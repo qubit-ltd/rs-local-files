@@ -209,6 +209,27 @@ fn test_file_name_from_url_decodes_percent_encoded_utf8() {
 }
 
 #[test]
+fn test_file_name_from_url_keeps_encoded_unsafe_path_fragments() {
+    for (url, expected) in [
+        (
+            "https://example.com/path/dir%2Fsecret.txt",
+            "dir%2Fsecret.txt",
+        ),
+        (
+            "https://example.com/path/dir%5Csecret.txt",
+            "dir%5Csecret.txt",
+        ),
+        ("https://example.com/path/bad%00name.txt", "bad%00name.txt"),
+        (
+            "https://example.com/path/%2E%2E%2Fsecret.txt",
+            "%2E%2E%2Fsecret.txt",
+        ),
+    ] {
+        assert_eq!(expected, LocalFilenames::file_name_from_url(url));
+    }
+}
+
+#[test]
 fn test_file_name_from_url_keeps_invalid_percent_encoding() {
     assert_eq!(
         "file%ZZ.txt",

@@ -273,8 +273,11 @@ impl LocalFiles {
     /// rejected instead of followed so a copy cannot accidentally leave the
     /// requested source tree.
     ///
-    /// This method also rejects destinations located inside the source tree,
-    /// because copying a directory into itself can recurse indefinitely.
+    /// This method also rejects destinations located inside the source tree or
+    /// inside any followed source directory, because copying a directory into
+    /// itself can recurse indefinitely. Directory cycles introduced by followed
+    /// symbolic links are rejected before recursive copy enters the repeated
+    /// directory.
     ///
     /// # Parameters
     /// - `src`: Source directory.
@@ -321,6 +324,10 @@ impl LocalFiles {
     /// on common platforms. After the replacement, the parent directory is
     /// synced so directory metadata reaches durable storage on platforms that
     /// support directory syncing.
+    ///
+    /// If `path` is a symbolic link on platforms where renaming over a symbolic
+    /// link replaces the link itself, this method replaces the symbolic link
+    /// with the new regular file and leaves the former link target unchanged.
     ///
     /// If writing or syncing the temporary file fails, the temporary file is
     /// removed and the existing destination is left untouched. If replacement
@@ -873,22 +880,24 @@ fn remove_any_path(path: &Path) -> Result<()> {
 ///
 /// # Errors
 /// Returns an I/O error when the source is invalid, the destination is inside
-/// the source tree, or an underlying filesystem operation fails.
+/// the source tree or a followed source directory, a followed directory
+/// cycle is detected, or an underlying filesystem operation fails.
 fn copy_dir_all_with_paths(
     src: &Path,
     dst: &Path,
     options: LocalCopyDirOptions,
 ) -> Result<LocalCopyDirStats> {
-    let source_metadata = metadata_for_copy_source(src, options.follow_symlinks)?;
-    if !source_metadata.is_dir() {
-        return Err(Error::new(
-            ErrorKind::InvalidInput,
-            format!("source is not a directory: {}", src.display()),
-        ));
-    }
-    reject_destination_inside_source(src, dst)?;
+    let destination_root = canonicalize_existing_prefix(dst)?;
+    let mut active_sources = Vec::new();
     let mut stats = LocalCopyDirStats::default();
-    copy_dir_recursive(src, dst, options, &mut stats)?;
+    copy_dir_recursive(
+        src,
+        dst,
+        options,
+        &destination_root,
+        &mut active_sources,
+        &mut stats,
+    )?;
     Ok(stats)
 }
 
@@ -906,38 +915,63 @@ fn copy_dir_recursive(
     src: &Path,
     dst: &Path,
     options: LocalCopyDirOptions,
+    destination_root: &Path,
+    active_sources: &mut Vec<PathBuf>,
     stats: &mut LocalCopyDirStats,
 ) -> Result<()> {
-    let source_metadata = metadata_for_copy_source(src, options.follow_symlinks)?;
-    if !source_metadata.is_dir() {
+    let (source_metadata, canonical_source) =
+        inspect_copy_source_directory(src, options.follow_symlinks, destination_root)?;
+    if active_sources
+        .iter()
+        .any(|active_source| active_source == &canonical_source)
+    {
         return Err(Error::new(
             ErrorKind::InvalidInput,
-            format!("source is not a directory: {}", src.display()),
+            format!("source directory cycle detected: {}", src.display()),
         ));
     }
-    ensure_copy_destination_dir(dst, options.overwrite, stats)?;
-    if options.preserve_permissions {
-        fs::set_permissions(dst, source_metadata.permissions())?;
-    }
-    for entry in fs::read_dir(src)? {
-        let entry = entry?;
-        let source_path = entry.path();
-        let destination_path = dst.join(entry.file_name());
-        let file_type = entry.file_type()?;
-        if file_type.is_symlink() {
-            copy_symlink_source(&source_path, &destination_path, options, stats)?;
-        } else if file_type.is_dir() {
-            copy_dir_recursive(&source_path, &destination_path, options, stats)?;
-        } else if file_type.is_file() {
-            copy_file_with_options(&source_path, &destination_path, options, stats)?;
-        } else {
-            return Err(Error::new(
-                ErrorKind::Unsupported,
-                format!("unsupported source file type: {}", source_path.display()),
-            ));
+    active_sources.push(canonical_source);
+    let result = (|| {
+        ensure_copy_destination_dir(dst, options.overwrite, stats)?;
+        if options.preserve_permissions {
+            fs::set_permissions(dst, source_metadata.permissions())?;
         }
-    }
-    Ok(())
+        for entry in fs::read_dir(src)? {
+            let entry = entry?;
+            let source_path = entry.path();
+            let destination_path = dst.join(entry.file_name());
+            let file_type = entry.file_type()?;
+            if file_type.is_symlink() {
+                copy_symlink_source(
+                    &source_path,
+                    &destination_path,
+                    options,
+                    destination_root,
+                    active_sources,
+                    stats,
+                )?;
+            } else if file_type.is_dir() {
+                copy_dir_recursive(
+                    &source_path,
+                    &destination_path,
+                    options,
+                    destination_root,
+                    active_sources,
+                    stats,
+                )?;
+            } else if file_type.is_file() {
+                copy_file_with_options(&source_path, &destination_path, options, stats)?;
+            } else {
+                return Err(Error::new(
+                    ErrorKind::Unsupported,
+                    format!("unsupported source file type: {}", source_path.display()),
+                ));
+            }
+        }
+        Ok(())
+    })();
+    let _ = active_sources.pop();
+    result
 }
 
 /// Copies a symbolic link source when link following is enabled.
@@ -955,6 +989,8 @@ fn copy_symlink_source(
     src: &Path,
     dst: &Path,
     options: LocalCopyDirOptions,
+    destination_root: &Path,
+    active_sources: &mut Vec<PathBuf>,
     stats: &mut LocalCopyDirStats,
 ) -> Result<()> {
     if !options.follow_symlinks {
@@ -965,7 +1001,7 @@ fn copy_symlink_source(
     }
     let target_metadata = fs::metadata(src)?;
     if target_metadata.is_dir() {
-        copy_dir_recursive(src, dst, options, stats)
+        copy_dir_recursive(src, dst, options, destination_root, active_sources, stats)
     } else if target_metadata.is_file() {
         copy_file_with_options(src, dst, options, stats)
     } else {
@@ -974,6 +1010,37 @@ fn copy_symlink_source(
             format!("unsupported symbolic link target type: {}", src.display()),
         ))
     }
+}
+
+/// Inspects a source directory before recursive copy enters it.
+///
+/// # Parameters
+/// - `src`: Source directory path.
+/// - `follow_symlinks`: Whether symbolic links may be followed.
+/// - `destination_root`: Canonical destination root, including missing tail
+///   components.
+///
+/// # Returns
+/// Source metadata and canonical source directory path.
+///
+/// # Errors
+/// Returns an I/O error when `src` is not a directory, cannot be canonicalized,
+/// or would contain the destination root.
+fn inspect_copy_source_directory(
+    src: &Path,
+    follow_symlinks: bool,
+    destination_root: &Path,
+) -> Result<(fs::Metadata, PathBuf)> {
+    let source_metadata = metadata_for_copy_source(src, follow_symlinks)?;
+    if !source_metadata.is_dir() {
+        return Err(Error::new(
+            ErrorKind::InvalidInput,
+            format!("source is not a directory: {}", src.display()),
+        ));
+    }
+    let canonical_source = fs::canonicalize(src)?;
+    reject_destination_inside_source(src, &canonical_source, destination_root)?;
+    Ok((source_metadata, canonical_source))
 }
 
 /// Ensures a directory copy destination exists as a directory.
@@ -1092,21 +1159,25 @@ fn metadata_for_copy_source(path: &Path, follow_symlinks: bool) -> Result<fs::Me
 ///
 /// # Parameters
 /// - `src`: Source directory.
-/// - `dst`: Destination directory.
+/// - `canonical_source`: Canonical source directory path.
+/// - `destination`: Canonical destination root, including missing tail
+///   components.
 ///
 /// # Errors
-/// Returns an I/O error when canonicalization fails or when `dst` is equal to
-/// or nested under `src`.
-fn reject_destination_inside_source(src: &Path, dst: &Path) -> Result<()> {
-    let source = fs::canonicalize(src)?;
-    let destination = canonicalize_existing_prefix(dst)?;
-    if destination == source || destination.starts_with(&source) {
+/// Returns an I/O error when `destination` is equal to or nested under
+/// `canonical_source`.
+fn reject_destination_inside_source(
+    src: &Path,
+    canonical_source: &Path,
+    destination: &Path,
+) -> Result<()> {
+    if destination == canonical_source || destination.starts_with(canonical_source) {
         return Err(Error::new(
             ErrorKind::InvalidInput,
             format!(
                 "destination must not be inside source: source={}, destination={}",
                 src.display(),
-                dst.display(),
+                destination.display(),
             ),
         ));
     }

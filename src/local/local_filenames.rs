@@ -347,9 +347,11 @@ impl LocalFilenames {
     /// Returns the final decoded file-name segment from a URL-like string.
     ///
     /// Query strings and fragments are removed before the final slash-delimited
-    /// segment is selected. Percent-encoded UTF-8 sequences are decoded. If the
-    /// selected segment contains invalid percent encoding or invalid UTF-8
-    /// after decoding, the original selected segment is returned unchanged.
+    /// segment is selected. Percent-encoded UTF-8 sequences are decoded when the
+    /// decoded result remains a single safe file-name fragment. If the selected
+    /// segment contains invalid percent encoding, invalid UTF-8, or encoded path
+    /// separators, parent-directory components, dot segments, or NUL bytes, the
+    /// original selected segment is returned unchanged.
     ///
     /// # Parameters
     /// - `url`: URL-like string to inspect.
@@ -362,7 +364,10 @@ impl LocalFilenames {
             Some(index) => &path[index + 1..],
             None => path,
         };
-        percent_decode_utf8(name).unwrap_or_else(|| name.to_owned())
+        match percent_decode_utf8(name) {
+            Some(decoded) if is_safe_decoded_url_file_name(&decoded) => decoded,
+            _ => name.to_owned(),
+        }
     }
 }
 
@@ -411,6 +416,20 @@ fn validate_file_name_fragment(role: &str, fragment: &str) -> Result<()> {
         ));
     }
     Ok(())
+}
+
+/// Tests whether a decoded URL segment is still a safe file-name fragment.
+///
+/// # Parameters
+/// - `name`: Decoded URL path segment.
+///
+/// # Returns
+/// `true` when the decoded segment cannot behave as a path after decoding.
+fn is_safe_decoded_url_file_name(name: &str) -> bool {
+    if name == "." || name == ".." {
+        return false;
+    }
+    validate_file_name_fragment("URL file name", name).is_ok()
 }
 
 /// Builds an invalid file-name fragment error.

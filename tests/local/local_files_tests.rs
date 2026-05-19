@@ -719,6 +719,54 @@ fn test_copy_dir_all_with_follows_directory_symlink_entry() {
 
 #[cfg(unix)]
 #[test]
+fn test_copy_dir_all_with_rejects_directory_symlink_cycle_when_following() {
+    let dir = temp_dir("copy-dir-symlink-cycle");
+    let src = dir.join("src");
+    let dst = dir.join("dst");
+    fs::create_dir(&src).unwrap();
+    std::os::unix::fs::symlink(&src, src.join("loop")).unwrap();
+
+    let error = LocalFiles::copy_dir_all_with(
+        &src,
+        &dst,
+        LocalCopyDirOptions {
+            follow_symlinks: true,
+            ..LocalCopyDirOptions::default()
+        },
+    )
+    .expect_err("directory symlink cycles should be rejected before recursive copy");
+
+    assert_eq!(ErrorKind::InvalidInput, error.kind());
+    fs::remove_dir_all(dir).unwrap();
+}
+
+#[cfg(unix)]
+#[test]
+fn test_copy_dir_all_with_rejects_destination_inside_followed_directory_symlink_target() {
+    let dir = temp_dir("copy-dir-symlink-target-contains-dst");
+    let src = dir.join("src");
+    let target = dir.join("target");
+    let dst = target.join("dst");
+    fs::create_dir(&src).unwrap();
+    fs::create_dir(&target).unwrap();
+    std::os::unix::fs::symlink(&target, src.join("target-link")).unwrap();
+
+    let error = LocalFiles::copy_dir_all_with(
+        &src,
+        &dst,
+        LocalCopyDirOptions {
+            follow_symlinks: true,
+            ..LocalCopyDirOptions::default()
+        },
+    )
+    .expect_err("destination inside followed symlink target should be rejected");
+
+    assert_eq!(ErrorKind::InvalidInput, error.kind());
+    fs::remove_dir_all(dir).unwrap();
+}
+
+#[cfg(unix)]
+#[test]
 fn test_copy_dir_all_with_directory_symlink_options() {
     let dir = temp_dir("copy-dir-symlink-dir");
     let target = dir.join("target");
@@ -744,6 +792,30 @@ fn test_copy_dir_all_with_directory_symlink_options() {
 
     assert_eq!(1, stats.files);
     assert_eq!(b"data", fs::read(dst.join("data.txt")).unwrap().as_slice());
+    fs::remove_dir_all(dir).unwrap();
+}
+
+#[cfg(unix)]
+#[test]
+fn test_atomic_write_replaces_symlink_itself_without_modifying_target() {
+    use std::os::unix::fs::symlink;
+
+    let dir = temp_dir("atomic-replace-symlink");
+    let target = dir.join("target.txt");
+    let link = dir.join("link.txt");
+    fs::write(&target, b"target").unwrap();
+    symlink(&target, &link).unwrap();
+
+    LocalFiles::atomic_write(&link, b"replacement").expect("symlink path should be replaced");
+
+    assert!(
+        !fs::symlink_metadata(&link)
+            .unwrap()
+            .file_type()
+            .is_symlink()
+    );
+    assert_eq!(b"replacement", fs::read(&link).unwrap().as_slice());
+    assert_eq!(b"target", fs::read(&target).unwrap().as_slice());
     fs::remove_dir_all(dir).unwrap();
 }
 
