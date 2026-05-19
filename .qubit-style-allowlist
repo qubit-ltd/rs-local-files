@@ -1,0 +1,1 @@
+coverage-cfg | src/ext/string_write_ext.rs | Coverage build avoids allocating an impossible u32-sized UTF-8 string only to cover length overflow.

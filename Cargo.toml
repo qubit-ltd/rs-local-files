@@ -1,0 +1,38 @@
+[package]
+name = "qubit-local-fs"
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.94"
+authors = ["Haixing Hu <starfish.hu@gmail.com>"]
+license = "Apache-2.0"
+repository = "https://github.com/qubit-ltd/rs-local-fs"
+description = "Local filesystem utilities for Rust"
+homepage = "https://github.com/qubit-ltd/rs-local-fs"
+documentation = "https://docs.rs/qubit-local-fs"
+readme = "README.md"
+keywords = ["filesystem", "file", "path", "temp", "qubit"]
+categories = ["filesystem", "rust-patterns"]
+include = [
+    "/Cargo.toml",
+    "/LICENSE",
+    "/README.md",
+    "/README.zh_CN.md",
+    "/RUST_CODING_STYLE.md",
+    "/RUST_CODING_STYLE.zh_CN.md",
+    "/doc/**/user_guide*.md",
+    "/examples/**",
+    "/resources/**",
+    "/src/**",
+    "/tests/**",
+]
+
+[lib]
+name = "qubit_local_fs"
+doctest = true
+
+[dependencies]
+getrandom = "0.4"
+log = "0.4"
+
+[lints.rust]
+unexpected_cfgs = { level = "warn", check-cfg = ['cfg(coverage)'] }
