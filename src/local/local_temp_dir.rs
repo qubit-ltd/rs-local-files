@@ -20,25 +20,25 @@ use std::path::{
 
 use log::warn;
 
-use crate::Files;
+use crate::LocalFiles;
 
-use super::files::create_temp_dir_in_dir;
+use super::local_files::create_temp_dir_in_dir;
 
 /// Temporary directory that is removed automatically unless kept or persisted.
 ///
-/// `TempDir` owns a directory path and removes that directory tree when the
-/// object is dropped. Use [`TempDir::keep`] to keep the temporary directory at
-/// its generated path, or [`TempDir::persist`] to move it to a final path.
+/// `LocalTempDir` owns a directory path and removes that directory tree when the
+/// object is dropped. Use [`LocalTempDir::keep`] to keep the temporary directory at
+/// its generated path, or [`LocalTempDir::persist`] to move it to a final path.
 ///
 /// Cleanup performed from `Drop` is best-effort. If removal fails, the failure
 /// is reported through the `log` facade at warning level and the program is not
 /// panicked.
 #[derive(Debug)]
-pub struct TempDir {
+pub struct LocalTempDir {
     path: Option<PathBuf>,
 }
 
-impl TempDir {
+impl LocalTempDir {
     /// Creates a temporary directory in the process temporary directory.
     ///
     /// # Errors
@@ -63,7 +63,7 @@ impl TempDir {
         Self::in_dir(
             std::env::temp_dir(),
             prefix,
-            Files::DEFAULT_TEMP_FILE_RETRIES,
+            LocalFiles::DEFAULT_TEMP_FILE_RETRIES,
         )
     }
 
@@ -131,7 +131,7 @@ impl TempDir {
         P: AsRef<Path>,
     {
         let target = target.as_ref().to_path_buf();
-        Files::ensure_parent(&target)?;
+        LocalFiles::ensure_parent(&target)?;
         match fs::symlink_metadata(&target) {
             Ok(_) => {
                 return Err(Error::new(
@@ -152,7 +152,7 @@ impl TempDir {
     }
 }
 
-impl Drop for TempDir {
+impl Drop for LocalTempDir {
     /// Removes the temporary directory unless ownership has been released.
     fn drop(&mut self) {
         if let Some(path) = self.path.take()

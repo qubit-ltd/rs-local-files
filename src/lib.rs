@@ -15,13 +15,13 @@
 //! file names, temporary files and directories, recursive directory operations,
 //! and durable same-directory atomic writes.
 
-mod util;
+mod local;
 
-pub use util::{
-    CopyDirOptions,
-    CopyDirStats,
-    Filenames,
-    Files,
-    TempDir,
-    TempFile,
+pub use local::{
+    LocalCopyDirOptions,
+    LocalCopyDirStats,
+    LocalFilenames,
+    LocalFiles,
+    LocalTempDir,
+    LocalTempFile,
 };

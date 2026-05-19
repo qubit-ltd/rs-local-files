@@ -13,7 +13,7 @@
 /// overwritten, symbolic links are not followed, and source permissions are not
 /// copied to destination entries.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub struct CopyDirOptions {
+pub struct LocalCopyDirOptions {
     /// Whether existing destination files may be overwritten.
     pub overwrite: bool,
 
@@ -31,7 +31,7 @@ pub struct CopyDirOptions {
     pub preserve_permissions: bool,
 }
 
-impl Default for CopyDirOptions {
+impl Default for LocalCopyDirOptions {
     /// Returns conservative directory copy options.
     ///
     /// # Returns

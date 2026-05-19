@@ -14,11 +14,11 @@ Local filesystem utilities for Rust.
 Qubit Local FS contains the local filesystem utilities split out of
 `qubit-io`:
 
-- `Files` for parent creation, buffered file helpers, directory cleanup,
+- `LocalFiles` for parent creation, buffered file helpers, directory cleanup,
   directory size, recursive directory copy, and durable atomic writes;
-- `Filenames` for random and lexical file-name operations;
-- `TempFile` and `TempDir` for RAII temporary files and directories;
-- `CopyDirOptions` and `CopyDirStats` for explicit recursive copy behavior.
+- `LocalFilenames` for random and lexical file-name operations;
+- `LocalTempFile` and `LocalTempDir` for RAII temporary files and directories;
+- `LocalCopyDirOptions` and `LocalCopyDirStats` for explicit recursive copy behavior.
 
 `qubit-io` remains focused on stream-level `std::io` traits, extension methods,
 wrappers, and codecs.
@@ -30,9 +30,9 @@ wrappers, and codecs.
 qubit-local-fs = "0.1"
 ```
 
-## Temporary Files and Directories
+## Temporary LocalFiles and Directories
 
-`TempFile` and `TempDir` create real temporary filesystem entries and remove
+`LocalTempFile` and `LocalTempDir` create real temporary filesystem entries and remove
 them automatically on drop unless callers call `keep` or `persist`. Drop-time
 cleanup is best-effort; failures are reported through the `log` facade with
 `warn!` and never panic.
@@ -40,12 +40,12 @@ cleanup is best-effort; failures are reported through the `log` facade with
 ```rust
 use std::io::Write;
 
-use qubit_local_fs::{TempDir, TempFile};
+use qubit_local_fs::{LocalTempDir, LocalTempFile};
 
-let dir = TempDir::with_prefix(Some("qubit-local-fs-work-"))?;
+let dir = LocalTempDir::with_prefix(Some("qubit-local-fs-work-"))?;
 std::fs::write(dir.path().join("scratch.txt"), b"scratch")?;
 
-let mut file = TempFile::with_name(Some("qubit-local-fs-"), Some(".txt"))?;
+let mut file = LocalTempFile::with_name(Some("qubit-local-fs-"), Some(".txt"))?;
 writeln!(file.file_mut()?, "temporary payload")?;
 
 # Ok::<(), std::io::Error>(())
@@ -53,17 +53,17 @@ writeln!(file.file_mut()?, "temporary payload")?;
 
 ## Atomic Writes
 
-Use `Files::atomic_write` when a file must not be observed half-written. It
+Use `LocalFiles::atomic_write` when a file must not be observed half-written. It
 writes through a temporary file in the same directory, flushes and syncs that
 file, replaces the destination, and syncs the parent directory when supported.
 
 ```rust
-use qubit_local_fs::{Files, TempDir};
+use qubit_local_fs::{LocalFiles, LocalTempDir};
 
-let dir = TempDir::with_prefix(Some("qubit-local-fs-atomic-"))?;
+let dir = LocalTempDir::with_prefix(Some("qubit-local-fs-atomic-"))?;
 let path = dir.path().join("state").join("manifest.json");
 
-Files::atomic_write(&path, br#"{"version":1,"complete":true}"#)?;
+LocalFiles::atomic_write(&path, br#"{"version":1,"complete":true}"#)?;
 
 assert_eq!(
     br#"{"version":1,"complete":true}"#,
@@ -77,22 +77,22 @@ assert_eq!(
 
 | API | Purpose |
 | --- | --- |
-| `Files::open_buffered_reader` | Opens a file as `BufReader<File>`. |
-| `Files::ensure_dir` | Creates a directory and missing ancestors. |
-| `Files::ensure_parent` | Creates missing parent directories for a file path. |
-| `Files::create_file_with_parent` | Creates missing parent directories, then creates a file. |
-| `Files::create_buffered_writer_with_parent` | Creates missing parent directories, then creates `BufWriter<File>`. |
-| `Files::dir_size` | Sums regular-file byte lengths below a directory without following symbolic links. |
-| `Files::clean_dir` | Removes all children from a directory while keeping the directory itself. |
-| `Files::remove_any` | Removes a file, directory tree, or symbolic link. |
-| `Files::copy_dir_all_with` | Recursively copies a local directory tree with explicit copy options and returns copy statistics. |
-| `Files::atomic_write` | Performs durable same-directory atomic file replacement. |
-| `Files::atomic_write_with` | Same as `atomic_write`, but accepts caller-provided write logic. |
-| `TempFile` | Temporary file guard that removes the file on drop unless kept or persisted. |
-| `TempDir` | Temporary directory guard that removes the directory tree on drop unless kept or persisted. |
-| `Filenames` | Random file-name generation and lexical UTF-8 file-name helpers. |
-| `CopyDirOptions` | Options controlling recursive directory copy behavior. |
-| `CopyDirStats` | Statistics returned by recursive directory copy operations. |
+| `LocalFiles::open_buffered_reader` | Opens a file as `BufReader<File>`. |
+| `LocalFiles::ensure_dir` | Creates a directory and missing ancestors. |
+| `LocalFiles::ensure_parent` | Creates missing parent directories for a file path. |
+| `LocalFiles::create_file_with_parent` | Creates missing parent directories, then creates a file. |
+| `LocalFiles::create_buffered_writer_with_parent` | Creates missing parent directories, then creates `BufWriter<File>`. |
+| `LocalFiles::dir_size` | Sums regular-file byte lengths below a directory without following symbolic links. |
+| `LocalFiles::clean_dir` | Removes all children from a directory while keeping the directory itself. |
+| `LocalFiles::remove_any` | Removes a file, directory tree, or symbolic link. |
+| `LocalFiles::copy_dir_all_with` | Recursively copies a local directory tree with explicit copy options and returns copy statistics. |
+| `LocalFiles::atomic_write` | Performs durable same-directory atomic file replacement. |
+| `LocalFiles::atomic_write_with` | Same as `atomic_write`, but accepts caller-provided write logic. |
+| `LocalTempFile` | Temporary file guard that removes the file on drop unless kept or persisted. |
+| `LocalTempDir` | Temporary directory guard that removes the directory tree on drop unless kept or persisted. |
+| `LocalFilenames` | Random file-name generation and lexical UTF-8 file-name helpers. |
+| `LocalCopyDirOptions` | Options controlling recursive directory copy behavior. |
+| `LocalCopyDirStats` | Statistics returned by recursive directory copy operations. |
 
 ## Runtime Dependencies
 

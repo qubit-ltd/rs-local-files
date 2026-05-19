@@ -9,7 +9,7 @@
  ******************************************************************************/
 /// Statistics reported by recursive directory copy operations.
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
-pub struct CopyDirStats {
+pub struct LocalCopyDirStats {
     /// Number of regular files copied.
     pub files: u64,
 

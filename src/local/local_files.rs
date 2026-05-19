@@ -28,9 +28,9 @@ use std::path::{
 };
 
 use crate::{
-    CopyDirOptions,
-    CopyDirStats,
-    Filenames,
+    LocalCopyDirOptions,
+    LocalCopyDirStats,
+    LocalFilenames,
 };
 
 #[cfg(windows)]
@@ -92,20 +92,20 @@ unsafe extern "system" {
 /// # Examples
 /// ```
 /// use qubit_local_fs::{
-///     Files,
-///     TempDir,
+///     LocalFiles,
+///     LocalTempDir,
 /// };
 ///
-/// let dir = TempDir::with_prefix(Some("qubit-local-fs-doc-"))?;
+/// let dir = LocalTempDir::with_prefix(Some("qubit-local-fs-doc-"))?;
 /// let path = dir.path().join("nested").join("data.txt");
 ///
-/// Files::atomic_write(&path, b"payload")?;
+/// LocalFiles::atomic_write(&path, b"payload")?;
 /// assert_eq!(b"payload", std::fs::read(&path)?.as_slice());
 /// # Ok::<(), std::io::Error>(())
 /// ```
-pub enum Files {}
+pub enum LocalFiles {}
 
-impl Files {
+impl LocalFiles {
     /// Default prefix used when callers do not provide a temporary file prefix.
     pub const DEFAULT_TEMP_FILE_PREFIX: &str = "qubit-local-fs-";
 
@@ -269,7 +269,7 @@ impl Files {
     ///
     /// The source path must be a directory. The destination directory is created
     /// when missing. Existing files are rejected unless
-    /// [`CopyDirOptions::overwrite`] is enabled. By default, symbolic links are
+    /// [`LocalCopyDirOptions::overwrite`] is enabled. By default, symbolic links are
     /// rejected instead of followed so a copy cannot accidentally leave the
     /// requested source tree.
     ///
@@ -291,7 +291,11 @@ impl Files {
     /// permission, a symbolic link is encountered while `follow_symlinks` is
     /// `false`, or an underlying filesystem operation fails.
     #[inline]
-    pub fn copy_dir_all_with<S, D>(src: S, dst: D, options: CopyDirOptions) -> Result<CopyDirStats>
+    pub fn copy_dir_all_with<S, D>(
+        src: S,
+        dst: D,
+        options: LocalCopyDirOptions,
+    ) -> Result<LocalCopyDirStats>
     where
         S: AsRef<Path>,
         D: AsRef<Path>,
@@ -332,14 +336,14 @@ impl Files {
     /// # Examples
     /// ```
     /// use qubit_local_fs::{
-    ///     Files,
-    ///     TempDir,
+    ///     LocalFiles,
+    ///     LocalTempDir,
     /// };
     ///
-    /// let dir = TempDir::with_prefix(Some("qubit-local-fs-atomic-"))?;
+    /// let dir = LocalTempDir::with_prefix(Some("qubit-local-fs-atomic-"))?;
     /// let path = dir.path().join("state").join("manifest.json");
     ///
-    /// Files::atomic_write(&path, br#"{"version":1,"complete":true}"#)?;
+    /// LocalFiles::atomic_write(&path, br#"{"version":1,"complete":true}"#)?;
     ///
     /// assert_eq!(
     ///     br#"{"version":1,"complete":true}"#,
@@ -454,7 +458,7 @@ fn atomic_write_with_path(
         parent,
         Some(ATOMIC_WRITE_TEMP_PREFIX),
         Some(ATOMIC_WRITE_TEMP_SUFFIX),
-        Files::DEFAULT_TEMP_FILE_RETRIES,
+        LocalFiles::DEFAULT_TEMP_FILE_RETRIES,
     )?;
 
     let result = write(&mut file)
@@ -548,7 +552,7 @@ pub(crate) fn create_temp_file_in_dir(
     let mut attempt = 0;
     loop {
         attempt += 1;
-        let path = dir.join(Filenames::try_random_with(prefix, suffix)?);
+        let path = dir.join(LocalFilenames::try_random_with(prefix, suffix)?);
         match OpenOptions::new()
             .read(true)
             .write(true)
@@ -589,7 +593,7 @@ pub(crate) fn create_temp_dir_in_dir(
     let mut attempt = 0;
     loop {
         attempt += 1;
-        let path = dir.join(Filenames::try_random_with(prefix, None)?);
+        let path = dir.join(LocalFilenames::try_random_with(prefix, None)?);
         match fs::create_dir(&path) {
             Ok(()) => return Ok(path),
             Err(error) => {
@@ -873,8 +877,8 @@ fn remove_any_path(path: &Path) -> Result<()> {
 fn copy_dir_all_with_paths(
     src: &Path,
     dst: &Path,
-    options: CopyDirOptions,
-) -> Result<CopyDirStats> {
+    options: LocalCopyDirOptions,
+) -> Result<LocalCopyDirStats> {
     let source_metadata = metadata_for_copy_source(src, options.follow_symlinks)?;
     if !source_metadata.is_dir() {
         return Err(Error::new(
@@ -883,7 +887,7 @@ fn copy_dir_all_with_paths(
         ));
     }
     reject_destination_inside_source(src, dst)?;
-    let mut stats = CopyDirStats::default();
+    let mut stats = LocalCopyDirStats::default();
     copy_dir_recursive(src, dst, options, &mut stats)?;
     Ok(stats)
 }
@@ -901,8 +905,8 @@ fn copy_dir_all_with_paths(
 fn copy_dir_recursive(
     src: &Path,
     dst: &Path,
-    options: CopyDirOptions,
-    stats: &mut CopyDirStats,
+    options: LocalCopyDirOptions,
+    stats: &mut LocalCopyDirStats,
 ) -> Result<()> {
     let source_metadata = metadata_for_copy_source(src, options.follow_symlinks)?;
     if !source_metadata.is_dir() {
@@ -950,8 +954,8 @@ fn copy_dir_recursive(
 fn copy_symlink_source(
     src: &Path,
     dst: &Path,
-    options: CopyDirOptions,
-    stats: &mut CopyDirStats,
+    options: LocalCopyDirOptions,
+    stats: &mut LocalCopyDirStats,
 ) -> Result<()> {
     if !options.follow_symlinks {
         return Err(Error::new(
@@ -985,7 +989,7 @@ fn copy_symlink_source(
 fn ensure_copy_destination_dir(
     dst: &Path,
     overwrite: bool,
-    stats: &mut CopyDirStats,
+    stats: &mut LocalCopyDirStats,
 ) -> Result<()> {
     match fs::symlink_metadata(dst) {
         Ok(metadata) => {
@@ -1022,8 +1026,8 @@ fn ensure_copy_destination_dir(
 fn copy_file_with_options(
     src: &Path,
     dst: &Path,
-    options: CopyDirOptions,
-    stats: &mut CopyDirStats,
+    options: LocalCopyDirOptions,
+    stats: &mut LocalCopyDirStats,
 ) -> Result<()> {
     prepare_copy_file_destination(dst, options.overwrite)?;
     let source_metadata = metadata_for_copy_source(src, options.follow_symlinks)?;

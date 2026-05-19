@@ -7,16 +7,14 @@
  *    Licensed under the Apache License, Version 2.0.
  *
  ******************************************************************************/
-mod copy_dir_options;
-mod copy_dir_stats;
-mod filenames;
-mod files;
-mod temp_dir;
-mod temp_file;
 
-pub use copy_dir_options::CopyDirOptions;
-pub use copy_dir_stats::CopyDirStats;
-pub use filenames::Filenames;
-pub use files::Files;
-pub use temp_dir::TempDir;
-pub use temp_file::TempFile;
+use super::local_files_tests::LocalCopyDirOptions;
+
+#[test]
+fn test_copy_dir_options_default_is_conservative() {
+    let options = LocalCopyDirOptions::default();
+
+    assert!(!options.overwrite);
+    assert!(!options.follow_symlinks);
+    assert!(!options.preserve_permissions);
+}

@@ -35,19 +35,19 @@ const RANDOM_NAME_BYTES: usize = 16;
 ///
 /// # Examples
 /// ```
-/// use qubit_local_fs::Filenames;
+/// use qubit_local_fs::LocalFilenames;
 /// use std::path::Path;
 ///
 /// let path = Path::new("/tmp/archive.tar.gz");
 ///
-/// assert!(Filenames::random().starts_with(Filenames::DEFAULT_RANDOM_PREFIX));
-/// assert_eq!(Some("archive.tar"), Filenames::file_stem(path));
-/// assert_eq!(Some("gz"), Filenames::extension(path));
-/// assert!(Filenames::has_extension(path, ".gz"));
+/// assert!(LocalFilenames::random().starts_with(LocalFilenames::DEFAULT_RANDOM_PREFIX));
+/// assert_eq!(Some("archive.tar"), LocalFilenames::file_stem(path));
+/// assert_eq!(Some("gz"), LocalFilenames::extension(path));
+/// assert!(LocalFilenames::has_extension(path, ".gz"));
 /// ```
-pub enum Filenames {}
+pub enum LocalFilenames {}
 
-impl Filenames {
+impl LocalFilenames {
     /// Default prefix used by random file-name generation.
     pub const DEFAULT_RANDOM_PREFIX: &str = "qubit-local-fs-";
 
@@ -72,11 +72,11 @@ impl Filenames {
     /// The caller-provided prefix and suffix must be file-name fragments, not
     /// paths. Path separators, root components, parent directory components,
     /// platform prefixes, and NUL bytes are rejected by
-    /// [`Filenames::try_random_with`].
+    /// [`LocalFilenames::try_random_with`].
     ///
     /// # Parameters
     /// - `prefix`: Optional file-name prefix. The default is
-    ///   [`Filenames::DEFAULT_RANDOM_PREFIX`].
+    ///   [`LocalFilenames::DEFAULT_RANDOM_PREFIX`].
     /// - `suffix`: Optional file-name suffix. The default is empty.
     ///
     /// # Returns
@@ -112,7 +112,7 @@ impl Filenames {
     ///
     /// # Parameters
     /// - `prefix`: Optional file-name prefix. The default is
-    ///   [`Filenames::DEFAULT_RANDOM_PREFIX`].
+    ///   [`LocalFilenames::DEFAULT_RANDOM_PREFIX`].
     /// - `suffix`: Optional file-name suffix. The default is empty.
     ///
     /// # Returns

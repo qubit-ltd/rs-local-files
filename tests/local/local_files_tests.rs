@@ -8,15 +8,15 @@
  *
  ******************************************************************************/
 
-use std::fs;
-use std::io::{
+pub(super) use std::fs;
+pub(super) use std::io::{
     Error,
     ErrorKind,
     Read,
     Write,
 };
 #[cfg(unix)]
-use std::os::unix::fs::PermissionsExt;
+pub(super) use std::os::unix::fs::PermissionsExt;
 use std::path::PathBuf;
 use std::sync::atomic::{
     AtomicU64,
@@ -27,16 +27,15 @@ use std::sync::{
     Once,
 };
 
-use qubit_local_fs::{
-    CopyDirOptions,
-    Filenames,
-    Files,
-    TempDir,
-    TempFile,
+pub(super) use qubit_local_fs::{
+    LocalCopyDirOptions,
+    LocalFiles,
+    LocalTempDir,
+    LocalTempFile,
 };
 
 static TEST_DIR_COUNTER: AtomicU64 = AtomicU64::new(0);
-static CURRENT_DIR_LOCK: Mutex<()> = Mutex::new(());
+pub(super) static CURRENT_DIR_LOCK: Mutex<()> = Mutex::new(());
 static LOGGER_INIT: Once = Once::new();
 
 struct TestLogger;
@@ -53,7 +52,7 @@ impl log::Log for TestLogger {
 
 static TEST_LOGGER: TestLogger = TestLogger;
 
-fn ensure_test_logger() {
+pub(super) fn ensure_test_logger() {
     LOGGER_INIT.call_once(|| {
         if log::set_logger(&TEST_LOGGER).is_ok() {
             log::set_max_level(log::LevelFilter::Warn);
@@ -61,10 +60,10 @@ fn ensure_test_logger() {
     });
 }
 
-fn temp_dir(name: &str) -> PathBuf {
+pub(super) fn temp_dir(name: &str) -> PathBuf {
     let id = TEST_DIR_COUNTER.fetch_add(1, Ordering::Relaxed);
     let path = std::env::temp_dir().join(format!(
-        "qubit-local-fs-file-helper-tests-{}-{name}-{id}",
+        "qubit-local-fs-local-tests-{}-{name}-{id}",
         std::process::id()
     ));
     drop(fs::remove_dir_all(&path));
@@ -73,7 +72,7 @@ fn temp_dir(name: &str) -> PathBuf {
 }
 
 #[cfg(unix)]
-fn short_temp_dir(name: &str) -> PathBuf {
+pub(super) fn short_temp_dir(name: &str) -> PathBuf {
     let id = TEST_DIR_COUNTER.fetch_add(1, Ordering::Relaxed);
     let path = PathBuf::from(format!("/tmp/qio-{}-{name}-{id}", std::process::id()));
     drop(fs::remove_dir_all(&path));
@@ -81,7 +80,7 @@ fn short_temp_dir(name: &str) -> PathBuf {
     path
 }
 
-fn count_atomic_temp_files(dir: &std::path::Path) -> usize {
+pub(super) fn count_atomic_temp_files(dir: &std::path::Path) -> usize {
     fs::read_dir(dir)
         .unwrap()
         .filter_map(Result::ok)
@@ -94,12 +93,12 @@ fn count_atomic_temp_files(dir: &std::path::Path) -> usize {
         .count()
 }
 
-struct CurrentDirGuard {
+pub(super) struct CurrentDirGuard {
     original: PathBuf,
 }
 
 impl CurrentDirGuard {
-    fn change_to(path: &std::path::Path) -> Self {
+    pub(super) fn change_to(path: &std::path::Path) -> Self {
         let original = std::env::current_dir().expect("current dir should be readable");
         std::env::set_current_dir(path).expect("current dir should be changed");
         Self { original }
@@ -117,8 +116,8 @@ fn test_atomic_write_creates_parent_directories_and_replaces_file() {
     let dir = temp_dir("atomic-replace");
     let path = dir.join("nested").join("out.txt");
 
-    Files::atomic_write(&path, b"first").expect("first atomic write should succeed");
-    Files::atomic_write(&path, b"second").expect("second atomic write should replace file");
+    LocalFiles::atomic_write(&path, b"first").expect("first atomic write should succeed");
+    LocalFiles::atomic_write(&path, b"second").expect("second atomic write should replace file");
 
     assert_eq!(b"second", fs::read(&path).unwrap().as_slice());
     fs::remove_dir_all(dir).unwrap();
@@ -154,7 +153,7 @@ fn test_atomic_write_ignores_windows_parent_sync_sharing_violation() {
     };
 
     let path = parent.join("out.txt");
-    Files::atomic_write(&path, b"data")
+    LocalFiles::atomic_write(&path, b"data")
         .expect("atomic write should ignore unavailable Windows parent directory sync");
     assert_eq!(b"data", fs::read(&path).unwrap().as_slice());
 
@@ -170,7 +169,7 @@ fn test_atomic_write_preserves_existing_file_permissions() {
     fs::write(&path, b"old").unwrap();
     fs::set_permissions(&path, fs::Permissions::from_mode(0o754)).unwrap();
 
-    Files::atomic_write(&path, b"new").expect("atomic write should preserve permissions");
+    LocalFiles::atomic_write(&path, b"new").expect("atomic write should preserve permissions");
 
     let mode = fs::metadata(&path).unwrap().permissions().mode() & 0o777;
     assert_eq!(0o754, mode);
@@ -186,7 +185,7 @@ fn test_atomic_write_supports_parentless_relative_path() {
     let dir = temp_dir("atomic-parentless");
     let _guard = CurrentDirGuard::change_to(&dir);
 
-    Files::atomic_write("out.txt", b"data").expect("parentless atomic write should succeed");
+    LocalFiles::atomic_write("out.txt", b"data").expect("parentless atomic write should succeed");
 
     assert_eq!(b"data", fs::read(dir.join("out.txt")).unwrap().as_slice());
     drop(_guard);
@@ -199,7 +198,7 @@ fn test_atomic_write_with_preserves_existing_file_and_removes_temp_on_error() {
     let path = dir.join("out.txt");
     fs::write(&path, b"old").unwrap();
 
-    let error = Files::atomic_write_with(&path, |file| {
+    let error = LocalFiles::atomic_write_with(&path, |file| {
         file.write_all(b"new")?;
         Err(Error::other("write failed"))
     })
@@ -213,431 +212,23 @@ fn test_atomic_write_with_preserves_existing_file_and_removes_temp_on_error() {
 }
 
 #[test]
-fn test_filenames_random_with_uses_prefix_suffix_pid_and_hex_payload() {
-    let name = Filenames::random_with(Some("pre-"), Some(".suf"));
-    let body = name
-        .strip_prefix("pre-")
-        .and_then(|value| value.strip_suffix(".suf"))
-        .expect("name should include requested prefix and suffix");
-    let parts = body.split('-').collect::<Vec<_>>();
-
-    assert_eq!(3, parts.len());
-    assert!(!parts[0].is_empty());
-    assert_eq!(format!("{:x}", std::process::id()), parts[1]);
-    assert_eq!(32, parts[2].len());
-    assert!(parts[2].chars().all(|ch| ch.is_ascii_hexdigit()));
-}
-
-#[test]
-fn test_filenames_try_random_with_rejects_path_fragments() {
-    let error = Filenames::try_random_with(Some("../escape-"), None)
-        .expect_err("prefix with path separators should be rejected");
-    assert_eq!(ErrorKind::InvalidInput, error.kind());
-
-    let error = Filenames::try_random_with(None, Some("/suffix"))
-        .expect_err("suffix with path separators should be rejected");
-    assert_eq!(ErrorKind::InvalidInput, error.kind());
-
-    let error = Filenames::try_random_with(Some("bad\0prefix"), None)
-        .expect_err("prefix with NUL bytes should be rejected");
-    assert_eq!(ErrorKind::InvalidInput, error.kind());
-
-    let error = Filenames::try_random_with(Some(".."), None)
-        .expect_err("parent directory component should be rejected");
-    assert_eq!(ErrorKind::InvalidInput, error.kind());
-
-    let name = Filenames::try_random_with(Some("safe-"), Some(".tmp"))
-        .expect("safe fragments should be accepted");
-    assert!(name.starts_with("safe-"));
-    assert!(name.ends_with(".tmp"));
-}
-
-#[test]
-fn test_temp_file_with_name_uses_system_temp_directory() {
-    let file = TempFile::with_name(Some("qubit-local-fs-test-"), Some(".tmp"))
-        .expect("temp file should be created");
-    let name = file
-        .path()
-        .file_name()
-        .expect("temp path should have a file name")
-        .to_string_lossy();
-
-    assert!(file.path().starts_with(std::env::temp_dir()));
-    assert!(name.starts_with("qubit-local-fs-test-"));
-    assert!(name.ends_with(".tmp"));
-}
-
-#[test]
-fn test_temp_guards_support_debug_formatting() {
-    let file = TempFile::with_name(Some("qubit-local-fs-debug-"), Some(".tmp"))
-        .expect("temp file should be created");
-    let dir =
-        TempDir::with_prefix(Some("qubit-local-fs-debug-")).expect("temp directory should be created");
-
-    assert!(format!("{file:?}").contains("TempFile"));
-    assert!(format!("{dir:?}").contains("TempDir"));
-}
-
-#[test]
-fn test_temp_file_file_and_close_handle() {
-    let dir = temp_dir("temp-file-close");
-    let mut file = TempFile::in_dir(&dir, Some("close-"), Some(".tmp"), 4)
-        .expect("temp file should be created");
-
-    file.file()
-        .expect("shared file handle should be available")
-        .metadata()
-        .expect("metadata should be readable");
-    file.close().expect("close should succeed");
-    let error = file
-        .file()
-        .expect_err("closed file handle should return an error");
-
-    assert_eq!(ErrorKind::NotFound, error.kind());
-    fs::remove_dir_all(dir).unwrap();
-}
-
-#[test]
-fn test_temp_file_new_creates_unique_existing_files() {
-    let first_file = TempFile::new().expect("first temp file should exist");
-    let second_file = TempFile::new().expect("second temp file should exist");
-    let first_path = first_file.path().to_owned();
-    let second_path = second_file.path().to_owned();
-
-    assert_ne!(first_path, second_path);
-    assert!(first_path.exists());
-    assert!(second_path.exists());
-}
-
-#[test]
-fn test_temp_file_in_dir_creates_unique_existing_files() {
-    let dir = temp_dir("temp-file-in");
-    let mut first_file = TempFile::in_dir(&dir, Some("local-"), Some(".tmp"), 4)
-        .expect("first temp file should be created in dir");
-    let second_file = TempFile::in_dir(&dir, Some("local-"), Some(".tmp"), 4)
-        .expect("second temp file should be created in dir");
-    let first_path = first_file.path().to_owned();
-    let second_path = second_file.path().to_owned();
-
-    first_file.file_mut().unwrap().write_all(b"abc").unwrap();
-
-    assert_ne!(first_path, second_path);
-    assert_eq!(Some(dir.as_path()), first_path.parent());
-    assert_eq!(Some(dir.as_path()), second_path.parent());
-    assert!(first_path.exists());
-    assert!(second_path.exists());
-
-    drop(first_file);
-    drop(second_file);
-    fs::remove_dir_all(dir).unwrap();
-}
-
-#[test]
-fn test_temp_dir_with_prefix_creates_existing_directory() {
-    let dir =
-        TempDir::with_prefix(Some("qubit-local-fs-dir-")).expect("temp directory should be created");
-    let name = dir
-        .path()
-        .file_name()
-        .expect("temp directory should have a name")
-        .to_string_lossy();
-
-    assert!(dir.path().starts_with(std::env::temp_dir()));
-    assert!(dir.path().is_dir());
-    assert!(name.starts_with("qubit-local-fs-dir-"));
-}
-
-#[test]
-fn test_temp_dir_new_and_keep_preserves_directory() {
-    let dir = TempDir::new().expect("temp directory should be created");
-    let path = dir.keep();
-
-    assert!(path.is_dir());
-    fs::remove_dir_all(path).unwrap();
-}
-
-#[test]
-fn test_temp_file_in_dir_rejects_zero_retry_count() {
-    let error = TempFile::in_dir(std::env::temp_dir(), None, None, 0)
-        .expect_err("zero retries should be invalid");
-
-    assert_eq!(ErrorKind::InvalidInput, error.kind());
-    assert_eq!(
-        "temporary entry retry count must be greater than zero",
-        error.to_string()
-    );
-}
-
-#[test]
-fn test_temp_file_in_dir_rejects_path_prefix_fragment() {
-    let dir = temp_dir("temp-file-create-error");
-
-    let error = TempFile::in_dir(&dir, Some("missing-parent/"), None, 1)
-        .expect_err("path-like prefix should be rejected");
-
-    assert_eq!(ErrorKind::InvalidInput, error.kind());
-    fs::remove_dir_all(dir).unwrap();
-}
-
-#[test]
-fn test_temp_file_in_dir_returns_parent_creation_error() {
-    let dir = temp_dir("temp-file-parent-error");
-    let file_parent = dir.join("file-parent");
-    fs::write(&file_parent, b"not a directory").unwrap();
-
-    let error = TempFile::in_dir(file_parent.join("child"), None, None, 1)
-        .expect_err("file parent should return create-dir error");
-
-    assert!(matches!(
-        error.kind(),
-        ErrorKind::AlreadyExists | ErrorKind::NotADirectory
-    ));
-    fs::remove_dir_all(dir).unwrap();
-}
-
-#[test]
-fn test_temp_dir_in_dir_rejects_path_prefix_fragment() {
-    let dir = temp_dir("temp-dir-create-error");
-
-    let error = TempDir::in_dir(&dir, Some("missing-parent/"), 1)
-        .expect_err("path-like prefix should be rejected");
-
-    assert_eq!(ErrorKind::InvalidInput, error.kind());
-    fs::remove_dir_all(dir).unwrap();
-}
-
-#[test]
-fn test_temp_dir_in_dir_returns_parent_creation_error() {
-    let dir = temp_dir("temp-dir-parent-error");
-    let file_parent = dir.join("file-parent");
-    fs::write(&file_parent, b"not a directory").unwrap();
-
-    let error = TempDir::in_dir(file_parent.join("child"), None, 1)
-        .expect_err("file parent should return create-dir error");
-
-    assert!(matches!(
-        error.kind(),
-        ErrorKind::AlreadyExists | ErrorKind::NotADirectory
-    ));
-    fs::remove_dir_all(dir).unwrap();
-}
-
-#[test]
-fn test_temp_dir_in_dir_rejects_zero_retry_count() {
-    let dir = temp_dir("temp-dir-zero-retries");
-
-    let error = TempDir::in_dir(&dir, None, 0).expect_err("zero retries should be invalid");
-
-    assert_eq!(ErrorKind::InvalidInput, error.kind());
-    fs::remove_dir_all(dir).unwrap();
-}
-
-#[cfg(unix)]
-#[test]
-fn test_temp_dir_in_dir_returns_create_error() {
-    let dir = temp_dir("temp-dir-permission-error");
-    fs::set_permissions(&dir, fs::Permissions::from_mode(0o500)).unwrap();
-
-    let error = TempDir::in_dir(&dir, Some("local-"), 1)
-        .expect_err("unwritable directory should return create-dir error");
-
-    fs::set_permissions(&dir, fs::Permissions::from_mode(0o700)).unwrap();
-    assert_eq!(ErrorKind::PermissionDenied, error.kind());
-    fs::remove_dir_all(dir).unwrap();
-}
-
-#[test]
-fn test_temp_file_drop_removes_file() {
-    let dir = temp_dir("temp-file-drop");
-    let path = {
-        let file = TempFile::in_dir(&dir, Some("drop-"), Some(".tmp"), 4)
-            .expect("temp file should be created");
-        let path = file.path().to_owned();
-        assert!(path.exists());
-        path
-    };
-
-    assert!(!path.exists());
-    fs::remove_dir_all(dir).unwrap();
-}
-
-#[test]
-fn test_temp_file_drop_logs_and_ignores_missing_file() {
-    ensure_test_logger();
-    let dir = temp_dir("temp-file-drop-missing");
-    let file = TempFile::in_dir(&dir, Some("drop-"), Some(".tmp"), 4)
-        .expect("temp file should be created");
-    let path = file.path().to_owned();
-    fs::remove_file(&path).unwrap();
-
-    drop(file);
-
-    assert!(!path.exists());
-    fs::remove_dir_all(dir).unwrap();
-}
-
-#[test]
-fn test_temp_dir_drop_removes_directory_tree() {
-    let dir = temp_dir("temp-dir-drop");
-    let path = {
-        let temp_dir = TempDir::in_dir(&dir, Some("drop-"), 4).expect("temp dir should be created");
-        let path = temp_dir.path().to_owned();
-        fs::write(path.join("scratch.txt"), b"scratch").unwrap();
-        assert!(path.is_dir());
-        path
-    };
-
-    assert!(!path.exists());
-    fs::remove_dir_all(dir).unwrap();
-}
-
-#[test]
-fn test_temp_dir_drop_logs_and_ignores_missing_directory() {
-    ensure_test_logger();
-    let dir = temp_dir("temp-dir-drop-missing");
-    let temp_dir = TempDir::in_dir(&dir, Some("drop-"), 4).expect("temp dir should be created");
-    let path = temp_dir.path().to_owned();
-    fs::remove_dir_all(&path).unwrap();
-
-    drop(temp_dir);
-
-    assert!(!path.exists());
-    fs::remove_dir_all(dir).unwrap();
-}
-
-#[test]
-fn test_temp_file_keep_preserves_file() {
-    let dir = temp_dir("temp-file-keep");
-    let mut file = TempFile::in_dir(&dir, Some("keep-"), Some(".tmp"), 4)
-        .expect("temp file should be created");
-    file.file_mut().unwrap().write_all(b"kept").unwrap();
-
-    let path = file.keep();
-
-    assert!(path.exists());
-    assert_eq!(b"kept", fs::read(&path).unwrap().as_slice());
-    fs::remove_dir_all(dir).unwrap();
-}
-
-#[test]
-fn test_temp_dir_persist_moves_directory() {
-    let dir = temp_dir("temp-dir-persist");
-    let temp_dir = TempDir::in_dir(&dir, Some("source-"), 4).expect("temp dir should be created");
-    let source = temp_dir.path().to_owned();
-    let target = dir.join("nested").join("persisted");
-    fs::write(source.join("payload.txt"), b"payload").unwrap();
-
-    let persisted = temp_dir.persist(&target).expect("temp dir should persist");
-
-    assert_eq!(target, persisted);
-    assert!(!source.exists());
-    assert_eq!(
-        b"payload",
-        fs::read(target.join("payload.txt")).unwrap().as_slice()
-    );
-    fs::remove_dir_all(dir).unwrap();
-}
-
-#[test]
-fn test_temp_dir_persist_cleans_up_when_parent_creation_fails() {
-    let dir = temp_dir("temp-dir-persist-error");
-    let temp_dir = TempDir::in_dir(&dir, Some("source-"), 4).expect("temp dir should be created");
-    let source = temp_dir.path().to_owned();
-    let blocker = dir.join("blocker");
-    fs::write(&blocker, b"not a directory").unwrap();
-
-    let error = temp_dir
-        .persist(blocker.join("target"))
-        .expect_err("invalid parent should be returned");
-
-    assert!(matches!(
-        error.kind(),
-        ErrorKind::AlreadyExists | ErrorKind::NotADirectory
-    ));
-    assert!(!source.exists());
-    fs::remove_dir_all(dir).unwrap();
-}
-
-#[test]
-fn test_temp_dir_persist_cleans_up_when_target_exists() {
-    let dir = temp_dir("temp-dir-persist-rename-error");
-    let temp_dir = TempDir::in_dir(&dir, Some("source-"), 4).expect("temp dir should be created");
-    let source = temp_dir.path().to_owned();
-    let target = dir.join("target-file");
-    fs::write(&target, b"not a directory").unwrap();
-
-    let error = temp_dir
-        .persist(&target)
-        .expect_err("existing target should be rejected");
-
-    assert!(matches!(
-        error.kind(),
-        ErrorKind::AlreadyExists
-            | ErrorKind::NotADirectory
-            | ErrorKind::PermissionDenied
-            | ErrorKind::Other
-    ));
-    assert!(!source.exists());
-    assert!(target.is_file());
-    fs::remove_dir_all(dir).unwrap();
-}
-
-#[test]
-fn test_temp_file_persist_moves_file() {
-    let dir = temp_dir("temp-file-persist");
-    let mut file = TempFile::in_dir(&dir, Some("source-"), Some(".tmp"), 4)
-        .expect("temp file should be created");
-    file.file_mut().unwrap().write_all(b"payload").unwrap();
-    let source = file.path().to_owned();
-    let target = dir.join("nested").join("result.txt");
-
-    let persisted = file.persist(&target).expect("temp file should persist");
-
-    assert_eq!(target, persisted);
-    assert!(!source.exists());
-    assert_eq!(b"payload", fs::read(&target).unwrap().as_slice());
-    fs::remove_dir_all(dir).unwrap();
-}
-
-#[test]
-fn test_temp_file_persist_cleans_up_when_parent_creation_fails() {
-    let dir = temp_dir("temp-file-persist-error");
-    let file = TempFile::in_dir(&dir, Some("source-"), Some(".tmp"), 4)
-        .expect("temp file should be created");
-    let source = file.path().to_owned();
-    let blocker = dir.join("blocker");
-    fs::write(&blocker, b"not a directory").unwrap();
-
-    let error = file
-        .persist(blocker.join("target"))
-        .expect_err("invalid parent should be returned");
-
-    assert!(matches!(
-        error.kind(),
-        ErrorKind::AlreadyExists | ErrorKind::NotADirectory
-    ));
-    assert!(!source.exists());
-    fs::remove_dir_all(dir).unwrap();
-}
-
-#[test]
 fn test_create_file_with_parent_and_buffered_helpers() {
     let dir = temp_dir("buffered");
     let path = dir.join("a").join("b").join("data.txt");
 
     {
-        let mut file = Files::create_file_with_parent(&path).expect("file should be created");
+        let mut file = LocalFiles::create_file_with_parent(&path).expect("file should be created");
         file.write_all(b"abc").unwrap();
     }
 
     {
-        let mut writer = Files::create_buffered_writer_with_parent(&path)
+        let mut writer = LocalFiles::create_buffered_writer_with_parent(&path)
             .expect("buffered writer should be created");
         writer.write_all(b"xyz").unwrap();
         writer.flush().unwrap();
     }
 
-    let mut reader = Files::open_buffered_reader(&path).expect("buffered reader should open");
+    let mut reader = LocalFiles::open_buffered_reader(&path).expect("buffered reader should open");
     let mut content = Vec::new();
     reader.read_to_end(&mut content).unwrap();
 
@@ -649,7 +240,7 @@ fn test_create_file_with_parent_and_buffered_helpers() {
 fn test_open_buffered_reader_returns_open_error() {
     let dir = temp_dir("open-error");
 
-    let error = Files::open_buffered_reader(dir.join("missing.txt"))
+    let error = LocalFiles::open_buffered_reader(dir.join("missing.txt"))
         .expect_err("missing file should return open error");
 
     assert_eq!(ErrorKind::NotFound, error.kind());
@@ -662,7 +253,7 @@ fn test_create_file_with_parent_returns_parent_error() {
     let file_parent = dir.join("file-parent");
     fs::write(&file_parent, b"not a directory").unwrap();
 
-    let error = Files::create_file_with_parent(file_parent.join("child.txt"))
+    let error = LocalFiles::create_file_with_parent(file_parent.join("child.txt"))
         .expect_err("file parent should return create-dir error");
 
     assert!(matches!(
@@ -678,8 +269,8 @@ fn test_ensure_dir_and_ensure_parent_create_missing_directories() {
     let child_dir = dir.join("a").join("b");
     let child_file = dir.join("c").join("d").join("out.txt");
 
-    Files::ensure_dir(&child_dir).expect("directory should be created");
-    Files::ensure_parent(&child_file).expect("parent should be created");
+    LocalFiles::ensure_dir(&child_dir).expect("directory should be created");
+    LocalFiles::ensure_parent(&child_file).expect("parent should be created");
 
     assert!(child_dir.is_dir());
     assert!(child_file.parent().unwrap().is_dir());
@@ -695,7 +286,7 @@ fn test_dir_size_sums_regular_files_and_ignores_symlinks() {
     #[cfg(unix)]
     std::os::unix::fs::symlink(dir.join("a.txt"), dir.join("link.txt")).unwrap();
 
-    let size = Files::dir_size(&dir).expect("directory size should be computed");
+    let size = LocalFiles::dir_size(&dir).expect("directory size should be computed");
 
     assert_eq!(8, size);
     fs::remove_dir_all(dir).unwrap();
@@ -707,7 +298,7 @@ fn test_dir_size_rejects_non_directory() {
     let path = dir.join("file.txt");
     fs::write(&path, b"data").unwrap();
 
-    let error = Files::dir_size(&path).expect_err("file should not be accepted as directory");
+    let error = LocalFiles::dir_size(&path).expect_err("file should not be accepted as directory");
 
     assert_eq!(ErrorKind::InvalidInput, error.kind());
     fs::remove_dir_all(dir).unwrap();
@@ -718,7 +309,7 @@ fn test_dir_size_returns_missing_path_error() {
     let dir = temp_dir("dir-size-missing");
     let missing = dir.join("missing");
 
-    let error = Files::dir_size(&missing).expect_err("missing path should return an error");
+    let error = LocalFiles::dir_size(&missing).expect_err("missing path should return an error");
 
     assert_eq!(ErrorKind::NotFound, error.kind());
     fs::remove_dir_all(dir).unwrap();
@@ -730,7 +321,7 @@ fn test_dir_size_returns_read_dir_error() {
     let dir = temp_dir("dir-size-read-error");
     fs::set_permissions(&dir, fs::Permissions::from_mode(0o300)).unwrap();
 
-    let error = Files::dir_size(&dir).expect_err("unreadable directory should fail");
+    let error = LocalFiles::dir_size(&dir).expect_err("unreadable directory should fail");
 
     fs::set_permissions(&dir, fs::Permissions::from_mode(0o700)).unwrap();
     assert_eq!(ErrorKind::PermissionDenied, error.kind());
@@ -746,7 +337,7 @@ fn test_clean_dir_removes_children_and_keeps_directory() {
     #[cfg(unix)]
     std::os::unix::fs::symlink(dir.join("file.txt"), dir.join("link.txt")).unwrap();
 
-    Files::clean_dir(&dir).expect("directory should be cleaned");
+    LocalFiles::clean_dir(&dir).expect("directory should be cleaned");
 
     assert!(dir.is_dir());
     assert_eq!(0, fs::read_dir(&dir).unwrap().count());
@@ -759,7 +350,7 @@ fn test_clean_dir_rejects_non_directory() {
     let path = dir.join("file.txt");
     fs::write(&path, b"data").unwrap();
 
-    let error = Files::clean_dir(&path).expect_err("file should not be accepted as directory");
+    let error = LocalFiles::clean_dir(&path).expect_err("file should not be accepted as directory");
 
     assert_eq!(ErrorKind::InvalidInput, error.kind());
     fs::remove_dir_all(dir).unwrap();
@@ -770,7 +361,7 @@ fn test_clean_dir_returns_missing_path_error() {
     let dir = temp_dir("clean-dir-missing");
     let missing = dir.join("missing");
 
-    let error = Files::clean_dir(&missing).expect_err("missing path should return an error");
+    let error = LocalFiles::clean_dir(&missing).expect_err("missing path should return an error");
 
     assert_eq!(ErrorKind::NotFound, error.kind());
     fs::remove_dir_all(dir).unwrap();
@@ -782,7 +373,7 @@ fn test_clean_dir_returns_read_dir_error() {
     let dir = temp_dir("clean-dir-read-error");
     fs::set_permissions(&dir, fs::Permissions::from_mode(0o300)).unwrap();
 
-    let error = Files::clean_dir(&dir).expect_err("unreadable directory should fail");
+    let error = LocalFiles::clean_dir(&dir).expect_err("unreadable directory should fail");
 
     fs::set_permissions(&dir, fs::Permissions::from_mode(0o700)).unwrap();
     assert_eq!(ErrorKind::PermissionDenied, error.kind());
@@ -798,8 +389,8 @@ fn test_remove_any_removes_files_directories_and_symlinks() {
     fs::create_dir(&nested).unwrap();
     fs::write(nested.join("child.txt"), b"child").unwrap();
 
-    Files::remove_any(&file).expect("file should be removed");
-    Files::remove_any(&nested).expect("directory should be removed");
+    LocalFiles::remove_any(&file).expect("file should be removed");
+    LocalFiles::remove_any(&nested).expect("directory should be removed");
 
     assert!(!file.exists());
     assert!(!nested.exists());
@@ -811,7 +402,7 @@ fn test_remove_any_removes_files_directories_and_symlinks() {
         fs::write(&target, b"target").unwrap();
         std::os::unix::fs::symlink(&target, &link).unwrap();
 
-        Files::remove_any(&link).expect("symlink should be removed");
+        LocalFiles::remove_any(&link).expect("symlink should be removed");
 
         assert!(target.exists());
         assert!(!link.exists());
@@ -825,19 +416,10 @@ fn test_remove_any_returns_missing_path_error() {
     let dir = temp_dir("remove-any-missing");
     let missing = dir.join("missing");
 
-    let error = Files::remove_any(&missing).expect_err("missing path should return an error");
+    let error = LocalFiles::remove_any(&missing).expect_err("missing path should return an error");
 
     assert_eq!(ErrorKind::NotFound, error.kind());
     fs::remove_dir_all(dir).unwrap();
-}
-
-#[test]
-fn test_copy_dir_options_default_is_conservative() {
-    let options = CopyDirOptions::default();
-
-    assert!(!options.overwrite);
-    assert!(!options.follow_symlinks);
-    assert!(!options.preserve_permissions);
 }
 
 #[test]
@@ -849,7 +431,7 @@ fn test_copy_dir_all_with_copies_tree_and_reports_stats() {
     fs::write(src.join("a.txt"), b"abc").unwrap();
     fs::write(src.join("nested").join("b.txt"), b"12345").unwrap();
 
-    let stats = Files::copy_dir_all_with(&src, &dst, CopyDirOptions::default())
+    let stats = LocalFiles::copy_dir_all_with(&src, &dst, LocalCopyDirOptions::default())
         .expect("directory tree should be copied");
 
     assert_eq!(2, stats.files);
@@ -874,7 +456,7 @@ fn test_copy_dir_all_with_copies_into_existing_directory() {
     fs::create_dir(&dst).unwrap();
     fs::write(src.join("data.txt"), b"data").unwrap();
 
-    let stats = Files::copy_dir_all_with(&src, &dst, CopyDirOptions::default())
+    let stats = LocalFiles::copy_dir_all_with(&src, &dst, LocalCopyDirOptions::default())
         .expect("directory should be copied into existing directory");
 
     assert_eq!(1, stats.files);
@@ -894,7 +476,7 @@ fn test_copy_dir_all_with_relative_missing_destination() {
     fs::write(src.join("data.txt"), b"data").unwrap();
     let _guard = CurrentDirGuard::change_to(&dir);
 
-    let stats = Files::copy_dir_all_with(&src, "relative-dst", CopyDirOptions::default())
+    let stats = LocalFiles::copy_dir_all_with(&src, "relative-dst", LocalCopyDirOptions::default())
         .expect("relative destination should be copied");
 
     assert_eq!(1, stats.files);
@@ -916,14 +498,15 @@ fn test_copy_dir_all_with_rejects_invalid_source_and_nested_destination() {
     fs::create_dir(&src).unwrap();
     fs::write(&src_file, b"file").unwrap();
 
-    let error = Files::copy_dir_all_with(&src_file, dir.join("dst"), CopyDirOptions::default())
-        .expect_err("file source should be rejected");
+    let error =
+        LocalFiles::copy_dir_all_with(&src_file, dir.join("dst"), LocalCopyDirOptions::default())
+            .expect_err("file source should be rejected");
     assert_eq!(ErrorKind::InvalidInput, error.kind());
 
-    let error = Files::copy_dir_all_with(
+    let error = LocalFiles::copy_dir_all_with(
         &src,
         src.join("nested").join("dst"),
-        CopyDirOptions::default(),
+        LocalCopyDirOptions::default(),
     )
     .expect_err("destination inside source should be rejected");
     assert_eq!(ErrorKind::InvalidInput, error.kind());
@@ -936,8 +519,9 @@ fn test_copy_dir_all_with_returns_missing_source_error() {
     let dir = temp_dir("copy-dir-missing-source");
     let missing = dir.join("missing");
 
-    let error = Files::copy_dir_all_with(&missing, dir.join("dst"), CopyDirOptions::default())
-        .expect_err("missing source should return metadata error");
+    let error =
+        LocalFiles::copy_dir_all_with(&missing, dir.join("dst"), LocalCopyDirOptions::default())
+            .expect_err("missing source should return metadata error");
 
     assert_eq!(ErrorKind::NotFound, error.kind());
     fs::remove_dir_all(dir).unwrap();
@@ -949,8 +533,12 @@ fn test_copy_dir_all_with_returns_destination_canonicalize_error() {
     let src = dir.join("src");
     fs::create_dir(&src).unwrap();
 
-    let error = Files::copy_dir_all_with(&src, std::path::Path::new(""), CopyDirOptions::default())
-        .expect_err("empty destination should fail canonicalization");
+    let error = LocalFiles::copy_dir_all_with(
+        &src,
+        std::path::Path::new(""),
+        LocalCopyDirOptions::default(),
+    )
+    .expect_err("empty destination should fail canonicalization");
 
     assert_eq!(ErrorKind::NotFound, error.kind());
     fs::remove_dir_all(dir).unwrap();
@@ -964,7 +552,7 @@ fn test_copy_dir_all_with_rejects_existing_root_destination_without_overwrite() 
     fs::create_dir(&src).unwrap();
     fs::write(&dst, b"not a directory").unwrap();
 
-    let error = Files::copy_dir_all_with(&src, &dst, CopyDirOptions::default())
+    let error = LocalFiles::copy_dir_all_with(&src, &dst, LocalCopyDirOptions::default())
         .expect_err("existing root destination should be rejected");
 
     assert_eq!(ErrorKind::AlreadyExists, error.kind());
@@ -980,7 +568,7 @@ fn test_copy_dir_all_with_returns_read_dir_error() {
     fs::create_dir(&src).unwrap();
     fs::set_permissions(&src, fs::Permissions::from_mode(0o300)).unwrap();
 
-    let error = Files::copy_dir_all_with(&src, &dst, CopyDirOptions::default())
+    let error = LocalFiles::copy_dir_all_with(&src, &dst, LocalCopyDirOptions::default())
         .expect_err("unreadable source directory should fail");
 
     fs::set_permissions(&src, fs::Permissions::from_mode(0o700)).unwrap();
@@ -998,7 +586,7 @@ fn test_copy_dir_all_with_returns_nested_read_dir_error() {
     fs::create_dir_all(&nested).unwrap();
     fs::set_permissions(&nested, fs::Permissions::from_mode(0o300)).unwrap();
 
-    let error = Files::copy_dir_all_with(&src, &dst, CopyDirOptions::default())
+    let error = LocalFiles::copy_dir_all_with(&src, &dst, LocalCopyDirOptions::default())
         .expect_err("unreadable nested directory should fail");
 
     fs::set_permissions(&nested, fs::Permissions::from_mode(0o700)).unwrap();
@@ -1016,7 +604,7 @@ fn test_copy_dir_all_with_rejects_existing_destination_without_overwrite() {
     fs::write(src.join("data.txt"), b"new").unwrap();
     fs::write(dst.join("data.txt"), b"old").unwrap();
 
-    let error = Files::copy_dir_all_with(&src, &dst, CopyDirOptions::default())
+    let error = LocalFiles::copy_dir_all_with(&src, &dst, LocalCopyDirOptions::default())
         .expect_err("existing destination file should be rejected");
 
     assert_eq!(ErrorKind::AlreadyExists, error.kind());
@@ -1033,12 +621,12 @@ fn test_copy_dir_all_with_overwrites_existing_destinations() {
     fs::write(src.join("data.txt"), b"new").unwrap();
     fs::write(&dst, b"old file blocks destination directory").unwrap();
 
-    let stats = Files::copy_dir_all_with(
+    let stats = LocalFiles::copy_dir_all_with(
         &src,
         &dst,
-        CopyDirOptions {
+        LocalCopyDirOptions {
             overwrite: true,
-            ..CopyDirOptions::default()
+            ..LocalCopyDirOptions::default()
         },
     )
     .expect("destination should be overwritten");
@@ -1048,12 +636,12 @@ fn test_copy_dir_all_with_overwrites_existing_destinations() {
     assert_eq!(b"new", fs::read(dst.join("data.txt")).unwrap().as_slice());
 
     fs::write(src.join("data.txt"), b"newer").unwrap();
-    let stats = Files::copy_dir_all_with(
+    let stats = LocalFiles::copy_dir_all_with(
         &src,
         &dst,
-        CopyDirOptions {
+        LocalCopyDirOptions {
             overwrite: true,
-            ..CopyDirOptions::default()
+            ..LocalCopyDirOptions::default()
         },
     )
     .expect("existing destination file should be overwritten");
@@ -1075,16 +663,16 @@ fn test_copy_dir_all_with_symlink_options() {
     fs::write(src.join("target.txt"), b"target").unwrap();
     std::os::unix::fs::symlink(src.join("target.txt"), src.join("link.txt")).unwrap();
 
-    let error = Files::copy_dir_all_with(&src, &dst, CopyDirOptions::default())
+    let error = LocalFiles::copy_dir_all_with(&src, &dst, LocalCopyDirOptions::default())
         .expect_err("default copy should reject symlinks");
     assert_eq!(ErrorKind::Unsupported, error.kind());
 
-    let stats = Files::copy_dir_all_with(
+    let stats = LocalFiles::copy_dir_all_with(
         &src,
         &followed_dst,
-        CopyDirOptions {
+        LocalCopyDirOptions {
             follow_symlinks: true,
-            ..CopyDirOptions::default()
+            ..LocalCopyDirOptions::default()
         },
     )
     .expect("symlink target should be copied");
@@ -1109,12 +697,12 @@ fn test_copy_dir_all_with_follows_directory_symlink_entry() {
     fs::write(target.join("data.txt"), b"data").unwrap();
     std::os::unix::fs::symlink(&target, src.join("dir-link")).unwrap();
 
-    let stats = Files::copy_dir_all_with(
+    let stats = LocalFiles::copy_dir_all_with(
         &src,
         &dst,
-        CopyDirOptions {
+        LocalCopyDirOptions {
             follow_symlinks: true,
-            ..CopyDirOptions::default()
+            ..LocalCopyDirOptions::default()
         },
     )
     .expect("directory symlink entry should be followed");
@@ -1140,16 +728,16 @@ fn test_copy_dir_all_with_directory_symlink_options() {
     fs::write(target.join("data.txt"), b"data").unwrap();
     std::os::unix::fs::symlink(&target, &src_link).unwrap();
 
-    let error = Files::copy_dir_all_with(&src_link, &dst, CopyDirOptions::default())
+    let error = LocalFiles::copy_dir_all_with(&src_link, &dst, LocalCopyDirOptions::default())
         .expect_err("source symlink should be rejected by default");
     assert_eq!(ErrorKind::Unsupported, error.kind());
 
-    let stats = Files::copy_dir_all_with(
+    let stats = LocalFiles::copy_dir_all_with(
         &src_link,
         &dst,
-        CopyDirOptions {
+        LocalCopyDirOptions {
             follow_symlinks: true,
-            ..CopyDirOptions::default()
+            ..LocalCopyDirOptions::default()
         },
     )
     .expect("directory symlink should be followed");
@@ -1171,7 +759,7 @@ fn test_copy_dir_all_with_rejects_unsupported_source_types() {
     let socket = src.join("socket");
     let listener = UnixListener::bind(&socket).expect("unix socket should be created");
 
-    let error = Files::copy_dir_all_with(&src, &dst, CopyDirOptions::default())
+    let error = LocalFiles::copy_dir_all_with(&src, &dst, LocalCopyDirOptions::default())
         .expect_err("socket source should be rejected");
 
     assert_eq!(ErrorKind::Unsupported, error.kind());
@@ -1192,12 +780,12 @@ fn test_copy_dir_all_with_rejects_unsupported_symlink_target_types() {
     let listener = UnixListener::bind(&socket).expect("unix socket should be created");
     std::os::unix::fs::symlink(&socket, src.join("socket-link")).unwrap();
 
-    let error = Files::copy_dir_all_with(
+    let error = LocalFiles::copy_dir_all_with(
         &src,
         &dst,
-        CopyDirOptions {
+        LocalCopyDirOptions {
             follow_symlinks: true,
-            ..CopyDirOptions::default()
+            ..LocalCopyDirOptions::default()
         },
     )
     .expect_err("socket symlink target should be rejected");
@@ -1218,12 +806,12 @@ fn test_copy_dir_all_with_preserves_permissions() {
     fs::set_permissions(&src, fs::Permissions::from_mode(0o751)).unwrap();
     fs::set_permissions(src.join("data.txt"), fs::Permissions::from_mode(0o640)).unwrap();
 
-    Files::copy_dir_all_with(
+    LocalFiles::copy_dir_all_with(
         &src,
         &dst,
-        CopyDirOptions {
+        LocalCopyDirOptions {
             preserve_permissions: true,
-            ..CopyDirOptions::default()
+            ..LocalCopyDirOptions::default()
         },
     )
     .expect("permissions should be preserved");
@@ -1254,7 +842,7 @@ fn test_copy_dir_all_with_returns_file_copy_error() {
     fs::write(&file, b"data").unwrap();
     fs::set_permissions(&file, fs::Permissions::from_mode(0o000)).unwrap();
 
-    let error = Files::copy_dir_all_with(&src, &dst, CopyDirOptions::default())
+    let error = LocalFiles::copy_dir_all_with(&src, &dst, LocalCopyDirOptions::default())
         .expect_err("unreadable source file should fail");
 
     fs::set_permissions(&file, fs::Permissions::from_mode(0o600)).unwrap();
@@ -1268,7 +856,7 @@ fn test_atomic_write_with_returns_parent_error() {
     let file_parent = dir.join("file-parent");
     fs::write(&file_parent, b"not a directory").unwrap();
 
-    let error = Files::atomic_write_with(file_parent.join("child.txt"), |_| Ok(()))
+    let error = LocalFiles::atomic_write_with(file_parent.join("child.txt"), |_| Ok(()))
         .expect_err("file parent should return create-dir error");
 
     assert!(matches!(
@@ -1285,8 +873,8 @@ fn test_atomic_write_returns_temp_create_error() {
     let path = dir.join("out.txt");
     fs::set_permissions(&dir, fs::Permissions::from_mode(0o500)).unwrap();
 
-    let error =
-        Files::atomic_write(&path, b"data").expect_err("unwritable dir should fail temp creation");
+    let error = LocalFiles::atomic_write(&path, b"data")
+        .expect_err("unwritable dir should fail temp creation");
 
     fs::set_permissions(&dir, fs::Permissions::from_mode(0o700)).unwrap();
     assert_eq!(ErrorKind::PermissionDenied, error.kind());
@@ -1303,7 +891,8 @@ fn test_atomic_write_returns_metadata_error() {
     let path = dir.join("loop");
     symlink(&path, &path).unwrap();
 
-    let error = Files::atomic_write(&path, b"data").expect_err("symlink loop metadata should fail");
+    let error =
+        LocalFiles::atomic_write(&path, b"data").expect_err("symlink loop metadata should fail");
 
     assert!(
         error
@@ -1320,8 +909,8 @@ fn test_atomic_write_removes_temp_when_rename_fails() {
     let path = dir.join("target-dir");
     fs::create_dir(&path).unwrap();
 
-    let error =
-        Files::atomic_write(&path, b"data").expect_err("renaming over a directory should fail");
+    let error = LocalFiles::atomic_write(&path, b"data")
+        .expect_err("renaming over a directory should fail");
 
     assert!(matches!(
         error.kind(),
@@ -1343,7 +932,7 @@ fn test_atomic_write_returns_parent_sync_open_error_when_directory_is_not_readab
     fs::create_dir(&parent).unwrap();
     fs::set_permissions(&parent, fs::Permissions::from_mode(0o300)).unwrap();
 
-    let result = Files::atomic_write(parent.join("out.txt"), b"data");
+    let result = LocalFiles::atomic_write(parent.join("out.txt"), b"data");
 
     fs::set_permissions(&parent, fs::Permissions::from_mode(0o700)).unwrap();
     if let Err(error) = result {
@@ -1359,7 +948,7 @@ fn test_copy_dir_all_with_returns_destination_create_error() {
     let dst = dir.join("missing-parent").join("dst");
     fs::create_dir(&src).unwrap();
 
-    let error = Files::copy_dir_all_with(&src, &dst, CopyDirOptions::default())
+    let error = LocalFiles::copy_dir_all_with(&src, &dst, LocalCopyDirOptions::default())
         .expect_err("missing destination parent should be reported");
 
     assert_eq!(ErrorKind::NotFound, error.kind());
@@ -1375,7 +964,7 @@ fn test_dir_size_ignores_unsupported_directory_entries() {
     fs::write(dir.join("data.bin"), b"abc").unwrap();
     let listener = UnixListener::bind(dir.join("socket")).unwrap();
 
-    assert_eq!(3, Files::dir_size(&dir).unwrap());
+    assert_eq!(3, LocalFiles::dir_size(&dir).unwrap());
 
     drop(listener);
     fs::remove_dir_all(dir).unwrap();
@@ -1392,7 +981,7 @@ fn test_copy_dir_all_with_rejects_unsupported_directory_entry() {
     fs::create_dir(&src).unwrap();
     let listener = UnixListener::bind(src.join("socket")).unwrap();
 
-    let error = Files::copy_dir_all_with(&src, &dst, CopyDirOptions::default())
+    let error = LocalFiles::copy_dir_all_with(&src, &dst, LocalCopyDirOptions::default())
         .expect_err("unsupported directory entry should be reported");
 
     assert_eq!(ErrorKind::Unsupported, error.kind());
@@ -1411,12 +1000,12 @@ fn test_copy_dir_all_with_returns_broken_symlink_entry_error_when_following() {
     fs::create_dir(&src).unwrap();
     symlink(src.join("missing"), src.join("broken-link")).unwrap();
 
-    let error = Files::copy_dir_all_with(
+    let error = LocalFiles::copy_dir_all_with(
         &src,
         &dst,
-        CopyDirOptions {
+        LocalCopyDirOptions {
             follow_symlinks: true,
-            ..CopyDirOptions::default()
+            ..LocalCopyDirOptions::default()
         },
     )
     .expect_err("broken symlink target should be reported");
@@ -1435,12 +1024,12 @@ fn test_copy_dir_all_with_returns_broken_root_symlink_error_when_following() {
     let dst = dir.join("dst");
     symlink(dir.join("missing"), &src).unwrap();
 
-    let error = Files::copy_dir_all_with(
+    let error = LocalFiles::copy_dir_all_with(
         &src,
         &dst,
-        CopyDirOptions {
+        LocalCopyDirOptions {
             follow_symlinks: true,
-            ..CopyDirOptions::default()
+            ..LocalCopyDirOptions::default()
         },
     )
     .expect_err("broken root symlink target should be reported");

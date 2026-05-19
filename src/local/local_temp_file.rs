@@ -23,27 +23,27 @@ use std::path::{
 
 use log::warn;
 
-use crate::Files;
+use crate::LocalFiles;
 
-use super::files::create_temp_file_in_dir;
+use super::local_files::create_temp_file_in_dir;
 
 /// Temporary file that is removed automatically unless kept or persisted.
 ///
-/// `TempFile` owns both the temporary file path and the open file handle. The
+/// `LocalTempFile` owns both the temporary file path and the open file handle. The
 /// file is closed before the path is removed, kept, or persisted. Use
-/// [`TempFile::keep`] to keep the file at its generated path, or
-/// [`TempFile::persist`] to move it to a final path.
+/// [`LocalTempFile::keep`] to keep the file at its generated path, or
+/// [`LocalTempFile::persist`] to move it to a final path.
 ///
 /// Cleanup performed from `Drop` is best-effort. If removal fails, the failure
 /// is reported through the `log` facade at warning level and the program is not
 /// panicked.
 #[derive(Debug)]
-pub struct TempFile {
+pub struct LocalTempFile {
     path: Option<PathBuf>,
     file: Option<File>,
 }
 
-impl TempFile {
+impl LocalTempFile {
     /// Creates a temporary file in the process temporary directory.
     ///
     /// # Errors
@@ -70,7 +70,7 @@ impl TempFile {
             std::env::temp_dir(),
             prefix,
             suffix,
-            Files::DEFAULT_TEMP_FILE_RETRIES,
+            LocalFiles::DEFAULT_TEMP_FILE_RETRIES,
         )
     }
 
@@ -185,7 +185,7 @@ impl TempFile {
     {
         self.close()?;
         let target = target.as_ref().to_path_buf();
-        Files::ensure_parent(&target)?;
+        LocalFiles::ensure_parent(&target)?;
         let source = self
             .path
             .as_ref()
@@ -196,7 +196,7 @@ impl TempFile {
     }
 }
 
-impl Drop for TempFile {
+impl Drop for LocalTempFile {
     /// Closes and removes the temporary file unless ownership has been released.
     fn drop(&mut self) {
         let _ = self.file.take();

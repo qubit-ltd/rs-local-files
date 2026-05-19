@@ -8,66 +8,66 @@ recursive directory operations, and durable atomic writes.
 
 ```rust
 use qubit_local_fs::{
-    CopyDirOptions,
-    Filenames,
-    Files,
-    TempDir,
-    TempFile,
+    LocalCopyDirOptions,
+    LocalFilenames,
+    LocalFiles,
+    LocalTempDir,
+    LocalTempFile,
 };
 ```
 
 ## Temporary Directories
 
-Use `TempDir` when a temporary directory should normally be cleaned up
+Use `LocalTempDir` when a temporary directory should normally be cleaned up
 automatically. The directory is created immediately and removed recursively when
 the guard is dropped. Call `keep` to keep the generated location or `persist` to
 move the directory to a final path.
 
 ```rust
-use qubit_local_fs::TempDir;
+use qubit_local_fs::LocalTempDir;
 
-let dir = TempDir::with_prefix(Some("qubit-local-fs-work-"))?;
+let dir = LocalTempDir::with_prefix(Some("qubit-local-fs-work-"))?;
 std::fs::write(dir.path().join("scratch.txt"), b"scratch")?;
 
 # Ok::<(), std::io::Error>(())
 ```
 
-Cleanup in `Drop` is best-effort. If deletion fails, `TempDir` logs a warning
+Cleanup in `Drop` is best-effort. If deletion fails, `LocalTempDir` logs a warning
 through the `log` facade and does not panic.
 
-## Temporary Files
+## Temporary LocalFiles
 
-Use `TempFile` when you need both a unique path and an already-open file handle.
+Use `LocalTempFile` when you need both a unique path and an already-open file handle.
 The file is removed on drop unless it is kept or persisted.
 
 ```rust
 use std::io::Write;
 
-use qubit_local_fs::TempFile;
+use qubit_local_fs::LocalTempFile;
 
-let mut file = TempFile::with_name(Some("qubit-local-fs-"), Some(".txt"))?;
+let mut file = LocalTempFile::with_name(Some("qubit-local-fs-"), Some(".txt"))?;
 writeln!(file.file_mut()?, "temporary payload")?;
 
 # Ok::<(), std::io::Error>(())
 ```
 
-`TempFile::persist` closes the file handle before moving the temporary file to
-its final path. Use `Files::atomic_write` instead when a target file must never
+`LocalTempFile::persist` closes the file handle before moving the temporary file to
+its final path. Use `LocalFiles::atomic_write` instead when a target file must never
 be observed half-written.
 
 ## Atomic Writes
 
-`Files::atomic_write` writes to a temporary file in the same parent directory,
+`LocalFiles::atomic_write` writes to a temporary file in the same parent directory,
 flushes and syncs that temporary file, replaces the destination, and syncs the
 parent directory when supported.
 
 ```rust
-use qubit_local_fs::{Files, TempDir};
+use qubit_local_fs::{LocalFiles, LocalTempDir};
 
-let dir = TempDir::with_prefix(Some("qubit-local-fs-guide-"))?;
+let dir = LocalTempDir::with_prefix(Some("qubit-local-fs-guide-"))?;
 let path = dir.path().join("state").join("manifest.json");
 
-Files::atomic_write(&path, br#"{"version":1,"complete":true}"#)?;
+LocalFiles::atomic_write(&path, br#"{"version":1,"complete":true}"#)?;
 
 assert_eq!(
     br#"{"version":1,"complete":true}"#,
@@ -77,12 +77,12 @@ assert_eq!(
 # Ok::<(), std::io::Error>(())
 ```
 
-Use `Files::atomic_write_with` when content generation needs direct access to
+Use `LocalFiles::atomic_write_with` when content generation needs direct access to
 the temporary file handle.
 
 ## Directory Helpers
 
-`Files` provides local directory helpers:
+`LocalFiles` provides local directory helpers:
 
 - `ensure_dir` creates a directory and missing ancestors;
 - `ensure_parent` creates missing parent directories for a file path;
@@ -92,16 +92,16 @@ the temporary file handle.
 - `copy_dir_all_with` recursively copies a directory tree with explicit options.
 
 ```rust
-use qubit_local_fs::{CopyDirOptions, Files, TempDir};
+use qubit_local_fs::{LocalCopyDirOptions, LocalFiles, LocalTempDir};
 
-let dir = TempDir::with_prefix(Some("qubit-local-fs-copy-"))?;
+let dir = LocalTempDir::with_prefix(Some("qubit-local-fs-copy-"))?;
 let src = dir.path().join("src");
 let dst = dir.path().join("dst");
 
-Files::ensure_dir(&src)?;
+LocalFiles::ensure_dir(&src)?;
 std::fs::write(src.join("data.txt"), b"data")?;
 
-let stats = Files::copy_dir_all_with(&src, &dst, CopyDirOptions::default())?;
+let stats = LocalFiles::copy_dir_all_with(&src, &dst, LocalCopyDirOptions::default())?;
 assert_eq!(1, stats.files);
 
 # Ok::<(), std::io::Error>(())
@@ -109,22 +109,22 @@ assert_eq!(1, stats.files);
 
 ## Filename Helpers
 
-`Filenames` contains lexical helpers that do not touch the filesystem. Methods
+`LocalFilenames` contains lexical helpers that do not touch the filesystem. Methods
 return UTF-8 strings (`&str` or `String`) instead of `OsStr`; invalid UTF-8 path
 components are reported as `None`.
 
 ```rust
 use std::path::Path;
 
-use qubit_local_fs::Filenames;
+use qubit_local_fs::LocalFilenames;
 
 let path = Path::new("/tmp/archive.tar.gz");
 
-assert_eq!(Some("archive.tar"), Filenames::file_stem(path));
-assert_eq!(Some("gz"), Filenames::extension(path));
-assert!(Filenames::has_extension(path, ".gz"));
+assert_eq!(Some("archive.tar"), LocalFilenames::file_stem(path));
+assert_eq!(Some("gz"), LocalFilenames::extension(path));
+assert!(LocalFilenames::has_extension(path, ".gz"));
 
-let name = Filenames::try_random_with(Some("upload-"), Some(".tmp"))?;
+let name = LocalFilenames::try_random_with(Some("upload-"), Some(".tmp"))?;
 assert!(name.starts_with("upload-"));
 
 # Ok::<(), std::io::Error>(())
@@ -132,7 +132,7 @@ assert!(name.starts_with("upload-"));
 
 ## Path Lengths and Platform Limits
 
-`TempFile` and `TempDir` create local filesystem entries and return operating
+`LocalTempFile` and `LocalTempDir` create local filesystem entries and return operating
 system errors when creation fails. They do not promise that the resulting path is
 valid for every platform API. Some APIs, such as Unix domain sockets, have much
 shorter path limits than regular files. For those cases, create temporary
