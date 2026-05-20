@@ -8,6 +8,8 @@
  *
  ******************************************************************************/
 use std::env;
+#[cfg(unix)]
+use std::ffi::CString;
 use std::ffi::OsString;
 use std::fs::{
     self,
@@ -35,6 +37,8 @@ use crate::{
 
 #[cfg(windows)]
 use std::ffi::c_void;
+#[cfg(unix)]
+use std::os::unix::ffi::OsStrExt;
 #[cfg(windows)]
 use std::os::windows::ffi::OsStrExt;
 #[cfg(windows)]
@@ -61,6 +65,17 @@ const OPEN_EXISTING: u32 = 3;
 const FILE_FLAG_BACKUP_SEMANTICS: u32 = 0x0200_0000;
 #[cfg(windows)]
 const INVALID_HANDLE_VALUE: RawHandle = -1isize as RawHandle;
+#[cfg(target_os = "macos")]
+const RENAME_EXCL: std::os::raw::c_uint = 0x0000_0004;
+
+#[cfg(target_os = "macos")]
+unsafe extern "C" {
+    fn renamex_np(
+        from: *const std::os::raw::c_char,
+        to: *const std::os::raw::c_char,
+        flags: std::os::raw::c_uint,
+    ) -> std::os::raw::c_int;
+}
 
 /// Default suffix used by atomic-write temporary files.
 const ATOMIC_WRITE_TEMP_SUFFIX: &str = ".tmp";
@@ -683,6 +698,148 @@ pub(crate) fn replace_file(source: &Path, destination: &Path) -> Result<()> {
     } else {
         Ok(())
     }
+}
+
+/// Moves `source` to `destination` without replacing an existing destination.
+///
+/// # Parameters
+/// - `source`: Existing source path.
+/// - `destination`: Destination path.
+///
+/// # Errors
+/// Returns the platform I/O error reported while moving the path.
+#[cfg(target_os = "macos")]
+pub(crate) fn move_path_without_replacing(source: &Path, destination: &Path) -> Result<()> {
+    let source = c_path(source)?;
+    let destination = c_path(destination)?;
+    let result = unsafe { renamex_np(source.as_ptr(), destination.as_ptr(), RENAME_EXCL) };
+    if result == 0 {
+        Ok(())
+    } else {
+        Err(std::io::Error::last_os_error())
+    }
+}
+
+/// Moves `source` to `destination` without replacing an existing destination.
+///
+/// # Parameters
+/// - `source`: Existing source path.
+/// - `destination`: Destination path.
+///
+/// # Errors
+/// Returns the platform I/O error reported while moving the path.
+#[cfg(target_os = "linux")]
+pub(crate) fn move_path_without_replacing(source: &Path, destination: &Path) -> Result<()> {
+    let source = c_path(source)?;
+    let destination = c_path(destination)?;
+    let result = unsafe {
+        libc::syscall(
+            libc::SYS_renameat2,
+            libc::AT_FDCWD,
+            source.as_ptr(),
+            libc::AT_FDCWD,
+            destination.as_ptr(),
+            libc::RENAME_NOREPLACE,
+        )
+    };
+    if result == 0 {
+        Ok(())
+    } else {
+        Err(std::io::Error::last_os_error())
+    }
+}
+
+/// Moves `source` to `destination` without replacing an existing destination.
+///
+/// # Parameters
+/// - `source`: Existing source path.
+/// - `destination`: Destination path.
+///
+/// # Errors
+/// Returns the platform I/O error reported while moving the path.
+#[cfg(windows)]
+pub(crate) fn move_path_without_replacing(source: &Path, destination: &Path) -> Result<()> {
+    let source = wide_path(source);
+    let destination = wide_path(destination);
+    let result = unsafe {
+        MoveFileExW(
+            source.as_ptr(),
+            destination.as_ptr(),
+            MOVEFILE_WRITE_THROUGH,
+        )
+    };
+    if result == 0 {
+        Err(std::io::Error::last_os_error())
+    } else {
+        Ok(())
+    }
+}
+
+/// Moves `source` to `destination` without replacing an existing file.
+///
+/// # Parameters
+/// - `source`: Existing source file path.
+/// - `destination`: Destination file path.
+///
+/// # Errors
+/// Returns the platform I/O error reported while moving the file.
+#[cfg(any(target_os = "linux", target_os = "macos", windows))]
+pub(crate) fn move_file_without_replacing(source: &Path, destination: &Path) -> Result<()> {
+    move_path_without_replacing(source, destination)
+}
+
+/// Moves `source` to `destination` without replacing an existing file.
+///
+/// This fallback creates a hard link at the destination, then removes the
+/// original temporary file. The destination creation is atomic and fails when
+/// the destination already exists.
+///
+/// # Parameters
+/// - `source`: Existing source file path.
+/// - `destination`: Destination file path.
+///
+/// # Errors
+/// Returns the platform I/O error reported while linking, unlinking, or
+/// rolling back the destination link after an unlink failure.
+#[cfg(all(unix, not(any(target_os = "linux", target_os = "macos"))))]
+pub(crate) fn move_file_without_replacing(source: &Path, destination: &Path) -> Result<()> {
+    fs::hard_link(source, destination)?;
+    match fs::remove_file(source) {
+        Ok(()) => Ok(()),
+        Err(error) => {
+            if let Err(cleanup_error) = fs::remove_file(destination) {
+                return Err(Error::new(
+                    error.kind(),
+                    format!(
+                        "failed to remove source after linking destination: {error}; \
+                         additionally failed to remove destination '{}': {cleanup_error}",
+                        destination.display(),
+                    ),
+                ));
+            }
+            Err(error)
+        }
+    }
+}
+
+/// Converts a Unix path to a C string.
+///
+/// # Parameters
+/// - `path`: Path to convert.
+///
+/// # Returns
+/// A nul-terminated C path string.
+///
+/// # Errors
+/// Returns [`ErrorKind::InvalidInput`] when the path contains an interior NUL.
+#[cfg(unix)]
+fn c_path(path: &Path) -> Result<CString> {
+    CString::new(path.as_os_str().as_bytes()).map_err(|_| {
+        Error::new(
+            ErrorKind::InvalidInput,
+            format!("path contains an interior NUL byte: {}", path.display()),
+        )
+    })
 }
 
 /// Syncs the parent directory for `path`.

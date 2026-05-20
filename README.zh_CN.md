@@ -34,8 +34,8 @@ qubit-local-files = "0.1"
 调用 `keep` 或 `persist`。Drop 阶段的清理是 best-effort；失败会通过 `log` 门面以
 `warn!` 记录告警，不会 panic。
 
-`LocalTempFile::persist` 默认拒绝已存在的目标；确实要替换已有目标时，使用 `persist_with`
-和 `LocalPersistOptions { overwrite: true }`。
+`LocalTempFile::persist` 默认在移动操作中拒绝已存在的目标；确实要替换已有目标时，使用
+`persist_with` 和 `LocalPersistOptions { overwrite: true }`。
 
 ```rust
 use std::io::Write;
@@ -96,5 +96,5 @@ assert_eq!(
 
 ## 运行时依赖
 
-本 crate 运行时依赖 Rust 标准库、`getrandom` 和 `log`。`getrandom` 用于生成随机临时名，
-`log` 用于 drop 阶段的清理失败告警。
+本 crate 运行时依赖 Rust 标准库、`getrandom`、`libc` 和 `log`。`getrandom` 用于生成随机临时名，
+`libc` 用于 Linux no-replace rename 支持，`log` 用于 drop 阶段的清理失败告警。

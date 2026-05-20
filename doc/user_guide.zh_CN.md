@@ -49,8 +49,8 @@ writeln!(file.file_mut()?, "temporary payload")?;
 # Ok::<(), std::io::Error>(())
 ```
 
-`LocalTempFile::persist` 会先关闭文件句柄，再把临时文件移动到最终路径，并默认拒绝已存在的目标。
-确实要替换已有目标时，使用 `LocalTempFile::persist_with` 和
+`LocalTempFile::persist` 会先关闭文件句柄，再把临时文件移动到最终路径，并默认在移动操作中拒绝
+已存在的目标。确实要替换已有目标时，使用 `LocalTempFile::persist_with` 和
 `LocalPersistOptions { overwrite: true }`。如果目标文件不能被外部观察到“只写了一半”，优先使用
 `LocalFiles::atomic_write`。
 

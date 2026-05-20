@@ -235,6 +235,47 @@ fn test_temp_file_persist_with_overwrite_replaces_existing_target() {
     fs::remove_dir_all(dir).unwrap();
 }
 
+#[test]
+fn test_temp_file_persist_with_default_rejects_existing_target() {
+    let dir = temp_dir("temp-file-persist-default-existing-target");
+    let mut file = LocalTempFile::in_dir(&dir, Some("source-"), Some(".tmp"), 4)
+        .expect("temp file should be created");
+    file.file_mut().unwrap().write_all(b"new").unwrap();
+    let source = file.path().to_owned();
+    let target = dir.join("result.txt");
+    fs::write(&target, b"old").unwrap();
+
+    let error = file
+        .persist_with(&target, LocalPersistOptions::default())
+        .expect_err("default persist options should reject existing targets");
+
+    assert_eq!(ErrorKind::AlreadyExists, error.kind());
+    assert!(!source.exists());
+    assert_eq!(b"old", fs::read(&target).unwrap().as_slice());
+    fs::remove_dir_all(dir).unwrap();
+}
+
+#[cfg(unix)]
+#[test]
+fn test_temp_file_persist_rejects_target_with_nul_byte() {
+    use std::ffi::OsString;
+    use std::os::unix::ffi::OsStringExt;
+
+    let dir = temp_dir("temp-file-persist-nul-target");
+    let file = LocalTempFile::in_dir(&dir, Some("source-"), Some(".tmp"), 4)
+        .expect("temp file should be created");
+    let source = file.path().to_owned();
+    let target = dir.join(OsString::from_vec(b"bad\0target.txt".to_vec()));
+
+    let error = file
+        .persist(&target)
+        .expect_err("NUL target should be rejected");
+
+    assert_eq!(ErrorKind::InvalidInput, error.kind());
+    assert!(!source.exists());
+    fs::remove_dir_all(dir).unwrap();
+}
+
 #[cfg(unix)]
 #[test]
 fn test_temp_file_persist_returns_target_metadata_error() {

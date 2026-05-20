@@ -38,9 +38,9 @@ them automatically on drop unless callers call `keep` or `persist`. Drop-time
 cleanup is best-effort; failures are reported through the `log` facade with
 `warn!` and never panic.
 
-`LocalTempFile::persist` rejects an existing target by default. Use
-`persist_with` and `LocalPersistOptions { overwrite: true }` when replacing an
-existing target is intended.
+`LocalTempFile::persist` rejects an existing target by default during the move
+operation. Use `persist_with` and `LocalPersistOptions { overwrite: true }` when
+replacing an existing target is intended.
 
 ```rust
 use std::io::Write;
@@ -102,6 +102,6 @@ assert_eq!(
 
 ## Runtime Dependencies
 
-This crate depends on the Rust standard library, `getrandom`, and `log`.
-`getrandom` is used for random temporary names. `log` is used for drop-time
-cleanup warnings.
+This crate depends on the Rust standard library, `getrandom`, `libc`, and
+`log`. `getrandom` is used for random temporary names. `libc` is used for
+Linux no-replace rename support. `log` is used for drop-time cleanup warnings.

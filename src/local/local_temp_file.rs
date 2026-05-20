@@ -30,6 +30,7 @@ use crate::{
 
 use super::local_files::{
     create_temp_file_in_dir,
+    move_file_without_replacing,
     replace_file,
 };
 
@@ -171,12 +172,12 @@ impl LocalTempFile {
 
     /// Moves the temporary file to a final path without overwriting.
     ///
-    /// The file handle is closed before renaming. Parent directories for
-    /// `target` are created before renaming. Existing targets are rejected by
-    /// default. Use [`LocalTempFile::persist_with`] and
-    /// [`LocalPersistOptions`] when overwriting is intended. If the move fails,
-    /// the temporary file remains owned by this guard and is cleaned up when
-    /// the guard is dropped.
+    /// The file handle is closed before moving. Parent directories for
+    /// `target` are created before moving. Existing targets are rejected by the
+    /// move operation instead of by a separate metadata precheck. Use
+    /// [`LocalTempFile::persist_with`] and [`LocalPersistOptions`] when
+    /// overwriting is intended. If the move fails, the temporary file remains
+    /// owned by this guard and is cleaned up when the guard is dropped.
     ///
     /// # Parameters
     /// - `target`: Final file path.
@@ -186,7 +187,7 @@ impl LocalTempFile {
     ///
     /// # Errors
     /// Returns an I/O error when the parent directory cannot be created, the
-    /// target already exists, or the temporary file cannot be renamed to
+    /// target already exists, or the temporary file cannot be moved to
     /// `target`.
     #[inline]
     pub fn persist<P>(self, target: P) -> Result<PathBuf>
@@ -200,8 +201,8 @@ impl LocalTempFile {
     ///
     /// The file handle is closed before moving the path. Parent directories for
     /// `target` are created before moving. When `options.overwrite` is `false`,
-    /// existing targets are rejected. When `options.overwrite` is `true`, an
-    /// existing target file may be replaced.
+    /// existing targets are rejected by the move operation. When
+    /// `options.overwrite` is `true`, an existing target file may be replaced.
     ///
     /// # Parameters
     /// - `target`: Final file path.
@@ -221,9 +222,6 @@ impl LocalTempFile {
         self.close()?;
         let target = target.as_ref().to_path_buf();
         LocalFiles::ensure_parent(&target)?;
-        if !options.overwrite {
-            reject_existing_target(&target)?;
-        }
         let source = self
             .path
             .as_ref()
@@ -231,7 +229,7 @@ impl LocalTempFile {
         if options.overwrite {
             replace_file(source, &target)?;
         } else {
-            fs::rename(source, &target)?;
+            move_file_without_replacing(source, &target)?;
         }
         let _ = self.path.take();
         Ok(target)
@@ -260,23 +258,4 @@ impl Drop for LocalTempFile {
 /// An [`ErrorKind::NotFound`] error describing the closed file handle.
 fn file_closed_error() -> Error {
     Error::new(ErrorKind::NotFound, "temporary file handle is closed")
-}
-
-/// Returns an error when `target` already exists.
-///
-/// # Parameters
-/// - `target`: Candidate final path.
-///
-/// # Errors
-/// Returns [`ErrorKind::AlreadyExists`] when `target` exists, or the metadata
-/// error reported by the filesystem.
-fn reject_existing_target(target: &Path) -> Result<()> {
-    match fs::symlink_metadata(target) {
-        Ok(_) => Err(Error::new(
-            ErrorKind::AlreadyExists,
-            format!("target already exists: {}", target.display()),
-        )),
-        Err(error) if error.kind() == ErrorKind::NotFound => Ok(()),
-        Err(error) => Err(error),
-    }
 }
