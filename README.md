@@ -46,6 +46,8 @@ qubit-local-files = "0.1"
 use std::io::Write;
 
 use qubit_local_files::{
+    FileWriteMode,
+    FileWriteOptions,
     LocalCopyDirOptions,
     LocalFiles,
     LocalPersistOptions,
@@ -69,7 +71,8 @@ let final_path = work.path().join("result.txt");
 std::fs::write(&final_path, "old payload")?;
 
 let mut temp = LocalTempFile::with_name(Some("qubit-local-files-"), Some(".txt"))?;
-writeln!(temp.file_mut()?, "new payload")?;
+temp.writer(FileWriteOptions::new(FileWriteMode::CreateOrTruncate).buffered())?
+    .write_all(b"new payload\n")?;
 temp.persist_with(&final_path, LocalPersistOptions { overwrite: true })?;
 
 assert_eq!("new payload\n", std::fs::read_to_string(&final_path)?);
@@ -86,11 +89,13 @@ become repeated boilerplate:
 
 | Method | Purpose |
 | --- | --- |
-| `open_buffered_reader` | Opens a file as `BufReader<File>`. |
+| `exists` | Checks path existence with `std::io::Result<bool>` instead of silently swallowing errors. |
+| `metadata` | Reads local path metadata. |
+| `list` | Lists direct directory entries. |
+| `open_reader` | Opens a file as `LocalFileReader` using `FileReadOptions`. |
+| `open_writer` | Opens a file as `LocalFileWriter` using `FileWriteOptions`. |
 | `ensure_dir` | Creates a directory and missing ancestors. |
 | `ensure_parent` | Creates missing parent directories for a file path. |
-| `create_file_with_parent` | Creates missing parent directories, then creates a file. |
-| `create_buffered_writer_with_parent` | Creates missing parent directories, then creates `BufWriter<File>`. |
 | `dir_size` | Sums regular-file byte lengths below a directory without following symbolic links. |
 | `clean_dir` | Removes all children from a directory while keeping the directory itself. |
 | `remove_any` | Removes a file, directory tree, or symbolic link. |
@@ -105,11 +110,35 @@ remove them automatically on drop unless ownership is released with `keep` or
 `persist`. Drop-time cleanup is best-effort; failures are reported through the
 `log` facade with `warn!` and never panic.
 
+`LocalTempFile` is write-oriented: use `writer(FileWriteOptions)` to configure
+the owned writer, and `close` to flush and close it before reusing the path from
+other APIs. It intentionally does not provide read helpers; read the path through
+`LocalFiles` or `std::fs` when that is needed.
+
+`LocalTempDir` provides safe child helpers: `child_path`, `ensure_child_dir`,
+`open_child_reader`, `open_child_writer`, and `list`. Child paths must be
+relative and cannot contain parent traversal. `ensure_child_dir` creates nested
+parents like `mkdir -p`.
+
 `LocalTempFile::persist` rejects an existing target by default during the move
 operation. Use `LocalTempFile::persist_with` and
 `LocalPersistOptions { overwrite: true }` only when replacing an existing target
 is intended. `LocalTempDir::persist` also rejects an existing target and does not
 provide an overwrite option.
+
+### Read and Write Options
+
+Normal file opening is intentionally explicit:
+
+| Type | Purpose |
+| --- | --- |
+| `FileReadOptions` | Controls reader buffering. |
+| `FileWriteOptions` | Controls parent creation, write mode, and writer buffering. |
+| `FileBuffering` | Selects unbuffered I/O or buffered I/O with an optional capacity. |
+| `FileWriteMode` | Selects `OpenExistingAtStart`, `CreateNew`, `CreateOrTruncate`, `AppendExisting`, or `AppendOrCreate`. |
+
+`atomic_write` remains a separate API because it performs a complete replacement
+protocol rather than opening a normal write handle.
 
 ### Atomic Writes
 

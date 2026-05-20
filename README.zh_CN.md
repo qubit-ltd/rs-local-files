@@ -40,6 +40,8 @@ qubit-local-files = "0.1"
 use std::io::Write;
 
 use qubit_local_files::{
+    FileWriteMode,
+    FileWriteOptions,
     LocalCopyDirOptions,
     LocalFiles,
     LocalPersistOptions,
@@ -63,7 +65,8 @@ let final_path = work.path().join("result.txt");
 std::fs::write(&final_path, "old payload")?;
 
 let mut temp = LocalTempFile::with_name(Some("qubit-local-files-"), Some(".txt"))?;
-writeln!(temp.file_mut()?, "new payload")?;
+temp.writer(FileWriteOptions::new(FileWriteMode::CreateOrTruncate).buffered())?
+    .write_all(b"new payload\n")?;
 temp.persist_with(&final_path, LocalPersistOptions { overwrite: true })?;
 
 assert_eq!("new payload\n", std::fs::read_to_string(&final_path)?);
@@ -79,11 +82,13 @@ assert_eq!("new payload\n", std::fs::read_to_string(&final_path)?);
 
 | 方法 | 用途 |
 | --- | --- |
-| `open_buffered_reader` | 以 `BufReader<File>` 形式打开文件。 |
+| `exists` | 以 `std::io::Result<bool>` 检查路径是否存在，不把检查错误静默折叠成 `false`。 |
+| `metadata` | 读取本地路径 metadata。 |
+| `list` | 列出目录直接子项。 |
+| `open_reader` | 使用 `FileReadOptions` 打开 `LocalFileReader`。 |
+| `open_writer` | 使用 `FileWriteOptions` 打开 `LocalFileWriter`。 |
 | `ensure_dir` | 创建目录及缺失祖先目录。 |
 | `ensure_parent` | 为文件路径创建缺失父目录。 |
-| `create_file_with_parent` | 创建缺失父目录后创建文件。 |
-| `create_buffered_writer_with_parent` | 创建缺失父目录后创建 `BufWriter<File>`。 |
 | `dir_size` | 统计目录下普通文件的总字节数，不跟随 symbolic link。 |
 | `clean_dir` | 删除目录中的所有子项，但保留目录本身。 |
 | `remove_any` | 删除文件、目录树或 symbolic link。 |
@@ -95,7 +100,24 @@ assert_eq!("new payload\n", std::fs::read_to_string(&final_path)?);
 
 `LocalTempFile` 和 `LocalTempDir` 创建真实的本地文件系统条目，并在 drop 时自动删除，除非通过 `keep` 或 `persist` 释放所有权。Drop 阶段的清理是 best-effort；失败会通过 `log` 门面以 `warn!` 记录告警，不会 panic。
 
+`LocalTempFile` 面向写入场景：通过 `writer(FileWriteOptions)` 配置内部 writer，通过 `close` flush 并关闭后，再用其他 API 读取该路径。它有意不提供读取 helper；确实需要读取时，通过 `LocalFiles` 或 `std::fs` 操作它的路径。
+
+`LocalTempDir` 提供安全 child helper：`child_path`、`ensure_child_dir`、`open_child_reader`、`open_child_writer` 和 `list`。child 路径必须是相对路径，不能包含父目录跳转。`ensure_child_dir` 会像 `mkdir -p` 一样创建多层缺失父目录。
+
 `LocalTempFile::persist` 默认在移动操作中拒绝已存在的目标。只有确实要替换已有目标时，才使用 `LocalTempFile::persist_with` 和 `LocalPersistOptions { overwrite: true }`。`LocalTempDir::persist` 同样拒绝已存在的目标，并且不提供 overwrite 选项。
+
+### 读写选项
+
+普通文件打开操作有意保持显式：
+
+| 类型 | 用途 |
+| --- | --- |
+| `FileReadOptions` | 控制 reader 是否缓冲。 |
+| `FileWriteOptions` | 控制是否创建父目录、写入模式和 writer 是否缓冲。 |
+| `FileBuffering` | 选择无额外缓冲，或使用可选容量的缓冲 I/O。 |
+| `FileWriteMode` | 选择 `OpenExistingAtStart`、`CreateNew`、`CreateOrTruncate`、`AppendExisting` 或 `AppendOrCreate`。 |
+
+`atomic_write` 仍然是独立 API，因为它执行的是完整替换协议，而不是普通写句柄打开。
 
 ### Atomic Write
 

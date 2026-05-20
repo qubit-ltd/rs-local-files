@@ -47,6 +47,10 @@ qubit-local-files = "0.1"
 
 ```rust
 use qubit_local_files::{
+    FileBuffering,
+    FileReadOptions,
+    FileWriteMode,
+    FileWriteOptions,
     LocalCopyDirOptions,
     LocalFilenames,
     LocalFiles,
@@ -57,6 +61,29 @@ use qubit_local_files::{
 ```
 
 本 crate 当前不暴露 prelude。显式导入可以让文件系统副作用和覆盖策略在调用点保持清晰。
+
+## 读写选项
+
+普通文件打开由显式 option struct 控制：
+
+| 类型 | 字段 | 用途 |
+| --- | --- | --- |
+| `FileReadOptions` | `buffering` | 控制 `open_reader` 返回无额外缓冲 reader，还是 buffered reader。 |
+| `FileWriteOptions` | `create_parent`、`mode`、`buffering` | 控制是否创建父目录、写入模式和 writer 是否缓冲。 |
+| `FileBuffering` | `Unbuffered`、`Buffered { capacity }` | 选择原始文件 I/O，或带可选容量的 `BufReader` / `BufWriter`。 |
+| `FileWriteMode` | enum variants | 选择目标文件的写入打开方式。 |
+
+写入模式：
+
+| 模式 | 行为 |
+| --- | --- |
+| `OpenExistingAtStart` | 打开已存在文件，从 offset zero 开始写入，不截断。 |
+| `CreateNew` | 创建新文件，目标已存在时报错。 |
+| `CreateOrTruncate` | 目标缺失时创建，目标已存在时截断。这是默认值。 |
+| `AppendExisting` | 追加到已存在文件，目标缺失时报错。 |
+| `AppendOrCreate` | 追加到已存在文件，目标缺失时创建。 |
+
+`LocalFiles::atomic_write` 有意不并入 `FileWriteOptions`。它执行的是完整的持久化替换协议，而不是返回普通写句柄。
 
 ## 临时目录
 
@@ -84,24 +111,40 @@ std::fs::write(dir.path().join("scratch.txt"), b"scratch")?;
 | 方法 | 行为 |
 | --- | --- |
 | `path` | 借用生成的目录路径。 |
+| `exists` | 检查目录路径是否存在，返回 `std::io::Result<bool>`。 |
+| `metadata` | 读取目录 metadata。 |
+| `list` | 列出直接子项。 |
+| `child_path` | 解析安全相对 child 路径，但不创建它。 |
+| `ensure_child_dir` | 创建 child 目录和缺失父目录，语义类似 `mkdir -p`。 |
+| `open_child_reader` | 使用 `FileReadOptions` 打开 child 文件 reader。 |
+| `open_child_writer` | 使用 `FileWriteOptions` 打开 child 文件 writer。 |
+| `cleanup` | 立即删除目录，并关闭后续 drop 清理。 |
 | `keep` | 消费 guard，并把目录留在生成路径。 |
 | `persist` | 把目录移动到最终路径，并关闭自动清理。 |
 
 `LocalTempDir::persist` 会为目标创建缺失父目录，并拒绝已存在目标。它不提供 overwrite 选项。如果移动失败，guard 仍然拥有该临时目录，并会在 drop 时清理。
 
+child 路径必须是非空相对路径，并且只能由 normal path component 组成。绝对路径、root 或 prefix component、`.` 和 `..` 都会被拒绝。`open_child_reader` 要求 child 是文件；目录或其他非文件条目会返回 `ErrorKind::InvalidInput`。`open_child_writer` 会校验已存在目标必须是文件，并确保 child 写入留在临时目录内。`ensure_child_dir` 会创建缺失的多层父目录，但在创建目录时会拒绝 symbolic link component，避免通过 child 路径离开临时目录。
+
 `Drop` 中的清理是 best-effort。如果删除失败，`LocalTempDir` 会通过 `log` 门面记录 warning，不会 panic。
 
 ## 临时文件
 
-当你既需要唯一路径，又需要一个已经打开的文件句柄时，使用 `LocalTempFile`。除非调用 `keep` 或 `persist`，否则文件会在 drop 时删除。
+当你需要一个唯一临时文件路径和一个由 guard 持有的 writer 时，使用 `LocalTempFile`。除非调用 `keep` 或 `persist`，否则文件会在 drop 时删除。
 
 ```rust
 use std::io::Write;
 
-use qubit_local_files::LocalTempFile;
+use qubit_local_files::{
+    FileWriteMode,
+    FileWriteOptions,
+    LocalTempFile,
+};
 
 let mut file = LocalTempFile::with_name(Some("qubit-local-files-"), Some(".txt"))?;
-writeln!(file.file_mut()?, "temporary payload")?;
+file.writer(FileWriteOptions::new(FileWriteMode::CreateOrTruncate).buffered())?
+    .write_all(b"temporary payload\n")?;
+file.close()?;
 
 # Ok::<(), std::io::Error>(())
 ```
@@ -114,19 +157,25 @@ writeln!(file.file_mut()?, "temporary payload")?;
 | `LocalTempFile::with_name` | 使用自定义前缀和后缀在 `std::env::temp_dir()` 中创建临时文件。 |
 | `LocalTempFile::in_dir` | 在调用方指定的父目录和重试次数下创建临时文件。 |
 
-句柄和所有权方法：
+writer 和所有权方法：
 
 | 方法 | 行为 |
 | --- | --- |
 | `path` | 借用生成的文件路径。 |
-| `file` | 借用已打开文件句柄。 |
-| `file_mut` | 可变借用已打开文件句柄。 |
-| `close` | 关闭句柄，但保留路径清理。 |
-| `keep` | 消费 guard，并把文件留在生成路径。 |
+| `exists` | 检查文件路径是否存在，返回 `std::io::Result<bool>`。 |
+| `metadata` | 读取文件 metadata。 |
+| `writer` | 使用 `FileWriteOptions` 配置并返回内部 `LocalFileWriter`。 |
+| `close` | flush 并关闭 writer，但保留路径清理。 |
+| `cleanup` | 立即删除文件，并关闭后续 drop 清理。 |
+| `keep` | flush、关闭、消费 guard，并把文件留在生成路径。 |
 | `persist` | 不覆盖地把文件移动到最终路径。 |
 | `persist_with` | 使用 `LocalPersistOptions` 把文件移动到最终路径。 |
 
-`LocalTempFile::persist` 会关闭文件句柄，为目标创建缺失父目录，并通过 no-clobber move 操作拒绝已存在目标。它有意不依赖单独的 metadata precheck。这可以在支持的平台上避免 time-of-check/time-of-use 覆盖竞态。
+第一次 `writer(options)` 调用会配置内部 writer。后续调用必须传入相同 options，并返回同一个 writer；不同 options 会以 `ErrorKind::InvalidInput` 拒绝。因为 `LocalTempFile` 会先创建文件再配置 writer，所以 `FileWriteMode::CreateNew` 会返回 `ErrorKind::AlreadyExists`。
+
+`LocalTempFile` 有意不提供读取 helper。临时文件的常见用法是写入、关闭，然后持久化。如果确实需要检查内容，先调用 `close`，再通过 `LocalFiles::open_reader` 或 `std::fs` 读取 `path()`。
+
+`LocalTempFile::persist` 会 flush 并关闭 writer，为目标创建缺失父目录，并通过 no-clobber move 操作拒绝已存在目标。它有意不依赖单独的 metadata precheck。这可以在支持的平台上避免 time-of-check/time-of-use 覆盖竞态。
 
 只有覆盖策略确实不同的时候才使用 `persist_with`：
 
@@ -134,6 +183,8 @@ writeln!(file.file_mut()?, "temporary payload")?;
 use std::io::Write;
 
 use qubit_local_files::{
+    FileWriteMode,
+    FileWriteOptions,
     LocalPersistOptions,
     LocalTempDir,
     LocalTempFile,
@@ -144,7 +195,8 @@ let target = dir.path().join("result.txt");
 std::fs::write(&target, "old")?;
 
 let mut file = LocalTempFile::with_name(Some("qubit-local-files-"), Some(".txt"))?;
-writeln!(file.file_mut()?, "new")?;
+file.writer(FileWriteOptions::new(FileWriteMode::CreateOrTruncate))?
+    .write_all(b"new\n")?;
 
 file.persist_with(&target, LocalPersistOptions { overwrite: true })?;
 
@@ -216,11 +268,13 @@ assert_eq!("{\"complete\":true}\n", std::fs::read_to_string(&path)?);
 
 | 方法 | 行为 |
 | --- | --- |
-| `open_buffered_reader` | 以 `BufReader<File>` 形式打开文件。 |
+| `exists` | 检查路径是否存在，并且不吞掉检查错误。 |
+| `metadata` | 通过 `std::fs::metadata` 读取路径 metadata。 |
+| `list` | 列出目录直接子项。 |
+| `open_reader` | 使用 `FileReadOptions` 打开 `LocalFileReader`。 |
+| `open_writer` | 使用 `FileWriteOptions` 打开 `LocalFileWriter`。 |
 | `ensure_dir` | 创建目录及缺失祖先目录。 |
 | `ensure_parent` | 为文件路径创建缺失父目录。没有父目录的路径会被接受。 |
-| `create_file_with_parent` | 创建缺失父目录后创建文件。 |
-| `create_buffered_writer_with_parent` | 创建缺失父目录后创建 `BufWriter<File>`。 |
 | `dir_size` | 统计目录下普通文件总字节数，不跟随 symbolic link。 |
 | `clean_dir` | 删除所有子项但保留目录自身。 |
 | `remove_any` | 删除文件、目录树或 symbolic link。 |
@@ -231,6 +285,9 @@ assert_eq!("{\"complete\":true}\n", std::fs::read_to_string(&path)?);
 use std::io::Write;
 
 use qubit_local_files::{
+    FileReadOptions,
+    FileWriteMode,
+    FileWriteOptions,
     LocalFiles,
     LocalTempDir,
 };
@@ -238,9 +295,19 @@ use qubit_local_files::{
 let dir = LocalTempDir::with_prefix(Some("qubit-local-files-helpers-"))?;
 let path = dir.path().join("nested").join("data.txt");
 
-let mut writer = LocalFiles::create_buffered_writer_with_parent(&path)?;
+let mut writer = LocalFiles::open_writer(
+    &path,
+    FileWriteOptions::new(FileWriteMode::CreateOrTruncate)
+        .with_parent()
+        .buffered(),
+)?;
 writer.write_all(b"payload")?;
-drop(writer);
+writer.close()?;
+
+let mut reader = LocalFiles::open_reader(&path, FileReadOptions::buffered())?;
+let mut payload = String::new();
+std::io::Read::read_to_string(&mut reader, &mut payload)?;
+assert_eq!("payload", payload);
 
 assert_eq!(7, LocalFiles::dir_size(dir.path())?);
 LocalFiles::clean_dir(dir.path())?;
@@ -364,7 +431,9 @@ assert_eq!(
 - 递归复制遇到已存在目标条目时会被拒绝，除非显式设置 `LocalCopyDirOptions { overwrite: true, .. }`。
 - 递归复制遇到 symbolic link 时会被拒绝，除非显式设置 `LocalCopyDirOptions { follow_symlinks: true, .. }`。
 - Drop 阶段清理失败会通过 `log::warn!` 记录，不会 panic。
-- `LocalTempFile::file` 和 `file_mut` 在句柄已经关闭或释放后返回 `ErrorKind::NotFound`。
+- `LocalTempFile::writer` 在 `close` 之后返回 `ErrorKind::NotFound`。
+- `LocalTempFile::writer` 如果已经用不同 options 配置过，会返回 `ErrorKind::InvalidInput`。
+- `LocalTempDir` child API 会在不安全 child 路径、child reader 目标不是文件、以及通过 symbolic link 离开临时目录时返回 `ErrorKind::InvalidInput`。
 
 ## 路径长度和平台限制
 

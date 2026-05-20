@@ -54,6 +54,10 @@ Import the concrete namespaces, guards, and option structs from the crate root:
 
 ```rust
 use qubit_local_files::{
+    FileBuffering,
+    FileReadOptions,
+    FileWriteMode,
+    FileWriteOptions,
     LocalCopyDirOptions,
     LocalFilenames,
     LocalFiles,
@@ -65,6 +69,31 @@ use qubit_local_files::{
 
 The crate currently does not expose a prelude. Keeping imports explicit makes
 filesystem side effects and overwrite policies visible at call sites.
+
+## Read and Write Options
+
+Normal file opening is controlled by explicit option structs:
+
+| Type | Fields | Purpose |
+| --- | --- | --- |
+| `FileReadOptions` | `buffering` | Controls whether `open_reader` returns an unbuffered or buffered reader. |
+| `FileWriteOptions` | `create_parent`, `mode`, `buffering` | Controls parent creation, write mode, and writer buffering. |
+| `FileBuffering` | `Unbuffered`, `Buffered { capacity }` | Selects raw file I/O or `BufReader` / `BufWriter` with an optional capacity. |
+| `FileWriteMode` | enum variants | Selects how the target is opened for writing. |
+
+Write modes:
+
+| Mode | Behavior |
+| --- | --- |
+| `OpenExistingAtStart` | Opens an existing file for writing at offset zero without truncating it. |
+| `CreateNew` | Creates a new file and fails when the target exists. |
+| `CreateOrTruncate` | Creates a missing file or truncates an existing file. This is the default. |
+| `AppendExisting` | Appends to an existing file and fails when it is missing. |
+| `AppendOrCreate` | Appends to an existing file or creates it when missing. |
+
+`LocalFiles::atomic_write` is intentionally separate from `FileWriteOptions`.
+It performs a complete durable replacement protocol rather than returning a
+normal write handle.
 
 ## Temporary Directories
 
@@ -94,6 +123,14 @@ Ownership methods:
 | Method | Behavior |
 | --- | --- |
 | `path` | Borrows the generated directory path. |
+| `exists` | Checks whether the directory path exists, returning `std::io::Result<bool>`. |
+| `metadata` | Reads directory metadata. |
+| `list` | Lists direct child entries. |
+| `child_path` | Resolves a safe relative child path without creating it. |
+| `ensure_child_dir` | Creates a child directory and missing parents, like `mkdir -p`. |
+| `open_child_reader` | Opens a child file for reading with `FileReadOptions`. |
+| `open_child_writer` | Opens a child file for writing with `FileWriteOptions`. |
+| `cleanup` | Removes the directory immediately and disables later drop cleanup. |
 | `keep` | Consumes the guard and leaves the directory at its generated path. |
 | `persist` | Moves the directory to a final path and disables automatic cleanup. |
 
@@ -101,21 +138,36 @@ Ownership methods:
 rejects an existing target. It does not provide an overwrite option. If the move
 fails, the guard still owns the temporary directory and will clean it up on drop.
 
+Child paths must be non-empty relative paths made only of normal path
+components. Absolute paths, root or prefix components, `.` and `..` are
+rejected. `open_child_reader` requires the child to be a file; directories and
+other non-file entries return `ErrorKind::InvalidInput`. `open_child_writer`
+validates existing targets as files and keeps child writes inside the temporary
+directory. `ensure_child_dir` creates missing nested parents, but rejects
+symbolic link components while creating directories so the operation cannot
+leave the temporary directory through a child path.
+
 Cleanup in `Drop` is best-effort. If deletion fails, `LocalTempDir` logs a
 warning through the `log` facade and does not panic.
 
 ## Temporary Files
 
-Use `LocalTempFile` when you need both a unique path and an already-open file
-handle. The file is removed on drop unless it is kept or persisted.
+Use `LocalTempFile` when you need a unique temporary file path with an owned
+writer. The file is removed on drop unless it is kept or persisted.
 
 ```rust
 use std::io::Write;
 
-use qubit_local_files::LocalTempFile;
+use qubit_local_files::{
+    FileWriteMode,
+    FileWriteOptions,
+    LocalTempFile,
+};
 
 let mut file = LocalTempFile::with_name(Some("qubit-local-files-"), Some(".txt"))?;
-writeln!(file.file_mut()?, "temporary payload")?;
+file.writer(FileWriteOptions::new(FileWriteMode::CreateOrTruncate).buffered())?
+    .write_all(b"temporary payload\n")?;
+file.close()?;
 
 # Ok::<(), std::io::Error>(())
 ```
@@ -128,19 +180,32 @@ Creation methods:
 | `LocalTempFile::with_name` | Creates a temporary file in `std::env::temp_dir()` with custom prefix and suffix. |
 | `LocalTempFile::in_dir` | Creates a temporary file under a caller-provided parent and retry limit. |
 
-Handle and ownership methods:
+Writer and ownership methods:
 
 | Method | Behavior |
 | --- | --- |
 | `path` | Borrows the generated file path. |
-| `file` | Borrows the open file handle. |
-| `file_mut` | Mutably borrows the open file handle. |
-| `close` | Closes the handle while keeping path cleanup active. |
-| `keep` | Consumes the guard and leaves the file at its generated path. |
+| `exists` | Checks whether the file path exists, returning `std::io::Result<bool>`. |
+| `metadata` | Reads file metadata. |
+| `writer` | Configures and returns the owned `LocalFileWriter` using `FileWriteOptions`. |
+| `close` | Flushes and closes the writer while keeping path cleanup active. |
+| `cleanup` | Removes the file immediately and disables later drop cleanup. |
+| `keep` | Flushes, closes, consumes the guard, and leaves the file at its generated path. |
 | `persist` | Moves the file to a final path without overwriting. |
 | `persist_with` | Moves the file to a final path using `LocalPersistOptions`. |
 
-`LocalTempFile::persist` closes the file handle, creates missing parent
+The first `writer(options)` call configures the owned writer. Later calls must
+pass the same options and return the same writer; different options are rejected
+with `ErrorKind::InvalidInput`. Because `LocalTempFile` creates the file before
+the writer is configured, `FileWriteMode::CreateNew` returns
+`ErrorKind::AlreadyExists`.
+
+`LocalTempFile` intentionally does not provide read helpers. A temporary file is
+normally written, closed, then persisted. If you need to inspect its contents,
+call `close` and then read `path()` through `LocalFiles::open_reader` or
+`std::fs`.
+
+`LocalTempFile::persist` flushes and closes the writer, creates missing parent
 directories for the target, and rejects existing targets by using a no-clobber
 move operation. It intentionally does not rely on a separate metadata precheck.
 This avoids a time-of-check/time-of-use overwrite race on supported platforms.
@@ -151,6 +216,8 @@ Use `persist_with` only when the overwrite policy should differ:
 use std::io::Write;
 
 use qubit_local_files::{
+    FileWriteMode,
+    FileWriteOptions,
     LocalPersistOptions,
     LocalTempDir,
     LocalTempFile,
@@ -161,7 +228,8 @@ let target = dir.path().join("result.txt");
 std::fs::write(&target, "old")?;
 
 let mut file = LocalTempFile::with_name(Some("qubit-local-files-"), Some(".txt"))?;
-writeln!(file.file_mut()?, "new")?;
+file.writer(FileWriteOptions::new(FileWriteMode::CreateOrTruncate))?
+    .write_all(b"new\n")?;
 
 file.persist_with(&target, LocalPersistOptions { overwrite: true })?;
 
@@ -244,11 +312,13 @@ Important semantics:
 
 | Method | Behavior |
 | --- | --- |
-| `open_buffered_reader` | Opens a file as `BufReader<File>`. |
+| `exists` | Checks whether a path exists without swallowing inspection errors. |
+| `metadata` | Reads path metadata with `std::fs::metadata`. |
+| `list` | Lists direct entries of a directory. |
+| `open_reader` | Opens a file as `LocalFileReader` with `FileReadOptions`. |
+| `open_writer` | Opens a file as `LocalFileWriter` with `FileWriteOptions`. |
 | `ensure_dir` | Creates a directory and missing ancestors. |
 | `ensure_parent` | Creates missing parent directories for a file path. Parentless paths are accepted. |
-| `create_file_with_parent` | Creates missing parent directories, then creates a file. |
-| `create_buffered_writer_with_parent` | Creates missing parent directories, then creates `BufWriter<File>`. |
 | `dir_size` | Sums regular-file byte lengths below a directory without following symbolic links. |
 | `clean_dir` | Removes all children while keeping the directory itself. |
 | `remove_any` | Removes a file, directory tree, or symbolic link. |
@@ -259,6 +329,9 @@ Example:
 use std::io::Write;
 
 use qubit_local_files::{
+    FileReadOptions,
+    FileWriteMode,
+    FileWriteOptions,
     LocalFiles,
     LocalTempDir,
 };
@@ -266,9 +339,19 @@ use qubit_local_files::{
 let dir = LocalTempDir::with_prefix(Some("qubit-local-files-helpers-"))?;
 let path = dir.path().join("nested").join("data.txt");
 
-let mut writer = LocalFiles::create_buffered_writer_with_parent(&path)?;
+let mut writer = LocalFiles::open_writer(
+    &path,
+    FileWriteOptions::new(FileWriteMode::CreateOrTruncate)
+        .with_parent()
+        .buffered(),
+)?;
 writer.write_all(b"payload")?;
-drop(writer);
+writer.close()?;
+
+let mut reader = LocalFiles::open_reader(&path, FileReadOptions::buffered())?;
+let mut payload = String::new();
+std::io::Read::read_to_string(&mut reader, &mut payload)?;
+assert_eq!("payload", payload);
 
 assert_eq!(7, LocalFiles::dir_size(dir.path())?);
 LocalFiles::clean_dir(dir.path())?;
@@ -409,8 +492,12 @@ Important error behavior:
 - Recursive copy rejects symbolic links unless
   `LocalCopyDirOptions { follow_symlinks: true, .. }` is explicit.
 - Drop-time cleanup failures are logged through `log::warn!` and never panic.
-- `LocalTempFile::file` and `file_mut` return `ErrorKind::NotFound` after the
-  handle has been closed or released.
+- `LocalTempFile::writer` returns `ErrorKind::NotFound` after `close`.
+- `LocalTempFile::writer` returns `ErrorKind::InvalidInput` when it has already
+  been configured with different options.
+- `LocalTempDir` child APIs return `ErrorKind::InvalidInput` for unsafe child
+  paths, non-file child readers, and child paths that escape the temporary
+  directory through symbolic links.
 
 ## Path Lengths and Platform Limits
 
