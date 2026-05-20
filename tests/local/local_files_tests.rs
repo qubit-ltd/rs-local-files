@@ -27,7 +27,7 @@ use std::sync::{
     Once,
 };
 
-pub(super) use qubit_local_fs::{
+pub(super) use qubit_local_files::{
     LocalCopyDirOptions,
     LocalFiles,
     LocalTempDir,
@@ -63,7 +63,7 @@ pub(super) fn ensure_test_logger() {
 pub(super) fn temp_dir(name: &str) -> PathBuf {
     let id = TEST_DIR_COUNTER.fetch_add(1, Ordering::Relaxed);
     let path = std::env::temp_dir().join(format!(
-        "qubit-local-fs-local-tests-{}-{name}-{id}",
+        "qubit-local-files-local-tests-{}-{name}-{id}",
         std::process::id()
     ));
     drop(fs::remove_dir_all(&path));

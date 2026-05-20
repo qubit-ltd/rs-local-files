@@ -91,12 +91,12 @@ unsafe extern "system" {
 ///
 /// # Examples
 /// ```
-/// use qubit_local_fs::{
+/// use qubit_local_files::{
 ///     LocalFiles,
 ///     LocalTempDir,
 /// };
 ///
-/// let dir = LocalTempDir::with_prefix(Some("qubit-local-fs-doc-"))?;
+/// let dir = LocalTempDir::with_prefix(Some("qubit-local-files-doc-"))?;
 /// let path = dir.path().join("nested").join("data.txt");
 ///
 /// LocalFiles::atomic_write(&path, b"payload")?;
@@ -107,7 +107,7 @@ pub enum LocalFiles {}
 
 impl LocalFiles {
     /// Default prefix used when callers do not provide a temporary file prefix.
-    pub const DEFAULT_TEMP_FILE_PREFIX: &str = "qubit-local-fs-";
+    pub const DEFAULT_TEMP_FILE_PREFIX: &str = "qubit-local-files-";
 
     /// Default number of attempts used when creating a random temporary entry.
     pub const DEFAULT_TEMP_FILE_RETRIES: usize = 256;
@@ -342,12 +342,12 @@ impl LocalFiles {
     ///
     /// # Examples
     /// ```
-    /// use qubit_local_fs::{
+    /// use qubit_local_files::{
     ///     LocalFiles,
     ///     LocalTempDir,
     /// };
     ///
-    /// let dir = LocalTempDir::with_prefix(Some("qubit-local-fs-atomic-"))?;
+    /// let dir = LocalTempDir::with_prefix(Some("qubit-local-files-atomic-"))?;
     /// let path = dir.path().join("state").join("manifest.json");
     ///
     /// LocalFiles::atomic_write(&path, br#"{"version":1,"complete":true}"#)?;

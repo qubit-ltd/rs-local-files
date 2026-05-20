@@ -1,12 +1,12 @@
-# Qubit Local FS 用户手册
+# Qubit Local Files 用户手册
 
-Qubit Local FS 提供从 `qubit-io` 拆出的本地文件系统工具。它覆盖本地路径、文件名、
+Qubit Local Files 提供从 `qubit-io` 拆出的本地文件系统工具。它覆盖本地路径、文件名、
 临时文件系统条目、递归目录操作和持久化 atomic write。
 
 ## 导入方式
 
 ```rust
-use qubit_local_fs::{
+use qubit_local_files::{
     LocalCopyDirOptions,
     LocalFilenames,
     LocalFiles,
@@ -21,9 +21,9 @@ use qubit_local_fs::{
 删除。调用 `keep` 可以保留生成位置；调用 `persist` 可以移动到最终路径。
 
 ```rust
-use qubit_local_fs::LocalTempDir;
+use qubit_local_files::LocalTempDir;
 
-let dir = LocalTempDir::with_prefix(Some("qubit-local-fs-work-"))?;
+let dir = LocalTempDir::with_prefix(Some("qubit-local-files-work-"))?;
 std::fs::write(dir.path().join("scratch.txt"), b"scratch")?;
 
 # Ok::<(), std::io::Error>(())
@@ -40,9 +40,9 @@ std::fs::write(dir.path().join("scratch.txt"), b"scratch")?;
 ```rust
 use std::io::Write;
 
-use qubit_local_fs::LocalTempFile;
+use qubit_local_files::LocalTempFile;
 
-let mut file = LocalTempFile::with_name(Some("qubit-local-fs-"), Some(".txt"))?;
+let mut file = LocalTempFile::with_name(Some("qubit-local-files-"), Some(".txt"))?;
 writeln!(file.file_mut()?, "temporary payload")?;
 
 # Ok::<(), std::io::Error>(())
@@ -57,9 +57,9 @@ writeln!(file.file_mut()?, "temporary payload")?;
 并在支持的平台上 sync 父目录。
 
 ```rust
-use qubit_local_fs::{LocalFiles, LocalTempDir};
+use qubit_local_files::{LocalFiles, LocalTempDir};
 
-let dir = LocalTempDir::with_prefix(Some("qubit-local-fs-guide-"))?;
+let dir = LocalTempDir::with_prefix(Some("qubit-local-files-guide-"))?;
 let path = dir.path().join("state").join("manifest.json");
 
 LocalFiles::atomic_write(&path, br#"{"version":1,"complete":true}"#)?;
@@ -86,9 +86,9 @@ assert_eq!(
 - `copy_dir_all_with` 使用显式选项递归复制目录树。
 
 ```rust
-use qubit_local_fs::{LocalCopyDirOptions, LocalFiles, LocalTempDir};
+use qubit_local_files::{LocalCopyDirOptions, LocalFiles, LocalTempDir};
 
-let dir = LocalTempDir::with_prefix(Some("qubit-local-fs-copy-"))?;
+let dir = LocalTempDir::with_prefix(Some("qubit-local-files-copy-"))?;
 let src = dir.path().join("src");
 let dst = dir.path().join("dst");
 
@@ -109,7 +109,7 @@ assert_eq!(1, stats.files);
 ```rust
 use std::path::Path;
 
-use qubit_local_fs::LocalFilenames;
+use qubit_local_files::LocalFilenames;
 
 let path = Path::new("/tmp/archive.tar.gz");
 

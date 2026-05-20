@@ -20,7 +20,7 @@ use super::local_files_tests::{
 
 #[test]
 fn test_debug_formatting_contains_type_name() {
-    let dir = LocalTempDir::with_prefix(Some("qubit-local-fs-debug-"))
+    let dir = LocalTempDir::with_prefix(Some("qubit-local-files-debug-"))
         .expect("temp directory should be created");
 
     assert!(format!("{dir:?}").contains("LocalTempDir"));
@@ -28,7 +28,7 @@ fn test_debug_formatting_contains_type_name() {
 
 #[test]
 fn test_temp_dir_with_prefix_creates_existing_directory() {
-    let dir = LocalTempDir::with_prefix(Some("qubit-local-fs-dir-"))
+    let dir = LocalTempDir::with_prefix(Some("qubit-local-files-dir-"))
         .expect("temp directory should be created");
     let name = dir
         .path()
@@ -38,7 +38,7 @@ fn test_temp_dir_with_prefix_creates_existing_directory() {
 
     assert!(dir.path().starts_with(std::env::temp_dir()));
     assert!(dir.path().is_dir());
-    assert!(name.starts_with("qubit-local-fs-dir-"));
+    assert!(name.starts_with("qubit-local-files-dir-"));
 }
 
 #[test]

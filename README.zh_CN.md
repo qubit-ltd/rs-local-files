@@ -1,8 +1,8 @@
-# Qubit Local FS
+# Qubit Local Files
 
-[![Rust CI](https://github.com/qubit-ltd/rs-local-fs/actions/workflows/ci.yml/badge.svg)](https://github.com/qubit-ltd/rs-local-fs/actions/workflows/ci.yml)
-[![Coverage](https://img.shields.io/endpoint?url=https://qubit-ltd.github.io/rs-local-fs/coverage-badge.json)](https://qubit-ltd.github.io/rs-local-fs/coverage/)
-[![Crates.io](https://img.shields.io/crates/v/qubit-local-fs.svg?color=blue)](https://crates.io/crates/qubit-local-fs)
+[![Rust CI](https://github.com/qubit-ltd/rs-local-files/actions/workflows/ci.yml/badge.svg)](https://github.com/qubit-ltd/rs-local-files/actions/workflows/ci.yml)
+[![Coverage](https://img.shields.io/endpoint?url=https://qubit-ltd.github.io/rs-local-files/coverage-badge.json)](https://qubit-ltd.github.io/rs-local-files/coverage/)
+[![Crates.io](https://img.shields.io/crates/v/qubit-local-files.svg?color=blue)](https://crates.io/crates/qubit-local-files)
 [![Rust](https://img.shields.io/badge/rust-1.94+-blue.svg?logo=rust)](https://www.rust-lang.org)
 [![License](https://img.shields.io/badge/license-Apache%202.0-blue.svg)](LICENSE)
 [![English Document](https://img.shields.io/badge/Document-English-blue.svg)](README.md)
@@ -11,7 +11,7 @@
 
 ## 概述
 
-Qubit Local FS 承载从 `qubit-io` 拆出的本地文件系统工具：
+Qubit Local Files 承载从 `qubit-io` 拆出的本地文件系统工具：
 
 - `LocalFiles`：父目录创建、buffered file helper、目录清理、目录大小、递归目录复制和
   持久化 atomic write；
@@ -25,7 +25,7 @@ Qubit Local FS 承载从 `qubit-io` 拆出的本地文件系统工具：
 
 ```toml
 [dependencies]
-qubit-local-fs = "0.1"
+qubit-local-files = "0.1"
 ```
 
 ## 临时文件和临时目录
@@ -37,12 +37,12 @@ qubit-local-fs = "0.1"
 ```rust
 use std::io::Write;
 
-use qubit_local_fs::{LocalTempDir, LocalTempFile};
+use qubit_local_files::{LocalTempDir, LocalTempFile};
 
-let dir = LocalTempDir::with_prefix(Some("qubit-local-fs-work-"))?;
+let dir = LocalTempDir::with_prefix(Some("qubit-local-files-work-"))?;
 std::fs::write(dir.path().join("scratch.txt"), b"scratch")?;
 
-let mut file = LocalTempFile::with_name(Some("qubit-local-fs-"), Some(".txt"))?;
+let mut file = LocalTempFile::with_name(Some("qubit-local-files-"), Some(".txt"))?;
 writeln!(file.file_mut()?, "temporary payload")?;
 
 # Ok::<(), std::io::Error>(())
@@ -54,9 +54,9 @@ writeln!(file.file_mut()?, "temporary payload")?;
 临时文件写入，flush 并 sync 临时文件，替换目标文件，并在支持的平台上 sync 父目录。
 
 ```rust
-use qubit_local_fs::{LocalFiles, LocalTempDir};
+use qubit_local_files::{LocalFiles, LocalTempDir};
 
-let dir = LocalTempDir::with_prefix(Some("qubit-local-fs-atomic-"))?;
+let dir = LocalTempDir::with_prefix(Some("qubit-local-files-atomic-"))?;
 let path = dir.path().join("state").join("manifest.json");
 
 LocalFiles::atomic_write(&path, br#"{"version":1,"complete":true}"#)?;

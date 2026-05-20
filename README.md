@@ -1,8 +1,8 @@
-# Qubit Local FS
+# Qubit Local Files
 
-[![Rust CI](https://github.com/qubit-ltd/rs-local-fs/actions/workflows/ci.yml/badge.svg)](https://github.com/qubit-ltd/rs-local-fs/actions/workflows/ci.yml)
-[![Coverage](https://img.shields.io/endpoint?url=https://qubit-ltd.github.io/rs-local-fs/coverage-badge.json)](https://qubit-ltd.github.io/rs-local-fs/coverage/)
-[![Crates.io](https://img.shields.io/crates/v/qubit-local-fs.svg?color=blue)](https://crates.io/crates/qubit-local-fs)
+[![Rust CI](https://github.com/qubit-ltd/rs-local-files/actions/workflows/ci.yml/badge.svg)](https://github.com/qubit-ltd/rs-local-files/actions/workflows/ci.yml)
+[![Coverage](https://img.shields.io/endpoint?url=https://qubit-ltd.github.io/rs-local-files/coverage-badge.json)](https://qubit-ltd.github.io/rs-local-files/coverage/)
+[![Crates.io](https://img.shields.io/crates/v/qubit-local-files.svg?color=blue)](https://crates.io/crates/qubit-local-files)
 [![Rust](https://img.shields.io/badge/rust-1.94+-blue.svg?logo=rust)](https://www.rust-lang.org)
 [![License](https://img.shields.io/badge/license-Apache%202.0-blue.svg)](LICENSE)
 [![Chinese Document](https://img.shields.io/badge/Document-Chinese-blue.svg)](README.zh_CN.md)
@@ -11,7 +11,7 @@ Local filesystem utilities for Rust.
 
 ## Overview
 
-Qubit Local FS contains the local filesystem utilities split out of
+Qubit Local Files contains the local filesystem utilities split out of
 `qubit-io`:
 
 - `LocalFiles` for parent creation, buffered file helpers, directory cleanup,
@@ -27,10 +27,10 @@ wrappers, and codecs.
 
 ```toml
 [dependencies]
-qubit-local-fs = "0.1"
+qubit-local-files = "0.1"
 ```
 
-## Temporary LocalFiles and Directories
+## Temporary Files and Directories
 
 `LocalTempFile` and `LocalTempDir` create real temporary filesystem entries and remove
 them automatically on drop unless callers call `keep` or `persist`. Drop-time
@@ -40,12 +40,12 @@ cleanup is best-effort; failures are reported through the `log` facade with
 ```rust
 use std::io::Write;
 
-use qubit_local_fs::{LocalTempDir, LocalTempFile};
+use qubit_local_files::{LocalTempDir, LocalTempFile};
 
-let dir = LocalTempDir::with_prefix(Some("qubit-local-fs-work-"))?;
+let dir = LocalTempDir::with_prefix(Some("qubit-local-files-work-"))?;
 std::fs::write(dir.path().join("scratch.txt"), b"scratch")?;
 
-let mut file = LocalTempFile::with_name(Some("qubit-local-fs-"), Some(".txt"))?;
+let mut file = LocalTempFile::with_name(Some("qubit-local-files-"), Some(".txt"))?;
 writeln!(file.file_mut()?, "temporary payload")?;
 
 # Ok::<(), std::io::Error>(())
@@ -58,9 +58,9 @@ writes through a temporary file in the same directory, flushes and syncs that
 file, replaces the destination, and syncs the parent directory when supported.
 
 ```rust
-use qubit_local_fs::{LocalFiles, LocalTempDir};
+use qubit_local_files::{LocalFiles, LocalTempDir};
 
-let dir = LocalTempDir::with_prefix(Some("qubit-local-fs-atomic-"))?;
+let dir = LocalTempDir::with_prefix(Some("qubit-local-files-atomic-"))?;
 let path = dir.path().join("state").join("manifest.json");
 
 LocalFiles::atomic_write(&path, br#"{"version":1,"complete":true}"#)?;

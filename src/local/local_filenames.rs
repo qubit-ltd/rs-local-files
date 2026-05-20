@@ -35,7 +35,7 @@ const RANDOM_NAME_BYTES: usize = 16;
 ///
 /// # Examples
 /// ```
-/// use qubit_local_fs::LocalFilenames;
+/// use qubit_local_files::LocalFilenames;
 /// use std::path::Path;
 ///
 /// let path = Path::new("/tmp/archive.tar.gz");
@@ -49,7 +49,7 @@ pub enum LocalFilenames {}
 
 impl LocalFilenames {
     /// Default prefix used by random file-name generation.
-    pub const DEFAULT_RANDOM_PREFIX: &str = "qubit-local-fs-";
+    pub const DEFAULT_RANDOM_PREFIX: &str = "qubit-local-files-";
 
     /// Builds a random file-name component using the default prefix.
     ///

@@ -1,14 +1,14 @@
 [package]
-name = "qubit-local-fs"
+name = "qubit-local-files"
 version = "0.1.0"
 edition = "2024"
 rust-version = "1.94"
 authors = ["Haixing Hu <starfish.hu@gmail.com>"]
 license = "Apache-2.0"
-repository = "https://github.com/qubit-ltd/rs-local-fs"
+repository = "https://github.com/qubit-ltd/rs-local-files"
 description = "Local filesystem utilities for Rust"
-homepage = "https://github.com/qubit-ltd/rs-local-fs"
-documentation = "https://docs.rs/qubit-local-fs"
+homepage = "https://github.com/qubit-ltd/rs-local-files"
+documentation = "https://docs.rs/qubit-local-files"
 readme = "README.md"
 keywords = ["filesystem", "file", "path", "temp", "qubit"]
 categories = ["filesystem", "rust-patterns"]
@@ -27,7 +27,7 @@ include = [
 ]
 
 [lib]
-name = "qubit_local_fs"
+name = "qubit_local_files"
 doctest = true
 
 [dependencies]

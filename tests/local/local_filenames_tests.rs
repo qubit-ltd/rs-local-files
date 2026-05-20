@@ -10,7 +10,7 @@
 use std::io::ErrorKind;
 use std::path::Path;
 
-use qubit_local_fs::LocalFilenames;
+use qubit_local_files::LocalFilenames;
 
 #[test]
 fn test_random_and_try_random_use_default_prefix() {

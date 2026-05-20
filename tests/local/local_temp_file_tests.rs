@@ -19,7 +19,7 @@ use super::local_files_tests::{
 
 #[test]
 fn test_temp_file_with_name_uses_system_temp_directory() {
-    let file = LocalTempFile::with_name(Some("qubit-local-fs-test-"), Some(".tmp"))
+    let file = LocalTempFile::with_name(Some("qubit-local-files-test-"), Some(".tmp"))
         .expect("temp file should be created");
     let name = file
         .path()
@@ -28,13 +28,13 @@ fn test_temp_file_with_name_uses_system_temp_directory() {
         .to_string_lossy();
 
     assert!(file.path().starts_with(std::env::temp_dir()));
-    assert!(name.starts_with("qubit-local-fs-test-"));
+    assert!(name.starts_with("qubit-local-files-test-"));
     assert!(name.ends_with(".tmp"));
 }
 
 #[test]
 fn test_debug_formatting_contains_type_name() {
-    let file = LocalTempFile::with_name(Some("qubit-local-fs-debug-"), Some(".tmp"))
+    let file = LocalTempFile::with_name(Some("qubit-local-files-debug-"), Some(".tmp"))
         .expect("temp file should be created");
 
     assert!(format!("{file:?}").contains("LocalTempFile"));

@@ -1,13 +1,13 @@
-# Qubit Local FS User Guide
+# Qubit Local Files User Guide
 
-Qubit Local FS provides local filesystem utilities split out of `qubit-io`. It
+Qubit Local Files provides local filesystem utilities split out of `qubit-io`. It
 contains helpers for local paths, file names, temporary filesystem entries,
 recursive directory operations, and durable atomic writes.
 
 ## Imports
 
 ```rust
-use qubit_local_fs::{
+use qubit_local_files::{
     LocalCopyDirOptions,
     LocalFilenames,
     LocalFiles,
@@ -24,9 +24,9 @@ the guard is dropped. Call `keep` to keep the generated location or `persist` to
 move the directory to a final path.
 
 ```rust
-use qubit_local_fs::LocalTempDir;
+use qubit_local_files::LocalTempDir;
 
-let dir = LocalTempDir::with_prefix(Some("qubit-local-fs-work-"))?;
+let dir = LocalTempDir::with_prefix(Some("qubit-local-files-work-"))?;
 std::fs::write(dir.path().join("scratch.txt"), b"scratch")?;
 
 # Ok::<(), std::io::Error>(())
@@ -35,7 +35,7 @@ std::fs::write(dir.path().join("scratch.txt"), b"scratch")?;
 Cleanup in `Drop` is best-effort. If deletion fails, `LocalTempDir` logs a warning
 through the `log` facade and does not panic.
 
-## Temporary LocalFiles
+## Temporary Files
 
 Use `LocalTempFile` when you need both a unique path and an already-open file handle.
 The file is removed on drop unless it is kept or persisted.
@@ -43,9 +43,9 @@ The file is removed on drop unless it is kept or persisted.
 ```rust
 use std::io::Write;
 
-use qubit_local_fs::LocalTempFile;
+use qubit_local_files::LocalTempFile;
 
-let mut file = LocalTempFile::with_name(Some("qubit-local-fs-"), Some(".txt"))?;
+let mut file = LocalTempFile::with_name(Some("qubit-local-files-"), Some(".txt"))?;
 writeln!(file.file_mut()?, "temporary payload")?;
 
 # Ok::<(), std::io::Error>(())
@@ -62,9 +62,9 @@ flushes and syncs that temporary file, replaces the destination, and syncs the
 parent directory when supported.
 
 ```rust
-use qubit_local_fs::{LocalFiles, LocalTempDir};
+use qubit_local_files::{LocalFiles, LocalTempDir};
 
-let dir = LocalTempDir::with_prefix(Some("qubit-local-fs-guide-"))?;
+let dir = LocalTempDir::with_prefix(Some("qubit-local-files-guide-"))?;
 let path = dir.path().join("state").join("manifest.json");
 
 LocalFiles::atomic_write(&path, br#"{"version":1,"complete":true}"#)?;
@@ -92,9 +92,9 @@ the temporary file handle.
 - `copy_dir_all_with` recursively copies a directory tree with explicit options.
 
 ```rust
-use qubit_local_fs::{LocalCopyDirOptions, LocalFiles, LocalTempDir};
+use qubit_local_files::{LocalCopyDirOptions, LocalFiles, LocalTempDir};
 
-let dir = LocalTempDir::with_prefix(Some("qubit-local-fs-copy-"))?;
+let dir = LocalTempDir::with_prefix(Some("qubit-local-files-copy-"))?;
 let src = dir.path().join("src");
 let dst = dir.path().join("dst");
 
@@ -116,7 +116,7 @@ components are reported as `None`.
 ```rust
 use std::path::Path;
 
-use qubit_local_fs::LocalFilenames;
+use qubit_local_files::LocalFilenames;
 
 let path = Path::new("/tmp/archive.tar.gz");
 
