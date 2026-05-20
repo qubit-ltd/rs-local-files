@@ -11,15 +11,21 @@
 
 ## 概述
 
-Qubit Local Files 承载从 `qubit-io` 拆出的本地文件系统工具：
+Qubit Local Files 承载从 `qubit-io` 拆出的本地文件系统工具。它专注于具体本地路径和本地文件系统条目：临时文件和目录、文件名 helper、递归目录操作，以及持久化同目录 atomic write。
 
-- `LocalFiles`：父目录创建、buffered file helper、目录清理、目录大小、递归目录复制和
-  持久化 atomic write；
-- `LocalFilenames`：随机文件名和 lexical 文件名操作；
-- `LocalTempFile` 和 `LocalTempDir`：RAII 临时文件和临时目录；
-- `LocalCopyDirOptions`、`LocalCopyDirStats` 和 `LocalPersistOptions`：显式文件系统行为。
+适合使用本 crate 的场景包括：
 
-`qubit-io` 继续只关注 stream 层 `std::io` trait、extension method、wrapper 和 codec。
+- 需要 drop 时自动清理的 RAII 临时文件或临时目录；
+- 打开或写入本地文件前需要自动创建父目录；
+- 需要递归清理目录、计算目录大小或复制目录树；
+- 需要默认拒绝意外覆盖的保守复制和持久化行为；
+- 需要随机、portable 或 lexical 文件名 helper；
+- 需要持久化替换写入，使读取方只能观察到旧完整文件或新完整文件。
+
+详细用法、示例和 API 选择建议请参见[中文用户手册](doc/user_guide.zh_CN.md)。API 参考文档可在 [docs.rs](https://docs.rs/qubit-local-files) 查看。
+
+如果需要 stream 层 `std::io` trait、extension method、wrapper 和 codec，请参考
+[qubit-io](https://github.com/qubit-ltd/rs-io)。
 
 ## 安装
 
@@ -28,73 +34,180 @@ Qubit Local Files 承载从 `qubit-io` 拆出的本地文件系统工具：
 qubit-local-files = "0.1"
 ```
 
-## 临时文件和临时目录
-
-`LocalTempFile` 和 `LocalTempDir` 会创建真实的临时文件系统条目，并在 drop 时自动删除，除非调用方
-调用 `keep` 或 `persist`。Drop 阶段的清理是 best-effort；失败会通过 `log` 门面以
-`warn!` 记录告警，不会 panic。
-
-`LocalTempFile::persist` 默认在移动操作中拒绝已存在的目标；确实要替换已有目标时，使用
-`persist_with` 和 `LocalPersistOptions { overwrite: true }`。
+## 快速示例
 
 ```rust
 use std::io::Write;
 
-use qubit_local_files::{LocalPersistOptions, LocalTempDir, LocalTempFile};
+use qubit_local_files::{
+    LocalCopyDirOptions,
+    LocalFiles,
+    LocalPersistOptions,
+    LocalTempDir,
+    LocalTempFile,
+};
 
-let dir = LocalTempDir::with_prefix(Some("qubit-local-files-work-"))?;
-std::fs::write(dir.path().join("scratch.txt"), b"scratch")?;
+let work = LocalTempDir::with_prefix(Some("qubit-local-files-readme-"))?;
+let src = work.path().join("src");
+let dst = work.path().join("dst");
 
-let mut file = LocalTempFile::with_name(Some("qubit-local-files-"), Some(".txt"))?;
-writeln!(file.file_mut()?, "temporary payload")?;
+LocalFiles::ensure_dir(&src)?;
+std::fs::write(src.join("manifest.json"), br#"{"version":1}"#)?;
+
+let stats = LocalFiles::copy_dir_all_with(&src, &dst, LocalCopyDirOptions::default())?;
+assert_eq!(1, stats.files);
+
+LocalFiles::atomic_write(dst.join("manifest.json"), br#"{"version":2}"#)?;
+
+let final_path = work.path().join("result.txt");
+std::fs::write(&final_path, "old payload")?;
+
+let mut temp = LocalTempFile::with_name(Some("qubit-local-files-"), Some(".txt"))?;
+writeln!(temp.file_mut()?, "new payload")?;
+temp.persist_with(&final_path, LocalPersistOptions { overwrite: true })?;
+
+assert_eq!("new payload\n", std::fs::read_to_string(&final_path)?);
 
 # Ok::<(), std::io::Error>(())
 ```
 
-## Atomic Write
+## 主要能力
 
-当文件不能被外部观察到“只写了一半”的状态时，使用 `LocalFiles::atomic_write`。它会使用同目录
-临时文件写入，flush 并 sync 临时文件，替换目标文件，并在支持的平台上 sync 父目录。
+### LocalFiles 命名空间
 
-```rust
-use qubit_local_files::{LocalFiles, LocalTempDir};
+`LocalFiles` 集中提供容易在业务代码中反复出现的小型本地文件系统操作：
 
-let dir = LocalTempDir::with_prefix(Some("qubit-local-files-atomic-"))?;
-let path = dir.path().join("state").join("manifest.json");
-
-LocalFiles::atomic_write(&path, br#"{"version":1,"complete":true}"#)?;
-
-assert_eq!(
-    br#"{"version":1,"complete":true}"#,
-    std::fs::read(&path)?.as_slice(),
-);
-
-# Ok::<(), std::io::Error>(())
-```
-
-## 主要 API
-
-| API | 用途 |
+| 方法 | 用途 |
 | --- | --- |
-| `LocalFiles::open_buffered_reader` | 以 `BufReader<File>` 形式打开文件。 |
-| `LocalFiles::ensure_dir` | 创建目录及缺失祖先目录。 |
-| `LocalFiles::ensure_parent` | 为文件路径创建缺失父目录。 |
-| `LocalFiles::create_file_with_parent` | 创建缺失父目录后创建文件。 |
-| `LocalFiles::create_buffered_writer_with_parent` | 创建缺失父目录后创建 `BufWriter<File>`。 |
-| `LocalFiles::dir_size` | 统计目录下普通文件的总字节数，不跟随 symbolic link。 |
-| `LocalFiles::clean_dir` | 删除目录中的所有子项，但保留目录本身。 |
-| `LocalFiles::remove_any` | 删除文件、目录树或 symbolic link。 |
-| `LocalFiles::copy_dir_all_with` | 使用显式复制选项递归复制本地目录树，并返回复制统计。 |
-| `LocalFiles::atomic_write` | 执行持久化同目录 atomic file replacement。 |
-| `LocalFiles::atomic_write_with` | 与 `atomic_write` 相同，但由调用方提供写入逻辑。 |
-| `LocalTempFile` | 临时文件 guard，drop 时删除文件，除非调用了 `keep` 或 `persist`。 |
-| `LocalTempDir` | 临时目录 guard，drop 时递归删除目录树，除非调用了 `keep` 或 `persist`。 |
-| `LocalFilenames` | 随机文件名和 lexical UTF-8 文件名 helper。 |
-| `LocalCopyDirOptions` | 控制递归目录复制行为的选项。 |
-| `LocalCopyDirStats` | 递归目录复制操作返回的统计信息。 |
-| `LocalPersistOptions` | 控制临时文件持久化是否可以覆盖已有目标的选项。 |
+| `open_buffered_reader` | 以 `BufReader<File>` 形式打开文件。 |
+| `ensure_dir` | 创建目录及缺失祖先目录。 |
+| `ensure_parent` | 为文件路径创建缺失父目录。 |
+| `create_file_with_parent` | 创建缺失父目录后创建文件。 |
+| `create_buffered_writer_with_parent` | 创建缺失父目录后创建 `BufWriter<File>`。 |
+| `dir_size` | 统计目录下普通文件的总字节数，不跟随 symbolic link。 |
+| `clean_dir` | 删除目录中的所有子项，但保留目录本身。 |
+| `remove_any` | 删除文件、目录树或 symbolic link。 |
+| `copy_dir_all_with` | 使用显式选项递归复制本地目录树，并返回统计信息。 |
+| `atomic_write` | 通过持久化同目录临时写入替换文件。 |
+| `atomic_write_with` | 与 `atomic_write` 相同，但由调用方提供写入逻辑。 |
+
+### 临时文件和临时目录
+
+`LocalTempFile` 和 `LocalTempDir` 创建真实的本地文件系统条目，并在 drop 时自动删除，除非通过 `keep` 或 `persist` 释放所有权。Drop 阶段的清理是 best-effort；失败会通过 `log` 门面以 `warn!` 记录告警，不会 panic。
+
+`LocalTempFile::persist` 默认在移动操作中拒绝已存在的目标。只有确实要替换已有目标时，才使用 `LocalTempFile::persist_with` 和 `LocalPersistOptions { overwrite: true }`。`LocalTempDir::persist` 同样拒绝已存在的目标，并且不提供 overwrite 选项。
+
+### Atomic Write
+
+`LocalFiles::atomic_write` 会在同一父目录下写入临时文件，flush 并 sync 这个临时文件，替换目标，并在支持的平台上 sync 父目录。它适合配置文件、cache manifest、checkpoint、生成索引等 whole-file replacement 场景。
+
+该操作不是多文件事务，也不协调并发写入。如果多个进程或线程可能同时替换同一路径，需要使用外部锁。
+
+### 递归目录复制
+
+`LocalFiles::copy_dir_all_with` 复制目录树并返回 `LocalCopyDirStats`：
+
+| 字段 | 含义 |
+| --- | --- |
+| `files` | 已复制的普通文件数量。 |
+| `directories` | 已创建的目标目录数量。 |
+| `bytes` | 从普通文件复制的字节数。 |
+
+`LocalCopyDirOptions::default()` 是有意保守的默认值：不覆盖已存在的目标条目，不跟随 symbolic link，也不保留源权限。需要这些行为时，应显式设置 `overwrite`、`follow_symlinks` 或 `preserve_permissions`。
+
+### 文件名 Helper
+
+`LocalFilenames` 提供随机和 lexical 文件名工具：
+
+| 方法组 | 用途 |
+| --- | --- |
+| `random`、`random_with` | 构造随机文件名 component，生成失败时 panic。 |
+| `try_random`、`try_random_with` | 通过 `std::io::Result` 构造随机文件名 component。 |
+| `validate_portable_file_name` | 校验保守 portable 的单 component 文件名。 |
+| `file_name`、`file_stem`、`file_prefix` | 按 `Path` 语义提取 UTF-8 path component。 |
+| `extension`、`dot_extension`、`has_extension` | 检查最终扩展名。 |
+| `has_extension_ignore_ascii_case` | 使用 ASCII-only 大小写折叠检查最终扩展名。 |
+| `file_name_from_path` | 从 path-like 字符串中提取最后一段。 |
+| `file_name_from_url` | 提取 URL 最后一个 path segment，并解码安全的 percent-encoded UTF-8。 |
+
+这些 lexical helper 不访问文件系统。返回文件名数据的公开方法返回 UTF-8 字符串，而不是 `OsStr`；无效 UTF-8 path component 返回 `None`。
+
+## Crate 边界
+
+`qubit-local-files` 有意只覆盖本地文件系统相关能力。它不提供：
+
+- stream extension trait、binary codec 或 stream wrapper；
+- 异步文件系统 API 或 runtime 集成；
+- 远程文件系统、FTP、S3、对象存储或 VFS 抽象；
+- file watching、globbing 或通用目录遍历框架；
+- 锁或跨进程写入协调。
+
+stream 和字节 I/O 相关能力请使用
+[qubit-io](https://github.com/qubit-ltd/rs-io)。
 
 ## 运行时依赖
 
-本 crate 运行时依赖 Rust 标准库、`getrandom`、`libc` 和 `log`。`getrandom` 用于生成随机临时名，
-`libc` 用于 Linux no-replace rename 支持，`log` 用于 drop 阶段的清理失败告警。
+本 crate 运行时依赖 Rust 标准库、`getrandom`、`libc` 和 `log`。`getrandom` 用于生成随机临时名，`libc` 用于 Linux no-replace rename 支持，`log` 用于 drop 阶段的清理失败告警。
+
+## 测试与代码覆盖率
+
+本项目为临时文件和目录清理、覆盖行为、atomic write、递归复制行为、文件名 helper 和公开文件系统工具保持测试覆盖。
+
+### 运行测试
+
+```bash
+# 运行所有测试
+cargo test
+
+# 运行覆盖率报告
+./coverage.sh
+
+# 生成文本格式报告
+./coverage.sh text
+
+# 运行 CI 检查（格式化、clippy、测试、覆盖率、audit）
+./ci-check.sh
+```
+
+## 许可证
+
+Copyright (c) 2026. Haixing Hu.
+
+根据 Apache 许可证 2.0 版（"许可证"）授权；
+除非遵守许可证，否则您不得使用此文件。
+您可以在以下位置获取许可证副本：
+
+    http://www.apache.org/licenses/LICENSE-2.0
+
+除非适用法律要求或书面同意，否则根据许可证分发的软件
+按"原样"分发，不附带任何明示或暗示的担保或条件。
+有关许可证下的特定语言管理权限和限制，请参阅许可证。
+
+完整的许可证文本请参阅 [LICENSE](LICENSE)。
+
+## 贡献
+
+欢迎贡献。请随时提交 Pull Request。
+
+### 开发指南
+
+- 遵循 Rust API 指南。
+- 将本地文件系统相关能力保留在 `qubit-local-files` 中。
+- stream 和字节 I/O 工具请使用 [qubit-io](https://github.com/qubit-ltd/rs-io)。
+- 可能覆盖数据或离开请求源目录的操作，应保持保守默认值。
+- 为平台相关文件系统行为保持全面测试覆盖。
+- 公共 API 在有助于说明行为时应提供文档和示例。
+- 提交 PR 前确保 `./ci-check.sh` 通过。
+
+## 作者
+
+**Haixing Hu**
+
+## 相关项目
+
+- [qubit-io](https://github.com/qubit-ltd/rs-io)：面向 Rust 的 stream 和字节 I/O 工具库。
+- Qubit 旗下的更多 Rust 库发布在 GitHub 组织 [qubit-ltd](https://github.com/qubit-ltd)。
+
+---
+
+仓库地址：[https://github.com/qubit-ltd/rs-local-files](https://github.com/qubit-ltd/rs-local-files)
