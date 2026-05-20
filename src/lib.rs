@@ -18,8 +18,14 @@
 mod local;
 
 pub use local::{
+    FileBuffering,
+    FileReadOptions,
+    FileWriteMode,
+    FileWriteOptions,
     LocalCopyDirOptions,
     LocalCopyDirStats,
+    LocalFileReader,
+    LocalFileWriter,
     LocalFilenames,
     LocalFiles,
     LocalPersistOptions,

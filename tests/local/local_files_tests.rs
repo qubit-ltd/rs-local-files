@@ -28,7 +28,13 @@ use std::sync::{
 };
 
 pub(super) use qubit_local_files::{
+    FileBuffering,
+    FileReadOptions,
+    FileWriteMode,
+    FileWriteOptions,
     LocalCopyDirOptions,
+    LocalFileReader,
+    LocalFileWriter,
     LocalFiles,
     LocalPersistOptions,
     LocalTempDir,
@@ -110,6 +116,51 @@ impl Drop for CurrentDirGuard {
     fn drop(&mut self) {
         drop(std::env::set_current_dir(&self.original));
     }
+}
+
+#[test]
+fn test_file_option_constructors_are_explicit() {
+    assert_eq!(FileBuffering::Unbuffered, FileBuffering::default());
+    assert_eq!(
+        FileBuffering::Buffered { capacity: None },
+        FileBuffering::buffered()
+    );
+    assert_eq!(
+        FileBuffering::Buffered { capacity: Some(32) },
+        FileBuffering::buffered_with_capacity(32)
+    );
+
+    assert_eq!(
+        FileReadOptions {
+            buffering: FileBuffering::Unbuffered,
+        },
+        FileReadOptions::unbuffered()
+    );
+    assert_eq!(
+        FileReadOptions {
+            buffering: FileBuffering::Buffered { capacity: Some(32) },
+        },
+        FileReadOptions::buffered_with_capacity(32)
+    );
+
+    assert_eq!(
+        FileWriteOptions {
+            create_parent: true,
+            mode: FileWriteMode::AppendOrCreate,
+            buffering: FileBuffering::Buffered { capacity: Some(64) },
+        },
+        FileWriteOptions::new(FileWriteMode::AppendOrCreate)
+            .with_parent()
+            .buffered_with_capacity(64)
+    );
+    assert_eq!(
+        FileWriteOptions {
+            create_parent: false,
+            mode: FileWriteMode::CreateOrTruncate,
+            buffering: FileBuffering::Buffered { capacity: None },
+        },
+        FileWriteOptions::new(FileWriteMode::CreateOrTruncate).buffered()
+    );
 }
 
 #[test]
@@ -213,23 +264,39 @@ fn test_atomic_write_with_preserves_existing_file_and_removes_temp_on_error() {
 }
 
 #[test]
-fn test_create_file_with_parent_and_buffered_helpers() {
+fn test_open_reader_and_writer_replace_old_buffered_helpers() {
     let dir = temp_dir("buffered");
     let path = dir.join("a").join("b").join("data.txt");
 
     {
-        let mut file = LocalFiles::create_file_with_parent(&path).expect("file should be created");
-        file.write_all(b"abc").unwrap();
+        let mut writer = LocalFiles::open_writer(
+            &path,
+            FileWriteOptions {
+                create_parent: true,
+                mode: FileWriteMode::CreateOrTruncate,
+                buffering: FileBuffering::Unbuffered,
+            },
+        )
+        .expect("writer should be created");
+        writer.write_all(b"abc").unwrap();
+        writer.close().unwrap();
     }
 
     {
-        let mut writer = LocalFiles::create_buffered_writer_with_parent(&path)
-            .expect("buffered writer should be created");
+        let mut writer = LocalFiles::open_writer(
+            &path,
+            FileWriteOptions {
+                buffering: FileBuffering::Buffered { capacity: None },
+                ..FileWriteOptions::default()
+            },
+        )
+        .expect("buffered writer should be created");
         writer.write_all(b"xyz").unwrap();
-        writer.flush().unwrap();
+        writer.close().unwrap();
     }
 
-    let mut reader = LocalFiles::open_buffered_reader(&path).expect("buffered reader should open");
+    let mut reader =
+        LocalFiles::open_reader(&path, FileReadOptions::buffered()).expect("reader should open");
     let mut content = Vec::new();
     reader.read_to_end(&mut content).unwrap();
 
@@ -238,24 +305,226 @@ fn test_create_file_with_parent_and_buffered_helpers() {
 }
 
 #[test]
-fn test_open_buffered_reader_returns_open_error() {
+fn test_open_reader_returns_open_error() {
     let dir = temp_dir("open-error");
 
-    let error = LocalFiles::open_buffered_reader(dir.join("missing.txt"))
+    let error = LocalFiles::open_reader(dir.join("missing.txt"), FileReadOptions::default())
         .expect_err("missing file should return open error");
 
     assert_eq!(ErrorKind::NotFound, error.kind());
     fs::remove_dir_all(dir).unwrap();
 }
 
+#[cfg(unix)]
 #[test]
-fn test_create_file_with_parent_returns_parent_error() {
+fn test_open_reader_returns_open_error_after_metadata_success() {
+    let dir = temp_dir("open-reader-permission-error");
+    let path = dir.join("data.txt");
+    fs::write(&path, b"payload").unwrap();
+    fs::set_permissions(&path, fs::Permissions::from_mode(0o000)).unwrap();
+
+    let error = LocalFiles::open_reader(&path, FileReadOptions::default())
+        .expect_err("unreadable file should return open error");
+
+    fs::set_permissions(&path, fs::Permissions::from_mode(0o600)).unwrap();
+    assert_eq!(ErrorKind::PermissionDenied, error.kind());
+    fs::remove_dir_all(dir).unwrap();
+}
+
+#[test]
+fn test_open_reader_respects_buffering_options_and_rejects_directories() {
+    let dir = temp_dir("open-reader-options");
+    let path = dir.join("data.txt");
+    fs::write(&path, b"payload").unwrap();
+
+    let mut reader = LocalFiles::open_reader(
+        &path,
+        FileReadOptions {
+            buffering: FileBuffering::Buffered { capacity: Some(16) },
+        },
+    )
+    .expect("buffered reader should open");
+    let mut content = Vec::new();
+    reader.read_to_end(&mut content).unwrap();
+
+    let error = LocalFiles::open_reader(&dir, FileReadOptions::default())
+        .expect_err("directories should not be accepted as files");
+
+    assert!(matches!(reader, LocalFileReader::Buffered(_)));
+    assert_eq!(b"payload", content.as_slice());
+    assert_eq!(ErrorKind::InvalidInput, error.kind());
+    fs::remove_dir_all(dir).unwrap();
+}
+
+#[test]
+fn test_open_reader_rejects_zero_buffer_capacity() {
+    let dir = temp_dir("open-reader-zero-capacity");
+    let path = dir.join("data.txt");
+    fs::write(&path, b"payload").unwrap();
+
+    let error = LocalFiles::open_reader(&path, FileReadOptions::buffered_with_capacity(0))
+        .expect_err("zero-capacity reader buffer should be rejected");
+
+    assert_eq!(ErrorKind::InvalidInput, error.kind());
+    fs::remove_dir_all(dir).unwrap();
+}
+
+#[test]
+fn test_open_writer_respects_modes_parent_creation_and_buffering_options() {
+    let dir = temp_dir("open-writer-options");
+    let path = dir.join("nested").join("data.txt");
+
+    {
+        let mut writer = LocalFiles::open_writer(
+            &path,
+            FileWriteOptions {
+                create_parent: true,
+                mode: FileWriteMode::CreateNew,
+                buffering: FileBuffering::Buffered { capacity: None },
+            },
+        )
+        .expect("create-new writer should create missing parents");
+        assert!(matches!(writer, LocalFileWriter::Buffered(_)));
+        writer.write_all(b"one").unwrap();
+        writer.close().unwrap();
+    }
+
+    let error = LocalFiles::open_writer(
+        &path,
+        FileWriteOptions {
+            mode: FileWriteMode::CreateNew,
+            ..FileWriteOptions::default()
+        },
+    )
+    .expect_err("create-new mode should reject existing files");
+    assert_eq!(ErrorKind::AlreadyExists, error.kind());
+
+    {
+        let mut writer = LocalFiles::open_writer(
+            &path,
+            FileWriteOptions {
+                mode: FileWriteMode::AppendExisting,
+                ..FileWriteOptions::default()
+            },
+        )
+        .expect("append-existing writer should open existing files");
+        writer.write_all(b"-two").unwrap();
+        writer.close().unwrap();
+    }
+    assert_eq!(b"one-two", fs::read(&path).unwrap().as_slice());
+
+    {
+        let mut writer = LocalFiles::open_writer(&path, FileWriteOptions::default())
+            .expect("default writer should create or truncate");
+        writer.write_all(b"three").unwrap();
+        writer.close().unwrap();
+    }
+    assert_eq!(b"three", fs::read(&path).unwrap().as_slice());
+
+    fs::remove_dir_all(dir).unwrap();
+}
+
+#[test]
+fn test_open_reader_and_writer_cover_unbuffered_and_append_or_create_modes() {
+    let dir = temp_dir("open-writer-extra-modes");
+    let path = dir.join("data.txt");
+    fs::write(&path, b"abcdef").unwrap();
+
+    {
+        let mut writer = LocalFiles::open_writer(
+            &path,
+            FileWriteOptions::new(FileWriteMode::OpenExistingAtStart),
+        )
+        .expect("open-existing-at-start writer should open");
+        assert!(!writer.is_buffered());
+        writer.write_all(b"XY").unwrap();
+        writer.close().unwrap();
+    }
+    assert_eq!(b"XYcdef", fs::read(&path).unwrap().as_slice());
+
+    {
+        let mut writer = LocalFiles::open_writer(
+            &path,
+            FileWriteOptions::new(FileWriteMode::AppendOrCreate).buffered_with_capacity(16),
+        )
+        .expect("append-or-create writer should open");
+        assert!(writer.is_buffered());
+        writer.write_all(b"-tail").unwrap();
+        writer.close().unwrap();
+    }
+
+    let mut reader = LocalFiles::open_reader(&path, FileReadOptions::unbuffered())
+        .expect("unbuffered reader should open");
+    assert!(!reader.is_buffered());
+    let mut content = Vec::new();
+    reader.read_to_end(&mut content).unwrap();
+
+    assert_eq!(b"XYcdef-tail", content.as_slice());
+    fs::remove_dir_all(dir).unwrap();
+}
+
+#[test]
+fn test_open_writer_rejects_zero_buffer_capacity() {
+    let dir = temp_dir("open-writer-zero-capacity");
+    let path = dir.join("data.txt");
+
+    let error = LocalFiles::open_writer(
+        &path,
+        FileWriteOptions::new(FileWriteMode::CreateOrTruncate).buffered_with_capacity(0),
+    )
+    .expect_err("zero-capacity writer buffer should be rejected");
+
+    assert_eq!(ErrorKind::InvalidInput, error.kind());
+    fs::remove_dir_all(dir).unwrap();
+}
+
+#[test]
+fn test_open_writer_returns_open_error_for_missing_parent_without_parent_creation() {
+    let dir = temp_dir("open-writer-missing-parent");
+
+    let error = LocalFiles::open_writer(
+        dir.join("missing").join("data.txt"),
+        FileWriteOptions::default(),
+    )
+    .expect_err("missing parent should return writer open error");
+
+    assert_eq!(ErrorKind::NotFound, error.kind());
+    fs::remove_dir_all(dir).unwrap();
+}
+
+#[test]
+fn test_exists_metadata_and_list_report_local_paths() {
+    let dir = temp_dir("metadata-list");
+    let path = dir.join("data.txt");
+    fs::write(&path, b"abc").unwrap();
+
+    let mut names = LocalFiles::list(&dir)
+        .expect("directory should be listed")
+        .map(|entry| entry.expect("entry should be readable").file_name())
+        .collect::<Vec<_>>();
+    names.sort();
+
+    assert!(LocalFiles::exists(&path).expect("existing file should be checked"));
+    assert_eq!(3, LocalFiles::metadata(&path).unwrap().len());
+    assert_eq!(vec![std::ffi::OsString::from("data.txt")], names);
+    assert!(!LocalFiles::exists(dir.join("missing.txt")).unwrap());
+    fs::remove_dir_all(dir).unwrap();
+}
+
+#[test]
+fn test_open_writer_returns_parent_error() {
     let dir = temp_dir("parent-error");
     let file_parent = dir.join("file-parent");
     fs::write(&file_parent, b"not a directory").unwrap();
 
-    let error = LocalFiles::create_file_with_parent(file_parent.join("child.txt"))
-        .expect_err("file parent should return create-dir error");
+    let error = LocalFiles::open_writer(
+        file_parent.join("child.txt"),
+        FileWriteOptions {
+            create_parent: true,
+            ..FileWriteOptions::default()
+        },
+    )
+    .expect_err("file parent should return create-dir error");
 
     assert!(matches!(
         error.kind(),

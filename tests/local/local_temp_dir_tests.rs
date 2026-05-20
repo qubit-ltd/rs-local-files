@@ -12,7 +12,13 @@
 use super::local_files_tests::PermissionsExt;
 use super::local_files_tests::{
     ErrorKind,
+    FileBuffering,
+    FileReadOptions,
+    FileWriteMode,
+    FileWriteOptions,
     LocalTempDir,
+    Read,
+    Write,
     ensure_test_logger,
     fs,
     temp_dir,
@@ -39,6 +45,30 @@ fn test_temp_dir_with_prefix_creates_existing_directory() {
     assert!(dir.path().starts_with(std::env::temp_dir()));
     assert!(dir.path().is_dir());
     assert!(name.starts_with("qubit-local-files-dir-"));
+}
+
+#[test]
+fn test_temp_dir_exists_metadata_and_cleanup() {
+    let dir = temp_dir("temp-dir-cleanup");
+    let temp_dir =
+        LocalTempDir::in_dir(&dir, Some("cleanup-"), 4).expect("temp dir should be created");
+    let path = temp_dir.path().to_owned();
+
+    assert!(
+        temp_dir
+            .exists()
+            .expect("temp dir existence should be checked")
+    );
+    assert!(
+        temp_dir
+            .metadata()
+            .expect("metadata should be read")
+            .is_dir()
+    );
+    temp_dir.cleanup().expect("temp dir should be cleaned up");
+
+    assert!(!path.exists());
+    fs::remove_dir_all(dir).unwrap();
 }
 
 #[test]
@@ -98,6 +128,213 @@ fn test_temp_dir_in_dir_returns_create_error() {
 
     fs::set_permissions(&dir, fs::Permissions::from_mode(0o700)).unwrap();
     assert_eq!(ErrorKind::PermissionDenied, error.kind());
+    fs::remove_dir_all(dir).unwrap();
+}
+
+#[test]
+fn test_temp_dir_child_path_rejects_escape_and_ensure_child_dir_creates_parents() {
+    let dir = temp_dir("temp-dir-child-path");
+    let temp_dir =
+        LocalTempDir::in_dir(&dir, Some("child-"), 4).expect("temp dir should be created");
+
+    let child = temp_dir
+        .child_path("a/b/c.txt")
+        .expect("nested child path should be accepted");
+    let ensured = temp_dir
+        .ensure_child_dir("a/b/nested")
+        .expect("nested child directory should be created with parents");
+    let error = temp_dir
+        .child_path("../outside.txt")
+        .expect_err("parent traversal should be rejected");
+
+    assert_eq!(temp_dir.path().join("a/b/c.txt"), child);
+    assert!(ensured.is_dir());
+    assert_eq!(ErrorKind::InvalidInput, error.kind());
+    fs::remove_dir_all(dir).unwrap();
+}
+
+#[test]
+fn test_temp_dir_child_path_rejects_empty_path() {
+    let dir = temp_dir("temp-dir-empty-child");
+    let temp_dir =
+        LocalTempDir::in_dir(&dir, Some("child-"), 4).expect("temp dir should be created");
+
+    let error = temp_dir
+        .child_path("")
+        .expect_err("empty child path should be rejected");
+
+    assert_eq!(ErrorKind::InvalidInput, error.kind());
+    fs::remove_dir_all(dir).unwrap();
+}
+
+#[test]
+fn test_temp_dir_ensure_child_dir_rejects_existing_file_component() {
+    let dir = temp_dir("temp-dir-child-file-component");
+    let temp_dir =
+        LocalTempDir::in_dir(&dir, Some("child-"), 4).expect("temp dir should be created");
+    fs::write(temp_dir.path().join("blocker"), b"not a directory").unwrap();
+
+    let error = temp_dir
+        .ensure_child_dir("blocker/nested")
+        .expect_err("file path component should be rejected");
+
+    assert_eq!(ErrorKind::AlreadyExists, error.kind());
+    fs::remove_dir_all(dir).unwrap();
+}
+
+#[cfg(unix)]
+#[test]
+fn test_temp_dir_ensure_child_dir_returns_metadata_error() {
+    let dir = temp_dir("temp-dir-child-metadata-error");
+    let temp_dir =
+        LocalTempDir::in_dir(&dir, Some("child-"), 4).expect("temp dir should be created");
+    let long_name = "x".repeat(10_000);
+
+    let error = temp_dir
+        .ensure_child_dir(long_name)
+        .expect_err("filesystem metadata errors should be returned");
+
+    assert_ne!(ErrorKind::NotFound, error.kind());
+    fs::remove_dir_all(dir).unwrap();
+}
+
+#[cfg(unix)]
+#[test]
+fn test_temp_dir_ensure_child_dir_rejects_symlink_component() {
+    let dir = temp_dir("temp-dir-child-symlink-component");
+    let temp_dir =
+        LocalTempDir::in_dir(&dir, Some("child-"), 4).expect("temp dir should be created");
+    let target = dir.join("target");
+    fs::create_dir(&target).unwrap();
+    std::os::unix::fs::symlink(&target, temp_dir.path().join("link")).unwrap();
+
+    let error = temp_dir
+        .ensure_child_dir("link/nested")
+        .expect_err("symlink path component should be rejected");
+
+    assert_eq!(ErrorKind::InvalidInput, error.kind());
+    fs::remove_dir_all(dir).unwrap();
+}
+
+#[test]
+fn test_temp_dir_list_and_child_reader_writer_use_shared_options() {
+    let dir = temp_dir("temp-dir-child-io");
+    let temp_dir =
+        LocalTempDir::in_dir(&dir, Some("child-"), 4).expect("temp dir should be created");
+    let child = "nested/data.txt";
+
+    {
+        let mut writer = temp_dir
+            .open_child_writer(
+                child,
+                FileWriteOptions {
+                    create_parent: true,
+                    mode: FileWriteMode::CreateNew,
+                    buffering: FileBuffering::Buffered { capacity: Some(8) },
+                },
+            )
+            .expect("child writer should create parent directories");
+        writer.write_all(b"payload").unwrap();
+        writer.close().unwrap();
+    }
+
+    let mut reader = temp_dir
+        .open_child_reader(
+            child,
+            FileReadOptions {
+                buffering: FileBuffering::Buffered { capacity: None },
+            },
+        )
+        .expect("child reader should open a child file");
+    let mut content = Vec::new();
+    reader.read_to_end(&mut content).unwrap();
+
+    let mut entries = temp_dir
+        .list()
+        .expect("temp directory should be listed")
+        .map(|entry| entry.expect("entry should be readable").file_name())
+        .collect::<Vec<_>>();
+    entries.sort();
+    let error = temp_dir
+        .open_child_reader("nested", FileReadOptions::default())
+        .expect_err("child reader should reject directories");
+
+    assert_eq!(b"payload", content.as_slice());
+    assert_eq!(vec![std::ffi::OsString::from("nested")], entries);
+    assert_eq!(ErrorKind::InvalidInput, error.kind());
+    fs::remove_dir_all(dir).unwrap();
+}
+
+#[test]
+fn test_temp_dir_open_child_writer_validates_existing_parent_and_target() {
+    let dir = temp_dir("temp-dir-child-writer-validation");
+    let temp_dir =
+        LocalTempDir::in_dir(&dir, Some("child-"), 4).expect("temp dir should be created");
+    temp_dir
+        .ensure_child_dir("nested")
+        .expect("parent should be created");
+    fs::write(temp_dir.path().join("nested/existing.txt"), b"old").unwrap();
+
+    {
+        let mut writer = temp_dir
+            .open_child_writer(
+                "nested/existing.txt",
+                FileWriteOptions::new(FileWriteMode::AppendExisting),
+            )
+            .expect("existing child file should open for append");
+        writer.write_all(b"-new").unwrap();
+        writer.close().unwrap();
+    }
+
+    let missing_parent_error = temp_dir
+        .open_child_writer("missing/file.txt", FileWriteOptions::default())
+        .expect_err("missing parent should be rejected without create_parent");
+    let directory_error = temp_dir
+        .open_child_writer("nested", FileWriteOptions::default())
+        .expect_err("directory target should be rejected");
+
+    assert_eq!(
+        b"old-new",
+        fs::read(temp_dir.path().join("nested/existing.txt"))
+            .unwrap()
+            .as_slice()
+    );
+    assert_eq!(ErrorKind::NotFound, missing_parent_error.kind());
+    assert_eq!(ErrorKind::InvalidInput, directory_error.kind());
+    fs::remove_dir_all(dir).unwrap();
+}
+
+#[cfg(unix)]
+#[test]
+fn test_temp_dir_open_child_writer_returns_metadata_error() {
+    let dir = temp_dir("temp-dir-child-writer-metadata-error");
+    let temp_dir =
+        LocalTempDir::in_dir(&dir, Some("child-"), 4).expect("temp dir should be created");
+    let long_name = "x".repeat(10_000);
+
+    let error = temp_dir
+        .open_child_writer(long_name, FileWriteOptions::default())
+        .expect_err("filesystem metadata errors should be returned");
+
+    assert_ne!(ErrorKind::NotFound, error.kind());
+    fs::remove_dir_all(dir).unwrap();
+}
+
+#[cfg(unix)]
+#[test]
+fn test_temp_dir_child_reader_rejects_symlink_escape() {
+    let dir = temp_dir("temp-dir-symlink-escape");
+    let temp_dir =
+        LocalTempDir::in_dir(&dir, Some("child-"), 4).expect("temp dir should be created");
+    let outside = dir.join("outside.txt");
+    fs::write(&outside, b"outside").unwrap();
+    std::os::unix::fs::symlink(&outside, temp_dir.path().join("link.txt")).unwrap();
+
+    let error = temp_dir
+        .open_child_reader("link.txt", FileReadOptions::default())
+        .expect_err("child symlink escaping the temp directory should be rejected");
+
+    assert_eq!(ErrorKind::InvalidInput, error.kind());
     fs::remove_dir_all(dir).unwrap();
 }
 

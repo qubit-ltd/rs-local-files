@@ -24,6 +24,8 @@ use std::path::{
 use log::warn;
 
 use crate::{
+    FileWriteOptions,
+    LocalFileWriter,
     LocalFiles,
     LocalPersistOptions,
 };
@@ -31,13 +33,14 @@ use crate::{
 use super::local_files::{
     create_temp_file_in_dir,
     move_file_without_replacing,
+    open_writer_path,
     replace_file,
 };
 
 /// Temporary file that is removed automatically unless kept or persisted.
 ///
-/// `LocalTempFile` owns both the temporary file path and the open file handle. The
-/// file is closed before the path is removed, kept, or persisted. Use
+/// `LocalTempFile` owns both the temporary file path and the writer state. The
+/// writer is closed before the path is removed, kept, or persisted. Use
 /// [`LocalTempFile::keep`] to keep the file at its generated path, or
 /// [`LocalTempFile::persist`] to move it to a final path.
 ///
@@ -47,7 +50,23 @@ use super::local_files::{
 #[derive(Debug)]
 pub struct LocalTempFile {
     path: Option<PathBuf>,
-    file: Option<File>,
+    writer: LocalTempFileWriterState,
+}
+
+/// Writer state owned by a temporary file.
+#[derive(Debug)]
+enum LocalTempFileWriterState {
+    /// A newly created file handle that has not yet been configured.
+    Unconfigured(File),
+    /// A configured writer returned through [`LocalTempFile::writer`].
+    Configured {
+        /// Configured writer.
+        writer: LocalFileWriter,
+        /// Options used to configure the writer.
+        options: FileWriteOptions,
+    },
+    /// The temporary file writer has been closed.
+    Closed,
 }
 
 impl LocalTempFile {
@@ -105,7 +124,7 @@ impl LocalTempFile {
         let (path, file) = create_temp_file_in_dir(dir.as_ref(), prefix, suffix, max_tries)?;
         Ok(Self {
             path: Some(path),
-            file: Some(file),
+            writer: LocalTempFileWriterState::Unconfigured(file),
         })
     }
 
@@ -120,59 +139,150 @@ impl LocalTempFile {
             .expect("temporary file path has already been released")
     }
 
-    /// Returns a shared reference to the open file handle.
+    /// Tests whether the temporary file path still exists.
     ///
     /// # Returns
-    /// The open file handle.
+    /// `true` when the path exists and `false` when it is missing.
     ///
     /// # Errors
-    /// Returns [`ErrorKind::NotFound`] when the file has already been closed.
+    /// Returns an I/O error when the filesystem cannot determine whether the
+    /// path exists. Unlike [`Path::exists`], this method does not silently map
+    /// inspection errors to `false`.
     #[inline]
-    pub fn file(&self) -> Result<&File> {
-        self.file.as_ref().ok_or_else(file_closed_error)
+    pub fn exists(&self) -> Result<bool> {
+        LocalFiles::exists(self.path())
     }
 
-    /// Returns a mutable reference to the open file handle.
+    /// Reads metadata for the temporary file path.
     ///
     /// # Returns
-    /// The open file handle.
+    /// Metadata for the temporary file path.
     ///
     /// # Errors
-    /// Returns [`ErrorKind::NotFound`] when the file has already been closed.
+    /// Returns the I/O error reported by [`fs::metadata`].
     #[inline]
-    pub fn file_mut(&mut self) -> Result<&mut File> {
-        self.file.as_mut().ok_or_else(file_closed_error)
+    pub fn metadata(&self) -> Result<fs::Metadata> {
+        LocalFiles::metadata(self.path())
     }
 
-    /// Closes the temporary file handle while keeping path cleanup active.
+    /// Returns the configured writer for this temporary file.
+    ///
+    /// The first call opens a writer using `options` and stores it inside the
+    /// temporary file. Later calls must pass the same options and return the
+    /// same writer. Passing different options after the writer has been
+    /// configured is rejected so the write mode cannot silently change midway
+    /// through a temporary file.
+    ///
+    /// Because the temporary file is created before this method is called,
+    /// [`crate::FileWriteMode::CreateNew`] fails with
+    /// [`ErrorKind::AlreadyExists`].
+    ///
+    /// # Parameters
+    /// - `options`: Write options controlling mode and buffering.
+    ///
+    /// # Returns
+    /// A mutable writer owned by this temporary file.
     ///
     /// # Errors
-    /// This method currently returns no close-time I/O errors because closing a
-    /// standard-library [`File`] is performed by dropping the handle.
-    #[inline]
+    /// Returns [`ErrorKind::NotFound`] after [`LocalTempFile::close`] has
+    /// closed the writer, [`ErrorKind::InvalidInput`] when a later call passes
+    /// different options, or any I/O error reported while opening the writer.
+    pub fn writer(&mut self, options: FileWriteOptions) -> Result<&mut LocalFileWriter> {
+        match &self.writer {
+            LocalTempFileWriterState::Configured {
+                options: existing_options,
+                ..
+            } if *existing_options == options => return self.configured_writer_mut(),
+            LocalTempFileWriterState::Configured { .. } => {
+                return Err(Error::new(
+                    ErrorKind::InvalidInput,
+                    "temporary file writer is already configured with different options",
+                ));
+            }
+            LocalTempFileWriterState::Closed => return Err(writer_closed_error()),
+            LocalTempFileWriterState::Unconfigured(_) => {}
+        }
+
+        let writer = open_writer_path(self.path(), options)?;
+        let old_state = std::mem::replace(
+            &mut self.writer,
+            LocalTempFileWriterState::Configured { writer, options },
+        );
+        drop(old_state);
+        self.configured_writer_mut()
+    }
+
+    /// Returns the configured writer after state validation.
+    ///
+    /// # Returns
+    /// The configured writer.
+    ///
+    /// # Errors
+    /// This helper currently cannot return an error when called after the state
+    /// has been checked. The result type keeps the public method simple.
+    fn configured_writer_mut(&mut self) -> Result<&mut LocalFileWriter> {
+        match &mut self.writer {
+            LocalTempFileWriterState::Configured { writer, .. } => Ok(writer),
+            LocalTempFileWriterState::Unconfigured(_) | LocalTempFileWriterState::Closed => {
+                unreachable!("temporary file writer is not configured")
+            }
+        }
+    }
+
+    /// Flushes and closes the temporary file writer while keeping cleanup active.
+    ///
+    /// # Errors
+    /// Returns the I/O error reported while flushing a configured writer.
     pub fn close(&mut self) -> Result<()> {
-        let _ = self.file.take();
+        let state = std::mem::replace(&mut self.writer, LocalTempFileWriterState::Closed);
+        match state {
+            LocalTempFileWriterState::Unconfigured(file) => {
+                drop(file);
+                Ok(())
+            }
+            LocalTempFileWriterState::Configured { writer, .. } => writer.close(),
+            LocalTempFileWriterState::Closed => Ok(()),
+        }
+    }
+
+    /// Removes the temporary file immediately.
+    ///
+    /// This consumes the guard and disables the later best-effort cleanup in
+    /// `Drop` after removal succeeds. If flushing or removal fails, the guard
+    /// still owns the path until it is dropped.
+    ///
+    /// # Errors
+    /// Returns an I/O error when flushing the writer or removing the file
+    /// fails.
+    pub fn cleanup(mut self) -> Result<()> {
+        self.close()?;
+        let path = self.path().to_path_buf();
+        fs::remove_file(&path)?;
+        let _ = self.path.take();
         Ok(())
     }
 
     /// Keeps the temporary file at its generated path.
     ///
-    /// This consumes the guard, closes the file handle, and disables automatic
-    /// cleanup.
+    /// This consumes the guard, flushes and closes the writer, and disables
+    /// automatic cleanup.
     ///
     /// # Returns
     /// The generated temporary file path.
-    #[inline]
-    pub fn keep(mut self) -> PathBuf {
-        let _ = self.file.take();
-        self.path
+    ///
+    /// # Errors
+    /// Returns the I/O error reported while flushing a configured writer.
+    pub fn keep(mut self) -> Result<PathBuf> {
+        self.close()?;
+        Ok(self
+            .path
             .take()
-            .expect("temporary file path has already been released")
+            .expect("temporary file path has already been released"))
     }
 
     /// Moves the temporary file to a final path without overwriting.
     ///
-    /// The file handle is closed before moving. Parent directories for
+    /// The writer is flushed and closed before moving. Parent directories for
     /// `target` are created before moving. Existing targets are rejected by the
     /// move operation instead of by a separate metadata precheck. Use
     /// [`LocalTempFile::persist_with`] and [`LocalPersistOptions`] when
@@ -199,9 +309,10 @@ impl LocalTempFile {
 
     /// Moves the temporary file to a final path using persistence options.
     ///
-    /// The file handle is closed before moving the path. Parent directories for
-    /// `target` are created before moving. When `options.overwrite` is `false`,
-    /// existing targets are rejected by the move operation. When
+    /// The writer is flushed and closed before moving the path. Parent
+    /// directories for `target` are created before moving. When
+    /// `options.overwrite` is `false`, existing targets are rejected by the move
+    /// operation. When
     /// `options.overwrite` is `true`, an existing target file may be replaced.
     ///
     /// # Parameters
@@ -239,7 +350,7 @@ impl LocalTempFile {
 impl Drop for LocalTempFile {
     /// Closes and removes the temporary file unless ownership has been released.
     fn drop(&mut self) {
-        let _ = self.file.take();
+        drop(self.close());
         if let Some(path) = self.path.take()
             && let Err(error) = fs::remove_file(&path)
         {
@@ -252,10 +363,10 @@ impl Drop for LocalTempFile {
     }
 }
 
-/// Creates the error returned when a temporary file handle is closed.
+/// Creates the error returned when a temporary file writer is closed.
 ///
 /// # Returns
-/// An [`ErrorKind::NotFound`] error describing the closed file handle.
-fn file_closed_error() -> Error {
-    Error::new(ErrorKind::NotFound, "temporary file handle is closed")
+/// An [`ErrorKind::NotFound`] error describing the closed writer.
+fn writer_closed_error() -> Error {
+    Error::new(ErrorKind::NotFound, "temporary file writer is closed")
 }

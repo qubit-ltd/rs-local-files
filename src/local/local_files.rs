@@ -17,8 +17,6 @@ use std::fs::{
     OpenOptions,
 };
 use std::io::{
-    BufReader,
-    BufWriter,
     Error,
     ErrorKind,
     Result,
@@ -30,8 +28,13 @@ use std::path::{
 };
 
 use crate::{
+    FileReadOptions,
+    FileWriteMode,
+    FileWriteOptions,
     LocalCopyDirOptions,
     LocalCopyDirStats,
+    LocalFileReader,
+    LocalFileWriter,
     LocalFilenames,
 };
 
@@ -127,22 +130,110 @@ impl LocalFiles {
     /// Default number of attempts used when creating a random temporary entry.
     pub const DEFAULT_TEMP_FILE_RETRIES: usize = 256;
 
-    /// Opens a file as a buffered reader.
+    /// Tests whether a path exists.
     ///
     /// # Parameters
-    /// - `path`: File path to open.
+    /// - `path`: Path to inspect.
     ///
     /// # Returns
-    /// A [`BufReader`] wrapping the opened file.
+    /// `true` when `path` exists and `false` when it is missing.
     ///
     /// # Errors
-    /// Returns the error reported by [`File::open`].
+    /// Returns an I/O error when the filesystem cannot determine whether the
+    /// path exists. Unlike [`Path::exists`], this method does not silently map
+    /// inspection errors to `false`.
     #[inline]
-    pub fn open_buffered_reader<P>(path: P) -> Result<BufReader<File>>
+    pub fn exists<P>(path: P) -> Result<bool>
     where
         P: AsRef<Path>,
     {
-        File::open(path).map(BufReader::new)
+        path.as_ref().try_exists()
+    }
+
+    /// Reads metadata for a local filesystem path.
+    ///
+    /// # Parameters
+    /// - `path`: Path whose metadata should be read.
+    ///
+    /// # Returns
+    /// Metadata reported by [`fs::metadata`].
+    ///
+    /// # Errors
+    /// Returns the I/O error reported by the filesystem. Symbolic links are
+    /// followed, matching [`fs::metadata`].
+    #[inline]
+    pub fn metadata<P>(path: P) -> Result<fs::Metadata>
+    where
+        P: AsRef<Path>,
+    {
+        fs::metadata(path)
+    }
+
+    /// Lists the direct entries of a directory.
+    ///
+    /// # Parameters
+    /// - `path`: Directory path to list.
+    ///
+    /// # Returns
+    /// A directory iterator over direct children of `path`.
+    ///
+    /// # Errors
+    /// Returns the I/O error reported by [`fs::read_dir`].
+    #[inline]
+    pub fn list<P>(path: P) -> Result<fs::ReadDir>
+    where
+        P: AsRef<Path>,
+    {
+        fs::read_dir(path)
+    }
+
+    /// Opens a local file for reading.
+    ///
+    /// The target must be a file. Directories and other non-file paths are
+    /// rejected before returning the reader.
+    ///
+    /// # Parameters
+    /// - `path`: File path to open.
+    /// - `options`: Read options controlling buffering.
+    ///
+    /// # Returns
+    /// A file reader matching `options`.
+    ///
+    /// # Errors
+    /// Returns an I/O error when `path` cannot be inspected or opened, when the
+    /// target is not a file, or when the requested buffer capacity is invalid.
+    #[inline]
+    pub fn open_reader<P>(path: P, options: FileReadOptions) -> Result<LocalFileReader>
+    where
+        P: AsRef<Path>,
+    {
+        open_reader_path(path.as_ref(), options)
+    }
+
+    /// Opens a local file for writing.
+    ///
+    /// This method centralizes normal write-handle creation. Whole-file durable
+    /// replacement remains the responsibility of [`LocalFiles::atomic_write`]
+    /// and [`LocalFiles::atomic_write_with`].
+    ///
+    /// # Parameters
+    /// - `path`: File path to open.
+    /// - `options`: Write options controlling parent creation, write mode, and
+    ///   buffering.
+    ///
+    /// # Returns
+    /// A file writer matching `options`.
+    ///
+    /// # Errors
+    /// Returns an I/O error when parent directories cannot be created, the file
+    /// cannot be opened with the requested mode, or the requested buffer
+    /// capacity is invalid.
+    #[inline]
+    pub fn open_writer<P>(path: P, options: FileWriteOptions) -> Result<LocalFileWriter>
+    where
+        P: AsRef<Path>,
+    {
+        open_writer_path(path.as_ref(), options)
     }
 
     /// Ensures that a directory exists.
@@ -178,45 +269,6 @@ impl LocalFiles {
         P: AsRef<Path>,
     {
         ensure_parent_path(path.as_ref())
-    }
-
-    /// Creates a file after creating missing parent directories.
-    ///
-    /// # Parameters
-    /// - `path`: File path to create.
-    ///
-    /// # Returns
-    /// The created file.
-    ///
-    /// # Errors
-    /// Returns an I/O error when parent directories or the file cannot be
-    /// created.
-    pub fn create_file_with_parent<P>(path: P) -> Result<File>
-    where
-        P: AsRef<Path>,
-    {
-        let path = path.as_ref();
-        ensure_parent_path(path)?;
-        File::create(path)
-    }
-
-    /// Creates a buffered writer after creating missing parent directories.
-    ///
-    /// # Parameters
-    /// - `path`: File path to create.
-    ///
-    /// # Returns
-    /// A [`BufWriter`] wrapping the created file.
-    ///
-    /// # Errors
-    /// Returns an I/O error when parent directories or the file cannot be
-    /// created.
-    #[inline]
-    pub fn create_buffered_writer_with_parent<P>(path: P) -> Result<BufWriter<File>>
-    where
-        P: AsRef<Path>,
-    {
-        Self::create_file_with_parent(path).map(BufWriter::new)
     }
 
     /// Computes the total size of regular files under a directory.
@@ -444,6 +496,72 @@ fn ensure_parent_path(path: &Path) -> Result<()> {
         ensure_dir_path(parent)?;
     }
     Ok(())
+}
+
+/// Opens a file reader with the supplied options.
+///
+/// # Parameters
+/// - `path`: File path to open.
+/// - `options`: Read options controlling buffering.
+///
+/// # Returns
+/// A local file reader.
+///
+/// # Errors
+/// Returns an I/O error when `path` cannot be inspected or opened, when the
+/// target is not a file, or when buffering options are invalid.
+fn open_reader_path(path: &Path, options: FileReadOptions) -> Result<LocalFileReader> {
+    let metadata =
+        fs::metadata(path).map_err(|error| add_path_context(error, "read metadata", path))?;
+    if !metadata.is_file() {
+        return Err(Error::new(
+            ErrorKind::InvalidInput,
+            format!("path is not a file: {}", path.display()),
+        ));
+    }
+    let file = File::open(path).map_err(|error| add_path_context(error, "open file", path))?;
+    LocalFileReader::from_file(file, options.buffering)
+}
+
+/// Opens a file writer with the supplied options.
+///
+/// # Parameters
+/// - `path`: File path to open.
+/// - `options`: Write options controlling parent creation, write mode, and
+///   buffering.
+///
+/// # Returns
+/// A local file writer.
+///
+/// # Errors
+/// Returns an I/O error when parent directories cannot be created, the file
+/// cannot be opened with the requested mode, or buffering options are invalid.
+pub(crate) fn open_writer_path(path: &Path, options: FileWriteOptions) -> Result<LocalFileWriter> {
+    if options.create_parent {
+        ensure_parent_path(path)?;
+    }
+    let mut open_options = OpenOptions::new();
+    match options.mode {
+        FileWriteMode::OpenExistingAtStart => {
+            open_options.write(true);
+        }
+        FileWriteMode::CreateNew => {
+            open_options.write(true).create_new(true);
+        }
+        FileWriteMode::CreateOrTruncate => {
+            open_options.write(true).create(true).truncate(true);
+        }
+        FileWriteMode::AppendExisting => {
+            open_options.append(true);
+        }
+        FileWriteMode::AppendOrCreate => {
+            open_options.append(true).create(true);
+        }
+    }
+    let file = open_options
+        .open(path)
+        .map_err(|error| add_path_context(error, "open file writer", path))?;
+    LocalFileWriter::from_file(file, options.buffering)
 }
 
 /// Atomically writes `bytes` to `path`.
