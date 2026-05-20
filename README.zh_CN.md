@@ -17,7 +17,7 @@ Qubit Local Files 承载从 `qubit-io` 拆出的本地文件系统工具：
   持久化 atomic write；
 - `LocalFilenames`：随机文件名和 lexical 文件名操作；
 - `LocalTempFile` 和 `LocalTempDir`：RAII 临时文件和临时目录；
-- `LocalCopyDirOptions` 和 `LocalCopyDirStats`：显式递归复制行为和复制统计。
+- `LocalCopyDirOptions`、`LocalCopyDirStats` 和 `LocalPersistOptions`：显式文件系统行为。
 
 `qubit-io` 继续只关注 stream 层 `std::io` trait、extension method、wrapper 和 codec。
 
@@ -34,10 +34,13 @@ qubit-local-files = "0.1"
 调用 `keep` 或 `persist`。Drop 阶段的清理是 best-effort；失败会通过 `log` 门面以
 `warn!` 记录告警，不会 panic。
 
+`LocalTempFile::persist` 默认拒绝已存在的目标；确实要替换已有目标时，使用 `persist_with`
+和 `LocalPersistOptions { overwrite: true }`。
+
 ```rust
 use std::io::Write;
 
-use qubit_local_files::{LocalTempDir, LocalTempFile};
+use qubit_local_files::{LocalPersistOptions, LocalTempDir, LocalTempFile};
 
 let dir = LocalTempDir::with_prefix(Some("qubit-local-files-work-"))?;
 std::fs::write(dir.path().join("scratch.txt"), b"scratch")?;
@@ -89,6 +92,7 @@ assert_eq!(
 | `LocalFilenames` | 随机文件名和 lexical UTF-8 文件名 helper。 |
 | `LocalCopyDirOptions` | 控制递归目录复制行为的选项。 |
 | `LocalCopyDirStats` | 递归目录复制操作返回的统计信息。 |
+| `LocalPersistOptions` | 控制临时文件持久化是否可以覆盖已有目标的选项。 |
 
 ## 运行时依赖
 

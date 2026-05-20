@@ -10,6 +10,7 @@
 
 use super::local_files_tests::{
     ErrorKind,
+    LocalPersistOptions,
     LocalTempFile,
     Write,
     ensure_test_logger,
@@ -191,6 +192,64 @@ fn test_temp_file_persist_moves_file() {
     assert_eq!(target, persisted);
     assert!(!source.exists());
     assert_eq!(b"payload", fs::read(&target).unwrap().as_slice());
+    fs::remove_dir_all(dir).unwrap();
+}
+
+#[test]
+fn test_temp_file_persist_rejects_existing_target_by_default() {
+    let dir = temp_dir("temp-file-persist-existing-target");
+    let mut file = LocalTempFile::in_dir(&dir, Some("source-"), Some(".tmp"), 4)
+        .expect("temp file should be created");
+    file.file_mut().unwrap().write_all(b"new").unwrap();
+    let source = file.path().to_owned();
+    let target = dir.join("result.txt");
+    fs::write(&target, b"old").unwrap();
+
+    let error = file
+        .persist(&target)
+        .expect_err("existing target should be rejected by default");
+
+    assert_eq!(ErrorKind::AlreadyExists, error.kind());
+    assert!(!source.exists());
+    assert_eq!(b"old", fs::read(&target).unwrap().as_slice());
+    fs::remove_dir_all(dir).unwrap();
+}
+
+#[test]
+fn test_temp_file_persist_with_overwrite_replaces_existing_target() {
+    let dir = temp_dir("temp-file-persist-overwrite");
+    let mut file = LocalTempFile::in_dir(&dir, Some("source-"), Some(".tmp"), 4)
+        .expect("temp file should be created");
+    file.file_mut().unwrap().write_all(b"new").unwrap();
+    let source = file.path().to_owned();
+    let target = dir.join("result.txt");
+    fs::write(&target, b"old").unwrap();
+
+    let persisted = file
+        .persist_with(&target, LocalPersistOptions { overwrite: true })
+        .expect("overwrite option should replace existing target");
+
+    assert_eq!(target, persisted);
+    assert!(!source.exists());
+    assert_eq!(b"new", fs::read(&target).unwrap().as_slice());
+    fs::remove_dir_all(dir).unwrap();
+}
+
+#[cfg(unix)]
+#[test]
+fn test_temp_file_persist_returns_target_metadata_error() {
+    let dir = temp_dir("temp-file-persist-metadata-error");
+    let file = LocalTempFile::in_dir(&dir, Some("source-"), Some(".tmp"), 4)
+        .expect("temp file should be created");
+    let source = file.path().to_owned();
+    let target = dir.join("x".repeat(10_000));
+
+    let error = file
+        .persist(&target)
+        .expect_err("target metadata error should be returned");
+
+    assert_ne!(ErrorKind::NotFound, error.kind());
+    assert!(!source.exists());
     fs::remove_dir_all(dir).unwrap();
 }
 

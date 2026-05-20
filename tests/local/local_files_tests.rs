@@ -30,6 +30,7 @@ use std::sync::{
 pub(super) use qubit_local_files::{
     LocalCopyDirOptions,
     LocalFiles,
+    LocalPersistOptions,
     LocalTempDir,
     LocalTempFile,
 };
@@ -900,6 +901,37 @@ fn test_copy_dir_all_with_preserves_permissions() {
             .mode()
             & 0o777
     );
+    fs::remove_dir_all(dir).unwrap();
+}
+
+#[cfg(unix)]
+#[test]
+fn test_copy_dir_all_with_preserves_read_only_directory_permissions() {
+    let dir = temp_dir("copy-dir-read-only-permissions");
+    let src = dir.join("src");
+    let dst = dir.join("dst");
+    fs::create_dir(&src).unwrap();
+    fs::write(src.join("data.txt"), b"data").unwrap();
+    fs::set_permissions(&src, fs::Permissions::from_mode(0o555)).unwrap();
+
+    LocalFiles::copy_dir_all_with(
+        &src,
+        &dst,
+        LocalCopyDirOptions {
+            preserve_permissions: true,
+            ..LocalCopyDirOptions::default()
+        },
+    )
+    .expect("read-only directory permissions should be preserved after copying children");
+
+    assert_eq!(
+        0o555,
+        fs::metadata(&dst).unwrap().permissions().mode() & 0o777
+    );
+    assert_eq!(b"data", fs::read(dst.join("data.txt")).unwrap().as_slice());
+
+    fs::set_permissions(&src, fs::Permissions::from_mode(0o755)).unwrap();
+    fs::set_permissions(&dst, fs::Permissions::from_mode(0o755)).unwrap();
     fs::remove_dir_all(dir).unwrap();
 }
 

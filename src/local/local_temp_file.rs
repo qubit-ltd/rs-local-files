@@ -23,9 +23,15 @@ use std::path::{
 
 use log::warn;
 
-use crate::LocalFiles;
+use crate::{
+    LocalFiles,
+    LocalPersistOptions,
+};
 
-use super::local_files::create_temp_file_in_dir;
+use super::local_files::{
+    create_temp_file_in_dir,
+    replace_file,
+};
 
 /// Temporary file that is removed automatically unless kept or persisted.
 ///
@@ -163,12 +169,14 @@ impl LocalTempFile {
             .expect("temporary file path has already been released")
     }
 
-    /// Moves the temporary file to a final path.
+    /// Moves the temporary file to a final path without overwriting.
     ///
     /// The file handle is closed before renaming. Parent directories for
-    /// `target` are created before renaming. If the rename fails, the temporary
-    /// file remains owned by this guard and is cleaned up when the guard is
-    /// dropped.
+    /// `target` are created before renaming. Existing targets are rejected by
+    /// default. Use [`LocalTempFile::persist_with`] and
+    /// [`LocalPersistOptions`] when overwriting is intended. If the move fails,
+    /// the temporary file remains owned by this guard and is cleaned up when
+    /// the guard is dropped.
     ///
     /// # Parameters
     /// - `target`: Final file path.
@@ -177,20 +185,54 @@ impl LocalTempFile {
     /// The final file path.
     ///
     /// # Errors
-    /// Returns an I/O error when the parent directory cannot be created or the
-    /// temporary file cannot be renamed to `target`.
-    pub fn persist<P>(mut self, target: P) -> Result<PathBuf>
+    /// Returns an I/O error when the parent directory cannot be created, the
+    /// target already exists, or the temporary file cannot be renamed to
+    /// `target`.
+    #[inline]
+    pub fn persist<P>(self, target: P) -> Result<PathBuf>
+    where
+        P: AsRef<Path>,
+    {
+        self.persist_with(target, LocalPersistOptions::default())
+    }
+
+    /// Moves the temporary file to a final path using persistence options.
+    ///
+    /// The file handle is closed before moving the path. Parent directories for
+    /// `target` are created before moving. When `options.overwrite` is `false`,
+    /// existing targets are rejected. When `options.overwrite` is `true`, an
+    /// existing target file may be replaced.
+    ///
+    /// # Parameters
+    /// - `target`: Final file path.
+    /// - `options`: Persistence behavior options.
+    ///
+    /// # Returns
+    /// The final file path.
+    ///
+    /// # Errors
+    /// Returns an I/O error when the parent directory cannot be created, the
+    /// target already exists while overwriting is disabled, or the temporary
+    /// file cannot be moved to `target`.
+    pub fn persist_with<P>(mut self, target: P, options: LocalPersistOptions) -> Result<PathBuf>
     where
         P: AsRef<Path>,
     {
         self.close()?;
         let target = target.as_ref().to_path_buf();
         LocalFiles::ensure_parent(&target)?;
+        if !options.overwrite {
+            reject_existing_target(&target)?;
+        }
         let source = self
             .path
             .as_ref()
             .expect("temporary file path has already been released");
-        fs::rename(source, &target)?;
+        if options.overwrite {
+            replace_file(source, &target)?;
+        } else {
+            fs::rename(source, &target)?;
+        }
         let _ = self.path.take();
         Ok(target)
     }
@@ -218,4 +260,23 @@ impl Drop for LocalTempFile {
 /// An [`ErrorKind::NotFound`] error describing the closed file handle.
 fn file_closed_error() -> Error {
     Error::new(ErrorKind::NotFound, "temporary file handle is closed")
+}
+
+/// Returns an error when `target` already exists.
+///
+/// # Parameters
+/// - `target`: Candidate final path.
+///
+/// # Errors
+/// Returns [`ErrorKind::AlreadyExists`] when `target` exists, or the metadata
+/// error reported by the filesystem.
+fn reject_existing_target(target: &Path) -> Result<()> {
+    match fs::symlink_metadata(target) {
+        Ok(_) => Err(Error::new(
+            ErrorKind::AlreadyExists,
+            format!("target already exists: {}", target.display()),
+        )),
+        Err(error) if error.kind() == ErrorKind::NotFound => Ok(()),
+        Err(error) => Err(error),
+    }
 }

@@ -22,6 +22,7 @@ pub use local::{
     LocalCopyDirStats,
     LocalFilenames,
     LocalFiles,
+    LocalPersistOptions,
     LocalTempDir,
     LocalTempFile,
 };

@@ -11,6 +11,7 @@ use qubit_local_files::{
     LocalCopyDirOptions,
     LocalFilenames,
     LocalFiles,
+    LocalPersistOptions,
     LocalTempDir,
     LocalTempFile,
 };
@@ -51,9 +52,11 @@ writeln!(file.file_mut()?, "temporary payload")?;
 # Ok::<(), std::io::Error>(())
 ```
 
-`LocalTempFile::persist` closes the file handle before moving the temporary file to
-its final path. Use `LocalFiles::atomic_write` instead when a target file must never
-be observed half-written.
+`LocalTempFile::persist` closes the file handle before moving the temporary file
+to its final path, and rejects an existing target by default. Use
+`LocalTempFile::persist_with` and `LocalPersistOptions { overwrite: true }` when
+replacing an existing target is intended. Use `LocalFiles::atomic_write` instead
+when a target file must never be observed half-written.
 
 ## Atomic Writes
 

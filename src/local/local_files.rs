@@ -655,7 +655,7 @@ fn add_path_context(error: Error, operation: &str, path: &Path) -> Error {
 /// # Errors
 /// Returns the platform I/O error reported while replacing the destination.
 #[cfg(not(windows))]
-fn replace_file(source: &Path, destination: &Path) -> Result<()> {
+pub(crate) fn replace_file(source: &Path, destination: &Path) -> Result<()> {
     fs::rename(source, destination)
 }
 
@@ -668,7 +668,7 @@ fn replace_file(source: &Path, destination: &Path) -> Result<()> {
 /// # Errors
 /// Returns the platform I/O error reported while replacing the destination.
 #[cfg(windows)]
-fn replace_file(source: &Path, destination: &Path) -> Result<()> {
+pub(crate) fn replace_file(source: &Path, destination: &Path) -> Result<()> {
     let source = wide_path(source);
     let destination = wide_path(destination);
     let result = unsafe {
@@ -933,9 +933,6 @@ fn copy_dir_recursive(
     active_sources.push(canonical_source);
     let result = (|| {
         ensure_copy_destination_dir(dst, options.overwrite, stats)?;
-        if options.preserve_permissions {
-            fs::set_permissions(dst, source_metadata.permissions())?;
-        }
         for entry in fs::read_dir(src)? {
             let entry = entry?;
             let source_path = entry.path();
@@ -967,6 +964,9 @@ fn copy_dir_recursive(
                     format!("unsupported source file type: {}", source_path.display()),
                 ));
             }
+        }
+        if options.preserve_permissions {
+            fs::set_permissions(dst, source_metadata.permissions())?;
         }
         Ok(())
     })();

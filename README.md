@@ -18,7 +18,8 @@ Qubit Local Files contains the local filesystem utilities split out of
   directory size, recursive directory copy, and durable atomic writes;
 - `LocalFilenames` for random and lexical file-name operations;
 - `LocalTempFile` and `LocalTempDir` for RAII temporary files and directories;
-- `LocalCopyDirOptions` and `LocalCopyDirStats` for explicit recursive copy behavior.
+- `LocalCopyDirOptions`, `LocalCopyDirStats`, and `LocalPersistOptions` for
+  explicit filesystem behavior.
 
 `qubit-io` remains focused on stream-level `std::io` traits, extension methods,
 wrappers, and codecs.
@@ -37,10 +38,14 @@ them automatically on drop unless callers call `keep` or `persist`. Drop-time
 cleanup is best-effort; failures are reported through the `log` facade with
 `warn!` and never panic.
 
+`LocalTempFile::persist` rejects an existing target by default. Use
+`persist_with` and `LocalPersistOptions { overwrite: true }` when replacing an
+existing target is intended.
+
 ```rust
 use std::io::Write;
 
-use qubit_local_files::{LocalTempDir, LocalTempFile};
+use qubit_local_files::{LocalPersistOptions, LocalTempDir, LocalTempFile};
 
 let dir = LocalTempDir::with_prefix(Some("qubit-local-files-work-"))?;
 std::fs::write(dir.path().join("scratch.txt"), b"scratch")?;
@@ -93,6 +98,7 @@ assert_eq!(
 | `LocalFilenames` | Random file-name generation and lexical UTF-8 file-name helpers. |
 | `LocalCopyDirOptions` | Options controlling recursive directory copy behavior. |
 | `LocalCopyDirStats` | Statistics returned by recursive directory copy operations. |
+| `LocalPersistOptions` | Options controlling whether temporary file persistence may overwrite an existing target. |
 
 ## Runtime Dependencies
 
