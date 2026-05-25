@@ -32,16 +32,15 @@ fn test_validate_portable_file_name_accepts_safe_names() {
         "data_2026-05-19.csv",
         "caf\u{00e9}.txt",
     ] {
-        LocalFilenames::validate_portable_file_name(name)
-            .expect("safe portable file name should be accepted");
+        LocalFilenames::validate_portable_file_name(name).expect("safe portable file name should be accepted");
     }
 }
 
 #[test]
 fn test_validate_portable_file_name_rejects_empty_dot_and_dot_dot() {
     for name in ["", ".", ".."] {
-        let error = LocalFilenames::validate_portable_file_name(name)
-            .expect_err("invalid dot segment should be rejected");
+        let error =
+            LocalFilenames::validate_portable_file_name(name).expect_err("invalid dot segment should be rejected");
 
         assert_eq!(std::io::ErrorKind::InvalidInput, error.kind());
     }
@@ -61,8 +60,8 @@ fn test_validate_portable_file_name_rejects_path_and_reserved_characters() {
         "bad\"name.txt",
         "line\nbreak.txt",
     ] {
-        let error = LocalFilenames::validate_portable_file_name(name)
-            .expect_err("forbidden character should be rejected");
+        let error =
+            LocalFilenames::validate_portable_file_name(name).expect_err("forbidden character should be rejected");
 
         assert_eq!(std::io::ErrorKind::InvalidInput, error.kind());
     }
@@ -71,8 +70,7 @@ fn test_validate_portable_file_name_rejects_path_and_reserved_characters() {
 #[test]
 fn test_validate_portable_file_name_rejects_windows_reserved_names() {
     for name in [
-        "CON", "con", "CON.txt", "PRN", "AUX", "NUL", "COM1", "com9.log", "LPT1", "lpt9.txt",
-        "CONIN$", "CONOUT$",
+        "CON", "con", "CON.txt", "PRN", "AUX", "NUL", "COM1", "com9.log", "LPT1", "lpt9.txt", "CONIN$", "CONOUT$",
     ] {
         let error = LocalFilenames::validate_portable_file_name(name)
             .expect_err("Windows reserved device name should be rejected");
@@ -88,8 +86,8 @@ fn test_validate_portable_file_name_rejects_windows_reserved_names() {
 #[test]
 fn test_validate_portable_file_name_rejects_trailing_space_dot_and_long_names() {
     for name in ["file.", "file "] {
-        let error = LocalFilenames::validate_portable_file_name(name)
-            .expect_err("trailing space or dot should be rejected");
+        let error =
+            LocalFilenames::validate_portable_file_name(name).expect_err("trailing space or dot should be rejected");
 
         assert_eq!(std::io::ErrorKind::InvalidInput, error.kind());
     }
@@ -97,8 +95,7 @@ fn test_validate_portable_file_name_rejects_trailing_space_dot_and_long_names() 
     let max_name = "a".repeat(255);
     let too_long_name = "a".repeat(256);
 
-    LocalFilenames::validate_portable_file_name(&max_name)
-        .expect("255-byte name should be accepted");
+    LocalFilenames::validate_portable_file_name(&max_name).expect("255-byte name should be accepted");
     let error = LocalFilenames::validate_portable_file_name(&too_long_name)
         .expect_err("name longer than 255 bytes should be rejected");
 
@@ -128,10 +125,7 @@ fn test_extension_helpers_handle_missing_and_empty_extensions() {
     assert_eq!(None, LocalFilenames::extension(Path::new("README")));
     assert_eq!(None, LocalFilenames::dot_extension(Path::new("README")));
     assert_eq!(Some(""), LocalFilenames::extension(Path::new("name.")));
-    assert_eq!(
-        Some(String::new()),
-        LocalFilenames::dot_extension(Path::new("name."))
-    );
+    assert_eq!(Some(String::new()), LocalFilenames::dot_extension(Path::new("name.")));
 }
 
 #[test]
@@ -139,14 +133,8 @@ fn test_dotfiles_follow_rust_path_semantics() {
     assert_eq!(Some(".env"), LocalFilenames::file_stem(Path::new(".env")));
     assert_eq!(None, LocalFilenames::extension(Path::new(".env")));
 
-    assert_eq!(
-        Some(".config"),
-        LocalFilenames::file_stem(Path::new(".config.toml"))
-    );
-    assert_eq!(
-        Some("toml"),
-        LocalFilenames::extension(Path::new(".config.toml"))
-    );
+    assert_eq!(Some(".config"), LocalFilenames::file_stem(Path::new(".config.toml")));
+    assert_eq!(Some("toml"), LocalFilenames::extension(Path::new(".config.toml")));
 }
 
 #[test]
@@ -157,21 +145,13 @@ fn test_has_extension_accepts_optional_leading_dot() {
     assert!(LocalFilenames::has_extension(path, ".PDF"));
     assert!(!LocalFilenames::has_extension(path, "pdf"));
     assert!(LocalFilenames::has_extension_ignore_ascii_case(path, "pdf"));
-    assert!(LocalFilenames::has_extension_ignore_ascii_case(
-        path, ".pdf"
-    ));
+    assert!(LocalFilenames::has_extension_ignore_ascii_case(path, ".pdf"));
 }
 
 #[test]
 fn test_file_name_from_path_handles_common_separators() {
-    assert_eq!(
-        "file.txt",
-        LocalFilenames::file_name_from_path("/tmp/data/file.txt")
-    );
-    assert_eq!(
-        "file.txt",
-        LocalFilenames::file_name_from_path(r"C:\tmp\data\file.txt")
-    );
+    assert_eq!("file.txt", LocalFilenames::file_name_from_path("/tmp/data/file.txt"));
+    assert_eq!("file.txt", LocalFilenames::file_name_from_path(r"C:\tmp\data\file.txt"));
     assert_eq!("file.txt", LocalFilenames::file_name_from_path("file.txt"));
     assert_eq!("", LocalFilenames::file_name_from_path("/tmp/data/"));
 }
@@ -211,19 +191,10 @@ fn test_file_name_from_url_decodes_percent_encoded_utf8() {
 #[test]
 fn test_file_name_from_url_keeps_encoded_unsafe_path_fragments() {
     for (url, expected) in [
-        (
-            "https://example.com/path/dir%2Fsecret.txt",
-            "dir%2Fsecret.txt",
-        ),
-        (
-            "https://example.com/path/dir%5Csecret.txt",
-            "dir%5Csecret.txt",
-        ),
+        ("https://example.com/path/dir%2Fsecret.txt", "dir%2Fsecret.txt"),
+        ("https://example.com/path/dir%5Csecret.txt", "dir%5Csecret.txt"),
         ("https://example.com/path/bad%00name.txt", "bad%00name.txt"),
-        (
-            "https://example.com/path/%2E%2E%2Fsecret.txt",
-            "%2E%2E%2Fsecret.txt",
-        ),
+        ("https://example.com/path/%2E%2E%2Fsecret.txt", "%2E%2E%2Fsecret.txt"),
     ] {
         assert_eq!(expected, LocalFilenames::file_name_from_url(url));
     }
@@ -271,12 +242,11 @@ fn test_filenames_try_random_with_rejects_path_fragments() {
         .expect_err("prefix with NUL bytes should be rejected");
     assert_eq!(ErrorKind::InvalidInput, error.kind());
 
-    let error = LocalFilenames::try_random_with(Some(".."), None)
-        .expect_err("parent directory component should be rejected");
+    let error =
+        LocalFilenames::try_random_with(Some(".."), None).expect_err("parent directory component should be rejected");
     assert_eq!(ErrorKind::InvalidInput, error.kind());
 
-    let name = LocalFilenames::try_random_with(Some("safe-"), Some(".tmp"))
-        .expect("safe fragments should be accepted");
+    let name = LocalFilenames::try_random_with(Some("safe-"), Some(".tmp")).expect("safe fragments should be accepted");
     assert!(name.starts_with("safe-"));
     assert!(name.ends_with(".tmp"));
 }

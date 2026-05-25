@@ -112,12 +112,7 @@ impl LocalTempFile {
     /// Returns an I/O error when `dir` cannot be created, `prefix` or `suffix`
     /// is not a safe file-name fragment, the retry limit is zero, all generated
     /// names collide, or file creation fails.
-    pub fn in_dir<P>(
-        dir: P,
-        prefix: Option<&str>,
-        suffix: Option<&str>,
-        max_tries: usize,
-    ) -> Result<Self>
+    pub fn in_dir<P>(dir: P, prefix: Option<&str>, suffix: Option<&str>, max_tries: usize) -> Result<Self>
     where
         P: AsRef<Path>,
     {
@@ -274,10 +269,7 @@ impl LocalTempFile {
     /// Returns the I/O error reported while flushing a configured writer.
     pub fn keep(mut self) -> Result<PathBuf> {
         self.close()?;
-        Ok(self
-            .path
-            .take()
-            .expect("temporary file path has already been released"))
+        Ok(self.path.take().expect("temporary file path has already been released"))
     }
 
     /// Moves the temporary file to a final path without overwriting.
@@ -354,11 +346,7 @@ impl Drop for LocalTempFile {
         if let Some(path) = self.path.take()
             && let Err(error) = fs::remove_file(&path)
         {
-            warn!(
-                "failed to remove temporary file {}: {}",
-                path.display(),
-                error
-            );
+            warn!("failed to remove temporary file {}: {}", path.display(), error);
         }
     }
 }

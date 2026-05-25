@@ -361,11 +361,7 @@ impl LocalFiles {
     /// permission, a symbolic link is encountered while `follow_symlinks` is
     /// `false`, or an underlying filesystem operation fails.
     #[inline]
-    pub fn copy_dir_all_with<S, D>(
-        src: S,
-        dst: D,
-        options: LocalCopyDirOptions,
-    ) -> Result<LocalCopyDirStats>
+    pub fn copy_dir_all_with<S, D>(src: S, dst: D, options: LocalCopyDirOptions) -> Result<LocalCopyDirStats>
     where
         S: AsRef<Path>,
         D: AsRef<Path>,
@@ -511,8 +507,7 @@ fn ensure_parent_path(path: &Path) -> Result<()> {
 /// Returns an I/O error when `path` cannot be inspected or opened, when the
 /// target is not a file, or when buffering options are invalid.
 fn open_reader_path(path: &Path, options: FileReadOptions) -> Result<LocalFileReader> {
-    let metadata =
-        fs::metadata(path).map_err(|error| add_path_context(error, "read metadata", path))?;
+    let metadata = fs::metadata(path).map_err(|error| add_path_context(error, "read metadata", path))?;
     if !metadata.is_file() {
         return Err(Error::new(
             ErrorKind::InvalidInput,
@@ -587,10 +582,7 @@ fn atomic_write_bytes_path(path: &Path, bytes: &[u8]) -> Result<()> {
 /// # Errors
 /// Returns the first I/O error reported while creating, writing, syncing,
 /// replacing, or syncing the temporary file or parent directory.
-fn atomic_write_with_path(
-    path: &Path,
-    write: &mut dyn FnMut(&mut File) -> Result<()>,
-) -> Result<()> {
+fn atomic_write_with_path(path: &Path, write: &mut dyn FnMut(&mut File) -> Result<()>) -> Result<()> {
     ensure_parent_path(path)?;
     let existing_permissions = existing_file_permissions(path)?;
     let parent = parent_dir_for(path);
@@ -647,20 +639,12 @@ fn existing_file_permissions(path: &Path) -> Result<Option<fs::Permissions>> {
 ///
 /// # Errors
 /// Returns an I/O error when permissions cannot be applied.
-fn apply_existing_permissions(
-    file: &File,
-    permissions: Option<&fs::Permissions>,
-    temp_path: &Path,
-) -> Result<()> {
+fn apply_existing_permissions(file: &File, permissions: Option<&fs::Permissions>, temp_path: &Path) -> Result<()> {
     if let Some(permissions) = permissions {
         match file.set_permissions(permissions.clone()) {
             Ok(()) => {}
             Err(error) => {
-                return Err(add_path_context(
-                    error,
-                    "set temporary file permissions",
-                    temp_path,
-                ));
+                return Err(add_path_context(error, "set temporary file permissions", temp_path));
             }
         }
     }
@@ -693,12 +677,7 @@ pub(crate) fn create_temp_file_in_dir(
     loop {
         attempt += 1;
         let path = dir.join(LocalFilenames::try_random_with(prefix, suffix)?);
-        match OpenOptions::new()
-            .read(true)
-            .write(true)
-            .create_new(true)
-            .open(&path)
-        {
+        match OpenOptions::new().read(true).write(true).create_new(true).open(&path) {
             Ok(file) => return Ok((path, file)),
             Err(error) => {
                 if error.kind() == ErrorKind::AlreadyExists && attempt < max_tries {
@@ -723,11 +702,7 @@ pub(crate) fn create_temp_file_in_dir(
 /// # Errors
 /// Returns an I/O error when `dir` cannot be created, `max_tries` is zero, all
 /// generated names collide, or directory creation fails.
-pub(crate) fn create_temp_dir_in_dir(
-    dir: &Path,
-    prefix: Option<&str>,
-    max_tries: usize,
-) -> Result<PathBuf> {
+pub(crate) fn create_temp_dir_in_dir(dir: &Path, prefix: Option<&str>, max_tries: usize) -> Result<PathBuf> {
     validate_max_tries(max_tries)?;
     ensure_dir_path(dir)?;
     let mut attempt = 0;
@@ -879,13 +854,7 @@ pub(crate) fn move_path_without_replacing(source: &Path, destination: &Path) -> 
 pub(crate) fn move_path_without_replacing(source: &Path, destination: &Path) -> Result<()> {
     let source = wide_path(source);
     let destination = wide_path(destination);
-    let result = unsafe {
-        MoveFileExW(
-            source.as_ptr(),
-            destination.as_ptr(),
-            MOVEFILE_WRITE_THROUGH,
-        )
-    };
+    let result = unsafe { MoveFileExW(source.as_ptr(), destination.as_ptr(), MOVEFILE_WRITE_THROUGH) };
     if result == 0 {
         Err(std::io::Error::last_os_error())
     } else {
@@ -1023,8 +992,7 @@ fn sync_parent_dir(path: &Path) -> Result<()> {
 fn is_ignorable_windows_parent_sync_error(error: &Error) -> bool {
     const ERROR_SHARING_VIOLATION: i32 = 32;
 
-    error.kind() == ErrorKind::PermissionDenied
-        || error.raw_os_error() == Some(ERROR_SHARING_VIOLATION)
+    error.kind() == ErrorKind::PermissionDenied || error.raw_os_error() == Some(ERROR_SHARING_VIOLATION)
 }
 
 /// Gets the parent directory that should be synced for `path`.
@@ -1157,22 +1125,11 @@ fn remove_any_path(path: &Path) -> Result<()> {
 /// Returns an I/O error when the source is invalid, the destination is inside
 /// the source tree or a followed source directory, a followed directory
 /// cycle is detected, or an underlying filesystem operation fails.
-fn copy_dir_all_with_paths(
-    src: &Path,
-    dst: &Path,
-    options: LocalCopyDirOptions,
-) -> Result<LocalCopyDirStats> {
+fn copy_dir_all_with_paths(src: &Path, dst: &Path, options: LocalCopyDirOptions) -> Result<LocalCopyDirStats> {
     let destination_root = canonicalize_existing_prefix(dst)?;
     let mut active_sources = Vec::new();
     let mut stats = LocalCopyDirStats::default();
-    copy_dir_recursive(
-        src,
-        dst,
-        options,
-        &destination_root,
-        &mut active_sources,
-        &mut stats,
-    )?;
+    copy_dir_recursive(src, dst, options, &destination_root, &mut active_sources, &mut stats)?;
     Ok(stats)
 }
 
@@ -1328,11 +1285,7 @@ fn inspect_copy_source_directory(
 /// # Errors
 /// Returns an I/O error when the destination cannot be created or cannot be
 /// replaced according to `overwrite`.
-fn ensure_copy_destination_dir(
-    dst: &Path,
-    overwrite: bool,
-    stats: &mut LocalCopyDirStats,
-) -> Result<()> {
+fn ensure_copy_destination_dir(dst: &Path, overwrite: bool, stats: &mut LocalCopyDirStats) -> Result<()> {
     match fs::symlink_metadata(dst) {
         Ok(metadata) => {
             if metadata.is_dir() && !metadata.file_type().is_symlink() {
@@ -1441,11 +1394,7 @@ fn metadata_for_copy_source(path: &Path, follow_symlinks: bool) -> Result<fs::Me
 /// # Errors
 /// Returns an I/O error when `destination` is equal to or nested under
 /// `canonical_source`.
-fn reject_destination_inside_source(
-    src: &Path,
-    canonical_source: &Path,
-    destination: &Path,
-) -> Result<()> {
+fn reject_destination_inside_source(src: &Path, canonical_source: &Path, destination: &Path) -> Result<()> {
     if destination == canonical_source || destination.starts_with(canonical_source) {
         return Err(Error::new(
             ErrorKind::InvalidInput,

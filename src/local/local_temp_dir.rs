@@ -72,11 +72,7 @@ impl LocalTempDir {
     /// temporary directory cannot be created.
     #[inline]
     pub fn with_prefix(prefix: Option<&str>) -> Result<Self> {
-        Self::in_dir(
-            std::env::temp_dir(),
-            prefix,
-            LocalFiles::DEFAULT_TEMP_FILE_RETRIES,
-        )
+        Self::in_dir(std::env::temp_dir(), prefix, LocalFiles::DEFAULT_TEMP_FILE_RETRIES)
     }
 
     /// Creates a temporary directory in the specified directory.
@@ -214,11 +210,7 @@ impl LocalTempDir {
     /// Returns an I/O error when the child path is invalid, escapes the
     /// temporary directory, is not a file, cannot be opened, or requests an
     /// invalid buffer capacity.
-    pub fn open_child_reader<P>(
-        &self,
-        child: P,
-        options: FileReadOptions,
-    ) -> Result<LocalFileReader>
+    pub fn open_child_reader<P>(&self, child: P, options: FileReadOptions) -> Result<LocalFileReader>
     where
         P: AsRef<Path>,
     {
@@ -248,11 +240,7 @@ impl LocalTempDir {
     /// cannot be created, the child would escape the temporary directory, the
     /// target is not a file, or the file cannot be opened with the requested
     /// mode.
-    pub fn open_child_writer<P>(
-        &self,
-        child: P,
-        options: FileWriteOptions,
-    ) -> Result<LocalFileWriter>
+    pub fn open_child_writer<P>(&self, child: P, options: FileWriteOptions) -> Result<LocalFileWriter>
     where
         P: AsRef<Path>,
     {
@@ -357,10 +345,7 @@ fn child_component_names(child: &Path) -> Result<Vec<OsString>> {
         }
     }
     if components.is_empty() {
-        return Err(Error::new(
-            ErrorKind::InvalidInput,
-            "child path must not be empty",
-        ));
+        return Err(Error::new(ErrorKind::InvalidInput, "child path must not be empty"));
     }
     Ok(components)
 }
@@ -386,20 +371,14 @@ fn ensure_child_dir_path(root: &Path, child: &Path) -> Result<PathBuf> {
             Ok(metadata) if metadata.file_type().is_symlink() => {
                 return Err(Error::new(
                     ErrorKind::InvalidInput,
-                    format!(
-                        "child directory crosses a symbolic link: {}",
-                        path.display()
-                    ),
+                    format!("child directory crosses a symbolic link: {}", path.display()),
                 ));
             }
             Ok(metadata) if metadata.is_dir() => {}
             Ok(_) => {
                 return Err(Error::new(
                     ErrorKind::AlreadyExists,
-                    format!(
-                        "child path component is not a directory: {}",
-                        path.display()
-                    ),
+                    format!("child path component is not a directory: {}", path.display()),
                 ));
             }
             Err(error) if error.kind() == ErrorKind::NotFound => fs::create_dir(&path)?,
@@ -440,12 +419,7 @@ fn ensure_child_file_inside(root: &Path, path: &Path) -> Result<()> {
 /// # Errors
 /// Returns an I/O error when parents are missing, cannot be created, or the
 /// target would escape `root`.
-fn prepare_child_writer_path(
-    root: &Path,
-    child: &Path,
-    path: &Path,
-    create_parent: bool,
-) -> Result<()> {
+fn prepare_child_writer_path(root: &Path, child: &Path, path: &Path, create_parent: bool) -> Result<()> {
     if let Some(parent) = child.parent()
         && !parent.as_os_str().is_empty()
     {
@@ -494,11 +468,7 @@ impl Drop for LocalTempDir {
         if let Some(path) = self.path.take()
             && let Err(error) = fs::remove_dir_all(&path)
         {
-            warn!(
-                "failed to remove temporary directory {}: {}",
-                path.display(),
-                error
-            );
+            warn!("failed to remove temporary directory {}: {}", path.display(), error);
         }
     }
 }

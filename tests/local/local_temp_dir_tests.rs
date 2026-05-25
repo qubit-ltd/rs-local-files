@@ -26,16 +26,14 @@ use super::local_files_tests::{
 
 #[test]
 fn test_debug_formatting_contains_type_name() {
-    let dir = LocalTempDir::with_prefix(Some("qubit-local-files-debug-"))
-        .expect("temp directory should be created");
+    let dir = LocalTempDir::with_prefix(Some("qubit-local-files-debug-")).expect("temp directory should be created");
 
     assert!(format!("{dir:?}").contains("LocalTempDir"));
 }
 
 #[test]
 fn test_temp_dir_with_prefix_creates_existing_directory() {
-    let dir = LocalTempDir::with_prefix(Some("qubit-local-files-dir-"))
-        .expect("temp directory should be created");
+    let dir = LocalTempDir::with_prefix(Some("qubit-local-files-dir-")).expect("temp directory should be created");
     let name = dir
         .path()
         .file_name()
@@ -50,21 +48,11 @@ fn test_temp_dir_with_prefix_creates_existing_directory() {
 #[test]
 fn test_temp_dir_exists_metadata_and_cleanup() {
     let dir = temp_dir("temp-dir-cleanup");
-    let temp_dir =
-        LocalTempDir::in_dir(&dir, Some("cleanup-"), 4).expect("temp dir should be created");
+    let temp_dir = LocalTempDir::in_dir(&dir, Some("cleanup-"), 4).expect("temp dir should be created");
     let path = temp_dir.path().to_owned();
 
-    assert!(
-        temp_dir
-            .exists()
-            .expect("temp dir existence should be checked")
-    );
-    assert!(
-        temp_dir
-            .metadata()
-            .expect("metadata should be read")
-            .is_dir()
-    );
+    assert!(temp_dir.exists().expect("temp dir existence should be checked"));
+    assert!(temp_dir.metadata().expect("metadata should be read").is_dir());
     temp_dir.cleanup().expect("temp dir should be cleaned up");
 
     assert!(!path.exists());
@@ -84,8 +72,8 @@ fn test_temp_dir_new_and_keep_preserves_directory() {
 fn test_temp_dir_in_dir_rejects_path_prefix_fragment() {
     let dir = temp_dir("temp-dir-create-error");
 
-    let error = LocalTempDir::in_dir(&dir, Some("missing-parent/"), 1)
-        .expect_err("path-like prefix should be rejected");
+    let error =
+        LocalTempDir::in_dir(&dir, Some("missing-parent/"), 1).expect_err("path-like prefix should be rejected");
 
     assert_eq!(ErrorKind::InvalidInput, error.kind());
     fs::remove_dir_all(dir).unwrap();
@@ -123,8 +111,8 @@ fn test_temp_dir_in_dir_returns_create_error() {
     let dir = temp_dir("temp-dir-permission-error");
     fs::set_permissions(&dir, fs::Permissions::from_mode(0o500)).unwrap();
 
-    let error = LocalTempDir::in_dir(&dir, Some("local-"), 1)
-        .expect_err("unwritable directory should return create-dir error");
+    let error =
+        LocalTempDir::in_dir(&dir, Some("local-"), 1).expect_err("unwritable directory should return create-dir error");
 
     fs::set_permissions(&dir, fs::Permissions::from_mode(0o700)).unwrap();
     assert_eq!(ErrorKind::PermissionDenied, error.kind());
@@ -134,8 +122,7 @@ fn test_temp_dir_in_dir_returns_create_error() {
 #[test]
 fn test_temp_dir_child_path_rejects_escape_and_ensure_child_dir_creates_parents() {
     let dir = temp_dir("temp-dir-child-path");
-    let temp_dir =
-        LocalTempDir::in_dir(&dir, Some("child-"), 4).expect("temp dir should be created");
+    let temp_dir = LocalTempDir::in_dir(&dir, Some("child-"), 4).expect("temp dir should be created");
 
     let child = temp_dir
         .child_path("a/b/c.txt")
@@ -156,8 +143,7 @@ fn test_temp_dir_child_path_rejects_escape_and_ensure_child_dir_creates_parents(
 #[test]
 fn test_temp_dir_child_path_rejects_empty_path() {
     let dir = temp_dir("temp-dir-empty-child");
-    let temp_dir =
-        LocalTempDir::in_dir(&dir, Some("child-"), 4).expect("temp dir should be created");
+    let temp_dir = LocalTempDir::in_dir(&dir, Some("child-"), 4).expect("temp dir should be created");
 
     let error = temp_dir
         .child_path("")
@@ -170,8 +156,7 @@ fn test_temp_dir_child_path_rejects_empty_path() {
 #[test]
 fn test_temp_dir_ensure_child_dir_rejects_existing_file_component() {
     let dir = temp_dir("temp-dir-child-file-component");
-    let temp_dir =
-        LocalTempDir::in_dir(&dir, Some("child-"), 4).expect("temp dir should be created");
+    let temp_dir = LocalTempDir::in_dir(&dir, Some("child-"), 4).expect("temp dir should be created");
     fs::write(temp_dir.path().join("blocker"), b"not a directory").unwrap();
 
     let error = temp_dir
@@ -186,8 +171,7 @@ fn test_temp_dir_ensure_child_dir_rejects_existing_file_component() {
 #[test]
 fn test_temp_dir_ensure_child_dir_returns_metadata_error() {
     let dir = temp_dir("temp-dir-child-metadata-error");
-    let temp_dir =
-        LocalTempDir::in_dir(&dir, Some("child-"), 4).expect("temp dir should be created");
+    let temp_dir = LocalTempDir::in_dir(&dir, Some("child-"), 4).expect("temp dir should be created");
     let long_name = "x".repeat(10_000);
 
     let error = temp_dir
@@ -202,8 +186,7 @@ fn test_temp_dir_ensure_child_dir_returns_metadata_error() {
 #[test]
 fn test_temp_dir_ensure_child_dir_rejects_symlink_component() {
     let dir = temp_dir("temp-dir-child-symlink-component");
-    let temp_dir =
-        LocalTempDir::in_dir(&dir, Some("child-"), 4).expect("temp dir should be created");
+    let temp_dir = LocalTempDir::in_dir(&dir, Some("child-"), 4).expect("temp dir should be created");
     let target = dir.join("target");
     fs::create_dir(&target).unwrap();
     std::os::unix::fs::symlink(&target, temp_dir.path().join("link")).unwrap();
@@ -219,8 +202,7 @@ fn test_temp_dir_ensure_child_dir_rejects_symlink_component() {
 #[test]
 fn test_temp_dir_list_and_child_reader_writer_use_shared_options() {
     let dir = temp_dir("temp-dir-child-io");
-    let temp_dir =
-        LocalTempDir::in_dir(&dir, Some("child-"), 4).expect("temp dir should be created");
+    let temp_dir = LocalTempDir::in_dir(&dir, Some("child-"), 4).expect("temp dir should be created");
     let child = "nested/data.txt";
 
     {
@@ -268,11 +250,8 @@ fn test_temp_dir_list_and_child_reader_writer_use_shared_options() {
 #[test]
 fn test_temp_dir_open_child_writer_validates_existing_parent_and_target() {
     let dir = temp_dir("temp-dir-child-writer-validation");
-    let temp_dir =
-        LocalTempDir::in_dir(&dir, Some("child-"), 4).expect("temp dir should be created");
-    temp_dir
-        .ensure_child_dir("nested")
-        .expect("parent should be created");
+    let temp_dir = LocalTempDir::in_dir(&dir, Some("child-"), 4).expect("temp dir should be created");
+    temp_dir.ensure_child_dir("nested").expect("parent should be created");
     fs::write(temp_dir.path().join("nested/existing.txt"), b"old").unwrap();
 
     {
@@ -308,8 +287,7 @@ fn test_temp_dir_open_child_writer_validates_existing_parent_and_target() {
 #[test]
 fn test_temp_dir_open_child_writer_returns_metadata_error() {
     let dir = temp_dir("temp-dir-child-writer-metadata-error");
-    let temp_dir =
-        LocalTempDir::in_dir(&dir, Some("child-"), 4).expect("temp dir should be created");
+    let temp_dir = LocalTempDir::in_dir(&dir, Some("child-"), 4).expect("temp dir should be created");
     let long_name = "x".repeat(10_000);
 
     let error = temp_dir
@@ -324,8 +302,7 @@ fn test_temp_dir_open_child_writer_returns_metadata_error() {
 #[test]
 fn test_temp_dir_child_reader_rejects_symlink_escape() {
     let dir = temp_dir("temp-dir-symlink-escape");
-    let temp_dir =
-        LocalTempDir::in_dir(&dir, Some("child-"), 4).expect("temp dir should be created");
+    let temp_dir = LocalTempDir::in_dir(&dir, Some("child-"), 4).expect("temp dir should be created");
     let outside = dir.join("outside.txt");
     fs::write(&outside, b"outside").unwrap();
     std::os::unix::fs::symlink(&outside, temp_dir.path().join("link.txt")).unwrap();
@@ -342,8 +319,7 @@ fn test_temp_dir_child_reader_rejects_symlink_escape() {
 fn test_temp_dir_drop_removes_directory_tree() {
     let dir = temp_dir("temp-dir-drop");
     let path = {
-        let temp_dir =
-            LocalTempDir::in_dir(&dir, Some("drop-"), 4).expect("temp dir should be created");
+        let temp_dir = LocalTempDir::in_dir(&dir, Some("drop-"), 4).expect("temp dir should be created");
         let path = temp_dir.path().to_owned();
         fs::write(path.join("scratch.txt"), b"scratch").unwrap();
         assert!(path.is_dir());
@@ -358,8 +334,7 @@ fn test_temp_dir_drop_removes_directory_tree() {
 fn test_temp_dir_drop_logs_and_ignores_missing_directory() {
     ensure_test_logger();
     let dir = temp_dir("temp-dir-drop-missing");
-    let temp_dir =
-        LocalTempDir::in_dir(&dir, Some("drop-"), 4).expect("temp dir should be created");
+    let temp_dir = LocalTempDir::in_dir(&dir, Some("drop-"), 4).expect("temp dir should be created");
     let path = temp_dir.path().to_owned();
     fs::remove_dir_all(&path).unwrap();
 
@@ -372,8 +347,7 @@ fn test_temp_dir_drop_logs_and_ignores_missing_directory() {
 #[test]
 fn test_temp_dir_persist_moves_directory() {
     let dir = temp_dir("temp-dir-persist");
-    let temp_dir =
-        LocalTempDir::in_dir(&dir, Some("source-"), 4).expect("temp dir should be created");
+    let temp_dir = LocalTempDir::in_dir(&dir, Some("source-"), 4).expect("temp dir should be created");
     let source = temp_dir.path().to_owned();
     let target = dir.join("nested").join("persisted");
     fs::write(source.join("payload.txt"), b"payload").unwrap();
@@ -382,18 +356,14 @@ fn test_temp_dir_persist_moves_directory() {
 
     assert_eq!(target, persisted);
     assert!(!source.exists());
-    assert_eq!(
-        b"payload",
-        fs::read(target.join("payload.txt")).unwrap().as_slice()
-    );
+    assert_eq!(b"payload", fs::read(target.join("payload.txt")).unwrap().as_slice());
     fs::remove_dir_all(dir).unwrap();
 }
 
 #[test]
 fn test_temp_dir_persist_cleans_up_when_parent_creation_fails() {
     let dir = temp_dir("temp-dir-persist-error");
-    let temp_dir =
-        LocalTempDir::in_dir(&dir, Some("source-"), 4).expect("temp dir should be created");
+    let temp_dir = LocalTempDir::in_dir(&dir, Some("source-"), 4).expect("temp dir should be created");
     let source = temp_dir.path().to_owned();
     let blocker = dir.join("blocker");
     fs::write(&blocker, b"not a directory").unwrap();
@@ -413,8 +383,7 @@ fn test_temp_dir_persist_cleans_up_when_parent_creation_fails() {
 #[test]
 fn test_temp_dir_persist_cleans_up_when_target_exists() {
     let dir = temp_dir("temp-dir-persist-rename-error");
-    let temp_dir =
-        LocalTempDir::in_dir(&dir, Some("source-"), 4).expect("temp dir should be created");
+    let temp_dir = LocalTempDir::in_dir(&dir, Some("source-"), 4).expect("temp dir should be created");
     let source = temp_dir.path().to_owned();
     let target = dir.join("target-file");
     fs::write(&target, b"not a directory").unwrap();
@@ -425,10 +394,7 @@ fn test_temp_dir_persist_cleans_up_when_target_exists() {
 
     assert!(matches!(
         error.kind(),
-        ErrorKind::AlreadyExists
-            | ErrorKind::NotADirectory
-            | ErrorKind::PermissionDenied
-            | ErrorKind::Other
+        ErrorKind::AlreadyExists | ErrorKind::NotADirectory | ErrorKind::PermissionDenied | ErrorKind::Other
     ));
     assert!(!source.exists());
     assert!(target.is_file());
@@ -439,8 +405,7 @@ fn test_temp_dir_persist_cleans_up_when_target_exists() {
 #[test]
 fn test_temp_dir_persist_returns_target_metadata_error() {
     let dir = temp_dir("temp-dir-persist-metadata-error");
-    let temp_dir =
-        LocalTempDir::in_dir(&dir, Some("source-"), 4).expect("temp dir should be created");
+    let temp_dir = LocalTempDir::in_dir(&dir, Some("source-"), 4).expect("temp dir should be created");
     let source = temp_dir.path().to_owned();
     let target = dir.join("x".repeat(10_000));
 

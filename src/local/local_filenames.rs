@@ -130,9 +130,7 @@ impl LocalFilenames {
         let timestamp = unix_timestamp_nanos();
         let process_id = std::process::id();
         let random = try_random_hex()?;
-        Ok(format!(
-            "{prefix}{timestamp:x}-{process_id:x}-{random}{suffix}"
-        ))
+        Ok(format!("{prefix}{timestamp:x}-{process_id:x}-{random}{suffix}"))
     }
 
     /// Validates that `name` is a portable single-component file name.
@@ -187,11 +185,7 @@ impl LocalFilenames {
             ));
         }
         if let Some(character) = name.chars().find(|character| {
-            character.is_control()
-                || matches!(
-                    character,
-                    '/' | '\\' | '<' | '>' | ':' | '"' | '|' | '?' | '*'
-                )
+            character.is_control() || matches!(character, '/' | '\\' | '<' | '>' | ':' | '"' | '|' | '?' | '*')
         }) {
             return Err(Error::new(
                 ErrorKind::InvalidInput,
@@ -393,10 +387,7 @@ fn normalize_extension(extension: &str) -> &str {
 /// instead of a plain file-name fragment.
 fn validate_file_name_fragment(role: &str, fragment: &str) -> Result<()> {
     if fragment.contains('\0') {
-        return Err(invalid_file_name_fragment_error(
-            role,
-            "NUL bytes are not allowed",
-        ));
+        return Err(invalid_file_name_fragment_error(role, "NUL bytes are not allowed"));
     }
     if fragment.contains('/') || fragment.contains('\\') {
         return Err(invalid_file_name_fragment_error(
@@ -511,9 +502,7 @@ fn hex_encode(bytes: &[u8]) -> String {
 /// `true` when `name` uses a reserved device name, including a reserved base
 /// name followed by an extension.
 fn is_windows_reserved_file_name(name: &str) -> bool {
-    let base_name = name
-        .split_once('.')
-        .map_or(name, |(base_name, _)| base_name);
+    let base_name = name.split_once('.').map_or(name, |(base_name, _)| base_name);
     let base_name = base_name.trim_end_matches([' ', '.']);
 
     if base_name.eq_ignore_ascii_case("CON")
@@ -533,8 +522,7 @@ fn is_windows_reserved_file_name(name: &str) -> bool {
 
     let prefix = &bytes[..3];
     let suffix = bytes[3];
-    (prefix.eq_ignore_ascii_case(b"COM") || prefix.eq_ignore_ascii_case(b"LPT"))
-        && (b'1'..=b'9').contains(&suffix)
+    (prefix.eq_ignore_ascii_case(b"COM") || prefix.eq_ignore_ascii_case(b"LPT")) && (b'1'..=b'9').contains(&suffix)
 }
 
 /// Removes query and fragment suffixes from a URL-like string.
