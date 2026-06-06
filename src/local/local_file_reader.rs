@@ -14,6 +14,8 @@ use std::io::{
     ErrorKind,
     Read,
     Result,
+    Seek,
+    SeekFrom,
 };
 
 use crate::FileBuffering;
@@ -84,6 +86,26 @@ impl Read for LocalFileReader {
         match self {
             Self::Unbuffered(file) => file.read(buf),
             Self::Buffered(reader) => reader.read(buf),
+        }
+    }
+}
+
+impl Seek for LocalFileReader {
+    /// Repositions the wrapped file reader.
+    ///
+    /// # Parameters
+    /// - `pos`: Target seek position.
+    ///
+    /// # Returns
+    /// New absolute stream position.
+    ///
+    /// # Errors
+    /// Returns the I/O error reported by the wrapped reader.
+    #[inline]
+    fn seek(&mut self, pos: SeekFrom) -> Result<u64> {
+        match self {
+            Self::Unbuffered(file) => file.seek(pos),
+            Self::Buffered(reader) => reader.seek(pos),
         }
     }
 }

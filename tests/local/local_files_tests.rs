@@ -11,6 +11,8 @@ pub(super) use std::io::{
     Error,
     ErrorKind,
     Read,
+    Seek,
+    SeekFrom,
     Write,
 };
 #[cfg(unix)]
@@ -477,6 +479,125 @@ fn test_open_reader_and_writer_cover_unbuffered_and_append_or_create_modes() {
     reader.read_to_end(&mut content).unwrap();
 
     assert_eq!(b"XYcdef-tail", content.as_slice());
+    fs::remove_dir_all(dir).unwrap();
+}
+
+#[test]
+fn test_local_file_reader_supports_seek_for_unbuffered_and_buffered_readers() {
+    let dir = temp_dir("reader-seek");
+    let path = dir.join("data.txt");
+    fs::write(&path, b"abcdef").unwrap();
+
+    let mut unbuffered =
+        LocalFiles::open_reader(&path, FileReadOptions::unbuffered())
+            .expect("unbuffered reader should open");
+    let mut unbuffered_bytes = [0; 2];
+    assert_eq!(
+        2,
+        unbuffered
+            .seek(SeekFrom::Start(2))
+            .expect("unbuffered reader should seek")
+    );
+    unbuffered
+        .read_exact(&mut unbuffered_bytes)
+        .expect("unbuffered reader should read from seeked position");
+
+    let mut buffered = LocalFiles::open_reader(
+        &path,
+        FileReadOptions::buffered_with_capacity(4),
+    )
+    .expect("buffered reader should open");
+    let mut first = [0; 1];
+    let mut buffered_tail = Vec::new();
+    buffered
+        .read_exact(&mut first)
+        .expect("buffered reader should fill its internal buffer");
+    assert_eq!(
+        4,
+        buffered
+            .seek(SeekFrom::Start(4))
+            .expect("buffered reader should seek")
+    );
+    buffered
+        .read_to_end(&mut buffered_tail)
+        .expect("buffered reader should read after seek");
+
+    assert_eq!(b"cd", &unbuffered_bytes);
+    assert_eq!(b"a", &first);
+    assert_eq!(b"ef", buffered_tail.as_slice());
+    fs::remove_dir_all(dir).unwrap();
+}
+
+#[test]
+fn test_local_file_writer_supports_seek_for_unbuffered_and_buffered_writers() {
+    let dir = temp_dir("writer-seek");
+    let unbuffered_path = dir.join("unbuffered.txt");
+    let buffered_path = dir.join("buffered.txt");
+
+    {
+        let mut writer = LocalFiles::open_writer(
+            &unbuffered_path,
+            FileWriteOptions::default(),
+        )
+        .expect("unbuffered writer should open");
+        writer.write_all(b"abcdef").unwrap();
+        assert_eq!(
+            2,
+            writer
+                .seek(SeekFrom::Start(2))
+                .expect("unbuffered writer should seek")
+        );
+        writer.write_all(b"XY").unwrap();
+        writer.close().unwrap();
+    }
+
+    {
+        let mut writer = LocalFiles::open_writer(
+            &buffered_path,
+            FileWriteOptions::default().buffered_with_capacity(4),
+        )
+        .expect("buffered writer should open");
+        writer.write_all(b"abcdef").unwrap();
+        assert_eq!(
+            2,
+            writer
+                .seek(SeekFrom::Start(2))
+                .expect("buffered writer should seek and flush")
+        );
+        writer.write_all(b"XY").unwrap();
+        writer.close().unwrap();
+    }
+
+    assert_eq!(b"abXYef", fs::read(&unbuffered_path).unwrap().as_slice());
+    assert_eq!(b"abXYef", fs::read(&buffered_path).unwrap().as_slice());
+    fs::remove_dir_all(dir).unwrap();
+}
+
+#[test]
+fn test_local_file_writer_sync_methods_flush_buffered_contents() {
+    let dir = temp_dir("writer-sync");
+    let path = dir.join("data.txt");
+
+    let mut writer = LocalFiles::open_writer(
+        &path,
+        FileWriteOptions::default().buffered_with_capacity(32),
+    )
+    .expect("buffered writer should open");
+    writer.write_all(b"sync-all").unwrap();
+    writer
+        .sync_all()
+        .expect("sync_all should flush and sync buffered contents");
+    assert_eq!(b"sync-all", fs::read(&path).unwrap().as_slice());
+
+    writer.write_all(b"-sync-data").unwrap();
+    writer
+        .sync_data()
+        .expect("sync_data should flush and sync buffered contents");
+    assert_eq!(
+        b"sync-all-sync-data",
+        fs::read(&path).unwrap().as_slice()
+    );
+    writer.close().unwrap();
     fs::remove_dir_all(dir).unwrap();
 }
 

@@ -13,6 +13,8 @@ use std::io::{
     Error,
     ErrorKind,
     Result,
+    Seek,
+    SeekFrom,
     Write,
 };
 
@@ -79,6 +81,41 @@ impl LocalFileWriter {
     pub const fn is_buffered(&self) -> bool {
         matches!(self, Self::Buffered(_))
     }
+
+    /// Flushes buffered bytes and synchronizes file contents and metadata to
+    /// storage.
+    ///
+    /// This method delegates to [`File::sync_all`] after flushing any
+    /// standard-library buffer owned by this writer. It does not close the
+    /// writer, so callers may continue writing after it succeeds.
+    ///
+    /// # Errors
+    /// Returns the I/O error reported while flushing or synchronizing the
+    /// wrapped file.
+    pub fn sync_all(&mut self) -> Result<()> {
+        self.flush()?;
+        match self {
+            Self::Unbuffered(file) => file.sync_all(),
+            Self::Buffered(writer) => writer.get_ref().sync_all(),
+        }
+    }
+
+    /// Flushes buffered bytes and synchronizes file contents to storage.
+    ///
+    /// This method delegates to [`File::sync_data`] after flushing any
+    /// standard-library buffer owned by this writer. Metadata synchronization is
+    /// platform-dependent and follows [`File::sync_data`] semantics.
+    ///
+    /// # Errors
+    /// Returns the I/O error reported while flushing or synchronizing the
+    /// wrapped file.
+    pub fn sync_data(&mut self) -> Result<()> {
+        self.flush()?;
+        match self {
+            Self::Unbuffered(file) => file.sync_data(),
+            Self::Buffered(writer) => writer.get_ref().sync_data(),
+        }
+    }
 }
 
 impl Write for LocalFileWriter {
@@ -109,6 +146,32 @@ impl Write for LocalFileWriter {
         match self {
             Self::Unbuffered(file) => file.flush(),
             Self::Buffered(writer) => writer.flush(),
+        }
+    }
+}
+
+impl Seek for LocalFileWriter {
+    /// Repositions the wrapped file writer.
+    ///
+    /// Buffered writers flush pending bytes before seeking, matching
+    /// [`BufWriter`] seek semantics. Seeking does not disable append mode:
+    /// writers opened with append semantics may still write at the end of the
+    /// file according to [`std::fs::OpenOptions`] behavior.
+    ///
+    /// # Parameters
+    /// - `pos`: Target seek position.
+    ///
+    /// # Returns
+    /// New absolute stream position.
+    ///
+    /// # Errors
+    /// Returns the I/O error reported while flushing buffered bytes or seeking
+    /// the wrapped file.
+    #[inline]
+    fn seek(&mut self, pos: SeekFrom) -> Result<u64> {
+        match self {
+            Self::Unbuffered(file) => file.seek(pos),
+            Self::Buffered(writer) => writer.seek(pos),
         }
     }
 }
