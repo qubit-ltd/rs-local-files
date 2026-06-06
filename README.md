@@ -37,7 +37,7 @@ For stream-level `std::io` traits, extension methods, wrappers, and codecs, see
 
 ```toml
 [dependencies]
-qubit-local-files = "0.1"
+qubit-local-files = "0.2"
 ```
 
 ## Quick Example
@@ -136,6 +136,11 @@ Normal file opening is intentionally explicit:
 | `FileWriteOptions` | Controls parent creation, write mode, and writer buffering. |
 | `FileBuffering` | Selects unbuffered I/O or buffered I/O with an optional capacity. |
 | `FileWriteMode` | Selects `OpenExistingAtStart`, `CreateNew`, `CreateOrTruncate`, `AppendExisting`, or `AppendOrCreate`. |
+
+`LocalFileReader` implements `Read` and `Seek`. `LocalFileWriter` implements
+`Write` and `Seek`, and provides `sync_all` / `sync_data` helpers that flush any
+buffered bytes before synchronizing the underlying file. Seeking a writer does
+not disable append-mode semantics.
 
 `atomic_write` remains a separate API because it performs a complete replacement
 protocol rather than opening a normal write handle.

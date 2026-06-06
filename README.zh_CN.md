@@ -31,7 +31,7 @@ Qubit Local Files 承载从 `qubit-io` 拆出的本地文件系统工具。它�
 
 ```toml
 [dependencies]
-qubit-local-files = "0.1"
+qubit-local-files = "0.2"
 ```
 
 ## 快速示例
@@ -116,6 +116,10 @@ assert_eq!("new payload\n", std::fs::read_to_string(&final_path)?);
 | `FileWriteOptions` | 控制是否创建父目录、写入模式和 writer 是否缓冲。 |
 | `FileBuffering` | 选择无额外缓冲，或使用可选容量的缓冲 I/O。 |
 | `FileWriteMode` | 选择 `OpenExistingAtStart`、`CreateNew`、`CreateOrTruncate`、`AppendExisting` 或 `AppendOrCreate`。 |
+
+`LocalFileReader` 实现 `Read` 和 `Seek`。`LocalFileWriter` 实现 `Write` 和
+`Seek`，并提供 `sync_all` / `sync_data` helper；这些 helper 会先 flush
+缓冲内容，再同步底层文件。对 writer 执行 seek 不会关闭 append-mode 语义。
 
 `atomic_write` 仍然是独立 API，因为它执行的是完整替换协议，而不是普通写句柄打开。
 

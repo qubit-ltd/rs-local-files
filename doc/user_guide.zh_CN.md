@@ -38,7 +38,7 @@ Qubit Local Files 是 Qubit Rust crate 家族中的本地文件系统 crate。�
 
 ```toml
 [dependencies]
-qubit-local-files = "0.1"
+qubit-local-files = "0.2"
 ```
 
 ## 导入方式
@@ -72,6 +72,12 @@ use qubit_local_files::{
 | `FileWriteOptions` | `create_parent`、`mode`、`buffering` | 控制是否创建父目录、写入模式和 writer 是否缓冲。 |
 | `FileBuffering` | `Unbuffered`、`Buffered { capacity }` | 选择原始文件 I/O，或带可选容量的 `BufReader` / `BufWriter`。 |
 | `FileWriteMode` | enum variants | 选择目标文件的写入打开方式。 |
+
+`LocalFiles::open_reader` 返回的 reader 实现 `Read` 和 `Seek`。
+`LocalFiles::open_writer` 返回的 writer 实现 `Write` 和 `Seek`。
+`LocalFileWriter::sync_all` 和 `LocalFileWriter::sync_data` 会先 flush
+缓冲内容，再同步底层文件，适合 append log 或其他不需要 whole-file atomic
+replacement 的普通写句柄。对 writer 执行 seek 不会关闭 append-mode 语义。
 
 写入模式：
 

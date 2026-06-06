@@ -45,7 +45,7 @@ Those stream and byte-I/O concerns belong in
 
 ```toml
 [dependencies]
-qubit-local-files = "0.1"
+qubit-local-files = "0.2"
 ```
 
 ## Import Patterns
@@ -80,6 +80,13 @@ Normal file opening is controlled by explicit option structs:
 | `FileWriteOptions` | `create_parent`, `mode`, `buffering` | Controls parent creation, write mode, and writer buffering. |
 | `FileBuffering` | `Unbuffered`, `Buffered { capacity }` | Selects raw file I/O or `BufReader` / `BufWriter` with an optional capacity. |
 | `FileWriteMode` | enum variants | Selects how the target is opened for writing. |
+
+Readers returned by `LocalFiles::open_reader` implement `Read` and `Seek`.
+Writers returned by `LocalFiles::open_writer` implement `Write` and `Seek`.
+`LocalFileWriter::sync_all` and `LocalFileWriter::sync_data` flush any buffered
+bytes before synchronizing the underlying file, which is useful for append logs
+or other normal write handles that do not need whole-file atomic replacement.
+Seeking a writer does not disable append-mode semantics.
 
 Write modes:
 
