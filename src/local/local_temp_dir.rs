@@ -1,12 +1,10 @@
-/*******************************************************************************
- *
- *    Copyright (c) 2026 Haixing Hu.
- *
- *    SPDX-License-Identifier: Apache-2.0
- *
- *    Licensed under the Apache License, Version 2.0.
- *
- ******************************************************************************/
+// =============================================================================
+//    Copyright (c) 2026 Haixing Hu.
+//
+//    SPDX-License-Identifier: Apache-2.0
+//
+//    Licensed under the Apache License, Version 2.0.
+// =============================================================================
 use std::ffi::OsString;
 use std::fs::{
     self,
@@ -38,9 +36,10 @@ use super::local_files::create_temp_dir_in_dir;
 
 /// Temporary directory that is removed automatically unless kept or persisted.
 ///
-/// `LocalTempDir` owns a directory path and removes that directory tree when the
-/// object is dropped. Use [`LocalTempDir::keep`] to keep the temporary directory at
-/// its generated path, or [`LocalTempDir::persist`] to move it to a final path.
+/// `LocalTempDir` owns a directory path and removes that directory tree when
+/// the object is dropped. Use [`LocalTempDir::keep`] to keep the temporary
+/// directory at its generated path, or [`LocalTempDir::persist`] to move it to
+/// a final path.
 ///
 /// Cleanup performed from `Drop` is best-effort. If removal fails, the failure
 /// is reported through the `log` facade at warning level and the program is not
@@ -72,7 +71,11 @@ impl LocalTempDir {
     /// temporary directory cannot be created.
     #[inline]
     pub fn with_prefix(prefix: Option<&str>) -> Result<Self> {
-        Self::in_dir(std::env::temp_dir(), prefix, LocalFiles::DEFAULT_TEMP_FILE_RETRIES)
+        Self::in_dir(
+            std::env::temp_dir(),
+            prefix,
+            LocalFiles::DEFAULT_TEMP_FILE_RETRIES,
+        )
     }
 
     /// Creates a temporary directory in the specified directory.
@@ -86,7 +89,11 @@ impl LocalTempDir {
     /// Returns an I/O error when `dir` cannot be created, `prefix` is not a
     /// safe file-name fragment, the retry limit is zero, all generated names
     /// collide, or directory creation fails.
-    pub fn in_dir<P>(dir: P, prefix: Option<&str>, max_tries: usize) -> Result<Self>
+    pub fn in_dir<P>(
+        dir: P,
+        prefix: Option<&str>,
+        max_tries: usize,
+    ) -> Result<Self>
     where
         P: AsRef<Path>,
     {
@@ -210,7 +217,11 @@ impl LocalTempDir {
     /// Returns an I/O error when the child path is invalid, escapes the
     /// temporary directory, is not a file, cannot be opened, or requests an
     /// invalid buffer capacity.
-    pub fn open_child_reader<P>(&self, child: P, options: FileReadOptions) -> Result<LocalFileReader>
+    pub fn open_child_reader<P>(
+        &self,
+        child: P,
+        options: FileReadOptions,
+    ) -> Result<LocalFileReader>
     where
         P: AsRef<Path>,
     {
@@ -240,13 +251,22 @@ impl LocalTempDir {
     /// cannot be created, the child would escape the temporary directory, the
     /// target is not a file, or the file cannot be opened with the requested
     /// mode.
-    pub fn open_child_writer<P>(&self, child: P, options: FileWriteOptions) -> Result<LocalFileWriter>
+    pub fn open_child_writer<P>(
+        &self,
+        child: P,
+        options: FileWriteOptions,
+    ) -> Result<LocalFileWriter>
     where
         P: AsRef<Path>,
     {
         let child = child.as_ref();
         let path = self.child_path(child)?;
-        prepare_child_writer_path(self.path(), child, &path, options.create_parent)?;
+        prepare_child_writer_path(
+            self.path(),
+            child,
+            &path,
+            options.create_parent,
+        )?;
         LocalFiles::open_writer(path, options)
     }
 
@@ -339,13 +359,19 @@ fn child_component_names(child: &Path) -> Result<Vec<OsString>> {
             _ => {
                 return Err(Error::new(
                     ErrorKind::InvalidInput,
-                    format!("child path must be relative and safe: {}", child.display()),
+                    format!(
+                        "child path must be relative and safe: {}",
+                        child.display()
+                    ),
                 ));
             }
         }
     }
     if components.is_empty() {
-        return Err(Error::new(ErrorKind::InvalidInput, "child path must not be empty"));
+        return Err(Error::new(
+            ErrorKind::InvalidInput,
+            "child path must not be empty",
+        ));
     }
     Ok(components)
 }
@@ -371,17 +397,25 @@ fn ensure_child_dir_path(root: &Path, child: &Path) -> Result<PathBuf> {
             Ok(metadata) if metadata.file_type().is_symlink() => {
                 return Err(Error::new(
                     ErrorKind::InvalidInput,
-                    format!("child directory crosses a symbolic link: {}", path.display()),
+                    format!(
+                        "child directory crosses a symbolic link: {}",
+                        path.display()
+                    ),
                 ));
             }
             Ok(metadata) if metadata.is_dir() => {}
             Ok(_) => {
                 return Err(Error::new(
                     ErrorKind::AlreadyExists,
-                    format!("child path component is not a directory: {}", path.display()),
+                    format!(
+                        "child path component is not a directory: {}",
+                        path.display()
+                    ),
                 ));
             }
-            Err(error) if error.kind() == ErrorKind::NotFound => fs::create_dir(&path)?,
+            Err(error) if error.kind() == ErrorKind::NotFound => {
+                fs::create_dir(&path)?
+            }
             Err(error) => return Err(error),
         }
     }
@@ -419,7 +453,12 @@ fn ensure_child_file_inside(root: &Path, path: &Path) -> Result<()> {
 /// # Errors
 /// Returns an I/O error when parents are missing, cannot be created, or the
 /// target would escape `root`.
-fn prepare_child_writer_path(root: &Path, child: &Path, path: &Path, create_parent: bool) -> Result<()> {
+fn prepare_child_writer_path(
+    root: &Path,
+    child: &Path,
+    path: &Path,
+    create_parent: bool,
+) -> Result<()> {
     if let Some(parent) = child.parent()
         && !parent.as_os_str().is_empty()
     {
@@ -431,7 +470,9 @@ fn prepare_child_writer_path(root: &Path, child: &Path, path: &Path, create_pare
     }
 
     match fs::metadata(path) {
-        Ok(metadata) if metadata.is_file() => ensure_existing_path_inside(root, path),
+        Ok(metadata) if metadata.is_file() => {
+            ensure_existing_path_inside(root, path)
+        }
         Ok(_) => Err(Error::new(
             ErrorKind::InvalidInput,
             format!("child path is not a file: {}", path.display()),
@@ -456,7 +497,10 @@ fn ensure_existing_path_inside(root: &Path, path: &Path) -> Result<()> {
     if !path.starts_with(&root) {
         return Err(Error::new(
             ErrorKind::InvalidInput,
-            format!("child path escapes temporary directory: {}", path.display()),
+            format!(
+                "child path escapes temporary directory: {}",
+                path.display()
+            ),
         ));
     }
     Ok(())
@@ -468,7 +512,11 @@ impl Drop for LocalTempDir {
         if let Some(path) = self.path.take()
             && let Err(error) = fs::remove_dir_all(&path)
         {
-            warn!("failed to remove temporary directory {}: {}", path.display(), error);
+            warn!(
+                "failed to remove temporary directory {}: {}",
+                path.display(),
+                error
+            );
         }
     }
 }

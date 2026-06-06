@@ -1,12 +1,10 @@
-/*******************************************************************************
- *
- *    Copyright (c) 2026 Haixing Hu.
- *
- *    SPDX-License-Identifier: Apache-2.0
- *
- *    Licensed under the Apache License, Version 2.0.
- *
- ******************************************************************************/
+// =============================================================================
+//    Copyright (c) 2026 Haixing Hu.
+//
+//    SPDX-License-Identifier: Apache-2.0
+//
+//    Licensed under the Apache License, Version 2.0.
+// =============================================================================
 use std::ffi::OsStr;
 use std::io::{
     Error,
@@ -87,7 +85,8 @@ impl LocalFilenames {
     /// the operating system random source cannot provide bytes.
     #[inline]
     pub fn random_with(prefix: Option<&str>, suffix: Option<&str>) -> String {
-        Self::try_random_with(prefix, suffix).expect("failed to build random file name")
+        Self::try_random_with(prefix, suffix)
+            .expect("failed to build random file name")
     }
 
     /// Tries to build a random file-name component using the default prefix.
@@ -122,7 +121,10 @@ impl LocalFilenames {
     /// Returns [`ErrorKind::InvalidInput`] when `prefix` or `suffix` is not a
     /// safe file-name fragment. Returns [`ErrorKind::Other`] when the operating
     /// system random source cannot provide bytes.
-    pub fn try_random_with(prefix: Option<&str>, suffix: Option<&str>) -> Result<String> {
+    pub fn try_random_with(
+        prefix: Option<&str>,
+        suffix: Option<&str>,
+    ) -> Result<String> {
         let prefix = prefix.unwrap_or(Self::DEFAULT_RANDOM_PREFIX);
         let suffix = suffix.unwrap_or("");
         validate_file_name_fragment("prefix", prefix)?;
@@ -130,7 +132,9 @@ impl LocalFilenames {
         let timestamp = unix_timestamp_nanos();
         let process_id = std::process::id();
         let random = try_random_hex()?;
-        Ok(format!("{prefix}{timestamp:x}-{process_id:x}-{random}{suffix}"))
+        Ok(format!(
+            "{prefix}{timestamp:x}-{process_id:x}-{random}{suffix}"
+        ))
     }
 
     /// Validates that `name` is a portable single-component file name.
@@ -138,9 +142,9 @@ impl LocalFilenames {
     /// This is a lexical, conservative validation helper for names that should
     /// be safe to use as one file-name component across common platforms. It
     /// does not check whether the current filesystem can actually create the
-    /// file, and it does not inspect permissions, existing paths, mount options,
-    /// Unicode normalization, or filesystem-specific limits beyond a conservative
-    /// 255-byte UTF-8 length cap.
+    /// file, and it does not inspect permissions, existing paths, mount
+    /// options, Unicode normalization, or filesystem-specific limits beyond
+    /// a conservative 255-byte UTF-8 length cap.
     ///
     /// A portable file name must:
     /// - be non-empty;
@@ -175,7 +179,9 @@ impl LocalFilenames {
         if name.len() > MAX_PORTABLE_FILE_NAME_BYTES {
             return Err(Error::new(
                 ErrorKind::InvalidInput,
-                format!("portable file name exceeds {MAX_PORTABLE_FILE_NAME_BYTES} UTF-8 bytes"),
+                format!(
+                    "portable file name exceeds {MAX_PORTABLE_FILE_NAME_BYTES} UTF-8 bytes"
+                ),
             ));
         }
         if name.ends_with([' ', '.']) {
@@ -185,11 +191,17 @@ impl LocalFilenames {
             ));
         }
         if let Some(character) = name.chars().find(|character| {
-            character.is_control() || matches!(character, '/' | '\\' | '<' | '>' | ':' | '"' | '|' | '?' | '*')
+            character.is_control()
+                || matches!(
+                    character,
+                    '/' | '\\' | '<' | '>' | ':' | '"' | '|' | '?' | '*'
+                )
         }) {
             return Err(Error::new(
                 ErrorKind::InvalidInput,
-                format!("portable file name contains forbidden character {character:?}"),
+                format!(
+                    "portable file name contains forbidden character {character:?}"
+                ),
             ));
         }
         if is_windows_reserved_file_name(name) {
@@ -312,9 +324,14 @@ impl LocalFilenames {
     /// # Returns
     /// `true` when `path` has `extension` as its final extension ignoring ASCII
     /// case.
-    pub fn has_extension_ignore_ascii_case(path: &Path, extension: &str) -> bool {
+    pub fn has_extension_ignore_ascii_case(
+        path: &Path,
+        extension: &str,
+    ) -> bool {
         Self::extension(path)
-            .map(|actual| actual.eq_ignore_ascii_case(normalize_extension(extension)))
+            .map(|actual| {
+                actual.eq_ignore_ascii_case(normalize_extension(extension))
+            })
             .unwrap_or(false)
     }
 
@@ -341,11 +358,12 @@ impl LocalFilenames {
     /// Returns the final decoded file-name segment from a URL-like string.
     ///
     /// Query strings and fragments are removed before the final slash-delimited
-    /// segment is selected. Percent-encoded UTF-8 sequences are decoded when the
-    /// decoded result remains a single safe file-name fragment. If the selected
-    /// segment contains invalid percent encoding, invalid UTF-8, or encoded path
-    /// separators, parent-directory components, dot segments, or NUL bytes, the
-    /// original selected segment is returned unchanged.
+    /// segment is selected. Percent-encoded UTF-8 sequences are decoded when
+    /// the decoded result remains a single safe file-name fragment. If the
+    /// selected segment contains invalid percent encoding, invalid UTF-8,
+    /// or encoded path separators, parent-directory components, dot
+    /// segments, or NUL bytes, the original selected segment is returned
+    /// unchanged.
     ///
     /// # Parameters
     /// - `url`: URL-like string to inspect.
@@ -387,7 +405,10 @@ fn normalize_extension(extension: &str) -> &str {
 /// instead of a plain file-name fragment.
 fn validate_file_name_fragment(role: &str, fragment: &str) -> Result<()> {
     if fragment.contains('\0') {
-        return Err(invalid_file_name_fragment_error(role, "NUL bytes are not allowed"));
+        return Err(invalid_file_name_fragment_error(
+            role,
+            "NUL bytes are not allowed",
+        ));
     }
     if fragment.contains('/') || fragment.contains('\\') {
         return Err(invalid_file_name_fragment_error(
@@ -441,8 +462,8 @@ fn invalid_file_name_fragment_error(role: &str, reason: &str) -> Error {
 /// Returns the current Unix timestamp in nanoseconds.
 ///
 /// # Returns
-/// Nanoseconds since the Unix epoch, or zero if the system clock is earlier than
-/// the epoch.
+/// Nanoseconds since the Unix epoch, or zero if the system clock is earlier
+/// than the epoch.
 fn unix_timestamp_nanos() -> u128 {
     SystemTime::now()
         .duration_since(UNIX_EPOCH)
@@ -502,7 +523,9 @@ fn hex_encode(bytes: &[u8]) -> String {
 /// `true` when `name` uses a reserved device name, including a reserved base
 /// name followed by an extension.
 fn is_windows_reserved_file_name(name: &str) -> bool {
-    let base_name = name.split_once('.').map_or(name, |(base_name, _)| base_name);
+    let base_name = name
+        .split_once('.')
+        .map_or(name, |(base_name, _)| base_name);
     let base_name = base_name.trim_end_matches([' ', '.']);
 
     if base_name.eq_ignore_ascii_case("CON")
@@ -522,7 +545,8 @@ fn is_windows_reserved_file_name(name: &str) -> bool {
 
     let prefix = &bytes[..3];
     let suffix = bytes[3];
-    (prefix.eq_ignore_ascii_case(b"COM") || prefix.eq_ignore_ascii_case(b"LPT")) && (b'1'..=b'9').contains(&suffix)
+    (prefix.eq_ignore_ascii_case(b"COM") || prefix.eq_ignore_ascii_case(b"LPT"))
+        && (b'1'..=b'9').contains(&suffix)
 }
 
 /// Removes query and fragment suffixes from a URL-like string.

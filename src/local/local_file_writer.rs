@@ -1,12 +1,10 @@
-/*******************************************************************************
- *
- *    Copyright (c) 2026 Haixing Hu.
- *
- *    SPDX-License-Identifier: Apache-2.0
- *
- *    Licensed under the Apache License, Version 2.0.
- *
- ******************************************************************************/
+// =============================================================================
+//    Copyright (c) 2026 Haixing Hu.
+//
+//    SPDX-License-Identifier: Apache-2.0
+//
+//    Licensed under the Apache License, Version 2.0.
+// =============================================================================
 //! Local file writer wrapper.
 
 use std::fs::File;
@@ -42,10 +40,15 @@ impl LocalFileWriter {
     /// # Errors
     /// Returns [`ErrorKind::InvalidInput`] when a buffered writer requests a
     /// zero-byte capacity.
-    pub(crate) fn from_file(file: File, buffering: FileBuffering) -> Result<Self> {
+    pub(crate) fn from_file(
+        file: File,
+        buffering: FileBuffering,
+    ) -> Result<Self> {
         match buffering {
             FileBuffering::Unbuffered => Ok(Self::Unbuffered(file)),
-            FileBuffering::Buffered { capacity: None } => Ok(Self::Buffered(BufWriter::new(file))),
+            FileBuffering::Buffered { capacity: None } => {
+                Ok(Self::Buffered(BufWriter::new(file)))
+            }
             FileBuffering::Buffered {
                 capacity: Some(capacity),
             } => {

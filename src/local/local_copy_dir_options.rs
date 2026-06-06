@@ -1,12 +1,10 @@
-/*******************************************************************************
- *
- *    Copyright (c) 2026 Haixing Hu.
- *
- *    SPDX-License-Identifier: Apache-2.0
- *
- *    Licensed under the Apache License, Version 2.0.
- *
- ******************************************************************************/
+// =============================================================================
+//    Copyright (c) 2026 Haixing Hu.
+//
+//    SPDX-License-Identifier: Apache-2.0
+//
+//    Licensed under the Apache License, Version 2.0.
+// =============================================================================
 /// Options controlling recursive directory copy behavior.
 ///
 /// The default is conservative: existing destination entries are not
@@ -24,7 +22,8 @@ pub struct LocalCopyDirOptions {
     /// data outside the requested source tree.
     pub follow_symlinks: bool,
 
-    /// Whether to copy source permissions to destination entries after copying.
+    /// Whether to copy source permissions to destination entries after
+    /// copying.
     ///
     /// This uses `std::fs::set_permissions` and therefore only preserves the
     /// portable permission bits exposed by the Rust standard library.

@@ -1,12 +1,10 @@
-/*******************************************************************************
- *
- *    Copyright (c) 2026 Haixing Hu.
- *
- *    SPDX-License-Identifier: Apache-2.0
- *
- *    Licensed under the Apache License, Version 2.0.
- *
- ******************************************************************************/
+// =============================================================================
+//    Copyright (c) 2026 Haixing Hu.
+//
+//    SPDX-License-Identifier: Apache-2.0
+//
+//    Licensed under the Apache License, Version 2.0.
+// =============================================================================
 use std::fs::{
     self,
     File,
@@ -91,7 +89,10 @@ impl LocalTempFile {
     /// created, `prefix` or `suffix` is not a safe file-name fragment, or a
     /// unique temporary file cannot be created.
     #[inline]
-    pub fn with_name(prefix: Option<&str>, suffix: Option<&str>) -> Result<Self> {
+    pub fn with_name(
+        prefix: Option<&str>,
+        suffix: Option<&str>,
+    ) -> Result<Self> {
         Self::in_dir(
             std::env::temp_dir(),
             prefix,
@@ -112,11 +113,17 @@ impl LocalTempFile {
     /// Returns an I/O error when `dir` cannot be created, `prefix` or `suffix`
     /// is not a safe file-name fragment, the retry limit is zero, all generated
     /// names collide, or file creation fails.
-    pub fn in_dir<P>(dir: P, prefix: Option<&str>, suffix: Option<&str>, max_tries: usize) -> Result<Self>
+    pub fn in_dir<P>(
+        dir: P,
+        prefix: Option<&str>,
+        suffix: Option<&str>,
+        max_tries: usize,
+    ) -> Result<Self>
     where
         P: AsRef<Path>,
     {
-        let (path, file) = create_temp_file_in_dir(dir.as_ref(), prefix, suffix, max_tries)?;
+        let (path, file) =
+            create_temp_file_in_dir(dir.as_ref(), prefix, suffix, max_tries)?;
         Ok(Self {
             path: Some(path),
             writer: LocalTempFileWriterState::Unconfigured(file),
@@ -182,19 +189,26 @@ impl LocalTempFile {
     /// Returns [`ErrorKind::NotFound`] after [`LocalTempFile::close`] has
     /// closed the writer, [`ErrorKind::InvalidInput`] when a later call passes
     /// different options, or any I/O error reported while opening the writer.
-    pub fn writer(&mut self, options: FileWriteOptions) -> Result<&mut LocalFileWriter> {
+    pub fn writer(
+        &mut self,
+        options: FileWriteOptions,
+    ) -> Result<&mut LocalFileWriter> {
         match &self.writer {
             LocalTempFileWriterState::Configured {
                 options: existing_options,
                 ..
-            } if *existing_options == options => return self.configured_writer_mut(),
+            } if *existing_options == options => {
+                return self.configured_writer_mut();
+            }
             LocalTempFileWriterState::Configured { .. } => {
                 return Err(Error::new(
                     ErrorKind::InvalidInput,
                     "temporary file writer is already configured with different options",
                 ));
             }
-            LocalTempFileWriterState::Closed => return Err(writer_closed_error()),
+            LocalTempFileWriterState::Closed => {
+                return Err(writer_closed_error());
+            }
             LocalTempFileWriterState::Unconfigured(_) => {}
         }
 
@@ -218,24 +232,31 @@ impl LocalTempFile {
     fn configured_writer_mut(&mut self) -> Result<&mut LocalFileWriter> {
         match &mut self.writer {
             LocalTempFileWriterState::Configured { writer, .. } => Ok(writer),
-            LocalTempFileWriterState::Unconfigured(_) | LocalTempFileWriterState::Closed => {
+            LocalTempFileWriterState::Unconfigured(_)
+            | LocalTempFileWriterState::Closed => {
                 unreachable!("temporary file writer is not configured")
             }
         }
     }
 
-    /// Flushes and closes the temporary file writer while keeping cleanup active.
+    /// Flushes and closes the temporary file writer while keeping cleanup
+    /// active.
     ///
     /// # Errors
     /// Returns the I/O error reported while flushing a configured writer.
     pub fn close(&mut self) -> Result<()> {
-        let state = std::mem::replace(&mut self.writer, LocalTempFileWriterState::Closed);
+        let state = std::mem::replace(
+            &mut self.writer,
+            LocalTempFileWriterState::Closed,
+        );
         match state {
             LocalTempFileWriterState::Unconfigured(file) => {
                 drop(file);
                 Ok(())
             }
-            LocalTempFileWriterState::Configured { writer, .. } => writer.close(),
+            LocalTempFileWriterState::Configured { writer, .. } => {
+                writer.close()
+            }
             LocalTempFileWriterState::Closed => Ok(()),
         }
     }
@@ -269,7 +290,10 @@ impl LocalTempFile {
     /// Returns the I/O error reported while flushing a configured writer.
     pub fn keep(mut self) -> Result<PathBuf> {
         self.close()?;
-        Ok(self.path.take().expect("temporary file path has already been released"))
+        Ok(self
+            .path
+            .take()
+            .expect("temporary file path has already been released"))
     }
 
     /// Moves the temporary file to a final path without overwriting.
@@ -303,8 +327,8 @@ impl LocalTempFile {
     ///
     /// The writer is flushed and closed before moving the path. Parent
     /// directories for `target` are created before moving. When
-    /// `options.overwrite` is `false`, existing targets are rejected by the move
-    /// operation. When
+    /// `options.overwrite` is `false`, existing targets are rejected by the
+    /// move operation. When
     /// `options.overwrite` is `true`, an existing target file may be replaced.
     ///
     /// # Parameters
@@ -318,7 +342,11 @@ impl LocalTempFile {
     /// Returns an I/O error when the parent directory cannot be created, the
     /// target already exists while overwriting is disabled, or the temporary
     /// file cannot be moved to `target`.
-    pub fn persist_with<P>(mut self, target: P, options: LocalPersistOptions) -> Result<PathBuf>
+    pub fn persist_with<P>(
+        mut self,
+        target: P,
+        options: LocalPersistOptions,
+    ) -> Result<PathBuf>
     where
         P: AsRef<Path>,
     {
@@ -340,13 +368,18 @@ impl LocalTempFile {
 }
 
 impl Drop for LocalTempFile {
-    /// Closes and removes the temporary file unless ownership has been released.
+    /// Closes and removes the temporary file unless ownership has been
+    /// released.
     fn drop(&mut self) {
         drop(self.close());
         if let Some(path) = self.path.take()
             && let Err(error) = fs::remove_file(&path)
         {
-            warn!("failed to remove temporary file {}: {}", path.display(), error);
+            warn!(
+                "failed to remove temporary file {}: {}",
+                path.display(),
+                error
+            );
         }
     }
 }

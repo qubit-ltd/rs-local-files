@@ -1,12 +1,10 @@
-/*******************************************************************************
- *
- *    Copyright (c) 2026 Haixing Hu.
- *
- *    SPDX-License-Identifier: Apache-2.0
- *
- *    Licensed under the Apache License, Version 2.0.
- *
- ******************************************************************************/
+// =============================================================================
+//    Copyright (c) 2026 Haixing Hu.
+//
+//    SPDX-License-Identifier: Apache-2.0
+//
+//    Licensed under the Apache License, Version 2.0.
+// =============================================================================
 use std::env;
 #[cfg(unix)]
 use std::ffi::CString;
@@ -88,7 +86,11 @@ const ATOMIC_WRITE_TEMP_PREFIX: &str = ".atomic-write-";
 
 #[cfg(windows)]
 unsafe extern "system" {
-    fn MoveFileExW(existing_file_name: *const u16, new_file_name: *const u16, flags: u32) -> i32;
+    fn MoveFileExW(
+        existing_file_name: *const u16,
+        new_file_name: *const u16,
+        flags: u32,
+    ) -> i32;
 
     fn CreateFileW(
         file_name: *const u16,
@@ -203,7 +205,10 @@ impl LocalFiles {
     /// Returns an I/O error when `path` cannot be inspected or opened, when the
     /// target is not a file, or when the requested buffer capacity is invalid.
     #[inline]
-    pub fn open_reader<P>(path: P, options: FileReadOptions) -> Result<LocalFileReader>
+    pub fn open_reader<P>(
+        path: P,
+        options: FileReadOptions,
+    ) -> Result<LocalFileReader>
     where
         P: AsRef<Path>,
     {
@@ -229,7 +234,10 @@ impl LocalFiles {
     /// cannot be opened with the requested mode, or the requested buffer
     /// capacity is invalid.
     #[inline]
-    pub fn open_writer<P>(path: P, options: FileWriteOptions) -> Result<LocalFileWriter>
+    pub fn open_writer<P>(
+        path: P,
+        options: FileWriteOptions,
+    ) -> Result<LocalFileWriter>
     where
         P: AsRef<Path>,
     {
@@ -284,8 +292,8 @@ impl LocalFiles {
     /// Total byte length of regular files contained in the directory tree.
     ///
     /// # Errors
-    /// Returns an I/O error when `path` cannot be inspected, is not a directory,
-    /// or one of the directory entries cannot be read.
+    /// Returns an I/O error when `path` cannot be inspected, is not a
+    /// directory, or one of the directory entries cannot be read.
     #[inline]
     pub fn dir_size<P>(path: P) -> Result<u64>
     where
@@ -297,8 +305,8 @@ impl LocalFiles {
     /// Removes all entries from a directory while keeping the directory itself.
     ///
     /// This method deletes files, directories, and symbolic links directly
-    /// contained in `path`. Nested directories are removed recursively. Symbolic
-    /// links are removed as links and are not followed.
+    /// contained in `path`. Nested directories are removed recursively.
+    /// Symbolic links are removed as links and are not followed.
     ///
     /// # Parameters
     /// - `path`: Directory to clean.
@@ -334,11 +342,11 @@ impl LocalFiles {
 
     /// Recursively copies a directory tree.
     ///
-    /// The source path must be a directory. The destination directory is created
-    /// when missing. Existing files are rejected unless
-    /// [`LocalCopyDirOptions::overwrite`] is enabled. By default, symbolic links are
-    /// rejected instead of followed so a copy cannot accidentally leave the
-    /// requested source tree.
+    /// The source path must be a directory. The destination directory is
+    /// created when missing. Existing files are rejected unless
+    /// [`LocalCopyDirOptions::overwrite`] is enabled. By default, symbolic
+    /// links are rejected instead of followed so a copy cannot accidentally
+    /// leave the requested source tree.
     ///
     /// This method also rejects destinations located inside the source tree or
     /// inside any followed source directory, because copying a directory into
@@ -361,7 +369,11 @@ impl LocalFiles {
     /// permission, a symbolic link is encountered while `follow_symlinks` is
     /// `false`, or an underlying filesystem operation fails.
     #[inline]
-    pub fn copy_dir_all_with<S, D>(src: S, dst: D, options: LocalCopyDirOptions) -> Result<LocalCopyDirStats>
+    pub fn copy_dir_all_with<S, D>(
+        src: S,
+        dst: D,
+        options: LocalCopyDirOptions,
+    ) -> Result<LocalCopyDirStats>
     where
         S: AsRef<Path>,
         D: AsRef<Path>,
@@ -483,8 +495,8 @@ fn ensure_dir_path(path: &Path) -> Result<()> {
 /// - `path`: File path whose parent directory should be created.
 ///
 /// # Errors
-/// Returns an I/O error when the parent directory or one of its ancestors cannot
-/// be created.
+/// Returns an I/O error when the parent directory or one of its ancestors
+/// cannot be created.
 fn ensure_parent_path(path: &Path) -> Result<()> {
     if let Some(parent) = path.parent()
         && !parent.as_os_str().is_empty()
@@ -506,15 +518,20 @@ fn ensure_parent_path(path: &Path) -> Result<()> {
 /// # Errors
 /// Returns an I/O error when `path` cannot be inspected or opened, when the
 /// target is not a file, or when buffering options are invalid.
-fn open_reader_path(path: &Path, options: FileReadOptions) -> Result<LocalFileReader> {
-    let metadata = fs::metadata(path).map_err(|error| add_path_context(error, "read metadata", path))?;
+fn open_reader_path(
+    path: &Path,
+    options: FileReadOptions,
+) -> Result<LocalFileReader> {
+    let metadata = fs::metadata(path)
+        .map_err(|error| add_path_context(error, "read metadata", path))?;
     if !metadata.is_file() {
         return Err(Error::new(
             ErrorKind::InvalidInput,
             format!("path is not a file: {}", path.display()),
         ));
     }
-    let file = File::open(path).map_err(|error| add_path_context(error, "open file", path))?;
+    let file = File::open(path)
+        .map_err(|error| add_path_context(error, "open file", path))?;
     LocalFileReader::from_file(file, options.buffering)
 }
 
@@ -531,7 +548,10 @@ fn open_reader_path(path: &Path, options: FileReadOptions) -> Result<LocalFileRe
 /// # Errors
 /// Returns an I/O error when parent directories cannot be created, the file
 /// cannot be opened with the requested mode, or buffering options are invalid.
-pub(crate) fn open_writer_path(path: &Path, options: FileWriteOptions) -> Result<LocalFileWriter> {
+pub(crate) fn open_writer_path(
+    path: &Path,
+    options: FileWriteOptions,
+) -> Result<LocalFileWriter> {
     if options.create_parent {
         ensure_parent_path(path)?;
     }
@@ -577,12 +597,16 @@ fn atomic_write_bytes_path(path: &Path, bytes: &[u8]) -> Result<()> {
 ///
 /// # Parameters
 /// - `path`: Destination path.
-/// - `write`: Function that writes the desired contents into the temporary file.
+/// - `write`: Function that writes the desired contents into the temporary
+///   file.
 ///
 /// # Errors
 /// Returns the first I/O error reported while creating, writing, syncing,
 /// replacing, or syncing the temporary file or parent directory.
-fn atomic_write_with_path(path: &Path, write: &mut dyn FnMut(&mut File) -> Result<()>) -> Result<()> {
+fn atomic_write_with_path(
+    path: &Path,
+    write: &mut dyn FnMut(&mut File) -> Result<()>,
+) -> Result<()> {
     ensure_parent_path(path)?;
     let existing_permissions = existing_file_permissions(path)?;
     let parent = parent_dir_for(path);
@@ -594,7 +618,13 @@ fn atomic_write_with_path(path: &Path, write: &mut dyn FnMut(&mut File) -> Resul
     )?;
 
     let result = write(&mut file)
-        .and_then(|()| apply_existing_permissions(&file, existing_permissions.as_ref(), &temp_path))
+        .and_then(|()| {
+            apply_existing_permissions(
+                &file,
+                existing_permissions.as_ref(),
+                &temp_path,
+            )
+        })
         .and_then(|()| file.flush())
         .and_then(|()| file.sync_all());
     if let Err(error) = result {
@@ -626,7 +656,9 @@ fn existing_file_permissions(path: &Path) -> Result<Option<fs::Permissions>> {
         Ok(metadata) if metadata.is_file() => Ok(Some(metadata.permissions())),
         Ok(_) => Ok(None),
         Err(error) if error.kind() == ErrorKind::NotFound => Ok(None),
-        Err(error) => Err(add_path_context(error, "read destination metadata", path)),
+        Err(error) => {
+            Err(add_path_context(error, "read destination metadata", path))
+        }
     }
 }
 
@@ -639,12 +671,20 @@ fn existing_file_permissions(path: &Path) -> Result<Option<fs::Permissions>> {
 ///
 /// # Errors
 /// Returns an I/O error when permissions cannot be applied.
-fn apply_existing_permissions(file: &File, permissions: Option<&fs::Permissions>, temp_path: &Path) -> Result<()> {
+fn apply_existing_permissions(
+    file: &File,
+    permissions: Option<&fs::Permissions>,
+    temp_path: &Path,
+) -> Result<()> {
     if let Some(permissions) = permissions {
         match file.set_permissions(permissions.clone()) {
             Ok(()) => {}
             Err(error) => {
-                return Err(add_path_context(error, "set temporary file permissions", temp_path));
+                return Err(add_path_context(
+                    error,
+                    "set temporary file permissions",
+                    temp_path,
+                ));
             }
         }
     }
@@ -677,13 +717,24 @@ pub(crate) fn create_temp_file_in_dir(
     loop {
         attempt += 1;
         let path = dir.join(LocalFilenames::try_random_with(prefix, suffix)?);
-        match OpenOptions::new().read(true).write(true).create_new(true).open(&path) {
+        match OpenOptions::new()
+            .read(true)
+            .write(true)
+            .create_new(true)
+            .open(&path)
+        {
             Ok(file) => return Ok((path, file)),
             Err(error) => {
-                if error.kind() == ErrorKind::AlreadyExists && attempt < max_tries {
+                if error.kind() == ErrorKind::AlreadyExists
+                    && attempt < max_tries
+                {
                     continue;
                 }
-                return Err(add_path_context(error, "create temporary file", &path));
+                return Err(add_path_context(
+                    error,
+                    "create temporary file",
+                    &path,
+                ));
             }
         }
     }
@@ -702,7 +753,11 @@ pub(crate) fn create_temp_file_in_dir(
 /// # Errors
 /// Returns an I/O error when `dir` cannot be created, `max_tries` is zero, all
 /// generated names collide, or directory creation fails.
-pub(crate) fn create_temp_dir_in_dir(dir: &Path, prefix: Option<&str>, max_tries: usize) -> Result<PathBuf> {
+pub(crate) fn create_temp_dir_in_dir(
+    dir: &Path,
+    prefix: Option<&str>,
+    max_tries: usize,
+) -> Result<PathBuf> {
     validate_max_tries(max_tries)?;
     ensure_dir_path(dir)?;
     let mut attempt = 0;
@@ -712,10 +767,16 @@ pub(crate) fn create_temp_dir_in_dir(dir: &Path, prefix: Option<&str>, max_tries
         match fs::create_dir(&path) {
             Ok(()) => return Ok(path),
             Err(error) => {
-                if error.kind() == ErrorKind::AlreadyExists && attempt < max_tries {
+                if error.kind() == ErrorKind::AlreadyExists
+                    && attempt < max_tries
+                {
                     continue;
                 }
-                return Err(add_path_context(error, "create temporary directory", &path));
+                return Err(add_path_context(
+                    error,
+                    "create temporary directory",
+                    &path,
+                ));
             }
         }
     }
@@ -802,10 +863,15 @@ pub(crate) fn replace_file(source: &Path, destination: &Path) -> Result<()> {
 /// # Errors
 /// Returns the platform I/O error reported while moving the path.
 #[cfg(target_os = "macos")]
-pub(crate) fn move_path_without_replacing(source: &Path, destination: &Path) -> Result<()> {
+pub(crate) fn move_path_without_replacing(
+    source: &Path,
+    destination: &Path,
+) -> Result<()> {
     let source = c_path(source)?;
     let destination = c_path(destination)?;
-    let result = unsafe { renamex_np(source.as_ptr(), destination.as_ptr(), RENAME_EXCL) };
+    let result = unsafe {
+        renamex_np(source.as_ptr(), destination.as_ptr(), RENAME_EXCL)
+    };
     if result == 0 {
         Ok(())
     } else {
@@ -822,7 +888,10 @@ pub(crate) fn move_path_without_replacing(source: &Path, destination: &Path) -> 
 /// # Errors
 /// Returns the platform I/O error reported while moving the path.
 #[cfg(target_os = "linux")]
-pub(crate) fn move_path_without_replacing(source: &Path, destination: &Path) -> Result<()> {
+pub(crate) fn move_path_without_replacing(
+    source: &Path,
+    destination: &Path,
+) -> Result<()> {
     let source = c_path(source)?;
     let destination = c_path(destination)?;
     let result = unsafe {
@@ -851,10 +920,19 @@ pub(crate) fn move_path_without_replacing(source: &Path, destination: &Path) -> 
 /// # Errors
 /// Returns the platform I/O error reported while moving the path.
 #[cfg(windows)]
-pub(crate) fn move_path_without_replacing(source: &Path, destination: &Path) -> Result<()> {
+pub(crate) fn move_path_without_replacing(
+    source: &Path,
+    destination: &Path,
+) -> Result<()> {
     let source = wide_path(source);
     let destination = wide_path(destination);
-    let result = unsafe { MoveFileExW(source.as_ptr(), destination.as_ptr(), MOVEFILE_WRITE_THROUGH) };
+    let result = unsafe {
+        MoveFileExW(
+            source.as_ptr(),
+            destination.as_ptr(),
+            MOVEFILE_WRITE_THROUGH,
+        )
+    };
     if result == 0 {
         Err(std::io::Error::last_os_error())
     } else {
@@ -871,7 +949,10 @@ pub(crate) fn move_path_without_replacing(source: &Path, destination: &Path) -> 
 /// # Errors
 /// Returns the platform I/O error reported while moving the file.
 #[cfg(any(target_os = "linux", target_os = "macos", windows))]
-pub(crate) fn move_file_without_replacing(source: &Path, destination: &Path) -> Result<()> {
+pub(crate) fn move_file_without_replacing(
+    source: &Path,
+    destination: &Path,
+) -> Result<()> {
     move_path_without_replacing(source, destination)
 }
 
@@ -889,7 +970,10 @@ pub(crate) fn move_file_without_replacing(source: &Path, destination: &Path) -> 
 /// Returns the platform I/O error reported while linking, unlinking, or
 /// rolling back the destination link after an unlink failure.
 #[cfg(all(unix, not(any(target_os = "linux", target_os = "macos"))))]
-pub(crate) fn move_file_without_replacing(source: &Path, destination: &Path) -> Result<()> {
+pub(crate) fn move_file_without_replacing(
+    source: &Path,
+    destination: &Path,
+) -> Result<()> {
     fs::hard_link(source, destination)?;
     match fs::remove_file(source) {
         Ok(()) => Ok(()),
@@ -992,7 +1076,8 @@ fn sync_parent_dir(path: &Path) -> Result<()> {
 fn is_ignorable_windows_parent_sync_error(error: &Error) -> bool {
     const ERROR_SHARING_VIOLATION: i32 = 32;
 
-    error.kind() == ErrorKind::PermissionDenied || error.raw_os_error() == Some(ERROR_SHARING_VIOLATION)
+    error.kind() == ErrorKind::PermissionDenied
+        || error.raw_os_error() == Some(ERROR_SHARING_VIOLATION)
 }
 
 /// Gets the parent directory that should be synced for `path`.
@@ -1125,11 +1210,22 @@ fn remove_any_path(path: &Path) -> Result<()> {
 /// Returns an I/O error when the source is invalid, the destination is inside
 /// the source tree or a followed source directory, a followed directory
 /// cycle is detected, or an underlying filesystem operation fails.
-fn copy_dir_all_with_paths(src: &Path, dst: &Path, options: LocalCopyDirOptions) -> Result<LocalCopyDirStats> {
+fn copy_dir_all_with_paths(
+    src: &Path,
+    dst: &Path,
+    options: LocalCopyDirOptions,
+) -> Result<LocalCopyDirStats> {
     let destination_root = canonicalize_existing_prefix(dst)?;
     let mut active_sources = Vec::new();
     let mut stats = LocalCopyDirStats::default();
-    copy_dir_recursive(src, dst, options, &destination_root, &mut active_sources, &mut stats)?;
+    copy_dir_recursive(
+        src,
+        dst,
+        options,
+        &destination_root,
+        &mut active_sources,
+        &mut stats,
+    )?;
     Ok(stats)
 }
 
@@ -1151,8 +1247,11 @@ fn copy_dir_recursive(
     active_sources: &mut Vec<PathBuf>,
     stats: &mut LocalCopyDirStats,
 ) -> Result<()> {
-    let (source_metadata, canonical_source) =
-        inspect_copy_source_directory(src, options.follow_symlinks, destination_root)?;
+    let (source_metadata, canonical_source) = inspect_copy_source_directory(
+        src,
+        options.follow_symlinks,
+        destination_root,
+    )?;
     if active_sources
         .iter()
         .any(|active_source| active_source == &canonical_source)
@@ -1189,11 +1288,19 @@ fn copy_dir_recursive(
                     stats,
                 )?;
             } else if file_type.is_file() {
-                copy_file_with_options(&source_path, &destination_path, options, stats)?;
+                copy_file_with_options(
+                    &source_path,
+                    &destination_path,
+                    options,
+                    stats,
+                )?;
             } else {
                 return Err(Error::new(
                     ErrorKind::Unsupported,
-                    format!("unsupported source file type: {}", source_path.display()),
+                    format!(
+                        "unsupported source file type: {}",
+                        source_path.display()
+                    ),
                 ));
             }
         }
@@ -1233,7 +1340,14 @@ fn copy_symlink_source(
     }
     let target_metadata = fs::metadata(src)?;
     if target_metadata.is_dir() {
-        copy_dir_recursive(src, dst, options, destination_root, active_sources, stats)
+        copy_dir_recursive(
+            src,
+            dst,
+            options,
+            destination_root,
+            active_sources,
+            stats,
+        )
     } else if target_metadata.is_file() {
         copy_file_with_options(src, dst, options, stats)
     } else {
@@ -1285,7 +1399,11 @@ fn inspect_copy_source_directory(
 /// # Errors
 /// Returns an I/O error when the destination cannot be created or cannot be
 /// replaced according to `overwrite`.
-fn ensure_copy_destination_dir(dst: &Path, overwrite: bool, stats: &mut LocalCopyDirStats) -> Result<()> {
+fn ensure_copy_destination_dir(
+    dst: &Path,
+    overwrite: bool,
+    stats: &mut LocalCopyDirStats,
+) -> Result<()> {
     match fs::symlink_metadata(dst) {
         Ok(metadata) => {
             if metadata.is_dir() && !metadata.file_type().is_symlink() {
@@ -1325,7 +1443,8 @@ fn copy_file_with_options(
     stats: &mut LocalCopyDirStats,
 ) -> Result<()> {
     prepare_copy_file_destination(dst, options.overwrite)?;
-    let source_metadata = metadata_for_copy_source(src, options.follow_symlinks)?;
+    let source_metadata =
+        metadata_for_copy_source(src, options.follow_symlinks)?;
     let copied = fs::copy(src, dst)?;
     if options.preserve_permissions {
         fs::set_permissions(dst, source_metadata.permissions())?;
@@ -1367,7 +1486,10 @@ fn prepare_copy_file_destination(dst: &Path, overwrite: bool) -> Result<()> {
 /// # Errors
 /// Returns an I/O error when metadata cannot be loaded or a symbolic link is
 /// encountered while `follow_symlinks` is `false`.
-fn metadata_for_copy_source(path: &Path, follow_symlinks: bool) -> Result<fs::Metadata> {
+fn metadata_for_copy_source(
+    path: &Path,
+    follow_symlinks: bool,
+) -> Result<fs::Metadata> {
     let metadata = fs::symlink_metadata(path)?;
     if metadata.file_type().is_symlink() {
         if follow_symlinks {
@@ -1394,8 +1516,14 @@ fn metadata_for_copy_source(path: &Path, follow_symlinks: bool) -> Result<fs::Me
 /// # Errors
 /// Returns an I/O error when `destination` is equal to or nested under
 /// `canonical_source`.
-fn reject_destination_inside_source(src: &Path, canonical_source: &Path, destination: &Path) -> Result<()> {
-    if destination == canonical_source || destination.starts_with(canonical_source) {
+fn reject_destination_inside_source(
+    src: &Path,
+    canonical_source: &Path,
+    destination: &Path,
+) -> Result<()> {
+    if destination == canonical_source
+        || destination.starts_with(canonical_source)
+    {
         return Err(Error::new(
             ErrorKind::InvalidInput,
             format!(
@@ -1408,13 +1536,15 @@ fn reject_destination_inside_source(src: &Path, canonical_source: &Path, destina
     Ok(())
 }
 
-/// Canonicalizes the existing prefix of a path while preserving missing tail components.
+/// Canonicalizes the existing prefix of a path while preserving missing tail
+/// components.
 ///
 /// # Parameters
 /// - `path`: Path that may not exist yet.
 ///
 /// # Returns
-/// A canonicalized path for the existing prefix with missing components appended.
+/// A canonicalized path for the existing prefix with missing components
+/// appended.
 ///
 /// # Errors
 /// Returns an I/O error when the existing prefix cannot be canonicalized.
@@ -1431,7 +1561,9 @@ fn canonicalize_existing_prefix(path: &Path) -> Result<PathBuf> {
             break;
         }
         match current.parent() {
-            Some(parent) if !parent.as_os_str().is_empty() => current = parent.to_path_buf(),
+            Some(parent) if !parent.as_os_str().is_empty() => {
+                current = parent.to_path_buf()
+            }
             _ => {
                 current = env::current_dir()?;
                 break;
