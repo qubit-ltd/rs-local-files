@@ -1,6 +1,17 @@
+mod file_buffering_tests;
+mod file_read_options_tests;
+mod file_write_mode_tests;
+mod file_write_options_tests;
+mod local_atomic_write_error_tests;
+mod local_atomic_write_stage_tests;
 mod local_copy_conflict_policy_tests;
+mod local_copy_dir_error_tests;
 mod local_copy_dir_options_tests;
+mod local_copy_dir_stage_tests;
+mod local_copy_dir_stats_tests;
 mod local_copy_type_conflict_policy_tests;
+mod local_file_reader_tests;
+mod local_file_writer_tests;
 mod local_filenames_tests;
 mod local_files_tests;
 mod local_persist_error_tests;

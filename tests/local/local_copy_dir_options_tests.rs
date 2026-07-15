@@ -7,7 +7,9 @@
 // =============================================================================
 
 use qubit_local_files::{
-    LocalCopyConflictPolicy, LocalCopyDirOptions, LocalCopyTypeConflictPolicy,
+    LocalCopyConflictPolicy,
+    LocalCopyDirOptions,
+    LocalCopyTypeConflictPolicy,
 };
 
 #[test]

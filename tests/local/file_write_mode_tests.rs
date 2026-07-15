@@ -6,11 +6,9 @@
 //    Licensed under the Apache License, Version 2.0.
 // =============================================================================
 
-use qubit_local_files::LocalPersistOptions;
+use qubit_local_files::FileWriteMode;
 
 #[test]
-fn test_persist_options_default_is_conservative() {
-    let options = LocalPersistOptions::default();
-
-    assert!(!options.overwrite);
+fn test_file_write_mode_default_creates_or_truncates() {
+    assert_eq!(FileWriteMode::CreateOrTruncate, FileWriteMode::default());
 }
