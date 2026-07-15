@@ -1,5 +1,10 @@
 # rs-local-files Review Follow-ups Implementation Plan
 
+> Superseded by
+> `docs/superpowers/plans/2026-07-15-local-files-approved-corrections.md`
+> after the second review. In particular, do not implement this plan's
+> fallible `LocalTempFile::close` or already-completed macOS CI tasks.
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** Fix the reviewed filesystem correctness defects, make close and buffering states explicit, split `local_files.rs` into a public facade plus private `inner` modules, document non-transactional behavior, and enable opt-in macOS CI for `rs-local-files`.

@@ -2,11 +2,10 @@
 
 ## Goal
 
-Resolve the correctness and API issues identified during the `rs-local-files`
-0.3 review, split the oversized `local_files.rs` implementation into focused
-private modules, document non-transactional and platform-dependent behavior,
-and add opt-in macOS CI coverage for the crate's macOS-specific filesystem
-code.
+Resolve the correctness and API issues confirmed during the second
+`rs-local-files` 0.3 review, split the oversized `local_files.rs`
+implementation into focused private modules, document non-transactional and
+platform-dependent behavior, and complete the authorized API-hygiene cleanup.
 
 This work remains part of the source-breaking 0.3 release. Compatibility with
 the released 0.2 API is not required, but downstream crates in this workspace
@@ -42,6 +41,45 @@ This check does not remove the existing time-of-check/time-of-use limitation.
 The Rustdoc continues to state that child helpers are convenience containment
 checks and are not a sandbox against a concurrently mutating untrusted actor.
 
+## Windows Path Conversion
+
+Every path passed to the raw Windows `MoveFileExW` and `CreateFileW` bindings
+is converted by one fallible helper. The helper rejects an interior UTF-16 NUL
+with `ErrorKind::InvalidInput` before invoking Win32. This prevents a target
+such as `target\0ignored` from being interpreted as the shorter `target` path.
+
+Windows-only regressions cover both no-replace persistence and replacement
+through atomic write. The tests verify that neither the NUL-prefixed path nor
+an existing prefix target is moved or overwritten. The documentation also
+states that native move semantics retain their platform path-length limits;
+the crate does not silently change relative-path or verbatim-path semantics in
+this correction.
+
+## Windows Directory Symlink Removal
+
+`LocalFiles::remove_any` continues to remove symbolic links themselves without
+following them. On Windows, `FileTypeExt::is_symlink_dir` selects
+`fs::remove_dir` for directory symlinks, while file symlinks use
+`fs::remove_file`. Unix keeps using `unlink` through `fs::remove_file` for all
+symlinks.
+
+A Windows regression creates a directory symlink, removes it through the
+public API, and verifies that the target directory remains. Environments that
+do not grant symlink creation privilege report that limitation instead of
+changing production behavior.
+
+## Atomic-Write Panic Cleanup
+
+Atomic write and recursive file copy share a private RAII staging-file guard.
+The guard owns the open handle and temporary path, removes the uncommitted path
+from `Drop`, and is disarmed only after a successful move. This makes callback
+unwinding in `LocalFiles::atomic_write_with` close and remove the staging file
+without catching or translating the panic.
+
+Rustdoc documents that callback panics propagate. A `catch_unwind` regression
+verifies that the destination remains unchanged and no `.atomic-write-*.tmp`
+entry is left behind.
+
 ## Portable File Name Validation
 
 `LocalFilenames::validate_portable_file_name` defines a name that is
@@ -69,41 +107,18 @@ effects, ensures a single component is not interpreted as a path, and prevents
 Windows device names such as `COM1` from being interpreted as devices rather
 than ordinary files.
 
-## LocalTempFile Close State
+## LocalTempFile Close Contract
 
-`LocalTempFile` continues to store its live handle as `Option<File>`. It gains:
+`LocalTempFile::close(&mut self) -> ()` remains infallible and only releases the
+owned unbuffered `std::fs::File` handle. It does not claim to report operating
+system close errors, flush a userspace buffer, or provide durability. Callers
+that require durability use `as_file()?.sync_all()` before closing.
 
-```rust
-pub fn close(&mut self) -> io::Result<()>;
-pub const fn is_closed(&self) -> bool;
-```
-
-The first `close` call flushes the live file. The handle is removed and dropped
-only after flushing succeeds. A flush failure leaves the handle open so the
-caller can inspect or retry it. Calling `close` after the handle has already
-been closed returns the existing closed-handle `ErrorKind::NotFound` error.
-
-Repeated `flush` calls while the file is open remain valid. `flush`, `write`,
-and `seek` after close return the closed-handle error. `flush` only transfers
-userspace buffered data to the operating system and is not a durability
-guarantee; callers that require durability must use `File::sync_all` through
-the exposed file handle.
-
-Operations that close implicitly propagate the new failure path:
-
-- `cleanup` returns a close or removal error;
-- `keep` returns `io::Result<PathBuf>`;
-- `persist` and `persist_with` return `LocalPersistError` retaining the guard
-  when close or move fails;
-- `Drop` logs a close failure, forcibly drops the handle because it cannot
-  return an error, and continues best-effort path cleanup.
-
-`LocalFileWriter::close(self)` is unchanged. It consumes the writer, so a
-second close is prevented by ownership instead of represented as runtime
-state.
-
-The two current `rs-mime` staging helpers migrate from `file.close()` to
-`file.close()?` and are tested against the local 0.3 crate.
+This contract matches the two `rs-mime` staging helpers, which close the handle
+before passing the path to a path-based backend, especially for Windows file
+sharing. The English and Chinese guides remove the inaccurate statement that
+temporary-file persistence flushes the handle. No downstream migration is
+required.
 
 ## Buffer Capacity Invariants
 
@@ -140,8 +155,8 @@ annotation is added.
 ## Internal Module Layout
 
 `local_files.rs` remains the public facade containing the `LocalFiles`
-namespace, its public constants, public associated methods, and their Rustdoc.
-Its private implementation is moved under a dedicated lower-level `inner`
+unconstructible marker type, its public associated methods, and their Rustdoc.
+Its private implementation is moved under a dedicated lower-level `internal`
 module so internal machinery is visually separated from the public types that
 use it:
 
@@ -151,18 +166,22 @@ src/local/
   local_temp_file.rs
   local_temp_dir.rs
   ... public-type modules ...
-  inner/
+  internal/
     mod.rs
+    path_io_error.rs
     path_operations.rs
     file_io.rs
     temp_entry.rs
     file_move.rs
+    staged_file.rs
     atomic_write.rs
     copy_dir.rs
 ```
 
 Responsibilities are:
 
+- `path_io_error.rs`: the private path-context error type and its trait
+  implementations;
 - `path_operations.rs`: existence, metadata, directory listing, parent and
   directory creation, size calculation, cleaning, generic removal, path error
   context, and shared parent-path helpers;
@@ -172,15 +191,17 @@ Responsibilities are:
   validation, and private directory modes;
 - `file_move.rs`: replace/no-replace moves, parent-directory synchronization,
   path conversion, and Linux, macOS, and Windows FFI;
+- `staged_file.rs`: panic-safe ownership and cleanup of uncommitted staging
+  files;
 - `atomic_write.rs`: atomic-write staging, permission preservation, commit, and
   stage-aware errors;
 - `copy_dir.rs`: recursive traversal, symlink policy, conflict handling,
   staging, commit, partial statistics, and cycle/destination checks.
 
-`inner/mod.rs` only declares internal modules and re-exports the narrowly
+`internal/mod.rs` only declares internal modules and re-exports the narrowly
 needed `pub(crate)` entry points. Each concrete source file imports its direct
 dependencies explicitly; child modules do not inherit a shared prelude from
-`inner/mod.rs`.
+`internal/mod.rs`.
 
 The public facade delegates to these modules. `LocalTempFile` and
 `LocalTempDir` call narrowly scoped internal functions instead of importing a
@@ -188,6 +209,14 @@ mixed collection of helpers from `local_files.rs`. The split is performed only
 after behavioral tests are green and does not change public behavior.
 
 ## Recursive Copy Documentation
+
+When a regular source file conflicts with an existing destination directory
+and `LocalCopyTypeConflictPolicy::Replace` is selected, the source contents are
+fully staged before the destination directory is removed. A source-open or
+copy failure therefore leaves the existing destination intact. The final
+remove-and-move sequence cannot be made fully atomic across unlike entry types;
+an explanatory implementation comment and public documentation state the
+remaining failure window.
 
 Rustdoc, the English and Chinese READMEs, and both user guides explicitly state
 that recursive copy is not a tree-level transaction. An error may leave
@@ -215,56 +244,48 @@ These constraints are documented on `LocalTempFile::persist`,
 `LocalTempFile::persist_with`, and directory persistence where applicable, and
 are repeated in the English and Chinese guides.
 
-## Opt-in macOS CI
+## API Hygiene and Style Debt
 
-The reusable `rs-ci` workflow gains this input:
+- `FileBuffering::Buffered` stores `Option<NonZeroUsize>` and all custom
+  capacity builders reject zero before filesystem I/O.
+- `FileBuffering`, `FileReadOptions`, and `FileWriteOptions` plus their
+  value-returning builders are `#[must_use]`.
+- The empty public namespace enums become unconstructible public marker
+  structs, preserving associated-function call paths without using an enum
+  that represents no state.
+- The unused duplicate `LocalFiles::DEFAULT_TEMP_FILE_PREFIX` is removed;
+  `LocalFilenames::DEFAULT_RANDOM_PREFIX` remains the canonical constant.
+- Every source module has module Rustdoc, private helper types live one per
+  file under `internal`, and externally observable tests are organized under
+  mirrored `tests/local/*_tests.rs` modules.
+- Inline attributes follow the repository decision table: pure forwarding,
+  getters, and setters use `#[inline(always)]`; short non-forwarding helpers
+  may use `#[inline]`; complex control flow has no inline attribute.
 
-```yaml
-run_macos_tests:
-  description: Run clippy and tests on the pinned macOS runner.
-  required: false
-  type: boolean
-  default: false
-```
-
-The new `macos_test` job runs only when the input is true and the triggering
-event is not a schedule. It uses `macos-15`, depends on `fast_checks`, checks
-out recursive submodules, restores a runner-specific Cargo cache, installs the
-configured build toolchain and Clippy, runs Clippy for all targets and features
-with warnings denied, and runs all-feature tests verbosely.
-
-Existing `rs-ci` consumers remain unaffected. The `rs-local-files` caller sets
-`run_macos_tests: true` so its macOS-specific `renamex_np` path is compiled and
-exercised. The `rs-ci` English and Chinese READMEs document the new opt-in
-input.
-
-After local workflow validation and the existing `rs-ci` test suite pass, the
-`rs-ci` change is committed with an English Angular-style message, merged into
-`dev` and `main`, and pushed. The working branch is returned to
-`dev-starfish` and pushed. Any fetch, merge, or push conflict stops the process
-for user direction. Finally, `rs-local-files` runs the repository's actual
-`./update-submodule.sh` script to update `.rs-ci` from its configured `main`
-tracking branch.
+The opt-in macOS CI work from the earlier plan is already present and is not
+reimplemented by this correction.
 
 ## TDD and Verification
 
 Implementation proceeds in this order:
 
 1. reproduce and fix the dangling final-symlink escape;
-2. reproduce and fix superscript Windows device names;
-3. reproduce and fix close flushing and state transitions, then migrate
-   `rs-mime`;
-4. reproduce zero-capacity construction and replace invalid states with
-   `NonZeroUsize`;
-5. add and satisfy the must-use compile-fail Rustdoc;
-6. split `local_files.rs` while all behavior tests remain green;
-7. document recursive-copy and persistence constraints;
-8. add and locally validate the opt-in macOS workflow;
-9. publish `rs-ci` as authorized and update the `rs-local-files` submodule.
+2. add Windows regressions and fix NUL conversion and directory-symlink
+   removal;
+3. reproduce callback-panic staging leakage and make staging cleanup RAII;
+4. reproduce destructive file-to-directory replacement ordering and stage
+   before removal;
+5. reproduce and fix superscript Windows device names;
+6. reproduce zero-capacity construction and replace invalid states with
+   `NonZeroUsize`, then enforce must-use builders;
+7. split `local_files.rs` into `local::internal` while behavior remains green;
+8. finish marker-type, constant, Rustdoc, test-layout, method-order, and inline
+   hygiene;
+9. document recursive-copy, persistence, callback-panic, path-length, and
+   close constraints in English and Chinese.
 
-Final local gates for `rs-local-files` are the repository-pinned rustfmt check,
-style check, all-target/all-feature Clippy with warnings denied, all-feature
-tests, doctests, and Rustdoc with warnings denied. The affected `rs-mime` tests
-run against the local 0.3 crate. `rs-ci` runs its Python, Node, shell/style, and
-workflow syntax checks. Actual macOS execution occurs through the enabled
-GitHub Actions job when the `rs-local-files` caller runs remotely.
+Final local gates follow the repository correction sequence: `./align-ci.sh`,
+then `./ci-check.sh`, and `./coverage.sh json` only if CI reports coverage below
+its threshold. The affected `rs-mime` suite runs against the local 0.3 crate.
+Windows and macOS runtime behavior remains finally exercised by the configured
+GitHub Actions jobs.
