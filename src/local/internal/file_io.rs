@@ -32,6 +32,20 @@ use super::path_operations::{
     ensure_parent_path,
 };
 
+/// Creates the canonical reader error for a non-file target.
+///
+/// # Parameters
+/// - `path`: Path that did not resolve to an opened regular file.
+///
+/// # Returns
+/// Invalid-input error describing the rejected path.
+fn opened_path_not_file_error(path: &Path) -> Error {
+    Error::new(
+        ErrorKind::InvalidInput,
+        format!("opened path is not a file: {}", path.display()),
+    )
+}
+
 /// Opens a file reader with the supplied options.
 ///
 /// # Parameters
@@ -48,16 +62,19 @@ pub(crate) fn open_reader_path(
     path: &Path,
     options: FileReadOptions,
 ) -> Result<LocalFileReader> {
-    let metadata = fs::metadata(path)
-        .map_err(|error| add_path_context(error, "read metadata", path))?;
+    let file = match File::open(path) {
+        Ok(file) => file,
+        Err(error) => {
+            if fs::metadata(path).is_ok_and(|metadata| !metadata.is_file()) {
+                return Err(opened_path_not_file_error(path));
+            }
+            return Err(add_path_context(error, "open file", path));
+        }
+    };
+    let metadata = file.metadata()?;
     if !metadata.is_file() {
-        return Err(Error::new(
-            ErrorKind::InvalidInput,
-            format!("path is not a file: {}", path.display()),
-        ));
+        return Err(opened_path_not_file_error(path));
     }
-    let file = File::open(path)
-        .map_err(|error| add_path_context(error, "open file", path))?;
     Ok(LocalFileReader::from_file(file, options.buffering))
 }
 

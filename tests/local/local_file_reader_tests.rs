@@ -12,10 +12,8 @@ use std::io::{
     Seek,
     SeekFrom,
 };
-use std::num::NonZeroUsize;
 
 use qubit_local_files::{
-    FileBuffering,
     FileReadOptions,
     LocalFiles,
 };
@@ -33,11 +31,8 @@ fn test_open_reader_respects_buffering_options_and_rejects_directories() {
 
     let mut reader = LocalFiles::open_reader(
         &path,
-        FileReadOptions {
-            buffering: FileBuffering::Buffered {
-                capacity: NonZeroUsize::new(16),
-            },
-        },
+        FileReadOptions::buffered_with_capacity(16)
+            .expect("positive buffer capacity should be accepted"),
     )
     .expect("buffered reader should open");
     let mut content = Vec::new();
@@ -49,6 +44,10 @@ fn test_open_reader_respects_buffering_options_and_rejects_directories() {
     assert!(reader.is_buffered());
     assert_eq!(b"payload", content.as_slice());
     assert_eq!(ErrorKind::InvalidInput, error.kind());
+    assert!(
+        error.to_string().contains("opened path is not a file"),
+        "reader validation must describe the resource obtained from open: {error}"
+    );
     fs::remove_dir_all(dir).unwrap();
 }
 
