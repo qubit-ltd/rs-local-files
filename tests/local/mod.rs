@@ -7,3 +7,4 @@ mod local_persist_error_tests;
 mod local_persist_options_tests;
 mod local_temp_dir_tests;
 mod local_temp_file_tests;
+mod test_support;

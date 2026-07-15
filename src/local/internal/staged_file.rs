@@ -7,14 +7,8 @@
 // =============================================================================
 //! Panic-safe ownership of an uncommitted staging file.
 
-use std::fs::{
-    self,
-    File,
-};
-use std::path::{
-    Path,
-    PathBuf,
-};
+use std::fs::{self, File};
+use std::path::{Path, PathBuf};
 
 /// Owns a staging file until its filesystem commit succeeds.
 ///

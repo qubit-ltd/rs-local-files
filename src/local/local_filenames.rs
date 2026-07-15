@@ -7,19 +7,9 @@
 // =============================================================================
 use std::convert::Infallible;
 use std::ffi::OsStr;
-use std::io::{
-    Error,
-    ErrorKind,
-    Result,
-};
-use std::path::{
-    Component,
-    Path,
-};
-use std::time::{
-    SystemTime,
-    UNIX_EPOCH,
-};
+use std::io::{Error, ErrorKind, Result};
+use std::path::{Component, Path};
+use std::time::{SystemTime, UNIX_EPOCH};
 
 const MAX_PORTABLE_FILE_NAME_BYTES: usize = 255;
 const RANDOM_NAME_BYTES: usize = 16;
@@ -88,8 +78,7 @@ impl LocalFilenames {
     /// the operating system random source cannot provide bytes.
     #[inline]
     pub fn random_with(prefix: Option<&str>, suffix: Option<&str>) -> String {
-        Self::try_random_with(prefix, suffix)
-            .expect("failed to build random file name")
+        Self::try_random_with(prefix, suffix).expect("failed to build random file name")
     }
 
     /// Tries to build a random file-name component using the default prefix.
@@ -124,10 +113,7 @@ impl LocalFilenames {
     /// Returns [`ErrorKind::InvalidInput`] when `prefix` or `suffix` is not a
     /// safe file-name fragment. Returns [`ErrorKind::Other`] when the operating
     /// system random source cannot provide bytes.
-    pub fn try_random_with(
-        prefix: Option<&str>,
-        suffix: Option<&str>,
-    ) -> Result<String> {
+    pub fn try_random_with(prefix: Option<&str>, suffix: Option<&str>) -> Result<String> {
         let prefix = prefix.unwrap_or(Self::DEFAULT_RANDOM_PREFIX);
         let suffix = suffix.unwrap_or("");
         validate_file_name_fragment("prefix", prefix)?;
@@ -187,9 +173,7 @@ impl LocalFilenames {
         if name.len() > MAX_PORTABLE_FILE_NAME_BYTES {
             return Err(Error::new(
                 ErrorKind::InvalidInput,
-                format!(
-                    "portable file name exceeds {MAX_PORTABLE_FILE_NAME_BYTES} UTF-8 bytes"
-                ),
+                format!("portable file name exceeds {MAX_PORTABLE_FILE_NAME_BYTES} UTF-8 bytes"),
             ));
         }
         if name.ends_with([' ', '.']) {
@@ -207,9 +191,7 @@ impl LocalFilenames {
         }) {
             return Err(Error::new(
                 ErrorKind::InvalidInput,
-                format!(
-                    "portable file name contains forbidden character {character:?}"
-                ),
+                format!("portable file name contains forbidden character {character:?}"),
             ));
         }
         if is_windows_reserved_file_name(name) {
@@ -332,14 +314,9 @@ impl LocalFilenames {
     /// # Returns
     /// `true` when `path` has `extension` as its final extension ignoring ASCII
     /// case.
-    pub fn has_extension_ignore_ascii_case(
-        path: &Path,
-        extension: &str,
-    ) -> bool {
+    pub fn has_extension_ignore_ascii_case(path: &Path, extension: &str) -> bool {
         Self::extension(path)
-            .map(|actual| {
-                actual.eq_ignore_ascii_case(normalize_extension(extension))
-            })
+            .map(|actual| actual.eq_ignore_ascii_case(normalize_extension(extension)))
             .unwrap_or(false)
     }
 
@@ -546,14 +523,12 @@ fn is_windows_reserved_file_name(name: &str) -> bool {
         return true;
     }
 
-    let Some((suffix_index, suffix)) = base_name.char_indices().next_back()
-    else {
+    let Some((suffix_index, suffix)) = base_name.char_indices().next_back() else {
         return false;
     };
     let prefix = &base_name[..suffix_index];
     let reserved_digit = matches!(suffix, '1'..='9' | '¹' | '²' | '³');
-    (prefix.eq_ignore_ascii_case("COM") || prefix.eq_ignore_ascii_case("LPT"))
-        && reserved_digit
+    (prefix.eq_ignore_ascii_case("COM") || prefix.eq_ignore_ascii_case("LPT")) && reserved_digit
 }
 
 /// Removes query and fragment suffixes from a URL-like string.

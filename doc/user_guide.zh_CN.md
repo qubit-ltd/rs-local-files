@@ -135,7 +135,7 @@ std::fs::write(dir.path().join("scratch.txt"), b"scratch")?;
 | `keep` | 消费 guard，并把目录留在生成路径。 |
 | `persist` | 把目录移动到最终路径，并关闭自动清理。 |
 
-`LocalTempDir::persist` 会为目标创建缺失父目录，并拒绝已存在目标。它不提供 overwrite 选项。如果移动失败，`LocalPersistError` 会把 guard 所有权返回给调用方，以便重试、保留、检查或显式清理。
+`LocalTempDir::persist` 会为目标创建缺失父目录，并拒绝已存在目标。它不提供 overwrite 选项。如果移动失败，`LocalPersistError` 会把 guard 所有权返回给调用方，以便重试、保留、检查或显式清理。持久化只使用原生 move/rename，不会回退到 copy-and-delete，因此跨文件系统移动可能在 Unix 上返回 `EXDEV`，或返回其他平台的等价错误。
 
 child 路径必须是非空相对路径，并且只能由 normal path component 组成。绝对路径、root 或 prefix component、`.` 和 `..` 都会被拒绝。`open_child_reader` 要求 child 是文件；目录或其他非文件条目会返回 `ErrorKind::InvalidInput`。`open_child_writer` 会校验已存在目标必须是文件，并确保 child 写入留在临时目录内。`ensure_child_dir` 会创建缺失的多层父目录，但在创建目录时会拒绝 symbolic link component，避免通过 child 路径离开临时目录。
 
@@ -184,7 +184,7 @@ file.close();
 
 `LocalTempFile` 有意不提供读取 helper。临时文件的常见用法是写入、关闭，然后持久化。如果确实需要检查内容，先调用 `close`，再通过 `LocalFiles::open_reader` 或 `std::fs` 读取 `path()`。
 
-`LocalTempFile::persist` 会关闭文件，为目标创建缺失父目录，并通过 no-clobber move 操作拒绝已存在目标。它有意不依赖单独的 metadata precheck。这可以在支持的平台上避免 time-of-check/time-of-use 覆盖竞态。失败时返回 `LocalPersistError<LocalTempFile>`，保留 guard 和原始 I/O error。
+`LocalTempFile::persist` 会关闭文件，为目标创建缺失父目录，并通过 no-clobber move 操作拒绝已存在目标。它有意不依赖单独的 metadata precheck。这可以在支持的平台上避免 time-of-check/time-of-use 覆盖竞态。失败时返回 `LocalPersistError<LocalTempFile>`，保留 guard 和原始 I/O error。文件持久化只使用原生 move/rename，不会回退到 copy-and-delete，因此跨文件系统移动可能在 Unix 上返回 `EXDEV`，或返回其他平台的等价错误。启用 overwrite 时，最终文件保留临时文件的权限，而不是被替换目标的权限；如果替换内容时必须保留已有普通文件的权限，请使用 `LocalFiles::atomic_write`。
 
 只有覆盖策略确实不同的时候才使用 `persist_with`：
 
@@ -367,7 +367,7 @@ assert_eq!(4, stats.bytes);
 | `bytes` | 从普通文件复制的字节数。 |
 | `skipped` | 因冲突策略而跳过的已有目标文件数量。 |
 
-复制操作会拒绝位于源目录内部的目标，因为把目录复制进自身可能导致无限递归。当启用 symlink following 时，由跟随 symbolic link 引入的目录环也会被拒绝。不支持的源条目通过 `LocalCopyDirError` 报告 `std::io::ErrorKind::Unsupported`。结构化错误同时提供失败阶段、源和目标路径、部分统计及原始 I/O source error。
+复制操作会拒绝位于源目录内部的目标，因为把目录复制进自身可能导致无限递归。当启用 symlink following 时，由跟随 symbolic link 引入的目录环也会被拒绝。不支持的源条目通过 `LocalCopyDirError` 报告 `std::io::ErrorKind::Unsupported`。结构化错误同时提供失败阶段、源和目标路径、部分统计及原始 I/O source error。递归复制不是目录树级事务：失败前已经提交的条目会留在目标中，不会执行回滚；破坏性的类型冲突替换还可能先删除已有目标目录，随后才在后续操作中失败。
 
 ## 文件名 Helper
 

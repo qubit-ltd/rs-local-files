@@ -153,6 +153,9 @@ Ownership methods:
 rejects an existing target. It does not provide an overwrite option. If the move
 fails, `LocalPersistError` returns ownership of the guard so callers can retry,
 keep, inspect, or explicitly clean up the directory.
+Persistence uses a native move/rename without a copy-and-delete fallback, so a
+cross-filesystem move may fail with `EXDEV` on Unix or an equivalent platform
+error.
 
 Child paths must be non-empty relative paths made only of normal path
 components. Absolute paths, root or prefix components, `.` and `..` are
@@ -223,6 +226,13 @@ move operation. It intentionally does not rely on a separate metadata precheck.
 This avoids a time-of-check/time-of-use overwrite race on supported platforms.
 On failure it returns `LocalPersistError<LocalTempFile>`, retaining the guard and
 native I/O error.
+
+File persistence uses a native move/rename without a copy-and-delete fallback,
+so cross-filesystem moves may fail with `EXDEV` on Unix or an equivalent
+platform error. With overwrite enabled, the resulting file keeps the temporary
+file's permissions rather than the replaced target's permissions. Use
+`LocalFiles::atomic_write` when existing regular-file permissions must be
+preserved while replacing contents.
 
 Use `persist_with` only when the overwrite policy should differ:
 
@@ -428,6 +438,10 @@ enabled, directory cycles introduced by followed symlinks are also rejected.
 Unsupported source entries report `std::io::ErrorKind::Unsupported` through
 `LocalCopyDirError`. The structured error also exposes the failed stage, source
 and destination paths, partial statistics, and native I/O source error.
+The copy is not a tree-level transaction: entries committed before a failure
+remain in the destination, no rollback is attempted, and destructive
+type-conflict replacement may remove an existing destination directory before
+a later operation fails.
 
 ## Filename Helpers
 

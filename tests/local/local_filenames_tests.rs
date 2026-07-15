@@ -13,8 +13,7 @@ use qubit_local_files::LocalFilenames;
 #[test]
 fn test_random_and_try_random_use_default_prefix() {
     let infallible_name = LocalFilenames::random();
-    let fallible_name =
-        LocalFilenames::try_random().expect("random name should be generated");
+    let fallible_name = LocalFilenames::try_random().expect("random name should be generated");
 
     assert!(infallible_name.starts_with(LocalFilenames::DEFAULT_RANDOM_PREFIX));
     assert!(fallible_name.starts_with(LocalFilenames::DEFAULT_RANDOM_PREFIX));
@@ -95,17 +94,13 @@ fn test_validate_portable_file_name_rejects_windows_reserved_names() {
         assert_eq!(std::io::ErrorKind::InvalidInput, error.kind());
     }
 
-    LocalFilenames::validate_portable_file_name("COM0.txt")
-        .expect("COM0 should not be reserved");
-    LocalFilenames::validate_portable_file_name("COM10.txt")
-        .expect("COM10 should not be reserved");
-    LocalFilenames::validate_portable_file_name("LPT0.txt")
-        .expect("LPT0 should not be reserved");
+    LocalFilenames::validate_portable_file_name("COM0.txt").expect("COM0 should not be reserved");
+    LocalFilenames::validate_portable_file_name("COM10.txt").expect("COM10 should not be reserved");
+    LocalFilenames::validate_portable_file_name("LPT0.txt").expect("LPT0 should not be reserved");
 }
 
 #[test]
-fn test_validate_portable_file_name_rejects_trailing_space_dot_and_long_names()
-{
+fn test_validate_portable_file_name_rejects_trailing_space_dot_and_long_names() {
     for name in ["file.", "file "] {
         let error = LocalFilenames::validate_portable_file_name(name)
             .expect_err("trailing space or dot should be rejected");
@@ -199,21 +194,15 @@ fn test_file_name_from_path_handles_common_separators() {
 fn test_file_name_from_url_removes_query_and_fragment() {
     assert_eq!(
         "file.txt",
-        LocalFilenames::file_name_from_url(
-            "https://example.com/path/file.txt?download=1"
-        )
+        LocalFilenames::file_name_from_url("https://example.com/path/file.txt?download=1")
     );
     assert_eq!(
         "file.txt",
-        LocalFilenames::file_name_from_url(
-            "https://example.com/path/file.txt#section"
-        )
+        LocalFilenames::file_name_from_url("https://example.com/path/file.txt#section")
     );
     assert_eq!(
         "file.txt",
-        LocalFilenames::file_name_from_url(
-            "https://example.com/path/file.txt?download=1#section"
-        )
+        LocalFilenames::file_name_from_url("https://example.com/path/file.txt?download=1#section")
     );
 }
 
@@ -221,21 +210,15 @@ fn test_file_name_from_url_removes_query_and_fragment() {
 fn test_file_name_from_url_decodes_percent_encoded_utf8() {
     assert_eq!(
         "my file.txt",
-        LocalFilenames::file_name_from_url(
-            "https://example.com/path/my%20file.txt"
-        )
+        LocalFilenames::file_name_from_url("https://example.com/path/my%20file.txt")
     );
     assert_eq!(
         format!("caf{}.txt", '\u{00e9}'),
-        LocalFilenames::file_name_from_url(
-            "https://example.com/path/caf%C3%A9.txt"
-        )
+        LocalFilenames::file_name_from_url("https://example.com/path/caf%C3%A9.txt")
     );
     assert_eq!(
         "file+plus.txt",
-        LocalFilenames::file_name_from_url(
-            "https://example.com/path/file%2Bplus.txt"
-        )
+        LocalFilenames::file_name_from_url("https://example.com/path/file%2Bplus.txt")
     );
 }
 
@@ -264,15 +247,11 @@ fn test_file_name_from_url_keeps_encoded_unsafe_path_fragments() {
 fn test_file_name_from_url_keeps_invalid_percent_encoding() {
     assert_eq!(
         "file%ZZ.txt",
-        LocalFilenames::file_name_from_url(
-            "https://example.com/path/file%ZZ.txt"
-        )
+        LocalFilenames::file_name_from_url("https://example.com/path/file%ZZ.txt")
     );
     assert_eq!(
         "file%2.txt",
-        LocalFilenames::file_name_from_url(
-            "https://example.com/path/file%2.txt"
-        )
+        LocalFilenames::file_name_from_url("https://example.com/path/file%2.txt")
     );
 }
 

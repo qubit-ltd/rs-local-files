@@ -12,7 +12,7 @@ use std::io::ErrorKind;
 
 use qubit_local_files::LocalTempFile;
 
-use super::local_files_tests::temp_dir;
+use super::test_support::temp_dir;
 
 #[test]
 fn test_persist_error_into_parts_returns_error_and_resource() {

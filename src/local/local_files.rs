@@ -8,25 +8,20 @@
 //! Public local filesystem utility namespace.
 
 use std::convert::Infallible;
-use std::fs::{
-    self,
-    File,
-};
+use std::fs::{self, File};
 use std::io::Result;
 use std::path::Path;
 
 use crate::{
-    FileReadOptions,
-    FileWriteOptions,
-    LocalAtomicWriteError,
-    LocalCopyDirError,
-    LocalCopyDirOptions,
-    LocalCopyDirStats,
-    LocalFileReader,
-    LocalFileWriter,
+    FileReadOptions, FileWriteOptions, LocalAtomicWriteError, LocalCopyDirError,
+    LocalCopyDirOptions, LocalCopyDirStats, LocalFileReader, LocalFileWriter,
 };
 
-use super::internal::LocalFileOperations;
+use super::internal::{
+    DEFAULT_TEMP_FILE_RETRIES as DEFAULT_TEMP_FILE_RETRIES_VALUE, atomic_write_bytes_path,
+    atomic_write_with_path, clean_dir_path, copy_dir_all_with_paths, dir_size_path,
+    ensure_dir_path, ensure_parent_path, open_reader_path, open_writer_path, remove_any_path,
+};
 
 /// File-system utility namespace.
 ///
@@ -51,8 +46,7 @@ pub struct LocalFiles {
 
 impl LocalFiles {
     /// Default number of attempts used when creating a random temporary entry.
-    pub const DEFAULT_TEMP_FILE_RETRIES: usize =
-        LocalFileOperations::DEFAULT_TEMP_FILE_RETRIES;
+    pub const DEFAULT_TEMP_FILE_RETRIES: usize = DEFAULT_TEMP_FILE_RETRIES_VALUE;
 
     /// Tests whether a path exists.
     ///
@@ -71,7 +65,7 @@ impl LocalFiles {
     where
         P: AsRef<Path>,
     {
-        LocalFileOperations::exists(path)
+        path.as_ref().try_exists()
     }
 
     /// Reads metadata for a local filesystem path.
@@ -90,7 +84,7 @@ impl LocalFiles {
     where
         P: AsRef<Path>,
     {
-        LocalFileOperations::metadata(path)
+        fs::metadata(path)
     }
 
     /// Lists the direct entries of a directory.
@@ -108,7 +102,7 @@ impl LocalFiles {
     where
         P: AsRef<Path>,
     {
-        LocalFileOperations::list(path)
+        fs::read_dir(path)
     }
 
     /// Opens a local file for reading.
@@ -127,14 +121,11 @@ impl LocalFiles {
     /// Returns an I/O error when `path` cannot be inspected or opened, or when
     /// the target is not a file.
     #[inline(always)]
-    pub fn open_reader<P>(
-        path: P,
-        options: FileReadOptions,
-    ) -> Result<LocalFileReader>
+    pub fn open_reader<P>(path: P, options: FileReadOptions) -> Result<LocalFileReader>
     where
         P: AsRef<Path>,
     {
-        LocalFileOperations::open_reader(path, options)
+        open_reader_path(path.as_ref(), options)
     }
 
     /// Opens a local file for writing.
@@ -154,14 +145,11 @@ impl LocalFiles {
     /// Returns an I/O error when parent directories cannot be created or the
     /// file cannot be opened with the requested mode.
     #[inline(always)]
-    pub fn open_writer<P>(
-        path: P,
-        options: FileWriteOptions,
-    ) -> Result<LocalFileWriter>
+    pub fn open_writer<P>(path: P, options: FileWriteOptions) -> Result<LocalFileWriter>
     where
         P: AsRef<Path>,
     {
-        LocalFileOperations::open_writer(path, options)
+        open_writer_path(path.as_ref(), options)
     }
 
     /// Ensures that a directory exists.
@@ -177,7 +165,7 @@ impl LocalFiles {
     where
         P: AsRef<Path>,
     {
-        LocalFileOperations::ensure_dir(path)
+        ensure_dir_path(path.as_ref())
     }
 
     /// Ensures that a path's parent directory exists.
@@ -196,7 +184,7 @@ impl LocalFiles {
     where
         P: AsRef<Path>,
     {
-        LocalFileOperations::ensure_parent(path)
+        ensure_parent_path(path.as_ref())
     }
 
     /// Computes the total size of regular files under a directory.
@@ -218,7 +206,7 @@ impl LocalFiles {
     where
         P: AsRef<Path>,
     {
-        LocalFileOperations::dir_size(path)
+        dir_size_path(path.as_ref())
     }
 
     /// Removes all entries from a directory while keeping the directory itself.
@@ -237,7 +225,7 @@ impl LocalFiles {
     where
         P: AsRef<Path>,
     {
-        LocalFileOperations::clean_dir(path)
+        clean_dir_path(path.as_ref())
     }
 
     /// Removes a file, directory, or symbolic link.
@@ -255,7 +243,7 @@ impl LocalFiles {
     where
         P: AsRef<Path>,
     {
-        LocalFileOperations::remove_any(path)
+        remove_any_path(path.as_ref())
     }
 
     /// Recursively copies a directory tree.
@@ -269,6 +257,12 @@ impl LocalFiles {
     /// directory, the source is staged successfully before that directory is
     /// removed. The final remove-and-move sequence is not atomic: a commit
     /// failure after removal can leave the destination absent.
+    ///
+    /// This operation is not a tree-level transaction. If it fails,
+    /// directories and files created or committed before the failure remain in
+    /// the destination and no rollback is attempted. Type-conflict replacement
+    /// may recursively remove an existing destination directory before a later
+    /// operation fails.
     ///
     /// # Parameters
     /// - `src`: Source directory.
@@ -293,7 +287,7 @@ impl LocalFiles {
         S: AsRef<Path>,
         D: AsRef<Path>,
     {
-        LocalFileOperations::copy_dir_all_with(src, dst, options)
+        copy_dir_all_with_paths(src.as_ref(), dst.as_ref(), options)
     }
 
     /// Atomically writes bytes using a same-directory temporary file.
@@ -332,15 +326,12 @@ impl LocalFiles {
     /// Returns [`LocalAtomicWriteError`] with the failed stage, temporary path,
     /// commit state, and native I/O source error.
     #[inline(always)]
-    pub fn atomic_write<P, B>(
-        path: P,
-        bytes: B,
-    ) -> std::result::Result<(), LocalAtomicWriteError>
+    pub fn atomic_write<P, B>(path: P, bytes: B) -> std::result::Result<(), LocalAtomicWriteError>
     where
         P: AsRef<Path>,
         B: AsRef<[u8]>,
     {
-        LocalFileOperations::atomic_write(path, bytes)
+        atomic_write_bytes_path(path.as_ref(), bytes.as_ref())
     }
 
     /// Atomically writes a file using caller-provided write logic.
@@ -372,6 +363,11 @@ impl LocalFiles {
         P: AsRef<Path>,
         F: FnOnce(&mut File) -> Result<()>,
     {
-        LocalFileOperations::atomic_write_with(path, write)
+        let mut write = Some(write);
+        atomic_write_with_path(path.as_ref(), &mut |file| {
+            write
+                .take()
+                .expect("atomic write callback must only be invoked once")(file)
+        })
     }
 }

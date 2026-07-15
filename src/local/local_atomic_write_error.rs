@@ -8,11 +8,7 @@
 //! Atomic-write errors.
 
 use std::error::Error;
-use std::fmt::{
-    Display,
-    Formatter,
-    Result as FmtResult,
-};
+use std::fmt::{Display, Formatter, Result as FmtResult};
 use std::io;
 use std::path::PathBuf;
 

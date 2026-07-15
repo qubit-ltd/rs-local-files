@@ -5,10 +5,7 @@
 //
 //    Licensed under the Apache License, Version 2.0.
 // =============================================================================
-use crate::{
-    LocalCopyConflictPolicy,
-    LocalCopyTypeConflictPolicy,
-};
+use crate::{LocalCopyConflictPolicy, LocalCopyTypeConflictPolicy};
 
 /// Options controlling recursive directory copy behavior.
 ///

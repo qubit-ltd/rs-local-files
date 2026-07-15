@@ -5,36 +5,15 @@
 //
 //    Licensed under the Apache License, Version 2.0.
 // =============================================================================
-use std::fs::{
-    self,
-    File,
-};
-use std::io::{
-    Error,
-    ErrorKind,
-    Result,
-    Seek,
-    SeekFrom,
-    Write,
-};
-use std::path::{
-    Path,
-    PathBuf,
-};
+use std::fs::{self, File};
+use std::io::{Error, ErrorKind, Result, Seek, SeekFrom, Write};
+use std::path::{Path, PathBuf};
 
 use log::warn;
 
-use crate::{
-    LocalFiles,
-    LocalPersistError,
-    LocalPersistOptions,
-};
+use crate::{LocalFiles, LocalPersistError, LocalPersistOptions};
 
-use super::internal::{
-    create_temp_file_in_dir,
-    move_file_without_replacing,
-    replace_file,
-};
+use super::internal::{create_temp_file_in_dir, move_file_without_replacing, replace_file};
 
 /// Temporary file that is removed automatically unless kept or persisted.
 ///
@@ -75,10 +54,7 @@ impl LocalTempFile {
     /// created, `prefix` or `suffix` is not a safe file-name fragment, or a
     /// unique temporary file cannot be created.
     #[inline]
-    pub fn with_name(
-        prefix: Option<&str>,
-        suffix: Option<&str>,
-    ) -> Result<Self> {
+    pub fn with_name(prefix: Option<&str>, suffix: Option<&str>) -> Result<Self> {
         Self::in_dir(
             std::env::temp_dir(),
             prefix,
@@ -108,8 +84,7 @@ impl LocalTempFile {
     where
         P: AsRef<Path>,
     {
-        let (path, file) =
-            create_temp_file_in_dir(dir.as_ref(), prefix, suffix, max_tries)?;
+        let (path, file) = create_temp_file_in_dir(dir.as_ref(), prefix, suffix, max_tries)?;
         Ok(Self {
             path: Some(path),
             file: Some(file),
@@ -230,6 +205,10 @@ impl LocalTempFile {
     /// [`LocalPersistError`] retains this guard so the caller can retry, keep,
     /// inspect, or explicitly clean up the temporary file.
     ///
+    /// Persistence uses a native move or rename and does not fall back to
+    /// copying and deleting. Moving across filesystems can therefore fail with
+    /// `EXDEV` on Unix or a platform-equivalent error.
+    ///
     /// # Parameters
     /// - `target`: Final file path.
     ///
@@ -241,10 +220,7 @@ impl LocalTempFile {
     /// created, the target already exists, or the temporary file cannot be
     /// moved to `target`.
     #[inline]
-    pub fn persist<P>(
-        self,
-        target: P,
-    ) -> std::result::Result<PathBuf, LocalPersistError<Self>>
+    pub fn persist<P>(self, target: P) -> std::result::Result<PathBuf, LocalPersistError<Self>>
     where
         P: AsRef<Path>,
     {
@@ -258,6 +234,13 @@ impl LocalTempFile {
     /// `options.overwrite` is `false`, existing targets are rejected by the
     /// move operation. When
     /// `options.overwrite` is `true`, an existing target file may be replaced.
+    /// Persistence uses a native move or rename and does not fall back to
+    /// copying and deleting, so cross-filesystem moves can fail with `EXDEV` on
+    /// Unix or a platform-equivalent error. Replacing an existing target keeps
+    /// the temporary file's permissions and does not preserve the replaced
+    /// target's permissions. Use [`LocalFiles::atomic_write`] when replacing
+    /// contents while preserving existing regular-file permissions is
+    /// required.
     ///
     /// # Parameters
     /// - `target`: Final file path.

@@ -7,11 +7,7 @@
 // =============================================================================
 //! File buffering policy.
 
-use std::io::{
-    Error,
-    ErrorKind,
-    Result,
-};
+use std::io::{Error, ErrorKind, Result};
 use std::num::NonZeroUsize;
 
 /// Buffering policy for local file readers and writers.

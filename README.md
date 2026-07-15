@@ -129,6 +129,12 @@ operation. Use `LocalTempFile::persist_with` and
 is intended. `LocalTempDir::persist` also rejects an existing target and does not
 provide an overwrite option. A failed persistence operation returns
 `LocalPersistError`, which retains the temporary guard for retry or inspection.
+Persistence uses native move/rename operations without a copy-and-delete
+fallback, so cross-filesystem moves may fail with `EXDEV` on Unix or an
+equivalent platform error. Overwriting a file keeps the temporary file's
+permissions rather than the replaced target's permissions; use
+`LocalFiles::atomic_write` when replacing contents while preserving an existing
+regular file's permissions is required.
 On Unix, temporary files are created with mode `0600` and temporary directories
 with mode `0700` before applying the process umask.
 
@@ -189,6 +195,11 @@ source permissions are not preserved. Select `Overwrite` or `Skip` through
 replacement separately through `LocalCopyTypeConflictPolicy::Replace`. Copy
 failures return `LocalCopyDirError` with paths, stage, partial statistics, and
 the native source error.
+
+Recursive copy is not a tree-level transaction. Entries committed before a
+failure remain in the destination, no rollback is attempted, and destructive
+type-conflict replacement may remove an existing destination directory before
+a later operation fails.
 
 ### Filename Helpers
 

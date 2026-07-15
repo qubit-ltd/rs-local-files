@@ -8,10 +8,7 @@
 //! Path-aware I/O error context.
 
 use std::io::Error;
-use std::path::{
-    Path,
-    PathBuf,
-};
+use std::path::{Path, PathBuf};
 
 /// An I/O error annotated with the failed operation and path.
 #[derive(Debug)]
@@ -32,11 +29,7 @@ impl PathIoError {
     /// # Returns
     /// A contextual error retaining `source`.
     #[inline]
-    pub(super) fn new(
-        operation: &'static str,
-        path: &Path,
-        source: Error,
-    ) -> Self {
+    pub(super) fn new(operation: &'static str, path: &Path, source: Error) -> Self {
         Self {
             operation,
             path: path.to_path_buf(),

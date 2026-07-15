@@ -7,10 +7,7 @@
 // =============================================================================
 //! File write options.
 
-use crate::{
-    FileBuffering,
-    FileWriteMode,
-};
+use crate::{FileBuffering, FileWriteMode};
 
 /// Options used when opening a local file for writing.
 ///
@@ -83,10 +80,7 @@ impl FileWriteOptions {
     /// # Errors
     /// Returns [`std::io::ErrorKind::InvalidInput`] when `capacity` is zero.
     #[inline]
-    pub fn buffered_with_capacity(
-        mut self,
-        capacity: usize,
-    ) -> std::io::Result<Self> {
+    pub fn buffered_with_capacity(mut self, capacity: usize) -> std::io::Result<Self> {
         self.buffering = FileBuffering::buffered_with_capacity(capacity)?;
         Ok(self)
     }

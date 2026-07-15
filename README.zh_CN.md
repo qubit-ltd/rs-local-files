@@ -103,7 +103,7 @@ assert_eq!("new payload\n", std::fs::read_to_string(&final_path)?);
 
 child helper 会拒绝 lexical traversal 和检查时可见的 symbolic-link escape，但校验与后续文件系统操作并非原子过程。当不可信参与者能够并发修改目录树时，它们不能作为 sandbox 边界。
 
-`LocalTempFile::persist` 默认在移动操作中拒绝已存在的目标。只有确实要替换已有目标时，才使用 `LocalTempFile::persist_with` 和 `LocalPersistOptions { overwrite: true }`。`LocalTempDir::persist` 同样拒绝已存在的目标，并且不提供 overwrite 选项。持久化失败会返回持有原临时 guard 的 `LocalPersistError`，调用方可以重试或检查资源。在 Unix 上，临时文件以 `0600`、临时目录以 `0700` 创建，之后仍受进程 umask 约束。
+`LocalTempFile::persist` 默认在移动操作中拒绝已存在的目标。只有确实要替换已有目标时，才使用 `LocalTempFile::persist_with` 和 `LocalPersistOptions { overwrite: true }`。`LocalTempDir::persist` 同样拒绝已存在的目标，并且不提供 overwrite 选项。持久化失败会返回持有原临时 guard 的 `LocalPersistError`，调用方可以重试或检查资源。持久化只使用原生 move/rename，不会回退到 copy-and-delete，因此跨文件系统移动可能在 Unix 上返回 `EXDEV`，或返回其他平台的等价错误。覆盖文件时会保留临时文件的权限，而不会保留被替换目标的权限；如果需要替换内容并保留已有普通文件的权限，请使用 `LocalFiles::atomic_write`。在 Unix 上，临时文件以 `0600`、临时目录以 `0700` 创建，之后仍受进程 umask 约束。
 
 ### 读写选项
 
@@ -146,6 +146,8 @@ child helper 会拒绝 lexical traversal 和检查时可见的 symbolic-link esc
 | `skipped` | 因冲突策略而跳过的已有目标文件数量。 |
 
 `LocalCopyDirOptions::default()` 是有意保守的默认值：`conflict` 和 `type_conflict` 均为 `Fail`，不跟随 symbolic link，也不保留源权限。通过 `LocalCopyConflictPolicy` 显式选择 `Overwrite` 或 `Skip`；文件/目录类型替换则必须单独设置 `LocalCopyTypeConflictPolicy::Replace`。复制失败返回 `LocalCopyDirError`，其中包含路径、失败阶段、部分统计和原始 I/O source error。
+
+递归复制不是目录树级事务。失败前已经提交的条目会留在目标中，不会执行回滚；破坏性的类型冲突替换还可能先删除已有目标目录，随后才在后续操作中失败。
 
 ### 文件名 Helper
 

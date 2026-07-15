@@ -8,13 +8,7 @@
 //! Local file reader wrapper.
 
 use std::fs::File;
-use std::io::{
-    BufReader,
-    Read,
-    Result,
-    Seek,
-    SeekFrom,
-};
+use std::io::{BufReader, Read, Result, Seek, SeekFrom};
 
 use crate::FileBuffering;
 
@@ -40,9 +34,7 @@ impl LocalFileReader {
     pub(crate) fn from_file(file: File, buffering: FileBuffering) -> Self {
         match buffering {
             FileBuffering::Unbuffered => Self::Unbuffered(file),
-            FileBuffering::Buffered { capacity: None } => {
-                Self::Buffered(BufReader::new(file))
-            }
+            FileBuffering::Buffered { capacity: None } => Self::Buffered(BufReader::new(file)),
             FileBuffering::Buffered {
                 capacity: Some(capacity),
             } => Self::Buffered(BufReader::with_capacity(capacity.get(), file)),

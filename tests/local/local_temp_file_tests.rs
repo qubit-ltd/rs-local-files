@@ -7,16 +7,9 @@
 // =============================================================================
 
 #[cfg(unix)]
-use super::local_files_tests::PermissionsExt;
-use super::local_files_tests::{
-    ErrorKind,
-    LocalPersistOptions,
-    LocalTempFile,
-    Seek,
-    SeekFrom,
-    Write,
-    ensure_test_logger,
-    fs,
+use super::test_support::PermissionsExt;
+use super::test_support::{
+    ErrorKind, LocalPersistOptions, LocalTempFile, Seek, SeekFrom, Write, ensure_test_logger, fs,
     temp_dir,
 };
 
@@ -36,9 +29,8 @@ fn test_temp_file_uses_private_permissions() {
 
 #[test]
 fn test_temp_file_with_name_uses_system_temp_directory() {
-    let file =
-        LocalTempFile::with_name(Some("qubit-local-files-test-"), Some(".tmp"))
-            .expect("temp file should be created");
+    let file = LocalTempFile::with_name(Some("qubit-local-files-test-"), Some(".tmp"))
+        .expect("temp file should be created");
     let name = file
         .path()
         .file_name()
@@ -69,11 +61,8 @@ fn test_temp_file_exists_and_cleanup() {
 
 #[test]
 fn test_debug_formatting_contains_type_name() {
-    let file = LocalTempFile::with_name(
-        Some("qubit-local-files-debug-"),
-        Some(".tmp"),
-    )
-    .expect("temp file should be created");
+    let file = LocalTempFile::with_name(Some("qubit-local-files-debug-"), Some(".tmp"))
+        .expect("temp file should be created");
 
     assert!(format!("{file:?}").contains("LocalTempFile"));
 }
@@ -121,9 +110,8 @@ fn test_temp_file_cleanup_returns_missing_file_error() {
 #[test]
 fn test_temp_file_close_releases_handle_and_rejects_writes_after_close() {
     let dir = temp_dir("temp-file-writer-close");
-    let mut file =
-        LocalTempFile::in_dir(&dir, Some("writer-"), Some(".tmp"), 4)
-            .expect("temp file should be created");
+    let mut file = LocalTempFile::in_dir(&dir, Some("writer-"), Some(".tmp"), 4)
+        .expect("temp file should be created");
     let path = file.path().to_owned();
 
     file.write_all(b"payload")
@@ -161,9 +149,8 @@ fn test_temp_file_supports_seek_through_owned_handle() {
 #[test]
 fn test_temp_file_exposes_owned_file_handle() {
     let dir = temp_dir("temp-file-handle");
-    let mut file =
-        LocalTempFile::in_dir(&dir, Some("handle-"), Some(".tmp"), 4)
-            .expect("temp file should be created");
+    let mut file = LocalTempFile::in_dir(&dir, Some("handle-"), Some(".tmp"), 4)
+        .expect("temp file should be created");
 
     file.as_file_mut()
         .expect("owned file handle should be available")
@@ -182,10 +169,8 @@ fn test_temp_file_exposes_owned_file_handle() {
 
 #[test]
 fn test_temp_file_new_creates_unique_existing_files() {
-    let first_file =
-        LocalTempFile::new().expect("first temp file should exist");
-    let second_file =
-        LocalTempFile::new().expect("second temp file should exist");
+    let first_file = LocalTempFile::new().expect("first temp file should exist");
+    let second_file = LocalTempFile::new().expect("second temp file should exist");
     let first_path = first_file.path().to_owned();
     let second_path = second_file.path().to_owned();
 
@@ -197,12 +182,10 @@ fn test_temp_file_new_creates_unique_existing_files() {
 #[test]
 fn test_temp_file_in_dir_creates_unique_existing_files() {
     let dir = temp_dir("temp-file-in");
-    let mut first_file =
-        LocalTempFile::in_dir(&dir, Some("local-"), Some(".tmp"), 4)
-            .expect("first temp file should be created in dir");
-    let second_file =
-        LocalTempFile::in_dir(&dir, Some("local-"), Some(".tmp"), 4)
-            .expect("second temp file should be created in dir");
+    let mut first_file = LocalTempFile::in_dir(&dir, Some("local-"), Some(".tmp"), 4)
+        .expect("first temp file should be created in dir");
+    let second_file = LocalTempFile::in_dir(&dir, Some("local-"), Some(".tmp"), 4)
+        .expect("second temp file should be created in dir");
     let first_path = first_file.path().to_owned();
     let second_path = second_file.path().to_owned();
 
@@ -305,9 +288,8 @@ fn test_temp_file_keep_preserves_file() {
 #[test]
 fn test_temp_file_persist_moves_file() {
     let dir = temp_dir("temp-file-persist");
-    let mut file =
-        LocalTempFile::in_dir(&dir, Some("source-"), Some(".tmp"), 4)
-            .expect("temp file should be created");
+    let mut file = LocalTempFile::in_dir(&dir, Some("source-"), Some(".tmp"), 4)
+        .expect("temp file should be created");
     file.write_all(b"payload").unwrap();
     let source = file.path().to_owned();
     let target = dir.join("nested").join("result.txt");
@@ -323,9 +305,8 @@ fn test_temp_file_persist_moves_file() {
 #[test]
 fn test_temp_file_persist_rejects_existing_target_by_default() {
     let dir = temp_dir("temp-file-persist-existing-target");
-    let mut file =
-        LocalTempFile::in_dir(&dir, Some("source-"), Some(".tmp"), 4)
-            .expect("temp file should be created");
+    let mut file = LocalTempFile::in_dir(&dir, Some("source-"), Some(".tmp"), 4)
+        .expect("temp file should be created");
     file.write_all(b"new").unwrap();
     let source = file.path().to_owned();
     let target = dir.join("result.txt");
@@ -347,9 +328,8 @@ fn test_temp_file_persist_rejects_existing_target_by_default() {
 #[test]
 fn test_temp_file_persist_with_overwrite_replaces_existing_target() {
     let dir = temp_dir("temp-file-persist-overwrite");
-    let mut file =
-        LocalTempFile::in_dir(&dir, Some("source-"), Some(".tmp"), 4)
-            .expect("temp file should be created");
+    let mut file = LocalTempFile::in_dir(&dir, Some("source-"), Some(".tmp"), 4)
+        .expect("temp file should be created");
     file.write_all(b"new").unwrap();
     let source = file.path().to_owned();
     let target = dir.join("result.txt");
@@ -368,9 +348,8 @@ fn test_temp_file_persist_with_overwrite_replaces_existing_target() {
 #[test]
 fn test_temp_file_persist_with_default_rejects_existing_target() {
     let dir = temp_dir("temp-file-persist-default-existing-target");
-    let mut file =
-        LocalTempFile::in_dir(&dir, Some("source-"), Some(".tmp"), 4)
-            .expect("temp file should be created");
+    let mut file = LocalTempFile::in_dir(&dir, Some("source-"), Some(".tmp"), 4)
+        .expect("temp file should be created");
     file.write_all(b"new").unwrap();
     let source = file.path().to_owned();
     let target = dir.join("result.txt");
@@ -424,8 +403,7 @@ fn test_temp_file_persist_rejects_windows_target_with_nul_byte() {
         .expect("temp file should be created");
     let source = file.path().to_owned();
     let prefix = dir.join("unexpected-target");
-    let mut target_units: Vec<u16> =
-        "unexpected-target".encode_utf16().collect();
+    let mut target_units: Vec<u16> = "unexpected-target".encode_utf16().collect();
     target_units.extend([0, u16::from(b'x')]);
     let target = dir.join(OsString::from_wide(&target_units));
 
@@ -444,15 +422,13 @@ fn test_temp_file_persist_rejects_windows_target_with_nul_byte() {
 
 #[cfg(windows)]
 #[test]
-fn test_temp_file_persist_with_overwrite_rejects_windows_target_with_nul_byte()
-{
+fn test_temp_file_persist_with_overwrite_rejects_windows_target_with_nul_byte() {
     use std::ffi::OsString;
     use std::os::windows::ffi::OsStringExt;
 
     let dir = temp_dir("temp-file-overwrite-windows-nul-target");
-    let mut file =
-        LocalTempFile::in_dir(&dir, Some("source-"), Some(".tmp"), 4)
-            .expect("temp file should be created");
+    let mut file = LocalTempFile::in_dir(&dir, Some("source-"), Some(".tmp"), 4)
+        .expect("temp file should be created");
     file.write_all(b"replacement")
         .expect("temporary contents should be written");
     let source = file.path().to_owned();
