@@ -358,7 +358,7 @@ fn test_temp_file_persist_with_overwrite_replaces_existing_target() {
     fs::write(&target, b"old").unwrap();
 
     let persisted = file
-        .persist_with(&target, LocalPersistOptions { overwrite: true })
+        .persist_with(&target, LocalPersistOptions::new().with_overwrite())
         .expect("overwrite option should replace existing target");
 
     assert_eq!(target, persisted);
@@ -454,7 +454,7 @@ fn test_temp_file_persist_with_overwrite_rejects_windows_target_with_nul_byte()
     let target = path_with_interior_nul(&dir, "existing-target");
 
     let error = file
-        .persist_with(&target, LocalPersistOptions { overwrite: true })
+        .persist_with(&target, LocalPersistOptions::new().with_overwrite())
         .expect_err("Windows NUL target should be rejected before replacement");
 
     assert_eq!(ErrorKind::InvalidInput, error.kind());

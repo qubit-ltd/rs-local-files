@@ -364,7 +364,8 @@ impl LocalFiles {
     ///
     /// # Errors
     /// Returns [`LocalAtomicWriteError`] with the failed stage, temporary path,
-    /// commit state, and native I/O source error.
+    /// commit state, native I/O source error, and any secondary staging cleanup
+    /// error.
     #[inline(always)]
     pub fn atomic_write<P, B>(
         path: P,
@@ -396,7 +397,8 @@ impl LocalFiles {
     ///
     /// # Errors
     /// Returns [`LocalAtomicWriteError`] with the failed stage, temporary path,
-    /// commit state, and native I/O source error.
+    /// commit state, native I/O source error, and any secondary staging cleanup
+    /// error.
     ///
     /// # Panics
     /// Propagates a panic raised by `write` after closing and attempting to

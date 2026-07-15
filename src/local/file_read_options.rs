@@ -11,6 +11,7 @@ use crate::FileBuffering;
 
 /// Options used when opening a local file for reading.
 #[must_use = "file read options have no effect unless they are used"]
+#[non_exhaustive]
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
 pub struct FileReadOptions {
     /// Buffering policy for the returned reader.
@@ -18,6 +19,15 @@ pub struct FileReadOptions {
 }
 
 impl FileReadOptions {
+    /// Returns the configured buffering policy.
+    ///
+    /// # Returns
+    /// Buffering policy used by the opened reader.
+    #[inline(always)]
+    pub const fn buffering(&self) -> FileBuffering {
+        self.buffering
+    }
+
     /// Returns options for an unbuffered reader.
     ///
     /// # Returns

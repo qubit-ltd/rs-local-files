@@ -6,8 +6,9 @@
 //    Licensed under the Apache License, Version 2.0.
 // =============================================================================
 
+#[cfg(unix)]
+use qubit_local_files::LocalCopyDirStage;
 use qubit_local_files::{
-    FileBuffering,
     FileReadOptions,
     FileWriteMode,
     FileWriteOptions,
@@ -16,11 +17,6 @@ use qubit_local_files::{
     LocalCopyDirOptions,
     LocalCopyTypeConflictPolicy,
     LocalFiles,
-};
-#[cfg(unix)]
-use qubit_local_files::{
-    LocalCopyDirStage,
-    LocalCopyDirStats,
 };
 use std::io::{
     Error,
@@ -362,6 +358,51 @@ fn test_atomic_write_with_preserves_existing_file_and_removes_temp_on_error() {
     fs::remove_dir_all(dir).unwrap();
 }
 
+#[cfg(target_os = "linux")]
+#[test]
+fn test_atomic_write_with_reports_temporary_cleanup_failure() {
+    let dir = temp_dir("atomic-staging-cleanup-error");
+    let path = dir.join("out.txt");
+    fs::write(&path, b"old").expect("original target should be written");
+    if !directory_write_restrictions_are_enforced(&dir) {
+        fs::remove_dir_all(dir).expect("test directory should be removed");
+        return;
+    }
+
+    let restricted_dir = dir.clone();
+    let error = LocalFiles::atomic_write_with(&path, move |file| {
+        file.write_all(b"new")?;
+        fs::set_permissions(
+            &restricted_dir,
+            fs::Permissions::from_mode(0o500),
+        )?;
+        Err(Error::other("write failed"))
+    })
+    .expect_err("write and staging cleanup should both fail");
+
+    let temporary_path = error
+        .temporary_path
+        .clone()
+        .expect("atomic error should retain the staging path");
+    let cleanup_error_kind = error
+        .cleanup_error
+        .as_ref()
+        .map(Error::kind)
+        .expect("atomic error should retain the cleanup failure");
+    let error_message = error.to_string();
+    fs::set_permissions(&dir, fs::Permissions::from_mode(0o700))
+        .expect("directory permissions should be restored");
+    let temporary_path_remained = temporary_path.exists();
+    fs::remove_dir_all(dir).expect("test directory should be removed");
+
+    assert_eq!(LocalAtomicWriteStage::WriteTemporaryFile, error.stage);
+    assert_eq!(ErrorKind::Other, error.kind());
+    assert_eq!(ErrorKind::PermissionDenied, cleanup_error_kind);
+    assert!(error_message.contains(&temporary_path.display().to_string()));
+    assert!(error_message.contains("staging cleanup also failed"));
+    assert!(temporary_path_remained);
+}
+
 #[test]
 fn test_atomic_write_with_removes_temporary_file_when_callback_panics() {
     let dir = temp_dir("atomic-write-panic");
@@ -435,11 +476,8 @@ fn test_open_reader_and_writer_replace_old_buffered_helpers() {
     {
         let mut writer = LocalFiles::open_writer(
             &path,
-            FileWriteOptions {
-                create_parent: true,
-                mode: FileWriteMode::CreateOrTruncate,
-                buffering: FileBuffering::Unbuffered,
-            },
+            FileWriteOptions::new(FileWriteMode::CreateOrTruncate)
+                .with_parent(),
         )
         .expect("writer should be created");
         writer.write_all(b"abc").unwrap();
@@ -449,10 +487,7 @@ fn test_open_reader_and_writer_replace_old_buffered_helpers() {
     {
         let mut writer = LocalFiles::open_writer(
             &path,
-            FileWriteOptions {
-                buffering: FileBuffering::Buffered { capacity: None },
-                ..FileWriteOptions::default()
-            },
+            FileWriteOptions::default().buffered(),
         )
         .expect("buffered writer should be created");
         writer.write_all(b"xyz").unwrap();
@@ -513,11 +548,9 @@ fn test_open_writer_respects_modes_parent_creation_and_buffering_options() {
     {
         let mut writer = LocalFiles::open_writer(
             &path,
-            FileWriteOptions {
-                create_parent: true,
-                mode: FileWriteMode::CreateNew,
-                buffering: FileBuffering::Buffered { capacity: None },
-            },
+            FileWriteOptions::new(FileWriteMode::CreateNew)
+                .with_parent()
+                .buffered(),
         )
         .expect("create-new writer should create missing parents");
         assert!(writer.is_buffered());
@@ -527,10 +560,7 @@ fn test_open_writer_respects_modes_parent_creation_and_buffering_options() {
 
     let error = LocalFiles::open_writer(
         &path,
-        FileWriteOptions {
-            mode: FileWriteMode::CreateNew,
-            ..FileWriteOptions::default()
-        },
+        FileWriteOptions::new(FileWriteMode::CreateNew),
     )
     .expect_err("create-new mode should reject existing files");
     assert_eq!(ErrorKind::AlreadyExists, error.kind());
@@ -538,10 +568,7 @@ fn test_open_writer_respects_modes_parent_creation_and_buffering_options() {
     {
         let mut writer = LocalFiles::open_writer(
             &path,
-            FileWriteOptions {
-                mode: FileWriteMode::AppendExisting,
-                ..FileWriteOptions::default()
-            },
+            FileWriteOptions::new(FileWriteMode::AppendExisting),
         )
         .expect("append-existing writer should open existing files");
         writer.write_all(b"-two").unwrap();
@@ -647,10 +674,7 @@ fn test_open_writer_returns_parent_error() {
 
     let error = LocalFiles::open_writer(
         file_parent.join("child.txt"),
-        FileWriteOptions {
-            create_parent: true,
-            ..FileWriteOptions::default()
-        },
+        FileWriteOptions::default().with_parent(),
     )
     .expect_err("file parent should return create-dir error");
 
@@ -1129,10 +1153,7 @@ fn test_copy_dir_all_with_skips_existing_destination_files() {
     let stats = LocalFiles::copy_dir_all_with(
         &src,
         &dst,
-        LocalCopyDirOptions {
-            conflict: LocalCopyConflictPolicy::Skip,
-            ..LocalCopyDirOptions::default()
-        },
+        LocalCopyDirOptions::new().with_conflict(LocalCopyConflictPolicy::Skip),
     )
     .expect("existing destination file should be skipped");
 
@@ -1154,7 +1175,7 @@ fn test_copy_dir_all_with_skips_existing_destination_files() {
 /// its staging file before opening the source, this provides exact
 /// after-staging synchronization without filesystem polling or large files.
 ///
-/// # Arguments
+/// # Parameters
 ///
 /// * `source_file` - Regular source file opened by the copy worker.
 /// * `action` - Filesystem mutation performed after the source open blocks.
@@ -1334,10 +1355,8 @@ fn test_copy_dir_all_with_reports_skipped_staging_cleanup_failure() {
             LocalFiles::copy_dir_all_with(
                 copy_src,
                 copy_dst,
-                LocalCopyDirOptions {
-                    conflict: LocalCopyConflictPolicy::Skip,
-                    ..LocalCopyDirOptions::default()
-                },
+                LocalCopyDirOptions::new()
+                    .with_conflict(LocalCopyConflictPolicy::Skip),
             )
         },
     )
@@ -1389,10 +1408,8 @@ fn test_copy_dir_all_with_handles_destination_created_after_staging() {
             LocalFiles::copy_dir_all_with(
                 copy_src,
                 copy_dst,
-                LocalCopyDirOptions {
-                    conflict: LocalCopyConflictPolicy::Skip,
-                    ..LocalCopyDirOptions::default()
-                },
+                LocalCopyDirOptions::new()
+                    .with_conflict(LocalCopyConflictPolicy::Skip),
             )
         },
     )
@@ -1474,11 +1491,9 @@ fn test_copy_dir_all_with_keeps_conflicting_directory_until_source_is_staged() {
             LocalFiles::copy_dir_all_with(
                 copy_src,
                 copy_dst,
-                LocalCopyDirOptions {
-                    conflict: LocalCopyConflictPolicy::Overwrite,
-                    type_conflict: LocalCopyTypeConflictPolicy::Replace,
-                    ..LocalCopyDirOptions::default()
-                },
+                LocalCopyDirOptions::new()
+                    .with_conflict(LocalCopyConflictPolicy::Overwrite)
+                    .with_type_conflict(LocalCopyTypeConflictPolicy::Replace),
             )
         },
     )
@@ -1522,11 +1537,9 @@ fn test_copy_dir_all_with_preserves_file_replacing_directory_after_staging() {
             LocalFiles::copy_dir_all_with(
                 copy_src,
                 copy_dst,
-                LocalCopyDirOptions {
-                    conflict: LocalCopyConflictPolicy::Skip,
-                    type_conflict: LocalCopyTypeConflictPolicy::Replace,
-                    ..LocalCopyDirOptions::default()
-                },
+                LocalCopyDirOptions::new()
+                    .with_conflict(LocalCopyConflictPolicy::Skip)
+                    .with_type_conflict(LocalCopyTypeConflictPolicy::Replace),
             )
         },
     )
@@ -1571,10 +1584,8 @@ fn test_copy_dir_all_with_rejects_file_replacing_directory_after_staging() {
             LocalFiles::copy_dir_all_with(
                 copy_src,
                 copy_dst,
-                LocalCopyDirOptions {
-                    type_conflict: LocalCopyTypeConflictPolicy::Replace,
-                    ..LocalCopyDirOptions::default()
-                },
+                LocalCopyDirOptions::new()
+                    .with_type_conflict(LocalCopyTypeConflictPolicy::Replace),
             )
         },
     )
@@ -1617,11 +1628,9 @@ fn test_copy_dir_all_with_commits_when_directory_disappears_after_staging() {
             LocalFiles::copy_dir_all_with(
                 copy_src,
                 copy_dst,
-                LocalCopyDirOptions {
-                    conflict: LocalCopyConflictPolicy::Overwrite,
-                    type_conflict: LocalCopyTypeConflictPolicy::Replace,
-                    ..LocalCopyDirOptions::default()
-                },
+                LocalCopyDirOptions::new()
+                    .with_conflict(LocalCopyConflictPolicy::Overwrite)
+                    .with_type_conflict(LocalCopyTypeConflictPolicy::Replace),
             )
         },
     )
@@ -1686,11 +1695,9 @@ fn test_copy_dir_all_with_reports_directory_removal_error_after_staging() {
             LocalFiles::copy_dir_all_with(
                 copy_src,
                 copy_dst,
-                LocalCopyDirOptions {
-                    conflict: LocalCopyConflictPolicy::Overwrite,
-                    type_conflict: LocalCopyTypeConflictPolicy::Replace,
-                    ..LocalCopyDirOptions::default()
-                },
+                LocalCopyDirOptions::new()
+                    .with_conflict(LocalCopyConflictPolicy::Overwrite)
+                    .with_type_conflict(LocalCopyTypeConflictPolicy::Replace),
             )
         },
     );
@@ -1747,11 +1754,9 @@ fn test_copy_dir_all_with_reports_reinspection_error_after_staging() {
             LocalFiles::copy_dir_all_with(
                 copy_src,
                 copy_dst,
-                LocalCopyDirOptions {
-                    conflict: LocalCopyConflictPolicy::Overwrite,
-                    type_conflict: LocalCopyTypeConflictPolicy::Replace,
-                    ..LocalCopyDirOptions::default()
-                },
+                LocalCopyDirOptions::new()
+                    .with_conflict(LocalCopyConflictPolicy::Overwrite)
+                    .with_type_conflict(LocalCopyTypeConflictPolicy::Replace),
             )
         },
     )
@@ -1834,10 +1839,8 @@ fn test_copy_dir_all_with_returns_destination_removal_permission_error() {
     let error = LocalFiles::copy_dir_all_with(
         &src,
         &dst,
-        LocalCopyDirOptions {
-            type_conflict: LocalCopyTypeConflictPolicy::Replace,
-            ..LocalCopyDirOptions::default()
-        },
+        LocalCopyDirOptions::new()
+            .with_type_conflict(LocalCopyTypeConflictPolicy::Replace),
     )
     .expect_err("non-writable parent should reject destination removal");
 
@@ -1892,10 +1895,8 @@ fn test_copy_dir_all_with_rejects_type_conflict_without_removing_directory() {
     let error = LocalFiles::copy_dir_all_with(
         &src,
         &dst,
-        LocalCopyDirOptions {
-            conflict: LocalCopyConflictPolicy::Overwrite,
-            ..LocalCopyDirOptions::default()
-        },
+        LocalCopyDirOptions::new()
+            .with_conflict(LocalCopyConflictPolicy::Overwrite),
     )
     .expect_err("type conflict should be rejected by default");
 
@@ -1926,11 +1927,9 @@ fn test_copy_dir_all_with_replaces_existing_destination_directory_with_file() {
     let stats = LocalFiles::copy_dir_all_with(
         &src,
         &dst,
-        LocalCopyDirOptions {
-            conflict: LocalCopyConflictPolicy::Overwrite,
-            type_conflict: LocalCopyTypeConflictPolicy::Replace,
-            ..LocalCopyDirOptions::default()
-        },
+        LocalCopyDirOptions::new()
+            .with_conflict(LocalCopyConflictPolicy::Overwrite)
+            .with_type_conflict(LocalCopyTypeConflictPolicy::Replace),
     )
     .expect("destination directory should be replaced with the source file");
 
@@ -1966,11 +1965,9 @@ fn test_copy_dir_all_with_keeps_conflicting_directory_when_source_copy_fails() {
     let error = LocalFiles::copy_dir_all_with(
         &src,
         &dst,
-        LocalCopyDirOptions {
-            conflict: LocalCopyConflictPolicy::Overwrite,
-            type_conflict: LocalCopyTypeConflictPolicy::Replace,
-            ..LocalCopyDirOptions::default()
-        },
+        LocalCopyDirOptions::new()
+            .with_conflict(LocalCopyConflictPolicy::Overwrite)
+            .with_type_conflict(LocalCopyTypeConflictPolicy::Replace),
     )
     .expect_err("unreadable source should fail before replacing destination");
 
@@ -2000,11 +1997,9 @@ fn test_copy_dir_all_with_overwrites_existing_destinations() {
     let stats = LocalFiles::copy_dir_all_with(
         &src,
         &dst,
-        LocalCopyDirOptions {
-            conflict: LocalCopyConflictPolicy::Overwrite,
-            type_conflict: LocalCopyTypeConflictPolicy::Replace,
-            ..LocalCopyDirOptions::default()
-        },
+        LocalCopyDirOptions::new()
+            .with_conflict(LocalCopyConflictPolicy::Overwrite)
+            .with_type_conflict(LocalCopyTypeConflictPolicy::Replace),
     )
     .expect("destination should be overwritten");
 
@@ -2016,11 +2011,9 @@ fn test_copy_dir_all_with_overwrites_existing_destinations() {
     let stats = LocalFiles::copy_dir_all_with(
         &src,
         &dst,
-        LocalCopyDirOptions {
-            conflict: LocalCopyConflictPolicy::Overwrite,
-            type_conflict: LocalCopyTypeConflictPolicy::Replace,
-            ..LocalCopyDirOptions::default()
-        },
+        LocalCopyDirOptions::new()
+            .with_conflict(LocalCopyConflictPolicy::Overwrite)
+            .with_type_conflict(LocalCopyTypeConflictPolicy::Replace),
     )
     .expect("existing destination file should be overwritten");
 
@@ -2048,10 +2041,8 @@ fn test_copy_dir_all_with_preserves_root_file_when_type_replacement_removal_fail
     let error = LocalFiles::copy_dir_all_with(
         &src,
         &dst,
-        LocalCopyDirOptions {
-            type_conflict: LocalCopyTypeConflictPolicy::Replace,
-            ..LocalCopyDirOptions::default()
-        },
+        LocalCopyDirOptions::new()
+            .with_type_conflict(LocalCopyTypeConflictPolicy::Replace),
     )
     .expect_err("unwritable parent should reject destination replacement");
 
@@ -2089,10 +2080,7 @@ fn test_copy_dir_all_with_symlink_options() {
     let stats = LocalFiles::copy_dir_all_with(
         &src,
         &followed_dst,
-        LocalCopyDirOptions {
-            follow_symlinks: true,
-            ..LocalCopyDirOptions::default()
-        },
+        LocalCopyDirOptions::new().follow_symlinks(),
     )
     .expect("symlink target should be copied");
 
@@ -2119,10 +2107,7 @@ fn test_copy_dir_all_with_follows_directory_symlink_entry() {
     let stats = LocalFiles::copy_dir_all_with(
         &src,
         &dst,
-        LocalCopyDirOptions {
-            follow_symlinks: true,
-            ..LocalCopyDirOptions::default()
-        },
+        LocalCopyDirOptions::new().follow_symlinks(),
     )
     .expect("directory symlink entry should be followed");
 
@@ -2148,10 +2133,7 @@ fn test_copy_dir_all_with_rejects_directory_symlink_cycle_when_following() {
     let error = LocalFiles::copy_dir_all_with(
         &src,
         &dst,
-        LocalCopyDirOptions {
-            follow_symlinks: true,
-            ..LocalCopyDirOptions::default()
-        },
+        LocalCopyDirOptions::new().follow_symlinks(),
     )
     .expect_err(
         "directory symlink cycles should be rejected before recursive copy",
@@ -2176,10 +2158,7 @@ fn test_copy_dir_all_with_rejects_destination_inside_followed_directory_symlink_
     let error = LocalFiles::copy_dir_all_with(
         &src,
         &dst,
-        LocalCopyDirOptions {
-            follow_symlinks: true,
-            ..LocalCopyDirOptions::default()
-        },
+        LocalCopyDirOptions::new().follow_symlinks(),
     )
     .expect_err(
         "destination inside followed symlink target should be rejected",
@@ -2211,10 +2190,7 @@ fn test_copy_dir_all_with_directory_symlink_options() {
     let stats = LocalFiles::copy_dir_all_with(
         &src_link,
         &dst,
-        LocalCopyDirOptions {
-            follow_symlinks: true,
-            ..LocalCopyDirOptions::default()
-        },
+        LocalCopyDirOptions::new().follow_symlinks(),
     )
     .expect("directory symlink should be followed");
 
@@ -2271,13 +2247,10 @@ fn test_copy_dir_all_with_rejects_unsupported_source_types() {
     assert_eq!(LocalCopyDirStage::InspectSourceEntry, error.stage);
     assert_eq!(socket, error.source_path);
     assert_eq!(dst.join("socket"), error.destination_path);
-    assert_eq!(
-        LocalCopyDirStats {
-            directories: 1,
-            ..LocalCopyDirStats::default()
-        },
-        error.stats
-    );
+    assert_eq!(0, error.stats.files);
+    assert_eq!(1, error.stats.directories);
+    assert_eq!(0, error.stats.bytes);
+    assert_eq!(0, error.stats.skipped);
     assert_eq!(ErrorKind::Unsupported, error.kind());
     drop(listener);
     fs::remove_dir_all(dir).unwrap();
@@ -2300,10 +2273,7 @@ fn test_copy_dir_all_with_rejects_unsupported_symlink_target_types() {
     let error = LocalFiles::copy_dir_all_with(
         &src,
         &dst,
-        LocalCopyDirOptions {
-            follow_symlinks: true,
-            ..LocalCopyDirOptions::default()
-        },
+        LocalCopyDirOptions::new().follow_symlinks(),
     )
     .expect_err("socket symlink target should be rejected");
 
@@ -2369,10 +2339,7 @@ fn test_copy_dir_all_with_preserves_permissions() {
     LocalFiles::copy_dir_all_with(
         &src,
         &dst,
-        LocalCopyDirOptions {
-            preserve_permissions: true,
-            ..LocalCopyDirOptions::default()
-        },
+        LocalCopyDirOptions::new().preserve_permissions(),
     )
     .expect("permissions should be preserved");
 
@@ -2404,10 +2371,7 @@ fn test_copy_dir_all_with_preserves_read_only_directory_permissions() {
     LocalFiles::copy_dir_all_with(
         &src,
         &dst,
-        LocalCopyDirOptions {
-            preserve_permissions: true,
-            ..LocalCopyDirOptions::default()
-        },
+        LocalCopyDirOptions::new().preserve_permissions(),
     )
     .expect("read-only directory permissions should be preserved after copying children");
 
@@ -2603,10 +2567,7 @@ fn test_copy_dir_all_with_returns_broken_symlink_entry_error_when_following() {
     let error = LocalFiles::copy_dir_all_with(
         &src,
         &dst,
-        LocalCopyDirOptions {
-            follow_symlinks: true,
-            ..LocalCopyDirOptions::default()
-        },
+        LocalCopyDirOptions::new().follow_symlinks(),
     )
     .expect_err("broken symlink target should be reported");
 
@@ -2627,10 +2588,7 @@ fn test_copy_dir_all_with_returns_broken_root_symlink_error_when_following() {
     let error = LocalFiles::copy_dir_all_with(
         &src,
         &dst,
-        LocalCopyDirOptions {
-            follow_symlinks: true,
-            ..LocalCopyDirOptions::default()
-        },
+        LocalCopyDirOptions::new().follow_symlinks(),
     )
     .expect_err("broken root symlink target should be reported");
 

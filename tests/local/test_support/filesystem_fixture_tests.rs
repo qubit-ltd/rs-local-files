@@ -24,7 +24,7 @@ static TEST_DIR_COUNTER: AtomicU64 = AtomicU64::new(0);
 ///
 /// Any stale fixture at the generated path is removed before creation.
 ///
-/// # Arguments
+/// # Parameters
 ///
 /// * `name` - Human-readable test name included in the generated path.
 ///
@@ -51,7 +51,7 @@ pub(crate) fn temp_dir(name: &str) -> PathBuf {
 ///
 /// Any stale fixture at the generated path is removed before creation.
 ///
-/// # Arguments
+/// # Parameters
 ///
 /// * `name` - Human-readable test name included in the generated path.
 ///
@@ -74,7 +74,7 @@ pub(crate) fn short_temp_dir(name: &str) -> PathBuf {
 #[cfg(windows)]
 /// Builds a Windows path whose final component contains an interior UTF-16 NUL.
 ///
-/// # Arguments
+/// # Parameters
 ///
 /// * `parent` - Parent directory for the malformed component.
 /// * `prefix` - Visible component prefix placed before the NUL.
@@ -93,7 +93,7 @@ pub(crate) fn path_with_interior_nul(parent: &Path, prefix: &str) -> PathBuf {
 
 /// Counts atomic-write staging entries in a fixture directory.
 ///
-/// # Arguments
+/// # Parameters
 ///
 /// * `dir` - Directory to scan.
 ///

@@ -24,6 +24,7 @@ use crate::{
 /// FileWriteOptions::default().with_parent();
 /// ```
 #[must_use = "file write options have no effect unless they are used"]
+#[non_exhaustive]
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub struct FileWriteOptions {
     /// Whether missing parent directories should be created before opening.
@@ -35,6 +36,33 @@ pub struct FileWriteOptions {
 }
 
 impl FileWriteOptions {
+    /// Returns whether missing parent directories will be created.
+    ///
+    /// # Returns
+    /// `true` when parent creation is enabled.
+    #[inline(always)]
+    pub const fn creates_parent(&self) -> bool {
+        self.create_parent
+    }
+
+    /// Returns the configured file write mode.
+    ///
+    /// # Returns
+    /// Mode used to create or open the destination file.
+    #[inline(always)]
+    pub const fn mode(&self) -> FileWriteMode {
+        self.mode
+    }
+
+    /// Returns the configured buffering policy.
+    ///
+    /// # Returns
+    /// Buffering policy used by the opened writer.
+    #[inline(always)]
+    pub const fn buffering(&self) -> FileBuffering {
+        self.buffering
+    }
+
     /// Returns options for a specific write mode.
     ///
     /// # Parameters

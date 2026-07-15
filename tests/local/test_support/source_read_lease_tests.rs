@@ -66,7 +66,7 @@ pub(crate) struct SourceReadLease {
 impl SourceReadLease {
     /// Acquires a write lease that blocks subsequent source-file readers.
     ///
-    /// # Arguments
+    /// # Parameters
     ///
     /// * `path` - Existing regular file to lease.
     ///

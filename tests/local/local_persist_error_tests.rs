@@ -23,7 +23,7 @@ fn test_persist_error_into_parts_returns_error_and_resource() {
     let target = dir.join("target.txt");
     fs::write(&target, b"existing").expect("target fixture should be written");
 
-    let persist_error = file
+    let mut persist_error = file
         .persist(&target)
         .expect_err("existing target should reject persistence");
     assert!(
@@ -32,6 +32,9 @@ fn test_persist_error_into_parts_returns_error_and_resource() {
             .contains("failed to persist temporary resource")
     );
     assert!(StdError::source(&persist_error).is_some());
+    assert_eq!(ErrorKind::AlreadyExists, persist_error.error().kind());
+    assert_eq!(source, persist_error.resource().path());
+    assert_eq!(source, persist_error.resource_mut().path());
     let (error, resource) = persist_error.into_parts();
 
     assert_eq!(ErrorKind::AlreadyExists, error.kind());

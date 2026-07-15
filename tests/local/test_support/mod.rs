@@ -9,7 +9,6 @@
 //! Shared fixtures and helpers for local-filesystem integration tests.
 
 pub(super) use qubit_local_files::{
-    FileBuffering,
     FileReadOptions,
     FileWriteMode,
     FileWriteOptions,

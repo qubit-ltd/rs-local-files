@@ -10,10 +10,51 @@
 /// Options controlling temporary file persistence behavior.
 ///
 /// The default is conservative: existing destination paths are not overwritten.
+/// Construct this non-exhaustive type through [`Self::new`] and its builder.
+/// Builder results must be used:
+///
+/// ```compile_fail
+/// #![deny(unused_must_use)]
+/// use qubit_local_files::LocalPersistOptions;
+///
+/// LocalPersistOptions::new().with_overwrite();
+/// ```
+#[must_use = "persistence options have no effect unless they are used"]
+#[non_exhaustive]
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub struct LocalPersistOptions {
     /// Whether an existing target path may be overwritten.
     pub overwrite: bool,
+}
+
+impl LocalPersistOptions {
+    /// Returns whether an existing target may be overwritten.
+    ///
+    /// # Returns
+    /// `true` when target replacement is enabled.
+    #[inline(always)]
+    pub const fn overwrites(&self) -> bool {
+        self.overwrite
+    }
+
+    /// Returns conservative persistence options.
+    ///
+    /// # Returns
+    /// Options that reject existing destination paths.
+    #[inline]
+    pub const fn new() -> Self {
+        Self { overwrite: false }
+    }
+
+    /// Enables replacement of an existing target path.
+    ///
+    /// # Returns
+    /// Updated persistence options that permit overwriting.
+    #[inline(always)]
+    pub const fn with_overwrite(mut self) -> Self {
+        self.overwrite = true;
+        self
+    }
 }
 
 impl Default for LocalPersistOptions {
@@ -23,6 +64,6 @@ impl Default for LocalPersistOptions {
     /// Options that reject existing destination paths.
     #[inline]
     fn default() -> Self {
-        Self { overwrite: false }
+        Self::new()
     }
 }

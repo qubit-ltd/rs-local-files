@@ -22,26 +22,26 @@ use super::test_support::{
 
 #[test]
 fn test_file_write_option_constructors_are_explicit() {
+    let custom = FileWriteOptions::new(FileWriteMode::AppendOrCreate)
+        .with_parent()
+        .buffered_with_capacity(64)
+        .expect("positive writer capacity should be accepted");
+    let buffered =
+        FileWriteOptions::new(FileWriteMode::CreateOrTruncate).buffered();
+
+    assert!(custom.creates_parent());
+    assert_eq!(FileWriteMode::AppendOrCreate, custom.mode());
     assert_eq!(
-        FileWriteOptions {
-            create_parent: true,
-            mode: FileWriteMode::AppendOrCreate,
-            buffering: FileBuffering::Buffered {
-                capacity: NonZeroUsize::new(64),
-            },
+        FileBuffering::Buffered {
+            capacity: NonZeroUsize::new(64),
         },
-        FileWriteOptions::new(FileWriteMode::AppendOrCreate)
-            .with_parent()
-            .buffered_with_capacity(64)
-            .expect("positive writer capacity should be accepted")
+        custom.buffering()
     );
+    assert!(!buffered.creates_parent());
+    assert_eq!(FileWriteMode::CreateOrTruncate, buffered.mode());
     assert_eq!(
-        FileWriteOptions {
-            create_parent: false,
-            mode: FileWriteMode::CreateOrTruncate,
-            buffering: FileBuffering::Buffered { capacity: None },
-        },
-        FileWriteOptions::new(FileWriteMode::CreateOrTruncate).buffered()
+        FileBuffering::Buffered { capacity: None },
+        buffered.buffering()
     );
 }
 

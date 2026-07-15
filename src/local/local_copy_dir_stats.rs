@@ -8,6 +8,7 @@
 //! Recursive directory copy statistics.
 
 /// Statistics reported by recursive directory copy operations.
+#[non_exhaustive]
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
 pub struct LocalCopyDirStats {
     /// Number of regular files copied.
@@ -21,4 +22,42 @@ pub struct LocalCopyDirStats {
 
     /// Number of existing destination file entries skipped.
     pub skipped: u64,
+}
+
+impl LocalCopyDirStats {
+    /// Returns the number of regular files copied.
+    ///
+    /// # Returns
+    /// Copied regular-file count.
+    #[inline(always)]
+    pub const fn files(&self) -> u64 {
+        self.files
+    }
+
+    /// Returns the number of destination directories created.
+    ///
+    /// # Returns
+    /// Created directory count.
+    #[inline(always)]
+    pub const fn directories(&self) -> u64 {
+        self.directories
+    }
+
+    /// Returns the number of bytes copied from regular files.
+    ///
+    /// # Returns
+    /// Copied byte count.
+    #[inline(always)]
+    pub const fn bytes(&self) -> u64 {
+        self.bytes
+    }
+
+    /// Returns the number of existing destination entries skipped.
+    ///
+    /// # Returns
+    /// Skipped entry count.
+    #[inline(always)]
+    pub const fn skipped(&self) -> u64 {
+        self.skipped
+    }
 }

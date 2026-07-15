@@ -14,11 +14,15 @@ use std::fmt::{
     Result as FmtResult,
 };
 use std::io;
-use std::path::PathBuf;
+use std::path::{
+    Path,
+    PathBuf,
+};
 
 use crate::LocalAtomicWriteStage;
 
 /// Error returned by an atomic whole-file replacement.
+#[non_exhaustive]
 #[derive(Debug)]
 pub struct LocalAtomicWriteError {
     /// Stage at which the operation failed.
@@ -29,11 +33,61 @@ pub struct LocalAtomicWriteError {
     pub temporary_path: Option<PathBuf>,
     /// Whether destination replacement completed before the failure.
     pub committed: bool,
+    /// Secondary error reported while removing an uncommitted staging file.
+    ///
+    /// The primary operation error remains available through [`Self::source`]
+    /// and the [`Error`] implementation.
+    pub cleanup_error: Option<io::Error>,
     /// Native I/O error that caused the failure.
     pub source: io::Error,
 }
 
 impl LocalAtomicWriteError {
+    /// Returns the stage at which the operation failed.
+    ///
+    /// # Returns
+    /// Failed atomic-write stage.
+    #[inline(always)]
+    pub const fn stage(&self) -> LocalAtomicWriteStage {
+        self.stage
+    }
+
+    /// Returns the requested destination path.
+    ///
+    /// # Returns
+    /// Destination path supplied by the caller.
+    #[inline(always)]
+    pub fn path(&self) -> &Path {
+        &self.path
+    }
+
+    /// Returns the same-directory staging path, when one was created.
+    ///
+    /// # Returns
+    /// Staging path retained for diagnostics.
+    #[inline(always)]
+    pub fn temporary_path(&self) -> Option<&Path> {
+        self.temporary_path.as_deref()
+    }
+
+    /// Returns whether destination replacement completed before the failure.
+    ///
+    /// # Returns
+    /// `true` when the destination had already been committed.
+    #[inline(always)]
+    pub const fn is_committed(&self) -> bool {
+        self.committed
+    }
+
+    /// Returns the secondary staging cleanup error, when cleanup failed.
+    ///
+    /// # Returns
+    /// Cleanup error without replacing the primary source error.
+    #[inline(always)]
+    pub fn cleanup_error(&self) -> Option<&io::Error> {
+        self.cleanup_error.as_ref()
+    }
+
     /// Creates an atomic-write error.
     ///
     /// # Parameters
@@ -58,6 +112,7 @@ impl LocalAtomicWriteError {
             path,
             temporary_path,
             committed,
+            cleanup_error: None,
             source,
         }
     }
@@ -69,6 +124,23 @@ impl LocalAtomicWriteError {
     #[inline(always)]
     pub fn kind(&self) -> io::ErrorKind {
         self.source.kind()
+    }
+
+    /// Attaches a staging cleanup failure.
+    ///
+    /// # Parameters
+    /// - `cleanup_error`: Secondary error raised while removing the staging
+    ///   path.
+    ///
+    /// # Returns
+    /// This atomic-write error enriched with cleanup context.
+    #[inline]
+    pub(crate) fn with_cleanup_error(
+        mut self,
+        cleanup_error: Option<io::Error>,
+    ) -> Self {
+        self.cleanup_error = cleanup_error;
+        self
     }
 }
 
@@ -82,7 +154,17 @@ impl Display for LocalAtomicWriteError {
             self.stage,
             self.committed,
             self.source
-        )
+        )?;
+        if let Some(temporary_path) = self.temporary_path.as_ref() {
+            write!(formatter, "; staging path '{}'", temporary_path.display())?;
+        }
+        if let Some(cleanup_error) = self.cleanup_error.as_ref() {
+            return write!(
+                formatter,
+                "; staging cleanup also failed: {cleanup_error}"
+            );
+        }
+        Ok(())
     }
 }
 

@@ -10,7 +10,6 @@
 use super::test_support::PermissionsExt;
 use super::test_support::{
     ErrorKind,
-    FileBuffering,
     FileReadOptions,
     FileWriteMode,
     FileWriteOptions,
@@ -277,12 +276,10 @@ fn test_temp_dir_list_and_child_reader_writer_use_shared_options() {
         let mut writer = temp_dir
             .open_child_writer(
                 child,
-                FileWriteOptions {
-                    create_parent: true,
-                    mode: FileWriteMode::CreateNew,
-                    buffering: FileBuffering::buffered_with_capacity(8)
-                        .expect("positive buffer capacity should be accepted"),
-                },
+                FileWriteOptions::new(FileWriteMode::CreateNew)
+                    .with_parent()
+                    .buffered_with_capacity(8)
+                    .expect("positive buffer capacity should be accepted"),
             )
             .expect("child writer should create parent directories");
         writer.write_all(b"payload").unwrap();
@@ -290,12 +287,7 @@ fn test_temp_dir_list_and_child_reader_writer_use_shared_options() {
     }
 
     let mut reader = temp_dir
-        .open_child_reader(
-            child,
-            FileReadOptions {
-                buffering: FileBuffering::Buffered { capacity: None },
-            },
-        )
+        .open_child_reader(child, FileReadOptions::buffered())
         .expect("child reader should open a child file");
     let mut content = Vec::new();
     reader.read_to_end(&mut content).unwrap();

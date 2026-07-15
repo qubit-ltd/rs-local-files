@@ -14,3 +14,10 @@ fn test_persist_options_default_is_conservative() {
 
     assert!(!options.overwrite);
 }
+
+#[test]
+fn test_persist_options_builder_enables_overwrite() {
+    let options = LocalPersistOptions::new().with_overwrite();
+
+    assert!(options.overwrites());
+}

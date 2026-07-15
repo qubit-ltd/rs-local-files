@@ -21,20 +21,16 @@ use super::test_support::{
 
 #[test]
 fn test_file_read_option_constructors_are_explicit() {
+    let unbuffered = FileReadOptions::unbuffered();
+    let buffered = FileReadOptions::buffered_with_capacity(32)
+        .expect("positive reader capacity should be accepted");
+
+    assert_eq!(FileBuffering::Unbuffered, unbuffered.buffering());
     assert_eq!(
-        FileReadOptions {
-            buffering: FileBuffering::Unbuffered,
+        FileBuffering::Buffered {
+            capacity: NonZeroUsize::new(32),
         },
-        FileReadOptions::unbuffered()
-    );
-    assert_eq!(
-        FileReadOptions {
-            buffering: FileBuffering::Buffered {
-                capacity: NonZeroUsize::new(32),
-            },
-        },
-        FileReadOptions::buffered_with_capacity(32)
-            .expect("positive reader capacity should be accepted")
+        buffered.buffering()
     );
 }
 

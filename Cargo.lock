@@ -135,7 +135,7 @@ dependencies = [
 
 [[package]]
 name = "qubit-local-files"
-version = "0.3.0"
+version = "0.4.0"
 dependencies = [
  "getrandom",
  "libc",

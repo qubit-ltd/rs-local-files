@@ -13,18 +13,25 @@ use qubit_local_files::FileBuffering;
 
 #[test]
 fn test_file_buffering_constructors_are_explicit() {
-    assert_eq!(FileBuffering::Unbuffered, FileBuffering::default());
-    assert_eq!(
-        FileBuffering::Buffered { capacity: None },
-        FileBuffering::buffered()
-    );
+    let unbuffered = FileBuffering::default();
+    let buffered = FileBuffering::buffered();
+    let custom = FileBuffering::buffered_with_capacity(32)
+        .expect("positive buffer capacity should be accepted");
+
+    assert_eq!(FileBuffering::Unbuffered, unbuffered);
+    assert_eq!(FileBuffering::Buffered { capacity: None }, buffered);
     assert_eq!(
         FileBuffering::Buffered {
             capacity: NonZeroUsize::new(32),
         },
-        FileBuffering::buffered_with_capacity(32)
-            .expect("positive buffer capacity should be accepted")
+        custom
     );
+    assert!(!unbuffered.is_buffered());
+    assert!(buffered.is_buffered());
+    assert!(custom.is_buffered());
+    assert_eq!(None, unbuffered.capacity());
+    assert_eq!(None, buffered.capacity());
+    assert_eq!(NonZeroUsize::new(32), custom.capacity());
 }
 
 #[test]

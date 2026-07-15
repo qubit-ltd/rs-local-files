@@ -26,7 +26,7 @@ pub(crate) struct CurrentDirGuard {
 impl CurrentDirGuard {
     /// Changes the process current directory and returns a restoration guard.
     ///
-    /// # Arguments
+    /// # Parameters
     ///
     /// * `path` - Directory to make current until the guard is dropped.
     ///

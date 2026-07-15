@@ -82,6 +82,34 @@ fn with_atomic_context<T>(
     })
 }
 
+/// Creates an atomic-write error and explicitly cleans up its staging file.
+///
+/// # Parameters
+/// - `stage`: Stage at which the primary operation failed.
+/// - `path`: Requested destination path.
+/// - `source`: Primary I/O error.
+/// - `staged_file`: Uncommitted staging file to close and remove.
+///
+/// # Returns
+/// Structured primary error with any secondary cleanup error attached.
+fn atomic_error_with_staging(
+    stage: LocalAtomicWriteStage,
+    path: &Path,
+    source: std::io::Error,
+    staged_file: &mut StagedFile,
+) -> LocalAtomicWriteError {
+    let temporary_path = staged_file.path().to_path_buf();
+    let cleanup_error = staged_file.cleanup().err();
+    LocalAtomicWriteError::new(
+        stage,
+        path.to_path_buf(),
+        Some(temporary_path),
+        false,
+        source,
+    )
+    .with_cleanup_error(cleanup_error)
+}
+
 /// Atomically writes a file at `path` using `write`.
 ///
 /// # Parameters
@@ -130,12 +158,11 @@ pub(crate) fn atomic_write_with_path(
     let mut staged_file = StagedFile::new(temp_path, file);
 
     if let Err(source) = write(staged_file.file_mut()) {
-        return Err(LocalAtomicWriteError::new(
+        return Err(atomic_error_with_staging(
             LocalAtomicWriteStage::WriteTemporaryFile,
-            path.to_path_buf(),
-            Some(staged_file.path().to_path_buf()),
-            false,
+            path,
             source,
+            &mut staged_file,
         ));
     }
     if let Err(source) = apply_existing_permissions(
@@ -143,32 +170,29 @@ pub(crate) fn atomic_write_with_path(
         existing_permissions.as_ref(),
         staged_file.path(),
     ) {
-        return Err(LocalAtomicWriteError::new(
+        return Err(atomic_error_with_staging(
             LocalAtomicWriteStage::PreservePermissions,
-            path.to_path_buf(),
-            Some(staged_file.path().to_path_buf()),
-            false,
+            path,
             source,
+            &mut staged_file,
         ));
     }
     if let Err(source) = staged_file.file().sync_all() {
-        return Err(LocalAtomicWriteError::new(
+        return Err(atomic_error_with_staging(
             LocalAtomicWriteStage::SyncTemporaryFile,
-            path.to_path_buf(),
-            Some(staged_file.path().to_path_buf()),
-            false,
+            path,
             source,
+            &mut staged_file,
         ));
     }
 
     staged_file.close();
     if let Err(source) = replace_file(staged_file.path(), path) {
-        return Err(LocalAtomicWriteError::new(
+        return Err(atomic_error_with_staging(
             LocalAtomicWriteStage::ReplaceDestination,
-            path.to_path_buf(),
-            Some(staged_file.path().to_path_buf()),
-            false,
+            path,
             source,
+            &mut staged_file,
         ));
     }
     let temp_path = staged_file.path().to_path_buf();

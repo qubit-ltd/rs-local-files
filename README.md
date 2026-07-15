@@ -37,7 +37,7 @@ For stream-level `std::io` traits, extension methods, wrappers, and codecs, see
 
 ```toml
 [dependencies]
-qubit-local-files = "0.3"
+qubit-local-files = "0.4"
 ```
 
 ## Quick Example
@@ -70,7 +70,7 @@ std::fs::write(&final_path, "old payload")?;
 
 let mut temp = LocalTempFile::with_name(Some("qubit-local-files-"), Some(".txt"))?;
 temp.write_all(b"new payload\n")?;
-temp.persist_with(&final_path, LocalPersistOptions { overwrite: true })?;
+temp.persist_with(&final_path, LocalPersistOptions::new().with_overwrite())?;
 
 assert_eq!("new payload\n", std::fs::read_to_string(&final_path)?);
 
@@ -126,7 +126,7 @@ not a sandbox boundary when an untrusted actor can mutate the tree concurrently.
 
 `LocalTempFile::persist` rejects an existing target by default during the move
 operation. Use `LocalTempFile::persist_with` and
-`LocalPersistOptions { overwrite: true }` only when replacing an existing target
+`LocalPersistOptions::new().with_overwrite()` only when replacing an existing target
 is intended. `LocalTempDir::persist` also rejects an existing target and does not
 provide an overwrite option. A failed persistence operation returns
 `LocalPersistError`, which retains the temporary guard for retry or inspection.
@@ -176,7 +176,8 @@ generated indexes. Existing regular-file permissions are preserved. On Unix,
 a new destination uses mode `0600` before applying a more restrictive process
 umask.
 Failures return `LocalAtomicWriteError`, including the failed stage, temporary
-path, native source error, and whether replacement had already committed.
+path, native source error, whether replacement had already committed, and any
+secondary error raised while removing an uncommitted staging file.
 If an `atomic_write_with` callback panics, the uncommitted temporary file is
 closed and best-effort removed before the panic propagates. A cleanup failure
 cannot replace the panic, so the staging path may remain in that case.

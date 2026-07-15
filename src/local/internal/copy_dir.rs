@@ -469,7 +469,7 @@ fn ensure_copy_destination_dir(
 /// removal APIs prevent a concurrently substituted real directory from being
 /// recursively deleted.
 ///
-/// # Arguments
+/// # Parameters
 ///
 /// * `dst` - Destination previously observed as a non-directory entry.
 ///
@@ -498,7 +498,7 @@ fn remove_destination_non_directory_if_unchanged(dst: &Path) -> Result<()> {
 /// A non-directory entry that appears after the caller's earlier inspection is
 /// retained for the file-conflict policy to handle during commit.
 ///
-/// # Arguments
+/// # Parameters
 ///
 /// * `dst` - Destination previously observed as a real directory.
 ///

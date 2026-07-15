@@ -17,6 +17,7 @@ use std::fmt::{
 use std::io;
 
 /// Persistence error that returns ownership of the temporary resource.
+#[non_exhaustive]
 #[derive(Debug)]
 pub struct LocalPersistError<T> {
     /// Native I/O error that prevented persistence.
@@ -26,6 +27,33 @@ pub struct LocalPersistError<T> {
 }
 
 impl<T> LocalPersistError<T> {
+    /// Returns the native persistence error.
+    ///
+    /// # Returns
+    /// I/O error that prevented persistence.
+    #[inline(always)]
+    pub const fn error(&self) -> &io::Error {
+        &self.error
+    }
+
+    /// Returns the retained temporary resource.
+    ///
+    /// # Returns
+    /// Shared reference to the resource retained after failure.
+    #[inline(always)]
+    pub const fn resource(&self) -> &T {
+        &self.resource
+    }
+
+    /// Returns the retained temporary resource mutably.
+    ///
+    /// # Returns
+    /// Mutable reference to the resource retained after failure.
+    #[inline(always)]
+    pub const fn resource_mut(&mut self) -> &mut T {
+        &mut self.resource
+    }
+
     /// Creates a recoverable persistence error.
     ///
     /// # Parameters

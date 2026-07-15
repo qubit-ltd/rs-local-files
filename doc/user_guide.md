@@ -20,7 +20,8 @@ Good fits:
 - Creating temporary files or directories that normally clean themselves up.
 - Keeping or persisting temporary entries after successful work.
 - Rejecting accidental overwrite when persisting a temporary file.
-- Replacing existing files only when `LocalPersistOptions { overwrite: true }`
+- Replacing existing files only when
+  `LocalPersistOptions::new().with_overwrite()`
   is explicit.
 - Creating parent directories before opening, writing, or persisting files.
 - Atomically replacing a complete file through a same-directory temporary file.
@@ -45,7 +46,7 @@ Those stream and byte-I/O concerns belong in
 
 ```toml
 [dependencies]
-qubit-local-files = "0.3"
+qubit-local-files = "0.4"
 ```
 
 ## Import Patterns
@@ -251,7 +252,7 @@ std::fs::write(&target, "old")?;
 let mut file = LocalTempFile::with_name(Some("qubit-local-files-"), Some(".txt"))?;
 file.write_all(b"new\n")?;
 
-file.persist_with(&target, LocalPersistOptions { overwrite: true })?;
+file.persist_with(&target, LocalPersistOptions::new().with_overwrite())?;
 
 assert_eq!("new\n", std::fs::read_to_string(&target)?);
 
@@ -329,7 +330,8 @@ Important semantics:
   of a newly created directory entry fails, the method may return an error after
   the destination already contains the new contents.
 - Errors are reported as `LocalAtomicWriteError`, which exposes the failed
-  stage, temporary path, native I/O source, and a `committed` flag.
+  stage, temporary path, native I/O source, a `committed` flag, and any
+  secondary staging cleanup error.
 - If the destination path is a symbolic link on platforms where renaming over a
   symlink replaces the link itself, the link is replaced and its previous target
   is left unchanged.
@@ -528,12 +530,12 @@ errors carrying the additional state needed for safe recovery.
 Important error behavior:
 
 - Existing temporary-file persistence targets are rejected unless
-  `LocalPersistOptions { overwrite: true }` is explicit.
+  `LocalPersistOptions::new().with_overwrite()` is explicit.
 - Existing temporary-directory persistence targets are rejected.
 - Recursive copy uses an explicit `LocalCopyConflictPolicy` for existing files
   and a separate `LocalCopyTypeConflictPolicy` for file/directory mismatches.
 - Recursive copy rejects symbolic links unless
-  `LocalCopyDirOptions { follow_symlinks: true, .. }` is explicit.
+  `LocalCopyDirOptions::new().follow_symlinks()` is explicit.
 - Drop-time cleanup failures are logged through `log::warn!` and never panic.
 - `LocalTempFile::as_file`, `as_file_mut`, `Write`, and `Seek` return
   `ErrorKind::NotFound` after `close`.

@@ -14,7 +14,7 @@ Qubit Local Files 是 Qubit Rust crate 家族中的本地文件系统 crate。�
 - 创建通常应该自动清理的临时文件或临时目录。
 - 成功完成工作后保留或持久化临时条目。
 - 持久化临时文件时拒绝意外覆盖。
-- 只有在显式指定 `LocalPersistOptions { overwrite: true }` 时才替换已有文件。
+- 只有在显式指定 `LocalPersistOptions::new().with_overwrite()` 时才替换已有文件。
 - 打开、写入或持久化文件前创建父目录。
 - 通过同目录临时文件 atomic replacement 完整替换文件。
 - 使用显式冲突和 symlink 策略复制本地目录树。
@@ -38,7 +38,7 @@ Qubit Local Files 是 Qubit Rust crate 家族中的本地文件系统 crate。�
 
 ```toml
 [dependencies]
-qubit-local-files = "0.3"
+qubit-local-files = "0.4"
 ```
 
 ## 导入方式
@@ -200,7 +200,7 @@ std::fs::write(&target, "old")?;
 let mut file = LocalTempFile::with_name(Some("qubit-local-files-"), Some(".txt"))?;
 file.write_all(b"new\n")?;
 
-file.persist_with(&target, LocalPersistOptions { overwrite: true })?;
+file.persist_with(&target, LocalPersistOptions::new().with_overwrite())?;
 
 assert_eq!("new\n", std::fs::read_to_string(&target)?);
 
@@ -263,7 +263,7 @@ assert_eq!("{\"complete\":true}\n", std::fs::read_to_string(&path)?);
 - 如果写入、flush 或 sync 临时文件失败，目标保持不变。
 - 如果 `atomic_write_with` callback panic，unwind 会先关闭并 best-effort 删除未提交临时文件，再继续传播 panic；目标保持不变。清理失败不能替换原 panic，因此 staging path 可能残留。
 - 如果替换已经成功，但 sync 目标父目录或新建目录项的父目录失败，方法可能在目标已经包含新内容后返回错误。
-- 错误通过 `LocalAtomicWriteError` 报告，包含失败阶段、临时路径、原始 I/O source 和 `committed` 标志。
+- 错误通过 `LocalAtomicWriteError` 报告，包含失败阶段、临时路径、原始 I/O source、`committed` 标志，以及 secondary staging cleanup error。
 - 如果目标路径是 symbolic link，并且平台 rename-over-symlink 语义是替换 link 本身，则该 link 会被新普通文件替换，原 link target 保持不变。
 - 该操作不是多文件事务，也不协调并发写入。
 
@@ -434,10 +434,10 @@ assert_eq!(
 
 重要错误行为：
 
-- 临时文件持久化目标已存在时会被拒绝，除非显式设置 `LocalPersistOptions { overwrite: true }`。
+- 临时文件持久化目标已存在时会被拒绝，除非显式设置 `LocalPersistOptions::new().with_overwrite()`。
 - 临时目录持久化目标已存在时会被拒绝。
 - 递归复制通过 `LocalCopyConflictPolicy` 处理已有文件，通过独立的 `LocalCopyTypeConflictPolicy` 处理文件/目录类型冲突。
-- 递归复制遇到 symbolic link 时会被拒绝，除非显式设置 `LocalCopyDirOptions { follow_symlinks: true, .. }`。
+- 递归复制遇到 symbolic link 时会被拒绝，除非显式设置 `LocalCopyDirOptions::new().follow_symlinks()`。
 - Drop 阶段清理失败会通过 `log::warn!` 记录，不会 panic。
 - `LocalTempFile::as_file`、`as_file_mut`、`Write` 和 `Seek` 在 `close` 之后返回 `ErrorKind::NotFound`。
 - `LocalTempDir` child API 会在不安全 child 路径、child reader 目标不是文件、以及通过 symbolic link 离开临时目录时返回 `ErrorKind::InvalidInput`。

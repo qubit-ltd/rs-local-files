@@ -37,6 +37,11 @@ fn test_atomic_write_with_returns_parent_error() {
     ));
     assert_eq!(LocalAtomicWriteStage::PrepareParent, error.stage);
     assert!(!error.committed);
+    assert_eq!(LocalAtomicWriteStage::PrepareParent, error.stage());
+    assert_eq!(file_parent.join("child.txt"), error.path());
+    assert!(error.temporary_path().is_none());
+    assert!(!error.is_committed());
+    assert!(error.cleanup_error().is_none());
     assert!(StdError::source(&error).is_some());
     fs::remove_dir_all(dir).unwrap();
 }

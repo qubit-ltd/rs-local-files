@@ -21,3 +21,23 @@ fn test_copy_dir_options_default_is_conservative() {
     assert!(!options.follow_symlinks);
     assert!(!options.preserve_permissions);
 }
+
+#[test]
+fn test_copy_dir_options_builders_express_non_default_policies() {
+    let options = LocalCopyDirOptions::new()
+        .with_conflict(LocalCopyConflictPolicy::Overwrite)
+        .with_type_conflict(LocalCopyTypeConflictPolicy::Replace)
+        .follow_symlinks()
+        .preserve_permissions();
+
+    assert_eq!(
+        LocalCopyConflictPolicy::Overwrite,
+        options.conflict_policy()
+    );
+    assert_eq!(
+        LocalCopyTypeConflictPolicy::Replace,
+        options.type_conflict_policy()
+    );
+    assert!(options.follows_symlinks());
+    assert!(options.preserves_permissions());
+}

@@ -25,6 +25,7 @@ use crate::{
 };
 
 /// Error returned by a recursive directory copy operation.
+#[non_exhaustive]
 #[derive(Debug)]
 pub struct LocalCopyDirError {
     /// Stage at which the copy failed.
@@ -50,6 +51,60 @@ pub struct LocalCopyDirError {
 }
 
 impl LocalCopyDirError {
+    /// Returns the stage at which the copy failed.
+    ///
+    /// # Returns
+    /// Failed recursive-copy stage.
+    #[inline(always)]
+    pub const fn stage(&self) -> LocalCopyDirStage {
+        self.stage
+    }
+
+    /// Returns the source entry associated with the failure.
+    ///
+    /// # Returns
+    /// Source path being processed.
+    #[inline(always)]
+    pub fn source_path(&self) -> &Path {
+        &self.source_path
+    }
+
+    /// Returns the destination entry associated with the failure.
+    ///
+    /// # Returns
+    /// Destination path being processed.
+    #[inline(always)]
+    pub fn destination_path(&self) -> &Path {
+        &self.destination_path
+    }
+
+    /// Returns statistics accumulated before the failure.
+    ///
+    /// # Returns
+    /// Partial recursive-copy statistics.
+    #[inline(always)]
+    pub const fn stats(&self) -> &LocalCopyDirStats {
+        &self.stats
+    }
+
+    /// Returns the same-directory staging path, when one was created.
+    ///
+    /// # Returns
+    /// Staging path retained for diagnostics.
+    #[inline(always)]
+    pub fn temporary_path(&self) -> Option<&Path> {
+        self.temporary_path.as_deref()
+    }
+
+    /// Returns the secondary staging cleanup error, when cleanup failed.
+    ///
+    /// # Returns
+    /// Cleanup error without replacing the primary source error.
+    #[inline(always)]
+    pub fn cleanup_error(&self) -> Option<&io::Error> {
+        self.cleanup_error.as_ref()
+    }
+
     /// Creates a recursive-copy error.
     ///
     /// # Parameters
