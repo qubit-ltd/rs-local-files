@@ -958,6 +958,68 @@ fn test_copy_dir_all_with_skips_existing_destination_files() {
     fs::remove_dir_all(dir).expect("test directory should be removed");
 }
 
+/// Runs an action as soon as a recursive-copy staging file appears.
+///
+/// # Arguments
+///
+/// * `destination_dir` - Directory in which copy staging files appear.
+/// * `action` - Filesystem mutation to perform after staging starts.
+///
+/// # Returns
+///
+/// Handle for the monitoring thread.
+///
+/// # Panics
+///
+/// The monitoring thread panics if it cannot inspect the fixture, perform the
+/// action, or observe a staging file before the deadline.
+fn spawn_copy_staging_race<F>(
+    destination_dir: PathBuf,
+    action: F,
+) -> std::thread::JoinHandle<()>
+where
+    F: FnOnce() + Send + 'static,
+{
+    let (ready_sender, ready_receiver) = std::sync::mpsc::sync_channel(0);
+    let handle = std::thread::spawn(move || {
+        let deadline =
+            std::time::Instant::now() + std::time::Duration::from_secs(5);
+        let mut ready_sender = Some(ready_sender);
+        let mut action = Some(action);
+        loop {
+            let staging_exists = fs::read_dir(&destination_dir)
+                .expect("destination directory should remain readable")
+                .any(|entry| {
+                    entry
+                        .expect("destination entry should be readable")
+                        .file_name()
+                        .to_string_lossy()
+                        .starts_with(".copy-file-")
+                });
+            if let Some(sender) = ready_sender.take() {
+                sender
+                    .send(())
+                    .expect("race monitor readiness should be received");
+                continue;
+            }
+            if staging_exists {
+                action.take().expect("race action should run exactly once")();
+                return;
+            }
+            assert!(
+                std::time::Instant::now() < deadline,
+                "staged copy file should appear before the deadline"
+            );
+            std::thread::yield_now();
+        }
+    });
+    ready_receiver
+        .recv()
+        .expect("race monitor should report readiness");
+    std::thread::yield_now();
+    handle
+}
+
 /// Starts a destination-creation race after its monitoring thread is ready.
 ///
 /// # Arguments
@@ -977,44 +1039,10 @@ fn spawn_copy_destination_race(
     destination_dir: PathBuf,
     destination_file: PathBuf,
 ) -> std::thread::JoinHandle<()> {
-    let (ready_sender, ready_receiver) = std::sync::mpsc::sync_channel(0);
-    let handle = std::thread::spawn(move || {
-        let deadline =
-            std::time::Instant::now() + std::time::Duration::from_secs(5);
-        let mut ready_sender = Some(ready_sender);
-        loop {
-            let staging_exists = fs::read_dir(&destination_dir)
-                .expect("destination directory should remain readable")
-                .any(|entry| {
-                    entry
-                        .expect("destination entry should be readable")
-                        .file_name()
-                        .to_string_lossy()
-                        .starts_with(".copy-file-")
-                });
-            if let Some(sender) = ready_sender.take() {
-                sender
-                    .send(())
-                    .expect("race monitor readiness should be received");
-                continue;
-            }
-            if staging_exists {
-                fs::write(&destination_file, b"raced")
-                    .expect("racing destination should be created");
-                return;
-            }
-            assert!(
-                std::time::Instant::now() < deadline,
-                "staged copy file should appear before the deadline"
-            );
-            std::thread::yield_now();
-        }
-    });
-    ready_receiver
-        .recv()
-        .expect("race monitor should report readiness");
-    std::thread::yield_now();
-    handle
+    spawn_copy_staging_race(destination_dir, move || {
+        fs::write(&destination_file, b"raced")
+            .expect("racing destination should be created");
+    })
 }
 
 /// Replaces an existing destination directory with a file after staging starts.
@@ -1036,46 +1064,12 @@ fn spawn_copy_directory_to_file_race(
     destination_dir: PathBuf,
     destination_entry: PathBuf,
 ) -> std::thread::JoinHandle<()> {
-    let (ready_sender, ready_receiver) = std::sync::mpsc::sync_channel(0);
-    let handle = std::thread::spawn(move || {
-        let deadline =
-            std::time::Instant::now() + std::time::Duration::from_secs(5);
-        let mut ready_sender = Some(ready_sender);
-        loop {
-            let staging_exists = fs::read_dir(&destination_dir)
-                .expect("destination directory should remain readable")
-                .any(|entry| {
-                    entry
-                        .expect("destination entry should be readable")
-                        .file_name()
-                        .to_string_lossy()
-                        .starts_with(".copy-file-")
-                });
-            if let Some(sender) = ready_sender.take() {
-                sender
-                    .send(())
-                    .expect("race monitor readiness should be received");
-                continue;
-            }
-            if staging_exists {
-                fs::remove_dir_all(&destination_entry)
-                    .expect("original destination directory should be removed");
-                fs::write(&destination_entry, b"raced")
-                    .expect("racing destination file should be created");
-                return;
-            }
-            assert!(
-                std::time::Instant::now() < deadline,
-                "staged copy file should appear before the deadline"
-            );
-            std::thread::yield_now();
-        }
-    });
-    ready_receiver
-        .recv()
-        .expect("race monitor should report readiness");
-    std::thread::yield_now();
-    handle
+    spawn_copy_staging_race(destination_dir, move || {
+        fs::remove_dir_all(&destination_entry)
+            .expect("original destination directory should be removed");
+        fs::write(&destination_entry, b"raced")
+            .expect("racing destination file should be created");
+    })
 }
 
 /// Removes a conflicting destination directory after copy staging starts.
@@ -1097,44 +1091,10 @@ fn spawn_copy_directory_removal_race(
     destination_dir: PathBuf,
     destination_entry: PathBuf,
 ) -> std::thread::JoinHandle<()> {
-    let (ready_sender, ready_receiver) = std::sync::mpsc::sync_channel(0);
-    let handle = std::thread::spawn(move || {
-        let deadline =
-            std::time::Instant::now() + std::time::Duration::from_secs(5);
-        let mut ready_sender = Some(ready_sender);
-        loop {
-            let staging_exists = fs::read_dir(&destination_dir)
-                .expect("destination directory should remain readable")
-                .any(|entry| {
-                    entry
-                        .expect("destination entry should be readable")
-                        .file_name()
-                        .to_string_lossy()
-                        .starts_with(".copy-file-")
-                });
-            if let Some(sender) = ready_sender.take() {
-                sender
-                    .send(())
-                    .expect("race monitor readiness should be received");
-                continue;
-            }
-            if staging_exists {
-                fs::remove_dir_all(&destination_entry)
-                    .expect("conflicting destination should be removed");
-                return;
-            }
-            assert!(
-                std::time::Instant::now() < deadline,
-                "staged copy file should appear before the deadline"
-            );
-            std::thread::yield_now();
-        }
-    });
-    ready_receiver
-        .recv()
-        .expect("race monitor should report readiness");
-    std::thread::yield_now();
-    handle
+    spawn_copy_staging_race(destination_dir, move || {
+        fs::remove_dir_all(&destination_entry)
+            .expect("conflicting destination should be removed");
+    })
 }
 
 #[cfg(unix)]
@@ -1156,47 +1116,14 @@ fn spawn_copy_destination_permission_restriction(
     destination_dir: PathBuf,
     mode: u32,
 ) -> std::thread::JoinHandle<()> {
-    let (ready_sender, ready_receiver) = std::sync::mpsc::sync_channel(0);
-    let handle = std::thread::spawn(move || {
-        let deadline =
-            std::time::Instant::now() + std::time::Duration::from_secs(5);
-        let mut ready_sender = Some(ready_sender);
-        loop {
-            let staging_exists = fs::read_dir(&destination_dir)
-                .expect("destination directory should remain readable")
-                .any(|entry| {
-                    entry
-                        .expect("destination entry should be readable")
-                        .file_name()
-                        .to_string_lossy()
-                        .starts_with(".copy-file-")
-                });
-            if let Some(sender) = ready_sender.take() {
-                sender
-                    .send(())
-                    .expect("race monitor readiness should be received");
-                continue;
-            }
-            if staging_exists {
-                fs::set_permissions(
-                    &destination_dir,
-                    fs::Permissions::from_mode(mode),
-                )
-                .expect("destination permissions should be restricted");
-                return;
-            }
-            assert!(
-                std::time::Instant::now() < deadline,
-                "staged copy file should appear before the deadline"
-            );
-            std::thread::yield_now();
-        }
-    });
-    ready_receiver
-        .recv()
-        .expect("race monitor should report readiness");
-    std::thread::yield_now();
-    handle
+    let destination_to_restrict = destination_dir.clone();
+    spawn_copy_staging_race(destination_dir, move || {
+        fs::set_permissions(
+            &destination_to_restrict,
+            fs::Permissions::from_mode(mode),
+        )
+        .expect("destination permissions should be restricted");
+    })
 }
 
 #[test]
