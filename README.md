@@ -135,6 +135,9 @@ equivalent platform error. Overwriting a file keeps the temporary file's
 permissions rather than the replaced target's permissions; use
 `LocalFiles::atomic_write` when replacing contents while preserving an existing
 regular file's permissions is required.
+On Windows, native moves do not add a verbatim-path prefix or convert relative
+paths to absolute paths; native path-length and relative/verbatim-path semantics
+apply.
 On Unix, temporary files are created with mode `0600` and temporary directories
 with mode `0700` before applying the process umask.
 
@@ -169,8 +172,9 @@ parent directory when supported. This is useful for whole-file replacement of
 configuration files, cache manifests, checkpoints, and generated indexes.
 Failures return `LocalAtomicWriteError`, including the failed stage, temporary
 path, native source error, and whether replacement had already committed.
-If an `atomic_write_with` callback panics, the panic is propagated after the
-uncommitted temporary file has been closed and removed.
+If an `atomic_write_with` callback panics, the uncommitted temporary file is
+closed and best-effort removed before the panic propagates. A cleanup failure
+cannot replace the panic, so the staging path may remain in that case.
 
 The operation is not a multi-file transaction and does not coordinate concurrent
 writers. Use an external lock if multiple processes or threads may replace the

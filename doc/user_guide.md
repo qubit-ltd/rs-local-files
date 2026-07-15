@@ -315,9 +315,10 @@ Important semantics:
   replacement.
 - If writing, flushing, or syncing the temporary file fails, the destination is
   left untouched.
-- If an `atomic_write_with` callback panics, unwinding closes and removes the
-  uncommitted temporary file before the panic continues; the destination is
-  left untouched.
+- If an `atomic_write_with` callback panics, unwinding closes and best-effort
+  removes the uncommitted temporary file before the panic continues; the
+  destination is left untouched. Cleanup failure cannot replace the panic, so
+  the staging path may remain.
 - If replacement succeeds but syncing the parent directory fails, the method may
   return an error after the destination already contains the new contents.
 - Errors are reported as `LocalAtomicWriteError`, which exposes the failed
@@ -538,6 +539,12 @@ operating system errors when creation fails. They do not promise that the
 resulting path is valid for every platform API. Some APIs, such as Unix domain
 sockets, have much shorter path limits than regular files. For those cases,
 create temporary entries under a short parent directory such as `/tmp`.
+
+On Windows, native persistence and replacement pass the existing path spelling
+to the operating system. The crate rejects interior UTF-16 NULs, but does not
+add a verbatim-path prefix or convert relative paths to absolute paths. Native
+path-length limits and relative/verbatim-path resolution semantics therefore
+apply.
 
 ## Crate Boundary
 

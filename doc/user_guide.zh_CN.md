@@ -260,7 +260,7 @@ assert_eq!("{\"complete\":true}\n", std::fs::read_to_string(&path)?);
 - 临时文件创建在目标目录下，因此在常见本地文件系统上可以 atomic replacement。
 - 如果目标已有普通文件，会在替换前把已有权限复制到临时文件。
 - 如果写入、flush 或 sync 临时文件失败，目标保持不变。
-- 如果 `atomic_write_with` callback panic，unwind 会先关闭并删除未提交临时文件，再继续传播 panic；目标保持不变。
+- 如果 `atomic_write_with` callback panic，unwind 会先关闭并 best-effort 删除未提交临时文件，再继续传播 panic；目标保持不变。清理失败不能替换原 panic，因此 staging path 可能残留。
 - 如果替换已经成功，但 sync 父目录失败，方法可能在目标已经包含新内容后返回错误。
 - 错误通过 `LocalAtomicWriteError` 报告，包含失败阶段、临时路径、原始 I/O source 和 `committed` 标志。
 - 如果目标路径是 symbolic link，并且平台 rename-over-symlink 语义是替换 link 本身，则该 link 会被新普通文件替换，原 link target 保持不变。
@@ -444,6 +444,8 @@ assert_eq!(
 ## 路径长度和平台限制
 
 `LocalTempFile` 和 `LocalTempDir` 创建的是本地文件系统条目；如果创建失败，会返回操作系统错误。它们不承诺生成的路径适用于所有平台 API。某些 API，例如 Unix domain socket，有比普通文件短得多的路径限制。遇到这类场景，应在较短的父目录下创建临时条目，例如 `/tmp`。
+
+在 Windows 上，原生持久化和替换会把现有路径表示传给操作系统。crate 会拒绝内部 UTF-16 NUL，但不会添加 verbatim-path prefix，也不会把相对路径转换为绝对路径；路径长度限制以及相对路径/verbatim path 解析语义因此遵循原生平台行为。
 
 ## Crate 边界
 
