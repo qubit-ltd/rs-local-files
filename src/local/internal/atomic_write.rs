@@ -92,6 +92,10 @@ fn with_atomic_context<T>(
 /// # Errors
 /// Returns a structured atomic-write error retaining the failed stage,
 /// temporary path, commit state, and native I/O source error.
+///
+/// # Panics
+/// Propagates panics from `write`. While unwinding, [`StagedFile`] performs
+/// best-effort cleanup of the temporary file.
 pub(crate) fn atomic_write_with_path(
     path: &Path,
     write: &mut dyn FnMut(&mut File) -> Result<()>,

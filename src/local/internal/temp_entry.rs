@@ -71,9 +71,7 @@ pub(crate) fn create_temp_file_in_dir(
         match options.open(&path) {
             Ok(file) => return Ok((path, file)),
             Err(error) => {
-                if error.kind() == ErrorKind::AlreadyExists
-                    && attempt < max_tries
-                {
+                if should_retry_collision(&error, attempt, max_tries) {
                     continue;
                 }
                 return Err(add_path_context(
@@ -113,9 +111,7 @@ pub(crate) fn create_temp_dir_in_dir(
         match create_private_dir(&path) {
             Ok(()) => return Ok(path),
             Err(error) => {
-                if error.kind() == ErrorKind::AlreadyExists
-                    && attempt < max_tries
-                {
+                if should_retry_collision(&error, attempt, max_tries) {
                     continue;
                 }
                 return Err(add_path_context(
@@ -148,6 +144,27 @@ pub(crate) fn create_private_dir(path: &Path) -> Result<()> {
     #[cfg(unix)]
     builder.mode(0o700);
     builder.create(path)
+}
+
+/// Tests whether a colliding temporary-entry name should be retried.
+///
+/// Both predicates are evaluated because they are side-effect free. This keeps
+/// the retry decision compact while retaining the same bounded-retry behavior.
+///
+/// # Parameters
+/// - `error`: Entry-creation error.
+/// - `attempt`: One-based attempt number that just failed.
+/// - `max_tries`: Maximum number of allowed attempts.
+///
+/// # Returns
+/// `true` only for an existing entry when another attempt remains.
+#[inline(always)]
+fn should_retry_collision(
+    error: &Error,
+    attempt: usize,
+    max_tries: usize,
+) -> bool {
+    (error.kind() == ErrorKind::AlreadyExists) & (attempt < max_tries)
 }
 
 /// Validates a retry count.

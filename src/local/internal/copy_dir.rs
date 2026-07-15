@@ -392,7 +392,7 @@ fn ensure_copy_destination_dir(
 ) -> Result<()> {
     match fs::symlink_metadata(dst) {
         Ok(metadata) => {
-            if metadata.is_dir() && !metadata.file_type().is_symlink() {
+            if is_real_directory(&metadata) {
                 return Ok(());
             }
             match type_conflict {
@@ -406,9 +406,7 @@ fn ensure_copy_destination_dir(
                     ));
                 }
                 LocalCopyTypeConflictPolicy::Replace => {
-                    if !remove_destination_non_directory_if_unchanged(dst)? {
-                        return Ok(());
-                    }
+                    remove_destination_non_directory_if_unchanged(dst)?;
                 }
             }
         }
@@ -422,7 +420,7 @@ fn ensure_copy_destination_dir(
         }
         Err(error) if error.kind() == ErrorKind::AlreadyExists => {
             let metadata = fs::symlink_metadata(dst)?;
-            if metadata.is_dir() && !metadata.file_type().is_symlink() {
+            if is_real_directory(&metadata) {
                 Ok(())
             } else {
                 Err(error)
@@ -443,31 +441,24 @@ fn ensure_copy_destination_dir(
 ///
 /// * `dst` - Destination previously observed as a non-directory entry.
 ///
-/// # Returns
-///
-/// `true` when the path is absent after this call and a directory still needs
-/// to be created; `false` when `dst` is now a real directory.
-///
 /// # Errors
 ///
 /// Returns the I/O error reported while inspecting or removing `dst`.
-fn remove_destination_non_directory_if_unchanged(dst: &Path) -> Result<bool> {
+fn remove_destination_non_directory_if_unchanged(dst: &Path) -> Result<()> {
     let metadata = match fs::symlink_metadata(dst) {
         Ok(metadata) => metadata,
-        Err(error) if error.kind() == ErrorKind::NotFound => return Ok(true),
+        Err(error) if error.kind() == ErrorKind::NotFound => return Ok(()),
         Err(error) => return Err(error),
     };
-    let file_type = metadata.file_type();
-    if metadata.is_dir() && !file_type.is_symlink() {
-        return Ok(false);
+    if is_real_directory(&metadata) {
+        return Ok(());
     }
     #[cfg(windows)]
-    if file_type.is_symlink_dir() {
+    if metadata.file_type().is_symlink_dir() {
         fs::remove_dir(dst)?;
-        return Ok(true);
+        return Ok(());
     }
-    fs::remove_file(dst)?;
-    Ok(true)
+    fs::remove_file(dst)
 }
 
 /// Removes a directory destination only while it remains a real directory.
@@ -485,11 +476,7 @@ fn remove_destination_non_directory_if_unchanged(dst: &Path) -> Result<bool> {
 /// directory.
 fn remove_destination_directory_if_unchanged(dst: &Path) -> Result<()> {
     match fs::symlink_metadata(dst) {
-        Ok(metadata)
-            if metadata.is_dir() && !metadata.file_type().is_symlink() =>
-        {
-            fs::remove_dir_all(dst)
-        }
+        Ok(metadata) if is_real_directory(&metadata) => fs::remove_dir_all(dst),
         Ok(_) => Ok(()),
         Err(error) if error.kind() == ErrorKind::NotFound => Ok(()),
         Err(error) => Err(error),
@@ -532,9 +519,7 @@ fn copy_file_with_options(
         stats,
     )?;
     let destination_directory_requires_removal = match destination_metadata {
-        Some(metadata)
-            if metadata.is_dir() && !metadata.file_type().is_symlink() =>
-        {
+        Some(metadata) if is_real_directory(&metadata) => {
             match options.type_conflict {
                 LocalCopyTypeConflictPolicy::Fail => {
                     return Err(copy_dir_error(
@@ -601,18 +586,16 @@ fn copy_file_with_options(
         dst,
         stats,
     )?;
-    if options.preserve_permissions
-        && let Err(error) = staged_file
-            .file()
-            .set_permissions(source_metadata.permissions())
-    {
-        return with_copy_context(
-            Err(error),
+    if options.preserve_permissions {
+        with_copy_context(
+            staged_file
+                .file()
+                .set_permissions(source_metadata.permissions()),
             LocalCopyDirStage::PreservePermissions,
             src,
             dst,
             stats,
-        );
+        )?;
     }
     staged_file.close();
 
@@ -696,6 +679,22 @@ fn metadata_for_copy_source(
     } else {
         Ok(metadata)
     }
+}
+
+/// Tests whether metadata describes a real directory rather than a symlink.
+///
+/// Both metadata predicates are side-effect free, so evaluating both avoids
+/// duplicating platform-sensitive directory checks throughout the copy
+/// pipeline.
+///
+/// # Parameters
+/// - `metadata`: Metadata loaded without following the final path component.
+///
+/// # Returns
+/// `true` only for a non-symlink directory.
+#[inline(always)]
+fn is_real_directory(metadata: &fs::Metadata) -> bool {
+    metadata.is_dir() & !metadata.file_type().is_symlink()
 }
 
 /// Rejects copy destinations located inside the source tree.

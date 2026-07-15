@@ -850,6 +850,59 @@ fn test_copy_dir_all_with_returns_nested_read_dir_error() {
     fs::remove_dir_all(dir).unwrap();
 }
 
+#[cfg(unix)]
+#[test]
+fn test_copy_dir_all_with_returns_source_entry_metadata_error_without_search_permission()
+ {
+    let dir = temp_dir("copy-dir-source-entry-metadata-error");
+    let src = dir.join("src");
+    let source_file = src.join("data.txt");
+    let dst = dir.join("dst");
+    fs::create_dir(&src).expect("source directory should be created");
+    fs::write(&source_file, b"data").expect("source file should be written");
+    fs::set_permissions(&src, fs::Permissions::from_mode(0o400))
+        .expect("source search permission should be removed");
+
+    let error = LocalFiles::copy_dir_all_with(
+        &src,
+        &dst,
+        LocalCopyDirOptions::default(),
+    )
+    .expect_err(
+        "source entries should not be inspectable without search permission",
+    );
+
+    fs::set_permissions(&src, fs::Permissions::from_mode(0o700))
+        .expect("source permissions should be restored");
+    fs::remove_dir_all(dir).expect("test directory should be removed");
+    assert_eq!(ErrorKind::PermissionDenied, error.kind());
+    assert_eq!(LocalCopyDirStage::InspectSourceEntry, error.stage);
+    assert_eq!(source_file, error.source_path);
+}
+
+#[cfg(unix)]
+#[test]
+fn test_copy_dir_all_with_returns_destination_inspection_error_for_nul_path() {
+    use std::ffi::OsString;
+    use std::os::unix::ffi::OsStringExt;
+
+    let dir = temp_dir("copy-dir-nul-destination");
+    let src = dir.join("src");
+    fs::create_dir(&src).expect("source directory should be created");
+    let dst = dir.join(OsString::from_vec(b"dst\0invalid".to_vec()));
+
+    let error = LocalFiles::copy_dir_all_with(
+        &src,
+        &dst,
+        LocalCopyDirOptions::default(),
+    )
+    .expect_err("destination NUL should fail native metadata inspection");
+
+    fs::remove_dir_all(dir).expect("test directory should be removed");
+    assert_eq!(ErrorKind::InvalidInput, error.kind());
+    assert_eq!(LocalCopyDirStage::PrepareDestination, error.stage);
+}
+
 #[test]
 fn test_copy_dir_all_with_rejects_existing_destination_without_overwrite() {
     let dir = temp_dir("copy-dir-existing");
@@ -1025,6 +1078,127 @@ fn spawn_copy_directory_to_file_race(
     handle
 }
 
+/// Removes a conflicting destination directory after copy staging starts.
+///
+/// # Arguments
+///
+/// * `destination_dir` - Directory in which copy staging files appear.
+/// * `destination_entry` - Conflicting directory removed by the racing thread.
+///
+/// # Returns
+///
+/// Handle for the monitoring thread.
+///
+/// # Panics
+///
+/// The monitoring thread panics if it cannot inspect or remove the fixture, or
+/// if no staging file appears before the deadline.
+fn spawn_copy_directory_removal_race(
+    destination_dir: PathBuf,
+    destination_entry: PathBuf,
+) -> std::thread::JoinHandle<()> {
+    let (ready_sender, ready_receiver) = std::sync::mpsc::sync_channel(0);
+    let handle = std::thread::spawn(move || {
+        let deadline =
+            std::time::Instant::now() + std::time::Duration::from_secs(5);
+        let mut ready_sender = Some(ready_sender);
+        loop {
+            let staging_exists = fs::read_dir(&destination_dir)
+                .expect("destination directory should remain readable")
+                .any(|entry| {
+                    entry
+                        .expect("destination entry should be readable")
+                        .file_name()
+                        .to_string_lossy()
+                        .starts_with(".copy-file-")
+                });
+            if let Some(sender) = ready_sender.take() {
+                sender
+                    .send(())
+                    .expect("race monitor readiness should be received");
+                continue;
+            }
+            if staging_exists {
+                fs::remove_dir_all(&destination_entry)
+                    .expect("conflicting destination should be removed");
+                return;
+            }
+            assert!(
+                std::time::Instant::now() < deadline,
+                "staged copy file should appear before the deadline"
+            );
+            std::thread::yield_now();
+        }
+    });
+    ready_receiver
+        .recv()
+        .expect("race monitor should report readiness");
+    std::thread::yield_now();
+    handle
+}
+
+#[cfg(unix)]
+/// Makes a copy destination non-writable after staging starts.
+///
+/// # Arguments
+///
+/// * `destination_dir` - Directory in which copy staging files appear.
+///
+/// # Returns
+///
+/// Handle for the monitoring thread.
+///
+/// # Panics
+///
+/// The monitoring thread panics if it cannot inspect or restrict the fixture,
+/// or if no staging file appears before the deadline.
+fn spawn_copy_destination_permission_restriction(
+    destination_dir: PathBuf,
+    mode: u32,
+) -> std::thread::JoinHandle<()> {
+    let (ready_sender, ready_receiver) = std::sync::mpsc::sync_channel(0);
+    let handle = std::thread::spawn(move || {
+        let deadline =
+            std::time::Instant::now() + std::time::Duration::from_secs(5);
+        let mut ready_sender = Some(ready_sender);
+        loop {
+            let staging_exists = fs::read_dir(&destination_dir)
+                .expect("destination directory should remain readable")
+                .any(|entry| {
+                    entry
+                        .expect("destination entry should be readable")
+                        .file_name()
+                        .to_string_lossy()
+                        .starts_with(".copy-file-")
+                });
+            if let Some(sender) = ready_sender.take() {
+                sender
+                    .send(())
+                    .expect("race monitor readiness should be received");
+                continue;
+            }
+            if staging_exists {
+                fs::set_permissions(
+                    &destination_dir,
+                    fs::Permissions::from_mode(mode),
+                )
+                .expect("destination permissions should be restricted");
+                return;
+            }
+            assert!(
+                std::time::Instant::now() < deadline,
+                "staged copy file should appear before the deadline"
+            );
+            std::thread::yield_now();
+        }
+    });
+    ready_receiver
+        .recv()
+        .expect("race monitor should report readiness");
+    std::thread::yield_now();
+    handle
+}
+
 #[test]
 fn test_copy_dir_all_with_handles_destination_created_during_staging() {
     let dir = temp_dir("copy-dir-staging-race");
@@ -1130,6 +1304,238 @@ fn test_copy_dir_all_with_preserves_file_replacing_observed_directory_during_sta
 }
 
 #[test]
+fn test_copy_dir_all_with_commits_when_conflicting_directory_disappears_during_staging()
+ {
+    let dir = temp_dir("copy-dir-directory-removal-race");
+    let src = dir.join("src");
+    let dst = dir.join("dst");
+    let destination_entry = dst.join("data.bin");
+    fs::create_dir(&src).expect("source directory should be created");
+    fs::write(src.join("data.bin"), vec![0x5a; 32 * 1024 * 1024])
+        .expect("large source file should be written");
+    fs::create_dir_all(&destination_entry)
+        .expect("conflicting destination directory should be created");
+    let race = spawn_copy_directory_removal_race(
+        dst.clone(),
+        destination_entry.clone(),
+    );
+
+    let stats = LocalFiles::copy_dir_all_with(
+        &src,
+        &dst,
+        LocalCopyDirOptions {
+            conflict: LocalCopyConflictPolicy::Overwrite,
+            type_conflict: LocalCopyTypeConflictPolicy::Replace,
+            ..LocalCopyDirOptions::default()
+        },
+    )
+    .expect("copy should commit after the conflicting directory disappears");
+    race.join().expect("directory-removal race should finish");
+
+    assert_eq!(1, stats.files);
+    assert_eq!(32 * 1024 * 1024, stats.bytes);
+    assert_eq!(
+        32 * 1024 * 1024,
+        fs::metadata(&destination_entry)
+            .expect("copied destination should exist")
+            .len()
+    );
+    fs::remove_dir_all(dir).expect("test directory should be removed");
+}
+
+#[cfg(unix)]
+#[test]
+fn test_copy_dir_all_with_reports_directory_replacement_permission_error_after_staging()
+ {
+    let dir = temp_dir("copy-dir-directory-removal-permission-error");
+    let src = dir.join("src");
+    let dst = dir.join("dst");
+    let destination_entry = dst.join("data.bin");
+    let marker = destination_entry.join("keep.txt");
+    fs::create_dir(&src).expect("source directory should be created");
+    fs::write(src.join("data.bin"), vec![0x5a; 32 * 1024 * 1024])
+        .expect("large source file should be written");
+    fs::create_dir_all(&destination_entry)
+        .expect("conflicting destination directory should be created");
+    fs::write(&marker, b"keep")
+        .expect("conflicting destination marker should be written");
+    let race =
+        spawn_copy_destination_permission_restriction(dst.clone(), 0o500);
+
+    let error = LocalFiles::copy_dir_all_with(
+        &src,
+        &dst,
+        LocalCopyDirOptions {
+            conflict: LocalCopyConflictPolicy::Overwrite,
+            type_conflict: LocalCopyTypeConflictPolicy::Replace,
+            ..LocalCopyDirOptions::default()
+        },
+    )
+    .expect_err("non-writable destination should reject directory removal");
+    race.join()
+        .expect("permission-restriction race should finish");
+
+    fs::set_permissions(&dst, fs::Permissions::from_mode(0o700))
+        .expect("destination permissions should be restored");
+    let destination_remained = destination_entry.is_dir();
+    fs::remove_dir_all(dir).expect("test directory should be removed");
+
+    assert_eq!(ErrorKind::PermissionDenied, error.kind());
+    assert_eq!(LocalCopyDirStage::PrepareDestination, error.stage);
+    assert!(
+        destination_remained,
+        "failed removal must not commit the source file over the directory"
+    );
+}
+
+#[cfg(unix)]
+#[test]
+fn test_copy_dir_all_with_reports_destination_reinspection_error_after_staging()
+{
+    let dir = temp_dir("copy-dir-directory-reinspection-error");
+    let src = dir.join("src");
+    let dst = dir.join("dst");
+    let destination_entry = dst.join("data.bin");
+    fs::create_dir(&src).expect("source directory should be created");
+    fs::write(src.join("data.bin"), vec![0x5a; 32 * 1024 * 1024])
+        .expect("large source file should be written");
+    fs::create_dir_all(&destination_entry)
+        .expect("conflicting destination directory should be created");
+    let race =
+        spawn_copy_destination_permission_restriction(dst.clone(), 0o400);
+
+    let error = LocalFiles::copy_dir_all_with(
+        &src,
+        &dst,
+        LocalCopyDirOptions {
+            conflict: LocalCopyConflictPolicy::Overwrite,
+            type_conflict: LocalCopyTypeConflictPolicy::Replace,
+            ..LocalCopyDirOptions::default()
+        },
+    )
+    .expect_err("unsearchable destination should fail reinspection");
+    race.join()
+        .expect("permission-restriction race should finish");
+
+    fs::set_permissions(&dst, fs::Permissions::from_mode(0o700))
+        .expect("destination permissions should be restored");
+    fs::remove_dir_all(dir).expect("test directory should be removed");
+    assert_eq!(ErrorKind::PermissionDenied, error.kind());
+    assert_eq!(LocalCopyDirStage::PrepareDestination, error.stage);
+}
+
+#[cfg(unix)]
+#[test]
+fn test_copy_dir_all_with_returns_destination_entry_inspection_error() {
+    let dir = temp_dir("copy-dir-destination-inspection-error");
+    let src = dir.join("src");
+    let dst = dir.join("dst");
+    fs::create_dir(&src).expect("source directory should be created");
+    fs::write(src.join("data.txt"), b"data")
+        .expect("source file should be written");
+    fs::create_dir(&dst).expect("destination directory should be created");
+    fs::set_permissions(&dst, fs::Permissions::from_mode(0o600))
+        .expect("destination search permission should be removed");
+
+    let error = LocalFiles::copy_dir_all_with(
+        &src,
+        &dst,
+        LocalCopyDirOptions::default(),
+    )
+    .expect_err("unsearchable destination should fail entry inspection");
+
+    fs::set_permissions(&dst, fs::Permissions::from_mode(0o700))
+        .expect("destination permissions should be restored");
+    fs::remove_dir_all(dir).expect("test directory should be removed");
+    assert_eq!(ErrorKind::PermissionDenied, error.kind());
+    assert_eq!(LocalCopyDirStage::PrepareDestination, error.stage);
+}
+
+#[cfg(unix)]
+#[test]
+fn test_copy_dir_all_with_returns_nested_destination_inspection_error() {
+    let dir = temp_dir("copy-dir-nested-destination-inspection-error");
+    let src = dir.join("src");
+    let dst = dir.join("dst");
+    fs::create_dir_all(src.join("nested"))
+        .expect("nested source directory should be created");
+    fs::create_dir(&dst).expect("destination directory should be created");
+    fs::set_permissions(&dst, fs::Permissions::from_mode(0o600))
+        .expect("destination search permission should be removed");
+
+    let error = LocalFiles::copy_dir_all_with(
+        &src,
+        &dst,
+        LocalCopyDirOptions::default(),
+    )
+    .expect_err("unsearchable destination should fail nested inspection");
+
+    fs::set_permissions(&dst, fs::Permissions::from_mode(0o700))
+        .expect("destination permissions should be restored");
+    fs::remove_dir_all(dir).expect("test directory should be removed");
+    assert_eq!(ErrorKind::PermissionDenied, error.kind());
+    assert_eq!(LocalCopyDirStage::PrepareDestination, error.stage);
+}
+
+#[cfg(unix)]
+#[test]
+fn test_copy_dir_all_with_returns_destination_removal_permission_error() {
+    let dir = temp_dir("copy-dir-destination-removal-permission-error");
+    let src = dir.join("src");
+    let parent = dir.join("parent");
+    let dst = parent.join("dst");
+    fs::create_dir(&src).expect("source directory should be created");
+    fs::create_dir(&parent).expect("destination parent should be created");
+    fs::write(&dst, b"existing")
+        .expect("conflicting destination file should be written");
+    fs::set_permissions(&parent, fs::Permissions::from_mode(0o500))
+        .expect("destination parent write permission should be removed");
+
+    let error = LocalFiles::copy_dir_all_with(
+        &src,
+        &dst,
+        LocalCopyDirOptions {
+            type_conflict: LocalCopyTypeConflictPolicy::Replace,
+            ..LocalCopyDirOptions::default()
+        },
+    )
+    .expect_err("non-writable parent should reject destination removal");
+
+    fs::set_permissions(&parent, fs::Permissions::from_mode(0o700))
+        .expect("destination parent permissions should be restored");
+    fs::remove_dir_all(dir).expect("test directory should be removed");
+    assert_eq!(ErrorKind::PermissionDenied, error.kind());
+    assert_eq!(LocalCopyDirStage::PrepareDestination, error.stage);
+}
+
+#[cfg(unix)]
+#[test]
+fn test_copy_dir_all_with_returns_staging_file_creation_error() {
+    let dir = temp_dir("copy-dir-staging-create-error");
+    let src = dir.join("src");
+    let dst = dir.join("dst");
+    fs::create_dir(&src).expect("source directory should be created");
+    fs::write(src.join("data.txt"), b"data")
+        .expect("source file should be written");
+    fs::create_dir(&dst).expect("destination directory should be created");
+    fs::set_permissions(&dst, fs::Permissions::from_mode(0o500))
+        .expect("destination write permission should be removed");
+
+    let error = LocalFiles::copy_dir_all_with(
+        &src,
+        &dst,
+        LocalCopyDirOptions::default(),
+    )
+    .expect_err("non-writable destination should reject staging creation");
+
+    fs::set_permissions(&dst, fs::Permissions::from_mode(0o700))
+        .expect("destination permissions should be restored");
+    fs::remove_dir_all(dir).expect("test directory should be removed");
+    assert_eq!(ErrorKind::PermissionDenied, error.kind());
+    assert_eq!(LocalCopyDirStage::PrepareDestination, error.stage);
+}
+
+#[test]
 fn test_copy_dir_all_with_rejects_type_conflict_without_removing_directory() {
     let dir = temp_dir("copy-dir-type-conflict");
     let src = dir.join("src");
@@ -1160,6 +1566,36 @@ fn test_copy_dir_all_with_rejects_type_conflict_without_removing_directory() {
             .expect("unrelated destination should remain readable")
             .as_slice()
     );
+    fs::remove_dir_all(dir).expect("test directory should be removed");
+}
+
+#[test]
+fn test_copy_dir_all_with_replaces_existing_destination_directory_with_file() {
+    let dir = temp_dir("copy-dir-replace-directory-with-file");
+    let src = dir.join("src");
+    let dst = dir.join("dst");
+    let destination_entry = dst.join("data.txt");
+    fs::create_dir(&src).expect("source directory should be created");
+    fs::write(src.join("data.txt"), b"new")
+        .expect("source file should be written");
+    fs::create_dir_all(&destination_entry)
+        .expect("conflicting destination directory should be created");
+    fs::write(destination_entry.join("old.txt"), b"old")
+        .expect("conflicting directory contents should be written");
+
+    let stats = LocalFiles::copy_dir_all_with(
+        &src,
+        &dst,
+        LocalCopyDirOptions {
+            conflict: LocalCopyConflictPolicy::Overwrite,
+            type_conflict: LocalCopyTypeConflictPolicy::Replace,
+            ..LocalCopyDirOptions::default()
+        },
+    )
+    .expect("destination directory should be replaced with the source file");
+
+    assert_eq!(1, stats.files);
+    assert_eq!(b"new", fs::read(&destination_entry).unwrap().as_slice());
     fs::remove_dir_all(dir).expect("test directory should be removed");
 }
 
@@ -1252,6 +1688,42 @@ fn test_copy_dir_all_with_overwrites_existing_destinations() {
     assert_eq!(0, stats.directories);
     assert_eq!(b"newer", fs::read(dst.join("data.txt")).unwrap().as_slice());
     fs::remove_dir_all(dir).unwrap();
+}
+
+#[cfg(unix)]
+#[test]
+fn test_copy_dir_all_with_preserves_root_file_when_type_replacement_removal_fails()
+ {
+    let dir = temp_dir("copy-dir-root-file-removal-error");
+    let src = dir.join("src");
+    let protected_parent = dir.join("protected");
+    let dst = protected_parent.join("dst");
+    fs::create_dir(&src).expect("source directory should be created");
+    fs::create_dir(&protected_parent)
+        .expect("destination parent should be created");
+    fs::write(&dst, b"old").expect("destination file should be written");
+    fs::set_permissions(&protected_parent, fs::Permissions::from_mode(0o500))
+        .expect("destination parent write permission should be removed");
+
+    let error = LocalFiles::copy_dir_all_with(
+        &src,
+        &dst,
+        LocalCopyDirOptions {
+            type_conflict: LocalCopyTypeConflictPolicy::Replace,
+            ..LocalCopyDirOptions::default()
+        },
+    )
+    .expect_err("unwritable parent should reject destination replacement");
+
+    fs::set_permissions(&protected_parent, fs::Permissions::from_mode(0o700))
+        .expect("destination parent permissions should be restored");
+    let destination_contents =
+        fs::read(&dst).expect("failed replacement should preserve destination");
+    fs::remove_dir_all(dir).expect("test directory should be removed");
+
+    assert_eq!(ErrorKind::PermissionDenied, error.kind());
+    assert_eq!(LocalCopyDirStage::PrepareDestination, error.stage);
+    assert_eq!(b"old", destination_contents.as_slice());
 }
 
 #[cfg(unix)]
