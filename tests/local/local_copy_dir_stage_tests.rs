@@ -18,6 +18,7 @@ fn test_copy_dir_stage_variants_are_distinct_and_debuggable() {
         LocalCopyDirStage::CopyFileContents,
         LocalCopyDirStage::PreservePermissions,
         LocalCopyDirStage::CommitFile,
+        LocalCopyDirStage::CleanupTemporaryFile,
     ];
 
     for (index, stage) in stages.iter().enumerate() {

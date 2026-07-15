@@ -17,7 +17,6 @@ use std::num::NonZeroUsize;
 use qubit_local_files::{
     FileBuffering,
     FileReadOptions,
-    LocalFileReader,
     LocalFiles,
 };
 
@@ -47,7 +46,7 @@ fn test_open_reader_respects_buffering_options_and_rejects_directories() {
     let error = LocalFiles::open_reader(&dir, FileReadOptions::default())
         .expect_err("directories should not be accepted as files");
 
-    assert!(matches!(reader, LocalFileReader::Buffered(_)));
+    assert!(reader.is_buffered());
     assert_eq!(b"payload", content.as_slice());
     assert_eq!(ErrorKind::InvalidInput, error.kind());
     fs::remove_dir_all(dir).unwrap();
