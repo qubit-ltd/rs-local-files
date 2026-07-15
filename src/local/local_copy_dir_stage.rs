@@ -8,7 +8,28 @@
 //! Recursive-copy failure stages.
 
 /// Stage at which a recursive directory copy failed.
+///
+/// Additional stages may be added as copy diagnostics evolve. Downstream
+/// matches must retain a wildcard arm.
+///
+/// ```compile_fail
+/// use qubit_local_files::LocalCopyDirStage;
+///
+/// fn classify(stage: LocalCopyDirStage) {
+///     match stage {
+///         LocalCopyDirStage::InspectSource => {}
+///         LocalCopyDirStage::InspectSourceEntry => {}
+///         LocalCopyDirStage::ReadSourceDirectory => {}
+///         LocalCopyDirStage::PrepareDestination => {}
+///         LocalCopyDirStage::CopyFileContents => {}
+///         LocalCopyDirStage::PreservePermissions => {}
+///         LocalCopyDirStage::CommitFile => {}
+///         LocalCopyDirStage::CleanupTemporaryFile => {}
+///     }
+/// }
+/// ```
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
+#[non_exhaustive]
 pub enum LocalCopyDirStage {
     /// Inspecting or canonicalizing the source directory failed.
     InspectSource,
@@ -24,4 +45,6 @@ pub enum LocalCopyDirStage {
     PreservePermissions,
     /// Committing a staged file to its destination failed.
     CommitFile,
+    /// Removing an uncommitted staging file after a skipped copy failed.
+    CleanupTemporaryFile,
 }

@@ -19,7 +19,22 @@ use std::io::{
 use crate::FileBuffering;
 
 /// Reader returned by local file read APIs.
+///
+/// Additional reader representations may be added in future releases. Match
+/// with a wildcard arm when inspecting the representation directly.
+///
+/// ```compile_fail
+/// use qubit_local_files::LocalFileReader;
+///
+/// fn consume(reader: LocalFileReader) {
+///     match reader {
+///         LocalFileReader::Unbuffered(_) => {}
+///         LocalFileReader::Buffered(_) => {}
+///     }
+/// }
+/// ```
 #[derive(Debug)]
+#[non_exhaustive]
 pub enum LocalFileReader {
     /// Unbuffered reader backed directly by a [`File`].
     Unbuffered(File),

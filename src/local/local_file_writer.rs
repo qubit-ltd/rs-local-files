@@ -19,7 +19,22 @@ use std::io::{
 use crate::FileBuffering;
 
 /// Writer returned by local file write APIs.
+///
+/// Additional writer representations may be added in future releases. Match
+/// with a wildcard arm when inspecting the representation directly.
+///
+/// ```compile_fail
+/// use qubit_local_files::LocalFileWriter;
+///
+/// fn consume(writer: LocalFileWriter) {
+///     match writer {
+///         LocalFileWriter::Unbuffered(_) => {}
+///         LocalFileWriter::Buffered(_) => {}
+///     }
+/// }
+/// ```
 #[derive(Debug)]
+#[non_exhaustive]
 pub enum LocalFileWriter {
     /// Unbuffered writer backed directly by a [`File`].
     Unbuffered(File),

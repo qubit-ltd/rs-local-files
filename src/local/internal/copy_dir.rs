@@ -34,6 +34,8 @@ use crate::{
     LocalCopyTypeConflictPolicy,
 };
 
+#[cfg(windows)]
+use super::file_move::remove_directory_symlink;
 use super::file_move::{
     move_file_without_replacing,
     parent_dir_for,
@@ -83,6 +85,35 @@ fn copy_dir_error(
         *stats,
         source,
     )
+}
+
+/// Builds a recursive-copy error and explicitly attempts staging cleanup.
+///
+/// The operation error remains primary. A cleanup failure is attached as
+/// secondary context, and the armed guard retries cleanup from [`Drop`].
+///
+/// # Parameters
+/// - `stage`: Stage at which the copy failed.
+/// - `src`: Source entry being processed.
+/// - `dst`: Destination entry being processed.
+/// - `stats`: Statistics accumulated before the failure.
+/// - `source`: Primary native I/O error that caused the failure.
+/// - `staged_file`: Uncommitted staging file to clean up.
+///
+/// # Returns
+/// Structured recursive-copy error retaining primary and cleanup context.
+fn copy_dir_error_with_staging(
+    stage: LocalCopyDirStage,
+    src: &Path,
+    dst: &Path,
+    stats: &LocalCopyDirStats,
+    source: Error,
+    staged_file: &mut StagedFile,
+) -> LocalCopyDirError {
+    let temporary_path = staged_file.path().to_path_buf();
+    let cleanup_error = staged_file.cleanup().err();
+    copy_dir_error(stage, src, dst, stats, source)
+        .with_staging_context(temporary_path, cleanup_error)
 }
 
 /// Adds recursive-copy context to a native I/O result.
@@ -270,9 +301,10 @@ fn copy_dir_recursive(
                 src,
                 dst,
                 stats,
-            )?;
+            )
+        } else {
+            Ok(())
         }
-        Ok(())
     })();
     let _ = active_sources.pop();
     result
@@ -455,7 +487,7 @@ fn remove_destination_non_directory_if_unchanged(dst: &Path) -> Result<()> {
     }
     #[cfg(windows)]
     if metadata.file_type().is_symlink_dir() {
-        fs::remove_dir(dst)?;
+        remove_directory_symlink(dst)?;
         return Ok(());
     }
     fs::remove_file(dst)
@@ -564,6 +596,48 @@ fn copy_file_with_options(
         None => false,
     };
 
+    let (staged_file, copied) =
+        stage_copy_file(src, dst, options, &source_metadata, stats)?;
+    if !commit_staged_copy_file(
+        src,
+        dst,
+        options.conflict,
+        destination_directory_requires_removal,
+        stats,
+        staged_file,
+    )? {
+        stats.skipped = stats.skipped.saturating_add(1);
+        return Ok(());
+    }
+
+    stats.files = stats.files.saturating_add(1);
+    stats.bytes = stats.bytes.saturating_add(copied);
+    Ok(())
+}
+
+/// Copies a regular source file into a private same-directory staging file.
+///
+/// # Parameters
+/// - `src`: Regular source file path.
+/// - `dst`: Final destination file path.
+/// - `options`: Recursive-copy behavior options.
+/// - `source_metadata`: Metadata loaded for the source file.
+/// - `stats`: Statistics accumulated before staging.
+///
+/// # Returns
+/// Armed staging-file guard and number of source bytes copied.
+///
+/// # Errors
+/// Returns a structured copy error when staging creation, source copying, or
+/// permission preservation fails. Post-creation errors include staging cleanup
+/// context.
+fn stage_copy_file(
+    src: &Path,
+    dst: &Path,
+    options: LocalCopyDirOptions,
+    source_metadata: &fs::Metadata,
+    stats: &LocalCopyDirStats,
+) -> CopyDirResult<(StagedFile, u64)> {
     let (temp_path, temp_file) = with_copy_context(
         create_temp_file_in_dir(
             parent_dir_for(dst),
@@ -577,29 +651,67 @@ fn copy_file_with_options(
         stats,
     )?;
     let mut staged_file = StagedFile::new(temp_path, temp_file);
-    let copied = with_copy_context(
-        File::open(src).and_then(|mut source_file| {
-            io::copy(&mut source_file, staged_file.file_mut())
-        }),
-        LocalCopyDirStage::CopyFileContents,
-        src,
-        dst,
-        stats,
-    )?;
+    let copied = match File::open(src).and_then(|mut source_file| {
+        io::copy(&mut source_file, staged_file.file_mut())
+    }) {
+        Ok(copied) => copied,
+        Err(source) => {
+            return Err(copy_dir_error_with_staging(
+                LocalCopyDirStage::CopyFileContents,
+                src,
+                dst,
+                stats,
+                source,
+                &mut staged_file,
+            ));
+        }
+    };
     if options.preserve_permissions {
-        with_copy_context(
-            staged_file
-                .file()
-                .set_permissions(source_metadata.permissions()),
-            LocalCopyDirStage::PreservePermissions,
-            src,
-            dst,
-            stats,
-        )?;
+        let preserve_result = staged_file
+            .file()
+            .set_permissions(source_metadata.permissions());
+        if let Err(source) = preserve_result {
+            return Err(copy_dir_error_with_staging(
+                LocalCopyDirStage::PreservePermissions,
+                src,
+                dst,
+                stats,
+                source,
+                &mut staged_file,
+            ));
+        }
     }
     staged_file.close();
+    Ok((staged_file, copied))
+}
 
-    if destination_directory_requires_removal {
+/// Commits an already staged regular file according to destination policies.
+///
+/// # Parameters
+/// - `src`: Source file associated with the staged contents.
+/// - `dst`: Final destination file path.
+/// - `conflict`: Existing-file conflict policy.
+/// - `remove_destination_directory`: Whether a previously observed directory
+///   conflict may be removed immediately before commit.
+/// - `stats`: Statistics accumulated before commit.
+/// - `staged_file`: Armed staging-file guard to commit or clean up.
+///
+/// # Returns
+/// `true` when the staged file committed, or `false` when a racing destination
+/// was skipped and the staging path was removed.
+///
+/// # Errors
+/// Returns a structured copy error when destination removal, commit, or staging
+/// cleanup fails.
+fn commit_staged_copy_file(
+    src: &Path,
+    dst: &Path,
+    conflict: LocalCopyConflictPolicy,
+    remove_destination_directory: bool,
+    stats: &LocalCopyDirStats,
+    mut staged_file: StagedFile,
+) -> CopyDirResult<bool> {
+    if remove_destination_directory {
         // Stage the source before deleting a conflicting directory so read
         // failures cannot destroy the existing destination. Re-check the
         // entry type and use directory-only removal so a racing file is left
@@ -607,16 +719,19 @@ fn copy_file_with_options(
         // then moving a file cannot be one atomic filesystem operation, so
         // commit failure after this point may still leave the destination
         // absent.
-        with_copy_context(
-            remove_destination_directory_if_unchanged(dst),
-            LocalCopyDirStage::PrepareDestination,
-            src,
-            dst,
-            stats,
-        )?;
+        if let Err(source) = remove_destination_directory_if_unchanged(dst) {
+            return Err(copy_dir_error_with_staging(
+                LocalCopyDirStage::PrepareDestination,
+                src,
+                dst,
+                stats,
+                source,
+                &mut staged_file,
+            ));
+        }
     }
 
-    let commit_result = match options.conflict {
+    let commit_result = match conflict {
         LocalCopyConflictPolicy::Fail | LocalCopyConflictPolicy::Skip => {
             move_file_without_replacing(staged_file.path(), dst)
         }
@@ -625,29 +740,36 @@ fn copy_file_with_options(
         }
     };
     match commit_result {
-        Ok(()) => {}
+        Ok(()) => {
+            staged_file.disarm();
+            Ok(true)
+        }
         Err(error)
-            if options.conflict == LocalCopyConflictPolicy::Skip
+            if conflict == LocalCopyConflictPolicy::Skip
                 && error.kind() == ErrorKind::AlreadyExists =>
         {
-            stats.skipped = stats.skipped.saturating_add(1);
-            return Ok(());
+            let temporary_path = staged_file.path().to_path_buf();
+            if let Err(source) = staged_file.cleanup() {
+                return Err(copy_dir_error(
+                    LocalCopyDirStage::CleanupTemporaryFile,
+                    src,
+                    dst,
+                    stats,
+                    source,
+                )
+                .with_staging_context(temporary_path, None));
+            }
+            Ok(false)
         }
-        Err(error) => {
-            return with_copy_context(
-                Err(error),
-                LocalCopyDirStage::CommitFile,
-                src,
-                dst,
-                stats,
-            );
-        }
+        Err(error) => Err(copy_dir_error_with_staging(
+            LocalCopyDirStage::CommitFile,
+            src,
+            dst,
+            stats,
+            error,
+            &mut staged_file,
+        )),
     }
-    staged_file.disarm();
-
-    stats.files = stats.files.saturating_add(1);
-    stats.bytes = stats.bytes.saturating_add(copied);
-    Ok(())
 }
 
 /// Loads metadata for a source path according to symlink policy.
@@ -683,18 +805,13 @@ fn metadata_for_copy_source(
 
 /// Tests whether metadata describes a real directory rather than a symlink.
 ///
-/// Both metadata predicates are side-effect free, so evaluating both avoids
-/// duplicating platform-sensitive directory checks throughout the copy
-/// pipeline.
-///
 /// # Parameters
 /// - `metadata`: Metadata loaded without following the final path component.
 ///
 /// # Returns
 /// `true` only for a non-symlink directory.
-#[inline(always)]
 fn is_real_directory(metadata: &fs::Metadata) -> bool {
-    metadata.is_dir() & !metadata.file_type().is_symlink()
+    metadata.is_dir() && !metadata.file_type().is_symlink()
 }
 
 /// Rejects copy destinations located inside the source tree.

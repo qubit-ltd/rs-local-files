@@ -148,9 +148,6 @@ pub(crate) fn create_private_dir(path: &Path) -> Result<()> {
 
 /// Tests whether a colliding temporary-entry name should be retried.
 ///
-/// Both predicates are evaluated because they are side-effect free. This keeps
-/// the retry decision compact while retaining the same bounded-retry behavior.
-///
 /// # Parameters
 /// - `error`: Entry-creation error.
 /// - `attempt`: One-based attempt number that just failed.
@@ -158,13 +155,12 @@ pub(crate) fn create_private_dir(path: &Path) -> Result<()> {
 ///
 /// # Returns
 /// `true` only for an existing entry when another attempt remains.
-#[inline(always)]
 fn should_retry_collision(
     error: &Error,
     attempt: usize,
     max_tries: usize,
 ) -> bool {
-    (error.kind() == ErrorKind::AlreadyExists) & (attempt < max_tries)
+    error.kind() == ErrorKind::AlreadyExists && attempt < max_tries
 }
 
 /// Validates a retry count.

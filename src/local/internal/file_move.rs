@@ -32,6 +32,7 @@ use std::os::unix::ffi::OsStrExt;
 use std::os::windows::ffi::OsStrExt;
 #[cfg(windows)]
 use std::os::windows::io::{
+    AsRawHandle,
     FromRawHandle,
     RawHandle,
 };
@@ -43,6 +44,10 @@ const MOVEFILE_WRITE_THROUGH: u32 = 0x0000_0008;
 #[cfg(windows)]
 const GENERIC_READ: u32 = 0x8000_0000;
 #[cfg(windows)]
+const DELETE: u32 = 0x0001_0000;
+#[cfg(windows)]
+const FILE_READ_ATTRIBUTES: u32 = 0x0000_0080;
+#[cfg(windows)]
 const FILE_SHARE_READ: u32 = 0x0000_0001;
 #[cfg(windows)]
 const FILE_SHARE_WRITE: u32 = 0x0000_0002;
@@ -52,6 +57,18 @@ const FILE_SHARE_DELETE: u32 = 0x0000_0004;
 const OPEN_EXISTING: u32 = 3;
 #[cfg(windows)]
 const FILE_FLAG_BACKUP_SEMANTICS: u32 = 0x0200_0000;
+#[cfg(windows)]
+const FILE_FLAG_OPEN_REPARSE_POINT: u32 = 0x0020_0000;
+#[cfg(windows)]
+const FILE_ATTRIBUTE_DIRECTORY: u32 = 0x0000_0010;
+#[cfg(windows)]
+const FILE_ATTRIBUTE_REPARSE_POINT: u32 = 0x0000_0400;
+#[cfg(windows)]
+const IO_REPARSE_TAG_NAME_SURROGATE: u32 = 0x2000_0000;
+#[cfg(windows)]
+const FILE_DISPOSITION_INFO_CLASS: u32 = 4;
+#[cfg(windows)]
+const FILE_ATTRIBUTE_TAG_INFO_CLASS: u32 = 9;
 #[cfg(windows)]
 const INVALID_HANDLE_VALUE: RawHandle = -1isize as RawHandle;
 #[cfg(target_os = "macos")]
@@ -83,6 +100,38 @@ unsafe extern "system" {
         flags_and_attributes: u32,
         template_file: RawHandle,
     ) -> RawHandle;
+
+    fn GetFileInformationByHandleEx(
+        file: RawHandle,
+        file_information_class: u32,
+        file_information: *mut c_void,
+        buffer_size: u32,
+    ) -> i32;
+
+    fn SetFileInformationByHandle(
+        file: RawHandle,
+        file_information_class: u32,
+        file_information: *const c_void,
+        buffer_size: u32,
+    ) -> i32;
+}
+
+/// Native Windows attributes returned for a handle and its reparse tag.
+#[cfg(windows)]
+#[repr(C)]
+struct FileAttributeTagInfo {
+    /// Bit mask of `FILE_ATTRIBUTE_*` values.
+    file_attributes: u32,
+    /// Reparse tag, or zero when the object is not a reparse point.
+    reparse_tag: u32,
+}
+
+/// Native Windows request that marks a handle's object for deletion.
+#[cfg(windows)]
+#[repr(C)]
+struct FileDispositionInfo {
+    /// Windows `BOOLEAN` value indicating whether deletion is requested.
+    delete_file: u8,
 }
 
 /// Replaces `destination` with `source`.
@@ -252,6 +301,93 @@ pub(crate) fn move_directory_without_replacing(
     destination: &Path,
 ) -> Result<()> {
     move_path_without_replacing(source, destination)
+}
+
+/// Removes a Windows directory reparse point through a verified handle.
+///
+/// Opening the final component with `FILE_FLAG_OPEN_REPARSE_POINT` prevents
+/// path traversal. The handle is then verified as both a directory and a
+/// reparse point before it is marked for deletion, so a real directory that
+/// replaces an earlier-observed link cannot be deleted by a path-level race.
+///
+/// # Parameters
+/// - `path`: Directory symbolic link or directory reparse point to remove.
+///
+/// # Errors
+/// Returns an I/O error when the path cannot be opened, inspected, or deleted.
+/// Returns [`ErrorKind::AlreadyExists`] when the opened object is no longer a
+/// directory reparse point.
+#[cfg(windows)]
+pub(crate) fn remove_directory_symlink(path: &Path) -> Result<()> {
+    let path = wide_path(path)?;
+    // SAFETY: `path` is a live NUL-terminated UTF-16 buffer without interior
+    // NULs. The constants are documented CreateFileW access, share,
+    // disposition, and reparse-point flags; null optional pointers are valid.
+    let handle = unsafe {
+        CreateFileW(
+            path.as_ptr(),
+            DELETE | FILE_READ_ATTRIBUTES,
+            FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE,
+            std::ptr::null_mut(),
+            OPEN_EXISTING,
+            FILE_FLAG_BACKUP_SEMANTICS | FILE_FLAG_OPEN_REPARSE_POINT,
+            std::ptr::null_mut(),
+        )
+    };
+    if handle == INVALID_HANDLE_VALUE {
+        return Err(Error::last_os_error());
+    }
+    // SAFETY: the handle was checked against INVALID_HANDLE_VALUE and is a
+    // uniquely owned CreateFileW result. File closes it exactly once.
+    let entry = unsafe { File::from_raw_handle(handle) };
+    let mut attributes = FileAttributeTagInfo {
+        file_attributes: 0,
+        reparse_tag: 0,
+    };
+    // SAFETY: `entry` owns a valid handle, `attributes` is a live writable
+    // buffer of the advertised size, and FileAttributeTagInfo is the matching
+    // structure for FILE_ATTRIBUTE_TAG_INFO_CLASS.
+    let inspected = unsafe {
+        GetFileInformationByHandleEx(
+            entry.as_raw_handle(),
+            FILE_ATTRIBUTE_TAG_INFO_CLASS,
+            std::ptr::from_mut(&mut attributes).cast::<c_void>(),
+            std::mem::size_of::<FileAttributeTagInfo>() as u32,
+        )
+    };
+    if inspected == 0 {
+        return Err(Error::last_os_error());
+    }
+    let is_directory =
+        attributes.file_attributes & FILE_ATTRIBUTE_DIRECTORY != 0;
+    let is_reparse_point =
+        attributes.file_attributes & FILE_ATTRIBUTE_REPARSE_POINT != 0;
+    let is_name_surrogate =
+        attributes.reparse_tag & IO_REPARSE_TAG_NAME_SURROGATE != 0;
+    if !is_directory || !is_reparse_point || !is_name_surrogate {
+        return Err(Error::new(
+            ErrorKind::AlreadyExists,
+            "path no longer refers to a directory name-surrogate reparse point",
+        ));
+    }
+
+    let disposition = FileDispositionInfo { delete_file: 1 };
+    // SAFETY: `entry` owns a valid handle opened with DELETE access;
+    // `disposition` is a live readable buffer of the advertised size and is
+    // the matching structure for FILE_DISPOSITION_INFO_CLASS.
+    let removed = unsafe {
+        SetFileInformationByHandle(
+            entry.as_raw_handle(),
+            FILE_DISPOSITION_INFO_CLASS,
+            std::ptr::from_ref(&disposition).cast::<c_void>(),
+            std::mem::size_of::<FileDispositionInfo>() as u32,
+        )
+    };
+    if removed == 0 {
+        Err(Error::last_os_error())
+    } else {
+        Ok(())
+    }
 }
 
 /// Rejects no-replace directory persistence on unsupported targets.

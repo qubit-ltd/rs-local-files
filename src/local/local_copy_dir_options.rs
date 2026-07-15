@@ -16,7 +16,9 @@ use crate::{
 ///
 /// The default is conservative: existing destination entries are not
 /// overwritten, symbolic links are not followed, and source permissions are not
-/// copied to destination entries.
+/// copied to destination entries. On Unix, newly created files therefore keep
+/// the private staging mode `0o600` and newly created directories use `0o700`,
+/// subject to a more restrictive process umask.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub struct LocalCopyDirOptions {
     /// Policy for existing destination file entries.
@@ -36,7 +38,10 @@ pub struct LocalCopyDirOptions {
     /// copying.
     ///
     /// This uses `std::fs::set_permissions` and therefore only preserves the
-    /// portable permission bits exposed by the Rust standard library.
+    /// portable permission bits exposed by the Rust standard library. When
+    /// this is `false`, new or replaced files retain the copy staging mode and
+    /// new directories retain the private directory mode; on Unix these are
+    /// `0o600` and `0o700`, respectively, subject to the process umask.
     pub preserve_permissions: bool,
 }
 

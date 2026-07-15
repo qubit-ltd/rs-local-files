@@ -23,6 +23,8 @@ use std::path::{
 #[cfg(windows)]
 use std::os::windows::fs::FileTypeExt;
 
+#[cfg(windows)]
+use super::file_move::remove_directory_symlink;
 use super::path_io_error::PathIoError;
 
 /// Ensures that the directory at `path` exists.
@@ -52,6 +54,61 @@ pub(crate) fn ensure_parent_path(path: &Path) -> Result<()> {
         ensure_dir_path(parent)?;
     }
     Ok(())
+}
+
+/// Ensures the parent directory of `path` and records directories whose parent
+/// entries require synchronization.
+///
+/// Directories observed as missing are returned even when another caller races
+/// to create them before [`fs::create_dir_all`] completes. Synchronizing an
+/// extra parent directory is safe and preserves the durability guarantee.
+///
+/// # Parameters
+/// - `path`: File path whose parent directory should be created.
+///
+/// # Returns
+/// Directories observed as missing, ordered from shallowest to deepest.
+///
+/// # Errors
+/// Returns an I/O error when a parent component cannot be inspected or
+/// created, or an existing component is not a directory.
+pub(super) fn ensure_parent_path_with_sync_dirs(
+    path: &Path,
+) -> Result<Vec<PathBuf>> {
+    let Some(parent) = path
+        .parent()
+        .filter(|parent| !parent.as_os_str().is_empty())
+    else {
+        return Ok(Vec::new());
+    };
+    let mut missing = Vec::new();
+    let mut current = parent;
+    loop {
+        match fs::metadata(current) {
+            Ok(metadata) if metadata.is_dir() => break,
+            Ok(_) => {
+                return Err(Error::new(
+                    ErrorKind::AlreadyExists,
+                    format!(
+                        "parent path component is not a directory: {}",
+                        current.display()
+                    ),
+                ));
+            }
+            Err(error) if error.kind() == ErrorKind::NotFound => {
+                missing.push(current.to_path_buf());
+            }
+            Err(error) => return Err(error),
+        }
+        match current.parent() {
+            Some(next) if !next.as_os_str().is_empty() => current = next,
+            _ => break,
+        }
+    }
+
+    ensure_dir_path(parent)?;
+    missing.reverse();
+    Ok(missing)
 }
 
 /// Adds path context to an I/O error while preserving its kind and source.
@@ -157,7 +214,7 @@ pub(crate) fn remove_any_path(path: &Path) -> Result<()> {
     } else {
         #[cfg(windows)]
         if file_type.is_symlink_dir() {
-            return fs::remove_dir(path);
+            return remove_directory_symlink(path);
         }
         fs::remove_file(path)
     }

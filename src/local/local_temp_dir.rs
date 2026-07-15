@@ -165,9 +165,11 @@ impl LocalTempDir {
     /// paths are rejected. This method only resolves the path; it does not
     /// create filesystem entries.
     ///
-    /// These lexical and symlink checks assume the directory tree is not being
-    /// mutated concurrently by an untrusted actor. They are convenience
-    /// containment checks, not capability-based filesystem isolation.
+    /// This method performs lexical validation only. It does not inspect the
+    /// filesystem, so an existing symbolic-link component may resolve outside
+    /// the temporary directory when the returned path is used by another API.
+    /// Use the open or ensure child helpers when observed symbolic links must
+    /// be rejected. The returned path is not proof of filesystem containment.
     ///
     /// # Parameters
     /// - `child`: Relative child path.
@@ -176,8 +178,8 @@ impl LocalTempDir {
     /// The child path joined under this temporary directory.
     ///
     /// # Errors
-    /// Returns [`ErrorKind::InvalidInput`] when `child` is not a safe relative
-    /// path.
+    /// Returns [`ErrorKind::InvalidInput`] when `child` is not a non-empty
+    /// relative path made only of normal lexical components.
     pub fn child_path<P>(&self, child: P) -> Result<PathBuf>
     where
         P: AsRef<Path>,

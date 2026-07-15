@@ -33,7 +33,7 @@ use super::file_move::{
 };
 use super::path_operations::{
     add_path_context,
-    ensure_parent_path,
+    ensure_parent_path_with_sync_dirs,
 };
 use super::temp_entry::create_temp_file_in_dir;
 use super::{
@@ -100,8 +100,8 @@ pub(crate) fn atomic_write_with_path(
     path: &Path,
     write: &mut dyn FnMut(&mut File) -> Result<()>,
 ) -> std::result::Result<(), LocalAtomicWriteError> {
-    with_atomic_context(
-        ensure_parent_path(path),
+    let parent_dirs_to_sync = with_atomic_context(
+        ensure_parent_path_with_sync_dirs(path),
         LocalAtomicWriteStage::PrepareParent,
         path,
         None,
@@ -174,12 +174,33 @@ pub(crate) fn atomic_write_with_path(
     let temp_path = staged_file.path().to_path_buf();
     staged_file.disarm();
     with_atomic_context(
-        sync_parent_dir(path),
+        sync_atomic_parent_chain(path, &parent_dirs_to_sync),
         LocalAtomicWriteStage::SyncParentDirectory,
         path,
         Some(temp_path),
         true,
     )
+}
+
+/// Synchronizes the committed destination and every newly created parent
+/// directory entry.
+///
+/// # Parameters
+/// - `path`: Committed destination path.
+/// - `parent_dirs_to_sync`: Parent directories observed as missing before
+///   staging, ordered from shallowest to deepest.
+///
+/// # Errors
+/// Returns the I/O error reported while opening or synchronizing a directory.
+fn sync_atomic_parent_chain(
+    path: &Path,
+    parent_dirs_to_sync: &[PathBuf],
+) -> Result<()> {
+    sync_parent_dir(path)?;
+    for directory in parent_dirs_to_sync.iter().rev() {
+        sync_parent_dir(directory)?;
+    }
+    Ok(())
 }
 
 /// Returns existing destination permissions to preserve during atomic writes.

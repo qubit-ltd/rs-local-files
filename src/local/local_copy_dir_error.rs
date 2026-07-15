@@ -14,7 +14,10 @@ use std::fmt::{
     Result as FmtResult,
 };
 use std::io;
-use std::path::PathBuf;
+use std::path::{
+    Path,
+    PathBuf,
+};
 
 use crate::{
     LocalCopyDirStage,
@@ -32,6 +35,16 @@ pub struct LocalCopyDirError {
     pub destination_path: PathBuf,
     /// Statistics accumulated before the failure.
     pub stats: LocalCopyDirStats,
+    /// Same-directory staging path when file staging had already started.
+    ///
+    /// The path may no longer exist when cleanup succeeded or a later retry
+    /// removed it.
+    pub temporary_path: Option<Box<Path>>,
+    /// Secondary error reported while removing an uncommitted staging file.
+    ///
+    /// The primary operation error remains available through [`Self::source`]
+    /// and the [`Error`] implementation.
+    pub cleanup_error: Option<io::Error>,
     /// Native I/O error that caused the failure.
     pub source: io::Error,
 }
@@ -61,6 +74,8 @@ impl LocalCopyDirError {
             source_path,
             destination_path,
             stats,
+            temporary_path: None,
+            cleanup_error: None,
             source,
         }
     }
@@ -72,6 +87,25 @@ impl LocalCopyDirError {
     #[inline(always)]
     pub fn kind(&self) -> io::ErrorKind {
         self.source.kind()
+    }
+
+    /// Attaches staging-path and cleanup-failure context.
+    ///
+    /// # Parameters
+    /// - `temporary_path`: Same-directory staging path used by the failed copy.
+    /// - `cleanup_error`: Secondary error raised while removing that path.
+    ///
+    /// # Returns
+    /// This copy error enriched with staging cleanup context.
+    #[inline]
+    pub(crate) fn with_staging_context(
+        mut self,
+        temporary_path: PathBuf,
+        cleanup_error: Option<io::Error>,
+    ) -> Self {
+        self.temporary_path = Some(temporary_path.into_boxed_path());
+        self.cleanup_error = cleanup_error;
+        self
     }
 }
 
@@ -85,8 +119,18 @@ impl Display for LocalCopyDirError {
             self.destination_path.display(),
             self.stage,
             self.stats,
-            self.source
-        )
+            self.source,
+        )?;
+        if let Some(temporary_path) = self.temporary_path.as_ref() {
+            write!(formatter, "; staging path '{}'", temporary_path.display())?;
+        }
+        if let Some(cleanup_error) = self.cleanup_error.as_ref() {
+            return write!(
+                formatter,
+                "; staging cleanup also failed: {cleanup_error}"
+            );
+        }
+        Ok(())
     }
 }
 

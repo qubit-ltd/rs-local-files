@@ -277,6 +277,9 @@ impl LocalFiles {
     /// handled according to `options`. Symbolic links are rejected by default.
     /// Destinations inside a source tree and cycles introduced by followed
     /// symbolic links are rejected.
+    /// On Unix, new or replaced files use mode `0o600` and newly created
+    /// directories use mode `0o700`, subject to a more restrictive process
+    /// umask, unless source permissions are explicitly preserved.
     ///
     /// When [`LocalCopyTypeConflictPolicy::Replace`](crate::LocalCopyTypeConflictPolicy::Replace)
     /// is enabled and a source file conflicts with a destination directory, the
@@ -301,8 +304,9 @@ impl LocalFiles {
     ///
     /// # Errors
     /// Returns [`LocalCopyDirError`] with the failed stage, source and
-    /// destination paths, partial statistics, and native I/O source error when
-    /// validation or an underlying filesystem operation fails.
+    /// destination paths, partial statistics, optional staging path, optional
+    /// secondary cleanup error, and native I/O source error when validation or
+    /// an underlying filesystem operation fails.
     #[inline(always)]
     pub fn copy_dir_all_with<S, D>(
         src: S,
@@ -319,10 +323,15 @@ impl LocalFiles {
     /// Atomically writes bytes using a same-directory temporary file.
     ///
     /// Parent directories are created first. The temporary file is flushed and
-    /// synced before it replaces the destination, after which the parent
-    /// directory is synced where supported. A symbolic-link destination is
-    /// replaced as a link rather than followed on platforms whose rename
+    /// synced before it replaces the destination. The destination parent and
+    /// the parents of directory entries created by this call are then synced
+    /// from deepest to shallowest where supported. A symbolic-link destination
+    /// is replaced as a link rather than followed on platforms whose rename
     /// semantics provide that behavior.
+    ///
+    /// Existing regular-file permissions are preserved. On Unix, a new
+    /// destination uses mode `0o600`, subject to a more restrictive process
+    /// umask.
     ///
     /// Before replacement, every error leaves the existing destination intact
     /// and attempts to remove the temporary file. Staging cleanup is
@@ -377,6 +386,8 @@ impl LocalFiles {
     /// ordinary errors and while unwinding from a callback panic. A cleanup
     /// failure cannot replace the original error or panic and may therefore
     /// leave the staging path behind.
+    /// Parent-chain synchronization and new-file permission behavior are the
+    /// same as for [`Self::atomic_write`].
     ///
     /// # Parameters
     /// - `path`: Destination path.

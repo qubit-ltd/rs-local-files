@@ -8,7 +8,28 @@
 //! Atomic-write failure stages.
 
 /// Stage at which an atomic write failed.
+///
+/// Additional stages may be added as durability behavior evolves. Downstream
+/// matches must retain a wildcard arm.
+///
+/// ```compile_fail
+/// use qubit_local_files::LocalAtomicWriteStage;
+///
+/// fn classify(stage: LocalAtomicWriteStage) {
+///     match stage {
+///         LocalAtomicWriteStage::PrepareParent => {}
+///         LocalAtomicWriteStage::InspectDestination => {}
+///         LocalAtomicWriteStage::CreateTemporaryFile => {}
+///         LocalAtomicWriteStage::WriteTemporaryFile => {}
+///         LocalAtomicWriteStage::PreservePermissions => {}
+///         LocalAtomicWriteStage::SyncTemporaryFile => {}
+///         LocalAtomicWriteStage::ReplaceDestination => {}
+///         LocalAtomicWriteStage::SyncParentDirectory => {}
+///     }
+/// }
+/// ```
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
+#[non_exhaustive]
 pub enum LocalAtomicWriteStage {
     /// Creating destination parent directories failed.
     PrepareParent,

@@ -11,10 +11,13 @@ use std::fs::{
     self,
     File,
 };
+use std::io::Result;
 use std::path::{
     Path,
     PathBuf,
 };
+
+use log::warn;
 
 /// Owns a staging file until its filesystem commit succeeds.
 ///
@@ -93,6 +96,22 @@ impl StagedFile {
         drop(self.file.take());
     }
 
+    /// Closes and removes the uncommitted staging file.
+    ///
+    /// Cleanup remains armed when removal fails so [`Drop`] can retry and log
+    /// the failure.
+    ///
+    /// # Errors
+    /// Returns the I/O error reported while removing the staging path.
+    pub(crate) fn cleanup(&mut self) -> Result<()> {
+        self.close();
+        if let Some(path) = self.path.as_ref() {
+            fs::remove_file(path)?;
+            let _ = self.path.take();
+        }
+        Ok(())
+    }
+
     /// Disarms path cleanup after a successful filesystem commit.
     ///
     /// The staging handle is closed before the guard is disarmed.
@@ -106,9 +125,14 @@ impl StagedFile {
 impl Drop for StagedFile {
     /// Closes and best-effort removes an uncommitted staging file.
     fn drop(&mut self) {
-        self.close();
-        if let Some(path) = self.path.take() {
-            drop(fs::remove_file(path));
+        if let Err(error) = self.cleanup()
+            && let Some(path) = self.path.as_ref()
+        {
+            warn!(
+                "failed to remove uncommitted staging file '{}': {}",
+                path.display(),
+                error
+            );
         }
     }
 }
