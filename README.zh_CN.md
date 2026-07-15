@@ -31,7 +31,7 @@ Qubit Local Files 承载从 `qubit-io` 拆出的本地文件系统工具。它�
 
 ```toml
 [dependencies]
-qubit-local-files = "0.2"
+qubit-local-files = "0.3"
 ```
 
 ## 快速示例
@@ -40,8 +40,6 @@ qubit-local-files = "0.2"
 use std::io::Write;
 
 use qubit_local_files::{
-    FileWriteMode,
-    FileWriteOptions,
     LocalCopyDirOptions,
     LocalFiles,
     LocalPersistOptions,
@@ -65,13 +63,12 @@ let final_path = work.path().join("result.txt");
 std::fs::write(&final_path, "old payload")?;
 
 let mut temp = LocalTempFile::with_name(Some("qubit-local-files-"), Some(".txt"))?;
-temp.writer(FileWriteOptions::new(FileWriteMode::CreateOrTruncate).buffered())?
-    .write_all(b"new payload\n")?;
+temp.write_all(b"new payload\n")?;
 temp.persist_with(&final_path, LocalPersistOptions { overwrite: true })?;
 
 assert_eq!("new payload\n", std::fs::read_to_string(&final_path)?);
 
-# Ok::<(), std::io::Error>(())
+# Ok::<(), Box<dyn std::error::Error>>(())
 ```
 
 ## 主要能力
@@ -100,11 +97,13 @@ assert_eq!("new payload\n", std::fs::read_to_string(&final_path)?);
 
 `LocalTempFile` 和 `LocalTempDir` 创建真实的本地文件系统条目，并在 drop 时自动删除，除非通过 `keep` 或 `persist` 释放所有权。Drop 阶段的清理是 best-effort；失败会通过 `log` 门面以 `warn!` 记录告警，不会 panic。
 
-`LocalTempFile` 面向写入场景：通过 `writer(FileWriteOptions)` 配置内部 writer，通过 `close` flush 并关闭后，再用其他 API 读取该路径。它有意不提供读取 helper；确实需要读取时，通过 `LocalFiles` 或 `std::fs` 操作它的路径。
+`LocalTempFile` 持有最初创建的文件句柄，并实现 `Write` 和 `Seek`。可通过 `as_file` / `as_file_mut` 直接访问句柄，通过 `close` flush 并关闭后，再用其他 API 读取该路径。它有意不提供读取 helper；确实需要读取时，通过 `LocalFiles` 或 `std::fs` 操作它的路径。
 
 `LocalTempDir` 提供安全 child helper：`child_path`、`ensure_child_dir`、`open_child_reader`、`open_child_writer` 和 `list`。child 路径必须是相对路径，不能包含父目录跳转。`ensure_child_dir` 会像 `mkdir -p` 一样创建多层缺失父目录。
 
-`LocalTempFile::persist` 默认在移动操作中拒绝已存在的目标。只有确实要替换已有目标时，才使用 `LocalTempFile::persist_with` 和 `LocalPersistOptions { overwrite: true }`。`LocalTempDir::persist` 同样拒绝已存在的目标，并且不提供 overwrite 选项。
+child helper 会拒绝 lexical traversal 和检查时可见的 symbolic-link escape，但校验与后续文件系统操作并非原子过程。当不可信参与者能够并发修改目录树时，它们不能作为 sandbox 边界。
+
+`LocalTempFile::persist` 默认在移动操作中拒绝已存在的目标。只有确实要替换已有目标时，才使用 `LocalTempFile::persist_with` 和 `LocalPersistOptions { overwrite: true }`。`LocalTempDir::persist` 同样拒绝已存在的目标，并且不提供 overwrite 选项。持久化失败会返回持有原临时 guard 的 `LocalPersistError`，调用方可以重试或检查资源。在 Unix 上，临时文件以 `0600`、临时目录以 `0700` 创建，之后仍受进程 umask 约束。
 
 ### 读写选项
 
@@ -127,6 +126,8 @@ assert_eq!("new payload\n", std::fs::read_to_string(&final_path)?);
 
 `LocalFiles::atomic_write` 会在同一父目录下写入临时文件，flush 并 sync 这个临时文件，替换目标，并在支持的平台上 sync 父目录。它适合配置文件、cache manifest、checkpoint、生成索引等 whole-file replacement 场景。
 
+失败时返回 `LocalAtomicWriteError`，其中包含失败阶段、临时路径、原始 I/O source error，以及替换是否已经提交。
+
 该操作不是多文件事务，也不协调并发写入。如果多个进程或线程可能同时替换同一路径，需要使用外部锁。
 
 ### 递归目录复制
@@ -138,8 +139,9 @@ assert_eq!("new payload\n", std::fs::read_to_string(&final_path)?);
 | `files` | 已复制的普通文件数量。 |
 | `directories` | 已创建的目标目录数量。 |
 | `bytes` | 从普通文件复制的字节数。 |
+| `skipped` | 因冲突策略而跳过的已有目标文件数量。 |
 
-`LocalCopyDirOptions::default()` 是有意保守的默认值：不覆盖已存在的目标条目，不跟随 symbolic link，也不保留源权限。需要这些行为时，应显式设置 `overwrite`、`follow_symlinks` 或 `preserve_permissions`。
+`LocalCopyDirOptions::default()` 是有意保守的默认值：`conflict` 和 `type_conflict` 均为 `Fail`，不跟随 symbolic link，也不保留源权限。通过 `LocalCopyConflictPolicy` 显式选择 `Overwrite` 或 `Skip`；文件/目录类型替换则必须单独设置 `LocalCopyTypeConflictPolicy::Replace`。复制失败返回 `LocalCopyDirError`，其中包含路径、失败阶段、部分统计和原始 I/O source error。
 
 ### 文件名 Helper
 

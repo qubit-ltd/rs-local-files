@@ -37,7 +37,7 @@ For stream-level `std::io` traits, extension methods, wrappers, and codecs, see
 
 ```toml
 [dependencies]
-qubit-local-files = "0.2"
+qubit-local-files = "0.3"
 ```
 
 ## Quick Example
@@ -46,8 +46,6 @@ qubit-local-files = "0.2"
 use std::io::Write;
 
 use qubit_local_files::{
-    FileWriteMode,
-    FileWriteOptions,
     LocalCopyDirOptions,
     LocalFiles,
     LocalPersistOptions,
@@ -71,13 +69,12 @@ let final_path = work.path().join("result.txt");
 std::fs::write(&final_path, "old payload")?;
 
 let mut temp = LocalTempFile::with_name(Some("qubit-local-files-"), Some(".txt"))?;
-temp.writer(FileWriteOptions::new(FileWriteMode::CreateOrTruncate).buffered())?
-    .write_all(b"new payload\n")?;
+temp.write_all(b"new payload\n")?;
 temp.persist_with(&final_path, LocalPersistOptions { overwrite: true })?;
 
 assert_eq!("new payload\n", std::fs::read_to_string(&final_path)?);
 
-# Ok::<(), std::io::Error>(())
+# Ok::<(), Box<dyn std::error::Error>>(())
 ```
 
 ## Main Capabilities
@@ -110,21 +107,29 @@ remove them automatically on drop unless ownership is released with `keep` or
 `persist`. Drop-time cleanup is best-effort; failures are reported through the
 `log` facade with `warn!` and never panic.
 
-`LocalTempFile` is write-oriented: use `writer(FileWriteOptions)` to configure
-the owned writer, and `close` to flush and close it before reusing the path from
-other APIs. It intentionally does not provide read helpers; read the path through
-`LocalFiles` or `std::fs` when that is needed.
+`LocalTempFile` owns its original file handle and implements `Write` and `Seek`.
+Use `as_file` / `as_file_mut` for direct handle access, and `close` to flush and
+close it before reusing the path from other APIs. It intentionally does not
+provide read helpers; read the path through `LocalFiles` or `std::fs` when that
+is needed.
 
 `LocalTempDir` provides safe child helpers: `child_path`, `ensure_child_dir`,
 `open_child_reader`, `open_child_writer`, and `list`. Child paths must be
 relative and cannot contain parent traversal. `ensure_child_dir` creates nested
 parents like `mkdir -p`.
 
+Child helpers reject lexical traversal and observed symbolic-link escapes, but
+validation is not atomic with later filesystem operations. They are not a
+sandbox boundary when an untrusted actor can mutate the tree concurrently.
+
 `LocalTempFile::persist` rejects an existing target by default during the move
 operation. Use `LocalTempFile::persist_with` and
 `LocalPersistOptions { overwrite: true }` only when replacing an existing target
 is intended. `LocalTempDir::persist` also rejects an existing target and does not
-provide an overwrite option.
+provide an overwrite option. A failed persistence operation returns
+`LocalPersistError`, which retains the temporary guard for retry or inspection.
+On Unix, temporary files are created with mode `0600` and temporary directories
+with mode `0700` before applying the process umask.
 
 ### Read and Write Options
 
@@ -151,6 +156,8 @@ protocol rather than opening a normal write handle.
 directory, flushes and syncs that file, replaces the destination, and syncs the
 parent directory when supported. This is useful for whole-file replacement of
 configuration files, cache manifests, checkpoints, and generated indexes.
+Failures return `LocalAtomicWriteError`, including the failed stage, temporary
+path, native source error, and whether replacement had already committed.
 
 The operation is not a multi-file transaction and does not coordinate concurrent
 writers. Use an external lock if multiple processes or threads may replace the
@@ -166,11 +173,15 @@ same destination path at the same time.
 | `files` | Number of regular files copied. |
 | `directories` | Number of destination directories created. |
 | `bytes` | Number of bytes copied from regular files. |
+| `skipped` | Number of existing destination files skipped. |
 
-`LocalCopyDirOptions::default()` is intentionally conservative: it does not
-overwrite existing destination entries, does not follow symbolic links, and does
-not preserve source permissions. Set `overwrite`, `follow_symlinks`, or
-`preserve_permissions` explicitly when those behaviors are required.
+`LocalCopyDirOptions::default()` is intentionally conservative: both
+`conflict` and `type_conflict` use `Fail`, symbolic links are not followed, and
+source permissions are not preserved. Select `Overwrite` or `Skip` through
+`LocalCopyConflictPolicy`, and opt into destructive file/directory type
+replacement separately through `LocalCopyTypeConflictPolicy::Replace`. Copy
+failures return `LocalCopyDirError` with paths, stage, partial statistics, and
+the native source error.
 
 ### Filename Helpers
 

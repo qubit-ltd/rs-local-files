@@ -17,7 +17,7 @@ Qubit Local Files 是 Qubit Rust crate 家族中的本地文件系统 crate。�
 - 只有在显式指定 `LocalPersistOptions { overwrite: true }` 时才替换已有文件。
 - 打开、写入或持久化文件前创建父目录。
 - 通过同目录临时文件 atomic replacement 完整替换文件。
-- 使用显式覆盖和 symlink 策略复制本地目录树。
+- 使用显式冲突和 symlink 策略复制本地目录树。
 - 保留目录自身，只清理目录内容。
 - 在不跟随 symbolic link 的前提下计算本地目录大小。
 - 生成随机文件名 component 或校验 portable 文件名。
@@ -38,7 +38,7 @@ Qubit Local Files 是 Qubit Rust crate 家族中的本地文件系统 crate。�
 
 ```toml
 [dependencies]
-qubit-local-files = "0.2"
+qubit-local-files = "0.3"
 ```
 
 ## 导入方式
@@ -51,7 +51,9 @@ use qubit_local_files::{
     FileReadOptions,
     FileWriteMode,
     FileWriteOptions,
+    LocalCopyConflictPolicy,
     LocalCopyDirOptions,
+    LocalCopyTypeConflictPolicy,
     LocalFilenames,
     LocalFiles,
     LocalPersistOptions,
@@ -128,28 +130,25 @@ std::fs::write(dir.path().join("scratch.txt"), b"scratch")?;
 | `keep` | 消费 guard，并把目录留在生成路径。 |
 | `persist` | 把目录移动到最终路径，并关闭自动清理。 |
 
-`LocalTempDir::persist` 会为目标创建缺失父目录，并拒绝已存在目标。它不提供 overwrite 选项。如果移动失败，guard 仍然拥有该临时目录，并会在 drop 时清理。
+`LocalTempDir::persist` 会为目标创建缺失父目录，并拒绝已存在目标。它不提供 overwrite 选项。如果移动失败，`LocalPersistError` 会把 guard 所有权返回给调用方，以便重试、保留、检查或显式清理。
 
 child 路径必须是非空相对路径，并且只能由 normal path component 组成。绝对路径、root 或 prefix component、`.` 和 `..` 都会被拒绝。`open_child_reader` 要求 child 是文件；目录或其他非文件条目会返回 `ErrorKind::InvalidInput`。`open_child_writer` 会校验已存在目标必须是文件，并确保 child 写入留在临时目录内。`ensure_child_dir` 会创建缺失的多层父目录，但在创建目录时会拒绝 symbolic link component，避免通过 child 路径离开临时目录。
+
+这些检查假设不可信参与者不会在校验和使用之间替换路径 component。child helper 是便捷的 containment check，不是抵御并发文件系统修改的 capability-based sandbox 边界。
 
 `Drop` 中的清理是 best-effort。如果删除失败，`LocalTempDir` 会通过 `log` 门面记录 warning，不会 panic。
 
 ## 临时文件
 
-当你需要一个唯一临时文件路径和一个由 guard 持有的 writer 时，使用 `LocalTempFile`。除非调用 `keep` 或 `persist`，否则文件会在 drop 时删除。
+当你需要一个唯一临时文件路径和一个由 guard 持有的文件句柄时，使用 `LocalTempFile`。除非调用 `keep` 或 `persist`，否则文件会在 drop 时删除。在 Unix 上，临时文件以 `0600`、临时目录以 `0700` 创建，之后仍受进程 umask 约束。
 
 ```rust
 use std::io::Write;
 
-use qubit_local_files::{
-    FileWriteMode,
-    FileWriteOptions,
-    LocalTempFile,
-};
+use qubit_local_files::LocalTempFile;
 
 let mut file = LocalTempFile::with_name(Some("qubit-local-files-"), Some(".txt"))?;
-file.writer(FileWriteOptions::new(FileWriteMode::CreateOrTruncate).buffered())?
-    .write_all(b"temporary payload\n")?;
+file.write_all(b"temporary payload\n")?;
 file.close()?;
 
 # Ok::<(), std::io::Error>(())
@@ -163,52 +162,44 @@ file.close()?;
 | `LocalTempFile::with_name` | 使用自定义前缀和后缀在 `std::env::temp_dir()` 中创建临时文件。 |
 | `LocalTempFile::in_dir` | 在调用方指定的父目录和重试次数下创建临时文件。 |
 
-writer 和所有权方法：
+句柄和所有权方法：
 
 | 方法 | 行为 |
 | --- | --- |
 | `path` | 借用生成的文件路径。 |
 | `exists` | 检查文件路径是否存在，返回 `std::io::Result<bool>`。 |
 | `metadata` | 读取文件 metadata。 |
-| `writer` | 使用 `FileWriteOptions` 配置并返回内部 `LocalFileWriter`。 |
-| `close` | flush 并关闭 writer，但保留路径清理。 |
+| `as_file` / `as_file_mut` | 借用最初创建并持有的 `File` 句柄。 |
+| `Write` / `Seek` | 直接通过持有的句柄写入或 seek。 |
+| `close` | flush 并关闭文件，但保留路径清理。 |
 | `cleanup` | 立即删除文件，并关闭后续 drop 清理。 |
 | `keep` | flush、关闭、消费 guard，并把文件留在生成路径。 |
 | `persist` | 不覆盖地把文件移动到最终路径。 |
 | `persist_with` | 使用 `LocalPersistOptions` 把文件移动到最终路径。 |
 
-第一次 `writer(options)` 调用会配置内部 writer。后续调用必须传入相同 options，并返回同一个 writer；不同 options 会以 `ErrorKind::InvalidInput` 拒绝。因为 `LocalTempFile` 会先创建文件再配置 writer，所以 `FileWriteMode::CreateNew` 会返回 `ErrorKind::AlreadyExists`。
-
 `LocalTempFile` 有意不提供读取 helper。临时文件的常见用法是写入、关闭，然后持久化。如果确实需要检查内容，先调用 `close`，再通过 `LocalFiles::open_reader` 或 `std::fs` 读取 `path()`。
 
-`LocalTempFile::persist` 会 flush 并关闭 writer，为目标创建缺失父目录，并通过 no-clobber move 操作拒绝已存在目标。它有意不依赖单独的 metadata precheck。这可以在支持的平台上避免 time-of-check/time-of-use 覆盖竞态。
+`LocalTempFile::persist` 会 flush 并关闭文件，为目标创建缺失父目录，并通过 no-clobber move 操作拒绝已存在目标。它有意不依赖单独的 metadata precheck。这可以在支持的平台上避免 time-of-check/time-of-use 覆盖竞态。失败时返回 `LocalPersistError<LocalTempFile>`，保留 guard 和原始 I/O error。
 
 只有覆盖策略确实不同的时候才使用 `persist_with`：
 
 ```rust
 use std::io::Write;
 
-use qubit_local_files::{
-    FileWriteMode,
-    FileWriteOptions,
-    LocalPersistOptions,
-    LocalTempDir,
-    LocalTempFile,
-};
+use qubit_local_files::{LocalPersistOptions, LocalTempDir, LocalTempFile};
 
 let dir = LocalTempDir::with_prefix(Some("qubit-local-files-persist-"))?;
 let target = dir.path().join("result.txt");
 std::fs::write(&target, "old")?;
 
 let mut file = LocalTempFile::with_name(Some("qubit-local-files-"), Some(".txt"))?;
-file.writer(FileWriteOptions::new(FileWriteMode::CreateOrTruncate))?
-    .write_all(b"new\n")?;
+file.write_all(b"new\n")?;
 
 file.persist_with(&target, LocalPersistOptions { overwrite: true })?;
 
 assert_eq!("new\n", std::fs::read_to_string(&target)?);
 
-# Ok::<(), std::io::Error>(())
+# Ok::<(), Box<dyn std::error::Error>>(())
 ```
 
 如果目标文件不能被外部观察到“只写了一半”，最终文件替换优先使用 `LocalFiles::atomic_write`。
@@ -233,7 +224,7 @@ assert_eq!(
     std::fs::read(&path)?.as_slice(),
 );
 
-# Ok::<(), std::io::Error>(())
+# Ok::<(), Box<dyn std::error::Error>>(())
 ```
 
 当内容生成逻辑需要直接使用临时文件句柄时，使用 `LocalFiles::atomic_write_with`：
@@ -255,7 +246,7 @@ LocalFiles::atomic_write_with(&path, |file| {
 
 assert_eq!("{\"complete\":true}\n", std::fs::read_to_string(&path)?);
 
-# Ok::<(), std::io::Error>(())
+# Ok::<(), Box<dyn std::error::Error>>(())
 ```
 
 重要语义：
@@ -265,6 +256,7 @@ assert_eq!("{\"complete\":true}\n", std::fs::read_to_string(&path)?);
 - 如果目标已有普通文件，会在替换前把已有权限复制到临时文件。
 - 如果写入、flush 或 sync 临时文件失败，目标保持不变。
 - 如果替换已经成功，但 sync 父目录失败，方法可能在目标已经包含新内容后返回错误。
+- 错误通过 `LocalAtomicWriteError` 报告，包含失败阶段、临时路径、原始 I/O source 和 `committed` 标志。
 - 如果目标路径是 symbolic link，并且平台 rename-over-symlink 语义是替换 link 本身，则该 link 会被新普通文件替换，原 link target 保持不变。
 - 该操作不是多文件事务，也不协调并发写入。
 
@@ -326,7 +318,7 @@ assert_eq!(0, LocalFiles::dir_size(dir.path())?);
 
 ## 递归目录复制
 
-当目录树复制需要显式覆盖策略和 symlink 策略时，使用 `LocalFiles::copy_dir_all_with`。
+当目录树复制需要显式冲突策略和 symlink 策略时，使用 `LocalFiles::copy_dir_all_with`。
 
 ```rust
 use qubit_local_files::{
@@ -348,14 +340,15 @@ assert_eq!(1, stats.files);
 assert_eq!(1, stats.directories);
 assert_eq!(4, stats.bytes);
 
-# Ok::<(), std::io::Error>(())
+# Ok::<(), Box<dyn std::error::Error>>(())
 ```
 
 选项：
 
 | 选项 | 默认值 | 行为 |
 | --- | --- | --- |
-| `overwrite` | `false` | 已存在的目标文件或非目录条目会被拒绝。 |
+| `conflict` | `Fail` | 已存在目标文件会被拒绝；可显式选择 `Overwrite` 或 `Skip`。 |
+| `type_conflict` | `Fail` | 文件/目录类型冲突会被拒绝；`Replace` 显式允许破坏性替换。 |
 | `follow_symlinks` | `false` | 源目录树中的 symbolic link 会被拒绝。 |
 | `preserve_permissions` | `false` | 不把源权限复制到目标条目。 |
 
@@ -366,8 +359,9 @@ assert_eq!(4, stats.bytes);
 | `files` | 已复制的普通文件数量。 |
 | `directories` | 已创建的目标目录数量。 |
 | `bytes` | 从普通文件复制的字节数。 |
+| `skipped` | 因冲突策略而跳过的已有目标文件数量。 |
 
-复制操作会拒绝位于源目录内部的目标，因为把目录复制进自身可能导致无限递归。当启用 symlink following 时，由跟随 symbolic link 引入的目录环也会被拒绝。不支持的源条目会返回 `std::io::ErrorKind::Unsupported`。
+复制操作会拒绝位于源目录内部的目标，因为把目录复制进自身可能导致无限递归。当启用 symlink following 时，由跟随 symbolic link 引入的目录环也会被拒绝。不支持的源条目通过 `LocalCopyDirError` 报告 `std::io::ErrorKind::Unsupported`。结构化错误同时提供失败阶段、源和目标路径、部分统计及原始 I/O source error。
 
 ## 文件名 Helper
 
@@ -428,17 +422,16 @@ assert_eq!(
 
 ## 错误和清理模型
 
-大多数 API 返回 `std::io::Result`，并尽量保留 `std::io::ErrorKind`。
+简单 API 返回 `std::io::Result` 并保留原始 error chain。atomic write、递归复制和临时资源持久化使用结构化错误，携带安全恢复需要的额外状态。
 
 重要错误行为：
 
 - 临时文件持久化目标已存在时会被拒绝，除非显式设置 `LocalPersistOptions { overwrite: true }`。
 - 临时目录持久化目标已存在时会被拒绝。
-- 递归复制遇到已存在目标条目时会被拒绝，除非显式设置 `LocalCopyDirOptions { overwrite: true, .. }`。
+- 递归复制通过 `LocalCopyConflictPolicy` 处理已有文件，通过独立的 `LocalCopyTypeConflictPolicy` 处理文件/目录类型冲突。
 - 递归复制遇到 symbolic link 时会被拒绝，除非显式设置 `LocalCopyDirOptions { follow_symlinks: true, .. }`。
 - Drop 阶段清理失败会通过 `log::warn!` 记录，不会 panic。
-- `LocalTempFile::writer` 在 `close` 之后返回 `ErrorKind::NotFound`。
-- `LocalTempFile::writer` 如果已经用不同 options 配置过，会返回 `ErrorKind::InvalidInput`。
+- `LocalTempFile::as_file`、`as_file_mut`、`Write` 和 `Seek` 在 `close` 之后返回 `ErrorKind::NotFound`。
 - `LocalTempDir` child API 会在不安全 child 路径、child reader 目标不是文件、以及通过 symbolic link 离开临时目录时返回 `ErrorKind::InvalidInput`。
 
 ## 路径长度和平台限制

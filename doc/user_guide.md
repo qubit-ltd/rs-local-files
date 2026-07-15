@@ -24,7 +24,7 @@ Good fits:
   is explicit.
 - Creating parent directories before opening, writing, or persisting files.
 - Atomically replacing a complete file through a same-directory temporary file.
-- Copying local directory trees with explicit overwrite and symlink policy.
+- Copying local directory trees with explicit conflict and symlink policy.
 - Cleaning a directory while preserving the directory itself.
 - Calculating local directory size without following symbolic links.
 - Generating random filename components or validating portable filenames.
@@ -45,7 +45,7 @@ Those stream and byte-I/O concerns belong in
 
 ```toml
 [dependencies]
-qubit-local-files = "0.2"
+qubit-local-files = "0.3"
 ```
 
 ## Import Patterns
@@ -58,7 +58,9 @@ use qubit_local_files::{
     FileReadOptions,
     FileWriteMode,
     FileWriteOptions,
+    LocalCopyConflictPolicy,
     LocalCopyDirOptions,
+    LocalCopyTypeConflictPolicy,
     LocalFilenames,
     LocalFiles,
     LocalPersistOptions,
@@ -143,7 +145,8 @@ Ownership methods:
 
 `LocalTempDir::persist` creates missing parent directories for the target and
 rejects an existing target. It does not provide an overwrite option. If the move
-fails, the guard still owns the temporary directory and will clean it up on drop.
+fails, `LocalPersistError` returns ownership of the guard so callers can retry,
+keep, inspect, or explicitly clean up the directory.
 
 Child paths must be non-empty relative paths made only of normal path
 components. Absolute paths, root or prefix components, `.` and `..` are
@@ -154,26 +157,27 @@ directory. `ensure_child_dir` creates missing nested parents, but rejects
 symbolic link components while creating directories so the operation cannot
 leave the temporary directory through a child path.
 
+These checks assume an untrusted actor is not replacing path components between
+validation and use. The child helpers are convenience containment checks, not a
+capability-based sandbox boundary for concurrent filesystem mutation.
+
 Cleanup in `Drop` is best-effort. If deletion fails, `LocalTempDir` logs a
 warning through the `log` facade and does not panic.
 
 ## Temporary Files
 
 Use `LocalTempFile` when you need a unique temporary file path with an owned
-writer. The file is removed on drop unless it is kept or persisted.
+file handle. The file is removed on drop unless it is kept or persisted. On
+Unix, temporary files are created with mode `0600` and temporary directories
+with mode `0700`, before applying the process umask.
 
 ```rust
 use std::io::Write;
 
-use qubit_local_files::{
-    FileWriteMode,
-    FileWriteOptions,
-    LocalTempFile,
-};
+use qubit_local_files::LocalTempFile;
 
 let mut file = LocalTempFile::with_name(Some("qubit-local-files-"), Some(".txt"))?;
-file.writer(FileWriteOptions::new(FileWriteMode::CreateOrTruncate).buffered())?
-    .write_all(b"temporary payload\n")?;
+file.write_all(b"temporary payload\n")?;
 file.close()?;
 
 # Ok::<(), std::io::Error>(())
@@ -187,62 +191,52 @@ Creation methods:
 | `LocalTempFile::with_name` | Creates a temporary file in `std::env::temp_dir()` with custom prefix and suffix. |
 | `LocalTempFile::in_dir` | Creates a temporary file under a caller-provided parent and retry limit. |
 
-Writer and ownership methods:
+Handle and ownership methods:
 
 | Method | Behavior |
 | --- | --- |
 | `path` | Borrows the generated file path. |
 | `exists` | Checks whether the file path exists, returning `std::io::Result<bool>`. |
 | `metadata` | Reads file metadata. |
-| `writer` | Configures and returns the owned `LocalFileWriter` using `FileWriteOptions`. |
-| `close` | Flushes and closes the writer while keeping path cleanup active. |
+| `as_file` / `as_file_mut` | Borrows the original owned `File` handle. |
+| `Write` / `Seek` | Writes or seeks directly through the owned handle. |
+| `close` | Flushes and closes the file while keeping path cleanup active. |
 | `cleanup` | Removes the file immediately and disables later drop cleanup. |
 | `keep` | Flushes, closes, consumes the guard, and leaves the file at its generated path. |
 | `persist` | Moves the file to a final path without overwriting. |
 | `persist_with` | Moves the file to a final path using `LocalPersistOptions`. |
-
-The first `writer(options)` call configures the owned writer. Later calls must
-pass the same options and return the same writer; different options are rejected
-with `ErrorKind::InvalidInput`. Because `LocalTempFile` creates the file before
-the writer is configured, `FileWriteMode::CreateNew` returns
-`ErrorKind::AlreadyExists`.
 
 `LocalTempFile` intentionally does not provide read helpers. A temporary file is
 normally written, closed, then persisted. If you need to inspect its contents,
 call `close` and then read `path()` through `LocalFiles::open_reader` or
 `std::fs`.
 
-`LocalTempFile::persist` flushes and closes the writer, creates missing parent
+`LocalTempFile::persist` flushes and closes the file, creates missing parent
 directories for the target, and rejects existing targets by using a no-clobber
 move operation. It intentionally does not rely on a separate metadata precheck.
 This avoids a time-of-check/time-of-use overwrite race on supported platforms.
+On failure it returns `LocalPersistError<LocalTempFile>`, retaining the guard and
+native I/O error.
 
 Use `persist_with` only when the overwrite policy should differ:
 
 ```rust
 use std::io::Write;
 
-use qubit_local_files::{
-    FileWriteMode,
-    FileWriteOptions,
-    LocalPersistOptions,
-    LocalTempDir,
-    LocalTempFile,
-};
+use qubit_local_files::{LocalPersistOptions, LocalTempDir, LocalTempFile};
 
 let dir = LocalTempDir::with_prefix(Some("qubit-local-files-persist-"))?;
 let target = dir.path().join("result.txt");
 std::fs::write(&target, "old")?;
 
 let mut file = LocalTempFile::with_name(Some("qubit-local-files-"), Some(".txt"))?;
-file.writer(FileWriteOptions::new(FileWriteMode::CreateOrTruncate))?
-    .write_all(b"new\n")?;
+file.write_all(b"new\n")?;
 
 file.persist_with(&target, LocalPersistOptions { overwrite: true })?;
 
 assert_eq!("new\n", std::fs::read_to_string(&target)?);
 
-# Ok::<(), std::io::Error>(())
+# Ok::<(), Box<dyn std::error::Error>>(())
 ```
 
 If a target file must never be observed half-written, prefer
@@ -270,7 +264,7 @@ assert_eq!(
     std::fs::read(&path)?.as_slice(),
 );
 
-# Ok::<(), std::io::Error>(())
+# Ok::<(), Box<dyn std::error::Error>>(())
 ```
 
 Use `LocalFiles::atomic_write_with` when content generation needs direct access
@@ -293,7 +287,7 @@ LocalFiles::atomic_write_with(&path, |file| {
 
 assert_eq!("{\"complete\":true}\n", std::fs::read_to_string(&path)?);
 
-# Ok::<(), std::io::Error>(())
+# Ok::<(), Box<dyn std::error::Error>>(())
 ```
 
 Important semantics:
@@ -307,6 +301,8 @@ Important semantics:
   left untouched.
 - If replacement succeeds but syncing the parent directory fails, the method may
   return an error after the destination already contains the new contents.
+- Errors are reported as `LocalAtomicWriteError`, which exposes the failed
+  stage, temporary path, native I/O source, and a `committed` flag.
 - If the destination path is a symbolic link on platforms where renaming over a
   symlink replaces the link itself, the link is replaced and its previous target
   is left unchanged.
@@ -374,7 +370,7 @@ links that point to directories.
 ## Recursive Directory Copy
 
 Use `LocalFiles::copy_dir_all_with` when a directory tree must be copied with an
-explicit overwrite and symlink policy.
+explicit conflict and symlink policy.
 
 ```rust
 use qubit_local_files::{
@@ -396,14 +392,15 @@ assert_eq!(1, stats.files);
 assert_eq!(1, stats.directories);
 assert_eq!(4, stats.bytes);
 
-# Ok::<(), std::io::Error>(())
+# Ok::<(), Box<dyn std::error::Error>>(())
 ```
 
 Options:
 
 | Option | Default | Behavior |
 | --- | --- | --- |
-| `overwrite` | `false` | Existing destination files or non-directory entries are rejected. |
+| `conflict` | `Fail` | Existing destination files are rejected; choose `Overwrite` or `Skip` explicitly. |
+| `type_conflict` | `Fail` | File/directory type mismatches are rejected; `Replace` explicitly permits destructive replacement. |
 | `follow_symlinks` | `false` | Symbolic links in the source tree are rejected. |
 | `preserve_permissions` | `false` | Source permissions are not copied to destination entries. |
 
@@ -414,11 +411,14 @@ Statistics:
 | `files` | Number of regular files copied. |
 | `directories` | Number of destination directories created. |
 | `bytes` | Number of bytes copied from regular files. |
+| `skipped` | Number of existing destination files skipped. |
 
 The copy operation rejects destinations inside the source tree, because copying
 a directory into itself can recurse indefinitely. When symlink following is
 enabled, directory cycles introduced by followed symlinks are also rejected.
-Unsupported source entries return `std::io::ErrorKind::Unsupported`.
+Unsupported source entries report `std::io::ErrorKind::Unsupported` through
+`LocalCopyDirError`. The structured error also exposes the failed stage, source
+and destination paths, partial statistics, and native I/O source error.
 
 ## Filename Helpers
 
@@ -486,22 +486,22 @@ decoded value remains a safe single filename fragment.
 
 ## Error and Cleanup Model
 
-Most APIs return `std::io::Result` and preserve `std::io::ErrorKind` where
-possible.
+Simple APIs return `std::io::Result` and preserve the native error chain.
+Atomic writes, recursive copy, and temporary-resource persistence use structured
+errors carrying the additional state needed for safe recovery.
 
 Important error behavior:
 
 - Existing temporary-file persistence targets are rejected unless
   `LocalPersistOptions { overwrite: true }` is explicit.
 - Existing temporary-directory persistence targets are rejected.
-- Recursive copy rejects existing destination entries unless
-  `LocalCopyDirOptions { overwrite: true, .. }` is explicit.
+- Recursive copy uses an explicit `LocalCopyConflictPolicy` for existing files
+  and a separate `LocalCopyTypeConflictPolicy` for file/directory mismatches.
 - Recursive copy rejects symbolic links unless
   `LocalCopyDirOptions { follow_symlinks: true, .. }` is explicit.
 - Drop-time cleanup failures are logged through `log::warn!` and never panic.
-- `LocalTempFile::writer` returns `ErrorKind::NotFound` after `close`.
-- `LocalTempFile::writer` returns `ErrorKind::InvalidInput` when it has already
-  been configured with different options.
+- `LocalTempFile::as_file`, `as_file_mut`, `Write`, and `Seek` return
+  `ErrorKind::NotFound` after `close`.
 - `LocalTempDir` child APIs return `ErrorKind::InvalidInput` for unsafe child
   paths, non-file child readers, and child paths that escape the temporary
   directory through symbolic links.
