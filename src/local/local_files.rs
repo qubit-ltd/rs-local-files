@@ -901,7 +901,10 @@ pub(crate) fn create_temp_dir_in_dir(
 /// # Errors
 /// Returns the I/O error reported while creating the directory.
 pub(crate) fn create_private_dir(path: &Path) -> Result<()> {
+    #[cfg(unix)]
     let mut builder = DirBuilder::new();
+    #[cfg(not(unix))]
+    let builder = DirBuilder::new();
     #[cfg(unix)]
     builder.mode(0o700);
     builder.create(path)
