@@ -5,20 +5,40 @@
 //
 //    Licensed under the Apache License, Version 2.0.
 // =============================================================================
+//! Automatically cleaned local temporary directories.
+
 use std::ffi::OsString;
-use std::fs::{self, Metadata, ReadDir};
-use std::io::{Error, ErrorKind, Result};
-use std::path::{Component, Path, PathBuf};
+use std::fs::{
+    self,
+    Metadata,
+    ReadDir,
+};
+use std::io::{
+    Error,
+    ErrorKind,
+    Result,
+};
+use std::path::{
+    Component,
+    Path,
+    PathBuf,
+};
 
 use log::warn;
 
 use crate::{
-    FileReadOptions, FileWriteOptions, LocalFileReader, LocalFileWriter, LocalFiles,
+    FileReadOptions,
+    FileWriteOptions,
+    LocalFileReader,
+    LocalFileWriter,
+    LocalFiles,
     LocalPersistError,
 };
 
 use super::internal::{
-    create_private_dir, create_temp_dir_in_dir, move_directory_without_replacing,
+    create_private_dir,
+    create_temp_dir_in_dir,
+    move_directory_without_replacing,
 };
 
 /// Temporary directory that is removed automatically unless kept or persisted.
@@ -33,6 +53,7 @@ use super::internal::{
 /// panicked.
 #[derive(Debug)]
 pub struct LocalTempDir {
+    /// Generated path while cleanup remains armed.
     path: Option<PathBuf>,
 }
 
@@ -42,7 +63,7 @@ impl LocalTempDir {
     /// # Errors
     /// Returns an I/O error when the process temporary directory cannot be
     /// created or a unique temporary directory cannot be created.
-    #[inline]
+    #[inline(always)]
     pub fn new() -> Result<Self> {
         Self::with_prefix(None)
     }
@@ -56,7 +77,7 @@ impl LocalTempDir {
     /// Returns an I/O error when the process temporary directory cannot be
     /// created, `prefix` is not a safe file-name fragment, or a unique
     /// temporary directory cannot be created.
-    #[inline]
+    #[inline(always)]
     pub fn with_prefix(prefix: Option<&str>) -> Result<Self> {
         Self::in_dir(
             std::env::temp_dir(),
@@ -76,7 +97,11 @@ impl LocalTempDir {
     /// Returns an I/O error when `dir` cannot be created, `prefix` is not a
     /// safe file-name fragment, the retry limit is zero, all generated names
     /// collide, or directory creation fails.
-    pub fn in_dir<P>(dir: P, prefix: Option<&str>, max_tries: usize) -> Result<Self>
+    pub fn in_dir<P>(
+        dir: P,
+        prefix: Option<&str>,
+        max_tries: usize,
+    ) -> Result<Self>
     where
         P: AsRef<Path>,
     {
@@ -88,7 +113,7 @@ impl LocalTempDir {
     ///
     /// # Returns
     /// Borrowed path managed by this temporary directory.
-    #[inline]
+    #[inline(always)]
     pub fn path(&self) -> &Path {
         self.path
             .as_deref()
@@ -104,7 +129,7 @@ impl LocalTempDir {
     /// Returns an I/O error when the filesystem cannot determine whether the
     /// path exists. Unlike [`Path::exists`], this method does not silently map
     /// inspection errors to `false`.
-    #[inline]
+    #[inline(always)]
     pub fn exists(&self) -> Result<bool> {
         LocalFiles::exists(self.path())
     }
@@ -116,7 +141,7 @@ impl LocalTempDir {
     ///
     /// # Errors
     /// Returns the I/O error reported by [`fs::metadata`].
-    #[inline]
+    #[inline(always)]
     pub fn metadata(&self) -> Result<Metadata> {
         LocalFiles::metadata(self.path())
     }
@@ -128,7 +153,7 @@ impl LocalTempDir {
     ///
     /// # Errors
     /// Returns the I/O error reported by [`fs::read_dir`].
-    #[inline]
+    #[inline(always)]
     pub fn list(&self) -> Result<ReadDir> {
         LocalFiles::list(self.path())
     }
@@ -261,7 +286,12 @@ impl LocalTempDir {
     {
         let child = child.as_ref();
         let path = self.child_path(child)?;
-        prepare_child_writer_path(self.path(), child, &path, options.create_parent)?;
+        prepare_child_writer_path(
+            self.path(),
+            child,
+            &path,
+            options.create_parent,
+        )?;
         LocalFiles::open_writer(path, options)
     }
 
@@ -303,6 +333,9 @@ impl LocalTempDir {
     /// Persistence uses a native move or rename and does not fall back to
     /// copying and deleting. Moving across filesystems can therefore fail with
     /// `EXDEV` on Unix or a platform-equivalent error.
+    /// On Windows, the path is passed to native move APIs without adding a
+    /// verbatim-path prefix or converting a relative path to an absolute path;
+    /// native path-length and relative/verbatim-path semantics therefore apply.
     ///
     /// # Parameters
     /// - `target`: Final directory path.
@@ -315,7 +348,10 @@ impl LocalTempDir {
     /// created, the target already exists, the platform lacks a native
     /// no-replace directory move, or the temporary directory cannot be moved to
     /// `target`.
-    pub fn persist<P>(mut self, target: P) -> std::result::Result<PathBuf, LocalPersistError<Self>>
+    pub fn persist<P>(
+        mut self,
+        target: P,
+    ) -> std::result::Result<PathBuf, LocalPersistError<Self>>
     where
         P: AsRef<Path>,
     {
@@ -357,7 +393,10 @@ fn child_component_names(child: &Path) -> Result<Vec<OsString>> {
             _ => {
                 return Err(Error::new(
                     ErrorKind::InvalidInput,
-                    format!("child path must be relative and safe: {}", child.display()),
+                    format!(
+                        "child path must be relative and safe: {}",
+                        child.display()
+                    ),
                 ));
             }
         }
@@ -408,7 +447,9 @@ fn ensure_child_dir_path(root: &Path, child: &Path) -> Result<PathBuf> {
                     ),
                 ));
             }
-            Err(error) if error.kind() == ErrorKind::NotFound => create_private_dir(&path)?,
+            Err(error) if error.kind() == ErrorKind::NotFound => {
+                create_private_dir(&path)?
+            }
             Err(error) => return Err(error),
         }
     }
@@ -467,7 +508,9 @@ fn prepare_child_writer_path(
             ErrorKind::InvalidInput,
             format!("child file target is a symbolic link: {}", path.display()),
         )),
-        Ok(metadata) if metadata.is_file() => ensure_existing_path_inside(root, path),
+        Ok(metadata) if metadata.is_file() => {
+            ensure_existing_path_inside(root, path)
+        }
         Ok(_) => Err(Error::new(
             ErrorKind::InvalidInput,
             format!("child path is not a file: {}", path.display()),
@@ -492,7 +535,10 @@ fn ensure_existing_path_inside(root: &Path, path: &Path) -> Result<()> {
     if !path.starts_with(&root) {
         return Err(Error::new(
             ErrorKind::InvalidInput,
-            format!("child path escapes temporary directory: {}", path.display()),
+            format!(
+                "child path escapes temporary directory: {}",
+                path.display()
+            ),
         ));
     }
     Ok(())

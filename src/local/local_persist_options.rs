@@ -5,6 +5,8 @@
 //
 //    Licensed under the Apache License, Version 2.0.
 // =============================================================================
+//! Temporary-file persistence options.
+
 /// Options controlling temporary file persistence behavior.
 ///
 /// The default is conservative: existing destination paths are not overwritten.

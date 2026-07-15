@@ -7,8 +7,14 @@
 // =============================================================================
 //! Panic-safe ownership of an uncommitted staging file.
 
-use std::fs::{self, File};
-use std::path::{Path, PathBuf};
+use std::fs::{
+    self,
+    File,
+};
+use std::path::{
+    Path,
+    PathBuf,
+};
 
 /// Owns a staging file until its filesystem commit succeeds.
 ///
@@ -82,6 +88,7 @@ impl StagedFile {
     }
 
     /// Closes the staging handle while keeping path cleanup armed.
+    #[inline(always)]
     pub(crate) fn close(&mut self) {
         drop(self.file.take());
     }
@@ -89,6 +96,7 @@ impl StagedFile {
     /// Disarms path cleanup after a successful filesystem commit.
     ///
     /// The staging handle is closed before the guard is disarmed.
+    #[inline(always)]
     pub(crate) fn disarm(mut self) {
         self.close();
         let _ = self.path.take();

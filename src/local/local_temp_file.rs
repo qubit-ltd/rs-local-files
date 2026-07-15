@@ -5,15 +5,38 @@
 //
 //    Licensed under the Apache License, Version 2.0.
 // =============================================================================
-use std::fs::{self, File};
-use std::io::{Error, ErrorKind, Result, Seek, SeekFrom, Write};
-use std::path::{Path, PathBuf};
+//! Automatically cleaned local temporary files.
+
+use std::fs::{
+    self,
+    File,
+};
+use std::io::{
+    Error,
+    ErrorKind,
+    Result,
+    Seek,
+    SeekFrom,
+    Write,
+};
+use std::path::{
+    Path,
+    PathBuf,
+};
 
 use log::warn;
 
-use crate::{LocalFiles, LocalPersistError, LocalPersistOptions};
+use crate::{
+    LocalFiles,
+    LocalPersistError,
+    LocalPersistOptions,
+};
 
-use super::internal::{create_temp_file_in_dir, move_file_without_replacing, replace_file};
+use super::internal::{
+    create_temp_file_in_dir,
+    move_file_without_replacing,
+    replace_file,
+};
 
 /// Temporary file that is removed automatically unless kept or persisted.
 ///
@@ -28,7 +51,9 @@ use super::internal::{create_temp_file_in_dir, move_file_without_replacing, repl
 /// panicked.
 #[derive(Debug)]
 pub struct LocalTempFile {
+    /// Generated path while cleanup remains armed.
     path: Option<PathBuf>,
+    /// Original unbuffered file handle until explicitly closed.
     file: Option<File>,
 }
 
@@ -38,7 +63,7 @@ impl LocalTempFile {
     /// # Errors
     /// Returns an I/O error when the process temporary directory cannot be
     /// created or a unique temporary file cannot be created.
-    #[inline]
+    #[inline(always)]
     pub fn new() -> Result<Self> {
         Self::with_name(None, None)
     }
@@ -53,8 +78,11 @@ impl LocalTempFile {
     /// Returns an I/O error when the process temporary directory cannot be
     /// created, `prefix` or `suffix` is not a safe file-name fragment, or a
     /// unique temporary file cannot be created.
-    #[inline]
-    pub fn with_name(prefix: Option<&str>, suffix: Option<&str>) -> Result<Self> {
+    #[inline(always)]
+    pub fn with_name(
+        prefix: Option<&str>,
+        suffix: Option<&str>,
+    ) -> Result<Self> {
         Self::in_dir(
             std::env::temp_dir(),
             prefix,
@@ -84,7 +112,8 @@ impl LocalTempFile {
     where
         P: AsRef<Path>,
     {
-        let (path, file) = create_temp_file_in_dir(dir.as_ref(), prefix, suffix, max_tries)?;
+        let (path, file) =
+            create_temp_file_in_dir(dir.as_ref(), prefix, suffix, max_tries)?;
         Ok(Self {
             path: Some(path),
             file: Some(file),
@@ -95,7 +124,7 @@ impl LocalTempFile {
     ///
     /// # Returns
     /// Borrowed path managed by this temporary file.
-    #[inline]
+    #[inline(always)]
     pub fn path(&self) -> &Path {
         self.path
             .as_deref()
@@ -111,7 +140,7 @@ impl LocalTempFile {
     /// Returns an I/O error when the filesystem cannot determine whether the
     /// path exists. Unlike [`Path::exists`], this method does not silently map
     /// inspection errors to `false`.
-    #[inline]
+    #[inline(always)]
     pub fn exists(&self) -> Result<bool> {
         LocalFiles::exists(self.path())
     }
@@ -123,7 +152,7 @@ impl LocalTempFile {
     ///
     /// # Errors
     /// Returns the I/O error reported by [`fs::metadata`].
-    #[inline]
+    #[inline(always)]
     pub fn metadata(&self) -> Result<fs::Metadata> {
         LocalFiles::metadata(self.path())
     }
@@ -136,6 +165,7 @@ impl LocalTempFile {
     /// # Errors
     /// Returns [`ErrorKind::NotFound`] after [`LocalTempFile::close`] closes
     /// the handle.
+    #[inline(always)]
     pub fn as_file(&self) -> Result<&File> {
         self.file.as_ref().ok_or_else(closed_file_error)
     }
@@ -148,6 +178,7 @@ impl LocalTempFile {
     /// # Errors
     /// Returns [`ErrorKind::NotFound`] after [`LocalTempFile::close`] closes
     /// the handle.
+    #[inline(always)]
     pub fn as_file_mut(&mut self) -> Result<&mut File> {
         self.file.as_mut().ok_or_else(closed_file_error)
     }
@@ -160,7 +191,7 @@ impl LocalTempFile {
     /// does not provide a durability guarantee. Call `sync_all` through
     /// [`LocalTempFile::as_file_mut`] before closing when durable storage is
     /// required.
-    #[inline]
+    #[inline(always)]
     pub fn close(&mut self) {
         drop(self.file.take());
     }
@@ -208,6 +239,9 @@ impl LocalTempFile {
     /// Persistence uses a native move or rename and does not fall back to
     /// copying and deleting. Moving across filesystems can therefore fail with
     /// `EXDEV` on Unix or a platform-equivalent error.
+    /// On Windows, the path is passed to native move APIs without adding a
+    /// verbatim-path prefix or converting a relative path to an absolute path;
+    /// native path-length and relative/verbatim-path semantics therefore apply.
     ///
     /// # Parameters
     /// - `target`: Final file path.
@@ -219,8 +253,11 @@ impl LocalTempFile {
     /// Returns [`LocalPersistError`] when the parent directory cannot be
     /// created, the target already exists, or the temporary file cannot be
     /// moved to `target`.
-    #[inline]
-    pub fn persist<P>(self, target: P) -> std::result::Result<PathBuf, LocalPersistError<Self>>
+    #[inline(always)]
+    pub fn persist<P>(
+        self,
+        target: P,
+    ) -> std::result::Result<PathBuf, LocalPersistError<Self>>
     where
         P: AsRef<Path>,
     {
@@ -241,6 +278,9 @@ impl LocalTempFile {
     /// target's permissions. Use [`LocalFiles::atomic_write`] when replacing
     /// contents while preserving existing regular-file permissions is
     /// required.
+    /// On Windows, the path is passed to native move APIs without adding a
+    /// verbatim-path prefix or converting a relative path to an absolute path;
+    /// native path-length and relative/verbatim-path semantics therefore apply.
     ///
     /// # Parameters
     /// - `target`: Final file path.
@@ -288,11 +328,13 @@ impl LocalTempFile {
 
 impl Write for LocalTempFile {
     /// Writes bytes through the owned temporary file handle.
+    #[inline(always)]
     fn write(&mut self, buffer: &[u8]) -> Result<usize> {
         self.as_file_mut()?.write(buffer)
     }
 
     /// Flushes the owned temporary file handle.
+    #[inline(always)]
     fn flush(&mut self) -> Result<()> {
         self.as_file_mut()?.flush()
     }
@@ -300,6 +342,7 @@ impl Write for LocalTempFile {
 
 impl Seek for LocalTempFile {
     /// Seeks the owned temporary file handle.
+    #[inline(always)]
     fn seek(&mut self, position: SeekFrom) -> Result<u64> {
         self.as_file_mut()?.seek(position)
     }
@@ -326,6 +369,7 @@ impl Drop for LocalTempFile {
 ///
 /// # Returns
 /// An [`ErrorKind::NotFound`] error describing the closed handle.
+#[inline]
 fn closed_file_error() -> Error {
     Error::new(ErrorKind::NotFound, "temporary file handle is closed")
 }

@@ -10,8 +10,15 @@
 use std::env;
 use std::ffi::OsString;
 use std::fs;
-use std::io::{Error, ErrorKind, Result};
-use std::path::{Path, PathBuf};
+use std::io::{
+    Error,
+    ErrorKind,
+    Result,
+};
+use std::path::{
+    Path,
+    PathBuf,
+};
 
 #[cfg(windows)]
 use std::os::windows::fs::FileTypeExt;
@@ -56,7 +63,11 @@ pub(crate) fn ensure_parent_path(path: &Path) -> Result<()> {
 ///
 /// # Returns
 /// A new I/O error with the same [`ErrorKind`] and a more descriptive message.
-pub(super) fn add_path_context(error: Error, operation: &'static str, path: &Path) -> Error {
+pub(super) fn add_path_context(
+    error: Error,
+    operation: &'static str,
+    path: &Path,
+) -> Error {
     Error::new(error.kind(), PathIoError::new(operation, path, error))
 }
 
@@ -177,7 +188,9 @@ pub(super) fn canonicalize_existing_prefix(path: &Path) -> Result<PathBuf> {
             break;
         }
         match current.parent() {
-            Some(parent) if !parent.as_os_str().is_empty() => current = parent.to_path_buf(),
+            Some(parent) if !parent.as_os_str().is_empty() => {
+                current = parent.to_path_buf()
+            }
             _ => {
                 current = env::current_dir()?;
                 break;

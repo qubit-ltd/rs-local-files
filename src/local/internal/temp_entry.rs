@@ -7,16 +7,36 @@
 // =============================================================================
 //! Private temporary-entry creation.
 
-use std::fs::{DirBuilder, File, OpenOptions};
-use std::io::{Error, ErrorKind, Result};
-use std::path::{Path, PathBuf};
+use std::fs::{
+    DirBuilder,
+    File,
+    OpenOptions,
+};
+use std::io::{
+    Error,
+    ErrorKind,
+    Result,
+};
+use std::path::{
+    Path,
+    PathBuf,
+};
 
 #[cfg(unix)]
-use std::os::unix::fs::{DirBuilderExt, OpenOptionsExt};
+use std::os::unix::fs::{
+    DirBuilderExt,
+    OpenOptionsExt,
+};
 
 use crate::LocalFilenames;
 
-use super::path_operations::{add_path_context, ensure_dir_path};
+use super::path_operations::{
+    add_path_context,
+    ensure_dir_path,
+};
+
+/// Default number of attempts used when creating a random temporary entry.
+pub(crate) const DEFAULT_TEMP_FILE_RETRIES: usize = 256;
 
 /// Creates a unique temporary file in `dir`.
 ///
@@ -51,10 +71,16 @@ pub(crate) fn create_temp_file_in_dir(
         match options.open(&path) {
             Ok(file) => return Ok((path, file)),
             Err(error) => {
-                if error.kind() == ErrorKind::AlreadyExists && attempt < max_tries {
+                if error.kind() == ErrorKind::AlreadyExists
+                    && attempt < max_tries
+                {
                     continue;
                 }
-                return Err(add_path_context(error, "create temporary file", &path));
+                return Err(add_path_context(
+                    error,
+                    "create temporary file",
+                    &path,
+                ));
             }
         }
     }
@@ -87,10 +113,16 @@ pub(crate) fn create_temp_dir_in_dir(
         match create_private_dir(&path) {
             Ok(()) => return Ok(path),
             Err(error) => {
-                if error.kind() == ErrorKind::AlreadyExists && attempt < max_tries {
+                if error.kind() == ErrorKind::AlreadyExists
+                    && attempt < max_tries
+                {
                     continue;
                 }
-                return Err(add_path_context(error, "create temporary directory", &path));
+                return Err(add_path_context(
+                    error,
+                    "create temporary directory",
+                    &path,
+                ));
             }
         }
     }

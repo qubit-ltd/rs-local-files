@@ -8,19 +8,36 @@
 //! Public local filesystem utility namespace.
 
 use std::convert::Infallible;
-use std::fs::{self, File};
+use std::fs::{
+    self,
+    File,
+};
 use std::io::Result;
 use std::path::Path;
 
 use crate::{
-    FileReadOptions, FileWriteOptions, LocalAtomicWriteError, LocalCopyDirError,
-    LocalCopyDirOptions, LocalCopyDirStats, LocalFileReader, LocalFileWriter,
+    FileReadOptions,
+    FileWriteOptions,
+    LocalAtomicWriteError,
+    LocalCopyDirError,
+    LocalCopyDirOptions,
+    LocalCopyDirStats,
+    LocalFileReader,
+    LocalFileWriter,
 };
 
 use super::internal::{
-    DEFAULT_TEMP_FILE_RETRIES as DEFAULT_TEMP_FILE_RETRIES_VALUE, atomic_write_bytes_path,
-    atomic_write_with_path, clean_dir_path, copy_dir_all_with_paths, dir_size_path,
-    ensure_dir_path, ensure_parent_path, open_reader_path, open_writer_path, remove_any_path,
+    DEFAULT_TEMP_FILE_RETRIES as DEFAULT_TEMP_FILE_RETRIES_VALUE,
+    atomic_write_bytes_path,
+    atomic_write_with_path,
+    clean_dir_path,
+    copy_dir_all_with_paths,
+    dir_size_path,
+    ensure_dir_path,
+    ensure_parent_path,
+    open_reader_path,
+    open_writer_path,
+    remove_any_path,
 };
 
 /// File-system utility namespace.
@@ -41,12 +58,14 @@ use super::internal::{
 /// # Ok::<(), Box<dyn std::error::Error>>(())
 /// ```
 pub struct LocalFiles {
+    /// Uninhabited field that prevents construction of this namespace type.
     _private: Infallible,
 }
 
 impl LocalFiles {
     /// Default number of attempts used when creating a random temporary entry.
-    pub const DEFAULT_TEMP_FILE_RETRIES: usize = DEFAULT_TEMP_FILE_RETRIES_VALUE;
+    pub const DEFAULT_TEMP_FILE_RETRIES: usize =
+        DEFAULT_TEMP_FILE_RETRIES_VALUE;
 
     /// Tests whether a path exists.
     ///
@@ -121,7 +140,10 @@ impl LocalFiles {
     /// Returns an I/O error when `path` cannot be inspected or opened, or when
     /// the target is not a file.
     #[inline(always)]
-    pub fn open_reader<P>(path: P, options: FileReadOptions) -> Result<LocalFileReader>
+    pub fn open_reader<P>(
+        path: P,
+        options: FileReadOptions,
+    ) -> Result<LocalFileReader>
     where
         P: AsRef<Path>,
     {
@@ -145,7 +167,10 @@ impl LocalFiles {
     /// Returns an I/O error when parent directories cannot be created or the
     /// file cannot be opened with the requested mode.
     #[inline(always)]
-    pub fn open_writer<P>(path: P, options: FileWriteOptions) -> Result<LocalFileWriter>
+    pub fn open_writer<P>(
+        path: P,
+        options: FileWriteOptions,
+    ) -> Result<LocalFileWriter>
     where
         P: AsRef<Path>,
     {
@@ -253,10 +278,11 @@ impl LocalFiles {
     /// Destinations inside a source tree and cycles introduced by followed
     /// symbolic links are rejected.
     ///
-    /// When overwrite is enabled and a source file conflicts with a destination
-    /// directory, the source is staged successfully before that directory is
-    /// removed. The final remove-and-move sequence is not atomic: a commit
-    /// failure after removal can leave the destination absent.
+    /// When [`LocalCopyTypeConflictPolicy::Replace`](crate::LocalCopyTypeConflictPolicy::Replace)
+    /// is enabled and a source file conflicts with a destination directory, the
+    /// source is staged successfully before that directory is removed. The
+    /// final remove-and-move sequence is not atomic: a commit failure after
+    /// removal can leave the destination absent.
     ///
     /// This operation is not a tree-level transaction. If it fails,
     /// directories and files created or committed before the failure remain in
@@ -299,10 +325,15 @@ impl LocalFiles {
     /// semantics provide that behavior.
     ///
     /// Before replacement, every error leaves the existing destination intact
-    /// and removes the temporary file. After replacement, a parent-directory
-    /// sync failure is reported even though the new destination is committed.
-    /// This operation is not a multi-file transaction and does not coordinate
-    /// concurrent writers.
+    /// and attempts to remove the temporary file. Staging cleanup is
+    /// best-effort because its removal error cannot replace the operation's
+    /// structured error, so an uncommitted staging path may remain when cleanup
+    /// itself fails. After replacement, a parent-directory sync failure is
+    /// reported even though the new destination is committed. This operation
+    /// is not a multi-file transaction and does not coordinate concurrent
+    /// writers. On Windows, replacement does not add a verbatim-path prefix or
+    /// convert relative paths to absolute paths; native path-length and
+    /// relative/verbatim-path semantics apply.
     ///
     /// # Examples
     /// ```
@@ -326,7 +357,10 @@ impl LocalFiles {
     /// Returns [`LocalAtomicWriteError`] with the failed stage, temporary path,
     /// commit state, and native I/O source error.
     #[inline(always)]
-    pub fn atomic_write<P, B>(path: P, bytes: B) -> std::result::Result<(), LocalAtomicWriteError>
+    pub fn atomic_write<P, B>(
+        path: P,
+        bytes: B,
+    ) -> std::result::Result<(), LocalAtomicWriteError>
     where
         P: AsRef<Path>,
         B: AsRef<[u8]>,
@@ -339,8 +373,10 @@ impl LocalFiles {
     /// The callback receives the same-directory temporary file. After it
     /// returns successfully, the file is flushed, synced, closed, and moved
     /// over the destination before the parent directory is synced. An
-    /// uncommitted temporary file is removed both on ordinary errors and while
-    /// unwinding from a callback panic.
+    /// uncommitted temporary file is closed and best-effort removed both on
+    /// ordinary errors and while unwinding from a callback panic. A cleanup
+    /// failure cannot replace the original error or panic and may therefore
+    /// leave the staging path behind.
     ///
     /// # Parameters
     /// - `path`: Destination path.
@@ -352,8 +388,9 @@ impl LocalFiles {
     /// commit state, and native I/O source error.
     ///
     /// # Panics
-    /// Propagates a panic raised by `write` after closing and removing the
-    /// uncommitted temporary file.
+    /// Propagates a panic raised by `write` after closing and attempting to
+    /// remove the uncommitted temporary file. Cleanup is best-effort, so the
+    /// staging path may remain if removal fails during unwinding.
     #[inline(always)]
     pub fn atomic_write_with<P, F>(
         path: P,
@@ -367,7 +404,9 @@ impl LocalFiles {
         atomic_write_with_path(path.as_ref(), &mut |file| {
             write
                 .take()
-                .expect("atomic write callback must only be invoked once")(file)
+                .expect("atomic write callback must only be invoked once")(
+                file
+            )
         })
     }
 }

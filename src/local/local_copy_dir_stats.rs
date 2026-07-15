@@ -5,6 +5,8 @@
 //
 //    Licensed under the Apache License, Version 2.0.
 // =============================================================================
+//! Recursive directory copy statistics.
+
 /// Statistics reported by recursive directory copy operations.
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
 pub struct LocalCopyDirStats {

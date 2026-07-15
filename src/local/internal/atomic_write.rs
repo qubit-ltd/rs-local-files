@@ -7,16 +7,39 @@
 // =============================================================================
 //! Private durable atomic-write pipeline.
 
-use std::fs::{self, File};
-use std::io::{ErrorKind, Result, Write};
-use std::path::{Path, PathBuf};
+use std::fs::{
+    self,
+    File,
+};
+use std::io::{
+    ErrorKind,
+    Result,
+    Write,
+};
+use std::path::{
+    Path,
+    PathBuf,
+};
 
-use crate::{LocalAtomicWriteError, LocalAtomicWriteStage};
+use crate::{
+    LocalAtomicWriteError,
+    LocalAtomicWriteStage,
+};
 
-use super::file_move::{parent_dir_for, replace_file, sync_parent_dir};
-use super::path_operations::{add_path_context, ensure_parent_path};
+use super::file_move::{
+    parent_dir_for,
+    replace_file,
+    sync_parent_dir,
+};
+use super::path_operations::{
+    add_path_context,
+    ensure_parent_path,
+};
 use super::temp_entry::create_temp_file_in_dir;
-use super::{DEFAULT_TEMP_FILE_RETRIES, StagedFile};
+use super::{
+    DEFAULT_TEMP_FILE_RETRIES,
+    StagedFile,
+};
 
 /// Default suffix used by atomic-write temporary files.
 const ATOMIC_WRITE_TEMP_SUFFIX: &str = ".tmp";
@@ -49,7 +72,13 @@ fn with_atomic_context<T>(
     committed: bool,
 ) -> std::result::Result<T, LocalAtomicWriteError> {
     result.map_err(|source| {
-        LocalAtomicWriteError::new(stage, path.to_path_buf(), temporary_path, committed, source)
+        LocalAtomicWriteError::new(
+            stage,
+            path.to_path_buf(),
+            temporary_path,
+            committed,
+            source,
+        )
     })
 }
 
@@ -164,7 +193,9 @@ fn existing_file_permissions(path: &Path) -> Result<Option<fs::Permissions>> {
         Ok(metadata) if metadata.is_file() => Ok(Some(metadata.permissions())),
         Ok(_) => Ok(None),
         Err(error) if error.kind() == ErrorKind::NotFound => Ok(None),
-        Err(error) => Err(add_path_context(error, "read destination metadata", path)),
+        Err(error) => {
+            Err(add_path_context(error, "read destination metadata", path))
+        }
     }
 }
 

@@ -8,7 +8,12 @@
 //! Recoverable temporary-resource persistence errors.
 
 use std::error::Error;
-use std::fmt::{Debug, Display, Formatter, Result as FmtResult};
+use std::fmt::{
+    Debug,
+    Display,
+    Formatter,
+    Result as FmtResult,
+};
 use std::io;
 
 /// Persistence error that returns ownership of the temporary resource.
@@ -29,6 +34,7 @@ impl<T> LocalPersistError<T> {
     ///
     /// # Returns
     /// New persistence error owning both values.
+    #[inline]
     pub(crate) fn new(error: io::Error, resource: T) -> Self {
         Self { error, resource }
     }
@@ -37,7 +43,7 @@ impl<T> LocalPersistError<T> {
     ///
     /// # Returns
     /// Error kind reported by the retained native error.
-    #[inline]
+    #[inline(always)]
     pub fn kind(&self) -> io::ErrorKind {
         self.error.kind()
     }
@@ -46,7 +52,7 @@ impl<T> LocalPersistError<T> {
     ///
     /// # Returns
     /// Native I/O error followed by the retained temporary resource.
-    #[inline]
+    #[inline(always)]
     pub fn into_parts(self) -> (io::Error, T) {
         (self.error, self.resource)
     }
@@ -68,6 +74,7 @@ where
     T: Debug,
 {
     /// Returns the retained native I/O error.
+    #[inline(always)]
     fn source(&self) -> Option<&(dyn Error + 'static)> {
         Some(&self.error)
     }

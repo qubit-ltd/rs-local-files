@@ -7,19 +7,47 @@
 // =============================================================================
 //! Private recursive directory-copy pipeline.
 
-use std::fs::{self, File};
-use std::io::{self, Error, ErrorKind, Result};
-use std::path::{Path, PathBuf};
-
-use crate::{
-    LocalCopyConflictPolicy, LocalCopyDirError, LocalCopyDirOptions, LocalCopyDirStage,
-    LocalCopyDirStats, LocalCopyTypeConflictPolicy,
+use std::fs::{
+    self,
+    File,
+};
+use std::io::{
+    self,
+    Error,
+    ErrorKind,
+    Result,
+};
+use std::path::{
+    Path,
+    PathBuf,
 };
 
-use super::file_move::{move_file_without_replacing, parent_dir_for, replace_file};
-use super::path_operations::{canonicalize_existing_prefix, remove_any_path};
-use super::temp_entry::{create_private_dir, create_temp_file_in_dir};
-use super::{DEFAULT_TEMP_FILE_RETRIES, StagedFile};
+#[cfg(windows)]
+use std::os::windows::fs::FileTypeExt;
+
+use crate::{
+    LocalCopyConflictPolicy,
+    LocalCopyDirError,
+    LocalCopyDirOptions,
+    LocalCopyDirStage,
+    LocalCopyDirStats,
+    LocalCopyTypeConflictPolicy,
+};
+
+use super::file_move::{
+    move_file_without_replacing,
+    parent_dir_for,
+    replace_file,
+};
+use super::path_operations::canonicalize_existing_prefix;
+use super::temp_entry::{
+    create_private_dir,
+    create_temp_file_in_dir,
+};
+use super::{
+    DEFAULT_TEMP_FILE_RETRIES,
+    StagedFile,
+};
 
 /// Prefix used by recursive-copy staging files.
 const COPY_FILE_TEMP_PREFIX: &str = ".copy-file-";
@@ -48,7 +76,13 @@ fn copy_dir_error(
     stats: &LocalCopyDirStats,
     source: Error,
 ) -> LocalCopyDirError {
-    LocalCopyDirError::new(stage, src.to_path_buf(), dst.to_path_buf(), *stats, source)
+    LocalCopyDirError::new(
+        stage,
+        src.to_path_buf(),
+        dst.to_path_buf(),
+        *stats,
+        source,
+    )
 }
 
 /// Adds recursive-copy context to a native I/O result.
@@ -130,7 +164,11 @@ fn copy_dir_recursive(
     stats: &mut LocalCopyDirStats,
 ) -> CopyDirResult<()> {
     let (source_metadata, canonical_source) = with_copy_context(
-        inspect_copy_source_directory(src, options.follow_symlinks, destination_root),
+        inspect_copy_source_directory(
+            src,
+            options.follow_symlinks,
+            destination_root,
+        ),
         LocalCopyDirStage::InspectSource,
         src,
         dst,
@@ -203,7 +241,12 @@ fn copy_dir_recursive(
                     stats,
                 )?;
             } else if file_type.is_file() {
-                copy_file_with_options(&source_path, &destination_path, options, stats)?;
+                copy_file_with_options(
+                    &source_path,
+                    &destination_path,
+                    options,
+                    stats,
+                )?;
             } else {
                 return Err(copy_dir_error(
                     LocalCopyDirStage::InspectSourceEntry,
@@ -212,7 +255,10 @@ fn copy_dir_recursive(
                     stats,
                     Error::new(
                         ErrorKind::Unsupported,
-                        format!("unsupported source file type: {}", source_path.display()),
+                        format!(
+                            "unsupported source file type: {}",
+                            source_path.display()
+                        ),
                     ),
                 ));
             }
@@ -271,7 +317,14 @@ fn copy_symlink_source(
         stats,
     )?;
     if target_metadata.is_dir() {
-        copy_dir_recursive(src, dst, options, destination_root, active_sources, stats)
+        copy_dir_recursive(
+            src,
+            dst,
+            options,
+            destination_root,
+            active_sources,
+            stats,
+        )
     } else if target_metadata.is_file() {
         copy_file_with_options(src, dst, options, stats)
     } else {
@@ -282,7 +335,10 @@ fn copy_symlink_source(
             stats,
             Error::new(
                 ErrorKind::Unsupported,
-                format!("unsupported symbolic link target type: {}", src.display()),
+                format!(
+                    "unsupported symbolic link target type: {}",
+                    src.display()
+                ),
             ),
         ))
     }
@@ -350,16 +406,94 @@ fn ensure_copy_destination_dir(
                     ));
                 }
                 LocalCopyTypeConflictPolicy::Replace => {
-                    remove_any_path(dst)?;
+                    if !remove_destination_non_directory_if_unchanged(dst)? {
+                        return Ok(());
+                    }
                 }
             }
         }
         Err(error) if error.kind() == ErrorKind::NotFound => {}
         Err(error) => return Err(error),
     }
-    create_private_dir(dst)?;
-    stats.directories = stats.directories.saturating_add(1);
-    Ok(())
+    match create_private_dir(dst) {
+        Ok(()) => {
+            stats.directories = stats.directories.saturating_add(1);
+            Ok(())
+        }
+        Err(error) if error.kind() == ErrorKind::AlreadyExists => {
+            let metadata = fs::symlink_metadata(dst)?;
+            if metadata.is_dir() && !metadata.file_type().is_symlink() {
+                Ok(())
+            } else {
+                Err(error)
+            }
+        }
+        Err(error) => Err(error),
+    }
+}
+
+/// Removes a non-directory destination only while its observed type is stable.
+///
+/// A real directory that appears after the caller's earlier inspection is
+/// retained and treated as a mergeable directory destination. File-specific
+/// removal APIs prevent a concurrently substituted real directory from being
+/// recursively deleted.
+///
+/// # Arguments
+///
+/// * `dst` - Destination previously observed as a non-directory entry.
+///
+/// # Returns
+///
+/// `true` when the path is absent after this call and a directory still needs
+/// to be created; `false` when `dst` is now a real directory.
+///
+/// # Errors
+///
+/// Returns the I/O error reported while inspecting or removing `dst`.
+fn remove_destination_non_directory_if_unchanged(dst: &Path) -> Result<bool> {
+    let metadata = match fs::symlink_metadata(dst) {
+        Ok(metadata) => metadata,
+        Err(error) if error.kind() == ErrorKind::NotFound => return Ok(true),
+        Err(error) => return Err(error),
+    };
+    let file_type = metadata.file_type();
+    if metadata.is_dir() && !file_type.is_symlink() {
+        return Ok(false);
+    }
+    #[cfg(windows)]
+    if file_type.is_symlink_dir() {
+        fs::remove_dir(dst)?;
+        return Ok(true);
+    }
+    fs::remove_file(dst)?;
+    Ok(true)
+}
+
+/// Removes a directory destination only while it remains a real directory.
+///
+/// A non-directory entry that appears after the caller's earlier inspection is
+/// retained for the file-conflict policy to handle during commit.
+///
+/// # Arguments
+///
+/// * `dst` - Destination previously observed as a real directory.
+///
+/// # Errors
+///
+/// Returns the I/O error reported while inspecting or recursively removing the
+/// directory.
+fn remove_destination_directory_if_unchanged(dst: &Path) -> Result<()> {
+    match fs::symlink_metadata(dst) {
+        Ok(metadata)
+            if metadata.is_dir() && !metadata.file_type().is_symlink() =>
+        {
+            fs::remove_dir_all(dst)
+        }
+        Ok(_) => Ok(()),
+        Err(error) if error.kind() == ErrorKind::NotFound => Ok(()),
+        Err(error) => Err(error),
+    }
 }
 
 /// Copies one regular source file into a destination path.
@@ -398,7 +532,9 @@ fn copy_file_with_options(
         stats,
     )?;
     let destination_directory_requires_removal = match destination_metadata {
-        Some(metadata) if metadata.is_dir() && !metadata.file_type().is_symlink() => {
+        Some(metadata)
+            if metadata.is_dir() && !metadata.file_type().is_symlink() =>
+        {
             match options.type_conflict {
                 LocalCopyTypeConflictPolicy::Fail => {
                     return Err(copy_dir_error(
@@ -427,7 +563,10 @@ fn copy_file_with_options(
                     stats,
                     Error::new(
                         ErrorKind::AlreadyExists,
-                        format!("destination already exists: {}", dst.display()),
+                        format!(
+                            "destination already exists: {}",
+                            dst.display()
+                        ),
                     ),
                 ));
             }
@@ -454,8 +593,9 @@ fn copy_file_with_options(
     )?;
     let mut staged_file = StagedFile::new(temp_path, temp_file);
     let copied = with_copy_context(
-        File::open(src)
-            .and_then(|mut source_file| io::copy(&mut source_file, staged_file.file_mut())),
+        File::open(src).and_then(|mut source_file| {
+            io::copy(&mut source_file, staged_file.file_mut())
+        }),
         LocalCopyDirStage::CopyFileContents,
         src,
         dst,
@@ -478,12 +618,14 @@ fn copy_file_with_options(
 
     if destination_directory_requires_removal {
         // Stage the source before deleting a conflicting directory so read
-        // failures cannot destroy the existing destination. Removing a
-        // directory and then moving a file cannot be one atomic
-        // filesystem operation, so commit failure after this point may
-        // still leave the destination absent.
+        // failures cannot destroy the existing destination. Re-check the
+        // entry type and use directory-only removal so a racing file is left
+        // for the configured file-conflict policy. Removing a directory and
+        // then moving a file cannot be one atomic filesystem operation, so
+        // commit failure after this point may still leave the destination
+        // absent.
         with_copy_context(
-            remove_any_path(dst),
+            remove_destination_directory_if_unchanged(dst),
             LocalCopyDirStage::PrepareDestination,
             src,
             dst,
@@ -495,7 +637,9 @@ fn copy_file_with_options(
         LocalCopyConflictPolicy::Fail | LocalCopyConflictPolicy::Skip => {
             move_file_without_replacing(staged_file.path(), dst)
         }
-        LocalCopyConflictPolicy::Overwrite => replace_file(staged_file.path(), dst),
+        LocalCopyConflictPolicy::Overwrite => {
+            replace_file(staged_file.path(), dst)
+        }
     };
     match commit_result {
         Ok(()) => {}
@@ -507,7 +651,13 @@ fn copy_file_with_options(
             return Ok(());
         }
         Err(error) => {
-            return with_copy_context(Err(error), LocalCopyDirStage::CommitFile, src, dst, stats);
+            return with_copy_context(
+                Err(error),
+                LocalCopyDirStage::CommitFile,
+                src,
+                dst,
+                stats,
+            );
         }
     }
     staged_file.disarm();
@@ -529,7 +679,10 @@ fn copy_file_with_options(
 /// # Errors
 /// Returns an I/O error when metadata cannot be loaded or a symbolic link is
 /// encountered while `follow_symlinks` is `false`.
-fn metadata_for_copy_source(path: &Path, follow_symlinks: bool) -> Result<fs::Metadata> {
+fn metadata_for_copy_source(
+    path: &Path,
+    follow_symlinks: bool,
+) -> Result<fs::Metadata> {
     let metadata = fs::symlink_metadata(path)?;
     if metadata.file_type().is_symlink() {
         if follow_symlinks {
@@ -561,7 +714,9 @@ fn reject_destination_inside_source(
     canonical_source: &Path,
     destination: &Path,
 ) -> Result<()> {
-    if destination == canonical_source || destination.starts_with(canonical_source) {
+    if destination == canonical_source
+        || destination.starts_with(canonical_source)
+    {
         return Err(Error::new(
             ErrorKind::InvalidInput,
             format!(

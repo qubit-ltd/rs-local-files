@@ -5,11 +5,23 @@
 //
 //    Licensed under the Apache License, Version 2.0.
 // =============================================================================
+//! Random, portable, and lexical file-name helpers.
+
 use std::convert::Infallible;
 use std::ffi::OsStr;
-use std::io::{Error, ErrorKind, Result};
-use std::path::{Component, Path};
-use std::time::{SystemTime, UNIX_EPOCH};
+use std::io::{
+    Error,
+    ErrorKind,
+    Result,
+};
+use std::path::{
+    Component,
+    Path,
+};
+use std::time::{
+    SystemTime,
+    UNIX_EPOCH,
+};
 
 const MAX_PORTABLE_FILE_NAME_BYTES: usize = 255;
 const RANDOM_NAME_BYTES: usize = 16;
@@ -35,6 +47,7 @@ const RANDOM_NAME_BYTES: usize = 16;
 /// assert!(LocalFilenames::has_extension(path, ".gz"));
 /// ```
 pub struct LocalFilenames {
+    /// Uninhabited field that prevents construction of this namespace type.
     _private: Infallible,
 }
 
@@ -53,7 +66,7 @@ impl LocalFilenames {
     ///
     /// # Panics
     /// Panics if the operating system random source cannot provide bytes.
-    #[inline]
+    #[inline(always)]
     pub fn random() -> String {
         Self::try_random().expect("failed to build random file name")
     }
@@ -78,7 +91,8 @@ impl LocalFilenames {
     /// the operating system random source cannot provide bytes.
     #[inline]
     pub fn random_with(prefix: Option<&str>, suffix: Option<&str>) -> String {
-        Self::try_random_with(prefix, suffix).expect("failed to build random file name")
+        Self::try_random_with(prefix, suffix)
+            .expect("failed to build random file name")
     }
 
     /// Tries to build a random file-name component using the default prefix.
@@ -89,7 +103,7 @@ impl LocalFilenames {
     /// # Errors
     /// Returns [`ErrorKind::Other`] when the operating system random source
     /// cannot provide bytes.
-    #[inline]
+    #[inline(always)]
     pub fn try_random() -> Result<String> {
         Self::try_random_with(None, None)
     }
@@ -113,7 +127,10 @@ impl LocalFilenames {
     /// Returns [`ErrorKind::InvalidInput`] when `prefix` or `suffix` is not a
     /// safe file-name fragment. Returns [`ErrorKind::Other`] when the operating
     /// system random source cannot provide bytes.
-    pub fn try_random_with(prefix: Option<&str>, suffix: Option<&str>) -> Result<String> {
+    pub fn try_random_with(
+        prefix: Option<&str>,
+        suffix: Option<&str>,
+    ) -> Result<String> {
         let prefix = prefix.unwrap_or(Self::DEFAULT_RANDOM_PREFIX);
         let suffix = suffix.unwrap_or("");
         validate_file_name_fragment("prefix", prefix)?;
@@ -156,7 +173,6 @@ impl LocalFilenames {
     /// # Errors
     /// Returns [`ErrorKind::InvalidInput`] when `name` is not a portable
     /// file-name component.
-    #[inline]
     pub fn validate_portable_file_name(name: &str) -> Result<()> {
         if name.is_empty() {
             return Err(Error::new(
@@ -173,7 +189,9 @@ impl LocalFilenames {
         if name.len() > MAX_PORTABLE_FILE_NAME_BYTES {
             return Err(Error::new(
                 ErrorKind::InvalidInput,
-                format!("portable file name exceeds {MAX_PORTABLE_FILE_NAME_BYTES} UTF-8 bytes"),
+                format!(
+                    "portable file name exceeds {MAX_PORTABLE_FILE_NAME_BYTES} UTF-8 bytes"
+                ),
             ));
         }
         if name.ends_with([' ', '.']) {
@@ -191,7 +209,9 @@ impl LocalFilenames {
         }) {
             return Err(Error::new(
                 ErrorKind::InvalidInput,
-                format!("portable file name contains forbidden character {character:?}"),
+                format!(
+                    "portable file name contains forbidden character {character:?}"
+                ),
             ));
         }
         if is_windows_reserved_file_name(name) {
@@ -211,7 +231,7 @@ impl LocalFilenames {
     /// # Returns
     /// The final file-name component as `&str`, or `None` when `path` has no
     /// file-name component or when the component is not valid UTF-8.
-    #[inline]
+    #[inline(always)]
     pub fn file_name(path: &Path) -> Option<&str> {
         path.file_name().and_then(OsStr::to_str)
     }
@@ -227,7 +247,7 @@ impl LocalFilenames {
     /// # Returns
     /// The file stem as `&str`, or `None` when there is no stem or when the
     /// stem is not valid UTF-8.
-    #[inline]
+    #[inline(always)]
     pub fn file_stem(path: &Path) -> Option<&str> {
         path.file_stem().and_then(OsStr::to_str)
     }
@@ -243,7 +263,7 @@ impl LocalFilenames {
     /// # Returns
     /// The file prefix as `&str`, or `None` when there is no prefix or when the
     /// prefix is not valid UTF-8.
-    #[inline]
+    #[inline(always)]
     pub fn file_prefix(path: &Path) -> Option<&str> {
         path.file_prefix().and_then(OsStr::to_str)
     }
@@ -259,7 +279,7 @@ impl LocalFilenames {
     /// # Returns
     /// The extension without the leading dot, or `None` when there is no
     /// extension or when the extension is not valid UTF-8.
-    #[inline]
+    #[inline(always)]
     pub fn extension(path: &Path) -> Option<&str> {
         path.extension().and_then(OsStr::to_str)
     }
@@ -314,9 +334,14 @@ impl LocalFilenames {
     /// # Returns
     /// `true` when `path` has `extension` as its final extension ignoring ASCII
     /// case.
-    pub fn has_extension_ignore_ascii_case(path: &Path, extension: &str) -> bool {
+    pub fn has_extension_ignore_ascii_case(
+        path: &Path,
+        extension: &str,
+    ) -> bool {
         Self::extension(path)
-            .map(|actual| actual.eq_ignore_ascii_case(normalize_extension(extension)))
+            .map(|actual| {
+                actual.eq_ignore_ascii_case(normalize_extension(extension))
+            })
             .unwrap_or(false)
     }
 
@@ -332,7 +357,7 @@ impl LocalFilenames {
     /// # Returns
     /// The substring after the final slash or backslash. If no separator is
     /// present, the original string is returned.
-    #[inline]
+    #[inline(always)]
     pub fn file_name_from_path(path: &str) -> &str {
         match path.rfind(['/', '\\']) {
             Some(index) => &path[index + 1..],
@@ -375,6 +400,7 @@ impl LocalFilenames {
 ///
 /// # Returns
 /// The extension without one leading dot.
+#[inline(always)]
 fn normalize_extension(extension: &str) -> &str {
     extension.strip_prefix('.').unwrap_or(extension)
 }
@@ -437,6 +463,7 @@ fn is_safe_decoded_url_file_name(name: &str) -> bool {
 ///
 /// # Returns
 /// An [`ErrorKind::InvalidInput`] error.
+#[inline]
 fn invalid_file_name_fragment_error(role: &str, reason: &str) -> Error {
     Error::new(
         ErrorKind::InvalidInput,
@@ -449,6 +476,7 @@ fn invalid_file_name_fragment_error(role: &str, reason: &str) -> Error {
 /// # Returns
 /// Nanoseconds since the Unix epoch, or zero if the system clock is earlier
 /// than the epoch.
+#[inline]
 fn unix_timestamp_nanos() -> u128 {
     SystemTime::now()
         .duration_since(UNIX_EPOCH)
@@ -478,6 +506,7 @@ fn try_random_hex() -> Result<String> {
 /// # Errors
 /// Returns [`ErrorKind::Other`] if the operating system random source cannot
 /// provide bytes.
+#[inline]
 fn fill_random_bytes(bytes: &mut [u8]) -> Result<()> {
     getrandom::fill(bytes).map_err(Error::other)
 }
@@ -523,12 +552,14 @@ fn is_windows_reserved_file_name(name: &str) -> bool {
         return true;
     }
 
-    let Some((suffix_index, suffix)) = base_name.char_indices().next_back() else {
+    let Some((suffix_index, suffix)) = base_name.char_indices().next_back()
+    else {
         return false;
     };
     let prefix = &base_name[..suffix_index];
     let reserved_digit = matches!(suffix, '1'..='9' | '¹' | '²' | '³');
-    (prefix.eq_ignore_ascii_case("COM") || prefix.eq_ignore_ascii_case("LPT")) && reserved_digit
+    (prefix.eq_ignore_ascii_case("COM") || prefix.eq_ignore_ascii_case("LPT"))
+        && reserved_digit
 }
 
 /// Removes query and fragment suffixes from a URL-like string.
@@ -539,6 +570,7 @@ fn is_windows_reserved_file_name(name: &str) -> bool {
 /// # Returns
 /// The prefix before the first `?` or `#`, or the full input when neither is
 /// present.
+#[inline]
 fn strip_query_and_fragment(url: &str) -> &str {
     match (url.find('?'), url.find('#')) {
         (Some(query), Some(fragment)) => &url[..query.min(fragment)],
@@ -587,6 +619,7 @@ fn percent_decode_utf8(value: &str) -> Option<String> {
 /// # Returns
 /// The hexadecimal value, or `None` when `byte` is not an ASCII hexadecimal
 /// digit.
+#[inline]
 fn hex_value(byte: u8) -> Option<u8> {
     match byte {
         b'0'..=b'9' => Some(byte - b'0'),

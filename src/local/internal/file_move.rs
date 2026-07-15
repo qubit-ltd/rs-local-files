@@ -6,6 +6,11 @@
 //    Licensed under the Apache License, Version 2.0.
 // =============================================================================
 //! Private platform-specific file moves and parent synchronization.
+//!
+//! Windows paths are passed to native APIs as their existing UTF-16 spelling
+//! plus a terminating NUL. This module rejects interior NULs, but does not add
+//! a verbatim-path prefix, convert relative paths to absolute paths, or
+//! otherwise change platform path-length and path-resolution semantics.
 
 #[cfg(unix)]
 use std::ffi::CString;
@@ -14,7 +19,11 @@ use std::ffi::c_void;
 #[cfg(not(windows))]
 use std::fs;
 use std::fs::File;
-use std::io::{Error, ErrorKind, Result};
+use std::io::{
+    Error,
+    ErrorKind,
+    Result,
+};
 use std::path::Path;
 
 #[cfg(unix)]
@@ -22,7 +31,10 @@ use std::os::unix::ffi::OsStrExt;
 #[cfg(windows)]
 use std::os::windows::ffi::OsStrExt;
 #[cfg(windows)]
-use std::os::windows::io::{FromRawHandle, RawHandle};
+use std::os::windows::io::{
+    FromRawHandle,
+    RawHandle,
+};
 
 #[cfg(windows)]
 const MOVEFILE_REPLACE_EXISTING: u32 = 0x0000_0001;
@@ -56,7 +68,11 @@ unsafe extern "C" {
 
 #[cfg(windows)]
 unsafe extern "system" {
-    fn MoveFileExW(existing_file_name: *const u16, new_file_name: *const u16, flags: u32) -> i32;
+    fn MoveFileExW(
+        existing_file_name: *const u16,
+        new_file_name: *const u16,
+        flags: u32,
+    ) -> i32;
 
     fn CreateFileW(
         file_name: *const u16,
@@ -94,6 +110,9 @@ pub(crate) fn replace_file(source: &Path, destination: &Path) -> Result<()> {
 pub(crate) fn replace_file(source: &Path, destination: &Path) -> Result<()> {
     let source = wide_path(source)?;
     let destination = wide_path(destination)?;
+    // SAFETY: both UTF-16 buffers are NUL-terminated, contain no interior NUL,
+    // and remain alive for the call. The flags are documented MoveFileExW
+    // values and no aliasing or retained-pointer contract is involved.
     let result = unsafe {
         MoveFileExW(
             source.as_ptr(),
@@ -117,10 +136,18 @@ pub(crate) fn replace_file(source: &Path, destination: &Path) -> Result<()> {
 /// # Errors
 /// Returns the platform I/O error reported while moving the path.
 #[cfg(target_os = "macos")]
-pub(crate) fn move_path_without_replacing(source: &Path, destination: &Path) -> Result<()> {
+pub(crate) fn move_path_without_replacing(
+    source: &Path,
+    destination: &Path,
+) -> Result<()> {
     let source = c_path(source)?;
     let destination = c_path(destination)?;
-    let result = unsafe { renamex_np(source.as_ptr(), destination.as_ptr(), RENAME_EXCL) };
+    // SAFETY: both CString buffers are NUL-terminated and remain alive for the
+    // call. `RENAME_EXCL` is a valid renamex_np flag and the function does not
+    // retain either pointer.
+    let result = unsafe {
+        renamex_np(source.as_ptr(), destination.as_ptr(), RENAME_EXCL)
+    };
     if result == 0 {
         Ok(())
     } else {
@@ -137,9 +164,15 @@ pub(crate) fn move_path_without_replacing(source: &Path, destination: &Path) -> 
 /// # Errors
 /// Returns the platform I/O error reported while moving the path.
 #[cfg(target_os = "linux")]
-pub(crate) fn move_path_without_replacing(source: &Path, destination: &Path) -> Result<()> {
+pub(crate) fn move_path_without_replacing(
+    source: &Path,
+    destination: &Path,
+) -> Result<()> {
     let source = c_path(source)?;
     let destination = c_path(destination)?;
+    // SAFETY: both CString pointers are valid and live for the syscall;
+    // AT_FDCWD makes each path relative to the process current directory, and
+    // RENAME_NOREPLACE is a valid renameat2 flag on Linux.
     let result = unsafe {
         libc::syscall(
             libc::SYS_renameat2,
@@ -166,9 +199,15 @@ pub(crate) fn move_path_without_replacing(source: &Path, destination: &Path) -> 
 /// # Errors
 /// Returns the platform I/O error reported while moving the path.
 #[cfg(windows)]
-pub(crate) fn move_path_without_replacing(source: &Path, destination: &Path) -> Result<()> {
+pub(crate) fn move_path_without_replacing(
+    source: &Path,
+    destination: &Path,
+) -> Result<()> {
     let source = wide_path(source)?;
     let destination = wide_path(destination)?;
+    // SAFETY: both UTF-16 buffers are NUL-terminated, contain no interior NUL,
+    // and remain alive for the call. MOVEFILE_WRITE_THROUGH is a documented
+    // MoveFileExW flag and the function does not retain either pointer.
     let result = unsafe {
         MoveFileExW(
             source.as_ptr(),
@@ -192,7 +231,10 @@ pub(crate) fn move_path_without_replacing(source: &Path, destination: &Path) -> 
 /// # Errors
 /// Returns the platform I/O error reported while moving the file.
 #[cfg(any(target_os = "linux", target_os = "macos", windows))]
-pub(crate) fn move_file_without_replacing(source: &Path, destination: &Path) -> Result<()> {
+pub(crate) fn move_file_without_replacing(
+    source: &Path,
+    destination: &Path,
+) -> Result<()> {
     move_path_without_replacing(source, destination)
 }
 
@@ -205,7 +247,10 @@ pub(crate) fn move_file_without_replacing(source: &Path, destination: &Path) -> 
 /// # Errors
 /// Returns the platform I/O error reported while moving the directory.
 #[cfg(any(target_os = "linux", target_os = "macos", windows))]
-pub(crate) fn move_directory_without_replacing(source: &Path, destination: &Path) -> Result<()> {
+pub(crate) fn move_directory_without_replacing(
+    source: &Path,
+    destination: &Path,
+) -> Result<()> {
     move_path_without_replacing(source, destination)
 }
 
@@ -219,7 +264,10 @@ pub(crate) fn move_directory_without_replacing(source: &Path, destination: &Path
 /// Always returns [`ErrorKind::Unsupported`] because this target has no native
 /// no-replace directory move implementation.
 #[cfg(not(any(target_os = "linux", target_os = "macos", windows)))]
-pub(crate) fn move_directory_without_replacing(source: &Path, destination: &Path) -> Result<()> {
+pub(crate) fn move_directory_without_replacing(
+    source: &Path,
+    destination: &Path,
+) -> Result<()> {
     Err(Error::new(
         ErrorKind::Unsupported,
         format!(
@@ -244,7 +292,10 @@ pub(crate) fn move_directory_without_replacing(source: &Path, destination: &Path
 /// Returns the platform I/O error reported while linking, unlinking, or
 /// rolling back the destination link after an unlink failure.
 #[cfg(all(unix, not(any(target_os = "linux", target_os = "macos"))))]
-pub(crate) fn move_file_without_replacing(source: &Path, destination: &Path) -> Result<()> {
+pub(crate) fn move_file_without_replacing(
+    source: &Path,
+    destination: &Path,
+) -> Result<()> {
     fs::hard_link(source, destination)?;
     match fs::remove_file(source) {
         Ok(()) => Ok(()),
@@ -308,6 +359,9 @@ pub(super) fn sync_parent_dir(path: &Path) -> Result<()> {
 #[cfg(windows)]
 pub(super) fn sync_parent_dir(path: &Path) -> Result<()> {
     let parent = wide_path(parent_dir_for(path))?;
+    // SAFETY: `parent` is a live NUL-terminated UTF-16 buffer without interior
+    // NULs; the remaining constants are documented CreateFileW access, share,
+    // disposition, and directory flags. Null optional pointers are permitted.
     let handle = unsafe {
         CreateFileW(
             parent.as_ptr(),
@@ -327,6 +381,9 @@ pub(super) fn sync_parent_dir(path: &Path) -> Result<()> {
             Err(error)
         };
     }
+    // SAFETY: the handle was checked against INVALID_HANDLE_VALUE and is a
+    // uniquely owned CreateFileW result. Transferring it to File ensures it is
+    // closed exactly once when `directory` is dropped.
     let directory = unsafe { File::from_raw_handle(handle) };
     match directory.sync_all() {
         Ok(()) => Ok(()),

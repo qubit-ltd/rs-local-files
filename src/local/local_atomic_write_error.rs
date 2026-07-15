@@ -8,7 +8,11 @@
 //! Atomic-write errors.
 
 use std::error::Error;
-use std::fmt::{Display, Formatter, Result as FmtResult};
+use std::fmt::{
+    Display,
+    Formatter,
+    Result as FmtResult,
+};
 use std::io;
 use std::path::PathBuf;
 
@@ -41,6 +45,7 @@ impl LocalAtomicWriteError {
     ///
     /// # Returns
     /// New atomic-write error retaining the native source error.
+    #[inline]
     pub(crate) fn new(
         stage: LocalAtomicWriteStage,
         path: PathBuf,
@@ -61,7 +66,7 @@ impl LocalAtomicWriteError {
     ///
     /// # Returns
     /// Error kind reported by the retained source error.
-    #[inline]
+    #[inline(always)]
     pub fn kind(&self) -> io::ErrorKind {
         self.source.kind()
     }
@@ -83,6 +88,7 @@ impl Display for LocalAtomicWriteError {
 
 impl Error for LocalAtomicWriteError {
     /// Returns the retained native I/O error.
+    #[inline(always)]
     fn source(&self) -> Option<&(dyn Error + 'static)> {
         Some(&self.source)
     }

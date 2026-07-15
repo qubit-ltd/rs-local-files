@@ -7,7 +7,10 @@
 // =============================================================================
 //! File write options.
 
-use crate::{FileBuffering, FileWriteMode};
+use crate::{
+    FileBuffering,
+    FileWriteMode,
+};
 
 /// Options used when opening a local file for writing.
 ///
@@ -53,7 +56,7 @@ impl FileWriteOptions {
     ///
     /// # Returns
     /// Updated options that create missing parent directories before opening.
-    #[inline]
+    #[inline(always)]
     pub const fn with_parent(mut self) -> Self {
         self.create_parent = true;
         self
@@ -63,7 +66,7 @@ impl FileWriteOptions {
     ///
     /// # Returns
     /// Updated options that return a buffered writer.
-    #[inline]
+    #[inline(always)]
     pub const fn buffered(mut self) -> Self {
         self.buffering = FileBuffering::buffered();
         self
@@ -79,8 +82,11 @@ impl FileWriteOptions {
     ///
     /// # Errors
     /// Returns [`std::io::ErrorKind::InvalidInput`] when `capacity` is zero.
-    #[inline]
-    pub fn buffered_with_capacity(mut self, capacity: usize) -> std::io::Result<Self> {
+    #[inline(always)]
+    pub fn buffered_with_capacity(
+        mut self,
+        capacity: usize,
+    ) -> std::io::Result<Self> {
         self.buffering = FileBuffering::buffered_with_capacity(capacity)?;
         Ok(self)
     }
@@ -88,7 +94,7 @@ impl FileWriteOptions {
 
 impl Default for FileWriteOptions {
     /// Creates a missing file or truncates an existing file by default.
-    #[inline]
+    #[inline(always)]
     fn default() -> Self {
         Self::new(FileWriteMode::default())
     }

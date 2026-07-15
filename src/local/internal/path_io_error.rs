@@ -8,13 +8,19 @@
 //! Path-aware I/O error context.
 
 use std::io::Error;
-use std::path::{Path, PathBuf};
+use std::path::{
+    Path,
+    PathBuf,
+};
 
 /// An I/O error annotated with the failed operation and path.
 #[derive(Debug)]
 pub(super) struct PathIoError {
+    /// Description of the filesystem operation that failed.
     operation: &'static str,
+    /// Path involved in the failed operation.
     path: PathBuf,
+    /// Native I/O error that caused the failure.
     source: Error,
 }
 
@@ -29,7 +35,11 @@ impl PathIoError {
     /// # Returns
     /// A contextual error retaining `source`.
     #[inline]
-    pub(super) fn new(operation: &'static str, path: &Path, source: Error) -> Self {
+    pub(super) fn new(
+        operation: &'static str,
+        path: &Path,
+        source: Error,
+    ) -> Self {
         Self {
             operation,
             path: path.to_path_buf(),
@@ -53,6 +63,7 @@ impl std::fmt::Display for PathIoError {
 
 impl std::error::Error for PathIoError {
     /// Returns the native I/O error that caused this contextual error.
+    #[inline(always)]
     fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
         Some(&self.source)
     }

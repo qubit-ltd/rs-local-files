@@ -7,13 +7,30 @@
 // =============================================================================
 //! Private local file reader and writer construction.
 
-use std::fs::{self, File, OpenOptions};
-use std::io::{Error, ErrorKind, Result};
+use std::fs::{
+    self,
+    File,
+    OpenOptions,
+};
+use std::io::{
+    Error,
+    ErrorKind,
+    Result,
+};
 use std::path::Path;
 
-use crate::{FileReadOptions, FileWriteMode, FileWriteOptions, LocalFileReader, LocalFileWriter};
+use crate::{
+    FileReadOptions,
+    FileWriteMode,
+    FileWriteOptions,
+    LocalFileReader,
+    LocalFileWriter,
+};
 
-use super::path_operations::{add_path_context, ensure_parent_path};
+use super::path_operations::{
+    add_path_context,
+    ensure_parent_path,
+};
 
 /// Opens a file reader with the supplied options.
 ///
@@ -27,16 +44,20 @@ use super::path_operations::{add_path_context, ensure_parent_path};
 /// # Errors
 /// Returns an I/O error when `path` cannot be inspected or opened, or when the
 /// target is not a file.
-pub(crate) fn open_reader_path(path: &Path, options: FileReadOptions) -> Result<LocalFileReader> {
-    let metadata =
-        fs::metadata(path).map_err(|error| add_path_context(error, "read metadata", path))?;
+pub(crate) fn open_reader_path(
+    path: &Path,
+    options: FileReadOptions,
+) -> Result<LocalFileReader> {
+    let metadata = fs::metadata(path)
+        .map_err(|error| add_path_context(error, "read metadata", path))?;
     if !metadata.is_file() {
         return Err(Error::new(
             ErrorKind::InvalidInput,
             format!("path is not a file: {}", path.display()),
         ));
     }
-    let file = File::open(path).map_err(|error| add_path_context(error, "open file", path))?;
+    let file = File::open(path)
+        .map_err(|error| add_path_context(error, "open file", path))?;
     Ok(LocalFileReader::from_file(file, options.buffering))
 }
 
@@ -53,7 +74,10 @@ pub(crate) fn open_reader_path(path: &Path, options: FileReadOptions) -> Result<
 /// # Errors
 /// Returns an I/O error when parent directories cannot be created or the file
 /// cannot be opened with the requested mode.
-pub(crate) fn open_writer_path(path: &Path, options: FileWriteOptions) -> Result<LocalFileWriter> {
+pub(crate) fn open_writer_path(
+    path: &Path,
+    options: FileWriteOptions,
+) -> Result<LocalFileWriter> {
     if options.create_parent {
         ensure_parent_path(path)?;
     }

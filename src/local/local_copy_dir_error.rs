@@ -8,11 +8,18 @@
 //! Recursive directory copy errors.
 
 use std::error::Error;
-use std::fmt::{Display, Formatter, Result as FmtResult};
+use std::fmt::{
+    Display,
+    Formatter,
+    Result as FmtResult,
+};
 use std::io;
 use std::path::PathBuf;
 
-use crate::{LocalCopyDirStage, LocalCopyDirStats};
+use crate::{
+    LocalCopyDirStage,
+    LocalCopyDirStats,
+};
 
 /// Error returned by a recursive directory copy operation.
 #[derive(Debug)]
@@ -41,6 +48,7 @@ impl LocalCopyDirError {
     ///
     /// # Returns
     /// New recursive-copy error retaining the native source error.
+    #[inline]
     pub(crate) fn new(
         stage: LocalCopyDirStage,
         source_path: PathBuf,
@@ -61,7 +69,7 @@ impl LocalCopyDirError {
     ///
     /// # Returns
     /// Error kind reported by the retained source error.
-    #[inline]
+    #[inline(always)]
     pub fn kind(&self) -> io::ErrorKind {
         self.source.kind()
     }
@@ -84,6 +92,7 @@ impl Display for LocalCopyDirError {
 
 impl Error for LocalCopyDirError {
     /// Returns the retained native I/O error.
+    #[inline(always)]
     fn source(&self) -> Option<&(dyn Error + 'static)> {
         Some(&self.source)
     }
