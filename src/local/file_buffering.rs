@@ -7,7 +7,11 @@
 // =============================================================================
 //! File buffering policy.
 
+use std::io::{Error, ErrorKind, Result};
+use std::num::NonZeroUsize;
+
 /// Buffering policy for local file readers and writers.
+#[must_use = "a buffering policy has no effect unless it is used"]
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum FileBuffering {
     /// Use the raw file handle without an additional standard-library buffer.
@@ -18,7 +22,7 @@ pub enum FileBuffering {
         ///
         /// When this value is [`None`], [`std::io::BufReader`] or
         /// [`std::io::BufWriter`] uses its default capacity.
-        capacity: Option<usize>,
+        capacity: Option<NonZeroUsize>,
     },
 }
 
@@ -35,17 +39,24 @@ impl FileBuffering {
     /// Returns buffered I/O using a caller-provided capacity.
     ///
     /// # Parameters
-    /// - `capacity`: Buffer capacity in bytes. A zero capacity is accepted by
-    ///   this constructor but rejected when opening the file, where an I/O
-    ///   error can be returned.
+    /// - `capacity`: Buffer capacity in bytes.
     ///
     /// # Returns
     /// A buffering policy that enables buffering with a custom capacity.
+    ///
+    /// # Errors
+    /// Returns [`ErrorKind::InvalidInput`] when `capacity` is zero.
     #[inline]
-    pub const fn buffered_with_capacity(capacity: usize) -> Self {
-        Self::Buffered {
+    pub fn buffered_with_capacity(capacity: usize) -> Result<Self> {
+        let capacity = NonZeroUsize::new(capacity).ok_or_else(|| {
+            Error::new(
+                ErrorKind::InvalidInput,
+                "buffer capacity must be greater than zero",
+            )
+        })?;
+        Ok(Self::Buffered {
             capacity: Some(capacity),
-        }
+        })
     }
 }
 

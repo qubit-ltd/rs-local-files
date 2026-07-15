@@ -7,12 +7,20 @@
 // =============================================================================
 //! File write options.
 
-use crate::{
-    FileBuffering,
-    FileWriteMode,
-};
+use crate::{FileBuffering, FileWriteMode};
 
 /// Options used when opening a local file for writing.
+///
+/// Builder results must be used so that an accidentally discarded option does
+/// not silently leave the original value unchanged:
+///
+/// ```compile_fail
+/// #![deny(unused_must_use)]
+/// use qubit_local_files::FileWriteOptions;
+///
+/// FileWriteOptions::default().with_parent();
+/// ```
+#[must_use = "file write options have no effect unless they are used"]
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub struct FileWriteOptions {
     /// Whether missing parent directories should be created before opening.
@@ -68,10 +76,13 @@ impl FileWriteOptions {
     ///
     /// # Returns
     /// Updated options that request a buffered writer with `capacity` bytes.
+    ///
+    /// # Errors
+    /// Returns [`std::io::ErrorKind::InvalidInput`] when `capacity` is zero.
     #[inline]
-    pub const fn buffered_with_capacity(mut self, capacity: usize) -> Self {
-        self.buffering = FileBuffering::buffered_with_capacity(capacity);
-        self
+    pub fn buffered_with_capacity(mut self, capacity: usize) -> std::io::Result<Self> {
+        self.buffering = FileBuffering::buffered_with_capacity(capacity)?;
+        Ok(self)
     }
 }
 

@@ -8,15 +8,7 @@
 //! Local file writer wrapper.
 
 use std::fs::File;
-use std::io::{
-    BufWriter,
-    Error,
-    ErrorKind,
-    Result,
-    Seek,
-    SeekFrom,
-    Write,
-};
+use std::io::{BufWriter, Result, Seek, SeekFrom, Write};
 
 use crate::FileBuffering;
 
@@ -39,22 +31,14 @@ impl LocalFileWriter {
     /// # Returns
     /// A local file writer matching `buffering`.
     ///
-    /// # Errors
-    /// Returns [`ErrorKind::InvalidInput`] when a buffered writer requests a
-    /// zero-byte capacity.
-    pub(crate) fn from_file(
-        file: File,
-        buffering: FileBuffering,
-    ) -> Result<Self> {
-        validate_buffering(buffering)?;
+    #[inline]
+    pub(crate) fn from_file(file: File, buffering: FileBuffering) -> Self {
         match buffering {
-            FileBuffering::Unbuffered => Ok(Self::Unbuffered(file)),
-            FileBuffering::Buffered { capacity: None } => {
-                Ok(Self::Buffered(BufWriter::new(file)))
-            }
+            FileBuffering::Unbuffered => Self::Unbuffered(file),
+            FileBuffering::Buffered { capacity: None } => Self::Buffered(BufWriter::new(file)),
             FileBuffering::Buffered {
                 capacity: Some(capacity),
-            } => Ok(Self::Buffered(BufWriter::with_capacity(capacity, file))),
+            } => Self::Buffered(BufWriter::with_capacity(capacity.get(), file)),
         }
     }
 
@@ -172,39 +156,4 @@ impl Seek for LocalFileWriter {
             Self::Buffered(writer) => writer.seek(pos),
         }
     }
-}
-
-/// Validates a writer buffering policy before a file is opened.
-///
-/// # Parameters
-/// - `buffering`: Buffering policy to validate.
-///
-/// # Errors
-/// Returns [`ErrorKind::InvalidInput`] when a buffered writer requests a
-/// zero-byte capacity.
-pub(crate) fn validate_buffering(buffering: FileBuffering) -> Result<()> {
-    if let FileBuffering::Buffered {
-        capacity: Some(capacity),
-    } = buffering
-    {
-        validate_buffer_capacity(capacity)?;
-    }
-    Ok(())
-}
-
-/// Validates a custom buffer capacity.
-///
-/// # Parameters
-/// - `capacity`: Buffer capacity in bytes.
-///
-/// # Errors
-/// Returns [`ErrorKind::InvalidInput`] when `capacity` is zero.
-fn validate_buffer_capacity(capacity: usize) -> Result<()> {
-    if capacity == 0 {
-        return Err(Error::new(
-            ErrorKind::InvalidInput,
-            "buffer capacity must be greater than zero",
-        ));
-    }
-    Ok(())
 }

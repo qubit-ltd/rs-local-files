@@ -5,36 +5,15 @@
 //
 //    Licensed under the Apache License, Version 2.0.
 // =============================================================================
-use std::fs::{
-    self,
-    File,
-};
-use std::io::{
-    Error,
-    ErrorKind,
-    Result,
-    Seek,
-    SeekFrom,
-    Write,
-};
-use std::path::{
-    Path,
-    PathBuf,
-};
+use std::fs::{self, File};
+use std::io::{Error, ErrorKind, Result, Seek, SeekFrom, Write};
+use std::path::{Path, PathBuf};
 
 use log::warn;
 
-use crate::{
-    LocalFiles,
-    LocalPersistError,
-    LocalPersistOptions,
-};
+use crate::{LocalFiles, LocalPersistError, LocalPersistOptions};
 
-use super::local_files::{
-    create_temp_file_in_dir,
-    move_file_without_replacing,
-    replace_file,
-};
+use super::internal::{create_temp_file_in_dir, move_file_without_replacing, replace_file};
 
 /// Temporary file that is removed automatically unless kept or persisted.
 ///
@@ -75,10 +54,7 @@ impl LocalTempFile {
     /// created, `prefix` or `suffix` is not a safe file-name fragment, or a
     /// unique temporary file cannot be created.
     #[inline]
-    pub fn with_name(
-        prefix: Option<&str>,
-        suffix: Option<&str>,
-    ) -> Result<Self> {
+    pub fn with_name(prefix: Option<&str>, suffix: Option<&str>) -> Result<Self> {
         Self::in_dir(
             std::env::temp_dir(),
             prefix,
@@ -108,8 +84,7 @@ impl LocalTempFile {
     where
         P: AsRef<Path>,
     {
-        let (path, file) =
-            create_temp_file_in_dir(dir.as_ref(), prefix, suffix, max_tries)?;
+        let (path, file) = create_temp_file_in_dir(dir.as_ref(), prefix, suffix, max_tries)?;
         Ok(Self {
             path: Some(path),
             file: Some(file),
@@ -179,6 +154,13 @@ impl LocalTempFile {
 
     /// Closes the unbuffered temporary file handle while keeping cleanup
     /// active.
+    ///
+    /// The guard owns a raw [`File`] rather than a userspace buffer, so this
+    /// operation only drops the handle. It does not call [`File::sync_all`] and
+    /// does not provide a durability guarantee. Call `sync_all` through
+    /// [`LocalTempFile::as_file_mut`] before closing when durable storage is
+    /// required.
+    #[inline]
     pub fn close(&mut self) {
         drop(self.file.take());
     }
@@ -234,10 +216,7 @@ impl LocalTempFile {
     /// created, the target already exists, or the temporary file cannot be
     /// moved to `target`.
     #[inline]
-    pub fn persist<P>(
-        self,
-        target: P,
-    ) -> std::result::Result<PathBuf, LocalPersistError<Self>>
+    pub fn persist<P>(self, target: P) -> std::result::Result<PathBuf, LocalPersistError<Self>>
     where
         P: AsRef<Path>,
     {

@@ -5,10 +5,13 @@
 //
 //    Licensed under the Apache License, Version 2.0.
 // =============================================================================
+//! Concrete local filesystem APIs and their private implementation.
+
 mod file_buffering;
 mod file_read_options;
 mod file_write_mode;
 mod file_write_options;
+mod internal;
 mod local_atomic_write_error;
 mod local_atomic_write_stage;
 mod local_copy_conflict_policy;

@@ -10,6 +10,7 @@
 use crate::FileBuffering;
 
 /// Options used when opening a local file for reading.
+#[must_use = "file read options have no effect unless they are used"]
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
 pub struct FileReadOptions {
     /// Buffering policy for the returned reader.
@@ -46,10 +47,13 @@ impl FileReadOptions {
     ///
     /// # Returns
     /// Read options that request a buffered reader with `capacity` bytes.
+    ///
+    /// # Errors
+    /// Returns [`std::io::ErrorKind::InvalidInput`] when `capacity` is zero.
     #[inline]
-    pub const fn buffered_with_capacity(capacity: usize) -> Self {
-        Self {
-            buffering: FileBuffering::buffered_with_capacity(capacity),
-        }
+    pub fn buffered_with_capacity(capacity: usize) -> std::io::Result<Self> {
+        Ok(Self {
+            buffering: FileBuffering::buffered_with_capacity(capacity)?,
+        })
     }
 }

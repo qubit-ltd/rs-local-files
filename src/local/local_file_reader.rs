@@ -8,15 +8,7 @@
 //! Local file reader wrapper.
 
 use std::fs::File;
-use std::io::{
-    BufReader,
-    Error,
-    ErrorKind,
-    Read,
-    Result,
-    Seek,
-    SeekFrom,
-};
+use std::io::{BufReader, Read, Result, Seek, SeekFrom};
 
 use crate::FileBuffering;
 
@@ -39,24 +31,14 @@ impl LocalFileReader {
     /// # Returns
     /// A local file reader matching `buffering`.
     ///
-    /// # Errors
-    /// Returns [`ErrorKind::InvalidInput`] when a buffered reader requests a
-    /// zero-byte capacity.
-    pub(crate) fn from_file(
-        file: File,
-        buffering: FileBuffering,
-    ) -> Result<Self> {
+    #[inline]
+    pub(crate) fn from_file(file: File, buffering: FileBuffering) -> Self {
         match buffering {
-            FileBuffering::Unbuffered => Ok(Self::Unbuffered(file)),
-            FileBuffering::Buffered { capacity: None } => {
-                Ok(Self::Buffered(BufReader::new(file)))
-            }
+            FileBuffering::Unbuffered => Self::Unbuffered(file),
+            FileBuffering::Buffered { capacity: None } => Self::Buffered(BufReader::new(file)),
             FileBuffering::Buffered {
                 capacity: Some(capacity),
-            } => {
-                validate_buffer_capacity(capacity)?;
-                Ok(Self::Buffered(BufReader::with_capacity(capacity, file)))
-            }
+            } => Self::Buffered(BufReader::with_capacity(capacity.get(), file)),
         }
     }
 
@@ -108,21 +90,4 @@ impl Seek for LocalFileReader {
             Self::Buffered(reader) => reader.seek(pos),
         }
     }
-}
-
-/// Validates a custom buffer capacity.
-///
-/// # Parameters
-/// - `capacity`: Buffer capacity in bytes.
-///
-/// # Errors
-/// Returns [`ErrorKind::InvalidInput`] when `capacity` is zero.
-fn validate_buffer_capacity(capacity: usize) -> Result<()> {
-    if capacity == 0 {
-        return Err(Error::new(
-            ErrorKind::InvalidInput,
-            "buffer capacity must be greater than zero",
-        ));
-    }
-    Ok(())
 }
