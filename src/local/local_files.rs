@@ -8,13 +8,22 @@
 //! Public local filesystem utility namespace.
 
 use std::convert::Infallible;
-use std::fs::{self, File};
+use std::fs::{
+    self,
+    File,
+};
 use std::io::Result;
 use std::path::Path;
 
 use crate::{
-    FileReadOptions, FileWriteOptions, LocalAtomicWriteError, LocalCopyDirError,
-    LocalCopyDirOptions, LocalCopyDirStats, LocalFileReader, LocalFileWriter,
+    FileReadOptions,
+    FileWriteOptions,
+    LocalAtomicWriteError,
+    LocalCopyDirError,
+    LocalCopyDirOptions,
+    LocalCopyDirStats,
+    LocalFileReader,
+    LocalFileWriter,
 };
 
 use super::internal::LocalFileOperations;
@@ -42,7 +51,8 @@ pub struct LocalFiles {
 
 impl LocalFiles {
     /// Default number of attempts used when creating a random temporary entry.
-    pub const DEFAULT_TEMP_FILE_RETRIES: usize = LocalFileOperations::DEFAULT_TEMP_FILE_RETRIES;
+    pub const DEFAULT_TEMP_FILE_RETRIES: usize =
+        LocalFileOperations::DEFAULT_TEMP_FILE_RETRIES;
 
     /// Tests whether a path exists.
     ///
@@ -117,7 +127,10 @@ impl LocalFiles {
     /// Returns an I/O error when `path` cannot be inspected or opened, or when
     /// the target is not a file.
     #[inline(always)]
-    pub fn open_reader<P>(path: P, options: FileReadOptions) -> Result<LocalFileReader>
+    pub fn open_reader<P>(
+        path: P,
+        options: FileReadOptions,
+    ) -> Result<LocalFileReader>
     where
         P: AsRef<Path>,
     {
@@ -141,7 +154,10 @@ impl LocalFiles {
     /// Returns an I/O error when parent directories cannot be created or the
     /// file cannot be opened with the requested mode.
     #[inline(always)]
-    pub fn open_writer<P>(path: P, options: FileWriteOptions) -> Result<LocalFileWriter>
+    pub fn open_writer<P>(
+        path: P,
+        options: FileWriteOptions,
+    ) -> Result<LocalFileWriter>
     where
         P: AsRef<Path>,
     {
@@ -316,7 +332,10 @@ impl LocalFiles {
     /// Returns [`LocalAtomicWriteError`] with the failed stage, temporary path,
     /// commit state, and native I/O source error.
     #[inline(always)]
-    pub fn atomic_write<P, B>(path: P, bytes: B) -> std::result::Result<(), LocalAtomicWriteError>
+    pub fn atomic_write<P, B>(
+        path: P,
+        bytes: B,
+    ) -> std::result::Result<(), LocalAtomicWriteError>
     where
         P: AsRef<Path>,
         B: AsRef<[u8]>,

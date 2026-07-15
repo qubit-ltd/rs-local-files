@@ -8,7 +8,13 @@
 //! Local file writer wrapper.
 
 use std::fs::File;
-use std::io::{BufWriter, Result, Seek, SeekFrom, Write};
+use std::io::{
+    BufWriter,
+    Result,
+    Seek,
+    SeekFrom,
+    Write,
+};
 
 use crate::FileBuffering;
 
@@ -30,12 +36,13 @@ impl LocalFileWriter {
     ///
     /// # Returns
     /// A local file writer matching `buffering`.
-    ///
     #[inline]
     pub(crate) fn from_file(file: File, buffering: FileBuffering) -> Self {
         match buffering {
             FileBuffering::Unbuffered => Self::Unbuffered(file),
-            FileBuffering::Buffered { capacity: None } => Self::Buffered(BufWriter::new(file)),
+            FileBuffering::Buffered { capacity: None } => {
+                Self::Buffered(BufWriter::new(file))
+            }
             FileBuffering::Buffered {
                 capacity: Some(capacity),
             } => Self::Buffered(BufWriter::with_capacity(capacity.get(), file)),

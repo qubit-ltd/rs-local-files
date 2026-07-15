@@ -8,7 +8,12 @@
 //! Recoverable temporary-resource persistence errors.
 
 use std::error::Error;
-use std::fmt::{Debug, Display, Formatter, Result as FmtResult};
+use std::fmt::{
+    Debug,
+    Display,
+    Formatter,
+    Result as FmtResult,
+};
 use std::io;
 
 /// Persistence error that returns ownership of the temporary resource.

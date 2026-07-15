@@ -6,19 +6,37 @@
 //    Licensed under the Apache License, Version 2.0.
 // =============================================================================
 use std::ffi::OsString;
-use std::fs::{self, Metadata, ReadDir};
-use std::io::{Error, ErrorKind, Result};
-use std::path::{Component, Path, PathBuf};
+use std::fs::{
+    self,
+    Metadata,
+    ReadDir,
+};
+use std::io::{
+    Error,
+    ErrorKind,
+    Result,
+};
+use std::path::{
+    Component,
+    Path,
+    PathBuf,
+};
 
 use log::warn;
 
 use crate::{
-    FileReadOptions, FileWriteOptions, LocalFileReader, LocalFileWriter, LocalFiles,
+    FileReadOptions,
+    FileWriteOptions,
+    LocalFileReader,
+    LocalFileWriter,
+    LocalFiles,
     LocalPersistError,
 };
 
 use super::internal::{
-    create_private_dir, create_temp_dir_in_dir, move_directory_without_replacing,
+    create_private_dir,
+    create_temp_dir_in_dir,
+    move_directory_without_replacing,
 };
 
 /// Temporary directory that is removed automatically unless kept or persisted.
@@ -76,7 +94,11 @@ impl LocalTempDir {
     /// Returns an I/O error when `dir` cannot be created, `prefix` is not a
     /// safe file-name fragment, the retry limit is zero, all generated names
     /// collide, or directory creation fails.
-    pub fn in_dir<P>(dir: P, prefix: Option<&str>, max_tries: usize) -> Result<Self>
+    pub fn in_dir<P>(
+        dir: P,
+        prefix: Option<&str>,
+        max_tries: usize,
+    ) -> Result<Self>
     where
         P: AsRef<Path>,
     {
@@ -230,8 +252,9 @@ impl LocalTempDir {
     /// The child path must remain inside this temporary directory. When
     /// `options.create_parent` is enabled, missing parent directories are
     /// created with the same `mkdir -p` semantics as
-    /// [`LocalTempDir::ensure_child_dir`]. Existing child targets must be regular
-    /// files; final symbolic links are rejected without following them.
+    /// [`LocalTempDir::ensure_child_dir`]. Existing child targets must be
+    /// regular files; final symbolic links are rejected without following
+    /// them.
     ///
     /// Validation and opening are separate filesystem operations. This helper
     /// is not a sandbox boundary when an untrusted actor can mutate the tree
@@ -260,7 +283,12 @@ impl LocalTempDir {
     {
         let child = child.as_ref();
         let path = self.child_path(child)?;
-        prepare_child_writer_path(self.path(), child, &path, options.create_parent)?;
+        prepare_child_writer_path(
+            self.path(),
+            child,
+            &path,
+            options.create_parent,
+        )?;
         LocalFiles::open_writer(path, options)
     }
 
@@ -310,7 +338,10 @@ impl LocalTempDir {
     /// created, the target already exists, the platform lacks a native
     /// no-replace directory move, or the temporary directory cannot be moved to
     /// `target`.
-    pub fn persist<P>(mut self, target: P) -> std::result::Result<PathBuf, LocalPersistError<Self>>
+    pub fn persist<P>(
+        mut self,
+        target: P,
+    ) -> std::result::Result<PathBuf, LocalPersistError<Self>>
     where
         P: AsRef<Path>,
     {
@@ -352,7 +383,10 @@ fn child_component_names(child: &Path) -> Result<Vec<OsString>> {
             _ => {
                 return Err(Error::new(
                     ErrorKind::InvalidInput,
-                    format!("child path must be relative and safe: {}", child.display()),
+                    format!(
+                        "child path must be relative and safe: {}",
+                        child.display()
+                    ),
                 ));
             }
         }
@@ -403,7 +437,9 @@ fn ensure_child_dir_path(root: &Path, child: &Path) -> Result<PathBuf> {
                     ),
                 ));
             }
-            Err(error) if error.kind() == ErrorKind::NotFound => create_private_dir(&path)?,
+            Err(error) if error.kind() == ErrorKind::NotFound => {
+                create_private_dir(&path)?
+            }
             Err(error) => return Err(error),
         }
     }
@@ -462,7 +498,9 @@ fn prepare_child_writer_path(
             ErrorKind::InvalidInput,
             format!("child file target is a symbolic link: {}", path.display()),
         )),
-        Ok(metadata) if metadata.is_file() => ensure_existing_path_inside(root, path),
+        Ok(metadata) if metadata.is_file() => {
+            ensure_existing_path_inside(root, path)
+        }
         Ok(_) => Err(Error::new(
             ErrorKind::InvalidInput,
             format!("child path is not a file: {}", path.display()),
@@ -487,7 +525,10 @@ fn ensure_existing_path_inside(root: &Path, path: &Path) -> Result<()> {
     if !path.starts_with(&root) {
         return Err(Error::new(
             ErrorKind::InvalidInput,
-            format!("child path escapes temporary directory: {}", path.display()),
+            format!(
+                "child path escapes temporary directory: {}",
+                path.display()
+            ),
         ));
     }
     Ok(())
