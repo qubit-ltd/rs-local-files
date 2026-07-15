@@ -141,7 +141,7 @@ Ownership methods:
 | `exists` | Checks whether the directory path exists, returning `std::io::Result<bool>`. |
 | `metadata` | Reads directory metadata. |
 | `list` | Lists direct child entries. |
-| `child_path` | Resolves a safe relative child path without creating it. |
+| `child_path` | Lexically validates and joins a relative child path without inspecting the filesystem. |
 | `ensure_child_dir` | Creates a child directory and missing parents, like `mkdir -p`. |
 | `open_child_reader` | Opens a child file for reading with `FileReadOptions`. |
 | `open_child_writer` | Opens a child file for writing with `FileWriteOptions`. |
@@ -159,7 +159,10 @@ error.
 
 Child paths must be non-empty relative paths made only of normal path
 components. Absolute paths, root or prefix components, `.` and `..` are
-rejected. `open_child_reader` requires the child to be a file; directories and
+rejected. `child_path` stops after this lexical validation: an existing
+symbolic-link component may still resolve outside the temporary directory, so
+the returned path is not proof of filesystem containment. `open_child_reader`
+requires the child to be a file; directories and
 other non-file entries return `ErrorKind::InvalidInput`. `open_child_writer`
 validates existing targets as files and keeps child writes inside the temporary
 directory. `ensure_child_dir` creates missing nested parents, but rejects
@@ -262,7 +265,8 @@ If a target file must never be observed half-written, prefer
 
 `LocalFiles::atomic_write` writes bytes to a temporary file in the same parent
 directory, flushes and syncs that temporary file, replaces the destination, and
-syncs the parent directory when supported.
+syncs the destination parent plus the parents of directory entries created by
+the operation, from deepest to shallowest, when supported.
 
 ```rust
 use qubit_local_files::{
@@ -313,14 +317,17 @@ Important semantics:
   be atomic on common local filesystems.
 - Existing regular-file permissions are copied to the temporary file before
   replacement.
+- On Unix, a new destination uses mode `0600`, subject to a more restrictive
+  process umask.
 - If writing, flushing, or syncing the temporary file fails, the destination is
   left untouched.
 - If an `atomic_write_with` callback panics, unwinding closes and best-effort
   removes the uncommitted temporary file before the panic continues; the
   destination is left untouched. Cleanup failure cannot replace the panic, so
   the staging path may remain.
-- If replacement succeeds but syncing the parent directory fails, the method may
-  return an error after the destination already contains the new contents.
+- If replacement succeeds but synchronizing the destination parent or a parent
+  of a newly created directory entry fails, the method may return an error after
+  the destination already contains the new contents.
 - Errors are reported as `LocalAtomicWriteError`, which exposes the failed
   stage, temporary path, native I/O source, and a `committed` flag.
 - If the destination path is a symbolic link on platforms where renaming over a
@@ -422,7 +429,7 @@ Options:
 | `conflict` | `Fail` | Existing destination files are rejected; choose `Overwrite` or `Skip` explicitly. |
 | `type_conflict` | `Fail` | File/directory type mismatches are rejected; `Replace` explicitly permits destructive replacement. |
 | `follow_symlinks` | `false` | Symbolic links in the source tree are rejected. |
-| `preserve_permissions` | `false` | Source permissions are not copied to destination entries. |
+| `preserve_permissions` | `false` | Source permissions are not copied; on Unix, new or replaced files keep mode `0600` and new directories use `0700`, subject to the process umask. |
 
 Statistics:
 
@@ -438,7 +445,9 @@ a directory into itself can recurse indefinitely. When symlink following is
 enabled, directory cycles introduced by followed symlinks are also rejected.
 Unsupported source entries report `std::io::ErrorKind::Unsupported` through
 `LocalCopyDirError`. The structured error also exposes the failed stage, source
-and destination paths, partial statistics, and native I/O source error.
+and destination paths, partial statistics, optional staging path, optional
+secondary cleanup error, and native I/O source error. The original copy or
+commit failure remains the primary source error.
 The copy is not a tree-level transaction: entries committed before a failure
 remain in the destination, no rollback is attempted, and destructive
 type-conflict replacement may remove an existing destination directory before

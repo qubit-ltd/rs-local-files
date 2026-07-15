@@ -58,10 +58,14 @@ this correction.
 ## Windows Directory Symlink Removal
 
 `LocalFiles::remove_any` continues to remove symbolic links themselves without
-following them. On Windows, `FileTypeExt::is_symlink_dir` selects
-`fs::remove_dir` for directory symlinks, while file symlinks use
-`fs::remove_file`. Unix keeps using `unlink` through `fs::remove_file` for all
-symlinks.
+following them. On Windows, `FileTypeExt::is_symlink_dir` selects a native
+handle-based path that opens the final reparse point without following it,
+requests the attribute-query access required by Windows, verifies directory,
+reparse-point, and name-surrogate tag bits from that handle, and marks the same
+handle for deletion. File symlinks continue to use `fs::remove_file`. Unix
+keeps using `unlink` through `fs::remove_file` for all symlinks. Keeping
+inspection and deletion on one handle prevents a concurrently substituted
+real directory or non-link reparse point from being deleted.
 
 A Windows regression creates a directory symlink, removes it through the
 public API, and verifies that the target directory remains. Environments that

@@ -99,9 +99,9 @@ assert_eq!("new payload\n", std::fs::read_to_string(&final_path)?);
 
 `LocalTempFile` 持有最初创建的文件句柄，并实现 `Write` 和 `Seek`。可通过 `as_file` / `as_file_mut` 直接访问句柄，通过 `close` 丢弃无缓冲句柄后，再用其他 API 读取该路径。`close` 不调用 `sync_all`；需要持久化保证时，应先显式同步句柄。它有意不提供读取 helper；确实需要读取时，通过 `LocalFiles` 或 `std::fs` 操作它的路径。
 
-`LocalTempDir` 提供安全 child helper：`child_path`、`ensure_child_dir`、`open_child_reader`、`open_child_writer` 和 `list`。child 路径必须是相对路径，不能包含父目录跳转。`ensure_child_dir` 会像 `mkdir -p` 一样创建多层缺失父目录。
+`LocalTempDir::child_path` 只对非空相对路径执行 lexical 校验并完成拼接；它不检查已有 symbolic link，返回结果也不能证明文件系统 containment。`ensure_child_dir`、`open_child_reader` 和 `open_child_writer` 还会拒绝其文件系统检查期间观察到的 symbolic-link escape。`ensure_child_dir` 会像 `mkdir -p` 一样创建多层缺失父目录。
 
-child helper 会拒绝 lexical traversal 和检查时可见的 symbolic-link escape，但校验与后续文件系统操作并非原子过程。当不可信参与者能够并发修改目录树时，它们不能作为 sandbox 边界。
+文件系统校验与后续操作并非原子过程。当不可信参与者能够并发修改目录树时，这些 helper 不能作为 sandbox 边界。
 
 `LocalTempFile::persist` 默认在移动操作中拒绝已存在的目标。只有确实要替换已有目标时，才使用 `LocalTempFile::persist_with` 和 `LocalPersistOptions { overwrite: true }`。`LocalTempDir::persist` 同样拒绝已存在的目标，并且不提供 overwrite 选项。持久化失败会返回持有原临时 guard 的 `LocalPersistError`，调用方可以重试或检查资源。持久化只使用原生 move/rename，不会回退到 copy-and-delete，因此跨文件系统移动可能在 Unix 上返回 `EXDEV`，或返回其他平台的等价错误。覆盖文件时会保留临时文件的权限，而不会保留被替换目标的权限；如果需要替换内容并保留已有普通文件的权限，请使用 `LocalFiles::atomic_write`。在 Windows 上，原生移动不会添加 verbatim-path prefix，也不会把相对路径转换为绝对路径；路径长度以及相对路径/verbatim path 语义遵循原生平台行为。在 Unix 上，临时文件以 `0600`、临时目录以 `0700` 创建，之后仍受进程 umask 约束。
 
@@ -127,7 +127,7 @@ child helper 会拒绝 lexical traversal 和检查时可见的 symbolic-link esc
 
 ### Atomic Write
 
-`LocalFiles::atomic_write` 会在同一父目录下写入临时文件，flush 并 sync 这个临时文件，替换目标，并在支持的平台上 sync 父目录。它适合配置文件、cache manifest、checkpoint、生成索引等 whole-file replacement 场景。
+`LocalFiles::atomic_write` 会在同一父目录下写入临时文件，flush 并 sync 这个临时文件，替换目标，并在支持的平台上从深到浅 sync 目标父目录以及本次新建目录项所在的各级父目录。它适合配置文件、cache manifest、checkpoint、生成索引等 whole-file replacement 场景。已有普通文件的权限会被保留；在 Unix 上，新目标使用 `0600`，之后仍受更严格的进程 umask 约束。
 
 失败时返回 `LocalAtomicWriteError`，其中包含失败阶段、临时路径、原始 I/O source error，以及替换是否已经提交。
 如果 `atomic_write_with` callback panic，会先关闭并 best-effort 删除未提交临时文件，再继续传播 panic。清理失败不能替换原 panic，因此这种情况下 staging path 可能残留。
@@ -145,7 +145,9 @@ child helper 会拒绝 lexical traversal 和检查时可见的 symbolic-link esc
 | `bytes` | 从普通文件复制的字节数。 |
 | `skipped` | 因冲突策略而跳过的已有目标文件数量。 |
 
-`LocalCopyDirOptions::default()` 是有意保守的默认值：`conflict` 和 `type_conflict` 均为 `Fail`，不跟随 symbolic link，也不保留源权限。通过 `LocalCopyConflictPolicy` 显式选择 `Overwrite` 或 `Skip`；文件/目录类型替换则必须单独设置 `LocalCopyTypeConflictPolicy::Replace`。复制失败返回 `LocalCopyDirError`，其中包含路径、失败阶段、部分统计和原始 I/O source error。
+`LocalCopyDirOptions::default()` 是有意保守的默认值：`conflict` 和 `type_conflict` 均为 `Fail`，不跟随 symbolic link，也不保留源权限。通过 `LocalCopyConflictPolicy` 显式选择 `Overwrite` 或 `Skip`；文件/目录类型替换则必须单独设置 `LocalCopyTypeConflictPolicy::Replace`。复制失败返回 `LocalCopyDirError`，其中包含路径、失败阶段、部分统计、可选 staging path、可选次级 cleanup error 和原始 I/O source error。
+
+默认不保留源权限。在 Unix 上，新建或替换的文件因此使用 `0600`，新建目录使用 `0700`，之后仍受更严格的进程 umask 约束。原始复制或提交错误保持为主 source error。
 
 递归复制不是目录树级事务。失败前已经提交的条目会留在目标中，不会执行回滚；破坏性的类型冲突替换还可能先删除已有目标目录，随后才在后续操作中失败。
 

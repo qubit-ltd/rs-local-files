@@ -88,7 +88,7 @@ Expected: all tests pass and the outside target remains absent.
 - Produces: `wide_path(&Path) -> io::Result<Vec<u16>>`.
 - Preserves: `LocalFiles::remove_any` removes the link rather than its target.
 
-- [ ] **Step 1: Add Windows NUL regressions**
+- [x] **Step 1: Add Windows NUL regressions**
 
 Construct a target with `OsStringExt::from_wide` and assert both no-replace persistence and atomic replacement return `InvalidInput`. The atomic test first creates the NUL-prefix target and verifies its contents remain unchanged.
 
@@ -103,7 +103,7 @@ fn path_with_interior_nul(parent: &Path, prefix: &str) -> PathBuf {
 }
 ```
 
-- [ ] **Step 2: Add the Windows directory-symlink regression**
+- [x] **Step 2: Add the Windows directory-symlink regression**
 
 ```rust
 #[cfg(windows)]
@@ -128,7 +128,7 @@ fn test_remove_any_removes_directory_symlink_without_removing_target() {
 }
 ```
 
-- [ ] **Step 3: Make Windows path conversion fallible**
+- [x] **Step 3: Make Windows path conversion fallible**
 
 ```rust
 #[cfg(windows)]
@@ -146,11 +146,18 @@ fn wide_path(path: &Path) -> Result<Vec<u16>> {
 
 Propagate `?` through replace, no-replace move, and parent-directory sync.
 
-- [ ] **Step 4: Select the Windows directory-link removal API**
+- [x] **Step 4: Select and harden the Windows directory-link removal API**
 
-Under `cfg(windows)`, import `std::os::windows::fs::FileTypeExt`; call `fs::remove_dir` when `file_type.is_symlink_dir()`, and keep `fs::remove_file` for file symlinks and Unix links.
+Under `cfg(windows)`, use `FileTypeExt::is_symlink_dir()` to select the
+directory-link path. Open its final component with `CreateFileW` and
+`FILE_FLAG_OPEN_REPARSE_POINT`, request `DELETE | FILE_READ_ATTRIBUTES`, verify
+the same handle has directory and reparse-point attributes plus a
+name-surrogate reparse tag, and mark that handle for deletion with
+`SetFileInformationByHandle`. This prevents a real directory or non-link
+reparse point substituted after path inspection from being deleted. Keep
+`fs::remove_file` for file symlinks and Unix links.
 
-- [ ] **Step 5: Run host tests and compile Windows paths when available**
+- [x] **Step 5: Run host tests and compile Windows paths when available**
 
 ```bash
 cargo +1.94.0 test --test local_tests local::local_files_tests
@@ -177,7 +184,7 @@ cargo +1.94.0 test --target x86_64-pc-windows-gnu --test local_tests --no-run
 - Produces: private `StagedFile` owning `Option<PathBuf>` and `Option<File>`.
 - Preserves: callback panics propagate unchanged.
 
-- [ ] **Step 1: Add the panic regression**
+- [x] **Step 1: Add the panic regression**
 
 ```rust
 #[test]
@@ -200,7 +207,7 @@ fn test_atomic_write_with_removes_temporary_file_when_callback_panics() {
 }
 ```
 
-- [ ] **Step 2: Run the exact test and confirm RED**
+- [x] **Step 2: Run the exact test and confirm RED**
 
 ```bash
 cargo +1.94.0 test --test local_tests local::local_files_tests::test_atomic_write_with_removes_temporary_file_when_callback_panics -- --exact
@@ -208,15 +215,15 @@ cargo +1.94.0 test --test local_tests local::local_files_tests::test_atomic_writ
 
 Expected: the callback panic is observed and the assertion finds a leaked staging file.
 
-- [ ] **Step 3: Add the private staging guard**
+- [x] **Step 3: Add the private staging guard**
 
 `StagedFile::new`, `path`, `file`, `file_mut`, `close`, and `disarm` own all staging state. `Drop` closes the handle and best-effort removes an armed path. Every type, field, method, and side effect receives complete Rustdoc.
 
-- [ ] **Step 4: Convert atomic write to the guard**
+- [x] **Step 4: Convert atomic write to the guard**
 
 Replace the raw `(temp_path, file)` and manual abort cleanup with `StagedFile`. Clone the path only when constructing `LocalAtomicWriteError`, close before the move, and disarm only after replacement succeeds. Add `# Panics` to `atomic_write_with` stating that callback panics propagate after staging cleanup.
 
-- [ ] **Step 5: Run atomic-write tests**
+- [x] **Step 5: Run atomic-write tests**
 
 ```bash
 cargo +1.94.0 test --test local_tests local::local_files_tests::test_atomic_write
@@ -234,11 +241,11 @@ Expected: all tests whose names contain `test_atomic_write` pass.
 - Preserves: public copy options, errors, and statistics.
 - Produces: source-open/copy failure does not remove a conflicting destination directory.
 
-- [ ] **Step 1: Add a Unix permission regression**
+- [x] **Step 1: Add a Unix permission regression**
 
 Create a regular source file with mode `0o000`, an existing destination directory with a marker, and use `type_conflict: Replace`. Skip only when the host can still open mode-zero files. Assert the copy fails and the marker remains.
 
-- [ ] **Step 2: Run the exact test and confirm RED**
+- [x] **Step 2: Run the exact test and confirm RED**
 
 ```bash
 cargo +1.94.0 test --test local_tests local::local_files_tests::test_copy_dir_all_with_keeps_conflicting_directory_when_source_copy_fails -- --exact
@@ -246,7 +253,7 @@ cargo +1.94.0 test --test local_tests local::local_files_tests::test_copy_dir_al
 
 Expected on a non-root Unix host: failure because the current implementation removes the destination directory before opening the source.
 
-- [ ] **Step 3: Delay removal until after staging**
+- [x] **Step 3: Delay removal until after staging**
 
 Inspect conflict policy first and record `destination_directory_requires_removal`. Copy and permission preparation into `StagedFile` before calling `remove_any_path`. Immediately before removal add this comment:
 
@@ -259,7 +266,7 @@ Inspect conflict policy first and record `destination_directory_requires_removal
 
 Use the RAII guard for every error path and disarm it after a successful commit.
 
-- [ ] **Step 4: Run all recursive-copy tests**
+- [x] **Step 4: Run all recursive-copy tests**
 
 ```bash
 cargo +1.94.0 test --test local_tests local::local_files_tests::test_copy_dir_all_with
@@ -273,11 +280,11 @@ Expected: all tests whose names contain `test_copy_dir_all_with` pass.
 - Modify: `tests/local/local_filenames_tests.rs`
 - Modify: `src/local/local_filenames.rs`
 
-- [ ] **Step 1: Add `COM¹`/`LPT¹` families and valid counterexamples to the existing reserved-name test**
-- [ ] **Step 2: Run the exact test and confirm RED because a superscript name is accepted**
-- [ ] **Step 3: Split the final Unicode scalar with `char_indices().next_back()` and accept only ASCII `1..=9` or superscripts `¹`, `²`, `³` after a case-insensitive `COM`/`LPT` prefix**
-- [ ] **Step 4: Add the Microsoft naming reference and target-independent portability explanation to Rustdoc and both user guides**
-- [ ] **Step 5: Run `cargo +1.94.0 test --test local_tests local::local_filenames_tests`**
+- [x] **Step 1: Add `COM¹`/`LPT¹` families and valid counterexamples to the existing reserved-name test**
+- [x] **Step 2: Run the exact test and confirm RED because a superscript name is accepted**
+- [x] **Step 3: Split the final Unicode scalar with `char_indices().next_back()` and accept only ASCII `1..=9` or superscripts `¹`, `²`, `³` after a case-insensitive `COM`/`LPT` prefix**
+- [x] **Step 4: Add the Microsoft naming reference and target-independent portability explanation to Rustdoc and both user guides**
+- [x] **Step 5: Run `cargo +1.94.0 test --test local_tests local::local_filenames_tests`**
 
 ### Task 6: Make buffering invariants explicit and enforce must-use values
 
@@ -290,11 +297,11 @@ Expected: all tests whose names contain `test_copy_dir_all_with` pass.
 - Modify: `tests/local/local_files_tests.rs`
 - Modify: `tests/local/local_temp_dir_tests.rs`
 
-- [ ] **Step 1: Add construction-time zero-capacity assertions and a compile-fail doctest that ignores `FileWriteOptions::default().with_parent()` under `deny(unused_must_use)`**
-- [ ] **Step 2: Confirm the integration test fails to compile because capacity builders return `Self`, and the compile-fail doctest fails because the ignored builder currently compiles**
-- [ ] **Step 3: Store `Option<NonZeroUsize>`, return `io::Result<Self>` from custom-capacity builders, and remove late reader/writer validation**
-- [ ] **Step 4: Add message-bearing type-level `#[must_use]` attributes; do not add redundant function-level attributes that trigger Clippy's `double_must_use`**
-- [ ] **Step 5: Migrate every local custom-capacity construction and run local file, reader, writer, and temp-directory tests plus doctests**
+- [x] **Step 1: Add construction-time zero-capacity assertions and a compile-fail doctest that ignores `FileWriteOptions::default().with_parent()` under `deny(unused_must_use)`**
+- [x] **Step 2: Confirm the integration test fails to compile because capacity builders return `Self`, and the compile-fail doctest fails because the ignored builder currently compiles**
+- [x] **Step 3: Store `Option<NonZeroUsize>`, return `io::Result<Self>` from custom-capacity builders, and remove late reader/writer validation**
+- [x] **Step 4: Add message-bearing type-level `#[must_use]` attributes; do not add redundant function-level attributes that trigger Clippy's `double_must_use`**
+- [x] **Step 5: Migrate every local custom-capacity construction and run local file, reader, writer, and temp-directory tests plus doctests**
 
 ### Task 7: Split the private implementation into `local::internal`
 
@@ -312,14 +319,14 @@ Expected: all tests whose names contain `test_copy_dir_all_with` pass.
 - Modify: `src/local/local_temp_file.rs`
 - Modify: `src/local/local_temp_dir.rs`
 
-- [ ] **Step 1: Re-run `cargo +1.94.0 test --all-features --verbose` as the green refactor baseline**
-- [ ] **Step 2: Move `PathIoError` into its own file and path helpers into `path_operations.rs`**
-- [ ] **Step 3: Move reader/writer opening into `file_io.rs` and temporary entry creation into `temp_entry.rs`**
-- [ ] **Step 4: Move platform FFI, fallible path conversion, replacement/no-replace moves, and parent sync into `file_move.rs`**
-- [ ] **Step 5: Move the complete atomic and copy pipelines into their responsibility modules while retaining `StagedFile` as their shared internal dependency**
-- [ ] **Step 6: Keep `internal/mod.rs` limited to declarations and narrow `pub(crate)` re-exports; keep direct imports in every concrete file**
-- [ ] **Step 7: Reduce `local_files.rs` to the marker type, constants still in use, public Rustdoc, and forwarding associated methods**
-- [ ] **Step 8: Run all-feature tests after each move and inspect the public exports in `src/lib.rs` for unchanged paths**
+- [x] **Step 1: Re-run `cargo +1.94.0 test --all-features --verbose` as the green refactor baseline**
+- [x] **Step 2: Move `PathIoError` into its own file and path helpers into `path_operations.rs`**
+- [x] **Step 3: Move reader/writer opening into `file_io.rs` and temporary entry creation into `temp_entry.rs`**
+- [x] **Step 4: Move platform FFI, fallible path conversion, replacement/no-replace moves, and parent sync into `file_move.rs`**
+- [x] **Step 5: Move the complete atomic and copy pipelines into their responsibility modules while retaining `StagedFile` as their shared internal dependency**
+- [x] **Step 6: Keep `internal/mod.rs` limited to declarations and narrow `pub(crate)` re-exports; keep direct imports in every concrete file**
+- [x] **Step 7: Reduce `local_files.rs` to the marker type, constants still in use, public Rustdoc, and forwarding associated methods**
+- [x] **Step 8: Run all-feature tests after each move and inspect the public exports in `src/lib.rs` for unchanged paths**
 
 ### Task 8: Finish API hygiene, test layout, and documentation
 
@@ -327,18 +334,34 @@ Expected: all tests whose names contain `test_copy_dir_all_with` pass.
 - Modify: all affected `src/local/*.rs`, `tests/local/*.rs`, `tests/local/mod.rs`
 - Modify: `README.md`, `README.zh_CN.md`, `doc/user_guide.md`, `doc/user_guide.zh_CN.md`
 
-- [ ] **Step 1: Replace `pub enum LocalFiles {}` and `pub enum LocalFilenames {}` with unconstructible marker structs containing a private `std::convert::Infallible` field; preserve associated call paths**
-- [ ] **Step 2: Remove the unused duplicate `LocalFiles::DEFAULT_TEMP_FILE_PREFIX` and keep `LocalFilenames::DEFAULT_RANDOM_PREFIX` canonical**
-- [ ] **Step 3: Add missing module Rustdoc and complete private/public item headings, including atomic callback `# Panics`, native-move same-filesystem limits, overwrite permissions, recursive-copy partial effects, and the infallible close contract**
-- [ ] **Step 4: Add mirrored test modules for `file_buffering`, read/write options and modes, atomic/copy error and stage types, copy stats, and local reader/writer; move the corresponding focused tests out of `local_files_tests.rs` without changing assertions**
-- [ ] **Step 5: Reorder inherent methods by constructor, visibility, and adjacency, then audit inline attributes using `#[inline(always)]` only for getters/setters/pure forwarding and `#[inline]` for other eligible short bodies**
-- [ ] **Step 6: Synchronize English and Chinese README/user-guide behavior statements and remove the inaccurate claim that temporary-file persistence flushes the unbuffered handle**
-- [ ] **Step 7: Run all affected test modules and doctests**
+- [x] **Step 1: Replace `pub enum LocalFiles {}` and `pub enum LocalFilenames {}` with unconstructible marker structs containing a private `std::convert::Infallible` field; preserve associated call paths**
+- [x] **Step 2: Remove the unused duplicate `LocalFiles::DEFAULT_TEMP_FILE_PREFIX` and keep `LocalFilenames::DEFAULT_RANDOM_PREFIX` canonical**
+- [x] **Step 3: Add missing module Rustdoc and complete private/public item headings, including atomic callback `# Panics`, native-move same-filesystem limits, overwrite permissions, recursive-copy partial effects, and the infallible close contract**
+- [x] **Step 4: Add mirrored test modules for `file_buffering`, read/write options and modes, atomic/copy error and stage types, copy stats, and local reader/writer; move the corresponding focused tests out of `local_files_tests.rs` without changing assertions**
+- [x] **Step 5: Reorder inherent methods by constructor, visibility, and adjacency, then audit inline attributes using `#[inline(always)]` only for getters/setters/pure forwarding and `#[inline]` for other eligible short bodies**
+- [x] **Step 6: Synchronize English and Chinese README/user-guide behavior statements and remove the inaccurate claim that temporary-file persistence flushes the unbuffered handle**
+- [x] **Step 7: Run all affected test modules and doctests**
 
 ### Task 9: Verify the crate and downstream
 
-- [ ] **Step 1: Run `./align-ci.sh`, inspect all formatter/alignment changes, and preserve only in-scope changes**
-- [ ] **Step 2: Run `./ci-check.sh`; record its exit status and every failing stage**
-- [ ] **Step 3: If CI reports coverage below threshold, run exactly `./coverage.sh json`, add only meaningful in-scope tests for uncovered branches, and rerun the affected checks**
-- [ ] **Step 4: From `../rs-mime`, run `cargo +1.94.0 test --all-features --verbose` against the local path dependency**
-- [ ] **Step 5: Run `git --no-pager diff --check`, inspect status/stat/full diff, verify no public path drift, and request final code review before reporting completion**
+- [x] **Step 1: Run `./align-ci.sh`, inspect all formatter/alignment changes, and preserve only in-scope changes**
+- [x] **Step 2: Run `./ci-check.sh`; record its exit status and every failing stage**
+- [x] **Step 3: If CI reports coverage below threshold, run exactly `./coverage.sh json`, add only meaningful in-scope tests for uncovered branches, and rerun the affected checks**
+- [x] **Step 4: From `../rs-mime`, run `cargo +1.94.0 test --all-features --verbose` against the local path dependency**
+- [x] **Step 5: Run `git --no-pager diff --check`, inspect status/stat/full diff, verify no public path drift, and request final code review before reporting completion**
+
+Verification note (2026-07-15): the crate's full CI pipeline passed, including
+177 integration tests, three normal doctests, five compile-fail doctests, and all
+per-source coverage thresholds. `copy_dir.rs` finishes at 100% functions,
+96.61% lines, and 95.2% regions. The recursive-copy ordering tests use a Linux
+file lease and targeted `SIGIO` to pause the exact source-open operation; the
+helper uses an absolute timeout, drains pending lease-break signals before
+restoring the thread mask, and no longer polls transient staging names or
+depends on large-file timing. The native `rs-mime` command currently
+fails before compiling `rs-mime` because its sibling graph resolves
+`qubit-datatype` 0.6 from both a path and crates.io. Applying an ephemeral
+Cargo CLI patch to unify that unrelated dependency identity makes all
+`rs-mime` tests and doctests pass, and the same patched graph makes
+`rs-magika --all-targets --all-features` pass. No downstream file changes were
+retained. Windows code and tests compile for `x86_64-pc-windows-msvc`; native
+Windows runtime execution remains delegated to the configured Windows CI job.

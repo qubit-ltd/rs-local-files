@@ -114,14 +114,15 @@ unbuffered handle before reusing the path from other APIs. `close` does not call
 The type intentionally does not provide read helpers; read the path through
 `LocalFiles` or `std::fs` when that is needed.
 
-`LocalTempDir` provides safe child helpers: `child_path`, `ensure_child_dir`,
-`open_child_reader`, `open_child_writer`, and `list`. Child paths must be
-relative and cannot contain parent traversal. `ensure_child_dir` creates nested
-parents like `mkdir -p`.
+`LocalTempDir::child_path` only validates and joins a non-empty relative path
+made of normal lexical components; it does not inspect existing symbolic
+links, and its result is not proof of filesystem containment. The
+`ensure_child_dir`, `open_child_reader`, and `open_child_writer` helpers also
+reject symbolic-link escapes observed during their filesystem checks.
+`ensure_child_dir` creates nested parents like `mkdir -p`.
 
-Child helpers reject lexical traversal and observed symbolic-link escapes, but
-validation is not atomic with later filesystem operations. They are not a
-sandbox boundary when an untrusted actor can mutate the tree concurrently.
+Filesystem validation is not atomic with later operations. These helpers are
+not a sandbox boundary when an untrusted actor can mutate the tree concurrently.
 
 `LocalTempFile::persist` rejects an existing target by default during the move
 operation. Use `LocalTempFile::persist_with` and
@@ -168,8 +169,12 @@ protocol rather than opening a normal write handle.
 
 `LocalFiles::atomic_write` writes bytes to a temporary file in the same parent
 directory, flushes and syncs that file, replaces the destination, and syncs the
-parent directory when supported. This is useful for whole-file replacement of
-configuration files, cache manifests, checkpoints, and generated indexes.
+destination parent plus the parents of directories created by the operation,
+from deepest to shallowest, when supported. This is useful for whole-file
+replacement of configuration files, cache manifests, checkpoints, and
+generated indexes. Existing regular-file permissions are preserved. On Unix,
+a new destination uses mode `0600` before applying a more restrictive process
+umask.
 Failures return `LocalAtomicWriteError`, including the failed stage, temporary
 path, native source error, and whether replacement had already committed.
 If an `atomic_write_with` callback panics, the uncommitted temporary file is
@@ -194,11 +199,13 @@ same destination path at the same time.
 
 `LocalCopyDirOptions::default()` is intentionally conservative: both
 `conflict` and `type_conflict` use `Fail`, symbolic links are not followed, and
-source permissions are not preserved. Select `Overwrite` or `Skip` through
+source permissions are not preserved. On Unix, new or replaced files therefore
+use mode `0600` and newly created directories use mode `0700`, before applying
+a more restrictive process umask. Select `Overwrite` or `Skip` through
 `LocalCopyConflictPolicy`, and opt into destructive file/directory type
 replacement separately through `LocalCopyTypeConflictPolicy::Replace`. Copy
-failures return `LocalCopyDirError` with paths, stage, partial statistics, and
-the native source error.
+failures return `LocalCopyDirError` with paths, stage, partial statistics, the
+optional staging path and secondary cleanup error, and the native source error.
 
 Recursive copy is not a tree-level transaction. Entries committed before a
 failure remain in the destination, no rollback is attempted, and destructive
