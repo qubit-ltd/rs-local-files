@@ -5,6 +5,11 @@
 //
 //    Licensed under the Apache License, Version 2.0.
 // =============================================================================
+use crate::{
+    LocalCopyConflictPolicy,
+    LocalCopyTypeConflictPolicy,
+};
+
 /// Options controlling recursive directory copy behavior.
 ///
 /// The default is conservative: existing destination entries are not
@@ -12,8 +17,11 @@
 /// copied to destination entries.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub struct LocalCopyDirOptions {
-    /// Whether existing destination files may be overwritten.
-    pub overwrite: bool,
+    /// Policy for existing destination file entries.
+    pub conflict: LocalCopyConflictPolicy,
+
+    /// Policy for source and destination entry type mismatches.
+    pub type_conflict: LocalCopyTypeConflictPolicy,
 
     /// Whether symbolic links in the source tree should be followed.
     ///
@@ -39,7 +47,8 @@ impl Default for LocalCopyDirOptions {
     #[inline]
     fn default() -> Self {
         Self {
-            overwrite: false,
+            conflict: LocalCopyConflictPolicy::Fail,
+            type_conflict: LocalCopyTypeConflictPolicy::Fail,
             follow_symlinks: false,
             preserve_permissions: false,
         }

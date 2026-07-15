@@ -46,6 +46,7 @@ impl LocalFileWriter {
         file: File,
         buffering: FileBuffering,
     ) -> Result<Self> {
+        validate_buffering(buffering)?;
         match buffering {
             FileBuffering::Unbuffered => Ok(Self::Unbuffered(file)),
             FileBuffering::Buffered { capacity: None } => {
@@ -53,10 +54,7 @@ impl LocalFileWriter {
             }
             FileBuffering::Buffered {
                 capacity: Some(capacity),
-            } => {
-                validate_buffer_capacity(capacity)?;
-                Ok(Self::Buffered(BufWriter::with_capacity(capacity, file)))
-            }
+            } => Ok(Self::Buffered(BufWriter::with_capacity(capacity, file))),
         }
     }
 
@@ -103,8 +101,8 @@ impl LocalFileWriter {
     /// Flushes buffered bytes and synchronizes file contents to storage.
     ///
     /// This method delegates to [`File::sync_data`] after flushing any
-    /// standard-library buffer owned by this writer. Metadata synchronization is
-    /// platform-dependent and follows [`File::sync_data`] semantics.
+    /// standard-library buffer owned by this writer. Metadata synchronization
+    /// is platform-dependent and follows [`File::sync_data`] semantics.
     ///
     /// # Errors
     /// Returns the I/O error reported while flushing or synchronizing the
@@ -174,6 +172,24 @@ impl Seek for LocalFileWriter {
             Self::Buffered(writer) => writer.seek(pos),
         }
     }
+}
+
+/// Validates a writer buffering policy before a file is opened.
+///
+/// # Parameters
+/// - `buffering`: Buffering policy to validate.
+///
+/// # Errors
+/// Returns [`ErrorKind::InvalidInput`] when a buffered writer requests a
+/// zero-byte capacity.
+pub(crate) fn validate_buffering(buffering: FileBuffering) -> Result<()> {
+    if let FileBuffering::Buffered {
+        capacity: Some(capacity),
+    } = buffering
+    {
+        validate_buffer_capacity(capacity)?;
+    }
+    Ok(())
 }
 
 /// Validates a custom buffer capacity.

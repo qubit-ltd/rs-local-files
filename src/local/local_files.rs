@@ -11,10 +11,12 @@ use std::ffi::CString;
 use std::ffi::OsString;
 use std::fs::{
     self,
+    DirBuilder,
     File,
     OpenOptions,
 };
 use std::io::{
+    self,
     Error,
     ErrorKind,
     Result,
@@ -29,17 +31,30 @@ use crate::{
     FileReadOptions,
     FileWriteMode,
     FileWriteOptions,
+    LocalAtomicWriteError,
+    LocalAtomicWriteStage,
+    LocalCopyConflictPolicy,
+    LocalCopyDirError,
     LocalCopyDirOptions,
+    LocalCopyDirStage,
     LocalCopyDirStats,
+    LocalCopyTypeConflictPolicy,
     LocalFileReader,
     LocalFileWriter,
     LocalFilenames,
 };
 
+use super::local_file_writer::validate_buffering;
+
 #[cfg(windows)]
 use std::ffi::c_void;
 #[cfg(unix)]
 use std::os::unix::ffi::OsStrExt;
+#[cfg(unix)]
+use std::os::unix::fs::{
+    DirBuilderExt,
+    OpenOptionsExt,
+};
 #[cfg(windows)]
 use std::os::windows::ffi::OsStrExt;
 #[cfg(windows)]
@@ -84,6 +99,12 @@ const ATOMIC_WRITE_TEMP_SUFFIX: &str = ".tmp";
 /// Prefix used by atomic-write temporary files.
 const ATOMIC_WRITE_TEMP_PREFIX: &str = ".atomic-write-";
 
+/// Prefix used by recursive-copy staging files.
+const COPY_FILE_TEMP_PREFIX: &str = ".copy-file-";
+
+/// Suffix used by recursive-copy staging files.
+const COPY_FILE_TEMP_SUFFIX: &str = ".tmp";
+
 #[cfg(windows)]
 unsafe extern "system" {
     fn MoveFileExW(
@@ -121,7 +142,7 @@ unsafe extern "system" {
 ///
 /// LocalFiles::atomic_write(&path, b"payload")?;
 /// assert_eq!(b"payload", std::fs::read(&path)?.as_slice());
-/// # Ok::<(), std::io::Error>(())
+/// # Ok::<(), Box<dyn std::error::Error>>(())
 /// ```
 pub enum LocalFiles {}
 
@@ -343,10 +364,11 @@ impl LocalFiles {
     /// Recursively copies a directory tree.
     ///
     /// The source path must be a directory. The destination directory is
-    /// created when missing. Existing files are rejected unless
-    /// [`LocalCopyDirOptions::overwrite`] is enabled. By default, symbolic
-    /// links are rejected instead of followed so a copy cannot accidentally
-    /// leave the requested source tree.
+    /// created when missing. Existing files and source/destination type
+    /// conflicts are handled by [`LocalCopyDirOptions::conflict`] and
+    /// [`LocalCopyDirOptions::type_conflict`]. By default, both conflict kinds
+    /// are rejected, and symbolic links are rejected instead of followed so a
+    /// copy cannot accidentally leave the requested source tree.
     ///
     /// This method also rejects destinations located inside the source tree or
     /// inside any followed source directory, because copying a directory into
@@ -360,20 +382,19 @@ impl LocalFiles {
     /// - `options`: Copy behavior options.
     ///
     /// # Returns
-    /// Statistics describing copied files, created directories, and copied
-    /// bytes.
+    /// Statistics describing copied files, created directories, copied bytes,
+    /// and skipped entries.
     ///
     /// # Errors
-    /// Returns an I/O error when the source is not a directory, the destination
-    /// is inside the source tree, a destination entry exists without overwrite
-    /// permission, a symbolic link is encountered while `follow_symlinks` is
-    /// `false`, or an underlying filesystem operation fails.
+    /// Returns [`LocalCopyDirError`] with the failed stage, source and
+    /// destination paths, partial statistics, and native I/O source error when
+    /// validation or an underlying filesystem operation fails.
     #[inline]
     pub fn copy_dir_all_with<S, D>(
         src: S,
         dst: D,
         options: LocalCopyDirOptions,
-    ) -> Result<LocalCopyDirStats>
+    ) -> std::result::Result<LocalCopyDirStats, LocalCopyDirError>
     where
         S: AsRef<Path>,
         D: AsRef<Path>,
@@ -431,7 +452,7 @@ impl LocalFiles {
     ///     br#"{"version":1,"complete":true}"#,
     ///     std::fs::read(&path)?.as_slice(),
     /// );
-    /// # Ok::<(), std::io::Error>(())
+    /// # Ok::<(), Box<dyn std::error::Error>>(())
     /// ```
     ///
     /// # Parameters
@@ -439,10 +460,13 @@ impl LocalFiles {
     /// - `bytes`: Bytes to write.
     ///
     /// # Errors
-    /// Returns the first I/O error reported while creating, writing, syncing,
-    /// removing, replacing, or syncing the temporary file or parent directory.
+    /// Returns [`LocalAtomicWriteError`] with the failed stage, temporary path,
+    /// commit state, and native I/O source error.
     #[inline]
-    pub fn atomic_write<P, B>(path: P, bytes: B) -> Result<()>
+    pub fn atomic_write<P, B>(
+        path: P,
+        bytes: B,
+    ) -> std::result::Result<(), LocalAtomicWriteError>
     where
         P: AsRef<Path>,
         B: AsRef<[u8]>,
@@ -453,8 +477,8 @@ impl LocalFiles {
     /// Atomically writes a file using caller-provided write logic.
     ///
     /// The closure receives the temporary file. After the closure succeeds, the
-    /// file is flushed, synced, closed, replaced over the destination path, and
-    /// the parent directory is synced. If replacement succeeds but syncing the
+    /// file is synced, closed, replaced over the destination path, and the
+    /// parent directory is synced. If replacement succeeds but syncing the
     /// parent directory fails, the destination may already contain the new
     /// contents even though this method returns an error.
     ///
@@ -464,16 +488,25 @@ impl LocalFiles {
     ///   file.
     ///
     /// # Errors
-    /// Returns the first I/O error reported while creating, writing, syncing,
-    /// removing, replacing, or syncing the temporary file or parent directory.
+    /// Returns [`LocalAtomicWriteError`] with the failed stage, temporary path,
+    /// commit state, and native I/O source error.
     #[inline]
-    pub fn atomic_write_with<P, F>(path: P, write: F) -> Result<()>
+    pub fn atomic_write_with<P, F>(
+        path: P,
+        write: F,
+    ) -> std::result::Result<(), LocalAtomicWriteError>
     where
         P: AsRef<Path>,
-        F: FnMut(&mut File) -> Result<()>,
+        F: FnOnce(&mut File) -> Result<()>,
     {
-        let mut write = write;
-        atomic_write_with_path(path.as_ref(), &mut write)
+        let mut write = Some(write);
+        atomic_write_with_path(path.as_ref(), &mut |file| {
+            write
+                .take()
+                .expect("atomic write callback must only be invoked once")(
+                file
+            )
+        })
     }
 }
 
@@ -552,6 +585,7 @@ pub(crate) fn open_writer_path(
     path: &Path,
     options: FileWriteOptions,
 ) -> Result<LocalFileWriter> {
+    validate_buffering(options.buffering)?;
     if options.create_parent {
         ensure_parent_path(path)?;
     }
@@ -586,11 +620,51 @@ pub(crate) fn open_writer_path(
 /// - `bytes`: Bytes to write.
 ///
 /// # Errors
-/// Returns the first I/O error reported while writing the temporary file,
-/// replacing the destination, or syncing the parent directory.
-fn atomic_write_bytes_path(path: &Path, bytes: &[u8]) -> Result<()> {
-    let mut write = |file: &mut File| file.write_all(bytes);
-    atomic_write_with_path(path, &mut write)
+/// Returns a structured atomic-write error retaining the failed stage,
+/// temporary path, commit state, and native I/O source error.
+fn atomic_write_bytes_path(
+    path: &Path,
+    bytes: &[u8],
+) -> std::result::Result<(), LocalAtomicWriteError> {
+    atomic_write_with_path(path, &mut |file| file.write_all(bytes))
+}
+
+/// Adds atomic-write context to a native I/O result.
+fn with_atomic_context<T>(
+    result: Result<T>,
+    stage: LocalAtomicWriteStage,
+    path: &Path,
+    temporary_path: Option<PathBuf>,
+    committed: bool,
+) -> std::result::Result<T, LocalAtomicWriteError> {
+    result.map_err(|source| {
+        LocalAtomicWriteError::new(
+            stage,
+            path.to_path_buf(),
+            temporary_path,
+            committed,
+            source,
+        )
+    })
+}
+
+/// Closes and removes an uncommitted atomic-write temporary file.
+fn abort_atomic_write<T>(
+    file: File,
+    temp_path: PathBuf,
+    stage: LocalAtomicWriteStage,
+    path: &Path,
+    source: Error,
+) -> std::result::Result<T, LocalAtomicWriteError> {
+    drop(file);
+    drop(fs::remove_file(&temp_path));
+    Err(LocalAtomicWriteError::new(
+        stage,
+        path.to_path_buf(),
+        Some(temp_path),
+        false,
+        source,
+    ))
 }
 
 /// Atomically writes a file at `path` using `write`.
@@ -601,44 +675,80 @@ fn atomic_write_bytes_path(path: &Path, bytes: &[u8]) -> Result<()> {
 ///   file.
 ///
 /// # Errors
-/// Returns the first I/O error reported while creating, writing, syncing,
-/// replacing, or syncing the temporary file or parent directory.
+/// Returns a structured atomic-write error retaining the failed stage,
+/// temporary path, commit state, and native I/O source error.
 fn atomic_write_with_path(
     path: &Path,
     write: &mut dyn FnMut(&mut File) -> Result<()>,
-) -> Result<()> {
-    ensure_parent_path(path)?;
-    let existing_permissions = existing_file_permissions(path)?;
+) -> std::result::Result<(), LocalAtomicWriteError> {
+    with_atomic_context(
+        ensure_parent_path(path),
+        LocalAtomicWriteStage::PrepareParent,
+        path,
+        None,
+        false,
+    )?;
+    let existing_permissions = with_atomic_context(
+        existing_file_permissions(path),
+        LocalAtomicWriteStage::InspectDestination,
+        path,
+        None,
+        false,
+    )?;
     let parent = parent_dir_for(path);
-    let (temp_path, mut file) = create_temp_file_in_dir(
-        parent,
-        Some(ATOMIC_WRITE_TEMP_PREFIX),
-        Some(ATOMIC_WRITE_TEMP_SUFFIX),
-        LocalFiles::DEFAULT_TEMP_FILE_RETRIES,
+    let (temp_path, mut file) = with_atomic_context(
+        create_temp_file_in_dir(
+            parent,
+            Some(ATOMIC_WRITE_TEMP_PREFIX),
+            Some(ATOMIC_WRITE_TEMP_SUFFIX),
+            LocalFiles::DEFAULT_TEMP_FILE_RETRIES,
+        ),
+        LocalAtomicWriteStage::CreateTemporaryFile,
+        path,
+        None,
+        false,
     )?;
 
-    let result = write(&mut file)
-        .and_then(|()| {
-            apply_existing_permissions(
-                &file,
-                existing_permissions.as_ref(),
-                &temp_path,
-            )
-        })
-        .and_then(|()| file.flush())
-        .and_then(|()| file.sync_all());
-    if let Err(error) = result {
-        drop(file);
-        drop(fs::remove_file(&temp_path));
-        return Err(error);
+    if let Err(source) = write(&mut file) {
+        return abort_atomic_write(
+            file,
+            temp_path,
+            LocalAtomicWriteStage::WriteTemporaryFile,
+            path,
+            source,
+        );
+    }
+    if let Err(source) = apply_existing_permissions(
+        &file,
+        existing_permissions.as_ref(),
+        &temp_path,
+    ) {
+        let stage = LocalAtomicWriteStage::PreservePermissions;
+        return abort_atomic_write(file, temp_path, stage, path, source);
+    }
+    if let Err(source) = file.sync_all() {
+        let stage = LocalAtomicWriteStage::SyncTemporaryFile;
+        return abort_atomic_write(file, temp_path, stage, path, source);
     }
 
     drop(file);
-    if let Err(error) = replace_file(&temp_path, path) {
+    if let Err(source) = replace_file(&temp_path, path) {
         drop(fs::remove_file(&temp_path));
-        return Err(error);
+        return Err(LocalAtomicWriteError::new(
+            LocalAtomicWriteStage::ReplaceDestination,
+            path.to_path_buf(),
+            Some(temp_path),
+            false,
+            source,
+        ));
     }
-    sync_parent_dir(path)
+    with_atomic_context(
+        sync_parent_dir(path),
+        LocalAtomicWriteStage::SyncParentDirectory,
+        path,
+        Some(temp_path),
+        true,
+    )
 }
 
 /// Returns existing destination permissions to preserve during atomic writes.
@@ -676,17 +786,14 @@ fn apply_existing_permissions(
     permissions: Option<&fs::Permissions>,
     temp_path: &Path,
 ) -> Result<()> {
-    if let Some(permissions) = permissions {
-        match file.set_permissions(permissions.clone()) {
-            Ok(()) => {}
-            Err(error) => {
-                return Err(add_path_context(
-                    error,
-                    "set temporary file permissions",
-                    temp_path,
-                ));
-            }
-        }
+    if let Some(permissions) = permissions
+        && let Err(error) = file.set_permissions(permissions.clone())
+    {
+        return Err(add_path_context(
+            error,
+            "set temporary file permissions",
+            temp_path,
+        ));
     }
     Ok(())
 }
@@ -717,12 +824,11 @@ pub(crate) fn create_temp_file_in_dir(
     loop {
         attempt += 1;
         let path = dir.join(LocalFilenames::try_random_with(prefix, suffix)?);
-        match OpenOptions::new()
-            .read(true)
-            .write(true)
-            .create_new(true)
-            .open(&path)
-        {
+        let mut options = OpenOptions::new();
+        options.read(true).write(true).create_new(true);
+        #[cfg(unix)]
+        options.mode(0o600);
+        match options.open(&path) {
             Ok(file) => return Ok((path, file)),
             Err(error) => {
                 if error.kind() == ErrorKind::AlreadyExists
@@ -764,7 +870,7 @@ pub(crate) fn create_temp_dir_in_dir(
     loop {
         attempt += 1;
         let path = dir.join(LocalFilenames::try_random_with(prefix, None)?);
-        match fs::create_dir(&path) {
+        match create_private_dir(&path) {
             Ok(()) => return Ok(path),
             Err(error) => {
                 if error.kind() == ErrorKind::AlreadyExists
@@ -780,6 +886,25 @@ pub(crate) fn create_temp_dir_in_dir(
             }
         }
     }
+}
+
+/// Creates a directory with private permissions where the platform supports
+/// explicit modes.
+///
+/// On Unix the directory is created with mode `0o700`, subject only to a more
+/// restrictive process umask. Other platforms use their native inherited
+/// access-control behavior.
+///
+/// # Parameters
+/// - `path`: Directory path to create.
+///
+/// # Errors
+/// Returns the I/O error reported while creating the directory.
+pub(crate) fn create_private_dir(path: &Path) -> Result<()> {
+    let mut builder = DirBuilder::new();
+    #[cfg(unix)]
+    builder.mode(0o700);
+    builder.create(path)
 }
 
 /// Validates a retry count.
@@ -799,7 +924,35 @@ fn validate_max_tries(max_tries: usize) -> Result<()> {
     Ok(())
 }
 
-/// Adds path context to an I/O error while preserving its kind.
+/// An I/O error annotated with the failed operation and path.
+#[derive(Debug)]
+struct PathIoError {
+    operation: &'static str,
+    path: PathBuf,
+    source: Error,
+}
+
+impl std::fmt::Display for PathIoError {
+    /// Formats the operation, path, and native I/O error.
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(
+            formatter,
+            "failed to {} '{}': {}",
+            self.operation,
+            self.path.display(),
+            self.source,
+        )
+    }
+}
+
+impl std::error::Error for PathIoError {
+    /// Returns the native I/O error that caused this contextual error.
+    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+        Some(&self.source)
+    }
+}
+
+/// Adds path context to an I/O error while preserving its kind and source.
 ///
 /// # Parameters
 /// - `error`: Original I/O error.
@@ -808,10 +961,18 @@ fn validate_max_tries(max_tries: usize) -> Result<()> {
 ///
 /// # Returns
 /// A new I/O error with the same [`ErrorKind`] and a more descriptive message.
-fn add_path_context(error: Error, operation: &str, path: &Path) -> Error {
+fn add_path_context(
+    error: Error,
+    operation: &'static str,
+    path: &Path,
+) -> Error {
     Error::new(
         error.kind(),
-        format!("failed to {operation} '{}': {error}", path.display()),
+        PathIoError {
+            operation,
+            path: path.to_path_buf(),
+            source: error,
+        },
     )
 }
 
@@ -954,6 +1115,46 @@ pub(crate) fn move_file_without_replacing(
     destination: &Path,
 ) -> Result<()> {
     move_path_without_replacing(source, destination)
+}
+
+/// Moves a directory without replacing an existing destination.
+///
+/// # Parameters
+/// - `source`: Existing source directory path.
+/// - `destination`: Destination directory path.
+///
+/// # Errors
+/// Returns the platform I/O error reported while moving the directory.
+#[cfg(any(target_os = "linux", target_os = "macos", windows))]
+pub(crate) fn move_directory_without_replacing(
+    source: &Path,
+    destination: &Path,
+) -> Result<()> {
+    move_path_without_replacing(source, destination)
+}
+
+/// Rejects no-replace directory persistence on unsupported targets.
+///
+/// # Parameters
+/// - `source`: Existing source directory path.
+/// - `destination`: Destination directory path.
+///
+/// # Errors
+/// Always returns [`ErrorKind::Unsupported`] because this target has no native
+/// no-replace directory move implementation.
+#[cfg(not(any(target_os = "linux", target_os = "macos", windows)))]
+pub(crate) fn move_directory_without_replacing(
+    source: &Path,
+    destination: &Path,
+) -> Result<()> {
+    Err(Error::new(
+        ErrorKind::Unsupported,
+        format!(
+            "moving directory '{}' to '{}' without replacement is unsupported",
+            source.display(),
+            destination.display()
+        ),
+    ))
 }
 
 /// Moves `source` to `destination` without replacing an existing file.
@@ -1196,6 +1397,72 @@ fn remove_any_path(path: &Path) -> Result<()> {
     }
 }
 
+/// Result type used by recursive directory copy internals.
+type CopyDirResult<T> = std::result::Result<T, LocalCopyDirError>;
+
+/// Builds a recursive-copy error from the current entry and statistics.
+///
+/// # Parameters
+/// - `stage`: Stage at which the copy failed.
+/// - `src`: Source entry being processed.
+/// - `dst`: Destination entry being processed.
+/// - `stats`: Statistics accumulated before the failure.
+/// - `source`: Native I/O error that caused the failure.
+///
+/// # Returns
+/// Structured recursive-copy error retaining the native source error.
+fn copy_dir_error(
+    stage: LocalCopyDirStage,
+    src: &Path,
+    dst: &Path,
+    stats: &LocalCopyDirStats,
+    source: Error,
+) -> LocalCopyDirError {
+    LocalCopyDirError::new(
+        stage,
+        src.to_path_buf(),
+        dst.to_path_buf(),
+        *stats,
+        source,
+    )
+}
+
+/// Adds recursive-copy context to a native I/O result.
+///
+/// # Parameters
+/// - `result`: Native I/O result to convert.
+/// - `stage`: Copy stage associated with the operation.
+/// - `src`: Source path associated with the operation.
+/// - `dst`: Destination path associated with the operation.
+/// - `stats`: Statistics accumulated before the operation.
+///
+/// # Returns
+/// The successful value or a structured recursive-copy error.
+fn with_copy_context<T>(
+    result: Result<T>,
+    stage: LocalCopyDirStage,
+    src: &Path,
+    dst: &Path,
+    stats: &LocalCopyDirStats,
+) -> CopyDirResult<T> {
+    result.map_err(|error| copy_dir_error(stage, src, dst, stats, error))
+}
+
+/// Closes and removes an uncommitted staged copy file.
+fn abort_staged_copy<T>(
+    temp_file: File,
+    temp_path: &Path,
+    stage: LocalCopyDirStage,
+    src: &Path,
+    dst: &Path,
+    stats: &LocalCopyDirStats,
+    error: Error,
+) -> CopyDirResult<T> {
+    drop(temp_file);
+    drop(fs::remove_file(temp_path));
+    Err(copy_dir_error(stage, src, dst, stats, error))
+}
+
 /// Recursively copies a directory tree with the supplied options.
 ///
 /// # Parameters
@@ -1207,17 +1474,23 @@ fn remove_any_path(path: &Path) -> Result<()> {
 /// Copy statistics for regular files, created directories, and bytes.
 ///
 /// # Errors
-/// Returns an I/O error when the source is invalid, the destination is inside
-/// the source tree or a followed source directory, a followed directory
-/// cycle is detected, or an underlying filesystem operation fails.
+/// Returns a structured copy error when the source is invalid, the destination
+/// is inside the source tree or a followed source directory, a followed
+/// directory cycle is detected, or an underlying filesystem operation fails.
 fn copy_dir_all_with_paths(
     src: &Path,
     dst: &Path,
     options: LocalCopyDirOptions,
-) -> Result<LocalCopyDirStats> {
-    let destination_root = canonicalize_existing_prefix(dst)?;
+) -> CopyDirResult<LocalCopyDirStats> {
     let mut active_sources = Vec::new();
     let mut stats = LocalCopyDirStats::default();
+    let destination_root = with_copy_context(
+        canonicalize_existing_prefix(dst),
+        LocalCopyDirStage::PrepareDestination,
+        src,
+        dst,
+        &stats,
+    )?;
     copy_dir_recursive(
         src,
         dst,
@@ -1238,7 +1511,7 @@ fn copy_dir_all_with_paths(
 /// - `stats`: Mutable copy statistics accumulator.
 ///
 /// # Errors
-/// Returns an I/O error when a directory or file cannot be copied.
+/// Returns a structured copy error when a directory or file cannot be copied.
 fn copy_dir_recursive(
     src: &Path,
     dst: &Path,
@@ -1246,29 +1519,66 @@ fn copy_dir_recursive(
     destination_root: &Path,
     active_sources: &mut Vec<PathBuf>,
     stats: &mut LocalCopyDirStats,
-) -> Result<()> {
-    let (source_metadata, canonical_source) = inspect_copy_source_directory(
+) -> CopyDirResult<()> {
+    let (source_metadata, canonical_source) = with_copy_context(
+        inspect_copy_source_directory(
+            src,
+            options.follow_symlinks,
+            destination_root,
+        ),
+        LocalCopyDirStage::InspectSource,
         src,
-        options.follow_symlinks,
-        destination_root,
+        dst,
+        stats,
     )?;
     if active_sources
         .iter()
         .any(|active_source| active_source == &canonical_source)
     {
-        return Err(Error::new(
-            ErrorKind::InvalidInput,
-            format!("source directory cycle detected: {}", src.display()),
+        return Err(copy_dir_error(
+            LocalCopyDirStage::InspectSource,
+            src,
+            dst,
+            stats,
+            Error::new(
+                ErrorKind::InvalidInput,
+                format!("source directory cycle detected: {}", src.display()),
+            ),
         ));
     }
     active_sources.push(canonical_source);
     let result = (|| {
-        ensure_copy_destination_dir(dst, options.overwrite, stats)?;
-        for entry in fs::read_dir(src)? {
-            let entry = entry?;
+        with_copy_context(
+            ensure_copy_destination_dir(dst, options.type_conflict, stats),
+            LocalCopyDirStage::PrepareDestination,
+            src,
+            dst,
+            stats,
+        )?;
+        let entries = with_copy_context(
+            fs::read_dir(src),
+            LocalCopyDirStage::ReadSourceDirectory,
+            src,
+            dst,
+            stats,
+        )?;
+        for entry in entries {
+            let entry = with_copy_context(
+                entry,
+                LocalCopyDirStage::ReadSourceDirectory,
+                src,
+                dst,
+                stats,
+            )?;
             let source_path = entry.path();
             let destination_path = dst.join(entry.file_name());
-            let file_type = entry.file_type()?;
+            let file_type = with_copy_context(
+                entry.file_type(),
+                LocalCopyDirStage::InspectSourceEntry,
+                &source_path,
+                &destination_path,
+                stats,
+            )?;
             if file_type.is_symlink() {
                 copy_symlink_source(
                     &source_path,
@@ -1295,17 +1605,29 @@ fn copy_dir_recursive(
                     stats,
                 )?;
             } else {
-                return Err(Error::new(
-                    ErrorKind::Unsupported,
-                    format!(
-                        "unsupported source file type: {}",
-                        source_path.display()
+                return Err(copy_dir_error(
+                    LocalCopyDirStage::InspectSourceEntry,
+                    &source_path,
+                    &destination_path,
+                    stats,
+                    Error::new(
+                        ErrorKind::Unsupported,
+                        format!(
+                            "unsupported source file type: {}",
+                            source_path.display()
+                        ),
                     ),
                 ));
             }
         }
         if options.preserve_permissions {
-            fs::set_permissions(dst, source_metadata.permissions())?;
+            with_copy_context(
+                fs::set_permissions(dst, source_metadata.permissions()),
+                LocalCopyDirStage::PreservePermissions,
+                src,
+                dst,
+                stats,
+            )?;
         }
         Ok(())
     })();
@@ -1322,8 +1644,8 @@ fn copy_dir_recursive(
 /// - `stats`: Mutable copy statistics accumulator.
 ///
 /// # Errors
-/// Returns an I/O error when symbolic links are disabled or the target cannot
-/// be copied.
+/// Returns a structured copy error when symbolic links are disabled or the
+/// target cannot be copied.
 fn copy_symlink_source(
     src: &Path,
     dst: &Path,
@@ -1331,14 +1653,26 @@ fn copy_symlink_source(
     destination_root: &Path,
     active_sources: &mut Vec<PathBuf>,
     stats: &mut LocalCopyDirStats,
-) -> Result<()> {
+) -> CopyDirResult<()> {
     if !options.follow_symlinks {
-        return Err(Error::new(
-            ErrorKind::Unsupported,
-            format!("symbolic links are not followed: {}", src.display()),
+        return Err(copy_dir_error(
+            LocalCopyDirStage::InspectSourceEntry,
+            src,
+            dst,
+            stats,
+            Error::new(
+                ErrorKind::Unsupported,
+                format!("symbolic links are not followed: {}", src.display()),
+            ),
         ));
     }
-    let target_metadata = fs::metadata(src)?;
+    let target_metadata = with_copy_context(
+        fs::metadata(src),
+        LocalCopyDirStage::InspectSourceEntry,
+        src,
+        dst,
+        stats,
+    )?;
     if target_metadata.is_dir() {
         copy_dir_recursive(
             src,
@@ -1351,9 +1685,18 @@ fn copy_symlink_source(
     } else if target_metadata.is_file() {
         copy_file_with_options(src, dst, options, stats)
     } else {
-        Err(Error::new(
-            ErrorKind::Unsupported,
-            format!("unsupported symbolic link target type: {}", src.display()),
+        Err(copy_dir_error(
+            LocalCopyDirStage::InspectSourceEntry,
+            src,
+            dst,
+            stats,
+            Error::new(
+                ErrorKind::Unsupported,
+                format!(
+                    "unsupported symbolic link target type: {}",
+                    src.display()
+                ),
+            ),
         ))
     }
 }
@@ -1393,15 +1736,15 @@ fn inspect_copy_source_directory(
 ///
 /// # Parameters
 /// - `dst`: Destination directory path.
-/// - `overwrite`: Whether an existing non-directory destination may be removed.
+/// - `type_conflict`: Policy for an existing non-directory destination.
 /// - `stats`: Mutable copy statistics accumulator.
 ///
 /// # Errors
 /// Returns an I/O error when the destination cannot be created or cannot be
-/// replaced according to `overwrite`.
+/// replaced according to `type_conflict`.
 fn ensure_copy_destination_dir(
     dst: &Path,
-    overwrite: bool,
+    type_conflict: LocalCopyTypeConflictPolicy,
     stats: &mut LocalCopyDirStats,
 ) -> Result<()> {
     match fs::symlink_metadata(dst) {
@@ -1409,18 +1752,25 @@ fn ensure_copy_destination_dir(
             if metadata.is_dir() && !metadata.file_type().is_symlink() {
                 return Ok(());
             }
-            if !overwrite {
-                return Err(Error::new(
-                    ErrorKind::AlreadyExists,
-                    format!("destination already exists: {}", dst.display()),
-                ));
+            match type_conflict {
+                LocalCopyTypeConflictPolicy::Fail => {
+                    return Err(Error::new(
+                        ErrorKind::AlreadyExists,
+                        format!(
+                            "destination type conflicts with source directory: {}",
+                            dst.display()
+                        ),
+                    ));
+                }
+                LocalCopyTypeConflictPolicy::Replace => {
+                    remove_any_path(dst)?;
+                }
             }
-            remove_any_path(dst)?;
         }
         Err(error) if error.kind() == ErrorKind::NotFound => {}
         Err(error) => return Err(error),
     }
-    fs::create_dir(dst)?;
+    create_private_dir(dst)?;
     stats.directories = stats.directories.saturating_add(1);
     Ok(())
 }
@@ -1434,44 +1784,163 @@ fn ensure_copy_destination_dir(
 /// - `stats`: Mutable copy statistics accumulator.
 ///
 /// # Errors
-/// Returns an I/O error when the destination exists without overwrite
-/// permission or the file cannot be copied.
+/// Returns a structured copy error when the destination conflict policy rejects
+/// the copy or the file cannot be staged and committed.
 fn copy_file_with_options(
     src: &Path,
     dst: &Path,
     options: LocalCopyDirOptions,
     stats: &mut LocalCopyDirStats,
-) -> Result<()> {
-    prepare_copy_file_destination(dst, options.overwrite)?;
-    let source_metadata =
-        metadata_for_copy_source(src, options.follow_symlinks)?;
-    let copied = fs::copy(src, dst)?;
-    if options.preserve_permissions {
-        fs::set_permissions(dst, source_metadata.permissions())?;
+) -> CopyDirResult<()> {
+    let source_metadata = with_copy_context(
+        metadata_for_copy_source(src, options.follow_symlinks),
+        LocalCopyDirStage::InspectSourceEntry,
+        src,
+        dst,
+        stats,
+    )?;
+    let destination_metadata = with_copy_context(
+        match fs::symlink_metadata(dst) {
+            Ok(metadata) => Ok(Some(metadata)),
+            Err(error) if error.kind() == ErrorKind::NotFound => Ok(None),
+            Err(error) => Err(error),
+        },
+        LocalCopyDirStage::PrepareDestination,
+        src,
+        dst,
+        stats,
+    )?;
+    match destination_metadata {
+        Some(metadata)
+            if metadata.is_dir() && !metadata.file_type().is_symlink() =>
+        {
+            match options.type_conflict {
+                LocalCopyTypeConflictPolicy::Fail => {
+                    return Err(copy_dir_error(
+                        LocalCopyDirStage::PrepareDestination,
+                        src,
+                        dst,
+                        stats,
+                        Error::new(
+                            ErrorKind::AlreadyExists,
+                            format!(
+                                "destination type conflicts with source file: {}",
+                                dst.display()
+                            ),
+                        ),
+                    ));
+                }
+                LocalCopyTypeConflictPolicy::Replace => {
+                    with_copy_context(
+                        remove_any_path(dst),
+                        LocalCopyDirStage::PrepareDestination,
+                        src,
+                        dst,
+                        stats,
+                    )?;
+                }
+            }
+        }
+        Some(_) => match options.conflict {
+            LocalCopyConflictPolicy::Fail => {
+                return Err(copy_dir_error(
+                    LocalCopyDirStage::PrepareDestination,
+                    src,
+                    dst,
+                    stats,
+                    Error::new(
+                        ErrorKind::AlreadyExists,
+                        format!(
+                            "destination already exists: {}",
+                            dst.display()
+                        ),
+                    ),
+                ));
+            }
+            LocalCopyConflictPolicy::Skip => {
+                stats.skipped = stats.skipped.saturating_add(1);
+                return Ok(());
+            }
+            LocalCopyConflictPolicy::Overwrite => {}
+        },
+        None => {}
     }
+
+    let (temp_path, mut temp_file) = with_copy_context(
+        create_temp_file_in_dir(
+            parent_dir_for(dst),
+            Some(COPY_FILE_TEMP_PREFIX),
+            Some(COPY_FILE_TEMP_SUFFIX),
+            LocalFiles::DEFAULT_TEMP_FILE_RETRIES,
+        ),
+        LocalCopyDirStage::PrepareDestination,
+        src,
+        dst,
+        stats,
+    )?;
+    let copy_result = File::open(src)
+        .and_then(|mut source_file| io::copy(&mut source_file, &mut temp_file));
+    let copied = match copy_result {
+        Ok(copied) => copied,
+        Err(error) => {
+            return abort_staged_copy(
+                temp_file,
+                &temp_path,
+                LocalCopyDirStage::CopyFileContents,
+                src,
+                dst,
+                stats,
+                error,
+            );
+        }
+    };
+    if options.preserve_permissions
+        && let Err(error) =
+            temp_file.set_permissions(source_metadata.permissions())
+    {
+        drop(temp_file);
+        drop(fs::remove_file(&temp_path));
+        return with_copy_context(
+            Err(error),
+            LocalCopyDirStage::PreservePermissions,
+            src,
+            dst,
+            stats,
+        );
+    }
+    drop(temp_file);
+
+    let commit_result = match options.conflict {
+        LocalCopyConflictPolicy::Fail | LocalCopyConflictPolicy::Skip => {
+            move_file_without_replacing(&temp_path, dst)
+        }
+        LocalCopyConflictPolicy::Overwrite => replace_file(&temp_path, dst),
+    };
+    match commit_result {
+        Ok(()) => {}
+        Err(error)
+            if options.conflict == LocalCopyConflictPolicy::Skip
+                && error.kind() == ErrorKind::AlreadyExists =>
+        {
+            drop(fs::remove_file(&temp_path));
+            stats.skipped = stats.skipped.saturating_add(1);
+            return Ok(());
+        }
+        Err(error) => {
+            drop(fs::remove_file(&temp_path));
+            return with_copy_context(
+                Err(error),
+                LocalCopyDirStage::CommitFile,
+                src,
+                dst,
+                stats,
+            );
+        }
+    }
+
     stats.files = stats.files.saturating_add(1);
     stats.bytes = stats.bytes.saturating_add(copied);
     Ok(())
-}
-
-/// Prepares a destination path for file copy.
-///
-/// # Parameters
-/// - `dst`: Destination file path.
-/// - `overwrite`: Whether an existing destination may be removed.
-///
-/// # Errors
-/// Returns an I/O error when the destination exists and cannot be overwritten.
-fn prepare_copy_file_destination(dst: &Path, overwrite: bool) -> Result<()> {
-    match fs::symlink_metadata(dst) {
-        Ok(_) if overwrite => remove_any_path(dst),
-        Ok(_) => Err(Error::new(
-            ErrorKind::AlreadyExists,
-            format!("destination already exists: {}", dst.display()),
-        )),
-        Err(error) if error.kind() == ErrorKind::NotFound => Ok(()),
-        Err(error) => Err(error),
-    }
 }
 
 /// Loads metadata for a source path according to symlink policy.

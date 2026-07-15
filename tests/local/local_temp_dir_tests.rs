@@ -45,6 +45,38 @@ fn test_temp_dir_with_prefix_creates_existing_directory() {
     assert!(name.starts_with("qubit-local-files-dir-"));
 }
 
+#[cfg(unix)]
+#[test]
+fn test_temp_dir_uses_private_permissions() {
+    let dir =
+        LocalTempDir::new().expect("temporary directory should be created");
+    let mode = dir
+        .metadata()
+        .expect("temporary directory metadata should be readable")
+        .permissions()
+        .mode()
+        & 0o777;
+
+    assert_eq!(0o700, mode);
+}
+
+#[cfg(unix)]
+#[test]
+fn test_temp_dir_child_directory_uses_private_permissions() {
+    let dir =
+        LocalTempDir::new().expect("temporary directory should be created");
+    let child = dir
+        .ensure_child_dir("nested")
+        .expect("child directory should be created");
+    let mode = fs::metadata(child)
+        .expect("child directory metadata should be readable")
+        .permissions()
+        .mode()
+        & 0o777;
+
+    assert_eq!(0o700, mode);
+}
+
 #[test]
 fn test_temp_dir_exists_metadata_and_cleanup() {
     let dir = temp_dir("temp-dir-cleanup");
@@ -164,6 +196,24 @@ fn test_temp_dir_child_path_rejects_empty_path() {
         .expect_err("empty child path should be rejected");
 
     assert_eq!(ErrorKind::InvalidInput, error.kind());
+    fs::remove_dir_all(dir).unwrap();
+}
+
+#[test]
+fn test_temp_dir_child_io_rejects_unsafe_paths() {
+    let dir = temp_dir("temp-dir-unsafe-child-io");
+    let temp_dir = LocalTempDir::in_dir(&dir, Some("child-"), 4)
+        .expect("temp dir should be created");
+
+    let read_error = temp_dir
+        .open_child_reader("../outside.txt", FileReadOptions::default())
+        .expect_err("unsafe reader path should be rejected");
+    let write_error = temp_dir
+        .open_child_writer("../outside.txt", FileWriteOptions::default())
+        .expect_err("unsafe writer path should be rejected");
+
+    assert_eq!(ErrorKind::InvalidInput, read_error.kind());
+    assert_eq!(ErrorKind::InvalidInput, write_error.kind());
     fs::remove_dir_all(dir).unwrap();
 }
 
@@ -393,7 +443,7 @@ fn test_temp_dir_persist_moves_directory() {
 }
 
 #[test]
-fn test_temp_dir_persist_cleans_up_when_parent_creation_fails() {
+fn test_temp_dir_persist_returns_resource_when_parent_creation_fails() {
     let dir = temp_dir("temp-dir-persist-error");
     let temp_dir = LocalTempDir::in_dir(&dir, Some("source-"), 4)
         .expect("temp dir should be created");
@@ -409,12 +459,15 @@ fn test_temp_dir_persist_cleans_up_when_parent_creation_fails() {
         error.kind(),
         ErrorKind::AlreadyExists | ErrorKind::NotADirectory
     ));
+    assert_eq!(source, error.resource.path());
+    assert!(source.exists());
+    drop(error);
     assert!(!source.exists());
     fs::remove_dir_all(dir).unwrap();
 }
 
 #[test]
-fn test_temp_dir_persist_cleans_up_when_target_exists() {
+fn test_temp_dir_persist_returns_resource_when_target_exists() {
     let dir = temp_dir("temp-dir-persist-rename-error");
     let temp_dir = LocalTempDir::in_dir(&dir, Some("source-"), 4)
         .expect("temp dir should be created");
@@ -426,15 +479,12 @@ fn test_temp_dir_persist_cleans_up_when_target_exists() {
         .persist(&target)
         .expect_err("existing target should be rejected");
 
-    assert!(matches!(
-        error.kind(),
-        ErrorKind::AlreadyExists
-            | ErrorKind::NotADirectory
-            | ErrorKind::PermissionDenied
-            | ErrorKind::Other
-    ));
-    assert!(!source.exists());
+    assert_eq!(ErrorKind::AlreadyExists, error.kind());
+    assert_eq!(source, error.resource.path());
+    assert!(source.exists());
     assert!(target.is_file());
+    drop(error);
+    assert!(!source.exists());
     fs::remove_dir_all(dir).unwrap();
 }
 
@@ -452,6 +502,9 @@ fn test_temp_dir_persist_returns_target_metadata_error() {
         .expect_err("target metadata error should be returned");
 
     assert_ne!(ErrorKind::NotFound, error.kind());
+    assert_eq!(source, error.resource.path());
+    assert!(source.exists());
+    drop(error);
     assert!(!source.exists());
     fs::remove_dir_all(dir).unwrap();
 }

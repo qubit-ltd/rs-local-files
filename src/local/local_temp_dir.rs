@@ -30,9 +30,14 @@ use crate::{
     LocalFileReader,
     LocalFileWriter,
     LocalFiles,
+    LocalPersistError,
 };
 
-use super::local_files::create_temp_dir_in_dir;
+use super::local_files::{
+    create_private_dir,
+    create_temp_dir_in_dir,
+    move_directory_without_replacing,
+};
 
 /// Temporary directory that is removed automatically unless kept or persisted.
 ///
@@ -157,6 +162,10 @@ impl LocalTempDir {
     /// paths are rejected. This method only resolves the path; it does not
     /// create filesystem entries.
     ///
+    /// These lexical and symlink checks assume the directory tree is not being
+    /// mutated concurrently by an untrusted actor. They are convenience
+    /// containment checks, not capability-based filesystem isolation.
+    ///
     /// # Parameters
     /// - `child`: Relative child path.
     ///
@@ -183,6 +192,10 @@ impl LocalTempDir {
     /// link components are rejected so the operation cannot leave the temporary
     /// directory through a child path.
     ///
+    /// The containment guarantee assumes no untrusted process concurrently
+    /// replaces checked path components. Do not use this helper as a sandbox
+    /// boundary for attacker-controlled filesystem races.
+    ///
     /// # Parameters
     /// - `child`: Relative child directory path.
     ///
@@ -205,6 +218,10 @@ impl LocalTempDir {
     /// The child path must resolve to a file. Directories and other non-file
     /// resources are rejected. Symbolic links are accepted only when their
     /// canonical target remains inside this temporary directory.
+    ///
+    /// The containment check is not atomic with opening the file and therefore
+    /// does not defend against concurrent path replacement by an untrusted
+    /// actor.
     ///
     /// # Parameters
     /// - `child`: Relative child file path.
@@ -237,6 +254,10 @@ impl LocalTempDir {
     /// created with the same `mkdir -p` semantics as
     /// [`LocalTempDir::ensure_child_dir`]. Existing child targets must be files
     /// if they already exist.
+    ///
+    /// Validation and opening are separate filesystem operations. This helper
+    /// is not a sandbox boundary when an untrusted actor can mutate the tree
+    /// concurrently.
     ///
     /// # Parameters
     /// - `child`: Relative child file path.
@@ -300,9 +321,10 @@ impl LocalTempDir {
 
     /// Moves the temporary directory to a final path.
     ///
-    /// Parent directories for `target` are created before renaming. If the
-    /// rename fails, the temporary directory remains owned by this guard and is
-    /// cleaned up when the guard is dropped.
+    /// Parent directories for `target` are created before a native no-replace
+    /// move. If persistence fails, the returned [`LocalPersistError`] retains
+    /// this guard so the caller can retry, keep, inspect, or explicitly clean
+    /// up the temporary directory.
     ///
     /// # Parameters
     /// - `target`: Final directory path.
@@ -311,30 +333,31 @@ impl LocalTempDir {
     /// The final directory path.
     ///
     /// # Errors
-    /// Returns an I/O error when the parent directory cannot be created, the
-    /// target already exists, or the temporary directory cannot be renamed to
+    /// Returns [`LocalPersistError`] when the parent directory cannot be
+    /// created, the target already exists, the platform lacks a native
+    /// no-replace directory move, or the temporary directory cannot be moved to
     /// `target`.
-    pub fn persist<P>(mut self, target: P) -> Result<PathBuf>
+    pub fn persist<P>(
+        mut self,
+        target: P,
+    ) -> std::result::Result<PathBuf, LocalPersistError<Self>>
     where
         P: AsRef<Path>,
     {
         let target = target.as_ref().to_path_buf();
-        LocalFiles::ensure_parent(&target)?;
-        match fs::symlink_metadata(&target) {
-            Ok(_) => {
-                return Err(Error::new(
-                    ErrorKind::AlreadyExists,
-                    format!("target already exists: {}", target.display()),
-                ));
-            }
-            Err(error) if error.kind() == ErrorKind::NotFound => {}
-            Err(error) => return Err(error),
+        if let Err(error) = LocalFiles::ensure_parent(&target) {
+            return Err(LocalPersistError::new(error, self));
         }
-        let source = self
-            .path
-            .as_ref()
-            .expect("temporary directory path has already been released");
-        fs::rename(source, &target)?;
+        let move_result = {
+            let source = self
+                .path
+                .as_ref()
+                .expect("temporary directory path has already been released");
+            move_directory_without_replacing(source, &target)
+        };
+        if let Err(error) = move_result {
+            return Err(LocalPersistError::new(error, self));
+        }
         let _ = self.path.take();
         Ok(target)
     }
@@ -414,7 +437,7 @@ fn ensure_child_dir_path(root: &Path, child: &Path) -> Result<PathBuf> {
                 ));
             }
             Err(error) if error.kind() == ErrorKind::NotFound => {
-                fs::create_dir(&path)?
+                create_private_dir(&path)?
             }
             Err(error) => return Err(error),
         }

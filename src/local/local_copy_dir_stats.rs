@@ -16,4 +16,7 @@ pub struct LocalCopyDirStats {
 
     /// Number of bytes copied from regular files.
     pub bytes: u64,
+
+    /// Number of existing destination file entries skipped.
+    pub skipped: u64,
 }

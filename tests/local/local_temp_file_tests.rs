@@ -6,18 +6,33 @@
 //    Licensed under the Apache License, Version 2.0.
 // =============================================================================
 
+#[cfg(unix)]
+use super::local_files_tests::PermissionsExt;
 use super::local_files_tests::{
     ErrorKind,
-    FileBuffering,
-    FileWriteMode,
-    FileWriteOptions,
     LocalPersistOptions,
     LocalTempFile,
+    Seek,
+    SeekFrom,
     Write,
     ensure_test_logger,
     fs,
     temp_dir,
 };
+
+#[cfg(unix)]
+#[test]
+fn test_temp_file_uses_private_permissions() {
+    let file = LocalTempFile::new().expect("temporary file should be created");
+    let mode = file
+        .metadata()
+        .expect("temporary file metadata should be readable")
+        .permissions()
+        .mode()
+        & 0o777;
+
+    assert_eq!(0o600, mode);
+}
 
 #[test]
 fn test_temp_file_with_name_uses_system_temp_directory() {
@@ -70,91 +85,98 @@ fn test_temp_file_metadata_and_close_handle() {
         .expect("temp file should be created");
 
     file.metadata().expect("metadata should be readable");
-    file.close().expect("close should succeed");
+    file.close();
+    file.close();
+    let write_error = file
+        .write_all(b"closed")
+        .expect_err("closed temporary file should reject writes");
+    let flush_error = file
+        .flush()
+        .expect_err("closed temporary file should reject flushes");
+    let seek_error = file
+        .seek(SeekFrom::Start(0))
+        .expect_err("closed temporary file should reject seeks");
+
+    assert_eq!(ErrorKind::NotFound, write_error.kind());
+    assert_eq!(ErrorKind::NotFound, flush_error.kind());
+    assert_eq!(ErrorKind::NotFound, seek_error.kind());
+    fs::remove_dir_all(dir).unwrap();
+}
+
+#[test]
+fn test_temp_file_cleanup_returns_missing_file_error() {
+    let dir = temp_dir("temp-file-cleanup-missing");
+    let file = LocalTempFile::in_dir(&dir, Some("cleanup-"), Some(".tmp"), 4)
+        .expect("temp file should be created");
+    fs::remove_file(file.path()).expect("temporary file should be removed");
+
     let error = file
-        .writer(FileWriteOptions::default())
-        .expect_err("closed writer should return an error");
+        .cleanup()
+        .expect_err("cleanup should report a missing temporary file");
 
     assert_eq!(ErrorKind::NotFound, error.kind());
     fs::remove_dir_all(dir).unwrap();
 }
 
 #[test]
-fn test_temp_file_writer_flushes_on_close_and_rejects_writes_after_close() {
+fn test_temp_file_close_flushes_and_rejects_writes_after_close() {
     let dir = temp_dir("temp-file-writer-close");
     let mut file =
         LocalTempFile::in_dir(&dir, Some("writer-"), Some(".tmp"), 4)
             .expect("temp file should be created");
     let path = file.path().to_owned();
 
-    {
-        let writer = file
-            .writer(FileWriteOptions {
-                mode: FileWriteMode::CreateOrTruncate,
-                buffering: FileBuffering::Buffered { capacity: Some(16) },
-                ..FileWriteOptions::default()
-            })
-            .expect("temp file writer should be configured");
-        writer.write_all(b"buffered payload").unwrap();
-    }
-    file.close().expect("close should flush buffered contents");
+    file.write_all(b"payload")
+        .expect("payload should be written through the owned handle");
+    file.flush()
+        .expect("temporary file should flush through the write trait");
+    file.close();
     let error = file
-        .writer(FileWriteOptions::default())
-        .expect_err("closed temp file should reject reopening its writer");
+        .write_all(b"rejected")
+        .expect_err("closed temporary file should reject writes");
 
-    assert_eq!(b"buffered payload", fs::read(&path).unwrap().as_slice());
+    assert_eq!(b"payload", fs::read(&path).unwrap().as_slice());
     assert_eq!(ErrorKind::NotFound, error.kind());
     fs::remove_dir_all(dir).unwrap();
 }
 
 #[test]
-fn test_temp_file_writer_reuses_same_options_and_rejects_different_options() {
-    let dir = temp_dir("temp-file-writer-options");
-    let mut file =
-        LocalTempFile::in_dir(&dir, Some("writer-"), Some(".tmp"), 4)
-            .expect("temp file should be created");
-    let options = FileWriteOptions::new(FileWriteMode::CreateOrTruncate)
-        .buffered_with_capacity(8);
+fn test_temp_file_supports_seek_through_owned_handle() {
+    let dir = temp_dir("temp-file-seek");
+    let mut file = LocalTempFile::in_dir(&dir, Some("seek-"), Some(".tmp"), 4)
+        .expect("temp file should be created");
 
-    {
-        let writer = file
-            .writer(options)
-            .expect("first writer call should configure writer");
-        writer.write_all(b"one").unwrap();
-    }
-    {
-        let writer = file
-            .writer(options)
-            .expect("same writer options should be accepted");
-        writer.write_all(b"-two").unwrap();
-    }
-    let error = file
-        .writer(FileWriteOptions::new(FileWriteMode::AppendExisting))
-        .expect_err("different writer options should be rejected");
+    file.write_all(b"one-two")
+        .expect("initial payload should be written");
+    file.seek(SeekFrom::Start(3))
+        .expect("temporary file should seek");
+    file.write_all(b"+")
+        .expect("payload should be overwritten after seeking");
+    file.close();
 
-    assert_eq!(ErrorKind::InvalidInput, error.kind());
-    file.close().unwrap();
-    assert_eq!(b"one-two", fs::read(file.path()).unwrap().as_slice());
+    assert_eq!(b"one+two", fs::read(file.path()).unwrap().as_slice());
     fs::remove_dir_all(dir).unwrap();
 }
 
 #[test]
-fn test_temp_file_writer_rejects_create_new_because_temp_file_already_exists() {
-    let dir = temp_dir("temp-file-writer-create-new");
+fn test_temp_file_exposes_owned_file_handle() {
+    let dir = temp_dir("temp-file-handle");
     let mut file =
-        LocalTempFile::in_dir(&dir, Some("writer-"), Some(".tmp"), 4)
+        LocalTempFile::in_dir(&dir, Some("handle-"), Some(".tmp"), 4)
             .expect("temp file should be created");
 
-    let error = file
-        .writer(FileWriteOptions {
-            mode: FileWriteMode::CreateNew,
-            ..FileWriteOptions::default()
-        })
-        .expect_err(
-            "create-new mode should reject an already-created temp file",
-        );
+    file.as_file_mut()
+        .expect("owned file handle should be available")
+        .write_all(b"handle")
+        .expect("owned file handle should be writable");
+    let length = file
+        .as_file()
+        .expect("owned file handle should be available")
+        .metadata()
+        .expect("owned file metadata should be readable")
+        .len();
 
-    assert_eq!(ErrorKind::AlreadyExists, error.kind());
+    assert_eq!(6, length);
     fs::remove_dir_all(dir).unwrap();
 }
 
@@ -184,11 +206,7 @@ fn test_temp_file_in_dir_creates_unique_existing_files() {
     let first_path = first_file.path().to_owned();
     let second_path = second_file.path().to_owned();
 
-    first_file
-        .writer(FileWriteOptions::default())
-        .unwrap()
-        .write_all(b"abc")
-        .unwrap();
+    first_file.write_all(b"abc").unwrap();
 
     assert_ne!(first_path, second_path);
     assert_eq!(Some(dir.as_path()), first_path.parent());
@@ -275,12 +293,9 @@ fn test_temp_file_keep_preserves_file() {
     let dir = temp_dir("temp-file-keep");
     let mut file = LocalTempFile::in_dir(&dir, Some("keep-"), Some(".tmp"), 4)
         .expect("temp file should be created");
-    file.writer(FileWriteOptions::default())
-        .unwrap()
-        .write_all(b"kept")
-        .unwrap();
+    file.write_all(b"kept").unwrap();
 
-    let path = file.keep().expect("temp file should be kept");
+    let path = file.keep();
 
     assert!(path.exists());
     assert_eq!(b"kept", fs::read(&path).unwrap().as_slice());
@@ -293,10 +308,7 @@ fn test_temp_file_persist_moves_file() {
     let mut file =
         LocalTempFile::in_dir(&dir, Some("source-"), Some(".tmp"), 4)
             .expect("temp file should be created");
-    file.writer(FileWriteOptions::default())
-        .unwrap()
-        .write_all(b"payload")
-        .unwrap();
+    file.write_all(b"payload").unwrap();
     let source = file.path().to_owned();
     let target = dir.join("nested").join("result.txt");
 
@@ -314,10 +326,7 @@ fn test_temp_file_persist_rejects_existing_target_by_default() {
     let mut file =
         LocalTempFile::in_dir(&dir, Some("source-"), Some(".tmp"), 4)
             .expect("temp file should be created");
-    file.writer(FileWriteOptions::default())
-        .unwrap()
-        .write_all(b"new")
-        .unwrap();
+    file.write_all(b"new").unwrap();
     let source = file.path().to_owned();
     let target = dir.join("result.txt");
     fs::write(&target, b"old").unwrap();
@@ -327,8 +336,11 @@ fn test_temp_file_persist_rejects_existing_target_by_default() {
         .expect_err("existing target should be rejected by default");
 
     assert_eq!(ErrorKind::AlreadyExists, error.kind());
-    assert!(!source.exists());
+    assert_eq!(source, error.resource.path());
+    assert!(source.exists());
     assert_eq!(b"old", fs::read(&target).unwrap().as_slice());
+    drop(error);
+    assert!(!source.exists());
     fs::remove_dir_all(dir).unwrap();
 }
 
@@ -338,10 +350,7 @@ fn test_temp_file_persist_with_overwrite_replaces_existing_target() {
     let mut file =
         LocalTempFile::in_dir(&dir, Some("source-"), Some(".tmp"), 4)
             .expect("temp file should be created");
-    file.writer(FileWriteOptions::default())
-        .unwrap()
-        .write_all(b"new")
-        .unwrap();
+    file.write_all(b"new").unwrap();
     let source = file.path().to_owned();
     let target = dir.join("result.txt");
     fs::write(&target, b"old").unwrap();
@@ -362,10 +371,7 @@ fn test_temp_file_persist_with_default_rejects_existing_target() {
     let mut file =
         LocalTempFile::in_dir(&dir, Some("source-"), Some(".tmp"), 4)
             .expect("temp file should be created");
-    file.writer(FileWriteOptions::default())
-        .unwrap()
-        .write_all(b"new")
-        .unwrap();
+    file.write_all(b"new").unwrap();
     let source = file.path().to_owned();
     let target = dir.join("result.txt");
     fs::write(&target, b"old").unwrap();
@@ -375,8 +381,11 @@ fn test_temp_file_persist_with_default_rejects_existing_target() {
         .expect_err("default persist options should reject existing targets");
 
     assert_eq!(ErrorKind::AlreadyExists, error.kind());
-    assert!(!source.exists());
+    assert_eq!(source, error.resource.path());
+    assert!(source.exists());
     assert_eq!(b"old", fs::read(&target).unwrap().as_slice());
+    drop(error);
+    assert!(!source.exists());
     fs::remove_dir_all(dir).unwrap();
 }
 
@@ -397,6 +406,9 @@ fn test_temp_file_persist_rejects_target_with_nul_byte() {
         .expect_err("NUL target should be rejected");
 
     assert_eq!(ErrorKind::InvalidInput, error.kind());
+    assert_eq!(source, error.resource.path());
+    assert!(source.exists());
+    drop(error);
     assert!(!source.exists());
     fs::remove_dir_all(dir).unwrap();
 }
@@ -415,12 +427,15 @@ fn test_temp_file_persist_returns_target_metadata_error() {
         .expect_err("target metadata error should be returned");
 
     assert_ne!(ErrorKind::NotFound, error.kind());
+    assert_eq!(source, error.resource.path());
+    assert!(source.exists());
+    drop(error);
     assert!(!source.exists());
     fs::remove_dir_all(dir).unwrap();
 }
 
 #[test]
-fn test_temp_file_persist_cleans_up_when_parent_creation_fails() {
+fn test_temp_file_persist_returns_resource_when_parent_creation_fails() {
     let dir = temp_dir("temp-file-persist-error");
     let file = LocalTempFile::in_dir(&dir, Some("source-"), Some(".tmp"), 4)
         .expect("temp file should be created");
@@ -436,6 +451,9 @@ fn test_temp_file_persist_cleans_up_when_parent_creation_fails() {
         error.kind(),
         ErrorKind::AlreadyExists | ErrorKind::NotADirectory
     ));
+    assert_eq!(source, error.resource.path());
+    assert!(source.exists());
+    drop(error);
     assert!(!source.exists());
     fs::remove_dir_all(dir).unwrap();
 }
