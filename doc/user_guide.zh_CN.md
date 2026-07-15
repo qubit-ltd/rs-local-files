@@ -72,7 +72,7 @@ use qubit_local_files::{
 | --- | --- | --- |
 | `FileReadOptions` | `buffering` | 控制 `open_reader` 返回无额外缓冲 reader，还是 buffered reader。 |
 | `FileWriteOptions` | `create_parent`、`mode`、`buffering` | 控制是否创建父目录、写入模式和 writer 是否缓冲。 |
-| `FileBuffering` | `Unbuffered`、`Buffered { capacity }` | 选择原始文件 I/O，或带可选容量的 `BufReader` / `BufWriter`。 |
+| `FileBuffering` | `Unbuffered`、`Buffered { capacity }` | 选择原始文件 I/O，或带可选非零容量的 `BufReader` / `BufWriter`。 |
 | `FileWriteMode` | enum variants | 选择目标文件的写入打开方式。 |
 
 `LocalFiles::open_reader` 返回的 reader 实现 `Read` 和 `Seek`。
@@ -80,6 +80,11 @@ use qubit_local_files::{
 `LocalFileWriter::sync_all` 和 `LocalFileWriter::sync_data` 会先 flush
 缓冲内容，再同步底层文件，适合 append log 或其他不需要 whole-file atomic
 replacement 的普通写句柄。对 writer 执行 seek 不会关闭 append-mode 语义。
+
+`FileBuffering::buffered_with_capacity`、
+`FileReadOptions::buffered_with_capacity` 和
+`FileWriteOptions::buffered_with_capacity` 返回 `std::io::Result` 并拒绝零容量。
+成功构造的自定义容量以 `NonZeroUsize` 保存，因此文件打开方法不会收到无效的零容量 policy。
 
 写入模式：
 
@@ -149,7 +154,7 @@ use qubit_local_files::LocalTempFile;
 
 let mut file = LocalTempFile::with_name(Some("qubit-local-files-"), Some(".txt"))?;
 file.write_all(b"temporary payload\n")?;
-file.close()?;
+file.close();
 
 # Ok::<(), std::io::Error>(())
 ```
@@ -171,15 +176,15 @@ file.close()?;
 | `metadata` | 读取文件 metadata。 |
 | `as_file` / `as_file_mut` | 借用最初创建并持有的 `File` 句柄。 |
 | `Write` / `Seek` | 直接通过持有的句柄写入或 seek。 |
-| `close` | flush 并关闭文件，但保留路径清理。 |
+| `close` | 丢弃无缓冲句柄但保留路径清理；它不调用 `sync_all`。 |
 | `cleanup` | 立即删除文件，并关闭后续 drop 清理。 |
-| `keep` | flush、关闭、消费 guard，并把文件留在生成路径。 |
+| `keep` | 关闭并消费 guard，把文件留在生成路径。 |
 | `persist` | 不覆盖地把文件移动到最终路径。 |
 | `persist_with` | 使用 `LocalPersistOptions` 把文件移动到最终路径。 |
 
 `LocalTempFile` 有意不提供读取 helper。临时文件的常见用法是写入、关闭，然后持久化。如果确实需要检查内容，先调用 `close`，再通过 `LocalFiles::open_reader` 或 `std::fs` 读取 `path()`。
 
-`LocalTempFile::persist` 会 flush 并关闭文件，为目标创建缺失父目录，并通过 no-clobber move 操作拒绝已存在目标。它有意不依赖单独的 metadata precheck。这可以在支持的平台上避免 time-of-check/time-of-use 覆盖竞态。失败时返回 `LocalPersistError<LocalTempFile>`，保留 guard 和原始 I/O error。
+`LocalTempFile::persist` 会关闭文件，为目标创建缺失父目录，并通过 no-clobber move 操作拒绝已存在目标。它有意不依赖单独的 metadata precheck。这可以在支持的平台上避免 time-of-check/time-of-use 覆盖竞态。失败时返回 `LocalPersistError<LocalTempFile>`，保留 guard 和原始 I/O error。
 
 只有覆盖策略确实不同的时候才使用 `persist_with`：
 
@@ -255,6 +260,7 @@ assert_eq!("{\"complete\":true}\n", std::fs::read_to_string(&path)?);
 - 临时文件创建在目标目录下，因此在常见本地文件系统上可以 atomic replacement。
 - 如果目标已有普通文件，会在替换前把已有权限复制到临时文件。
 - 如果写入、flush 或 sync 临时文件失败，目标保持不变。
+- 如果 `atomic_write_with` callback panic，unwind 会先关闭并删除未提交临时文件，再继续传播 panic；目标保持不变。
 - 如果替换已经成功，但 sync 父目录失败，方法可能在目标已经包含新内容后返回错误。
 - 错误通过 `LocalAtomicWriteError` 报告，包含失败阶段、临时路径、原始 I/O source 和 `committed` 标志。
 - 如果目标路径是 symbolic link，并且平台 rename-over-symlink 语义是替换 link 本身，则该 link 会被新普通文件替换，原 link target 保持不变。
@@ -405,6 +411,7 @@ assert_eq!(ErrorKind::InvalidInput, error.kind());
 ```
 
 portable 校验是 lexical 的。它不检查当前文件系统权限、mount option、Unicode normalization，或每个文件系统独有的限制。
+它也会拒绝 `COM¹`、`COM²`、`COM³`、`LPT¹`、`LPT²` 和 `LPT³`：Windows 会把 ISO/IEC 8859-1 上标数字视为 device-name digit，详见 [Microsoft 文件命名规则](https://learn.microsoft.com/zh-cn/windows/win32/fileio/naming-a-file)。
 
 对于还不是 `Path` 的字符串，可以使用字符串 helper：
 

@@ -108,10 +108,11 @@ remove them automatically on drop unless ownership is released with `keep` or
 `log` facade with `warn!` and never panic.
 
 `LocalTempFile` owns its original file handle and implements `Write` and `Seek`.
-Use `as_file` / `as_file_mut` for direct handle access, and `close` to flush and
-close it before reusing the path from other APIs. It intentionally does not
-provide read helpers; read the path through `LocalFiles` or `std::fs` when that
-is needed.
+Use `as_file` / `as_file_mut` for direct handle access, and `close` to drop the
+unbuffered handle before reusing the path from other APIs. `close` does not call
+`sync_all`; explicitly synchronize the handle first when durability is needed.
+The type intentionally does not provide read helpers; read the path through
+`LocalFiles` or `std::fs` when that is needed.
 
 `LocalTempDir` provides safe child helpers: `child_path`, `ensure_child_dir`,
 `open_child_reader`, `open_child_writer`, and `list`. Child paths must be
@@ -147,6 +148,10 @@ Normal file opening is intentionally explicit:
 buffered bytes before synchronizing the underlying file. Seeking a writer does
 not disable append-mode semantics.
 
+Custom-capacity constructors return `std::io::Result` and reject zero. The
+stored custom capacity is a `NonZeroUsize`, so invalid buffering policies cannot
+be passed to file-opening methods.
+
 `atomic_write` remains a separate API because it performs a complete replacement
 protocol rather than opening a normal write handle.
 
@@ -158,6 +163,8 @@ parent directory when supported. This is useful for whole-file replacement of
 configuration files, cache manifests, checkpoints, and generated indexes.
 Failures return `LocalAtomicWriteError`, including the failed stage, temporary
 path, native source error, and whether replacement had already committed.
+If an `atomic_write_with` callback panics, the panic is propagated after the
+uncommitted temporary file has been closed and removed.
 
 The operation is not a multi-file transaction and does not coordinate concurrent
 writers. Use an external lock if multiple processes or threads may replace the
@@ -201,6 +208,9 @@ the native source error.
 The lexical helpers do not touch the filesystem. Public methods that return
 filename data return UTF-8 strings instead of `OsStr`; invalid UTF-8 path
 components are reported as `None`.
+Portable validation rejects Windows device names that use superscript digits,
+including `COM¹`, `COM²`, `COM³`, `LPT¹`, `LPT²`, and `LPT³`, following
+[Microsoft's file-naming rules](https://learn.microsoft.com/en-us/windows/win32/fileio/naming-a-file).
 
 ## Crate Boundary
 

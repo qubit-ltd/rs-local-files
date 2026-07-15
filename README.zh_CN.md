@@ -97,7 +97,7 @@ assert_eq!("new payload\n", std::fs::read_to_string(&final_path)?);
 
 `LocalTempFile` 和 `LocalTempDir` 创建真实的本地文件系统条目，并在 drop 时自动删除，除非通过 `keep` 或 `persist` 释放所有权。Drop 阶段的清理是 best-effort；失败会通过 `log` 门面以 `warn!` 记录告警，不会 panic。
 
-`LocalTempFile` 持有最初创建的文件句柄，并实现 `Write` 和 `Seek`。可通过 `as_file` / `as_file_mut` 直接访问句柄，通过 `close` flush 并关闭后，再用其他 API 读取该路径。它有意不提供读取 helper；确实需要读取时，通过 `LocalFiles` 或 `std::fs` 操作它的路径。
+`LocalTempFile` 持有最初创建的文件句柄，并实现 `Write` 和 `Seek`。可通过 `as_file` / `as_file_mut` 直接访问句柄，通过 `close` 丢弃无缓冲句柄后，再用其他 API 读取该路径。`close` 不调用 `sync_all`；需要持久化保证时，应先显式同步句柄。它有意不提供读取 helper；确实需要读取时，通过 `LocalFiles` 或 `std::fs` 操作它的路径。
 
 `LocalTempDir` 提供安全 child helper：`child_path`、`ensure_child_dir`、`open_child_reader`、`open_child_writer` 和 `list`。child 路径必须是相对路径，不能包含父目录跳转。`ensure_child_dir` 会像 `mkdir -p` 一样创建多层缺失父目录。
 
@@ -120,6 +120,9 @@ child helper 会拒绝 lexical traversal 和检查时可见的 symbolic-link esc
 `Seek`，并提供 `sync_all` / `sync_data` helper；这些 helper 会先 flush
 缓冲内容，再同步底层文件。对 writer 执行 seek 不会关闭 append-mode 语义。
 
+自定义容量构造器返回 `std::io::Result` 并拒绝零容量。内部容量使用
+`NonZeroUsize` 表示，因此无效 buffering policy 无法传给文件打开方法。
+
 `atomic_write` 仍然是独立 API，因为它执行的是完整替换协议，而不是普通写句柄打开。
 
 ### Atomic Write
@@ -127,6 +130,7 @@ child helper 会拒绝 lexical traversal 和检查时可见的 symbolic-link esc
 `LocalFiles::atomic_write` 会在同一父目录下写入临时文件，flush 并 sync 这个临时文件，替换目标，并在支持的平台上 sync 父目录。它适合配置文件、cache manifest、checkpoint、生成索引等 whole-file replacement 场景。
 
 失败时返回 `LocalAtomicWriteError`，其中包含失败阶段、临时路径、原始 I/O source error，以及替换是否已经提交。
+如果 `atomic_write_with` callback panic，panic 会在未提交临时文件已经关闭并删除后继续传播。
 
 该操作不是多文件事务，也不协调并发写入。如果多个进程或线程可能同时替换同一路径，需要使用外部锁。
 
@@ -159,6 +163,7 @@ child helper 会拒绝 lexical traversal 和检查时可见的 symbolic-link esc
 | `file_name_from_url` | 提取 URL 最后一个 path segment，并解码安全的 percent-encoded UTF-8。 |
 
 这些 lexical helper 不访问文件系统。返回文件名数据的公开方法返回 UTF-8 字符串，而不是 `OsStr`；无效 UTF-8 path component 返回 `None`。
+portable 校验还会拒绝使用上标数字的 Windows device name，包括 `COM¹`、`COM²`、`COM³`、`LPT¹`、`LPT²` 和 `LPT³`；这一行为遵循 [Microsoft 文件命名规则](https://learn.microsoft.com/zh-cn/windows/win32/fileio/naming-a-file)。
 
 ## Crate 边界
 

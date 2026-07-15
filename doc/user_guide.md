@@ -80,7 +80,7 @@ Normal file opening is controlled by explicit option structs:
 | --- | --- | --- |
 | `FileReadOptions` | `buffering` | Controls whether `open_reader` returns an unbuffered or buffered reader. |
 | `FileWriteOptions` | `create_parent`, `mode`, `buffering` | Controls parent creation, write mode, and writer buffering. |
-| `FileBuffering` | `Unbuffered`, `Buffered { capacity }` | Selects raw file I/O or `BufReader` / `BufWriter` with an optional capacity. |
+| `FileBuffering` | `Unbuffered`, `Buffered { capacity }` | Selects raw file I/O or `BufReader` / `BufWriter` with an optional non-zero capacity. |
 | `FileWriteMode` | enum variants | Selects how the target is opened for writing. |
 
 Readers returned by `LocalFiles::open_reader` implement `Read` and `Seek`.
@@ -89,6 +89,12 @@ Writers returned by `LocalFiles::open_writer` implement `Write` and `Seek`.
 bytes before synchronizing the underlying file, which is useful for append logs
 or other normal write handles that do not need whole-file atomic replacement.
 Seeking a writer does not disable append-mode semantics.
+
+`FileBuffering::buffered_with_capacity`,
+`FileReadOptions::buffered_with_capacity`, and
+`FileWriteOptions::buffered_with_capacity` return `std::io::Result` and reject
+zero. A successfully constructed custom capacity is stored as `NonZeroUsize`,
+so file-opening methods cannot receive an invalid zero-capacity policy.
 
 Write modes:
 
@@ -178,7 +184,7 @@ use qubit_local_files::LocalTempFile;
 
 let mut file = LocalTempFile::with_name(Some("qubit-local-files-"), Some(".txt"))?;
 file.write_all(b"temporary payload\n")?;
-file.close()?;
+file.close();
 
 # Ok::<(), std::io::Error>(())
 ```
@@ -200,9 +206,9 @@ Handle and ownership methods:
 | `metadata` | Reads file metadata. |
 | `as_file` / `as_file_mut` | Borrows the original owned `File` handle. |
 | `Write` / `Seek` | Writes or seeks directly through the owned handle. |
-| `close` | Flushes and closes the file while keeping path cleanup active. |
+| `close` | Drops the unbuffered handle while keeping path cleanup active; it does not call `sync_all`. |
 | `cleanup` | Removes the file immediately and disables later drop cleanup. |
-| `keep` | Flushes, closes, consumes the guard, and leaves the file at its generated path. |
+| `keep` | Closes and consumes the guard, leaving the file at its generated path. |
 | `persist` | Moves the file to a final path without overwriting. |
 | `persist_with` | Moves the file to a final path using `LocalPersistOptions`. |
 
@@ -211,7 +217,7 @@ normally written, closed, then persisted. If you need to inspect its contents,
 call `close` and then read `path()` through `LocalFiles::open_reader` or
 `std::fs`.
 
-`LocalTempFile::persist` flushes and closes the file, creates missing parent
+`LocalTempFile::persist` closes the file, creates missing parent
 directories for the target, and rejects existing targets by using a no-clobber
 move operation. It intentionally does not rely on a separate metadata precheck.
 This avoids a time-of-check/time-of-use overwrite race on supported platforms.
@@ -298,6 +304,9 @@ Important semantics:
 - Existing regular-file permissions are copied to the temporary file before
   replacement.
 - If writing, flushing, or syncing the temporary file fails, the destination is
+  left untouched.
+- If an `atomic_write_with` callback panics, unwinding closes and removes the
+  uncommitted temporary file before the panic continues; the destination is
   left untouched.
 - If replacement succeeds but syncing the parent directory fails, the method may
   return an error after the destination already contains the new contents.
@@ -466,7 +475,9 @@ assert_eq!(ErrorKind::InvalidInput, error.kind());
 
 Portable validation is lexical. It does not check current filesystem
 permissions, mount options, Unicode normalization, or every filesystem-specific
-limit.
+limit. It also rejects `COM¹`, `COM²`, `COM³`, `LPT¹`, `LPT²`, and `LPT³`:
+Windows treats the ISO/IEC 8859-1 superscript digits as device-name digits, as
+documented in [Microsoft's file-naming rules](https://learn.microsoft.com/en-us/windows/win32/fileio/naming-a-file).
 
 For strings that are not already `Path` values, use the string helpers:
 
