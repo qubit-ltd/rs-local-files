@@ -1,9 +1,7 @@
 // =============================================================================
-//    Copyright (c) 2026 Haixing Hu.
+//    Copyright (c) 2025 - 2026 Haixing Hu.
 //
 //    SPDX-License-Identifier: Apache-2.0
-//
-//    Licensed under the Apache License, Version 2.0.
 // =============================================================================
 
 use std::io::{
@@ -18,6 +16,8 @@ use qubit_local_files::{
     LocalFiles,
 };
 
+#[cfg(target_os = "linux")]
+use super::test_support::file_status_flags;
 #[cfg(unix)]
 use super::test_support::{
     assert_fifo_open_is_rejected,
@@ -140,4 +140,22 @@ fn test_open_writer_rejects_fifo_without_blocking() {
     });
 
     fs::remove_dir_all(dir).expect("writer FIFO fixture should be removed");
+}
+
+#[cfg(target_os = "linux")]
+#[test]
+fn test_open_writer_clears_transient_nonblocking_status() {
+    let dir = temp_dir("open-writer-blocking-status");
+    let path = dir.join("data.txt");
+
+    let writer = LocalFiles::open_writer(&path, FileWriteOptions::default())
+        .expect("writer should open");
+
+    assert_eq!(
+        0,
+        file_status_flags(&path) & libc::O_NONBLOCK,
+        "anti-FIFO-race flags must not leak into the returned writer",
+    );
+    drop(writer);
+    fs::remove_dir_all(dir).expect("writer fixture should be removed");
 }

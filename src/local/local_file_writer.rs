@@ -1,15 +1,12 @@
 // =============================================================================
-//    Copyright (c) 2026 Haixing Hu.
+//    Copyright (c) 2025 - 2026 Haixing Hu.
 //
 //    SPDX-License-Identifier: Apache-2.0
-//
-//    Licensed under the Apache License, Version 2.0.
 // =============================================================================
 //! Local file writer wrapper.
 
 use std::fs::File;
 use std::io::{
-    BufWriter,
     Result,
     Seek,
     SeekFrom,
@@ -18,28 +15,23 @@ use std::io::{
 
 use crate::FileBuffering;
 
+use super::internal::LocalFileWriterInner;
+
 /// Writer returned by local file write APIs.
 ///
-/// Additional writer representations may be added in future releases. Match
-/// with a wildcard arm when inspecting the representation directly.
+/// Its concrete buffering representation is intentionally private so callers
+/// depend only on the stable [`Write`] and [`Seek`] behavior.
 ///
 /// ```compile_fail
 /// use qubit_local_files::LocalFileWriter;
 ///
-/// fn consume(writer: LocalFileWriter) {
-///     match writer {
-///         LocalFileWriter::Unbuffered(_) => {}
-///         LocalFileWriter::Buffered(_) => {}
-///     }
-/// }
+/// let _constructor: fn(std::io::BufWriter<std::fs::File>) -> LocalFileWriter =
+///     LocalFileWriter::Buffered;
 /// ```
 #[derive(Debug)]
-#[non_exhaustive]
-pub enum LocalFileWriter {
-    /// Unbuffered writer backed directly by a [`File`].
-    Unbuffered(File),
-    /// Buffered writer backed by a [`BufWriter<File>`].
-    Buffered(BufWriter<File>),
+pub struct LocalFileWriter {
+    /// Private concrete writer representation.
+    inner: LocalFileWriterInner,
 }
 
 impl LocalFileWriter {
@@ -53,14 +45,8 @@ impl LocalFileWriter {
     /// A local file writer matching `buffering`.
     #[inline]
     pub(crate) fn from_file(file: File, buffering: FileBuffering) -> Self {
-        match buffering {
-            FileBuffering::Unbuffered => Self::Unbuffered(file),
-            FileBuffering::Buffered { capacity: None } => {
-                Self::Buffered(BufWriter::new(file))
-            }
-            FileBuffering::Buffered {
-                capacity: Some(capacity),
-            } => Self::Buffered(BufWriter::with_capacity(capacity.get(), file)),
+        Self {
+            inner: LocalFileWriterInner::from_file(file, buffering),
         }
     }
 
@@ -80,10 +66,10 @@ impl LocalFileWriter {
     /// Returns whether this writer is buffered.
     ///
     /// # Returns
-    /// `true` when the writer is backed by [`BufWriter`].
+    /// `true` when the writer uses a userspace buffer.
     #[inline(always)]
     pub const fn is_buffered(&self) -> bool {
-        matches!(self, Self::Buffered(_))
+        self.inner.is_buffered()
     }
 
     /// Flushes buffered bytes and synchronizes file contents and metadata to
@@ -98,11 +84,7 @@ impl LocalFileWriter {
     /// wrapped file.
     #[inline]
     pub fn sync_all(&mut self) -> Result<()> {
-        self.flush()?;
-        match self {
-            Self::Unbuffered(file) => file.sync_all(),
-            Self::Buffered(writer) => writer.get_ref().sync_all(),
-        }
+        self.inner.sync_all()
     }
 
     /// Flushes buffered bytes and synchronizes file contents to storage.
@@ -116,11 +98,7 @@ impl LocalFileWriter {
     /// wrapped file.
     #[inline]
     pub fn sync_data(&mut self) -> Result<()> {
-        self.flush()?;
-        match self {
-            Self::Unbuffered(file) => file.sync_data(),
-            Self::Buffered(writer) => writer.get_ref().sync_data(),
-        }
+        self.inner.sync_data()
     }
 }
 
@@ -137,10 +115,7 @@ impl Write for LocalFileWriter {
     /// Returns the I/O error reported by the wrapped writer.
     #[inline]
     fn write(&mut self, buf: &[u8]) -> Result<usize> {
-        match self {
-            Self::Unbuffered(file) => file.write(buf),
-            Self::Buffered(writer) => writer.write(buf),
-        }
+        self.inner.write(buf)
     }
 
     /// Flushes the wrapped file writer.
@@ -149,10 +124,7 @@ impl Write for LocalFileWriter {
     /// Returns the I/O error reported by the wrapped writer.
     #[inline]
     fn flush(&mut self) -> Result<()> {
-        match self {
-            Self::Unbuffered(file) => file.flush(),
-            Self::Buffered(writer) => writer.flush(),
-        }
+        self.inner.flush()
     }
 }
 
@@ -160,9 +132,9 @@ impl Seek for LocalFileWriter {
     /// Repositions the wrapped file writer.
     ///
     /// Buffered writers flush pending bytes before seeking, matching
-    /// [`BufWriter`] seek semantics. Seeking does not disable append mode:
-    /// writers opened with append semantics may still write at the end of the
-    /// file according to [`std::fs::OpenOptions`] behavior.
+    /// [`std::io::BufWriter`] seek semantics. Seeking does not disable append
+    /// mode: writers opened with append semantics may still write at the
+    /// end of the file according to [`std::fs::OpenOptions`] behavior.
     ///
     /// # Parameters
     /// - `pos`: Target seek position.
@@ -175,9 +147,6 @@ impl Seek for LocalFileWriter {
     /// the wrapped file.
     #[inline]
     fn seek(&mut self, pos: SeekFrom) -> Result<u64> {
-        match self {
-            Self::Unbuffered(file) => file.seek(pos),
-            Self::Buffered(writer) => writer.seek(pos),
-        }
+        self.inner.seek(pos)
     }
 }

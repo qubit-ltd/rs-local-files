@@ -1,9 +1,7 @@
 // =============================================================================
-//    Copyright (c) 2026 Haixing Hu.
+//    Copyright (c) 2025 - 2026 Haixing Hu.
 //
 //    SPDX-License-Identifier: Apache-2.0
-//
-//    Licensed under the Apache License, Version 2.0.
 // =============================================================================
 //! Local-filesystem fixture construction and inspection.
 
@@ -157,6 +155,55 @@ where
     worker.join().expect("FIFO worker should join");
     let error = result.expect_err("FIFO must be rejected");
     assert_eq!(std::io::ErrorKind::InvalidInput, error.kind());
+}
+
+#[cfg(target_os = "linux")]
+/// Returns the status flags of the unique live descriptor for `path`.
+///
+/// The helper observes the process descriptor table through procfs so public
+/// file wrappers do not need to expose their underlying handles solely for a
+/// regression test.
+///
+/// # Parameters
+///
+/// * `path` - Path whose unique live descriptor should be inspected.
+///
+/// # Returns
+///
+/// Status flags parsed from `/proc/self/fdinfo`.
+///
+/// # Panics
+///
+/// Panics when the path cannot be canonicalized, procfs cannot be inspected,
+/// the path does not have exactly one live descriptor, or flags are malformed.
+pub(crate) fn file_status_flags(path: &Path) -> i32 {
+    let canonical_path = fs::canonicalize(path)
+        .expect("descriptor fixture path should be canonicalized");
+    let descriptors = fs::read_dir("/proc/self/fd")
+        .expect("process descriptor directory should be readable")
+        .filter_map(Result::ok)
+        .filter(|entry| {
+            fs::read_link(entry.path())
+                .is_ok_and(|target| target == canonical_path)
+        })
+        .collect::<Vec<_>>();
+    assert_eq!(
+        1,
+        descriptors.len(),
+        "fixture should have exactly one live descriptor: {}",
+        canonical_path.display(),
+    );
+    let descriptor_name = descriptors[0].file_name();
+    let info = fs::read_to_string(
+        Path::new("/proc/self/fdinfo").join(descriptor_name),
+    )
+    .expect("descriptor information should be readable");
+    let flags = info
+        .lines()
+        .find_map(|line| line.strip_prefix("flags:\t"))
+        .expect("descriptor information should contain status flags");
+    i32::from_str_radix(flags.trim(), 8)
+        .expect("descriptor status flags should be octal")
 }
 
 #[cfg(windows)]

@@ -1,9 +1,7 @@
 // =============================================================================
-//    Copyright (c) 2026 Haixing Hu.
+//    Copyright (c) 2025 - 2026 Haixing Hu.
 //
 //    SPDX-License-Identifier: Apache-2.0
-//
-//    Licensed under the Apache License, Version 2.0.
 // =============================================================================
 
 use std::io::{
@@ -18,6 +16,8 @@ use qubit_local_files::{
     LocalFiles,
 };
 
+#[cfg(target_os = "linux")]
+use super::test_support::file_status_flags;
 #[cfg(unix)]
 use super::test_support::{
     assert_fifo_open_is_rejected,
@@ -117,4 +117,23 @@ fn test_open_reader_rejects_fifo_without_blocking() {
     });
 
     fs::remove_dir_all(dir).expect("reader FIFO fixture should be removed");
+}
+
+#[cfg(target_os = "linux")]
+#[test]
+fn test_open_reader_clears_transient_nonblocking_status() {
+    let dir = temp_dir("open-reader-blocking-status");
+    let path = dir.join("data.txt");
+    fs::write(&path, b"payload").expect("reader fixture should be written");
+
+    let reader = LocalFiles::open_reader(&path, FileReadOptions::unbuffered())
+        .expect("reader should open");
+
+    assert_eq!(
+        0,
+        file_status_flags(&path) & libc::O_NONBLOCK,
+        "anti-FIFO-race flags must not leak into the returned reader",
+    );
+    drop(reader);
+    fs::remove_dir_all(dir).expect("reader fixture should be removed");
 }

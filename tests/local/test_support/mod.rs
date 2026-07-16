@@ -1,9 +1,7 @@
 // =============================================================================
-//    Copyright (c) 2026 Haixing Hu.
+//    Copyright (c) 2025 - 2026 Haixing Hu.
 //
 //    SPDX-License-Identifier: Apache-2.0
-//
-//    Licensed under the Apache License, Version 2.0.
 // =============================================================================
 
 //! Shared fixtures and helpers for local-filesystem integration tests.
@@ -37,6 +35,8 @@ pub(super) use current_dir_guard_tests::{
     CURRENT_DIR_LOCK,
     CurrentDirGuard,
 };
+#[cfg(target_os = "linux")]
+pub(super) use filesystem_fixture_tests::file_status_flags;
 #[cfg(windows)]
 pub(super) use filesystem_fixture_tests::path_with_interior_nul;
 #[cfg(unix)]
