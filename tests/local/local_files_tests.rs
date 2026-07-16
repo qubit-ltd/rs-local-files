@@ -1093,6 +1093,29 @@ fn test_copy_dir_all_with_returns_destination_inspection_error_for_nul_path() {
     assert_eq!(LocalCopyDirStage::PrepareDestination, error.stage);
 }
 
+#[cfg(unix)]
+#[test]
+fn test_copy_dir_all_with_validates_invalid_destination_before_missing_source()
+{
+    use std::ffi::OsString;
+    use std::os::unix::ffi::OsStringExt;
+
+    let dir = temp_dir("copy-invalid-destination-first");
+    let src = dir.join("missing-source");
+    let dst = dir.join(OsString::from_vec(b"dst\0invalid".to_vec()));
+
+    let error = LocalFiles::copy_dir_all_with(
+        &src,
+        &dst,
+        LocalCopyDirOptions::default(),
+    )
+    .expect_err("invalid destination should fail before source inspection");
+
+    assert_eq!(LocalCopyDirStage::PrepareDestination, error.stage);
+    assert_eq!(ErrorKind::InvalidInput, error.kind());
+    fs::remove_dir_all(dir).unwrap();
+}
+
 #[test]
 fn test_copy_dir_all_with_rejects_existing_destination_without_overwrite() {
     let dir = temp_dir("copy-dir-existing");

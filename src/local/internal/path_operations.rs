@@ -233,12 +233,12 @@ pub(crate) fn remove_any_path(path: &Path) -> Result<()> {
 /// # Errors
 /// Returns an I/O error when the existing prefix cannot be canonicalized.
 pub(super) fn canonicalize_existing_prefix(path: &Path) -> Result<PathBuf> {
-    if path.exists() {
+    if path.try_exists()? {
         return fs::canonicalize(path);
     }
     let mut missing = Vec::<OsString>::new();
     let mut current = path.to_path_buf();
-    while !current.exists() {
+    while !current.try_exists()? {
         if let Some(name) = current.file_name() {
             missing.push(name.to_os_string());
         } else {
