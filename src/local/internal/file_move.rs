@@ -298,6 +298,30 @@ pub(crate) fn move_file_without_replacing(
     move_path_without_replacing(source, destination)
 }
 
+/// Rejects no-replace file persistence on unsupported targets.
+///
+/// # Parameters
+/// - `source`: Existing source file path.
+/// - `destination`: Destination file path.
+///
+/// # Errors
+/// Always returns [`ErrorKind::Unsupported`] because this target has no native
+/// or hard-link no-replace file move implementation.
+#[cfg(not(any(unix, windows)))]
+pub(crate) fn move_file_without_replacing(
+    source: &Path,
+    destination: &Path,
+) -> Result<()> {
+    Err(Error::new(
+        ErrorKind::Unsupported,
+        format!(
+            "moving file '{}' to '{}' without replacement is unsupported",
+            source.display(),
+            destination.display(),
+        ),
+    ))
+}
+
 /// Moves a directory without replacing an existing destination.
 ///
 /// # Parameters

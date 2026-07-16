@@ -25,33 +25,50 @@ use super::test_support::{
 };
 
 #[test]
-fn test_temp_file_keeps_relative_location_after_cwd_change() {
-    let _lock = CURRENT_DIR_LOCK.lock().unwrap();
-    let dir = temp_dir("temp-file-relative-cwd");
+fn test_temp_file_exposes_absolute_location_after_cwd_change() {
+    let _lock = CURRENT_DIR_LOCK
+        .lock()
+        .expect("current directory lock should be acquired");
+    let dir = temp_dir("temp-file-absolute-cwd");
     let creation_dir = dir.join("creation");
     let later_dir = dir.join("later");
-    fs::create_dir_all(creation_dir.join("temp")).unwrap();
-    fs::create_dir_all(&later_dir).unwrap();
+    fs::create_dir_all(creation_dir.join("temp"))
+        .expect("relative creation parent should be created");
+    fs::create_dir_all(&later_dir).expect("later directory should be created");
 
-    let (exists_result, generated_path, path_exists_after_drop) = {
+    let (
+        path_is_absolute,
+        path_has_expected_parent,
+        exists_result,
+        stable_path_exists,
+        path_exists_after_drop,
+    ) = {
         let _guard = CurrentDirGuard::change_to(&creation_dir);
         let file = LocalTempFile::in_dir("temp", Some("cwd-"), None, 4)
             .expect("relative temporary file should be created");
-        assert!(file.path().is_relative());
-        let generated_path = creation_dir.join(file.path());
-        std::env::set_current_dir(&later_dir).unwrap();
+        let path_is_absolute = file.path().is_absolute();
+        let path_has_expected_parent =
+            file.path().starts_with(creation_dir.join("temp"));
+        let generated_path = file.path().to_owned();
+        std::env::set_current_dir(&later_dir)
+            .expect("current directory should change");
         let exists_result = file.exists();
+        let stable_path_exists = generated_path.exists();
         drop(file);
         (
+            path_is_absolute,
+            path_has_expected_parent,
             exists_result,
-            generated_path.clone(),
+            stable_path_exists,
             generated_path.exists(),
         )
     };
-    drop(fs::remove_dir_all(&dir));
+    fs::remove_dir_all(&dir).expect("temporary fixture should be removed");
 
+    assert!(path_is_absolute);
+    assert!(path_has_expected_parent);
     assert!(exists_result.expect("existence should be checked"));
-    assert!(generated_path.starts_with(&creation_dir));
+    assert!(stable_path_exists);
     assert!(!path_exists_after_drop);
 }
 
@@ -338,6 +355,35 @@ fn test_temp_file_keep_preserves_file() {
 }
 
 #[test]
+fn test_temp_file_keep_returns_absolute_path() {
+    let _lock = CURRENT_DIR_LOCK
+        .lock()
+        .expect("current directory lock should be acquired");
+    let dir = temp_dir("temp-file-keep-absolute");
+    let creation_dir = dir.join("creation");
+    let later_dir = dir.join("later");
+    fs::create_dir_all(creation_dir.join("temp"))
+        .expect("relative creation parent should be created");
+    fs::create_dir_all(&later_dir).expect("later directory should be created");
+
+    let (kept_path, kept_path_exists) = {
+        let _guard = CurrentDirGuard::change_to(&creation_dir);
+        let file = LocalTempFile::in_dir("temp", Some("keep-"), None, 4)
+            .expect("relative temporary file should be created");
+        let kept_path = file.keep();
+        std::env::set_current_dir(&later_dir)
+            .expect("current directory should change");
+        let kept_path_exists = kept_path.exists();
+        (kept_path, kept_path_exists)
+    };
+    fs::remove_dir_all(&dir).expect("temporary fixture should be removed");
+
+    assert!(kept_path.is_absolute());
+    assert!(kept_path.starts_with(creation_dir.join("temp")));
+    assert!(kept_path_exists);
+}
+
+#[test]
 fn test_temp_file_persist_moves_file() {
     let dir = temp_dir("temp-file-persist");
     let mut file =
@@ -353,6 +399,60 @@ fn test_temp_file_persist_moves_file() {
     assert!(!source.exists());
     assert_eq!(b"payload", fs::read(&target).unwrap().as_slice());
     fs::remove_dir_all(dir).unwrap();
+}
+
+#[test]
+fn test_temp_file_persist_returns_absolute_path() {
+    let _lock = CURRENT_DIR_LOCK
+        .lock()
+        .expect("current directory lock should be acquired");
+    let dir = temp_dir("temp-file-persist-absolute");
+    let creation_dir = dir.join("creation");
+    let later_dir = dir.join("later");
+    fs::create_dir_all(creation_dir.join("temp"))
+        .expect("relative creation parent should be created");
+    fs::create_dir_all(&later_dir).expect("later directory should be created");
+
+    let (persisted_path, persisted_path_exists) = {
+        let _guard = CurrentDirGuard::change_to(&creation_dir);
+        let file = LocalTempFile::in_dir("temp", Some("source-"), None, 4)
+            .expect("relative temporary file should be created");
+        let persisted_path = file
+            .persist("persisted/final-file.txt")
+            .expect("relative target should be persisted");
+        std::env::set_current_dir(&later_dir)
+            .expect("current directory should change");
+        let persisted_path_exists = persisted_path.exists();
+        (persisted_path, persisted_path_exists)
+    };
+    fs::remove_dir_all(&dir).expect("temporary fixture should be removed");
+
+    assert!(persisted_path.is_absolute());
+    assert_eq!(
+        creation_dir.join("persisted/final-file.txt"),
+        persisted_path
+    );
+    assert!(persisted_path_exists);
+}
+
+#[cfg(not(any(unix, windows)))]
+#[test]
+fn test_temp_file_persist_reports_unsupported_no_replace_move() {
+    let dir = temp_dir("unsupported-file-persist");
+    let file = LocalTempFile::in_dir(&dir, Some("source-"), None, 4)
+        .expect("temporary file should be created");
+    let target = dir.join("target.txt");
+
+    let error = file
+        .persist(&target)
+        .expect_err("no-replace file move should be unsupported");
+
+    assert_eq!(ErrorKind::Unsupported, error.kind());
+    error
+        .resource
+        .cleanup()
+        .expect("failed persistence resource should be cleaned up");
+    fs::remove_dir_all(dir).expect("unsupported fixture should be removed");
 }
 
 #[test]
@@ -518,6 +618,37 @@ fn test_temp_file_persist_returns_target_metadata_error() {
     drop(error);
     assert!(!source.exists());
     fs::remove_dir_all(dir).unwrap();
+}
+
+#[cfg(unix)]
+#[test]
+fn test_temp_file_persist_returns_resource_when_current_dir_is_unavailable() {
+    let _lock = CURRENT_DIR_LOCK
+        .lock()
+        .expect("current directory lock should be acquired");
+    let dir = temp_dir("temp-file-persist-unavailable-cwd");
+    let removed_cwd = dir.join("removed-cwd");
+    fs::create_dir(&removed_cwd)
+        .expect("temporary current directory should exist");
+    let file = LocalTempFile::in_dir(&dir, Some("source-"), Some(".tmp"), 4)
+        .expect("temporary file should be created");
+    let source = file.path().to_owned();
+
+    let error = {
+        let _guard = CurrentDirGuard::change_to(&removed_cwd);
+        fs::remove_dir(&removed_cwd)
+            .expect("Unix should allow removing the process current directory");
+        file.persist("relative-target").expect_err(
+            "relative target should require a readable current directory",
+        )
+    };
+
+    assert_eq!(ErrorKind::NotFound, error.kind());
+    assert_eq!(source, error.resource.path());
+    assert!(source.exists());
+    drop(error);
+    assert!(!source.exists());
+    fs::remove_dir_all(dir).expect("temporary fixture should be removed");
 }
 
 #[test]

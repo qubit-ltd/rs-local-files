@@ -47,18 +47,18 @@ use super::internal::{
 /// [`LocalTempFile::keep`] to keep the file at its generated path, or
 /// [`LocalTempFile::persist`] to move it to a final path.
 /// Relative creation directories are bound to the process current directory
-/// at creation time while [`LocalTempFile::path`] preserves the caller-facing
-/// relative spelling.
+/// at creation time. [`LocalTempFile::path`], [`LocalTempFile::keep`],
+/// [`LocalTempFile::persist`], and [`LocalTempFile::persist_with`] expose
+/// stable absolute paths that remain directly usable after later
+/// current-directory changes.
 ///
 /// Cleanup performed from `Drop` is best-effort. If removal fails, the failure
 /// is reported through the `log` facade at warning level and the program is not
 /// panicked.
 #[derive(Debug)]
 pub struct LocalTempFile {
-    /// Generated path while cleanup remains armed.
+    /// Absolute generated path while cleanup remains armed.
     path: Option<PathBuf>,
-    /// Absolute generated path used by filesystem operations.
-    operation_path: Option<PathBuf>,
     /// Original unbuffered file handle until explicitly closed.
     file: Option<File>,
 }
@@ -118,25 +118,19 @@ impl LocalTempFile {
     where
         P: AsRef<Path>,
     {
-        let dir = dir.as_ref();
-        let operation_dir = absolute_path(dir)?;
-        let (operation_path, file) =
+        let operation_dir = absolute_path(dir.as_ref())?;
+        let (path, file) =
             create_temp_file_in_dir(&operation_dir, prefix, suffix, max_tries)?;
-        let file_name = operation_path
-            .file_name()
-            .expect("generated temporary file path should have a file name");
-        let path = dir.join(file_name);
         Ok(Self {
             path: Some(path),
-            operation_path: Some(operation_path),
             file: Some(file),
         })
     }
 
-    /// Returns the temporary file path.
+    /// Returns the absolute temporary file path.
     ///
     /// # Returns
-    /// Borrowed path managed by this temporary file.
+    /// Borrowed absolute path managed by this temporary file.
     #[inline(always)]
     pub fn path(&self) -> &Path {
         self.path
@@ -155,7 +149,7 @@ impl LocalTempFile {
     /// inspection errors to `false`.
     #[inline(always)]
     pub fn exists(&self) -> Result<bool> {
-        LocalFiles::exists(self.operation_path())
+        LocalFiles::exists(self.path())
     }
 
     /// Reads metadata for the temporary file path.
@@ -167,7 +161,7 @@ impl LocalTempFile {
     /// Returns the I/O error reported by [`fs::metadata`].
     #[inline(always)]
     pub fn metadata(&self) -> Result<fs::Metadata> {
-        LocalFiles::metadata(self.operation_path())
+        LocalFiles::metadata(self.path())
     }
 
     /// Returns the owned file handle.
@@ -219,10 +213,9 @@ impl LocalTempFile {
     /// Returns an I/O error when removing the file fails.
     pub fn cleanup(mut self) -> Result<()> {
         self.close();
-        let path = self.operation_path().to_path_buf();
+        let path = self.path().to_path_buf();
         fs::remove_file(&path)?;
         let _ = self.path.take();
-        let _ = self.operation_path.take();
         Ok(())
     }
 
@@ -232,10 +225,9 @@ impl LocalTempFile {
     /// cleanup.
     ///
     /// # Returns
-    /// The generated temporary file path.
+    /// The absolute generated temporary file path.
     pub fn keep(mut self) -> PathBuf {
         self.close();
-        let _ = self.operation_path.take();
         self.path
             .take()
             .expect("temporary file path has already been released")
@@ -255,14 +247,15 @@ impl LocalTempFile {
     /// copying and deleting. Moving across filesystems can therefore fail with
     /// `EXDEV` on Unix or a platform-equivalent error.
     /// A relative target is bound to the process current directory when this
-    /// method begins. On Windows, no verbatim-path prefix is added, so native
-    /// path-length and verbatim-path semantics still apply.
+    /// method begins, and the returned path is absolute. On Windows, no
+    /// verbatim-path prefix is added, so native path-length and verbatim-path
+    /// semantics still apply.
     ///
     /// # Parameters
     /// - `target`: Final file path.
     ///
     /// # Returns
-    /// The final file path.
+    /// The absolute final file path.
     ///
     /// # Errors
     /// Returns [`LocalPersistError`] when the parent directory cannot be
@@ -295,15 +288,16 @@ impl LocalTempFile {
     /// contents while preserving existing regular-file permissions is
     /// required.
     /// A relative target is bound to the process current directory when this
-    /// method begins. On Windows, no verbatim-path prefix is added, so native
-    /// path-length and verbatim-path semantics still apply.
+    /// method begins, and the returned path is absolute. On Windows, no
+    /// verbatim-path prefix is added, so native path-length and verbatim-path
+    /// semantics still apply.
     ///
     /// # Parameters
     /// - `target`: Final file path.
     /// - `options`: Persistence behavior options.
     ///
     /// # Returns
-    /// The final file path.
+    /// The absolute final file path.
     ///
     /// # Errors
     /// Returns [`LocalPersistError`] retaining this guard when the parent
@@ -319,42 +313,29 @@ impl LocalTempFile {
         P: AsRef<Path>,
     {
         self.close();
-        let target = target.as_ref().to_path_buf();
-        let operation_target = match absolute_path(&target) {
+        let target = match absolute_path(target.as_ref()) {
             Ok(path) => path,
             Err(error) => return Err(LocalPersistError::new(error, self)),
         };
-        if let Err(error) = LocalFiles::ensure_parent(&operation_target) {
+        if let Err(error) = LocalFiles::ensure_parent(&target) {
             return Err(LocalPersistError::new(error, self));
         }
         let move_result = {
             let source = self
-                .operation_path
+                .path
                 .as_ref()
                 .expect("temporary file path has already been released");
             if options.overwrites() {
-                replace_file(source, &operation_target)
+                replace_file(source, &target)
             } else {
-                move_file_without_replacing(source, &operation_target)
+                move_file_without_replacing(source, &target)
             }
         };
         if let Err(error) = move_result {
             return Err(LocalPersistError::new(error, self));
         }
         let _ = self.path.take();
-        let _ = self.operation_path.take();
         Ok(target)
-    }
-
-    /// Returns the absolute path used for filesystem operations.
-    ///
-    /// # Returns
-    /// Borrowed operational path while cleanup remains armed.
-    #[inline(always)]
-    fn operation_path(&self) -> &Path {
-        self.operation_path
-            .as_deref()
-            .expect("temporary file path has already been released")
     }
 }
 
@@ -385,8 +366,7 @@ impl Drop for LocalTempFile {
     /// released.
     fn drop(&mut self) {
         self.close();
-        let _ = self.path.take();
-        if let Some(path) = self.operation_path.take()
+        if let Some(path) = self.path.take()
             && let Err(error) = fs::remove_file(&path)
         {
             warn!(

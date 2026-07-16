@@ -49,18 +49,17 @@ use super::internal::{
 /// directory at its generated path, or [`LocalTempDir::persist`] to move it to
 /// a final path.
 /// Relative creation directories are bound to the process current directory
-/// at creation time while [`LocalTempDir::path`] preserves the caller-facing
-/// relative spelling.
+/// at creation time. [`LocalTempDir::path`], child-path helpers,
+/// [`LocalTempDir::keep`], and [`LocalTempDir::persist`] expose stable absolute
+/// paths that remain directly usable after later current-directory changes.
 ///
 /// Cleanup performed from `Drop` is best-effort. If removal fails, the failure
 /// is reported through the `log` facade at warning level and the program is not
 /// panicked.
 #[derive(Debug)]
 pub struct LocalTempDir {
-    /// Generated path while cleanup remains armed.
+    /// Absolute generated path while cleanup remains armed.
     path: Option<PathBuf>,
-    /// Absolute generated path used by filesystem operations.
-    operation_path: Option<PathBuf>,
 }
 
 impl LocalTempDir {
@@ -111,24 +110,15 @@ impl LocalTempDir {
     where
         P: AsRef<Path>,
     {
-        let dir = dir.as_ref();
-        let operation_dir = absolute_path(dir)?;
-        let operation_path =
-            create_temp_dir_in_dir(&operation_dir, prefix, max_tries)?;
-        let file_name = operation_path.file_name().expect(
-            "generated temporary directory path should have a file name",
-        );
-        let path = dir.join(file_name);
-        Ok(Self {
-            path: Some(path),
-            operation_path: Some(operation_path),
-        })
+        let operation_dir = absolute_path(dir.as_ref())?;
+        let path = create_temp_dir_in_dir(&operation_dir, prefix, max_tries)?;
+        Ok(Self { path: Some(path) })
     }
 
-    /// Returns the temporary directory path.
+    /// Returns the absolute temporary directory path.
     ///
     /// # Returns
-    /// Borrowed path managed by this temporary directory.
+    /// Borrowed absolute path managed by this temporary directory.
     #[inline(always)]
     pub fn path(&self) -> &Path {
         self.path
@@ -147,7 +137,7 @@ impl LocalTempDir {
     /// inspection errors to `false`.
     #[inline(always)]
     pub fn exists(&self) -> Result<bool> {
-        LocalFiles::exists(self.operation_path())
+        LocalFiles::exists(self.path())
     }
 
     /// Reads metadata for the temporary directory path.
@@ -159,7 +149,7 @@ impl LocalTempDir {
     /// Returns the I/O error reported by [`fs::metadata`].
     #[inline(always)]
     pub fn metadata(&self) -> Result<Metadata> {
-        LocalFiles::metadata(self.operation_path())
+        LocalFiles::metadata(self.path())
     }
 
     /// Lists direct children of the temporary directory.
@@ -171,7 +161,7 @@ impl LocalTempDir {
     /// Returns the I/O error reported by [`fs::read_dir`].
     #[inline(always)]
     pub fn list(&self) -> Result<ReadDir> {
-        LocalFiles::list(self.operation_path())
+        LocalFiles::list(self.path())
     }
 
     /// Resolves a relative child path inside the temporary directory.
@@ -191,7 +181,7 @@ impl LocalTempDir {
     /// - `child`: Relative child path.
     ///
     /// # Returns
-    /// The child path joined under this temporary directory.
+    /// The absolute child path joined under this temporary directory.
     ///
     /// # Errors
     /// Returns [`ErrorKind::InvalidInput`] when `child` is not a non-empty
@@ -221,7 +211,7 @@ impl LocalTempDir {
     /// - `child`: Relative child directory path.
     ///
     /// # Returns
-    /// The ensured child directory path.
+    /// The absolute ensured child directory path.
     ///
     /// # Errors
     /// Returns an I/O error when `child` is invalid, an existing component is
@@ -232,7 +222,7 @@ impl LocalTempDir {
         P: AsRef<Path>,
     {
         let child = child.as_ref();
-        ensure_child_dir_path(self.operation_path(), child)?;
+        ensure_child_dir_path(self.path(), child)?;
         Ok(self.path().join(child))
     }
 
@@ -267,8 +257,8 @@ impl LocalTempDir {
     {
         let child = child.as_ref();
         let _ = self.child_path(child)?;
-        let path = self.operation_path().join(child);
-        ensure_child_file_inside(self.operation_path(), &path)?;
+        let path = self.path().join(child);
+        ensure_child_file_inside(self.path(), &path)?;
         LocalFiles::open_reader(path, options)
     }
 
@@ -308,9 +298,9 @@ impl LocalTempDir {
     {
         let child = child.as_ref();
         let _ = self.child_path(child)?;
-        let path = self.operation_path().join(child);
+        let path = self.path().join(child);
         prepare_child_writer_path(
-            self.operation_path(),
+            self.path(),
             child,
             &path,
             options.creates_parent(),
@@ -327,10 +317,9 @@ impl LocalTempDir {
     /// # Errors
     /// Returns the I/O error reported by [`fs::remove_dir_all`].
     pub fn cleanup(mut self) -> Result<()> {
-        let path = self.operation_path().to_path_buf();
+        let path = self.path().to_path_buf();
         fs::remove_dir_all(&path)?;
         let _ = self.path.take();
-        let _ = self.operation_path.take();
         Ok(())
     }
 
@@ -339,10 +328,9 @@ impl LocalTempDir {
     /// This consumes the guard and disables automatic cleanup.
     ///
     /// # Returns
-    /// The generated temporary directory path.
+    /// The absolute generated temporary directory path.
     #[inline]
     pub fn keep(mut self) -> PathBuf {
-        let _ = self.operation_path.take();
         self.path
             .take()
             .expect("temporary directory path has already been released")
@@ -359,14 +347,15 @@ impl LocalTempDir {
     /// copying and deleting. Moving across filesystems can therefore fail with
     /// `EXDEV` on Unix or a platform-equivalent error.
     /// A relative target is bound to the process current directory when this
-    /// method begins. On Windows, no verbatim-path prefix is added, so native
-    /// path-length and verbatim-path semantics still apply.
+    /// method begins, and the returned path is absolute. On Windows, no
+    /// verbatim-path prefix is added, so native path-length and verbatim-path
+    /// semantics still apply.
     ///
     /// # Parameters
     /// - `target`: Final directory path.
     ///
     /// # Returns
-    /// The final directory path.
+    /// The absolute final directory path.
     ///
     /// # Errors
     /// Returns [`LocalPersistError`] when the parent directory cannot be
@@ -380,38 +369,25 @@ impl LocalTempDir {
     where
         P: AsRef<Path>,
     {
-        let target = target.as_ref().to_path_buf();
-        let operation_target = match absolute_path(&target) {
+        let target = match absolute_path(target.as_ref()) {
             Ok(path) => path,
             Err(error) => return Err(LocalPersistError::new(error, self)),
         };
-        if let Err(error) = LocalFiles::ensure_parent(&operation_target) {
+        if let Err(error) = LocalFiles::ensure_parent(&target) {
             return Err(LocalPersistError::new(error, self));
         }
         let move_result = {
             let source = self
-                .operation_path
+                .path
                 .as_ref()
                 .expect("temporary directory path has already been released");
-            move_directory_without_replacing(source, &operation_target)
+            move_directory_without_replacing(source, &target)
         };
         if let Err(error) = move_result {
             return Err(LocalPersistError::new(error, self));
         }
         let _ = self.path.take();
-        let _ = self.operation_path.take();
         Ok(target)
-    }
-
-    /// Returns the absolute path used for filesystem operations.
-    ///
-    /// # Returns
-    /// Borrowed operational path while cleanup remains armed.
-    #[inline(always)]
-    fn operation_path(&self) -> &Path {
-        self.operation_path
-            .as_deref()
-            .expect("temporary directory path has already been released")
     }
 }
 
@@ -588,8 +564,7 @@ fn ensure_existing_path_inside(root: &Path, path: &Path) -> Result<()> {
 impl Drop for LocalTempDir {
     /// Removes the temporary directory unless ownership has been released.
     fn drop(&mut self) {
-        let _ = self.path.take();
-        if let Some(path) = self.operation_path.take()
+        if let Some(path) = self.path.take()
             && let Err(error) = fs::remove_dir_all(&path)
         {
             warn!(
