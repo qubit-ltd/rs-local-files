@@ -23,7 +23,9 @@ use std::time::{
     UNIX_EPOCH,
 };
 
+/// Maximum byte length accepted for a portable UTF-8 file name.
 const MAX_PORTABLE_FILE_NAME_BYTES: usize = 255;
+/// Random payload length used by generated file names.
 const RANDOM_NAME_BYTES: usize = 16;
 
 /// File-name utility namespace.

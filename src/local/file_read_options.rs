@@ -28,15 +28,6 @@ pub struct FileReadOptions {
 }
 
 impl FileReadOptions {
-    /// Returns the configured buffering policy.
-    ///
-    /// # Returns
-    /// Buffering policy used by the opened reader.
-    #[inline(always)]
-    pub const fn buffering(&self) -> FileBuffering {
-        self.buffering
-    }
-
     /// Returns options for an unbuffered reader.
     ///
     /// # Returns
@@ -74,5 +65,14 @@ impl FileReadOptions {
         Ok(Self {
             buffering: FileBuffering::buffered_with_capacity(capacity)?,
         })
+    }
+
+    /// Returns the configured buffering policy.
+    ///
+    /// # Returns
+    /// Buffering policy used by the opened reader.
+    #[inline(always)]
+    pub const fn buffering(&self) -> FileBuffering {
+        self.buffering
     }
 }

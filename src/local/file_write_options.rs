@@ -45,6 +45,23 @@ pub struct FileWriteOptions {
 }
 
 impl FileWriteOptions {
+    /// Returns options for a specific write mode.
+    ///
+    /// # Parameters
+    /// - `mode`: File write mode.
+    ///
+    /// # Returns
+    /// Write options using `mode`, without parent creation and without
+    /// buffering.
+    #[inline]
+    pub const fn new(mode: FileWriteMode) -> Self {
+        Self {
+            create_parent: false,
+            mode,
+            buffering: FileBuffering::Unbuffered,
+        }
+    }
+
     /// Returns whether missing parent directories will be created.
     ///
     /// # Returns
@@ -70,23 +87,6 @@ impl FileWriteOptions {
     #[inline(always)]
     pub const fn buffering(&self) -> FileBuffering {
         self.buffering
-    }
-
-    /// Returns options for a specific write mode.
-    ///
-    /// # Parameters
-    /// - `mode`: File write mode.
-    ///
-    /// # Returns
-    /// Write options using `mode`, without parent creation and without
-    /// buffering.
-    #[inline]
-    pub const fn new(mode: FileWriteMode) -> Self {
-        Self {
-            create_parent: false,
-            mode,
-            buffering: FileBuffering::Unbuffered,
-        }
     }
 
     /// Enables parent directory creation.

@@ -38,44 +38,69 @@ use std::os::windows::io::{
 };
 
 #[cfg(windows)]
+use super::{
+    FileAttributeTagInfo,
+    FileDispositionInfo,
+};
+
+/// Replace an existing destination in `MoveFileExW`.
+#[cfg(windows)]
 const MOVEFILE_REPLACE_EXISTING: u32 = 0x0000_0001;
+/// Flush the move to disk before `MoveFileExW` returns.
 #[cfg(windows)]
 const MOVEFILE_WRITE_THROUGH: u32 = 0x0000_0008;
+/// Windows generic read access mask.
 #[cfg(windows)]
 const GENERIC_READ: u32 = 0x8000_0000;
+/// Windows delete access mask.
 #[cfg(windows)]
 const DELETE: u32 = 0x0001_0000;
+/// Windows file-attribute read access mask.
 #[cfg(windows)]
 const FILE_READ_ATTRIBUTES: u32 = 0x0000_0080;
+/// Windows read sharing flag.
 #[cfg(windows)]
 const FILE_SHARE_READ: u32 = 0x0000_0001;
+/// Windows write sharing flag.
 #[cfg(windows)]
 const FILE_SHARE_WRITE: u32 = 0x0000_0002;
+/// Windows delete sharing flag.
 #[cfg(windows)]
 const FILE_SHARE_DELETE: u32 = 0x0000_0004;
+/// Windows disposition for opening an existing object.
 #[cfg(windows)]
 const OPEN_EXISTING: u32 = 3;
+/// Windows flag allowing directory handles to be opened.
 #[cfg(windows)]
 const FILE_FLAG_BACKUP_SEMANTICS: u32 = 0x0200_0000;
+/// Windows flag opening a reparse point instead of its target.
 #[cfg(windows)]
 const FILE_FLAG_OPEN_REPARSE_POINT: u32 = 0x0020_0000;
+/// Windows directory attribute bit.
 #[cfg(windows)]
 const FILE_ATTRIBUTE_DIRECTORY: u32 = 0x0000_0010;
+/// Windows reparse-point attribute bit.
 #[cfg(windows)]
 const FILE_ATTRIBUTE_REPARSE_POINT: u32 = 0x0000_0400;
+/// Windows reparse-tag bit identifying name-surrogate tags.
 #[cfg(windows)]
 const IO_REPARSE_TAG_NAME_SURROGATE: u32 = 0x2000_0000;
+/// Windows `FILE_DISPOSITION_INFO` information class.
 #[cfg(windows)]
 const FILE_DISPOSITION_INFO_CLASS: u32 = 4;
+/// Windows `FILE_ATTRIBUTE_TAG_INFO` information class.
 #[cfg(windows)]
 const FILE_ATTRIBUTE_TAG_INFO_CLASS: u32 = 9;
+/// Sentinel returned when a Windows handle operation fails.
 #[cfg(windows)]
 const INVALID_HANDLE_VALUE: RawHandle = -1isize as RawHandle;
+/// macOS flag that prevents replacement during `renamex_np`.
 #[cfg(target_os = "macos")]
 const RENAME_EXCL: std::os::raw::c_uint = 0x0000_0004;
 
 #[cfg(target_os = "macos")]
 unsafe extern "C" {
+    /// Renames a path using macOS-specific flags.
     fn renamex_np(
         from: *const std::os::raw::c_char,
         to: *const std::os::raw::c_char,
@@ -85,12 +110,14 @@ unsafe extern "C" {
 
 #[cfg(windows)]
 unsafe extern "system" {
+    /// Moves or replaces a Windows filesystem path.
     fn MoveFileExW(
         existing_file_name: *const u16,
         new_file_name: *const u16,
         flags: u32,
     ) -> i32;
 
+    /// Opens a Windows file or directory handle.
     fn CreateFileW(
         file_name: *const u16,
         desired_access: u32,
@@ -101,6 +128,7 @@ unsafe extern "system" {
         template_file: RawHandle,
     ) -> RawHandle;
 
+    /// Reads an information class from a Windows file handle.
     fn GetFileInformationByHandleEx(
         file: RawHandle,
         file_information_class: u32,
@@ -108,30 +136,13 @@ unsafe extern "system" {
         buffer_size: u32,
     ) -> i32;
 
+    /// Writes an information class to a Windows file handle.
     fn SetFileInformationByHandle(
         file: RawHandle,
         file_information_class: u32,
         file_information: *const c_void,
         buffer_size: u32,
     ) -> i32;
-}
-
-/// Native Windows attributes returned for a handle and its reparse tag.
-#[cfg(windows)]
-#[repr(C)]
-struct FileAttributeTagInfo {
-    /// Bit mask of `FILE_ATTRIBUTE_*` values.
-    file_attributes: u32,
-    /// Reparse tag, or zero when the object is not a reparse point.
-    reparse_tag: u32,
-}
-
-/// Native Windows request that marks a handle's object for deletion.
-#[cfg(windows)]
-#[repr(C)]
-struct FileDispositionInfo {
-    /// Windows `BOOLEAN` value indicating whether deletion is requested.
-    delete_file: u8,
 }
 
 /// Replaces `destination` with `source`.

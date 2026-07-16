@@ -27,6 +27,19 @@ pub struct LocalPersistError<T> {
 }
 
 impl<T> LocalPersistError<T> {
+    /// Creates a recoverable persistence error.
+    ///
+    /// # Parameters
+    /// - `error`: Native I/O error that prevented persistence.
+    /// - `resource`: Temporary resource retained after the failure.
+    ///
+    /// # Returns
+    /// New persistence error owning both values.
+    #[inline]
+    pub(crate) fn new(error: io::Error, resource: T) -> Self {
+        Self { error, resource }
+    }
+
     /// Returns the native persistence error.
     ///
     /// # Returns
@@ -52,19 +65,6 @@ impl<T> LocalPersistError<T> {
     #[inline(always)]
     pub const fn resource_mut(&mut self) -> &mut T {
         &mut self.resource
-    }
-
-    /// Creates a recoverable persistence error.
-    ///
-    /// # Parameters
-    /// - `error`: Native I/O error that prevented persistence.
-    /// - `resource`: Temporary resource retained after the failure.
-    ///
-    /// # Returns
-    /// New persistence error owning both values.
-    #[inline]
-    pub(crate) fn new(error: io::Error, resource: T) -> Self {
-        Self { error, resource }
     }
 
     /// Returns the native I/O error kind.

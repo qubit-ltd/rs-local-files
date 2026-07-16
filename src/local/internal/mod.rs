@@ -8,6 +8,8 @@
 //! Private implementation support for local filesystem operations.
 
 mod copy_dir;
+mod file_attribute_tag_info;
+mod file_disposition_info;
 mod file_io;
 mod file_move;
 mod path_io_error;
@@ -16,6 +18,10 @@ mod staged_file;
 mod temp_entry;
 
 pub(crate) use copy_dir::copy_dir_all_with_paths;
+#[cfg(windows)]
+pub(super) use file_attribute_tag_info::FileAttributeTagInfo;
+#[cfg(windows)]
+pub(super) use file_disposition_info::FileDispositionInfo;
 pub(crate) use file_io::{
     open_reader_path,
     open_writer_path,

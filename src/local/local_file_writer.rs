@@ -96,6 +96,7 @@ impl LocalFileWriter {
     /// # Errors
     /// Returns the I/O error reported while flushing or synchronizing the
     /// wrapped file.
+    #[inline]
     pub fn sync_all(&mut self) -> Result<()> {
         self.flush()?;
         match self {
@@ -113,6 +114,7 @@ impl LocalFileWriter {
     /// # Errors
     /// Returns the I/O error reported while flushing or synchronizing the
     /// wrapped file.
+    #[inline]
     pub fn sync_data(&mut self) -> Result<()> {
         self.flush()?;
         match self {

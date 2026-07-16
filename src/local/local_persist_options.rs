@@ -37,15 +37,6 @@ pub struct LocalPersistOptions {
 }
 
 impl LocalPersistOptions {
-    /// Returns whether an existing target may be overwritten.
-    ///
-    /// # Returns
-    /// `true` when target replacement is enabled.
-    #[inline(always)]
-    pub const fn overwrites(&self) -> bool {
-        self.overwrite
-    }
-
     /// Returns conservative persistence options.
     ///
     /// # Returns
@@ -53,6 +44,15 @@ impl LocalPersistOptions {
     #[inline]
     pub const fn new() -> Self {
         Self { overwrite: false }
+    }
+
+    /// Returns whether an existing target may be overwritten.
+    ///
+    /// # Returns
+    /// `true` when target replacement is enabled.
+    #[inline(always)]
+    pub const fn overwrites(&self) -> bool {
+        self.overwrite
     }
 
     /// Enables replacement of an existing target path.
@@ -71,7 +71,7 @@ impl Default for LocalPersistOptions {
     ///
     /// # Returns
     /// Options that reject existing destination paths.
-    #[inline]
+    #[inline(always)]
     fn default() -> Self {
         Self::new()
     }

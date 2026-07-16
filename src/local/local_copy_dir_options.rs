@@ -74,6 +74,21 @@ pub struct LocalCopyDirOptions {
 }
 
 impl LocalCopyDirOptions {
+    /// Returns conservative directory copy options.
+    ///
+    /// # Returns
+    /// Options that fail on destination conflicts, do not follow symbolic
+    /// links, and do not preserve source permissions.
+    #[inline]
+    pub const fn new() -> Self {
+        Self {
+            conflict: LocalCopyConflictPolicy::Fail,
+            type_conflict: LocalCopyTypeConflictPolicy::Fail,
+            follow_symlinks: false,
+            preserve_permissions: false,
+        }
+    }
+
     /// Returns the destination file conflict policy.
     ///
     /// # Returns
@@ -108,21 +123,6 @@ impl LocalCopyDirOptions {
     #[inline(always)]
     pub const fn preserves_permissions(&self) -> bool {
         self.preserve_permissions
-    }
-
-    /// Returns conservative directory copy options.
-    ///
-    /// # Returns
-    /// Options that fail on destination conflicts, do not follow symbolic
-    /// links, and do not preserve source permissions.
-    #[inline]
-    pub const fn new() -> Self {
-        Self {
-            conflict: LocalCopyConflictPolicy::Fail,
-            type_conflict: LocalCopyTypeConflictPolicy::Fail,
-            follow_symlinks: false,
-            preserve_permissions: false,
-        }
     }
 
     /// Sets the policy for existing destination file entries.
@@ -184,7 +184,7 @@ impl Default for LocalCopyDirOptions {
     /// # Returns
     /// Options that do not overwrite existing destination entries, do not
     /// follow symbolic links, and do not preserve source permissions.
-    #[inline]
+    #[inline(always)]
     fn default() -> Self {
         Self::new()
     }

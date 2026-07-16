@@ -32,28 +32,6 @@ pub enum FileBuffering {
 }
 
 impl FileBuffering {
-    /// Returns whether this policy enables buffered I/O.
-    ///
-    /// # Returns
-    /// `true` for buffered policies.
-    #[inline(always)]
-    pub const fn is_buffered(&self) -> bool {
-        matches!(self, Self::Buffered { .. })
-    }
-
-    /// Returns the custom buffer capacity, when configured.
-    ///
-    /// # Returns
-    /// Custom capacity for buffered I/O, or [`None`] for unbuffered I/O and
-    /// default-capacity buffering.
-    #[inline(always)]
-    pub const fn capacity(&self) -> Option<NonZeroUsize> {
-        match self {
-            Self::Buffered { capacity } => *capacity,
-            Self::Unbuffered => None,
-        }
-    }
-
     /// Returns buffered I/O using the standard-library default capacity.
     ///
     /// # Returns
@@ -85,11 +63,33 @@ impl FileBuffering {
             capacity: Some(capacity),
         })
     }
+
+    /// Returns whether this policy enables buffered I/O.
+    ///
+    /// # Returns
+    /// `true` for buffered policies.
+    #[inline(always)]
+    pub const fn is_buffered(&self) -> bool {
+        matches!(self, Self::Buffered { .. })
+    }
+
+    /// Returns the custom buffer capacity, when configured.
+    ///
+    /// # Returns
+    /// Custom capacity for buffered I/O, or [`None`] for unbuffered I/O and
+    /// default-capacity buffering.
+    #[inline(always)]
+    pub const fn capacity(&self) -> Option<NonZeroUsize> {
+        match self {
+            Self::Buffered { capacity } => *capacity,
+            Self::Unbuffered => None,
+        }
+    }
 }
 
 impl Default for FileBuffering {
     /// Uses an unbuffered file handle by default.
-    #[inline]
+    #[inline(always)]
     fn default() -> Self {
         Self::Unbuffered
     }

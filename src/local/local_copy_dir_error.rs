@@ -51,6 +51,36 @@ pub struct LocalCopyDirError {
 }
 
 impl LocalCopyDirError {
+    /// Creates a recursive-copy error.
+    ///
+    /// # Parameters
+    /// - `stage`: Stage at which the copy failed.
+    /// - `source_path`: Source entry being processed.
+    /// - `destination_path`: Destination entry being processed.
+    /// - `stats`: Statistics accumulated before the failure.
+    /// - `source`: Native I/O error that caused the failure.
+    ///
+    /// # Returns
+    /// New recursive-copy error retaining the native source error.
+    #[inline]
+    pub(crate) fn new(
+        stage: LocalCopyDirStage,
+        source_path: PathBuf,
+        destination_path: PathBuf,
+        stats: LocalCopyDirStats,
+        source: io::Error,
+    ) -> Self {
+        Self {
+            stage,
+            source_path,
+            destination_path,
+            stats,
+            temporary_path: None,
+            cleanup_error: None,
+            source,
+        }
+    }
+
     /// Returns the stage at which the copy failed.
     ///
     /// # Returns
@@ -103,36 +133,6 @@ impl LocalCopyDirError {
     #[inline(always)]
     pub fn cleanup_error(&self) -> Option<&io::Error> {
         self.cleanup_error.as_ref()
-    }
-
-    /// Creates a recursive-copy error.
-    ///
-    /// # Parameters
-    /// - `stage`: Stage at which the copy failed.
-    /// - `source_path`: Source entry being processed.
-    /// - `destination_path`: Destination entry being processed.
-    /// - `stats`: Statistics accumulated before the failure.
-    /// - `source`: Native I/O error that caused the failure.
-    ///
-    /// # Returns
-    /// New recursive-copy error retaining the native source error.
-    #[inline]
-    pub(crate) fn new(
-        stage: LocalCopyDirStage,
-        source_path: PathBuf,
-        destination_path: PathBuf,
-        stats: LocalCopyDirStats,
-        source: io::Error,
-    ) -> Self {
-        Self {
-            stage,
-            source_path,
-            destination_path,
-            stats,
-            temporary_path: None,
-            cleanup_error: None,
-            source,
-        }
     }
 
     /// Returns the native I/O error kind.

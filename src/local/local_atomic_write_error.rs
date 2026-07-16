@@ -43,6 +43,35 @@ pub struct LocalAtomicWriteError {
 }
 
 impl LocalAtomicWriteError {
+    /// Creates an atomic-write error.
+    ///
+    /// # Parameters
+    /// - `stage`: Stage at which the operation failed.
+    /// - `path`: Requested destination path.
+    /// - `temporary_path`: Optional same-directory temporary path.
+    /// - `committed`: Whether destination replacement already completed.
+    /// - `source`: Native I/O error that caused the failure.
+    ///
+    /// # Returns
+    /// New atomic-write error retaining the native source error.
+    #[inline]
+    pub(crate) fn new(
+        stage: LocalAtomicWriteStage,
+        path: PathBuf,
+        temporary_path: Option<PathBuf>,
+        committed: bool,
+        source: io::Error,
+    ) -> Self {
+        Self {
+            stage,
+            path,
+            temporary_path,
+            committed,
+            cleanup_error: None,
+            source,
+        }
+    }
+
     /// Returns the stage at which the operation failed.
     ///
     /// # Returns
@@ -86,35 +115,6 @@ impl LocalAtomicWriteError {
     #[inline(always)]
     pub fn cleanup_error(&self) -> Option<&io::Error> {
         self.cleanup_error.as_ref()
-    }
-
-    /// Creates an atomic-write error.
-    ///
-    /// # Parameters
-    /// - `stage`: Stage at which the operation failed.
-    /// - `path`: Requested destination path.
-    /// - `temporary_path`: Optional same-directory temporary path.
-    /// - `committed`: Whether destination replacement already completed.
-    /// - `source`: Native I/O error that caused the failure.
-    ///
-    /// # Returns
-    /// New atomic-write error retaining the native source error.
-    #[inline]
-    pub(crate) fn new(
-        stage: LocalAtomicWriteStage,
-        path: PathBuf,
-        temporary_path: Option<PathBuf>,
-        committed: bool,
-        source: io::Error,
-    ) -> Self {
-        Self {
-            stage,
-            path,
-            temporary_path,
-            committed,
-            cleanup_error: None,
-            source,
-        }
     }
 
     /// Returns the native I/O error kind.
