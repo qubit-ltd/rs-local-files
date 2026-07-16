@@ -31,7 +31,7 @@ Qubit Local Files 承载从 `qubit-io` 拆出的本地文件系统工具。它�
 
 ```toml
 [dependencies]
-qubit-local-files = "0.4"
+qubit-local-files = "0.5"
 ```
 
 ## 快速示例
@@ -92,6 +92,7 @@ assert_eq!("new payload\n", std::fs::read_to_string(&final_path)?);
 | `copy_dir_all_with` | 使用显式选项递归复制本地目录树，并返回统计信息。 |
 | `atomic_write` | 通过持久化同目录临时写入替换文件。 |
 | `atomic_write_with` | 与 `atomic_write` 相同，但由调用方提供写入逻辑。 |
+| `begin_atomic_write` | 返回由调用方显式提交的 streaming `LocalAtomicWriter`。 |
 
 ### 临时文件和临时目录
 
@@ -127,7 +128,24 @@ assert_eq!("new payload\n", std::fs::read_to_string(&final_path)?);
 
 ### Atomic Write
 
-`LocalFiles::atomic_write` 会在同一父目录下写入临时文件，flush 并 sync 这个临时文件，替换目标，并在支持的平台上从深到浅 sync 目标父目录以及本次新建目录项所在的各级父目录。它适合配置文件、cache manifest、checkpoint、生成索引等 whole-file replacement 场景。已有普通文件的权限会被保留；在 Unix 上，新目标使用 `0600`，之后仍受更严格的进程 umask 约束。
+`LocalFiles::atomic_write` 会在同一父目录下写入临时文件，flush 并 sync 这个临时文件，替换目标，并在支持的平台上从深到浅 sync 目标父目录以及本次新建目录项所在的各级父目录。它适合配置文件、cache manifest、checkpoint、生成索引等 whole-file replacement 场景。已有普通文件的权限会被保留；symlink 目标不会从其 link target 继承权限。在 Unix 上，新目标使用 `0600`，之后仍受更严格的进程 umask 约束。
+
+streaming 内容可以使用 `LocalAtomicWriter`：
+
+```rust
+use std::io::Write;
+use qubit_local_files::LocalFiles;
+
+let mut writer = LocalFiles::begin_atomic_write("state.bin")?;
+writer.write_all(b"complete state")?;
+writer.commit()?;
+# Ok::<(), Box<dyn std::error::Error>>(())
+```
+
+`LocalAtomicWriter` 实现 `Write`，但首版不实现 `Seek`。只有 `commit`
+成功后目标才会被替换；调用 `abort` 或直接 drop 会保留原目标并清理 staging
+文件。自 `0.5.0` 起，配置类型的字段不再公开，调用方必须使用现有 getter、
+constructor 和 builder。crate 仍保持同步、path-based 的边界。
 
 失败时返回 `LocalAtomicWriteError`，其中包含失败阶段、临时路径、原始 I/O source error、替换是否已经提交，以及删除未提交 staging file 时产生的 secondary cleanup error。
 如果 `atomic_write_with` callback panic，会先关闭并 best-effort 删除未提交临时文件，再继续传播 panic。清理失败不能替换原 panic，因此这种情况下 staging path 可能残留。

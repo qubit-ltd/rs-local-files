@@ -254,11 +254,29 @@ assert_eq!("{\"complete\":true}\n", std::fs::read_to_string(&path)?);
 # Ok::<(), Box<dyn std::error::Error>>(())
 ```
 
+需要跨多次调用 streaming 内容时，使用 `LocalAtomicWriter`：
+
+```rust
+use std::io::Write;
+use qubit_local_files::LocalFiles;
+
+let mut writer = LocalFiles::begin_atomic_write("state.bin")?;
+writer.write_all(b"complete state")?;
+writer.commit()?;
+# Ok::<(), Box<dyn std::error::Error>>(())
+```
+
+`LocalAtomicWriter` 实现 `Write`，但首版不实现 `Seek`。只有 `commit`
+成功后目标才会被替换；调用 `abort` 或直接 drop 会保留原目标并清理 staging
+文件。自 `0.5.0` 起，配置类型的字段不再公开，调用方必须使用现有 getter、
+constructor 和 builder。API 仍保持同步边界。
+
 重要语义：
 
 - 写入前会创建父目录。
 - 临时文件创建在目标目录下，因此在常见本地文件系统上可以 atomic replacement。
-- 如果目标已有普通文件，会在替换前把已有权限复制到临时文件。
+- 如果目标已有普通文件，会在替换前把已有权限复制到临时文件；symlink
+  target 不会提供权限。
 - 在 Unix 上，新目标使用 `0600`，之后仍受更严格的进程 umask 约束。
 - 如果写入、flush 或 sync 临时文件失败，目标保持不变。
 - 如果 `atomic_write_with` callback panic，unwind 会先关闭并 best-effort 删除未提交临时文件，再继续传播 panic；目标保持不变。清理失败不能替换原 panic，因此 staging path 可能残留。

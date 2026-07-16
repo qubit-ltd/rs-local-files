@@ -37,7 +37,7 @@ For stream-level `std::io` traits, extension methods, wrappers, and codecs, see
 
 ```toml
 [dependencies]
-qubit-local-files = "0.4"
+qubit-local-files = "0.5"
 ```
 
 ## Quick Example
@@ -99,6 +99,7 @@ become repeated boilerplate:
 | `copy_dir_all_with` | Recursively copies a local directory tree with explicit options and returns statistics. |
 | `atomic_write` | Replaces a file through a durable same-directory temporary write. |
 | `atomic_write_with` | Same as `atomic_write`, but accepts caller-provided write logic. |
+| `begin_atomic_write` | Returns a streaming `LocalAtomicWriter` committed explicitly by the caller. |
 
 ### Temporary Files and Directories
 
@@ -174,7 +175,26 @@ from deepest to shallowest, when supported. This is useful for whole-file
 replacement of configuration files, cache manifests, checkpoints, and
 generated indexes. Existing regular-file permissions are preserved. On Unix,
 a new destination uses mode `0600` before applying a more restrictive process
-umask.
+umask. A symbolic-link destination does not donate permissions from its target.
+
+For streaming content, use `LocalAtomicWriter`:
+
+```rust
+use std::io::Write;
+use qubit_local_files::LocalFiles;
+
+let mut writer = LocalFiles::begin_atomic_write("state.bin")?;
+writer.write_all(b"complete state")?;
+writer.commit()?;
+# Ok::<(), Box<dyn std::error::Error>>(())
+```
+
+`LocalAtomicWriter` implements `Write`, but not `Seek`. Only a successful
+`commit` replaces the destination; `abort` or drop leaves it unchanged and
+cleans up the staging file. The crate remains synchronous and path-based.
+
+Since `0.5.0`, configuration fields are private. Use the existing getters,
+constructors, and builders instead of direct field access.
 Failures return `LocalAtomicWriteError`, including the failed stage, temporary
 path, native source error, whether replacement had already committed, and any
 secondary error raised while removing an uncommitted staging file.

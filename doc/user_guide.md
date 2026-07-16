@@ -311,13 +311,32 @@ assert_eq!("{\"complete\":true}\n", std::fs::read_to_string(&path)?);
 # Ok::<(), Box<dyn std::error::Error>>(())
 ```
 
+Use `LocalAtomicWriter` when content should be streamed across multiple calls:
+
+```rust
+use std::io::Write;
+use qubit_local_files::LocalFiles;
+
+let mut writer = LocalFiles::begin_atomic_write("state.bin")?;
+writer.write_all(b"complete state")?;
+writer.commit()?;
+# Ok::<(), Box<dyn std::error::Error>>(())
+```
+
+`LocalAtomicWriter` implements `Write`, but not `Seek`. Only `commit` replaces
+the destination. Calling `abort` or dropping the writer preserves the original
+destination and cleans up the staging file. The API remains synchronous.
+
+Since `0.5.0`, configuration fields are private. Callers must use the existing
+getters, constructors, and builders.
+
 Important semantics:
 
 - Parent directories are created before writing.
 - The temporary file is created in the destination directory, so replacement can
   be atomic on common local filesystems.
 - Existing regular-file permissions are copied to the temporary file before
-  replacement.
+  replacement. Symbolic-link targets do not donate permissions.
 - On Unix, a new destination uses mode `0600`, subject to a more restrictive
   process umask.
 - If writing, flushing, or syncing the temporary file fails, the destination is
