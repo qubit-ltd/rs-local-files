@@ -587,12 +587,9 @@ fn is_ignorable_windows_parent_sync_error(error: &Error) -> bool {
 /// # Returns
 /// The parent directory, or the current directory for parentless paths.
 pub(crate) fn parent_dir_for(path: &Path) -> &Path {
-    if let Some(parent) = path.parent()
-        && !parent.as_os_str().is_empty()
-    {
-        return parent;
-    }
-    Path::new(".")
+    path.parent()
+        .filter(|parent| !parent.as_os_str().is_empty())
+        .unwrap_or(Path::new("."))
 }
 
 /// Converts a path into a null-terminated Windows wide string.
