@@ -575,11 +575,11 @@ resulting path is valid for every platform API. Some APIs, such as Unix domain
 sockets, have much shorter path limits than regular files. For those cases,
 create temporary entries under a short parent directory such as `/tmp`.
 
-On Windows, native persistence and replacement pass the existing path spelling
-to the operating system. The crate rejects interior UTF-16 NULs, but does not
-add a verbatim-path prefix or convert relative paths to absolute paths. Native
-path-length limits and relative/verbatim-path resolution semantics therefore
-apply.
+Relative paths owned by temporary resources and atomic writers are bound to
+the process current directory when the resource or operation begins. Their
+caller-facing generated paths preserve the original relative spelling. The
+crate rejects interior UTF-16 NULs on Windows but does not add a verbatim-path
+prefix, so native path-length and verbatim-path semantics still apply.
 
 ## Crate Boundary
 

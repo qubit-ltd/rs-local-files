@@ -137,9 +137,12 @@ equivalent platform error. Overwriting a file keeps the temporary file's
 permissions rather than the replaced target's permissions; use
 `LocalFiles::atomic_write` when replacing contents while preserving an existing
 regular file's permissions is required.
-On Windows, native moves do not add a verbatim-path prefix or convert relative
-paths to absolute paths; native path-length and relative/verbatim-path semantics
-apply.
+Relative creation and persistence paths are bound to the process current
+directory when the resource or operation begins, so later current-directory
+changes do not redirect cleanup, commit, or persistence. Caller-facing
+generated paths preserve their original relative spelling. On Windows, native
+moves do not add a verbatim-path prefix, so native path-length and verbatim-path
+semantics apply.
 On Unix, temporary files are created with mode `0600` and temporary directories
 with mode `0700` before applying the process umask.
 

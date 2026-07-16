@@ -466,7 +466,7 @@ assert_eq!(
 
 `LocalTempFile` 和 `LocalTempDir` 创建的是本地文件系统条目；如果创建失败，会返回操作系统错误。它们不承诺生成的路径适用于所有平台 API。某些 API，例如 Unix domain socket，有比普通文件短得多的路径限制。遇到这类场景，应在较短的父目录下创建临时条目，例如 `/tmp`。
 
-在 Windows 上，原生持久化和替换会把现有路径表示传给操作系统。crate 会拒绝内部 UTF-16 NUL，但不会添加 verbatim-path prefix，也不会把相对路径转换为绝对路径；路径长度限制以及相对路径/verbatim path 解析语义因此遵循原生平台行为。
+临时资源和 atomic writer 持有的相对路径会在资源创建或操作开始时绑定到当时的进程工作目录，对调用方展示的生成路径仍保留原始相对拼写。在 Windows 上，crate 会拒绝内部 UTF-16 NUL，但不会添加 verbatim-path prefix，因此路径长度和 verbatim path 语义仍遵循原生平台行为。
 
 ## Crate 边界
 

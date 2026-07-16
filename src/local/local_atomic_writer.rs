@@ -29,6 +29,7 @@ use crate::{
 use super::internal::{
     DEFAULT_TEMP_FILE_RETRIES,
     StagedFile,
+    absolute_path,
     add_path_context,
     create_temp_file_in_dir,
     ensure_parent_path_with_sync_dirs,
@@ -49,11 +50,15 @@ const ATOMIC_WRITE_TEMP_PREFIX: &str = ".atomic-write-";
 /// [`Self::commit`] succeeds. Calling [`Self::abort`] or dropping the writer
 /// leaves the destination unchanged and removes the staging file on a
 /// best-effort basis. This initial API intentionally does not implement
-/// [`std::io::Seek`].
+/// [`std::io::Seek`]. A relative destination is bound to the process current
+/// directory when the writer is created, so later current-directory changes
+/// do not redirect commit or cleanup operations.
 #[derive(Debug)]
 pub struct LocalAtomicWriter {
     /// Requested destination path.
     path: PathBuf,
+    /// Absolute destination path used by filesystem operations.
+    operation_path: PathBuf,
     /// Newly created parent directories that require synchronization.
     parent_dirs_to_sync: Vec<PathBuf>,
     /// Existing regular-file permissions preserved at commit time.
@@ -72,21 +77,28 @@ impl LocalAtomicWriter {
     /// Returns a structured error when parent preparation, destination
     /// inspection, or staging-file creation fails.
     pub(crate) fn new(path: &Path) -> Result<Self, LocalAtomicWriteError> {
+        let operation_path = with_atomic_context(
+            absolute_path(path),
+            LocalAtomicWriteStage::PrepareParent,
+            path,
+            None,
+            false,
+        )?;
         let parent_dirs_to_sync = with_atomic_context(
-            ensure_parent_path_with_sync_dirs(path),
+            ensure_parent_path_with_sync_dirs(&operation_path),
             LocalAtomicWriteStage::PrepareParent,
             path,
             None,
             false,
         )?;
         let existing_permissions = with_atomic_context(
-            existing_file_permissions(path),
+            existing_file_permissions(&operation_path),
             LocalAtomicWriteStage::InspectDestination,
             path,
             None,
             false,
         )?;
-        let parent = parent_dir_for(path);
+        let parent = parent_dir_for(&operation_path);
         let (temp_path, file) = with_atomic_context(
             create_temp_file_in_dir(
                 parent,
@@ -101,6 +113,7 @@ impl LocalAtomicWriter {
         )?;
         Ok(Self {
             path: path.to_path_buf(),
+            operation_path,
             parent_dirs_to_sync,
             existing_permissions,
             staged_file: StagedFile::new(temp_path, file),
@@ -134,7 +147,8 @@ impl LocalAtomicWriter {
         )?;
 
         self.staged_file.close();
-        let result = replace_file(self.staged_file.path(), &self.path);
+        let result =
+            replace_file(self.staged_file.path(), &self.operation_path);
         with_staging_cleanup(
             result,
             LocalAtomicWriteStage::ReplaceDestination,
@@ -144,7 +158,10 @@ impl LocalAtomicWriter {
         let temporary_path = self.staged_file.path().to_path_buf();
         self.staged_file.disarm();
         with_atomic_context(
-            sync_atomic_parent_chain(&self.path, &self.parent_dirs_to_sync),
+            sync_atomic_parent_chain(
+                &self.operation_path,
+                &self.parent_dirs_to_sync,
+            ),
             LocalAtomicWriteStage::SyncParentDirectory,
             &self.path,
             Some(temporary_path),

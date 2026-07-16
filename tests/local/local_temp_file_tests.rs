@@ -11,6 +11,8 @@ use super::test_support::PermissionsExt;
 #[cfg(windows)]
 use super::test_support::path_with_interior_nul;
 use super::test_support::{
+    CURRENT_DIR_LOCK,
+    CurrentDirGuard,
     ErrorKind,
     LocalPersistOptions,
     LocalTempFile,
@@ -21,6 +23,37 @@ use super::test_support::{
     fs,
     temp_dir,
 };
+
+#[test]
+fn test_temp_file_keeps_relative_location_after_cwd_change() {
+    let _lock = CURRENT_DIR_LOCK.lock().unwrap();
+    let dir = temp_dir("temp-file-relative-cwd");
+    let creation_dir = dir.join("creation");
+    let later_dir = dir.join("later");
+    fs::create_dir_all(creation_dir.join("temp")).unwrap();
+    fs::create_dir_all(&later_dir).unwrap();
+
+    let (exists_result, generated_path, path_exists_after_drop) = {
+        let _guard = CurrentDirGuard::change_to(&creation_dir);
+        let file = LocalTempFile::in_dir("temp", Some("cwd-"), None, 4)
+            .expect("relative temporary file should be created");
+        assert!(file.path().is_relative());
+        let generated_path = creation_dir.join(file.path());
+        std::env::set_current_dir(&later_dir).unwrap();
+        let exists_result = file.exists();
+        drop(file);
+        (
+            exists_result,
+            generated_path.clone(),
+            generated_path.exists(),
+        )
+    };
+    drop(fs::remove_dir_all(&dir));
+
+    assert!(exists_result.expect("existence should be checked"));
+    assert!(generated_path.starts_with(&creation_dir));
+    assert!(!path_exists_after_drop);
+}
 
 #[cfg(unix)]
 #[test]

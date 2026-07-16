@@ -371,9 +371,10 @@ impl LocalFiles {
     /// itself fails. After replacement, a parent-directory sync failure is
     /// reported even though the new destination is committed. This operation
     /// is not a multi-file transaction and does not coordinate concurrent
-    /// writers. On Windows, replacement does not add a verbatim-path prefix or
-    /// convert relative paths to absolute paths; native path-length and
-    /// relative/verbatim-path semantics apply.
+    /// writers. A relative destination is bound to the process current
+    /// directory when the atomic writer is created. On Windows, replacement
+    /// does not add a verbatim-path prefix, so native path-length and
+    /// verbatim-path semantics apply.
     ///
     /// # Examples
     /// ```

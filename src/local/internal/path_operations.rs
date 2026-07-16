@@ -27,6 +27,23 @@ use std::os::windows::fs::FileTypeExt;
 use super::file_move::remove_directory_symlink;
 use super::path_io_error::PathIoError;
 
+/// Resolves `path` to a lexical absolute path at the current point in time.
+///
+/// # Parameters
+/// - `path`: Path to bind to the current working directory when relative.
+///
+/// # Returns
+/// An absolute path suitable for operations that may occur after the process
+/// current directory changes.
+///
+/// # Errors
+/// Returns an I/O error when a relative path is supplied and the current
+/// working directory cannot be read.
+#[inline]
+pub(crate) fn absolute_path(path: &Path) -> Result<PathBuf> {
+    std::path::absolute(path)
+}
+
 /// Ensures that the directory at `path` exists.
 ///
 /// # Parameters

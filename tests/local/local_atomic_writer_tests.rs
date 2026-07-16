@@ -16,6 +16,8 @@ use qubit_local_files::{
 };
 
 use super::test_support::{
+    CURRENT_DIR_LOCK,
+    CurrentDirGuard,
     count_atomic_temp_files,
     fs,
     temp_dir,
@@ -43,6 +45,32 @@ fn test_local_atomic_writer_commits_written_contents() {
     assert_eq!(b"committed", fs::read(&path).unwrap().as_slice());
     assert_eq!(0, count_atomic_temp_files(&dir));
     fs::remove_dir_all(dir).unwrap();
+}
+
+#[test]
+fn test_local_atomic_writer_keeps_relative_destination_after_cwd_change() {
+    let _lock = CURRENT_DIR_LOCK.lock().unwrap();
+    let dir = temp_dir("atomic-writer-relative-cwd");
+    let creation_dir = dir.join("creation");
+    let later_dir = dir.join("later");
+    fs::create_dir_all(&creation_dir).unwrap();
+    fs::create_dir_all(&later_dir).unwrap();
+
+    let result = {
+        let _guard = CurrentDirGuard::change_to(&creation_dir);
+        let mut writer = LocalFiles::begin_atomic_write("out.txt")
+            .expect("relative atomic writer should begin");
+        writer.write_all(b"committed").unwrap();
+        std::env::set_current_dir(&later_dir).unwrap();
+        writer.commit()
+    };
+    let creation_contents = fs::read(creation_dir.join("out.txt"));
+    let later_destination_exists = later_dir.join("out.txt").exists();
+    drop(fs::remove_dir_all(&dir));
+
+    result.expect("commit should remain bound to its creation directory");
+    assert_eq!(b"committed", creation_contents.unwrap().as_slice());
+    assert!(!later_destination_exists);
 }
 
 #[cfg(target_os = "linux")]

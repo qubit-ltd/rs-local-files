@@ -34,6 +34,7 @@ pub(crate) use file_move::{
     sync_parent_dir,
 };
 pub(crate) use path_operations::{
+    absolute_path,
     add_path_context,
     clean_dir_path,
     dir_size_path,

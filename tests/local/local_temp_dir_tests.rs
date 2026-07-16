@@ -9,6 +9,8 @@
 #[cfg(unix)]
 use super::test_support::PermissionsExt;
 use super::test_support::{
+    CURRENT_DIR_LOCK,
+    CurrentDirGuard,
     ErrorKind,
     FileReadOptions,
     FileWriteMode,
@@ -20,6 +22,49 @@ use super::test_support::{
     fs,
     temp_dir,
 };
+
+#[test]
+fn test_temp_dir_keeps_relative_location_after_cwd_change() {
+    let _lock = CURRENT_DIR_LOCK.lock().unwrap();
+    let dir = temp_dir("temp-dir-relative-cwd");
+    let creation_dir = dir.join("creation");
+    let later_dir = dir.join("later");
+    fs::create_dir_all(creation_dir.join("temp")).unwrap();
+    fs::create_dir_all(&later_dir).unwrap();
+
+    let (
+        exists_result,
+        child_result,
+        expected_child_path,
+        nested_exists_before_drop,
+        path_exists_after_drop,
+    ) = {
+        let _guard = CurrentDirGuard::change_to(&creation_dir);
+        let temp_dir = LocalTempDir::in_dir("temp", Some("cwd-"), 4)
+            .expect("relative temporary directory should be created");
+        assert!(temp_dir.path().is_relative());
+        let generated_path = creation_dir.join(temp_dir.path());
+        let expected_child_path = temp_dir.path().join("nested");
+        std::env::set_current_dir(&later_dir).unwrap();
+        let exists_result = temp_dir.exists();
+        let child_result = temp_dir.ensure_child_dir("nested");
+        let nested_exists_before_drop = generated_path.join("nested").exists();
+        drop(temp_dir);
+        (
+            exists_result,
+            child_result,
+            expected_child_path,
+            nested_exists_before_drop,
+            generated_path.exists(),
+        )
+    };
+    drop(fs::remove_dir_all(&dir));
+
+    assert!(exists_result.expect("existence should be checked"));
+    assert_eq!(expected_child_path, child_result.unwrap());
+    assert!(nested_exists_before_drop);
+    assert!(!path_exists_after_drop);
+}
 
 #[test]
 fn test_debug_formatting_contains_type_name() {
