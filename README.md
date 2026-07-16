@@ -298,6 +298,9 @@ cargo test
 # Generate text format report
 ./coverage.sh text
 
+# Apply the repository-prescribed formatting and lint fixes
+./align-ci.sh
+
 # Run CI checks (format, clippy, test, coverage, audit)
 ./ci-check.sh
 ```
@@ -332,7 +335,7 @@ Contributions are welcome. Please feel free to submit a Pull Request.
 - Keep conservative defaults for operations that may overwrite data or leave the requested source tree.
 - Maintain comprehensive test coverage for platform-sensitive filesystem behavior.
 - Document public APIs with examples when they clarify behavior.
-- Ensure `./ci-check.sh` passes before submitting a PR.
+- Run `./align-ci.sh`, then ensure `./ci-check.sh` passes before submitting a PR.
 
 ## Author
 

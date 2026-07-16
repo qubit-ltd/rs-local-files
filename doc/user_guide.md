@@ -46,7 +46,7 @@ Those stream and byte-I/O concerns belong in
 
 ```toml
 [dependencies]
-qubit-local-files = "0.4"
+qubit-local-files = "0.5"
 ```
 
 ## Import Patterns
@@ -447,10 +447,10 @@ Options:
 
 | Option | Default | Behavior |
 | --- | --- | --- |
-| `conflict` | `Fail` | Existing destination files are rejected; choose `Overwrite` or `Skip` explicitly. |
-| `type_conflict` | `Fail` | File/directory type mismatches are rejected; `Replace` explicitly permits destructive replacement. |
-| `follow_symlinks` | `false` | Symbolic links in the source tree are rejected. |
-| `preserve_permissions` | `false` | Source permissions are not copied; on Unix, new or replaced files keep mode `0600` and new directories use `0700`, subject to the process umask. |
+| `with_conflict(...)` | `Fail` | Existing destination files are rejected; choose `Overwrite` or `Skip` explicitly. |
+| `with_type_conflict(...)` | `Fail` | File/directory type mismatches are rejected; `Replace` explicitly permits destructive replacement. |
+| `follow_symlinks()` | `false` | Symbolic links in the source tree are rejected. |
+| `preserve_permissions()` | `false` | Source permissions are not copied; on Unix, new or replaced files keep mode `0600` and new directories use `0700`, subject to the process umask. |
 
 Statistics:
 
@@ -604,5 +604,6 @@ Useful commands:
 cargo test
 ./coverage.sh
 ./coverage.sh text
+./align-ci.sh
 ./ci-check.sh
 ```

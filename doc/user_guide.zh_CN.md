@@ -38,7 +38,7 @@ Qubit Local Files 是 Qubit Rust crate 家族中的本地文件系统 crate。�
 
 ```toml
 [dependencies]
-qubit-local-files = "0.4"
+qubit-local-files = "0.5"
 ```
 
 ## 导入方式
@@ -372,10 +372,10 @@ assert_eq!(4, stats.bytes);
 
 | 选项 | 默认值 | 行为 |
 | --- | --- | --- |
-| `conflict` | `Fail` | 已存在目标文件会被拒绝；可显式选择 `Overwrite` 或 `Skip`。 |
-| `type_conflict` | `Fail` | 文件/目录类型冲突会被拒绝；`Replace` 显式允许破坏性替换。 |
-| `follow_symlinks` | `false` | 源目录树中的 symbolic link 会被拒绝。 |
-| `preserve_permissions` | `false` | 不复制源权限；在 Unix 上，新建或替换的文件保留 `0600`，新建目录使用 `0700`，之后仍受进程 umask 约束。 |
+| `with_conflict(...)` | `Fail` | 已存在目标文件会被拒绝；可显式选择 `Overwrite` 或 `Skip`。 |
+| `with_type_conflict(...)` | `Fail` | 文件/目录类型冲突会被拒绝；`Replace` 显式允许破坏性替换。 |
+| `follow_symlinks()` | `false` | 源目录树中的 symbolic link 会被拒绝。 |
+| `preserve_permissions()` | `false` | 不复制源权限；在 Unix 上，新建或替换的文件保留 `0600`，新建目录使用 `0700`，之后仍受进程 umask 约束。 |
 
 统计信息：
 
@@ -485,5 +485,6 @@ assert_eq!(
 cargo test
 ./coverage.sh
 ./coverage.sh text
+./align-ci.sh
 ./ci-check.sh
 ```

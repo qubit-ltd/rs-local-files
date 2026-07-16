@@ -222,6 +222,9 @@ cargo test
 # 生成文本格式报告
 ./coverage.sh text
 
+# 应用仓库规定的格式化和 lint 修复
+./align-ci.sh
+
 # 运行 CI 检查（格式化、clippy、测试、覆盖率、audit）
 ./ci-check.sh
 ```
@@ -254,7 +257,7 @@ Copyright (c) 2026. Haixing Hu.
 - 可能覆盖数据或离开请求源目录的操作，应保持保守默认值。
 - 为平台相关文件系统行为保持全面测试覆盖。
 - 公共 API 在有助于说明行为时应提供文档和示例。
-- 提交 PR 前确保 `./ci-check.sh` 通过。
+- 提交 PR 前先运行 `./align-ci.sh`，再确保 `./ci-check.sh` 通过。
 
 ## 作者
 
