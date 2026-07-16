@@ -72,7 +72,7 @@ pub(crate) fn ensure_parent_path(path: &Path) -> Result<()> {
 /// # Errors
 /// Returns an I/O error when a parent component cannot be inspected or
 /// created, or an existing component is not a directory.
-pub(super) fn ensure_parent_path_with_sync_dirs(
+pub(crate) fn ensure_parent_path_with_sync_dirs(
     path: &Path,
 ) -> Result<Vec<PathBuf>> {
     let Some(parent) = path
@@ -120,7 +120,7 @@ pub(super) fn ensure_parent_path_with_sync_dirs(
 ///
 /// # Returns
 /// A new I/O error with the same [`ErrorKind`] and a more descriptive message.
-pub(super) fn add_path_context(
+pub(crate) fn add_path_context(
     error: Error,
     operation: &'static str,
     path: &Path,

@@ -18,6 +18,7 @@ fn test_atomic_write_stage_variants_are_distinct_and_debuggable() {
         LocalAtomicWriteStage::PreservePermissions,
         LocalAtomicWriteStage::SyncTemporaryFile,
         LocalAtomicWriteStage::ReplaceDestination,
+        LocalAtomicWriteStage::CleanupTemporaryFile,
         LocalAtomicWriteStage::SyncParentDirectory,
     ];
 

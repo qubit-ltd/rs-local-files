@@ -24,6 +24,7 @@
 ///         LocalAtomicWriteStage::PreservePermissions => {}
 ///         LocalAtomicWriteStage::SyncTemporaryFile => {}
 ///         LocalAtomicWriteStage::ReplaceDestination => {}
+///         LocalAtomicWriteStage::CleanupTemporaryFile => {}
 ///         LocalAtomicWriteStage::SyncParentDirectory => {}
 ///     }
 /// }
@@ -45,6 +46,8 @@ pub enum LocalAtomicWriteStage {
     SyncTemporaryFile,
     /// Replacing the destination failed.
     ReplaceDestination,
+    /// Explicitly removing an aborted temporary file failed.
+    CleanupTemporaryFile,
     /// Synchronizing the parent directory after replacement failed.
     SyncParentDirectory,
 }

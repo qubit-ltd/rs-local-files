@@ -4,6 +4,7 @@ mod file_write_mode_tests;
 mod file_write_options_tests;
 mod local_atomic_write_error_tests;
 mod local_atomic_write_stage_tests;
+mod local_atomic_writer_tests;
 mod local_copy_conflict_policy_tests;
 mod local_copy_dir_error_tests;
 mod local_copy_dir_options_tests;

@@ -19,6 +19,7 @@ use crate::{
     FileReadOptions,
     FileWriteOptions,
     LocalAtomicWriteError,
+    LocalAtomicWriter,
     LocalCopyDirError,
     LocalCopyDirOptions,
     LocalCopyDirStats,
@@ -28,8 +29,6 @@ use crate::{
 
 use super::internal::{
     DEFAULT_TEMP_FILE_RETRIES as DEFAULT_TEMP_FILE_RETRIES_VALUE,
-    atomic_write_bytes_path,
-    atomic_write_with_path,
     clean_dir_path,
     copy_dir_all_with_paths,
     dir_size_path,
@@ -66,6 +65,31 @@ impl LocalFiles {
     /// Default number of attempts used when creating a random temporary entry.
     pub const DEFAULT_TEMP_FILE_RETRIES: usize =
         DEFAULT_TEMP_FILE_RETRIES_VALUE;
+
+    /// Begins a streaming same-directory atomic file replacement.
+    ///
+    /// The returned writer owns a staging file. The destination is replaced
+    /// only by [`LocalAtomicWriter::commit`]; aborting or dropping the writer
+    /// leaves the destination unchanged.
+    ///
+    /// # Parameters
+    /// - `path`: Destination path to replace on commit.
+    ///
+    /// # Returns
+    /// A streaming writer for the private staging file.
+    ///
+    /// # Errors
+    /// Returns a structured error when parent preparation, destination
+    /// inspection, or staging-file creation fails.
+    #[inline(always)]
+    pub fn begin_atomic_write<P>(
+        path: P,
+    ) -> std::result::Result<LocalAtomicWriter, LocalAtomicWriteError>
+    where
+        P: AsRef<Path>,
+    {
+        LocalAtomicWriter::new(path.as_ref())
+    }
 
     /// Tests whether a path exists.
     ///
@@ -382,7 +406,7 @@ impl LocalFiles {
         P: AsRef<Path>,
         B: AsRef<[u8]>,
     {
-        atomic_write_bytes_path(path.as_ref(), bytes.as_ref())
+        Self::begin_atomic_write(path)?.write_bytes(bytes.as_ref())
     }
 
     /// Atomically writes a file using caller-provided write logic.
@@ -420,6 +444,6 @@ impl LocalFiles {
         P: AsRef<Path>,
         F: FnOnce(&mut File) -> Result<()>,
     {
-        atomic_write_with_path(path.as_ref(), write)
+        Self::begin_atomic_write(path)?.write_with(write)
     }
 }

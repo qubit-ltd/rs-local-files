@@ -479,7 +479,7 @@ fn c_path(path: &Path) -> Result<CString> {
 /// # Errors
 /// Returns an I/O error when opening or syncing the parent directory fails.
 #[cfg(not(windows))]
-pub(super) fn sync_parent_dir(path: &Path) -> Result<()> {
+pub(crate) fn sync_parent_dir(path: &Path) -> Result<()> {
     let parent_dir = parent_dir_for(path);
     let parent = File::open(parent_dir)?;
     parent.sync_all()
@@ -493,7 +493,7 @@ pub(super) fn sync_parent_dir(path: &Path) -> Result<()> {
 /// # Errors
 /// Returns an I/O error when opening or syncing the parent directory fails.
 #[cfg(windows)]
-pub(super) fn sync_parent_dir(path: &Path) -> Result<()> {
+pub(crate) fn sync_parent_dir(path: &Path) -> Result<()> {
     let parent = wide_path(parent_dir_for(path))?;
     // SAFETY: `parent` is a live NUL-terminated UTF-16 buffer without interior
     // NULs; the remaining constants are documented CreateFileW access, share,
@@ -551,7 +551,7 @@ fn is_ignorable_windows_parent_sync_error(error: &Error) -> bool {
 ///
 /// # Returns
 /// The parent directory, or the current directory for parentless paths.
-pub(super) fn parent_dir_for(path: &Path) -> &Path {
+pub(crate) fn parent_dir_for(path: &Path) -> &Path {
     if let Some(parent) = path.parent()
         && !parent.as_os_str().is_empty()
     {
