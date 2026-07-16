@@ -197,7 +197,7 @@ fn copy_dir_recursive(
     let (source_metadata, canonical_source) = with_copy_context(
         inspect_copy_source_directory(
             src,
-            options.follow_symlinks,
+            options.follows_symlinks(),
             destination_root,
         ),
         LocalCopyDirStage::InspectSource,
@@ -223,7 +223,11 @@ fn copy_dir_recursive(
     active_sources.push(canonical_source);
     let result = (|| {
         with_copy_context(
-            ensure_copy_destination_dir(dst, options.type_conflict, stats),
+            ensure_copy_destination_dir(
+                dst,
+                options.type_conflict_policy(),
+                stats,
+            ),
             LocalCopyDirStage::PrepareDestination,
             src,
             dst,
@@ -294,7 +298,7 @@ fn copy_dir_recursive(
                 ));
             }
         }
-        if options.preserve_permissions {
+        if options.preserves_permissions() {
             with_copy_context(
                 fs::set_permissions(dst, source_metadata.permissions()),
                 LocalCopyDirStage::PreservePermissions,
@@ -329,7 +333,7 @@ fn copy_symlink_source(
     active_sources: &mut Vec<PathBuf>,
     stats: &mut LocalCopyDirStats,
 ) -> CopyDirResult<()> {
-    if !options.follow_symlinks {
+    if !options.follows_symlinks() {
         return Err(copy_dir_error(
             LocalCopyDirStage::InspectSourceEntry,
             src,
@@ -533,7 +537,7 @@ fn copy_file_with_options(
     stats: &mut LocalCopyDirStats,
 ) -> CopyDirResult<()> {
     let source_metadata = with_copy_context(
-        metadata_for_copy_source(src, options.follow_symlinks),
+        metadata_for_copy_source(src, options.follows_symlinks()),
         LocalCopyDirStage::InspectSourceEntry,
         src,
         dst,
@@ -552,7 +556,7 @@ fn copy_file_with_options(
     )?;
     let destination_directory_requires_removal = match destination_metadata {
         Some(metadata) if is_real_directory(&metadata) => {
-            match options.type_conflict {
+            match options.type_conflict_policy() {
                 LocalCopyTypeConflictPolicy::Fail => {
                     return Err(copy_dir_error(
                         LocalCopyDirStage::PrepareDestination,
@@ -571,7 +575,7 @@ fn copy_file_with_options(
                 LocalCopyTypeConflictPolicy::Replace => true,
             }
         }
-        Some(_) => match options.conflict {
+        Some(_) => match options.conflict_policy() {
             LocalCopyConflictPolicy::Fail => {
                 return Err(copy_dir_error(
                     LocalCopyDirStage::PrepareDestination,
@@ -601,7 +605,7 @@ fn copy_file_with_options(
     if !commit_staged_copy_file(
         src,
         dst,
-        options.conflict,
+        options.conflict_policy(),
         destination_directory_requires_removal,
         stats,
         staged_file,
@@ -666,7 +670,7 @@ fn stage_copy_file(
             ));
         }
     };
-    if options.preserve_permissions {
+    if options.preserves_permissions() {
         let preserve_result = staged_file
             .file()
             .set_permissions(source_metadata.permissions());

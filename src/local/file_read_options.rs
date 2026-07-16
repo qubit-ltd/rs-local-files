@@ -10,12 +10,21 @@
 use crate::FileBuffering;
 
 /// Options used when opening a local file for reading.
+///
+/// Configuration fields are private; use the constructors and getters:
+///
+/// ```compile_fail
+/// use qubit_local_files::{FileBuffering, FileReadOptions};
+///
+/// let mut options = FileReadOptions::default();
+/// options.buffering = FileBuffering::Unbuffered;
+/// ```
 #[must_use = "file read options have no effect unless they are used"]
 #[non_exhaustive]
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
 pub struct FileReadOptions {
     /// Buffering policy for the returned reader.
-    pub buffering: FileBuffering,
+    buffering: FileBuffering,
 }
 
 impl FileReadOptions {

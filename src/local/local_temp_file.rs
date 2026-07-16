@@ -268,9 +268,10 @@ impl LocalTempFile {
     ///
     /// The file is closed before moving the path. Parent directories for
     /// `target` are created before moving. When
-    /// `options.overwrite` is `false`, existing targets are rejected by the
+    /// `options.overwrites()` is `false`, existing targets are rejected by the
     /// move operation. When
-    /// `options.overwrite` is `true`, an existing target file may be replaced.
+    /// `options.overwrites()` is `true`, an existing target file may be
+    /// replaced.
     /// Persistence uses a native move or rename and does not fall back to
     /// copying and deleting, so cross-filesystem moves can fail with `EXDEV` on
     /// Unix or a platform-equivalent error. Replacing an existing target keeps
@@ -312,7 +313,7 @@ impl LocalTempFile {
                 .path
                 .as_ref()
                 .expect("temporary file path has already been released");
-            if options.overwrite {
+            if options.overwrites() {
                 replace_file(source, &target)
             } else {
                 move_file_without_replacing(source, &target)

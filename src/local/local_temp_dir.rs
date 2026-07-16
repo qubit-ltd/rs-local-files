@@ -255,7 +255,7 @@ impl LocalTempDir {
     /// Opens a child file for writing.
     ///
     /// The child path must remain inside this temporary directory. When
-    /// `options.create_parent` is enabled, missing parent directories are
+    /// `options.creates_parent()` is enabled, missing parent directories are
     /// created with the same `mkdir -p` semantics as
     /// [`LocalTempDir::ensure_child_dir`]. Existing child targets must be
     /// regular files; final symbolic links are rejected without following
@@ -292,7 +292,7 @@ impl LocalTempDir {
             self.path(),
             child,
             &path,
-            options.create_parent,
+            options.creates_parent(),
         )?;
         LocalFiles::open_writer(path, options)
     }

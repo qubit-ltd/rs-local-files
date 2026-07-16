@@ -29,15 +29,24 @@ use crate::{
 ///
 /// LocalCopyDirOptions::new().follow_symlinks();
 /// ```
+///
+/// Configuration fields are private:
+///
+/// ```compile_fail
+/// use qubit_local_files::LocalCopyDirOptions;
+///
+/// let mut options = LocalCopyDirOptions::default();
+/// options.follow_symlinks = true;
+/// ```
 #[must_use = "directory copy options have no effect unless they are used"]
 #[non_exhaustive]
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub struct LocalCopyDirOptions {
     /// Policy for existing destination file entries.
-    pub conflict: LocalCopyConflictPolicy,
+    conflict: LocalCopyConflictPolicy,
 
     /// Policy for source and destination entry type mismatches.
-    pub type_conflict: LocalCopyTypeConflictPolicy,
+    type_conflict: LocalCopyTypeConflictPolicy,
 
     /// Whether symbolic links in the source tree should be followed.
     ///
@@ -51,7 +60,7 @@ pub struct LocalCopyDirOptions {
     /// not a sandbox boundary when an untrusted actor can mutate either tree
     /// concurrently. Use descriptor- or capability-relative filesystem APIs
     /// when containment must resist concurrent path replacement.
-    pub follow_symlinks: bool,
+    follow_symlinks: bool,
 
     /// Whether to copy source permissions to destination entries after
     /// copying.
@@ -61,7 +70,7 @@ pub struct LocalCopyDirOptions {
     /// this is `false`, new or replaced files retain the copy staging mode and
     /// new directories retain the private directory mode; on Unix these are
     /// `0o600` and `0o700`, respectively, subject to the process umask.
-    pub preserve_permissions: bool,
+    preserve_permissions: bool,
 }
 
 impl LocalCopyDirOptions {

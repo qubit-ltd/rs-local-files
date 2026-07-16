@@ -23,16 +23,25 @@ use crate::{
 ///
 /// FileWriteOptions::default().with_parent();
 /// ```
+///
+/// Configuration fields are private:
+///
+/// ```compile_fail
+/// use qubit_local_files::FileWriteOptions;
+///
+/// let mut options = FileWriteOptions::default();
+/// options.create_parent = true;
+/// ```
 #[must_use = "file write options have no effect unless they are used"]
 #[non_exhaustive]
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub struct FileWriteOptions {
     /// Whether missing parent directories should be created before opening.
-    pub create_parent: bool,
+    create_parent: bool,
     /// File creation and positioning mode.
-    pub mode: FileWriteMode,
+    mode: FileWriteMode,
     /// Buffering policy for the returned writer.
-    pub buffering: FileBuffering,
+    buffering: FileBuffering,
 }
 
 impl FileWriteOptions {

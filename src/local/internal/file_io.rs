@@ -75,7 +75,7 @@ pub(crate) fn open_reader_path(
     if !metadata.is_file() {
         return Err(opened_path_not_file_error(path));
     }
-    Ok(LocalFileReader::from_file(file, options.buffering))
+    Ok(LocalFileReader::from_file(file, options.buffering()))
 }
 
 /// Opens a file writer with the supplied options.
@@ -95,11 +95,11 @@ pub(crate) fn open_writer_path(
     path: &Path,
     options: FileWriteOptions,
 ) -> Result<LocalFileWriter> {
-    if options.create_parent {
+    if options.creates_parent() {
         ensure_parent_path(path)?;
     }
     let mut open_options = OpenOptions::new();
-    match options.mode {
+    match options.mode() {
         FileWriteMode::OpenExistingAtStart => {
             open_options.write(true);
         }
@@ -119,5 +119,5 @@ pub(crate) fn open_writer_path(
     let file = open_options
         .open(path)
         .map_err(|error| add_path_context(error, "open file writer", path))?;
-    Ok(LocalFileWriter::from_file(file, options.buffering))
+    Ok(LocalFileWriter::from_file(file, options.buffering()))
 }

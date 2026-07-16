@@ -19,12 +19,21 @@
 ///
 /// LocalPersistOptions::new().with_overwrite();
 /// ```
+///
+/// Configuration fields are private:
+///
+/// ```compile_fail
+/// use qubit_local_files::LocalPersistOptions;
+///
+/// let mut options = LocalPersistOptions::default();
+/// options.overwrite = true;
+/// ```
 #[must_use = "persistence options have no effect unless they are used"]
 #[non_exhaustive]
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub struct LocalPersistOptions {
     /// Whether an existing target path may be overwritten.
-    pub overwrite: bool,
+    overwrite: bool,
 }
 
 impl LocalPersistOptions {

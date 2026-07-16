@@ -12,7 +12,7 @@ use qubit_local_files::LocalPersistOptions;
 fn test_persist_options_default_is_conservative() {
     let options = LocalPersistOptions::default();
 
-    assert!(!options.overwrite);
+    assert!(!options.overwrites());
 }
 
 #[test]

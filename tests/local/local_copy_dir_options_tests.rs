@@ -16,10 +16,13 @@ use qubit_local_files::{
 fn test_copy_dir_options_default_is_conservative() {
     let options = LocalCopyDirOptions::default();
 
-    assert_eq!(LocalCopyConflictPolicy::Fail, options.conflict);
-    assert_eq!(LocalCopyTypeConflictPolicy::Fail, options.type_conflict);
-    assert!(!options.follow_symlinks);
-    assert!(!options.preserve_permissions);
+    assert_eq!(LocalCopyConflictPolicy::Fail, options.conflict_policy());
+    assert_eq!(
+        LocalCopyTypeConflictPolicy::Fail,
+        options.type_conflict_policy()
+    );
+    assert!(!options.follows_symlinks());
+    assert!(!options.preserves_permissions());
 }
 
 #[test]
