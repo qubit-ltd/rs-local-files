@@ -426,29 +426,66 @@ fn ensure_copy_destination_dir(
     type_conflict: LocalCopyTypeConflictPolicy,
     stats: &mut LocalCopyDirStats,
 ) -> Result<()> {
-    match fs::symlink_metadata(dst) {
-        Ok(metadata) => {
-            if is_real_directory(&metadata) {
-                return Ok(());
-            }
-            match type_conflict {
-                LocalCopyTypeConflictPolicy::Fail => {
-                    return Err(Error::new(
-                        ErrorKind::AlreadyExists,
-                        format!(
-                            "destination type conflicts with source directory: {}",
-                            dst.display()
-                        ),
-                    ));
-                }
-                LocalCopyTypeConflictPolicy::Replace => {
-                    remove_destination_non_directory_if_unchanged(dst)?;
-                }
-            }
-        }
-        Err(error) if error.kind() == ErrorKind::NotFound => {}
-        Err(error) => return Err(error),
+    if prepare_existing_directory_destination(dst, type_conflict)? {
+        return Ok(());
     }
+
+    create_copy_destination_dir(dst, stats)
+}
+
+/// Prepares an existing entry for use as a directory-copy destination.
+///
+/// # Parameters
+/// - `dst`: Destination directory path.
+/// - `type_conflict`: Policy for an existing non-directory destination.
+///
+/// # Returns
+/// `true` when `dst` already exists as a real directory; otherwise, `false`
+/// after any permitted conflicting entry has been removed.
+///
+/// # Errors
+/// Returns an I/O error when destination inspection fails, the conflict policy
+/// rejects an existing non-directory, or the conflicting entry cannot be
+/// removed safely.
+fn prepare_existing_directory_destination(
+    dst: &Path,
+    type_conflict: LocalCopyTypeConflictPolicy,
+) -> Result<bool> {
+    let Some(metadata) = destination_metadata_if_exists(dst)? else {
+        return Ok(false);
+    };
+    if is_real_directory(&metadata) {
+        return Ok(true);
+    }
+    if type_conflict == LocalCopyTypeConflictPolicy::Fail {
+        return Err(Error::new(
+            ErrorKind::AlreadyExists,
+            format!(
+                "destination type conflicts with source directory: {}",
+                dst.display()
+            ),
+        ));
+    }
+    remove_destination_non_directory_if_unchanged(dst)?;
+    Ok(false)
+}
+
+/// Creates a private directory destination and updates copy statistics.
+///
+/// A concurrently created real directory is accepted without incrementing the
+/// created-directory count.
+///
+/// # Parameters
+/// - `dst`: Destination directory path.
+/// - `stats`: Mutable copy statistics accumulator.
+///
+/// # Errors
+/// Returns an I/O error when the directory cannot be created or a concurrent
+/// destination entry is not a real directory.
+fn create_copy_destination_dir(
+    dst: &Path,
+    stats: &mut LocalCopyDirStats,
+) -> Result<()> {
     match create_private_dir(dst) {
         Ok(()) => {
             stats.directories = stats.directories.saturating_add(1);
@@ -544,11 +581,7 @@ fn copy_file_with_options(
         stats,
     )?;
     let destination_metadata = with_copy_context(
-        match fs::symlink_metadata(dst) {
-            Ok(metadata) => Ok(Some(metadata)),
-            Err(error) if error.kind() == ErrorKind::NotFound => Ok(None),
-            Err(error) => Err(error),
-        },
+        destination_metadata_if_exists(dst),
         LocalCopyDirStage::PrepareDestination,
         src,
         dst,
@@ -556,47 +589,26 @@ fn copy_file_with_options(
     )?;
     let destination_directory_requires_removal = match destination_metadata {
         Some(metadata) if is_real_directory(&metadata) => {
-            match options.type_conflict_policy() {
-                LocalCopyTypeConflictPolicy::Fail => {
-                    return Err(copy_dir_error(
-                        LocalCopyDirStage::PrepareDestination,
-                        src,
-                        dst,
-                        stats,
-                        Error::new(
-                            ErrorKind::AlreadyExists,
-                            format!(
-                                "destination type conflicts with source file: {}",
-                                dst.display()
-                            ),
-                        ),
-                    ));
-                }
-                LocalCopyTypeConflictPolicy::Replace => true,
-            }
+            ensure_directory_can_be_replaced_by_file(
+                src,
+                dst,
+                options.type_conflict_policy(),
+                stats,
+            )?;
+            true
         }
-        Some(_) => match options.conflict_policy() {
-            LocalCopyConflictPolicy::Fail => {
-                return Err(copy_dir_error(
-                    LocalCopyDirStage::PrepareDestination,
-                    src,
-                    dst,
-                    stats,
-                    Error::new(
-                        ErrorKind::AlreadyExists,
-                        format!(
-                            "destination already exists: {}",
-                            dst.display()
-                        ),
-                    ),
-                ));
-            }
-            LocalCopyConflictPolicy::Skip => {
+        Some(_) => {
+            if existing_file_destination_should_be_skipped(
+                src,
+                dst,
+                options.conflict_policy(),
+                stats,
+            )? {
                 stats.skipped = stats.skipped.saturating_add(1);
                 return Ok(());
             }
-            LocalCopyConflictPolicy::Overwrite => false,
-        },
+            false
+        }
         None => false,
     };
 
@@ -617,6 +629,96 @@ fn copy_file_with_options(
     stats.files = stats.files.saturating_add(1);
     stats.bytes = stats.bytes.saturating_add(copied);
     Ok(())
+}
+
+/// Ensures the type-conflict policy permits replacing a directory with a file.
+///
+/// # Parameters
+/// - `src`: Source file path.
+/// - `dst`: Destination path currently occupied by a real directory.
+/// - `type_conflict`: File/directory type-conflict policy.
+/// - `stats`: Copy statistics accumulated before destination preparation.
+///
+/// # Errors
+/// Returns a structured destination-preparation error when the type-conflict
+/// policy rejects replacement.
+fn ensure_directory_can_be_replaced_by_file(
+    src: &Path,
+    dst: &Path,
+    type_conflict: LocalCopyTypeConflictPolicy,
+    stats: &LocalCopyDirStats,
+) -> CopyDirResult<()> {
+    if type_conflict == LocalCopyTypeConflictPolicy::Replace {
+        return Ok(());
+    }
+    Err(copy_dir_error(
+        LocalCopyDirStage::PrepareDestination,
+        src,
+        dst,
+        stats,
+        Error::new(
+            ErrorKind::AlreadyExists,
+            format!(
+                "destination type conflicts with source file: {}",
+                dst.display()
+            ),
+        ),
+    ))
+}
+
+/// Applies the file-conflict policy to an existing non-directory destination.
+///
+/// # Parameters
+/// - `src`: Source file path.
+/// - `dst`: Existing non-directory destination path.
+/// - `conflict`: Existing-file conflict policy.
+/// - `stats`: Copy statistics accumulated before destination preparation.
+///
+/// # Returns
+/// `true` when the destination should be skipped and `false` when it may be
+/// overwritten.
+///
+/// # Errors
+/// Returns a structured destination-preparation error when the conflict policy
+/// rejects the existing destination.
+fn existing_file_destination_should_be_skipped(
+    src: &Path,
+    dst: &Path,
+    conflict: LocalCopyConflictPolicy,
+    stats: &LocalCopyDirStats,
+) -> CopyDirResult<bool> {
+    match conflict {
+        LocalCopyConflictPolicy::Fail => Err(copy_dir_error(
+            LocalCopyDirStage::PrepareDestination,
+            src,
+            dst,
+            stats,
+            Error::new(
+                ErrorKind::AlreadyExists,
+                format!("destination already exists: {}", dst.display()),
+            ),
+        )),
+        LocalCopyConflictPolicy::Skip => Ok(true),
+        LocalCopyConflictPolicy::Overwrite => Ok(false),
+    }
+}
+
+/// Reads destination metadata while treating a missing path as an empty slot.
+///
+/// # Parameters
+/// - `dst`: Destination path to inspect without following symbolic links.
+///
+/// # Returns
+/// `Some(metadata)` when the destination exists and `None` when it does not.
+///
+/// # Errors
+/// Returns the native metadata error for failures other than a missing path.
+fn destination_metadata_if_exists(dst: &Path) -> Result<Option<fs::Metadata>> {
+    match fs::symlink_metadata(dst) {
+        Ok(metadata) => Ok(Some(metadata)),
+        Err(error) if error.kind() == ErrorKind::NotFound => Ok(None),
+        Err(error) => Err(error),
+    }
 }
 
 /// Copies a regular source file into a private same-directory staging file.
