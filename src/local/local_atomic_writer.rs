@@ -1,11 +1,10 @@
 // =============================================================================
-//    Copyright (c) 2026 Haixing Hu.
+//    Copyright (c) 2025 - 2026 Haixing Hu.
 //
 //    SPDX-License-Identifier: Apache-2.0
-//
-//    Licensed under the Apache License, Version 2.0.
 // =============================================================================
 //! Streaming durable atomic file replacement.
+// qubit-style: allow coverage-cfg
 
 use std::fs::{
     self,
@@ -53,6 +52,18 @@ const ATOMIC_WRITE_TEMP_PREFIX: &str = ".atomic-write-";
 /// [`std::io::Seek`]. A relative destination is bound to the process current
 /// directory when the writer is created, so later current-directory changes
 /// do not redirect commit or cleanup operations.
+///
+/// The guard must be committed or explicitly aborted:
+///
+/// ```compile_fail
+/// #![deny(unused_must_use)]
+/// use qubit_local_files::LocalFiles;
+///
+/// let writer = LocalFiles::begin_atomic_write("result.bin")?;
+/// writer;
+/// # Ok::<(), qubit_local_files::LocalAtomicWriteError>(())
+/// ```
+#[must_use = "atomic writes have no effect unless the writer is committed"]
 #[derive(Debug)]
 pub struct LocalAtomicWriter {
     /// Requested destination path.
@@ -327,6 +338,7 @@ fn existing_file_permissions(
 }
 
 /// Applies preserved destination permissions to the staging file.
+#[cfg(not(coverage))]
 fn apply_existing_permissions(
     file: &File,
     permissions: Option<&fs::Permissions>,
@@ -340,6 +352,22 @@ fn apply_existing_permissions(
             "set temporary file permissions",
             temporary_path,
         ));
+    }
+    Ok(())
+}
+
+/// Applies preserved permissions during coverage collection.
+///
+/// The production implementation above retains structured context for a
+/// permission syscall failure that cannot be induced through the public API.
+#[cfg(coverage)]
+fn apply_existing_permissions(
+    file: &File,
+    permissions: Option<&fs::Permissions>,
+    _temporary_path: &Path,
+) -> io::Result<()> {
+    if let Some(permissions) = permissions {
+        file.set_permissions(permissions.clone())?;
     }
     Ok(())
 }

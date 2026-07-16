@@ -1,9 +1,7 @@
 // =============================================================================
-//    Copyright (c) 2026 Haixing Hu.
+//    Copyright (c) 2025 - 2026 Haixing Hu.
 //
 //    SPDX-License-Identifier: Apache-2.0
-//
-//    Licensed under the Apache License, Version 2.0.
 // =============================================================================
 //! Panic-safe ownership of an uncommitted staging file.
 
@@ -23,6 +21,7 @@ use log::warn;
 ///
 /// Dropping an armed guard closes the file handle and best-effort removes its
 /// path. A successful commit disarms cleanup after the path has been moved.
+#[must_use = "dropping the staging guard removes the uncommitted file"]
 #[derive(Debug)]
 pub(crate) struct StagedFile {
     /// Path removed while cleanup remains armed.

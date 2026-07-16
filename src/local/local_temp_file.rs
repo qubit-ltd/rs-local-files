@@ -1,9 +1,7 @@
 // =============================================================================
-//    Copyright (c) 2026 Haixing Hu.
+//    Copyright (c) 2025 - 2026 Haixing Hu.
 //
 //    SPDX-License-Identifier: Apache-2.0
-//
-//    Licensed under the Apache License, Version 2.0.
 // =============================================================================
 //! Automatically cleaned local temporary files.
 
@@ -55,6 +53,18 @@ use super::internal::{
 /// Cleanup performed from `Drop` is best-effort. If removal fails, the failure
 /// is reported through the `log` facade at warning level and the program is not
 /// panicked.
+///
+/// The guard must be retained until the file is kept, persisted, or cleaned:
+///
+/// ```compile_fail
+/// #![deny(unused_must_use)]
+/// use qubit_local_files::LocalTempFile;
+///
+/// let temporary_file = LocalTempFile::new()?;
+/// temporary_file;
+/// # Ok::<(), std::io::Error>(())
+/// ```
+#[must_use = "dropping the temporary-file guard removes its file"]
 #[derive(Debug)]
 pub struct LocalTempFile {
     /// Absolute generated path while cleanup remains armed.
