@@ -29,6 +29,8 @@ fn test_ensure_dir_and_ensure_parent_create_missing_directories() {
 
     LocalFiles::ensure_dir(&child_dir).expect("directory should be created");
     LocalFiles::ensure_parent(&child_file).expect("parent should be created");
+    LocalFiles::ensure_parent("parentless.txt")
+        .expect("a parentless path should require no directory creation");
 
     assert!(child_dir.is_dir());
     assert!(child_file.parent().unwrap().is_dir());

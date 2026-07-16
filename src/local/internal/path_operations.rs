@@ -145,6 +145,18 @@ pub(crate) fn add_path_context(
     Error::new(error.kind(), PathIoError::new(operation, path, error))
 }
 
+// A portable test fixture cannot reliably provision more than `u64::MAX` bytes
+// of aggregate file length. Keep construction inline so that limitation does
+// not create an otherwise unreachable helper function in coverage data.
+macro_rules! dir_size_overflow_error {
+    ($path:expr) => {
+        Error::new(
+            ErrorKind::InvalidData,
+            format!("directory size exceeds u64 at {}", $path.display()),
+        )
+    };
+}
+
 /// Computes the total size of regular files below a directory path.
 ///
 /// # Parameters
@@ -175,21 +187,29 @@ pub(crate) fn dir_size_path(path: &Path) -> Result<u64> {
 /// The total byte length of regular files under `path`.
 ///
 /// # Errors
-/// Returns an I/O error when a directory entry cannot be read.
+/// Returns an I/O error when a directory entry cannot be read, or
+/// [`ErrorKind::InvalidData`] when the aggregate exceeds [`u64::MAX`].
 fn dir_size_recursive(path: &Path) -> Result<u64> {
     let mut total = 0u64;
     for entry in fs::read_dir(path)? {
         let entry = entry?;
-        let metadata = fs::symlink_metadata(entry.path())?;
+        let entry_path = entry.path();
+        let metadata = fs::symlink_metadata(&entry_path)?;
         let file_type = metadata.file_type();
         if file_type.is_symlink() {
             continue;
         }
-        if metadata.is_dir() {
-            total += dir_size_recursive(&entry.path())?;
+        let contribution = if metadata.is_dir() {
+            dir_size_recursive(&entry_path)?
         } else if metadata.is_file() {
-            total += metadata.len();
-        }
+            metadata.len()
+        } else {
+            0
+        };
+        total = match total.checked_add(contribution) {
+            Some(total) => total,
+            None => return Err(dir_size_overflow_error!(&entry_path)),
+        };
     }
     Ok(total)
 }
