@@ -151,6 +151,8 @@ assert_eq!("new payload\n", std::fs::read_to_string(&final_path)?);
 
 递归复制不是目录树级事务。失败前已经提交的条目会留在目标中，不会执行回滚；破坏性的类型冲突替换还可能先删除已有目标目录，随后才在后续操作中失败。
 
+源路径检查、源文件打开、目标复查和破坏性替换是彼此分离的 path-based 操作。symlink 策略用于避免普通的意外穿越；当其他参与者能够并发修改任一目录树时，它不是可抵御攻击者的 sandbox 边界。
+
 ### 文件名 Helper
 
 `LocalFilenames` 提供随机和 lexical 文件名工具：

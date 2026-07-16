@@ -44,6 +44,13 @@ pub struct LocalCopyDirOptions {
     /// When this is `false`, encountering a symbolic link returns
     /// [`std::io::ErrorKind::Unsupported`]. This avoids accidentally copying
     /// data outside the requested source tree.
+    ///
+    /// Source inspection, source opening, destination reinspection, and
+    /// destructive replacement are separate path-based operations. The
+    /// symbolic link policy prevents ordinary accidental traversal, but it is
+    /// not a sandbox boundary when an untrusted actor can mutate either tree
+    /// concurrently. Use descriptor- or capability-relative filesystem APIs
+    /// when containment must resist concurrent path replacement.
     pub follow_symlinks: bool,
 
     /// Whether to copy source permissions to destination entries after

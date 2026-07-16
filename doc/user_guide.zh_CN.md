@@ -370,6 +370,8 @@ assert_eq!(4, stats.bytes);
 
 复制操作会拒绝位于源目录内部的目标，因为把目录复制进自身可能导致无限递归。当启用 symlink following 时，由跟随 symbolic link 引入的目录环也会被拒绝。不支持的源条目通过 `LocalCopyDirError` 报告 `std::io::ErrorKind::Unsupported`。结构化错误同时提供失败阶段、源和目标路径、部分统计、可选 staging path、可选次级 cleanup error 及原始 I/O source error；原始复制或提交错误保持为主 source error。递归复制不是目录树级事务：失败前已经提交的条目会留在目标中，不会执行回滚；破坏性的类型冲突替换还可能先删除已有目标目录，随后才在后续操作中失败。
 
+源路径检查、源文件打开、目标复查和破坏性替换是彼此分离的 path-based 操作。symlink 策略用于避免普通的意外穿越；当其他参与者能够并发修改任一目录树时，它不是可抵御攻击者的 sandbox 边界。
+
 ## 文件名 Helper
 
 `LocalFilenames` 提供不访问文件系统的 lexical helper。返回文件名数据的方法返回 UTF-8 字符串（`&str` 或 `String`），而不是 `OsStr`；无效 UTF-8 path component 返回 `None`。

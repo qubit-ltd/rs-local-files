@@ -213,6 +213,11 @@ failure remain in the destination, no rollback is attempted, and destructive
 type-conflict replacement may remove an existing destination directory before
 a later operation fails.
 
+Source checks, source opens, destination rechecks, and destructive replacement
+are separate path-based operations. The symlink policy prevents accidental
+traversal; it is not an attacker-resistant sandbox when another actor can
+mutate either tree concurrently.
+
 ### Filename Helpers
 
 `LocalFilenames` provides random and lexical filename utilities:
