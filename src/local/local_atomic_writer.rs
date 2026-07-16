@@ -114,36 +114,33 @@ impl LocalAtomicWriter {
     /// synchronization, destination replacement, or parent synchronization
     /// fails. A parent synchronization error may report `committed = true`.
     pub fn commit(mut self) -> Result<(), LocalAtomicWriteError> {
-        if let Err(source) = apply_existing_permissions(
+        let result = apply_existing_permissions(
             self.staged_file.file(),
             self.existing_permissions.as_ref(),
             self.staged_file.path(),
-        ) {
-            return Err(atomic_error_with_staging(
-                LocalAtomicWriteStage::PreservePermissions,
-                &self.path,
-                source,
-                &mut self.staged_file,
-            ));
-        }
-        if let Err(source) = self.staged_file.file().sync_all() {
-            return Err(atomic_error_with_staging(
-                LocalAtomicWriteStage::SyncTemporaryFile,
-                &self.path,
-                source,
-                &mut self.staged_file,
-            ));
-        }
+        );
+        with_staging_cleanup(
+            result,
+            LocalAtomicWriteStage::PreservePermissions,
+            &self.path,
+            &mut self.staged_file,
+        )?;
+        let result = self.staged_file.file().sync_all();
+        with_staging_cleanup(
+            result,
+            LocalAtomicWriteStage::SyncTemporaryFile,
+            &self.path,
+            &mut self.staged_file,
+        )?;
 
         self.staged_file.close();
-        if let Err(source) = replace_file(self.staged_file.path(), &self.path) {
-            return Err(atomic_error_with_staging(
-                LocalAtomicWriteStage::ReplaceDestination,
-                &self.path,
-                source,
-                &mut self.staged_file,
-            ));
-        }
+        let result = replace_file(self.staged_file.path(), &self.path);
+        with_staging_cleanup(
+            result,
+            LocalAtomicWriteStage::ReplaceDestination,
+            &self.path,
+            &mut self.staged_file,
+        )?;
         let temporary_path = self.staged_file.path().to_path_buf();
         self.staged_file.disarm();
         with_atomic_context(
@@ -179,18 +176,10 @@ impl LocalAtomicWriter {
 
     /// Writes all bytes and commits the destination.
     pub(crate) fn write_bytes(
-        mut self,
+        self,
         bytes: &[u8],
     ) -> Result<(), LocalAtomicWriteError> {
-        if let Err(source) = self.write_all(bytes) {
-            return Err(atomic_error_with_staging(
-                LocalAtomicWriteStage::WriteTemporaryFile,
-                &self.path,
-                source,
-                &mut self.staged_file,
-            ));
-        }
-        self.commit()
+        self.write_with(|file| file.write_all(bytes))
     }
 
     /// Invokes caller-provided staging logic and commits the destination.
@@ -201,25 +190,20 @@ impl LocalAtomicWriter {
     where
         F: FnOnce(&mut File) -> io::Result<()>,
     {
-        let mut callback_file = match self.staged_file.file().try_clone() {
-            Ok(file) => file,
-            Err(source) => {
-                return Err(atomic_error_with_staging(
-                    LocalAtomicWriteStage::WriteTemporaryFile,
-                    &self.path,
-                    source,
-                    &mut self.staged_file,
-                ));
-            }
-        };
-        if let Err(source) = write(&mut callback_file) {
-            return Err(atomic_error_with_staging(
-                LocalAtomicWriteStage::WriteTemporaryFile,
-                &self.path,
-                source,
-                &mut self.staged_file,
-            ));
-        }
+        let result = self.staged_file.file().try_clone();
+        let mut callback_file = with_staging_cleanup(
+            result,
+            LocalAtomicWriteStage::WriteTemporaryFile,
+            &self.path,
+            &mut self.staged_file,
+        )?;
+        let result = write(&mut callback_file);
+        with_staging_cleanup(
+            result,
+            LocalAtomicWriteStage::WriteTemporaryFile,
+            &self.path,
+            &mut self.staged_file,
+        )?;
         drop(callback_file);
         self.commit()
     }
@@ -273,6 +257,18 @@ fn atomic_error_with_staging(
         source,
     )
     .with_cleanup_error(cleanup_error)
+}
+
+/// Adds atomic-write context and cleanup to a staging operation result.
+fn with_staging_cleanup<T>(
+    result: io::Result<T>,
+    stage: LocalAtomicWriteStage,
+    path: &Path,
+    staged_file: &mut StagedFile,
+) -> Result<T, LocalAtomicWriteError> {
+    result.map_err(|source| {
+        atomic_error_with_staging(stage, path, source, staged_file)
+    })
 }
 
 /// Synchronizes the destination and every newly created parent entry.
