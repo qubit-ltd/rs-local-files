@@ -196,43 +196,51 @@ impl LocalAtomicWriter {
         self,
         bytes: &[u8],
     ) -> Result<(), LocalAtomicWriteError> {
-        self.write_with(|file| file.write_all(bytes))
+        self.write_with(|writer| writer.write_all(bytes))
     }
 
     /// Invokes caller-provided staging logic and commits the destination.
+    ///
+    /// The callback receives the guarded writer itself rather than a [`File`].
+    /// Exposing a file would let the callback retain a cloned handle and mutate
+    /// the committed inode after rename, invalidating the atomic snapshot.
+    ///
+    /// # Parameters
+    /// - `write`: Callback that writes the complete staged contents.
+    ///
+    /// # Errors
+    /// Returns a structured error when the callback or commit sequence fails.
+    /// Callback errors are reported at
+    /// [`LocalAtomicWriteStage::WriteTemporaryFile`].
+    ///
+    /// # Panics
+    /// Propagates callback panics after the staging guard attempts best-effort
+    /// cleanup while unwinding.
     pub(crate) fn write_with<F>(
         mut self,
         write: F,
     ) -> Result<(), LocalAtomicWriteError>
     where
-        F: FnOnce(&mut File) -> io::Result<()>,
+        F: FnOnce(&mut Self) -> io::Result<()>,
     {
-        let result = self.staged_file.file().try_clone();
-        let mut callback_file = with_staging_cleanup(
-            result,
-            LocalAtomicWriteStage::WriteTemporaryFile,
-            &self.path,
-            &mut self.staged_file,
-        )?;
-        let result = write(&mut callback_file);
+        let result = write(&mut self);
         with_staging_cleanup(
             result,
             LocalAtomicWriteStage::WriteTemporaryFile,
             &self.path,
             &mut self.staged_file,
         )?;
-        drop(callback_file);
         self.commit()
     }
 }
 
 impl Write for LocalAtomicWriter {
-    #[inline]
+    #[inline(always)]
     fn write(&mut self, buffer: &[u8]) -> io::Result<usize> {
         self.staged_file.file_mut().write(buffer)
     }
 
-    #[inline]
+    #[inline(always)]
     fn flush(&mut self) -> io::Result<()> {
         self.staged_file.file_mut().flush()
     }

@@ -8,10 +8,7 @@
 //! Public local filesystem utility namespace.
 
 use std::convert::Infallible;
-use std::fs::{
-    self,
-    File,
-};
+use std::fs;
 use std::io::Result;
 use std::path::Path;
 
@@ -65,31 +62,6 @@ impl LocalFiles {
     /// Default number of attempts used when creating a random temporary entry.
     pub const DEFAULT_TEMP_FILE_RETRIES: usize =
         DEFAULT_TEMP_FILE_RETRIES_VALUE;
-
-    /// Begins a streaming same-directory atomic file replacement.
-    ///
-    /// The returned writer owns a staging file. The destination is replaced
-    /// only by [`LocalAtomicWriter::commit`]; aborting or dropping the writer
-    /// leaves the destination unchanged.
-    ///
-    /// # Parameters
-    /// - `path`: Destination path to replace on commit.
-    ///
-    /// # Returns
-    /// A streaming writer for the private staging file.
-    ///
-    /// # Errors
-    /// Returns a structured error when parent preparation, destination
-    /// inspection, or staging-file creation fails.
-    #[inline(always)]
-    pub fn begin_atomic_write<P>(
-        path: P,
-    ) -> std::result::Result<LocalAtomicWriter, LocalAtomicWriteError>
-    where
-        P: AsRef<Path>,
-    {
-        LocalAtomicWriter::new(path.as_ref())
-    }
 
     /// Tests whether a path exists.
     ///
@@ -150,8 +122,8 @@ impl LocalFiles {
 
     /// Opens a local file for reading.
     ///
-    /// The target must be a file. Directories and other non-file paths are
-    /// rejected before returning the reader.
+    /// The target must be a regular file. Directories and special filesystem
+    /// resources are rejected without returning a reader.
     ///
     /// # Parameters
     /// - `path`: File path to open.
@@ -162,7 +134,7 @@ impl LocalFiles {
     ///
     /// # Errors
     /// Returns an I/O error when `path` cannot be inspected or opened, or when
-    /// the target is not a file.
+    /// the target is not a regular file.
     #[inline(always)]
     pub fn open_reader<P>(
         path: P,
@@ -178,6 +150,8 @@ impl LocalFiles {
     ///
     /// Whole-file durable replacement remains the responsibility of
     /// [`LocalFiles::atomic_write`] and [`LocalFiles::atomic_write_with`].
+    /// The target must be a regular file or a path that the selected mode can
+    /// create; directories and special filesystem resources are rejected.
     ///
     /// # Parameters
     /// - `path`: File path to open.
@@ -189,7 +163,8 @@ impl LocalFiles {
     ///
     /// # Errors
     /// Returns an I/O error when parent directories cannot be created or the
-    /// file cannot be opened with the requested mode.
+    /// file cannot be opened with the requested mode, or the target is not a
+    /// regular file.
     #[inline(always)]
     pub fn open_writer<P>(
         path: P,
@@ -249,7 +224,9 @@ impl LocalFiles {
     ///
     /// # Errors
     /// Returns an I/O error when `path` cannot be inspected, is not a
-    /// directory, or one of the directory entries cannot be read.
+    /// directory, one of the directory entries cannot be read, or the
+    /// aggregate size exceeds [`u64::MAX`]. Overflow is reported as
+    /// [`std::io::ErrorKind::InvalidData`].
     #[inline(always)]
     pub fn dir_size<P>(path: P) -> Result<u64>
     where
@@ -351,6 +328,31 @@ impl LocalFiles {
         copy_dir_all_with_paths(src.as_ref(), dst.as_ref(), options)
     }
 
+    /// Begins a streaming same-directory atomic file replacement.
+    ///
+    /// The returned writer owns a staging file. The destination is replaced
+    /// only by [`LocalAtomicWriter::commit`]; aborting or dropping the writer
+    /// leaves the destination unchanged.
+    ///
+    /// # Parameters
+    /// - `path`: Destination path to replace on commit.
+    ///
+    /// # Returns
+    /// A streaming writer for the private staging file.
+    ///
+    /// # Errors
+    /// Returns a structured error when parent preparation, destination
+    /// inspection, or staging-file creation fails.
+    #[inline(always)]
+    pub fn begin_atomic_write<P>(
+        path: P,
+    ) -> std::result::Result<LocalAtomicWriter, LocalAtomicWriteError>
+    where
+        P: AsRef<Path>,
+    {
+        LocalAtomicWriter::new(path.as_ref())
+    }
+
     /// Atomically writes bytes using a same-directory temporary file.
     ///
     /// Parent directories are created first. The temporary file is flushed and
@@ -412,20 +414,38 @@ impl LocalFiles {
 
     /// Atomically writes a file using caller-provided write logic.
     ///
-    /// The callback receives the same-directory temporary file. After it
-    /// returns successfully, the file is flushed, synced, closed, and moved
-    /// over the destination before the parent directory is synced. An
-    /// uncommitted temporary file is closed and best-effort removed both on
+    /// The callback receives a non-cloneable [`LocalAtomicWriter`] capability
+    /// that implements [`std::io::Write`] but deliberately exposes neither
+    /// [`std::io::Seek`] nor the underlying file or raw handle. After it
+    /// returns successfully, the staging file is flushed, synced, closed, and
+    /// moved over the destination before the parent directory is synced. An
+    /// uncommitted staging file is closed and best-effort removed both on
     /// ordinary errors and while unwinding from a callback panic. A cleanup
     /// failure cannot replace the original error or panic and may therefore
     /// leave the staging path behind.
     /// Parent-chain synchronization and new-file permission behavior are the
     /// same as for [`Self::atomic_write`].
     ///
+    /// The callback receives a guarded writer rather than a cloneable file
+    /// handle:
+    ///
+    /// ```compile_fail
+    /// use qubit_local_files::{LocalFiles, LocalTempDir};
+    ///
+    /// let dir = LocalTempDir::new()?;
+    /// let path = dir.path().join("state.bin");
+    /// let mut escaped = None;
+    /// LocalFiles::atomic_write_with(&path, |writer| {
+    ///     escaped = Some(writer.try_clone()?);
+    ///     Ok(())
+    /// })?;
+    /// # Ok::<(), Box<dyn std::error::Error>>(())
+    /// ```
+    ///
     /// # Parameters
     /// - `path`: Destination path.
-    /// - `write`: Function that writes the desired contents into the temporary
-    ///   file.
+    /// - `write`: Function that writes the desired contents through the guarded
+    ///   staging writer.
     ///
     /// # Errors
     /// Returns [`LocalAtomicWriteError`] with the failed stage, temporary path,
@@ -443,7 +463,7 @@ impl LocalFiles {
     ) -> std::result::Result<(), LocalAtomicWriteError>
     where
         P: AsRef<Path>,
-        F: FnOnce(&mut File) -> Result<()>,
+        F: FnOnce(&mut LocalAtomicWriter) -> Result<()>,
     {
         Self::begin_atomic_write(path)?.write_with(write)
     }

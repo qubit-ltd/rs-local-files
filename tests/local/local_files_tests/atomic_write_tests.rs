@@ -52,8 +52,8 @@ fn test_atomic_write_syncs_parents_of_newly_created_directories() {
     let path = first_created_parent.join("second").join("out.txt");
     let mut permission_check_is_effective = false;
 
-    let result = LocalFiles::atomic_write_with(&path, |file| {
-        file.write_all(b"durable")?;
+    let result = LocalFiles::atomic_write_with(&path, |writer| {
+        writer.write_all(b"durable")?;
         fs::set_permissions(
             &first_created_parent,
             fs::Permissions::from_mode(0o111),
@@ -327,10 +327,10 @@ fn test_atomic_write_returns_parent_inspection_error() {
 fn test_atomic_write_with_preserves_existing_file_and_removes_temp_on_error() {
     let dir = temp_dir("atomic-error");
     let path = dir.join("out.txt");
-    fs::write(&path, b"old").unwrap();
+    fs::write(&path, b"old").expect("original target should be written");
 
-    let error = LocalFiles::atomic_write_with(&path, |file| {
-        file.write_all(b"new")?;
+    let error = LocalFiles::atomic_write_with(&path, |writer| {
+        writer.write_all(b"new")?;
         Err(Error::other("write failed"))
     })
     .expect_err("writer error should be returned");
@@ -341,9 +341,14 @@ fn test_atomic_write_with_preserves_existing_file_and_removes_temp_on_error() {
     assert!(!error.committed);
     assert_eq!(ErrorKind::Other, error.kind());
     assert_eq!("write failed", error.source.to_string());
-    assert_eq!(b"old", fs::read(&path).unwrap().as_slice());
+    assert_eq!(
+        b"old",
+        fs::read(&path)
+            .expect("original target should remain readable")
+            .as_slice()
+    );
     assert_eq!(0, count_atomic_temp_files(&dir));
-    fs::remove_dir_all(dir).unwrap();
+    fs::remove_dir_all(dir).expect("atomic error fixture should be removed");
 }
 
 #[cfg(target_os = "linux")]
@@ -358,8 +363,8 @@ fn test_atomic_write_with_reports_temporary_cleanup_failure() {
     }
 
     let restricted_dir = dir.clone();
-    let error = LocalFiles::atomic_write_with(&path, move |file| {
-        file.write_all(b"new")?;
+    let error = LocalFiles::atomic_write_with(&path, move |writer| {
+        writer.write_all(b"new")?;
         fs::set_permissions(
             &restricted_dir,
             fs::Permissions::from_mode(0o500),
@@ -398,8 +403,8 @@ fn test_atomic_write_with_removes_temporary_file_when_callback_panics() {
     fs::write(&path, b"old").expect("original target should be written");
 
     let panic = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-        let _ = LocalFiles::atomic_write_with(&path, |file| {
-            file.write_all(b"new")?;
+        let _ = LocalFiles::atomic_write_with(&path, |writer| {
+            writer.write_all(b"new")?;
             panic!("intentional atomic-write callback panic");
         });
     }));
@@ -413,24 +418,27 @@ fn test_atomic_write_with_removes_temporary_file_when_callback_panics() {
     assert_eq!(0, temporary_file_count, "staging file must be removed");
 }
 
-#[cfg(target_os = "linux")]
 #[test]
-fn test_atomic_write_with_keeps_canonical_staging_handle() {
-    let dir = temp_dir("atomic-canonical-handle");
+fn test_atomic_write_with_uses_guarded_atomic_writer() {
+    let dir = temp_dir("atomic-guarded-callback");
     let path = dir.join("out.txt");
 
-    LocalFiles::atomic_write_with(&path, |file| {
-        file.write_all(b"committed")?;
-        *file = fs::OpenOptions::new().write(true).open("/dev/full")?;
-        Ok(())
-    })
-    .expect(
-        "replacing the callback handle must not replace the staging handle",
-    );
+    LocalFiles::atomic_write_with(
+        &path,
+        |writer: &mut qubit_local_files::LocalAtomicWriter| {
+            writer.write_all(b"committed")
+        },
+    )
+    .expect("guarded atomic callback should commit");
 
-    assert_eq!(b"committed", fs::read(&path).unwrap().as_slice());
+    assert_eq!(
+        b"committed",
+        fs::read(&path)
+            .expect("committed destination should be readable")
+            .as_slice(),
+    );
     assert_eq!(0, count_atomic_temp_files(&dir));
-    fs::remove_dir_all(dir).unwrap();
+    fs::remove_dir_all(dir).expect("atomic fixture should be removed");
 }
 
 #[cfg(unix)]
