@@ -427,43 +427,20 @@ fn test_atomic_write_with_removes_temporary_file_when_callback_panics() {
 
 #[cfg(target_os = "linux")]
 #[test]
-fn test_atomic_write_with_returns_temporary_sync_error() {
-    let dir = temp_dir("atomic-sync-error");
+fn test_atomic_write_with_keeps_canonical_staging_handle() {
+    let dir = temp_dir("atomic-canonical-handle");
     let path = dir.join("out.txt");
 
-    let error = LocalFiles::atomic_write_with(&path, |file| {
-        *file = fs::OpenOptions::new()
-            .write(true)
-            .open("/dev/full")
-            .expect("/dev/full should be writable");
+    LocalFiles::atomic_write_with(&path, |file| {
+        file.write_all(b"committed")?;
+        *file = fs::OpenOptions::new().write(true).open("/dev/full")?;
         Ok(())
     })
-    .expect_err("syncing /dev/full should fail");
+    .expect(
+        "replacing the callback handle must not replace the staging handle",
+    );
 
-    assert_eq!(LocalAtomicWriteStage::SyncTemporaryFile, error.stage);
-    assert!(!error.committed);
-    assert!(!path.exists());
-    assert_eq!(0, count_atomic_temp_files(&dir));
-    fs::remove_dir_all(dir).unwrap();
-}
-
-#[cfg(target_os = "linux")]
-#[test]
-fn test_atomic_write_with_returns_permission_preservation_error() {
-    let dir = temp_dir("atomic-permission-error");
-    let path = dir.join("out.txt");
-    fs::write(&path, b"original").unwrap();
-
-    let error = LocalFiles::atomic_write_with(&path, |file| {
-        *file = fs::File::open("/proc/self/status")
-            .expect("process status should be readable");
-        Ok(())
-    })
-    .expect_err("changing process status permissions should fail");
-
-    assert_eq!(LocalAtomicWriteStage::PreservePermissions, error.stage);
-    assert!(!error.committed);
-    assert_eq!(b"original", fs::read(&path).unwrap().as_slice());
+    assert_eq!(b"committed", fs::read(&path).unwrap().as_slice());
     assert_eq!(0, count_atomic_temp_files(&dir));
     fs::remove_dir_all(dir).unwrap();
 }
@@ -2465,7 +2442,12 @@ fn test_atomic_write_replaces_self_referential_symlink() {
     LocalFiles::atomic_write(&path, b"data")
         .expect("self-referential symlink should be replaced");
 
-    assert!(!fs::symlink_metadata(&path).unwrap().file_type().is_symlink());
+    assert!(
+        !fs::symlink_metadata(&path)
+            .unwrap()
+            .file_type()
+            .is_symlink()
+    );
     assert_eq!(b"data", fs::read(&path).unwrap().as_slice());
     fs::remove_dir_all(dir).unwrap();
 }

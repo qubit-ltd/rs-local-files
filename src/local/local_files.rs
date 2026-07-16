@@ -413,13 +413,6 @@ impl LocalFiles {
         P: AsRef<Path>,
         F: FnOnce(&mut File) -> Result<()>,
     {
-        let mut write = Some(write);
-        atomic_write_with_path(path.as_ref(), &mut |file| {
-            write
-                .take()
-                .expect("atomic write callback must only be invoked once")(
-                file
-            )
-        })
+        atomic_write_with_path(path.as_ref(), write)
     }
 }

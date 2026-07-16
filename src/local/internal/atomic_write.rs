@@ -60,7 +60,7 @@ pub(crate) fn atomic_write_bytes_path(
     path: &Path,
     bytes: &[u8],
 ) -> std::result::Result<(), LocalAtomicWriteError> {
-    atomic_write_with_path(path, &mut |file| file.write_all(bytes))
+    atomic_write_with_path(path, |file| file.write_all(bytes))
 }
 
 /// Adds atomic-write context to a native I/O result.
@@ -124,10 +124,13 @@ fn atomic_error_with_staging(
 /// # Panics
 /// Propagates panics from `write`. While unwinding, [`StagedFile`] performs
 /// best-effort cleanup of the temporary file.
-pub(crate) fn atomic_write_with_path(
+pub(crate) fn atomic_write_with_path<F>(
     path: &Path,
-    write: &mut dyn FnMut(&mut File) -> Result<()>,
-) -> std::result::Result<(), LocalAtomicWriteError> {
+    write: F,
+) -> std::result::Result<(), LocalAtomicWriteError>
+where
+    F: FnOnce(&mut File) -> Result<()>,
+{
     let parent_dirs_to_sync = with_atomic_context(
         ensure_parent_path_with_sync_dirs(path),
         LocalAtomicWriteStage::PrepareParent,
@@ -157,7 +160,18 @@ pub(crate) fn atomic_write_with_path(
     )?;
     let mut staged_file = StagedFile::new(temp_path, file);
 
-    if let Err(source) = write(staged_file.file_mut()) {
+    let mut callback_file = match staged_file.file().try_clone() {
+        Ok(file) => file,
+        Err(source) => {
+            return Err(atomic_error_with_staging(
+                LocalAtomicWriteStage::WriteTemporaryFile,
+                path,
+                source,
+                &mut staged_file,
+            ));
+        }
+    };
+    if let Err(source) = write(&mut callback_file) {
         return Err(atomic_error_with_staging(
             LocalAtomicWriteStage::WriteTemporaryFile,
             path,
@@ -165,6 +179,7 @@ pub(crate) fn atomic_write_with_path(
             &mut staged_file,
         ));
     }
+    drop(callback_file);
     if let Err(source) = apply_existing_permissions(
         staged_file.file(),
         existing_permissions.as_ref(),
