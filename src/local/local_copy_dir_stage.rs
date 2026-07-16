@@ -1,9 +1,7 @@
 // =============================================================================
-//    Copyright (c) 2026 Haixing Hu.
+//    Copyright (c) 2025 - 2026 Haixing Hu.
 //
 //    SPDX-License-Identifier: Apache-2.0
-//
-//    Licensed under the Apache License, Version 2.0.
 // =============================================================================
 //! Recursive-copy failure stages.
 
@@ -25,6 +23,7 @@
 ///         LocalCopyDirStage::PreservePermissions => {}
 ///         LocalCopyDirStage::CommitFile => {}
 ///         LocalCopyDirStage::CleanupTemporaryFile => {}
+///         LocalCopyDirStage::UpdateStatistics => {}
 ///     }
 /// }
 /// ```
@@ -47,4 +46,6 @@ pub enum LocalCopyDirStage {
     CommitFile,
     /// Removing an uncommitted staging file after a skipped copy failed.
     CleanupTemporaryFile,
+    /// Updating exact recursive-copy statistics overflowed.
+    UpdateStatistics,
 }

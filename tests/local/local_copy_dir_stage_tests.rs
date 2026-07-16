@@ -1,13 +1,12 @@
 // =============================================================================
-//    Copyright (c) 2026 Haixing Hu.
+//    Copyright (c) 2025 - 2026 Haixing Hu.
 //
 //    SPDX-License-Identifier: Apache-2.0
-//
-//    Licensed under the Apache License, Version 2.0.
 // =============================================================================
 
 use qubit_local_files::LocalCopyDirStage;
 
+/// Verifies that every public recursive-copy stage remains distinguishable.
 #[test]
 fn test_copy_dir_stage_variants_are_distinct_and_debuggable() {
     let stages = [
@@ -19,6 +18,7 @@ fn test_copy_dir_stage_variants_are_distinct_and_debuggable() {
         LocalCopyDirStage::PreservePermissions,
         LocalCopyDirStage::CommitFile,
         LocalCopyDirStage::CleanupTemporaryFile,
+        LocalCopyDirStage::UpdateStatistics,
     ];
 
     for (index, stage) in stages.iter().enumerate() {
