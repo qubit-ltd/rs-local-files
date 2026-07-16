@@ -86,6 +86,9 @@ Normal file opening is controlled by explicit option structs:
 
 Readers returned by `LocalFiles::open_reader` implement `Read` and `Seek`.
 Writers returned by `LocalFiles::open_writer` implement `Write` and `Seek`.
+Both helpers return only regular files. They reject directories, FIFOs,
+sockets, and other special filesystem resources; Unix FIFO rejection does not
+wait for a peer.
 `LocalFileWriter::sync_all` and `LocalFileWriter::sync_data` flush any buffered
 bytes before synchronizing the underlying file, which is useful for append logs
 or other normal write handles that do not need whole-file atomic replacement.
@@ -138,17 +141,17 @@ Ownership methods:
 
 | Method | Behavior |
 | --- | --- |
-| `path` | Borrows the generated directory path. |
+| `path` | Borrows the generated absolute directory path. |
 | `exists` | Checks whether the directory path exists, returning `std::io::Result<bool>`. |
 | `metadata` | Reads directory metadata. |
 | `list` | Lists direct child entries. |
-| `child_path` | Lexically validates and joins a relative child path without inspecting the filesystem. |
-| `ensure_child_dir` | Creates a child directory and missing parents, like `mkdir -p`. |
+| `child_path` | Lexically validates a relative child and returns its absolute joined path without inspecting the filesystem. |
+| `ensure_child_dir` | Creates a child directory and missing parents, like `mkdir -p`, and returns its absolute path. |
 | `open_child_reader` | Opens a child file for reading with `FileReadOptions`. |
 | `open_child_writer` | Opens a child file for writing with `FileWriteOptions`. |
 | `cleanup` | Removes the directory immediately and disables later drop cleanup. |
-| `keep` | Consumes the guard and leaves the directory at its generated path. |
-| `persist` | Moves the directory to a final path and disables automatic cleanup. |
+| `keep` | Consumes the guard, leaves the directory in place, and returns its absolute path. |
+| `persist` | Moves the directory to a final path, returns its absolute path, and disables automatic cleanup. |
 
 `LocalTempDir::persist` creates missing parent directories for the target and
 rejects an existing target. It does not provide an overwrite option. If the move
@@ -208,16 +211,16 @@ Handle and ownership methods:
 
 | Method | Behavior |
 | --- | --- |
-| `path` | Borrows the generated file path. |
+| `path` | Borrows the generated absolute file path. |
 | `exists` | Checks whether the file path exists, returning `std::io::Result<bool>`. |
 | `metadata` | Reads file metadata. |
 | `as_file` / `as_file_mut` | Borrows the original owned `File` handle. |
 | `Write` / `Seek` | Writes or seeks directly through the owned handle. |
 | `close` | Drops the unbuffered handle while keeping path cleanup active; it does not call `sync_all`. |
 | `cleanup` | Removes the file immediately and disables later drop cleanup. |
-| `keep` | Closes and consumes the guard, leaving the file at its generated path. |
-| `persist` | Moves the file to a final path without overwriting. |
-| `persist_with` | Moves the file to a final path using `LocalPersistOptions`. |
+| `keep` | Closes and consumes the guard, leaving the file in place and returning its absolute path. |
+| `persist` | Moves the file without overwriting and returns the absolute final path. |
+| `persist_with` | Moves the file using `LocalPersistOptions` and returns the absolute final path. |
 
 `LocalTempFile` intentionally does not provide read helpers. A temporary file is
 normally written, closed, then persisted. If you need to inspect its contents,
@@ -288,8 +291,9 @@ assert_eq!(
 # Ok::<(), Box<dyn std::error::Error>>(())
 ```
 
-Use `LocalFiles::atomic_write_with` when content generation needs direct access
-to the temporary file handle:
+Use `LocalFiles::atomic_write_with` when content generation should run inside a
+guarded atomic-write callback. The callback receives `LocalAtomicWriter`, which
+supports `Write` but cannot clone or retain the underlying file handle:
 
 ```rust
 use std::io::Write;
@@ -302,8 +306,8 @@ use qubit_local_files::{
 let dir = LocalTempDir::with_prefix(Some("qubit-local-files-json-"))?;
 let path = dir.path().join("state.json");
 
-LocalFiles::atomic_write_with(&path, |file| {
-    writeln!(file, "{{\"complete\":true}}")
+LocalFiles::atomic_write_with(&path, |writer| {
+    writeln!(writer, "{{\"complete\":true}}")
 })?;
 
 assert_eq!("{\"complete\":true}\n", std::fs::read_to_string(&path)?);
@@ -366,8 +370,8 @@ Important semantics:
 | `exists` | Checks whether a path exists without swallowing inspection errors. |
 | `metadata` | Reads path metadata with `std::fs::metadata`. |
 | `list` | Lists direct entries of a directory. |
-| `open_reader` | Opens a file as `LocalFileReader` with `FileReadOptions`. |
-| `open_writer` | Opens a file as `LocalFileWriter` with `FileWriteOptions`. |
+| `open_reader` | Opens a regular file as `LocalFileReader` with `FileReadOptions`; rejects directories and special resources. |
+| `open_writer` | Opens or creates a regular file as `LocalFileWriter` with `FileWriteOptions`; rejects directories and special resources. |
 | `ensure_dir` | Creates a directory and missing ancestors. |
 | `ensure_parent` | Creates missing parent directories for a file path. Parentless paths are accepted. |
 | `dir_size` | Sums regular-file byte lengths below a directory without following symbolic links. |
@@ -575,9 +579,10 @@ resulting path is valid for every platform API. Some APIs, such as Unix domain
 sockets, have much shorter path limits than regular files. For those cases,
 create temporary entries under a short parent directory such as `/tmp`.
 
-Relative paths owned by temporary resources and atomic writers are bound to
-the process current directory when the resource or operation begins. Their
-caller-facing generated paths preserve the original relative spelling. The
+Relative inputs used by temporary resources and atomic writers are bound to the
+process current directory when the resource or operation begins. Temporary
+resource `path`, child-path, `keep`, and persistence methods return absolute
+paths that remain directly usable after later current-directory changes. The
 crate rejects interior UTF-16 NULs on Windows but does not add a verbatim-path
 prefix, so native path-length and verbatim-path semantics still apply.
 

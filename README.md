@@ -89,8 +89,8 @@ become repeated boilerplate:
 | `exists` | Checks path existence with `std::io::Result<bool>` instead of silently swallowing errors. |
 | `metadata` | Reads local path metadata. |
 | `list` | Lists direct directory entries. |
-| `open_reader` | Opens a file as `LocalFileReader` using `FileReadOptions`. |
-| `open_writer` | Opens a file as `LocalFileWriter` using `FileWriteOptions`. |
+| `open_reader` | Opens a regular file as `LocalFileReader` using `FileReadOptions`; rejects directories and special resources. |
+| `open_writer` | Opens or creates a regular file as `LocalFileWriter` using `FileWriteOptions`; rejects directories and special resources. |
 | `ensure_dir` | Creates a directory and missing ancestors. |
 | `ensure_parent` | Creates missing parent directories for a file path. |
 | `dir_size` | Sums regular-file byte lengths below a directory without following symbolic links. |
@@ -98,7 +98,7 @@ become repeated boilerplate:
 | `remove_any` | Removes a file, directory tree, or symbolic link. |
 | `copy_dir_all_with` | Recursively copies a local directory tree with explicit options and returns statistics. |
 | `atomic_write` | Replaces a file through a durable same-directory temporary write. |
-| `atomic_write_with` | Same as `atomic_write`, but accepts caller-provided write logic. |
+| `atomic_write_with` | Same as `atomic_write`, but passes a guarded `LocalAtomicWriter` to caller-provided write logic. |
 | `begin_atomic_write` | Returns a streaming `LocalAtomicWriter` committed explicitly by the caller. |
 
 ### Temporary Files and Directories
@@ -137,12 +137,14 @@ equivalent platform error. Overwriting a file keeps the temporary file's
 permissions rather than the replaced target's permissions; use
 `LocalFiles::atomic_write` when replacing contents while preserving an existing
 regular file's permissions is required.
-Relative creation and persistence paths are bound to the process current
-directory when the resource or operation begins, so later current-directory
-changes do not redirect cleanup, commit, or persistence. Caller-facing
-generated paths preserve their original relative spelling. On Windows, native
-moves do not add a verbatim-path prefix, so native path-length and verbatim-path
-semantics apply.
+Relative temporary-resource creation directories and persistence targets are
+bound to the process current directory when the resource or operation begins.
+`path`, child-path helpers, `keep`, `persist`, and `persist_with` return absolute
+paths that remain directly usable after later current-directory changes.
+Relative atomic-write destinations are likewise bound when writing begins, so
+later changes do not redirect commit or cleanup. On Windows, native moves do
+not add a verbatim-path prefix, so native path-length and verbatim-path semantics
+apply.
 On Unix, temporary files are created with mode `0600` and temporary directories
 with mode `0700` before applying the process umask.
 
@@ -156,6 +158,10 @@ Normal file opening is intentionally explicit:
 | `FileWriteOptions` | Controls parent creation, write mode, and writer buffering. |
 | `FileBuffering` | Selects unbuffered I/O or buffered I/O with an optional capacity. |
 | `FileWriteMode` | Selects `OpenExistingAtStart`, `CreateNew`, `CreateOrTruncate`, `AppendExisting`, or `AppendOrCreate`. |
+
+Both open helpers return only regular files. Directories, FIFOs, sockets, and
+other special filesystem resources are rejected; on Unix, FIFO rejection does
+not wait for a peer.
 
 `LocalFileReader` implements `Read` and `Seek`. `LocalFileWriter` implements
 `Write` and `Seek`, and provides `sync_all` / `sync_data` helpers that flush any
@@ -195,6 +201,9 @@ writer.commit()?;
 `LocalAtomicWriter` implements `Write`, but not `Seek`. Only a successful
 `commit` replaces the destination; `abort` or drop leaves it unchanged and
 cleans up the staging file. The crate remains synchronous and path-based.
+`atomic_write_with` lends the same guarded writer to its callback. The callback
+can write the staged contents, but cannot clone, retain, seek, or access the
+underlying file or raw handle after the callback returns.
 
 Since `0.5.0`, configuration fields are private. Use the existing getters,
 constructors, and builders instead of direct field access.

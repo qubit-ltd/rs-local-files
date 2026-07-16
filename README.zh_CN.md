@@ -82,8 +82,8 @@ assert_eq!("new payload\n", std::fs::read_to_string(&final_path)?);
 | `exists` | 以 `std::io::Result<bool>` 检查路径是否存在，不把检查错误静默折叠成 `false`。 |
 | `metadata` | 读取本地路径 metadata。 |
 | `list` | 列出目录直接子项。 |
-| `open_reader` | 使用 `FileReadOptions` 打开 `LocalFileReader`。 |
-| `open_writer` | 使用 `FileWriteOptions` 打开 `LocalFileWriter`。 |
+| `open_reader` | 使用 `FileReadOptions` 把普通文件打开为 `LocalFileReader`；拒绝目录和特殊资源。 |
+| `open_writer` | 使用 `FileWriteOptions` 打开或创建普通文件 `LocalFileWriter`；拒绝目录和特殊资源。 |
 | `ensure_dir` | 创建目录及缺失祖先目录。 |
 | `ensure_parent` | 为文件路径创建缺失父目录。 |
 | `dir_size` | 统计目录下普通文件的总字节数，不跟随 symbolic link。 |
@@ -91,7 +91,7 @@ assert_eq!("new payload\n", std::fs::read_to_string(&final_path)?);
 | `remove_any` | 删除文件、目录树或 symbolic link。 |
 | `copy_dir_all_with` | 使用显式选项递归复制本地目录树，并返回统计信息。 |
 | `atomic_write` | 通过持久化同目录临时写入替换文件。 |
-| `atomic_write_with` | 与 `atomic_write` 相同，但由调用方提供写入逻辑。 |
+| `atomic_write_with` | 与 `atomic_write` 相同，但向调用方写入逻辑传入受保护的 `LocalAtomicWriter`。 |
 | `begin_atomic_write` | 返回由调用方显式提交的 streaming `LocalAtomicWriter`。 |
 
 ### 临时文件和临时目录
@@ -104,7 +104,7 @@ assert_eq!("new payload\n", std::fs::read_to_string(&final_path)?);
 
 文件系统校验与后续操作并非原子过程。当不可信参与者能够并发修改目录树时，这些 helper 不能作为 sandbox 边界。
 
-`LocalTempFile::persist` 默认在移动操作中拒绝已存在的目标。只有确实要替换已有目标时，才使用 `LocalTempFile::persist_with` 和 `LocalPersistOptions::new().with_overwrite()`。`LocalTempDir::persist` 同样拒绝已存在的目标，并且不提供 overwrite 选项。持久化失败会返回持有原临时 guard 的 `LocalPersistError`，调用方可以重试或检查资源。持久化只使用原生 move/rename，不会回退到 copy-and-delete，因此跨文件系统移动可能在 Unix 上返回 `EXDEV`，或返回其他平台的等价错误。覆盖文件时会保留临时文件的权限，而不会保留被替换目标的权限；如果需要替换内容并保留已有普通文件的权限，请使用 `LocalFiles::atomic_write`。相对创建路径和持久化目标会在资源创建或操作开始时绑定到当时的进程工作目录，之后的工作目录变化不会重定向清理、提交或持久化；对调用方展示的生成路径仍保留原始相对拼写。在 Windows 上，原生移动不会添加 verbatim-path prefix，因此路径长度和 verbatim path 语义仍遵循原生平台行为。在 Unix 上，临时文件以 `0600`、临时目录以 `0700` 创建，之后仍受进程 umask 约束。
+`LocalTempFile::persist` 默认在移动操作中拒绝已存在的目标。只有确实要替换已有目标时，才使用 `LocalTempFile::persist_with` 和 `LocalPersistOptions::new().with_overwrite()`。`LocalTempDir::persist` 同样拒绝已存在的目标，并且不提供 overwrite 选项。持久化失败会返回持有原临时 guard 的 `LocalPersistError`，调用方可以重试或检查资源。持久化只使用原生 move/rename，不会回退到 copy-and-delete，因此跨文件系统移动可能在 Unix 上返回 `EXDEV`，或返回其他平台的等价错误。覆盖文件时会保留临时文件的权限，而不会保留被替换目标的权限；如果需要替换内容并保留已有普通文件的权限，请使用 `LocalFiles::atomic_write`。临时资源的相对创建目录和持久化目标会在资源创建或操作开始时绑定到当时的进程工作目录；`path`、child path helper、`keep`、`persist` 和 `persist_with` 返回绝对路径，之后即使工作目录变化也可直接使用。相对 atomic-write 目标同样会在写入开始时绑定，因此后续工作目录变化不会重定向提交或清理。在 Windows 上，原生移动不会添加 verbatim-path prefix，因此路径长度和 verbatim path 语义仍遵循原生平台行为。在 Unix 上，临时文件以 `0600`、临时目录以 `0700` 创建，之后仍受进程 umask 约束。
 
 ### 读写选项
 
@@ -116,6 +116,9 @@ assert_eq!("new payload\n", std::fs::read_to_string(&final_path)?);
 | `FileWriteOptions` | 控制是否创建父目录、写入模式和 writer 是否缓冲。 |
 | `FileBuffering` | 选择无额外缓冲，或使用可选容量的缓冲 I/O。 |
 | `FileWriteMode` | 选择 `OpenExistingAtStart`、`CreateNew`、`CreateOrTruncate`、`AppendExisting` 或 `AppendOrCreate`。 |
+
+两个打开 helper 都只返回普通文件。目录、FIFO、socket 和其他特殊文件系统
+资源会被拒绝；在 Unix 上，拒绝 FIFO 时不会等待另一端连接。
 
 `LocalFileReader` 实现 `Read` 和 `Seek`。`LocalFileWriter` 实现 `Write` 和
 `Seek`，并提供 `sync_all` / `sync_data` helper；这些 helper 会先 flush
@@ -146,6 +149,9 @@ writer.commit()?;
 成功后目标才会被替换；调用 `abort` 或直接 drop 会保留原目标并清理 staging
 文件。自 `0.5.0` 起，配置类型的字段不再公开，调用方必须使用现有 getter、
 constructor 和 builder。crate 仍保持同步、path-based 的边界。
+`atomic_write_with` 会把同一个受保护 writer 临时借给 callback。callback
+可以写入 staging 内容，但不能 clone、保留、seek，也不能访问底层文件或 raw
+handle，因此 callback 返回后无法继续修改已提交 inode。
 
 失败时返回 `LocalAtomicWriteError`，其中包含失败阶段、临时路径、原始 I/O source error、替换是否已经提交，以及删除未提交 staging file 时产生的 secondary cleanup error。
 如果 `atomic_write_with` callback panic，会先关闭并 best-effort 删除未提交临时文件，再继续传播 panic。清理失败不能替换原 panic，因此这种情况下 staging path 可能残留。

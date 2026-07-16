@@ -77,6 +77,8 @@ use qubit_local_files::{
 
 `LocalFiles::open_reader` 返回的 reader 实现 `Read` 和 `Seek`。
 `LocalFiles::open_writer` 返回的 writer 实现 `Write` 和 `Seek`。
+两个 helper 都只返回普通文件；目录、FIFO、socket 和其他特殊文件系统资源会被
+拒绝，在 Unix 上拒绝 FIFO 时不会等待另一端连接。
 `LocalFileWriter::sync_all` 和 `LocalFileWriter::sync_data` 会先 flush
 缓冲内容，再同步底层文件，适合 append log 或其他不需要 whole-file atomic
 replacement 的普通写句柄。对 writer 执行 seek 不会关闭 append-mode 语义。
@@ -123,17 +125,17 @@ std::fs::write(dir.path().join("scratch.txt"), b"scratch")?;
 
 | 方法 | 行为 |
 | --- | --- |
-| `path` | 借用生成的目录路径。 |
+| `path` | 借用生成的绝对目录路径。 |
 | `exists` | 检查目录路径是否存在，返回 `std::io::Result<bool>`。 |
 | `metadata` | 读取目录 metadata。 |
 | `list` | 列出直接子项。 |
-| `child_path` | 只做 lexical 校验并拼接相对 child 路径，不检查文件系统。 |
-| `ensure_child_dir` | 创建 child 目录和缺失父目录，语义类似 `mkdir -p`。 |
+| `child_path` | 只对相对 child 路径做 lexical 校验，返回拼接后的绝对路径，不检查文件系统。 |
+| `ensure_child_dir` | 创建 child 目录和缺失父目录，语义类似 `mkdir -p`，并返回绝对路径。 |
 | `open_child_reader` | 使用 `FileReadOptions` 打开 child 文件 reader。 |
 | `open_child_writer` | 使用 `FileWriteOptions` 打开 child 文件 writer。 |
 | `cleanup` | 立即删除目录，并关闭后续 drop 清理。 |
-| `keep` | 消费 guard，并把目录留在生成路径。 |
-| `persist` | 把目录移动到最终路径，并关闭自动清理。 |
+| `keep` | 消费 guard，把目录留在生成位置，并返回绝对路径。 |
+| `persist` | 把目录移动到最终路径，返回其绝对路径，并关闭自动清理。 |
 
 `LocalTempDir::persist` 会为目标创建缺失父目录，并拒绝已存在目标。它不提供 overwrite 选项。如果移动失败，`LocalPersistError` 会把 guard 所有权返回给调用方，以便重试、保留、检查或显式清理。持久化只使用原生 move/rename，不会回退到 copy-and-delete，因此跨文件系统移动可能在 Unix 上返回 `EXDEV`，或返回其他平台的等价错误。
 
@@ -171,16 +173,16 @@ file.close();
 
 | 方法 | 行为 |
 | --- | --- |
-| `path` | 借用生成的文件路径。 |
+| `path` | 借用生成的绝对文件路径。 |
 | `exists` | 检查文件路径是否存在，返回 `std::io::Result<bool>`。 |
 | `metadata` | 读取文件 metadata。 |
 | `as_file` / `as_file_mut` | 借用最初创建并持有的 `File` 句柄。 |
 | `Write` / `Seek` | 直接通过持有的句柄写入或 seek。 |
 | `close` | 丢弃无缓冲句柄但保留路径清理；它不调用 `sync_all`。 |
 | `cleanup` | 立即删除文件，并关闭后续 drop 清理。 |
-| `keep` | 关闭并消费 guard，把文件留在生成路径。 |
-| `persist` | 不覆盖地把文件移动到最终路径。 |
-| `persist_with` | 使用 `LocalPersistOptions` 把文件移动到最终路径。 |
+| `keep` | 关闭并消费 guard，把文件留在生成位置并返回绝对路径。 |
+| `persist` | 不覆盖地把文件移动到最终路径，并返回绝对最终路径。 |
+| `persist_with` | 使用 `LocalPersistOptions` 移动文件，并返回绝对最终路径。 |
 
 `LocalTempFile` 有意不提供读取 helper。临时文件的常见用法是写入、关闭，然后持久化。如果确实需要检查内容，先调用 `close`，再通过 `LocalFiles::open_reader` 或 `std::fs` 读取 `path()`。
 
@@ -232,7 +234,9 @@ assert_eq!(
 # Ok::<(), Box<dyn std::error::Error>>(())
 ```
 
-当内容生成逻辑需要直接使用临时文件句柄时，使用 `LocalFiles::atomic_write_with`：
+当内容生成逻辑应在受保护的原子写 callback 中执行时，使用
+`LocalFiles::atomic_write_with`。callback 收到支持 `Write` 的
+`LocalAtomicWriter`，但不能 clone 或保留底层文件句柄：
 
 ```rust
 use std::io::Write;
@@ -245,8 +249,8 @@ use qubit_local_files::{
 let dir = LocalTempDir::with_prefix(Some("qubit-local-files-json-"))?;
 let path = dir.path().join("state.json");
 
-LocalFiles::atomic_write_with(&path, |file| {
-    writeln!(file, "{{\"complete\":true}}")
+LocalFiles::atomic_write_with(&path, |writer| {
+    writeln!(writer, "{{\"complete\":true}}")
 })?;
 
 assert_eq!("{\"complete\":true}\n", std::fs::read_to_string(&path)?);
@@ -294,8 +298,8 @@ constructor 和 builder。API 仍保持同步边界。
 | `exists` | 检查路径是否存在，并且不吞掉检查错误。 |
 | `metadata` | 通过 `std::fs::metadata` 读取路径 metadata。 |
 | `list` | 列出目录直接子项。 |
-| `open_reader` | 使用 `FileReadOptions` 打开 `LocalFileReader`。 |
-| `open_writer` | 使用 `FileWriteOptions` 打开 `LocalFileWriter`。 |
+| `open_reader` | 使用 `FileReadOptions` 把普通文件打开为 `LocalFileReader`；拒绝目录和特殊资源。 |
+| `open_writer` | 使用 `FileWriteOptions` 打开或创建普通文件 `LocalFileWriter`；拒绝目录和特殊资源。 |
 | `ensure_dir` | 创建目录及缺失祖先目录。 |
 | `ensure_parent` | 为文件路径创建缺失父目录。没有父目录的路径会被接受。 |
 | `dir_size` | 统计目录下普通文件总字节数，不跟随 symbolic link。 |
@@ -466,7 +470,7 @@ assert_eq!(
 
 `LocalTempFile` 和 `LocalTempDir` 创建的是本地文件系统条目；如果创建失败，会返回操作系统错误。它们不承诺生成的路径适用于所有平台 API。某些 API，例如 Unix domain socket，有比普通文件短得多的路径限制。遇到这类场景，应在较短的父目录下创建临时条目，例如 `/tmp`。
 
-临时资源和 atomic writer 持有的相对路径会在资源创建或操作开始时绑定到当时的进程工作目录，对调用方展示的生成路径仍保留原始相对拼写。在 Windows 上，crate 会拒绝内部 UTF-16 NUL，但不会添加 verbatim-path prefix，因此路径长度和 verbatim path 语义仍遵循原生平台行为。
+临时资源和 atomic writer 使用的相对输入会在资源创建或操作开始时绑定到当时的进程工作目录。临时资源的 `path`、child path、`keep` 和持久化方法返回绝对路径，之后即使工作目录变化也可直接使用。在 Windows 上，crate 会拒绝内部 UTF-16 NUL，但不会添加 verbatim-path prefix，因此路径长度和 verbatim path 语义仍遵循原生平台行为。
 
 ## Crate 边界
 
