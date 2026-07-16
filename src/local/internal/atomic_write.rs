@@ -238,8 +238,12 @@ fn sync_atomic_parent_chain(
 /// # Errors
 /// Returns an I/O error when destination metadata exists but cannot be read.
 fn existing_file_permissions(path: &Path) -> Result<Option<fs::Permissions>> {
-    match fs::metadata(path) {
-        Ok(metadata) if metadata.is_file() => Ok(Some(metadata.permissions())),
+    match fs::symlink_metadata(path) {
+        Ok(metadata)
+            if metadata.is_file() && !metadata.file_type().is_symlink() =>
+        {
+            Ok(Some(metadata.permissions()))
+        }
         Ok(_) => Ok(None),
         Err(error) if error.kind() == ErrorKind::NotFound => Ok(None),
         Err(error) => {

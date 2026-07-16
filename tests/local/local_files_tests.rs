@@ -2226,6 +2226,32 @@ fn test_atomic_write_replaces_symlink_itself_without_modifying_target() {
 
 #[cfg(unix)]
 #[test]
+fn test_atomic_write_does_not_inherit_symlink_target_permissions() {
+    use std::os::unix::fs::symlink;
+
+    let dir = temp_dir("atomic-symlink-permissions");
+    let target = dir.join("target.txt");
+    let link = dir.join("link.txt");
+    fs::write(&target, b"target").expect("target should be written");
+    fs::set_permissions(&target, fs::Permissions::from_mode(0o777))
+        .expect("target permissions should be set");
+    symlink(&target, &link).expect("symlink should be created");
+
+    LocalFiles::atomic_write(&link, b"replacement")
+        .expect("symlink path should be replaced");
+
+    let replacement_mode =
+        fs::metadata(&link).unwrap().permissions().mode() & 0o777;
+    let target_mode =
+        fs::metadata(&target).unwrap().permissions().mode() & 0o777;
+    assert_eq!(0, replacement_mode & 0o177);
+    assert_eq!(0o777, target_mode);
+    assert_eq!(b"target", fs::read(&target).unwrap().as_slice());
+    fs::remove_dir_all(dir).unwrap();
+}
+
+#[cfg(unix)]
+#[test]
 fn test_copy_dir_all_with_rejects_unsupported_source_types() {
     use std::os::unix::net::UnixListener;
 
@@ -2429,24 +2455,18 @@ fn test_atomic_write_returns_temp_create_error() {
 
 #[cfg(unix)]
 #[test]
-fn test_atomic_write_returns_metadata_error() {
+fn test_atomic_write_replaces_self_referential_symlink() {
     use std::os::unix::fs::symlink;
 
     let dir = temp_dir("atomic-metadata-error");
     let path = dir.join("loop");
     symlink(&path, &path).unwrap();
 
-    let error = LocalFiles::atomic_write(&path, b"data")
-        .expect_err("symlink loop metadata should fail");
+    LocalFiles::atomic_write(&path, b"data")
+        .expect("self-referential symlink should be replaced");
 
-    assert!(
-        error
-            .to_string()
-            .contains("failed to read destination metadata")
-    );
-    assert_eq!(LocalAtomicWriteStage::InspectDestination, error.stage);
-    assert!(!error.committed);
-    fs::remove_file(&path).unwrap();
+    assert!(!fs::symlink_metadata(&path).unwrap().file_type().is_symlink());
+    assert_eq!(b"data", fs::read(&path).unwrap().as_slice());
     fs::remove_dir_all(dir).unwrap();
 }
 
