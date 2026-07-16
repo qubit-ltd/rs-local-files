@@ -40,7 +40,11 @@ pub(super) use current_dir_guard_tests::{
 #[cfg(windows)]
 pub(super) use filesystem_fixture_tests::path_with_interior_nul;
 #[cfg(unix)]
-pub(super) use filesystem_fixture_tests::short_temp_dir;
+pub(super) use filesystem_fixture_tests::{
+    assert_fifo_open_is_rejected,
+    create_fifo,
+    short_temp_dir,
+};
 pub(super) use filesystem_fixture_tests::{
     count_atomic_temp_files,
     temp_dir,

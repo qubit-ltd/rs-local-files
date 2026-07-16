@@ -13,10 +13,16 @@ use std::io::{
 };
 
 use qubit_local_files::{
+    FileWriteMode,
     FileWriteOptions,
     LocalFiles,
 };
 
+#[cfg(unix)]
+use super::test_support::{
+    assert_fifo_open_is_rejected,
+    create_fifo,
+};
 use super::test_support::{
     fs,
     temp_dir,
@@ -116,4 +122,22 @@ fn test_local_file_writer_sync_methods_support_unbuffered_files() {
 
     assert_eq!(b"sync-all-sync-data", fs::read(&path).unwrap().as_slice());
     fs::remove_dir_all(dir).unwrap();
+}
+
+#[cfg(unix)]
+#[test]
+fn test_open_writer_rejects_fifo_without_blocking() {
+    let dir = temp_dir("open-writer-fifo");
+    let fifo = dir.join("output.fifo");
+    create_fifo(&fifo);
+
+    assert_fifo_open_is_rejected(fifo, |path| {
+        LocalFiles::open_writer(
+            path,
+            FileWriteOptions::new(FileWriteMode::OpenExistingAtStart),
+        )
+        .map(|_| ())
+    });
+
+    fs::remove_dir_all(dir).expect("writer FIFO fixture should be removed");
 }

@@ -18,6 +18,11 @@ use qubit_local_files::{
     LocalFiles,
 };
 
+#[cfg(unix)]
+use super::test_support::{
+    assert_fifo_open_is_rejected,
+    create_fifo,
+};
 use super::test_support::{
     fs,
     temp_dir,
@@ -27,7 +32,7 @@ use super::test_support::{
 fn test_open_reader_respects_buffering_options_and_rejects_directories() {
     let dir = temp_dir("open-reader-options");
     let path = dir.join("data.txt");
-    fs::write(&path, b"payload").unwrap();
+    fs::write(&path, b"payload").expect("reader fixture should be written");
 
     let mut reader = LocalFiles::open_reader(
         &path,
@@ -36,7 +41,9 @@ fn test_open_reader_respects_buffering_options_and_rejects_directories() {
     )
     .expect("buffered reader should open");
     let mut content = Vec::new();
-    reader.read_to_end(&mut content).unwrap();
+    reader
+        .read_to_end(&mut content)
+        .expect("buffered reader should read the fixture");
 
     let error = LocalFiles::open_reader(&dir, FileReadOptions::default())
         .expect_err("directories should not be accepted as files");
@@ -45,10 +52,10 @@ fn test_open_reader_respects_buffering_options_and_rejects_directories() {
     assert_eq!(b"payload", content.as_slice());
     assert_eq!(ErrorKind::InvalidInput, error.kind());
     assert!(
-        error.to_string().contains("opened path is not a file"),
-        "reader validation must describe the resource obtained from open: {error}"
+        error.to_string().contains("path is not a regular file"),
+        "reader validation must describe the rejected resource: {error}"
     );
-    fs::remove_dir_all(dir).unwrap();
+    fs::remove_dir_all(dir).expect("reader fixture should be removed");
 }
 
 #[test]
@@ -96,4 +103,18 @@ fn test_local_file_reader_supports_seek_for_unbuffered_and_buffered_readers() {
     assert_eq!(b"a", &first);
     assert_eq!(b"ef", buffered_tail.as_slice());
     fs::remove_dir_all(dir).unwrap();
+}
+
+#[cfg(unix)]
+#[test]
+fn test_open_reader_rejects_fifo_without_blocking() {
+    let dir = temp_dir("open-reader-fifo");
+    let fifo = dir.join("input.fifo");
+    create_fifo(&fifo);
+
+    assert_fifo_open_is_rejected(fifo, |path| {
+        LocalFiles::open_reader(path, FileReadOptions::unbuffered()).map(|_| ())
+    });
+
+    fs::remove_dir_all(dir).expect("reader FIFO fixture should be removed");
 }

@@ -18,6 +18,8 @@ use std::io::{
     Read,
     Write,
 };
+#[cfg(unix)]
+use std::os::unix::fs::symlink;
 
 #[cfg(unix)]
 use super::super::test_support::PermissionsExt;
@@ -243,4 +245,25 @@ fn test_open_writer_returns_parent_error() {
         ErrorKind::AlreadyExists | ErrorKind::NotADirectory
     ));
     fs::remove_dir_all(dir).unwrap();
+}
+
+#[cfg(unix)]
+#[test]
+fn test_open_writer_returns_parent_creation_error_for_dangling_symlink() {
+    let dir = temp_dir("dangling-parent-error");
+    let dangling_parent = dir.join("dangling-parent");
+    symlink(dir.join("missing-target"), &dangling_parent)
+        .expect("dangling parent symlink should be created");
+
+    let error = LocalFiles::open_writer(
+        dangling_parent.join("child.txt"),
+        FileWriteOptions::default().with_parent(),
+    )
+    .expect_err("parent creation should reject a dangling symlink");
+
+    assert!(matches!(
+        error.kind(),
+        ErrorKind::AlreadyExists | ErrorKind::NotFound
+    ));
+    fs::remove_dir_all(dir).expect("temporary fixture should be removed");
 }
