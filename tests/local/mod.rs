@@ -1,3 +1,9 @@
+// =============================================================================
+//    Copyright (c) 2025 - 2026 Haixing Hu.
+//
+//    SPDX-License-Identifier: Apache-2.0
+// =============================================================================
+
 mod file_buffering_tests;
 mod file_read_options_tests;
 mod file_write_mode_tests;
@@ -17,6 +23,9 @@ mod local_filenames_tests;
 mod local_files_tests;
 mod local_persist_error_tests;
 mod local_persist_options_tests;
+mod local_relative_path_tests;
+mod local_root_atomic_writer_tests;
+mod local_root_tests;
 mod local_temp_dir_tests;
 mod local_temp_file_tests;
 mod test_support;

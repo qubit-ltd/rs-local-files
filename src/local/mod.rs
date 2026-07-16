@@ -1,9 +1,7 @@
 // =============================================================================
-//    Copyright (c) 2026 Haixing Hu.
+//    Copyright (c) 2025 - 2026 Haixing Hu.
 //
 //    SPDX-License-Identifier: Apache-2.0
-//
-//    Licensed under the Apache License, Version 2.0.
 // =============================================================================
 //! Concrete local filesystem APIs and their private implementation.
 
@@ -27,6 +25,9 @@ mod local_filenames;
 mod local_files;
 mod local_persist_error;
 mod local_persist_options;
+mod local_relative_path;
+mod local_root;
+mod local_root_atomic_writer;
 mod local_temp_dir;
 mod local_temp_file;
 
@@ -49,5 +50,8 @@ pub use local_filenames::LocalFilenames;
 pub use local_files::LocalFiles;
 pub use local_persist_error::LocalPersistError;
 pub use local_persist_options::LocalPersistOptions;
+pub use local_relative_path::LocalRelativePath;
+pub use local_root::LocalRoot;
+pub use local_root_atomic_writer::LocalRootAtomicWriter;
 pub use local_temp_dir::LocalTempDir;
 pub use local_temp_file::LocalTempFile;

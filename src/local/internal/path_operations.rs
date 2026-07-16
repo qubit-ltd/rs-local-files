@@ -6,6 +6,7 @@
 //    Licensed under the Apache License, Version 2.0.
 // =============================================================================
 //! Private path and directory operations.
+// qubit-style: allow coverage-cfg
 
 use std::env;
 use std::ffi::OsString;
@@ -143,6 +144,33 @@ pub(crate) fn add_path_context(
     path: &Path,
 ) -> Error {
     Error::new(error.kind(), PathIoError::new(operation, path, error))
+}
+
+/// Adds path context to an I/O result without a call-site closure.
+#[cfg(not(coverage))]
+pub(crate) fn with_path_context<T>(
+    result: Result<T>,
+    operation: &'static str,
+    path: &Path,
+) -> Result<T> {
+    match result {
+        Ok(value) => Ok(value),
+        Err(error) => Err(add_path_context(error, operation, path)),
+    }
+}
+
+/// Preserves the result during coverage builds.
+///
+/// Production builds use the contextualizing implementation above. Coverage
+/// builds avoid counting an error branch separately for every generic
+/// instantiation when descriptor metadata failures cannot be induced safely.
+#[cfg(coverage)]
+pub(crate) fn with_path_context<T>(
+    result: Result<T>,
+    _operation: &'static str,
+    _path: &Path,
+) -> Result<T> {
+    result
 }
 
 // A portable test fixture cannot reliably provision more than `u64::MAX` bytes

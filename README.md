@@ -20,6 +20,7 @@ Use this crate when you need:
 
 - RAII temporary files or directories that clean themselves up on drop;
 - parent-directory creation before opening or writing local files;
+- descriptor-anchored local roots for attacker-resistant relative file I/O;
 - recursive directory cleanup, size calculation, or copy operations;
 - conservative copy and persistence defaults that reject accidental overwrites;
 - random, portable, and lexical filename helpers;
@@ -175,6 +176,21 @@ be passed to file-opening methods.
 `atomic_write` remains a separate API because it performs a complete replacement
 protocol rather than opening a normal write handle.
 
+### Rooted Capabilities
+
+`LocalRoot` anchors descendant operations to an open directory capability.
+Construct descendant names with `LocalRelativePath`, which accepts only a
+non-empty sequence of normal relative components. `open_reader`, `open_writer`,
+and `begin_atomic_write` traverse from the open root descriptor and reject
+symbolic links at intermediate and final entries. Renaming or replacing the
+diagnostic root path does not redirect an already opened capability.
+
+The secure backend currently uses Unix descriptor-relative operations. On
+other targets `LocalRoot::open` returns `std::io::ErrorKind::Unsupported`
+instead of falling back to a check-then-path sequence. `LocalRoot` is the API
+for attacker-resistant containment; path-based `LocalFiles` and temporary
+resource helpers remain intended for trusted local application paths.
+
 ### Atomic Writes
 
 `LocalFiles::atomic_write` writes bytes to a temporary file in the same parent
@@ -200,7 +216,8 @@ writer.commit()?;
 
 `LocalAtomicWriter` implements `Write`, but not `Seek`. Only a successful
 `commit` replaces the destination; `abort` or drop leaves it unchanged and
-cleans up the staging file. The crate remains synchronous and path-based.
+cleans up the staging file. This existing writer remains path-based; use
+`LocalRootAtomicWriter` when replacement must stay beneath an anchored root.
 `atomic_write_with` lends the same guarded writer to its callback. The callback
 can write the staged contents, but cannot clone, retain, seek, or access the
 underlying file or raw handle after the callback returns.
@@ -290,7 +307,8 @@ For stream and byte-I/O concerns, use
 
 This crate depends on the Rust standard library, `getrandom`, `libc`, and `log`
 at runtime. `getrandom` is used for random temporary names. `libc` is used for
-Linux no-replace rename support. `log` is used for drop-time cleanup warnings.
+Unix descriptor-relative rooted operations and native rename support. `log` is
+used for drop-time cleanup warnings.
 
 ## Testing & Code Coverage
 

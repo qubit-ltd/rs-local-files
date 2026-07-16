@@ -17,6 +17,7 @@ Qubit Local Files 承载从 `qubit-io` 拆出的本地文件系统工具。它�
 
 - 需要 drop 时自动清理的 RAII 临时文件或临时目录；
 - 打开或写入本地文件前需要自动创建父目录；
+- 需要基于目录 descriptor 锚定、可抵御攻击者路径替换的相对文件 I/O；
 - 需要递归清理目录、计算目录大小或复制目录树；
 - 需要默认拒绝意外覆盖的保守复制和持久化行为；
 - 需要随机、portable 或 lexical 文件名 helper；
@@ -129,6 +130,19 @@ assert_eq!("new payload\n", std::fs::read_to_string(&final_path)?);
 
 `atomic_write` 仍然是独立 API，因为它执行的是完整替换协议，而不是普通写句柄打开。
 
+### Rooted Capability
+
+`LocalRoot` 把所有后代操作锚定到一个已打开的目录 capability。
+后代名称必须先构造为 `LocalRelativePath`；它只接受由普通 component 组成的
+非空相对路径。`open_reader`、`open_writer` 和 `begin_atomic_write` 都从已打开
+的 root descriptor 开始遍历，并拒绝中间项和最终项上的 symbolic link。
+即使诊断路径被重命名或替换，已打开的 capability 也不会被重定向。
+
+当前安全 backend 使用 Unix descriptor-relative 操作。其他目标上的
+`LocalRoot::open` 返回 `std::io::ErrorKind::Unsupported`，不会回退到
+check-then-path。需要抵御攻击者并发替换文件系统名字时应使用 `LocalRoot`；
+path-based `LocalFiles` 和临时资源 helper 仍面向可信本地应用路径。
+
 ### Atomic Write
 
 `LocalFiles::atomic_write` 会在同一父目录下写入临时文件，flush 并 sync 这个临时文件，替换目标，并在支持的平台上从深到浅 sync 目标父目录以及本次新建目录项所在的各级父目录。它适合配置文件、cache manifest、checkpoint、生成索引等 whole-file replacement 场景。已有普通文件的权限会被保留；symlink 目标不会从其 link target 继承权限。在 Unix 上，新目标使用 `0600`，之后仍受更严格的进程 umask 约束。
@@ -148,7 +162,8 @@ writer.commit()?;
 `LocalAtomicWriter` 实现 `Write`，但首版不实现 `Seek`。只有 `commit`
 成功后目标才会被替换；调用 `abort` 或直接 drop 会保留原目标并清理 staging
 文件。自 `0.5.0` 起，配置类型的字段不再公开，调用方必须使用现有 getter、
-constructor 和 builder。crate 仍保持同步、path-based 的边界。
+constructor 和 builder。这个既有 writer 仍是 path-based；需要把替换限制在
+锚定 root 下时使用 `LocalRootAtomicWriter`。
 `atomic_write_with` 会把同一个受保护 writer 临时借给 callback。callback
 可以写入 staging 内容，但不能 clone、保留、seek，也不能访问底层文件或 raw
 handle，因此 callback 返回后无法继续修改已提交 inode。
@@ -210,7 +225,9 @@ stream 和字节 I/O 相关能力请使用
 
 ## 运行时依赖
 
-本 crate 运行时依赖 Rust 标准库、`getrandom`、`libc` 和 `log`。`getrandom` 用于生成随机临时名，`libc` 用于 Linux no-replace rename 支持，`log` 用于 drop 阶段的清理失败告警。
+本 crate 运行时依赖 Rust 标准库、`getrandom`、`libc` 和 `log`。`getrandom`
+用于生成随机临时名，`libc` 用于 Unix descriptor-relative rooted 操作和原生
+rename 支持，`log` 用于 drop 阶段的清理失败告警。
 
 ## 测试与代码覆盖率
 
