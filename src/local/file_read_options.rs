@@ -60,7 +60,7 @@ impl FileReadOptions {
     ///
     /// # Errors
     /// Returns [`std::io::ErrorKind::InvalidInput`] when `capacity` is zero.
-    #[inline]
+    #[inline(always)]
     pub fn buffered_with_capacity(capacity: usize) -> std::io::Result<Self> {
         Ok(Self {
             buffering: FileBuffering::buffered_with_capacity(capacity)?,

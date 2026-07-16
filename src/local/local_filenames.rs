@@ -158,7 +158,7 @@ impl LocalFilenames {
     /// - be non-empty;
     /// - not be `.` or `..`;
     /// - be at most 255 UTF-8 bytes;
-    /// - not contain NUL, path separators, ASCII control characters, or Windows
+    /// - not contain NUL, path separators, control characters, or Windows
     ///   reserved file-name characters;
     /// - not end with a space or dot;
     /// - not use a Windows reserved device name such as `CON`, `NUL`, `COM1`,
@@ -359,7 +359,7 @@ impl LocalFilenames {
     /// # Returns
     /// The substring after the final slash or backslash. If no separator is
     /// present, the original string is returned.
-    #[inline(always)]
+    #[inline]
     pub fn file_name_from_path(path: &str) -> &str {
         match path.rfind(['/', '\\']) {
             Some(index) => &path[index + 1..],

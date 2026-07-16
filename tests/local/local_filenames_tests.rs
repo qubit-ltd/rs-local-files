@@ -59,6 +59,7 @@ fn test_validate_portable_file_name_rejects_path_and_reserved_characters() {
         "bad*name.txt",
         "bad\"name.txt",
         "line\nbreak.txt",
+        "next\u{0085}line.txt",
     ] {
         let error = LocalFilenames::validate_portable_file_name(name)
             .expect_err("forbidden character should be rejected");
