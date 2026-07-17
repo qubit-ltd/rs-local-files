@@ -32,7 +32,7 @@ Qubit Local Files 承载从 `qubit-io` 拆出的本地文件系统工具。它�
 
 ```toml
 [dependencies]
-qubit-local-files = "0.5"
+qubit-local-files = "0.6"
 ```
 
 ## 快速示例
@@ -48,7 +48,7 @@ use qubit_local_files::{
     LocalTempFile,
 };
 
-let work = LocalTempDir::with_prefix(Some("qubit-local-files-readme-"))?;
+let work = LocalTempDir::with_prefix("qubit-local-files-readme-")?;
 let src = work.path().join("src");
 let dst = work.path().join("dst");
 
@@ -63,7 +63,7 @@ LocalFiles::atomic_write(dst.join("manifest.json"), br#"{"version":2}"#)?;
 let final_path = work.path().join("result.txt");
 std::fs::write(&final_path, "old payload")?;
 
-let mut temp = LocalTempFile::with_name(Some("qubit-local-files-"), Some(".txt"))?;
+let mut temp = LocalTempFile::with_affixes("qubit-local-files-", ".txt")?;
 temp.write_all(b"new payload\n")?;
 temp.persist_with(&final_path, LocalPersistOptions::new().with_overwrite())?;
 
@@ -235,7 +235,7 @@ rename 支持，`log` 用于 drop 阶段的清理失败告警。
 # 使用默认的空 feature 集测试核心 API
 cargo test --no-default-features
 
-# 测试核心 API 和正则校验
+# 使用所有已声明 feature 测试完整 API（当前未声明 feature）
 cargo test --all-features
 
 # 运行项目 CI 检查

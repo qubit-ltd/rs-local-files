@@ -38,7 +38,7 @@ Qubit Local Files 是 Qubit Rust crate 家族中的本地文件系统 crate。�
 
 ```toml
 [dependencies]
-qubit-local-files = "0.5"
+qubit-local-files = "0.6"
 ```
 
 ## 导入方式
@@ -107,7 +107,7 @@ replacement 的普通写句柄。对 writer 执行 seek 不会关闭 append-mode
 ```rust
 use qubit_local_files::LocalTempDir;
 
-let dir = LocalTempDir::with_prefix(Some("qubit-local-files-work-"))?;
+let dir = LocalTempDir::with_prefix("qubit-local-files-work-")?;
 std::fs::write(dir.path().join("scratch.txt"), b"scratch")?;
 
 # Ok::<(), std::io::Error>(())
@@ -154,7 +154,7 @@ use std::io::Write;
 
 use qubit_local_files::LocalTempFile;
 
-let mut file = LocalTempFile::with_name(Some("qubit-local-files-"), Some(".txt"))?;
+let mut file = LocalTempFile::with_affixes("qubit-local-files-", ".txt")?;
 file.write_all(b"temporary payload\n")?;
 file.close();
 
@@ -166,7 +166,9 @@ file.close();
 | 方法 | 用途 |
 | --- | --- |
 | `LocalTempFile::new` | 使用默认前缀在 `std::env::temp_dir()` 中创建临时文件。 |
-| `LocalTempFile::with_name` | 使用自定义前缀和后缀在 `std::env::temp_dir()` 中创建临时文件。 |
+| `LocalTempFile::with_prefix` | 使用自定义前缀在 `std::env::temp_dir()` 中创建临时文件。 |
+| `LocalTempFile::with_suffix` | 使用默认前缀和自定义后缀在 `std::env::temp_dir()` 中创建临时文件。 |
+| `LocalTempFile::with_affixes` | 使用自定义前缀和后缀在 `std::env::temp_dir()` 中创建临时文件。 |
 | `LocalTempFile::in_dir` | 在调用方指定的父目录和重试次数下创建临时文件。 |
 
 句柄和所有权方法：
@@ -195,11 +197,11 @@ use std::io::Write;
 
 use qubit_local_files::{LocalPersistOptions, LocalTempDir, LocalTempFile};
 
-let dir = LocalTempDir::with_prefix(Some("qubit-local-files-persist-"))?;
+let dir = LocalTempDir::with_prefix("qubit-local-files-persist-")?;
 let target = dir.path().join("result.txt");
 std::fs::write(&target, "old")?;
 
-let mut file = LocalTempFile::with_name(Some("qubit-local-files-"), Some(".txt"))?;
+let mut file = LocalTempFile::with_affixes("qubit-local-files-", ".txt")?;
 file.write_all(b"new\n")?;
 
 file.persist_with(&target, LocalPersistOptions::new().with_overwrite())?;
@@ -221,7 +223,7 @@ use qubit_local_files::{
     LocalTempDir,
 };
 
-let dir = LocalTempDir::with_prefix(Some("qubit-local-files-guide-"))?;
+let dir = LocalTempDir::with_prefix("qubit-local-files-guide-")?;
 let path = dir.path().join("state").join("manifest.json");
 
 LocalFiles::atomic_write(&path, br#"{"version":1,"complete":true}"#)?;
@@ -246,7 +248,7 @@ use qubit_local_files::{
     LocalTempDir,
 };
 
-let dir = LocalTempDir::with_prefix(Some("qubit-local-files-json-"))?;
+let dir = LocalTempDir::with_prefix("qubit-local-files-json-")?;
 let path = dir.path().join("state.json");
 
 LocalFiles::atomic_write_with(&path, |writer| {
@@ -320,7 +322,7 @@ use qubit_local_files::{
     LocalTempDir,
 };
 
-let dir = LocalTempDir::with_prefix(Some("qubit-local-files-helpers-"))?;
+let dir = LocalTempDir::with_prefix("qubit-local-files-helpers-")?;
 let path = dir.path().join("nested").join("data.txt");
 
 let mut writer = LocalFiles::open_writer(
@@ -357,7 +359,7 @@ use qubit_local_files::{
     LocalTempDir,
 };
 
-let dir = LocalTempDir::with_prefix(Some("qubit-local-files-copy-"))?;
+let dir = LocalTempDir::with_prefix("qubit-local-files-copy-")?;
 let src = dir.path().join("src");
 let dst = dir.path().join("dst");
 

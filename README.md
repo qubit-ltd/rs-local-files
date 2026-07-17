@@ -38,7 +38,7 @@ For stream-level `std::io` traits, extension methods, wrappers, and codecs, see
 
 ```toml
 [dependencies]
-qubit-local-files = "0.5"
+qubit-local-files = "0.6"
 ```
 
 ## Quick Example
@@ -54,7 +54,7 @@ use qubit_local_files::{
     LocalTempFile,
 };
 
-let work = LocalTempDir::with_prefix(Some("qubit-local-files-readme-"))?;
+let work = LocalTempDir::with_prefix("qubit-local-files-readme-")?;
 let src = work.path().join("src");
 let dst = work.path().join("dst");
 
@@ -69,7 +69,7 @@ LocalFiles::atomic_write(dst.join("manifest.json"), br#"{"version":2}"#)?;
 let final_path = work.path().join("result.txt");
 std::fs::write(&final_path, "old payload")?;
 
-let mut temp = LocalTempFile::with_name(Some("qubit-local-files-"), Some(".txt"))?;
+let mut temp = LocalTempFile::with_affixes("qubit-local-files-", ".txt")?;
 temp.write_all(b"new payload\n")?;
 temp.persist_with(&final_path, LocalPersistOptions::new().with_overwrite())?;
 
@@ -319,7 +319,7 @@ used for drop-time cleanup warnings.
 # Core API with the default empty feature set
 cargo test --no-default-features
 
-# Core API plus regex validation
+# Complete API with all declared features (currently none)
 cargo test --all-features
 
 # Project CI checks

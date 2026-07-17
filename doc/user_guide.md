@@ -46,7 +46,7 @@ Those stream and byte-I/O concerns belong in
 
 ```toml
 [dependencies]
-qubit-local-files = "0.5"
+qubit-local-files = "0.6"
 ```
 
 ## Import Patterns
@@ -123,7 +123,7 @@ the guard is dropped.
 ```rust
 use qubit_local_files::LocalTempDir;
 
-let dir = LocalTempDir::with_prefix(Some("qubit-local-files-work-"))?;
+let dir = LocalTempDir::with_prefix("qubit-local-files-work-")?;
 std::fs::write(dir.path().join("scratch.txt"), b"scratch")?;
 
 # Ok::<(), std::io::Error>(())
@@ -192,7 +192,7 @@ use std::io::Write;
 
 use qubit_local_files::LocalTempFile;
 
-let mut file = LocalTempFile::with_name(Some("qubit-local-files-"), Some(".txt"))?;
+let mut file = LocalTempFile::with_affixes("qubit-local-files-", ".txt")?;
 file.write_all(b"temporary payload\n")?;
 file.close();
 
@@ -204,7 +204,9 @@ Creation methods:
 | Method | Purpose |
 | --- | --- |
 | `LocalTempFile::new` | Creates a temporary file in `std::env::temp_dir()` with the default prefix. |
-| `LocalTempFile::with_name` | Creates a temporary file in `std::env::temp_dir()` with custom prefix and suffix. |
+| `LocalTempFile::with_prefix` | Creates a temporary file in `std::env::temp_dir()` with a custom prefix. |
+| `LocalTempFile::with_suffix` | Creates a temporary file in `std::env::temp_dir()` with the default prefix and a custom suffix. |
+| `LocalTempFile::with_affixes` | Creates a temporary file in `std::env::temp_dir()` with a custom prefix and suffix. |
 | `LocalTempFile::in_dir` | Creates a temporary file under a caller-provided parent and retry limit. |
 
 Handle and ownership methods:
@@ -248,11 +250,11 @@ use std::io::Write;
 
 use qubit_local_files::{LocalPersistOptions, LocalTempDir, LocalTempFile};
 
-let dir = LocalTempDir::with_prefix(Some("qubit-local-files-persist-"))?;
+let dir = LocalTempDir::with_prefix("qubit-local-files-persist-")?;
 let target = dir.path().join("result.txt");
 std::fs::write(&target, "old")?;
 
-let mut file = LocalTempFile::with_name(Some("qubit-local-files-"), Some(".txt"))?;
+let mut file = LocalTempFile::with_affixes("qubit-local-files-", ".txt")?;
 file.write_all(b"new\n")?;
 
 file.persist_with(&target, LocalPersistOptions::new().with_overwrite())?;
@@ -278,7 +280,7 @@ use qubit_local_files::{
     LocalTempDir,
 };
 
-let dir = LocalTempDir::with_prefix(Some("qubit-local-files-guide-"))?;
+let dir = LocalTempDir::with_prefix("qubit-local-files-guide-")?;
 let path = dir.path().join("state").join("manifest.json");
 
 LocalFiles::atomic_write(&path, br#"{"version":1,"complete":true}"#)?;
@@ -303,7 +305,7 @@ use qubit_local_files::{
     LocalTempDir,
 };
 
-let dir = LocalTempDir::with_prefix(Some("qubit-local-files-json-"))?;
+let dir = LocalTempDir::with_prefix("qubit-local-files-json-")?;
 let path = dir.path().join("state.json");
 
 LocalFiles::atomic_write_with(&path, |writer| {
@@ -394,7 +396,7 @@ use qubit_local_files::{
     LocalTempDir,
 };
 
-let dir = LocalTempDir::with_prefix(Some("qubit-local-files-helpers-"))?;
+let dir = LocalTempDir::with_prefix("qubit-local-files-helpers-")?;
 let path = dir.path().join("nested").join("data.txt");
 
 let mut writer = LocalFiles::open_writer(
@@ -434,7 +436,7 @@ use qubit_local_files::{
     LocalTempDir,
 };
 
-let dir = LocalTempDir::with_prefix(Some("qubit-local-files-copy-"))?;
+let dir = LocalTempDir::with_prefix("qubit-local-files-copy-")?;
 let src = dir.path().join("src");
 let dst = dir.path().join("dst");
 
