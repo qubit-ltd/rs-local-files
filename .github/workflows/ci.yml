@@ -21,6 +21,29 @@ jobs:
       run_macos_tests: true
     secrets: inherit
 
+  unix-cross-check:
+    name: Check ${{ matrix.target }}
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        target:
+          - x86_64-unknown-freebsd
+          - armv7-linux-androideabi
+
+    steps:
+      - name: Checkout source
+        uses: actions/checkout@v6
+        with:
+          fetch-depth: 1
+          submodules: recursive
+
+      - name: Install Rust target
+        run: rustup toolchain install 1.94 --profile minimal --target ${{ matrix.target }}
+
+      - name: Check target
+        run: cargo +1.94 check --target ${{ matrix.target }}
+
   rooted-atomic-durability:
     name: Rooted atomic durability
     runs-on: ubuntu-latest
