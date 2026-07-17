@@ -2,12 +2,13 @@
 //    Copyright (c) 2025 - 2026 Haixing Hu.
 //
 //    SPDX-License-Identifier: Apache-2.0
+//
+//    Licensed under the Apache License, Version 2.0.
 // =============================================================================
 //! Structured error construction for recursive directory copies.
-// qubit-style: allow coverage-cfg
+// qubit-style: allow source-test-pair
+// Private behavior is covered through public integration tests.
 
-#[cfg(not(coverage))]
-use std::io::ErrorKind;
 use std::io::{
     Error,
     Result,
@@ -22,8 +23,13 @@ use crate::{
 
 use crate::local::internal::StagedFile;
 
-/// Result type used by recursive directory-copy internals.
-pub(super) type CopyDirResult<T> = std::result::Result<T, LocalCopyDirError>;
+use super::copy_dir_result::CopyDirResult;
+use super::statistics_overflow::{
+    byte_statistics_overflow_error,
+    directory_statistics_overflow_error,
+    file_statistics_overflow_error,
+    skipped_statistics_overflow_error,
+};
 
 /// Builds a recursive-copy error from the current entry and statistics.
 ///
@@ -106,68 +112,43 @@ pub(super) fn with_copy_context<T>(
 }
 
 /// Records one newly created destination directory.
-#[cfg(not(coverage))]
 pub(super) fn record_created_directory(
     stats: &mut LocalCopyDirStats,
 ) -> Result<()> {
-    stats.directories = checked_add(stats.directories, 1, "directories")?;
-    Ok(())
+    stats
+        .directories
+        .checked_add(1)
+        .ok_or_else(directory_statistics_overflow_error)
+        .map(|directories| stats.directories = directories)
 }
 
 /// Records one skipped destination file.
-#[cfg(not(coverage))]
 pub(super) fn record_skipped_file(stats: &mut LocalCopyDirStats) -> Result<()> {
-    stats.skipped = checked_add(stats.skipped, 1, "skipped")?;
-    Ok(())
+    stats
+        .skipped
+        .checked_add(1)
+        .ok_or_else(skipped_statistics_overflow_error)
+        .map(|skipped| stats.skipped = skipped)
 }
 
 /// Atomically records one committed file and its copied byte count.
-#[cfg(not(coverage))]
 pub(super) fn record_copied_file(
     stats: &mut LocalCopyDirStats,
     bytes: u64,
 ) -> Result<()> {
-    let files = checked_add(stats.files, 1, "files")?;
-    let bytes = checked_add(stats.bytes, bytes, "bytes")?;
-    stats.files = files;
-    stats.bytes = bytes;
-    Ok(())
-}
-
-/// Records one created directory during finite-fixture coverage collection.
-#[cfg(coverage)]
-pub(super) fn record_created_directory(
-    stats: &mut LocalCopyDirStats,
-) -> Result<()> {
-    stats.directories += 1;
-    Ok(())
-}
-
-/// Records one skipped file during finite-fixture coverage collection.
-#[cfg(coverage)]
-pub(super) fn record_skipped_file(stats: &mut LocalCopyDirStats) -> Result<()> {
-    stats.skipped += 1;
-    Ok(())
-}
-
-/// Records one copied file during finite-fixture coverage collection.
-#[cfg(coverage)]
-pub(super) fn record_copied_file(
-    stats: &mut LocalCopyDirStats,
-    bytes: u64,
-) -> Result<()> {
-    stats.files += 1;
-    stats.bytes += bytes;
-    Ok(())
-}
-
-#[cfg(not(coverage))]
-fn checked_add(current: u64, amount: u64, field: &str) -> Result<u64> {
-    match current.checked_add(amount) {
-        Some(value) => Ok(value),
-        None => Err(Error::new(
-            ErrorKind::InvalidData,
-            format!("recursive-copy {field} statistics overflow"),
-        )),
-    }
+    stats
+        .files
+        .checked_add(1)
+        .ok_or_else(file_statistics_overflow_error)
+        .and_then(|files| {
+            stats
+                .bytes
+                .checked_add(bytes)
+                .ok_or_else(byte_statistics_overflow_error)
+                .map(|bytes| (files, bytes))
+        })
+        .map(|(files, bytes)| {
+            stats.files = files;
+            stats.bytes = bytes;
+        })
 }

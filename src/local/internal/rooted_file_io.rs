@@ -2,9 +2,12 @@
 //    Copyright (c) 2025 - 2026 Haixing Hu.
 //
 //    SPDX-License-Identifier: Apache-2.0
+//
+//    Licensed under the Apache License, Version 2.0.
 // =============================================================================
 //! Unix descriptor-relative rooted ordinary-file operations.
-// qubit-style: allow coverage-cfg
+// qubit-style: allow source-test-pair
+// Private behavior is covered through public integration tests.
 
 use std::ffi::{
     CString,
@@ -40,9 +43,13 @@ use crate::{
 };
 
 use super::file_io::clear_nonblocking;
-use super::path_operations::{
-    add_path_context,
-    with_path_context,
+use super::io_result_context::with_path_context;
+use super::path_operations::add_path_context;
+use super::rooted_io_result::{
+    missing_rooted_entry,
+    normalize_mkdirat_result,
+    normalize_opened_directory_metadata,
+    normalize_opened_regular_file_metadata,
 };
 
 /// Opens a no-follow directory handle for a root path.
@@ -66,18 +73,8 @@ pub(crate) fn open_root_directory(path: &Path) -> Result<File> {
         .custom_flags(libc::O_DIRECTORY | libc::O_NOFOLLOW | libc::O_CLOEXEC);
     let directory =
         rooted_open_result(options.open(path), "open root directory", path)?;
-    let metadata = with_path_context(
-        directory.metadata(),
-        "inspect root directory",
-        path,
-    )?;
-    #[cfg(coverage)]
-    let _ = metadata;
-    #[cfg(not(coverage))]
-    if !metadata.is_dir() {
-        return Err(rooted_type_error(path, "directory"));
-    }
-    Ok(directory)
+    verify_opened_directory(&directory, "inspect root directory", path)
+        .map(|()| directory)
 }
 
 /// Opens an ordinary reader relative to an anchored root descriptor.
@@ -114,13 +111,13 @@ pub(crate) fn open_rooted_reader(
         "open rooted file reader",
         &diagnostic_path,
     )?;
-    verify_regular_file(&file, &diagnostic_path)?;
-    with_path_context(
-        clear_nonblocking(&file),
+    let buffering = options.buffering();
+    prepare_opened_rooted_regular_file(
+        &file,
         "restore blocking rooted file reader",
         &diagnostic_path,
-    )?;
-    Ok(LocalFileReader::from_file(file, options.buffering()))
+    )
+    .map(|()| LocalFileReader::from_file(file, buffering))
 }
 
 /// Opens an ordinary writer relative to an anchored root descriptor.
@@ -175,13 +172,13 @@ pub(crate) fn open_rooted_writer(
         "open rooted file writer",
         &diagnostic_path,
     )?;
-    verify_regular_file(&file, &diagnostic_path)?;
-    with_path_context(
-        clear_nonblocking(&file),
+    let buffering = options.buffering();
+    prepare_opened_rooted_regular_file(
+        &file,
         "restore blocking rooted file writer",
         &diagnostic_path,
-    )?;
-    Ok(LocalFileWriter::from_file(file, options.buffering()))
+    )
+    .map(|()| LocalFileWriter::from_file(file, buffering))
 }
 
 /// Opens the destination parent by traversing only from `root`.
@@ -245,17 +242,11 @@ pub(in crate::local) fn open_rooted_parent(
                 ));
             }
         };
-        let metadata = with_path_context(
-            directory.metadata(),
+        verify_opened_directory(
+            &directory,
             "inspect rooted directory component",
             &component_path,
         )?;
-        #[cfg(coverage)]
-        let _ = metadata;
-        #[cfg(not(coverage))]
-        if !metadata.is_dir() {
-            return Err(rooted_type_error(&component_path, "directory"));
-        }
     }
     Ok((directory, final_name))
 }
@@ -273,7 +264,12 @@ pub(in crate::local) fn open_rooted_parent(
 ///
 /// # Errors
 ///
-/// Returns the operating-system error from component conversion or `openat`.
+/// Returns the operating-system error reported by `openat`.
+///
+/// # Panics
+///
+/// Panics if `name` violates the validated-component invariant by containing
+/// an interior NUL.
 fn open_directory_at(parent: &File, name: &OsStr) -> Result<File> {
     let name = component_c_string(name);
     open_file_at(
@@ -288,39 +284,34 @@ fn open_directory_at(parent: &File, name: &OsStr) -> Result<File> {
 ///
 /// # Parameters
 ///
-/// * `parent` - Open parent directory descriptor.
-/// * `name` - Single child component to create.
-/// * `diagnostic_path` - Path used only for error context.
+/// * `parent` - The open parent-directory handle used by `mkdirat`.
+/// * `name` - The single native path component to create.
+/// * `diagnostic_path` - The path attached to a creation error.
+///
+/// # Returns
+///
+/// `Ok(())` after creating the directory or observing that it already exists.
 ///
 /// # Errors
 ///
-/// Returns a contextual error when component conversion or `mkdirat` fails.
+/// Returns a contextual operating-system error when `mkdirat` fails for a
+/// reason other than an existing entry.
+///
+/// # Panics
+///
+/// Panics if `name` violates the validated-component invariant by containing
+/// an interior NUL.
 fn create_directory_at(
     parent: &File,
     name: &OsStr,
     diagnostic_path: &Path,
 ) -> Result<()> {
-    #[cfg(coverage)]
-    let _ = diagnostic_path;
     let name = component_c_string(name);
     // SAFETY: the parent descriptor and NUL-terminated component remain live;
     // `mkdirat` does not retain either value.
     let result =
         unsafe { libc::mkdirat(parent.as_raw_fd(), name.as_ptr(), 0o700) };
-    #[cfg(coverage)]
-    let _ = result;
-    #[cfg(not(coverage))]
-    if result == -1 {
-        let error = Error::last_os_error();
-        if error.kind() != ErrorKind::AlreadyExists {
-            return Err(add_path_context(
-                error,
-                "create rooted directory",
-                diagnostic_path,
-            ));
-        }
-    }
-    Ok(())
+    normalize_mkdirat_result(result, diagnostic_path)
 }
 
 /// Opens one entry relative to an open directory descriptor.
@@ -394,21 +385,7 @@ fn reject_existing_non_file(
         )
     };
     if result == -1 {
-        #[cfg(coverage)]
-        return Ok(());
-        #[cfg(not(coverage))]
-        {
-            let error = Error::last_os_error();
-            return if error.kind() == ErrorKind::NotFound {
-                Ok(())
-            } else {
-                Err(add_path_context(
-                    error,
-                    "inspect rooted file entry",
-                    diagnostic_path,
-                ))
-            };
-        }
+        return missing_rooted_entry(Error::last_os_error(), diagnostic_path);
     }
     // SAFETY: successful `fstatat` initialized the complete `stat` value.
     let status = unsafe { status.assume_init() };
@@ -418,29 +395,63 @@ fn reject_existing_non_file(
     Ok(())
 }
 
-/// Verifies that an opened handle is a regular file.
+/// Verifies that an opened handle is a directory.
 ///
 /// # Parameters
 ///
-/// * `file` - Handle opened by a rooted final operation.
-/// * `diagnostic_path` - Path used only for error context.
+/// * `directory` - The open handle to inspect.
+/// * `operation` - The operation label attached to metadata errors.
+/// * `diagnostic_path` - The path attached to errors and type diagnostics.
+///
+/// # Returns
+///
+/// `Ok(())` when the open handle refers to a directory.
 ///
 /// # Errors
 ///
-/// Returns a contextual metadata error or `InvalidInput` for a non-file.
-fn verify_regular_file(file: &File, diagnostic_path: &Path) -> Result<()> {
-    let metadata = with_path_context(
-        file.metadata(),
-        "inspect rooted file handle",
+/// Returns a contextual metadata error or `InvalidInput` for a non-directory.
+fn verify_opened_directory(
+    directory: &File,
+    operation: &'static str,
+    diagnostic_path: &Path,
+) -> Result<()> {
+    normalize_opened_directory_metadata(
+        directory.metadata(),
+        operation,
         diagnostic_path,
-    )?;
-    #[cfg(coverage)]
-    let _ = metadata;
-    #[cfg(not(coverage))]
-    if !metadata.is_file() {
-        return Err(rooted_type_error(diagnostic_path, "regular file"));
-    }
-    Ok(())
+    )
+}
+
+/// Verifies an opened rooted file and restores blocking behavior.
+///
+/// # Parameters
+///
+/// * `file` - The opened rooted file handle to inspect and normalize.
+/// * `restore_operation` - The operation label attached to descriptor errors.
+/// * `diagnostic_path` - The path attached to metadata and descriptor errors.
+///
+/// # Returns
+///
+/// `Ok(())` after a regular file handle has been verified and normalized to
+/// blocking mode.
+///
+/// # Errors
+///
+/// Returns a contextual metadata or descriptor error, or `InvalidInput` for a
+/// non-regular handle.
+fn prepare_opened_rooted_regular_file(
+    file: &File,
+    restore_operation: &'static str,
+    diagnostic_path: &Path,
+) -> Result<()> {
+    normalize_opened_regular_file_metadata(file.metadata(), diagnostic_path)
+        .and_then(|()| {
+            with_path_context(
+                clear_nonblocking(file),
+                restore_operation,
+                diagnostic_path,
+            )
+        })
 }
 
 /// Converts a validated normal component to a native C string.
@@ -453,15 +464,34 @@ fn verify_regular_file(file: &File, diagnostic_path: &Path) -> Result<()> {
 ///
 /// A NUL-terminated native component.
 ///
-/// # Errors
+/// # Panics
 ///
-/// Returns `InvalidInput` if the component unexpectedly contains NUL.
+/// Panics if the validated component unexpectedly contains an interior NUL.
 fn component_c_string(component: &OsStr) -> CString {
     CString::new(component.as_bytes())
         .expect("LocalRelativePath guarantees components without NUL")
 }
 
 /// Adds rooted-open normalization and path context to an open result.
+///
+/// # Type Parameters
+///
+/// * `T` - The successful value carried through unchanged.
+///
+/// # Parameters
+///
+/// * `result` - The rooted-open result to return or normalize.
+/// * `operation` - The operation description attached to an error.
+/// * `path` - The diagnostic path attached to an error.
+///
+/// # Returns
+///
+/// The original success value, or a normalized and contextualized error.
+///
+/// # Errors
+///
+/// Returns a contextual error when `result` is `Err`, normalizing stable link
+/// and wrong-directory failures to `InvalidInput`.
 fn rooted_open_result<T>(
     result: Result<T>,
     operation: &'static str,
@@ -509,7 +539,7 @@ fn rooted_open_error(
 /// # Returns
 ///
 /// An invalid-input error naming the required type.
-fn rooted_type_error(path: &Path, expected: &str) -> Error {
+pub(super) fn rooted_type_error(path: &Path, expected: &str) -> Error {
     Error::new(
         ErrorKind::InvalidInput,
         format!("rooted path is not a {expected}: {}", path.display(),),

@@ -4,7 +4,6 @@
 //    SPDX-License-Identifier: Apache-2.0
 // =============================================================================
 //! Streaming durable atomic file replacement.
-// qubit-style: allow coverage-cfg
 
 use std::fs::{
     self,
@@ -338,7 +337,6 @@ fn existing_file_permissions(
 }
 
 /// Applies preserved destination permissions to the staging file.
-#[cfg(not(coverage))]
 fn apply_existing_permissions(
     file: &File,
     permissions: Option<&fs::Permissions>,
@@ -352,22 +350,6 @@ fn apply_existing_permissions(
             "set temporary file permissions",
             temporary_path,
         ));
-    }
-    Ok(())
-}
-
-/// Applies preserved permissions during coverage collection.
-///
-/// The production implementation above retains structured context for a
-/// permission syscall failure that cannot be induced through the public API.
-#[cfg(coverage)]
-fn apply_existing_permissions(
-    file: &File,
-    permissions: Option<&fs::Permissions>,
-    _temporary_path: &Path,
-) -> io::Result<()> {
-    if let Some(permissions) = permissions {
-        file.set_permissions(permissions.clone())?;
     }
     Ok(())
 }

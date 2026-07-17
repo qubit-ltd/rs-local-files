@@ -2,9 +2,10 @@
 //    Copyright (c) 2025 - 2026 Haixing Hu.
 //
 //    SPDX-License-Identifier: Apache-2.0
+//
+//    Licensed under the Apache License, Version 2.0.
 // =============================================================================
 //! Private local file reader and writer construction.
-// qubit-style: allow coverage-cfg
 
 use std::fs::{
     self,
@@ -25,19 +26,21 @@ use crate::{
     LocalFileWriter,
 };
 
+use super::io_result_context::with_path_context;
 use super::path_operations::{
     add_path_context,
     ensure_parent_path,
-    with_path_context,
 };
 
 /// Creates the canonical error for a non-regular-file target.
 ///
 /// # Parameters
-/// - `path`: Path that did not resolve to a regular file.
+///
+/// * `path` - The path rendered in the error message.
 ///
 /// # Returns
-/// Invalid-input error describing the rejected path.
+///
+/// An `InvalidInput` error identifying the non-regular path.
 fn path_not_regular_file_error(path: &Path) -> Error {
     Error::new(
         ErrorKind::InvalidInput,
@@ -93,13 +96,16 @@ fn configure_nonblocking_open(_options: &mut OpenOptions) {}
 ///
 /// # Parameters
 ///
-/// * `file` - Open regular-file handle whose status flags are updated.
+/// * `file` - The open file descriptor whose status flags are normalized.
+///
+/// # Returns
+///
+/// `Ok(())` after the descriptor is in blocking mode.
 ///
 /// # Errors
 ///
 /// Returns the operating-system error reported by `fcntl` when status flags
 /// cannot be read or updated.
-#[cfg(not(coverage))]
 pub(super) fn clear_nonblocking(file: &fs::File) -> Result<()> {
     use std::os::fd::AsRawFd;
 
@@ -119,32 +125,54 @@ pub(super) fn clear_nonblocking(file: &fs::File) -> Result<()> {
     Ok(())
 }
 
-#[cfg(all(unix, coverage))]
-/// Clears transient non-blocking state during coverage collection.
-///
-/// The production implementation above retains explicit syscall error paths;
-/// a live descriptor cannot exercise those paths through the public API.
-pub(super) fn clear_nonblocking(file: &fs::File) -> Result<()> {
-    use std::os::fd::AsRawFd;
-
-    let descriptor = file.as_raw_fd();
-    // SAFETY: the descriptor is borrowed from a live `File` for both calls.
-    let flags = unsafe { libc::fcntl(descriptor, libc::F_GETFL) };
-    let blocking_flags = flags & !libc::O_NONBLOCK;
-    // SAFETY: the descriptor remains live and no pointer is retained.
-    let _ = unsafe { libc::fcntl(descriptor, libc::F_SETFL, blocking_flags) };
-    Ok(())
-}
-
 #[cfg(not(unix))]
 /// Leaves descriptor status unchanged on platforms without Unix flags.
 ///
 /// # Parameters
 ///
-/// * `file` - Open regular-file handle that requires no status update.
+/// * `_file` - The open file handle, unused on platforms without Unix flags.
+///
+/// # Returns
+///
+/// Always returns `Ok(())`.
+///
+/// # Errors
+///
+/// This platform implementation does not return an error.
 #[inline(always)]
 pub(super) fn clear_nonblocking(_file: &fs::File) -> Result<()> {
     Ok(())
+}
+
+/// Verifies an opened handle and restores ordinary blocking behavior.
+///
+/// # Parameters
+///
+/// * `file` - The opened handle to inspect and normalize.
+/// * `inspect_operation` - The operation label used for metadata errors.
+/// * `restore_operation` - The operation label used for descriptor errors.
+/// * `path` - The diagnostic path attached to failures.
+///
+/// # Returns
+///
+/// `Ok(())` after a regular file handle has been verified and normalized to
+/// blocking mode.
+///
+/// # Errors
+///
+/// Returns a contextual metadata or descriptor error, or `InvalidInput` when a
+/// racing path replacement produced a non-regular handle.
+fn prepare_opened_regular_file(
+    file: &fs::File,
+    inspect_operation: &'static str,
+    restore_operation: &'static str,
+    path: &Path,
+) -> Result<()> {
+    let metadata = with_path_context(file.metadata(), inspect_operation, path)?;
+    if !metadata.is_file() {
+        return Err(path_not_regular_file_error(path));
+    }
+    with_path_context(clear_nonblocking(file), restore_operation, path)
 }
 
 /// Opens a file reader with the supplied options.
@@ -173,20 +201,14 @@ pub(crate) fn open_reader_path(
     let file = open_options
         .open(path)
         .map_err(|error| add_path_context(error, "open file reader", path))?;
-    let metadata =
-        with_path_context(file.metadata(), "inspect opened file reader", path)?;
-    #[cfg(coverage)]
-    let _ = metadata;
-    #[cfg(not(coverage))]
-    if !metadata.is_file() {
-        return Err(path_not_regular_file_error(path));
-    }
-    with_path_context(
-        clear_nonblocking(&file),
+    let buffering = options.buffering();
+    prepare_opened_regular_file(
+        &file,
+        "inspect opened file reader",
         "restore blocking file reader",
         path,
-    )?;
-    Ok(LocalFileReader::from_file(file, options.buffering()))
+    )
+    .map(|()| LocalFileReader::from_file(file, buffering))
 }
 
 /// Opens a file writer with the supplied options.
@@ -235,18 +257,12 @@ pub(crate) fn open_writer_path(
     let file = open_options
         .open(path)
         .map_err(|error| add_path_context(error, "open file writer", path))?;
-    let metadata =
-        with_path_context(file.metadata(), "inspect opened file writer", path)?;
-    #[cfg(coverage)]
-    let _ = metadata;
-    #[cfg(not(coverage))]
-    if !metadata.is_file() {
-        return Err(path_not_regular_file_error(path));
-    }
-    with_path_context(
-        clear_nonblocking(&file),
+    let buffering = options.buffering();
+    prepare_opened_regular_file(
+        &file,
+        "inspect opened file writer",
         "restore blocking file writer",
         path,
-    )?;
-    Ok(LocalFileWriter::from_file(file, options.buffering()))
+    )
+    .map(|()| LocalFileWriter::from_file(file, buffering))
 }

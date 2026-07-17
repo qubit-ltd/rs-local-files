@@ -11,6 +11,7 @@ mod file_attribute_tag_info;
 mod file_disposition_info;
 mod file_io;
 mod file_move;
+mod io_result_context;
 mod local_file_reader_inner;
 mod local_file_writer_inner;
 mod path_io_error;
@@ -20,7 +21,11 @@ mod rooted_atomic_write;
 #[cfg(unix)]
 mod rooted_file_io;
 #[cfg(unix)]
+mod rooted_io_result;
+#[cfg(unix)]
 mod rooted_staged_file;
+#[cfg(unix)]
+mod rooted_staging_retry;
 mod staged_file;
 mod temp_entry;
 

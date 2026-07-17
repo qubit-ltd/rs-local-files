@@ -2,9 +2,12 @@
 //    Copyright (c) 2025 - 2026 Haixing Hu.
 //
 //    SPDX-License-Identifier: Apache-2.0
+//
+//    Licensed under the Apache License, Version 2.0.
 // =============================================================================
 //! Descriptor-relative atomic-write preparation.
-// qubit-style: allow coverage-cfg
+// qubit-style: allow source-test-pair
+// Private behavior is covered through public integration tests.
 
 use std::ffi::CString;
 use std::fs::{
@@ -23,8 +26,9 @@ use std::path::Path;
 use crate::LocalFilenames;
 
 use super::rooted_file_io::open_file_at;
+use super::rooted_io_result::missing_rooted_file_permissions;
 use super::rooted_staged_file::RootedStagedFile;
-#[cfg(not(coverage))]
+use super::rooted_staging_retry::retry_rooted_staging_entry;
 use super::temp_entry::DEFAULT_TEMP_FILE_RETRIES;
 
 /// Prefix used by descriptor-relative atomic staging entries.
@@ -64,17 +68,7 @@ pub(in crate::local) fn existing_rooted_file_permissions(
         )
     };
     if result == -1 {
-        #[cfg(coverage)]
-        return Ok(None);
-        #[cfg(not(coverage))]
-        {
-            let error = Error::last_os_error();
-            return if error.kind() == ErrorKind::NotFound {
-                Ok(None)
-            } else {
-                Err(error)
-            };
-        }
+        return missing_rooted_file_permissions(Error::last_os_error());
     }
     // SAFETY: successful `fstatat` initialized the complete status value.
     let status = unsafe { status.assume_init() };
@@ -97,9 +91,10 @@ pub(in crate::local) fn existing_rooted_file_permissions(
 ///
 /// # Parameters
 ///
-/// * `parent` - Open destination parent descriptor transferred to the guard.
-/// * `relative_parent` - Non-authoritative relative parent path for
-///   diagnostics.
+/// * `parent` - The open destination-parent handle transferred to the staging
+///   guard.
+/// * `relative_parent` - The diagnostic parent path used to identify the
+///   staging entry.
 ///
 /// # Returns
 ///
@@ -109,69 +104,41 @@ pub(in crate::local) fn existing_rooted_file_permissions(
 ///
 /// Returns an I/O error when randomness fails, all generated names collide, or
 /// `openat` cannot create a private staging entry.
-#[cfg(not(coverage))]
-pub(in crate::local) fn create_rooted_staged_file(
-    parent: File,
-    relative_parent: &Path,
-) -> Result<RootedStagedFile> {
-    for _ in 0..DEFAULT_TEMP_FILE_RETRIES {
-        let name = LocalFilenames::try_random_with(
-            Some(ROOTED_ATOMIC_TEMP_PREFIX),
-            Some(ROOTED_ATOMIC_TEMP_SUFFIX),
-        )?;
-        let native_name = CString::new(name.as_bytes())
-            .expect("LocalFilenames guarantees generated names without NUL");
-        let file = open_file_at(
-            &parent,
-            &native_name,
-            libc::O_RDWR | libc::O_CREAT | libc::O_EXCL | libc::O_CLOEXEC,
-            0o600,
-        );
-        match file {
-            Ok(file) => {
-                return Ok(RootedStagedFile::new(
-                    parent,
-                    native_name,
-                    file,
-                    relative_parent.join(name),
-                ));
-            }
-            #[cfg(not(coverage))]
-            Err(error) if error.kind() == ErrorKind::AlreadyExists => {}
-            Err(error) => return Err(error),
-        }
-    }
-    Err(Error::new(
-        ErrorKind::AlreadyExists,
-        "failed to create a unique rooted atomic staging file",
-    ))
-}
-
-/// Creates one staging entry during coverage collection.
 ///
-/// Production retries random-name collisions. A finite public fixture cannot
-/// force the cryptographically random generator to exhaust every retry.
-#[cfg(coverage)]
+/// # Panics
+///
+/// Panics if the filename generator violates its no-NUL invariant.
 pub(in crate::local) fn create_rooted_staged_file(
     parent: File,
     relative_parent: &Path,
 ) -> Result<RootedStagedFile> {
-    let name = LocalFilenames::try_random_with(
-        Some(ROOTED_ATOMIC_TEMP_PREFIX),
-        Some(ROOTED_ATOMIC_TEMP_SUFFIX),
-    )?;
-    let native_name = CString::new(name.as_bytes())
-        .expect("LocalFilenames guarantees generated names without NUL");
-    let file = open_file_at(
-        &parent,
-        &native_name,
-        libc::O_RDWR | libc::O_CREAT | libc::O_EXCL | libc::O_CLOEXEC,
-        0o600,
-    )?;
-    Ok(RootedStagedFile::new(
-        parent,
-        native_name,
-        file,
-        relative_parent.join(name),
-    ))
+    retry_rooted_staging_entry(
+        DEFAULT_TEMP_FILE_RETRIES,
+        || {
+            LocalFilenames::try_random_with(
+                Some(ROOTED_ATOMIC_TEMP_PREFIX),
+                Some(ROOTED_ATOMIC_TEMP_SUFFIX),
+            )
+        },
+        |name| {
+            let native_name = CString::new(name.as_bytes()).expect(
+                "LocalFilenames guarantees generated names without NUL",
+            );
+            open_file_at(
+                &parent,
+                &native_name,
+                libc::O_RDWR | libc::O_CREAT | libc::O_EXCL | libc::O_CLOEXEC,
+                0o600,
+            )
+            .map(|file| (native_name, file))
+        },
+    )
+    .map(|(name, native_name, file)| {
+        RootedStagedFile::new(
+            parent,
+            native_name,
+            file,
+            relative_parent.join(name),
+        )
+    })
 }

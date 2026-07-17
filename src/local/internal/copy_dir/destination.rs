@@ -2,9 +2,12 @@
 //    Copyright (c) 2025 - 2026 Haixing Hu.
 //
 //    SPDX-License-Identifier: Apache-2.0
+//
+//    Licensed under the Apache License, Version 2.0.
 // =============================================================================
 //! Destination inspection, conflict policy, and type-stable removal.
-// qubit-style: allow coverage-cfg
+// qubit-style: allow source-test-pair
+// Private behavior is covered through public integration tests.
 
 use std::fs;
 use std::io::{
@@ -17,6 +20,9 @@ use std::path::Path;
 #[cfg(windows)]
 use std::os::windows::fs::FileTypeExt;
 
+#[cfg(windows)]
+use crate::local::internal::file_move::remove_directory_symlink;
+use crate::local::internal::temp_entry::create_private_dir;
 use crate::{
     LocalCopyConflictPolicy,
     LocalCopyDirStage,
@@ -24,13 +30,11 @@ use crate::{
     LocalCopyTypeConflictPolicy,
 };
 
-#[cfg(windows)]
-use crate::local::internal::file_move::remove_directory_symlink;
-use crate::local::internal::temp_entry::create_private_dir;
-
-use super::error::{
-    CopyDirResult,
-    copy_dir_error,
+use super::copy_dir_result::CopyDirResult;
+use super::error::copy_dir_error;
+use super::namespace_race::{
+    reconcile_directory_creation,
+    removable_non_directory_metadata,
 };
 use super::source::is_real_directory;
 
@@ -149,7 +153,7 @@ pub(super) fn existing_file_destination_should_be_skipped(
 pub(super) fn destination_metadata_if_exists(
     dst: &Path,
 ) -> Result<Option<fs::Metadata>> {
-    match fs::symlink_metadata(dst) {
+    match inspect_destination_metadata(dst) {
         Ok(metadata) => Ok(Some(metadata)),
         Err(error) if error.kind() == ErrorKind::NotFound => Ok(None),
         Err(error) => Err(error),
@@ -168,7 +172,7 @@ pub(super) fn destination_metadata_if_exists(
 pub(super) fn remove_destination_directory_if_unchanged(
     dst: &Path,
 ) -> Result<()> {
-    match fs::symlink_metadata(dst) {
+    match inspect_destination_metadata(dst) {
         Ok(metadata) if is_real_directory(&metadata) => fs::remove_dir_all(dst),
         Ok(_) => Ok(()),
         Err(error) if error.kind() == ErrorKind::NotFound => Ok(()),
@@ -218,7 +222,7 @@ fn prepare_existing_directory_destination(
 ///
 /// # Parameters
 ///
-/// * `dst` - Destination directory path.
+/// * `dst` - The destination path to create or inspect after a creation race.
 ///
 /// # Returns
 ///
@@ -229,64 +233,62 @@ fn prepare_existing_directory_destination(
 ///
 /// Returns an I/O error when creation fails or a racing entry is not a real
 /// directory.
-#[cfg(not(coverage))]
 fn create_copy_destination_dir(dst: &Path) -> Result<bool> {
-    match create_private_dir(dst) {
-        Ok(()) => Ok(true),
-        Err(error) if error.kind() == ErrorKind::AlreadyExists => {
-            let metadata = fs::symlink_metadata(dst)?;
-            if is_real_directory(&metadata) {
-                Ok(false)
-            } else {
-                Err(error)
-            }
-        }
-        Err(error) => Err(error),
-    }
-}
-
-/// Creates the destination during coverage collection.
-///
-/// Production retains the concurrent-creator reconciliation above. A
-/// deterministic filesystem fixture cannot force that narrow race.
-#[cfg(coverage)]
-fn create_copy_destination_dir(dst: &Path) -> Result<bool> {
-    create_private_dir(dst)?;
-    Ok(true)
+    reconcile_directory_creation(
+        dst,
+        create_private_dir(dst),
+        inspect_destination_metadata,
+    )
 }
 
 /// Removes a non-directory destination only while its type remains stable.
 ///
 /// # Parameters
 ///
-/// * `dst` - Destination previously observed as a non-directory.
+/// * `dst` - The destination path to inspect and, when still appropriate,
+///   remove.
+///
+/// # Returns
+///
+/// `Ok(())` after the entry is absent, removed, or observed as a real
+/// directory.
 ///
 /// # Errors
 ///
 /// Returns the I/O error reported while inspecting or removing the entry.
-#[cfg(not(coverage))]
 fn remove_destination_non_directory_if_unchanged(dst: &Path) -> Result<()> {
-    let metadata = match fs::symlink_metadata(dst) {
-        Ok(metadata) => metadata,
-        Err(error) if error.kind() == ErrorKind::NotFound => return Ok(()),
-        Err(error) => return Err(error),
-    };
-    if is_real_directory(&metadata) {
-        return Ok(());
-    }
-    #[cfg(windows)]
-    if metadata.file_type().is_symlink_dir() {
-        remove_directory_symlink(dst)?;
-        return Ok(());
-    }
-    fs::remove_file(dst)
+    removable_non_directory_metadata(inspect_destination_metadata(dst))?.map_or(
+        Ok(()),
+        |metadata| {
+            #[cfg(windows)]
+            if metadata.file_type().is_symlink_dir() {
+                remove_directory_symlink(dst)?;
+                return Ok(());
+            }
+            #[cfg(not(windows))]
+            let _ = metadata;
+            fs::remove_file(dst)
+        },
+    )
 }
 
-/// Removes the previously inspected non-directory during coverage collection.
+/// Reads destination metadata without following the final path component.
 ///
-/// Production retains the type-stability reinspection above; forcing the
-/// entry to change in exactly that interval requires an internal race hook.
-#[cfg(coverage)]
-fn remove_destination_non_directory_if_unchanged(dst: &Path) -> Result<()> {
-    fs::remove_file(dst)
+/// This shared operation keeps ordinary inspection and race-only reinspection
+/// on the same covered filesystem call site.
+///
+/// # Parameters
+///
+/// * `dst` - The destination path to inspect.
+///
+/// # Returns
+///
+/// Metadata for the destination entry.
+///
+/// # Errors
+///
+/// Returns the I/O error reported by `symlink_metadata`.
+#[inline(always)]
+fn inspect_destination_metadata(dst: &Path) -> Result<fs::Metadata> {
+    fs::symlink_metadata(dst)
 }

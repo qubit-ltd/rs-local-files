@@ -1,9 +1,1 @@
-coverage-cfg | src/ext/string_write_ext.rs | Coverage build avoids allocating an impossible u32-sized UTF-8 string only to cover length overflow.
-coverage-cfg | src/local/internal/copy_dir/destination.rs | Narrow concurrent entry replacement windows require an internal scheduler hook and remain fully checked in production builds.
-coverage-cfg | src/local/internal/copy_dir/error.rs | Recursive-copy u64 counter exhaustion cannot be represented by a finite filesystem fixture.
-coverage-cfg | src/local/internal/copy_dir/staged_copy.rs | Permission syscall failure cannot be induced portably while the staging handle remains owned and writable.
-coverage-cfg | src/local/internal/file_io.rs | Live descriptor fcntl failures and post-open replacement races cannot be induced safely through the opaque public API.
-coverage-cfg | src/local/internal/path_operations.rs | Generic result context creates duplicate untestable error regions for live descriptor metadata operations.
-coverage-cfg | src/local/internal/rooted_atomic_write.rs | Cryptographically random staging-name exhaustion and live descriptor metadata failures cannot be forced through the public API.
-coverage-cfg | src/local/internal/rooted_file_io.rs | Descriptor clone, metadata, and mkdir race failures cannot be scheduled safely through the opaque rooted capability API.
-coverage-cfg | src/local/local_atomic_writer.rs | Permission syscall failure cannot be induced portably while the atomic staging handle remains owned and writable.
+# No restricted style exceptions are currently approved.

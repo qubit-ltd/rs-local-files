@@ -2,9 +2,12 @@
 //    Copyright (c) 2025 - 2026 Haixing Hu.
 //
 //    SPDX-License-Identifier: Apache-2.0
+//
+//    Licensed under the Apache License, Version 2.0.
 // =============================================================================
 //! Regular-file staging and commit for recursive directory copies.
-// qubit-style: allow coverage-cfg
+// qubit-style: allow source-test-pair
+// Private behavior is covered through public integration tests.
 
 use std::fs::{
     self,
@@ -34,6 +37,7 @@ use crate::local::internal::temp_entry::{
     create_temp_file_in_dir,
 };
 
+use super::copy_dir_result::CopyDirResult;
 use super::destination::{
     destination_metadata_if_exists,
     ensure_directory_can_be_replaced_by_file,
@@ -41,7 +45,6 @@ use super::destination::{
     remove_destination_directory_if_unchanged,
 };
 use super::error::{
-    CopyDirResult,
     copy_dir_error,
     copy_dir_error_with_staging,
     record_copied_file,
@@ -109,14 +112,13 @@ pub(super) fn copy_file_with_options(
                 options.conflict_policy(),
                 stats,
             )? {
-                with_copy_context(
+                return with_copy_context(
                     record_skipped_file(stats),
                     LocalCopyDirStage::UpdateStatistics,
                     src,
                     dst,
                     stats,
-                )?;
-                return Ok(());
+                );
             }
             false
         }
@@ -133,14 +135,13 @@ pub(super) fn copy_file_with_options(
         stats,
         staged_file,
     )? {
-        with_copy_context(
+        return with_copy_context(
             record_skipped_file(stats),
             LocalCopyDirStage::UpdateStatistics,
             src,
             dst,
             stats,
-        )?;
-        return Ok(());
+        );
     }
 
     with_copy_context(
@@ -206,25 +207,61 @@ fn stage_copy_file(
         }
     };
     if options.preserves_permissions() {
-        let preserve_result = staged_file
-            .file()
-            .set_permissions(source_metadata.permissions());
-        #[cfg(not(coverage))]
-        if let Err(source) = preserve_result {
-            return Err(copy_dir_error_with_staging(
-                LocalCopyDirStage::PreservePermissions,
-                src,
-                dst,
-                stats,
-                source,
-                &mut staged_file,
-            ));
-        }
-        #[cfg(coverage)]
-        preserve_result.expect("staging permissions should remain writable");
+        preserve_staged_permissions(
+            src,
+            dst,
+            source_metadata,
+            stats,
+            &mut staged_file,
+        )?;
     }
     staged_file.close();
     Ok((staged_file, copied))
+}
+
+/// Applies source permissions to an armed staging file.
+///
+/// # Parameters
+///
+/// * `src` - The source path included in a structured failure.
+/// * `dst` - The destination path included in a structured failure.
+/// * `source_metadata` - The source metadata supplying the permissions.
+/// * `stats` - The recursive-copy statistics snapshot attached to a failure.
+/// * `staged_file` - The armed staging file whose permissions are updated and
+///   whose cleanup is attempted after an error.
+///
+/// # Returns
+///
+/// `Ok(())` after the source permissions have been applied.
+///
+/// # Errors
+///
+/// Returns a structured error that also attempts to clean up the staging file.
+///
+/// # Panics
+///
+/// Panics if `staged_file` no longer owns an open staging handle.
+fn preserve_staged_permissions(
+    src: &Path,
+    dst: &Path,
+    source_metadata: &fs::Metadata,
+    stats: &LocalCopyDirStats,
+    staged_file: &mut StagedFile,
+) -> CopyDirResult<()> {
+    if let Err(source) = staged_file
+        .file()
+        .set_permissions(source_metadata.permissions())
+    {
+        return Err(copy_dir_error_with_staging(
+            LocalCopyDirStage::PreservePermissions,
+            src,
+            dst,
+            stats,
+            source,
+            staged_file,
+        ));
+    }
+    Ok(())
 }
 
 /// Commits an already staged regular file according to destination policies.
