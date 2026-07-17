@@ -283,6 +283,19 @@ impl LocalTempFile {
     ///
     /// # Returns
     /// The absolute generated temporary file path.
+    ///
+    /// Ignoring the returned path is rejected:
+    ///
+    /// ```compile_fail
+    /// #![deny(unused_must_use)]
+    /// use qubit_local_files::LocalTempFile;
+    ///
+    /// let temporary_file = LocalTempFile::new()?;
+    /// temporary_file.keep();
+    /// # Ok::<(), std::io::Error>(())
+    /// ```
+    #[must_use = "keeping the temporary file disables automatic cleanup; retain the returned path"]
+    #[inline]
     pub fn keep(mut self) -> PathBuf {
         self.close();
         self.path
