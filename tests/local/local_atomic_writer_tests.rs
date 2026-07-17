@@ -6,11 +6,15 @@
 //    Licensed under the Apache License, Version 2.0.
 // =============================================================================
 
-use std::io::Write;
+use std::io::{
+    ErrorKind,
+    Write,
+};
 #[cfg(target_os = "linux")]
 use std::path::Path;
 
 use qubit_local_files::{
+    LocalAtomicWriteStage,
     LocalAtomicWriter,
     LocalFiles,
 };
@@ -44,6 +48,40 @@ fn test_local_atomic_writer_commits_written_contents() {
     assert!(!path.exists());
     writer.commit().expect("atomic writer should commit");
     assert_eq!(b"committed", fs::read(&path).unwrap().as_slice());
+    assert_eq!(0, count_atomic_temp_files(&dir));
+    fs::remove_dir_all(dir).unwrap();
+}
+
+#[cfg(unix)]
+#[test]
+fn test_local_atomic_writer_rejects_symlink_installed_before_commit() {
+    use std::os::unix::fs::symlink;
+
+    let dir = temp_dir("atomic-writer-commit-symlink");
+    let path = dir.join("out.txt");
+    let target = dir.join("target.txt");
+    fs::write(&target, b"original target").expect("target should be written");
+    let mut writer = LocalFiles::begin_atomic_write(&path)
+        .expect("atomic writer should begin with an absent destination");
+    writer
+        .write_all(b"replacement")
+        .expect("staged contents should be written");
+    assert_eq!(1, count_atomic_temp_files(&dir));
+    symlink(&target, &path).expect("destination symlink should be installed");
+
+    let error = writer
+        .commit()
+        .expect_err("commit should reject the destination symlink");
+
+    assert_eq!(LocalAtomicWriteStage::ReplaceDestination, error.stage);
+    assert_eq!(ErrorKind::InvalidInput, error.kind());
+    assert_eq!(b"original target", fs::read(&target).unwrap().as_slice());
+    assert!(
+        fs::symlink_metadata(&path)
+            .unwrap()
+            .file_type()
+            .is_symlink()
+    );
     assert_eq!(0, count_atomic_temp_files(&dir));
     fs::remove_dir_all(dir).unwrap();
 }

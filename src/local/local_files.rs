@@ -334,11 +334,19 @@ impl LocalFiles {
     /// only by [`LocalAtomicWriter::commit`]; aborting or dropping the writer
     /// leaves the destination unchanged.
     ///
+    /// The destination must be absent or a regular file. Symbolic links,
+    /// directories, sockets, FIFOs, devices, and other special files are
+    /// rejected with [`std::io::ErrorKind::InvalidInput`].
+    ///
     /// Permissions of an existing regular-file destination are captured while
     /// this method constructs the writer. Commit applies that snapshot and
-    /// does not re-read permissions. Callers that concurrently create the
-    /// destination or change its permissions must provide external
-    /// coordination when those changes must be retained.
+    /// does not refresh permissions, although it reinspects the destination
+    /// type immediately before replacement. Callers that concurrently create
+    /// the destination or change its permissions must provide external
+    /// coordination when those changes must be retained. The final inspection
+    /// and replacement remain separate path operations; use
+    /// [`crate::LocalRoot`] when containment must be anchored to an opened
+    /// directory capability.
     ///
     /// # Parameters
     /// - `path`: Destination path to replace on commit.
@@ -364,13 +372,15 @@ impl LocalFiles {
     /// Parent directories are created first. The temporary file is flushed and
     /// synced before it replaces the destination. The destination parent and
     /// the parents of directory entries created by this call are then synced
-    /// from deepest to shallowest where supported. A symbolic-link destination
-    /// is replaced as a link rather than followed on platforms whose rename
-    /// semantics provide that behavior.
+    /// from deepest to shallowest where supported. The destination must be
+    /// absent or a regular file. Symbolic links, directories, sockets, FIFOs,
+    /// devices, and other special files are rejected with
+    /// [`std::io::ErrorKind::InvalidInput`].
     ///
     /// Existing regular-file permissions are preserved from a snapshot taken
-    /// when this operation begins; commit does not re-read them. Concurrent
-    /// destination creation or permission changes require external
+    /// when this operation begins; commit does not refresh them, but it
+    /// reinspects the destination type immediately before replacement.
+    /// Concurrent destination creation or permission changes require external
     /// coordination when they must be retained. On Unix, a new destination
     /// uses mode `0o600`, subject to a more restrictive process umask.
     ///
@@ -381,10 +391,13 @@ impl LocalFiles {
     /// itself fails. After replacement, a parent-directory sync failure is
     /// reported even though the new destination is committed. This operation
     /// is not a multi-file transaction and does not coordinate concurrent
-    /// writers. A relative destination is bound to the process current
-    /// directory when the atomic writer is created. On Windows, replacement
-    /// does not add a verbatim-path prefix, so native path-length and
-    /// verbatim-path semantics apply.
+    /// writers. The final type inspection and replacement are separate
+    /// path-based operations, so this API is not a sandbox boundary against
+    /// concurrent path replacement; use [`crate::LocalRoot`] when
+    /// descriptor-relative containment is required. A relative destination is
+    /// bound to the process current directory when the atomic writer is
+    /// created. On Windows, replacement does not add a verbatim-path prefix, so
+    /// native path-length and verbatim-path semantics apply.
     ///
     /// # Examples
     /// ```
@@ -432,7 +445,9 @@ impl LocalFiles {
     /// failure cannot replace the original error or panic and may therefore
     /// leave the staging path behind.
     /// Parent-chain synchronization and new-file permission behavior are the
-    /// same as for [`Self::atomic_write`].
+    /// same as for [`Self::atomic_write`], including rejection of symbolic
+    /// links and other non-regular destinations and commit-time type
+    /// reinspection.
     ///
     /// The callback receives a guarded writer rather than a cloneable file
     /// handle:

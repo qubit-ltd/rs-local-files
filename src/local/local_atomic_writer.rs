@@ -54,10 +54,16 @@ const ATOMIC_WRITE_TEMP_PREFIX: &str = ".atomic-write-";
 /// directory when the writer is created, so later current-directory changes
 /// do not redirect commit or cleanup operations.
 ///
-/// Existing regular-file permissions are captured when this writer is
-/// created. Commit applies that snapshot without re-reading the destination;
-/// externally coordinate concurrent destination creation or permission
-/// changes when they must be retained.
+/// The destination must be absent or a regular file when this writer is
+/// created. Symbolic links, directories, sockets, FIFOs, devices, and other
+/// special files are rejected. Existing regular-file permissions are captured
+/// at creation. Commit applies that snapshot without refreshing permissions,
+/// but reinspects the destination type immediately before replacement.
+///
+/// The final inspection and replacement remain separate path-based operations.
+/// This writer is therefore not a sandbox boundary against an actor that can
+/// replace path entries concurrently. Use [`crate::LocalRoot`] when filesystem
+/// containment must be anchored to an opened directory capability.
 ///
 /// The guard must be committed or explicitly aborted:
 ///
@@ -140,8 +146,9 @@ impl LocalAtomicWriter {
     /// Synchronizes and atomically replaces the destination.
     ///
     /// Any existing permissions applied here are the snapshot captured when
-    /// this writer was created; the destination is not re-inspected for newer
-    /// permission changes.
+    /// this writer was created; newer permission changes are not retained.
+    /// Immediately before replacement, commit verifies that the destination is
+    /// still absent or a regular file and rejects every other file type.
     ///
     /// # Errors
     /// Returns a structured error when permission preservation, staging-file
@@ -163,6 +170,14 @@ impl LocalAtomicWriter {
         with_staging_cleanup(
             result,
             LocalAtomicWriteStage::SyncTemporaryFile,
+            &self.path,
+            &mut self.staged_file,
+        )?;
+
+        let result = existing_file_permissions(&self.operation_path).map(drop);
+        with_staging_cleanup(
+            result,
+            LocalAtomicWriteStage::ReplaceDestination,
             &self.path,
             &mut self.staged_file,
         )?;
@@ -336,12 +351,13 @@ fn existing_file_permissions(
     path: &Path,
 ) -> io::Result<Option<fs::Permissions>> {
     match fs::symlink_metadata(path) {
-        Ok(metadata)
-            if metadata.is_file() && !metadata.file_type().is_symlink() =>
-        {
+        Ok(metadata) if metadata.file_type().is_file() => {
             Ok(Some(metadata.permissions()))
         }
-        Ok(_) => Ok(None),
+        Ok(_) => Err(io::Error::new(
+            ErrorKind::InvalidInput,
+            "atomic write destination must be absent or a regular file",
+        )),
         Err(error) if error.kind() == ErrorKind::NotFound => Ok(None),
         Err(error) => {
             Err(add_path_context(error, "read destination metadata", path))

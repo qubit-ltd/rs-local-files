@@ -18,6 +18,8 @@ use std::io::{
 
 #[cfg(unix)]
 use super::super::test_support::PermissionsExt;
+#[cfg(unix)]
+use super::super::test_support::create_fifo;
 #[cfg(windows)]
 use super::super::test_support::path_with_interior_nul;
 use super::super::test_support::{
@@ -443,7 +445,7 @@ fn test_atomic_write_with_uses_guarded_atomic_writer() {
 
 #[cfg(unix)]
 #[test]
-fn test_atomic_write_replaces_symlink_itself_without_modifying_target() {
+fn test_atomic_write_rejects_symlink_without_modifying_target() {
     use std::os::unix::fs::symlink;
 
     let dir = temp_dir("atomic-replace-symlink");
@@ -452,43 +454,59 @@ fn test_atomic_write_replaces_symlink_itself_without_modifying_target() {
     fs::write(&target, b"target").unwrap();
     symlink(&target, &link).unwrap();
 
-    LocalFiles::atomic_write(&link, b"replacement")
-        .expect("symlink path should be replaced");
+    let error = LocalFiles::atomic_write(&link, b"replacement")
+        .expect_err("symlink destination should be rejected");
 
     assert!(
-        !fs::symlink_metadata(&link)
+        fs::symlink_metadata(&link)
             .unwrap()
             .file_type()
             .is_symlink()
     );
-    assert_eq!(b"replacement", fs::read(&link).unwrap().as_slice());
+    assert_eq!(LocalAtomicWriteStage::InspectDestination, error.stage);
+    assert_eq!(ErrorKind::InvalidInput, error.kind());
     assert_eq!(b"target", fs::read(&target).unwrap().as_slice());
+    assert_eq!(0, count_atomic_temp_files(&dir));
     fs::remove_dir_all(dir).unwrap();
 }
 
 #[cfg(unix)]
 #[test]
-fn test_atomic_write_does_not_inherit_symlink_target_permissions() {
-    use std::os::unix::fs::symlink;
+fn test_atomic_write_rejects_fifo_destination() {
+    use std::os::unix::fs::FileTypeExt;
 
-    let dir = temp_dir("atomic-symlink-permissions");
-    let target = dir.join("target.txt");
-    let link = dir.join("link.txt");
-    fs::write(&target, b"target").expect("target should be written");
-    fs::set_permissions(&target, fs::Permissions::from_mode(0o777))
-        .expect("target permissions should be set");
-    symlink(&target, &link).expect("symlink should be created");
+    let dir = temp_dir("atomic-fifo-destination");
+    let path = dir.join("pipe");
+    create_fifo(&path);
 
-    LocalFiles::atomic_write(&link, b"replacement")
-        .expect("symlink path should be replaced");
+    let error = LocalFiles::atomic_write(&path, b"replacement")
+        .expect_err("FIFO destination should be rejected");
 
-    let replacement_mode =
-        fs::metadata(&link).unwrap().permissions().mode() & 0o777;
-    let target_mode =
-        fs::metadata(&target).unwrap().permissions().mode() & 0o777;
-    assert_eq!(0, replacement_mode & 0o177);
-    assert_eq!(0o777, target_mode);
-    assert_eq!(b"target", fs::read(&target).unwrap().as_slice());
+    assert_eq!(LocalAtomicWriteStage::InspectDestination, error.stage);
+    assert_eq!(ErrorKind::InvalidInput, error.kind());
+    assert!(fs::symlink_metadata(&path).unwrap().file_type().is_fifo());
+    assert_eq!(0, count_atomic_temp_files(&dir));
+    fs::remove_dir_all(dir).unwrap();
+}
+
+#[cfg(unix)]
+#[test]
+fn test_atomic_write_rejects_unix_socket_destination() {
+    use std::os::unix::fs::FileTypeExt;
+    use std::os::unix::net::UnixListener;
+
+    let dir = temp_dir("atomic-socket-destination");
+    let path = dir.join("socket");
+    let listener = UnixListener::bind(&path).expect("socket should be bound");
+
+    let error = LocalFiles::atomic_write(&path, b"replacement")
+        .expect_err("socket destination should be rejected");
+
+    assert_eq!(LocalAtomicWriteStage::InspectDestination, error.stage);
+    assert_eq!(ErrorKind::InvalidInput, error.kind());
+    assert!(fs::symlink_metadata(&path).unwrap().file_type().is_socket());
+    assert_eq!(0, count_atomic_temp_files(&dir));
+    drop(listener);
     fs::remove_dir_all(dir).unwrap();
 }
 
@@ -512,43 +530,39 @@ fn test_atomic_write_returns_temp_create_error() {
 
 #[cfg(unix)]
 #[test]
-fn test_atomic_write_replaces_self_referential_symlink() {
+fn test_atomic_write_rejects_self_referential_symlink() {
     use std::os::unix::fs::symlink;
 
     let dir = temp_dir("atomic-metadata-error");
     let path = dir.join("loop");
     symlink(&path, &path).unwrap();
 
-    LocalFiles::atomic_write(&path, b"data")
-        .expect("self-referential symlink should be replaced");
+    let error = LocalFiles::atomic_write(&path, b"data")
+        .expect_err("self-referential symlink should be rejected");
 
     assert!(
-        !fs::symlink_metadata(&path)
+        fs::symlink_metadata(&path)
             .unwrap()
             .file_type()
             .is_symlink()
     );
-    assert_eq!(b"data", fs::read(&path).unwrap().as_slice());
+    assert_eq!(LocalAtomicWriteStage::InspectDestination, error.stage);
+    assert_eq!(ErrorKind::InvalidInput, error.kind());
+    assert_eq!(0, count_atomic_temp_files(&dir));
     fs::remove_dir_all(dir).unwrap();
 }
 
 #[test]
-fn test_atomic_write_removes_temp_when_rename_fails() {
+fn test_atomic_write_rejects_directory_destination() {
     let dir = temp_dir("rename-error");
     let path = dir.join("target-dir");
     fs::create_dir(&path).unwrap();
 
     let error = LocalFiles::atomic_write(&path, b"data")
-        .expect_err("renaming over a directory should fail");
+        .expect_err("directory destination should be rejected");
 
-    assert!(matches!(
-        error.kind(),
-        ErrorKind::AlreadyExists
-            | ErrorKind::IsADirectory
-            | ErrorKind::Other
-            | ErrorKind::PermissionDenied
-    ));
-    assert_eq!(LocalAtomicWriteStage::ReplaceDestination, error.stage);
+    assert_eq!(ErrorKind::InvalidInput, error.kind());
+    assert_eq!(LocalAtomicWriteStage::InspectDestination, error.stage);
     assert!(!error.committed);
     assert!(path.is_dir());
     assert_eq!(0, count_atomic_temp_files(&dir));
