@@ -372,6 +372,10 @@ impl LocalTempDir {
     /// this guard so the caller can retry, keep, inspect, or explicitly clean
     /// up the temporary directory.
     ///
+    /// Native no-replace directory persistence is available on Linux, macOS,
+    /// and Windows. Other targets return
+    /// [`std::io::ErrorKind::Unsupported`] and retain this guard in the error.
+    ///
     /// Persistence uses a native move or rename and does not fall back to
     /// copying and deleting. Moving across filesystems can therefore fail with
     /// `EXDEV` on Unix or a platform-equivalent error.
@@ -388,9 +392,8 @@ impl LocalTempDir {
     ///
     /// # Errors
     /// Returns [`LocalPersistError`] when the parent directory cannot be
-    /// created, the target already exists, the platform lacks a native
-    /// no-replace directory move, or the temporary directory cannot be moved to
-    /// `target`.
+    /// created, the target already exists, the platform is not Linux, macOS, or
+    /// Windows, or the temporary directory cannot be moved to `target`.
     pub fn persist<P>(
         mut self,
         target: P,

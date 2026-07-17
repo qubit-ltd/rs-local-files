@@ -398,6 +398,7 @@ fn test_temp_file_keep_returns_absolute_path() {
     assert!(kept_path_exists);
 }
 
+#[cfg(any(target_os = "linux", target_os = "macos", windows))]
 #[test]
 fn test_temp_file_persist_moves_file() {
     let dir = temp_dir("temp-file-persist");
@@ -416,6 +417,7 @@ fn test_temp_file_persist_moves_file() {
     fs::remove_dir_all(dir).unwrap();
 }
 
+#[cfg(any(target_os = "linux", target_os = "macos", windows))]
 #[test]
 fn test_temp_file_persist_returns_absolute_path() {
     let _lock = CURRENT_DIR_LOCK
@@ -450,7 +452,7 @@ fn test_temp_file_persist_returns_absolute_path() {
     assert!(persisted_path_exists);
 }
 
-#[cfg(not(any(unix, windows)))]
+#[cfg(not(any(target_os = "linux", target_os = "macos", windows)))]
 #[test]
 fn test_temp_file_persist_reports_unsupported_no_replace_move() {
     let dir = temp_dir("unsupported-file-persist");
@@ -463,6 +465,8 @@ fn test_temp_file_persist_reports_unsupported_no_replace_move() {
         .expect_err("no-replace file move should be unsupported");
 
     assert_eq!(ErrorKind::Unsupported, error.kind());
+    assert!(error.resource.path().exists());
+    assert!(!target.exists());
     error
         .resource
         .cleanup()
@@ -470,6 +474,7 @@ fn test_temp_file_persist_reports_unsupported_no_replace_move() {
     fs::remove_dir_all(dir).expect("unsupported fixture should be removed");
 }
 
+#[cfg(any(target_os = "linux", target_os = "macos", windows))]
 #[test]
 fn test_temp_file_persist_rejects_existing_target_by_default() {
     let dir = temp_dir("temp-file-persist-existing-target");
@@ -515,6 +520,7 @@ fn test_temp_file_persist_with_overwrite_replaces_existing_target() {
     fs::remove_dir_all(dir).unwrap();
 }
 
+#[cfg(any(target_os = "linux", target_os = "macos", windows))]
 #[test]
 fn test_temp_file_persist_with_default_rejects_existing_target() {
     let dir = temp_dir("temp-file-persist-default-existing-target");
@@ -539,7 +545,7 @@ fn test_temp_file_persist_with_default_rejects_existing_target() {
     fs::remove_dir_all(dir).unwrap();
 }
 
-#[cfg(unix)]
+#[cfg(any(target_os = "linux", target_os = "macos"))]
 #[test]
 fn test_temp_file_persist_rejects_target_with_nul_byte() {
     use std::ffi::OsString;
@@ -614,7 +620,7 @@ fn test_temp_file_persist_with_overwrite_rejects_windows_target_with_nul_byte()
     fs::remove_dir_all(dir).expect("test directory should be removed");
 }
 
-#[cfg(unix)]
+#[cfg(any(target_os = "linux", target_os = "macos"))]
 #[test]
 fn test_temp_file_persist_returns_target_metadata_error() {
     let dir = temp_dir("temp-file-persist-metadata-error");

@@ -313,6 +313,12 @@ impl LocalTempFile {
     /// [`LocalPersistError`] retains this guard so the caller can retry, keep,
     /// inspect, or explicitly clean up the temporary file.
     ///
+    /// Native no-replace persistence is available on Linux, macOS, and
+    /// Windows. Other targets return [`std::io::ErrorKind::Unsupported`] and
+    /// retain this guard in the error. The same platform restriction applies
+    /// to recursive-copy file commits using the `Fail` or `Skip` conflict
+    /// policy because those operations share the no-replace primitive.
+    ///
     /// Persistence uses a native move or rename and does not fall back to
     /// copying and deleting. Moving across filesystems can therefore fail with
     /// `EXDEV` on Unix or a platform-equivalent error.
@@ -350,6 +356,11 @@ impl LocalTempFile {
     /// move operation. When
     /// `options.overwrites()` is `true`, an existing target file may be
     /// replaced.
+    /// Native no-replace persistence is available on Linux, macOS, and
+    /// Windows. On other targets, disabling overwrite returns
+    /// [`std::io::ErrorKind::Unsupported`] and retains this guard in the error.
+    /// Overwrite persistence continues to use the platform's ordinary
+    /// replacement primitive and is not subject to that no-replace matrix.
     /// Persistence uses a native move or rename and does not fall back to
     /// copying and deleting, so cross-filesystem moves can fail with `EXDEV` on
     /// Unix or a platform-equivalent error. Replacing an existing target keeps
@@ -372,8 +383,8 @@ impl LocalTempFile {
     /// # Errors
     /// Returns [`LocalPersistError`] retaining this guard when the parent
     /// directory cannot be created, the target already exists while
-    /// overwriting is disabled, or the temporary file cannot be moved to
-    /// `target`.
+    /// overwriting is disabled, native no-replace installation is unavailable,
+    /// or the temporary file cannot be moved to `target`.
     pub fn persist_with<P>(
         mut self,
         target: P,

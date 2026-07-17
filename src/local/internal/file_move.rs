@@ -308,8 +308,8 @@ pub(crate) fn move_file_without_replacing(
 ///
 /// # Errors
 /// Always returns [`ErrorKind::Unsupported`] because this target has no native
-/// or hard-link no-replace file move implementation.
-#[cfg(not(any(unix, windows)))]
+/// no-replace file move implementation.
+#[cfg(not(any(target_os = "linux", target_os = "macos", windows)))]
 pub(crate) fn move_file_without_replacing(
     source: &Path,
     destination: &Path,
@@ -317,7 +317,7 @@ pub(crate) fn move_file_without_replacing(
     Err(Error::new(
         ErrorKind::Unsupported,
         format!(
-            "moving file '{}' to '{}' without replacement is unsupported",
+            "native no-replace installation from '{}' to '{}' is unsupported",
             source.display(),
             destination.display(),
         ),
@@ -449,43 +449,6 @@ pub(crate) fn move_directory_without_replacing(
             destination.display()
         ),
     ))
-}
-
-/// Moves `source` to `destination` without replacing an existing file.
-///
-/// This fallback creates a hard link at the destination, then removes the
-/// original temporary file. The destination creation is atomic and fails when
-/// the destination already exists.
-///
-/// # Parameters
-/// - `source`: Existing source file path.
-/// - `destination`: Destination file path.
-///
-/// # Errors
-/// Returns the platform I/O error reported while linking, unlinking, or
-/// rolling back the destination link after an unlink failure.
-#[cfg(all(unix, not(any(target_os = "linux", target_os = "macos"))))]
-pub(crate) fn move_file_without_replacing(
-    source: &Path,
-    destination: &Path,
-) -> Result<()> {
-    fs::hard_link(source, destination)?;
-    match fs::remove_file(source) {
-        Ok(()) => Ok(()),
-        Err(error) => {
-            if let Err(cleanup_error) = fs::remove_file(destination) {
-                return Err(Error::new(
-                    error.kind(),
-                    format!(
-                        "failed to remove source after linking destination: {error}; \
-                         additionally failed to remove destination '{}': {cleanup_error}",
-                        destination.display(),
-                    ),
-                ));
-            }
-            Err(error)
-        }
-    }
 }
 
 /// Converts a Unix path to a C string.

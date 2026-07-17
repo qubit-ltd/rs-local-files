@@ -20,6 +20,14 @@ use crate::{
 /// the private staging mode `0o600` and newly created directories use `0o700`,
 /// subject to a more restrictive process umask.
 ///
+/// File commits using [`LocalCopyConflictPolicy::Fail`] or
+/// [`LocalCopyConflictPolicy::Skip`] require native no-replace installation,
+/// which is available on Linux, macOS, and Windows. Other targets return
+/// [`std::io::ErrorKind::Unsupported`] at the file-commit stage. The
+/// [`LocalCopyConflictPolicy::Overwrite`] policy uses ordinary replacement and
+/// is not subject to that no-replace matrix. Destination directories created
+/// before a failed file commit are not rolled back.
+///
 /// Construct this non-exhaustive type through [`Self::new`] and its builders.
 /// Builder results must be used:
 ///

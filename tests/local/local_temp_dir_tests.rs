@@ -593,6 +593,7 @@ fn test_temp_dir_drop_logs_and_ignores_missing_directory() {
     fs::remove_dir_all(dir).unwrap();
 }
 
+#[cfg(any(target_os = "linux", target_os = "macos", windows))]
 #[test]
 fn test_temp_dir_persist_moves_directory() {
     let dir = temp_dir("temp-dir-persist");
@@ -613,6 +614,7 @@ fn test_temp_dir_persist_moves_directory() {
     fs::remove_dir_all(dir).unwrap();
 }
 
+#[cfg(any(target_os = "linux", target_os = "macos", windows))]
 #[test]
 fn test_temp_dir_persist_returns_absolute_path() {
     let _lock = CURRENT_DIR_LOCK
@@ -645,6 +647,28 @@ fn test_temp_dir_persist_returns_absolute_path() {
         persisted_path
     );
     assert!(persisted_path_exists);
+}
+
+#[cfg(not(any(target_os = "linux", target_os = "macos", windows)))]
+#[test]
+fn test_temp_dir_persist_reports_unsupported_no_replace_move() {
+    let dir = temp_dir("unsupported-dir-persist");
+    let temp_dir = LocalTempDir::in_dir(&dir, Some("source-"), 4)
+        .expect("temporary directory should be created");
+    let target = dir.join("target");
+
+    let error = temp_dir
+        .persist(&target)
+        .expect_err("no-replace directory move should be unsupported");
+
+    assert_eq!(ErrorKind::Unsupported, error.kind());
+    assert!(error.resource.path().exists());
+    assert!(!target.exists());
+    error
+        .resource
+        .cleanup()
+        .expect("failed persistence resource should be cleaned up");
+    fs::remove_dir_all(dir).expect("unsupported fixture should be removed");
 }
 
 #[cfg(unix)]
@@ -702,6 +726,7 @@ fn test_temp_dir_persist_returns_resource_when_parent_creation_fails() {
     fs::remove_dir_all(dir).unwrap();
 }
 
+#[cfg(any(target_os = "linux", target_os = "macos", windows))]
 #[test]
 fn test_temp_dir_persist_returns_resource_when_target_exists() {
     let dir = temp_dir("temp-dir-persist-rename-error");
@@ -724,7 +749,7 @@ fn test_temp_dir_persist_returns_resource_when_target_exists() {
     fs::remove_dir_all(dir).unwrap();
 }
 
-#[cfg(unix)]
+#[cfg(any(target_os = "linux", target_os = "macos"))]
 #[test]
 fn test_temp_dir_persist_returns_target_metadata_error() {
     let dir = temp_dir("temp-dir-persist-metadata-error");
