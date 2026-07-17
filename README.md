@@ -138,6 +138,20 @@ equivalent platform error. Overwriting a file keeps the temporary file's
 permissions rather than the replaced target's permissions; use
 `LocalFiles::atomic_write` when replacing contents while preserving an existing
 regular file's permissions is required.
+
+Native no-replace support is deliberately explicit:
+
+| Operation | Linux | macOS | Windows | Other targets |
+| --- | --- | --- | --- | --- |
+| Temp file/dir default persist (no replace) | Supported | Supported | Supported | `Unsupported` |
+| Recursive copy `Fail`/`Skip` file commit | Supported | Supported | Supported | `Unsupported` |
+| Temp file overwrite persist | Supported | Supported | Supported | Uses ordinary replacement support |
+| Recursive copy `Overwrite` | Supported | Supported | Supported | Uses ordinary replacement support |
+
+On unsupported targets, failed persistence retains the temporary guard.
+Recursive copy may create destination directories before a later file commit
+returns `Unsupported`; it does not roll back the whole destination tree.
+
 Relative temporary-resource creation directories and persistence targets are
 bound to the process current directory when the resource or operation begins.
 `path`, child-path helpers, `keep`, `persist`, and `persist_with` return absolute
@@ -178,12 +192,19 @@ protocol rather than opening a normal write handle.
 
 ### Rooted Capabilities
 
-`LocalRoot` anchors descendant operations to an open directory capability.
+`LocalRoot` anchors descendant operations to an opened directory descriptor,
+which is the filesystem authority; its stored absolute path is diagnostic
+context only.
 Construct descendant names with `LocalRelativePath`, which accepts only a
 non-empty sequence of normal relative components. `open_reader`, `open_writer`,
 and `begin_atomic_write` traverse from the open root descriptor and reject
 symbolic links at intermediate and final entries. Renaming or replacing the
-diagnostic root path does not redirect an already opened capability.
+root path or an already opened intermediate name does not redirect that handle.
+
+This is descriptor-relative path containment, not inode-name uniqueness or a
+complete OS security boundary. Hard links, mounts, permissions, and processes
+with equivalent OS authority remain deployment concerns. Path-based
+`LocalFiles` APIs are convenience operations, not sandbox boundaries.
 
 The secure backend currently uses Unix descriptor-relative operations. On
 other targets `LocalRoot::open` returns `std::io::ErrorKind::Unsupported`
@@ -196,14 +217,19 @@ resource helpers remain intended for trusted local application paths.
 `LocalFiles::atomic_write` writes bytes to a temporary file in the same parent
 directory, flushes and syncs that file, replaces the destination, and syncs the
 destination parent plus the parents of directories created by the operation,
-from deepest to shallowest, when supported. This is useful for whole-file
+from deepest to shallowest, when supported. The destination must be absent or
+an existing regular file. Symbolic links, directories, FIFOs, sockets, devices,
+and other special files are rejected with
+`std::io::ErrorKind::InvalidInput`. This is useful for whole-file
 replacement of configuration files, cache manifests, checkpoints, and
 generated indexes. Existing regular-file permissions are snapshotted when the
 atomic writer begins and that snapshot is applied at commit; commit does not
-re-read permissions. Coordinate concurrent destination creation or permission
-changes externally when they must be retained. On Unix, a new destination uses
-mode `0600` before applying a more restrictive process umask. A symbolic-link
-destination does not donate permissions from its target.
+refresh permissions, but it reinspects the destination type immediately before
+replacement. Coordinate concurrent destination creation or permission changes
+externally when they must be retained. The final inspection and replacement
+remain separate path operations, so use `LocalRootAtomicWriter` when adversarial
+namespace replacement is in scope. On Unix, a new destination uses mode `0600`
+before applying a more restrictive process umask.
 
 For streaming content, use `LocalAtomicWriter`:
 
@@ -259,6 +285,9 @@ a more restrictive process umask. Select `Overwrite` or `Skip` through
 replacement separately through `LocalCopyTypeConflictPolicy::Replace`. Copy
 failures return `LocalCopyDirError` with paths, stage, partial statistics, the
 optional staging path and secondary cleanup error, and the native source error.
+`Fail` and `Skip` file commits require native no-replace support and therefore
+return `Unsupported` outside Linux, macOS, and Windows. `Overwrite` uses the
+ordinary replacement primitive and is not subject to that restriction.
 
 Recursive copy is not a tree-level transaction. Entries committed before a
 failure remain in the destination, no rollback is attempted, and destructive

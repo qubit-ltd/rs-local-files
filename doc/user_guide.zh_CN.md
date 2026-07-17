@@ -213,9 +213,28 @@ assert_eq!("new\n", std::fs::read_to_string(&target)?);
 
 如果目标文件不能被外部观察到“只写了一半”，最终文件替换优先使用 `LocalFiles::atomic_write`。
 
+## No-Replace 平台支持
+
+本 crate 使用原生 no-replace 安装原语，不使用 hard-link 或 copy-and-delete 模拟。支持矩阵如下：
+
+| 操作 | Linux | macOS | Windows | 其他目标 |
+| --- | --- | --- | --- | --- |
+| 临时文件/目录默认持久化（不替换） | 支持 | 支持 | 支持 | `Unsupported` |
+| 递归复制 `Fail`/`Skip` 文件提交 | 支持 | 支持 | 支持 | `Unsupported` |
+| 临时文件 overwrite 持久化 | 支持 | 支持 | 支持 | 使用普通替换能力 |
+| 递归复制 `Overwrite` | 支持 | 支持 | 支持 | 使用普通替换能力 |
+
+在不支持的目标上，`LocalTempFile::persist`、禁用 overwrite 的 `LocalTempFile::persist_with` 和 `LocalTempDir::persist` 返回 `ErrorKind::Unsupported`，同时由 `LocalPersistError` 保留临时资源。递归复制的 `Fail` 或 `Skip` 会报告 `LocalCopyDirStage::CommitFile` 和 `ErrorKind::Unsupported`。此时可能已经创建了一部分目标目录；递归复制不提供整个事务的回滚。overwrite 操作使用普通替换原语，不受 no-replace 支持矩阵限制。
+
+## 根目录 Capability
+
+`LocalRoot` 打开目录 descriptor，并把该 descriptor 作为所有后代操作的 authority。保存的绝对 root 路径仅用于诊断。后代名称使用 `LocalRelativePath` 表示，reader、writer 和 atomic writer 的遍历会拒绝每一级 component 上的 symbolic link。root 路径或中间名称被重命名或替换时，已经打开的 descriptor 不会被重定向。
+
+这里保证的是 descriptor-relative 路径 containment，不是 inode 名称唯一性或完整的 OS 安全边界。hard link、mounted filesystem、权限以及拥有同等 OS authority 的进程仍属于部署安全责任。该 backend 在 Unix 上可用；其他目标返回 `ErrorKind::Unsupported`，不会回退到 check-then-path。path-based `LocalFiles` 是便利 API；当其他参与者可以并发修改 namespace 时，不能作为 sandbox 边界。
+
 ## Atomic Write
 
-`LocalFiles::atomic_write` 会在同一父目录下写入临时文件，flush 并 sync 这个临时文件，替换目标，并在支持的平台上从深到浅 sync 目标父目录以及本次新建目录项所在的各级父目录。
+`LocalFiles::atomic_write` 会在同一父目录下写入临时文件，flush 并 sync 这个临时文件，替换目标，并在支持的平台上从深到浅 sync 目标父目录以及本次新建目录项所在的各级父目录。目标必须不存在或是已有普通文件；symbolic link、目录、FIFO、socket、device 和其他特殊文件会以 `ErrorKind::InvalidInput` 拒绝。
 
 ```rust
 use qubit_local_files::{
@@ -282,14 +301,14 @@ constructor 和 builder。API 仍保持同步边界。
 - 写入前会创建父目录。
 - 临时文件创建在目标目录下，因此在常见本地文件系统上可以 atomic replacement。
 - 原子 writer 开始时会对目标已有普通文件的权限取快照，并在替换前把该快照
-  复制到临时文件；commit 不会重新读取权限。如果并发创建目标或修改权限且
-  这些变更必须保留，调用方需要在外部进行协调。symlink target 不会提供权限。
+  复制到临时文件；commit 不会刷新权限，但会在替换前重新检查目标类型。如果
+  并发创建目标或修改权限且这些变更必须保留，调用方需要在外部进行协调。
 - 在 Unix 上，新目标使用 `0600`，之后仍受更严格的进程 umask 约束。
 - 如果写入、flush 或 sync 临时文件失败，目标保持不变。
 - 如果 `atomic_write_with` callback panic，unwind 会先关闭并 best-effort 删除未提交临时文件，再继续传播 panic；目标保持不变。清理失败不能替换原 panic，因此 staging path 可能残留。
 - 如果替换已经成功，但 sync 目标父目录或新建目录项的父目录失败，方法可能在目标已经包含新内容后返回错误。
 - 错误通过 `LocalAtomicWriteError` 报告，包含失败阶段、临时路径、原始 I/O source、`committed` 标志，以及 secondary staging cleanup error。
-- 如果目标路径是 symbolic link，并且平台 rename-over-symlink 语义是替换 link 本身，则该 link 会被新普通文件替换，原 link target 保持不变。
+- 最终目标检查和替换仍是两个 path-based 操作；需要抵御并发 namespace 替换时，应使用 `LocalRootAtomicWriter`。
 - 该操作不是多文件事务，也不协调并发写入。
 
 ## 文件和目录 Helper
@@ -383,6 +402,8 @@ assert_eq!(4, stats.bytes);
 | `with_type_conflict(...)` | `Fail` | 文件/目录类型冲突会被拒绝；`Replace` 显式允许破坏性替换。 |
 | `follow_symlinks()` | `false` | 源目录树中的 symbolic link 会被拒绝。 |
 | `preserve_permissions()` | `false` | 不复制源权限；在 Unix 上，新建或替换的文件保留 `0600`，新建目录使用 `0700`，之后仍受进程 umask 约束。 |
+
+`Fail` 和 `Skip` 文件提交需要原生 no-replace 原语，因此在 Linux、macOS、Windows 之外返回 `ErrorKind::Unsupported`。`Overwrite` 使用普通替换原语。由于操作不是目录树级事务，在不支持的文件提交前已经创建的目标目录会继续保留。
 
 统计信息：
 

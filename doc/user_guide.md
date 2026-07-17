@@ -267,12 +267,53 @@ assert_eq!("new\n", std::fs::read_to_string(&target)?);
 If a target file must never be observed half-written, prefer
 `LocalFiles::atomic_write` for the final file replacement.
 
+## No-Replace Platform Support
+
+The crate uses a native no-replace installation primitive rather than a
+hard-link or copy-and-delete emulation. Its support matrix is:
+
+| Operation | Linux | macOS | Windows | Other targets |
+| --- | --- | --- | --- | --- |
+| Temp file/dir default persist (no replace) | Supported | Supported | Supported | `Unsupported` |
+| Recursive copy `Fail`/`Skip` file commit | Supported | Supported | Supported | `Unsupported` |
+| Temp file overwrite persist | Supported | Supported | Supported | Uses ordinary replacement support |
+| Recursive copy `Overwrite` | Supported | Supported | Supported | Uses ordinary replacement support |
+
+On an unsupported target, `LocalTempFile::persist`, no-overwrite
+`LocalTempFile::persist_with`, and `LocalTempDir::persist` return
+`ErrorKind::Unsupported` while retaining the temporary resource in
+`LocalPersistError`. Recursive copy reports `LocalCopyDirStage::CommitFile` and
+`ErrorKind::Unsupported` for `Fail` or `Skip`. It may already have created
+destination directories; recursive copy does not provide transaction-wide
+rollback. Overwrite operations use the ordinary replacement primitive and are
+not subject to the no-replace support matrix.
+
+## Rooted Capabilities
+
+`LocalRoot` opens a directory descriptor and uses that descriptor as the
+authority for descendant operations. Its stored absolute root path is retained
+only for diagnostics. Descendant names are supplied as `LocalRelativePath`, and
+reader, writer, and atomic-writer traversal rejects symbolic links at every
+component. Renaming or replacing the root path or an intermediate name does not
+redirect descriptors that were already opened.
+
+This guarantee is descriptor-relative path containment. It does not establish
+unique inode names or a complete OS security boundary: hard links, mounted
+filesystems, permissions, and processes with equivalent OS authority remain
+deployment concerns. The backend is available on Unix; other targets return
+`ErrorKind::Unsupported` rather than falling back to check-then-path behavior.
+Path-based `LocalFiles` APIs are convenience operations and are not sandbox
+boundaries when another actor can mutate the namespace concurrently.
+
 ## Atomic Writes
 
 `LocalFiles::atomic_write` writes bytes to a temporary file in the same parent
 directory, flushes and syncs that temporary file, replaces the destination, and
 syncs the destination parent plus the parents of directory entries created by
-the operation, from deepest to shallowest, when supported.
+the operation, from deepest to shallowest, when supported. The destination must
+be absent or an existing regular file. Symbolic links, directories, FIFOs,
+sockets, devices, and other special files are rejected with
+`ErrorKind::InvalidInput`.
 
 ```rust
 use qubit_local_files::{
@@ -343,9 +384,9 @@ Important semantics:
   be atomic on common local filesystems.
 - Existing regular-file permissions are captured when the atomic writer begins
   and that snapshot is copied to the temporary file before replacement. Commit
-  does not re-read permissions; coordinate concurrent destination creation or
-  permission changes externally when they must be retained. Symbolic-link
-  targets do not donate permissions.
+  does not refresh permissions, but it reinspects the destination type
+  immediately before replacement. Coordinate concurrent destination creation
+  or permission changes externally when they must be retained.
 - On Unix, a new destination uses mode `0600`, subject to a more restrictive
   process umask.
 - If writing, flushing, or syncing the temporary file fails, the destination is
@@ -360,9 +401,9 @@ Important semantics:
 - Errors are reported as `LocalAtomicWriteError`, which exposes the failed
   stage, temporary path, native I/O source, a `committed` flag, and any
   secondary staging cleanup error.
-- If the destination path is a symbolic link on platforms where renaming over a
-  symlink replaces the link itself, the link is replaced and its previous target
-  is left unchanged.
+- The final destination inspection and replacement are separate path-based
+  operations. Use `LocalRootAtomicWriter` when containment must resist
+  concurrent namespace replacement.
 - The operation is not a multi-file transaction and does not coordinate
   concurrent writers.
 
@@ -460,6 +501,12 @@ Options:
 | `with_type_conflict(...)` | `Fail` | File/directory type mismatches are rejected; `Replace` explicitly permits destructive replacement. |
 | `follow_symlinks()` | `false` | Symbolic links in the source tree are rejected. |
 | `preserve_permissions()` | `false` | Source permissions are not copied; on Unix, new or replaced files keep mode `0600` and new directories use `0700`, subject to the process umask. |
+
+`Fail` and `Skip` file commits require the native no-replace primitive and
+return `ErrorKind::Unsupported` outside Linux, macOS, and Windows. `Overwrite`
+uses ordinary replacement. Destination directories created before an
+unsupported file commit remain present because the operation is not a
+tree-level transaction.
 
 Statistics:
 

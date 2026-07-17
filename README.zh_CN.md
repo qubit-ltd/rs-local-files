@@ -105,7 +105,20 @@ assert_eq!("new payload\n", std::fs::read_to_string(&final_path)?);
 
 文件系统校验与后续操作并非原子过程。当不可信参与者能够并发修改目录树时，这些 helper 不能作为 sandbox 边界。
 
-`LocalTempFile::persist` 默认在移动操作中拒绝已存在的目标。只有确实要替换已有目标时，才使用 `LocalTempFile::persist_with` 和 `LocalPersistOptions::new().with_overwrite()`。`LocalTempDir::persist` 同样拒绝已存在的目标，并且不提供 overwrite 选项。持久化失败会返回持有原临时 guard 的 `LocalPersistError`，调用方可以重试或检查资源。持久化只使用原生 move/rename，不会回退到 copy-and-delete，因此跨文件系统移动可能在 Unix 上返回 `EXDEV`，或返回其他平台的等价错误。覆盖文件时会保留临时文件的权限，而不会保留被替换目标的权限；如果需要替换内容并保留已有普通文件的权限，请使用 `LocalFiles::atomic_write`。临时资源的相对创建目录和持久化目标会在资源创建或操作开始时绑定到当时的进程工作目录；`path`、child path helper、`keep`、`persist` 和 `persist_with` 返回绝对路径，之后即使工作目录变化也可直接使用。相对 atomic-write 目标同样会在写入开始时绑定，因此后续工作目录变化不会重定向提交或清理。在 Windows 上，原生移动不会添加 verbatim-path prefix，因此路径长度和 verbatim path 语义仍遵循原生平台行为。在 Unix 上，临时文件以 `0600`、临时目录以 `0700` 创建，之后仍受进程 umask 约束。
+`LocalTempFile::persist` 默认在移动操作中拒绝已存在的目标。只有确实要替换已有目标时，才使用 `LocalTempFile::persist_with` 和 `LocalPersistOptions::new().with_overwrite()`。`LocalTempDir::persist` 同样拒绝已存在的目标，并且不提供 overwrite 选项。持久化失败会返回持有原临时 guard 的 `LocalPersistError`，调用方可以重试或检查资源。持久化只使用原生 move/rename，不会回退到 copy-and-delete，因此跨文件系统移动可能在 Unix 上返回 `EXDEV`，或返回其他平台的等价错误。覆盖文件时会保留临时文件的权限，而不会保留被替换目标的权限；如果需要替换内容并保留已有普通文件的权限，请使用 `LocalFiles::atomic_write`。
+
+原生 no-replace 支持矩阵如下：
+
+| 操作 | Linux | macOS | Windows | 其他目标 |
+| --- | --- | --- | --- | --- |
+| 临时文件/目录默认持久化（不替换） | 支持 | 支持 | 支持 | `Unsupported` |
+| 递归复制 `Fail`/`Skip` 文件提交 | 支持 | 支持 | 支持 | `Unsupported` |
+| 临时文件 overwrite 持久化 | 支持 | 支持 | 支持 | 使用普通替换能力 |
+| 递归复制 `Overwrite` | 支持 | 支持 | 支持 | 使用普通替换能力 |
+
+在不支持的目标上，持久化错误仍持有临时 guard。递归复制可能先创建目标目录，随后才在文件提交阶段返回 `Unsupported`；不会回滚整个目标树。
+
+临时资源的相对创建目录和持久化目标会在资源创建或操作开始时绑定到当时的进程工作目录；`path`、child path helper、`keep`、`persist` 和 `persist_with` 返回绝对路径，之后即使工作目录变化也可直接使用。相对 atomic-write 目标同样会在写入开始时绑定，因此后续工作目录变化不会重定向提交或清理。在 Windows 上，原生移动不会添加 verbatim-path prefix，因此路径长度和 verbatim path 语义仍遵循原生平台行为。在 Unix 上，临时文件以 `0600`、临时目录以 `0700` 创建，之后仍受进程 umask 约束。
 
 ### 读写选项
 
@@ -132,11 +145,13 @@ assert_eq!("new payload\n", std::fs::read_to_string(&final_path)?);
 
 ### Rooted Capability
 
-`LocalRoot` 把所有后代操作锚定到一个已打开的目录 capability。
+`LocalRoot` 把所有后代操作锚定到一个已打开的目录 descriptor；它才是文件系统 authority，保存的绝对路径只用于诊断。
 后代名称必须先构造为 `LocalRelativePath`；它只接受由普通 component 组成的
 非空相对路径。`open_reader`、`open_writer` 和 `begin_atomic_write` 都从已打开
 的 root descriptor 开始遍历，并拒绝中间项和最终项上的 symbolic link。
-即使诊断路径被重命名或替换，已打开的 capability 也不会被重定向。
+即使 root 路径或已经打开的中间名称被重命名或替换，已有句柄也不会被重定向。
+
+这里保证的是 descriptor-relative 路径 containment，不是 inode 名称唯一性或完整的 OS 安全边界。hard link、mount、权限以及拥有同等 OS authority 的进程仍属于部署安全责任。path-based `LocalFiles` 是便利 API，不能作为 sandbox 边界。
 
 当前安全 backend 使用 Unix descriptor-relative 操作。其他目标上的
 `LocalRoot::open` 返回 `std::io::ErrorKind::Unsupported`，不会回退到
@@ -145,7 +160,7 @@ path-based `LocalFiles` 和临时资源 helper 仍面向可信本地应用路径
 
 ### Atomic Write
 
-`LocalFiles::atomic_write` 会在同一父目录下写入临时文件，flush 并 sync 这个临时文件，替换目标，并在支持的平台上从深到浅 sync 目标父目录以及本次新建目录项所在的各级父目录。它适合配置文件、cache manifest、checkpoint、生成索引等 whole-file replacement 场景。原子 writer 开始时会对已有普通文件的权限取快照，commit 时应用该快照而不会重新读取目标权限；如果并发创建目标或修改权限且这些变更必须保留，调用方需要在外部进行协调。symlink 目标不会从其 link target 继承权限。在 Unix 上，新目标使用 `0600`，之后仍受更严格的进程 umask 约束。
+`LocalFiles::atomic_write` 会在同一父目录下写入临时文件，flush 并 sync 这个临时文件，替换目标，并在支持的平台上从深到浅 sync 目标父目录以及本次新建目录项所在的各级父目录。目标必须不存在或是已有普通文件；symbolic link、目录、FIFO、socket、device 和其他特殊文件会以 `std::io::ErrorKind::InvalidInput` 拒绝。它适合配置文件、cache manifest、checkpoint、生成索引等 whole-file replacement 场景。原子 writer 开始时会对已有普通文件的权限取快照，commit 时应用该快照而不会刷新权限，但会在替换前重新检查目标类型；如果并发创建目标或修改权限且这些变更必须保留，调用方需要在外部进行协调。最终检查与替换仍是两个 path-based 操作；对抗并发 namespace 替换时应使用 `LocalRootAtomicWriter`。在 Unix 上，新目标使用 `0600`，之后仍受更严格的进程 umask 约束。
 
 streaming 内容可以使用 `LocalAtomicWriter`：
 
@@ -185,6 +200,8 @@ handle，因此 callback 返回后无法继续修改已提交 inode。
 | `skipped` | 因冲突策略而跳过的已有目标文件数量。 |
 
 `LocalCopyDirOptions::default()` 是有意保守的默认值：`conflict` 和 `type_conflict` 均为 `Fail`，不跟随 symbolic link，也不保留源权限。通过 `LocalCopyConflictPolicy` 显式选择 `Overwrite` 或 `Skip`；文件/目录类型替换则必须单独设置 `LocalCopyTypeConflictPolicy::Replace`。复制失败返回 `LocalCopyDirError`，其中包含路径、失败阶段、部分统计、可选 staging path、可选次级 cleanup error 和原始 I/O source error。
+
+`Fail` 和 `Skip` 文件提交需要原生 no-replace 支持，因此在 Linux、macOS、Windows 之外返回 `Unsupported`。`Overwrite` 使用普通替换原语，不受该限制。
 
 默认不保留源权限。在 Unix 上，新建或替换的文件因此使用 `0600`，新建目录使用 `0700`，之后仍受更严格的进程 umask 约束。原始复制或提交错误保持为主 source error。
 
