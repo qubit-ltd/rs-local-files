@@ -136,6 +136,51 @@ fn test_commit_survives_root_rename_and_creates_parents() {
     fs::remove_dir_all(moved_path).expect("moved root should be removed");
 }
 
+/// Verifies that an atomic writer commits through its opened parent descriptor
+/// after the intermediate name is replaced by an outside symlink.
+#[cfg(unix)]
+#[test]
+fn test_commit_survives_intermediate_directory_replacement() {
+    use std::os::unix::fs::symlink;
+
+    let fixture = temp_dir("rooted-atomic-parent-replacement");
+    let root_path = fixture.join("root");
+    let parent_path = root_path.join("parent");
+    let moved_parent_path = root_path.join("moved-parent");
+    let outside_path = fixture.join("outside");
+    fs::create_dir_all(&parent_path).expect("rooted parent should be created");
+    fs::create_dir(&outside_path).expect("outside directory should be created");
+    let root = LocalRoot::open(&root_path).expect("root should open");
+    let destination = LocalRelativePath::new("parent/data.txt")
+        .expect("destination should validate");
+    let mut writer = root
+        .begin_atomic_write(&destination)
+        .expect("rooted atomic writer should begin");
+    writer
+        .write_all(b"anchored")
+        .expect("rooted atomic contents should be staged");
+    fs::rename(&parent_path, &moved_parent_path)
+        .expect("intermediate parent should be renamed");
+    symlink(&outside_path, &parent_path)
+        .expect("outside symlink should replace the intermediate name");
+
+    writer
+        .commit()
+        .expect("commit should use the opened parent descriptor");
+
+    assert_eq!(
+        b"anchored",
+        fs::read(moved_parent_path.join("data.txt"))
+            .expect("moved destination should be readable")
+            .as_slice(),
+    );
+    assert!(!outside_path.join("data.txt").exists());
+    assert_eq!(0, count_atomic_temp_files(&moved_parent_path));
+    fs::remove_file(parent_path)
+        .expect("replacement symlink should be removed");
+    fs::remove_dir_all(fixture).expect("atomic fixture should be removed");
+}
+
 /// Verifies that commit synchronizes every newly created rooted parent entry.
 #[cfg(target_os = "linux")]
 #[test]

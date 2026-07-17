@@ -42,10 +42,21 @@ use super::internal::{
 
 /// An open local directory capability used as the authority for descendants.
 ///
-/// The diagnostic path never authorizes descendant access. Supported rooted
-/// operations traverse exclusively from the open directory handle and deny
-/// symbolic links at every component. Platforms without a proven secure
-/// backend return [`std::io::ErrorKind::Unsupported`] from [`Self::open`].
+/// The opened directory descriptor is the filesystem authority. The stored
+/// absolute path is diagnostic context only and never authorizes descendant
+/// access. Supported rooted operations traverse exclusively from opened
+/// directory handles and deny symbolic links at every component. Renaming or
+/// replacing the root path or an intermediate name does not redirect handles
+/// that were already opened.
+///
+/// This capability provides descriptor-relative path containment; it does not
+/// establish unique inode names or a complete operating-system security
+/// boundary. Hard links, mounted filesystems, permissions, and processes with
+/// equivalent OS authority remain deployment concerns. Ordinary path-based
+/// [`crate::LocalFiles`] operations are convenience APIs, not substitutes for
+/// this capability when concurrent namespace mutation is adversarial.
+/// Platforms without the Unix descriptor-relative backend return
+/// [`std::io::ErrorKind::Unsupported`] from [`Self::open`].
 #[must_use]
 #[derive(Debug)]
 pub struct LocalRoot {
@@ -105,6 +116,10 @@ impl LocalRoot {
 
     /// Opens an ordinary file reader beneath this root.
     ///
+    /// Traversal is anchored to the opened root and intermediate directory
+    /// descriptors. Renaming or replacing their path names after they are
+    /// opened cannot redirect this operation.
+    ///
     /// # Parameters
     ///
     /// * `path` - Validated relative descendant path.
@@ -138,7 +153,9 @@ impl LocalRoot {
     /// Opens an ordinary file writer beneath this root.
     ///
     /// Missing parent directories are created through anchored directory
-    /// descriptors only when requested by `options`.
+    /// descriptors only when requested by `options`. Once the returned file is
+    /// open, later root or intermediate-name replacement cannot redirect that
+    /// file handle.
     ///
     /// # Parameters
     ///
@@ -172,6 +189,10 @@ impl LocalRoot {
     }
 
     /// Begins a descriptor-relative atomic replacement beneath this root.
+    ///
+    /// Parent traversal, staging, reinspection, replacement, and cleanup use
+    /// opened directory descriptors. Renaming or replacing the diagnostic root
+    /// path or an already-opened intermediate name does not redirect commit.
     ///
     /// # Parameters
     ///

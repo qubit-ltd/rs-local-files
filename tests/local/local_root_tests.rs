@@ -257,6 +257,48 @@ fn test_open_reader_survives_root_rename() {
     fs::remove_dir_all(moved_path).expect("moved root should be removed");
 }
 
+/// Verifies that an already-open writer remains bound to its original parent
+/// descriptor after an intermediate name is replaced by an outside symlink.
+#[cfg(unix)]
+#[test]
+fn test_open_writer_survives_intermediate_directory_replacement() {
+    use std::os::unix::fs::symlink;
+
+    let fixture = temp_dir("rooted-writer-parent-replacement");
+    let root_path = fixture.join("root");
+    let parent_path = root_path.join("parent");
+    let moved_parent_path = root_path.join("moved-parent");
+    let outside_path = fixture.join("outside");
+    fs::create_dir_all(&parent_path).expect("rooted parent should be created");
+    fs::create_dir(&outside_path).expect("outside directory should be created");
+    let root = LocalRoot::open(&root_path).expect("root should open");
+    let destination = LocalRelativePath::new("parent/data.txt")
+        .expect("destination should validate");
+    let mut writer = root
+        .open_writer(&destination, FileWriteOptions::default())
+        .expect("rooted writer should open");
+    fs::rename(&parent_path, &moved_parent_path)
+        .expect("intermediate parent should be renamed");
+    symlink(&outside_path, &parent_path)
+        .expect("outside symlink should replace the intermediate name");
+
+    writer
+        .write_all(b"anchored")
+        .expect("anchored writer should write");
+    writer.close().expect("anchored writer should close");
+
+    assert_eq!(
+        b"anchored",
+        fs::read(moved_parent_path.join("data.txt"))
+            .expect("moved destination should be readable")
+            .as_slice(),
+    );
+    assert!(!outside_path.join("data.txt").exists());
+    fs::remove_file(parent_path)
+        .expect("replacement symlink should be removed");
+    fs::remove_dir_all(fixture).expect("writer fixture should be removed");
+}
+
 /// Verifies that root, intermediate, and final symbolic links are denied.
 #[cfg(unix)]
 #[test]
