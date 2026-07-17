@@ -2,6 +2,8 @@
 //    Copyright (c) 2025 - 2026 Haixing Hu.
 //
 //    SPDX-License-Identifier: Apache-2.0
+//
+//    Licensed under the Apache License, Version 2.0.
 // =============================================================================
 //! Local file reader wrapper.
 
@@ -28,6 +30,15 @@ use super::internal::LocalFileReaderInner;
 /// let _constructor: fn(std::fs::File) -> LocalFileReader =
 ///     LocalFileReader::Unbuffered;
 /// ```
+///
+/// ```compile_fail
+/// #![deny(unused_must_use)]
+/// use qubit_local_files::{FileReadOptions, LocalFiles};
+///
+/// LocalFiles::open_reader("input.txt", FileReadOptions::default())
+///     .expect("reader should open");
+/// ```
+#[must_use = "discarding the reader immediately closes the opened file"]
 #[derive(Debug)]
 pub struct LocalFileReader {
     /// Private concrete reader representation.
@@ -43,7 +54,7 @@ impl LocalFileReader {
     ///
     /// # Returns
     /// A local file reader matching `buffering`.
-    #[inline]
+    #[inline(always)]
     pub(crate) fn from_file(file: File, buffering: FileBuffering) -> Self {
         Self {
             inner: LocalFileReaderInner::from_file(file, buffering),
@@ -71,7 +82,7 @@ impl Read for LocalFileReader {
     ///
     /// # Errors
     /// Returns the I/O error reported by the wrapped reader.
-    #[inline]
+    #[inline(always)]
     fn read(&mut self, buf: &mut [u8]) -> Result<usize> {
         self.inner.read(buf)
     }
@@ -88,7 +99,7 @@ impl Seek for LocalFileReader {
     ///
     /// # Errors
     /// Returns the I/O error reported by the wrapped reader.
-    #[inline]
+    #[inline(always)]
     fn seek(&mut self, pos: SeekFrom) -> Result<u64> {
         self.inner.seek(pos)
     }

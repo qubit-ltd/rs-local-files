@@ -6,6 +6,8 @@
 //    Licensed under the Apache License, Version 2.0.
 // =============================================================================
 //! Private platform-specific file moves and parent synchronization.
+// qubit-style: allow source-test-pair
+// Private behavior is covered through public integration tests.
 //!
 //! Windows paths are passed to native APIs as their existing UTF-16 spelling
 //! plus a terminating NUL. This module rejects interior NULs, but does not add

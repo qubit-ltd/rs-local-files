@@ -2,8 +2,12 @@
 //    Copyright (c) 2025 - 2026 Haixing Hu.
 //
 //    SPDX-License-Identifier: Apache-2.0
+//
+//    Licensed under the Apache License, Version 2.0.
 // =============================================================================
 //! Source metadata, cycle identity, and containment checks for recursive copy.
+// qubit-style: allow source-test-pair
+// Private behavior is covered through public integration tests.
 
 use std::fs;
 use std::io::{

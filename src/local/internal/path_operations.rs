@@ -40,7 +40,7 @@ use super::path_io_error::PathIoError;
 /// # Errors
 /// Returns an I/O error when a relative path is supplied and the current
 /// working directory cannot be read.
-#[inline]
+#[inline(always)]
 pub(crate) fn absolute_path(path: &Path) -> Result<PathBuf> {
     std::path::absolute(path)
 }
@@ -53,6 +53,7 @@ pub(crate) fn absolute_path(path: &Path) -> Result<PathBuf> {
 /// # Errors
 /// Returns an I/O error when the directory or one of its ancestors cannot be
 /// created.
+#[inline(always)]
 pub(crate) fn ensure_dir_path(path: &Path) -> Result<()> {
     fs::create_dir_all(path)
 }

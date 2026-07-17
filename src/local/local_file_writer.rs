@@ -2,6 +2,8 @@
 //    Copyright (c) 2025 - 2026 Haixing Hu.
 //
 //    SPDX-License-Identifier: Apache-2.0
+//
+//    Licensed under the Apache License, Version 2.0.
 // =============================================================================
 //! Local file writer wrapper.
 
@@ -28,6 +30,15 @@ use super::internal::LocalFileWriterInner;
 /// let _constructor: fn(std::io::BufWriter<std::fs::File>) -> LocalFileWriter =
 ///     LocalFileWriter::Buffered;
 /// ```
+///
+/// ```compile_fail
+/// #![deny(unused_must_use)]
+/// use qubit_local_files::{FileWriteOptions, LocalFiles};
+///
+/// LocalFiles::open_writer("output.txt", FileWriteOptions::default())
+///     .expect("writer should open");
+/// ```
+#[must_use = "discarding the writer may hide buffered write or flush failures"]
 #[derive(Debug)]
 pub struct LocalFileWriter {
     /// Private concrete writer representation.
@@ -43,7 +54,7 @@ impl LocalFileWriter {
     ///
     /// # Returns
     /// A local file writer matching `buffering`.
-    #[inline]
+    #[inline(always)]
     pub(crate) fn from_file(file: File, buffering: FileBuffering) -> Self {
         Self {
             inner: LocalFileWriterInner::from_file(file, buffering),
@@ -82,7 +93,7 @@ impl LocalFileWriter {
     /// # Errors
     /// Returns the I/O error reported while flushing or synchronizing the
     /// wrapped file.
-    #[inline]
+    #[inline(always)]
     pub fn sync_all(&mut self) -> Result<()> {
         self.inner.sync_all()
     }
@@ -96,7 +107,7 @@ impl LocalFileWriter {
     /// # Errors
     /// Returns the I/O error reported while flushing or synchronizing the
     /// wrapped file.
-    #[inline]
+    #[inline(always)]
     pub fn sync_data(&mut self) -> Result<()> {
         self.inner.sync_data()
     }
@@ -113,7 +124,7 @@ impl Write for LocalFileWriter {
     ///
     /// # Errors
     /// Returns the I/O error reported by the wrapped writer.
-    #[inline]
+    #[inline(always)]
     fn write(&mut self, buf: &[u8]) -> Result<usize> {
         self.inner.write(buf)
     }
@@ -122,7 +133,7 @@ impl Write for LocalFileWriter {
     ///
     /// # Errors
     /// Returns the I/O error reported by the wrapped writer.
-    #[inline]
+    #[inline(always)]
     fn flush(&mut self) -> Result<()> {
         self.inner.flush()
     }
@@ -145,7 +156,7 @@ impl Seek for LocalFileWriter {
     /// # Errors
     /// Returns the I/O error reported while flushing buffered bytes or seeking
     /// the wrapped file.
-    #[inline]
+    #[inline(always)]
     fn seek(&mut self, pos: SeekFrom) -> Result<u64> {
         self.inner.seek(pos)
     }
