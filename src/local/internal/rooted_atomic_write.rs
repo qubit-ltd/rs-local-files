@@ -78,12 +78,10 @@ pub(in crate::local) fn existing_rooted_file_permissions(
             "rooted atomic destination is not a regular file",
         ));
     }
-    // `mode_t` is narrower on some Unix targets; permission construction uses
-    // the portable `u32` representation exposed by `PermissionsExt`.
-    #[cfg(target_os = "macos")]
+    // `mode_t` varies across Unix targets. Permission construction uses the
+    // portable `u32` representation exposed by `PermissionsExt`.
+    #[allow(clippy::useless_conversion)]
     let mode = u32::from(status.st_mode);
-    #[cfg(not(target_os = "macos"))]
-    let mode = status.st_mode;
     Ok(Some(Permissions::from_mode(mode)))
 }
 

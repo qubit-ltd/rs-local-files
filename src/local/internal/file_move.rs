@@ -14,7 +14,7 @@
 //! a verbatim-path prefix, convert relative paths to absolute paths, or
 //! otherwise change platform path-length and path-resolution semantics.
 
-#[cfg(unix)]
+#[cfg(any(target_os = "linux", target_os = "macos"))]
 use std::ffi::CString;
 #[cfg(windows)]
 use std::ffi::c_void;
@@ -28,7 +28,7 @@ use std::io::{
 };
 use std::path::Path;
 
-#[cfg(unix)]
+#[cfg(any(target_os = "linux", target_os = "macos"))]
 use std::os::unix::ffi::OsStrExt;
 #[cfg(windows)]
 use std::os::windows::ffi::OsStrExt;
@@ -498,7 +498,7 @@ pub(crate) fn move_file_without_replacing(
 ///
 /// # Errors
 /// Returns [`ErrorKind::InvalidInput`] when the path contains an interior NUL.
-#[cfg(unix)]
+#[cfg(any(target_os = "linux", target_os = "macos"))]
 fn c_path(path: &Path) -> Result<CString> {
     CString::new(path.as_os_str().as_bytes()).map_err(|_| {
         Error::new(
