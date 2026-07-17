@@ -43,6 +43,11 @@ use super::internal::{
 /// Staging, replacement, synchronization, and cleanup use the destination
 /// parent descriptor and entry names. No diagnostic path is reused as
 /// authority, and no underlying file or directory handle is exposed.
+/// Existing ordinary-file permissions are captured when the writer begins and
+/// applied at commit without re-reading their values. The final entry is still
+/// re-inspected for the no-symbolic-link and regular-file policy. Externally
+/// coordinate concurrent creation or permission changes when they must be
+/// retained.
 ///
 /// ```compile_fail
 /// #![deny(unused_must_use)]
@@ -62,7 +67,7 @@ pub struct LocalRootAtomicWriter {
     /// Final destination entry name within the staging parent.
     final_name: CString,
     #[cfg(unix)]
-    /// Existing ordinary-file permissions preserved at commit.
+    /// Existing ordinary-file permissions captured when the writer began.
     existing_permissions: Option<fs::Permissions>,
     #[cfg(unix)]
     /// Descriptor-relative staging lifecycle.
@@ -125,6 +130,9 @@ impl LocalRootAtomicWriter {
     }
 
     /// Synchronizes and atomically replaces the rooted destination.
+    ///
+    /// Any existing permissions applied here are the snapshot captured when
+    /// this writer was created; commit does not re-read their values.
     ///
     /// # Errors
     ///

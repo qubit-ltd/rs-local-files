@@ -54,6 +54,11 @@ const ATOMIC_WRITE_TEMP_PREFIX: &str = ".atomic-write-";
 /// directory when the writer is created, so later current-directory changes
 /// do not redirect commit or cleanup operations.
 ///
+/// Existing regular-file permissions are captured when this writer is
+/// created. Commit applies that snapshot without re-reading the destination;
+/// externally coordinate concurrent destination creation or permission
+/// changes when they must be retained.
+///
 /// The guard must be committed or explicitly aborted:
 ///
 /// ```compile_fail
@@ -73,7 +78,7 @@ pub struct LocalAtomicWriter {
     operation_path: PathBuf,
     /// Newly created parent directories that require synchronization.
     parent_dirs_to_sync: Vec<PathBuf>,
-    /// Existing regular-file permissions preserved at commit time.
+    /// Existing regular-file permissions captured when the writer began.
     existing_permissions: Option<fs::Permissions>,
     /// Owned same-directory staging file.
     staged_file: StagedFile,
@@ -133,6 +138,10 @@ impl LocalAtomicWriter {
     }
 
     /// Synchronizes and atomically replaces the destination.
+    ///
+    /// Any existing permissions applied here are the snapshot captured when
+    /// this writer was created; the destination is not re-inspected for newer
+    /// permission changes.
     ///
     /// # Errors
     /// Returns a structured error when permission preservation, staging-file

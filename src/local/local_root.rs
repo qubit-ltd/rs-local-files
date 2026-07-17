@@ -182,6 +182,12 @@ impl LocalRoot {
     /// An armed streaming writer whose commit remains within the destination
     /// parent descriptor.
     ///
+    /// Existing ordinary-file permissions are captured during this call.
+    /// Commit applies that snapshot without re-reading permission values, so
+    /// concurrent creation or permission changes require external coordination
+    /// when they must be retained. The final entry is still re-inspected for
+    /// the no-symbolic-link and regular-file policy before replacement.
+    ///
     /// # Errors
     ///
     /// Returns a structured atomic-write error for parent preparation,

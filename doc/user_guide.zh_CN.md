@@ -279,8 +279,9 @@ constructor 和 builder。API 仍保持同步边界。
 
 - 写入前会创建父目录。
 - 临时文件创建在目标目录下，因此在常见本地文件系统上可以 atomic replacement。
-- 如果目标已有普通文件，会在替换前把已有权限复制到临时文件；symlink
-  target 不会提供权限。
+- 原子 writer 开始时会对目标已有普通文件的权限取快照，并在替换前把该快照
+  复制到临时文件；commit 不会重新读取权限。如果并发创建目标或修改权限且
+  这些变更必须保留，调用方需要在外部进行协调。symlink target 不会提供权限。
 - 在 Unix 上，新目标使用 `0600`，之后仍受更严格的进程 umask 约束。
 - 如果写入、flush 或 sync 临时文件失败，目标保持不变。
 - 如果 `atomic_write_with` callback panic，unwind 会先关闭并 best-effort 删除未提交临时文件，再继续传播 panic；目标保持不变。清理失败不能替换原 panic，因此 staging path 可能残留。

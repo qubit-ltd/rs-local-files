@@ -145,7 +145,7 @@ path-based `LocalFiles` 和临时资源 helper 仍面向可信本地应用路径
 
 ### Atomic Write
 
-`LocalFiles::atomic_write` 会在同一父目录下写入临时文件，flush 并 sync 这个临时文件，替换目标，并在支持的平台上从深到浅 sync 目标父目录以及本次新建目录项所在的各级父目录。它适合配置文件、cache manifest、checkpoint、生成索引等 whole-file replacement 场景。已有普通文件的权限会被保留；symlink 目标不会从其 link target 继承权限。在 Unix 上，新目标使用 `0600`，之后仍受更严格的进程 umask 约束。
+`LocalFiles::atomic_write` 会在同一父目录下写入临时文件，flush 并 sync 这个临时文件，替换目标，并在支持的平台上从深到浅 sync 目标父目录以及本次新建目录项所在的各级父目录。它适合配置文件、cache manifest、checkpoint、生成索引等 whole-file replacement 场景。原子 writer 开始时会对已有普通文件的权限取快照，commit 时应用该快照而不会重新读取目标权限；如果并发创建目标或修改权限且这些变更必须保留，调用方需要在外部进行协调。symlink 目标不会从其 link target 继承权限。在 Unix 上，新目标使用 `0600`，之后仍受更严格的进程 umask 约束。
 
 streaming 内容可以使用 `LocalAtomicWriter`：
 
@@ -229,68 +229,36 @@ stream 和字节 I/O 相关能力请使用
 用于生成随机临时名，`libc` 用于 Unix descriptor-relative rooted 操作和原生
 rename 支持，`log` 用于 drop 阶段的清理失败告警。
 
-## 测试与代码覆盖率
-
-本项目为临时文件和目录清理、覆盖行为、atomic write、递归复制行为、文件名 helper 和公开文件系统工具保持测试覆盖。
-
-### 运行测试
+## 测试
 
 ```bash
-# 运行所有测试
-cargo test
+# 使用默认的空 feature 集测试核心 API
+cargo test --no-default-features
 
-# 运行覆盖率报告
-./coverage.sh
+# 测试核心 API 和正则校验
+cargo test --all-features
 
-# 生成文本格式报告
-./coverage.sh text
-
-# 应用仓库规定的格式化和 lint 修复
-./align-ci.sh
-
-# 运行 CI 检查（格式化、clippy、测试、覆盖率、audit）
+# 运行项目 CI 检查
 ./ci-check.sh
+
+# 检查代码覆盖率
+./coverage.sh
 ```
 
 ## 许可证
 
-Copyright (c) 2026. Haixing Hu.
+Copyright (c) 2025 - 2026. Haixing Hu. All rights reserved.
 
-根据 Apache 许可证 2.0 版（"许可证"）授权；
-除非遵守许可证，否则您不得使用此文件。
-您可以在以下位置获取许可证副本：
-
-    http://www.apache.org/licenses/LICENSE-2.0
-
-除非适用法律要求或书面同意，否则根据许可证分发的软件
-按"原样"分发，不附带任何明示或暗示的担保或条件。
-有关许可证下的特定语言管理权限和限制，请参阅许可证。
-
-完整的许可证文本请参阅 [LICENSE](LICENSE)。
+本项目基于 Apache License 2.0 授权。完整许可证文本请参阅
+[LICENSE](LICENSE)。
 
 ## 贡献
 
-欢迎贡献。请随时提交 Pull Request。
-
-### 开发指南
-
-- 遵循 Rust API 指南。
-- 将本地文件系统相关能力保留在 `qubit-local-files` 中。
-- stream 和字节 I/O 工具请使用 [qubit-io](https://github.com/qubit-ltd/rs-io)。
-- 可能覆盖数据或离开请求源目录的操作，应保持保守默认值。
-- 为平台相关文件系统行为保持全面测试覆盖。
-- 公共 API 在有助于说明行为时应提供文档和示例。
-- 提交 PR 前先运行 `./align-ci.sh`，再确保 `./ci-check.sh` 通过。
+欢迎贡献。请遵循 Rust API 指南，及时更新公共 API 文档与测试，并在提交
+Pull Request 前运行 `./align-ci.sh`格式化代码，运行`./ci-check.sh`对齐CI要求。
 
 ## 作者
 
-**Haixing Hu**
-
-## 相关项目
-
-- [qubit-io](https://github.com/qubit-ltd/rs-io)：面向 Rust 的 stream 和字节 I/O 工具库。
-- Qubit 旗下的更多 Rust 库发布在 GitHub 组织 [qubit-ltd](https://github.com/qubit-ltd)。
-
----
+**Haixing Hu** - *Qubit Co. Ltd.*
 
 仓库地址：[https://github.com/qubit-ltd/rs-local-files](https://github.com/qubit-ltd/rs-local-files)

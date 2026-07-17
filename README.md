@@ -5,7 +5,7 @@
 [![Crates.io](https://img.shields.io/crates/v/qubit-local-files.svg?color=blue)](https://crates.io/crates/qubit-local-files)
 [![Rust](https://img.shields.io/badge/rust-1.94+-blue.svg?logo=rust)](https://www.rust-lang.org)
 [![License](https://img.shields.io/badge/license-Apache%202.0-blue.svg)](LICENSE)
-[![Chinese Document](https://img.shields.io/badge/Document-Chinese-blue.svg)](README.zh_CN.md)
+[![中文文档](https://img.shields.io/badge/文档-中文版-blue.svg)](README.zh_CN.md)
 
 Local filesystem utilities for Rust.
 
@@ -198,9 +198,12 @@ directory, flushes and syncs that file, replaces the destination, and syncs the
 destination parent plus the parents of directories created by the operation,
 from deepest to shallowest, when supported. This is useful for whole-file
 replacement of configuration files, cache manifests, checkpoints, and
-generated indexes. Existing regular-file permissions are preserved. On Unix,
-a new destination uses mode `0600` before applying a more restrictive process
-umask. A symbolic-link destination does not donate permissions from its target.
+generated indexes. Existing regular-file permissions are snapshotted when the
+atomic writer begins and that snapshot is applied at commit; commit does not
+re-read permissions. Coordinate concurrent destination creation or permission
+changes externally when they must be retained. On Unix, a new destination uses
+mode `0600` before applying a more restrictive process umask. A symbolic-link
+destination does not donate permissions from its target.
 
 For streaming content, use `LocalAtomicWriter`:
 
@@ -310,72 +313,37 @@ at runtime. `getrandom` is used for random temporary names. `libc` is used for
 Unix descriptor-relative rooted operations and native rename support. `log` is
 used for drop-time cleanup warnings.
 
-## Testing & Code Coverage
-
-This project maintains test coverage for temporary file and directory cleanup,
-overwrite behavior, atomic writes, recursive copy behavior, filename helpers,
-and public filesystem utilities.
-
-### Running Tests
+## Testing
 
 ```bash
-# Run all tests
-cargo test
+# Core API with the default empty feature set
+cargo test --no-default-features
 
-# Run with coverage report
-./coverage.sh
+# Core API plus regex validation
+cargo test --all-features
 
-# Generate text format report
-./coverage.sh text
-
-# Apply the repository-prescribed formatting and lint fixes
-./align-ci.sh
-
-# Run CI checks (format, clippy, test, coverage, audit)
+# Project CI checks
 ./ci-check.sh
+
+# Check code coverage
+./coverage.sh
 ```
 
 ## License
 
-Copyright (c) 2026. Haixing Hu.
+Copyright (c) 2025 - 2026. Haixing Hu. All rights reserved.
 
-Licensed under the Apache License, Version 2.0 (the "License");
-you may not use this file except in compliance with the License.
-You may obtain a copy of the License at
-
-    http://www.apache.org/licenses/LICENSE-2.0
-
-Unless required by applicable law or agreed to in writing, software
-distributed under the License is distributed on an "AS IS" BASIS,
-WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-See the License for the specific language governing permissions and
-limitations under the License.
-
-See [LICENSE](LICENSE) for the full license text.
+Licensed under the Apache License, Version 2.0. See [LICENSE](LICENSE) for the
+full license text.
 
 ## Contributing
 
-Contributions are welcome. Please feel free to submit a Pull Request.
-
-### Development Guidelines
-
-- Follow the Rust API guidelines.
-- Keep local filesystem concerns in `qubit-local-files`.
-- Use [qubit-io](https://github.com/qubit-ltd/rs-io) for stream and byte-I/O utilities.
-- Keep conservative defaults for operations that may overwrite data or leave the requested source tree.
-- Maintain comprehensive test coverage for platform-sensitive filesystem behavior.
-- Document public APIs with examples when they clarify behavior.
-- Run `./align-ci.sh`, then ensure `./ci-check.sh` passes before submitting a PR.
+Contributions are welcome. Please follow the Rust API guidelines, keep public
+API documentation and tests current, and run `./align-ci.sh` to format code and
+`./ci-check.sh` to satisfy CI requirements before submitting a pull request.
 
 ## Author
 
-**Haixing Hu**
-
-## Related Projects
-
-- [qubit-io](https://github.com/qubit-ltd/rs-io): stream and byte-I/O utilities for Rust.
-- More Rust libraries from Qubit are published under the [qubit-ltd](https://github.com/qubit-ltd) organization on GitHub.
-
----
+**Haixing Hu** - *Qubit Co. Ltd.*
 
 Repository: [https://github.com/qubit-ltd/rs-local-files](https://github.com/qubit-ltd/rs-local-files)

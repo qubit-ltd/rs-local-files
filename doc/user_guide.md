@@ -339,8 +339,11 @@ Important semantics:
 - Parent directories are created before writing.
 - The temporary file is created in the destination directory, so replacement can
   be atomic on common local filesystems.
-- Existing regular-file permissions are copied to the temporary file before
-  replacement. Symbolic-link targets do not donate permissions.
+- Existing regular-file permissions are captured when the atomic writer begins
+  and that snapshot is copied to the temporary file before replacement. Commit
+  does not re-read permissions; coordinate concurrent destination creation or
+  permission changes externally when they must be retained. Symbolic-link
+  targets do not donate permissions.
 - On Unix, a new destination uses mode `0600`, subject to a more restrictive
   process umask.
 - If writing, flushing, or syncing the temporary file fails, the destination is

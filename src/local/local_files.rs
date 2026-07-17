@@ -334,6 +334,12 @@ impl LocalFiles {
     /// only by [`LocalAtomicWriter::commit`]; aborting or dropping the writer
     /// leaves the destination unchanged.
     ///
+    /// Permissions of an existing regular-file destination are captured while
+    /// this method constructs the writer. Commit applies that snapshot and
+    /// does not re-read permissions. Callers that concurrently create the
+    /// destination or change its permissions must provide external
+    /// coordination when those changes must be retained.
+    ///
     /// # Parameters
     /// - `path`: Destination path to replace on commit.
     ///
@@ -362,9 +368,11 @@ impl LocalFiles {
     /// is replaced as a link rather than followed on platforms whose rename
     /// semantics provide that behavior.
     ///
-    /// Existing regular-file permissions are preserved. On Unix, a new
-    /// destination uses mode `0o600`, subject to a more restrictive process
-    /// umask.
+    /// Existing regular-file permissions are preserved from a snapshot taken
+    /// when this operation begins; commit does not re-read them. Concurrent
+    /// destination creation or permission changes require external
+    /// coordination when they must be retained. On Unix, a new destination
+    /// uses mode `0o600`, subject to a more restrictive process umask.
     ///
     /// Before replacement, every error leaves the existing destination intact
     /// and attempts to remove the temporary file. Staging cleanup is
