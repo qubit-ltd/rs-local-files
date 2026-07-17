@@ -17,5 +17,6 @@ jobs:
   rust-ci:
     uses: qubit-ltd/rs-ci/.github/workflows/rust-ci.yml@main
     with:
+      run_windows_tests: true
       run_macos_tests: true
     secrets: inherit
