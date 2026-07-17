@@ -319,7 +319,7 @@ used for drop-time cleanup warnings.
 # Core API with the default empty feature set
 cargo test --no-default-features
 
-# Complete API with all declared features (currently none)
+# Core API plus regex validation
 cargo test --all-features
 
 # Project CI checks

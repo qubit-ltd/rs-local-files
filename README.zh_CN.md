@@ -235,7 +235,7 @@ rename 支持，`log` 用于 drop 阶段的清理失败告警。
 # 使用默认的空 feature 集测试核心 API
 cargo test --no-default-features
 
-# 使用所有已声明 feature 测试完整 API（当前未声明 feature）
+# 测试核心 API 和正则校验
 cargo test --all-features
 
 # 运行项目 CI 检查
