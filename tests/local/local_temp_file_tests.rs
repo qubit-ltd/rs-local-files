@@ -14,6 +14,7 @@ use super::test_support::{
     CURRENT_DIR_LOCK,
     CurrentDirGuard,
     ErrorKind,
+    LocalFilenames,
     LocalPersistOptions,
     LocalTempFile,
     Seek,
@@ -87,19 +88,36 @@ fn test_temp_file_uses_private_permissions() {
 }
 
 #[test]
-fn test_temp_file_with_name_uses_system_temp_directory() {
-    let file =
-        LocalTempFile::with_name(Some("qubit-local-files-test-"), Some(".tmp"))
-            .expect("temp file should be created");
-    let name = file
+fn test_temp_file_convenience_constructors_use_requested_affixes() {
+    let prefix_file = LocalTempFile::with_prefix("prefix-")
+        .expect("prefix temp file should be created");
+    let suffix_file = LocalTempFile::with_suffix(".suffix")
+        .expect("suffix temp file should be created");
+    let affix_file = LocalTempFile::with_affixes("affix-", ".tmp")
+        .expect("affix temp file should be created");
+
+    let prefix_name = prefix_file
         .path()
         .file_name()
-        .expect("temp path should have a file name")
+        .expect("prefix temp path should have a file name")
+        .to_string_lossy();
+    let suffix_name = suffix_file
+        .path()
+        .file_name()
+        .expect("suffix temp path should have a file name")
+        .to_string_lossy();
+    let affix_name = affix_file
+        .path()
+        .file_name()
+        .expect("affix temp path should have a file name")
         .to_string_lossy();
 
-    assert!(file.path().starts_with(std::env::temp_dir()));
-    assert!(name.starts_with("qubit-local-files-test-"));
-    assert!(name.ends_with(".tmp"));
+    assert!(prefix_file.path().starts_with(std::env::temp_dir()));
+    assert!(prefix_name.starts_with("prefix-"));
+    assert!(suffix_name.starts_with(LocalFilenames::DEFAULT_RANDOM_PREFIX));
+    assert!(suffix_name.ends_with(".suffix"));
+    assert!(affix_name.starts_with("affix-"));
+    assert!(affix_name.ends_with(".tmp"));
 }
 
 #[test]
@@ -121,11 +139,8 @@ fn test_temp_file_exists_and_cleanup() {
 
 #[test]
 fn test_debug_formatting_contains_type_name() {
-    let file = LocalTempFile::with_name(
-        Some("qubit-local-files-debug-"),
-        Some(".tmp"),
-    )
-    .expect("temp file should be created");
+    let file = LocalTempFile::with_affixes("qubit-local-files-debug-", ".tmp")
+        .expect("temp file should be created");
 
     assert!(format!("{file:?}").contains("LocalTempFile"));
 }

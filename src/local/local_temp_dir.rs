@@ -83,23 +83,27 @@ impl LocalTempDir {
     /// created or a unique temporary directory cannot be created.
     #[inline(always)]
     pub fn new() -> Result<Self> {
-        Self::with_prefix(None)
+        Self::in_dir(
+            std::env::temp_dir(),
+            None,
+            LocalFiles::DEFAULT_TEMP_FILE_RETRIES,
+        )
     }
 
     /// Creates a temporary directory in the process temporary directory.
     ///
     /// # Parameters
-    /// - `prefix`: Optional directory-name prefix.
+    /// - `prefix`: Directory-name prefix.
     ///
     /// # Errors
     /// Returns an I/O error when the process temporary directory cannot be
     /// created, `prefix` is not a safe file-name fragment, or a unique
     /// temporary directory cannot be created.
     #[inline(always)]
-    pub fn with_prefix(prefix: Option<&str>) -> Result<Self> {
+    pub fn with_prefix(prefix: &str) -> Result<Self> {
         Self::in_dir(
             std::env::temp_dir(),
-            prefix,
+            Some(prefix),
             LocalFiles::DEFAULT_TEMP_FILE_RETRIES,
         )
     }

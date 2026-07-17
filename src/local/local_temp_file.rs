@@ -83,28 +83,73 @@ impl LocalTempFile {
     /// created or a unique temporary file cannot be created.
     #[inline(always)]
     pub fn new() -> Result<Self> {
-        Self::with_name(None, None)
+        Self::in_dir(
+            std::env::temp_dir(),
+            None,
+            None,
+            LocalFiles::DEFAULT_TEMP_FILE_RETRIES,
+        )
     }
 
-    /// Creates a temporary file in the process temporary directory.
+    /// Creates a temporary file with a custom prefix in the process temporary
+    /// directory.
     ///
     /// # Parameters
-    /// - `prefix`: Optional file-name prefix.
-    /// - `suffix`: Optional file-name suffix.
+    /// - `prefix`: File-name prefix.
+    ///
+    /// # Errors
+    /// Returns an I/O error when the process temporary directory cannot be
+    /// created, `prefix` is not a safe file-name fragment, or a unique
+    /// temporary file cannot be created.
+    #[inline(always)]
+    pub fn with_prefix(prefix: &str) -> Result<Self> {
+        Self::in_dir(
+            std::env::temp_dir(),
+            Some(prefix),
+            None,
+            LocalFiles::DEFAULT_TEMP_FILE_RETRIES,
+        )
+    }
+
+    /// Creates a temporary file with a custom suffix in the process temporary
+    /// directory.
+    ///
+    /// The default random prefix is retained.
+    ///
+    /// # Parameters
+    /// - `suffix`: File-name suffix.
+    ///
+    /// # Errors
+    /// Returns an I/O error when the process temporary directory cannot be
+    /// created, `suffix` is not a safe file-name fragment, or a unique
+    /// temporary file cannot be created.
+    #[inline(always)]
+    pub fn with_suffix(suffix: &str) -> Result<Self> {
+        Self::in_dir(
+            std::env::temp_dir(),
+            None,
+            Some(suffix),
+            LocalFiles::DEFAULT_TEMP_FILE_RETRIES,
+        )
+    }
+
+    /// Creates a temporary file with custom prefix and suffix in the process
+    /// temporary directory.
+    ///
+    /// # Parameters
+    /// - `prefix`: File-name prefix.
+    /// - `suffix`: File-name suffix.
     ///
     /// # Errors
     /// Returns an I/O error when the process temporary directory cannot be
     /// created, `prefix` or `suffix` is not a safe file-name fragment, or a
     /// unique temporary file cannot be created.
     #[inline(always)]
-    pub fn with_name(
-        prefix: Option<&str>,
-        suffix: Option<&str>,
-    ) -> Result<Self> {
+    pub fn with_affixes(prefix: &str, suffix: &str) -> Result<Self> {
         Self::in_dir(
             std::env::temp_dir(),
-            prefix,
-            suffix,
+            Some(prefix),
+            Some(suffix),
             LocalFiles::DEFAULT_TEMP_FILE_RETRIES,
         )
     }

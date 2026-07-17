@@ -12,6 +12,7 @@ pub(super) use qubit_local_files::{
     FileReadOptions,
     FileWriteMode,
     FileWriteOptions,
+    LocalFilenames,
     LocalPersistOptions,
     LocalTempDir,
     LocalTempFile,

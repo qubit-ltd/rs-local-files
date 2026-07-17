@@ -46,7 +46,7 @@ use super::internal::{
 /// ```
 /// use qubit_local_files::{LocalFiles, LocalTempDir};
 ///
-/// let dir = LocalTempDir::with_prefix(Some("qubit-local-files-doc-"))?;
+/// let dir = LocalTempDir::with_prefix("qubit-local-files-doc-")?;
 /// let path = dir.path().join("nested").join("data.txt");
 ///
 /// LocalFiles::atomic_write(&path, b"payload")?;
@@ -390,7 +390,7 @@ impl LocalFiles {
     /// ```
     /// use qubit_local_files::{LocalFiles, LocalTempDir};
     ///
-    /// let dir = LocalTempDir::with_prefix(Some("qubit-local-files-atomic-"))?;
+    /// let dir = LocalTempDir::with_prefix("qubit-local-files-atomic-")?;
     /// let path = dir.path().join("state").join("manifest.json");
     /// LocalFiles::atomic_write(&path, br#"{"version":1,"complete":true}"#)?;
     /// assert_eq!(

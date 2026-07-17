@@ -83,7 +83,7 @@ fn test_temp_dir_exposes_absolute_location_after_cwd_change() {
 
 #[test]
 fn test_debug_formatting_contains_type_name() {
-    let dir = LocalTempDir::with_prefix(Some("qubit-local-files-debug-"))
+    let dir = LocalTempDir::with_prefix("qubit-local-files-debug-")
         .expect("temp directory should be created");
 
     assert!(format!("{dir:?}").contains("LocalTempDir"));
@@ -91,7 +91,7 @@ fn test_debug_formatting_contains_type_name() {
 
 #[test]
 fn test_temp_dir_with_prefix_creates_existing_directory() {
-    let dir = LocalTempDir::with_prefix(Some("qubit-local-files-dir-"))
+    let dir = LocalTempDir::with_prefix("qubit-local-files-dir-")
         .expect("temp directory should be created");
     let name = dir
         .path()
