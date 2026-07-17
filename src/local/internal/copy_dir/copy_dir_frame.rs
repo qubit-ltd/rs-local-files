@@ -1,0 +1,105 @@
+// =============================================================================
+//    Copyright (c) 2025 - 2026 Haixing Hu.
+//
+//    SPDX-License-Identifier: Apache-2.0
+//
+//    Licensed under the Apache License, Version 2.0.
+// =============================================================================
+
+//! One active directory frame for iterative recursive-copy traversal.
+// qubit-style: allow source-test-pair
+// Private behavior is covered through public integration tests.
+
+use std::fs;
+use std::path::{
+    Path,
+    PathBuf,
+};
+
+/// Holds the lazy iterator and completion state for one source directory.
+pub(super) struct CopyDirFrame {
+    /// Source directory path used for traversal and diagnostics.
+    src: PathBuf,
+    /// Destination directory path paired with `src`.
+    dst: PathBuf,
+    /// Canonical source identity retained for active-cycle detection.
+    canonical_source: PathBuf,
+    /// Source permissions captured for post-order preservation.
+    source_permissions: fs::Permissions,
+    /// Lazy iterator over direct source-directory entries.
+    entries: fs::ReadDir,
+}
+
+impl CopyDirFrame {
+    /// Creates one active directory traversal frame.
+    ///
+    /// # Parameters
+    ///
+    /// * `src` - Source directory path.
+    /// * `dst` - Destination directory path.
+    /// * `canonical_source` - Canonical source identity for cycle detection.
+    /// * `source_permissions` - Permissions to apply after copying children.
+    /// * `entries` - Lazy source-directory iterator.
+    ///
+    /// # Returns
+    ///
+    /// A frame ready to yield source entries.
+    #[inline]
+    pub(super) fn new(
+        src: PathBuf,
+        dst: PathBuf,
+        canonical_source: PathBuf,
+        source_permissions: fs::Permissions,
+        entries: fs::ReadDir,
+    ) -> Self {
+        Self {
+            src,
+            dst,
+            canonical_source,
+            source_permissions,
+            entries,
+        }
+    }
+
+    /// Returns the source directory path.
+    #[inline(always)]
+    pub(super) fn src(&self) -> &Path {
+        &self.src
+    }
+
+    /// Returns the destination directory path.
+    #[inline(always)]
+    pub(super) fn dst(&self) -> &Path {
+        &self.dst
+    }
+
+    /// Returns the canonical source identity.
+    #[inline(always)]
+    pub(super) fn canonical_source(&self) -> &Path {
+        &self.canonical_source
+    }
+
+    /// Returns the source permissions captured before traversal.
+    #[inline(always)]
+    pub(super) fn source_permissions(&self) -> &fs::Permissions {
+        &self.source_permissions
+    }
+
+    /// Advances the lazy source-directory iterator.
+    ///
+    /// # Returns
+    ///
+    /// The next directory-entry result, or `None` after the directory is
+    /// exhausted.
+    ///
+    /// # Errors
+    ///
+    /// The yielded result contains the filesystem error when an entry cannot
+    /// be read.
+    #[inline(always)]
+    pub(super) fn next_entry(
+        &mut self,
+    ) -> Option<std::io::Result<fs::DirEntry>> {
+        self.entries.next()
+    }
+}

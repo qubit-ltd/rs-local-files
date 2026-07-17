@@ -10,4 +10,4 @@
 mod atomic_write_tests;
 mod copy_dir_tests;
 mod file_io_tests;
-mod path_operation_tests;
+mod path_operations_tests;

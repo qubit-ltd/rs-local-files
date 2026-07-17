@@ -2,8 +2,12 @@
 //    Copyright (c) 2025 - 2026 Haixing Hu.
 //
 //    SPDX-License-Identifier: Apache-2.0
+//
+//    Licensed under the Apache License, Version 2.0.
 // =============================================================================
 //! Facade for the private recursive directory-copy pipeline.
+// qubit-style: allow source-test-pair
+// Private behavior is covered through public integration tests.
 
 use std::path::Path;
 
@@ -15,11 +19,9 @@ use crate::{
 
 use crate::local::internal::path_operations::canonicalize_existing_prefix;
 
-use super::error::{
-    CopyDirResult,
-    with_copy_context,
-};
-use super::traversal::copy_dir_recursive;
+use super::copy_dir_result::CopyDirResult;
+use super::error::with_copy_context;
+use super::traversal::copy_dir_iterative;
 
 /// Recursively copies a directory tree with the supplied options.
 ///
@@ -42,7 +44,6 @@ pub(crate) fn copy_dir_all_with_paths(
     dst: &Path,
     options: LocalCopyDirOptions,
 ) -> CopyDirResult<LocalCopyDirStats> {
-    let mut active_sources = Vec::new();
     let mut stats = LocalCopyDirStats::default();
     let destination_root = with_copy_context(
         canonicalize_existing_prefix(dst),
@@ -51,13 +52,6 @@ pub(crate) fn copy_dir_all_with_paths(
         dst,
         &stats,
     )?;
-    copy_dir_recursive(
-        src,
-        dst,
-        options,
-        &destination_root,
-        &mut active_sources,
-        &mut stats,
-    )?;
+    copy_dir_iterative(src, dst, options, &destination_root, &mut stats)?;
     Ok(stats)
 }

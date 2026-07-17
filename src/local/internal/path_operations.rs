@@ -24,6 +24,7 @@ use std::path::{
 #[cfg(windows)]
 use std::os::windows::fs::FileTypeExt;
 
+use super::dir_size_frame::DirSizeFrame;
 #[cfg(windows)]
 use super::file_move::remove_directory_symlink;
 use super::path_io_error::PathIoError;
@@ -203,10 +204,10 @@ pub(crate) fn dir_size_path(path: &Path) -> Result<u64> {
             format!("path is not a directory: {}", path.display()),
         ));
     }
-    dir_size_recursive(path)
+    dir_size_iterative(path)
 }
 
-/// Recursively computes regular-file sizes below a directory.
+/// Computes regular-file sizes below a directory without recursive calls.
 ///
 /// # Parameters
 /// - `path`: Directory path to measure.
@@ -217,9 +218,32 @@ pub(crate) fn dir_size_path(path: &Path) -> Result<u64> {
 /// # Errors
 /// Returns an I/O error when a directory entry cannot be read, or
 /// [`ErrorKind::InvalidData`] when the aggregate exceeds [`u64::MAX`].
-fn dir_size_recursive(path: &Path) -> Result<u64> {
-    let mut total = 0u64;
-    for entry in fs::read_dir(path)? {
+fn dir_size_iterative(path: &Path) -> Result<u64> {
+    let mut directories =
+        vec![DirSizeFrame::new(path.to_path_buf(), fs::read_dir(path)?)];
+    loop {
+        let entry = directories
+            .last_mut()
+            .expect("directory-size traversal should retain its root frame")
+            .next_entry();
+        let Some(entry) = entry else {
+            let completed = directories.pop().expect(
+                "directory-size traversal should retain its root frame",
+            );
+            let (completed_path, completed_size) =
+                completed.into_path_and_size();
+            let Some(parent) = directories.last_mut() else {
+                return Ok(completed_size);
+            };
+            let parent_size = match parent.size().checked_add(completed_size) {
+                Some(total) => total,
+                None => {
+                    return Err(dir_size_overflow_error!(&completed_path));
+                }
+            };
+            parent.set_size(parent_size);
+            continue;
+        };
         let entry = entry?;
         let entry_path = entry.path();
         let metadata = fs::symlink_metadata(&entry_path)?;
@@ -227,19 +251,21 @@ fn dir_size_recursive(path: &Path) -> Result<u64> {
         if file_type.is_symlink() {
             continue;
         }
-        let contribution = if metadata.is_dir() {
-            dir_size_recursive(&entry_path)?
+        if metadata.is_dir() {
+            let entries = fs::read_dir(&entry_path)?;
+            directories.push(DirSizeFrame::new(entry_path, entries));
         } else if metadata.is_file() {
-            metadata.len()
-        } else {
-            0
-        };
-        total = match total.checked_add(contribution) {
-            Some(total) => total,
-            None => return Err(dir_size_overflow_error!(&entry_path)),
-        };
+            let current = directories.last_mut().expect(
+                "directory-size traversal should retain its root frame",
+            );
+            let current_size = match current.size().checked_add(metadata.len())
+            {
+                Some(total) => total,
+                None => return Err(dir_size_overflow_error!(&entry_path)),
+            };
+            current.set_size(current_size);
+        }
     }
-    Ok(total)
 }
 
 /// Removes all children from a directory while keeping the directory itself.

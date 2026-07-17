@@ -11,6 +11,8 @@ use std::io::ErrorKind;
 
 #[cfg(windows)]
 use super::super::test_support::path_with_interior_nul;
+#[cfg(target_os = "linux")]
+use super::super::test_support::run_in_small_stack_process;
 #[cfg(unix)]
 use super::super::test_support::{
     PermissionsExt,
@@ -52,6 +54,49 @@ fn test_dir_size_sums_regular_files_and_ignores_symlinks() {
 
     assert_eq!(8, size);
     fs::remove_dir_all(dir).unwrap();
+}
+
+#[cfg(target_os = "linux")]
+#[test]
+fn test_dir_size_handles_deep_tree_on_small_stack() {
+    const TEST_NAME: &str = concat!(
+        "local::local_files_tests::path_operations_tests::",
+        "test_dir_size_handles_deep_tree_on_small_stack",
+    );
+    const CHILD_ENVIRONMENT: &str =
+        "QUBIT_LOCAL_FILES_DIR_SIZE_SMALL_STACK_CHILD";
+
+    let Some(dir) =
+        run_in_small_stack_process(TEST_NAME, CHILD_ENVIRONMENT, || {
+            let dir = std::path::PathBuf::from(format!(
+                "/tmp/qio-{}-deep-dir-size",
+                std::process::id(),
+            ));
+            drop(fs::remove_dir_all(&dir));
+            let root = dir.join("root");
+            fs::create_dir_all(&root)
+                .expect("deep-tree root should be created");
+            let mut current = root.clone();
+            for _ in 0..512 {
+                current.push("d");
+                fs::create_dir(&current)
+                    .expect("deep-tree directory should be created");
+            }
+            fs::write(current.join("leaf"), b"x")
+                .expect("deep-tree leaf should be written");
+
+            assert_eq!(
+                1,
+                LocalFiles::dir_size(&root)
+                    .expect("deep-tree size should be computed"),
+            );
+            dir
+        })
+    else {
+        return;
+    };
+
+    fs::remove_dir_all(dir).expect("deep-tree fixture should be removed");
 }
 
 #[test]

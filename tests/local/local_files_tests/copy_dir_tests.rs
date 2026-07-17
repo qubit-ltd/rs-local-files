@@ -23,6 +23,8 @@ use std::io::{
 use super::super::test_support::SourceReadLease;
 #[cfg(windows)]
 use super::super::test_support::path_with_interior_nul;
+#[cfg(target_os = "linux")]
+use super::super::test_support::run_in_small_stack_process;
 use super::super::test_support::{
     CURRENT_DIR_LOCK,
     CurrentDirGuard,
@@ -62,6 +64,63 @@ fn test_copy_dir_all_with_copies_tree_and_reports_stats() {
             .as_slice()
     );
     fs::remove_dir_all(dir).unwrap();
+}
+
+#[cfg(target_os = "linux")]
+#[test]
+fn test_copy_dir_all_with_handles_deep_tree_on_small_stack() {
+    const TEST_NAME: &str = concat!(
+        "local::local_files_tests::copy_dir_tests::",
+        "test_copy_dir_all_with_handles_deep_tree_on_small_stack",
+    );
+    const CHILD_ENVIRONMENT: &str =
+        "QUBIT_LOCAL_FILES_COPY_DIR_SMALL_STACK_CHILD";
+
+    let Some(dir) =
+        run_in_small_stack_process(TEST_NAME, CHILD_ENVIRONMENT, || {
+            let dir = std::path::PathBuf::from(format!(
+                "/tmp/qio-{}-deep-copy-dir",
+                std::process::id(),
+            ));
+            drop(fs::remove_dir_all(&dir));
+            let src = dir.join("src");
+            let dst = dir.join("dst");
+            fs::create_dir_all(&src)
+                .expect("deep copy source should be created");
+            let mut current = src.clone();
+            let mut relative = std::path::PathBuf::new();
+            for _ in 0..512 {
+                current.push("d");
+                relative.push("d");
+                fs::create_dir(&current)
+                    .expect("deep copy directory should be created");
+            }
+            fs::write(current.join("leaf"), b"x")
+                .expect("deep copy leaf should be written");
+
+            let stats = LocalFiles::copy_dir_all_with(
+                &src,
+                &dst,
+                LocalCopyDirOptions::default(),
+            )
+            .expect("deep directory tree should be copied");
+
+            assert_eq!(1, stats.files);
+            assert_eq!(513, stats.directories);
+            assert_eq!(1, stats.bytes);
+            assert_eq!(
+                b"x",
+                fs::read(dst.join(relative).join("leaf"))
+                    .expect("deep copied leaf should be readable")
+                    .as_slice(),
+            );
+            dir
+        })
+    else {
+        return;
+    };
+
+    fs::remove_dir_all(dir).expect("deep copy fixture should be removed");
 }
 
 #[test]

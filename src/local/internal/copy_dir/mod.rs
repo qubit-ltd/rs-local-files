@@ -5,6 +5,8 @@
 // =============================================================================
 //! Private recursive directory-copy pipeline.
 
+mod copy_dir_frame;
+mod copy_dir_result;
 mod destination;
 mod error;
 mod facade;

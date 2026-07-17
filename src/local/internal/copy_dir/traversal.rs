@@ -2,9 +2,14 @@
 //    Copyright (c) 2025 - 2026 Haixing Hu.
 //
 //    SPDX-License-Identifier: Apache-2.0
+//
+//    Licensed under the Apache License, Version 2.0.
 // =============================================================================
 //! Recursive enumeration and symbolic-link dispatch for directory copies.
+// qubit-style: allow source-test-pair
+// Private behavior is covered through public integration tests.
 
+use std::collections::HashSet;
 use std::fs;
 use std::io::{
     Error,
@@ -21,9 +26,10 @@ use crate::{
     LocalCopyDirStats,
 };
 
+use super::copy_dir_frame::CopyDirFrame;
+use super::copy_dir_result::CopyDirResult;
 use super::destination::ensure_copy_destination_dir;
 use super::error::{
-    CopyDirResult,
     copy_dir_error,
     record_created_directory,
     with_copy_context,
@@ -31,7 +37,7 @@ use super::error::{
 use super::source::inspect_copy_source_directory;
 use super::staged_copy::copy_file_with_options;
 
-/// Recursively copies one source directory into one destination directory.
+/// Copies one source directory tree without recursive function calls.
 ///
 /// # Parameters
 ///
@@ -39,21 +45,161 @@ use super::staged_copy::copy_file_with_options;
 /// * `dst` - Destination directory.
 /// * `options` - Recursive-copy behavior options.
 /// * `destination_root` - Canonical destination used for containment checks.
-/// * `active_sources` - Canonical directory stack used for cycle detection.
 /// * `stats` - Mutable statistics accumulator.
 ///
 /// # Errors
 ///
 /// Returns a structured error when inspection, traversal, copying, permission
 /// preservation, or exact accounting fails.
-pub(super) fn copy_dir_recursive(
+pub(super) fn copy_dir_iterative(
     src: &Path,
     dst: &Path,
     options: LocalCopyDirOptions,
     destination_root: &Path,
-    active_sources: &mut Vec<PathBuf>,
     stats: &mut LocalCopyDirStats,
 ) -> CopyDirResult<()> {
+    let mut active_sources = HashSet::new();
+    let root_frame = enter_copy_directory(
+        src,
+        dst,
+        options,
+        destination_root,
+        &mut active_sources,
+        stats,
+    )?;
+    let mut frames = vec![root_frame];
+
+    while !frames.is_empty() {
+        let entry = frames
+            .last_mut()
+            .expect("non-empty traversal stack should have a frame")
+            .next_entry();
+        let Some(entry) = entry else {
+            let completed = frames
+                .pop()
+                .expect("non-empty traversal stack should have a frame");
+            let _ = active_sources.remove(completed.canonical_source());
+            if options.preserves_permissions() {
+                with_copy_context(
+                    fs::set_permissions(
+                        completed.dst(),
+                        completed.source_permissions().clone(),
+                    ),
+                    LocalCopyDirStage::PreservePermissions,
+                    completed.src(),
+                    completed.dst(),
+                    stats,
+                )?;
+            }
+            continue;
+        };
+
+        let current = frames
+            .last()
+            .expect("active traversal should retain its current frame");
+        let entry = with_copy_context(
+            entry,
+            LocalCopyDirStage::ReadSourceDirectory,
+            current.src(),
+            current.dst(),
+            stats,
+        )?;
+        let source_path = entry.path();
+        let destination_path = current.dst().join(entry.file_name());
+        let file_type = with_copy_context(
+            entry.file_type(),
+            LocalCopyDirStage::InspectSourceEntry,
+            &source_path,
+            &destination_path,
+            stats,
+        )?;
+        if file_type.is_symlink() {
+            if symlink_target_is_directory(
+                &source_path,
+                &destination_path,
+                options,
+                stats,
+            )? {
+                let frame = enter_copy_directory(
+                    &source_path,
+                    &destination_path,
+                    options,
+                    destination_root,
+                    &mut active_sources,
+                    stats,
+                )?;
+                frames.push(frame);
+            } else {
+                copy_file_with_options(
+                    &source_path,
+                    &destination_path,
+                    options,
+                    stats,
+                )?;
+            }
+        } else if file_type.is_dir() {
+            let frame = enter_copy_directory(
+                &source_path,
+                &destination_path,
+                options,
+                destination_root,
+                &mut active_sources,
+                stats,
+            )?;
+            frames.push(frame);
+        } else if file_type.is_file() {
+            copy_file_with_options(
+                &source_path,
+                &destination_path,
+                options,
+                stats,
+            )?;
+        } else {
+            return Err(copy_dir_error(
+                LocalCopyDirStage::InspectSourceEntry,
+                &source_path,
+                &destination_path,
+                stats,
+                Error::new(
+                    ErrorKind::Unsupported,
+                    format!(
+                        "unsupported source file type: {}",
+                        source_path.display(),
+                    ),
+                ),
+            ));
+        }
+    }
+    Ok(())
+}
+
+/// Enters one source directory and constructs its traversal frame.
+///
+/// # Parameters
+///
+/// * `src` - Source directory.
+/// * `dst` - Destination directory.
+/// * `options` - Recursive-copy behavior options.
+/// * `destination_root` - Canonical destination used for containment checks.
+/// * `active_sources` - Canonical ancestor set used for cycle detection.
+/// * `stats` - Mutable statistics accumulator.
+///
+/// # Returns
+///
+/// A lazy traversal frame for the entered directory.
+///
+/// # Errors
+///
+/// Returns a structured error when inspection, cycle validation, destination
+/// preparation, statistics accounting, or directory enumeration fails.
+fn enter_copy_directory(
+    src: &Path,
+    dst: &Path,
+    options: LocalCopyDirOptions,
+    destination_root: &Path,
+    active_sources: &mut HashSet<PathBuf>,
+    stats: &mut LocalCopyDirStats,
+) -> CopyDirResult<CopyDirFrame> {
     let (source_metadata, canonical_source) = with_copy_context(
         inspect_copy_source_directory(
             src,
@@ -65,10 +211,7 @@ pub(super) fn copy_dir_recursive(
         dst,
         stats,
     )?;
-    if active_sources
-        .iter()
-        .any(|active_source| active_source == &canonical_source)
-    {
+    if active_sources.contains(&canonical_source) {
         return Err(copy_dir_error(
             LocalCopyDirStage::InspectSource,
             src,
@@ -80,128 +223,62 @@ pub(super) fn copy_dir_recursive(
             ),
         ));
     }
-    active_sources.push(canonical_source);
-    let result = (|| {
-        let created = with_copy_context(
-            ensure_copy_destination_dir(dst, options.type_conflict_policy()),
-            LocalCopyDirStage::PrepareDestination,
+    let created = with_copy_context(
+        ensure_copy_destination_dir(dst, options.type_conflict_policy()),
+        LocalCopyDirStage::PrepareDestination,
+        src,
+        dst,
+        stats,
+    )?;
+    if created {
+        with_copy_context(
+            record_created_directory(stats),
+            LocalCopyDirStage::UpdateStatistics,
             src,
             dst,
             stats,
         )?;
-        if created {
-            with_copy_context(
-                record_created_directory(stats),
-                LocalCopyDirStage::UpdateStatistics,
-                src,
-                dst,
-                stats,
-            )?;
-        }
-        let entries = with_copy_context(
-            fs::read_dir(src),
-            LocalCopyDirStage::ReadSourceDirectory,
-            src,
-            dst,
-            stats,
-        )?;
-        for entry in entries {
-            let entry = with_copy_context(
-                entry,
-                LocalCopyDirStage::ReadSourceDirectory,
-                src,
-                dst,
-                stats,
-            )?;
-            let source_path = entry.path();
-            let destination_path = dst.join(entry.file_name());
-            let file_type = with_copy_context(
-                entry.file_type(),
-                LocalCopyDirStage::InspectSourceEntry,
-                &source_path,
-                &destination_path,
-                stats,
-            )?;
-            if file_type.is_symlink() {
-                copy_symlink_source(
-                    &source_path,
-                    &destination_path,
-                    options,
-                    destination_root,
-                    active_sources,
-                    stats,
-                )?;
-            } else if file_type.is_dir() {
-                copy_dir_recursive(
-                    &source_path,
-                    &destination_path,
-                    options,
-                    destination_root,
-                    active_sources,
-                    stats,
-                )?;
-            } else if file_type.is_file() {
-                copy_file_with_options(
-                    &source_path,
-                    &destination_path,
-                    options,
-                    stats,
-                )?;
-            } else {
-                return Err(copy_dir_error(
-                    LocalCopyDirStage::InspectSourceEntry,
-                    &source_path,
-                    &destination_path,
-                    stats,
-                    Error::new(
-                        ErrorKind::Unsupported,
-                        format!(
-                            "unsupported source file type: {}",
-                            source_path.display(),
-                        ),
-                    ),
-                ));
-            }
-        }
-        if options.preserves_permissions() {
-            with_copy_context(
-                fs::set_permissions(dst, source_metadata.permissions()),
-                LocalCopyDirStage::PreservePermissions,
-                src,
-                dst,
-                stats,
-            )
-        } else {
-            Ok(())
-        }
-    })();
-    let _ = active_sources.pop();
-    result
+    }
+    let entries = with_copy_context(
+        fs::read_dir(src),
+        LocalCopyDirStage::ReadSourceDirectory,
+        src,
+        dst,
+        stats,
+    )?;
+    let _ = active_sources.insert(canonical_source.clone());
+    Ok(CopyDirFrame::new(
+        src.to_path_buf(),
+        dst.to_path_buf(),
+        canonical_source,
+        source_metadata.permissions(),
+        entries,
+    ))
 }
 
-/// Copies a symbolic-link source when following is enabled.
+/// Determines whether an allowed symbolic link targets a directory.
 ///
 /// # Parameters
 ///
 /// * `src` - Source symbolic link.
 /// * `dst` - Destination path.
 /// * `options` - Recursive-copy behavior options.
-/// * `destination_root` - Canonical destination used for containment checks.
-/// * `active_sources` - Canonical directory stack used for cycle detection.
 /// * `stats` - Mutable statistics accumulator.
+///
+/// # Returns
+///
+/// `true` for a directory target and `false` for a regular-file target.
 ///
 /// # Errors
 ///
 /// Returns a structured error when links are disabled or the target cannot be
-/// inspected or copied.
-fn copy_symlink_source(
+/// inspected or has an unsupported type.
+fn symlink_target_is_directory(
     src: &Path,
     dst: &Path,
     options: LocalCopyDirOptions,
-    destination_root: &Path,
-    active_sources: &mut Vec<PathBuf>,
-    stats: &mut LocalCopyDirStats,
-) -> CopyDirResult<()> {
+    stats: &LocalCopyDirStats,
+) -> CopyDirResult<bool> {
     if !options.follows_symlinks() {
         return Err(copy_dir_error(
             LocalCopyDirStage::InspectSourceEntry,
@@ -222,16 +299,9 @@ fn copy_symlink_source(
         stats,
     )?;
     if target_metadata.is_dir() {
-        copy_dir_recursive(
-            src,
-            dst,
-            options,
-            destination_root,
-            active_sources,
-            stats,
-        )
+        Ok(true)
     } else if target_metadata.is_file() {
-        copy_file_with_options(src, dst, options, stats)
+        Ok(false)
     } else {
         Err(copy_dir_error(
             LocalCopyDirStage::InspectSourceEntry,

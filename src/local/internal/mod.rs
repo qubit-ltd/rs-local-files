@@ -6,6 +6,7 @@
 //! Private implementation support for local filesystem operations.
 
 mod copy_dir;
+mod dir_size_frame;
 mod file_attribute_tag_info;
 mod file_disposition_info;
 mod file_io;
