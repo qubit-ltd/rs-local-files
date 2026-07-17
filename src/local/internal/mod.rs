@@ -25,6 +25,10 @@ mod rooted_file_io;
 #[cfg(unix)]
 mod rooted_io_result;
 #[cfg(unix)]
+mod rooted_parent;
+#[cfg(unix)]
+mod rooted_parent_mode;
+#[cfg(unix)]
 mod rooted_staged_file;
 #[cfg(unix)]
 mod rooted_staging_retry;
@@ -72,6 +76,8 @@ pub(crate) use rooted_file_io::{
     open_rooted_reader,
     open_rooted_writer,
 };
+#[cfg(unix)]
+pub(super) use rooted_parent_mode::RootedParentMode;
 #[cfg(unix)]
 pub(super) use rooted_staged_file::RootedStagedFile;
 pub(crate) use staged_file::StagedFile;

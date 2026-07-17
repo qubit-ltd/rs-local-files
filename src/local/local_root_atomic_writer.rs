@@ -32,6 +32,7 @@ use crate::{
 
 #[cfg(unix)]
 use super::internal::{
+    RootedParentMode,
     RootedStagedFile,
     create_rooted_staged_file,
     existing_rooted_file_permissions,
@@ -70,6 +71,9 @@ pub struct LocalRootAtomicWriter {
     /// Existing ordinary-file permissions captured when the writer began.
     existing_permissions: Option<fs::Permissions>,
     #[cfg(unix)]
+    /// Parents whose newly created child entries require synchronization.
+    parent_dirs_to_sync: Vec<File>,
+    #[cfg(unix)]
     /// Descriptor-relative staging lifecycle.
     staged_file: RootedStagedFile,
 }
@@ -99,13 +103,20 @@ impl LocalRootAtomicWriter {
     ) -> Result<Self, LocalAtomicWriteError> {
         let requested_path = path.as_path().to_path_buf();
         let diagnostic_path = diagnostic_root.join(path.as_path());
-        let (parent, final_name) = map_atomic_error(
-            open_rooted_parent(root, &diagnostic_path, path, true),
+        let rooted_parent = map_atomic_error(
+            open_rooted_parent(
+                root,
+                &diagnostic_path,
+                path,
+                RootedParentMode::CreateMissingAndTrackSync,
+            ),
             LocalAtomicWriteStage::PrepareParent,
             &requested_path,
             None,
             false,
         )?;
+        let (parent, final_name, parent_dirs_to_sync) =
+            rooted_parent.into_parts();
         let existing_permissions = map_atomic_error(
             existing_rooted_file_permissions(&parent, &final_name),
             LocalAtomicWriteStage::InspectDestination,
@@ -125,6 +136,7 @@ impl LocalRootAtomicWriter {
             path: requested_path,
             final_name,
             existing_permissions,
+            parent_dirs_to_sync,
             staged_file,
         })
     }
@@ -186,7 +198,10 @@ impl LocalRootAtomicWriter {
                 self.staged_file.diagnostic_path().to_path_buf();
             self.staged_file.disarm();
             map_atomic_error(
-                self.staged_file.parent().sync_all(),
+                sync_rooted_parent_chain(
+                    self.staged_file.parent(),
+                    &self.parent_dirs_to_sync,
+                ),
                 LocalAtomicWriteStage::SyncParentDirectory,
                 &self.path,
                 Some(temporary_path),
@@ -261,6 +276,29 @@ impl Write for LocalRootAtomicWriter {
             ))
         }
     }
+}
+
+/// Synchronizes the final parent and newly created ancestor entries.
+///
+/// # Parameters
+///
+/// * `parent` - Final destination parent descriptor.
+/// * `parent_dirs_to_sync` - Ancestor descriptors ordered shallowest to
+///   deepest.
+///
+/// # Errors
+///
+/// Returns the first directory synchronization error.
+#[cfg(unix)]
+fn sync_rooted_parent_chain(
+    parent: &File,
+    parent_dirs_to_sync: &[File],
+) -> io::Result<()> {
+    parent.sync_all()?;
+    for directory in parent_dirs_to_sync.iter().rev() {
+        directory.sync_all()?;
+    }
+    Ok(())
 }
 
 #[cfg(unix)]

@@ -20,3 +20,28 @@ jobs:
       run_windows_tests: true
       run_macos_tests: true
     secrets: inherit
+
+  rooted-atomic-durability:
+    name: Rooted atomic durability
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout source
+        uses: actions/checkout@v6
+        with:
+          fetch-depth: 1
+          submodules: recursive
+
+      - name: Install strace
+        run: |
+          sudo apt-get update
+          sudo apt-get install --yes strace
+
+      - name: Install Rust
+        run: rustup toolchain install 1.94 --profile minimal
+
+      - name: Trace rooted atomic parent synchronization
+        run: >-
+          cargo +1.94 test --test lib_tests
+          local::local_root_atomic_writer_tests::test_commit_syncs_new_parent_chain
+          -- --exact --nocapture

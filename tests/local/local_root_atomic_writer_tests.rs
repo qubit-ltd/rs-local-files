@@ -6,8 +6,14 @@
 //    Licensed under the Apache License, Version 2.0.
 // =============================================================================
 
+#[cfg(target_os = "linux")]
+use std::env;
 #[cfg(unix)]
 use std::io::Write;
+#[cfg(target_os = "linux")]
+use std::path::PathBuf;
+#[cfg(target_os = "linux")]
+use std::process::Command;
 
 #[cfg(unix)]
 use qubit_local_files::{
@@ -22,6 +28,13 @@ use super::test_support::{
     fs,
     temp_dir,
 };
+
+#[cfg(target_os = "linux")]
+const ROOTED_ATOMIC_SYNC_CHILD_ENV: &str =
+    "QUBIT_LOCAL_FILES_ROOTED_ATOMIC_SYNC_CHILD";
+#[cfg(target_os = "linux")]
+const ROOTED_ATOMIC_SYNC_ROOT_ENV: &str =
+    "QUBIT_LOCAL_FILES_ROOTED_ATOMIC_SYNC_ROOT";
 
 /// Verifies descriptor-relative atomic replacement and explicit abort cleanup.
 #[cfg(unix)]
@@ -121,6 +134,73 @@ fn test_commit_survives_root_rename_and_creates_parents() {
     assert!(!root_path.join("nested/result.txt").exists());
     fs::remove_dir_all(root_path).expect("replacement root should be removed");
     fs::remove_dir_all(moved_path).expect("moved root should be removed");
+}
+
+/// Verifies that commit synchronizes every newly created rooted parent entry.
+#[cfg(target_os = "linux")]
+#[test]
+fn test_commit_syncs_new_parent_chain() {
+    if env::var_os(ROOTED_ATOMIC_SYNC_CHILD_ENV).is_some() {
+        let root_path = PathBuf::from(
+            env::var_os(ROOTED_ATOMIC_SYNC_ROOT_ENV)
+                .expect("traced child should receive its rooted fixture"),
+        );
+        let root = LocalRoot::open(&root_path).expect("root should open");
+        let destination = LocalRelativePath::new("a/b/result.txt")
+            .expect("destination should validate");
+        let mut writer = root
+            .begin_atomic_write(&destination)
+            .expect("rooted atomic writer should create parents");
+        writer
+            .write_all(b"durable")
+            .expect("rooted atomic writer should write");
+        writer.commit().expect("rooted atomic writer should commit");
+        return;
+    }
+
+    if Command::new("strace").arg("--version").output().is_err() {
+        eprintln!("skipping rooted fsync trace because strace is unavailable");
+        return;
+    }
+
+    let root_path = temp_dir("rooted-atomic-sync-chain");
+    let trace_path = root_path.with_extension("strace");
+    let status = Command::new("strace")
+        .args(["-f", "-y", "-e", "trace=fsync", "-o"])
+        .arg(&trace_path)
+        .arg(env::current_exe().expect("test executable path should resolve"))
+        .args([
+            "--exact",
+            "local::local_root_atomic_writer_tests::test_commit_syncs_new_parent_chain",
+            "--nocapture",
+        ])
+        .env(ROOTED_ATOMIC_SYNC_CHILD_ENV, "1")
+        .env(ROOTED_ATOMIC_SYNC_ROOT_ENV, &root_path)
+        .status()
+        .expect("strace should launch the traced child");
+    assert!(status.success(), "traced child should succeed");
+
+    let trace = fs::read_to_string(&trace_path)
+        .expect("fsync trace should be readable");
+    let nested_marker = format!("<{}>", root_path.join("a/b").display());
+    let parent_marker = format!("<{}>", root_path.join("a").display());
+    let root_marker = format!("<{}>", root_path.display());
+    let nested_index = trace
+        .find(&nested_marker)
+        .expect("trace should synchronize the final parent");
+    let parent_index = trace
+        .find(&parent_marker)
+        .expect("trace should synchronize the created parent entry");
+    let root_index = trace
+        .find(&root_marker)
+        .expect("trace should synchronize the created root child entry");
+    assert!(
+        nested_index < parent_index && parent_index < root_index,
+        "rooted parent descriptors should be synchronized deepest first: {trace}"
+    );
+
+    fs::remove_file(trace_path).expect("trace file should be removed");
+    fs::remove_dir_all(root_path).expect("sync fixture should be removed");
 }
 
 /// Verifies permission preservation and final symbolic-link denial.

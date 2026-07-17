@@ -51,6 +51,8 @@ use super::rooted_io_result::{
     normalize_opened_directory_metadata,
     normalize_opened_regular_file_metadata,
 };
+use super::rooted_parent::RootedParent;
+use super::rooted_parent_mode::RootedParentMode;
 
 /// Opens a no-follow directory handle for a root path.
 ///
@@ -101,8 +103,13 @@ pub(crate) fn open_rooted_reader(
     options: FileReadOptions,
 ) -> Result<LocalFileReader> {
     let diagnostic_path = diagnostic_root.join(path.as_path());
-    let (parent, name) =
-        open_rooted_parent(root, &diagnostic_path, path, false)?;
+    let (parent, name, _parent_dirs_to_sync) = open_rooted_parent(
+        root,
+        &diagnostic_path,
+        path,
+        RootedParentMode::OpenExisting,
+    )?
+    .into_parts();
     reject_existing_non_file(&parent, &name, &diagnostic_path)?;
     let flags =
         libc::O_RDONLY | libc::O_NOFOLLOW | libc::O_CLOEXEC | libc::O_NONBLOCK;
@@ -144,12 +151,14 @@ pub(crate) fn open_rooted_writer(
     options: FileWriteOptions,
 ) -> Result<LocalFileWriter> {
     let diagnostic_path = diagnostic_root.join(path.as_path());
-    let (parent, name) = open_rooted_parent(
-        root,
-        &diagnostic_path,
-        path,
-        options.creates_parent(),
-    )?;
+    let parent_mode = if options.creates_parent() {
+        RootedParentMode::CreateMissing
+    } else {
+        RootedParentMode::OpenExisting
+    };
+    let (parent, name, _parent_dirs_to_sync) =
+        open_rooted_parent(root, &diagnostic_path, path, parent_mode)?
+            .into_parts();
     reject_existing_non_file(&parent, &name, &diagnostic_path)?;
     let mut flags = libc::O_NOFOLLOW | libc::O_CLOEXEC | libc::O_NONBLOCK;
     match options.mode() {
@@ -188,11 +197,12 @@ pub(crate) fn open_rooted_writer(
 /// * `root` - Open root directory authority.
 /// * `diagnostic_path` - Full diagnostic target path.
 /// * `path` - Validated relative target path.
-/// * `create` - Whether missing parent directories should be created.
+/// * `mode` - Missing-parent creation and durability-tracking behavior.
 ///
 /// # Returns
 ///
-/// The open parent directory and final entry name.
+/// The open parent directory, final entry name, and ancestor descriptors whose
+/// newly created child entries require synchronization.
 ///
 /// # Errors
 ///
@@ -202,8 +212,8 @@ pub(in crate::local) fn open_rooted_parent(
     root: &File,
     diagnostic_path: &Path,
     path: &LocalRelativePath,
-    create: bool,
-) -> Result<(File, CString)> {
+    mode: RootedParentMode,
+) -> Result<RootedParent> {
     let final_name = path
         .as_path()
         .file_name()
@@ -220,14 +230,28 @@ pub(in crate::local) fn open_rooted_parent(
         let _ = diagnostic_root.pop();
     }
     let mut traversed = PathBuf::new();
+    let mut parent_dirs_to_sync = Vec::new();
     for component in parent.components() {
         let name = component.as_os_str();
         traversed.push(name);
         let component_path = diagnostic_root.join(&traversed);
         directory = match open_directory_at(&directory, name) {
             Ok(next) => next,
-            Err(error) if create && error.kind() == ErrorKind::NotFound => {
+            Err(error)
+                if mode.creates_missing()
+                    && error.kind() == ErrorKind::NotFound =>
+            {
+                let parent_to_sync = if mode.tracks_sync() {
+                    Some(with_path_context(
+                        directory.try_clone(),
+                        "clone rooted parent for synchronization",
+                        &component_path,
+                    )?)
+                } else {
+                    None
+                };
                 create_directory_at(&directory, name, &component_path)?;
+                parent_dirs_to_sync.extend(parent_to_sync);
                 rooted_open_result(
                     open_directory_at(&directory, name),
                     "open created rooted directory",
@@ -248,7 +272,11 @@ pub(in crate::local) fn open_rooted_parent(
             &component_path,
         )?;
     }
-    Ok((directory, final_name))
+    Ok(RootedParent::new(
+        directory,
+        final_name,
+        parent_dirs_to_sync,
+    ))
 }
 
 /// Opens one no-follow directory entry relative to `parent`.
