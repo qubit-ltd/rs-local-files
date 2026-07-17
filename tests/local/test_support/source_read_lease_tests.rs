@@ -26,6 +26,8 @@ use std::time::{
     Instant,
 };
 
+use super::file_owner_ex_tests::FileOwnerEx;
+
 /// Linux `F_SETOWN_EX` command number from `<fcntl.h>`.
 const F_SETOWN_EX: libc::c_int = 15;
 
@@ -34,15 +36,6 @@ const F_OWNER_TID: libc::c_int = 0;
 
 /// Maximum time to wait for the recursive-copy worker to open its source.
 const LEASE_BREAK_TIMEOUT: Duration = Duration::from_secs(5);
-
-/// Native owner descriptor accepted by `fcntl(F_SETOWN_EX)`.
-#[repr(C)]
-struct FileOwnerEx {
-    /// Kind of owner stored in `pid`.
-    owner_type: libc::c_int,
-    /// Thread or process identifier receiving the lease-break signal.
-    pid: libc::pid_t,
-}
 
 /// A Linux write lease that blocks another thread from opening a source file.
 ///

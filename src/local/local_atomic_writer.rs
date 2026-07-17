@@ -256,11 +256,13 @@ impl LocalAtomicWriter {
 }
 
 impl Write for LocalAtomicWriter {
+    /// Writes bytes into the private staging file.
     #[inline(always)]
     fn write(&mut self, buffer: &[u8]) -> io::Result<usize> {
         self.staged_file.file_mut().write(buffer)
     }
 
+    /// Flushes userspace data into the private staging file.
     #[inline(always)]
     fn flush(&mut self) -> io::Result<()> {
         self.staged_file.file_mut().flush()

@@ -23,6 +23,7 @@ use super::test_support::{
     temp_dir,
 };
 
+/// Asserts at compile time that `T` implements `Send`.
 fn assert_send<T: Send>() {}
 
 #[test]
@@ -153,6 +154,20 @@ fn test_local_atomic_writer_drop_removes_staging_file() {
     fs::remove_dir_all(dir).unwrap();
 }
 
+/// Returns the sole atomic staging path in `dir`.
+///
+/// # Parameters
+///
+/// * `dir` - Directory containing one atomic staging entry.
+///
+/// # Returns
+///
+/// The discovered staging path.
+///
+/// # Panics
+///
+/// Panics when the directory cannot be read, an entry cannot be inspected, or
+/// no atomic staging entry exists.
 #[cfg(target_os = "linux")]
 fn atomic_staging_path(dir: &Path) -> std::path::PathBuf {
     fs::read_dir(dir)

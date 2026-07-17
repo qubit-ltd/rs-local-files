@@ -28,6 +28,8 @@ pub(super) use std::io::{
 pub(super) use std::os::unix::fs::PermissionsExt;
 
 mod current_dir_guard_tests;
+#[cfg(target_os = "linux")]
+mod file_owner_ex_tests;
 mod filesystem_fixture_tests;
 #[cfg(target_os = "linux")]
 mod small_stack_process_tests;
