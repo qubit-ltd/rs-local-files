@@ -19,7 +19,6 @@ use std::io::{
     Result,
 };
 use std::path::{
-    Component,
     Path,
     PathBuf,
 };
@@ -33,6 +32,7 @@ use crate::{
     LocalFileWriter,
     LocalFiles,
     LocalPersistError,
+    LocalRelativePath,
 };
 
 use super::internal::{
@@ -420,28 +420,20 @@ impl LocalTempDir {
 /// Returns [`ErrorKind::InvalidInput`] when `child` is empty or contains any
 /// component other than a normal relative component.
 fn child_component_names(child: &Path) -> Result<Vec<OsString>> {
-    let mut components = Vec::new();
-    for component in child.components() {
-        match component {
-            Component::Normal(name) => components.push(name.to_os_string()),
-            _ => {
-                return Err(Error::new(
-                    ErrorKind::InvalidInput,
-                    format!(
-                        "child path must be relative and safe: {}",
-                        child.display()
-                    ),
-                ));
-            }
-        }
-    }
-    if components.is_empty() {
-        return Err(Error::new(
+    let relative = LocalRelativePath::new(child).map_err(|_| {
+        Error::new(
             ErrorKind::InvalidInput,
-            "child path must not be empty",
-        ));
-    }
-    Ok(components)
+            format!(
+                "child path must be relative and safe: {}",
+                child.display()
+            ),
+        )
+    })?;
+    Ok(relative
+        .as_path()
+        .components()
+        .map(|component| component.as_os_str().to_os_string())
+        .collect())
 }
 
 /// Ensures a child directory under a root directory.

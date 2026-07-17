@@ -304,6 +304,59 @@ fn test_temp_dir_child_path_rejects_empty_path() {
 }
 
 #[test]
+fn test_temp_dir_child_path_rejects_explicit_dot_components() {
+    let dir = temp_dir("temp-dir-explicit-dot-child");
+    let temp_dir = LocalTempDir::in_dir(&dir, Some("child-"), 4)
+        .expect("temp dir should be created");
+
+    for child in ["a/./child.txt", "a/."] {
+        let error = temp_dir
+            .child_path(child)
+            .expect_err("explicit dot components should be rejected");
+        assert_eq!(ErrorKind::InvalidInput, error.kind());
+    }
+
+    fs::remove_dir_all(dir).expect("test directory should be removed");
+}
+
+#[cfg(unix)]
+#[test]
+fn test_temp_dir_child_path_rejects_unix_nul() {
+    use std::ffi::OsString;
+    use std::os::unix::ffi::OsStringExt;
+
+    let dir = temp_dir("temp-dir-unix-nul-child");
+    let temp_dir = LocalTempDir::in_dir(&dir, Some("child-"), 4)
+        .expect("temp dir should be created");
+    let child = OsString::from_vec(b"safe\0unsafe".to_vec());
+    let error = temp_dir
+        .child_path(child)
+        .expect_err("NUL should be rejected before filesystem use");
+
+    assert_eq!(ErrorKind::InvalidInput, error.kind());
+    fs::remove_dir_all(dir).expect("test directory should be removed");
+}
+
+#[cfg(windows)]
+#[test]
+fn test_temp_dir_child_path_rejects_windows_nul() {
+    use std::path::Path;
+
+    use super::test_support::path_with_interior_nul;
+
+    let dir = temp_dir("temp-dir-windows-nul-child");
+    let temp_dir = LocalTempDir::in_dir(&dir, Some("child-"), 4)
+        .expect("temp dir should be created");
+    let child = path_with_interior_nul(Path::new("nested"), "unsafe");
+    let error = temp_dir
+        .child_path(child)
+        .expect_err("NUL should be rejected before filesystem use");
+
+    assert_eq!(ErrorKind::InvalidInput, error.kind());
+    fs::remove_dir_all(dir).expect("test directory should be removed");
+}
+
+#[test]
 fn test_temp_dir_child_io_rejects_unsafe_paths() {
     let dir = temp_dir("temp-dir-unsafe-child-io");
     let temp_dir = LocalTempDir::in_dir(&dir, Some("child-"), 4)
