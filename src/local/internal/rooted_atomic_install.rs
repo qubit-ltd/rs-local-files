@@ -36,7 +36,15 @@ pub(in crate::local) fn install_rooted_atomic_file(
     destination_existed: bool,
 ) -> Result<(), (Error, LocalAtomicDestinationState)> {
     if destination_existed {
-        match staged_file.rename_to(destination) {
+        #[cfg(coverage)]
+        let result = if super::coverage_fault::is_enabled("rooted-install") {
+            Err(Error::from_raw_os_error(libc::EIO))
+        } else {
+            staged_file.rename_to(destination)
+        };
+        #[cfg(not(coverage))]
+        let result = staged_file.rename_to(destination);
+        match result {
             Ok(()) => Ok(()),
             Err(source) => {
                 let destination_state = replacement_error_state(&source);

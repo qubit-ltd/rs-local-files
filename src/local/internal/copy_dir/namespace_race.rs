@@ -16,6 +16,9 @@ use std::io::{
 };
 use std::path::Path;
 
+#[cfg(coverage)]
+use crate::local::internal::coverage_fault;
+
 use super::source::is_real_directory;
 
 /// Reconciles a directory-creation result with a concurrent creator.
@@ -52,7 +55,9 @@ where
         Ok(()) => Ok(true),
         Err(error) if error.kind() == ErrorKind::AlreadyExists => {
             let metadata = inspect(dst)?;
-            if is_real_directory(&metadata) {
+            if is_real_directory(&metadata)
+                && !coverage_non_directory_race_enabled()
+            {
                 Ok(false)
             } else {
                 Err(error)
@@ -60,6 +65,14 @@ where
         }
         Err(error) => Err(error),
     }
+}
+
+/// Returns whether coverage should classify a racing entry as non-directory.
+fn coverage_non_directory_race_enabled() -> bool {
+    #[cfg(coverage)]
+    return coverage_fault::is_enabled("copy-directory-race-nondirectory");
+    #[cfg(not(coverage))]
+    false
 }
 
 /// Normalizes metadata reinspection after a non-directory was observed.
@@ -81,9 +94,22 @@ pub(super) fn removable_non_directory_metadata(
     result: Result<fs::Metadata>,
 ) -> Result<Option<fs::Metadata>> {
     match result {
-        Ok(metadata) if is_real_directory(&metadata) => Ok(None),
+        Ok(metadata)
+            if is_real_directory(&metadata)
+                || coverage_removal_directory_race_enabled() =>
+        {
+            Ok(None)
+        }
         Ok(metadata) => Ok(Some(metadata)),
         Err(error) if error.kind() == ErrorKind::NotFound => Ok(None),
         Err(error) => Err(error),
     }
+}
+
+/// Returns whether coverage should classify a replacement race as directory.
+fn coverage_removal_directory_race_enabled() -> bool {
+    #[cfg(coverage)]
+    return coverage_fault::is_enabled("copy-removal-race-directory");
+    #[cfg(not(coverage))]
+    false
 }

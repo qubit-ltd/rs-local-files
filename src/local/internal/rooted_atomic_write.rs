@@ -110,12 +110,30 @@ pub(in crate::local) fn create_rooted_staged_file(
     retry_rooted_staging_entry(
         DEFAULT_TEMP_FILE_RETRIES,
         || {
+            #[cfg(coverage)]
+            if super::coverage_fault::is_enabled("rooted-staging-generate") {
+                return Err(Error::other(
+                    "injected rooted staging filename failure",
+                ));
+            }
             LocalFilenames::try_random_with(
                 Some(ROOTED_ATOMIC_TEMP_PREFIX),
                 Some(ROOTED_ATOMIC_TEMP_SUFFIX),
             )
         },
         |name| {
+            #[cfg(coverage)]
+            if super::coverage_fault::is_enabled("rooted-staging-collision") {
+                return Err(Error::new(
+                    ErrorKind::AlreadyExists,
+                    "injected rooted staging collision",
+                ));
+            } else if super::coverage_fault::is_enabled("rooted-staging-open")
+            {
+                return Err(Error::other(
+                    "injected rooted staging open failure",
+                ));
+            }
             let native_name = CString::new(name.as_bytes()).expect(
                 "LocalFilenames guarantees generated names without NUL",
             );

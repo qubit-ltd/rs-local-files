@@ -28,6 +28,159 @@ use super::test_support::{
     fs,
     temp_dir,
 };
+#[cfg(all(coverage, target_os = "linux"))]
+use super::test_support::run_in_coverage_fault_process;
+
+/// Verifies one injected root-handle metadata or type failure.
+#[cfg(all(coverage, target_os = "linux"))]
+fn assert_injected_root_open_error(
+    test_name: &str,
+    fault: &str,
+    expected_kind: Option<ErrorKind>,
+) {
+    let Some(()) = run_in_coverage_fault_process(test_name, fault, move || {
+        let root_path = temp_dir(fault);
+        let error = LocalRoot::open(&root_path)
+            .expect_err("injected root validation should fail");
+        if let Some(expected_kind) = expected_kind {
+            assert_eq!(expected_kind, error.kind());
+        } else {
+            assert!(
+                error.to_string().contains("Input/output error"),
+                "contextual error should retain the injected native failure: {error}",
+            );
+        }
+        fs::remove_dir_all(root_path).expect("test directory should be removed");
+    }) else {
+        return;
+    };
+}
+
+/// Verifies propagation of injected root-directory metadata failures.
+#[cfg(all(coverage, target_os = "linux"))]
+#[test]
+fn test_open_root_reports_injected_directory_metadata_error() {
+    const TEST_NAME: &str = concat!(
+        "local::local_root_tests::",
+        "test_open_root_reports_injected_directory_metadata_error",
+    );
+    assert_injected_root_open_error(
+        TEST_NAME,
+        "rooted-directory-metadata",
+        None,
+    );
+}
+
+/// Verifies rejection of an injected invalid root-directory type.
+#[cfg(all(coverage, target_os = "linux"))]
+#[test]
+fn test_open_root_reports_injected_directory_type_error() {
+    const TEST_NAME: &str = concat!(
+        "local::local_root_tests::",
+        "test_open_root_reports_injected_directory_type_error",
+    );
+    assert_injected_root_open_error(
+        TEST_NAME,
+        "rooted-directory-type",
+        Some(ErrorKind::InvalidInput),
+    );
+}
+
+/// Asserts one injected rooted file-handle validation failure.
+#[cfg(all(coverage, target_os = "linux"))]
+fn assert_injected_rooted_reader_error(
+    test_name: &str,
+    fault: &str,
+    expected_kind: Option<ErrorKind>,
+) {
+    let Some(()) = run_in_coverage_fault_process(test_name, fault, move || {
+        let root_path = temp_dir(fault);
+        fs::write(root_path.join("data.txt"), b"data")
+            .expect("file fixture should be written");
+        let root = LocalRoot::open(&root_path).expect("root should open");
+        let path = LocalRelativePath::new("data.txt")
+            .expect("relative path should validate");
+
+        let error = root
+            .open_reader(&path, FileReadOptions::unbuffered())
+            .expect_err("injected rooted reader validation should fail");
+
+        if let Some(expected_kind) = expected_kind {
+            assert_eq!(expected_kind, error.kind());
+        } else {
+            assert!(
+                error.to_string().contains("Input/output error"),
+                "contextual error should retain the injected native failure: {error}",
+            );
+        }
+        fs::remove_dir_all(root_path).expect("test directory should be removed");
+    }) else {
+        return;
+    };
+}
+
+/// Verifies propagation of injected rooted file metadata failures.
+#[cfg(all(coverage, target_os = "linux"))]
+#[test]
+fn test_open_reader_reports_injected_file_metadata_error() {
+    const TEST_NAME: &str = concat!(
+        "local::local_root_tests::",
+        "test_open_reader_reports_injected_file_metadata_error",
+    );
+    assert_injected_rooted_reader_error(
+        TEST_NAME,
+        "rooted-file-metadata",
+        None,
+    );
+}
+
+/// Verifies rejection of an injected invalid rooted file type.
+#[cfg(all(coverage, target_os = "linux"))]
+#[test]
+fn test_open_reader_reports_injected_file_type_error() {
+    const TEST_NAME: &str = concat!(
+        "local::local_root_tests::",
+        "test_open_reader_reports_injected_file_type_error",
+    );
+    assert_injected_rooted_reader_error(
+        TEST_NAME,
+        "rooted-file-type",
+        Some(ErrorKind::InvalidInput),
+    );
+}
+
+/// Verifies contextual propagation of injected final-entry inspection errors.
+#[cfg(all(coverage, target_os = "linux"))]
+#[test]
+fn test_open_reader_reports_injected_entry_inspection_error() {
+    const TEST_NAME: &str = concat!(
+        "local::local_root_tests::",
+        "test_open_reader_reports_injected_entry_inspection_error",
+    );
+    let Some(()) = run_in_coverage_fault_process(
+        TEST_NAME,
+        "rooted-entry-inspect",
+        || {
+            let root_path = temp_dir("rooted-entry-inspect");
+            let root = LocalRoot::open(&root_path).expect("root should open");
+            let path = LocalRelativePath::new("missing.txt")
+                .expect("relative path should validate");
+
+            let error = root
+                .open_reader(&path, FileReadOptions::unbuffered())
+                .expect_err("injected entry inspection should fail");
+
+            assert!(
+                error.to_string().contains("Input/output error"),
+                "contextual error should retain the injected native failure: {error}",
+            );
+            fs::remove_dir_all(root_path)
+                .expect("test directory should be removed");
+        },
+    ) else {
+        return;
+    };
+}
 
 /// Verifies every rooted write mode and buffered flushing against an anchored
 /// parent descriptor.

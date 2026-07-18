@@ -51,7 +51,17 @@ pub(super) fn copy_into_staging(
     source_file: &mut File,
     staged_file: &mut StagedFile,
 ) -> CopyDirResult<u64> {
-    match io::copy(source_file, staged_file.file_mut()) {
+    #[cfg(coverage)]
+    let result = if crate::local::internal::coverage_fault::is_enabled(
+        "copy-staging-copy",
+    ) {
+        Err(io::Error::from_raw_os_error(libc::EIO))
+    } else {
+        io::copy(source_file, staged_file.file_mut())
+    };
+    #[cfg(not(coverage))]
+    let result = io::copy(source_file, staged_file.file_mut());
+    match result {
         Ok(copied) => Ok(copied),
         Err(source) => Err(copy_dir_error_with_staging(
             LocalCopyDirStage::CopyFileContents,
@@ -85,10 +95,21 @@ pub(super) fn preserve_staged_permissions(
     stats: &LocalCopyDirStats,
     staged_file: &mut StagedFile,
 ) -> CopyDirResult<()> {
-    if let Err(source) = staged_file
+    #[cfg(coverage)]
+    let result = if crate::local::internal::coverage_fault::is_enabled(
+        "copy-staging-permissions",
+    ) {
+        Err(io::Error::from_raw_os_error(libc::EIO))
+    } else {
+        staged_file
+            .file()
+            .set_permissions(source_metadata.permissions())
+    };
+    #[cfg(not(coverage))]
+    let result = staged_file
         .file()
-        .set_permissions(source_metadata.permissions())
-    {
+        .set_permissions(source_metadata.permissions());
+    if let Err(source) = result {
         return Err(copy_dir_error_with_staging(
             LocalCopyDirStage::PreservePermissions,
             src,

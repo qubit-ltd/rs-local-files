@@ -29,6 +29,8 @@ use super::test_support::{
     fs,
     temp_dir,
 };
+#[cfg(all(coverage, target_os = "linux"))]
+use super::test_support::run_in_coverage_fault_process;
 #[cfg(any(
     target_os = "linux",
     target_os = "android",
@@ -46,6 +48,262 @@ const ROOTED_ATOMIC_SYNC_CHILD_ENV: &str =
 #[cfg(target_os = "linux")]
 const ROOTED_ATOMIC_SYNC_ROOT_ENV: &str =
     "QUBIT_LOCAL_FILES_ROOTED_ATOMIC_SYNC_ROOT";
+
+/// Asserts one injected rooted commit failure through the public API.
+#[cfg(all(coverage, target_os = "linux"))]
+fn assert_injected_rooted_commit_error(
+    test_name: &str,
+    fault: &str,
+    expected_stage: LocalAtomicWriteStage,
+    expected_state: LocalAtomicDestinationState,
+    expected_temporary_files: usize,
+) {
+    let Some(()) = run_in_coverage_fault_process(test_name, fault, move || {
+        let root_path = temp_dir(fault);
+        fs::write(root_path.join("result.txt"), b"old")
+            .expect("destination fixture should be written");
+        let root = LocalRoot::open(&root_path).expect("root should open");
+        let destination = LocalRelativePath::new("result.txt")
+            .expect("destination should validate");
+        let mut writer = root
+            .begin_atomic_write(&destination)
+            .expect("rooted atomic writer should begin");
+        writer
+            .write_all(b"new")
+            .expect("replacement should be staged");
+
+        let error = writer
+            .commit()
+            .expect_err("injected rooted commit should fail");
+
+        assert_eq!(expected_stage, error.stage());
+        assert_eq!(expected_state, error.destination_state());
+        assert_eq!(expected_temporary_files, count_atomic_temp_files(&root_path));
+        fs::remove_dir_all(root_path).expect("test directory should be removed");
+    }) else {
+        return;
+    };
+}
+
+/// Asserts one injected rooted staging-creation failure.
+#[cfg(all(coverage, target_os = "linux"))]
+fn assert_injected_rooted_begin_error(test_name: &str, fault: &str) {
+    let Some(()) = run_in_coverage_fault_process(test_name, fault, move || {
+        let root_path = temp_dir(fault);
+        let root = LocalRoot::open(&root_path).expect("root should open");
+        let destination = LocalRelativePath::new("result.txt")
+            .expect("destination should validate");
+
+        let error = root
+            .begin_atomic_write(&destination)
+            .expect_err("injected rooted writer creation should fail");
+
+        assert_eq!(LocalAtomicWriteStage::CreateTemporaryFile, error.stage());
+        assert_eq!(0, count_atomic_temp_files(&root_path));
+        fs::remove_dir_all(root_path).expect("test directory should be removed");
+    }) else {
+        return;
+    };
+}
+
+/// Verifies rejection of an injected rooted destination identity mismatch.
+#[cfg(all(coverage, target_os = "linux"))]
+#[test]
+fn test_commit_rejects_injected_rooted_identity_mismatch() {
+    const TEST_NAME: &str = concat!(
+        "local::local_root_atomic_writer_tests::",
+        "test_commit_rejects_injected_rooted_identity_mismatch",
+    );
+    assert_injected_rooted_commit_error(
+        TEST_NAME,
+        "rooted-identity-mismatch",
+        LocalAtomicWriteStage::ReplaceDestination,
+        LocalAtomicDestinationState::Unchanged,
+        0,
+    );
+}
+
+/// Verifies precise missing state after an injected rooted identity mismatch.
+#[cfg(all(coverage, target_os = "linux"))]
+#[test]
+fn test_commit_reports_injected_missing_rooted_identity() {
+    const TEST_NAME: &str = concat!(
+        "local::local_root_atomic_writer_tests::",
+        "test_commit_reports_injected_missing_rooted_identity",
+    );
+    assert_injected_rooted_commit_error(
+        TEST_NAME,
+        "rooted-identity-missing",
+        LocalAtomicWriteStage::ReplaceDestination,
+        LocalAtomicDestinationState::Missing,
+        1,
+    );
+}
+
+/// Verifies propagation of injected rooted identity inspection failures.
+#[cfg(all(coverage, target_os = "linux"))]
+#[test]
+fn test_commit_reports_injected_rooted_identity_inspection_error() {
+    const TEST_NAME: &str = concat!(
+        "local::local_root_atomic_writer_tests::",
+        "test_commit_reports_injected_rooted_identity_inspection_error",
+    );
+    assert_injected_rooted_commit_error(
+        TEST_NAME,
+        "rooted-identity-inspect",
+        LocalAtomicWriteStage::ReplaceDestination,
+        LocalAtomicDestinationState::Unchanged,
+        0,
+    );
+}
+
+/// Verifies propagation of injected rooted replacement failures.
+#[cfg(all(coverage, target_os = "linux"))]
+#[test]
+fn test_commit_reports_injected_rooted_install_error() {
+    const TEST_NAME: &str = concat!(
+        "local::local_root_atomic_writer_tests::",
+        "test_commit_reports_injected_rooted_install_error",
+    );
+    assert_injected_rooted_commit_error(
+        TEST_NAME,
+        "rooted-install",
+        LocalAtomicWriteStage::ReplaceDestination,
+        LocalAtomicDestinationState::Unchanged,
+        0,
+    );
+}
+
+/// Verifies propagation of injected rooted destination-open failures.
+#[cfg(all(coverage, target_os = "linux"))]
+#[test]
+fn test_commit_reports_injected_rooted_destination_open_error() {
+    const TEST_NAME: &str = concat!(
+        "local::local_root_atomic_writer_tests::",
+        "test_commit_reports_injected_rooted_destination_open_error",
+    );
+    assert_injected_rooted_commit_error(
+        TEST_NAME,
+        "rooted-destination-open",
+        LocalAtomicWriteStage::ReadDestinationMetadata,
+        LocalAtomicDestinationState::Unchanged,
+        0,
+    );
+}
+
+/// Verifies normalization of an injected missing rooted destination.
+#[cfg(all(coverage, target_os = "linux"))]
+#[test]
+fn test_commit_reports_injected_missing_rooted_destination() {
+    const TEST_NAME: &str = concat!(
+        "local::local_root_atomic_writer_tests::",
+        "test_commit_reports_injected_missing_rooted_destination",
+    );
+    assert_injected_rooted_commit_error(
+        TEST_NAME,
+        "rooted-destination-missing",
+        LocalAtomicWriteStage::ReadDestinationMetadata,
+        LocalAtomicDestinationState::Missing,
+        1,
+    );
+}
+
+/// Verifies propagation of injected descriptor-status read failures.
+#[cfg(all(coverage, target_os = "linux"))]
+#[test]
+fn test_commit_reports_injected_nonblocking_status_read_error() {
+    const TEST_NAME: &str = concat!(
+        "local::local_root_atomic_writer_tests::",
+        "test_commit_reports_injected_nonblocking_status_read_error",
+    );
+    assert_injected_rooted_commit_error(
+        TEST_NAME,
+        "unix-clear-nonblocking-get",
+        LocalAtomicWriteStage::ReadDestinationMetadata,
+        LocalAtomicDestinationState::Unchanged,
+        0,
+    );
+}
+
+/// Verifies propagation of injected descriptor-status update failures.
+#[cfg(all(coverage, target_os = "linux"))]
+#[test]
+fn test_commit_reports_injected_nonblocking_status_update_error() {
+    const TEST_NAME: &str = concat!(
+        "local::local_root_atomic_writer_tests::",
+        "test_commit_reports_injected_nonblocking_status_update_error",
+    );
+    assert_injected_rooted_commit_error(
+        TEST_NAME,
+        "unix-clear-nonblocking-set",
+        LocalAtomicWriteStage::ReadDestinationMetadata,
+        LocalAtomicDestinationState::Unchanged,
+        0,
+    );
+}
+
+/// Verifies propagation of rooted staging filename generation failures.
+#[cfg(all(coverage, target_os = "linux"))]
+#[test]
+fn test_begin_reports_injected_rooted_staging_generation_error() {
+    const TEST_NAME: &str = concat!(
+        "local::local_root_atomic_writer_tests::",
+        "test_begin_reports_injected_rooted_staging_generation_error",
+    );
+    assert_injected_rooted_begin_error(TEST_NAME, "rooted-staging-generate");
+}
+
+/// Verifies exhaustion of injected rooted staging-name collisions.
+#[cfg(all(coverage, target_os = "linux"))]
+#[test]
+fn test_begin_reports_injected_rooted_staging_collision_exhaustion() {
+    const TEST_NAME: &str = concat!(
+        "local::local_root_atomic_writer_tests::",
+        "test_begin_reports_injected_rooted_staging_collision_exhaustion",
+    );
+    assert_injected_rooted_begin_error(TEST_NAME, "rooted-staging-collision");
+}
+
+/// Verifies propagation of rooted staging open failures.
+#[cfg(all(coverage, target_os = "linux"))]
+#[test]
+fn test_begin_reports_injected_rooted_staging_open_error() {
+    const TEST_NAME: &str = concat!(
+        "local::local_root_atomic_writer_tests::",
+        "test_begin_reports_injected_rooted_staging_open_error",
+    );
+    assert_injected_rooted_begin_error(TEST_NAME, "rooted-staging-open");
+}
+
+/// Verifies propagation of injected rooted parent-creation failures.
+#[cfg(all(coverage, target_os = "linux"))]
+#[test]
+fn test_begin_reports_injected_rooted_parent_creation_error() {
+    const TEST_NAME: &str = concat!(
+        "local::local_root_atomic_writer_tests::",
+        "test_begin_reports_injected_rooted_parent_creation_error",
+    );
+    let Some(()) = run_in_coverage_fault_process(
+        TEST_NAME,
+        "rooted-mkdir-error",
+        || {
+            let root_path = temp_dir("rooted-mkdir-error");
+            let root = LocalRoot::open(&root_path).expect("root should open");
+            let destination = LocalRelativePath::new("nested/result.txt")
+                .expect("destination should validate");
+
+            let error = root
+                .begin_atomic_write(&destination)
+                .expect_err("injected parent creation should fail");
+
+            assert_eq!(LocalAtomicWriteStage::PrepareParent, error.stage());
+            fs::remove_dir_all(root_path)
+                .expect("test directory should be removed");
+        },
+    ) else {
+        return;
+    };
+}
 
 /// Verifies descriptor-relative atomic replacement and explicit abort cleanup.
 #[cfg(unix)]

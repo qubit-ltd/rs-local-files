@@ -115,20 +115,44 @@ pub(super) fn with_copy_context<T>(
 pub(super) fn record_created_directory(
     stats: &mut LocalCopyDirStats,
 ) -> Result<()> {
-    stats
-        .directories
-        .checked_add(1)
-        .ok_or_else(directory_statistics_overflow_error)
-        .map(|directories| stats.directories = directories)
+    #[cfg(coverage)]
+    let directories = if crate::local::internal::coverage_fault::is_enabled(
+        "copy-stats-directories",
+    ) {
+        None
+    } else {
+        stats.directories.checked_add(1)
+    };
+    #[cfg(not(coverage))]
+    let directories = stats.directories.checked_add(1);
+    match directories {
+        Some(directories) => {
+            stats.directories = directories;
+            Ok(())
+        }
+        None => Err(directory_statistics_overflow_error()),
+    }
 }
 
 /// Records one skipped destination file.
 pub(super) fn record_skipped_file(stats: &mut LocalCopyDirStats) -> Result<()> {
-    stats
-        .skipped
-        .checked_add(1)
-        .ok_or_else(skipped_statistics_overflow_error)
-        .map(|skipped| stats.skipped = skipped)
+    #[cfg(coverage)]
+    let skipped = if crate::local::internal::coverage_fault::is_enabled(
+        "copy-stats-skipped",
+    ) {
+        None
+    } else {
+        stats.skipped.checked_add(1)
+    };
+    #[cfg(not(coverage))]
+    let skipped = stats.skipped.checked_add(1);
+    match skipped {
+        Some(skipped) => {
+            stats.skipped = skipped;
+            Ok(())
+        }
+        None => Err(skipped_statistics_overflow_error()),
+    }
 }
 
 /// Atomically records one committed file and its copied byte count.
@@ -136,19 +160,36 @@ pub(super) fn record_copied_file(
     stats: &mut LocalCopyDirStats,
     bytes: u64,
 ) -> Result<()> {
-    stats
-        .files
-        .checked_add(1)
-        .ok_or_else(file_statistics_overflow_error)
-        .and_then(|files| {
-            stats
-                .bytes
-                .checked_add(bytes)
-                .ok_or_else(byte_statistics_overflow_error)
-                .map(|bytes| (files, bytes))
-        })
-        .map(|(files, bytes)| {
+    #[cfg(coverage)]
+    let files = if crate::local::internal::coverage_fault::is_enabled(
+        "copy-stats-files",
+    ) {
+        None
+    } else {
+        stats.files.checked_add(1)
+    };
+    #[cfg(not(coverage))]
+    let files = stats.files.checked_add(1);
+    let files = match files {
+        Some(files) => files,
+        None => return Err(file_statistics_overflow_error()),
+    };
+    #[cfg(coverage)]
+    let total_bytes = if crate::local::internal::coverage_fault::is_enabled(
+        "copy-stats-bytes",
+    ) {
+        None
+    } else {
+        stats.bytes.checked_add(bytes)
+    };
+    #[cfg(not(coverage))]
+    let total_bytes = stats.bytes.checked_add(bytes);
+    match total_bytes {
+        Some(total_bytes) => {
             stats.files = files;
-            stats.bytes = bytes;
-        })
+            stats.bytes = total_bytes;
+            Ok(())
+        }
+        None => Err(byte_statistics_overflow_error()),
+    }
 }

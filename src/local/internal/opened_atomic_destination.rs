@@ -49,12 +49,15 @@ pub(crate) struct OpenedAtomicDestination {
 impl OpenedAtomicDestination {
     /// Constructs and validates destination identity from an open file.
     pub(crate) fn from_file(file: File) -> Result<Self> {
+        let mut metadata_result = file.metadata();
         #[cfg(coverage)]
         if super::coverage_fault::is_enabled("atomic-destination-stat") {
-            return Err(Error::from_raw_os_error(libc::EIO));
+            metadata_result = Err(Error::from_raw_os_error(libc::EIO));
         }
-        let metadata = file.metadata()?;
-        if !metadata.is_file() {
+        let metadata = metadata_result?;
+        if !metadata.is_file()
+            || coverage_fault_enabled("atomic-destination-type")
+        {
             return Err(invalid_atomic_destination());
         }
         clear_nonblocking(file.as_raw_fd())?;
@@ -101,7 +104,19 @@ pub(crate) fn open_atomic_destination(
         .custom_flags(libc::O_NOFOLLOW | libc::O_NONBLOCK);
     let mut retry_delay = Duration::ZERO;
     let file = loop {
-        match options.open(path) {
+        let mut result = options.open(path);
+        #[cfg(coverage)]
+        if super::coverage_fault::take("atomic-destination-would-block") {
+            result = Err(Error::from(ErrorKind::WouldBlock));
+        } else if super::coverage_fault::is_enabled(
+            "atomic-destination-invalid",
+        ) {
+            result = Err(Error::from_raw_os_error(libc::ELOOP));
+        } else if super::coverage_fault::is_enabled("atomic-destination-native")
+        {
+            result = Err(Error::from_raw_os_error(libc::EIO));
+        }
+        match result {
             Ok(file) => break file,
             Err(error) if error.kind() == ErrorKind::NotFound => {
                 return Ok(None);
@@ -129,16 +144,17 @@ pub(crate) fn destination_identity_matches(
     destination: &OpenedAtomicDestination,
 ) -> Result<bool> {
     #[cfg(coverage)]
-    if super::coverage_fault::is_enabled("atomic-identity-mismatch")
-        || super::coverage_fault::is_enabled("atomic-identity-missing")
-    {
+    if super::coverage_fault::is_enabled("atomic-identity-mismatch") {
         return Ok(false);
     }
+    let mut result = fs::symlink_metadata(path);
     #[cfg(coverage)]
-    if super::coverage_fault::is_enabled("atomic-identity-inspect") {
-        return Err(Error::from_raw_os_error(libc::EIO));
+    if super::coverage_fault::is_enabled("atomic-identity-missing") {
+        result = Err(Error::from(ErrorKind::NotFound));
+    } else if super::coverage_fault::is_enabled("atomic-identity-inspect") {
+        result = Err(Error::from_raw_os_error(libc::EIO));
     }
-    match fs::symlink_metadata(path) {
+    match result {
         Ok(metadata) => Ok(metadata.file_type().is_file()
             && metadata.dev() == destination.device
             && metadata.ino() == destination.inode),
@@ -152,11 +168,29 @@ pub(in crate::local) fn open_rooted_atomic_destination(
     parent: &File,
     name: &CString,
 ) -> Result<Option<OpenedAtomicDestination>> {
+    #[cfg(coverage)]
+    if super::coverage_fault::is_enabled("rooted-destination-open") {
+        return Err(Error::from_raw_os_error(libc::EIO));
+    } else if super::coverage_fault::is_enabled("rooted-destination-missing") {
+        return Ok(None);
+    }
     let flags =
         libc::O_RDONLY | libc::O_NOFOLLOW | libc::O_NONBLOCK | libc::O_CLOEXEC;
     let mut retry_delay = Duration::ZERO;
     let file = loop {
-        match open_file_at(parent, name, flags, 0) {
+        let mut result = open_file_at(parent, name, flags, 0);
+        #[cfg(coverage)]
+        if super::coverage_fault::take("rooted-destination-would-block") {
+            result = Err(Error::from(ErrorKind::WouldBlock));
+        } else if super::coverage_fault::is_enabled(
+            "rooted-destination-invalid",
+        ) {
+            result = Err(Error::from_raw_os_error(libc::ELOOP));
+        } else if super::coverage_fault::is_enabled("rooted-destination-native")
+        {
+            result = Err(Error::from_raw_os_error(libc::EIO));
+        }
+        match result {
             Ok(file) => break file,
             Err(error) if error.kind() == ErrorKind::NotFound => {
                 return Ok(None);
@@ -184,10 +218,20 @@ pub(in crate::local) fn rooted_destination_identity_matches(
     name: &CString,
     destination: &OpenedAtomicDestination,
 ) -> Result<bool> {
+    #[cfg(coverage)]
+    if super::coverage_fault::is_enabled("rooted-identity-mismatch")
+        || super::coverage_fault::is_enabled("rooted-identity-missing")
+    {
+        return Ok(false);
+    } else if super::coverage_fault::is_enabled("rooted-identity-inspect") {
+        return Err(Error::from_raw_os_error(libc::EIO));
+    }
     let Some(status) = rooted_destination_status(parent, name)? else {
         return Ok(false);
     };
-    if !is_regular_file_mode(status.st_mode) {
+    if !is_regular_file_mode(status.st_mode)
+        || coverage_fault_enabled("rooted-status-type")
+    {
         return Ok(false);
     }
     let device = native_identity_component(status.st_dev)?;
@@ -200,6 +244,12 @@ fn rooted_destination_status(
     parent: &File,
     name: &CString,
 ) -> Result<Option<libc::stat>> {
+    #[cfg(coverage)]
+    if super::coverage_fault::is_enabled("rooted-status-missing") {
+        return Ok(None);
+    } else if super::coverage_fault::is_enabled("rooted-status-error") {
+        return Err(Error::from_raw_os_error(libc::EIO));
+    }
     let mut status = std::mem::MaybeUninit::<libc::stat>::uninit();
     // SAFETY: `status` is writable storage and the parent descriptor and name
     // remain live for this non-retaining lookup.
@@ -228,12 +278,30 @@ fn native_identity_component<T>(value: T) -> Result<u64>
 where
     u64: TryFrom<T>,
 {
+    #[cfg(coverage)]
+    if super::coverage_fault::is_enabled("rooted-identity-overflow") {
+        return Err(Error::new(
+            ErrorKind::InvalidData,
+            "injected atomic destination identity overflow",
+        ));
+    }
     match u64::try_from(value) {
         Ok(value) => Ok(value),
         Err(_) => Err(Error::new(
             ErrorKind::InvalidData,
             "atomic destination identity is outside the supported range",
         )),
+    }
+}
+
+/// Returns whether a coverage-only atomic destination fault is selected.
+fn coverage_fault_enabled(name: &str) -> bool {
+    #[cfg(coverage)]
+    return super::coverage_fault::is_enabled(name);
+    #[cfg(not(coverage))]
+    {
+        let _ = name;
+        false
     }
 }
 

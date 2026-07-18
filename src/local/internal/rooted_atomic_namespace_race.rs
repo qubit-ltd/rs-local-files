@@ -104,6 +104,10 @@ fn rooted_mismatch_state(
     parent: &File,
     name: &CString,
 ) -> LocalAtomicDestinationState {
+    #[cfg(coverage)]
+    if super::coverage_fault::is_enabled("rooted-identity-missing") {
+        return LocalAtomicDestinationState::Missing;
+    }
     match inspect_rooted_atomic_destination(parent, name) {
         Ok(false) => LocalAtomicDestinationState::Missing,
         _ => LocalAtomicDestinationState::Unchanged,

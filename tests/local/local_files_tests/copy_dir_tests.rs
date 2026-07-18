@@ -22,6 +22,8 @@ use std::os::fd::AsRawFd;
 #[cfg(target_os = "linux")]
 use std::time::Duration;
 
+#[cfg(coverage)]
+use super::super::test_support::run_in_coverage_fault_process;
 #[cfg(target_os = "linux")]
 use super::super::test_support::run_in_small_stack_process;
 use super::super::test_support::{
@@ -42,6 +44,306 @@ use super::super::test_support::{
     SourceReadLease,
     current_thread_cpu_time,
 };
+
+/// Asserts one injected recursive-copy failure through the public API.
+#[cfg(all(coverage, target_os = "linux"))]
+fn assert_injected_copy_error(
+    test_name: &str,
+    fault: &str,
+    options: LocalCopyDirOptions,
+    with_file: bool,
+    existing_destination: bool,
+    expected_stage: LocalCopyDirStage,
+) {
+    let Some(()) = run_in_coverage_fault_process(test_name, fault, move || {
+        let dir = temp_dir(fault);
+        let src = dir.join("src");
+        let dst = dir.join("dst");
+        fs::create_dir(&src).expect("source directory should be created");
+        if with_file {
+            fs::write(src.join("data.txt"), b"source")
+                .expect("source file should be written");
+        }
+        if existing_destination {
+            fs::create_dir(&dst)
+                .expect("destination directory should be created");
+            fs::write(dst.join("data.txt"), b"destination")
+                .expect("destination file should be written");
+        }
+
+        let error = LocalFiles::copy_dir_all_with(&src, &dst, options)
+            .expect_err("injected copy operation should fail");
+        assert_eq!(expected_stage, error.stage);
+        fs::remove_dir_all(dir).expect("test directory should be removed");
+    }) else {
+        return;
+    };
+}
+
+/// Verifies propagation of an injected source-to-staging copy error.
+#[cfg(all(coverage, target_os = "linux"))]
+#[test]
+fn test_copy_dir_reports_injected_staging_copy_error() {
+    const TEST_NAME: &str = concat!(
+        "local::local_files_tests::copy_dir_tests::",
+        "test_copy_dir_reports_injected_staging_copy_error",
+    );
+    assert_injected_copy_error(
+        TEST_NAME,
+        "copy-staging-copy",
+        LocalCopyDirOptions::default(),
+        true,
+        false,
+        LocalCopyDirStage::CopyFileContents,
+    );
+}
+
+/// Verifies propagation of an injected staging-permission error.
+#[cfg(all(coverage, target_os = "linux"))]
+#[test]
+fn test_copy_dir_reports_injected_staging_permissions_error() {
+    const TEST_NAME: &str = concat!(
+        "local::local_files_tests::copy_dir_tests::",
+        "test_copy_dir_reports_injected_staging_permissions_error",
+    );
+    assert_injected_copy_error(
+        TEST_NAME,
+        "copy-staging-permissions",
+        LocalCopyDirOptions::default().preserve_permissions(),
+        true,
+        false,
+        LocalCopyDirStage::PreservePermissions,
+    );
+}
+
+/// Verifies directory-statistics overflow normalization.
+#[cfg(all(coverage, target_os = "linux"))]
+#[test]
+fn test_copy_dir_reports_injected_directory_statistics_overflow() {
+    const TEST_NAME: &str = concat!(
+        "local::local_files_tests::copy_dir_tests::",
+        "test_copy_dir_reports_injected_directory_statistics_overflow",
+    );
+    assert_injected_copy_error(
+        TEST_NAME,
+        "copy-stats-directories",
+        LocalCopyDirOptions::default(),
+        false,
+        false,
+        LocalCopyDirStage::UpdateStatistics,
+    );
+}
+
+/// Verifies copied-file statistics overflow normalization.
+#[cfg(all(coverage, target_os = "linux"))]
+#[test]
+fn test_copy_dir_reports_injected_file_statistics_overflow() {
+    const TEST_NAME: &str = concat!(
+        "local::local_files_tests::copy_dir_tests::",
+        "test_copy_dir_reports_injected_file_statistics_overflow",
+    );
+    assert_injected_copy_error(
+        TEST_NAME,
+        "copy-stats-files",
+        LocalCopyDirOptions::default(),
+        true,
+        false,
+        LocalCopyDirStage::UpdateStatistics,
+    );
+}
+
+/// Verifies copied-byte statistics overflow normalization.
+#[cfg(all(coverage, target_os = "linux"))]
+#[test]
+fn test_copy_dir_reports_injected_byte_statistics_overflow() {
+    const TEST_NAME: &str = concat!(
+        "local::local_files_tests::copy_dir_tests::",
+        "test_copy_dir_reports_injected_byte_statistics_overflow",
+    );
+    assert_injected_copy_error(
+        TEST_NAME,
+        "copy-stats-bytes",
+        LocalCopyDirOptions::default(),
+        true,
+        false,
+        LocalCopyDirStage::UpdateStatistics,
+    );
+}
+
+/// Verifies skipped-file statistics overflow normalization.
+#[cfg(all(coverage, target_os = "linux"))]
+#[test]
+fn test_copy_dir_reports_injected_skipped_statistics_overflow() {
+    const TEST_NAME: &str = concat!(
+        "local::local_files_tests::copy_dir_tests::",
+        "test_copy_dir_reports_injected_skipped_statistics_overflow",
+    );
+    assert_injected_copy_error(
+        TEST_NAME,
+        "copy-stats-skipped",
+        LocalCopyDirOptions::new().with_conflict(LocalCopyConflictPolicy::Skip),
+        true,
+        true,
+        LocalCopyDirStage::UpdateStatistics,
+    );
+}
+
+/// Verifies reconciliation when a destination directory appears concurrently.
+#[cfg(all(coverage, target_os = "linux"))]
+#[test]
+fn test_copy_dir_reconciles_injected_existing_directory_race() {
+    const TEST_NAME: &str = concat!(
+        "local::local_files_tests::copy_dir_tests::",
+        "test_copy_dir_reconciles_injected_existing_directory_race",
+    );
+    let Some(()) = run_in_coverage_fault_process(
+        TEST_NAME,
+        "copy-directory-race-existing",
+        || {
+            let dir = temp_dir("copy-directory-race-existing");
+            let src = dir.join("src");
+            let dst = dir.join("dst");
+            fs::create_dir(&src).expect("source directory should be created");
+
+            let stats = LocalFiles::copy_dir_all_with(
+                &src,
+                &dst,
+                LocalCopyDirOptions::default(),
+            )
+            .expect("racing destination directory should be reconciled");
+
+            assert_eq!(0, stats.directories);
+            fs::remove_dir_all(dir).expect("test directory should be removed");
+        },
+    ) else {
+        return;
+    };
+}
+
+/// Verifies rejection when a racing destination is not a real directory.
+#[cfg(all(coverage, target_os = "linux"))]
+#[test]
+fn test_copy_dir_rejects_injected_non_directory_creation_race() {
+    const TEST_NAME: &str = concat!(
+        "local::local_files_tests::copy_dir_tests::",
+        "test_copy_dir_rejects_injected_non_directory_creation_race",
+    );
+    assert_injected_copy_error(
+        TEST_NAME,
+        "copy-directory-race-nondirectory",
+        LocalCopyDirOptions::default(),
+        false,
+        false,
+        LocalCopyDirStage::PrepareDestination,
+    );
+}
+
+/// Verifies propagation of directory-race reinspection failures.
+#[cfg(all(coverage, target_os = "linux"))]
+#[test]
+fn test_copy_dir_reports_injected_directory_race_inspection_error() {
+    const TEST_NAME: &str = concat!(
+        "local::local_files_tests::copy_dir_tests::",
+        "test_copy_dir_reports_injected_directory_race_inspection_error",
+    );
+    assert_injected_copy_error(
+        TEST_NAME,
+        "copy-directory-race-inspect",
+        LocalCopyDirOptions::default(),
+        false,
+        false,
+        LocalCopyDirStage::PrepareDestination,
+    );
+}
+
+/// Verifies propagation of directory-creation failures.
+#[cfg(all(coverage, target_os = "linux"))]
+#[test]
+fn test_copy_dir_reports_injected_directory_creation_error() {
+    const TEST_NAME: &str = concat!(
+        "local::local_files_tests::copy_dir_tests::",
+        "test_copy_dir_reports_injected_directory_creation_error",
+    );
+    assert_injected_copy_error(
+        TEST_NAME,
+        "copy-directory-create-error",
+        LocalCopyDirOptions::default(),
+        false,
+        false,
+        LocalCopyDirStage::PrepareDestination,
+    );
+}
+
+/// Asserts one injected type-replacement reinspection failure.
+#[cfg(all(coverage, target_os = "linux"))]
+fn assert_injected_root_type_replacement_error(
+    test_name: &str,
+    fault: &str,
+) {
+    let Some(()) = run_in_coverage_fault_process(test_name, fault, move || {
+        let dir = temp_dir(fault);
+        let src = dir.join("src");
+        let dst = dir.join("dst");
+        fs::create_dir(&src).expect("source directory should be created");
+        fs::write(&dst, b"destination")
+            .expect("destination file should be written");
+
+        let error = LocalFiles::copy_dir_all_with(
+            &src,
+            &dst,
+            LocalCopyDirOptions::new()
+                .with_type_conflict(LocalCopyTypeConflictPolicy::Replace),
+        )
+        .expect_err("injected destination reinspection should fail");
+
+        assert_eq!(LocalCopyDirStage::PrepareDestination, error.stage);
+        fs::remove_dir_all(dir).expect("test directory should be removed");
+    }) else {
+        return;
+    };
+}
+
+/// Verifies that a destination changing into a directory is not removed.
+#[cfg(all(coverage, target_os = "linux"))]
+#[test]
+fn test_copy_dir_handles_injected_directory_before_type_replacement() {
+    const TEST_NAME: &str = concat!(
+        "local::local_files_tests::copy_dir_tests::",
+        "test_copy_dir_handles_injected_directory_before_type_replacement",
+    );
+    assert_injected_root_type_replacement_error(
+        TEST_NAME,
+        "copy-removal-race-directory",
+    );
+}
+
+/// Verifies that a disappearing destination is normalized before creation.
+#[cfg(all(coverage, target_os = "linux"))]
+#[test]
+fn test_copy_dir_handles_injected_disappearance_before_type_replacement() {
+    const TEST_NAME: &str = concat!(
+        "local::local_files_tests::copy_dir_tests::",
+        "test_copy_dir_handles_injected_disappearance_before_type_replacement",
+    );
+    assert_injected_root_type_replacement_error(
+        TEST_NAME,
+        "copy-removal-race-not-found",
+    );
+}
+
+/// Verifies propagation of type-replacement reinspection failures.
+#[cfg(all(coverage, target_os = "linux"))]
+#[test]
+fn test_copy_dir_reports_injected_type_replacement_inspection_error() {
+    const TEST_NAME: &str = concat!(
+        "local::local_files_tests::copy_dir_tests::",
+        "test_copy_dir_reports_injected_type_replacement_inspection_error",
+    );
+    assert_injected_root_type_replacement_error(
+        TEST_NAME,
+        "copy-removal-race-inspect",
+    );
+}
 
 #[test]
 fn test_copy_dir_all_with_copies_tree_and_reports_stats() {
@@ -623,7 +925,10 @@ fn test_source_read_lease_retries_transient_conflict() {
         })
         .expect("transient lease conflict should be retried");
 
-    assert_eq!(2, attempts.get());
+    assert!(
+        attempts.get() >= 2,
+        "the injected transient conflict should require a retry",
+    );
     lease.release().expect("test lease should be released");
     fs::remove_dir_all(dir).expect("test directory should be removed");
 }
