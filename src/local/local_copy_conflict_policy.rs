@@ -8,6 +8,27 @@
 //! Copy conflict policy.
 
 /// Conflict policy for existing destination file entries.
+///
+/// ```compile_fail
+/// #![deny(unused_must_use)]
+/// use qubit_local_files::LocalCopyConflictPolicy;
+///
+/// LocalCopyConflictPolicy::default();
+/// ```
+///
+/// ```compile_fail
+/// use qubit_local_files::LocalCopyConflictPolicy;
+///
+/// fn classify(policy: LocalCopyConflictPolicy) {
+///     match policy {
+///         LocalCopyConflictPolicy::Fail => {}
+///         LocalCopyConflictPolicy::Overwrite => {}
+///         LocalCopyConflictPolicy::Skip => {}
+///     }
+/// }
+/// ```
+#[must_use]
+#[non_exhaustive]
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
 pub enum LocalCopyConflictPolicy {
     /// Fail when a destination file entry already exists.

@@ -8,6 +8,29 @@
 //! File write mode.
 
 /// Mode used when opening a local file for writing.
+///
+/// ```compile_fail
+/// #![deny(unused_must_use)]
+/// use qubit_local_files::FileWriteMode;
+///
+/// FileWriteMode::default();
+/// ```
+///
+/// ```compile_fail
+/// use qubit_local_files::FileWriteMode;
+///
+/// fn classify(mode: FileWriteMode) {
+///     match mode {
+///         FileWriteMode::OpenExistingAtStart => {}
+///         FileWriteMode::CreateNew => {}
+///         FileWriteMode::CreateOrTruncate => {}
+///         FileWriteMode::AppendExisting => {}
+///         FileWriteMode::AppendOrCreate => {}
+///     }
+/// }
+/// ```
+#[must_use]
+#[non_exhaustive]
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum FileWriteMode {
     /// Open an existing file for writing at offset zero without truncating it.

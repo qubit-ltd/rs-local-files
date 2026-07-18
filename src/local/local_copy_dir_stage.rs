@@ -29,8 +29,16 @@
 ///     }
 /// }
 /// ```
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+///
+/// ```compile_fail
+/// #![deny(unused_must_use)]
+/// use qubit_local_files::LocalCopyDirStage;
+///
+/// LocalCopyDirStage::InspectSource.clone();
+/// ```
+#[must_use]
 #[non_exhaustive]
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum LocalCopyDirStage {
     /// Inspecting or canonicalizing the source directory failed.
     InspectSource,

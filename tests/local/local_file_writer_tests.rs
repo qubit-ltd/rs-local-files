@@ -12,8 +12,9 @@ use std::io::{
     Write,
 };
 
+#[cfg(unix)]
+use qubit_local_files::FileWriteMode;
 use qubit_local_files::{
-    FileWriteMode,
     FileWriteOptions,
     LocalFiles,
 };
