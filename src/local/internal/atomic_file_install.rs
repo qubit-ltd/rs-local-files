@@ -143,6 +143,12 @@ pub(crate) fn install_new_atomic_file_at(
 ) -> std::result::Result<(), (Error, LocalAtomicDestinationState)> {
     #[cfg(any(target_os = "linux", target_os = "android"))]
     {
+        #[cfg(coverage)]
+        if super::coverage_fault::is_enabled(
+            "atomic-install-before-native-call",
+        ) {
+            return Err(unchanged_error(Error::from_raw_os_error(libc::EIO)));
+        }
         // SAFETY: both directory descriptors and C strings remain live for
         // the non-retaining syscall, and `RENAME_NOREPLACE` is the only flag.
         let result = unsafe {

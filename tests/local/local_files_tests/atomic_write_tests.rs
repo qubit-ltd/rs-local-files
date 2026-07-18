@@ -22,6 +22,8 @@ use std::io::{
 use super::super::test_support::PermissionsExt;
 #[cfg(unix)]
 use super::super::test_support::create_fifo;
+#[cfg(coverage)]
+use super::super::test_support::run_in_coverage_fault_process;
 use super::super::test_support::{
     CURRENT_DIR_LOCK,
     CurrentDirGuard,
@@ -59,6 +61,39 @@ use super::super::test_support::{
 };
 #[cfg(target_os = "linux")]
 use super::copy_dir_tests::directory_write_restrictions_are_enforced;
+
+/// Verifies that an injected native no-replace failure keeps the destination
+/// unchanged and reports the replacement stage.
+#[cfg(all(coverage, target_os = "linux"))]
+#[test]
+fn test_atomic_write_reports_injected_native_install_error() {
+    const TEST_NAME: &str = concat!(
+        "local::local_files_tests::atomic_write_tests::",
+        "test_atomic_write_reports_injected_native_install_error",
+    );
+
+    let dir = temp_dir("atomic-injected-native-install-error");
+    let destination = dir.join("destination.txt");
+    let child_destination = destination.clone();
+    let Some(result) = run_in_coverage_fault_process(
+        TEST_NAME,
+        "atomic-install-before-native-call",
+        move || LocalFiles::atomic_write(&child_destination, b"new"),
+    ) else {
+        fs::remove_dir_all(dir).expect("test directory should be removed");
+        return;
+    };
+
+    let error = result.expect_err("injected native install should fail");
+    assert_eq!(LocalAtomicWriteStage::ReplaceDestination, error.stage());
+    assert_eq!(
+        LocalAtomicDestinationState::Unchanged,
+        error.destination_state(),
+    );
+    assert!(!destination.exists(), "destination must remain missing");
+    assert_eq!(0, count_atomic_temp_files(&dir));
+    fs::remove_dir_all(dir).expect("test directory should be removed");
+}
 
 #[test]
 fn test_atomic_write_creates_parent_directories_and_replaces_file() {

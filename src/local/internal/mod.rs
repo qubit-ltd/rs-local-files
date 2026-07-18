@@ -13,6 +13,8 @@ mod atomic_metadata;
 #[cfg(unix)]
 mod atomic_namespace_race;
 mod copy_dir;
+#[cfg(coverage)]
+mod coverage_fault;
 mod dir_size_frame;
 mod file_io;
 mod file_move;

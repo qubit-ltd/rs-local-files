@@ -28,6 +28,8 @@ pub(super) use std::io::{
 #[cfg(unix)]
 pub(super) use std::os::unix::fs::PermissionsExt;
 
+#[cfg(coverage)]
+mod coverage_fault_process_tests;
 mod current_dir_guard_tests;
 #[cfg(target_os = "linux")]
 mod file_owner_ex_tests;
@@ -51,6 +53,8 @@ mod windows_security_tests;
 ))]
 mod xattr_tests;
 
+#[cfg(coverage)]
+pub(super) use coverage_fault_process_tests::run_in_coverage_fault_process;
 pub(super) use current_dir_guard_tests::{
     CURRENT_DIR_LOCK,
     CurrentDirGuard,
