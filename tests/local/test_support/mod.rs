@@ -82,7 +82,10 @@ pub(super) use macos_acl_tests::{
 #[cfg(target_os = "linux")]
 pub(super) use small_stack_process_tests::run_in_small_stack_process;
 #[cfg(target_os = "linux")]
-pub(super) use source_read_lease_tests::SourceReadLease;
+pub(super) use source_read_lease_tests::{
+    SourceReadLease,
+    current_thread_cpu_time,
+};
 pub(super) use test_logger_tests::ensure_test_logger;
 #[cfg(windows)]
 pub(super) use windows_security_tests::{

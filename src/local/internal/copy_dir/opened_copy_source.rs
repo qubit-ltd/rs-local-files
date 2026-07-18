@@ -20,6 +20,8 @@ use std::io::{
     Result,
 };
 use std::path::Path;
+#[cfg(unix)]
+use std::time::Duration;
 
 #[cfg(unix)]
 use std::os::fd::AsRawFd;
@@ -39,9 +41,13 @@ use windows_sys::Win32::Storage::FileSystem::{
 };
 
 #[cfg(unix)]
-use crate::local::internal::clear_nonblocking;
+use crate::local::internal::{
+    clear_nonblocking,
+    wait_for_nonblocking_open_retry,
+};
 
 /// Open regular-file source and metadata read from the same handle.
+#[must_use = "the opened source handle and its authoritative metadata must be consumed together"]
 pub(super) struct OpenedCopySource {
     /// Open source file used for byte copying.
     file: File,
@@ -66,6 +72,7 @@ impl OpenedCopySource {
     /// Returns `InvalidInput` for a symbolic link that must not be followed or
     /// for an opened non-regular resource. Other open and metadata errors are
     /// returned unchanged.
+    #[inline(always)]
     pub(super) fn open(path: &Path, follow_symlinks: bool) -> Result<Self> {
         open_copy_source(path, follow_symlinks)
     }
@@ -75,6 +82,7 @@ impl OpenedCopySource {
     /// # Returns
     ///
     /// Open source file followed by metadata read from that handle.
+    #[must_use = "the opened source handle and authoritative metadata must both be retained"]
     #[inline(always)]
     pub(super) fn into_parts(self) -> (File, Metadata) {
         (self.file, self.metadata)
@@ -109,10 +117,11 @@ fn open_copy_source(
 /// ever allowing a racing FIFO or device path to block the opening thread.
 #[cfg(unix)]
 fn open_unix_source(options: &OpenOptions, path: &Path) -> Result<File> {
+    let mut retry_delay = Duration::ZERO;
     loop {
         match options.open(path) {
             Err(error) if error.kind() == ErrorKind::WouldBlock => {
-                std::thread::yield_now();
+                wait_for_nonblocking_open_retry(&mut retry_delay);
             }
             result => return result,
         }

@@ -15,6 +15,13 @@ use std::io::{
     Result,
 };
 use std::os::fd::RawFd;
+use std::thread;
+use std::time::Duration;
+
+/// Initial sleep after one scheduler yield for a conflicting file lease.
+const INITIAL_OPEN_RETRY_DELAY: Duration = Duration::from_micros(50);
+/// Maximum sleep between nonblocking open attempts.
+const MAX_OPEN_RETRY_DELAY: Duration = Duration::from_millis(10);
 
 /// Clears the nonblocking status flag from a live descriptor.
 ///
@@ -44,4 +51,25 @@ pub(crate) fn clear_nonblocking(descriptor: RawFd) -> Result<()> {
         return Err(Error::last_os_error());
     }
     Ok(())
+}
+
+/// Waits before retrying a nonblocking open that conflicts with a file lease.
+///
+/// The first conflict yields the current time slice. Later conflicts sleep
+/// with exponentially increasing delay capped at ten milliseconds. This keeps
+/// normal blocking-open semantics without continuously consuming a worker CPU
+/// while another process or thread retains the lease.
+///
+/// # Parameters
+///
+/// * `delay` - Current retry delay. Callers initialize it to [`Duration::ZERO`]
+///   and retain the updated value for later retries.
+pub(crate) fn wait_for_nonblocking_open_retry(delay: &mut Duration) {
+    if delay.is_zero() {
+        thread::yield_now();
+        *delay = INITIAL_OPEN_RETRY_DELAY;
+        return;
+    }
+    thread::sleep(*delay);
+    *delay = delay.saturating_mul(2).min(MAX_OPEN_RETRY_DELAY);
 }

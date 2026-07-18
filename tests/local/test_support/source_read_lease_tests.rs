@@ -250,6 +250,46 @@ fn duration_to_timespec(duration: Duration) -> libc::timespec {
     }
 }
 
+/// Reads CPU time consumed by the current Linux thread.
+///
+/// # Returns
+///
+/// CPU time charged to the calling thread.
+///
+/// # Errors
+///
+/// Returns the native clock error, or [`ErrorKind::InvalidData`] when the
+/// returned native time cannot be represented as a Rust [`Duration`].
+pub(crate) fn current_thread_cpu_time() -> Result<Duration> {
+    let mut time = std::mem::MaybeUninit::<libc::timespec>::uninit();
+    // SAFETY: `time` points to writable storage for one timespec and is read
+    // only after clock_gettime reports success.
+    let result = unsafe {
+        libc::clock_gettime(libc::CLOCK_THREAD_CPUTIME_ID, time.as_mut_ptr())
+    };
+    if result == -1 {
+        return Err(Error::last_os_error());
+    }
+    // SAFETY: a successful clock_gettime call initialized the complete value.
+    let time = unsafe { time.assume_init() };
+    let seconds = u64::try_from(time.tv_sec).map_err(|_| {
+        Error::new(ErrorKind::InvalidData, "thread CPU seconds are negative")
+    })?;
+    let nanoseconds = u32::try_from(time.tv_nsec).map_err(|_| {
+        Error::new(
+            ErrorKind::InvalidData,
+            "thread CPU nanoseconds are negative",
+        )
+    })?;
+    if nanoseconds >= 1_000_000_000 {
+        return Err(Error::new(
+            ErrorKind::InvalidData,
+            "thread CPU nanoseconds exceed one second",
+        ));
+    }
+    Ok(Duration::new(seconds, nanoseconds))
+}
+
 /// Consumes all pending lease-break signals before they are unblocked.
 fn drain_signal(signal_set: &libc::sigset_t) -> Option<Error> {
     let timeout = libc::timespec {

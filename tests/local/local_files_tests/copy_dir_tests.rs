@@ -17,9 +17,9 @@ use qubit_local_files::{
 #[cfg(unix)]
 use std::io::Error;
 use std::io::ErrorKind;
-
 #[cfg(target_os = "linux")]
-use super::super::test_support::SourceReadLease;
+use std::time::Duration;
+
 #[cfg(target_os = "linux")]
 use super::super::test_support::run_in_small_stack_process;
 use super::super::test_support::{
@@ -34,6 +34,11 @@ use super::super::test_support::{
     assert_fifo_open_is_rejected,
     create_fifo,
     short_temp_dir,
+};
+#[cfg(target_os = "linux")]
+use super::super::test_support::{
+    SourceReadLease,
+    current_thread_cpu_time,
 };
 
 #[test]
@@ -467,6 +472,47 @@ where
     }
     release_result.expect("source read lease should be released");
     worker_result.expect("copy worker should not panic")
+}
+
+#[cfg(target_os = "linux")]
+#[test]
+fn test_copy_dir_all_with_waits_for_source_lease_without_busy_polling() {
+    const LEASE_HOLD_DURATION: Duration = Duration::from_millis(500);
+    const MAX_WORKER_CPU_TIME: Duration = Duration::from_millis(100);
+
+    let dir = temp_dir("copy-dir-source-lease-cpu");
+    let src = dir.join("src");
+    let dst = dir.join("dst");
+    let source_file = src.join("data.txt");
+    fs::create_dir(&src).expect("source directory should be created");
+    fs::write(&source_file, b"leased").expect("source file should be written");
+    let copy_src = src.clone();
+    let copy_dst = dst.clone();
+
+    let (result, worker_cpu_time) = run_copy_after_staging(
+        &source_file,
+        || std::thread::sleep(LEASE_HOLD_DURATION),
+        move || {
+            let started = current_thread_cpu_time()
+                .expect("worker CPU start time should be readable");
+            let result = LocalFiles::copy_dir_all_with(
+                copy_src,
+                copy_dst,
+                LocalCopyDirOptions::default(),
+            );
+            let finished = current_thread_cpu_time()
+                .expect("worker CPU finish time should be readable");
+            (result, finished.saturating_sub(started))
+        },
+    );
+
+    let stats = result.expect("copy should resume after the lease is released");
+    assert_eq!(1, stats.files);
+    assert!(
+        worker_cpu_time < MAX_WORKER_CPU_TIME,
+        "lease wait consumed {worker_cpu_time:?} of worker CPU time"
+    );
+    fs::remove_dir_all(dir).expect("test directory should be removed");
 }
 
 /// Tests whether directory write restrictions are effective for this process.

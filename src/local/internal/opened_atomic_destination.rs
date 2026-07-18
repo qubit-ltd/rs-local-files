@@ -26,12 +26,17 @@ use std::os::unix::fs::{
     OpenOptionsExt,
 };
 use std::path::Path;
+use std::time::Duration;
 
 use super::rooted_file_io::open_file_at;
-use super::unix_nonblocking::clear_nonblocking;
+use super::unix_nonblocking::{
+    clear_nonblocking,
+    wait_for_nonblocking_open_retry,
+};
 use super::unix_stat::is_regular_file_mode;
 
 /// Open destination handle and Unix identity used by atomic replacement.
+#[must_use = "the destination handle and captured identity must remain authoritative until commit"]
 pub(crate) struct OpenedAtomicDestination {
     /// Open destination handle supplying commit-time metadata.
     file: File,
@@ -57,18 +62,21 @@ impl OpenedAtomicDestination {
     }
 
     /// Returns the open destination handle.
+    #[must_use]
     #[inline(always)]
     pub(crate) fn file(&self) -> &File {
         &self.file
     }
 
     /// Returns the captured device identifier.
+    #[must_use]
     #[inline(always)]
     pub(crate) const fn device(&self) -> u64 {
         self.device
     }
 
     /// Returns the captured inode identifier.
+    #[must_use]
     #[inline(always)]
     pub(crate) const fn inode(&self) -> u64 {
         self.inode
@@ -83,6 +91,7 @@ pub(crate) fn open_atomic_destination(
     options
         .read(true)
         .custom_flags(libc::O_NOFOLLOW | libc::O_NONBLOCK);
+    let mut retry_delay = Duration::ZERO;
     let file = loop {
         match options.open(path) {
             Ok(file) => break file,
@@ -90,7 +99,7 @@ pub(crate) fn open_atomic_destination(
                 return Ok(None);
             }
             Err(error) if error.kind() == ErrorKind::WouldBlock => {
-                std::thread::yield_now();
+                wait_for_nonblocking_open_retry(&mut retry_delay);
             }
             Err(error)
                 if matches!(
@@ -127,6 +136,7 @@ pub(in crate::local) fn open_rooted_atomic_destination(
 ) -> Result<Option<OpenedAtomicDestination>> {
     let flags =
         libc::O_RDONLY | libc::O_NOFOLLOW | libc::O_NONBLOCK | libc::O_CLOEXEC;
+    let mut retry_delay = Duration::ZERO;
     let file = loop {
         match open_file_at(parent, name, flags, 0) {
             Ok(file) => break file,
@@ -134,7 +144,7 @@ pub(in crate::local) fn open_rooted_atomic_destination(
                 return Ok(None);
             }
             Err(error) if error.kind() == ErrorKind::WouldBlock => {
-                std::thread::yield_now();
+                wait_for_nonblocking_open_retry(&mut retry_delay);
             }
             Err(error)
                 if matches!(

@@ -110,4 +110,7 @@ pub(crate) use temp_entry::{
     create_temp_file_in_dir,
 };
 #[cfg(unix)]
-pub(crate) use unix_nonblocking::clear_nonblocking;
+pub(crate) use unix_nonblocking::{
+    clear_nonblocking,
+    wait_for_nonblocking_open_retry,
+};
