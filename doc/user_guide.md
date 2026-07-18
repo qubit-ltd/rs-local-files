@@ -46,7 +46,7 @@ Those stream and byte-I/O concerns belong in
 
 ```toml
 [dependencies]
-qubit-local-files = "0.6"
+qubit-local-files = "0.7"
 ```
 
 ## Import Patterns
@@ -156,7 +156,9 @@ Ownership methods:
 `LocalTempDir::persist` creates missing parent directories for the target and
 rejects an existing target. It does not provide an overwrite option. If the move
 fails, `LocalPersistError` returns ownership of the guard so callers can retry,
-keep, inspect, or explicitly clean up the directory.
+keep, inspect, or explicitly clean up the directory. It also reports the
+failure stage, caller-requested target, and resolved absolute target when
+resolution succeeded.
 Persistence uses a native move/rename without a copy-and-delete fallback, so a
 cross-filesystem move may fail with `EXDEV` on Unix or an equivalent platform
 error.
@@ -233,15 +235,16 @@ call `close` and then read `path()` through `LocalFiles::open_reader` or
 directories for the target, and rejects existing targets by using a no-clobber
 move operation. It intentionally does not rely on a separate metadata precheck.
 This avoids a time-of-check/time-of-use overwrite race on supported platforms.
-On failure it returns `LocalPersistError<LocalTempFile>`, retaining the guard and
-native I/O error.
+On failure it returns `LocalPersistError<LocalTempFile>`, retaining the guard,
+native I/O error, `ResolveTarget` / `PrepareParent` / `InstallDestination`
+stage, requested target, and optional resolved absolute target.
 
 File persistence uses a native move/rename without a copy-and-delete fallback,
 so cross-filesystem moves may fail with `EXDEV` on Unix or an equivalent
 platform error. With overwrite enabled, the resulting file keeps the temporary
-file's permissions rather than the replaced target's permissions. Use
-`LocalFiles::atomic_write` when existing regular-file permissions must be
-preserved while replacing contents.
+file's metadata rather than the replaced target's metadata. Use
+`LocalFiles::atomic_write` when supported platform-native metadata must be
+strictly preserved while replacing contents.
 
 Use `persist_with` only when the overwrite policy should differ:
 
@@ -377,16 +380,39 @@ destination and cleans up the staging file. The API remains synchronous.
 Since `0.5.0`, configuration fields are private. Callers must use the existing
 getters, constructors, and builders.
 
+### Existing-target metadata contract
+
+Metadata preservation is strict. A failed read, ACL operation, xattr/extattr
+operation, or native merge aborts the replacement instead of returning success
+with weaker protection.
+
+| Target | Metadata preserved from the current destination |
+| --- | --- |
+| Windows | `ReplaceFileW` with flags `0` preserves creation time, short name, object identifier, DACL, security resource attributes, encryption, compression, and named streams absent from staging. |
+| Linux / Android | uid, gid, complete mode, and every descriptor-visible xattr, including exposed POSIX ACL, SELinux, and capability attributes. |
+| macOS | uid, gid, mode, ACLs, and xattrs through descriptor operations and `fcopyfile`. |
+| FreeBSD | uid, gid, mode, the supported POSIX or NFSv4 ACL, and user/system extattrs. |
+
+The crate does not clear `FILE_ATTRIBUTE_READONLY` to force replacement. A
+read-only Windows destination is rejected by `ReplaceFileW` and remains
+unchanged.
+
+Unix metadata is read from the destination handle during `commit`; it is not a
+snapshot taken when the writer begins. Staging metadata is synchronized before
+replacement, and the destination's device/inode identity is checked again.
+Unix intentionally does not promise to preserve inode or hard-link identity,
+mtime/ctime, or immutable/append-only flags. Windows follows the documented
+native `ReplaceFileW` merge contract.
+
 Important semantics:
 
 - Parent directories are created before writing.
 - The temporary file is created in the destination directory, so replacement can
   be atomic on common local filesystems.
-- Existing regular-file permissions are captured when the atomic writer begins
-  and that snapshot is copied to the temporary file before replacement. Commit
-  does not refresh permissions, but it reinspects the destination type
-  immediately before replacement. Coordinate concurrent destination creation
-  or permission changes externally when they must be retained.
+- Existing Unix metadata is captured from an opened current destination at
+  commit time; Windows merges metadata inside `ReplaceFileW`.
+- A destination that was absent when the writer began is installed with a
+  native no-replace operation. A concurrent creator is never overwritten.
 - On Unix, a new destination uses mode `0600`, subject to a more restrictive
   process umask.
 - If writing, flushing, or syncing the temporary file fails, the destination is
@@ -399,8 +425,10 @@ Important semantics:
   of a newly created directory entry fails, the method may return an error after
   the destination already contains the new contents.
 - Errors are reported as `LocalAtomicWriteError`, which exposes the failed
-  stage, temporary path, native I/O source, a `committed` flag, and any
-  secondary staging cleanup error.
+  stage, temporary path, native I/O source, destination state, and any secondary
+  staging cleanup error. `Unchanged`, `Replaced`, `Missing`, and `Indeterminate`
+  distinguish recovery actions. Cleanup is automatic only for `Unchanged`;
+  other outcomes retain any still-existing staging entry.
 - The final destination inspection and replacement are separate path-based
   operations. Use `LocalRootAtomicWriter` when containment must resist
   concurrent namespace replacement.
@@ -520,8 +548,10 @@ Statistics:
 The copy operation rejects destinations inside the source tree, because copying
 a directory into itself can recurse indefinitely. When symlink following is
 enabled, directory cycles introduced by followed symlinks are also rejected.
-Unsupported source entries report `std::io::ErrorKind::Unsupported` through
-`LocalCopyDirError`. The structured error also exposes the failed stage, source
+Opened source entries that are not regular files report
+`std::io::ErrorKind::InvalidInput` through `LocalCopyDirError`; an unsupported
+target reached through an explicitly followed symbolic link reports
+`ErrorKind::Unsupported`. The structured error also exposes the failed stage, source
 and destination paths, partial statistics, optional staging path, optional
 secondary cleanup error, and native I/O source error. The original copy or
 commit failure remains the primary source error.
@@ -530,9 +560,11 @@ remain in the destination, no rollback is attempted, and destructive
 type-conflict replacement may remove an existing destination directory before
 a later operation fails.
 
-Source checks, source opens, destination rechecks, and destructive replacement
-are separate path-based operations. The symlink policy prevents accidental
-traversal; it is not an attacker-resistant sandbox when another actor can
+Regular-file type and optional file permissions are read from the same opened
+handle that supplies copied bytes. Unix uses `O_NOFOLLOW` when links are
+disabled, and Windows rejects name-surrogate reparse handles. Directory
+traversal, destination rechecks, and destructive replacement remain path-based,
+so the policy is not an attacker-resistant sandbox when another actor can
 mutate either tree concurrently.
 
 ## Filename Helpers
@@ -609,6 +641,11 @@ errors carrying the additional state needed for safe recovery.
 
 Important error behavior:
 
+- `LocalPersistError` retains the temporary resource plus the persistence stage,
+  requested target, resolved target when available, and native error.
+- `LocalAtomicWriteError::destination_state()` reports `Unchanged`, `Replaced`,
+  `Missing`, or `Indeterminate`; callers must inspect both paths for an
+  indeterminate result.
 - Existing temporary-file persistence targets are rejected unless
   `LocalPersistOptions::new().with_overwrite()` is explicit.
 - Existing temporary-directory persistence targets are rejected.
@@ -654,6 +691,11 @@ codecs.
 The project includes tests for public helpers, temporary entries, overwrite
 semantics, recursive copy behavior, filename validation, atomic writes, and
 platform-sensitive edge cases.
+
+Linux runs the primary runtime suite. Native Windows and macOS jobs exercise
+their metadata and reparse behavior. FreeBSD and Android production backends
+and cfg-test sources are cross-compiled, but are not claimed as runtime-tested
+by the current CI matrix.
 
 Useful commands:
 

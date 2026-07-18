@@ -11,7 +11,9 @@
 //!
 //! This crate provides small, standard-library-first helpers for local paths,
 //! file names, temporary files and directories, recursive directory operations,
-//! and durable same-directory atomic writes.
+//! and durable same-directory atomic writes. Existing-file atomic replacement
+//! uses strict platform-native metadata preservation and reports an explicit
+//! post-failure destination state.
 
 mod local;
 

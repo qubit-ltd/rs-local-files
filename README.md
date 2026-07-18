@@ -38,7 +38,7 @@ For stream-level `std::io` traits, extension methods, wrappers, and codecs, see
 
 ```toml
 [dependencies]
-qubit-local-files = "0.6"
+qubit-local-files = "0.7"
 ```
 
 ## Quick Example
@@ -131,13 +131,15 @@ operation. Use `LocalTempFile::persist_with` and
 `LocalPersistOptions::new().with_overwrite()` only when replacing an existing target
 is intended. `LocalTempDir::persist` also rejects an existing target and does not
 provide an overwrite option. A failed persistence operation returns
-`LocalPersistError`, which retains the temporary guard for retry or inspection.
+`LocalPersistError`, which retains the temporary guard for retry or inspection
+and reports `ResolveTarget`, `PrepareParent`, or `InstallDestination` together
+with the requested target and, once available, its resolved absolute path.
 Persistence uses native move/rename operations without a copy-and-delete
 fallback, so cross-filesystem moves may fail with `EXDEV` on Unix or an
 equivalent platform error. Overwriting a file keeps the temporary file's
-permissions rather than the replaced target's permissions; use
-`LocalFiles::atomic_write` when replacing contents while preserving an existing
-regular file's permissions is required.
+metadata rather than the replaced target's metadata; use
+`LocalFiles::atomic_write` when strict platform-native metadata preservation is
+required.
 
 Native no-replace support is deliberately explicit:
 
@@ -220,16 +222,32 @@ destination parent plus the parents of directories created by the operation,
 from deepest to shallowest, when supported. The destination must be absent or
 an existing regular file. Symbolic links, directories, FIFOs, sockets, devices,
 and other special files are rejected with
-`std::io::ErrorKind::InvalidInput`. This is useful for whole-file
-replacement of configuration files, cache manifests, checkpoints, and
-generated indexes. Existing regular-file permissions are snapshotted when the
-atomic writer begins and that snapshot is applied at commit; commit does not
-refresh permissions, but it reinspects the destination type immediately before
-replacement. Coordinate concurrent destination creation or permission changes
-externally when they must be retained. The final inspection and replacement
-remain separate path operations, so use `LocalRootAtomicWriter` when adversarial
-namespace replacement is in scope. On Unix, a new destination uses mode `0600`
-before applying a more restrictive process umask.
+`std::io::ErrorKind::InvalidInput`. This is useful for whole-file replacement
+of configuration files, cache manifests, checkpoints, and generated indexes.
+
+Existing-target metadata preservation is strict and platform-native:
+
+| Target | Metadata preserved from the existing destination |
+| --- | --- |
+| Windows | `ReplaceFileW` with flags `0`: creation time, short name, object identifier, DACL, security resource attributes, encryption, compression, and named streams absent from staging. |
+| Linux / Android | uid, gid, complete Unix mode, and all descriptor-visible xattrs, including POSIX ACLs, SELinux labels, and file capabilities where exposed. |
+| macOS | uid, gid, mode, ACLs, and extended attributes through descriptor APIs and `fcopyfile`. |
+| FreeBSD | uid, gid, mode, the filesystem's POSIX or NFSv4 ACL, and user/system extattrs. |
+
+The crate does not clear `FILE_ATTRIBUTE_READONLY` to force a Windows
+replacement. A read-only destination is rejected by `ReplaceFileW` and remains
+unchanged.
+
+Unix metadata is read from an opened destination during `commit`, so changes
+made after the writer begins are included. If any protected metadata cannot be
+read, copied, or merged, commit fails rather than silently weakening it. Unix
+does not promise to preserve inode or hard-link identity, timestamps, or
+immutable/append-only flags. A target that was initially absent is installed
+with a native no-replace operation, so a concurrent creator is not overwritten.
+The final Unix identity check and replacement are still separate operations;
+coordinate concurrent writers externally and use `LocalRootAtomicWriter` when
+descriptor-relative containment is required. On Unix, a new destination starts
+with mode `0600` before applying a more restrictive process umask.
 
 For streaming content, use `LocalAtomicWriter`:
 
@@ -254,8 +272,13 @@ underlying file or raw handle after the callback returns.
 Since `0.5.0`, configuration fields are private. Use the existing getters,
 constructors, and builders instead of direct field access.
 Failures return `LocalAtomicWriteError`, including the failed stage, temporary
-path, native source error, whether replacement had already committed, and any
-secondary error raised while removing an uncommitted staging file.
+path, native source error, a `LocalAtomicDestinationState`, and any secondary
+error raised while removing an uncommitted staging file. `Unchanged` means the
+destination was not modified; `Replaced` means it contains staged contents;
+`Missing` means no destination exists; `Indeterminate` requires inspecting both
+paths before recovery. Cleanup is attempted only for `Unchanged`; other states
+retain any still-existing staging entry, although a successful move means the
+diagnostic staging path no longer exists.
 If an `atomic_write_with` callback panics, the uncommitted temporary file is
 closed and best-effort removed before the panic propagates. A cleanup failure
 cannot replace the panic, so the staging path may remain in that case.
@@ -294,10 +317,12 @@ failure remain in the destination, no rollback is attempted, and destructive
 type-conflict replacement may remove an existing destination directory before
 a later operation fails.
 
-Source checks, source opens, destination rechecks, and destructive replacement
-are separate path-based operations. The symlink policy prevents accidental
-traversal; it is not an attacker-resistant sandbox when another actor can
-mutate either tree concurrently.
+Each copied file is validated as regular from the same opened handle that
+supplies its bytes and optional permissions. Unix uses a no-follow open when
+links are disabled, and Windows rejects name-surrogate reparse handles.
+Directory traversal, destination rechecks, and destructive replacement remain
+path-based operations, so the policy is not an attacker-resistant sandbox when
+another actor can mutate either tree concurrently.
 
 ### Filename Helpers
 
@@ -337,10 +362,11 @@ For stream and byte-I/O concerns, use
 
 ## Runtime Dependencies
 
-This crate depends on the Rust standard library, `getrandom`, `libc`, and `log`
-at runtime. `getrandom` is used for random temporary names. `libc` is used for
-Unix descriptor-relative rooted operations and native rename support. `log` is
-used for drop-time cleanup warnings.
+This crate depends on the Rust standard library, `getrandom`, `libc`, `log`, and
+the target-scoped `windows-sys` bindings. `getrandom` is used for random
+temporary names. `libc` supplies Unix descriptor, metadata, ACL/extattr, and
+native rename operations. `windows-sys` supplies native Windows handle and
+replacement APIs. `log` is used for drop-time cleanup warnings.
 
 ## Testing
 
@@ -357,6 +383,11 @@ cargo test --all-features
 # Check code coverage
 ./coverage.sh
 ```
+
+Linux behavior is exercised by the primary runtime suite. Windows and macOS
+metadata/reparse tests run on their native CI jobs. FreeBSD and Android backend
+and cfg-test sources are cross-compiled; this repository does not claim runtime
+execution for those two targets in its current CI matrix.
 
 ## License
 

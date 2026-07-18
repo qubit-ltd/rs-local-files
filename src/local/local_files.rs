@@ -294,12 +294,14 @@ impl LocalFiles {
     /// may recursively remove an existing destination directory before a later
     /// operation fails.
     ///
-    /// Source inspection, source opening, destination reinspection, and
-    /// destructive replacement are separate path-based operations. The
-    /// symbolic link policy prevents ordinary accidental traversal, but it is
-    /// not a sandbox boundary when an untrusted actor can mutate either tree
-    /// concurrently. Use descriptor- or capability-relative filesystem APIs
-    /// when containment must resist concurrent path replacement.
+    /// Each file's regular-file type and optional source permissions come from
+    /// the same opened handle used to copy its bytes. Unix opens use
+    /// `O_NOFOLLOW` when links are disabled; Windows rejects name-surrogate
+    /// reparse handles. Directory traversal, destination reinspection, and
+    /// destructive replacement remain separate path-based operations, so the
+    /// symbolic-link policy is not a sandbox boundary against concurrent tree
+    /// mutation. Use descriptor- or capability-relative filesystem APIs when
+    /// containment must resist concurrent path replacement.
     ///
     /// # Parameters
     /// - `src`: Source directory.
@@ -338,13 +340,13 @@ impl LocalFiles {
     /// directories, sockets, FIFOs, devices, and other special files are
     /// rejected with [`std::io::ErrorKind::InvalidInput`].
     ///
-    /// Permissions of an existing regular-file destination are captured while
-    /// this method constructs the writer. Commit applies that snapshot and
-    /// does not refresh permissions, although it reinspects the destination
-    /// type immediately before replacement. Callers that concurrently create
-    /// the destination or change its permissions must provide external
-    /// coordination when those changes must be retained. The final inspection
-    /// and replacement remain separate path operations; use
+    /// Existing Unix metadata is read from an opened destination during
+    /// commit; Windows uses `ReplaceFileW` to merge destination metadata during
+    /// replacement. Preservation is strict: metadata or ACL merge failures
+    /// abort instead of silently degrading protection. A destination that was
+    /// absent when this method returns is installed without replacing a
+    /// concurrent creator. The final inspection and replacement remain
+    /// separate path operations; use
     /// [`crate::LocalRoot`] when containment must be anchored to an opened
     /// directory capability.
     ///
@@ -377,21 +379,23 @@ impl LocalFiles {
     /// devices, and other special files are rejected with
     /// [`std::io::ErrorKind::InvalidInput`].
     ///
-    /// Existing regular-file permissions are preserved from a snapshot taken
-    /// when this operation begins; commit does not refresh them, but it
-    /// reinspects the destination type immediately before replacement.
-    /// Concurrent destination creation or permission changes require external
-    /// coordination when they must be retained. On Unix, a new destination
-    /// uses mode `0o600`, subject to a more restrictive process umask.
+    /// Existing destination metadata is captured at commit time. Linux and
+    /// Android preserve uid, gid, mode, and descriptor-visible extended
+    /// attributes; macOS preserves uid, gid, mode, ACLs, and extended
+    /// attributes; FreeBSD preserves uid, gid, mode, ACLs, and user/system
+    /// extattrs. Windows uses strict `ReplaceFileW` metadata merging. Any
+    /// preservation failure aborts. New destinations use native no-replace
+    /// installation; on Unix their initial mode is `0o600`, subject to a more
+    /// restrictive process umask.
     ///
-    /// Before replacement, every error leaves the existing destination intact
-    /// and attempts to remove the temporary file. Staging cleanup is
-    /// best-effort because its removal error cannot replace the operation's
-    /// structured error, so an uncommitted staging path may remain when cleanup
-    /// itself fails. After replacement, a parent-directory sync failure is
-    /// reported even though the new destination is committed. This operation
-    /// is not a multi-file transaction and does not coordinate concurrent
-    /// writers. The final type inspection and replacement are separate
+    /// Failures classified as [`crate::LocalAtomicDestinationState::Unchanged`]
+    /// do not modify the destination and attempt to remove the temporary file.
+    /// Cleanup is best-effort because its error cannot replace the primary
+    /// structured error. `Missing` and `Indeterminate` retain any
+    /// still-existing staging entry for recovery; `Replaced` can report a
+    /// later durability failure after installation. This operation is not a
+    /// multi-file transaction and does not coordinate concurrent writers.
+    /// The final type inspection and replacement are separate
     /// path-based operations, so this API is not a sandbox boundary against
     /// concurrent path replacement; use [`crate::LocalRoot`] when
     /// descriptor-relative containment is required. A relative destination is
@@ -419,8 +423,8 @@ impl LocalFiles {
     ///
     /// # Errors
     /// Returns [`LocalAtomicWriteError`] with the failed stage, temporary path,
-    /// commit state, native I/O source error, and any secondary staging cleanup
-    /// error.
+    /// destination state, native I/O source error, and any secondary staging
+    /// cleanup error.
     #[inline(always)]
     pub fn atomic_write<P, B>(
         path: P,
@@ -440,10 +444,12 @@ impl LocalFiles {
     /// [`std::io::Seek`] nor the underlying file or raw handle. After it
     /// returns successfully, the staging file is flushed, synced, closed, and
     /// moved over the destination before the parent directory is synced. An
-    /// uncommitted staging file is closed and best-effort removed both on
-    /// ordinary errors and while unwinding from a callback panic. A cleanup
-    /// failure cannot replace the original error or panic and may therefore
-    /// leave the staging path behind.
+    /// uncommitted staging file is closed and best-effort removed on callback
+    /// errors and while unwinding from a callback panic. Commit failures follow
+    /// [`LocalAtomicWriteError::destination_state`]: only `Unchanged` attempts
+    /// automatic cleanup, while recovery-sensitive states retain any
+    /// still-existing staging entry. A cleanup failure cannot replace the
+    /// original error or panic and may therefore leave the staging path behind.
     /// Parent-chain synchronization and new-file permission behavior are the
     /// same as for [`Self::atomic_write`], including rejection of symbolic
     /// links and other non-regular destinations and commit-time type
@@ -472,8 +478,8 @@ impl LocalFiles {
     ///
     /// # Errors
     /// Returns [`LocalAtomicWriteError`] with the failed stage, temporary path,
-    /// commit state, native I/O source error, and any secondary staging cleanup
-    /// error.
+    /// destination state, native I/O source error, and any secondary staging
+    /// cleanup error.
     ///
     /// # Panics
     /// Propagates a panic raised by `write` after closing and attempting to

@@ -38,7 +38,7 @@ Qubit Local Files 是 Qubit Rust crate 家族中的本地文件系统 crate。�
 
 ```toml
 [dependencies]
-qubit-local-files = "0.6"
+qubit-local-files = "0.7"
 ```
 
 ## 导入方式
@@ -137,7 +137,7 @@ std::fs::write(dir.path().join("scratch.txt"), b"scratch")?;
 | `keep` | 消费 guard，把目录留在生成位置，并返回绝对路径。 |
 | `persist` | 把目录移动到最终路径，返回其绝对路径，并关闭自动清理。 |
 
-`LocalTempDir::persist` 会为目标创建缺失父目录，并拒绝已存在目标。它不提供 overwrite 选项。如果移动失败，`LocalPersistError` 会把 guard 所有权返回给调用方，以便重试、保留、检查或显式清理。持久化只使用原生 move/rename，不会回退到 copy-and-delete，因此跨文件系统移动可能在 Unix 上返回 `EXDEV`，或返回其他平台的等价错误。
+`LocalTempDir::persist` 会为目标创建缺失父目录，并拒绝已存在目标。它不提供 overwrite 选项。如果移动失败，`LocalPersistError` 会把 guard 所有权返回给调用方，以便重试、保留、检查或显式清理；错误还会报告失败阶段、调用方传入的目标，以及解析成功后绑定的绝对目标。持久化只使用原生 move/rename，不会回退到 copy-and-delete，因此跨文件系统移动可能在 Unix 上返回 `EXDEV`，或返回其他平台的等价错误。
 
 child 路径必须是非空相对路径，并且只能由 normal path component 组成。绝对路径、root 或 prefix component、`.` 和 `..` 都会被拒绝。`child_path` 在 lexical 校验后即返回；已有 symbolic-link component 仍可能解析到临时目录之外，因此返回路径不能证明文件系统 containment。`open_child_reader` 要求 child 是文件；目录或其他非文件条目会返回 `ErrorKind::InvalidInput`。`open_child_writer` 会校验已存在目标必须是文件，并确保 child 写入留在临时目录内。`ensure_child_dir` 会创建缺失的多层父目录，但在创建目录时会拒绝 symbolic link component，避免通过 child 路径离开临时目录。
 
@@ -188,7 +188,7 @@ file.close();
 
 `LocalTempFile` 有意不提供读取 helper。临时文件的常见用法是写入、关闭，然后持久化。如果确实需要检查内容，先调用 `close`，再通过 `LocalFiles::open_reader` 或 `std::fs` 读取 `path()`。
 
-`LocalTempFile::persist` 会关闭文件，为目标创建缺失父目录，并通过 no-clobber move 操作拒绝已存在目标。它有意不依赖单独的 metadata precheck。这可以在支持的平台上避免 time-of-check/time-of-use 覆盖竞态。失败时返回 `LocalPersistError<LocalTempFile>`，保留 guard 和原始 I/O error。文件持久化只使用原生 move/rename，不会回退到 copy-and-delete，因此跨文件系统移动可能在 Unix 上返回 `EXDEV`，或返回其他平台的等价错误。启用 overwrite 时，最终文件保留临时文件的权限，而不是被替换目标的权限；如果替换内容时必须保留已有普通文件的权限，请使用 `LocalFiles::atomic_write`。
+`LocalTempFile::persist` 会关闭文件，为目标创建缺失父目录，并通过 no-clobber move 操作拒绝已存在目标。它有意不依赖单独的 metadata precheck。这可以在支持的平台上避免 time-of-check/time-of-use 覆盖竞态。失败时返回 `LocalPersistError<LocalTempFile>`，保留 guard、原始 I/O error、`ResolveTarget` / `PrepareParent` / `InstallDestination` 阶段、调用方目标及可用的绝对目标。文件持久化只使用原生 move/rename，不会回退到 copy-and-delete，因此跨文件系统移动可能在 Unix 上返回 `EXDEV`，或返回其他平台的等价错误。启用 overwrite 时，最终文件保留临时文件的 metadata，而不是被替换目标的 metadata；如果替换内容时必须严格保留受支持的平台原生 metadata，请使用 `LocalFiles::atomic_write`。
 
 只有覆盖策略确实不同的时候才使用 `persist_with`：
 
@@ -296,18 +296,39 @@ writer.commit()?;
 文件。自 `0.5.0` 起，配置类型的字段不再公开，调用方必须使用现有 getter、
 constructor 和 builder。API 仍保持同步边界。
 
+### 已有目标的 metadata 契约
+
+metadata 保留采用严格语义。读取、ACL、xattr/extattr 或原生 merge 任一步骤
+失败，都会中止替换，不会在降低保护后仍返回成功。
+
+| 目标平台 | 从当前目标保留的 metadata |
+| --- | --- |
+| Windows | flags 为 `0` 的 `ReplaceFileW` 保留 creation time、short name、object identifier、DACL、security resource attributes、encryption、compression，以及 staging 中不存在的 named stream。 |
+| Linux / Android | uid、gid、完整 mode 与所有 descriptor-visible xattr，包括平台暴露的 POSIX ACL、SELinux 和 capability attribute。 |
+| macOS | 通过 descriptor 操作与 `fcopyfile` 保留 uid、gid、mode、ACL 和 xattr。 |
+| FreeBSD | uid、gid、mode、受支持的 POSIX 或 NFSv4 ACL，以及 user/system extattr。 |
+
+crate 不会为了强制替换而清除 `FILE_ATTRIBUTE_READONLY`；只读 Windows 目标会被
+`ReplaceFileW` 拒绝并保持不变。
+
+Unix metadata 在 `commit` 时从目标 handle 读取，而不是 writer 开始时的快照。
+staging metadata 会在替换前同步，并再次校验目标 device/inode identity。Unix
+有意不承诺保留 inode 或 hard-link identity、mtime/ctime、immutable 或
+append-only flag；Windows 遵循 `ReplaceFileW` 的原生 merge 契约。
+
 重要语义：
 
 - 写入前会创建父目录。
 - 临时文件创建在目标目录下，因此在常见本地文件系统上可以 atomic replacement。
-- 原子 writer 开始时会对目标已有普通文件的权限取快照，并在替换前把该快照
-  复制到临时文件；commit 不会刷新权限，但会在替换前重新检查目标类型。如果
-  并发创建目标或修改权限且这些变更必须保留，调用方需要在外部进行协调。
+- 已有目标的 Unix metadata 在 commit 时从当前打开的目标捕获；Windows 在
+  `ReplaceFileW` 内合并 metadata。
+- writer 开始时不存在的目标通过原生 no-replace 操作安装，绝不会覆盖并发
+  创建者。
 - 在 Unix 上，新目标使用 `0600`，之后仍受更严格的进程 umask 约束。
 - 如果写入、flush 或 sync 临时文件失败，目标保持不变。
 - 如果 `atomic_write_with` callback panic，unwind 会先关闭并 best-effort 删除未提交临时文件，再继续传播 panic；目标保持不变。清理失败不能替换原 panic，因此 staging path 可能残留。
 - 如果替换已经成功，但 sync 目标父目录或新建目录项的父目录失败，方法可能在目标已经包含新内容后返回错误。
-- 错误通过 `LocalAtomicWriteError` 报告，包含失败阶段、临时路径、原始 I/O source、`committed` 标志，以及 secondary staging cleanup error。
+- 错误通过 `LocalAtomicWriteError` 报告，包含失败阶段、临时路径、原始 I/O source、destination state，以及 secondary staging cleanup error。`Unchanged`、`Replaced`、`Missing` 与 `Indeterminate` 对应不同恢复动作；只有 `Unchanged` 会自动清理 staging，其他结果保留仍存在的 staging entry。
 - 最终目标检查和替换仍是两个 path-based 操作；需要抵御并发 namespace 替换时，应使用 `LocalRootAtomicWriter`。
 - 该操作不是多文件事务，也不协调并发写入。
 
@@ -414,9 +435,9 @@ assert_eq!(4, stats.bytes);
 | `bytes` | 从普通文件复制的字节数。 |
 | `skipped` | 因冲突策略而跳过的已有目标文件数量。 |
 
-复制操作会拒绝位于源目录内部的目标，因为把目录复制进自身可能导致无限递归。当启用 symlink following 时，由跟随 symbolic link 引入的目录环也会被拒绝。不支持的源条目通过 `LocalCopyDirError` 报告 `std::io::ErrorKind::Unsupported`。结构化错误同时提供失败阶段、源和目标路径、部分统计、可选 staging path、可选次级 cleanup error 及原始 I/O source error；原始复制或提交错误保持为主 source error。递归复制不是目录树级事务：失败前已经提交的条目会留在目标中，不会执行回滚；破坏性的类型冲突替换还可能先删除已有目标目录，随后才在后续操作中失败。
+复制操作会拒绝位于源目录内部的目标，因为把目录复制进自身可能导致无限递归。当启用 symlink following 时，由跟随 symbolic link 引入的目录环也会被拒绝。打开后确认不是普通文件的源条目通过 `LocalCopyDirError` 报告 `std::io::ErrorKind::InvalidInput`；显式跟随 symbolic link 后遇到不支持的目标类型则报告 `ErrorKind::Unsupported`。结构化错误同时提供失败阶段、源和目标路径、部分统计、可选 staging path、可选次级 cleanup error 及原始 I/O source error；原始复制或提交错误保持为主 source error。递归复制不是目录树级事务：失败前已经提交的条目会留在目标中，不会执行回滚；破坏性的类型冲突替换还可能先删除已有目标目录，随后才在后续操作中失败。
 
-源路径检查、源文件打开、目标复查和破坏性替换是彼此分离的 path-based 操作。symlink 策略用于避免普通的意外穿越；当其他参与者能够并发修改任一目录树时，它不是可抵御攻击者的 sandbox 边界。
+普通文件类型和可选文件权限来自实际提供复制字节的同一个已打开 handle。禁用 link 时 Unix 使用 `O_NOFOLLOW`，Windows 拒绝 name-surrogate reparse handle。目录遍历、目标复查和破坏性替换仍是 path-based 操作；当其他参与者能够并发修改任一目录树时，该策略不是可抵御攻击者的 sandbox 边界。
 
 ## 文件名 Helper
 
@@ -482,6 +503,8 @@ assert_eq!(
 
 重要错误行为：
 
+- `LocalPersistError` 保留临时资源、失败阶段、调用方目标、可用的绝对目标和原始错误。
+- `LocalAtomicWriteError::destination_state()` 返回 `Unchanged`、`Replaced`、`Missing` 或 `Indeterminate`；最后一种结果要求恢复前检查目标和 staging 两条路径。
 - 临时文件持久化目标已存在时会被拒绝，除非显式设置 `LocalPersistOptions::new().with_overwrite()`。
 - 临时目录持久化目标已存在时会被拒绝。
 - 递归复制通过 `LocalCopyConflictPolicy` 处理已有文件，通过独立的 `LocalCopyTypeConflictPolicy` 处理文件/目录类型冲突。
@@ -506,6 +529,10 @@ assert_eq!(
 ## 测试和 CI
 
 本项目包含公开 helper、临时条目、覆盖语义、递归复制行为、文件名校验、atomic write 和平台相关边界情况的测试。
+
+主 runtime suite 在 Linux 上运行；Windows 与 macOS 原生 job 覆盖各自的 metadata
+与 reparse 行为。FreeBSD 和 Android 的 production backend 及 cfg test source
+会执行 cross-compile，但当前 CI matrix 不宣称在这两个目标上运行 runtime test。
 
 常用命令：
 

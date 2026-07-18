@@ -32,7 +32,7 @@ Qubit Local Files 承载从 `qubit-io` 拆出的本地文件系统工具。它�
 
 ```toml
 [dependencies]
-qubit-local-files = "0.6"
+qubit-local-files = "0.7"
 ```
 
 ## 快速示例
@@ -105,7 +105,7 @@ assert_eq!("new payload\n", std::fs::read_to_string(&final_path)?);
 
 文件系统校验与后续操作并非原子过程。当不可信参与者能够并发修改目录树时，这些 helper 不能作为 sandbox 边界。
 
-`LocalTempFile::persist` 默认在移动操作中拒绝已存在的目标。只有确实要替换已有目标时，才使用 `LocalTempFile::persist_with` 和 `LocalPersistOptions::new().with_overwrite()`。`LocalTempDir::persist` 同样拒绝已存在的目标，并且不提供 overwrite 选项。持久化失败会返回持有原临时 guard 的 `LocalPersistError`，调用方可以重试或检查资源。持久化只使用原生 move/rename，不会回退到 copy-and-delete，因此跨文件系统移动可能在 Unix 上返回 `EXDEV`，或返回其他平台的等价错误。覆盖文件时会保留临时文件的权限，而不会保留被替换目标的权限；如果需要替换内容并保留已有普通文件的权限，请使用 `LocalFiles::atomic_write`。
+`LocalTempFile::persist` 默认在移动操作中拒绝已存在的目标。只有确实要替换已有目标时，才使用 `LocalTempFile::persist_with` 和 `LocalPersistOptions::new().with_overwrite()`。`LocalTempDir::persist` 同样拒绝已存在的目标，并且不提供 overwrite 选项。持久化失败会返回持有原临时 guard 的 `LocalPersistError`，调用方可以重试或检查资源；错误同时报告 `ResolveTarget`、`PrepareParent` 或 `InstallDestination` 阶段、调用方传入的目标，以及解析成功后绑定的绝对目标。持久化只使用原生 move/rename，不会回退到 copy-and-delete，因此跨文件系统移动可能在 Unix 上返回 `EXDEV`，或返回其他平台的等价错误。覆盖文件时会保留临时文件的 metadata，而不会保留被替换目标的 metadata；需要严格保留平台原生 metadata 时请使用 `LocalFiles::atomic_write`。
 
 原生 no-replace 支持矩阵如下：
 
@@ -160,7 +160,21 @@ path-based `LocalFiles` 和临时资源 helper 仍面向可信本地应用路径
 
 ### Atomic Write
 
-`LocalFiles::atomic_write` 会在同一父目录下写入临时文件，flush 并 sync 这个临时文件，替换目标，并在支持的平台上从深到浅 sync 目标父目录以及本次新建目录项所在的各级父目录。目标必须不存在或是已有普通文件；symbolic link、目录、FIFO、socket、device 和其他特殊文件会以 `std::io::ErrorKind::InvalidInput` 拒绝。它适合配置文件、cache manifest、checkpoint、生成索引等 whole-file replacement 场景。原子 writer 开始时会对已有普通文件的权限取快照，commit 时应用该快照而不会刷新权限，但会在替换前重新检查目标类型；如果并发创建目标或修改权限且这些变更必须保留，调用方需要在外部进行协调。最终检查与替换仍是两个 path-based 操作；对抗并发 namespace 替换时应使用 `LocalRootAtomicWriter`。在 Unix 上，新目标使用 `0600`，之后仍受更严格的进程 umask 约束。
+`LocalFiles::atomic_write` 会在同一父目录下写入临时文件，flush 并 sync 这个临时文件，替换目标，并在支持的平台上从深到浅 sync 目标父目录以及本次新建目录项所在的各级父目录。目标必须不存在或是已有普通文件；symbolic link、目录、FIFO、socket、device 和其他特殊文件会以 `std::io::ErrorKind::InvalidInput` 拒绝。它适合配置文件、cache manifest、checkpoint、生成索引等 whole-file replacement 场景。
+
+已有目标的 metadata 使用严格的平台原生语义保留：
+
+| 目标平台 | 从已有目标保留的 metadata |
+| --- | --- |
+| Windows | flags 为 `0` 的 `ReplaceFileW`：creation time、short name、object identifier、DACL、security resource attributes、encryption、compression，以及 staging 中不存在的 named stream。 |
+| Linux / Android | uid、gid、完整 Unix mode 和所有 descriptor-visible xattr，包括平台暴露的 POSIX ACL、SELinux label 和 file capability。 |
+| macOS | 通过 descriptor API 与 `fcopyfile` 保留 uid、gid、mode、ACL 和 xattr。 |
+| FreeBSD | uid、gid、mode、文件系统采用的 POSIX 或 NFSv4 ACL，以及 user/system extattr。 |
+
+crate 不会为了强制 Windows 替换而清除 `FILE_ATTRIBUTE_READONLY`；只读目标会被
+`ReplaceFileW` 拒绝并保持不变。
+
+Unix 在 `commit` 时从已打开的当前目标读取 metadata，因此 writer 开始后的变更也会被保留。任一受保护 metadata 无法读取、复制或合并时，commit 会失败，不会静默降低保护。Unix 不承诺保留 inode、hard-link identity、timestamp 或 immutable/append-only flag。最初不存在的目标使用原生 no-replace 安装，因此不会覆盖并发创建者。最终 Unix identity 检查与替换仍是分离操作；并发 writer 需要外部协调，需要 descriptor-relative containment 时使用 `LocalRootAtomicWriter`。Unix 新目标从 `0600` 开始，之后仍受更严格的进程 umask 约束。
 
 streaming 内容可以使用 `LocalAtomicWriter`：
 
@@ -183,7 +197,7 @@ constructor 和 builder。这个既有 writer 仍是 path-based；需要把替�
 可以写入 staging 内容，但不能 clone、保留、seek，也不能访问底层文件或 raw
 handle，因此 callback 返回后无法继续修改已提交 inode。
 
-失败时返回 `LocalAtomicWriteError`，其中包含失败阶段、临时路径、原始 I/O source error、替换是否已经提交，以及删除未提交 staging file 时产生的 secondary cleanup error。
+失败时返回 `LocalAtomicWriteError`，其中包含失败阶段、临时路径、原始 I/O source error、`LocalAtomicDestinationState`，以及删除未提交 staging file 时产生的 secondary cleanup error。`Unchanged` 表示目标未变，`Replaced` 表示目标包含 staging 内容，`Missing` 表示目标已不存在，`Indeterminate` 要求恢复前同时检查目标与 staging。只有 `Unchanged` 会自动尝试清理 staging；其他状态保留仍存在的 staging entry，但成功移动后诊断用 staging path 可能已经不存在。
 如果 `atomic_write_with` callback panic，会先关闭并 best-effort 删除未提交临时文件，再继续传播 panic。清理失败不能替换原 panic，因此这种情况下 staging path 可能残留。
 
 该操作不是多文件事务，也不协调并发写入。如果多个进程或线程可能同时替换同一路径，需要使用外部锁。
@@ -207,7 +221,7 @@ handle，因此 callback 返回后无法继续修改已提交 inode。
 
 递归复制不是目录树级事务。失败前已经提交的条目会留在目标中，不会执行回滚；破坏性的类型冲突替换还可能先删除已有目标目录，随后才在后续操作中失败。
 
-源路径检查、源文件打开、目标复查和破坏性替换是彼此分离的 path-based 操作。symlink 策略用于避免普通的意外穿越；当其他参与者能够并发修改任一目录树时，它不是可抵御攻击者的 sandbox 边界。
+每个复制文件的普通文件类型和可选源权限，都来自实际复制字节的同一个已打开 handle。禁用 link 时 Unix 使用 no-follow open，Windows 拒绝 name-surrogate reparse handle。目录遍历、目标复查和破坏性替换仍是 path-based 操作；当其他参与者能够并发修改任一目录树时，该策略不是可抵御攻击者的 sandbox 边界。
 
 ### 文件名 Helper
 
@@ -242,9 +256,10 @@ stream 和字节 I/O 相关能力请使用
 
 ## 运行时依赖
 
-本 crate 运行时依赖 Rust 标准库、`getrandom`、`libc` 和 `log`。`getrandom`
-用于生成随机临时名，`libc` 用于 Unix descriptor-relative rooted 操作和原生
-rename 支持，`log` 用于 drop 阶段的清理失败告警。
+本 crate 运行时依赖 Rust 标准库、`getrandom`、`libc`、`log` 和按目标启用的
+`windows-sys`。`getrandom` 用于生成随机临时名，`libc` 提供 Unix descriptor、
+metadata、ACL/extattr 与原生 rename 操作，`windows-sys` 提供 Windows handle 和
+replacement API，`log` 用于 drop 阶段的清理失败告警。
 
 ## 测试
 
@@ -261,6 +276,10 @@ cargo test --all-features
 # 检查代码覆盖率
 ./coverage.sh
 ```
+
+主 runtime suite 在 Linux 上运行；Windows 与 macOS 的 metadata/reparse 测试在
+各自原生 CI job 上运行。FreeBSD 与 Android backend 及 cfg test source 会执行
+cross-compile；当前 CI matrix 不宣称在这两个目标上执行 runtime tests。
 
 ## 许可证
 
