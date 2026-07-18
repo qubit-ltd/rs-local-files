@@ -13,8 +13,10 @@ mod destination;
 mod error;
 mod facade;
 mod namespace_race;
+mod opened_copy_source;
 mod source;
 mod staged_copy;
+mod staging_io;
 mod statistics_overflow;
 mod traversal;
 

@@ -20,6 +20,12 @@ use crate::{
 /// the private staging mode `0o600` and newly created directories use `0o700`,
 /// subject to a more restrictive process umask.
 ///
+/// Regular-file validation and preserved file permissions are read from the
+/// same opened source handle that supplies copied bytes. Disabling symbolic
+/// links requests a no-follow open on Unix and rejects Windows name-surrogate
+/// reparse handles. Directory traversal and destination mutation remain
+/// path-based and require external containment when the tree is adversarial.
+///
 /// File commits using [`LocalCopyConflictPolicy::Fail`] or
 /// [`LocalCopyConflictPolicy::Skip`] require native no-replace installation,
 /// which is available on Linux, macOS, and Windows. Other targets return
@@ -62,17 +68,18 @@ pub struct LocalCopyDirOptions {
     /// [`std::io::ErrorKind::Unsupported`]. This avoids accidentally copying
     /// data outside the requested source tree.
     ///
-    /// Source inspection, source opening, destination reinspection, and
-    /// destructive replacement are separate path-based operations. The
-    /// symbolic link policy prevents ordinary accidental traversal, but it is
-    /// not a sandbox boundary when an untrusted actor can mutate either tree
-    /// concurrently. Use descriptor- or capability-relative filesystem APIs
-    /// when containment must resist concurrent path replacement.
+    /// File type is verified from the opened source handle. Directory
+    /// traversal, destination reinspection, and destructive replacement remain
+    /// separate path-based operations, so this policy is not a sandbox
+    /// boundary when an untrusted actor can mutate either tree
+    /// concurrently.
     follow_symlinks: bool,
 
     /// Whether to copy source permissions to destination entries after
     /// copying.
     ///
+    /// File permissions come from metadata for the same opened handle used to
+    /// copy the bytes. Directory permissions come from traversal metadata.
     /// This uses `std::fs::set_permissions` and therefore only preserves the
     /// portable permission bits exposed by the Rust standard library. When
     /// this is `false`, new or replaced files retain the copy staging mode and

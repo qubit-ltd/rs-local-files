@@ -6,7 +6,7 @@
 //    Licensed under the Apache License, Version 2.0.
 // =============================================================================
 
-#[cfg(unix)]
+#[cfg(any(unix, windows))]
 use qubit_local_files::LocalCopyDirStage;
 use qubit_local_files::{
     LocalCopyConflictPolicy,
@@ -14,15 +14,12 @@ use qubit_local_files::{
     LocalCopyTypeConflictPolicy,
     LocalFiles,
 };
-use std::io::{
-    Error,
-    ErrorKind,
-};
+#[cfg(unix)]
+use std::io::Error;
+use std::io::ErrorKind;
 
 #[cfg(target_os = "linux")]
 use super::super::test_support::SourceReadLease;
-#[cfg(windows)]
-use super::super::test_support::path_with_interior_nul;
 #[cfg(target_os = "linux")]
 use super::super::test_support::run_in_small_stack_process;
 use super::super::test_support::{
@@ -34,6 +31,8 @@ use super::super::test_support::{
 #[cfg(unix)]
 use super::super::test_support::{
     PermissionsExt,
+    assert_fifo_open_is_rejected,
+    create_fifo,
     short_temp_dir,
 };
 
@@ -307,7 +306,7 @@ fn test_copy_dir_all_with_returns_source_entry_metadata_error_without_search_per
         .expect("source permissions should be restored");
     fs::remove_dir_all(dir).expect("test directory should be removed");
     assert_eq!(ErrorKind::PermissionDenied, error.kind());
-    assert_eq!(LocalCopyDirStage::InspectSourceEntry, error.stage);
+    assert_eq!(LocalCopyDirStage::CopyFileContents, error.stage);
     assert_eq!(source_file, error.source_path);
 }
 
@@ -1318,7 +1317,7 @@ fn test_copy_dir_all_with_symlink_options() {
         LocalCopyDirOptions::default(),
     )
     .expect_err("default copy should reject symlinks");
-    assert_eq!(ErrorKind::Unsupported, error.kind());
+    assert_eq!(ErrorKind::InvalidInput, error.kind());
 
     let stats = LocalFiles::copy_dir_all_with(
         &src,
@@ -1333,6 +1332,104 @@ fn test_copy_dir_all_with_symlink_options() {
         fs::read(followed_dst.join("link.txt")).unwrap().as_slice()
     );
     fs::remove_dir_all(dir).unwrap();
+}
+
+#[cfg(unix)]
+#[test]
+fn test_copy_dir_all_with_rejects_fifo_without_blocking() {
+    let dir = short_temp_dir("copy-fifo-open");
+    let src = dir.join("src");
+    let dst = dir.join("dst");
+    let fifo = src.join("fifo");
+    fs::create_dir(&src).expect("source directory should be created");
+    create_fifo(&fifo);
+
+    let copy_source = src.clone();
+    let copy_destination = dst.clone();
+    assert_fifo_open_is_rejected(fifo, move |_| {
+        let error = LocalFiles::copy_dir_all_with(
+            &copy_source,
+            &copy_destination,
+            LocalCopyDirOptions::default(),
+        )
+        .expect_err("FIFO source should be rejected without blocking");
+        assert_eq!(LocalCopyDirStage::CopyFileContents, error.stage());
+        Err(Error::from(error.kind()))
+    });
+
+    fs::remove_dir_all(dir).expect("test directory should be removed");
+}
+
+#[cfg(unix)]
+#[test]
+fn test_copy_dir_all_with_rejects_symlink_from_opened_handle() {
+    let dir = temp_dir("copy-symlink-opened-handle");
+    let src = dir.join("src");
+    let target = dir.join("target.txt");
+    let dst = dir.join("dst");
+    fs::create_dir(&src).expect("source directory should be created");
+    fs::write(&target, b"target").expect("symlink target should be written");
+    std::os::unix::fs::symlink(&target, src.join("link.txt"))
+        .expect("source symlink should be created");
+
+    let error = LocalFiles::copy_dir_all_with(
+        &src,
+        &dst,
+        LocalCopyDirOptions::default(),
+    )
+    .expect_err("default copy should reject the opened symlink itself");
+
+    assert_eq!(LocalCopyDirStage::CopyFileContents, error.stage());
+    assert_eq!(ErrorKind::InvalidInput, error.kind());
+    assert!(!dst.join("link.txt").exists());
+
+    let followed_dst = dir.join("followed-dst");
+    LocalFiles::copy_dir_all_with(
+        &src,
+        &followed_dst,
+        LocalCopyDirOptions::new().follow_symlinks(),
+    )
+    .expect("enabled symlink following should copy the regular target");
+    assert_eq!(
+        b"target",
+        fs::read(followed_dst.join("link.txt"))
+            .expect("followed target should be copied")
+            .as_slice(),
+    );
+    fs::remove_dir_all(dir).expect("test directory should be removed");
+}
+
+#[cfg(windows)]
+#[test]
+fn test_copy_dir_all_with_rejects_windows_name_surrogate_handle() {
+    let dir = temp_dir("copy-windows-name-surrogate");
+    let src = dir.join("src");
+    let target = dir.join("target.txt");
+    let link = src.join("link.txt");
+    let dst = dir.join("dst");
+    fs::create_dir(&src).expect("source directory should be created");
+    fs::write(&target, b"target").expect("symlink target should be written");
+    if let Err(error) = std::os::windows::fs::symlink_file(&target, &link) {
+        if error.kind() == ErrorKind::PermissionDenied
+            || error.raw_os_error() == Some(1314)
+        {
+            fs::remove_dir_all(dir).expect("test directory should be removed");
+            return;
+        }
+        panic!("source file symlink should be created: {error}");
+    }
+
+    let error = LocalFiles::copy_dir_all_with(
+        &src,
+        &dst,
+        LocalCopyDirOptions::default(),
+    )
+    .expect_err("default copy should reject the opened reparse point");
+
+    assert_eq!(LocalCopyDirStage::CopyFileContents, error.stage());
+    assert_eq!(ErrorKind::InvalidInput, error.kind());
+    assert!(!dst.join("link.txt").exists());
+    fs::remove_dir_all(dir).expect("test directory should be removed");
 }
 
 #[cfg(unix)]
@@ -1462,14 +1559,14 @@ fn test_copy_dir_all_with_rejects_unsupported_source_types() {
     )
     .expect_err("socket source should be rejected");
 
-    assert_eq!(LocalCopyDirStage::InspectSourceEntry, error.stage);
+    assert_eq!(LocalCopyDirStage::CopyFileContents, error.stage);
     assert_eq!(socket, error.source_path);
     assert_eq!(dst.join("socket"), error.destination_path);
     assert_eq!(0, error.stats.files);
     assert_eq!(1, error.stats.directories);
     assert_eq!(0, error.stats.bytes);
     assert_eq!(0, error.stats.skipped);
-    assert_eq!(ErrorKind::Unsupported, error.kind());
+    assert_eq!(ErrorKind::InvalidInput, error.kind());
     drop(listener);
     fs::remove_dir_all(dir).unwrap();
 }
@@ -1663,7 +1760,7 @@ fn test_copy_dir_all_with_rejects_unsupported_directory_entry() {
     )
     .expect_err("unsupported directory entry should be reported");
 
-    assert_eq!(ErrorKind::Unsupported, error.kind());
+    assert_eq!(ErrorKind::InvalidInput, error.kind());
     drop(listener);
     fs::remove_dir_all(dir).unwrap();
 }

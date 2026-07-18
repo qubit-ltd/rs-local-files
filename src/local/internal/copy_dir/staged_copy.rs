@@ -9,14 +9,7 @@
 // qubit-style: allow source-test-pair
 // Private behavior is covered through public integration tests.
 
-use std::fs::{
-    self,
-    File,
-};
-use std::io::{
-    self,
-    ErrorKind,
-};
+use std::io::ErrorKind;
 use std::path::Path;
 
 use crate::{
@@ -51,9 +44,11 @@ use super::error::{
     record_skipped_file,
     with_copy_context,
 };
-use super::source::{
-    is_real_directory,
-    metadata_for_copy_source,
+use super::opened_copy_source::OpenedCopySource;
+use super::source::is_real_directory;
+use super::staging_io::{
+    copy_into_staging,
+    preserve_staged_permissions,
 };
 
 /// Prefix used by recursive-copy staging files.
@@ -81,13 +76,6 @@ pub(super) fn copy_file_with_options(
     options: LocalCopyDirOptions,
     stats: &mut LocalCopyDirStats,
 ) -> CopyDirResult<()> {
-    let source_metadata = with_copy_context(
-        metadata_for_copy_source(src, options.follows_symlinks()),
-        LocalCopyDirStage::InspectSourceEntry,
-        src,
-        dst,
-        stats,
-    )?;
     let destination_metadata = with_copy_context(
         destination_metadata_if_exists(dst),
         LocalCopyDirStage::PrepareDestination,
@@ -125,8 +113,7 @@ pub(super) fn copy_file_with_options(
         None => false,
     };
 
-    let (staged_file, copied) =
-        stage_copy_file(src, dst, options, &source_metadata, stats)?;
+    let (staged_file, copied) = stage_copy_file(src, dst, options, stats)?;
     if !commit_staged_copy_file(
         src,
         dst,
@@ -160,7 +147,6 @@ pub(super) fn copy_file_with_options(
 /// * `src` - Regular source file path.
 /// * `dst` - Final destination file path.
 /// * `options` - Recursive-copy behavior options.
-/// * `source_metadata` - Metadata loaded for the source file.
 /// * `stats` - Statistics accumulated before staging.
 ///
 /// # Returns
@@ -175,7 +161,6 @@ fn stage_copy_file(
     src: &Path,
     dst: &Path,
     options: LocalCopyDirOptions,
-    source_metadata: &fs::Metadata,
     stats: &LocalCopyDirStats,
 ) -> CopyDirResult<(StagedFile, u64)> {
     let (temp_path, temp_file) = with_copy_context(
@@ -191,77 +176,34 @@ fn stage_copy_file(
         stats,
     )?;
     let mut staged_file = StagedFile::new(temp_path, temp_file);
-    let copied = match File::open(src).and_then(|mut source_file| {
-        io::copy(&mut source_file, staged_file.file_mut())
-    }) {
-        Ok(copied) => copied,
-        Err(source) => {
-            return Err(copy_dir_error_with_staging(
-                LocalCopyDirStage::CopyFileContents,
-                src,
-                dst,
-                stats,
-                source,
-                &mut staged_file,
-            ));
-        }
-    };
+    let opened_source =
+        match OpenedCopySource::open(src, options.follows_symlinks()) {
+            Ok(source) => source,
+            Err(source) => {
+                return Err(copy_dir_error_with_staging(
+                    LocalCopyDirStage::CopyFileContents,
+                    src,
+                    dst,
+                    stats,
+                    source,
+                    &mut staged_file,
+                ));
+            }
+        };
+    let (mut source_file, source_metadata) = opened_source.into_parts();
+    let copied =
+        copy_into_staging(src, dst, stats, &mut source_file, &mut staged_file)?;
     if options.preserves_permissions() {
         preserve_staged_permissions(
             src,
             dst,
-            source_metadata,
+            &source_metadata,
             stats,
             &mut staged_file,
         )?;
     }
     staged_file.close();
     Ok((staged_file, copied))
-}
-
-/// Applies source permissions to an armed staging file.
-///
-/// # Parameters
-///
-/// * `src` - The source path included in a structured failure.
-/// * `dst` - The destination path included in a structured failure.
-/// * `source_metadata` - The source metadata supplying the permissions.
-/// * `stats` - The recursive-copy statistics snapshot attached to a failure.
-/// * `staged_file` - The armed staging file whose permissions are updated and
-///   whose cleanup is attempted after an error.
-///
-/// # Returns
-///
-/// `Ok(())` after the source permissions have been applied.
-///
-/// # Errors
-///
-/// Returns a structured error that also attempts to clean up the staging file.
-///
-/// # Panics
-///
-/// Panics if `staged_file` no longer owns an open staging handle.
-fn preserve_staged_permissions(
-    src: &Path,
-    dst: &Path,
-    source_metadata: &fs::Metadata,
-    stats: &LocalCopyDirStats,
-    staged_file: &mut StagedFile,
-) -> CopyDirResult<()> {
-    if let Err(source) = staged_file
-        .file()
-        .set_permissions(source_metadata.permissions())
-    {
-        return Err(copy_dir_error_with_staging(
-            LocalCopyDirStage::PreservePermissions,
-            src,
-            dst,
-            stats,
-            source,
-            staged_file,
-        ));
-    }
-    Ok(())
 }
 
 /// Commits an already staged regular file according to destination policies.

@@ -113,11 +113,20 @@ pub(super) fn copy_dir_iterative(
             &destination_path,
             stats,
         )?;
-        if file_type.is_symlink() {
-            if symlink_target_is_directory(
+        if file_type.is_dir() {
+            let frame = enter_copy_directory(
                 &source_path,
                 &destination_path,
                 options,
+                destination_root,
+                &mut active_sources,
+                stats,
+            )?;
+            frames.push(frame);
+        } else if file_type.is_symlink() && options.follows_symlinks() {
+            if symlink_target_is_directory(
+                &source_path,
+                &destination_path,
                 stats,
             )? {
                 let frame = enter_copy_directory(
@@ -137,37 +146,13 @@ pub(super) fn copy_dir_iterative(
                     stats,
                 )?;
             }
-        } else if file_type.is_dir() {
-            let frame = enter_copy_directory(
-                &source_path,
-                &destination_path,
-                options,
-                destination_root,
-                &mut active_sources,
-                stats,
-            )?;
-            frames.push(frame);
-        } else if file_type.is_file() {
+        } else {
             copy_file_with_options(
                 &source_path,
                 &destination_path,
                 options,
                 stats,
             )?;
-        } else {
-            return Err(copy_dir_error(
-                LocalCopyDirStage::InspectSourceEntry,
-                &source_path,
-                &destination_path,
-                stats,
-                Error::new(
-                    ErrorKind::Unsupported,
-                    format!(
-                        "unsupported source file type: {}",
-                        source_path.display(),
-                    ),
-                ),
-            ));
         }
     }
     Ok(())
@@ -262,7 +247,6 @@ fn enter_copy_directory(
 ///
 /// * `src` - Source symbolic link.
 /// * `dst` - Destination path.
-/// * `options` - Recursive-copy behavior options.
 /// * `stats` - Mutable statistics accumulator.
 ///
 /// # Returns
@@ -271,26 +255,13 @@ fn enter_copy_directory(
 ///
 /// # Errors
 ///
-/// Returns a structured error when links are disabled or the target cannot be
-/// inspected or has an unsupported type.
+/// Returns a structured error when the target cannot be inspected or has an
+/// unsupported type.
 fn symlink_target_is_directory(
     src: &Path,
     dst: &Path,
-    options: LocalCopyDirOptions,
     stats: &LocalCopyDirStats,
 ) -> CopyDirResult<bool> {
-    if !options.follows_symlinks() {
-        return Err(copy_dir_error(
-            LocalCopyDirStage::InspectSourceEntry,
-            src,
-            dst,
-            stats,
-            Error::new(
-                ErrorKind::Unsupported,
-                format!("symbolic links are not followed: {}", src.display()),
-            ),
-        ));
-    }
     let target_metadata = with_copy_context(
         fs::metadata(src),
         LocalCopyDirStage::InspectSourceEntry,
