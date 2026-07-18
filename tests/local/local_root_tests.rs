@@ -22,14 +22,14 @@ use qubit_local_files::{
     LocalRoot,
 };
 
+#[cfg(all(coverage, target_os = "linux"))]
+use super::test_support::run_in_coverage_fault_process;
 #[cfg(unix)]
 use super::test_support::{
     create_fifo,
     fs,
     temp_dir,
 };
-#[cfg(all(coverage, target_os = "linux"))]
-use super::test_support::run_in_coverage_fault_process;
 
 /// Verifies one injected root-handle metadata or type failure.
 #[cfg(all(coverage, target_os = "linux"))]
@@ -50,7 +50,8 @@ fn assert_injected_root_open_error(
                 "contextual error should retain the injected native failure: {error}",
             );
         }
-        fs::remove_dir_all(root_path).expect("test directory should be removed");
+        fs::remove_dir_all(root_path)
+            .expect("test directory should be removed");
     }) else {
         return;
     };
@@ -113,7 +114,8 @@ fn assert_injected_rooted_reader_error(
                 "contextual error should retain the injected native failure: {error}",
             );
         }
-        fs::remove_dir_all(root_path).expect("test directory should be removed");
+        fs::remove_dir_all(root_path)
+            .expect("test directory should be removed");
     }) else {
         return;
     };

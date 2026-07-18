@@ -276,10 +276,7 @@ fn test_copy_dir_reports_injected_directory_creation_error() {
 
 /// Asserts one injected type-replacement reinspection failure.
 #[cfg(all(coverage, target_os = "linux"))]
-fn assert_injected_root_type_replacement_error(
-    test_name: &str,
-    fault: &str,
-) {
+fn assert_injected_root_type_replacement_error(test_name: &str, fault: &str) {
     let Some(()) = run_in_coverage_fault_process(test_name, fault, move || {
         let dir = temp_dir(fault);
         let src = dir.join("src");

@@ -128,8 +128,7 @@ pub(in crate::local) fn create_rooted_staged_file(
                     ErrorKind::AlreadyExists,
                     "injected rooted staging collision",
                 ));
-            } else if super::coverage_fault::is_enabled("rooted-staging-open")
-            {
+            } else if super::coverage_fault::is_enabled("rooted-staging-open") {
                 return Err(Error::other(
                     "injected rooted staging open failure",
                 ));

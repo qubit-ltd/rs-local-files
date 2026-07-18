@@ -49,11 +49,14 @@ pub(crate) struct OpenedAtomicDestination {
 impl OpenedAtomicDestination {
     /// Constructs and validates destination identity from an open file.
     pub(crate) fn from_file(file: File) -> Result<Self> {
-        let mut metadata_result = file.metadata();
+        let metadata_result = file.metadata();
         #[cfg(coverage)]
-        if super::coverage_fault::is_enabled("atomic-destination-stat") {
-            metadata_result = Err(Error::from_raw_os_error(libc::EIO));
-        }
+        let metadata_result =
+            if super::coverage_fault::is_enabled("atomic-destination-stat") {
+                Err(Error::from_raw_os_error(libc::EIO))
+            } else {
+                metadata_result
+            };
         let metadata = metadata_result?;
         if !metadata.is_file()
             || coverage_fault_enabled("atomic-destination-type")
@@ -104,18 +107,22 @@ pub(crate) fn open_atomic_destination(
         .custom_flags(libc::O_NOFOLLOW | libc::O_NONBLOCK);
     let mut retry_delay = Duration::ZERO;
     let file = loop {
-        let mut result = options.open(path);
+        let result = options.open(path);
         #[cfg(coverage)]
-        if super::coverage_fault::take("atomic-destination-would-block") {
-            result = Err(Error::from(ErrorKind::WouldBlock));
-        } else if super::coverage_fault::is_enabled(
-            "atomic-destination-invalid",
-        ) {
-            result = Err(Error::from_raw_os_error(libc::ELOOP));
-        } else if super::coverage_fault::is_enabled("atomic-destination-native")
-        {
-            result = Err(Error::from_raw_os_error(libc::EIO));
-        }
+        let result =
+            if super::coverage_fault::take("atomic-destination-would-block") {
+                Err(Error::from(ErrorKind::WouldBlock))
+            } else if super::coverage_fault::is_enabled(
+                "atomic-destination-invalid",
+            ) {
+                Err(Error::from_raw_os_error(libc::ELOOP))
+            } else if super::coverage_fault::is_enabled(
+                "atomic-destination-native",
+            ) {
+                Err(Error::from_raw_os_error(libc::EIO))
+            } else {
+                result
+            };
         match result {
             Ok(file) => break file,
             Err(error) if error.kind() == ErrorKind::NotFound => {
@@ -147,13 +154,16 @@ pub(crate) fn destination_identity_matches(
     if super::coverage_fault::is_enabled("atomic-identity-mismatch") {
         return Ok(false);
     }
-    let mut result = fs::symlink_metadata(path);
+    let result = fs::symlink_metadata(path);
     #[cfg(coverage)]
-    if super::coverage_fault::is_enabled("atomic-identity-missing") {
-        result = Err(Error::from(ErrorKind::NotFound));
+    let result = if super::coverage_fault::is_enabled("atomic-identity-missing")
+    {
+        Err(Error::from(ErrorKind::NotFound))
     } else if super::coverage_fault::is_enabled("atomic-identity-inspect") {
-        result = Err(Error::from_raw_os_error(libc::EIO));
-    }
+        Err(Error::from_raw_os_error(libc::EIO))
+    } else {
+        result
+    };
     match result {
         Ok(metadata) => Ok(metadata.file_type().is_file()
             && metadata.dev() == destination.device
@@ -178,18 +188,22 @@ pub(in crate::local) fn open_rooted_atomic_destination(
         libc::O_RDONLY | libc::O_NOFOLLOW | libc::O_NONBLOCK | libc::O_CLOEXEC;
     let mut retry_delay = Duration::ZERO;
     let file = loop {
-        let mut result = open_file_at(parent, name, flags, 0);
+        let result = open_file_at(parent, name, flags, 0);
         #[cfg(coverage)]
-        if super::coverage_fault::take("rooted-destination-would-block") {
-            result = Err(Error::from(ErrorKind::WouldBlock));
-        } else if super::coverage_fault::is_enabled(
-            "rooted-destination-invalid",
-        ) {
-            result = Err(Error::from_raw_os_error(libc::ELOOP));
-        } else if super::coverage_fault::is_enabled("rooted-destination-native")
-        {
-            result = Err(Error::from_raw_os_error(libc::EIO));
-        }
+        let result =
+            if super::coverage_fault::take("rooted-destination-would-block") {
+                Err(Error::from(ErrorKind::WouldBlock))
+            } else if super::coverage_fault::is_enabled(
+                "rooted-destination-invalid",
+            ) {
+                Err(Error::from_raw_os_error(libc::ELOOP))
+            } else if super::coverage_fault::is_enabled(
+                "rooted-destination-native",
+            ) {
+                Err(Error::from_raw_os_error(libc::EIO))
+            } else {
+                result
+            };
         match result {
             Ok(file) => break file,
             Err(error) if error.kind() == ErrorKind::NotFound => {

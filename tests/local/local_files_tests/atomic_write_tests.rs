@@ -549,6 +549,71 @@ fn test_atomic_write_reports_injected_destination_stat_error() {
     );
 }
 
+/// Verifies rejection of an injected non-file destination handle.
+#[cfg(all(coverage, target_os = "linux"))]
+#[test]
+fn test_atomic_write_reports_injected_destination_type_error() {
+    const TEST_NAME: &str = concat!(
+        "local::local_files_tests::atomic_write_tests::",
+        "test_atomic_write_reports_injected_destination_type_error",
+    );
+    assert_injected_atomic_error(
+        TEST_NAME,
+        "atomic-destination-type",
+        LocalAtomicWriteStage::ReadDestinationMetadata,
+    );
+}
+
+/// Verifies retry of an injected nonblocking destination-open conflict.
+#[cfg(all(coverage, target_os = "linux"))]
+#[test]
+fn test_atomic_write_retries_injected_destination_open_conflict() {
+    const TEST_NAME: &str = concat!(
+        "local::local_files_tests::atomic_write_tests::",
+        "test_atomic_write_retries_injected_destination_open_conflict",
+    );
+    let Some((dir, destination, result)) = run_atomic_write_fault(
+        TEST_NAME,
+        "atomic-destination-would-block",
+        true,
+    ) else {
+        return;
+    };
+    result.expect("transient destination-open conflict should be retried");
+    assert_eq!(b"new", fs::read(&destination).unwrap().as_slice());
+    fs::remove_dir_all(dir).expect("test directory should be removed");
+}
+
+/// Verifies normalization of an injected invalid destination resource.
+#[cfg(all(coverage, target_os = "linux"))]
+#[test]
+fn test_atomic_write_reports_injected_invalid_destination_open() {
+    const TEST_NAME: &str = concat!(
+        "local::local_files_tests::atomic_write_tests::",
+        "test_atomic_write_reports_injected_invalid_destination_open",
+    );
+    assert_injected_atomic_error(
+        TEST_NAME,
+        "atomic-destination-invalid",
+        LocalAtomicWriteStage::ReadDestinationMetadata,
+    );
+}
+
+/// Verifies propagation of an injected native destination-open failure.
+#[cfg(all(coverage, target_os = "linux"))]
+#[test]
+fn test_atomic_write_reports_injected_native_destination_open_error() {
+    const TEST_NAME: &str = concat!(
+        "local::local_files_tests::atomic_write_tests::",
+        "test_atomic_write_reports_injected_native_destination_open_error",
+    );
+    assert_injected_atomic_error(
+        TEST_NAME,
+        "atomic-destination-native",
+        LocalAtomicWriteStage::ReadDestinationMetadata,
+    );
+}
+
 /// Verifies normalization of an injected destination identity mismatch.
 #[cfg(all(coverage, target_os = "linux"))]
 #[test]

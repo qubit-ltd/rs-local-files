@@ -36,13 +36,12 @@ pub(crate) fn clear_nonblocking(descriptor: RawFd) -> Result<()> {
     // SAFETY: callers retain ownership of the live descriptor for both
     // non-retaining `fcntl` calls.
     #[cfg(coverage)]
-    let flags = if super::coverage_fault::is_enabled(
-        "unix-clear-nonblocking-get",
-    ) {
-        -1
-    } else {
-        unsafe { libc::fcntl(descriptor, libc::F_GETFL) }
-    };
+    let flags =
+        if super::coverage_fault::is_enabled("unix-clear-nonblocking-get") {
+            -1
+        } else {
+            unsafe { libc::fcntl(descriptor, libc::F_GETFL) }
+        };
     #[cfg(not(coverage))]
     let flags = unsafe { libc::fcntl(descriptor, libc::F_GETFL) };
     if flags == -1 {
@@ -54,15 +53,18 @@ pub(crate) fn clear_nonblocking(descriptor: RawFd) -> Result<()> {
     // SAFETY: the descriptor remains live and `F_SETFL` accepts status flags
     // returned by `F_GETFL` with `O_NONBLOCK` cleared.
     #[cfg(coverage)]
-    let result = if super::coverage_fault::is_enabled(
-        "unix-clear-nonblocking-set",
-    ) {
-        -1
-    } else {
-        unsafe {
-            libc::fcntl(descriptor, libc::F_SETFL, flags & !libc::O_NONBLOCK)
-        }
-    };
+    let result =
+        if super::coverage_fault::is_enabled("unix-clear-nonblocking-set") {
+            -1
+        } else {
+            unsafe {
+                libc::fcntl(
+                    descriptor,
+                    libc::F_SETFL,
+                    flags & !libc::O_NONBLOCK,
+                )
+            }
+        };
     #[cfg(not(coverage))]
     let result = unsafe {
         libc::fcntl(descriptor, libc::F_SETFL, flags & !libc::O_NONBLOCK)

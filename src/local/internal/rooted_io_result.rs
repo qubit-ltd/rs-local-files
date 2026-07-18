@@ -43,7 +43,8 @@ pub(super) fn normalize_mkdirat_result(
     diagnostic_path: &Path,
 ) -> Result<()> {
     #[cfg(coverage)]
-    let injected_error = super::coverage_fault::is_enabled("rooted-mkdir-error");
+    let injected_error =
+        super::coverage_fault::is_enabled("rooted-mkdir-error");
     #[cfg(not(coverage))]
     let injected_error = false;
     if result == -1 || injected_error {
@@ -80,13 +81,15 @@ pub(super) fn normalize_mkdirat_result(
 /// Returns a contextual operating-system error when the entry was not merely
 /// absent.
 pub(super) fn missing_rooted_entry(
-    mut error: Error,
+    error: Error,
     diagnostic_path: &Path,
 ) -> Result<()> {
     #[cfg(coverage)]
-    if super::coverage_fault::is_enabled("rooted-entry-inspect") {
-        error = Error::from_raw_os_error(libc::EIO);
-    }
+    let error = if super::coverage_fault::is_enabled("rooted-entry-inspect") {
+        Error::from_raw_os_error(libc::EIO)
+    } else {
+        error
+    };
     if error.kind() == ErrorKind::NotFound {
         Ok(())
     } else {
@@ -114,14 +117,17 @@ pub(super) fn missing_rooted_entry(
 ///
 /// Returns a contextual metadata error or `InvalidInput` for a non-directory.
 pub(super) fn normalize_opened_directory_metadata(
-    mut result: Result<fs::Metadata>,
+    result: Result<fs::Metadata>,
     operation: &'static str,
     diagnostic_path: &Path,
 ) -> Result<()> {
     #[cfg(coverage)]
-    if super::coverage_fault::is_enabled("rooted-directory-metadata") {
-        result = Err(Error::from_raw_os_error(libc::EIO));
-    }
+    let result =
+        if super::coverage_fault::is_enabled("rooted-directory-metadata") {
+            Err(Error::from_raw_os_error(libc::EIO))
+        } else {
+            result
+        };
     let metadata = with_path_context(result, operation, diagnostic_path)?;
     if !metadata.is_dir() || rooted_directory_type_fault_enabled() {
         return Err(rooted_type_error(diagnostic_path, "directory"));
@@ -145,13 +151,15 @@ pub(super) fn normalize_opened_directory_metadata(
 /// Returns a contextual metadata error or `InvalidInput` for a non-regular
 /// handle.
 pub(super) fn normalize_opened_regular_file_metadata(
-    mut result: Result<fs::Metadata>,
+    result: Result<fs::Metadata>,
     diagnostic_path: &Path,
 ) -> Result<()> {
     #[cfg(coverage)]
-    if super::coverage_fault::is_enabled("rooted-file-metadata") {
-        result = Err(Error::from_raw_os_error(libc::EIO));
-    }
+    let result = if super::coverage_fault::is_enabled("rooted-file-metadata") {
+        Err(Error::from_raw_os_error(libc::EIO))
+    } else {
+        result
+    };
     let metadata = with_path_context(
         result,
         "inspect rooted file handle",

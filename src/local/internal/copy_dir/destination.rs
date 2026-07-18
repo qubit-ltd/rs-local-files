@@ -236,32 +236,30 @@ fn prepare_existing_directory_destination(
 /// Returns an I/O error when creation fails or a racing entry is not a real
 /// directory.
 fn create_copy_destination_dir(dst: &Path) -> Result<bool> {
-    let mut result = create_private_dir(dst);
+    let result = create_private_dir(dst);
     #[cfg(coverage)]
-    if coverage_fault::is_enabled("copy-directory-race-existing")
+    let result = if coverage_fault::is_enabled("copy-directory-race-existing")
         || coverage_fault::is_enabled("copy-directory-race-nondirectory")
         || coverage_fault::is_enabled("copy-directory-race-inspect")
     {
-        result = Err(Error::new(
+        Err(Error::new(
             ErrorKind::AlreadyExists,
             "injected directory creation race",
-        ));
+        ))
     } else if coverage_fault::is_enabled("copy-directory-create-error") {
-        result = Err(Error::other("injected directory creation failure"));
-    }
-    reconcile_directory_creation(
-        dst,
-        result,
-        |path| {
-            #[cfg(coverage)]
-            if coverage_fault::is_enabled("copy-directory-race-inspect") {
-                return Err(Error::other(
-                    "injected directory race inspection failure",
-                ));
-            }
-            inspect_destination_metadata(path)
-        },
-    )
+        Err(Error::other("injected directory creation failure"))
+    } else {
+        result
+    };
+    reconcile_directory_creation(dst, result, |path| {
+        #[cfg(coverage)]
+        if coverage_fault::is_enabled("copy-directory-race-inspect") {
+            return Err(Error::other(
+                "injected directory race inspection failure",
+            ));
+        }
+        inspect_destination_metadata(path)
+    })
 }
 
 /// Removes a non-directory destination only while its type remains stable.
@@ -280,28 +278,28 @@ fn create_copy_destination_dir(dst: &Path) -> Result<bool> {
 ///
 /// Returns the I/O error reported while inspecting or removing the entry.
 fn remove_destination_non_directory_if_unchanged(dst: &Path) -> Result<()> {
-    let mut result = inspect_destination_metadata(dst);
+    let result = inspect_destination_metadata(dst);
     #[cfg(coverage)]
-    if coverage_fault::is_enabled("copy-removal-race-not-found") {
-        result = Err(Error::new(
+    let result = if coverage_fault::is_enabled("copy-removal-race-not-found") {
+        Err(Error::new(
             ErrorKind::NotFound,
             "injected destination disappearance",
-        ));
+        ))
     } else if coverage_fault::is_enabled("copy-removal-race-inspect") {
-        result = Err(Error::other(
-            "injected destination reinspection failure",
-        ));
-    }
+        Err(Error::other("injected destination reinspection failure"))
+    } else {
+        result
+    };
     removable_non_directory_metadata(result)?.map_or(Ok(()), |metadata| {
-            #[cfg(windows)]
-            if metadata.file_type().is_symlink_dir() {
-                remove_directory_symlink(dst)?;
-                return Ok(());
-            }
-            #[cfg(not(windows))]
-            let _ = metadata;
-            fs::remove_file(dst)
-        })
+        #[cfg(windows)]
+        if metadata.file_type().is_symlink_dir() {
+            remove_directory_symlink(dst)?;
+            return Ok(());
+        }
+        #[cfg(not(windows))]
+        let _ = metadata;
+        fs::remove_file(dst)
+    })
 }
 
 /// Reads destination metadata without following the final path component.

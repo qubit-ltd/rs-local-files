@@ -23,14 +23,14 @@ use qubit_local_files::{
     LocalRoot,
 };
 
+#[cfg(all(coverage, target_os = "linux"))]
+use super::test_support::run_in_coverage_fault_process;
 #[cfg(unix)]
 use super::test_support::{
     count_atomic_temp_files,
     fs,
     temp_dir,
 };
-#[cfg(all(coverage, target_os = "linux"))]
-use super::test_support::run_in_coverage_fault_process;
 #[cfg(any(
     target_os = "linux",
     target_os = "android",
@@ -78,8 +78,12 @@ fn assert_injected_rooted_commit_error(
 
         assert_eq!(expected_stage, error.stage());
         assert_eq!(expected_state, error.destination_state());
-        assert_eq!(expected_temporary_files, count_atomic_temp_files(&root_path));
-        fs::remove_dir_all(root_path).expect("test directory should be removed");
+        assert_eq!(
+            expected_temporary_files,
+            count_atomic_temp_files(&root_path)
+        );
+        fs::remove_dir_all(root_path)
+            .expect("test directory should be removed");
     }) else {
         return;
     };
@@ -100,7 +104,8 @@ fn assert_injected_rooted_begin_error(test_name: &str, fault: &str) {
 
         assert_eq!(LocalAtomicWriteStage::CreateTemporaryFile, error.stage());
         assert_eq!(0, count_atomic_temp_files(&root_path));
-        fs::remove_dir_all(root_path).expect("test directory should be removed");
+        fs::remove_dir_all(root_path)
+            .expect("test directory should be removed");
     }) else {
         return;
     };
@@ -242,6 +247,149 @@ fn test_commit_reports_injected_nonblocking_status_update_error() {
     );
 }
 
+/// Asserts one injected rooted destination-open normalization failure.
+#[cfg(all(coverage, target_os = "linux"))]
+fn assert_injected_rooted_destination_open_error(test_name: &str, fault: &str) {
+    assert_injected_rooted_commit_error(
+        test_name,
+        fault,
+        LocalAtomicWriteStage::ReadDestinationMetadata,
+        LocalAtomicDestinationState::Unchanged,
+        0,
+    );
+}
+
+/// Verifies normalization of an injected invalid rooted destination.
+#[cfg(all(coverage, target_os = "linux"))]
+#[test]
+fn test_commit_reports_injected_invalid_rooted_destination() {
+    const TEST_NAME: &str = concat!(
+        "local::local_root_atomic_writer_tests::",
+        "test_commit_reports_injected_invalid_rooted_destination",
+    );
+    assert_injected_rooted_destination_open_error(
+        TEST_NAME,
+        "rooted-destination-invalid",
+    );
+}
+
+/// Verifies propagation of an injected native rooted destination-open error.
+#[cfg(all(coverage, target_os = "linux"))]
+#[test]
+fn test_commit_reports_injected_native_rooted_destination_open_error() {
+    const TEST_NAME: &str = concat!(
+        "local::local_root_atomic_writer_tests::",
+        "test_commit_reports_injected_native_rooted_destination_open_error",
+    );
+    assert_injected_rooted_destination_open_error(
+        TEST_NAME,
+        "rooted-destination-native",
+    );
+}
+
+/// Verifies retry of an injected rooted destination-open conflict.
+#[cfg(all(coverage, target_os = "linux"))]
+#[test]
+fn test_commit_retries_injected_rooted_destination_open_conflict() {
+    const TEST_NAME: &str = concat!(
+        "local::local_root_atomic_writer_tests::",
+        "test_commit_retries_injected_rooted_destination_open_conflict",
+    );
+    let Some(()) = run_in_coverage_fault_process(
+        TEST_NAME,
+        "rooted-destination-would-block",
+        || {
+            let root_path = temp_dir("rooted-destination-would-block");
+            fs::write(root_path.join("result.txt"), b"old")
+                .expect("destination fixture should be written");
+            let root = LocalRoot::open(&root_path).expect("root should open");
+            let destination = LocalRelativePath::new("result.txt")
+                .expect("destination should validate");
+            let mut writer = root
+                .begin_atomic_write(&destination)
+                .expect("rooted writer should begin");
+            writer
+                .write_all(b"new")
+                .expect("replacement should be staged");
+            writer
+                .commit()
+                .expect("transient conflict should be retried");
+            fs::remove_dir_all(root_path)
+                .expect("test directory should be removed");
+        },
+    ) else {
+        return;
+    };
+}
+
+/// Asserts one injected rooted identity-status failure.
+#[cfg(all(coverage, target_os = "linux"))]
+fn assert_injected_rooted_identity_status_error(test_name: &str, fault: &str) {
+    assert_injected_rooted_commit_error(
+        test_name,
+        fault,
+        LocalAtomicWriteStage::ReplaceDestination,
+        LocalAtomicDestinationState::Unchanged,
+        0,
+    );
+}
+
+/// Verifies normalization of an injected missing rooted identity status.
+#[cfg(all(coverage, target_os = "linux"))]
+#[test]
+fn test_commit_handles_injected_missing_rooted_identity_status() {
+    const TEST_NAME: &str = concat!(
+        "local::local_root_atomic_writer_tests::",
+        "test_commit_handles_injected_missing_rooted_identity_status",
+    );
+    assert_injected_rooted_identity_status_error(
+        TEST_NAME,
+        "rooted-status-missing",
+    );
+}
+
+/// Verifies rejection of an injected non-file rooted identity status.
+#[cfg(all(coverage, target_os = "linux"))]
+#[test]
+fn test_commit_rejects_injected_rooted_identity_status_type() {
+    const TEST_NAME: &str = concat!(
+        "local::local_root_atomic_writer_tests::",
+        "test_commit_rejects_injected_rooted_identity_status_type",
+    );
+    assert_injected_rooted_identity_status_error(
+        TEST_NAME,
+        "rooted-status-type",
+    );
+}
+
+/// Verifies propagation of injected rooted identity-status errors.
+#[cfg(all(coverage, target_os = "linux"))]
+#[test]
+fn test_commit_reports_injected_rooted_identity_status_error() {
+    const TEST_NAME: &str = concat!(
+        "local::local_root_atomic_writer_tests::",
+        "test_commit_reports_injected_rooted_identity_status_error",
+    );
+    assert_injected_rooted_identity_status_error(
+        TEST_NAME,
+        "rooted-status-error",
+    );
+}
+
+/// Verifies propagation of injected rooted identity conversion overflow.
+#[cfg(all(coverage, target_os = "linux"))]
+#[test]
+fn test_commit_reports_injected_rooted_identity_overflow() {
+    const TEST_NAME: &str = concat!(
+        "local::local_root_atomic_writer_tests::",
+        "test_commit_reports_injected_rooted_identity_overflow",
+    );
+    assert_injected_rooted_identity_status_error(
+        TEST_NAME,
+        "rooted-identity-overflow",
+    );
+}
+
 /// Verifies propagation of rooted staging filename generation failures.
 #[cfg(all(coverage, target_os = "linux"))]
 #[test]
@@ -283,10 +431,8 @@ fn test_begin_reports_injected_rooted_parent_creation_error() {
         "local::local_root_atomic_writer_tests::",
         "test_begin_reports_injected_rooted_parent_creation_error",
     );
-    let Some(()) = run_in_coverage_fault_process(
-        TEST_NAME,
-        "rooted-mkdir-error",
-        || {
+    let Some(()) =
+        run_in_coverage_fault_process(TEST_NAME, "rooted-mkdir-error", || {
             let root_path = temp_dir("rooted-mkdir-error");
             let root = LocalRoot::open(&root_path).expect("root should open");
             let destination = LocalRelativePath::new("nested/result.txt")
@@ -299,8 +445,8 @@ fn test_begin_reports_injected_rooted_parent_creation_error() {
             assert_eq!(LocalAtomicWriteStage::PrepareParent, error.stage());
             fs::remove_dir_all(root_path)
                 .expect("test directory should be removed");
-        },
-    ) else {
+        })
+    else {
         return;
     };
 }
