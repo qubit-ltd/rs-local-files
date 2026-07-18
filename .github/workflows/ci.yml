@@ -22,7 +22,7 @@ jobs:
     secrets: inherit
 
   unix-cross-check:
-    name: Check ${{ matrix.target }}
+    name: Compile-only ${{ matrix.target }}
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
@@ -41,7 +41,7 @@ jobs:
       - name: Install Rust target
         run: rustup toolchain install 1.94 --profile minimal --target ${{ matrix.target }}
 
-      - name: Check target
+      - name: Compile-only check target
         run: cargo +1.94 check --target ${{ matrix.target }}
 
   rooted-atomic-durability:

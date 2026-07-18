@@ -393,6 +393,10 @@ with weaker protection.
 | macOS | uid, gid, mode, ACLs, and xattrs through descriptor operations and `fcopyfile`. |
 | FreeBSD | uid, gid, mode, the supported POSIX or NFSv4 ACL, and user/system extattrs. |
 
+These rows describe implemented code paths. Android and FreeBSD are
+compile-only targets, so the behavior listed for them is not runtime-validated
+by this repository's CI.
+
 The crate does not clear `FILE_ATTRIBUTE_READONLY` to force replacement. A
 read-only Windows destination is rejected by `ReplaceFileW` and remains
 unchanged.
@@ -692,17 +696,18 @@ The project includes tests for public helpers, temporary entries, overwrite
 semantics, recursive copy behavior, filename validation, atomic writes, and
 platform-sensitive edge cases.
 
-Linux runs the primary runtime suite. Native Windows and macOS jobs exercise
-their metadata and reparse behavior. FreeBSD and Android production backends
-and cfg-test sources are cross-compiled, but are not claimed as runtime-tested
-by the current CI matrix.
+The support tiers are explicit:
+
+| Support tier | Targets | CI validation |
+| --- | --- | --- |
+| Native runtime-tested | Linux, Windows, macOS | Tests execute on the named operating system, including platform-specific filesystem behavior. |
+| Compile-only | FreeBSD, Android | CI cross-compiles production and cfg-selected sources with `cargo check`; runtime filesystem, ABI, and metadata behavior are not validated or guaranteed by this repository. |
 
 Useful commands:
 
 ```bash
 cargo test
 ./coverage.sh
-./coverage.sh text
 ./align-ci.sh
 ./ci-check.sh
 ```

@@ -234,6 +234,10 @@ Existing-target metadata preservation is strict and platform-native:
 | macOS | uid, gid, mode, ACLs, and extended attributes through descriptor APIs and `fcopyfile`. |
 | FreeBSD | uid, gid, mode, the filesystem's POSIX or NFSv4 ACL, and user/system extattrs. |
 
+This table describes implemented code paths. Android and FreeBSD belong to the
+compile-only support tier defined below; their filesystem and metadata behavior
+is not runtime-validated by this repository's CI.
+
 The crate does not clear `FILE_ATTRIBUTE_READONLY` to force a Windows
 replacement. A read-only destination is rejected by `ReplaceFileW` and remains
 unchanged.
@@ -360,6 +364,13 @@ does not provide:
 For stream and byte-I/O concerns, use
 [qubit-io](https://github.com/qubit-ltd/rs-io).
 
+## Platform Support
+
+| Support tier | Targets | CI validation |
+| --- | --- | --- |
+| Native runtime-tested | Linux, Windows, macOS | Tests execute on the named operating system, including platform-specific filesystem behavior. |
+| Compile-only | FreeBSD, Android | CI cross-compiles the production backend and cfg-selected sources with `cargo check`; runtime filesystem, ABI, and metadata behavior are not validated or guaranteed by this repository. |
+
 ## Runtime Dependencies
 
 This crate depends on the Rust standard library, `getrandom`, `libc`, `log`, and
@@ -371,10 +382,10 @@ replacement APIs. `log` is used for drop-time cleanup warnings.
 ## Testing
 
 ```bash
-# Core API with the default empty feature set
-cargo test --no-default-features
+# Run tests with the default feature set
+cargo test
 
-# Core API plus regex validation
+# Run tests with all declared features
 cargo test --all-features
 
 # Project CI checks
@@ -383,11 +394,6 @@ cargo test --all-features
 # Check code coverage
 ./coverage.sh
 ```
-
-Linux behavior is exercised by the primary runtime suite. Windows and macOS
-metadata/reparse tests run on their native CI jobs. FreeBSD and Android backend
-and cfg-test sources are cross-compiled; this repository does not claim runtime
-execution for those two targets in its current CI matrix.
 
 ## License
 

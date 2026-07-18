@@ -171,6 +171,9 @@ path-based `LocalFiles` 和临时资源 helper 仍面向可信本地应用路径
 | macOS | 通过 descriptor API 与 `fcopyfile` 保留 uid、gid、mode、ACL 和 xattr。 |
 | FreeBSD | uid、gid、mode、文件系统采用的 POSIX 或 NFSv4 ACL，以及 user/system extattr。 |
 
+此表描述已经实现的代码路径。Android 与 FreeBSD 属于下文正式定义的
+compile-only 支持层级；本仓库 CI 不对其文件系统与 metadata 行为做 runtime 验证。
+
 crate 不会为了强制 Windows 替换而清除 `FILE_ATTRIBUTE_READONLY`；只读目标会被
 `ReplaceFileW` 拒绝并保持不变。
 
@@ -254,6 +257,13 @@ portable 校验还会拒绝使用上标数字的 Windows device name，包括 `C
 stream 和字节 I/O 相关能力请使用
 [qubit-io](https://github.com/qubit-ltd/rs-io)。
 
+## 平台支持
+
+| 支持层级 | 目标平台 | CI 验证方式 |
+| --- | --- | --- |
+| 原生 runtime-tested | Linux、Windows、macOS | 测试在对应操作系统上执行，并覆盖平台相关文件系统行为。 |
+| Compile-only | FreeBSD、Android | CI 使用 `cargo check` cross-compile production backend 与 cfg-selected source；本仓库不验证或保证其 runtime 文件系统、ABI 与 metadata 行为。 |
+
 ## 运行时依赖
 
 本 crate 运行时依赖 Rust 标准库、`getrandom`、`libc`、`log` 和按目标启用的
@@ -264,10 +274,10 @@ replacement API，`log` 用于 drop 阶段的清理失败告警。
 ## 测试
 
 ```bash
-# 使用默认的空 feature 集测试核心 API
-cargo test --no-default-features
+# 使用默认 feature 集运行测试
+cargo test
 
-# 测试核心 API 和正则校验
+# 使用项目声明的全部 feature 运行测试
 cargo test --all-features
 
 # 运行项目 CI 检查
@@ -276,10 +286,6 @@ cargo test --all-features
 # 检查代码覆盖率
 ./coverage.sh
 ```
-
-主 runtime suite 在 Linux 上运行；Windows 与 macOS 的 metadata/reparse 测试在
-各自原生 CI job 上运行。FreeBSD 与 Android backend 及 cfg test source 会执行
-cross-compile；当前 CI matrix 不宣称在这两个目标上执行 runtime tests。
 
 ## 许可证
 

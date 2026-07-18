@@ -308,6 +308,9 @@ metadata 保留采用严格语义。读取、ACL、xattr/extattr 或原生 merge
 | macOS | 通过 descriptor 操作与 `fcopyfile` 保留 uid、gid、mode、ACL 和 xattr。 |
 | FreeBSD | uid、gid、mode、受支持的 POSIX 或 NFSv4 ACL，以及 user/system extattr。 |
 
+这些行描述已经实现的代码路径。Android 与 FreeBSD 是 compile-only 目标，因此
+本仓库 CI 不对表中所列行为做 runtime 验证。
+
 crate 不会为了强制替换而清除 `FILE_ATTRIBUTE_READONLY`；只读 Windows 目标会被
 `ReplaceFileW` 拒绝并保持不变。
 
@@ -530,16 +533,18 @@ assert_eq!(
 
 本项目包含公开 helper、临时条目、覆盖语义、递归复制行为、文件名校验、atomic write 和平台相关边界情况的测试。
 
-主 runtime suite 在 Linux 上运行；Windows 与 macOS 原生 job 覆盖各自的 metadata
-与 reparse 行为。FreeBSD 和 Android 的 production backend 及 cfg test source
-会执行 cross-compile，但当前 CI matrix 不宣称在这两个目标上运行 runtime test。
+支持层级正式定义如下：
+
+| 支持层级 | 目标平台 | CI 验证方式 |
+| --- | --- | --- |
+| 原生 runtime-tested | Linux、Windows、macOS | 测试在对应操作系统上执行，并覆盖平台相关文件系统行为。 |
+| Compile-only | FreeBSD、Android | CI 使用 `cargo check` cross-compile production 与 cfg-selected source；本仓库不验证或保证其 runtime 文件系统、ABI 与 metadata 行为。 |
 
 常用命令：
 
 ```bash
 cargo test
 ./coverage.sh
-./coverage.sh text
 ./align-ci.sh
 ./ci-check.sh
 ```

@@ -388,6 +388,9 @@ impl LocalFiles {
     /// installation; on Unix their initial mode is `0o600`, subject to a more
     /// restrictive process umask.
     ///
+    /// Android and FreeBSD are compile-only targets: CI checks that their code
+    /// compiles, but does not execute runtime filesystem validation there.
+    ///
     /// Failures classified as [`crate::LocalAtomicDestinationState::Unchanged`]
     /// do not modify the destination and attempt to remove the temporary file.
     /// Cleanup is best-effort because its error cannot replace the primary
