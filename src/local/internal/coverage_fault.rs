@@ -6,6 +6,7 @@
 //    Licensed under the Apache License, Version 2.0.
 // =============================================================================
 //! Deterministic fault selection for coverage-only subprocess tests.
+// qubit-style: allow source-test-pair
 
 use std::ffi::OsStr;
 use std::sync::atomic::{

@@ -7,6 +7,7 @@
 // =============================================================================
 //! Unix descriptor status restoration after nonblocking safety opens.
 // qubit-style: allow source-test-pair
+// qubit-style: allow coverage-cfg
 // Public APIs keep descriptors live, so native `fcntl` failures cannot be
 // induced deterministically by integration fixtures.
 

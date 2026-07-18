@@ -7,6 +7,7 @@
 // =============================================================================
 //! Result normalization for externally timed copy-destination races.
 // qubit-style: allow source-test-pair
+// qubit-style: allow coverage-cfg
 // Public fixtures cannot deterministically interleave these namespace changes.
 
 use std::fs;

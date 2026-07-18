@@ -7,6 +7,7 @@
 // =============================================================================
 //! Linux and Android atomic extended-metadata preservation.
 // qubit-style: allow source-test-pair
+// qubit-style: allow coverage-cfg
 // Private behavior is covered through public integration tests.
 
 use std::collections::BTreeSet;

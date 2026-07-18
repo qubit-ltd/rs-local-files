@@ -6,6 +6,7 @@
 //    Licensed under the Apache License, Version 2.0.
 // =============================================================================
 //! Private implementation support for local filesystem operations.
+// qubit-style: allow coverage-cfg
 
 mod atomic_file_install;
 #[cfg(unix)]

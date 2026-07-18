@@ -7,6 +7,7 @@
 // =============================================================================
 //! Structured error construction for recursive directory copies.
 // qubit-style: allow source-test-pair
+// qubit-style: allow coverage-cfg
 // Private behavior is covered through public integration tests.
 
 use std::io::{

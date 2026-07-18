@@ -7,6 +7,7 @@
 // =============================================================================
 //! Live-descriptor I/O normalization for recursive-copy staging.
 // qubit-style: allow source-test-pair
+// qubit-style: allow coverage-cfg
 // Public APIs retain both descriptors, so post-open copy and permission
 // failures cannot be induced deterministically by portable fixtures.
 

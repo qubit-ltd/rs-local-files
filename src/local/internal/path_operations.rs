@@ -6,6 +6,7 @@
 //    Licensed under the Apache License, Version 2.0.
 // =============================================================================
 //! Private path and directory operations.
+// qubit-style: allow coverage-cfg
 
 use std::env;
 use std::ffi::OsString;

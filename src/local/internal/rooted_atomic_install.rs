@@ -7,6 +7,7 @@
 // =============================================================================
 //! Descriptor-relative atomic installation result normalization.
 // qubit-style: allow source-test-pair
+// qubit-style: allow coverage-cfg
 // Replacement failures after a validated live destination require externally
 // timed namespace or mount failures that public fixtures cannot force.
 

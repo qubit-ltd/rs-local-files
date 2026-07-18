@@ -7,6 +7,7 @@
 // =============================================================================
 //! Result normalization for descriptor failures and namespace races.
 // qubit-style: allow source-test-pair
+// qubit-style: allow coverage-cfg
 // Public APIs retain live descriptors and cannot force these interleavings.
 
 use std::fs;

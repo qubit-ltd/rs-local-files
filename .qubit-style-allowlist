@@ -1,1 +1,18 @@
-# No restricted style exceptions are currently approved.
+# Coverage-only fault injection runs exclusively in exact subprocess tests.
+coverage-cfg | src/local/internal/atomic_file_install.rs | Exercises otherwise unreachable native atomic-install failures
+coverage-cfg | src/local/internal/atomic_metadata/linux_android.rs | Exercises otherwise unreachable native metadata failures
+coverage-cfg | src/local/internal/atomic_metadata/preservation.rs | Exercises otherwise unreachable metadata orchestration failures
+coverage-cfg | src/local/internal/atomic_namespace_race.rs | Exercises otherwise unreachable atomic namespace races
+coverage-cfg | src/local/internal/copy_dir/destination.rs | Exercises otherwise unreachable copy destination races
+coverage-cfg | src/local/internal/copy_dir/error.rs | Exercises otherwise unreachable copy statistics overflow
+coverage-cfg | src/local/internal/copy_dir/facade.rs | Exercises otherwise unreachable absolute-path resolution failures
+coverage-cfg | src/local/internal/copy_dir/namespace_race.rs | Exercises otherwise unreachable copy namespace races
+coverage-cfg | src/local/internal/copy_dir/staging_io.rs | Exercises otherwise unreachable staging descriptor failures
+coverage-cfg | src/local/internal/mod.rs | Gates the isolated coverage fault helper
+coverage-cfg | src/local/internal/opened_atomic_destination.rs | Exercises otherwise unreachable destination handle failures
+coverage-cfg | src/local/internal/path_operations.rs | Exercises otherwise unreachable directory traversal failures
+coverage-cfg | src/local/internal/rooted_atomic_install.rs | Exercises otherwise unreachable rooted installation failures
+coverage-cfg | src/local/internal/rooted_atomic_namespace_race.rs | Exercises otherwise unreachable rooted namespace races
+coverage-cfg | src/local/internal/rooted_atomic_write.rs | Exercises otherwise unreachable rooted staging failures
+coverage-cfg | src/local/internal/rooted_io_result.rs | Exercises otherwise unreachable rooted descriptor failures
+coverage-cfg | src/local/internal/unix_nonblocking.rs | Exercises otherwise unreachable descriptor status failures
