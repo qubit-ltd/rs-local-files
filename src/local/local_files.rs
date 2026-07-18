@@ -288,6 +288,10 @@ impl LocalFiles {
     /// final remove-and-move sequence is not atomic: a commit failure after
     /// removal can leave the destination absent.
     ///
+    /// Relative source and destination paths are bound to the process current
+    /// directory when this operation begins. Later current-directory changes
+    /// do not redirect traversal, staging, or commit.
+    ///
     /// This operation is not a tree-level transaction. If it fails,
     /// directories and files created or committed before the failure remain in
     /// the destination and no rollback is attempted. Type-conflict replacement

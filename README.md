@@ -162,6 +162,9 @@ Relative atomic-write destinations are likewise bound when writing begins, so
 later changes do not redirect commit or cleanup. On Windows, native moves do
 not add a verbatim-path prefix, so native path-length and verbatim-path semantics
 apply.
+Relative source and destination paths for recursive copy are also bound when
+copy begins, so later current-directory changes do not redirect traversal,
+staging, or commit.
 On Unix, temporary files are created with mode `0600` and temporary directories
 with mode `0700` before applying the process umask.
 

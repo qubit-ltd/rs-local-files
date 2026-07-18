@@ -676,7 +676,10 @@ Relative inputs used by temporary resources and atomic writers are bound to the
 process current directory when the resource or operation begins. Temporary
 resource `path`, child-path, `keep`, and persistence methods return absolute
 paths that remain directly usable after later current-directory changes. The
-crate rejects interior UTF-16 NULs on Windows but does not add a verbatim-path
+relative source and destination paths of recursive copy are likewise bound when
+copy begins, so later current-directory changes do not redirect traversal,
+staging, or commit. The crate rejects interior UTF-16 NULs on Windows but does
+not add a verbatim-path
 prefix, so native path-length and verbatim-path semantics still apply.
 
 ## Crate Boundary

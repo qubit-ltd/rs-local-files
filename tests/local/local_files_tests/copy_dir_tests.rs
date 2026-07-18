@@ -178,6 +178,86 @@ fn test_copy_dir_all_with_relative_missing_destination() {
     fs::remove_dir_all(dir).unwrap();
 }
 
+/// Verifies that a relative copy keeps both trees bound after the worker has
+/// started a source-file open.
+///
+/// A Linux file lease pauses the source open after traversal has begun. The
+/// test then changes the process current directory before copy commit resumes.
+/// The destination must remain in the directory that was current when the
+/// operation began.
+#[cfg(target_os = "linux")]
+#[test]
+fn test_copy_dir_all_with_binds_relative_paths_before_source_open() {
+    const TEST_NAME: &str = concat!(
+        "local::local_files_tests::copy_dir_tests::",
+        "test_copy_dir_all_with_binds_relative_paths_before_source_open",
+    );
+    const CHILD_ENVIRONMENT: &str =
+        "QUBIT_LOCAL_FILES_COPY_DIR_RELATIVE_PATH_CHILD";
+
+    let Some(dir) =
+        run_in_small_stack_process(TEST_NAME, CHILD_ENVIRONMENT, || {
+            let _lock = CURRENT_DIR_LOCK
+                .lock()
+                .expect("current directory lock should be acquired");
+            let dir = temp_dir("copy-dir-relative-path-binding");
+            let creation_dir = dir.join("creation");
+            let later_dir = dir.join("later");
+            let source_dir = creation_dir.join("src");
+            let source_file = source_dir.join("data.txt");
+            fs::create_dir_all(&source_dir)
+                .expect("source directory should be created");
+            fs::create_dir_all(&later_dir)
+                .expect("later directory should be created");
+            fs::write(&source_file, b"creation")
+                .expect("source file should be written");
+
+            let _guard = CurrentDirGuard::change_to(&creation_dir);
+            let lease = SourceReadLease::acquire(&source_file)
+                .expect("source read lease should be acquired");
+            let worker = std::thread::spawn(|| {
+                LocalFiles::copy_dir_all_with(
+                    "src",
+                    "dst",
+                    LocalCopyDirOptions::default(),
+                )
+            });
+
+            lease
+                .wait_for_break()
+                .expect("copy worker should reach the source open");
+            std::env::set_current_dir(&later_dir)
+                .expect("current directory should change");
+            lease
+                .release()
+                .expect("source read lease should be released");
+
+            let stats = worker
+                .join()
+                .expect("copy worker should not panic")
+                .expect("copy should remain bound to its creation directory");
+            assert_eq!(1, stats.files);
+            assert_eq!(
+                b"creation",
+                fs::read(creation_dir.join("dst/data.txt"))
+                    .expect("creation destination should be readable")
+                    .as_slice(),
+            );
+            assert!(
+                !later_dir.join("dst").exists(),
+                "later directory must not receive the copied tree",
+            );
+
+            drop(_guard);
+            dir
+        })
+    else {
+        return;
+    };
+
+    fs::remove_dir_all(dir).expect("copy fixture should be removed");
+}
+
 #[test]
 fn test_copy_dir_all_with_rejects_invalid_source_and_nested_destination() {
     let dir = temp_dir("copy-dir-invalid");

@@ -118,7 +118,7 @@ assert_eq!("new payload\n", std::fs::read_to_string(&final_path)?);
 
 在不支持的目标上，持久化错误仍持有临时 guard。递归复制可能先创建目标目录，随后才在文件提交阶段返回 `Unsupported`；不会回滚整个目标树。
 
-临时资源的相对创建目录和持久化目标会在资源创建或操作开始时绑定到当时的进程工作目录；`path`、child path helper、`keep`、`persist` 和 `persist_with` 返回绝对路径，之后即使工作目录变化也可直接使用。相对 atomic-write 目标同样会在写入开始时绑定，因此后续工作目录变化不会重定向提交或清理。在 Windows 上，原生移动不会添加 verbatim-path prefix，因此路径长度和 verbatim path 语义仍遵循原生平台行为。在 Unix 上，临时文件以 `0600`、临时目录以 `0700` 创建，之后仍受进程 umask 约束。
+临时资源的相对创建目录和持久化目标会在资源创建或操作开始时绑定到当时的进程工作目录；`path`、child path helper、`keep`、`persist` 和 `persist_with` 返回绝对路径，之后即使工作目录变化也可直接使用。相对 atomic-write 目标同样会在写入开始时绑定，因此后续工作目录变化不会重定向提交或清理。递归复制的相对 source 和 destination 也会在复制开始时绑定，后续工作目录变化不会重定向遍历、staging 或提交。在 Windows 上，原生移动不会添加 verbatim-path prefix，因此路径长度和 verbatim path 语义仍遵循原生平台行为。在 Unix 上，临时文件以 `0600`、临时目录以 `0700` 创建，之后仍受进程 umask 约束。
 
 ### 读写选项
 

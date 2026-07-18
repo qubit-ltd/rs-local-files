@@ -17,7 +17,10 @@ use crate::{
     LocalCopyDirStats,
 };
 
-use crate::local::internal::path_operations::canonicalize_existing_prefix;
+use crate::local::internal::path_operations::{
+    absolute_path,
+    canonicalize_existing_prefix,
+};
 
 use super::copy_dir_result::CopyDirResult;
 use super::error::with_copy_context;
@@ -45,13 +48,31 @@ pub(crate) fn copy_dir_all_with_paths(
     options: LocalCopyDirOptions,
 ) -> CopyDirResult<LocalCopyDirStats> {
     let mut stats = LocalCopyDirStats::default();
-    let destination_root = with_copy_context(
-        canonicalize_existing_prefix(dst),
-        LocalCopyDirStage::PrepareDestination,
+    let src = with_copy_context(
+        absolute_path(src),
+        LocalCopyDirStage::InspectSource,
         src,
         dst,
         &stats,
     )?;
-    copy_dir_iterative(src, dst, options, &destination_root, &mut stats)?;
+    let dst = with_copy_context(
+        if dst.as_os_str().is_empty() {
+            Ok(dst.to_path_buf())
+        } else {
+            absolute_path(dst)
+        },
+        LocalCopyDirStage::PrepareDestination,
+        &src,
+        dst,
+        &stats,
+    )?;
+    let destination_root = with_copy_context(
+        canonicalize_existing_prefix(&dst),
+        LocalCopyDirStage::PrepareDestination,
+        &src,
+        &dst,
+        &stats,
+    )?;
+    copy_dir_iterative(&src, &dst, options, &destination_root, &mut stats)?;
     Ok(stats)
 }
