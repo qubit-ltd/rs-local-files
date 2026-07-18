@@ -18,6 +18,8 @@ use qubit_local_files::{
 use std::io::Error;
 use std::io::ErrorKind;
 #[cfg(target_os = "linux")]
+use std::os::fd::AsRawFd;
+#[cfg(target_os = "linux")]
 use std::time::Duration;
 
 #[cfg(target_os = "linux")]
@@ -552,6 +554,47 @@ where
     }
     release_result.expect("source read lease should be released");
     worker_result.expect("copy worker should not panic")
+}
+
+/// Verifies that a transient native lease conflict is retried before the
+/// lease helper reports failure.
+#[cfg(target_os = "linux")]
+#[test]
+fn test_source_read_lease_retries_transient_conflict() {
+    let dir = temp_dir("source-read-lease-transient-conflict");
+    let source_file = dir.join("source.txt");
+    fs::write(&source_file, b"source").expect("source file should be written");
+    let attempts = std::cell::Cell::new(0_u32);
+
+    let lease =
+        SourceReadLease::acquire_with_lease_operation(&source_file, |file| {
+            let attempt = attempts.get() + 1;
+            attempts.set(attempt);
+            if attempt == 1 {
+                Err(Error::from_raw_os_error(libc::EAGAIN))
+            } else {
+                // SAFETY: the helper supplies its live regular-file
+                // descriptor for the same write-lease operation used by the
+                // production test path.
+                let result = unsafe {
+                    libc::fcntl(
+                        file.as_raw_fd(),
+                        libc::F_SETLEASE,
+                        libc::F_WRLCK,
+                    )
+                };
+                if result == -1 {
+                    Err(Error::last_os_error())
+                } else {
+                    Ok(())
+                }
+            }
+        })
+        .expect("transient lease conflict should be retried");
+
+    assert_eq!(2, attempts.get());
+    lease.release().expect("test lease should be released");
+    fs::remove_dir_all(dir).expect("test directory should be removed");
 }
 
 #[cfg(target_os = "linux")]

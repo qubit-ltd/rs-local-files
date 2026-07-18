@@ -36,6 +36,12 @@ const F_OWNER_TID: libc::c_int = 0;
 
 /// Maximum time to wait for the recursive-copy worker to open its source.
 const LEASE_BREAK_TIMEOUT: Duration = Duration::from_secs(5);
+/// Maximum time to wait for a transient conflict while acquiring a lease.
+const LEASE_ACQUIRE_TIMEOUT: Duration = Duration::from_secs(5);
+/// Initial sleep after one scheduler yield for a conflicting lease.
+const INITIAL_LEASE_RETRY_DELAY: Duration = Duration::from_micros(50);
+/// Maximum sleep between conflicting lease attempts.
+const MAX_LEASE_RETRY_DELAY: Duration = Duration::from_millis(10);
 
 /// A Linux write lease that blocks another thread from opening a source file.
 ///
@@ -68,6 +74,41 @@ impl SourceReadLease {
     /// Returns the native I/O error reported while opening the file, blocking
     /// `SIGIO`, targeting the signal, or acquiring the lease.
     pub(crate) fn acquire(path: &Path) -> Result<Self> {
+        Self::acquire_with_lease_operation(path, |file| {
+            // SAFETY: the file descriptor is a live regular file opened for
+            // reading and writing, as required for a Linux write lease.
+            let result = unsafe {
+                libc::fcntl(file.as_raw_fd(), libc::F_SETLEASE, libc::F_WRLCK)
+            };
+            if result == -1 {
+                Err(Error::last_os_error())
+            } else {
+                Ok(())
+            }
+        })
+    }
+
+    /// Acquires a lease using an injectable native lease operation.
+    ///
+    /// This keeps transient-conflict retry behavior deterministic in tests
+    /// while [`Self::acquire`] supplies the real Linux `F_SETLEASE` call.
+    ///
+    /// # Parameters
+    ///
+    /// * `path` - Existing regular file to lease.
+    /// * `lease_operation` - Native lease attempt for the opened file.
+    ///
+    /// # Errors
+    ///
+    /// Returns an opening, signal setup, ownership, non-transient lease, or
+    /// lease-timeout error.
+    pub(crate) fn acquire_with_lease_operation<F>(
+        path: &Path,
+        mut lease_operation: F,
+    ) -> Result<Self>
+    where
+        F: FnMut(&File) -> Result<()>,
+    {
         let file = OpenOptions::new().read(true).write(true).open(path)?;
         // SAFETY: a zeroed sigset_t is immediately initialized by
         // sigemptyset before it is read by any other libc function.
@@ -125,15 +166,30 @@ impl SourceReadLease {
             restore_signal_mask(&previous_signal_mask);
             return Err(error);
         }
-        // SAFETY: the file descriptor is a live regular file opened for
-        // reading and writing, as required for a Linux write lease.
-        let lease_result = unsafe {
-            libc::fcntl(file.as_raw_fd(), libc::F_SETLEASE, libc::F_WRLCK)
-        };
-        if lease_result == -1 {
-            let error = Error::last_os_error();
-            restore_signal_mask(&previous_signal_mask);
-            return Err(error);
+        let deadline = Instant::now() + LEASE_ACQUIRE_TIMEOUT;
+        let mut retry_delay = Duration::ZERO;
+        loop {
+            match lease_operation(&file) {
+                Ok(()) => break,
+                Err(error)
+                    if error.kind() == ErrorKind::WouldBlock
+                        && Instant::now() < deadline =>
+                {
+                    if retry_delay.is_zero() {
+                        std::thread::yield_now();
+                        retry_delay = INITIAL_LEASE_RETRY_DELAY;
+                    } else {
+                        std::thread::sleep(retry_delay);
+                        retry_delay = retry_delay
+                            .saturating_mul(2)
+                            .min(MAX_LEASE_RETRY_DELAY);
+                    }
+                }
+                Err(error) => {
+                    restore_signal_mask(&previous_signal_mask);
+                    return Err(error);
+                }
+            }
         }
         Ok(Self {
             file: Some(file),
