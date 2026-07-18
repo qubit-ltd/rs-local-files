@@ -9,6 +9,8 @@
 use qubit_local_files::LocalFiles;
 use std::io::ErrorKind;
 
+#[cfg(all(coverage, target_os = "linux"))]
+use super::super::test_support::run_in_coverage_fault_process;
 #[cfg(target_os = "linux")]
 use super::super::test_support::run_in_small_stack_process;
 #[cfg(unix)]
@@ -16,6 +18,94 @@ use super::super::test_support::{
     PermissionsExt,
     short_temp_dir,
 };
+
+/// Asserts one injected directory-size traversal failure.
+#[cfg(all(coverage, target_os = "linux"))]
+fn assert_injected_dir_size_error(test_name: &str, fault: &str, nested: bool) {
+    let Some(()) = run_in_coverage_fault_process(test_name, fault, move || {
+        let dir = temp_dir(fault);
+        if nested {
+            fs::create_dir(dir.join("nested"))
+                .expect("nested directory should be created");
+            fs::write(dir.join("nested/data.txt"), b"data")
+                .expect("nested file should be written");
+        } else {
+            fs::write(dir.join("data.txt"), b"data")
+                .expect("file fixture should be written");
+        }
+
+        let error = LocalFiles::dir_size(&dir)
+            .expect_err("injected directory-size traversal should fail");
+
+        if fault.ends_with("overflow") {
+            assert_eq!(ErrorKind::InvalidData, error.kind());
+        } else {
+            assert_eq!(Some(libc::EIO), error.raw_os_error());
+        }
+        fs::remove_dir_all(dir).expect("test directory should be removed");
+    }) else {
+        return;
+    };
+}
+
+/// Verifies propagation of injected directory-entry iteration failures.
+#[cfg(all(coverage, target_os = "linux"))]
+#[test]
+fn test_dir_size_reports_injected_entry_error() {
+    const TEST_NAME: &str = concat!(
+        "local::local_files_tests::path_operations_tests::",
+        "test_dir_size_reports_injected_entry_error",
+    );
+    assert_injected_dir_size_error(TEST_NAME, "dir-size-entry", false);
+}
+
+/// Verifies propagation of injected entry-metadata failures.
+#[cfg(all(coverage, target_os = "linux"))]
+#[test]
+fn test_dir_size_reports_injected_metadata_error() {
+    const TEST_NAME: &str = concat!(
+        "local::local_files_tests::path_operations_tests::",
+        "test_dir_size_reports_injected_metadata_error",
+    );
+    assert_injected_dir_size_error(TEST_NAME, "dir-size-metadata", false);
+}
+
+/// Verifies propagation of injected nested-directory open failures.
+#[cfg(all(coverage, target_os = "linux"))]
+#[test]
+fn test_dir_size_reports_injected_nested_read_error() {
+    const TEST_NAME: &str = concat!(
+        "local::local_files_tests::path_operations_tests::",
+        "test_dir_size_reports_injected_nested_read_error",
+    );
+    assert_injected_dir_size_error(TEST_NAME, "dir-size-read-dir", true);
+}
+
+/// Verifies normalization of injected file-size overflow.
+#[cfg(all(coverage, target_os = "linux"))]
+#[test]
+fn test_dir_size_reports_injected_file_overflow() {
+    const TEST_NAME: &str = concat!(
+        "local::local_files_tests::path_operations_tests::",
+        "test_dir_size_reports_injected_file_overflow",
+    );
+    assert_injected_dir_size_error(TEST_NAME, "dir-size-file-overflow", false);
+}
+
+/// Verifies normalization of injected child-directory size overflow.
+#[cfg(all(coverage, target_os = "linux"))]
+#[test]
+fn test_dir_size_reports_injected_directory_overflow() {
+    const TEST_NAME: &str = concat!(
+        "local::local_files_tests::path_operations_tests::",
+        "test_dir_size_reports_injected_directory_overflow",
+    );
+    assert_injected_dir_size_error(
+        TEST_NAME,
+        "dir-size-directory-overflow",
+        true,
+    );
+}
 use super::super::test_support::{
     fs,
     temp_dir,

@@ -9,6 +9,8 @@
 // qubit-style: allow source-test-pair
 // Private behavior is covered through public integration tests.
 
+#[cfg(coverage)]
+use std::io::Error;
 use std::path::Path;
 
 use crate::{
@@ -48,19 +50,38 @@ pub(crate) fn copy_dir_all_with_paths(
     options: LocalCopyDirOptions,
 ) -> CopyDirResult<LocalCopyDirStats> {
     let mut stats = LocalCopyDirStats::default();
+    let source_result = absolute_path(src);
+    #[cfg(coverage)]
+    let source_result = if crate::local::internal::coverage_fault::is_enabled(
+        "copy-source-absolute",
+    ) {
+        Err(Error::from_raw_os_error(libc::EIO))
+    } else {
+        source_result
+    };
     let src = with_copy_context(
-        absolute_path(src),
+        source_result,
         LocalCopyDirStage::InspectSource,
         src,
         dst,
         &stats,
     )?;
-    let dst = with_copy_context(
-        if dst.as_os_str().is_empty() {
-            Ok(dst.to_path_buf())
+    let destination_result = if dst.as_os_str().is_empty() {
+        Ok(dst.to_path_buf())
+    } else {
+        absolute_path(dst)
+    };
+    #[cfg(coverage)]
+    let destination_result =
+        if crate::local::internal::coverage_fault::is_enabled(
+            "copy-destination-absolute",
+        ) {
+            Err(Error::from_raw_os_error(libc::EIO))
         } else {
-            absolute_path(dst)
-        },
+            destination_result
+        };
+    let dst = with_copy_context(
+        destination_result,
         LocalCopyDirStage::PrepareDestination,
         &src,
         dst,

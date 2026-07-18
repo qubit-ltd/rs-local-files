@@ -274,6 +274,42 @@ fn test_copy_dir_reports_injected_directory_creation_error() {
     );
 }
 
+/// Verifies propagation of source absolute-path resolution failures.
+#[cfg(all(coverage, target_os = "linux"))]
+#[test]
+fn test_copy_dir_reports_injected_source_absolute_path_error() {
+    const TEST_NAME: &str = concat!(
+        "local::local_files_tests::copy_dir_tests::",
+        "test_copy_dir_reports_injected_source_absolute_path_error",
+    );
+    assert_injected_copy_error(
+        TEST_NAME,
+        "copy-source-absolute",
+        LocalCopyDirOptions::default(),
+        false,
+        false,
+        LocalCopyDirStage::InspectSource,
+    );
+}
+
+/// Verifies propagation of destination absolute-path resolution failures.
+#[cfg(all(coverage, target_os = "linux"))]
+#[test]
+fn test_copy_dir_reports_injected_destination_absolute_path_error() {
+    const TEST_NAME: &str = concat!(
+        "local::local_files_tests::copy_dir_tests::",
+        "test_copy_dir_reports_injected_destination_absolute_path_error",
+    );
+    assert_injected_copy_error(
+        TEST_NAME,
+        "copy-destination-absolute",
+        LocalCopyDirOptions::default(),
+        false,
+        false,
+        LocalCopyDirStage::PrepareDestination,
+    );
+}
+
 /// Asserts one injected type-replacement reinspection failure.
 #[cfg(all(coverage, target_os = "linux"))]
 fn assert_injected_root_type_replacement_error(test_name: &str, fault: &str) {

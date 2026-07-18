@@ -23,6 +23,8 @@ use std::path::{
 #[cfg(windows)]
 use std::os::windows::fs::FileTypeExt;
 
+#[cfg(coverage)]
+use super::coverage_fault;
 use super::dir_size_frame::DirSizeFrame;
 #[cfg(windows)]
 use super::file_move::remove_directory_symlink;
@@ -208,7 +210,15 @@ fn dir_size_iterative(path: &Path) -> Result<u64> {
             let Some(parent) = directories.last_mut() else {
                 return Ok(completed_size);
             };
-            let parent_size = match parent.size().checked_add(completed_size) {
+            let parent_size_result = parent.size().checked_add(completed_size);
+            #[cfg(coverage)]
+            let parent_size_result =
+                if coverage_fault::is_enabled("dir-size-directory-overflow") {
+                    None
+                } else {
+                    parent_size_result
+                };
+            let parent_size = match parent_size_result {
                 Some(total) => total,
                 None => {
                     return Err(dir_size_overflow_error!(&completed_path));
@@ -217,22 +227,52 @@ fn dir_size_iterative(path: &Path) -> Result<u64> {
             parent.set_size(parent_size);
             continue;
         };
+        #[cfg(coverage)]
+        let entry = if coverage_fault::is_enabled("dir-size-entry") {
+            Err(Error::from_raw_os_error(libc::EIO))
+        } else {
+            entry
+        };
         let entry = entry?;
         let entry_path = entry.path();
-        let metadata = fs::symlink_metadata(&entry_path)?;
+        let metadata_result = fs::symlink_metadata(&entry_path);
+        #[cfg(coverage)]
+        let metadata_result = if coverage_fault::is_enabled("dir-size-metadata")
+        {
+            Err(Error::from_raw_os_error(libc::EIO))
+        } else {
+            metadata_result
+        };
+        let metadata = metadata_result?;
         let file_type = metadata.file_type();
         if file_type.is_symlink() {
             continue;
         }
         if metadata.is_dir() {
-            let entries = fs::read_dir(&entry_path)?;
+            let entries_result = fs::read_dir(&entry_path);
+            #[cfg(coverage)]
+            let entries_result =
+                if coverage_fault::is_enabled("dir-size-read-dir") {
+                    Err(Error::from_raw_os_error(libc::EIO))
+                } else {
+                    entries_result
+                };
+            let entries = entries_result?;
             directories.push(DirSizeFrame::new(entry_path, entries));
         } else if metadata.is_file() {
             let current = directories.last_mut().expect(
                 "directory-size traversal should retain its root frame",
             );
-            let current_size = match current.size().checked_add(metadata.len())
-            {
+            let current_size_result =
+                current.size().checked_add(metadata.len());
+            #[cfg(coverage)]
+            let current_size_result =
+                if coverage_fault::is_enabled("dir-size-file-overflow") {
+                    None
+                } else {
+                    current_size_result
+                };
+            let current_size = match current_size_result {
                 Some(total) => total,
                 None => return Err(dir_size_overflow_error!(&entry_path)),
             };
