@@ -6,6 +6,8 @@
 //    Licensed under the Apache License, Version 2.0.
 // =============================================================================
 
+#[cfg(coverage)]
+use qubit_local_files::LocalAtomicWriteError;
 use qubit_local_files::{
     LocalAtomicDestinationState,
     LocalAtomicWriteStage,
@@ -62,6 +64,83 @@ use super::super::test_support::{
 #[cfg(target_os = "linux")]
 use super::copy_dir_tests::directory_write_restrictions_are_enforced;
 
+/// Runs one atomic-write fault in an isolated coverage subprocess.
+#[cfg(all(coverage, target_os = "linux"))]
+fn run_atomic_write_fault(
+    test_name: &str,
+    fault: &str,
+    destination_existed: bool,
+) -> Option<(
+    std::path::PathBuf,
+    std::path::PathBuf,
+    Result<(), LocalAtomicWriteError>,
+)> {
+    run_in_coverage_fault_process(test_name, fault, move || {
+        let dir = temp_dir(fault);
+        let destination = dir.join("destination.txt");
+        if destination_existed {
+            fs::write(&destination, b"old")
+                .expect("existing destination should be written");
+        }
+        let result = LocalFiles::atomic_write(&destination, b"new");
+        (dir, destination, result)
+    })
+}
+
+/// Asserts one injected metadata-preservation failure through atomic write.
+#[cfg(all(coverage, target_os = "linux"))]
+fn assert_injected_metadata_error(test_name: &str, fault: &str) {
+    let Some((dir, destination, result)) =
+        run_in_coverage_fault_process(test_name, fault, move || {
+            let dir = temp_dir(fault);
+            let destination = dir.join("destination.txt");
+            fs::write(&destination, b"old")
+                .expect("existing destination should be written");
+            set_user_xattr(&destination, "user.coverage-source", b"value")
+                .expect("source xattr should be written");
+            let result = LocalFiles::atomic_write(&destination, b"new");
+            (dir, destination, result)
+        })
+    else {
+        return;
+    };
+
+    let error = result.expect_err("injected metadata operation should fail");
+    assert_eq!(
+        LocalAtomicWriteStage::ApplyDestinationMetadata,
+        error.stage(),
+    );
+    assert_eq!(
+        LocalAtomicDestinationState::Unchanged,
+        error.destination_state(),
+    );
+    assert_eq!(b"old", fs::read(&destination).unwrap().as_slice());
+    fs::remove_dir_all(dir).expect("test directory should be removed");
+}
+
+/// Asserts one injected existing-destination atomic failure.
+#[cfg(all(coverage, target_os = "linux"))]
+fn assert_injected_atomic_error(
+    test_name: &str,
+    fault: &str,
+    expected_stage: LocalAtomicWriteStage,
+) {
+    let Some((dir, destination, result)) =
+        run_atomic_write_fault(test_name, fault, true)
+    else {
+        return;
+    };
+
+    let error = result.expect_err("injected atomic operation should fail");
+    assert_eq!(expected_stage, error.stage());
+    assert_eq!(
+        LocalAtomicDestinationState::Unchanged,
+        error.destination_state(),
+    );
+    assert_eq!(b"old", fs::read(&destination).unwrap().as_slice());
+    fs::remove_dir_all(dir).expect("test directory should be removed");
+}
+
 /// Verifies that an injected native no-replace failure keeps the destination
 /// unchanged and reports the replacement stage.
 #[cfg(all(coverage, target_os = "linux"))]
@@ -92,6 +171,441 @@ fn test_atomic_write_reports_injected_native_install_error() {
     );
     assert!(!destination.exists(), "destination must remain missing");
     assert_eq!(0, count_atomic_temp_files(&dir));
+    fs::remove_dir_all(dir).expect("test directory should be removed");
+}
+
+/// Verifies that the native no-replace fallback installs a missing file.
+#[cfg(all(coverage, target_os = "linux"))]
+#[test]
+fn test_atomic_write_uses_injected_native_install_fallback() {
+    const TEST_NAME: &str = concat!(
+        "local::local_files_tests::atomic_write_tests::",
+        "test_atomic_write_uses_injected_native_install_fallback",
+    );
+    let Some((dir, destination, result)) =
+        run_atomic_write_fault(TEST_NAME, "atomic-install-fallback", false)
+    else {
+        return;
+    };
+
+    result.expect("fallback install should succeed");
+    assert_eq!(b"new", fs::read(&destination).unwrap().as_slice());
+    fs::remove_dir_all(dir).expect("test directory should be removed");
+}
+
+/// Verifies that an injected fallback link failure leaves no destination.
+#[cfg(all(coverage, target_os = "linux"))]
+#[test]
+fn test_atomic_write_reports_injected_install_link_error() {
+    const TEST_NAME: &str = concat!(
+        "local::local_files_tests::atomic_write_tests::",
+        "test_atomic_write_reports_injected_install_link_error",
+    );
+    let Some((dir, destination, result)) =
+        run_atomic_write_fault(TEST_NAME, "atomic-install-link", false)
+    else {
+        return;
+    };
+
+    let error = result.expect_err("injected link should fail");
+    assert_eq!(LocalAtomicWriteStage::ReplaceDestination, error.stage());
+    assert_eq!(
+        LocalAtomicDestinationState::Unchanged,
+        error.destination_state()
+    );
+    assert!(!destination.exists());
+    fs::remove_dir_all(dir).expect("test directory should be removed");
+}
+
+/// Verifies that an injected fallback unlink failure reports replacement.
+#[cfg(all(coverage, target_os = "linux"))]
+#[test]
+fn test_atomic_write_reports_injected_install_unlink_error() {
+    const TEST_NAME: &str = concat!(
+        "local::local_files_tests::atomic_write_tests::",
+        "test_atomic_write_reports_injected_install_unlink_error",
+    );
+    let Some((dir, destination, result)) =
+        run_atomic_write_fault(TEST_NAME, "atomic-install-unlink", false)
+    else {
+        return;
+    };
+
+    let error = result.expect_err("injected unlink should fail");
+    assert_eq!(LocalAtomicWriteStage::ReplaceDestination, error.stage());
+    assert_eq!(
+        LocalAtomicDestinationState::Replaced,
+        error.destination_state()
+    );
+    assert_eq!(b"new", fs::read(&destination).unwrap().as_slice());
+    fs::remove_dir_all(dir).expect("test directory should be removed");
+}
+
+/// Verifies that an injected existing-file replacement error is normalized.
+#[cfg(all(coverage, target_os = "linux"))]
+#[test]
+fn test_atomic_write_reports_injected_existing_replace_error() {
+    const TEST_NAME: &str = concat!(
+        "local::local_files_tests::atomic_write_tests::",
+        "test_atomic_write_reports_injected_existing_replace_error",
+    );
+    let Some((dir, destination, result)) =
+        run_atomic_write_fault(TEST_NAME, "atomic-install-replace", true)
+    else {
+        return;
+    };
+
+    let error = result.expect_err("injected replacement should fail");
+    assert_eq!(LocalAtomicWriteStage::ReplaceDestination, error.stage());
+    assert_eq!(
+        LocalAtomicDestinationState::Unchanged,
+        error.destination_state()
+    );
+    assert_eq!(b"old", fs::read(&destination).unwrap().as_slice());
+    fs::remove_dir_all(dir).expect("test directory should be removed");
+}
+
+/// Verifies propagation of an injected xattr-list error.
+#[cfg(all(coverage, target_os = "linux"))]
+#[test]
+fn test_atomic_write_reports_injected_metadata_list_error() {
+    const TEST_NAME: &str = concat!(
+        "local::local_files_tests::atomic_write_tests::",
+        "test_atomic_write_reports_injected_metadata_list_error",
+    );
+    assert_injected_metadata_error(TEST_NAME, "atomic-metadata-list");
+}
+
+/// Verifies propagation of an injected xattr-read error.
+#[cfg(all(coverage, target_os = "linux"))]
+#[test]
+fn test_atomic_write_reports_injected_metadata_read_error() {
+    const TEST_NAME: &str = concat!(
+        "local::local_files_tests::atomic_write_tests::",
+        "test_atomic_write_reports_injected_metadata_read_error",
+    );
+    assert_injected_metadata_error(TEST_NAME, "atomic-metadata-read");
+}
+
+/// Verifies propagation of an injected xattr-write error.
+#[cfg(all(coverage, target_os = "linux"))]
+#[test]
+fn test_atomic_write_reports_injected_metadata_write_error() {
+    const TEST_NAME: &str = concat!(
+        "local::local_files_tests::atomic_write_tests::",
+        "test_atomic_write_reports_injected_metadata_write_error",
+    );
+    assert_injected_metadata_error(TEST_NAME, "atomic-metadata-write");
+}
+
+/// Verifies propagation of an injected xattr-removal error.
+#[cfg(all(coverage, target_os = "linux"))]
+#[test]
+fn test_atomic_write_reports_injected_metadata_remove_error() {
+    const TEST_NAME: &str = concat!(
+        "local::local_files_tests::atomic_write_tests::",
+        "test_atomic_write_reports_injected_metadata_remove_error",
+    );
+    assert_injected_metadata_error(TEST_NAME, "atomic-metadata-remove");
+}
+
+/// Verifies propagation of an injected mode-application error.
+#[cfg(all(coverage, target_os = "linux"))]
+#[test]
+fn test_atomic_write_reports_injected_metadata_mode_error() {
+    const TEST_NAME: &str = concat!(
+        "local::local_files_tests::atomic_write_tests::",
+        "test_atomic_write_reports_injected_metadata_mode_error",
+    );
+    assert_injected_metadata_error(TEST_NAME, "atomic-metadata-mode");
+}
+
+/// Verifies propagation of an injected ownership-application error.
+#[cfg(all(coverage, target_os = "linux"))]
+#[test]
+fn test_atomic_write_reports_injected_metadata_owner_error() {
+    const TEST_NAME: &str = concat!(
+        "local::local_files_tests::atomic_write_tests::",
+        "test_atomic_write_reports_injected_metadata_owner_error",
+    );
+    assert_injected_metadata_error(TEST_NAME, "atomic-metadata-owner");
+}
+
+/// Verifies propagation of an injected native ownership syscall failure.
+#[cfg(all(coverage, target_os = "linux"))]
+#[test]
+fn test_atomic_write_reports_injected_metadata_owner_native_error() {
+    const TEST_NAME: &str = concat!(
+        "local::local_files_tests::atomic_write_tests::",
+        "test_atomic_write_reports_injected_metadata_owner_native_error",
+    );
+    assert_injected_metadata_error(TEST_NAME, "atomic-metadata-owner-native");
+}
+
+/// Verifies propagation of an injected source-metadata error.
+#[cfg(all(coverage, target_os = "linux"))]
+#[test]
+fn test_atomic_write_reports_injected_metadata_source_stat_error() {
+    const TEST_NAME: &str = concat!(
+        "local::local_files_tests::atomic_write_tests::",
+        "test_atomic_write_reports_injected_metadata_source_stat_error",
+    );
+    assert_injected_metadata_error(TEST_NAME, "atomic-metadata-source-stat");
+}
+
+/// Verifies propagation of an injected staging-metadata error.
+#[cfg(all(coverage, target_os = "linux"))]
+#[test]
+fn test_atomic_write_reports_injected_metadata_staging_stat_error() {
+    const TEST_NAME: &str = concat!(
+        "local::local_files_tests::atomic_write_tests::",
+        "test_atomic_write_reports_injected_metadata_staging_stat_error",
+    );
+    assert_injected_metadata_error(TEST_NAME, "atomic-metadata-staging-stat");
+}
+
+/// Verifies propagation of an injected native-mode conversion error.
+#[cfg(all(coverage, target_os = "linux"))]
+#[test]
+fn test_atomic_write_reports_injected_metadata_native_mode_error() {
+    const TEST_NAME: &str = concat!(
+        "local::local_files_tests::atomic_write_tests::",
+        "test_atomic_write_reports_injected_metadata_native_mode_error",
+    );
+    assert_injected_metadata_error(TEST_NAME, "atomic-metadata-native-mode");
+}
+
+/// Verifies that an injected unsupported xattr interface skips xattr copying.
+#[cfg(all(coverage, target_os = "linux"))]
+#[test]
+fn test_atomic_write_handles_injected_metadata_not_supported() {
+    const TEST_NAME: &str = concat!(
+        "local::local_files_tests::atomic_write_tests::",
+        "test_atomic_write_handles_injected_metadata_not_supported",
+    );
+    let Some((dir, destination, result)) = run_in_coverage_fault_process(
+        TEST_NAME,
+        "atomic-metadata-not-supported",
+        move || {
+            let dir = temp_dir("atomic-metadata-not-supported");
+            let destination = dir.join("destination.txt");
+            fs::write(&destination, b"old")
+                .expect("existing destination should be written");
+            set_user_xattr(&destination, "user.coverage-source", b"value")
+                .expect("source xattr should be written");
+            let result = LocalFiles::atomic_write(&destination, b"new");
+            (dir, destination, result)
+        },
+    ) else {
+        return;
+    };
+
+    result.expect("unsupported xattr interface should be tolerated");
+    assert_eq!(b"new", fs::read(&destination).unwrap().as_slice());
+    assert!(
+        get_user_xattr(&destination, "user.coverage-source").is_err(),
+        "xattr must not be copied when the interface is unsupported",
+    );
+    fs::remove_dir_all(dir).expect("test directory should be removed");
+}
+
+/// Verifies that an injected disappearing source xattr is reported.
+#[cfg(all(coverage, target_os = "linux"))]
+#[test]
+fn test_atomic_write_reports_injected_metadata_source_missing() {
+    const TEST_NAME: &str = concat!(
+        "local::local_files_tests::atomic_write_tests::",
+        "test_atomic_write_reports_injected_metadata_source_missing",
+    );
+    assert_injected_metadata_error(TEST_NAME, "atomic-metadata-source-missing");
+}
+
+/// Verifies that an injected invalid native xattr name is reported.
+#[cfg(all(coverage, target_os = "linux"))]
+#[test]
+fn test_atomic_write_reports_injected_metadata_invalid_name() {
+    const TEST_NAME: &str = concat!(
+        "local::local_files_tests::atomic_write_tests::",
+        "test_atomic_write_reports_injected_metadata_invalid_name",
+    );
+    assert_injected_metadata_error(TEST_NAME, "atomic-metadata-invalid-name");
+}
+
+/// Verifies propagation of an injected staging xattr-list error.
+#[cfg(all(coverage, target_os = "linux"))]
+#[test]
+fn test_atomic_write_reports_injected_metadata_staging_list_error() {
+    const TEST_NAME: &str = concat!(
+        "local::local_files_tests::atomic_write_tests::",
+        "test_atomic_write_reports_injected_metadata_staging_list_error",
+    );
+    assert_injected_metadata_error(TEST_NAME, "atomic-metadata-staging-list");
+}
+
+/// Verifies propagation of an injected xattr-list buffer read error.
+#[cfg(all(coverage, target_os = "linux"))]
+#[test]
+fn test_atomic_write_reports_injected_metadata_list_read_error() {
+    const TEST_NAME: &str = concat!(
+        "local::local_files_tests::atomic_write_tests::",
+        "test_atomic_write_reports_injected_metadata_list_read_error",
+    );
+    assert_injected_metadata_error(TEST_NAME, "atomic-metadata-list-read");
+}
+
+/// Verifies that an xattr-list size race retries before a later native error.
+#[cfg(all(coverage, target_os = "linux"))]
+#[test]
+fn test_atomic_write_retries_injected_metadata_list_range() {
+    const TEST_NAME: &str = concat!(
+        "local::local_files_tests::atomic_write_tests::",
+        "test_atomic_write_retries_injected_metadata_list_range",
+    );
+    assert_injected_metadata_error(TEST_NAME, "atomic-metadata-list-range");
+}
+
+/// Verifies propagation of an injected xattr-value buffer read error.
+#[cfg(all(coverage, target_os = "linux"))]
+#[test]
+fn test_atomic_write_reports_injected_metadata_value_read_error() {
+    const TEST_NAME: &str = concat!(
+        "local::local_files_tests::atomic_write_tests::",
+        "test_atomic_write_reports_injected_metadata_value_read_error",
+    );
+    assert_injected_metadata_error(TEST_NAME, "atomic-metadata-value-read");
+}
+
+/// Verifies ordering and lookup of an injected security xattr name.
+#[cfg(all(coverage, target_os = "linux"))]
+#[test]
+fn test_atomic_write_reports_injected_metadata_security_name() {
+    const TEST_NAME: &str = concat!(
+        "local::local_files_tests::atomic_write_tests::",
+        "test_atomic_write_reports_injected_metadata_security_name",
+    );
+    assert_injected_metadata_error(TEST_NAME, "atomic-metadata-security-name");
+}
+
+/// Verifies that an injected equal staging value skips redundant xattr copy.
+#[cfg(all(coverage, target_os = "linux"))]
+#[test]
+fn test_atomic_write_skips_injected_equal_metadata_value() {
+    const TEST_NAME: &str = concat!(
+        "local::local_files_tests::atomic_write_tests::",
+        "test_atomic_write_skips_injected_equal_metadata_value",
+    );
+    let Some((dir, destination, result)) = run_in_coverage_fault_process(
+        TEST_NAME,
+        "atomic-metadata-equal-value",
+        move || {
+            let dir = temp_dir("atomic-metadata-equal-value");
+            let destination = dir.join("destination.txt");
+            fs::write(&destination, b"old")
+                .expect("existing destination should be written");
+            set_user_xattr(&destination, "user.coverage-source", b"value")
+                .expect("source xattr should be written");
+            let result = LocalFiles::atomic_write(&destination, b"new");
+            (dir, destination, result)
+        },
+    ) else {
+        return;
+    };
+
+    result.expect("equal staging xattr should not be rewritten");
+    assert!(
+        get_user_xattr(&destination, "user.coverage-source").is_err(),
+        "the injected staging value is not persisted by a skipped write",
+    );
+    fs::remove_dir_all(dir).expect("test directory should be removed");
+}
+
+/// Verifies propagation of an injected destination-open error.
+#[cfg(all(coverage, target_os = "linux"))]
+#[test]
+fn test_atomic_write_reports_injected_destination_open_error() {
+    const TEST_NAME: &str = concat!(
+        "local::local_files_tests::atomic_write_tests::",
+        "test_atomic_write_reports_injected_destination_open_error",
+    );
+    assert_injected_atomic_error(
+        TEST_NAME,
+        "atomic-destination-open",
+        LocalAtomicWriteStage::ReadDestinationMetadata,
+    );
+}
+
+/// Verifies propagation of an injected destination-stat error.
+#[cfg(all(coverage, target_os = "linux"))]
+#[test]
+fn test_atomic_write_reports_injected_destination_stat_error() {
+    const TEST_NAME: &str = concat!(
+        "local::local_files_tests::atomic_write_tests::",
+        "test_atomic_write_reports_injected_destination_stat_error",
+    );
+    assert_injected_atomic_error(
+        TEST_NAME,
+        "atomic-destination-stat",
+        LocalAtomicWriteStage::ReadDestinationMetadata,
+    );
+}
+
+/// Verifies normalization of an injected destination identity mismatch.
+#[cfg(all(coverage, target_os = "linux"))]
+#[test]
+fn test_atomic_write_reports_injected_identity_mismatch() {
+    const TEST_NAME: &str = concat!(
+        "local::local_files_tests::atomic_write_tests::",
+        "test_atomic_write_reports_injected_identity_mismatch",
+    );
+    assert_injected_atomic_error(
+        TEST_NAME,
+        "atomic-identity-mismatch",
+        LocalAtomicWriteStage::ReplaceDestination,
+    );
+}
+
+/// Verifies propagation of an injected destination identity inspection error.
+#[cfg(all(coverage, target_os = "linux"))]
+#[test]
+fn test_atomic_write_reports_injected_identity_inspect_error() {
+    const TEST_NAME: &str = concat!(
+        "local::local_files_tests::atomic_write_tests::",
+        "test_atomic_write_reports_injected_identity_inspect_error",
+    );
+    assert_injected_atomic_error(
+        TEST_NAME,
+        "atomic-identity-inspect",
+        LocalAtomicWriteStage::ReplaceDestination,
+    );
+}
+
+/// Verifies normalization of an injected missing destination identity.
+#[cfg(all(coverage, target_os = "linux"))]
+#[test]
+fn test_atomic_write_reports_injected_identity_missing() {
+    const TEST_NAME: &str = concat!(
+        "local::local_files_tests::atomic_write_tests::",
+        "test_atomic_write_reports_injected_identity_missing",
+    );
+    let Some((dir, destination, result)) =
+        run_atomic_write_fault(TEST_NAME, "atomic-identity-missing", true)
+    else {
+        return;
+    };
+
+    let error = result.expect_err("injected missing identity should fail");
+    assert_eq!(LocalAtomicWriteStage::ReplaceDestination, error.stage());
+    assert_eq!(
+        LocalAtomicDestinationState::Missing,
+        error.destination_state()
+    );
+    assert_eq!(b"old", fs::read(&destination).unwrap().as_slice());
+    let temporary_path = error
+        .temporary_path()
+        .expect("indeterminate staging path should be retained");
+    assert!(temporary_path.exists());
+    fs::remove_file(temporary_path)
+        .expect("retained staging file should be removed");
     fs::remove_dir_all(dir).expect("test directory should be removed");
 }
 

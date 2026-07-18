@@ -94,7 +94,16 @@ fn identity_error(
 
 /// Classifies a pre-replacement destination identity mismatch.
 fn destination_mismatch_state(path: &Path) -> LocalAtomicDestinationState {
-    match fs::symlink_metadata(path) {
+    #[cfg(coverage)]
+    let metadata =
+        if super::coverage_fault::is_enabled("atomic-identity-missing") {
+            Err(Error::from_raw_os_error(libc::ENOENT))
+        } else {
+            fs::symlink_metadata(path)
+        };
+    #[cfg(not(coverage))]
+    let metadata = fs::symlink_metadata(path);
+    match metadata {
         Err(error) if error.kind() == ErrorKind::NotFound => {
             LocalAtomicDestinationState::Missing
         }

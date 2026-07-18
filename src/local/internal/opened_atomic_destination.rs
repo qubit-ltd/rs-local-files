@@ -49,6 +49,10 @@ pub(crate) struct OpenedAtomicDestination {
 impl OpenedAtomicDestination {
     /// Constructs and validates destination identity from an open file.
     pub(crate) fn from_file(file: File) -> Result<Self> {
+        #[cfg(coverage)]
+        if super::coverage_fault::is_enabled("atomic-destination-stat") {
+            return Err(Error::from_raw_os_error(libc::EIO));
+        }
         let metadata = file.metadata()?;
         if !metadata.is_file() {
             return Err(invalid_atomic_destination());
@@ -87,6 +91,10 @@ impl OpenedAtomicDestination {
 pub(crate) fn open_atomic_destination(
     path: &Path,
 ) -> Result<Option<OpenedAtomicDestination>> {
+    #[cfg(coverage)]
+    if super::coverage_fault::is_enabled("atomic-destination-open") {
+        return Err(Error::from_raw_os_error(libc::EIO));
+    }
     let mut options = OpenOptions::new();
     options
         .read(true)
@@ -120,6 +128,16 @@ pub(crate) fn destination_identity_matches(
     path: &Path,
     destination: &OpenedAtomicDestination,
 ) -> Result<bool> {
+    #[cfg(coverage)]
+    if super::coverage_fault::is_enabled("atomic-identity-mismatch")
+        || super::coverage_fault::is_enabled("atomic-identity-missing")
+    {
+        return Ok(false);
+    }
+    #[cfg(coverage)]
+    if super::coverage_fault::is_enabled("atomic-identity-inspect") {
+        return Err(Error::from_raw_os_error(libc::EIO));
+    }
     match fs::symlink_metadata(path) {
         Ok(metadata) => Ok(metadata.file_type().is_file()
             && metadata.dev() == destination.device
@@ -210,12 +228,13 @@ fn native_identity_component<T>(value: T) -> Result<u64>
 where
     u64: TryFrom<T>,
 {
-    u64::try_from(value).map_err(|_| {
-        Error::new(
+    match u64::try_from(value) {
+        Ok(value) => Ok(value),
+        Err(_) => Err(Error::new(
             ErrorKind::InvalidData,
             "atomic destination identity is outside the supported range",
-        )
-    })
+        )),
+    }
 }
 
 /// Creates the stable type error for atomic destinations.

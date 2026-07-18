@@ -43,30 +43,78 @@ pub(crate) fn preserve_atomic_metadata(
     source: &File,
     staging: &File,
 ) -> Result<()> {
+    #[cfg(coverage)]
+    let source_metadata = if super::super::coverage_fault::is_enabled(
+        "atomic-metadata-source-stat",
+    ) {
+        Err(Error::from_raw_os_error(libc::EIO))
+    } else {
+        source.metadata()
+    }?;
+    #[cfg(not(coverage))]
     let source_metadata = source.metadata()?;
+    #[cfg(coverage)]
+    let staging_metadata = if super::super::coverage_fault::is_enabled(
+        "atomic-metadata-staging-stat",
+    ) {
+        Err(Error::from_raw_os_error(libc::EIO))
+    } else {
+        staging.metadata()
+    }?;
+    #[cfg(not(coverage))]
     let staging_metadata = staging.metadata()?;
-    if source_metadata.uid() != staging_metadata.uid()
+    #[cfg(coverage)]
+    let forced_owner_error =
+        super::super::coverage_fault::is_enabled("atomic-metadata-owner");
+    #[cfg(coverage)]
+    let forced_owner_native_error = super::super::coverage_fault::is_enabled(
+        "atomic-metadata-owner-native",
+    );
+    #[cfg(not(coverage))]
+    let forced_owner_error = false;
+    #[cfg(not(coverage))]
+    let forced_owner_native_error = false;
+    if forced_owner_error
+        || forced_owner_native_error
+        || source_metadata.uid() != staging_metadata.uid()
         || source_metadata.gid() != staging_metadata.gid()
     {
         // SAFETY: the staging descriptor remains live and the uid/gid values
         // came from metadata for a live Unix file handle.
-        let result = unsafe {
-            libc::fchown(
-                staging.as_raw_fd(),
-                source_metadata.uid(),
-                source_metadata.gid(),
-            )
+        let result = if forced_owner_native_error {
+            -1
+        } else {
+            unsafe {
+                libc::fchown(
+                    staging.as_raw_fd(),
+                    source_metadata.uid(),
+                    source_metadata.gid(),
+                )
+            }
         };
-        if result == -1 {
-            return Err(Error::last_os_error());
+        if forced_owner_error || result == -1 {
+            return Err(if forced_owner_error {
+                Error::from_raw_os_error(libc::EIO)
+            } else {
+                Error::last_os_error()
+            });
         }
     }
     let mode = native_mode(source_metadata.mode())?;
+    #[cfg(coverage)]
+    let forced_mode_error =
+        super::super::coverage_fault::is_enabled("atomic-metadata-mode");
+    #[cfg(not(coverage))]
+    let forced_mode_error = false;
     // SAFETY: the staging descriptor remains live and `mode` contains the
     // native Unix mode bits expected by `fchmod`.
     let result = unsafe { libc::fchmod(staging.as_raw_fd(), mode) };
-    if result == -1 {
-        return Err(Error::last_os_error());
+    if forced_mode_error || result == -1 {
+        return Err(if forced_mode_error {
+            Error::from_raw_os_error(libc::EIO)
+        } else {
+            Error::last_os_error()
+        });
     }
     preserve_extended_metadata(source, staging)
 }
@@ -76,12 +124,23 @@ fn native_mode<T>(mode: u32) -> Result<T>
 where
     T: TryFrom<u32>,
 {
-    T::try_from(mode).map_err(|_| {
-        Error::new(
+    #[cfg(coverage)]
+    let mode = if super::super::coverage_fault::is_enabled(
+        "atomic-metadata-native-mode",
+    ) {
+        None
+    } else {
+        T::try_from(mode).ok()
+    };
+    #[cfg(not(coverage))]
+    let mode = T::try_from(mode).ok();
+    match mode {
+        Some(mode) => Ok(mode),
+        None => Err(Error::new(
             ErrorKind::InvalidData,
             "source mode cannot be represented by the target platform",
-        )
-    })
+        )),
+    }
 }
 
 /// Rejects strict metadata replacement on an unsupported Unix platform.

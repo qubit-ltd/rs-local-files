@@ -25,7 +25,34 @@ pub(super) fn preserve_extended_metadata(
     staging: &File,
 ) -> Result<()> {
     let source_names = list_xattrs(source)?;
+    #[cfg(coverage)]
+    let source_names = {
+        let mut source_names = source_names;
+        if super::super::coverage_fault::is_enabled(
+            "atomic-metadata-security-name",
+        ) {
+            let _ = source_names.insert(b"security.coverage-missing".to_vec());
+        }
+        source_names
+    };
+    #[cfg(coverage)]
+    let staging_names = if super::super::coverage_fault::is_enabled(
+        "atomic-metadata-staging-list",
+    ) {
+        Err(Error::from_raw_os_error(libc::EIO))
+    } else {
+        list_xattrs(staging)
+    }?;
+    #[cfg(not(coverage))]
     let staging_names = list_xattrs(staging)?;
+    #[cfg(coverage)]
+    let staging_names = {
+        let mut staging_names = staging_names;
+        if super::super::coverage_fault::is_enabled("atomic-metadata-remove") {
+            let _ = staging_names.insert(b"user.coverage-remove".to_vec());
+        }
+        staging_names
+    };
     for name in staging_names.difference(&source_names) {
         remove_xattr(staging, name)?;
     }
@@ -42,14 +69,32 @@ pub(super) fn preserve_extended_metadata(
 
 /// Lists all extended-attribute names visible through a file descriptor.
 fn list_xattrs(file: &File) -> Result<BTreeSet<Vec<u8>>> {
+    #[cfg(coverage)]
+    let forced_error = if super::super::coverage_fault::is_enabled(
+        "atomic-metadata-not-supported",
+    ) {
+        Some(libc::ENOTSUP)
+    } else if super::super::coverage_fault::is_enabled("atomic-metadata-list") {
+        Some(libc::EIO)
+    } else {
+        None
+    };
+    #[cfg(not(coverage))]
+    let forced_error = None;
     loop {
         // SAFETY: the file descriptor is live and null output requests the
         // current list length without retaining pointers.
-        let length = unsafe {
-            libc::flistxattr(file.as_raw_fd(), std::ptr::null_mut(), 0)
+        let length = match forced_error {
+            Some(_) => -1,
+            None => unsafe {
+                libc::flistxattr(file.as_raw_fd(), std::ptr::null_mut(), 0)
+            },
         };
         if length == -1 {
-            let error = Error::last_os_error();
+            let error = match forced_error {
+                Some(code) => Error::from_raw_os_error(code),
+                None => Error::last_os_error(),
+            };
             if is_not_supported(&error) {
                 return Ok(BTreeSet::new());
             }
@@ -61,15 +106,43 @@ fn list_xattrs(file: &File) -> Result<BTreeSet<Vec<u8>>> {
         let mut buffer = vec![0_u8; length as usize];
         // SAFETY: `buffer` is writable for the requested length and the live
         // descriptor and buffer are not retained by the system call.
-        let read = unsafe {
-            libc::flistxattr(
-                file.as_raw_fd(),
-                buffer.as_mut_ptr().cast(),
-                buffer.len(),
-            )
+        #[cfg(coverage)]
+        let forced_read_error = super::super::coverage_fault::is_enabled(
+            "atomic-metadata-list-read",
+        );
+        #[cfg(coverage)]
+        let forced_range_error = super::super::coverage_fault::is_enabled(
+            "atomic-metadata-list-range",
+        );
+        #[cfg(coverage)]
+        let forced_error = if forced_read_error {
+            Some(libc::EIO)
+        } else if super::super::coverage_fault::take(
+            "atomic-metadata-list-range",
+        ) {
+            Some(libc::ERANGE)
+        } else if forced_range_error {
+            Some(libc::EIO)
+        } else {
+            None
+        };
+        #[cfg(not(coverage))]
+        let forced_error = None;
+        let read = match forced_error {
+            Some(_) => -1,
+            None => unsafe {
+                libc::flistxattr(
+                    file.as_raw_fd(),
+                    buffer.as_mut_ptr().cast(),
+                    buffer.len(),
+                )
+            },
         };
         if read == -1 {
-            let error = Error::last_os_error();
+            let error = match forced_error {
+                Some(code) => Error::from_raw_os_error(code),
+                None => Error::last_os_error(),
+            };
             if error.raw_os_error() == Some(libc::ERANGE) {
                 continue;
             }
@@ -86,12 +159,6 @@ fn parse_xattr_names(buffer: &[u8]) -> Result<BTreeSet<Vec<u8>>> {
     for name in buffer.split(|byte| *byte == 0) {
         if name.is_empty() {
             continue;
-        }
-        if name.contains(&0) {
-            return Err(Error::new(
-                ErrorKind::InvalidData,
-                "extended-attribute name contains an interior NUL",
-            ));
         }
         let _ = names.insert(name.to_vec());
     }
@@ -116,35 +183,66 @@ fn ordered_names(names: &BTreeSet<Vec<u8>>) -> Vec<&[u8]> {
 
 /// Gets one required extended-attribute value, retrying size races.
 fn get_xattr(file: &File, name: &[u8]) -> Result<Vec<u8>> {
-    get_xattr_inner(file, name)?.ok_or_else(|| {
-        Error::new(
+    #[cfg(coverage)]
+    let name = if super::super::coverage_fault::is_enabled(
+        "atomic-metadata-invalid-name",
+    ) {
+        b"user.coverage\0invalid".as_slice()
+    } else {
+        name
+    };
+    match get_xattr_inner(file, name)? {
+        Some(value) => Ok(value),
+        None => Err(Error::new(
             ErrorKind::NotFound,
             "source extended attribute disappeared during preservation",
-        )
-    })
+        )),
+    }
 }
 
 /// Gets an optional extended-attribute value, retrying size races.
 fn get_optional_xattr(file: &File, name: &[u8]) -> Result<Option<Vec<u8>>> {
+    #[cfg(coverage)]
+    if super::super::coverage_fault::is_enabled("atomic-metadata-equal-value") {
+        return Ok(Some(b"value".to_vec()));
+    }
     get_xattr_inner(file, name)
 }
 
 /// Implements descriptor-based xattr lookup.
 fn get_xattr_inner(file: &File, name: &[u8]) -> Result<Option<Vec<u8>>> {
+    #[cfg(coverage)]
+    let forced_error = if super::super::coverage_fault::is_enabled(
+        "atomic-metadata-source-missing",
+    ) {
+        Some(libc::ENODATA)
+    } else if super::super::coverage_fault::is_enabled("atomic-metadata-read") {
+        Some(libc::EIO)
+    } else {
+        None
+    };
+    #[cfg(not(coverage))]
+    let forced_error = None;
     let name = native_name(name)?;
     loop {
         // SAFETY: the descriptor and name remain live, and null output asks
         // only for the current value length.
-        let length = unsafe {
-            libc::fgetxattr(
-                file.as_raw_fd(),
-                name.as_ptr(),
-                std::ptr::null_mut(),
-                0,
-            )
+        let length = match forced_error {
+            Some(_) => -1,
+            None => unsafe {
+                libc::fgetxattr(
+                    file.as_raw_fd(),
+                    name.as_ptr(),
+                    std::ptr::null_mut(),
+                    0,
+                )
+            },
         };
         if length == -1 {
-            let error = Error::last_os_error();
+            let error = match forced_error {
+                Some(code) => Error::from_raw_os_error(code),
+                None => Error::last_os_error(),
+            };
             if is_missing_xattr(&error) {
                 return Ok(None);
             }
@@ -153,16 +251,30 @@ fn get_xattr_inner(file: &File, name: &[u8]) -> Result<Option<Vec<u8>>> {
         let mut value = vec![0_u8; length as usize];
         // SAFETY: `value` is writable for its full length and the descriptor
         // and name remain live for this non-retaining system call.
-        let read = unsafe {
-            libc::fgetxattr(
-                file.as_raw_fd(),
-                name.as_ptr(),
-                value.as_mut_ptr().cast(),
-                value.len(),
-            )
+        #[cfg(coverage)]
+        let forced_read_error = super::super::coverage_fault::is_enabled(
+            "atomic-metadata-value-read",
+        );
+        #[cfg(not(coverage))]
+        let forced_read_error = false;
+        let read = if forced_read_error {
+            -1
+        } else {
+            unsafe {
+                libc::fgetxattr(
+                    file.as_raw_fd(),
+                    name.as_ptr(),
+                    value.as_mut_ptr().cast(),
+                    value.len(),
+                )
+            }
         };
         if read == -1 {
-            let error = Error::last_os_error();
+            let error = if forced_read_error {
+                Error::from_raw_os_error(libc::EIO)
+            } else {
+                Error::last_os_error()
+            };
             if error.raw_os_error() == Some(libc::ERANGE) {
                 continue;
             }
@@ -178,31 +290,57 @@ fn get_xattr_inner(file: &File, name: &[u8]) -> Result<Option<Vec<u8>>> {
 
 /// Sets one descriptor-based extended attribute.
 fn set_xattr(file: &File, name: &[u8], value: &[u8]) -> Result<()> {
+    #[cfg(coverage)]
+    let forced_error =
+        super::super::coverage_fault::is_enabled("atomic-metadata-write");
+    #[cfg(not(coverage))]
+    let forced_error = false;
     let name = native_name(name)?;
     // SAFETY: the descriptor, name, and value remain live for the call, and
     // the supplied length matches the value buffer.
-    let result = unsafe {
-        libc::fsetxattr(
-            file.as_raw_fd(),
-            name.as_ptr(),
-            value.as_ptr().cast(),
-            value.len(),
-            0,
-        )
+    let result = if forced_error {
+        -1
+    } else {
+        unsafe {
+            libc::fsetxattr(
+                file.as_raw_fd(),
+                name.as_ptr(),
+                value.as_ptr().cast(),
+                value.len(),
+                0,
+            )
+        }
     };
     if result == -1 {
-        return Err(Error::last_os_error());
+        return Err(if forced_error {
+            Error::from_raw_os_error(libc::EIO)
+        } else {
+            Error::last_os_error()
+        });
     }
     Ok(())
 }
 
 /// Removes one descriptor-based extended attribute.
 fn remove_xattr(file: &File, name: &[u8]) -> Result<()> {
+    #[cfg(coverage)]
+    let forced_error =
+        super::super::coverage_fault::is_enabled("atomic-metadata-remove");
+    #[cfg(not(coverage))]
+    let forced_error = false;
     let name = native_name(name)?;
     // SAFETY: the descriptor and name remain live for this non-retaining call.
-    let result = unsafe { libc::fremovexattr(file.as_raw_fd(), name.as_ptr()) };
+    let result = if forced_error {
+        -1
+    } else {
+        unsafe { libc::fremovexattr(file.as_raw_fd(), name.as_ptr()) }
+    };
     if result == -1 {
-        let error = Error::last_os_error();
+        let error = if forced_error {
+            Error::from_raw_os_error(libc::EIO)
+        } else {
+            Error::last_os_error()
+        };
         if is_missing_xattr(&error) {
             return Ok(());
         }
@@ -213,12 +351,13 @@ fn remove_xattr(file: &File, name: &[u8]) -> Result<()> {
 
 /// Converts an xattr name to a native C string.
 fn native_name(name: &[u8]) -> Result<CString> {
-    CString::new(name).map_err(|_| {
-        Error::new(
+    match CString::new(name) {
+        Ok(name) => Ok(name),
+        Err(_) => Err(Error::new(
             ErrorKind::InvalidData,
             "extended-attribute name contains NUL",
-        )
-    })
+        )),
+    }
 }
 
 /// Reports the platform's missing-attribute error.

@@ -62,6 +62,10 @@ pub(crate) fn replace_existing_atomic_file(
     staging: &Path,
     destination: &Path,
 ) -> Result<()> {
+    #[cfg(all(coverage, unix))]
+    if super::coverage_fault::is_enabled("atomic-install-replace") {
+        return Err(Error::from_raw_os_error(libc::EIO));
+    }
     #[cfg(not(windows))]
     {
         replace_file(staging, destination)
@@ -149,22 +153,41 @@ pub(crate) fn install_new_atomic_file_at(
         ) {
             return Err(unchanged_error(Error::from_raw_os_error(libc::EIO)));
         }
-        // SAFETY: both directory descriptors and C strings remain live for
-        // the non-retaining syscall, and `RENAME_NOREPLACE` is the only flag.
-        let result = unsafe {
-            libc::syscall(
-                libc::SYS_renameat2,
-                staging_parent,
-                staging.as_ptr(),
-                destination_parent,
-                destination.as_ptr(),
-                libc::RENAME_NOREPLACE,
-            )
+        #[cfg(coverage)]
+        let forced_fallback = [
+            "atomic-install-fallback",
+            "atomic-install-link",
+            "atomic-install-unlink",
+        ]
+        .into_iter()
+        .any(super::coverage_fault::is_enabled);
+        #[cfg(not(coverage))]
+        let forced_fallback = false;
+        let result = if forced_fallback {
+            -1
+        } else {
+            // SAFETY: both directory descriptors and C strings remain live
+            // for the non-retaining syscall, and `RENAME_NOREPLACE` is the
+            // only flag.
+            unsafe {
+                libc::syscall(
+                    libc::SYS_renameat2,
+                    staging_parent,
+                    staging.as_ptr(),
+                    destination_parent,
+                    destination.as_ptr(),
+                    libc::RENAME_NOREPLACE,
+                )
+            }
         };
         if result == 0 {
             return Ok(());
         }
-        let error = Error::last_os_error();
+        let error = if forced_fallback {
+            Error::from_raw_os_error(libc::ENOSYS)
+        } else {
+            Error::last_os_error()
+        };
         let code = error.raw_os_error();
         if code != Some(libc::ENOSYS)
             && code != Some(libc::EINVAL)
@@ -229,6 +252,10 @@ fn link_then_unlink(
     destination_parent: RawFd,
     destination: &CStr,
 ) -> std::result::Result<(), (Error, LocalAtomicDestinationState)> {
+    #[cfg(coverage)]
+    if super::coverage_fault::is_enabled("atomic-install-link") {
+        return Err(unchanged_error(Error::from_raw_os_error(libc::EIO)));
+    }
     // SAFETY: both directory descriptors and names remain live for this
     // non-retaining hard-link operation.
     let link_result = unsafe {
@@ -243,13 +270,25 @@ fn link_then_unlink(
     if link_result == -1 {
         return Err(unchanged_error(Error::last_os_error()));
     }
-    // SAFETY: the staging directory descriptor and name remain live for this
-    // non-retaining unlink operation.
-    let unlink_result =
-        unsafe { libc::unlinkat(staging_parent, staging.as_ptr(), 0) };
+    #[cfg(coverage)]
+    let forced_unlink_error =
+        super::coverage_fault::is_enabled("atomic-install-unlink");
+    #[cfg(not(coverage))]
+    let forced_unlink_error = false;
+    let unlink_result = if forced_unlink_error {
+        -1
+    } else {
+        // SAFETY: the staging directory descriptor and name remain live for
+        // this non-retaining unlink operation.
+        unsafe { libc::unlinkat(staging_parent, staging.as_ptr(), 0) }
+    };
     if unlink_result == -1 {
         return Err((
-            Error::last_os_error(),
+            if forced_unlink_error {
+                Error::from_raw_os_error(libc::EIO)
+            } else {
+                Error::last_os_error()
+            },
             LocalAtomicDestinationState::Replaced,
         ));
     }
@@ -259,9 +298,13 @@ fn link_then_unlink(
 /// Converts a Unix path to a NUL-terminated byte string.
 #[cfg(unix)]
 fn native_path(path: &Path) -> Result<CString> {
-    CString::new(path.as_os_str().as_bytes()).map_err(|_| {
-        Error::new(ErrorKind::InvalidInput, "atomic install path contains NUL")
-    })
+    match CString::new(path.as_os_str().as_bytes()) {
+        Ok(path) => Ok(path),
+        Err(_) => Err(Error::new(
+            ErrorKind::InvalidInput,
+            "atomic install path contains NUL",
+        )),
+    }
 }
 
 /// Pairs an error with a destination known to be unmodified.
