@@ -99,6 +99,7 @@ fn parse_xattr_names(buffer: &[u8]) -> Result<BTreeSet<Vec<u8>>> {
 }
 
 /// Returns names in deterministic order with security attributes last.
+#[must_use]
 fn ordered_names(names: &BTreeSet<Vec<u8>>) -> Vec<&[u8]> {
     let mut ordinary = Vec::new();
     let mut security = Vec::new();
@@ -221,11 +222,13 @@ fn native_name(name: &[u8]) -> Result<CString> {
 }
 
 /// Reports the platform's missing-attribute error.
+#[must_use]
 fn is_missing_xattr(error: &Error) -> bool {
     error.raw_os_error() == Some(libc::ENODATA)
 }
 
 /// Reports that the filesystem exposes no extended-attribute interface.
+#[must_use]
 fn is_not_supported(error: &Error) -> bool {
     let code = error.raw_os_error();
     code == Some(libc::ENOTSUP) || code == Some(libc::EOPNOTSUPP)

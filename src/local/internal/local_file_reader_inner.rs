@@ -21,6 +21,7 @@ use std::io::{
 use crate::FileBuffering;
 
 /// Owns the private concrete representation of a local file reader.
+#[must_use = "discarding the reader representation immediately closes its file"]
 #[derive(Debug)]
 pub(in crate::local) enum LocalFileReaderInner {
     /// Reader backed directly by an unbuffered file handle.
@@ -61,6 +62,7 @@ impl LocalFileReaderInner {
     /// # Returns
     ///
     /// `true` for the buffered representation; otherwise, `false`.
+    #[must_use]
     #[inline(always)]
     pub(in crate::local) const fn is_buffered(&self) -> bool {
         matches!(self, Self::Buffered(_))

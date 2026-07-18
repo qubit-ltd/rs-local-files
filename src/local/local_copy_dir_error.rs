@@ -94,6 +94,7 @@ impl LocalCopyDirError {
     ///
     /// # Returns
     /// Source path being processed.
+    #[must_use]
     #[inline(always)]
     pub fn source_path(&self) -> &Path {
         &self.source_path
@@ -103,6 +104,7 @@ impl LocalCopyDirError {
     ///
     /// # Returns
     /// Destination path being processed.
+    #[must_use]
     #[inline(always)]
     pub fn destination_path(&self) -> &Path {
         &self.destination_path
@@ -112,6 +114,7 @@ impl LocalCopyDirError {
     ///
     /// # Returns
     /// Partial recursive-copy statistics.
+    #[must_use]
     #[inline(always)]
     pub const fn stats(&self) -> &LocalCopyDirStats {
         &self.stats
@@ -139,6 +142,7 @@ impl LocalCopyDirError {
     ///
     /// # Returns
     /// Error kind reported by the retained source error.
+    #[must_use]
     #[inline(always)]
     pub fn kind(&self) -> io::ErrorKind {
         self.source.kind()

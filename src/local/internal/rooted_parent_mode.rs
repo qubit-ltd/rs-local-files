@@ -27,6 +27,7 @@ impl RootedParentMode {
     /// # Returns
     ///
     /// `true` for either creation mode; otherwise, `false`.
+    #[must_use]
     #[inline(always)]
     pub(in crate::local) const fn creates_missing(self) -> bool {
         matches!(self, Self::CreateMissing | Self::CreateMissingAndTrackSync)
@@ -37,6 +38,7 @@ impl RootedParentMode {
     /// # Returns
     ///
     /// `true` only for creation with synchronization tracking.
+    #[must_use]
     #[inline(always)]
     pub(in crate::local) const fn tracks_sync(self) -> bool {
         matches!(self, Self::CreateMissingAndTrackSync)

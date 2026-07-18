@@ -41,6 +41,7 @@ use super::path_operations::{
 /// # Returns
 ///
 /// An `InvalidInput` error identifying the non-regular path.
+#[inline]
 fn path_not_regular_file_error(path: &Path) -> Error {
     Error::new(
         ErrorKind::InvalidInput,
@@ -74,6 +75,7 @@ fn reject_existing_non_file(path: &Path) -> Result<()> {
 ///
 /// # Parameters
 /// - `options`: Open options to update.
+#[inline(always)]
 fn configure_nonblocking_open(options: &mut OpenOptions) {
     use std::os::unix::fs::OpenOptionsExt;
 
@@ -89,6 +91,7 @@ fn configure_nonblocking_open(options: &mut OpenOptions) {
 ///
 /// # Parameters
 /// - `options`: Open options that remain unchanged.
+#[inline(always)]
 fn configure_nonblocking_open(_options: &mut OpenOptions) {}
 
 #[cfg(unix)]

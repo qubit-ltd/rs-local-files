@@ -19,6 +19,7 @@ use std::io::{
 /// # Returns
 ///
 /// An `InvalidData` error identifying the directory counter.
+#[inline(always)]
 pub(super) fn directory_statistics_overflow_error() -> Error {
     statistics_overflow_error("directories")
 }
@@ -28,6 +29,7 @@ pub(super) fn directory_statistics_overflow_error() -> Error {
 /// # Returns
 ///
 /// An `InvalidData` error identifying the skipped-file counter.
+#[inline(always)]
 pub(super) fn skipped_statistics_overflow_error() -> Error {
     statistics_overflow_error("skipped")
 }
@@ -37,6 +39,7 @@ pub(super) fn skipped_statistics_overflow_error() -> Error {
 /// # Returns
 ///
 /// An `InvalidData` error identifying the copied-file counter.
+#[inline(always)]
 pub(super) fn file_statistics_overflow_error() -> Error {
     statistics_overflow_error("files")
 }
@@ -46,6 +49,7 @@ pub(super) fn file_statistics_overflow_error() -> Error {
 /// # Returns
 ///
 /// An `InvalidData` error identifying the copied-byte counter.
+#[inline(always)]
 pub(super) fn byte_statistics_overflow_error() -> Error {
     statistics_overflow_error("bytes")
 }
@@ -59,6 +63,7 @@ pub(super) fn byte_statistics_overflow_error() -> Error {
 /// # Returns
 ///
 /// An `InvalidData` error naming the overflowing field.
+#[inline]
 fn statistics_overflow_error(field: &str) -> Error {
     Error::new(
         ErrorKind::InvalidData,

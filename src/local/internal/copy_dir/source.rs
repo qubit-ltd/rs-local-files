@@ -96,6 +96,7 @@ pub(super) fn metadata_for_copy_source(
 /// # Returns
 ///
 /// `true` only for a non-symbolic-link directory.
+#[must_use]
 #[inline(always)]
 pub(super) fn is_real_directory(metadata: &fs::Metadata) -> bool {
     metadata.is_dir() && !metadata.file_type().is_symlink()

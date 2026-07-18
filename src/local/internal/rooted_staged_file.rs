@@ -77,6 +77,7 @@ impl RootedStagedFile {
     /// # Returns
     ///
     /// The relative staging path retained by this guard.
+    #[must_use]
     #[inline(always)]
     pub(in crate::local) fn diagnostic_path(&self) -> &Path {
         &self.diagnostic_path
@@ -91,6 +92,7 @@ impl RootedStagedFile {
     /// # Panics
     ///
     /// Panics after the data handle has been closed.
+    #[must_use]
     #[inline(always)]
     pub(in crate::local) fn file(&self) -> &File {
         self.file
@@ -107,6 +109,7 @@ impl RootedStagedFile {
     /// # Panics
     ///
     /// Panics after the data handle has been closed.
+    #[must_use]
     #[inline(always)]
     pub(in crate::local) fn file_mut(&mut self) -> &mut File {
         self.file
@@ -119,6 +122,7 @@ impl RootedStagedFile {
     /// # Returns
     ///
     /// The descriptor that authorizes staging entry operations.
+    #[must_use]
     #[inline(always)]
     pub(in crate::local) fn parent(&self) -> &File {
         &self.parent

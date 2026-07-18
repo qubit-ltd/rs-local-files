@@ -68,6 +68,7 @@ impl FileBuffering {
     ///
     /// # Returns
     /// `true` for buffered policies.
+    #[must_use]
     #[inline(always)]
     pub const fn is_buffered(&self) -> bool {
         matches!(self, Self::Buffered { .. })

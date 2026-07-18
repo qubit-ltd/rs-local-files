@@ -66,6 +66,7 @@ impl FileWriteOptions {
     ///
     /// # Returns
     /// `true` when parent creation is enabled.
+    #[must_use]
     #[inline(always)]
     pub const fn creates_parent(&self) -> bool {
         self.create_parent

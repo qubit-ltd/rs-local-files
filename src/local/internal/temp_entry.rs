@@ -157,6 +157,8 @@ pub(crate) fn create_private_dir(path: &Path) -> Result<()> {
 ///
 /// # Returns
 /// `true` only for an existing entry when another attempt remains.
+#[must_use]
+#[inline(always)]
 fn should_retry_collision(
     error: &Error,
     attempt: usize,

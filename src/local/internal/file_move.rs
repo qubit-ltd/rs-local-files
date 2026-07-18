@@ -469,6 +469,8 @@ pub(crate) fn sync_parent_dir(path: &Path) -> Result<()> {
 /// `true` when the error only means the best-effort parent directory sync is
 /// unavailable on Windows.
 #[cfg(windows)]
+#[must_use]
+#[inline(always)]
 fn is_ignorable_windows_parent_sync_error(error: &Error) -> bool {
     const ERROR_SHARING_VIOLATION: i32 = 32;
 
@@ -483,6 +485,8 @@ fn is_ignorable_windows_parent_sync_error(error: &Error) -> bool {
 ///
 /// # Returns
 /// The parent directory, or the current directory for parentless paths.
+#[must_use]
+#[inline(always)]
 pub(crate) fn parent_dir_for(path: &Path) -> &Path {
     path.parent()
         .filter(|parent| !parent.as_os_str().is_empty())

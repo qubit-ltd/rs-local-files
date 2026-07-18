@@ -199,6 +199,7 @@ impl LocalTempFile {
     ///
     /// # Returns
     /// Borrowed absolute path managed by this temporary file.
+    #[must_use]
     #[inline(always)]
     pub fn path(&self) -> &Path {
         self.path

@@ -21,6 +21,7 @@ use std::io::{
 use crate::FileBuffering;
 
 /// Owns the private concrete representation of a local file writer.
+#[must_use = "discarding the writer representation may hide buffered write or flush failures"]
 #[derive(Debug)]
 pub(in crate::local) enum LocalFileWriterInner {
     /// Writer backed directly by an unbuffered file handle.
@@ -61,6 +62,7 @@ impl LocalFileWriterInner {
     /// # Returns
     ///
     /// `true` for the buffered representation; otherwise, `false`.
+    #[must_use]
     #[inline(always)]
     pub(in crate::local) const fn is_buffered(&self) -> bool {
         matches!(self, Self::Buffered(_))

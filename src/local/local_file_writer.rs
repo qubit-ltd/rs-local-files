@@ -78,6 +78,7 @@ impl LocalFileWriter {
     ///
     /// # Returns
     /// `true` when the writer uses a userspace buffer.
+    #[must_use]
     #[inline(always)]
     pub const fn is_buffered(&self) -> bool {
         self.inner.is_buffered()

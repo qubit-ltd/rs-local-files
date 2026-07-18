@@ -94,6 +94,7 @@ impl LocalAtomicWriteError {
     ///
     /// # Returns
     /// Destination path supplied by the caller.
+    #[must_use]
     #[inline(always)]
     pub fn path(&self) -> &Path {
         &self.path
@@ -133,6 +134,7 @@ impl LocalAtomicWriteError {
     ///
     /// # Returns
     /// Error kind reported by the retained source error.
+    #[must_use]
     #[inline(always)]
     pub fn kind(&self) -> io::ErrorKind {
         self.source.kind()

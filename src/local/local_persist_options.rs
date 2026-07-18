@@ -50,6 +50,7 @@ impl LocalPersistOptions {
     ///
     /// # Returns
     /// `true` when target replacement is enabled.
+    #[must_use]
     #[inline(always)]
     pub const fn overwrites(&self) -> bool {
         self.overwrite

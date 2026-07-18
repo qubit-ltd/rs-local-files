@@ -77,6 +77,7 @@ impl<T> LocalPersistError<T> {
     ///
     /// # Returns
     /// I/O error that prevented persistence.
+    #[must_use]
     #[inline(always)]
     pub const fn error(&self) -> &io::Error {
         &self.error
@@ -86,6 +87,7 @@ impl<T> LocalPersistError<T> {
     ///
     /// # Returns
     /// Shared reference to the resource retained after failure.
+    #[must_use]
     #[inline(always)]
     pub const fn resource(&self) -> &T {
         &self.resource
@@ -95,6 +97,7 @@ impl<T> LocalPersistError<T> {
     ///
     /// # Returns
     /// Mutable reference to the resource retained after failure.
+    #[must_use]
     #[inline(always)]
     pub const fn resource_mut(&mut self) -> &mut T {
         &mut self.resource
@@ -104,6 +107,7 @@ impl<T> LocalPersistError<T> {
     ///
     /// # Returns
     /// Requested target before absolute-path resolution.
+    #[must_use]
     #[inline(always)]
     pub fn requested_target(&self) -> &Path {
         &self.requested_target
@@ -131,6 +135,7 @@ impl<T> LocalPersistError<T> {
     ///
     /// # Returns
     /// Error kind reported by the retained native error.
+    #[must_use]
     #[inline(always)]
     pub fn kind(&self) -> io::ErrorKind {
         self.error.kind()

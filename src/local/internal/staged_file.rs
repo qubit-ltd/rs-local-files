@@ -58,6 +58,7 @@ impl StagedFile {
     ///
     /// # Panics
     /// Panics when called after cleanup has been disarmed.
+    #[must_use]
     #[inline(always)]
     pub(crate) fn path(&self) -> &Path {
         self.path
@@ -72,6 +73,7 @@ impl StagedFile {
     ///
     /// # Panics
     /// Panics when called after the handle has been closed.
+    #[must_use]
     #[inline(always)]
     pub(crate) fn file(&self) -> &File {
         self.file
@@ -86,6 +88,7 @@ impl StagedFile {
     ///
     /// # Panics
     /// Panics when called after the handle has been closed.
+    #[must_use]
     #[inline(always)]
     pub(crate) fn file_mut(&mut self) -> &mut File {
         self.file

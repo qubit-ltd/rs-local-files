@@ -68,6 +68,7 @@ impl LocalFilenames {
     ///
     /// # Panics
     /// Panics if the operating system random source cannot provide bytes.
+    #[must_use]
     #[inline(always)]
     pub fn random() -> String {
         Self::try_random().expect("failed to build random file name")
@@ -91,6 +92,7 @@ impl LocalFilenames {
     /// # Panics
     /// Panics if `prefix` or `suffix` is not a safe file-name fragment, or if
     /// the operating system random source cannot provide bytes.
+    #[must_use]
     #[inline]
     pub fn random_with(prefix: Option<&str>, suffix: Option<&str>) -> String {
         Self::try_random_with(prefix, suffix)
@@ -318,6 +320,7 @@ impl LocalFilenames {
     ///
     /// # Returns
     /// `true` when `path` has `extension` as its final extension.
+    #[must_use]
     #[inline]
     pub fn has_extension(path: &Path, extension: &str) -> bool {
         Self::extension(path) == Some(normalize_extension(extension))
@@ -336,6 +339,8 @@ impl LocalFilenames {
     /// # Returns
     /// `true` when `path` has `extension` as its final extension ignoring ASCII
     /// case.
+    #[must_use]
+    #[inline]
     pub fn has_extension_ignore_ascii_case(
         path: &Path,
         extension: &str,
@@ -359,6 +364,7 @@ impl LocalFilenames {
     /// # Returns
     /// The substring after the final slash or backslash. If no separator is
     /// present, the original string is returned.
+    #[must_use]
     #[inline]
     pub fn file_name_from_path(path: &str) -> &str {
         match path.rfind(['/', '\\']) {
@@ -382,6 +388,7 @@ impl LocalFilenames {
     ///
     /// # Returns
     /// The decoded final URL path segment.
+    #[must_use]
     pub fn file_name_from_url(url: &str) -> String {
         let path = strip_query_and_fragment(url);
         let name = match path.rfind('/') {
@@ -402,6 +409,7 @@ impl LocalFilenames {
 ///
 /// # Returns
 /// The extension without one leading dot.
+#[must_use]
 #[inline(always)]
 fn normalize_extension(extension: &str) -> &str {
     extension.strip_prefix('.').unwrap_or(extension)
@@ -450,6 +458,7 @@ fn validate_file_name_fragment(role: &str, fragment: &str) -> Result<()> {
 ///
 /// # Returns
 /// `true` when the decoded segment cannot behave as a path after decoding.
+#[must_use]
 fn is_safe_decoded_url_file_name(name: &str) -> bool {
     if name == "." || name == ".." {
         return false;
@@ -479,6 +488,7 @@ fn invalid_file_name_fragment_error(role: &str, reason: &str) -> Error {
 /// Nanoseconds since the Unix epoch, or zero if the system clock is earlier
 /// than the epoch.
 #[inline]
+#[must_use]
 fn unix_timestamp_nanos() -> u128 {
     SystemTime::now()
         .duration_since(UNIX_EPOCH)
@@ -520,6 +530,7 @@ fn fill_random_bytes(bytes: &mut [u8]) -> Result<()> {
 ///
 /// # Returns
 /// Lowercase hexadecimal string.
+#[must_use]
 fn hex_encode(bytes: &[u8]) -> String {
     const HEX: &[u8; 16] = b"0123456789abcdef";
     let mut result = String::with_capacity(bytes.len() * 2);
@@ -538,6 +549,7 @@ fn hex_encode(bytes: &[u8]) -> String {
 /// # Returns
 /// `true` when `name` uses a reserved device name, including a reserved base
 /// name followed by an extension.
+#[must_use]
 fn is_windows_reserved_file_name(name: &str) -> bool {
     let base_name = name
         .split_once('.')
@@ -573,6 +585,7 @@ fn is_windows_reserved_file_name(name: &str) -> bool {
 /// The prefix before the first `?` or `#`, or the full input when neither is
 /// present.
 #[inline]
+#[must_use]
 fn strip_query_and_fragment(url: &str) -> &str {
     match (url.find('?'), url.find('#')) {
         (Some(query), Some(fragment)) => &url[..query.min(fragment)],

@@ -13,6 +13,7 @@ use std::fs;
 use std::path::PathBuf;
 
 /// Holds the lazy iterator and subtotal for one directory being measured.
+#[must_use = "discarding an active size frame abandons its directory subtotal"]
 pub(super) struct DirSizeFrame {
     /// Directory path used for traversal and overflow diagnostics.
     path: PathBuf,
@@ -43,6 +44,7 @@ impl DirSizeFrame {
     }
 
     /// Returns the subtotal accumulated for this directory.
+    #[must_use]
     #[inline(always)]
     pub(super) const fn size(&self) -> u64 {
         self.size
@@ -81,6 +83,7 @@ impl DirSizeFrame {
     /// # Returns
     ///
     /// The owned directory path followed by its completed subtotal.
+    #[must_use = "the completed directory path and subtotal must be consumed together"]
     #[inline(always)]
     pub(super) fn into_path_and_size(self) -> (PathBuf, u64) {
         (self.path, self.size)

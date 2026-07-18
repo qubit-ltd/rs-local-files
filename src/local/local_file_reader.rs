@@ -65,6 +65,7 @@ impl LocalFileReader {
     ///
     /// # Returns
     /// `true` when the reader uses a userspace buffer.
+    #[must_use]
     #[inline(always)]
     pub const fn is_buffered(&self) -> bool {
         self.inner.is_buffered()

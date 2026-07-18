@@ -17,6 +17,7 @@ use std::path::{
 };
 
 /// Holds the lazy iterator and completion state for one source directory.
+#[must_use = "discarding an active copy frame abandons its directory traversal"]
 pub(super) struct CopyDirFrame {
     /// Source directory path used for traversal and diagnostics.
     src: PathBuf,
@@ -62,24 +63,28 @@ impl CopyDirFrame {
     }
 
     /// Returns the source directory path.
+    #[must_use]
     #[inline(always)]
     pub(super) fn src(&self) -> &Path {
         &self.src
     }
 
     /// Returns the destination directory path.
+    #[must_use]
     #[inline(always)]
     pub(super) fn dst(&self) -> &Path {
         &self.dst
     }
 
     /// Returns the canonical source identity.
+    #[must_use]
     #[inline(always)]
     pub(super) fn canonical_source(&self) -> &Path {
         &self.canonical_source
     }
 
     /// Returns the source permissions captured before traversal.
+    #[must_use]
     #[inline(always)]
     pub(super) fn source_permissions(&self) -> &fs::Permissions {
         &self.source_permissions

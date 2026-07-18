@@ -71,6 +71,7 @@ impl LocalRelativePath {
     /// # Returns
     ///
     /// The sole path state owned by this value.
+    #[must_use]
     #[inline(always)]
     pub fn as_path(&self) -> &Path {
         &self.path
@@ -106,6 +107,8 @@ fn invalid_relative_path_error(path: &Path) -> Error {
 /// # Returns
 ///
 /// `true` when the path contains NUL; otherwise, `false`.
+#[must_use]
+#[inline]
 fn contains_nul(path: &Path) -> bool {
     use std::os::unix::ffi::OsStrExt;
 
@@ -122,6 +125,8 @@ fn contains_nul(path: &Path) -> bool {
 /// # Returns
 ///
 /// `true` when the path contains NUL; otherwise, `false`.
+#[must_use]
+#[inline]
 fn contains_nul(path: &Path) -> bool {
     use std::os::windows::ffi::OsStrExt;
 
@@ -138,6 +143,8 @@ fn contains_nul(path: &Path) -> bool {
 /// # Returns
 ///
 /// `true` when the path contains NUL; otherwise, `false`.
+#[must_use]
+#[inline]
 fn contains_nul(path: &Path) -> bool {
     path.to_string_lossy().contains('\0')
 }
@@ -155,6 +162,8 @@ fn contains_nul(path: &Path) -> bool {
 /// # Returns
 ///
 /// `true` when any slash-delimited component is exactly `.`.
+#[must_use]
+#[inline]
 fn contains_explicit_dot_component(path: &Path) -> bool {
     use std::os::unix::ffi::OsStrExt;
 
@@ -174,6 +183,8 @@ fn contains_explicit_dot_component(path: &Path) -> bool {
 /// # Returns
 ///
 /// `true` when any slash-delimited component is exactly `.`.
+#[must_use]
+#[inline]
 fn contains_explicit_dot_component(path: &Path) -> bool {
     use std::os::windows::ffi::OsStrExt;
 
@@ -193,6 +204,8 @@ fn contains_explicit_dot_component(path: &Path) -> bool {
 /// # Returns
 ///
 /// `true` when any slash-delimited component is exactly `.`.
+#[must_use]
+#[inline]
 fn contains_explicit_dot_component(path: &Path) -> bool {
     path.to_string_lossy().split('/').any(|part| part == ".")
 }

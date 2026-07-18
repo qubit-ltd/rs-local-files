@@ -495,6 +495,8 @@ fn prepare_opened_rooted_regular_file(
 /// # Panics
 ///
 /// Panics if the validated component unexpectedly contains an interior NUL.
+#[must_use]
+#[inline]
 fn component_c_string(component: &OsStr) -> CString {
     CString::new(component.as_bytes())
         .expect("LocalRelativePath guarantees components without NUL")

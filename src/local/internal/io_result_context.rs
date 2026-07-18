@@ -34,6 +34,7 @@ use super::path_operations::add_path_context;
 /// # Errors
 ///
 /// Returns the supplied error with path context when `result` is `Err`.
+#[inline]
 pub(crate) fn with_path_context<T>(
     result: Result<T>,
     operation: &'static str,

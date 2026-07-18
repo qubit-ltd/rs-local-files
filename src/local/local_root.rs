@@ -112,6 +112,7 @@ impl LocalRoot {
     /// # Returns
     ///
     /// The root's diagnostic path.
+    #[must_use]
     #[inline(always)]
     pub fn path(&self) -> &Path {
         &self.path

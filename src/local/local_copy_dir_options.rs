@@ -126,6 +126,7 @@ impl LocalCopyDirOptions {
     ///
     /// # Returns
     /// `true` when source symbolic links are followed.
+    #[must_use]
     #[inline(always)]
     pub const fn follows_symlinks(&self) -> bool {
         self.follow_symlinks
@@ -135,6 +136,7 @@ impl LocalCopyDirOptions {
     ///
     /// # Returns
     /// `true` when destination permissions are copied from the source.
+    #[must_use]
     #[inline(always)]
     pub const fn preserves_permissions(&self) -> bool {
         self.preserve_permissions

@@ -56,6 +56,7 @@ impl RootedParent {
     ///
     /// The final parent, final entry name, and ancestor descriptors ordered
     /// shallowest to deepest.
+    #[must_use = "the rooted parent descriptors, final name, and durability work must all be retained"]
     #[inline(always)]
     pub(in crate::local) fn into_parts(self) -> (File, CString, Vec<File>) {
         (self.directory, self.final_name, self.parent_dirs_to_sync)

@@ -16,6 +16,8 @@ use std::ops::BitAnd;
 /// Android's 32-bit stat structure widens `st_mode` beyond `mode_t`; the
 /// generic conversion preserves that platform ABI without target-specific
 /// casts at every call site.
+#[must_use]
+#[inline(always)]
 pub(crate) fn is_regular_file_mode<T>(mode: T) -> bool
 where
     T: BitAnd<Output = T> + Copy + From<libc::mode_t> + PartialEq,
