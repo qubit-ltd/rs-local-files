@@ -129,6 +129,37 @@ fn test_copy_dir_all_with_handles_deep_tree_on_small_stack() {
     fs::remove_dir_all(dir).expect("deep copy fixture should be removed");
 }
 
+/// Verifies that isolated child tests start from a stable current directory.
+#[cfg(target_os = "linux")]
+#[test]
+fn test_small_stack_process_uses_stable_child_current_dir() {
+    const TEST_NAME: &str = concat!(
+        "local::local_files_tests::copy_dir_tests::",
+        "test_small_stack_process_uses_stable_child_current_dir",
+    );
+    const CHILD_ENVIRONMENT: &str =
+        "QUBIT_LOCAL_FILES_STABLE_CHILD_CURRENT_DIR";
+
+    if std::env::var_os(CHILD_ENVIRONMENT).is_some() {
+        std::env::current_dir()
+            .expect("child current directory should be readable");
+        return;
+    }
+
+    let _lock = CURRENT_DIR_LOCK
+        .lock()
+        .expect("current directory lock should be acquired");
+    let dir = temp_dir("stable-child-current-dir");
+    let guard = CurrentDirGuard::change_to(&dir);
+    fs::remove_dir(&dir).expect("current fixture directory should be removed");
+
+    let result =
+        run_in_small_stack_process(TEST_NAME, CHILD_ENVIRONMENT, || ());
+
+    drop(guard);
+    assert!(result.is_none(), "parent should only verify the child");
+}
+
 #[test]
 fn test_copy_dir_all_with_copies_into_existing_directory() {
     let dir = temp_dir("copy-dir-existing-dir");

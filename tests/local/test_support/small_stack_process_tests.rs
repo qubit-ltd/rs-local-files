@@ -14,10 +14,10 @@ use std::thread;
 /// Runs `action` on a small-stack thread in an isolated child test process.
 ///
 /// The parent process launches only the named test with `child_environment`
-/// set. The child executes `action` on a 128 KiB thread stack and returns its
-/// value on the ordinary test-harness thread. A stack overflow therefore
-/// terminates only the child process and is reported as an assertion failure
-/// in the parent.
+/// set and starts it from the stable system temporary directory. The child
+/// executes `action` on a 128 KiB thread stack and returns its value on the
+/// ordinary test-harness thread. A stack overflow therefore terminates only
+/// the child process and is reported as an assertion failure in the parent.
 ///
 /// # Parameters
 ///
@@ -51,6 +51,7 @@ where
             .arg(test_name)
             .arg("--nocapture")
             .env(child_environment, "1")
+            .current_dir(std::env::temp_dir())
             .status()
             .expect("small-stack child test should launch");
         assert!(status.success(), "small-stack child test should pass");
