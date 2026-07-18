@@ -52,6 +52,11 @@ use super::internal::{
 /// replacing the root path or an intermediate name does not redirect handles
 /// that were already opened.
 ///
+/// The operating system resolves ancestor components in the input root path
+/// before this capability is acquired. The final root entry is opened without
+/// following a symbolic link; descriptor-relative containment begins only
+/// after that directory handle is open.
+///
 /// This capability provides descriptor-relative path containment; it does not
 /// establish unique inode names or a complete operating-system security
 /// boundary. Hard links, mounted filesystems, permissions, and processes with
@@ -83,8 +88,10 @@ impl LocalRoot {
     ///
     /// # Errors
     ///
-    /// Returns an I/O error when the root cannot be made absolute or opened as
-    /// a real directory without following a link. Returns
+    /// Returns an I/O error when the root cannot be made absolute or its final
+    /// entry cannot be opened as a real directory without following a link.
+    /// Ancestor components are resolved by the operating system before the
+    /// descriptor is acquired. Returns
     /// [`std::io::ErrorKind::Unsupported`] when no secure backend exists on the
     /// target.
     pub fn open<P>(root: P) -> Result<Self>

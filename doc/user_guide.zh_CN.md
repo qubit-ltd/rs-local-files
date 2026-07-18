@@ -228,7 +228,7 @@ assert_eq!("new\n", std::fs::read_to_string(&target)?);
 
 ## 根目录 Capability
 
-`LocalRoot` 打开目录 descriptor，并把该 descriptor 作为所有后代操作的 authority。保存的绝对 root 路径仅用于诊断。后代名称使用 `LocalRelativePath` 表示，reader、writer 和 atomic writer 的遍历会拒绝每一级 component 上的 symbolic link。root 路径或中间名称被重命名或替换时，已经打开的 descriptor 不会被重定向。
+`LocalRoot` 打开目录 descriptor，并把该 descriptor 作为所有后代操作的 authority。保存的绝对 root 路径仅用于诊断。后代名称使用 `LocalRelativePath` 表示，reader、writer 和 atomic writer 的遍历会拒绝每一级 component 上的 symbolic link。root 路径或中间名称被重命名或替换时，已经打开的 descriptor 不会被重定向。操作系统会在 capability 获取前解析 root 输入中的祖先 component；no-follow 只适用于最终 root entry。只有目录 descriptor 打开后，containment 才开始生效。
 
 这里保证的是 descriptor-relative 路径 containment，不是 inode 名称唯一性或完整的 OS 安全边界。hard link、mounted filesystem、权限以及拥有同等 OS authority 的进程仍属于部署安全责任。该 backend 在 Unix 上可用；其他目标返回 `ErrorKind::Unsupported`，不会回退到 check-then-path。path-based `LocalFiles` 是便利 API；当其他参与者可以并发修改 namespace 时，不能作为 sandbox 边界。
 

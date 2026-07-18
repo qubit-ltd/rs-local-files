@@ -205,6 +205,9 @@ non-empty sequence of normal relative components. `open_reader`, `open_writer`,
 and `begin_atomic_write` traverse from the open root descriptor and reject
 symbolic links at intermediate and final entries. Renaming or replacing the
 root path or an already opened intermediate name does not redirect that handle.
+The operating system resolves ancestor components in the root input before the
+capability is acquired; no-follow applies to the final root entry. Containment
+begins after that directory descriptor has been opened.
 
 This is descriptor-relative path containment, not inode-name uniqueness or a
 complete OS security boundary. Hard links, mounts, permissions, and processes

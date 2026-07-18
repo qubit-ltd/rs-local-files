@@ -299,7 +299,8 @@ fn test_open_writer_survives_intermediate_directory_replacement() {
     fs::remove_dir_all(fixture).expect("writer fixture should be removed");
 }
 
-/// Verifies that root, intermediate, and final symbolic links are denied.
+/// Verifies that a final root symbolic link and descendant symbolic links are
+/// denied.
 #[cfg(unix)]
 #[test]
 fn test_rooted_io_rejects_symbolic_links() {
@@ -347,6 +348,41 @@ fn test_rooted_io_rejects_symbolic_links() {
             .as_slice(),
     );
     fs::remove_dir_all(fixture).expect("symlink fixture should be removed");
+}
+
+/// Verifies that root opening resolves symbolic links in ancestor components
+/// while rejecting a symbolic link as the final root entry.
+#[cfg(unix)]
+#[test]
+fn test_open_root_allows_symlinked_ancestor() {
+    use std::os::unix::fs::symlink;
+
+    let fixture = temp_dir("rooted-ancestor-symlink");
+    let real_parent = fixture.join("real-parent");
+    let root_path = real_parent.join("root");
+    let alias_parent = fixture.join("alias-parent");
+    fs::create_dir_all(&root_path)
+        .expect("real root directory should be created");
+    fs::write(root_path.join("data.txt"), b"anchored")
+        .expect("root fixture should be written");
+    symlink(&real_parent, &alias_parent)
+        .expect("ancestor symbolic link should be created");
+
+    let root = LocalRoot::open(alias_parent.join("root"))
+        .expect("ancestor symbolic link should be resolved");
+    let path = LocalRelativePath::new("data.txt")
+        .expect("relative path should validate");
+    let mut reader = root
+        .open_reader(&path, FileReadOptions::unbuffered())
+        .expect("rooted reader should open through the anchored root");
+    let mut content = Vec::new();
+    reader
+        .read_to_end(&mut content)
+        .expect("rooted reader should read through the anchored root");
+
+    assert_eq!(b"anchored", content.as_slice());
+    fs::remove_dir_all(fixture)
+        .expect("rooted ancestor fixture should be removed");
 }
 
 /// Verifies the conservative fallback on targets without a secure rooted

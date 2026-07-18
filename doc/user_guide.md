@@ -299,6 +299,9 @@ only for diagnostics. Descendant names are supplied as `LocalRelativePath`, and
 reader, writer, and atomic-writer traversal rejects symbolic links at every
 component. Renaming or replacing the root path or an intermediate name does not
 redirect descriptors that were already opened.
+The operating system resolves ancestor components in the root input before the
+capability is acquired; no-follow applies to the final root entry. Containment
+begins after that directory descriptor has been opened.
 
 This guarantee is descriptor-relative path containment. It does not establish
 unique inode names or a complete OS security boundary: hard links, mounted

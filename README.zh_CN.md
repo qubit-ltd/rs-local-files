@@ -150,6 +150,7 @@ assert_eq!("new payload\n", std::fs::read_to_string(&final_path)?);
 非空相对路径。`open_reader`、`open_writer` 和 `begin_atomic_write` 都从已打开
 的 root descriptor 开始遍历，并拒绝中间项和最终项上的 symbolic link。
 即使 root 路径或已经打开的中间名称被重命名或替换，已有句柄也不会被重定向。
+操作系统会在 capability 获取前解析 root 输入中的祖先 component；no-follow 只适用于最终 root entry。只有目录 descriptor 打开后，containment 才开始生效。
 
 这里保证的是 descriptor-relative 路径 containment，不是 inode 名称唯一性或完整的 OS 安全边界。hard link、mount、权限以及拥有同等 OS authority 的进程仍属于部署安全责任。path-based `LocalFiles` 是便利 API，不能作为 sandbox 边界。
 
