@@ -15,11 +15,12 @@ fn test_atomic_write_stage_variants_are_distinct_and_debuggable() {
         LocalAtomicWriteStage::InspectDestination,
         LocalAtomicWriteStage::CreateTemporaryFile,
         LocalAtomicWriteStage::WriteTemporaryFile,
-        LocalAtomicWriteStage::PreservePermissions,
+        LocalAtomicWriteStage::ReadDestinationMetadata,
+        LocalAtomicWriteStage::ApplyDestinationMetadata,
         LocalAtomicWriteStage::SyncTemporaryFile,
         LocalAtomicWriteStage::ReplaceDestination,
         LocalAtomicWriteStage::CleanupTemporaryFile,
-        LocalAtomicWriteStage::SyncParentDirectory,
+        LocalAtomicWriteStage::SyncParent,
     ];
 
     for (index, stage) in stages.iter().enumerate() {

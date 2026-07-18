@@ -10,10 +10,7 @@
 #[cfg(unix)]
 use std::ffi::CString;
 #[cfg(unix)]
-use std::fs::{
-    self,
-    File,
-};
+use std::fs::File;
 use std::io::{
     self,
     Write,
@@ -26,6 +23,7 @@ use std::path::{
 #[cfg(unix)]
 use crate::LocalRelativePath;
 use crate::{
+    LocalAtomicDestinationState,
     LocalAtomicWriteError,
     LocalAtomicWriteStage,
 };
@@ -35,8 +33,12 @@ use super::internal::{
     RootedParentMode,
     RootedStagedFile,
     create_rooted_staged_file,
-    existing_rooted_file_permissions,
+    inspect_rooted_atomic_destination,
+    install_rooted_atomic_file,
+    open_rooted_atomic_destination,
     open_rooted_parent,
+    preserve_atomic_metadata,
+    verify_rooted_atomic_destination_identity,
 };
 
 /// A streaming atomic writer contained by an open [`crate::LocalRoot`].
@@ -44,11 +46,12 @@ use super::internal::{
 /// Staging, replacement, synchronization, and cleanup use the destination
 /// parent descriptor and entry names. No diagnostic path is reused as
 /// authority, and no underlying file or directory handle is exposed.
-/// Existing ordinary-file permissions are captured when the writer begins and
-/// applied at commit without re-reading their values. The final entry is still
-/// re-inspected for the no-symbolic-link and regular-file policy. Externally
-/// coordinate concurrent creation or permission changes when they must be
-/// retained.
+/// Commit opens the current destination, copies its strict platform-native
+/// Unix metadata to staging, and verifies the opened file identity immediately
+/// before replacement. Metadata is therefore captured at commit time rather
+/// than when the writer begins. A metadata or ACL copy failure aborts instead
+/// of silently reducing protection. A destination that was initially absent is
+/// installed without replacing a concurrent creator.
 ///
 /// ```compile_fail
 /// #![deny(unused_must_use)]
@@ -68,11 +71,11 @@ pub struct LocalRootAtomicWriter {
     /// Final destination entry name within the staging parent.
     final_name: CString,
     #[cfg(unix)]
-    /// Existing ordinary-file permissions captured when the writer began.
-    existing_permissions: Option<fs::Permissions>,
-    #[cfg(unix)]
     /// Parents whose newly created child entries require synchronization.
     parent_dirs_to_sync: Vec<File>,
+    #[cfg(unix)]
+    /// Whether a regular destination existed when this writer began.
+    destination_existed: bool,
     #[cfg(unix)]
     /// Descriptor-relative staging lifecycle.
     staged_file: RootedStagedFile,
@@ -113,16 +116,16 @@ impl LocalRootAtomicWriter {
             LocalAtomicWriteStage::PrepareParent,
             &requested_path,
             None,
-            false,
+            LocalAtomicDestinationState::Unchanged,
         )?;
         let (parent, final_name, parent_dirs_to_sync) =
             rooted_parent.into_parts();
-        let existing_permissions = map_atomic_error(
-            existing_rooted_file_permissions(&parent, &final_name),
+        let destination_existed = map_atomic_error(
+            inspect_rooted_atomic_destination(&parent, &final_name),
             LocalAtomicWriteStage::InspectDestination,
             &requested_path,
             None,
-            false,
+            LocalAtomicDestinationState::Unchanged,
         )?;
         let relative_parent = path.as_path().parent().unwrap_or(Path::new(""));
         let staged_file = map_atomic_error(
@@ -130,41 +133,73 @@ impl LocalRootAtomicWriter {
             LocalAtomicWriteStage::CreateTemporaryFile,
             &requested_path,
             None,
-            false,
+            LocalAtomicDestinationState::Unchanged,
         )?;
         Ok(Self {
             path: requested_path,
             final_name,
-            existing_permissions,
             parent_dirs_to_sync,
+            destination_existed,
             staged_file,
         })
     }
 
     /// Synchronizes and atomically replaces the rooted destination.
     ///
-    /// Any existing permissions applied here are the snapshot captured when
-    /// this writer was created; commit does not re-read their values.
+    /// Existing metadata is read from the opened destination during this call
+    /// and applied to staging before the identity check and replacement.
     ///
     /// # Errors
     ///
-    /// Returns a structured error when permission preservation, staging-file
+    /// Returns a structured error when metadata preservation, staging-file
     /// synchronization, replacement, or parent-directory synchronization
-    /// fails. A parent synchronization failure reports `committed = true`.
+    /// fails. Inspect [`LocalAtomicWriteError::destination_state`] to determine
+    /// the known post-failure destination outcome.
     #[cfg_attr(not(unix), allow(unused_mut))]
     pub fn commit(mut self) -> Result<(), LocalAtomicWriteError> {
         #[cfg(unix)]
         {
-            let result = apply_existing_permissions(
-                self.staged_file.file(),
-                self.existing_permissions.as_ref(),
-            );
-            with_staging_cleanup(
-                result,
-                LocalAtomicWriteStage::PreservePermissions,
-                &self.path,
-                &mut self.staged_file,
-            )?;
+            let destination = if self.destination_existed {
+                let destination_result = open_rooted_atomic_destination(
+                    self.staged_file.parent(),
+                    &self.final_name,
+                );
+                let opened = with_staging_cleanup(
+                    destination_result,
+                    LocalAtomicWriteStage::ReadDestinationMetadata,
+                    &self.path,
+                    &mut self.staged_file,
+                )?;
+                match opened {
+                    Some(destination) => Some(destination),
+                    None => {
+                        return Err(rooted_error_with_staging_state(
+                            LocalAtomicWriteStage::ReadDestinationMetadata,
+                            &self.path,
+                            io::Error::new(
+                                io::ErrorKind::NotFound,
+                                "rooted atomic destination disappeared",
+                            ),
+                            LocalAtomicDestinationState::Missing,
+                            &mut self.staged_file,
+                        ));
+                    }
+                }
+            } else {
+                None
+            };
+            if let Some(destination) = destination.as_ref() {
+                let result = preserve_atomic_metadata(
+                    destination.file(),
+                    self.staged_file.file(),
+                );
+                with_staging_cleanup(
+                    result,
+                    LocalAtomicWriteStage::ApplyDestinationMetadata,
+                    &self.path,
+                    &mut self.staged_file,
+                )?;
+            }
             let result = self.staged_file.file().sync_all();
             with_staging_cleanup(
                 result,
@@ -172,28 +207,28 @@ impl LocalRootAtomicWriter {
                 &self.path,
                 &mut self.staged_file,
             )?;
-            // Reinspect the final name immediately before replacement. The
-            // subsequent same-parent `renameat` never follows a later link,
-            // but rejecting a link already visible here preserves the public
-            // no-symbolic-link policy as well as containment.
-            let result = existing_rooted_file_permissions(
-                self.staged_file.parent(),
+            if let Some(destination) = destination.as_ref() {
+                verify_rooted_atomic_destination_identity(
+                    &self.final_name,
+                    destination,
+                    &self.path,
+                    &mut self.staged_file,
+                )?;
+            }
+            let install_result = install_rooted_atomic_file(
+                &mut self.staged_file,
                 &self.final_name,
-            )
-            .map(drop);
-            with_staging_cleanup(
-                result,
-                LocalAtomicWriteStage::ReplaceDestination,
-                &self.path,
-                &mut self.staged_file,
-            )?;
-            let result = self.staged_file.rename_to(&self.final_name);
-            with_staging_cleanup(
-                result,
-                LocalAtomicWriteStage::ReplaceDestination,
-                &self.path,
-                &mut self.staged_file,
-            )?;
+                self.destination_existed,
+            );
+            if let Err((source, destination_state)) = install_result {
+                return Err(rooted_error_with_staging_state(
+                    LocalAtomicWriteStage::ReplaceDestination,
+                    &self.path,
+                    source,
+                    destination_state,
+                    &mut self.staged_file,
+                ));
+            }
             let temporary_path =
                 self.staged_file.diagnostic_path().to_path_buf();
             self.staged_file.disarm();
@@ -202,10 +237,10 @@ impl LocalRootAtomicWriter {
                     self.staged_file.parent(),
                     &self.parent_dirs_to_sync,
                 ),
-                LocalAtomicWriteStage::SyncParentDirectory,
+                LocalAtomicWriteStage::SyncParent,
                 &self.path,
                 Some(temporary_path),
-                true,
+                LocalAtomicDestinationState::Replaced,
             )
         }
         #[cfg(not(unix))]
@@ -231,7 +266,7 @@ impl LocalRootAtomicWriter {
                     LocalAtomicWriteStage::CleanupTemporaryFile,
                     self.path.clone(),
                     Some(temporary_path),
-                    false,
+                    LocalAtomicDestinationState::Unchanged,
                     source,
                 )),
             }
@@ -302,27 +337,6 @@ fn sync_rooted_parent_chain(
 }
 
 #[cfg(unix)]
-/// Applies existing destination permissions to a staging file.
-///
-/// # Parameters
-///
-/// * `file` - Open staging file handle.
-/// * `permissions` - Existing permissions to preserve, when any.
-///
-/// # Errors
-///
-/// Returns the operating-system error from permission application.
-fn apply_existing_permissions(
-    file: &File,
-    permissions: Option<&fs::Permissions>,
-) -> io::Result<()> {
-    if let Some(permissions) = permissions {
-        file.set_permissions(permissions.clone())?;
-    }
-    Ok(())
-}
-
-#[cfg(unix)]
 /// Adds structured atomic context to a native I/O result.
 ///
 /// # Parameters
@@ -331,7 +345,7 @@ fn apply_existing_permissions(
 /// * `stage` - Atomic stage associated with failure.
 /// * `path` - Requested relative destination.
 /// * `temporary_path` - Optional diagnostic staging path.
-/// * `committed` - Whether replacement has already completed.
+/// * `destination_state` - Known destination state after the failure.
 ///
 /// # Returns
 ///
@@ -341,7 +355,7 @@ fn map_atomic_error<T>(
     stage: LocalAtomicWriteStage,
     path: &Path,
     temporary_path: Option<PathBuf>,
-    committed: bool,
+    destination_state: LocalAtomicDestinationState,
 ) -> Result<T, LocalAtomicWriteError> {
     match result {
         Ok(value) => Ok(value),
@@ -349,7 +363,7 @@ fn map_atomic_error<T>(
             stage,
             path.to_path_buf(),
             temporary_path,
-            committed,
+            destination_state,
             source,
         )),
     }
@@ -376,19 +390,42 @@ fn with_staging_cleanup<T>(
 ) -> Result<T, LocalAtomicWriteError> {
     match result {
         Ok(value) => Ok(value),
-        Err(source) => {
-            let temporary_path = staged_file.diagnostic_path().to_path_buf();
-            let cleanup_error = staged_file.cleanup().err();
-            Err(LocalAtomicWriteError::new(
-                stage,
-                path.to_path_buf(),
-                Some(temporary_path),
-                false,
-                source,
-            )
-            .with_cleanup_error(cleanup_error))
-        }
+        Err(source) => Err(rooted_error_with_staging_state(
+            stage,
+            path,
+            source,
+            LocalAtomicDestinationState::Unchanged,
+            staged_file,
+        )),
     }
+}
+
+#[cfg(unix)]
+/// Creates a rooted error and handles staging according to destination state.
+fn rooted_error_with_staging_state(
+    stage: LocalAtomicWriteStage,
+    path: &Path,
+    source: io::Error,
+    destination_state: LocalAtomicDestinationState,
+    staged_file: &mut RootedStagedFile,
+) -> LocalAtomicWriteError {
+    let temporary_path = staged_file.diagnostic_path().to_path_buf();
+    let cleanup_error =
+        if destination_state == LocalAtomicDestinationState::Unchanged {
+            staged_file.cleanup().err()
+        } else {
+            staged_file.close();
+            staged_file.disarm();
+            None
+        };
+    LocalAtomicWriteError::new(
+        stage,
+        path.to_path_buf(),
+        Some(temporary_path),
+        destination_state,
+        source,
+    )
+    .with_cleanup_error(cleanup_error)
 }
 
 #[cfg(not(unix))]
@@ -406,7 +443,7 @@ fn unsupported_atomic_error(path: &Path) -> LocalAtomicWriteError {
         LocalAtomicWriteStage::PrepareParent,
         path.to_path_buf(),
         None,
-        false,
+        LocalAtomicDestinationState::Unchanged,
         io::Error::new(
             io::ErrorKind::Unsupported,
             "secure rooted atomic writes are unsupported on this target",

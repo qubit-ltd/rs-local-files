@@ -417,7 +417,7 @@ fn reject_existing_non_file(
     }
     // SAFETY: successful `fstatat` initialized the complete `stat` value.
     let status = unsafe { status.assume_init() };
-    if status.st_mode & libc::S_IFMT != libc::S_IFREG {
+    if !super::unix_stat::is_regular_file_mode(status.st_mode) {
         return Err(rooted_type_error(diagnostic_path, "regular file"));
     }
     Ok(())

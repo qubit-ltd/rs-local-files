@@ -119,7 +119,7 @@ impl StagedFile {
     ///
     /// The staging handle is closed before the guard is disarmed.
     #[inline(always)]
-    pub(crate) fn disarm(mut self) {
+    pub(crate) fn disarm(&mut self) {
         self.close();
         let _ = self.path.take();
     }

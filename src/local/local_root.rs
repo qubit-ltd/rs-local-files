@@ -20,8 +20,6 @@ use std::path::{
     PathBuf,
 };
 
-#[cfg(not(unix))]
-use crate::LocalAtomicWriteStage;
 use crate::{
     FileReadOptions,
     FileWriteOptions,
@@ -30,6 +28,11 @@ use crate::{
     LocalFileWriter,
     LocalRelativePath,
     LocalRootAtomicWriter,
+};
+#[cfg(not(unix))]
+use crate::{
+    LocalAtomicDestinationState,
+    LocalAtomicWriteStage,
 };
 
 use super::internal::absolute_path;
@@ -203,11 +206,12 @@ impl LocalRoot {
     /// An armed streaming writer whose commit remains within the destination
     /// parent descriptor.
     ///
-    /// Existing ordinary-file permissions are captured during this call.
-    /// Commit applies that snapshot without re-reading permission values, so
-    /// concurrent creation or permission changes require external coordination
-    /// when they must be retained. The final entry is still re-inspected for
-    /// the no-symbolic-link and regular-file policy before replacement.
+    /// Existing platform-native metadata is read from an opened destination
+    /// during commit, then applied to staging before a final
+    /// descriptor-relative identity check. A destination that was absent
+    /// during this call is installed with no-replace semantics, so a
+    /// concurrent creator is not overwritten. Concurrent writers still
+    /// require external coordination.
     ///
     /// # Errors
     ///
@@ -228,7 +232,7 @@ impl LocalRoot {
                 LocalAtomicWriteStage::PrepareParent,
                 path.as_path().to_path_buf(),
                 None,
-                false,
+                LocalAtomicDestinationState::Unchanged,
                 unsupported_root_error(),
             ))
         }

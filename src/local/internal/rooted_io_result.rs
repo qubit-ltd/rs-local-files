@@ -9,10 +9,7 @@
 // qubit-style: allow source-test-pair
 // Public APIs retain live descriptors and cannot force these interleavings.
 
-use std::fs::{
-    self,
-    Permissions,
-};
+use std::fs;
 use std::io::{
     Error,
     ErrorKind,
@@ -23,31 +20,6 @@ use std::path::Path;
 use super::io_result_context::with_path_context;
 use super::path_operations::add_path_context;
 use super::rooted_file_io::rooted_type_error;
-
-/// Converts a failed destination status lookup to absence or an I/O error.
-///
-/// # Parameters
-///
-/// * `error` - The operating-system error captured immediately after the failed
-///   lookup.
-///
-/// # Returns
-///
-/// `Ok(None)` when the destination is absent.
-///
-/// # Errors
-///
-/// Returns the operating-system error when the failed lookup was not caused by
-/// a missing destination.
-pub(super) fn missing_rooted_file_permissions(
-    error: Error,
-) -> Result<Option<Permissions>> {
-    if error.kind() == ErrorKind::NotFound {
-        Ok(None)
-    } else {
-        Err(error)
-    }
-}
 
 /// Normalizes the native result of creating a rooted directory component.
 ///

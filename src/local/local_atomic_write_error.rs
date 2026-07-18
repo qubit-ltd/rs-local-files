@@ -19,27 +19,36 @@ use std::path::{
     PathBuf,
 };
 
-use crate::LocalAtomicWriteStage;
+use crate::{
+    LocalAtomicDestinationState,
+    LocalAtomicWriteStage,
+};
 
 /// Error returned by an atomic whole-file replacement.
+///
+/// [`Self::destination_state`] is the authoritative recovery signal. Staging
+/// cleanup is attempted only for [`LocalAtomicDestinationState::Unchanged`].
+/// Other states retain any still-existing staging entry because cleanup could
+/// destroy recovery evidence; the path may already have been moved when the
+/// destination is [`LocalAtomicDestinationState::Replaced`].
 #[non_exhaustive]
 #[derive(Debug)]
 pub struct LocalAtomicWriteError {
     /// Stage at which the operation failed.
-    pub stage: LocalAtomicWriteStage,
+    stage: LocalAtomicWriteStage,
     /// Requested destination path.
-    pub path: PathBuf,
+    path: PathBuf,
     /// Same-directory temporary path when one had already been created.
-    pub temporary_path: Option<PathBuf>,
-    /// Whether destination replacement completed before the failure.
-    pub committed: bool,
+    temporary_path: Option<PathBuf>,
+    /// Known destination state after the failure.
+    destination_state: LocalAtomicDestinationState,
     /// Secondary error reported while removing an uncommitted staging file.
     ///
     /// The primary operation error remains available through [`Self::source`]
     /// and the [`Error`] implementation.
-    pub cleanup_error: Option<io::Error>,
+    cleanup_error: Option<io::Error>,
     /// Native I/O error that caused the failure.
-    pub source: io::Error,
+    source: io::Error,
 }
 
 impl LocalAtomicWriteError {
@@ -49,7 +58,7 @@ impl LocalAtomicWriteError {
     /// - `stage`: Stage at which the operation failed.
     /// - `path`: Requested destination path.
     /// - `temporary_path`: Optional same-directory temporary path.
-    /// - `committed`: Whether destination replacement already completed.
+    /// - `destination_state`: Known destination state after the failure.
     /// - `source`: Native I/O error that caused the failure.
     ///
     /// # Returns
@@ -59,14 +68,14 @@ impl LocalAtomicWriteError {
         stage: LocalAtomicWriteStage,
         path: PathBuf,
         temporary_path: Option<PathBuf>,
-        committed: bool,
+        destination_state: LocalAtomicDestinationState,
         source: io::Error,
     ) -> Self {
         Self {
             stage,
             path,
             temporary_path,
-            committed,
+            destination_state,
             cleanup_error: None,
             source,
         }
@@ -93,19 +102,22 @@ impl LocalAtomicWriteError {
     /// Returns the same-directory staging path, when one was created.
     ///
     /// # Returns
-    /// Staging path retained for diagnostics.
+    /// Staging path retained for diagnostics. The entry is not guaranteed to
+    /// exist after a completed replacement or a successful cleanup.
     #[inline(always)]
     pub fn temporary_path(&self) -> Option<&Path> {
         self.temporary_path.as_deref()
     }
 
-    /// Returns whether destination replacement completed before the failure.
+    /// Returns the known destination state after the failure.
     ///
     /// # Returns
-    /// `true` when the destination had already been committed.
+    /// State reported by the failed operation. Callers must handle
+    /// [`LocalAtomicDestinationState::Indeterminate`] conservatively and
+    /// inspect the destination and staging path before retrying.
     #[inline(always)]
-    pub const fn is_committed(&self) -> bool {
-        self.committed
+    pub const fn destination_state(&self) -> LocalAtomicDestinationState {
+        self.destination_state
     }
 
     /// Returns the secondary staging cleanup error, when cleanup failed.
@@ -145,14 +157,15 @@ impl LocalAtomicWriteError {
 }
 
 impl Display for LocalAtomicWriteError {
-    /// Formats the failed stage, destination, commit state, and source error.
+    /// Formats the failed stage, destination state, and source error.
     fn fmt(&self, formatter: &mut Formatter<'_>) -> FmtResult {
         write!(
             formatter,
-            "atomic write to '{}' failed during {:?} (committed={}): {}",
+            "atomic write to '{}' failed during {:?} \
+             (destination_state={:?}): {}",
             self.path.display(),
             self.stage,
-            self.committed,
+            self.destination_state,
             self.source
         )?;
         if let Some(temporary_path) = self.temporary_path.as_ref() {

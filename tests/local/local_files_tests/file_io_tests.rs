@@ -23,8 +23,6 @@ use std::os::unix::fs::symlink;
 
 #[cfg(unix)]
 use super::super::test_support::PermissionsExt;
-#[cfg(windows)]
-use super::super::test_support::path_with_interior_nul;
 use super::super::test_support::{
     fs,
     temp_dir,

@@ -6,14 +6,14 @@
 //    Licensed under the Apache License, Version 2.0.
 // =============================================================================
 
-use std::io::{
-    ErrorKind,
-    Write,
-};
+#[cfg(unix)]
+use std::io::ErrorKind;
+use std::io::Write;
 #[cfg(target_os = "linux")]
 use std::path::Path;
 
 use qubit_local_files::{
+    LocalAtomicDestinationState,
     LocalAtomicWriteStage,
     LocalAtomicWriter,
     LocalFiles,
@@ -73,8 +73,12 @@ fn test_local_atomic_writer_rejects_symlink_installed_before_commit() {
         .commit()
         .expect_err("commit should reject the destination symlink");
 
-    assert_eq!(LocalAtomicWriteStage::ReplaceDestination, error.stage);
-    assert_eq!(ErrorKind::InvalidInput, error.kind());
+    assert_eq!(LocalAtomicWriteStage::ReplaceDestination, error.stage());
+    assert_eq!(ErrorKind::AlreadyExists, error.kind());
+    assert_eq!(
+        LocalAtomicDestinationState::Unchanged,
+        error.destination_state(),
+    );
     assert_eq!(b"original target", fs::read(&target).unwrap().as_slice());
     assert!(
         fs::symlink_metadata(&path)
@@ -127,7 +131,7 @@ fn test_local_atomic_writer_reports_abort_cleanup_error() {
 
     assert_eq!(
         qubit_local_files::LocalAtomicWriteStage::CleanupTemporaryFile,
-        error.stage
+        error.stage()
     );
     assert_eq!(Some(temporary_path.as_path()), error.temporary_path());
     assert!(!path.exists());
@@ -153,7 +157,7 @@ fn test_local_atomic_writer_preserves_destination_inspection_context() {
 
     assert_eq!(
         qubit_local_files::LocalAtomicWriteStage::InspectDestination,
-        error.stage
+        error.stage()
     );
     assert!(source.to_string().contains("read destination metadata"));
     assert_eq!(
@@ -177,6 +181,44 @@ fn test_local_atomic_writer_abort_preserves_destination() {
     assert_eq!(b"original", fs::read(&path).unwrap().as_slice());
     assert_eq!(0, count_atomic_temp_files(&dir));
     fs::remove_dir_all(dir).unwrap();
+}
+
+#[test]
+fn test_local_atomic_writer_retains_staging_when_destination_disappears() {
+    let dir = temp_dir("atomic-writer-missing-destination");
+    let path = dir.join("out.txt");
+    fs::write(&path, b"original").expect("destination should be written");
+    let mut writer = LocalFiles::begin_atomic_write(&path)
+        .expect("atomic writer should begin");
+    writer
+        .write_all(b"replacement")
+        .expect("replacement should be staged");
+    fs::remove_file(&path).expect("destination should be removed");
+
+    let error = writer
+        .commit()
+        .expect_err("missing destination should reject replacement");
+    let staging_path = error
+        .temporary_path()
+        .map(ToOwned::to_owned)
+        .expect("missing-state error should retain its staging path");
+
+    assert_eq!(
+        LocalAtomicWriteStage::ReadDestinationMetadata,
+        error.stage(),
+    );
+    assert_eq!(
+        LocalAtomicDestinationState::Missing,
+        error.destination_state(),
+    );
+    assert_eq!(
+        b"replacement",
+        fs::read(&staging_path)
+            .expect("retained staging data should be readable")
+            .as_slice(),
+    );
+    fs::remove_file(staging_path).expect("retained staging file should remove");
+    fs::remove_dir_all(dir).expect("test directory should be removed");
 }
 
 #[test]

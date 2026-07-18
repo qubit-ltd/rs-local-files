@@ -7,17 +7,26 @@
 // =============================================================================
 //! Private implementation support for local filesystem operations.
 
+mod atomic_file_install;
+#[cfg(unix)]
+mod atomic_metadata;
+#[cfg(unix)]
+mod atomic_namespace_race;
 mod copy_dir;
 mod dir_size_frame;
-mod file_attribute_tag_info;
-mod file_disposition_info;
 mod file_io;
 mod file_move;
 mod io_result_context;
 mod local_file_reader_inner;
 mod local_file_writer_inner;
+#[cfg(unix)]
+mod opened_atomic_destination;
 mod path_io_error;
 mod path_operations;
+#[cfg(unix)]
+mod rooted_atomic_install;
+#[cfg(unix)]
+mod rooted_atomic_namespace_race;
 #[cfg(unix)]
 mod rooted_atomic_write;
 #[cfg(unix)]
@@ -34,12 +43,17 @@ mod rooted_staged_file;
 mod rooted_staging_retry;
 mod staged_file;
 mod temp_entry;
+#[cfg(unix)]
+mod unix_nonblocking;
+#[cfg(unix)]
+mod unix_stat;
 
+pub(crate) use atomic_file_install::install_atomic_file;
+#[cfg(unix)]
+pub(crate) use atomic_metadata::preserve_atomic_metadata;
+#[cfg(unix)]
+pub(crate) use atomic_namespace_race::verify_atomic_destination_identity;
 pub(crate) use copy_dir::copy_dir_all_with_paths;
-#[cfg(windows)]
-pub(super) use file_attribute_tag_info::FileAttributeTagInfo;
-#[cfg(windows)]
-pub(super) use file_disposition_info::FileDispositionInfo;
 pub(crate) use file_io::{
     open_reader_path,
     open_writer_path,
@@ -53,6 +67,10 @@ pub(crate) use file_move::{
 };
 pub(super) use local_file_reader_inner::LocalFileReaderInner;
 pub(super) use local_file_writer_inner::LocalFileWriterInner;
+#[cfg(unix)]
+pub(crate) use opened_atomic_destination::open_atomic_destination;
+#[cfg(unix)]
+pub(super) use opened_atomic_destination::open_rooted_atomic_destination;
 pub(crate) use path_operations::{
     absolute_path,
     add_path_context,
@@ -64,9 +82,13 @@ pub(crate) use path_operations::{
     remove_any_path,
 };
 #[cfg(unix)]
+pub(super) use rooted_atomic_install::install_rooted_atomic_file;
+#[cfg(unix)]
+pub(super) use rooted_atomic_namespace_race::verify_rooted_atomic_destination_identity;
+#[cfg(unix)]
 pub(super) use rooted_atomic_write::{
     create_rooted_staged_file,
-    existing_rooted_file_permissions,
+    inspect_rooted_atomic_destination,
 };
 #[cfg(unix)]
 pub(super) use rooted_file_io::open_rooted_parent;
@@ -87,3 +109,5 @@ pub(crate) use temp_entry::{
     create_temp_dir_in_dir,
     create_temp_file_in_dir,
 };
+#[cfg(unix)]
+pub(crate) use unix_nonblocking::clear_nonblocking;

@@ -21,16 +21,25 @@
 ///         LocalAtomicWriteStage::InspectDestination => {}
 ///         LocalAtomicWriteStage::CreateTemporaryFile => {}
 ///         LocalAtomicWriteStage::WriteTemporaryFile => {}
-///         LocalAtomicWriteStage::PreservePermissions => {}
+///         LocalAtomicWriteStage::ReadDestinationMetadata => {}
+///         LocalAtomicWriteStage::ApplyDestinationMetadata => {}
 ///         LocalAtomicWriteStage::SyncTemporaryFile => {}
 ///         LocalAtomicWriteStage::ReplaceDestination => {}
 ///         LocalAtomicWriteStage::CleanupTemporaryFile => {}
-///         LocalAtomicWriteStage::SyncParentDirectory => {}
+///         LocalAtomicWriteStage::SyncParent => {}
 ///     }
 /// }
 /// ```
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+///
+/// ```compile_fail
+/// #![deny(unused_must_use)]
+/// use qubit_local_files::LocalAtomicWriteStage;
+///
+/// LocalAtomicWriteStage::InspectDestination.clone();
+/// ```
+#[must_use]
 #[non_exhaustive]
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum LocalAtomicWriteStage {
     /// Creating destination parent directories failed.
     PrepareParent,
@@ -40,8 +49,10 @@ pub enum LocalAtomicWriteStage {
     CreateTemporaryFile,
     /// Caller-provided temporary-file writing failed.
     WriteTemporaryFile,
-    /// Applying existing destination permissions failed.
-    PreservePermissions,
+    /// Reading metadata from an existing destination failed.
+    ReadDestinationMetadata,
+    /// Applying existing destination metadata to staging failed.
+    ApplyDestinationMetadata,
     /// Synchronizing the temporary file failed.
     SyncTemporaryFile,
     /// Replacing the destination failed.
@@ -49,5 +60,5 @@ pub enum LocalAtomicWriteStage {
     /// Explicitly removing an aborted temporary file failed.
     CleanupTemporaryFile,
     /// Synchronizing the parent directory after replacement failed.
-    SyncParentDirectory,
+    SyncParent,
 }

@@ -16,8 +16,6 @@
 
 #[cfg(any(target_os = "linux", target_os = "macos"))]
 use std::ffi::CString;
-#[cfg(windows)]
-use std::ffi::c_void;
 #[cfg(not(windows))]
 use std::fs;
 use std::fs::File;
@@ -36,66 +34,40 @@ use std::os::windows::ffi::OsStrExt;
 use std::os::windows::io::{
     AsRawHandle,
     FromRawHandle,
-    RawHandle,
 };
 
 #[cfg(windows)]
-use super::{
+use windows_sys::Win32::Foundation::{
+    GENERIC_READ,
+    INVALID_HANDLE_VALUE,
+};
+#[cfg(windows)]
+use windows_sys::Win32::Storage::FileSystem::{
+    CreateFileW,
+    DELETE,
+    FILE_ATTRIBUTE_DIRECTORY,
+    FILE_ATTRIBUTE_REPARSE_POINT,
+    FILE_ATTRIBUTE_TAG_INFO,
+    FILE_DISPOSITION_INFO,
+    FILE_FLAG_BACKUP_SEMANTICS,
+    FILE_FLAG_OPEN_REPARSE_POINT,
+    FILE_READ_ATTRIBUTES,
+    FILE_SHARE_DELETE,
+    FILE_SHARE_READ,
+    FILE_SHARE_WRITE,
     FileAttributeTagInfo,
     FileDispositionInfo,
+    GetFileInformationByHandleEx,
+    MOVEFILE_REPLACE_EXISTING,
+    MOVEFILE_WRITE_THROUGH,
+    MoveFileExW,
+    OPEN_EXISTING,
+    SetFileInformationByHandle,
 };
 
-/// Replace an existing destination in `MoveFileExW`.
-#[cfg(windows)]
-const MOVEFILE_REPLACE_EXISTING: u32 = 0x0000_0001;
-/// Flush the move to disk before `MoveFileExW` returns.
-#[cfg(windows)]
-const MOVEFILE_WRITE_THROUGH: u32 = 0x0000_0008;
-/// Windows generic read access mask.
-#[cfg(windows)]
-const GENERIC_READ: u32 = 0x8000_0000;
-/// Windows delete access mask.
-#[cfg(windows)]
-const DELETE: u32 = 0x0001_0000;
-/// Windows file-attribute read access mask.
-#[cfg(windows)]
-const FILE_READ_ATTRIBUTES: u32 = 0x0000_0080;
-/// Windows read sharing flag.
-#[cfg(windows)]
-const FILE_SHARE_READ: u32 = 0x0000_0001;
-/// Windows write sharing flag.
-#[cfg(windows)]
-const FILE_SHARE_WRITE: u32 = 0x0000_0002;
-/// Windows delete sharing flag.
-#[cfg(windows)]
-const FILE_SHARE_DELETE: u32 = 0x0000_0004;
-/// Windows disposition for opening an existing object.
-#[cfg(windows)]
-const OPEN_EXISTING: u32 = 3;
-/// Windows flag allowing directory handles to be opened.
-#[cfg(windows)]
-const FILE_FLAG_BACKUP_SEMANTICS: u32 = 0x0200_0000;
-/// Windows flag opening a reparse point instead of its target.
-#[cfg(windows)]
-const FILE_FLAG_OPEN_REPARSE_POINT: u32 = 0x0020_0000;
-/// Windows directory attribute bit.
-#[cfg(windows)]
-const FILE_ATTRIBUTE_DIRECTORY: u32 = 0x0000_0010;
-/// Windows reparse-point attribute bit.
-#[cfg(windows)]
-const FILE_ATTRIBUTE_REPARSE_POINT: u32 = 0x0000_0400;
 /// Windows reparse-tag bit identifying name-surrogate tags.
 #[cfg(windows)]
 const IO_REPARSE_TAG_NAME_SURROGATE: u32 = 0x2000_0000;
-/// Windows `FILE_DISPOSITION_INFO` information class.
-#[cfg(windows)]
-const FILE_DISPOSITION_INFO_CLASS: u32 = 4;
-/// Windows `FILE_ATTRIBUTE_TAG_INFO` information class.
-#[cfg(windows)]
-const FILE_ATTRIBUTE_TAG_INFO_CLASS: u32 = 9;
-/// Sentinel returned when a Windows handle operation fails.
-#[cfg(windows)]
-const INVALID_HANDLE_VALUE: RawHandle = -1isize as RawHandle;
 /// macOS flag that prevents replacement during `renamex_np`.
 #[cfg(target_os = "macos")]
 const RENAME_EXCL: std::os::raw::c_uint = 0x0000_0004;
@@ -108,43 +80,6 @@ unsafe extern "C" {
         to: *const std::os::raw::c_char,
         flags: std::os::raw::c_uint,
     ) -> std::os::raw::c_int;
-}
-
-#[cfg(windows)]
-unsafe extern "system" {
-    /// Moves or replaces a Windows filesystem path.
-    fn MoveFileExW(
-        existing_file_name: *const u16,
-        new_file_name: *const u16,
-        flags: u32,
-    ) -> i32;
-
-    /// Opens a Windows file or directory handle.
-    fn CreateFileW(
-        file_name: *const u16,
-        desired_access: u32,
-        share_mode: u32,
-        security_attributes: *mut c_void,
-        creation_disposition: u32,
-        flags_and_attributes: u32,
-        template_file: RawHandle,
-    ) -> RawHandle;
-
-    /// Reads an information class from a Windows file handle.
-    fn GetFileInformationByHandleEx(
-        file: RawHandle,
-        file_information_class: u32,
-        file_information: *mut c_void,
-        buffer_size: u32,
-    ) -> i32;
-
-    /// Writes an information class to a Windows file handle.
-    fn SetFileInformationByHandle(
-        file: RawHandle,
-        file_information_class: u32,
-        file_information: *const c_void,
-        buffer_size: u32,
-    ) -> i32;
 }
 
 /// Replaces `destination` with `source`.
@@ -365,7 +300,7 @@ pub(crate) fn remove_directory_symlink(path: &Path) -> Result<()> {
             path.as_ptr(),
             DELETE | FILE_READ_ATTRIBUTES,
             FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE,
-            std::ptr::null_mut(),
+            std::ptr::null(),
             OPEN_EXISTING,
             FILE_FLAG_BACKUP_SEMANTICS | FILE_FLAG_OPEN_REPARSE_POINT,
             std::ptr::null_mut(),
@@ -377,30 +312,27 @@ pub(crate) fn remove_directory_symlink(path: &Path) -> Result<()> {
     // SAFETY: the handle was checked against INVALID_HANDLE_VALUE and is a
     // uniquely owned CreateFileW result. File closes it exactly once.
     let entry = unsafe { File::from_raw_handle(handle) };
-    let mut attributes = FileAttributeTagInfo {
-        file_attributes: 0,
-        reparse_tag: 0,
-    };
+    let mut attributes = FILE_ATTRIBUTE_TAG_INFO::default();
     // SAFETY: `entry` owns a valid handle, `attributes` is a live writable
     // buffer of the advertised size, and FileAttributeTagInfo is the matching
     // structure for FILE_ATTRIBUTE_TAG_INFO_CLASS.
     let inspected = unsafe {
         GetFileInformationByHandleEx(
             entry.as_raw_handle(),
-            FILE_ATTRIBUTE_TAG_INFO_CLASS,
-            std::ptr::from_mut(&mut attributes).cast::<c_void>(),
-            std::mem::size_of::<FileAttributeTagInfo>() as u32,
+            FileAttributeTagInfo,
+            std::ptr::from_mut(&mut attributes).cast(),
+            std::mem::size_of::<FILE_ATTRIBUTE_TAG_INFO>() as u32,
         )
     };
     if inspected == 0 {
         return Err(Error::last_os_error());
     }
     let is_directory =
-        attributes.file_attributes & FILE_ATTRIBUTE_DIRECTORY != 0;
+        attributes.FileAttributes & FILE_ATTRIBUTE_DIRECTORY != 0;
     let is_reparse_point =
-        attributes.file_attributes & FILE_ATTRIBUTE_REPARSE_POINT != 0;
+        attributes.FileAttributes & FILE_ATTRIBUTE_REPARSE_POINT != 0;
     let is_name_surrogate =
-        attributes.reparse_tag & IO_REPARSE_TAG_NAME_SURROGATE != 0;
+        attributes.ReparseTag & IO_REPARSE_TAG_NAME_SURROGATE != 0;
     if !is_directory || !is_reparse_point || !is_name_surrogate {
         return Err(Error::new(
             ErrorKind::AlreadyExists,
@@ -408,16 +340,16 @@ pub(crate) fn remove_directory_symlink(path: &Path) -> Result<()> {
         ));
     }
 
-    let disposition = FileDispositionInfo { delete_file: 1 };
+    let disposition = FILE_DISPOSITION_INFO { DeleteFile: true };
     // SAFETY: `entry` owns a valid handle opened with DELETE access;
     // `disposition` is a live readable buffer of the advertised size and is
     // the matching structure for FILE_DISPOSITION_INFO_CLASS.
     let removed = unsafe {
         SetFileInformationByHandle(
             entry.as_raw_handle(),
-            FILE_DISPOSITION_INFO_CLASS,
-            std::ptr::from_ref(&disposition).cast::<c_void>(),
-            std::mem::size_of::<FileDispositionInfo>() as u32,
+            FileDispositionInfo,
+            std::ptr::from_ref(&disposition).cast(),
+            std::mem::size_of::<FILE_DISPOSITION_INFO>() as u32,
         )
     };
     if removed == 0 {
@@ -503,7 +435,7 @@ pub(crate) fn sync_parent_dir(path: &Path) -> Result<()> {
             parent.as_ptr(),
             GENERIC_READ,
             FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE,
-            std::ptr::null_mut(),
+            std::ptr::null(),
             OPEN_EXISTING,
             FILE_FLAG_BACKUP_SEMANTICS,
             std::ptr::null_mut(),
@@ -568,7 +500,7 @@ pub(crate) fn parent_dir_for(path: &Path) -> &Path {
 /// # Errors
 /// Returns [`ErrorKind::InvalidInput`] when `path` contains an interior NUL.
 #[cfg(windows)]
-fn wide_path(path: &Path) -> Result<Vec<u16>> {
+pub(super) fn wide_path(path: &Path) -> Result<Vec<u16>> {
     let units: Vec<u16> = path.as_os_str().encode_wide().collect();
     if units.contains(&0) {
         return Err(Error::new(

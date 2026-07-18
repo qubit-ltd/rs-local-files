@@ -17,6 +17,7 @@ use std::process::Command;
 
 #[cfg(unix)]
 use qubit_local_files::{
+    LocalAtomicDestinationState,
     LocalAtomicWriteStage,
     LocalRelativePath,
     LocalRoot,
@@ -27,6 +28,16 @@ use super::test_support::{
     count_atomic_temp_files,
     fs,
     temp_dir,
+};
+#[cfg(any(
+    target_os = "linux",
+    target_os = "android",
+    target_os = "macos",
+    target_os = "freebsd",
+))]
+use super::test_support::{
+    get_user_xattr,
+    set_user_xattr,
 };
 
 #[cfg(target_os = "linux")]
@@ -301,6 +312,62 @@ fn test_begin_atomic_write_preserves_permissions_and_rejects_symlink() {
     fs::remove_dir_all(fixture).expect("permission fixture should be removed");
 }
 
+/// Verifies that rooted commit snapshots mode and xattrs at commit time.
+#[cfg(any(
+    target_os = "linux",
+    target_os = "android",
+    target_os = "macos",
+    target_os = "freebsd",
+))]
+#[test]
+fn test_begin_atomic_write_preserves_commit_time_metadata() {
+    use std::os::unix::fs::PermissionsExt;
+
+    const XATTR_NAME: &str = "user.qubit-local-files";
+
+    let root_path = temp_dir("rooted-atomic-commit-time-metadata");
+    let destination_path = root_path.join("result.txt");
+    fs::write(&destination_path, b"old")
+        .expect("destination fixture should be written");
+    fs::set_permissions(&destination_path, fs::Permissions::from_mode(0o600))
+        .expect("initial destination mode should be set");
+    set_user_xattr(&destination_path, XATTR_NAME, b"initial")
+        .expect("initial destination xattr should be set");
+    let root = LocalRoot::open(&root_path).expect("root should open");
+    let destination = LocalRelativePath::new("result.txt")
+        .expect("destination should validate");
+    let mut writer = root
+        .begin_atomic_write(&destination)
+        .expect("rooted atomic writer should begin");
+    fs::set_permissions(&destination_path, fs::Permissions::from_mode(0o640))
+        .expect("destination mode should change before commit");
+    set_user_xattr(&destination_path, XATTR_NAME, b"latest")
+        .expect("destination xattr should change before commit");
+    writer
+        .write_all(b"new")
+        .expect("replacement contents should be staged");
+
+    writer
+        .commit()
+        .expect("rooted atomic commit should succeed");
+
+    assert_eq!(
+        0o640,
+        fs::metadata(&destination_path)
+            .expect("committed metadata should be readable")
+            .permissions()
+            .mode()
+            & 0o777,
+    );
+    assert_eq!(
+        b"latest",
+        get_user_xattr(&destination_path, XATTR_NAME)
+            .expect("committed xattr should be readable")
+            .as_slice(),
+    );
+    fs::remove_dir_all(root_path).expect("test directory should be removed");
+}
+
 /// Verifies that a final entry replaced by a symbolic link after staging is
 /// rejected without modifying the link target.
 #[cfg(unix)]
@@ -336,7 +403,10 @@ fn test_commit_rejects_final_symlink_replacement() {
         .commit()
         .expect_err("commit should reject the replacement symlink");
 
-    assert_eq!(LocalAtomicWriteStage::ReplaceDestination, error.stage());
+    assert_eq!(
+        LocalAtomicWriteStage::ReadDestinationMetadata,
+        error.stage(),
+    );
     assert_eq!(b"outside", fs::read(&outside_path).unwrap().as_slice());
     assert!(destination_path.is_symlink());
     assert_eq!(0, count_atomic_temp_files(&root_path));
@@ -366,6 +436,64 @@ fn test_commit_flushes_and_creates_missing_destination() {
     );
     fs::remove_dir_all(root_path)
         .expect("new atomic fixture should be removed");
+}
+
+/// Verifies rooted no-replace installation and missing-state staging retention.
+#[cfg(unix)]
+#[test]
+fn test_commit_reports_precise_namespace_states() {
+    let root_path = temp_dir("rooted-atomic-namespace-states");
+    let root = LocalRoot::open(&root_path).expect("root should open");
+    let created = LocalRelativePath::new("created.txt")
+        .expect("created destination should validate");
+    let mut writer = root
+        .begin_atomic_write(&created)
+        .expect("missing destination writer should begin");
+    writer
+        .write_all(b"replacement")
+        .expect("replacement should be staged");
+    fs::write(root_path.join("created.txt"), b"concurrent")
+        .expect("concurrent destination should be created");
+
+    let error = writer
+        .commit()
+        .expect_err("rooted install must not replace a concurrent target");
+
+    assert_eq!(
+        LocalAtomicDestinationState::Unchanged,
+        error.destination_state(),
+    );
+    assert_eq!(
+        b"concurrent",
+        fs::read(root_path.join("created.txt"))
+            .expect("concurrent destination should remain")
+            .as_slice(),
+    );
+    assert_eq!(0, count_atomic_temp_files(&root_path));
+
+    let existing = LocalRelativePath::new("existing.txt")
+        .expect("existing destination should validate");
+    fs::write(root_path.join("existing.txt"), b"original")
+        .expect("existing destination should be written");
+    let mut writer = root
+        .begin_atomic_write(&existing)
+        .expect("existing destination writer should begin");
+    writer
+        .write_all(b"retained")
+        .expect("replacement should be staged");
+    fs::remove_file(root_path.join("existing.txt"))
+        .expect("existing destination should disappear");
+
+    let error = writer
+        .commit()
+        .expect_err("missing existing destination should reject replacement");
+
+    assert_eq!(
+        LocalAtomicDestinationState::Missing,
+        error.destination_state(),
+    );
+    assert_eq!(1, count_atomic_temp_files(&root_path));
+    fs::remove_dir_all(root_path).expect("test directory should be removed");
 }
 
 /// Verifies structured preparation errors for an ordinary-file parent and a

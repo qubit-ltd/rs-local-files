@@ -20,6 +20,7 @@ pub use local::{
     FileReadOptions,
     FileWriteMode,
     FileWriteOptions,
+    LocalAtomicDestinationState,
     LocalAtomicWriteError,
     LocalAtomicWriteStage,
     LocalAtomicWriter,

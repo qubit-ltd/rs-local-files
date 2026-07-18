@@ -23,6 +23,10 @@ use std::path::{
 
 use log::warn;
 
+use crate::LocalAtomicDestinationState;
+
+use super::atomic_file_install::install_new_atomic_file_at;
+
 /// Owns an uncommitted staging entry relative to its open parent directory.
 ///
 /// The entry name and parent descriptor are the only cleanup authority. Its
@@ -161,6 +165,33 @@ impl RootedStagedFile {
             return Err(Error::last_os_error());
         }
         Ok(())
+    }
+
+    /// Installs the staging entry only when the destination is absent.
+    ///
+    /// # Parameters
+    ///
+    /// * `destination` - Final entry name in the same parent directory.
+    ///
+    /// # Errors
+    ///
+    /// Returns the native error and known destination state. Cleanup remains
+    /// armed until the caller handles that state explicitly.
+    pub(in crate::local) fn install_new_to(
+        &mut self,
+        destination: &CString,
+    ) -> std::result::Result<(), (Error, LocalAtomicDestinationState)> {
+        self.close();
+        let name = self
+            .name
+            .as_ref()
+            .expect("rooted staging entry has already been disarmed");
+        install_new_atomic_file_at(
+            self.parent.as_raw_fd(),
+            name,
+            self.parent.as_raw_fd(),
+            destination,
+        )
     }
 
     /// Closes and removes the uncommitted staging entry.

@@ -9,8 +9,6 @@
 use qubit_local_files::LocalFiles;
 use std::io::ErrorKind;
 
-#[cfg(windows)]
-use super::super::test_support::path_with_interior_nul;
 #[cfg(target_os = "linux")]
 use super::super::test_support::run_in_small_stack_process;
 #[cfg(unix)]
