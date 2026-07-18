@@ -30,6 +30,7 @@ use crate::{
     LocalFiles,
     LocalPersistError,
     LocalPersistOptions,
+    LocalPersistStage,
 };
 
 use super::internal::{
@@ -175,7 +176,17 @@ impl LocalTempFile {
     where
         P: AsRef<Path>,
     {
-        let operation_dir = absolute_path(dir.as_ref())?;
+        Self::in_directory(dir.as_ref(), prefix, suffix, max_tries)
+    }
+
+    /// Creates a temporary file from a borrowed directory path.
+    fn in_directory(
+        dir: &Path,
+        prefix: Option<&str>,
+        suffix: Option<&str>,
+        max_tries: usize,
+    ) -> Result<Self> {
+        let operation_dir = absolute_path(dir)?;
         let (path, file) =
             create_temp_file_in_dir(&operation_dir, prefix, suffix, max_tries)?;
         Ok(Self {
@@ -334,9 +345,9 @@ impl LocalTempFile {
     /// The absolute final file path.
     ///
     /// # Errors
-    /// Returns [`LocalPersistError`] when the parent directory cannot be
-    /// created, the target already exists, or the temporary file cannot be
-    /// moved to `target`.
+    /// Returns [`LocalPersistError`] with the failure stage, requested target,
+    /// optional resolved target, native error, and this retained guard when
+    /// target resolution, parent preparation, or installation fails.
     #[inline(always)]
     pub fn persist<P>(
         self,
@@ -345,7 +356,7 @@ impl LocalTempFile {
     where
         P: AsRef<Path>,
     {
-        self.persist_with(target, LocalPersistOptions::default())
+        self.persist_path_with(target.as_ref(), LocalPersistOptions::default())
     }
 
     /// Moves the temporary file to a final path using persistence options.
@@ -364,10 +375,10 @@ impl LocalTempFile {
     /// Persistence uses a native move or rename and does not fall back to
     /// copying and deleting, so cross-filesystem moves can fail with `EXDEV` on
     /// Unix or a platform-equivalent error. Replacing an existing target keeps
-    /// the temporary file's permissions and does not preserve the replaced
-    /// target's permissions. Use [`LocalFiles::atomic_write`] when replacing
-    /// contents while preserving existing regular-file permissions is
-    /// required.
+    /// the temporary file's metadata and does not preserve the replaced
+    /// target's metadata. Use [`LocalFiles::atomic_write`] when replacing
+    /// contents while strictly preserving supported platform-native metadata
+    /// is required.
     /// A relative target is bound to the process current directory when this
     /// method begins, and the returned path is absolute. On Windows, no
     /// verbatim-path prefix is added, so native path-length and verbatim-path
@@ -381,25 +392,49 @@ impl LocalTempFile {
     /// The absolute final file path.
     ///
     /// # Errors
-    /// Returns [`LocalPersistError`] retaining this guard when the parent
-    /// directory cannot be created, the target already exists while
-    /// overwriting is disabled, native no-replace installation is unavailable,
-    /// or the temporary file cannot be moved to `target`.
+    /// Returns [`LocalPersistError`] with target and stage context while
+    /// retaining this guard when resolution, parent preparation, or
+    /// installation fails, including no-replace conflicts and unsupported
+    /// native operations.
     pub fn persist_with<P>(
-        mut self,
+        self,
         target: P,
         options: LocalPersistOptions,
     ) -> std::result::Result<PathBuf, LocalPersistError<Self>>
     where
         P: AsRef<Path>,
     {
+        self.persist_path_with(target.as_ref(), options)
+    }
+
+    /// Persists this file using one borrowed target path.
+    fn persist_path_with(
+        mut self,
+        target: &Path,
+        options: LocalPersistOptions,
+    ) -> std::result::Result<PathBuf, LocalPersistError<Self>> {
         self.close();
-        let target = match absolute_path(target.as_ref()) {
+        let requested_target = target.to_path_buf();
+        let target = match absolute_path(&requested_target) {
             Ok(path) => path,
-            Err(error) => return Err(LocalPersistError::new(error, self)),
+            Err(error) => {
+                return Err(LocalPersistError::new(
+                    error,
+                    self,
+                    requested_target,
+                    None,
+                    LocalPersistStage::ResolveTarget,
+                ));
+            }
         };
         if let Err(error) = LocalFiles::ensure_parent(&target) {
-            return Err(LocalPersistError::new(error, self));
+            return Err(LocalPersistError::new(
+                error,
+                self,
+                requested_target,
+                Some(target),
+                LocalPersistStage::PrepareParent,
+            ));
         }
         let move_result = {
             let source = self
@@ -413,7 +448,13 @@ impl LocalTempFile {
             }
         };
         if let Err(error) = move_result {
-            return Err(LocalPersistError::new(error, self));
+            return Err(LocalPersistError::new(
+                error,
+                self,
+                requested_target,
+                Some(target),
+                LocalPersistStage::InstallDestination,
+            ));
         }
         let _ = self.path.take();
         Ok(target)

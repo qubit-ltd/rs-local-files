@@ -32,6 +32,7 @@ use crate::{
     LocalFileWriter,
     LocalFiles,
     LocalPersistError,
+    LocalPersistStage,
     LocalRelativePath,
 };
 
@@ -391,9 +392,9 @@ impl LocalTempDir {
     /// The absolute final directory path.
     ///
     /// # Errors
-    /// Returns [`LocalPersistError`] when the parent directory cannot be
-    /// created, the target already exists, the platform is not Linux, macOS, or
-    /// Windows, or the temporary directory cannot be moved to `target`.
+    /// Returns [`LocalPersistError`] with the failure stage, requested target,
+    /// optional resolved target, native error, and this retained guard when
+    /// resolution, parent preparation, or no-replace installation fails.
     pub fn persist<P>(
         mut self,
         target: P,
@@ -401,12 +402,27 @@ impl LocalTempDir {
     where
         P: AsRef<Path>,
     {
-        let target = match absolute_path(target.as_ref()) {
+        let requested_target = target.as_ref().to_path_buf();
+        let target = match absolute_path(&requested_target) {
             Ok(path) => path,
-            Err(error) => return Err(LocalPersistError::new(error, self)),
+            Err(error) => {
+                return Err(LocalPersistError::new(
+                    error,
+                    self,
+                    requested_target,
+                    None,
+                    LocalPersistStage::ResolveTarget,
+                ));
+            }
         };
         if let Err(error) = LocalFiles::ensure_parent(&target) {
-            return Err(LocalPersistError::new(error, self));
+            return Err(LocalPersistError::new(
+                error,
+                self,
+                requested_target,
+                Some(target),
+                LocalPersistStage::PrepareParent,
+            ));
         }
         let move_result = {
             let source = self
@@ -416,7 +432,13 @@ impl LocalTempDir {
             move_directory_without_replacing(source, &target)
         };
         if let Err(error) = move_result {
-            return Err(LocalPersistError::new(error, self));
+            return Err(LocalPersistError::new(
+                error,
+                self,
+                requested_target,
+                Some(target),
+                LocalPersistStage::InstallDestination,
+            ));
         }
         let _ = self.path.take();
         Ok(target)

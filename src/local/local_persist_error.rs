@@ -15,15 +15,33 @@ use std::fmt::{
     Result as FmtResult,
 };
 use std::io;
+use std::path::{
+    Path,
+    PathBuf,
+};
+
+use crate::LocalPersistStage;
 
 /// Persistence error that returns ownership of the temporary resource.
+///
+/// The stage distinguishes target resolution, parent preparation, and final
+/// installation. [`Self::requested_target`] always returns the caller's path;
+/// [`Self::resolved_target`] returns the bound absolute path once resolution
+/// has succeeded. The resource remains available for retry, inspection, keep,
+/// or explicit cleanup at every stage.
 #[non_exhaustive]
 #[derive(Debug)]
 pub struct LocalPersistError<T> {
     /// Native I/O error that prevented persistence.
-    pub error: io::Error,
+    error: io::Error,
     /// Temporary resource retained after the failed operation.
-    pub resource: T,
+    resource: Box<T>,
+    /// Target path supplied by the caller.
+    requested_target: PathBuf,
+    /// Absolute target path, when target resolution succeeded.
+    resolved_target: Option<PathBuf>,
+    /// Stage at which persistence failed.
+    stage: LocalPersistStage,
 }
 
 impl<T> LocalPersistError<T> {
@@ -32,12 +50,27 @@ impl<T> LocalPersistError<T> {
     /// # Parameters
     /// - `error`: Native I/O error that prevented persistence.
     /// - `resource`: Temporary resource retained after the failure.
+    /// - `requested_target`: Target path supplied by the caller.
+    /// - `resolved_target`: Absolute target, when resolution succeeded.
+    /// - `stage`: Stage at which persistence failed.
     ///
     /// # Returns
     /// New persistence error owning both values.
     #[inline]
-    pub(crate) fn new(error: io::Error, resource: T) -> Self {
-        Self { error, resource }
+    pub(crate) fn new(
+        error: io::Error,
+        resource: T,
+        requested_target: PathBuf,
+        resolved_target: Option<PathBuf>,
+        stage: LocalPersistStage,
+    ) -> Self {
+        Self {
+            error,
+            resource: Box::new(resource),
+            requested_target,
+            resolved_target,
+            stage,
+        }
     }
 
     /// Returns the native persistence error.
@@ -67,6 +100,33 @@ impl<T> LocalPersistError<T> {
         &mut self.resource
     }
 
+    /// Returns the target path supplied by the caller.
+    ///
+    /// # Returns
+    /// Requested target before absolute-path resolution.
+    #[inline(always)]
+    pub fn requested_target(&self) -> &Path {
+        &self.requested_target
+    }
+
+    /// Returns the resolved absolute target, when resolution succeeded.
+    ///
+    /// # Returns
+    /// Resolved target for parent preparation and destination installation.
+    #[inline(always)]
+    pub fn resolved_target(&self) -> Option<&Path> {
+        self.resolved_target.as_deref()
+    }
+
+    /// Returns the stage at which persistence failed.
+    ///
+    /// # Returns
+    /// Failed persistence stage.
+    #[inline(always)]
+    pub const fn stage(&self) -> LocalPersistStage {
+        self.stage
+    }
+
     /// Returns the native I/O error kind.
     ///
     /// # Returns
@@ -76,24 +136,49 @@ impl<T> LocalPersistError<T> {
         self.error.kind()
     }
 
-    /// Splits this error into its native error and temporary resource.
+    /// Splits this error into all retained values.
     ///
     /// # Returns
-    /// Native I/O error followed by the retained temporary resource.
+    /// Native error, retained resource, requested target, resolved target, and
+    /// failure stage.
     #[inline(always)]
-    pub fn into_parts(self) -> (io::Error, T) {
-        (self.error, self.resource)
+    pub fn into_parts(
+        self,
+    ) -> (io::Error, T, PathBuf, Option<PathBuf>, LocalPersistStage) {
+        let Self {
+            error,
+            resource,
+            requested_target,
+            resolved_target,
+            stage,
+        } = self;
+        (error, *resource, requested_target, resolved_target, stage)
     }
 }
 
 impl<T> Display for LocalPersistError<T> {
-    /// Formats the retained native error.
+    /// Formats the failure stage, target context, and native error.
     fn fmt(&self, formatter: &mut Formatter<'_>) -> FmtResult {
-        write!(
-            formatter,
-            "failed to persist temporary resource: {}",
-            self.error
-        )
+        if let Some(resolved_target) = self.resolved_target.as_ref() {
+            write!(
+                formatter,
+                "failed to persist temporary resource during {:?} to requested \
+                 target '{}' (resolved as '{}'): {}",
+                self.stage,
+                self.requested_target.display(),
+                resolved_target.display(),
+                self.error,
+            )
+        } else {
+            write!(
+                formatter,
+                "failed to persist temporary resource during {:?} to requested \
+                 target '{}': {}",
+                self.stage,
+                self.requested_target.display(),
+                self.error,
+            )
+        }
     }
 }
 

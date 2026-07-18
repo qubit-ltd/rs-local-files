@@ -35,6 +35,7 @@ pub use local::{
     LocalFiles,
     LocalPersistError,
     LocalPersistOptions,
+    LocalPersistStage,
     LocalRelativePath,
     LocalRoot,
     LocalRootAtomicWriter,

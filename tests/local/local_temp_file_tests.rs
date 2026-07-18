@@ -24,6 +24,7 @@ use super::test_support::{
     fs,
     temp_dir,
 };
+use qubit_local_files::LocalPersistStage;
 
 #[test]
 fn test_temp_file_exposes_absolute_location_after_cwd_change() {
@@ -465,10 +466,10 @@ fn test_temp_file_persist_reports_unsupported_no_replace_move() {
         .expect_err("no-replace file move should be unsupported");
 
     assert_eq!(ErrorKind::Unsupported, error.kind());
-    assert!(error.resource.path().exists());
+    assert!(error.resource().path().exists());
     assert!(!target.exists());
-    error
-        .resource
+    let (_, resource, _, _, _) = error.into_parts();
+    resource
         .cleanup()
         .expect("failed persistence resource should be cleaned up");
     fs::remove_dir_all(dir).expect("unsupported fixture should be removed");
@@ -491,7 +492,7 @@ fn test_temp_file_persist_rejects_existing_target_by_default() {
         .expect_err("existing target should be rejected by default");
 
     assert_eq!(ErrorKind::AlreadyExists, error.kind());
-    assert_eq!(source, error.resource.path());
+    assert_eq!(source, error.resource().path());
     assert!(source.exists());
     assert_eq!(b"old", fs::read(&target).unwrap().as_slice());
     drop(error);
@@ -537,12 +538,32 @@ fn test_temp_file_persist_with_default_rejects_existing_target() {
         .expect_err("default persist options should reject existing targets");
 
     assert_eq!(ErrorKind::AlreadyExists, error.kind());
-    assert_eq!(source, error.resource.path());
+    assert_eq!(source, error.resource().path());
     assert!(source.exists());
     assert_eq!(b"old", fs::read(&target).unwrap().as_slice());
     drop(error);
     assert!(!source.exists());
     fs::remove_dir_all(dir).unwrap();
+}
+
+#[cfg(any(target_os = "linux", target_os = "macos", windows))]
+#[test]
+fn test_persist_error_reports_install_context() {
+    let dir = temp_dir("temp-file-persist-install-context");
+    let file = LocalTempFile::in_dir(&dir, Some("source-"), Some(".tmp"), 4)
+        .expect("temporary file should be created");
+    let target = dir.join("existing.txt");
+    fs::write(&target, b"existing").expect("target fixture should exist");
+
+    let error = file
+        .persist_with(&target, LocalPersistOptions::new())
+        .expect_err("no-replace persistence should fail");
+
+    assert_eq!(LocalPersistStage::InstallDestination, error.stage());
+    assert_eq!(target, error.requested_target());
+    assert_eq!(Some(target.as_path()), error.resolved_target());
+    assert!(error.to_string().contains("InstallDestination"));
+    fs::remove_dir_all(dir).expect("test directory should be removed");
 }
 
 #[cfg(any(target_os = "linux", target_os = "macos"))]
@@ -562,7 +583,7 @@ fn test_temp_file_persist_rejects_target_with_nul_byte() {
         .expect_err("NUL target should be rejected");
 
     assert_eq!(ErrorKind::InvalidInput, error.kind());
-    assert_eq!(source, error.resource.path());
+    assert_eq!(source, error.resource().path());
     assert!(source.exists());
     drop(error);
     assert!(!source.exists());
@@ -584,7 +605,7 @@ fn test_temp_file_persist_rejects_windows_target_with_nul_byte() {
         .expect_err("Windows NUL target should be rejected before moving");
 
     assert_eq!(ErrorKind::InvalidInput, error.kind());
-    assert_eq!(source, error.resource.path());
+    assert_eq!(source, error.resource().path());
     assert!(source.exists());
     assert!(!prefix.exists(), "NUL prefix target must not be created");
     drop(error);
@@ -612,7 +633,7 @@ fn test_temp_file_persist_with_overwrite_rejects_windows_target_with_nul_byte()
         .expect_err("Windows NUL target should be rejected before replacement");
 
     assert_eq!(ErrorKind::InvalidInput, error.kind());
-    assert_eq!(source, error.resource.path());
+    assert_eq!(source, error.resource().path());
     assert!(source.exists());
     assert_eq!(b"original", fs::read(&prefix).unwrap().as_slice());
     drop(error);
@@ -634,7 +655,7 @@ fn test_temp_file_persist_returns_target_metadata_error() {
         .expect_err("target metadata error should be returned");
 
     assert_ne!(ErrorKind::NotFound, error.kind());
-    assert_eq!(source, error.resource.path());
+    assert_eq!(source, error.resource().path());
     assert!(source.exists());
     drop(error);
     assert!(!source.exists());
@@ -665,7 +686,16 @@ fn test_temp_file_persist_returns_resource_when_current_dir_is_unavailable() {
     };
 
     assert_eq!(ErrorKind::NotFound, error.kind());
-    assert_eq!(source, error.resource.path());
+    assert_eq!(LocalPersistStage::ResolveTarget, error.stage());
+    assert_eq!(
+        std::path::Path::new("relative-target"),
+        error.requested_target(),
+    );
+    assert!(error.resolved_target().is_none());
+    let message = error.to_string();
+    assert!(message.contains("relative-target"));
+    assert!(!message.contains("resolved as"));
+    assert_eq!(source, error.resource().path());
     assert!(source.exists());
     drop(error);
     assert!(!source.exists());
@@ -689,7 +719,7 @@ fn test_temp_file_persist_returns_resource_when_parent_creation_fails() {
         error.kind(),
         ErrorKind::AlreadyExists | ErrorKind::NotADirectory
     ));
-    assert_eq!(source, error.resource.path());
+    assert_eq!(source, error.resource().path());
     assert!(source.exists());
     drop(error);
     assert!(!source.exists());

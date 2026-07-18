@@ -10,7 +10,10 @@ use std::error::Error as StdError;
 use std::fs;
 use std::io::ErrorKind;
 
-use qubit_local_files::LocalTempFile;
+use qubit_local_files::{
+    LocalPersistStage,
+    LocalTempFile,
+};
 
 use super::test_support::temp_dir;
 
@@ -35,10 +38,17 @@ fn test_persist_error_into_parts_returns_error_and_resource() {
     assert_eq!(ErrorKind::AlreadyExists, persist_error.error().kind());
     assert_eq!(source, persist_error.resource().path());
     assert_eq!(source, persist_error.resource_mut().path());
-    let (error, resource) = persist_error.into_parts();
+    assert_eq!(target, persist_error.requested_target());
+    assert_eq!(Some(target.as_path()), persist_error.resolved_target());
+    assert_eq!(LocalPersistStage::InstallDestination, persist_error.stage());
+    let (error, resource, requested_target, resolved_target, stage) =
+        persist_error.into_parts();
 
     assert_eq!(ErrorKind::AlreadyExists, error.kind());
     assert_eq!(source, resource.path());
+    assert_eq!(target, requested_target);
+    assert_eq!(Some(target), resolved_target);
+    assert_eq!(LocalPersistStage::InstallDestination, stage);
     drop(resource);
     assert!(!source.exists());
     fs::remove_dir_all(dir).expect("test directory should be removed");

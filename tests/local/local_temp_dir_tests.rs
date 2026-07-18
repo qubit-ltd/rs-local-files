@@ -22,6 +22,7 @@ use super::test_support::{
     fs,
     temp_dir,
 };
+use qubit_local_files::LocalPersistStage;
 
 #[test]
 fn test_temp_dir_exposes_absolute_location_after_cwd_change() {
@@ -662,10 +663,10 @@ fn test_temp_dir_persist_reports_unsupported_no_replace_move() {
         .expect_err("no-replace directory move should be unsupported");
 
     assert_eq!(ErrorKind::Unsupported, error.kind());
-    assert!(error.resource.path().exists());
+    assert!(error.resource().path().exists());
     assert!(!target.exists());
-    error
-        .resource
+    let (_, resource, _, _, _) = error.into_parts();
+    resource
         .cleanup()
         .expect("failed persistence resource should be cleaned up");
     fs::remove_dir_all(dir).expect("unsupported fixture should be removed");
@@ -695,7 +696,7 @@ fn test_temp_dir_persist_returns_resource_when_current_dir_is_unavailable() {
     };
 
     assert_eq!(ErrorKind::NotFound, error.kind());
-    assert_eq!(source, error.resource.path());
+    assert_eq!(source, error.resource().path());
     assert!(source.exists());
     drop(error);
     assert!(!source.exists());
@@ -719,11 +720,32 @@ fn test_temp_dir_persist_returns_resource_when_parent_creation_fails() {
         error.kind(),
         ErrorKind::AlreadyExists | ErrorKind::NotADirectory
     ));
-    assert_eq!(source, error.resource.path());
+    assert_eq!(source, error.resource().path());
     assert!(source.exists());
     drop(error);
     assert!(!source.exists());
     fs::remove_dir_all(dir).unwrap();
+}
+
+#[test]
+fn test_persist_error_reports_parent_context() {
+    let dir = temp_dir("temp-dir-persist-parent-context");
+    let temp_dir = LocalTempDir::in_dir(&dir, Some("source-"), 4)
+        .expect("temporary directory should be created");
+    let blocker = dir.join("blocker");
+    fs::write(&blocker, b"not a directory")
+        .expect("blocking file should be written");
+    let target = blocker.join("target");
+
+    let error = temp_dir
+        .persist(&target)
+        .expect_err("invalid parent should reject persistence");
+
+    assert_eq!(LocalPersistStage::PrepareParent, error.stage());
+    assert_eq!(target, error.requested_target());
+    assert_eq!(Some(target.as_path()), error.resolved_target());
+    assert!(error.to_string().contains("PrepareParent"));
+    fs::remove_dir_all(dir).expect("test directory should be removed");
 }
 
 #[cfg(any(target_os = "linux", target_os = "macos", windows))]
@@ -741,7 +763,7 @@ fn test_temp_dir_persist_returns_resource_when_target_exists() {
         .expect_err("existing target should be rejected");
 
     assert_eq!(ErrorKind::AlreadyExists, error.kind());
-    assert_eq!(source, error.resource.path());
+    assert_eq!(source, error.resource().path());
     assert!(source.exists());
     assert!(target.is_file());
     drop(error);
@@ -763,7 +785,7 @@ fn test_temp_dir_persist_returns_target_metadata_error() {
         .expect_err("target metadata error should be returned");
 
     assert_ne!(ErrorKind::NotFound, error.kind());
-    assert_eq!(source, error.resource.path());
+    assert_eq!(source, error.resource().path());
     assert!(source.exists());
     drop(error);
     assert!(!source.exists());
