@@ -160,14 +160,16 @@ pub(crate) fn open_rooted_writer(
         open_rooted_parent(root, &diagnostic_path, path, parent_mode)?
             .into_parts();
     reject_existing_non_file(&parent, &name, &diagnostic_path)?;
+    let mode = options.mode();
+    let should_truncate = mode == FileWriteMode::CreateOrTruncate;
     let mut flags = libc::O_NOFOLLOW | libc::O_CLOEXEC | libc::O_NONBLOCK;
-    match options.mode() {
+    match mode {
         FileWriteMode::OpenExistingAtStart => flags |= libc::O_WRONLY,
         FileWriteMode::CreateNew => {
             flags |= libc::O_WRONLY | libc::O_CREAT | libc::O_EXCL;
         }
         FileWriteMode::CreateOrTruncate => {
-            flags |= libc::O_WRONLY | libc::O_CREAT | libc::O_TRUNC;
+            flags |= libc::O_WRONLY | libc::O_CREAT;
         }
         FileWriteMode::AppendExisting => {
             flags |= libc::O_WRONLY | libc::O_APPEND;
@@ -186,8 +188,15 @@ pub(crate) fn open_rooted_writer(
         &file,
         "restore blocking rooted file writer",
         &diagnostic_path,
-    )
-    .map(|()| LocalFileWriter::from_file(file, buffering))
+    )?;
+    if should_truncate {
+        with_path_context(
+            file.set_len(0),
+            "truncate opened rooted file writer",
+            &diagnostic_path,
+        )?;
+    }
+    Ok(LocalFileWriter::from_file(file, buffering))
 }
 
 /// Opens the destination parent by traversing only from `root`.

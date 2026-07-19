@@ -8,6 +8,7 @@ coverage-cfg | src/local/internal/copy_dir/error.rs | Exercises otherwise unreac
 coverage-cfg | src/local/internal/copy_dir/facade.rs | Exercises otherwise unreachable absolute-path resolution failures
 coverage-cfg | src/local/internal/copy_dir/namespace_race.rs | Exercises otherwise unreachable copy namespace races
 coverage-cfg | src/local/internal/copy_dir/staging_io.rs | Exercises otherwise unreachable staging descriptor failures
+coverage-cfg | src/local/internal/file_io.rs | Exercises otherwise unreachable opened-file validation failures
 coverage-cfg | src/local/internal/mod.rs | Gates the isolated coverage fault helper
 coverage-cfg | src/local/internal/opened_atomic_destination.rs | Exercises otherwise unreachable destination handle failures
 coverage-cfg | src/local/internal/path_operations.rs | Exercises otherwise unreachable directory traversal failures

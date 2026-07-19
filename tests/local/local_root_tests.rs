@@ -184,6 +184,47 @@ fn test_open_reader_reports_injected_entry_inspection_error() {
     };
 }
 
+/// Verifies that rooted handle validation fails before destructive truncation.
+#[cfg(all(coverage, target_os = "linux"))]
+#[test]
+fn test_open_writer_preserves_contents_when_rooted_validation_fails() {
+    const TEST_NAME: &str = concat!(
+        "local::local_root_tests::",
+        "test_open_writer_preserves_contents_when_rooted_validation_fails",
+    );
+    let Some(()) = run_in_coverage_fault_process(
+        TEST_NAME,
+        "rooted-file-metadata",
+        || {
+            let root_path = temp_dir("rooted-writer-metadata");
+            let destination_path = root_path.join("data.txt");
+            fs::write(&destination_path, b"original")
+                .expect("rooted writer fixture should be written");
+            let root = LocalRoot::open(&root_path).expect("root should open");
+            let path = LocalRelativePath::new("data.txt")
+                .expect("relative path should validate");
+            let error = root
+                .open_writer(&path, FileWriteOptions::default())
+                .expect_err("injected rooted validation should fail");
+
+            assert!(
+                error.to_string().contains("inspect rooted file handle"),
+                "validation error should retain operation context: {error}",
+            );
+            assert_eq!(
+                b"original",
+                fs::read(&destination_path)
+                    .expect("failed rooted destination should remain readable")
+                    .as_slice(),
+            );
+            fs::remove_dir_all(root_path)
+                .expect("rooted writer fixture should be removed");
+        },
+    ) else {
+        return;
+    };
+}
+
 /// Verifies every rooted write mode and buffered flushing against an anchored
 /// parent descriptor.
 #[cfg(unix)]

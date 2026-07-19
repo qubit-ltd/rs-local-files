@@ -6,6 +6,8 @@
 //    Licensed under the Apache License, Version 2.0.
 // =============================================================================
 //! Private local file reader and writer construction.
+// qubit-style: allow coverage-cfg
+// Public APIs cannot force an opened regular-file metadata failure.
 
 use std::fs::{
     self,
@@ -171,7 +173,15 @@ fn prepare_opened_regular_file(
     restore_operation: &'static str,
     path: &Path,
 ) -> Result<()> {
-    let metadata = with_path_context(file.metadata(), inspect_operation, path)?;
+    let metadata_result = file.metadata();
+    #[cfg(coverage)]
+    let metadata_result =
+        if super::coverage_fault::is_enabled("file-handle-metadata") {
+            Err(Error::other("injected opened-file metadata failure"))
+        } else {
+            metadata_result
+        };
+    let metadata = with_path_context(metadata_result, inspect_operation, path)?;
     if !metadata.is_file() {
         return Err(path_not_regular_file_error(path));
     }
@@ -236,8 +246,10 @@ pub(crate) fn open_writer_path(
     if options.creates_parent() {
         ensure_parent_path(path)?;
     }
+    let mode = options.mode();
+    let should_truncate = mode == FileWriteMode::CreateOrTruncate;
     let mut open_options = OpenOptions::new();
-    match options.mode() {
+    match mode {
         FileWriteMode::OpenExistingAtStart => {
             open_options.write(true);
         }
@@ -245,7 +257,7 @@ pub(crate) fn open_writer_path(
             open_options.write(true).create_new(true);
         }
         FileWriteMode::CreateOrTruncate => {
-            open_options.write(true).create(true).truncate(true);
+            open_options.write(true).create(true);
         }
         FileWriteMode::AppendExisting => {
             open_options.append(true);
@@ -266,6 +278,13 @@ pub(crate) fn open_writer_path(
         "inspect opened file writer",
         "restore blocking file writer",
         path,
-    )
-    .map(|()| LocalFileWriter::from_file(file, buffering))
+    )?;
+    if should_truncate {
+        with_path_context(
+            file.set_len(0),
+            "truncate opened file writer",
+            path,
+        )?;
+    }
+    Ok(LocalFileWriter::from_file(file, buffering))
 }

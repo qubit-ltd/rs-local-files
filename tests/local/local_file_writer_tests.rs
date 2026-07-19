@@ -127,6 +127,44 @@ fn test_local_file_writer_sync_methods_support_unbuffered_files() {
     fs::remove_dir_all(dir).unwrap();
 }
 
+/// Verifies that opened-handle validation fails before destructive truncation.
+#[cfg(all(coverage, target_os = "linux"))]
+#[test]
+fn test_open_writer_preserves_contents_when_handle_validation_fails() {
+    const TEST_NAME: &str = concat!(
+        "local::local_file_writer_tests::",
+        "test_open_writer_preserves_contents_when_handle_validation_fails",
+    );
+    let Some(()) = run_in_coverage_fault_process(
+        TEST_NAME,
+        "file-handle-metadata",
+        || {
+            let dir = temp_dir("file-handle-metadata");
+            let path = dir.join("data.txt");
+            fs::write(&path, b"original")
+                .expect("writer fixture should be written");
+            let error =
+                LocalFiles::open_writer(&path, FileWriteOptions::default())
+                    .expect_err("injected handle validation should fail");
+
+            assert_eq!(ErrorKind::Other, error.kind());
+            assert!(
+                error.to_string().contains("inspect opened file writer"),
+                "validation error should retain operation context: {error}",
+            );
+            assert_eq!(
+                b"original",
+                fs::read(&path)
+                    .expect("failed writer destination should remain readable")
+                    .as_slice(),
+            );
+            fs::remove_dir_all(dir).expect("writer fixture should be removed");
+        },
+    ) else {
+        return;
+    };
+}
+
 #[cfg(unix)]
 #[test]
 fn test_open_writer_rejects_fifo_without_blocking() {
