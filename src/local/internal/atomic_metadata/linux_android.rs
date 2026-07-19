@@ -70,6 +70,40 @@ pub(super) fn preserve_extended_metadata(
 
 /// Lists all extended-attribute names visible through a file descriptor.
 fn list_xattrs(file: &File) -> Result<BTreeSet<Vec<u8>>> {
+    loop {
+        let length = match query_xattr_list_length(file) {
+            Ok(0) => return Ok(BTreeSet::new()),
+            Ok(length) => length,
+            Err(error) if is_not_supported(&error) => {
+                return Ok(BTreeSet::new());
+            }
+            Err(error) => return Err(error),
+        };
+        let mut buffer = vec![0_u8; length];
+        match read_xattr_list(file, &mut buffer) {
+            Ok(read) => {
+                buffer.truncate(read);
+                return parse_xattr_names(&buffer);
+            }
+            Err(error) if error.raw_os_error() == Some(libc::ERANGE) => {
+                continue;
+            }
+            Err(error) => return Err(error),
+        }
+    }
+}
+
+/// Queries the buffer length required for descriptor-based xattr names.
+///
+/// # Parameters
+/// - `file`: Open file whose extended attributes should be listed.
+///
+/// # Returns
+/// Required buffer length in bytes, including zero for an empty list.
+///
+/// # Errors
+/// Returns the native `flistxattr` error or a selected coverage fault.
+fn query_xattr_list_length(file: &File) -> Result<usize> {
     #[cfg(coverage)]
     let forced_error = if super::super::coverage_fault::is_enabled(
         "atomic-metadata-not-supported",
@@ -82,76 +116,58 @@ fn list_xattrs(file: &File) -> Result<BTreeSet<Vec<u8>>> {
     };
     #[cfg(not(coverage))]
     let forced_error = None;
-    loop {
-        // SAFETY: the file descriptor is live and null output requests the
-        // current list length without retaining pointers.
-        let length = match forced_error {
-            Some(_) => -1,
-            None => unsafe {
-                libc::flistxattr(file.as_raw_fd(), std::ptr::null_mut(), 0)
-            },
-        };
-        if length == -1 {
-            let error = match forced_error {
-                Some(code) => Error::from_raw_os_error(code),
-                None => Error::last_os_error(),
-            };
-            if is_not_supported(&error) {
-                return Ok(BTreeSet::new());
-            }
-            return Err(error);
-        }
-        if length == 0 {
-            return Ok(BTreeSet::new());
-        }
-        let mut buffer = vec![0_u8; length as usize];
-        // SAFETY: `buffer` is writable for the requested length and the live
-        // descriptor and buffer are not retained by the system call.
-        #[cfg(coverage)]
-        let forced_read_error = super::super::coverage_fault::is_enabled(
-            "atomic-metadata-list-read",
-        );
-        #[cfg(coverage)]
-        let forced_range_error = super::super::coverage_fault::is_enabled(
-            "atomic-metadata-list-range",
-        );
-        #[cfg(coverage)]
-        let forced_error = if forced_read_error {
-            Some(libc::EIO)
-        } else if super::super::coverage_fault::take(
-            "atomic-metadata-list-range",
-        ) {
-            Some(libc::ERANGE)
-        } else if forced_range_error {
-            Some(libc::EIO)
-        } else {
-            None
-        };
-        #[cfg(not(coverage))]
-        let forced_error = None;
-        let read = match forced_error {
-            Some(_) => -1,
-            None => unsafe {
-                libc::flistxattr(
-                    file.as_raw_fd(),
-                    buffer.as_mut_ptr().cast(),
-                    buffer.len(),
-                )
-            },
-        };
-        if read == -1 {
-            let error = match forced_error {
-                Some(code) => Error::from_raw_os_error(code),
-                None => Error::last_os_error(),
-            };
-            if error.raw_os_error() == Some(libc::ERANGE) {
-                continue;
-            }
-            return Err(error);
-        }
-        buffer.truncate(read as usize);
-        return parse_xattr_names(&buffer);
-    }
+    // SAFETY: the file descriptor is live and null output requests the current
+    // list length without retaining pointers.
+    let length = match forced_error {
+        Some(_) => -1,
+        None => unsafe {
+            libc::flistxattr(file.as_raw_fd(), std::ptr::null_mut(), 0)
+        },
+    };
+    xattr_size_result(length, forced_error)
+}
+
+/// Reads descriptor-based xattr names into a caller-provided buffer.
+///
+/// # Parameters
+/// - `file`: Open file whose extended attributes should be listed.
+/// - `buffer`: Writable storage sized by [`query_xattr_list_length`].
+///
+/// # Returns
+/// Number of initialized bytes in `buffer`.
+///
+/// # Errors
+/// Returns the native `flistxattr` error or a selected coverage fault.
+fn read_xattr_list(file: &File, buffer: &mut [u8]) -> Result<usize> {
+    #[cfg(coverage)]
+    let forced_error = if super::super::coverage_fault::is_enabled(
+        "atomic-metadata-list-read",
+    ) {
+        Some(libc::EIO)
+    } else if super::super::coverage_fault::take("atomic-metadata-list-range") {
+        Some(libc::ERANGE)
+    } else if super::super::coverage_fault::is_enabled(
+        "atomic-metadata-list-range",
+    ) {
+        Some(libc::EIO)
+    } else {
+        None
+    };
+    #[cfg(not(coverage))]
+    let forced_error = None;
+    // SAFETY: `buffer` is writable for the requested length and the live
+    // descriptor and buffer are not retained by the system call.
+    let read = match forced_error {
+        Some(_) => -1,
+        None => unsafe {
+            libc::flistxattr(
+                file.as_raw_fd(),
+                buffer.as_mut_ptr().cast(),
+                buffer.len(),
+            )
+        },
+    };
+    xattr_size_result(read, forced_error)
 }
 
 /// Parses the NUL-separated name list returned by `flistxattr`.
@@ -212,6 +228,40 @@ fn get_optional_xattr(file: &File, name: &[u8]) -> Result<Option<Vec<u8>>> {
 
 /// Implements descriptor-based xattr lookup.
 fn get_xattr_inner(file: &File, name: &[u8]) -> Result<Option<Vec<u8>>> {
+    let name = native_name(name)?;
+    loop {
+        let length = match query_xattr_value_length(file, &name) {
+            Ok(length) => length,
+            Err(error) if is_missing_xattr(&error) => return Ok(None),
+            Err(error) => return Err(error),
+        };
+        let mut value = vec![0_u8; length];
+        match read_xattr_value(file, &name, &mut value) {
+            Ok(read) => {
+                value.truncate(read);
+                return Ok(Some(value));
+            }
+            Err(error) if error.raw_os_error() == Some(libc::ERANGE) => {
+                continue;
+            }
+            Err(error) if is_missing_xattr(&error) => return Ok(None),
+            Err(error) => return Err(error),
+        }
+    }
+}
+
+/// Queries the buffer length required for one descriptor-based xattr value.
+///
+/// # Parameters
+/// - `file`: Open file containing the attribute.
+/// - `name`: Native attribute name.
+///
+/// # Returns
+/// Required value-buffer length in bytes.
+///
+/// # Errors
+/// Returns the native `fgetxattr` error or a selected coverage fault.
+fn query_xattr_value_length(file: &File, name: &CString) -> Result<usize> {
     #[cfg(coverage)]
     let forced_error = if super::super::coverage_fault::is_enabled(
         "atomic-metadata-source-missing",
@@ -224,68 +274,82 @@ fn get_xattr_inner(file: &File, name: &[u8]) -> Result<Option<Vec<u8>>> {
     };
     #[cfg(not(coverage))]
     let forced_error = None;
-    let name = native_name(name)?;
-    loop {
-        // SAFETY: the descriptor and name remain live, and null output asks
-        // only for the current value length.
-        let length = match forced_error {
-            Some(_) => -1,
-            None => unsafe {
-                libc::fgetxattr(
-                    file.as_raw_fd(),
-                    name.as_ptr(),
-                    std::ptr::null_mut(),
-                    0,
-                )
-            },
-        };
-        if length == -1 {
-            let error = match forced_error {
-                Some(code) => Error::from_raw_os_error(code),
-                None => Error::last_os_error(),
-            };
-            if is_missing_xattr(&error) {
-                return Ok(None);
-            }
-            return Err(error);
-        }
-        let mut value = vec![0_u8; length as usize];
-        // SAFETY: `value` is writable for its full length and the descriptor
-        // and name remain live for this non-retaining system call.
-        #[cfg(coverage)]
-        let forced_read_error = super::super::coverage_fault::is_enabled(
-            "atomic-metadata-value-read",
-        );
-        #[cfg(not(coverage))]
-        let forced_read_error = false;
-        let read = if forced_read_error {
-            -1
-        } else {
-            unsafe {
-                libc::fgetxattr(
-                    file.as_raw_fd(),
-                    name.as_ptr(),
-                    value.as_mut_ptr().cast(),
-                    value.len(),
-                )
-            }
-        };
-        if read == -1 {
-            let error = if forced_read_error {
-                Error::from_raw_os_error(libc::EIO)
-            } else {
-                Error::last_os_error()
-            };
-            if error.raw_os_error() == Some(libc::ERANGE) {
-                continue;
-            }
-            if is_missing_xattr(&error) {
-                return Ok(None);
-            }
-            return Err(error);
-        }
-        value.truncate(read as usize);
-        return Ok(Some(value));
+    // SAFETY: the descriptor and name remain live, and null output asks only
+    // for the current value length.
+    let length = match forced_error {
+        Some(_) => -1,
+        None => unsafe {
+            libc::fgetxattr(
+                file.as_raw_fd(),
+                name.as_ptr(),
+                std::ptr::null_mut(),
+                0,
+            )
+        },
+    };
+    xattr_size_result(length, forced_error)
+}
+
+/// Reads one descriptor-based xattr value into a caller-provided buffer.
+///
+/// # Parameters
+/// - `file`: Open file containing the attribute.
+/// - `name`: Native attribute name.
+/// - `value`: Writable storage sized by [`query_xattr_value_length`].
+///
+/// # Returns
+/// Number of initialized bytes in `value`.
+///
+/// # Errors
+/// Returns the native `fgetxattr` error or a selected coverage fault.
+fn read_xattr_value(
+    file: &File,
+    name: &CString,
+    value: &mut [u8],
+) -> Result<usize> {
+    #[cfg(coverage)]
+    let forced_error =
+        super::super::coverage_fault::is_enabled("atomic-metadata-value-read");
+    #[cfg(not(coverage))]
+    let forced_error = false;
+    // SAFETY: `value` is writable for its full length and the descriptor and
+    // name remain live for this non-retaining system call.
+    let forced_error = forced_error.then_some(libc::EIO);
+    let read = match forced_error {
+        Some(_) => -1,
+        None => unsafe {
+            libc::fgetxattr(
+                file.as_raw_fd(),
+                name.as_ptr(),
+                value.as_mut_ptr().cast(),
+                value.len(),
+            )
+        },
+    };
+    xattr_size_result(read, forced_error)
+}
+
+/// Converts one size-returning xattr syscall result to an I/O result.
+///
+/// # Parameters
+/// - `result`: Native byte count or `-1` on failure.
+/// - `forced_error`: Coverage-only native error code selected for this call.
+///
+/// # Returns
+/// Nonnegative byte count returned by the native syscall.
+///
+/// # Errors
+/// Returns the injected error or the operating system's last error when the
+/// native syscall returns `-1`.
+fn xattr_size_result(
+    result: isize,
+    forced_error: Option<i32>,
+) -> Result<usize> {
+    if result == -1 {
+        Err(forced_error
+            .map_or_else(Error::last_os_error, Error::from_raw_os_error))
+    } else {
+        Ok(result as usize)
     }
 }
 

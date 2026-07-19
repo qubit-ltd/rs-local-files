@@ -106,44 +106,17 @@ pub(crate) fn open_atomic_destination(
     options
         .read(true)
         .custom_flags(libc::O_NOFOLLOW | libc::O_NONBLOCK);
-    let mut retry_delay = Duration::ZERO;
-    let file = loop {
+    open_destination_with_retry(|| {
         let result = options.open(path);
         #[cfg(coverage)]
-        let result =
-            if super::coverage_fault::take("atomic-destination-would-block") {
-                Err(Error::from(ErrorKind::WouldBlock))
-            } else if super::coverage_fault::is_enabled(
-                "atomic-destination-invalid",
-            ) {
-                Err(Error::from_raw_os_error(libc::ELOOP))
-            } else if super::coverage_fault::is_enabled(
-                "atomic-destination-native",
-            ) {
-                Err(Error::from_raw_os_error(libc::EIO))
-            } else {
-                result
-            };
-        match result {
-            Ok(file) => break file,
-            Err(error) if error.kind() == ErrorKind::NotFound => {
-                return Ok(None);
-            }
-            Err(error) if error.kind() == ErrorKind::WouldBlock => {
-                wait_for_nonblocking_open_retry(&mut retry_delay);
-            }
-            Err(error)
-                if matches!(
-                    error.raw_os_error(),
-                    Some(libc::ELOOP | libc::ENXIO | libc::ENODEV)
-                ) =>
-            {
-                return Err(invalid_atomic_destination());
-            }
-            Err(error) => return Err(error),
-        }
-    };
-    OpenedAtomicDestination::from_file(file).map(Some)
+        let result = inject_destination_open_result(
+            result,
+            "atomic-destination-would-block",
+            "atomic-destination-invalid",
+            "atomic-destination-native",
+        );
+        result
+    })
 }
 
 /// Checks whether a path still names the opened destination identity.
@@ -187,26 +160,42 @@ pub(in crate::local) fn open_rooted_atomic_destination(
     }
     let flags =
         libc::O_RDONLY | libc::O_NOFOLLOW | libc::O_NONBLOCK | libc::O_CLOEXEC;
-    let mut retry_delay = Duration::ZERO;
-    let file = loop {
+    open_destination_with_retry(|| {
         let result = open_file_at(parent, name, flags, 0);
         #[cfg(coverage)]
-        let result =
-            if super::coverage_fault::take("rooted-destination-would-block") {
-                Err(Error::from(ErrorKind::WouldBlock))
-            } else if super::coverage_fault::is_enabled(
-                "rooted-destination-invalid",
-            ) {
-                Err(Error::from_raw_os_error(libc::ELOOP))
-            } else if super::coverage_fault::is_enabled(
-                "rooted-destination-native",
-            ) {
-                Err(Error::from_raw_os_error(libc::EIO))
-            } else {
-                result
-            };
-        match result {
-            Ok(file) => break file,
+        let result = inject_destination_open_result(
+            result,
+            "rooted-destination-would-block",
+            "rooted-destination-invalid",
+            "rooted-destination-native",
+        );
+        result
+    })
+}
+
+/// Repeats a nonblocking destination open until it succeeds or is classified.
+///
+/// # Parameters
+/// - `open`: Native path-based or descriptor-relative open attempt.
+///
+/// # Returns
+/// An authoritative destination handle, or `None` when the entry is missing.
+///
+/// # Errors
+/// Returns [`ErrorKind::InvalidInput`] for symbolic links and other forbidden
+/// resource types, or preserves any other native open or inspection error.
+fn open_destination_with_retry<F>(
+    mut open: F,
+) -> Result<Option<OpenedAtomicDestination>>
+where
+    F: FnMut() -> Result<File>,
+{
+    let mut retry_delay = Duration::ZERO;
+    loop {
+        match open() {
+            Ok(file) => {
+                return OpenedAtomicDestination::from_file(file).map(Some);
+            }
             Err(error) if error.kind() == ErrorKind::NotFound => {
                 return Ok(None);
             }
@@ -223,8 +212,39 @@ pub(in crate::local) fn open_rooted_atomic_destination(
             }
             Err(error) => return Err(error),
         }
-    };
-    OpenedAtomicDestination::from_file(file).map(Some)
+    }
+}
+
+/// Applies coverage-only failures to one native destination-open result.
+///
+/// # Parameters
+/// - `result`: Native open result before fault injection.
+/// - `would_block_fault`: One-shot retry fault name.
+/// - `invalid_fault`: Invalid-resource fault name.
+/// - `native_fault`: Unclassified native failure name.
+///
+/// # Returns
+/// The original result or the selected injected failure.
+///
+/// # Errors
+/// Returns the selected retry, invalid-resource, or native coverage fault, or
+/// preserves the native error in `result`.
+#[cfg(coverage)]
+fn inject_destination_open_result(
+    result: Result<File>,
+    would_block_fault: &str,
+    invalid_fault: &str,
+    native_fault: &str,
+) -> Result<File> {
+    if super::coverage_fault::take(would_block_fault) {
+        Err(Error::from(ErrorKind::WouldBlock))
+    } else if super::coverage_fault::is_enabled(invalid_fault) {
+        Err(Error::from_raw_os_error(libc::ELOOP))
+    } else if super::coverage_fault::is_enabled(native_fault) {
+        Err(Error::from_raw_os_error(libc::EIO))
+    } else {
+        result
+    }
 }
 
 /// Checks whether a rooted entry still names an opened destination identity.
