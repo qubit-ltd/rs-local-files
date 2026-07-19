@@ -25,7 +25,7 @@ use crate::LocalFilenames;
 use super::rooted_file_io::open_file_at;
 use super::rooted_staged_file::RootedStagedFile;
 use super::rooted_staging_retry::retry_rooted_staging_entry;
-use super::temp_entry::DEFAULT_TEMP_FILE_RETRIES;
+use super::temp_entry::DEFAULT_TEMP_ENTRY_RETRIES;
 use super::unix_stat::is_regular_file_mode;
 
 /// Prefix used by descriptor-relative atomic staging entries.
@@ -109,7 +109,7 @@ pub(in crate::local) fn create_rooted_staged_file(
     relative_parent: &Path,
 ) -> Result<RootedStagedFile> {
     retry_rooted_staging_entry(
-        DEFAULT_TEMP_FILE_RETRIES,
+        DEFAULT_TEMP_ENTRY_RETRIES,
         || {
             #[cfg(coverage)]
             if super::coverage_fault::is_enabled("rooted-staging-generate") {

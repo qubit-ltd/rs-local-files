@@ -25,7 +25,7 @@ use crate::{
 };
 
 use super::internal::{
-    DEFAULT_TEMP_FILE_RETRIES as DEFAULT_TEMP_FILE_RETRIES_VALUE,
+    DEFAULT_TEMP_ENTRY_RETRIES as DEFAULT_TEMP_ENTRY_RETRIES_VALUE,
     clean_dir_path,
     copy_dir_all_with_paths,
     dir_size_path,
@@ -60,8 +60,8 @@ pub struct LocalFiles {
 
 impl LocalFiles {
     /// Default number of attempts used when creating a random temporary entry.
-    pub const DEFAULT_TEMP_FILE_RETRIES: usize =
-        DEFAULT_TEMP_FILE_RETRIES_VALUE;
+    pub const DEFAULT_TEMP_ENTRY_RETRIES: usize =
+        DEFAULT_TEMP_ENTRY_RETRIES_VALUE;
 
     /// Tests whether a path exists.
     ///

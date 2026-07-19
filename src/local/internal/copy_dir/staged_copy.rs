@@ -26,7 +26,7 @@ use crate::local::internal::file_move::{
     replace_file,
 };
 use crate::local::internal::temp_entry::{
-    DEFAULT_TEMP_FILE_RETRIES,
+    DEFAULT_TEMP_ENTRY_RETRIES,
     create_temp_file_in_dir,
 };
 
@@ -168,7 +168,7 @@ fn stage_copy_file(
             parent_dir_for(dst),
             Some(COPY_FILE_TEMP_PREFIX),
             Some(COPY_FILE_TEMP_SUFFIX),
-            DEFAULT_TEMP_FILE_RETRIES,
+            DEFAULT_TEMP_ENTRY_RETRIES,
         ),
         LocalCopyDirStage::PrepareDestination,
         src,

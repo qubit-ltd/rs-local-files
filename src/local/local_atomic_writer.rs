@@ -25,7 +25,7 @@ use crate::{
 };
 
 use super::internal::{
-    DEFAULT_TEMP_FILE_RETRIES,
+    DEFAULT_TEMP_ENTRY_RETRIES,
     StagedFile,
     absolute_path,
     add_path_context,
@@ -137,7 +137,7 @@ impl LocalAtomicWriter {
                 parent,
                 Some(ATOMIC_WRITE_TEMP_PREFIX),
                 Some(ATOMIC_WRITE_TEMP_SUFFIX),
-                DEFAULT_TEMP_FILE_RETRIES,
+                DEFAULT_TEMP_ENTRY_RETRIES,
             ),
             LocalAtomicWriteStage::CreateTemporaryFile,
             path,

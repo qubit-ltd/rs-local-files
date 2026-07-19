@@ -87,7 +87,7 @@ impl LocalTempDir {
         Self::in_dir(
             std::env::temp_dir(),
             None,
-            LocalFiles::DEFAULT_TEMP_FILE_RETRIES,
+            LocalFiles::DEFAULT_TEMP_ENTRY_RETRIES,
         )
     }
 
@@ -105,7 +105,7 @@ impl LocalTempDir {
         Self::in_dir(
             std::env::temp_dir(),
             Some(prefix),
-            LocalFiles::DEFAULT_TEMP_FILE_RETRIES,
+            LocalFiles::DEFAULT_TEMP_ENTRY_RETRIES,
         )
     }
 

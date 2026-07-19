@@ -107,7 +107,7 @@ pub(super) use rooted_parent_mode::RootedParentMode;
 pub(super) use rooted_staged_file::RootedStagedFile;
 pub(crate) use staged_file::StagedFile;
 pub(crate) use temp_entry::{
-    DEFAULT_TEMP_FILE_RETRIES,
+    DEFAULT_TEMP_ENTRY_RETRIES,
     create_private_dir,
     create_temp_dir_in_dir,
     create_temp_file_in_dir,

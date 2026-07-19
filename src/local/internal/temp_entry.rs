@@ -38,7 +38,7 @@ use super::path_operations::{
 };
 
 /// Default number of attempts used when creating a random temporary entry.
-pub(crate) const DEFAULT_TEMP_FILE_RETRIES: usize = 256;
+pub(crate) const DEFAULT_TEMP_ENTRY_RETRIES: usize = 256;
 
 /// Creates a unique temporary file in `dir`.
 ///

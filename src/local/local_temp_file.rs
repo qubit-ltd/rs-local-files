@@ -88,7 +88,7 @@ impl LocalTempFile {
             std::env::temp_dir(),
             None,
             None,
-            LocalFiles::DEFAULT_TEMP_FILE_RETRIES,
+            LocalFiles::DEFAULT_TEMP_ENTRY_RETRIES,
         )
     }
 
@@ -108,7 +108,7 @@ impl LocalTempFile {
             std::env::temp_dir(),
             Some(prefix),
             None,
-            LocalFiles::DEFAULT_TEMP_FILE_RETRIES,
+            LocalFiles::DEFAULT_TEMP_ENTRY_RETRIES,
         )
     }
 
@@ -130,7 +130,7 @@ impl LocalTempFile {
             std::env::temp_dir(),
             None,
             Some(suffix),
-            LocalFiles::DEFAULT_TEMP_FILE_RETRIES,
+            LocalFiles::DEFAULT_TEMP_ENTRY_RETRIES,
         )
     }
 
@@ -151,7 +151,7 @@ impl LocalTempFile {
             std::env::temp_dir(),
             Some(prefix),
             Some(suffix),
-            LocalFiles::DEFAULT_TEMP_FILE_RETRIES,
+            LocalFiles::DEFAULT_TEMP_ENTRY_RETRIES,
         )
     }
 
