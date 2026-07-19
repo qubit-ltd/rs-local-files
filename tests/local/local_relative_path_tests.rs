@@ -7,9 +7,64 @@
 // =============================================================================
 
 use std::io::ErrorKind;
-use std::path::Path;
+use std::path::{
+    Path,
+    PathBuf,
+};
 
+use proptest::{
+    collection,
+    prop_assert_eq,
+    proptest,
+};
 use qubit_local_files::LocalRelativePath;
+
+proptest! {
+    /// Verifies that arbitrary normal components remain valid and unchanged.
+    #[test]
+    fn test_new_accepts_generated_normal_components(
+        components in collection::vec("[A-Za-z0-9_-]{1,16}", 1..8),
+    ) {
+        let mut path = PathBuf::new();
+        for component in &components {
+            path.push(component);
+        }
+
+        let relative = LocalRelativePath::new(&path)
+            .expect("generated normal components should be accepted");
+
+        prop_assert_eq!(path.as_path(), relative.as_path());
+    }
+
+    /// Verifies that generated parent components cannot escape their prefix.
+    #[test]
+    fn test_new_rejects_generated_parent_components(
+        prefix in collection::vec("[A-Za-z0-9_-]{1,16}", 0..8),
+        suffix in "[A-Za-z0-9_-]{1,16}",
+    ) {
+        let mut path = PathBuf::new();
+        for component in prefix {
+            path.push(component);
+        }
+        path.push("..");
+        path.push(suffix);
+
+        let error = LocalRelativePath::new(path)
+            .expect_err("generated parent component should be rejected");
+
+        prop_assert_eq!(ErrorKind::InvalidInput, error.kind());
+    }
+
+    /// Verifies that generated interior NUL bytes are rejected before FFI use.
+    #[test]
+    fn test_new_rejects_generated_nul(component in "[A-Za-z0-9_-]{0,16}") {
+        let path = format!("{component}\0tail");
+        let error = LocalRelativePath::new(path)
+            .expect_err("generated NUL should be rejected");
+
+        prop_assert_eq!(ErrorKind::InvalidInput, error.kind());
+    }
+}
 
 /// Verifies that normal relative components are retained as the sole path
 /// state.

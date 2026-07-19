@@ -8,7 +8,65 @@
 use std::io::ErrorKind;
 use std::path::Path;
 
+use proptest::{
+    arbitrary::any,
+    prop_assert,
+    prop_assert_eq,
+    prop_assert_ne,
+    proptest,
+    sample,
+};
 use qubit_local_files::LocalFilenames;
+
+proptest! {
+    /// Verifies that arbitrary UTF-8 input cannot make URL extraction panic.
+    #[test]
+    fn test_file_name_from_url_handles_arbitrary_utf8(url in any::<String>()) {
+        let _ = LocalFilenames::file_name_from_url(&url);
+    }
+
+    /// Verifies that encoded separators and NUL bytes never become active.
+    #[test]
+    fn test_file_name_from_url_keeps_generated_unsafe_fragments(
+        prefix in "[A-Za-z0-9_-]{0,16}",
+        suffix in "[A-Za-z0-9_.-]{0,16}",
+        encoded in sample::select(vec!["%2F", "%2f", "%5C", "%5c", "%00"]),
+    ) {
+        let raw_name = format!("{prefix}{encoded}{suffix}");
+        let url = format!("https://example.test/path/{raw_name}?download=1#part");
+
+        prop_assert_eq!(raw_name, LocalFilenames::file_name_from_url(&url));
+    }
+
+    /// Verifies that encoded dot components remain inactive.
+    #[test]
+    fn test_file_name_from_url_keeps_generated_dot_components(
+        encoded in sample::select(vec!["%2E", "%2e", "%2E%2E", "%2e%2e"]),
+    ) {
+        let url = format!("https://example.test/path/{encoded}");
+
+        prop_assert_eq!(encoded, LocalFilenames::file_name_from_url(&url));
+    }
+
+    /// Verifies portable invariants for every generated accepted name.
+    #[test]
+    fn test_validate_portable_generated_acceptance_implies_invariants(
+        name in any::<String>(),
+    ) {
+        if LocalFilenames::validate_portable_file_name(&name).is_ok() {
+            prop_assert!(!name.is_empty());
+            prop_assert_ne!(name.as_str(), ".");
+            prop_assert_ne!(name.as_str(), "..");
+            prop_assert!(name.len() <= 255);
+            prop_assert!(!name.ends_with([' ', '.']));
+            let contains_forbidden_character = name.chars().any(|ch| {
+                ch.is_control()
+                    || matches!(ch, '\0' | '/' | '\\' | '<' | '>' | ':' | '"' | '|' | '?' | '*')
+            });
+            prop_assert!(!contains_forbidden_character);
+        }
+    }
+}
 
 #[test]
 fn test_random_and_try_random_use_default_prefix() {
