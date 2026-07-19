@@ -73,7 +73,7 @@ fn assert_injected_copy_error(
 
         let error = LocalFiles::copy_dir_all_with(&src, &dst, options)
             .expect_err("injected copy operation should fail");
-        assert_eq!(expected_stage, error.stage);
+        assert_eq!(expected_stage, error.stage());
         fs::remove_dir_all(dir).expect("test directory should be removed");
     }) else {
         return;
@@ -329,7 +329,7 @@ fn assert_injected_root_type_replacement_error(test_name: &str, fault: &str) {
         )
         .expect_err("injected destination reinspection should fail");
 
-        assert_eq!(LocalCopyDirStage::PrepareDestination, error.stage);
+        assert_eq!(LocalCopyDirStage::PrepareDestination, error.stage());
         fs::remove_dir_all(dir).expect("test directory should be removed");
     }) else {
         return;
@@ -759,8 +759,8 @@ fn test_copy_dir_all_with_returns_source_entry_metadata_error_without_search_per
         .expect("source permissions should be restored");
     fs::remove_dir_all(dir).expect("test directory should be removed");
     assert_eq!(ErrorKind::PermissionDenied, error.kind());
-    assert_eq!(LocalCopyDirStage::CopyFileContents, error.stage);
-    assert_eq!(source_file, error.source_path);
+    assert_eq!(LocalCopyDirStage::CopyFileContents, error.stage());
+    assert_eq!(source_file, error.source_path());
 }
 
 #[cfg(unix)]
@@ -783,7 +783,7 @@ fn test_copy_dir_all_with_returns_destination_inspection_error_for_nul_path() {
 
     fs::remove_dir_all(dir).expect("test directory should be removed");
     assert_eq!(ErrorKind::InvalidInput, error.kind());
-    assert_eq!(LocalCopyDirStage::PrepareDestination, error.stage);
+    assert_eq!(LocalCopyDirStage::PrepareDestination, error.stage());
 }
 
 #[cfg(unix)]
@@ -804,7 +804,7 @@ fn test_copy_dir_all_with_validates_invalid_destination_before_missing_source()
     )
     .expect_err("invalid destination should fail before source inspection");
 
-    assert_eq!(LocalCopyDirStage::PrepareDestination, error.stage);
+    assert_eq!(LocalCopyDirStage::PrepareDestination, error.stage());
     assert_eq!(ErrorKind::InvalidInput, error.kind());
     fs::remove_dir_all(dir).unwrap();
 }
@@ -966,8 +966,8 @@ fn test_copy_dir_zero_open_retry_timeout_reports_timed_out() {
     assert_eq!(ErrorKind::TimedOut, error.kind());
     assert_eq!(source_file, error.source_path());
     assert_eq!(destination.join("data.txt"), error.destination_path());
-    assert_eq!(0, error.stats().files);
-    assert_eq!(0, error.stats().bytes);
+    assert_eq!(0, error.stats().files());
+    assert_eq!(0, error.stats().bytes());
     assert!(!destination.join("data.txt").exists());
     assert!(
         error.temporary_path().is_some_and(|path| !path.exists()),
@@ -1167,12 +1167,11 @@ fn test_copy_dir_all_with_reports_staging_cleanup_failure() {
     .expect_err("commit and staging cleanup should both fail");
 
     let temporary_path = error
-        .temporary_path
-        .clone()
-        .expect("copy error should retain the staging path");
+        .temporary_path()
+        .expect("copy error should retain the staging path")
+        .to_path_buf();
     let cleanup_error_kind = error
-        .cleanup_error
-        .as_ref()
+        .cleanup_error()
         .map(Error::kind)
         .expect("copy error should retain the cleanup failure");
     let error_message = error.to_string();
@@ -1181,7 +1180,7 @@ fn test_copy_dir_all_with_reports_staging_cleanup_failure() {
     let temporary_path_remained = temporary_path.exists();
     fs::remove_dir_all(dir).expect("test directory should be removed");
 
-    assert_eq!(LocalCopyDirStage::CommitFile, error.stage);
+    assert_eq!(LocalCopyDirStage::CommitFile, error.stage());
     assert_eq!(ErrorKind::PermissionDenied, error.kind());
     assert_eq!(ErrorKind::PermissionDenied, cleanup_error_kind);
     assert!(error_message.contains(&temporary_path.display().to_string()));
@@ -1235,9 +1234,9 @@ fn test_copy_dir_all_with_reports_skipped_staging_cleanup_failure() {
     .expect_err("failed cleanup must make a skipped copy observable");
 
     let temporary_path = error
-        .temporary_path
-        .clone()
-        .expect("cleanup error should retain the staging path");
+        .temporary_path()
+        .expect("cleanup error should retain the staging path")
+        .to_path_buf();
     let error_message = error.to_string();
     fs::set_permissions(&dst, fs::Permissions::from_mode(0o700))
         .expect("destination permissions should be restored");
@@ -1246,9 +1245,9 @@ fn test_copy_dir_all_with_reports_skipped_staging_cleanup_failure() {
         .expect("racing destination should remain readable");
     fs::remove_dir_all(dir).expect("test directory should be removed");
 
-    assert_eq!(LocalCopyDirStage::CleanupTemporaryFile, error.stage);
+    assert_eq!(LocalCopyDirStage::CleanupTemporaryFile, error.stage());
     assert_eq!(ErrorKind::PermissionDenied, error.kind());
-    assert!(error.cleanup_error.is_none());
+    assert!(error.cleanup_error().is_none());
     assert!(error_message.contains(&temporary_path.display().to_string()));
     assert!(!error_message.contains("staging cleanup also failed"));
     assert!(temporary_path_remained);
@@ -1321,7 +1320,7 @@ fn test_copy_dir_all_with_handles_destination_created_after_staging() {
     );
 
     assert_eq!(ErrorKind::AlreadyExists, error.kind());
-    assert_eq!(LocalCopyDirStage::CommitFile, error.stage);
+    assert_eq!(LocalCopyDirStage::CommitFile, error.stage());
     assert_eq!(
         b"raced",
         fs::read(&fail_target)
@@ -1464,7 +1463,7 @@ fn test_copy_dir_all_with_rejects_file_replacing_directory_after_staging() {
     .expect_err("racing destination file should be rejected");
 
     assert_eq!(ErrorKind::AlreadyExists, error.kind());
-    assert_eq!(LocalCopyDirStage::CommitFile, error.stage);
+    assert_eq!(LocalCopyDirStage::CommitFile, error.stage());
     assert_eq!(
         b"raced",
         fs::read(&destination_entry)
@@ -1579,7 +1578,7 @@ fn test_copy_dir_all_with_reports_directory_removal_error_after_staging() {
         .expect_err("non-writable destination should reject directory removal");
 
     assert_eq!(ErrorKind::PermissionDenied, error.kind());
-    assert_eq!(LocalCopyDirStage::PrepareDestination, error.stage);
+    assert_eq!(LocalCopyDirStage::PrepareDestination, error.stage());
     assert!(
         destination_entry.is_dir(),
         "failed removal must not commit the source file over the directory"
@@ -1638,7 +1637,7 @@ fn test_copy_dir_all_with_reports_reinspection_error_after_staging() {
         .expect("destination permissions should be restored");
     fs::remove_dir_all(dir).expect("test directory should be removed");
     assert_eq!(ErrorKind::PermissionDenied, error.kind());
-    assert_eq!(LocalCopyDirStage::PrepareDestination, error.stage);
+    assert_eq!(LocalCopyDirStage::PrepareDestination, error.stage());
 }
 
 #[cfg(unix)]
@@ -1665,7 +1664,7 @@ fn test_copy_dir_all_with_returns_destination_entry_inspection_error() {
         .expect("destination permissions should be restored");
     fs::remove_dir_all(dir).expect("test directory should be removed");
     assert_eq!(ErrorKind::PermissionDenied, error.kind());
-    assert_eq!(LocalCopyDirStage::PrepareDestination, error.stage);
+    assert_eq!(LocalCopyDirStage::PrepareDestination, error.stage());
 }
 
 #[cfg(unix)]
@@ -1691,7 +1690,7 @@ fn test_copy_dir_all_with_returns_nested_destination_inspection_error() {
         .expect("destination permissions should be restored");
     fs::remove_dir_all(dir).expect("test directory should be removed");
     assert_eq!(ErrorKind::PermissionDenied, error.kind());
-    assert_eq!(LocalCopyDirStage::PrepareDestination, error.stage);
+    assert_eq!(LocalCopyDirStage::PrepareDestination, error.stage());
 }
 
 #[cfg(unix)]
@@ -1720,7 +1719,7 @@ fn test_copy_dir_all_with_returns_destination_removal_permission_error() {
         .expect("destination parent permissions should be restored");
     fs::remove_dir_all(dir).expect("test directory should be removed");
     assert_eq!(ErrorKind::PermissionDenied, error.kind());
-    assert_eq!(LocalCopyDirStage::PrepareDestination, error.stage);
+    assert_eq!(LocalCopyDirStage::PrepareDestination, error.stage());
 }
 
 #[cfg(unix)]
@@ -1747,7 +1746,7 @@ fn test_copy_dir_all_with_returns_staging_file_creation_error() {
         .expect("destination permissions should be restored");
     fs::remove_dir_all(dir).expect("test directory should be removed");
     assert_eq!(ErrorKind::PermissionDenied, error.kind());
-    assert_eq!(LocalCopyDirStage::PrepareDestination, error.stage);
+    assert_eq!(LocalCopyDirStage::PrepareDestination, error.stage());
 }
 
 #[test]
@@ -1925,7 +1924,7 @@ fn test_copy_dir_all_with_preserves_root_file_when_type_replacement_removal_fail
     fs::remove_dir_all(dir).expect("test directory should be removed");
 
     assert_eq!(ErrorKind::PermissionDenied, error.kind());
-    assert_eq!(LocalCopyDirStage::PrepareDestination, error.stage);
+    assert_eq!(LocalCopyDirStage::PrepareDestination, error.stage());
     assert_eq!(b"old", destination_contents.as_slice());
 }
 
@@ -2189,13 +2188,13 @@ fn test_copy_dir_all_with_rejects_unsupported_source_types() {
     )
     .expect_err("socket source should be rejected");
 
-    assert_eq!(LocalCopyDirStage::CopyFileContents, error.stage);
-    assert_eq!(socket, error.source_path);
-    assert_eq!(dst.join("socket"), error.destination_path);
-    assert_eq!(0, error.stats.files);
-    assert_eq!(1, error.stats.directories);
-    assert_eq!(0, error.stats.bytes);
-    assert_eq!(0, error.stats.skipped);
+    assert_eq!(LocalCopyDirStage::CopyFileContents, error.stage());
+    assert_eq!(socket, error.source_path());
+    assert_eq!(dst.join("socket"), error.destination_path());
+    assert_eq!(0, error.stats().files());
+    assert_eq!(1, error.stats().directories());
+    assert_eq!(0, error.stats().bytes());
+    assert_eq!(0, error.stats().skipped());
     assert_eq!(ErrorKind::InvalidInput, error.kind());
     drop(listener);
     fs::remove_dir_all(dir).unwrap();

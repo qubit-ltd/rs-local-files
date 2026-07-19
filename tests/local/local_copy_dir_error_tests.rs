@@ -33,6 +33,7 @@ fn test_copy_dir_all_with_returns_missing_source_error() {
     .expect_err("missing source should return metadata error");
 
     assert_eq!(ErrorKind::NotFound, error.kind());
+    assert_eq!(ErrorKind::NotFound, error.error().kind());
     assert_eq!(LocalCopyDirStage::InspectSource, error.stage());
     assert_eq!(missing, error.source_path());
     assert_eq!(dir.join("dst"), error.destination_path());

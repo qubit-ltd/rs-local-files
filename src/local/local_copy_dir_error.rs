@@ -25,29 +25,40 @@ use crate::{
 };
 
 /// Error returned by a recursive directory copy operation.
+///
+/// Diagnostic state is exposed through read-only accessors so callers cannot
+/// mutate the stage, paths, statistics, or retained errors independently.
+///
+/// ```compile_fail
+/// use qubit_local_files::LocalCopyDirError;
+///
+/// fn overwrite_stage(error: LocalCopyDirError) {
+///     let _ = error.stage;
+/// }
+/// ```
 #[non_exhaustive]
 #[derive(Debug)]
 pub struct LocalCopyDirError {
     /// Stage at which the copy failed.
-    pub stage: LocalCopyDirStage,
+    stage: LocalCopyDirStage,
     /// Source entry being processed when the failure occurred.
-    pub source_path: PathBuf,
+    source_path: PathBuf,
     /// Destination entry being processed when the failure occurred.
-    pub destination_path: PathBuf,
+    destination_path: PathBuf,
     /// Statistics accumulated before the failure.
-    pub stats: LocalCopyDirStats,
+    stats: LocalCopyDirStats,
     /// Same-directory staging path when file staging had already started.
     ///
     /// The path may no longer exist when cleanup succeeded or a later retry
     /// removed it.
-    pub temporary_path: Option<Box<Path>>,
+    temporary_path: Option<Box<Path>>,
     /// Secondary error reported while removing an uncommitted staging file.
     ///
-    /// The primary operation error remains available through [`Self::source`]
+    /// The primary operation error remains available through [`Self::error`]
     /// and the [`Error`] implementation.
-    pub cleanup_error: Option<io::Error>,
+    cleanup_error: Option<io::Error>,
     /// Native I/O error that caused the failure.
-    pub source: io::Error,
+    error: io::Error,
 }
 
 impl LocalCopyDirError {
@@ -58,7 +69,7 @@ impl LocalCopyDirError {
     /// - `source_path`: Source entry being processed.
     /// - `destination_path`: Destination entry being processed.
     /// - `stats`: Statistics accumulated before the failure.
-    /// - `source`: Native I/O error that caused the failure.
+    /// - `error`: Native I/O error that caused the failure.
     ///
     /// # Returns
     /// New recursive-copy error retaining the native source error.
@@ -68,7 +79,7 @@ impl LocalCopyDirError {
         source_path: PathBuf,
         destination_path: PathBuf,
         stats: LocalCopyDirStats,
-        source: io::Error,
+        error: io::Error,
     ) -> Self {
         Self {
             stage,
@@ -77,7 +88,7 @@ impl LocalCopyDirError {
             stats,
             temporary_path: None,
             cleanup_error: None,
-            source,
+            error,
         }
     }
 
@@ -138,6 +149,16 @@ impl LocalCopyDirError {
         self.cleanup_error.as_ref()
     }
 
+    /// Returns the native I/O error that caused the copy to fail.
+    ///
+    /// # Returns
+    /// Retained primary I/O error.
+    #[must_use]
+    #[inline(always)]
+    pub const fn error(&self) -> &io::Error {
+        &self.error
+    }
+
     /// Returns the native I/O error kind.
     ///
     /// # Returns
@@ -145,7 +166,7 @@ impl LocalCopyDirError {
     #[must_use]
     #[inline(always)]
     pub fn kind(&self) -> io::ErrorKind {
-        self.source.kind()
+        self.error.kind()
     }
 
     /// Attaches staging-path and cleanup-failure context.
@@ -178,7 +199,7 @@ impl Display for LocalCopyDirError {
             self.destination_path.display(),
             self.stage,
             self.stats,
-            self.source,
+            self.error,
         )?;
         if let Some(temporary_path) = self.temporary_path.as_ref() {
             write!(formatter, "; staging path '{}'", temporary_path.display())?;
@@ -197,6 +218,6 @@ impl Error for LocalCopyDirError {
     /// Returns the retained native I/O error.
     #[inline(always)]
     fn source(&self) -> Option<&(dyn Error + 'static)> {
-        Some(&self.source)
+        Some(&self.error)
     }
 }
