@@ -72,6 +72,16 @@ impl FileWriteOptions {
         self.create_parent
     }
 
+    /// Enables parent directory creation.
+    ///
+    /// # Returns
+    /// Updated options that create missing parent directories before opening.
+    #[inline(always)]
+    pub const fn with_parent(mut self) -> Self {
+        self.create_parent = true;
+        self
+    }
+
     /// Returns the configured file write mode.
     ///
     /// # Returns
@@ -88,16 +98,6 @@ impl FileWriteOptions {
     #[inline(always)]
     pub const fn buffering(&self) -> FileBuffering {
         self.buffering
-    }
-
-    /// Enables parent directory creation.
-    ///
-    /// # Returns
-    /// Updated options that create missing parent directories before opening.
-    #[inline(always)]
-    pub const fn with_parent(mut self) -> Self {
-        self.create_parent = true;
-        self
     }
 
     /// Enables buffering with the standard-library default capacity.

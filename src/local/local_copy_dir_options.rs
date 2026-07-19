@@ -119,50 +119,6 @@ impl LocalCopyDirOptions {
         self.conflict
     }
 
-    /// Returns the entry type-conflict policy.
-    ///
-    /// # Returns
-    /// Policy applied to source and destination type mismatches.
-    #[inline(always)]
-    pub const fn type_conflict_policy(&self) -> LocalCopyTypeConflictPolicy {
-        self.type_conflict
-    }
-
-    /// Returns whether symbolic links will be followed.
-    ///
-    /// # Returns
-    /// `true` when source symbolic links are followed.
-    #[must_use]
-    #[inline(always)]
-    pub const fn follows_symlinks(&self) -> bool {
-        self.follow_symlinks
-    }
-
-    /// Returns whether source permissions will be preserved.
-    ///
-    /// # Returns
-    /// `true` when destination permissions are copied from the source.
-    #[must_use]
-    #[inline(always)]
-    pub const fn preserves_permissions(&self) -> bool {
-        self.preserve_permissions
-    }
-
-    /// Returns the configured nonblocking-open retry timeout.
-    ///
-    /// On Unix, this limits how long a copy waits for a regular source whose
-    /// active file lease makes a nonblocking open return
-    /// [`std::io::ErrorKind::WouldBlock`]. `None` preserves the default
-    /// unbounded wait.
-    ///
-    /// # Returns
-    /// The configured timeout, or `None` when retries are unbounded.
-    #[must_use]
-    #[inline(always)]
-    pub const fn open_retry_timeout(&self) -> Option<Duration> {
-        self.open_retry_timeout
-    }
-
     /// Sets the policy for existing destination file entries.
     ///
     /// # Parameters
@@ -177,6 +133,15 @@ impl LocalCopyDirOptions {
     ) -> Self {
         self.conflict = conflict;
         self
+    }
+
+    /// Returns the entry type-conflict policy.
+    ///
+    /// # Returns
+    /// Policy applied to source and destination type mismatches.
+    #[inline(always)]
+    pub const fn type_conflict_policy(&self) -> LocalCopyTypeConflictPolicy {
+        self.type_conflict
     }
 
     /// Sets the policy for source and destination type mismatches.
@@ -195,6 +160,16 @@ impl LocalCopyDirOptions {
         self
     }
 
+    /// Returns whether symbolic links will be followed.
+    ///
+    /// # Returns
+    /// `true` when source symbolic links are followed.
+    #[must_use]
+    #[inline(always)]
+    pub const fn follows_symlinks(&self) -> bool {
+        self.follow_symlinks
+    }
+
     /// Enables following symbolic links in the source tree.
     ///
     /// # Returns
@@ -205,6 +180,16 @@ impl LocalCopyDirOptions {
         self
     }
 
+    /// Returns whether source permissions will be preserved.
+    ///
+    /// # Returns
+    /// `true` when destination permissions are copied from the source.
+    #[must_use]
+    #[inline(always)]
+    pub const fn preserves_permissions(&self) -> bool {
+        self.preserve_permissions
+    }
+
     /// Enables preservation of source permissions.
     ///
     /// # Returns
@@ -213,6 +198,21 @@ impl LocalCopyDirOptions {
     pub const fn preserve_permissions(mut self) -> Self {
         self.preserve_permissions = true;
         self
+    }
+
+    /// Returns the configured nonblocking-open retry timeout.
+    ///
+    /// On Unix, this limits how long a copy waits for a regular source whose
+    /// active file lease makes a nonblocking open return
+    /// [`std::io::ErrorKind::WouldBlock`]. `None` preserves the default
+    /// unbounded wait.
+    ///
+    /// # Returns
+    /// The configured timeout, or `None` when retries are unbounded.
+    #[must_use]
+    #[inline(always)]
+    pub const fn open_retry_timeout(&self) -> Option<Duration> {
+        self.open_retry_timeout
     }
 
     /// Sets the nonblocking-open retry timeout.
