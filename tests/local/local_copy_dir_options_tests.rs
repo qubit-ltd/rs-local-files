@@ -6,6 +6,8 @@
 //    Licensed under the Apache License, Version 2.0.
 // =============================================================================
 
+use std::time::Duration;
+
 use qubit_local_files::{
     LocalCopyConflictPolicy,
     LocalCopyDirOptions,
@@ -23,6 +25,7 @@ fn test_copy_dir_options_default_is_conservative() {
     );
     assert!(!options.follows_symlinks());
     assert!(!options.preserves_permissions());
+    assert_eq!(None, options.open_retry_timeout());
 }
 
 #[test]
@@ -31,7 +34,8 @@ fn test_copy_dir_options_builders_express_non_default_policies() {
         .with_conflict(LocalCopyConflictPolicy::Overwrite)
         .with_type_conflict(LocalCopyTypeConflictPolicy::Replace)
         .follow_symlinks()
-        .preserve_permissions();
+        .preserve_permissions()
+        .with_open_retry_timeout(Duration::ZERO);
 
     assert_eq!(
         LocalCopyConflictPolicy::Overwrite,
@@ -43,4 +47,5 @@ fn test_copy_dir_options_builders_express_non_default_policies() {
     );
     assert!(options.follows_symlinks());
     assert!(options.preserves_permissions());
+    assert_eq!(Some(Duration::ZERO), options.open_retry_timeout());
 }

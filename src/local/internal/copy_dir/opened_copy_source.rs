@@ -20,7 +20,6 @@ use std::io::{
     Result,
 };
 use std::path::Path;
-#[cfg(unix)]
 use std::time::Duration;
 
 #[cfg(unix)]
@@ -43,7 +42,7 @@ use windows_sys::Win32::Storage::FileSystem::{
 #[cfg(unix)]
 use crate::local::internal::{
     clear_nonblocking,
-    wait_for_nonblocking_open_retry,
+    open_with_nonblocking_retry,
 };
 
 /// Open regular-file source and metadata read from the same handle.
@@ -73,8 +72,12 @@ impl OpenedCopySource {
     /// for an opened non-regular resource. Other open and metadata errors are
     /// returned unchanged.
     #[inline(always)]
-    pub(super) fn open(path: &Path, follow_symlinks: bool) -> Result<Self> {
-        open_copy_source(path, follow_symlinks)
+    pub(super) fn open(
+        path: &Path,
+        follow_symlinks: bool,
+        open_retry_timeout: Option<Duration>,
+    ) -> Result<Self> {
+        open_copy_source(path, follow_symlinks, open_retry_timeout)
     }
 
     /// Splits this source into its open handle and authoritative metadata.
@@ -95,6 +98,7 @@ impl OpenedCopySource {
 fn open_copy_source(
     path: &Path,
     follow_symlinks: bool,
+    open_retry_timeout: Option<Duration>,
 ) -> Result<OpenedCopySource> {
     let mut options = OpenOptions::new();
     let mut flags = libc::O_NONBLOCK;
@@ -102,30 +106,13 @@ fn open_copy_source(
         flags |= libc::O_NOFOLLOW;
     }
     options.read(true).custom_flags(flags);
-    let file = open_unix_source(&options, path)
-        .map_err(|error| normalize_unix_source_open_error(path, error))?;
+    let file =
+        open_with_nonblocking_retry(open_retry_timeout, || options.open(path))
+            .map_err(|error| normalize_unix_source_open_error(path, error))?;
     let metadata = file.metadata()?;
     reject_non_regular_source(path, &metadata)?;
     clear_nonblocking(file.as_raw_fd())?;
     Ok(OpenedCopySource { file, metadata })
-}
-
-/// Retries a nonblocking open while a regular-file lease is being broken.
-///
-/// Linux reports `WouldBlock` for `O_NONBLOCK` opens that conflict with an
-/// active lease. Retrying preserves normal blocking-open semantics without
-/// ever allowing a racing FIFO or device path to block the opening thread.
-#[cfg(unix)]
-fn open_unix_source(options: &OpenOptions, path: &Path) -> Result<File> {
-    let mut retry_delay = Duration::ZERO;
-    loop {
-        match options.open(path) {
-            Err(error) if error.kind() == ErrorKind::WouldBlock => {
-                wait_for_nonblocking_open_retry(&mut retry_delay);
-            }
-            result => return result,
-        }
-    }
 }
 
 /// Normalizes final-link and non-openable special-file errors.
@@ -145,6 +132,7 @@ fn normalize_unix_source_open_error(path: &Path, error: Error) -> Error {
 fn open_copy_source(
     path: &Path,
     follow_symlinks: bool,
+    _open_retry_timeout: Option<Duration>,
 ) -> Result<OpenedCopySource> {
     const IO_REPARSE_TAG_NAME_SURROGATE: u32 = 0x2000_0000;
 
@@ -183,6 +171,7 @@ fn open_copy_source(
 fn open_copy_source(
     path: &Path,
     _follow_symlinks: bool,
+    _open_retry_timeout: Option<Duration>,
 ) -> Result<OpenedCopySource> {
     let file = File::open(path)?;
     let metadata = file.metadata()?;

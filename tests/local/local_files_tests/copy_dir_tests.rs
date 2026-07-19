@@ -922,6 +922,60 @@ where
     worker_result.expect("copy worker should not panic")
 }
 
+/// Verifies that zero timeout reports a leased source instead of waiting.
+#[cfg(target_os = "linux")]
+#[test]
+fn test_copy_dir_zero_open_retry_timeout_reports_timed_out() {
+    let dir = temp_dir("copy-dir-zero-open-retry-timeout");
+    let source = dir.join("source");
+    let destination = dir.join("destination");
+    let source_file = source.join("data.txt");
+    fs::create_dir(&source).expect("source directory should be created");
+    fs::write(&source_file, b"source").expect("source file should be written");
+    let lease = SourceReadLease::acquire(&source_file)
+        .expect("source read lease should be acquired");
+    let options =
+        LocalCopyDirOptions::new().with_open_retry_timeout(Duration::ZERO);
+    let worker_source = source.clone();
+    let worker_destination = destination.clone();
+    let (sender, receiver) = std::sync::mpsc::sync_channel(1);
+    let worker = std::thread::spawn(move || {
+        let result = LocalFiles::copy_dir_all_with(
+            worker_source,
+            worker_destination,
+            options,
+        );
+        sender.send(result).expect("result should be sent");
+    });
+
+    lease
+        .wait_for_break()
+        .expect("copy should reach the source open");
+    let first_result = receiver.recv_timeout(Duration::from_millis(250));
+    lease.release().expect("source lease should be released");
+    worker.join().expect("copy worker should not panic");
+    let result = first_result.unwrap_or_else(|_| {
+        receiver
+            .recv_timeout(Duration::from_secs(1))
+            .expect("copy result should arrive after lease release")
+    });
+    let error =
+        result.expect_err("zero timeout should reject the lease conflict");
+
+    assert_eq!(LocalCopyDirStage::CopyFileContents, error.stage());
+    assert_eq!(ErrorKind::TimedOut, error.kind());
+    assert_eq!(source_file, error.source_path());
+    assert_eq!(destination.join("data.txt"), error.destination_path());
+    assert_eq!(0, error.stats().files);
+    assert_eq!(0, error.stats().bytes);
+    assert!(!destination.join("data.txt").exists());
+    assert!(
+        error.temporary_path().is_some_and(|path| !path.exists()),
+        "staging path should be reported and cleaned",
+    );
+    fs::remove_dir_all(dir).unwrap();
+}
+
 /// Verifies that a transient native lease conflict is retried before the
 /// lease helper reports failure.
 #[cfg(target_os = "linux")]
@@ -1003,6 +1057,44 @@ fn test_copy_dir_all_with_waits_for_source_lease_without_busy_polling() {
     assert!(
         worker_cpu_time < MAX_WORKER_CPU_TIME,
         "lease wait consumed {worker_cpu_time:?} of worker CPU time"
+    );
+    fs::remove_dir_all(dir).expect("test directory should be removed");
+}
+
+/// Verifies that a positive open timeout still permits a lease to clear.
+#[cfg(target_os = "linux")]
+#[test]
+fn test_copy_dir_all_with_open_retry_timeout_resumes_after_lease_release() {
+    const LEASE_HOLD_DURATION: Duration = Duration::from_millis(20);
+    const OPEN_RETRY_TIMEOUT: Duration = Duration::from_secs(5);
+
+    let dir = temp_dir("copy-dir-source-lease-positive-timeout");
+    let src = dir.join("src");
+    let dst = dir.join("dst");
+    let source_file = src.join("data.txt");
+    fs::create_dir(&src).expect("source directory should be created");
+    fs::write(&source_file, b"leased").expect("source file should be written");
+    let copy_src = src.clone();
+    let copy_dst = dst.clone();
+
+    let result = run_copy_after_staging(
+        &source_file,
+        || std::thread::sleep(LEASE_HOLD_DURATION),
+        move || {
+            LocalFiles::copy_dir_all_with(
+                copy_src,
+                copy_dst,
+                LocalCopyDirOptions::new()
+                    .with_open_retry_timeout(OPEN_RETRY_TIMEOUT),
+            )
+        },
+    );
+
+    let stats = result.expect("copy should resume before its open timeout");
+    assert_eq!(1, stats.files);
+    assert_eq!(
+        b"leased",
+        fs::read(dst.join("data.txt")).unwrap().as_slice()
     );
     fs::remove_dir_all(dir).expect("test directory should be removed");
 }

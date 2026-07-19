@@ -11,6 +11,7 @@ use std::io::ErrorKind;
 use std::io::Write;
 #[cfg(target_os = "linux")]
 use std::path::Path;
+use std::time::Duration;
 
 use qubit_local_files::{
     LocalAtomicDestinationState,
@@ -19,6 +20,8 @@ use qubit_local_files::{
     LocalFiles,
 };
 
+#[cfg(target_os = "linux")]
+use super::test_support::SourceReadLease;
 use super::test_support::{
     CURRENT_DIR_LOCK,
     CurrentDirGuard,
@@ -33,6 +36,70 @@ fn assert_send<T: Send>() {}
 #[test]
 fn test_local_atomic_writer_is_send() {
     assert_send::<LocalAtomicWriter>();
+}
+
+#[test]
+fn test_local_atomic_writer_open_retry_timeout_configuration() {
+    let dir = temp_dir("atomic-writer-open-retry-timeout-option");
+    let path = dir.join("out.txt");
+    let writer = LocalFiles::begin_atomic_write(&path)
+        .expect("atomic writer should begin");
+    assert_eq!(None, writer.open_retry_timeout());
+
+    let writer = writer.with_open_retry_timeout(Duration::ZERO);
+
+    assert_eq!(Some(Duration::ZERO), writer.open_retry_timeout());
+    writer.abort().expect("atomic writer should abort");
+    fs::remove_dir_all(dir).unwrap();
+}
+
+#[cfg(target_os = "linux")]
+#[test]
+fn test_local_atomic_writer_zero_open_retry_timeout_reports_timed_out() {
+    let dir = temp_dir("atomic-writer-zero-open-retry-timeout");
+    let path = dir.join("out.txt");
+    fs::write(&path, b"original").expect("destination should be written");
+    let lease = SourceReadLease::acquire(&path)
+        .expect("destination read lease should be acquired");
+    let mut writer = LocalFiles::begin_atomic_write(&path)
+        .expect("atomic writer should begin")
+        .with_open_retry_timeout(Duration::ZERO);
+    writer
+        .write_all(b"replacement")
+        .expect("replacement should be staged");
+    let (sender, receiver) = std::sync::mpsc::sync_channel(1);
+    let worker = std::thread::spawn(move || {
+        sender.send(writer.commit()).expect("result should be sent");
+    });
+
+    lease
+        .wait_for_break()
+        .expect("commit should reach the destination open");
+    let first_result = receiver.recv_timeout(Duration::from_millis(250));
+    lease
+        .release()
+        .expect("destination lease should be released");
+    worker.join().expect("commit worker should not panic");
+    let result = first_result.unwrap_or_else(|_| {
+        receiver
+            .recv_timeout(Duration::from_secs(1))
+            .expect("commit result should arrive after lease release")
+    });
+    let error =
+        result.expect_err("zero timeout should reject the lease conflict");
+
+    assert_eq!(
+        LocalAtomicWriteStage::ReadDestinationMetadata,
+        error.stage()
+    );
+    assert_eq!(ErrorKind::TimedOut, error.kind());
+    assert_eq!(
+        LocalAtomicDestinationState::Unchanged,
+        error.destination_state()
+    );
+    assert_eq!(b"original", fs::read(&path).unwrap().as_slice());
+    assert_eq!(0, count_atomic_temp_files(&dir));
+    fs::remove_dir_all(dir).unwrap();
 }
 
 #[test]

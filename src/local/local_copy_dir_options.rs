@@ -7,6 +7,8 @@
 // =============================================================================
 //! Recursive directory copy options.
 
+use std::time::Duration;
+
 use crate::{
     LocalCopyConflictPolicy,
     LocalCopyTypeConflictPolicy,
@@ -86,6 +88,9 @@ pub struct LocalCopyDirOptions {
     /// new directories retain the private directory mode; on Unix these are
     /// `0o600` and `0o700`, respectively, subject to the process umask.
     preserve_permissions: bool,
+
+    /// Optional limit for retrying a nonblocking source open.
+    open_retry_timeout: Option<Duration>,
 }
 
 impl LocalCopyDirOptions {
@@ -101,6 +106,7 @@ impl LocalCopyDirOptions {
             type_conflict: LocalCopyTypeConflictPolicy::Fail,
             follow_symlinks: false,
             preserve_permissions: false,
+            open_retry_timeout: None,
         }
     }
 
@@ -140,6 +146,21 @@ impl LocalCopyDirOptions {
     #[inline(always)]
     pub const fn preserves_permissions(&self) -> bool {
         self.preserve_permissions
+    }
+
+    /// Returns the configured nonblocking-open retry timeout.
+    ///
+    /// On Unix, this limits how long a copy waits for a regular source whose
+    /// active file lease makes a nonblocking open return
+    /// [`std::io::ErrorKind::WouldBlock`]. `None` preserves the default
+    /// unbounded wait.
+    ///
+    /// # Returns
+    /// The configured timeout, or `None` when retries are unbounded.
+    #[must_use]
+    #[inline(always)]
+    pub const fn open_retry_timeout(&self) -> Option<Duration> {
+        self.open_retry_timeout
     }
 
     /// Sets the policy for existing destination file entries.
@@ -191,6 +212,23 @@ impl LocalCopyDirOptions {
     #[inline(always)]
     pub const fn preserve_permissions(mut self) -> Self {
         self.preserve_permissions = true;
+        self
+    }
+
+    /// Sets the nonblocking-open retry timeout.
+    ///
+    /// On Unix, [`Duration::ZERO`] returns
+    /// [`std::io::ErrorKind::TimedOut`] after the first lease-conflicting open
+    /// attempt. Other open errors are never retried.
+    ///
+    /// # Parameters
+    /// - `timeout`: Maximum time to retry a lease-conflicting open.
+    ///
+    /// # Returns
+    /// Updated directory copy options.
+    #[inline(always)]
+    pub const fn with_open_retry_timeout(mut self, timeout: Duration) -> Self {
+        self.open_retry_timeout = Some(timeout);
         self
     }
 }

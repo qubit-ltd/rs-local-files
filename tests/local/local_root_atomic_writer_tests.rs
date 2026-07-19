@@ -14,6 +14,8 @@ use std::io::Write;
 use std::path::PathBuf;
 #[cfg(target_os = "linux")]
 use std::process::Command;
+#[cfg(unix)]
+use std::time::Duration;
 
 #[cfg(unix)]
 use qubit_local_files::{
@@ -23,6 +25,8 @@ use qubit_local_files::{
     LocalRoot,
 };
 
+#[cfg(target_os = "linux")]
+use super::test_support::SourceReadLease;
 #[cfg(all(coverage, target_os = "linux"))]
 use super::test_support::run_in_coverage_fault_process;
 #[cfg(unix)]
@@ -48,6 +52,79 @@ const ROOTED_ATOMIC_SYNC_CHILD_ENV: &str =
 #[cfg(target_os = "linux")]
 const ROOTED_ATOMIC_SYNC_ROOT_ENV: &str =
     "QUBIT_LOCAL_FILES_ROOTED_ATOMIC_SYNC_ROOT";
+
+#[cfg(unix)]
+#[test]
+fn test_local_root_atomic_writer_open_retry_timeout_configuration() {
+    let root_path = temp_dir("rooted-atomic-open-retry-timeout-option");
+    let root = LocalRoot::open(&root_path).expect("root should open");
+    let destination = LocalRelativePath::new("result.txt")
+        .expect("destination should validate");
+    let writer = root
+        .begin_atomic_write(&destination)
+        .expect("rooted atomic writer should begin");
+    assert_eq!(None, writer.open_retry_timeout());
+
+    let writer = writer.with_open_retry_timeout(Duration::ZERO);
+
+    assert_eq!(Some(Duration::ZERO), writer.open_retry_timeout());
+    writer.abort().expect("rooted writer should abort");
+    fs::remove_dir_all(root_path).unwrap();
+}
+
+#[cfg(target_os = "linux")]
+#[test]
+fn test_local_root_atomic_writer_zero_open_retry_timeout_reports_timed_out() {
+    let root_path = temp_dir("rooted-atomic-zero-open-retry-timeout");
+    let destination_path = root_path.join("result.txt");
+    fs::write(&destination_path, b"original")
+        .expect("destination should be written");
+    let lease = SourceReadLease::acquire(&destination_path)
+        .expect("destination read lease should be acquired");
+    let root = LocalRoot::open(&root_path).expect("root should open");
+    let destination = LocalRelativePath::new("result.txt")
+        .expect("destination should validate");
+    let mut writer = root
+        .begin_atomic_write(&destination)
+        .expect("rooted atomic writer should begin")
+        .with_open_retry_timeout(Duration::ZERO);
+    writer
+        .write_all(b"replacement")
+        .expect("replacement should be staged");
+    let (sender, receiver) = std::sync::mpsc::sync_channel(1);
+    let worker = std::thread::spawn(move || {
+        sender.send(writer.commit()).expect("result should be sent");
+    });
+
+    lease
+        .wait_for_break()
+        .expect("commit should reach the destination open");
+    let first_result = receiver.recv_timeout(Duration::from_millis(250));
+    lease
+        .release()
+        .expect("destination lease should be released");
+    worker.join().expect("commit worker should not panic");
+    let result = first_result.unwrap_or_else(|_| {
+        receiver
+            .recv_timeout(Duration::from_secs(1))
+            .expect("commit result should arrive after lease release")
+    });
+    let error =
+        result.expect_err("zero timeout should reject the lease conflict");
+
+    assert_eq!(
+        LocalAtomicWriteStage::ReadDestinationMetadata,
+        error.stage()
+    );
+    assert_eq!(std::io::ErrorKind::TimedOut, error.kind());
+    assert_eq!(
+        LocalAtomicDestinationState::Unchanged,
+        error.destination_state()
+    );
+    assert_eq!(b"original", fs::read(&destination_path).unwrap().as_slice());
+    assert_eq!(0, count_atomic_temp_files(&root_path));
+    fs::remove_dir_all(root_path).unwrap();
+}
 
 /// Asserts one injected rooted commit failure through the public API.
 #[cfg(all(coverage, target_os = "linux"))]

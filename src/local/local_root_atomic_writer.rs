@@ -19,6 +19,7 @@ use std::path::{
     Path,
     PathBuf,
 };
+use std::time::Duration;
 
 #[cfg(unix)]
 use crate::LocalRelativePath;
@@ -67,6 +68,8 @@ use super::internal::{
 pub struct LocalRootAtomicWriter {
     /// Requested relative destination retained for structured errors.
     path: PathBuf,
+    /// Optional limit for retrying a nonblocking destination open.
+    open_retry_timeout: Option<Duration>,
     #[cfg(unix)]
     /// Final destination entry name within the staging parent.
     final_name: CString,
@@ -137,11 +140,44 @@ impl LocalRootAtomicWriter {
         )?;
         Ok(Self {
             path: requested_path,
+            open_retry_timeout: None,
             final_name,
             parent_dirs_to_sync,
             destination_existed,
             staged_file,
         })
+    }
+
+    /// Returns the configured nonblocking-open retry timeout.
+    ///
+    /// On Unix, this limits how long commit waits for an existing destination
+    /// whose active file lease makes a nonblocking open return
+    /// [`io::ErrorKind::WouldBlock`]. `None` preserves the default unbounded
+    /// wait.
+    ///
+    /// # Returns
+    /// The configured timeout, or `None` when retries are unbounded.
+    #[must_use]
+    #[inline(always)]
+    pub const fn open_retry_timeout(&self) -> Option<Duration> {
+        self.open_retry_timeout
+    }
+
+    /// Sets the nonblocking-open retry timeout.
+    ///
+    /// On Unix, [`Duration::ZERO`] returns [`io::ErrorKind::TimedOut`] after
+    /// the first lease-conflicting open attempt. Other open errors are never
+    /// retried.
+    ///
+    /// # Parameters
+    /// - `timeout`: Maximum time to retry a lease-conflicting open.
+    ///
+    /// # Returns
+    /// This writer with the timeout configured.
+    #[inline(always)]
+    pub const fn with_open_retry_timeout(mut self, timeout: Duration) -> Self {
+        self.open_retry_timeout = Some(timeout);
+        self
     }
 
     /// Synchronizes and atomically replaces the rooted destination.
@@ -163,6 +199,7 @@ impl LocalRootAtomicWriter {
                 let destination_result = open_rooted_atomic_destination(
                     self.staged_file.parent(),
                     &self.final_name,
+                    self.open_retry_timeout,
                 );
                 let opened = with_staging_cleanup(
                     destination_result,

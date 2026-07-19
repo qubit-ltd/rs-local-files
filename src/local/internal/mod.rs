@@ -115,5 +115,5 @@ pub(crate) use temp_entry::{
 #[cfg(unix)]
 pub(crate) use unix_nonblocking::{
     clear_nonblocking,
-    wait_for_nonblocking_open_retry,
+    open_with_nonblocking_retry,
 };

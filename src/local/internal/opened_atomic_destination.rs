@@ -32,7 +32,7 @@ use std::time::Duration;
 use super::rooted_file_io::open_file_at;
 use super::unix_nonblocking::{
     clear_nonblocking,
-    wait_for_nonblocking_open_retry,
+    open_with_nonblocking_retry,
 };
 use super::unix_stat::is_regular_file_mode;
 
@@ -97,6 +97,7 @@ impl OpenedAtomicDestination {
 /// Opens the current destination without following its final component.
 pub(crate) fn open_atomic_destination(
     path: &Path,
+    open_retry_timeout: Option<Duration>,
 ) -> Result<Option<OpenedAtomicDestination>> {
     #[cfg(coverage)]
     if super::coverage_fault::is_enabled("atomic-destination-open") {
@@ -106,7 +107,7 @@ pub(crate) fn open_atomic_destination(
     options
         .read(true)
         .custom_flags(libc::O_NOFOLLOW | libc::O_NONBLOCK);
-    open_destination_with_retry(|| {
+    open_destination_with_retry(open_retry_timeout, || {
         let result = options.open(path);
         #[cfg(coverage)]
         let result = inject_destination_open_result(
@@ -151,6 +152,7 @@ pub(crate) fn destination_identity_matches(
 pub(in crate::local) fn open_rooted_atomic_destination(
     parent: &File,
     name: &CString,
+    open_retry_timeout: Option<Duration>,
 ) -> Result<Option<OpenedAtomicDestination>> {
     #[cfg(coverage)]
     if super::coverage_fault::is_enabled("rooted-destination-open") {
@@ -160,7 +162,7 @@ pub(in crate::local) fn open_rooted_atomic_destination(
     }
     let flags =
         libc::O_RDONLY | libc::O_NOFOLLOW | libc::O_NONBLOCK | libc::O_CLOEXEC;
-    open_destination_with_retry(|| {
+    open_destination_with_retry(open_retry_timeout, || {
         let result = open_file_at(parent, name, flags, 0);
         #[cfg(coverage)]
         let result = inject_destination_open_result(
@@ -185,33 +187,24 @@ pub(in crate::local) fn open_rooted_atomic_destination(
 /// Returns [`ErrorKind::InvalidInput`] for symbolic links and other forbidden
 /// resource types, or preserves any other native open or inspection error.
 fn open_destination_with_retry<F>(
-    mut open: F,
+    open_retry_timeout: Option<Duration>,
+    open: F,
 ) -> Result<Option<OpenedAtomicDestination>>
 where
     F: FnMut() -> Result<File>,
 {
-    let mut retry_delay = Duration::ZERO;
-    loop {
-        match open() {
-            Ok(file) => {
-                return OpenedAtomicDestination::from_file(file).map(Some);
-            }
-            Err(error) if error.kind() == ErrorKind::NotFound => {
-                return Ok(None);
-            }
-            Err(error) if error.kind() == ErrorKind::WouldBlock => {
-                wait_for_nonblocking_open_retry(&mut retry_delay);
-            }
-            Err(error)
-                if matches!(
-                    error.raw_os_error(),
-                    Some(libc::ELOOP | libc::ENXIO | libc::ENODEV)
-                ) =>
-            {
-                return Err(invalid_atomic_destination());
-            }
-            Err(error) => return Err(error),
+    match open_with_nonblocking_retry(open_retry_timeout, open) {
+        Ok(file) => OpenedAtomicDestination::from_file(file).map(Some),
+        Err(error) if error.kind() == ErrorKind::NotFound => Ok(None),
+        Err(error)
+            if matches!(
+                error.raw_os_error(),
+                Some(libc::ELOOP | libc::ENXIO | libc::ENODEV)
+            ) =>
+        {
+            Err(invalid_atomic_destination())
         }
+        Err(error) => Err(error),
     }
 }
 

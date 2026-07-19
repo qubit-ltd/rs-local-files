@@ -176,20 +176,23 @@ fn stage_copy_file(
         stats,
     )?;
     let mut staged_file = StagedFile::new(temp_path, temp_file);
-    let opened_source =
-        match OpenedCopySource::open(src, options.follows_symlinks()) {
-            Ok(source) => source,
-            Err(source) => {
-                return Err(copy_dir_error_with_staging(
-                    LocalCopyDirStage::CopyFileContents,
-                    src,
-                    dst,
-                    stats,
-                    source,
-                    &mut staged_file,
-                ));
-            }
-        };
+    let opened_source = match OpenedCopySource::open(
+        src,
+        options.follows_symlinks(),
+        options.open_retry_timeout(),
+    ) {
+        Ok(source) => source,
+        Err(source) => {
+            return Err(copy_dir_error_with_staging(
+                LocalCopyDirStage::CopyFileContents,
+                src,
+                dst,
+                stats,
+                source,
+                &mut staged_file,
+            ));
+        }
+    };
     let (mut source_file, source_metadata) = opened_source.into_parts();
     let copied =
         copy_into_staging(src, dst, stats, &mut source_file, &mut staged_file)?;

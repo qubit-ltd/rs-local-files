@@ -13,11 +13,15 @@
 
 use std::io::{
     Error,
+    ErrorKind,
     Result,
 };
 use std::os::fd::RawFd;
 use std::thread;
-use std::time::Duration;
+use std::time::{
+    Duration,
+    Instant,
+};
 
 /// Initial sleep after one scheduler yield for a conflicting file lease.
 const INITIAL_OPEN_RETRY_DELAY: Duration = Duration::from_micros(50);
@@ -76,23 +80,83 @@ pub(crate) fn clear_nonblocking(descriptor: RawFd) -> Result<()> {
     Ok(())
 }
 
-/// Waits before retrying a nonblocking open that conflicts with a file lease.
+/// Repeats a nonblocking open that conflicts with a file lease.
 ///
 /// The first conflict yields the current time slice. Later conflicts sleep
 /// with exponentially increasing delay capped at ten milliseconds. This keeps
 /// normal blocking-open semantics without continuously consuming a worker CPU
-/// while another process or thread retains the lease.
+/// while another process or thread retains the lease. A configured timeout is
+/// measured with a monotonic clock and never suppresses the initial attempt.
 ///
 /// # Parameters
 ///
-/// * `delay` - Current retry delay. Callers initialize it to [`Duration::ZERO`]
-///   and retain the updated value for later retries.
-pub(crate) fn wait_for_nonblocking_open_retry(delay: &mut Duration) {
+/// * `timeout` - Optional maximum duration spent resolving lease conflicts.
+/// * `open` - Native nonblocking open attempt.
+///
+/// # Returns
+///
+/// Value returned by the first successful open.
+///
+/// # Errors
+///
+/// Returns [`ErrorKind::TimedOut`] when the configured duration expires after
+/// a lease conflict, or returns any non-conflict open error unchanged.
+pub(crate) fn open_with_nonblocking_retry<F, T>(
+    timeout: Option<Duration>,
+    mut open: F,
+) -> Result<T>
+where
+    F: FnMut() -> Result<T>,
+{
+    let started_at = Instant::now();
+    let mut retry_delay = Duration::ZERO;
+    loop {
+        match open() {
+            Err(error) if error.kind() == ErrorKind::WouldBlock => {
+                if let Some(timeout) = timeout {
+                    let remaining =
+                        timeout.saturating_sub(started_at.elapsed());
+                    if remaining.is_zero() {
+                        return Err(open_retry_timed_out(timeout));
+                    }
+                    wait_for_nonblocking_open_retry(
+                        &mut retry_delay,
+                        Some(remaining),
+                    );
+                    if started_at.elapsed() >= timeout {
+                        return Err(open_retry_timed_out(timeout));
+                    }
+                } else {
+                    wait_for_nonblocking_open_retry(&mut retry_delay, None);
+                }
+            }
+            result => return result,
+        }
+    }
+}
+
+/// Waits before the next nonblocking open attempt.
+fn wait_for_nonblocking_open_retry(
+    delay: &mut Duration,
+    remaining: Option<Duration>,
+) {
     if delay.is_zero() {
         thread::yield_now();
         *delay = INITIAL_OPEN_RETRY_DELAY;
         return;
     }
-    thread::sleep(*delay);
+    let sleep_duration = match remaining {
+        Some(remaining) => remaining.min(*delay),
+        None => *delay,
+    };
+    thread::sleep(sleep_duration);
     *delay = delay.saturating_mul(2).min(MAX_OPEN_RETRY_DELAY);
+}
+
+/// Creates the stable error returned when an open retry deadline expires.
+fn open_retry_timed_out(timeout: Duration) -> Error {
+    Error::new(
+        ErrorKind::TimedOut,
+        format!("timed out after {timeout:?} retrying a nonblocking file open"),
+    )
 }
