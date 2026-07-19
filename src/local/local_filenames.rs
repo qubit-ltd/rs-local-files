@@ -93,7 +93,7 @@ impl LocalFilenames {
     /// Panics if `prefix` or `suffix` is not a safe file-name fragment, or if
     /// the operating system random source cannot provide bytes.
     #[must_use]
-    #[inline]
+    #[inline(always)]
     pub fn random_with(prefix: Option<&str>, suffix: Option<&str>) -> String {
         Self::try_random_with(prefix, suffix)
             .expect("failed to build random file name")
@@ -299,6 +299,7 @@ impl LocalFilenames {
     /// # Returns
     /// The extension with a leading dot, or `None` when there is no extension
     /// or when the extension is not valid UTF-8.
+    #[inline]
     pub fn dot_extension(path: &Path) -> Option<String> {
         Self::extension(path).map(|extension| {
             if extension.is_empty() {
