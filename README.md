@@ -359,11 +359,13 @@ another actor can mutate either tree concurrently.
 | `extension`, `dot_extension`, `has_extension` | Inspect final extensions. |
 | `has_extension_ignore_ascii_case` | Inspect final extensions with ASCII-only case folding. |
 | `file_name_from_path` | Get the final segment from a path-like string. |
-| `file_name_from_url` | Get the final URL path segment, decoding safe percent-encoded UTF-8. |
+| `file_name_from_url` | Get the final URL path segment after excluding its scheme, authority, query, and fragment. |
 
 The lexical helpers do not touch the filesystem. Public methods that return
 filename data return UTF-8 strings instead of `OsStr`; invalid UTF-8 path
 components are reported as `None`.
+URL filename extraction returns an empty string for authority-only URLs and
+decodes percent-encoded UTF-8 only when it remains a safe single filename.
 Portable validation rejects Windows device names that use superscript digits,
 including `COM¹`, `COM²`, `COM³`, `LPT¹`, `LPT²`, and `LPT³`, following
 [Microsoft's file-naming rules](https://learn.microsoft.com/en-us/windows/win32/fileio/naming-a-file).

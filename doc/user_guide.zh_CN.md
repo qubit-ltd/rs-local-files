@@ -510,7 +510,7 @@ assert_eq!(
 );
 ```
 
-`file_name_from_url` 会先去掉 query 和 fragment，再选择最后一个 slash-delimited segment。只有当 percent-encoded UTF-8 解码后仍然是安全的单文件名 fragment 时，它才返回解码结果。
+`file_name_from_url` 会先排除符合语法的 scheme、层级 URL authority、query 和 fragment，再选择最后一个 slash-delimited path segment。authority-only URL 返回空字符串；`mailto:user@example.com` 这类 opaque URL 把 scheme-specific part 作为 lexical path。只有当 percent-encoded UTF-8 解码后仍然是安全的单文件名 fragment 时，它才返回解码结果；该 helper 不负责校验或规范化完整 URL。
 
 ## 错误和清理模型
 

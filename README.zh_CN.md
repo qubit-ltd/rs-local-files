@@ -251,9 +251,10 @@ nonblocking source open 冲突时的重试。它与 atomic writer 一样默认�
 | `extension`、`dot_extension`、`has_extension` | 检查最终扩展名。 |
 | `has_extension_ignore_ascii_case` | 使用 ASCII-only 大小写折叠检查最终扩展名。 |
 | `file_name_from_path` | 从 path-like 字符串中提取最后一段。 |
-| `file_name_from_url` | 提取 URL 最后一个 path segment，并解码安全的 percent-encoded UTF-8。 |
+| `file_name_from_url` | 排除 scheme、authority、query 和 fragment 后，提取 URL 最后一个 path segment。 |
 
 这些 lexical helper 不访问文件系统。返回文件名数据的公开方法返回 UTF-8 字符串，而不是 `OsStr`；无效 UTF-8 path component 返回 `None`。
+authority-only URL 的文件名提取结果为空字符串；仅当 percent-encoded UTF-8 解码结果仍是安全的单文件名时才会返回解码值。
 portable 校验还会拒绝使用上标数字的 Windows device name，包括 `COM¹`、`COM²`、`COM³`、`LPT¹`、`LPT²` 和 `LPT³`；这一行为遵循 [Microsoft 文件命名规则](https://learn.microsoft.com/zh-cn/windows/win32/fileio/naming-a-file)。
 
 ## Crate 边界

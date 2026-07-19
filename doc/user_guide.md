@@ -649,9 +649,13 @@ assert_eq!(
 );
 ```
 
-`file_name_from_url` strips query and fragment suffixes before selecting the
-last slash-delimited segment. It decodes percent-encoded UTF-8 only when the
-decoded value remains a safe single filename fragment.
+`file_name_from_url` excludes a syntactically valid scheme, hierarchical URL
+authority, query, and fragment before selecting the last slash-delimited path
+segment. Authority-only URLs return an empty string. Opaque URLs such as
+`mailto:user@example.com` use their scheme-specific part as the lexical path.
+The helper decodes percent-encoded UTF-8 only when the decoded value remains a
+safe single filename fragment; it does not validate or normalize a complete
+URL.
 
 ## Error and Cleanup Model
 

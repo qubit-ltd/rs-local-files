@@ -277,6 +277,36 @@ fn test_file_name_from_url_removes_query_and_fragment() {
 }
 
 #[test]
+fn test_file_name_from_url_excludes_url_authority() {
+    for url in [
+        "https://example.com",
+        "https://example.com?download=1",
+        "https://user@example.com:8443#section",
+        "//example.com",
+    ] {
+        assert_eq!("", LocalFilenames::file_name_from_url(url));
+    }
+}
+
+#[test]
+fn test_file_name_from_url_supports_hierarchical_and_opaque_urls() {
+    for (url, expected) in [
+        ("file:///tmp/report.txt", "report.txt"),
+        ("https:/path/report.txt", "report.txt"),
+        ("//example.com/path/report.txt", "report.txt"),
+        ("mailto:user@example.com", "user@example.com"),
+        (
+            "urn:example:animal:ferret:nose",
+            "example:animal:ferret:nose",
+        ),
+        ("reports/report.txt", "report.txt"),
+        ("report.txt", "report.txt"),
+    ] {
+        assert_eq!(expected, LocalFilenames::file_name_from_url(url));
+    }
+}
+
+#[test]
 fn test_file_name_from_url_decodes_percent_encoded_utf8() {
     assert_eq!(
         "my file.txt",

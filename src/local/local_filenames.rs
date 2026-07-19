@@ -376,22 +376,28 @@ impl LocalFilenames {
 
     /// Returns the final decoded file-name segment from a URL-like string.
     ///
-    /// Query strings and fragments are removed before the final slash-delimited
-    /// segment is selected. Percent-encoded UTF-8 sequences are decoded when
-    /// the decoded result remains a single safe file-name fragment. If the
-    /// selected segment contains invalid percent encoding, invalid UTF-8,
-    /// or encoded path separators, parent-directory components, dot
-    /// segments, or NUL bytes, the original selected segment is returned
-    /// unchanged.
+    /// Query strings, fragments, schemes, and hierarchical URL authorities are
+    /// excluded before the final slash-delimited path segment is selected. An
+    /// authority-only URL therefore returns an empty string. Opaque URLs such
+    /// as `mailto:user@example.com` use the scheme-specific part as their
+    /// lexical path.
+    ///
+    /// Percent-encoded UTF-8 sequences are decoded when the decoded result
+    /// remains a single safe file-name fragment. If the selected segment
+    /// contains invalid percent encoding, invalid UTF-8, or encoded path
+    /// separators, parent-directory components, dot segments, or NUL bytes,
+    /// the original selected segment is returned unchanged. This helper is
+    /// lexical; it does not validate or normalize a complete URL.
     ///
     /// # Parameters
     /// - `url`: URL-like string to inspect.
     ///
     /// # Returns
-    /// The decoded final URL path segment.
+    /// The decoded final URL path segment, or an empty string when no path
+    /// segment exists.
     #[must_use]
     pub fn file_name_from_url(url: &str) -> String {
-        let path = strip_query_and_fragment(url);
+        let path = lexical_url_path(url);
         let name = match path.rfind('/') {
             Some(index) => &path[index + 1..],
             None => path,
@@ -593,6 +599,70 @@ fn strip_query_and_fragment(url: &str) -> &str {
         (Some(index), None) | (None, Some(index)) => &url[..index],
         (None, None) => url,
     }
+}
+
+/// Returns the lexical path portion of a URL-like string.
+///
+/// A syntactically valid scheme is removed first. When the remaining value
+/// begins with `//`, its authority is excluded and only the following path is
+/// returned. No URL validation, normalization, or percent decoding occurs.
+///
+/// # Parameters
+/// - `url`: URL-like string to inspect.
+///
+/// # Returns
+/// The path-like portion before any query or fragment, or an empty string for
+/// an authority-only URL.
+#[inline]
+#[must_use]
+fn lexical_url_path(url: &str) -> &str {
+    let value = strip_query_and_fragment(url);
+    let value = strip_url_scheme(value);
+    let Some(authority_and_path) = value.strip_prefix("//") else {
+        return value;
+    };
+    authority_and_path
+        .find('/')
+        .map_or("", |index| &authority_and_path[index..])
+}
+
+/// Removes a syntactically valid URL scheme and its colon.
+///
+/// # Parameters
+/// - `value`: Query- and fragment-free URL-like value.
+///
+/// # Returns
+/// The substring after a valid leading scheme, or `value` unchanged when no
+/// valid scheme is present.
+#[inline]
+#[must_use]
+fn strip_url_scheme(value: &str) -> &str {
+    let Some((scheme, remainder)) = value.split_once(':') else {
+        return value;
+    };
+    if is_url_scheme(scheme) {
+        remainder
+    } else {
+        value
+    }
+}
+
+/// Tests whether a string matches the lexical URL scheme grammar.
+///
+/// # Parameters
+/// - `value`: Candidate scheme without its trailing colon.
+///
+/// # Returns
+/// `true` when the candidate starts with an ASCII letter and every remaining
+/// byte is an ASCII letter, digit, plus sign, hyphen, or period.
+#[inline]
+#[must_use]
+fn is_url_scheme(value: &str) -> bool {
+    let mut bytes = value.bytes();
+    bytes.next().is_some_and(|byte| byte.is_ascii_alphabetic())
+        && bytes.all(|byte| {
+            byte.is_ascii_alphanumeric() || matches!(byte, b'+' | b'-' | b'.')
+        })
 }
 
 /// Decodes percent-encoded UTF-8.
