@@ -184,9 +184,11 @@ streaming 内容可以使用 `LocalAtomicWriter`：
 
 ```rust
 use std::io::Write;
+use std::time::Duration;
 use qubit_local_files::LocalFiles;
 
-let mut writer = LocalFiles::begin_atomic_write("state.bin")?;
+let mut writer = LocalFiles::begin_atomic_write("state.bin")?
+    .with_open_retry_timeout(Duration::from_secs(5));
 writer.write_all(b"complete state")?;
 writer.commit()?;
 # Ok::<(), Box<dyn std::error::Error>>(())
@@ -200,6 +202,11 @@ constructor 和 builder。这个既有 writer 仍是 path-based；需要把替�
 `atomic_write_with` 会把同一个受保护 writer 临时借给 callback。callback
 可以写入 staging 内容，但不能 clone、保留、seek，也不能访问底层文件或 raw
 handle，因此 callback 返回后无法继续修改已提交 inode。
+
+在 Unix 上，`with_open_retry_timeout` 可限制活动 file lease 导致目标的
+nonblocking open 返回 `WouldBlock` 时的重试时间。默认无限等待；
+`Duration::ZERO` 在第一次冲突后返回 `TimedOut`。one-shot facade 不新增超时
+重载：应先取得 writer，配置后再写入并 commit，如上例所示。其他平台行为不变。
 
 失败时返回 `LocalAtomicWriteError`，其中包含失败阶段、临时路径、原始 I/O source error、`LocalAtomicDestinationState`，以及删除未提交 staging file 时产生的 secondary cleanup error。`Unchanged` 表示目标未变，`Replaced` 表示目标包含 staging 内容，`Missing` 表示目标已不存在，`Indeterminate` 要求恢复前同时检查目标与 staging。只有 `Unchanged` 会自动尝试清理 staging；其他状态保留仍存在的 staging entry，但成功移动后诊断用 staging path 可能已经不存在。
 如果 `atomic_write_with` callback panic，会先关闭并 best-effort 删除未提交临时文件，再继续传播 panic。清理失败不能替换原 panic，因此这种情况下 staging path 可能残留。
@@ -220,6 +227,10 @@ handle，因此 callback 返回后无法继续修改已提交 inode。
 `LocalCopyDirOptions::default()` 是有意保守的默认值：`conflict` 和 `type_conflict` 均为 `Fail`，不跟随 symbolic link，也不保留源权限。通过 `LocalCopyConflictPolicy` 显式选择 `Overwrite` 或 `Skip`；文件/目录类型替换则必须单独设置 `LocalCopyTypeConflictPolicy::Replace`。复制失败返回 `LocalCopyDirError`，其中包含路径、失败阶段、部分统计、可选 staging path、可选次级 cleanup error 和原始 I/O source error。
 
 `Fail` 和 `Skip` 文件提交需要原生 no-replace 支持，因此在 Linux、macOS、Windows 之外返回 `Unsupported`。`Overwrite` 使用普通替换原语，不受该限制。
+
+`with_open_retry_timeout(...)` 还可限制 Unix 上 source file lease 与
+nonblocking source open 冲突时的重试。它与 atomic writer 一样默认无限等待，
+零值在首次冲突后返回 `TimedOut`；这不是整个复制操作或通用 I/O 的超时。
 
 默认不保留源权限。在 Unix 上，新建或替换的文件因此使用 `0600`，新建目录使用 `0700`，之后仍受更严格的进程 umask 约束。原始复制或提交错误保持为主 source error。
 

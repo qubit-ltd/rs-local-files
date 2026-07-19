@@ -283,9 +283,11 @@ assert_eq!("{\"complete\":true}\n", std::fs::read_to_string(&path)?);
 
 ```rust
 use std::io::Write;
+use std::time::Duration;
 use qubit_local_files::LocalFiles;
 
-let mut writer = LocalFiles::begin_atomic_write("state.bin")?;
+let mut writer = LocalFiles::begin_atomic_write("state.bin")?
+    .with_open_retry_timeout(Duration::from_secs(5));
 writer.write_all(b"complete state")?;
 writer.commit()?;
 # Ok::<(), Box<dyn std::error::Error>>(())
@@ -295,6 +297,12 @@ writer.commit()?;
 成功后目标才会被替换；调用 `abort` 或直接 drop 会保留原目标并清理 staging
 文件。自 `0.5.0` 起，配置类型的字段不再公开，调用方必须使用现有 getter、
 constructor 和 builder。API 仍保持同步边界。
+
+在 Unix 上，`with_open_retry_timeout` 只限制活动 file lease 使目标的
+nonblocking open 返回 `WouldBlock` 时的重试。默认 `None` 不设期限；
+`Duration::ZERO` 在第一次冲突后返回 `TimedOut`。one-shot helper 有意不增加
+超时重载；请使用 `begin_atomic_write`（或 rooted writer），配置 writer 后再写入
+并 commit。该设置不改变其他平台的行为。
 
 ### 已有目标的 metadata 契约
 
@@ -426,6 +434,10 @@ assert_eq!(4, stats.bytes);
 | `with_type_conflict(...)` | `Fail` | 文件/目录类型冲突会被拒绝；`Replace` 显式允许破坏性替换。 |
 | `follow_symlinks()` | `false` | 源目录树中的 symbolic link 会被拒绝。 |
 | `preserve_permissions()` | `false` | 不复制源权限；在 Unix 上，新建或替换的文件保留 `0600`，新建目录使用 `0700`，之后仍受进程 umask 约束。 |
+| `with_open_retry_timeout(...)` | 无限等待 | 在 Unix 上限制 source lease 与 nonblocking open 冲突时的重试；零值在首次冲突后返回 `TimedOut`。 |
+
+该 open 重试超时不是遍历、字节复制、提交或通用 I/O 的 deadline。其他平台保持
+原有行为。
 
 `Fail` 和 `Skip` 文件提交需要原生 no-replace 原语，因此在 Linux、macOS、Windows 之外返回 `ErrorKind::Unsupported`。`Overwrite` 使用普通替换原语。由于操作不是目录树级事务，在不支持的文件提交前已经创建的目标目录会继续保留。
 

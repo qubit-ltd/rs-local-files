@@ -368,9 +368,11 @@ Use `LocalAtomicWriter` when content should be streamed across multiple calls:
 
 ```rust
 use std::io::Write;
+use std::time::Duration;
 use qubit_local_files::LocalFiles;
 
-let mut writer = LocalFiles::begin_atomic_write("state.bin")?;
+let mut writer = LocalFiles::begin_atomic_write("state.bin")?
+    .with_open_retry_timeout(Duration::from_secs(5));
 writer.write_all(b"complete state")?;
 writer.commit()?;
 # Ok::<(), Box<dyn std::error::Error>>(())
@@ -382,6 +384,13 @@ destination and cleans up the staging file. The API remains synchronous.
 
 Since `0.5.0`, configuration fields are private. Callers must use the existing
 getters, constructors, and builders.
+
+On Unix, `with_open_retry_timeout` limits only retries caused by an active file
+lease making the nonblocking destination open return `WouldBlock`. The default
+`None` waits without a deadline, while `Duration::ZERO` returns `TimedOut`
+after the first conflicting attempt. One-shot helpers intentionally have no
+timeout overload; use `begin_atomic_write` (or a rooted writer), configure the
+writer, then write and commit. This setting does not change other platforms.
 
 ### Existing-target metadata contract
 
@@ -536,6 +545,10 @@ Options:
 | `with_type_conflict(...)` | `Fail` | File/directory type mismatches are rejected; `Replace` explicitly permits destructive replacement. |
 | `follow_symlinks()` | `false` | Symbolic links in the source tree are rejected. |
 | `preserve_permissions()` | `false` | Source permissions are not copied; on Unix, new or replaced files keep mode `0600` and new directories use `0700`, subject to the process umask. |
+| `with_open_retry_timeout(...)` | unbounded | On Unix, bounds retries when a source lease conflicts with the nonblocking open; zero returns `TimedOut` after the first conflict. |
+
+The open retry timeout is not a deadline for traversal, byte copying, commit,
+or general I/O. Other platforms retain their existing behavior.
 
 `Fail` and `Skip` file commits require the native no-replace primitive and
 return `ErrorKind::Unsupported` outside Linux, macOS, and Windows. `Overwrite`

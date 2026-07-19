@@ -263,9 +263,11 @@ For streaming content, use `LocalAtomicWriter`:
 
 ```rust
 use std::io::Write;
+use std::time::Duration;
 use qubit_local_files::LocalFiles;
 
-let mut writer = LocalFiles::begin_atomic_write("state.bin")?;
+let mut writer = LocalFiles::begin_atomic_write("state.bin")?
+    .with_open_retry_timeout(Duration::from_secs(5));
 writer.write_all(b"complete state")?;
 writer.commit()?;
 # Ok::<(), Box<dyn std::error::Error>>(())
@@ -278,6 +280,12 @@ cleans up the staging file. This existing writer remains path-based; use
 `atomic_write_with` lends the same guarded writer to its callback. The callback
 can write the staged contents, but cannot clone, retain, seek, or access the
 underlying file or raw handle after the callback returns.
+
+On Unix, `with_open_retry_timeout` bounds retries when an active file lease
+makes the nonblocking destination open report `WouldBlock`. The default is an
+unbounded wait; `Duration::ZERO` returns `TimedOut` after the first conflict.
+The one-shot facade has no timeout overload: begin a writer, configure it, then
+write and commit as above. Other platforms are unchanged.
 
 Since `0.5.0`, configuration fields are private. Use the existing getters,
 constructors, and builders instead of direct field access.
@@ -321,6 +329,10 @@ optional staging path and secondary cleanup error, and the native source error.
 `Fail` and `Skip` file commits require native no-replace support and therefore
 return `Unsupported` outside Linux, macOS, and Windows. `Overwrite` uses the
 ordinary replacement primitive and is not subject to that restriction.
+`with_open_retry_timeout(...)` can additionally bound Unix retries when a
+source file lease conflicts with the nonblocking source open. It has the same
+unbounded default and zero-timeout semantics as atomic writers; it is not a
+general copy or I/O timeout.
 
 Recursive copy is not a tree-level transaction. Entries committed before a
 failure remain in the destination, no rollback is attempted, and destructive
