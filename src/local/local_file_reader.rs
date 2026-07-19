@@ -9,6 +9,7 @@
 
 use std::fs::File;
 use std::io::{
+    IoSliceMut,
     Read,
     Result,
     Seek,
@@ -86,6 +87,24 @@ impl Read for LocalFileReader {
     #[inline(always)]
     fn read(&mut self, buf: &mut [u8]) -> Result<usize> {
         self.inner.read(buf)
+    }
+
+    /// Reads bytes into multiple destination buffers.
+    ///
+    /// # Parameters
+    /// - `buffers`: Destination buffers filled by the wrapped reader.
+    ///
+    /// # Returns
+    /// Total number of bytes read across the supplied buffers.
+    ///
+    /// # Errors
+    /// Returns the I/O error reported by the wrapped reader.
+    #[inline(always)]
+    fn read_vectored(
+        &mut self,
+        buffers: &mut [IoSliceMut<'_>],
+    ) -> Result<usize> {
+        self.inner.read_vectored(buffers)
     }
 }
 

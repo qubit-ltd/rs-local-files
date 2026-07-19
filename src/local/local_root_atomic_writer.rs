@@ -333,6 +333,26 @@ impl Write for LocalRootAtomicWriter {
         }
     }
 
+    /// Writes bytes from multiple buffers into the rooted staging file.
+    #[inline(always)]
+    fn write_vectored(
+        &mut self,
+        buffers: &[io::IoSlice<'_>],
+    ) -> io::Result<usize> {
+        #[cfg(unix)]
+        {
+            self.staged_file.file_mut().write_vectored(buffers)
+        }
+        #[cfg(not(unix))]
+        {
+            let _ = buffers;
+            Err(io::Error::new(
+                io::ErrorKind::Unsupported,
+                "secure rooted atomic writes are unsupported on this target",
+            ))
+        }
+    }
+
     /// Flushes userspace data into the private rooted staging file.
     #[inline(always)]
     fn flush(&mut self) -> io::Result<()> {

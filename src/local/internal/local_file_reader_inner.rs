@@ -12,6 +12,7 @@
 use std::fs::File;
 use std::io::{
     BufReader,
+    IoSliceMut,
     Read,
     Result,
     Seek,
@@ -76,6 +77,18 @@ impl Read for LocalFileReaderInner {
         match self {
             Self::Unbuffered(file) => file.read(buffer),
             Self::Buffered(reader) => reader.read(buffer),
+        }
+    }
+
+    /// Reads into multiple buffers through the active representation.
+    #[inline(always)]
+    fn read_vectored(
+        &mut self,
+        buffers: &mut [IoSliceMut<'_>],
+    ) -> Result<usize> {
+        match self {
+            Self::Unbuffered(file) => file.read_vectored(buffers),
+            Self::Buffered(reader) => reader.read_vectored(buffers),
         }
     }
 }

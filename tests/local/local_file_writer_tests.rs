@@ -7,10 +7,14 @@
 // =============================================================================
 
 use std::io::{
+    IoSlice,
     Seek,
     SeekFrom,
     Write,
 };
+
+#[cfg(all(coverage, target_os = "linux"))]
+use std::io::ErrorKind;
 
 #[cfg(unix)]
 use qubit_local_files::FileWriteMode;
@@ -21,6 +25,8 @@ use qubit_local_files::{
 
 #[cfg(target_os = "linux")]
 use super::test_support::file_status_flags;
+#[cfg(all(coverage, target_os = "linux"))]
+use super::test_support::run_in_coverage_fault_process;
 #[cfg(unix)]
 use super::test_support::{
     assert_fifo_open_is_rejected,
@@ -75,6 +81,49 @@ fn test_local_file_writer_supports_seek_for_unbuffered_and_buffered_writers() {
 
     assert_eq!(b"abXYef", fs::read(&unbuffered_path).unwrap().as_slice());
     assert_eq!(b"abXYef", fs::read(&buffered_path).unwrap().as_slice());
+    fs::remove_dir_all(dir).unwrap();
+}
+
+#[test]
+fn test_local_file_writer_forwards_vectored_writes_to_buffered_writer() {
+    let dir = temp_dir("writer-vectored");
+    let path = dir.join("data.txt");
+    let mut writer = LocalFiles::open_writer(
+        &path,
+        FileWriteOptions::default()
+            .buffered_with_capacity(16)
+            .expect("positive buffer capacity should be accepted"),
+    )
+    .expect("buffered writer should open");
+    let buffers = [IoSlice::new(b"ab"), IoSlice::new(b"cd")];
+
+    let count = writer
+        .write_vectored(&buffers)
+        .expect("vectored write should succeed");
+    writer.close().expect("buffered writer should close");
+
+    assert_eq!(4, count);
+    assert_eq!(b"abcd", fs::read(&path).unwrap().as_slice());
+    fs::remove_dir_all(dir).unwrap();
+}
+
+#[cfg(unix)]
+#[test]
+fn test_local_file_writer_forwards_vectored_writes_to_unbuffered_file() {
+    let dir = temp_dir("writer-unbuffered-vectored");
+    let path = dir.join("data.txt");
+    let mut writer =
+        LocalFiles::open_writer(&path, FileWriteOptions::default())
+            .expect("unbuffered writer should open");
+    let buffers = [IoSlice::new(b"ab"), IoSlice::new(b"cd")];
+
+    let count = writer
+        .write_vectored(&buffers)
+        .expect("vectored write should succeed");
+    writer.close().expect("unbuffered writer should close");
+
+    assert_eq!(4, count);
+    assert_eq!(b"abcd", fs::read(&path).unwrap().as_slice());
     fs::remove_dir_all(dir).unwrap();
 }
 

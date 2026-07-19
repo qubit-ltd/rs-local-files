@@ -7,6 +7,9 @@
 // =============================================================================
 
 #[cfg(unix)]
+use std::io::IoSlice;
+
+#[cfg(unix)]
 use super::test_support::PermissionsExt;
 #[cfg(windows)]
 use super::test_support::path_with_interior_nul;
@@ -223,6 +226,26 @@ fn test_temp_file_supports_seek_through_owned_handle() {
     file.close();
 
     assert_eq!(b"one+two", fs::read(file.path()).unwrap().as_slice());
+    fs::remove_dir_all(dir).unwrap();
+}
+
+#[cfg(unix)]
+#[test]
+fn test_temp_file_forwards_vectored_writes_to_owned_handle() {
+    let dir = temp_dir("temp-file-vectored");
+    let mut file =
+        LocalTempFile::in_dir(&dir, Some("vectored-"), Some(".tmp"), 4)
+            .expect("temporary file should be created");
+    let path = file.path().to_path_buf();
+    let buffers = [IoSlice::new(b"ab"), IoSlice::new(b"cd")];
+
+    let count = file
+        .write_vectored(&buffers)
+        .expect("vectored write should succeed");
+    file.close();
+
+    assert_eq!(4, count);
+    assert_eq!(b"abcd", fs::read(path).unwrap().as_slice());
     fs::remove_dir_all(dir).unwrap();
 }
 

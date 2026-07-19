@@ -14,6 +14,7 @@ use std::fs::{
 use std::io::{
     Error,
     ErrorKind,
+    IoSlice,
     Result,
     Seek,
     SeekFrom,
@@ -467,6 +468,12 @@ impl Write for LocalTempFile {
     #[inline(always)]
     fn write(&mut self, buffer: &[u8]) -> Result<usize> {
         self.as_file_mut()?.write(buffer)
+    }
+
+    /// Writes bytes from multiple buffers through the owned file handle.
+    #[inline(always)]
+    fn write_vectored(&mut self, buffers: &[IoSlice<'_>]) -> Result<usize> {
+        self.as_file_mut()?.write_vectored(buffers)
     }
 
     /// Flushes the owned temporary file handle.

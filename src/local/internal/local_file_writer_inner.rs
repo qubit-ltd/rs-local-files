@@ -12,6 +12,7 @@
 use std::fs::File;
 use std::io::{
     BufWriter,
+    IoSlice,
     Result,
     Seek,
     SeekFrom,
@@ -104,6 +105,15 @@ impl Write for LocalFileWriterInner {
         match self {
             Self::Unbuffered(file) => file.write(buffer),
             Self::Buffered(writer) => writer.write(buffer),
+        }
+    }
+
+    /// Writes from multiple buffers through the active representation.
+    #[inline(always)]
+    fn write_vectored(&mut self, buffers: &[IoSlice<'_>]) -> Result<usize> {
+        match self {
+            Self::Unbuffered(file) => file.write_vectored(buffers),
+            Self::Buffered(writer) => writer.write_vectored(buffers),
         }
     }
 

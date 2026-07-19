@@ -6,9 +6,12 @@
 //    Licensed under the Apache License, Version 2.0.
 // =============================================================================
 
-#[cfg(unix)]
-use std::io::ErrorKind;
 use std::io::Write;
+#[cfg(unix)]
+use std::io::{
+    ErrorKind,
+    IoSlice,
+};
 #[cfg(target_os = "linux")]
 use std::path::Path;
 use std::time::Duration;
@@ -115,6 +118,26 @@ fn test_local_atomic_writer_commits_written_contents() {
     assert!(!path.exists());
     writer.commit().expect("atomic writer should commit");
     assert_eq!(b"committed", fs::read(&path).unwrap().as_slice());
+    assert_eq!(0, count_atomic_temp_files(&dir));
+    fs::remove_dir_all(dir).unwrap();
+}
+
+#[cfg(unix)]
+#[test]
+fn test_local_atomic_writer_forwards_vectored_writes() {
+    let dir = temp_dir("atomic-writer-vectored");
+    let path = dir.join("out.txt");
+    let mut writer = LocalFiles::begin_atomic_write(&path)
+        .expect("atomic writer should begin");
+    let buffers = [IoSlice::new(b"ab"), IoSlice::new(b"cd")];
+
+    let count = writer
+        .write_vectored(&buffers)
+        .expect("vectored write should succeed");
+    writer.commit().expect("atomic writer should commit");
+
+    assert_eq!(4, count);
+    assert_eq!(b"abcd", fs::read(&path).unwrap().as_slice());
     assert_eq!(0, count_atomic_temp_files(&dir));
     fs::remove_dir_all(dir).unwrap();
 }

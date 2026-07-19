@@ -9,6 +9,7 @@
 
 use std::fs::File;
 use std::io::{
+    IoSlice,
     Result,
     Seek,
     SeekFrom,
@@ -128,6 +129,21 @@ impl Write for LocalFileWriter {
     #[inline(always)]
     fn write(&mut self, buf: &[u8]) -> Result<usize> {
         self.inner.write(buf)
+    }
+
+    /// Writes bytes from multiple source buffers.
+    ///
+    /// # Parameters
+    /// - `buffers`: Source buffers passed to the wrapped writer.
+    ///
+    /// # Returns
+    /// Total number of bytes accepted across the supplied buffers.
+    ///
+    /// # Errors
+    /// Returns the I/O error reported by the wrapped writer.
+    #[inline(always)]
+    fn write_vectored(&mut self, buffers: &[IoSlice<'_>]) -> Result<usize> {
+        self.inner.write_vectored(buffers)
     }
 
     /// Flushes the wrapped file writer.

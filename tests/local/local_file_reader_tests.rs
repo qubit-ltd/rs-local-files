@@ -8,6 +8,7 @@
 
 use std::io::{
     ErrorKind,
+    IoSliceMut,
     Read,
     Seek,
     SeekFrom,
@@ -104,6 +105,61 @@ fn test_local_file_reader_supports_seek_for_unbuffered_and_buffered_readers() {
     assert_eq!(b"cd", &unbuffered_bytes);
     assert_eq!(b"a", &first);
     assert_eq!(b"ef", buffered_tail.as_slice());
+    fs::remove_dir_all(dir).unwrap();
+}
+
+#[test]
+fn test_local_file_reader_forwards_vectored_reads_to_buffered_reader() {
+    let dir = temp_dir("reader-vectored");
+    let path = dir.join("data.txt");
+    fs::write(&path, b"abcdefghi").expect("reader fixture should be written");
+    let mut reader = LocalFiles::open_reader(
+        &path,
+        FileReadOptions::buffered_with_capacity(8)
+            .expect("positive buffer capacity should be accepted"),
+    )
+    .expect("buffered reader should open");
+    let mut prefix = [0; 1];
+    reader
+        .read_exact(&mut prefix)
+        .expect("initial read should fill the internal buffer");
+    let mut first = [0; 2];
+    let mut second = [0; 2];
+    let mut buffers =
+        [IoSliceMut::new(&mut first), IoSliceMut::new(&mut second)];
+
+    let count = reader
+        .read_vectored(&mut buffers)
+        .expect("vectored read should succeed");
+
+    assert_eq!(4, count);
+    assert_eq!(b"a", &prefix);
+    assert_eq!(b"bc", &first);
+    assert_eq!(b"de", &second);
+    fs::remove_dir_all(dir).unwrap();
+}
+
+#[cfg(unix)]
+#[test]
+fn test_local_file_reader_forwards_vectored_reads_to_unbuffered_file() {
+    let dir = temp_dir("reader-unbuffered-vectored");
+    let path = dir.join("data.txt");
+    fs::write(&path, b"abcd").expect("reader fixture should be written");
+    let mut reader =
+        LocalFiles::open_reader(&path, FileReadOptions::unbuffered())
+            .expect("unbuffered reader should open");
+    let mut first = [0; 2];
+    let mut second = [0; 2];
+    let mut buffers =
+        [IoSliceMut::new(&mut first), IoSliceMut::new(&mut second)];
+
+    let count = reader
+        .read_vectored(&mut buffers)
+        .expect("vectored read should succeed");
+
+    assert_eq!(4, count);
+    assert_eq!(b"ab", &first);
+    assert_eq!(b"cd", &second);
     fs::remove_dir_all(dir).unwrap();
 }
 

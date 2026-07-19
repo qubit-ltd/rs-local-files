@@ -397,6 +397,15 @@ impl Write for LocalAtomicWriter {
         self.staged_file.file_mut().write(buffer)
     }
 
+    /// Writes bytes from multiple buffers into the private staging file.
+    #[inline(always)]
+    fn write_vectored(
+        &mut self,
+        buffers: &[io::IoSlice<'_>],
+    ) -> io::Result<usize> {
+        self.staged_file.file_mut().write_vectored(buffers)
+    }
+
     /// Flushes userspace data into the private staging file.
     #[inline(always)]
     fn flush(&mut self) -> io::Result<()> {

@@ -9,7 +9,10 @@
 #[cfg(target_os = "linux")]
 use std::env;
 #[cfg(unix)]
-use std::io::Write;
+use std::io::{
+    IoSlice,
+    Write,
+};
 #[cfg(target_os = "linux")]
 use std::path::PathBuf;
 #[cfg(target_os = "linux")]
@@ -567,6 +570,35 @@ fn test_begin_atomic_write_commits_and_aborts() {
             .expect("aborted destination should remain readable")
             .as_slice(),
     );
+    fs::remove_dir_all(root_path).expect("atomic fixture should be removed");
+}
+
+/// Verifies vectored writes through the descriptor-relative staging handle.
+#[cfg(unix)]
+#[test]
+fn test_root_atomic_writer_forwards_vectored_writes() {
+    let root_path = temp_dir("rooted-atomic-vectored");
+    let root = LocalRoot::open(&root_path).expect("root should open");
+    let destination = LocalRelativePath::new("result.txt")
+        .expect("destination should validate");
+    let mut writer = root
+        .begin_atomic_write(&destination)
+        .expect("rooted atomic writer should begin");
+    let buffers = [IoSlice::new(b"ab"), IoSlice::new(b"cd")];
+
+    let count = writer
+        .write_vectored(&buffers)
+        .expect("vectored write should succeed");
+    writer.commit().expect("rooted atomic writer should commit");
+
+    assert_eq!(4, count);
+    assert_eq!(
+        b"abcd",
+        fs::read(root_path.join("result.txt"))
+            .expect("committed destination should be readable")
+            .as_slice(),
+    );
+    assert_eq!(0, count_atomic_temp_files(&root_path));
     fs::remove_dir_all(root_path).expect("atomic fixture should be removed");
 }
 
