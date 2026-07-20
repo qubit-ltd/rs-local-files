@@ -54,6 +54,12 @@ use super::internal::{
 /// [`LocalTempDir::keep`], and [`LocalTempDir::persist`] expose stable absolute
 /// paths that remain directly usable after later current-directory changes.
 ///
+/// Cleanup and persistence are bound to the generated path name rather than an
+/// immutable filesystem-entry identity. Custom parent directories must belong
+/// to a trusted namespace: a concurrent replacement of that name can redirect
+/// recursive cleanup or persistence. This guard is not a security boundary
+/// against concurrent namespace mutation.
+///
 /// Cleanup performed from `Drop` is best-effort. If removal fails, the failure
 /// is reported through the `log` facade at warning level and the program is not
 /// panicked.
@@ -110,6 +116,10 @@ impl LocalTempDir {
     }
 
     /// Creates a temporary directory in the specified directory.
+    ///
+    /// `dir` must belong to a trusted namespace. The returned guard manages the
+    /// generated path name and cannot prevent another actor from replacing that
+    /// directory entry before cleanup or persistence.
     ///
     /// # Parameters
     /// - `dir`: Parent directory in which the temporary directory is created.
@@ -331,7 +341,9 @@ impl LocalTempDir {
     ///
     /// This consumes the guard and disables the later best-effort cleanup in
     /// `Drop` after removal succeeds. If removal fails, the guard still owns
-    /// the path and will attempt best-effort cleanup when dropped.
+    /// the path and will attempt best-effort cleanup when dropped. Recursive
+    /// removal applies to the directory tree currently stored at the generated
+    /// path name.
     ///
     /// # Errors
     /// Returns the I/O error reported by [`fs::remove_dir_all`].
@@ -381,6 +393,8 @@ impl LocalTempDir {
     /// Persistence uses a native move or rename and does not fall back to
     /// copying and deleting. Moving across filesystems can therefore fail with
     /// `EXDEV` on Unix or a platform-equivalent error.
+    /// The source is the filesystem entry currently stored at the generated
+    /// path name; persistence is not an identity-bound operation.
     /// A relative target is bound to the process current directory when this
     /// method begins, and the returned path is absolute. On Windows, no
     /// verbatim-path prefix is added, so native path-length and verbatim-path

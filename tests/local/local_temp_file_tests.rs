@@ -715,6 +715,16 @@ fn test_temp_file_persist_returns_resource_when_current_dir_is_unavailable() {
         error.requested_target(),
     );
     assert!(error.resolved_target().is_none());
+    assert_eq!(
+        ErrorKind::NotFound,
+        error
+            .resource()
+            .as_file()
+            .expect_err(
+                "target resolution failure should retain a closed guard"
+            )
+            .kind(),
+    );
     let message = error.to_string();
     assert!(message.contains("relative-target"));
     assert!(!message.contains("resolved as"));
@@ -744,6 +754,16 @@ fn test_temp_file_persist_returns_resource_when_parent_creation_fails() {
     ));
     assert_eq!(source, error.resource().path());
     assert!(source.exists());
+    assert_eq!(
+        ErrorKind::NotFound,
+        error
+            .resource()
+            .as_file()
+            .expect_err(
+                "parent preparation failure should retain a closed guard"
+            )
+            .kind(),
+    );
     drop(error);
     assert!(!source.exists());
     fs::remove_dir_all(dir).unwrap();

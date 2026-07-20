@@ -38,6 +38,14 @@ fn test_persist_error_into_parts_returns_error_and_resource() {
     assert_eq!(ErrorKind::AlreadyExists, persist_error.error().kind());
     assert_eq!(source, persist_error.resource().path());
     assert_eq!(source, persist_error.resource_mut().path());
+    assert_eq!(
+        ErrorKind::NotFound,
+        persist_error
+            .resource()
+            .as_file()
+            .expect_err("persist failure should retain a closed file guard")
+            .kind(),
+    );
     assert_eq!(target, persist_error.requested_target());
     assert_eq!(Some(target.as_path()), persist_error.resolved_target());
     assert_eq!(LocalPersistStage::InstallDestination, persist_error.stage());

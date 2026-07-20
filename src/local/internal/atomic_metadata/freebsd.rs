@@ -26,6 +26,8 @@ use std::os::fd::AsRawFd;
 const ACL_TYPE_ACCESS: u32 = 0x0000_0002;
 /// FreeBSD NFSv4 ACL type.
 const ACL_TYPE_NFS4: u32 = 0x0000_0004;
+/// Maximum number of attempts for one xattr size race.
+const XATTR_SIZE_RACE_ATTEMPTS: usize = 8;
 
 unsafe extern "C" {
     /// Gets a descriptor ACL of the requested native type.
@@ -121,6 +123,7 @@ fn list_attributes(
     file: &File,
     namespace: libc::c_int,
 ) -> Result<BTreeSet<Vec<u8>>> {
+    let mut remaining_attempts = XATTR_SIZE_RACE_ATTEMPTS;
     loop {
         // SAFETY: the descriptor remains live and null output requests only
         // the current byte length of the namespace's name list.
@@ -155,7 +158,10 @@ fn list_attributes(
         };
         if read == -1 {
             let error = Error::last_os_error();
-            if error.raw_os_error() == Some(libc::ERANGE) {
+            if error.raw_os_error() == Some(libc::ERANGE)
+                && remaining_attempts > 1
+            {
+                remaining_attempts -= 1;
                 continue;
             }
             return Err(error);
@@ -218,6 +224,7 @@ fn get_optional_attribute(
     name: &[u8],
 ) -> Result<Option<Vec<u8>>> {
     let name = native_name(name)?;
+    let mut remaining_attempts = XATTR_SIZE_RACE_ATTEMPTS;
     loop {
         // SAFETY: the descriptor and name remain live, and null output asks
         // only for the current value length.
@@ -254,7 +261,10 @@ fn get_optional_attribute(
         };
         if read == -1 {
             let error = Error::last_os_error();
-            if error.raw_os_error() == Some(libc::ERANGE) {
+            if error.raw_os_error() == Some(libc::ERANGE)
+                && remaining_attempts > 1
+            {
+                remaining_attempts -= 1;
                 continue;
             }
             if is_missing_attribute(&error) {

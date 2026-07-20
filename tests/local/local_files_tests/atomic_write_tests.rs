@@ -464,6 +464,20 @@ fn test_atomic_write_retries_injected_metadata_list_range() {
     assert_injected_metadata_error(TEST_NAME, "atomic-metadata-list-range");
 }
 
+/// Verifies that persistent xattr-list size races eventually return an error.
+#[cfg(all(coverage, target_os = "linux"))]
+#[test]
+fn test_atomic_write_limits_persistent_metadata_list_range() {
+    const TEST_NAME: &str = concat!(
+        "local::local_files_tests::atomic_write_tests::",
+        "test_atomic_write_limits_persistent_metadata_list_range",
+    );
+    assert_injected_metadata_error(
+        TEST_NAME,
+        "atomic-metadata-list-range-persistent",
+    );
+}
+
 /// Verifies propagation of an injected xattr-value buffer read error.
 #[cfg(all(coverage, target_os = "linux"))]
 #[test]
@@ -473,6 +487,20 @@ fn test_atomic_write_reports_injected_metadata_value_read_error() {
         "test_atomic_write_reports_injected_metadata_value_read_error",
     );
     assert_injected_metadata_error(TEST_NAME, "atomic-metadata-value-read");
+}
+
+/// Verifies that persistent xattr-value size races eventually return an error.
+#[cfg(all(coverage, target_os = "linux"))]
+#[test]
+fn test_atomic_write_limits_persistent_metadata_value_range() {
+    const TEST_NAME: &str = concat!(
+        "local::local_files_tests::atomic_write_tests::",
+        "test_atomic_write_limits_persistent_metadata_value_range",
+    );
+    assert_injected_metadata_error(
+        TEST_NAME,
+        "atomic-metadata-value-range-persistent",
+    );
 }
 
 /// Verifies ordering and lookup of an injected security xattr name.

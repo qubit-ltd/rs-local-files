@@ -54,6 +54,12 @@ use super::internal::{
 /// stable absolute paths that remain directly usable after later
 /// current-directory changes.
 ///
+/// Cleanup and persistence are bound to the generated path name rather than an
+/// immutable filesystem-entry identity. Custom parent directories must belong
+/// to a trusted namespace: a concurrent replacement of that name can redirect
+/// the later cleanup or persistence operation. This guard is not a security
+/// boundary against concurrent namespace mutation.
+///
 /// Cleanup performed from `Drop` is best-effort. If removal fails, the failure
 /// is reported through the `log` facade at warning level and the program is not
 /// panicked.
@@ -157,6 +163,10 @@ impl LocalTempFile {
     }
 
     /// Creates a temporary file in the specified directory.
+    ///
+    /// `dir` must belong to a trusted namespace. The returned guard manages the
+    /// generated path name and cannot prevent another actor from replacing that
+    /// directory entry before cleanup or persistence.
     ///
     /// # Parameters
     /// - `dir`: Parent directory in which the temporary file is created.
@@ -277,7 +287,8 @@ impl LocalTempFile {
     ///
     /// This consumes the guard and disables the later best-effort cleanup in
     /// `Drop` after removal succeeds. If removal fails, the guard still owns
-    /// the path until it is dropped.
+    /// the path until it is dropped. Removal applies to the filesystem entry
+    /// currently stored at the generated path name.
     ///
     /// # Errors
     /// Returns an I/O error when removing the file fails.
@@ -318,13 +329,16 @@ impl LocalTempFile {
 
     /// Moves the temporary file to a final path without overwriting.
     ///
-    /// The file is closed before moving. Parent directories for
-    /// `target` are created before moving. Existing targets are rejected by the
-    /// move operation instead of by a separate metadata precheck. Use
+    /// The file is closed before target resolution and moving. Parent
+    /// directories for `target` are created before moving. Existing targets
+    /// are rejected by the move operation instead of by a separate metadata
+    /// precheck. Use
     /// [`LocalTempFile::persist_with`] and [`LocalPersistOptions`] when
     /// overwriting is intended. If persistence fails, the returned
-    /// [`LocalPersistError`] retains this guard so the caller can retry, keep,
-    /// inspect, or explicitly clean up the temporary file.
+    /// [`LocalPersistError`] retains this guard in its closed state so the
+    /// caller can retry persistence, keep the path, inspect path metadata, or
+    /// explicitly clean up the temporary file. The retained guard cannot read,
+    /// write, or seek through its original handle.
     ///
     /// Native no-replace persistence is available on Linux, macOS, and
     /// Windows. Other targets return [`std::io::ErrorKind::Unsupported`] and
@@ -335,6 +349,8 @@ impl LocalTempFile {
     /// Persistence uses a native move or rename and does not fall back to
     /// copying and deleting. Moving across filesystems can therefore fail with
     /// `EXDEV` on Unix or a platform-equivalent error.
+    /// The source is the filesystem entry currently stored at the generated
+    /// path name; persistence is not an identity-bound operation.
     /// A relative target is bound to the process current directory when this
     /// method begins, and the returned path is absolute. On Windows, no
     /// verbatim-path prefix is added, so native path-length and verbatim-path
@@ -363,8 +379,11 @@ impl LocalTempFile {
 
     /// Moves the temporary file to a final path using persistence options.
     ///
-    /// The file is closed before moving the path. Parent directories for
-    /// `target` are created before moving. When
+    /// The file is closed before target resolution and moving the path. On any
+    /// failure, the returned [`LocalPersistError`] retains the guard in its
+    /// closed state; its path operations remain available, but its original
+    /// handle cannot be used for reading, writing, or seeking. Parent
+    /// directories for `target` are created before moving. When
     /// `options.overwrites()` is `false`, existing targets are rejected by the
     /// move operation. When
     /// `options.overwrites()` is `true`, an existing target file may be
@@ -381,6 +400,8 @@ impl LocalTempFile {
     /// target's metadata. Use [`LocalFiles::atomic_write`] when replacing
     /// contents while strictly preserving supported platform-native metadata
     /// is required.
+    /// The source is the filesystem entry currently stored at the generated
+    /// path name; persistence is not an identity-bound operation.
     /// A relative target is bound to the process current directory when this
     /// method begins, and the returned path is absolute. On Windows, no
     /// verbatim-path prefix is added, so native path-length and verbatim-path
@@ -410,6 +431,23 @@ impl LocalTempFile {
     }
 
     /// Persists this file using one borrowed target path.
+    ///
+    /// The original handle is closed before resolving `target`. Every error
+    /// therefore retains a closed guard whose path ownership remains active.
+    ///
+    /// # Parameters
+    /// - `target`: Borrowed final file path.
+    /// - `options`: Persistence behavior options.
+    ///
+    /// # Returns
+    /// The absolute final file path.
+    ///
+    /// # Errors
+    /// Returns [`LocalPersistError`] with the closed guard when target
+    /// resolution, parent preparation, or installation fails.
+    ///
+    /// # Panics
+    /// Panics if the temporary path was released before this method begins.
     fn persist_path_with(
         mut self,
         target: &Path,
