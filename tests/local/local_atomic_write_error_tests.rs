@@ -39,6 +39,11 @@ fn test_atomic_write_with_returns_parent_error() {
         error.kind(),
         ErrorKind::AlreadyExists | ErrorKind::NotADirectory
     ));
+    assert_eq!(error.kind(), error.source_error().kind());
+    let dynamic_source = StdError::source(&error)
+        .and_then(|source| source.downcast_ref::<Error>())
+        .expect("error source should retain the native I/O error");
+    assert!(std::ptr::eq(error.source_error(), dynamic_source));
     assert_eq!(LocalAtomicWriteStage::PrepareParent, error.stage());
     assert_eq!(file_parent.join("child.txt"), error.path());
     assert!(error.temporary_path().is_none());

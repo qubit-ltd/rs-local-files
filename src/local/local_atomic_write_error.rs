@@ -44,8 +44,8 @@ pub struct LocalAtomicWriteError {
     destination_state: LocalAtomicDestinationState,
     /// Secondary error reported while removing an uncommitted staging file.
     ///
-    /// The primary operation error remains available through [`Self::source`]
-    /// and the [`Error`] implementation.
+    /// The primary operation error remains available through
+    /// [`Self::source_error`] and the [`Error`] implementation.
     cleanup_error: Option<io::Error>,
     /// Native I/O error that caused the failure.
     source: io::Error,
@@ -130,6 +130,16 @@ impl LocalAtomicWriteError {
         self.cleanup_error.as_ref()
     }
 
+    /// Returns the native I/O error that caused the atomic write to fail.
+    ///
+    /// # Returns
+    /// Retained primary I/O error without dynamic downcasting.
+    #[must_use]
+    #[inline(always)]
+    pub const fn source_error(&self) -> &io::Error {
+        &self.source
+    }
+
     /// Returns the native I/O error kind.
     ///
     /// # Returns
@@ -187,6 +197,6 @@ impl Error for LocalAtomicWriteError {
     /// Returns the retained native I/O error.
     #[inline(always)]
     fn source(&self) -> Option<&(dyn Error + 'static)> {
-        Some(&self.source)
+        Some(self.source_error())
     }
 }
