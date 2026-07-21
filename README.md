@@ -384,6 +384,11 @@ does not provide:
 For stream and byte-I/O concerns, use
 [qubit-io](https://github.com/qubit-ltd/rs-io).
 
+For provider-neutral filesystem contracts and pluggable backend registries, use
+[qubit-fs](https://github.com/qubit-ltd/rs-fs). A local `qubit-fs` provider
+should remain a separate adapter crate rather than adding that abstraction
+dependency here.
+
 ## Platform Support
 
 | Support tier | Targets | CI validation |

@@ -270,6 +270,10 @@ portable 校验还会拒绝使用上标数字的 Windows device name，包括 `C
 stream 和字节 I/O 相关能力请使用
 [qubit-io](https://github.com/qubit-ltd/rs-io)。
 
+provider-neutral 文件系统契约和可插拔后端注册请使用
+[qubit-fs](https://github.com/qubit-ltd/rs-fs)。面向 `qubit-fs` 的本地 provider
+应保持为独立 adapter crate，而不应将该抽象依赖加入本 crate。
+
 ## 平台支持
 
 | 支持层级 | 目标平台 | CI 验证方式 |
