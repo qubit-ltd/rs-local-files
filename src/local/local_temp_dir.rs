@@ -147,6 +147,9 @@ impl LocalTempDir {
     ///
     /// # Returns
     /// Borrowed absolute path managed by this temporary directory.
+    ///
+    /// # Panics
+    /// Panics if the path was already released by an internal state transition.
     #[must_use]
     #[inline(always)]
     pub fn path(&self) -> &Path {
@@ -361,6 +364,9 @@ impl LocalTempDir {
     /// # Returns
     /// The absolute generated temporary directory path.
     ///
+    /// # Panics
+    /// Panics if the path was already released by an internal state transition.
+    ///
     /// Ignoring the returned path is rejected:
     ///
     /// ```compile_fail
@@ -410,6 +416,9 @@ impl LocalTempDir {
     /// Returns [`LocalPersistError`] with the failure stage, requested target,
     /// optional resolved target, native error, and this retained guard when
     /// resolution, parent preparation, or no-replace installation fails.
+    ///
+    /// # Panics
+    /// Panics if the path was already released by an internal state transition.
     pub fn persist<P>(
         mut self,
         target: P,

@@ -49,6 +49,10 @@ use super::staged_copy::copy_file_with_options;
 ///
 /// Returns a structured error when inspection, traversal, copying, permission
 /// preservation, or exact accounting fails.
+///
+/// # Panics
+///
+/// Panics if the iterative traversal loses its active frame.
 pub(super) fn copy_dir_iterative(
     src: &Path,
     dst: &Path,

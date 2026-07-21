@@ -148,6 +148,10 @@ impl RootedStagedFile {
     /// # Errors
     ///
     /// Returns the operating-system error from `renameat`.
+    ///
+    /// # Panics
+    ///
+    /// Panics if the staging entry was already disarmed.
     pub(in crate::local) fn rename_to(
         &mut self,
         destination: &CString,
@@ -183,6 +187,10 @@ impl RootedStagedFile {
     ///
     /// Returns the native error with the known destination and staging states.
     /// Cleanup remains armed until the caller handles those states explicitly.
+    ///
+    /// # Panics
+    ///
+    /// Panics if the staging entry was already disarmed.
     pub(in crate::local) fn install_new_to(
         &mut self,
         destination: &CString,

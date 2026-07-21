@@ -211,6 +211,9 @@ impl LocalTempFile {
     ///
     /// # Returns
     /// Borrowed absolute path managed by this temporary file.
+    ///
+    /// # Panics
+    /// Panics if the path was already released by an internal state transition.
     #[must_use]
     #[inline(always)]
     pub fn path(&self) -> &Path {
@@ -308,6 +311,9 @@ impl LocalTempFile {
     ///
     /// # Returns
     /// The absolute generated temporary file path.
+    ///
+    /// # Panics
+    /// Panics if the path was already released by an internal state transition.
     ///
     /// Ignoring the returned path is rejected:
     ///

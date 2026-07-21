@@ -217,6 +217,11 @@ pub(crate) fn open_rooted_writer(
 ///
 /// Returns a contextual error when a parent cannot be cloned, created, opened
 /// without following a link, or verified as a directory.
+///
+/// # Panics
+///
+/// Panics if `path` violates the validated relative-path invariant and has no
+/// final component.
 pub(in crate::local) fn open_rooted_parent(
     root: &File,
     diagnostic_path: &Path,

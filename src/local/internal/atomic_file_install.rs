@@ -277,6 +277,26 @@ pub(crate) fn install_new_atomic_file_at(
 }
 
 /// Creates a new hard link and then removes the staging name.
+///
+/// # Parameters
+///
+/// * `staging_parent` - Directory descriptor authorizing the staging name.
+/// * `staging` - Staging entry name relative to `staging_parent`.
+/// * `destination_parent` - Directory descriptor authorizing the destination.
+/// * `destination` - Destination entry name relative to `destination_parent`.
+///
+/// # Returns
+///
+/// `Ok(())` after the hard link is published and the staging name is removed.
+///
+/// # Errors
+///
+/// Returns the native link or unlink error together with the known destination
+/// and staging states.
+///
+/// # Panics
+///
+/// Panics if the internal unlink-attempt count is configured as zero.
 #[cfg(any(target_os = "linux", target_os = "android", target_os = "freebsd",))]
 fn link_then_unlink(
     staging_parent: RawFd,

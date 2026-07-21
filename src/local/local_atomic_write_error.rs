@@ -219,10 +219,12 @@ impl Display for LocalAtomicWriteError {
                 "; staging cleanup also failed: {cleanup_error}; parent \
                  synchronization also failed: {parent_sync_error}",
             ),
-            (Some(cleanup_error), None) => write!(
-                formatter,
-                "; staging cleanup also failed: {cleanup_error}",
-            ),
+            (Some(cleanup_error), None) => {
+                write!(
+                    formatter,
+                    "; staging cleanup also failed: {cleanup_error}",
+                )
+            }
             (None, Some(parent_sync_error)) => write!(
                 formatter,
                 "; parent synchronization also failed: {parent_sync_error}",
