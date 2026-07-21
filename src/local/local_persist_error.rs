@@ -146,6 +146,19 @@ impl<T> LocalPersistError<T> {
     /// # Returns
     /// Native error, retained resource, requested target, resolved target, and
     /// failure stage.
+    ///
+    /// Ignoring the returned tuple is rejected because it owns the retained
+    /// temporary resource:
+    ///
+    /// ```compile_fail
+    /// #![deny(unused_must_use)]
+    /// use qubit_local_files::LocalPersistError;
+    ///
+    /// fn discard(error: LocalPersistError<()>) {
+    ///     error.into_parts();
+    /// }
+    /// ```
+    #[must_use = "the returned tuple retains the temporary resource and persistence context"]
     #[inline(always)]
     pub fn into_parts(
         self,
