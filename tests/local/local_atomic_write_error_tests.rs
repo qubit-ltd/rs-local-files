@@ -52,7 +52,7 @@ fn test_atomic_write_with_returns_parent_error() {
         error.destination_state(),
     );
     assert!(error.cleanup_error().is_none());
-    assert!(StdError::source(&error).is_some());
+    assert!(error.parent_sync_error().is_none());
     let base_message = error.to_string();
     assert!(base_message.contains("PrepareParent"));
     assert!(!base_message.contains("staging path"));

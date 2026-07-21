@@ -13,9 +13,10 @@ mod atomic_file_install;
 mod atomic_metadata;
 #[cfg(unix)]
 mod atomic_namespace_race;
+mod atomic_staging_state;
 mod copy_dir;
 #[cfg(coverage)]
-mod coverage_fault;
+pub(crate) mod coverage_fault;
 mod dir_size_frame;
 mod directory_identity;
 mod file_io;
@@ -57,6 +58,7 @@ pub(crate) use atomic_file_install::install_atomic_file;
 pub(crate) use atomic_metadata::preserve_atomic_metadata;
 #[cfg(unix)]
 pub(crate) use atomic_namespace_race::verify_atomic_destination_identity;
+pub(crate) use atomic_staging_state::AtomicStagingState;
 pub(crate) use copy_dir::copy_dir_all_with_paths;
 pub(crate) use file_io::{
     open_reader_path,

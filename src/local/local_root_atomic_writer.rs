@@ -6,6 +6,7 @@
 //    Licensed under the Apache License, Version 2.0.
 // =============================================================================
 //! Streaming descriptor-relative atomic file replacement.
+// qubit-style: allow coverage-cfg
 
 #[cfg(unix)]
 use std::ffi::CString;
@@ -29,8 +30,11 @@ use crate::{
     LocalAtomicWriteStage,
 };
 
+#[cfg(coverage)]
+use super::internal::coverage_fault;
 #[cfg(unix)]
 use super::internal::{
+    AtomicStagingState,
     RootedParentMode,
     RootedStagedFile,
     create_rooted_staged_file,
@@ -257,14 +261,17 @@ impl LocalRootAtomicWriter {
                 &self.final_name,
                 self.destination_existed,
             );
-            if let Err((source, destination_state)) = install_result {
-                return Err(rooted_error_with_staging_state(
-                    LocalAtomicWriteStage::ReplaceDestination,
+            if let Err((source, destination_state, staging_state)) =
+                install_result
+            {
+                return recover_rooted_atomic_install_error(
                     &self.path,
+                    &self.parent_dirs_to_sync,
                     source,
                     destination_state,
+                    staging_state,
                     &mut self.staged_file,
-                ));
+                );
             }
             let temporary_path =
                 self.staged_file.diagnostic_path().to_path_buf();
@@ -386,6 +393,15 @@ fn sync_rooted_parent_chain(
     parent: &File,
     parent_dirs_to_sync: &[File],
 ) -> io::Result<()> {
+    #[cfg(coverage)]
+    if coverage_fault::is_enabled("atomic-install-unlink-recover-sync")
+        || coverage_fault::is_enabled("atomic-install-unlink-persistent-sync")
+        || coverage_fault::is_enabled(
+            "atomic-install-unlink-indeterminate-sync",
+        )
+    {
+        return Err(io::Error::from_raw_os_error(libc::EIO));
+    }
     parent.sync_all()?;
     for directory in parent_dirs_to_sync.iter().rev() {
         directory.sync_all()?;
@@ -483,6 +499,75 @@ fn rooted_error_with_staging_state(
         source,
     )
     .with_cleanup_error(cleanup_error)
+}
+
+#[cfg(unix)]
+/// Recovers or reports a failed rooted destination installation.
+///
+/// # Parameters
+///
+/// * `path` - Requested relative destination retained for diagnostics.
+/// * `parent_dirs_to_sync` - Newly created ancestor entries requiring sync.
+/// * `source` - Primary native installation error.
+/// * `destination_state` - Known destination state after installation.
+/// * `staging_state` - Known staging-name state after installation.
+/// * `staged_file` - Armed rooted staging guard used for recovery.
+///
+/// # Errors
+///
+/// Returns the installation error when recovery is incomplete, or a parent
+/// synchronization error after a fully recovered published destination.
+fn recover_rooted_atomic_install_error(
+    path: &Path,
+    parent_dirs_to_sync: &[File],
+    source: io::Error,
+    destination_state: LocalAtomicDestinationState,
+    staging_state: AtomicStagingState,
+    staged_file: &mut RootedStagedFile,
+) -> Result<(), LocalAtomicWriteError> {
+    let temporary_path = staged_file.diagnostic_path().to_path_buf();
+    let cleanup_error = match staging_state {
+        AtomicStagingState::Present => match staged_file.cleanup() {
+            Ok(())
+                if destination_state
+                    == LocalAtomicDestinationState::Replaced =>
+            {
+                return map_atomic_error(
+                    sync_rooted_parent_chain(
+                        staged_file.parent(),
+                        parent_dirs_to_sync,
+                    ),
+                    LocalAtomicWriteStage::SyncParent,
+                    path,
+                    Some(temporary_path),
+                    destination_state,
+                );
+            }
+            Ok(()) => None,
+            Err(error) => Some(error),
+        },
+        AtomicStagingState::Indeterminate => {
+            staged_file.close();
+            staged_file.disarm();
+            None
+        }
+    };
+    let parent_sync_error =
+        if destination_state == LocalAtomicDestinationState::Replaced {
+            sync_rooted_parent_chain(staged_file.parent(), parent_dirs_to_sync)
+                .err()
+        } else {
+            None
+        };
+    Err(LocalAtomicWriteError::new(
+        LocalAtomicWriteStage::ReplaceDestination,
+        path.to_path_buf(),
+        Some(temporary_path),
+        destination_state,
+        source,
+    )
+    .with_cleanup_error(cleanup_error)
+    .with_parent_sync_error(parent_sync_error))
 }
 
 #[cfg(not(unix))]

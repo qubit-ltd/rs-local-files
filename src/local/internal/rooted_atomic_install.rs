@@ -17,6 +17,7 @@ use std::io::Error;
 use crate::LocalAtomicDestinationState;
 
 use super::atomic_file_install::replacement_error_state;
+use super::atomic_staging_state::AtomicStagingState;
 use super::rooted_staged_file::RootedStagedFile;
 
 /// Installs a rooted staging file according to its initial destination state.
@@ -35,10 +36,12 @@ pub(in crate::local) fn install_rooted_atomic_file(
     staged_file: &mut RootedStagedFile,
     destination: &CString,
     destination_existed: bool,
-) -> Result<(), (Error, LocalAtomicDestinationState)> {
+) -> Result<(), (Error, LocalAtomicDestinationState, AtomicStagingState)> {
     if destination_existed {
         #[cfg(coverage)]
-        let result = if super::coverage_fault::is_enabled("rooted-install") {
+        let result = if super::coverage_fault::is_enabled("rooted-install")
+            || super::coverage_fault::is_enabled("rooted-install-indeterminate")
+        {
             Err(Error::from_raw_os_error(libc::EIO))
         } else {
             staged_file.rename_to(destination)
@@ -49,7 +52,14 @@ pub(in crate::local) fn install_rooted_atomic_file(
             Ok(()) => Ok(()),
             Err(source) => {
                 let destination_state = replacement_error_state(&source);
-                Err((source, destination_state))
+                let staging_state = if destination_state
+                    == LocalAtomicDestinationState::Unchanged
+                {
+                    AtomicStagingState::Present
+                } else {
+                    AtomicStagingState::Indeterminate
+                };
+                Err((source, destination_state, staging_state))
             }
         }
     } else {

@@ -28,7 +28,7 @@ static ONE_SHOT_FAULT_TAKEN: AtomicBool = AtomicBool::new(false);
 /// # Returns
 ///
 /// `true` only when the coverage subprocess selected exactly `name`.
-pub(super) fn is_enabled(name: &str) -> bool {
+pub(crate) fn is_enabled(name: &str) -> bool {
     std::env::var_os(COVERAGE_FAULT_ENV)
         .is_some_and(|value| value == OsStr::new(name))
 }
@@ -42,7 +42,7 @@ pub(super) fn is_enabled(name: &str) -> bool {
 /// # Returns
 ///
 /// `true` only for the first matching call in the subprocess.
-pub(super) fn take(name: &str) -> bool {
+pub(crate) fn take(name: &str) -> bool {
     is_enabled(name)
         && ONE_SHOT_FAULT_TAKEN
             .compare_exchange(false, true, Ordering::Relaxed, Ordering::Relaxed)

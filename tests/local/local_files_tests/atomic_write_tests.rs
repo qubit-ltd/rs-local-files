@@ -217,13 +217,13 @@ fn test_atomic_write_reports_injected_install_link_error() {
     fs::remove_dir_all(dir).expect("test directory should be removed");
 }
 
-/// Verifies that an injected fallback unlink failure reports replacement.
+/// Verifies that one injected fallback unlink failure is retried.
 #[cfg(all(coverage, target_os = "linux"))]
 #[test]
-fn test_atomic_write_reports_injected_install_unlink_error() {
+fn test_atomic_write_retries_injected_install_unlink_error() {
     const TEST_NAME: &str = concat!(
         "local::local_files_tests::atomic_write_tests::",
-        "test_atomic_write_reports_injected_install_unlink_error",
+        "test_atomic_write_retries_injected_install_unlink_error",
     );
     let Some((dir, destination, result)) =
         run_atomic_write_fault(TEST_NAME, "atomic-install-unlink", false)
@@ -231,13 +231,154 @@ fn test_atomic_write_reports_injected_install_unlink_error() {
         return;
     };
 
-    let error = result.expect_err("injected unlink should fail");
+    result.expect("a one-shot staging unlink failure should be recovered");
+    assert_eq!(b"new", fs::read(&destination).unwrap().as_slice());
+    assert_eq!(0, count_atomic_temp_files(&dir));
+    fs::remove_dir_all(dir).expect("test directory should be removed");
+}
+
+/// Verifies that persistent fallback unlink failures retain every error and
+/// leave staging available for recovery.
+#[cfg(all(coverage, target_os = "linux"))]
+#[test]
+fn test_atomic_write_reports_persistent_install_unlink_error() {
+    const TEST_NAME: &str = concat!(
+        "local::local_files_tests::atomic_write_tests::",
+        "test_atomic_write_reports_persistent_install_unlink_error",
+    );
+    let Some((dir, destination, result)) = run_atomic_write_fault(
+        TEST_NAME,
+        "atomic-install-unlink-persistent",
+        false,
+    ) else {
+        return;
+    };
+
+    let error = result.expect_err("persistent staging unlink should fail");
     assert_eq!(LocalAtomicWriteStage::ReplaceDestination, error.stage());
     assert_eq!(
         LocalAtomicDestinationState::Replaced,
         error.destination_state()
     );
+    assert_eq!(
+        Some(libc::EIO),
+        error.cleanup_error().and_then(Error::raw_os_error)
+    );
     assert_eq!(b"new", fs::read(&destination).unwrap().as_slice());
+    assert_eq!(1, count_atomic_temp_files(&dir));
+    fs::remove_dir_all(dir).expect("test directory should be removed");
+}
+
+/// Verifies parent synchronization after guard-level staging recovery.
+#[cfg(all(coverage, target_os = "linux"))]
+#[test]
+fn test_atomic_write_syncs_parent_after_install_unlink_recovery() {
+    const TEST_NAME: &str = concat!(
+        "local::local_files_tests::atomic_write_tests::",
+        "test_atomic_write_syncs_parent_after_install_unlink_recovery",
+    );
+    let Some((dir, destination, result)) = run_atomic_write_fault(
+        TEST_NAME,
+        "atomic-install-unlink-recover-sync",
+        false,
+    ) else {
+        return;
+    };
+
+    let error = result.expect_err("injected parent sync should fail");
+    assert_eq!(LocalAtomicWriteStage::SyncParent, error.stage());
+    assert_eq!(
+        LocalAtomicDestinationState::Replaced,
+        error.destination_state(),
+    );
+    assert_eq!(
+        Some(libc::EIO),
+        error.source().and_then(|source| {
+            source.downcast_ref::<Error>().and_then(Error::raw_os_error)
+        })
+    );
+    assert!(error.cleanup_error().is_none());
+    assert_eq!(b"new", fs::read(&destination).unwrap().as_slice());
+    assert_eq!(0, count_atomic_temp_files(&dir));
+    fs::remove_dir_all(dir).expect("test directory should be removed");
+}
+
+/// Verifies that an indeterminate staging name is preserved while a secondary
+/// parent-sync failure remains inspectable.
+#[cfg(all(coverage, target_os = "linux"))]
+#[test]
+fn test_atomic_write_retains_sync_error_with_indeterminate_staging() {
+    const TEST_NAME: &str = concat!(
+        "local::local_files_tests::atomic_write_tests::",
+        "test_atomic_write_retains_sync_error_with_indeterminate_staging",
+    );
+    let Some((dir, destination, result)) = run_atomic_write_fault(
+        TEST_NAME,
+        "atomic-install-unlink-indeterminate-sync",
+        false,
+    ) else {
+        return;
+    };
+
+    let error = result.expect_err("indeterminate staging unlink should fail");
+    assert_eq!(LocalAtomicWriteStage::ReplaceDestination, error.stage());
+    assert_eq!(
+        LocalAtomicDestinationState::Replaced,
+        error.destination_state(),
+    );
+    assert!(error.cleanup_error().is_none());
+    assert_eq!(
+        Some(libc::EIO),
+        error.parent_sync_error().and_then(Error::raw_os_error),
+    );
+    assert!(
+        error
+            .to_string()
+            .contains("parent synchronization also failed"),
+    );
+    assert_eq!(b"new", fs::read(&destination).unwrap().as_slice());
+    assert_eq!(1, count_atomic_temp_files(&dir));
+    fs::remove_dir_all(dir).expect("test directory should be removed");
+}
+
+/// Verifies that an unrecovered staging unlink keeps a secondary parent-sync
+/// failure without replacing the primary installation error.
+#[cfg(all(coverage, target_os = "linux"))]
+#[test]
+fn test_atomic_write_retains_sync_error_after_persistent_install_unlink() {
+    const TEST_NAME: &str = concat!(
+        "local::local_files_tests::atomic_write_tests::",
+        "test_atomic_write_retains_sync_error_after_persistent_install_unlink",
+    );
+    let Some((dir, destination, result)) = run_atomic_write_fault(
+        TEST_NAME,
+        "atomic-install-unlink-persistent-sync",
+        false,
+    ) else {
+        return;
+    };
+
+    let error = result.expect_err("persistent staging unlink should fail");
+    assert_eq!(LocalAtomicWriteStage::ReplaceDestination, error.stage());
+    assert_eq!(
+        LocalAtomicDestinationState::Replaced,
+        error.destination_state(),
+    );
+    assert_eq!(
+        Some(libc::EIO),
+        error.cleanup_error().and_then(Error::raw_os_error),
+    );
+    assert_eq!(
+        Some(libc::EIO),
+        error.parent_sync_error().and_then(Error::raw_os_error),
+    );
+    assert!(
+        error
+            .to_string()
+            .contains("parent synchronization also failed"),
+    );
+    assert_eq!(b"new", fs::read(&destination).unwrap().as_slice());
+    assert_eq!(1, count_atomic_temp_files(&dir));
     fs::remove_dir_all(dir).expect("test directory should be removed");
 }
 
@@ -262,6 +403,36 @@ fn test_atomic_write_reports_injected_existing_replace_error() {
         error.destination_state()
     );
     assert_eq!(b"old", fs::read(&destination).unwrap().as_slice());
+    fs::remove_dir_all(dir).expect("test directory should be removed");
+}
+
+/// Verifies that an indeterminate replacement outcome preserves staging for
+/// caller-directed recovery.
+#[cfg(all(coverage, target_os = "linux"))]
+#[test]
+fn test_atomic_write_preserves_staging_after_indeterminate_replace_error() {
+    const TEST_NAME: &str = concat!(
+        "local::local_files_tests::atomic_write_tests::",
+        "test_atomic_write_preserves_staging_after_indeterminate_replace_error",
+    );
+    let Some((dir, destination, result)) = run_atomic_write_fault(
+        TEST_NAME,
+        "atomic-install-replace-indeterminate",
+        true,
+    ) else {
+        return;
+    };
+
+    let error = result.expect_err("indeterminate replacement should fail");
+    assert_eq!(LocalAtomicWriteStage::ReplaceDestination, error.stage());
+    assert_eq!(
+        LocalAtomicDestinationState::Indeterminate,
+        error.destination_state(),
+    );
+    assert!(error.cleanup_error().is_none());
+    assert!(error.parent_sync_error().is_none());
+    assert_eq!(b"old", fs::read(&destination).unwrap().as_slice());
+    assert_eq!(1, count_atomic_temp_files(&dir));
     fs::remove_dir_all(dir).expect("test directory should be removed");
 }
 

@@ -259,6 +259,224 @@ fn test_commit_reports_injected_rooted_install_error() {
     );
 }
 
+/// Verifies that an indeterminate rooted replacement outcome preserves
+/// staging for caller-directed recovery.
+#[cfg(all(coverage, target_os = "linux"))]
+#[test]
+fn test_commit_preserves_staging_after_indeterminate_rooted_install_error() {
+    const TEST_NAME: &str = concat!(
+        "local::local_root_atomic_writer_tests::",
+        "test_commit_preserves_staging_after_indeterminate_rooted_install_error",
+    );
+    assert_injected_rooted_commit_error(
+        TEST_NAME,
+        "rooted-install-indeterminate",
+        LocalAtomicWriteStage::ReplaceDestination,
+        LocalAtomicDestinationState::Indeterminate,
+        1,
+    );
+}
+
+/// Verifies that one rooted no-replace staging unlink failure is retried.
+#[cfg(all(coverage, target_os = "linux"))]
+#[test]
+fn test_commit_retries_injected_rooted_install_unlink_error() {
+    const TEST_NAME: &str = concat!(
+        "local::local_root_atomic_writer_tests::",
+        "test_commit_retries_injected_rooted_install_unlink_error",
+    );
+    let Some(()) = run_in_coverage_fault_process(
+        TEST_NAME,
+        "atomic-install-unlink",
+        move || {
+            let root_path = temp_dir("rooted-atomic-install-unlink");
+            let root = LocalRoot::open(&root_path).expect("root should open");
+            let destination = LocalRelativePath::new("result.txt")
+                .expect("destination should validate");
+            let mut writer = root
+                .begin_atomic_write(&destination)
+                .expect("rooted atomic writer should begin");
+            writer.write_all(b"new").expect("content should be staged");
+
+            writer
+                .commit()
+                .expect("a one-shot staging unlink failure should recover");
+
+            assert_eq!(
+                b"new",
+                fs::read(root_path.join("result.txt")).unwrap().as_slice(),
+            );
+            assert_eq!(0, count_atomic_temp_files(&root_path));
+            fs::remove_dir_all(root_path)
+                .expect("test directory should be removed");
+        },
+    ) else {
+        return;
+    };
+}
+
+/// Verifies that persistent rooted no-replace unlink failures preserve
+/// staging and cleanup context.
+#[cfg(all(coverage, target_os = "linux"))]
+#[test]
+fn test_commit_reports_persistent_rooted_install_unlink_error() {
+    const TEST_NAME: &str = concat!(
+        "local::local_root_atomic_writer_tests::",
+        "test_commit_reports_persistent_rooted_install_unlink_error",
+    );
+    let Some(()) = run_in_coverage_fault_process(
+        TEST_NAME,
+        "atomic-install-unlink-persistent",
+        move || {
+            let root_path = temp_dir("rooted-atomic-install-unlink-persistent");
+            let root = LocalRoot::open(&root_path).expect("root should open");
+            let destination = LocalRelativePath::new("result.txt")
+                .expect("destination should validate");
+            let mut writer = root
+                .begin_atomic_write(&destination)
+                .expect("rooted atomic writer should begin");
+            writer.write_all(b"new").expect("content should be staged");
+
+            let error = writer
+                .commit()
+                .expect_err("persistent staging unlink should fail");
+
+            assert_eq!(
+                LocalAtomicWriteStage::ReplaceDestination,
+                error.stage()
+            );
+            assert_eq!(
+                LocalAtomicDestinationState::Replaced,
+                error.destination_state(),
+            );
+            assert_eq!(
+                Some(libc::EIO),
+                error.cleanup_error().and_then(std::io::Error::raw_os_error),
+            );
+            assert_eq!(
+                b"new",
+                fs::read(root_path.join("result.txt")).unwrap().as_slice(),
+            );
+            assert_eq!(1, count_atomic_temp_files(&root_path));
+            fs::remove_dir_all(root_path)
+                .expect("test directory should be removed");
+        },
+    ) else {
+        return;
+    };
+}
+
+/// Verifies rooted parent synchronization after guard-level staging recovery.
+#[cfg(all(coverage, target_os = "linux"))]
+#[test]
+fn test_commit_syncs_parent_after_rooted_install_unlink_recovery() {
+    const TEST_NAME: &str = concat!(
+        "local::local_root_atomic_writer_tests::",
+        "test_commit_syncs_parent_after_rooted_install_unlink_recovery",
+    );
+    let Some(()) = run_in_coverage_fault_process(
+        TEST_NAME,
+        "atomic-install-unlink-recover-sync",
+        move || {
+            let root_path =
+                temp_dir("rooted-atomic-install-unlink-recover-sync");
+            let root = LocalRoot::open(&root_path).expect("root should open");
+            let destination = LocalRelativePath::new("result.txt")
+                .expect("destination should validate");
+            let mut writer = root
+                .begin_atomic_write(&destination)
+                .expect("rooted atomic writer should begin");
+            writer.write_all(b"new").expect("content should be staged");
+
+            let error = writer
+                .commit()
+                .expect_err("injected rooted parent sync should fail");
+
+            assert_eq!(LocalAtomicWriteStage::SyncParent, error.stage());
+            assert_eq!(
+                LocalAtomicDestinationState::Replaced,
+                error.destination_state(),
+            );
+            assert_eq!(
+                Some(libc::EIO),
+                std::error::Error::source(&error).and_then(|source| {
+                    source
+                        .downcast_ref::<std::io::Error>()
+                        .and_then(std::io::Error::raw_os_error)
+                }),
+            );
+            assert!(error.cleanup_error().is_none());
+            assert_eq!(
+                b"new",
+                fs::read(root_path.join("result.txt")).unwrap().as_slice(),
+            );
+            assert_eq!(0, count_atomic_temp_files(&root_path));
+            fs::remove_dir_all(root_path)
+                .expect("test directory should be removed");
+        },
+    ) else {
+        return;
+    };
+}
+
+/// Verifies that rooted install, cleanup, and parent-sync failures retain
+/// distinct error context.
+#[cfg(all(coverage, target_os = "linux"))]
+#[test]
+fn test_commit_retains_sync_error_after_persistent_rooted_install_unlink() {
+    const TEST_NAME: &str = concat!(
+        "local::local_root_atomic_writer_tests::",
+        "test_commit_retains_sync_error_after_persistent_rooted_install_unlink",
+    );
+    let Some(()) = run_in_coverage_fault_process(
+        TEST_NAME,
+        "atomic-install-unlink-persistent-sync",
+        move || {
+            let root_path =
+                temp_dir("rooted-atomic-install-unlink-persistent-sync");
+            let root = LocalRoot::open(&root_path).expect("root should open");
+            let destination = LocalRelativePath::new("result.txt")
+                .expect("destination should validate");
+            let mut writer = root
+                .begin_atomic_write(&destination)
+                .expect("rooted atomic writer should begin");
+            writer.write_all(b"new").expect("content should be staged");
+
+            let error = writer
+                .commit()
+                .expect_err("persistent rooted staging unlink should fail");
+
+            assert_eq!(
+                LocalAtomicWriteStage::ReplaceDestination,
+                error.stage()
+            );
+            assert_eq!(
+                LocalAtomicDestinationState::Replaced,
+                error.destination_state(),
+            );
+            assert_eq!(
+                Some(libc::EIO),
+                error.cleanup_error().and_then(std::io::Error::raw_os_error),
+            );
+            assert_eq!(
+                Some(libc::EIO),
+                error
+                    .parent_sync_error()
+                    .and_then(std::io::Error::raw_os_error),
+            );
+            assert_eq!(
+                b"new",
+                fs::read(root_path.join("result.txt")).unwrap().as_slice(),
+            );
+            assert_eq!(1, count_atomic_temp_files(&root_path));
+            fs::remove_dir_all(root_path)
+                .expect("test directory should be removed");
+        },
+    ) else {
+        return;
+    };
+}
+
 /// Verifies propagation of injected rooted destination-open failures.
 #[cfg(all(coverage, target_os = "linux"))]
 #[test]

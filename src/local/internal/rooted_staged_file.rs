@@ -7,6 +7,7 @@
 // =============================================================================
 //! Panic-safe ownership of a descriptor-relative staging file.
 // qubit-style: allow source-test-pair
+// qubit-style: allow coverage-cfg
 // Private behavior is covered through public integration tests.
 
 use std::ffi::CString;
@@ -26,6 +27,7 @@ use log::warn;
 use crate::LocalAtomicDestinationState;
 
 use super::atomic_file_install::install_new_atomic_file_at;
+use super::atomic_staging_state::AtomicStagingState;
 
 /// Owns an uncommitted staging entry relative to its open parent directory.
 ///
@@ -179,12 +181,15 @@ impl RootedStagedFile {
     ///
     /// # Errors
     ///
-    /// Returns the native error and known destination state. Cleanup remains
-    /// armed until the caller handles that state explicitly.
+    /// Returns the native error with the known destination and staging states.
+    /// Cleanup remains armed until the caller handles those states explicitly.
     pub(in crate::local) fn install_new_to(
         &mut self,
         destination: &CString,
-    ) -> std::result::Result<(), (Error, LocalAtomicDestinationState)> {
+    ) -> std::result::Result<
+        (),
+        (Error, LocalAtomicDestinationState, AtomicStagingState),
+    > {
         self.close();
         let name = self
             .name
@@ -210,6 +215,14 @@ impl RootedStagedFile {
         let Some(name) = self.name.as_ref() else {
             return Ok(());
         };
+        #[cfg(coverage)]
+        if super::coverage_fault::is_enabled("atomic-install-unlink-persistent")
+            || super::coverage_fault::is_enabled(
+                "atomic-install-unlink-persistent-sync",
+            )
+        {
+            return Err(Error::from_raw_os_error(libc::EIO));
+        }
         // SAFETY: the live parent descriptor and NUL-terminated name remain
         // valid for this non-retaining unlink operation.
         let result = unsafe {

@@ -17,4 +17,8 @@ coverage-cfg | src/local/internal/rooted_atomic_install.rs | Exercises otherwise
 coverage-cfg | src/local/internal/rooted_atomic_namespace_race.rs | Exercises otherwise unreachable rooted namespace races
 coverage-cfg | src/local/internal/rooted_atomic_write.rs | Exercises otherwise unreachable rooted staging failures
 coverage-cfg | src/local/internal/rooted_io_result.rs | Exercises otherwise unreachable rooted descriptor failures
+coverage-cfg | src/local/internal/rooted_staged_file.rs | Exercises persistent descriptor-relative staging cleanup failures
+coverage-cfg | src/local/internal/staged_file.rs | Exercises persistent path-based staging cleanup failures
 coverage-cfg | src/local/internal/unix_nonblocking.rs | Exercises otherwise unreachable descriptor status failures
+coverage-cfg | src/local/local_atomic_writer.rs | Exercises parent synchronization after partial installation
+coverage-cfg | src/local/local_root_atomic_writer.rs | Exercises rooted parent synchronization after partial installation

@@ -27,10 +27,9 @@ use crate::{
 /// Error returned by an atomic whole-file replacement.
 ///
 /// [`Self::destination_state`] is the authoritative recovery signal. Staging
-/// cleanup is attempted only for [`LocalAtomicDestinationState::Unchanged`].
-/// Other states retain any still-existing staging entry because cleanup could
-/// destroy recovery evidence; the path may already have been moved when the
-/// destination is [`LocalAtomicDestinationState::Replaced`].
+/// cleanup follows the independently tracked staging-name state. When a
+/// destination has already been published, cleanup and parent synchronization
+/// failures remain available without replacing the primary installation error.
 #[non_exhaustive]
 #[derive(Debug)]
 pub struct LocalAtomicWriteError {
@@ -47,6 +46,9 @@ pub struct LocalAtomicWriteError {
     /// The primary operation error remains available through
     /// [`Self::source_error`] and the [`Error`] implementation.
     cleanup_error: Option<io::Error>,
+    /// Secondary error reported while synchronizing a published destination's
+    /// parent chain after an installation failure.
+    parent_sync_error: Option<io::Error>,
     /// Native I/O error that caused the failure.
     source: io::Error,
 }
@@ -77,6 +79,7 @@ impl LocalAtomicWriteError {
             temporary_path,
             destination_state,
             cleanup_error: None,
+            parent_sync_error: None,
             source,
         }
     }
@@ -130,6 +133,16 @@ impl LocalAtomicWriteError {
         self.cleanup_error.as_ref()
     }
 
+    /// Returns the secondary parent synchronization error, when synchronization
+    /// failed after the destination had already been published.
+    ///
+    /// # Returns
+    /// Parent synchronization error without replacing the primary source error.
+    #[inline(always)]
+    pub fn parent_sync_error(&self) -> Option<&io::Error> {
+        self.parent_sync_error.as_ref()
+    }
+
     /// Returns the native I/O error that caused the atomic write to fail.
     ///
     /// # Returns
@@ -166,6 +179,23 @@ impl LocalAtomicWriteError {
         self.cleanup_error = cleanup_error;
         self
     }
+
+    /// Attaches a parent synchronization failure.
+    ///
+    /// # Parameters
+    /// - `parent_sync_error`: Secondary error raised while synchronizing a
+    ///   published destination's parent chain.
+    ///
+    /// # Returns
+    /// This atomic-write error enriched with parent synchronization context.
+    #[inline]
+    pub(crate) fn with_parent_sync_error(
+        mut self,
+        parent_sync_error: Option<io::Error>,
+    ) -> Self {
+        self.parent_sync_error = parent_sync_error;
+        self
+    }
 }
 
 impl Display for LocalAtomicWriteError {
@@ -183,13 +213,22 @@ impl Display for LocalAtomicWriteError {
         if let Some(temporary_path) = self.temporary_path.as_ref() {
             write!(formatter, "; staging path '{}'", temporary_path.display())?;
         }
-        if let Some(cleanup_error) = self.cleanup_error.as_ref() {
-            return write!(
+        match (self.cleanup_error.as_ref(), self.parent_sync_error.as_ref()) {
+            (Some(cleanup_error), Some(parent_sync_error)) => write!(
                 formatter,
-                "; staging cleanup also failed: {cleanup_error}"
-            );
+                "; staging cleanup also failed: {cleanup_error}; parent \
+                 synchronization also failed: {parent_sync_error}",
+            ),
+            (Some(cleanup_error), None) => write!(
+                formatter,
+                "; staging cleanup also failed: {cleanup_error}",
+            ),
+            (None, Some(parent_sync_error)) => write!(
+                formatter,
+                "; parent synchronization also failed: {parent_sync_error}",
+            ),
+            (None, None) => Ok(()),
         }
-        Ok(())
     }
 }
 

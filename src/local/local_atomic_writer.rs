@@ -6,6 +6,7 @@
 //    Licensed under the Apache License, Version 2.0.
 // =============================================================================
 //! Streaming durable atomic file replacement.
+// qubit-style: allow coverage-cfg
 
 use std::fs;
 use std::io::{
@@ -25,7 +26,10 @@ use crate::{
     LocalAtomicWriteStage,
 };
 
+#[cfg(coverage)]
+use super::internal::coverage_fault;
 use super::internal::{
+    AtomicStagingState,
     DEFAULT_TEMP_ENTRY_RETRIES,
     StagedFile,
     absolute_path,
@@ -302,14 +306,17 @@ impl LocalAtomicWriter {
             &self.operation_path,
             self.destination_existed,
         );
-        if let Err((source, destination_state)) = install_result {
-            return Err(atomic_error_with_staging_state(
-                LocalAtomicWriteStage::ReplaceDestination,
+        if let Err((source, destination_state, staging_state)) = install_result
+        {
+            return recover_atomic_install_error(
                 &self.path,
+                &self.operation_path,
+                &self.parent_dirs_to_sync,
                 source,
                 destination_state,
+                staging_state,
                 &mut self.staged_file,
-            ));
+            );
         }
         let temporary_path = self.staged_file.path().to_path_buf();
         self.staged_file.disarm();
@@ -475,6 +482,75 @@ fn atomic_error_with_staging_state(
     .with_cleanup_error(cleanup_error)
 }
 
+/// Recovers or reports a failed atomic destination installation.
+///
+/// # Parameters
+///
+/// * `path` - Requested destination retained for diagnostics.
+/// * `operation_path` - Bound absolute destination used for synchronization.
+/// * `parent_dirs_to_sync` - Newly created parent entries requiring sync.
+/// * `source` - Primary native installation error.
+/// * `destination_state` - Known destination state after installation.
+/// * `staging_state` - Known staging-name state after installation.
+/// * `staged_file` - Armed staging guard used for recovery.
+///
+/// # Errors
+///
+/// Returns the installation error when recovery is incomplete, or a parent
+/// synchronization error after a fully recovered published destination.
+fn recover_atomic_install_error(
+    path: &Path,
+    operation_path: &Path,
+    parent_dirs_to_sync: &[PathBuf],
+    source: io::Error,
+    destination_state: LocalAtomicDestinationState,
+    staging_state: AtomicStagingState,
+    staged_file: &mut StagedFile,
+) -> Result<(), LocalAtomicWriteError> {
+    let temporary_path = staged_file.path().to_path_buf();
+    let cleanup_error = match staging_state {
+        AtomicStagingState::Present => match staged_file.cleanup() {
+            Ok(())
+                if destination_state
+                    == LocalAtomicDestinationState::Replaced =>
+            {
+                return with_atomic_context(
+                    sync_atomic_parent_chain(
+                        operation_path,
+                        parent_dirs_to_sync,
+                    ),
+                    LocalAtomicWriteStage::SyncParent,
+                    path,
+                    Some(temporary_path),
+                    destination_state,
+                );
+            }
+            Ok(()) => None,
+            Err(error) => Some(error),
+        },
+        AtomicStagingState::Indeterminate => {
+            staged_file.close();
+            staged_file.disarm();
+            None
+        }
+    };
+    let parent_sync_error =
+        if destination_state == LocalAtomicDestinationState::Replaced {
+            sync_atomic_parent_chain(operation_path, parent_dirs_to_sync).err()
+        } else {
+            None
+        };
+    Err(LocalAtomicWriteError::new(
+        LocalAtomicWriteStage::ReplaceDestination,
+        path.to_path_buf(),
+        Some(temporary_path),
+        destination_state,
+        source,
+    )
+    .with_cleanup_error(cleanup_error)
+    .with_parent_sync_error(parent_sync_error))
+}
+
 /// Adds atomic-write context and cleanup to a staging operation result.
 fn with_staging_cleanup<T>(
     result: io::Result<T>,
@@ -492,6 +568,15 @@ fn sync_atomic_parent_chain(
     path: &Path,
     parent_dirs_to_sync: &[PathBuf],
 ) -> io::Result<()> {
+    #[cfg(coverage)]
+    if coverage_fault::is_enabled("atomic-install-unlink-recover-sync")
+        || coverage_fault::is_enabled("atomic-install-unlink-persistent-sync")
+        || coverage_fault::is_enabled(
+            "atomic-install-unlink-indeterminate-sync",
+        )
+    {
+        return Err(io::Error::from_raw_os_error(libc::EIO));
+    }
     sync_parent_dir(path)?;
     for directory in parent_dirs_to_sync.iter().rev() {
         sync_parent_dir(directory)?;

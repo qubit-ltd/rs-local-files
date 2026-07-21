@@ -32,6 +32,7 @@ use windows_sys::Win32::Storage::FileSystem::ReplaceFileW;
 
 use crate::LocalAtomicDestinationState;
 
+use super::atomic_staging_state::AtomicStagingState;
 #[cfg(not(unix))]
 use super::file_move::move_file_without_replacing;
 #[cfg(not(windows))]
@@ -44,13 +45,23 @@ pub(crate) fn install_atomic_file(
     staging: &Path,
     destination: &Path,
     destination_existed: bool,
-) -> std::result::Result<(), (Error, LocalAtomicDestinationState)> {
+) -> std::result::Result<
+    (),
+    (Error, LocalAtomicDestinationState, AtomicStagingState),
+> {
     if destination_existed {
         match replace_existing_atomic_file(staging, destination) {
             Ok(()) => Ok(()),
             Err(source) => {
                 let destination_state = replacement_error_state(&source);
-                Err((source, destination_state))
+                let staging_state = if destination_state
+                    == LocalAtomicDestinationState::Unchanged
+                {
+                    AtomicStagingState::Present
+                } else {
+                    AtomicStagingState::Indeterminate
+                };
+                Err((source, destination_state, staging_state))
             }
         }
     } else {
@@ -64,7 +75,11 @@ pub(crate) fn replace_existing_atomic_file(
     destination: &Path,
 ) -> Result<()> {
     #[cfg(all(coverage, unix))]
-    if super::coverage_fault::is_enabled("atomic-install-replace") {
+    if super::coverage_fault::is_enabled("atomic-install-replace")
+        || super::coverage_fault::is_enabled(
+            "atomic-install-replace-indeterminate",
+        )
+    {
         return Err(Error::from_raw_os_error(libc::EIO));
     }
     #[cfg(not(windows))]
@@ -99,7 +114,10 @@ pub(crate) fn replace_existing_atomic_file(
 pub(crate) fn install_new_atomic_file(
     staging: &Path,
     destination: &Path,
-) -> std::result::Result<(), (Error, LocalAtomicDestinationState)> {
+) -> std::result::Result<
+    (),
+    (Error, LocalAtomicDestinationState, AtomicStagingState),
+> {
     #[cfg(unix)]
     {
         let staging = native_path(staging).map_err(unchanged_error)?;
@@ -122,6 +140,12 @@ pub(crate) fn install_new_atomic_file(
 pub(crate) fn replacement_error_state(
     error: &Error,
 ) -> LocalAtomicDestinationState {
+    #[cfg(coverage)]
+    if super::coverage_fault::is_enabled("atomic-install-replace-indeterminate")
+        || super::coverage_fault::is_enabled("rooted-install-indeterminate")
+    {
+        return LocalAtomicDestinationState::Indeterminate;
+    }
     #[cfg(windows)]
     {
         match error.raw_os_error() {
@@ -145,7 +169,10 @@ pub(crate) fn install_new_atomic_file_at(
     staging: &CStr,
     destination_parent: RawFd,
     destination: &CStr,
-) -> std::result::Result<(), (Error, LocalAtomicDestinationState)> {
+) -> std::result::Result<
+    (),
+    (Error, LocalAtomicDestinationState, AtomicStagingState),
+> {
     #[cfg(any(target_os = "linux", target_os = "android"))]
     {
         #[cfg(coverage)]
@@ -159,6 +186,10 @@ pub(crate) fn install_new_atomic_file_at(
             "atomic-install-fallback",
             "atomic-install-link",
             "atomic-install-unlink",
+            "atomic-install-unlink-persistent",
+            "atomic-install-unlink-persistent-sync",
+            "atomic-install-unlink-recover-sync",
+            "atomic-install-unlink-indeterminate-sync",
         ]
         .into_iter()
         .any(super::coverage_fault::is_enabled);
@@ -252,46 +283,106 @@ fn link_then_unlink(
     staging: &CStr,
     destination_parent: RawFd,
     destination: &CStr,
-) -> std::result::Result<(), (Error, LocalAtomicDestinationState)> {
+) -> std::result::Result<
+    (),
+    (Error, LocalAtomicDestinationState, AtomicStagingState),
+> {
     #[cfg(coverage)]
-    if super::coverage_fault::is_enabled("atomic-install-link") {
-        return Err(unchanged_error(Error::from_raw_os_error(libc::EIO)));
-    }
+    let forced_link_error =
+        super::coverage_fault::is_enabled("atomic-install-link");
+    #[cfg(not(coverage))]
+    let forced_link_error = false;
     // SAFETY: both directory descriptors and names remain live for this
     // non-retaining hard-link operation.
-    let link_result = unsafe {
-        libc::linkat(
-            staging_parent,
-            staging.as_ptr(),
-            destination_parent,
-            destination.as_ptr(),
-            0,
-        )
-    };
-    if link_result == -1 {
-        return Err(unchanged_error(Error::last_os_error()));
-    }
-    #[cfg(coverage)]
-    let forced_unlink_error =
-        super::coverage_fault::is_enabled("atomic-install-unlink");
-    #[cfg(not(coverage))]
-    let forced_unlink_error = false;
-    let unlink_result = if forced_unlink_error {
+    let link_result = if forced_link_error {
         -1
     } else {
-        // SAFETY: the staging directory descriptor and name remain live for
-        // this non-retaining unlink operation.
+        unsafe {
+            libc::linkat(
+                staging_parent,
+                staging.as_ptr(),
+                destination_parent,
+                destination.as_ptr(),
+                0,
+            )
+        }
+    };
+    if link_result == -1 {
+        let error = if forced_link_error {
+            Error::from_raw_os_error(libc::EIO)
+        } else {
+            Error::last_os_error()
+        };
+        return Err(unchanged_error(error));
+    }
+    const MAX_UNLINK_ATTEMPTS: usize = 2;
+    let mut last_error = None;
+    for _ in 0..MAX_UNLINK_ATTEMPTS {
+        match unlink_staging_name(staging_parent, staging) {
+            Ok(()) => return Ok(()),
+            Err(error) if error.kind() == ErrorKind::NotFound => return Ok(()),
+            Err(error) => last_error = Some(error),
+        }
+    }
+    #[cfg(coverage)]
+    let staging_state = if super::coverage_fault::is_enabled(
+        "atomic-install-unlink-indeterminate-sync",
+    ) {
+        AtomicStagingState::Indeterminate
+    } else {
+        AtomicStagingState::Present
+    };
+    #[cfg(not(coverage))]
+    let staging_state = AtomicStagingState::Present;
+    Err((
+        last_error.expect("at least one staging unlink attempt should run"),
+        LocalAtomicDestinationState::Replaced,
+        staging_state,
+    ))
+}
+
+/// Removes the staging name after its destination hard link is published.
+///
+/// # Parameters
+///
+/// * `staging_parent` - Directory descriptor authorizing the staging name.
+/// * `staging` - Staging entry name relative to `staging_parent`.
+///
+/// # Errors
+///
+/// Returns the native `unlinkat` error or a selected coverage fault.
+#[cfg(any(target_os = "linux", target_os = "android", target_os = "freebsd",))]
+fn unlink_staging_name(staging_parent: RawFd, staging: &CStr) -> Result<()> {
+    #[cfg(coverage)]
+    let forced_unlink_error =
+        super::coverage_fault::take("atomic-install-unlink")
+            || super::coverage_fault::is_enabled(
+                "atomic-install-unlink-persistent",
+            )
+            || super::coverage_fault::is_enabled(
+                "atomic-install-unlink-persistent-sync",
+            )
+            || super::coverage_fault::is_enabled(
+                "atomic-install-unlink-recover-sync",
+            )
+            || super::coverage_fault::is_enabled(
+                "atomic-install-unlink-indeterminate-sync",
+            );
+    #[cfg(not(coverage))]
+    let forced_unlink_error = false;
+    // SAFETY: the staging directory descriptor and name remain live for this
+    // non-retaining unlink operation.
+    let result = if forced_unlink_error {
+        -1
+    } else {
         unsafe { libc::unlinkat(staging_parent, staging.as_ptr(), 0) }
     };
-    if unlink_result == -1 {
-        return Err((
-            if forced_unlink_error {
-                Error::from_raw_os_error(libc::EIO)
-            } else {
-                Error::last_os_error()
-            },
-            LocalAtomicDestinationState::Replaced,
-        ));
+    if result == -1 {
+        return Err(if forced_unlink_error {
+            Error::from_raw_os_error(libc::EIO)
+        } else {
+            Error::last_os_error()
+        });
     }
     Ok(())
 }
@@ -309,6 +400,12 @@ fn native_path(path: &Path) -> Result<CString> {
 }
 
 /// Pairs an error with a destination known to be unmodified.
-fn unchanged_error(error: Error) -> (Error, LocalAtomicDestinationState) {
-    (error, LocalAtomicDestinationState::Unchanged)
+fn unchanged_error(
+    error: Error,
+) -> (Error, LocalAtomicDestinationState, AtomicStagingState) {
+    (
+        error,
+        LocalAtomicDestinationState::Unchanged,
+        AtomicStagingState::Present,
+    )
 }
