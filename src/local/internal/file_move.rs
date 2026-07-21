@@ -91,6 +91,7 @@ unsafe extern "C" {
 /// # Errors
 /// Returns the platform I/O error reported while replacing the destination.
 #[cfg(not(windows))]
+#[inline(always)]
 pub(crate) fn replace_file(source: &Path, destination: &Path) -> Result<()> {
     fs::rename(source, destination)
 }
@@ -228,6 +229,7 @@ pub(crate) fn move_path_without_replacing(
 /// # Errors
 /// Returns the platform I/O error reported while moving the file.
 #[cfg(any(target_os = "linux", target_os = "macos", windows))]
+#[inline(always)]
 pub(crate) fn move_file_without_replacing(
     source: &Path,
     destination: &Path,
@@ -268,6 +270,7 @@ pub(crate) fn move_file_without_replacing(
 /// # Errors
 /// Returns the platform I/O error reported while moving the directory.
 #[cfg(any(target_os = "linux", target_os = "macos", windows))]
+#[inline(always)]
 pub(crate) fn move_directory_without_replacing(
     source: &Path,
     destination: &Path,

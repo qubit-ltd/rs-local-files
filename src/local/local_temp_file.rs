@@ -178,6 +178,7 @@ impl LocalTempFile {
     /// Returns an I/O error when `dir` cannot be created, `prefix` or `suffix`
     /// is not a safe file-name fragment, the retry limit is zero, all generated
     /// names collide, or file creation fails.
+    #[inline(always)]
     pub fn in_dir<P>(
         dir: P,
         prefix: Option<&str>,
@@ -419,6 +420,7 @@ impl LocalTempFile {
     /// retaining this guard when resolution, parent preparation, or
     /// installation fails, including no-replace conflicts and unsupported
     /// native operations.
+    #[inline(always)]
     pub fn persist_with<P>(
         self,
         target: P,
