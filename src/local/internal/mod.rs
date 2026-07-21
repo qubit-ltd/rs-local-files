@@ -9,6 +9,7 @@
 // qubit-style: allow coverage-cfg
 
 mod atomic_file_install;
+mod atomic_install_recovery;
 #[cfg(unix)]
 mod atomic_metadata;
 #[cfg(unix)]
@@ -54,6 +55,10 @@ mod unix_nonblocking;
 mod unix_stat;
 
 pub(crate) use atomic_file_install::install_atomic_file;
+pub(crate) use atomic_install_recovery::{
+    AtomicInstallRecovery,
+    recover_atomic_install_error,
+};
 #[cfg(unix)]
 pub(crate) use atomic_metadata::preserve_atomic_metadata;
 #[cfg(unix)]

@@ -29,7 +29,7 @@ use crate::{
 #[cfg(coverage)]
 use super::internal::coverage_fault;
 use super::internal::{
-    AtomicStagingState,
+    AtomicInstallRecovery,
     DEFAULT_TEMP_ENTRY_RETRIES,
     StagedFile,
     absolute_path,
@@ -38,6 +38,7 @@ use super::internal::{
     ensure_parent_path_with_sync_dirs,
     install_atomic_file,
     parent_dir_for,
+    recover_atomic_install_error,
     sync_parent_dir,
 };
 #[cfg(unix)]
@@ -244,6 +245,7 @@ impl LocalAtomicWriter {
     }
 
     /// Writes all bytes and commits the destination.
+    #[inline(always)]
     pub(crate) fn write_bytes(
         self,
         bytes: &[u8],
@@ -474,13 +476,25 @@ impl LocalAtomicWriter {
         if let Err((source, destination_state, staging_state)) = install_result
         {
             return recover_atomic_install_error(
-                &self.path,
-                &self.operation_path,
-                &self.parent_dirs_to_sync,
-                source,
-                destination_state,
-                staging_state,
+                AtomicInstallRecovery {
+                    path: &self.path,
+                    temporary_path: self.staged_file.path().to_path_buf(),
+                    source,
+                    destination_state,
+                    staging_state,
+                },
                 &mut self.staged_file,
+                StagedFile::cleanup,
+                |staged_file: &mut StagedFile| {
+                    staged_file.close();
+                    staged_file.disarm();
+                },
+                |_: &StagedFile| {
+                    sync_atomic_parent_chain(
+                        &self.operation_path,
+                        &self.parent_dirs_to_sync,
+                    )
+                },
             );
         }
         let temporary_path = self.staged_file.path().to_path_buf();
@@ -581,75 +595,6 @@ fn atomic_error_with_staging_state(
         source,
     )
     .with_cleanup_error(cleanup_error)
-}
-
-/// Recovers or reports a failed atomic destination installation.
-///
-/// # Parameters
-///
-/// * `path` - Requested destination retained for diagnostics.
-/// * `operation_path` - Bound absolute destination used for synchronization.
-/// * `parent_dirs_to_sync` - Newly created parent entries requiring sync.
-/// * `source` - Primary native installation error.
-/// * `destination_state` - Known destination state after installation.
-/// * `staging_state` - Known staging-name state after installation.
-/// * `staged_file` - Armed staging guard used for recovery.
-///
-/// # Errors
-///
-/// Returns the installation error when recovery is incomplete, or a parent
-/// synchronization error after a fully recovered published destination.
-fn recover_atomic_install_error(
-    path: &Path,
-    operation_path: &Path,
-    parent_dirs_to_sync: &[PathBuf],
-    source: io::Error,
-    destination_state: LocalAtomicDestinationState,
-    staging_state: AtomicStagingState,
-    staged_file: &mut StagedFile,
-) -> Result<(), LocalAtomicWriteError> {
-    let temporary_path = staged_file.path().to_path_buf();
-    let cleanup_error = match staging_state {
-        AtomicStagingState::Present => match staged_file.cleanup() {
-            Ok(())
-                if destination_state
-                    == LocalAtomicDestinationState::Replaced =>
-            {
-                return with_atomic_context(
-                    sync_atomic_parent_chain(
-                        operation_path,
-                        parent_dirs_to_sync,
-                    ),
-                    LocalAtomicWriteStage::SyncParent,
-                    path,
-                    Some(temporary_path),
-                    destination_state,
-                );
-            }
-            Ok(()) => None,
-            Err(error) => Some(error),
-        },
-        AtomicStagingState::Indeterminate => {
-            staged_file.close();
-            staged_file.disarm();
-            None
-        }
-    };
-    let parent_sync_error =
-        if destination_state == LocalAtomicDestinationState::Replaced {
-            sync_atomic_parent_chain(operation_path, parent_dirs_to_sync).err()
-        } else {
-            None
-        };
-    Err(LocalAtomicWriteError::new(
-        LocalAtomicWriteStage::ReplaceDestination,
-        path.to_path_buf(),
-        Some(temporary_path),
-        destination_state,
-        source,
-    )
-    .with_cleanup_error(cleanup_error)
-    .with_parent_sync_error(parent_sync_error))
 }
 
 /// Adds atomic-write context and cleanup to a staging operation result.
