@@ -35,6 +35,7 @@ use super::internal::coverage_fault;
 #[cfg(unix)]
 use super::internal::{
     AtomicStagingState,
+    OpenedAtomicDestination,
     RootedParentMode,
     RootedStagedFile,
     create_rooted_staged_file,
@@ -199,93 +200,11 @@ impl LocalRootAtomicWriter {
     pub fn commit(mut self) -> Result<(), LocalAtomicWriteError> {
         #[cfg(unix)]
         {
-            let destination = if self.destination_existed {
-                let destination_result = open_rooted_atomic_destination(
-                    self.staged_file.parent(),
-                    &self.final_name,
-                    self.open_retry_timeout,
-                );
-                let opened = with_staging_cleanup(
-                    destination_result,
-                    LocalAtomicWriteStage::ReadDestinationMetadata,
-                    &self.path,
-                    &mut self.staged_file,
-                )?;
-                match opened {
-                    Some(destination) => Some(destination),
-                    None => {
-                        return Err(rooted_error_with_staging_state(
-                            LocalAtomicWriteStage::ReadDestinationMetadata,
-                            &self.path,
-                            io::Error::new(
-                                io::ErrorKind::NotFound,
-                                "rooted atomic destination disappeared",
-                            ),
-                            LocalAtomicDestinationState::Missing,
-                            &mut self.staged_file,
-                        ));
-                    }
-                }
-            } else {
-                None
-            };
-            if let Some(destination) = destination.as_ref() {
-                let result = preserve_atomic_metadata(
-                    destination.file(),
-                    self.staged_file.file(),
-                );
-                with_staging_cleanup(
-                    result,
-                    LocalAtomicWriteStage::ApplyDestinationMetadata,
-                    &self.path,
-                    &mut self.staged_file,
-                )?;
-            }
-            let result = self.staged_file.file().sync_all();
-            with_staging_cleanup(
-                result,
-                LocalAtomicWriteStage::SyncTemporaryFile,
-                &self.path,
-                &mut self.staged_file,
-            )?;
-            if let Some(destination) = destination.as_ref() {
-                verify_rooted_atomic_destination_identity(
-                    &self.final_name,
-                    destination,
-                    &self.path,
-                    &mut self.staged_file,
-                )?;
-            }
-            let install_result = install_rooted_atomic_file(
-                &mut self.staged_file,
-                &self.final_name,
-                self.destination_existed,
-            );
-            if let Err((source, destination_state, staging_state)) =
-                install_result
-            {
-                return recover_rooted_atomic_install_error(
-                    &self.path,
-                    &self.parent_dirs_to_sync,
-                    source,
-                    destination_state,
-                    staging_state,
-                    &mut self.staged_file,
-                );
-            }
-            let temporary_path =
-                self.staged_file.diagnostic_path().to_path_buf();
-            self.staged_file.disarm();
-            map_atomic_error(
-                sync_rooted_parent_chain(
-                    self.staged_file.parent(),
-                    &self.parent_dirs_to_sync,
-                ),
-                LocalAtomicWriteStage::SyncParent,
-                &self.path,
-                Some(temporary_path),
-                LocalAtomicDestinationState::Replaced,
-            )
+            let destination = self.open_destination_for_commit()?;
+            self.preserve_destination_metadata(destination.as_ref())?;
+            self.sync_temporary_file()?;
+            self.verify_destination_for_commit(destination.as_ref())?;
+            self.install_and_sync_parent()
         }
         #[cfg(not(unix))]
         {
@@ -319,6 +238,162 @@ impl LocalRootAtomicWriter {
         {
             Err(unsupported_atomic_error(&self.path))
         }
+    }
+
+    #[cfg(unix)]
+    /// Opens the existing rooted destination for commit-time metadata.
+    ///
+    /// # Returns
+    ///
+    /// The descriptor-relative destination when one existed at writer
+    /// creation, or `None` when commit will install a new entry.
+    ///
+    /// # Errors
+    ///
+    /// Returns a structured metadata-stage error when the destination cannot
+    /// be opened or disappeared before commit. Staging cleanup is attempted
+    /// before the error is returned.
+    fn open_destination_for_commit(
+        &mut self,
+    ) -> Result<Option<OpenedAtomicDestination>, LocalAtomicWriteError> {
+        if !self.destination_existed {
+            return Ok(None);
+        }
+        let destination_result = open_rooted_atomic_destination(
+            self.staged_file.parent(),
+            &self.final_name,
+            self.open_retry_timeout,
+        );
+        let opened = with_staging_cleanup(
+            destination_result,
+            LocalAtomicWriteStage::ReadDestinationMetadata,
+            &self.path,
+            &mut self.staged_file,
+        )?;
+        match opened {
+            Some(destination) => Ok(Some(destination)),
+            None => Err(rooted_error_with_staging_state(
+                LocalAtomicWriteStage::ReadDestinationMetadata,
+                &self.path,
+                io::Error::new(
+                    io::ErrorKind::NotFound,
+                    "rooted atomic destination disappeared",
+                ),
+                LocalAtomicDestinationState::Missing,
+                &mut self.staged_file,
+            )),
+        }
+    }
+
+    #[cfg(unix)]
+    /// Copies strict metadata from a rooted destination to staging.
+    ///
+    /// # Parameters
+    ///
+    /// * `destination` - Opened destination, or `None` for a new entry.
+    ///
+    /// # Errors
+    ///
+    /// Returns a structured metadata-application error and attempts staging
+    /// cleanup when platform metadata cannot be preserved.
+    fn preserve_destination_metadata(
+        &mut self,
+        destination: Option<&OpenedAtomicDestination>,
+    ) -> Result<(), LocalAtomicWriteError> {
+        let Some(destination) = destination else {
+            return Ok(());
+        };
+        let result = preserve_atomic_metadata(
+            destination.file(),
+            self.staged_file.file(),
+        );
+        with_staging_cleanup(
+            result,
+            LocalAtomicWriteStage::ApplyDestinationMetadata,
+            &self.path,
+            &mut self.staged_file,
+        )
+    }
+
+    #[cfg(unix)]
+    /// Synchronizes the rooted staging file before installation.
+    ///
+    /// # Errors
+    ///
+    /// Returns a structured staging synchronization error and attempts
+    /// staging cleanup when the native synchronization fails.
+    fn sync_temporary_file(&mut self) -> Result<(), LocalAtomicWriteError> {
+        let result = self.staged_file.file().sync_all();
+        with_staging_cleanup(
+            result,
+            LocalAtomicWriteStage::SyncTemporaryFile,
+            &self.path,
+            &mut self.staged_file,
+        )
+    }
+
+    #[cfg(unix)]
+    /// Verifies that the rooted destination still names the opened file.
+    ///
+    /// # Parameters
+    ///
+    /// * `destination` - Opened destination, or `None` for a new entry.
+    ///
+    /// # Errors
+    ///
+    /// Returns the structured namespace-race error produced by the rooted
+    /// identity verifier.
+    fn verify_destination_for_commit(
+        &mut self,
+        destination: Option<&OpenedAtomicDestination>,
+    ) -> Result<(), LocalAtomicWriteError> {
+        let Some(destination) = destination else {
+            return Ok(());
+        };
+        verify_rooted_atomic_destination_identity(
+            &self.final_name,
+            destination,
+            &self.path,
+            &mut self.staged_file,
+        )
+    }
+
+    #[cfg(unix)]
+    /// Installs rooted staging and synchronizes the parent descriptor chain.
+    ///
+    /// # Errors
+    ///
+    /// Returns the structured installation or recovery error, or a parent
+    /// synchronization error after the destination has been replaced.
+    fn install_and_sync_parent(&mut self) -> Result<(), LocalAtomicWriteError> {
+        let install_result = install_rooted_atomic_file(
+            &mut self.staged_file,
+            &self.final_name,
+            self.destination_existed,
+        );
+        if let Err((source, destination_state, staging_state)) = install_result
+        {
+            return recover_rooted_atomic_install_error(
+                &self.path,
+                &self.parent_dirs_to_sync,
+                source,
+                destination_state,
+                staging_state,
+                &mut self.staged_file,
+            );
+        }
+        let temporary_path = self.staged_file.diagnostic_path().to_path_buf();
+        self.staged_file.disarm();
+        map_atomic_error(
+            sync_rooted_parent_chain(
+                self.staged_file.parent(),
+                &self.parent_dirs_to_sync,
+            ),
+            LocalAtomicWriteStage::SyncParent,
+            &self.path,
+            Some(temporary_path),
+            LocalAtomicDestinationState::Replaced,
+        )
     }
 }
 

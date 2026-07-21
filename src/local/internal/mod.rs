@@ -74,9 +74,12 @@ pub(crate) use file_move::{
 pub(super) use local_file_reader_inner::LocalFileReaderInner;
 pub(super) use local_file_writer_inner::LocalFileWriterInner;
 #[cfg(unix)]
-pub(crate) use opened_atomic_destination::open_atomic_destination;
-#[cfg(unix)]
 pub(super) use opened_atomic_destination::open_rooted_atomic_destination;
+#[cfg(unix)]
+pub(crate) use opened_atomic_destination::{
+    OpenedAtomicDestination,
+    open_atomic_destination,
+};
 pub(crate) use path_operations::{
     absolute_path,
     add_path_context,
