@@ -22,6 +22,10 @@ mod dir_size_frame;
 mod directory_identity;
 mod file_io;
 mod file_move;
+mod file_name_generation;
+mod file_name_path;
+mod file_name_url;
+mod file_name_validation;
 mod io_result_context;
 mod local_file_reader_inner;
 mod local_file_writer_inner;
@@ -76,6 +80,13 @@ pub(crate) use file_move::{
     replace_file,
     sync_parent_dir,
 };
+pub(crate) use file_name_generation::try_random_file_name;
+pub(crate) use file_name_path::{
+    file_name_from_path,
+    normalize_extension,
+};
+pub(crate) use file_name_url::file_name_from_url;
+pub(crate) use file_name_validation::validate_portable_file_name_impl;
 pub(super) use local_file_reader_inner::LocalFileReaderInner;
 pub(super) use local_file_writer_inner::LocalFileWriterInner;
 #[cfg(unix)]

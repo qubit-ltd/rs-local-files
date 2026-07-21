@@ -9,24 +9,16 @@
 
 use std::convert::Infallible;
 use std::ffi::OsStr;
-use std::io::{
-    Error,
-    ErrorKind,
-    Result,
-};
-use std::path::{
-    Component,
-    Path,
-};
-use std::time::{
-    SystemTime,
-    UNIX_EPOCH,
-};
+use std::io::Result;
+use std::path::Path;
 
-/// Maximum byte length accepted for a portable UTF-8 file name.
-const MAX_PORTABLE_FILE_NAME_BYTES: usize = 255;
-/// Random payload length used by generated file names.
-const RANDOM_NAME_BYTES: usize = 16;
+use super::internal::{
+    file_name_from_path,
+    file_name_from_url,
+    normalize_extension,
+    try_random_file_name,
+    validate_portable_file_name_impl,
+};
 
 /// File-name utility namespace.
 ///
@@ -105,8 +97,8 @@ impl LocalFilenames {
     /// A random file-name component.
     ///
     /// # Errors
-    /// Returns [`ErrorKind::Other`] when the operating system random source
-    /// cannot provide bytes.
+    /// Returns [`std::io::ErrorKind::Other`] when the operating system random
+    /// source cannot provide bytes.
     #[inline(always)]
     pub fn try_random() -> Result<String> {
         Self::try_random_with(None, None)
@@ -128,23 +120,15 @@ impl LocalFilenames {
     /// A random file-name component.
     ///
     /// # Errors
-    /// Returns [`ErrorKind::InvalidInput`] when `prefix` or `suffix` is not a
-    /// safe file-name fragment. Returns [`ErrorKind::Other`] when the operating
-    /// system random source cannot provide bytes.
+    /// Returns [`std::io::ErrorKind::InvalidInput`] when `prefix` or `suffix`
+    /// is not a safe file-name fragment. Returns
+    /// [`std::io::ErrorKind::Other`] when the operating system random source
+    /// cannot provide bytes.
     pub fn try_random_with(
         prefix: Option<&str>,
         suffix: Option<&str>,
     ) -> Result<String> {
-        let prefix = prefix.unwrap_or(Self::DEFAULT_RANDOM_PREFIX);
-        let suffix = suffix.unwrap_or("");
-        validate_file_name_fragment("prefix", prefix)?;
-        validate_file_name_fragment("suffix", suffix)?;
-        let timestamp = unix_timestamp_nanos();
-        let process_id = std::process::id();
-        let random = try_random_hex()?;
-        Ok(format!(
-            "{prefix}{timestamp:x}-{process_id:x}-{random}{suffix}"
-        ))
+        try_random_file_name(Self::DEFAULT_RANDOM_PREFIX, prefix, suffix)
     }
 
     /// Validates that `name` is a portable single-component file name.
@@ -175,56 +159,10 @@ impl LocalFilenames {
     /// - `name`: File-name component to validate.
     ///
     /// # Errors
-    /// Returns [`ErrorKind::InvalidInput`] when `name` is not a portable
-    /// file-name component.
+    /// Returns [`std::io::ErrorKind::InvalidInput`] when `name` is not a
+    /// portable file-name component.
     pub fn validate_portable_file_name(name: &str) -> Result<()> {
-        if name.is_empty() {
-            return Err(Error::new(
-                ErrorKind::InvalidInput,
-                "portable file name must not be empty",
-            ));
-        }
-        if name == "." || name == ".." {
-            return Err(Error::new(
-                ErrorKind::InvalidInput,
-                "portable file name must not be a dot segment",
-            ));
-        }
-        if name.len() > MAX_PORTABLE_FILE_NAME_BYTES {
-            return Err(Error::new(
-                ErrorKind::InvalidInput,
-                format!(
-                    "portable file name exceeds {MAX_PORTABLE_FILE_NAME_BYTES} UTF-8 bytes"
-                ),
-            ));
-        }
-        if name.ends_with([' ', '.']) {
-            return Err(Error::new(
-                ErrorKind::InvalidInput,
-                "portable file name must not end with a space or dot",
-            ));
-        }
-        if let Some(character) = name.chars().find(|character| {
-            character.is_control()
-                || matches!(
-                    character,
-                    '/' | '\\' | '<' | '>' | ':' | '"' | '|' | '?' | '*'
-                )
-        }) {
-            return Err(Error::new(
-                ErrorKind::InvalidInput,
-                format!(
-                    "portable file name contains forbidden character {character:?}"
-                ),
-            ));
-        }
-        if is_windows_reserved_file_name(name) {
-            return Err(Error::new(
-                ErrorKind::InvalidInput,
-                "portable file name must not be a Windows reserved device name",
-            ));
-        }
-        Ok(())
+        validate_portable_file_name_impl(name)
     }
 
     /// Returns the final file-name component of `path` as UTF-8.
@@ -368,10 +306,7 @@ impl LocalFilenames {
     #[must_use]
     #[inline]
     pub fn file_name_from_path(path: &str) -> &str {
-        match path.rfind(['/', '\\']) {
-            Some(index) => &path[index + 1..],
-            None => path,
-        }
+        file_name_from_path(path)
     }
 
     /// Returns the final decoded file-name segment from a URL-like string.
@@ -397,320 +332,6 @@ impl LocalFilenames {
     /// segment exists.
     #[must_use]
     pub fn file_name_from_url(url: &str) -> String {
-        let path = lexical_url_path(url);
-        let name = match path.rfind('/') {
-            Some(index) => &path[index + 1..],
-            None => path,
-        };
-        match percent_decode_utf8(name) {
-            Some(decoded) if is_safe_decoded_url_file_name(&decoded) => decoded,
-            _ => name.to_owned(),
-        }
-    }
-}
-
-/// Removes one leading dot from an extension argument.
-///
-/// # Parameters
-/// - `extension`: Extension argument supplied by a caller.
-///
-/// # Returns
-/// The extension without one leading dot.
-#[must_use]
-#[inline(always)]
-fn normalize_extension(extension: &str) -> &str {
-    extension.strip_prefix('.').unwrap_or(extension)
-}
-
-/// Validates a caller-provided file-name fragment.
-///
-/// # Parameters
-/// - `role`: Fragment role used in error messages.
-/// - `fragment`: File-name fragment to validate.
-///
-/// # Errors
-/// Returns [`ErrorKind::InvalidInput`] when `fragment` can behave like a path
-/// instead of a plain file-name fragment.
-fn validate_file_name_fragment(role: &str, fragment: &str) -> Result<()> {
-    if fragment.contains('\0') {
-        return Err(invalid_file_name_fragment_error(
-            role,
-            "NUL bytes are not allowed",
-        ));
-    }
-    if fragment.contains('/') || fragment.contains('\\') {
-        return Err(invalid_file_name_fragment_error(
-            role,
-            "path separators are not allowed",
-        ));
-    }
-    if Path::new(fragment).components().any(|component| {
-        matches!(
-            component,
-            Component::Prefix(_) | Component::RootDir | Component::ParentDir
-        )
-    }) {
-        return Err(invalid_file_name_fragment_error(
-            role,
-            "path components are not allowed",
-        ));
-    }
-    Ok(())
-}
-
-/// Tests whether a decoded URL segment is still a safe file-name fragment.
-///
-/// # Parameters
-/// - `name`: Decoded URL path segment.
-///
-/// # Returns
-/// `true` when the decoded segment cannot behave as a path after decoding.
-#[must_use]
-fn is_safe_decoded_url_file_name(name: &str) -> bool {
-    if name == "." || name == ".." {
-        return false;
-    }
-    validate_file_name_fragment("URL file name", name).is_ok()
-}
-
-/// Builds an invalid file-name fragment error.
-///
-/// # Parameters
-/// - `role`: Fragment role used in error messages.
-/// - `reason`: Validation failure reason.
-///
-/// # Returns
-/// An [`ErrorKind::InvalidInput`] error.
-#[inline]
-fn invalid_file_name_fragment_error(role: &str, reason: &str) -> Error {
-    Error::new(
-        ErrorKind::InvalidInput,
-        format!("random file name {role} is invalid: {reason}"),
-    )
-}
-
-/// Returns the current Unix timestamp in nanoseconds.
-///
-/// # Returns
-/// Nanoseconds since the Unix epoch, or zero if the system clock is earlier
-/// than the epoch.
-#[inline]
-#[must_use]
-fn unix_timestamp_nanos() -> u128 {
-    SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .map(|duration| duration.as_nanos())
-        .unwrap_or_default()
-}
-
-/// Tries to return random bytes encoded as lowercase hexadecimal.
-///
-/// # Returns
-/// A hexadecimal string derived from operating-system randomness.
-///
-/// # Errors
-/// Returns [`ErrorKind::Other`] if the operating system random source cannot
-/// provide bytes.
-fn try_random_hex() -> Result<String> {
-    let mut bytes = [0_u8; RANDOM_NAME_BYTES];
-    fill_random_bytes(&mut bytes)?;
-    Ok(hex_encode(&bytes))
-}
-
-/// Fills a byte slice with random bytes.
-///
-/// # Parameters
-/// - `bytes`: Destination buffer.
-///
-/// # Errors
-/// Returns [`ErrorKind::Other`] if the operating system random source cannot
-/// provide bytes.
-#[inline]
-fn fill_random_bytes(bytes: &mut [u8]) -> Result<()> {
-    getrandom::fill(bytes).map_err(Error::other)
-}
-
-/// Encodes bytes as lowercase hexadecimal.
-///
-/// # Parameters
-/// - `bytes`: Bytes to encode.
-///
-/// # Returns
-/// Lowercase hexadecimal string.
-#[must_use]
-fn hex_encode(bytes: &[u8]) -> String {
-    const HEX: &[u8; 16] = b"0123456789abcdef";
-    let mut result = String::with_capacity(bytes.len() * 2);
-    for byte in bytes {
-        result.push(HEX[(byte >> 4) as usize] as char);
-        result.push(HEX[(byte & 0x0f) as usize] as char);
-    }
-    result
-}
-
-/// Tests whether a single-component file name is reserved by Windows.
-///
-/// # Parameters
-/// - `name`: File name to inspect.
-///
-/// # Returns
-/// `true` when `name` uses a reserved device name, including a reserved base
-/// name followed by an extension.
-#[must_use]
-fn is_windows_reserved_file_name(name: &str) -> bool {
-    let base_name = name
-        .split_once('.')
-        .map_or(name, |(base_name, _)| base_name);
-    let base_name = base_name.trim_end_matches([' ', '.']);
-
-    if base_name.eq_ignore_ascii_case("CON")
-        || base_name.eq_ignore_ascii_case("PRN")
-        || base_name.eq_ignore_ascii_case("AUX")
-        || base_name.eq_ignore_ascii_case("NUL")
-        || base_name.eq_ignore_ascii_case("CONIN$")
-        || base_name.eq_ignore_ascii_case("CONOUT$")
-    {
-        return true;
-    }
-
-    let Some((suffix_index, suffix)) = base_name.char_indices().next_back()
-    else {
-        return false;
-    };
-    let prefix = &base_name[..suffix_index];
-    let reserved_digit = matches!(suffix, '1'..='9' | '¹' | '²' | '³');
-    (prefix.eq_ignore_ascii_case("COM") || prefix.eq_ignore_ascii_case("LPT"))
-        && reserved_digit
-}
-
-/// Removes query and fragment suffixes from a URL-like string.
-///
-/// # Parameters
-/// - `url`: URL-like string to inspect.
-///
-/// # Returns
-/// The prefix before the first `?` or `#`, or the full input when neither is
-/// present.
-#[inline]
-#[must_use]
-fn strip_query_and_fragment(url: &str) -> &str {
-    match (url.find('?'), url.find('#')) {
-        (Some(query), Some(fragment)) => &url[..query.min(fragment)],
-        (Some(index), None) | (None, Some(index)) => &url[..index],
-        (None, None) => url,
-    }
-}
-
-/// Returns the lexical path portion of a URL-like string.
-///
-/// A syntactically valid scheme is removed first. When the remaining value
-/// begins with `//`, its authority is excluded and only the following path is
-/// returned. No URL validation, normalization, or percent decoding occurs.
-///
-/// # Parameters
-/// - `url`: URL-like string to inspect.
-///
-/// # Returns
-/// The path-like portion before any query or fragment, or an empty string for
-/// an authority-only URL.
-#[inline]
-#[must_use]
-fn lexical_url_path(url: &str) -> &str {
-    let value = strip_query_and_fragment(url);
-    let value = strip_url_scheme(value);
-    let Some(authority_and_path) = value.strip_prefix("//") else {
-        return value;
-    };
-    authority_and_path
-        .find('/')
-        .map_or("", |index| &authority_and_path[index..])
-}
-
-/// Removes a syntactically valid URL scheme and its colon.
-///
-/// # Parameters
-/// - `value`: Query- and fragment-free URL-like value.
-///
-/// # Returns
-/// The substring after a valid leading scheme, or `value` unchanged when no
-/// valid scheme is present.
-#[inline]
-#[must_use]
-fn strip_url_scheme(value: &str) -> &str {
-    let Some((scheme, remainder)) = value.split_once(':') else {
-        return value;
-    };
-    if is_url_scheme(scheme) {
-        remainder
-    } else {
-        value
-    }
-}
-
-/// Tests whether a string matches the lexical URL scheme grammar.
-///
-/// # Parameters
-/// - `value`: Candidate scheme without its trailing colon.
-///
-/// # Returns
-/// `true` when the candidate starts with an ASCII letter and every remaining
-/// byte is an ASCII letter, digit, plus sign, hyphen, or period.
-#[inline]
-#[must_use]
-fn is_url_scheme(value: &str) -> bool {
-    let mut bytes = value.bytes();
-    bytes.next().is_some_and(|byte| byte.is_ascii_alphabetic())
-        && bytes.all(|byte| {
-            byte.is_ascii_alphanumeric() || matches!(byte, b'+' | b'-' | b'.')
-        })
-}
-
-/// Decodes percent-encoded UTF-8.
-///
-/// # Parameters
-/// - `value`: Percent-encoded string.
-///
-/// # Returns
-/// The decoded string, or `None` when the input contains malformed percent
-/// encoding or decoded bytes are not valid UTF-8.
-fn percent_decode_utf8(value: &str) -> Option<String> {
-    if !value.as_bytes().contains(&b'%') {
-        return Some(value.to_owned());
-    }
-    let bytes = value.as_bytes();
-    let mut output = Vec::with_capacity(bytes.len());
-    let mut index = 0;
-    while index < bytes.len() {
-        if bytes[index] == b'%' {
-            if index + 2 >= bytes.len() {
-                return None;
-            }
-            let high = hex_value(bytes[index + 1])?;
-            let low = hex_value(bytes[index + 2])?;
-            output.push((high << 4) | low);
-            index += 3;
-        } else {
-            output.push(bytes[index]);
-            index += 1;
-        }
-    }
-    String::from_utf8(output).ok()
-}
-
-/// Converts an ASCII hexadecimal digit to its numeric value.
-///
-/// # Parameters
-/// - `byte`: ASCII byte to convert.
-///
-/// # Returns
-/// The hexadecimal value, or `None` when `byte` is not an ASCII hexadecimal
-/// digit.
-#[inline]
-fn hex_value(byte: u8) -> Option<u8> {
-    match byte {
-        b'0'..=b'9' => Some(byte - b'0'),
-        b'a'..=b'f' => Some(byte - b'a' + 10),
-        b'A'..=b'F' => Some(byte - b'A' + 10),
-        _ => None,
+        file_name_from_url(url)
     }
 }
