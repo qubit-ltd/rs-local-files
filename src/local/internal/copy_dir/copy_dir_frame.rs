@@ -16,6 +16,8 @@ use std::path::{
     PathBuf,
 };
 
+use super::super::directory_identity::DirectoryIdentity;
+
 /// Holds the lazy iterator and completion state for one source directory.
 #[must_use = "discarding an active copy frame abandons its directory traversal"]
 pub(super) struct CopyDirFrame {
@@ -23,8 +25,8 @@ pub(super) struct CopyDirFrame {
     src: PathBuf,
     /// Destination directory path paired with `src`.
     dst: PathBuf,
-    /// Canonical source identity retained for active-cycle detection.
-    canonical_source: PathBuf,
+    /// Filesystem-object identity retained for active-cycle detection.
+    source_identity: DirectoryIdentity,
     /// Source permissions captured for post-order preservation.
     source_permissions: fs::Permissions,
     /// Lazy iterator over direct source-directory entries.
@@ -38,7 +40,7 @@ impl CopyDirFrame {
     ///
     /// * `src` - Source directory path.
     /// * `dst` - Destination directory path.
-    /// * `canonical_source` - Canonical source identity for cycle detection.
+    /// * `source_identity` - Filesystem-object identity for cycle detection.
     /// * `source_permissions` - Permissions to apply after copying children.
     /// * `entries` - Lazy source-directory iterator.
     ///
@@ -49,14 +51,14 @@ impl CopyDirFrame {
     pub(super) fn new(
         src: PathBuf,
         dst: PathBuf,
-        canonical_source: PathBuf,
+        source_identity: DirectoryIdentity,
         source_permissions: fs::Permissions,
         entries: fs::ReadDir,
     ) -> Self {
         Self {
             src,
             dst,
-            canonical_source,
+            source_identity,
             source_permissions,
             entries,
         }
@@ -76,11 +78,11 @@ impl CopyDirFrame {
         &self.dst
     }
 
-    /// Returns the canonical source identity.
+    /// Returns the filesystem-object source identity.
     #[must_use]
     #[inline(always)]
-    pub(super) fn canonical_source(&self) -> &Path {
-        &self.canonical_source
+    pub(super) const fn source_identity(&self) -> &DirectoryIdentity {
+        &self.source_identity
     }
 
     /// Returns the source permissions captured before traversal.

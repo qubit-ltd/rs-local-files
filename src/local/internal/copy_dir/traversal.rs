@@ -15,10 +15,7 @@ use std::io::{
     Error,
     ErrorKind,
 };
-use std::path::{
-    Path,
-    PathBuf,
-};
+use std::path::Path;
 
 use crate::{
     LocalCopyDirOptions,
@@ -26,6 +23,7 @@ use crate::{
     LocalCopyDirStats,
 };
 
+use super::super::directory_identity::DirectoryIdentity;
 use super::copy_dir_frame::CopyDirFrame;
 use super::copy_dir_result::CopyDirResult;
 use super::destination::ensure_copy_destination_dir;
@@ -78,7 +76,7 @@ pub(super) fn copy_dir_iterative(
             let completed = frames
                 .pop()
                 .expect("non-empty traversal stack should have a frame");
-            let _ = active_sources.remove(completed.canonical_source());
+            let _ = active_sources.remove(completed.source_identity());
             if options.preserves_permissions() {
                 with_copy_context(
                     fs::set_permissions(
@@ -166,7 +164,8 @@ pub(super) fn copy_dir_iterative(
 /// * `dst` - Destination directory.
 /// * `options` - Recursive-copy behavior options.
 /// * `destination_root` - Canonical destination used for containment checks.
-/// * `active_sources` - Canonical ancestor set used for cycle detection.
+/// * `active_sources` - Filesystem-object ancestor identities used for cycle
+///   detection.
 /// * `stats` - Mutable statistics accumulator.
 ///
 /// # Returns
@@ -182,10 +181,10 @@ fn enter_copy_directory(
     dst: &Path,
     options: LocalCopyDirOptions,
     destination_root: &Path,
-    active_sources: &mut HashSet<PathBuf>,
+    active_sources: &mut HashSet<DirectoryIdentity>,
     stats: &mut LocalCopyDirStats,
 ) -> CopyDirResult<CopyDirFrame> {
-    let (source_metadata, canonical_source) = with_copy_context(
+    let (source_metadata, source_identity) = with_copy_context(
         inspect_copy_source_directory(
             src,
             options.follows_symlinks(),
@@ -196,7 +195,7 @@ fn enter_copy_directory(
         dst,
         stats,
     )?;
-    if active_sources.contains(&canonical_source) {
+    if active_sources.contains(&source_identity) {
         return Err(copy_dir_error(
             LocalCopyDirStage::InspectSource,
             src,
@@ -231,11 +230,11 @@ fn enter_copy_directory(
         dst,
         stats,
     )?;
-    let _ = active_sources.insert(canonical_source.clone());
+    let _ = active_sources.insert(source_identity.clone());
     Ok(CopyDirFrame::new(
         src.to_path_buf(),
         dst.to_path_buf(),
-        canonical_source,
+        source_identity,
         source_metadata.permissions(),
         entries,
     ))

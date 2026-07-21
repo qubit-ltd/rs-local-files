@@ -80,6 +80,41 @@ fn assert_injected_copy_error(
     };
 }
 
+/// Verifies cycle detection when distinct paths resolve to one directory
+/// identity, as can happen through a bind mount.
+#[cfg(all(coverage, target_os = "linux"))]
+#[test]
+fn test_copy_dir_rejects_injected_directory_identity_cycle() {
+    const TEST_NAME: &str = concat!(
+        "local::local_files_tests::copy_dir_tests::",
+        "test_copy_dir_rejects_injected_directory_identity_cycle",
+    );
+    let Some(()) = run_in_coverage_fault_process(
+        TEST_NAME,
+        "copy-dir-directory-identity-cycle",
+        move || {
+            let dir = temp_dir("copy-dir-directory-identity-cycle");
+            let src = dir.join("src");
+            let dst = dir.join("dst");
+            fs::create_dir_all(src.join("nested"))
+                .expect("nested source directory should be created");
+
+            let error = LocalFiles::copy_dir_all_with(
+                &src,
+                &dst,
+                LocalCopyDirOptions::default(),
+            )
+            .expect_err("repeated directory identity should be rejected");
+
+            assert_eq!(LocalCopyDirStage::InspectSource, error.stage());
+            assert_eq!(ErrorKind::InvalidInput, error.kind());
+            fs::remove_dir_all(dir).expect("test directory should be removed");
+        },
+    ) else {
+        return;
+    };
+}
+
 /// Verifies propagation of an injected source-to-staging copy error.
 #[cfg(all(coverage, target_os = "linux"))]
 #[test]

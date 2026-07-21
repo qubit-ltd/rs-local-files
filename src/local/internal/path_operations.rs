@@ -8,6 +8,7 @@
 //! Private path and directory operations.
 // qubit-style: allow coverage-cfg
 
+use std::collections::HashSet;
 use std::env;
 use std::ffi::OsString;
 use std::fs;
@@ -27,6 +28,7 @@ use std::os::windows::fs::FileTypeExt;
 #[cfg(coverage)]
 use super::coverage_fault;
 use super::dir_size_frame::DirSizeFrame;
+use super::directory_identity::DirectoryIdentity;
 #[cfg(windows)]
 use super::file_move::remove_directory_symlink;
 use super::path_io_error::PathIoError;
@@ -180,7 +182,10 @@ pub(crate) fn dir_size_path(path: &Path) -> Result<u64> {
             format!("path is not a directory: {}", path.display()),
         ));
     }
-    dir_size_iterative(path)
+    let canonical_path = fs::canonicalize(path)?;
+    let root_identity =
+        DirectoryIdentity::from_metadata(&metadata, &canonical_path);
+    dir_size_iterative(path, root_identity)
 }
 
 /// Computes regular-file sizes below a directory without recursive calls.
@@ -194,9 +199,17 @@ pub(crate) fn dir_size_path(path: &Path) -> Result<u64> {
 /// # Errors
 /// Returns an I/O error when a directory entry cannot be read, or
 /// [`ErrorKind::InvalidData`] when the aggregate exceeds [`u64::MAX`].
-fn dir_size_iterative(path: &Path) -> Result<u64> {
-    let mut directories =
-        vec![DirSizeFrame::new(path.to_path_buf(), fs::read_dir(path)?)];
+fn dir_size_iterative(
+    path: &Path,
+    root_identity: DirectoryIdentity,
+) -> Result<u64> {
+    let mut active_directories = HashSet::new();
+    let _ = active_directories.insert(root_identity.clone());
+    let mut directories = vec![DirSizeFrame::new(
+        path.to_path_buf(),
+        root_identity,
+        fs::read_dir(path)?,
+    )];
     loop {
         let current = directories
             .last_mut()
@@ -206,8 +219,9 @@ fn dir_size_iterative(path: &Path) -> Result<u64> {
             let completed = directories.pop().expect(
                 "directory-size traversal should retain its root frame",
             );
-            let (completed_path, completed_size) =
-                completed.into_path_and_size();
+            let (completed_path, completed_identity, completed_size) =
+                completed.into_parts();
+            let _ = active_directories.remove(&completed_identity);
             let Some(parent) = directories.last_mut() else {
                 return Ok(completed_size);
             };
@@ -228,8 +242,21 @@ fn dir_size_iterative(path: &Path) -> Result<u64> {
             continue;
         }
         if metadata.is_dir() {
+            let canonical_path = fs::canonicalize(&entry_path)?;
+            let identity =
+                DirectoryIdentity::from_metadata(&metadata, &canonical_path);
+            if active_directories.contains(&identity) {
+                return Err(Error::new(
+                    ErrorKind::InvalidInput,
+                    format!(
+                        "directory cycle detected while measuring size: {}",
+                        entry_path.display(),
+                    ),
+                ));
+            }
             let entries = read_dir_size_entries(&entry_path)?;
-            directories.push(DirSizeFrame::new(entry_path, entries));
+            let _ = active_directories.insert(identity.clone());
+            directories.push(DirSizeFrame::new(entry_path, identity, entries));
         } else if metadata.is_file() {
             let current = directories.last_mut().expect(
                 "directory-size traversal should retain its root frame",

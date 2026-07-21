@@ -39,6 +39,8 @@ fn assert_injected_dir_size_error(test_name: &str, fault: &str, nested: bool) {
 
         if fault.ends_with("overflow") {
             assert_eq!(ErrorKind::InvalidData, error.kind());
+        } else if fault.ends_with("identity-cycle") {
+            assert_eq!(ErrorKind::InvalidInput, error.kind());
         } else {
             assert_eq!(Some(libc::EIO), error.raw_os_error());
         }
@@ -79,6 +81,22 @@ fn test_dir_size_reports_injected_nested_read_error() {
         "test_dir_size_reports_injected_nested_read_error",
     );
     assert_injected_dir_size_error(TEST_NAME, "dir-size-read-dir", true);
+}
+
+/// Verifies cycle detection when distinct paths resolve to one directory
+/// identity, as can happen through a bind mount.
+#[cfg(all(coverage, target_os = "linux"))]
+#[test]
+fn test_dir_size_rejects_injected_directory_identity_cycle() {
+    const TEST_NAME: &str = concat!(
+        "local::local_files_tests::path_operations_tests::",
+        "test_dir_size_rejects_injected_directory_identity_cycle",
+    );
+    assert_injected_dir_size_error(
+        TEST_NAME,
+        "dir-size-directory-identity-cycle",
+        true,
+    );
 }
 
 /// Verifies normalization of injected file-size overflow.

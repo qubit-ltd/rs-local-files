@@ -15,10 +15,9 @@ use std::io::{
     ErrorKind,
     Result,
 };
-use std::path::{
-    Path,
-    PathBuf,
-};
+use std::path::Path;
+
+use super::super::directory_identity::DirectoryIdentity;
 
 /// Inspects a source directory before recursive copy enters it.
 ///
@@ -30,7 +29,7 @@ use std::path::{
 ///
 /// # Returns
 ///
-/// Source metadata and canonical source directory path.
+/// Source metadata and filesystem-object identity.
 ///
 /// # Errors
 ///
@@ -40,7 +39,7 @@ pub(super) fn inspect_copy_source_directory(
     src: &Path,
     follow_symlinks: bool,
     destination_root: &Path,
-) -> Result<(fs::Metadata, PathBuf)> {
+) -> Result<(fs::Metadata, DirectoryIdentity)> {
     let source_metadata = metadata_for_copy_source(src, follow_symlinks)?;
     if !source_metadata.is_dir() {
         return Err(Error::new(
@@ -50,7 +49,9 @@ pub(super) fn inspect_copy_source_directory(
     }
     let canonical_source = fs::canonicalize(src)?;
     reject_destination_inside_source(src, &canonical_source, destination_root)?;
-    Ok((source_metadata, canonical_source))
+    let source_identity =
+        DirectoryIdentity::from_metadata(&source_metadata, &canonical_source);
+    Ok((source_metadata, source_identity))
 }
 
 /// Loads source metadata according to the symbolic-link policy.

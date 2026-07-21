@@ -12,11 +12,15 @@
 use std::fs;
 use std::path::PathBuf;
 
+use super::directory_identity::DirectoryIdentity;
+
 /// Holds the lazy iterator and subtotal for one directory being measured.
 #[must_use = "discarding an active size frame abandons its directory subtotal"]
 pub(super) struct DirSizeFrame {
     /// Directory path used for traversal and overflow diagnostics.
     path: PathBuf,
+    /// Filesystem-object identity retained for active-cycle detection.
+    identity: DirectoryIdentity,
     /// Subtotal accumulated from completed children and regular files.
     size: u64,
     /// Lazy iterator over direct directory entries.
@@ -29,15 +33,21 @@ impl DirSizeFrame {
     /// # Parameters
     ///
     /// * `path` - The directory path retained for traversal diagnostics.
+    /// * `identity` - Filesystem-object identity for cycle detection.
     /// * `entries` - The lazy iterator over the directory's direct entries.
     ///
     /// # Returns
     ///
     /// A frame with a zero subtotal and the supplied lazy iterator.
     #[inline]
-    pub(super) fn new(path: PathBuf, entries: fs::ReadDir) -> Self {
+    pub(super) fn new(
+        path: PathBuf,
+        identity: DirectoryIdentity,
+        entries: fs::ReadDir,
+    ) -> Self {
         Self {
             path,
+            identity,
             size: 0,
             entries,
         }
@@ -78,14 +88,14 @@ impl DirSizeFrame {
         self.entries.next()
     }
 
-    /// Consumes this completed frame into its path and subtotal.
+    /// Consumes this completed frame into its path, identity, and subtotal.
     ///
     /// # Returns
     ///
-    /// The owned directory path followed by its completed subtotal.
-    #[must_use = "the completed directory path and subtotal must be consumed together"]
+    /// The owned directory path, identity, and completed subtotal.
+    #[must_use = "the completed directory path, identity, and subtotal must be consumed together"]
     #[inline(always)]
-    pub(super) fn into_path_and_size(self) -> (PathBuf, u64) {
-        (self.path, self.size)
+    pub(super) fn into_parts(self) -> (PathBuf, DirectoryIdentity, u64) {
+        (self.path, self.identity, self.size)
     }
 }

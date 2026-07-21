@@ -17,6 +17,7 @@ mod copy_dir;
 #[cfg(coverage)]
 mod coverage_fault;
 mod dir_size_frame;
+mod directory_identity;
 mod file_io;
 mod file_move;
 mod io_result_context;
