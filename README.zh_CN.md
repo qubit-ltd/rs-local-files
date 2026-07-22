@@ -94,6 +94,7 @@ assert_eq!("new payload\n", std::fs::read_to_string(&final_path)?);
 | `atomic_write` | 通过持久化同目录临时写入替换文件。 |
 | `atomic_write_with` | 与 `atomic_write` 相同，但向调用方写入逻辑传入受保护的 `LocalAtomicWriter`。 |
 | `begin_atomic_write` | 返回由调用方显式提交的 streaming `LocalAtomicWriter`。 |
+| `begin_atomic_write_with_options` | 以显式的缺失父目录创建策略返回 streaming 原子 writer。 |
 
 ### 临时文件和临时目录
 

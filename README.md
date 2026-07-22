@@ -101,6 +101,7 @@ become repeated boilerplate:
 | `atomic_write` | Replaces a file through a durable same-directory temporary write. |
 | `atomic_write_with` | Same as `atomic_write`, but passes a guarded `LocalAtomicWriter` to caller-provided write logic. |
 | `begin_atomic_write` | Returns a streaming `LocalAtomicWriter` committed explicitly by the caller. |
+| `begin_atomic_write_with_options` | Begins a streaming atomic write with explicit missing-parent creation policy. |
 
 ### Temporary Files and Directories
 
