@@ -23,6 +23,7 @@ use std::time::Duration;
 use crate::{
     LocalAtomicDestinationState,
     LocalAtomicWriteError,
+    LocalAtomicWriteOptions,
     LocalAtomicWriteStage,
 };
 
@@ -113,11 +114,18 @@ impl LocalAtomicWriter {
     ///
     /// # Parameters
     /// - `path`: Destination path to replace on commit.
+    /// - `options`: Parent-directory preparation policy.
+    ///
+    /// # Returns
+    /// A writer owning a same-directory staging file.
     ///
     /// # Errors
     /// Returns a structured error when parent preparation, destination
     /// inspection, or staging-file creation fails.
-    pub(crate) fn new(path: &Path) -> Result<Self, LocalAtomicWriteError> {
+    pub(crate) fn new(
+        path: &Path,
+        options: LocalAtomicWriteOptions,
+    ) -> Result<Self, LocalAtomicWriteError> {
         let operation_path = with_atomic_context(
             absolute_path(path),
             LocalAtomicWriteStage::PrepareParent,
@@ -125,13 +133,37 @@ impl LocalAtomicWriter {
             None,
             LocalAtomicDestinationState::Unchanged,
         )?;
-        let parent_dirs_to_sync = with_atomic_context(
-            ensure_parent_path_with_sync_dirs(&operation_path),
-            LocalAtomicWriteStage::PrepareParent,
-            path,
-            None,
-            LocalAtomicDestinationState::Unchanged,
-        )?;
+        let parent_dirs_to_sync = if options.creates_parent() {
+            with_atomic_context(
+                ensure_parent_path_with_sync_dirs(&operation_path),
+                LocalAtomicWriteStage::PrepareParent,
+                path,
+                None,
+                LocalAtomicDestinationState::Unchanged,
+            )?
+        } else {
+            let parent = parent_dir_for(&operation_path);
+            let metadata = with_atomic_context(
+                fs::metadata(parent),
+                LocalAtomicWriteStage::PrepareParent,
+                path,
+                None,
+                LocalAtomicDestinationState::Unchanged,
+            )?;
+            if !metadata.is_dir() {
+                return Err(LocalAtomicWriteError::new(
+                    LocalAtomicWriteStage::PrepareParent,
+                    path.to_path_buf(),
+                    None,
+                    LocalAtomicDestinationState::Unchanged,
+                    io::Error::new(
+                        ErrorKind::NotADirectory,
+                        "atomic write parent must be a directory",
+                    ),
+                ));
+            }
+            Vec::new()
+        };
         let destination_existed = with_atomic_context(
             existing_file_metadata(&operation_path),
             LocalAtomicWriteStage::InspectDestination,

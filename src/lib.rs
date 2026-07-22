@@ -24,6 +24,7 @@ pub use local::{
     FileWriteOptions,
     LocalAtomicDestinationState,
     LocalAtomicWriteError,
+    LocalAtomicWriteOptions,
     LocalAtomicWriteStage,
     LocalAtomicWriter,
     LocalCopyConflictPolicy,

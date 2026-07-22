@@ -16,6 +16,7 @@ use crate::{
     FileReadOptions,
     FileWriteOptions,
     LocalAtomicWriteError,
+    LocalAtomicWriteOptions,
     LocalAtomicWriter,
     LocalCopyDirError,
     LocalCopyDirOptions,
@@ -370,7 +371,36 @@ impl LocalFiles {
     where
         P: AsRef<Path>,
     {
-        LocalAtomicWriter::new(path.as_ref())
+        Self::begin_atomic_write_with_options(
+            path,
+            LocalAtomicWriteOptions::new().with_parent(),
+        )
+    }
+
+    /// Begins a streaming same-directory atomic file replacement with options.
+    ///
+    /// Unlike [`Self::begin_atomic_write`], missing parent directories are not
+    /// created unless `options` enables parent creation.
+    ///
+    /// # Parameters
+    /// - `path`: Destination path to replace on commit.
+    /// - `options`: Atomic write options controlling parent creation.
+    ///
+    /// # Returns
+    /// A streaming writer for the private staging file.
+    ///
+    /// # Errors
+    /// Returns a structured error when parent preparation, destination
+    /// inspection, or staging-file creation fails.
+    #[inline(always)]
+    pub fn begin_atomic_write_with_options<P>(
+        path: P,
+        options: LocalAtomicWriteOptions,
+    ) -> std::result::Result<LocalAtomicWriter, LocalAtomicWriteError>
+    where
+        P: AsRef<Path>,
+    {
+        LocalAtomicWriter::new(path.as_ref(), options)
     }
 
     /// Atomically writes bytes using a same-directory temporary file.
