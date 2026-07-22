@@ -15,6 +15,7 @@ use std::io::{
 use qubit_local_files::{
     LocalAtomicDestinationState,
     LocalAtomicWriteStage,
+    LocalAtomicWriter,
     LocalFiles,
 };
 
@@ -22,6 +23,11 @@ use super::test_support::{
     fs,
     temp_dir,
 };
+
+/// Returns a stable callback failure for atomic-write error assertions.
+fn fail_atomic_write(_: &mut LocalAtomicWriter) -> std::io::Result<()> {
+    Err(Error::other("write failed"))
+}
 
 #[test]
 fn test_atomic_write_with_returns_parent_error() {
@@ -31,7 +37,7 @@ fn test_atomic_write_with_returns_parent_error() {
 
     let error = LocalFiles::atomic_write_with(
         file_parent.join("child.txt"),
-        |_| Ok(()),
+        fail_atomic_write,
     )
     .expect_err("file parent should return create-dir error");
 
@@ -57,10 +63,9 @@ fn test_atomic_write_with_returns_parent_error() {
     assert!(base_message.contains("PrepareParent"));
     assert!(!base_message.contains("staging path"));
     let display_path = dir.join("display.txt");
-    let display_error = LocalFiles::atomic_write_with(&display_path, |_| {
-        Err(Error::other("write failed"))
-    })
-    .expect_err("callback failure should return staging context");
+    let display_error =
+        LocalFiles::atomic_write_with(&display_path, fail_atomic_write)
+            .expect_err("callback failure should return staging context");
     let temporary_path = display_error
         .temporary_path()
         .map(ToOwned::to_owned)

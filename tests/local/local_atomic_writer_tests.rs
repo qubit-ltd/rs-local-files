@@ -18,6 +18,7 @@ use std::time::Duration;
 
 use qubit_local_files::{
     LocalAtomicDestinationState,
+    LocalAtomicWriteOptions,
     LocalAtomicWriteStage,
     LocalAtomicWriter,
     LocalFiles,
@@ -39,6 +40,41 @@ fn assert_send<T: Send>() {}
 #[test]
 fn test_local_atomic_writer_is_send() {
     assert_send::<LocalAtomicWriter>();
+}
+
+#[test]
+fn test_atomic_writer_options_do_not_create_missing_parent_by_default() {
+    let dir = temp_dir("atomic-writer-parent-disabled");
+    let parent = dir.join("missing").join("nested");
+    let path = parent.join("out.txt");
+
+    let error = LocalFiles::begin_atomic_write_with_options(
+        &path,
+        LocalAtomicWriteOptions::new(),
+    )
+    .expect_err("missing parent should be rejected");
+
+    assert_eq!(std::io::ErrorKind::NotFound, error.kind());
+    assert!(!parent.exists());
+    fs::remove_dir_all(dir).unwrap();
+}
+
+#[test]
+fn test_atomic_writer_options_can_create_missing_parents() {
+    let dir = temp_dir("atomic-writer-parent-enabled");
+    let parent = dir.join("missing").join("nested");
+    let path = parent.join("out.txt");
+
+    let mut writer = LocalFiles::begin_atomic_write_with_options(
+        &path,
+        LocalAtomicWriteOptions::new().with_parent(),
+    )
+    .expect("parent-enabled writer should begin");
+    writer.write_all(b"payload").expect("payload should stage");
+    writer.commit().expect("payload should commit");
+
+    assert_eq!(b"payload", fs::read(&path).unwrap().as_slice());
+    fs::remove_dir_all(dir).unwrap();
 }
 
 #[test]
