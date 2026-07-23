@@ -77,21 +77,6 @@ fn test_atomic_writer_options_can_create_missing_parents() {
     fs::remove_dir_all(dir).unwrap();
 }
 
-#[test]
-fn test_local_atomic_writer_open_retry_timeout_configuration() {
-    let dir = temp_dir("atomic-writer-open-retry-timeout-option");
-    let path = dir.join("out.txt");
-    let writer = LocalFiles::begin_atomic_write(&path)
-        .expect("atomic writer should begin");
-    assert_eq!(None, writer.open_retry_timeout());
-
-    let writer = writer.with_open_retry_timeout(Duration::ZERO);
-
-    assert_eq!(Some(Duration::ZERO), writer.open_retry_timeout());
-    writer.abort().expect("atomic writer should abort");
-    fs::remove_dir_all(dir).unwrap();
-}
-
 #[cfg(target_os = "linux")]
 #[test]
 fn test_local_atomic_writer_zero_open_retry_timeout_reports_timed_out() {
@@ -100,9 +85,12 @@ fn test_local_atomic_writer_zero_open_retry_timeout_reports_timed_out() {
     fs::write(&path, b"original").expect("destination should be written");
     let lease = SourceReadLease::acquire(&path)
         .expect("destination read lease should be acquired");
-    let mut writer = LocalFiles::begin_atomic_write(&path)
-        .expect("atomic writer should begin")
+    let options = LocalAtomicWriteOptions::new()
+        .with_parent()
         .with_open_retry_timeout(Duration::ZERO);
+    let mut writer =
+        LocalFiles::begin_atomic_write_with_options(&path, options)
+            .expect("atomic writer should begin");
     writer
         .write_all(b"replacement")
         .expect("replacement should be staged");

@@ -190,40 +190,9 @@ impl LocalAtomicWriter {
             operation_path,
             parent_dirs_to_sync,
             destination_existed,
-            open_retry_timeout: None,
+            open_retry_timeout: options.open_retry_timeout(),
             staged_file: StagedFile::new(temp_path, file),
         })
-    }
-
-    /// Returns the configured nonblocking-open retry timeout.
-    ///
-    /// On Unix, this limits how long commit waits for an existing destination
-    /// whose active file lease makes a nonblocking open return
-    /// [`ErrorKind::WouldBlock`]. `None` preserves the default unbounded wait.
-    ///
-    /// # Returns
-    /// The configured timeout, or `None` when retries are unbounded.
-    #[must_use]
-    #[inline(always)]
-    pub const fn open_retry_timeout(&self) -> Option<Duration> {
-        self.open_retry_timeout
-    }
-
-    /// Sets the nonblocking-open retry timeout.
-    ///
-    /// On Unix, [`Duration::ZERO`] returns [`ErrorKind::TimedOut`] after the
-    /// first lease-conflicting open attempt. Other open errors are never
-    /// retried.
-    ///
-    /// # Parameters
-    /// - `timeout`: Maximum time to retry a lease-conflicting open.
-    ///
-    /// # Returns
-    /// This writer with the timeout configured.
-    #[inline(always)]
-    pub const fn with_open_retry_timeout(mut self, timeout: Duration) -> Self {
-        self.open_retry_timeout = Some(timeout);
-        self
     }
 
     /// Synchronizes and atomically replaces the destination.

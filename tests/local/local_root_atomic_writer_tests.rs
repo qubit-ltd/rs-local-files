@@ -23,6 +23,7 @@ use std::time::Duration;
 #[cfg(unix)]
 use qubit_local_files::{
     LocalAtomicDestinationState,
+    LocalAtomicWriteOptions,
     LocalAtomicWriteStage,
     LocalRelativePath,
     LocalRoot,
@@ -58,20 +59,21 @@ const ROOTED_ATOMIC_SYNC_ROOT_ENV: &str =
 
 #[cfg(unix)]
 #[test]
-fn test_local_root_atomic_writer_open_retry_timeout_configuration() {
-    let root_path = temp_dir("rooted-atomic-open-retry-timeout-option");
+fn test_begin_atomic_write_with_options_rejects_missing_parent() {
+    let root_path = temp_dir("rooted-atomic-parent-disabled");
     let root = LocalRoot::open(&root_path).expect("root should open");
-    let destination = LocalRelativePath::new("result.txt")
+    let destination = LocalRelativePath::new("nested/result.txt")
         .expect("destination should validate");
-    let writer = root
-        .begin_atomic_write(&destination)
-        .expect("rooted atomic writer should begin");
-    assert_eq!(None, writer.open_retry_timeout());
 
-    let writer = writer.with_open_retry_timeout(Duration::ZERO);
+    let error = root
+        .begin_atomic_write_with_options(
+            &destination,
+            LocalAtomicWriteOptions::new(),
+        )
+        .expect_err("missing parent should be rejected");
 
-    assert_eq!(Some(Duration::ZERO), writer.open_retry_timeout());
-    writer.abort().expect("rooted writer should abort");
+    assert_eq!(LocalAtomicWriteStage::PrepareParent, error.stage());
+    assert!(!root_path.join("nested").exists());
     fs::remove_dir_all(root_path).unwrap();
 }
 
@@ -87,10 +89,12 @@ fn test_local_root_atomic_writer_zero_open_retry_timeout_reports_timed_out() {
     let root = LocalRoot::open(&root_path).expect("root should open");
     let destination = LocalRelativePath::new("result.txt")
         .expect("destination should validate");
-    let mut writer = root
-        .begin_atomic_write(&destination)
-        .expect("rooted atomic writer should begin")
+    let options = LocalAtomicWriteOptions::new()
+        .with_parent()
         .with_open_retry_timeout(Duration::ZERO);
+    let mut writer = root
+        .begin_atomic_write_with_options(&destination, options)
+        .expect("rooted atomic writer should begin");
     writer
         .write_all(b"replacement")
         .expect("replacement should be staged");

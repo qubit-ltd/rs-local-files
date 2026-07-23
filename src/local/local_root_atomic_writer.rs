@@ -27,6 +27,7 @@ use crate::LocalRelativePath;
 use crate::{
     LocalAtomicDestinationState,
     LocalAtomicWriteError,
+    LocalAtomicWriteOptions,
     LocalAtomicWriteStage,
 };
 
@@ -99,6 +100,7 @@ impl LocalRootAtomicWriter {
     /// * `root` - Open root directory authority.
     /// * `diagnostic_root` - Path used only to contextualize traversal errors.
     /// * `path` - Validated relative destination.
+    /// * `options` - Parent-creation and destination-open retry policy.
     ///
     /// # Returns
     ///
@@ -112,16 +114,17 @@ impl LocalRootAtomicWriter {
         root: &File,
         diagnostic_root: &Path,
         path: &LocalRelativePath,
+        options: LocalAtomicWriteOptions,
     ) -> Result<Self, LocalAtomicWriteError> {
         let requested_path = path.as_path().to_path_buf();
         let diagnostic_path = diagnostic_root.join(path.as_path());
+        let parent_mode = if options.creates_parent() {
+            RootedParentMode::CreateMissingAndTrackSync
+        } else {
+            RootedParentMode::OpenExisting
+        };
         let rooted_parent = map_atomic_error(
-            open_rooted_parent(
-                root,
-                &diagnostic_path,
-                path,
-                RootedParentMode::CreateMissingAndTrackSync,
-            ),
+            open_rooted_parent(root, &diagnostic_path, path, parent_mode),
             LocalAtomicWriteStage::PrepareParent,
             &requested_path,
             None,
@@ -146,44 +149,12 @@ impl LocalRootAtomicWriter {
         )?;
         Ok(Self {
             path: requested_path,
-            open_retry_timeout: None,
+            open_retry_timeout: options.open_retry_timeout(),
             final_name,
             parent_dirs_to_sync,
             destination_existed,
             staged_file,
         })
-    }
-
-    /// Returns the configured nonblocking-open retry timeout.
-    ///
-    /// On Unix, this limits how long commit waits for an existing destination
-    /// whose active file lease makes a nonblocking open return
-    /// [`io::ErrorKind::WouldBlock`]. `None` preserves the default unbounded
-    /// wait.
-    ///
-    /// # Returns
-    /// The configured timeout, or `None` when retries are unbounded.
-    #[must_use]
-    #[inline(always)]
-    pub const fn open_retry_timeout(&self) -> Option<Duration> {
-        self.open_retry_timeout
-    }
-
-    /// Sets the nonblocking-open retry timeout.
-    ///
-    /// On Unix, [`Duration::ZERO`] returns [`io::ErrorKind::TimedOut`] after
-    /// the first lease-conflicting open attempt. Other open errors are never
-    /// retried.
-    ///
-    /// # Parameters
-    /// - `timeout`: Maximum time to retry a lease-conflicting open.
-    ///
-    /// # Returns
-    /// This writer with the timeout configured.
-    #[inline(always)]
-    pub const fn with_open_retry_timeout(mut self, timeout: Duration) -> Self {
-        self.open_retry_timeout = Some(timeout);
-        self
     }
 
     /// Synchronizes and atomically replaces the rooted destination.

@@ -24,6 +24,7 @@ use crate::{
     FileReadOptions,
     FileWriteOptions,
     LocalAtomicWriteError,
+    LocalAtomicWriteOptions,
     LocalFileReader,
     LocalFileWriter,
     LocalRelativePath,
@@ -230,12 +231,41 @@ impl LocalRoot {
         &self,
         path: &LocalRelativePath,
     ) -> std::result::Result<LocalRootAtomicWriter, LocalAtomicWriteError> {
+        self.begin_atomic_write_with_options(
+            path,
+            LocalAtomicWriteOptions::new().with_parent(),
+        )
+    }
+
+    /// Begins an atomic write relative to this root using `options`.
+    ///
+    /// Missing parent directories are created only when requested by
+    /// [`LocalAtomicWriteOptions::with_parent`]. Transient destination-open
+    /// failures are retried according to
+    /// [`LocalAtomicWriteOptions::with_open_retry_timeout`].
+    ///
+    /// # Errors
+    ///
+    /// Returns a structured atomic-write error for parent preparation,
+    /// destination inspection, staging creation, or unsupported secure
+    /// backend failures.
+    pub fn begin_atomic_write_with_options(
+        &self,
+        path: &LocalRelativePath,
+        options: LocalAtomicWriteOptions,
+    ) -> std::result::Result<LocalRootAtomicWriter, LocalAtomicWriteError> {
         #[cfg(unix)]
         {
-            LocalRootAtomicWriter::new(&self.directory, &self.path, path)
+            LocalRootAtomicWriter::new(
+                &self.directory,
+                &self.path,
+                path,
+                options,
+            )
         }
         #[cfg(not(unix))]
         {
+            let _ = options;
             Err(LocalAtomicWriteError::new(
                 LocalAtomicWriteStage::PrepareParent,
                 path.as_path().to_path_buf(),

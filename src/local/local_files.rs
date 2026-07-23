@@ -384,7 +384,8 @@ impl LocalFiles {
     ///
     /// # Parameters
     /// - `path`: Destination path to replace on commit.
-    /// - `options`: Atomic write options controlling parent creation.
+    /// - `options`: Atomic write options controlling parent creation and
+    ///   destination-open retries.
     ///
     /// # Returns
     /// A streaming writer for the private staging file.
