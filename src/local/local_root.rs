@@ -244,6 +244,15 @@ impl LocalRoot {
     /// failures are retried according to
     /// [`LocalAtomicWriteOptions::with_open_retry_timeout`].
     ///
+    /// # Parameters
+    ///
+    /// * `path` - Validated destination relative to this root.
+    /// * `options` - Parent creation and destination-open retry policy.
+    ///
+    /// # Returns
+    ///
+    /// A descriptor-relative staging writer bound to this root.
+    ///
     /// # Errors
     ///
     /// Returns a structured atomic-write error for parent preparation,
