@@ -22,6 +22,8 @@ use qubit_local_files::{
     LocalRoot,
 };
 
+#[cfg(target_os = "linux")]
+use super::test_support::SourceReadLease;
 #[cfg(all(coverage, target_os = "linux"))]
 use super::test_support::run_in_coverage_fault_process;
 #[cfg(unix)]
@@ -420,6 +422,101 @@ fn test_open_reader_and_writer_use_root_capability() {
             .as_slice(),
     );
     fs::remove_dir_all(root_path).expect("rooted fixture should be removed");
+}
+
+/// Verifies rooted readers preserve blocking semantics for Linux file leases.
+#[cfg(target_os = "linux")]
+#[test]
+fn test_open_rooted_reader_waits_for_conflicting_file_lease() {
+    let root_path = temp_dir("rooted-reader-file-lease");
+    let path = root_path.join("data.txt");
+    fs::write(&path, b"payload").expect("reader fixture should be written");
+    let lease = SourceReadLease::acquire(&path)
+        .expect("write lease should be acquired");
+    let worker_root_path = root_path.clone();
+    let (sender, receiver) = std::sync::mpsc::sync_channel(1);
+    let worker = std::thread::spawn(move || {
+        let root = LocalRoot::open(&worker_root_path)
+            .expect("worker root should open");
+        let relative = LocalRelativePath::new("data.txt")
+            .expect("reader path should validate");
+        sender
+            .send(root.open_reader(&relative, FileReadOptions::unbuffered()))
+            .expect("reader result should be sent");
+    });
+
+    lease
+        .wait_for_break()
+        .expect("rooted reader should request a lease break");
+    let early_result =
+        receiver.recv_timeout(std::time::Duration::from_millis(250));
+    lease.release().expect("write lease should be released");
+    let result = match early_result {
+        Err(std::sync::mpsc::RecvTimeoutError::Timeout) => receiver
+            .recv_timeout(std::time::Duration::from_secs(1))
+            .expect("reader result should arrive after lease release"),
+        Err(error) => {
+            panic!("reader worker disconnected unexpectedly: {error}")
+        }
+        Ok(result) => {
+            worker.join().expect("reader worker should not panic");
+            panic!("rooted reader returned before lease release: {result:?}");
+        }
+    };
+    worker.join().expect("reader worker should not panic");
+    let reader = result.expect("rooted reader should open after lease release");
+
+    drop(reader);
+    fs::remove_dir_all(root_path).expect("reader fixture should be removed");
+}
+
+/// Verifies rooted writers preserve blocking semantics for Linux file leases.
+#[cfg(target_os = "linux")]
+#[test]
+fn test_open_rooted_writer_waits_for_conflicting_file_lease() {
+    let root_path = temp_dir("rooted-writer-file-lease");
+    let path = root_path.join("data.txt");
+    fs::write(&path, b"payload").expect("writer fixture should be written");
+    let lease = SourceReadLease::acquire(&path)
+        .expect("write lease should be acquired");
+    let worker_root_path = root_path.clone();
+    let (sender, receiver) = std::sync::mpsc::sync_channel(1);
+    let worker = std::thread::spawn(move || {
+        let root = LocalRoot::open(&worker_root_path)
+            .expect("worker root should open");
+        let relative = LocalRelativePath::new("data.txt")
+            .expect("writer path should validate");
+        sender
+            .send(root.open_writer(
+                &relative,
+                FileWriteOptions::new(FileWriteMode::OpenExistingAtStart),
+            ))
+            .expect("writer result should be sent");
+    });
+
+    lease
+        .wait_for_break()
+        .expect("rooted writer should request a lease break");
+    let early_result =
+        receiver.recv_timeout(std::time::Duration::from_millis(250));
+    lease.release().expect("write lease should be released");
+    let result = match early_result {
+        Err(std::sync::mpsc::RecvTimeoutError::Timeout) => receiver
+            .recv_timeout(std::time::Duration::from_secs(1))
+            .expect("writer result should arrive after lease release"),
+        Err(error) => {
+            panic!("writer worker disconnected unexpectedly: {error}")
+        }
+        Ok(result) => {
+            worker.join().expect("writer worker should not panic");
+            panic!("rooted writer returned before lease release: {result:?}");
+        }
+    };
+    worker.join().expect("writer worker should not panic");
+    let writer = result.expect("rooted writer should open after lease release");
+
+    drop(writer);
+    fs::remove_dir_all(root_path).expect("writer fixture should be removed");
 }
 
 /// Verifies that renaming the diagnostic path cannot redirect an already open

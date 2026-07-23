@@ -42,7 +42,6 @@ use crate::{
     LocalRelativePath,
 };
 
-use super::file_io::clear_nonblocking;
 use super::io_result_context::with_path_context;
 use super::path_operations::add_path_context;
 use super::rooted_io_result::{
@@ -53,6 +52,10 @@ use super::rooted_io_result::{
 };
 use super::rooted_parent::RootedParent;
 use super::rooted_parent_mode::RootedParentMode;
+use super::unix_nonblocking::{
+    clear_nonblocking,
+    open_with_nonblocking_retry,
+};
 
 /// Opens a no-follow directory handle for a root path.
 ///
@@ -114,7 +117,9 @@ pub(crate) fn open_rooted_reader(
     let flags =
         libc::O_RDONLY | libc::O_NOFOLLOW | libc::O_CLOEXEC | libc::O_NONBLOCK;
     let file = rooted_open_result(
-        open_file_at(&parent, &name, flags, 0),
+        open_with_nonblocking_retry(None, || {
+            open_file_at(&parent, &name, flags, 0)
+        }),
         "open rooted file reader",
         &diagnostic_path,
     )?;
@@ -179,7 +184,9 @@ pub(crate) fn open_rooted_writer(
         }
     }
     let file = rooted_open_result(
-        open_file_at(&parent, &name, flags, 0o600),
+        open_with_nonblocking_retry(None, || {
+            open_file_at(&parent, &name, flags, 0o600)
+        }),
         "open rooted file writer",
         &diagnostic_path,
     )?;
@@ -489,7 +496,7 @@ fn prepare_opened_rooted_regular_file(
     normalize_opened_regular_file_metadata(file.metadata(), diagnostic_path)
         .and_then(|()| {
             with_path_context(
-                clear_nonblocking(file),
+                clear_nonblocking(file.as_raw_fd()),
                 restore_operation,
                 diagnostic_path,
             )

@@ -20,7 +20,10 @@ use qubit_local_files::{
 };
 
 #[cfg(target_os = "linux")]
-use super::test_support::file_status_flags;
+use super::test_support::{
+    SourceReadLease,
+    file_status_flags,
+};
 #[cfg(unix)]
 use super::test_support::{
     assert_fifo_open_is_rejected,
@@ -192,6 +195,50 @@ fn test_open_reader_clears_transient_nonblocking_status() {
         file_status_flags(&path) & libc::O_NONBLOCK,
         "anti-FIFO-race flags must not leak into the returned reader",
     );
+    drop(reader);
+    fs::remove_dir_all(dir).expect("reader fixture should be removed");
+}
+
+#[cfg(target_os = "linux")]
+#[test]
+fn test_open_reader_waits_for_conflicting_file_lease() {
+    let dir = temp_dir("open-reader-file-lease");
+    let path = dir.join("data.txt");
+    fs::write(&path, b"payload").expect("reader fixture should be written");
+    let lease = SourceReadLease::acquire(&path)
+        .expect("write lease should be acquired");
+    let worker_path = path.clone();
+    let (sender, receiver) = std::sync::mpsc::sync_channel(1);
+    let worker = std::thread::spawn(move || {
+        sender
+            .send(LocalFiles::open_reader(
+                worker_path,
+                FileReadOptions::unbuffered(),
+            ))
+            .expect("reader result should be sent");
+    });
+
+    lease
+        .wait_for_break()
+        .expect("reader open should request a lease break");
+    let early_result =
+        receiver.recv_timeout(std::time::Duration::from_millis(250));
+    lease.release().expect("write lease should be released");
+    let result = match early_result {
+        Err(std::sync::mpsc::RecvTimeoutError::Timeout) => receiver
+            .recv_timeout(std::time::Duration::from_secs(1))
+            .expect("reader result should arrive after lease release"),
+        Err(error) => {
+            panic!("reader worker disconnected unexpectedly: {error}")
+        }
+        Ok(result) => {
+            worker.join().expect("reader worker should not panic");
+            panic!("reader open returned before lease release: {result:?}");
+        }
+    };
+    worker.join().expect("reader worker should not panic");
+    let reader = result.expect("reader should open after lease release");
+
     drop(reader);
     fs::remove_dir_all(dir).expect("reader fixture should be removed");
 }

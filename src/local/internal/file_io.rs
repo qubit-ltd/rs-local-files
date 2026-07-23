@@ -18,6 +18,8 @@ use std::io::{
     ErrorKind,
     Result,
 };
+#[cfg(unix)]
+use std::os::fd::AsRawFd;
 use std::path::Path;
 
 use crate::{
@@ -32,6 +34,11 @@ use super::io_result_context::with_path_context;
 use super::path_operations::{
     add_path_context,
     ensure_parent_path,
+};
+#[cfg(unix)]
+use super::unix_nonblocking::{
+    clear_nonblocking,
+    open_with_nonblocking_retry,
 };
 
 /// Creates the canonical error for a non-regular-file target.
@@ -96,57 +103,59 @@ fn configure_nonblocking_open(options: &mut OpenOptions) {
 #[inline(always)]
 fn configure_nonblocking_open(_options: &mut OpenOptions) {}
 
-#[cfg(unix)]
-/// Clears the transient non-blocking status while preserving all other flags.
+/// Opens a path with ordinary blocking semantics after applying safety flags.
 ///
 /// # Parameters
 ///
-/// * `file` - The open file descriptor whose status flags are normalized.
+/// * `options` - Configured native open options.
+/// * `path` - Path opened by the native operation.
 ///
 /// # Returns
 ///
-/// `Ok(())` after the descriptor is in blocking mode.
+/// The opened file handle.
 ///
 /// # Errors
 ///
-/// Returns the operating-system error reported by `fcntl` when status flags
-/// cannot be read or updated.
-pub(super) fn clear_nonblocking(file: &fs::File) -> Result<()> {
-    use std::os::fd::AsRawFd;
-
-    let descriptor = file.as_raw_fd();
-    // SAFETY: `descriptor` is borrowed from a live `File`; `F_GETFL` neither
-    // retains the descriptor nor dereferences any pointer argument.
-    let flags = unsafe { libc::fcntl(descriptor, libc::F_GETFL) };
-    if flags == -1 {
-        return Err(Error::last_os_error());
+/// Returns the native open error. On Unix, lease conflicts are retried to
+/// preserve ordinary blocking-open behavior.
+fn open_configured_file(
+    options: &OpenOptions,
+    path: &Path,
+) -> Result<fs::File> {
+    #[cfg(unix)]
+    {
+        open_with_nonblocking_retry(None, || options.open(path))
     }
-    let blocking_flags = flags & !libc::O_NONBLOCK;
-    // SAFETY: `descriptor` remains live and `blocking_flags` preserves every
-    // status flag except the modifiable `O_NONBLOCK` bit.
-    if unsafe { libc::fcntl(descriptor, libc::F_SETFL, blocking_flags) } == -1 {
-        return Err(Error::last_os_error());
+    #[cfg(not(unix))]
+    {
+        options.open(path)
     }
-    Ok(())
 }
 
-#[cfg(not(unix))]
-/// Leaves descriptor status unchanged on platforms without Unix flags.
+/// Clears the transient non-blocking status after handle validation.
 ///
 /// # Parameters
 ///
-/// * `_file` - The open file handle, unused on platforms without Unix flags.
+/// * `file` - Open file handle whose status is normalized.
 ///
 /// # Returns
 ///
-/// Always returns `Ok(())`.
+/// `Ok(())` after the handle has ordinary blocking behavior.
 ///
 /// # Errors
 ///
-/// This platform implementation does not return an error.
+/// Returns the native descriptor-status error on Unix.
 #[inline(always)]
-pub(super) fn clear_nonblocking(_file: &fs::File) -> Result<()> {
-    Ok(())
+fn clear_transient_nonblocking(file: &fs::File) -> Result<()> {
+    #[cfg(unix)]
+    {
+        clear_nonblocking(file.as_raw_fd())
+    }
+    #[cfg(not(unix))]
+    {
+        let _ = file;
+        Ok(())
+    }
 }
 
 /// Verifies an opened handle and restores ordinary blocking behavior.
@@ -185,7 +194,11 @@ fn prepare_opened_regular_file(
     if !metadata.is_file() {
         return Err(path_not_regular_file_error(path));
     }
-    with_path_context(clear_nonblocking(file), restore_operation, path)
+    with_path_context(
+        clear_transient_nonblocking(file),
+        restore_operation,
+        path,
+    )
 }
 
 /// Opens a file reader with the supplied options.
@@ -211,8 +224,7 @@ pub(crate) fn open_reader_path(
     // O_NONBLOCK closes the FIFO replacement race during open, and handle
     // metadata verifies the object that was actually opened.
     configure_nonblocking_open(&mut open_options);
-    let file = open_options
-        .open(path)
+    let file = open_configured_file(&open_options, path)
         .map_err(|error| add_path_context(error, "open file reader", path))?;
     let buffering = options.buffering();
     prepare_opened_regular_file(
@@ -269,8 +281,7 @@ pub(crate) fn open_writer_path(
     // The same three layers used by readers keep writer creation deterministic
     // while preventing a path swapped to a FIFO from blocking this thread.
     configure_nonblocking_open(&mut open_options);
-    let file = open_options
-        .open(path)
+    let file = open_configured_file(&open_options, path)
         .map_err(|error| add_path_context(error, "open file writer", path))?;
     let buffering = options.buffering();
     prepare_opened_regular_file(

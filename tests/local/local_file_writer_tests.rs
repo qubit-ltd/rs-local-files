@@ -23,10 +23,13 @@ use qubit_local_files::{
     LocalFiles,
 };
 
-#[cfg(target_os = "linux")]
-use super::test_support::file_status_flags;
 #[cfg(all(coverage, target_os = "linux"))]
 use super::test_support::run_in_coverage_fault_process;
+#[cfg(target_os = "linux")]
+use super::test_support::{
+    SourceReadLease,
+    file_status_flags,
+};
 #[cfg(unix)]
 use super::test_support::{
     assert_fifo_open_is_rejected,
@@ -246,6 +249,50 @@ fn test_open_writer_clears_transient_nonblocking_status() {
         file_status_flags(&path) & libc::O_NONBLOCK,
         "anti-FIFO-race flags must not leak into the returned writer",
     );
+    drop(writer);
+    fs::remove_dir_all(dir).expect("writer fixture should be removed");
+}
+
+#[cfg(target_os = "linux")]
+#[test]
+fn test_open_writer_waits_for_conflicting_file_lease() {
+    let dir = temp_dir("open-writer-file-lease");
+    let path = dir.join("data.txt");
+    fs::write(&path, b"payload").expect("writer fixture should be written");
+    let lease = SourceReadLease::acquire(&path)
+        .expect("write lease should be acquired");
+    let worker_path = path.clone();
+    let (sender, receiver) = std::sync::mpsc::sync_channel(1);
+    let worker = std::thread::spawn(move || {
+        sender
+            .send(LocalFiles::open_writer(
+                worker_path,
+                FileWriteOptions::new(FileWriteMode::OpenExistingAtStart),
+            ))
+            .expect("writer result should be sent");
+    });
+
+    lease
+        .wait_for_break()
+        .expect("writer open should request a lease break");
+    let early_result =
+        receiver.recv_timeout(std::time::Duration::from_millis(250));
+    lease.release().expect("write lease should be released");
+    let result = match early_result {
+        Err(std::sync::mpsc::RecvTimeoutError::Timeout) => receiver
+            .recv_timeout(std::time::Duration::from_secs(1))
+            .expect("writer result should arrive after lease release"),
+        Err(error) => {
+            panic!("writer worker disconnected unexpectedly: {error}")
+        }
+        Ok(result) => {
+            worker.join().expect("writer worker should not panic");
+            panic!("writer open returned before lease release: {result:?}");
+        }
+    };
+    worker.join().expect("writer worker should not panic");
+    let writer = result.expect("writer should open after lease release");
+
     drop(writer);
     fs::remove_dir_all(dir).expect("writer fixture should be removed");
 }
