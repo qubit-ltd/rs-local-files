@@ -384,6 +384,11 @@ writer.commit()?;
 `LocalAtomicWriter` implements `Write`, but not `Seek`. Only `commit` replaces
 the destination. Calling `abort` or dropping the writer preserves the original
 destination and cleans up the staging file. The API remains synchronous.
+Use `commit_recoverable` when a caller must retry or explicitly abort after a
+pre-installation failure. Its `LocalAtomicCommitError::into_parts` returns the
+structured failure and an optional retained writer; the writer is unavailable
+once installation has begun. `LocalRootAtomicWriter` exposes the same recovery
+contract.
 
 Since `0.5.0`, configuration fields are private. Callers must use the existing
 getters, constructors, and builders.

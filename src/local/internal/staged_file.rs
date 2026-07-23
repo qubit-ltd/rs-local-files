@@ -97,6 +97,17 @@ impl StagedFile {
             .expect("staging file handle has already been closed")
     }
 
+    /// Returns whether the staging data handle remains open for recovery.
+    ///
+    /// # Returns
+    ///
+    /// `true` before installation begins or explicit cleanup closes the handle.
+    #[must_use]
+    #[inline(always)]
+    pub(crate) const fn is_open(&self) -> bool {
+        self.file.is_some()
+    }
+
     /// Closes the staging handle while keeping path cleanup armed.
     #[inline(always)]
     pub(crate) fn close(&mut self) {

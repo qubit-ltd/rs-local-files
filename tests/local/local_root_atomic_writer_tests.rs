@@ -1173,6 +1173,51 @@ fn test_commit_flushes_and_creates_missing_destination() {
         .expect("new atomic fixture should be removed");
 }
 
+/// Verifies that a pre-installation rooted failure returns its writer for
+/// abort.
+#[cfg(unix)]
+#[test]
+fn test_root_atomic_writer_recoverable_commit_returns_writer_for_abort() {
+    let root_path = temp_dir("rooted-atomic-recoverable-commit");
+    let destination_path = root_path.join("result.txt");
+    fs::write(&destination_path, b"original")
+        .expect("destination should be written");
+    let root = LocalRoot::open(&root_path).expect("root should open");
+    let destination = LocalRelativePath::new("result.txt")
+        .expect("destination should validate");
+    let mut writer = root
+        .begin_atomic_write(&destination)
+        .expect("rooted atomic writer should begin");
+    writer
+        .write_all(b"replacement")
+        .expect("replacement should be staged");
+    fs::remove_file(&destination_path).expect("destination should be removed");
+
+    let mut commit_error = writer
+        .commit_recoverable()
+        .expect_err("missing destination should retain the rooted writer");
+    assert_eq!(
+        LocalAtomicDestinationState::Missing,
+        commit_error.error().destination_state(),
+    );
+    assert!(commit_error.writer().is_some());
+    assert!(commit_error.writer_mut().is_some());
+    let (error, writer) = commit_error.into_parts();
+    let writer =
+        writer.expect("pre-publication failure should return rooted writer");
+
+    assert_eq!(
+        LocalAtomicDestinationState::Missing,
+        error.destination_state(),
+    );
+    assert_eq!(1, count_atomic_temp_files(&root_path));
+    writer
+        .abort()
+        .expect("returned rooted writer should remove staging");
+    assert_eq!(0, count_atomic_temp_files(&root_path));
+    fs::remove_dir_all(root_path).expect("test directory should be removed");
+}
+
 /// Verifies rooted no-replace installation and missing-state staging retention.
 #[cfg(unix)]
 #[test]

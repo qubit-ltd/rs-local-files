@@ -281,6 +281,11 @@ writer.commit()?;
 `commit` replaces the destination; `abort` or drop leaves it unchanged and
 cleans up the staging file. This existing writer remains path-based; use
 `LocalRootAtomicWriter` when replacement must stay beneath an anchored root.
+Use `commit_recoverable` when a caller must retry or explicitly abort after a
+pre-installation failure. Its `LocalAtomicCommitError::into_parts` returns the
+structured failure and an optional retained writer; the writer is unavailable
+once installation has begun. The same recovery API is available on
+`LocalRootAtomicWriter`.
 `atomic_write_with` lends the same guarded writer to its callback. The callback
 can write the staged contents, but cannot clone, retain, seek, or access the
 underlying file or raw handle after the callback returns.

@@ -28,14 +28,16 @@ use super::opened_atomic_destination::{
     OpenedAtomicDestination,
     destination_identity_matches,
 };
-use super::staged_file::StagedFile;
 
 /// Verifies that a path still names its opened atomic destination.
 ///
 /// # Parameters
 ///
-/// * `path` - Destination path inspected immediately before replacement.
+/// * `operation_path` - Destination path inspected immediately before
+///   replacement.
 /// * `destination` - Commit-time destination handle and identity.
+/// * `requested_path` - Caller-supplied destination retained for diagnostics.
+/// * `temporary_path` - Staging path retained for recovery diagnostics.
 ///
 /// # Errors
 ///
@@ -45,7 +47,7 @@ pub(crate) fn verify_atomic_destination_identity(
     operation_path: &Path,
     destination: &OpenedAtomicDestination,
     requested_path: &Path,
-    staged_file: &mut StagedFile,
+    temporary_path: &Path,
 ) -> Result<(), LocalAtomicWriteError> {
     match destination_identity_matches(operation_path, destination) {
         Ok(true) => Ok(()),
@@ -56,41 +58,42 @@ pub(crate) fn verify_atomic_destination_identity(
                 "atomic write destination changed before replacement",
             ),
             destination_mismatch_state(operation_path),
-            staged_file,
+            temporary_path,
         )),
         Err(error) => Err(identity_error(
             requested_path,
             error,
             LocalAtomicDestinationState::Unchanged,
-            staged_file,
+            temporary_path,
         )),
     }
 }
 
-/// Builds a structured identity failure with state-aware staging recovery.
+/// Builds a structured identity failure while retaining staging for recovery.
+///
+/// # Parameters
+///
+/// * `requested_path` - Caller-supplied destination retained for diagnostics.
+/// * `source` - Native identity inspection failure.
+/// * `destination_state` - Known destination state after the failed check.
+/// * `temporary_path` - Staging path retained for recovery diagnostics.
+///
+/// # Returns
+///
+/// A structured pre-installation failure.
 fn identity_error(
     requested_path: &Path,
     source: Error,
     destination_state: LocalAtomicDestinationState,
-    staged_file: &mut StagedFile,
+    temporary_path: &Path,
 ) -> LocalAtomicWriteError {
-    let temporary_path = staged_file.path().to_path_buf();
-    let cleanup_error =
-        if destination_state == LocalAtomicDestinationState::Unchanged {
-            staged_file.cleanup().err()
-        } else {
-            staged_file.close();
-            staged_file.disarm();
-            None
-        };
     LocalAtomicWriteError::new(
         LocalAtomicWriteStage::ReplaceDestination,
         requested_path.to_path_buf(),
-        Some(temporary_path),
+        Some(temporary_path.to_path_buf()),
         destination_state,
         source,
     )
-    .with_cleanup_error(cleanup_error)
 }
 
 /// Classifies a pre-replacement destination identity mismatch.

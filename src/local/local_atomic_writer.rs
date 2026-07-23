@@ -21,6 +21,7 @@ use std::path::{
 use std::time::Duration;
 
 use crate::{
+    LocalAtomicCommitError,
     LocalAtomicDestinationState,
     LocalAtomicWriteError,
     LocalAtomicWriteOptions,
@@ -202,13 +203,66 @@ impl LocalAtomicWriter {
     /// merging to `ReplaceFileW`. Immediately before replacement, commit
     /// verifies the applicable destination type and identity rules.
     ///
+    /// # Returns
+    ///
+    /// `Ok(())` after the replacement and required directory synchronization
+    /// complete.
+    ///
     /// # Errors
+    ///
     /// Returns a structured error when metadata preservation, staging-file
     /// synchronization, destination replacement, or parent synchronization
     /// fails. Inspect [`LocalAtomicWriteError::destination_state`] before
     /// deciding whether the destination or retained staging path needs
     /// recovery.
-    pub fn commit(mut self) -> Result<(), LocalAtomicWriteError> {
+    pub fn commit(self) -> Result<(), LocalAtomicWriteError> {
+        match self.commit_recoverable() {
+            Ok(()) => Ok(()),
+            Err(error) => {
+                let (error, writer) = error.into_parts();
+                match writer {
+                    Some(writer) => Err(writer.finalize_failed_commit(error)),
+                    None => Err(error),
+                }
+            }
+        }
+    }
+
+    /// Attempts to commit while retaining a recoverable staging writer.
+    ///
+    /// Failures detected before installation begins return the writer through
+    /// [`LocalAtomicCommitError::writer`] so callers can retry or explicitly
+    /// abort it. Failures after installation begins are terminal and do not
+    /// return a writer.
+    ///
+    /// # Returns
+    ///
+    /// `Ok(())` after a successful commit.
+    ///
+    /// # Errors
+    ///
+    /// Returns a recoverable commit error when metadata preservation,
+    /// staging-file synchronization, destination replacement, or parent
+    /// synchronization fails.
+    pub fn commit_recoverable(
+        mut self,
+    ) -> Result<(), LocalAtomicCommitError<Self>> {
+        match self.commit_attempt() {
+            Ok(()) => Ok(()),
+            Err(error) if self.staged_file.is_open() => {
+                Err(LocalAtomicCommitError::new(error, Some(self)))
+            }
+            Err(error) => Err(LocalAtomicCommitError::new(error, None)),
+        }
+    }
+
+    /// Runs one commit attempt without consuming recoverable staging state.
+    ///
+    /// # Errors
+    ///
+    /// Returns the structured commit failure. Errors raised before installation
+    /// leave the staging handle open for the public recoverable commit API.
+    fn commit_attempt(&mut self) -> Result<(), LocalAtomicWriteError> {
         #[cfg(unix)]
         let destination = self.open_destination_for_commit()?;
         #[cfg(unix)]
@@ -299,34 +353,36 @@ impl LocalAtomicWriter {
     /// # Errors
     ///
     /// Returns a structured metadata-stage error when the destination cannot
-    /// be opened or disappeared before commit. Staging cleanup is attempted
-    /// before the error is returned.
+    /// be opened or disappeared before commit. The staging writer remains
+    /// available for retry or explicit abort.
     fn open_destination_for_commit(
         &mut self,
     ) -> Result<Option<OpenedAtomicDestination>, LocalAtomicWriteError> {
         if !self.destination_existed {
             return Ok(None);
         }
-        let opened = with_staging_cleanup(
+        let temporary_path = Some(self.staged_file.path().to_path_buf());
+        let opened = with_atomic_context(
             open_atomic_destination(
                 &self.operation_path,
                 self.open_retry_timeout,
             ),
             LocalAtomicWriteStage::ReadDestinationMetadata,
             &self.path,
-            &mut self.staged_file,
+            temporary_path,
+            LocalAtomicDestinationState::Unchanged,
         )?;
         match opened {
             Some(destination) => Ok(Some(destination)),
-            None => Err(atomic_error_with_staging_state(
+            None => Err(LocalAtomicWriteError::new(
                 LocalAtomicWriteStage::ReadDestinationMetadata,
-                &self.path,
+                self.path.clone(),
+                Some(self.staged_file.path().to_path_buf()),
+                LocalAtomicDestinationState::Missing,
                 io::Error::new(
                     ErrorKind::NotFound,
                     "atomic write destination disappeared",
                 ),
-                LocalAtomicDestinationState::Missing,
-                &mut self.staged_file,
             )),
         }
     }
@@ -340,8 +396,8 @@ impl LocalAtomicWriter {
     ///
     /// # Errors
     ///
-    /// Returns a structured metadata-application error and attempts staging
-    /// cleanup when platform metadata cannot be preserved.
+    /// Returns a structured metadata-application error while retaining staging
+    /// when platform metadata cannot be preserved.
     fn preserve_destination_metadata(
         &mut self,
         destination: Option<&OpenedAtomicDestination>,
@@ -353,11 +409,12 @@ impl LocalAtomicWriter {
             destination.file(),
             self.staged_file.file(),
         );
-        with_staging_cleanup(
+        with_atomic_context(
             result,
             LocalAtomicWriteStage::ApplyDestinationMetadata,
             &self.path,
-            &mut self.staged_file,
+            Some(self.staged_file.path().to_path_buf()),
+            LocalAtomicDestinationState::Unchanged,
         )
     }
 
@@ -366,22 +423,23 @@ impl LocalAtomicWriter {
     ///
     /// # Errors
     ///
-    /// Returns a structured unsupported metadata-application error and
-    /// attempts staging cleanup when the destination already exists.
+    /// Returns a structured unsupported metadata-application error while
+    /// retaining staging when the destination already exists.
     fn reject_unsupported_metadata_preservation(
         &mut self,
     ) -> Result<(), LocalAtomicWriteError> {
         if !self.destination_existed {
             return Ok(());
         }
-        with_staging_cleanup(
+        with_atomic_context(
             Err(io::Error::new(
                 ErrorKind::Unsupported,
                 "strict atomic metadata preservation is unsupported on this target",
             )),
             LocalAtomicWriteStage::ApplyDestinationMetadata,
             &self.path,
-            &mut self.staged_file,
+            Some(self.staged_file.path().to_path_buf()),
+            LocalAtomicDestinationState::Unchanged,
         )
     }
 
@@ -389,15 +447,16 @@ impl LocalAtomicWriter {
     ///
     /// # Errors
     ///
-    /// Returns a structured staging synchronization error and attempts
-    /// staging cleanup when the native synchronization fails.
+    /// Returns a structured staging synchronization error while retaining
+    /// staging when the native synchronization fails.
     fn sync_temporary_file(&mut self) -> Result<(), LocalAtomicWriteError> {
         let result = self.staged_file.file().sync_all();
-        with_staging_cleanup(
+        with_atomic_context(
             result,
             LocalAtomicWriteStage::SyncTemporaryFile,
             &self.path,
-            &mut self.staged_file,
+            Some(self.staged_file.path().to_path_buf()),
+            LocalAtomicDestinationState::Unchanged,
         )
     }
 
@@ -411,7 +470,7 @@ impl LocalAtomicWriter {
     /// # Errors
     ///
     /// Returns the structured namespace-race error produced by the identity
-    /// verifier. Staging cleanup follows that verifier's destination state.
+    /// verifier while retaining staging for retry or explicit abort.
     fn verify_destination_for_commit(
         &mut self,
         destination: Option<&OpenedAtomicDestination>,
@@ -423,7 +482,7 @@ impl LocalAtomicWriter {
             &self.operation_path,
             destination,
             &self.path,
-            &mut self.staged_file,
+            self.staged_file.path(),
         )
     }
 
@@ -440,25 +499,48 @@ impl LocalAtomicWriter {
         if !self.destination_existed {
             return Ok(());
         }
-        let metadata = with_staging_cleanup(
+        let metadata = with_atomic_context(
             existing_file_metadata(&self.operation_path),
             LocalAtomicWriteStage::ReplaceDestination,
             &self.path,
-            &mut self.staged_file,
+            Some(self.staged_file.path().to_path_buf()),
+            LocalAtomicDestinationState::Unchanged,
         )?;
         if metadata.is_none() {
-            return Err(atomic_error_with_staging_state(
+            return Err(LocalAtomicWriteError::new(
                 LocalAtomicWriteStage::ReplaceDestination,
-                &self.path,
+                self.path.clone(),
+                Some(self.staged_file.path().to_path_buf()),
+                LocalAtomicDestinationState::Missing,
                 io::Error::new(
                     ErrorKind::NotFound,
                     "atomic write destination disappeared",
                 ),
-                LocalAtomicDestinationState::Missing,
-                &mut self.staged_file,
             ));
         }
         Ok(())
+    }
+
+    /// Applies the historical cleanup policy for consuming commit failures.
+    ///
+    /// # Parameters
+    ///
+    /// * `error` - Recoverable pre-installation failure to finalize.
+    ///
+    /// # Returns
+    ///
+    /// The failure enriched with any staging cleanup error.
+    fn finalize_failed_commit(
+        mut self,
+        error: LocalAtomicWriteError,
+    ) -> LocalAtomicWriteError {
+        if error.destination_state() == LocalAtomicDestinationState::Unchanged {
+            error.with_cleanup_error(self.staged_file.cleanup().err())
+        } else {
+            self.staged_file.close();
+            self.staged_file.disarm();
+            error
+        }
     }
 
     /// Installs staging and synchronizes the destination parent chain.
@@ -562,37 +644,13 @@ fn atomic_error_with_staging(
     source: io::Error,
     staged_file: &mut StagedFile,
 ) -> LocalAtomicWriteError {
-    atomic_error_with_staging_state(
-        stage,
-        path,
-        source,
-        LocalAtomicDestinationState::Unchanged,
-        staged_file,
-    )
-}
-
-/// Creates an atomic error and handles staging according to destination state.
-fn atomic_error_with_staging_state(
-    stage: LocalAtomicWriteStage,
-    path: &Path,
-    source: io::Error,
-    destination_state: LocalAtomicDestinationState,
-    staged_file: &mut StagedFile,
-) -> LocalAtomicWriteError {
     let temporary_path = staged_file.path().to_path_buf();
-    let cleanup_error =
-        if destination_state == LocalAtomicDestinationState::Unchanged {
-            staged_file.cleanup().err()
-        } else {
-            staged_file.close();
-            staged_file.disarm();
-            None
-        };
+    let cleanup_error = staged_file.cleanup().err();
     LocalAtomicWriteError::new(
         stage,
         path.to_path_buf(),
         Some(temporary_path),
-        destination_state,
+        LocalAtomicDestinationState::Unchanged,
         source,
     )
     .with_cleanup_error(cleanup_error)

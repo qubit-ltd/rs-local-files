@@ -203,6 +203,10 @@ writer.commit()?;
 文件。自 `0.5.0` 起，配置类型的字段不再公开，调用方必须使用现有 getter、
 constructor 和 builder。这个既有 writer 仍是 path-based；需要把替换限制在
 锚定 root 下时使用 `LocalRootAtomicWriter`。
+当调用方需要在 installation 前失败后重试或显式 abort 时，使用
+`commit_recoverable`。它的 `LocalAtomicCommitError::into_parts` 返回结构化
+错误和可选的保留 writer；installation 开始后 writer 不再可用。
+`LocalRootAtomicWriter` 提供相同的恢复 API。
 `atomic_write_with` 会把同一个受保护 writer 临时借给 callback。callback
 可以写入 staging 内容，但不能 clone、保留、seek，也不能访问底层文件或 raw
 handle，因此 callback 返回后无法继续修改已提交 inode。

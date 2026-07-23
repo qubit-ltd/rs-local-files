@@ -119,6 +119,17 @@ impl RootedStagedFile {
             .expect("rooted staging file handle has already been closed")
     }
 
+    /// Returns whether the staging data handle remains open for recovery.
+    ///
+    /// # Returns
+    ///
+    /// `true` before installation begins or explicit cleanup closes the handle.
+    #[must_use]
+    #[inline(always)]
+    pub(in crate::local) const fn is_open(&self) -> bool {
+        self.file.is_some()
+    }
+
     /// Returns the open destination parent directory.
     ///
     /// # Returns

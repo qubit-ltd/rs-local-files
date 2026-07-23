@@ -300,6 +300,10 @@ writer.commit()?;
 成功后目标才会被替换；调用 `abort` 或直接 drop 会保留原目标并清理 staging
 文件。自 `0.5.0` 起，配置类型的字段不再公开，调用方必须使用现有 getter、
 constructor 和 builder。API 仍保持同步边界。
+当调用方需要在 installation 前失败后重试或显式 abort 时，使用
+`commit_recoverable`。它的 `LocalAtomicCommitError::into_parts` 返回结构化
+错误和可选的保留 writer；installation 开始后 writer 不再可用。
+`LocalRootAtomicWriter` 提供相同的恢复契约。
 
 在 Unix 上，`LocalAtomicWriteOptions::with_open_retry_timeout` 只限制活动
 file lease 使目标的 nonblocking open 返回 `WouldBlock` 时的重试。默认

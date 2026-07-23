@@ -38,7 +38,7 @@ use super::rooted_staged_file::RootedStagedFile;
 /// * `name` - Destination entry name relative to `parent`.
 /// * `destination` - Commit-time destination handle and identity.
 /// * `requested_path` - Relative destination retained for diagnostics.
-/// * `staged_file` - Armed staging file whose parent is authoritative.
+/// * `staged_file` - Armed staging file whose parent remains authoritative.
 ///
 /// # Errors
 ///
@@ -48,7 +48,7 @@ pub(in crate::local) fn verify_rooted_atomic_destination_identity(
     name: &CString,
     destination: &OpenedAtomicDestination,
     requested_path: &std::path::Path,
-    staged_file: &mut RootedStagedFile,
+    staged_file: &RootedStagedFile,
 ) -> Result<(), LocalAtomicWriteError> {
     match rooted_destination_identity_matches(
         staged_file.parent(),
@@ -74,22 +74,25 @@ pub(in crate::local) fn verify_rooted_atomic_destination_identity(
     }
 }
 
-/// Builds a structured rooted identity failure with staging recovery.
+/// Builds a structured rooted identity failure while retaining staging.
+///
+/// # Parameters
+///
+/// * `requested_path` - Relative destination retained for diagnostics.
+/// * `source` - Native identity inspection failure.
+/// * `destination_state` - Known destination state after the failed check.
+/// * `staged_file` - Armed staging file retained for recovery.
+///
+/// # Returns
+///
+/// A structured pre-installation failure.
 fn identity_error(
     requested_path: &std::path::Path,
     source: Error,
     destination_state: LocalAtomicDestinationState,
-    staged_file: &mut RootedStagedFile,
+    staged_file: &RootedStagedFile,
 ) -> LocalAtomicWriteError {
     let temporary_path = staged_file.diagnostic_path().to_path_buf();
-    let cleanup_error =
-        if destination_state == LocalAtomicDestinationState::Unchanged {
-            staged_file.cleanup().err()
-        } else {
-            staged_file.close();
-            staged_file.disarm();
-            None
-        };
     LocalAtomicWriteError::new(
         LocalAtomicWriteStage::ReplaceDestination,
         requested_path.to_path_buf(),
@@ -97,7 +100,6 @@ fn identity_error(
         destination_state,
         source,
     )
-    .with_cleanup_error(cleanup_error)
 }
 
 /// Classifies a rooted identity mismatch before replacement.

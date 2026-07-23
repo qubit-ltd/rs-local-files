@@ -336,6 +336,48 @@ fn test_local_atomic_writer_retains_staging_when_destination_disappears() {
 }
 
 #[test]
+fn test_local_atomic_writer_recoverable_commit_returns_writer_for_abort() {
+    let dir = temp_dir("atomic-writer-recoverable-commit");
+    let path = dir.join("out.txt");
+    fs::write(&path, b"original").expect("destination should be written");
+    let mut writer = LocalFiles::begin_atomic_write(&path)
+        .expect("atomic writer should begin");
+    writer
+        .write_all(b"replacement")
+        .expect("replacement should be staged");
+    fs::remove_file(&path).expect("destination should be removed");
+
+    let mut commit_error = writer
+        .commit_recoverable()
+        .expect_err("missing destination should retain the writer");
+    assert_eq!(
+        LocalAtomicDestinationState::Missing,
+        commit_error.error().destination_state(),
+    );
+    assert!(commit_error.writer().is_some());
+    assert!(commit_error.writer_mut().is_some());
+    let (error, writer) = commit_error.into_parts();
+    let writer = writer.expect("pre-publication failure should return writer");
+    let staging_path = error
+        .temporary_path()
+        .map(ToOwned::to_owned)
+        .expect("missing-state error should retain its staging path");
+
+    assert_eq!(
+        LocalAtomicDestinationState::Missing,
+        error.destination_state(),
+    );
+    writer
+        .abort()
+        .expect("returned writer should explicitly remove staging");
+    assert!(
+        !staging_path.exists(),
+        "explicit abort must remove the recoverable staging file",
+    );
+    fs::remove_dir_all(dir).expect("test directory should be removed");
+}
+
+#[test]
 fn test_local_atomic_writer_drop_removes_staging_file() {
     let dir = temp_dir("atomic-writer-drop");
     let path = dir.join("out.txt");
