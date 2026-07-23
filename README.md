@@ -101,7 +101,7 @@ become repeated boilerplate:
 | `atomic_write` | Replaces a file through a durable same-directory temporary write. |
 | `atomic_write_with` | Same as `atomic_write`, but passes a guarded `LocalAtomicWriter` to caller-provided write logic. |
 | `begin_atomic_write` | Returns a streaming `LocalAtomicWriter` committed explicitly by the caller. |
-| `begin_atomic_write_with_options` | Begins a streaming atomic write with explicit missing-parent creation policy. |
+| `begin_atomic_write_with_options` | Begins a streaming atomic write with explicit parent-creation and destination-open retry policies. |
 
 ### Temporary Files and Directories
 
@@ -265,10 +265,13 @@ For streaming content, use `LocalAtomicWriter`:
 ```rust
 use std::io::Write;
 use std::time::Duration;
-use qubit_local_files::LocalFiles;
+use qubit_local_files::{LocalAtomicWriteOptions, LocalFiles};
 
-let mut writer = LocalFiles::begin_atomic_write("state.bin")?
+let options = LocalAtomicWriteOptions::new()
+    .with_parent()
     .with_open_retry_timeout(Duration::from_secs(5));
+let mut writer =
+    LocalFiles::begin_atomic_write_with_options("state.bin", options)?;
 writer.write_all(b"complete state")?;
 writer.commit()?;
 # Ok::<(), Box<dyn std::error::Error>>(())
@@ -282,11 +285,12 @@ cleans up the staging file. This existing writer remains path-based; use
 can write the staged contents, but cannot clone, retain, seek, or access the
 underlying file or raw handle after the callback returns.
 
-On Unix, `with_open_retry_timeout` bounds retries when an active file lease
-makes the nonblocking destination open report `WouldBlock`. The default is an
-unbounded wait; `Duration::ZERO` returns `TimedOut` after the first conflict.
-The one-shot facade has no timeout overload: begin a writer, configure it, then
-write and commit as above. Other platforms are unchanged.
+On Unix, `LocalAtomicWriteOptions::with_open_retry_timeout` bounds retries when
+an active file lease makes the nonblocking destination open report
+`WouldBlock`. The default is an unbounded wait; `Duration::ZERO` returns
+`TimedOut` after the first conflict. Path-based and rooted writers share this
+options type. The one-shot facade intentionally retains its unbounded default.
+Other platforms are unchanged.
 
 Since `0.5.0`, configuration fields are private. Use the existing getters,
 constructors, and builders instead of direct field access.

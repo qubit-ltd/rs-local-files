@@ -369,10 +369,13 @@ Use `LocalAtomicWriter` when content should be streamed across multiple calls:
 ```rust
 use std::io::Write;
 use std::time::Duration;
-use qubit_local_files::LocalFiles;
+use qubit_local_files::{LocalAtomicWriteOptions, LocalFiles};
 
-let mut writer = LocalFiles::begin_atomic_write("state.bin")?
+let options = LocalAtomicWriteOptions::new()
+    .with_parent()
     .with_open_retry_timeout(Duration::from_secs(5));
+let mut writer =
+    LocalFiles::begin_atomic_write_with_options("state.bin", options)?;
 writer.write_all(b"complete state")?;
 writer.commit()?;
 # Ok::<(), Box<dyn std::error::Error>>(())
@@ -385,12 +388,13 @@ destination and cleans up the staging file. The API remains synchronous.
 Since `0.5.0`, configuration fields are private. Callers must use the existing
 getters, constructors, and builders.
 
-On Unix, `with_open_retry_timeout` limits only retries caused by an active file
-lease making the nonblocking destination open return `WouldBlock`. The default
-`None` waits without a deadline, while `Duration::ZERO` returns `TimedOut`
-after the first conflicting attempt. One-shot helpers intentionally have no
-timeout overload; use `begin_atomic_write` (or a rooted writer), configure the
-writer, then write and commit. This setting does not change other platforms.
+On Unix, `LocalAtomicWriteOptions::with_open_retry_timeout` limits only retries
+caused by an active file lease making the nonblocking destination open return
+`WouldBlock`. The default `None` waits without a deadline, while
+`Duration::ZERO` returns `TimedOut` after the first conflicting attempt.
+Path-based and rooted writers accept the same options before staging begins.
+One-shot helpers intentionally retain the unbounded default. This setting does
+not change other platforms.
 
 ### Existing-target metadata contract
 

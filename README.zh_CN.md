@@ -94,7 +94,7 @@ assert_eq!("new payload\n", std::fs::read_to_string(&final_path)?);
 | `atomic_write` | 通过持久化同目录临时写入替换文件。 |
 | `atomic_write_with` | 与 `atomic_write` 相同，但向调用方写入逻辑传入受保护的 `LocalAtomicWriter`。 |
 | `begin_atomic_write` | 返回由调用方显式提交的 streaming `LocalAtomicWriter`。 |
-| `begin_atomic_write_with_options` | 以显式的缺失父目录创建策略返回 streaming 原子 writer。 |
+| `begin_atomic_write_with_options` | 以显式的父目录创建和目标打开重试策略返回 streaming 原子 writer。 |
 
 ### 临时文件和临时目录
 
@@ -186,10 +186,13 @@ streaming 内容可以使用 `LocalAtomicWriter`：
 ```rust
 use std::io::Write;
 use std::time::Duration;
-use qubit_local_files::LocalFiles;
+use qubit_local_files::{LocalAtomicWriteOptions, LocalFiles};
 
-let mut writer = LocalFiles::begin_atomic_write("state.bin")?
+let options = LocalAtomicWriteOptions::new()
+    .with_parent()
     .with_open_retry_timeout(Duration::from_secs(5));
+let mut writer =
+    LocalFiles::begin_atomic_write_with_options("state.bin", options)?;
 writer.write_all(b"complete state")?;
 writer.commit()?;
 # Ok::<(), Box<dyn std::error::Error>>(())
@@ -204,10 +207,11 @@ constructor 和 builder。这个既有 writer 仍是 path-based；需要把替�
 可以写入 staging 内容，但不能 clone、保留、seek，也不能访问底层文件或 raw
 handle，因此 callback 返回后无法继续修改已提交 inode。
 
-在 Unix 上，`with_open_retry_timeout` 可限制活动 file lease 导致目标的
-nonblocking open 返回 `WouldBlock` 时的重试时间。默认无限等待；
-`Duration::ZERO` 在第一次冲突后返回 `TimedOut`。one-shot facade 不新增超时
-重载：应先取得 writer，配置后再写入并 commit，如上例所示。其他平台行为不变。
+在 Unix 上，`LocalAtomicWriteOptions::with_open_retry_timeout` 可限制活动
+file lease 导致目标的 nonblocking open 返回 `WouldBlock` 时的重试时间。
+默认无限等待；`Duration::ZERO` 在第一次冲突后返回 `TimedOut`。path-based
+和 rooted writer 共用这个 options 类型；one-shot facade 有意保留无限等待的
+默认值。其他平台行为不变。
 
 失败时返回 `LocalAtomicWriteError`，其中包含失败阶段、临时路径、原始 I/O source error、`LocalAtomicDestinationState`，以及删除未提交 staging file 时产生的 secondary cleanup error。`Unchanged` 表示目标未变，`Replaced` 表示目标包含 staging 内容，`Missing` 表示目标已不存在，`Indeterminate` 要求恢复前同时检查目标与 staging。只有 `Unchanged` 会自动尝试清理 staging；其他状态保留仍存在的 staging entry，但成功移动后诊断用 staging path 可能已经不存在。
 如果 `atomic_write_with` callback panic，会先关闭并 best-effort 删除未提交临时文件，再继续传播 panic。清理失败不能替换原 panic，因此这种情况下 staging path 可能残留。

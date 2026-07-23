@@ -284,10 +284,13 @@ assert_eq!("{\"complete\":true}\n", std::fs::read_to_string(&path)?);
 ```rust
 use std::io::Write;
 use std::time::Duration;
-use qubit_local_files::LocalFiles;
+use qubit_local_files::{LocalAtomicWriteOptions, LocalFiles};
 
-let mut writer = LocalFiles::begin_atomic_write("state.bin")?
+let options = LocalAtomicWriteOptions::new()
+    .with_parent()
     .with_open_retry_timeout(Duration::from_secs(5));
+let mut writer =
+    LocalFiles::begin_atomic_write_with_options("state.bin", options)?;
 writer.write_all(b"complete state")?;
 writer.commit()?;
 # Ok::<(), Box<dyn std::error::Error>>(())
@@ -298,11 +301,11 @@ writer.commit()?;
 文件。自 `0.5.0` 起，配置类型的字段不再公开，调用方必须使用现有 getter、
 constructor 和 builder。API 仍保持同步边界。
 
-在 Unix 上，`with_open_retry_timeout` 只限制活动 file lease 使目标的
-nonblocking open 返回 `WouldBlock` 时的重试。默认 `None` 不设期限；
-`Duration::ZERO` 在第一次冲突后返回 `TimedOut`。one-shot helper 有意不增加
-超时重载；请使用 `begin_atomic_write`（或 rooted writer），配置 writer 后再写入
-并 commit。该设置不改变其他平台的行为。
+在 Unix 上，`LocalAtomicWriteOptions::with_open_retry_timeout` 只限制活动
+file lease 使目标的 nonblocking open 返回 `WouldBlock` 时的重试。默认
+`None` 不设期限；`Duration::ZERO` 在第一次冲突后返回 `TimedOut`。
+path-based 和 rooted writer 在创建 staging 前接受同一个 options 类型。
+one-shot helper 有意保留无限等待的默认值。该设置不改变其他平台的行为。
 
 ### 已有目标的 metadata 契约
 
