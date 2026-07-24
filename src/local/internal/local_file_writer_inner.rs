@@ -26,9 +26,15 @@ use crate::FileBuffering;
 #[derive(Debug)]
 pub(in crate::local) enum LocalFileWriterInner {
     /// Writer backed directly by an unbuffered file handle.
-    Unbuffered(File),
+    Unbuffered(
+        /// Unbuffered file handle that receives written bytes.
+        File,
+    ),
     /// Writer backed by a standard-library buffer.
-    Buffered(BufWriter<File>),
+    Buffered(
+        /// Buffered file handle that receives written bytes.
+        BufWriter<File>,
+    ),
 }
 
 impl LocalFileWriterInner {

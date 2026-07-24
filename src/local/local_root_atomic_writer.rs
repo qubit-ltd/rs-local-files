@@ -178,6 +178,7 @@ impl LocalRootAtomicWriter {
     /// synchronization, replacement, or parent-directory synchronization
     /// fails. Inspect [`LocalAtomicWriteError::destination_state`] to determine
     /// the known post-failure destination outcome.
+    #[inline(always)]
     pub fn commit(self) -> Result<(), LocalAtomicWriteError> {
         self.commit_recoverable().map_err(|error| {
             error.into_final_error_with(Self::finalize_failed_commit)

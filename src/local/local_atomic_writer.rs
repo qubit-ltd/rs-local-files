@@ -218,6 +218,7 @@ impl LocalAtomicWriter {
     /// fails. Inspect [`LocalAtomicWriteError::destination_state`] before
     /// deciding whether the destination or retained staging path needs
     /// recovery.
+    #[inline(always)]
     pub fn commit(self) -> Result<(), LocalAtomicWriteError> {
         self.commit_recoverable().map_err(|error| {
             error.into_final_error_with(Self::finalize_failed_commit)
@@ -250,27 +251,6 @@ impl LocalAtomicWriter {
             }
             Err(error) => Err(LocalAtomicCommitError::new(error, None)),
         }
-    }
-
-    /// Runs one commit attempt without consuming recoverable staging state.
-    ///
-    /// # Errors
-    ///
-    /// Returns the structured commit failure. Errors raised before installation
-    /// leave the staging handle open for the public recoverable commit API.
-    fn commit_attempt(&mut self) -> Result<(), LocalAtomicWriteError> {
-        #[cfg(unix)]
-        let destination = self.open_destination_for_commit()?;
-        #[cfg(unix)]
-        self.preserve_destination_metadata(destination.as_ref())?;
-        #[cfg(not(any(unix, windows)))]
-        self.reject_unsupported_metadata_preservation()?;
-        self.sync_temporary_file()?;
-        #[cfg(unix)]
-        self.verify_destination_for_commit(destination.as_ref())?;
-        #[cfg(not(unix))]
-        self.verify_non_unix_destination_for_commit()?;
-        self.install_and_sync_parent()
     }
 
     /// Aborts the staged replacement and removes its temporary file.
@@ -306,9 +286,10 @@ impl LocalAtomicWriter {
 
     /// Invokes caller-provided staging logic and commits the destination.
     ///
-    /// The callback receives the guarded writer itself rather than a [`File`].
-    /// Exposing a file would let the callback retain a cloned handle and mutate
-    /// the committed inode after rename, invalidating the atomic snapshot.
+    /// The callback receives the guarded writer itself rather than a
+    /// [`std::fs::File`]. Exposing a file would let the callback retain a
+    /// cloned handle and mutate the committed inode after rename,
+    /// invalidating the atomic snapshot.
     ///
     /// # Parameters
     /// - `write`: Callback that writes the complete staged contents.
@@ -336,6 +317,27 @@ impl LocalAtomicWriter {
             &mut self.staged_file,
         )?;
         self.commit()
+    }
+
+    /// Runs one commit attempt without consuming recoverable staging state.
+    ///
+    /// # Errors
+    ///
+    /// Returns the structured commit failure. Errors raised before installation
+    /// leave the staging handle open for the public recoverable commit API.
+    fn commit_attempt(&mut self) -> Result<(), LocalAtomicWriteError> {
+        #[cfg(unix)]
+        let destination = self.open_destination_for_commit()?;
+        #[cfg(unix)]
+        self.preserve_destination_metadata(destination.as_ref())?;
+        #[cfg(not(any(unix, windows)))]
+        self.reject_unsupported_metadata_preservation()?;
+        self.sync_temporary_file()?;
+        #[cfg(unix)]
+        self.verify_destination_for_commit(destination.as_ref())?;
+        #[cfg(not(unix))]
+        self.verify_non_unix_destination_for_commit()?;
+        self.install_and_sync_parent()
     }
 
     #[cfg(unix)]

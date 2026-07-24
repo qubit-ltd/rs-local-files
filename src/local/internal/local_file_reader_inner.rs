@@ -26,9 +26,15 @@ use crate::FileBuffering;
 #[derive(Debug)]
 pub(in crate::local) enum LocalFileReaderInner {
     /// Reader backed directly by an unbuffered file handle.
-    Unbuffered(File),
+    Unbuffered(
+        /// Unbuffered file handle that supplies the reader.
+        File,
+    ),
     /// Reader backed by a standard-library buffer.
-    Buffered(BufReader<File>),
+    Buffered(
+        /// Buffered file handle that supplies the reader.
+        BufReader<File>,
+    ),
 }
 
 impl LocalFileReaderInner {
