@@ -13,7 +13,7 @@ use std::io::{
     Write,
 };
 
-#[cfg(all(coverage, target_os = "linux"))]
+#[cfg(target_os = "linux")]
 use std::io::ErrorKind;
 
 #[cfg(unix)]
@@ -294,5 +294,38 @@ fn test_open_writer_waits_for_conflicting_file_lease() {
     let writer = result.expect("writer should open after lease release");
 
     drop(writer);
+    fs::remove_dir_all(dir).expect("writer fixture should be removed");
+}
+
+#[cfg(target_os = "linux")]
+#[test]
+fn test_open_writer_timeout_reports_lease_conflict() {
+    let dir = temp_dir("open-writer-lease-timeout");
+    let path = dir.join("data.txt");
+    fs::write(&path, b"payload").expect("writer fixture should be written");
+    let lease = SourceReadLease::acquire(&path)
+        .expect("write lease should be acquired");
+    let worker_path = path.clone();
+    let (sender, receiver) = std::sync::mpsc::sync_channel(1);
+    let worker = std::thread::spawn(move || {
+        sender
+            .send(LocalFiles::open_writer(
+                worker_path,
+                FileWriteOptions::new(FileWriteMode::OpenExistingAtStart)
+                    .with_open_retry_timeout(std::time::Duration::ZERO),
+            ))
+            .expect("writer result should be sent");
+    });
+
+    lease
+        .wait_for_break()
+        .expect("writer open should request a lease break");
+    let error = receiver
+        .recv_timeout(std::time::Duration::from_secs(1))
+        .expect("timed writer result should arrive")
+        .expect_err("zero timeout should reject the lease conflict");
+    assert_eq!(ErrorKind::TimedOut, error.kind());
+    lease.release().expect("write lease should be released");
+    worker.join().expect("writer worker should not panic");
     fs::remove_dir_all(dir).expect("writer fixture should be removed");
 }

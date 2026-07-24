@@ -8,6 +8,7 @@
 
 use std::io::ErrorKind;
 use std::num::NonZeroUsize;
+use std::time::Duration;
 
 use qubit_local_files::{
     FileBuffering,
@@ -28,6 +29,8 @@ fn test_file_write_option_constructors_are_explicit() {
         .expect("positive writer capacity should be accepted");
     let buffered =
         FileWriteOptions::new(FileWriteMode::CreateOrTruncate).buffered();
+    let timed = FileWriteOptions::default()
+        .with_open_retry_timeout(Duration::from_millis(25));
 
     assert!(custom.creates_parent());
     assert_eq!(FileWriteMode::AppendOrCreate, custom.mode());
@@ -43,6 +46,8 @@ fn test_file_write_option_constructors_are_explicit() {
         FileBuffering::Buffered { capacity: None },
         buffered.buffering()
     );
+    assert_eq!(None, FileWriteOptions::default().open_retry_timeout());
+    assert_eq!(Some(Duration::from_millis(25)), timed.open_retry_timeout());
 }
 
 #[test]

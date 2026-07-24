@@ -519,6 +519,57 @@ fn test_open_rooted_writer_waits_for_conflicting_file_lease() {
     fs::remove_dir_all(root_path).expect("writer fixture should be removed");
 }
 
+/// Verifies rooted file opens can bound Linux lease-conflict retries.
+#[cfg(target_os = "linux")]
+#[test]
+fn test_open_rooted_reader_and_writer_timeout_report_lease_conflicts() {
+    let root_path = temp_dir("rooted-open-lease-timeout");
+    let path = root_path.join("data.txt");
+    fs::write(&path, b"payload").expect("fixture should be written");
+
+    for is_writer in [false, true] {
+        let lease = SourceReadLease::acquire(&path)
+            .expect("write lease should be acquired");
+        let worker_root_path = root_path.clone();
+        let (sender, receiver) = std::sync::mpsc::sync_channel(1);
+        let worker = std::thread::spawn(move || {
+            let root = LocalRoot::open(&worker_root_path)
+                .expect("worker root should open");
+            let relative = LocalRelativePath::new("data.txt")
+                .expect("path should validate");
+            let result = if is_writer {
+                root.open_writer(
+                    &relative,
+                    FileWriteOptions::new(FileWriteMode::OpenExistingAtStart)
+                        .with_open_retry_timeout(std::time::Duration::ZERO),
+                )
+                .map(drop)
+            } else {
+                root.open_reader(
+                    &relative,
+                    FileReadOptions::unbuffered()
+                        .with_open_retry_timeout(std::time::Duration::ZERO),
+                )
+                .map(drop)
+            };
+            sender.send(result).expect("open result should be sent");
+        });
+
+        lease
+            .wait_for_break()
+            .expect("rooted open should request a lease break");
+        let error = receiver
+            .recv_timeout(std::time::Duration::from_secs(1))
+            .expect("timed rooted result should arrive")
+            .expect_err("zero timeout should reject the lease conflict");
+        assert_eq!(ErrorKind::TimedOut, error.kind());
+        lease.release().expect("write lease should be released");
+        worker.join().expect("rooted worker should not panic");
+    }
+
+    fs::remove_dir_all(root_path).expect("fixture should be removed");
+}
+
 /// Verifies that renaming the diagnostic path cannot redirect an already open
 /// root capability.
 #[cfg(unix)]

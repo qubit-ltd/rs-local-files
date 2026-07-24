@@ -132,6 +132,11 @@ impl LocalRoot {
     /// descriptors. Renaming or replacing their path names after they are
     /// opened cannot redirect this operation.
     ///
+    /// On Unix, a lease-conflicting defensive open is retried to preserve
+    /// ordinary blocking-open behavior. Use
+    /// [`FileReadOptions::with_open_retry_timeout`] to bound that wait; the
+    /// default is unbounded.
+    ///
     /// # Parameters
     ///
     /// * `path` - Validated relative descendant path.
@@ -168,6 +173,11 @@ impl LocalRoot {
     /// descriptors only when requested by `options`. Once the returned file is
     /// open, later root or intermediate-name replacement cannot redirect that
     /// file handle.
+    ///
+    /// On Unix, a lease-conflicting defensive open is retried to preserve
+    /// ordinary blocking-open behavior. Use
+    /// [`FileWriteOptions::with_open_retry_timeout`] to bound that wait; the
+    /// default is unbounded.
     ///
     /// # Parameters
     ///

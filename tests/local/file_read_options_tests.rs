@@ -8,6 +8,7 @@
 
 use std::io::ErrorKind;
 use std::num::NonZeroUsize;
+use std::time::Duration;
 
 use qubit_local_files::{
     FileBuffering,
@@ -24,6 +25,8 @@ fn test_file_read_option_constructors_are_explicit() {
     let unbuffered = FileReadOptions::unbuffered();
     let buffered = FileReadOptions::buffered_with_capacity(32)
         .expect("positive reader capacity should be accepted");
+    let timed = FileReadOptions::unbuffered()
+        .with_open_retry_timeout(Duration::from_millis(25));
 
     assert_eq!(FileBuffering::Unbuffered, unbuffered.buffering());
     assert_eq!(
@@ -32,6 +35,8 @@ fn test_file_read_option_constructors_are_explicit() {
         },
         buffered.buffering()
     );
+    assert_eq!(None, FileReadOptions::default().open_retry_timeout());
+    assert_eq!(Some(Duration::from_millis(25)), timed.open_retry_timeout());
 }
 
 #[test]

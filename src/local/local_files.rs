@@ -126,6 +126,11 @@ impl LocalFiles {
     /// The target must be a regular file. Directories and special filesystem
     /// resources are rejected without returning a reader.
     ///
+    /// On Unix, a lease-conflicting defensive open is retried to preserve
+    /// ordinary blocking-open behavior. Use
+    /// [`FileReadOptions::with_open_retry_timeout`] to bound that wait; the
+    /// default is unbounded.
+    ///
     /// # Parameters
     /// - `path`: File path to open.
     /// - `options`: Read options controlling buffering.
@@ -153,6 +158,11 @@ impl LocalFiles {
     /// [`LocalFiles::atomic_write`] and [`LocalFiles::atomic_write_with`].
     /// The target must be a regular file or a path that the selected mode can
     /// create; directories and special filesystem resources are rejected.
+    ///
+    /// On Unix, a lease-conflicting defensive open is retried to preserve
+    /// ordinary blocking-open behavior. Use
+    /// [`FileWriteOptions::with_open_retry_timeout`] to bound that wait; the
+    /// default is unbounded.
     ///
     /// # Parameters
     /// - `path`: File path to open.

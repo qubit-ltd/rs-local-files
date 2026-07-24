@@ -21,6 +21,7 @@ use std::io::{
 #[cfg(unix)]
 use std::os::fd::AsRawFd;
 use std::path::Path;
+use std::time::Duration;
 
 use crate::{
     FileReadOptions,
@@ -121,13 +122,15 @@ fn configure_nonblocking_open(_options: &mut OpenOptions) {}
 fn open_configured_file(
     options: &OpenOptions,
     path: &Path,
+    open_retry_timeout: Option<Duration>,
 ) -> Result<fs::File> {
     #[cfg(unix)]
     {
-        open_with_nonblocking_retry(None, || options.open(path))
+        open_with_nonblocking_retry(open_retry_timeout, || options.open(path))
     }
     #[cfg(not(unix))]
     {
+        let _ = open_retry_timeout;
         options.open(path)
     }
 }
@@ -224,8 +227,11 @@ pub(crate) fn open_reader_path(
     // O_NONBLOCK closes the FIFO replacement race during open, and handle
     // metadata verifies the object that was actually opened.
     configure_nonblocking_open(&mut open_options);
-    let file = open_configured_file(&open_options, path)
-        .map_err(|error| add_path_context(error, "open file reader", path))?;
+    let file =
+        open_configured_file(&open_options, path, options.open_retry_timeout())
+            .map_err(|error| {
+                add_path_context(error, "open file reader", path)
+            })?;
     let buffering = options.buffering();
     prepare_opened_regular_file(
         &file,
@@ -281,8 +287,11 @@ pub(crate) fn open_writer_path(
     // The same three layers used by readers keep writer creation deterministic
     // while preventing a path swapped to a FIFO from blocking this thread.
     configure_nonblocking_open(&mut open_options);
-    let file = open_configured_file(&open_options, path)
-        .map_err(|error| add_path_context(error, "open file writer", path))?;
+    let file =
+        open_configured_file(&open_options, path, options.open_retry_timeout())
+            .map_err(|error| {
+                add_path_context(error, "open file writer", path)
+            })?;
     let buffering = options.buffering();
     prepare_opened_regular_file(
         &file,

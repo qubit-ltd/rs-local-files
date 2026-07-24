@@ -268,6 +268,11 @@ impl LocalTempDir {
     /// does not defend against concurrent path replacement by an untrusted
     /// actor.
     ///
+    /// On Unix, a lease-conflicting defensive open is retried to preserve
+    /// ordinary blocking-open behavior. Use
+    /// [`FileReadOptions::with_open_retry_timeout`] to bound that wait; the
+    /// default is unbounded.
+    ///
     /// # Parameters
     /// - `child`: Relative child file path.
     /// - `options`: Read options controlling buffering.
@@ -306,6 +311,11 @@ impl LocalTempDir {
     /// Validation and opening are separate filesystem operations. This helper
     /// is not a sandbox boundary when an untrusted actor can mutate the tree
     /// concurrently.
+    ///
+    /// On Unix, a lease-conflicting defensive open is retried to preserve
+    /// ordinary blocking-open behavior. Use
+    /// [`FileWriteOptions::with_open_retry_timeout`] to bound that wait; the
+    /// default is unbounded.
     ///
     /// # Parameters
     /// - `child`: Relative child file path.

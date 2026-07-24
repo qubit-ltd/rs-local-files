@@ -117,7 +117,7 @@ pub(crate) fn open_rooted_reader(
     let flags =
         libc::O_RDONLY | libc::O_NOFOLLOW | libc::O_CLOEXEC | libc::O_NONBLOCK;
     let file = rooted_open_result(
-        open_with_nonblocking_retry(None, || {
+        open_with_nonblocking_retry(options.open_retry_timeout(), || {
             open_file_at(&parent, &name, flags, 0)
         }),
         "open rooted file reader",
@@ -184,7 +184,7 @@ pub(crate) fn open_rooted_writer(
         }
     }
     let file = rooted_open_result(
-        open_with_nonblocking_retry(None, || {
+        open_with_nonblocking_retry(options.open_retry_timeout(), || {
             open_file_at(&parent, &name, flags, 0o600)
         }),
         "open rooted file writer",
