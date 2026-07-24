@@ -101,6 +101,31 @@ impl<T> LocalAtomicCommitError<T> {
         let Self { error, writer } = self;
         (error, writer.map(|writer| *writer))
     }
+
+    /// Converts this recoverable commit error into a consuming commit failure.
+    ///
+    /// # Parameters
+    ///
+    /// * `finalize_writer` - Finalizes a retained writer and enriches its
+    ///   structured failure with any cleanup error.
+    ///
+    /// # Returns
+    ///
+    /// The finalized writer failure when recovery remained available, or the
+    /// original terminal failure when no writer was retained.
+    pub(crate) fn into_final_error_with<F>(
+        self,
+        finalize_writer: F,
+    ) -> LocalAtomicWriteError
+    where
+        F: FnOnce(T, LocalAtomicWriteError) -> LocalAtomicWriteError,
+    {
+        let (error, writer) = self.into_parts();
+        match writer {
+            Some(writer) => finalize_writer(writer, error),
+            None => error,
+        }
+    }
 }
 
 impl<T> Display for LocalAtomicCommitError<T> {

@@ -219,16 +219,9 @@ impl LocalAtomicWriter {
     /// deciding whether the destination or retained staging path needs
     /// recovery.
     pub fn commit(self) -> Result<(), LocalAtomicWriteError> {
-        match self.commit_recoverable() {
-            Ok(()) => Ok(()),
-            Err(error) => {
-                let (error, writer) = error.into_parts();
-                match writer {
-                    Some(writer) => Err(writer.finalize_failed_commit(error)),
-                    None => Err(error),
-                }
-            }
-        }
+        self.commit_recoverable().map_err(|error| {
+            error.into_final_error_with(Self::finalize_failed_commit)
+        })
     }
 
     /// Attempts to commit while retaining a recoverable staging writer.
