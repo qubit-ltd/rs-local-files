@@ -175,14 +175,22 @@ Normal file opening is intentionally explicit:
 
 | Type | Purpose |
 | --- | --- |
-| `FileReadOptions` | Controls reader buffering. |
-| `FileWriteOptions` | Controls parent creation, write mode, and writer buffering. |
+| `FileReadOptions` | Controls reader buffering and an optional Unix lease-conflict open timeout. |
+| `FileWriteOptions` | Controls parent creation, write mode, writer buffering, and an optional Unix lease-conflict open timeout. |
 | `FileBuffering` | Selects unbuffered I/O or buffered I/O with an optional capacity. |
 | `FileWriteMode` | Selects `OpenExistingAtStart`, `CreateNew`, `CreateOrTruncate`, `AppendExisting`, or `AppendOrCreate`. |
 
 Both open helpers return only regular files. Directories, FIFOs, sockets, and
 other special filesystem resources are rejected; on Unix, FIFO rejection does
 not wait for a peer.
+
+On Unix, an active file lease can make the defensive nonblocking open return
+`WouldBlock`. Normal readers and writers retry that condition to preserve
+ordinary blocking-open behavior. `with_open_retry_timeout` bounds the wait;
+the default is unbounded, and `Duration::ZERO` reports `TimedOut` after the
+first lease-conflicting attempt. Other open errors are never retried. This
+option applies to `LocalFiles`, `LocalRoot`, and `LocalTempDir` file-open
+helpers; it is not a general I/O timeout.
 
 `LocalFileReader` implements `Read` and `Seek`. `LocalFileWriter` implements
 `Write` and `Seek`, and provides `sync_all` / `sync_data` helpers that flush any

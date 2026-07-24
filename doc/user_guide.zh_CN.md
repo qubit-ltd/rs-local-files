@@ -70,8 +70,8 @@ use qubit_local_files::{
 
 | 类型 | 字段 | 用途 |
 | --- | --- | --- |
-| `FileReadOptions` | `buffering` | 控制 `open_reader` 返回无额外缓冲 reader，还是 buffered reader。 |
-| `FileWriteOptions` | `create_parent`、`mode`、`buffering` | 控制是否创建父目录、写入模式和 writer 是否缓冲。 |
+| `FileReadOptions` | `buffering`、`open_retry_timeout` | 控制 `open_reader` 返回无额外缓冲 reader，还是 buffered reader，以及可选的 Unix 租约冲突打开超时。 |
+| `FileWriteOptions` | `create_parent`、`mode`、`buffering`、`open_retry_timeout` | 控制是否创建父目录、写入模式、writer 是否缓冲，以及可选的 Unix 租约冲突打开超时。 |
 | `FileBuffering` | `Unbuffered`、`Buffered { capacity }` | 选择原始文件 I/O，或带可选非零容量的 `BufReader` / `BufWriter`。 |
 | `FileWriteMode` | enum variants | 选择目标文件的写入打开方式。 |
 
@@ -79,6 +79,12 @@ use qubit_local_files::{
 `LocalFiles::open_writer` 返回的 writer 实现 `Write` 和 `Seek`。
 两个 helper 都只返回普通文件；目录、FIFO、socket 和其他特殊文件系统资源会被
 拒绝，在 Unix 上拒绝 FIFO 时不会等待另一端连接。
+
+在 Unix 上，文件租约可能使防御性非阻塞打开返回 `WouldBlock`。普通打开 helper
+会重试该情况，以保持通常的阻塞打开语义。`with_open_retry_timeout` 可以限制该
+等待时间；默认无限等待，`Duration::ZERO` 会在第一次租约冲突尝试后返回
+`TimedOut`。其他打开错误不会重试。该选项适用于 `LocalFiles`、`LocalRoot` 和
+`LocalTempDir` 的文件打开 helper，不影响后续的读取或写入。
 `LocalFileWriter::sync_all` 和 `LocalFileWriter::sync_data` 会先 flush
 缓冲内容，再同步底层文件，适合 append log 或其他不需要 whole-file atomic
 replacement 的普通写句柄。对 writer 执行 seek 不会关闭 append-mode 语义。

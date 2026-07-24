@@ -127,13 +127,19 @@ assert_eq!("new payload\n", std::fs::read_to_string(&final_path)?);
 
 | 类型 | 用途 |
 | --- | --- |
-| `FileReadOptions` | 控制 reader 是否缓冲。 |
-| `FileWriteOptions` | 控制是否创建父目录、写入模式和 writer 是否缓冲。 |
+| `FileReadOptions` | 控制 reader 是否缓冲，以及可选的 Unix 租约冲突打开超时。 |
+| `FileWriteOptions` | 控制是否创建父目录、写入模式、writer 是否缓冲，以及可选的 Unix 租约冲突打开超时。 |
 | `FileBuffering` | 选择无额外缓冲，或使用可选容量的缓冲 I/O。 |
 | `FileWriteMode` | 选择 `OpenExistingAtStart`、`CreateNew`、`CreateOrTruncate`、`AppendExisting` 或 `AppendOrCreate`。 |
 
 两个打开 helper 都只返回普通文件。目录、FIFO、socket 和其他特殊文件系统
 资源会被拒绝；在 Unix 上，拒绝 FIFO 时不会等待另一端连接。
+
+在 Unix 上，活动文件租约可能使防御性非阻塞打开返回 `WouldBlock`。普通 reader
+和 writer 会重试该情况，以保持通常的阻塞打开语义。`with_open_retry_timeout`
+可以限制等待时间；默认无限等待，`Duration::ZERO` 会在第一次租约冲突尝试后
+返回 `TimedOut`。其他打开错误不会重试。该选项适用于 `LocalFiles`、`LocalRoot`
+和 `LocalTempDir` 的文件打开 helper；它不是通用 I/O 超时。
 
 `LocalFileReader` 实现 `Read` 和 `Seek`。`LocalFileWriter` 实现 `Write` 和
 `Seek`，并提供 `sync_all` / `sync_data` helper；这些 helper 会先 flush

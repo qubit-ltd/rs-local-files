@@ -79,8 +79,8 @@ Normal file opening is controlled by explicit option structs:
 
 | Type | Fields | Purpose |
 | --- | --- | --- |
-| `FileReadOptions` | `buffering` | Controls whether `open_reader` returns an unbuffered or buffered reader. |
-| `FileWriteOptions` | `create_parent`, `mode`, `buffering` | Controls parent creation, write mode, and writer buffering. |
+| `FileReadOptions` | `buffering`, `open_retry_timeout` | Controls reader buffering and an optional Unix lease-conflict open timeout. |
+| `FileWriteOptions` | `create_parent`, `mode`, `buffering`, `open_retry_timeout` | Controls parent creation, write mode, writer buffering, and an optional Unix lease-conflict open timeout. |
 | `FileBuffering` | `Unbuffered`, `Buffered { capacity }` | Selects raw file I/O or `BufReader` / `BufWriter` with an optional non-zero capacity. |
 | `FileWriteMode` | enum variants | Selects how the target is opened for writing. |
 
@@ -89,6 +89,14 @@ Writers returned by `LocalFiles::open_writer` implement `Write` and `Seek`.
 Both helpers return only regular files. They reject directories, FIFOs,
 sockets, and other special filesystem resources; Unix FIFO rejection does not
 wait for a peer.
+
+On Unix, a file lease can make the defensive nonblocking open return
+`WouldBlock`. The normal open helpers retry it to preserve ordinary
+blocking-open behavior. `with_open_retry_timeout` bounds that wait; the
+default is unbounded and `Duration::ZERO` returns `TimedOut` after the first
+lease-conflicting attempt. Other open errors are never retried. The option
+applies to the `LocalFiles`, `LocalRoot`, and `LocalTempDir` file-open helpers,
+not to later reads or writes.
 `LocalFileWriter::sync_all` and `LocalFileWriter::sync_data` flush any buffered
 bytes before synchronizing the underlying file, which is useful for append logs
 or other normal write handles that do not need whole-file atomic replacement.
