@@ -18,6 +18,7 @@ use std::path::{
     Path,
     PathBuf,
 };
+#[cfg(unix)]
 use std::time::Duration;
 
 use crate::{
@@ -104,6 +105,7 @@ pub struct LocalAtomicWriter {
     parent_dirs_to_sync: Vec<PathBuf>,
     /// Whether a regular destination existed when this writer began.
     destination_existed: bool,
+    #[cfg(unix)]
     /// Optional limit for retrying a nonblocking destination open.
     open_retry_timeout: Option<Duration>,
     /// Owned same-directory staging file.
@@ -191,6 +193,7 @@ impl LocalAtomicWriter {
             operation_path,
             parent_dirs_to_sync,
             destination_existed,
+            #[cfg(unix)]
             open_retry_timeout: options.open_retry_timeout(),
             staged_file: StagedFile::new(temp_path, file),
         })

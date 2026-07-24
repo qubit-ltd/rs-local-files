@@ -20,16 +20,19 @@ use std::path::{
     Path,
     PathBuf,
 };
+#[cfg(unix)]
 use std::time::Duration;
 
-#[cfg(unix)]
-use crate::LocalRelativePath;
 use crate::{
     LocalAtomicCommitError,
     LocalAtomicDestinationState,
     LocalAtomicWriteError,
-    LocalAtomicWriteOptions,
     LocalAtomicWriteStage,
+};
+#[cfg(unix)]
+use crate::{
+    LocalAtomicWriteOptions,
+    LocalRelativePath,
 };
 
 #[cfg(coverage)]
@@ -76,6 +79,7 @@ use super::internal::{
 pub struct LocalRootAtomicWriter {
     /// Requested relative destination retained for structured errors.
     path: PathBuf,
+    #[cfg(unix)]
     /// Optional limit for retrying a nonblocking destination open.
     open_retry_timeout: Option<Duration>,
     #[cfg(unix)]

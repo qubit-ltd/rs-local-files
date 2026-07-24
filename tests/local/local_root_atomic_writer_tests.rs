@@ -17,7 +17,7 @@ use std::io::{
 use std::path::PathBuf;
 #[cfg(target_os = "linux")]
 use std::process::Command;
-#[cfg(unix)]
+#[cfg(target_os = "linux")]
 use std::time::Duration;
 
 #[cfg(unix)]

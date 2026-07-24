@@ -14,6 +14,7 @@ use std::io::{
 };
 #[cfg(target_os = "linux")]
 use std::path::Path;
+#[cfg(target_os = "linux")]
 use std::time::Duration;
 
 use qubit_local_files::{
