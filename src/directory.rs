@@ -30,6 +30,16 @@ pub fn read(path: &Path) -> Result<ReadDir> {
     fs::read_dir(path)
 }
 
+/// Creates exactly one directory.
+///
+/// # Errors
+/// Returns an I/O error when the parent is missing, the destination already
+/// exists, or the directory cannot be created.
+#[inline(always)]
+pub fn create(path: &Path) -> Result<()> {
+    fs::create_dir(path)
+}
+
 /// Creates a directory and any missing ancestors.
 ///
 /// # Errors

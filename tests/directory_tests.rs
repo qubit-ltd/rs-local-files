@@ -15,6 +15,21 @@ fn test_directory_create_all_is_idempotent() {
         .expect("an existing directory should be accepted");
 }
 
+/// Verifies single-directory creation rejects an existing destination.
+#[test]
+fn test_directory_create_requires_a_new_entry() {
+    let directory =
+        tempfile::tempdir().expect("a temporary directory should exist");
+    let child = directory.path().join("child");
+
+    qubit_local_files::directory::create(&child)
+        .expect("a missing child directory should be created");
+    let error = qubit_local_files::directory::create(&child)
+        .expect_err("an existing child directory should be rejected");
+
+    assert_eq!(std::io::ErrorKind::AlreadyExists, error.kind());
+}
+
 /// Verifies listing, sizing, parent creation, and clearing share one facade.
 #[test]
 fn test_directory_lifecycle_operations() {
