@@ -38,6 +38,12 @@ use super::{
     Writer,
 };
 
+// TODO: Add descriptor-relative directory creation, listing, removal, rename,
+// copy, and temporary-entry operations when rooted filesystem consumers need
+// those capabilities.
+// TODO: Implement a Windows directory-handle backend before advertising
+// rooted support on non-Unix platforms.
+
 /// An opened directory descriptor that authorizes contained operations.
 #[must_use]
 #[derive(Debug)]

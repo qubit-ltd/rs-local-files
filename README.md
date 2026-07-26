@@ -69,7 +69,7 @@ let mut replacement = atomic::begin(&path)?;
 replacement.write_all(br#"{"version":2}"#)?;
 replacement.commit()?;
 
-let mut file = read::open(&path, &read::OpenOptions::default())?;
+let mut file = read::open(&path)?;
 let mut content = String::new();
 file.read_to_string(&mut content)?;
 assert_eq!(r#"{"version":2}"#, content);
@@ -91,29 +91,23 @@ New code should import the module that owns each operation:
 | `temp` | Provides RAII temporary files, directories, and persistence policy types. |
 | `directory`, `metadata`, `remove`, `rename` | Provides focused native filesystem operations. |
 | `copy` | Recursively copies a directory with explicit conflict policies and statistics. |
-| `path` | Validates portable single-component filenames. |
-
-The top-level `Local*` types and `LocalFiles` remain available as a compatibility
-API. They additionally provide buffered readers and writers and one-shot
-helpers. New integrations should prefer the focused modules so authority,
-overwrite policy, and native handle behavior remain visible at call sites.
+| `path` | Generates, validates, and lexically inspects filenames. |
 
 ### Temporary Files and Directories
 
 `temp::TempFile` and `temp::TempDir` create real local filesystem entries and
 remove them automatically on drop unless ownership is released with `keep` or
-`persist`. They are focused aliases of the legacy `LocalTempFile` and
-`LocalTempDir` names. Drop-time cleanup is best-effort; failures are reported
-through the `log` facade with `warn!` and never panic.
+`persist`. Drop-time cleanup is best-effort; failures are reported through the
+`log` facade with `warn!` and never panic.
 
-`LocalTempFile` owns its original file handle and implements `Write` and `Seek`.
+`temp::TempFile` owns its original file handle and implements `Write` and `Seek`.
 Use `as_file` / `as_file_mut` for direct handle access, and `close` to drop the
 unbuffered handle before reusing the path from other APIs. `close` does not call
 `sync_all`; explicitly synchronize the handle first when durability is needed.
 The type intentionally does not provide read helpers; read the path through
-`LocalFiles` or `std::fs` when that is needed.
+`read` or `std::fs` when that is needed.
 
-`LocalTempDir::child_path` only validates and joins a non-empty relative path
+`temp::TempDir::child_path` only validates and joins a non-empty relative path
 made of normal lexical components; it does not inspect existing symbolic
 links, and its result is not proof of filesystem containment. The
 `ensure_child_dir`, `open_child_reader`, and `open_child_writer` helpers also
@@ -123,19 +117,19 @@ reject symbolic-link escapes observed during their filesystem checks.
 Filesystem validation is not atomic with later operations. These helpers are
 not a sandbox boundary when an untrusted actor can mutate the tree concurrently.
 
-`LocalTempFile::persist` rejects an existing target by default during the move
-operation. Use `LocalTempFile::persist_with` and
-`LocalPersistOptions::new().with_overwrite()` only when replacing an existing target
-is intended. `LocalTempDir::persist` also rejects an existing target and does not
+`temp::TempFile::persist` rejects an existing target by default during the move
+operation. Use `temp::TempFile::persist_with` and
+`temp::PersistOptions::new().with_overwrite()` only when replacing an existing
+target is intended. `temp::TempDir::persist` also rejects an existing target and does not
 provide an overwrite option. A failed persistence operation returns
-`LocalPersistError`, which retains the temporary guard for retry or inspection
+`temp::PersistError`, which retains the temporary guard for retry or inspection
 and reports `ResolveTarget`, `PrepareParent`, or `InstallDestination` together
 with the requested target and, once available, its resolved absolute path.
 Persistence uses native move/rename operations without a copy-and-delete
 fallback, so cross-filesystem moves may fail with `EXDEV` on Unix or an
 equivalent platform error. Overwriting a file keeps the temporary file's
 metadata rather than the replaced target's metadata; use
-`LocalFiles::atomic_write` when strict platform-native metadata preservation is
+`atomic::write` when strict platform-native metadata preservation is
 required.
 
 Native no-replace support is deliberately explicit:
@@ -184,20 +178,11 @@ On Unix, an active file lease can make the defensive nonblocking open return
 ordinary blocking-open behavior. `with_open_retry_timeout` bounds the wait;
 the default is unbounded, and `Duration::ZERO` reports `TimedOut` after the
 first lease-conflicting attempt. Other open errors are never retried. This
-option applies consistently to focused and legacy file-open helpers; it is not
-a general I/O timeout.
+option applies to configured focused file-open helpers; it is not a general I/O
+timeout. Use `read::open` for defaults and `read::open_with` when configuring
+reader options.
 
-The compatibility `LocalFileReader` implements `Read` and `Seek`.
-`LocalFileWriter` implements
-`Write` and `Seek`, and provides `sync_all` / `sync_data` helpers that flush any
-buffered bytes before synchronizing the underlying file. Seeking a writer does
-not disable append-mode semantics.
-
-Custom-capacity constructors return `std::io::Result` and reject zero. The
-stored custom capacity is a `NonZeroUsize`, so invalid buffering policies cannot
-be passed to file-opening methods.
-
-`atomic_write` remains a separate API because it performs a complete replacement
+`atomic::write` remains a separate API because it performs a complete replacement
 protocol rather than opening a normal write handle.
 
 ### Rooted Capabilities
@@ -220,13 +205,13 @@ begins after that directory descriptor has been opened.
 This is descriptor-relative path containment, not inode-name uniqueness or a
 complete OS security boundary. Hard links, mounts, permissions, and processes
 with equivalent OS authority remain deployment concerns. Path-based
-`LocalFiles` APIs are convenience operations, not sandbox boundaries.
+Path-based focused APIs are convenience operations, not sandbox boundaries.
 
 The secure backend currently uses Unix descriptor-relative operations. On
 other targets `rooted::Root::open` returns `std::io::ErrorKind::Unsupported`
 instead of falling back to a check-then-path sequence. `rooted::Root` is the API
-for attacker-resistant containment; path-based `LocalFiles` and temporary
-resource helpers remain intended for trusted local application paths.
+for attacker-resistant containment; path-based and temporary resource helpers
+remain intended for trusted local application paths.
 
 ### Atomic Writes
 
@@ -264,7 +249,7 @@ does not promise to preserve inode or hard-link identity, timestamps, or
 immutable/append-only flags. A target that was initially absent is installed
 with a native no-replace operation, so a concurrent creator is not overwritten.
 The final Unix identity check and replacement are still separate operations;
-coordinate concurrent writers externally and use `LocalRootAtomicWriter` when
+coordinate concurrent writers externally and use `rooted::Writer` when
 descriptor-relative containment is required. On Unix, a new destination starts
 with mode `0600` before applying a more restrictive process umask.
 
@@ -290,15 +275,15 @@ writer.commit()?;
 cleans up the staging file. Use `rooted::Root::begin_atomic_write` when
 replacement must stay beneath an anchored root.
 Use `commit_recoverable` when a caller must retry or explicitly abort after a
-pre-installation failure. Its `LocalAtomicCommitError::into_parts` returns the
+pre-installation failure. Its `atomic::CommitError::into_parts` returns the
 structured failure and an optional retained writer; the writer is unavailable
 once installation has begun. The same recovery API is available on
-`LocalRootAtomicWriter`.
-`atomic_write_with` lends the same guarded writer to its callback. The callback
+`rooted::Writer`.
+`atomic::write_with` lends the same guarded writer to its callback. The callback
 can write the staged contents, but cannot clone, retain, seek, or access the
 underlying file or raw handle after the callback returns.
 
-On Unix, `LocalAtomicWriteOptions::with_open_retry_timeout` bounds retries when
+On Unix, `atomic::Options::with_open_retry_timeout` bounds retries when
 an active file lease makes the nonblocking destination open report
 `WouldBlock`. The default is an unbounded wait; `Duration::ZERO` returns
 `TimedOut` after the first conflict. Path-based and rooted writers share this
@@ -307,15 +292,15 @@ Other platforms are unchanged.
 
 Since `0.5.0`, configuration fields are private. Use the existing getters,
 constructors, and builders instead of direct field access.
-Failures return `LocalAtomicWriteError`, including the failed stage, temporary
-path, native source error, a `LocalAtomicDestinationState`, and any secondary
+Failures return `atomic::Error`, including the failed stage, temporary
+path, native source error, an `atomic::DestinationState`, and any secondary
 error raised while removing an uncommitted staging file. `Unchanged` means the
 destination was not modified; `Replaced` means it contains staged contents;
 `Missing` means no destination exists; `Indeterminate` requires inspecting both
 paths before recovery. Cleanup is attempted only for `Unchanged`; other states
 retain any still-existing staging entry, although a successful move means the
 diagnostic staging path no longer exists.
-If an `atomic_write_with` callback panics, the uncommitted temporary file is
+If an `atomic::write_with` callback panics, the uncommitted temporary file is
 closed and best-effort removed before the panic propagates. A cleanup failure
 cannot replace the panic, so the staging path may remain in that case.
 
@@ -325,8 +310,7 @@ same destination path at the same time.
 
 ### Recursive Directory Copy
 
-`LocalFiles::copy_dir_all_with` copies a directory tree and returns
-`LocalCopyDirStats`:
+`copy::directory` copies a directory tree and returns `copy::Statistics`:
 
 | Field | Meaning |
 | --- | --- |
@@ -335,14 +319,14 @@ same destination path at the same time.
 | `bytes` | Number of bytes copied from regular files. |
 | `skipped` | Number of existing destination files skipped. |
 
-`LocalCopyDirOptions::default()` is intentionally conservative: both
+`copy::Options::default()` is intentionally conservative: both
 `conflict` and `type_conflict` use `Fail`, symbolic links are not followed, and
 source permissions are not preserved. On Unix, new or replaced files therefore
 use mode `0600` and newly created directories use mode `0700`, before applying
 a more restrictive process umask. Select `Overwrite` or `Skip` through
-`LocalCopyConflictPolicy`, and opt into destructive file/directory type
-replacement separately through `LocalCopyTypeConflictPolicy::Replace`. Copy
-failures return `LocalCopyDirError` with paths, stage, partial statistics, the
+`copy::ConflictPolicy`, and opt into destructive file/directory type
+replacement separately through `copy::TypeConflictPolicy::Replace`. Copy
+failures return `copy::Error` with paths, stage, partial statistics, the
 optional staging path and secondary cleanup error, and the native source error.
 `Fail` and `Skip` file commits require native no-replace support and therefore
 return `Unsupported` outside Linux, macOS, and Windows. `Overwrite` uses the
@@ -366,12 +350,11 @@ another actor can mutate either tree concurrently.
 
 ### Filename Helpers
 
-`LocalFilenames` provides random and lexical filename utilities:
+The `path` module provides random and lexical filename utilities:
 
 | Method group | Purpose |
 | --- | --- |
-| `random`, `random_with` | Build random filename components and panic on generation errors. |
-| `try_random`, `try_random_with` | Build random filename components through `std::io::Result`. |
+| `random_file_name`, `random_file_name_with` | Build random filename components through `std::io::Result`. |
 | `validate_portable_file_name` | Validate a conservative portable single-component filename. |
 | `file_name`, `file_stem`, `file_prefix` | Extract UTF-8 path components using `Path` semantics. |
 | `extension`, `dot_extension`, `has_extension` | Inspect final extensions. |

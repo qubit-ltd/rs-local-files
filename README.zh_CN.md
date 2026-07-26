@@ -63,7 +63,7 @@ let mut replacement = atomic::begin(&path)?;
 replacement.write_all(br#"{"version":2}"#)?;
 replacement.commit()?;
 
-let mut file = read::open(&path, &read::OpenOptions::default())?;
+let mut file = read::open(&path)?;
 let mut content = String::new();
 file.read_to_string(&mut content)?;
 assert_eq!(r#"{"version":2}"#, content);
@@ -85,26 +85,21 @@ assert_eq!(r#"{"version":2}"#, content);
 | `temp` | 提供 RAII 临时文件、目录和持久化策略类型。 |
 | `directory`、`metadata`、`remove`、`rename` | 提供职责明确的原生文件系统操作。 |
 | `copy` | 以显式冲突策略递归复制目录并返回统计。 |
-| `path` | 校验 portable 的单 component 文件名。 |
-
-顶层 `Local*` 类型与 `LocalFiles` 继续作为兼容 API，并额外提供 buffered
-reader/writer 与 one-shot helper。新集成应优先使用 focused 模块，使 authority、
-覆盖策略和原生 handle 行为在调用点保持清晰。
+| `path` | 生成、校验并按 lexical 语义检查文件名。 |
 
 ### 临时文件和临时目录
 
 `temp::TempFile` 和 `temp::TempDir` 创建真实的本地文件系统条目，并在 drop
-时自动删除，除非通过 `keep` 或 `persist` 释放所有权。它们分别是旧名称
-`LocalTempFile` 和 `LocalTempDir` 的 focused alias。Drop 阶段的清理是
+时自动删除，除非通过 `keep` 或 `persist` 释放所有权。Drop 阶段的清理是
 best-effort；失败会通过 `log` 门面以 `warn!` 记录告警，不会 panic。
 
-`LocalTempFile` 持有最初创建的文件句柄，并实现 `Write` 和 `Seek`。可通过 `as_file` / `as_file_mut` 直接访问句柄，通过 `close` 丢弃无缓冲句柄后，再用其他 API 读取该路径。`close` 不调用 `sync_all`；需要持久化保证时，应先显式同步句柄。它有意不提供读取 helper；确实需要读取时，通过 `LocalFiles` 或 `std::fs` 操作它的路径。
+`temp::TempFile` 持有最初创建的文件句柄，并实现 `Write` 和 `Seek`。可通过 `as_file` / `as_file_mut` 直接访问句柄，通过 `close` 丢弃无缓冲句柄后，再用其他 API 读取该路径。`close` 不调用 `sync_all`；需要持久化保证时，应先显式同步句柄。它有意不提供读取 helper；确实需要读取时，通过 `read` 或 `std::fs` 操作它的路径。
 
-`LocalTempDir::child_path` 只对非空相对路径执行 lexical 校验并完成拼接；它不检查已有 symbolic link，返回结果也不能证明文件系统 containment。`ensure_child_dir`、`open_child_reader` 和 `open_child_writer` 还会拒绝其文件系统检查期间观察到的 symbolic-link escape。`ensure_child_dir` 会像 `mkdir -p` 一样创建多层缺失父目录。
+`temp::TempDir::child_path` 只对非空相对路径执行 lexical 校验并完成拼接；它不检查已有 symbolic link，返回结果也不能证明文件系统 containment。`ensure_child_dir`、`open_child_reader` 和 `open_child_writer` 还会拒绝其文件系统检查期间观察到的 symbolic-link escape。`ensure_child_dir` 会像 `mkdir -p` 一样创建多层缺失父目录。
 
 文件系统校验与后续操作并非原子过程。当不可信参与者能够并发修改目录树时，这些 helper 不能作为 sandbox 边界。
 
-`LocalTempFile::persist` 默认在移动操作中拒绝已存在的目标。只有确实要替换已有目标时，才使用 `LocalTempFile::persist_with` 和 `LocalPersistOptions::new().with_overwrite()`。`LocalTempDir::persist` 同样拒绝已存在的目标，并且不提供 overwrite 选项。持久化失败会返回持有原临时 guard 的 `LocalPersistError`，调用方可以重试或检查资源；错误同时报告 `ResolveTarget`、`PrepareParent` 或 `InstallDestination` 阶段、调用方传入的目标，以及解析成功后绑定的绝对目标。持久化只使用原生 move/rename，不会回退到 copy-and-delete，因此跨文件系统移动可能在 Unix 上返回 `EXDEV`，或返回其他平台的等价错误。覆盖文件时会保留临时文件的 metadata，而不会保留被替换目标的 metadata；需要严格保留平台原生 metadata 时请使用 `LocalFiles::atomic_write`。
+`temp::TempFile::persist` 默认在移动操作中拒绝已存在的目标。只有确实要替换已有目标时，才使用 `temp::TempFile::persist_with` 和 `temp::PersistOptions::new().with_overwrite()`。`temp::TempDir::persist` 同样拒绝已存在的目标，并且不提供 overwrite 选项。持久化失败会返回持有原临时 guard 的 `temp::PersistError`，调用方可以重试或检查资源；错误同时报告 `ResolveTarget`、`PrepareParent` 或 `InstallDestination` 阶段、调用方传入的目标，以及解析成功后绑定的绝对目标。持久化只使用原生 move/rename，不会回退到 copy-and-delete，因此跨文件系统移动可能在 Unix 上返回 `EXDEV`，或返回其他平台的等价错误。覆盖文件时会保留临时文件的 metadata，而不会保留被替换目标的 metadata；需要严格保留平台原生 metadata 时请使用 `atomic::write`。
 
 原生 no-replace 支持矩阵如下：
 
@@ -136,17 +131,11 @@ socket 和其他特殊文件系统资源会被拒绝；在 Unix 上，拒绝 FIF
 在 Unix 上，活动文件租约可能使防御性非阻塞打开返回 `WouldBlock`。普通 reader
 和 writer 会重试该情况，以保持通常的阻塞打开语义。`with_open_retry_timeout`
 可以限制等待时间；默认无限等待，`Duration::ZERO` 会在第一次租约冲突尝试后
-返回 `TimedOut`。其他打开错误不会重试。该选项一致适用于 focused 与 legacy
-文件打开 helper；它不是通用 I/O 超时。
+返回 `TimedOut`。其他打开错误不会重试。该选项适用于 configured focused
+文件打开 helper；它不是通用 I/O 超时。默认读取使用 `read::open`，需要配置
+reader options 时使用 `read::open_with`。
 
-`LocalFileReader` 实现 `Read` 和 `Seek`。`LocalFileWriter` 实现 `Write` 和
-`Seek`，并提供 `sync_all` / `sync_data` helper；这些 helper 会先 flush
-缓冲内容，再同步底层文件。对 writer 执行 seek 不会关闭 append-mode 语义。
-
-自定义容量构造器返回 `std::io::Result` 并拒绝零容量。内部容量使用
-`NonZeroUsize` 表示，因此无效 buffering policy 无法传给文件打开方法。
-
-`atomic_write` 仍然是独立 API，因为它执行的是完整替换协议，而不是普通写句柄打开。
+`atomic::write` 仍然是独立 API，因为它执行的是完整替换协议，而不是普通写句柄打开。
 
 ### Rooted Capability
 
@@ -160,12 +149,12 @@ socket 和其他特殊文件系统资源会被拒绝；在 Unix 上，拒绝 FIF
 `None`。
 操作系统会在 capability 获取前解析 root 输入中的祖先 component；no-follow 只适用于最终 root entry。只有目录 descriptor 打开后，containment 才开始生效。
 
-这里保证的是 descriptor-relative 路径 containment，不是 inode 名称唯一性或完整的 OS 安全边界。hard link、mount、权限以及拥有同等 OS authority 的进程仍属于部署安全责任。path-based `LocalFiles` 是便利 API，不能作为 sandbox 边界。
+这里保证的是 descriptor-relative 路径 containment，不是 inode 名称唯一性或完整的 OS 安全边界。hard link、mount、权限以及拥有同等 OS authority 的进程仍属于部署安全责任。path-based focused API 是便利 API，不能作为 sandbox 边界。
 
 当前安全 backend 使用 Unix descriptor-relative 操作。其他目标上的
 `rooted::Root::open` 返回 `std::io::ErrorKind::Unsupported`，不会回退到
 check-then-path。需要抵御攻击者并发替换文件系统名字时应使用 `rooted::Root`；
-path-based `LocalFiles` 和临时资源 helper 仍面向可信本地应用路径。
+path-based API 和临时资源 helper 仍面向可信本地应用路径。
 
 ### Atomic Write
 
@@ -190,9 +179,9 @@ compile-only 支持层级；本仓库 CI 不对其文件系统与 metadata 行�
 crate 不会为了强制 Windows 替换而清除 `FILE_ATTRIBUTE_READONLY`；只读目标会被
 `ReplaceFileW` 拒绝并保持不变。
 
-Unix 在 `commit` 时从已打开的当前目标读取 metadata，因此 writer 开始后的变更也会被保留。任一受保护 metadata 无法读取、复制或合并时，commit 会失败，不会静默降低保护。Unix 不承诺保留 inode、hard-link identity、timestamp 或 immutable/append-only flag。最初不存在的目标使用原生 no-replace 安装，因此不会覆盖并发创建者。最终 Unix identity 检查与替换仍是分离操作；并发 writer 需要外部协调，需要 descriptor-relative containment 时使用 `LocalRootAtomicWriter`。Unix 新目标从 `0600` 开始，之后仍受更严格的进程 umask 约束。
+Unix 在 `commit` 时从已打开的当前目标读取 metadata，因此 writer 开始后的变更也会被保留。任一受保护 metadata 无法读取、复制或合并时，commit 会失败，不会静默降低保护。Unix 不承诺保留 inode、hard-link identity、timestamp 或 immutable/append-only flag。最初不存在的目标使用原生 no-replace 安装，因此不会覆盖并发创建者。最终 Unix identity 检查与替换仍是分离操作；并发 writer 需要外部协调，需要 descriptor-relative containment 时使用 `rooted::Writer`。Unix 新目标从 `0600` 开始，之后仍受更严格的进程 umask 约束。
 
-streaming 内容可以使用 `LocalAtomicWriter`：
+streaming 内容可以使用 `atomic::Writer`：
 
 ```rust
 use std::io::Write;
@@ -214,27 +203,27 @@ writer.commit()?;
 文件。需要把替换限制在锚定 root 下时，使用
 `rooted::Root::begin_atomic_write`。
 当调用方需要在 installation 前失败后重试或显式 abort 时，使用
-`commit_recoverable`。它的 `LocalAtomicCommitError::into_parts` 返回结构化
+`commit_recoverable`。它的 `atomic::CommitError::into_parts` 返回结构化
 错误和可选的保留 writer；installation 开始后 writer 不再可用。
-`LocalRootAtomicWriter` 提供相同的恢复 API。
-`atomic_write_with` 会把同一个受保护 writer 临时借给 callback。callback
+`rooted::Writer` 提供相同的恢复 API。
+`atomic::write_with` 会把同一个受保护 writer 临时借给 callback。callback
 可以写入 staging 内容，但不能 clone、保留、seek，也不能访问底层文件或 raw
 handle，因此 callback 返回后无法继续修改已提交 inode。
 
-在 Unix 上，`LocalAtomicWriteOptions::with_open_retry_timeout` 可限制活动
+在 Unix 上，`atomic::Options::with_open_retry_timeout` 可限制活动
 file lease 导致目标的 nonblocking open 返回 `WouldBlock` 时的重试时间。
 默认无限等待；`Duration::ZERO` 在第一次冲突后返回 `TimedOut`。path-based
 和 rooted writer 共用这个 options 类型；one-shot facade 有意保留无限等待的
 默认值。其他平台行为不变。
 
-失败时返回 `LocalAtomicWriteError`，其中包含失败阶段、临时路径、原始 I/O source error、`LocalAtomicDestinationState`，以及删除未提交 staging file 时产生的 secondary cleanup error。`Unchanged` 表示目标未变，`Replaced` 表示目标包含 staging 内容，`Missing` 表示目标已不存在，`Indeterminate` 要求恢复前同时检查目标与 staging。只有 `Unchanged` 会自动尝试清理 staging；其他状态保留仍存在的 staging entry，但成功移动后诊断用 staging path 可能已经不存在。
-如果 `atomic_write_with` callback panic，会先关闭并 best-effort 删除未提交临时文件，再继续传播 panic。清理失败不能替换原 panic，因此这种情况下 staging path 可能残留。
+失败时返回 `atomic::Error`，其中包含失败阶段、临时路径、原始 I/O source error、`atomic::DestinationState`，以及删除未提交 staging file 时产生的 secondary cleanup error。`Unchanged` 表示目标未变，`Replaced` 表示目标包含 staging 内容，`Missing` 表示目标已不存在，`Indeterminate` 要求恢复前同时检查目标与 staging。只有 `Unchanged` 会自动尝试清理 staging；其他状态保留仍存在的 staging entry，但成功移动后诊断用 staging path 可能已经不存在。
+如果 `atomic::write_with` callback panic，会先关闭并 best-effort 删除未提交临时文件，再继续传播 panic。清理失败不能替换原 panic，因此这种情况下 staging path 可能残留。
 
 该操作不是多文件事务，也不协调并发写入。如果多个进程或线程可能同时替换同一路径，需要使用外部锁。
 
 ### 递归目录复制
 
-`LocalFiles::copy_dir_all_with` 复制目录树并返回 `LocalCopyDirStats`：
+`copy::directory` 复制目录树并返回 `copy::Statistics`：
 
 | 字段 | 含义 |
 | --- | --- |
@@ -243,7 +232,7 @@ file lease 导致目标的 nonblocking open 返回 `WouldBlock` 时的重试时�
 | `bytes` | 从普通文件复制的字节数。 |
 | `skipped` | 因冲突策略而跳过的已有目标文件数量。 |
 
-`LocalCopyDirOptions::default()` 是有意保守的默认值：`conflict` 和 `type_conflict` 均为 `Fail`，不跟随 symbolic link，也不保留源权限。通过 `LocalCopyConflictPolicy` 显式选择 `Overwrite` 或 `Skip`；文件/目录类型替换则必须单独设置 `LocalCopyTypeConflictPolicy::Replace`。复制失败返回 `LocalCopyDirError`，其中包含路径、失败阶段、部分统计、可选 staging path、可选次级 cleanup error 和原始 I/O source error。
+`copy::Options::default()` 是有意保守的默认值：`conflict` 和 `type_conflict` 均为 `Fail`，不跟随 symbolic link，也不保留源权限。通过 `copy::ConflictPolicy` 显式选择 `Overwrite` 或 `Skip`；文件/目录类型替换则必须单独设置 `copy::TypeConflictPolicy::Replace`。复制失败返回 `copy::Error`，其中包含路径、失败阶段、部分统计、可选 staging path、可选次级 cleanup error 和原始 I/O source error。
 
 `Fail` 和 `Skip` 文件提交需要原生 no-replace 支持，因此在 Linux、macOS、Windows 之外返回 `Unsupported`。`Overwrite` 使用普通替换原语，不受该限制。
 
@@ -259,12 +248,11 @@ nonblocking source open 冲突时的重试。它与 atomic writer 一样默认�
 
 ### 文件名 Helper
 
-`LocalFilenames` 提供随机和 lexical 文件名工具：
+`path` 模块提供随机和 lexical 文件名工具：
 
 | 方法组 | 用途 |
 | --- | --- |
-| `random`、`random_with` | 构造随机文件名 component，生成失败时 panic。 |
-| `try_random`、`try_random_with` | 通过 `std::io::Result` 构造随机文件名 component。 |
+| `random_file_name`、`random_file_name_with` | 通过 `std::io::Result` 构造随机文件名 component。 |
 | `validate_portable_file_name` | 校验保守 portable 的单 component 文件名。 |
 | `file_name`、`file_stem`、`file_prefix` | 按 `Path` 语义提取 UTF-8 path component。 |
 | `extension`、`dot_extension`、`has_extension` | 检查最终扩展名。 |

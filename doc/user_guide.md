@@ -21,7 +21,7 @@ Good fits:
 - Keeping or persisting temporary entries after successful work.
 - Rejecting accidental overwrite when persisting a temporary file.
 - Replacing existing files only when
-  `LocalPersistOptions::new().with_overwrite()`
+  `temp::PersistOptions::new().with_overwrite()`
   is explicit.
 - Creating parent directories before opening, writing, or persisting files.
 - Atomically replacing a complete file through a same-directory temporary file.
@@ -71,9 +71,6 @@ use qubit_local_files::{
 
 The crate currently does not expose a prelude. Keeping imports explicit makes
 filesystem side effects and overwrite policies visible at call sites.
-Top-level `Local*` types and `LocalFiles` remain available for compatibility,
-buffered I/O, and existing one-shot helpers, but new integrations should begin
-with the focused modules.
 
 ## Read and Write Options
 
@@ -85,7 +82,8 @@ Normal file opening is controlled by explicit option structs:
 | `write::OpenOptions` | `create_parents`, `mode`, `open_retry_timeout` | Controls parent creation, native write mode, and the optional Unix lease-conflict timeout. |
 | `write::Mode` | enum variants | Selects how the target is opened for writing. |
 
-`read::open` and `write::open` return unbuffered `std::fs::File` handles.
+`read::open`, `read::open_with`, and `write::open` return unbuffered
+`std::fs::File` handles.
 Both helpers return only regular files. They reject directories, FIFOs,
 sockets, and other special filesystem resources; Unix FIFO rejection does not
 wait for a peer.
@@ -95,18 +93,9 @@ On Unix, a file lease can make the defensive nonblocking open return
 blocking-open behavior. `with_open_retry_timeout` bounds that wait; the
 default is unbounded and `Duration::ZERO` returns `TimedOut` after the first
 lease-conflicting attempt. Other open errors are never retried. The option
-applies consistently to focused and compatibility file-open helpers, not to
-later reads or writes.
-`LocalFileWriter::sync_all` and `LocalFileWriter::sync_data` flush any buffered
-bytes before synchronizing the underlying file, which is useful for append logs
-or other normal write handles that do not need whole-file atomic replacement.
-Seeking a writer does not disable append-mode semantics.
-
-`FileBuffering::buffered_with_capacity`,
-`FileReadOptions::buffered_with_capacity`, and
-`FileWriteOptions::buffered_with_capacity` return `std::io::Result` and reject
-zero. A successfully constructed custom capacity is stored as `NonZeroUsize`,
-so file-opening methods cannot receive an invalid zero-capacity policy.
+applies to configured focused file-open helpers, not to later reads or writes.
+Use `read::open` for the default policy and `read::open_with` when a bounded
+retry timeout is required.
 
 Write modes:
 
@@ -118,20 +107,20 @@ Write modes:
 | `AppendExisting` | Appends to an existing file and fails when it is missing. |
 | `AppendOrCreate` | Appends to an existing file or creates it when missing. |
 
-`LocalFiles::atomic_write` is intentionally separate from `FileWriteOptions`.
+`atomic::write` is intentionally separate from `write::OpenOptions`.
 It performs a complete durable replacement protocol rather than returning a
 normal write handle.
 
 ## Temporary Directories
 
-Use `LocalTempDir` when a temporary directory should normally be cleaned up
+Use `temp::TempDir` when a temporary directory should normally be cleaned up
 automatically. The directory is created immediately and removed recursively when
 the guard is dropped.
 
 ```rust
-use qubit_local_files::LocalTempDir;
+use qubit_local_files::temp;
 
-let dir = LocalTempDir::with_prefix("qubit-local-files-work-")?;
+let dir = temp::TempDir::with_prefix("qubit-local-files-work-")?;
 std::fs::write(dir.path().join("scratch.txt"), b"scratch")?;
 
 # Ok::<(), std::io::Error>(())
@@ -141,9 +130,9 @@ Creation methods:
 
 | Method | Purpose |
 | --- | --- |
-| `LocalTempDir::new` | Creates a temporary directory in `std::env::temp_dir()` with the default prefix. |
-| `LocalTempDir::with_prefix` | Creates a temporary directory in `std::env::temp_dir()` with a custom prefix. |
-| `LocalTempDir::in_dir` | Creates a temporary directory under a caller-provided parent and retry limit. |
+| `temp::TempDir::new` | Creates a temporary directory in `std::env::temp_dir()` with the default prefix. |
+| `temp::TempDir::with_prefix` | Creates a temporary directory in `std::env::temp_dir()` with a custom prefix. |
+| `temp::TempDir::in_dir` | Creates a temporary directory under a caller-provided parent and retry limit. |
 
 Ownership methods:
 
@@ -155,15 +144,16 @@ Ownership methods:
 | `list` | Lists direct child entries. |
 | `child_path` | Lexically validates a relative child and returns its absolute joined path without inspecting the filesystem. |
 | `ensure_child_dir` | Creates a child directory and missing parents, like `mkdir -p`, and returns its absolute path. |
-| `open_child_reader` | Opens a child file for reading with `FileReadOptions`. |
-| `open_child_writer` | Opens a child file for writing with `FileWriteOptions`. |
+| `open_child_reader` | Opens a child file for reading with default options. |
+| `open_child_reader_with` | Opens a child file for reading with `read::OpenOptions`. |
+| `open_child_writer` | Opens a child file for writing with `write::OpenOptions`. |
 | `cleanup` | Removes the directory immediately and disables later drop cleanup. |
 | `keep` | Consumes the guard, leaves the directory in place, and returns its absolute path. |
 | `persist` | Moves the directory to a final path, returns its absolute path, and disables automatic cleanup. |
 
-`LocalTempDir::persist` creates missing parent directories for the target and
+`temp::TempDir::persist` creates missing parent directories for the target and
 rejects an existing target. It does not provide an overwrite option. If the move
-fails, `LocalPersistError` returns ownership of the guard so callers can retry,
+fails, `temp::PersistError` returns ownership of the guard so callers can retry,
 keep, inspect, or explicitly clean up the directory. It also reports the
 failure stage, caller-requested target, and resolved absolute target when
 resolution succeeded.
@@ -187,12 +177,12 @@ These checks assume an untrusted actor is not replacing path components between
 validation and use. The child helpers are convenience containment checks, not a
 capability-based sandbox boundary for concurrent filesystem mutation.
 
-Cleanup in `Drop` is best-effort. If deletion fails, `LocalTempDir` logs a
+Cleanup in `Drop` is best-effort. If deletion fails, `temp::TempDir` logs a
 warning through the `log` facade and does not panic.
 
 ## Temporary Files
 
-Use `LocalTempFile` when you need a unique temporary file path with an owned
+Use `temp::TempFile` when you need a unique temporary file path with an owned
 file handle. The file is removed on drop unless it is kept or persisted. On
 Unix, temporary files are created with mode `0600` and temporary directories
 with mode `0700`, before applying the process umask.
@@ -200,9 +190,9 @@ with mode `0700`, before applying the process umask.
 ```rust
 use std::io::Write;
 
-use qubit_local_files::LocalTempFile;
+use qubit_local_files::temp;
 
-let mut file = LocalTempFile::with_affixes("qubit-local-files-", ".txt")?;
+let mut file = temp::TempFile::with_affixes("qubit-local-files-", ".txt")?;
 file.write_all(b"temporary payload\n")?;
 file.close();
 
@@ -213,11 +203,11 @@ Creation methods:
 
 | Method | Purpose |
 | --- | --- |
-| `LocalTempFile::new` | Creates a temporary file in `std::env::temp_dir()` with the default prefix. |
-| `LocalTempFile::with_prefix` | Creates a temporary file in `std::env::temp_dir()` with a custom prefix. |
-| `LocalTempFile::with_suffix` | Creates a temporary file in `std::env::temp_dir()` with the default prefix and a custom suffix. |
-| `LocalTempFile::with_affixes` | Creates a temporary file in `std::env::temp_dir()` with a custom prefix and suffix. |
-| `LocalTempFile::in_dir` | Creates a temporary file under a caller-provided parent and retry limit. |
+| `temp::TempFile::new` | Creates a temporary file in `std::env::temp_dir()` with the default prefix. |
+| `temp::TempFile::with_prefix` | Creates a temporary file in `std::env::temp_dir()` with a custom prefix. |
+| `temp::TempFile::with_suffix` | Creates a temporary file in `std::env::temp_dir()` with the default prefix and a custom suffix. |
+| `temp::TempFile::with_affixes` | Creates a temporary file in `std::env::temp_dir()` with a custom prefix and suffix. |
+| `temp::TempFile::in_dir` | Creates a temporary file under a caller-provided parent and retry limit. |
 
 Handle and ownership methods:
 
@@ -232,18 +222,17 @@ Handle and ownership methods:
 | `cleanup` | Removes the file immediately and disables later drop cleanup. |
 | `keep` | Closes and consumes the guard, leaving the file in place and returning its absolute path. |
 | `persist` | Moves the file without overwriting and returns the absolute final path. |
-| `persist_with` | Moves the file using `LocalPersistOptions` and returns the absolute final path. |
+| `persist_with` | Moves the file using `temp::PersistOptions` and returns the absolute final path. |
 
-`LocalTempFile` intentionally does not provide read helpers. A temporary file is
+`temp::TempFile` intentionally does not provide read helpers. A temporary file is
 normally written, closed, then persisted. If you need to inspect its contents,
-call `close` and then read `path()` through `LocalFiles::open_reader` or
-`std::fs`.
+call `close` and then read `path()` through `read::open` or `std::fs`.
 
-`LocalTempFile::persist` closes the file, creates missing parent
+`temp::TempFile::persist` closes the file, creates missing parent
 directories for the target, and rejects existing targets by using a no-clobber
 move operation. It intentionally does not rely on a separate metadata precheck.
 This avoids a time-of-check/time-of-use overwrite race on supported platforms.
-On failure it returns `LocalPersistError<LocalTempFile>`, retaining the guard,
+On failure it returns `temp::PersistError<temp::TempFile>`, retaining the guard,
 native I/O error, `ResolveTarget` / `PrepareParent` / `InstallDestination`
 stage, requested target, and optional resolved absolute target.
 
@@ -251,7 +240,7 @@ File persistence uses a native move/rename without a copy-and-delete fallback,
 so cross-filesystem moves may fail with `EXDEV` on Unix or an equivalent
 platform error. With overwrite enabled, the resulting file keeps the temporary
 file's metadata rather than the replaced target's metadata. Use
-`LocalFiles::atomic_write` when supported platform-native metadata must be
+`atomic::write` when supported platform-native metadata must be
 strictly preserved while replacing contents.
 
 Use `persist_with` only when the overwrite policy should differ:
@@ -259,16 +248,16 @@ Use `persist_with` only when the overwrite policy should differ:
 ```rust
 use std::io::Write;
 
-use qubit_local_files::{LocalPersistOptions, LocalTempDir, LocalTempFile};
+use qubit_local_files::temp;
 
-let dir = LocalTempDir::with_prefix("qubit-local-files-persist-")?;
+let dir = temp::TempDir::with_prefix("qubit-local-files-persist-")?;
 let target = dir.path().join("result.txt");
 std::fs::write(&target, "old")?;
 
-let mut file = LocalTempFile::with_affixes("qubit-local-files-", ".txt")?;
+let mut file = temp::TempFile::with_affixes("qubit-local-files-", ".txt")?;
 file.write_all(b"new\n")?;
 
-file.persist_with(&target, LocalPersistOptions::new().with_overwrite())?;
+file.persist_with(&target, temp::PersistOptions::new().with_overwrite())?;
 
 assert_eq!("new\n", std::fs::read_to_string(&target)?);
 
@@ -276,7 +265,7 @@ assert_eq!("new\n", std::fs::read_to_string(&target)?);
 ```
 
 If a target file must never be observed half-written, prefer
-`LocalFiles::atomic_write` for the final file replacement.
+`atomic::write` for the final file replacement.
 
 ## No-Replace Platform Support
 
@@ -290,10 +279,10 @@ hard-link or copy-and-delete emulation. Its support matrix is:
 | Temp file overwrite persist | Supported | Supported | Supported | Uses ordinary replacement support |
 | Recursive copy `Overwrite` | Supported | Supported | Supported | Uses ordinary replacement support |
 
-On an unsupported target, `LocalTempFile::persist`, no-overwrite
-`LocalTempFile::persist_with`, and `LocalTempDir::persist` return
+On an unsupported target, `temp::TempFile::persist`, no-overwrite
+`temp::TempFile::persist_with`, and `temp::TempDir::persist` return
 `ErrorKind::Unsupported` while retaining the temporary resource in
-`LocalPersistError`. Recursive copy reports `LocalCopyDirStage::CommitFile` and
+`temp::PersistError`. Recursive copy reports `copy::Stage::CommitFile` and
 `ErrorKind::Unsupported` for `Fail` or `Skip`. It may already have created
 destination directories; recursive copy does not provide transaction-wide
 rollback. Overwrite operations use the ordinary replacement primitive and are
@@ -324,7 +313,7 @@ boundaries when another actor can mutate the namespace concurrently.
 
 ## Atomic Writes
 
-`LocalFiles::atomic_write` writes bytes to a temporary file in the same parent
+`atomic::write` writes bytes to a temporary file in the same parent
 directory, flushes and syncs that temporary file, replaces the destination, and
 syncs the destination parent plus the parents of directory entries created by
 the operation, from deepest to shallowest, when supported. The destination must
@@ -354,22 +343,22 @@ assert_eq!(
 # Ok::<(), Box<dyn std::error::Error>>(())
 ```
 
-Use `LocalFiles::atomic_write_with` when content generation should run inside a
-guarded atomic-write callback. The callback receives `LocalAtomicWriter`, which
+Use `atomic::write_with` when content generation should run inside a
+guarded atomic-write callback. The callback receives `atomic::Writer`, which
 supports `Write` but cannot clone or retain the underlying file handle:
 
 ```rust
 use std::io::Write;
 
 use qubit_local_files::{
-    LocalFiles,
-    LocalTempDir,
+    atomic,
+    temp::TempDir,
 };
 
-let dir = LocalTempDir::with_prefix("qubit-local-files-json-")?;
+let dir = TempDir::with_prefix("qubit-local-files-json-")?;
 let path = dir.path().join("state.json");
 
-LocalFiles::atomic_write_with(&path, |writer| {
+atomic::write_with(&path, |writer| {
     writeln!(writer, "{{\"complete\":true}}")
 })?;
 
@@ -378,7 +367,7 @@ assert_eq!("{\"complete\":true}\n", std::fs::read_to_string(&path)?);
 # Ok::<(), Box<dyn std::error::Error>>(())
 ```
 
-Use `LocalAtomicWriter` when content should be streamed across multiple calls:
+Use `atomic::Writer` when content should be streamed across multiple calls:
 
 ```rust
 use std::io::Write;
@@ -399,7 +388,7 @@ writer.commit()?;
 the destination. Calling `abort` or dropping the writer preserves the original
 destination and cleans up the staging file. The API remains synchronous.
 Use `commit_recoverable` when a caller must retry or explicitly abort after a
-pre-installation failure. Its `LocalAtomicCommitError::into_parts` returns the
+pre-installation failure. Its `atomic::CommitError::into_parts` returns the
 structured failure and an optional retained writer; the writer is unavailable
 once installation has begun. `rooted::Writer` exposes the same recovery
 contract through `rooted::Root::begin_atomic_write`.
@@ -407,7 +396,7 @@ contract through `rooted::Root::begin_atomic_write`.
 Since `0.5.0`, configuration fields are private. Callers must use the existing
 getters, constructors, and builders.
 
-On Unix, `LocalAtomicWriteOptions::with_open_retry_timeout` limits only retries
+On Unix, `atomic::Options::with_open_retry_timeout` limits only retries
 caused by an active file lease making the nonblocking destination open return
 `WouldBlock`. The default `None` waits without a deadline, while
 `Duration::ZERO` returns `TimedOut` after the first conflicting attempt.
@@ -463,33 +452,33 @@ Important semantics:
 - If replacement succeeds but synchronizing the destination parent or a parent
   of a newly created directory entry fails, the method may return an error after
   the destination already contains the new contents.
-- Errors are reported as `LocalAtomicWriteError`, which exposes the failed
+- Errors are reported as `atomic::Error`, which exposes the failed
   stage, temporary path, native I/O source, destination state, and any secondary
   staging cleanup error. `Unchanged`, `Replaced`, `Missing`, and `Indeterminate`
   distinguish recovery actions. Cleanup is automatic only for `Unchanged`;
   other outcomes retain any still-existing staging entry.
 - The final destination inspection and replacement are separate path-based
-  operations. Use `LocalRootAtomicWriter` when containment must resist
+  operations. Use `rooted::Writer` when containment must resist
   concurrent namespace replacement.
 - The operation is not a multi-file transaction and does not coordinate
   concurrent writers.
 
 ## File and Directory Helpers
 
-`LocalFiles` provides small local filesystem helpers:
+Focused modules provide small local filesystem helpers:
 
 | Method | Behavior |
 | --- | --- |
-| `exists` | Checks whether a path exists without swallowing inspection errors. |
-| `metadata` | Reads path metadata with `std::fs::metadata`. |
-| `list` | Lists direct entries of a directory. |
-| `open_reader` | Opens a regular file as `LocalFileReader` with `FileReadOptions`; rejects directories and special resources. |
-| `open_writer` | Opens or creates a regular file as `LocalFileWriter` with `FileWriteOptions`; rejects directories and special resources. |
-| `ensure_dir` | Creates a directory and missing ancestors. |
-| `ensure_parent` | Creates missing parent directories for a file path. Parentless paths are accepted. |
-| `dir_size` | Sums regular-file byte lengths below a directory without following symbolic links. |
-| `clean_dir` | Removes all children while keeping the directory itself. |
-| `remove_any` | Removes a file, directory tree, or symbolic link. |
+| `metadata::exists` | Checks whether a path exists without swallowing inspection errors. |
+| `metadata::read` | Reads path metadata with `std::fs::metadata`. |
+| `directory::read` | Lists direct entries of a directory. |
+| `read::open` / `read::open_with` | Opens a regular file for reading; rejects directories and special resources. |
+| `write::open` | Opens or creates a regular file with explicit options. |
+| `directory::create_all` | Creates a directory and missing ancestors. |
+| `directory::create_parent` | Creates missing parent directories for a file path. |
+| `directory::size` | Sums regular-file byte lengths without following symbolic links. |
+| `directory::clear` | Removes all children while keeping the directory itself. |
+| `remove::any` | Removes a file, directory tree, or symbolic link. |
 
 Example:
 
@@ -497,61 +486,58 @@ Example:
 use std::io::Write;
 
 use qubit_local_files::{
-    FileReadOptions,
-    FileWriteMode,
-    FileWriteOptions,
-    LocalFiles,
-    LocalTempDir,
+    directory,
+    read,
+    temp::TempDir,
+    write,
 };
 
-let dir = LocalTempDir::with_prefix("qubit-local-files-helpers-")?;
+let dir = TempDir::with_prefix("qubit-local-files-helpers-")?;
 let path = dir.path().join("nested").join("data.txt");
 
-let mut writer = LocalFiles::open_writer(
+let mut writer = write::open(
     &path,
-    FileWriteOptions::new(FileWriteMode::CreateOrTruncate)
-        .with_parent()
-        .buffered(),
+    &write::OpenOptions::new(write::Mode::CreateOrTruncate).with_parents(),
 )?;
 writer.write_all(b"payload")?;
-writer.close()?;
+drop(writer);
 
-let mut reader = LocalFiles::open_reader(&path, FileReadOptions::buffered())?;
+let mut reader = read::open(&path)?;
 let mut payload = String::new();
 std::io::Read::read_to_string(&mut reader, &mut payload)?;
 assert_eq!("payload", payload);
 
-assert_eq!(7, LocalFiles::dir_size(dir.path())?);
-LocalFiles::clean_dir(dir.path())?;
-assert_eq!(0, LocalFiles::dir_size(dir.path())?);
+assert_eq!(7, directory::size(dir.path())?);
+directory::clear(dir.path())?;
+assert_eq!(0, directory::size(dir.path())?);
 
 # Ok::<(), std::io::Error>(())
 ```
 
-`dir_size` and `clean_dir` require the root path to be a directory. Symbolic
-links are not followed. `remove_any` removes symbolic links as links, including
+`directory::size` and `directory::clear` require the root path to be a
+directory. Symbolic links are not followed. `remove::any` removes symbolic links as links, including
 links that point to directories.
 
 ## Recursive Directory Copy
 
-Use `LocalFiles::copy_dir_all_with` when a directory tree must be copied with an
+Use `copy::directory` when a directory tree must be copied with an
 explicit conflict and symlink policy.
 
 ```rust
 use qubit_local_files::{
-    LocalCopyDirOptions,
-    LocalFiles,
-    LocalTempDir,
+    copy,
+    directory,
+    temp,
 };
 
-let dir = LocalTempDir::with_prefix("qubit-local-files-copy-")?;
+let dir = temp::TempDir::with_prefix("qubit-local-files-copy-")?;
 let src = dir.path().join("src");
 let dst = dir.path().join("dst");
 
-LocalFiles::ensure_dir(&src)?;
+directory::create_all(&src)?;
 std::fs::write(src.join("data.txt"), b"data")?;
 
-let stats = LocalFiles::copy_dir_all_with(&src, &dst, LocalCopyDirOptions::default())?;
+let stats = copy::directory(&src, &dst, copy::Options::default())?;
 
 assert_eq!(1, stats.files);
 assert_eq!(1, stats.directories);
@@ -592,7 +578,7 @@ The copy operation rejects destinations inside the source tree, because copying
 a directory into itself can recurse indefinitely. When symlink following is
 enabled, directory cycles introduced by followed symlinks are also rejected.
 Opened source entries that are not regular files report
-`std::io::ErrorKind::InvalidInput` through `LocalCopyDirError`; an unsupported
+`std::io::ErrorKind::InvalidInput` through `copy::Error`; an unsupported
 target reached through an explicitly followed symbolic link reports
 `ErrorKind::Unsupported`. The structured error also exposes the failed stage, source
 and destination paths, partial statistics, optional staging path, optional
@@ -612,25 +598,25 @@ mutate either tree concurrently.
 
 ## Filename Helpers
 
-`LocalFilenames` contains lexical helpers that do not touch the filesystem.
+The `path` module contains lexical helpers that do not touch the filesystem.
 Methods that return filename data return UTF-8 strings (`&str` or `String`)
 instead of `OsStr`; invalid UTF-8 path components are reported as `None`.
 
 ```rust
 use std::path::Path;
 
-use qubit_local_files::LocalFilenames;
+use qubit_local_files::path;
 
 let path = Path::new("/tmp/archive.tar.gz");
 
-assert_eq!(Some("archive.tar"), LocalFilenames::file_stem(path));
-assert_eq!(Some("archive"), LocalFilenames::file_prefix(path));
-assert_eq!(Some("gz"), LocalFilenames::extension(path));
-assert_eq!(Some(".gz".to_owned()), LocalFilenames::dot_extension(path));
-assert!(LocalFilenames::has_extension(path, ".gz"));
-assert!(LocalFilenames::has_extension_ignore_ascii_case(path, "GZ"));
+assert_eq!(Some("archive.tar"), path::file_stem(path));
+assert_eq!(Some("archive"), path::file_prefix(path));
+assert_eq!(Some("gz"), path::extension(path));
+assert_eq!(Some(".gz".to_owned()), path::dot_extension(path));
+assert!(path::has_extension(path, ".gz"));
+assert!(path::has_extension_ignore_ascii_case(path, "GZ"));
 
-let name = LocalFilenames::try_random_with(Some("upload-"), Some(".tmp"))?;
+let name = path::random_file_name_with(Some("upload-"), Some(".tmp"))?;
 assert!(name.starts_with("upload-"));
 assert!(name.ends_with(".tmp"));
 
@@ -643,11 +629,11 @@ conservative single path component across common platforms:
 ```rust
 use std::io::ErrorKind;
 
-use qubit_local_files::LocalFilenames;
+use qubit_local_files::path;
 
-LocalFilenames::validate_portable_file_name("report.csv")?;
+path::validate_portable_file_name("report.csv")?;
 
-let error = LocalFilenames::validate_portable_file_name("CON.txt")
+let error = path::validate_portable_file_name("CON.txt")
     .expect_err("Windows reserved names are rejected");
 assert_eq!(ErrorKind::InvalidInput, error.kind());
 
@@ -663,12 +649,12 @@ documented in [Microsoft's file-naming rules](https://learn.microsoft.com/en-us/
 For strings that are not already `Path` values, use the string helpers:
 
 ```rust
-use qubit_local_files::LocalFilenames;
+use qubit_local_files::path;
 
-assert_eq!("file.txt", LocalFilenames::file_name_from_path(r"C:\tmp\file.txt"));
+assert_eq!("file.txt", path::file_name_from_path(r"C:\tmp\file.txt"));
 assert_eq!(
     "report 2026.csv",
-    LocalFilenames::file_name_from_url("https://example.test/files/report%202026.csv?download=1"),
+    path::file_name_from_url("https://example.test/files/report%202026.csv?download=1"),
 );
 ```
 
@@ -688,28 +674,28 @@ errors carrying the additional state needed for safe recovery.
 
 Important error behavior:
 
-- `LocalPersistError` retains the temporary resource plus the persistence stage,
+- `temp::PersistError` retains the temporary resource plus the persistence stage,
   requested target, resolved target when available, and native error.
-- `LocalAtomicWriteError::destination_state()` reports `Unchanged`, `Replaced`,
+- `atomic::Error::destination_state()` reports `Unchanged`, `Replaced`,
   `Missing`, or `Indeterminate`; callers must inspect both paths for an
   indeterminate result.
 - Existing temporary-file persistence targets are rejected unless
-  `LocalPersistOptions::new().with_overwrite()` is explicit.
+  `temp::PersistOptions::new().with_overwrite()` is explicit.
 - Existing temporary-directory persistence targets are rejected.
-- Recursive copy uses an explicit `LocalCopyConflictPolicy` for existing files
-  and a separate `LocalCopyTypeConflictPolicy` for file/directory mismatches.
+- Recursive copy uses an explicit `copy::ConflictPolicy` for existing files
+  and a separate `copy::TypeConflictPolicy` for file/directory mismatches.
 - Recursive copy rejects symbolic links unless
-  `LocalCopyDirOptions::new().follow_symlinks()` is explicit.
+  `copy::Options::new().follow_symlinks()` is explicit.
 - Drop-time cleanup failures are logged through `log::warn!` and never panic.
-- `LocalTempFile::as_file`, `as_file_mut`, `Write`, and `Seek` return
+- `temp::TempFile::as_file`, `as_file_mut`, `Write`, and `Seek` return
   `ErrorKind::NotFound` after `close`.
-- `LocalTempDir` child APIs return `ErrorKind::InvalidInput` for unsafe child
+- `temp::TempDir` child APIs return `ErrorKind::InvalidInput` for unsafe child
   paths, non-file child readers, and child paths that escape the temporary
   directory through symbolic links.
 
 ## Path Lengths and Platform Limits
 
-`LocalTempFile` and `LocalTempDir` create local filesystem entries and return
+`temp::TempFile` and `temp::TempDir` create local filesystem entries and return
 operating system errors when creation fails. They do not promise that the
 resulting path is valid for every platform API. Some APIs, such as Unix domain
 sockets, have much shorter path limits than regular files. For those cases,
