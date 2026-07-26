@@ -1,0 +1,128 @@
+// =============================================================================
+//    Copyright (c) 2026 Haixing Hu.
+//
+//    SPDX-License-Identifier: Apache-2.0
+//
+//    Licensed under the Apache License, Version 2.0.
+// =============================================================================
+//! Open directory capabilities.
+
+#[cfg(unix)]
+use std::fs::File;
+use std::io::Result;
+#[cfg(not(unix))]
+use std::io::{
+    Error,
+    ErrorKind,
+};
+use std::path::{
+    Path,
+    PathBuf,
+};
+
+use crate::{
+    local,
+    read,
+    write,
+};
+
+use super::path;
+
+/// An opened directory descriptor that authorizes contained operations.
+#[must_use]
+#[derive(Debug)]
+pub struct Root {
+    /// Absolute path retained only for diagnostics.
+    path: PathBuf,
+    /// Open descriptor used as the sole descendant authority.
+    #[cfg(unix)]
+    directory: File,
+}
+
+impl Root {
+    /// Opens and anchors a local filesystem root.
+    ///
+    /// # Errors
+    /// Returns an I/O error when the directory cannot be securely opened.
+    pub fn open(path: &Path) -> Result<Self> {
+        let path = std::path::absolute(path)?;
+        #[cfg(unix)]
+        {
+            let directory = local::open_root_directory(&path)?;
+            Ok(Self { path, directory })
+        }
+        #[cfg(not(unix))]
+        {
+            let _ = path;
+            Err(Error::new(
+                ErrorKind::Unsupported,
+                "descriptor-relative local roots are unsupported on this platform",
+            ))
+        }
+    }
+
+    /// Returns the diagnostic path captured when the root was opened.
+    #[must_use]
+    #[inline(always)]
+    pub fn path(&self) -> &Path {
+        &self.path
+    }
+
+    /// Opens a regular native file for reading beneath this root.
+    ///
+    /// # Errors
+    /// Returns an I/O error when traversal escapes through a link or the file
+    /// cannot be opened.
+    pub fn open_reader(
+        &self,
+        path: &path::Path,
+        options: &read::OpenOptions,
+    ) -> Result<File> {
+        #[cfg(unix)]
+        {
+            local::open_rooted_native_reader(
+                &self.directory,
+                &self.path,
+                path,
+                options,
+            )
+        }
+        #[cfg(not(unix))]
+        {
+            let _ = (path, options);
+            Err(Error::new(
+                ErrorKind::Unsupported,
+                "descriptor-relative local roots are unsupported on this platform",
+            ))
+        }
+    }
+
+    /// Opens a regular native file for writing beneath this root.
+    ///
+    /// # Errors
+    /// Returns an I/O error when traversal escapes through a link or the file
+    /// cannot be opened with the requested mode.
+    pub fn open_writer(
+        &self,
+        path: &path::Path,
+        options: &write::OpenOptions,
+    ) -> Result<File> {
+        #[cfg(unix)]
+        {
+            local::open_rooted_native_writer(
+                &self.directory,
+                &self.path,
+                path,
+                options,
+            )
+        }
+        #[cfg(not(unix))]
+        {
+            let _ = (path, options);
+            Err(Error::new(
+                ErrorKind::Unsupported,
+                "descriptor-relative local roots are unsupported on this platform",
+            ))
+        }
+    }
+}

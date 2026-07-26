@@ -15,7 +15,18 @@
 //! uses strict platform-native metadata preservation and reports an explicit
 //! post-failure destination state.
 
+pub mod atomic;
+pub mod copy;
+pub mod directory;
 mod local;
+pub mod metadata;
+pub mod path;
+pub mod read;
+pub mod remove;
+pub mod rename;
+pub mod rooted;
+pub mod temp;
+pub mod write;
 
 pub use local::{
     FileBuffering,

@@ -70,6 +70,8 @@ pub(crate) use atomic_namespace_race::verify_atomic_destination_identity;
 pub(crate) use atomic_staging_state::AtomicStagingState;
 pub(crate) use copy_dir::copy_dir_all_with_paths;
 pub(crate) use file_io::{
+    open_native_reader_path,
+    open_native_writer_path,
     open_reader_path,
     open_writer_path,
 };
@@ -120,6 +122,8 @@ pub(super) use rooted_file_io::open_rooted_parent;
 #[cfg(unix)]
 pub(crate) use rooted_file_io::{
     open_root_directory,
+    open_rooted_native_reader,
+    open_rooted_native_writer,
     open_rooted_reader,
     open_rooted_writer,
 };

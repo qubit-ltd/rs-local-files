@@ -6,7 +6,16 @@
 //    Licensed under the Apache License, Version 2.0.
 // =============================================================================
 
+mod atomic_tests;
+mod copy_tests;
+mod directory_tests;
 mod local;
+mod metadata_tests;
+mod native_module_tests;
+mod path;
+mod read;
+mod rooted;
+mod write;
 
 /// Verifies that project wrappers do not hide host-compiled source files from
 /// per-source coverage thresholds.
@@ -27,3 +36,6 @@ fn test_coverage_wrappers_do_not_define_project_source_exclusions() {
         );
     }
 }
+mod remove_tests;
+mod rename_tests;
+mod temp_tests;

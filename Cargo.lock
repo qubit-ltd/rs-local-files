@@ -245,6 +245,7 @@ dependencies = [
  "libc",
  "log",
  "proptest",
+ "tempfile",
  "windows-sys",
 ]
 

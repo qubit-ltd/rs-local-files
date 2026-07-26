@@ -37,6 +37,24 @@ mod local_root_atomic_writer;
 mod local_temp_dir;
 mod local_temp_file;
 
+pub(crate) use internal::{
+    clean_dir_path,
+    copy_dir_all_with_paths,
+    dir_size_path,
+    ensure_dir_path,
+    ensure_parent_path,
+    open_native_reader_path,
+    open_native_writer_path,
+    remove_any_path,
+    validate_portable_file_name_impl,
+};
+#[cfg(unix)]
+pub(crate) use internal::{
+    open_root_directory,
+    open_rooted_native_reader,
+    open_rooted_native_writer,
+};
+
 pub use file_buffering::FileBuffering;
 pub use file_read_options::FileReadOptions;
 pub use file_write_mode::FileWriteMode;

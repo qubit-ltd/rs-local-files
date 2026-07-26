@@ -30,6 +30,10 @@ use crate::{
     LocalFileReader,
     LocalFileWriter,
 };
+use crate::{
+    read,
+    write,
+};
 
 use super::io_result_context::with_path_context;
 use super::path_operations::{
@@ -204,6 +208,56 @@ fn prepare_opened_regular_file(
     )
 }
 
+/// Opens and validates one unbuffered regular file for reading.
+///
+/// # Parameters
+/// - `path`: File path to inspect and open.
+/// - `open_retry_timeout`: Optional Unix lease-conflict retry timeout.
+///
+/// # Returns
+/// The validated standard-library file handle.
+///
+/// # Errors
+/// Returns a contextual I/O error when the path cannot be inspected or opened,
+/// or when the opened object is not a regular file.
+fn open_reader_file(
+    path: &Path,
+    open_retry_timeout: Option<Duration>,
+) -> Result<fs::File> {
+    reject_existing_non_file(path)?;
+    let mut open_options = OpenOptions::new();
+    open_options.read(true);
+    configure_nonblocking_open(&mut open_options);
+    let file = open_configured_file(&open_options, path, open_retry_timeout)
+        .map_err(|error| add_path_context(error, "open file reader", path))?;
+    prepare_opened_regular_file(
+        &file,
+        "inspect opened file reader",
+        "restore blocking file reader",
+        path,
+    )?;
+    Ok(file)
+}
+
+/// Opens an unbuffered regular file through the native read API.
+///
+/// # Parameters
+/// - `path`: File path to inspect and open.
+/// - `options`: Native read-open options.
+///
+/// # Returns
+/// The validated standard-library file handle.
+///
+/// # Errors
+/// Returns a contextual I/O error when the path cannot be inspected or opened,
+/// or when the opened object is not a regular file.
+pub(crate) fn open_native_reader_path(
+    path: &Path,
+    options: &read::OpenOptions,
+) -> Result<fs::File> {
+    open_reader_file(path, Some(options.open_retry_timeout()))
+}
+
 /// Opens a file reader with the supplied options.
 ///
 /// # Parameters
@@ -220,26 +274,102 @@ pub(crate) fn open_reader_path(
     path: &Path,
     options: FileReadOptions,
 ) -> Result<LocalFileReader> {
-    reject_existing_non_file(path)?;
-    let mut open_options = OpenOptions::new();
-    open_options.read(true);
-    // Preflight gives deterministic errors for stable special files,
-    // O_NONBLOCK closes the FIFO replacement race during open, and handle
-    // metadata verifies the object that was actually opened.
-    configure_nonblocking_open(&mut open_options);
-    let file =
-        open_configured_file(&open_options, path, options.open_retry_timeout())
-            .map_err(|error| {
-                add_path_context(error, "open file reader", path)
-            })?;
     let buffering = options.buffering();
+    open_reader_file(path, options.open_retry_timeout())
+        .map(|file| LocalFileReader::from_file(file, buffering))
+}
+
+/// Opens and validates one unbuffered regular file for writing.
+///
+/// # Parameters
+/// - `path`: File path to inspect and open.
+/// - `create_parent`: Whether missing parent directories are created.
+/// - `mode`: Native file creation and positioning mode.
+/// - `open_retry_timeout`: Optional Unix lease-conflict retry timeout.
+///
+/// # Returns
+/// The validated standard-library file handle.
+///
+/// # Errors
+/// Returns a contextual I/O error when parent creation, inspection, opening, or
+/// post-open truncation fails.
+fn open_writer_file(
+    path: &Path,
+    create_parent: bool,
+    mode: FileWriteMode,
+    open_retry_timeout: Option<Duration>,
+) -> Result<fs::File> {
+    reject_existing_non_file(path)?;
+    if create_parent {
+        ensure_parent_path(path)?;
+    }
+    let should_truncate = mode == FileWriteMode::CreateOrTruncate;
+    let mut open_options = OpenOptions::new();
+    match mode {
+        FileWriteMode::OpenExistingAtStart => {
+            open_options.write(true);
+        }
+        FileWriteMode::CreateNew => {
+            open_options.write(true).create_new(true);
+        }
+        FileWriteMode::CreateOrTruncate => {
+            open_options.write(true).create(true);
+        }
+        FileWriteMode::AppendExisting => {
+            open_options.append(true);
+        }
+        FileWriteMode::AppendOrCreate => {
+            open_options.append(true).create(true);
+        }
+    }
+    configure_nonblocking_open(&mut open_options);
+    let file = open_configured_file(&open_options, path, open_retry_timeout)
+        .map_err(|error| add_path_context(error, "open file writer", path))?;
     prepare_opened_regular_file(
         &file,
-        "inspect opened file reader",
-        "restore blocking file reader",
+        "inspect opened file writer",
+        "restore blocking file writer",
         path,
+    )?;
+    if should_truncate {
+        with_path_context(
+            file.set_len(0),
+            "truncate opened file writer",
+            path,
+        )?;
+    }
+    Ok(file)
+}
+
+/// Opens an unbuffered regular file through the native write API.
+///
+/// # Parameters
+/// - `path`: File path to inspect and open.
+/// - `options`: Native write-open options.
+///
+/// # Returns
+/// The validated standard-library file handle.
+///
+/// # Errors
+/// Returns a contextual I/O error when parent creation, inspection, opening, or
+/// post-open truncation fails.
+pub(crate) fn open_native_writer_path(
+    path: &Path,
+    options: &write::OpenOptions,
+) -> Result<fs::File> {
+    let mode = match options.mode() {
+        write::Mode::OpenExistingAtStart => FileWriteMode::OpenExistingAtStart,
+        write::Mode::CreateNew => FileWriteMode::CreateNew,
+        write::Mode::CreateOrTruncate => FileWriteMode::CreateOrTruncate,
+        write::Mode::AppendExisting => FileWriteMode::AppendExisting,
+        write::Mode::AppendOrCreate => FileWriteMode::AppendOrCreate,
+    };
+    open_writer_file(
+        path,
+        options.creates_parents(),
+        mode,
+        Some(options.open_retry_timeout()),
     )
-    .map(|()| LocalFileReader::from_file(file, buffering))
 }
 
 /// Opens a file writer with the supplied options.
@@ -260,51 +390,12 @@ pub(crate) fn open_writer_path(
     path: &Path,
     options: FileWriteOptions,
 ) -> Result<LocalFileWriter> {
-    reject_existing_non_file(path)?;
-    if options.creates_parent() {
-        ensure_parent_path(path)?;
-    }
-    let mode = options.mode();
-    let should_truncate = mode == FileWriteMode::CreateOrTruncate;
-    let mut open_options = OpenOptions::new();
-    match mode {
-        FileWriteMode::OpenExistingAtStart => {
-            open_options.write(true);
-        }
-        FileWriteMode::CreateNew => {
-            open_options.write(true).create_new(true);
-        }
-        FileWriteMode::CreateOrTruncate => {
-            open_options.write(true).create(true);
-        }
-        FileWriteMode::AppendExisting => {
-            open_options.append(true);
-        }
-        FileWriteMode::AppendOrCreate => {
-            open_options.append(true).create(true);
-        }
-    }
-    // The same three layers used by readers keep writer creation deterministic
-    // while preventing a path swapped to a FIFO from blocking this thread.
-    configure_nonblocking_open(&mut open_options);
-    let file =
-        open_configured_file(&open_options, path, options.open_retry_timeout())
-            .map_err(|error| {
-                add_path_context(error, "open file writer", path)
-            })?;
     let buffering = options.buffering();
-    prepare_opened_regular_file(
-        &file,
-        "inspect opened file writer",
-        "restore blocking file writer",
+    open_writer_file(
         path,
-    )?;
-    if should_truncate {
-        with_path_context(
-            file.set_len(0),
-            "truncate opened file writer",
-            path,
-        )?;
-    }
-    Ok(LocalFileWriter::from_file(file, buffering))
+        options.creates_parent(),
+        options.mode(),
+        options.open_retry_timeout(),
+    )
+    .map(|file| LocalFileWriter::from_file(file, buffering))
 }

@@ -41,6 +41,10 @@ use crate::{
     LocalFileWriter,
     LocalRelativePath,
 };
+use crate::{
+    read,
+    write,
+};
 
 use super::io_result_context::with_path_context;
 use super::path_operations::add_path_context;
@@ -132,6 +136,39 @@ pub(crate) fn open_rooted_reader(
     .map(|()| LocalFileReader::from_file(file, buffering))
 }
 
+/// Opens a native file reader relative to an anchored root descriptor.
+pub(crate) fn open_rooted_native_reader(
+    root: &File,
+    diagnostic_root: &Path,
+    path: &LocalRelativePath,
+    options: &read::OpenOptions,
+) -> Result<File> {
+    let diagnostic_path = diagnostic_root.join(path.as_path());
+    let (parent, name, _parent_dirs_to_sync) = open_rooted_parent(
+        root,
+        &diagnostic_path,
+        path,
+        RootedParentMode::OpenExisting,
+    )?
+    .into_parts();
+    reject_existing_non_file(&parent, &name, &diagnostic_path)?;
+    let flags =
+        libc::O_RDONLY | libc::O_NOFOLLOW | libc::O_CLOEXEC | libc::O_NONBLOCK;
+    let file = rooted_open_result(
+        open_with_nonblocking_retry(Some(options.open_retry_timeout()), || {
+            open_file_at(&parent, &name, flags, 0)
+        }),
+        "open rooted native file reader",
+        &diagnostic_path,
+    )?;
+    prepare_opened_rooted_regular_file(
+        &file,
+        "restore blocking rooted native file reader",
+        &diagnostic_path,
+    )?;
+    Ok(file)
+}
+
 /// Opens an ordinary writer relative to an anchored root descriptor.
 ///
 /// # Parameters
@@ -204,6 +241,61 @@ pub(crate) fn open_rooted_writer(
         )?;
     }
     Ok(LocalFileWriter::from_file(file, buffering))
+}
+
+/// Opens a native file writer relative to an anchored root descriptor.
+pub(crate) fn open_rooted_native_writer(
+    root: &File,
+    diagnostic_root: &Path,
+    path: &LocalRelativePath,
+    options: &write::OpenOptions,
+) -> Result<File> {
+    let diagnostic_path = diagnostic_root.join(path.as_path());
+    let parent_mode = if options.creates_parents() {
+        RootedParentMode::CreateMissing
+    } else {
+        RootedParentMode::OpenExisting
+    };
+    let (parent, name, _parent_dirs_to_sync) =
+        open_rooted_parent(root, &diagnostic_path, path, parent_mode)?
+            .into_parts();
+    reject_existing_non_file(&parent, &name, &diagnostic_path)?;
+    let mode = options.mode();
+    let should_truncate = mode == write::Mode::CreateOrTruncate;
+    let mut flags = libc::O_NOFOLLOW | libc::O_CLOEXEC | libc::O_NONBLOCK;
+    match mode {
+        write::Mode::OpenExistingAtStart => flags |= libc::O_WRONLY,
+        write::Mode::CreateNew => {
+            flags |= libc::O_WRONLY | libc::O_CREAT | libc::O_EXCL
+        }
+        write::Mode::CreateOrTruncate => {
+            flags |= libc::O_WRONLY | libc::O_CREAT
+        }
+        write::Mode::AppendExisting => flags |= libc::O_WRONLY | libc::O_APPEND,
+        write::Mode::AppendOrCreate => {
+            flags |= libc::O_WRONLY | libc::O_APPEND | libc::O_CREAT;
+        }
+    }
+    let file = rooted_open_result(
+        open_with_nonblocking_retry(Some(options.open_retry_timeout()), || {
+            open_file_at(&parent, &name, flags, 0o600)
+        }),
+        "open rooted native file writer",
+        &diagnostic_path,
+    )?;
+    prepare_opened_rooted_regular_file(
+        &file,
+        "restore blocking rooted native file writer",
+        &diagnostic_path,
+    )?;
+    if should_truncate {
+        with_path_context(
+            file.set_len(0),
+            "truncate opened rooted native file writer",
+            &diagnostic_path,
+        )?;
+    }
+    Ok(file)
 }
 
 /// Opens the destination parent by traversing only from `root`.
