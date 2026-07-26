@@ -36,6 +36,8 @@ pub(crate) use internal::{
     ensure_parent_path,
     file_name_from_path,
     file_name_from_url,
+    move_directory_without_replacing,
+    move_file_without_replacing,
     normalize_extension,
     open_native_reader_path,
     open_native_writer_path,
@@ -45,10 +47,16 @@ pub(crate) use internal::{
 };
 #[cfg(unix)]
 pub(crate) use internal::{
+    create_rooted_directory,
     open_root_directory,
     open_rooted_native_reader,
     open_rooted_native_writer,
+    read_root_directory,
+    read_rooted_directory,
     read_rooted_symlink_metadata,
+    remove_rooted_entry,
+    rename_rooted_entry,
+    set_rooted_permissions,
 };
 
 pub use local_atomic_commit_error::LocalAtomicCommitError;

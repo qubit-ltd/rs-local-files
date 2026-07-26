@@ -245,6 +245,7 @@ dependencies = [
  "libc",
  "log",
  "proptest",
+ "rustix",
  "tempfile",
  "windows-sys",
 ]

@@ -11,6 +11,8 @@
 use std::fs;
 #[cfg(unix)]
 use std::ops::BitAnd;
+#[cfg(unix)]
+use std::os::unix::fs::MetadataExt;
 use std::time::SystemTime;
 #[cfg(unix)]
 use std::time::{
@@ -33,6 +35,12 @@ pub struct Metadata {
     modified_at: Option<SystemTime>,
     /// Creation time reported by the operating system when available.
     created_at: Option<SystemTime>,
+    /// Portable Unix permission bits when available.
+    permissions_mode: Option<u32>,
+    /// Native device identity when available.
+    device_id: Option<u64>,
+    /// Native file identity within its device when available.
+    file_id: Option<u64>,
 }
 
 impl Metadata {
@@ -54,6 +62,9 @@ impl Metadata {
             accessed_at: metadata.accessed().ok(),
             modified_at: metadata.modified().ok(),
             created_at: metadata.created().ok(),
+            permissions_mode: Some(metadata.mode() & 0o7777),
+            device_id: Some(metadata.dev()),
+            file_id: Some(metadata.ino()),
         }
     }
 
@@ -77,6 +88,9 @@ impl Metadata {
             accessed_at,
             modified_at,
             created_at,
+            permissions_mode: Some(permission_mode(status.st_mode)),
+            device_id: native_id(status.st_dev),
+            file_id: native_id(status.st_ino),
         }
     }
 
@@ -117,6 +131,43 @@ impl Metadata {
     pub const fn created_at(&self) -> Option<SystemTime> {
         self.created_at
     }
+
+    /// Returns portable Unix permission bits when available.
+    #[must_use]
+    #[inline(always)]
+    pub const fn permissions_mode(&self) -> Option<u32> {
+        self.permissions_mode
+    }
+
+    /// Returns whether two metadata values identify the same native entry.
+    #[must_use]
+    pub const fn is_same_file(&self, other: &Self) -> bool {
+        matches!(
+            (self.device_id, self.file_id, other.device_id, other.file_id),
+            (Some(left_device), Some(left_file), Some(right_device), Some(right_file))
+                if left_device == right_device && left_file == right_file
+        )
+    }
+}
+
+/// Converts a platform-native mode into portable permission bits.
+#[cfg(unix)]
+#[inline(always)]
+fn permission_mode<T>(mode: T) -> u32
+where
+    T: Into<u32>,
+{
+    mode.into() & 0o7777
+}
+
+/// Converts a platform-native identity field into the portable representation.
+#[cfg(unix)]
+#[inline(always)]
+fn native_id<T>(value: T) -> Option<u64>
+where
+    T: TryInto<u64>,
+{
+    value.try_into().ok()
 }
 
 /// Classifies one platform-native `st_mode` value.

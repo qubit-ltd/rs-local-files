@@ -42,6 +42,8 @@ mod rooted_file_io;
 #[cfg(unix)]
 mod rooted_io_result;
 #[cfg(unix)]
+mod rooted_namespace_io;
+#[cfg(unix)]
 mod rooted_parent;
 #[cfg(unix)]
 mod rooted_parent_mode;
@@ -119,6 +121,15 @@ pub(crate) use rooted_file_io::{
     open_rooted_native_reader,
     open_rooted_native_writer,
     read_rooted_symlink_metadata,
+};
+#[cfg(unix)]
+pub(crate) use rooted_namespace_io::{
+    create_rooted_directory,
+    read_root_directory,
+    read_rooted_directory,
+    remove_rooted_entry,
+    rename_rooted_entry,
+    set_rooted_permissions,
 };
 #[cfg(unix)]
 pub(super) use rooted_parent_mode::RootedParentMode;

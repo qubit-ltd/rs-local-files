@@ -34,13 +34,11 @@ use crate::{
 
 use super::path;
 use super::{
+    Entry,
     Metadata,
     Writer,
 };
 
-// TODO: Add descriptor-relative directory creation, listing, removal, rename,
-// copy, and temporary-entry operations when rooted filesystem consumers need
-// those capabilities.
 // TODO: Implement a Windows directory-handle backend before advertising
 // rooted support on non-Unix platforms.
 
@@ -134,6 +132,173 @@ impl Root {
         #[cfg(not(unix))]
         {
             let _ = path;
+            Err(Error::new(
+                ErrorKind::Unsupported,
+                "descriptor-relative local roots are unsupported on this platform",
+            ))
+        }
+    }
+
+    /// Lists immediate children of the opened root directory.
+    ///
+    /// # Errors
+    /// Returns an I/O error when the descriptor cannot be enumerated or an
+    /// entry cannot be inspected without following links.
+    pub fn read_root_dir(&self) -> Result<Vec<Entry>> {
+        #[cfg(unix)]
+        {
+            local::read_root_directory(&self.directory, &self.path).map(
+                |entries| {
+                    entries
+                        .into_iter()
+                        .map(|(name, status)| {
+                            Entry::new(name, Metadata::from_stat(&status))
+                        })
+                        .collect()
+                },
+            )
+        }
+        #[cfg(not(unix))]
+        {
+            Err(Error::new(
+                ErrorKind::Unsupported,
+                "descriptor-relative local roots are unsupported on this platform",
+            ))
+        }
+    }
+
+    /// Lists immediate children of a descendant directory.
+    ///
+    /// # Errors
+    /// Returns an I/O error when traversal cannot remain beneath the opened
+    /// root or the directory cannot be enumerated.
+    pub fn read_dir(&self, path: &path::Path) -> Result<Vec<Entry>> {
+        #[cfg(unix)]
+        {
+            local::read_rooted_directory(&self.directory, &self.path, path).map(
+                |entries| {
+                    entries
+                        .into_iter()
+                        .map(|(name, status)| {
+                            Entry::new(name, Metadata::from_stat(&status))
+                        })
+                        .collect()
+                },
+            )
+        }
+        #[cfg(not(unix))]
+        {
+            let _ = path;
+            Err(Error::new(
+                ErrorKind::Unsupported,
+                "descriptor-relative local roots are unsupported on this platform",
+            ))
+        }
+    }
+
+    /// Creates a descendant directory.
+    ///
+    /// # Errors
+    /// Returns an I/O error when secure traversal or creation fails.
+    pub fn create_dir(
+        &self,
+        path: &path::Path,
+        recursive: bool,
+        exists_ok: bool,
+    ) -> Result<()> {
+        #[cfg(unix)]
+        {
+            local::create_rooted_directory(
+                &self.directory,
+                &self.path,
+                path,
+                recursive,
+                exists_ok,
+            )
+        }
+        #[cfg(not(unix))]
+        {
+            let _ = (path, recursive, exists_ok);
+            Err(Error::new(
+                ErrorKind::Unsupported,
+                "descriptor-relative local roots are unsupported on this platform",
+            ))
+        }
+    }
+
+    /// Removes a descendant entry without following symbolic links.
+    ///
+    /// # Errors
+    /// Returns an I/O error when secure traversal or removal fails.
+    pub fn remove(&self, path: &path::Path, recursive: bool) -> Result<()> {
+        #[cfg(unix)]
+        {
+            local::remove_rooted_entry(
+                &self.directory,
+                &self.path,
+                path,
+                recursive,
+            )
+        }
+        #[cfg(not(unix))]
+        {
+            let _ = (path, recursive);
+            Err(Error::new(
+                ErrorKind::Unsupported,
+                "descriptor-relative local roots are unsupported on this platform",
+            ))
+        }
+    }
+
+    /// Renames a descendant entry within the same opened root.
+    ///
+    /// # Errors
+    /// Returns an I/O error when secure traversal or the requested atomic
+    /// rename fails.
+    pub fn rename(
+        &self,
+        source: &path::Path,
+        destination: &path::Path,
+        overwrite: bool,
+    ) -> Result<()> {
+        #[cfg(unix)]
+        {
+            local::rename_rooted_entry(
+                &self.directory,
+                &self.path,
+                source,
+                destination,
+                overwrite,
+            )
+        }
+        #[cfg(not(unix))]
+        {
+            let _ = (source, destination, overwrite);
+            Err(Error::new(
+                ErrorKind::Unsupported,
+                "descriptor-relative local roots are unsupported on this platform",
+            ))
+        }
+    }
+
+    /// Applies portable Unix permission bits to a descendant entry.
+    ///
+    /// # Errors
+    /// Returns an I/O error when traversal cannot remain beneath the opened
+    /// root or the permission update fails.
+    pub fn set_permissions(&self, path: &path::Path, mode: u32) -> Result<()> {
+        #[cfg(unix)]
+        {
+            local::set_rooted_permissions(
+                &self.directory,
+                &self.path,
+                path,
+                mode,
+            )
+        }
+        #[cfg(not(unix))]
+        {
+            let _ = (path, mode);
             Err(Error::new(
                 ErrorKind::Unsupported,
                 "descriptor-relative local roots are unsupported on this platform",
