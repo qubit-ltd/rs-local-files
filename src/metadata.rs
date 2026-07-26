@@ -38,6 +38,18 @@ pub fn read(path: &Path) -> Result<Metadata> {
 /// # Errors
 /// Returns the I/O error reported by the filesystem.
 #[inline(always)]
-pub fn read_link(path: &Path) -> Result<Metadata> {
+pub fn symlink_metadata(path: &Path) -> Result<Metadata> {
     fs::symlink_metadata(path)
+}
+
+/// Reads metadata without following the final symbolic link.
+///
+/// This compatibility alias predates the focused metadata naming.
+///
+/// # Errors
+/// Returns the I/O error reported by the filesystem.
+#[deprecated(since = "0.7.1", note = "use metadata::symlink_metadata")]
+#[inline(always)]
+pub fn read_link(path: &Path) -> Result<Metadata> {
+    symlink_metadata(path)
 }
