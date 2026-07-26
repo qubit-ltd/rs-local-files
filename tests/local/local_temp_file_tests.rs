@@ -9,6 +9,7 @@
 #[cfg(unix)]
 use std::io::IoSlice;
 
+use super::api_tests::LocalPersistStage;
 #[cfg(unix)]
 use super::test_support::PermissionsExt;
 #[cfg(windows)]
@@ -17,7 +18,6 @@ use super::test_support::{
     CURRENT_DIR_LOCK,
     CurrentDirGuard,
     ErrorKind,
-    LocalFilenames,
     LocalPersistOptions,
     LocalTempFile,
     Seek,
@@ -25,9 +25,9 @@ use super::test_support::{
     Write,
     ensure_test_logger,
     fs,
+    path,
     temp_dir,
 };
-use qubit_local_files::LocalPersistStage;
 
 #[test]
 fn test_temp_file_exposes_absolute_location_after_cwd_change() {
@@ -118,7 +118,7 @@ fn test_temp_file_convenience_constructors_use_requested_affixes() {
 
     assert!(prefix_file.path().starts_with(std::env::temp_dir()));
     assert!(prefix_name.starts_with("prefix-"));
-    assert!(suffix_name.starts_with(LocalFilenames::DEFAULT_RANDOM_PREFIX));
+    assert!(suffix_name.starts_with(path::DEFAULT_RANDOM_FILE_NAME_PREFIX));
     assert!(suffix_name.ends_with(".suffix"));
     assert!(affix_name.starts_with("affix-"));
     assert!(affix_name.ends_with(".tmp"));

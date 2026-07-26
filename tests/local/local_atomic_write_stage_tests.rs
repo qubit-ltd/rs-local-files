@@ -6,7 +6,7 @@
 //    Licensed under the Apache License, Version 2.0.
 // =============================================================================
 
-use qubit_local_files::LocalAtomicWriteStage;
+use super::api_tests::LocalAtomicWriteStage;
 
 #[test]
 fn test_atomic_write_stage_variants_are_distinct_and_debuggable() {

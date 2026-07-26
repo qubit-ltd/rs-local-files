@@ -30,7 +30,7 @@ use std::os::unix::fs::{
     OpenOptionsExt,
 };
 
-use crate::LocalFilenames;
+use crate::path::random_file_name_with;
 
 use super::path_operations::{
     add_path_context,
@@ -65,7 +65,7 @@ pub(crate) fn create_temp_file_in_dir(
     let mut attempt = 0;
     loop {
         attempt += 1;
-        let path = dir.join(LocalFilenames::try_random_with(prefix, suffix)?);
+        let path = dir.join(random_file_name_with(prefix, suffix)?);
         let mut options = OpenOptions::new();
         options.read(true).write(true).create_new(true);
         #[cfg(unix)]
@@ -109,7 +109,7 @@ pub(crate) fn create_temp_dir_in_dir(
     let mut attempt = 0;
     loop {
         attempt += 1;
-        let path = dir.join(LocalFilenames::try_random_with(prefix, None)?);
+        let path = dir.join(random_file_name_with(prefix, None)?);
         match create_private_dir(&path) {
             Ok(()) => return Ok(path),
             Err(error) => {

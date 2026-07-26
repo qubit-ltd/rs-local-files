@@ -27,8 +27,6 @@ mod file_name_path;
 mod file_name_url;
 mod file_name_validation;
 mod io_result_context;
-mod local_file_reader_inner;
-mod local_file_writer_inner;
 #[cfg(unix)]
 mod opened_atomic_destination;
 mod path_io_error;
@@ -72,8 +70,6 @@ pub(crate) use copy_dir::copy_dir_all_with_paths;
 pub(crate) use file_io::{
     open_native_reader_path,
     open_native_writer_path,
-    open_reader_path,
-    open_writer_path,
 };
 pub(crate) use file_move::{
     move_directory_without_replacing,
@@ -89,8 +85,6 @@ pub(crate) use file_name_path::{
 };
 pub(crate) use file_name_url::file_name_from_url;
 pub(crate) use file_name_validation::validate_portable_file_name_impl;
-pub(super) use local_file_reader_inner::LocalFileReaderInner;
-pub(super) use local_file_writer_inner::LocalFileWriterInner;
 #[cfg(unix)]
 pub(super) use opened_atomic_destination::open_rooted_atomic_destination;
 #[cfg(unix)]
@@ -124,8 +118,6 @@ pub(crate) use rooted_file_io::{
     open_root_directory,
     open_rooted_native_reader,
     open_rooted_native_writer,
-    open_rooted_reader,
-    open_rooted_writer,
     read_rooted_symlink_metadata,
 };
 #[cfg(unix)]

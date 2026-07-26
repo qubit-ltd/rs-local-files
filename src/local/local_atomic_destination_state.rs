@@ -13,23 +13,23 @@
 /// replacement outcome. Downstream matches must retain a wildcard arm.
 ///
 /// ```compile_fail
-/// use qubit_local_files::LocalAtomicDestinationState;
+/// use qubit_local_files::atomic::DestinationState;
 ///
-/// fn classify(state: LocalAtomicDestinationState) {
+/// fn classify(state: DestinationState) {
 ///     match state {
-///         LocalAtomicDestinationState::Unchanged => {}
-///         LocalAtomicDestinationState::Replaced => {}
-///         LocalAtomicDestinationState::Missing => {}
-///         LocalAtomicDestinationState::Indeterminate => {}
+///         DestinationState::Unchanged => {}
+///         DestinationState::Replaced => {}
+///         DestinationState::Missing => {}
+///         DestinationState::Indeterminate => {}
 ///     }
 /// }
 /// ```
 ///
 /// ```compile_fail
 /// #![deny(unused_must_use)]
-/// use qubit_local_files::LocalAtomicDestinationState;
+/// use qubit_local_files::atomic::DestinationState;
 ///
-/// LocalAtomicDestinationState::Unchanged.clone();
+/// DestinationState::Unchanged.clone();
 /// ```
 #[must_use]
 #[non_exhaustive]

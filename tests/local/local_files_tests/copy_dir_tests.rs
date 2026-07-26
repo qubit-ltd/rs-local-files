@@ -7,18 +7,18 @@
 // =============================================================================
 
 #[cfg(any(unix, windows))]
-use qubit_local_files::LocalCopyDirStage;
-use qubit_local_files::{
+use super::super::api_tests::LocalCopyDirStage;
+use super::super::api_tests::{
     LocalCopyConflictPolicy,
     LocalCopyDirOptions,
     LocalCopyTypeConflictPolicy,
-    LocalFiles,
 };
 #[cfg(unix)]
 use std::io::Error;
 use std::io::ErrorKind;
 #[cfg(target_os = "linux")]
 use std::os::fd::AsRawFd;
+use std::path::Path;
 #[cfg(target_os = "linux")]
 use std::time::Duration;
 
@@ -71,7 +71,7 @@ fn assert_injected_copy_error(
                 .expect("destination file should be written");
         }
 
-        let error = LocalFiles::copy_dir_all_with(&src, &dst, options)
+        let error = qubit_local_files::copy::directory(&src, &dst, options)
             .expect_err("injected copy operation should fail");
         assert_eq!(expected_stage, error.stage());
         fs::remove_dir_all(dir).expect("test directory should be removed");
@@ -99,7 +99,7 @@ fn test_copy_dir_rejects_injected_directory_identity_cycle() {
             fs::create_dir_all(src.join("nested"))
                 .expect("nested source directory should be created");
 
-            let error = LocalFiles::copy_dir_all_with(
+            let error = qubit_local_files::copy::directory(
                 &src,
                 &dst,
                 LocalCopyDirOptions::default(),
@@ -240,7 +240,7 @@ fn test_copy_dir_reconciles_injected_existing_directory_race() {
             let dst = dir.join("dst");
             fs::create_dir(&src).expect("source directory should be created");
 
-            let stats = LocalFiles::copy_dir_all_with(
+            let stats = qubit_local_files::copy::directory(
                 &src,
                 &dst,
                 LocalCopyDirOptions::default(),
@@ -356,7 +356,7 @@ fn assert_injected_root_type_replacement_error(test_name: &str, fault: &str) {
         fs::write(&dst, b"destination")
             .expect("destination file should be written");
 
-        let error = LocalFiles::copy_dir_all_with(
+        let error = qubit_local_files::copy::directory(
             &src,
             &dst,
             LocalCopyDirOptions::new()
@@ -422,7 +422,7 @@ fn test_copy_dir_all_with_copies_tree_and_reports_stats() {
     fs::write(src.join("a.txt"), b"abc").unwrap();
     fs::write(src.join("nested").join("b.txt"), b"12345").unwrap();
 
-    let stats = LocalFiles::copy_dir_all_with(
+    let stats = qubit_local_files::copy::directory(
         &src,
         &dst,
         LocalCopyDirOptions::default(),
@@ -474,7 +474,7 @@ fn test_copy_dir_all_with_handles_deep_tree_on_small_stack() {
             fs::write(current.join("leaf"), b"x")
                 .expect("deep copy leaf should be written");
 
-            let stats = LocalFiles::copy_dir_all_with(
+            let stats = qubit_local_files::copy::directory(
                 &src,
                 &dst,
                 LocalCopyDirOptions::default(),
@@ -539,7 +539,7 @@ fn test_copy_dir_all_with_copies_into_existing_directory() {
     fs::create_dir(&dst).unwrap();
     fs::write(src.join("data.txt"), b"data").unwrap();
 
-    let stats = LocalFiles::copy_dir_all_with(
+    let stats = qubit_local_files::copy::directory(
         &src,
         &dst,
         LocalCopyDirOptions::default(),
@@ -563,9 +563,9 @@ fn test_copy_dir_all_with_relative_missing_destination() {
     fs::write(src.join("data.txt"), b"data").unwrap();
     let _guard = CurrentDirGuard::change_to(&dir);
 
-    let stats = LocalFiles::copy_dir_all_with(
+    let stats = qubit_local_files::copy::directory(
         &src,
-        "relative-dst",
+        Path::new("relative-dst"),
         LocalCopyDirOptions::default(),
     )
     .expect("relative destination should be copied");
@@ -619,9 +619,9 @@ fn test_copy_dir_all_with_binds_relative_paths_before_source_open() {
             let lease = SourceReadLease::acquire(&source_file)
                 .expect("source read lease should be acquired");
             let worker = std::thread::spawn(|| {
-                LocalFiles::copy_dir_all_with(
-                    "src",
-                    "dst",
+                qubit_local_files::copy::directory(
+                    Path::new("src"),
+                    Path::new("dst"),
                     LocalCopyDirOptions::default(),
                 )
             });
@@ -669,17 +669,17 @@ fn test_copy_dir_all_with_rejects_invalid_source_and_nested_destination() {
     fs::create_dir(&src).unwrap();
     fs::write(&src_file, b"file").unwrap();
 
-    let error = LocalFiles::copy_dir_all_with(
+    let error = qubit_local_files::copy::directory(
         &src_file,
-        dir.join("dst"),
+        &dir.join("dst"),
         LocalCopyDirOptions::default(),
     )
     .expect_err("file source should be rejected");
     assert_eq!(ErrorKind::InvalidInput, error.kind());
 
-    let error = LocalFiles::copy_dir_all_with(
+    let error = qubit_local_files::copy::directory(
         &src,
-        src.join("nested").join("dst"),
+        &src.join("nested").join("dst"),
         LocalCopyDirOptions::default(),
     )
     .expect_err("destination inside source should be rejected");
@@ -694,7 +694,7 @@ fn test_copy_dir_all_with_returns_destination_canonicalize_error() {
     let src = dir.join("src");
     fs::create_dir(&src).unwrap();
 
-    let error = LocalFiles::copy_dir_all_with(
+    let error = qubit_local_files::copy::directory(
         &src,
         std::path::Path::new(""),
         LocalCopyDirOptions::default(),
@@ -714,7 +714,7 @@ fn test_copy_dir_all_with_rejects_existing_root_destination_without_overwrite()
     fs::create_dir(&src).unwrap();
     fs::write(&dst, b"not a directory").unwrap();
 
-    let error = LocalFiles::copy_dir_all_with(
+    let error = qubit_local_files::copy::directory(
         &src,
         &dst,
         LocalCopyDirOptions::default(),
@@ -734,7 +734,7 @@ fn test_copy_dir_all_with_returns_read_dir_error() {
     fs::create_dir(&src).unwrap();
     fs::set_permissions(&src, fs::Permissions::from_mode(0o300)).unwrap();
 
-    let error = LocalFiles::copy_dir_all_with(
+    let error = qubit_local_files::copy::directory(
         &src,
         &dst,
         LocalCopyDirOptions::default(),
@@ -756,7 +756,7 @@ fn test_copy_dir_all_with_returns_nested_read_dir_error() {
     fs::create_dir_all(&nested).unwrap();
     fs::set_permissions(&nested, fs::Permissions::from_mode(0o300)).unwrap();
 
-    let error = LocalFiles::copy_dir_all_with(
+    let error = qubit_local_files::copy::directory(
         &src,
         &dst,
         LocalCopyDirOptions::default(),
@@ -781,7 +781,7 @@ fn test_copy_dir_all_with_returns_source_entry_metadata_error_without_search_per
     fs::set_permissions(&src, fs::Permissions::from_mode(0o400))
         .expect("source search permission should be removed");
 
-    let error = LocalFiles::copy_dir_all_with(
+    let error = qubit_local_files::copy::directory(
         &src,
         &dst,
         LocalCopyDirOptions::default(),
@@ -809,7 +809,7 @@ fn test_copy_dir_all_with_returns_destination_inspection_error_for_nul_path() {
     fs::create_dir(&src).expect("source directory should be created");
     let dst = dir.join(OsString::from_vec(b"dst\0invalid".to_vec()));
 
-    let error = LocalFiles::copy_dir_all_with(
+    let error = qubit_local_files::copy::directory(
         &src,
         &dst,
         LocalCopyDirOptions::default(),
@@ -832,7 +832,7 @@ fn test_copy_dir_all_with_validates_invalid_destination_before_missing_source()
     let src = dir.join("missing-source");
     let dst = dir.join(OsString::from_vec(b"dst\0invalid".to_vec()));
 
-    let error = LocalFiles::copy_dir_all_with(
+    let error = qubit_local_files::copy::directory(
         &src,
         &dst,
         LocalCopyDirOptions::default(),
@@ -854,7 +854,7 @@ fn test_copy_dir_all_with_rejects_existing_destination_without_overwrite() {
     fs::write(src.join("data.txt"), b"new").unwrap();
     fs::write(dst.join("data.txt"), b"old").unwrap();
 
-    let error = LocalFiles::copy_dir_all_with(
+    let error = qubit_local_files::copy::directory(
         &src,
         &dst,
         LocalCopyDirOptions::default(),
@@ -878,7 +878,7 @@ fn test_copy_dir_all_with_skips_existing_destination_files() {
     fs::write(dst.join("data.txt"), b"old")
         .expect("destination fixture should be written");
 
-    let stats = LocalFiles::copy_dir_all_with(
+    let stats = qubit_local_files::copy::directory(
         &src,
         &dst,
         LocalCopyDirOptions::new().with_conflict(LocalCopyConflictPolicy::Skip),
@@ -975,9 +975,9 @@ fn test_copy_dir_zero_open_retry_timeout_reports_timed_out() {
     let worker_destination = destination.clone();
     let (sender, receiver) = std::sync::mpsc::sync_channel(1);
     let worker = std::thread::spawn(move || {
-        let result = LocalFiles::copy_dir_all_with(
-            worker_source,
-            worker_destination,
+        let result = qubit_local_files::copy::directory(
+            &worker_source,
+            &worker_destination,
             options,
         );
         sender.send(result).expect("result should be sent");
@@ -1076,9 +1076,9 @@ fn test_copy_dir_all_with_waits_for_source_lease_without_busy_polling() {
         move || {
             let started = current_thread_cpu_time()
                 .expect("worker CPU start time should be readable");
-            let result = LocalFiles::copy_dir_all_with(
-                copy_src,
-                copy_dst,
+            let result = qubit_local_files::copy::directory(
+                &copy_src,
+                &copy_dst,
                 LocalCopyDirOptions::default(),
             );
             let finished = current_thread_cpu_time()
@@ -1116,9 +1116,9 @@ fn test_copy_dir_all_with_open_retry_timeout_resumes_after_lease_release() {
         &source_file,
         || std::thread::sleep(LEASE_HOLD_DURATION),
         move || {
-            LocalFiles::copy_dir_all_with(
-                copy_src,
-                copy_dst,
+            qubit_local_files::copy::directory(
+                &copy_src,
+                &copy_dst,
                 LocalCopyDirOptions::new()
                     .with_open_retry_timeout(OPEN_RETRY_TIMEOUT),
             )
@@ -1192,9 +1192,9 @@ fn test_copy_dir_all_with_reports_staging_cleanup_failure() {
             .expect("destination write permission should be removed");
         },
         move || {
-            LocalFiles::copy_dir_all_with(
-                copy_src,
-                copy_dst,
+            qubit_local_files::copy::directory(
+                &copy_src,
+                &copy_dst,
                 LocalCopyDirOptions::default(),
             )
         },
@@ -1258,9 +1258,9 @@ fn test_copy_dir_all_with_reports_skipped_staging_cleanup_failure() {
             .expect("destination write permission should be removed");
         },
         move || {
-            LocalFiles::copy_dir_all_with(
-                copy_src,
-                copy_dst,
+            qubit_local_files::copy::directory(
+                &copy_src,
+                &copy_dst,
                 LocalCopyDirOptions::new()
                     .with_conflict(LocalCopyConflictPolicy::Skip),
             )
@@ -1311,9 +1311,9 @@ fn test_copy_dir_all_with_handles_destination_created_after_staging() {
                 .expect("racing skip destination should be written");
         },
         move || {
-            LocalFiles::copy_dir_all_with(
-                copy_src,
-                copy_dst,
+            qubit_local_files::copy::directory(
+                &copy_src,
+                &copy_dst,
                 LocalCopyDirOptions::new()
                     .with_conflict(LocalCopyConflictPolicy::Skip),
             )
@@ -1343,9 +1343,9 @@ fn test_copy_dir_all_with_handles_destination_created_after_staging() {
                 .expect("racing fail destination should be written");
         },
         move || {
-            LocalFiles::copy_dir_all_with(
-                copy_src,
-                copy_dst,
+            qubit_local_files::copy::directory(
+                &copy_src,
+                &copy_dst,
                 LocalCopyDirOptions::default(),
             )
         },
@@ -1394,9 +1394,9 @@ fn test_copy_dir_all_with_keeps_conflicting_directory_until_source_is_staged() {
             );
         },
         move || {
-            LocalFiles::copy_dir_all_with(
-                copy_src,
-                copy_dst,
+            qubit_local_files::copy::directory(
+                &copy_src,
+                &copy_dst,
                 LocalCopyDirOptions::new()
                     .with_conflict(LocalCopyConflictPolicy::Overwrite)
                     .with_type_conflict(LocalCopyTypeConflictPolicy::Replace),
@@ -1440,9 +1440,9 @@ fn test_copy_dir_all_with_preserves_file_replacing_directory_after_staging() {
                 .expect("racing destination file should be written");
         },
         move || {
-            LocalFiles::copy_dir_all_with(
-                copy_src,
-                copy_dst,
+            qubit_local_files::copy::directory(
+                &copy_src,
+                &copy_dst,
                 LocalCopyDirOptions::new()
                     .with_conflict(LocalCopyConflictPolicy::Skip)
                     .with_type_conflict(LocalCopyTypeConflictPolicy::Replace),
@@ -1487,9 +1487,9 @@ fn test_copy_dir_all_with_rejects_file_replacing_directory_after_staging() {
                 .expect("racing destination file should be written");
         },
         move || {
-            LocalFiles::copy_dir_all_with(
-                copy_src,
-                copy_dst,
+            qubit_local_files::copy::directory(
+                &copy_src,
+                &copy_dst,
                 LocalCopyDirOptions::new()
                     .with_type_conflict(LocalCopyTypeConflictPolicy::Replace),
             )
@@ -1531,9 +1531,9 @@ fn test_copy_dir_all_with_commits_when_directory_disappears_after_staging() {
                 .expect("conflicting destination directory should be removed");
         },
         move || {
-            LocalFiles::copy_dir_all_with(
-                copy_src,
-                copy_dst,
+            qubit_local_files::copy::directory(
+                &copy_src,
+                &copy_dst,
                 LocalCopyDirOptions::new()
                     .with_conflict(LocalCopyConflictPolicy::Overwrite)
                     .with_type_conflict(LocalCopyTypeConflictPolicy::Replace),
@@ -1598,9 +1598,9 @@ fn test_copy_dir_all_with_reports_directory_removal_error_after_staging() {
             .expect("destination write permission should be removed");
         },
         move || {
-            LocalFiles::copy_dir_all_with(
-                copy_src,
-                copy_dst,
+            qubit_local_files::copy::directory(
+                &copy_src,
+                &copy_dst,
                 LocalCopyDirOptions::new()
                     .with_conflict(LocalCopyConflictPolicy::Overwrite)
                     .with_type_conflict(LocalCopyTypeConflictPolicy::Replace),
@@ -1657,9 +1657,9 @@ fn test_copy_dir_all_with_reports_reinspection_error_after_staging() {
             .expect("destination search permission should be removed");
         },
         move || {
-            LocalFiles::copy_dir_all_with(
-                copy_src,
-                copy_dst,
+            qubit_local_files::copy::directory(
+                &copy_src,
+                &copy_dst,
                 LocalCopyDirOptions::new()
                     .with_conflict(LocalCopyConflictPolicy::Overwrite)
                     .with_type_conflict(LocalCopyTypeConflictPolicy::Replace),
@@ -1688,7 +1688,7 @@ fn test_copy_dir_all_with_returns_destination_entry_inspection_error() {
     fs::set_permissions(&dst, fs::Permissions::from_mode(0o600))
         .expect("destination search permission should be removed");
 
-    let error = LocalFiles::copy_dir_all_with(
+    let error = qubit_local_files::copy::directory(
         &src,
         &dst,
         LocalCopyDirOptions::default(),
@@ -1714,7 +1714,7 @@ fn test_copy_dir_all_with_returns_nested_destination_inspection_error() {
     fs::set_permissions(&dst, fs::Permissions::from_mode(0o600))
         .expect("destination search permission should be removed");
 
-    let error = LocalFiles::copy_dir_all_with(
+    let error = qubit_local_files::copy::directory(
         &src,
         &dst,
         LocalCopyDirOptions::default(),
@@ -1742,7 +1742,7 @@ fn test_copy_dir_all_with_returns_destination_removal_permission_error() {
     fs::set_permissions(&parent, fs::Permissions::from_mode(0o500))
         .expect("destination parent write permission should be removed");
 
-    let error = LocalFiles::copy_dir_all_with(
+    let error = qubit_local_files::copy::directory(
         &src,
         &dst,
         LocalCopyDirOptions::new()
@@ -1770,7 +1770,7 @@ fn test_copy_dir_all_with_returns_staging_file_creation_error() {
     fs::set_permissions(&dst, fs::Permissions::from_mode(0o500))
         .expect("destination write permission should be removed");
 
-    let error = LocalFiles::copy_dir_all_with(
+    let error = qubit_local_files::copy::directory(
         &src,
         &dst,
         LocalCopyDirOptions::default(),
@@ -1798,7 +1798,7 @@ fn test_copy_dir_all_with_rejects_type_conflict_without_removing_directory() {
     fs::write(conflicting_dir.join("unrelated.txt"), b"keep")
         .expect("unrelated destination file should be written");
 
-    let error = LocalFiles::copy_dir_all_with(
+    let error = qubit_local_files::copy::directory(
         &src,
         &dst,
         LocalCopyDirOptions::new()
@@ -1830,7 +1830,7 @@ fn test_copy_dir_all_with_replaces_existing_destination_directory_with_file() {
     fs::write(destination_entry.join("old.txt"), b"old")
         .expect("conflicting directory contents should be written");
 
-    let stats = LocalFiles::copy_dir_all_with(
+    let stats = qubit_local_files::copy::directory(
         &src,
         &dst,
         LocalCopyDirOptions::new()
@@ -1868,7 +1868,7 @@ fn test_copy_dir_all_with_keeps_conflicting_directory_when_source_copy_fails() {
         return;
     }
 
-    let error = LocalFiles::copy_dir_all_with(
+    let error = qubit_local_files::copy::directory(
         &src,
         &dst,
         LocalCopyDirOptions::new()
@@ -1900,7 +1900,7 @@ fn test_copy_dir_all_with_overwrites_existing_destinations() {
     fs::write(src.join("data.txt"), b"new").unwrap();
     fs::write(&dst, b"old file blocks destination directory").unwrap();
 
-    let stats = LocalFiles::copy_dir_all_with(
+    let stats = qubit_local_files::copy::directory(
         &src,
         &dst,
         LocalCopyDirOptions::new()
@@ -1914,7 +1914,7 @@ fn test_copy_dir_all_with_overwrites_existing_destinations() {
     assert_eq!(b"new", fs::read(dst.join("data.txt")).unwrap().as_slice());
 
     fs::write(src.join("data.txt"), b"newer").unwrap();
-    let stats = LocalFiles::copy_dir_all_with(
+    let stats = qubit_local_files::copy::directory(
         &src,
         &dst,
         LocalCopyDirOptions::new()
@@ -1944,7 +1944,7 @@ fn test_copy_dir_all_with_preserves_root_file_when_type_replacement_removal_fail
     fs::set_permissions(&protected_parent, fs::Permissions::from_mode(0o500))
         .expect("destination parent write permission should be removed");
 
-    let error = LocalFiles::copy_dir_all_with(
+    let error = qubit_local_files::copy::directory(
         &src,
         &dst,
         LocalCopyDirOptions::new()
@@ -1975,7 +1975,7 @@ fn test_copy_dir_all_with_symlink_options() {
     std::os::unix::fs::symlink(src.join("target.txt"), src.join("link.txt"))
         .unwrap();
 
-    let error = LocalFiles::copy_dir_all_with(
+    let error = qubit_local_files::copy::directory(
         &src,
         &dst,
         LocalCopyDirOptions::default(),
@@ -1983,7 +1983,7 @@ fn test_copy_dir_all_with_symlink_options() {
     .expect_err("default copy should reject symlinks");
     assert_eq!(ErrorKind::InvalidInput, error.kind());
 
-    let stats = LocalFiles::copy_dir_all_with(
+    let stats = qubit_local_files::copy::directory(
         &src,
         &followed_dst,
         LocalCopyDirOptions::new().follow_symlinks(),
@@ -2011,7 +2011,7 @@ fn test_copy_dir_all_with_rejects_fifo_without_blocking() {
     let copy_source = src.clone();
     let copy_destination = dst.clone();
     assert_fifo_open_is_rejected(fifo, move |_| {
-        let error = LocalFiles::copy_dir_all_with(
+        let error = qubit_local_files::copy::directory(
             &copy_source,
             &copy_destination,
             LocalCopyDirOptions::default(),
@@ -2036,7 +2036,7 @@ fn test_copy_dir_all_with_rejects_symlink_from_opened_handle() {
     std::os::unix::fs::symlink(&target, src.join("link.txt"))
         .expect("source symlink should be created");
 
-    let error = LocalFiles::copy_dir_all_with(
+    let error = qubit_local_files::copy::directory(
         &src,
         &dst,
         LocalCopyDirOptions::default(),
@@ -2048,7 +2048,7 @@ fn test_copy_dir_all_with_rejects_symlink_from_opened_handle() {
     assert!(!dst.join("link.txt").exists());
 
     let followed_dst = dir.join("followed-dst");
-    LocalFiles::copy_dir_all_with(
+    qubit_local_files::copy::directory(
         &src,
         &followed_dst,
         LocalCopyDirOptions::new().follow_symlinks(),
@@ -2083,7 +2083,7 @@ fn test_copy_dir_all_with_rejects_windows_name_surrogate_handle() {
         panic!("source file symlink should be created: {error}");
     }
 
-    let error = LocalFiles::copy_dir_all_with(
+    let error = qubit_local_files::copy::directory(
         &src,
         &dst,
         LocalCopyDirOptions::default(),
@@ -2108,7 +2108,7 @@ fn test_copy_dir_all_with_follows_directory_symlink_entry() {
     fs::write(target.join("data.txt"), b"data").unwrap();
     std::os::unix::fs::symlink(&target, src.join("dir-link")).unwrap();
 
-    let stats = LocalFiles::copy_dir_all_with(
+    let stats = qubit_local_files::copy::directory(
         &src,
         &dst,
         LocalCopyDirOptions::new().follow_symlinks(),
@@ -2134,7 +2134,7 @@ fn test_copy_dir_all_with_rejects_directory_symlink_cycle_when_following() {
     fs::create_dir(&src).unwrap();
     std::os::unix::fs::symlink(&src, src.join("loop")).unwrap();
 
-    let error = LocalFiles::copy_dir_all_with(
+    let error = qubit_local_files::copy::directory(
         &src,
         &dst,
         LocalCopyDirOptions::new().follow_symlinks(),
@@ -2159,7 +2159,7 @@ fn test_copy_dir_all_with_rejects_destination_inside_followed_directory_symlink_
     fs::create_dir(&target).unwrap();
     std::os::unix::fs::symlink(&target, src.join("target-link")).unwrap();
 
-    let error = LocalFiles::copy_dir_all_with(
+    let error = qubit_local_files::copy::directory(
         &src,
         &dst,
         LocalCopyDirOptions::new().follow_symlinks(),
@@ -2183,7 +2183,7 @@ fn test_copy_dir_all_with_directory_symlink_options() {
     fs::write(target.join("data.txt"), b"data").unwrap();
     std::os::unix::fs::symlink(&target, &src_link).unwrap();
 
-    let error = LocalFiles::copy_dir_all_with(
+    let error = qubit_local_files::copy::directory(
         &src_link,
         &dst,
         LocalCopyDirOptions::default(),
@@ -2191,7 +2191,7 @@ fn test_copy_dir_all_with_directory_symlink_options() {
     .expect_err("source symlink should be rejected by default");
     assert_eq!(ErrorKind::Unsupported, error.kind());
 
-    let stats = LocalFiles::copy_dir_all_with(
+    let stats = qubit_local_files::copy::directory(
         &src_link,
         &dst,
         LocalCopyDirOptions::new().follow_symlinks(),
@@ -2216,7 +2216,7 @@ fn test_copy_dir_all_with_rejects_unsupported_source_types() {
     let listener =
         UnixListener::bind(&socket).expect("unix socket should be created");
 
-    let error = LocalFiles::copy_dir_all_with(
+    let error = qubit_local_files::copy::directory(
         &src,
         &dst,
         LocalCopyDirOptions::default(),
@@ -2249,7 +2249,7 @@ fn test_copy_dir_all_with_rejects_unsupported_symlink_target_types() {
         UnixListener::bind(&socket).expect("unix socket should be created");
     std::os::unix::fs::symlink(&socket, src.join("socket-link")).unwrap();
 
-    let error = LocalFiles::copy_dir_all_with(
+    let error = qubit_local_files::copy::directory(
         &src,
         &dst,
         LocalCopyDirOptions::new().follow_symlinks(),
@@ -2278,8 +2278,12 @@ fn test_copy_dir_all_with_does_not_preserve_permissions_by_default() {
     )
     .expect("source file permissions should be set");
 
-    LocalFiles::copy_dir_all_with(&src, &dst, LocalCopyDirOptions::default())
-        .expect("directory should be copied with private defaults");
+    qubit_local_files::copy::directory(
+        &src,
+        &dst,
+        LocalCopyDirOptions::default(),
+    )
+    .expect("directory should be copied with private defaults");
 
     assert_eq!(
         0o700,
@@ -2315,7 +2319,7 @@ fn test_copy_dir_all_with_preserves_permissions() {
     )
     .unwrap();
 
-    LocalFiles::copy_dir_all_with(
+    qubit_local_files::copy::directory(
         &src,
         &dst,
         LocalCopyDirOptions::new().preserve_permissions(),
@@ -2347,7 +2351,7 @@ fn test_copy_dir_all_with_preserves_read_only_directory_permissions() {
     fs::write(src.join("data.txt"), b"data").unwrap();
     fs::set_permissions(&src, fs::Permissions::from_mode(0o555)).unwrap();
 
-    LocalFiles::copy_dir_all_with(
+    qubit_local_files::copy::directory(
         &src,
         &dst,
         LocalCopyDirOptions::new().preserve_permissions(),
@@ -2376,7 +2380,7 @@ fn test_copy_dir_all_with_returns_file_copy_error() {
     fs::write(&file, b"data").unwrap();
     fs::set_permissions(&file, fs::Permissions::from_mode(0o000)).unwrap();
 
-    let error = LocalFiles::copy_dir_all_with(
+    let error = qubit_local_files::copy::directory(
         &src,
         &dst,
         LocalCopyDirOptions::default(),
@@ -2395,7 +2399,7 @@ fn test_copy_dir_all_with_returns_destination_create_error() {
     let dst = dir.join("missing-parent").join("dst");
     fs::create_dir(&src).unwrap();
 
-    let error = LocalFiles::copy_dir_all_with(
+    let error = qubit_local_files::copy::directory(
         &src,
         &dst,
         LocalCopyDirOptions::default(),
@@ -2417,7 +2421,7 @@ fn test_copy_dir_all_with_rejects_unsupported_directory_entry() {
     fs::create_dir(&src).unwrap();
     let listener = UnixListener::bind(src.join("socket")).unwrap();
 
-    let error = LocalFiles::copy_dir_all_with(
+    let error = qubit_local_files::copy::directory(
         &src,
         &dst,
         LocalCopyDirOptions::default(),
@@ -2440,7 +2444,7 @@ fn test_copy_dir_all_with_returns_broken_symlink_entry_error_when_following() {
     fs::create_dir(&src).unwrap();
     symlink(src.join("missing"), src.join("broken-link")).unwrap();
 
-    let error = LocalFiles::copy_dir_all_with(
+    let error = qubit_local_files::copy::directory(
         &src,
         &dst,
         LocalCopyDirOptions::new().follow_symlinks(),
@@ -2461,7 +2465,7 @@ fn test_copy_dir_all_with_returns_broken_root_symlink_error_when_following() {
     let dst = dir.join("dst");
     symlink(dir.join("missing"), &src).unwrap();
 
-    let error = LocalFiles::copy_dir_all_with(
+    let error = qubit_local_files::copy::directory(
         &src,
         &dst,
         LocalCopyDirOptions::new().follow_symlinks(),

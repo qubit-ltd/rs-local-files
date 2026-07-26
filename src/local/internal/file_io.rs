@@ -24,13 +24,6 @@ use std::path::Path;
 use std::time::Duration;
 
 use crate::{
-    FileReadOptions,
-    FileWriteMode,
-    FileWriteOptions,
-    LocalFileReader,
-    LocalFileWriter,
-};
-use crate::{
     read,
     write,
 };
@@ -198,6 +191,10 @@ fn prepare_opened_regular_file(
             metadata_result
         };
     let metadata = with_path_context(metadata_result, inspect_operation, path)?;
+    #[cfg(coverage)]
+    if super::coverage_fault::is_enabled("file-handle-type") {
+        return Err(path_not_regular_file_error(path));
+    }
     if !metadata.is_file() {
         return Err(path_not_regular_file_error(path));
     }
@@ -258,27 +255,6 @@ pub(crate) fn open_native_reader_path(
     open_reader_file(path, options.open_retry_timeout())
 }
 
-/// Opens a file reader with the supplied options.
-///
-/// # Parameters
-/// - `path`: File path to open.
-/// - `options`: Read options controlling buffering.
-///
-/// # Returns
-/// A local file reader.
-///
-/// # Errors
-/// Returns an I/O error when `path` cannot be inspected or opened, or when the
-/// target is not a regular file.
-pub(crate) fn open_reader_path(
-    path: &Path,
-    options: FileReadOptions,
-) -> Result<LocalFileReader> {
-    let buffering = options.buffering();
-    open_reader_file(path, options.open_retry_timeout())
-        .map(|file| LocalFileReader::from_file(file, buffering))
-}
-
 /// Opens and validates one unbuffered regular file for writing.
 ///
 /// # Parameters
@@ -296,29 +272,29 @@ pub(crate) fn open_reader_path(
 fn open_writer_file(
     path: &Path,
     create_parent: bool,
-    mode: FileWriteMode,
+    mode: write::Mode,
     open_retry_timeout: Option<Duration>,
 ) -> Result<fs::File> {
     reject_existing_non_file(path)?;
     if create_parent {
         ensure_parent_path(path)?;
     }
-    let should_truncate = mode == FileWriteMode::CreateOrTruncate;
+    let should_truncate = mode == write::Mode::CreateOrTruncate;
     let mut open_options = OpenOptions::new();
     match mode {
-        FileWriteMode::OpenExistingAtStart => {
+        write::Mode::OpenExistingAtStart => {
             open_options.write(true);
         }
-        FileWriteMode::CreateNew => {
+        write::Mode::CreateNew => {
             open_options.write(true).create_new(true);
         }
-        FileWriteMode::CreateOrTruncate => {
+        write::Mode::CreateOrTruncate => {
             open_options.write(true).create(true);
         }
-        FileWriteMode::AppendExisting => {
+        write::Mode::AppendExisting => {
             open_options.append(true);
         }
-        FileWriteMode::AppendOrCreate => {
+        write::Mode::AppendOrCreate => {
             open_options.append(true).create(true);
         }
     }
@@ -357,45 +333,10 @@ pub(crate) fn open_native_writer_path(
     path: &Path,
     options: &write::OpenOptions,
 ) -> Result<fs::File> {
-    let mode = match options.mode() {
-        write::Mode::OpenExistingAtStart => FileWriteMode::OpenExistingAtStart,
-        write::Mode::CreateNew => FileWriteMode::CreateNew,
-        write::Mode::CreateOrTruncate => FileWriteMode::CreateOrTruncate,
-        write::Mode::AppendExisting => FileWriteMode::AppendExisting,
-        write::Mode::AppendOrCreate => FileWriteMode::AppendOrCreate,
-    };
     open_writer_file(
         path,
         options.creates_parents(),
-        mode,
-        options.open_retry_timeout(),
-    )
-}
-
-/// Opens a file writer with the supplied options.
-///
-/// # Parameters
-/// - `path`: File path to open.
-/// - `options`: Write options controlling parent creation, write mode, and
-///   buffering.
-///
-/// # Returns
-/// A local file writer.
-///
-/// # Errors
-/// Returns an I/O error when parent directories cannot be created or the file
-/// cannot be opened with the requested mode, or the target is not a regular
-/// file.
-pub(crate) fn open_writer_path(
-    path: &Path,
-    options: FileWriteOptions,
-) -> Result<LocalFileWriter> {
-    let buffering = options.buffering();
-    open_writer_file(
-        path,
-        options.creates_parent(),
         options.mode(),
         options.open_retry_timeout(),
     )
-    .map(|file| LocalFileWriter::from_file(file, buffering))
 }

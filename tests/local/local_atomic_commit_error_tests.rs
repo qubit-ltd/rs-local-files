@@ -9,10 +9,7 @@
 use std::error::Error as StdError;
 use std::io::Write;
 
-use qubit_local_files::{
-    LocalAtomicDestinationState,
-    LocalFiles,
-};
+use super::api_tests::LocalAtomicDestinationState;
 
 #[cfg(all(coverage, unix))]
 use super::test_support::run_in_coverage_fault_process;
@@ -26,7 +23,7 @@ fn test_atomic_commit_error_exposes_failure_and_retained_writer() {
     let dir = temp_dir("atomic-commit-error");
     let path = dir.join("out.txt");
     fs::write(&path, b"original").expect("destination should be written");
-    let mut writer = LocalFiles::begin_atomic_write(&path)
+    let mut writer = qubit_local_files::atomic::begin(&path)
         .expect("atomic writer should begin");
     writer
         .write_all(b"replacement")
@@ -72,7 +69,7 @@ fn test_atomic_commit_error_reports_terminal_installation_failure() {
             let path = dir.join("out.txt");
             fs::write(&path, b"original")
                 .expect("destination should be written");
-            let mut writer = LocalFiles::begin_atomic_write(&path)
+            let mut writer = qubit_local_files::atomic::begin(&path)
                 .expect("atomic writer should begin");
             writer
                 .write_all(b"replacement")

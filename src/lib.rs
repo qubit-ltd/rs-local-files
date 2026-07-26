@@ -14,6 +14,18 @@
 //! and durable same-directory atomic writes. Existing-file atomic replacement
 //! uses strict platform-native metadata preservation and reports an explicit
 //! post-failure destination state.
+//!
+//! Legacy root-level namespace APIs are intentionally unavailable:
+//!
+//! ```compile_fail
+//! use qubit_local_files::LocalFiles;
+//! ```
+//!
+//! The deprecated metadata compatibility alias is also unavailable:
+//!
+//! ```compile_fail
+//! use qubit_local_files::metadata::read_link;
+//! ```
 
 pub mod atomic;
 pub mod copy;
@@ -28,33 +40,20 @@ pub mod rooted;
 pub mod temp;
 pub mod write;
 
-pub use local::{
-    FileBuffering,
-    FileReadOptions,
-    FileWriteMode,
-    FileWriteOptions,
+pub(crate) use local::{
     LocalAtomicCommitError,
     LocalAtomicDestinationState,
     LocalAtomicWriteError,
     LocalAtomicWriteOptions,
     LocalAtomicWriteStage,
-    LocalAtomicWriter,
     LocalCopyConflictPolicy,
     LocalCopyDirError,
     LocalCopyDirOptions,
     LocalCopyDirStage,
     LocalCopyDirStats,
     LocalCopyTypeConflictPolicy,
-    LocalFileReader,
-    LocalFileWriter,
-    LocalFilenames,
-    LocalFiles,
     LocalPersistError,
     LocalPersistOptions,
     LocalPersistStage,
     LocalRelativePath,
-    LocalRoot,
-    LocalRootAtomicWriter,
-    LocalTempDir,
-    LocalTempFile,
 };

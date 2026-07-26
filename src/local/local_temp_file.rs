@@ -28,15 +28,17 @@ use std::path::{
 use log::warn;
 
 use crate::{
-    LocalFiles,
     LocalPersistError,
     LocalPersistOptions,
     LocalPersistStage,
+    metadata,
 };
 
 use super::internal::{
+    DEFAULT_TEMP_ENTRY_RETRIES,
     absolute_path,
     create_temp_file_in_dir,
+    ensure_parent_path,
     move_file_without_replacing,
     replace_file,
 };
@@ -68,9 +70,9 @@ use super::internal::{
 ///
 /// ```compile_fail
 /// #![deny(unused_must_use)]
-/// use qubit_local_files::LocalTempFile;
+/// use qubit_local_files::temp::TempFile;
 ///
-/// let temporary_file = LocalTempFile::new()?;
+/// let temporary_file = TempFile::new()?;
 /// temporary_file;
 /// # Ok::<(), std::io::Error>(())
 /// ```
@@ -95,7 +97,7 @@ impl LocalTempFile {
             std::env::temp_dir(),
             None,
             None,
-            LocalFiles::DEFAULT_TEMP_ENTRY_RETRIES,
+            DEFAULT_TEMP_ENTRY_RETRIES,
         )
     }
 
@@ -115,7 +117,7 @@ impl LocalTempFile {
             std::env::temp_dir(),
             Some(prefix),
             None,
-            LocalFiles::DEFAULT_TEMP_ENTRY_RETRIES,
+            DEFAULT_TEMP_ENTRY_RETRIES,
         )
     }
 
@@ -137,7 +139,7 @@ impl LocalTempFile {
             std::env::temp_dir(),
             None,
             Some(suffix),
-            LocalFiles::DEFAULT_TEMP_ENTRY_RETRIES,
+            DEFAULT_TEMP_ENTRY_RETRIES,
         )
     }
 
@@ -158,7 +160,7 @@ impl LocalTempFile {
             std::env::temp_dir(),
             Some(prefix),
             Some(suffix),
-            LocalFiles::DEFAULT_TEMP_ENTRY_RETRIES,
+            DEFAULT_TEMP_ENTRY_RETRIES,
         )
     }
 
@@ -233,7 +235,7 @@ impl LocalTempFile {
     /// inspection errors to `false`.
     #[inline(always)]
     pub fn exists(&self) -> Result<bool> {
-        LocalFiles::exists(self.path())
+        metadata::exists(self.path())
     }
 
     /// Reads metadata for the temporary file path.
@@ -245,7 +247,7 @@ impl LocalTempFile {
     /// Returns the I/O error reported by [`fs::metadata`].
     #[inline(always)]
     pub fn metadata(&self) -> Result<fs::Metadata> {
-        LocalFiles::metadata(self.path())
+        metadata::read(self.path())
     }
 
     /// Returns the owned file handle.
@@ -319,9 +321,9 @@ impl LocalTempFile {
     ///
     /// ```compile_fail
     /// #![deny(unused_must_use)]
-    /// use qubit_local_files::LocalTempFile;
+    /// use qubit_local_files::temp::TempFile;
     ///
-    /// let temporary_file = LocalTempFile::new()?;
+    /// let temporary_file = TempFile::new()?;
     /// temporary_file.keep();
     /// # Ok::<(), std::io::Error>(())
     /// ```
@@ -404,7 +406,7 @@ impl LocalTempFile {
     /// copying and deleting, so cross-filesystem moves can fail with `EXDEV` on
     /// Unix or a platform-equivalent error. Replacing an existing target keeps
     /// the temporary file's metadata and does not preserve the replaced
-    /// target's metadata. Use [`LocalFiles::atomic_write`] when replacing
+    /// target's metadata. Use [`crate::atomic::write`] when replacing
     /// contents while strictly preserving supported platform-native metadata
     /// is required.
     /// The source is the filesystem entry currently stored at the generated
@@ -475,7 +477,7 @@ impl LocalTempFile {
                 ));
             }
         };
-        if let Err(error) = LocalFiles::ensure_parent(&target) {
+        if let Err(error) = ensure_parent_path(&target) {
             return Err(LocalPersistError::new(
                 error,
                 self,

@@ -15,11 +15,12 @@ use std::io::{
 
 #[cfg(unix)]
 use qubit_local_files::{
-    FileReadOptions,
-    FileWriteMode,
-    FileWriteOptions,
-    LocalRelativePath,
-    LocalRoot,
+    read,
+    rooted::{
+        Path as LocalRelativePath,
+        Root as LocalRoot,
+    },
+    write,
 };
 
 #[cfg(target_os = "linux")]
@@ -105,7 +106,7 @@ fn assert_injected_rooted_reader_error(
             .expect("relative path should validate");
 
         let error = root
-            .open_reader(&path, FileReadOptions::unbuffered())
+            .open_reader(&path, &read::OpenOptions::default())
             .expect_err("injected rooted reader validation should fail");
 
         if let Some(expected_kind) = expected_kind {
@@ -171,7 +172,7 @@ fn test_open_reader_reports_injected_entry_inspection_error() {
                 .expect("relative path should validate");
 
             let error = root
-                .open_reader(&path, FileReadOptions::unbuffered())
+                .open_reader(&path, &read::OpenOptions::default())
                 .expect_err("injected entry inspection should fail");
 
             assert!(
@@ -206,7 +207,7 @@ fn test_open_writer_preserves_contents_when_rooted_validation_fails() {
             let path = LocalRelativePath::new("data.txt")
                 .expect("relative path should validate");
             let error = root
-                .open_writer(&path, FileWriteOptions::default())
+                .open_writer(&path, &write::OpenOptions::default())
                 .expect_err("injected rooted validation should fail");
 
             assert!(
@@ -242,32 +243,35 @@ fn test_open_writer_supports_all_modes() {
     let mut writer = root
         .open_writer(
             &existing,
-            FileWriteOptions::new(FileWriteMode::OpenExistingAtStart),
+            &write::OpenOptions::new(write::Mode::OpenExistingAtStart),
         )
         .expect("existing file should open at its start");
     writer.write_all(b"X").expect("prefix should be replaced");
-    writer.close().expect("writer should close");
+    drop(writer);
 
     let error = root
-        .open_writer(&existing, FileWriteOptions::new(FileWriteMode::CreateNew))
+        .open_writer(
+            &existing,
+            &write::OpenOptions::new(write::Mode::CreateNew),
+        )
         .expect_err("create-new should reject an existing destination");
     assert_eq!(ErrorKind::AlreadyExists, error.kind());
 
     let mut writer = root
         .open_writer(
             &existing,
-            FileWriteOptions::new(FileWriteMode::AppendExisting),
+            &write::OpenOptions::new(write::Mode::AppendExisting),
         )
         .expect("existing file should open for append");
     writer.write_all(b"Y").expect("suffix should append");
-    writer.close().expect("append writer should close");
+    drop(writer);
 
     let created = LocalRelativePath::new("created.txt")
         .expect("created path should validate");
     let error = root
         .open_writer(
             &created,
-            FileWriteOptions::new(FileWriteMode::AppendExisting),
+            &write::OpenOptions::new(write::Mode::AppendExisting),
         )
         .expect_err("append-existing should reject a missing destination");
     assert_eq!(ErrorKind::NotFound, error.kind());
@@ -275,24 +279,24 @@ fn test_open_writer_supports_all_modes() {
     let mut writer = root
         .open_writer(
             &created,
-            FileWriteOptions::new(FileWriteMode::AppendOrCreate).buffered(),
+            &write::OpenOptions::new(write::Mode::AppendOrCreate),
         )
         .expect("append-or-create should create a buffered writer");
     writer
         .write_all(b"Z")
         .expect("created file should be written");
     writer.flush().expect("buffered writer should flush");
-    writer.close().expect("buffered writer should close");
+    drop(writer);
 
     let new_path =
         LocalRelativePath::new("new.txt").expect("new path should validate");
-    root.open_writer(
-        &new_path,
-        FileWriteOptions::new(FileWriteMode::CreateNew),
-    )
-    .expect("create-new should create a missing file")
-    .close()
-    .expect("new writer should close");
+    let writer = root
+        .open_writer(
+            &new_path,
+            &write::OpenOptions::new(write::Mode::CreateNew),
+        )
+        .expect("create-new should create a missing file");
+    drop(writer);
 
     assert_eq!(
         b"XbcY",
@@ -322,11 +326,11 @@ fn test_rooted_io_rejects_missing_and_wrong_resource_types() {
     let missing = LocalRelativePath::new("missing/file.txt")
         .expect("missing path should validate");
     let error = root
-        .open_reader(&missing, FileReadOptions::unbuffered())
+        .open_reader(&missing, &read::OpenOptions::default())
         .expect_err("missing reader parent should fail");
     assert_eq!(ErrorKind::NotFound, error.kind());
     let error = root
-        .open_writer(&missing, FileWriteOptions::default())
+        .open_writer(&missing, &write::OpenOptions::default())
         .expect_err("missing writer parent should fail without creation");
     assert_eq!(ErrorKind::NotFound, error.kind());
 
@@ -335,13 +339,13 @@ fn test_rooted_io_rejects_missing_and_wrong_resource_types() {
             .expect("resource path should validate");
         assert_eq!(
             ErrorKind::InvalidInput,
-            root.open_reader(&path, FileReadOptions::unbuffered())
+            root.open_reader(&path, &read::OpenOptions::default())
                 .expect_err("reader should reject a non-file")
                 .kind(),
         );
         assert_eq!(
             ErrorKind::InvalidInput,
-            root.open_writer(&path, FileWriteOptions::default())
+            root.open_writer(&path, &write::OpenOptions::default())
                 .expect_err("writer should reject a non-file")
                 .kind(),
         );
@@ -350,7 +354,10 @@ fn test_rooted_io_rejects_missing_and_wrong_resource_types() {
     let invalid_parent = LocalRelativePath::new("parent-file/child.txt")
         .expect("invalid parent path should validate lexically");
     let error = root
-        .open_writer(&invalid_parent, FileWriteOptions::default().with_parent())
+        .open_writer(
+            &invalid_parent,
+            &write::OpenOptions::default().with_parents(),
+        )
         .expect_err("ordinary file parent should be rejected");
     assert_eq!(ErrorKind::InvalidInput, error.kind());
 
@@ -369,7 +376,7 @@ fn test_open_root_rejects_missing_path_and_regular_file() {
 
     assert_eq!(
         ErrorKind::NotFound,
-        LocalRoot::open(fixture.join("missing"))
+        LocalRoot::open(&fixture.join("missing"))
             .expect_err("missing root should fail")
             .kind(),
     );
@@ -396,7 +403,7 @@ fn test_open_reader_and_writer_use_root_capability() {
     let input = LocalRelativePath::new("input.txt")
         .expect("reader path should validate");
     let mut reader = root
-        .open_reader(&input, FileReadOptions::buffered())
+        .open_reader(&input, &read::OpenOptions::default())
         .expect("rooted reader should open");
     let mut content = String::new();
     reader
@@ -406,12 +413,12 @@ fn test_open_reader_and_writer_use_root_capability() {
     let output = LocalRelativePath::new("nested/output.txt")
         .expect("writer path should validate");
     let mut writer = root
-        .open_writer(&output, FileWriteOptions::default().with_parent())
+        .open_writer(&output, &write::OpenOptions::default().with_parents())
         .expect("rooted writer should create parents");
     writer
         .write_all(b"output")
         .expect("rooted writer should write");
-    writer.close().expect("rooted writer should close");
+    drop(writer);
 
     assert_eq!("input", content);
     assert_eq!(root_path.as_path(), root.path());
@@ -441,7 +448,7 @@ fn test_open_rooted_reader_waits_for_conflicting_file_lease() {
         let relative = LocalRelativePath::new("data.txt")
             .expect("reader path should validate");
         sender
-            .send(root.open_reader(&relative, FileReadOptions::unbuffered()))
+            .send(root.open_reader(&relative, &read::OpenOptions::default()))
             .expect("reader result should be sent");
     });
 
@@ -489,7 +496,7 @@ fn test_open_rooted_writer_waits_for_conflicting_file_lease() {
         sender
             .send(root.open_writer(
                 &relative,
-                FileWriteOptions::new(FileWriteMode::OpenExistingAtStart),
+                &write::OpenOptions::new(write::Mode::OpenExistingAtStart),
             ))
             .expect("writer result should be sent");
     });
@@ -540,14 +547,14 @@ fn test_open_rooted_reader_and_writer_timeout_report_lease_conflicts() {
             let result = if is_writer {
                 root.open_writer(
                     &relative,
-                    FileWriteOptions::new(FileWriteMode::OpenExistingAtStart)
+                    &write::OpenOptions::new(write::Mode::OpenExistingAtStart)
                         .with_open_retry_timeout(std::time::Duration::ZERO),
                 )
                 .map(drop)
             } else {
                 root.open_reader(
                     &relative,
-                    FileReadOptions::unbuffered()
+                    &read::OpenOptions::default()
                         .with_open_retry_timeout(std::time::Duration::ZERO),
                 )
                 .map(drop)
@@ -589,7 +596,7 @@ fn test_open_reader_survives_root_rename() {
     let relative = LocalRelativePath::new("data.txt")
         .expect("reader path should validate");
     let mut reader = root
-        .open_reader(&relative, FileReadOptions::unbuffered())
+        .open_reader(&relative, &read::OpenOptions::default())
         .expect("anchored reader should open after root rename");
     let mut content = String::new();
     reader
@@ -619,7 +626,7 @@ fn test_open_writer_survives_intermediate_directory_replacement() {
     let destination = LocalRelativePath::new("parent/data.txt")
         .expect("destination should validate");
     let mut writer = root
-        .open_writer(&destination, FileWriteOptions::default())
+        .open_writer(&destination, &write::OpenOptions::default())
         .expect("rooted writer should open");
     fs::rename(&parent_path, &moved_parent_path)
         .expect("intermediate parent should be renamed");
@@ -629,7 +636,7 @@ fn test_open_writer_survives_intermediate_directory_replacement() {
     writer
         .write_all(b"anchored")
         .expect("anchored writer should write");
-    writer.close().expect("anchored writer should close");
+    drop(writer);
 
     assert_eq!(
         b"anchored",
@@ -659,7 +666,7 @@ fn test_rooted_io_rejects_symbolic_links() {
         .expect("outside fixture should be written");
     symlink(&outside, fixture.join("root-link"))
         .expect("root symlink should be created");
-    let error = LocalRoot::open(fixture.join("root-link"))
+    let error = LocalRoot::open(&fixture.join("root-link"))
         .expect_err("root symlink should be rejected");
     assert_eq!(ErrorKind::InvalidInput, error.kind());
 
@@ -676,10 +683,10 @@ fn test_rooted_io_rejects_symbolic_links() {
         let relative = LocalRelativePath::new(invalid)
             .expect("symlink path should be lexically valid");
         let read_error = root
-            .open_reader(&relative, FileReadOptions::unbuffered())
+            .open_reader(&relative, &read::OpenOptions::default())
             .expect_err("rooted reader should reject symlinks");
         let write_error = root
-            .open_writer(&relative, FileWriteOptions::default())
+            .open_writer(&relative, &write::OpenOptions::default())
             .expect_err("rooted writer should reject symlinks");
         assert_eq!(ErrorKind::InvalidInput, read_error.kind());
         assert_eq!(ErrorKind::InvalidInput, write_error.kind());
@@ -712,12 +719,12 @@ fn test_open_root_allows_symlinked_ancestor() {
     symlink(&real_parent, &alias_parent)
         .expect("ancestor symbolic link should be created");
 
-    let root = LocalRoot::open(alias_parent.join("root"))
+    let root = LocalRoot::open(&alias_parent.join("root"))
         .expect("ancestor symbolic link should be resolved");
     let path = LocalRelativePath::new("data.txt")
         .expect("relative path should validate");
     let mut reader = root
-        .open_reader(&path, FileReadOptions::unbuffered())
+        .open_reader(&path, &read::OpenOptions::default())
         .expect("rooted reader should open through the anchored root");
     let mut content = Vec::new();
     reader
@@ -736,9 +743,9 @@ fn test_open_root_allows_symlinked_ancestor() {
 fn test_open_returns_unsupported_without_secure_backend() {
     use std::io::ErrorKind;
 
-    use qubit_local_files::LocalRoot;
+    use qubit_local_files::rooted::Root;
 
-    let error = LocalRoot::open(".")
+    let error = Root::open(std::path::Path::new("."))
         .expect_err("unsupported platform should reject rooted operations");
     assert_eq!(ErrorKind::Unsupported, error.kind());
 }

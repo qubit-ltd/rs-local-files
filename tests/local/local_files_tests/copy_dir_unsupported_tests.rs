@@ -8,11 +8,10 @@
 
 use std::io::ErrorKind;
 
-use qubit_local_files::{
+use super::super::api_tests::{
     LocalCopyConflictPolicy,
     LocalCopyDirOptions,
     LocalCopyDirStage,
-    LocalFiles,
 };
 
 use super::super::test_support::{
@@ -32,7 +31,7 @@ fn test_copy_dir_fail_and_skip_require_native_no_replace_installation() {
         fs::write(source.join("data.txt"), b"payload")
             .expect("source file should be written");
 
-        let error = LocalFiles::copy_dir_all_with(
+        let error = qubit_local_files::copy::directory(
             &source,
             &destination,
             LocalCopyDirOptions::new().with_conflict(conflict),
@@ -56,7 +55,7 @@ fn test_copy_dir_overwrite_uses_ordinary_replacement() {
     fs::write(source.join("data.txt"), b"payload")
         .expect("source file should be written");
 
-    LocalFiles::copy_dir_all_with(
+    qubit_local_files::copy::directory(
         &source,
         &destination,
         LocalCopyDirOptions::new()

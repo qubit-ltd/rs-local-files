@@ -53,7 +53,7 @@ use super::internal::{
     verify_rooted_atomic_destination_identity,
 };
 
-/// A streaming atomic writer contained by an open [`crate::LocalRoot`].
+/// A streaming atomic writer contained by an open [`crate::rooted::Root`].
 ///
 /// Staging, replacement, synchronization, and cleanup use the destination
 /// parent descriptor and entry names. No diagnostic path is reused as
@@ -67,10 +67,13 @@ use super::internal::{
 ///
 /// ```compile_fail
 /// #![deny(unused_must_use)]
-/// use qubit_local_files::{LocalRelativePath, LocalRoot};
+/// use qubit_local_files::rooted::{
+///     Path,
+///     Root,
+/// };
 ///
-/// let root = LocalRoot::open(".").unwrap();
-/// let path = LocalRelativePath::new("result.bin").unwrap();
+/// let root = Root::open(".").unwrap();
+/// let path = Path::new("result.bin").unwrap();
 /// let writer = root.begin_atomic_write(&path).unwrap();
 /// writer;
 /// ```

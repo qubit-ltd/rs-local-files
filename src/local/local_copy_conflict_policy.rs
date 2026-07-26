@@ -11,19 +11,19 @@
 ///
 /// ```compile_fail
 /// #![deny(unused_must_use)]
-/// use qubit_local_files::LocalCopyConflictPolicy;
+/// use qubit_local_files::copy::ConflictPolicy;
 ///
-/// LocalCopyConflictPolicy::default();
+/// ConflictPolicy::default();
 /// ```
 ///
 /// ```compile_fail
-/// use qubit_local_files::LocalCopyConflictPolicy;
+/// use qubit_local_files::copy::ConflictPolicy;
 ///
-/// fn classify(policy: LocalCopyConflictPolicy) {
+/// fn classify(policy: ConflictPolicy) {
 ///     match policy {
-///         LocalCopyConflictPolicy::Fail => {}
-///         LocalCopyConflictPolicy::Overwrite => {}
-///         LocalCopyConflictPolicy::Skip => {}
+///         ConflictPolicy::Fail => {}
+///         ConflictPolicy::Overwrite => {}
+///         ConflictPolicy::Skip => {}
 ///     }
 /// }
 /// ```

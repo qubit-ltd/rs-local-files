@@ -8,20 +8,17 @@
 
 use std::io::Read;
 
-use qubit_local_files::read::{
-    OpenOptions,
-    open,
-};
+use qubit_local_files::read::open;
 use tempfile::tempdir;
 
+/// Verifies that the concise read entry point uses default open options.
 #[test]
-fn opens_a_regular_file_for_reading() {
+fn test_open_uses_default_options() {
     let directory = tempdir().expect("temporary directory should be created");
     let path = directory.path().join("payload.txt");
     std::fs::write(&path, b"payload").expect("fixture should be written");
 
-    let mut file =
-        open(&path, &OpenOptions::default()).expect("regular file should open");
+    let mut file = open(&path).expect("regular file should open");
     let mut content = String::new();
     file.read_to_string(&mut content)
         .expect("content should be readable");

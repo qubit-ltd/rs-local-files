@@ -18,7 +18,7 @@ use std::path::{
     PathBuf,
 };
 
-/// An owned, validated path accepted by [`crate::LocalRoot`].
+/// An owned, validated path accepted by [`crate::rooted::Root`].
 ///
 /// The path is non-empty and contains only normal relative components. This
 /// lexical type prevents accidental unchecked input, while the open root

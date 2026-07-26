@@ -8,7 +8,7 @@
 
 use std::time::Duration;
 
-use qubit_local_files::{
+use super::api_tests::{
     LocalCopyConflictPolicy,
     LocalCopyDirOptions,
     LocalCopyTypeConflictPolicy,

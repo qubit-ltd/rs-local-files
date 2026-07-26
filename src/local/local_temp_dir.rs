@@ -10,6 +10,7 @@
 use std::ffi::OsString;
 use std::fs::{
     self,
+    File,
     Metadata,
     ReadDir,
 };
@@ -26,20 +27,21 @@ use std::path::{
 use log::warn;
 
 use crate::{
-    FileReadOptions,
-    FileWriteOptions,
-    LocalFileReader,
-    LocalFileWriter,
-    LocalFiles,
     LocalPersistError,
     LocalPersistStage,
     LocalRelativePath,
+    directory,
+    metadata,
+    read,
+    write,
 };
 
 use super::internal::{
+    DEFAULT_TEMP_ENTRY_RETRIES,
     absolute_path,
     create_private_dir,
     create_temp_dir_in_dir,
+    ensure_parent_path,
     move_directory_without_replacing,
 };
 
@@ -69,9 +71,9 @@ use super::internal::{
 ///
 /// ```compile_fail
 /// #![deny(unused_must_use)]
-/// use qubit_local_files::LocalTempDir;
+/// use qubit_local_files::temp::TempDir;
 ///
-/// let temporary_dir = LocalTempDir::new()?;
+/// let temporary_dir = TempDir::new()?;
 /// temporary_dir;
 /// # Ok::<(), std::io::Error>(())
 /// ```
@@ -90,11 +92,7 @@ impl LocalTempDir {
     /// created or a unique temporary directory cannot be created.
     #[inline(always)]
     pub fn new() -> Result<Self> {
-        Self::in_dir(
-            std::env::temp_dir(),
-            None,
-            LocalFiles::DEFAULT_TEMP_ENTRY_RETRIES,
-        )
+        Self::in_dir(std::env::temp_dir(), None, DEFAULT_TEMP_ENTRY_RETRIES)
     }
 
     /// Creates a temporary directory in the process temporary directory.
@@ -111,7 +109,7 @@ impl LocalTempDir {
         Self::in_dir(
             std::env::temp_dir(),
             Some(prefix),
-            LocalFiles::DEFAULT_TEMP_ENTRY_RETRIES,
+            DEFAULT_TEMP_ENTRY_RETRIES,
         )
     }
 
@@ -169,7 +167,7 @@ impl LocalTempDir {
     /// inspection errors to `false`.
     #[inline(always)]
     pub fn exists(&self) -> Result<bool> {
-        LocalFiles::exists(self.path())
+        metadata::exists(self.path())
     }
 
     /// Reads metadata for the temporary directory path.
@@ -181,7 +179,7 @@ impl LocalTempDir {
     /// Returns the I/O error reported by [`fs::metadata`].
     #[inline(always)]
     pub fn metadata(&self) -> Result<Metadata> {
-        LocalFiles::metadata(self.path())
+        metadata::read(self.path())
     }
 
     /// Lists direct children of the temporary directory.
@@ -193,7 +191,7 @@ impl LocalTempDir {
     /// Returns the I/O error reported by [`fs::read_dir`].
     #[inline(always)]
     pub fn list(&self) -> Result<ReadDir> {
-        LocalFiles::list(self.path())
+        directory::read(self.path())
     }
 
     /// Resolves a relative child path inside the temporary directory.
@@ -268,27 +266,43 @@ impl LocalTempDir {
     /// does not defend against concurrent path replacement by an untrusted
     /// actor.
     ///
-    /// On Unix, a lease-conflicting defensive open is retried to preserve
-    /// ordinary blocking-open behavior. Use
-    /// [`FileReadOptions::with_open_retry_timeout`] to bound that wait; the
-    /// default is unbounded.
-    ///
     /// # Parameters
     /// - `child`: Relative child file path.
-    /// - `options`: Read options controlling buffering.
     ///
     /// # Returns
-    /// A reader for the child file.
+    /// An unbuffered standard-library file handle.
     ///
     /// # Errors
     /// Returns an I/O error when the child path is invalid, escapes the
-    /// temporary directory, is not a file, cannot be opened, or requests an
-    /// invalid buffer capacity.
-    pub fn open_child_reader<P>(
+    /// temporary directory, is not a file, or cannot be opened.
+    #[inline]
+    pub fn open_child_reader<P>(&self, child: P) -> Result<File>
+    where
+        P: AsRef<Path>,
+    {
+        self.open_child_reader_with(child, &read::OpenOptions::default())
+    }
+
+    /// Opens a child file for reading with explicit options.
+    ///
+    /// The same lexical and filesystem containment checks as
+    /// [`Self::open_child_reader`] apply.
+    ///
+    /// # Parameters
+    /// - `child`: Relative child file path.
+    /// - `options`: Read-open retry policy.
+    ///
+    /// # Returns
+    /// An unbuffered standard-library file handle.
+    ///
+    /// # Errors
+    /// Returns an I/O error when the child path is invalid, escapes the
+    /// temporary directory, is not a file, or cannot be opened.
+    pub fn open_child_reader_with<P>(
         &self,
         child: P,
-        options: FileReadOptions,
-    ) -> Result<LocalFileReader>
+        options: &read::OpenOptions,
+    ) -> Result<File>
     where
         P: AsRef<Path>,
     {
@@ -296,7 +310,7 @@ impl LocalTempDir {
         let _ = self.child_path(child)?;
         let path = self.path().join(child);
         ensure_child_file_inside(self.path(), &path)?;
-        LocalFiles::open_reader(path, options)
+        read::open_with(&path, options)
     }
 
     /// Opens a child file for writing.
@@ -312,18 +326,12 @@ impl LocalTempDir {
     /// is not a sandbox boundary when an untrusted actor can mutate the tree
     /// concurrently.
     ///
-    /// On Unix, a lease-conflicting defensive open is retried to preserve
-    /// ordinary blocking-open behavior. Use
-    /// [`FileWriteOptions::with_open_retry_timeout`] to bound that wait; the
-    /// default is unbounded.
-    ///
     /// # Parameters
     /// - `child`: Relative child file path.
-    /// - `options`: Write options controlling parent creation, write mode, and
-    ///   buffering.
+    /// - `options`: Write-open mode, parent creation, and retry policy.
     ///
     /// # Returns
-    /// A writer for the child file.
+    /// An unbuffered standard-library file handle.
     ///
     /// # Errors
     /// Returns an I/O error when the child path is invalid, parent directories
@@ -333,8 +341,8 @@ impl LocalTempDir {
     pub fn open_child_writer<P>(
         &self,
         child: P,
-        options: FileWriteOptions,
-    ) -> Result<LocalFileWriter>
+        options: &write::OpenOptions,
+    ) -> Result<File>
     where
         P: AsRef<Path>,
     {
@@ -345,9 +353,9 @@ impl LocalTempDir {
             self.path(),
             child,
             &path,
-            options.creates_parent(),
+            options.creates_parents(),
         )?;
-        LocalFiles::open_writer(path, options)
+        write::open(&path, options)
     }
 
     /// Removes the temporary directory immediately.
@@ -381,9 +389,9 @@ impl LocalTempDir {
     ///
     /// ```compile_fail
     /// #![deny(unused_must_use)]
-    /// use qubit_local_files::LocalTempDir;
+    /// use qubit_local_files::temp::TempDir;
     ///
-    /// let temporary_dir = LocalTempDir::new()?;
+    /// let temporary_dir = TempDir::new()?;
     /// temporary_dir.keep();
     /// # Ok::<(), std::io::Error>(())
     /// ```
@@ -449,7 +457,7 @@ impl LocalTempDir {
                 ));
             }
         };
-        if let Err(error) = LocalFiles::ensure_parent(&target) {
+        if let Err(error) = ensure_parent_path(&target) {
             return Err(LocalPersistError::new(
                 error,
                 self,

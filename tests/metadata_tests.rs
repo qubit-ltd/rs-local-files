@@ -30,9 +30,4 @@ fn test_metadata_read_entry_points_inspect_files() {
             .expect("unfollowed metadata should be available")
             .is_file()
     );
-    #[allow(deprecated)]
-    let compatibility_metadata =
-        qubit_local_files::metadata::read_link(file.path())
-            .expect("compatibility metadata should be available");
-    assert!(compatibility_metadata.is_file());
 }

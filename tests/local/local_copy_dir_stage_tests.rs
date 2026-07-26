@@ -6,7 +6,7 @@
 //    Licensed under the Apache License, Version 2.0.
 // =============================================================================
 
-use qubit_local_files::LocalCopyDirStage;
+use super::api_tests::LocalCopyDirStage;
 
 /// Verifies that every public recursive-copy stage remains distinguishable.
 #[test]

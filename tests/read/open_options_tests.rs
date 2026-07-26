@@ -34,15 +34,17 @@ fn test_open_options_sets_retry_timeout() {
     );
 }
 
-/// Verifies that the native read API returns the standard file handle.
+/// Verifies that explicit read options return the standard file handle.
 #[test]
-fn test_open_returns_std_file() {
+fn test_open_with_returns_std_file() {
     let directory =
         tempfile::tempdir().expect("a temporary directory should be created");
     let path = directory.path().join("input.bin");
     std::fs::write(&path, b"payload").expect("the fixture should be written");
 
-    let file: File = read::open(&path, &OpenOptions::default())
+    let options = OpenOptions::default()
+        .with_open_retry_timeout(Duration::from_millis(25));
+    let file: File = read::open_with(&path, &options)
         .expect("the regular file should open for reading");
 
     assert_eq!(

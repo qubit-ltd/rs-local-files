@@ -40,3 +40,31 @@ fn test_atomic_begin_entry_points_install_files() {
     assert_eq!(b"default", std::fs::read(nested).unwrap().as_slice());
     assert_eq!(b"explicit", std::fs::read(explicit).unwrap().as_slice());
 }
+
+/// Verifies the one-shot atomic entry points publish complete contents.
+#[test]
+fn test_atomic_write_entry_points_install_files() {
+    let directory =
+        tempfile::tempdir().expect("a temporary directory should exist");
+    let bytes_path = directory.path().join("nested/bytes.txt");
+
+    atomic::write(&bytes_path, b"bytes")
+        .expect("one-shot bytes should be installed");
+
+    let callback_path = directory.path().join("callback.txt");
+    atomic::write_with(&callback_path, |writer| writer.write_all(b"callback"))
+        .expect("callback bytes should be installed");
+
+    assert_eq!(
+        b"bytes",
+        std::fs::read(bytes_path)
+            .expect("byte destination should be readable")
+            .as_slice()
+    );
+    assert_eq!(
+        b"callback",
+        std::fs::read(callback_path)
+            .expect("callback destination should be readable")
+            .as_slice()
+    );
+}

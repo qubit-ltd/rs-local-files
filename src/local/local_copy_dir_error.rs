@@ -30,9 +30,9 @@ use crate::{
 /// mutate the stage, paths, statistics, or retained errors independently.
 ///
 /// ```compile_fail
-/// use qubit_local_files::LocalCopyDirError;
+/// use qubit_local_files::copy::Error;
 ///
-/// fn overwrite_stage(error: LocalCopyDirError) {
+/// fn overwrite_stage(error: CopyError) {
 ///     let _ = error.stage;
 /// }
 /// ```

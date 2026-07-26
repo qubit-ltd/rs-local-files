@@ -34,14 +34,7 @@ use std::path::{
 };
 
 use crate::{
-    FileReadOptions,
-    FileWriteMode,
-    FileWriteOptions,
-    LocalFileReader,
-    LocalFileWriter,
     LocalRelativePath,
-};
-use crate::{
     read,
     write,
 };
@@ -143,56 +136,6 @@ pub(crate) fn read_rooted_symlink_metadata(
     Ok(unsafe { status.assume_init() })
 }
 
-/// Opens an ordinary reader relative to an anchored root descriptor.
-///
-/// # Parameters
-///
-/// * `root` - Open root directory authority.
-/// * `diagnostic_root` - Path used only to contextualize errors.
-/// * `path` - Validated relative target path.
-/// * `options` - Buffering options for the returned reader.
-///
-/// # Returns
-///
-/// A reader for the opened regular file.
-///
-/// # Errors
-///
-/// Returns a contextual error for traversal, symbolic-link, resource-type,
-/// open, metadata, or descriptor-status failures.
-pub(crate) fn open_rooted_reader(
-    root: &File,
-    diagnostic_root: &Path,
-    path: &LocalRelativePath,
-    options: FileReadOptions,
-) -> Result<LocalFileReader> {
-    let diagnostic_path = diagnostic_root.join(path.as_path());
-    let (parent, name, _parent_dirs_to_sync) = open_rooted_parent(
-        root,
-        &diagnostic_path,
-        path,
-        RootedParentMode::OpenExisting,
-    )?
-    .into_parts();
-    reject_existing_non_file(&parent, &name, &diagnostic_path)?;
-    let flags =
-        libc::O_RDONLY | libc::O_NOFOLLOW | libc::O_CLOEXEC | libc::O_NONBLOCK;
-    let file = rooted_open_result(
-        open_with_nonblocking_retry(options.open_retry_timeout(), || {
-            open_file_at(&parent, &name, flags, 0)
-        }),
-        "open rooted file reader",
-        &diagnostic_path,
-    )?;
-    let buffering = options.buffering();
-    prepare_opened_rooted_regular_file(
-        &file,
-        "restore blocking rooted file reader",
-        &diagnostic_path,
-    )
-    .map(|()| LocalFileReader::from_file(file, buffering))
-}
-
 /// Opens a native file reader relative to an anchored root descriptor.
 pub(crate) fn open_rooted_native_reader(
     root: &File,
@@ -224,80 +167,6 @@ pub(crate) fn open_rooted_native_reader(
         &diagnostic_path,
     )?;
     Ok(file)
-}
-
-/// Opens an ordinary writer relative to an anchored root descriptor.
-///
-/// # Parameters
-///
-/// * `root` - Open root directory authority.
-/// * `diagnostic_root` - Path used only to contextualize errors.
-/// * `path` - Validated relative target path.
-/// * `options` - Parent, mode, and buffering options.
-///
-/// # Returns
-///
-/// A writer for the opened regular file.
-///
-/// # Errors
-///
-/// Returns a contextual error for traversal, parent creation, symbolic-link,
-/// resource-type, open, metadata, or descriptor-status failures.
-pub(crate) fn open_rooted_writer(
-    root: &File,
-    diagnostic_root: &Path,
-    path: &LocalRelativePath,
-    options: FileWriteOptions,
-) -> Result<LocalFileWriter> {
-    let diagnostic_path = diagnostic_root.join(path.as_path());
-    let parent_mode = if options.creates_parent() {
-        RootedParentMode::CreateMissing
-    } else {
-        RootedParentMode::OpenExisting
-    };
-    let (parent, name, _parent_dirs_to_sync) =
-        open_rooted_parent(root, &diagnostic_path, path, parent_mode)?
-            .into_parts();
-    reject_existing_non_file(&parent, &name, &diagnostic_path)?;
-    let mode = options.mode();
-    let should_truncate = mode == FileWriteMode::CreateOrTruncate;
-    let mut flags = libc::O_NOFOLLOW | libc::O_CLOEXEC | libc::O_NONBLOCK;
-    match mode {
-        FileWriteMode::OpenExistingAtStart => flags |= libc::O_WRONLY,
-        FileWriteMode::CreateNew => {
-            flags |= libc::O_WRONLY | libc::O_CREAT | libc::O_EXCL;
-        }
-        FileWriteMode::CreateOrTruncate => {
-            flags |= libc::O_WRONLY | libc::O_CREAT;
-        }
-        FileWriteMode::AppendExisting => {
-            flags |= libc::O_WRONLY | libc::O_APPEND;
-        }
-        FileWriteMode::AppendOrCreate => {
-            flags |= libc::O_WRONLY | libc::O_APPEND | libc::O_CREAT;
-        }
-    }
-    let file = rooted_open_result(
-        open_with_nonblocking_retry(options.open_retry_timeout(), || {
-            open_file_at(&parent, &name, flags, 0o600)
-        }),
-        "open rooted file writer",
-        &diagnostic_path,
-    )?;
-    let buffering = options.buffering();
-    prepare_opened_rooted_regular_file(
-        &file,
-        "restore blocking rooted file writer",
-        &diagnostic_path,
-    )?;
-    if should_truncate {
-        with_path_context(
-            file.set_len(0),
-            "truncate opened rooted file writer",
-            &diagnostic_path,
-        )?;
-    }
-    Ok(LocalFileWriter::from_file(file, buffering))
 }
 
 /// Opens a native file writer relative to an anchored root descriptor.

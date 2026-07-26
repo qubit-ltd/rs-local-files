@@ -13,22 +13,22 @@
 /// matches must retain a wildcard arm.
 ///
 /// ```compile_fail
-/// use qubit_local_files::LocalPersistStage;
+/// use qubit_local_files::temp::PersistStage;
 ///
-/// fn classify(stage: LocalPersistStage) {
+/// fn classify(stage: PersistStage) {
 ///     match stage {
-///         LocalPersistStage::ResolveTarget => {}
-///         LocalPersistStage::PrepareParent => {}
-///         LocalPersistStage::InstallDestination => {}
+///         PersistStage::ResolveTarget => {}
+///         PersistStage::PrepareParent => {}
+///         PersistStage::InstallDestination => {}
 ///     }
 /// }
 /// ```
 ///
 /// ```compile_fail
 /// #![deny(unused_must_use)]
-/// use qubit_local_files::LocalPersistStage;
+/// use qubit_local_files::temp::PersistStage;
 ///
-/// LocalPersistStage::ResolveTarget.clone();
+/// PersistStage::ResolveTarget.clone();
 /// ```
 #[must_use]
 #[non_exhaustive]

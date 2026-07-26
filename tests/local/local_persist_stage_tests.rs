@@ -6,7 +6,7 @@
 //    Licensed under the Apache License, Version 2.0.
 // =============================================================================
 
-use qubit_local_files::LocalPersistStage;
+use super::api_tests::LocalPersistStage;
 
 #[test]
 fn test_persist_stage_variants_are_distinct_and_debuggable() {

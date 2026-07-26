@@ -7,7 +7,7 @@
 // =============================================================================
 //! Automatically cleaned local temporary entries.
 
-pub use crate::{
+pub use crate::local::{
     LocalPersistError as PersistError,
     LocalPersistOptions as PersistOptions,
     LocalPersistStage as PersistStage,

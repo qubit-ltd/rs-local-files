@@ -6,14 +6,16 @@
 //    Licensed under the Apache License, Version 2.0.
 // =============================================================================
 
+#[cfg(unix)]
 use std::io::{
     Read,
     Write,
 };
 
+use qubit_local_files::rooted;
+#[cfg(unix)]
 use qubit_local_files::{
     read,
-    rooted,
     write,
 };
 

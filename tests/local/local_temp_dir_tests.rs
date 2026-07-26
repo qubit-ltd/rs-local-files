@@ -6,15 +6,13 @@
 //    Licensed under the Apache License, Version 2.0.
 // =============================================================================
 
+use super::api_tests::LocalPersistStage;
 #[cfg(unix)]
 use super::test_support::PermissionsExt;
 use super::test_support::{
     CURRENT_DIR_LOCK,
     CurrentDirGuard,
     ErrorKind,
-    FileReadOptions,
-    FileWriteMode,
-    FileWriteOptions,
     LocalTempDir,
     Read,
     Write,
@@ -22,7 +20,7 @@ use super::test_support::{
     fs,
     temp_dir,
 };
-use qubit_local_files::LocalPersistStage;
+use qubit_local_files::write;
 
 #[test]
 fn test_temp_dir_exposes_absolute_location_after_cwd_change() {
@@ -364,10 +362,11 @@ fn test_temp_dir_child_io_rejects_unsafe_paths() {
         .expect("temp dir should be created");
 
     let read_error = temp_dir
-        .open_child_reader("../outside.txt", FileReadOptions::default())
+        .open_child_reader("../outside.txt")
         .expect_err("unsafe reader path should be rejected");
+    let options = write::OpenOptions::default();
     let write_error = temp_dir
-        .open_child_writer("../outside.txt", FileWriteOptions::default())
+        .open_child_writer("../outside.txt", &options)
         .expect_err("unsafe writer path should be rejected");
 
     assert_eq!(ErrorKind::InvalidInput, read_error.kind());
@@ -432,21 +431,16 @@ fn test_temp_dir_list_and_child_reader_writer_use_shared_options() {
     let child = "nested/data.txt";
 
     {
+        let options =
+            write::OpenOptions::new(write::Mode::CreateNew).with_parents();
         let mut writer = temp_dir
-            .open_child_writer(
-                child,
-                FileWriteOptions::new(FileWriteMode::CreateNew)
-                    .with_parent()
-                    .buffered_with_capacity(8)
-                    .expect("positive buffer capacity should be accepted"),
-            )
+            .open_child_writer(child, &options)
             .expect("child writer should create parent directories");
         writer.write_all(b"payload").unwrap();
-        writer.close().unwrap();
     }
 
     let mut reader = temp_dir
-        .open_child_reader(child, FileReadOptions::buffered())
+        .open_child_reader(child)
         .expect("child reader should open a child file");
     let mut content = Vec::new();
     reader.read_to_end(&mut content).unwrap();
@@ -458,7 +452,7 @@ fn test_temp_dir_list_and_child_reader_writer_use_shared_options() {
         .collect::<Vec<_>>();
     entries.sort();
     let error = temp_dir
-        .open_child_reader("nested", FileReadOptions::default())
+        .open_child_reader("nested")
         .expect_err("child reader should reject directories");
 
     assert_eq!(b"payload", content.as_slice());
@@ -478,21 +472,19 @@ fn test_temp_dir_open_child_writer_validates_existing_parent_and_target() {
     fs::write(temp_dir.path().join("nested/existing.txt"), b"old").unwrap();
 
     {
+        let options = write::OpenOptions::new(write::Mode::AppendExisting);
         let mut writer = temp_dir
-            .open_child_writer(
-                "nested/existing.txt",
-                FileWriteOptions::new(FileWriteMode::AppendExisting),
-            )
+            .open_child_writer("nested/existing.txt", &options)
             .expect("existing child file should open for append");
         writer.write_all(b"-new").unwrap();
-        writer.close().unwrap();
     }
 
+    let options = write::OpenOptions::default();
     let missing_parent_error = temp_dir
-        .open_child_writer("missing/file.txt", FileWriteOptions::default())
+        .open_child_writer("missing/file.txt", &options)
         .expect_err("missing parent should be rejected without create_parent");
     let directory_error = temp_dir
-        .open_child_writer("nested", FileWriteOptions::default())
+        .open_child_writer("nested", &options)
         .expect_err("directory target should be rejected");
 
     assert_eq!(
@@ -514,8 +506,9 @@ fn test_temp_dir_open_child_writer_returns_metadata_error() {
         .expect("temp dir should be created");
     let long_name = "x".repeat(10_000);
 
+    let options = write::OpenOptions::default();
     let error = temp_dir
-        .open_child_writer(long_name, FileWriteOptions::default())
+        .open_child_writer(long_name, &options)
         .expect_err("filesystem metadata errors should be returned");
 
     assert_ne!(ErrorKind::NotFound, error.kind());
@@ -533,8 +526,9 @@ fn test_temp_dir_open_child_writer_rejects_dangling_symlink_escape() {
     std::os::unix::fs::symlink(&outside, &link)
         .expect("dangling symlink should be created");
 
+    let options = write::OpenOptions::default();
     let error = temp_dir
-        .open_child_writer("link.txt", FileWriteOptions::default())
+        .open_child_writer("link.txt", &options)
         .expect_err("dangling final symlink should be rejected");
 
     assert_eq!(ErrorKind::InvalidInput, error.kind());
@@ -553,11 +547,9 @@ fn test_temp_dir_child_reader_rejects_symlink_escape() {
     std::os::unix::fs::symlink(&outside, temp_dir.path().join("link.txt"))
         .unwrap();
 
-    let error = temp_dir
-        .open_child_reader("link.txt", FileReadOptions::default())
-        .expect_err(
-            "child symlink escaping the temp directory should be rejected",
-        );
+    let error = temp_dir.open_child_reader("link.txt").expect_err(
+        "child symlink escaping the temp directory should be rejected",
+    );
 
     assert_eq!(ErrorKind::InvalidInput, error.kind());
     fs::remove_dir_all(dir).unwrap();

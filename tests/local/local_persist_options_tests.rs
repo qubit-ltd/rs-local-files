@@ -6,7 +6,7 @@
 //    Licensed under the Apache License, Version 2.0.
 // =============================================================================
 
-use qubit_local_files::LocalPersistOptions;
+use super::api_tests::LocalPersistOptions;
 
 #[test]
 fn test_persist_options_default_is_conservative() {

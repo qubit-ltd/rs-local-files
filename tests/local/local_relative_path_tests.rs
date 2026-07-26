@@ -12,12 +12,12 @@ use std::path::{
     PathBuf,
 };
 
+use super::api_tests::LocalRelativePath;
 use proptest::{
     collection,
     prop_assert_eq,
     proptest,
 };
-use qubit_local_files::LocalRelativePath;
 
 proptest! {
     /// Verifies that arbitrary normal components remain valid and unchanged.

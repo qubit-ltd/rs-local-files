@@ -9,10 +9,9 @@
 use std::error::Error as StdError;
 use std::io::ErrorKind;
 
-use qubit_local_files::{
+use super::api_tests::{
     LocalCopyDirOptions,
     LocalCopyDirStage,
-    LocalFiles,
 };
 
 use super::test_support::{
@@ -24,10 +23,11 @@ use super::test_support::{
 fn test_copy_dir_all_with_returns_missing_source_error() {
     let dir = temp_dir("copy-dir-missing-source");
     let missing = dir.join("missing");
+    let destination = dir.join("dst");
 
-    let error = LocalFiles::copy_dir_all_with(
+    let error = qubit_local_files::copy::directory(
         &missing,
-        dir.join("dst"),
+        &destination,
         LocalCopyDirOptions::default(),
     )
     .expect_err("missing source should return metadata error");

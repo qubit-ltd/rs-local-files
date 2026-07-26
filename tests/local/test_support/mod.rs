@@ -8,15 +8,12 @@
 
 //! Shared fixtures and helpers for local-filesystem integration tests.
 
-pub(super) use qubit_local_files::{
-    FileReadOptions,
-    FileWriteMode,
-    FileWriteOptions,
-    LocalFilenames,
+pub(super) use super::api_tests::{
     LocalPersistOptions,
     LocalTempDir,
     LocalTempFile,
 };
+pub(super) use qubit_local_files::path;
 pub(super) use std::fs;
 pub(super) use std::io::{
     ErrorKind,
@@ -59,19 +56,18 @@ pub(super) use current_dir_guard_tests::{
     CURRENT_DIR_LOCK,
     CurrentDirGuard,
 };
-#[cfg(target_os = "linux")]
-pub(super) use filesystem_fixture_tests::file_status_flags;
+#[cfg(any(target_os = "linux", target_os = "macos"))]
+pub(super) use filesystem_fixture_tests::assert_fifo_open_is_rejected;
 #[cfg(windows)]
 pub(super) use filesystem_fixture_tests::path_with_interior_nul;
-#[cfg(unix)]
-pub(super) use filesystem_fixture_tests::{
-    assert_fifo_open_is_rejected,
-    create_fifo,
-    short_temp_dir,
-};
 pub(super) use filesystem_fixture_tests::{
     count_atomic_temp_files,
     temp_dir,
+};
+#[cfg(unix)]
+pub(super) use filesystem_fixture_tests::{
+    create_fifo,
+    short_temp_dir,
 };
 #[cfg(target_os = "freebsd")]
 pub(super) use freebsd_acl_tests::{

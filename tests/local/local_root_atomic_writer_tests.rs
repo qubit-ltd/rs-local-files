@@ -21,7 +21,7 @@ use std::process::Command;
 use std::time::Duration;
 
 #[cfg(unix)]
-use qubit_local_files::{
+use super::api_tests::{
     LocalAtomicDestinationState,
     LocalAtomicWriteOptions,
     LocalAtomicWriteStage,

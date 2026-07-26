@@ -6,7 +6,7 @@
 //    Licensed under the Apache License, Version 2.0.
 // =============================================================================
 
-use qubit_local_files::LocalAtomicDestinationState;
+use super::api_tests::LocalAtomicDestinationState;
 
 #[test]
 fn test_atomic_destination_state_variants_are_distinct_and_debuggable() {

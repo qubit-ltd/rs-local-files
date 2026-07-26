@@ -10,7 +10,7 @@ use std::error::Error as StdError;
 use std::fs;
 use std::io::ErrorKind;
 
-use qubit_local_files::{
+use super::api_tests::{
     LocalPersistStage,
     LocalTempFile,
 };

@@ -6,7 +6,7 @@
 //    Licensed under the Apache License, Version 2.0.
 // =============================================================================
 
-use qubit_local_files::LocalCopyConflictPolicy;
+use super::api_tests::LocalCopyConflictPolicy;
 
 #[test]
 fn test_copy_conflict_policy_default_fails_on_conflicts() {

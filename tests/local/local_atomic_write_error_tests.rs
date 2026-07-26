@@ -12,11 +12,10 @@ use std::io::{
     ErrorKind,
 };
 
-use qubit_local_files::{
+use super::api_tests::{
     LocalAtomicDestinationState,
     LocalAtomicWriteStage,
     LocalAtomicWriter,
-    LocalFiles,
 };
 
 use super::test_support::{
@@ -35,11 +34,9 @@ fn test_atomic_write_with_returns_parent_error() {
     let file_parent = dir.join("file-parent");
     fs::write(&file_parent, b"not a directory").unwrap();
 
-    let error = LocalFiles::atomic_write_with(
-        file_parent.join("child.txt"),
-        fail_atomic_write,
-    )
-    .expect_err("file parent should return create-dir error");
+    let path = file_parent.join("child.txt");
+    let error = qubit_local_files::atomic::write_with(&path, fail_atomic_write)
+        .expect_err("file parent should return create-dir error");
 
     assert!(matches!(
         error.kind(),
@@ -64,7 +61,7 @@ fn test_atomic_write_with_returns_parent_error() {
     assert!(!base_message.contains("staging path"));
     let display_path = dir.join("display.txt");
     let display_error =
-        LocalFiles::atomic_write_with(&display_path, fail_atomic_write)
+        qubit_local_files::atomic::write_with(&display_path, fail_atomic_write)
             .expect_err("callback failure should return staging context");
     let temporary_path = display_error
         .temporary_path()

@@ -41,17 +41,17 @@ use crate::{
 ///
 /// ```compile_fail
 /// #![deny(unused_must_use)]
-/// use qubit_local_files::LocalCopyDirOptions;
+/// use qubit_local_files::copy::Options;
 ///
-/// LocalCopyDirOptions::new().follow_symlinks();
+/// Options::new().follow_symlinks();
 /// ```
 ///
 /// Configuration fields are private:
 ///
 /// ```compile_fail
-/// use qubit_local_files::LocalCopyDirOptions;
+/// use qubit_local_files::copy::Options;
 ///
-/// let mut options = LocalCopyDirOptions::default();
+/// let mut options = Options::default();
 /// options.follow_symlinks = true;
 /// ```
 #[must_use = "directory copy options have no effect unless they are used"]

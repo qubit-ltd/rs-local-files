@@ -12,7 +12,7 @@ mod metadata;
 mod path;
 mod root;
 
-pub use crate::LocalRootAtomicWriter as Writer;
+pub use crate::local::LocalRootAtomicWriter as Writer;
 pub use entry_kind::EntryKind;
 pub use metadata::Metadata;
 pub use path::Path;

@@ -8,4 +8,4 @@
 //! Validated rooted paths.
 
 /// A non-empty path containing only normal relative components.
-pub type Path = crate::LocalRelativePath;
+pub type Path = crate::local::LocalRelativePath;

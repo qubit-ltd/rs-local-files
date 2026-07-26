@@ -13,28 +13,28 @@
 /// matches must retain a wildcard arm.
 ///
 /// ```compile_fail
-/// use qubit_local_files::LocalCopyDirStage;
+/// use qubit_local_files::copy::Stage;
 ///
-/// fn classify(stage: LocalCopyDirStage) {
+/// fn classify(stage: Stage) {
 ///     match stage {
-///         LocalCopyDirStage::InspectSource => {}
-///         LocalCopyDirStage::InspectSourceEntry => {}
-///         LocalCopyDirStage::ReadSourceDirectory => {}
-///         LocalCopyDirStage::PrepareDestination => {}
-///         LocalCopyDirStage::CopyFileContents => {}
-///         LocalCopyDirStage::PreservePermissions => {}
-///         LocalCopyDirStage::CommitFile => {}
-///         LocalCopyDirStage::CleanupTemporaryFile => {}
-///         LocalCopyDirStage::UpdateStatistics => {}
+///         Stage::InspectSource => {}
+///         Stage::InspectSourceEntry => {}
+///         Stage::ReadSourceDirectory => {}
+///         Stage::PrepareDestination => {}
+///         Stage::CopyFileContents => {}
+///         Stage::PreservePermissions => {}
+///         Stage::CommitFile => {}
+///         Stage::CleanupTemporaryFile => {}
+///         Stage::UpdateStatistics => {}
 ///     }
 /// }
 /// ```
 ///
 /// ```compile_fail
 /// #![deny(unused_must_use)]
-/// use qubit_local_files::LocalCopyDirStage;
+/// use qubit_local_files::copy::Stage;
 ///
-/// LocalCopyDirStage::InspectSource.clone();
+/// Stage::InspectSource.clone();
 /// ```
 #[must_use]
 #[non_exhaustive]

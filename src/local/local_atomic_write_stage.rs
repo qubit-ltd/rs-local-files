@@ -13,29 +13,29 @@
 /// matches must retain a wildcard arm.
 ///
 /// ```compile_fail
-/// use qubit_local_files::LocalAtomicWriteStage;
+/// use qubit_local_files::atomic::Stage;
 ///
-/// fn classify(stage: LocalAtomicWriteStage) {
+/// fn classify(stage: Stage) {
 ///     match stage {
-///         LocalAtomicWriteStage::PrepareParent => {}
-///         LocalAtomicWriteStage::InspectDestination => {}
-///         LocalAtomicWriteStage::CreateTemporaryFile => {}
-///         LocalAtomicWriteStage::WriteTemporaryFile => {}
-///         LocalAtomicWriteStage::ReadDestinationMetadata => {}
-///         LocalAtomicWriteStage::ApplyDestinationMetadata => {}
-///         LocalAtomicWriteStage::SyncTemporaryFile => {}
-///         LocalAtomicWriteStage::ReplaceDestination => {}
-///         LocalAtomicWriteStage::CleanupTemporaryFile => {}
-///         LocalAtomicWriteStage::SyncParent => {}
+///         Stage::PrepareParent => {}
+///         Stage::InspectDestination => {}
+///         Stage::CreateTemporaryFile => {}
+///         Stage::WriteTemporaryFile => {}
+///         Stage::ReadDestinationMetadata => {}
+///         Stage::ApplyDestinationMetadata => {}
+///         Stage::SyncTemporaryFile => {}
+///         Stage::ReplaceDestination => {}
+///         Stage::CleanupTemporaryFile => {}
+///         Stage::SyncParent => {}
 ///     }
 /// }
 /// ```
 ///
 /// ```compile_fail
 /// #![deny(unused_must_use)]
-/// use qubit_local_files::LocalAtomicWriteStage;
+/// use qubit_local_files::atomic::Stage;
 ///
-/// LocalAtomicWriteStage::InspectDestination.clone();
+/// Stage::InspectDestination.clone();
 /// ```
 #[must_use]
 #[non_exhaustive]

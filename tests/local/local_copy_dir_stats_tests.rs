@@ -6,7 +6,7 @@
 //    Licensed under the Apache License, Version 2.0.
 // =============================================================================
 
-use qubit_local_files::LocalCopyDirStats;
+use super::api_tests::LocalCopyDirStats;
 
 #[test]
 fn test_copy_dir_stats_default_and_fields_are_explicit() {

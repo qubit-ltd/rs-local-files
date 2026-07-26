@@ -8,7 +8,7 @@
 
 use std::time::Duration;
 
-use qubit_local_files::LocalAtomicWriteOptions;
+use super::api_tests::LocalAtomicWriteOptions;
 
 #[test]
 fn test_local_atomic_write_options_control_parent_creation() {

@@ -11,7 +11,7 @@ use std::path::Path;
 
 use crate::local::copy_dir_all_with_paths;
 
-pub use crate::{
+pub use crate::local::{
     LocalCopyConflictPolicy as ConflictPolicy,
     LocalCopyDirError as Error,
     LocalCopyDirOptions as Options,

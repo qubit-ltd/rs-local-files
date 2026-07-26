@@ -81,18 +81,18 @@ const ATOMIC_WRITE_TEMP_PREFIX: &str = ".atomic-write-";
 ///
 /// The final inspection and replacement remain separate path-based operations.
 /// This writer is therefore not a sandbox boundary against an actor that can
-/// replace path entries concurrently. Use [`crate::LocalRoot`] when filesystem
-/// containment must be anchored to an opened directory capability.
+/// replace path entries concurrently. Use [`crate::rooted::Root`] when
+/// filesystem containment must be anchored to an opened directory capability.
 ///
 /// The guard must be committed or explicitly aborted:
 ///
 /// ```compile_fail
 /// #![deny(unused_must_use)]
-/// use qubit_local_files::LocalFiles;
+/// use qubit_local_files::atomic;
 ///
-/// let writer = LocalFiles::begin_atomic_write("result.bin")?;
+/// let writer = atomic::begin(std::path::Path::new("result.bin"))?;
 /// writer;
-/// # Ok::<(), qubit_local_files::LocalAtomicWriteError>(())
+/// # Ok::<(), atomic::Error>(())
 /// ```
 #[must_use = "atomic writes have no effect unless the writer is committed"]
 #[derive(Debug)]

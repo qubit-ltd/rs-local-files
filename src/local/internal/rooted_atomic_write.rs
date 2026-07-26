@@ -20,7 +20,7 @@ use std::io::{
 use std::os::fd::AsRawFd;
 use std::path::Path;
 
-use crate::LocalFilenames;
+use crate::path::random_file_name_with;
 
 use super::rooted_file_io::open_file_at;
 use super::rooted_staged_file::RootedStagedFile;
@@ -117,7 +117,7 @@ pub(in crate::local) fn create_rooted_staged_file(
                     "injected rooted staging filename failure",
                 ));
             }
-            LocalFilenames::try_random_with(
+            random_file_name_with(
                 Some(ROOTED_ATOMIC_TEMP_PREFIX),
                 Some(ROOTED_ATOMIC_TEMP_SUFFIX),
             )
@@ -135,7 +135,7 @@ pub(in crate::local) fn create_rooted_staged_file(
                 ));
             }
             let native_name = CString::new(name.as_bytes()).expect(
-                "LocalFilenames guarantees generated names without NUL",
+                "random_file_name_with guarantees generated names without NUL",
             );
             open_file_at(
                 &parent,
