@@ -43,26 +43,27 @@ qubit-local-files = "0.7"
 
 ## 导入方式
 
-从 crate root 导入具体命名空间、guard 和 option struct：
+从 crate root 导入每个操作所属的 focused 模块：
 
 ```rust
 use qubit_local_files::{
-    FileBuffering,
-    FileReadOptions,
-    FileWriteMode,
-    FileWriteOptions,
-    LocalCopyConflictPolicy,
-    LocalCopyDirOptions,
-    LocalCopyTypeConflictPolicy,
-    LocalFilenames,
-    LocalFiles,
-    LocalPersistOptions,
-    LocalTempDir,
-    LocalTempFile,
+    atomic,
+    copy,
+    directory,
+    metadata,
+    path,
+    read,
+    remove,
+    rename,
+    rooted,
+    temp,
+    write,
 };
 ```
 
 本 crate 当前不暴露 prelude。显式导入可以让文件系统副作用和覆盖策略在调用点保持清晰。
+顶层 `Local*` 类型与 `LocalFiles` 继续提供兼容、buffered I/O 和既有 one-shot
+helper，但新集成应从 focused 模块开始。
 
 ## 读写选项
 
@@ -70,21 +71,19 @@ use qubit_local_files::{
 
 | 类型 | 字段 | 用途 |
 | --- | --- | --- |
-| `FileReadOptions` | `buffering`、`open_retry_timeout` | 控制 `open_reader` 返回无额外缓冲 reader，还是 buffered reader，以及可选的 Unix 租约冲突打开超时。 |
-| `FileWriteOptions` | `create_parent`、`mode`、`buffering`、`open_retry_timeout` | 控制是否创建父目录、写入模式、writer 是否缓冲，以及可选的 Unix 租约冲突打开超时。 |
-| `FileBuffering` | `Unbuffered`、`Buffered { capacity }` | 选择原始文件 I/O，或带可选非零容量的 `BufReader` / `BufWriter`。 |
-| `FileWriteMode` | enum variants | 选择目标文件的写入打开方式。 |
+| `read::OpenOptions` | `open_retry_timeout` | 控制无缓冲原生 reader 的可选 Unix 租约冲突超时。 |
+| `write::OpenOptions` | `create_parents`、`mode`、`open_retry_timeout` | 控制父目录创建、原生写入模式和可选 Unix 租约冲突超时。 |
+| `write::Mode` | enum variants | 选择目标文件的写入打开方式。 |
 
-`LocalFiles::open_reader` 返回的 reader 实现 `Read` 和 `Seek`。
-`LocalFiles::open_writer` 返回的 writer 实现 `Write` 和 `Seek`。
+`read::open` 和 `write::open` 返回无缓冲 `std::fs::File`。
 两个 helper 都只返回普通文件；目录、FIFO、socket 和其他特殊文件系统资源会被
 拒绝，在 Unix 上拒绝 FIFO 时不会等待另一端连接。
 
 在 Unix 上，文件租约可能使防御性非阻塞打开返回 `WouldBlock`。普通打开 helper
 会重试该情况，以保持通常的阻塞打开语义。`with_open_retry_timeout` 可以限制该
 等待时间；默认无限等待，`Duration::ZERO` 会在第一次租约冲突尝试后返回
-`TimedOut`。其他打开错误不会重试。该选项适用于 `LocalFiles`、`LocalRoot` 和
-`LocalTempDir` 的文件打开 helper，不影响后续的读取或写入。
+`TimedOut`。其他打开错误不会重试。该选项一致适用于 focused 与兼容文件打开
+helper，不影响后续的读取或写入。
 `LocalFileWriter::sync_all` 和 `LocalFileWriter::sync_data` 会先 flush
 缓冲内容，再同步底层文件，适合 append log 或其他不需要 whole-file atomic
 replacement 的普通写句柄。对 writer 执行 seek 不会关闭 append-mode 语义。
@@ -234,7 +233,16 @@ assert_eq!("new\n", std::fs::read_to_string(&target)?);
 
 ## 根目录 Capability
 
-`LocalRoot` 打开目录 descriptor，并把该 descriptor 作为所有后代操作的 authority。保存的绝对 root 路径仅用于诊断。后代名称使用 `LocalRelativePath` 表示，reader、writer 和 atomic writer 的遍历会拒绝每一级 component 上的 symbolic link。root 路径或中间名称被重命名或替换时，已经打开的 descriptor 不会被重定向。操作系统会在 capability 获取前解析 root 输入中的祖先 component；no-follow 只适用于最终 root entry。只有目录 descriptor 打开后，containment 才开始生效。
+`rooted::Root` 打开目录 descriptor，并把该 descriptor 作为所有后代操作的
+authority。保存的绝对 root 路径仅用于诊断。后代名称使用 `rooted::Path`
+表示，reader、writer 和 atomic writer 的遍历会拒绝每一级 component 上的
+symbolic link。root 路径或中间名称被重命名或替换时，已经打开的 descriptor
+不会被重定向。操作系统会在 capability 获取前解析 root 输入中的祖先
+component；no-follow 只适用于最终 root entry。只有目录 descriptor 打开后，
+containment 才开始生效。
+`metadata` 与 `symlink_metadata` 暴露 entry kind、size，以及可选的访问、
+修改和创建时间；平台 descriptor metadata 不暴露 birth time 时，创建时间为
+`None`。
 
 这里保证的是 descriptor-relative 路径 containment，不是 inode 名称唯一性或完整的 OS 安全边界。hard link、mounted filesystem、权限以及拥有同等 OS authority 的进程仍属于部署安全责任。该 backend 在 Unix 上可用；其他目标返回 `ErrorKind::Unsupported`，不会回退到 check-then-path。path-based `LocalFiles` 是便利 API；当其他参与者可以并发修改 namespace 时，不能作为 sandbox 边界。
 
@@ -243,15 +251,18 @@ assert_eq!("new\n", std::fs::read_to_string(&target)?);
 `LocalFiles::atomic_write` 会在同一父目录下写入临时文件，flush 并 sync 这个临时文件，替换目标，并在支持的平台上从深到浅 sync 目标父目录以及本次新建目录项所在的各级父目录。目标必须不存在或是已有普通文件；symbolic link、目录、FIFO、socket、device 和其他特殊文件会以 `ErrorKind::InvalidInput` 拒绝。
 
 ```rust
+use std::io::Write;
 use qubit_local_files::{
-    LocalFiles,
-    LocalTempDir,
+    atomic,
+    temp::TempDir,
 };
 
-let dir = LocalTempDir::with_prefix("qubit-local-files-guide-")?;
+let dir = TempDir::with_prefix("qubit-local-files-guide-")?;
 let path = dir.path().join("state").join("manifest.json");
 
-LocalFiles::atomic_write(&path, br#"{"version":1,"complete":true}"#)?;
+let mut writer = atomic::begin(&path)?;
+writer.write_all(br#"{"version":1,"complete":true}"#)?;
+writer.commit()?;
 
 assert_eq!(
     br#"{"version":1,"complete":true}"#,
@@ -290,26 +301,26 @@ assert_eq!("{\"complete\":true}\n", std::fs::read_to_string(&path)?);
 ```rust
 use std::io::Write;
 use std::time::Duration;
-use qubit_local_files::{LocalAtomicWriteOptions, LocalFiles};
+use qubit_local_files::atomic;
 
-let options = LocalAtomicWriteOptions::new()
+let options = atomic::Options::new()
     .with_parent()
     .with_open_retry_timeout(Duration::from_secs(5));
 let mut writer =
-    LocalFiles::begin_atomic_write_with_options("state.bin", options)?;
+    atomic::begin_with(std::path::Path::new("state.bin"), options)?;
 writer.write_all(b"complete state")?;
 writer.commit()?;
 # Ok::<(), Box<dyn std::error::Error>>(())
 ```
 
-`LocalAtomicWriter` 实现 `Write`，但首版不实现 `Seek`。只有 `commit`
+`atomic::Writer` 实现 `Write`，但不实现 `Seek`。只有 `commit`
 成功后目标才会被替换；调用 `abort` 或直接 drop 会保留原目标并清理 staging
 文件。自 `0.5.0` 起，配置类型的字段不再公开，调用方必须使用现有 getter、
 constructor 和 builder。API 仍保持同步边界。
 当调用方需要在 installation 前失败后重试或显式 abort 时，使用
 `commit_recoverable`。它的 `LocalAtomicCommitError::into_parts` 返回结构化
 错误和可选的保留 writer；installation 开始后 writer 不再可用。
-`LocalRootAtomicWriter` 提供相同的恢复契约。
+`rooted::Writer` 通过 `rooted::Root::begin_atomic_write` 提供相同恢复契约。
 
 在 Unix 上，`LocalAtomicWriteOptions::with_open_retry_timeout` 只限制活动
 file lease 使目标的 nonblocking open 返回 `WouldBlock` 时的重试。默认

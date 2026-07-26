@@ -51,27 +51,29 @@ qubit-local-files = "0.7"
 
 ## Import Patterns
 
-Import the concrete namespaces, guards, and option structs from the crate root:
+Import focused modules and the concrete guard types needed by each operation:
 
 ```rust
 use qubit_local_files::{
-    FileBuffering,
-    FileReadOptions,
-    FileWriteMode,
-    FileWriteOptions,
-    LocalCopyConflictPolicy,
-    LocalCopyDirOptions,
-    LocalCopyTypeConflictPolicy,
-    LocalFilenames,
-    LocalFiles,
-    LocalPersistOptions,
-    LocalTempDir,
-    LocalTempFile,
+    atomic,
+    copy,
+    directory,
+    metadata,
+    path,
+    read,
+    remove,
+    rename,
+    rooted,
+    temp,
+    write,
 };
 ```
 
 The crate currently does not expose a prelude. Keeping imports explicit makes
 filesystem side effects and overwrite policies visible at call sites.
+Top-level `Local*` types and `LocalFiles` remain available for compatibility,
+buffered I/O, and existing one-shot helpers, but new integrations should begin
+with the focused modules.
 
 ## Read and Write Options
 
@@ -79,13 +81,11 @@ Normal file opening is controlled by explicit option structs:
 
 | Type | Fields | Purpose |
 | --- | --- | --- |
-| `FileReadOptions` | `buffering`, `open_retry_timeout` | Controls reader buffering and an optional Unix lease-conflict open timeout. |
-| `FileWriteOptions` | `create_parent`, `mode`, `buffering`, `open_retry_timeout` | Controls parent creation, write mode, writer buffering, and an optional Unix lease-conflict open timeout. |
-| `FileBuffering` | `Unbuffered`, `Buffered { capacity }` | Selects raw file I/O or `BufReader` / `BufWriter` with an optional non-zero capacity. |
-| `FileWriteMode` | enum variants | Selects how the target is opened for writing. |
+| `read::OpenOptions` | `open_retry_timeout` | Controls the optional Unix lease-conflict timeout for an unbuffered native reader. |
+| `write::OpenOptions` | `create_parents`, `mode`, `open_retry_timeout` | Controls parent creation, native write mode, and the optional Unix lease-conflict timeout. |
+| `write::Mode` | enum variants | Selects how the target is opened for writing. |
 
-Readers returned by `LocalFiles::open_reader` implement `Read` and `Seek`.
-Writers returned by `LocalFiles::open_writer` implement `Write` and `Seek`.
+`read::open` and `write::open` return unbuffered `std::fs::File` handles.
 Both helpers return only regular files. They reject directories, FIFOs,
 sockets, and other special filesystem resources; Unix FIFO rejection does not
 wait for a peer.
@@ -95,8 +95,8 @@ On Unix, a file lease can make the defensive nonblocking open return
 blocking-open behavior. `with_open_retry_timeout` bounds that wait; the
 default is unbounded and `Duration::ZERO` returns `TimedOut` after the first
 lease-conflicting attempt. Other open errors are never retried. The option
-applies to the `LocalFiles`, `LocalRoot`, and `LocalTempDir` file-open helpers,
-not to later reads or writes.
+applies consistently to focused and compatibility file-open helpers, not to
+later reads or writes.
 `LocalFileWriter::sync_all` and `LocalFileWriter::sync_data` flush any buffered
 bytes before synchronizing the underlying file, which is useful for append logs
 or other normal write handles that do not need whole-file atomic replacement.
@@ -301,12 +301,15 @@ not subject to the no-replace support matrix.
 
 ## Rooted Capabilities
 
-`LocalRoot` opens a directory descriptor and uses that descriptor as the
+`rooted::Root` opens a directory descriptor and uses that descriptor as the
 authority for descendant operations. Its stored absolute root path is retained
-only for diagnostics. Descendant names are supplied as `LocalRelativePath`, and
+only for diagnostics. Descendant names are supplied as `rooted::Path`, and
 reader, writer, and atomic-writer traversal rejects symbolic links at every
 component. Renaming or replacing the root path or an intermediate name does not
 redirect descriptors that were already opened.
+`metadata` and `symlink_metadata` expose entry kind, size, and optional access,
+modification, and creation times. Creation time is `None` when the platform's
+descriptor metadata does not expose a birth time.
 The operating system resolves ancestor components in the root input before the
 capability is acquired; no-follow applies to the final root entry. Containment
 begins after that directory descriptor has been opened.
@@ -316,7 +319,7 @@ unique inode names or a complete OS security boundary: hard links, mounted
 filesystems, permissions, and processes with equivalent OS authority remain
 deployment concerns. The backend is available on Unix; other targets return
 `ErrorKind::Unsupported` rather than falling back to check-then-path behavior.
-Path-based `LocalFiles` APIs are convenience operations and are not sandbox
+Path-based APIs are convenience operations and are not sandbox
 boundaries when another actor can mutate the namespace concurrently.
 
 ## Atomic Writes
@@ -330,15 +333,18 @@ sockets, devices, and other special files are rejected with
 `ErrorKind::InvalidInput`.
 
 ```rust
+use std::io::Write;
 use qubit_local_files::{
-    LocalFiles,
-    LocalTempDir,
+    atomic,
+    temp::TempDir,
 };
 
-let dir = LocalTempDir::with_prefix("qubit-local-files-guide-")?;
+let dir = TempDir::with_prefix("qubit-local-files-guide-")?;
 let path = dir.path().join("state").join("manifest.json");
 
-LocalFiles::atomic_write(&path, br#"{"version":1,"complete":true}"#)?;
+let mut writer = atomic::begin(&path)?;
+writer.write_all(br#"{"version":1,"complete":true}"#)?;
+writer.commit()?;
 
 assert_eq!(
     br#"{"version":1,"complete":true}"#,
@@ -377,26 +383,26 @@ Use `LocalAtomicWriter` when content should be streamed across multiple calls:
 ```rust
 use std::io::Write;
 use std::time::Duration;
-use qubit_local_files::{LocalAtomicWriteOptions, LocalFiles};
+use qubit_local_files::atomic;
 
-let options = LocalAtomicWriteOptions::new()
+let options = atomic::Options::new()
     .with_parent()
     .with_open_retry_timeout(Duration::from_secs(5));
 let mut writer =
-    LocalFiles::begin_atomic_write_with_options("state.bin", options)?;
+    atomic::begin_with(std::path::Path::new("state.bin"), options)?;
 writer.write_all(b"complete state")?;
 writer.commit()?;
 # Ok::<(), Box<dyn std::error::Error>>(())
 ```
 
-`LocalAtomicWriter` implements `Write`, but not `Seek`. Only `commit` replaces
+`atomic::Writer` implements `Write`, but not `Seek`. Only `commit` replaces
 the destination. Calling `abort` or dropping the writer preserves the original
 destination and cleans up the staging file. The API remains synchronous.
 Use `commit_recoverable` when a caller must retry or explicitly abort after a
 pre-installation failure. Its `LocalAtomicCommitError::into_parts` returns the
 structured failure and an optional retained writer; the writer is unavailable
-once installation has begun. `LocalRootAtomicWriter` exposes the same recovery
-contract.
+once installation has begun. `rooted::Writer` exposes the same recovery
+contract through `rooted::Root::begin_atomic_write`.
 
 Since `0.5.0`, configuration fields are private. Callers must use the existing
 getters, constructors, and builders.

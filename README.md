@@ -44,71 +44,67 @@ qubit-local-files = "0.7"
 ## Quick Example
 
 ```rust
-use std::io::Write;
-
-use qubit_local_files::{
-    LocalCopyDirOptions,
-    LocalFiles,
-    LocalPersistOptions,
-    LocalTempDir,
-    LocalTempFile,
+use std::io::{
+    Read,
+    Write,
 };
 
-let work = LocalTempDir::with_prefix("qubit-local-files-readme-")?;
-let src = work.path().join("src");
-let dst = work.path().join("dst");
+use qubit_local_files::{
+    atomic,
+    read,
+    temp::TempDir,
+    write,
+};
 
-LocalFiles::ensure_dir(&src)?;
-std::fs::write(src.join("manifest.json"), br#"{"version":1}"#)?;
+let work = TempDir::with_prefix("qubit-local-files-readme-")?;
+let path = work.path().join("state").join("manifest.json");
 
-let stats = LocalFiles::copy_dir_all_with(&src, &dst, LocalCopyDirOptions::default())?;
-assert_eq!(1, stats.files);
+let options =
+    write::OpenOptions::new(write::Mode::CreateNew).with_parents();
+let mut file = write::open(&path, &options)?;
+file.write_all(br#"{"version":1}"#)?;
+drop(file);
 
-LocalFiles::atomic_write(dst.join("manifest.json"), br#"{"version":2}"#)?;
+let mut replacement = atomic::begin(&path)?;
+replacement.write_all(br#"{"version":2}"#)?;
+replacement.commit()?;
 
-let final_path = work.path().join("result.txt");
-std::fs::write(&final_path, "old payload")?;
-
-let mut temp = LocalTempFile::with_affixes("qubit-local-files-", ".txt")?;
-temp.write_all(b"new payload\n")?;
-temp.persist_with(&final_path, LocalPersistOptions::new().with_overwrite())?;
-
-assert_eq!("new payload\n", std::fs::read_to_string(&final_path)?);
+let mut file = read::open(&path, &read::OpenOptions::default())?;
+let mut content = String::new();
+file.read_to_string(&mut content)?;
+assert_eq!(r#"{"version":2}"#, content);
 
 # Ok::<(), Box<dyn std::error::Error>>(())
 ```
 
 ## Main Capabilities
 
-### LocalFiles Namespace
+### Focused Modules
 
-`LocalFiles` groups small local filesystem operations that otherwise tend to
-become repeated boilerplate:
+New code should import the module that owns each operation:
 
-| Method | Purpose |
+| Module | Purpose |
 | --- | --- |
-| `exists` | Checks path existence with `std::io::Result<bool>` instead of silently swallowing errors. |
-| `metadata` | Reads local path metadata. |
-| `list` | Lists direct directory entries. |
-| `open_reader` | Opens a regular file as `LocalFileReader` using `FileReadOptions`; rejects directories and special resources. |
-| `open_writer` | Opens or creates a regular file as `LocalFileWriter` using `FileWriteOptions`; rejects directories and special resources. |
-| `ensure_dir` | Creates a directory and missing ancestors. |
-| `ensure_parent` | Creates missing parent directories for a file path. |
-| `dir_size` | Sums regular-file byte lengths below a directory without following symbolic links. |
-| `clean_dir` | Removes all children from a directory while keeping the directory itself. |
-| `remove_any` | Removes a file, directory tree, or symbolic link. |
-| `copy_dir_all_with` | Recursively copies a local directory tree with explicit options and returns statistics. |
-| `atomic_write` | Replaces a file through a durable same-directory temporary write. |
-| `atomic_write_with` | Same as `atomic_write`, but passes a guarded `LocalAtomicWriter` to caller-provided write logic. |
-| `begin_atomic_write` | Returns a streaming `LocalAtomicWriter` committed explicitly by the caller. |
-| `begin_atomic_write_with_options` | Begins a streaming atomic write with explicit parent-creation and destination-open retry policies. |
+| `read` / `write` | Opens validated regular files as unbuffered `std::fs::File` handles. |
+| `atomic` | Begins durable same-directory atomic replacement. |
+| `rooted` | Performs descriptor-relative metadata, read, write, and atomic operations beneath an opened root. |
+| `temp` | Provides RAII temporary files, directories, and persistence policy types. |
+| `directory`, `metadata`, `remove`, `rename` | Provides focused native filesystem operations. |
+| `copy` | Recursively copies a directory with explicit conflict policies and statistics. |
+| `path` | Validates portable single-component filenames. |
+
+The top-level `Local*` types and `LocalFiles` remain available as a compatibility
+API. They additionally provide buffered readers and writers and one-shot
+helpers. New integrations should prefer the focused modules so authority,
+overwrite policy, and native handle behavior remain visible at call sites.
 
 ### Temporary Files and Directories
 
-`LocalTempFile` and `LocalTempDir` create real local filesystem entries and
+`temp::TempFile` and `temp::TempDir` create real local filesystem entries and
 remove them automatically on drop unless ownership is released with `keep` or
-`persist`. Drop-time cleanup is best-effort; failures are reported through the
-`log` facade with `warn!` and never panic.
+`persist`. They are focused aliases of the legacy `LocalTempFile` and
+`LocalTempDir` names. Drop-time cleanup is best-effort; failures are reported
+through the `log` facade with `warn!` and never panic.
 
 `LocalTempFile` owns its original file handle and implements `Write` and `Seek`.
 Use `as_file` / `as_file_mut` for direct handle access, and `close` to drop the
@@ -175,24 +171,24 @@ Normal file opening is intentionally explicit:
 
 | Type | Purpose |
 | --- | --- |
-| `FileReadOptions` | Controls reader buffering and an optional Unix lease-conflict open timeout. |
-| `FileWriteOptions` | Controls parent creation, write mode, writer buffering, and an optional Unix lease-conflict open timeout. |
-| `FileBuffering` | Selects unbuffered I/O or buffered I/O with an optional capacity. |
-| `FileWriteMode` | Selects `OpenExistingAtStart`, `CreateNew`, `CreateOrTruncate`, `AppendExisting`, or `AppendOrCreate`. |
+| `read::OpenOptions` | Controls the optional Unix lease-conflict open timeout for a native reader. |
+| `write::OpenOptions` | Controls parent creation, native write mode, and the optional Unix lease-conflict timeout. |
+| `write::Mode` | Selects `OpenExistingAtStart`, `CreateNew`, `CreateOrTruncate`, `AppendExisting`, or `AppendOrCreate`. |
 
-Both open helpers return only regular files. Directories, FIFOs, sockets, and
-other special filesystem resources are rejected; on Unix, FIFO rejection does
-not wait for a peer.
+The focused open helpers return unbuffered `std::fs::File` handles for regular
+files only. Directories, FIFOs, sockets, and other special filesystem resources
+are rejected; on Unix, FIFO rejection does not wait for a peer.
 
 On Unix, an active file lease can make the defensive nonblocking open return
 `WouldBlock`. Normal readers and writers retry that condition to preserve
 ordinary blocking-open behavior. `with_open_retry_timeout` bounds the wait;
 the default is unbounded, and `Duration::ZERO` reports `TimedOut` after the
 first lease-conflicting attempt. Other open errors are never retried. This
-option applies to `LocalFiles`, `LocalRoot`, and `LocalTempDir` file-open
-helpers; it is not a general I/O timeout.
+option applies consistently to focused and legacy file-open helpers; it is not
+a general I/O timeout.
 
-`LocalFileReader` implements `Read` and `Seek`. `LocalFileWriter` implements
+The compatibility `LocalFileReader` implements `Read` and `Seek`.
+`LocalFileWriter` implements
 `Write` and `Seek`, and provides `sync_all` / `sync_data` helpers that flush any
 buffered bytes before synchronizing the underlying file. Seeking a writer does
 not disable append-mode semantics.
@@ -206,14 +202,17 @@ protocol rather than opening a normal write handle.
 
 ### Rooted Capabilities
 
-`LocalRoot` anchors descendant operations to an opened directory descriptor,
+`rooted::Root` anchors descendant operations to an opened directory descriptor,
 which is the filesystem authority; its stored absolute path is diagnostic
 context only.
-Construct descendant names with `LocalRelativePath`, which accepts only a
+Construct descendant names with `rooted::Path`, which accepts only a
 non-empty sequence of normal relative components. `open_reader`, `open_writer`,
 and `begin_atomic_write` traverse from the open root descriptor and reject
 symbolic links at intermediate and final entries. Renaming or replacing the
 root path or an already opened intermediate name does not redirect that handle.
+`metadata` and `symlink_metadata` report entry kind, size, and optional access,
+modification, and creation times. Creation time is `None` when the underlying
+descriptor metadata does not expose a birth time.
 The operating system resolves ancestor components in the root input before the
 capability is acquired; no-follow applies to the final root entry. Containment
 begins after that directory descriptor has been opened.
@@ -224,15 +223,16 @@ with equivalent OS authority remain deployment concerns. Path-based
 `LocalFiles` APIs are convenience operations, not sandbox boundaries.
 
 The secure backend currently uses Unix descriptor-relative operations. On
-other targets `LocalRoot::open` returns `std::io::ErrorKind::Unsupported`
-instead of falling back to a check-then-path sequence. `LocalRoot` is the API
+other targets `rooted::Root::open` returns `std::io::ErrorKind::Unsupported`
+instead of falling back to a check-then-path sequence. `rooted::Root` is the API
 for attacker-resistant containment; path-based `LocalFiles` and temporary
 resource helpers remain intended for trusted local application paths.
 
 ### Atomic Writes
 
-`LocalFiles::atomic_write` writes bytes to a temporary file in the same parent
-directory, flushes and syncs that file, replaces the destination, and syncs the
+`atomic::begin` returns an `atomic::Writer` backed by a temporary file in the
+same parent directory. Commit flushes and syncs that file, replaces the
+destination, and syncs the
 destination parent plus the parents of directories created by the operation,
 from deepest to shallowest, when supported. The destination must be absent or
 an existing regular file. Symbolic links, directories, FIFOs, sockets, devices,
@@ -268,27 +268,27 @@ coordinate concurrent writers externally and use `LocalRootAtomicWriter` when
 descriptor-relative containment is required. On Unix, a new destination starts
 with mode `0600` before applying a more restrictive process umask.
 
-For streaming content, use `LocalAtomicWriter`:
+For streaming content, use the focused atomic module:
 
 ```rust
 use std::io::Write;
 use std::time::Duration;
-use qubit_local_files::{LocalAtomicWriteOptions, LocalFiles};
+use qubit_local_files::atomic;
 
-let options = LocalAtomicWriteOptions::new()
+let options = atomic::Options::new()
     .with_parent()
     .with_open_retry_timeout(Duration::from_secs(5));
 let mut writer =
-    LocalFiles::begin_atomic_write_with_options("state.bin", options)?;
+    atomic::begin_with(std::path::Path::new("state.bin"), options)?;
 writer.write_all(b"complete state")?;
 writer.commit()?;
 # Ok::<(), Box<dyn std::error::Error>>(())
 ```
 
-`LocalAtomicWriter` implements `Write`, but not `Seek`. Only a successful
+`atomic::Writer` implements `Write`, but not `Seek`. Only a successful
 `commit` replaces the destination; `abort` or drop leaves it unchanged and
-cleans up the staging file. This existing writer remains path-based; use
-`LocalRootAtomicWriter` when replacement must stay beneath an anchored root.
+cleans up the staging file. Use `rooted::Root::begin_atomic_write` when
+replacement must stay beneath an anchored root.
 Use `commit_recoverable` when a caller must retry or explicitly abort after a
 pre-installation failure. Its `LocalAtomicCommitError::into_parts` returns the
 structured failure and an optional retained writer; the writer is unavailable

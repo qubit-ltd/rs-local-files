@@ -38,67 +38,65 @@ qubit-local-files = "0.7"
 ## 快速示例
 
 ```rust
-use std::io::Write;
-
-use qubit_local_files::{
-    LocalCopyDirOptions,
-    LocalFiles,
-    LocalPersistOptions,
-    LocalTempDir,
-    LocalTempFile,
+use std::io::{
+    Read,
+    Write,
 };
 
-let work = LocalTempDir::with_prefix("qubit-local-files-readme-")?;
-let src = work.path().join("src");
-let dst = work.path().join("dst");
+use qubit_local_files::{
+    atomic,
+    read,
+    temp::TempDir,
+    write,
+};
 
-LocalFiles::ensure_dir(&src)?;
-std::fs::write(src.join("manifest.json"), br#"{"version":1}"#)?;
+let work = TempDir::with_prefix("qubit-local-files-readme-")?;
+let path = work.path().join("state").join("manifest.json");
 
-let stats = LocalFiles::copy_dir_all_with(&src, &dst, LocalCopyDirOptions::default())?;
-assert_eq!(1, stats.files);
+let options =
+    write::OpenOptions::new(write::Mode::CreateNew).with_parents();
+let mut file = write::open(&path, &options)?;
+file.write_all(br#"{"version":1}"#)?;
+drop(file);
 
-LocalFiles::atomic_write(dst.join("manifest.json"), br#"{"version":2}"#)?;
+let mut replacement = atomic::begin(&path)?;
+replacement.write_all(br#"{"version":2}"#)?;
+replacement.commit()?;
 
-let final_path = work.path().join("result.txt");
-std::fs::write(&final_path, "old payload")?;
-
-let mut temp = LocalTempFile::with_affixes("qubit-local-files-", ".txt")?;
-temp.write_all(b"new payload\n")?;
-temp.persist_with(&final_path, LocalPersistOptions::new().with_overwrite())?;
-
-assert_eq!("new payload\n", std::fs::read_to_string(&final_path)?);
+let mut file = read::open(&path, &read::OpenOptions::default())?;
+let mut content = String::new();
+file.read_to_string(&mut content)?;
+assert_eq!(r#"{"version":2}"#, content);
 
 # Ok::<(), Box<dyn std::error::Error>>(())
 ```
 
 ## 主要能力
 
-### LocalFiles 命名空间
+### Focused 模块
 
-`LocalFiles` 集中提供容易在业务代码中反复出现的小型本地文件系统操作：
+新代码应导入操作所属的具体模块：
 
-| 方法 | 用途 |
+| 模块 | 用途 |
 | --- | --- |
-| `exists` | 以 `std::io::Result<bool>` 检查路径是否存在，不把检查错误静默折叠成 `false`。 |
-| `metadata` | 读取本地路径 metadata。 |
-| `list` | 列出目录直接子项。 |
-| `open_reader` | 使用 `FileReadOptions` 把普通文件打开为 `LocalFileReader`；拒绝目录和特殊资源。 |
-| `open_writer` | 使用 `FileWriteOptions` 打开或创建普通文件 `LocalFileWriter`；拒绝目录和特殊资源。 |
-| `ensure_dir` | 创建目录及缺失祖先目录。 |
-| `ensure_parent` | 为文件路径创建缺失父目录。 |
-| `dir_size` | 统计目录下普通文件的总字节数，不跟随 symbolic link。 |
-| `clean_dir` | 删除目录中的所有子项，但保留目录本身。 |
-| `remove_any` | 删除文件、目录树或 symbolic link。 |
-| `copy_dir_all_with` | 使用显式选项递归复制本地目录树，并返回统计信息。 |
-| `atomic_write` | 通过持久化同目录临时写入替换文件。 |
-| `atomic_write_with` | 与 `atomic_write` 相同，但向调用方写入逻辑传入受保护的 `LocalAtomicWriter`。 |
-| `begin_atomic_write` | 返回由调用方显式提交的 streaming `LocalAtomicWriter`。 |
-| `begin_atomic_write_with_options` | 以显式的父目录创建和目标打开重试策略返回 streaming 原子 writer。 |
+| `read` / `write` | 把已验证的普通文件打开为无缓冲 `std::fs::File`。 |
+| `atomic` | 启动持久化同目录原子替换。 |
+| `rooted` | 在已打开 root 下执行 descriptor-relative metadata、读、写和原子替换。 |
+| `temp` | 提供 RAII 临时文件、目录和持久化策略类型。 |
+| `directory`、`metadata`、`remove`、`rename` | 提供职责明确的原生文件系统操作。 |
+| `copy` | 以显式冲突策略递归复制目录并返回统计。 |
+| `path` | 校验 portable 的单 component 文件名。 |
+
+顶层 `Local*` 类型与 `LocalFiles` 继续作为兼容 API，并额外提供 buffered
+reader/writer 与 one-shot helper。新集成应优先使用 focused 模块，使 authority、
+覆盖策略和原生 handle 行为在调用点保持清晰。
 
 ### 临时文件和临时目录
 
-`LocalTempFile` 和 `LocalTempDir` 创建真实的本地文件系统条目，并在 drop 时自动删除，除非通过 `keep` 或 `persist` 释放所有权。Drop 阶段的清理是 best-effort；失败会通过 `log` 门面以 `warn!` 记录告警，不会 panic。
+`temp::TempFile` 和 `temp::TempDir` 创建真实的本地文件系统条目，并在 drop
+时自动删除，除非通过 `keep` 或 `persist` 释放所有权。它们分别是旧名称
+`LocalTempFile` 和 `LocalTempDir` 的 focused alias。Drop 阶段的清理是
+best-effort；失败会通过 `log` 门面以 `warn!` 记录告警，不会 panic。
 
 `LocalTempFile` 持有最初创建的文件句柄，并实现 `Write` 和 `Seek`。可通过 `as_file` / `as_file_mut` 直接访问句柄，通过 `close` 丢弃无缓冲句柄后，再用其他 API 读取该路径。`close` 不调用 `sync_all`；需要持久化保证时，应先显式同步句柄。它有意不提供读取 helper；确实需要读取时，通过 `LocalFiles` 或 `std::fs` 操作它的路径。
 
@@ -127,19 +125,19 @@ assert_eq!("new payload\n", std::fs::read_to_string(&final_path)?);
 
 | 类型 | 用途 |
 | --- | --- |
-| `FileReadOptions` | 控制 reader 是否缓冲，以及可选的 Unix 租约冲突打开超时。 |
-| `FileWriteOptions` | 控制是否创建父目录、写入模式、writer 是否缓冲，以及可选的 Unix 租约冲突打开超时。 |
-| `FileBuffering` | 选择无额外缓冲，或使用可选容量的缓冲 I/O。 |
-| `FileWriteMode` | 选择 `OpenExistingAtStart`、`CreateNew`、`CreateOrTruncate`、`AppendExisting` 或 `AppendOrCreate`。 |
+| `read::OpenOptions` | 控制原生 reader 的可选 Unix 租约冲突打开超时。 |
+| `write::OpenOptions` | 控制父目录创建、原生写入模式和可选 Unix 租约冲突超时。 |
+| `write::Mode` | 选择 `OpenExistingAtStart`、`CreateNew`、`CreateOrTruncate`、`AppendExisting` 或 `AppendOrCreate`。 |
 
-两个打开 helper 都只返回普通文件。目录、FIFO、socket 和其他特殊文件系统
-资源会被拒绝；在 Unix 上，拒绝 FIFO 时不会等待另一端连接。
+focused 打开 helper 只为普通文件返回无缓冲 `std::fs::File`。目录、FIFO、
+socket 和其他特殊文件系统资源会被拒绝；在 Unix 上，拒绝 FIFO 时不会等待
+另一端连接。
 
 在 Unix 上，活动文件租约可能使防御性非阻塞打开返回 `WouldBlock`。普通 reader
 和 writer 会重试该情况，以保持通常的阻塞打开语义。`with_open_retry_timeout`
 可以限制等待时间；默认无限等待，`Duration::ZERO` 会在第一次租约冲突尝试后
-返回 `TimedOut`。其他打开错误不会重试。该选项适用于 `LocalFiles`、`LocalRoot`
-和 `LocalTempDir` 的文件打开 helper；它不是通用 I/O 超时。
+返回 `TimedOut`。其他打开错误不会重试。该选项一致适用于 focused 与 legacy
+文件打开 helper；它不是通用 I/O 超时。
 
 `LocalFileReader` 实现 `Read` 和 `Seek`。`LocalFileWriter` 实现 `Write` 和
 `Seek`，并提供 `sync_all` / `sync_data` helper；这些 helper 会先 flush
@@ -152,23 +150,30 @@ assert_eq!("new payload\n", std::fs::read_to_string(&final_path)?);
 
 ### Rooted Capability
 
-`LocalRoot` 把所有后代操作锚定到一个已打开的目录 descriptor；它才是文件系统 authority，保存的绝对路径只用于诊断。
-后代名称必须先构造为 `LocalRelativePath`；它只接受由普通 component 组成的
+`rooted::Root` 把所有后代操作锚定到一个已打开的目录 descriptor；它才是文件系统 authority，保存的绝对路径只用于诊断。
+后代名称必须先构造为 `rooted::Path`；它只接受由普通 component 组成的
 非空相对路径。`open_reader`、`open_writer` 和 `begin_atomic_write` 都从已打开
 的 root descriptor 开始遍历，并拒绝中间项和最终项上的 symbolic link。
 即使 root 路径或已经打开的中间名称被重命名或替换，已有句柄也不会被重定向。
+`metadata` 与 `symlink_metadata` 返回 entry kind、size，以及可选的访问、
+修改和创建时间；底层 descriptor metadata 不暴露 birth time 时，创建时间为
+`None`。
 操作系统会在 capability 获取前解析 root 输入中的祖先 component；no-follow 只适用于最终 root entry。只有目录 descriptor 打开后，containment 才开始生效。
 
 这里保证的是 descriptor-relative 路径 containment，不是 inode 名称唯一性或完整的 OS 安全边界。hard link、mount、权限以及拥有同等 OS authority 的进程仍属于部署安全责任。path-based `LocalFiles` 是便利 API，不能作为 sandbox 边界。
 
 当前安全 backend 使用 Unix descriptor-relative 操作。其他目标上的
-`LocalRoot::open` 返回 `std::io::ErrorKind::Unsupported`，不会回退到
-check-then-path。需要抵御攻击者并发替换文件系统名字时应使用 `LocalRoot`；
+`rooted::Root::open` 返回 `std::io::ErrorKind::Unsupported`，不会回退到
+check-then-path。需要抵御攻击者并发替换文件系统名字时应使用 `rooted::Root`；
 path-based `LocalFiles` 和临时资源 helper 仍面向可信本地应用路径。
 
 ### Atomic Write
 
-`LocalFiles::atomic_write` 会在同一父目录下写入临时文件，flush 并 sync 这个临时文件，替换目标，并在支持的平台上从深到浅 sync 目标父目录以及本次新建目录项所在的各级父目录。目标必须不存在或是已有普通文件；symbolic link、目录、FIFO、socket、device 和其他特殊文件会以 `std::io::ErrorKind::InvalidInput` 拒绝。它适合配置文件、cache manifest、checkpoint、生成索引等 whole-file replacement 场景。
+`atomic::begin` 返回 `atomic::Writer`；它会在同一父目录下写入临时文件，
+commit 时 flush 并 sync 这个临时文件，替换目标，并在支持的平台上从深到浅
+sync 目标父目录以及本次新建目录项所在的各级父目录。目标必须不存在或是已有
+普通文件；symbolic link、目录、FIFO、socket、device 和其他特殊文件会以
+`std::io::ErrorKind::InvalidInput` 拒绝。
 
 已有目标的 metadata 使用严格的平台原生语义保留：
 
@@ -192,23 +197,22 @@ streaming 内容可以使用 `LocalAtomicWriter`：
 ```rust
 use std::io::Write;
 use std::time::Duration;
-use qubit_local_files::{LocalAtomicWriteOptions, LocalFiles};
+use qubit_local_files::atomic;
 
-let options = LocalAtomicWriteOptions::new()
+let options = atomic::Options::new()
     .with_parent()
     .with_open_retry_timeout(Duration::from_secs(5));
 let mut writer =
-    LocalFiles::begin_atomic_write_with_options("state.bin", options)?;
+    atomic::begin_with(std::path::Path::new("state.bin"), options)?;
 writer.write_all(b"complete state")?;
 writer.commit()?;
 # Ok::<(), Box<dyn std::error::Error>>(())
 ```
 
-`LocalAtomicWriter` 实现 `Write`，但首版不实现 `Seek`。只有 `commit`
+`atomic::Writer` 实现 `Write`，但不实现 `Seek`。只有 `commit`
 成功后目标才会被替换；调用 `abort` 或直接 drop 会保留原目标并清理 staging
-文件。自 `0.5.0` 起，配置类型的字段不再公开，调用方必须使用现有 getter、
-constructor 和 builder。这个既有 writer 仍是 path-based；需要把替换限制在
-锚定 root 下时使用 `LocalRootAtomicWriter`。
+文件。需要把替换限制在锚定 root 下时，使用
+`rooted::Root::begin_atomic_write`。
 当调用方需要在 installation 前失败后重试或显式 abort 时，使用
 `commit_recoverable`。它的 `LocalAtomicCommitError::into_parts` 返回结构化
 错误和可选的保留 writer；installation 开始后 writer 不再可用。
