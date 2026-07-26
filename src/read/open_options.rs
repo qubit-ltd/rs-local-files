@@ -14,17 +14,18 @@ use std::time::Duration;
 #[non_exhaustive]
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
 pub struct OpenOptions {
-    /// Maximum time spent retrying Unix lease-conflicting opens.
-    open_retry_timeout: Duration,
+    /// Optional maximum time spent retrying Unix lease-conflicting opens.
+    open_retry_timeout: Option<Duration>,
 }
 
 impl OpenOptions {
     /// Returns the Unix lease-conflict retry timeout.
     ///
-    /// A zero duration disables retry after the first conflicting attempt.
+    /// `None` preserves ordinary unbounded blocking-open behavior. `Some`
+    /// bounds retries, and a zero duration reports the first conflict.
     #[must_use]
-    #[inline]
-    pub const fn open_retry_timeout(&self) -> Duration {
+    #[inline(always)]
+    pub const fn open_retry_timeout(&self) -> Option<Duration> {
         self.open_retry_timeout
     }
 
@@ -37,7 +38,7 @@ impl OpenOptions {
     /// Updated options.
     #[inline]
     pub const fn with_open_retry_timeout(mut self, timeout: Duration) -> Self {
-        self.open_retry_timeout = timeout;
+        self.open_retry_timeout = Some(timeout);
         self
     }
 }

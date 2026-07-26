@@ -14,12 +14,12 @@ use qubit_local_files::read::{
     OpenOptions,
 };
 
-/// Verifies that read opens do not retry unless callers opt in.
+/// Verifies that read opens preserve ordinary unbounded lease retry by default.
 #[test]
-fn test_open_options_default_disables_retry() {
+fn test_open_options_default_retries_without_timeout() {
     let options = OpenOptions::default();
 
-    assert_eq!(Duration::ZERO, options.open_retry_timeout());
+    assert_eq!(None, options.open_retry_timeout());
 }
 
 /// Verifies the retry builder retains the requested timeout.
@@ -28,7 +28,10 @@ fn test_open_options_sets_retry_timeout() {
     let options = OpenOptions::default()
         .with_open_retry_timeout(Duration::from_millis(25));
 
-    assert_eq!(Duration::from_millis(25), options.open_retry_timeout());
+    assert_eq!(
+        Some(Duration::from_millis(25)),
+        options.open_retry_timeout()
+    );
 }
 
 /// Verifies that the native read API returns the standard file handle.

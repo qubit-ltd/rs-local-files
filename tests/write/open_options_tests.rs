@@ -16,14 +16,14 @@ use qubit_local_files::write::{
     OpenOptions,
 };
 
-/// Verifies default write options contain no hidden retry or parent creation.
+/// Verifies default write options preserve ordinary unbounded lease retry.
 #[test]
 fn test_open_options_default_is_explicit() {
     let options = OpenOptions::default();
 
     assert_eq!(Mode::CreateOrTruncate, options.mode());
     assert!(!options.creates_parents());
-    assert_eq!(Duration::ZERO, options.open_retry_timeout());
+    assert_eq!(None, options.open_retry_timeout());
 }
 
 /// Verifies builders configure the native open contract.
@@ -36,7 +36,7 @@ fn test_open_options_builders_update_native_behavior() {
 
     assert_eq!(Mode::CreateNew, options.mode());
     assert!(options.creates_parents());
-    assert_eq!(timeout, options.open_retry_timeout());
+    assert_eq!(Some(timeout), options.open_retry_timeout());
 }
 
 /// Verifies that the native write API returns the standard file handle.

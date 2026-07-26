@@ -255,7 +255,7 @@ pub(crate) fn open_native_reader_path(
     path: &Path,
     options: &read::OpenOptions,
 ) -> Result<fs::File> {
-    open_reader_file(path, Some(options.open_retry_timeout()))
+    open_reader_file(path, options.open_retry_timeout())
 }
 
 /// Opens a file reader with the supplied options.
@@ -368,7 +368,7 @@ pub(crate) fn open_native_writer_path(
         path,
         options.creates_parents(),
         mode,
-        Some(options.open_retry_timeout()),
+        options.open_retry_timeout(),
     )
 }
 

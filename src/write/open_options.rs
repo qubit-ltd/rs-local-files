@@ -20,8 +20,8 @@ pub struct OpenOptions {
     mode: Mode,
     /// Whether missing parent directories are created before opening.
     create_parents: bool,
-    /// Maximum time spent retrying Unix lease-conflicting opens.
-    open_retry_timeout: Duration,
+    /// Optional maximum time spent retrying Unix lease-conflicting opens.
+    open_retry_timeout: Option<Duration>,
 }
 
 impl OpenOptions {
@@ -31,13 +31,13 @@ impl OpenOptions {
     /// - `mode`: Native creation and positioning behavior.
     ///
     /// # Returns
-    /// Options without parent creation or implicit retry.
+    /// Options without parent creation and with ordinary unbounded open retry.
     #[inline]
     pub const fn new(mode: Mode) -> Self {
         Self {
             mode,
             create_parents: false,
-            open_retry_timeout: Duration::ZERO,
+            open_retry_timeout: None,
         }
     }
 
@@ -65,9 +65,12 @@ impl OpenOptions {
     }
 
     /// Returns the Unix lease-conflict retry timeout.
+    ///
+    /// `None` preserves ordinary unbounded blocking-open behavior. `Some`
+    /// bounds retries, and a zero duration reports the first conflict.
     #[must_use]
-    #[inline]
-    pub const fn open_retry_timeout(&self) -> Duration {
+    #[inline(always)]
+    pub const fn open_retry_timeout(&self) -> Option<Duration> {
         self.open_retry_timeout
     }
 
@@ -80,13 +83,14 @@ impl OpenOptions {
     /// Updated options.
     #[inline]
     pub const fn with_open_retry_timeout(mut self, timeout: Duration) -> Self {
-        self.open_retry_timeout = timeout;
+        self.open_retry_timeout = Some(timeout);
         self
     }
 }
 
 impl Default for OpenOptions {
-    /// Creates or truncates a file without parent creation or retry.
+    /// Creates or truncates a file without parent creation and with ordinary
+    /// unbounded open retry.
     #[inline]
     fn default() -> Self {
         Self::new(Mode::default())
