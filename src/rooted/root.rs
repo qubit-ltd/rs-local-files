@@ -7,7 +7,6 @@
 // =============================================================================
 //! Open directory capabilities.
 
-#[cfg(unix)]
 use std::fs::File;
 use std::io::Result;
 #[cfg(not(unix))]
@@ -20,14 +19,24 @@ use std::path::{
     PathBuf,
 };
 
+#[cfg(unix)]
+use crate::local;
+#[cfg(not(unix))]
 use crate::{
-    local,
+    LocalAtomicDestinationState,
+    LocalAtomicWriteStage,
+};
+use crate::{
+    atomic,
     read,
     write,
 };
 
-use super::Metadata;
 use super::path;
+use super::{
+    Metadata,
+    Writer,
+};
 
 /// An opened directory descriptor that authorizes contained operations.
 #[must_use]
@@ -180,6 +189,68 @@ impl Root {
             Err(Error::new(
                 ErrorKind::Unsupported,
                 "descriptor-relative local roots are unsupported on this platform",
+            ))
+        }
+    }
+
+    /// Begins a descriptor-relative atomic replacement and creates missing
+    /// parent directories.
+    ///
+    /// # Parameters
+    ///
+    /// * `path` - Validated non-empty relative destination beneath this root.
+    ///
+    /// # Returns
+    /// A staging writer that publishes only when committed.
+    ///
+    /// # Errors
+    /// Returns a structured atomic-write error when parent preparation or
+    /// staging-file creation fails.
+    #[inline]
+    pub fn begin_atomic_write(
+        &self,
+        path: &path::Path,
+    ) -> std::result::Result<Writer, atomic::Error> {
+        self.begin_atomic_write_with_options(
+            path,
+            atomic::Options::new().with_parent(),
+        )
+    }
+
+    /// Begins a descriptor-relative atomic replacement with explicit options.
+    ///
+    /// # Parameters
+    ///
+    /// * `path` - Validated non-empty relative destination beneath this root.
+    /// * `options` - Parent creation and destination-open retry policy.
+    ///
+    /// # Returns
+    /// A staging writer that publishes only when committed.
+    ///
+    /// # Errors
+    /// Returns a structured atomic-write error when parent preparation,
+    /// destination inspection, or staging-file creation fails.
+    pub fn begin_atomic_write_with_options(
+        &self,
+        path: &path::Path,
+        options: atomic::Options,
+    ) -> std::result::Result<Writer, atomic::Error> {
+        #[cfg(unix)]
+        {
+            Writer::new(&self.directory, &self.path, path, options)
+        }
+        #[cfg(not(unix))]
+        {
+            let _ = options;
+            Err(atomic::Error::new(
+                LocalAtomicWriteStage::PrepareParent,
+                path.as_path().to_path_buf(),
+                None,
+                LocalAtomicDestinationState::Unchanged,
+                Error::new(
+                    ErrorKind::Unsupported,
+                    "descriptor-relative local roots are unsupported on this platform",
+                ),
             ))
         }
     }
