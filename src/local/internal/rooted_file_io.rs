@@ -86,6 +86,63 @@ pub(crate) fn open_root_directory(path: &Path) -> Result<File> {
         .map(|()| directory)
 }
 
+/// Reads metadata for a final rooted entry without following a symbolic link.
+///
+/// The traversal opens every parent through directory descriptors before using
+/// `fstatat` with `AT_SYMLINK_NOFOLLOW` for the final entry. It therefore
+/// preserves the rooted authority while observing directories, links, and
+/// special files without opening them as regular files.
+///
+/// # Parameters
+///
+/// * `root` - Open directory descriptor that authorizes the lookup.
+/// * `diagnostic_root` - Path used only to contextualize I/O errors.
+/// * `path` - Validated non-empty relative entry path.
+///
+/// # Returns
+///
+/// The initialized native `stat` structure for the final entry.
+///
+/// # Errors
+///
+/// Returns a contextual I/O error when a parent cannot be securely traversed
+/// or when the final entry cannot be inspected.
+pub(crate) fn read_rooted_symlink_metadata(
+    root: &File,
+    diagnostic_root: &Path,
+    path: &LocalRelativePath,
+) -> Result<libc::stat> {
+    let diagnostic_path = diagnostic_root.join(path.as_path());
+    let (parent, name, _parent_dirs_to_sync) = open_rooted_parent(
+        root,
+        &diagnostic_path,
+        path,
+        RootedParentMode::OpenExisting,
+    )?
+    .into_parts();
+    let mut status = std::mem::MaybeUninit::<libc::stat>::uninit();
+    // SAFETY: the live parent descriptor and final component remain valid for
+    // the duration of this non-retaining call, and `status` provides writable
+    // storage for the complete kernel result.
+    let result = unsafe {
+        libc::fstatat(
+            parent.as_raw_fd(),
+            name.as_ptr(),
+            status.as_mut_ptr(),
+            libc::AT_SYMLINK_NOFOLLOW,
+        )
+    };
+    if result == -1 {
+        return Err(add_path_context(
+            Error::last_os_error(),
+            "inspect rooted entry",
+            &diagnostic_path,
+        ));
+    }
+    // SAFETY: a successful `fstatat` fully initializes `status`.
+    Ok(unsafe { status.assume_init() })
+}
+
 /// Opens an ordinary reader relative to an anchored root descriptor.
 ///
 /// # Parameters

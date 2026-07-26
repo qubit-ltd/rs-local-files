@@ -7,8 +7,13 @@
 // =============================================================================
 //! Descriptor-relative local filesystem operations.
 
+mod metadata;
 mod path;
 mod root;
 
+pub use metadata::{
+    EntryKind,
+    Metadata,
+};
 pub use path::Path;
 pub use root::Root;

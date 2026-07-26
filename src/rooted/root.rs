@@ -26,6 +26,7 @@ use crate::{
     write,
 };
 
+use super::Metadata;
 use super::path;
 
 /// An opened directory descriptor that authorizes contained operations.
@@ -66,6 +67,63 @@ impl Root {
     #[inline(always)]
     pub fn path(&self) -> &Path {
         &self.path
+    }
+
+    /// Reads metadata for the opened root directory through its descriptor.
+    ///
+    /// # Returns
+    /// Metadata for the directory that was securely opened by [`Self::open`].
+    ///
+    /// # Errors
+    /// Returns an I/O error when the operating system cannot inspect the open
+    /// root descriptor.
+    pub fn metadata(&self) -> Result<Metadata> {
+        #[cfg(unix)]
+        {
+            self.directory
+                .metadata()
+                .map(|metadata| Metadata::from_native(&metadata))
+        }
+        #[cfg(not(unix))]
+        {
+            Err(Error::new(
+                ErrorKind::Unsupported,
+                "descriptor-relative local roots are unsupported on this platform",
+            ))
+        }
+    }
+
+    /// Reads final-entry metadata without following a symbolic link.
+    ///
+    /// # Parameters
+    ///
+    /// * `path` - Validated non-empty relative path beneath this root.
+    ///
+    /// # Returns
+    /// Metadata for the final entry itself, including a symbolic link when the
+    /// final entry is a link.
+    ///
+    /// # Errors
+    /// Returns an I/O error when traversal cannot remain beneath the opened
+    /// root or when the final entry cannot be inspected.
+    pub fn symlink_metadata(&self, path: &path::Path) -> Result<Metadata> {
+        #[cfg(unix)]
+        {
+            local::read_rooted_symlink_metadata(
+                &self.directory,
+                &self.path,
+                path,
+            )
+            .map(|status| Metadata::from_stat(&status))
+        }
+        #[cfg(not(unix))]
+        {
+            let _ = path;
+            Err(Error::new(
+                ErrorKind::Unsupported,
+                "descriptor-relative local roots are unsupported on this platform",
+            ))
+        }
     }
 
     /// Opens a regular native file for reading beneath this root.

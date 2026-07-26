@@ -126,6 +126,7 @@ pub(crate) use rooted_file_io::{
     open_rooted_native_writer,
     open_rooted_reader,
     open_rooted_writer,
+    read_rooted_symlink_metadata,
 };
 #[cfg(unix)]
 pub(super) use rooted_parent_mode::RootedParentMode;

@@ -53,6 +53,7 @@ pub(crate) use internal::{
     open_root_directory,
     open_rooted_native_reader,
     open_rooted_native_writer,
+    read_rooted_symlink_metadata,
 };
 
 pub use file_buffering::FileBuffering;

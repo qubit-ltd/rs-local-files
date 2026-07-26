@@ -17,6 +17,38 @@ use qubit_local_files::{
     write,
 };
 
+/// Verifies rooted metadata preserves final symbolic links without abandoning
+/// the opened directory authority.
+#[cfg(unix)]
+#[test]
+fn test_rooted_symlink_metadata_reports_final_entry_kind() {
+    use std::os::unix::fs::symlink;
+
+    let temp = tempfile::tempdir().expect("a temporary root should be created");
+    let root = rooted::Root::open(temp.path()).expect("the root should open");
+    let file =
+        rooted::Path::new("value.txt").expect("the path should validate");
+    let link =
+        rooted::Path::new("value-link").expect("the link path should validate");
+    std::fs::write(temp.path().join("value.txt"), b"value")
+        .expect("the regular file should be created");
+    symlink("value.txt", temp.path().join("value-link"))
+        .expect("the final symbolic link should be created");
+
+    assert_eq!(
+        rooted::EntryKind::Directory,
+        root.metadata().expect("root metadata").kind()
+    );
+    assert_eq!(
+        rooted::EntryKind::File,
+        root.symlink_metadata(&file).expect("file metadata").kind(),
+    );
+    assert_eq!(
+        rooted::EntryKind::Symlink,
+        root.symlink_metadata(&link).expect("link metadata").kind(),
+    );
+}
+
 /// Verifies rooted ordinary I/O returns native file handles.
 #[cfg(unix)]
 #[test]
