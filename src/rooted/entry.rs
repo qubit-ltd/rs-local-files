@@ -26,7 +26,7 @@ pub struct Entry {
 impl Entry {
     /// Builds a rooted directory entry.
     #[must_use]
-    #[cfg(unix)]
+    #[cfg(any(unix, windows))]
     pub(crate) const fn new(name: OsString, metadata: Metadata) -> Self {
         Self { name, metadata }
     }

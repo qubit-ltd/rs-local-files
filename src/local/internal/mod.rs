@@ -57,6 +57,8 @@ mod temp_entry;
 mod unix_nonblocking;
 #[cfg(unix)]
 mod unix_stat;
+#[cfg(windows)]
+mod windows_rooted;
 
 pub(crate) use atomic_file_install::install_atomic_file;
 pub(crate) use atomic_install_recovery::{
@@ -146,4 +148,17 @@ pub(crate) use temp_entry::{
 pub(crate) use unix_nonblocking::{
     clear_nonblocking,
     open_with_nonblocking_retry,
+};
+#[cfg(windows)]
+pub(crate) use windows_rooted::{
+    create_rooted_directory,
+    open_root_directory,
+    open_rooted_native_reader,
+    open_rooted_native_writer,
+    read_root_directory,
+    read_rooted_directory,
+    read_rooted_symlink_metadata,
+    remove_rooted_entry,
+    rename_rooted_entry,
+    set_rooted_permissions,
 };

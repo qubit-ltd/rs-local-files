@@ -22,6 +22,9 @@ pub struct LocalCopyDirStats {
 
     /// Number of existing destination file entries skipped.
     pub skipped: u64,
+
+    /// Number of existing destination entries replaced or merged.
+    pub overwritten: u64,
 }
 
 impl LocalCopyDirStats {
@@ -63,5 +66,12 @@ impl LocalCopyDirStats {
     #[inline(always)]
     pub const fn skipped(&self) -> u64 {
         self.skipped
+    }
+
+    /// Returns the number of destination entries overwritten.
+    #[must_use]
+    #[inline(always)]
+    pub const fn overwritten(&self) -> u64 {
+        self.overwritten
     }
 }

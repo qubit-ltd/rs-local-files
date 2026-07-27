@@ -6,6 +6,8 @@
 //    Licensed under the Apache License, Version 2.0.
 // =============================================================================
 
+mod copy_tests;
 mod entry_kind_tests;
 mod entry_tests;
+mod permissions_tests;
 mod root_tests;

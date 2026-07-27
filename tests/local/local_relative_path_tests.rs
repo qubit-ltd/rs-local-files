@@ -76,6 +76,42 @@ fn test_new_accepts_normal_relative_components() {
     assert_eq!(Path::new("目录/data.bin"), path.as_path());
 }
 
+/// Verifies that validated paths compose normal relative descendants.
+#[test]
+fn test_join_accepts_normal_relative_descendants() {
+    let parent =
+        LocalRelativePath::new("parent").expect("the parent should validate");
+
+    let joined = parent
+        .join("child/value.bin")
+        .expect("the descendant should validate");
+    let component = parent
+        .join_component(std::ffi::OsStr::new("child"))
+        .expect("the child component should validate");
+
+    assert_eq!(Path::new("parent/child/value.bin"), joined.as_path());
+    assert_eq!(Path::new("parent/child"), component.as_path());
+}
+
+/// Verifies that path composition rejects non-normal descendants.
+#[test]
+fn test_join_rejects_invalid_descendants() {
+    let parent =
+        LocalRelativePath::new("parent").expect("the parent should validate");
+
+    for invalid in ["", ".", "..", "../escape", "/absolute"] {
+        let error = parent
+            .join(invalid)
+            .expect_err("an invalid descendant should be rejected");
+        assert_eq!(ErrorKind::InvalidInput, error.kind());
+    }
+    assert!(
+        parent
+            .join_component(std::ffi::OsStr::new("child/grandchild"))
+            .is_err()
+    );
+}
+
 /// Verifies rejection of every platform-independent non-normal component.
 #[test]
 fn test_new_rejects_non_normal_paths() {

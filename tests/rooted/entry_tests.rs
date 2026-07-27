@@ -6,8 +6,10 @@
 //    Licensed under the Apache License, Version 2.0.
 // =============================================================================
 
+#[cfg(unix)]
 use std::ffi::OsStr;
 
+#[cfg(unix)]
 use qubit_local_files::rooted::{
     EntryKind,
     Root,

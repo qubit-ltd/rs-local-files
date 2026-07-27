@@ -227,16 +227,21 @@ assert_eq!("new\n", std::fs::read_to_string(&target)?);
 
 `rooted::Root` 打开目录 descriptor，并把该 descriptor 作为所有后代操作的
 authority。保存的绝对 root 路径仅用于诊断。后代名称使用 `rooted::Path`
-表示，reader、writer 和 atomic writer 的遍历会拒绝每一级 component 上的
-symbolic link。root 路径或中间名称被重命名或替换时，已经打开的 descriptor
-不会被重定向。操作系统会在 capability 获取前解析 root 输入中的祖先
+表示，并可通过 `join` 或 `join_component` 安全组合。reader、writer 和 atomic
+writer 的遍历会拒绝每一级 component 上的 symbolic link。namespace 操作使用
+含义明确的单层/递归创建、文件/目录删除及覆盖/no-replace rename 方法。root
+路径或中间名称被重命名或替换时，已经打开的 descriptor 不会被重定向。操作系统会在 capability 获取前解析 root 输入中的祖先
 component；no-follow 只适用于最终 root entry。只有目录 descriptor 打开后，
 containment 才开始生效。
 `metadata` 与 `symlink_metadata` 暴露 entry kind、size，以及可选的访问、
-修改和创建时间；平台 descriptor metadata 不暴露 birth time 时，创建时间为
-`None`。
+修改和创建时间，以及 `rooted::Permissions`；平台 descriptor metadata 不暴露
+birth time 时，创建时间为 `None`。
 
-这里保证的是 descriptor-relative 路径 containment，不是 inode 名称唯一性或完整的 OS 安全边界。hard link、mounted filesystem、权限以及拥有同等 OS authority 的进程仍属于部署安全责任。该 backend 在 Unix 上可用；其他目标返回 `ErrorKind::Unsupported`，不会回退到 check-then-path。path-based focused API 是便利 API；当其他参与者可以并发修改 namespace 时，不能作为 sandbox 边界。
+这里保证的是 descriptor-relative 路径 containment，不是 inode 名称唯一性或完整的 OS 安全边界。hard link、mounted filesystem、权限以及拥有同等 OS authority 的进程仍属于部署安全责任。backend 在 Unix 使用 descriptor-relative 操作，在 Windows 使用 handle-relative 操作，并对逐级打开的 component 拒绝 name-surrogate reparse point。其他目标返回 `ErrorKind::Unsupported`，不会回退到 check-then-path。path-based focused API 是便利 API；当其他参与者可以并发修改 namespace 时，不能作为 sandbox 边界。
+
+`Root::copy` 在同一个 root 内复制普通文件或目录树，复用共享 copy policy 和结构化
+错误，不跟随 link，并通过显式工作栈遍历目录。每个文件通过 staging 原子安装；
+完整目录树不是事务。
 
 ## Atomic Write
 
@@ -462,6 +467,7 @@ assert_eq!(4, stats.bytes);
 | `directories` | 已创建的目标目录数量。 |
 | `bytes` | 从普通文件复制的字节数。 |
 | `skipped` | 因冲突策略而跳过的已有目标文件数量。 |
+| `overwritten` | 被替换或合并的已有目标条目数量。 |
 
 复制操作会拒绝位于源目录内部的目标，因为把目录复制进自身可能导致无限递归。当启用 symlink following 时，由跟随 symbolic link 引入的目录环也会被拒绝。打开后确认不是普通文件的源条目通过 `copy::Error` 报告 `std::io::ErrorKind::InvalidInput`；显式跟随 symbolic link 后遇到不支持的目标类型则报告 `ErrorKind::Unsupported`。结构化错误同时提供失败阶段、源和目标路径、部分统计、可选 staging path、可选次级 cleanup error 及原始 I/O source error；原始复制或提交错误保持为主 source error。递归复制不是目录树级事务：失败前已经提交的条目会留在目标中，不会执行回滚；破坏性的类型冲突替换还可能先删除已有目标目录，随后才在后续操作中失败。
 

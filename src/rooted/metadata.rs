@@ -7,12 +7,13 @@
 // =============================================================================
 //! Descriptor-relative entry metadata.
 
-#[cfg(unix)]
 use std::fs;
 #[cfg(unix)]
 use std::ops::BitAnd;
 #[cfg(unix)]
 use std::os::unix::fs::MetadataExt;
+#[cfg(windows)]
+use std::os::windows::io::AsRawHandle;
 use std::time::SystemTime;
 #[cfg(unix)]
 use std::time::{
@@ -20,7 +21,10 @@ use std::time::{
     UNIX_EPOCH,
 };
 
-use super::EntryKind;
+use super::{
+    EntryKind,
+    Permissions,
+};
 
 /// Metadata observed through an opened rooted directory authority.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -35,8 +39,8 @@ pub struct Metadata {
     modified_at: Option<SystemTime>,
     /// Creation time reported by the operating system when available.
     created_at: Option<SystemTime>,
-    /// Portable Unix permission bits when available.
-    permissions_mode: Option<u32>,
+    /// Cross-platform permissions observed through the open handle.
+    permissions: Permissions,
     /// Native device identity when available.
     device_id: Option<u64>,
     /// Native file identity within its device when available.
@@ -56,15 +60,114 @@ impl Metadata {
     #[must_use]
     #[cfg(unix)]
     pub(crate) fn from_native(metadata: &fs::Metadata) -> Self {
+        let file_type = metadata.file_type();
+        let kind = if file_type.is_file() {
+            EntryKind::File
+        } else if file_type.is_dir() {
+            EntryKind::Directory
+        } else if file_type.is_symlink() {
+            EntryKind::Symlink
+        } else {
+            EntryKind::Other
+        };
         Self {
-            kind: EntryKind::Directory,
+            kind,
             len: metadata.len(),
             accessed_at: metadata.accessed().ok(),
             modified_at: metadata.modified().ok(),
             created_at: metadata.created().ok(),
-            permissions_mode: Some(metadata.mode() & 0o7777),
+            permissions: Permissions::from_unix_mode(metadata.mode()),
             device_id: Some(metadata.dev()),
             file_id: Some(metadata.ino()),
+        }
+    }
+
+    /// Builds rooted metadata from an opened native file handle.
+    ///
+    /// # Parameters
+    ///
+    /// * `file` - Already-opened native file handle.
+    ///
+    /// # Returns
+    ///
+    /// Rooted metadata preserving handle-observed type, timestamps, size, and
+    /// native identity when the filesystem reports it.
+    ///
+    /// # Errors
+    ///
+    /// Returns an I/O error when handle metadata cannot be inspected.
+    pub(crate) fn from_open_file(file: &fs::File) -> std::io::Result<Self> {
+        let metadata = file.metadata()?;
+        #[cfg(unix)]
+        {
+            Ok(Self::from_native(&metadata))
+        }
+        #[cfg(windows)]
+        {
+            use windows_sys::Win32::Storage::FileSystem::{
+                BY_HANDLE_FILE_INFORMATION,
+                GetFileInformationByHandle,
+            };
+
+            let mut identity = BY_HANDLE_FILE_INFORMATION::default();
+            // SAFETY: `file` owns a live handle and `identity` is a correctly
+            // sized writable buffer for `GetFileInformationByHandle`.
+            let result = unsafe {
+                GetFileInformationByHandle(
+                    file.as_raw_handle(),
+                    &raw mut identity,
+                )
+            };
+            if result == 0 {
+                return Err(std::io::Error::last_os_error());
+            }
+            let file_id = (u64::from(identity.nFileIndexHigh) << 32)
+                | u64::from(identity.nFileIndexLow);
+            return Ok(Self::from_windows_metadata(
+                &metadata,
+                Some(u64::from(identity.dwVolumeSerialNumber)),
+                Some(file_id),
+            ));
+        }
+        #[cfg(not(any(unix, windows)))]
+        {
+            let _ = metadata;
+            Err(std::io::Error::new(
+                std::io::ErrorKind::Unsupported,
+                "rooted metadata is unsupported on this target",
+            ))
+        }
+    }
+
+    /// Builds rooted metadata from Windows metadata and handle identity.
+    #[must_use]
+    #[cfg(windows)]
+    fn from_windows_metadata(
+        metadata: &fs::Metadata,
+        device_id: Option<u64>,
+        file_id: Option<u64>,
+    ) -> Self {
+        let file_type = metadata.file_type();
+        let kind = if file_type.is_symlink() {
+            EntryKind::Symlink
+        } else if metadata.is_file() {
+            EntryKind::File
+        } else if metadata.is_dir() {
+            EntryKind::Directory
+        } else {
+            EntryKind::Other
+        };
+        Self {
+            kind,
+            len: metadata.len(),
+            accessed_at: metadata.accessed().ok(),
+            modified_at: metadata.modified().ok(),
+            created_at: metadata.created().ok(),
+            permissions: Permissions::from_read_only(
+                metadata.permissions().readonly(),
+            ),
+            device_id,
+            file_id,
         }
     }
 
@@ -88,7 +191,9 @@ impl Metadata {
             accessed_at,
             modified_at,
             created_at,
-            permissions_mode: Some(permission_mode(status.st_mode)),
+            permissions: Permissions::from_unix_mode(permission_mode(
+                status.st_mode,
+            )),
             device_id: native_id(status.st_dev),
             file_id: native_id(status.st_ino),
         }
@@ -132,11 +237,10 @@ impl Metadata {
         self.created_at
     }
 
-    /// Returns portable Unix permission bits when available.
-    #[must_use]
+    /// Returns the permissions observed through the rooted operation.
     #[inline(always)]
-    pub const fn permissions_mode(&self) -> Option<u32> {
-        self.permissions_mode
+    pub const fn permissions(&self) -> Permissions {
+        self.permissions
     }
 
     /// Returns whether two metadata values identify the same native entry.

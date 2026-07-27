@@ -9,7 +9,7 @@
 
 use std::fs::File;
 use std::io::Result;
-#[cfg(not(unix))]
+#[cfg(not(any(unix, windows)))]
 use std::io::{
     Error,
     ErrorKind,
@@ -19,9 +19,10 @@ use std::path::{
     PathBuf,
 };
 
-#[cfg(unix)]
+use crate::copy;
+#[cfg(any(unix, windows))]
 use crate::local;
-#[cfg(not(unix))]
+#[cfg(not(any(unix, windows)))]
 use crate::{
     LocalAtomicDestinationState,
     LocalAtomicWriteStage,
@@ -36,11 +37,9 @@ use super::path;
 use super::{
     Entry,
     Metadata,
+    Permissions,
     Writer,
 };
-
-// TODO: Implement a Windows directory-handle backend before advertising
-// rooted support on non-Unix platforms.
 
 /// An opened directory descriptor that authorizes contained operations.
 #[must_use]
@@ -49,7 +48,7 @@ pub struct Root {
     /// Absolute path retained only for diagnostics.
     path: PathBuf,
     /// Open descriptor used as the sole descendant authority.
-    #[cfg(unix)]
+    #[cfg(any(unix, windows))]
     directory: File,
 }
 
@@ -60,12 +59,12 @@ impl Root {
     /// Returns an I/O error when the directory cannot be securely opened.
     pub fn open(path: &Path) -> Result<Self> {
         let path = std::path::absolute(path)?;
-        #[cfg(unix)]
+        #[cfg(any(unix, windows))]
         {
             let directory = local::open_root_directory(&path)?;
             Ok(Self { path, directory })
         }
-        #[cfg(not(unix))]
+        #[cfg(not(any(unix, windows)))]
         {
             let _ = path;
             Err(Error::new(
@@ -80,6 +79,32 @@ impl Root {
     #[inline(always)]
     pub fn path(&self) -> &Path {
         &self.path
+    }
+
+    /// Copies one descendant entry beneath this opened root.
+    ///
+    /// # Parameters
+    ///
+    /// * `source` - Existing rooted source entry.
+    /// * `destination` - Rooted destination entry beneath the same root.
+    /// * `options` - Explicit copy policies.
+    ///
+    /// # Returns
+    ///
+    /// Exact statistics accumulated by the completed copy.
+    ///
+    /// # Errors
+    ///
+    /// Returns a structured copy error when the source is unsupported,
+    /// destination policies reject an entry, traversal fails, or a staged file
+    /// cannot be installed.
+    pub fn copy(
+        &self,
+        source: &path::Path,
+        destination: &path::Path,
+        options: copy::Options,
+    ) -> std::result::Result<copy::Statistics, copy::Error> {
+        super::copy::copy(self, source, destination, options)
     }
 
     /// Reads metadata for the opened root directory through its descriptor.
@@ -97,7 +122,11 @@ impl Root {
                 .metadata()
                 .map(|metadata| Metadata::from_native(&metadata))
         }
-        #[cfg(not(unix))]
+        #[cfg(windows)]
+        {
+            Metadata::from_open_file(&self.directory)
+        }
+        #[cfg(not(any(unix, windows)))]
         {
             Err(Error::new(
                 ErrorKind::Unsupported,
@@ -129,7 +158,16 @@ impl Root {
             )
             .map(|status| Metadata::from_stat(&status))
         }
-        #[cfg(not(unix))]
+        #[cfg(windows)]
+        {
+            local::read_rooted_symlink_metadata(
+                &self.directory,
+                &self.path,
+                path,
+            )
+            .and_then(|file| Metadata::from_open_file(&file))
+        }
+        #[cfg(not(any(unix, windows)))]
         {
             let _ = path;
             Err(Error::new(
@@ -158,7 +196,17 @@ impl Root {
                 },
             )
         }
-        #[cfg(not(unix))]
+        #[cfg(windows)]
+        {
+            local::read_root_directory(&self.directory, &self.path)?
+                .into_iter()
+                .map(|(name, file)| {
+                    Metadata::from_open_file(&file)
+                        .map(|metadata| Entry::new(name, metadata))
+                })
+                .collect()
+        }
+        #[cfg(not(any(unix, windows)))]
         {
             Err(Error::new(
                 ErrorKind::Unsupported,
@@ -186,7 +234,17 @@ impl Root {
                 },
             )
         }
-        #[cfg(not(unix))]
+        #[cfg(windows)]
+        {
+            local::read_rooted_directory(&self.directory, &self.path, path)?
+                .into_iter()
+                .map(|(name, file)| {
+                    Metadata::from_open_file(&file)
+                        .map(|metadata| Entry::new(name, metadata))
+                })
+                .collect()
+        }
+        #[cfg(not(any(unix, windows)))]
         {
             let _ = path;
             Err(Error::new(
@@ -196,29 +254,25 @@ impl Root {
         }
     }
 
-    /// Creates a descendant directory.
+    /// Creates one descendant directory.
     ///
     /// # Errors
-    /// Returns an I/O error when secure traversal or creation fails.
-    pub fn create_dir(
-        &self,
-        path: &path::Path,
-        recursive: bool,
-        exists_ok: bool,
-    ) -> Result<()> {
-        #[cfg(unix)]
+    /// Returns an I/O error when secure traversal or creation fails, including
+    /// when the parent is missing or the destination already exists.
+    pub fn create_dir(&self, path: &path::Path) -> Result<()> {
+        #[cfg(any(unix, windows))]
         {
             local::create_rooted_directory(
                 &self.directory,
                 &self.path,
                 path,
-                recursive,
-                exists_ok,
+                false,
+                false,
             )
         }
-        #[cfg(not(unix))]
+        #[cfg(not(any(unix, windows)))]
         {
-            let _ = (path, recursive, exists_ok);
+            let _ = path;
             Err(Error::new(
                 ErrorKind::Unsupported,
                 "descriptor-relative local roots are unsupported on this platform",
@@ -226,23 +280,26 @@ impl Root {
         }
     }
 
-    /// Removes a descendant entry without following symbolic links.
+    /// Creates a descendant directory and any missing parents.
+    ///
+    /// Existing directories are accepted, matching [`std::fs::create_dir_all`].
     ///
     /// # Errors
-    /// Returns an I/O error when secure traversal or removal fails.
-    pub fn remove(&self, path: &path::Path, recursive: bool) -> Result<()> {
-        #[cfg(unix)]
+    /// Returns an I/O error when secure traversal or creation fails.
+    pub fn create_dir_all(&self, path: &path::Path) -> Result<()> {
+        #[cfg(any(unix, windows))]
         {
-            local::remove_rooted_entry(
+            local::create_rooted_directory(
                 &self.directory,
                 &self.path,
                 path,
-                recursive,
+                true,
+                true,
             )
         }
-        #[cfg(not(unix))]
+        #[cfg(not(any(unix, windows)))]
         {
-            let _ = (path, recursive);
+            let _ = path;
             Err(Error::new(
                 ErrorKind::Unsupported,
                 "descriptor-relative local roots are unsupported on this platform",
@@ -250,7 +307,124 @@ impl Root {
         }
     }
 
-    /// Renames a descendant entry within the same opened root.
+    /// Ensures one descendant directory exists without creating parents.
+    ///
+    /// # Errors
+    /// Returns an I/O error when secure traversal fails or an existing entry
+    /// is not a directory.
+    pub fn ensure_dir(&self, path: &path::Path) -> Result<()> {
+        #[cfg(any(unix, windows))]
+        {
+            local::create_rooted_directory(
+                &self.directory,
+                &self.path,
+                path,
+                false,
+                true,
+            )
+        }
+        #[cfg(not(any(unix, windows)))]
+        {
+            let _ = path;
+            Err(Error::new(
+                ErrorKind::Unsupported,
+                "descriptor-relative local roots are unsupported on this platform",
+            ))
+        }
+    }
+
+    /// Ensures a descendant directory and all of its parents exist.
+    ///
+    /// # Errors
+    /// Returns an I/O error when secure traversal fails or an existing entry
+    /// in the chain is not a directory.
+    #[inline]
+    pub fn ensure_dir_all(&self, path: &path::Path) -> Result<()> {
+        self.create_dir_all(path)
+    }
+
+    /// Removes one descendant regular file or symbolic link.
+    ///
+    /// # Errors
+    /// Returns an I/O error when secure traversal or removal fails.
+    pub fn remove_file(&self, path: &path::Path) -> Result<()> {
+        #[cfg(any(unix, windows))]
+        {
+            if self.symlink_metadata(path)?.kind()
+                == super::EntryKind::Directory
+            {
+                return Err(std::io::Error::new(
+                    std::io::ErrorKind::IsADirectory,
+                    "rooted remove_file does not remove directories",
+                ));
+            }
+            local::remove_rooted_entry(&self.directory, &self.path, path, false)
+        }
+        #[cfg(not(any(unix, windows)))]
+        {
+            let _ = path;
+            Err(Error::new(
+                ErrorKind::Unsupported,
+                "descriptor-relative local roots are unsupported on this platform",
+            ))
+        }
+    }
+
+    /// Removes one empty descendant directory.
+    ///
+    /// # Errors
+    /// Returns an I/O error when secure traversal or removal fails.
+    pub fn remove_empty_dir(&self, path: &path::Path) -> Result<()> {
+        #[cfg(any(unix, windows))]
+        {
+            if self.symlink_metadata(path)?.kind()
+                != super::EntryKind::Directory
+            {
+                return Err(std::io::Error::new(
+                    std::io::ErrorKind::NotADirectory,
+                    "rooted remove_empty_dir requires a directory",
+                ));
+            }
+            local::remove_rooted_entry(&self.directory, &self.path, path, false)
+        }
+        #[cfg(not(any(unix, windows)))]
+        {
+            let _ = path;
+            Err(Error::new(
+                ErrorKind::Unsupported,
+                "descriptor-relative local roots are unsupported on this platform",
+            ))
+        }
+    }
+
+    /// Removes a descendant directory tree without following symbolic links.
+    ///
+    /// # Errors
+    /// Returns an I/O error when secure traversal or removal fails.
+    pub fn remove_tree(&self, path: &path::Path) -> Result<()> {
+        #[cfg(any(unix, windows))]
+        {
+            if self.symlink_metadata(path)?.kind()
+                != super::EntryKind::Directory
+            {
+                return Err(std::io::Error::new(
+                    std::io::ErrorKind::NotADirectory,
+                    "rooted remove_tree requires a directory",
+                ));
+            }
+            local::remove_rooted_entry(&self.directory, &self.path, path, true)
+        }
+        #[cfg(not(any(unix, windows)))]
+        {
+            let _ = path;
+            Err(Error::new(
+                ErrorKind::Unsupported,
+                "descriptor-relative local roots are unsupported on this platform",
+            ))
+        }
+    }
+
+    /// Renames a descendant entry, replacing an existing destination.
     ///
     /// # Errors
     /// Returns an I/O error when secure traversal or the requested atomic
@@ -259,21 +433,20 @@ impl Root {
         &self,
         source: &path::Path,
         destination: &path::Path,
-        overwrite: bool,
     ) -> Result<()> {
-        #[cfg(unix)]
+        #[cfg(any(unix, windows))]
         {
             local::rename_rooted_entry(
                 &self.directory,
                 &self.path,
                 source,
                 destination,
-                overwrite,
+                true,
             )
         }
-        #[cfg(not(unix))]
+        #[cfg(not(any(unix, windows)))]
         {
-            let _ = (source, destination, overwrite);
+            let _ = (source, destination);
             Err(Error::new(
                 ErrorKind::Unsupported,
                 "descriptor-relative local roots are unsupported on this platform",
@@ -281,14 +454,54 @@ impl Root {
         }
     }
 
-    /// Applies portable Unix permission bits to a descendant entry.
+    /// Renames a descendant entry without replacing an existing destination.
+    ///
+    /// # Errors
+    /// Returns an I/O error when secure traversal fails, the destination
+    /// exists, or the requested atomic rename is unavailable.
+    pub fn rename_without_replacing(
+        &self,
+        source: &path::Path,
+        destination: &path::Path,
+    ) -> Result<()> {
+        #[cfg(any(unix, windows))]
+        {
+            local::rename_rooted_entry(
+                &self.directory,
+                &self.path,
+                source,
+                destination,
+                false,
+            )
+        }
+        #[cfg(not(any(unix, windows)))]
+        {
+            let _ = (source, destination);
+            Err(Error::new(
+                ErrorKind::Unsupported,
+                "descriptor-relative local roots are unsupported on this platform",
+            ))
+        }
+    }
+
+    /// Applies cross-platform permissions to a descendant entry.
     ///
     /// # Errors
     /// Returns an I/O error when traversal cannot remain beneath the opened
     /// root or the permission update fails.
-    pub fn set_permissions(&self, path: &path::Path, mode: u32) -> Result<()> {
+    pub fn set_permissions(
+        &self,
+        path: &path::Path,
+        permissions: Permissions,
+    ) -> Result<()> {
         #[cfg(unix)]
         {
+            let current_mode = self
+                .symlink_metadata(path)?
+                .permissions()
+                .unix_mode()
+                .expect("Unix rooted metadata always carries a mode");
+            let mode = permissions.resolve_unix_mode(current_mode);
             local::set_rooted_permissions(
                 &self.directory,
                 &self.path,
@@ -296,9 +509,19 @@ impl Root {
                 mode,
             )
         }
-        #[cfg(not(unix))]
+        #[cfg(windows)]
         {
-            let _ = (path, mode);
+            let mode = if permissions.is_read_only() { 0 } else { 0o200 };
+            local::set_rooted_permissions(
+                &self.directory,
+                &self.path,
+                path,
+                mode,
+            )
+        }
+        #[cfg(not(any(unix, windows)))]
+        {
+            let _ = (path, permissions);
             Err(Error::new(
                 ErrorKind::Unsupported,
                 "descriptor-relative local roots are unsupported on this platform",
@@ -316,7 +539,7 @@ impl Root {
         path: &path::Path,
         options: &read::OpenOptions,
     ) -> Result<File> {
-        #[cfg(unix)]
+        #[cfg(any(unix, windows))]
         {
             local::open_rooted_native_reader(
                 &self.directory,
@@ -325,7 +548,7 @@ impl Root {
                 options,
             )
         }
-        #[cfg(not(unix))]
+        #[cfg(not(any(unix, windows)))]
         {
             let _ = (path, options);
             Err(Error::new(
@@ -345,7 +568,7 @@ impl Root {
         path: &path::Path,
         options: &write::OpenOptions,
     ) -> Result<File> {
-        #[cfg(unix)]
+        #[cfg(any(unix, windows))]
         {
             local::open_rooted_native_writer(
                 &self.directory,
@@ -354,7 +577,7 @@ impl Root {
                 options,
             )
         }
-        #[cfg(not(unix))]
+        #[cfg(not(any(unix, windows)))]
         {
             let _ = (path, options);
             Err(Error::new(
@@ -406,11 +629,11 @@ impl Root {
         path: &path::Path,
         options: atomic::Options,
     ) -> std::result::Result<Writer, atomic::Error> {
-        #[cfg(unix)]
+        #[cfg(any(unix, windows))]
         {
             Writer::new(&self.directory, &self.path, path, options)
         }
-        #[cfg(not(unix))]
+        #[cfg(not(any(unix, windows)))]
         {
             let _ = options;
             Err(atomic::Error::new(

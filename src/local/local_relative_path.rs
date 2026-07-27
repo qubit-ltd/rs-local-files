@@ -7,6 +7,7 @@
 // =============================================================================
 //! Validated relative paths for rooted filesystem operations.
 
+use std::ffi::OsStr;
 use std::io::{
     Error,
     ErrorKind,
@@ -75,6 +76,53 @@ impl LocalRelativePath {
     #[inline(always)]
     pub fn as_path(&self) -> &Path {
         &self.path
+    }
+
+    /// Appends a validated relative descendant.
+    ///
+    /// # Parameters
+    ///
+    /// * `child` - Non-empty relative path containing only normal components.
+    ///
+    /// # Returns
+    ///
+    /// A newly validated path containing this path followed by `child`.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`ErrorKind::InvalidInput`] when `child` is empty, absolute,
+    /// contains a non-normal component, or contains an embedded NUL value.
+    pub fn join<P>(&self, child: P) -> Result<Self>
+    where
+        P: AsRef<Path>,
+    {
+        let child = Self::new(child)?;
+        Self::new(self.path.join(child.as_path()))
+    }
+
+    /// Appends exactly one validated normal path component.
+    ///
+    /// # Parameters
+    ///
+    /// * `child` - Native child name to append.
+    ///
+    /// # Returns
+    ///
+    /// A newly validated path containing this path followed by `child`.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`ErrorKind::InvalidInput`] when `child` is not exactly one
+    /// normal component or contains an embedded NUL value.
+    pub fn join_component(&self, child: &OsStr) -> Result<Self> {
+        let child_path = Path::new(child);
+        let mut components = child_path.components();
+        if !matches!(components.next(), Some(Component::Normal(_)))
+            || components.next().is_some()
+        {
+            return Err(invalid_relative_path_error(child_path));
+        }
+        self.join(child_path)
     }
 }
 

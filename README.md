@@ -191,13 +191,19 @@ protocol rather than opening a normal write handle.
 which is the filesystem authority; its stored absolute path is diagnostic
 context only.
 Construct descendant names with `rooted::Path`, which accepts only a
-non-empty sequence of normal relative components. `open_reader`, `open_writer`,
-and `begin_atomic_write` traverse from the open root descriptor and reject
-symbolic links at intermediate and final entries. Renaming or replacing the
-root path or an already opened intermediate name does not redirect that handle.
+non-empty sequence of normal relative components. Use `join` for a validated
+relative descendant and `join_component` for one native child name.
+`open_reader`, `open_writer`, and `begin_atomic_write` traverse from the open
+root descriptor and reject symbolic links at intermediate and final entries.
+Namespace operations use explicit methods: `create_dir`, `create_dir_all`,
+`ensure_dir`, `ensure_dir_all`, `remove_file`, `remove_empty_dir`,
+`remove_tree`, `rename`, and `rename_without_replacing`.
+Renaming or replacing the root path or an already opened intermediate name
+does not redirect that handle.
 `metadata` and `symlink_metadata` report entry kind, size, and optional access,
-modification, and creation times. Creation time is `None` when the underlying
-descriptor metadata does not expose a birth time.
+modification, and creation times, plus cross-platform `rooted::Permissions`.
+Creation time is `None` when the underlying descriptor metadata does not expose
+a birth time.
 The operating system resolves ancestor components in the root input before the
 capability is acquired; no-follow applies to the final root entry. Containment
 begins after that directory descriptor has been opened.
@@ -205,13 +211,19 @@ begins after that directory descriptor has been opened.
 This is descriptor-relative path containment, not inode-name uniqueness or a
 complete OS security boundary. Hard links, mounts, permissions, and processes
 with equivalent OS authority remain deployment concerns. Path-based
-Path-based focused APIs are convenience operations, not sandbox boundaries.
+focused APIs are convenience operations, not sandbox boundaries.
 
-The secure backend currently uses Unix descriptor-relative operations. On
-other targets `rooted::Root::open` returns `std::io::ErrorKind::Unsupported`
-instead of falling back to a check-then-path sequence. `rooted::Root` is the API
-for attacker-resistant containment; path-based and temporary resource helpers
-remain intended for trusted local application paths.
+The secure backend uses descriptor-relative operations on Unix and
+handle-relative NT operations on Windows. Windows rejects name-surrogate
+reparse points while opening each component. Other targets return
+`std::io::ErrorKind::Unsupported` instead of falling back to a check-then-path
+sequence.
+
+`Root::copy` copies a file or directory tree within the same opened root and
+reuses `copy::Options`, `copy::Statistics`, and `copy::Error`. It rejects
+symbolic links, uses an explicit work stack for directories, and installs each
+file through same-directory staging. A file install is atomic; a directory tree
+is not a multi-entry transaction.
 
 ### Atomic Writes
 
@@ -318,6 +330,7 @@ same destination path at the same time.
 | `directories` | Number of destination directories created. |
 | `bytes` | Number of bytes copied from regular files. |
 | `skipped` | Number of existing destination files skipped. |
+| `overwritten` | Number of existing destination entries replaced or merged. |
 
 `copy::Options::default()` is intentionally conservative: both
 `conflict` and `type_conflict` use `Fail`, symbolic links are not followed, and

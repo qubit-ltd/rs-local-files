@@ -10,7 +10,7 @@
 
 #[cfg(unix)]
 use std::ffi::CString;
-#[cfg(unix)]
+#[cfg(any(unix, windows))]
 use std::fs::File;
 use std::io::{
     self,
@@ -29,7 +29,7 @@ use crate::{
     LocalAtomicWriteError,
     LocalAtomicWriteStage,
 };
-#[cfg(unix)]
+#[cfg(any(unix, windows))]
 use crate::{
     LocalAtomicWriteOptions,
     LocalRelativePath,
@@ -51,6 +51,20 @@ use super::internal::{
     preserve_atomic_metadata,
     recover_atomic_install_error,
     verify_rooted_atomic_destination_identity,
+};
+#[cfg(windows)]
+use super::{
+    create_rooted_directory,
+    open_rooted_native_writer,
+    read_rooted_symlink_metadata,
+    remove_rooted_entry,
+    rename_rooted_entry,
+    try_random_file_name,
+};
+#[cfg(windows)]
+use crate::write::{
+    Mode as WriteMode,
+    OpenOptions as WriteOpenOptions,
 };
 
 /// A streaming atomic writer contained by an open [`crate::rooted::Root`].
@@ -97,6 +111,77 @@ pub struct LocalRootAtomicWriter {
     #[cfg(unix)]
     /// Descriptor-relative staging lifecycle.
     staged_file: RootedStagedFile,
+    #[cfg(windows)]
+    /// Final rooted destination.
+    destination: LocalRelativePath,
+    #[cfg(windows)]
+    /// Whether a regular destination existed when this writer began.
+    destination_existed: bool,
+    #[cfg(windows)]
+    /// Handle-relative staging lifecycle.
+    staged_file: WindowsRootedStagedFile,
+}
+
+/// Owns a Windows rooted staging file and removes its name unless disarmed.
+#[cfg(windows)]
+#[derive(Debug)]
+struct WindowsRootedStagedFile {
+    /// Root capability used for cleanup and installation.
+    root: File,
+    /// Validated staging path beneath `root`.
+    path: LocalRelativePath,
+    /// Diagnostic-only absolute staging path.
+    diagnostic_path: PathBuf,
+    /// Open staging handle.
+    file: Option<File>,
+    /// Whether the staging name still requires cleanup.
+    armed: bool,
+}
+
+#[cfg(windows)]
+impl WindowsRootedStagedFile {
+    /// Returns the open staging file.
+    fn file(&self) -> &File {
+        self.file
+            .as_ref()
+            .expect("rooted staging file must remain open while armed")
+    }
+
+    /// Returns the open staging file mutably.
+    fn file_mut(&mut self) -> &mut File {
+        self.file
+            .as_mut()
+            .expect("rooted staging file must remain open while armed")
+    }
+
+    /// Closes and removes the staging entry.
+    fn cleanup(&mut self) -> io::Result<()> {
+        if let Some(file) = self.file.as_ref() {
+            let mut permissions = file.metadata()?.permissions();
+            if permissions.readonly() {
+                permissions.set_readonly(false);
+                file.set_permissions(permissions)?;
+            }
+        }
+        self.file.take();
+        if self.armed {
+            remove_rooted_entry(&self.root, Path::new(""), &self.path, false)?;
+            self.armed = false;
+        }
+        Ok(())
+    }
+
+    /// Marks the staging name as installed.
+    fn disarm(&mut self) {
+        self.armed = false;
+    }
+}
+
+#[cfg(windows)]
+impl Drop for WindowsRootedStagedFile {
+    fn drop(&mut self) {
+        let _ = self.cleanup();
+    }
 }
 
 impl LocalRootAtomicWriter {
@@ -165,6 +250,175 @@ impl LocalRootAtomicWriter {
         })
     }
 
+    #[cfg(windows)]
+    /// Creates a Windows rooted atomic writer from an open root capability.
+    pub(crate) fn new(
+        root: &File,
+        diagnostic_root: &Path,
+        path: &LocalRelativePath,
+        options: LocalAtomicWriteOptions,
+    ) -> Result<Self, LocalAtomicWriteError> {
+        let requested_path = path.as_path().to_path_buf();
+        let diagnostic_path = diagnostic_root.join(path.as_path());
+        if options.creates_parent()
+            && let Some(parent) = path
+                .as_path()
+                .parent()
+                .filter(|parent| !parent.as_os_str().is_empty())
+        {
+            let parent = LocalRelativePath::new(parent).map_err(|source| {
+                LocalAtomicWriteError::new(
+                    LocalAtomicWriteStage::PrepareParent,
+                    requested_path.clone(),
+                    None,
+                    LocalAtomicDestinationState::Unchanged,
+                    source,
+                )
+            })?;
+            map_atomic_error(
+                create_rooted_directory(
+                    root,
+                    diagnostic_root,
+                    &parent,
+                    true,
+                    true,
+                ),
+                LocalAtomicWriteStage::PrepareParent,
+                &requested_path,
+                None,
+                LocalAtomicDestinationState::Unchanged,
+            )?;
+        }
+        let destination_existed = match read_rooted_symlink_metadata(
+            root,
+            diagnostic_root,
+            path,
+        ) {
+            Ok(file) => {
+                let metadata = file.metadata().map_err(|source| {
+                    LocalAtomicWriteError::new(
+                        LocalAtomicWriteStage::InspectDestination,
+                        requested_path.clone(),
+                        None,
+                        LocalAtomicDestinationState::Unchanged,
+                        source,
+                    )
+                })?;
+                if !metadata.is_file() {
+                    return Err(LocalAtomicWriteError::new(
+                        LocalAtomicWriteStage::InspectDestination,
+                        requested_path,
+                        None,
+                        LocalAtomicDestinationState::Unchanged,
+                        io::Error::new(
+                            io::ErrorKind::InvalidInput,
+                            "rooted atomic destination is not a regular file",
+                        ),
+                    ));
+                }
+                true
+            }
+            Err(source) if source.kind() == io::ErrorKind::NotFound => false,
+            Err(source) => {
+                return Err(LocalAtomicWriteError::new(
+                    LocalAtomicWriteStage::InspectDestination,
+                    requested_path,
+                    None,
+                    LocalAtomicDestinationState::Unchanged,
+                    source,
+                ));
+            }
+        };
+        let relative_parent = path.as_path().parent().unwrap_or(Path::new(""));
+        let staging_root = root.try_clone().map_err(|source| {
+            LocalAtomicWriteError::new(
+                LocalAtomicWriteStage::CreateTemporaryFile,
+                requested_path.clone(),
+                None,
+                LocalAtomicDestinationState::Unchanged,
+                source,
+            )
+        })?;
+        let mut last_collision = None;
+        for _ in 0..32 {
+            let name =
+                try_random_file_name(".qubit-atomic-", None, Some(".tmp"))
+                    .map_err(|source| {
+                        LocalAtomicWriteError::new(
+                            LocalAtomicWriteStage::CreateTemporaryFile,
+                            requested_path.clone(),
+                            None,
+                            LocalAtomicDestinationState::Unchanged,
+                            source,
+                        )
+                    })?;
+            let staging_path = if relative_parent.as_os_str().is_empty() {
+                LocalRelativePath::new(&name)
+            } else {
+                LocalRelativePath::new(relative_parent)
+                    .and_then(|parent| parent.join(&name))
+            }
+            .map_err(|source| {
+                LocalAtomicWriteError::new(
+                    LocalAtomicWriteStage::CreateTemporaryFile,
+                    requested_path.clone(),
+                    None,
+                    LocalAtomicDestinationState::Unchanged,
+                    source,
+                )
+            })?;
+            let write_options = WriteOpenOptions::new(WriteMode::CreateNew);
+            match open_rooted_native_writer(
+                root,
+                diagnostic_root,
+                &staging_path,
+                &write_options,
+            ) {
+                Ok(file) => {
+                    return Ok(Self {
+                        path: requested_path,
+                        destination: path.clone(),
+                        destination_existed,
+                        staged_file: WindowsRootedStagedFile {
+                            root: staging_root,
+                            path: staging_path.clone(),
+                            diagnostic_path: diagnostic_root
+                                .join(staging_path.as_path()),
+                            file: Some(file),
+                            armed: true,
+                        },
+                    });
+                }
+                Err(source)
+                    if source.kind() == io::ErrorKind::AlreadyExists =>
+                {
+                    last_collision = Some(source);
+                }
+                Err(source) => {
+                    return Err(LocalAtomicWriteError::new(
+                        LocalAtomicWriteStage::CreateTemporaryFile,
+                        requested_path,
+                        Some(diagnostic_path),
+                        LocalAtomicDestinationState::Unchanged,
+                        source,
+                    ));
+                }
+            }
+        }
+        Err(LocalAtomicWriteError::new(
+            LocalAtomicWriteStage::CreateTemporaryFile,
+            requested_path,
+            Some(diagnostic_path),
+            LocalAtomicDestinationState::Unchanged,
+            last_collision.unwrap_or_else(|| {
+                io::Error::new(
+                    io::ErrorKind::AlreadyExists,
+                    "could not allocate a unique rooted staging file",
+                )
+            }),
+        ))
+    }
+
     /// Synchronizes and atomically replaces the rooted destination.
     ///
     /// Existing metadata is read from the opened destination during this call
@@ -204,7 +458,7 @@ impl LocalRootAtomicWriter {
     /// Returns a recoverable commit error when metadata preservation,
     /// staging-file synchronization, replacement, or parent-directory
     /// synchronization fails.
-    #[cfg_attr(not(unix), allow(unused_mut))]
+    #[cfg_attr(not(any(unix, windows)), allow(unused_mut))]
     pub fn commit_recoverable(
         mut self,
     ) -> Result<(), LocalAtomicCommitError<Self>> {
@@ -218,7 +472,17 @@ impl LocalRootAtomicWriter {
                 Err(error) => Err(LocalAtomicCommitError::new(error, None)),
             }
         }
-        #[cfg(not(unix))]
+        #[cfg(windows)]
+        {
+            match self.commit_attempt_windows() {
+                Ok(()) => Ok(()),
+                Err(error) if self.staged_file.armed => {
+                    Err(LocalAtomicCommitError::new(error, Some(self)))
+                }
+                Err(error) => Err(LocalAtomicCommitError::new(error, None)),
+            }
+        }
+        #[cfg(not(any(unix, windows)))]
         {
             let error = unsupported_atomic_error(&self.path);
             Err(LocalAtomicCommitError::new(error, None))
@@ -230,7 +494,7 @@ impl LocalRootAtomicWriter {
     /// # Errors
     ///
     /// Returns a structured cleanup error when `unlinkat` fails.
-    #[cfg_attr(not(unix), allow(unused_mut))]
+    #[cfg_attr(not(any(unix, windows)), allow(unused_mut))]
     pub fn abort(mut self) -> Result<(), LocalAtomicWriteError> {
         #[cfg(unix)]
         {
@@ -247,10 +511,151 @@ impl LocalRootAtomicWriter {
                 )),
             }
         }
-        #[cfg(not(unix))]
+        #[cfg(windows)]
+        {
+            let temporary_path = self.staged_file.diagnostic_path.clone();
+            self.staged_file.cleanup().map_err(|source| {
+                LocalAtomicWriteError::new(
+                    LocalAtomicWriteStage::CleanupTemporaryFile,
+                    self.path.clone(),
+                    Some(temporary_path),
+                    LocalAtomicDestinationState::Unchanged,
+                    source,
+                )
+            })
+        }
+        #[cfg(not(any(unix, windows)))]
         {
             Err(unsupported_atomic_error(&self.path))
         }
+    }
+
+    #[cfg(windows)]
+    /// Runs one handle-relative Windows commit attempt.
+    fn commit_attempt_windows(&mut self) -> Result<(), LocalAtomicWriteError> {
+        let destination = if self.destination_existed {
+            Some(
+                read_rooted_symlink_metadata(
+                    &self.staged_file.root,
+                    Path::new(""),
+                    &self.destination,
+                )
+                .map_err(|source| {
+                    LocalAtomicWriteError::new(
+                        LocalAtomicWriteStage::ReadDestinationMetadata,
+                        self.path.clone(),
+                        Some(self.staged_file.diagnostic_path.clone()),
+                        LocalAtomicDestinationState::Unchanged,
+                        source,
+                    )
+                })?,
+            )
+        } else {
+            None
+        };
+        if let Some(destination) = destination.as_ref() {
+            let permissions = destination
+                .metadata()
+                .map_err(|source| {
+                    LocalAtomicWriteError::new(
+                        LocalAtomicWriteStage::ReadDestinationMetadata,
+                        self.path.clone(),
+                        Some(self.staged_file.diagnostic_path.clone()),
+                        LocalAtomicDestinationState::Unchanged,
+                        source,
+                    )
+                })?
+                .permissions();
+            self.staged_file
+                .file()
+                .set_permissions(permissions)
+                .map_err(|source| {
+                    LocalAtomicWriteError::new(
+                        LocalAtomicWriteStage::ApplyDestinationMetadata,
+                        self.path.clone(),
+                        Some(self.staged_file.diagnostic_path.clone()),
+                        LocalAtomicDestinationState::Unchanged,
+                        source,
+                    )
+                })?;
+        }
+        self.staged_file.file().sync_all().map_err(|source| {
+            LocalAtomicWriteError::new(
+                LocalAtomicWriteStage::SyncTemporaryFile,
+                self.path.clone(),
+                Some(self.staged_file.diagnostic_path.clone()),
+                LocalAtomicDestinationState::Unchanged,
+                source,
+            )
+        })?;
+        if let Some(opened_destination) = destination.as_ref() {
+            let current_destination = read_rooted_symlink_metadata(
+                &self.staged_file.root,
+                Path::new(""),
+                &self.destination,
+            )
+            .map_err(|source| {
+                LocalAtomicWriteError::new(
+                    LocalAtomicWriteStage::ReadDestinationMetadata,
+                    self.path.clone(),
+                    Some(self.staged_file.diagnostic_path.clone()),
+                    LocalAtomicDestinationState::Unchanged,
+                    source,
+                )
+            })?;
+            let opened =
+                crate::rooted::Metadata::from_open_file(opened_destination)
+                    .map_err(|source| {
+                        LocalAtomicWriteError::new(
+                            LocalAtomicWriteStage::ReadDestinationMetadata,
+                            self.path.clone(),
+                            Some(self.staged_file.diagnostic_path.clone()),
+                            LocalAtomicDestinationState::Unchanged,
+                            source,
+                        )
+                    })?;
+            let current =
+                crate::rooted::Metadata::from_open_file(&current_destination)
+                    .map_err(|source| {
+                    LocalAtomicWriteError::new(
+                        LocalAtomicWriteStage::ReadDestinationMetadata,
+                        self.path.clone(),
+                        Some(self.staged_file.diagnostic_path.clone()),
+                        LocalAtomicDestinationState::Unchanged,
+                        source,
+                    )
+                })?;
+            if !opened.is_same_file(&current) {
+                return Err(LocalAtomicWriteError::new(
+                    LocalAtomicWriteStage::ReplaceDestination,
+                    self.path.clone(),
+                    Some(self.staged_file.diagnostic_path.clone()),
+                    LocalAtomicDestinationState::Indeterminate,
+                    io::Error::new(
+                        io::ErrorKind::AlreadyExists,
+                        "rooted atomic destination changed during commit",
+                    ),
+                ));
+            }
+        }
+        rename_rooted_entry(
+            &self.staged_file.root,
+            Path::new(""),
+            &self.staged_file.path,
+            &self.destination,
+            self.destination_existed,
+        )
+        .map_err(|source| {
+            LocalAtomicWriteError::new(
+                LocalAtomicWriteStage::ReplaceDestination,
+                self.path.clone(),
+                Some(self.staged_file.diagnostic_path.clone()),
+                LocalAtomicDestinationState::Unchanged,
+                source,
+            )
+        })?;
+        self.staged_file.disarm();
+        Ok(())
     }
 
     #[cfg(unix)]
@@ -412,7 +817,20 @@ impl LocalRootAtomicWriter {
         }
     }
 
-    #[cfg(not(unix))]
+    #[cfg(windows)]
+    /// Finalizes a consuming Windows commit failure.
+    fn finalize_failed_commit(
+        mut self,
+        error: LocalAtomicWriteError,
+    ) -> LocalAtomicWriteError {
+        if error.destination_state() == LocalAtomicDestinationState::Unchanged {
+            error.with_cleanup_error(self.staged_file.cleanup().err())
+        } else {
+            error
+        }
+    }
+
+    #[cfg(not(any(unix, windows)))]
     /// Returns an unsupported failure after a non-Unix commit attempt.
     ///
     /// # Parameters
@@ -493,7 +911,11 @@ impl Write for LocalRootAtomicWriter {
         {
             self.staged_file.file_mut().write(buffer)
         }
-        #[cfg(not(unix))]
+        #[cfg(windows)]
+        {
+            self.staged_file.file_mut().write(buffer)
+        }
+        #[cfg(not(any(unix, windows)))]
         {
             let _ = buffer;
             Err(io::Error::new(
@@ -513,7 +935,11 @@ impl Write for LocalRootAtomicWriter {
         {
             self.staged_file.file_mut().write_vectored(buffers)
         }
-        #[cfg(not(unix))]
+        #[cfg(windows)]
+        {
+            self.staged_file.file_mut().write_vectored(buffers)
+        }
+        #[cfg(not(any(unix, windows)))]
         {
             let _ = buffers;
             Err(io::Error::new(
@@ -530,7 +956,11 @@ impl Write for LocalRootAtomicWriter {
         {
             self.staged_file.file_mut().flush()
         }
-        #[cfg(not(unix))]
+        #[cfg(windows)]
+        {
+            self.staged_file.file_mut().flush()
+        }
+        #[cfg(not(any(unix, windows)))]
         {
             Err(io::Error::new(
                 io::ErrorKind::Unsupported,
@@ -572,7 +1002,7 @@ fn sync_rooted_parent_chain(
     Ok(())
 }
 
-#[cfg(unix)]
+#[cfg(any(unix, windows))]
 /// Adds structured atomic context to a native I/O result.
 ///
 /// # Parameters
@@ -605,7 +1035,7 @@ fn map_atomic_error<T>(
     }
 }
 
-#[cfg(not(unix))]
+#[cfg(not(any(unix, windows)))]
 /// Creates a structured unsupported rooted atomic-write error.
 ///
 /// # Parameters

@@ -293,12 +293,15 @@ not subject to the no-replace support matrix.
 `rooted::Root` opens a directory descriptor and uses that descriptor as the
 authority for descendant operations. Its stored absolute root path is retained
 only for diagnostics. Descendant names are supplied as `rooted::Path`, and
-reader, writer, and atomic-writer traversal rejects symbolic links at every
-component. Renaming or replacing the root path or an intermediate name does not
-redirect descriptors that were already opened.
+can be composed with `join` or `join_component`. Reader, writer, and
+atomic-writer traversal rejects symbolic links at every component. Namespace
+operations use explicit methods for single or recursive creation, file or
+directory removal, and replacing or no-replace rename. Renaming or replacing
+the root path or an intermediate name does not redirect descriptors that were
+already opened.
 `metadata` and `symlink_metadata` expose entry kind, size, and optional access,
-modification, and creation times. Creation time is `None` when the platform's
-descriptor metadata does not expose a birth time.
+modification, and creation times, plus `rooted::Permissions`. Creation time is
+`None` when the platform's descriptor metadata does not expose a birth time.
 The operating system resolves ancestor components in the root input before the
 capability is acquired; no-follow applies to the final root entry. Containment
 begins after that directory descriptor has been opened.
@@ -306,10 +309,17 @@ begins after that directory descriptor has been opened.
 This guarantee is descriptor-relative path containment. It does not establish
 unique inode names or a complete OS security boundary: hard links, mounted
 filesystems, permissions, and processes with equivalent OS authority remain
-deployment concerns. The backend is available on Unix; other targets return
-`ErrorKind::Unsupported` rather than falling back to check-then-path behavior.
+deployment concerns. The backend is descriptor-relative on Unix and
+handle-relative on Windows, where name-surrogate reparse points are rejected
+for every opened component. Other targets return `ErrorKind::Unsupported`
+rather than falling back to check-then-path behavior.
 Path-based APIs are convenience operations and are not sandbox
 boundaries when another actor can mutate the namespace concurrently.
+
+`Root::copy` copies a regular file or directory tree inside the same root. It
+uses the shared copy policies and structured errors, never follows links, and
+uses an explicit directory work stack. Each file is staged and installed
+atomically; the complete directory tree is not transactional.
 
 ## Atomic Writes
 
@@ -573,6 +583,7 @@ Statistics:
 | `directories` | Number of destination directories created. |
 | `bytes` | Number of bytes copied from regular files. |
 | `skipped` | Number of existing destination files skipped. |
+| `overwritten` | Number of existing destination entries replaced or merged. |
 
 The copy operation rejects destinations inside the source tree, because copying
 a directory into itself can recurse indefinitely. When symlink following is

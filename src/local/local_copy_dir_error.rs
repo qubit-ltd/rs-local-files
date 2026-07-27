@@ -46,7 +46,7 @@ pub struct LocalCopyDirError {
     /// Destination entry being processed when the failure occurred.
     destination_path: PathBuf,
     /// Statistics accumulated before the failure.
-    stats: LocalCopyDirStats,
+    stats: Box<LocalCopyDirStats>,
     /// Same-directory staging path when file staging had already started.
     ///
     /// The path may no longer exist when cleanup succeeded or a later retry
@@ -85,7 +85,7 @@ impl LocalCopyDirError {
             stage,
             source_path,
             destination_path,
-            stats,
+            stats: Box::new(stats),
             temporary_path: None,
             cleanup_error: None,
             error,

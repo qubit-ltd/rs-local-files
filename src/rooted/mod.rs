@@ -7,10 +7,12 @@
 // =============================================================================
 //! Descriptor-relative local filesystem operations.
 
+mod copy;
 mod entry;
 mod entry_kind;
 mod metadata;
 mod path;
+mod permissions;
 mod root;
 
 pub use crate::local::LocalRootAtomicWriter as Writer;
@@ -18,4 +20,5 @@ pub use entry::Entry;
 pub use entry_kind::EntryKind;
 pub use metadata::Metadata;
 pub use path::Path;
+pub use permissions::Permissions;
 pub use root::Root;

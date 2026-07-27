@@ -141,20 +141,29 @@ reader options 时使用 `read::open_with`。
 
 `rooted::Root` 把所有后代操作锚定到一个已打开的目录 descriptor；它才是文件系统 authority，保存的绝对路径只用于诊断。
 后代名称必须先构造为 `rooted::Path`；它只接受由普通 component 组成的
-非空相对路径。`open_reader`、`open_writer` 和 `begin_atomic_write` 都从已打开
-的 root descriptor 开始遍历，并拒绝中间项和最终项上的 symbolic link。
+非空相对路径。使用 `join` 组合已验证的相对后代路径，使用 `join_component`
+追加一个原生子名称。`open_reader`、`open_writer` 和 `begin_atomic_write`
+都从已打开的 root descriptor 开始遍历，并拒绝中间项和最终项上的 symbolic
+link。namespace 操作使用含义明确的方法：`create_dir`、`create_dir_all`、
+`ensure_dir`、`ensure_dir_all`、`remove_file`、`remove_empty_dir`、
+`remove_tree`、`rename` 和 `rename_without_replacing`。
 即使 root 路径或已经打开的中间名称被重命名或替换，已有句柄也不会被重定向。
 `metadata` 与 `symlink_metadata` 返回 entry kind、size，以及可选的访问、
-修改和创建时间；底层 descriptor metadata 不暴露 birth time 时，创建时间为
-`None`。
+修改和创建时间，以及跨平台的 `rooted::Permissions`；底层 descriptor metadata
+不暴露 birth time 时，创建时间为 `None`。
 操作系统会在 capability 获取前解析 root 输入中的祖先 component；no-follow 只适用于最终 root entry。只有目录 descriptor 打开后，containment 才开始生效。
 
 这里保证的是 descriptor-relative 路径 containment，不是 inode 名称唯一性或完整的 OS 安全边界。hard link、mount、权限以及拥有同等 OS authority 的进程仍属于部署安全责任。path-based focused API 是便利 API，不能作为 sandbox 边界。
 
-当前安全 backend 使用 Unix descriptor-relative 操作。其他目标上的
-`rooted::Root::open` 返回 `std::io::ErrorKind::Unsupported`，不会回退到
-check-then-path。需要抵御攻击者并发替换文件系统名字时应使用 `rooted::Root`；
-path-based API 和临时资源 helper 仍面向可信本地应用路径。
+安全 backend 在 Unix 使用 descriptor-relative 操作，在 Windows 使用
+handle-relative NT 操作，并在逐级打开 component 时拒绝 name-surrogate reparse
+point。其他目标返回 `std::io::ErrorKind::Unsupported`，不会回退到
+check-then-path。
+
+`Root::copy` 在同一个已打开 root 内复制文件或目录树，并复用 `copy::Options`、
+`copy::Statistics` 和 `copy::Error`。它拒绝 symbolic link，以显式工作栈遍历
+目录，并通过同目录 staging 安装每个文件。单个文件安装是原子的，但目录树不是
+多条目事务。
 
 ### Atomic Write
 
@@ -231,6 +240,7 @@ file lease 导致目标的 nonblocking open 返回 `WouldBlock` 时的重试时�
 | `directories` | 已创建的目标目录数量。 |
 | `bytes` | 从普通文件复制的字节数。 |
 | `skipped` | 因冲突策略而跳过的已有目标文件数量。 |
+| `overwritten` | 被替换或合并的已有目标条目数量。 |
 
 `copy::Options::default()` 是有意保守的默认值：`conflict` 和 `type_conflict` 均为 `Fail`，不跟随 symbolic link，也不保留源权限。通过 `copy::ConflictPolicy` 显式选择 `Overwrite` 或 `Skip`；文件/目录类型替换则必须单独设置 `copy::TypeConflictPolicy::Replace`。复制失败返回 `copy::Error`，其中包含路径、失败阶段、部分统计、可选 staging path、可选次级 cleanup error 和原始 I/O source error。
 

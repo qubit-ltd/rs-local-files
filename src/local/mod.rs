@@ -45,7 +45,7 @@ pub(crate) use internal::{
     try_random_file_name,
     validate_portable_file_name_impl,
 };
-#[cfg(unix)]
+#[cfg(any(unix, windows))]
 pub(crate) use internal::{
     create_rooted_directory,
     open_root_directory,
