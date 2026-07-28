@@ -41,6 +41,7 @@ use super::internal::{
     absolute_path,
     create_private_dir,
     create_temp_dir_in_dir,
+    create_temp_dir_in_dir_with_affixes,
     ensure_parent_path,
     move_directory_without_replacing,
 };
@@ -138,6 +139,40 @@ impl LocalTempDir {
     {
         let operation_dir = absolute_path(dir.as_ref())?;
         let path = create_temp_dir_in_dir(&operation_dir, prefix, max_tries)?;
+        Ok(Self { path: Some(path) })
+    }
+
+    /// Creates a temporary directory with prefix and suffix in a specified
+    /// parent.
+    ///
+    /// # Parameters
+    ///
+    /// - `dir`: Absolute or relative parent directory.
+    /// - `prefix`: Optional generated-name prefix.
+    /// - `suffix`: Optional generated-name suffix.
+    /// - `max_tries`: Maximum random-name collision attempts.
+    ///
+    /// # Returns
+    ///
+    /// A cleanup-owned temporary directory with an absolute path.
+    ///
+    /// # Errors
+    ///
+    /// Returns an I/O error when the parent cannot be bound or created, affixes
+    /// are invalid, or no unique directory can be created.
+    pub(crate) fn in_dir_with_affixes(
+        dir: &Path,
+        prefix: Option<&str>,
+        suffix: Option<&str>,
+        max_tries: usize,
+    ) -> Result<Self> {
+        let operation_dir = absolute_path(dir)?;
+        let path = create_temp_dir_in_dir_with_affixes(
+            &operation_dir,
+            prefix,
+            suffix,
+            max_tries,
+        )?;
         Ok(Self { path: Some(path) })
     }
 

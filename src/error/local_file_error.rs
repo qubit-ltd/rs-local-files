@@ -1,0 +1,215 @@
+// =============================================================================
+//    Copyright (c) 2025 - 2026 Haixing Hu.
+//
+//    SPDX-License-Identifier: Apache-2.0
+//
+//    Licensed under the Apache License, Version 2.0.
+// =============================================================================
+// qubit-style: allow source-test-pair
+// Covered by structured error integration tests.
+
+use std::{
+    error::Error,
+    fmt,
+    io,
+    path::{
+        Path,
+        PathBuf,
+    },
+};
+
+use super::{
+    LocalFileErrorKind,
+    LocalFileOperation,
+};
+
+/// Structured failure from a local filesystem operation.
+#[derive(Debug)]
+pub struct LocalFileError {
+    /// Stable failure classification.
+    kind: LocalFileErrorKind,
+    /// Operation that failed.
+    operation: LocalFileOperation,
+    /// Primary native path involved in the operation.
+    path: Option<PathBuf>,
+    /// Secondary or destination native path.
+    target: Option<PathBuf>,
+    /// Native I/O source when the failure originated in the operating system.
+    source: Option<io::Error>,
+}
+
+impl LocalFileError {
+    /// Creates a structured error without native I/O context.
+    ///
+    /// # Parameters
+    ///
+    /// - `kind`: Stable failure classification.
+    /// - `operation`: Operation that failed.
+    #[must_use]
+    #[inline]
+    pub const fn new(
+        kind: LocalFileErrorKind,
+        operation: LocalFileOperation,
+    ) -> Self {
+        Self {
+            kind,
+            operation,
+            path: None,
+            target: None,
+            source: None,
+        }
+    }
+
+    /// Converts a native I/O failure and preserves path context.
+    ///
+    /// # Parameters
+    ///
+    /// - `operation`: Operation that failed.
+    /// - `path`: Optional primary path.
+    /// - `target`: Optional destination path.
+    /// - `source`: Native I/O error.
+    ///
+    /// # Returns
+    ///
+    /// A structured local filesystem error.
+    #[must_use]
+    #[inline]
+    pub fn from_io(
+        operation: LocalFileOperation,
+        path: Option<PathBuf>,
+        target: Option<PathBuf>,
+        source: io::Error,
+    ) -> Self {
+        Self {
+            kind: classify_io_error(&source),
+            operation,
+            path,
+            target,
+            source: Some(source),
+        }
+    }
+
+    /// Adds a primary path to this error.
+    ///
+    /// # Parameters
+    ///
+    /// - `path`: Native path that was being accessed.
+    ///
+    /// # Returns
+    ///
+    /// The updated error.
+    #[must_use]
+    #[inline(always)]
+    pub fn with_path(mut self, path: PathBuf) -> Self {
+        self.path = Some(path);
+        self
+    }
+
+    /// Adds a destination path to this error.
+    ///
+    /// # Parameters
+    ///
+    /// - `target`: Native destination path.
+    ///
+    /// # Returns
+    ///
+    /// The updated error.
+    #[must_use]
+    #[inline(always)]
+    pub fn with_target(mut self, target: PathBuf) -> Self {
+        self.target = Some(target);
+        self
+    }
+
+    /// Returns the stable failure classification.
+    #[must_use]
+    #[inline(always)]
+    pub const fn kind(&self) -> LocalFileErrorKind {
+        self.kind
+    }
+
+    /// Returns the operation that failed.
+    #[must_use]
+    #[inline(always)]
+    pub const fn operation(&self) -> LocalFileOperation {
+        self.operation
+    }
+
+    /// Returns the primary path, or `None` when no path applies.
+    #[must_use]
+    #[inline(always)]
+    pub fn path(&self) -> Option<&Path> {
+        self.path.as_deref()
+    }
+
+    /// Returns the destination path, or `None` for single-path operations.
+    #[must_use]
+    #[inline(always)]
+    pub fn target(&self) -> Option<&Path> {
+        self.target.as_deref()
+    }
+
+    /// Consumes the error and returns its native I/O source, if present.
+    #[must_use]
+    #[inline(always)]
+    pub fn into_source(self) -> Option<io::Error> {
+        self.source
+    }
+}
+
+impl fmt::Display for LocalFileError {
+    /// Formats the structured operation and available native path context.
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(
+            formatter,
+            "{:?} failed with {:?}",
+            self.operation, self.kind
+        )?;
+        if let Some(path) = &self.path {
+            write!(formatter, " at {}", path.display())?;
+        }
+        if let Some(target) = &self.target {
+            write!(formatter, " targeting {}", target.display())?;
+        }
+        if let Some(source) = &self.source {
+            write!(formatter, ": {source}")?;
+        }
+        Ok(())
+    }
+}
+
+impl Error for LocalFileError {
+    /// Returns the underlying native I/O error, if present.
+    #[inline(always)]
+    fn source(&self) -> Option<&(dyn Error + 'static)> {
+        self.source
+            .as_ref()
+            .map(|source| source as &(dyn Error + 'static))
+    }
+}
+
+/// Classifies an operating-system I/O error without discarding its source.
+///
+/// # Parameters
+///
+/// - `error`: Native I/O failure to classify.
+///
+/// # Returns
+///
+/// The stable local error kind corresponding to the native error.
+#[inline]
+fn classify_io_error(error: &io::Error) -> LocalFileErrorKind {
+    match error.kind() {
+        io::ErrorKind::NotFound => LocalFileErrorKind::NotFound,
+        io::ErrorKind::AlreadyExists => LocalFileErrorKind::AlreadyExists,
+        io::ErrorKind::PermissionDenied => LocalFileErrorKind::PermissionDenied,
+        io::ErrorKind::InvalidInput | io::ErrorKind::InvalidData => {
+            LocalFileErrorKind::InvalidInput
+        }
+        io::ErrorKind::Unsupported => LocalFileErrorKind::Unsupported,
+        io::ErrorKind::OutOfMemory | io::ErrorKind::StorageFull => {
+            LocalFileErrorKind::ResourceLimit
+        }
+        _ => LocalFileErrorKind::Io,
+    }
+}

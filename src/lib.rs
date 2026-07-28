@@ -5,40 +5,153 @@
 //
 //    Licensed under the Apache License, Version 2.0.
 // =============================================================================
+// qubit-style: allow coverage-cfg
 //! # Qubit Local Files
 //!
-//! Local filesystem utilities for Rust.
+//! Unified native local filesystem operations for Rust.
 //!
-//! This crate provides small, standard-library-first helpers for local paths,
-//! file names, temporary files and directories, recursive directory operations,
-//! and durable same-directory atomic writes. Existing-file atomic replacement
-//! uses strict platform-native metadata preservation and reports an explicit
-//! post-failure destination state.
+//! [`LocalFileSystem`] provides host-wide operations. [`RootedLocalFileSystem`]
+//! anchors descendant operations to an opened directory descriptor or handle.
+//! [`LocalFileNames`] and [`LocalPaths`] provide native lexical utilities,
+//! while readers, writers, walkers, and temporary resources retain explicit
+//! ownership and lifecycle state.
 //!
-//! Legacy root-level namespace APIs are intentionally unavailable:
+//! Scattered legacy free-function namespaces are intentionally unavailable:
 //!
 //! ```compile_fail
-//! use qubit_local_files::LocalFiles;
+//! use qubit_local_files::directory;
 //! ```
 //!
-//! The deprecated metadata compatibility alias is also unavailable:
+//! Rooted authority is exposed only through the unified stateful type:
 //!
 //! ```compile_fail
-//! use qubit_local_files::metadata::read_link;
+//! use qubit_local_files::rooted::Root;
 //! ```
 
+#[cfg(coverage)]
 pub mod atomic;
+#[cfg(not(coverage))]
+#[allow(dead_code, unused_imports)]
+mod atomic;
+mod capability;
+#[cfg(coverage)]
 pub mod copy;
+#[cfg(not(coverage))]
+#[allow(dead_code, unused_imports)]
+mod copy;
+#[cfg(coverage)]
 pub mod directory;
+#[cfg(not(coverage))]
+#[allow(dead_code, unused_imports)]
+mod directory;
+mod error;
+#[cfg(coverage)]
+pub mod local;
+#[cfg(not(coverage))]
+#[allow(dead_code, unused_imports)]
 mod local;
+mod local_file_kind;
+mod local_file_metadata;
+mod local_file_names;
+mod local_file_reader;
+mod local_file_system;
+mod local_paths;
+#[cfg(coverage)]
 pub mod metadata;
+#[cfg(not(coverage))]
+#[allow(dead_code, unused_imports)]
+mod metadata;
+mod options;
+mod outcome;
+#[cfg(coverage)]
 pub mod path;
+#[cfg(coverage)]
 pub mod read;
+#[cfg(not(coverage))]
+#[allow(dead_code, unused_imports)]
+mod read;
+#[cfg(coverage)]
 pub mod remove;
+#[cfg(coverage)]
 pub mod rename;
+#[cfg(coverage)]
 pub mod rooted;
+#[cfg(not(coverage))]
+#[allow(dead_code, unused_imports)]
+mod rooted;
+mod rooted_local_file_system;
+#[cfg(coverage)]
 pub mod temp;
+mod walk;
+#[cfg(coverage)]
 pub mod write;
+#[cfg(not(coverage))]
+#[allow(dead_code, unused_imports)]
+mod write;
+mod writer;
+
+pub use capability::{
+    LocalFileSystemCapabilities,
+    LocalPathLengthUnit,
+    LocalPathLimit,
+};
+pub use error::{
+    LocalFileError,
+    LocalFileErrorKind,
+    LocalFileOperation,
+    LocalResult,
+};
+pub use local::{
+    LocalCopyConflictPolicy,
+    LocalCopyTypeConflictPolicy,
+    LocalPersistError,
+    LocalPersistOptions,
+    LocalPersistStage,
+    LocalTempDir as LocalTempDirectory,
+    LocalTempFile,
+};
+pub use local_file_kind::LocalFileKind;
+pub use local_file_metadata::LocalFileMetadata;
+pub use local_file_names::LocalFileNames;
+pub use local_file_reader::LocalFileReader;
+pub use local_file_system::LocalFileSystem;
+pub use local_paths::LocalPaths;
+pub use options::{
+    LocalAtomicityRequirement,
+    LocalCopyOptions,
+    LocalCreateDirectoryOptions,
+    LocalCrossDevicePolicy,
+    LocalDeleteOptions,
+    LocalDurabilityRequirement,
+    LocalListOptions,
+    LocalMetadataPreservePolicy,
+    LocalReadOptions,
+    LocalRenameOptions,
+    LocalSymlinkPolicy,
+    LocalTempDirectoryOptions,
+    LocalTempFileOptions,
+    LocalWriteMode,
+    LocalWriteOptions,
+};
+pub use outcome::{
+    LocalCopyMethod,
+    LocalCopyOutcome,
+    LocalCopyStats,
+    LocalCreateDirectoryOutcome,
+    LocalDeleteOutcome,
+    LocalRenameOutcome,
+};
+pub use rooted_local_file_system::RootedLocalFileSystem;
+pub use walk::{
+    LocalDirectoryEntry,
+    LocalDirectoryWalker,
+};
+pub use writer::{
+    LocalFileCommitError,
+    LocalFileWriter,
+    LocalWriteOutcome,
+    LocalWriterState,
+};
 
 pub(crate) use local::{
     LocalAtomicCommitError,
@@ -46,14 +159,9 @@ pub(crate) use local::{
     LocalAtomicWriteError,
     LocalAtomicWriteOptions,
     LocalAtomicWriteStage,
-    LocalCopyConflictPolicy,
     LocalCopyDirError,
     LocalCopyDirOptions,
     LocalCopyDirStage,
     LocalCopyDirStats,
-    LocalCopyTypeConflictPolicy,
-    LocalPersistError,
-    LocalPersistOptions,
-    LocalPersistStage,
     LocalRelativePath,
 };

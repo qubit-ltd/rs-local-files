@@ -31,6 +31,7 @@ mod local_temp_file;
 pub(crate) use internal::{
     clean_dir_path,
     copy_dir_all_with_paths,
+    copy_file_with_options,
     dir_size_path,
     ensure_dir_path,
     ensure_parent_path,
@@ -42,6 +43,7 @@ pub(crate) use internal::{
     open_native_reader_path,
     open_native_writer_path,
     remove_any_path,
+    replace_file,
     try_random_file_name,
     validate_portable_file_name_impl,
 };

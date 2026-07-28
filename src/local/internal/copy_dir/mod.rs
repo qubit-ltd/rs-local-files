@@ -21,3 +21,4 @@ mod statistics_overflow;
 mod traversal;
 
 pub(crate) use facade::copy_dir_all_with_paths;
+pub(crate) use staged_copy::copy_file_with_options;

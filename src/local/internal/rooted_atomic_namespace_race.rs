@@ -111,8 +111,8 @@ fn rooted_mismatch_state(
     if super::coverage_fault::is_enabled("rooted-identity-missing") {
         return LocalAtomicDestinationState::Missing;
     }
-    match inspect_rooted_atomic_destination(parent, name) {
-        Ok(false) => LocalAtomicDestinationState::Missing,
+    match inspect_rooted_atomic_destination(parent, name, false) {
+        Ok((false, _)) => LocalAtomicDestinationState::Missing,
         _ => LocalAtomicDestinationState::Unchanged,
     }
 }

@@ -1,0 +1,189 @@
+// =============================================================================
+//    Copyright (c) 2025 - 2026 Haixing Hu.
+//
+//    SPDX-License-Identifier: Apache-2.0
+//
+//    Licensed under the Apache License, Version 2.0.
+// =============================================================================
+// qubit-style: allow source-test-pair
+// Covered by copy integration tests.
+
+use super::{
+    LocalAtomicityRequirement,
+    LocalCrossDevicePolicy,
+    LocalDurabilityRequirement,
+    LocalMetadataPreservePolicy,
+    LocalSymlinkPolicy,
+};
+use crate::{
+    LocalCopyConflictPolicy,
+    LocalCopyTypeConflictPolicy,
+};
+
+/// Unified options for copying a native file or directory tree.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct LocalCopyOptions {
+    /// Destination file conflict policy.
+    conflict: LocalCopyConflictPolicy,
+    /// File/directory type conflict policy.
+    type_conflict: LocalCopyTypeConflictPolicy,
+    /// Source metadata preservation policy.
+    preserve_metadata: LocalMetadataPreservePolicy,
+    /// Symbolic-link traversal policy.
+    symlink: LocalSymlinkPolicy,
+    /// Cross-device traversal policy.
+    cross_device: LocalCrossDevicePolicy,
+    /// Required publication atomicity.
+    atomicity: LocalAtomicityRequirement,
+    /// Required durability.
+    durability: LocalDurabilityRequirement,
+}
+
+impl LocalCopyOptions {
+    /// Creates conservative copy options.
+    #[must_use]
+    #[inline(always)]
+    pub const fn new() -> Self {
+        Self {
+            conflict: LocalCopyConflictPolicy::Fail,
+            type_conflict: LocalCopyTypeConflictPolicy::Fail,
+            preserve_metadata: LocalMetadataPreservePolicy::None,
+            symlink: LocalSymlinkPolicy::Reject,
+            cross_device: LocalCrossDevicePolicy::Allow,
+            atomicity: LocalAtomicityRequirement::Preferred,
+            durability: LocalDurabilityRequirement::NotRequired,
+        }
+    }
+
+    /// Returns the destination file conflict policy.
+    #[inline(always)]
+    pub const fn conflict(&self) -> LocalCopyConflictPolicy {
+        self.conflict
+    }
+
+    /// Returns the file/directory type conflict policy.
+    #[inline(always)]
+    pub const fn type_conflict(&self) -> LocalCopyTypeConflictPolicy {
+        self.type_conflict
+    }
+
+    /// Returns the metadata preservation policy.
+    #[must_use]
+    #[inline(always)]
+    pub const fn preserve_metadata(&self) -> LocalMetadataPreservePolicy {
+        self.preserve_metadata
+    }
+
+    /// Returns the symbolic-link policy.
+    #[must_use]
+    #[inline(always)]
+    pub const fn symlink_policy(&self) -> LocalSymlinkPolicy {
+        self.symlink
+    }
+
+    /// Returns the cross-device policy.
+    #[must_use]
+    #[inline(always)]
+    pub const fn cross_device_policy(&self) -> LocalCrossDevicePolicy {
+        self.cross_device
+    }
+
+    /// Returns the required atomicity.
+    #[must_use]
+    #[inline(always)]
+    pub const fn atomicity(&self) -> LocalAtomicityRequirement {
+        self.atomicity
+    }
+
+    /// Returns the required durability.
+    #[must_use]
+    #[inline(always)]
+    pub const fn durability(&self) -> LocalDurabilityRequirement {
+        self.durability
+    }
+
+    /// Sets the destination file conflict policy.
+    #[must_use]
+    #[inline(always)]
+    pub const fn with_conflict(
+        mut self,
+        conflict: LocalCopyConflictPolicy,
+    ) -> Self {
+        self.conflict = conflict;
+        self
+    }
+
+    /// Sets the file/directory type conflict policy.
+    #[must_use]
+    #[inline(always)]
+    pub const fn with_type_conflict(
+        mut self,
+        type_conflict: LocalCopyTypeConflictPolicy,
+    ) -> Self {
+        self.type_conflict = type_conflict;
+        self
+    }
+
+    /// Sets metadata preservation policy.
+    #[must_use]
+    #[inline(always)]
+    pub const fn with_metadata_preservation(
+        mut self,
+        preserve_metadata: LocalMetadataPreservePolicy,
+    ) -> Self {
+        self.preserve_metadata = preserve_metadata;
+        self
+    }
+
+    /// Sets symbolic-link policy.
+    #[must_use]
+    #[inline(always)]
+    pub const fn with_symlink_policy(
+        mut self,
+        symlink: LocalSymlinkPolicy,
+    ) -> Self {
+        self.symlink = symlink;
+        self
+    }
+
+    /// Sets cross-device policy.
+    #[must_use]
+    #[inline(always)]
+    pub const fn with_cross_device_policy(
+        mut self,
+        cross_device: LocalCrossDevicePolicy,
+    ) -> Self {
+        self.cross_device = cross_device;
+        self
+    }
+
+    /// Sets required publication atomicity.
+    #[must_use]
+    #[inline(always)]
+    pub const fn with_atomicity(
+        mut self,
+        atomicity: LocalAtomicityRequirement,
+    ) -> Self {
+        self.atomicity = atomicity;
+        self
+    }
+
+    /// Sets required durability.
+    #[must_use]
+    #[inline(always)]
+    pub const fn with_durability(
+        mut self,
+        durability: LocalDurabilityRequirement,
+    ) -> Self {
+        self.durability = durability;
+        self
+    }
+}
+
+impl Default for LocalCopyOptions {
+    /// Returns conservative copy defaults.
+    #[inline(always)]
+    fn default() -> Self {
+        Self::new()
+    }
+}

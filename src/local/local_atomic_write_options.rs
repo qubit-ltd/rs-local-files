@@ -21,6 +21,8 @@ pub struct LocalAtomicWriteOptions {
     create_parent: bool,
     /// Optional limit for retrying a nonblocking destination open.
     open_retry_timeout: Option<Duration>,
+    /// Whether a final symlink entry may be replaced without following it.
+    replace_target_symlink: bool,
 }
 
 impl LocalAtomicWriteOptions {
@@ -33,6 +35,7 @@ impl LocalAtomicWriteOptions {
         Self {
             create_parent: false,
             open_retry_timeout: None,
+            replace_target_symlink: false,
         }
     }
 
@@ -86,5 +89,19 @@ impl LocalAtomicWriteOptions {
     pub const fn with_open_retry_timeout(mut self, timeout: Duration) -> Self {
         self.open_retry_timeout = Some(timeout);
         self
+    }
+
+    /// Enables replacement of a final symbolic-link entry.
+    #[inline(always)]
+    pub(crate) const fn with_target_symlink_replacement(mut self) -> Self {
+        self.replace_target_symlink = true;
+        self
+    }
+
+    /// Reports whether final symbolic-link replacement is enabled.
+    #[must_use]
+    #[inline(always)]
+    pub(crate) const fn replaces_target_symlink(&self) -> bool {
+        self.replace_target_symlink
     }
 }

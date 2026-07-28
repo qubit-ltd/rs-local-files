@@ -1,4 +1,5 @@
 # Coverage-only fault injection runs exclusively in exact subprocess tests.
+coverage-cfg | src/lib.rs | Exposes legacy adapters only to their coverage regression tests
 coverage-cfg | src/local/internal/atomic_file_install.rs | Exercises otherwise unreachable native atomic-install failures
 coverage-cfg | src/local/internal/atomic_metadata/linux_android.rs | Exercises otherwise unreachable native metadata failures
 coverage-cfg | src/local/internal/atomic_metadata/preservation.rs | Exercises otherwise unreachable metadata orchestration failures

@@ -406,9 +406,8 @@ impl LocalTempFile {
     /// copying and deleting, so cross-filesystem moves can fail with `EXDEV` on
     /// Unix or a platform-equivalent error. Replacing an existing target keeps
     /// the temporary file's metadata and does not preserve the replaced
-    /// target's metadata. Use [`crate::atomic::write`] when replacing
-    /// contents while strictly preserving supported platform-native metadata
-    /// is required.
+    /// target's metadata. Use [`crate::LocalFileSystem::open_writer`] when
+    /// replacement requires a staged publication session.
     /// The source is the filesystem entry currently stored at the generated
     /// path name; persistence is not an identity-bound operation.
     /// A relative target is bound to the process current directory when this

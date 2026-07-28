@@ -103,8 +103,10 @@ pub struct LocalAtomicWriter {
     operation_path: PathBuf,
     /// Newly created parent directories that require synchronization.
     parent_dirs_to_sync: Vec<PathBuf>,
-    /// Whether a regular destination existed when this writer began.
+    /// Whether a destination entry existed when this writer began.
     destination_existed: bool,
+    /// Whether commit preserves metadata from an existing regular file.
+    preserve_destination_metadata: bool,
     #[cfg(unix)]
     /// Optional limit for retrying a nonblocking destination open.
     open_retry_timeout: Option<Duration>,
@@ -167,14 +169,17 @@ impl LocalAtomicWriter {
             }
             Vec::new()
         };
-        let destination_existed = with_atomic_context(
-            existing_file_metadata(&operation_path),
-            LocalAtomicWriteStage::InspectDestination,
-            path,
-            None,
-            LocalAtomicDestinationState::Unchanged,
-        )?
-        .is_some();
+        let (destination_existed, preserve_destination_metadata) =
+            with_atomic_context(
+                existing_file_metadata(
+                    &operation_path,
+                    options.replaces_target_symlink(),
+                ),
+                LocalAtomicWriteStage::InspectDestination,
+                path,
+                None,
+                LocalAtomicDestinationState::Unchanged,
+            )?;
         let parent = parent_dir_for(&operation_path);
         let (temp_path, file) = with_atomic_context(
             create_temp_file_in_dir(
@@ -193,6 +198,7 @@ impl LocalAtomicWriter {
             operation_path,
             parent_dirs_to_sync,
             destination_existed,
+            preserve_destination_metadata,
             #[cfg(unix)]
             open_retry_timeout: options.open_retry_timeout(),
             staged_file: StagedFile::new(temp_path, file),
@@ -356,7 +362,7 @@ impl LocalAtomicWriter {
     fn open_destination_for_commit(
         &mut self,
     ) -> Result<Option<OpenedAtomicDestination>, LocalAtomicWriteError> {
-        if !self.destination_existed {
+        if !self.preserve_destination_metadata {
             return Ok(None);
         }
         let temporary_path = Some(self.staged_file.path().to_path_buf());
@@ -426,7 +432,7 @@ impl LocalAtomicWriter {
     fn reject_unsupported_metadata_preservation(
         &mut self,
     ) -> Result<(), LocalAtomicWriteError> {
-        if !self.destination_existed {
+        if !self.preserve_destination_metadata {
             return Ok(());
         }
         with_atomic_context(
@@ -497,14 +503,25 @@ impl LocalAtomicWriter {
         if !self.destination_existed {
             return Ok(());
         }
-        let metadata = with_atomic_context(
-            existing_file_metadata(&self.operation_path),
-            LocalAtomicWriteStage::ReplaceDestination,
-            &self.path,
-            Some(self.staged_file.path().to_path_buf()),
-            LocalAtomicDestinationState::Unchanged,
-        )?;
-        if metadata.is_none() {
+        let exists = if self.preserve_destination_metadata {
+            with_atomic_context(
+                existing_file_metadata(&self.operation_path, false),
+                LocalAtomicWriteStage::ReplaceDestination,
+                &self.path,
+                Some(self.staged_file.path().to_path_buf()),
+                LocalAtomicDestinationState::Unchanged,
+            )?
+            .0
+        } else {
+            with_atomic_context(
+                fs::symlink_metadata(&self.operation_path).map(|_| true),
+                LocalAtomicWriteStage::ReplaceDestination,
+                &self.path,
+                Some(self.staged_file.path().to_path_buf()),
+                LocalAtomicDestinationState::Unchanged,
+            )?
+        };
+        if !exists {
             return Err(LocalAtomicWriteError::new(
                 LocalAtomicWriteStage::ReplaceDestination,
                 self.path.clone(),
@@ -687,15 +704,23 @@ fn sync_atomic_parent_chain(
     Ok(())
 }
 
-/// Returns existing regular-file metadata for atomic validation.
-fn existing_file_metadata(path: &Path) -> io::Result<Option<fs::Metadata>> {
+/// Returns destination existence and metadata-preservation requirements.
+fn existing_file_metadata(
+    path: &Path,
+    replace_target_symlink: bool,
+) -> io::Result<(bool, bool)> {
     match fs::symlink_metadata(path) {
-        Ok(metadata) if metadata.file_type().is_file() => Ok(Some(metadata)),
+        Ok(metadata) if metadata.file_type().is_file() => Ok((true, true)),
+        Ok(metadata)
+            if replace_target_symlink && metadata.file_type().is_symlink() =>
+        {
+            Ok((true, false))
+        }
         Ok(_) => Err(io::Error::new(
             ErrorKind::InvalidInput,
             "atomic write destination must be absent or a regular file",
         )),
-        Err(error) if error.kind() == ErrorKind::NotFound => Ok(None),
+        Err(error) if error.kind() == ErrorKind::NotFound => Ok((false, false)),
         Err(error) => {
             Err(add_path_context(error, "read destination metadata", path))
         }

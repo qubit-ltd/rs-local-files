@@ -109,6 +109,9 @@ pub struct LocalRootAtomicWriter {
     /// Whether a regular destination existed when this writer began.
     destination_existed: bool,
     #[cfg(unix)]
+    /// Whether existing regular-file metadata must be preserved.
+    preserve_destination_metadata: bool,
+    #[cfg(unix)]
     /// Descriptor-relative staging lifecycle.
     staged_file: RootedStagedFile,
     #[cfg(windows)]
@@ -117,6 +120,9 @@ pub struct LocalRootAtomicWriter {
     #[cfg(windows)]
     /// Whether a regular destination existed when this writer began.
     destination_existed: bool,
+    #[cfg(windows)]
+    /// Whether existing regular-file metadata must be preserved.
+    preserve_destination_metadata: bool,
     #[cfg(windows)]
     /// Handle-relative staging lifecycle.
     staged_file: WindowsRootedStagedFile,
@@ -225,13 +231,18 @@ impl LocalRootAtomicWriter {
         )?;
         let (parent, final_name, parent_dirs_to_sync) =
             rooted_parent.into_parts();
-        let destination_existed = map_atomic_error(
-            inspect_rooted_atomic_destination(&parent, &final_name),
-            LocalAtomicWriteStage::InspectDestination,
-            &requested_path,
-            None,
-            LocalAtomicDestinationState::Unchanged,
-        )?;
+        let (destination_existed, preserve_destination_metadata) =
+            map_atomic_error(
+                inspect_rooted_atomic_destination(
+                    &parent,
+                    &final_name,
+                    options.replaces_target_symlink(),
+                ),
+                LocalAtomicWriteStage::InspectDestination,
+                &requested_path,
+                None,
+                LocalAtomicDestinationState::Unchanged,
+            )?;
         let relative_parent = path.as_path().parent().unwrap_or(Path::new(""));
         let staged_file = map_atomic_error(
             create_rooted_staged_file(parent, relative_parent),
@@ -246,6 +257,7 @@ impl LocalRootAtomicWriter {
             final_name,
             parent_dirs_to_sync,
             destination_existed,
+            preserve_destination_metadata,
             staged_file,
         })
     }
@@ -289,46 +301,50 @@ impl LocalRootAtomicWriter {
                 LocalAtomicDestinationState::Unchanged,
             )?;
         }
-        let destination_existed = match read_rooted_symlink_metadata(
-            root,
-            diagnostic_root,
-            path,
-        ) {
-            Ok(file) => {
-                let metadata = file.metadata().map_err(|source| {
-                    LocalAtomicWriteError::new(
-                        LocalAtomicWriteStage::InspectDestination,
-                        requested_path.clone(),
-                        None,
-                        LocalAtomicDestinationState::Unchanged,
-                        source,
-                    )
-                })?;
-                if !metadata.is_file() {
+        let (destination_existed, preserve_destination_metadata) =
+            match read_rooted_symlink_metadata(root, diagnostic_root, path) {
+                Ok(file) => {
+                    let metadata = file.metadata().map_err(|source| {
+                        LocalAtomicWriteError::new(
+                            LocalAtomicWriteStage::InspectDestination,
+                            requested_path.clone(),
+                            None,
+                            LocalAtomicDestinationState::Unchanged,
+                            source,
+                        )
+                    })?;
+                    if metadata.is_file() {
+                        (true, true)
+                    } else if options.replaces_target_symlink()
+                        && metadata.file_type().is_symlink()
+                    {
+                        (true, false)
+                    } else {
+                        return Err(LocalAtomicWriteError::new(
+                            LocalAtomicWriteStage::InspectDestination,
+                            requested_path,
+                            None,
+                            LocalAtomicDestinationState::Unchanged,
+                            io::Error::new(
+                                io::ErrorKind::InvalidInput,
+                                "rooted atomic destination is not a regular file",
+                            ),
+                        ));
+                    }
+                }
+                Err(source) if source.kind() == io::ErrorKind::NotFound => {
+                    (false, false)
+                }
+                Err(source) => {
                     return Err(LocalAtomicWriteError::new(
                         LocalAtomicWriteStage::InspectDestination,
                         requested_path,
                         None,
                         LocalAtomicDestinationState::Unchanged,
-                        io::Error::new(
-                            io::ErrorKind::InvalidInput,
-                            "rooted atomic destination is not a regular file",
-                        ),
+                        source,
                     ));
                 }
-                true
-            }
-            Err(source) if source.kind() == io::ErrorKind::NotFound => false,
-            Err(source) => {
-                return Err(LocalAtomicWriteError::new(
-                    LocalAtomicWriteStage::InspectDestination,
-                    requested_path,
-                    None,
-                    LocalAtomicDestinationState::Unchanged,
-                    source,
-                ));
-            }
-        };
+            };
         let relative_parent = path.as_path().parent().unwrap_or(Path::new(""));
         let staging_root = root.try_clone().map_err(|source| {
             LocalAtomicWriteError::new(
@@ -387,6 +403,7 @@ impl LocalRootAtomicWriter {
                             file: Some(file),
                             armed: true,
                         },
+                        preserve_destination_metadata,
                     });
                 }
                 Err(source)
@@ -533,7 +550,7 @@ impl LocalRootAtomicWriter {
     #[cfg(windows)]
     /// Runs one handle-relative Windows commit attempt.
     fn commit_attempt_windows(&mut self) -> Result<(), LocalAtomicWriteError> {
-        let destination = if self.destination_existed {
+        let destination = if self.preserve_destination_metadata {
             Some(
                 read_rooted_symlink_metadata(
                     &self.staged_file.root,
@@ -689,7 +706,7 @@ impl LocalRootAtomicWriter {
     fn open_destination_for_commit(
         &mut self,
     ) -> Result<Option<OpenedAtomicDestination>, LocalAtomicWriteError> {
-        if !self.destination_existed {
+        if !self.preserve_destination_metadata {
             return Ok(None);
         }
         let destination_result = open_rooted_atomic_destination(

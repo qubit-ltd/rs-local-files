@@ -70,7 +70,10 @@ pub(crate) use atomic_metadata::preserve_atomic_metadata;
 #[cfg(unix)]
 pub(crate) use atomic_namespace_race::verify_atomic_destination_identity;
 pub(crate) use atomic_staging_state::AtomicStagingState;
-pub(crate) use copy_dir::copy_dir_all_with_paths;
+pub(crate) use copy_dir::{
+    copy_dir_all_with_paths,
+    copy_file_with_options,
+};
 pub(crate) use file_io::{
     open_native_reader_path,
     open_native_writer_path,
@@ -142,6 +145,7 @@ pub(crate) use temp_entry::{
     DEFAULT_TEMP_ENTRY_RETRIES,
     create_private_dir,
     create_temp_dir_in_dir,
+    create_temp_dir_in_dir_with_affixes,
     create_temp_file_in_dir,
 };
 #[cfg(unix)]

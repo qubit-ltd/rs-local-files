@@ -30,7 +30,7 @@ use std::os::unix::fs::{
     OpenOptionsExt,
 };
 
-use crate::path::random_file_name_with;
+use crate::local::try_random_file_name;
 
 use super::path_operations::{
     add_path_context,
@@ -65,7 +65,11 @@ pub(crate) fn create_temp_file_in_dir(
     let mut attempt = 0;
     loop {
         attempt += 1;
-        let path = dir.join(random_file_name_with(prefix, suffix)?);
+        let path = dir.join(try_random_file_name(
+            "qubit-local-files-",
+            prefix,
+            suffix,
+        )?);
         let mut options = OpenOptions::new();
         options.read(true).write(true).create_new(true);
         #[cfg(unix)]
@@ -104,12 +108,38 @@ pub(crate) fn create_temp_dir_in_dir(
     prefix: Option<&str>,
     max_tries: usize,
 ) -> Result<PathBuf> {
+    create_temp_dir_in_dir_with_affixes(dir, prefix, None, max_tries)
+}
+
+/// Creates a unique temporary directory with validated prefix and suffix.
+///
+/// # Parameters
+///
+/// - `dir`: Parent directory.
+/// - `prefix`: Optional generated-name prefix.
+/// - `suffix`: Optional generated-name suffix.
+/// - `max_tries`: Maximum collision attempts.
+///
+/// # Errors
+///
+/// Returns an I/O error when affix validation, parent creation, name
+/// generation, or directory creation fails.
+pub(crate) fn create_temp_dir_in_dir_with_affixes(
+    dir: &Path,
+    prefix: Option<&str>,
+    suffix: Option<&str>,
+    max_tries: usize,
+) -> Result<PathBuf> {
     validate_max_tries(max_tries)?;
     ensure_dir_path(dir)?;
     let mut attempt = 0;
     loop {
         attempt += 1;
-        let path = dir.join(random_file_name_with(prefix, None)?);
+        let path = dir.join(try_random_file_name(
+            "qubit-local-files-",
+            prefix,
+            suffix,
+        )?);
         match create_private_dir(&path) {
             Ok(()) => return Ok(path),
             Err(error) => {

@@ -70,7 +70,7 @@ const COPY_FILE_TEMP_SUFFIX: &str = ".tmp";
 ///
 /// Returns a structured error when policy rejects the destination, staging or
 /// commit fails, or exact statistics cannot be represented.
-pub(super) fn copy_file_with_options(
+pub(crate) fn copy_file_with_options(
     src: &Path,
     dst: &Path,
     options: LocalCopyDirOptions,

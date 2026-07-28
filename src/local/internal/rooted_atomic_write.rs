@@ -20,7 +20,7 @@ use std::io::{
 use std::os::fd::AsRawFd;
 use std::path::Path;
 
-use crate::path::random_file_name_with;
+use crate::local::try_random_file_name;
 
 use super::rooted_file_io::open_file_at;
 use super::rooted_staged_file::RootedStagedFile;
@@ -43,16 +43,18 @@ const ROOTED_ATOMIC_TEMP_SUFFIX: &str = ".tmp";
 ///
 /// # Returns
 ///
-/// `true` when a regular destination exists, or `false` when it is missing.
+/// A pair containing destination existence and whether regular-file metadata
+/// must be preserved.
 ///
 /// # Errors
 ///
-/// Returns `InvalidInput` when the entry is a link or non-regular resource,
-/// and otherwise returns the operating-system error from `fstatat`.
+/// Returns `InvalidInput` for a non-regular resource or a symbolic link when
+/// link-entry replacement is disabled.
 pub(in crate::local) fn inspect_rooted_atomic_destination(
     parent: &File,
     name: &CString,
-) -> Result<bool> {
+    replace_target_symlink: bool,
+) -> Result<(bool, bool)> {
     let mut status = std::mem::MaybeUninit::<libc::stat>::uninit();
     // SAFETY: `status` is writable storage and the live parent and name remain
     // valid for this non-retaining metadata operation.
@@ -67,20 +69,26 @@ pub(in crate::local) fn inspect_rooted_atomic_destination(
     if result == -1 {
         let error = Error::last_os_error();
         return if error.kind() == ErrorKind::NotFound {
-            Ok(false)
+            Ok((false, false))
         } else {
             Err(error)
         };
     }
     // SAFETY: successful `fstatat` initialized the complete status value.
     let status = unsafe { status.assume_init() };
-    if !is_regular_file_mode(status.st_mode) {
-        return Err(Error::new(
+    if is_regular_file_mode(status.st_mode) {
+        return Ok((true, true));
+    }
+    if replace_target_symlink && status.st_mode & libc::S_IFMT == libc::S_IFLNK
+    {
+        return Ok((true, false));
+    }
+    {
+        Err(Error::new(
             ErrorKind::InvalidInput,
             "rooted atomic destination is not a regular file",
-        ));
+        ))
     }
-    Ok(true)
 }
 
 /// Creates a unique staging entry in an open destination parent directory.
@@ -117,7 +125,8 @@ pub(in crate::local) fn create_rooted_staged_file(
                     "injected rooted staging filename failure",
                 ));
             }
-            random_file_name_with(
+            try_random_file_name(
+                "qubit-local-files-",
                 Some(ROOTED_ATOMIC_TEMP_PREFIX),
                 Some(ROOTED_ATOMIC_TEMP_SUFFIX),
             )

@@ -1,0 +1,418 @@
+// =============================================================================
+//    Copyright (c) 2025 - 2026 Haixing Hu.
+//
+//    SPDX-License-Identifier: Apache-2.0
+//
+//    Licensed under the Apache License, Version 2.0.
+// =============================================================================
+
+use std::{
+    io::{
+        self,
+        IoSlice,
+        Write,
+    },
+    path::{
+        Path,
+        PathBuf,
+    },
+};
+
+use crate::{
+    LocalDurabilityRequirement,
+    LocalFileCommitError,
+    LocalFileError,
+    LocalFileOperation,
+    LocalResult,
+    LocalWriteOptions,
+    LocalWriteOutcome,
+    LocalWriterState,
+};
+
+use super::internal::LocalFileWriterBackend;
+
+/// Stateful native byte output and destination publication session.
+#[derive(Debug)]
+pub struct LocalFileWriter {
+    /// Bound destination path.
+    path: PathBuf,
+    /// Selected native write backend while the session is open.
+    backend: Option<LocalFileWriterBackend>,
+    /// Policy fixed when the writer is opened.
+    options: LocalWriteOptions,
+    /// Current observable session state.
+    state: LocalWriterState,
+    /// Bytes accepted by successful stream writes.
+    bytes_written: u64,
+}
+
+impl LocalFileWriter {
+    /// Creates a writer around a selected native backend.
+    ///
+    /// # Parameters
+    ///
+    /// - `path`: Bound destination path.
+    /// - `backend`: Staged or append backend.
+    /// - `options`: Writer policy.
+    #[inline(always)]
+    pub(crate) const fn new(
+        path: PathBuf,
+        backend: LocalFileWriterBackend,
+        options: LocalWriteOptions,
+    ) -> Self {
+        Self {
+            path,
+            backend: Some(backend),
+            options,
+            state: LocalWriterState::Open,
+            bytes_written: 0,
+        }
+    }
+
+    /// Returns the bound destination path.
+    #[must_use]
+    #[inline(always)]
+    pub fn path(&self) -> &Path {
+        &self.path
+    }
+
+    /// Returns the current writer state.
+    #[must_use]
+    #[inline(always)]
+    pub const fn state(&self) -> LocalWriterState {
+        self.state
+    }
+
+    /// Commits bytes and destination publication.
+    ///
+    /// # Returns
+    ///
+    /// Achieved atomicity, durability, and byte count.
+    ///
+    /// # Errors
+    ///
+    /// Returns `LocalFileCommitError` with a retryable writer only when staged
+    /// publication has not started. A `Published` state means the destination
+    /// changed before a later durability failure.
+    pub fn commit(mut self) -> Result<LocalWriteOutcome, LocalFileCommitError> {
+        let backend = self
+            .backend
+            .take()
+            .expect("open writer must retain one backend");
+        match backend {
+            LocalFileWriterBackend::Staged(writer) => {
+                match writer.commit_recoverable() {
+                    Ok(()) => {
+                        self.state = LocalWriterState::Committed;
+                        Ok(LocalWriteOutcome::new(
+                            self.state,
+                            true,
+                            true,
+                            self.bytes_written,
+                        ))
+                    }
+                    Err(commit_error) => {
+                        let (error, retained) = commit_error.into_parts();
+                        let state =
+                            atomic_destination_state(error.destination_state());
+                        let retained = retained.map(|writer| {
+                            Self::new(
+                                self.path.clone(),
+                                LocalFileWriterBackend::Staged(writer),
+                                self.options,
+                            )
+                        });
+                        Err(LocalFileCommitError::new(
+                            atomic_write_error(&self.path, error),
+                            state,
+                            retained,
+                        ))
+                    }
+                }
+            }
+            LocalFileWriterBackend::Rooted(writer) => {
+                match writer.commit_recoverable() {
+                    Ok(()) => {
+                        self.state = LocalWriterState::Committed;
+                        Ok(LocalWriteOutcome::new(
+                            self.state,
+                            true,
+                            true,
+                            self.bytes_written,
+                        ))
+                    }
+                    Err(commit_error) => {
+                        let (error, retained) = commit_error.into_parts();
+                        let state =
+                            atomic_destination_state(error.destination_state());
+                        let retained = retained.map(|writer| {
+                            Self::new(
+                                self.path.clone(),
+                                LocalFileWriterBackend::Rooted(writer),
+                                self.options,
+                            )
+                        });
+                        Err(LocalFileCommitError::new(
+                            atomic_write_error(&self.path, error),
+                            state,
+                            retained,
+                        ))
+                    }
+                }
+            }
+            LocalFileWriterBackend::Append(mut file) => {
+                if let Err(error) = file.flush() {
+                    return Err(LocalFileCommitError::new(
+                        writer_io_error(&self.path, error),
+                        LocalWriterState::Indeterminate,
+                        None,
+                    ));
+                }
+                let durable = match self.options.durability() {
+                    LocalDurabilityRequirement::NotRequired => false,
+                    LocalDurabilityRequirement::Preferred => {
+                        file.sync_all().is_ok()
+                    }
+                    LocalDurabilityRequirement::Required => {
+                        if let Err(error) = file.sync_all() {
+                            return Err(LocalFileCommitError::new(
+                                writer_io_error(&self.path, error),
+                                LocalWriterState::Published,
+                                None,
+                            ));
+                        }
+                        true
+                    }
+                };
+                self.state = LocalWriterState::Committed;
+                Ok(LocalWriteOutcome::new(
+                    self.state,
+                    false,
+                    durable,
+                    self.bytes_written,
+                ))
+            }
+        }
+    }
+
+    /// Aborts staged publication or closes direct append.
+    ///
+    /// # Returns
+    ///
+    /// An `Aborted` outcome for staging. Append with accepted bytes returns
+    /// `Published` because direct writes cannot be rolled back.
+    ///
+    /// # Errors
+    ///
+    /// Returns `LocalFileError` when staging cleanup or append flush fails.
+    pub fn abort(mut self) -> LocalResult<LocalWriteOutcome> {
+        let backend = self
+            .backend
+            .take()
+            .expect("open writer must retain one backend");
+        match backend {
+            LocalFileWriterBackend::Staged(writer) => {
+                writer
+                    .abort()
+                    .map_err(|error| atomic_write_error(&self.path, error))?;
+                self.state = LocalWriterState::Aborted;
+                Ok(LocalWriteOutcome::new(
+                    self.state,
+                    false,
+                    false,
+                    self.bytes_written,
+                ))
+            }
+            LocalFileWriterBackend::Rooted(writer) => {
+                writer
+                    .abort()
+                    .map_err(|error| atomic_write_error(&self.path, error))?;
+                self.state = LocalWriterState::Aborted;
+                Ok(LocalWriteOutcome::new(
+                    self.state,
+                    false,
+                    false,
+                    self.bytes_written,
+                ))
+            }
+            LocalFileWriterBackend::Append(mut file) => {
+                file.flush()
+                    .map_err(|error| writer_io_error(&self.path, error))?;
+                self.state = if self.bytes_written == 0 {
+                    LocalWriterState::Aborted
+                } else {
+                    LocalWriterState::Published
+                };
+                Ok(LocalWriteOutcome::new(
+                    self.state,
+                    false,
+                    false,
+                    self.bytes_written,
+                ))
+            }
+        }
+    }
+
+    /// Records bytes accepted by a successful stream operation.
+    ///
+    /// # Parameters
+    ///
+    /// - `written`: Bytes accepted by the backend.
+    #[inline(always)]
+    fn record_written(&mut self, written: usize) {
+        self.bytes_written = self.bytes_written.saturating_add(written as u64);
+    }
+
+    /// Marks an ordinary stream error as indeterminate.
+    ///
+    /// # Parameters
+    ///
+    /// - `result`: Backend stream result.
+    ///
+    /// # Returns
+    ///
+    /// The original result.
+    #[inline(always)]
+    fn observe_stream_result<T>(
+        &mut self,
+        result: io::Result<T>,
+    ) -> io::Result<T> {
+        if result.is_err() {
+            self.state = LocalWriterState::Indeterminate;
+        }
+        result
+    }
+}
+
+impl Write for LocalFileWriter {
+    /// Writes bytes to staging or directly appends to the destination.
+    fn write(&mut self, buffer: &[u8]) -> io::Result<usize> {
+        if self.state != LocalWriterState::Open {
+            return Err(io::Error::new(
+                io::ErrorKind::BrokenPipe,
+                "local file writer is not open",
+            ));
+        }
+        let result = match self.backend.as_mut() {
+            Some(LocalFileWriterBackend::Staged(writer)) => {
+                writer.write(buffer)
+            }
+            Some(LocalFileWriterBackend::Rooted(writer)) => {
+                writer.write(buffer)
+            }
+            Some(LocalFileWriterBackend::Append(file)) => file.write(buffer),
+            None => unreachable!("open writer must retain one backend"),
+        };
+        let written = self.observe_stream_result(result)?;
+        self.record_written(written);
+        Ok(written)
+    }
+
+    /// Writes vectored bytes to staging or directly appends to the destination.
+    fn write_vectored(&mut self, buffers: &[IoSlice<'_>]) -> io::Result<usize> {
+        if self.state != LocalWriterState::Open {
+            return Err(io::Error::new(
+                io::ErrorKind::BrokenPipe,
+                "local file writer is not open",
+            ));
+        }
+        let result = match self.backend.as_mut() {
+            Some(LocalFileWriterBackend::Staged(writer)) => {
+                writer.write_vectored(buffers)
+            }
+            Some(LocalFileWriterBackend::Rooted(writer)) => {
+                writer.write_vectored(buffers)
+            }
+            Some(LocalFileWriterBackend::Append(file)) => {
+                file.write_vectored(buffers)
+            }
+            None => unreachable!("open writer must retain one backend"),
+        };
+        let written = self.observe_stream_result(result)?;
+        self.record_written(written);
+        Ok(written)
+    }
+
+    /// Flushes userspace buffers without publishing staged content.
+    fn flush(&mut self) -> io::Result<()> {
+        if self.state != LocalWriterState::Open {
+            return Err(io::Error::new(
+                io::ErrorKind::BrokenPipe,
+                "local file writer is not open",
+            ));
+        }
+        let result = match self.backend.as_mut() {
+            Some(LocalFileWriterBackend::Staged(writer)) => writer.flush(),
+            Some(LocalFileWriterBackend::Rooted(writer)) => writer.flush(),
+            Some(LocalFileWriterBackend::Append(file)) => file.flush(),
+            None => unreachable!("open writer must retain one backend"),
+        };
+        self.observe_stream_result(result)
+    }
+}
+
+/// Maps the existing atomic destination state to the unified writer state.
+///
+/// # Parameters
+///
+/// - `state`: Atomic writer destination state.
+///
+/// # Returns
+///
+/// Unified publication state.
+#[inline(always)]
+fn atomic_destination_state(
+    state: crate::local::LocalAtomicDestinationState,
+) -> LocalWriterState {
+    match state {
+        crate::local::LocalAtomicDestinationState::Unchanged
+        | crate::local::LocalAtomicDestinationState::Missing => {
+            LocalWriterState::NotPublished
+        }
+        crate::local::LocalAtomicDestinationState::Replaced => {
+            LocalWriterState::Published
+        }
+        crate::local::LocalAtomicDestinationState::Indeterminate => {
+            LocalWriterState::Indeterminate
+        }
+    }
+}
+
+/// Converts the existing atomic writer error into the unified error domain.
+///
+/// # Parameters
+///
+/// - `path`: Bound destination path.
+/// - `error`: Existing structured atomic-write error.
+///
+/// # Returns
+///
+/// Unified local filesystem error retaining the atomic error as its source.
+#[inline]
+fn atomic_write_error(
+    path: &Path,
+    error: crate::local::LocalAtomicWriteError,
+) -> LocalFileError {
+    let kind = error.kind();
+    writer_io_error(path, io::Error::new(kind, error))
+}
+
+/// Adds writer operation context to a native I/O failure.
+///
+/// # Parameters
+///
+/// - `path`: Bound destination path.
+/// - `error`: Native I/O failure.
+///
+/// # Returns
+///
+/// Structured writer error.
+#[inline(always)]
+fn writer_io_error(path: &Path, error: io::Error) -> LocalFileError {
+    LocalFileError::from_io(
+        LocalFileOperation::Commit,
+        Some(path.to_path_buf()),
+        None,
+        error,
+    )
+}
