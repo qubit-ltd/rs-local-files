@@ -203,7 +203,7 @@ path，以及可选 `std::io::Error` source。Publication session 使用专用 f
 
 `LocalFileSystem::capabilities()` 报告 host 实现；
 `RootedLocalFileSystem::capabilities()` 返回 open authority 时缓存的 snapshot。
-Path limit 显式携带单位：Unix 为 byte，Windows 为 UTF-16 code unit。
+只有能够为目标 filesystem 验证的 path limit 才会报告；否则为 `None`。
 
 ## 验证
 

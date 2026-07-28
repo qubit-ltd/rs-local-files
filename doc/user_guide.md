@@ -212,8 +212,8 @@ sessions use dedicated failure types for partial-success state.
 
 `LocalFileSystem::capabilities()` reports the host implementation.
 `RootedLocalFileSystem::capabilities()` returns the snapshot cached when the
-authority was opened. Path limits carry an explicit unit: bytes on Unix or
-UTF-16 code units on Windows.
+authority was opened. A path limit is reported only when it is verified for the
+target filesystem; otherwise it is `None`.
 
 ## Validation
 
