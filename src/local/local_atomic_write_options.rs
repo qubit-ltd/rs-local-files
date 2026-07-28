@@ -9,6 +9,8 @@
 
 use std::time::Duration;
 
+use super::internal::LocalAtomicPublicationMode;
+
 /// Options used when beginning a local atomic write.
 ///
 /// Builder results must be used so that an accidentally discarded option does
@@ -23,6 +25,8 @@ pub struct LocalAtomicWriteOptions {
     open_retry_timeout: Option<Duration>,
     /// Whether a final symlink entry may be replaced without following it.
     replace_target_symlink: bool,
+    /// Publication policy enforced during final installation.
+    publication_mode: LocalAtomicPublicationMode,
 }
 
 impl LocalAtomicWriteOptions {
@@ -36,6 +40,7 @@ impl LocalAtomicWriteOptions {
             create_parent: false,
             open_retry_timeout: None,
             replace_target_symlink: false,
+            publication_mode: LocalAtomicPublicationMode::ReplaceOrCreate,
         }
     }
 
@@ -91,6 +96,21 @@ impl LocalAtomicWriteOptions {
         self
     }
 
+    /// Requires final publication to preserve every existing destination.
+    ///
+    /// The atomic backend checks for an existing entry while opening and uses
+    /// a native no-replace installation at commit, so a concurrent creator
+    /// cannot be overwritten.
+    ///
+    /// # Returns
+    ///
+    /// Updated options enforcing create-new publication.
+    #[inline(always)]
+    pub const fn with_create_new(mut self) -> Self {
+        self.publication_mode = LocalAtomicPublicationMode::CreateNew;
+        self
+    }
+
     /// Enables replacement of a final symbolic-link entry.
     #[inline(always)]
     pub(crate) const fn with_target_symlink_replacement(mut self) -> Self {
@@ -103,5 +123,14 @@ impl LocalAtomicWriteOptions {
     #[inline(always)]
     pub(crate) const fn replaces_target_symlink(&self) -> bool {
         self.replace_target_symlink
+    }
+
+    /// Returns the final installation policy.
+    #[must_use]
+    #[inline(always)]
+    pub(crate) const fn publication_mode(
+        &self,
+    ) -> LocalAtomicPublicationMode {
+        self.publication_mode
     }
 }

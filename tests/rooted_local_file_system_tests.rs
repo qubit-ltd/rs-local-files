@@ -138,6 +138,38 @@ fn test_rooted_local_file_system_writer_replaces_final_symlink() {
     );
 }
 
+/// Verifies rooted create-new commit preserves a concurrently created entry.
+#[test]
+fn test_rooted_local_file_system_create_new_preserves_concurrent_target() {
+    let directory = tempdir().expect("temporary directory should be created");
+    let target = directory.path().join("target");
+    let root = RootedLocalFileSystem::open(directory.path())
+        .expect("rooted filesystem should open");
+    let mut writer = root
+        .open_writer(
+            Path::new("target"),
+            &LocalWriteOptions::new(LocalWriteMode::CreateNew),
+        )
+        .expect("create-new staging should open for an absent target");
+    writer
+        .write_all(b"staged")
+        .expect("staged bytes should be written");
+    fs::write(&target, b"concurrent")
+        .expect("concurrent target should be created");
+
+    let error = writer
+        .commit()
+        .expect_err("rooted create-new must not replace a concurrent target");
+
+    assert_eq!(LocalWriterState::NotPublished, error.state());
+    assert_eq!(
+        b"concurrent",
+        fs::read(&target)
+            .expect("concurrent target should remain")
+            .as_slice(),
+    );
+}
+
 /// Verifies rooted deletion distinguishes files and recursive directories.
 #[test]
 fn test_rooted_local_file_system_deletes_entries() {

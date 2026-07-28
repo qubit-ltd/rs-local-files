@@ -34,6 +34,7 @@ use super::internal::coverage_fault;
 use super::internal::{
     AtomicInstallRecovery,
     DEFAULT_TEMP_ENTRY_RETRIES,
+    LocalAtomicPublicationMode,
     StagedFile,
     absolute_path,
     add_path_context,
@@ -170,16 +171,47 @@ impl LocalAtomicWriter {
             Vec::new()
         };
         let (destination_existed, preserve_destination_metadata) =
-            with_atomic_context(
-                existing_file_metadata(
-                    &operation_path,
-                    options.replaces_target_symlink(),
-                ),
-                LocalAtomicWriteStage::InspectDestination,
-                path,
-                None,
-                LocalAtomicDestinationState::Unchanged,
-            )?;
+            if options.publication_mode()
+                == LocalAtomicPublicationMode::CreateNew
+            {
+                match fs::symlink_metadata(&operation_path) {
+                    Ok(_) => {
+                        return Err(LocalAtomicWriteError::new(
+                            LocalAtomicWriteStage::InspectDestination,
+                            path.to_path_buf(),
+                            None,
+                            LocalAtomicDestinationState::Unchanged,
+                            io::Error::new(
+                                ErrorKind::AlreadyExists,
+                                "atomic create-new destination already exists",
+                            ),
+                        ));
+                    }
+                    Err(error) if error.kind() == ErrorKind::NotFound => {
+                        (false, false)
+                    }
+                    Err(error) => {
+                        return Err(LocalAtomicWriteError::new(
+                            LocalAtomicWriteStage::InspectDestination,
+                            path.to_path_buf(),
+                            None,
+                            LocalAtomicDestinationState::Unchanged,
+                            error,
+                        ));
+                    }
+                }
+            } else {
+                with_atomic_context(
+                    existing_file_metadata(
+                        &operation_path,
+                        options.replaces_target_symlink(),
+                    ),
+                    LocalAtomicWriteStage::InspectDestination,
+                    path,
+                    None,
+                    LocalAtomicDestinationState::Unchanged,
+                )?
+            };
         let parent = parent_dir_for(&operation_path);
         let (temp_path, file) = with_atomic_context(
             create_temp_file_in_dir(

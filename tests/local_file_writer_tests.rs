@@ -7,8 +7,10 @@
 // =============================================================================
 
 use std::{
+    env,
     fs,
     io::Write,
+    process::Command,
 };
 
 use qubit_local_files::{
@@ -20,6 +22,11 @@ use qubit_local_files::{
     LocalWriterState,
 };
 use tempfile::tempdir;
+
+/// Environment switch used by the file-size-limit subprocess regression.
+#[cfg(unix)]
+const INDETERMINATE_APPEND_CASE: &str =
+    "QUBIT_LOCAL_FILES_INDETERMINATE_APPEND_CASE";
 
 /// Verifies staged replacement is invisible until commit.
 #[test]
@@ -109,6 +116,60 @@ fn test_local_file_writer_create_new_rejects_existing_target() {
     assert_eq!(LocalFileErrorKind::AlreadyExists, error.kind());
 }
 
+/// Verifies the atomic backend enforces create-new publication itself.
+#[test]
+fn test_local_file_writer_atomic_backend_create_new_is_no_replace() {
+    use qubit_local_files::backend::atomic;
+
+    let directory = tempdir().expect("temporary directory should be created");
+    let target = directory.path().join("target");
+    fs::write(&target, b"existing").expect("target fixture should be written");
+
+    let error = atomic::begin_with(
+        &target,
+        atomic::Options::new().with_create_new(),
+    )
+    .expect_err("backend create-new must reject an existing target");
+
+    assert_eq!(std::io::ErrorKind::AlreadyExists, error.kind());
+    assert_eq!(
+        b"existing",
+        fs::read(&target)
+            .expect("existing target should remain")
+            .as_slice(),
+    );
+}
+
+/// Verifies a destination created after opening cannot be replaced by
+/// create-new commit.
+#[test]
+fn test_local_file_writer_create_new_preserves_concurrent_target() {
+    let directory = tempdir().expect("temporary directory should be created");
+    let target = directory.path().join("target");
+    let mut writer = LocalFileSystem::open_writer(
+        &target,
+        &LocalWriteOptions::new(LocalWriteMode::CreateNew),
+    )
+    .expect("create-new staging should open for an absent target");
+    writer
+        .write_all(b"staged")
+        .expect("staged bytes should be written");
+    fs::write(&target, b"concurrent")
+        .expect("concurrent target should be created");
+
+    let error = writer
+        .commit()
+        .expect_err("create-new commit must not replace a concurrent target");
+
+    assert_eq!(LocalWriterState::NotPublished, error.state());
+    assert_eq!(
+        b"concurrent",
+        fs::read(&target)
+            .expect("concurrent target should remain")
+            .as_slice(),
+    );
+}
+
 /// Verifies abort cleans staging without modifying the destination.
 #[test]
 fn test_local_file_writer_abort_keeps_original_target() {
@@ -150,4 +211,75 @@ fn test_local_file_writer_append_rejects_required_atomicity() {
     .expect_err("direct append cannot provide required atomicity");
 
     assert_eq!(LocalFileErrorKind::RequirementNotMet, error.kind());
+}
+
+/// Verifies a stream error permanently prevents append commit or clean abort.
+#[cfg(unix)]
+#[test]
+fn test_local_file_writer_append_preserves_indeterminate_state() {
+    if let Ok(case) = env::var(INDETERMINATE_APPEND_CASE) {
+        run_indeterminate_append_case(&case);
+        return;
+    }
+    let executable =
+        env::current_exe().expect("current test executable should resolve");
+    for case in ["commit", "abort"] {
+        let status = Command::new(&executable)
+            .arg("--exact")
+            .arg("test_local_file_writer_append_preserves_indeterminate_state")
+            .arg("--nocapture")
+            .env(INDETERMINATE_APPEND_CASE, case)
+            .status()
+            .expect("indeterminate append child should start");
+        assert!(
+            status.success(),
+            "indeterminate append {case} child should succeed"
+        );
+    }
+}
+
+/// Runs one append state transition under a zero-byte process file-size limit.
+#[cfg(unix)]
+fn run_indeterminate_append_case(case: &str) {
+    let directory = tempdir().expect("temporary directory should be created");
+    let target = directory.path().join("target");
+    fs::write(&target, b"existing").expect("target fixture should be written");
+    // SAFETY: this test runs in an isolated child process. Ignoring SIGXFSZ
+    // converts the process file-size limit into an ordinary write error.
+    unsafe {
+        libc::signal(libc::SIGXFSZ, libc::SIG_IGN);
+        let limit = libc::rlimit {
+            rlim_cur: 0,
+            rlim_max: 0,
+        };
+        assert_eq!(
+            0,
+            libc::setrlimit(libc::RLIMIT_FSIZE, &raw const limit),
+            "child process file-size limit should be installed",
+        );
+    }
+    let mut writer = LocalFileSystem::open_writer(
+        &target,
+        &LocalWriteOptions::new(LocalWriteMode::Append),
+    )
+    .expect("append writer should open before the failing write");
+    writer
+        .write_all(b"x")
+        .expect_err("zero file-size limit should reject append");
+    assert_eq!(LocalWriterState::Indeterminate, writer.state());
+    match case {
+        "commit" => {
+            let error = writer
+                .commit()
+                .expect_err("indeterminate writer must not commit");
+            assert_eq!(LocalWriterState::Indeterminate, error.state());
+        }
+        "abort" => {
+            let outcome = writer
+                .abort()
+                .expect("abort should close an indeterminate append writer");
+            assert_eq!(LocalWriterState::Indeterminate, outcome.state());
+        }
+        other => panic!("unexpected append regression case: {other}"),
+    }
 }

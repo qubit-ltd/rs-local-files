@@ -27,6 +27,7 @@ mod file_name_path;
 mod file_name_url;
 mod file_name_validation;
 mod io_result_context;
+mod local_atomic_publication_mode;
 #[cfg(unix)]
 mod opened_atomic_destination;
 mod path_io_error;
@@ -92,6 +93,7 @@ pub(crate) use file_name_path::{
 };
 pub(crate) use file_name_url::file_name_from_url;
 pub(crate) use file_name_validation::validate_portable_file_name_impl;
+pub(crate) use local_atomic_publication_mode::LocalAtomicPublicationMode;
 #[cfg(unix)]
 pub(super) use opened_atomic_destination::open_rooted_atomic_destination;
 #[cfg(unix)]

@@ -188,29 +188,9 @@ impl LocalFileSystem {
             })?;
         }
         let backend = match options.mode() {
-            LocalWriteMode::CreateNew => {
-                match fs::symlink_metadata(&bound) {
-                    Ok(_) => {
-                        return Err(LocalFileError::new(
-                            LocalFileErrorKind::AlreadyExists,
-                            LocalFileOperation::OpenWriter,
-                        )
-                        .with_path(bound));
-                    }
-                    Err(error) if error.kind() == io::ErrorKind::NotFound => {}
-                    Err(error) => {
-                        return Err(LocalFileError::from_io(
-                            LocalFileOperation::OpenWriter,
-                            Some(bound),
-                            None,
-                            error,
-                        ));
-                    }
-                }
-                LocalFileWriterBackend::Staged(open_staged_writer(
-                    &bound, options,
-                )?)
-            }
+            LocalWriteMode::CreateNew => LocalFileWriterBackend::Staged(
+                open_staged_writer(&bound, options)?,
+            ),
             LocalWriteMode::CreateOrReplace => LocalFileWriterBackend::Staged(
                 open_staged_writer(&bound, options)?,
             ),
@@ -804,6 +784,9 @@ fn open_staged_writer(
 ) -> LocalResult<crate::local::LocalAtomicWriter> {
     let mut native_options = crate::local::LocalAtomicWriteOptions::new()
         .with_target_symlink_replacement();
+    if options.mode() == LocalWriteMode::CreateNew {
+        native_options = native_options.with_create_new();
+    }
     if options.creates_parent() {
         native_options = native_options.with_parent();
     }

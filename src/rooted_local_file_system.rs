@@ -218,29 +218,13 @@ impl RootedLocalFileSystem {
             .with_path(path.to_path_buf()));
         }
         let relative = rooted_path(path, LocalFileOperation::OpenWriter)?;
-        if options.mode() == LocalWriteMode::CreateNew {
-            match self.root.symlink_metadata(&relative) {
-                Ok(_) => {
-                    return Err(LocalFileError::new(
-                        LocalFileErrorKind::AlreadyExists,
-                        LocalFileOperation::OpenWriter,
-                    )
-                    .with_path(path.to_path_buf()));
-                }
-                Err(error) if error.kind() == io::ErrorKind::NotFound => {}
-                Err(error) => {
-                    return Err(rooted_io_error(
-                        LocalFileOperation::OpenWriter,
-                        path,
-                        error,
-                    ));
-                }
-            }
-        }
         let backend = match options.mode() {
             LocalWriteMode::CreateNew | LocalWriteMode::CreateOrReplace => {
                 let mut atomic_options = crate::atomic::Options::new()
                     .with_target_symlink_replacement();
+                if options.mode() == LocalWriteMode::CreateNew {
+                    atomic_options = atomic_options.with_create_new();
+                }
                 if options.creates_parent() {
                     atomic_options = atomic_options.with_parent();
                 }

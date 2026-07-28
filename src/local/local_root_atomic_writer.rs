@@ -37,6 +37,8 @@ use crate::{
 
 #[cfg(coverage)]
 use super::internal::coverage_fault;
+#[cfg(any(unix, windows))]
+use super::internal::LocalAtomicPublicationMode;
 #[cfg(unix)]
 use super::internal::{
     AtomicInstallRecovery,
@@ -236,13 +238,29 @@ impl LocalRootAtomicWriter {
                 inspect_rooted_atomic_destination(
                     &parent,
                     &final_name,
-                    options.replaces_target_symlink(),
+                    options.replaces_target_symlink()
+                        || options.publication_mode()
+                            == LocalAtomicPublicationMode::CreateNew,
                 ),
                 LocalAtomicWriteStage::InspectDestination,
                 &requested_path,
                 None,
                 LocalAtomicDestinationState::Unchanged,
             )?;
+        if options.publication_mode() == LocalAtomicPublicationMode::CreateNew
+            && destination_existed
+        {
+            return Err(LocalAtomicWriteError::new(
+                LocalAtomicWriteStage::InspectDestination,
+                requested_path,
+                None,
+                LocalAtomicDestinationState::Unchanged,
+                io::Error::new(
+                    io::ErrorKind::AlreadyExists,
+                    "rooted atomic create-new destination already exists",
+                ),
+            ));
+        }
         let relative_parent = path.as_path().parent().unwrap_or(Path::new(""));
         let staged_file = map_atomic_error(
             create_rooted_staged_file(parent, relative_parent),
@@ -304,6 +322,20 @@ impl LocalRootAtomicWriter {
         let (destination_existed, preserve_destination_metadata) =
             match read_rooted_symlink_metadata(root, diagnostic_root, path) {
                 Ok(file) => {
+                    if options.publication_mode()
+                        == LocalAtomicPublicationMode::CreateNew
+                    {
+                        return Err(LocalAtomicWriteError::new(
+                            LocalAtomicWriteStage::InspectDestination,
+                            requested_path,
+                            None,
+                            LocalAtomicDestinationState::Unchanged,
+                            io::Error::new(
+                                io::ErrorKind::AlreadyExists,
+                                "rooted atomic create-new destination already exists",
+                            ),
+                        ));
+                    }
                     let metadata = file.metadata().map_err(|source| {
                         LocalAtomicWriteError::new(
                             LocalAtomicWriteStage::InspectDestination,
