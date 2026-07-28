@@ -8,10 +8,7 @@
 // qubit-style: allow source-test-pair
 // Covered by public capability integration tests.
 
-use super::{
-    LocalPathLengthUnit,
-    LocalPathLimit,
-};
+use super::LocalPathLimit;
 
 /// Immutable snapshot of native filesystem guarantees available to this crate.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -31,16 +28,11 @@ impl LocalFileSystemCapabilities {
     /// Detects capabilities for the current build and runtime platform.
     #[inline]
     pub(crate) const fn detect() -> Self {
-        #[cfg(unix)]
-        let path_limit = Some(LocalPathLimit::new(
-            libc::PATH_MAX as usize,
-            LocalPathLengthUnit::Bytes,
-        ));
-        #[cfg(not(unix))]
-        let path_limit = None;
-
         Self {
-            path_limit,
+            // PATH_MAX is a process-header bound, not a verified limit of the
+            // target filesystem. This crate does not currently probe the
+            // mounted filesystem, so report the limit as unknown.
+            path_limit: None,
             rooted_operations: cfg!(any(unix, windows)),
             no_replace_publication: cfg!(any(
                 target_os = "linux",

@@ -15,24 +15,16 @@ use qubit_local_files::{
     LocalFileKind,
     LocalFileNames,
     LocalFileSystem,
-    LocalPathLengthUnit,
 };
 use tempfile::tempdir;
 
-/// Verifies that host capabilities report the native path-length unit.
+/// Verifies capabilities do not misrepresent a compile-time path bound as a
+/// filesystem-specific limit.
 #[test]
-fn test_local_file_system_capabilities_report_native_path_unit() {
+fn test_local_file_system_capabilities_report_unknown_path_limit() {
     let capabilities = LocalFileSystem::capabilities();
 
-    #[cfg(unix)]
-    assert_eq!(
-        Some(LocalPathLengthUnit::Bytes),
-        capabilities.path_limit().map(|limit| limit.unit()),
-    );
-    #[cfg(windows)]
-    assert!(capabilities.path_limit().is_none_or(
-        |limit| limit.unit() == LocalPathLengthUnit::Utf16CodeUnits
-    ),);
+    assert!(capabilities.path_limit().is_none());
 }
 
 /// Verifies that generated names are portable single path components.
