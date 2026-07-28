@@ -5,28 +5,30 @@
 [![Crates.io](https://img.shields.io/crates/v/qubit-local-files.svg?color=blue)](https://crates.io/crates/qubit-local-files)
 [![Rust](https://img.shields.io/badge/rust-1.94+-blue.svg?logo=rust)](https://www.rust-lang.org)
 [![License](https://img.shields.io/badge/license-Apache%202.0-blue.svg)](LICENSE)
-[![English Document](https://img.shields.io/badge/Document-English-blue.svg)](README.md)
+[![English](https://img.shields.io/badge/docs-English-blue.svg)](README.md)
 
-面向 Rust 的本地文件系统工具库。
+面向 Rust 的统一 native 本地文件系统操作库。
 
-## 概述
+## 概览
 
-Qubit Local Files 承载从 `qubit-io` 拆出的本地文件系统工具。它专注于具体本地路径和本地文件系统条目：临时文件和目录、文件名 helper、递归目录操作，以及持久化同目录 atomic write。
+Qubit Local Files 通过同一套策略化 API 提供 host-wide 与 descriptor-anchored
+本地文件系统操作。它直接接受 native `Path` 和 `OsStr`，保留平台文件名，并把
+containment、publication 及平台差异封装在本 crate 内部。
 
-适合使用本 crate 的场景包括：
+主要能力包括：
 
-- 需要 drop 时自动清理的 RAII 临时文件或临时目录；
-- 打开或写入本地文件前需要自动创建父目录；
-- 需要基于目录 descriptor 锚定、可抵御攻击者路径替换的相对文件 I/O；
-- 需要递归清理目录、计算目录大小或复制目录树；
-- 需要默认拒绝意外覆盖的保守复制和持久化行为；
-- 需要随机、portable 或 lexical 文件名 helper；
-- 需要持久化替换写入，使读取方只能观察到旧完整文件或新完整文件。
+- 结构化本地文件系统错误和结果；
+- 文件与目录统一复制；
+- 惰性递归遍历；
+- staged publication 与显式 append 语义；
+- RAII 临时文件和临时目录；
+- descriptor/handle-relative rooted authority；
+- native 路径和文件名校验。
 
-详细用法、示例和 API 选择建议请参见[中文用户手册](doc/user_guide.zh_CN.md)。API 参考文档可在 [docs.rs](https://docs.rs/qubit-local-files) 查看。
+本 crate 不依赖 `qubit-fs`。Provider-neutral 转换应由 `qubit-fs-local` 完成。
 
-如果需要 stream 层 `std::io` trait、extension method、wrapper 和 codec，请参考
-[qubit-io](https://github.com/qubit-ltd/rs-io)。
+完整使用说明见[用户手册](doc/user_guide.zh_CN.md)，整体契约见
+[设计文档](doc/local_file_system_design.zh_CN.md)。
 
 ## 安装
 
@@ -38,303 +40,111 @@ qubit-local-files = "0.7"
 ## 快速示例
 
 ```rust
-use std::io::{
-    Read,
-    Write,
-};
+use std::io::{Read, Write};
 
 use qubit_local_files::{
-    atomic,
-    read,
-    temp::TempDir,
-    write,
+    LocalFileSystem,
+    LocalReadOptions,
+    LocalTempDirectoryOptions,
+    LocalWriteMode,
+    LocalWriteOptions,
+    LocalWriterState,
 };
 
-let work = TempDir::with_prefix("qubit-local-files-readme-")?;
-let path = work.path().join("state").join("manifest.json");
+let work =
+    LocalFileSystem::create_temp_directory(&LocalTempDirectoryOptions::new())?;
+let path = work.path().join("state.json");
 
-let options =
-    write::OpenOptions::new(write::Mode::CreateNew).with_parents();
-let mut file = write::open(&path, &options)?;
-file.write_all(br#"{"version":1}"#)?;
-drop(file);
+let mut writer =
+    LocalFileSystem::open_writer(
+        &path,
+        &LocalWriteOptions::new(LocalWriteMode::CreateOrReplace),
+    )?;
+writer.write_all(br#"{"version":1}"#)?;
+let outcome = writer.commit()?;
+assert_eq!(LocalWriterState::Committed, outcome.state());
 
-let mut replacement = atomic::begin(&path)?;
-replacement.write_all(br#"{"version":2}"#)?;
-replacement.commit()?;
-
-let mut file = read::open(&path)?;
+let mut reader =
+    LocalFileSystem::open_reader(&path, &LocalReadOptions::new())?;
 let mut content = String::new();
-file.read_to_string(&mut content)?;
-assert_eq!(r#"{"version":2}"#, content);
+reader.read_to_string(&mut content)?;
+assert_eq!(r#"{"version":1}"#, content);
 
 # Ok::<(), Box<dyn std::error::Error>>(())
 ```
 
-## 主要能力
-
-### Focused 模块
-
-新代码应导入操作所属的具体模块：
-
-| 模块 | 用途 |
-| --- | --- |
-| `read` / `write` | 把已验证的普通文件打开为无缓冲 `std::fs::File`。 |
-| `atomic` | 启动持久化同目录原子替换。 |
-| `rooted` | 在已打开 root 下执行 descriptor-relative metadata、读、写和原子替换。 |
-| `temp` | 提供 RAII 临时文件、目录和持久化策略类型。 |
-| `directory`、`metadata`、`remove`、`rename` | 提供职责明确的原生文件系统操作。 |
-| `copy` | 以显式冲突策略递归复制目录并返回统计。 |
-| `path` | 生成、校验并按 lexical 语义检查文件名。 |
-
-### 临时文件和临时目录
-
-`temp::TempFile` 和 `temp::TempDir` 创建真实的本地文件系统条目，并在 drop
-时自动删除，除非通过 `keep` 或 `persist` 释放所有权。Drop 阶段的清理是
-best-effort；失败会通过 `log` 门面以 `warn!` 记录告警，不会 panic。
-
-`temp::TempFile` 持有最初创建的文件句柄，并实现 `Write` 和 `Seek`。可通过 `as_file` / `as_file_mut` 直接访问句柄，通过 `close` 丢弃无缓冲句柄后，再用其他 API 读取该路径。`close` 不调用 `sync_all`；需要持久化保证时，应先显式同步句柄。它有意不提供读取 helper；确实需要读取时，通过 `read` 或 `std::fs` 操作它的路径。
-
-`temp::TempDir::child_path` 只对非空相对路径执行 lexical 校验并完成拼接；它不检查已有 symbolic link，返回结果也不能证明文件系统 containment。`ensure_child_dir`、`open_child_reader` 和 `open_child_writer` 还会拒绝其文件系统检查期间观察到的 symbolic-link escape。`ensure_child_dir` 会像 `mkdir -p` 一样创建多层缺失父目录。
-
-文件系统校验与后续操作并非原子过程。当不可信参与者能够并发修改目录树时，这些 helper 不能作为 sandbox 边界。
-
-`temp::TempFile::persist` 默认在移动操作中拒绝已存在的目标。只有确实要替换已有目标时，才使用 `temp::TempFile::persist_with` 和 `temp::PersistOptions::new().with_overwrite()`。`temp::TempDir::persist` 同样拒绝已存在的目标，并且不提供 overwrite 选项。持久化失败会返回持有原临时 guard 的 `temp::PersistError`，调用方可以重试或检查资源；错误同时报告 `ResolveTarget`、`PrepareParent` 或 `InstallDestination` 阶段、调用方传入的目标，以及解析成功后绑定的绝对目标。持久化只使用原生 move/rename，不会回退到 copy-and-delete，因此跨文件系统移动可能在 Unix 上返回 `EXDEV`，或返回其他平台的等价错误。覆盖文件时会保留临时文件的 metadata，而不会保留被替换目标的 metadata；需要严格保留平台原生 metadata 时请使用 `atomic::write`。
-
-原生 no-replace 支持矩阵如下：
-
-| 操作 | Linux | macOS | Windows | 其他目标 |
-| --- | --- | --- | --- | --- |
-| 临时文件/目录默认持久化（不替换） | 支持 | 支持 | 支持 | `Unsupported` |
-| 递归复制 `Fail`/`Skip` 文件提交 | 支持 | 支持 | 支持 | `Unsupported` |
-| 临时文件 overwrite 持久化 | 支持 | 支持 | 支持 | 使用普通替换能力 |
-| 递归复制 `Overwrite` | 支持 | 支持 | 支持 | 使用普通替换能力 |
-
-在不支持的目标上，持久化错误仍持有临时 guard。递归复制可能先创建目标目录，随后才在文件提交阶段返回 `Unsupported`；不会回滚整个目标树。
-
-临时资源的相对创建目录和持久化目标会在资源创建或操作开始时绑定到当时的进程工作目录；`path`、child path helper、`keep`、`persist` 和 `persist_with` 返回绝对路径，之后即使工作目录变化也可直接使用。相对 atomic-write 目标同样会在写入开始时绑定，因此后续工作目录变化不会重定向提交或清理。递归复制的相对 source 和 destination 也会在复制开始时绑定，后续工作目录变化不会重定向遍历、staging 或提交。在 Windows 上，原生移动不会添加 verbatim-path prefix，因此路径长度和 verbatim path 语义仍遵循原生平台行为。在 Unix 上，临时文件以 `0600`、临时目录以 `0700` 创建，之后仍受进程 umask 约束。
-
-### 读写选项
-
-普通文件打开操作有意保持显式：
+## 主要类型
 
 | 类型 | 用途 |
 | --- | --- |
-| `read::OpenOptions` | 控制原生 reader 的可选 Unix 租约冲突打开超时。 |
-| `write::OpenOptions` | 控制父目录创建、原生写入模式和可选 Unix 租约冲突超时。 |
-| `write::Mode` | 选择 `OpenExistingAtStart`、`CreateNew`、`CreateOrTruncate`、`AppendExisting` 或 `AppendOrCreate`。 |
+| `LocalFileSystem` | Host metadata、读写、复制、遍历、创建、删除、rename 和临时资源。 |
+| `RootedLocalFileSystem` | 一个已打开 root 下的 descriptor/handle-relative authority。 |
+| `LocalFileNames` / `LocalPaths` | 不进行 lossy UTF-8 转换的 native lexical 工具。 |
+| `LocalDirectoryWalker` | 固定 depth 与 symlink 策略的惰性遍历器。 |
+| `LocalFileReader` / `LocalFileWriter` | 拥有 I/O 资源并显式报告 publication 状态。 |
+| `LocalTempFile` / `LocalTempDirectory` | 拥有 cleanup responsibility 的临时条目。 |
+| `LocalFileError` | 稳定错误分类、操作与 native path 上下文。 |
 
-focused 打开 helper 只为普通文件返回无缓冲 `std::fs::File`。目录、FIFO、
-socket 和其他特殊文件系统资源会被拒绝；在 Unix 上，拒绝 FIFO 时不会等待
-另一端连接。
+所有无状态操作通过关联方法组织；旧的 public free-function namespace 不再属于公共 API。
 
-在 Unix 上，活动文件租约可能使防御性非阻塞打开返回 `WouldBlock`。普通 reader
-和 writer 会重试该情况，以保持通常的阻塞打开语义。`with_open_retry_timeout`
-可以限制等待时间；默认无限等待，`Duration::ZERO` 会在第一次租约冲突尝试后
-返回 `TimedOut`。其他打开错误不会重试。该选项适用于 configured focused
-文件打开 helper；它不是通用 I/O 超时。默认读取使用 `read::open`，需要配置
-reader options 时使用 `read::open_with`。
-
-`atomic::write` 仍然是独立 API，因为它执行的是完整替换协议，而不是普通写句柄打开。
-
-### Rooted Capability
-
-`rooted::Root` 把所有后代操作锚定到一个已打开的目录 descriptor；它才是文件系统 authority，保存的绝对路径只用于诊断。
-后代名称必须先构造为 `rooted::Path`；它只接受由普通 component 组成的
-非空相对路径。使用 `join` 组合已验证的相对后代路径，使用 `join_component`
-追加一个原生子名称。`open_reader`、`open_writer` 和 `begin_atomic_write`
-都从已打开的 root descriptor 开始遍历，并拒绝中间项和最终项上的 symbolic
-link。namespace 操作使用含义明确的方法：`create_dir`、`create_dir_all`、
-`ensure_dir`、`ensure_dir_all`、`remove_file`、`remove_empty_dir`、
-`remove_tree`、`rename` 和 `rename_without_replacing`。
-即使 root 路径或已经打开的中间名称被重命名或替换，已有句柄也不会被重定向。
-`metadata` 与 `symlink_metadata` 返回 entry kind、size，以及可选的访问、
-修改和创建时间，以及跨平台的 `rooted::Permissions`；底层 descriptor metadata
-不暴露 birth time 时，创建时间为 `None`。
-操作系统会在 capability 获取前解析 root 输入中的祖先 component；no-follow 只适用于最终 root entry。只有目录 descriptor 打开后，containment 才开始生效。
-
-这里保证的是 descriptor-relative 路径 containment，不是 inode 名称唯一性或完整的 OS 安全边界。hard link、mount、权限以及拥有同等 OS authority 的进程仍属于部署安全责任。path-based focused API 是便利 API，不能作为 sandbox 边界。
-
-安全 backend 在 Unix 使用 descriptor-relative 操作，在 Windows 使用
-handle-relative NT 操作，并在逐级打开 component 时拒绝 name-surrogate reparse
-point。其他目标返回 `std::io::ErrorKind::Unsupported`，不会回退到
-check-then-path。
-
-`Root::copy` 在同一个已打开 root 内复制文件或目录树，并复用 `copy::Options`、
-`copy::Statistics` 和 `copy::Error`。它拒绝 symbolic link，以显式工作栈遍历
-目录，并通过同目录 staging 安装每个文件。单个文件安装是原子的，但目录树不是
-多条目事务。
-
-### Atomic Write
-
-`atomic::begin` 返回 `atomic::Writer`；它会在同一父目录下写入临时文件，
-commit 时 flush 并 sync 这个临时文件，替换目标，并在支持的平台上从深到浅
-sync 目标父目录以及本次新建目录项所在的各级父目录。目标必须不存在或是已有
-普通文件；symbolic link、目录、FIFO、socket、device 和其他特殊文件会以
-`std::io::ErrorKind::InvalidInput` 拒绝。
-
-已有目标的 metadata 使用严格的平台原生语义保留：
-
-| 目标平台 | 从已有目标保留的 metadata |
-| --- | --- |
-| Windows | flags 为 `0` 的 `ReplaceFileW`：creation time、short name、object identifier、DACL、security resource attributes、encryption、compression，以及 staging 中不存在的 named stream。 |
-| Linux / Android | uid、gid、完整 Unix mode 和所有 descriptor-visible xattr，包括平台暴露的 POSIX ACL、SELinux label 和 file capability。 |
-| macOS | 通过 descriptor API 与 `fcopyfile` 保留 uid、gid、mode、ACL 和 xattr。 |
-| FreeBSD | uid、gid、mode、文件系统采用的 POSIX 或 NFSv4 ACL，以及 user/system extattr。 |
-
-此表描述已经实现的代码路径。Android 与 FreeBSD 属于下文正式定义的
-compile-only 支持层级；本仓库 CI 不对其文件系统与 metadata 行为做 runtime 验证。
-
-crate 不会为了强制 Windows 替换而清除 `FILE_ATTRIBUTE_READONLY`；只读目标会被
-`ReplaceFileW` 拒绝并保持不变。
-
-Unix 在 `commit` 时从已打开的当前目标读取 metadata，因此 writer 开始后的变更也会被保留。任一受保护 metadata 无法读取、复制或合并时，commit 会失败，不会静默降低保护。Unix 不承诺保留 inode、hard-link identity、timestamp 或 immutable/append-only flag。最初不存在的目标使用原生 no-replace 安装，因此不会覆盖并发创建者。最终 Unix identity 检查与替换仍是分离操作；并发 writer 需要外部协调，需要 descriptor-relative containment 时使用 `rooted::Writer`。Unix 新目标从 `0600` 开始，之后仍受更严格的进程 umask 约束。
-
-streaming 内容可以使用 `atomic::Writer`：
+## Rooted 访问
 
 ```rust
-use std::io::Write;
-use std::time::Duration;
-use qubit_local_files::atomic;
+use std::io::Read;
 
-let options = atomic::Options::new()
-    .with_parent()
-    .with_open_retry_timeout(Duration::from_secs(5));
-let mut writer =
-    atomic::begin_with(std::path::Path::new("state.bin"), options)?;
-writer.write_all(b"complete state")?;
-writer.commit()?;
+use qubit_local_files::{
+    LocalReadOptions,
+    RootedLocalFileSystem,
+};
+
+let root = RootedLocalFileSystem::open(std::path::Path::new("workspace"))?;
+let mut reader =
+    root.open_reader(std::path::Path::new("config/app.toml"), &LocalReadOptions::new())?;
+let mut content = String::new();
+reader.read_to_string(&mut content)?;
+
 # Ok::<(), Box<dyn std::error::Error>>(())
 ```
 
-`atomic::Writer` 实现 `Write`，但不实现 `Seek`。只有 `commit`
-成功后目标才会被替换；调用 `abort` 或直接 drop 会保留原目标并清理 staging
-文件。需要把替换限制在锚定 root 下时，使用
-`rooted::Root::begin_atomic_write`。
-当调用方需要在 installation 前失败后重试或显式 abort 时，使用
-`commit_recoverable`。它的 `atomic::CommitError::into_parts` 返回结构化
-错误和可选的保留 writer；installation 开始后 writer 不再可用。
-`rooted::Writer` 提供相同的恢复 API。
-`atomic::write_with` 会把同一个受保护 writer 临时借给 callback。callback
-可以写入 staging 内容，但不能 clone、保留、seek，也不能访问底层文件或 raw
-handle，因此 callback 返回后无法继续修改已提交 inode。
-
-在 Unix 上，`atomic::Options::with_open_retry_timeout` 可限制活动
-file lease 导致目标的 nonblocking open 返回 `WouldBlock` 时的重试时间。
-默认无限等待；`Duration::ZERO` 在第一次冲突后返回 `TimedOut`。path-based
-和 rooted writer 共用这个 options 类型；one-shot facade 有意保留无限等待的
-默认值。其他平台行为不变。
-
-失败时返回 `atomic::Error`，其中包含失败阶段、临时路径、原始 I/O source error、`atomic::DestinationState`，以及删除未提交 staging file 时产生的 secondary cleanup error。`Unchanged` 表示目标未变，`Replaced` 表示目标包含 staging 内容，`Missing` 表示目标已不存在，`Indeterminate` 要求恢复前同时检查目标与 staging。只有 `Unchanged` 会自动尝试清理 staging；其他状态保留仍存在的 staging entry，但成功移动后诊断用 staging path 可能已经不存在。
-如果 `atomic::write_with` callback panic，会先关闭并 best-effort 删除未提交临时文件，再继续传播 panic。清理失败不能替换原 panic，因此这种情况下 staging path 可能残留。
-
-该操作不是多文件事务，也不协调并发写入。如果多个进程或线程可能同时替换同一路径，需要使用外部锁。
-
-### 递归目录复制
-
-`copy::directory` 复制目录树并返回 `copy::Statistics`：
-
-| 字段 | 含义 |
-| --- | --- |
-| `files` | 已复制的普通文件数量。 |
-| `directories` | 已创建的目标目录数量。 |
-| `bytes` | 从普通文件复制的字节数。 |
-| `skipped` | 因冲突策略而跳过的已有目标文件数量。 |
-| `overwritten` | 被替换或合并的已有目标条目数量。 |
-
-`copy::Options::default()` 是有意保守的默认值：`conflict` 和 `type_conflict` 均为 `Fail`，不跟随 symbolic link，也不保留源权限。通过 `copy::ConflictPolicy` 显式选择 `Overwrite` 或 `Skip`；文件/目录类型替换则必须单独设置 `copy::TypeConflictPolicy::Replace`。复制失败返回 `copy::Error`，其中包含路径、失败阶段、部分统计、可选 staging path、可选次级 cleanup error 和原始 I/O source error。
-
-`Fail` 和 `Skip` 文件提交需要原生 no-replace 支持，因此在 Linux、macOS、Windows 之外返回 `Unsupported`。`Overwrite` 使用普通替换原语，不受该限制。
-
-`with_open_retry_timeout(...)` 还可限制 Unix 上 source file lease 与
-nonblocking source open 冲突时的重试。它与 atomic writer 一样默认无限等待，
-零值在首次冲突后返回 `TimedOut`；这不是整个复制操作或通用 I/O 的超时。
-
-默认不保留源权限。在 Unix 上，新建或替换的文件因此使用 `0600`，新建目录使用 `0700`，之后仍受更严格的进程 umask 约束。原始复制或提交错误保持为主 source error。
-
-递归复制不是目录树级事务。失败前已经提交的条目会留在目标中，不会执行回滚；破坏性的类型冲突替换还可能先删除已有目标目录，随后才在后续操作中失败。
-
-每个复制文件的普通文件类型和可选源权限，都来自实际复制字节的同一个已打开 handle。禁用 link 时 Unix 使用 no-follow open，Windows 拒绝 name-surrogate reparse handle。目录遍历、目标复查和破坏性替换仍是 path-based 操作；当其他参与者能够并发修改任一目录树时，该策略不是可抵御攻击者的 sandbox 边界。
-
-### 文件名 Helper
-
-`path` 模块提供随机和 lexical 文件名工具：
-
-| 方法组 | 用途 |
-| --- | --- |
-| `random_file_name`、`random_file_name_with` | 通过 `std::io::Result` 构造随机文件名 component。 |
-| `validate_portable_file_name` | 校验保守 portable 的单 component 文件名。 |
-| `file_name`、`file_stem`、`file_prefix` | 按 `Path` 语义提取 UTF-8 path component。 |
-| `extension`、`dot_extension`、`has_extension` | 检查最终扩展名。 |
-| `has_extension_ignore_ascii_case` | 使用 ASCII-only 大小写折叠检查最终扩展名。 |
-| `file_name_from_path` | 从 path-like 字符串中提取最后一段。 |
-| `file_name_from_url` | 排除 scheme、authority、query 和 fragment 后，提取 URL 最后一个 path segment。 |
-
-这些 lexical helper 不访问文件系统。返回文件名数据的公开方法返回 UTF-8 字符串，而不是 `OsStr`；无效 UTF-8 path component 返回 `None`。
-authority-only URL 的文件名提取结果为空字符串；仅当 percent-encoded UTF-8 解码结果仍是安全的单文件名时才会返回解码值。
-portable 校验还会拒绝使用上标数字的 Windows device name，包括 `COM¹`、`COM²`、`COM³`、`LPT¹`、`LPT²` 和 `LPT³`；这一行为遵循 [Microsoft 文件命名规则](https://learn.microsoft.com/zh-cn/windows/win32/fileio/naming-a-file)。
-
-## Crate 边界
-
-`qubit-local-files` 有意只覆盖本地文件系统相关能力。它不提供：
-
-- stream extension trait、binary codec 或 stream wrapper；
-- 异步文件系统 API 或 runtime 集成；
-- 远程文件系统、FTP、S3、对象存储或 VFS 抽象；
-- file watching、globbing 或通用目录遍历框架；
-- 锁或跨进程写入协调。
-
-stream 和字节 I/O 相关能力请使用
-[qubit-io](https://github.com/qubit-ltd/rs-io)。
-
-provider-neutral 文件系统契约和可插拔后端注册请使用
-[qubit-fs](https://github.com/qubit-ltd/rs-fs)。面向 `qubit-fs` 的本地 provider
-应保持为独立 adapter crate，而不应将该抽象依赖加入本 crate。
+Rooted 操作拒绝 absolute path、平台 prefix、`.` 与 `..`，并从已打开 root authority
+派生 descendant access，而不依赖之后再次查找诊断路径字符串。
 
 ## 平台支持
 
-| 支持层级 | 目标平台 | CI 验证方式 |
+| 支持级别 | 目标 | 验证 |
 | --- | --- | --- |
-| 原生 runtime-tested | Linux、Windows、macOS | 测试在对应操作系统上执行，并覆盖平台相关文件系统行为。 |
-| Compile-only | FreeBSD、Android | CI 使用 `cargo check` cross-compile production backend 与 cfg-selected source；本仓库不验证或保证其 runtime 文件系统、ABI 与 metadata 行为。 |
+| Runtime-tested | Linux、Windows、macOS | CI 执行平台文件系统测试。 |
+| Compile-only | FreeBSD、Android | 检查 production cfg path，不宣称 runtime 保证。 |
 
-## 运行时依赖
+Capability snapshot 只报告当前实现能够提供的保证。无法满足 required atomicity 或
+durability 时，会在 namespace 变更前拒绝操作。
 
-本 crate 运行时依赖 Rust 标准库、`getrandom`、`libc`、`log` 和按目标启用的
-`windows-sys`。`getrandom` 用于生成随机临时名，`libc` 提供 Unix descriptor、
-metadata、ACL/extattr 与原生 rename 操作，`windows-sys` 提供 Windows handle 和
-replacement API，`log` 用于 drop 阶段的清理失败告警。
+## Runtime 依赖
+
+本 crate 使用 Rust 标准库、`getrandom`、`libc`、`log` 以及 target-specific
+`windows-sys` binding。
 
 ## 测试
 
 ```bash
-# 使用默认 feature 集运行测试
-cargo test
-
-# 使用项目声明的全部 feature 运行测试
 cargo test --all-features
-
-# 运行项目 CI 检查
+./align-ci.sh
 ./ci-check.sh
-
-# 检查代码覆盖率
-./coverage.sh
 ```
 
 ## 许可证
 
 Copyright (c) 2025 - 2026. Haixing Hu. All rights reserved.
 
-本项目基于 Apache License 2.0 授权。完整许可证文本请参阅
-[LICENSE](LICENSE)。
+本项目采用 Apache License 2.0，完整文本见 [LICENSE](LICENSE)。
 
 ## 贡献
 
-欢迎贡献。请遵循 Rust API 指南，及时更新公共 API 文档与测试，并在提交
-Pull Request 前运行 `./align-ci.sh`格式化代码，运行`./ci-check.sh`对齐CI要求。
+欢迎贡献。请同步维护公共文档和平台行为测试，并运行 `./align-ci.sh` 与
+`./ci-check.sh`。
 
 ## 作者
 
 **Haixing Hu** - *Qubit Co. Ltd.*
 
-仓库地址：[https://github.com/qubit-ltd/rs-local-files](https://github.com/qubit-ltd/rs-local-files)
+仓库：[https://github.com/qubit-ltd/rs-local-files](https://github.com/qubit-ltd/rs-local-files)
