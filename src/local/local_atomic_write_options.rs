@@ -116,12 +116,8 @@ impl LocalAtomicWriteOptions {
     /// # Returns
     ///
     /// Updated options carrying the durability policy.
-    #[must_use]
     #[inline(always)]
-    pub const fn with_durability(
-        mut self,
-        durability: LocalDurabilityRequirement,
-    ) -> Self {
+    pub const fn with_durability(mut self, durability: LocalDurabilityRequirement) -> Self {
         self.durability = durability;
         self
     }
@@ -158,9 +154,7 @@ impl LocalAtomicWriteOptions {
     /// Returns the final installation policy.
     #[must_use]
     #[inline(always)]
-    pub(crate) const fn publication_mode(
-        &self,
-    ) -> LocalAtomicPublicationMode {
+    pub(crate) const fn publication_mode(&self) -> LocalAtomicPublicationMode {
         self.publication_mode
     }
 }

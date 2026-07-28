@@ -27,6 +27,4 @@ mod local_persist_stage_tests;
 mod local_relative_path_tests;
 mod local_root_atomic_writer_tests;
 mod local_root_tests;
-mod local_temp_dir_tests;
-mod local_temp_file_tests;
 mod test_support;

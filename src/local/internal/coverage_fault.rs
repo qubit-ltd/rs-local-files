@@ -9,15 +9,14 @@
 // qubit-style: allow source-test-pair
 
 use std::ffi::OsStr;
-use std::sync::atomic::{
-    AtomicBool,
-    Ordering,
-};
+use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 
 /// Environment variable carrying one isolated coverage fault name.
 const COVERAGE_FAULT_ENV: &str = "QUBIT_LOCAL_FILES_COVERAGE_FAULT";
 /// Whether the selected one-shot fault was already consumed in this process.
 static ONE_SHOT_FAULT_TAKEN: AtomicBool = AtomicBool::new(false);
+/// Number of times the selected occurrence-counted fault has been observed.
+static NTH_FAULT_OCCURRENCES: AtomicUsize = AtomicUsize::new(0);
 
 /// Returns whether the isolated test process selected `name`.
 ///
@@ -29,8 +28,7 @@ static ONE_SHOT_FAULT_TAKEN: AtomicBool = AtomicBool::new(false);
 ///
 /// `true` only when the coverage subprocess selected exactly `name`.
 pub(crate) fn is_enabled(name: &str) -> bool {
-    std::env::var_os(COVERAGE_FAULT_ENV)
-        .is_some_and(|value| value == OsStr::new(name))
+    std::env::var_os(COVERAGE_FAULT_ENV).is_some_and(|value| value == OsStr::new(name))
 }
 
 /// Takes the selected fault once within its isolated subprocess.
@@ -47,4 +45,18 @@ pub(crate) fn take(name: &str) -> bool {
         && ONE_SHOT_FAULT_TAKEN
             .compare_exchange(false, true, Ordering::Relaxed, Ordering::Relaxed)
             .is_ok()
+}
+
+/// Returns whether this is the selected occurrence of one isolated fault.
+///
+/// # Parameters
+///
+/// * `name` - Static name of an occurrence-counted fault.
+/// * `occurrence` - One-based matching invocation that should fail.
+///
+/// # Returns
+///
+/// `true` only for the requested matching invocation in the isolated process.
+pub(crate) fn take_on_nth(name: &str, occurrence: usize) -> bool {
+    is_enabled(name) && NTH_FAULT_OCCURRENCES.fetch_add(1, Ordering::Relaxed) + 1 == occurrence
 }

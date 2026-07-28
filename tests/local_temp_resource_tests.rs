@@ -8,11 +8,7 @@
 
 use std::fs;
 
-use qubit_local_files::{
-    LocalFileSystem,
-    LocalTempDirectoryOptions,
-    LocalTempFileOptions,
-};
+use qubit_local_files::{LocalFileSystem, LocalTempDirectoryOptions, LocalTempFileOptions};
 use tempfile::tempdir;
 
 /// Verifies temporary-file options bind the parent and apply both affixes.

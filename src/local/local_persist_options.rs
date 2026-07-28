@@ -15,17 +15,17 @@
 ///
 /// ```compile_fail
 /// #![deny(unused_must_use)]
-/// use qubit_local_files::temp::PersistOptions;
+/// use qubit_local_files::LocalPersistOptions;
 ///
-/// PersistOptions::new().with_overwrite();
+/// LocalPersistOptions::new().with_overwrite();
 /// ```
 ///
 /// Configuration fields are private:
 ///
 /// ```compile_fail
-/// use qubit_local_files::temp::PersistOptions;
+/// use qubit_local_files::LocalPersistOptions;
 ///
-/// let mut options = PersistOptions::default();
+/// let mut options = LocalPersistOptions::default();
 /// options.overwrite = true;
 /// ```
 #[must_use = "persistence options have no effect unless they are used"]

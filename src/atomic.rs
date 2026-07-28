@@ -11,12 +11,9 @@ use std::io;
 use std::path::Path;
 
 pub use crate::local::{
-    LocalAtomicCommitError as CommitError,
-    LocalAtomicDestinationState as DestinationState,
-    LocalAtomicWriteError as Error,
-    LocalAtomicWriteOptions as Options,
-    LocalAtomicWriteStage as Stage,
-    LocalAtomicWriter as Writer,
+    LocalAtomicCommitError as CommitError, LocalAtomicDestinationState as DestinationState,
+    LocalAtomicWriteError as Error, LocalAtomicWriteOptions as Options,
+    LocalAtomicWriteStage as Stage, LocalAtomicWriter as Writer,
 };
 
 /// Begins an atomic replacement and creates missing parent directories.

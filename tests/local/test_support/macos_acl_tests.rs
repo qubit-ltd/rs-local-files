@@ -8,17 +8,8 @@
 
 //! Native macOS ACL fixtures for local-filesystem integration tests.
 
-use std::ffi::{
-    CString,
-    c_char,
-    c_int,
-    c_void,
-};
-use std::io::{
-    self,
-    Error,
-    ErrorKind,
-};
+use std::ffi::{CString, c_char, c_int, c_void};
+use std::io::{self, Error, ErrorKind};
 use std::os::unix::ffi::OsStrExt;
 use std::path::Path;
 use std::ptr;
@@ -82,8 +73,7 @@ pub(crate) fn set_current_user_read_acl(path: &Path) -> io::Result<()> {
 
         let mut uuid = [0_u8; 16];
         // SAFETY: `uuid` points to the 16 writable bytes required by uuid_t.
-        let status =
-            unsafe { mbr_uid_to_uuid(libc::geteuid(), uuid.as_mut_ptr()) };
+        let status = unsafe { mbr_uid_to_uuid(libc::geteuid(), uuid.as_mut_ptr()) };
         if status != 0 {
             return Err(Error::from_raw_os_error(status));
         }
@@ -103,9 +93,7 @@ pub(crate) fn set_current_user_read_acl(path: &Path) -> io::Result<()> {
         // SAFETY: both arguments belong to the same live ACL entry.
         cvt(unsafe { acl_set_permset(entry, permset) })?;
         // SAFETY: `native_path` is NUL-terminated and `acl` remains live.
-        cvt(unsafe {
-            acl_set_file(native_path.as_ptr(), ACL_TYPE_EXTENDED, acl)
-        })
+        cvt(unsafe { acl_set_file(native_path.as_ptr(), ACL_TYPE_EXTENDED, acl) })
     })();
 
     finish_with_acl_cleanup(result, acl)
@@ -130,9 +118,7 @@ pub(crate) fn read_macos_acl_text(path: &Path) -> io::Result<Vec<u8>> {
     }
 
     let result = usize::try_from(length)
-        .map_err(|_| {
-            Error::new(ErrorKind::InvalidData, "negative ACL text length")
-        })
+        .map_err(|_| Error::new(ErrorKind::InvalidData, "negative ACL text length"))
         .map(|length| {
             // SAFETY: `acl_to_text` returned `length` readable bytes.
             unsafe { std::slice::from_raw_parts(text.cast(), length) }.to_vec()
@@ -145,9 +131,8 @@ pub(crate) fn read_macos_acl_text(path: &Path) -> io::Result<Vec<u8>> {
 
 /// Converts a path to the native NUL-terminated representation.
 fn native_path(path: &Path) -> io::Result<CString> {
-    CString::new(path.as_os_str().as_bytes()).map_err(|_| {
-        Error::new(ErrorKind::InvalidInput, "path contains an interior NUL")
-    })
+    CString::new(path.as_os_str().as_bytes())
+        .map_err(|_| Error::new(ErrorKind::InvalidInput, "path contains an interior NUL"))
 }
 
 /// Converts a native zero/sentinel return convention into `io::Result`.

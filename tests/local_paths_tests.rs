@@ -8,52 +8,133 @@
 
 use std::{
     ffi::OsStr,
-    path::{
-        Path,
-        PathBuf,
-    },
+    path::{Path, PathBuf},
+    sync::Mutex,
 };
 
-use qubit_local_files::{
-    LocalFileErrorKind,
-    LocalFileNames,
-    LocalFileOperation,
-    LocalPaths,
-};
+use qubit_local_files::{LocalFileErrorKind, LocalFileNames, LocalFileOperation, LocalPaths};
+
+/// Serializes current-directory-sensitive assertions within this test target.
+static CURRENT_DIRECTORY_LOCK: Mutex<()> = Mutex::new(());
 
 /// Verifies that a group of relative host paths is bound against one cwd
 /// snapshot.
 #[test]
 fn test_local_paths_bind_host_paths_uses_absolute_paths() {
-    let [source, target] =
-        LocalPaths::bind_host_paths([Path::new("source"), Path::new("target")])
-            .expect("relative paths should bind against the current directory");
+    let _lock = CURRENT_DIRECTORY_LOCK
+        .lock()
+        .expect("current-directory test lock should be available");
+    let [source, target] = LocalPaths::bind_host_paths([Path::new("source"), Path::new("target")])
+        .expect("relative paths should bind against the current directory");
 
     assert!(source.is_absolute());
     assert!(target.is_absolute());
     assert_eq!(source.parent(), target.parent());
 }
 
+/// Verifies Unix absolute canonical components round-trip through native paths.
+#[cfg(unix)]
+#[test]
+fn test_canonical_absolute_components_round_trip_unix_path() {
+    let native = LocalPaths::from_canonical_absolute_components(["", "tmp", "a%25b"])
+        .expect("canonical absolute path should decode");
+    assert_eq!(native, Path::new("/tmp/a%b"));
+    assert_eq!(
+        LocalPaths::to_canonical_absolute_components(&native)
+            .expect("native absolute path should encode"),
+        vec!["".to_owned(), "tmp".to_owned(), "a%25b".to_owned()],
+    );
+}
+
+/// Verifies Windows drive-rooted canonical components round-trip through native paths.
+#[cfg(windows)]
+#[test]
+fn test_canonical_absolute_components_round_trip_windows_drive_path() {
+    let native = LocalPaths::from_canonical_absolute_components(["", "C:", "work", "file"])
+        .expect("canonical Windows absolute path should decode");
+    assert_eq!(native, Path::new(r"C:\work\file"));
+    assert_eq!(
+        LocalPaths::to_canonical_absolute_components(&native)
+            .expect("native Windows absolute path should encode"),
+        vec![
+            "".to_owned(),
+            "C:".to_owned(),
+            "work".to_owned(),
+            "file".to_owned(),
+        ],
+    );
+}
+
+/// Verifies Windows absolute conversion rejects unsupported root authorities.
+#[cfg(windows)]
+#[test]
+fn test_canonical_absolute_components_rejects_windows_unsupported_roots() {
+    assert_windows_unsupported_absolute_path(Path::new(r"\\server\share\file"));
+    assert_windows_unsupported_absolute_path(Path::new(r"\\?\C:\work\file"));
+    assert_windows_unsupported_absolute_path(Path::new(r"\work\file"));
+}
+
+/// Asserts that a Windows root form cannot become a canonical host absolute path.
+///
+/// # Parameters
+///
+/// - `path`: Windows native path using an unsupported root authority.
+///
+/// # Panics
+///
+/// Panics when conversion unexpectedly succeeds or returns an unrelated error kind.
+#[cfg(windows)]
+fn assert_windows_unsupported_absolute_path(path: &Path) {
+    let error = LocalPaths::to_canonical_absolute_components(path)
+        .expect_err("unsupported Windows root authority must be rejected");
+    assert!(matches!(
+        error.kind(),
+        LocalFileErrorKind::Unsupported | LocalFileErrorKind::InvalidInput,
+    ));
+}
+
+/// Verifies canonical relative paths cannot escape through a parent component.
+#[test]
+fn test_canonical_relative_components_rejects_parent_escape() {
+    let error = LocalPaths::from_canonical_relative_components(["safe", ".."])
+        .expect_err("parent traversal must be rejected");
+
+    assert_eq!(LocalFileOperation::ComposePath, error.operation());
+}
+
+/// Verifies canonical absolute paths must begin with their platform root shape.
+#[test]
+fn test_absolute_conversion_rejects_relative_shape() {
+    assert!(LocalPaths::from_canonical_absolute_components(["a", "b"]).is_err());
+}
+
+/// Verifies canonical relative components round-trip through native paths.
+#[test]
+fn test_canonical_relative_components_round_trip() {
+    let native = LocalPaths::from_canonical_relative_components(["safe", "a%25b"])
+        .expect("canonical relative path should decode");
+    assert_eq!(native, Path::new("safe/a%b"));
+    assert_eq!(
+        LocalPaths::to_canonical_relative_components(&native)
+            .expect("native relative path should encode"),
+        vec!["safe".to_owned(), "a%25b".to_owned()],
+    );
+}
+
 /// Verifies lexical containment for normalized native paths.
 #[test]
 fn test_local_paths_is_lexically_within_accepts_descendant() {
     assert!(
-        LocalPaths::is_lexically_within(
-            Path::new("/root/a"),
-            Path::new("/root")
-        )
-        .expect("normalized paths should be comparable"),
+        LocalPaths::is_lexically_within(Path::new("/root/a"), Path::new("/root"))
+            .expect("normalized paths should be comparable"),
     );
 }
 
 /// Verifies that dot components are rejected instead of silently normalized.
 #[test]
 fn test_local_paths_is_lexically_within_rejects_dot_components() {
-    let error = LocalPaths::is_lexically_within(
-        Path::new("/root/../escape"),
-        Path::new("/root"),
-    )
-    .expect_err("parent traversal must be rejected");
+    let error = LocalPaths::is_lexically_within(Path::new("/root/../escape"), Path::new("/root"))
+        .expect_err("parent traversal must be rejected");
 
     assert_eq!(LocalFileErrorKind::InvalidInput, error.kind());
     assert_eq!(LocalFileOperation::ComposePath, error.operation());

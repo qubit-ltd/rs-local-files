@@ -10,18 +10,13 @@
 
 use std::{
     error::Error,
-    fmt,
-    io,
-    path::{
-        Path,
-        PathBuf,
-    },
+    fmt, io,
+    path::{Path, PathBuf},
 };
 
 use super::{
-    LocalFileErrorKind,
-    LocalFileOperation,
-    LocalMutationState,
+    LocalFileErrorKind, LocalFileErrorSource, LocalFileOperation, LocalMutationState,
+    LocalPathCodecError,
 };
 
 /// Structured failure from a local filesystem operation.
@@ -35,8 +30,8 @@ pub struct LocalFileError {
     path: Option<PathBuf>,
     /// Secondary or destination native path.
     target: Option<PathBuf>,
-    /// Native I/O source when the failure originated in the operating system.
-    source: Option<io::Error>,
+    /// Typed source retained from the originating failure.
+    source: Option<LocalFileErrorSource>,
     /// Namespace state established after a mutating failure.
     mutation_state: Option<LocalMutationState>,
 }
@@ -50,10 +45,7 @@ impl LocalFileError {
     /// - `operation`: Operation that failed.
     #[must_use]
     #[inline]
-    pub const fn new(
-        kind: LocalFileErrorKind,
-        operation: LocalFileOperation,
-    ) -> Self {
+    pub const fn new(kind: LocalFileErrorKind, operation: LocalFileOperation) -> Self {
         Self {
             kind,
             operation,
@@ -89,7 +81,36 @@ impl LocalFileError {
             operation,
             path,
             target,
-            source: Some(source),
+            source: Some(LocalFileErrorSource::Io(source)),
+            mutation_state: None,
+        }
+    }
+
+    /// Converts a canonical path codec failure and preserves path context.
+    ///
+    /// # Parameters
+    ///
+    /// - `operation`: Operation that failed while converting a path.
+    /// - `path`: Optional primary native path context.
+    /// - `error`: Canonical path codec failure to retain as the typed source.
+    ///
+    /// # Returns
+    ///
+    /// A structured invalid-input error whose source is `PathCodec(error)`.
+    #[must_use]
+    #[allow(dead_code)]
+    #[inline]
+    pub(crate) fn from_path_codec(
+        operation: LocalFileOperation,
+        path: Option<PathBuf>,
+        error: LocalPathCodecError,
+    ) -> Self {
+        Self {
+            kind: LocalFileErrorKind::InvalidInput,
+            operation,
+            path,
+            target: None,
+            source: Some(LocalFileErrorSource::PathCodec(error)),
             mutation_state: None,
         }
     }
@@ -137,10 +158,7 @@ impl LocalFileError {
     /// The updated structured error.
     #[must_use]
     #[inline(always)]
-    pub const fn with_mutation_state(
-        mut self,
-        state: LocalMutationState,
-    ) -> Self {
+    pub const fn with_mutation_state(mut self, state: LocalMutationState) -> Self {
         self.mutation_state = Some(state);
         self
     }
@@ -185,10 +203,27 @@ impl LocalFileError {
         self.mutation_state
     }
 
-    /// Consumes the error and returns its native I/O source, if present.
+    /// Returns the typed source retained from the originating failure.
+    ///
+    /// # Returns
+    ///
+    /// `Some` contains an I/O or path codec source; `None` means this error
+    /// was constructed without an originating source.
     #[must_use]
     #[inline(always)]
-    pub fn into_source(self) -> Option<io::Error> {
+    pub const fn source_kind(&self) -> Option<&LocalFileErrorSource> {
+        self.source.as_ref()
+    }
+
+    /// Consumes the error and returns its typed source, if present.
+    ///
+    /// # Returns
+    ///
+    /// `Some` contains an I/O or path codec source; `None` means this error
+    /// was constructed without an originating source.
+    #[must_use]
+    #[inline(always)]
+    pub fn into_source(self) -> Option<LocalFileErrorSource> {
         self.source
     }
 
@@ -222,20 +257,15 @@ impl fmt::Display for LocalFileError {
         if let Some(target) = &self.target {
             write!(formatter, " targeting {}", target.display())?;
         }
-        if let Some(source) = &self.source {
-            write!(formatter, ": {source}")?;
-        }
         Ok(())
     }
 }
 
 impl Error for LocalFileError {
-    /// Returns the underlying native I/O error, if present.
+    /// Returns the concrete I/O or path codec source, if present.
     #[inline(always)]
     fn source(&self) -> Option<&(dyn Error + 'static)> {
-        self.source
-            .as_ref()
-            .map(|source| source as &(dyn Error + 'static))
+        self.source.as_ref().and_then(Error::source)
     }
 }
 

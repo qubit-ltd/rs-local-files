@@ -8,11 +8,7 @@
 
 use std::io::Write;
 
-use qubit_local_files::write::{
-    Mode,
-    OpenOptions,
-    open,
-};
+use qubit_local_files::write::{Mode, OpenOptions, open};
 use tempfile::tempdir;
 
 #[test]

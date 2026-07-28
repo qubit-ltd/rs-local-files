@@ -7,17 +7,10 @@
 // =============================================================================
 
 use std::io::ErrorKind;
-use std::path::{
-    Path,
-    PathBuf,
-};
+use std::path::{Path, PathBuf};
 
 use super::api_tests::LocalRelativePath;
-use proptest::{
-    collection,
-    prop_assert_eq,
-    proptest,
-};
+use proptest::{collection, prop_assert_eq, proptest};
 
 proptest! {
     /// Verifies that arbitrary normal components remain valid and unchanged.
@@ -79,8 +72,7 @@ fn test_new_accepts_normal_relative_components() {
 /// Verifies that validated paths compose normal relative descendants.
 #[test]
 fn test_join_accepts_normal_relative_descendants() {
-    let parent =
-        LocalRelativePath::new("parent").expect("the parent should validate");
+    let parent = LocalRelativePath::new("parent").expect("the parent should validate");
 
     let joined = parent
         .join("child/value.bin")
@@ -96,8 +88,7 @@ fn test_join_accepts_normal_relative_descendants() {
 /// Verifies that path composition rejects non-normal descendants.
 #[test]
 fn test_join_rejects_invalid_descendants() {
-    let parent =
-        LocalRelativePath::new("parent").expect("the parent should validate");
+    let parent = LocalRelativePath::new("parent").expect("the parent should validate");
 
     for invalid in ["", ".", "..", "../escape", "/absolute"] {
         let error = parent
@@ -126,8 +117,7 @@ fn test_new_rejects_non_normal_paths() {
     }
 
     let absolute = std::env::temp_dir().join("absolute.bin");
-    let error = LocalRelativePath::new(&absolute)
-        .expect_err("absolute paths should be rejected");
+    let error = LocalRelativePath::new(&absolute).expect_err("absolute paths should be rejected");
     assert_eq!(ErrorKind::InvalidInput, error.kind());
 }
 
@@ -139,8 +129,7 @@ fn test_new_rejects_unix_nul() {
     use std::os::unix::ffi::OsStringExt;
 
     let path = OsString::from_vec(b"safe\0unsafe".to_vec());
-    let error =
-        LocalRelativePath::new(path).expect_err("NUL should be rejected");
+    let error = LocalRelativePath::new(path).expect_err("NUL should be rejected");
 
     assert_eq!(ErrorKind::InvalidInput, error.kind());
 }
@@ -153,8 +142,7 @@ fn test_new_rejects_windows_nul() {
     use super::test_support::path_with_interior_nul;
 
     let path = path_with_interior_nul(Path::new("safe"), "unsafe");
-    let error =
-        LocalRelativePath::new(path).expect_err("NUL should be rejected");
+    let error = LocalRelativePath::new(path).expect_err("NUL should be rejected");
 
     assert_eq!(ErrorKind::InvalidInput, error.kind());
 }

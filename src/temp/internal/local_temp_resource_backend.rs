@@ -1,0 +1,26 @@
+//! Shared authority marker for unified temporary resources.
+
+use super::{HostTempResourceBackend, RootedTempResourceBackend};
+
+/// Identifies whether a temporary resource is host- or descriptor-relative.
+#[derive(Debug)]
+pub(crate) enum LocalTempResourceBackend {
+    /// A host path already bound at creation time.
+    Host(HostTempResourceBackend),
+    /// A descendant authorized by an opened root handle.
+    Rooted(RootedTempResourceBackend),
+}
+
+/// Namespace certainty retained after a temporary-resource state transition.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(crate) enum LocalTempResourceState {
+    /// The source is known to remain owned and cleanup-safe.
+    Owned,
+    /// Publication completed but a retained source still needs cleanup.
+    #[allow(dead_code)]
+    CleanupRequired,
+    /// The native namespace result is unknown; no cleanup operation is safe.
+    Indeterminate,
+    /// The resource was kept, cleaned, or fully persisted.
+    Released,
+}

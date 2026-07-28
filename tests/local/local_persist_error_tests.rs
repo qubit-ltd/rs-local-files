@@ -10,18 +10,17 @@ use std::error::Error as StdError;
 use std::fs;
 use std::io::ErrorKind;
 
-use super::api_tests::{
-    LocalPersistStage,
-    LocalTempFile,
-};
+use super::api_tests::LocalPersistStage;
 
 use super::test_support::temp_dir;
 
 #[test]
 fn test_persist_error_into_parts_returns_error_and_resource() {
     let dir = temp_dir("persist-error-parts");
-    let file = LocalTempFile::in_dir(&dir, Some("source-"), Some(".tmp"), 4)
-        .expect("temporary file should be created");
+    let file = qubit_local_files::LocalFileSystem::create_temp_file(
+        &qubit_local_files::LocalTempFileOptions::new().with_parent(&dir),
+    )
+    .expect("temporary file should be created");
     let source = file.path().to_path_buf();
     let target = dir.join("target.txt");
     fs::write(&target, b"existing").expect("target fixture should be written");
@@ -41,16 +40,15 @@ fn test_persist_error_into_parts_returns_error_and_resource() {
     assert_eq!(
         ErrorKind::NotFound,
         persist_error
-            .resource()
-            .as_file()
+            .resource_mut()
+            .as_file_mut()
             .expect_err("persist failure should retain a closed file guard")
             .kind(),
     );
     assert_eq!(target, persist_error.requested_target());
     assert_eq!(Some(target.as_path()), persist_error.resolved_target());
     assert_eq!(LocalPersistStage::InstallDestination, persist_error.stage());
-    let (error, resource, requested_target, resolved_target, stage) =
-        persist_error.into_parts();
+    let (error, resource, requested_target, resolved_target, stage) = persist_error.into_parts();
 
     assert_eq!(ErrorKind::AlreadyExists, error.kind());
     assert_eq!(source, resource.path());

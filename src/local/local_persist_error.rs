@@ -8,17 +8,9 @@
 //! Recoverable temporary-resource persistence errors.
 
 use std::error::Error;
-use std::fmt::{
-    Debug,
-    Display,
-    Formatter,
-    Result as FmtResult,
-};
+use std::fmt::{Debug, Display, Formatter, Result as FmtResult};
 use std::io;
-use std::path::{
-    Path,
-    PathBuf,
-};
+use std::path::{Path, PathBuf};
 
 use crate::LocalPersistStage;
 
@@ -28,7 +20,10 @@ use crate::LocalPersistStage;
 /// installation. [`Self::requested_target`] always returns the caller's path;
 /// [`Self::resolved_target`] returns the bound absolute path once resolution
 /// has succeeded. The resource remains available for retry, inspection, keep,
-/// or explicit cleanup at every stage.
+/// or explicit cleanup only while the retained resource still has a known
+/// owned namespace entry. After an indeterminate native publish failure,
+/// temporary handles reject cleanup and their `Drop` implementation performs
+/// no namespace operation.
 #[non_exhaustive]
 #[derive(Debug)]
 pub struct LocalPersistError<T> {
@@ -152,17 +147,15 @@ impl<T> LocalPersistError<T> {
     ///
     /// ```compile_fail
     /// #![deny(unused_must_use)]
-    /// use qubit_local_files::temp::PersistError;
+    /// use qubit_local_files::LocalPersistError;
     ///
-    /// fn discard(error: PersistError<()>) {
+    /// fn discard(error: LocalPersistError<()>) {
     ///     error.into_parts();
     /// }
     /// ```
     #[must_use = "the returned tuple retains the temporary resource and persistence context"]
     #[inline(always)]
-    pub fn into_parts(
-        self,
-    ) -> (io::Error, T, PathBuf, Option<PathBuf>, LocalPersistStage) {
+    pub fn into_parts(self) -> (io::Error, T, PathBuf, Option<PathBuf>, LocalPersistStage) {
         let Self {
             error,
             resource,

@@ -11,10 +11,7 @@ use std::fs;
 use std::io::Result;
 use std::path::Path;
 
-use crate::local::{
-    move_directory_without_replacing,
-    move_file_without_replacing,
-};
+use crate::local::{move_directory_without_replacing, move_file_without_replacing};
 
 /// Renames or moves a local path using the platform operation.
 ///
@@ -34,10 +31,7 @@ pub fn move_path(source: &Path, destination: &Path) -> Result<()> {
 /// # Errors
 /// Returns an I/O error when the source cannot be inspected, the destination
 /// exists, the platform lacks a no-replace primitive, or the move fails.
-pub fn move_path_without_replacing(
-    source: &Path,
-    destination: &Path,
-) -> Result<()> {
+pub fn move_path_without_replacing(source: &Path, destination: &Path) -> Result<()> {
     let metadata = fs::symlink_metadata(source)?;
     if metadata.is_dir() {
         move_directory_without_replacing(source, destination)

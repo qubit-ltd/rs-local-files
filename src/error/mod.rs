@@ -9,12 +9,16 @@
 
 mod local_file_error;
 mod local_file_error_kind;
+mod local_file_error_source;
 mod local_file_operation;
 mod local_mutation_state;
+mod local_path_codec_error;
 mod local_result;
 
 pub use local_file_error::LocalFileError;
 pub use local_file_error_kind::LocalFileErrorKind;
+pub use local_file_error_source::LocalFileErrorSource;
 pub use local_file_operation::LocalFileOperation;
 pub use local_mutation_state::LocalMutationState;
+pub use local_path_codec_error::LocalPathCodecError;
 pub use local_result::LocalResult;

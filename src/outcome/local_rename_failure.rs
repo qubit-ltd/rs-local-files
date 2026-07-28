@@ -1,0 +1,78 @@
+// =============================================================================
+//    Copyright (c) 2026 Haixing Hu.
+//
+//    SPDX-License-Identifier: Apache-2.0
+//
+//    Licensed under the Apache License, Version 2.0.
+// =============================================================================
+
+//! Typed failures from unified rename operations.
+
+use std::{
+    error::Error,
+    fmt::{Display, Formatter, Result as FmtResult},
+};
+
+use crate::LocalFileError;
+
+use super::LocalRenameFailureState;
+
+/// Failure details retained when a unified rename does not complete.
+#[derive(Debug)]
+pub struct LocalRenameFailure {
+    /// Primary typed filesystem error.
+    error: LocalFileError,
+    /// Most precise namespace state proven by native operations.
+    state: LocalRenameFailureState,
+}
+
+impl Display for LocalRenameFailure {
+    /// Formats the primary rename failure and its proven namespace state.
+    fn fmt(&self, formatter: &mut Formatter<'_>) -> FmtResult {
+        write!(
+            formatter,
+            "rename failed with {:?} state: {}",
+            self.state, self.error
+        )
+    }
+}
+
+impl Error for LocalRenameFailure {
+    /// Returns the primary typed filesystem error.
+    #[inline(always)]
+    fn source(&self) -> Option<&(dyn Error + 'static)> {
+        Some(&self.error)
+    }
+}
+
+impl LocalRenameFailure {
+    /// Creates a typed rename failure from implementation facts.
+    #[must_use]
+    #[inline]
+    pub(crate) const fn new(error: LocalFileError, state: LocalRenameFailureState) -> Self {
+        Self { error, state }
+    }
+
+    /// Returns the primary typed filesystem error.
+    #[must_use]
+    #[inline(always)]
+    pub const fn error(&self) -> &LocalFileError {
+        &self.error
+    }
+
+    /// Returns the most precise namespace state proven by native operations.
+    #[must_use]
+    #[inline(always)]
+    pub const fn state(&self) -> LocalRenameFailureState {
+        self.state
+    }
+
+    /// Consumes this failure and returns its error and proven state.
+    #[inline(always)]
+    pub fn into_parts(self) -> (LocalFileError, LocalRenameFailureState) {
+        (self.error, self.state)
+    }
+}
+
+/// Result returned by unified rename operations.
+pub type LocalRenameResult = Result<super::LocalRenameOutcome, LocalRenameFailure>;

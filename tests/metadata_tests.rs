@@ -11,16 +11,14 @@
 /// Verifies fallible existence checks report an existing path.
 #[test]
 fn test_metadata_exists_reports_existing_path() {
-    let directory =
-        tempfile::tempdir().expect("a temporary directory should exist");
+    let directory = tempfile::tempdir().expect("a temporary directory should exist");
     assert!(qubit_local_files::metadata::exists(directory.path()).unwrap());
 }
 
 /// Verifies followed and unfollowed metadata are both available.
 #[test]
 fn test_metadata_read_entry_points_inspect_files() {
-    let file =
-        tempfile::NamedTempFile::new().expect("a temporary file should exist");
+    let file = tempfile::NamedTempFile::new().expect("a temporary file should exist");
 
     assert!(
         qubit_local_files::metadata::read(file.path())

@@ -7,31 +7,12 @@
 // =============================================================================
 //! Descriptor-relative file and directory copying.
 
-use std::io::{
-    self,
-    ErrorKind,
-};
+use std::io::{self, ErrorKind};
 
-use crate::copy::{
-    ConflictPolicy,
-    Error,
-    Options,
-    Stage,
-    Statistics,
-    TypeConflictPolicy,
-};
-use crate::{
-    LocalCopyDirError,
-    atomic,
-    read,
-};
+use crate::copy::{ConflictPolicy, Error, Options, Stage, Statistics, TypeConflictPolicy};
+use crate::{LocalCopyDirError, atomic, read};
 
-use super::{
-    EntryKind,
-    Metadata,
-    Path,
-    Root,
-};
+use super::{EntryKind, Metadata, Path, Root};
 
 /// Deferred work for iterative rooted directory copying.
 enum Work {
@@ -104,24 +85,17 @@ pub(super) fn copy(
         ));
     }
 
-    let source_metadata =
-        root.symlink_metadata(source).map_err(|source_error| {
-            error(
-                Stage::InspectSource,
-                source,
-                destination,
-                Statistics::default(),
-                source_error,
-            )
-        })?;
-    match source_metadata.kind() {
-        EntryKind::File => copy_file(
-            root,
+    let source_metadata = root.symlink_metadata(source).map_err(|source_error| {
+        error(
+            Stage::InspectSource,
             source,
             destination,
-            &options,
             Statistics::default(),
-        ),
+            source_error,
+        )
+    })?;
+    match source_metadata.kind() {
+        EntryKind::File => copy_file(root, source, destination, &options, Statistics::default()),
         EntryKind::Directory => {
             if destination.as_path().starts_with(source.as_path()) {
                 return Err(error(
@@ -156,8 +130,7 @@ fn copy_tree(
     options: &Options,
 ) -> Result<Statistics, Error> {
     let mut statistics = Statistics::default();
-    if !prepare_directory(root, source, destination, options, &mut statistics)?
-    {
+    if !prepare_directory(root, source, destination, options, &mut statistics)? {
         return Ok(statistics);
     }
     let mut work = vec![Work::Enter {
@@ -172,44 +145,45 @@ fn copy_tree(
                 destination,
                 metadata,
             } => {
-                let entries =
-                    root.read_dir(&source).map_err(|source_error| {
-                        error(
-                            Stage::ReadSourceDirectory,
-                            &source,
-                            &destination,
-                            statistics,
-                            source_error,
-                        )
-                    })?;
+                let entries = root.read_dir(&source).map_err(|source_error| {
+                    error(
+                        Stage::ReadSourceDirectory,
+                        &source,
+                        &destination,
+                        statistics,
+                        source_error,
+                    )
+                })?;
                 work.push(Work::Finish {
                     source: source.clone(),
                     destination: destination.clone(),
                     metadata,
                 });
                 for entry in entries.into_iter().rev() {
-                    let source_child = source
-                        .join_component(entry.name())
-                        .map_err(|source_error| {
-                            error(
-                                Stage::InspectSourceEntry,
-                                &source,
-                                &destination,
-                                statistics,
-                                source_error,
-                            )
-                        })?;
-                    let destination_child = destination
-                        .join_component(entry.name())
-                        .map_err(|source_error| {
-                            error(
-                                Stage::PrepareDestination,
-                                &source_child,
-                                &destination,
-                                statistics,
-                                source_error,
-                            )
-                        })?;
+                    let source_child =
+                        source
+                            .join_component(entry.name())
+                            .map_err(|source_error| {
+                                error(
+                                    Stage::InspectSourceEntry,
+                                    &source,
+                                    &destination,
+                                    statistics,
+                                    source_error,
+                                )
+                            })?;
+                    let destination_child =
+                        destination
+                            .join_component(entry.name())
+                            .map_err(|source_error| {
+                                error(
+                                    Stage::PrepareDestination,
+                                    &source_child,
+                                    &destination,
+                                    statistics,
+                                    source_error,
+                                )
+                            })?;
                     match entry.metadata().kind() {
                         EntryKind::File => {
                             statistics = copy_file(
@@ -251,14 +225,7 @@ fn copy_tree(
                 source,
                 destination,
                 metadata,
-            } => preserve_permissions(
-                root,
-                &source,
-                &destination,
-                metadata,
-                options,
-                statistics,
-            )?,
+            } => preserve_permissions(root, &source, &destination, metadata, options, statistics)?,
         }
     }
     Ok(statistics)
@@ -291,13 +258,8 @@ fn prepare_directory(
                     source_error,
                 )
             })?;
-            statistics.directories = checked_add(
-                statistics.directories,
-                1,
-                source,
-                destination,
-                *statistics,
-            )?;
+            statistics.directories =
+                checked_add(statistics.directories, 1, source, destination, *statistics)?;
             Ok(true)
         }
         Some(metadata) if metadata.kind() == EntryKind::Directory => {
@@ -313,31 +275,18 @@ fn prepare_directory(
                     ),
                 )),
                 ConflictPolicy::Skip => {
-                    statistics.skipped = checked_add(
-                        statistics.skipped,
-                        1,
-                        source,
-                        destination,
-                        *statistics,
-                    )?;
+                    statistics.skipped =
+                        checked_add(statistics.skipped, 1, source, destination, *statistics)?;
                     Ok(false)
                 }
                 ConflictPolicy::Overwrite => {
-                    statistics.overwritten = checked_add(
-                        statistics.overwritten,
-                        1,
-                        source,
-                        destination,
-                        *statistics,
-                    )?;
+                    statistics.overwritten =
+                        checked_add(statistics.overwritten, 1, source, destination, *statistics)?;
                     Ok(true)
                 }
             }
         }
-        Some(_)
-            if options.type_conflict_policy()
-                == TypeConflictPolicy::Replace =>
-        {
+        Some(_) if options.type_conflict_policy() == TypeConflictPolicy::Replace => {
             root.remove_file(destination).map_err(|source_error| {
                 error(
                     Stage::PrepareDestination,
@@ -356,20 +305,10 @@ fn prepare_directory(
                     source_error,
                 )
             })?;
-            statistics.directories = checked_add(
-                statistics.directories,
-                1,
-                source,
-                destination,
-                *statistics,
-            )?;
-            statistics.overwritten = checked_add(
-                statistics.overwritten,
-                1,
-                source,
-                destination,
-                *statistics,
-            )?;
+            statistics.directories =
+                checked_add(statistics.directories, 1, source, destination, *statistics)?;
+            statistics.overwritten =
+                checked_add(statistics.overwritten, 1, source, destination, *statistics)?;
             Ok(true)
         }
         Some(_) => Err(error(
@@ -393,6 +332,16 @@ fn copy_file(
     options: &Options,
     mut statistics: Statistics,
 ) -> Result<Statistics, Error> {
+    #[cfg(coverage)]
+    if crate::local::take_coverage_fault_on_nth("rooted-copy-file-second", 2) {
+        return Err(error(
+            Stage::CopyFileContents,
+            source,
+            destination,
+            statistics,
+            io::Error::from_raw_os_error(libc::EIO),
+        ));
+    }
     let mut reader = root
         .open_reader(source, &read::OpenOptions::default())
         .map_err(|source_error| {
@@ -404,26 +353,24 @@ fn copy_file(
                 source_error,
             )
         })?;
-    let source_metadata =
-        Metadata::from_open_file(&reader).map_err(|source_error| {
-            error(
-                Stage::InspectSourceEntry,
-                source,
-                destination,
-                statistics,
-                source_error,
-            )
-        })?;
-    let destination_metadata =
-        optional_metadata(root, destination).map_err(|source_error| {
-            error(
-                Stage::PrepareDestination,
-                source,
-                destination,
-                statistics,
-                source_error,
-            )
-        })?;
+    let source_metadata = Metadata::from_open_file(&reader).map_err(|source_error| {
+        error(
+            Stage::InspectSourceEntry,
+            source,
+            destination,
+            statistics,
+            source_error,
+        )
+    })?;
+    let destination_metadata = optional_metadata(root, destination).map_err(|source_error| {
+        error(
+            Stage::PrepareDestination,
+            source,
+            destination,
+            statistics,
+            source_error,
+        )
+    })?;
     if destination_metadata
         .as_ref()
         .is_some_and(|metadata| source_metadata.is_same_file(metadata))
@@ -482,13 +429,8 @@ fn copy_file(
                     ));
                 }
                 ConflictPolicy::Skip => {
-                    statistics.skipped = checked_add(
-                        statistics.skipped,
-                        1,
-                        source,
-                        destination,
-                        statistics,
-                    )?;
+                    statistics.skipped =
+                        checked_add(statistics.skipped, 1, source, destination, statistics)?;
                     return Ok(statistics);
                 }
                 ConflictPolicy::Overwrite => {}
@@ -498,8 +440,7 @@ fn copy_file(
     let mut writer = root
         .begin_atomic_write_with_options(destination, atomic::Options::new())
         .map_err(|source_error| {
-            let source_error =
-                io::Error::new(source_error.kind(), source_error);
+            let source_error = io::Error::new(source_error.kind(), source_error);
             error(
                 Stage::PrepareDestination,
                 source,
@@ -518,27 +459,13 @@ fn copy_file(
         )
     })?;
     writer.commit().map_err(|source_error| {
-        let source_error = io::Error::new(source_error.kind(), source_error);
-        error(
-            Stage::CommitFile,
-            source,
-            destination,
-            statistics,
-            source_error,
-        )
+        rooted_commit_error(source, destination, statistics, source_error)
     })?;
-    statistics.files =
-        checked_add(statistics.files, 1, source, destination, statistics)?;
-    statistics.bytes =
-        checked_add(statistics.bytes, bytes, source, destination, statistics)?;
+    statistics.files = checked_add(statistics.files, 1, source, destination, statistics)?;
+    statistics.bytes = checked_add(statistics.bytes, bytes, source, destination, statistics)?;
     if destination_metadata.is_some() {
-        statistics.overwritten = checked_add(
-            statistics.overwritten,
-            1,
-            source,
-            destination,
-            statistics,
-        )?;
+        statistics.overwritten =
+            checked_add(statistics.overwritten, 1, source, destination, statistics)?;
     }
     preserve_permissions(
         root,
@@ -575,13 +502,35 @@ fn preserve_permissions(
     Ok(())
 }
 
+/// Converts a rooted atomic commit failure without discarding cleanup details.
+fn rooted_commit_error(
+    source: &Path,
+    destination: &Path,
+    statistics: Statistics,
+    source_error: crate::LocalAtomicWriteError,
+) -> Error {
+    let (temporary_path, cleanup_error, source_error) = source_error.into_staging_parts();
+    let source_kind = source_error.kind();
+    let copy_error = error(
+        Stage::CommitFile,
+        source,
+        destination,
+        statistics,
+        io::Error::new(source_kind, source_error),
+    );
+    match (temporary_path, cleanup_error) {
+        (Some(temporary_path), Some(cleanup_error)) => {
+            copy_error.with_staging_context(temporary_path, Some(cleanup_error))
+        }
+        _ => copy_error,
+    }
+}
+
 /// Reads optional destination metadata without following the final link.
 fn optional_metadata(root: &Root, path: &Path) -> io::Result<Option<Metadata>> {
     match root.symlink_metadata(path) {
         Ok(metadata) => Ok(Some(metadata)),
-        Err(source_error) if source_error.kind() == ErrorKind::NotFound => {
-            Ok(None)
-        }
+        Err(source_error) if source_error.kind() == ErrorKind::NotFound => Ok(None),
         Err(source_error) => Err(source_error),
     }
 }

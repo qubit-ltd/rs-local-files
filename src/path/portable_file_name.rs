@@ -7,11 +7,7 @@
 // =============================================================================
 //! Portable local file names.
 
-use std::fmt::{
-    self,
-    Display,
-    Formatter,
-};
+use std::fmt::{self, Display, Formatter};
 use std::io;
 
 /// A validated UTF-8 filename accepted by mainstream local filesystems.

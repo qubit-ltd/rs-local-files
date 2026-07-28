@@ -6,44 +6,18 @@
 //    Licensed under the Apache License, Version 2.0.
 // =============================================================================
 
-use std::{
-    fs,
-    io,
-    path::Path,
-};
+use std::{fs, io, path::Path};
 
 use crate::{
-    LocalAtomicityRequirement,
-    LocalCopyMethod,
-    LocalCopyOptions,
-    LocalCopyOutcome,
-    LocalCopyStats,
-    LocalCreateDirectoryOptions,
-    LocalCreateDirectoryOutcome,
-    LocalDeleteOptions,
-    LocalDeleteOutcome,
-    LocalDirectoryWalker,
-    LocalDurabilityRequirement,
-    LocalFileError,
-    LocalFileErrorKind,
-    LocalFileMetadata,
-    LocalFileOperation,
-    LocalFileReader,
-    LocalFileSystemCapabilities,
-    LocalFileWriter,
-    LocalListOptions,
-    LocalMetadataPreservePolicy,
-    LocalPaths,
-    LocalReadOptions,
-    LocalRenameOptions,
-    LocalRenameOutcome,
-    LocalResult,
-    LocalSymlinkPolicy,
-    LocalTempDirectory,
-    LocalTempDirectoryOptions,
-    LocalTempFile,
-    LocalTempFileOptions,
-    LocalWriteMode,
+    LocalAtomicityRequirement, LocalCopyFailure, LocalCopyFailureState, LocalCopyMethod,
+    LocalCopyOptions, LocalCopyOutcome, LocalCopyResult, LocalCopyStats,
+    LocalCreateDirectoryOptions, LocalCreateDirectoryOutcome, LocalDeleteOptions,
+    LocalDeleteOutcome, LocalDirectoryWalker, LocalDurabilityRequirement, LocalFileError,
+    LocalFileErrorKind, LocalFileMetadata, LocalFileOperation, LocalFileReader,
+    LocalFileSystemCapabilities, LocalFileWriter, LocalListOptions, LocalMetadataPreservePolicy,
+    LocalPaths, LocalReadOptions, LocalRenameFailure, LocalRenameFailureState, LocalRenameOptions,
+    LocalRenameOutcome, LocalRenameResult, LocalResult, LocalSymlinkPolicy, LocalTempDirectory,
+    LocalTempDirectoryOptions, LocalTempFile, LocalTempFileOptions, LocalWriteMode,
     LocalWriteOptions,
 };
 
@@ -101,10 +75,7 @@ impl LocalFileSystem {
     /// Returns `LocalFileError` when the entry is not a regular file or cannot
     /// be opened.
     #[inline]
-    pub fn open_reader(
-        path: &Path,
-        options: &LocalReadOptions,
-    ) -> LocalResult<LocalFileReader> {
+    pub fn open_reader(path: &Path, options: &LocalReadOptions) -> LocalResult<LocalFileReader> {
         let bound = LocalPaths::bind_host_path(path)?;
         let metadata = fs::symlink_metadata(&bound).map_err(|source| {
             LocalFileError::from_io(
@@ -121,22 +92,15 @@ impl LocalFileSystem {
             )
             .with_path(bound));
         }
-        let native_options = options.open_retry_timeout().map_or_else(
-            crate::read::OpenOptions::default,
-            |timeout| {
-                crate::read::OpenOptions::default()
-                    .with_open_retry_timeout(timeout)
-            },
-        );
+        let native_options = options
+            .open_retry_timeout()
+            .map_or_else(crate::read::OpenOptions::default, |timeout| {
+                crate::read::OpenOptions::default().with_open_retry_timeout(timeout)
+            });
         crate::local::open_native_reader_path(&bound, &native_options)
             .map(LocalFileReader::new)
             .map_err(|source| {
-                LocalFileError::from_io(
-                    LocalFileOperation::OpenReader,
-                    Some(bound),
-                    None,
-                    source,
-                )
+                LocalFileError::from_io(LocalFileOperation::OpenReader, Some(bound), None, source)
             })
     }
 
@@ -159,10 +123,7 @@ impl LocalFileSystem {
     ///
     /// Returns `LocalFileError` for invalid mode/guarantee combinations,
     /// destination conflicts, invalid entry kinds, or native open failures.
-    pub fn open_writer(
-        path: &Path,
-        options: &LocalWriteOptions,
-    ) -> LocalResult<LocalFileWriter> {
+    pub fn open_writer(path: &Path, options: &LocalWriteOptions) -> LocalResult<LocalFileWriter> {
         use crate::writer::internal::LocalFileWriterBackend;
 
         let bound = LocalPaths::bind_host_path(path)?;
@@ -198,22 +159,21 @@ impl LocalFileSystem {
             })?;
         }
         let backend = match options.mode() {
-            LocalWriteMode::CreateNew => LocalFileWriterBackend::Staged(
-                open_staged_writer(&bound, options)?,
-            ),
-            LocalWriteMode::CreateOrReplace => LocalFileWriterBackend::Staged(
-                open_staged_writer(&bound, options)?,
-            ),
+            LocalWriteMode::CreateNew => {
+                LocalFileWriterBackend::Staged(open_staged_writer(&bound, options)?)
+            }
+            LocalWriteMode::CreateOrReplace => {
+                LocalFileWriterBackend::Staged(open_staged_writer(&bound, options)?)
+            }
             LocalWriteMode::Append => {
-                let metadata =
-                    fs::symlink_metadata(&bound).map_err(|error| {
-                        LocalFileError::from_io(
-                            LocalFileOperation::OpenWriter,
-                            Some(bound.clone()),
-                            None,
-                            error,
-                        )
-                    })?;
+                let metadata = fs::symlink_metadata(&bound).map_err(|error| {
+                    LocalFileError::from_io(
+                        LocalFileOperation::OpenWriter,
+                        Some(bound.clone()),
+                        None,
+                        error,
+                    )
+                })?;
                 if !metadata.file_type().is_file() {
                     return Err(LocalFileError::new(
                         LocalFileErrorKind::TypeConflict,
@@ -221,25 +181,21 @@ impl LocalFileSystem {
                     )
                     .with_path(bound));
                 }
-                let mut native_options = crate::write::OpenOptions::new(
-                    crate::write::Mode::AppendExisting,
-                );
+                let mut native_options =
+                    crate::write::OpenOptions::new(crate::write::Mode::AppendExisting);
                 if let Some(timeout) = options.open_retry_timeout() {
-                    native_options =
-                        native_options.with_open_retry_timeout(timeout);
+                    native_options = native_options.with_open_retry_timeout(timeout);
                 }
-                let file = crate::local::open_native_writer_path(
-                    &bound,
-                    &native_options,
-                )
-                .map_err(|error| {
+                let file = crate::local::open_native_writer_path(&bound, &native_options).map_err(
+                    |error| {
                         LocalFileError::from_io(
                             LocalFileOperation::OpenWriter,
                             Some(bound.clone()),
                             None,
                             error,
                         )
-                    })?;
+                    },
+                )?;
                 LocalFileWriterBackend::Append(file)
             }
         };
@@ -264,10 +220,7 @@ impl LocalFileSystem {
     ///
     /// Returns `LocalFileError` when the root cannot be bound or opened.
     #[inline]
-    pub fn list(
-        path: &Path,
-        options: &LocalListOptions,
-    ) -> LocalResult<LocalDirectoryWalker> {
+    pub fn list(path: &Path, options: &LocalListOptions) -> LocalResult<LocalDirectoryWalker> {
         let bound = LocalPaths::bind_host_path(path)?;
         LocalDirectoryWalker::open(bound, *options)
     }
@@ -292,40 +245,40 @@ impl LocalFileSystem {
     ///
     /// # Errors
     ///
-    /// Returns `LocalFileError` for source/target aliases, unsupported source
+    /// Returns `LocalCopyFailure` for source/target aliases, unsupported source
     /// kinds, policy conflicts, failed staging, or unmet required guarantees.
-    pub fn copy(
-        source: &Path,
-        target: &Path,
-        options: &LocalCopyOptions,
-    ) -> LocalResult<LocalCopyOutcome> {
-        let [source, target] = LocalPaths::bind_host_paths([source, target])?;
+    #[allow(clippy::result_large_err)]
+    pub fn copy(source: &Path, target: &Path, options: &LocalCopyOptions) -> LocalCopyResult {
+        let [source, target] =
+            LocalPaths::bind_host_paths([source, target]).map_err(copy_failure_unchanged)?;
         require_directory_durability(
             options.durability(),
             LocalFileOperation::Copy,
             &source,
             &target,
-        )?;
+        )
+        .map_err(copy_failure_unchanged)?;
         let source_metadata = fs::symlink_metadata(&source)
-            .map_err(|error| copy_io_error(&source, &target, error))?;
-        reject_copy_alias(&source, &target, &source_metadata)?;
+            .map_err(|error| copy_failure_unchanged(copy_io_error(&source, &target, error)))?;
+        reject_copy_alias(&source, &target, &source_metadata).map_err(copy_failure_unchanged)?;
 
         let followed_metadata;
         let effective_metadata = if source_metadata.file_type().is_symlink() {
             match options.symlink_policy() {
                 LocalSymlinkPolicy::Reject => {
-                    return Err(LocalFileError::new(
-                        LocalFileErrorKind::Unsupported,
-                        LocalFileOperation::Copy,
-                    )
-                    .with_path(source)
-                    .with_target(target));
+                    return Err(copy_failure_unchanged(
+                        LocalFileError::new(
+                            LocalFileErrorKind::Unsupported,
+                            LocalFileOperation::Copy,
+                        )
+                        .with_path(source)
+                        .with_target(target),
+                    ));
                 }
                 LocalSymlinkPolicy::Follow => {
-                    followed_metadata =
-                        fs::metadata(&source).map_err(|error| {
-                            copy_io_error(&source, &target, error)
-                        })?;
+                    followed_metadata = fs::metadata(&source).map_err(|error| {
+                        copy_failure_unchanged(copy_io_error(&source, &target, error))
+                    })?;
                     &followed_metadata
                 }
             }
@@ -335,36 +288,38 @@ impl LocalFileSystem {
 
         if effective_metadata.file_type().is_dir() {
             if !options.recursive() {
-                return Err(LocalFileError::new(
-                    LocalFileErrorKind::RequirementNotMet,
-                    LocalFileOperation::Copy,
-                )
-                .with_path(source)
-                .with_target(target));
+                return Err(copy_failure_unchanged(
+                    LocalFileError::new(
+                        LocalFileErrorKind::RequirementNotMet,
+                        LocalFileOperation::Copy,
+                    )
+                    .with_path(source)
+                    .with_target(target),
+                ));
             }
             if options.atomicity() == LocalAtomicityRequirement::Required {
-                return Err(LocalFileError::new(
-                    LocalFileErrorKind::RequirementNotMet,
-                    LocalFileOperation::Copy,
-                )
-                .with_path(source)
-                .with_target(target));
+                return Err(copy_failure_unchanged(
+                    LocalFileError::new(
+                        LocalFileErrorKind::RequirementNotMet,
+                        LocalFileOperation::Copy,
+                    )
+                    .with_path(source)
+                    .with_target(target),
+                ));
             }
             if options.durability() == LocalDurabilityRequirement::Required {
-                return Err(LocalFileError::new(
-                    LocalFileErrorKind::RequirementNotMet,
-                    LocalFileOperation::Copy,
-                )
-                .with_path(source)
-                .with_target(target));
+                return Err(copy_failure_unchanged(
+                    LocalFileError::new(
+                        LocalFileErrorKind::RequirementNotMet,
+                        LocalFileOperation::Copy,
+                    )
+                    .with_path(source)
+                    .with_target(target),
+                ));
             }
             let internal_options = internal_copy_options(options);
-            let stats = crate::local::copy_dir_all_with_paths(
-                &source,
-                &target,
-                internal_options,
-            )
-            .map_err(|error| copy_pipeline_error(&source, &target, error))?;
+            let stats = crate::local::copy_dir_all_with_paths(&source, &target, internal_options)
+                .map_err(|error| copy_pipeline_failure(&source, &target, error))?;
             return Ok(LocalCopyOutcome::new(
                 LocalCopyStats::from_internal(stats),
                 LocalCopyMethod::Recursive,
@@ -374,12 +329,11 @@ impl LocalFileSystem {
             ));
         }
         if !effective_metadata.file_type().is_file() {
-            return Err(LocalFileError::new(
-                LocalFileErrorKind::TypeConflict,
-                LocalFileOperation::Copy,
-            )
-            .with_path(source)
-            .with_target(target));
+            return Err(copy_failure_unchanged(
+                LocalFileError::new(LocalFileErrorKind::TypeConflict, LocalFileOperation::Copy)
+                    .with_path(source)
+                    .with_target(target),
+            ));
         }
 
         let mut stats = crate::local::LocalCopyDirStats::default();
@@ -389,7 +343,7 @@ impl LocalFileSystem {
             internal_copy_options(options),
             &mut stats,
         )
-        .map_err(|error| copy_pipeline_error(&source, &target, error))?;
+        .map_err(|error| copy_pipeline_failure(&source, &target, error))?;
         let durable = published_durability(
             options.durability(),
             fs::File::open(&target)
@@ -398,7 +352,8 @@ impl LocalFileSystem {
             LocalFileOperation::Copy,
             &source,
             &target,
-        )?;
+        )
+        .map_err(|error| copy_failure_published(error, LocalCopyStats::from_internal(stats)))?;
         Ok(LocalCopyOutcome::new(
             LocalCopyStats::from_internal(stats),
             LocalCopyMethod::StagedFile,
@@ -472,18 +427,17 @@ impl LocalFileSystem {
     ///
     /// Returns `LocalFileError` when the parent cannot be bound or created,
     /// affixes are invalid, or a unique file cannot be created.
-    pub fn create_temp_file(
-        options: &LocalTempFileOptions,
-    ) -> LocalResult<LocalTempFile> {
+    pub fn create_temp_file(options: &LocalTempFileOptions) -> LocalResult<LocalTempFile> {
         let parent = options
             .parent()
             .map_or_else(std::env::temp_dir, Path::to_path_buf);
-        LocalTempFile::in_dir(
-            parent,
+        crate::local::create_temp_file_in_dir(
+            &parent,
             options.prefix(),
             options.suffix(),
             options.max_attempts(),
         )
+        .map(|(path, file)| LocalTempFile::host(path, file))
         .map_err(|error| {
             LocalFileError::from_io(
                 LocalFileOperation::CreateTempFile,
@@ -516,12 +470,13 @@ impl LocalFileSystem {
         let parent = options
             .parent()
             .map_or_else(std::env::temp_dir, Path::to_path_buf);
-        LocalTempDirectory::in_dir_with_affixes(
+        crate::local::create_temp_dir_in_dir_with_affixes(
             &parent,
             options.prefix(),
             options.suffix(),
             options.max_attempts(),
         )
+        .map(LocalTempDirectory::host)
         .map_err(|error| {
             LocalFileError::from_io(
                 LocalFileOperation::CreateTempDirectory,
@@ -552,11 +507,7 @@ impl LocalFileSystem {
         options: &LocalDeleteOptions,
     ) -> LocalResult<LocalDeleteOutcome> {
         let bound = LocalPaths::bind_host_path(path)?;
-        let Some(metadata) = metadata_for_delete(
-            &bound,
-            options,
-            LocalFileOperation::DeleteFile,
-        )?
+        let Some(metadata) = metadata_for_delete(&bound, options, LocalFileOperation::DeleteFile)?
         else {
             return Ok(LocalDeleteOutcome::new(false));
         };
@@ -570,12 +521,7 @@ impl LocalFileSystem {
         fs::remove_file(&bound)
             .map(|()| LocalDeleteOutcome::new(true))
             .map_err(|source| {
-                LocalFileError::from_io(
-                    LocalFileOperation::DeleteFile,
-                    Some(bound),
-                    None,
-                    source,
-                )
+                LocalFileError::from_io(LocalFileOperation::DeleteFile, Some(bound), None, source)
             })
     }
 
@@ -600,11 +546,8 @@ impl LocalFileSystem {
         options: &LocalDeleteOptions,
     ) -> LocalResult<LocalDeleteOutcome> {
         let bound = LocalPaths::bind_host_path(path)?;
-        let Some(metadata) = metadata_for_delete(
-            &bound,
-            options,
-            LocalFileOperation::DeleteDirectory,
-        )?
+        let Some(metadata) =
+            metadata_for_delete(&bound, options, LocalFileOperation::DeleteDirectory)?
         else {
             return Ok(LocalDeleteOutcome::new(false));
         };
@@ -648,23 +591,30 @@ impl LocalFileSystem {
     ///
     /// # Errors
     ///
-    /// Returns `LocalFileError` when source inspection, publication, or
-    /// required durability fails.
+    /// Returns `LocalRenameFailure` when source inspection, publication, or
+    /// required durability fails. The failure retains the strongest namespace
+    /// state established by the native rename contract.
     #[inline]
-    pub fn rename(
-        source: &Path,
-        target: &Path,
-        options: &LocalRenameOptions,
-    ) -> LocalResult<LocalRenameOutcome> {
-        let [source, target] = LocalPaths::bind_host_paths([source, target])?;
+    pub fn rename(source: &Path, target: &Path, options: &LocalRenameOptions) -> LocalRenameResult {
+        let [source, target] =
+            LocalPaths::bind_host_paths([source, target]).map_err(rename_failure_unchanged)?;
         require_directory_durability(
             options.durability(),
             LocalFileOperation::Rename,
             &source,
             &target,
-        )?;
+        )
+        .map_err(rename_failure_unchanged)?;
         let source_metadata = fs::symlink_metadata(&source)
-            .map_err(|error| rename_io_error(&source, &target, error))?;
+            .map_err(|error| rename_failure_unchanged(rename_io_error(&source, &target, error)))?;
+        #[cfg(coverage)]
+        if crate::local::coverage_fault_enabled("rename-native-indeterminate") {
+            return Err(rename_failure_indeterminate(rename_io_error(
+                &source,
+                &target,
+                io::Error::from_raw_os_error(libc::EIO),
+            )));
+        }
         let result = if options.overwrite() {
             if source_metadata.file_type().is_dir() {
                 fs::rename(&source, &target)
@@ -676,7 +626,7 @@ impl LocalFileSystem {
         } else {
             crate::local::move_file_without_replacing(&source, &target)
         };
-        result.map_err(|error| rename_io_error(&source, &target, error))?;
+        result.map_err(|error| rename_failure_after_native_attempt(&source, &target, error))?;
 
         let durable = published_durability(
             options.durability(),
@@ -684,16 +634,18 @@ impl LocalFileSystem {
             LocalFileOperation::Rename,
             &source,
             &target,
-        )?;
+        )
+        .map_err(rename_failure_renamed)?;
         let atomic = true;
-        if options.atomicity() == LocalAtomicityRequirement::Required && !atomic
-        {
-            return Err(LocalFileError::new(
-                LocalFileErrorKind::RequirementNotMet,
-                LocalFileOperation::Rename,
-            )
-            .with_path(source)
-            .with_target(target));
+        if options.atomicity() == LocalAtomicityRequirement::Required && !atomic {
+            return Err(rename_failure_unchanged(
+                LocalFileError::new(
+                    LocalFileErrorKind::RequirementNotMet,
+                    LocalFileOperation::Rename,
+                )
+                .with_path(source)
+                .with_target(target),
+            ));
         }
         Ok(LocalRenameOutcome::new(atomic, durable))
     }
@@ -724,12 +676,7 @@ fn metadata_for_delete(
 ) -> LocalResult<Option<fs::Metadata>> {
     match fs::symlink_metadata(path) {
         Ok(metadata) => Ok(Some(metadata)),
-        Err(error)
-            if error.kind() == io::ErrorKind::NotFound
-                && options.missing_ok() =>
-        {
-            Ok(None)
-        }
+        Err(error) if error.kind() == io::ErrorKind::NotFound && options.missing_ok() => Ok(None),
         Err(error) => Err(LocalFileError::from_io(
             operation,
             Some(path.to_path_buf()),
@@ -751,17 +698,48 @@ fn metadata_for_delete(
 ///
 /// Structured rename error.
 #[inline(always)]
-fn rename_io_error(
-    source: &Path,
-    target: &Path,
-    error: io::Error,
-) -> LocalFileError {
+fn rename_io_error(source: &Path, target: &Path, error: io::Error) -> LocalFileError {
     LocalFileError::from_io(
         LocalFileOperation::Rename,
         Some(source.to_path_buf()),
         Some(target.to_path_buf()),
         error,
     )
+}
+
+/// Wraps a preflight failure that proves no namespace mutation occurred.
+#[inline(always)]
+fn rename_failure_unchanged(error: LocalFileError) -> LocalRenameFailure {
+    LocalRenameFailure::new(error, LocalRenameFailureState::Unchanged)
+}
+
+/// Wraps a failure after a completed native rename.
+#[inline(always)]
+fn rename_failure_renamed(error: LocalFileError) -> LocalRenameFailure {
+    LocalRenameFailure::new(error, LocalRenameFailureState::Renamed)
+}
+
+/// Maps a native rename failure to the strongest state guaranteed by its contract.
+#[inline(always)]
+fn rename_failure_after_native_attempt(
+    source: &Path,
+    target: &Path,
+    error: io::Error,
+) -> LocalRenameFailure {
+    let state = match error.kind() {
+        io::ErrorKind::AlreadyExists | io::ErrorKind::CrossesDevices | io::ErrorKind::NotFound => {
+            LocalRenameFailureState::Unchanged
+        }
+        _ => LocalRenameFailureState::Indeterminate,
+    };
+    LocalRenameFailure::new(rename_io_error(source, target, error), state)
+}
+
+/// Wraps a failure whose native rename effect cannot be proven.
+#[cfg(coverage)]
+#[inline(always)]
+fn rename_failure_indeterminate(error: LocalFileError) -> LocalRenameFailure {
+    LocalRenameFailure::new(error, LocalRenameFailureState::Indeterminate)
 }
 
 /// Synchronizes the destination parent directory where supported.
@@ -776,6 +754,12 @@ fn rename_io_error(
 #[inline]
 fn sync_rename_parent(target: &Path) -> io::Result<()> {
     let parent = target.parent().unwrap_or_else(|| Path::new("."));
+    #[cfg(coverage)]
+    if crate::local::coverage_fault_enabled("copy-parent-sync")
+        || crate::local::coverage_fault_enabled("rename-parent-sync")
+    {
+        return Err(io::Error::from_raw_os_error(libc::EIO));
+    }
     #[cfg(unix)]
     {
         fs::File::open(parent)?.sync_all()
@@ -813,12 +797,11 @@ fn require_directory_durability(
     if requirement == LocalDurabilityRequirement::Required
         && !LocalFileSystem::capabilities().supports_directory_durability()
     {
-        return Err(LocalFileError::new(
-            LocalFileErrorKind::RequirementNotMet,
-            operation,
-        )
-        .with_path(source.to_path_buf())
-        .with_target(target.to_path_buf()));
+        return Err(
+            LocalFileError::new(LocalFileErrorKind::RequirementNotMet, operation)
+                .with_path(source.to_path_buf())
+                .with_target(target.to_path_buf()),
+        );
     }
     Ok(())
 }
@@ -853,18 +836,16 @@ fn published_durability(
     match requirement {
         LocalDurabilityRequirement::NotRequired => Ok(false),
         LocalDurabilityRequirement::Preferred => Ok(sync.is_ok()),
-        LocalDurabilityRequirement::Required => sync.map(|()| true).map_err(
-            |error| {
-                LocalFileError::from_io(
-                    operation,
-                    Some(source.to_path_buf()),
-                    Some(target.to_path_buf()),
-                    error,
-                )
-                .with_kind(LocalFileErrorKind::PublicationIncomplete)
-                .with_mutation_state(crate::LocalMutationState::Published)
-            },
-        ),
+        LocalDurabilityRequirement::Required => sync.map(|()| true).map_err(|error| {
+            LocalFileError::from_io(
+                operation,
+                Some(source.to_path_buf()),
+                Some(target.to_path_buf()),
+                error,
+            )
+            .with_kind(LocalFileErrorKind::PublicationIncomplete)
+            .with_mutation_state(crate::LocalMutationState::Published)
+        }),
     }
 }
 
@@ -899,17 +880,15 @@ fn open_staged_writer(
     if let Some(timeout) = options.open_retry_timeout() {
         native_options = native_options.with_open_retry_timeout(timeout);
     }
-    crate::local::LocalAtomicWriter::new(path, native_options).map_err(
-        |error| {
-            let kind = error.kind();
-            LocalFileError::from_io(
-                LocalFileOperation::OpenWriter,
-                Some(path.to_path_buf()),
-                None,
-                io::Error::new(kind, error),
-            )
-        },
-    )
+    crate::local::LocalAtomicWriter::new(path, native_options).map_err(|error| {
+        let kind = error.kind();
+        LocalFileError::from_io(
+            LocalFileOperation::OpenWriter,
+            Some(path.to_path_buf()),
+            None,
+            io::Error::new(kind, error),
+        )
+    })
 }
 
 /// Converts unified copy policy to the existing shared native implementation.
@@ -987,33 +966,46 @@ fn reject_copy_alias(
 /// Invalid-input copy error.
 #[inline(always)]
 fn copy_alias_error(source: &Path, target: &Path) -> LocalFileError {
-    LocalFileError::new(
-        LocalFileErrorKind::InvalidInput,
-        LocalFileOperation::Copy,
-    )
-    .with_path(source.to_path_buf())
-    .with_target(target.to_path_buf())
+    LocalFileError::new(LocalFileErrorKind::InvalidInput, LocalFileOperation::Copy)
+        .with_path(source.to_path_buf())
+        .with_target(target.to_path_buf())
 }
 
-/// Converts a shared copy-pipeline error without discarding its native source.
-///
-/// # Parameters
-///
-/// - `source`: Bound source path.
-/// - `target`: Bound destination path.
-/// - `error`: Shared structured copy error.
-///
-/// # Returns
-///
-/// Unified local filesystem error.
+/// Converts a pipeline failure into a lossless public copy failure.
 #[inline]
-fn copy_pipeline_error(
+fn copy_pipeline_failure(
     source: &Path,
     target: &Path,
     error: crate::local::LocalCopyDirError,
-) -> LocalFileError {
-    let kind = error.kind();
-    copy_io_error(source, target, io::Error::new(kind, error))
+) -> LocalCopyFailure {
+    LocalCopyFailure::from_copy_dir_error(source, target, error)
+}
+
+/// Wraps a pre-publication copy error with an unchanged destination state.
+#[inline(always)]
+fn copy_failure_unchanged(error: LocalFileError) -> LocalCopyFailure {
+    LocalCopyFailure::new(
+        error,
+        LocalCopyFailureState::Unchanged,
+        LocalCopyStats::default(),
+        None,
+        None,
+    )
+}
+
+/// Wraps a post-publication durability error with a published destination state.
+#[inline(always)]
+fn copy_failure_published(
+    error: LocalFileError,
+    partial_stats: LocalCopyStats,
+) -> LocalCopyFailure {
+    LocalCopyFailure::new(
+        error,
+        LocalCopyFailureState::Published,
+        partial_stats,
+        None,
+        None,
+    )
 }
 
 /// Adds both copy paths to a native I/O failure.
@@ -1028,11 +1020,7 @@ fn copy_pipeline_error(
 ///
 /// Structured copy error.
 #[inline(always)]
-fn copy_io_error(
-    source: &Path,
-    target: &Path,
-    error: io::Error,
-) -> LocalFileError {
+fn copy_io_error(source: &Path, target: &Path, error: io::Error) -> LocalFileError {
     LocalFileError::from_io(
         LocalFileOperation::Copy,
         Some(source.to_path_buf()),

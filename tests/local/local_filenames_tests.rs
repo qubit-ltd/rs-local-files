@@ -8,14 +8,7 @@
 use std::io::ErrorKind;
 use std::path::Path;
 
-use proptest::{
-    arbitrary::any,
-    prop_assert,
-    prop_assert_eq,
-    prop_assert_ne,
-    proptest,
-    sample,
-};
+use proptest::{arbitrary::any, prop_assert, prop_assert_eq, prop_assert_ne, proptest, sample};
 use qubit_local_files::path;
 
 proptest! {
@@ -70,10 +63,8 @@ proptest! {
 
 #[test]
 fn test_random_file_name_uses_default_prefix() {
-    let first_name =
-        path::random_file_name().expect("random name should be generated");
-    let second_name =
-        path::random_file_name().expect("random name should be generated");
+    let first_name = path::random_file_name().expect("random name should be generated");
+    let second_name = path::random_file_name().expect("random name should be generated");
 
     assert!(first_name.starts_with(path::DEFAULT_RANDOM_FILE_NAME_PREFIX));
     assert!(second_name.starts_with(path::DEFAULT_RANDOM_FILE_NAME_PREFIX));
@@ -155,17 +146,13 @@ fn test_validate_portable_file_name_rejects_windows_reserved_names() {
         assert_eq!(std::io::ErrorKind::InvalidInput, error.kind());
     }
 
-    path::validate_portable_file_name("COM0.txt")
-        .expect("COM0 should not be reserved");
-    path::validate_portable_file_name("COM10.txt")
-        .expect("COM10 should not be reserved");
-    path::validate_portable_file_name("LPT0.txt")
-        .expect("LPT0 should not be reserved");
+    path::validate_portable_file_name("COM0.txt").expect("COM0 should not be reserved");
+    path::validate_portable_file_name("COM10.txt").expect("COM10 should not be reserved");
+    path::validate_portable_file_name("LPT0.txt").expect("LPT0 should not be reserved");
 }
 
 #[test]
-fn test_validate_portable_file_name_rejects_trailing_space_dot_and_long_names()
-{
+fn test_validate_portable_file_name_rejects_trailing_space_dot_and_long_names() {
     for name in ["file.", "file "] {
         let error = path::validate_portable_file_name(name)
             .expect_err("trailing space or dot should be rejected");
@@ -176,8 +163,7 @@ fn test_validate_portable_file_name_rejects_trailing_space_dot_and_long_names()
     let max_name = "a".repeat(255);
     let too_long_name = "a".repeat(256);
 
-    path::validate_portable_file_name(&max_name)
-        .expect("255-byte name should be accepted");
+    path::validate_portable_file_name(&max_name).expect("255-byte name should be accepted");
     let error = path::validate_portable_file_name(&too_long_name)
         .expect_err("name longer than 255 bytes should be rejected");
 
@@ -245,9 +231,7 @@ fn test_file_name_from_path_handles_common_separators() {
 fn test_file_name_from_url_removes_query_and_fragment() {
     assert_eq!(
         "file.txt",
-        path::file_name_from_url(
-            "https://example.com/path/file.txt?download=1"
-        )
+        path::file_name_from_url("https://example.com/path/file.txt?download=1")
     );
     assert_eq!(
         "file.txt",
@@ -255,9 +239,7 @@ fn test_file_name_from_url_removes_query_and_fragment() {
     );
     assert_eq!(
         "file.txt",
-        path::file_name_from_url(
-            "https://example.com/path/file.txt?download=1#section"
-        )
+        path::file_name_from_url("https://example.com/path/file.txt?download=1#section")
     );
 }
 

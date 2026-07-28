@@ -46,8 +46,7 @@ where
         return Some(action());
     }
 
-    let executable = std::env::current_exe()
-        .expect("current test executable should be available");
+    let executable = std::env::current_exe().expect("current test executable should be available");
     let status = Command::new(executable)
         .arg("--exact")
         .arg(test_name)

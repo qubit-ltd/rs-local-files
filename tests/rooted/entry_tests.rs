@@ -10,22 +10,17 @@
 use std::ffi::OsStr;
 
 #[cfg(unix)]
-use qubit_local_files::rooted::{
-    EntryKind,
-    Root,
-};
+use qubit_local_files::rooted::{EntryKind, Root};
 
 /// Verifies rooted directory entries expose native names and no-follow
 /// metadata.
 #[cfg(unix)]
 #[test]
 fn test_rooted_entry_exposes_name_and_metadata() {
-    let temporary_directory =
-        tempfile::tempdir().expect("a temporary root should be created");
+    let temporary_directory = tempfile::tempdir().expect("a temporary root should be created");
     std::fs::write(temporary_directory.path().join("value.txt"), b"value")
         .expect("the fixture should be written");
-    let root =
-        Root::open(temporary_directory.path()).expect("the root should open");
+    let root = Root::open(temporary_directory.path()).expect("the root should open");
 
     let entries = root
         .read_root_dir()

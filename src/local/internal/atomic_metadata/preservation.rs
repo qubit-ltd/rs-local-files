@@ -11,11 +11,7 @@
 // Private behavior is covered through public integration tests.
 
 use std::fs::File;
-use std::io::{
-    Error,
-    ErrorKind,
-    Result,
-};
+use std::io::{Error, ErrorKind, Result};
 use std::os::fd::AsRawFd;
 use std::os::unix::fs::MetadataExt;
 
@@ -40,14 +36,10 @@ use super::macos::preserve_extended_metadata;
 /// # Errors
 ///
 /// Returns the first native error from metadata inspection or application.
-pub(crate) fn preserve_atomic_metadata(
-    source: &File,
-    staging: &File,
-) -> Result<()> {
+pub(crate) fn preserve_atomic_metadata(source: &File, staging: &File) -> Result<()> {
     #[cfg(coverage)]
-    let source_metadata = if super::super::coverage_fault::is_enabled(
-        "atomic-metadata-source-stat",
-    ) {
+    let source_metadata = if super::super::coverage_fault::is_enabled("atomic-metadata-source-stat")
+    {
         Err(Error::from_raw_os_error(libc::EIO))
     } else {
         source.metadata()
@@ -55,22 +47,19 @@ pub(crate) fn preserve_atomic_metadata(
     #[cfg(not(coverage))]
     let source_metadata = source.metadata()?;
     #[cfg(coverage)]
-    let staging_metadata = if super::super::coverage_fault::is_enabled(
-        "atomic-metadata-staging-stat",
-    ) {
-        Err(Error::from_raw_os_error(libc::EIO))
-    } else {
-        staging.metadata()
-    }?;
+    let staging_metadata =
+        if super::super::coverage_fault::is_enabled("atomic-metadata-staging-stat") {
+            Err(Error::from_raw_os_error(libc::EIO))
+        } else {
+            staging.metadata()
+        }?;
     #[cfg(not(coverage))]
     let staging_metadata = staging.metadata()?;
     #[cfg(coverage)]
-    let forced_owner_error =
-        super::super::coverage_fault::is_enabled("atomic-metadata-owner");
+    let forced_owner_error = super::super::coverage_fault::is_enabled("atomic-metadata-owner");
     #[cfg(coverage)]
-    let forced_owner_native_error = super::super::coverage_fault::is_enabled(
-        "atomic-metadata-owner-native",
-    );
+    let forced_owner_native_error =
+        super::super::coverage_fault::is_enabled("atomic-metadata-owner-native");
     #[cfg(not(coverage))]
     let forced_owner_error = false;
     #[cfg(not(coverage))]
@@ -103,8 +92,7 @@ pub(crate) fn preserve_atomic_metadata(
     }
     let mode = native_mode(source_metadata.mode())?;
     #[cfg(coverage)]
-    let forced_mode_error =
-        super::super::coverage_fault::is_enabled("atomic-metadata-mode");
+    let forced_mode_error = super::super::coverage_fault::is_enabled("atomic-metadata-mode");
     #[cfg(not(coverage))]
     let forced_mode_error = false;
     // SAFETY: the staging descriptor remains live and `mode` contains the
@@ -126,9 +114,7 @@ where
     T: TryFrom<u32>,
 {
     #[cfg(coverage)]
-    let mode = if super::super::coverage_fault::is_enabled(
-        "atomic-metadata-native-mode",
-    ) {
+    let mode = if super::super::coverage_fault::is_enabled("atomic-metadata-native-mode") {
         None
     } else {
         T::try_from(mode).ok()

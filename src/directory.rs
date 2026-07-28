@@ -7,19 +7,11 @@
 // =============================================================================
 //! Local directory operations.
 
-use std::fs::{
-    self,
-    ReadDir,
-};
+use std::fs::{self, ReadDir};
 use std::io::Result;
 use std::path::Path;
 
-use crate::local::{
-    clean_dir_path,
-    dir_size_path,
-    ensure_dir_path,
-    ensure_parent_path,
-};
+use crate::local::{clean_dir_path, dir_size_path, ensure_dir_path, ensure_parent_path};
 
 /// Lists the direct entries of a directory.
 ///

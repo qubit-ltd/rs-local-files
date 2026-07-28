@@ -8,21 +8,11 @@
 //! Recursive directory copy errors.
 
 use std::error::Error;
-use std::fmt::{
-    Display,
-    Formatter,
-    Result as FmtResult,
-};
+use std::fmt::{Display, Formatter, Result as FmtResult};
 use std::io;
-use std::path::{
-    Path,
-    PathBuf,
-};
+use std::path::{Path, PathBuf};
 
-use crate::{
-    LocalCopyDirStage,
-    LocalCopyDirStats,
-};
+use crate::{LocalCopyDirStage, LocalCopyDirStats};
 
 /// Error returned by a recursive directory copy operation.
 ///
@@ -169,6 +159,30 @@ impl LocalCopyDirError {
         self.error.kind()
     }
 
+    /// Consumes this error and returns every retained copy-pipeline detail.
+    #[inline]
+    pub(crate) fn into_parts(
+        self,
+    ) -> (
+        LocalCopyDirStage,
+        PathBuf,
+        PathBuf,
+        LocalCopyDirStats,
+        Option<Box<Path>>,
+        Option<io::Error>,
+        io::Error,
+    ) {
+        (
+            self.stage,
+            self.source_path,
+            self.destination_path,
+            *self.stats,
+            self.temporary_path,
+            self.cleanup_error,
+            self.error,
+        )
+    }
+
     /// Attaches staging-path and cleanup-failure context.
     ///
     /// # Parameters
@@ -205,10 +219,7 @@ impl Display for LocalCopyDirError {
             write!(formatter, "; staging path '{}'", temporary_path.display())?;
         }
         if let Some(cleanup_error) = self.cleanup_error.as_ref() {
-            return write!(
-                formatter,
-                "; staging cleanup also failed: {cleanup_error}"
-            );
+            return write!(formatter, "; staging cleanup also failed: {cleanup_error}");
         }
         Ok(())
     }

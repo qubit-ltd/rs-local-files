@@ -13,7 +13,7 @@
 /// matches must retain a wildcard arm.
 ///
 /// ```compile_fail
-/// use qubit_local_files::temp::PersistStage;
+/// use qubit_local_files::LocalPersistStage;
 ///
 /// fn classify(stage: PersistStage) {
 ///     match stage {
@@ -26,7 +26,7 @@
 ///
 /// ```compile_fail
 /// #![deny(unused_must_use)]
-/// use qubit_local_files::temp::PersistStage;
+/// use qubit_local_files::LocalPersistStage;
 ///
 /// PersistStage::ResolveTarget.clone();
 /// ```

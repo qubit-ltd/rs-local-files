@@ -14,8 +14,7 @@ use super::api_tests::LocalAtomicWriteOptions;
 fn test_local_atomic_write_options_control_parent_creation() {
     let default_options = LocalAtomicWriteOptions::new();
     let parent_options = default_options.with_parent();
-    let timeout_options =
-        default_options.with_open_retry_timeout(Duration::ZERO);
+    let timeout_options = default_options.with_open_retry_timeout(Duration::ZERO);
 
     assert!(!default_options.creates_parent());
     assert!(parent_options.creates_parent());

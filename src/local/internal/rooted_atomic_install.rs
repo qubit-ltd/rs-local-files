@@ -41,6 +41,7 @@ pub(in crate::local) fn install_rooted_atomic_file(
         #[cfg(coverage)]
         let result = if super::coverage_fault::is_enabled("rooted-install")
             || super::coverage_fault::is_enabled("rooted-install-indeterminate")
+            || super::coverage_fault::is_enabled("rooted-copy-install-cleanup")
         {
             Err(Error::from_raw_os_error(libc::EIO))
         } else {
@@ -52,9 +53,7 @@ pub(in crate::local) fn install_rooted_atomic_file(
             Ok(()) => Ok(()),
             Err(source) => {
                 let destination_state = replacement_error_state(&source);
-                let staging_state = if destination_state
-                    == LocalAtomicDestinationState::Unchanged
-                {
+                let staging_state = if destination_state == LocalAtomicDestinationState::Unchanged {
                     AtomicStagingState::Present
                 } else {
                     AtomicStagingState::Indeterminate

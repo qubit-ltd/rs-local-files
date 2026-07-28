@@ -10,15 +10,8 @@
 
 use std::ffi::OsString;
 use std::fs;
-use std::io::{
-    Error,
-    ErrorKind,
-    Result,
-};
-use std::path::{
-    Path,
-    PathBuf,
-};
+use std::io::{Error, ErrorKind, Result};
+use std::path::{Path, PathBuf};
 
 #[cfg(windows)]
 use std::os::windows::fs::FileTypeExt;
@@ -129,9 +122,7 @@ pub(crate) fn ensure_parent_path(path: &Path) -> Result<()> {
 /// # Errors
 /// Returns an I/O error when a parent component cannot be inspected or
 /// created, or an existing component is not a directory.
-pub(crate) fn ensure_parent_path_with_sync_dirs(
-    path: &Path,
-) -> Result<Vec<PathBuf>> {
+pub(crate) fn ensure_parent_path_with_sync_dirs(path: &Path) -> Result<Vec<PathBuf>> {
     let Some(parent) = path
         .parent()
         .filter(|parent| !parent.as_os_str().is_empty())
@@ -177,11 +168,7 @@ pub(crate) fn ensure_parent_path_with_sync_dirs(
 ///
 /// # Returns
 /// A new I/O error with the same [`ErrorKind`] and a more descriptive message.
-pub(crate) fn add_path_context(
-    error: Error,
-    operation: &'static str,
-    path: &Path,
-) -> Error {
+pub(crate) fn add_path_context(error: Error, operation: &'static str, path: &Path) -> Error {
     Error::new(error.kind(), PathIoError::new(operation, path, error))
 }
 

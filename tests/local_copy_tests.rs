@@ -6,17 +6,35 @@
 //    Licensed under the Apache License, Version 2.0.
 // =============================================================================
 
-use std::fs;
+use std::{fs, path::PathBuf};
 
 use qubit_local_files::{
-    LocalCopyConflictPolicy,
-    LocalCopyMethod,
-    LocalCopyOptions,
-    LocalDurabilityRequirement,
-    LocalFileErrorKind,
-    LocalFileSystem,
+    LocalCopyConflictPolicy, LocalCopyFailureState, LocalCopyMethod, LocalCopyOptions,
+    LocalCopyStats, LocalDurabilityRequirement, LocalFileErrorKind, LocalFileSystem,
 };
 use tempfile::tempdir;
+
+/// Creates a process-specific path that is absent before each test use.
+fn temp_path(name: &str) -> PathBuf {
+    std::env::temp_dir().join(format!(
+        "qubit-local-files-copy-{name}-{}",
+        std::process::id()
+    ))
+}
+
+/// Verifies copy preflight failures preserve an unchanged destination state.
+#[test]
+fn test_copy_failure_preserves_unchanged_state() {
+    let source = temp_path("missing-source");
+    let target = temp_path("missing-target");
+
+    let failure = LocalFileSystem::copy(&source, &target, &LocalCopyOptions::default())
+        .expect_err("missing source must fail");
+
+    assert_eq!(LocalCopyFailureState::Unchanged, failure.state());
+    assert_eq!(&LocalCopyStats::default(), failure.partial_stats());
+    assert!(!target.exists());
+}
 
 /// Verifies that one copy entry handles both regular files and directory trees.
 #[test]
@@ -26,22 +44,16 @@ fn test_local_file_system_copy_unifies_file_and_directory_copy() {
     let target_file = directory.path().join("target.txt");
     fs::write(&source_file, b"file").expect("source file should be written");
 
-    let file_outcome = LocalFileSystem::copy(
-        &source_file,
-        &target_file,
-        &LocalCopyOptions::new(),
-    )
-    .expect("file copy should succeed");
+    let file_outcome = LocalFileSystem::copy(&source_file, &target_file, &LocalCopyOptions::new())
+        .expect("file copy should succeed");
     assert_eq!(LocalCopyMethod::StagedFile, file_outcome.method());
     assert_eq!(1, file_outcome.stats().files());
     assert_eq!(4, file_outcome.stats().bytes());
 
     let source_directory = directory.path().join("source-directory");
     let target_directory = directory.path().join("target-directory");
-    fs::create_dir(&source_directory)
-        .expect("source directory should be created");
-    fs::write(source_directory.join("child"), b"tree")
-        .expect("child should be written");
+    fs::create_dir(&source_directory).expect("source directory should be created");
+    fs::write(source_directory.join("child"), b"tree").expect("child should be written");
 
     let tree_outcome = LocalFileSystem::copy(
         &source_directory,
@@ -70,7 +82,7 @@ fn test_local_file_system_copy_rejects_implicit_directory_recursion() {
     let error = LocalFileSystem::copy(&source, &target, &LocalCopyOptions::new())
         .expect_err("directory copy must require explicit recursion");
 
-    assert_eq!(LocalFileErrorKind::RequirementNotMet, error.kind());
+    assert_eq!(LocalFileErrorKind::RequirementNotMet, error.error().kind());
     assert!(!target.exists());
 }
 
@@ -87,12 +99,11 @@ fn test_local_file_system_copy_rejects_hard_link_alias() {
     let error = LocalFileSystem::copy(
         &source,
         &alias,
-        &LocalCopyOptions::new()
-            .with_conflict(LocalCopyConflictPolicy::Overwrite),
+        &LocalCopyOptions::new().with_conflict(LocalCopyConflictPolicy::Overwrite),
     )
     .expect_err("copying onto a hard-link alias must be rejected");
 
-    assert_eq!(LocalFileErrorKind::InvalidInput, error.kind());
+    assert_eq!(LocalFileErrorKind::InvalidInput, error.error().kind());
     assert_eq!(
         b"payload",
         fs::read(&source)
@@ -118,8 +129,7 @@ fn test_local_file_system_copy_overwrite_replaces_target_symlink() {
     let _outcome = LocalFileSystem::copy(
         &source,
         &target,
-        &LocalCopyOptions::new()
-            .with_conflict(LocalCopyConflictPolicy::Overwrite),
+        &LocalCopyOptions::new().with_conflict(LocalCopyConflictPolicy::Overwrite),
     )
     .expect("overwrite should replace the target entry");
 
@@ -161,8 +171,7 @@ fn test_local_copy_preferred_durability_reports_downgrade() {
     let outcome = LocalFileSystem::copy(
         &source,
         &target,
-        &LocalCopyOptions::new()
-            .with_durability(LocalDurabilityRequirement::Preferred),
+        &LocalCopyOptions::new().with_durability(LocalDurabilityRequirement::Preferred),
     )
     .expect("preferred copy durability may report a downgrade");
 
