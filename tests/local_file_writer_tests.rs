@@ -15,8 +15,10 @@ use std::{
 
 use qubit_local_files::{
     LocalAtomicityRequirement,
+    LocalDurabilityRequirement,
     LocalFileErrorKind,
     LocalFileSystem,
+    LocalMutationState,
     LocalWriteMode,
     LocalWriteOptions,
     LocalWriterState,
@@ -211,6 +213,66 @@ fn test_local_file_writer_append_rejects_required_atomicity() {
     .expect_err("direct append cannot provide required atomicity");
 
     assert_eq!(LocalFileErrorKind::RequirementNotMet, error.kind());
+}
+
+/// Verifies preferred durability reports a downgrade after successful
+/// publication while required durability reports partial success.
+#[cfg(unix)]
+#[test]
+fn test_local_file_writer_reports_parent_sync_result() {
+    use std::os::unix::fs::PermissionsExt;
+
+    let directory = tempdir().expect("temporary directory should be created");
+    for requirement in [
+        LocalDurabilityRequirement::Preferred,
+        LocalDurabilityRequirement::Required,
+    ] {
+        let parent = directory.path().join(format!("{requirement:?}"));
+        fs::create_dir(&parent).expect("target parent should be created");
+        let target = parent.join("target");
+        let mut writer = LocalFileSystem::open_writer(
+            &target,
+            &LocalWriteOptions::new(LocalWriteMode::CreateNew)
+                .with_durability(requirement),
+        )
+        .expect("staged writer should open before permissions change");
+        writer
+            .write_all(b"published")
+            .expect("staged bytes should be written");
+        fs::set_permissions(&parent, fs::Permissions::from_mode(0o300))
+            .expect("parent should reject read-only directory opens");
+        match requirement {
+            LocalDurabilityRequirement::Preferred => {
+                let outcome = writer
+                    .commit()
+                    .expect("preferred durability may downgrade");
+                assert!(!outcome.durable());
+            }
+            LocalDurabilityRequirement::Required => {
+                let error = writer
+                    .commit()
+                    .expect_err("required durability must report sync failure");
+                assert_eq!(LocalWriterState::Published, error.state());
+                assert_eq!(
+                    LocalFileErrorKind::PublicationIncomplete,
+                    error.error().kind(),
+                );
+                assert_eq!(
+                    Some(LocalMutationState::Published),
+                    error.error().mutation_state(),
+                );
+            }
+            LocalDurabilityRequirement::NotRequired => unreachable!(),
+        }
+        fs::set_permissions(&parent, fs::Permissions::from_mode(0o700))
+            .expect("parent permissions should be restored");
+        assert_eq!(
+            b"published",
+            fs::read(&target)
+                .expect("published target should remain")
+                .as_slice(),
+        );
+    }
 }
 
 /// Verifies a stream error permanently prevents append commit or clean abort.

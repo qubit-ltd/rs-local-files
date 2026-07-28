@@ -128,6 +128,7 @@ pub(crate) use rooted_file_io::{
     open_rooted_native_reader,
     open_rooted_native_writer,
     read_rooted_symlink_metadata,
+    sync_rooted_parent,
 };
 #[cfg(unix)]
 pub(crate) use rooted_namespace_io::{

@@ -21,6 +21,7 @@ use std::{
 use super::{
     LocalFileErrorKind,
     LocalFileOperation,
+    LocalMutationState,
 };
 
 /// Structured failure from a local filesystem operation.
@@ -36,6 +37,8 @@ pub struct LocalFileError {
     target: Option<PathBuf>,
     /// Native I/O source when the failure originated in the operating system.
     source: Option<io::Error>,
+    /// Namespace state established after a mutating failure.
+    mutation_state: Option<LocalMutationState>,
 }
 
 impl LocalFileError {
@@ -57,6 +60,7 @@ impl LocalFileError {
             path: None,
             target: None,
             source: None,
+            mutation_state: None,
         }
     }
 
@@ -86,6 +90,7 @@ impl LocalFileError {
             path,
             target,
             source: Some(source),
+            mutation_state: None,
         }
     }
 
@@ -121,6 +126,25 @@ impl LocalFileError {
         self
     }
 
+    /// Records the namespace state established after a mutating failure.
+    ///
+    /// # Parameters
+    ///
+    /// - `state`: Most precise state proven by the native operation.
+    ///
+    /// # Returns
+    ///
+    /// The updated structured error.
+    #[must_use]
+    #[inline(always)]
+    pub const fn with_mutation_state(
+        mut self,
+        state: LocalMutationState,
+    ) -> Self {
+        self.mutation_state = Some(state);
+        self
+    }
+
     /// Returns the stable failure classification.
     #[must_use]
     #[inline(always)]
@@ -149,11 +173,38 @@ impl LocalFileError {
         self.target.as_deref()
     }
 
+    /// Returns the proven namespace state after failure.
+    ///
+    /// # Returns
+    ///
+    /// `Some` for mutating failures that established a publication state, or
+    /// `None` when no mutation state applies.
+    #[must_use]
+    #[inline(always)]
+    pub const fn mutation_state(&self) -> Option<LocalMutationState> {
+        self.mutation_state
+    }
+
     /// Consumes the error and returns its native I/O source, if present.
     #[must_use]
     #[inline(always)]
     pub fn into_source(self) -> Option<io::Error> {
         self.source
+    }
+
+    /// Reclassifies an error while retaining its native source and paths.
+    ///
+    /// # Parameters
+    ///
+    /// - `kind`: More precise classification established by the caller.
+    ///
+    /// # Returns
+    ///
+    /// The reclassified error.
+    #[inline(always)]
+    pub(crate) const fn with_kind(mut self, kind: LocalFileErrorKind) -> Self {
+        self.kind = kind;
+        self
     }
 }
 

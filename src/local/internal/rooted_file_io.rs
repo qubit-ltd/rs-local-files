@@ -224,6 +224,34 @@ pub(crate) fn open_rooted_native_writer(
     Ok(file)
 }
 
+/// Synchronizes the parent directory of a rooted descendant.
+///
+/// The parent is reopened solely through the root descriptor, so the
+/// synchronization remains within the established rooted authority.
+///
+/// # Errors
+///
+/// Returns an error when the parent cannot be opened securely or synchronized.
+pub(crate) fn sync_rooted_parent(
+    root: &File,
+    diagnostic_root: &Path,
+    path: &LocalRelativePath,
+) -> Result<()> {
+    let diagnostic_path = diagnostic_root.join(path.as_path());
+    let (parent, _name, _parent_dirs_to_sync) = open_rooted_parent(
+        root,
+        &diagnostic_path,
+        path,
+        RootedParentMode::OpenExisting,
+    )?
+    .into_parts();
+    with_path_context(
+        parent.sync_all(),
+        "synchronize rooted parent directory",
+        &diagnostic_path,
+    )
+}
+
 /// Opens the destination parent by traversing only from `root`.
 ///
 /// # Parameters

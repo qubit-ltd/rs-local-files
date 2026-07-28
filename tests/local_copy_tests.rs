@@ -12,6 +12,7 @@ use qubit_local_files::{
     LocalCopyConflictPolicy,
     LocalCopyMethod,
     LocalCopyOptions,
+    LocalDurabilityRequirement,
     LocalFileErrorKind,
     LocalFileSystem,
 };
@@ -124,5 +125,39 @@ fn test_local_file_system_copy_overwrite_replaces_target_symlink() {
         fs::read(&referent)
             .expect("referent should remain unchanged")
             .as_slice()
+    );
+}
+
+/// Verifies preferred file-copy durability reports a parent-sync downgrade.
+#[cfg(unix)]
+#[test]
+fn test_local_copy_preferred_durability_reports_downgrade() {
+    use std::os::unix::fs::PermissionsExt;
+
+    let directory = tempdir().expect("temporary directory should be created");
+    let source = directory.path().join("source");
+    let parent = directory.path().join("parent");
+    let target = parent.join("target");
+    fs::write(&source, b"payload").expect("source should be written");
+    fs::create_dir(&parent).expect("target parent should be created");
+    fs::set_permissions(&parent, fs::Permissions::from_mode(0o300))
+        .expect("target parent should reject directory open");
+
+    let outcome = LocalFileSystem::copy(
+        &source,
+        &target,
+        &LocalCopyOptions::new()
+            .with_durability(LocalDurabilityRequirement::Preferred),
+    )
+    .expect("preferred copy durability may report a downgrade");
+
+    fs::set_permissions(&parent, fs::Permissions::from_mode(0o700))
+        .expect("target parent permissions should be restored");
+    assert!(!outcome.durable());
+    assert_eq!(
+        b"payload",
+        fs::read(&target)
+            .expect("copied target should remain")
+            .as_slice(),
     );
 }

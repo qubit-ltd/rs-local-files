@@ -175,6 +175,16 @@ impl LocalFileSystem {
             )
             .with_path(bound));
         }
+        if options.mode() != LocalWriteMode::Append
+            && options.durability() == LocalDurabilityRequirement::Required
+            && !Self::capabilities().supports_directory_durability()
+        {
+            return Err(LocalFileError::new(
+                LocalFileErrorKind::RequirementNotMet,
+                LocalFileOperation::OpenWriter,
+            )
+            .with_path(bound));
+        }
         if options.creates_parent()
             && let Some(parent) = bound.parent()
         {
@@ -282,6 +292,12 @@ impl LocalFileSystem {
         options: &LocalCopyOptions,
     ) -> LocalResult<LocalCopyOutcome> {
         let [source, target] = LocalPaths::bind_host_paths([source, target])?;
+        require_directory_durability(
+            options.durability(),
+            LocalFileOperation::Copy,
+            &source,
+            &target,
+        )?;
         let source_metadata = fs::symlink_metadata(&source)
             .map_err(|error| copy_io_error(&source, &target, error))?;
         reject_copy_alias(&source, &target, &source_metadata)?;
@@ -365,17 +381,15 @@ impl LocalFileSystem {
             &mut stats,
         )
         .map_err(|error| copy_pipeline_error(&source, &target, error))?;
-        let durable = if options.durability()
-            == LocalDurabilityRequirement::NotRequired
-        {
-            false
-        } else {
+        let durable = published_durability(
+            options.durability(),
             fs::File::open(&target)
                 .and_then(|file| file.sync_all())
-                .and_then(|()| sync_rename_parent(&target))
-                .map_err(|error| copy_io_error(&source, &target, error))?;
-            true
-        };
+                .and_then(|()| sync_rename_parent(&target)),
+            LocalFileOperation::Copy,
+            &source,
+            &target,
+        )?;
         Ok(LocalCopyOutcome::new(
             LocalCopyStats::from_internal(stats),
             LocalCopyMethod::StagedFile,
@@ -633,6 +647,12 @@ impl LocalFileSystem {
         options: &LocalRenameOptions,
     ) -> LocalResult<LocalRenameOutcome> {
         let [source, target] = LocalPaths::bind_host_paths([source, target])?;
+        require_directory_durability(
+            options.durability(),
+            LocalFileOperation::Rename,
+            &source,
+            &target,
+        )?;
         let source_metadata = fs::symlink_metadata(&source)
             .map_err(|error| rename_io_error(&source, &target, error))?;
         let result = if options.overwrite() {
@@ -648,16 +668,13 @@ impl LocalFileSystem {
         };
         result.map_err(|error| rename_io_error(&source, &target, error))?;
 
-        let durable = match options.durability() {
-            LocalDurabilityRequirement::NotRequired => false,
-            LocalDurabilityRequirement::Required
-            | LocalDurabilityRequirement::Preferred => {
-                sync_rename_parent(&target).map_err(|error| {
-                    rename_io_error(&source, &target, error)
-                })?;
-                true
-            }
-        };
+        let durable = published_durability(
+            options.durability(),
+            sync_rename_parent(&target),
+            LocalFileOperation::Rename,
+            &source,
+            &target,
+        )?;
         let atomic = true;
         if options.atomicity() == LocalAtomicityRequirement::Required && !atomic
         {
@@ -763,6 +780,84 @@ fn sync_rename_parent(target: &Path) -> io::Result<()> {
     }
 }
 
+/// Rejects a required parent-durability guarantee before namespace mutation.
+///
+/// # Parameters
+///
+/// - `requirement`: Requested durability policy.
+/// - `operation`: Mutating operation that would publish an entry.
+/// - `source`: Primary path.
+/// - `target`: Destination path.
+///
+/// # Errors
+///
+/// Returns `RequirementNotMet` when the host cannot provide directory
+/// durability at all.
+#[inline(always)]
+fn require_directory_durability(
+    requirement: LocalDurabilityRequirement,
+    operation: LocalFileOperation,
+    source: &Path,
+    target: &Path,
+) -> LocalResult<()> {
+    if requirement == LocalDurabilityRequirement::Required
+        && !LocalFileSystem::capabilities().supports_directory_durability()
+    {
+        return Err(LocalFileError::new(
+            LocalFileErrorKind::RequirementNotMet,
+            operation,
+        )
+        .with_path(source.to_path_buf())
+        .with_target(target.to_path_buf()));
+    }
+    Ok(())
+}
+
+/// Converts post-publication synchronization into an achieved guarantee.
+///
+/// # Parameters
+///
+/// - `requirement`: Requested durability policy.
+/// - `sync`: File and parent synchronization result after publication.
+/// - `operation`: Operation that already published its destination.
+/// - `source`: Primary path.
+/// - `target`: Destination path.
+///
+/// # Returns
+///
+/// `true` after completed synchronization, or `false` for a permitted
+/// preferred downgrade.
+///
+/// # Errors
+///
+/// Returns `PublicationIncomplete` with `Published` state when required
+/// synchronization fails after the namespace mutation.
+#[inline]
+fn published_durability(
+    requirement: LocalDurabilityRequirement,
+    sync: io::Result<()>,
+    operation: LocalFileOperation,
+    source: &Path,
+    target: &Path,
+) -> LocalResult<bool> {
+    match requirement {
+        LocalDurabilityRequirement::NotRequired => Ok(false),
+        LocalDurabilityRequirement::Preferred => Ok(sync.is_ok()),
+        LocalDurabilityRequirement::Required => sync.map(|()| true).map_err(
+            |error| {
+                LocalFileError::from_io(
+                    operation,
+                    Some(source.to_path_buf()),
+                    Some(target.to_path_buf()),
+                    error,
+                )
+                .with_kind(LocalFileErrorKind::PublicationIncomplete)
+                .with_mutation_state(crate::LocalMutationState::Published)
+            },
+        ),
+    }
+}
+
 /// Opens the existing robust same-directory staged writer implementation.
 ///
 /// # Parameters
@@ -783,7 +878,8 @@ fn open_staged_writer(
     options: &LocalWriteOptions,
 ) -> LocalResult<crate::local::LocalAtomicWriter> {
     let mut native_options = crate::local::LocalAtomicWriteOptions::new()
-        .with_target_symlink_replacement();
+        .with_target_symlink_replacement()
+        .with_durability(options.durability());
     if options.mode() == LocalWriteMode::CreateNew {
         native_options = native_options.with_create_new();
     }

@@ -205,6 +205,7 @@ pub use error::{
     LocalFileError,
     LocalFileErrorKind,
     LocalFileOperation,
+    LocalMutationState,
     LocalResult,
 };
 pub use local::{

@@ -217,11 +217,22 @@ impl RootedLocalFileSystem {
             )
             .with_path(path.to_path_buf()));
         }
+        if options.mode() != LocalWriteMode::Append
+            && options.durability() == LocalDurabilityRequirement::Required
+            && !self.capabilities.supports_directory_durability()
+        {
+            return Err(LocalFileError::new(
+                LocalFileErrorKind::RequirementNotMet,
+                LocalFileOperation::OpenWriter,
+            )
+            .with_path(path.to_path_buf()));
+        }
         let relative = rooted_path(path, LocalFileOperation::OpenWriter)?;
         let backend = match options.mode() {
             LocalWriteMode::CreateNew | LocalWriteMode::CreateOrReplace => {
                 let mut atomic_options = crate::atomic::Options::new()
-                    .with_target_symlink_replacement();
+                    .with_target_symlink_replacement()
+                    .with_durability(options.durability());
                 if options.mode() == LocalWriteMode::CreateNew {
                     atomic_options = atomic_options.with_create_new();
                 }
@@ -355,7 +366,9 @@ impl RootedLocalFileSystem {
         target: &Path,
         options: &LocalCopyOptions,
     ) -> LocalResult<LocalCopyOutcome> {
-        if options.durability() == LocalDurabilityRequirement::Required {
+        if options.durability() == LocalDurabilityRequirement::Required
+            && !self.capabilities.supports_directory_durability()
+        {
             return Err(LocalFileError::new(
                 LocalFileErrorKind::RequirementNotMet,
                 LocalFileOperation::Copy,
@@ -396,6 +409,13 @@ impl RootedLocalFileSystem {
                     io::Error::new(kind, error),
                 )
             })?;
+        let durable = rooted_published_durability(
+            options.durability(),
+            self.root.sync_parent(&target_path),
+            LocalFileOperation::Copy,
+            source,
+            target,
+        )?;
         Ok(LocalCopyOutcome::new(
             LocalCopyStats::from_internal(stats),
             if directory {
@@ -404,7 +424,7 @@ impl RootedLocalFileSystem {
                 LocalCopyMethod::StagedFile
             },
             !directory,
-            false,
+            durable,
         ))
     }
 
@@ -509,7 +529,9 @@ impl RootedLocalFileSystem {
         target: &Path,
         options: &LocalRenameOptions,
     ) -> LocalResult<LocalRenameOutcome> {
-        if options.durability() == LocalDurabilityRequirement::Required {
+        if options.durability() == LocalDurabilityRequirement::Required
+            && !self.capabilities.supports_directory_durability()
+        {
             return Err(LocalFileError::new(
                 LocalFileErrorKind::RequirementNotMet,
                 LocalFileOperation::Rename,
@@ -526,7 +548,6 @@ impl RootedLocalFileSystem {
                 .rename_without_replacing(&source_path, &target_path)
         };
         result
-            .map(|()| LocalRenameOutcome::new(true, false))
             .map_err(|error| {
                 LocalFileError::from_io(
                     LocalFileOperation::Rename,
@@ -534,7 +555,42 @@ impl RootedLocalFileSystem {
                     Some(target.to_path_buf()),
                     error,
                 )
-            })
+            })?;
+        let durable = rooted_published_durability(
+            options.durability(),
+            self.root.sync_parent(&target_path),
+            LocalFileOperation::Rename,
+            source,
+            target,
+        )?;
+        Ok(LocalRenameOutcome::new(true, durable))
+    }
+}
+
+/// Converts rooted post-publication synchronization into an achieved guarantee.
+#[inline]
+fn rooted_published_durability(
+    requirement: LocalDurabilityRequirement,
+    sync: io::Result<()>,
+    operation: LocalFileOperation,
+    source: &Path,
+    target: &Path,
+) -> LocalResult<bool> {
+    match requirement {
+        LocalDurabilityRequirement::NotRequired => Ok(false),
+        LocalDurabilityRequirement::Preferred => Ok(sync.is_ok()),
+        LocalDurabilityRequirement::Required => sync.map(|()| true).map_err(
+            |error| {
+                LocalFileError::from_io(
+                    operation,
+                    Some(source.to_path_buf()),
+                    Some(target.to_path_buf()),
+                    error,
+                )
+                .with_kind(LocalFileErrorKind::PublicationIncomplete)
+                .with_mutation_state(crate::LocalMutationState::Published)
+            },
+        ),
     }
 }
 

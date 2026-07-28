@@ -10,6 +10,7 @@
 use std::time::Duration;
 
 use super::internal::LocalAtomicPublicationMode;
+use crate::LocalDurabilityRequirement;
 
 /// Options used when beginning a local atomic write.
 ///
@@ -27,6 +28,8 @@ pub struct LocalAtomicWriteOptions {
     replace_target_symlink: bool,
     /// Publication policy enforced during final installation.
     publication_mode: LocalAtomicPublicationMode,
+    /// Durability requested for staging and parent synchronization.
+    durability: LocalDurabilityRequirement,
 }
 
 impl LocalAtomicWriteOptions {
@@ -41,6 +44,7 @@ impl LocalAtomicWriteOptions {
             open_retry_timeout: None,
             replace_target_symlink: false,
             publication_mode: LocalAtomicPublicationMode::ReplaceOrCreate,
+            durability: LocalDurabilityRequirement::Required,
         }
     }
 
@@ -93,6 +97,32 @@ impl LocalAtomicWriteOptions {
     #[inline(always)]
     pub const fn with_open_retry_timeout(mut self, timeout: Duration) -> Self {
         self.open_retry_timeout = Some(timeout);
+        self
+    }
+
+    /// Returns the requested durability for atomic publication.
+    #[must_use]
+    #[inline(always)]
+    pub const fn durability(&self) -> LocalDurabilityRequirement {
+        self.durability
+    }
+
+    /// Sets the required durability for atomic publication.
+    ///
+    /// # Parameters
+    ///
+    /// - `durability`: Requested file and parent synchronization policy.
+    ///
+    /// # Returns
+    ///
+    /// Updated options carrying the durability policy.
+    #[must_use]
+    #[inline(always)]
+    pub const fn with_durability(
+        mut self,
+        durability: LocalDurabilityRequirement,
+    ) -> Self {
+        self.durability = durability;
         self
     }
 

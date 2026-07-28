@@ -60,6 +60,8 @@ pub(crate) use internal::{
     rename_rooted_entry,
     set_rooted_permissions,
 };
+#[cfg(unix)]
+pub(crate) use internal::sync_rooted_parent;
 
 pub use local_atomic_commit_error::LocalAtomicCommitError;
 pub use local_atomic_destination_state::LocalAtomicDestinationState;

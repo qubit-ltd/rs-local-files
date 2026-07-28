@@ -28,6 +28,7 @@ use crate::{
     LocalAtomicDestinationState,
     LocalAtomicWriteError,
     LocalAtomicWriteStage,
+    LocalDurabilityRequirement,
 };
 #[cfg(any(unix, windows))]
 use crate::{
@@ -114,6 +115,9 @@ pub struct LocalRootAtomicWriter {
     /// Whether existing regular-file metadata must be preserved.
     preserve_destination_metadata: bool,
     #[cfg(unix)]
+    /// Durability requested for staging and parent synchronization.
+    durability: LocalDurabilityRequirement,
+    #[cfg(unix)]
     /// Descriptor-relative staging lifecycle.
     staged_file: RootedStagedFile,
     #[cfg(windows)]
@@ -125,6 +129,9 @@ pub struct LocalRootAtomicWriter {
     #[cfg(windows)]
     /// Whether existing regular-file metadata must be preserved.
     preserve_destination_metadata: bool,
+    #[cfg(windows)]
+    /// Durability requested for staging and parent synchronization.
+    durability: LocalDurabilityRequirement,
     #[cfg(windows)]
     /// Handle-relative staging lifecycle.
     staged_file: WindowsRootedStagedFile,
@@ -276,6 +283,7 @@ impl LocalRootAtomicWriter {
             parent_dirs_to_sync,
             destination_existed,
             preserve_destination_metadata,
+            durability: options.durability(),
             staged_file,
         })
     }
@@ -436,6 +444,7 @@ impl LocalRootAtomicWriter {
                             armed: true,
                         },
                         preserve_destination_metadata,
+                        durability: options.durability(),
                     });
                 }
                 Err(source)
@@ -509,12 +518,30 @@ impl LocalRootAtomicWriter {
     /// synchronization fails.
     #[cfg_attr(not(any(unix, windows)), allow(unused_mut))]
     pub fn commit_recoverable(
-        mut self,
+        self,
     ) -> Result<(), LocalAtomicCommitError<Self>> {
+        self.commit_recoverable_with_durability().map(|_| ())
+    }
+
+    /// Attempts commit and reports whether requested durability completed.
+    ///
+    /// # Returns
+    ///
+    /// `true` only when both staging data and the parent namespace were
+    /// synchronized. Preferred durability may publish with `false`.
+    ///
+    /// # Errors
+    ///
+    /// Returns a recoverable error before installation or a terminal error
+    /// after destination state may have changed.
+    #[cfg_attr(not(any(unix, windows)), allow(unused_mut))]
+    pub fn commit_recoverable_with_durability(
+        mut self,
+    ) -> Result<bool, LocalAtomicCommitError<Self>> {
         #[cfg(unix)]
         {
             match self.commit_attempt() {
-                Ok(()) => Ok(()),
+                Ok(durable) => Ok(durable),
                 Err(error) if self.staged_file.is_open() => {
                     Err(LocalAtomicCommitError::new(error, Some(self)))
                 }
@@ -523,8 +550,14 @@ impl LocalRootAtomicWriter {
         }
         #[cfg(windows)]
         {
+            if self.durability == LocalDurabilityRequirement::Required {
+                return Err(LocalAtomicCommitError::new(
+                    unsupported_atomic_error(&self.path),
+                    Some(self),
+                ));
+            }
             match self.commit_attempt_windows() {
-                Ok(()) => Ok(()),
+                Ok(durable) => Ok(durable),
                 Err(error) if self.staged_file.armed => {
                     Err(LocalAtomicCommitError::new(error, Some(self)))
                 }
@@ -581,7 +614,9 @@ impl LocalRootAtomicWriter {
 
     #[cfg(windows)]
     /// Runs one handle-relative Windows commit attempt.
-    fn commit_attempt_windows(&mut self) -> Result<(), LocalAtomicWriteError> {
+    fn commit_attempt_windows(
+        &mut self,
+    ) -> Result<bool, LocalAtomicWriteError> {
         let destination = if self.preserve_destination_metadata {
             Some(
                 read_rooted_symlink_metadata(
@@ -628,15 +663,19 @@ impl LocalRootAtomicWriter {
                     )
                 })?;
         }
-        self.staged_file.file().sync_all().map_err(|source| {
-            LocalAtomicWriteError::new(
-                LocalAtomicWriteStage::SyncTemporaryFile,
-                self.path.clone(),
-                Some(self.staged_file.diagnostic_path.clone()),
-                LocalAtomicDestinationState::Unchanged,
-                source,
-            )
-        })?;
+        if self.durability == LocalDurabilityRequirement::Required {
+            self.staged_file.file().sync_all().map_err(|source| {
+                LocalAtomicWriteError::new(
+                    LocalAtomicWriteStage::SyncTemporaryFile,
+                    self.path.clone(),
+                    Some(self.staged_file.diagnostic_path.clone()),
+                    LocalAtomicDestinationState::Unchanged,
+                    source,
+                )
+            })?;
+        } else if self.durability == LocalDurabilityRequirement::Preferred {
+            let _ = self.staged_file.file().sync_all();
+        }
         if let Some(opened_destination) = destination.as_ref() {
             let current_destination = read_rooted_symlink_metadata(
                 &self.staged_file.root,
@@ -704,7 +743,7 @@ impl LocalRootAtomicWriter {
             )
         })?;
         self.staged_file.disarm();
-        Ok(())
+        Ok(false)
     }
 
     #[cfg(unix)]
@@ -714,12 +753,13 @@ impl LocalRootAtomicWriter {
     ///
     /// Returns the structured commit failure. Errors raised before installation
     /// leave the staging handle open for the public recoverable commit API.
-    fn commit_attempt(&mut self) -> Result<(), LocalAtomicWriteError> {
+    fn commit_attempt(&mut self) -> Result<bool, LocalAtomicWriteError> {
         let destination = self.open_destination_for_commit()?;
         self.preserve_destination_metadata(destination.as_ref())?;
-        self.sync_temporary_file()?;
+        let file_durable = self.sync_temporary_file()?;
         self.verify_destination_for_commit(destination.as_ref())?;
-        self.install_and_sync_parent()
+        let parent_durable = self.install_and_sync_parent()?;
+        Ok(file_durable && parent_durable)
     }
 
     #[cfg(unix)]
@@ -806,15 +846,23 @@ impl LocalRootAtomicWriter {
     ///
     /// Returns a structured staging synchronization error while retaining
     /// staging when the native synchronization fails.
-    fn sync_temporary_file(&mut self) -> Result<(), LocalAtomicWriteError> {
-        let result = self.staged_file.file().sync_all();
-        map_atomic_error(
-            result,
-            LocalAtomicWriteStage::SyncTemporaryFile,
-            &self.path,
-            Some(self.staged_file.diagnostic_path().to_path_buf()),
-            LocalAtomicDestinationState::Unchanged,
-        )
+    fn sync_temporary_file(&mut self) -> Result<bool, LocalAtomicWriteError> {
+        match self.durability {
+            LocalDurabilityRequirement::NotRequired => Ok(false),
+            LocalDurabilityRequirement::Preferred => {
+                Ok(self.staged_file.file().sync_all().is_ok())
+            }
+            LocalDurabilityRequirement::Required => {
+                map_atomic_error(
+                    self.staged_file.file().sync_all(),
+                    LocalAtomicWriteStage::SyncTemporaryFile,
+                    &self.path,
+                    Some(self.staged_file.diagnostic_path().to_path_buf()),
+                    LocalAtomicDestinationState::Unchanged,
+                )?;
+                Ok(true)
+            }
+        }
     }
 
     #[cfg(unix)]
@@ -904,7 +952,9 @@ impl LocalRootAtomicWriter {
     ///
     /// Returns the structured installation or recovery error, or a parent
     /// synchronization error after the destination has been replaced.
-    fn install_and_sync_parent(&mut self) -> Result<(), LocalAtomicWriteError> {
+    fn install_and_sync_parent(
+        &mut self,
+    ) -> Result<bool, LocalAtomicWriteError> {
         let install_result = install_rooted_atomic_file(
             &mut self.staged_file,
             &self.final_name,
@@ -935,20 +985,32 @@ impl LocalRootAtomicWriter {
                         &self.parent_dirs_to_sync,
                     )
                 },
-            );
+            )
+            .map(|()| false);
+        }
+        if self.durability == LocalDurabilityRequirement::NotRequired {
+            self.staged_file.disarm();
+            return Ok(false);
         }
         let temporary_path = self.staged_file.diagnostic_path().to_path_buf();
         self.staged_file.disarm();
-        map_atomic_error(
-            sync_rooted_parent_chain(
-                self.staged_file.parent(),
-                &self.parent_dirs_to_sync,
-            ),
-            LocalAtomicWriteStage::SyncParent,
-            &self.path,
-            Some(temporary_path),
-            LocalAtomicDestinationState::Replaced,
-        )
+        match sync_rooted_parent_chain(
+            self.staged_file.parent(),
+            &self.parent_dirs_to_sync,
+        ) {
+            Ok(()) => Ok(true),
+            Err(_) if self.durability == LocalDurabilityRequirement::Preferred => {
+                Ok(false)
+            }
+            Err(error) => map_atomic_error(
+                Err(error),
+                LocalAtomicWriteStage::SyncParent,
+                &self.path,
+                Some(temporary_path),
+                LocalAtomicDestinationState::Replaced,
+            )
+            .map(|()| true),
+        }
     }
 }
 

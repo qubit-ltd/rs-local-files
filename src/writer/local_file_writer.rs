@@ -22,7 +22,9 @@ use crate::{
     LocalDurabilityRequirement,
     LocalFileCommitError,
     LocalFileError,
+    LocalFileErrorKind,
     LocalFileOperation,
+    LocalMutationState,
     LocalResult,
     LocalWriteOptions,
     LocalWriteOutcome,
@@ -112,13 +114,13 @@ impl LocalFileWriter {
             .expect("open writer must retain one backend");
         match backend {
             LocalFileWriterBackend::Staged(writer) => {
-                match writer.commit_recoverable() {
-                    Ok(()) => {
+                match writer.commit_recoverable_with_durability() {
+                    Ok(durable) => {
                         self.state = LocalWriterState::Committed;
                         Ok(LocalWriteOutcome::new(
                             self.state,
                             true,
-                            true,
+                            durable,
                             self.bytes_written,
                         ))
                     }
@@ -132,10 +134,13 @@ impl LocalFileWriter {
                             )
                         });
                         Err(LocalFileCommitError::new(
-                            atomic_write_error(
+                            publication_error(
+                                atomic_write_error(
                                 &self.path,
                                 LocalFileOperation::Commit,
                                 error,
+                                ),
+                                state,
                             ),
                             state,
                             retained,
@@ -144,13 +149,13 @@ impl LocalFileWriter {
                 }
             }
             LocalFileWriterBackend::Rooted(writer) => {
-                match writer.commit_recoverable() {
-                    Ok(()) => {
+                match writer.commit_recoverable_with_durability() {
+                    Ok(durable) => {
                         self.state = LocalWriterState::Committed;
                         Ok(LocalWriteOutcome::new(
                             self.state,
                             true,
-                            true,
+                            durable,
                             self.bytes_written,
                         ))
                     }
@@ -164,10 +169,13 @@ impl LocalFileWriter {
                             )
                         });
                         Err(LocalFileCommitError::new(
-                            atomic_write_error(
+                            publication_error(
+                                atomic_write_error(
                                 &self.path,
                                 LocalFileOperation::Commit,
                                 error,
+                                ),
+                                state,
                             ),
                             state,
                             retained,
@@ -178,11 +186,11 @@ impl LocalFileWriter {
             LocalFileWriterBackend::Append(mut file) => {
                 if let Err(error) = file.flush() {
                     return Err(LocalFileCommitError::new(
-                        writer_io_error(
+                        publication_error(writer_io_error(
                             &self.path,
                             LocalFileOperation::Commit,
                             error,
-                        ),
+                        ), LocalWriterState::Indeterminate),
                         LocalWriterState::Indeterminate,
                         None,
                     ));
@@ -195,11 +203,11 @@ impl LocalFileWriter {
                     LocalDurabilityRequirement::Required => {
                         if let Err(error) = file.sync_all() {
                             return Err(LocalFileCommitError::new(
-                                writer_io_error(
+                                publication_error(writer_io_error(
                                     &self.path,
                                     LocalFileOperation::Commit,
                                     error,
-                                ),
+                                ), LocalWriterState::Published),
                                 LocalWriterState::Published,
                                 None,
                             ));
@@ -534,4 +542,34 @@ fn writer_state_error(
             format!("local file writer cannot transition from {state:?}"),
         ),
     )
+}
+
+/// Adds partial-publication classification to a terminal writer failure.
+///
+/// # Parameters
+///
+/// - `error`: Original structured I/O error.
+/// - `state`: Publication state established by the failed operation.
+///
+/// # Returns
+///
+/// Error classified consistently with the observable publication state.
+#[inline(always)]
+fn publication_error(
+    error: LocalFileError,
+    state: LocalWriterState,
+) -> LocalFileError {
+    match state {
+        LocalWriterState::NotPublished => error
+            .with_mutation_state(LocalMutationState::NotPublished),
+        LocalWriterState::Published => error
+            .with_kind(LocalFileErrorKind::PublicationIncomplete)
+            .with_mutation_state(LocalMutationState::Published),
+        LocalWriterState::Indeterminate => error
+            .with_kind(LocalFileErrorKind::Indeterminate)
+            .with_mutation_state(LocalMutationState::Indeterminate),
+        LocalWriterState::Open
+        | LocalWriterState::Committed
+        | LocalWriterState::Aborted => error,
+    }
 }

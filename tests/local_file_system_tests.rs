@@ -14,8 +14,10 @@ use std::{
 use qubit_local_files::{
     LocalCreateDirectoryOptions,
     LocalDeleteOptions,
+    LocalDurabilityRequirement,
     LocalFileErrorKind,
     LocalFileSystem,
+    LocalMutationState,
     LocalReadOptions,
     LocalRenameOptions,
 };
@@ -94,6 +96,61 @@ fn test_local_file_system_rename_respects_overwrite_policy() {
             .expect("target should be replaced")
             .as_slice(),
     );
+}
+
+/// Verifies rename durability distinguishes preferred downgrade from required
+/// partial success.
+#[cfg(unix)]
+#[test]
+fn test_local_file_system_rename_reports_parent_sync_result() {
+    use std::os::unix::fs::PermissionsExt;
+
+    let directory = tempdir().expect("temporary directory should be created");
+    for requirement in [
+        LocalDurabilityRequirement::Preferred,
+        LocalDurabilityRequirement::Required,
+    ] {
+        let source = directory.path().join(format!("source-{requirement:?}"));
+        let parent = directory.path().join(format!("parent-{requirement:?}"));
+        let target = parent.join("target");
+        fs::write(&source, b"payload").expect("source should be written");
+        fs::create_dir(&parent).expect("target parent should be created");
+        fs::set_permissions(&parent, fs::Permissions::from_mode(0o300))
+            .expect("target parent should reject directory open");
+        let result = LocalFileSystem::rename(
+            &source,
+            &target,
+            &LocalRenameOptions::new().with_durability(requirement),
+        );
+        match requirement {
+            LocalDurabilityRequirement::Preferred => {
+                let outcome = result
+                    .expect("preferred durability may report a downgrade");
+                assert!(!outcome.durable());
+            }
+            LocalDurabilityRequirement::Required => {
+                let error =
+                    result.expect_err("required durability must report failure");
+                assert_eq!(
+                    LocalFileErrorKind::PublicationIncomplete,
+                    error.kind(),
+                );
+                assert_eq!(
+                    Some(LocalMutationState::Published),
+                    error.mutation_state(),
+                );
+            }
+            LocalDurabilityRequirement::NotRequired => unreachable!(),
+        }
+        fs::set_permissions(&parent, fs::Permissions::from_mode(0o700))
+            .expect("target parent permissions should be restored");
+        assert_eq!(
+            b"payload",
+            fs::read(&target)
+                .expect("renamed target should remain")
+                .as_slice(),
+        );
+    }
 }
 
 /// Verifies file and recursive-directory deletion semantics.

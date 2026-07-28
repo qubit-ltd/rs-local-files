@@ -648,4 +648,25 @@ impl Root {
             ))
         }
     }
+
+    /// Synchronizes the parent directory of a rooted descendant.
+    ///
+    /// # Errors
+    ///
+    /// Returns an I/O error when secure parent traversal or directory
+    /// synchronization is unavailable or fails.
+    pub(crate) fn sync_parent(&self, path: &path::Path) -> Result<()> {
+        #[cfg(unix)]
+        {
+            local::sync_rooted_parent(&self.directory, &self.path, path)
+        }
+        #[cfg(not(unix))]
+        {
+            let _ = path;
+            Err(Error::new(
+                ErrorKind::Unsupported,
+                "rooted directory durability is unsupported on this platform",
+            ))
+        }
+    }
 }
