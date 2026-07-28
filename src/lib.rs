@@ -72,8 +72,14 @@ pub mod read;
 mod read;
 #[cfg(coverage)]
 pub mod remove;
+#[cfg(not(coverage))]
+#[allow(dead_code, unused_imports)]
+mod remove;
 #[cfg(coverage)]
 pub mod rename;
+#[cfg(not(coverage))]
+#[allow(dead_code, unused_imports)]
+mod rename;
 #[cfg(coverage)]
 pub mod rooted;
 #[cfg(not(coverage))]
@@ -89,6 +95,106 @@ pub mod write;
 #[allow(dead_code, unused_imports)]
 mod write;
 mod writer;
+
+/// Native primitives for filesystem-provider implementations.
+///
+/// Application code should use [`LocalFileSystem`] or
+/// [`RootedLocalFileSystem`] instead. This namespace groups the low-level
+/// operations needed by provider adapters without restoring their former
+/// crate-root module paths.
+pub mod backend {
+    /// Atomic replacement primitives for provider adapters.
+    pub mod atomic {
+        pub use crate::atomic::{
+            CommitError,
+            DestinationState,
+            Error,
+            Options,
+            Stage,
+            Writer,
+            begin,
+            begin_with,
+            write,
+            write_with,
+        };
+    }
+
+    /// Recursive copy primitives for provider adapters.
+    pub mod copy {
+        pub use crate::copy::{
+            ConflictPolicy,
+            Error,
+            Options,
+            Stage,
+            Statistics,
+            TypeConflictPolicy,
+            directory,
+            file,
+            file_without_replacing,
+        };
+    }
+
+    /// Directory primitives for provider adapters.
+    pub mod directory {
+        pub use crate::directory::{
+            clear,
+            create,
+            create_all,
+            create_parent,
+            read,
+            size,
+        };
+    }
+
+    /// Native reader primitives for provider adapters.
+    pub mod read {
+        pub use crate::read::{
+            OpenOptions,
+            open,
+            open_with,
+        };
+    }
+
+    /// Removal primitives for provider adapters.
+    pub mod remove {
+        pub use crate::remove::{
+            any,
+            directory_tree,
+            empty_directory,
+            file,
+        };
+    }
+
+    /// Rename primitives for provider adapters.
+    pub mod rename {
+        pub use crate::rename::{
+            move_path,
+            move_path_without_replacing,
+        };
+    }
+
+    /// Descriptor-relative primitives for provider adapters.
+    pub mod rooted {
+        pub use crate::rooted::{
+            Entry,
+            EntryKind,
+            Metadata,
+            Path,
+            Permissions,
+            Root,
+            Writer,
+        };
+    }
+
+    /// Native writer primitives for provider adapters.
+    pub mod write {
+        pub use crate::write::{
+            Mode,
+            OpenOptions,
+            open,
+        };
+    }
+}
 
 pub use capability::{
     LocalFileSystemCapabilities,
