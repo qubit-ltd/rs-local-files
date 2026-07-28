@@ -82,6 +82,53 @@ Required guarantees are rejected before destructive changes when unsupported.
 Copy rejects self-copy and hard-link aliases. Overwrite replaces a target
 symbolic-link entry rather than following it.
 
+Copy failures retain the strongest state proven for the destination:
+
+```rust,no_run
+use qubit_local_files::{
+    LocalCopyFailureState,
+    LocalCopyOptions,
+    LocalFileSystem,
+};
+
+match LocalFileSystem::copy(
+    std::path::Path::new("source"),
+    std::path::Path::new("backup"),
+    &LocalCopyOptions::new(),
+) {
+    Ok(outcome) => println!("copied {} files", outcome.stats().files()),
+    Err(failure) => match failure.state() {
+        LocalCopyFailureState::Unchanged => println!("destination is unchanged"),
+        LocalCopyFailureState::PartiallyPublished => println!("destination is partial"),
+        LocalCopyFailureState::Published => println!("destination was published"),
+        LocalCopyFailureState::Indeterminate => println!("destination state is unknown"),
+    },
+}
+```
+
+Rename failures likewise report the proven namespace state:
+
+```rust,no_run
+use qubit_local_files::{
+    LocalFileSystem,
+    LocalRenameFailureState,
+    LocalRenameOptions,
+};
+
+match LocalFileSystem::rename(
+    std::path::Path::new("draft"),
+    std::path::Path::new("published"),
+    &LocalRenameOptions::new(),
+) {
+    Ok(_) => println!("rename completed"),
+    Err(failure) => match failure.state() {
+        LocalRenameFailureState::Unchanged => println!("source is unchanged"),
+        LocalRenameFailureState::Renamed => println!("rename completed before a later error"),
+        LocalRenameFailureState::Indeterminate => println!("rename state is unknown"),
+    },
+}
+```
+
 ## Lazy Walking
 
 ```rust
@@ -153,11 +200,13 @@ entry.
 ```rust
 use qubit_local_files::{
     LocalListOptions,
+    LocalTempDirectoryOptions,
     RootedLocalFileSystem,
 };
 
 let root =
     RootedLocalFileSystem::open(std::path::Path::new("workspace"))?;
+let _temporary = root.create_temp_directory(&LocalTempDirectoryOptions::new())?;
 let walker = root.list(
     std::path::Path::new("assets"),
     &LocalListOptions::new(),

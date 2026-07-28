@@ -94,10 +94,12 @@ use std::io::Read;
 
 use qubit_local_files::{
     LocalReadOptions,
+    LocalTempDirectoryOptions,
     RootedLocalFileSystem,
 };
 
 let root = RootedLocalFileSystem::open(std::path::Path::new("workspace"))?;
+let _temporary = root.create_temp_directory(&LocalTempDirectoryOptions::new())?;
 let mut reader =
     root.open_reader(std::path::Path::new("config/app.toml"), &LocalReadOptions::new())?;
 let mut content = String::new();
