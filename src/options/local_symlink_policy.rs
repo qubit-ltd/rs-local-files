@@ -16,6 +16,4 @@ pub enum LocalSymlinkPolicy {
     Reject,
     /// Follow links while applying cycle and containment checks.
     Follow,
-    /// Recreate links instead of copying their referents.
-    Preserve,
 }

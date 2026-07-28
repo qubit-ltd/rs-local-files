@@ -12,6 +12,7 @@ use super::{
     LocalCopyMethod,
     LocalCopyStats,
 };
+use crate::LocalMetadataPreservePolicy;
 
 /// Structured result of a native file or directory copy.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -25,10 +26,8 @@ pub struct LocalCopyOutcome {
     atomic: bool,
     /// Whether required durability synchronization completed.
     durable: bool,
-    /// Whether the operation crossed a device boundary.
-    crossed_device: bool,
-    /// Whether a lower-fidelity fallback method was used.
-    fallback: bool,
+    /// Metadata preservation actually applied by the copy pipeline.
+    metadata_preservation: LocalMetadataPreservePolicy,
 }
 
 impl LocalCopyOutcome {
@@ -40,20 +39,22 @@ impl LocalCopyOutcome {
     /// - `method`: Native copy method.
     /// - `atomic`: Whether the whole publication was atomic.
     /// - `durable`: Whether durability synchronization completed.
+    /// - `metadata_preservation`: Metadata preservation applied to copied
+    ///   entries.
     #[inline(always)]
     pub(crate) const fn new(
         stats: LocalCopyStats,
         method: LocalCopyMethod,
         atomic: bool,
         durable: bool,
+        metadata_preservation: LocalMetadataPreservePolicy,
     ) -> Self {
         Self {
             stats,
             method,
             atomic,
             durable,
-            crossed_device: false,
-            fallback: false,
+            metadata_preservation,
         }
     }
 
@@ -84,17 +85,10 @@ impl LocalCopyOutcome {
         self.durable
     }
 
-    /// Reports whether a native device boundary was crossed.
+    /// Returns metadata preservation applied by the copy pipeline.
     #[must_use]
     #[inline(always)]
-    pub const fn crossed_device(&self) -> bool {
-        self.crossed_device
-    }
-
-    /// Reports whether a lower-fidelity fallback was used.
-    #[must_use]
-    #[inline(always)]
-    pub const fn used_fallback(&self) -> bool {
-        self.fallback
+    pub const fn metadata_preservation(&self) -> LocalMetadataPreservePolicy {
+        self.metadata_preservation
     }
 }

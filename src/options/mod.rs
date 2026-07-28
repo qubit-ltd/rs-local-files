@@ -10,7 +10,6 @@
 mod local_atomicity_requirement;
 mod local_copy_options;
 mod local_create_directory_options;
-mod local_cross_device_policy;
 mod local_delete_options;
 mod local_durability_requirement;
 mod local_list_options;
@@ -26,7 +25,6 @@ mod local_write_options;
 pub use local_atomicity_requirement::LocalAtomicityRequirement;
 pub use local_copy_options::LocalCopyOptions;
 pub use local_create_directory_options::LocalCreateDirectoryOptions;
-pub use local_cross_device_policy::LocalCrossDevicePolicy;
 pub use local_delete_options::LocalDeleteOptions;
 pub use local_durability_requirement::LocalDurabilityRequirement;
 pub use local_list_options::LocalListOptions;

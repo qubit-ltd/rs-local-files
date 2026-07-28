@@ -227,7 +227,6 @@ pub use options::{
     LocalAtomicityRequirement,
     LocalCopyOptions,
     LocalCreateDirectoryOptions,
-    LocalCrossDevicePolicy,
     LocalDeleteOptions,
     LocalDurabilityRequirement,
     LocalListOptions,

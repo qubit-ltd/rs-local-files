@@ -313,14 +313,6 @@ impl LocalFileSystem {
                     .with_path(source)
                     .with_target(target));
                 }
-                LocalSymlinkPolicy::Preserve => {
-                    return Err(LocalFileError::new(
-                        LocalFileErrorKind::Unsupported,
-                        LocalFileOperation::Copy,
-                    )
-                    .with_path(source)
-                    .with_target(target));
-                }
                 LocalSymlinkPolicy::Follow => {
                     followed_metadata =
                         fs::metadata(&source).map_err(|error| {
@@ -334,6 +326,14 @@ impl LocalFileSystem {
         };
 
         if effective_metadata.file_type().is_dir() {
+            if !options.recursive() {
+                return Err(LocalFileError::new(
+                    LocalFileErrorKind::RequirementNotMet,
+                    LocalFileOperation::Copy,
+                )
+                .with_path(source)
+                .with_target(target));
+            }
             if options.atomicity() == LocalAtomicityRequirement::Required {
                 return Err(LocalFileError::new(
                     LocalFileErrorKind::RequirementNotMet,
@@ -362,6 +362,7 @@ impl LocalFileSystem {
                 LocalCopyMethod::Recursive,
                 false,
                 false,
+                options.preserve_metadata(),
             ));
         }
         if !effective_metadata.file_type().is_file() {
@@ -395,6 +396,7 @@ impl LocalFileSystem {
             LocalCopyMethod::StagedFile,
             true,
             durable,
+            options.preserve_metadata(),
         ))
     }
 
@@ -921,7 +923,7 @@ pub(crate) fn internal_copy_options(
     if options.symlink_policy() == LocalSymlinkPolicy::Follow {
         result = result.follow_symlinks();
     }
-    if options.preserve_metadata() != LocalMetadataPreservePolicy::None {
+    if options.preserve_metadata() == LocalMetadataPreservePolicy::Permissions {
         result = result.preserve_permissions();
     }
     result

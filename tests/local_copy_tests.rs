@@ -46,7 +46,7 @@ fn test_local_file_system_copy_unifies_file_and_directory_copy() {
     let tree_outcome = LocalFileSystem::copy(
         &source_directory,
         &target_directory,
-        &LocalCopyOptions::new(),
+        &LocalCopyOptions::new().with_recursive(),
     )
     .expect("directory copy should succeed");
     assert_eq!(LocalCopyMethod::Recursive, tree_outcome.method());
@@ -57,6 +57,21 @@ fn test_local_file_system_copy_unifies_file_and_directory_copy() {
             .expect("child should copy")
             .as_slice()
     );
+}
+
+/// Verifies directory copies require explicit recursion authorization.
+#[test]
+fn test_local_file_system_copy_rejects_implicit_directory_recursion() {
+    let directory = tempdir().expect("temporary directory should exist");
+    let source = directory.path().join("source");
+    let target = directory.path().join("target");
+    fs::create_dir(&source).expect("source directory should be created");
+
+    let error = LocalFileSystem::copy(&source, &target, &LocalCopyOptions::new())
+        .expect_err("directory copy must require explicit recursion");
+
+    assert_eq!(LocalFileErrorKind::RequirementNotMet, error.kind());
+    assert!(!target.exists());
 }
 
 /// Verifies source and hard-link alias detection before destructive overwrite.

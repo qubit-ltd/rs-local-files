@@ -383,6 +383,14 @@ impl RootedLocalFileSystem {
                 rooted_io_error(LocalFileOperation::Copy, source, error)
             })?;
         let directory = metadata.kind() == crate::rooted::EntryKind::Directory;
+        if directory && !options.recursive() {
+            return Err(LocalFileError::new(
+                LocalFileErrorKind::RequirementNotMet,
+                LocalFileOperation::Copy,
+            )
+            .with_path(source.to_path_buf())
+            .with_target(target.to_path_buf()));
+        }
         if directory
             && options.atomicity() == crate::LocalAtomicityRequirement::Required
         {
@@ -425,6 +433,7 @@ impl RootedLocalFileSystem {
             },
             !directory,
             durable,
+            options.preserve_metadata(),
         ))
     }
 

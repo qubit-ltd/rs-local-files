@@ -16,6 +16,4 @@ pub enum LocalMetadataPreservePolicy {
     None,
     /// Preserve portable native permission metadata.
     Permissions,
-    /// Preserve all metadata supported by the selected native method.
-    All,
 }

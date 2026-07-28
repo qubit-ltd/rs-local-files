@@ -10,7 +10,6 @@
 
 use super::{
     LocalAtomicityRequirement,
-    LocalCrossDevicePolicy,
     LocalDurabilityRequirement,
     LocalMetadataPreservePolicy,
     LocalSymlinkPolicy,
@@ -31,8 +30,8 @@ pub struct LocalCopyOptions {
     preserve_metadata: LocalMetadataPreservePolicy,
     /// Symbolic-link traversal policy.
     symlink: LocalSymlinkPolicy,
-    /// Cross-device traversal policy.
-    cross_device: LocalCrossDevicePolicy,
+    /// Whether copying a directory tree is authorized.
+    recursive: bool,
     /// Required publication atomicity.
     atomicity: LocalAtomicityRequirement,
     /// Required durability.
@@ -49,7 +48,7 @@ impl LocalCopyOptions {
             type_conflict: LocalCopyTypeConflictPolicy::Fail,
             preserve_metadata: LocalMetadataPreservePolicy::None,
             symlink: LocalSymlinkPolicy::Reject,
-            cross_device: LocalCrossDevicePolicy::Allow,
+            recursive: false,
             atomicity: LocalAtomicityRequirement::Preferred,
             durability: LocalDurabilityRequirement::NotRequired,
         }
@@ -81,11 +80,11 @@ impl LocalCopyOptions {
         self.symlink
     }
 
-    /// Returns the cross-device policy.
+    /// Reports whether directory-tree copying is authorized.
     #[must_use]
     #[inline(always)]
-    pub const fn cross_device_policy(&self) -> LocalCrossDevicePolicy {
-        self.cross_device
+    pub const fn recursive(&self) -> bool {
+        self.recursive
     }
 
     /// Returns the required atomicity.
@@ -146,14 +145,11 @@ impl LocalCopyOptions {
         self
     }
 
-    /// Sets cross-device policy.
+    /// Authorizes copying a directory tree.
     #[must_use]
     #[inline(always)]
-    pub const fn with_cross_device_policy(
-        mut self,
-        cross_device: LocalCrossDevicePolicy,
-    ) -> Self {
-        self.cross_device = cross_device;
+    pub const fn with_recursive(mut self) -> Self {
+        self.recursive = true;
         self
     }
 
