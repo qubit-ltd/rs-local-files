@@ -102,6 +102,28 @@ fn test_local_file_writer_replaces_target_symlink_entry() {
     );
 }
 
+/// Verifies direct append rejects a final symbolic-link entry.
+#[cfg(unix)]
+#[test]
+fn test_local_file_writer_append_rejects_target_symlink() {
+    use std::os::unix::fs::symlink;
+
+    let directory = tempdir().expect("temporary directory should exist");
+    let referent = directory.path().join("referent");
+    let target = directory.path().join("target");
+    fs::write(&referent, b"original").expect("referent should be written");
+    symlink(&referent, &target).expect("target symlink should be created");
+
+    let error = LocalFileSystem::open_writer(
+        &target,
+        &LocalWriteOptions::new(LocalWriteMode::Append),
+    )
+    .expect_err("append must not follow a final symlink");
+
+    assert_eq!(LocalFileErrorKind::TypeConflict, error.kind());
+    assert_eq!(b"original", fs::read(&referent).unwrap().as_slice());
+}
+
 /// Verifies create-new rejects an existing entry before writing.
 #[test]
 fn test_local_file_writer_create_new_rejects_existing_target() {

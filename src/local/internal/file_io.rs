@@ -90,7 +90,7 @@ fn configure_nonblocking_open(options: &mut OpenOptions) {
     // replaced by a FIFO. Once handle metadata proves the object is a regular
     // file, it is cleared so the temporary defense does not become observable
     // state on the reader or writer returned to callers.
-    options.custom_flags(libc::O_NONBLOCK);
+    options.custom_flags(libc::O_NONBLOCK | libc::O_NOFOLLOW);
 }
 
 #[cfg(not(unix))]

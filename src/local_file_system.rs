@@ -221,10 +221,18 @@ impl LocalFileSystem {
                     )
                     .with_path(bound));
                 }
-                let file = fs::OpenOptions::new()
-                    .append(true)
-                    .open(&bound)
-                    .map_err(|error| {
+                let mut native_options = crate::write::OpenOptions::new(
+                    crate::write::Mode::AppendExisting,
+                );
+                if let Some(timeout) = options.open_retry_timeout() {
+                    native_options =
+                        native_options.with_open_retry_timeout(timeout);
+                }
+                let file = crate::local::open_native_writer_path(
+                    &bound,
+                    &native_options,
+                )
+                .map_err(|error| {
                         LocalFileError::from_io(
                             LocalFileOperation::OpenWriter,
                             Some(bound.clone()),
