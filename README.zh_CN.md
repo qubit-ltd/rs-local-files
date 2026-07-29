@@ -7,28 +7,11 @@
 [![License](https://img.shields.io/badge/license-Apache%202.0-blue.svg)](LICENSE)
 [![English Document](https://img.shields.io/badge/Document-English-blue.svg)](README.md)
 
-面向 Rust 的统一 native 本地文件系统操作库。
-
-## 概览
-
-Qubit Local Files 通过同一套策略化 API 提供 host-wide 与 descriptor-anchored
-本地文件系统操作。它直接接受 native `Path` 和 `OsStr`，保留平台文件名，并把
-containment、publication 及平台差异封装在本 crate 内部。
-
-主要能力包括：
-
-- 结构化本地文件系统错误和结果；
-- 文件与目录统一复制；
-- 惰性递归遍历；
-- staged publication 与显式 append 语义；
-- RAII 临时文件和临时目录；
-- descriptor/handle-relative rooted authority；
-- native 路径和文件名校验。
-
-本 crate 不依赖 `qubit-fs`。Provider-neutral 转换应由 `qubit-fs-local` 完成。
-
-完整使用说明见[用户手册](doc/user_guide.zh_CN.md)，整体契约见
-[设计文档](doc/local_file_system_design.zh_CN.md)。
+`qubit-local-files` 是面向原生本地文件系统的策略化 API，适合不满足于零散
+`std::fs` 调用的应用：它提供结构化错误上下文、明确的发布结果、惰性遍历、临时资源
+所有权，以及以已打开目录为基础的访问权限。它直接使用原生 `Path` 和 `OsStr`，不依赖
+`qubit-fs`；provider 适配由
+[`qubit-fs-local`](https://crates.io/crates/qubit-fs-local) 提供。
 
 ## 安装
 
@@ -37,94 +20,73 @@ containment、publication 及平台差异封装在本 crate 内部。
 qubit-local-files = "0.7"
 ```
 
-## 快速示例
+## 快速开始：发布生成文件
+
+构建工具和导出程序通常只有在全部字节写完后才应替换输出文件。下面的示例创建工作目录，
+通过 writer 写入清单并提交，然后读回已经发布的内容。
 
 ```rust
 use std::io::{Read, Write};
 
 use qubit_local_files::{
-    LocalFileSystem,
-    LocalReadOptions,
-    LocalTempDirectoryOptions,
-    LocalWriteMode,
-    LocalWriteOptions,
-    LocalWriterState,
+    LocalFileSystem, LocalReadOptions, LocalTempDirectoryOptions, LocalWriteMode,
+    LocalWriteOptions, LocalWriterState,
 };
 
-let work =
-    LocalFileSystem::create_temp_directory(&LocalTempDirectoryOptions::new())?;
-let path = work.path().join("state.json");
-
-let mut writer =
-    LocalFileSystem::open_writer(
-        &path,
-        &LocalWriteOptions::new(LocalWriteMode::CreateOrReplace),
-    )?;
+let work = LocalFileSystem::create_temp_directory(&LocalTempDirectoryOptions::new())?;
+let path = work.path().join("manifest.json");
+let mut writer = LocalFileSystem::open_writer(
+    &path,
+    &LocalWriteOptions::new(LocalWriteMode::CreateOrReplace),
+)?;
 writer.write_all(br#"{"version":1}"#)?;
 let outcome = writer.commit()?;
-assert_eq!(LocalWriterState::Committed, outcome.state());
+assert_eq!(outcome.state(), LocalWriterState::Committed);
 
-let mut reader =
-    LocalFileSystem::open_reader(&path, &LocalReadOptions::new())?;
 let mut content = String::new();
-reader.read_to_string(&mut content)?;
-assert_eq!(r#"{"version":1}"#, content);
-
+LocalFileSystem::open_reader(&path, &LocalReadOptions::new())?
+    .read_to_string(&mut content)?;
+assert_eq!(content, r#"{"version":1}"#);
 # Ok::<(), Box<dyn std::error::Error>>(())
 ```
 
-## 主要类型
+## 提供的能力
 
-| 类型 | 用途 |
+| API | 适用场景 |
 | --- | --- |
-| `LocalFileSystem` | Host metadata、读写、复制、遍历、创建、删除、rename 和临时资源。 |
-| `RootedLocalFileSystem` | 一个已打开 root 下的 descriptor/handle-relative authority。 |
-| `LocalFileNames` / `LocalPaths` | 不进行 lossy UTF-8 转换的 native lexical 工具。 |
-| `LocalDirectoryWalker` | 固定 depth 与 symlink 策略的惰性遍历器。 |
-| `LocalFileReader` / `LocalFileWriter` | 拥有 I/O 资源并显式报告 publication 状态。 |
-| `LocalTempFile` / `LocalTempDirectory` | 拥有 cleanup responsibility 的临时条目。 |
-| `LocalFileError` | 稳定错误分类、操作与 native path 上下文。 |
+| `LocalFileSystem` | 主机范围的元数据、I/O、复制、重命名、遍历和临时条目。 |
+| `RootedLocalFileSystem` | 限定在一个已打开目录权限下的访问。 |
+| `LocalFileWriter` | 分阶段发布后的显式提交或中止。 |
+| `LocalDirectoryWalker` | 采用创建时固定策略的惰性目录枚举。 |
+| `LocalTempFile` / `LocalTempDirectory` | 拥有清理责任，并支持 `keep` 与持久化。 |
+| `LocalFileNames` / `LocalPaths` | 不丢失 UTF-8 以外文件名信息的原生文件名和词法路径工具。 |
 
-所有无状态操作通过关联方法组织；旧的 public free-function namespace 不再属于公共 API。
+所有文件系统操作都是关联方法或有状态资源的方法；旧式的自由函数命名空间不是公共 API。
 
-## Rooted 访问
+## 选择合适的权限范围
 
-```rust
-use std::io::Read;
+主机路径使用 `LocalFileSystem`。当一个已打开目录就是权限边界时，使用
+`RootedLocalFileSystem`：每个操作路径都必须是相对后代；绝对路径、平台前缀、`.`、`..`
+和中间符号链接都会被拒绝。之后重命名诊断用的根路径也不会重定向已打开的权限。
 
-use qubit_local_files::{
-    LocalReadOptions,
-    LocalTempDirectoryOptions,
-    RootedLocalFileSystem,
-};
+复制会根据源元数据选择文件或目录行为。复制和重命名失败会保留已证实的最强发布状态，
+因此调用方必须检查类型化失败，不能假设出错后目标未变。`CreateNew` 和
+`CreateOrReplace` 在目标目录中暂存；`Append` 会直接写入已有普通文件，不能满足要求的
+原子性。
 
-let root = RootedLocalFileSystem::open(std::path::Path::new("workspace"))?;
-let _temporary = root.create_temp_directory(&LocalTempDirectoryOptions::new())?;
-let mut reader =
-    root.open_reader(std::path::Path::new("config/app.toml"), &LocalReadOptions::new())?;
-let mut content = String::new();
-reader.read_to_string(&mut content)?;
+## 延伸阅读
 
-# Ok::<(), Box<dyn std::error::Error>>(())
-```
+- [User guide](doc/user_guide.md)
+- [用户手册](doc/user_guide.zh_CN.md)
+- [API 文档](https://docs.rs/qubit-local-files)
+- [本地文件系统设计文档](doc/local_file_system_design.zh_CN.md)
+- [English README](README.md)
 
-Rooted 操作拒绝 absolute path、平台 prefix、`.` 与 `..`，并从已打开 root authority
-派生 descendant access，而不依赖之后再次查找诊断路径字符串。
+## 平台范围
 
-## 平台支持
-
-| 支持级别 | 目标 | 验证 |
-| --- | --- | --- |
-| Runtime-tested | Linux、Windows、macOS | CI 执行平台文件系统测试。 |
-| Compile-only | FreeBSD、Android | 检查 production cfg path，不宣称 runtime 保证。 |
-
-Capability snapshot 只报告当前实现能够提供的保证。无法满足 required atomicity 或
-durability 时，会在 namespace 变更前拒绝操作。
-
-## Runtime 依赖
-
-本 crate 使用 Rust 标准库、`getrandom`、`libc`、`log` 以及 target-specific
-`windows-sys` binding。
+Linux、Windows 和 macOS 的行为会在运行时测试。FreeBSD 和 Android 仅编译检查配置路径；
+本 crate 不承诺这些目标上的运行时保证。能力快照只报告所选实现确实能够提供的保证；
+无法满足要求的原子性或耐久性时，会在命名空间变更前拒绝操作。
 
 ## 测试
 
