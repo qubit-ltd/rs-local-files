@@ -5,7 +5,7 @@
 [![Crates.io](https://img.shields.io/crates/v/qubit-local-files.svg?color=blue)](https://crates.io/crates/qubit-local-files)
 [![Rust](https://img.shields.io/badge/rust-1.94+-blue.svg?logo=rust)](https://www.rust-lang.org)
 [![License](https://img.shields.io/badge/license-Apache%202.0-blue.svg)](LICENSE)
-[![English](https://img.shields.io/badge/docs-English-blue.svg)](README.md)
+[![English Document](https://img.shields.io/badge/Document-English-blue.svg)](README.md)
 
 面向 Rust 的统一 native 本地文件系统操作库。
 
@@ -129,9 +129,20 @@ durability 时，会在 namespace 变更前拒绝操作。
 ## 测试
 
 ```bash
+# 使用默认 feature 集运行测试
+cargo test
+
+# 使用项目声明的全部 feature 运行测试
 cargo test --all-features
-./align-ci.sh
+
+# 运行项目 CI 检查
 ./ci-check.sh
+
+# 生成覆盖率报告（默认只报告，不强制阈值）
+./coverage.sh
+
+# 强制执行已配置的逐源文件覆盖率阈值
+COVERAGE_ENFORCE_THRESHOLDS=1 ./coverage.sh json
 ```
 
 ## 许可证
@@ -142,8 +153,8 @@ Copyright (c) 2025 - 2026. Haixing Hu. All rights reserved.
 
 ## 贡献
 
-欢迎贡献。请同步维护公共文档和平台行为测试，并运行 `./align-ci.sh` 与
-`./ci-check.sh`。
+欢迎贡献。请遵循 Rust API 指南，及时更新公共 API 文档与测试，并在提交
+Pull Request 前运行 `./align-ci.sh`格式化代码，运行`./ci-check.sh`对齐 CI 要求。
 
 ## 作者
 

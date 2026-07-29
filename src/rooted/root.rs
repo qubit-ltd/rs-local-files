@@ -10,19 +10,37 @@
 
 use std::fs::File;
 use std::io::Result;
-#[cfg(not(any(unix, windows)))]
-use std::io::{Error, ErrorKind};
-use std::path::{Path, PathBuf};
+#[cfg(not(unix))]
+use std::io::{
+    Error,
+    ErrorKind,
+};
+use std::path::{
+    Path,
+    PathBuf,
+};
 
 use crate::copy;
 #[cfg(any(unix, windows))]
 use crate::local;
 #[cfg(not(any(unix, windows)))]
-use crate::{LocalAtomicDestinationState, LocalAtomicWriteStage};
-use crate::{atomic, read, write};
+use crate::{
+    LocalAtomicDestinationState,
+    LocalAtomicWriteStage,
+};
+use crate::{
+    atomic,
+    read,
+    write,
+};
 
 use super::path;
-use super::{Entry, Metadata, Permissions, Writer};
+use super::{
+    Entry,
+    Metadata,
+    Permissions,
+    Writer,
+};
 
 /// An opened directory descriptor that authorizes contained operations.
 #[must_use]
@@ -134,13 +152,21 @@ impl Root {
     pub fn symlink_metadata(&self, path: &path::Path) -> Result<Metadata> {
         #[cfg(unix)]
         {
-            local::read_rooted_symlink_metadata(&self.directory, &self.path, path)
-                .map(|status| Metadata::from_stat(&status))
+            local::read_rooted_symlink_metadata(
+                &self.directory,
+                &self.path,
+                path,
+            )
+            .map(|status| Metadata::from_stat(&status))
         }
         #[cfg(windows)]
         {
-            local::read_rooted_symlink_metadata(&self.directory, &self.path, path)
-                .and_then(|file| Metadata::from_open_file(&file))
+            local::read_rooted_symlink_metadata(
+                &self.directory,
+                &self.path,
+                path,
+            )
+            .and_then(|file| Metadata::from_open_file(&file))
         }
         #[cfg(not(any(unix, windows)))]
         {
@@ -160,19 +186,24 @@ impl Root {
     pub fn read_root_dir(&self) -> Result<Vec<Entry>> {
         #[cfg(unix)]
         {
-            local::read_root_directory(&self.directory, &self.path).map(|entries| {
-                entries
-                    .into_iter()
-                    .map(|(name, status)| Entry::new(name, Metadata::from_stat(&status)))
-                    .collect()
-            })
+            local::read_root_directory(&self.directory, &self.path).map(
+                |entries| {
+                    entries
+                        .into_iter()
+                        .map(|(name, status)| {
+                            Entry::new(name, Metadata::from_stat(&status))
+                        })
+                        .collect()
+                },
+            )
         }
         #[cfg(windows)]
         {
             local::read_root_directory(&self.directory, &self.path)?
                 .into_iter()
                 .map(|(name, file)| {
-                    Metadata::from_open_file(&file).map(|metadata| Entry::new(name, metadata))
+                    Metadata::from_open_file(&file)
+                        .map(|metadata| Entry::new(name, metadata))
                 })
                 .collect()
         }
@@ -193,19 +224,24 @@ impl Root {
     pub fn read_dir(&self, path: &path::Path) -> Result<Vec<Entry>> {
         #[cfg(unix)]
         {
-            local::read_rooted_directory(&self.directory, &self.path, path).map(|entries| {
-                entries
-                    .into_iter()
-                    .map(|(name, status)| Entry::new(name, Metadata::from_stat(&status)))
-                    .collect()
-            })
+            local::read_rooted_directory(&self.directory, &self.path, path).map(
+                |entries| {
+                    entries
+                        .into_iter()
+                        .map(|(name, status)| {
+                            Entry::new(name, Metadata::from_stat(&status))
+                        })
+                        .collect()
+                },
+            )
         }
         #[cfg(windows)]
         {
             local::read_rooted_directory(&self.directory, &self.path, path)?
                 .into_iter()
                 .map(|(name, file)| {
-                    Metadata::from_open_file(&file).map(|metadata| Entry::new(name, metadata))
+                    Metadata::from_open_file(&file)
+                        .map(|metadata| Entry::new(name, metadata))
                 })
                 .collect()
         }
@@ -227,7 +263,13 @@ impl Root {
     pub fn create_dir(&self, path: &path::Path) -> Result<()> {
         #[cfg(any(unix, windows))]
         {
-            local::create_rooted_directory(&self.directory, &self.path, path, false, false)
+            local::create_rooted_directory(
+                &self.directory,
+                &self.path,
+                path,
+                false,
+                false,
+            )
         }
         #[cfg(not(any(unix, windows)))]
         {
@@ -248,7 +290,13 @@ impl Root {
     pub fn create_dir_all(&self, path: &path::Path) -> Result<()> {
         #[cfg(any(unix, windows))]
         {
-            local::create_rooted_directory(&self.directory, &self.path, path, true, true)
+            local::create_rooted_directory(
+                &self.directory,
+                &self.path,
+                path,
+                true,
+                true,
+            )
         }
         #[cfg(not(any(unix, windows)))]
         {
@@ -268,7 +316,13 @@ impl Root {
     pub fn ensure_dir(&self, path: &path::Path) -> Result<()> {
         #[cfg(any(unix, windows))]
         {
-            local::create_rooted_directory(&self.directory, &self.path, path, false, true)
+            local::create_rooted_directory(
+                &self.directory,
+                &self.path,
+                path,
+                false,
+                true,
+            )
         }
         #[cfg(not(any(unix, windows)))]
         {
@@ -297,7 +351,9 @@ impl Root {
     pub fn remove_file(&self, path: &path::Path) -> Result<()> {
         #[cfg(any(unix, windows))]
         {
-            if self.symlink_metadata(path)?.kind() == super::EntryKind::Directory {
+            if self.symlink_metadata(path)?.kind()
+                == super::EntryKind::Directory
+            {
                 return Err(std::io::Error::new(
                     std::io::ErrorKind::IsADirectory,
                     "rooted remove_file does not remove directories",
@@ -322,7 +378,9 @@ impl Root {
     pub fn remove_empty_dir(&self, path: &path::Path) -> Result<()> {
         #[cfg(any(unix, windows))]
         {
-            if self.symlink_metadata(path)?.kind() != super::EntryKind::Directory {
+            if self.symlink_metadata(path)?.kind()
+                != super::EntryKind::Directory
+            {
                 return Err(std::io::Error::new(
                     std::io::ErrorKind::NotADirectory,
                     "rooted remove_empty_dir requires a directory",
@@ -347,7 +405,9 @@ impl Root {
     pub fn remove_tree(&self, path: &path::Path) -> Result<()> {
         #[cfg(any(unix, windows))]
         {
-            if self.symlink_metadata(path)?.kind() != super::EntryKind::Directory {
+            if self.symlink_metadata(path)?.kind()
+                != super::EntryKind::Directory
+            {
                 return Err(std::io::Error::new(
                     std::io::ErrorKind::NotADirectory,
                     "rooted remove_tree requires a directory",
@@ -370,10 +430,20 @@ impl Root {
     /// # Errors
     /// Returns an I/O error when secure traversal or the requested atomic
     /// rename fails.
-    pub fn rename(&self, source: &path::Path, destination: &path::Path) -> Result<()> {
+    pub fn rename(
+        &self,
+        source: &path::Path,
+        destination: &path::Path,
+    ) -> Result<()> {
         #[cfg(any(unix, windows))]
         {
-            local::rename_rooted_entry(&self.directory, &self.path, source, destination, true)
+            local::rename_rooted_entry(
+                &self.directory,
+                &self.path,
+                source,
+                destination,
+                true,
+            )
         }
         #[cfg(not(any(unix, windows)))]
         {
@@ -397,7 +467,13 @@ impl Root {
     ) -> Result<()> {
         #[cfg(any(unix, windows))]
         {
-            local::rename_rooted_entry(&self.directory, &self.path, source, destination, false)
+            local::rename_rooted_entry(
+                &self.directory,
+                &self.path,
+                source,
+                destination,
+                false,
+            )
         }
         #[cfg(not(any(unix, windows)))]
         {
@@ -414,7 +490,11 @@ impl Root {
     /// # Errors
     /// Returns an I/O error when traversal cannot remain beneath the opened
     /// root or the permission update fails.
-    pub fn set_permissions(&self, path: &path::Path, permissions: Permissions) -> Result<()> {
+    pub fn set_permissions(
+        &self,
+        path: &path::Path,
+        permissions: Permissions,
+    ) -> Result<()> {
         #[cfg(unix)]
         {
             let current_mode = self
@@ -423,12 +503,22 @@ impl Root {
                 .unix_mode()
                 .expect("Unix rooted metadata always carries a mode");
             let mode = permissions.resolve_unix_mode(current_mode);
-            local::set_rooted_permissions(&self.directory, &self.path, path, mode)
+            local::set_rooted_permissions(
+                &self.directory,
+                &self.path,
+                path,
+                mode,
+            )
         }
         #[cfg(windows)]
         {
             let mode = if permissions.is_read_only() { 0 } else { 0o200 };
-            local::set_rooted_permissions(&self.directory, &self.path, path, mode)
+            local::set_rooted_permissions(
+                &self.directory,
+                &self.path,
+                path,
+                mode,
+            )
         }
         #[cfg(not(any(unix, windows)))]
         {
@@ -445,10 +535,19 @@ impl Root {
     /// # Errors
     /// Returns an I/O error when traversal escapes through a link or the file
     /// cannot be opened.
-    pub fn open_reader(&self, path: &path::Path, options: &read::OpenOptions) -> Result<File> {
+    pub fn open_reader(
+        &self,
+        path: &path::Path,
+        options: &read::OpenOptions,
+    ) -> Result<File> {
         #[cfg(any(unix, windows))]
         {
-            local::open_rooted_native_reader(&self.directory, &self.path, path, options)
+            local::open_rooted_native_reader(
+                &self.directory,
+                &self.path,
+                path,
+                options,
+            )
         }
         #[cfg(not(any(unix, windows)))]
         {
@@ -465,10 +564,19 @@ impl Root {
     /// # Errors
     /// Returns an I/O error when traversal escapes through a link or the file
     /// cannot be opened with the requested mode.
-    pub fn open_writer(&self, path: &path::Path, options: &write::OpenOptions) -> Result<File> {
+    pub fn open_writer(
+        &self,
+        path: &path::Path,
+        options: &write::OpenOptions,
+    ) -> Result<File> {
         #[cfg(any(unix, windows))]
         {
-            local::open_rooted_native_writer(&self.directory, &self.path, path, options)
+            local::open_rooted_native_writer(
+                &self.directory,
+                &self.path,
+                path,
+                options,
+            )
         }
         #[cfg(not(any(unix, windows)))]
         {
@@ -498,7 +606,10 @@ impl Root {
         &self,
         path: &path::Path,
     ) -> std::result::Result<Writer, atomic::Error> {
-        self.begin_atomic_write_with_options(path, atomic::Options::new().with_parent())
+        self.begin_atomic_write_with_options(
+            path,
+            atomic::Options::new().with_parent(),
+        )
     }
 
     /// Begins a descriptor-relative atomic replacement with explicit options.

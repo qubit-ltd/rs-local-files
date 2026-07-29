@@ -135,9 +135,20 @@ target-specific `windows-sys` bindings.
 ## Testing
 
 ```bash
+# Run tests with the default feature set
+cargo test
+
+# Run tests with all declared features
 cargo test --all-features
-./align-ci.sh
+
+# Project CI checks
 ./ci-check.sh
+
+# Generate a coverage report (thresholds are reported but not enforced by default)
+./coverage.sh
+
+# Enforce the configured per-source coverage thresholds
+COVERAGE_ENFORCE_THRESHOLDS=1 ./coverage.sh json
 ```
 
 ## License
@@ -149,8 +160,9 @@ full license text.
 
 ## Contributing
 
-Contributions are welcome. Keep public documentation and platform behavior
-tests current, then run `./align-ci.sh` and `./ci-check.sh`.
+Contributions are welcome. Please follow the Rust API guidelines, keep public
+API documentation and tests current, and run `./align-ci.sh` to format code and
+`./ci-check.sh` to satisfy CI requirements before submitting a pull request.
 
 ## Author
 

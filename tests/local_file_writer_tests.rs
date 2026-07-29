@@ -6,17 +6,35 @@
 //    Licensed under the Apache License, Version 2.0.
 // =============================================================================
 
-use std::{env, fs, io::Write, process::Command};
+#[cfg(unix)]
+use std::{
+    env,
+    process::Command,
+};
+use std::{
+    fs,
+    io::Write,
+};
 
 use qubit_local_files::{
-    LocalAtomicityRequirement, LocalDurabilityRequirement, LocalFileErrorKind, LocalFileSystem,
-    LocalMutationState, LocalWriteMode, LocalWriteOptions, LocalWriterState,
+    LocalAtomicityRequirement,
+    LocalFileErrorKind,
+    LocalFileSystem,
+    LocalWriteMode,
+    LocalWriteOptions,
+    LocalWriterState,
+};
+#[cfg(unix)]
+use qubit_local_files::{
+    LocalDurabilityRequirement,
+    LocalMutationState,
 };
 use tempfile::tempdir;
 
 /// Environment switch used by the file-size-limit subprocess regression.
 #[cfg(unix)]
-const INDETERMINATE_APPEND_CASE: &str = "QUBIT_LOCAL_FILES_INDETERMINATE_APPEND_CASE";
+const INDETERMINATE_APPEND_CASE: &str =
+    "QUBIT_LOCAL_FILES_INDETERMINATE_APPEND_CASE";
 
 /// Verifies staged replacement is invisible until commit.
 #[test]
@@ -102,9 +120,11 @@ fn test_local_file_writer_append_rejects_target_symlink() {
     fs::write(&referent, b"original").expect("referent should be written");
     symlink(&referent, &target).expect("target symlink should be created");
 
-    let error =
-        LocalFileSystem::open_writer(&target, &LocalWriteOptions::new(LocalWriteMode::Append))
-            .expect_err("append must not follow a final symlink");
+    let error = LocalFileSystem::open_writer(
+        &target,
+        &LocalWriteOptions::new(LocalWriteMode::Append),
+    )
+    .expect_err("append must not follow a final symlink");
 
     assert_eq!(LocalFileErrorKind::TypeConflict, error.kind());
     assert_eq!(b"original", fs::read(&referent).unwrap().as_slice());
@@ -117,9 +137,11 @@ fn test_local_file_writer_create_new_rejects_existing_target() {
     let target = directory.path().join("target");
     fs::write(&target, b"old").expect("target fixture should be written");
 
-    let error =
-        LocalFileSystem::open_writer(&target, &LocalWriteOptions::new(LocalWriteMode::CreateNew))
-            .expect_err("create-new must reject the existing target");
+    let error = LocalFileSystem::open_writer(
+        &target,
+        &LocalWriteOptions::new(LocalWriteMode::CreateNew),
+    )
+    .expect_err("create-new must reject the existing target");
 
     assert_eq!(LocalFileErrorKind::AlreadyExists, error.kind());
 }
@@ -130,13 +152,16 @@ fn test_local_file_writer_create_new_rejects_existing_target() {
 fn test_local_file_writer_create_new_preserves_concurrent_target() {
     let directory = tempdir().expect("temporary directory should be created");
     let target = directory.path().join("target");
-    let mut writer =
-        LocalFileSystem::open_writer(&target, &LocalWriteOptions::new(LocalWriteMode::CreateNew))
-            .expect("create-new staging should open for an absent target");
+    let mut writer = LocalFileSystem::open_writer(
+        &target,
+        &LocalWriteOptions::new(LocalWriteMode::CreateNew),
+    )
+    .expect("create-new staging should open for an absent target");
     writer
         .write_all(b"staged")
         .expect("staged bytes should be written");
-    fs::write(&target, b"concurrent").expect("concurrent target should be created");
+    fs::write(&target, b"concurrent")
+        .expect("concurrent target should be created");
 
     let error = writer
         .commit()
@@ -211,7 +236,8 @@ fn test_local_file_writer_reports_parent_sync_result() {
         let target = parent.join("target");
         let mut writer = LocalFileSystem::open_writer(
             &target,
-            &LocalWriteOptions::new(LocalWriteMode::CreateNew).with_durability(requirement),
+            &LocalWriteOptions::new(LocalWriteMode::CreateNew)
+                .with_durability(requirement),
         )
         .expect("staged writer should open before permissions change");
         writer
@@ -221,7 +247,9 @@ fn test_local_file_writer_reports_parent_sync_result() {
             .expect("parent should reject read-only directory opens");
         match requirement {
             LocalDurabilityRequirement::Preferred => {
-                let outcome = writer.commit().expect("preferred durability may downgrade");
+                let outcome = writer
+                    .commit()
+                    .expect("preferred durability may downgrade");
                 assert!(!outcome.durable());
             }
             LocalDurabilityRequirement::Required => {
@@ -259,7 +287,8 @@ fn test_local_file_writer_append_preserves_indeterminate_state() {
         run_indeterminate_append_case(&case);
         return;
     }
-    let executable = env::current_exe().expect("current test executable should resolve");
+    let executable =
+        env::current_exe().expect("current test executable should resolve");
     for case in ["commit", "abort"] {
         let status = Command::new(&executable)
             .arg("--exact")
@@ -281,13 +310,22 @@ fn run_indeterminate_append_case(case: &str) {
     let directory = tempdir().expect("temporary directory should be created");
     let target = directory.path().join("target");
     fs::write(&target, b"existing").expect("target fixture should be written");
-    // SAFETY: this test runs in an isolated child process. Ignoring SIGXFSZ
-    // converts the process file-size limit into an ordinary write error.
+    let mut original_limit = libc::rlimit {
+        rlim_cur: 0,
+        rlim_max: 0,
+    };
+    // SAFETY: the child process owns its resource limit. Ignoring SIGXFSZ
+    // converts the temporary zero-byte limit into an ordinary write error.
     unsafe {
         libc::signal(libc::SIGXFSZ, libc::SIG_IGN);
+        assert_eq!(
+            0,
+            libc::getrlimit(libc::RLIMIT_FSIZE, &raw mut original_limit),
+            "child process file-size limit should be readable",
+        );
         let limit = libc::rlimit {
             rlim_cur: 0,
-            rlim_max: 0,
+            rlim_max: original_limit.rlim_max,
         };
         assert_eq!(
             0,
@@ -295,9 +333,11 @@ fn run_indeterminate_append_case(case: &str) {
             "child process file-size limit should be installed",
         );
     }
-    let mut writer =
-        LocalFileSystem::open_writer(&target, &LocalWriteOptions::new(LocalWriteMode::Append))
-            .expect("append writer should open before the failing write");
+    let mut writer = LocalFileSystem::open_writer(
+        &target,
+        &LocalWriteOptions::new(LocalWriteMode::Append),
+    )
+    .expect("append writer should open before the failing write");
     writer
         .write_all(b"x")
         .expect_err("zero file-size limit should reject append");
@@ -316,5 +356,14 @@ fn run_indeterminate_append_case(case: &str) {
             assert_eq!(LocalWriterState::Indeterminate, outcome.state());
         }
         other => panic!("unexpected append regression case: {other}"),
+    }
+    // SAFETY: restoring the saved soft limit lets coverage-instrumented child
+    // processes flush their profile after the regression assertions complete.
+    unsafe {
+        assert_eq!(
+            0,
+            libc::setrlimit(libc::RLIMIT_FSIZE, &raw const original_limit),
+            "child process file-size limit should be restored",
+        );
     }
 }
