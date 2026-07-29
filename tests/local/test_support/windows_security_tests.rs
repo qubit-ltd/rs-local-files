@@ -9,19 +9,42 @@
 //! Native Windows security and alternate-stream fixtures.
 
 use std::ffi::OsString;
-use std::io::{Error, ErrorKind, Result};
+use std::io::{
+    Error,
+    ErrorKind,
+    Result,
+};
 use std::mem::size_of;
-use std::os::windows::ffi::{OsStrExt, OsStringExt};
-use std::path::{Path, PathBuf};
+use std::os::windows::ffi::{
+    OsStrExt,
+    OsStringExt,
+};
+use std::path::{
+    Path,
+    PathBuf,
+};
 
 use windows_sys::Win32::Security::{
-    ACCESS_ALLOWED_ACE, ACL, ACL_REVISION, AddAccessAllowedAce, CreateWellKnownSid,
-    DACL_SECURITY_INFORMATION, GetFileSecurityW, InitializeAcl, InitializeSecurityDescriptor,
-    SECURITY_DESCRIPTOR, SECURITY_MAX_SID_SIZE, SetFileSecurityW, SetSecurityDescriptorDacl,
+    ACCESS_ALLOWED_ACE,
+    ACL,
+    ACL_REVISION,
+    AddAccessAllowedAce,
+    CreateWellKnownSid,
+    DACL_SECURITY_INFORMATION,
+    GetFileSecurityW,
+    InitializeAcl,
+    InitializeSecurityDescriptor,
+    SECURITY_DESCRIPTOR,
+    SECURITY_MAX_SID_SIZE,
+    SetFileSecurityW,
+    SetSecurityDescriptorDacl,
     WinWorldSid,
 };
 use windows_sys::Win32::Storage::FileSystem::{
-    FILE_ALL_ACCESS, FILE_ATTRIBUTE_READONLY, GetFileAttributesW, INVALID_FILE_ATTRIBUTES,
+    FILE_ALL_ACCESS,
+    FILE_ATTRIBUTE_READONLY,
+    GetFileAttributesW,
+    INVALID_FILE_ATTRIBUTES,
     SetFileAttributesW,
 };
 
@@ -36,8 +59,14 @@ pub(crate) fn set_world_full_control_dacl(path: &Path) -> Result<()> {
     // SAFETY: `sid_storage` is aligned and writable for `sid_size` bytes, the
     // size pointer remains live, and a null domain SID is valid for this well-
     // known SID type.
-    let created =
-        unsafe { CreateWellKnownSid(WinWorldSid, std::ptr::null_mut(), sid, &raw mut sid_size) };
+    let created = unsafe {
+        CreateWellKnownSid(
+            WinWorldSid,
+            std::ptr::null_mut(),
+            sid,
+            &raw mut sid_size,
+        )
+    };
     if created == 0 {
         return Err(Error::last_os_error());
     }
@@ -47,8 +76,9 @@ pub(crate) fn set_world_full_control_dacl(path: &Path) -> Result<()> {
         .and_then(|size| size.checked_sub(size_of::<u32>()))
         .and_then(|size| size.checked_add(sid_size as usize))
         .ok_or_else(|| Error::other("Windows ACL fixture size overflow"))?;
-    let acl_size = u32::try_from(acl_size)
-        .map_err(|_| Error::new(ErrorKind::InvalidInput, "Windows ACL fixture is too large"))?;
+    let acl_size = u32::try_from(acl_size).map_err(|_| {
+        Error::new(ErrorKind::InvalidInput, "Windows ACL fixture is too large")
+    })?;
     let mut acl_storage = aligned_storage(acl_size)?;
     let acl = acl_storage.as_mut_ptr().cast::<ACL>();
     // SAFETY: `acl_storage` is aligned and writable for `acl_size` bytes, and
@@ -59,7 +89,8 @@ pub(crate) fn set_world_full_control_dacl(path: &Path) -> Result<()> {
     }
     // SAFETY: `acl` is initialized with sufficient storage, `sid` is a live
     // well-known SID, and FILE_ALL_ACCESS is a valid file access mask.
-    let added = unsafe { AddAccessAllowedAce(acl, ACL_REVISION, FILE_ALL_ACCESS, sid) };
+    let added =
+        unsafe { AddAccessAllowedAce(acl, ACL_REVISION, FILE_ALL_ACCESS, sid) };
     if added == 0 {
         return Err(Error::last_os_error());
     }
@@ -68,14 +99,19 @@ pub(crate) fn set_world_full_control_dacl(path: &Path) -> Result<()> {
     // SAFETY: `descriptor` is writable and remains live through the calls that
     // initialize it, attach the live ACL, and synchronously apply it.
     let initialized = unsafe {
-        InitializeSecurityDescriptor((&raw mut descriptor).cast(), SECURITY_DESCRIPTOR_REVISION)
+        InitializeSecurityDescriptor(
+            (&raw mut descriptor).cast(),
+            SECURITY_DESCRIPTOR_REVISION,
+        )
     };
     if initialized == 0 {
         return Err(Error::last_os_error());
     }
     // SAFETY: `descriptor` and `acl` remain live, the DACL is present, and it
     // is explicitly marked as not defaulted.
-    let attached = unsafe { SetSecurityDescriptorDacl((&raw mut descriptor).cast(), 1, acl, 0) };
+    let attached = unsafe {
+        SetSecurityDescriptorDacl((&raw mut descriptor).cast(), 1, acl, 0)
+    };
     if attached == 0 {
         return Err(Error::last_os_error());
     }
@@ -131,13 +167,20 @@ pub(crate) fn read_dacl_bytes(path: &Path) -> Result<Vec<u8>> {
     }
     // SAFETY: the returned descriptor initialized exactly `needed` bytes in
     // the aligned allocation, which remains live while the slice is copied.
-    let bytes =
-        unsafe { std::slice::from_raw_parts(storage.as_ptr().cast::<u8>(), needed as usize) };
+    let bytes = unsafe {
+        std::slice::from_raw_parts(
+            storage.as_ptr().cast::<u8>(),
+            needed as usize,
+        )
+    };
     Ok(bytes.to_vec())
 }
 
 /// Builds the path syntax for a named alternate data stream.
-pub(crate) fn alternate_data_stream_path(path: &Path, stream_name: &str) -> PathBuf {
+pub(crate) fn alternate_data_stream_path(
+    path: &Path,
+    stream_name: &str,
+) -> PathBuf {
     let mut units: Vec<u16> = path.as_os_str().encode_wide().collect();
     units.push(u16::from(b':'));
     units.extend(stream_name.encode_utf16());
@@ -155,8 +198,9 @@ pub(crate) fn clear_readonly_attribute(path: &Path) -> Result<()> {
     }
     // SAFETY: the path remains live and the flags came from the same entry,
     // with only the documented read-only bit cleared.
-    let updated =
-        unsafe { SetFileAttributesW(path.as_ptr(), attributes & !FILE_ATTRIBUTE_READONLY) };
+    let updated = unsafe {
+        SetFileAttributesW(path.as_ptr(), attributes & !FILE_ATTRIBUTE_READONLY)
+    };
     if updated == 0 {
         return Err(Error::last_os_error());
     }

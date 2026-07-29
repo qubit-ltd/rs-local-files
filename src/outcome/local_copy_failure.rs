@@ -10,13 +10,24 @@
 
 use std::{
     error::Error,
-    fmt::{Display, Formatter, Result as FmtResult},
+    fmt::{
+        Display,
+        Formatter,
+        Result as FmtResult,
+    },
     io,
-    path::{Path, PathBuf},
+    path::{
+        Path,
+        PathBuf,
+    },
 };
 
 use crate::{
-    LocalCopyDirError, LocalCopyDirStage, LocalCopyStats, LocalFileError, LocalFileOperation,
+    LocalCopyDirError,
+    LocalCopyDirStage,
+    LocalCopyStats,
+    LocalFileError,
+    LocalFileOperation,
 };
 
 use super::LocalCopyFailureState;
@@ -83,8 +94,15 @@ impl LocalCopyFailure {
         target: &Path,
         error: LocalCopyDirError,
     ) -> Self {
-        let (stage, _failed_source, _failed_target, stats, staging_path, cleanup_error, primary) =
-            error.into_parts();
+        let (
+            stage,
+            _failed_source,
+            _failed_target,
+            stats,
+            staging_path,
+            cleanup_error,
+            primary,
+        ) = error.into_parts();
         let partial_stats = LocalCopyStats::from_internal(stats);
         let state = copy_failure_state(stage, partial_stats);
         let primary_kind = primary.kind();
@@ -179,12 +197,16 @@ const fn copy_failure_state(
         LocalCopyDirStage::InspectSource
         | LocalCopyDirStage::InspectSourceEntry
         | LocalCopyDirStage::ReadSourceDirectory
-        | LocalCopyDirStage::CleanupTemporaryFile => LocalCopyFailureState::Unchanged,
+        | LocalCopyDirStage::CleanupTemporaryFile => {
+            LocalCopyFailureState::Unchanged
+        }
         LocalCopyDirStage::PrepareDestination
         | LocalCopyDirStage::CopyFileContents
         | LocalCopyDirStage::PreservePermissions
         | LocalCopyDirStage::CommitFile
-        | LocalCopyDirStage::UpdateStatistics => LocalCopyFailureState::Indeterminate,
+        | LocalCopyDirStage::UpdateStatistics => {
+            LocalCopyFailureState::Indeterminate
+        }
     }
 }
 

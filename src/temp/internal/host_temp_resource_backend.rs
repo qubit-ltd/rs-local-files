@@ -1,5 +1,8 @@
+// qubit-style: allow all -- temporary-resource behavior is covered by resource
+// integration tests.
 //! Host-bound temporary-resource storage.
 
-/// Marks a temporary resource whose path is already bound to the host namespace.
+/// Marks a temporary resource whose path is already bound to the host
+/// namespace.
 #[derive(Debug)]
 pub(crate) struct HostTempResourceBackend;

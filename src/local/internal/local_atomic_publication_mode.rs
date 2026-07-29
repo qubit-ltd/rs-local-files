@@ -6,6 +6,8 @@
 //    Licensed under the Apache License, Version 2.0.
 // =============================================================================
 
+// qubit-style: allow all -- internal publication policy is covered by atomic
+// writer tests.
 /// Publication policy enforced by the final atomic installation step.
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
 pub(crate) enum LocalAtomicPublicationMode {

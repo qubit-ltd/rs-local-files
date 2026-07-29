@@ -11,7 +11,11 @@
 // Public APIs retain live descriptors and cannot force these interleavings.
 
 use std::fs;
-use std::io::{Error, ErrorKind, Result};
+use std::io::{
+    Error,
+    ErrorKind,
+    Result,
+};
 use std::path::Path;
 
 use super::io_result_context::with_path_context;
@@ -35,9 +39,13 @@ use super::rooted_file_io::rooted_type_error;
 /// # Errors
 ///
 /// Returns a contextual operating-system error for any other negative result.
-pub(super) fn normalize_mkdirat_result(result: libc::c_int, diagnostic_path: &Path) -> Result<()> {
+pub(super) fn normalize_mkdirat_result(
+    result: libc::c_int,
+    diagnostic_path: &Path,
+) -> Result<()> {
     #[cfg(coverage)]
-    let injected_error = super::coverage_fault::is_enabled("rooted-mkdir-error");
+    let injected_error =
+        super::coverage_fault::is_enabled("rooted-mkdir-error");
     #[cfg(not(coverage))]
     let injected_error = false;
     if result == -1 || injected_error {
@@ -73,7 +81,10 @@ pub(super) fn normalize_mkdirat_result(result: libc::c_int, diagnostic_path: &Pa
 ///
 /// Returns a contextual operating-system error when the entry was not merely
 /// absent.
-pub(super) fn missing_rooted_entry(error: Error, diagnostic_path: &Path) -> Result<()> {
+pub(super) fn missing_rooted_entry(
+    error: Error,
+    diagnostic_path: &Path,
+) -> Result<()> {
     #[cfg(coverage)]
     let error = if super::coverage_fault::is_enabled("rooted-entry-inspect") {
         Error::from_raw_os_error(libc::EIO)
@@ -112,11 +123,12 @@ pub(super) fn normalize_opened_directory_metadata(
     diagnostic_path: &Path,
 ) -> Result<()> {
     #[cfg(coverage)]
-    let result = if super::coverage_fault::is_enabled("rooted-directory-metadata") {
-        Err(Error::from_raw_os_error(libc::EIO))
-    } else {
-        result
-    };
+    let result =
+        if super::coverage_fault::is_enabled("rooted-directory-metadata") {
+            Err(Error::from_raw_os_error(libc::EIO))
+        } else {
+            result
+        };
     let metadata = with_path_context(result, operation, diagnostic_path)?;
     if !metadata.is_dir() || rooted_directory_type_fault_enabled() {
         return Err(rooted_type_error(diagnostic_path, "directory"));
@@ -149,7 +161,11 @@ pub(super) fn normalize_opened_regular_file_metadata(
     } else {
         result
     };
-    let metadata = with_path_context(result, "inspect rooted file handle", diagnostic_path)?;
+    let metadata = with_path_context(
+        result,
+        "inspect rooted file handle",
+        diagnostic_path,
+    )?;
     if !metadata.is_file() || rooted_file_type_fault_enabled() {
         return Err(rooted_type_error(diagnostic_path, "regular file"));
     }

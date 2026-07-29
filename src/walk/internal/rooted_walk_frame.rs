@@ -8,7 +8,10 @@
 // qubit-style: allow source-test-pair
 // Covered by rooted walker integration tests.
 
-use std::{path::PathBuf, vec::IntoIter};
+use std::{
+    path::PathBuf,
+    vec::IntoIter,
+};
 
 use crate::rooted::Entry;
 

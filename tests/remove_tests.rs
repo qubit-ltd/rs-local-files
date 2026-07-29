@@ -11,7 +11,8 @@
 /// Verifies file removal uses the responsibility module.
 #[test]
 fn test_remove_file_removes_existing_file() {
-    let file = tempfile::NamedTempFile::new().expect("a temporary file should exist");
+    let file =
+        tempfile::NamedTempFile::new().expect("a temporary file should exist");
     let path = file
         .into_temp_path()
         .keep()
@@ -22,7 +23,8 @@ fn test_remove_file_removes_existing_file() {
 /// Verifies directory and type-directed removal entry points.
 #[test]
 fn test_remove_directory_entry_points() {
-    let directory = tempfile::tempdir().expect("a temporary directory should exist");
+    let directory =
+        tempfile::tempdir().expect("a temporary directory should exist");
 
     let empty = directory.path().join("empty");
     std::fs::create_dir(&empty).expect("the empty directory should be created");
@@ -31,10 +33,13 @@ fn test_remove_directory_entry_points() {
 
     let tree = directory.path().join("tree");
     std::fs::create_dir(&tree).expect("the tree should be created");
-    std::fs::write(tree.join("payload"), b"payload").expect("the tree fixture should be written");
-    qubit_local_files::remove::directory_tree(&tree).expect("the tree should be removed");
+    std::fs::write(tree.join("payload"), b"payload")
+        .expect("the tree fixture should be written");
+    qubit_local_files::remove::directory_tree(&tree)
+        .expect("the tree should be removed");
 
     let any = directory.path().join("any");
     std::fs::write(&any, b"payload").expect("the file should be written");
-    qubit_local_files::remove::any(&any).expect("type-directed removal should remove the file");
+    qubit_local_files::remove::any(&any)
+        .expect("type-directed removal should remove the file");
 }

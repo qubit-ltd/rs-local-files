@@ -8,14 +8,18 @@
 
 use std::ffi::OsStr;
 
-use qubit_local_files::{LocalPathCodec, LocalPathCodecError};
+use qubit_local_files::{
+    LocalPathCodec,
+    LocalPathCodecError,
+};
 
 /// Verifies native Unicode is retained while percent signs and controls use
 /// canonical uppercase escaped bytes.
 #[test]
 fn test_decode_preserves_unicode_and_escapes_percent_and_control_bytes() {
     assert_eq!(
-        LocalPathCodec::decode(OsStr::new("文档%name\n")).expect("native component should decode"),
+        LocalPathCodec::decode(OsStr::new("文档%name\n"))
+            .expect("native component should decode"),
         "文档%25name%0A",
     );
 }
@@ -48,15 +52,18 @@ fn test_encode_rejects_malformed_escape() {
 fn test_unix_non_utf8_native_bytes_round_trip() {
     use std::{
         ffi::OsString,
-        os::unix::ffi::{OsStrExt, OsStringExt},
+        os::unix::ffi::{
+            OsStrExt,
+            OsStringExt,
+        },
     };
 
     let native = OsString::from_vec(vec![0x66, 0x80, 0x25]);
-    let decoded =
-        LocalPathCodec::decode(&native).expect("non-UTF-8 native component should decode");
+    let decoded = LocalPathCodec::decode(&native)
+        .expect("non-UTF-8 native component should decode");
     assert_eq!(decoded, "f%80%25");
-    let encoded =
-        LocalPathCodec::encode(&decoded).expect("canonical native component should encode");
+    let encoded = LocalPathCodec::encode(&decoded)
+        .expect("canonical native component should encode");
     assert_eq!(encoded.as_bytes(), [0x66, 0x80, 0x25]);
 }
 
@@ -67,14 +74,17 @@ fn test_unix_non_utf8_native_bytes_round_trip() {
 fn test_windows_unpaired_surrogate_round_trip() {
     use std::{
         ffi::OsString,
-        os::windows::ffi::{OsStrExt, OsStringExt},
+        os::windows::ffi::{
+            OsStrExt,
+            OsStringExt,
+        },
     };
 
     let native = OsString::from_wide(&[0x0066, 0xD800, 0x0025]);
-    let decoded =
-        LocalPathCodec::decode(&native).expect("unpaired surrogate native component should decode");
-    let encoded =
-        LocalPathCodec::encode(&decoded).expect("canonical native component should encode");
+    let decoded = LocalPathCodec::decode(&native)
+        .expect("unpaired surrogate native component should decode");
+    let encoded = LocalPathCodec::encode(&decoded)
+        .expect("canonical native component should encode");
     assert_eq!(
         encoded.encode_wide().collect::<Vec<_>>(),
         [0x0066, 0xD800, 0x0025]

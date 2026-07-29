@@ -1,6 +1,11 @@
+// qubit-style: allow all -- paired internal state types form one
+// temporary-resource boundary.
 //! Shared authority marker for unified temporary resources.
 
-use super::{HostTempResourceBackend, RootedTempResourceBackend};
+use super::{
+    HostTempResourceBackend,
+    RootedTempResourceBackend,
+};
 
 /// Identifies whether a temporary resource is host- or descriptor-relative.
 #[derive(Debug)]

@@ -9,7 +9,10 @@
 #[cfg(target_os = "linux")]
 use std::env;
 #[cfg(unix)]
-use std::io::{IoSlice, Write};
+use std::io::{
+    IoSlice,
+    Write,
+};
 #[cfg(target_os = "linux")]
 use std::path::PathBuf;
 #[cfg(target_os = "linux")]
@@ -19,7 +22,10 @@ use std::time::Duration;
 
 #[cfg(unix)]
 use super::api_tests::{
-    LocalAtomicDestinationState, LocalAtomicWriteOptions, LocalAtomicWriteStage, LocalRelativePath,
+    LocalAtomicDestinationState,
+    LocalAtomicWriteOptions,
+    LocalAtomicWriteStage,
+    LocalRelativePath,
     LocalRoot,
 };
 
@@ -28,30 +34,42 @@ use super::test_support::SourceReadLease;
 #[cfg(all(coverage, target_os = "linux"))]
 use super::test_support::run_in_coverage_fault_process;
 #[cfg(unix)]
-use super::test_support::{count_atomic_temp_files, fs, temp_dir};
+use super::test_support::{
+    count_atomic_temp_files,
+    fs,
+    temp_dir,
+};
 #[cfg(any(
     target_os = "linux",
     target_os = "android",
     target_os = "macos",
     target_os = "freebsd",
 ))]
-use super::test_support::{get_user_xattr, set_user_xattr};
+use super::test_support::{
+    get_user_xattr,
+    set_user_xattr,
+};
 
 #[cfg(target_os = "linux")]
-const ROOTED_ATOMIC_SYNC_CHILD_ENV: &str = "QUBIT_LOCAL_FILES_ROOTED_ATOMIC_SYNC_CHILD";
+const ROOTED_ATOMIC_SYNC_CHILD_ENV: &str =
+    "QUBIT_LOCAL_FILES_ROOTED_ATOMIC_SYNC_CHILD";
 #[cfg(target_os = "linux")]
-const ROOTED_ATOMIC_SYNC_ROOT_ENV: &str = "QUBIT_LOCAL_FILES_ROOTED_ATOMIC_SYNC_ROOT";
+const ROOTED_ATOMIC_SYNC_ROOT_ENV: &str =
+    "QUBIT_LOCAL_FILES_ROOTED_ATOMIC_SYNC_ROOT";
 
 #[cfg(unix)]
 #[test]
 fn test_begin_atomic_write_with_options_rejects_missing_parent() {
     let root_path = temp_dir("rooted-atomic-parent-disabled");
     let root = LocalRoot::open(&root_path).expect("root should open");
-    let destination =
-        LocalRelativePath::new("nested/result.txt").expect("destination should validate");
+    let destination = LocalRelativePath::new("nested/result.txt")
+        .expect("destination should validate");
 
     let error = root
-        .begin_atomic_write_with_options(&destination, LocalAtomicWriteOptions::new())
+        .begin_atomic_write_with_options(
+            &destination,
+            LocalAtomicWriteOptions::new(),
+        )
         .expect_err("missing parent should be rejected");
 
     assert_eq!(LocalAtomicWriteStage::PrepareParent, error.stage());
@@ -64,11 +82,13 @@ fn test_begin_atomic_write_with_options_rejects_missing_parent() {
 fn test_local_root_atomic_writer_zero_open_retry_timeout_reports_timed_out() {
     let root_path = temp_dir("rooted-atomic-zero-open-retry-timeout");
     let destination_path = root_path.join("result.txt");
-    fs::write(&destination_path, b"original").expect("destination should be written");
+    fs::write(&destination_path, b"original")
+        .expect("destination should be written");
     let lease = SourceReadLease::acquire(&destination_path)
         .expect("destination read lease should be acquired");
     let root = LocalRoot::open(&root_path).expect("root should open");
-    let destination = LocalRelativePath::new("result.txt").expect("destination should validate");
+    let destination = LocalRelativePath::new("result.txt")
+        .expect("destination should validate");
     let options = LocalAtomicWriteOptions::new()
         .with_parent()
         .with_open_retry_timeout(Duration::ZERO);
@@ -96,7 +116,8 @@ fn test_local_root_atomic_writer_zero_open_retry_timeout_reports_timed_out() {
             .recv_timeout(Duration::from_secs(1))
             .expect("commit result should arrive after lease release")
     });
-    let error = result.expect_err("zero timeout should reject the lease conflict");
+    let error =
+        result.expect_err("zero timeout should reject the lease conflict");
 
     assert_eq!(
         LocalAtomicWriteStage::ReadDestinationMetadata,
@@ -126,8 +147,8 @@ fn assert_injected_rooted_commit_error(
         fs::write(root_path.join("result.txt"), b"old")
             .expect("destination fixture should be written");
         let root = LocalRoot::open(&root_path).expect("root should open");
-        let destination =
-            LocalRelativePath::new("result.txt").expect("destination should validate");
+        let destination = LocalRelativePath::new("result.txt")
+            .expect("destination should validate");
         let mut writer = root
             .begin_atomic_write(&destination)
             .expect("rooted atomic writer should begin");
@@ -145,7 +166,8 @@ fn assert_injected_rooted_commit_error(
             expected_temporary_files,
             count_atomic_temp_files(&root_path)
         );
-        fs::remove_dir_all(root_path).expect("test directory should be removed");
+        fs::remove_dir_all(root_path)
+            .expect("test directory should be removed");
     }) else {
         return;
     };
@@ -157,8 +179,8 @@ fn assert_injected_rooted_begin_error(test_name: &str, fault: &str) {
     let Some(()) = run_in_coverage_fault_process(test_name, fault, move || {
         let root_path = temp_dir(fault);
         let root = LocalRoot::open(&root_path).expect("root should open");
-        let destination =
-            LocalRelativePath::new("result.txt").expect("destination should validate");
+        let destination = LocalRelativePath::new("result.txt")
+            .expect("destination should validate");
 
         let error = root
             .begin_atomic_write(&destination)
@@ -166,7 +188,8 @@ fn assert_injected_rooted_begin_error(test_name: &str, fault: &str) {
 
         assert_eq!(LocalAtomicWriteStage::CreateTemporaryFile, error.stage());
         assert_eq!(0, count_atomic_temp_files(&root_path));
-        fs::remove_dir_all(root_path).expect("test directory should be removed");
+        fs::remove_dir_all(root_path)
+            .expect("test directory should be removed");
     }) else {
         return;
     };
@@ -266,27 +289,32 @@ fn test_commit_retries_injected_rooted_install_unlink_error() {
         "local::local_root_atomic_writer_tests::",
         "test_commit_retries_injected_rooted_install_unlink_error",
     );
-    let Some(()) = run_in_coverage_fault_process(TEST_NAME, "atomic-install-unlink", move || {
-        let root_path = temp_dir("rooted-atomic-install-unlink");
-        let root = LocalRoot::open(&root_path).expect("root should open");
-        let destination =
-            LocalRelativePath::new("result.txt").expect("destination should validate");
-        let mut writer = root
-            .begin_atomic_write(&destination)
-            .expect("rooted atomic writer should begin");
-        writer.write_all(b"new").expect("content should be staged");
+    let Some(()) = run_in_coverage_fault_process(
+        TEST_NAME,
+        "atomic-install-unlink",
+        move || {
+            let root_path = temp_dir("rooted-atomic-install-unlink");
+            let root = LocalRoot::open(&root_path).expect("root should open");
+            let destination = LocalRelativePath::new("result.txt")
+                .expect("destination should validate");
+            let mut writer = root
+                .begin_atomic_write(&destination)
+                .expect("rooted atomic writer should begin");
+            writer.write_all(b"new").expect("content should be staged");
 
-        writer
-            .commit()
-            .expect("a one-shot staging unlink failure should recover");
+            writer
+                .commit()
+                .expect("a one-shot staging unlink failure should recover");
 
-        assert_eq!(
-            b"new",
-            fs::read(root_path.join("result.txt")).unwrap().as_slice(),
-        );
-        assert_eq!(0, count_atomic_temp_files(&root_path));
-        fs::remove_dir_all(root_path).expect("test directory should be removed");
-    }) else {
+            assert_eq!(
+                b"new",
+                fs::read(root_path.join("result.txt")).unwrap().as_slice(),
+            );
+            assert_eq!(0, count_atomic_temp_files(&root_path));
+            fs::remove_dir_all(root_path)
+                .expect("test directory should be removed");
+        },
+    ) else {
         return;
     };
 }
@@ -300,12 +328,14 @@ fn test_commit_reports_persistent_rooted_install_unlink_error() {
         "local::local_root_atomic_writer_tests::",
         "test_commit_reports_persistent_rooted_install_unlink_error",
     );
-    let Some(()) =
-        run_in_coverage_fault_process(TEST_NAME, "atomic-install-unlink-persistent", move || {
+    let Some(()) = run_in_coverage_fault_process(
+        TEST_NAME,
+        "atomic-install-unlink-persistent",
+        move || {
             let root_path = temp_dir("rooted-atomic-install-unlink-persistent");
             let root = LocalRoot::open(&root_path).expect("root should open");
-            let destination =
-                LocalRelativePath::new("result.txt").expect("destination should validate");
+            let destination = LocalRelativePath::new("result.txt")
+                .expect("destination should validate");
             let mut writer = root
                 .begin_atomic_write(&destination)
                 .expect("rooted atomic writer should begin");
@@ -315,7 +345,10 @@ fn test_commit_reports_persistent_rooted_install_unlink_error() {
                 .commit()
                 .expect_err("persistent staging unlink should fail");
 
-            assert_eq!(LocalAtomicWriteStage::ReplaceDestination, error.stage());
+            assert_eq!(
+                LocalAtomicWriteStage::ReplaceDestination,
+                error.stage()
+            );
             assert_eq!(
                 LocalAtomicDestinationState::Replaced,
                 error.destination_state(),
@@ -329,9 +362,10 @@ fn test_commit_reports_persistent_rooted_install_unlink_error() {
                 fs::read(root_path.join("result.txt")).unwrap().as_slice(),
             );
             assert_eq!(1, count_atomic_temp_files(&root_path));
-            fs::remove_dir_all(root_path).expect("test directory should be removed");
-        })
-    else {
+            fs::remove_dir_all(root_path)
+                .expect("test directory should be removed");
+        },
+    ) else {
         return;
     };
 }
@@ -344,12 +378,15 @@ fn test_commit_syncs_parent_after_rooted_install_unlink_recovery() {
         "local::local_root_atomic_writer_tests::",
         "test_commit_syncs_parent_after_rooted_install_unlink_recovery",
     );
-    let Some(()) =
-        run_in_coverage_fault_process(TEST_NAME, "atomic-install-unlink-recover-sync", move || {
-            let root_path = temp_dir("rooted-atomic-install-unlink-recover-sync");
+    let Some(()) = run_in_coverage_fault_process(
+        TEST_NAME,
+        "atomic-install-unlink-recover-sync",
+        move || {
+            let root_path =
+                temp_dir("rooted-atomic-install-unlink-recover-sync");
             let root = LocalRoot::open(&root_path).expect("root should open");
-            let destination =
-                LocalRelativePath::new("result.txt").expect("destination should validate");
+            let destination = LocalRelativePath::new("result.txt")
+                .expect("destination should validate");
             let mut writer = root
                 .begin_atomic_write(&destination)
                 .expect("rooted atomic writer should begin");
@@ -378,9 +415,10 @@ fn test_commit_syncs_parent_after_rooted_install_unlink_recovery() {
                 fs::read(root_path.join("result.txt")).unwrap().as_slice(),
             );
             assert_eq!(0, count_atomic_temp_files(&root_path));
-            fs::remove_dir_all(root_path).expect("test directory should be removed");
-        })
-    else {
+            fs::remove_dir_all(root_path)
+                .expect("test directory should be removed");
+        },
+    ) else {
         return;
     };
 }
@@ -398,10 +436,11 @@ fn test_commit_retains_sync_error_after_persistent_rooted_install_unlink() {
         TEST_NAME,
         "atomic-install-unlink-persistent-sync",
         move || {
-            let root_path = temp_dir("rooted-atomic-install-unlink-persistent-sync");
+            let root_path =
+                temp_dir("rooted-atomic-install-unlink-persistent-sync");
             let root = LocalRoot::open(&root_path).expect("root should open");
-            let destination =
-                LocalRelativePath::new("result.txt").expect("destination should validate");
+            let destination = LocalRelativePath::new("result.txt")
+                .expect("destination should validate");
             let mut writer = root
                 .begin_atomic_write(&destination)
                 .expect("rooted atomic writer should begin");
@@ -411,7 +450,10 @@ fn test_commit_retains_sync_error_after_persistent_rooted_install_unlink() {
                 .commit()
                 .expect_err("persistent rooted staging unlink should fail");
 
-            assert_eq!(LocalAtomicWriteStage::ReplaceDestination, error.stage());
+            assert_eq!(
+                LocalAtomicWriteStage::ReplaceDestination,
+                error.stage()
+            );
             assert_eq!(
                 LocalAtomicDestinationState::Replaced,
                 error.destination_state(),
@@ -431,7 +473,8 @@ fn test_commit_retains_sync_error_after_persistent_rooted_install_unlink() {
                 fs::read(root_path.join("result.txt")).unwrap().as_slice(),
             );
             assert_eq!(1, count_atomic_temp_files(&root_path));
-            fs::remove_dir_all(root_path).expect("test directory should be removed");
+            fs::remove_dir_all(root_path)
+                .expect("test directory should be removed");
         },
     ) else {
         return;
@@ -526,7 +569,10 @@ fn test_commit_reports_injected_invalid_rooted_destination() {
         "local::local_root_atomic_writer_tests::",
         "test_commit_reports_injected_invalid_rooted_destination",
     );
-    assert_injected_rooted_destination_open_error(TEST_NAME, "rooted-destination-invalid");
+    assert_injected_rooted_destination_open_error(
+        TEST_NAME,
+        "rooted-destination-invalid",
+    );
 }
 
 /// Verifies propagation of an injected native rooted destination-open error.
@@ -537,7 +583,10 @@ fn test_commit_reports_injected_native_rooted_destination_open_error() {
         "local::local_root_atomic_writer_tests::",
         "test_commit_reports_injected_native_rooted_destination_open_error",
     );
-    assert_injected_rooted_destination_open_error(TEST_NAME, "rooted-destination-native");
+    assert_injected_rooted_destination_open_error(
+        TEST_NAME,
+        "rooted-destination-native",
+    );
 }
 
 /// Verifies retry of an injected rooted destination-open conflict.
@@ -548,14 +597,16 @@ fn test_commit_retries_injected_rooted_destination_open_conflict() {
         "local::local_root_atomic_writer_tests::",
         "test_commit_retries_injected_rooted_destination_open_conflict",
     );
-    let Some(()) =
-        run_in_coverage_fault_process(TEST_NAME, "rooted-destination-would-block", || {
+    let Some(()) = run_in_coverage_fault_process(
+        TEST_NAME,
+        "rooted-destination-would-block",
+        || {
             let root_path = temp_dir("rooted-destination-would-block");
             fs::write(root_path.join("result.txt"), b"old")
                 .expect("destination fixture should be written");
             let root = LocalRoot::open(&root_path).expect("root should open");
-            let destination =
-                LocalRelativePath::new("result.txt").expect("destination should validate");
+            let destination = LocalRelativePath::new("result.txt")
+                .expect("destination should validate");
             let mut writer = root
                 .begin_atomic_write(&destination)
                 .expect("rooted writer should begin");
@@ -565,9 +616,10 @@ fn test_commit_retries_injected_rooted_destination_open_conflict() {
             writer
                 .commit()
                 .expect("transient conflict should be retried");
-            fs::remove_dir_all(root_path).expect("test directory should be removed");
-        })
-    else {
+            fs::remove_dir_all(root_path)
+                .expect("test directory should be removed");
+        },
+    ) else {
         return;
     };
 }
@@ -592,7 +644,10 @@ fn test_commit_handles_injected_missing_rooted_identity_status() {
         "local::local_root_atomic_writer_tests::",
         "test_commit_handles_injected_missing_rooted_identity_status",
     );
-    assert_injected_rooted_identity_status_error(TEST_NAME, "rooted-status-missing");
+    assert_injected_rooted_identity_status_error(
+        TEST_NAME,
+        "rooted-status-missing",
+    );
 }
 
 /// Verifies rejection of an injected non-file rooted identity status.
@@ -603,7 +658,10 @@ fn test_commit_rejects_injected_rooted_identity_status_type() {
         "local::local_root_atomic_writer_tests::",
         "test_commit_rejects_injected_rooted_identity_status_type",
     );
-    assert_injected_rooted_identity_status_error(TEST_NAME, "rooted-status-type");
+    assert_injected_rooted_identity_status_error(
+        TEST_NAME,
+        "rooted-status-type",
+    );
 }
 
 /// Verifies propagation of injected rooted identity-status errors.
@@ -614,7 +672,10 @@ fn test_commit_reports_injected_rooted_identity_status_error() {
         "local::local_root_atomic_writer_tests::",
         "test_commit_reports_injected_rooted_identity_status_error",
     );
-    assert_injected_rooted_identity_status_error(TEST_NAME, "rooted-status-error");
+    assert_injected_rooted_identity_status_error(
+        TEST_NAME,
+        "rooted-status-error",
+    );
 }
 
 /// Verifies propagation of injected rooted identity conversion overflow.
@@ -625,7 +686,10 @@ fn test_commit_reports_injected_rooted_identity_overflow() {
         "local::local_root_atomic_writer_tests::",
         "test_commit_reports_injected_rooted_identity_overflow",
     );
-    assert_injected_rooted_identity_status_error(TEST_NAME, "rooted-identity-overflow");
+    assert_injected_rooted_identity_status_error(
+        TEST_NAME,
+        "rooted-identity-overflow",
+    );
 }
 
 /// Verifies propagation of rooted staging filename generation failures.
@@ -669,19 +733,22 @@ fn test_begin_reports_injected_rooted_parent_creation_error() {
         "local::local_root_atomic_writer_tests::",
         "test_begin_reports_injected_rooted_parent_creation_error",
     );
-    let Some(()) = run_in_coverage_fault_process(TEST_NAME, "rooted-mkdir-error", || {
-        let root_path = temp_dir("rooted-mkdir-error");
-        let root = LocalRoot::open(&root_path).expect("root should open");
-        let destination =
-            LocalRelativePath::new("nested/result.txt").expect("destination should validate");
+    let Some(()) =
+        run_in_coverage_fault_process(TEST_NAME, "rooted-mkdir-error", || {
+            let root_path = temp_dir("rooted-mkdir-error");
+            let root = LocalRoot::open(&root_path).expect("root should open");
+            let destination = LocalRelativePath::new("nested/result.txt")
+                .expect("destination should validate");
 
-        let error = root
-            .begin_atomic_write(&destination)
-            .expect_err("injected parent creation should fail");
+            let error = root
+                .begin_atomic_write(&destination)
+                .expect_err("injected parent creation should fail");
 
-        assert_eq!(LocalAtomicWriteStage::PrepareParent, error.stage());
-        fs::remove_dir_all(root_path).expect("test directory should be removed");
-    }) else {
+            assert_eq!(LocalAtomicWriteStage::PrepareParent, error.stage());
+            fs::remove_dir_all(root_path)
+                .expect("test directory should be removed");
+        })
+    else {
         return;
     };
 }
@@ -691,9 +758,11 @@ fn test_begin_reports_injected_rooted_parent_creation_error() {
 #[test]
 fn test_begin_atomic_write_commits_and_aborts() {
     let root_path = temp_dir("rooted-atomic-lifecycle");
-    fs::write(root_path.join("result.txt"), b"old").expect("destination fixture should be written");
+    fs::write(root_path.join("result.txt"), b"old")
+        .expect("destination fixture should be written");
     let root = LocalRoot::open(&root_path).expect("root should open");
-    let destination = LocalRelativePath::new("result.txt").expect("destination should validate");
+    let destination = LocalRelativePath::new("result.txt")
+        .expect("destination should validate");
 
     let mut writer = root
         .begin_atomic_write(&destination)
@@ -732,7 +801,8 @@ fn test_begin_atomic_write_commits_and_aborts() {
 fn test_root_atomic_writer_forwards_vectored_writes() {
     let root_path = temp_dir("rooted-atomic-vectored");
     let root = LocalRoot::open(&root_path).expect("root should open");
-    let destination = LocalRelativePath::new("result.txt").expect("destination should validate");
+    let destination = LocalRelativePath::new("result.txt")
+        .expect("destination should validate");
     let mut writer = root
         .begin_atomic_write(&destination)
         .expect("rooted atomic writer should begin");
@@ -760,7 +830,8 @@ fn test_root_atomic_writer_forwards_vectored_writes() {
 fn test_drop_removes_rooted_atomic_staging_file() {
     let root_path = temp_dir("rooted-atomic-drop");
     let root = LocalRoot::open(&root_path).expect("root should open");
-    let destination = LocalRelativePath::new("result.txt").expect("destination should validate");
+    let destination = LocalRelativePath::new("result.txt")
+        .expect("destination should validate");
 
     let mut writer = root
         .begin_atomic_write(&destination)
@@ -783,8 +854,8 @@ fn test_drop_removes_rooted_atomic_staging_file() {
 fn test_commit_survives_root_rename_and_creates_parents() {
     let root_path = temp_dir("rooted-atomic-rename");
     let root = LocalRoot::open(&root_path).expect("root should open");
-    let destination =
-        LocalRelativePath::new("nested/result.txt").expect("destination should validate");
+    let destination = LocalRelativePath::new("nested/result.txt")
+        .expect("destination should validate");
     let mut writer = root
         .begin_atomic_write(&destination)
         .expect("rooted atomic writer should create its parent");
@@ -793,7 +864,8 @@ fn test_commit_survives_root_rename_and_creates_parents() {
         .expect("rooted atomic writer should write");
     let moved_path = root_path.with_extension("moved");
     fs::rename(&root_path, &moved_path).expect("root should be renamed");
-    fs::create_dir(&root_path).expect("replacement diagnostic root should exist");
+    fs::create_dir(&root_path)
+        .expect("replacement diagnostic root should exist");
 
     writer
         .commit()
@@ -825,15 +897,16 @@ fn test_commit_survives_intermediate_directory_replacement() {
     fs::create_dir_all(&parent_path).expect("rooted parent should be created");
     fs::create_dir(&outside_path).expect("outside directory should be created");
     let root = LocalRoot::open(&root_path).expect("root should open");
-    let destination =
-        LocalRelativePath::new("parent/data.txt").expect("destination should validate");
+    let destination = LocalRelativePath::new("parent/data.txt")
+        .expect("destination should validate");
     let mut writer = root
         .begin_atomic_write(&destination)
         .expect("rooted atomic writer should begin");
     writer
         .write_all(b"anchored")
         .expect("rooted atomic contents should be staged");
-    fs::rename(&parent_path, &moved_parent_path).expect("intermediate parent should be renamed");
+    fs::rename(&parent_path, &moved_parent_path)
+        .expect("intermediate parent should be renamed");
     symlink(&outside_path, &parent_path)
         .expect("outside symlink should replace the intermediate name");
 
@@ -849,7 +922,8 @@ fn test_commit_survives_intermediate_directory_replacement() {
     );
     assert!(!outside_path.join("data.txt").exists());
     assert_eq!(0, count_atomic_temp_files(&moved_parent_path));
-    fs::remove_file(parent_path).expect("replacement symlink should be removed");
+    fs::remove_file(parent_path)
+        .expect("replacement symlink should be removed");
     fs::remove_dir_all(fixture).expect("atomic fixture should be removed");
 }
 
@@ -863,8 +937,8 @@ fn test_commit_syncs_new_parent_chain() {
                 .expect("traced child should receive its rooted fixture"),
         );
         let root = LocalRoot::open(&root_path).expect("root should open");
-        let destination =
-            LocalRelativePath::new("a/b/result.txt").expect("destination should validate");
+        let destination = LocalRelativePath::new("a/b/result.txt")
+            .expect("destination should validate");
         let mut writer = root
             .begin_atomic_write(&destination)
             .expect("rooted atomic writer should create parents");
@@ -897,7 +971,8 @@ fn test_commit_syncs_new_parent_chain() {
         .expect("strace should launch the traced child");
     assert!(status.success(), "traced child should succeed");
 
-    let trace = fs::read_to_string(&trace_path).expect("fsync trace should be readable");
+    let trace = fs::read_to_string(&trace_path)
+        .expect("fsync trace should be readable");
     let nested_marker = format!("<{}>", root_path.join("a/b").display());
     let parent_marker = format!("<{}>", root_path.join("a").display());
     let root_marker = format!("<{}>", root_path.display());
@@ -923,17 +998,22 @@ fn test_commit_syncs_new_parent_chain() {
 #[cfg(unix)]
 #[test]
 fn test_begin_atomic_write_preserves_permissions_and_rejects_symlink() {
-    use std::os::unix::fs::{PermissionsExt, symlink};
+    use std::os::unix::fs::{
+        PermissionsExt,
+        symlink,
+    };
 
     let fixture = temp_dir("rooted-atomic-permissions");
     let root_path = fixture.join("root");
     fs::create_dir(&root_path).expect("root should be created");
     let destination_path = root_path.join("result.txt");
-    fs::write(&destination_path, b"old").expect("destination fixture should be written");
+    fs::write(&destination_path, b"old")
+        .expect("destination fixture should be written");
     fs::set_permissions(&destination_path, fs::Permissions::from_mode(0o640))
         .expect("destination permissions should be set");
     let root = LocalRoot::open(&root_path).expect("root should open");
-    let destination = LocalRelativePath::new("result.txt").expect("destination should validate");
+    let destination = LocalRelativePath::new("result.txt")
+        .expect("destination should validate");
     let mut writer = root
         .begin_atomic_write(&destination)
         .expect("rooted atomic writer should begin");
@@ -951,11 +1031,13 @@ fn test_begin_atomic_write_preserves_permissions_and_rejects_symlink() {
     );
 
     let outside_path = fixture.join("outside.txt");
-    fs::write(&outside_path, b"outside").expect("outside fixture should be written");
+    fs::write(&outside_path, b"outside")
+        .expect("outside fixture should be written");
     let linked_path = root_path.join("linked.txt");
-    symlink(&outside_path, &linked_path).expect("final symlink should be created");
-    let linked =
-        LocalRelativePath::new("linked.txt").expect("linked destination should validate lexically");
+    symlink(&outside_path, &linked_path)
+        .expect("final symlink should be created");
+    let linked = LocalRelativePath::new("linked.txt")
+        .expect("linked destination should validate lexically");
     let error = root
         .begin_atomic_write(&linked)
         .expect_err("final symlink should be rejected");
@@ -980,13 +1062,15 @@ fn test_begin_atomic_write_preserves_commit_time_metadata() {
 
     let root_path = temp_dir("rooted-atomic-commit-time-metadata");
     let destination_path = root_path.join("result.txt");
-    fs::write(&destination_path, b"old").expect("destination fixture should be written");
+    fs::write(&destination_path, b"old")
+        .expect("destination fixture should be written");
     fs::set_permissions(&destination_path, fs::Permissions::from_mode(0o600))
         .expect("initial destination mode should be set");
     set_user_xattr(&destination_path, XATTR_NAME, b"initial")
         .expect("initial destination xattr should be set");
     let root = LocalRoot::open(&root_path).expect("root should open");
-    let destination = LocalRelativePath::new("result.txt").expect("destination should validate");
+    let destination = LocalRelativePath::new("result.txt")
+        .expect("destination should validate");
     let mut writer = root
         .begin_atomic_write(&destination)
         .expect("rooted atomic writer should begin");
@@ -1030,11 +1114,14 @@ fn test_commit_rejects_final_symlink_replacement() {
     let root_path = fixture.join("root");
     fs::create_dir(&root_path).expect("root should be created");
     let destination_path = root_path.join("result.txt");
-    fs::write(&destination_path, b"old").expect("destination fixture should be written");
+    fs::write(&destination_path, b"old")
+        .expect("destination fixture should be written");
     let outside_path = fixture.join("outside.txt");
-    fs::write(&outside_path, b"outside").expect("outside fixture should be written");
+    fs::write(&outside_path, b"outside")
+        .expect("outside fixture should be written");
     let root = LocalRoot::open(&root_path).expect("root should open");
-    let destination = LocalRelativePath::new("result.txt").expect("destination should validate");
+    let destination = LocalRelativePath::new("result.txt")
+        .expect("destination should validate");
     let mut writer = root
         .begin_atomic_write(&destination)
         .expect("rooted atomic writer should begin");
@@ -1042,8 +1129,10 @@ fn test_commit_rejects_final_symlink_replacement() {
         .write_all(b"replacement")
         .expect("replacement should be staged");
     let displaced_path = root_path.join("displaced.txt");
-    fs::rename(&destination_path, &displaced_path).expect("destination should be displaced");
-    symlink(&outside_path, &destination_path).expect("destination symlink should be installed");
+    fs::rename(&destination_path, &displaced_path)
+        .expect("destination should be displaced");
+    symlink(&outside_path, &destination_path)
+        .expect("destination symlink should be installed");
 
     let error = writer
         .commit()
@@ -1066,7 +1155,8 @@ fn test_commit_rejects_final_symlink_replacement() {
 fn test_commit_flushes_and_creates_missing_destination() {
     let root_path = temp_dir("rooted-atomic-new");
     let root = LocalRoot::open(&root_path).expect("root should open");
-    let destination = LocalRelativePath::new("result.txt").expect("destination should validate");
+    let destination = LocalRelativePath::new("result.txt")
+        .expect("destination should validate");
     let mut writer = root
         .begin_atomic_write(&destination)
         .expect("rooted atomic writer should begin");
@@ -1079,7 +1169,8 @@ fn test_commit_flushes_and_creates_missing_destination() {
         b"new",
         fs::read(root_path.join("result.txt")).unwrap().as_slice(),
     );
-    fs::remove_dir_all(root_path).expect("new atomic fixture should be removed");
+    fs::remove_dir_all(root_path)
+        .expect("new atomic fixture should be removed");
 }
 
 /// Verifies that a pre-installation rooted failure returns its writer for
@@ -1089,9 +1180,11 @@ fn test_commit_flushes_and_creates_missing_destination() {
 fn test_root_atomic_writer_recoverable_commit_returns_writer_for_abort() {
     let root_path = temp_dir("rooted-atomic-recoverable-commit");
     let destination_path = root_path.join("result.txt");
-    fs::write(&destination_path, b"original").expect("destination should be written");
+    fs::write(&destination_path, b"original")
+        .expect("destination should be written");
     let root = LocalRoot::open(&root_path).expect("root should open");
-    let destination = LocalRelativePath::new("result.txt").expect("destination should validate");
+    let destination = LocalRelativePath::new("result.txt")
+        .expect("destination should validate");
     let mut writer = root
         .begin_atomic_write(&destination)
         .expect("rooted atomic writer should begin");
@@ -1110,7 +1203,8 @@ fn test_root_atomic_writer_recoverable_commit_returns_writer_for_abort() {
     assert!(commit_error.writer().is_some());
     assert!(commit_error.writer_mut().is_some());
     let (error, writer) = commit_error.into_parts();
-    let writer = writer.expect("pre-publication failure should return rooted writer");
+    let writer =
+        writer.expect("pre-publication failure should return rooted writer");
 
     assert_eq!(
         LocalAtomicDestinationState::Missing,
@@ -1130,8 +1224,8 @@ fn test_root_atomic_writer_recoverable_commit_returns_writer_for_abort() {
 fn test_commit_reports_precise_namespace_states() {
     let root_path = temp_dir("rooted-atomic-namespace-states");
     let root = LocalRoot::open(&root_path).expect("root should open");
-    let created =
-        LocalRelativePath::new("created.txt").expect("created destination should validate");
+    let created = LocalRelativePath::new("created.txt")
+        .expect("created destination should validate");
     let mut writer = root
         .begin_atomic_write(&created)
         .expect("missing destination writer should begin");
@@ -1157,8 +1251,8 @@ fn test_commit_reports_precise_namespace_states() {
     );
     assert_eq!(0, count_atomic_temp_files(&root_path));
 
-    let existing =
-        LocalRelativePath::new("existing.txt").expect("existing destination should validate");
+    let existing = LocalRelativePath::new("existing.txt")
+        .expect("existing destination should validate");
     fs::write(root_path.join("existing.txt"), b"original")
         .expect("existing destination should be written");
     let mut writer = root
@@ -1167,7 +1261,8 @@ fn test_commit_reports_precise_namespace_states() {
     writer
         .write_all(b"retained")
         .expect("replacement should be staged");
-    fs::remove_file(root_path.join("existing.txt")).expect("existing destination should disappear");
+    fs::remove_file(root_path.join("existing.txt"))
+        .expect("existing destination should disappear");
 
     let error = writer
         .commit()
@@ -1207,7 +1302,8 @@ fn test_begin_atomic_write_reports_parent_and_destination_type_errors() {
         .expect_err("directory destination should fail");
     assert_eq!(LocalAtomicWriteStage::InspectDestination, error.stage());
 
-    fs::remove_dir_all(root_path).expect("atomic-type fixture should be removed");
+    fs::remove_dir_all(root_path)
+        .expect("atomic-type fixture should be removed");
 }
 
 /// Verifies that explicit abort reports a staging entry removed behind the
@@ -1217,7 +1313,8 @@ fn test_begin_atomic_write_reports_parent_and_destination_type_errors() {
 fn test_abort_reports_missing_staging_entry() {
     let root_path = temp_dir("rooted-atomic-abort-error");
     let root = LocalRoot::open(&root_path).expect("root should open");
-    let destination = LocalRelativePath::new("result.txt").expect("destination should validate");
+    let destination = LocalRelativePath::new("result.txt")
+        .expect("destination should validate");
     let writer = root
         .begin_atomic_write(&destination)
         .expect("rooted atomic writer should begin");
@@ -1225,12 +1322,15 @@ fn test_abort_reports_missing_staging_entry() {
         .expect("root directory should be readable")
         .map(|entry| entry.expect("root entry should be readable").path())
         .find(|path| {
-            path.file_name()
-                .and_then(|name| name.to_str())
-                .is_some_and(|name| name.starts_with(".atomic-write-") && name.ends_with(".tmp"))
+            path.file_name().and_then(|name| name.to_str()).is_some_and(
+                |name| {
+                    name.starts_with(".atomic-write-") && name.ends_with(".tmp")
+                },
+            )
         })
         .expect("staging entry should exist");
-    fs::remove_file(temporary_path).expect("staging entry should be removed behind the writer");
+    fs::remove_file(temporary_path)
+        .expect("staging entry should be removed behind the writer");
 
     let error = writer
         .abort()
@@ -1238,5 +1338,6 @@ fn test_abort_reports_missing_staging_entry() {
 
     assert_eq!(LocalAtomicWriteStage::CleanupTemporaryFile, error.stage());
     assert_eq!(std::io::ErrorKind::NotFound, error.kind());
-    fs::remove_dir_all(root_path).expect("abort-error fixture should be removed");
+    fs::remove_dir_all(root_path)
+        .expect("abort-error fixture should be removed");
 }

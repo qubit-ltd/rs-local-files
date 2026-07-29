@@ -36,7 +36,6 @@ impl LocalFileSystemCapabilities {
             rooted_operations: cfg!(any(unix, windows)),
             no_replace_publication: cfg!(any(
                 target_os = "linux",
-                target_os = "android",
                 target_os = "macos",
                 windows
             )),

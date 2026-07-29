@@ -9,10 +9,15 @@
 // Covered by copy integration tests.
 
 use super::{
-    LocalAtomicityRequirement, LocalDurabilityRequirement, LocalMetadataPreservePolicy,
+    LocalAtomicityRequirement,
+    LocalDurabilityRequirement,
+    LocalMetadataPreservePolicy,
     LocalSymlinkPolicy,
 };
-use crate::{LocalCopyConflictPolicy, LocalCopyTypeConflictPolicy};
+use crate::{
+    LocalCopyConflictPolicy,
+    LocalCopyTypeConflictPolicy,
+};
 
 /// Unified options for copying a native file or directory tree.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -99,7 +104,10 @@ impl LocalCopyOptions {
     /// Sets the destination file conflict policy.
     #[must_use]
     #[inline(always)]
-    pub const fn with_conflict(mut self, conflict: LocalCopyConflictPolicy) -> Self {
+    pub const fn with_conflict(
+        mut self,
+        conflict: LocalCopyConflictPolicy,
+    ) -> Self {
         self.conflict = conflict;
         self
     }
@@ -107,7 +115,10 @@ impl LocalCopyOptions {
     /// Sets the file/directory type conflict policy.
     #[must_use]
     #[inline(always)]
-    pub const fn with_type_conflict(mut self, type_conflict: LocalCopyTypeConflictPolicy) -> Self {
+    pub const fn with_type_conflict(
+        mut self,
+        type_conflict: LocalCopyTypeConflictPolicy,
+    ) -> Self {
         self.type_conflict = type_conflict;
         self
     }
@@ -126,7 +137,10 @@ impl LocalCopyOptions {
     /// Sets symbolic-link policy.
     #[must_use]
     #[inline(always)]
-    pub const fn with_symlink_policy(mut self, symlink: LocalSymlinkPolicy) -> Self {
+    pub const fn with_symlink_policy(
+        mut self,
+        symlink: LocalSymlinkPolicy,
+    ) -> Self {
         self.symlink = symlink;
         self
     }
@@ -142,7 +156,10 @@ impl LocalCopyOptions {
     /// Sets required publication atomicity.
     #[must_use]
     #[inline(always)]
-    pub const fn with_atomicity(mut self, atomicity: LocalAtomicityRequirement) -> Self {
+    pub const fn with_atomicity(
+        mut self,
+        atomicity: LocalAtomicityRequirement,
+    ) -> Self {
         self.atomicity = atomicity;
         self
     }
@@ -150,7 +167,10 @@ impl LocalCopyOptions {
     /// Sets required durability.
     #[must_use]
     #[inline(always)]
-    pub const fn with_durability(mut self, durability: LocalDurabilityRequirement) -> Self {
+    pub const fn with_durability(
+        mut self,
+        durability: LocalDurabilityRequirement,
+    ) -> Self {
         self.durability = durability;
         self
     }

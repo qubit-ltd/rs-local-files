@@ -7,12 +7,19 @@
 // =============================================================================
 
 #[cfg(unix)]
-use std::io::{ErrorKind, Read, Write};
+use std::io::{
+    ErrorKind,
+    Read,
+    Write,
+};
 
 #[cfg(unix)]
 use qubit_local_files::{
     read,
-    rooted::{Path as LocalRelativePath, Root as LocalRoot},
+    rooted::{
+        Path as LocalRelativePath,
+        Root as LocalRoot,
+    },
     write,
 };
 
@@ -21,14 +28,23 @@ use super::test_support::SourceReadLease;
 #[cfg(all(coverage, target_os = "linux"))]
 use super::test_support::run_in_coverage_fault_process;
 #[cfg(unix)]
-use super::test_support::{create_fifo, fs, temp_dir};
+use super::test_support::{
+    create_fifo,
+    fs,
+    temp_dir,
+};
 
 /// Verifies one injected root-handle metadata or type failure.
 #[cfg(all(coverage, target_os = "linux"))]
-fn assert_injected_root_open_error(test_name: &str, fault: &str, expected_kind: Option<ErrorKind>) {
+fn assert_injected_root_open_error(
+    test_name: &str,
+    fault: &str,
+    expected_kind: Option<ErrorKind>,
+) {
     let Some(()) = run_in_coverage_fault_process(test_name, fault, move || {
         let root_path = temp_dir(fault);
-        let error = LocalRoot::open(&root_path).expect_err("injected root validation should fail");
+        let error = LocalRoot::open(&root_path)
+            .expect_err("injected root validation should fail");
         if let Some(expected_kind) = expected_kind {
             assert_eq!(expected_kind, error.kind());
         } else {
@@ -37,7 +53,8 @@ fn assert_injected_root_open_error(test_name: &str, fault: &str, expected_kind: 
                 "contextual error should retain the injected native failure: {error}",
             );
         }
-        fs::remove_dir_all(root_path).expect("test directory should be removed");
+        fs::remove_dir_all(root_path)
+            .expect("test directory should be removed");
     }) else {
         return;
     };
@@ -51,7 +68,11 @@ fn test_open_root_reports_injected_directory_metadata_error() {
         "local::local_root_tests::",
         "test_open_root_reports_injected_directory_metadata_error",
     );
-    assert_injected_root_open_error(TEST_NAME, "rooted-directory-metadata", None);
+    assert_injected_root_open_error(
+        TEST_NAME,
+        "rooted-directory-metadata",
+        None,
+    );
 }
 
 /// Verifies rejection of an injected invalid root-directory type.
@@ -78,9 +99,11 @@ fn assert_injected_rooted_reader_error(
 ) {
     let Some(()) = run_in_coverage_fault_process(test_name, fault, move || {
         let root_path = temp_dir(fault);
-        fs::write(root_path.join("data.txt"), b"data").expect("file fixture should be written");
+        fs::write(root_path.join("data.txt"), b"data")
+            .expect("file fixture should be written");
         let root = LocalRoot::open(&root_path).expect("root should open");
-        let path = LocalRelativePath::new("data.txt").expect("relative path should validate");
+        let path = LocalRelativePath::new("data.txt")
+            .expect("relative path should validate");
 
         let error = root
             .open_reader(&path, &read::OpenOptions::default())
@@ -94,7 +117,8 @@ fn assert_injected_rooted_reader_error(
                 "contextual error should retain the injected native failure: {error}",
             );
         }
-        fs::remove_dir_all(root_path).expect("test directory should be removed");
+        fs::remove_dir_all(root_path)
+            .expect("test directory should be removed");
     }) else {
         return;
     };
@@ -108,7 +132,11 @@ fn test_open_reader_reports_injected_file_metadata_error() {
         "local::local_root_tests::",
         "test_open_reader_reports_injected_file_metadata_error",
     );
-    assert_injected_rooted_reader_error(TEST_NAME, "rooted-file-metadata", None);
+    assert_injected_rooted_reader_error(
+        TEST_NAME,
+        "rooted-file-metadata",
+        None,
+    );
 }
 
 /// Verifies rejection of an injected invalid rooted file type.
@@ -134,21 +162,27 @@ fn test_open_reader_reports_injected_entry_inspection_error() {
         "local::local_root_tests::",
         "test_open_reader_reports_injected_entry_inspection_error",
     );
-    let Some(()) = run_in_coverage_fault_process(TEST_NAME, "rooted-entry-inspect", || {
-        let root_path = temp_dir("rooted-entry-inspect");
-        let root = LocalRoot::open(&root_path).expect("root should open");
-        let path = LocalRelativePath::new("missing.txt").expect("relative path should validate");
+    let Some(()) = run_in_coverage_fault_process(
+        TEST_NAME,
+        "rooted-entry-inspect",
+        || {
+            let root_path = temp_dir("rooted-entry-inspect");
+            let root = LocalRoot::open(&root_path).expect("root should open");
+            let path = LocalRelativePath::new("missing.txt")
+                .expect("relative path should validate");
 
-        let error = root
-            .open_reader(&path, &read::OpenOptions::default())
-            .expect_err("injected entry inspection should fail");
+            let error = root
+                .open_reader(&path, &read::OpenOptions::default())
+                .expect_err("injected entry inspection should fail");
 
-        assert!(
-            error.to_string().contains("Input/output error"),
-            "contextual error should retain the injected native failure: {error}",
-        );
-        fs::remove_dir_all(root_path).expect("test directory should be removed");
-    }) else {
+            assert!(
+                error.to_string().contains("Input/output error"),
+                "contextual error should retain the injected native failure: {error}",
+            );
+            fs::remove_dir_all(root_path)
+                .expect("test directory should be removed");
+        },
+    ) else {
         return;
     };
 }
@@ -161,28 +195,35 @@ fn test_open_writer_preserves_contents_when_rooted_validation_fails() {
         "local::local_root_tests::",
         "test_open_writer_preserves_contents_when_rooted_validation_fails",
     );
-    let Some(()) = run_in_coverage_fault_process(TEST_NAME, "rooted-file-metadata", || {
-        let root_path = temp_dir("rooted-writer-metadata");
-        let destination_path = root_path.join("data.txt");
-        fs::write(&destination_path, b"original").expect("rooted writer fixture should be written");
-        let root = LocalRoot::open(&root_path).expect("root should open");
-        let path = LocalRelativePath::new("data.txt").expect("relative path should validate");
-        let error = root
-            .open_writer(&path, &write::OpenOptions::default())
-            .expect_err("injected rooted validation should fail");
+    let Some(()) = run_in_coverage_fault_process(
+        TEST_NAME,
+        "rooted-file-metadata",
+        || {
+            let root_path = temp_dir("rooted-writer-metadata");
+            let destination_path = root_path.join("data.txt");
+            fs::write(&destination_path, b"original")
+                .expect("rooted writer fixture should be written");
+            let root = LocalRoot::open(&root_path).expect("root should open");
+            let path = LocalRelativePath::new("data.txt")
+                .expect("relative path should validate");
+            let error = root
+                .open_writer(&path, &write::OpenOptions::default())
+                .expect_err("injected rooted validation should fail");
 
-        assert!(
-            error.to_string().contains("inspect rooted file handle"),
-            "validation error should retain operation context: {error}",
-        );
-        assert_eq!(
-            b"original",
-            fs::read(&destination_path)
-                .expect("failed rooted destination should remain readable")
-                .as_slice(),
-        );
-        fs::remove_dir_all(root_path).expect("rooted writer fixture should be removed");
-    }) else {
+            assert!(
+                error.to_string().contains("inspect rooted file handle"),
+                "validation error should retain operation context: {error}",
+            );
+            assert_eq!(
+                b"original",
+                fs::read(&destination_path)
+                    .expect("failed rooted destination should remain readable")
+                    .as_slice(),
+            );
+            fs::remove_dir_all(root_path)
+                .expect("rooted writer fixture should be removed");
+        },
+    ) else {
         return;
     };
 }
@@ -193,9 +234,11 @@ fn test_open_writer_preserves_contents_when_rooted_validation_fails() {
 #[test]
 fn test_open_writer_supports_all_modes() {
     let root_path = temp_dir("rooted-write-modes");
-    fs::write(root_path.join("existing.txt"), b"abc").expect("existing fixture should be written");
+    fs::write(root_path.join("existing.txt"), b"abc")
+        .expect("existing fixture should be written");
     let root = LocalRoot::open(&root_path).expect("root should open");
-    let existing = LocalRelativePath::new("existing.txt").expect("existing path should validate");
+    let existing = LocalRelativePath::new("existing.txt")
+        .expect("existing path should validate");
 
     let mut writer = root
         .open_writer(
@@ -207,7 +250,10 @@ fn test_open_writer_supports_all_modes() {
     drop(writer);
 
     let error = root
-        .open_writer(&existing, &write::OpenOptions::new(write::Mode::CreateNew))
+        .open_writer(
+            &existing,
+            &write::OpenOptions::new(write::Mode::CreateNew),
+        )
         .expect_err("create-new should reject an existing destination");
     assert_eq!(ErrorKind::AlreadyExists, error.kind());
 
@@ -220,7 +266,8 @@ fn test_open_writer_supports_all_modes() {
     writer.write_all(b"Y").expect("suffix should append");
     drop(writer);
 
-    let created = LocalRelativePath::new("created.txt").expect("created path should validate");
+    let created = LocalRelativePath::new("created.txt")
+        .expect("created path should validate");
     let error = root
         .open_writer(
             &created,
@@ -241,9 +288,13 @@ fn test_open_writer_supports_all_modes() {
     writer.flush().expect("buffered writer should flush");
     drop(writer);
 
-    let new_path = LocalRelativePath::new("new.txt").expect("new path should validate");
+    let new_path =
+        LocalRelativePath::new("new.txt").expect("new path should validate");
     let writer = root
-        .open_writer(&new_path, &write::OpenOptions::new(write::Mode::CreateNew))
+        .open_writer(
+            &new_path,
+            &write::OpenOptions::new(write::Mode::CreateNew),
+        )
         .expect("create-new should create a missing file");
     drop(writer);
 
@@ -255,7 +306,8 @@ fn test_open_writer_supports_all_modes() {
         b"Z",
         fs::read(root_path.join("created.txt")).unwrap().as_slice(),
     );
-    fs::remove_dir_all(root_path).expect("write-mode fixture should be removed");
+    fs::remove_dir_all(root_path)
+        .expect("write-mode fixture should be removed");
 }
 
 /// Verifies deterministic errors for missing components and non-file resource
@@ -264,13 +316,15 @@ fn test_open_writer_supports_all_modes() {
 #[test]
 fn test_rooted_io_rejects_missing_and_wrong_resource_types() {
     let root_path = temp_dir("rooted-resource-types");
-    fs::create_dir(root_path.join("directory")).expect("directory fixture should be created");
+    fs::create_dir(root_path.join("directory"))
+        .expect("directory fixture should be created");
     fs::write(root_path.join("parent-file"), b"file")
         .expect("parent file fixture should be written");
     create_fifo(&root_path.join("pipe"));
     let root = LocalRoot::open(&root_path).expect("root should open");
 
-    let missing = LocalRelativePath::new("missing/file.txt").expect("missing path should validate");
+    let missing = LocalRelativePath::new("missing/file.txt")
+        .expect("missing path should validate");
     let error = root
         .open_reader(&missing, &read::OpenOptions::default())
         .expect_err("missing reader parent should fail");
@@ -281,7 +335,8 @@ fn test_rooted_io_rejects_missing_and_wrong_resource_types() {
     assert_eq!(ErrorKind::NotFound, error.kind());
 
     for invalid in ["directory", "pipe"] {
-        let path = LocalRelativePath::new(invalid).expect("resource path should validate");
+        let path = LocalRelativePath::new(invalid)
+            .expect("resource path should validate");
         assert_eq!(
             ErrorKind::InvalidInput,
             root.open_reader(&path, &read::OpenOptions::default())
@@ -306,7 +361,8 @@ fn test_rooted_io_rejects_missing_and_wrong_resource_types() {
         .expect_err("ordinary file parent should be rejected");
     assert_eq!(ErrorKind::InvalidInput, error.kind());
 
-    fs::remove_dir_all(root_path).expect("resource-type fixture should be removed");
+    fs::remove_dir_all(root_path)
+        .expect("resource-type fixture should be removed");
 }
 
 /// Verifies root opening distinguishes missing paths from existing non-
@@ -344,7 +400,8 @@ fn test_open_reader_and_writer_use_root_capability() {
         .expect("rooted reader fixture should be written");
     let root = LocalRoot::open(&root_path).expect("root should open");
 
-    let input = LocalRelativePath::new("input.txt").expect("reader path should validate");
+    let input = LocalRelativePath::new("input.txt")
+        .expect("reader path should validate");
     let mut reader = root
         .open_reader(&input, &read::OpenOptions::default())
         .expect("rooted reader should open");
@@ -353,7 +410,8 @@ fn test_open_reader_and_writer_use_root_capability() {
         .read_to_string(&mut content)
         .expect("rooted reader should read");
 
-    let output = LocalRelativePath::new("nested/output.txt").expect("writer path should validate");
+    let output = LocalRelativePath::new("nested/output.txt")
+        .expect("writer path should validate");
     let mut writer = root
         .open_writer(&output, &write::OpenOptions::default().with_parents())
         .expect("rooted writer should create parents");
@@ -380,12 +438,15 @@ fn test_open_rooted_reader_waits_for_conflicting_file_lease() {
     let root_path = temp_dir("rooted-reader-file-lease");
     let path = root_path.join("data.txt");
     fs::write(&path, b"payload").expect("reader fixture should be written");
-    let lease = SourceReadLease::acquire(&path).expect("write lease should be acquired");
+    let lease = SourceReadLease::acquire(&path)
+        .expect("write lease should be acquired");
     let worker_root_path = root_path.clone();
     let (sender, receiver) = std::sync::mpsc::sync_channel(1);
     let worker = std::thread::spawn(move || {
-        let root = LocalRoot::open(&worker_root_path).expect("worker root should open");
-        let relative = LocalRelativePath::new("data.txt").expect("reader path should validate");
+        let root = LocalRoot::open(&worker_root_path)
+            .expect("worker root should open");
+        let relative = LocalRelativePath::new("data.txt")
+            .expect("reader path should validate");
         sender
             .send(root.open_reader(&relative, &read::OpenOptions::default()))
             .expect("reader result should be sent");
@@ -394,7 +455,8 @@ fn test_open_rooted_reader_waits_for_conflicting_file_lease() {
     lease
         .wait_for_break()
         .expect("rooted reader should request a lease break");
-    let early_result = receiver.recv_timeout(std::time::Duration::from_millis(250));
+    let early_result =
+        receiver.recv_timeout(std::time::Duration::from_millis(250));
     lease.release().expect("write lease should be released");
     let result = match early_result {
         Err(std::sync::mpsc::RecvTimeoutError::Timeout) => receiver
@@ -422,12 +484,15 @@ fn test_open_rooted_writer_waits_for_conflicting_file_lease() {
     let root_path = temp_dir("rooted-writer-file-lease");
     let path = root_path.join("data.txt");
     fs::write(&path, b"payload").expect("writer fixture should be written");
-    let lease = SourceReadLease::acquire(&path).expect("write lease should be acquired");
+    let lease = SourceReadLease::acquire(&path)
+        .expect("write lease should be acquired");
     let worker_root_path = root_path.clone();
     let (sender, receiver) = std::sync::mpsc::sync_channel(1);
     let worker = std::thread::spawn(move || {
-        let root = LocalRoot::open(&worker_root_path).expect("worker root should open");
-        let relative = LocalRelativePath::new("data.txt").expect("writer path should validate");
+        let root = LocalRoot::open(&worker_root_path)
+            .expect("worker root should open");
+        let relative = LocalRelativePath::new("data.txt")
+            .expect("writer path should validate");
         sender
             .send(root.open_writer(
                 &relative,
@@ -439,7 +504,8 @@ fn test_open_rooted_writer_waits_for_conflicting_file_lease() {
     lease
         .wait_for_break()
         .expect("rooted writer should request a lease break");
-    let early_result = receiver.recv_timeout(std::time::Duration::from_millis(250));
+    let early_result =
+        receiver.recv_timeout(std::time::Duration::from_millis(250));
     lease.release().expect("write lease should be released");
     let result = match early_result {
         Err(std::sync::mpsc::RecvTimeoutError::Timeout) => receiver
@@ -469,12 +535,15 @@ fn test_open_rooted_reader_and_writer_timeout_report_lease_conflicts() {
     fs::write(&path, b"payload").expect("fixture should be written");
 
     for is_writer in [false, true] {
-        let lease = SourceReadLease::acquire(&path).expect("write lease should be acquired");
+        let lease = SourceReadLease::acquire(&path)
+            .expect("write lease should be acquired");
         let worker_root_path = root_path.clone();
         let (sender, receiver) = std::sync::mpsc::sync_channel(1);
         let worker = std::thread::spawn(move || {
-            let root = LocalRoot::open(&worker_root_path).expect("worker root should open");
-            let relative = LocalRelativePath::new("data.txt").expect("path should validate");
+            let root = LocalRoot::open(&worker_root_path)
+                .expect("worker root should open");
+            let relative = LocalRelativePath::new("data.txt")
+                .expect("path should validate");
             let result = if is_writer {
                 root.open_writer(
                     &relative,
@@ -514,15 +583,18 @@ fn test_open_rooted_reader_and_writer_timeout_report_lease_conflicts() {
 #[test]
 fn test_open_reader_survives_root_rename() {
     let root_path = temp_dir("rooted-rename");
-    fs::write(root_path.join("data.txt"), b"anchored").expect("rooted fixture should be written");
+    fs::write(root_path.join("data.txt"), b"anchored")
+        .expect("rooted fixture should be written");
     let root = LocalRoot::open(&root_path).expect("root should open");
     let moved_path = root_path.with_extension("moved");
     fs::rename(&root_path, &moved_path).expect("root should be renamed");
-    fs::create_dir(&root_path).expect("replacement diagnostic path should exist");
+    fs::create_dir(&root_path)
+        .expect("replacement diagnostic path should exist");
     fs::write(root_path.join("data.txt"), b"replacement")
         .expect("replacement fixture should be written");
 
-    let relative = LocalRelativePath::new("data.txt").expect("reader path should validate");
+    let relative = LocalRelativePath::new("data.txt")
+        .expect("reader path should validate");
     let mut reader = root
         .open_reader(&relative, &read::OpenOptions::default())
         .expect("anchored reader should open after root rename");
@@ -551,12 +623,13 @@ fn test_open_writer_survives_intermediate_directory_replacement() {
     fs::create_dir_all(&parent_path).expect("rooted parent should be created");
     fs::create_dir(&outside_path).expect("outside directory should be created");
     let root = LocalRoot::open(&root_path).expect("root should open");
-    let destination =
-        LocalRelativePath::new("parent/data.txt").expect("destination should validate");
+    let destination = LocalRelativePath::new("parent/data.txt")
+        .expect("destination should validate");
     let mut writer = root
         .open_writer(&destination, &write::OpenOptions::default())
         .expect("rooted writer should open");
-    fs::rename(&parent_path, &moved_parent_path).expect("intermediate parent should be renamed");
+    fs::rename(&parent_path, &moved_parent_path)
+        .expect("intermediate parent should be renamed");
     symlink(&outside_path, &parent_path)
         .expect("outside symlink should replace the intermediate name");
 
@@ -572,7 +645,8 @@ fn test_open_writer_survives_intermediate_directory_replacement() {
             .as_slice(),
     );
     assert!(!outside_path.join("data.txt").exists());
-    fs::remove_file(parent_path).expect("replacement symlink should be removed");
+    fs::remove_file(parent_path)
+        .expect("replacement symlink should be removed");
     fs::remove_dir_all(fixture).expect("writer fixture should be removed");
 }
 
@@ -588,10 +662,12 @@ fn test_rooted_io_rejects_symbolic_links() {
     let outside = fixture.join("outside");
     fs::create_dir_all(&root_path).expect("root should be created");
     fs::create_dir_all(&outside).expect("outside directory should be created");
-    fs::write(outside.join("secret.txt"), b"secret").expect("outside fixture should be written");
-    symlink(&outside, fixture.join("root-link")).expect("root symlink should be created");
-    let error =
-        LocalRoot::open(&fixture.join("root-link")).expect_err("root symlink should be rejected");
+    fs::write(outside.join("secret.txt"), b"secret")
+        .expect("outside fixture should be written");
+    symlink(&outside, fixture.join("root-link"))
+        .expect("root symlink should be created");
+    let error = LocalRoot::open(&fixture.join("root-link"))
+        .expect_err("root symlink should be rejected");
     assert_eq!(ErrorKind::InvalidInput, error.kind());
 
     symlink(&outside, root_path.join("linked-dir"))
@@ -604,8 +680,8 @@ fn test_rooted_io_rejects_symbolic_links() {
     let root = LocalRoot::open(&root_path).expect("real root should open");
 
     for invalid in ["linked-dir/secret.txt", "linked-file.txt"] {
-        let relative =
-            LocalRelativePath::new(invalid).expect("symlink path should be lexically valid");
+        let relative = LocalRelativePath::new(invalid)
+            .expect("symlink path should be lexically valid");
         let read_error = root
             .open_reader(&relative, &read::OpenOptions::default())
             .expect_err("rooted reader should reject symlinks");
@@ -636,13 +712,17 @@ fn test_open_root_allows_symlinked_ancestor() {
     let real_parent = fixture.join("real-parent");
     let root_path = real_parent.join("root");
     let alias_parent = fixture.join("alias-parent");
-    fs::create_dir_all(&root_path).expect("real root directory should be created");
-    fs::write(root_path.join("data.txt"), b"anchored").expect("root fixture should be written");
-    symlink(&real_parent, &alias_parent).expect("ancestor symbolic link should be created");
+    fs::create_dir_all(&root_path)
+        .expect("real root directory should be created");
+    fs::write(root_path.join("data.txt"), b"anchored")
+        .expect("root fixture should be written");
+    symlink(&real_parent, &alias_parent)
+        .expect("ancestor symbolic link should be created");
 
     let root = LocalRoot::open(&alias_parent.join("root"))
         .expect("ancestor symbolic link should be resolved");
-    let path = LocalRelativePath::new("data.txt").expect("relative path should validate");
+    let path = LocalRelativePath::new("data.txt")
+        .expect("relative path should validate");
     let mut reader = root
         .open_reader(&path, &read::OpenOptions::default())
         .expect("rooted reader should open through the anchored root");
@@ -652,7 +732,8 @@ fn test_open_root_allows_symlinked_ancestor() {
         .expect("rooted reader should read through the anchored root");
 
     assert_eq!(b"anchored", content.as_slice());
-    fs::remove_dir_all(fixture).expect("rooted ancestor fixture should be removed");
+    fs::remove_dir_all(fixture)
+        .expect("rooted ancestor fixture should be removed");
 }
 
 /// Verifies the conservative fallback on targets without a secure rooted

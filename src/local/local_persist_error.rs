@@ -8,9 +8,17 @@
 //! Recoverable temporary-resource persistence errors.
 
 use std::error::Error;
-use std::fmt::{Debug, Display, Formatter, Result as FmtResult};
+use std::fmt::{
+    Debug,
+    Display,
+    Formatter,
+    Result as FmtResult,
+};
 use std::io;
-use std::path::{Path, PathBuf};
+use std::path::{
+    Path,
+    PathBuf,
+};
 
 use crate::LocalPersistStage;
 
@@ -155,7 +163,9 @@ impl<T> LocalPersistError<T> {
     /// ```
     #[must_use = "the returned tuple retains the temporary resource and persistence context"]
     #[inline(always)]
-    pub fn into_parts(self) -> (io::Error, T, PathBuf, Option<PathBuf>, LocalPersistStage) {
+    pub fn into_parts(
+        self,
+    ) -> (io::Error, T, PathBuf, Option<PathBuf>, LocalPersistStage) {
         let Self {
             error,
             resource,

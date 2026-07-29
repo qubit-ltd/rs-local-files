@@ -13,7 +13,9 @@ use std::path::Path;
 
 use crate::local::{
     file_name_from_path as extract_file_name_from_path,
-    file_name_from_url as extract_file_name_from_url, normalize_extension, try_random_file_name,
+    file_name_from_url as extract_file_name_from_url,
+    normalize_extension,
+    try_random_file_name,
     validate_portable_file_name_impl,
 };
 
@@ -46,7 +48,10 @@ pub fn random_file_name() -> Result<String> {
 /// safe file-name fragment, or an I/O error when the operating-system random
 /// source fails.
 #[inline(always)]
-pub fn random_file_name_with(prefix: Option<&str>, suffix: Option<&str>) -> Result<String> {
+pub fn random_file_name_with(
+    prefix: Option<&str>,
+    suffix: Option<&str>,
+) -> Result<String> {
     try_random_file_name(DEFAULT_RANDOM_FILE_NAME_PREFIX, prefix, suffix)
 }
 
@@ -161,7 +166,9 @@ pub fn has_extension(path: &Path, expected: &str) -> bool {
 #[must_use]
 #[inline]
 pub fn has_extension_ignore_ascii_case(path: &Path, expected: &str) -> bool {
-    extension(path).is_some_and(|value| value.eq_ignore_ascii_case(normalize_extension(expected)))
+    extension(path).is_some_and(|value| {
+        value.eq_ignore_ascii_case(normalize_extension(expected))
+    })
 }
 
 /// Returns the final segment from a path-like string.

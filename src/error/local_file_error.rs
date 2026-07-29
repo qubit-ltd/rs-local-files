@@ -10,12 +10,19 @@
 
 use std::{
     error::Error,
-    fmt, io,
-    path::{Path, PathBuf},
+    fmt,
+    io,
+    path::{
+        Path,
+        PathBuf,
+    },
 };
 
 use super::{
-    LocalFileErrorKind, LocalFileErrorSource, LocalFileOperation, LocalMutationState,
+    LocalFileErrorKind,
+    LocalFileErrorSource,
+    LocalFileOperation,
+    LocalMutationState,
     LocalPathCodecError,
 };
 
@@ -45,7 +52,10 @@ impl LocalFileError {
     /// - `operation`: Operation that failed.
     #[must_use]
     #[inline]
-    pub const fn new(kind: LocalFileErrorKind, operation: LocalFileOperation) -> Self {
+    pub const fn new(
+        kind: LocalFileErrorKind,
+        operation: LocalFileOperation,
+    ) -> Self {
         Self {
             kind,
             operation,
@@ -158,7 +168,10 @@ impl LocalFileError {
     /// The updated structured error.
     #[must_use]
     #[inline(always)]
-    pub const fn with_mutation_state(mut self, state: LocalMutationState) -> Self {
+    pub const fn with_mutation_state(
+        mut self,
+        state: LocalMutationState,
+    ) -> Self {
         self.mutation_state = Some(state);
         self
     }

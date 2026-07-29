@@ -10,5 +10,8 @@
 mod open;
 mod open_options;
 
-pub use open::{open, open_with};
+pub use open::{
+    open,
+    open_with,
+};
 pub use open_options::OpenOptions;

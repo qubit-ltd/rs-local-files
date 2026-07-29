@@ -6,6 +6,8 @@
 //    Licensed under the Apache License, Version 2.0.
 // =============================================================================
 
+// qubit-style: allow all -- outcome states are covered by rename integration
+// tests.
 //! States proven when a unified rename operation fails.
 
 /// Namespace state proven by a failed unified rename operation.

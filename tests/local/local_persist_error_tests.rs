@@ -48,7 +48,8 @@ fn test_persist_error_into_parts_returns_error_and_resource() {
     assert_eq!(target, persist_error.requested_target());
     assert_eq!(Some(target.as_path()), persist_error.resolved_target());
     assert_eq!(LocalPersistStage::InstallDestination, persist_error.stage());
-    let (error, resource, requested_target, resolved_target, stage) = persist_error.into_parts();
+    let (error, resource, requested_target, resolved_target, stage) =
+        persist_error.into_parts();
 
     assert_eq!(ErrorKind::AlreadyExists, error.kind());
     assert_eq!(source, resource.path());

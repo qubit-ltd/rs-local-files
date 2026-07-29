@@ -10,7 +10,11 @@
 
 use std::time::Duration;
 
-use super::{LocalAtomicityRequirement, LocalDurabilityRequirement, LocalWriteMode};
+use super::{
+    LocalAtomicityRequirement,
+    LocalDurabilityRequirement,
+    LocalWriteMode,
+};
 
 /// Options fixed for a local file writer session.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -91,7 +95,10 @@ impl LocalWriteOptions {
     /// Sets the required atomicity.
     #[must_use]
     #[inline(always)]
-    pub const fn with_atomicity(mut self, atomicity: LocalAtomicityRequirement) -> Self {
+    pub const fn with_atomicity(
+        mut self,
+        atomicity: LocalAtomicityRequirement,
+    ) -> Self {
         self.atomicity = atomicity;
         self
     }
@@ -99,7 +106,10 @@ impl LocalWriteOptions {
     /// Sets the required durability.
     #[must_use]
     #[inline(always)]
-    pub const fn with_durability(mut self, durability: LocalDurabilityRequirement) -> Self {
+    pub const fn with_durability(
+        mut self,
+        durability: LocalDurabilityRequirement,
+    ) -> Self {
         self.durability = durability;
         self
     }

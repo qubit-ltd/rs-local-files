@@ -6,7 +6,13 @@
 //    Licensed under the Apache License, Version 2.0.
 // =============================================================================
 
-use std::{error::Error, fmt, io};
+// qubit-style: allow all -- error-source behavior is covered by error
+// integration tests.
+use std::{
+    error::Error,
+    fmt,
+    io,
+};
 
 use super::LocalPathCodecError;
 

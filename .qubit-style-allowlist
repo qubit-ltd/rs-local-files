@@ -23,3 +23,8 @@ coverage-cfg | src/local/internal/staged_file.rs | Exercises persistent path-bas
 coverage-cfg | src/local/internal/unix_nonblocking.rs | Exercises otherwise unreachable descriptor status failures
 coverage-cfg | src/local/local_atomic_writer.rs | Exercises parent synchronization after partial installation
 coverage-cfg | src/local/local_root_atomic_writer.rs | Exercises rooted parent synchronization after partial installation
+coverage-cfg | src/local/internal/rooted_namespace_io.rs | Exercises otherwise unreachable rooted namespace faults
+coverage-cfg | src/local/mod.rs | Exposes legacy local helpers only to coverage regression tests
+coverage-cfg | src/local_file_system.rs | Exercises otherwise unreachable local filesystem fault paths
+coverage-cfg | src/rooted/copy.rs | Exercises otherwise unreachable rooted copy fault paths
+coverage-cfg | src/rooted/root.rs | Exercises otherwise unreachable rooted root fault paths

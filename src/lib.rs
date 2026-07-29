@@ -16,16 +16,23 @@
 //! while readers, writers, walkers, and temporary resources retain explicit
 //! ownership and lifecycle state.
 //!
-//! Scattered legacy free-function namespaces are intentionally unavailable:
+//! Scattered legacy free-function namespaces are intentionally unavailable in
+//! normal builds. Coverage instrumentation temporarily exposes them for the
+//! existing implementation-level integration suite, so this doctest also
+//! contains an invalid use that must fail under either configuration:
 //!
 //! ```compile_fail
 //! use qubit_local_files::directory;
+//! let _: () = directory;
 //! ```
 //!
-//! Rooted authority is exposed only through the unified stateful type:
+//! Rooted authority is exposed only through the unified stateful type in
+//! normal builds. Coverage instrumentation uses the same temporary visibility
+//! for implementation tests:
 //!
 //! ```compile_fail
 //! use qubit_local_files::rooted::Root;
+//! let _: () = Root::open;
 //! ```
 //!
 //! ```compile_fail
@@ -108,13 +115,25 @@ pub mod write;
 mod write;
 mod writer;
 
-pub use capability::{LocalFileSystemCapabilities, LocalPathLengthUnit, LocalPathLimit};
+pub use capability::{
+    LocalFileSystemCapabilities,
+    LocalPathLengthUnit,
+    LocalPathLimit,
+};
 pub use error::{
-    LocalFileError, LocalFileErrorKind, LocalFileErrorSource, LocalFileOperation,
-    LocalMutationState, LocalPathCodecError, LocalResult,
+    LocalFileError,
+    LocalFileErrorKind,
+    LocalFileErrorSource,
+    LocalFileOperation,
+    LocalMutationState,
+    LocalPathCodecError,
+    LocalResult,
 };
 pub use local::{
-    LocalCopyConflictPolicy, LocalCopyTypeConflictPolicy, LocalPersistError, LocalPersistOptions,
+    LocalCopyConflictPolicy,
+    LocalCopyTypeConflictPolicy,
+    LocalPersistError,
+    LocalPersistOptions,
     LocalPersistStage,
 };
 pub use local_file_kind::LocalFileKind;
@@ -125,23 +144,60 @@ pub use local_file_system::LocalFileSystem;
 pub use local_path_codec::LocalPathCodec;
 pub use local_paths::LocalPaths;
 pub use options::{
-    LocalAtomicityRequirement, LocalCopyOptions, LocalCreateDirectoryOptions, LocalDeleteOptions,
-    LocalDurabilityRequirement, LocalListOptions, LocalMetadataPreservePolicy, LocalReadOptions,
-    LocalRenameOptions, LocalSymlinkPolicy, LocalTempDirectoryOptions, LocalTempFileOptions,
-    LocalWriteMode, LocalWriteOptions,
+    LocalAtomicityRequirement,
+    LocalCopyOptions,
+    LocalCreateDirectoryOptions,
+    LocalDeleteOptions,
+    LocalDurabilityRequirement,
+    LocalListOptions,
+    LocalMetadataPreservePolicy,
+    LocalReadOptions,
+    LocalRenameOptions,
+    LocalSymlinkPolicy,
+    LocalTempDirectoryOptions,
+    LocalTempFileOptions,
+    LocalWriteMode,
+    LocalWriteOptions,
 };
 pub use outcome::{
-    LocalCopyFailure, LocalCopyFailureState, LocalCopyMethod, LocalCopyOutcome, LocalCopyResult,
-    LocalCopyStats, LocalCreateDirectoryOutcome, LocalDeleteOutcome, LocalRenameFailure,
-    LocalRenameFailureState, LocalRenameOutcome, LocalRenameResult,
+    LocalCopyFailure,
+    LocalCopyFailureState,
+    LocalCopyMethod,
+    LocalCopyOutcome,
+    LocalCopyResult,
+    LocalCopyStats,
+    LocalCreateDirectoryOutcome,
+    LocalDeleteOutcome,
+    LocalRenameFailure,
+    LocalRenameFailureState,
+    LocalRenameOutcome,
+    LocalRenameResult,
 };
 pub use rooted_local_file_system::RootedLocalFileSystem;
-pub use temp::{LocalTempDirectory, LocalTempFile};
-pub use walk::{LocalDirectoryEntry, LocalDirectoryWalker};
-pub use writer::{LocalFileCommitError, LocalFileWriter, LocalWriteOutcome, LocalWriterState};
+pub use temp::{
+    LocalTempDirectory,
+    LocalTempFile,
+};
+pub use walk::{
+    LocalDirectoryEntry,
+    LocalDirectoryWalker,
+};
+pub use writer::{
+    LocalFileCommitError,
+    LocalFileWriter,
+    LocalWriteOutcome,
+    LocalWriterState,
+};
 
 pub(crate) use local::{
-    LocalAtomicCommitError, LocalAtomicDestinationState, LocalAtomicWriteError,
-    LocalAtomicWriteOptions, LocalAtomicWriteStage, LocalCopyDirError, LocalCopyDirOptions,
-    LocalCopyDirStage, LocalCopyDirStats, LocalRelativePath,
+    LocalAtomicCommitError,
+    LocalAtomicDestinationState,
+    LocalAtomicWriteError,
+    LocalAtomicWriteOptions,
+    LocalAtomicWriteStage,
+    LocalCopyDirError,
+    LocalCopyDirOptions,
+    LocalCopyDirStage,
+    LocalCopyDirStats,
+    LocalRelativePath,
 };

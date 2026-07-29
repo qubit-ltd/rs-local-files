@@ -8,7 +8,11 @@
 
 use std::fs;
 
-use qubit_local_files::{LocalFileSystem, LocalTempDirectoryOptions, LocalTempFileOptions};
+use qubit_local_files::{
+    LocalFileSystem,
+    LocalTempDirectoryOptions,
+    LocalTempFileOptions,
+};
 use tempfile::tempdir;
 
 /// Verifies temporary-file options bind the parent and apply both affixes.
@@ -41,7 +45,7 @@ fn test_local_file_system_create_temp_file_applies_options() {
 #[test]
 fn test_local_file_system_create_temp_directory_applies_suffix() {
     let parent = tempdir().expect("temporary parent should be created");
-    let directory = LocalFileSystem::create_temp_directory(
+    let mut directory = LocalFileSystem::create_temp_directory(
         &LocalTempDirectoryOptions::new()
             .with_parent(parent.path())
             .with_prefix("work-")

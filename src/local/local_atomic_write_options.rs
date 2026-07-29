@@ -18,7 +18,7 @@ use crate::LocalDurabilityRequirement;
 /// not silently leave the original value unchanged.
 #[must_use = "atomic write options have no effect unless they are used"]
 #[non_exhaustive]
-#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub struct LocalAtomicWriteOptions {
     /// Whether missing parent directories should be created before staging.
     create_parent: bool,
@@ -117,7 +117,10 @@ impl LocalAtomicWriteOptions {
     ///
     /// Updated options carrying the durability policy.
     #[inline(always)]
-    pub const fn with_durability(mut self, durability: LocalDurabilityRequirement) -> Self {
+    pub const fn with_durability(
+        mut self,
+        durability: LocalDurabilityRequirement,
+    ) -> Self {
         self.durability = durability;
         self
     }
@@ -156,5 +159,13 @@ impl LocalAtomicWriteOptions {
     #[inline(always)]
     pub(crate) const fn publication_mode(&self) -> LocalAtomicPublicationMode {
         self.publication_mode
+    }
+}
+
+impl Default for LocalAtomicWriteOptions {
+    /// Returns the same policy as [`Self::new`].
+    #[inline(always)]
+    fn default() -> Self {
+        Self::new()
     }
 }
