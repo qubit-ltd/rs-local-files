@@ -1,95 +1,81 @@
 # Qubit Local Files User Guide
 
-Qubit Local Files is the concrete native filesystem layer used by applications
-and local-provider adapters. It does not define provider paths, registries, or
-remote filesystem behavior.
+[中文](user_guide.zh_CN.md) · [README](../README.md) ·
+[API reference](https://docs.rs/qubit-local-files)
 
-## API Model
+This guide covers `qubit-local-files` 0.7 on Rust 1.94 or newer. It is for
+applications that operate on the host filesystem or need operations restricted
+to one opened directory. It is not a provider registry, a remote filesystem
+API, or a replacement for provider-level logical paths.
 
-The public API has two authorities:
+## Conceptual Model
 
-- `LocalFileSystem` contains host-wide associated methods.
-- `RootedLocalFileSystem` is a stateful authority anchored to an opened
-  directory descriptor or handle.
+```
+host paths ── LocalFileSystem ── native filesystem
+opened root ─ RootedLocalFileSystem ─ relative descendants only
+```
 
-`LocalFileNames` and `LocalPaths` contain native lexical helpers. Readers,
-writers, walkers, and temporary resources are stateful values. There are no
-public free-function aliases for filesystem operations.
+`LocalFileSystem` exposes host-wide associated methods. `RootedLocalFileSystem`
+is a stateful authority created with `open`; it keeps the opened root rather
+than repeatedly resolving a string path. Readers, writers, walkers, and
+temporary entries are owned stateful resources. `LocalFileNames` and
+`LocalPaths` provide native lexical utilities without converting names to UTF-8.
 
-## Host Operations
+## Scenario: write and inspect an export
+
+An exporter must create `build/output`, publish `manifest.json` only after a
+complete write, and inspect the result. The observable success condition is a
+`Committed` writer outcome and the bytes read back from the published file.
 
 ```rust
 use std::io::{Read, Write};
-
 use qubit_local_files::{
-    LocalCreateDirectoryOptions,
-    LocalFileSystem,
-    LocalReadOptions,
-    LocalWriteMode,
-    LocalWriteOptions,
-    LocalWriterState,
+    LocalCreateDirectoryOptions, LocalFileSystem, LocalReadOptions,
+    LocalWriteMode, LocalWriteOptions, LocalWriterState,
 };
 
-let root = std::path::Path::new("build/output");
+let output = std::path::Path::new("build/output");
 LocalFileSystem::create_directory(
-    root,
+    output,
     &LocalCreateDirectoryOptions::new().with_recursive(),
 )?;
-
-let path = root.join("manifest.json");
-let mut writer =
-    LocalFileSystem::open_writer(
-        &path,
-        &LocalWriteOptions::new(LocalWriteMode::CreateOrReplace),
-    )?;
+let path = output.join("manifest.json");
+let mut writer = LocalFileSystem::open_writer(
+    &path,
+    &LocalWriteOptions::new(LocalWriteMode::CreateOrReplace),
+)?;
 writer.write_all(br#"{"complete":true}"#)?;
 let result = writer.commit()?;
-assert_eq!(LocalWriterState::Committed, result.state());
-
-let mut reader =
-    LocalFileSystem::open_reader(&path, &LocalReadOptions::new())?;
+assert_eq!(result.state(), LocalWriterState::Committed);
 let mut text = String::new();
-reader.read_to_string(&mut text)?;
-
+LocalFileSystem::open_reader(&path, &LocalReadOptions::new())?
+    .read_to_string(&mut text)?;
+assert_eq!(text, r#"{"complete":true}"#);
 # Ok::<(), Box<dyn std::error::Error>>(())
 ```
 
-Relative paths used by multi-call operations are bound at operation start.
-Copy and rename bind source and target using one current-directory snapshot.
-Metadata observes the final entry without following a final symbolic link.
+Relative paths used by a multi-call operation are bound when that operation
+starts. Copy and rename bind source and target from one current-directory
+snapshot. `metadata` observes the final entry without following a final
+symbolic link.
 
-## Copy
+## Publish, Copy, and Recover
 
-`LocalFileSystem::copy` and `RootedLocalFileSystem::copy` select file or
-directory behavior from source metadata.
+`CreateNew` and `CreateOrReplace` use same-directory staging. `Append` changes
+an existing regular file directly and rejects required atomicity. A writer can
+be committed or aborted; a write, flush, or commit error can leave publication
+state indeterminate, so retain and inspect the returned resource/error where
+recovery is required.
 
-```rust
-use qubit_local_files::{LocalCopyOptions, LocalFileSystem};
-
-let outcome = LocalFileSystem::copy(
-    std::path::Path::new("source"),
-    std::path::Path::new("backup"),
-    &LocalCopyOptions::new(),
-)?;
-assert!(outcome.stats().files() + outcome.stats().directories() > 0);
-
-# Ok::<(), Box<dyn std::error::Error>>(())
-```
-
-Options separately describe target conflict, type conflict, metadata,
-symbolic-link, device-boundary, recursion, atomicity, and durability policies.
-Required guarantees are rejected before destructive changes when unsupported.
-Copy rejects self-copy and hard-link aliases. Overwrite replaces a target
-symbolic-link entry rather than following it.
-
-Copy failures retain the strongest state proven for the destination:
+`copy` selects file or directory behavior from source metadata. Its options
+separately control target conflict, type conflict, metadata, symbolic links,
+device boundaries, recursion, atomicity, and durability. Unsupported required
+guarantees are rejected before destructive changes. Self-copy and hard-link
+aliases are rejected; overwriting a symbolic-link target replaces that entry
+rather than following it.
 
 ```rust,no_run
-use qubit_local_files::{
-    LocalCopyFailureState,
-    LocalCopyOptions,
-    LocalFileSystem,
-};
+use qubit_local_files::{LocalCopyFailureState, LocalCopyOptions, LocalFileSystem};
 
 match LocalFileSystem::copy(
     std::path::Path::new("source"),
@@ -101,178 +87,70 @@ match LocalFileSystem::copy(
         LocalCopyFailureState::Unchanged => println!("destination is unchanged"),
         LocalCopyFailureState::PartiallyPublished => println!("destination is partial"),
         LocalCopyFailureState::Published => println!("destination was published"),
-        LocalCopyFailureState::Indeterminate => println!("destination state is unknown"),
+        LocalCopyFailureState::Indeterminate => println!("reconcile destination"),
     },
 }
 ```
 
-Rename failures likewise report the proven namespace state:
+Rename reports `Unchanged`, `Renamed`, or `Indeterminate` through its typed
+failure state for the same reason: an error is not necessarily “nothing
+happened”.
 
-```rust,no_run
-use qubit_local_files::{
-    LocalFileSystem,
-    LocalRenameFailureState,
-    LocalRenameOptions,
-};
+## Walk and Temporary Resources
 
-match LocalFileSystem::rename(
-    std::path::Path::new("draft"),
-    std::path::Path::new("published"),
-    &LocalRenameOptions::new(),
-) {
-    Ok(_) => println!("rename completed"),
-    Err(failure) => match failure.state() {
-        LocalRenameFailureState::Unchanged => println!("source is unchanged"),
-        LocalRenameFailureState::Renamed => println!("rename completed before a later error"),
-        LocalRenameFailureState::Indeterminate => println!("rename state is unknown"),
-    },
-}
-```
+`LocalFileSystem::list` returns a lazy `LocalDirectoryWalker`. It opens and
+advances directories on demand; maximum depth and symbolic-link policy are
+fixed at creation, and dropping it only releases handles.
 
-## Lazy Walking
+Temporary files and directories own cleanup while armed. Dropping them performs
+best-effort cleanup; `keep` disables cleanup and returns a stable absolute path.
+Persistence failures retain the resource so the caller can retry, inspect,
+keep, or explicitly clean it. Prefixes and suffixes are checked before entry
+creation: native separators, NUL, and portable reserved-name violations do not
+leave an entry behind.
+
+## Rooted Workspaces
+
+Use rooted access when processing untrusted relative names beneath a workspace.
 
 ```rust
-use qubit_local_files::{LocalFileSystem, LocalListOptions};
+use qubit_local_files::{LocalListOptions, RootedLocalFileSystem};
 
-let walker = LocalFileSystem::list(
-    std::path::Path::new("workspace"),
-    &LocalListOptions::new().with_max_depth(2),
-)?;
-for entry in walker {
-    let entry = entry?;
-    println!("{}", entry.path().display());
-}
-
-# Ok::<(), Box<dyn std::error::Error>>(())
-```
-
-The walker opens and advances directories on demand. Depth and symbolic-link
-policies are fixed when the walker is created. Dropping a walker only releases
-handles.
-
-## Writer Lifecycle
-
-`LocalWriteMode::CreateNew` and `CreateOrReplace` use same-directory staging.
-`Append` modifies an existing regular file directly and rejects required
-atomicity.
-
-A writer starts in `Open`. `commit` returns `LocalWriteOutcome`; `abort`
-discards unpublished staging. A stream write or flush failure makes the state
-indeterminate because an ordinary I/O error cannot prove that no bytes changed.
-Commit failures use `LocalFileCommitError` to preserve publication state.
-
-## Temporary Resources
-
-```rust
-use std::io::Write;
-
-use qubit_local_files::{
-    LocalFileSystem,
-    LocalTempDirectoryOptions,
-    LocalTempFileOptions,
-};
-
-let directory = LocalFileSystem::create_temp_directory(
-    &LocalTempDirectoryOptions::new().with_suffix(".work"),
-)?;
-let mut file = LocalFileSystem::create_temp_file(
-    &LocalTempFileOptions::new()
-        .with_parent(directory.path())
-        .with_suffix(".data"),
-)?;
-file.write_all(b"payload")?;
-file.close();
-
-# Ok::<(), Box<dyn std::error::Error>>(())
-```
-
-Temporary entries own cleanup responsibility. Drop performs best-effort cleanup
-while ownership remains armed. `keep` disables cleanup and returns the stable
-absolute path. Persistence errors retain the resource so callers can retry,
-inspect, keep, or explicitly clean it.
-
-Prefix and suffix validation happens before entry creation. Native separators,
-NUL, and portable reserved-name violations are rejected without leaving an
-entry.
-
-## Rooted Authority
-
-```rust
-use qubit_local_files::{
-    LocalListOptions,
-    LocalTempDirectoryOptions,
-    RootedLocalFileSystem,
-};
-
-let root =
-    RootedLocalFileSystem::open(std::path::Path::new("workspace"))?;
-let _temporary = root.create_temp_directory(&LocalTempDirectoryOptions::new())?;
-let walker = root.list(
-    std::path::Path::new("assets"),
-    &LocalListOptions::new(),
-)?;
+let root = RootedLocalFileSystem::open(std::path::Path::new("workspace"))?;
+let walker = root.list(std::path::Path::new("assets"), &LocalListOptions::new())?;
 for entry in walker {
     println!("{}", entry?.path().display());
 }
-
 # Ok::<(), Box<dyn std::error::Error>>(())
 ```
 
-Rooted paths are relative descendants. Absolute paths, prefixes, `.`, and `..`
-are rejected. Intermediate symbolic links are not accepted. The diagnostic
-root path is non-authoritative: renaming that path after open does not redirect
-the opened authority.
+Rooted paths must be relative descendants. Absolute paths, prefixes, `.`, `..`,
+and intermediate symbolic links are rejected. The diagnostic root path is not
+the authority: renaming it after `open` does not redirect the resource.
+Lexical containment is useful early classification, but it is not a substitute
+for descriptor-relative authorization.
 
-## Names and Paths
+## Errors, Diagnostics, and Troubleshooting
 
-Filename accessors return `OsStr` or `OsString`, preserving non-UTF-8 Unix
-names and native Windows values.
+`LocalFileError` carries a `LocalFileErrorKind`, a `LocalFileOperation`, native
+primary and target paths when available, and an optional `std::io::Error`
+source. Publication operations use dedicated failure types to preserve
+partial-success state.
 
-```rust
-use qubit_local_files::{LocalFileNames, LocalPaths};
+| Symptom | Check |
+| --- | --- |
+| A rooted operation rejects a path | Pass a relative descendant; remove absolute prefixes, `.`, `..`, and intermediate symlinks. |
+| A required guarantee is rejected | Inspect the selected filesystem capabilities and relax the requirement only if the application permits it. |
+| Copy or rename returns an error | Inspect its typed failure state before retrying, cleanup, or treating the target as absent. |
+| A temporary entry remains | Retain the resource and call its explicit lifecycle method; drop cleanup is best effort. |
 
-let name = LocalFileNames::random_name_with(
-    Some("upload-"),
-    Some(".tmp"),
-)?;
-LocalFileNames::validate_portable(name.as_os_str())?;
+## Platform Limits and Further Reading
 
-let child = LocalPaths::compose_descendant(
-    std::path::Path::new("workspace"),
-    std::path::Path::new(name.as_os_str()),
-)?;
-assert!(LocalPaths::is_lexically_within(
-    &child,
-    std::path::Path::new("workspace"),
-)?);
+Linux, Windows, and macOS are runtime-tested. FreeBSD and Android are
+compile-checked only. `LocalFileSystem::capabilities()` reports the host
+implementation; `RootedLocalFileSystem::capabilities()` is the snapshot cached
+when opening the authority. A path limit is `Some` only when verified for the
+target filesystem.
 
-# Ok::<(), Box<dyn std::error::Error>>(())
-```
-
-`bind_host_paths` should be used for related paths so one current-directory
-snapshot defines the operation. Lexical containment is an early classification,
-not a replacement for descriptor-relative authorization.
-
-## Errors and Capabilities
-
-`LocalFileError` reports `LocalFileErrorKind`, `LocalFileOperation`, primary and
-target native paths, and an optional `std::io::Error` source. Publication
-sessions use dedicated failure types for partial-success state.
-
-`LocalFileSystem::capabilities()` reports the host implementation.
-`RootedLocalFileSystem::capabilities()` returns the snapshot cached when the
-authority was opened. A path limit is reported only when it is verified for the
-target filesystem; otherwise it is `None`.
-
-## Validation
-
-Run:
-
-```bash
-cargo test --all-features
-./align-ci.sh
-./ci-check.sh
-```
-
-Linux, Windows, and macOS behavior is runtime-tested. FreeBSD and Android are
-compile-checked and are not documented as runtime guarantees.
+Continue with the [README](../README.md), [中文用户手册](user_guide.zh_CN.md),
+or the [API reference](https://docs.rs/qubit-local-files).
