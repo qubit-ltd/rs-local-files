@@ -8,10 +8,7 @@
 // qubit-style: allow source-test-pair
 // Covered by metadata integration tests.
 
-use std::{
-    fs::Metadata,
-    time::SystemTime,
-};
+use std::{fs::Metadata, time::SystemTime};
 
 use crate::LocalFileKind;
 

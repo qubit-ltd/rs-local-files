@@ -2,35 +2,17 @@
 
 use std::{
     fs::File,
-    io::{
-        Error,
-        ErrorKind,
-        IoSlice,
-        Result,
-        Seek,
-        SeekFrom,
-        Write,
-    },
-    path::{
-        Path,
-        PathBuf,
-    },
+    io::{Error, ErrorKind, IoSlice, Result, Seek, SeekFrom, Write},
+    path::{Path, PathBuf},
     sync::Arc,
 };
 
 use log::warn;
 
-use crate::{
-    LocalPersistError,
-    LocalPersistOptions,
-    LocalPersistStage,
-    LocalRelativePath,
-};
+use crate::{LocalPersistError, LocalPersistOptions, LocalPersistStage, LocalRelativePath};
 
 use super::internal::{
-    LocalTempResourceBackend,
-    LocalTempResourceState,
-    RootedTempResourceBackend,
+    LocalTempResourceBackend, LocalTempResourceState, RootedTempResourceBackend,
 };
 
 /// A temporary file whose cleanup remains bound to its creating authority.
@@ -52,28 +34,20 @@ impl LocalTempFile {
     pub(crate) fn host(path: PathBuf, file: File) -> Self {
         Self {
             path,
-            backend: LocalTempResourceBackend::Host(
-                super::internal::HostTempResourceBackend,
-            ),
+            backend: LocalTempResourceBackend::Host(super::internal::HostTempResourceBackend),
             file: Some(file),
             state: LocalTempResourceState::Owned,
         }
     }
 
     /// Builds a rooted temporary file from the retained root authority.
-    pub(crate) fn rooted(
-        root: Arc<crate::rooted::Root>,
-        path: PathBuf,
-        file: File,
-    ) -> Self {
+    pub(crate) fn rooted(root: Arc<crate::rooted::Root>, path: PathBuf, file: File) -> Self {
         Self {
             path: path.clone(),
-            backend: LocalTempResourceBackend::Rooted(
-                RootedTempResourceBackend {
-                    root,
-                    relative_path: path,
-                },
-            ),
+            backend: LocalTempResourceBackend::Rooted(RootedTempResourceBackend {
+                root,
+                relative_path: path,
+            }),
             file: Some(file),
             state: LocalTempResourceState::Owned,
         }
@@ -193,8 +167,7 @@ impl LocalTempFile {
         };
         let source = LocalRelativePath::new(&rooted.relative_path)
             .expect("rooted temporary path was validated at creation");
-        let destination = LocalRelativePath::new(&target)
-            .expect("persist target was validated");
+        let destination = LocalRelativePath::new(&target).expect("persist target was validated");
         let result = if options.overwrites() {
             rooted.root.rename(&source, &destination)
         } else {
@@ -223,9 +196,7 @@ impl LocalTempFile {
     /// path.
     fn remove(&self) -> Result<()> {
         match &self.backend {
-            LocalTempResourceBackend::Host(_) => {
-                std::fs::remove_file(&self.path)
-            }
+            LocalTempResourceBackend::Host(_) => std::fs::remove_file(&self.path),
             LocalTempResourceBackend::Rooted(rooted) => {
                 let path = LocalRelativePath::new(&rooted.relative_path)
                     .expect("rooted temporary path was validated at creation");
@@ -285,8 +256,7 @@ impl Drop for LocalTempFile {
         self.close();
         if matches!(
             self.state,
-            LocalTempResourceState::Owned
-                | LocalTempResourceState::CleanupRequired
+            LocalTempResourceState::Owned | LocalTempResourceState::CleanupRequired
         ) && let Err(error) = self.remove()
         {
             warn!(

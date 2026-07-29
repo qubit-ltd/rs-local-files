@@ -8,14 +8,8 @@
 //! Local-filesystem fixture construction and inspection.
 
 use std::fs;
-use std::path::{
-    Path,
-    PathBuf,
-};
-use std::sync::atomic::{
-    AtomicU64,
-    Ordering,
-};
+use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicU64, Ordering};
 
 /// Counter used to keep per-process temporary fixture names unique.
 static TEST_DIR_COUNTER: AtomicU64 = AtomicU64::new(0);
@@ -64,8 +58,7 @@ pub(crate) fn temp_dir(name: &str) -> PathBuf {
 /// Panics when the fixture directory cannot be created.
 pub(crate) fn short_temp_dir(name: &str) -> PathBuf {
     let id = TEST_DIR_COUNTER.fetch_add(1, Ordering::Relaxed);
-    let path =
-        PathBuf::from(format!("/tmp/qio-{}-{name}-{id}", std::process::id()));
+    let path = PathBuf::from(format!("/tmp/qio-{}-{name}-{id}", std::process::id()));
     drop(fs::remove_dir_all(&path));
     fs::create_dir_all(&path).expect("short temp dir should be created");
     path
@@ -85,8 +78,7 @@ pub(crate) fn create_fifo(path: &Path) {
     use std::ffi::CString;
     use std::os::unix::ffi::OsStrExt;
 
-    let path = CString::new(path.as_os_str().as_bytes())
-        .expect("FIFO path must not contain NUL");
+    let path = CString::new(path.as_os_str().as_bytes()).expect("FIFO path must not contain NUL");
     // SAFETY: `path` is a live NUL-terminated byte string and `0o600` is a
     // valid permission mode. `mkfifo` does not retain the pointer.
     let result = unsafe { libc::mkfifo(path.as_ptr(), 0o600) };
@@ -118,10 +110,7 @@ pub(crate) fn assert_fifo_open_is_rejected<F>(path: PathBuf, open: F)
 where
     F: FnOnce(&Path) -> std::io::Result<()> + Send + 'static,
 {
-    use std::sync::mpsc::{
-        self,
-        RecvTimeoutError,
-    };
+    use std::sync::mpsc::{self, RecvTimeoutError};
     use std::thread;
     use std::time::Duration;
 

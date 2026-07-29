@@ -123,9 +123,7 @@ fn strip_url_scheme(value: &str) -> &str {
 fn is_url_scheme(value: &str) -> bool {
     let mut bytes = value.bytes();
     bytes.next().is_some_and(|byte| byte.is_ascii_alphabetic())
-        && bytes.all(|byte| {
-            byte.is_ascii_alphanumeric() || matches!(byte, b'+' | b'-' | b'.')
-        })
+        && bytes.all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'+' | b'-' | b'.'))
 }
 
 /// Decodes percent-encoded UTF-8.

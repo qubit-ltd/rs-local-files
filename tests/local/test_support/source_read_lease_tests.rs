@@ -8,23 +8,13 @@
 
 //! Linux file-lease synchronization for deterministic copy-ordering tests.
 
-use std::fs::{
-    File,
-    OpenOptions,
-};
-use std::io::{
-    Error,
-    ErrorKind,
-    Result,
-};
+use std::fs::{File, OpenOptions};
+use std::io::{Error, ErrorKind, Result};
 use std::marker::PhantomData;
 use std::os::fd::AsRawFd;
 use std::path::Path;
 use std::rc::Rc;
-use std::time::{
-    Duration,
-    Instant,
-};
+use std::time::{Duration, Instant};
 
 use super::file_owner_ex_tests::FileOwnerEx;
 
@@ -77,9 +67,7 @@ impl SourceReadLease {
         Self::acquire_with_lease_operation(path, |file| {
             // SAFETY: the file descriptor is a live regular file opened for
             // reading and writing, as required for a Linux write lease.
-            let result = unsafe {
-                libc::fcntl(file.as_raw_fd(), libc::F_SETLEASE, libc::F_WRLCK)
-            };
+            let result = unsafe { libc::fcntl(file.as_raw_fd(), libc::F_SETLEASE, libc::F_WRLCK) };
             if result == -1 {
                 Err(Error::last_os_error())
             } else {
@@ -124,16 +112,11 @@ impl SourceReadLease {
         }
         // SAFETY: a zeroed sigset_t is a valid output buffer for
         // pthread_sigmask, which initializes it before it is read.
-        let mut previous_signal_mask: libc::sigset_t =
-            unsafe { std::mem::zeroed() };
+        let mut previous_signal_mask: libc::sigset_t = unsafe { std::mem::zeroed() };
         // SAFETY: both sigset_t pointers are valid for their documented input
         // and output roles for the duration of the call.
         let mask_result = unsafe {
-            libc::pthread_sigmask(
-                libc::SIG_BLOCK,
-                &signal_set,
-                &mut previous_signal_mask,
-            )
+            libc::pthread_sigmask(libc::SIG_BLOCK, &signal_set, &mut previous_signal_mask)
         };
         if mask_result != 0 {
             return Err(Error::from_raw_os_error(mask_result));
@@ -158,9 +141,7 @@ impl SourceReadLease {
         };
         // SAFETY: the file descriptor is live and `owner` has the native
         // layout required by the Linux F_SETOWN_EX fcntl command.
-        let owner_result = unsafe {
-            libc::fcntl(file.as_raw_fd(), F_SETOWN_EX, &raw const owner)
-        };
+        let owner_result = unsafe { libc::fcntl(file.as_raw_fd(), F_SETOWN_EX, &raw const owner) };
         if owner_result == -1 {
             let error = Error::last_os_error();
             restore_signal_mask(&previous_signal_mask);
@@ -172,17 +153,14 @@ impl SourceReadLease {
             match lease_operation(&file) {
                 Ok(()) => break,
                 Err(error)
-                    if error.kind() == ErrorKind::WouldBlock
-                        && Instant::now() < deadline =>
+                    if error.kind() == ErrorKind::WouldBlock && Instant::now() < deadline =>
                 {
                     if retry_delay.is_zero() {
                         std::thread::yield_now();
                         retry_delay = INITIAL_LEASE_RETRY_DELAY;
                     } else {
                         std::thread::sleep(retry_delay);
-                        retry_delay = retry_delay
-                            .saturating_mul(2)
-                            .min(MAX_LEASE_RETRY_DELAY);
+                        retry_delay = retry_delay.saturating_mul(2).min(MAX_LEASE_RETRY_DELAY);
                     }
                 }
                 Err(error) => {
@@ -209,19 +187,12 @@ impl SourceReadLease {
     pub(crate) fn wait_for_break(&self) -> Result<()> {
         let deadline = Instant::now() + LEASE_BREAK_TIMEOUT;
         loop {
-            let timeout = duration_to_timespec(
-                deadline.saturating_duration_since(Instant::now()),
-            );
+            let timeout = duration_to_timespec(deadline.saturating_duration_since(Instant::now()));
             // SAFETY: `signal_set` is initialized and remains live, the
             // optional signal-information pointer may be null, and `timeout`
             // is valid.
-            let signal = unsafe {
-                libc::sigtimedwait(
-                    &self.signal_set,
-                    std::ptr::null_mut(),
-                    &timeout,
-                )
-            };
+            let signal =
+                unsafe { libc::sigtimedwait(&self.signal_set, std::ptr::null_mut(), &timeout) };
             if signal == libc::SIGIO {
                 return Ok(());
             }
@@ -260,13 +231,8 @@ impl SourceReadLease {
         let lease_error = self.file.as_ref().and_then(|file| {
             // SAFETY: the file descriptor remains live and owns the lease
             // being released by the Linux F_SETLEASE command.
-            let result = unsafe {
-                libc::fcntl(
-                    file_descriptor(file),
-                    libc::F_SETLEASE,
-                    libc::F_UNLCK,
-                )
-            };
+            let result =
+                unsafe { libc::fcntl(file_descriptor(file), libc::F_SETLEASE, libc::F_UNLCK) };
             (result == -1).then(Error::last_os_error)
         });
         // Closing the descriptor also releases the lease if the explicit
@@ -277,9 +243,7 @@ impl SourceReadLease {
         let mask_error = restore_signal_mask(&self.previous_signal_mask);
         self.active = false;
         match (lease_error, signal_error, mask_error) {
-            (Some(error), _, _)
-            | (None, Some(error), _)
-            | (None, None, Some(error)) => Err(error),
+            (Some(error), _, _) | (None, Some(error), _) | (None, None, Some(error)) => Err(error),
             (None, None, None) => Ok(()),
         }
     }
@@ -300,8 +264,7 @@ fn file_descriptor(file: &File) -> libc::c_int {
 /// Converts a relative Rust duration to the native signal-wait timeout.
 fn duration_to_timespec(duration: Duration) -> libc::timespec {
     libc::timespec {
-        tv_sec: libc::time_t::try_from(duration.as_secs())
-            .unwrap_or(libc::time_t::MAX),
+        tv_sec: libc::time_t::try_from(duration.as_secs()).unwrap_or(libc::time_t::MAX),
         tv_nsec: duration.subsec_nanos().into(),
     }
 }
@@ -320,17 +283,14 @@ pub(crate) fn current_thread_cpu_time() -> Result<Duration> {
     let mut time = std::mem::MaybeUninit::<libc::timespec>::uninit();
     // SAFETY: `time` points to writable storage for one timespec and is read
     // only after clock_gettime reports success.
-    let result = unsafe {
-        libc::clock_gettime(libc::CLOCK_THREAD_CPUTIME_ID, time.as_mut_ptr())
-    };
+    let result = unsafe { libc::clock_gettime(libc::CLOCK_THREAD_CPUTIME_ID, time.as_mut_ptr()) };
     if result == -1 {
         return Err(Error::last_os_error());
     }
     // SAFETY: a successful clock_gettime call initialized the complete value.
     let time = unsafe { time.assume_init() };
-    let seconds = u64::try_from(time.tv_sec).map_err(|_| {
-        Error::new(ErrorKind::InvalidData, "thread CPU seconds are negative")
-    })?;
+    let seconds = u64::try_from(time.tv_sec)
+        .map_err(|_| Error::new(ErrorKind::InvalidData, "thread CPU seconds are negative"))?;
     let nanoseconds = u32::try_from(time.tv_nsec).map_err(|_| {
         Error::new(
             ErrorKind::InvalidData,
@@ -355,9 +315,7 @@ fn drain_signal(signal_set: &libc::sigset_t) -> Option<Error> {
     loop {
         // SAFETY: `signal_set` is initialized and remains live, the optional
         // signal-information pointer may be null, and `timeout` is valid.
-        let signal = unsafe {
-            libc::sigtimedwait(signal_set, std::ptr::null_mut(), &timeout)
-        };
+        let signal = unsafe { libc::sigtimedwait(signal_set, std::ptr::null_mut(), &timeout) };
         if signal == libc::SIGIO {
             continue;
         }

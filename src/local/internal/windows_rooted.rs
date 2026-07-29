@@ -9,89 +9,42 @@
 // qubit-style: allow source-test-pair
 // Platform behavior is covered through public rooted integration tests.
 
-use std::ffi::{
-    OsStr,
-    OsString,
-};
+use std::ffi::{OsStr, OsString};
 use std::fs::File;
-use std::io::{
-    Error,
-    ErrorKind,
-    Result,
-};
+use std::io::{Error, ErrorKind, Result};
 use std::mem::size_of;
-use std::os::windows::ffi::{
-    OsStrExt,
-    OsStringExt,
-};
-use std::os::windows::io::{
-    AsRawHandle,
-    FromRawHandle,
-};
+use std::os::windows::ffi::{OsStrExt, OsStringExt};
+use std::os::windows::io::{AsRawHandle, FromRawHandle};
 use std::path::Path;
-use std::ptr::{
-    null,
-    null_mut,
-};
+use std::ptr::{null, null_mut};
 
 use windows_sys::Wdk::Foundation::OBJECT_ATTRIBUTES;
 use windows_sys::Wdk::Storage::FileSystem::{
-    FILE_CREATE,
-    FILE_DIRECTORY_FILE,
-    FILE_DIRECTORY_INFORMATION,
-    FILE_NON_DIRECTORY_FILE,
-    FILE_OPEN,
-    FILE_OPEN_IF,
-    FILE_OPEN_REPARSE_POINT,
-    FILE_OVERWRITE_IF,
-    FILE_SYNCHRONOUS_IO_NONALERT,
-    FileDirectoryInformation,
-    NtCreateFile,
-    NtQueryDirectoryFile,
+    FILE_CREATE, FILE_DIRECTORY_FILE, FILE_DIRECTORY_INFORMATION, FILE_NON_DIRECTORY_FILE,
+    FILE_OPEN, FILE_OPEN_IF, FILE_OPEN_REPARSE_POINT, FILE_OVERWRITE_IF,
+    FILE_SYNCHRONOUS_IO_NONALERT, FileDirectoryInformation, NtCreateFile, NtQueryDirectoryFile,
     RtlNtStatusToDosErrorNoTeb,
 };
 use windows_sys::Win32::Foundation::{
-    GENERIC_READ,
-    GENERIC_WRITE,
-    HANDLE,
-    INVALID_HANDLE_VALUE,
-    OBJ_CASE_INSENSITIVE,
-    STATUS_NO_MORE_FILES,
-    UNICODE_STRING,
+    GENERIC_READ, GENERIC_WRITE, HANDLE, INVALID_HANDLE_VALUE, OBJ_CASE_INSENSITIVE,
+    STATUS_NO_MORE_FILES, UNICODE_STRING,
 };
 use windows_sys::Win32::Storage::FileSystem::{
-    CreateFileW,
-    FILE_APPEND_DATA,
-    FILE_ATTRIBUTE_DIRECTORY,
-    FILE_ATTRIBUTE_NORMAL,
-    FILE_ATTRIBUTE_REPARSE_POINT,
-    FILE_ATTRIBUTE_TAG_INFO,
-    FILE_FLAG_BACKUP_SEMANTICS,
-    FILE_FLAG_OPEN_REPARSE_POINT,
-    FILE_LIST_DIRECTORY,
-    FILE_READ_ATTRIBUTES,
-    FILE_SHARE_DELETE,
-    FILE_SHARE_READ,
-    FILE_SHARE_WRITE,
-    FILE_WRITE_ATTRIBUTES,
-    FileAttributeTagInfo,
-    GetFileInformationByHandleEx,
-    OPEN_EXISTING,
-    SYNCHRONIZE,
+    CreateFileW, FILE_APPEND_DATA, FILE_ATTRIBUTE_DIRECTORY, FILE_ATTRIBUTE_NORMAL,
+    FILE_ATTRIBUTE_REPARSE_POINT, FILE_ATTRIBUTE_TAG_INFO, FILE_FLAG_BACKUP_SEMANTICS,
+    FILE_FLAG_OPEN_REPARSE_POINT, FILE_LIST_DIRECTORY, FILE_READ_ATTRIBUTES, FILE_SHARE_DELETE,
+    FILE_SHARE_READ, FILE_SHARE_WRITE, FILE_WRITE_ATTRIBUTES, FileAttributeTagInfo,
+    GetFileInformationByHandleEx, OPEN_EXISTING, SYNCHRONIZE,
 };
 use windows_sys::Win32::System::IO::IO_STATUS_BLOCK;
 
 use crate::local::LocalRelativePath;
-use crate::{
-    read,
-    write,
-};
+use crate::{read, write};
 
 /// Reparse-tag bit identifying name-surrogate entries.
 const IO_REPARSE_TAG_NAME_SURROGATE: u32 = 0x2000_0000;
 /// Access shared by synchronous relative opens.
-const ROOTED_SHARE_MODE: u32 =
-    FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE;
+const ROOTED_SHARE_MODE: u32 = FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE;
 
 /// Opens an absolute root directory without following its final reparse point.
 ///
@@ -134,13 +87,7 @@ pub(crate) fn read_rooted_symlink_metadata(
     _diagnostic_root: &Path,
     path: &LocalRelativePath,
 ) -> Result<File> {
-    open_entry_no_follow(
-        root,
-        path,
-        FILE_READ_ATTRIBUTES | SYNCHRONIZE,
-        FILE_OPEN,
-        0,
-    )
+    open_entry_no_follow(root, path, FILE_READ_ATTRIBUTES | SYNCHRONIZE, FILE_OPEN, 0)
 }
 
 /// Opens a rooted regular file for reading.
@@ -283,9 +230,7 @@ pub(crate) fn create_rooted_directory(
                 parent = directory;
             }
             Err(source_error)
-                if !recursive
-                    && !final_component
-                    && source_error.kind() == ErrorKind::NotFound =>
+                if !recursive && !final_component && source_error.kind() == ErrorKind::NotFound =>
             {
                 return Err(source_error);
             }
@@ -316,9 +261,7 @@ pub(crate) fn remove_rooted_entry(
     let entry = open_entry_no_follow(
         root,
         path,
-        windows_sys::Win32::Storage::FileSystem::DELETE
-            | FILE_READ_ATTRIBUTES
-            | SYNCHRONIZE,
+        windows_sys::Win32::Storage::FileSystem::DELETE | FILE_READ_ATTRIBUTES | SYNCHRONIZE,
         FILE_OPEN,
         0,
     )?;
@@ -392,18 +335,15 @@ fn open_entry_no_follow(
 }
 
 /// Opens and verifies every parent component beneath the root.
-fn open_parent(
-    root: &File,
-    path: &LocalRelativePath,
-) -> Result<(File, OsString)> {
+fn open_parent(root: &File, path: &LocalRelativePath) -> Result<(File, OsString)> {
     let mut components: Vec<OsString> = path
         .as_path()
         .components()
         .map(|component| component.as_os_str().to_os_string())
         .collect();
-    let name = components.pop().ok_or_else(|| {
-        Error::new(ErrorKind::InvalidInput, "rooted path is empty")
-    })?;
+    let name = components
+        .pop()
+        .ok_or_else(|| Error::new(ErrorKind::InvalidInput, "rooted path is empty"))?;
     let mut parent = root.try_clone()?;
     for component in components {
         let directory = nt_open_at(
@@ -473,8 +413,7 @@ fn read_directory_handle(
     let mut restart = true;
     loop {
         let buffer_size = 64_usize * 1024;
-        let mut buffer =
-            vec![0_usize; buffer_size.div_ceil(size_of::<usize>())];
+        let mut buffer = vec![0_usize; buffer_size.div_ceil(size_of::<usize>())];
         let mut status_block = IO_STATUS_BLOCK::default();
         // SAFETY: `buffer` and `status_block` are writable for the duration of
         // the synchronous query. Optional event, APC, context, and filter
@@ -505,19 +444,12 @@ fn read_directory_handle(
         while offset < used {
             // SAFETY: NtQueryDirectoryFile returned a sequence of
             // FILE_DIRECTORY_INFORMATION records within `used` bytes.
-            let information = unsafe {
-                &*buffer.add(offset).cast::<FILE_DIRECTORY_INFORMATION>()
-            };
-            let name_len =
-                information.FileNameLength as usize / size_of::<u16>();
+            let information = unsafe { &*buffer.add(offset).cast::<FILE_DIRECTORY_INFORMATION>() };
+            let name_len = information.FileNameLength as usize / size_of::<u16>();
             // SAFETY: FileNameLength describes the inline UTF-16 name in this
             // record and the record lies inside the returned buffer.
-            let name_units = unsafe {
-                std::slice::from_raw_parts(
-                    information.FileName.as_ptr(),
-                    name_len,
-                )
-            };
+            let name_units =
+                unsafe { std::slice::from_raw_parts(information.FileName.as_ptr(), name_len) };
             let name = OsString::from_wide(name_units);
             if name != OsStr::new(".") && name != OsStr::new("..") {
                 let child = nt_open_at(
@@ -534,9 +466,7 @@ fn read_directory_handle(
             }
             offset = offset
                 .checked_add(information.NextEntryOffset as usize)
-                .ok_or_else(|| {
-                Error::other("directory record offset overflowed")
-            })?;
+                .ok_or_else(|| Error::other("directory record offset overflowed"))?;
         }
     }
     entries.sort_by(|left, right| left.0.cmp(&right.0));
@@ -593,9 +523,7 @@ fn handle_attributes(file: &File) -> Result<FILE_ATTRIBUTE_TAG_INFO> {
 /// Deletes the entry identified by an already opened handle.
 fn delete_open_entry(entry: &File) -> Result<()> {
     use windows_sys::Win32::Storage::FileSystem::{
-        FILE_DISPOSITION_INFO,
-        FileDispositionInfo,
-        SetFileInformationByHandle,
+        FILE_DISPOSITION_INFO, FileDispositionInfo, SetFileInformationByHandle,
     };
 
     let disposition = FILE_DISPOSITION_INFO { DeleteFile: true };
@@ -624,10 +552,7 @@ fn rename_open_entry(
     overwrite: bool,
 ) -> Result<()> {
     use windows_sys::Win32::Storage::FileSystem::{
-        DELETE,
-        FILE_RENAME_INFO,
-        FileRenameInfo,
-        SetFileInformationByHandle,
+        DELETE, FILE_RENAME_INFO, FileRenameInfo, SetFileInformationByHandle,
     };
 
     let source = open_entry_no_follow(
@@ -637,27 +562,19 @@ fn rename_open_entry(
         FILE_OPEN,
         0,
     )?;
-    let destination_units: Vec<u16> =
-        destination.as_path().as_os_str().encode_wide().collect();
+    let destination_units: Vec<u16> = destination.as_path().as_os_str().encode_wide().collect();
     let allocation = size_of::<FILE_RENAME_INFO>()
-        .checked_add(
-            destination_units.len().saturating_sub(1) * size_of::<u16>(),
-        )
-        .ok_or_else(|| {
-            Error::new(ErrorKind::InvalidInput, "rename buffer is too large")
-        })?;
+        .checked_add(destination_units.len().saturating_sub(1) * size_of::<u16>())
+        .ok_or_else(|| Error::new(ErrorKind::InvalidInput, "rename buffer is too large"))?;
     let mut buffer = vec![0_usize; allocation.div_ceil(size_of::<usize>())];
     // SAFETY: `Vec<usize>` provides alignment suitable for
     // `FILE_RENAME_INFO`, and the allocation includes the trailing UTF-16
     // name.
-    let information =
-        unsafe { &mut *buffer.as_mut_ptr().cast::<FILE_RENAME_INFO>() };
+    let information = unsafe { &mut *buffer.as_mut_ptr().cast::<FILE_RENAME_INFO>() };
     information.Anonymous.ReplaceIfExists = overwrite;
     information.RootDirectory = root.as_raw_handle();
-    information.FileNameLength =
-        u32::try_from(destination_units.len() * size_of::<u16>()).map_err(
-            |_| Error::new(ErrorKind::InvalidInput, "rename name is too long"),
-        )?;
+    information.FileNameLength = u32::try_from(destination_units.len() * size_of::<u16>())
+        .map_err(|_| Error::new(ErrorKind::InvalidInput, "rename name is too long"))?;
     // SAFETY: the allocation reserves enough trailing storage for the full
     // destination name and the source slice remains live for the copy.
     unsafe {
@@ -674,12 +591,8 @@ fn rename_open_entry(
             source.as_raw_handle(),
             FileRenameInfo,
             buffer.as_ptr().cast(),
-            u32::try_from(allocation).map_err(|_| {
-                Error::new(
-                    ErrorKind::InvalidInput,
-                    "rename buffer is too large",
-                )
-            })?,
+            u32::try_from(allocation)
+                .map_err(|_| Error::new(ErrorKind::InvalidInput, "rename buffer is too large"))?,
         )
     };
     if result == 0 {
@@ -710,9 +623,7 @@ fn unicode_string(value: &OsStr) -> Result<OwnedUnicodeString> {
         .len()
         .checked_mul(size_of::<u16>())
         .and_then(|length| u16::try_from(length).ok())
-        .ok_or_else(|| {
-            Error::new(ErrorKind::InvalidInput, "rooted component is too long")
-        })?;
+        .ok_or_else(|| Error::new(ErrorKind::InvalidInput, "rooted component is too long"))?;
     let header = UNICODE_STRING {
         Length: byte_len,
         MaximumLength: byte_len,

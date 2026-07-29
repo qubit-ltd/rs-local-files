@@ -7,10 +7,7 @@
 // =============================================================================
 //! Local filesystem metadata operations.
 
-use std::fs::{
-    self,
-    Metadata,
-};
+use std::fs::{self, Metadata};
 use std::io::Result;
 use std::path::Path;
 

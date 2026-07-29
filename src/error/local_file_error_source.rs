@@ -8,11 +8,7 @@
 
 // qubit-style: allow all -- error-source behavior is covered by error
 // integration tests.
-use std::{
-    error::Error,
-    fmt,
-    io,
-};
+use std::{error::Error, fmt, io};
 
 use super::LocalPathCodecError;
 

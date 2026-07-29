@@ -6,20 +6,11 @@
 //    Licensed under the Apache License, Version 2.0.
 // =============================================================================
 
-use std::{
-    fs,
-    io::Read,
-};
+use std::{fs, io::Read};
 
 use qubit_local_files::{
-    LocalCreateDirectoryOptions,
-    LocalDeleteOptions,
-    LocalDurabilityRequirement,
-    LocalFileErrorKind,
-    LocalFileSystem,
-    LocalMutationState,
-    LocalReadOptions,
-    LocalRenameOptions,
+    LocalCreateDirectoryOptions, LocalDeleteOptions, LocalDurabilityRequirement,
+    LocalFileErrorKind, LocalFileSystem, LocalMutationState, LocalReadOptions, LocalRenameOptions,
 };
 use tempfile::tempdir;
 
@@ -39,6 +30,22 @@ fn test_local_file_system_create_directory_reports_created_entries() {
     assert!(target.is_dir());
 }
 
+/// Verifies callers may explicitly accept an already existing directory.
+#[test]
+fn test_local_file_system_create_directory_accepts_existing_directory() {
+    let directory = tempdir().expect("temporary directory should be created");
+    let target = directory.path().join("existing");
+    fs::create_dir(&target).expect("fixture directory should be created");
+
+    let outcome = LocalFileSystem::create_directory(
+        &target,
+        &LocalCreateDirectoryOptions::new().with_exists_ok(),
+    )
+    .expect("existing directory should be accepted");
+
+    assert!(!outcome.created());
+}
+
 /// Verifies that opening a reader rejects directories and reads regular files.
 #[test]
 fn test_local_file_system_open_reader_requires_regular_file() {
@@ -46,20 +53,16 @@ fn test_local_file_system_open_reader_requires_regular_file() {
     let file = directory.path().join("payload");
     fs::write(&file, b"content").expect("fixture should be written");
 
-    let mut reader =
-        LocalFileSystem::open_reader(&file, &LocalReadOptions::new())
-            .expect("regular file should open");
+    let mut reader = LocalFileSystem::open_reader(&file, &LocalReadOptions::new())
+        .expect("regular file should open");
     let mut content = String::new();
     reader
         .read_to_string(&mut content)
         .expect("reader should return fixture content");
     assert_eq!("content", content);
 
-    let error = LocalFileSystem::open_reader(
-        directory.path(),
-        &LocalReadOptions::new(),
-    )
-    .expect_err("directory must not be exposed as a file reader");
+    let error = LocalFileSystem::open_reader(directory.path(), &LocalReadOptions::new())
+        .expect_err("directory must not be exposed as a file reader");
     assert_eq!(LocalFileErrorKind::TypeConflict, error.kind());
 }
 
@@ -72,9 +75,8 @@ fn test_local_file_system_rename_respects_overwrite_policy() {
     fs::write(&source, b"new").expect("source fixture should be written");
     fs::write(&target, b"old").expect("target fixture should be written");
 
-    let error =
-        LocalFileSystem::rename(&source, &target, &LocalRenameOptions::new())
-            .expect_err("default rename must not replace an entry");
+    let error = LocalFileSystem::rename(&source, &target, &LocalRenameOptions::new())
+        .expect_err("default rename must not replace an entry");
     assert_eq!(LocalFileErrorKind::AlreadyExists, error.error().kind());
     assert_eq!(
         b"old".as_slice(),
@@ -124,13 +126,11 @@ fn test_local_file_system_rename_reports_parent_sync_result() {
         );
         match requirement {
             LocalDurabilityRequirement::Preferred => {
-                let outcome = result
-                    .expect("preferred durability may report a downgrade");
+                let outcome = result.expect("preferred durability may report a downgrade");
                 assert!(!outcome.durable());
             }
             LocalDurabilityRequirement::Required => {
-                let error = result
-                    .expect_err("required durability must report failure");
+                let error = result.expect_err("required durability must report failure");
                 assert_eq!(
                     LocalFileErrorKind::PublicationIncomplete,
                     error.error().kind(),
@@ -161,21 +161,16 @@ fn test_local_file_system_delete_uses_explicit_directory_recursion() {
     fs::create_dir(&tree).expect("tree root should be created");
     fs::write(tree.join("child"), b"x").expect("tree child should be written");
 
-    let error =
-        LocalFileSystem::delete_directory(&tree, &LocalDeleteOptions::new())
-            .expect_err(
-                "non-recursive deletion should reject a non-empty directory",
-            );
+    let error = LocalFileSystem::delete_directory(&tree, &LocalDeleteOptions::new())
+        .expect_err("non-recursive deletion should reject a non-empty directory");
     assert!(matches!(
         error.kind(),
         LocalFileErrorKind::Io | LocalFileErrorKind::TypeConflict
     ));
 
-    let outcome = LocalFileSystem::delete_directory(
-        &tree,
-        &LocalDeleteOptions::new().with_recursive(),
-    )
-    .expect("recursive deletion should remove the tree");
+    let outcome =
+        LocalFileSystem::delete_directory(&tree, &LocalDeleteOptions::new().with_recursive())
+            .expect("recursive deletion should remove the tree");
     assert!(outcome.deleted());
     assert!(!tree.exists());
 }

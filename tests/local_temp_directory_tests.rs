@@ -6,11 +6,7 @@
 
 use std::path::Path;
 
-use qubit_local_files::{
-    LocalFileSystem,
-    LocalPersistOptions,
-    LocalTempDirectoryOptions,
-};
+use qubit_local_files::{LocalFileSystem, LocalPersistOptions, LocalTempDirectoryOptions};
 use tempfile::tempdir;
 
 /// Verifies temporary-directory child helpers reject lexical escape shapes.
@@ -31,8 +27,7 @@ fn test_local_temp_directory_child_helpers_reject_escape_paths() {
 
 /// Verifies directory persistence honors the requested replacement policy.
 #[test]
-fn test_local_temp_directory_persist_with_overwrite_replaces_empty_destination()
-{
+fn test_local_temp_directory_persist_with_overwrite_replaces_empty_destination() {
     let parent = tempdir().expect("temporary parent should be created");
     let temporary = LocalFileSystem::create_temp_directory(
         &LocalTempDirectoryOptions::new().with_parent(parent.path()),
@@ -58,15 +53,13 @@ fn test_local_temp_directory_cleanup_failure_retains_resource_for_retry() {
     )
     .expect("temporary directory should be created");
     let path = temporary.path().to_path_buf();
-    std::fs::remove_dir(&path)
-        .expect("fixture should remove the temporary directory");
+    std::fs::remove_dir(&path).expect("fixture should remove the temporary directory");
 
     assert!(temporary.cleanup().is_err());
-    std::fs::create_dir(&path)
-        .expect("fixture should restore the temporary directory");
-    temporary.cleanup().expect(
-        "the retained temporary directory should support cleanup retry",
-    );
+    std::fs::create_dir(&path).expect("fixture should restore the temporary directory");
+    temporary
+        .cleanup()
+        .expect("the retained temporary directory should support cleanup retry");
     assert!(!path.exists());
 }
 

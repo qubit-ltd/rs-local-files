@@ -6,16 +6,9 @@
 //    Licensed under the Apache License, Version 2.0.
 // =============================================================================
 
-use std::{
-    fs,
-    time::SystemTime,
-};
+use std::{fs, time::SystemTime};
 
-use qubit_local_files::{
-    LocalFileKind,
-    LocalFileNames,
-    LocalFileSystem,
-};
+use qubit_local_files::{LocalFileKind, LocalFileNames, LocalFileSystem};
 use tempfile::tempdir;
 
 /// Verifies capabilities do not misrepresent a compile-time path bound as a
@@ -30,11 +23,9 @@ fn test_local_file_system_capabilities_report_unknown_path_limit() {
 /// Verifies that generated names are portable single path components.
 #[test]
 fn test_local_file_names_generate_random_portable_components() {
-    let first = LocalFileNames::random_name()
-        .expect("a random filename should be generated");
-    let second =
-        LocalFileNames::random_name_with(Some("prefix-"), Some(".tmp"))
-            .expect("a random filename with affixes should be generated");
+    let first = LocalFileNames::random_name().expect("a random filename should be generated");
+    let second = LocalFileNames::random_name_with(Some("prefix-"), Some(".tmp"))
+        .expect("a random filename with affixes should be generated");
 
     assert_ne!(first, second);
     let second_text = second
@@ -60,8 +51,8 @@ fn test_local_file_system_metadata_does_not_follow_final_symlink() {
     fs::write(&target, b"payload").expect("target should be written");
     symlink(&target, &link).expect("symbolic link should be created");
 
-    let metadata = LocalFileSystem::metadata(&link)
-        .expect("symbolic-link metadata should be available");
+    let metadata =
+        LocalFileSystem::metadata(&link).expect("symbolic-link metadata should be available");
 
     assert_eq!(LocalFileKind::Symlink, metadata.kind());
     assert_eq!(

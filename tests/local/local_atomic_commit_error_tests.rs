@@ -13,18 +13,14 @@ use super::api_tests::LocalAtomicDestinationState;
 
 #[cfg(all(coverage, unix))]
 use super::test_support::run_in_coverage_fault_process;
-use super::test_support::{
-    fs,
-    temp_dir,
-};
+use super::test_support::{fs, temp_dir};
 
 #[test]
 fn test_atomic_commit_error_exposes_failure_and_retained_writer() {
     let dir = temp_dir("atomic-commit-error");
     let path = dir.join("out.txt");
     fs::write(&path, b"original").expect("destination should be written");
-    let mut writer = qubit_local_files::atomic::begin(&path)
-        .expect("atomic writer should begin");
+    let mut writer = qubit_local_files::atomic::begin(&path).expect("atomic writer should begin");
     writer
         .write_all(b"replacement")
         .expect("replacement should be staged");
@@ -61,34 +57,28 @@ fn test_atomic_commit_error_reports_terminal_installation_failure() {
         "local::local_atomic_commit_error_tests::",
         "test_atomic_commit_error_reports_terminal_installation_failure",
     );
-    let Some(()) = run_in_coverage_fault_process(
-        TEST_NAME,
-        "atomic-install-replace",
-        move || {
-            let dir = temp_dir("terminal-atomic-commit-error");
-            let path = dir.join("out.txt");
-            fs::write(&path, b"original")
-                .expect("destination should be written");
-            let mut writer = qubit_local_files::atomic::begin(&path)
-                .expect("atomic writer should begin");
-            writer
-                .write_all(b"replacement")
-                .expect("replacement should be staged");
+    let Some(()) = run_in_coverage_fault_process(TEST_NAME, "atomic-install-replace", move || {
+        let dir = temp_dir("terminal-atomic-commit-error");
+        let path = dir.join("out.txt");
+        fs::write(&path, b"original").expect("destination should be written");
+        let mut writer =
+            qubit_local_files::atomic::begin(&path).expect("atomic writer should begin");
+        writer
+            .write_all(b"replacement")
+            .expect("replacement should be staged");
 
-            let commit_error = writer
-                .commit_recoverable()
-                .expect_err("injected installation failure should be reported");
+        let commit_error = writer
+            .commit_recoverable()
+            .expect_err("injected installation failure should be reported");
 
-            assert!(commit_error.writer().is_none());
-            assert!(
-                commit_error
-                    .to_string()
-                    .contains("staging writer unavailable"),
-            );
-            fs::remove_dir_all(dir)
-                .expect("terminal error fixture should be removed");
-        },
-    ) else {
+        assert!(commit_error.writer().is_none());
+        assert!(
+            commit_error
+                .to_string()
+                .contains("staging writer unavailable"),
+        );
+        fs::remove_dir_all(dir).expect("terminal error fixture should be removed");
+    }) else {
         return;
     };
 }

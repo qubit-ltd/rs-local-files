@@ -19,11 +19,7 @@ use std::ffi::CString;
 #[cfg(not(windows))]
 use std::fs;
 use std::fs::File;
-use std::io::{
-    Error,
-    ErrorKind,
-    Result,
-};
+use std::io::{Error, ErrorKind, Result};
 use std::path::Path;
 
 #[cfg(any(target_os = "linux", target_os = "macos"))]
@@ -31,37 +27,17 @@ use std::os::unix::ffi::OsStrExt;
 #[cfg(windows)]
 use std::os::windows::ffi::OsStrExt;
 #[cfg(windows)]
-use std::os::windows::io::{
-    AsRawHandle,
-    FromRawHandle,
-};
+use std::os::windows::io::{AsRawHandle, FromRawHandle};
 
 #[cfg(windows)]
-use windows_sys::Win32::Foundation::{
-    GENERIC_READ,
-    INVALID_HANDLE_VALUE,
-};
+use windows_sys::Win32::Foundation::{GENERIC_READ, INVALID_HANDLE_VALUE};
 #[cfg(windows)]
 use windows_sys::Win32::Storage::FileSystem::{
-    CreateFileW,
-    DELETE,
-    FILE_ATTRIBUTE_DIRECTORY,
-    FILE_ATTRIBUTE_REPARSE_POINT,
-    FILE_ATTRIBUTE_TAG_INFO,
-    FILE_DISPOSITION_INFO,
-    FILE_FLAG_BACKUP_SEMANTICS,
-    FILE_FLAG_OPEN_REPARSE_POINT,
-    FILE_READ_ATTRIBUTES,
-    FILE_SHARE_DELETE,
-    FILE_SHARE_READ,
-    FILE_SHARE_WRITE,
-    FileAttributeTagInfo,
-    FileDispositionInfo,
-    GetFileInformationByHandleEx,
-    MOVEFILE_REPLACE_EXISTING,
-    MOVEFILE_WRITE_THROUGH,
-    MoveFileExW,
-    OPEN_EXISTING,
+    CreateFileW, DELETE, FILE_ATTRIBUTE_DIRECTORY, FILE_ATTRIBUTE_REPARSE_POINT,
+    FILE_ATTRIBUTE_TAG_INFO, FILE_DISPOSITION_INFO, FILE_FLAG_BACKUP_SEMANTICS,
+    FILE_FLAG_OPEN_REPARSE_POINT, FILE_READ_ATTRIBUTES, FILE_SHARE_DELETE, FILE_SHARE_READ,
+    FILE_SHARE_WRITE, FileAttributeTagInfo, FileDispositionInfo, GetFileInformationByHandleEx,
+    MOVEFILE_REPLACE_EXISTING, MOVEFILE_WRITE_THROUGH, MoveFileExW, OPEN_EXISTING,
     SetFileInformationByHandle,
 };
 
@@ -134,18 +110,13 @@ pub(crate) fn replace_file(source: &Path, destination: &Path) -> Result<()> {
 /// # Errors
 /// Returns the platform I/O error reported while moving the path.
 #[cfg(target_os = "macos")]
-pub(crate) fn move_path_without_replacing(
-    source: &Path,
-    destination: &Path,
-) -> Result<()> {
+pub(crate) fn move_path_without_replacing(source: &Path, destination: &Path) -> Result<()> {
     let source = c_path(source)?;
     let destination = c_path(destination)?;
     // SAFETY: both CString buffers are NUL-terminated and remain alive for the
     // call. `RENAME_EXCL` is a valid renamex_np flag and the function does not
     // retain either pointer.
-    let result = unsafe {
-        renamex_np(source.as_ptr(), destination.as_ptr(), RENAME_EXCL)
-    };
+    let result = unsafe { renamex_np(source.as_ptr(), destination.as_ptr(), RENAME_EXCL) };
     if result == 0 {
         Ok(())
     } else {
@@ -162,10 +133,7 @@ pub(crate) fn move_path_without_replacing(
 /// # Errors
 /// Returns the platform I/O error reported while moving the path.
 #[cfg(target_os = "linux")]
-pub(crate) fn move_path_without_replacing(
-    source: &Path,
-    destination: &Path,
-) -> Result<()> {
+pub(crate) fn move_path_without_replacing(source: &Path, destination: &Path) -> Result<()> {
     let source = c_path(source)?;
     let destination = c_path(destination)?;
     // SAFETY: both CString pointers are valid and live for the syscall;
@@ -197,10 +165,7 @@ pub(crate) fn move_path_without_replacing(
 /// # Errors
 /// Returns the platform I/O error reported while moving the path.
 #[cfg(windows)]
-pub(crate) fn move_path_without_replacing(
-    source: &Path,
-    destination: &Path,
-) -> Result<()> {
+pub(crate) fn move_path_without_replacing(source: &Path, destination: &Path) -> Result<()> {
     let source = wide_path(source)?;
     let destination = wide_path(destination)?;
     // SAFETY: both UTF-16 buffers are NUL-terminated, contain no interior NUL,
@@ -230,10 +195,7 @@ pub(crate) fn move_path_without_replacing(
 /// Returns the platform I/O error reported while moving the file.
 #[cfg(any(target_os = "linux", target_os = "macos", windows))]
 #[inline(always)]
-pub(crate) fn move_file_without_replacing(
-    source: &Path,
-    destination: &Path,
-) -> Result<()> {
+pub(crate) fn move_file_without_replacing(source: &Path, destination: &Path) -> Result<()> {
     move_path_without_replacing(source, destination)
 }
 
@@ -247,10 +209,7 @@ pub(crate) fn move_file_without_replacing(
 /// Always returns [`ErrorKind::Unsupported`] because this target has no native
 /// no-replace file move implementation.
 #[cfg(not(any(target_os = "linux", target_os = "macos", windows)))]
-pub(crate) fn move_file_without_replacing(
-    source: &Path,
-    destination: &Path,
-) -> Result<()> {
+pub(crate) fn move_file_without_replacing(source: &Path, destination: &Path) -> Result<()> {
     Err(Error::new(
         ErrorKind::Unsupported,
         format!(
@@ -271,10 +230,7 @@ pub(crate) fn move_file_without_replacing(
 /// Returns the platform I/O error reported while moving the directory.
 #[cfg(any(target_os = "linux", target_os = "macos", windows))]
 #[inline(always)]
-pub(crate) fn move_directory_without_replacing(
-    source: &Path,
-    destination: &Path,
-) -> Result<()> {
+pub(crate) fn move_directory_without_replacing(source: &Path, destination: &Path) -> Result<()> {
     move_path_without_replacing(source, destination)
 }
 
@@ -330,12 +286,9 @@ pub(crate) fn remove_directory_symlink(path: &Path) -> Result<()> {
     if inspected == 0 {
         return Err(Error::last_os_error());
     }
-    let is_directory =
-        attributes.FileAttributes & FILE_ATTRIBUTE_DIRECTORY != 0;
-    let is_reparse_point =
-        attributes.FileAttributes & FILE_ATTRIBUTE_REPARSE_POINT != 0;
-    let is_name_surrogate =
-        attributes.ReparseTag & IO_REPARSE_TAG_NAME_SURROGATE != 0;
+    let is_directory = attributes.FileAttributes & FILE_ATTRIBUTE_DIRECTORY != 0;
+    let is_reparse_point = attributes.FileAttributes & FILE_ATTRIBUTE_REPARSE_POINT != 0;
+    let is_name_surrogate = attributes.ReparseTag & IO_REPARSE_TAG_NAME_SURROGATE != 0;
     if !is_directory || !is_reparse_point || !is_name_surrogate {
         return Err(Error::new(
             ErrorKind::AlreadyExists,
@@ -372,10 +325,7 @@ pub(crate) fn remove_directory_symlink(path: &Path) -> Result<()> {
 /// Always returns [`ErrorKind::Unsupported`] because this target has no native
 /// no-replace directory move implementation.
 #[cfg(not(any(target_os = "linux", target_os = "macos", windows)))]
-pub(crate) fn move_directory_without_replacing(
-    source: &Path,
-    destination: &Path,
-) -> Result<()> {
+pub(crate) fn move_directory_without_replacing(source: &Path, destination: &Path) -> Result<()> {
     Err(Error::new(
         ErrorKind::Unsupported,
         format!(

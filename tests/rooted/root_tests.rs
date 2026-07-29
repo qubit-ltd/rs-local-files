@@ -7,17 +7,11 @@
 // =============================================================================
 
 #[cfg(any(unix, windows))]
-use std::io::{
-    Read,
-    Write,
-};
+use std::io::{Read, Write};
 
 use qubit_local_files::rooted;
 #[cfg(any(unix, windows))]
-use qubit_local_files::{
-    read,
-    write,
-};
+use qubit_local_files::{read, write};
 
 /// Verifies rooted metadata preserves final symbolic links without abandoning
 /// the opened directory authority.
@@ -29,14 +23,10 @@ fn test_rooted_symlink_metadata_reports_final_entry_kind() {
 
     let temp = tempfile::tempdir().expect("a temporary root should be created");
     let root = rooted::Root::open(temp.path()).expect("the root should open");
-    let file =
-        rooted::Path::new("value.txt").expect("the path should validate");
-    let link =
-        rooted::Path::new("value-link").expect("the link path should validate");
-    let directory = rooted::Path::new("nested")
-        .expect("the directory path should validate");
-    let socket = rooted::Path::new("value.sock")
-        .expect("the socket path should validate");
+    let file = rooted::Path::new("value.txt").expect("the path should validate");
+    let link = rooted::Path::new("value-link").expect("the link path should validate");
+    let directory = rooted::Path::new("nested").expect("the directory path should validate");
+    let socket = rooted::Path::new("value.sock").expect("the socket path should validate");
     std::fs::write(temp.path().join("value.txt"), b"value")
         .expect("the regular file should be created");
     std::fs::create_dir(temp.path().join("nested"))
@@ -72,9 +62,8 @@ fn test_rooted_symlink_metadata_reports_final_entry_kind() {
     );
 
     let rooted_metadata = root.symlink_metadata(&file).expect("file metadata");
-    let native_metadata =
-        std::fs::symlink_metadata(temp.path().join("value.txt"))
-            .expect("native file metadata should be available");
+    let native_metadata = std::fs::symlink_metadata(temp.path().join("value.txt"))
+        .expect("native file metadata should be available");
     assert_eq!(
         native_metadata.accessed().ok(),
         rooted_metadata.accessed_at()
@@ -86,8 +75,7 @@ fn test_rooted_symlink_metadata_reports_final_entry_kind() {
     assert_eq!(native_metadata.len(), rooted_metadata.size());
 
     let rooted_root_metadata = root.metadata().expect("root metadata");
-    let native_root_metadata =
-        std::fs::metadata(temp.path()).expect("native root metadata");
+    let native_root_metadata = std::fs::metadata(temp.path()).expect("native root metadata");
     assert_eq!(
         native_root_metadata.created().ok(),
         rooted_root_metadata.created_at()
@@ -100,8 +88,7 @@ fn test_rooted_symlink_metadata_reports_final_entry_kind() {
 fn test_rooted_atomic_write_commits_and_aborts() {
     let temp = tempfile::tempdir().expect("a temporary root should be created");
     let root = rooted::Root::open(temp.path()).expect("the root should open");
-    let path =
-        rooted::Path::new("value.txt").expect("the path should validate");
+    let path = rooted::Path::new("value.txt").expect("the path should validate");
 
     let mut writer = root
         .begin_atomic_write(&path)
@@ -142,8 +129,7 @@ fn test_rooted_read_and_write_use_open_directory_authority() {
         std::path::absolute(temp.path()).expect("path should be absolute"),
         root.path(),
     );
-    let path = rooted::Path::new("nested/value.txt")
-        .expect("the path should validate");
+    let path = rooted::Path::new("nested/value.txt").expect("the path should validate");
 
     let mut file = root
         .open_writer(&path, &write::OpenOptions::default().with_parents())
@@ -186,16 +172,14 @@ fn test_rooted_open_rejects_symbolic_link_escape() {
     use std::os::unix::fs::symlink;
 
     let temp = tempfile::tempdir().expect("a temporary root should be created");
-    let outside =
-        tempfile::tempdir().expect("an outside directory should be created");
+    let outside = tempfile::tempdir().expect("an outside directory should be created");
     std::fs::write(outside.path().join("secret"), b"secret")
         .expect("the outside fixture should be written");
     symlink(outside.path(), temp.path().join("linked"))
         .expect("the intermediate link should be created");
 
     let root = rooted::Root::open(temp.path()).expect("the root should open");
-    let path =
-        rooted::Path::new("linked/secret").expect("the path should validate");
+    let path = rooted::Path::new("linked/secret").expect("the path should validate");
     assert!(
         root.open_reader(&path, &read::OpenOptions::default())
             .is_err()
@@ -208,8 +192,7 @@ fn test_rooted_open_rejects_symbolic_link_escape() {
 fn test_rooted_native_writer_supports_all_modes() {
     let temp = tempfile::tempdir().expect("a temporary root should be created");
     let root = rooted::Root::open(temp.path()).expect("the root should open");
-    let path =
-        rooted::Path::new("value.txt").expect("the path should validate");
+    let path = rooted::Path::new("value.txt").expect("the path should validate");
 
     let mut file = root
         .open_writer(&path, &write::OpenOptions::new(write::Mode::CreateNew))
@@ -227,16 +210,12 @@ fn test_rooted_native_writer_supports_all_modes() {
     drop(file);
 
     let mut file = root
-        .open_writer(
-            &path,
-            &write::OpenOptions::new(write::Mode::AppendExisting),
-        )
+        .open_writer(&path, &write::OpenOptions::new(write::Mode::AppendExisting))
         .expect("append-existing should open the file");
     file.write_all(b"!").expect("bytes should be appended");
     drop(file);
 
-    let created_path =
-        rooted::Path::new("created.txt").expect("the path should validate");
+    let created_path = rooted::Path::new("created.txt").expect("the path should validate");
     let mut file = root
         .open_writer(
             &created_path,
@@ -282,15 +261,13 @@ fn test_rooted_namespace_operations_survive_root_rename() {
     let root = rooted::Root::open(&original).expect("the root should open");
     std::fs::rename(&original, &renamed).expect("the root should be renamed");
 
-    let nested = rooted::Path::new("nested/deeper")
-        .expect("the directory path should validate");
+    let nested = rooted::Path::new("nested/deeper").expect("the directory path should validate");
     root.create_dir_all(&nested)
         .expect("the nested directory should be created");
     std::fs::write(renamed.join("nested/deeper/value.txt"), b"value")
         .expect("the fixture should be written");
 
-    let directory =
-        rooted::Path::new("nested").expect("the path should validate");
+    let directory = rooted::Path::new("nested").expect("the path should validate");
     let entries = root
         .read_dir(&directory)
         .expect("the rooted directory should be listed");
@@ -298,10 +275,9 @@ fn test_rooted_namespace_operations_survive_root_rename() {
     assert_eq!(std::ffi::OsStr::new("deeper"), entries[0].name());
     assert_eq!(rooted::EntryKind::Directory, entries[0].metadata().kind());
 
-    let source = rooted::Path::new("nested/deeper/value.txt")
-        .expect("the source should validate");
-    let destination = rooted::Path::new("nested/deeper/moved.txt")
-        .expect("the destination should validate");
+    let source = rooted::Path::new("nested/deeper/value.txt").expect("the source should validate");
+    let destination =
+        rooted::Path::new("nested/deeper/moved.txt").expect("the destination should validate");
     root.rename_without_replacing(&source, &destination)
         .expect("the file should be renamed");
     root.remove_tree(&directory)
@@ -315,8 +291,7 @@ fn test_rooted_namespace_operations_survive_root_rename() {
 fn test_rooted_named_directory_and_rename_operations() {
     let temp = tempfile::tempdir().expect("a temporary root should be created");
     let root = rooted::Root::open(temp.path()).expect("the root should open");
-    let directory =
-        rooted::Path::new("a/b").expect("the directory path should validate");
+    let directory = rooted::Path::new("a/b").expect("the directory path should validate");
 
     root.create_dir_all(&directory)
         .expect("recursive creation should succeed");
@@ -324,17 +299,13 @@ fn test_rooted_named_directory_and_rename_operations() {
         .expect("exists-ok creation should succeed");
     root.ensure_dir_all(&directory)
         .expect("ensure-dir-all should accept an existing directory");
-    let ensured = rooted::Path::new("ensured")
-        .expect("the directory path should validate");
+    let ensured = rooted::Path::new("ensured").expect("the directory path should validate");
     root.ensure_dir(&ensured)
         .expect("ensure-dir should create one missing directory");
 
-    let source =
-        rooted::Path::new("source").expect("the source should validate");
-    let destination = rooted::Path::new("destination")
-        .expect("the destination should validate");
-    std::fs::write(temp.path().join("source"), b"source")
-        .expect("the source should be written");
+    let source = rooted::Path::new("source").expect("the source should validate");
+    let destination = rooted::Path::new("destination").expect("the destination should validate");
+    std::fs::write(temp.path().join("source"), b"source").expect("the source should be written");
     std::fs::write(temp.path().join("destination"), b"destination")
         .expect("the destination should be written");
 
@@ -358,14 +329,10 @@ fn test_rooted_named_directory_and_rename_operations() {
 fn test_rooted_named_removal_operations_are_type_strict() {
     let temp = tempfile::tempdir().expect("a temporary root should be created");
     let root = rooted::Root::open(temp.path()).expect("the root should open");
-    std::fs::write(temp.path().join("file"), b"value")
-        .expect("the file should be written");
-    std::fs::create_dir(temp.path().join("directory"))
-        .expect("the directory should be created");
-    let file =
-        rooted::Path::new("file").expect("the file path should validate");
-    let directory = rooted::Path::new("directory")
-        .expect("the directory path should validate");
+    std::fs::write(temp.path().join("file"), b"value").expect("the file should be written");
+    std::fs::create_dir(temp.path().join("directory")).expect("the directory should be created");
+    let file = rooted::Path::new("file").expect("the file path should validate");
+    let directory = rooted::Path::new("directory").expect("the directory path should validate");
 
     assert!(root.remove_empty_dir(&file).is_err());
     assert!(root.remove_file(&directory).is_err());
@@ -382,14 +349,11 @@ fn test_rooted_recursive_remove_does_not_follow_links() {
     use std::os::unix::fs::symlink;
 
     let temp = tempfile::tempdir().expect("a temporary root should be created");
-    let outside =
-        tempfile::tempdir().expect("an outside directory should be created");
+    let outside = tempfile::tempdir().expect("an outside directory should be created");
     std::fs::write(outside.path().join("preserved"), b"outside")
         .expect("the outside fixture should be written");
-    std::fs::create_dir(temp.path().join("tree"))
-        .expect("the tree should be created");
-    symlink(outside.path(), temp.path().join("tree/link"))
-        .expect("the link should be created");
+    std::fs::create_dir(temp.path().join("tree")).expect("the tree should be created");
+    symlink(outside.path(), temp.path().join("tree/link")).expect("the link should be created");
     let root = rooted::Root::open(temp.path()).expect("the root should open");
     let tree = rooted::Path::new("tree").expect("the path should validate");
 
@@ -410,14 +374,10 @@ fn test_rooted_recursive_remove_does_not_follow_links() {
 #[cfg(unix)]
 #[test]
 fn test_rooted_namespace_error_and_permission_paths() {
-    use std::os::unix::fs::{
-        MetadataExt,
-        symlink,
-    };
+    use std::os::unix::fs::{MetadataExt, symlink};
 
     let temp = tempfile::tempdir().expect("a temporary root should be created");
-    std::fs::write(temp.path().join("first"), b"first")
-        .expect("the first file should be written");
+    std::fs::write(temp.path().join("first"), b"first").expect("the first file should be written");
     std::fs::write(temp.path().join("second"), b"second")
         .expect("the second file should be written");
     std::fs::hard_link(temp.path().join("first"), temp.path().join("alias"))
@@ -426,8 +386,7 @@ fn test_rooted_namespace_error_and_permission_paths() {
         .expect("the nonempty directory should be created");
     std::fs::write(temp.path().join("nonempty/child"), b"child")
         .expect("the child should be written");
-    symlink("first", temp.path().join("link"))
-        .expect("the symbolic link should be created");
+    symlink("first", temp.path().join("link")).expect("the symbolic link should be created");
     let root = rooted::Root::open(temp.path()).expect("the root should open");
 
     let entries = root
@@ -446,8 +405,7 @@ fn test_rooted_namespace_error_and_permission_paths() {
     assert!(root.create_dir(&first).is_err());
     assert!(root.read_dir(&first).is_err());
 
-    let nonempty =
-        rooted::Path::new("nonempty").expect("the path should validate");
+    let nonempty = rooted::Path::new("nonempty").expect("the path should validate");
     assert!(root.remove_empty_dir(&nonempty).is_err());
 
     root.set_permissions(&first, rooted::Permissions::from_unix_mode(0o640))
@@ -489,14 +447,10 @@ fn test_rooted_namespace_error_and_permission_paths() {
         root.set_permissions(&link, rooted::Permissions::from_unix_mode(0o600))
             .is_err()
     );
-    let missing =
-        rooted::Path::new("missing").expect("the path should validate");
+    let missing = rooted::Path::new("missing").expect("the path should validate");
     assert!(
-        root.set_permissions(
-            &missing,
-            rooted::Permissions::from_unix_mode(0o600)
-        )
-        .is_err()
+        root.set_permissions(&missing, rooted::Permissions::from_unix_mode(0o600))
+            .is_err()
     );
 }
 

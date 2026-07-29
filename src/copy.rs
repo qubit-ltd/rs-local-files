@@ -8,10 +8,7 @@
 //! Recursive local directory copying.
 
 use std::{
-    fs::{
-        self,
-        OpenOptions,
-    },
+    fs::{self, OpenOptions},
     io,
     path::Path,
 };
@@ -19,11 +16,8 @@ use std::{
 use crate::local::copy_dir_all_with_paths;
 
 pub use crate::local::{
-    LocalCopyConflictPolicy as ConflictPolicy,
-    LocalCopyDirError as Error,
-    LocalCopyDirOptions as Options,
-    LocalCopyDirStage as Stage,
-    LocalCopyDirStats as Statistics,
+    LocalCopyConflictPolicy as ConflictPolicy, LocalCopyDirError as Error,
+    LocalCopyDirOptions as Options, LocalCopyDirStage as Stage, LocalCopyDirStats as Statistics,
     LocalCopyTypeConflictPolicy as TypeConflictPolicy,
 };
 
@@ -33,11 +27,7 @@ pub use crate::local::{
 /// Returns a structured error containing the failed stage and partial
 /// statistics.
 #[inline(always)]
-pub fn directory(
-    source: &Path,
-    destination: &Path,
-    options: Options,
-) -> Result<Statistics, Error> {
+pub fn directory(source: &Path, destination: &Path, options: Options) -> Result<Statistics, Error> {
     copy_dir_all_with_paths(source, destination, options)
 }
 
@@ -65,22 +55,18 @@ pub fn file(source: &Path, destination: &Path) -> io::Result<u64> {
 /// # Errors
 /// Returns [`std::io::ErrorKind::AlreadyExists`] for a destination conflict,
 /// or the I/O error reported while reading, writing, or applying permissions.
-pub fn file_without_replacing(
-    source: &Path,
-    destination: &Path,
-) -> io::Result<u64> {
+pub fn file_without_replacing(source: &Path, destination: &Path) -> io::Result<u64> {
     let mut source_file = fs::File::open(source)?;
     let permissions = source_file.metadata()?.permissions();
     let mut destination_file = OpenOptions::new()
         .write(true)
         .create_new(true)
         .open(destination)?;
-    let result =
-        io::copy(&mut source_file, &mut destination_file).and_then(|bytes| {
-            destination_file.sync_all()?;
-            fs::set_permissions(destination, permissions)?;
-            Ok(bytes)
-        });
+    let result = io::copy(&mut source_file, &mut destination_file).and_then(|bytes| {
+        destination_file.sync_all()?;
+        fs::set_permissions(destination, permissions)?;
+        Ok(bytes)
+    });
     if result.is_err() {
         drop(destination_file);
         let _ = fs::remove_file(destination);

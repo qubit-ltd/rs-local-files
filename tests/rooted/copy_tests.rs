@@ -6,10 +6,7 @@
 //    Licensed under the Apache License, Version 2.0.
 // =============================================================================
 
-use qubit_local_files::{
-    copy,
-    rooted,
-};
+use qubit_local_files::{copy, rooted};
 
 /// Verifies that rooted copy stages and installs one regular file.
 #[cfg(any(unix, windows))]
@@ -19,10 +16,8 @@ fn test_copy_file_installs_complete_contents() {
     std::fs::write(temp.path().join("source"), b"complete payload")
         .expect("the source should be written");
     let root = rooted::Root::open(temp.path()).expect("the root should open");
-    let source =
-        rooted::Path::new("source").expect("the source should validate");
-    let destination = rooted::Path::new("destination")
-        .expect("the destination should validate");
+    let source = rooted::Path::new("source").expect("the source should validate");
+    let destination = rooted::Path::new("destination").expect("the destination should validate");
 
     let statistics = root
         .copy(&source, &destination, copy::Options::new())
@@ -48,10 +43,8 @@ fn test_copy_directory_copies_regular_descendants() {
     std::fs::write(temp.path().join("source/nested/value"), b"value")
         .expect("the source should be written");
     let root = rooted::Root::open(temp.path()).expect("the root should open");
-    let source =
-        rooted::Path::new("source").expect("the source should validate");
-    let destination = rooted::Path::new("destination")
-        .expect("the destination should validate");
+    let source = rooted::Path::new("source").expect("the source should validate");
+    let destination = rooted::Path::new("destination").expect("the destination should validate");
 
     let statistics = root
         .copy(&source, &destination, copy::Options::new())
@@ -72,15 +65,12 @@ fn test_copy_directory_copies_regular_descendants() {
 #[test]
 fn test_copy_file_rejects_existing_destination() {
     let temp = tempfile::tempdir().expect("a temporary root should exist");
-    std::fs::write(temp.path().join("source"), b"source")
-        .expect("the source should be written");
+    std::fs::write(temp.path().join("source"), b"source").expect("the source should be written");
     std::fs::write(temp.path().join("destination"), b"destination")
         .expect("the destination should be written");
     let root = rooted::Root::open(temp.path()).expect("the root should open");
-    let source =
-        rooted::Path::new("source").expect("the source should validate");
-    let destination = rooted::Path::new("destination")
-        .expect("the destination should validate");
+    let source = rooted::Path::new("source").expect("the source should validate");
+    let destination = rooted::Path::new("destination").expect("the destination should validate");
 
     let error = root
         .copy(&source, &destination, copy::Options::new())
@@ -100,15 +90,12 @@ fn test_copy_file_rejects_existing_destination() {
 #[test]
 fn test_copy_file_applies_explicit_conflict_policies() {
     let temp = tempfile::tempdir().expect("a temporary root should exist");
-    std::fs::write(temp.path().join("source"), b"new")
-        .expect("the source should be written");
+    std::fs::write(temp.path().join("source"), b"new").expect("the source should be written");
     std::fs::write(temp.path().join("destination"), b"old")
         .expect("the destination should be written");
     let root = rooted::Root::open(temp.path()).expect("the root should open");
-    let source =
-        rooted::Path::new("source").expect("the source should validate");
-    let destination = rooted::Path::new("destination")
-        .expect("the destination should validate");
+    let source = rooted::Path::new("source").expect("the source should validate");
+    let destination = rooted::Path::new("destination").expect("the destination should validate");
 
     let skipped = root
         .copy(
@@ -147,23 +134,19 @@ fn test_copy_file_applies_explicit_conflict_policies() {
 #[test]
 fn test_copy_file_replaces_directory_type_conflict() {
     let temp = tempfile::tempdir().expect("a temporary root should exist");
-    std::fs::write(temp.path().join("source"), b"file")
-        .expect("the source should be written");
+    std::fs::write(temp.path().join("source"), b"file").expect("the source should be written");
     std::fs::create_dir_all(temp.path().join("destination/nested"))
         .expect("the destination tree should exist");
     std::fs::write(temp.path().join("destination/nested/value"), b"old")
         .expect("the old child should exist");
     let root = rooted::Root::open(temp.path()).expect("the root should open");
-    let source =
-        rooted::Path::new("source").expect("the source should validate");
-    let destination = rooted::Path::new("destination")
-        .expect("the destination should validate");
+    let source = rooted::Path::new("source").expect("the source should validate");
+    let destination = rooted::Path::new("destination").expect("the destination should validate");
 
     root.copy(
         &source,
         &destination,
-        copy::Options::new()
-            .with_type_conflict(copy::TypeConflictPolicy::Replace),
+        copy::Options::new().with_type_conflict(copy::TypeConflictPolicy::Replace),
     )
     .expect("the directory should be replaced by a file");
 
@@ -180,13 +163,10 @@ fn test_copy_file_replaces_directory_type_conflict() {
 #[test]
 fn test_copy_rejects_self_and_nested_tree_destinations() {
     let temp = tempfile::tempdir().expect("a temporary root should exist");
-    std::fs::create_dir(temp.path().join("source"))
-        .expect("the source should exist");
+    std::fs::create_dir(temp.path().join("source")).expect("the source should exist");
     let root = rooted::Root::open(temp.path()).expect("the root should open");
-    let source =
-        rooted::Path::new("source").expect("the source should validate");
-    let nested = rooted::Path::new("source/nested")
-        .expect("the nested path should validate");
+    let source = rooted::Path::new("source").expect("the source should validate");
+    let nested = rooted::Path::new("source/nested").expect("the nested path should validate");
 
     assert!(root.copy(&source, &source, copy::Options::new()).is_err());
     assert!(root.copy(&source, &nested, copy::Options::new()).is_err());
@@ -201,15 +181,11 @@ fn test_copy_deep_tree_without_recursive_call_stack() {
     for _ in 0..128 {
         source_path.push("d");
     }
-    std::fs::create_dir_all(&source_path)
-        .expect("the deep source should exist");
-    std::fs::write(source_path.join("value"), b"deep")
-        .expect("the leaf should be written");
+    std::fs::create_dir_all(&source_path).expect("the deep source should exist");
+    std::fs::write(source_path.join("value"), b"deep").expect("the leaf should be written");
     let root = rooted::Root::open(temp.path()).expect("the root should open");
-    let source =
-        rooted::Path::new("source").expect("the source should validate");
-    let destination = rooted::Path::new("destination")
-        .expect("the destination should validate");
+    let source = rooted::Path::new("source").expect("the source should validate");
+    let destination = rooted::Path::new("destination").expect("the destination should validate");
 
     let statistics = root
         .copy(&source, &destination, copy::Options::new())
@@ -226,15 +202,11 @@ fn test_copy_rejects_symbolic_links() {
     use std::os::unix::fs::symlink;
 
     let temp = tempfile::tempdir().expect("a temporary root should exist");
-    std::fs::write(temp.path().join("target"), b"value")
-        .expect("the target should exist");
-    symlink("target", temp.path().join("source"))
-        .expect("the link should exist");
+    std::fs::write(temp.path().join("target"), b"value").expect("the target should exist");
+    symlink("target", temp.path().join("source")).expect("the link should exist");
     let root = rooted::Root::open(temp.path()).expect("the root should open");
-    let source =
-        rooted::Path::new("source").expect("the source should validate");
-    let destination = rooted::Path::new("destination")
-        .expect("the destination should validate");
+    let source = rooted::Path::new("source").expect("the source should validate");
+    let destination = rooted::Path::new("destination").expect("the destination should validate");
 
     assert!(
         root.copy(&source, &destination, copy::Options::new())
@@ -254,24 +226,18 @@ fn test_copy_rejects_symbolic_links() {
 #[cfg(unix)]
 #[test]
 fn test_copy_preserves_permissions_when_requested() {
-    use std::os::unix::fs::{
-        MetadataExt,
-        PermissionsExt,
-    };
+    use std::os::unix::fs::{MetadataExt, PermissionsExt};
 
     let temp = tempfile::tempdir().expect("a temporary root should exist");
-    std::fs::write(temp.path().join("source"), b"value")
-        .expect("the source should be written");
+    std::fs::write(temp.path().join("source"), b"value").expect("the source should be written");
     std::fs::set_permissions(
         temp.path().join("source"),
         std::fs::Permissions::from_mode(0o640),
     )
     .expect("the source mode should be set");
     let root = rooted::Root::open(temp.path()).expect("the root should open");
-    let source =
-        rooted::Path::new("source").expect("the source should validate");
-    let destination = rooted::Path::new("destination")
-        .expect("the destination should validate");
+    let source = rooted::Path::new("source").expect("the source should validate");
+    let destination = rooted::Path::new("destination").expect("the destination should validate");
 
     root.copy(
         &source,

@@ -2,10 +2,7 @@
 // integration tests.
 //! Root-descriptor-bound temporary-resource storage.
 
-use std::{
-    path::PathBuf,
-    sync::Arc,
-};
+use std::{path::PathBuf, sync::Arc};
 
 /// Retains the exact root authority used to create a temporary descendant.
 #[derive(Debug)]

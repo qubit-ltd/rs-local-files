@@ -8,10 +8,7 @@
 // qubit-style: allow source-test-pair
 // Covered by rename integration tests.
 
-use super::{
-    LocalAtomicityRequirement,
-    LocalDurabilityRequirement,
-};
+use super::{LocalAtomicityRequirement, LocalDurabilityRequirement};
 
 /// Options for renaming a native filesystem entry.
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
@@ -68,10 +65,7 @@ impl LocalRenameOptions {
     /// Sets the required atomicity.
     #[must_use]
     #[inline(always)]
-    pub const fn with_atomicity(
-        mut self,
-        requirement: LocalAtomicityRequirement,
-    ) -> Self {
+    pub const fn with_atomicity(mut self, requirement: LocalAtomicityRequirement) -> Self {
         self.atomicity = requirement;
         self
     }
@@ -79,10 +73,7 @@ impl LocalRenameOptions {
     /// Sets the required durability.
     #[must_use]
     #[inline(always)]
-    pub const fn with_durability(
-        mut self,
-        requirement: LocalDurabilityRequirement,
-    ) -> Self {
+    pub const fn with_durability(mut self, requirement: LocalDurabilityRequirement) -> Self {
         self.durability = requirement;
         self
     }

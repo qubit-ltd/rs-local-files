@@ -38,45 +38,25 @@ mod xattr_tests;
 
 #[cfg(coverage)]
 pub(super) use coverage_fault_process_tests::run_in_coverage_fault_process;
-pub(super) use current_dir_guard_tests::{
-    CURRENT_DIR_LOCK,
-    CurrentDirGuard,
-};
+pub(super) use current_dir_guard_tests::{CURRENT_DIR_LOCK, CurrentDirGuard};
 #[cfg(any(target_os = "linux", target_os = "macos"))]
 pub(super) use filesystem_fixture_tests::assert_fifo_open_is_rejected;
 #[cfg(windows)]
 pub(super) use filesystem_fixture_tests::path_with_interior_nul;
-pub(super) use filesystem_fixture_tests::{
-    count_atomic_temp_files,
-    temp_dir,
-};
+pub(super) use filesystem_fixture_tests::{count_atomic_temp_files, temp_dir};
 #[cfg(unix)]
-pub(super) use filesystem_fixture_tests::{
-    create_fifo,
-    short_temp_dir,
-};
+pub(super) use filesystem_fixture_tests::{create_fifo, short_temp_dir};
 #[cfg(target_os = "freebsd")]
-pub(super) use freebsd_acl_tests::{
-    install_supported_test_acl,
-    read_freebsd_acl_text,
-};
+pub(super) use freebsd_acl_tests::{install_supported_test_acl, read_freebsd_acl_text};
 #[cfg(target_os = "macos")]
-pub(super) use macos_acl_tests::{
-    read_macos_acl_text,
-    set_current_user_read_acl,
-};
+pub(super) use macos_acl_tests::{read_macos_acl_text, set_current_user_read_acl};
 #[cfg(target_os = "linux")]
 pub(super) use small_stack_process_tests::run_in_small_stack_process;
 #[cfg(target_os = "linux")]
-pub(super) use source_read_lease_tests::{
-    SourceReadLease,
-    current_thread_cpu_time,
-};
+pub(super) use source_read_lease_tests::{SourceReadLease, current_thread_cpu_time};
 #[cfg(windows)]
 pub(super) use windows_security_tests::{
-    alternate_data_stream_path,
-    clear_readonly_attribute,
-    read_dacl_bytes,
+    alternate_data_stream_path, clear_readonly_attribute, read_dacl_bytes,
     set_world_full_control_dacl,
 };
 #[cfg(any(
@@ -85,7 +65,4 @@ pub(super) use windows_security_tests::{
     target_os = "macos",
     target_os = "freebsd",
 ))]
-pub(super) use xattr_tests::{
-    get_user_xattr,
-    set_user_xattr,
-};
+pub(super) use xattr_tests::{get_user_xattr, set_user_xattr};
