@@ -1,217 +1,135 @@
 # Qubit Local Files 用户手册
 
-Qubit Local Files 是应用和本地 provider adapter 使用的 concrete native 文件系统层。
-它不定义 provider path、registry 或远程文件系统行为。
+[English](user_guide.md) · [README](../README.zh_CN.md) ·
+[API 文档](https://docs.rs/qubit-local-files)
 
-## API 模型
+本手册面向 Rust 1.94 及以上版本的 `qubit-local-files` 0.7 使用者，适用于直接操作主机
+文件系统，或需要把操作限制在一个已打开目录之下的应用。它不是 provider 注册表、远程
+文件系统 API，也不替代 provider 层的逻辑路径模型。
 
-公共 API 提供两种 authority：
+## 概念模型
 
-- `LocalFileSystem` 通过关联方法组织 host-wide 操作；
-- `RootedLocalFileSystem` 是绑定已打开目录 descriptor/handle 的有状态 authority。
+```
+主机路径 ── LocalFileSystem ── 原生文件系统
+已打开根目录 ─ RootedLocalFileSystem ─ 仅相对后代路径
+```
 
-`LocalFileNames` 与 `LocalPaths` 提供 native lexical helper。Reader、writer、walker
-和临时资源都是有状态值。文件系统操作不提供 public free-function alias。
+`LocalFileSystem` 以关联方法提供主机范围操作。`RootedLocalFileSystem` 通过 `open`
+创建，是持有已打开根目录的有状态权限，而不是反复解析字符串路径。reader、writer、
+walker 与临时条目都是拥有资源的有状态对象。`LocalFileNames` 和 `LocalPaths` 提供原生
+词法工具，不会把文件名强制转换为 UTF-8。
 
-## Host 操作
+## 场景：写入并检查导出产物
+
+导出程序需要创建 `build/output`，只在完整写入后发布 `manifest.json`，并读回结果。成功
+的可观察条件是 writer 返回 `Committed`，且能读取已经发布的字节。
 
 ```rust
 use std::io::{Read, Write};
-
 use qubit_local_files::{
-    LocalCreateDirectoryOptions,
-    LocalFileSystem,
-    LocalReadOptions,
-    LocalWriteMode,
-    LocalWriteOptions,
-    LocalWriterState,
+    LocalCreateDirectoryOptions, LocalFileSystem, LocalReadOptions,
+    LocalWriteMode, LocalWriteOptions, LocalWriterState,
 };
 
-let root = std::path::Path::new("build/output");
+let output = std::path::Path::new("build/output");
 LocalFileSystem::create_directory(
-    root,
+    output,
     &LocalCreateDirectoryOptions::new().with_recursive(),
 )?;
-
-let path = root.join("manifest.json");
-let mut writer =
-    LocalFileSystem::open_writer(
-        &path,
-        &LocalWriteOptions::new(LocalWriteMode::CreateOrReplace),
-    )?;
+let path = output.join("manifest.json");
+let mut writer = LocalFileSystem::open_writer(
+    &path,
+    &LocalWriteOptions::new(LocalWriteMode::CreateOrReplace),
+)?;
 writer.write_all(br#"{"complete":true}"#)?;
 let result = writer.commit()?;
-assert_eq!(LocalWriterState::Committed, result.state());
-
-let mut reader =
-    LocalFileSystem::open_reader(&path, &LocalReadOptions::new())?;
+assert_eq!(result.state(), LocalWriterState::Committed);
 let mut text = String::new();
-reader.read_to_string(&mut text)?;
-
+LocalFileSystem::open_reader(&path, &LocalReadOptions::new())?
+    .read_to_string(&mut text)?;
+assert_eq!(text, r#"{"complete":true}"#);
 # Ok::<(), Box<dyn std::error::Error>>(())
 ```
 
-跨多个系统调用的相对路径会在操作开始时绑定。Copy 和 rename 使用同一个 current
-directory snapshot 绑定 source 与 target。Metadata 默认观察 final entry 本身，不跟随
-final symbolic link。
+多次系统调用使用的相对路径会在操作开始时绑定。复制和重命名会用同一个当前目录快照绑定
+源和目标。`metadata` 观察最终条目本身，不跟随最终符号链接。
 
-## Copy
+## 发布、复制与恢复
 
-`LocalFileSystem::copy` 与 `RootedLocalFileSystem::copy` 根据 source metadata 选择文件
-或目录行为。
+`CreateNew` 与 `CreateOrReplace` 使用目标目录内的暂存；`Append` 直接修改已有普通文件，
+因此拒绝要求的原子性。writer 可提交或中止；写入、刷新或提交失败可能使发布状态变为
+不确定，需要恢复时应保留并检查返回的资源或错误。
 
-```rust
-use qubit_local_files::{LocalCopyOptions, LocalFileSystem};
+`copy` 根据源元数据选择文件或目录行为。其选项分别控制目标冲突、类型冲突、元数据、
+符号链接、设备边界、递归、原子性和耐久性。无法满足的要求保证会在破坏性变更前被拒绝。
+自复制和硬链接别名会被拒绝；覆盖符号链接目标时会替换该条目而不跟随它。
 
-let outcome = LocalFileSystem::copy(
+```rust,no_run
+use qubit_local_files::{LocalCopyFailureState, LocalCopyOptions, LocalFileSystem};
+
+match LocalFileSystem::copy(
     std::path::Path::new("source"),
     std::path::Path::new("backup"),
     &LocalCopyOptions::new(),
-)?;
-assert!(outcome.stats().files() + outcome.stats().directories() > 0);
-
-# Ok::<(), Box<dyn std::error::Error>>(())
-```
-
-Option 分别描述 target conflict、type conflict、metadata、symbolic-link、
-device-boundary、递归、atomicity 和 durability 策略。无法满足 required guarantee 时，
-操作会在 destructive change 前拒绝执行。Copy 拒绝 self-copy 和 hard-link alias；
-overwrite 会替换 target symbolic-link entry，而不是跟随它。
-
-## 惰性遍历
-
-```rust
-use qubit_local_files::{LocalFileSystem, LocalListOptions};
-
-let walker = LocalFileSystem::list(
-    std::path::Path::new("workspace"),
-    &LocalListOptions::new().with_max_depth(2),
-)?;
-for entry in walker {
-    let entry = entry?;
-    println!("{}", entry.path().display());
+) {
+    Ok(outcome) => println!("已复制 {} 个文件", outcome.stats().files()),
+    Err(failure) => match failure.state() {
+        LocalCopyFailureState::Unchanged => println!("目标未改变"),
+        LocalCopyFailureState::PartiallyPublished => println!("目标部分发布"),
+        LocalCopyFailureState::Published => println!("目标已发布"),
+        LocalCopyFailureState::Indeterminate => println!("需要核对目标状态"),
+    },
 }
-
-# Ok::<(), Box<dyn std::error::Error>>(())
 ```
 
-Walker 按需打开并推进目录。Depth 与 symbolic-link policy 在创建时固定。Drop walker
-只释放 handle，不修改 namespace。
+重命名也会通过类型化失败状态报告 `Unchanged`、`Renamed` 或 `Indeterminate`；出错并不等于
+“什么都没发生”。
 
-## Writer 生命周期
+## 遍历和临时资源
 
-`LocalWriteMode::CreateNew` 和 `CreateOrReplace` 使用同目录 staging；`Append` 直接修改
-已有普通文件，因此拒绝 required atomicity。
+`LocalFileSystem::list` 返回惰性的 `LocalDirectoryWalker`。它按需打开和推进目录；最大
+深度与符号链接策略在创建时固定，drop 只释放句柄。
 
-Writer 初始状态为 `Open`。`commit` 返回 `LocalWriteOutcome`，`abort` 丢弃未发布的
-staging。Stream write 或 flush 失败会进入 indeterminate 状态，因为普通 I/O error
-不能证明没有字节发生变化。Commit failure 使用 `LocalFileCommitError` 保留
-publication state。
+临时文件和目录在仍处于 armed 状态时拥有清理责任。drop 会尽力清理；`keep` 会关闭清理并
+返回稳定的绝对路径。持久化失败会保留资源，调用方可重试、检查、保留或显式清理。创建前会
+校验前缀和后缀：原生分隔符、NUL 与便携保留名称不会留下条目。
 
-## 临时资源
+## Rooted 工作区
 
-```rust
-use std::io::Write;
-
-use qubit_local_files::{
-    LocalFileSystem,
-    LocalTempDirectoryOptions,
-    LocalTempFileOptions,
-};
-
-let directory = LocalFileSystem::create_temp_directory(
-    &LocalTempDirectoryOptions::new().with_suffix(".work"),
-)?;
-let mut file = LocalFileSystem::create_temp_file(
-    &LocalTempFileOptions::new()
-        .with_parent(directory.path())
-        .with_suffix(".data"),
-)?;
-file.write_all(b"payload")?;
-file.close();
-
-# Ok::<(), Box<dyn std::error::Error>>(())
-```
-
-临时条目拥有 cleanup responsibility。只要 ownership 仍然 armed，Drop 就执行
-best-effort cleanup。`keep` 会禁用 cleanup 并返回稳定绝对路径。Persist failure
-保留资源，调用者可以 retry、inspect、keep 或显式 cleanup。
-
-Prefix 与 suffix 在创建条目前校验。Native separator、NUL 和 portable reserved-name
-违规不会留下临时条目。
-
-## Rooted Authority
+处理工作区下不受信任的相对名称时，应使用 rooted 访问。
 
 ```rust
-use qubit_local_files::{
-    LocalListOptions,
-    RootedLocalFileSystem,
-};
+use qubit_local_files::{LocalListOptions, RootedLocalFileSystem};
 
-let root =
-    RootedLocalFileSystem::open(std::path::Path::new("workspace"))?;
-let walker = root.list(
-    std::path::Path::new("assets"),
-    &LocalListOptions::new(),
-)?;
+let root = RootedLocalFileSystem::open(std::path::Path::new("workspace"))?;
+let walker = root.list(std::path::Path::new("assets"), &LocalListOptions::new())?;
 for entry in walker {
     println!("{}", entry?.path().display());
 }
-
 # Ok::<(), Box<dyn std::error::Error>>(())
 ```
 
-Rooted path 必须是 relative descendant。Absolute path、prefix、`.` 与 `..` 会被拒绝，
-中间 symbolic link 不会被接受。诊断 root path 不参与授权：open 后 rename 该路径不会
-重定向已经打开的 authority。
+rooted 路径必须是相对后代。绝对路径、平台前缀、`.`、`..` 和中间符号链接都会被拒绝。诊断
+用根路径不是权限本身：`open` 之后重命名它不会重定向已打开的资源。词法包含关系可用于早期
+分类，但不能替代基于描述符的权限控制。
 
-## 文件名与路径
+## 错误、诊断与排障
 
-Filename accessor 返回 `OsStr` 或 `OsString`，保留 Unix 非 UTF-8 名称和 Windows
-native value。
+`LocalFileError` 包含 `LocalFileErrorKind`、`LocalFileOperation`、可用时的主/目标原生
+路径，以及可选的 `std::io::Error` 来源。发布操作用专门失败类型保存部分成功状态。
 
-```rust
-use qubit_local_files::{LocalFileNames, LocalPaths};
+| 症状 | 检查方式 |
+| --- | --- |
+| rooted 操作拒绝路径 | 传入相对后代，移除绝对前缀、`.`、`..` 与中间符号链接。 |
+| 要求保证被拒绝 | 检查所选文件系统的 capability；仅在业务允许时放宽要求。 |
+| copy 或 rename 出错 | 先检查类型化失败状态，再决定重试、清理或认定目标不存在。 |
+| 临时条目仍存在 | 保留资源并调用显式生命周期方法；drop 清理只是尽力而为。 |
 
-let name = LocalFileNames::random_name_with(
-    Some("upload-"),
-    Some(".tmp"),
-)?;
-LocalFileNames::validate_portable(name.as_os_str())?;
+## 平台限制与延伸阅读
 
-let child = LocalPaths::compose_descendant(
-    std::path::Path::new("workspace"),
-    std::path::Path::new(name.as_os_str()),
-)?;
-assert!(LocalPaths::is_lexically_within(
-    &child,
-    std::path::Path::new("workspace"),
-)?);
+Linux、Windows 和 macOS 会进行运行时测试。FreeBSD 与 Android 仅做编译检查。
+`LocalFileSystem::capabilities()` 报告主机实现；`RootedLocalFileSystem::capabilities()`
+返回打开权限时缓存的快照。路径限制只有对目标文件系统验证成功时才是 `Some`。
 
-# Ok::<(), Box<dyn std::error::Error>>(())
-```
-
-相关路径应使用 `bind_host_paths`，由一个 current-directory snapshot 定义操作。
-Lexical containment 只是 early classification，不能替代 descriptor-relative
-authorization。
-
-## 错误与 Capability
-
-`LocalFileError` 提供 `LocalFileErrorKind`、`LocalFileOperation`、primary/target native
-path，以及可选 `std::io::Error` source。Publication session 使用专用 failure type
-表达 partial-success state。
-
-`LocalFileSystem::capabilities()` 报告 host 实现；
-`RootedLocalFileSystem::capabilities()` 返回 open authority 时缓存的 snapshot。
-只有能够为目标 filesystem 验证的 path limit 才会报告；否则为 `None`。
-
-## 验证
-
-```bash
-cargo test --all-features
-./align-ci.sh
-./ci-check.sh
-```
-
-Linux、Windows 和 macOS 执行 runtime test；FreeBSD 与 Android 只 compile-check，
-不会被描述为 runtime 保证。
+继续阅读 [README](../README.zh_CN.md)、[English user guide](user_guide.md) 或
+[API 文档](https://docs.rs/qubit-local-files)。
