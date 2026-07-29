@@ -34,7 +34,11 @@ impl LocalFileSystemCapabilities {
             // mounted filesystem, so report the limit as unknown.
             path_limit: None,
             rooted_operations: cfg!(any(unix, windows)),
-            no_replace_publication: cfg!(any(target_os = "linux", target_os = "macos", windows)),
+            no_replace_publication: cfg!(any(
+                target_os = "linux",
+                target_os = "macos",
+                windows
+            )),
             directory_durability: cfg!(unix),
         }
     }

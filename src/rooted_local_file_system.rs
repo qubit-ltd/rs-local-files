@@ -6,17 +6,47 @@
 //    Licensed under the Apache License, Version 2.0.
 // =============================================================================
 
-use std::{io, path::Path, sync::Arc};
+use std::{
+    io,
+    path::Path,
+    sync::Arc,
+};
 
 use crate::{
-    LocalCopyFailure, LocalCopyFailureState, LocalCopyMethod, LocalCopyOptions, LocalCopyOutcome,
-    LocalCopyResult, LocalCopyStats, LocalCreateDirectoryOptions, LocalCreateDirectoryOutcome,
-    LocalDeleteOptions, LocalDeleteOutcome, LocalDirectoryWalker, LocalDurabilityRequirement,
-    LocalFileError, LocalFileErrorKind, LocalFileKind, LocalFileMetadata, LocalFileOperation,
-    LocalFileReader, LocalFileSystemCapabilities, LocalFileWriter, LocalListOptions,
-    LocalReadOptions, LocalRenameFailure, LocalRenameFailureState, LocalRenameOptions,
-    LocalRenameOutcome, LocalRenameResult, LocalResult, LocalTempDirectory,
-    LocalTempDirectoryOptions, LocalTempFile, LocalTempFileOptions, LocalWriteMode,
+    LocalCopyFailure,
+    LocalCopyFailureState,
+    LocalCopyMethod,
+    LocalCopyOptions,
+    LocalCopyOutcome,
+    LocalCopyResult,
+    LocalCopyStats,
+    LocalCreateDirectoryOptions,
+    LocalCreateDirectoryOutcome,
+    LocalDeleteOptions,
+    LocalDeleteOutcome,
+    LocalDirectoryWalker,
+    LocalDurabilityRequirement,
+    LocalFileError,
+    LocalFileErrorKind,
+    LocalFileKind,
+    LocalFileMetadata,
+    LocalFileOperation,
+    LocalFileReader,
+    LocalFileSystemCapabilities,
+    LocalFileWriter,
+    LocalListOptions,
+    LocalReadOptions,
+    LocalRenameFailure,
+    LocalRenameFailureState,
+    LocalRenameOptions,
+    LocalRenameOutcome,
+    LocalRenameResult,
+    LocalResult,
+    LocalTempDirectory,
+    LocalTempDirectoryOptions,
+    LocalTempFile,
+    LocalTempFileOptions,
+    LocalWriteMode,
     LocalWriteOptions,
 };
 
@@ -81,8 +111,14 @@ impl RootedLocalFileSystem {
     /// # Errors
     /// Returns `LocalFileError` when options are invalid, entry creation
     /// collides through all attempts, or rooted traversal/opening fails.
-    pub fn create_temp_file(&self, options: &LocalTempFileOptions) -> LocalResult<LocalTempFile> {
-        let parent = rooted_temp_parent(options.parent(), LocalFileOperation::CreateTempFile)?;
+    pub fn create_temp_file(
+        &self,
+        options: &LocalTempFileOptions,
+    ) -> LocalResult<LocalTempFile> {
+        let parent = rooted_temp_parent(
+            options.parent(),
+            LocalFileOperation::CreateTempFile,
+        )?;
         if options.max_attempts() == 0 {
             return Err(rooted_io_error(
                 LocalFileOperation::CreateTempFile,
@@ -100,7 +136,8 @@ impl RootedLocalFileSystem {
                 options.suffix(),
                 LocalFileOperation::CreateTempFile,
             )?;
-            let relative = rooted_path(&candidate, LocalFileOperation::CreateTempFile)?;
+            let relative =
+                rooted_path(&candidate, LocalFileOperation::CreateTempFile)?;
             match self.root.open_writer(
                 &relative,
                 &crate::write::OpenOptions::new(crate::write::Mode::CreateNew),
@@ -147,7 +184,10 @@ impl RootedLocalFileSystem {
         &self,
         options: &LocalTempDirectoryOptions,
     ) -> LocalResult<LocalTempDirectory> {
-        let parent = rooted_temp_parent(options.parent(), LocalFileOperation::CreateTempDirectory)?;
+        let parent = rooted_temp_parent(
+            options.parent(),
+            LocalFileOperation::CreateTempDirectory,
+        )?;
         if options.max_attempts() == 0 {
             return Err(rooted_io_error(
                 LocalFileOperation::CreateTempDirectory,
@@ -165,7 +205,10 @@ impl RootedLocalFileSystem {
                 options.suffix(),
                 LocalFileOperation::CreateTempDirectory,
             )?;
-            let relative = rooted_path(&candidate, LocalFileOperation::CreateTempDirectory)?;
+            let relative = rooted_path(
+                &candidate,
+                LocalFileOperation::CreateTempDirectory,
+            )?;
             match self.root.create_dir(&relative) {
                 Ok(()) => {
                     return Ok(LocalTempDirectory::rooted(
@@ -214,7 +257,9 @@ impl RootedLocalFileSystem {
         self.root
             .symlink_metadata(&relative)
             .map(rooted_metadata)
-            .map_err(|error| rooted_io_error(LocalFileOperation::Metadata, path, error))
+            .map_err(|error| {
+                rooted_io_error(LocalFileOperation::Metadata, path, error)
+            })
     }
 
     /// Opens a descriptor-relative reader for a rooted regular file.
@@ -238,15 +283,19 @@ impl RootedLocalFileSystem {
         options: &LocalReadOptions,
     ) -> LocalResult<LocalFileReader> {
         let relative = rooted_path(path, LocalFileOperation::OpenReader)?;
-        let native_options = options
-            .open_retry_timeout()
-            .map_or_else(crate::read::OpenOptions::default, |timeout| {
-                crate::read::OpenOptions::default().with_open_retry_timeout(timeout)
-            });
+        let native_options = options.open_retry_timeout().map_or_else(
+            crate::read::OpenOptions::default,
+            |timeout| {
+                crate::read::OpenOptions::default()
+                    .with_open_retry_timeout(timeout)
+            },
+        );
         self.root
             .open_reader(&relative, &native_options)
             .map(LocalFileReader::new)
-            .map_err(|error| rooted_io_error(LocalFileOperation::OpenReader, path, error))
+            .map_err(|error| {
+                rooted_io_error(LocalFileOperation::OpenReader, path, error)
+            })
     }
 
     /// Creates a descriptor-relative lazy directory walker.
@@ -275,7 +324,11 @@ impl RootedLocalFileSystem {
         } else {
             Some(rooted_path(path, LocalFileOperation::List)?)
         };
-        LocalDirectoryWalker::open_rooted(Arc::clone(&self.root), relative, *options)
+        LocalDirectoryWalker::open_rooted(
+            Arc::clone(&self.root),
+            relative,
+            *options,
+        )
     }
 
     /// Opens a descriptor-relative writer publication session.
@@ -333,7 +386,8 @@ impl RootedLocalFileSystem {
                     atomic_options = atomic_options.with_parent();
                 }
                 if let Some(timeout) = options.open_retry_timeout() {
-                    atomic_options = atomic_options.with_open_retry_timeout(timeout);
+                    atomic_options =
+                        atomic_options.with_open_retry_timeout(timeout);
                 }
                 let writer = self
                     .root
@@ -349,9 +403,14 @@ impl RootedLocalFileSystem {
                 LocalFileWriterBackend::Rooted(writer)
             }
             LocalWriteMode::Append => {
-                let metadata = self.root.symlink_metadata(&relative).map_err(|error| {
-                    rooted_io_error(LocalFileOperation::OpenWriter, path, error)
-                })?;
+                let metadata =
+                    self.root.symlink_metadata(&relative).map_err(|error| {
+                        rooted_io_error(
+                            LocalFileOperation::OpenWriter,
+                            path,
+                            error,
+                        )
+                    })?;
                 if metadata.kind() != crate::rooted::EntryKind::File {
                     return Err(LocalFileError::new(
                         LocalFileErrorKind::TypeConflict,
@@ -359,16 +418,22 @@ impl RootedLocalFileSystem {
                     )
                     .with_path(path.to_path_buf()));
                 }
-                let mut native_options =
-                    crate::write::OpenOptions::new(crate::write::Mode::AppendExisting);
+                let mut native_options = crate::write::OpenOptions::new(
+                    crate::write::Mode::AppendExisting,
+                );
                 if let Some(timeout) = options.open_retry_timeout() {
-                    native_options = native_options.with_open_retry_timeout(timeout);
+                    native_options =
+                        native_options.with_open_retry_timeout(timeout);
                 }
                 let file = self
                     .root
                     .open_writer(&relative, &native_options)
                     .map_err(|error| {
-                        rooted_io_error(LocalFileOperation::OpenWriter, path, error)
+                        rooted_io_error(
+                            LocalFileOperation::OpenWriter,
+                            path,
+                            error,
+                        )
                     })?;
                 LocalFileWriterBackend::Append(file)
             }
@@ -399,7 +464,9 @@ impl RootedLocalFileSystem {
     ) -> LocalResult<LocalCreateDirectoryOutcome> {
         let relative = rooted_path(path, LocalFileOperation::CreateDirectory)?;
         let existing_directory = match self.root.symlink_metadata(&relative) {
-            Ok(metadata) => Some(metadata.kind() == crate::rooted::EntryKind::Directory),
+            Ok(metadata) => {
+                Some(metadata.kind() == crate::rooted::EntryKind::Directory)
+            }
             Err(error) if error.kind() == io::ErrorKind::NotFound => None,
             Err(error) => {
                 return Err(rooted_io_error(
@@ -427,7 +494,13 @@ impl RootedLocalFileSystem {
         };
         result
             .map(|()| LocalCreateDirectoryOutcome::new(!existed))
-            .map_err(|error| rooted_io_error(LocalFileOperation::CreateDirectory, path, error))
+            .map_err(|error| {
+                rooted_io_error(
+                    LocalFileOperation::CreateDirectory,
+                    path,
+                    error,
+                )
+            })
     }
 
     /// Copies one rooted regular file or directory tree.
@@ -465,13 +538,18 @@ impl RootedLocalFileSystem {
                 .with_target(target.to_path_buf()),
             ));
         }
-        let source_path =
-            rooted_path(source, LocalFileOperation::Copy).map_err(rooted_copy_failure_unchanged)?;
-        let target_path =
-            rooted_path(target, LocalFileOperation::Copy).map_err(rooted_copy_failure_unchanged)?;
-        let metadata = self.root.symlink_metadata(&source_path).map_err(|error| {
-            rooted_copy_failure_unchanged(rooted_io_error(LocalFileOperation::Copy, source, error))
-        })?;
+        let source_path = rooted_path(source, LocalFileOperation::Copy)
+            .map_err(rooted_copy_failure_unchanged)?;
+        let target_path = rooted_path(target, LocalFileOperation::Copy)
+            .map_err(rooted_copy_failure_unchanged)?;
+        let metadata =
+            self.root.symlink_metadata(&source_path).map_err(|error| {
+                rooted_copy_failure_unchanged(rooted_io_error(
+                    LocalFileOperation::Copy,
+                    source,
+                    error,
+                ))
+            })?;
         let directory = metadata.kind() == crate::rooted::EntryKind::Directory;
         if directory && !options.recursive() {
             return Err(rooted_copy_failure_unchanged(
@@ -483,7 +561,9 @@ impl RootedLocalFileSystem {
                 .with_target(target.to_path_buf()),
             ));
         }
-        if directory && options.atomicity() == crate::LocalAtomicityRequirement::Required {
+        if directory
+            && options.atomicity() == crate::LocalAtomicityRequirement::Required
+        {
             return Err(rooted_copy_failure_unchanged(
                 LocalFileError::new(
                     LocalFileErrorKind::RequirementNotMet,
@@ -500,7 +580,9 @@ impl RootedLocalFileSystem {
                 &target_path,
                 crate::local_file_system::internal_copy_options(options),
             )
-            .map_err(|error| LocalCopyFailure::from_copy_dir_error(source, target, error))?;
+            .map_err(|error| {
+                LocalCopyFailure::from_copy_dir_error(source, target, error)
+            })?;
         let durable = rooted_published_durability(
             options.durability(),
             self.root.sync_parent(&target_path),
@@ -509,7 +591,10 @@ impl RootedLocalFileSystem {
             target,
         )
         .map_err(|error| {
-            rooted_copy_failure_published(error, LocalCopyStats::from_internal(stats))
+            rooted_copy_failure_published(
+                error,
+                LocalCopyStats::from_internal(stats),
+            )
         })?;
         Ok(LocalCopyOutcome::new(
             LocalCopyStats::from_internal(stats),
@@ -547,10 +632,17 @@ impl RootedLocalFileSystem {
         let relative = rooted_path(path, LocalFileOperation::DeleteFile)?;
         match self.root.remove_file(&relative) {
             Ok(()) => Ok(LocalDeleteOutcome::new(true)),
-            Err(error) if error.kind() == io::ErrorKind::NotFound && options.missing_ok() => {
+            Err(error)
+                if error.kind() == io::ErrorKind::NotFound
+                    && options.missing_ok() =>
+            {
                 Ok(LocalDeleteOutcome::new(false))
             }
-            Err(error) => Err(rooted_io_error(LocalFileOperation::DeleteFile, path, error)),
+            Err(error) => Err(rooted_io_error(
+                LocalFileOperation::DeleteFile,
+                path,
+                error,
+            )),
         }
     }
 
@@ -582,7 +674,10 @@ impl RootedLocalFileSystem {
         };
         match result {
             Ok(()) => Ok(LocalDeleteOutcome::new(true)),
-            Err(error) if error.kind() == io::ErrorKind::NotFound && options.missing_ok() => {
+            Err(error)
+                if error.kind() == io::ErrorKind::NotFound
+                    && options.missing_ok() =>
+            {
                 Ok(LocalDeleteOutcome::new(false))
             }
             Err(error) => Err(rooted_io_error(
@@ -638,8 +733,9 @@ impl RootedLocalFileSystem {
             self.root
                 .rename_without_replacing(&source_path, &target_path)
         };
-        result
-            .map_err(|error| rooted_rename_failure_after_native_attempt(source, target, error))?;
+        result.map_err(|error| {
+            rooted_rename_failure_after_native_attempt(source, target, error)
+        })?;
         let durable = rooted_published_durability(
             options.durability(),
             self.root.sync_parent(&target_path),
@@ -654,7 +750,9 @@ impl RootedLocalFileSystem {
 
 /// Wraps a rooted preflight failure that proves no namespace mutation occurred.
 #[inline(always)]
-fn rooted_rename_failure_unchanged(error: LocalFileError) -> LocalRenameFailure {
+fn rooted_rename_failure_unchanged(
+    error: LocalFileError,
+) -> LocalRenameFailure {
     LocalRenameFailure::new(error, LocalRenameFailureState::Unchanged)
 }
 
@@ -672,9 +770,9 @@ fn rooted_rename_failure_after_native_attempt(
     error: io::Error,
 ) -> LocalRenameFailure {
     let state = match error.kind() {
-        io::ErrorKind::AlreadyExists | io::ErrorKind::CrossesDevices | io::ErrorKind::NotFound => {
-            LocalRenameFailureState::Unchanged
-        }
+        io::ErrorKind::AlreadyExists
+        | io::ErrorKind::CrossesDevices
+        | io::ErrorKind::NotFound => LocalRenameFailureState::Unchanged,
         _ => LocalRenameFailureState::Indeterminate,
     };
     LocalRenameFailure::new(
@@ -727,16 +825,18 @@ fn rooted_published_durability(
     match requirement {
         LocalDurabilityRequirement::NotRequired => Ok(false),
         LocalDurabilityRequirement::Preferred => Ok(sync.is_ok()),
-        LocalDurabilityRequirement::Required => sync.map(|()| true).map_err(|error| {
-            LocalFileError::from_io(
-                operation,
-                Some(source.to_path_buf()),
-                Some(target.to_path_buf()),
-                error,
-            )
-            .with_kind(LocalFileErrorKind::PublicationIncomplete)
-            .with_mutation_state(crate::LocalMutationState::Published)
-        }),
+        LocalDurabilityRequirement::Required => {
+            sync.map(|()| true).map_err(|error| {
+                LocalFileError::from_io(
+                    operation,
+                    Some(source.to_path_buf()),
+                    Some(target.to_path_buf()),
+                    error,
+                )
+                .with_kind(LocalFileErrorKind::PublicationIncomplete)
+                .with_mutation_state(crate::LocalMutationState::Published)
+            })
+        }
     }
 }
 
@@ -760,8 +860,14 @@ fn rooted_path(
     path: &Path,
     operation: LocalFileOperation,
 ) -> LocalResult<crate::local::LocalRelativePath> {
-    crate::local::LocalRelativePath::new(path)
-        .map_err(|error| LocalFileError::from_io(operation, Some(path.to_path_buf()), None, error))
+    crate::local::LocalRelativePath::new(path).map_err(|error| {
+        LocalFileError::from_io(
+            operation,
+            Some(path.to_path_buf()),
+            None,
+            error,
+        )
+    })
 }
 
 /// Validates an optional rooted temporary-resource parent.
@@ -775,7 +881,10 @@ fn rooted_temp_parent(
 ) -> LocalResult<std::path::PathBuf> {
     parent.map_or_else(
         || Ok(std::path::PathBuf::new()),
-        |parent| rooted_path(parent, operation).map(|path| path.as_path().to_path_buf()),
+        |parent| {
+            rooted_path(parent, operation)
+                .map(|path| path.as_path().to_path_buf())
+        },
     )
 }
 
@@ -805,7 +914,9 @@ fn temp_candidate(
 ///
 /// Unified normalized metadata.
 #[inline]
-pub(crate) fn rooted_metadata(metadata: crate::rooted::Metadata) -> LocalFileMetadata {
+pub(crate) fn rooted_metadata(
+    metadata: crate::rooted::Metadata,
+) -> LocalFileMetadata {
     let kind = match metadata.kind() {
         crate::rooted::EntryKind::File => LocalFileKind::File,
         crate::rooted::EntryKind::Directory => LocalFileKind::Directory,
@@ -833,6 +944,10 @@ pub(crate) fn rooted_metadata(metadata: crate::rooted::Metadata) -> LocalFileMet
 ///
 /// Structured rooted local filesystem error.
 #[inline(always)]
-fn rooted_io_error(operation: LocalFileOperation, path: &Path, error: io::Error) -> LocalFileError {
+fn rooted_io_error(
+    operation: LocalFileOperation,
+    path: &Path,
+    error: io::Error,
+) -> LocalFileError {
     LocalFileError::from_io(operation, Some(path.to_path_buf()), None, error)
 }

@@ -8,9 +8,16 @@
 // qubit-style: allow source-test-pair
 // Covered by writer integration tests.
 
-use std::{error::Error, fmt};
+use std::{
+    error::Error,
+    fmt,
+};
 
-use crate::{LocalFileError, LocalFileWriter, LocalWriterState};
+use crate::{
+    LocalFileError,
+    LocalFileWriter,
+    LocalWriterState,
+};
 
 /// Failed writer commit with publication state and an optional retryable
 /// writer.
@@ -71,7 +78,9 @@ impl LocalFileCommitError {
     /// writer.
     #[must_use]
     #[inline(always)]
-    pub fn into_parts(self) -> (LocalFileError, LocalWriterState, Option<LocalFileWriter>) {
+    pub fn into_parts(
+        self,
+    ) -> (LocalFileError, LocalWriterState, Option<LocalFileWriter>) {
         (self.error, self.state, self.writer.map(|writer| *writer))
     }
 }

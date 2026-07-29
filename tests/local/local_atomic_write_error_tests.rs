@@ -7,11 +7,21 @@
 // =============================================================================
 
 use std::error::Error as StdError;
-use std::io::{Error, ErrorKind};
+use std::io::{
+    Error,
+    ErrorKind,
+};
 
-use super::api_tests::{LocalAtomicDestinationState, LocalAtomicWriteStage, LocalAtomicWriter};
+use super::api_tests::{
+    LocalAtomicDestinationState,
+    LocalAtomicWriteStage,
+    LocalAtomicWriter,
+};
 
-use super::test_support::{fs, temp_dir};
+use super::test_support::{
+    fs,
+    temp_dir,
+};
 
 /// Returns a stable callback failure for atomic-write error assertions.
 fn fail_atomic_write(_: &mut LocalAtomicWriter) -> std::io::Result<()> {
@@ -50,8 +60,9 @@ fn test_atomic_write_with_returns_parent_error() {
     assert!(base_message.contains("PrepareParent"));
     assert!(!base_message.contains("staging path"));
     let display_path = dir.join("display.txt");
-    let display_error = qubit_local_files::atomic::write_with(&display_path, fail_atomic_write)
-        .expect_err("callback failure should return staging context");
+    let display_error =
+        qubit_local_files::atomic::write_with(&display_path, fail_atomic_write)
+            .expect_err("callback failure should return staging context");
     let temporary_path = display_error
         .temporary_path()
         .map(ToOwned::to_owned)

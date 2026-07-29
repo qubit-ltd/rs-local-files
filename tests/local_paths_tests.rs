@@ -8,11 +8,19 @@
 
 use std::{
     ffi::OsStr,
-    path::{Path, PathBuf},
+    path::{
+        Path,
+        PathBuf,
+    },
     sync::Mutex,
 };
 
-use qubit_local_files::{LocalFileErrorKind, LocalFileNames, LocalFileOperation, LocalPaths};
+use qubit_local_files::{
+    LocalFileErrorKind,
+    LocalFileNames,
+    LocalFileOperation,
+    LocalPaths,
+};
 
 /// Serializes current-directory-sensitive assertions within this test target.
 static CURRENT_DIRECTORY_LOCK: Mutex<()> = Mutex::new(());
@@ -24,8 +32,9 @@ fn test_local_paths_bind_host_paths_uses_absolute_paths() {
     let _lock = CURRENT_DIRECTORY_LOCK
         .lock()
         .expect("current-directory test lock should be available");
-    let [source, target] = LocalPaths::bind_host_paths([Path::new("source"), Path::new("target")])
-        .expect("relative paths should bind against the current directory");
+    let [source, target] =
+        LocalPaths::bind_host_paths([Path::new("source"), Path::new("target")])
+            .expect("relative paths should bind against the current directory");
 
     assert!(source.is_absolute());
     assert!(target.is_absolute());
@@ -36,8 +45,9 @@ fn test_local_paths_bind_host_paths_uses_absolute_paths() {
 #[cfg(unix)]
 #[test]
 fn test_canonical_absolute_components_round_trip_unix_path() {
-    let native = LocalPaths::from_canonical_absolute_components(["", "tmp", "a%25b"])
-        .expect("canonical absolute path should decode");
+    let native =
+        LocalPaths::from_canonical_absolute_components(["", "tmp", "a%25b"])
+            .expect("canonical absolute path should decode");
     assert_eq!(native, Path::new("/tmp/a%b"));
     assert_eq!(
         LocalPaths::to_canonical_absolute_components(&native)
@@ -51,8 +61,10 @@ fn test_canonical_absolute_components_round_trip_unix_path() {
 #[cfg(windows)]
 #[test]
 fn test_canonical_absolute_components_round_trip_windows_drive_path() {
-    let native = LocalPaths::from_canonical_absolute_components(["", "C:", "work", "file"])
-        .expect("canonical Windows absolute path should decode");
+    let native = LocalPaths::from_canonical_absolute_components([
+        "", "C:", "work", "file",
+    ])
+    .expect("canonical Windows absolute path should decode");
     assert_eq!(native, Path::new(r"C:\work\file"));
     assert_eq!(
         LocalPaths::to_canonical_absolute_components(&native)
@@ -108,14 +120,17 @@ fn test_canonical_relative_components_rejects_parent_escape() {
 /// Verifies canonical absolute paths must begin with their platform root shape.
 #[test]
 fn test_absolute_conversion_rejects_relative_shape() {
-    assert!(LocalPaths::from_canonical_absolute_components(["a", "b"]).is_err());
+    assert!(
+        LocalPaths::from_canonical_absolute_components(["a", "b"]).is_err()
+    );
 }
 
 /// Verifies canonical relative components round-trip through native paths.
 #[test]
 fn test_canonical_relative_components_round_trip() {
-    let native = LocalPaths::from_canonical_relative_components(["safe", "a%25b"])
-        .expect("canonical relative path should decode");
+    let native =
+        LocalPaths::from_canonical_relative_components(["safe", "a%25b"])
+            .expect("canonical relative path should decode");
     assert_eq!(native, Path::new("safe/a%b"));
     assert_eq!(
         LocalPaths::to_canonical_relative_components(&native)
@@ -128,16 +143,22 @@ fn test_canonical_relative_components_round_trip() {
 #[test]
 fn test_local_paths_is_lexically_within_accepts_descendant() {
     assert!(
-        LocalPaths::is_lexically_within(Path::new("/root/a"), Path::new("/root"))
-            .expect("normalized paths should be comparable"),
+        LocalPaths::is_lexically_within(
+            Path::new("/root/a"),
+            Path::new("/root")
+        )
+        .expect("normalized paths should be comparable"),
     );
 }
 
 /// Verifies that dot components are rejected instead of silently normalized.
 #[test]
 fn test_local_paths_is_lexically_within_rejects_dot_components() {
-    let error = LocalPaths::is_lexically_within(Path::new("/root/../escape"), Path::new("/root"))
-        .expect_err("parent traversal must be rejected");
+    let error = LocalPaths::is_lexically_within(
+        Path::new("/root/../escape"),
+        Path::new("/root"),
+    )
+    .expect_err("parent traversal must be rejected");
 
     assert_eq!(LocalFileErrorKind::InvalidInput, error.kind());
     assert_eq!(LocalFileOperation::ComposePath, error.operation());

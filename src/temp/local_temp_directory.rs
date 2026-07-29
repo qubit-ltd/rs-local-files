@@ -2,16 +2,26 @@
 
 use std::{
     io::Result,
-    path::{Path, PathBuf},
+    path::{
+        Path,
+        PathBuf,
+    },
     sync::Arc,
 };
 
 use log::warn;
 
-use crate::{LocalPersistError, LocalPersistOptions, LocalPersistStage, LocalRelativePath};
+use crate::{
+    LocalPersistError,
+    LocalPersistOptions,
+    LocalPersistStage,
+    LocalRelativePath,
+};
 
 use super::internal::{
-    LocalTempResourceBackend, LocalTempResourceState, RootedTempResourceBackend,
+    LocalTempResourceBackend,
+    LocalTempResourceState,
+    RootedTempResourceBackend,
 };
 
 /// A temporary directory whose cleanup remains bound to its creating authority.
@@ -31,19 +41,26 @@ impl LocalTempDirectory {
     pub(crate) fn host(path: PathBuf) -> Self {
         Self {
             path,
-            backend: LocalTempResourceBackend::Host(super::internal::HostTempResourceBackend),
+            backend: LocalTempResourceBackend::Host(
+                super::internal::HostTempResourceBackend,
+            ),
             state: LocalTempResourceState::Owned,
         }
     }
 
     /// Builds a rooted temporary directory from the retained root authority.
-    pub(crate) fn rooted(root: Arc<crate::rooted::Root>, path: PathBuf) -> Self {
+    pub(crate) fn rooted(
+        root: Arc<crate::rooted::Root>,
+        path: PathBuf,
+    ) -> Self {
         Self {
             path: path.clone(),
-            backend: LocalTempResourceBackend::Rooted(RootedTempResourceBackend {
-                root,
-                relative_path: path,
-            }),
+            backend: LocalTempResourceBackend::Rooted(
+                RootedTempResourceBackend {
+                    root,
+                    relative_path: path,
+                },
+            ),
             state: LocalTempResourceState::Owned,
         }
     }
@@ -105,7 +122,9 @@ impl LocalTempDirectory {
     ) -> std::result::Result<PathBuf, LocalPersistError<Self>> {
         if self.state == LocalTempResourceState::Indeterminate {
             return Err(LocalPersistError::new(
-                std::io::Error::other("temporary directory namespace state is indeterminate"),
+                std::io::Error::other(
+                    "temporary directory namespace state is indeterminate",
+                ),
                 self,
                 target.as_ref().to_path_buf(),
                 None,
@@ -139,7 +158,9 @@ impl LocalTempDirectory {
                 let result = if options.overwrites() {
                     std::fs::rename(&self.path, &target)
                 } else {
-                    crate::local::move_directory_without_replacing(&self.path, &target)
+                    crate::local::move_directory_without_replacing(
+                        &self.path, &target,
+                    )
                 };
                 if let Err(error) = result {
                     self.record_native_persist_failure(&error);
@@ -169,8 +190,8 @@ impl LocalTempDirectory {
                 };
                 let source = LocalRelativePath::new(&rooted.relative_path)
                     .expect("rooted temporary path was validated at creation");
-                let destination =
-                    LocalRelativePath::new(&target).expect("persist target was validated");
+                let destination = LocalRelativePath::new(&target)
+                    .expect("persist target was validated");
                 let result = if options.overwrites() {
                     rooted.root.rename(&source, &destination)
                 } else {
@@ -196,7 +217,9 @@ impl LocalTempDirectory {
     /// path.
     fn remove(&self) -> Result<()> {
         match &self.backend {
-            LocalTempResourceBackend::Host(_) => std::fs::remove_dir_all(&self.path),
+            LocalTempResourceBackend::Host(_) => {
+                std::fs::remove_dir_all(&self.path)
+            }
             LocalTempResourceBackend::Rooted(rooted) => {
                 let path = LocalRelativePath::new(&rooted.relative_path)
                     .expect("rooted temporary path was validated at creation");
@@ -231,7 +254,8 @@ impl Drop for LocalTempDirectory {
     fn drop(&mut self) {
         if matches!(
             self.state,
-            LocalTempResourceState::Owned | LocalTempResourceState::CleanupRequired
+            LocalTempResourceState::Owned
+                | LocalTempResourceState::CleanupRequired
         ) && let Err(error) = self.remove()
         {
             warn!(

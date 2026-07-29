@@ -8,8 +8,16 @@
 //! Validated relative paths for rooted filesystem operations.
 
 use std::ffi::OsStr;
-use std::io::{Error, ErrorKind, Result};
-use std::path::{Component, Path, PathBuf};
+use std::io::{
+    Error,
+    ErrorKind,
+    Result,
+};
+use std::path::{
+    Component,
+    Path,
+    PathBuf,
+};
 
 /// An owned, validated path accepted by [`crate::rooted::Root`].
 ///
@@ -109,7 +117,9 @@ impl LocalRelativePath {
     pub fn join_component(&self, child: &OsStr) -> Result<Self> {
         let child_path = Path::new(child);
         let mut components = child_path.components();
-        if !matches!(components.next(), Some(Component::Normal(_))) || components.next().is_some() {
+        if !matches!(components.next(), Some(Component::Normal(_)))
+            || components.next().is_some()
+        {
             return Err(invalid_relative_path_error(child_path));
         }
         self.join(child_path)

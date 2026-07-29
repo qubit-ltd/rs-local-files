@@ -9,16 +9,33 @@
 // qubit-style: allow source-test-pair
 // Private behavior is covered through public integration tests.
 
-use std::fs::{DirBuilder, File, OpenOptions};
-use std::io::{Error, ErrorKind, Result};
-use std::path::{Path, PathBuf};
+use std::fs::{
+    DirBuilder,
+    File,
+    OpenOptions,
+};
+use std::io::{
+    Error,
+    ErrorKind,
+    Result,
+};
+use std::path::{
+    Path,
+    PathBuf,
+};
 
 #[cfg(unix)]
-use std::os::unix::fs::{DirBuilderExt, OpenOptionsExt};
+use std::os::unix::fs::{
+    DirBuilderExt,
+    OpenOptionsExt,
+};
 
 use crate::local::try_random_file_name;
 
-use super::path_operations::{add_path_context, ensure_dir_path};
+use super::path_operations::{
+    add_path_context,
+    ensure_dir_path,
+};
 
 /// Default number of attempts used when creating a random temporary entry.
 pub(crate) const DEFAULT_TEMP_ENTRY_RETRIES: usize = 256;
@@ -48,7 +65,11 @@ pub(crate) fn create_temp_file_in_dir(
     let mut attempt = 0;
     loop {
         attempt += 1;
-        let path = dir.join(try_random_file_name("qubit-local-files-", prefix, suffix)?);
+        let path = dir.join(try_random_file_name(
+            "qubit-local-files-",
+            prefix,
+            suffix,
+        )?);
         let mut options = OpenOptions::new();
         options.read(true).write(true).create_new(true);
         #[cfg(unix)]
@@ -59,7 +80,11 @@ pub(crate) fn create_temp_file_in_dir(
                 if should_retry_collision(&error, attempt, max_tries) {
                     continue;
                 }
-                return Err(add_path_context(error, "create temporary file", &path));
+                return Err(add_path_context(
+                    error,
+                    "create temporary file",
+                    &path,
+                ));
             }
         }
     }
@@ -89,14 +114,22 @@ pub(crate) fn create_temp_dir_in_dir_with_affixes(
     let mut attempt = 0;
     loop {
         attempt += 1;
-        let path = dir.join(try_random_file_name("qubit-local-files-", prefix, suffix)?);
+        let path = dir.join(try_random_file_name(
+            "qubit-local-files-",
+            prefix,
+            suffix,
+        )?);
         match create_private_dir(&path) {
             Ok(()) => return Ok(path),
             Err(error) => {
                 if should_retry_collision(&error, attempt, max_tries) {
                     continue;
                 }
-                return Err(add_path_context(error, "create temporary directory", &path));
+                return Err(add_path_context(
+                    error,
+                    "create temporary directory",
+                    &path,
+                ));
             }
         }
     }
@@ -135,7 +168,11 @@ pub(crate) fn create_private_dir(path: &Path) -> Result<()> {
 /// `true` only for an existing entry when another attempt remains.
 #[must_use]
 #[inline(always)]
-fn should_retry_collision(error: &Error, attempt: usize, max_tries: usize) -> bool {
+fn should_retry_collision(
+    error: &Error,
+    attempt: usize,
+    max_tries: usize,
+) -> bool {
     error.kind() == ErrorKind::AlreadyExists && attempt < max_tries
 }
 

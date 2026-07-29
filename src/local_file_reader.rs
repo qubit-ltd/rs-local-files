@@ -10,7 +10,13 @@
 
 use std::{
     fs::File,
-    io::{self, IoSliceMut, Read, Seek, SeekFrom},
+    io::{
+        self,
+        IoSliceMut,
+        Read,
+        Seek,
+        SeekFrom,
+    },
 };
 
 /// Owned synchronous reader for an opened native regular file.
@@ -48,7 +54,10 @@ impl Read for LocalFileReader {
 
     /// Reads bytes into multiple buffers from the current offset.
     #[inline(always)]
-    fn read_vectored(&mut self, buffers: &mut [IoSliceMut<'_>]) -> io::Result<usize> {
+    fn read_vectored(
+        &mut self,
+        buffers: &mut [IoSliceMut<'_>],
+    ) -> io::Result<usize> {
         self.file.read_vectored(buffers)
     }
 }

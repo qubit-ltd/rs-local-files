@@ -8,7 +8,10 @@
 
 //! Process current-directory serialization and restoration for tests.
 
-use std::path::{Path, PathBuf};
+use std::path::{
+    Path,
+    PathBuf,
+};
 use std::sync::Mutex;
 
 /// Serializes tests that temporarily change the process current directory.
@@ -35,7 +38,8 @@ impl CurrentDirGuard {
     ///
     /// Panics when the current directory cannot be read or changed.
     pub(crate) fn change_to(path: &Path) -> Self {
-        let original = std::env::current_dir().expect("current dir should be readable");
+        let original =
+            std::env::current_dir().expect("current dir should be readable");
         std::env::set_current_dir(path).expect("current dir should be changed");
         Self { original }
     }

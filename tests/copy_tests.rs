@@ -19,15 +19,17 @@ fn test_copy_options_are_available() {
 /// Verifies recursive copying reports the copied tree.
 #[test]
 fn test_copy_directory_copies_regular_files() {
-    let directory = tempfile::tempdir().expect("a temporary directory should exist");
+    let directory =
+        tempfile::tempdir().expect("a temporary directory should exist");
     let source = directory.path().join("source");
     let destination = directory.path().join("destination");
     std::fs::create_dir(&source).expect("the source should be created");
     std::fs::write(source.join("payload"), b"payload")
         .expect("the source fixture should be written");
 
-    let statistics = copy::directory(&source, &destination, copy::Options::default())
-        .expect("the source tree should be copied");
+    let statistics =
+        copy::directory(&source, &destination, copy::Options::default())
+            .expect("the source tree should be copied");
 
     assert_eq!(1, statistics.files());
     assert_eq!(7, statistics.bytes());
@@ -42,13 +44,16 @@ fn test_copy_directory_copies_regular_files() {
 /// Verifies file copy reports bytes and replaces an existing destination.
 #[test]
 fn test_copy_file_replaces_existing_destination() {
-    let directory = tempfile::tempdir().expect("a temporary directory should exist");
+    let directory =
+        tempfile::tempdir().expect("a temporary directory should exist");
     let source = directory.path().join("source");
     let destination = directory.path().join("destination");
     std::fs::write(&source, b"source").expect("the source should be written");
-    std::fs::write(&destination, b"destination").expect("the destination should be written");
+    std::fs::write(&destination, b"destination")
+        .expect("the destination should be written");
 
-    let bytes = copy::file(&source, &destination).expect("the destination should be replaced");
+    let bytes = copy::file(&source, &destination)
+        .expect("the destination should be replaced");
 
     assert_eq!(6, bytes);
     assert_eq!(b"source", std::fs::read(&destination).unwrap().as_slice());
@@ -57,11 +62,13 @@ fn test_copy_file_replaces_existing_destination() {
 /// Verifies no-replace file copy leaves an existing destination unchanged.
 #[test]
 fn test_copy_file_without_replacing_preserves_destination() {
-    let directory = tempfile::tempdir().expect("a temporary directory should exist");
+    let directory =
+        tempfile::tempdir().expect("a temporary directory should exist");
     let source = directory.path().join("source");
     let destination = directory.path().join("destination");
     std::fs::write(&source, b"source").expect("the source should be written");
-    std::fs::write(&destination, b"destination").expect("the destination should be written");
+    std::fs::write(&destination, b"destination")
+        .expect("the destination should be written");
 
     let error = copy::file_without_replacing(&source, &destination)
         .expect_err("the destination conflict should be rejected");
@@ -78,9 +85,13 @@ fn test_copy_file_without_replacing_preserves_destination() {
 #[cfg(unix)]
 #[test]
 fn test_copy_file_without_replacing_creates_destination() {
-    use std::os::unix::fs::{MetadataExt, PermissionsExt};
+    use std::os::unix::fs::{
+        MetadataExt,
+        PermissionsExt,
+    };
 
-    let directory = tempfile::tempdir().expect("a temporary directory should exist");
+    let directory =
+        tempfile::tempdir().expect("a temporary directory should exist");
     let source = directory.path().join("source");
     let destination = directory.path().join("destination");
     std::fs::write(&source, b"source").expect("the source should be written");
@@ -106,7 +117,8 @@ fn test_copy_file_without_replacing_creates_destination() {
 #[cfg(unix)]
 #[test]
 fn test_copy_file_without_replacing_cleans_up_failed_destination() {
-    let directory = tempfile::tempdir().expect("a temporary directory should exist");
+    let directory =
+        tempfile::tempdir().expect("a temporary directory should exist");
     let source = directory.path().join("source-directory");
     let destination = directory.path().join("destination");
     std::fs::create_dir(&source).expect("the source directory should exist");
@@ -120,7 +132,8 @@ fn test_copy_file_without_replacing_cleans_up_failed_destination() {
 /// Verifies a missing source is reported before a destination is created.
 #[test]
 fn test_copy_file_without_replacing_rejects_missing_source() {
-    let directory = tempfile::tempdir().expect("a temporary directory should exist");
+    let directory =
+        tempfile::tempdir().expect("a temporary directory should exist");
     let source = directory.path().join("missing");
     let destination = directory.path().join("destination");
 
@@ -139,16 +152,20 @@ fn test_copy_file_without_replacing_cleans_up_permission_failure() {
     use std::{
         ffi::CString,
         io::Write,
-        os::unix::{ffi::OsStrExt, fs::symlink},
+        os::unix::{
+            ffi::OsStrExt,
+            fs::symlink,
+        },
         thread,
         time::Duration,
     };
 
-    let directory = tempfile::tempdir().expect("a temporary directory should exist");
+    let directory =
+        tempfile::tempdir().expect("a temporary directory should exist");
     let source = directory.path().join("source-fifo");
     let destination = directory.path().join("destination");
-    let source_c =
-        CString::new(source.as_os_str().as_bytes()).expect("the FIFO path should not contain NUL");
+    let source_c = CString::new(source.as_os_str().as_bytes())
+        .expect("the FIFO path should not contain NUL");
     // SAFETY: `source_c` is a live NUL-terminated path for this non-retaining
     // call.
     let result = unsafe { libc::mkfifo(source_c.as_ptr(), 0o600) };

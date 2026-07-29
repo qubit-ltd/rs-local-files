@@ -56,10 +56,16 @@ fn test_coverage_wrappers_do_not_define_project_source_exclusions() {
 /// Verifies crate-root exports for the unified public API.
 #[test]
 fn test_crate_root_exports_unified_api_types() {
-    use std::{borrow::Cow, ffi::OsStr};
+    use std::{
+        borrow::Cow,
+        ffi::OsStr,
+    };
 
     use qubit_local_files::{
-        LocalCopyFailureState, LocalPathCodec, LocalPathCodecError, LocalRenameFailureState,
+        LocalCopyFailureState,
+        LocalPathCodec,
+        LocalPathCodecError,
+        LocalRenameFailureState,
     };
 
     let _: for<'a> fn(&'a str) -> Result<Cow<'a, OsStr>, LocalPathCodecError> =

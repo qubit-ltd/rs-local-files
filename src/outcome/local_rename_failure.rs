@@ -10,7 +10,11 @@
 
 use std::{
     error::Error,
-    fmt::{Display, Formatter, Result as FmtResult},
+    fmt::{
+        Display,
+        Formatter,
+        Result as FmtResult,
+    },
 };
 
 use crate::LocalFileError;
@@ -49,7 +53,10 @@ impl LocalRenameFailure {
     /// Creates a typed rename failure from implementation facts.
     #[must_use]
     #[inline]
-    pub(crate) const fn new(error: LocalFileError, state: LocalRenameFailureState) -> Self {
+    pub(crate) const fn new(
+        error: LocalFileError,
+        state: LocalRenameFailureState,
+    ) -> Self {
         Self { error, state }
     }
 
@@ -75,4 +82,5 @@ impl LocalRenameFailure {
 }
 
 /// Result returned by unified rename operations.
-pub type LocalRenameResult = Result<super::LocalRenameOutcome, LocalRenameFailure>;
+pub type LocalRenameResult =
+    Result<super::LocalRenameOutcome, LocalRenameFailure>;

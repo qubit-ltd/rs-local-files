@@ -10,9 +10,15 @@
 // qubit-style: allow coverage-cfg
 // Private behavior is covered through public integration tests.
 
-use std::fs::{self, File};
+use std::fs::{
+    self,
+    File,
+};
 use std::io::Result;
-use std::path::{Path, PathBuf};
+use std::path::{
+    Path,
+    PathBuf,
+};
 
 use log::warn;
 
@@ -119,10 +125,13 @@ impl StagedFile {
         self.close();
         if let Some(path) = self.path.as_ref() {
             #[cfg(coverage)]
-            if super::coverage_fault::is_enabled("atomic-install-unlink-persistent")
-                || super::coverage_fault::is_enabled("atomic-install-unlink-persistent-sync")
-                || super::coverage_fault::is_enabled("copy-staging-copy-cleanup")
-            {
+            if super::coverage_fault::is_enabled(
+                "atomic-install-unlink-persistent",
+            ) || super::coverage_fault::is_enabled(
+                "atomic-install-unlink-persistent-sync",
+            ) || super::coverage_fault::is_enabled(
+                "copy-staging-copy-cleanup",
+            ) {
                 return Err(std::io::Error::from_raw_os_error(libc::EIO));
             }
             fs::remove_file(path)?;

@@ -8,8 +8,18 @@
 
 //! Native FreeBSD ACL fixtures for local-filesystem integration tests.
 
-use std::ffi::{CString, c_char, c_int, c_uint, c_void};
-use std::io::{self, Error, ErrorKind};
+use std::ffi::{
+    CString,
+    c_char,
+    c_int,
+    c_uint,
+    c_void,
+};
+use std::io::{
+    self,
+    Error,
+    ErrorKind,
+};
 use std::os::unix::ffi::OsStrExt;
 use std::path::Path;
 
@@ -54,7 +64,9 @@ unsafe extern "C" {
 ///
 /// Returns the installed native ACL type, or `None` when the filesystem has
 /// neither NFSv4 nor POSIX.1e ACL support.
-pub(crate) fn install_supported_test_acl(path: &Path) -> io::Result<Option<c_uint>> {
+pub(crate) fn install_supported_test_acl(
+    path: &Path,
+) -> io::Result<Option<c_uint>> {
     let native_path = native_path(path)?;
     match install_acl(&native_path, ACL_TYPE_NFS4, NFS4_ACL_TEXT) {
         Ok(()) => return Ok(Some(ACL_TYPE_NFS4)),
@@ -69,7 +81,10 @@ pub(crate) fn install_supported_test_acl(path: &Path) -> io::Result<Option<c_uin
 }
 
 /// Reads the canonical text for one FreeBSD ACL flavor.
-pub(crate) fn read_freebsd_acl_text(path: &Path, acl_type: c_uint) -> io::Result<Vec<u8>> {
+pub(crate) fn read_freebsd_acl_text(
+    path: &Path,
+    acl_type: c_uint,
+) -> io::Result<Vec<u8>> {
     let native_path = native_path(path)?;
     // SAFETY: `native_path` is NUL-terminated and `acl_type` was returned by
     // `install_supported_test_acl`.
@@ -88,7 +103,9 @@ pub(crate) fn read_freebsd_acl_text(path: &Path, acl_type: c_uint) -> io::Result
     }
 
     let result = usize::try_from(length)
-        .map_err(|_| Error::new(ErrorKind::InvalidData, "negative ACL text length"))
+        .map_err(|_| {
+            Error::new(ErrorKind::InvalidData, "negative ACL text length")
+        })
         .map(|length| {
             // SAFETY: `acl_to_text` returned `length` readable bytes.
             unsafe { std::slice::from_raw_parts(text.cast(), length) }.to_vec()
@@ -100,7 +117,11 @@ pub(crate) fn read_freebsd_acl_text(path: &Path, acl_type: c_uint) -> io::Result
 }
 
 /// Parses and installs one native ACL fixture.
-fn install_acl(native_path: &CString, acl_type: c_uint, acl_text: &str) -> io::Result<()> {
+fn install_acl(
+    native_path: &CString,
+    acl_type: c_uint,
+    acl_text: &str,
+) -> io::Result<()> {
     let native_text = CString::new(acl_text).expect("ACL fixture has no NUL");
     // SAFETY: `native_text` is NUL-terminated and remains live for the call.
     let acl = unsafe { acl_from_text(native_text.as_ptr()) };
@@ -121,8 +142,9 @@ fn install_acl(native_path: &CString, acl_type: c_uint, acl_text: &str) -> io::R
 
 /// Converts a path to the native NUL-terminated representation.
 fn native_path(path: &Path) -> io::Result<CString> {
-    CString::new(path.as_os_str().as_bytes())
-        .map_err(|_| Error::new(ErrorKind::InvalidInput, "path contains an interior NUL"))
+    CString::new(path.as_os_str().as_bytes()).map_err(|_| {
+        Error::new(ErrorKind::InvalidInput, "path contains an interior NUL")
+    })
 }
 
 /// Frees one native ACL allocation.

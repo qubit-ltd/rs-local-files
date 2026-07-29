@@ -40,7 +40,11 @@ impl DirSizeFrame {
     ///
     /// A frame with a zero subtotal and the supplied lazy iterator.
     #[inline]
-    pub(super) fn new(path: PathBuf, identity: DirectoryIdentity, entries: fs::ReadDir) -> Self {
+    pub(super) fn new(
+        path: PathBuf,
+        identity: DirectoryIdentity,
+        entries: fs::ReadDir,
+    ) -> Self {
         Self {
             path,
             identity,
@@ -78,7 +82,9 @@ impl DirSizeFrame {
     /// A returned `Some(Err(_))` contains the I/O error reported while reading
     /// the next directory entry.
     #[inline(always)]
-    pub(super) fn next_entry(&mut self) -> Option<std::io::Result<fs::DirEntry>> {
+    pub(super) fn next_entry(
+        &mut self,
+    ) -> Option<std::io::Result<fs::DirEntry>> {
         self.entries.next()
     }
 

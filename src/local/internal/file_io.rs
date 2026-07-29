@@ -9,19 +9,35 @@
 // qubit-style: allow coverage-cfg
 // Public APIs cannot force an opened regular-file metadata failure.
 
-use std::fs::{self, OpenOptions};
-use std::io::{Error, ErrorKind, Result};
+use std::fs::{
+    self,
+    OpenOptions,
+};
+use std::io::{
+    Error,
+    ErrorKind,
+    Result,
+};
 #[cfg(unix)]
 use std::os::fd::AsRawFd;
 use std::path::Path;
 use std::time::Duration;
 
-use crate::{read, write};
+use crate::{
+    read,
+    write,
+};
 
 use super::io_result_context::with_path_context;
-use super::path_operations::{add_path_context, ensure_parent_path};
+use super::path_operations::{
+    add_path_context,
+    ensure_parent_path,
+};
 #[cfg(unix)]
-use super::unix_nonblocking::{clear_nonblocking, open_with_nonblocking_retry};
+use super::unix_nonblocking::{
+    clear_nonblocking,
+    open_with_nonblocking_retry,
+};
 
 /// Creates the canonical error for a non-regular-file target.
 ///
@@ -168,11 +184,12 @@ fn prepare_opened_regular_file(
 ) -> Result<()> {
     let metadata_result = file.metadata();
     #[cfg(coverage)]
-    let metadata_result = if super::coverage_fault::is_enabled("file-handle-metadata") {
-        Err(Error::other("injected opened-file metadata failure"))
-    } else {
-        metadata_result
-    };
+    let metadata_result =
+        if super::coverage_fault::is_enabled("file-handle-metadata") {
+            Err(Error::other("injected opened-file metadata failure"))
+        } else {
+            metadata_result
+        };
     let metadata = with_path_context(metadata_result, inspect_operation, path)?;
     #[cfg(coverage)]
     if super::coverage_fault::is_enabled("file-handle-type") {
@@ -181,7 +198,11 @@ fn prepare_opened_regular_file(
     if !metadata.is_file() {
         return Err(path_not_regular_file_error(path));
     }
-    with_path_context(clear_transient_nonblocking(file), restore_operation, path)
+    with_path_context(
+        clear_transient_nonblocking(file),
+        restore_operation,
+        path,
+    )
 }
 
 /// Opens and validates one unbuffered regular file for reading.
@@ -196,7 +217,10 @@ fn prepare_opened_regular_file(
 /// # Errors
 /// Returns a contextual I/O error when the path cannot be inspected or opened,
 /// or when the opened object is not a regular file.
-fn open_reader_file(path: &Path, open_retry_timeout: Option<Duration>) -> Result<fs::File> {
+fn open_reader_file(
+    path: &Path,
+    open_retry_timeout: Option<Duration>,
+) -> Result<fs::File> {
     reject_existing_non_file(path)?;
     let mut open_options = OpenOptions::new();
     open_options.read(true);
@@ -284,7 +308,11 @@ fn open_writer_file(
         path,
     )?;
     if should_truncate {
-        with_path_context(file.set_len(0), "truncate opened file writer", path)?;
+        with_path_context(
+            file.set_len(0),
+            "truncate opened file writer",
+            path,
+        )?;
     }
     Ok(file)
 }

@@ -21,9 +21,11 @@ fn test_atomic_options_are_available() {
 /// Verifies both atomic entry points install complete file contents.
 #[test]
 fn test_atomic_begin_entry_points_install_files() {
-    let directory = tempfile::tempdir().expect("a temporary directory should exist");
+    let directory =
+        tempfile::tempdir().expect("a temporary directory should exist");
     let nested = directory.path().join("nested/default.txt");
-    let mut writer = atomic::begin(&nested).expect("default atomic writing should create parents");
+    let mut writer = atomic::begin(&nested)
+        .expect("default atomic writing should create parents");
     writer
         .write_all(b"default")
         .expect("staged content should be written");
@@ -44,10 +46,12 @@ fn test_atomic_begin_entry_points_install_files() {
 /// Verifies the one-shot atomic entry points publish complete contents.
 #[test]
 fn test_atomic_write_entry_points_install_files() {
-    let directory = tempfile::tempdir().expect("a temporary directory should exist");
+    let directory =
+        tempfile::tempdir().expect("a temporary directory should exist");
     let bytes_path = directory.path().join("nested/bytes.txt");
 
-    atomic::write(&bytes_path, b"bytes").expect("one-shot bytes should be installed");
+    atomic::write(&bytes_path, b"bytes")
+        .expect("one-shot bytes should be installed");
 
     let callback_path = directory.path().join("callback.txt");
     atomic::write_with(&callback_path, |writer| writer.write_all(b"callback"))

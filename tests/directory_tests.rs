@@ -11,7 +11,8 @@
 /// Verifies directory creation is idempotent.
 #[test]
 fn test_directory_create_all_is_idempotent() {
-    let directory = tempfile::tempdir().expect("a temporary directory should exist");
+    let directory =
+        tempfile::tempdir().expect("a temporary directory should exist");
     qubit_local_files::directory::create_all(directory.path())
         .expect("an existing directory should be accepted");
 }
@@ -19,7 +20,8 @@ fn test_directory_create_all_is_idempotent() {
 /// Verifies single-directory creation rejects an existing destination.
 #[test]
 fn test_directory_create_requires_a_new_entry() {
-    let directory = tempfile::tempdir().expect("a temporary directory should exist");
+    let directory =
+        tempfile::tempdir().expect("a temporary directory should exist");
     let child = directory.path().join("child");
 
     qubit_local_files::directory::create(&child)
@@ -33,9 +35,11 @@ fn test_directory_create_requires_a_new_entry() {
 /// Verifies listing, sizing, parent creation, and clearing share one facade.
 #[test]
 fn test_directory_lifecycle_operations() {
-    let directory = tempfile::tempdir().expect("a temporary directory should exist");
+    let directory =
+        tempfile::tempdir().expect("a temporary directory should exist");
     let child = directory.path().join("nested/payload");
-    qubit_local_files::directory::create_parent(&child).expect("the parent should be created");
+    qubit_local_files::directory::create_parent(&child)
+        .expect("the parent should be created");
     std::fs::write(&child, b"payload").expect("the fixture should be written");
 
     assert_eq!(
@@ -50,6 +54,7 @@ fn test_directory_lifecycle_operations() {
             .expect("the directory should be sized"),
     );
 
-    qubit_local_files::directory::clear(directory.path()).expect("the directory should be cleared");
+    qubit_local_files::directory::clear(directory.path())
+        .expect("the directory should be cleared");
     assert_eq!(0, std::fs::read_dir(directory.path()).unwrap().count());
 }
