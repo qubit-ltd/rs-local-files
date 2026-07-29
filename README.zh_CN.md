@@ -138,26 +138,24 @@ cargo test --all-features
 # 运行项目 CI 检查
 ./ci-check.sh
 
-# 生成覆盖率报告（默认只报告，不强制阈值）
+# 检查代码覆盖率
 ./coverage.sh
-
-# 强制执行已配置的逐源文件覆盖率阈值
-COVERAGE_ENFORCE_THRESHOLDS=1 ./coverage.sh json
 ```
 
 ## 许可证
 
 Copyright (c) 2025 - 2026. Haixing Hu. All rights reserved.
 
-本项目采用 Apache License 2.0，完整文本见 [LICENSE](LICENSE)。
+本项目基于 Apache License 2.0 授权。完整许可证文本请参阅
+[LICENSE](LICENSE)。
 
 ## 贡献
 
 欢迎贡献。请遵循 Rust API 指南，及时更新公共 API 文档与测试，并在提交
-Pull Request 前运行 `./align-ci.sh`格式化代码，运行`./ci-check.sh`对齐 CI 要求。
+Pull Request 前运行 `./align-ci.sh`格式化代码，运行`./ci-check.sh`对齐CI要求。
 
 ## 作者
 
 **Haixing Hu** - *Qubit Co. Ltd.*
 
-仓库：[https://github.com/qubit-ltd/rs-local-files](https://github.com/qubit-ltd/rs-local-files)
+仓库地址：[https://github.com/qubit-ltd/rs-local-files](https://github.com/qubit-ltd/rs-local-files)

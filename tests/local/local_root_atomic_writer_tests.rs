@@ -77,6 +77,38 @@ fn test_begin_atomic_write_with_options_rejects_missing_parent() {
     fs::remove_dir_all(root_path).unwrap();
 }
 
+/// Verifies rooted create-new preparation rejects an existing final entry
+/// before it creates a descriptor-relative staging file.
+#[cfg(unix)]
+#[test]
+fn test_rooted_atomic_writer_create_new_rejects_existing_destination() {
+    let root_path = temp_dir("rooted-atomic-create-new-existing");
+    let destination_path = root_path.join("payload");
+    fs::write(&destination_path, b"existing")
+        .expect("existing rooted destination should be created");
+    let root = LocalRoot::open(&root_path).expect("root should open");
+    let destination =
+        LocalRelativePath::new("payload").expect("destination should validate");
+
+    let error = root
+        .begin_atomic_write_with_options(
+            &destination,
+            LocalAtomicWriteOptions::new().with_create_new(),
+        )
+        .expect_err("rooted create-new must reject existing destination");
+
+    assert_eq!(LocalAtomicWriteStage::InspectDestination, error.stage());
+    assert_eq!(std::io::ErrorKind::AlreadyExists, error.kind());
+    assert_eq!(
+        b"existing",
+        fs::read(&destination_path)
+            .expect("existing rooted destination should remain")
+            .as_slice(),
+    );
+    assert_eq!(0, count_atomic_temp_files(&root_path));
+    fs::remove_dir_all(root_path).unwrap();
+}
+
 #[cfg(target_os = "linux")]
 #[test]
 fn test_local_root_atomic_writer_zero_open_retry_timeout_reports_timed_out() {
@@ -1340,4 +1372,84 @@ fn test_abort_reports_missing_staging_entry() {
     assert_eq!(std::io::ErrorKind::NotFound, error.kind());
     fs::remove_dir_all(root_path)
         .expect("abort-error fixture should be removed");
+}
+
+/// Verifies rooted recoverable commit publishes without synchronization when
+/// the caller explicitly does not require durability.
+#[cfg(unix)]
+#[test]
+fn test_root_atomic_writer_commit_recoverable_reports_optional_durability() {
+    let root_path = temp_dir("rooted-atomic-optional-durability");
+    let root = LocalRoot::open(&root_path).expect("root should open");
+    let destination = LocalRelativePath::new("result.txt")
+        .expect("destination should validate");
+    let options = LocalAtomicWriteOptions::new().with_durability(
+        qubit_local_files::LocalDurabilityRequirement::NotRequired,
+    );
+    let mut writer = root
+        .begin_atomic_write_with_options(&destination, options)
+        .expect("rooted writer should begin");
+    writer
+        .write_all(b"payload")
+        .expect("payload should be staged");
+
+    let durable = writer
+        .commit_recoverable_with_durability()
+        .expect("optional durability should still publish");
+
+    assert!(!durable);
+    assert_eq!(
+        b"payload",
+        fs::read(root_path.join("result.txt"))
+            .expect("published destination should read")
+            .as_slice(),
+    );
+    fs::remove_dir_all(root_path).expect("test directory should be removed");
+}
+
+/// Verifies preferred rooted durability publishes successfully when parent
+/// synchronization is unavailable after installation.
+#[cfg(all(coverage, target_os = "linux"))]
+#[test]
+fn test_root_atomic_writer_preferred_durability_tolerates_parent_sync_failure()
+{
+    const TEST_NAME: &str = concat!(
+        "local::local_root_atomic_writer_tests::",
+        "test_root_atomic_writer_preferred_durability_tolerates_parent_sync_failure",
+    );
+    let Some(()) = run_in_coverage_fault_process(
+        TEST_NAME,
+        "rooted-preferred-parent-sync",
+        move || {
+            let root_path = temp_dir("rooted-atomic-preferred-parent-sync");
+            let root = LocalRoot::open(&root_path).expect("root should open");
+            let destination = LocalRelativePath::new("result.txt")
+                .expect("destination should validate");
+            let options = LocalAtomicWriteOptions::new().with_durability(
+                qubit_local_files::LocalDurabilityRequirement::Preferred,
+            );
+            let mut writer = root
+                .begin_atomic_write_with_options(&destination, options)
+                .expect("rooted writer should begin");
+            writer
+                .write_all(b"payload")
+                .expect("payload should be staged");
+
+            let durable = writer.commit_recoverable_with_durability().expect(
+                "preferred durability should tolerate parent sync failure",
+            );
+
+            assert!(!durable);
+            assert_eq!(
+                b"payload",
+                fs::read(root_path.join("result.txt"))
+                    .expect("published destination should read")
+                    .as_slice(),
+            );
+            fs::remove_dir_all(root_path)
+                .expect("test directory should be removed");
+        },
+    ) else {
+        return;
+    };
 }

@@ -96,7 +96,6 @@ impl LocalCopyDirError {
     ///
     /// # Returns
     /// Failed recursive-copy stage.
-    #[inline(always)]
     pub const fn stage(&self) -> LocalCopyDirStage {
         self.stage
     }
@@ -106,7 +105,6 @@ impl LocalCopyDirError {
     /// # Returns
     /// Source path being processed.
     #[must_use]
-    #[inline(always)]
     pub fn source_path(&self) -> &Path {
         &self.source_path
     }
@@ -116,7 +114,6 @@ impl LocalCopyDirError {
     /// # Returns
     /// Destination path being processed.
     #[must_use]
-    #[inline(always)]
     pub fn destination_path(&self) -> &Path {
         &self.destination_path
     }
@@ -126,7 +123,6 @@ impl LocalCopyDirError {
     /// # Returns
     /// Partial recursive-copy statistics.
     #[must_use]
-    #[inline(always)]
     pub const fn stats(&self) -> &LocalCopyDirStats {
         &self.stats
     }
@@ -135,7 +131,6 @@ impl LocalCopyDirError {
     ///
     /// # Returns
     /// Staging path retained for diagnostics.
-    #[inline(always)]
     pub fn temporary_path(&self) -> Option<&Path> {
         self.temporary_path.as_deref()
     }
@@ -144,7 +139,6 @@ impl LocalCopyDirError {
     ///
     /// # Returns
     /// Cleanup error without replacing the primary source error.
-    #[inline(always)]
     pub fn cleanup_error(&self) -> Option<&io::Error> {
         self.cleanup_error.as_ref()
     }
@@ -154,7 +148,6 @@ impl LocalCopyDirError {
     /// # Returns
     /// Retained primary I/O error.
     #[must_use]
-    #[inline(always)]
     pub const fn error(&self) -> &io::Error {
         &self.error
     }
@@ -164,13 +157,11 @@ impl LocalCopyDirError {
     /// # Returns
     /// Error kind reported by the retained source error.
     #[must_use]
-    #[inline(always)]
     pub fn kind(&self) -> io::ErrorKind {
         self.error.kind()
     }
 
-    /// Consumes this error and returns every retained copy-pipeline detail.
-    #[inline]
+    #[inline(never)]
     pub(crate) fn into_parts(
         self,
     ) -> (
@@ -216,6 +207,7 @@ impl LocalCopyDirError {
 impl Display for LocalCopyDirError {
     /// Formats the copy stage, paths, partial statistics, and source error.
     fn fmt(&self, formatter: &mut Formatter<'_>) -> FmtResult {
+        let source = self.source().expect("copy errors always retain a source");
         write!(
             formatter,
             "failed to copy '{}' to '{}' during {:?} after {:?}: {}",
@@ -223,7 +215,7 @@ impl Display for LocalCopyDirError {
             self.destination_path.display(),
             self.stage,
             self.stats,
-            self.error,
+            source,
         )?;
         if let Some(temporary_path) = self.temporary_path.as_ref() {
             write!(formatter, "; staging path '{}'", temporary_path.display())?;

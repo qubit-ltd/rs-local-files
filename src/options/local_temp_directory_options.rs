@@ -30,7 +30,6 @@ pub struct LocalTempDirectoryOptions {
 impl LocalTempDirectoryOptions {
     /// Creates default temporary-directory options.
     #[must_use]
-    #[inline(always)]
     pub const fn new() -> Self {
         Self {
             parent: None,
@@ -43,28 +42,24 @@ impl LocalTempDirectoryOptions {
     /// Returns the configured parent, or `None` for the process temporary
     /// directory.
     #[must_use]
-    #[inline(always)]
     pub fn parent(&self) -> Option<&Path> {
         self.parent.as_deref()
     }
 
     /// Returns the optional directory-name prefix.
     #[must_use]
-    #[inline(always)]
     pub fn prefix(&self) -> Option<&str> {
         self.prefix.as_deref()
     }
 
     /// Returns the optional directory-name suffix.
     #[must_use]
-    #[inline(always)]
     pub fn suffix(&self) -> Option<&str> {
         self.suffix.as_deref()
     }
 
     /// Returns the maximum random-name creation attempts.
     #[must_use]
-    #[inline(always)]
     pub const fn max_attempts(&self) -> usize {
         self.max_attempts
     }
@@ -75,7 +70,6 @@ impl LocalTempDirectoryOptions {
     ///
     /// - `parent`: Absolute or relative parent directory.
     #[must_use]
-    #[inline(always)]
     pub fn with_parent(mut self, parent: &Path) -> Self {
         self.parent = Some(parent.to_path_buf());
         self
@@ -87,7 +81,6 @@ impl LocalTempDirectoryOptions {
     ///
     /// - `prefix`: Prefix validated before entry creation.
     #[must_use]
-    #[inline(always)]
     pub fn with_prefix(mut self, prefix: &str) -> Self {
         self.prefix = Some(prefix.to_owned());
         self
@@ -99,7 +92,6 @@ impl LocalTempDirectoryOptions {
     ///
     /// - `suffix`: Suffix validated before entry creation.
     #[must_use]
-    #[inline(always)]
     pub fn with_suffix(mut self, suffix: &str) -> Self {
         self.suffix = Some(suffix.to_owned());
         self
@@ -111,7 +103,6 @@ impl LocalTempDirectoryOptions {
     ///
     /// - `max_attempts`: Positive attempt count.
     #[must_use]
-    #[inline(always)]
     pub const fn with_max_attempts(mut self, max_attempts: usize) -> Self {
         self.max_attempts = max_attempts;
         self
@@ -120,7 +111,6 @@ impl LocalTempDirectoryOptions {
 
 impl Default for LocalTempDirectoryOptions {
     /// Returns default temporary-directory options.
-    #[inline(always)]
     fn default() -> Self {
         Self::new()
     }

@@ -6,11 +6,11 @@
 //    Licensed under the Apache License, Version 2.0.
 // =============================================================================
 
-use std::io::Write;
 #[cfg(unix)]
+use std::io::IoSlice;
 use std::io::{
     ErrorKind,
-    IoSlice,
+    Write,
 };
 #[cfg(target_os = "linux")]
 use std::path::Path;
@@ -74,6 +74,50 @@ fn test_atomic_writer_options_can_create_missing_parents() {
     writer.commit().expect("payload should commit");
 
     assert_eq!(b"payload", fs::read(&path).unwrap().as_slice());
+    fs::remove_dir_all(dir).unwrap();
+}
+
+/// Verifies preparation rejects a non-directory parent without creating a
+/// staging file or changing the parent entry.
+#[test]
+fn test_atomic_writer_rejects_non_directory_parent() {
+    let dir = temp_dir("atomic-writer-file-parent");
+    let parent = dir.join("parent");
+    fs::write(&parent, b"not a directory")
+        .expect("parent file should be created");
+    let path = parent.join("payload");
+
+    let error = qubit_local_files::atomic::begin_with(
+        &path,
+        LocalAtomicWriteOptions::new(),
+    )
+    .expect_err("atomic writer must reject a file parent");
+
+    assert_eq!(LocalAtomicWriteStage::PrepareParent, error.stage());
+    assert_eq!(ErrorKind::NotADirectory, error.kind());
+    assert_eq!(b"not a directory", fs::read(&parent).unwrap().as_slice());
+    fs::remove_dir_all(dir).unwrap();
+}
+
+/// Verifies create-new preparation rejects an existing destination before it
+/// creates a staging file or changes the destination contents.
+#[test]
+fn test_atomic_writer_create_new_rejects_existing_destination() {
+    let dir = temp_dir("atomic-writer-create-new-existing");
+    let path = dir.join("payload");
+    fs::write(&path, b"existing")
+        .expect("existing destination should be created");
+
+    let error = qubit_local_files::atomic::begin_with(
+        &path,
+        LocalAtomicWriteOptions::new().with_create_new(),
+    )
+    .expect_err("create-new atomic writer must reject existing destination");
+
+    assert_eq!(LocalAtomicWriteStage::InspectDestination, error.stage());
+    assert_eq!(ErrorKind::AlreadyExists, error.kind());
+    assert_eq!(b"existing", fs::read(&path).unwrap().as_slice());
+    assert_eq!(0, count_atomic_temp_files(&dir));
     fs::remove_dir_all(dir).unwrap();
 }
 
@@ -388,6 +432,30 @@ fn test_local_atomic_writer_drop_removes_staging_file() {
     assert!(!path.exists());
     assert_eq!(0, count_atomic_temp_files(&dir));
     fs::remove_dir_all(dir).unwrap();
+}
+
+/// Verifies the recoverable commit API reports an intentionally relaxed
+/// durability guarantee after publishing staged content.
+#[test]
+fn test_local_atomic_writer_commit_recoverable_reports_optional_durability() {
+    let dir = temp_dir("atomic-writer-optional-durability");
+    let path = dir.join("out.txt");
+    let options = LocalAtomicWriteOptions::new().with_durability(
+        qubit_local_files::LocalDurabilityRequirement::NotRequired,
+    );
+    let mut writer = qubit_local_files::atomic::begin_with(&path, options)
+        .expect("optional-durability writer should begin");
+    writer
+        .write_all(b"payload")
+        .expect("payload should be staged");
+
+    let durable = writer
+        .commit_recoverable_with_durability()
+        .expect("optional durability should still publish");
+
+    assert!(!durable);
+    assert_eq!(b"payload", fs::read(&path).unwrap().as_slice());
+    fs::remove_dir_all(dir).expect("test directory should be removed");
 }
 
 /// Returns the sole atomic staging path in `dir`.

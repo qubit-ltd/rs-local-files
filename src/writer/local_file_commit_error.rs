@@ -39,7 +39,6 @@ impl LocalFileCommitError {
     /// - `error`: Structured local filesystem failure.
     /// - `state`: Established publication state.
     /// - `writer`: Retryable writer when publication has not started.
-    #[inline(always)]
     pub(crate) fn new(
         error: LocalFileError,
         state: LocalWriterState,
@@ -54,14 +53,12 @@ impl LocalFileCommitError {
 
     /// Returns the structured local filesystem failure.
     #[must_use]
-    #[inline(always)]
     pub const fn error(&self) -> &LocalFileError {
         &self.error
     }
 
     /// Returns the established publication state.
     #[must_use]
-    #[inline(always)]
     pub const fn state(&self) -> LocalWriterState {
         self.state
     }
@@ -69,7 +66,6 @@ impl LocalFileCommitError {
     /// Returns a retryable writer, or `None` after publication may have
     /// started.
     #[must_use]
-    #[inline(always)]
     pub fn writer(&self) -> Option<&LocalFileWriter> {
         self.writer.as_deref()
     }
@@ -77,7 +73,6 @@ impl LocalFileCommitError {
     /// Consumes the failure into its error, state, and optional retryable
     /// writer.
     #[must_use]
-    #[inline(always)]
     pub fn into_parts(
         self,
     ) -> (LocalFileError, LocalWriterState, Option<LocalFileWriter>) {
@@ -94,7 +89,6 @@ impl fmt::Display for LocalFileCommitError {
 
 impl Error for LocalFileCommitError {
     /// Returns the structured local filesystem failure.
-    #[inline(always)]
     fn source(&self) -> Option<&(dyn Error + 'static)> {
         Some(&self.error)
     }

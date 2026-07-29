@@ -16,7 +16,6 @@
 /// # Returns
 /// The extension without one leading dot.
 #[must_use]
-#[inline(always)]
 pub(crate) fn normalize_extension(extension: &str) -> &str {
     extension.strip_prefix('.').unwrap_or(extension)
 }

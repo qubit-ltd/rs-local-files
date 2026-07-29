@@ -41,7 +41,6 @@ pub struct LocalCopyOptions {
 impl LocalCopyOptions {
     /// Creates conservative copy options.
     #[must_use]
-    #[inline(always)]
     pub const fn new() -> Self {
         Self {
             conflict: LocalCopyConflictPolicy::Fail,
@@ -55,55 +54,47 @@ impl LocalCopyOptions {
     }
 
     /// Returns the destination file conflict policy.
-    #[inline(always)]
     pub const fn conflict(&self) -> LocalCopyConflictPolicy {
         self.conflict
     }
 
     /// Returns the file/directory type conflict policy.
-    #[inline(always)]
     pub const fn type_conflict(&self) -> LocalCopyTypeConflictPolicy {
         self.type_conflict
     }
 
     /// Returns the metadata preservation policy.
     #[must_use]
-    #[inline(always)]
     pub const fn preserve_metadata(&self) -> LocalMetadataPreservePolicy {
         self.preserve_metadata
     }
 
     /// Returns the symbolic-link policy.
     #[must_use]
-    #[inline(always)]
     pub const fn symlink_policy(&self) -> LocalSymlinkPolicy {
         self.symlink
     }
 
     /// Reports whether directory-tree copying is authorized.
     #[must_use]
-    #[inline(always)]
     pub const fn recursive(&self) -> bool {
         self.recursive
     }
 
     /// Returns the required atomicity.
     #[must_use]
-    #[inline(always)]
     pub const fn atomicity(&self) -> LocalAtomicityRequirement {
         self.atomicity
     }
 
     /// Returns the required durability.
     #[must_use]
-    #[inline(always)]
     pub const fn durability(&self) -> LocalDurabilityRequirement {
         self.durability
     }
 
     /// Sets the destination file conflict policy.
     #[must_use]
-    #[inline(always)]
     pub const fn with_conflict(
         mut self,
         conflict: LocalCopyConflictPolicy,
@@ -114,7 +105,6 @@ impl LocalCopyOptions {
 
     /// Sets the file/directory type conflict policy.
     #[must_use]
-    #[inline(always)]
     pub const fn with_type_conflict(
         mut self,
         type_conflict: LocalCopyTypeConflictPolicy,
@@ -125,7 +115,6 @@ impl LocalCopyOptions {
 
     /// Sets metadata preservation policy.
     #[must_use]
-    #[inline(always)]
     pub const fn with_metadata_preservation(
         mut self,
         preserve_metadata: LocalMetadataPreservePolicy,
@@ -136,7 +125,6 @@ impl LocalCopyOptions {
 
     /// Sets symbolic-link policy.
     #[must_use]
-    #[inline(always)]
     pub const fn with_symlink_policy(
         mut self,
         symlink: LocalSymlinkPolicy,
@@ -147,7 +135,6 @@ impl LocalCopyOptions {
 
     /// Authorizes copying a directory tree.
     #[must_use]
-    #[inline(always)]
     pub const fn with_recursive(mut self) -> Self {
         self.recursive = true;
         self
@@ -155,7 +142,6 @@ impl LocalCopyOptions {
 
     /// Sets required publication atomicity.
     #[must_use]
-    #[inline(always)]
     pub const fn with_atomicity(
         mut self,
         atomicity: LocalAtomicityRequirement,
@@ -166,7 +152,6 @@ impl LocalCopyOptions {
 
     /// Sets required durability.
     #[must_use]
-    #[inline(always)]
     pub const fn with_durability(
         mut self,
         durability: LocalDurabilityRequirement,
@@ -178,7 +163,6 @@ impl LocalCopyOptions {
 
 impl Default for LocalCopyOptions {
     /// Returns conservative copy defaults.
-    #[inline(always)]
     fn default() -> Self {
         Self::new()
     }

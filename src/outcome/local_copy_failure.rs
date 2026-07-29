@@ -60,7 +60,6 @@ impl Display for LocalCopyFailure {
 
 impl Error for LocalCopyFailure {
     /// Returns the primary typed filesystem error.
-    #[inline(always)]
     fn source(&self) -> Option<&(dyn Error + 'static)> {
         Some(&self.error)
     }
@@ -130,41 +129,35 @@ impl LocalCopyFailure {
 
     /// Returns the primary typed filesystem error.
     #[must_use]
-    #[inline(always)]
     pub const fn error(&self) -> &LocalFileError {
         &self.error
     }
 
     /// Returns the most precise destination state proven by native operations.
     #[must_use]
-    #[inline(always)]
     pub const fn state(&self) -> LocalCopyFailureState {
         self.state
     }
 
     /// Returns statistics accumulated before the failure.
     #[must_use = "partial statistics retain copy progress"]
-    #[inline(always)]
     pub const fn partial_stats(&self) -> &LocalCopyStats {
         &self.partial_stats
     }
 
     /// Returns the retained staging path when cleanup failed.
     #[must_use]
-    #[inline(always)]
     pub fn staging_path(&self) -> Option<&Path> {
         self.staging_path.as_deref()
     }
 
     /// Returns the secondary staging-cleanup error when cleanup failed.
     #[must_use]
-    #[inline(always)]
     pub const fn cleanup_error(&self) -> Option<&LocalFileError> {
         self.cleanup_error.as_ref()
     }
 
     /// Consumes this failure and returns every retained part.
-    #[inline(always)]
     pub fn into_parts(
         self,
     ) -> (
@@ -185,7 +178,6 @@ impl LocalCopyFailure {
 }
 
 /// Maps structured native copy facts to the strongest proven failure state.
-#[inline(always)]
 const fn copy_failure_state(
     stage: LocalCopyDirStage,
     partial_stats: LocalCopyStats,

@@ -1,5 +1,4 @@
 // =============================================================================
-
 //    Copyright (c) 2025 - 2026 Haixing Hu.
 //
 //    SPDX-License-Identifier: Apache-2.0
@@ -29,6 +28,8 @@ mod remove_tests;
 mod rename_tests;
 #[cfg(coverage)]
 mod rooted;
+#[cfg(coverage)]
+mod rooted_local_file_system_coverage_tests;
 #[cfg(coverage)]
 mod write;
 

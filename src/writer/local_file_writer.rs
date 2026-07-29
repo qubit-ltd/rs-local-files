@@ -5,6 +5,7 @@
 //
 //    Licensed under the Apache License, Version 2.0.
 // =============================================================================
+// qubit-style: allow coverage-cfg
 
 use std::{
     io::{
@@ -56,7 +57,6 @@ impl LocalFileWriter {
     /// - `path`: Bound destination path.
     /// - `backend`: Staged or append backend.
     /// - `options`: Writer policy.
-    #[inline(always)]
     pub(crate) const fn new(
         path: PathBuf,
         backend: LocalFileWriterBackend,
@@ -73,14 +73,12 @@ impl LocalFileWriter {
 
     /// Returns the bound destination path.
     #[must_use]
-    #[inline(always)]
     pub fn path(&self) -> &Path {
         &self.path
     }
 
     /// Returns the current writer state.
     #[must_use]
-    #[inline(always)]
     pub const fn state(&self) -> LocalWriterState {
         self.state
     }
@@ -184,7 +182,17 @@ impl LocalFileWriter {
                 }
             }
             LocalFileWriterBackend::Append(mut file) => {
-                if let Err(error) = file.flush() {
+                #[cfg(coverage)]
+                let flush_result = if crate::local::coverage_fault_enabled(
+                    "writer-append-commit-flush",
+                ) {
+                    Err(io::Error::from_raw_os_error(libc::EIO))
+                } else {
+                    file.flush()
+                };
+                #[cfg(not(coverage))]
+                let flush_result = file.flush();
+                if let Err(error) = flush_result {
                     return Err(LocalFileCommitError::new(
                         publication_error(
                             writer_io_error(
@@ -204,7 +212,18 @@ impl LocalFileWriter {
                         file.sync_all().is_ok()
                     }
                     LocalDurabilityRequirement::Required => {
-                        if let Err(error) = file.sync_all() {
+                        #[cfg(coverage)]
+                        let sync_result =
+                            if crate::local::coverage_fault_enabled(
+                                "writer-append-required-sync",
+                            ) {
+                                Err(io::Error::from_raw_os_error(libc::EIO))
+                            } else {
+                                file.sync_all()
+                            };
+                        #[cfg(not(coverage))]
+                        let sync_result = file.sync_all();
+                        if let Err(error) = sync_result {
                             return Err(LocalFileCommitError::new(
                                 publication_error(
                                     writer_io_error(
@@ -250,13 +269,13 @@ impl LocalFileWriter {
             .expect("open writer must retain one backend");
         match backend {
             LocalFileWriterBackend::Staged(writer) => {
-                writer.abort().map_err(|error| {
-                    atomic_write_error(
+                if let Err(error) = writer.abort() {
+                    return Err(atomic_write_error(
                         &self.path,
                         LocalFileOperation::Abort,
                         error,
-                    )
-                })?;
+                    ));
+                }
                 self.state = aborted_state(previous_state);
                 Ok(LocalWriteOutcome::new(
                     self.state,
@@ -266,13 +285,13 @@ impl LocalFileWriter {
                 ))
             }
             LocalFileWriterBackend::Rooted(writer) => {
-                writer.abort().map_err(|error| {
-                    atomic_write_error(
+                if let Err(error) = writer.abort() {
+                    return Err(atomic_write_error(
                         &self.path,
                         LocalFileOperation::Abort,
                         error,
-                    )
-                })?;
+                    ));
+                }
                 self.state = aborted_state(previous_state);
                 Ok(LocalWriteOutcome::new(
                     self.state,
@@ -282,13 +301,23 @@ impl LocalFileWriter {
                 ))
             }
             LocalFileWriterBackend::Append(mut file) => {
-                file.flush().map_err(|error| {
-                    writer_io_error(
+                #[cfg(coverage)]
+                let flush_result = if crate::local::coverage_fault_enabled(
+                    "writer-append-abort-flush",
+                ) {
+                    Err(io::Error::from_raw_os_error(libc::EIO))
+                } else {
+                    file.flush()
+                };
+                #[cfg(not(coverage))]
+                let flush_result = file.flush();
+                if let Err(error) = flush_result {
+                    return Err(writer_io_error(
                         &self.path,
                         LocalFileOperation::Abort,
                         error,
-                    )
-                })?;
+                    ));
+                }
                 self.state =
                     if previous_state == LocalWriterState::Indeterminate {
                         LocalWriterState::Indeterminate
@@ -332,7 +361,6 @@ impl LocalFileWriter {
     /// # Parameters
     ///
     /// - `written`: Bytes accepted by the backend.
-    #[inline(always)]
     fn record_written(&mut self, written: usize) {
         self.bytes_written = self.bytes_written.saturating_add(written as u64);
     }
@@ -346,7 +374,6 @@ impl LocalFileWriter {
     /// # Returns
     ///
     /// The original result.
-    #[inline(always)]
     fn observe_stream_result<T>(
         &mut self,
         result: io::Result<T>,
@@ -434,7 +461,6 @@ impl Write for LocalFileWriter {
 /// # Returns
 ///
 /// Unified publication state.
-#[inline(always)]
 fn atomic_destination_state(
     state: crate::local::LocalAtomicDestinationState,
 ) -> LocalWriterState {
@@ -483,7 +509,6 @@ fn atomic_write_error(
 /// # Returns
 ///
 /// Structured writer error.
-#[inline(always)]
 fn writer_io_error(
     path: &Path,
     operation: LocalFileOperation,
@@ -502,7 +527,6 @@ fn writer_io_error(
 ///
 /// `Indeterminate` when a prior stream failure made byte state uncertain;
 /// otherwise `Aborted`.
-#[inline(always)]
 const fn aborted_state(previous_state: LocalWriterState) -> LocalWriterState {
     if matches!(previous_state, LocalWriterState::Indeterminate) {
         LocalWriterState::Indeterminate
@@ -549,7 +573,6 @@ fn writer_state_error(
 /// # Returns
 ///
 /// Error classified consistently with the observable publication state.
-#[inline(always)]
 fn publication_error(
     error: LocalFileError,
     state: LocalWriterState,

@@ -76,7 +76,7 @@ fn test_rename_missing_source_reports_unchanged() {
 #[test]
 fn test_rename_parent_durability_failure_reports_renamed() {
     const TEST_NAME: &str =
-        concat!("test_rename_parent_durability_failure_reports_renamed");
+        "test_rename_parent_durability_failure_reports_renamed";
     run_in_coverage_fault_process(TEST_NAME, "rename-parent-sync", || {
         let directory =
             tempfile::tempdir().expect("temporary directory should be created");
@@ -103,7 +103,7 @@ fn test_rename_parent_durability_failure_reports_renamed() {
 #[test]
 fn test_rename_native_io_failure_reports_indeterminate() {
     const TEST_NAME: &str =
-        concat!("test_rename_native_io_failure_reports_indeterminate");
+        "test_rename_native_io_failure_reports_indeterminate";
     run_in_coverage_fault_process(
         TEST_NAME,
         "rename-native-indeterminate",

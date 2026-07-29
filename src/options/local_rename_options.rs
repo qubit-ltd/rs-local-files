@@ -27,7 +27,6 @@ pub struct LocalRenameOptions {
 impl LocalRenameOptions {
     /// Creates no-replace rename options with preferred atomicity.
     #[must_use]
-    #[inline(always)]
     pub const fn new() -> Self {
         Self {
             overwrite: false,
@@ -38,28 +37,24 @@ impl LocalRenameOptions {
 
     /// Reports whether an existing destination may be replaced.
     #[must_use]
-    #[inline(always)]
     pub const fn overwrite(&self) -> bool {
         self.overwrite
     }
 
     /// Returns the requested atomicity.
     #[must_use]
-    #[inline(always)]
     pub const fn atomicity(&self) -> LocalAtomicityRequirement {
         self.atomicity
     }
 
     /// Returns the requested durability.
     #[must_use]
-    #[inline(always)]
     pub const fn durability(&self) -> LocalDurabilityRequirement {
         self.durability
     }
 
     /// Allows replacement of an existing destination entry.
     #[must_use]
-    #[inline(always)]
     pub const fn with_overwrite(mut self) -> Self {
         self.overwrite = true;
         self
@@ -67,7 +62,6 @@ impl LocalRenameOptions {
 
     /// Sets the required atomicity.
     #[must_use]
-    #[inline(always)]
     pub const fn with_atomicity(
         mut self,
         requirement: LocalAtomicityRequirement,
@@ -78,7 +72,6 @@ impl LocalRenameOptions {
 
     /// Sets the required durability.
     #[must_use]
-    #[inline(always)]
     pub const fn with_durability(
         mut self,
         requirement: LocalDurabilityRequirement,

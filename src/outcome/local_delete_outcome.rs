@@ -22,14 +22,12 @@ impl LocalDeleteOutcome {
     /// # Parameters
     ///
     /// - `deleted`: Whether an existing entry was removed.
-    #[inline(always)]
     pub(crate) const fn new(deleted: bool) -> Self {
         Self { deleted }
     }
 
     /// Reports whether an entry was removed.
     #[must_use]
-    #[inline(always)]
     pub const fn deleted(self) -> bool {
         self.deleted
     }

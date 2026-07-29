@@ -150,6 +150,13 @@ impl Root {
     /// Returns an I/O error when traversal cannot remain beneath the opened
     /// root or when the final entry cannot be inspected.
     pub fn symlink_metadata(&self, path: &path::Path) -> Result<Metadata> {
+        #[cfg(coverage)]
+        if local::take_coverage_fault_on_nth(
+            "rooted-copy-destination-metadata-native",
+            2,
+        ) {
+            return Err(std::io::Error::from_raw_os_error(libc::EIO));
+        }
         #[cfg(unix)]
         {
             local::read_rooted_symlink_metadata(
@@ -222,6 +229,10 @@ impl Root {
     /// Returns an I/O error when traversal cannot remain beneath the opened
     /// root or the directory cannot be enumerated.
     pub fn read_dir(&self, path: &path::Path) -> Result<Vec<Entry>> {
+        #[cfg(coverage)]
+        if local::coverage_fault_enabled("rooted-copy-directory-read-native") {
+            return Err(std::io::Error::from_raw_os_error(libc::EIO));
+        }
         #[cfg(unix)]
         {
             local::read_rooted_directory(&self.directory, &self.path, path).map(
@@ -261,6 +272,11 @@ impl Root {
     /// Returns an I/O error when secure traversal or creation fails, including
     /// when the parent is missing or the destination already exists.
     pub fn create_dir(&self, path: &path::Path) -> Result<()> {
+        #[cfg(coverage)]
+        if local::coverage_fault_enabled("rooted-copy-directory-create-native")
+        {
+            return Err(std::io::Error::from_raw_os_error(libc::EIO));
+        }
         #[cfg(any(unix, windows))]
         {
             local::create_rooted_directory(
@@ -359,6 +375,10 @@ impl Root {
                     "rooted remove_file does not remove directories",
                 ));
             }
+            #[cfg(coverage)]
+            if local::coverage_fault_enabled("rooted-copy-remove-file-native") {
+                return Err(std::io::Error::from_raw_os_error(libc::EIO));
+            }
             local::remove_rooted_entry(&self.directory, &self.path, path, false)
         }
         #[cfg(not(any(unix, windows)))]
@@ -412,6 +432,10 @@ impl Root {
                     std::io::ErrorKind::NotADirectory,
                     "rooted remove_tree requires a directory",
                 ));
+            }
+            #[cfg(coverage)]
+            if local::coverage_fault_enabled("rooted-copy-remove-tree-native") {
+                return Err(std::io::Error::from_raw_os_error(libc::EIO));
             }
             local::remove_rooted_entry(&self.directory, &self.path, path, true)
         }
@@ -503,6 +527,12 @@ impl Root {
                 .unix_mode()
                 .expect("Unix rooted metadata always carries a mode");
             let mode = permissions.resolve_unix_mode(current_mode);
+            #[cfg(coverage)]
+            if local::coverage_fault_enabled(
+                "rooted-copy-set-permissions-native",
+            ) {
+                return Err(std::io::Error::from_raw_os_error(libc::EIO));
+            }
             local::set_rooted_permissions(
                 &self.directory,
                 &self.path,
@@ -540,6 +570,10 @@ impl Root {
         path: &path::Path,
         options: &read::OpenOptions,
     ) -> Result<File> {
+        #[cfg(coverage)]
+        if local::coverage_fault_enabled("rooted-copy-source-open-native") {
+            return Err(std::io::Error::from_raw_os_error(libc::EIO));
+        }
         #[cfg(any(unix, windows))]
         {
             local::open_rooted_native_reader(

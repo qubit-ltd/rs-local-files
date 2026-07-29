@@ -45,21 +45,18 @@ impl LocalFileSystemCapabilities {
 
     /// Returns the native path limit, or `None` when no stable limit is known.
     #[must_use]
-    #[inline(always)]
     pub const fn path_limit(self) -> Option<LocalPathLimit> {
         self.path_limit
     }
 
     /// Reports whether secure rooted operations are available.
     #[must_use]
-    #[inline(always)]
     pub const fn supports_rooted_operations(self) -> bool {
         self.rooted_operations
     }
 
     /// Reports whether native no-replace publication is available.
     #[must_use]
-    #[inline(always)]
     pub const fn supports_no_replace_publication(self) -> bool {
         self.no_replace_publication
     }
@@ -67,7 +64,6 @@ impl LocalFileSystemCapabilities {
     /// Reports whether parent-directory durability synchronization is
     /// implemented.
     #[must_use]
-    #[inline(always)]
     pub const fn supports_directory_durability(self) -> bool {
         self.directory_durability
     }

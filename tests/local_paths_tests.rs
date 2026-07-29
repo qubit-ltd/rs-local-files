@@ -45,9 +45,10 @@ fn test_local_paths_bind_host_paths_uses_absolute_paths() {
 #[cfg(unix)]
 #[test]
 fn test_canonical_absolute_components_round_trip_unix_path() {
-    let native =
-        LocalPaths::from_canonical_absolute_components(["", "tmp", "a%25b"])
-            .expect("canonical absolute path should decode");
+    let native = LocalPaths::from_canonical_absolute_components(vec![
+        "", "tmp", "a%25b",
+    ])
+    .expect("canonical absolute path should decode");
     assert_eq!(native, Path::new("/tmp/a%b"));
     assert_eq!(
         LocalPaths::to_canonical_absolute_components(&native)
@@ -61,7 +62,7 @@ fn test_canonical_absolute_components_round_trip_unix_path() {
 #[cfg(windows)]
 #[test]
 fn test_canonical_absolute_components_round_trip_windows_drive_path() {
-    let native = LocalPaths::from_canonical_absolute_components([
+    let native = LocalPaths::from_canonical_absolute_components(vec![
         "", "C:", "work", "file",
     ])
     .expect("canonical Windows absolute path should decode");
@@ -111,17 +112,33 @@ fn assert_windows_unsupported_absolute_path(path: &Path) {
 /// Verifies canonical relative paths cannot escape through a parent component.
 #[test]
 fn test_canonical_relative_components_rejects_parent_escape() {
-    let error = LocalPaths::from_canonical_relative_components(["safe", ".."])
-        .expect_err("parent traversal must be rejected");
+    let error =
+        LocalPaths::from_canonical_relative_components(vec!["safe", ".."])
+            .expect_err("parent traversal must be rejected");
 
     assert_eq!(LocalFileOperation::ComposePath, error.operation());
+}
+
+/// Verifies malformed canonical text retains the path-codec cause rather than
+/// degrading it to an untyped invalid-input error.
+#[test]
+fn test_canonical_relative_components_retain_path_codec_failure() {
+    let error = LocalPaths::from_canonical_relative_components(vec!["bad%"])
+        .expect_err("malformed percent escape must be rejected");
+
+    assert_eq!(LocalFileErrorKind::InvalidInput, error.kind());
+    assert_eq!(LocalFileOperation::ComposePath, error.operation());
+    assert!(matches!(
+        error.source_kind(),
+        Some(qubit_local_files::LocalFileErrorSource::PathCodec(_))
+    ));
 }
 
 /// Verifies canonical absolute paths must begin with their platform root shape.
 #[test]
 fn test_absolute_conversion_rejects_relative_shape() {
     assert!(
-        LocalPaths::from_canonical_absolute_components(["a", "b"]).is_err()
+        LocalPaths::from_canonical_absolute_components(vec!["a", "b"]).is_err()
     );
 }
 
@@ -129,7 +146,7 @@ fn test_absolute_conversion_rejects_relative_shape() {
 #[test]
 fn test_canonical_relative_components_round_trip() {
     let native =
-        LocalPaths::from_canonical_relative_components(["safe", "a%25b"])
+        LocalPaths::from_canonical_relative_components(vec!["safe", "a%25b"])
             .expect("canonical relative path should decode");
     assert_eq!(native, Path::new("safe/a%b"));
     assert_eq!(

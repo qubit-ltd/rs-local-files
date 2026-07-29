@@ -1,3 +1,10 @@
+// =============================================================================
+//    Copyright (c) 2025 - 2026 Haixing Hu.
+//
+//    SPDX-License-Identifier: Apache-2.0
+//
+//    Licensed under the Apache License, Version 2.0.
+// =============================================================================
 //! Cleanup-owned temporary directories with host or rooted authority.
 
 use std::{
@@ -106,6 +113,7 @@ impl LocalTempDirectory {
 
     /// Persists the directory without replacement through its creating
     /// authority.
+    #[inline(always)]
     pub fn persist(
         self,
         target: impl AsRef<Path>,
@@ -115,9 +123,19 @@ impl LocalTempDirectory {
 
     /// Persists the directory with an explicit replacement policy through its
     /// creating authority.
+    #[inline(always)]
     pub fn persist_with(
-        mut self,
+        self,
         target: impl AsRef<Path>,
+        options: LocalPersistOptions,
+    ) -> std::result::Result<PathBuf, LocalPersistError<Self>> {
+        self.persist_with_path(target.as_ref(), options)
+    }
+
+    /// Persists the directory to a resolved public-API target path.
+    fn persist_with_path(
+        mut self,
+        target: &Path,
         options: LocalPersistOptions,
     ) -> std::result::Result<PathBuf, LocalPersistError<Self>> {
         if self.state == LocalTempResourceState::Indeterminate {
@@ -126,12 +144,12 @@ impl LocalTempDirectory {
                     "temporary directory namespace state is indeterminate",
                 ),
                 self,
-                target.as_ref().to_path_buf(),
+                target.to_path_buf(),
                 None,
                 LocalPersistStage::InstallDestination,
             ));
         }
-        let requested_target = target.as_ref().to_path_buf();
+        let requested_target = target.to_path_buf();
         match &self.backend {
             LocalTempResourceBackend::Host(_) => {
                 let target = match std::path::absolute(&requested_target) {
@@ -252,11 +270,8 @@ impl LocalTempDirectory {
 impl Drop for LocalTempDirectory {
     /// Performs best-effort cleanup only while the directory remains owned.
     fn drop(&mut self) {
-        if matches!(
-            self.state,
-            LocalTempResourceState::Owned
-                | LocalTempResourceState::CleanupRequired
-        ) && let Err(error) = self.remove()
+        if matches!(self.state, LocalTempResourceState::Owned)
+            && let Err(error) = self.remove()
         {
             warn!(
                 "failed to remove temporary directory {}: {}",

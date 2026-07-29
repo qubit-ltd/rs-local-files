@@ -78,7 +78,7 @@ fn test_copy_failure_exposes_typed_state_and_parts() {
 #[test]
 fn test_copy_failure_reports_second_child_partial_publication() {
     const TEST_NAME: &str =
-        concat!("test_copy_failure_reports_second_child_partial_publication");
+        "test_copy_failure_reports_second_child_partial_publication";
     run_in_coverage_fault_process(
         TEST_NAME,
         "copy-staging-copy-second",
@@ -115,7 +115,7 @@ fn test_copy_failure_reports_second_child_partial_publication() {
 #[test]
 fn test_copy_failure_reports_published_after_parent_sync_fault() {
     const TEST_NAME: &str =
-        concat!("test_copy_failure_reports_published_after_parent_sync_fault");
+        "test_copy_failure_reports_published_after_parent_sync_fault";
     run_in_coverage_fault_process(TEST_NAME, "copy-parent-sync", || {
         let directory =
             tempfile::tempdir().expect("temporary directory should be created");
@@ -147,7 +147,7 @@ fn test_copy_failure_reports_published_after_parent_sync_fault() {
 #[test]
 fn test_copy_failure_retains_staging_only_for_cleanup_failure() {
     const TEST_NAME: &str =
-        concat!("test_copy_failure_retains_staging_only_for_cleanup_failure");
+        "test_copy_failure_retains_staging_only_for_cleanup_failure";
     run_in_coverage_fault_process(
         TEST_NAME,
         "copy-staging-copy-cleanup",
@@ -177,7 +177,7 @@ fn test_copy_failure_retains_staging_only_for_cleanup_failure() {
 #[test]
 fn test_copy_failure_omits_staging_after_successful_cleanup() {
     const TEST_NAME: &str =
-        concat!("test_copy_failure_omits_staging_after_successful_cleanup");
+        "test_copy_failure_omits_staging_after_successful_cleanup";
     run_in_coverage_fault_process(TEST_NAME, "copy-staging-copy", || {
         let directory =
             tempfile::tempdir().expect("temporary directory should be created");
@@ -202,9 +202,7 @@ fn test_copy_failure_omits_staging_after_successful_cleanup() {
 #[cfg(coverage)]
 #[test]
 fn test_copy_failure_reports_indeterminate_for_destination_preparation_fault() {
-    const TEST_NAME: &str = concat!(
-        "test_copy_failure_reports_indeterminate_for_destination_preparation_fault"
-    );
+    const TEST_NAME: &str = "test_copy_failure_reports_indeterminate_for_destination_preparation_fault";
     run_in_coverage_fault_process(
         TEST_NAME,
         "copy-destination-absolute",
@@ -227,4 +225,31 @@ fn test_copy_failure_reports_indeterminate_for_destination_preparation_fault() {
             assert_eq!(&LocalCopyStats::default(), failure.partial_stats());
         },
     );
+}
+
+/// Verifies source inspection failures in the recursive pipeline prove that no
+/// destination publication began.
+#[cfg(coverage)]
+#[test]
+fn test_copy_failure_reports_unchanged_for_source_inspection_fault() {
+    const TEST_NAME: &str =
+        "test_copy_failure_reports_unchanged_for_source_inspection_fault";
+    run_in_coverage_fault_process(TEST_NAME, "copy-source-absolute", || {
+        let directory =
+            tempfile::tempdir().expect("temporary directory should be created");
+        let source = directory.path().join("source");
+        let target = directory.path().join("target");
+        fs::create_dir(&source).expect("source directory should be created");
+
+        let failure = LocalFileSystem::copy(
+            &source,
+            &target,
+            &LocalCopyOptions::default().with_recursive(),
+        )
+        .expect_err("source inspection fault must fail before publication");
+
+        assert_eq!(LocalCopyFailureState::Unchanged, failure.state());
+        assert_eq!(&LocalCopyStats::default(), failure.partial_stats());
+        assert!(!target.exists());
+    });
 }

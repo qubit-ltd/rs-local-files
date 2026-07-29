@@ -1105,6 +1105,7 @@ fn sync_rooted_parent_chain(
         || coverage_fault::is_enabled(
             "atomic-install-unlink-indeterminate-sync",
         )
+        || coverage_fault::is_enabled("rooted-preferred-parent-sync")
     {
         return Err(io::Error::from_raw_os_error(libc::EIO));
     }

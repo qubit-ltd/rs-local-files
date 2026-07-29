@@ -32,6 +32,10 @@ fn test_encode_rejects_non_canonical_escape_aliases() {
         Err(LocalPathCodecError::NonCanonicalText),
     ));
     assert!(matches!(
+        LocalPathCodec::encode("a%2Fb"),
+        Err(LocalPathCodecError::NonCanonicalText),
+    ));
+    assert!(matches!(
         LocalPathCodec::encode("a%41b"),
         Err(LocalPathCodecError::NonCanonicalText),
     ));
@@ -43,6 +47,24 @@ fn test_encode_rejects_malformed_escape() {
     assert!(matches!(
         LocalPathCodec::encode("a%4"),
         Err(LocalPathCodecError::InvalidEscape { offset: 1 }),
+    ));
+}
+
+/// Verifies invalid hexadecimal escapes and native NUL bytes retain their
+/// distinct canonical-path diagnostics.
+#[test]
+fn test_path_codec_rejects_invalid_hex_and_native_nul() {
+    assert!(matches!(
+        LocalPathCodec::encode("a%G0"),
+        Err(LocalPathCodecError::InvalidEscape { offset: 1 }),
+    ));
+    assert!(matches!(
+        LocalPathCodec::encode("a%00"),
+        Err(LocalPathCodecError::NativeNul),
+    ));
+    assert!(matches!(
+        LocalPathCodec::decode(OsStr::new("a\0")),
+        Err(LocalPathCodecError::NativeNul),
     ));
 }
 

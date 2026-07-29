@@ -269,9 +269,8 @@ where
 #[cfg(coverage)]
 #[test]
 fn test_rooted_copy_failure_reports_second_child_partial_publication() {
-    const TEST_NAME: &str = concat!(
-        "test_rooted_copy_failure_reports_second_child_partial_publication"
-    );
+    const TEST_NAME: &str =
+        "test_rooted_copy_failure_reports_second_child_partial_publication";
     run_in_coverage_fault_process(TEST_NAME, "rooted-copy-file-second", || {
         let directory =
             tempdir().expect("temporary directory should be created");
@@ -304,9 +303,8 @@ fn test_rooted_copy_failure_reports_second_child_partial_publication() {
 #[cfg(coverage)]
 #[test]
 fn test_rooted_copy_failure_retains_stats_after_parent_sync_fault() {
-    const TEST_NAME: &str = concat!(
-        "test_rooted_copy_failure_retains_stats_after_parent_sync_fault"
-    );
+    const TEST_NAME: &str =
+        "test_rooted_copy_failure_retains_stats_after_parent_sync_fault";
     run_in_coverage_fault_process(TEST_NAME, "rooted-copy-parent-sync", || {
         let directory =
             tempdir().expect("temporary directory should be created");
@@ -335,7 +333,7 @@ fn test_rooted_copy_failure_retains_stats_after_parent_sync_fault() {
 #[test]
 fn test_rooted_copy_failure_retains_cleanup_staging_context() {
     const TEST_NAME: &str =
-        concat!("test_rooted_copy_failure_retains_cleanup_staging_context");
+        "test_rooted_copy_failure_retains_cleanup_staging_context";
     run_in_coverage_fault_process(
         TEST_NAME,
         "rooted-copy-install-cleanup",
@@ -376,7 +374,7 @@ fn test_rooted_copy_failure_retains_cleanup_staging_context() {
 #[test]
 fn test_rooted_rename_parent_durability_failure_reports_renamed() {
     const TEST_NAME: &str =
-        concat!("test_rooted_rename_parent_durability_failure_reports_renamed");
+        "test_rooted_rename_parent_durability_failure_reports_renamed";
     run_in_coverage_fault_process(
         TEST_NAME,
         "rooted-rename-parent-sync",
@@ -409,7 +407,7 @@ fn test_rooted_rename_parent_durability_failure_reports_renamed() {
 #[test]
 fn test_rooted_rename_native_io_failure_reports_indeterminate() {
     const TEST_NAME: &str =
-        concat!("test_rooted_rename_native_io_failure_reports_indeterminate");
+        "test_rooted_rename_native_io_failure_reports_indeterminate";
     run_in_coverage_fault_process(
         TEST_NAME,
         "rooted-rename-indeterminate",

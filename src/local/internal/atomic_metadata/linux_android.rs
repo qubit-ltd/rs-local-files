@@ -154,9 +154,9 @@ fn read_xattr_list(file: &File, buffer: &mut [u8]) -> Result<usize> {
         Some(libc::EIO)
     } else if super::super::coverage_fault::is_enabled(
         "atomic-metadata-list-range-persistent",
+    ) || super::super::coverage_fault::take(
+        "atomic-metadata-list-range",
     ) {
-        Some(libc::ERANGE)
-    } else if super::super::coverage_fault::take("atomic-metadata-list-range") {
         Some(libc::ERANGE)
     } else if super::super::coverage_fault::is_enabled(
         "atomic-metadata-list-range",

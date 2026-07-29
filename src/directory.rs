@@ -25,7 +25,6 @@ use crate::local::{
 ///
 /// # Errors
 /// Returns the I/O error reported by the filesystem.
-#[inline(always)]
 pub fn read(path: &Path) -> Result<ReadDir> {
     fs::read_dir(path)
 }
@@ -35,7 +34,6 @@ pub fn read(path: &Path) -> Result<ReadDir> {
 /// # Errors
 /// Returns an I/O error when the parent is missing, the destination already
 /// exists, or the directory cannot be created.
-#[inline(always)]
 pub fn create(path: &Path) -> Result<()> {
     fs::create_dir(path)
 }
@@ -44,7 +42,6 @@ pub fn create(path: &Path) -> Result<()> {
 ///
 /// # Errors
 /// Returns an I/O error when the directory cannot be created.
-#[inline(always)]
 pub fn create_all(path: &Path) -> Result<()> {
     ensure_dir_path(path)
 }
@@ -53,7 +50,6 @@ pub fn create_all(path: &Path) -> Result<()> {
 ///
 /// # Errors
 /// Returns an I/O error when the parent directory cannot be created.
-#[inline(always)]
 pub fn create_parent(path: &Path) -> Result<()> {
     ensure_parent_path(path)
 }
@@ -62,7 +58,6 @@ pub fn create_parent(path: &Path) -> Result<()> {
 ///
 /// # Errors
 /// Returns an I/O error when the tree cannot be traversed or inspected.
-#[inline(always)]
 pub fn size(path: &Path) -> Result<u64> {
     dir_size_path(path)
 }
@@ -72,7 +67,6 @@ pub fn size(path: &Path) -> Result<u64> {
 /// # Errors
 /// Returns an I/O error when the directory cannot be read or a child cannot be
 /// removed.
-#[inline(always)]
 pub fn clear(path: &Path) -> Result<()> {
     clean_dir_path(path)
 }

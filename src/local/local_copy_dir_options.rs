@@ -114,7 +114,6 @@ impl LocalCopyDirOptions {
     ///
     /// # Returns
     /// Policy applied to existing destination file entries.
-    #[inline(always)]
     pub const fn conflict_policy(&self) -> LocalCopyConflictPolicy {
         self.conflict
     }
@@ -126,7 +125,6 @@ impl LocalCopyDirOptions {
     ///
     /// # Returns
     /// Updated directory copy options.
-    #[inline(always)]
     pub const fn with_conflict(
         mut self,
         conflict: LocalCopyConflictPolicy,
@@ -139,7 +137,6 @@ impl LocalCopyDirOptions {
     ///
     /// # Returns
     /// Policy applied to source and destination type mismatches.
-    #[inline(always)]
     pub const fn type_conflict_policy(&self) -> LocalCopyTypeConflictPolicy {
         self.type_conflict
     }
@@ -151,7 +148,6 @@ impl LocalCopyDirOptions {
     ///
     /// # Returns
     /// Updated directory copy options.
-    #[inline(always)]
     pub const fn with_type_conflict(
         mut self,
         type_conflict: LocalCopyTypeConflictPolicy,
@@ -165,7 +161,6 @@ impl LocalCopyDirOptions {
     /// # Returns
     /// `true` when source symbolic links are followed.
     #[must_use]
-    #[inline(always)]
     pub const fn follows_symlinks(&self) -> bool {
         self.follow_symlinks
     }
@@ -174,7 +169,6 @@ impl LocalCopyDirOptions {
     ///
     /// # Returns
     /// Updated directory copy options.
-    #[inline(always)]
     pub const fn follow_symlinks(mut self) -> Self {
         self.follow_symlinks = true;
         self
@@ -185,7 +179,6 @@ impl LocalCopyDirOptions {
     /// # Returns
     /// `true` when destination permissions are copied from the source.
     #[must_use]
-    #[inline(always)]
     pub const fn preserves_permissions(&self) -> bool {
         self.preserve_permissions
     }
@@ -194,7 +187,6 @@ impl LocalCopyDirOptions {
     ///
     /// # Returns
     /// Updated directory copy options.
-    #[inline(always)]
     pub const fn preserve_permissions(mut self) -> Self {
         self.preserve_permissions = true;
         self
@@ -210,7 +202,6 @@ impl LocalCopyDirOptions {
     /// # Returns
     /// The configured timeout, or `None` when retries are unbounded.
     #[must_use]
-    #[inline(always)]
     pub const fn open_retry_timeout(&self) -> Option<Duration> {
         self.open_retry_timeout
     }
@@ -226,7 +217,6 @@ impl LocalCopyDirOptions {
     ///
     /// # Returns
     /// Updated directory copy options.
-    #[inline(always)]
     pub const fn with_open_retry_timeout(mut self, timeout: Duration) -> Self {
         self.open_retry_timeout = Some(timeout);
         self
@@ -239,7 +229,6 @@ impl Default for LocalCopyDirOptions {
     /// # Returns
     /// Options that do not overwrite existing destination entries, do not
     /// follow symbolic links, and do not preserve source permissions.
-    #[inline(always)]
     fn default() -> Self {
         Self::new()
     }

@@ -1,3 +1,10 @@
+// =============================================================================
+//    Copyright (c) 2025 - 2026 Haixing Hu.
+//
+//    SPDX-License-Identifier: Apache-2.0
+//
+//    Licensed under the Apache License, Version 2.0.
+// =============================================================================
 //! Cleanup-owned temporary files with host or rooted authority.
 
 use std::{
@@ -111,6 +118,7 @@ impl LocalTempFile {
     }
 
     /// Persists the file within its creating authority without replacement.
+    #[inline(always)]
     pub fn persist(
         self,
         target: impl AsRef<Path>,
@@ -120,9 +128,19 @@ impl LocalTempFile {
 
     /// Persists the file with explicit replacement policy within its creating
     /// authority.
+    #[inline(always)]
     pub fn persist_with(
-        mut self,
+        self,
         target: impl AsRef<Path>,
+        options: LocalPersistOptions,
+    ) -> std::result::Result<PathBuf, LocalPersistError<Self>> {
+        self.persist_with_path(target.as_ref(), options)
+    }
+
+    /// Persists the file to a resolved public-API target path.
+    fn persist_with_path(
+        mut self,
+        target: &Path,
         options: LocalPersistOptions,
     ) -> std::result::Result<PathBuf, LocalPersistError<Self>> {
         self.close();
@@ -130,12 +148,12 @@ impl LocalTempFile {
             return Err(LocalPersistError::new(
                 Error::other("temporary file namespace state is indeterminate"),
                 self,
-                target.as_ref().to_path_buf(),
+                target.to_path_buf(),
                 None,
                 LocalPersistStage::InstallDestination,
             ));
         }
-        let requested_target = target.as_ref().to_path_buf();
+        let requested_target = target.to_path_buf();
         if matches!(&self.backend, LocalTempResourceBackend::Host(_)) {
             let target = match std::path::absolute(&requested_target) {
                 Ok(target) => target,
@@ -283,11 +301,8 @@ impl Drop for LocalTempFile {
     /// Performs best-effort cleanup only while the resource remains owned.
     fn drop(&mut self) {
         self.close();
-        if matches!(
-            self.state,
-            LocalTempResourceState::Owned
-                | LocalTempResourceState::CleanupRequired
-        ) && let Err(error) = self.remove()
+        if matches!(self.state, LocalTempResourceState::Owned)
+            && let Err(error) = self.remove()
         {
             warn!(
                 "failed to remove temporary file {}: {}",

@@ -7,6 +7,7 @@
 // =============================================================================
 //! Private temporary-entry creation.
 // qubit-style: allow source-test-pair
+// qubit-style: allow coverage-cfg
 // Private behavior is covered through public integration tests.
 
 use std::fs::{
@@ -30,6 +31,8 @@ use std::os::unix::fs::{
     OpenOptionsExt,
 };
 
+#[cfg(coverage)]
+use crate::local::internal::coverage_fault;
 use crate::local::try_random_file_name;
 
 use super::path_operations::{
@@ -74,7 +77,20 @@ pub(crate) fn create_temp_file_in_dir(
         options.read(true).write(true).create_new(true);
         #[cfg(unix)]
         options.mode(0o600);
-        match options.open(&path) {
+        #[cfg(coverage)]
+        let opened = if coverage_fault::take("temp-file-collision") {
+            Err(Error::new(
+                ErrorKind::AlreadyExists,
+                "injected temporary file collision",
+            ))
+        } else if coverage_fault::is_enabled("temp-file-open") {
+            Err(Error::other("injected temporary file creation failure"))
+        } else {
+            options.open(&path)
+        };
+        #[cfg(not(coverage))]
+        let opened = options.open(&path);
+        match opened {
             Ok(file) => return Ok((path, file)),
             Err(error) => {
                 if should_retry_collision(&error, attempt, max_tries) {
@@ -119,7 +135,22 @@ pub(crate) fn create_temp_dir_in_dir_with_affixes(
             prefix,
             suffix,
         )?);
-        match create_private_dir(&path) {
+        #[cfg(coverage)]
+        let created = if coverage_fault::take("temp-directory-collision") {
+            Err(Error::new(
+                ErrorKind::AlreadyExists,
+                "injected temporary directory collision",
+            ))
+        } else if coverage_fault::is_enabled("temp-directory-create") {
+            Err(Error::other(
+                "injected temporary directory creation failure",
+            ))
+        } else {
+            create_private_dir(&path)
+        };
+        #[cfg(not(coverage))]
+        let created = create_private_dir(&path);
+        match created {
             Ok(()) => return Ok(path),
             Err(error) => {
                 if should_retry_collision(&error, attempt, max_tries) {

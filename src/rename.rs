@@ -20,7 +20,6 @@ use crate::local::{
 ///
 /// # Errors
 /// Returns the I/O error reported by the filesystem.
-#[inline(always)]
 pub fn move_path(source: &Path, destination: &Path) -> Result<()> {
     fs::rename(source, destination)
 }

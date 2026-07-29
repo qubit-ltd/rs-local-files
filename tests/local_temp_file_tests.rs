@@ -2,13 +2,56 @@
 //    Copyright (c) 2026 Haixing Hu.
 //
 //    SPDX-License-Identifier: Apache-2.0
+//
+//    Licensed under the Apache License, Version 2.0.
 // =============================================================================
+
+use std::{
+    env,
+    fs,
+    io::{
+        IoSlice,
+        Seek,
+        SeekFrom,
+        Write,
+    },
+    process::Command,
+};
 
 use qubit_local_files::{
     LocalFileSystem,
+    LocalPersistOptions,
     LocalTempFileOptions,
+    RootedLocalFileSystem,
 };
 use tempfile::tempdir;
+
+/// Runs a current-directory failure scenario in a child process so changing
+/// the process directory cannot affect concurrent tests.
+fn run_in_deleted_current_directory_process(
+    test_name: &str,
+    action: impl FnOnce(),
+) {
+    const CHILD_ENV: &str = "QUBIT_LOCAL_FILES_DELETED_CWD_TEST";
+    if env::var_os(CHILD_ENV).is_some() {
+        action();
+        return;
+    }
+
+    let executable =
+        env::current_exe().expect("test executable should be available");
+    let status = Command::new(executable)
+        .arg("--exact")
+        .arg(test_name)
+        .arg("--nocapture")
+        .env(CHILD_ENV, "1")
+        .status()
+        .expect("deleted-current-directory child should launch");
+    assert!(
+        status.success(),
+        "deleted-current-directory child should pass"
+    );
+}
 
 /// Verifies closing file I/O does not release the retained persistence
 /// responsibility.
@@ -32,4 +75,449 @@ fn test_local_temp_file_close_retains_path_and_persist_responsibility() {
             .expect("closed file should persist")
     );
     assert!(target.exists());
+}
+
+/// Verifies temporary-file creation rejects a zero collision-retry budget
+/// before creating a parent entry.
+#[test]
+fn test_local_temp_file_rejects_zero_creation_attempts() {
+    let parent = tempdir().expect("temporary parent should be created");
+    let error = LocalFileSystem::create_temp_file(
+        &LocalTempFileOptions::new()
+            .with_parent(parent.path())
+            .with_max_attempts(0),
+    )
+    .expect_err("zero creation attempts must be rejected");
+
+    assert_eq!(
+        qubit_local_files::LocalFileErrorKind::InvalidInput,
+        error.kind()
+    );
+}
+
+/// Verifies open temporary files implement the ordinary seekable write stream
+/// contract before their handles are closed.
+#[test]
+fn test_local_temp_file_reads_back_written_content_before_cleanup() {
+    let parent = tempdir().expect("temporary parent should be created");
+    let mut temporary = LocalFileSystem::create_temp_file(
+        &LocalTempFileOptions::new().with_parent(parent.path()),
+    )
+    .expect("temporary file should be created");
+    let path = temporary.path().to_path_buf();
+
+    assert_eq!(
+        7,
+        temporary
+            .write_vectored(&[IoSlice::new(b"pay"), IoSlice::new(b"load")])
+            .expect("temporary file should accept vectored bytes")
+    );
+    let offset = temporary
+        .stream_position()
+        .expect("temporary file should report its current offset");
+    temporary
+        .flush()
+        .expect("temporary file should flush its bytes");
+
+    assert_eq!(7, offset);
+    assert_eq!(
+        b"payload",
+        fs::read(&path)
+            .expect("temporary path should read")
+            .as_slice()
+    );
+    temporary
+        .cleanup()
+        .expect("temporary file should be removed");
+    assert!(!path.exists());
+}
+
+/// Verifies mutable native-file access remains available until an explicit
+/// close and writes through the temporary-file guard.
+#[test]
+fn test_local_temp_file_exposes_mutable_open_file_handle() {
+    let parent = tempdir().expect("temporary parent should be created");
+    let mut temporary = LocalFileSystem::create_temp_file(
+        &LocalTempFileOptions::new().with_parent(parent.path()),
+    )
+    .expect("temporary file should be created");
+    let path = temporary.path().to_path_buf();
+
+    temporary
+        .as_file_mut()
+        .expect("open temporary file should expose its native handle")
+        .write_all(b"payload")
+        .expect("native handle should write through the guard");
+    temporary
+        .flush()
+        .expect("temporary file should flush native-handle writes");
+
+    assert_eq!(
+        b"payload",
+        fs::read(&path)
+            .expect("temporary path should read")
+            .as_slice()
+    );
+    temporary.cleanup().expect("temporary file should clean up");
+}
+
+/// Verifies parent preparation failures retain a cleanup-safe temporary file.
+#[test]
+fn test_local_temp_file_persist_rejects_non_directory_parent_and_retains_cleanup()
+ {
+    let parent = tempdir().expect("temporary parent should be created");
+    let blocked_parent = parent.path().join("blocked");
+    fs::write(&blocked_parent, b"not a directory")
+        .expect("blocked parent fixture should be written");
+    let temporary = LocalFileSystem::create_temp_file(
+        &LocalTempFileOptions::new().with_parent(parent.path()),
+    )
+    .expect("temporary file should be created");
+    let source = temporary.path().to_path_buf();
+
+    let error = temporary
+        .persist(blocked_parent.join("target"))
+        .expect_err("a file cannot serve as a target parent");
+    let (_io, mut temporary, _requested, _resolved, _stage) =
+        error.into_parts();
+    temporary
+        .cleanup()
+        .expect("parent preparation failure must retain cleanup authority");
+
+    assert!(!source.exists());
+}
+
+/// Verifies an indeterminate host publication failure disables retries and
+/// automatic cleanup rather than risking an unrelated namespace entry.
+#[test]
+fn test_local_temp_file_indeterminate_persist_failure_disables_cleanup() {
+    let parent = tempdir().expect("temporary parent should be created");
+    let target = parent.path().join("target-directory");
+    fs::create_dir(&target).expect("target directory fixture should exist");
+    let temporary = LocalFileSystem::create_temp_file(
+        &LocalTempFileOptions::new().with_parent(parent.path()),
+    )
+    .expect("temporary file should be created");
+    let source = temporary.path().to_path_buf();
+
+    let error = temporary
+        .persist_with(&target, LocalPersistOptions::new().with_overwrite())
+        .expect_err("a file cannot replace a directory");
+    let (_io, mut temporary, _requested, _resolved, _stage) =
+        error.into_parts();
+    assert!(temporary.cleanup().is_err());
+    let error = temporary
+        .persist(&target)
+        .expect_err("indeterminate resources must reject persistence retries");
+    let (_io, temporary, _requested, _resolved, _stage) = error.into_parts();
+    drop(temporary);
+
+    assert!(source.exists());
+    fs::remove_file(source)
+        .expect("indeterminate fixture should be removed manually");
+}
+
+/// Verifies rooted temporary files reject host-absolute persist targets while
+/// retaining their root-bound cleanup authority.
+#[test]
+fn test_rooted_temp_file_rejects_absolute_persist_target_and_cleans_up() {
+    let parent = tempdir().expect("root parent should be created");
+    let rooted = RootedLocalFileSystem::open(parent.path())
+        .expect("root authority should open");
+    let temporary = rooted
+        .create_temp_file(&LocalTempFileOptions::new())
+        .expect("rooted temporary file should be created");
+    let relative_source = temporary.path().to_path_buf();
+
+    let error = temporary
+        .persist(parent.path().join("absolute-target"))
+        .expect_err("rooted persistence must reject absolute targets");
+    let (_io, mut temporary, _requested, _resolved, _stage) =
+        error.into_parts();
+    temporary
+        .cleanup()
+        .expect("rooted temporary file should clean up");
+
+    assert!(!parent.path().join(relative_source).exists());
+}
+
+/// Verifies rooted temporary-file overwrite persistence replaces the final
+/// entry within the opened root.
+#[test]
+fn test_rooted_temp_file_persist_with_overwrite_replaces_target() {
+    let parent = tempdir().expect("root parent should be created");
+    let rooted = RootedLocalFileSystem::open(parent.path())
+        .expect("root authority should open");
+    fs::write(parent.path().join("target"), b"existing")
+        .expect("target fixture should be written");
+    let mut temporary = rooted
+        .create_temp_file(&LocalTempFileOptions::new())
+        .expect("rooted temporary file should be created");
+    temporary
+        .write_all(b"replacement")
+        .expect("rooted temporary file should accept bytes");
+
+    let persisted = temporary
+        .persist_with(
+            std::path::Path::new("target"),
+            LocalPersistOptions::new().with_overwrite(),
+        )
+        .expect("rooted overwrite should publish the temporary file");
+
+    assert_eq!(std::path::Path::new("target"), persisted);
+    assert_eq!(
+        b"replacement",
+        fs::read(parent.path().join("target"))
+            .expect("target should read")
+            .as_slice(),
+    );
+}
+
+/// Verifies rooted temporary files can publish to an absent relative target
+/// and release automatic cleanup after publication.
+#[test]
+fn test_rooted_temp_file_persist_publishes_absent_target() {
+    let parent = tempdir().expect("root parent should be created");
+    let rooted = RootedLocalFileSystem::open(parent.path())
+        .expect("root authority should open");
+    let mut temporary = rooted
+        .create_temp_file(&LocalTempFileOptions::new())
+        .expect("rooted temporary file should be created");
+    temporary
+        .write_all(b"payload")
+        .expect("rooted temporary file should accept bytes");
+    let source = temporary.path().to_path_buf();
+
+    assert_eq!(
+        std::path::Path::new("published"),
+        temporary
+            .persist(std::path::Path::new("published"))
+            .expect("rooted temporary file should publish"),
+    );
+    assert!(!parent.path().join(source).exists());
+    assert_eq!(
+        b"payload",
+        fs::read(parent.path().join("published"))
+            .expect("published file should read")
+            .as_slice(),
+    );
+}
+
+/// Verifies rooted temporary-file cleanup removes the retained relative path.
+#[test]
+fn test_rooted_temp_file_cleanup_removes_entry() {
+    let parent = tempdir().expect("root parent should be created");
+    let rooted = RootedLocalFileSystem::open(parent.path())
+        .expect("root authority should open");
+    let mut temporary = rooted
+        .create_temp_file(&LocalTempFileOptions::new())
+        .expect("rooted temporary file should be created");
+    let path = temporary.path().to_path_buf();
+
+    temporary
+        .cleanup()
+        .expect("rooted temporary file should clean up");
+
+    assert!(!parent.path().join(path).exists());
+}
+
+/// Verifies rooted temporary files retain cleanup authority after a no-replace
+/// conflict and reject lexical escape targets.
+#[test]
+fn test_rooted_temp_file_conflicts_and_invalid_targets_retain_cleanup() {
+    let parent = tempdir().expect("root parent should be created");
+    let rooted = RootedLocalFileSystem::open(parent.path())
+        .expect("root authority should open");
+    fs::write(parent.path().join("occupied"), b"existing")
+        .expect("occupied target should be written");
+    let temporary = rooted
+        .create_temp_file(&LocalTempFileOptions::new())
+        .expect("rooted temporary file should be created");
+    let source = temporary.path().to_path_buf();
+
+    let error = temporary
+        .persist(std::path::Path::new("occupied"))
+        .expect_err("default persistence must retain an occupied target");
+    let (_io, temporary, _requested, resolved, _stage) = error.into_parts();
+    assert_eq!(Some(std::path::Path::new("occupied")), resolved.as_deref());
+
+    let error = temporary
+        .persist(std::path::Path::new("../escape"))
+        .expect_err("rooted persistence must reject lexical escapes");
+    let (_io, mut temporary, _requested, resolved, _stage) = error.into_parts();
+    assert_eq!(None, resolved);
+    temporary
+        .cleanup()
+        .expect("conflicted rooted file should remain cleanup-safe");
+    assert!(!parent.path().join(source).exists());
+}
+
+/// Verifies dropping an externally removed temporary file is best effort.
+#[test]
+fn test_local_temp_file_drop_tolerates_missing_entry() {
+    let parent = tempdir().expect("temporary parent should be created");
+    let temporary = LocalFileSystem::create_temp_file(
+        &LocalTempFileOptions::new().with_parent(parent.path()),
+    )
+    .expect("temporary file should be created");
+    let path = temporary.path().to_path_buf();
+    fs::remove_file(&path).expect("fixture should remove the temporary file");
+
+    drop(temporary);
+
+    assert!(!path.exists());
+}
+
+/// Verifies relative host persistence reports target-resolution failure when
+/// the process current directory was removed externally.
+#[test]
+fn test_local_temp_file_persist_reports_deleted_current_directory() {
+    const TEST_NAME: &str =
+        "test_local_temp_file_persist_reports_deleted_current_directory";
+    run_in_deleted_current_directory_process(TEST_NAME, || {
+        let original = env::current_dir()
+            .expect("original current directory should be available");
+        let parent = tempdir().expect("temporary parent should be created");
+        let cwd = parent.path().join("deleted-current-directory");
+        fs::create_dir(&cwd).expect("current-directory fixture should exist");
+        let temporary = LocalFileSystem::create_temp_file(
+            &LocalTempFileOptions::new().with_parent(parent.path()),
+        )
+        .expect("temporary file should be created");
+        let source = temporary.path().to_path_buf();
+
+        env::set_current_dir(&cwd)
+            .expect("current directory should change to the fixture");
+        fs::remove_dir(&cwd)
+            .expect("current-directory fixture should be removed externally");
+        let error = temporary
+            .persist(std::path::Path::new("relative-target"))
+            .expect_err(
+                "deleted current directory must prevent target resolution",
+            );
+        env::set_current_dir(&original)
+            .expect("original current directory should be restored");
+
+        let (_io, mut temporary, _requested, resolved, _stage) =
+            error.into_parts();
+        assert_eq!(None, resolved);
+        temporary.cleanup().expect(
+            "target resolution failure should retain cleanup authority",
+        );
+        assert!(!source.exists());
+    });
+}
+
+/// Verifies keeping a temporary file disables its automatic cleanup.
+#[test]
+fn test_local_temp_file_keep_retains_path_after_drop() {
+    let parent = tempdir().expect("temporary parent should be created");
+    let path = LocalFileSystem::create_temp_file(
+        &LocalTempFileOptions::new().with_parent(parent.path()),
+    )
+    .expect("temporary file should be created")
+    .keep();
+
+    assert!(path.exists());
+    fs::remove_file(path).expect("kept fixture should be removed manually");
+}
+
+/// Verifies failed no-replace persistence preserves cleanup responsibility and
+/// explicit replacement publishes the temporary content.
+#[test]
+fn test_local_temp_file_persist_respects_conflict_and_overwrite_policy() {
+    let parent = tempdir().expect("temporary parent should be created");
+    let target = parent.path().join("target");
+    fs::write(&target, b"existing").expect("target fixture should exist");
+    let mut temporary = LocalFileSystem::create_temp_file(
+        &LocalTempFileOptions::new().with_parent(parent.path()),
+    )
+    .expect("temporary file should be created");
+    temporary
+        .write_all(b"replacement")
+        .expect("temporary file should accept bytes");
+
+    let error = temporary
+        .persist(&target)
+        .expect_err("default persistence must not replace an existing file");
+    assert_eq!(target, error.requested_target());
+    let (_io, temporary, _requested, _resolved, _stage) = error.into_parts();
+    assert!(temporary.path().exists());
+
+    let persisted = temporary
+        .persist_with(&target, LocalPersistOptions::new().with_overwrite())
+        .expect("explicit overwrite should publish the temporary file");
+    assert_eq!(target, persisted);
+    assert_eq!(
+        b"replacement",
+        fs::read(&target).expect("target should read").as_slice()
+    );
+}
+
+/// Verifies closing a temporary file rejects further stream access while still
+/// permitting cleanup.
+#[test]
+fn test_local_temp_file_close_rejects_stream_access_and_allows_cleanup() {
+    let parent = tempdir().expect("temporary parent should be created");
+    let mut temporary = LocalFileSystem::create_temp_file(
+        &LocalTempFileOptions::new().with_parent(parent.path()),
+    )
+    .expect("temporary file should be created");
+    let path = temporary.path().to_path_buf();
+
+    temporary.close();
+    assert!(temporary.write_all(b"unavailable").is_err());
+    assert!(
+        temporary
+            .write_vectored(&[IoSlice::new(b"unavailable")])
+            .is_err()
+    );
+    assert!(temporary.flush().is_err());
+    assert!(temporary.seek(SeekFrom::Start(0)).is_err());
+    assert!(temporary.as_file_mut().is_err());
+    temporary
+        .cleanup()
+        .expect("closed temporary file should clean up");
+    assert!(!path.exists());
+}
+
+/// Verifies a failed temporary-file cleanup keeps the resource available for a
+/// later successful cleanup attempt.
+#[test]
+fn test_local_temp_file_cleanup_failure_retains_resource_for_retry() {
+    let parent = tempdir().expect("temporary parent should be created");
+    let mut temporary = LocalFileSystem::create_temp_file(
+        &LocalTempFileOptions::new().with_parent(parent.path()),
+    )
+    .expect("temporary file should be created");
+    let path = temporary.path().to_path_buf();
+    fs::remove_file(&path).expect("fixture should remove the temporary file");
+
+    assert!(temporary.cleanup().is_err());
+    fs::write(&path, b"restored")
+        .expect("fixture should restore the temporary file");
+    temporary
+        .cleanup()
+        .expect("cleanup retry should remove the file");
+    assert!(!path.exists());
+}
+
+/// Verifies drop logs and tolerates a cleanup failure without removing a
+/// different entry that replaced the temporary file path.
+#[test]
+fn test_local_temp_file_drop_tolerates_replaced_directory() {
+    let parent = tempdir().expect("temporary parent should be created");
+    let temporary = LocalFileSystem::create_temp_file(
+        &LocalTempFileOptions::new().with_parent(parent.path()),
+    )
+    .expect("temporary file should be created");
+    let path = temporary.path().to_path_buf();
+    fs::remove_file(&path).expect("fixture should remove the temporary file");
+    fs::create_dir(&path)
+        .expect("fixture should replace the file with a directory");
+
+    drop(temporary);
+
+    assert!(path.is_dir());
+    fs::remove_dir(path).expect("replacement directory should be removed");
 }

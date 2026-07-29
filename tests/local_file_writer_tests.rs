@@ -13,7 +13,10 @@ use std::{
 };
 use std::{
     fs,
-    io::Write,
+    io::{
+        IoSlice,
+        Write,
+    },
 };
 
 use qubit_local_files::{
@@ -342,6 +345,21 @@ fn run_indeterminate_append_case(case: &str) {
         .write_all(b"x")
         .expect_err("zero file-size limit should reject append");
     assert_eq!(LocalWriterState::Indeterminate, writer.state());
+    let write_after_failure = writer
+        .write(b"x")
+        .expect_err("indeterminate writer must reject further writes");
+    assert_eq!(std::io::ErrorKind::BrokenPipe, write_after_failure.kind());
+    let vectored_after_failure = writer
+        .write_vectored(&[IoSlice::new(b"x")])
+        .expect_err("indeterminate writer must reject further vectored writes");
+    assert_eq!(
+        std::io::ErrorKind::BrokenPipe,
+        vectored_after_failure.kind()
+    );
+    let flush_after_failure = writer
+        .flush()
+        .expect_err("indeterminate writer must reject further flushes");
+    assert_eq!(std::io::ErrorKind::BrokenPipe, flush_after_failure.kind());
     match case {
         "commit" => {
             let error = writer

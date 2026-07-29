@@ -5,6 +5,7 @@
 //
 //    Licensed under the Apache License, Version 2.0.
 // =============================================================================
+// qubit-style: allow coverage-cfg
 
 use std::{
     io,
@@ -91,13 +92,11 @@ impl RootedLocalFileSystem {
 
     /// Returns the non-authoritative diagnostic path captured at open time.
     #[must_use]
-    #[inline(always)]
     pub fn diagnostic_path(&self) -> &Path {
         self.root.path()
     }
 
     /// Returns the capability snapshot cached for this opened authority.
-    #[inline(always)]
     pub const fn capabilities(&self) -> LocalFileSystemCapabilities {
         self.capabilities
     }
@@ -138,10 +137,29 @@ impl RootedLocalFileSystem {
             )?;
             let relative =
                 rooted_path(&candidate, LocalFileOperation::CreateTempFile)?;
-            match self.root.open_writer(
+            #[cfg(coverage)]
+            let opened = if crate::local::coverage_fault_enabled(
+                "rooted-temp-file-collision",
+            ) {
+                Err(io::Error::from(io::ErrorKind::AlreadyExists))
+            } else if crate::local::coverage_fault_enabled(
+                "rooted-temp-file-open",
+            ) {
+                Err(io::Error::from(io::ErrorKind::PermissionDenied))
+            } else {
+                self.root.open_writer(
+                    &relative,
+                    &crate::write::OpenOptions::new(
+                        crate::write::Mode::CreateNew,
+                    ),
+                )
+            };
+            #[cfg(not(coverage))]
+            let opened = self.root.open_writer(
                 &relative,
                 &crate::write::OpenOptions::new(crate::write::Mode::CreateNew),
-            ) {
+            );
+            match opened {
                 Ok(file) => {
                     return Ok(LocalTempFile::rooted(
                         Arc::clone(&self.root),
@@ -209,7 +227,21 @@ impl RootedLocalFileSystem {
                 &candidate,
                 LocalFileOperation::CreateTempDirectory,
             )?;
-            match self.root.create_dir(&relative) {
+            #[cfg(coverage)]
+            let created = if crate::local::coverage_fault_enabled(
+                "rooted-temp-directory-collision",
+            ) {
+                Err(io::Error::from(io::ErrorKind::AlreadyExists))
+            } else if crate::local::coverage_fault_enabled(
+                "rooted-temp-directory-create",
+            ) {
+                Err(io::Error::from(io::ErrorKind::PermissionDenied))
+            } else {
+                self.root.create_dir(&relative)
+            };
+            #[cfg(not(coverage))]
+            let created = self.root.create_dir(&relative);
+            match created {
                 Ok(()) => {
                     return Ok(LocalTempDirectory::rooted(
                         Arc::clone(&self.root),
@@ -463,7 +495,17 @@ impl RootedLocalFileSystem {
         options: &LocalCreateDirectoryOptions,
     ) -> LocalResult<LocalCreateDirectoryOutcome> {
         let relative = rooted_path(path, LocalFileOperation::CreateDirectory)?;
-        let existing_directory = match self.root.symlink_metadata(&relative) {
+        #[cfg(coverage)]
+        let metadata = if crate::local::coverage_fault_enabled(
+            "rooted-local-create-directory-status",
+        ) {
+            Err(io::Error::from(io::ErrorKind::PermissionDenied))
+        } else {
+            self.root.symlink_metadata(&relative)
+        };
+        #[cfg(not(coverage))]
+        let metadata = self.root.symlink_metadata(&relative);
+        let existing_directory = match metadata {
             Ok(metadata) => {
                 Some(metadata.kind() == crate::rooted::EntryKind::Directory)
             }
@@ -749,7 +791,6 @@ impl RootedLocalFileSystem {
 }
 
 /// Wraps a rooted preflight failure that proves no namespace mutation occurred.
-#[inline(always)]
 fn rooted_rename_failure_unchanged(
     error: LocalFileError,
 ) -> LocalRenameFailure {
@@ -757,13 +798,11 @@ fn rooted_rename_failure_unchanged(
 }
 
 /// Wraps a rooted failure after a completed native rename.
-#[inline(always)]
 fn rooted_rename_failure_renamed(error: LocalFileError) -> LocalRenameFailure {
     LocalRenameFailure::new(error, LocalRenameFailureState::Renamed)
 }
 
 /// Maps a rooted native rename failure to the strongest guaranteed state.
-#[inline(always)]
 fn rooted_rename_failure_after_native_attempt(
     source: &Path,
     target: &Path,
@@ -787,7 +826,6 @@ fn rooted_rename_failure_after_native_attempt(
 }
 
 /// Wraps a pre-publication rooted copy error with an unchanged state.
-#[inline(always)]
 fn rooted_copy_failure_unchanged(error: LocalFileError) -> LocalCopyFailure {
     LocalCopyFailure::new(
         error,
@@ -799,7 +837,6 @@ fn rooted_copy_failure_unchanged(error: LocalFileError) -> LocalCopyFailure {
 }
 
 /// Wraps a rooted post-publication durability error with a published state.
-#[inline(always)]
 fn rooted_copy_failure_published(
     error: LocalFileError,
     partial_stats: LocalCopyStats,
@@ -943,7 +980,6 @@ pub(crate) fn rooted_metadata(
 /// # Returns
 ///
 /// Structured rooted local filesystem error.
-#[inline(always)]
 fn rooted_io_error(
     operation: LocalFileOperation,
     path: &Path,

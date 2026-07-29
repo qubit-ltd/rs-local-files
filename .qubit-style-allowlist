@@ -20,11 +20,16 @@ coverage-cfg | src/local/internal/rooted_atomic_write.rs | Exercises otherwise u
 coverage-cfg | src/local/internal/rooted_io_result.rs | Exercises otherwise unreachable rooted descriptor failures
 coverage-cfg | src/local/internal/rooted_staged_file.rs | Exercises persistent descriptor-relative staging cleanup failures
 coverage-cfg | src/local/internal/staged_file.rs | Exercises persistent path-based staging cleanup failures
+coverage-cfg | src/local/internal/temp_entry.rs | Exercises otherwise unreachable temporary entry collision and creation failures
 coverage-cfg | src/local/internal/unix_nonblocking.rs | Exercises otherwise unreachable descriptor status failures
 coverage-cfg | src/local/local_atomic_writer.rs | Exercises parent synchronization after partial installation
 coverage-cfg | src/local/local_root_atomic_writer.rs | Exercises rooted parent synchronization after partial installation
 coverage-cfg | src/local/internal/rooted_namespace_io.rs | Exercises otherwise unreachable rooted namespace faults
 coverage-cfg | src/local/mod.rs | Exposes legacy local helpers only to coverage regression tests
 coverage-cfg | src/local_file_system.rs | Exercises otherwise unreachable local filesystem fault paths
+coverage-cfg | src/local_paths.rs | Exercises otherwise unreachable host current-directory binding failures
 coverage-cfg | src/rooted/copy.rs | Exercises otherwise unreachable rooted copy fault paths
+coverage-cfg | src/rooted_local_file_system.rs | Exercises otherwise unreachable rooted temporary-resource and status failures
 coverage-cfg | src/rooted/root.rs | Exercises otherwise unreachable rooted root fault paths
+coverage-cfg | src/walk/local_directory_walker.rs | Exercises otherwise unreachable native walker iterator and canonicalization failures
+coverage-cfg | src/writer/local_file_writer.rs | Exercises otherwise unreachable append flush and synchronization failures

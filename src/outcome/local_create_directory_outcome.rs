@@ -22,14 +22,12 @@ impl LocalCreateDirectoryOutcome {
     /// # Parameters
     ///
     /// - `created`: Whether the requested entry was newly created.
-    #[inline(always)]
     pub(crate) const fn new(created: bool) -> Self {
         Self { created }
     }
 
     /// Reports whether the requested directory was newly created.
     #[must_use]
-    #[inline(always)]
     pub const fn created(self) -> bool {
         self.created
     }

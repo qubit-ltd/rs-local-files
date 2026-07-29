@@ -12,6 +12,8 @@ mod internal;
 #[cfg(coverage)]
 pub(crate) use internal::coverage_fault::is_enabled as coverage_fault_enabled;
 #[cfg(coverage)]
+pub(crate) use internal::coverage_fault::take as take_coverage_fault;
+#[cfg(coverage)]
 pub(crate) use internal::coverage_fault::take_on_nth as take_coverage_fault_on_nth;
 mod local_atomic_commit_error;
 mod local_atomic_destination_state;

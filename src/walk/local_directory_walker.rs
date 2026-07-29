@@ -26,6 +26,8 @@ use crate::{
     LocalResult,
 };
 
+// qubit-style: allow coverage-cfg
+
 use super::internal::{
     RootedWalkFrame,
     RootedWalkState,
@@ -81,8 +83,20 @@ impl LocalDirectoryWalker {
             fs::read_dir(&root).map_err(|error| walk_io_error(&root, error))?;
         let mut followed_directories = HashSet::new();
         if options.follows_symlinks() {
-            let identity = fs::canonicalize(&root)
-                .map_err(|error| walk_io_error(&root, error))?;
+            #[cfg(coverage)]
+            if crate::local::coverage_fault_enabled("walker-root-canonicalize")
+            {
+                return Err(walk_io_error(
+                    &root,
+                    std::io::Error::other(
+                        "injected walker root canonicalization failure",
+                    ),
+                ));
+            }
+            let identity = match fs::canonicalize(&root) {
+                Ok(identity) => identity,
+                Err(error) => return Err(walk_io_error(&root, error)),
+            };
             followed_directories.insert(identity);
         }
         Ok(Self {
@@ -154,7 +168,6 @@ impl LocalDirectoryWalker {
 
     /// Returns the bound traversal root.
     #[must_use]
-    #[inline(always)]
     pub fn root(&self) -> &Path {
         &self.root
     }
@@ -168,7 +181,6 @@ impl LocalDirectoryWalker {
     /// # Returns
     ///
     /// `true` when recursion and the configured depth limit permit descent.
-    #[inline(always)]
     fn may_descend(&self, entry_depth: usize) -> bool {
         self.options.recursive()
             && self
@@ -195,8 +207,21 @@ impl LocalDirectoryWalker {
         entry_depth: usize,
     ) -> LocalResult<()> {
         if self.options.follows_symlinks() {
-            let identity = fs::canonicalize(path)
-                .map_err(|error| walk_io_error(path, error))?;
+            #[cfg(coverage)]
+            if crate::local::coverage_fault_enabled(
+                "walker-descend-canonicalize",
+            ) {
+                return Err(walk_io_error(
+                    path,
+                    std::io::Error::other(
+                        "injected walker descent canonicalization failure",
+                    ),
+                ));
+            }
+            let identity = match fs::canonicalize(path) {
+                Ok(identity) => identity,
+                Err(error) => return Err(walk_io_error(path, error)),
+            };
             if !self.followed_directories.insert(identity) {
                 return Err(LocalFileError::new(
                     LocalFileErrorKind::InvalidInput,
@@ -228,7 +253,17 @@ impl Iterator for LocalDirectoryWalker {
             let frame = self.stack.last_mut()?;
             let entry_depth = frame.entry_depth;
             let relative_parent = frame.relative.clone();
-            let entry = match frame.entries.next() {
+            let next_entry = frame.entries.next();
+            #[cfg(coverage)]
+            let next_entry =
+                if crate::local::take_coverage_fault("walker-entry") {
+                    Some(Err(std::io::Error::other(
+                        "injected walker directory entry failure",
+                    )))
+                } else {
+                    next_entry
+                };
+            let entry = match next_entry {
                 Some(Ok(entry)) => entry,
                 Some(Err(error)) => {
                     return Some(Err(walk_io_error(
@@ -314,10 +349,14 @@ fn next_rooted_entry(
         let metadata =
             crate::rooted_local_file_system::rooted_metadata(entry.metadata());
         let is_directory = metadata.kind() == crate::LocalFileKind::Directory;
-        let may_descend = options.recursive()
-            && options
-                .max_depth()
-                .is_none_or(|max_depth| entry_depth < max_depth);
+        let may_descend = if options.recursive() {
+            match options.max_depth() {
+                Some(max_depth) => entry_depth < max_depth,
+                None => true,
+            }
+        } else {
+            false
+        };
         if is_directory && may_descend {
             let relative =
                 match crate::local::LocalRelativePath::new(&authority_path) {
@@ -361,7 +400,6 @@ fn next_rooted_entry(
 /// # Returns
 ///
 /// Structured listing error.
-#[inline(always)]
 fn walk_io_error(path: &Path, error: std::io::Error) -> LocalFileError {
     LocalFileError::from_io(
         LocalFileOperation::List,

@@ -25,21 +25,18 @@ impl LocalRenameOutcome {
     ///
     /// - `atomic`: Whether the namespace change was atomic.
     /// - `durable`: Whether parent-directory durability was synchronized.
-    #[inline(always)]
     pub(crate) const fn new(atomic: bool, durable: bool) -> Self {
         Self { atomic, durable }
     }
 
     /// Reports whether the namespace change was atomic.
     #[must_use]
-    #[inline(always)]
     pub const fn atomic(self) -> bool {
         self.atomic
     }
 
     /// Reports whether parent-directory durability was synchronized.
     #[must_use]
-    #[inline(always)]
     pub const fn durable(self) -> bool {
         self.durable
     }

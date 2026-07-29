@@ -43,7 +43,6 @@ impl Display for LocalRenameFailure {
 
 impl Error for LocalRenameFailure {
     /// Returns the primary typed filesystem error.
-    #[inline(always)]
     fn source(&self) -> Option<&(dyn Error + 'static)> {
         Some(&self.error)
     }
@@ -62,20 +61,17 @@ impl LocalRenameFailure {
 
     /// Returns the primary typed filesystem error.
     #[must_use]
-    #[inline(always)]
     pub const fn error(&self) -> &LocalFileError {
         &self.error
     }
 
     /// Returns the most precise namespace state proven by native operations.
     #[must_use]
-    #[inline(always)]
     pub const fn state(&self) -> LocalRenameFailureState {
         self.state
     }
 
     /// Consumes this failure and returns its error and proven state.
-    #[inline(always)]
     pub fn into_parts(self) -> (LocalFileError, LocalRenameFailureState) {
         (self.error, self.state)
     }

@@ -33,7 +33,6 @@ impl LocalWriteOutcome {
     /// - `atomic`: Whether publication was atomic.
     /// - `durable`: Whether durability synchronization completed.
     /// - `bytes_written`: Bytes accepted by the stream.
-    #[inline(always)]
     pub(crate) const fn new(
         state: LocalWriterState,
         atomic: bool,
@@ -50,28 +49,24 @@ impl LocalWriteOutcome {
 
     /// Returns the terminal writer state.
     #[must_use]
-    #[inline(always)]
     pub const fn state(self) -> LocalWriterState {
         self.state
     }
 
     /// Reports whether destination publication was atomic.
     #[must_use]
-    #[inline(always)]
     pub const fn atomic(self) -> bool {
         self.atomic
     }
 
     /// Reports whether durability synchronization completed.
     #[must_use]
-    #[inline(always)]
     pub const fn durable(self) -> bool {
         self.durable
     }
 
     /// Returns the number of bytes accepted by the writer stream.
     #[must_use]
-    #[inline(always)]
     pub const fn bytes_written(self) -> u64 {
         self.bytes_written
     }

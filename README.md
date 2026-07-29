@@ -144,11 +144,8 @@ cargo test --all-features
 # Project CI checks
 ./ci-check.sh
 
-# Generate a coverage report (thresholds are reported but not enforced by default)
+# Check code coverage
 ./coverage.sh
-
-# Enforce the configured per-source coverage thresholds
-COVERAGE_ENFORCE_THRESHOLDS=1 ./coverage.sh json
 ```
 
 ## License

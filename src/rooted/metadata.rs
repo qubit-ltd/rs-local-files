@@ -60,16 +60,7 @@ impl Metadata {
     #[must_use]
     #[cfg(unix)]
     pub(crate) fn from_native(metadata: &fs::Metadata) -> Self {
-        let file_type = metadata.file_type();
-        let kind = if file_type.is_file() {
-            EntryKind::File
-        } else if file_type.is_dir() {
-            EntryKind::Directory
-        } else if file_type.is_symlink() {
-            EntryKind::Symlink
-        } else {
-            EntryKind::Other
-        };
+        let kind = entry_kind_from_mode(metadata.mode());
         Self {
             kind,
             len: metadata.len(),

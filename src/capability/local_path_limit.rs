@@ -27,21 +27,18 @@ impl LocalPathLimit {
     /// - `value`: Maximum supported length.
     /// - `unit`: Unit used by the platform API.
     #[must_use]
-    #[inline(always)]
     pub const fn new(value: usize, unit: LocalPathLengthUnit) -> Self {
         Self { value, unit }
     }
 
     /// Returns the maximum known path length.
     #[must_use]
-    #[inline(always)]
     pub const fn value(self) -> usize {
         self.value
     }
 
     /// Returns the unit used to measure the limit.
     #[must_use]
-    #[inline(always)]
     pub const fn unit(self) -> LocalPathLengthUnit {
         self.unit
     }

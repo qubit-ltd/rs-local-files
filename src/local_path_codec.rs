@@ -33,7 +33,8 @@ impl LocalPathCodec {
         text: &'a str,
     ) -> Result<Cow<'a, OsStr>, LocalPathCodecError> {
         let native = platform::decode_canonical_text(text)?;
-        let canonical = platform::encode_native_text(&native)?;
+        let canonical = platform::encode_native_text(&native)
+            .expect("decoded canonical text cannot contain a native NUL byte");
         if canonical != text {
             return Err(LocalPathCodecError::NonCanonicalText);
         }
@@ -180,9 +181,7 @@ mod platform {
                         let valid = std::str::from_utf8(
                             &remaining[..valid_end],
                         )
-                        .map_err(|_| {
-                            LocalPathCodecError::UnsupportedNativeEncoding
-                        })?;
+                        .expect("valid_up_to always identifies a valid UTF-8 prefix");
                         for scalar in valid.chars() {
                             push_scalar(&mut encoded, scalar);
                         }

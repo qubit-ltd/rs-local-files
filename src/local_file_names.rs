@@ -32,7 +32,6 @@ impl LocalFileNames {
     /// # Errors
     ///
     /// Returns `LocalFileError` when the operating-system random source fails.
-    #[inline(always)]
     pub fn random_name() -> LocalResult<OsString> {
         Self::random_name_with(None, None)
     }
@@ -67,28 +66,24 @@ impl LocalFileNames {
 
     /// Returns the final native filename component.
     #[must_use]
-    #[inline(always)]
     pub fn file_name(path: &Path) -> Option<&OsStr> {
         path.file_name()
     }
 
     /// Returns the native filename without its final extension.
     #[must_use]
-    #[inline(always)]
     pub fn file_stem(path: &Path) -> Option<&OsStr> {
         path.file_stem()
     }
 
     /// Returns the native filename prefix before the first non-leading dot.
     #[must_use]
-    #[inline(always)]
     pub fn file_prefix(path: &Path) -> Option<&OsStr> {
         path.file_prefix()
     }
 
     /// Returns the final native extension without a leading dot.
     #[must_use]
-    #[inline(always)]
     pub fn extension(path: &Path) -> Option<&OsStr> {
         path.extension()
     }

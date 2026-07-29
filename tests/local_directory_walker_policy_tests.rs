@@ -1,0 +1,233 @@
+// =============================================================================
+//    Copyright (c) 2025 - 2026 Haixing Hu.
+//
+//    SPDX-License-Identifier: Apache-2.0
+//
+//    Licensed under the Apache License, Version 2.0.
+// =============================================================================
+
+use std::{
+    fs,
+    path::PathBuf,
+};
+
+use qubit_local_files::{
+    LocalFileErrorKind,
+    LocalFileKind,
+    LocalFileSystem,
+    LocalListOptions,
+};
+use tempfile::tempdir;
+
+/// Verifies non-recursive traversal returns only immediate entries and retains
+/// the bound root path for diagnostics.
+#[test]
+fn test_local_directory_walker_non_recursive_listing_retains_bound_root() {
+    let directory = tempdir().expect("temporary directory should be created");
+    fs::create_dir(directory.path().join("nested"))
+        .expect("nested directory should be created");
+    fs::write(directory.path().join("nested/child"), b"child")
+        .expect("nested child should be written");
+    fs::write(directory.path().join("top"), b"top")
+        .expect("top-level fixture should be written");
+
+    let walker =
+        LocalFileSystem::list(directory.path(), &LocalListOptions::new())
+            .expect("directory should open for listing");
+    assert_eq!(directory.path(), walker.root());
+    let mut entries = walker
+        .collect::<Result<Vec<_>, _>>()
+        .expect("non-recursive traversal should succeed");
+    entries
+        .sort_by(|left, right| left.relative_path().cmp(right.relative_path()));
+
+    assert_eq!(2, entries.len());
+    assert_eq!(PathBuf::from("nested"), entries[0].relative_path());
+    assert_eq!(LocalFileKind::Directory, entries[0].metadata().kind());
+    assert_eq!(PathBuf::from("top"), entries[1].relative_path());
+    assert_eq!(directory.path().join("top"), entries[1].path());
+}
+
+/// Verifies a regular file cannot be opened as a directory traversal root.
+#[test]
+fn test_local_directory_walker_rejects_regular_file_root() {
+    let directory = tempdir().expect("temporary directory should be created");
+    let file = directory.path().join("file");
+    fs::write(&file, b"payload").expect("file fixture should be written");
+
+    let error = LocalFileSystem::list(&file, &LocalListOptions::new())
+        .expect_err("regular files must not open as directory walkers");
+
+    assert_eq!(LocalFileErrorKind::TypeConflict, error.kind());
+    assert_eq!(Some(file.as_path()), error.path());
+}
+
+/// Verifies opening a missing traversal root preserves the path-specific
+/// not-found classification.
+#[test]
+fn test_local_directory_walker_rejects_missing_root() {
+    let directory = tempdir().expect("temporary directory should be created");
+    let missing = directory.path().join("missing");
+
+    let error = LocalFileSystem::list(&missing, &LocalListOptions::new())
+        .expect_err("missing directories must not open as walkers");
+
+    assert_eq!(LocalFileErrorKind::NotFound, error.kind());
+    assert_eq!(Some(missing.as_path()), error.path());
+}
+
+/// Verifies a zero traversal depth yields no entries, including entries that
+/// would otherwise be visible at the root level.
+#[test]
+fn test_local_directory_walker_zero_max_depth_yields_no_entries() {
+    let directory = tempdir().expect("temporary directory should be created");
+    fs::write(directory.path().join("entry"), b"payload")
+        .expect("entry fixture should be written");
+
+    let entries = LocalFileSystem::list(
+        directory.path(),
+        &LocalListOptions::new().with_max_depth(0),
+    )
+    .expect("walker should open")
+    .collect::<Result<Vec<_>, _>>()
+    .expect("zero-depth traversal should succeed");
+
+    assert!(entries.is_empty());
+}
+
+/// Verifies follow-mode resolves a symlinked directory and detects a traversal
+/// cycle rather than looping indefinitely.
+#[cfg(unix)]
+#[test]
+fn test_local_directory_walker_follow_mode_traverses_links_and_rejects_cycles()
+{
+    use std::os::unix::fs::symlink;
+
+    let directory = tempdir().expect("temporary directory should be created");
+    let outside = tempdir().expect("outside directory should be created");
+    let target = outside.path().join("target");
+    fs::create_dir(&target)
+        .expect("outside target directory should be created");
+    fs::write(target.join("child"), b"payload")
+        .expect("target child should be written");
+    symlink(&target, directory.path().join("link"))
+        .expect("directory link should be created");
+
+    let entries = LocalFileSystem::list(
+        directory.path(),
+        &LocalListOptions::new()
+            .with_recursive()
+            .with_follow_symlinks(),
+    )
+    .expect("follow-mode walker should open")
+    .collect::<Result<Vec<_>, _>>()
+    .expect("one symlinked directory should be traversable");
+    assert!(
+        entries
+            .iter()
+            .any(|entry| entry.relative_path() == "link/child")
+    );
+
+    symlink(directory.path(), target.join("cycle"))
+        .expect("cycle link should be created");
+    let error = LocalFileSystem::list(
+        directory.path(),
+        &LocalListOptions::new()
+            .with_recursive()
+            .with_follow_symlinks(),
+    )
+    .expect("cycle walker should open")
+    .find_map(Result::err)
+    .expect("cycle detection should return a structured error");
+
+    assert_eq!(LocalFileErrorKind::InvalidInput, error.kind());
+}
+
+/// Verifies follow-mode reports the dangling-link metadata failure at the
+/// entry itself instead of treating the unresolved link as an ordinary file.
+#[cfg(unix)]
+#[test]
+fn test_local_directory_walker_follow_mode_reports_dangling_link() {
+    use std::os::unix::fs::symlink;
+
+    let directory = tempdir().expect("temporary directory should be created");
+    let link = directory.path().join("dangling");
+    symlink(directory.path().join("missing"), &link)
+        .expect("dangling link fixture should be created");
+
+    let error = LocalFileSystem::list(
+        directory.path(),
+        &LocalListOptions::new().with_follow_symlinks(),
+    )
+    .expect("follow-mode walker should open")
+    .next()
+    .expect("dangling entry should be observed")
+    .expect_err("follow-mode walker must resolve a symlink target");
+
+    assert_eq!(LocalFileErrorKind::NotFound, error.kind());
+    assert_eq!(Some(link.as_path()), error.path());
+}
+
+/// Verifies recursive traversal reports native child-directory opening errors
+/// after yielding the readable parent entry.
+#[cfg(unix)]
+#[test]
+fn test_local_directory_walker_reports_unreadable_child_directory() {
+    use std::os::unix::fs::PermissionsExt;
+
+    // SAFETY: `geteuid` reads the current process identity without pointers or
+    // mutable state.
+    if unsafe { libc::geteuid() } == 0 {
+        return;
+    }
+    let directory = tempdir().expect("temporary directory should be created");
+    let child = directory.path().join("restricted");
+    fs::create_dir(&child).expect("restricted child should be created");
+    fs::write(child.join("entry"), b"payload")
+        .expect("restricted child fixture should be written");
+    fs::set_permissions(&child, fs::Permissions::from_mode(0o000))
+        .expect("restricted child should become unreadable");
+
+    let mut walker = LocalFileSystem::list(
+        directory.path(),
+        &LocalListOptions::new().with_recursive(),
+    )
+    .expect("recursive walker should open before entering its child");
+    let result = walker
+        .next()
+        .expect("restricted directory entry should be read from its parent");
+    fs::set_permissions(&child, fs::Permissions::from_mode(0o700))
+        .expect("restricted child permissions should be restored");
+
+    let error =
+        result.expect_err("unreadable child descent must return an error");
+    assert_eq!(LocalFileErrorKind::PermissionDenied, error.kind());
+    assert_eq!(Some(child.as_path()), error.path());
+}
+
+/// Verifies opening an unreadable traversal root reports the native directory
+/// enumeration failure rather than constructing an empty walker.
+#[cfg(unix)]
+#[test]
+fn test_local_directory_walker_rejects_unreadable_root_directory() {
+    use std::os::unix::fs::PermissionsExt;
+
+    // SAFETY: `geteuid` reads the current process identity without pointers or
+    // mutable state.
+    if unsafe { libc::geteuid() } == 0 {
+        return;
+    }
+    let directory = tempdir().expect("temporary directory should be created");
+    let root = directory.path().join("restricted-root");
+    fs::create_dir(&root).expect("restricted root should be created");
+    fs::set_permissions(&root, fs::Permissions::from_mode(0o000))
+        .expect("restricted root should become unreadable");
+
+    let error = LocalFileSystem::list(&root, &LocalListOptions::new())
+        .expect_err("unreadable traversal root must not open a walker");
+    fs::set_permissions(&root, fs::Permissions::from_mode(0o700))
+        .expect("restricted root permissions should be restored");
+
+    assert_eq!(LocalFileErrorKind::PermissionDenied, error.kind());
+    assert_eq!(Some(root.as_path()), error.path());
+}

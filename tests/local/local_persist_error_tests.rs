@@ -13,6 +13,10 @@ use std::io::ErrorKind;
 use super::api_tests::LocalPersistStage;
 
 use super::test_support::temp_dir;
+use qubit_local_files::{
+    LocalTempFileOptions,
+    RootedLocalFileSystem,
+};
 
 #[test]
 fn test_persist_error_into_parts_returns_error_and_resource() {
@@ -35,6 +39,7 @@ fn test_persist_error_into_parts_returns_error_and_resource() {
     );
     assert!(StdError::source(&persist_error).is_some());
     assert_eq!(ErrorKind::AlreadyExists, persist_error.error().kind());
+    assert_eq!(ErrorKind::AlreadyExists, persist_error.kind());
     assert_eq!(source, persist_error.resource().path());
     assert_eq!(source, persist_error.resource_mut().path());
     assert_eq!(
@@ -58,5 +63,35 @@ fn test_persist_error_into_parts_returns_error_and_resource() {
     assert_eq!(LocalPersistStage::InstallDestination, stage);
     drop(resource);
     assert!(!source.exists());
+    fs::remove_dir_all(dir).expect("test directory should be removed");
+}
+
+/// Verifies target-resolution failures retain only the caller-supplied target
+/// and format without an unavailable resolved path.
+#[test]
+fn test_persist_error_without_resolved_target_retains_context() {
+    let dir = temp_dir("persist-error-unresolved-target");
+    let rooted =
+        RootedLocalFileSystem::open(&dir).expect("root authority should open");
+    let file = rooted
+        .create_temp_file(&LocalTempFileOptions::new())
+        .expect("rooted temporary file should be created");
+    let requested = dir.join("host-absolute-target");
+
+    let mut error = file
+        .persist(&requested)
+        .expect_err("rooted persistence must reject host-absolute targets");
+    assert_eq!(ErrorKind::InvalidInput, error.kind());
+    assert_eq!(requested, error.requested_target());
+    assert_eq!(None, error.resolved_target());
+    assert!(error.to_string().contains("requested target"));
+    assert!(!error.to_string().contains("resolved as"));
+
+    error.resource_mut().cleanup().expect(
+        "unresolved persistence failure should retain cleanup authority",
+    );
+    let (_io, resource, _requested, resolved, _stage) = error.into_parts();
+    assert_eq!(None, resolved);
+    drop(resource);
     fs::remove_dir_all(dir).expect("test directory should be removed");
 }

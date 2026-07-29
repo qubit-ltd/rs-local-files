@@ -19,6 +19,8 @@ mod local_copy_dir_options_tests;
 mod local_copy_dir_stage_tests;
 mod local_copy_dir_stats_tests;
 mod local_copy_type_conflict_policy_tests;
+#[cfg(coverage)]
+mod local_directory_walker_fault_tests;
 mod local_filenames_tests;
 mod local_files_tests;
 mod local_persist_error_tests;
@@ -27,4 +29,6 @@ mod local_persist_stage_tests;
 mod local_relative_path_tests;
 mod local_root_atomic_writer_tests;
 mod local_root_tests;
+#[cfg(coverage)]
+mod local_temp_entry_fault_tests;
 mod test_support;
