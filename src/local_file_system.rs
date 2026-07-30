@@ -10,7 +10,10 @@
 use std::{
     fs,
     io,
-    path::Path,
+    path::{
+        Path,
+        PathBuf,
+    },
 };
 
 use crate::{
@@ -405,6 +408,9 @@ impl LocalFileSystem {
                     .with_target(target),
                 ));
             }
+            prepare_copy_parent(&target, options).map_err(|error| {
+                copy_failure_unchanged(copy_io_error(&source, &target, error))
+            })?;
             let internal_options = internal_copy_options(options);
             let stats = crate::local::copy_dir_all_with_paths(
                 &source,
@@ -431,6 +437,11 @@ impl LocalFileSystem {
             ));
         }
 
+        let parent_dirs_to_sync = prepare_copy_parent(&target, options)
+            .map_err(|error| {
+                copy_failure_unchanged(copy_io_error(&source, &target, error))
+            })?;
+
         let mut stats = crate::local::LocalCopyDirStats::default();
         crate::local::copy_file_with_options(
             &source,
@@ -445,6 +456,9 @@ impl LocalFileSystem {
                 fs::File::open(&target)
                     .and_then(|file| file.sync_all())
                     .and_then(|()| sync_rename_parent(&target))
+                    .and_then(|()| {
+                        sync_created_parent_directories(&parent_dirs_to_sync)
+                    })
             },
             LocalFileOperation::Copy,
             &source,
@@ -782,6 +796,34 @@ impl LocalFileSystem {
         // The native rename path above either publishes atomically or fails
         // before publication; no fallback copy-and-delete path is used.
         Ok(LocalRenameOutcome::new(true, durable))
+    }
+}
+
+/// Creates missing copy target parents and returns directories requiring sync.
+fn prepare_copy_parent(
+    target: &Path,
+    options: &LocalCopyOptions,
+) -> io::Result<Vec<PathBuf>> {
+    if options.creates_parent() {
+        crate::local::ensure_parent_path_with_sync_dirs(target)
+    } else {
+        Ok(Vec::new())
+    }
+}
+
+/// Synchronizes newly created copy target parents from deepest to shallowest.
+fn sync_created_parent_directories(paths: &[PathBuf]) -> io::Result<()> {
+    #[cfg(unix)]
+    {
+        paths
+            .iter()
+            .rev()
+            .try_for_each(|path| fs::File::open(path)?.sync_all())
+    }
+    #[cfg(not(unix))]
+    {
+        let _ = paths;
+        Ok(())
     }
 }
 
