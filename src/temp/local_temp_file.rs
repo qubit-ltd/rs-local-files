@@ -29,7 +29,10 @@ use log::warn;
 
 use crate::{
     LocalPersistError,
+    LocalPersistFailureState,
+    LocalPersistMethod,
     LocalPersistOptions,
+    LocalPersistOutcome,
     LocalPersistStage,
     LocalRelativePath,
 };
@@ -134,6 +137,17 @@ impl LocalTempFile {
         target: impl AsRef<Path>,
         options: LocalPersistOptions,
     ) -> std::result::Result<PathBuf, LocalPersistError<Self>> {
+        self.persist_with_outcome(target, options)
+            .map(LocalPersistOutcome::into_path)
+    }
+
+    /// Persists the file and reports the achieved publication guarantees.
+    #[inline(always)]
+    pub fn persist_with_outcome(
+        self,
+        target: impl AsRef<Path>,
+        options: LocalPersistOptions,
+    ) -> std::result::Result<LocalPersistOutcome, LocalPersistError<Self>> {
         self.persist_with_path(target.as_ref(), options)
     }
 
@@ -142,7 +156,7 @@ impl LocalTempFile {
         mut self,
         target: &Path,
         options: LocalPersistOptions,
-    ) -> std::result::Result<PathBuf, LocalPersistError<Self>> {
+    ) -> std::result::Result<LocalPersistOutcome, LocalPersistError<Self>> {
         self.close();
         if self.state == LocalTempResourceState::Indeterminate {
             return Err(LocalPersistError::new(
@@ -192,7 +206,12 @@ impl LocalTempFile {
                 ));
             }
             self.state = LocalTempResourceState::Released;
-            return Ok(target);
+            return Ok(LocalPersistOutcome::new(
+                target,
+                LocalPersistMethod::AtomicRename,
+                true,
+                false,
+            ));
         }
         let target = match LocalRelativePath::new(&requested_target) {
             Ok(path) => path.as_path().to_path_buf(),
@@ -229,7 +248,12 @@ impl LocalTempFile {
             ));
         }
         self.state = LocalTempResourceState::Released;
-        Ok(target)
+        Ok(LocalPersistOutcome::new(
+            target,
+            LocalPersistMethod::AtomicRename,
+            true,
+            false,
+        ))
     }
 
     /// Returns the mutable open file handle, or an error after [`Self::close`].
@@ -265,7 +289,11 @@ impl LocalTempFile {
 
     /// Records whether a failed native install proves the source remains owned.
     fn record_native_persist_failure(&mut self, error: &Error) {
-        self.state = if error.kind() == ErrorKind::AlreadyExists {
+        self.state = if LocalPersistFailureState::from_error(
+            LocalPersistStage::InstallDestination,
+            error.kind(),
+        ) == LocalPersistFailureState::NotPublished
+        {
             LocalTempResourceState::Owned
         } else {
             LocalTempResourceState::Indeterminate
