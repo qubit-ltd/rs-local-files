@@ -240,6 +240,18 @@ impl LocalFileError {
         self.source
     }
 
+    /// Consumes this structured error as a standard I/O error.
+    ///
+    /// # Returns
+    ///
+    /// An I/O error that preserves the originating native kind when available
+    /// and retains this structured error as its source.
+    #[must_use]
+    pub fn into_io_error(self) -> io::Error {
+        let kind = standard_io_error_kind(&self);
+        io::Error::new(kind, self)
+    }
+
     /// Reclassifies an error while retaining its native source and paths.
     ///
     /// # Parameters
@@ -253,6 +265,30 @@ impl LocalFileError {
     pub(crate) const fn with_kind(mut self, kind: LocalFileErrorKind) -> Self {
         self.kind = kind;
         self
+    }
+}
+
+/// Selects the standard I/O kind to expose when adapting this error.
+///
+/// Native I/O sources retain their exact kind. Errors without one use the
+/// closest stable local classification.
+#[inline]
+fn standard_io_error_kind(error: &LocalFileError) -> io::ErrorKind {
+    match error.source.as_ref() {
+        Some(LocalFileErrorSource::Io(source)) => source.kind(),
+        Some(LocalFileErrorSource::PathCodec(_)) => io::ErrorKind::InvalidInput,
+        None => match error.kind {
+            LocalFileErrorKind::AlreadyExists => io::ErrorKind::AlreadyExists,
+            LocalFileErrorKind::InvalidInput => io::ErrorKind::InvalidInput,
+            LocalFileErrorKind::NotFound => io::ErrorKind::NotFound,
+            LocalFileErrorKind::PermissionDenied => {
+                io::ErrorKind::PermissionDenied
+            }
+            LocalFileErrorKind::ResourceLimit => io::ErrorKind::StorageFull,
+            LocalFileErrorKind::RequirementNotMet
+            | LocalFileErrorKind::Unsupported => io::ErrorKind::Unsupported,
+            _ => io::ErrorKind::Other,
+        },
     }
 }
 

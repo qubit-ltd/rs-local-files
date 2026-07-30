@@ -57,8 +57,11 @@ use crate::{
     LocalWriteOptions,
 };
 
-/// Host-wide native local filesystem namespace.
-pub enum LocalFileSystem {}
+/// Host-wide native local filesystem service.
+pub struct LocalFileSystem {
+    /// Prevents construction of this stateless service type.
+    _private: (),
+}
 
 impl LocalFileSystem {
     /// Returns a snapshot of capabilities for the current host platform.
@@ -561,6 +564,7 @@ impl LocalFileSystem {
         let parent = options
             .parent()
             .map_or_else(std::env::temp_dir, Path::to_path_buf);
+        let parent = LocalPaths::bind_host_path(&parent)?;
         crate::local::create_temp_file_in_dir(
             &parent,
             options.prefix(),
@@ -571,7 +575,7 @@ impl LocalFileSystem {
         .map_err(|error| {
             LocalFileError::from_io(
                 LocalFileOperation::CreateTempFile,
-                options.parent().map(Path::to_path_buf),
+                Some(parent),
                 None,
                 error,
             )
@@ -600,6 +604,7 @@ impl LocalFileSystem {
         let parent = options
             .parent()
             .map_or_else(std::env::temp_dir, Path::to_path_buf);
+        let parent = LocalPaths::bind_host_path(&parent)?;
         crate::local::create_temp_dir_in_dir_with_affixes(
             &parent,
             options.prefix(),
@@ -610,7 +615,7 @@ impl LocalFileSystem {
         .map_err(|error| {
             LocalFileError::from_io(
                 LocalFileOperation::CreateTempDirectory,
-                options.parent().map(Path::to_path_buf),
+                Some(parent),
                 None,
                 error,
             )

@@ -15,6 +15,7 @@ use std::{
         SeekFrom,
         Write,
     },
+    path::Path,
     process::Command,
 };
 
@@ -97,6 +98,40 @@ fn test_local_temp_file_persist_with_outcome_reports_atomic_rename() {
     assert!(outcome.atomic());
     assert!(!outcome.durable());
     assert_eq!(LocalPersistMethod::AtomicRename, outcome.method());
+}
+
+/// Verifies a relative temporary parent remains bound after the current
+/// directory changes.
+#[test]
+fn test_local_temp_file_relative_parent_remains_bound_after_current_directory_change()
+ {
+    const TEST_NAME: &str = "test_local_temp_file_relative_parent_remains_bound_after_current_directory_change";
+    run_in_deleted_current_directory_process(TEST_NAME, || {
+        let creation = tempdir().expect("creation directory should be created");
+        let later = tempdir().expect("later directory should be created");
+        let original = env::current_dir()
+            .expect("original current directory should be available");
+        env::set_current_dir(creation.path())
+            .expect("creation directory should become current");
+
+        let mut temporary = LocalFileSystem::create_temp_file(
+            &LocalTempFileOptions::new().with_parent(Path::new("temporary")),
+        )
+        .expect("temporary file should be created");
+        let path = temporary.path().to_path_buf();
+
+        assert!(path.is_absolute());
+        assert!(path.starts_with(creation.path()));
+        env::set_current_dir(later.path())
+            .expect("later directory should become current");
+        temporary
+            .cleanup()
+            .expect("bound temporary file should clean up");
+        assert!(!path.exists());
+
+        env::set_current_dir(original)
+            .expect("original current directory should be restored");
+    });
 }
 
 /// Verifies temporary-file creation rejects a zero collision-retry budget

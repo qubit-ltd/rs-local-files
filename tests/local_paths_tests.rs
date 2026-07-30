@@ -41,6 +41,25 @@ fn test_local_paths_bind_host_paths_uses_absolute_paths() {
     assert_eq!(source.parent(), target.parent());
 }
 
+/// Verifies canonical component decoders accept iterators without requiring a
+/// caller-owned vector.
+#[test]
+fn test_canonical_component_decoders_accept_iterators() {
+    let relative =
+        LocalPaths::from_canonical_relative_components(["safe", "a%25b"])
+            .expect("relative iterator components should decode");
+    assert_eq!(Path::new("safe/a%b"), relative);
+
+    #[cfg(unix)]
+    {
+        let absolute = LocalPaths::from_canonical_absolute_components(
+            std::iter::once("").chain(["tmp", "safe"]),
+        )
+        .expect("absolute iterator components should decode");
+        assert_eq!(Path::new("/tmp/safe"), absolute);
+    }
+}
+
 /// Verifies Unix absolute canonical components round-trip through native paths.
 #[cfg(unix)]
 #[test]

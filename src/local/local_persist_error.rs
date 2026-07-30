@@ -8,22 +8,11 @@
 //! Recoverable temporary-resource persistence errors.
 
 use std::error::Error;
-use std::fmt::{
-    Debug,
-    Display,
-    Formatter,
-    Result as FmtResult,
-};
+use std::fmt::{Debug, Display, Formatter, Result as FmtResult};
 use std::io;
-use std::path::{
-    Path,
-    PathBuf,
-};
+use std::path::{Path, PathBuf};
 
-use crate::{
-    LocalPersistFailureState,
-    LocalPersistStage,
-};
+use crate::{LocalPersistFailureState, LocalPersistStage};
 
 /// Persistence error that returns ownership of the temporary resource.
 ///
@@ -160,11 +149,12 @@ impl<T> LocalPersistError<T> {
         self.error.kind()
     }
 
-    /// Splits this error into all retained values.
+    /// Splits this error into the original compatibility values.
     ///
     /// # Returns
     /// Native error, retained resource, requested target, resolved target, and
-    /// failure stage.
+    /// failure stage. Use [`Self::into_parts_with_state`] to retain the
+    /// publication state too.
     ///
     /// Ignoring the returned tuple is rejected because it owns the retained
     /// temporary resource:
@@ -178,18 +168,45 @@ impl<T> LocalPersistError<T> {
     /// }
     /// ```
     #[must_use = "the returned tuple retains the temporary resource and persistence context"]
-    pub fn into_parts(
+    pub fn into_parts(self) -> (io::Error, T, PathBuf, Option<PathBuf>, LocalPersistStage) {
+        let (error, resource, requested_target, resolved_target, stage, _) =
+            self.into_parts_with_state();
+        (error, resource, requested_target, resolved_target, stage)
+    }
+
+    /// Splits this error into its retained values, including recovery state.
+    ///
+    /// # Returns
+    ///
+    /// The native error, temporary resource, requested target, resolved target,
+    /// failure stage, and publication state in that order.
+    #[must_use = "the returned tuple retains the temporary resource and persistence context"]
+    pub fn into_parts_with_state(
         self,
-    ) -> (io::Error, T, PathBuf, Option<PathBuf>, LocalPersistStage) {
+    ) -> (
+        io::Error,
+        T,
+        PathBuf,
+        Option<PathBuf>,
+        LocalPersistStage,
+        LocalPersistFailureState,
+    ) {
         let Self {
             error,
             resource,
             requested_target,
             resolved_target,
             stage,
-            state: _,
+            state,
         } = self;
-        (error, *resource, requested_target, resolved_target, stage)
+        (
+            error,
+            *resource,
+            requested_target,
+            resolved_target,
+            stage,
+            state,
+        )
     }
 }
 

@@ -28,8 +28,11 @@ use crate::{
     LocalResult,
 };
 
-/// Namespace for native path validation, binding, and composition.
-pub enum LocalPaths {}
+/// Native path validation, binding, and composition utilities.
+pub struct LocalPaths {
+    /// Prevents construction of this stateless utility type.
+    _private: (),
+}
 
 impl LocalPaths {
     /// Decodes canonical components into an absolute native path.
@@ -49,8 +52,8 @@ impl LocalPaths {
     /// Returns `LocalFileError` with `ComposePath` when canonical decoding
     /// fails or the components do not form a supported absolute path.
     #[inline]
-    pub fn from_canonical_absolute_components(
-        components: Vec<&str>,
+    pub fn from_canonical_absolute_components<'a>(
+        components: impl IntoIterator<Item = &'a str>,
     ) -> LocalResult<PathBuf> {
         from_canonical_absolute_components(components)
     }
@@ -70,8 +73,8 @@ impl LocalPaths {
     ///
     /// Returns `LocalFileError` with `ComposePath` when canonical decoding
     /// fails or a component would alter path authority.
-    pub fn from_canonical_relative_components(
-        components: Vec<&str>,
+    pub fn from_canonical_relative_components<'a>(
+        components: impl IntoIterator<Item = &'a str>,
     ) -> LocalResult<PathBuf> {
         let mut path = PathBuf::new();
         let mut has_component = false;
@@ -550,8 +553,8 @@ const fn has_native_separator(_component: &OsStr) -> bool {
 /// malformed.
 #[cfg(unix)]
 #[inline(never)]
-fn from_canonical_absolute_components(
-    components: Vec<&str>,
+fn from_canonical_absolute_components<'a>(
+    components: impl IntoIterator<Item = &'a str>,
 ) -> LocalResult<PathBuf> {
     let mut components = components.into_iter();
     if components.next() != Some("") {
@@ -605,7 +608,7 @@ fn to_canonical_absolute_components(path: &Path) -> LocalResult<Vec<String>> {
     }
     debug_assert!(matches!(
         LocalPaths::from_canonical_absolute_components(
-            encoded.iter().map(String::as_str).collect(),
+            encoded.iter().map(String::as_str),
         ),
         Ok(decoded) if decoded == path
     ));
@@ -629,8 +632,8 @@ fn to_canonical_absolute_components(path: &Path) -> LocalResult<Vec<String>> {
 /// is malformed.
 #[cfg(windows)]
 #[inline(never)]
-fn from_canonical_absolute_components(
-    components: Vec<&str>,
+fn from_canonical_absolute_components<'a>(
+    components: impl IntoIterator<Item = &'a str>,
 ) -> LocalResult<PathBuf> {
     let mut components = components.into_iter();
     let (Some(root), Some(drive)) = (components.next(), components.next())
@@ -732,8 +735,8 @@ fn to_canonical_absolute_components(path: &Path) -> LocalResult<Vec<String>> {
 /// Always returns a `ComposePath` unsupported error.
 #[cfg(not(any(unix, windows)))]
 #[inline(never)]
-fn from_canonical_absolute_components(
-    _components: Vec<&str>,
+fn from_canonical_absolute_components<'a>(
+    _components: impl IntoIterator<Item = &'a str>,
 ) -> LocalResult<PathBuf> {
     Err(LocalFileError::new(
         LocalFileErrorKind::Unsupported,
