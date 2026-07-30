@@ -14,8 +14,11 @@ use std::{
 
 use crate::LocalPathCodecError;
 
-/// Namespace for reversible canonical conversion of one native path component.
-pub enum LocalPathCodec {}
+/// Reversible canonical conversion for one native path component.
+pub struct LocalPathCodec {
+    /// Prevents construction of this stateless codec type.
+    _private: (),
+}
 
 impl LocalPathCodec {
     /// Converts canonical escaped-byte text to one native path component.
@@ -57,6 +60,121 @@ impl LocalPathCodec {
     ) -> Result<Cow<'a, str>, LocalPathCodecError> {
         platform::encode_native_text(native)
     }
+
+    /// Decodes one raw URI path component into canonical local path text.
+    ///
+    /// URI percent escapes encode bytes, while canonical local path text keeps
+    /// Unicode scalars literal and escapes percent signs, controls, and invalid
+    /// UTF-8 bytes. Callers remain responsible for rejecting decoded native
+    /// separators, roots, and prefixes when assembling hierarchical paths.
+    ///
+    /// # Parameters
+    ///
+    /// - `component`: Raw URI path component without a slash separator.
+    ///
+    /// # Returns
+    ///
+    /// Canonical local path text representing the decoded URI bytes.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`LocalPathCodecError::InvalidEscape`] when `component`
+    /// contains a truncated or non-hexadecimal percent escape.
+    pub fn decode_uri_component(
+        component: &str,
+    ) -> Result<String, LocalPathCodecError> {
+        let bytes = decode_uri_bytes(component)?;
+        if bytes.contains(&0) {
+            return Err(LocalPathCodecError::NativeNul);
+        }
+        Ok(canonicalize_uri_bytes(&bytes))
+    }
+}
+
+/// Strictly percent-decodes a URI component without treating `+` as a space.
+fn decode_uri_bytes(component: &str) -> Result<Vec<u8>, LocalPathCodecError> {
+    let bytes = component.as_bytes();
+    let mut decoded = Vec::with_capacity(bytes.len());
+    let mut index = 0;
+    while index < bytes.len() {
+        if bytes[index] != b'%' {
+            decoded.push(bytes[index]);
+            index += 1;
+            continue;
+        }
+        let high = bytes
+            .get(index + 1)
+            .copied()
+            .ok_or(LocalPathCodecError::InvalidEscape { offset: index })?;
+        let low = bytes
+            .get(index + 2)
+            .copied()
+            .ok_or(LocalPathCodecError::InvalidEscape { offset: index })?;
+        let high = hex_value(high)
+            .ok_or(LocalPathCodecError::InvalidEscape { offset: index })?;
+        let low = hex_value(low)
+            .ok_or(LocalPathCodecError::InvalidEscape { offset: index })?;
+        decoded.push((high << 4) | low);
+        index += 3;
+    }
+    Ok(decoded)
+}
+
+/// Converts one ASCII hexadecimal digit to its numeric value.
+fn hex_value(byte: u8) -> Option<u8> {
+    match byte {
+        b'0'..=b'9' => Some(byte - b'0'),
+        b'a'..=b'f' => Some(byte - b'a' + 10),
+        b'A'..=b'F' => Some(byte - b'A' + 10),
+        _ => None,
+    }
+}
+
+/// Canonicalizes decoded URI bytes without requiring a native path value.
+fn canonicalize_uri_bytes(bytes: &[u8]) -> String {
+    let mut canonical = String::with_capacity(bytes.len());
+    let mut remaining = bytes;
+    while !remaining.is_empty() {
+        match std::str::from_utf8(remaining) {
+            Ok(valid) => {
+                push_uri_scalars(&mut canonical, valid);
+                break;
+            }
+            Err(error) => {
+                let valid_end = error.valid_up_to();
+                let valid = std::str::from_utf8(&remaining[..valid_end])
+                    .expect("valid UTF-8 prefix must decode");
+                push_uri_scalars(&mut canonical, valid);
+                let invalid_len = error.error_len().unwrap_or(1);
+                for byte in &remaining[valid_end..valid_end + invalid_len] {
+                    push_uri_escaped_byte(&mut canonical, *byte);
+                }
+                remaining = &remaining[valid_end + invalid_len..];
+            }
+        }
+    }
+    canonical
+}
+
+/// Appends UTF-8 scalars using local canonical escaped-byte text.
+fn push_uri_scalars(canonical: &mut String, text: &str) {
+    for scalar in text.chars() {
+        if scalar == '%' || scalar.is_control() {
+            for byte in scalar.to_string().bytes() {
+                push_uri_escaped_byte(canonical, byte);
+            }
+        } else {
+            canonical.push(scalar);
+        }
+    }
+}
+
+/// Appends one uppercase percent escape.
+fn push_uri_escaped_byte(canonical: &mut String, byte: u8) {
+    const HEX: &[u8; 16] = b"0123456789ABCDEF";
+    canonical.push('%');
+    canonical.push(char::from(HEX[usize::from(byte >> 4)]));
+    canonical.push(char::from(HEX[usize::from(byte & 0x0F)]));
 }
 
 /// Platform-specific native path representation operations.
