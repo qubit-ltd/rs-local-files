@@ -51,6 +51,7 @@ impl LocalPathCodec {
     ///
     /// Canonical text that preserves all representable native bytes or code
     /// units, or `LocalPathCodecError::NativeNul` when `native` contains NUL.
+    #[inline(always)]
     pub fn decode<'a>(
         native: &'a OsStr,
     ) -> Result<Cow<'a, str>, LocalPathCodecError> {
@@ -106,6 +107,7 @@ mod platform {
     }
 
     /// Appends an uppercase percent escape for one native byte.
+    #[inline]
     fn push_escaped_byte(text: &mut String, byte: u8) {
         const HEX: &[u8; 16] = b"0123456789ABCDEF";
         text.push('%');
@@ -318,6 +320,8 @@ mod platform {
         }
 
         /// Encodes one unpaired UTF-16 surrogate as its three WTF-8 bytes.
+        #[must_use]
+        #[inline]
         fn wtf8_surrogate_bytes(surrogate: u16) -> [u8; 3] {
             [
                 0xE0 | ((surrogate >> 12) as u8),
@@ -340,6 +344,7 @@ mod platform {
         use crate::LocalPathCodecError;
 
         /// Reports that this platform has no supported reversible codec.
+        #[inline(always)]
         pub(crate) fn decode_canonical_text(
             _text: &str,
         ) -> Result<OsString, LocalPathCodecError> {
@@ -347,6 +352,7 @@ mod platform {
         }
 
         /// Reports that this platform has no supported reversible codec.
+        #[inline(always)]
         pub(crate) fn encode_native_text<'a>(
             _native: &'a OsStr,
         ) -> Result<Cow<'a, str>, LocalPathCodecError> {

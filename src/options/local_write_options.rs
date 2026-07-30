@@ -50,36 +50,42 @@ impl LocalWriteOptions {
 
     /// Returns the publication mode.
     #[must_use]
+    #[inline(always)]
     pub const fn mode(&self) -> LocalWriteMode {
         self.mode
     }
 
     /// Reports whether missing parent directories are created.
     #[must_use]
+    #[inline(always)]
     pub const fn creates_parent(&self) -> bool {
         self.create_parent
     }
 
     /// Returns the required atomicity.
     #[must_use]
+    #[inline(always)]
     pub const fn atomicity(&self) -> LocalAtomicityRequirement {
         self.atomicity
     }
 
     /// Returns the required durability.
     #[must_use]
+    #[inline(always)]
     pub const fn durability(&self) -> LocalDurabilityRequirement {
         self.durability
     }
 
     /// Returns the configured Unix open retry timeout.
     #[must_use]
+    #[inline(always)]
     pub const fn open_retry_timeout(&self) -> Option<Duration> {
         self.open_retry_timeout
     }
 
     /// Enables creation of missing parent directories.
     #[must_use]
+    #[inline(always)]
     pub const fn with_parent(mut self) -> Self {
         self.create_parent = true;
         self
@@ -87,6 +93,7 @@ impl LocalWriteOptions {
 
     /// Sets the required atomicity.
     #[must_use]
+    #[inline(always)]
     pub const fn with_atomicity(
         mut self,
         atomicity: LocalAtomicityRequirement,
@@ -97,6 +104,7 @@ impl LocalWriteOptions {
 
     /// Sets the required durability.
     #[must_use]
+    #[inline(always)]
     pub const fn with_durability(
         mut self,
         durability: LocalDurabilityRequirement,
@@ -107,6 +115,7 @@ impl LocalWriteOptions {
 
     /// Sets the maximum time spent retrying Unix lease conflicts.
     #[must_use]
+    #[inline(always)]
     pub const fn with_open_retry_timeout(mut self, timeout: Duration) -> Self {
         self.open_retry_timeout = Some(timeout);
         self

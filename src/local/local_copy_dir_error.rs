@@ -73,7 +73,7 @@ impl LocalCopyDirError {
     ///
     /// # Returns
     /// New recursive-copy error retaining the native source error.
-    #[inline]
+    #[inline(always)]
     pub(crate) fn new(
         stage: LocalCopyDirStage,
         source_path: PathBuf,
@@ -96,6 +96,7 @@ impl LocalCopyDirError {
     ///
     /// # Returns
     /// Failed recursive-copy stage.
+    #[inline(always)]
     pub const fn stage(&self) -> LocalCopyDirStage {
         self.stage
     }
@@ -105,6 +106,7 @@ impl LocalCopyDirError {
     /// # Returns
     /// Source path being processed.
     #[must_use]
+    #[inline(always)]
     pub fn source_path(&self) -> &Path {
         &self.source_path
     }
@@ -114,6 +116,7 @@ impl LocalCopyDirError {
     /// # Returns
     /// Destination path being processed.
     #[must_use]
+    #[inline(always)]
     pub fn destination_path(&self) -> &Path {
         &self.destination_path
     }
@@ -123,6 +126,7 @@ impl LocalCopyDirError {
     /// # Returns
     /// Partial recursive-copy statistics.
     #[must_use]
+    #[inline(always)]
     pub const fn stats(&self) -> &LocalCopyDirStats {
         &self.stats
     }
@@ -131,6 +135,7 @@ impl LocalCopyDirError {
     ///
     /// # Returns
     /// Staging path retained for diagnostics.
+    #[inline(always)]
     pub fn temporary_path(&self) -> Option<&Path> {
         self.temporary_path.as_deref()
     }
@@ -139,6 +144,7 @@ impl LocalCopyDirError {
     ///
     /// # Returns
     /// Cleanup error without replacing the primary source error.
+    #[inline(always)]
     pub fn cleanup_error(&self) -> Option<&io::Error> {
         self.cleanup_error.as_ref()
     }
@@ -148,6 +154,7 @@ impl LocalCopyDirError {
     /// # Returns
     /// Retained primary I/O error.
     #[must_use]
+    #[inline(always)]
     pub const fn error(&self) -> &io::Error {
         &self.error
     }
@@ -157,6 +164,7 @@ impl LocalCopyDirError {
     /// # Returns
     /// Error kind reported by the retained source error.
     #[must_use]
+    #[inline]
     pub fn kind(&self) -> io::ErrorKind {
         self.error.kind()
     }

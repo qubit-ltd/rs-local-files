@@ -92,11 +92,13 @@ impl RootedLocalFileSystem {
 
     /// Returns the non-authoritative diagnostic path captured at open time.
     #[must_use]
+    #[inline(always)]
     pub fn diagnostic_path(&self) -> &Path {
         self.root.path()
     }
 
     /// Returns the capability snapshot cached for this opened authority.
+    #[inline(always)]
     pub const fn capabilities(&self) -> LocalFileSystemCapabilities {
         self.capabilities
     }
@@ -829,6 +831,8 @@ fn sync_rooted_copy_parent_chain(
 }
 
 /// Wraps a rooted preflight failure that proves no namespace mutation occurred.
+#[must_use]
+#[inline(always)]
 fn rooted_rename_failure_unchanged(
     error: LocalFileError,
 ) -> LocalRenameFailure {
@@ -836,6 +840,7 @@ fn rooted_rename_failure_unchanged(
 }
 
 /// Wraps a rooted failure after a completed native rename.
+#[inline(always)]
 fn rooted_rename_failure_renamed(error: LocalFileError) -> LocalRenameFailure {
     LocalRenameFailure::new(error, LocalRenameFailureState::Renamed)
 }
@@ -1018,6 +1023,7 @@ pub(crate) fn rooted_metadata(
 /// # Returns
 ///
 /// Structured rooted local filesystem error.
+#[inline(always)]
 fn rooted_io_error(
     operation: LocalFileOperation,
     path: &Path,

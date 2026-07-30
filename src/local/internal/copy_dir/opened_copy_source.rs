@@ -189,6 +189,8 @@ fn reject_non_regular_source(path: &Path, metadata: &Metadata) -> Result<()> {
 }
 
 /// Creates the stable error used for a non-regular copy source.
+#[must_use]
+#[inline]
 fn invalid_copy_source(path: &Path) -> Error {
     Error::new(
         ErrorKind::InvalidInput,

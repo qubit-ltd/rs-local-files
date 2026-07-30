@@ -51,6 +51,7 @@ impl LocalPersistOptions {
     /// # Returns
     /// `true` when target replacement is enabled.
     #[must_use]
+    #[inline(always)]
     pub const fn overwrites(&self) -> bool {
         self.overwrite
     }
@@ -59,6 +60,7 @@ impl LocalPersistOptions {
     ///
     /// # Returns
     /// Updated persistence options that permit overwriting.
+    #[inline(always)]
     pub const fn with_overwrite(mut self) -> Self {
         self.overwrite = true;
         self
@@ -70,6 +72,7 @@ impl Default for LocalPersistOptions {
     ///
     /// # Returns
     /// Options that reject existing destination paths.
+    #[inline]
     fn default() -> Self {
         Self::new()
     }

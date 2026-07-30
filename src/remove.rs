@@ -17,6 +17,7 @@ use crate::local::remove_any_path;
 ///
 /// # Errors
 /// Returns the I/O error reported by the filesystem.
+#[inline(always)]
 pub fn file(path: &Path) -> Result<()> {
     fs::remove_file(path)
 }
@@ -25,6 +26,7 @@ pub fn file(path: &Path) -> Result<()> {
 ///
 /// # Errors
 /// Returns the I/O error reported by the filesystem.
+#[inline(always)]
 pub fn empty_directory(path: &Path) -> Result<()> {
     fs::remove_dir(path)
 }
@@ -33,6 +35,7 @@ pub fn empty_directory(path: &Path) -> Result<()> {
 ///
 /// # Errors
 /// Returns the I/O error reported by the filesystem.
+#[inline(always)]
 pub fn directory_tree(path: &Path) -> Result<()> {
     fs::remove_dir_all(path)
 }
@@ -41,6 +44,7 @@ pub fn directory_tree(path: &Path) -> Result<()> {
 ///
 /// # Errors
 /// Returns an I/O error when the path cannot be inspected or removed.
+#[inline(always)]
 pub fn any(path: &Path) -> Result<()> {
     remove_any_path(path)
 }

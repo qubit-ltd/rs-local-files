@@ -636,6 +636,7 @@ fn rooted_open_error(
 /// # Returns
 ///
 /// An invalid-input error naming the required type.
+#[inline]
 pub(super) fn rooted_type_error(path: &Path, expected: &str) -> Error {
     Error::new(
         ErrorKind::InvalidInput,

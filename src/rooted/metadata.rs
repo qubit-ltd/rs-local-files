@@ -247,6 +247,7 @@ impl Metadata {
 
 /// Converts a platform-native mode into portable permission bits.
 #[cfg(unix)]
+#[must_use]
 #[inline(always)]
 fn permission_mode<T>(mode: T) -> u32
 where
@@ -267,6 +268,7 @@ where
 
 /// Classifies one platform-native `st_mode` value.
 #[cfg(unix)]
+#[must_use]
 #[inline]
 fn entry_kind_from_mode<T>(mode: T) -> EntryKind
 where

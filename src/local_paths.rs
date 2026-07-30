@@ -48,6 +48,7 @@ impl LocalPaths {
     ///
     /// Returns `LocalFileError` with `ComposePath` when canonical decoding
     /// fails or the components do not form a supported absolute path.
+    #[inline]
     pub fn from_canonical_absolute_components(
         components: Vec<&str>,
     ) -> LocalResult<PathBuf> {
@@ -100,6 +101,7 @@ impl LocalPaths {
     ///
     /// Returns `LocalFileError` with `ComposePath` when the path is not a
     /// supported absolute shape or one component cannot be canonically encoded.
+    #[inline(always)]
     pub fn to_canonical_absolute_components(
         path: &Path,
     ) -> LocalResult<Vec<String>> {
@@ -285,6 +287,8 @@ impl LocalPaths {
 /// # Returns
 ///
 /// `true` when `.` or `..` is present.
+#[must_use]
+#[inline]
 fn has_disallowed_component(path: &Path) -> bool {
     path.components().any(|component| {
         matches!(component, Component::CurDir | Component::ParentDir)
@@ -301,6 +305,7 @@ fn has_disallowed_component(path: &Path) -> bool {
 ///
 /// `true` when a raw component is `.` or `..`.
 #[cfg(unix)]
+#[must_use]
 fn has_raw_dot_component(path: &Path) -> bool {
     use std::os::unix::ffi::OsStrExt;
 
@@ -316,6 +321,8 @@ fn has_raw_dot_component(path: &Path) -> bool {
 ///
 /// A `ComposePath` invalid-input error with no native path context, because
 /// the rejected shape may not be safely representable as a path.
+#[must_use]
+#[inline(always)]
 fn invalid_path_error() -> LocalFileError {
     LocalFileError::new(
         LocalFileErrorKind::InvalidInput,
@@ -360,6 +367,7 @@ fn current_directory_for_binding(fault: &str) -> std::io::Result<PathBuf> {
 ///
 /// Returns the native current-directory I/O error.
 #[cfg(not(coverage))]
+#[inline(always)]
 fn current_directory_for_binding(_fault: &str) -> std::io::Result<PathBuf> {
     env::current_dir()
 }
@@ -426,6 +434,7 @@ fn decode_canonical_component(component: &str) -> LocalResult<OsString> {
 ///
 /// `true` only for non-empty normal components without either native path
 /// separator; `false` for roots, prefixes, dots, parents, and separators.
+#[must_use]
 fn is_normal_native_component(component: &OsStr) -> bool {
     !has_native_separator(component)
         && matches!(
@@ -479,6 +488,7 @@ fn encode_normal_components(path: &Path) -> LocalResult<Vec<String>> {
 /// `true` when the component contains a separator that would make `push`
 /// interpret it as more than one lexical component.
 #[cfg(unix)]
+#[inline]
 fn has_native_separator(component: &OsStr) -> bool {
     use std::os::unix::ffi::OsStrExt;
 
@@ -700,6 +710,7 @@ fn from_canonical_absolute_components(
 ///
 /// Always returns a `ComposePath` unsupported-platform error.
 #[cfg(not(any(unix, windows)))]
+#[inline(always)]
 fn to_canonical_absolute_components(_path: &Path) -> LocalResult<Vec<String>> {
     Err(LocalFileError::new(
         LocalFileErrorKind::Unsupported,
