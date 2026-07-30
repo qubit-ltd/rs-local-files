@@ -441,9 +441,11 @@ impl LocalFileSystem {
         .map_err(|error| copy_pipeline_failure(&source, &target, error))?;
         let durable = published_durability(
             options.durability(),
-            fs::File::open(&target)
-                .and_then(|file| file.sync_all())
-                .and_then(|()| sync_rename_parent(&target)),
+            || {
+                fs::File::open(&target)
+                    .and_then(|file| file.sync_all())
+                    .and_then(|()| sync_rename_parent(&target))
+            },
             LocalFileOperation::Copy,
             &source,
             &target,
@@ -771,7 +773,7 @@ impl LocalFileSystem {
 
         let durable = published_durability(
             options.durability(),
-            sync_rename_parent(&target),
+            || sync_rename_parent(&target),
             LocalFileOperation::Rename,
             &source,
             &target,
@@ -987,7 +989,7 @@ fn require_directory_durability(
 /// # Parameters
 ///
 /// - `requirement`: Requested durability policy.
-/// - `sync`: File and parent synchronization result after publication.
+/// - `sync`: File and parent synchronization operation after publication.
 /// - `operation`: Operation that already published its destination.
 /// - `source`: Primary path.
 /// - `target`: Destination path.
@@ -1003,16 +1005,16 @@ fn require_directory_durability(
 /// synchronization fails after the namespace mutation.
 fn published_durability(
     requirement: LocalDurabilityRequirement,
-    sync: io::Result<()>,
+    sync: impl FnOnce() -> io::Result<()>,
     operation: LocalFileOperation,
     source: &Path,
     target: &Path,
 ) -> LocalResult<bool> {
     match requirement {
         LocalDurabilityRequirement::NotRequired => Ok(false),
-        LocalDurabilityRequirement::Preferred => Ok(sync.is_ok()),
+        LocalDurabilityRequirement::Preferred => Ok(sync().is_ok()),
         LocalDurabilityRequirement::Required => {
-            sync.map(|()| true).map_err(|error| {
+            sync().map(|()| true).map_err(|error| {
                 LocalFileError::from_io(
                     operation,
                     Some(source.to_path_buf()),
