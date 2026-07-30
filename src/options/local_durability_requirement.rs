@@ -10,6 +10,7 @@
 
 /// Required storage durability for a completed operation.
 #[derive(Clone, Copy, Debug, Default, Eq, Hash, PartialEq)]
+#[must_use]
 pub enum LocalDurabilityRequirement {
     /// File data and relevant parent namespace updates must be synchronized.
     Required,

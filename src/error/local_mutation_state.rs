@@ -10,6 +10,7 @@
 
 /// Namespace state established after a mutating filesystem failure.
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
+#[must_use]
 pub enum LocalMutationState {
     /// No destination publication began.
     NotPublished,

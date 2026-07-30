@@ -13,6 +13,7 @@ use std::time::Duration;
 #[must_use = "read-open options have no effect unless they are used"]
 #[non_exhaustive]
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+#[must_use = "read-open options have no effect unless they are used"]
 pub struct OpenOptions {
     /// Optional maximum time spent retrying Unix lease-conflicting opens.
     open_retry_timeout: Option<Duration>,

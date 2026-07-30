@@ -15,6 +15,7 @@ use super::{
 
 /// Options for renaming a native filesystem entry.
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+#[must_use = "rename options have no effect unless they are used"]
 pub struct LocalRenameOptions {
     /// Whether an existing destination may be replaced.
     overwrite: bool,

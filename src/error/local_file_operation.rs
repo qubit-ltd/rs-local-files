@@ -11,6 +11,7 @@
 /// Local filesystem operation that produced an error.
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
 #[non_exhaustive]
+#[must_use]
 pub enum LocalFileOperation {
     /// Querying filesystem capabilities.
     Capabilities,

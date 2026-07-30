@@ -10,6 +10,7 @@
 
 /// Metadata preservation requested during native copy or persistence.
 #[derive(Clone, Copy, Debug, Default, Eq, Hash, PartialEq)]
+#[must_use]
 pub enum LocalMetadataPreservePolicy {
     /// Do not copy source metadata.
     #[default]

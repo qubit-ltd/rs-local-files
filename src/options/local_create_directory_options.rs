@@ -10,6 +10,7 @@
 
 /// Options for creating a native directory.
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+#[must_use = "directory creation options have no effect unless they are used"]
 pub struct LocalCreateDirectoryOptions {
     /// Whether missing ancestors should also be created.
     recursive: bool,

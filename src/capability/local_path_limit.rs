@@ -12,6 +12,7 @@ use super::LocalPathLengthUnit;
 
 /// Known native path-length limit and its platform-specific unit.
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
+#[must_use]
 pub struct LocalPathLimit {
     /// Maximum known path length.
     value: usize,

@@ -12,6 +12,7 @@ use std::time::Duration;
 
 /// Options for opening a native local file reader.
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+#[must_use = "read options have no effect unless they are used"]
 pub struct LocalReadOptions {
     /// Optional maximum time spent retrying Unix lease conflicts.
     open_retry_timeout: Option<Duration>,

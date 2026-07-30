@@ -10,6 +10,7 @@
 /// Statistics reported by recursive directory copy operations.
 #[non_exhaustive]
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+#[must_use]
 pub struct LocalCopyDirStats {
     /// Number of regular files copied.
     pub files: u64,

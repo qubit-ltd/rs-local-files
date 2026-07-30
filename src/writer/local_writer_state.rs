@@ -10,6 +10,7 @@
 
 /// Observable state of a native writer publication session.
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
+#[must_use]
 pub enum LocalWriterState {
     /// The byte stream remains writable.
     Open,

@@ -10,6 +10,7 @@
 
 /// Options for deleting a native filesystem entry.
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+#[must_use = "delete options have no effect unless they are used"]
 pub struct LocalDeleteOptions {
     /// Whether directory descendants should be removed.
     recursive: bool,

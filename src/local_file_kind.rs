@@ -10,6 +10,7 @@
 
 /// Normalized kind of a native filesystem entry.
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
+#[must_use]
 pub enum LocalFileKind {
     /// Regular file.
     File,

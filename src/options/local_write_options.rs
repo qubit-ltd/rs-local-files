@@ -18,6 +18,7 @@ use super::{
 
 /// Options fixed for a local file writer session.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
+#[must_use = "write options have no effect unless they are used"]
 pub struct LocalWriteOptions {
     /// Destination publication mode.
     mode: LocalWriteMode,

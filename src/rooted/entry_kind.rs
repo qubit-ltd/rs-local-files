@@ -10,6 +10,7 @@
 /// The type of a rooted filesystem entry observed without following its final
 /// symbolic link.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
+#[must_use]
 pub enum EntryKind {
     /// A regular file.
     File,

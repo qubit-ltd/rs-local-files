@@ -10,6 +10,7 @@
 
 /// Publication mode for a local file writer.
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
+#[must_use]
 pub enum LocalWriteMode {
     /// Publish only when the destination does not exist.
     CreateNew,

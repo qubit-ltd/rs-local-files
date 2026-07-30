@@ -10,6 +10,7 @@
 
 /// Unit used by a native path-length limit.
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
+#[must_use]
 pub enum LocalPathLengthUnit {
     /// Native path bytes, as used by Unix APIs.
     Bytes,

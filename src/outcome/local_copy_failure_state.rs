@@ -12,6 +12,7 @@
 
 /// Namespace state proven by a failed unified copy operation.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
+#[must_use]
 pub enum LocalCopyFailureState {
     /// No destination entry was changed.
     Unchanged,

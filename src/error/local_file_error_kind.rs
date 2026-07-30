@@ -11,6 +11,7 @@
 /// Stable classification of local filesystem failures.
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
 #[non_exhaustive]
+#[must_use]
 pub enum LocalFileErrorKind {
     /// A path, filename, option, or state is invalid.
     InvalidInput,
