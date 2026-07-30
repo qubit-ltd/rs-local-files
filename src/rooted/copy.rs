@@ -23,6 +23,7 @@ use crate::copy::{
 };
 use crate::{
     LocalCopyDirError,
+    LocalDurabilityRequirement,
     atomic,
     read,
 };
@@ -79,6 +80,7 @@ pub(super) fn copy(
     source: &Path,
     destination: &Path,
     options: Options,
+    durability: LocalDurabilityRequirement,
 ) -> Result<Statistics, Error> {
     if options.follows_symlinks() {
         return Err(error(
@@ -121,6 +123,7 @@ pub(super) fn copy(
             source,
             destination,
             &options,
+            durability,
             Statistics::default(),
         ),
         EntryKind::Directory => {
@@ -136,7 +139,14 @@ pub(super) fn copy(
                     ),
                 ));
             }
-            copy_tree(root, source, destination, source_metadata, &options)
+            copy_tree(
+                root,
+                source,
+                destination,
+                source_metadata,
+                &options,
+                durability,
+            )
         }
         EntryKind::Symlink | EntryKind::Other => Err(error(
             Stage::InspectSource,
@@ -155,6 +165,7 @@ fn copy_tree(
     destination: &Path,
     source_metadata: Metadata,
     options: &Options,
+    durability: LocalDurabilityRequirement,
 ) -> Result<Statistics, Error> {
     let mut statistics = Statistics::default();
     if !prepare_directory(root, source, destination, options, &mut statistics)?
@@ -219,6 +230,7 @@ fn copy_tree(
                                 &source_child,
                                 &destination_child,
                                 options,
+                                durability,
                                 statistics,
                             )?;
                         }
@@ -411,6 +423,7 @@ fn copy_file(
     source: &Path,
     destination: &Path,
     options: &Options,
+    durability: LocalDurabilityRequirement,
     mut statistics: Statistics,
 ) -> Result<Statistics, Error> {
     #[cfg(coverage)]
@@ -571,7 +584,10 @@ fn copy_file(
         }
     }
     let mut writer = root
-        .begin_atomic_write_with_options(destination, atomic::Options::new())
+        .begin_atomic_write_with_options(
+            destination,
+            atomic::Options::new().with_durability(durability),
+        )
         .map_err(|source_error| {
             let source_error =
                 io::Error::new(source_error.kind(), source_error);
