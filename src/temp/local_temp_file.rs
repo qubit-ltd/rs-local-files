@@ -154,6 +154,12 @@ impl LocalTempFile {
         self.persist_with_path(target.as_ref(), options)
     }
 
+    /// Returns the mutable open file handle, or an error after [`Self::close`].
+    #[inline(always)]
+    pub fn as_file_mut(&mut self) -> Result<&mut File> {
+        self.file.as_mut().ok_or_else(closed_file_error)
+    }
+
     /// Persists the file to a resolved public-API target path.
     fn persist_with_path(
         mut self,
@@ -257,12 +263,6 @@ impl LocalTempFile {
             true,
             false,
         ))
-    }
-
-    /// Returns the mutable open file handle, or an error after [`Self::close`].
-    #[inline(always)]
-    pub fn as_file_mut(&mut self) -> Result<&mut File> {
-        self.file.as_mut().ok_or_else(closed_file_error)
     }
 
     /// Removes the resource using the retained backend rather than a diagnostic
