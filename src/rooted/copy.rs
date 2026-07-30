@@ -761,6 +761,7 @@ fn checked_add(
 }
 
 /// Creates one structured rooted-copy error.
+#[inline]
 fn error(
     stage: Stage,
     source: &Path,

@@ -38,6 +38,7 @@ impl LocalWriteOptions {
     ///
     /// - `mode`: Destination publication mode.
     #[must_use]
+    #[inline]
     pub const fn new(mode: LocalWriteMode) -> Self {
         Self {
             mode,

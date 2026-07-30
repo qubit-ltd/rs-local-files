@@ -316,6 +316,7 @@ fn read_directory_handle(
 }
 
 /// Opens a no-follow child directory from an already-open parent.
+#[inline]
 fn open_directory_component(parent: &File, name: &CString) -> Result<File> {
     super::rooted_file_io::open_file_at(
         parent,
@@ -354,6 +355,7 @@ fn stat_child(
 }
 
 /// Reads no-follow metadata for a rooted path.
+#[inline]
 fn rooted_status(
     root: &File,
     diagnostic_root: &Path,
@@ -374,6 +376,7 @@ const fn is_directory(mode: libc::mode_t) -> bool {
 
 /// Performs an atomic no-replace rename where the platform supports it.
 #[cfg(any(target_os = "linux", target_os = "android"))]
+#[inline]
 fn rename_without_replacing(
     source_parent: &File,
     source_name: &CString,
@@ -395,6 +398,7 @@ fn rename_without_replacing(
 
 /// Performs an atomic no-replace rename on Apple platforms.
 #[cfg(any(target_os = "macos", target_os = "ios"))]
+#[inline]
 fn rename_without_replacing(
     source_parent: &File,
     source_name: &CString,
@@ -421,6 +425,7 @@ fn rename_without_replacing(
     target_os = "macos",
     target_os = "ios",
 )))]
+#[inline]
 fn rename_without_replacing(
     _source_parent: &File,
     _source_name: &CString,

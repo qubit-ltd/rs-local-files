@@ -267,6 +267,7 @@ impl LocalTempFile {
 
     /// Removes the resource using the retained backend rather than a diagnostic
     /// path.
+    #[inline]
     fn remove(&self) -> Result<()> {
         match &self.backend {
             LocalTempResourceBackend::Host(_) => {
@@ -282,6 +283,7 @@ impl LocalTempFile {
 
     /// Rejects namespace cleanup after an indeterminate native publication
     /// attempt.
+    #[inline]
     fn ensure_cleanup_safe(&self) -> Result<()> {
         if self.state == LocalTempResourceState::Indeterminate {
             return Err(Error::other(
@@ -292,6 +294,7 @@ impl LocalTempFile {
     }
 
     /// Records whether a failed native install proves the source remains owned.
+    #[inline]
     fn record_native_persist_failure(&mut self, error: &Error) {
         self.state = if LocalPersistFailureState::from_error(
             LocalPersistStage::InstallDestination,

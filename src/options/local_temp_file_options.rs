@@ -30,6 +30,7 @@ pub struct LocalTempFileOptions {
 impl LocalTempFileOptions {
     /// Creates default temporary-file options.
     #[must_use]
+    #[inline]
     pub const fn new() -> Self {
         Self {
             parent: None,

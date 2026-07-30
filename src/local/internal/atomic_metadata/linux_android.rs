@@ -230,6 +230,7 @@ fn get_xattr(file: &File, name: &[u8]) -> Result<Vec<u8>> {
 }
 
 /// Gets an optional extended-attribute value, retrying size races.
+#[inline]
 fn get_optional_xattr(file: &File, name: &[u8]) -> Result<Option<Vec<u8>>> {
     #[cfg(coverage)]
     if super::super::coverage_fault::is_enabled("atomic-metadata-equal-value") {
@@ -366,6 +367,7 @@ fn read_xattr_value(
 /// # Errors
 /// Returns the injected error or the operating system's last error when the
 /// native syscall returns `-1`.
+#[inline]
 fn xattr_size_result(
     result: isize,
     forced_error: Option<i32>,
@@ -440,6 +442,7 @@ fn remove_xattr(file: &File, name: &[u8]) -> Result<()> {
 }
 
 /// Converts an xattr name to a native C string.
+#[inline]
 fn native_name(name: &[u8]) -> Result<CString> {
     match CString::new(name) {
         Ok(name) => Ok(name),

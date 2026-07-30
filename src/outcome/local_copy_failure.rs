@@ -165,6 +165,7 @@ impl LocalCopyFailure {
     }
 
     /// Consumes this failure and returns every retained part.
+    #[inline]
     pub fn into_parts(
         self,
     ) -> (
