@@ -11,7 +11,6 @@
 #[must_use]
 #[non_exhaustive]
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
-#[must_use]
 pub enum Mode {
     /// Opens an existing file at offset zero without truncating it.
     OpenExistingAtStart,
