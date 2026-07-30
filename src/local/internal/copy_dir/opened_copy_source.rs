@@ -117,6 +117,7 @@ fn open_copy_source(
 
 /// Normalizes final-link and non-openable special-file errors.
 #[cfg(unix)]
+#[inline]
 fn normalize_unix_source_open_error(path: &Path, error: Error) -> Error {
     match error.raw_os_error() {
         Some(libc::ELOOP | libc::ENXIO | libc::ENODEV) => {
@@ -180,6 +181,7 @@ fn open_copy_source(
 }
 
 /// Rejects metadata that does not represent a regular file.
+#[inline]
 fn reject_non_regular_source(path: &Path, metadata: &Metadata) -> Result<()> {
     if metadata.is_file() {
         Ok(())

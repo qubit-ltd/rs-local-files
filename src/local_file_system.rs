@@ -81,6 +81,7 @@ impl LocalFileSystem {
     /// # Errors
     ///
     /// Returns `LocalFileError` when the path cannot be inspected.
+    #[inline]
     pub fn metadata(path: &Path) -> LocalResult<LocalFileMetadata> {
         fs::symlink_metadata(path)
             .map(|metadata| LocalFileMetadata::from_native(&metadata))
@@ -802,6 +803,7 @@ impl LocalFileSystem {
 }
 
 /// Creates missing copy target parents and returns directories requiring sync.
+#[inline]
 fn prepare_copy_parent(
     target: &Path,
     options: &LocalCopyOptions,
@@ -914,6 +916,7 @@ fn coverage_io_fault(_fault: &str) -> Option<io::Error> {
 /// # Returns
 ///
 /// Structured rename error.
+#[inline]
 fn rename_io_error(
     source: &Path,
     target: &Path,
@@ -941,6 +944,7 @@ fn rename_failure_renamed(error: LocalFileError) -> LocalRenameFailure {
 
 /// Maps a native rename failure to the strongest state guaranteed by its
 /// contract.
+#[inline]
 fn rename_failure_after_native_attempt(
     source: &Path,
     target: &Path,
@@ -1246,6 +1250,7 @@ fn windows_file_identity(path: &Path) -> io::Result<(u32, u64)> {
 ///
 /// Invalid-input copy error.
 #[must_use]
+#[inline]
 fn copy_alias_error(source: &Path, target: &Path) -> LocalFileError {
     LocalFileError::new(
         LocalFileErrorKind::InvalidInput,
@@ -1266,6 +1271,7 @@ fn copy_pipeline_failure(
 }
 
 /// Wraps a pre-publication copy error with an unchanged destination state.
+#[inline]
 fn copy_failure_unchanged(error: LocalFileError) -> LocalCopyFailure {
     LocalCopyFailure::new(
         error,
@@ -1278,6 +1284,7 @@ fn copy_failure_unchanged(error: LocalFileError) -> LocalCopyFailure {
 
 /// Wraps a post-publication durability error with a published destination
 /// state.
+#[inline]
 fn copy_failure_published(
     error: LocalFileError,
     partial_stats: LocalCopyStats,
@@ -1302,6 +1309,7 @@ fn copy_failure_published(
 /// # Returns
 ///
 /// Structured copy error.
+#[inline]
 fn copy_io_error(
     source: &Path,
     target: &Path,

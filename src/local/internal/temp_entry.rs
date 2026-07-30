@@ -178,6 +178,7 @@ pub(crate) fn create_temp_dir_in_dir_with_affixes(
 ///
 /// # Errors
 /// Returns the I/O error reported while creating the directory.
+#[inline]
 pub(crate) fn create_private_dir(path: &Path) -> Result<()> {
     #[cfg(unix)]
     let mut builder = DirBuilder::new();
@@ -214,6 +215,7 @@ fn should_retry_collision(
 ///
 /// # Errors
 /// Returns [`ErrorKind::InvalidInput`] when `max_tries` is zero.
+#[inline]
 fn validate_max_tries(max_tries: usize) -> Result<()> {
     if max_tries == 0 {
         return Err(Error::new(

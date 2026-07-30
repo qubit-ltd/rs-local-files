@@ -403,6 +403,7 @@ fn next_rooted_entry(
 ///
 /// Structured listing error.
 #[must_use]
+#[inline]
 fn walk_io_error(path: &Path, error: std::io::Error) -> LocalFileError {
     LocalFileError::from_io(
         LocalFileOperation::List,

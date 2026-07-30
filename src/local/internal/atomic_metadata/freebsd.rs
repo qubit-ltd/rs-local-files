@@ -330,6 +330,7 @@ fn remove_attribute(
 }
 
 /// Converts an attribute name to a native C string.
+#[inline]
 fn native_name(name: &[u8]) -> Result<CString> {
     CString::new(name).map_err(|_| {
         Error::new(

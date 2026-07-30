@@ -81,6 +81,7 @@ pub(crate) fn verify_atomic_destination_identity(
 /// # Returns
 ///
 /// A structured pre-installation failure.
+#[inline]
 fn identity_error(
     requested_path: &Path,
     source: Error,

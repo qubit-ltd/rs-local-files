@@ -41,6 +41,7 @@ impl LocalCopyOutcome {
     /// - `durable`: Whether durability synchronization completed.
     /// - `metadata_preservation`: Metadata preservation applied to copied
     ///   entries.
+    #[inline]
     pub(crate) const fn new(
         stats: LocalCopyStats,
         method: LocalCopyMethod,

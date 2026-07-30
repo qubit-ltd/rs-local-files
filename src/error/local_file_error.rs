@@ -109,6 +109,7 @@ impl LocalFileError {
     /// A structured invalid-input error whose source is `PathCodec(error)`.
     #[must_use]
     #[allow(dead_code)]
+    #[inline]
     pub(crate) fn from_path_codec(
         operation: LocalFileOperation,
         path: Option<PathBuf>,

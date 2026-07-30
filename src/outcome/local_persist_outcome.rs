@@ -30,6 +30,7 @@ pub struct LocalPersistOutcome {
 
 impl LocalPersistOutcome {
     /// Creates a temporary-resource persistence outcome.
+    #[inline]
     pub(crate) const fn new(
         path: PathBuf,
         method: LocalPersistMethod,

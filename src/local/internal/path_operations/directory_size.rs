@@ -154,6 +154,7 @@ fn dir_size_iterative(
 ///
 /// # Returns
 /// The next entry result, or `None` when the directory is exhausted.
+#[inline]
 fn next_dir_size_entry(
     frame: &mut DirSizeFrame,
 ) -> Option<Result<fs::DirEntry>> {
@@ -179,6 +180,7 @@ fn next_dir_size_entry(
 ///
 /// # Errors
 /// Returns the native metadata error or the selected coverage fault.
+#[inline]
 fn read_dir_size_metadata(path: &Path) -> Result<fs::Metadata> {
     #[cfg(coverage)]
     if coverage_fault::is_enabled("dir-size-metadata") {
@@ -197,6 +199,7 @@ fn read_dir_size_metadata(path: &Path) -> Result<fs::Metadata> {
 ///
 /// # Errors
 /// Returns the native directory-open error or the selected coverage fault.
+#[inline]
 fn read_dir_size_entries(path: &Path) -> Result<fs::ReadDir> {
     #[cfg(coverage)]
     if coverage_fault::is_enabled("dir-size-read-dir") {

@@ -362,6 +362,7 @@ impl LocalAtomicWriter {
     /// # Panics
     /// Propagates callback panics after the staging guard attempts best-effort
     /// cleanup while unwinding.
+    #[inline]
     pub(crate) fn write_with<F>(
         mut self,
         write: F,
@@ -538,6 +539,7 @@ impl LocalAtomicWriter {
     ///
     /// Returns the structured namespace-race error produced by the identity
     /// verifier while retaining staging for retry or explicit abort.
+    #[inline]
     fn verify_destination_for_commit(
         &mut self,
         destination: Option<&OpenedAtomicDestination>,
@@ -567,14 +569,15 @@ impl LocalAtomicWriter {
             return Ok(());
         }
         let exists = if self.preserve_destination_metadata {
-            with_atomic_context(
-                existing_file_metadata(&self.operation_path, false),
-                LocalAtomicWriteStage::ReplaceDestination,
-                &self.path,
-                Some(self.staged_file.path().to_path_buf()),
-                LocalAtomicDestinationState::Unchanged,
-            )?
-            .0
+            let (exists, _metadata_preservation_required) =
+                with_atomic_context(
+                    existing_file_metadata(&self.operation_path, false),
+                    LocalAtomicWriteStage::ReplaceDestination,
+                    &self.path,
+                    Some(self.staged_file.path().to_path_buf()),
+                    LocalAtomicDestinationState::Unchanged,
+                )?;
+            exists
         } else {
             with_atomic_context(
                 fs::symlink_metadata(&self.operation_path).map(|_| true),
@@ -608,6 +611,7 @@ impl LocalAtomicWriter {
     /// # Returns
     ///
     /// The failure enriched with any staging cleanup error.
+    #[inline]
     fn finalize_failed_commit(
         mut self,
         error: LocalAtomicWriteError,
@@ -713,6 +717,7 @@ impl Write for LocalAtomicWriter {
 }
 
 /// Adds atomic-write context to a native I/O result.
+#[inline]
 fn with_atomic_context<T>(
     result: io::Result<T>,
     stage: LocalAtomicWriteStage,
@@ -732,6 +737,7 @@ fn with_atomic_context<T>(
 }
 
 /// Creates an atomic-write error and explicitly cleans up its staging file.
+#[inline]
 fn atomic_error_with_staging(
     stage: LocalAtomicWriteStage,
     path: &Path,
@@ -751,6 +757,7 @@ fn atomic_error_with_staging(
 }
 
 /// Adds atomic-write context and cleanup to a staging operation result.
+#[inline(always)]
 fn with_staging_cleanup<T>(
     result: io::Result<T>,
     stage: LocalAtomicWriteStage,

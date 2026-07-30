@@ -129,6 +129,7 @@ pub(crate) fn open_root_directory(path: &Path) -> Result<File> {
 /// # Errors
 ///
 /// Returns an I/O error when traversal, opening, or metadata inspection fails.
+#[inline]
 pub(crate) fn read_rooted_symlink_metadata(
     root: &File,
     _diagnostic_root: &Path,
@@ -340,6 +341,7 @@ pub(crate) fn remove_rooted_entry(
 /// # Errors
 ///
 /// Returns an I/O error when the entry cannot be opened or deleted.
+#[inline]
 fn delete_rooted_entry(root: &File, path: &LocalRelativePath) -> Result<()> {
     let entry = open_entry_no_follow(
         root,
@@ -358,6 +360,7 @@ fn delete_rooted_entry(root: &File, path: &LocalRelativePath) -> Result<()> {
 /// # Errors
 ///
 /// Returns an I/O error when traversal or handle-relative rename fails.
+#[inline(always)]
 pub(crate) fn rename_rooted_entry(
     root: &File,
     _diagnostic_root: &Path,
@@ -408,6 +411,7 @@ fn open_entry(
 
 /// Opens one rooted entry without following or rejecting its final reparse
 /// point.
+#[inline]
 fn open_entry_no_follow(
     root: &File,
     path: &LocalRelativePath,
@@ -754,6 +758,7 @@ fn unicode_string(value: &OsStr) -> Result<OwnedUnicodeString> {
 }
 
 /// Converts a native path to a NUL-terminated UTF-16 string.
+#[inline]
 fn wide_path(path: &Path) -> Result<Vec<u16>> {
     let units: Vec<u16> = path.as_os_str().encode_wide().collect();
     if units.contains(&0) {
@@ -766,6 +771,7 @@ fn wide_path(path: &Path) -> Result<Vec<u16>> {
 }
 
 /// Converts an NTSTATUS result into a standard I/O result.
+#[inline]
 fn nt_result(status: i32) -> Result<()> {
     if status >= 0 {
         return Ok(());

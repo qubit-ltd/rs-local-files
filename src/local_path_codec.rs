@@ -97,6 +97,7 @@ mod platform {
     }
 
     /// Converts one ASCII hexadecimal digit to its nibble value.
+    #[inline]
     fn uppercase_hex(byte: u8) -> Option<u8> {
         match byte {
             b'0'..=b'9' => Some(byte - b'0'),

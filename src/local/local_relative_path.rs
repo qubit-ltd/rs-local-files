@@ -136,6 +136,7 @@ impl LocalRelativePath {
 /// # Returns
 ///
 /// An invalid-input error describing the lexical contract.
+#[inline]
 fn invalid_relative_path_error(path: &Path) -> Error {
     Error::new(
         ErrorKind::InvalidInput,

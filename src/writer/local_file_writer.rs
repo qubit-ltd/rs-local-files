@@ -57,6 +57,7 @@ impl LocalFileWriter {
     /// - `path`: Bound destination path.
     /// - `backend`: Staged or append backend.
     /// - `options`: Writer policy.
+    #[inline]
     pub(crate) const fn new(
         path: PathBuf,
         backend: LocalFileWriterBackend,
@@ -377,6 +378,7 @@ impl LocalFileWriter {
     /// # Returns
     ///
     /// The original result.
+    #[inline]
     fn observe_stream_result<T>(
         &mut self,
         result: io::Result<T>,
@@ -533,6 +535,7 @@ fn writer_io_error(
 ///
 /// `Indeterminate` when a prior stream failure made byte state uncertain;
 /// otherwise `Aborted`.
+#[inline]
 const fn aborted_state(previous_state: LocalWriterState) -> LocalWriterState {
     if matches!(previous_state, LocalWriterState::Indeterminate) {
         LocalWriterState::Indeterminate

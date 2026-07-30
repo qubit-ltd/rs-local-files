@@ -247,6 +247,7 @@ pub(crate) fn move_file_without_replacing(
 /// Always returns [`ErrorKind::Unsupported`] because this target has no native
 /// no-replace file move implementation.
 #[cfg(not(any(target_os = "linux", target_os = "macos", windows)))]
+#[inline]
 pub(crate) fn move_file_without_replacing(
     source: &Path,
     destination: &Path,
@@ -372,6 +373,7 @@ pub(crate) fn remove_directory_symlink(path: &Path) -> Result<()> {
 /// Always returns [`ErrorKind::Unsupported`] because this target has no native
 /// no-replace directory move implementation.
 #[cfg(not(any(target_os = "linux", target_os = "macos", windows)))]
+#[inline]
 pub(crate) fn move_directory_without_replacing(
     source: &Path,
     destination: &Path,
@@ -397,6 +399,7 @@ pub(crate) fn move_directory_without_replacing(
 /// # Errors
 /// Returns [`ErrorKind::InvalidInput`] when the path contains an interior NUL.
 #[cfg(any(target_os = "linux", target_os = "macos"))]
+#[inline]
 fn c_path(path: &Path) -> Result<CString> {
     CString::new(path.as_os_str().as_bytes()).map_err(|_| {
         Error::new(
@@ -508,6 +511,7 @@ pub(crate) fn parent_dir_for(path: &Path) -> &Path {
 /// # Errors
 /// Returns [`ErrorKind::InvalidInput`] when `path` contains an interior NUL.
 #[cfg(windows)]
+#[inline]
 pub(super) fn wide_path(path: &Path) -> Result<Vec<u16>> {
     let units: Vec<u16> = path.as_os_str().encode_wide().collect();
     if units.contains(&0) {

@@ -86,6 +86,7 @@ pub(in crate::local) fn verify_rooted_atomic_destination_identity(
 /// # Returns
 ///
 /// A structured pre-installation failure.
+#[inline]
 fn identity_error(
     requested_path: &std::path::Path,
     source: Error,

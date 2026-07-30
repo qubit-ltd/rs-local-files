@@ -286,6 +286,7 @@ impl RootedLocalFileSystem {
     ///
     /// Returns `LocalFileError` for lexical escape, symlink traversal, missing
     /// entries, or native metadata failures.
+    #[inline]
     pub fn metadata(&self, path: &Path) -> LocalResult<LocalFileMetadata> {
         let relative = rooted_path(path, LocalFileOperation::Metadata)?;
         self.root
@@ -869,6 +870,7 @@ fn rooted_rename_failure_after_native_attempt(
 }
 
 /// Wraps a pre-publication rooted copy error with an unchanged state.
+#[inline]
 fn rooted_copy_failure_unchanged(error: LocalFileError) -> LocalCopyFailure {
     LocalCopyFailure::new(
         error,
@@ -880,6 +882,7 @@ fn rooted_copy_failure_unchanged(error: LocalFileError) -> LocalCopyFailure {
 }
 
 /// Wraps a rooted post-publication durability error with a published state.
+#[inline]
 fn rooted_copy_failure_published(
     error: LocalFileError,
     partial_stats: LocalCopyStats,
@@ -955,6 +958,7 @@ fn rooted_path(
 /// # Errors
 /// Returns `LocalFileError` when the configured parent is not a normal
 /// relative descendant of the opened root.
+#[inline]
 fn rooted_temp_parent(
     parent: Option<&Path>,
     operation: LocalFileOperation,
@@ -973,6 +977,7 @@ fn rooted_temp_parent(
 /// # Errors
 /// Returns `LocalFileError` when an affix is invalid or randomness is
 /// unavailable.
+#[inline]
 fn temp_candidate(
     parent: &Path,
     prefix: Option<&str>,
