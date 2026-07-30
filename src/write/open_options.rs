@@ -32,7 +32,7 @@ impl OpenOptions {
     ///
     /// # Returns
     /// Options without parent creation and with ordinary unbounded open retry.
-    #[inline]
+    #[inline(always)]
     pub const fn new(mode: Mode) -> Self {
         Self {
             mode,
@@ -42,7 +42,7 @@ impl OpenOptions {
     }
 
     /// Returns the native write mode.
-    #[inline]
+    #[inline(always)]
     pub const fn mode(&self) -> Mode {
         self.mode
     }

@@ -151,6 +151,7 @@ where
     target_os = "macos",
     target_os = "freebsd",
 )))]
+#[inline(always)]
 fn preserve_extended_metadata(_source: &File, _staging: &File) -> Result<()> {
     Err(Error::new(
         ErrorKind::Unsupported,

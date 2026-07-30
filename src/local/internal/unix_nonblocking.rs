@@ -154,6 +154,8 @@ fn wait_for_nonblocking_open_retry(
 }
 
 /// Creates the stable error returned when an open retry deadline expires.
+#[must_use]
+#[inline]
 fn open_retry_timed_out(timeout: Duration) -> Error {
     Error::new(
         ErrorKind::TimedOut,

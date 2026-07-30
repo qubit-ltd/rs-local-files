@@ -48,6 +48,7 @@ use super::unix_nonblocking::{
 /// # Returns
 ///
 /// An `InvalidInput` error identifying the non-regular path.
+#[must_use]
 #[inline]
 fn path_not_regular_file_error(path: &Path) -> Error {
     Error::new(
@@ -248,6 +249,7 @@ fn open_reader_file(
 /// # Errors
 /// Returns a contextual I/O error when the path cannot be inspected or opened,
 /// or when the opened object is not a regular file.
+#[inline(always)]
 pub(crate) fn open_native_reader_path(
     path: &Path,
     options: &read::OpenOptions,

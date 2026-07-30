@@ -414,6 +414,7 @@ fn c_path(path: &Path) -> Result<CString> {
 /// # Errors
 /// Returns an I/O error when opening or syncing the parent directory fails.
 #[cfg(not(windows))]
+#[inline]
 pub(crate) fn sync_parent_dir(path: &Path) -> Result<()> {
     let parent_dir = parent_dir_for(path);
     let parent = File::open(parent_dir)?;

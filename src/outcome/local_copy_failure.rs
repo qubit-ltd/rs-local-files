@@ -49,6 +49,7 @@ pub struct LocalCopyFailure {
 
 impl Display for LocalCopyFailure {
     /// Formats the primary copy failure and its proven destination state.
+    #[inline(always)]
     fn fmt(&self, formatter: &mut Formatter<'_>) -> FmtResult {
         write!(
             formatter,
@@ -60,6 +61,7 @@ impl Display for LocalCopyFailure {
 
 impl Error for LocalCopyFailure {
     /// Returns the primary typed filesystem error.
+    #[inline(always)]
     fn source(&self) -> Option<&(dyn Error + 'static)> {
         Some(&self.error)
     }
@@ -129,30 +131,35 @@ impl LocalCopyFailure {
 
     /// Returns the primary typed filesystem error.
     #[must_use]
+    #[inline(always)]
     pub const fn error(&self) -> &LocalFileError {
         &self.error
     }
 
     /// Returns the most precise destination state proven by native operations.
     #[must_use]
+    #[inline(always)]
     pub const fn state(&self) -> LocalCopyFailureState {
         self.state
     }
 
     /// Returns statistics accumulated before the failure.
     #[must_use = "partial statistics retain copy progress"]
+    #[inline(always)]
     pub const fn partial_stats(&self) -> &LocalCopyStats {
         &self.partial_stats
     }
 
     /// Returns the retained staging path when cleanup failed.
     #[must_use]
+    #[inline]
     pub fn staging_path(&self) -> Option<&Path> {
         self.staging_path.as_deref()
     }
 
     /// Returns the secondary staging-cleanup error when cleanup failed.
     #[must_use]
+    #[inline(always)]
     pub const fn cleanup_error(&self) -> Option<&LocalFileError> {
         self.cleanup_error.as_ref()
     }

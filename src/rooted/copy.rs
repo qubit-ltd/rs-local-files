@@ -778,6 +778,8 @@ fn error(
 }
 
 /// Creates the stable error used for unsupported source entry types.
+#[must_use]
+#[inline(always)]
 fn unsupported_source_error() -> io::Error {
     io::Error::new(
         ErrorKind::Unsupported,

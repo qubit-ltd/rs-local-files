@@ -334,6 +334,8 @@ fn coverage_fault_enabled(name: &str) -> bool {
 }
 
 /// Creates the stable type error for atomic destinations.
+#[must_use]
+#[inline(always)]
 pub(crate) fn invalid_atomic_destination() -> Error {
     Error::new(
         ErrorKind::InvalidInput,

@@ -173,6 +173,8 @@ pub(super) fn normalize_opened_regular_file_metadata(
 }
 
 /// Returns whether coverage should reject an opened directory's type.
+#[must_use]
+#[inline]
 fn rooted_directory_type_fault_enabled() -> bool {
     #[cfg(coverage)]
     return super::coverage_fault::is_enabled("rooted-directory-type");
@@ -181,6 +183,7 @@ fn rooted_directory_type_fault_enabled() -> bool {
 }
 
 /// Returns whether coverage should reject an opened file's type.
+#[inline]
 fn rooted_file_type_fault_enabled() -> bool {
     #[cfg(coverage)]
     return super::coverage_fault::is_enabled("rooted-file-type");

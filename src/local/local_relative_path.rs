@@ -92,6 +92,7 @@ impl LocalRelativePath {
     ///
     /// Returns [`ErrorKind::InvalidInput`] when `child` is empty, absolute,
     /// contains a non-normal component, or contains an embedded NUL value.
+    #[inline]
     pub fn join<P>(&self, child: P) -> Result<Self>
     where
         P: AsRef<Path>,

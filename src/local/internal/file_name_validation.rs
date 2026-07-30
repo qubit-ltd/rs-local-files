@@ -125,6 +125,7 @@ pub(super) fn validate_file_name_fragment(
 ///
 /// # Returns
 /// An [`ErrorKind::InvalidInput`] error.
+#[must_use]
 #[inline]
 fn invalid_file_name_fragment_error(role: &str, reason: &str) -> Error {
     Error::new(

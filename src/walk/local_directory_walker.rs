@@ -168,6 +168,7 @@ impl LocalDirectoryWalker {
 
     /// Returns the bound traversal root.
     #[must_use]
+    #[inline(always)]
     pub fn root(&self) -> &Path {
         &self.root
     }
@@ -181,6 +182,7 @@ impl LocalDirectoryWalker {
     /// # Returns
     ///
     /// `true` when recursion and the configured depth limit permit descent.
+    #[inline(always)]
     fn may_descend(&self, entry_depth: usize) -> bool {
         self.options.recursive()
             && self
@@ -400,6 +402,7 @@ fn next_rooted_entry(
 /// # Returns
 ///
 /// Structured listing error.
+#[must_use]
 fn walk_io_error(path: &Path, error: std::io::Error) -> LocalFileError {
     LocalFileError::from_io(
         LocalFileOperation::List,

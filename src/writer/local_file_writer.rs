@@ -73,12 +73,14 @@ impl LocalFileWriter {
 
     /// Returns the bound destination path.
     #[must_use]
+    #[inline(always)]
     pub fn path(&self) -> &Path {
         &self.path
     }
 
     /// Returns the current writer state.
     #[must_use]
+    #[inline(always)]
     pub const fn state(&self) -> LocalWriterState {
         self.state
     }
@@ -361,6 +363,7 @@ impl LocalFileWriter {
     /// # Parameters
     ///
     /// - `written`: Bytes accepted by the backend.
+    #[inline]
     fn record_written(&mut self, written: usize) {
         self.bytes_written = self.bytes_written.saturating_add(written as u64);
     }
@@ -488,6 +491,7 @@ fn atomic_destination_state(
 /// # Returns
 ///
 /// Unified local filesystem error retaining the atomic error as its source.
+#[must_use]
 #[inline]
 fn atomic_write_error(
     path: &Path,
@@ -509,6 +513,8 @@ fn atomic_write_error(
 /// # Returns
 ///
 /// Structured writer error.
+#[must_use]
+#[inline(always)]
 fn writer_io_error(
     path: &Path,
     operation: LocalFileOperation,

@@ -51,7 +51,7 @@ impl LocalFileError {
     /// - `kind`: Stable failure classification.
     /// - `operation`: Operation that failed.
     #[must_use]
-    #[inline]
+    #[inline(always)]
     pub const fn new(
         kind: LocalFileErrorKind,
         operation: LocalFileOperation,
@@ -79,7 +79,7 @@ impl LocalFileError {
     ///
     /// A structured local filesystem error.
     #[must_use]
-    #[inline]
+    #[inline(always)]
     pub fn from_io(
         operation: LocalFileOperation,
         path: Option<PathBuf>,
@@ -134,6 +134,7 @@ impl LocalFileError {
     ///
     /// The updated error.
     #[must_use]
+    #[inline(always)]
     pub fn with_path(mut self, path: PathBuf) -> Self {
         self.path = Some(path);
         self
@@ -149,6 +150,7 @@ impl LocalFileError {
     ///
     /// The updated error.
     #[must_use]
+    #[inline(always)]
     pub fn with_target(mut self, target: PathBuf) -> Self {
         self.target = Some(target);
         self
@@ -164,6 +166,7 @@ impl LocalFileError {
     ///
     /// The updated structured error.
     #[must_use]
+    #[inline(always)]
     pub const fn with_mutation_state(
         mut self,
         state: LocalMutationState,
@@ -174,24 +177,28 @@ impl LocalFileError {
 
     /// Returns the stable failure classification.
     #[must_use]
+    #[inline(always)]
     pub const fn kind(&self) -> LocalFileErrorKind {
         self.kind
     }
 
     /// Returns the operation that failed.
     #[must_use]
+    #[inline(always)]
     pub const fn operation(&self) -> LocalFileOperation {
         self.operation
     }
 
     /// Returns the primary path, or `None` when no path applies.
     #[must_use]
+    #[inline(always)]
     pub fn path(&self) -> Option<&Path> {
         self.path.as_deref()
     }
 
     /// Returns the destination path, or `None` for single-path operations.
     #[must_use]
+    #[inline]
     pub fn target(&self) -> Option<&Path> {
         self.target.as_deref()
     }
@@ -203,6 +210,7 @@ impl LocalFileError {
     /// `Some` for mutating failures that established a publication state, or
     /// `None` when no mutation state applies.
     #[must_use]
+    #[inline(always)]
     pub const fn mutation_state(&self) -> Option<LocalMutationState> {
         self.mutation_state
     }
@@ -214,6 +222,7 @@ impl LocalFileError {
     /// `Some` contains an I/O or path codec source; `None` means this error
     /// was constructed without an originating source.
     #[must_use]
+    #[inline(always)]
     pub const fn source_kind(&self) -> Option<&LocalFileErrorSource> {
         self.source.as_ref()
     }
@@ -225,6 +234,7 @@ impl LocalFileError {
     /// `Some` contains an I/O or path codec source; `None` means this error
     /// was constructed without an originating source.
     #[must_use]
+    #[inline(always)]
     pub fn into_source(self) -> Option<LocalFileErrorSource> {
         self.source
     }
@@ -238,6 +248,7 @@ impl LocalFileError {
     /// # Returns
     ///
     /// The reclassified error.
+    #[inline(always)]
     pub(crate) const fn with_kind(mut self, kind: LocalFileErrorKind) -> Self {
         self.kind = kind;
         self
@@ -264,6 +275,7 @@ impl fmt::Display for LocalFileError {
 
 impl Error for LocalFileError {
     /// Returns the concrete I/O or path codec source, if present.
+    #[inline]
     fn source(&self) -> Option<&(dyn Error + 'static)> {
         self.source.as_ref().and_then(Error::source)
     }

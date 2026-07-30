@@ -19,6 +19,7 @@ use std::io::{
 /// # Returns
 ///
 /// An `InvalidData` error identifying the directory counter.
+#[must_use]
 #[inline(always)]
 pub(super) fn directory_statistics_overflow_error() -> Error {
     statistics_overflow_error("directories")
@@ -63,6 +64,7 @@ pub(super) fn byte_statistics_overflow_error() -> Error {
 /// # Returns
 ///
 /// An `InvalidData` error naming the overflowing field.
+#[must_use]
 #[inline]
 fn statistics_overflow_error(field: &str) -> Error {
     Error::new(

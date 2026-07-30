@@ -31,6 +31,8 @@ static NTH_FAULT_OCCURRENCES: AtomicUsize = AtomicUsize::new(0);
 /// # Returns
 ///
 /// `true` only when the coverage subprocess selected exactly `name`.
+#[must_use]
+#[inline(always)]
 pub(crate) fn is_enabled(name: &str) -> bool {
     std::env::var_os(COVERAGE_FAULT_ENV)
         .is_some_and(|value| value == OsStr::new(name))
@@ -45,6 +47,7 @@ pub(crate) fn is_enabled(name: &str) -> bool {
 /// # Returns
 ///
 /// `true` only for the first matching call in the subprocess.
+#[inline(always)]
 pub(crate) fn take(name: &str) -> bool {
     is_enabled(name)
         && ONE_SHOT_FAULT_TAKEN
@@ -62,6 +65,8 @@ pub(crate) fn take(name: &str) -> bool {
 /// # Returns
 ///
 /// `true` only for the requested matching invocation in the isolated process.
+#[must_use]
+#[inline]
 pub(crate) fn take_on_nth(name: &str, occurrence: usize) -> bool {
     is_enabled(name)
         && NTH_FAULT_OCCURRENCES.fetch_add(1, Ordering::Relaxed) + 1

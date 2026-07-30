@@ -59,6 +59,7 @@ pub struct LocalTempFile {
 
 impl LocalTempFile {
     /// Builds a host temporary file from its already-bound path and handle.
+    #[inline]
     pub(crate) fn host(path: PathBuf, file: File) -> Self {
         Self {
             path,
@@ -71,6 +72,7 @@ impl LocalTempFile {
     }
 
     /// Builds a rooted temporary file from the retained root authority.
+    #[inline]
     pub(crate) fn rooted(
         root: Arc<crate::rooted::Root>,
         path: PathBuf,
@@ -114,6 +116,7 @@ impl LocalTempFile {
 
     /// Disables automatic cleanup and returns the authority-local path.
     #[must_use = "keeping the temporary file disables automatic cleanup; retain the returned path"]
+    #[inline]
     pub fn keep(mut self) -> PathBuf {
         self.close();
         self.state = LocalTempResourceState::Released;
@@ -257,6 +260,7 @@ impl LocalTempFile {
     }
 
     /// Returns the mutable open file handle, or an error after [`Self::close`].
+    #[inline(always)]
     pub fn as_file_mut(&mut self) -> Result<&mut File> {
         self.file.as_mut().ok_or_else(closed_file_error)
     }
@@ -303,16 +307,19 @@ impl LocalTempFile {
 
 impl Write for LocalTempFile {
     /// Writes bytes to the still-open temporary file.
+    #[inline(always)]
     fn write(&mut self, buffer: &[u8]) -> Result<usize> {
         self.as_file_mut()?.write(buffer)
     }
 
     /// Writes vectored bytes to the still-open temporary file.
+    #[inline(always)]
     fn write_vectored(&mut self, buffers: &[IoSlice<'_>]) -> Result<usize> {
         self.as_file_mut()?.write_vectored(buffers)
     }
 
     /// Flushes the still-open temporary file.
+    #[inline(always)]
     fn flush(&mut self) -> Result<()> {
         self.as_file_mut()?.flush()
     }
@@ -320,6 +327,7 @@ impl Write for LocalTempFile {
 
 impl Seek for LocalTempFile {
     /// Seeks the still-open temporary file.
+    #[inline(always)]
     fn seek(&mut self, position: SeekFrom) -> Result<u64> {
         self.as_file_mut()?.seek(position)
     }
@@ -342,6 +350,8 @@ impl Drop for LocalTempFile {
 }
 
 /// Builds the error used after a temporary file handle was closed.
+#[must_use]
+#[inline]
 fn closed_file_error() -> Error {
     Error::new(ErrorKind::NotFound, "temporary file handle is closed")
 }
