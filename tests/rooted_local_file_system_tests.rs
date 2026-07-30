@@ -105,6 +105,31 @@ fn test_rooted_local_file_system_default_copy_and_rename_skip_sync() {
     );
 }
 
+/// Verifies rooted copy can create missing destination parents on request.
+#[test]
+fn test_rooted_local_file_system_copy_creates_missing_parent() {
+    let directory = tempdir().expect("temporary root should be created");
+    fs::write(directory.path().join("source"), b"payload")
+        .expect("source fixture should be written");
+    let rooted = RootedLocalFileSystem::open(directory.path())
+        .expect("root authority should open");
+
+    let _ = rooted
+        .copy(
+            Path::new("source"),
+            Path::new("nested/target"),
+            &LocalCopyOptions::new().with_parent(),
+        )
+        .expect("rooted copy should create the missing parent");
+
+    assert_eq!(
+        b"payload",
+        fs::read(directory.path().join("nested/target"))
+            .expect("copied target should read")
+            .as_slice()
+    );
+}
+
 /// Verifies cleanup follows the root descriptor after its diagnostic path
 /// moves.
 #[test]

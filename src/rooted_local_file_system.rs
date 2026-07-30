@@ -615,6 +615,22 @@ impl RootedLocalFileSystem {
                 .with_target(target.to_path_buf()),
             ));
         }
+        if options.creates_parent()
+            && let Some(parent) = target_path
+                .as_path()
+                .parent()
+                .filter(|parent| !parent.as_os_str().is_empty())
+        {
+            let parent = crate::local::LocalRelativePath::new(parent)
+                .expect("parent of a validated rooted path is valid");
+            self.root.create_dir_all(&parent).map_err(|error| {
+                rooted_copy_failure_unchanged(rooted_io_error(
+                    LocalFileOperation::Copy,
+                    target,
+                    error,
+                ))
+            })?;
+        }
         let stats = self
             .root
             .copy_with_durability(
@@ -628,7 +644,13 @@ impl RootedLocalFileSystem {
             })?;
         let durable = rooted_published_durability(
             options.durability(),
-            || self.root.sync_parent(&target_path),
+            || {
+                self.root.sync_parent(&target_path)?;
+                if options.creates_parent() {
+                    sync_rooted_copy_parent_chain(&self.root, &target_path)?;
+                }
+                Ok(())
+            },
             LocalFileOperation::Copy,
             source,
             target,
@@ -789,6 +811,21 @@ impl RootedLocalFileSystem {
         .map_err(rooted_rename_failure_renamed)?;
         Ok(LocalRenameOutcome::new(true, durable))
     }
+}
+
+/// Synchronizes ancestors that may have gained newly created directories.
+fn sync_rooted_copy_parent_chain(
+    root: &crate::rooted::Root,
+    target: &crate::local::LocalRelativePath,
+) -> io::Result<()> {
+    let mut parent = target.as_path().parent().map(Path::to_path_buf);
+    while let Some(path) = parent.filter(|path| !path.as_os_str().is_empty()) {
+        let path = crate::local::LocalRelativePath::new(&path)
+            .expect("parent of a validated rooted path is valid");
+        root.sync_parent(&path)?;
+        parent = path.as_path().parent().map(Path::to_path_buf);
+    }
+    Ok(())
 }
 
 /// Wraps a rooted preflight failure that proves no namespace mutation occurred.
