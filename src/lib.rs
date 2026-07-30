@@ -133,6 +133,7 @@ pub use local::{
     LocalCopyConflictPolicy,
     LocalCopyTypeConflictPolicy,
     LocalPersistError,
+    LocalPersistFailureState,
     LocalPersistOptions,
     LocalPersistStage,
 };
@@ -168,6 +169,8 @@ pub use outcome::{
     LocalCopyStats,
     LocalCreateDirectoryOutcome,
     LocalDeleteOutcome,
+    LocalPersistMethod,
+    LocalPersistOutcome,
     LocalRenameFailure,
     LocalRenameFailureState,
     LocalRenameOutcome,
