@@ -20,7 +20,6 @@ pub struct LocalDeleteOptions {
 
 impl LocalDeleteOptions {
     /// Creates strict, non-recursive deletion options.
-    #[must_use]
     #[inline]
     pub const fn new() -> Self {
         Self {
@@ -44,7 +43,6 @@ impl LocalDeleteOptions {
     }
 
     /// Enables recursive directory deletion.
-    #[must_use]
     #[inline(always)]
     pub const fn with_recursive(mut self) -> Self {
         self.recursive = true;
@@ -52,7 +50,6 @@ impl LocalDeleteOptions {
     }
 
     /// Treats a missing entry as a successful no-op.
-    #[must_use]
     #[inline(always)]
     pub const fn with_missing_ok(mut self) -> Self {
         self.missing_ok = true;

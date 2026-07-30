@@ -49,7 +49,6 @@ impl LocalWriteOutcome {
     }
 
     /// Returns the terminal writer state.
-    #[must_use]
     #[inline(always)]
     pub const fn state(self) -> LocalWriterState {
         self.state

@@ -69,7 +69,6 @@ impl LocalRenameFailure {
     }
 
     /// Returns the most precise namespace state proven by native operations.
-    #[must_use]
     #[inline(always)]
     pub const fn state(&self) -> LocalRenameFailureState {
         self.state

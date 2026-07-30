@@ -86,7 +86,6 @@ impl LocalFileMetadata {
     }
 
     /// Returns the normalized entry kind.
-    #[must_use]
     #[inline(always)]
     pub const fn kind(&self) -> LocalFileKind {
         self.kind

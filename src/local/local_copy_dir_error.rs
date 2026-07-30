@@ -125,7 +125,6 @@ impl LocalCopyDirError {
     ///
     /// # Returns
     /// Partial recursive-copy statistics.
-    #[must_use]
     #[inline(always)]
     pub const fn stats(&self) -> &LocalCopyDirStats {
         &self.stats

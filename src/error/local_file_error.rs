@@ -177,14 +177,12 @@ impl LocalFileError {
     }
 
     /// Returns the stable failure classification.
-    #[must_use]
     #[inline(always)]
     pub const fn kind(&self) -> LocalFileErrorKind {
         self.kind
     }
 
     /// Returns the operation that failed.
-    #[must_use]
     #[inline(always)]
     pub const fn operation(&self) -> LocalFileOperation {
         self.operation
