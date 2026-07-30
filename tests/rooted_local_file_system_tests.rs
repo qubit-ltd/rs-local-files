@@ -41,6 +41,70 @@ use qubit_local_files::{
 };
 use tempfile::tempdir;
 
+/// Verifies default rooted copy and rename avoid durability synchronization.
+#[cfg(target_os = "linux")]
+#[test]
+fn test_rooted_local_file_system_default_copy_and_rename_skip_sync() {
+    const CHILD_ENV: &str = "QUBIT_LOCAL_FILES_DEFAULT_ROOTED_SYNC_CHILD";
+    if std::env::var_os(CHILD_ENV).is_some() {
+        let directory = tempdir().expect("temporary root should be created");
+        fs::write(directory.path().join("copy-source"), b"copy")
+            .expect("copy source should be written");
+        let rooted = RootedLocalFileSystem::open(directory.path())
+            .expect("root authority should open");
+        let _ = rooted
+            .copy(
+                Path::new("copy-source"),
+                Path::new("copy-target"),
+                &LocalCopyOptions::new(),
+            )
+            .expect("default rooted copy should succeed");
+
+        fs::write(directory.path().join("rename-source"), b"rename")
+            .expect("rename source should be written");
+        let _ = rooted
+            .rename(
+                Path::new("rename-source"),
+                Path::new("rename-target"),
+                &LocalRenameOptions::new(),
+            )
+            .expect("default rooted rename should succeed");
+        return;
+    }
+
+    if std::process::Command::new("strace")
+        .arg("--version")
+        .output()
+        .is_err()
+    {
+        eprintln!(
+            "skipping default rooted sync trace because strace is unavailable"
+        );
+        return;
+    }
+    let trace =
+        tempfile::NamedTempFile::new().expect("trace file should be created");
+    let status = std::process::Command::new("strace")
+        .args(["-f", "-e", "trace=fsync", "-o"])
+        .arg(trace.path())
+        .arg(std::env::current_exe().expect("test executable should resolve"))
+        .args([
+            "--exact",
+            "test_rooted_local_file_system_default_copy_and_rename_skip_sync",
+            "--nocapture",
+        ])
+        .env(CHILD_ENV, "1")
+        .status()
+        .expect("strace should launch the traced child");
+    assert!(status.success(), "traced child should succeed");
+    let trace =
+        fs::read_to_string(trace.path()).expect("trace should be readable");
+    assert!(
+        !trace.contains("fsync("),
+        "default durability must not synchronize: {trace}"
+    );
+}
+
 /// Verifies cleanup follows the root descriptor after its diagnostic path
 /// moves.
 #[test]

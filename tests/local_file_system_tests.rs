@@ -12,6 +12,7 @@ use std::{
 };
 
 use qubit_local_files::{
+    LocalCopyOptions,
     LocalCreateDirectoryOptions,
     LocalDeleteOptions,
     LocalFileErrorKind,
@@ -25,6 +26,71 @@ use qubit_local_files::{
     LocalMutationState,
 };
 use tempfile::tempdir;
+
+/// Verifies default host copy and rename avoid durability synchronization.
+#[cfg(target_os = "linux")]
+#[test]
+fn test_local_file_system_default_copy_and_rename_skip_sync() {
+    const CHILD_ENV: &str = "QUBIT_LOCAL_FILES_DEFAULT_HOST_SYNC_CHILD";
+    if std::env::var_os(CHILD_ENV).is_some() {
+        let directory =
+            tempdir().expect("temporary directory should be created");
+        let copy_source = directory.path().join("copy-source");
+        let copy_target = directory.path().join("copy-target");
+        fs::write(&copy_source, b"copy")
+            .expect("copy source should be written");
+        let _ = LocalFileSystem::copy(
+            &copy_source,
+            &copy_target,
+            &LocalCopyOptions::new(),
+        )
+        .expect("default copy should succeed");
+
+        let rename_source = directory.path().join("rename-source");
+        let rename_target = directory.path().join("rename-target");
+        fs::write(&rename_source, b"rename")
+            .expect("rename source should be written");
+        let _ = LocalFileSystem::rename(
+            &rename_source,
+            &rename_target,
+            &LocalRenameOptions::new(),
+        )
+        .expect("default rename should succeed");
+        return;
+    }
+
+    if std::process::Command::new("strace")
+        .arg("--version")
+        .output()
+        .is_err()
+    {
+        eprintln!(
+            "skipping default host sync trace because strace is unavailable"
+        );
+        return;
+    }
+    let trace =
+        tempfile::NamedTempFile::new().expect("trace file should be created");
+    let status = std::process::Command::new("strace")
+        .args(["-f", "-e", "trace=fsync", "-o"])
+        .arg(trace.path())
+        .arg(std::env::current_exe().expect("test executable should resolve"))
+        .args([
+            "--exact",
+            "test_local_file_system_default_copy_and_rename_skip_sync",
+            "--nocapture",
+        ])
+        .env(CHILD_ENV, "1")
+        .status()
+        .expect("strace should launch the traced child");
+    assert!(status.success(), "traced child should succeed");
+    let trace =
+        fs::read_to_string(trace.path()).expect("trace should be readable");
+    assert!(
+        !trace.contains("fsync("),
+        "default durability must not synchronize: {trace}"
+    );
+}
 
 /// Verifies explicit parent creation and its structured outcome.
 #[test]

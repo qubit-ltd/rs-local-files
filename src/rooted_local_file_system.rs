@@ -617,17 +617,18 @@ impl RootedLocalFileSystem {
         }
         let stats = self
             .root
-            .copy(
+            .copy_with_durability(
                 &source_path,
                 &target_path,
                 crate::local_file_system::internal_copy_options(options),
+                options.durability(),
             )
             .map_err(|error| {
                 LocalCopyFailure::from_copy_dir_error(source, target, error)
             })?;
         let durable = rooted_published_durability(
             options.durability(),
-            self.root.sync_parent(&target_path),
+            || self.root.sync_parent(&target_path),
             LocalFileOperation::Copy,
             source,
             target,
@@ -780,7 +781,7 @@ impl RootedLocalFileSystem {
         })?;
         let durable = rooted_published_durability(
             options.durability(),
-            self.root.sync_parent(&target_path),
+            || self.root.sync_parent(&target_path),
             LocalFileOperation::Rename,
             source,
             target,
@@ -854,16 +855,16 @@ fn rooted_copy_failure_published(
 #[inline]
 fn rooted_published_durability(
     requirement: LocalDurabilityRequirement,
-    sync: io::Result<()>,
+    sync: impl FnOnce() -> io::Result<()>,
     operation: LocalFileOperation,
     source: &Path,
     target: &Path,
 ) -> LocalResult<bool> {
     match requirement {
         LocalDurabilityRequirement::NotRequired => Ok(false),
-        LocalDurabilityRequirement::Preferred => Ok(sync.is_ok()),
+        LocalDurabilityRequirement::Preferred => Ok(sync().is_ok()),
         LocalDurabilityRequirement::Required => {
-            sync.map(|()| true).map_err(|error| {
+            sync().map(|()| true).map_err(|error| {
                 LocalFileError::from_io(
                     operation,
                     Some(source.to_path_buf()),
