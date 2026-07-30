@@ -215,6 +215,7 @@ pub(crate) fn open_rooted_native_writer(
 /// # Errors
 ///
 /// Returns an I/O error when enumeration or child inspection fails.
+#[inline(always)]
 pub(crate) fn read_root_directory(
     root: &File,
     diagnostic_root: &Path,
@@ -566,7 +567,8 @@ fn read_directory_handle(
             })?;
         }
     }
-    entries.sort_by(|left, right| left.0.cmp(&right.0));
+    entries
+        .sort_by(|(left_name, _), (right_name, _)| left_name.cmp(right_name));
     Ok(entries)
 }
 
