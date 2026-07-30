@@ -6,8 +6,8 @@
 //    Licensed under the Apache License, Version 2.0.
 // =============================================================================
 
-// qubit-style: allow all -- error-source behavior is covered by error
-// integration tests.
+// qubit-style: allow source-test-pair
+// Error-source behavior is covered through the public error integration tests.
 use std::{
     error::Error,
     fmt,
@@ -38,6 +38,7 @@ impl fmt::Display for LocalFileErrorSource {
 
 impl Error for LocalFileErrorSource {
     /// Returns the concrete I/O or codec error retained by this source.
+    #[inline]
     fn source(&self) -> Option<&(dyn Error + 'static)> {
         match self {
             Self::Io(error) => Some(error),

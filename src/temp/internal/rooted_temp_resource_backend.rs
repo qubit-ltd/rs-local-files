@@ -5,8 +5,8 @@
 //
 //    Licensed under the Apache License, Version 2.0.
 // =============================================================================
-// qubit-style: allow all -- temporary-resource behavior is covered by resource
-// integration tests.
+// qubit-style: allow source-test-pair
+// Temporary-resource behavior is covered through public integration tests.
 //! Root-descriptor-bound temporary-resource storage.
 
 use std::{
