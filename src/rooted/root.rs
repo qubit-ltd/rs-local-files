@@ -117,35 +117,6 @@ impl Root {
         )
     }
 
-    /// Copies one descendant entry with an explicit synchronization policy.
-    ///
-    /// # Parameters
-    ///
-    /// * `source` - Existing rooted source entry.
-    /// * `destination` - Rooted destination entry beneath the same root.
-    /// * `options` - Explicit copy policies.
-    /// * `durability` - Synchronization policy applied to staged file commits.
-    ///
-    /// # Returns
-    ///
-    /// Exact statistics accumulated by the completed copy.
-    ///
-    /// # Errors
-    ///
-    /// Returns a structured copy error when the source is unsupported,
-    /// destination policies reject an entry, traversal fails, staging cannot
-    /// be installed, or required synchronization fails.
-    #[inline(always)]
-    pub(crate) fn copy_with_durability(
-        &self,
-        source: &path::Path,
-        destination: &path::Path,
-        options: copy::Options,
-        durability: LocalDurabilityRequirement,
-    ) -> std::result::Result<copy::Statistics, copy::Error> {
-        super::copy::copy(self, source, destination, options, durability)
-    }
-
     /// Reads metadata for the opened root directory through its descriptor.
     ///
     /// # Returns
@@ -720,6 +691,35 @@ impl Root {
                 ),
             ))
         }
+    }
+
+    /// Copies one descendant entry with an explicit synchronization policy.
+    ///
+    /// # Parameters
+    ///
+    /// * `source` - Existing rooted source entry.
+    /// * `destination` - Rooted destination entry beneath the same root.
+    /// * `options` - Explicit copy policies.
+    /// * `durability` - Synchronization policy applied to staged file commits.
+    ///
+    /// # Returns
+    ///
+    /// Exact statistics accumulated by the completed copy.
+    ///
+    /// # Errors
+    ///
+    /// Returns a structured copy error when the source is unsupported,
+    /// destination policies reject an entry, traversal fails, staging cannot
+    /// be installed, or required synchronization fails.
+    #[inline(always)]
+    pub(crate) fn copy_with_durability(
+        &self,
+        source: &path::Path,
+        destination: &path::Path,
+        options: copy::Options,
+        durability: LocalDurabilityRequirement,
+    ) -> std::result::Result<copy::Statistics, copy::Error> {
+        super::copy::copy(self, source, destination, options, durability)
     }
 
     /// Synchronizes the parent directory of a rooted descendant.
