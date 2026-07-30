@@ -76,6 +76,7 @@ fn unix_timestamp_nanos() -> u128 {
 /// # Errors
 /// Returns [`std::io::ErrorKind::Other`] if the operating system random
 /// source cannot provide bytes.
+#[inline]
 fn try_random_hex() -> Result<String> {
     let mut bytes = [0_u8; RANDOM_NAME_BYTES];
     fill_random_bytes(&mut bytes)?;

@@ -64,7 +64,7 @@ impl<T> LocalPersistError<T> {
     ///
     /// # Returns
     /// New persistence error owning both values.
-    #[inline]
+    #[inline(always)]
     pub(crate) fn new(
         error: io::Error,
         resource: T,
@@ -88,6 +88,7 @@ impl<T> LocalPersistError<T> {
     /// # Returns
     /// I/O error that prevented persistence.
     #[must_use]
+    #[inline(always)]
     pub const fn error(&self) -> &io::Error {
         &self.error
     }
@@ -97,6 +98,7 @@ impl<T> LocalPersistError<T> {
     /// # Returns
     /// Shared reference to the resource retained after failure.
     #[must_use]
+    #[inline(always)]
     pub const fn resource(&self) -> &T {
         &self.resource
     }
@@ -106,6 +108,7 @@ impl<T> LocalPersistError<T> {
     /// # Returns
     /// Mutable reference to the resource retained after failure.
     #[must_use]
+    #[inline(always)]
     pub const fn resource_mut(&mut self) -> &mut T {
         &mut self.resource
     }
@@ -115,6 +118,7 @@ impl<T> LocalPersistError<T> {
     /// # Returns
     /// Requested target before absolute-path resolution.
     #[must_use]
+    #[inline(always)]
     pub fn requested_target(&self) -> &Path {
         &self.requested_target
     }
@@ -123,6 +127,7 @@ impl<T> LocalPersistError<T> {
     ///
     /// # Returns
     /// Resolved target for parent preparation and destination installation.
+    #[inline]
     pub fn resolved_target(&self) -> Option<&Path> {
         self.resolved_target.as_deref()
     }
@@ -131,6 +136,7 @@ impl<T> LocalPersistError<T> {
     ///
     /// # Returns
     /// Failed persistence stage.
+    #[inline(always)]
     pub const fn stage(&self) -> LocalPersistStage {
         self.stage
     }
@@ -139,6 +145,7 @@ impl<T> LocalPersistError<T> {
     ///
     /// # Returns
     /// A state describing whether the temporary resource remains safely owned.
+    #[inline(always)]
     pub const fn state(&self) -> LocalPersistFailureState {
         self.state
     }
@@ -148,6 +155,7 @@ impl<T> LocalPersistError<T> {
     /// # Returns
     /// Error kind reported by the retained native error.
     #[must_use]
+    #[inline]
     pub fn kind(&self) -> io::ErrorKind {
         self.error.kind()
     }
@@ -216,6 +224,7 @@ where
     T: Debug,
 {
     /// Returns the retained native I/O error.
+    #[inline(always)]
     fn source(&self) -> Option<&(dyn Error + 'static)> {
         Some(&self.error)
     }

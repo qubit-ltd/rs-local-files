@@ -18,6 +18,7 @@ use super::OpenOptions;
 /// # Errors
 /// Returns an I/O error when the path cannot be inspected or opened, or when
 /// the opened object is not a regular file.
+#[inline(always)]
 pub fn open(path: &Path) -> io::Result<File> {
     open_with(path, &OpenOptions::default())
 }
@@ -34,6 +35,7 @@ pub fn open(path: &Path) -> io::Result<File> {
 /// # Errors
 /// Returns an I/O error when the path cannot be inspected or opened, or when
 /// the opened object is not a regular file.
+#[inline(always)]
 pub fn open_with(path: &Path, options: &OpenOptions) -> io::Result<File> {
     crate::local::open_native_reader_path(path, options)
 }

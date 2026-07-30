@@ -27,6 +27,7 @@ impl Entry {
     /// Builds a rooted directory entry.
     #[must_use]
     #[cfg(any(unix, windows))]
+    #[inline]
     pub(crate) const fn new(name: OsString, metadata: Metadata) -> Self {
         Self { name, metadata }
     }

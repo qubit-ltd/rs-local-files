@@ -452,12 +452,14 @@ fn native_name(name: &[u8]) -> Result<CString> {
 
 /// Reports the platform's missing-attribute error.
 #[must_use]
+#[inline]
 fn is_missing_xattr(error: &Error) -> bool {
     error.raw_os_error() == Some(libc::ENODATA)
 }
 
 /// Reports that the filesystem exposes no extended-attribute interface.
 #[must_use]
+#[inline]
 fn is_not_supported(error: &Error) -> bool {
     let code = error.raw_os_error();
     code == Some(libc::ENOTSUP) || code == Some(libc::EOPNOTSUPP)

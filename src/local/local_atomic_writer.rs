@@ -283,6 +283,7 @@ impl LocalAtomicWriter {
     /// Returns a recoverable commit error when metadata preservation,
     /// staging-file synchronization, destination replacement, or parent
     /// synchronization fails.
+    #[inline]
     pub fn commit_recoverable(
         self,
     ) -> Result<(), LocalAtomicCommitError<Self>> {

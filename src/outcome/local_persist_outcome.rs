@@ -46,29 +46,34 @@ impl LocalPersistOutcome {
 
     /// Returns the authority-local published path.
     #[must_use]
+    #[inline(always)]
     pub fn path(&self) -> &Path {
         &self.path
     }
 
     /// Returns the native publication method.
+    #[inline(always)]
     pub const fn method(&self) -> LocalPersistMethod {
         self.method
     }
 
     /// Reports whether publication was atomic.
     #[must_use]
+    #[inline(always)]
     pub const fn atomic(&self) -> bool {
         self.atomic
     }
 
     /// Reports whether persistence durability was synchronized.
     #[must_use]
+    #[inline(always)]
     pub const fn durable(&self) -> bool {
         self.durable
     }
 
     /// Returns the owned authority-local published path.
     #[must_use]
+    #[inline(always)]
     pub fn into_path(self) -> PathBuf {
         self.path
     }

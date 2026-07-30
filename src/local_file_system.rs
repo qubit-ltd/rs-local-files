@@ -62,6 +62,7 @@ pub enum LocalFileSystem {}
 
 impl LocalFileSystem {
     /// Returns a snapshot of capabilities for the current host platform.
+    #[inline(always)]
     pub const fn capabilities() -> LocalFileSystemCapabilities {
         LocalFileSystemCapabilities::detect()
     }
@@ -292,6 +293,7 @@ impl LocalFileSystem {
     /// # Errors
     ///
     /// Returns `LocalFileError` when the root cannot be bound or opened.
+    #[inline]
     pub fn list(
         path: &Path,
         options: &LocalListOptions,
@@ -879,6 +881,7 @@ fn metadata_for_delete(
 /// `Some` deterministic I/O error only when the matching coverage fault is
 /// enabled; `None` otherwise.
 #[cfg(coverage)]
+#[must_use]
 #[inline(always)]
 fn coverage_io_fault(fault: &str) -> Option<io::Error> {
     crate::local::coverage_fault_enabled(fault)
@@ -925,11 +928,13 @@ fn rename_io_error(
 }
 
 /// Wraps a preflight failure that proves no namespace mutation occurred.
+#[inline(always)]
 fn rename_failure_unchanged(error: LocalFileError) -> LocalRenameFailure {
     LocalRenameFailure::new(error, LocalRenameFailureState::Unchanged)
 }
 
 /// Wraps a failure after a completed native rename.
+#[inline(always)]
 fn rename_failure_renamed(error: LocalFileError) -> LocalRenameFailure {
     LocalRenameFailure::new(error, LocalRenameFailureState::Renamed)
 }
@@ -952,6 +957,7 @@ fn rename_failure_after_native_attempt(
 
 /// Wraps a failure whose native rename effect cannot be proven.
 #[cfg(coverage)]
+#[inline(always)]
 fn rename_failure_indeterminate(error: LocalFileError) -> LocalRenameFailure {
     LocalRenameFailure::new(error, LocalRenameFailureState::Indeterminate)
 }
@@ -1239,6 +1245,7 @@ fn windows_file_identity(path: &Path) -> io::Result<(u32, u64)> {
 /// # Returns
 ///
 /// Invalid-input copy error.
+#[must_use]
 fn copy_alias_error(source: &Path, target: &Path) -> LocalFileError {
     LocalFileError::new(
         LocalFileErrorKind::InvalidInput,
@@ -1249,6 +1256,7 @@ fn copy_alias_error(source: &Path, target: &Path) -> LocalFileError {
 }
 
 /// Converts a pipeline failure into a lossless public copy failure.
+#[inline(always)]
 fn copy_pipeline_failure(
     source: &Path,
     target: &Path,

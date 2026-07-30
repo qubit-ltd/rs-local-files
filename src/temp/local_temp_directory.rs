@@ -48,6 +48,7 @@ pub struct LocalTempDirectory {
 
 impl LocalTempDirectory {
     /// Builds a host temporary directory from its already-bound path.
+    #[inline]
     pub(crate) fn host(path: PathBuf) -> Self {
         Self {
             path,
@@ -59,6 +60,7 @@ impl LocalTempDirectory {
     }
 
     /// Builds a rooted temporary directory from the retained root authority.
+    #[inline]
     pub(crate) fn rooted(
         root: Arc<crate::rooted::Root>,
         path: PathBuf,
@@ -77,6 +79,7 @@ impl LocalTempDirectory {
 
     /// Returns the authority-local generated path.
     #[must_use]
+    #[inline(always)]
     pub fn path(&self) -> &Path {
         &self.path
     }
@@ -102,6 +105,7 @@ impl LocalTempDirectory {
     }
 
     /// Resolves a normal relative descendant below this directory.
+    #[inline]
     pub fn descendant(&self, descendant: &Path) -> Result<PathBuf> {
         let relative = LocalRelativePath::new(descendant)?;
         Ok(self.path.join(relative.as_path()))
@@ -109,6 +113,7 @@ impl LocalTempDirectory {
 
     /// Disables cleanup and returns the authority-local directory path.
     #[must_use = "keeping the temporary directory disables automatic cleanup; retain the returned path"]
+    #[inline]
     pub fn keep(mut self) -> PathBuf {
         self.state = LocalTempResourceState::Released;
         self.path.clone()

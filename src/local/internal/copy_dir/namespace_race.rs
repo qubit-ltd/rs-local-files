@@ -69,6 +69,8 @@ where
 }
 
 /// Returns whether coverage should classify a racing entry as non-directory.
+#[must_use]
+#[inline]
 fn coverage_non_directory_race_enabled() -> bool {
     #[cfg(coverage)]
     return coverage_fault::is_enabled("copy-directory-race-nondirectory");
@@ -108,6 +110,7 @@ pub(super) fn removable_non_directory_metadata(
 }
 
 /// Returns whether coverage should classify a replacement race as directory.
+#[inline]
 fn coverage_removal_directory_race_enabled() -> bool {
     #[cfg(coverage)]
     return coverage_fault::is_enabled("copy-removal-race-directory");

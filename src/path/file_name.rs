@@ -29,6 +29,7 @@ pub const DEFAULT_RANDOM_FILE_NAME_PREFIX: &str = "qubit-local-files-";
 ///
 /// # Errors
 /// Returns an I/O error when the operating-system random source fails.
+#[inline(always)]
 pub fn random_file_name() -> Result<String> {
     random_file_name_with(None, None)
 }
@@ -46,6 +47,7 @@ pub fn random_file_name() -> Result<String> {
 /// Returns [`std::io::ErrorKind::InvalidInput`] when either affix is not a
 /// safe file-name fragment, or an I/O error when the operating-system random
 /// source fails.
+#[inline(always)]
 pub fn random_file_name_with(
     prefix: Option<&str>,
     suffix: Option<&str>,
@@ -62,6 +64,7 @@ pub fn random_file_name_with(
 /// Returns [`std::io::ErrorKind::InvalidInput`] when `name` is empty,
 /// composite, reserved, too long, or contains a non-portable character or
 /// suffix.
+#[inline(always)]
 pub fn validate_portable_file_name(name: &str) -> Result<()> {
     validate_portable_file_name_impl(name)
 }
@@ -74,6 +77,7 @@ pub fn validate_portable_file_name(name: &str) -> Result<()> {
 /// # Returns
 /// The final component, or `None` when absent or not valid UTF-8.
 #[must_use]
+#[inline]
 pub fn file_name(path: &Path) -> Option<&str> {
     path.file_name().and_then(OsStr::to_str)
 }
@@ -86,6 +90,7 @@ pub fn file_name(path: &Path) -> Option<&str> {
 /// # Returns
 /// The stem, or `None` when absent or not valid UTF-8.
 #[must_use]
+#[inline]
 pub fn file_stem(path: &Path) -> Option<&str> {
     path.file_stem().and_then(OsStr::to_str)
 }
@@ -98,6 +103,7 @@ pub fn file_stem(path: &Path) -> Option<&str> {
 /// # Returns
 /// The prefix, or `None` when absent or not valid UTF-8.
 #[must_use]
+#[inline]
 pub fn file_prefix(path: &Path) -> Option<&str> {
     path.file_prefix().and_then(OsStr::to_str)
 }
@@ -110,6 +116,7 @@ pub fn file_prefix(path: &Path) -> Option<&str> {
 /// # Returns
 /// The extension, or `None` when absent or not valid UTF-8.
 #[must_use]
+#[inline]
 pub fn extension(path: &Path) -> Option<&str> {
     path.extension().and_then(OsStr::to_str)
 }
@@ -143,6 +150,7 @@ pub fn dot_extension(path: &Path) -> Option<String> {
 /// # Returns
 /// `true` when the final extension matches exactly.
 #[must_use]
+#[inline(always)]
 pub fn has_extension(path: &Path, expected: &str) -> bool {
     extension(path) == Some(normalize_extension(expected))
 }

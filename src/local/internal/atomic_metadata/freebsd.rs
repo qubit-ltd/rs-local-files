@@ -341,12 +341,14 @@ fn native_name(name: &[u8]) -> Result<CString> {
 
 /// Reports an absent FreeBSD extended attribute.
 #[must_use]
+#[inline]
 fn is_missing_attribute(error: &Error) -> bool {
     error.raw_os_error() == Some(libc::ENOATTR)
 }
 
 /// Reports that a filesystem lacks an extended-attribute namespace.
 #[must_use]
+#[inline]
 fn is_not_supported(error: &Error) -> bool {
     let code = error.raw_os_error();
     code == Some(libc::ENOTSUP) || code == Some(libc::EOPNOTSUPP)
@@ -354,6 +356,7 @@ fn is_not_supported(error: &Error) -> bool {
 
 /// Reports that a filesystem does not use the requested ACL flavor.
 #[must_use]
+#[inline]
 fn is_unsupported_acl_type(error: &Error) -> bool {
     let code = error.raw_os_error();
     code == Some(libc::EINVAL)

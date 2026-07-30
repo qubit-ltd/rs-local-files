@@ -19,6 +19,7 @@ use std::path::Path;
 /// # Errors
 /// Returns an I/O error when the filesystem cannot determine whether `path`
 /// exists.
+#[inline]
 pub fn exists(path: &Path) -> Result<bool> {
     path.try_exists()
 }
@@ -27,6 +28,7 @@ pub fn exists(path: &Path) -> Result<bool> {
 ///
 /// # Errors
 /// Returns the I/O error reported by the filesystem.
+#[inline(always)]
 pub fn read(path: &Path) -> Result<Metadata> {
     fs::metadata(path)
 }
@@ -35,6 +37,7 @@ pub fn read(path: &Path) -> Result<Metadata> {
 ///
 /// # Errors
 /// Returns the I/O error reported by the filesystem.
+#[inline(always)]
 pub fn symlink_metadata(path: &Path) -> Result<Metadata> {
     fs::symlink_metadata(path)
 }
