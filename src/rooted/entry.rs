@@ -26,7 +26,6 @@ pub struct Entry {
 
 impl Entry {
     /// Builds a rooted directory entry.
-    #[must_use]
     #[cfg(any(unix, windows))]
     #[inline]
     pub(crate) const fn new(name: OsString, metadata: Metadata) -> Self {
@@ -41,7 +40,6 @@ impl Entry {
     }
 
     /// Returns metadata captured for the final child entry.
-    #[must_use]
     #[inline(always)]
     pub const fn metadata(&self) -> Metadata {
         self.metadata

@@ -38,7 +38,6 @@ impl LocalWriteOptions {
     /// # Parameters
     ///
     /// - `mode`: Destination publication mode.
-    #[must_use]
     #[inline]
     pub const fn new(mode: LocalWriteMode) -> Self {
         Self {
@@ -51,7 +50,6 @@ impl LocalWriteOptions {
     }
 
     /// Returns the publication mode.
-    #[must_use]
     #[inline(always)]
     pub const fn mode(&self) -> LocalWriteMode {
         self.mode
@@ -65,14 +63,12 @@ impl LocalWriteOptions {
     }
 
     /// Returns the required atomicity.
-    #[must_use]
     #[inline(always)]
     pub const fn atomicity(&self) -> LocalAtomicityRequirement {
         self.atomicity
     }
 
     /// Returns the required durability.
-    #[must_use]
     #[inline(always)]
     pub const fn durability(&self) -> LocalDurabilityRequirement {
         self.durability
@@ -86,7 +82,6 @@ impl LocalWriteOptions {
     }
 
     /// Enables creation of missing parent directories.
-    #[must_use]
     #[inline(always)]
     pub const fn with_parent(mut self) -> Self {
         self.create_parent = true;
@@ -94,7 +89,6 @@ impl LocalWriteOptions {
     }
 
     /// Sets the required atomicity.
-    #[must_use]
     #[inline(always)]
     pub const fn with_atomicity(
         mut self,
@@ -105,7 +99,6 @@ impl LocalWriteOptions {
     }
 
     /// Sets the required durability.
-    #[must_use]
     #[inline(always)]
     pub const fn with_durability(
         mut self,
@@ -116,7 +109,6 @@ impl LocalWriteOptions {
     }
 
     /// Sets the maximum time spent retrying Unix lease conflicts.
-    #[must_use]
     #[inline(always)]
     pub const fn with_open_retry_timeout(mut self, timeout: Duration) -> Self {
         self.open_retry_timeout = Some(timeout);

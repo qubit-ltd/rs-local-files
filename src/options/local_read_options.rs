@@ -20,7 +20,6 @@ pub struct LocalReadOptions {
 
 impl LocalReadOptions {
     /// Creates default reader options with unbounded platform retry behavior.
-    #[must_use]
     #[inline(always)]
     pub const fn new() -> Self {
         Self {
@@ -46,7 +45,6 @@ impl LocalReadOptions {
     /// # Returns
     ///
     /// Updated reader options.
-    #[must_use]
     #[inline(always)]
     pub const fn with_open_retry_timeout(mut self, timeout: Duration) -> Self {
         self.open_retry_timeout = Some(timeout);

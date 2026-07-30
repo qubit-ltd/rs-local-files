@@ -137,7 +137,6 @@ impl LocalCopyFailure {
     }
 
     /// Returns the most precise destination state proven by native operations.
-    #[must_use]
     #[inline(always)]
     pub const fn state(&self) -> LocalCopyFailureState {
         self.state

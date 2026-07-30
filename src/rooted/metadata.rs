@@ -58,7 +58,6 @@ impl Metadata {
     ///
     /// # Returns
     /// Rooted metadata preserving the descriptor-observed entry type and size.
-    #[must_use]
     #[cfg(unix)]
     pub(crate) fn from_native(metadata: &fs::Metadata) -> Self {
         let kind = entry_kind_from_mode(metadata.mode());
@@ -141,7 +140,6 @@ impl Metadata {
     /// # Returns
     /// Rooted metadata for the final entry represented by `status`.
     #[cfg(unix)]
-    #[must_use]
     pub(crate) fn from_stat(status: &libc::stat) -> Self {
         let kind = entry_kind_from_mode(status.st_mode);
         let (accessed_at, modified_at, created_at) = stat_times(status);
@@ -192,7 +190,6 @@ impl Metadata {
     }
 
     /// Returns the final entry type observed by the rooted operation.
-    #[must_use]
     #[inline(always)]
     pub const fn kind(&self) -> EntryKind {
         self.kind
@@ -269,7 +266,6 @@ where
 
 /// Classifies one platform-native `st_mode` value.
 #[cfg(unix)]
-#[must_use]
 #[inline]
 fn entry_kind_from_mode<T>(mode: T) -> EntryKind
 where

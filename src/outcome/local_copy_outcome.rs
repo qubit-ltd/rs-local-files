@@ -65,7 +65,6 @@ impl LocalCopyOutcome {
     }
 
     /// Returns the method used to copy the entry.
-    #[must_use]
     #[inline(always)]
     pub const fn method(&self) -> LocalCopyMethod {
         self.method
@@ -86,7 +85,6 @@ impl LocalCopyOutcome {
     }
 
     /// Returns metadata preservation applied by the copy pipeline.
-    #[must_use]
     #[inline(always)]
     pub const fn metadata_preservation(&self) -> LocalMetadataPreservePolicy {
         self.metadata_preservation
