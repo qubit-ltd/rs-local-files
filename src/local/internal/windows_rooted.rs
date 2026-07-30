@@ -307,12 +307,39 @@ pub(crate) fn remove_rooted_entry(
     recursive: bool,
 ) -> Result<()> {
     let entry = read_rooted_symlink_metadata(root, diagnostic_root, path)?;
-    if entry.metadata()?.is_dir() && recursive {
-        for (name, _) in read_rooted_directory(root, diagnostic_root, path)? {
-            let child = path.join_component(&name)?;
-            remove_rooted_entry(root, diagnostic_root, &child, true)?;
+    if !entry.metadata()?.is_dir() || !recursive {
+        return delete_rooted_entry(root, path);
+    }
+
+    let mut work = vec![(path.clone(), false)];
+    while let Some((current, remove_directory)) = work.pop() {
+        if remove_directory {
+            delete_rooted_entry(root, &current)?;
+            continue;
+        }
+        let entry =
+            read_rooted_symlink_metadata(root, diagnostic_root, &current)?;
+        if !entry.metadata()?.is_dir() {
+            delete_rooted_entry(root, &current)?;
+            continue;
+        }
+        work.push((current.clone(), true));
+        for (name, _) in read_rooted_directory(root, diagnostic_root, &current)?
+            .into_iter()
+            .rev()
+        {
+            work.push((current.join_component(&name)?, false));
         }
     }
+    Ok(())
+}
+
+/// Opens and deletes one rooted entry without following a reparse point.
+///
+/// # Errors
+///
+/// Returns an I/O error when the entry cannot be opened or deleted.
+fn delete_rooted_entry(root: &File, path: &LocalRelativePath) -> Result<()> {
     let entry = open_entry_no_follow(
         root,
         path,
