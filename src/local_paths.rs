@@ -306,6 +306,7 @@ fn has_disallowed_component(path: &Path) -> bool {
 /// `true` when a raw component is `.` or `..`.
 #[cfg(unix)]
 #[must_use]
+#[inline]
 fn has_raw_dot_component(path: &Path) -> bool {
     use std::os::unix::ffi::OsStrExt;
 
@@ -346,6 +347,7 @@ fn invalid_path_error() -> LocalFileError {
 /// Returns the native current-directory I/O error, including a deterministic
 /// coverage-only error when the selected fault is enabled.
 #[cfg(coverage)]
+#[inline]
 fn current_directory_for_binding(fault: &str) -> std::io::Result<PathBuf> {
     if crate::local::coverage_fault_enabled(fault) {
         return Err(std::io::Error::from_raw_os_error(libc::EIO));
@@ -412,6 +414,7 @@ fn decode_normal_component(component: &str) -> LocalResult<OsString> {
 ///
 /// Returns a `ComposePath` error retaining a `PathCodec` source when the text
 /// is malformed, non-canonical, or unrepresentable on the current platform.
+#[inline]
 fn decode_canonical_component(component: &str) -> LocalResult<OsString> {
     LocalPathCodec::encode(component)
         .map_err(|error| {
@@ -531,6 +534,20 @@ const fn has_native_separator(_component: &OsStr) -> bool {
     true
 }
 
+/// Builds a Unix absolute path from canonical path components.
+///
+/// # Parameters
+///
+/// - `components`: Canonical components beginning with the empty root marker.
+///
+/// # Returns
+///
+/// The decoded absolute native path.
+///
+/// # Errors
+///
+/// Returns a `ComposePath` error when the root marker or any component is
+/// malformed.
 #[cfg(unix)]
 #[inline(never)]
 fn from_canonical_absolute_components(
@@ -595,6 +612,21 @@ fn to_canonical_absolute_components(path: &Path) -> LocalResult<Vec<String>> {
     Ok(encoded)
 }
 
+/// Builds a Windows drive-rooted path from canonical path components.
+///
+/// # Parameters
+///
+/// - `components`: Canonical components beginning with an empty root marker and
+///   drive component.
+///
+/// # Returns
+///
+/// The decoded absolute native path.
+///
+/// # Errors
+///
+/// Returns a `ComposePath` error when the root marker, drive, or any component
+/// is malformed.
 #[cfg(windows)]
 #[inline(never)]
 fn from_canonical_absolute_components(
@@ -685,6 +717,19 @@ fn to_canonical_absolute_components(path: &Path) -> LocalResult<Vec<String>> {
     Ok(encoded)
 }
 
+/// Rejects absolute canonical conversion on unsupported native targets.
+///
+/// # Parameters
+///
+/// - `_components`: Canonical components ignored on unsupported targets.
+///
+/// # Returns
+///
+/// Never returns a native path.
+///
+/// # Errors
+///
+/// Always returns a `ComposePath` unsupported error.
 #[cfg(not(any(unix, windows)))]
 #[inline(never)]
 fn from_canonical_absolute_components(
