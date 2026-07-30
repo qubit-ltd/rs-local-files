@@ -54,3 +54,19 @@ fn test_local_file_error_requirement_not_met_is_structured() {
     assert_eq!(LocalFileOperation::OpenWriter, error.operation());
     assert!(error.source().is_none());
 }
+
+/// Verifies conversion to a standard I/O error preserves the native error kind.
+#[test]
+fn test_local_file_error_into_io_error_preserves_kind_and_context() {
+    let error = LocalFileError::from_io(
+        LocalFileOperation::Metadata,
+        Some(Path::new("missing").to_path_buf()),
+        None,
+        io::Error::from(io::ErrorKind::NotFound),
+    );
+
+    let error = error.into_io_error();
+
+    assert_eq!(io::ErrorKind::NotFound, error.kind());
+    assert!(error.to_string().contains("Metadata failed"));
+}

@@ -41,9 +41,12 @@ impl LocalPersistFailureState {
                 if matches!(
                     kind,
                     io::ErrorKind::AlreadyExists
+                        | io::ErrorKind::CrossesDevices
+                        | io::ErrorKind::InvalidInput
                         | io::ErrorKind::IsADirectory
                         | io::ErrorKind::NotADirectory
                         | io::ErrorKind::DirectoryNotEmpty
+                        | io::ErrorKind::Unsupported
                 ) =>
             {
                 Self::NotPublished

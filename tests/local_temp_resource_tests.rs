@@ -117,12 +117,17 @@ fn test_local_temp_file_persist_rejects_interior_nul_target() {
         .persist(&target)
         .expect_err("interior NUL must be rejected by native no-replace move");
     assert_eq!(std::io::ErrorKind::InvalidInput, error.kind());
-    let (_io, temporary, _requested, _resolved, _stage) = error.into_parts();
-    drop(temporary);
+    assert_eq!(
+        qubit_local_files::LocalPersistFailureState::NotPublished,
+        error.state()
+    );
+    let (_io, mut temporary, _requested, _resolved, _stage) =
+        error.into_parts();
+    temporary
+        .cleanup()
+        .expect("unpublished temporary file should retain cleanup authority");
 
-    assert!(source.exists());
-    fs::remove_file(source)
-        .expect("indeterminate temporary file should be removed manually");
+    assert!(!source.exists());
 }
 
 /// Verifies invalid affixes fail before leaving a temporary entry.

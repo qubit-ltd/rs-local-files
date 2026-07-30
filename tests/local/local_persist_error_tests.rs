@@ -53,14 +53,18 @@ fn test_persist_error_into_parts_returns_error_and_resource() {
     assert_eq!(target, persist_error.requested_target());
     assert_eq!(Some(target.as_path()), persist_error.resolved_target());
     assert_eq!(LocalPersistStage::InstallDestination, persist_error.stage());
-    let (error, resource, requested_target, resolved_target, stage) =
-        persist_error.into_parts();
+    let (error, resource, requested_target, resolved_target, stage, state) =
+        persist_error.into_parts_with_state();
 
     assert_eq!(ErrorKind::AlreadyExists, error.kind());
     assert_eq!(source, resource.path());
     assert_eq!(target, requested_target);
     assert_eq!(Some(target), resolved_target);
     assert_eq!(LocalPersistStage::InstallDestination, stage);
+    assert_eq!(
+        qubit_local_files::LocalPersistFailureState::NotPublished,
+        state
+    );
     drop(resource);
     assert!(!source.exists());
     fs::remove_dir_all(dir).expect("test directory should be removed");
