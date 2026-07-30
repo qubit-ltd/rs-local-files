@@ -1,8 +1,8 @@
 # Qubit Local Files 本地文件系统设计
 
 > 状态：已批准的目标设计。本文定义 `qubit-local-files` 的公共边界与平台语义；
-> 当前实现已完成统一入口重构，但类型化 copy/rename failure、rooted temporary
-> resource 与路径 codec 仍需按本文补齐。
+> 当前实现已完成统一入口、类型化 copy/rename failure、rooted temporary resource
+> 与路径 codec。本文仍保留尚未实施的 persistence option 与扩展状态模型目标。
 
 ## 1. 定位
 
@@ -529,13 +529,18 @@ Owned
 Persist failure state 包括：
 
 - `NotPublished`；
-- `Published`；
 - `PublishedSourceRetained`；
 - `Indeterminate`。
 
-`LocalPersistOptions` 对 file 与 directory 使用同一套 overwrite、atomicity、
-durability 和 metadata-preservation 语义。所有 `Required` requirement 在 namespace
-修改前验证；实际结果由 persist outcome 报告，不能只返回路径。
+当前 `LocalPersistOptions` 对 file 与 directory 提供同一套 overwrite 语义；
+`persist_with_outcome` 返回实际的 target、publication method、atomicity 与 durability。
+当前 native 实现以同一 authority 内的 rename 发布，报告 `AtomicRename`、
+`atomic = true` 与 `durable = false`。`LocalPersistFailureState` 在已知未发布的错误上
+报告 `NotPublished`，无法证明结果的 native install error 报告 `Indeterminate`；
+`PublishedSourceRetained` 为未来分阶段 publish 实现保留。
+
+后续扩展可为 `LocalPersistOptions` 增加 atomicity、durability 和 metadata-preservation
+requirement；所有 `Required` requirement 必须在 namespace 修改前验证。
 
 Drop 只在 `Owned` 或 `CleanupRequired` 执行 best-effort cleanup；`Indeterminate` 不
 自动操作。需要确认 cleanup 的调用者必须显式调用 `cleanup`。

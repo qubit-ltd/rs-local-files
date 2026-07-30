@@ -32,7 +32,7 @@ use crate::{
 /// ```compile_fail
 /// use qubit_local_files::copy::Error;
 ///
-/// fn overwrite_stage(error: CopyError) {
+/// fn overwrite_stage(error: Error) {
 ///     let _ = error.stage;
 /// }
 /// ```
