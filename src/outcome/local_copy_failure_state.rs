@@ -6,8 +6,8 @@
 //    Licensed under the Apache License, Version 2.0.
 // =============================================================================
 
-// qubit-style: allow all -- outcome states are covered by copy integration
-// tests.
+// qubit-style: allow source-test-pair
+// Outcome states are covered through public copy integration tests.
 //! States proven when a unified copy operation fails.
 
 /// Namespace state proven by a failed unified copy operation.

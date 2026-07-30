@@ -169,6 +169,12 @@ impl LocalCopyDirError {
         self.error.kind()
     }
 
+    /// Decomposes the failure into its stage, paths, statistics, and errors.
+    ///
+    /// # Returns
+    ///
+    /// The copy stage, source and destination paths, partial statistics,
+    /// optional staging path, optional cleanup error, and primary I/O error.
     #[inline(never)]
     pub(crate) fn into_parts(
         self,
