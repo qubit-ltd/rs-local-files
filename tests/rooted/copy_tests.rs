@@ -182,13 +182,14 @@ fn test_copy_file_replaces_directory_type_conflict() {
     let destination = rooted::Path::new("destination")
         .expect("the destination should validate");
 
-    root.copy(
-        &source,
-        &destination,
-        copy::Options::new()
-            .with_type_conflict(copy::TypeConflictPolicy::Replace),
-    )
-    .expect("the directory should be replaced by a file");
+    let _ = root
+        .copy(
+            &source,
+            &destination,
+            copy::Options::new()
+                .with_type_conflict(copy::TypeConflictPolicy::Replace),
+        )
+        .expect("the directory should be replaced by a file");
 
     assert_eq!(
         b"file",
@@ -296,12 +297,13 @@ fn test_copy_preserves_permissions_when_requested() {
     let destination = rooted::Path::new("destination")
         .expect("the destination should validate");
 
-    root.copy(
-        &source,
-        &destination,
-        copy::Options::new().preserve_permissions(),
-    )
-    .expect("the file should copy with permissions");
+    let _ = root
+        .copy(
+            &source,
+            &destination,
+            copy::Options::new().preserve_permissions(),
+        )
+        .expect("the file should copy with permissions");
 
     assert_eq!(
         0o640,
@@ -343,12 +345,13 @@ fn test_copy_directory_preserves_source_directory_permissions() {
     let destination = rooted::Path::new("destination")
         .expect("the destination should validate");
 
-    root.copy(
-        &source,
-        &destination,
-        copy::Options::new().preserve_permissions(),
-    )
-    .expect("the directory tree should copy with permissions");
+    let _ = root
+        .copy(
+            &source,
+            &destination,
+            copy::Options::new().preserve_permissions(),
+        )
+        .expect("the directory tree should copy with permissions");
 
     assert_eq!(
         0o750,
