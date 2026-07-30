@@ -23,8 +23,11 @@ use crate::{
     LocalResult,
 };
 
-/// Namespace for native and portable filename operations.
-pub enum LocalFileNames {}
+/// Stateless native and portable filename operations.
+pub struct LocalFileNames {
+    /// Prevents construction of this stateless utility type.
+    _private: (),
+}
 
 impl LocalFileNames {
     /// Generates a cryptographically random portable filename component.

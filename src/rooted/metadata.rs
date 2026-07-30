@@ -28,6 +28,7 @@ use super::{
 
 /// Metadata observed through an opened rooted directory authority.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
+#[must_use]
 pub struct Metadata {
     /// The observed entry type.
     kind: EntryKind,
@@ -130,6 +131,34 @@ impl Metadata {
         }
     }
 
+    /// Builds rooted metadata from a Unix `fstatat` result.
+    ///
+    /// # Parameters
+    ///
+    /// * `status` - Fully initialized metadata returned with
+    ///   `AT_SYMLINK_NOFOLLOW`.
+    ///
+    /// # Returns
+    /// Rooted metadata for the final entry represented by `status`.
+    #[cfg(unix)]
+    #[must_use]
+    pub(crate) fn from_stat(status: &libc::stat) -> Self {
+        let kind = entry_kind_from_mode(status.st_mode);
+        let (accessed_at, modified_at, created_at) = stat_times(status);
+        Self {
+            kind,
+            len: u64::try_from(status.st_size).unwrap_or_default(),
+            accessed_at,
+            modified_at,
+            created_at,
+            permissions: Permissions::from_unix_mode(permission_mode(
+                status.st_mode,
+            )),
+            device_id: native_id(status.st_dev),
+            file_id: native_id(status.st_ino),
+        }
+    }
+
     /// Builds rooted metadata from Windows metadata and handle identity.
     #[must_use]
     #[cfg(windows)]
@@ -159,34 +188,6 @@ impl Metadata {
             ),
             device_id,
             file_id,
-        }
-    }
-
-    /// Builds rooted metadata from a Unix `fstatat` result.
-    ///
-    /// # Parameters
-    ///
-    /// * `status` - Fully initialized metadata returned with
-    ///   `AT_SYMLINK_NOFOLLOW`.
-    ///
-    /// # Returns
-    /// Rooted metadata for the final entry represented by `status`.
-    #[cfg(unix)]
-    #[must_use]
-    pub(crate) fn from_stat(status: &libc::stat) -> Self {
-        let kind = entry_kind_from_mode(status.st_mode);
-        let (accessed_at, modified_at, created_at) = stat_times(status);
-        Self {
-            kind,
-            len: u64::try_from(status.st_size).unwrap_or_default(),
-            accessed_at,
-            modified_at,
-            created_at,
-            permissions: Permissions::from_unix_mode(permission_mode(
-                status.st_mode,
-            )),
-            device_id: native_id(status.st_dev),
-            file_id: native_id(status.st_ino),
         }
     }
 
