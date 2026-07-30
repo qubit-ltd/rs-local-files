@@ -20,7 +20,10 @@ use std::path::{
     PathBuf,
 };
 
-use crate::LocalPersistStage;
+use crate::{
+    LocalPersistFailureState,
+    LocalPersistStage,
+};
 
 /// Persistence error that returns ownership of the temporary resource.
 ///
@@ -45,6 +48,8 @@ pub struct LocalPersistError<T> {
     resolved_target: Option<PathBuf>,
     /// Stage at which persistence failed.
     stage: LocalPersistStage,
+    /// Strongest namespace state established by the failed operation.
+    state: LocalPersistFailureState,
 }
 
 impl<T> LocalPersistError<T> {
@@ -67,12 +72,14 @@ impl<T> LocalPersistError<T> {
         resolved_target: Option<PathBuf>,
         stage: LocalPersistStage,
     ) -> Self {
+        let state = LocalPersistFailureState::from_error(stage, error.kind());
         Self {
             error,
             resource: Box::new(resource),
             requested_target,
             resolved_target,
             stage,
+            state,
         }
     }
 
@@ -128,6 +135,14 @@ impl<T> LocalPersistError<T> {
         self.stage
     }
 
+    /// Returns the strongest namespace state established by the failure.
+    ///
+    /// # Returns
+    /// A state describing whether the temporary resource remains safely owned.
+    pub const fn state(&self) -> LocalPersistFailureState {
+        self.state
+    }
+
     /// Returns the native I/O error kind.
     ///
     /// # Returns
@@ -164,6 +179,7 @@ impl<T> LocalPersistError<T> {
             requested_target,
             resolved_target,
             stage,
+            state: _,
         } = self;
         (error, *resource, requested_target, resolved_target, stage)
     }

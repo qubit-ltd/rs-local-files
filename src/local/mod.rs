@@ -28,6 +28,7 @@ mod local_copy_dir_stage;
 mod local_copy_dir_stats;
 mod local_copy_type_conflict_policy;
 mod local_persist_error;
+mod local_persist_failure_state;
 mod local_persist_options;
 mod local_persist_stage;
 mod local_relative_path;
@@ -44,6 +45,7 @@ pub(crate) use internal::{
     dir_size_path,
     ensure_dir_path,
     ensure_parent_path,
+    ensure_parent_path_with_sync_dirs,
     file_name_from_path,
     file_name_from_url,
     move_directory_without_replacing,
@@ -83,6 +85,7 @@ pub use local_copy_dir_stage::LocalCopyDirStage;
 pub use local_copy_dir_stats::LocalCopyDirStats;
 pub use local_copy_type_conflict_policy::LocalCopyTypeConflictPolicy;
 pub use local_persist_error::LocalPersistError;
+pub use local_persist_failure_state::LocalPersistFailureState;
 pub use local_persist_options::LocalPersistOptions;
 pub use local_persist_stage::LocalPersistStage;
 pub use local_relative_path::LocalRelativePath;

@@ -15,6 +15,7 @@ use std::{
 
 use qubit_local_files::{
     LocalFileSystem,
+    LocalPersistFailureState,
     LocalPersistOptions,
     LocalTempDirectoryOptions,
     RootedLocalFileSystem,
@@ -270,10 +271,9 @@ fn test_local_temp_directory_persist_rejects_non_directory_parent_and_cleans_up(
     assert!(!source.exists());
 }
 
-/// Verifies an indeterminate directory publication failure disables cleanup
-/// and later persistence attempts.
+/// Verifies a known directory type conflict preserves cleanup ownership.
 #[test]
-fn test_local_temp_directory_indeterminate_persist_failure_disables_cleanup() {
+fn test_local_temp_directory_known_persist_conflict_retains_cleanup() {
     let parent = tempdir().expect("temporary parent should be created");
     let target = parent.path().join("target-file");
     fs::write(&target, b"not a directory")
@@ -287,18 +287,14 @@ fn test_local_temp_directory_indeterminate_persist_failure_disables_cleanup() {
     let error = temporary
         .persist_with(&target, LocalPersistOptions::new().with_overwrite())
         .expect_err("a directory cannot replace a file");
+    assert_eq!(LocalPersistFailureState::NotPublished, error.state());
     let (_io, mut temporary, _requested, _resolved, _stage) =
         error.into_parts();
-    assert!(temporary.cleanup().is_err());
-    let error = temporary
-        .persist(&target)
-        .expect_err("indeterminate resources must reject persistence retries");
-    let (_io, temporary, _requested, _resolved, _stage) = error.into_parts();
-    drop(temporary);
+    temporary
+        .cleanup()
+        .expect("known type conflicts must retain cleanup authority");
 
-    assert!(source.exists());
-    fs::remove_dir_all(source)
-        .expect("indeterminate fixture should be removed manually");
+    assert!(!source.exists());
 }
 
 /// Verifies rooted temporary-directory persistence rejects host-absolute

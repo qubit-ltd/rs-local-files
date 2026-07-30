@@ -20,6 +20,8 @@ use std::{
 
 use qubit_local_files::{
     LocalFileSystem,
+    LocalPersistFailureState,
+    LocalPersistMethod,
     LocalPersistOptions,
     LocalTempFileOptions,
     RootedLocalFileSystem,
@@ -75,6 +77,26 @@ fn test_local_temp_file_close_retains_path_and_persist_responsibility() {
             .expect("closed file should persist")
     );
     assert!(target.exists());
+}
+
+/// Verifies detailed persistence reports the actual atomic rename outcome.
+#[test]
+fn test_local_temp_file_persist_with_outcome_reports_atomic_rename() {
+    let parent = tempdir().expect("temporary parent should be created");
+    let target = parent.path().join("persisted");
+    let temporary = LocalFileSystem::create_temp_file(
+        &LocalTempFileOptions::new().with_parent(parent.path()),
+    )
+    .expect("temporary file should be created");
+
+    let outcome = temporary
+        .persist_with_outcome(&target, LocalPersistOptions::new())
+        .expect("temporary file should persist");
+
+    assert_eq!(target, outcome.path());
+    assert!(outcome.atomic());
+    assert!(!outcome.durable());
+    assert_eq!(LocalPersistMethod::AtomicRename, outcome.method());
 }
 
 /// Verifies temporary-file creation rejects a zero collision-retry budget
@@ -187,10 +209,9 @@ fn test_local_temp_file_persist_rejects_non_directory_parent_and_retains_cleanup
     assert!(!source.exists());
 }
 
-/// Verifies an indeterminate host publication failure disables retries and
-/// automatic cleanup rather than risking an unrelated namespace entry.
+/// Verifies a known host type conflict preserves cleanup ownership.
 #[test]
-fn test_local_temp_file_indeterminate_persist_failure_disables_cleanup() {
+fn test_local_temp_file_known_persist_conflict_retains_cleanup() {
     let parent = tempdir().expect("temporary parent should be created");
     let target = parent.path().join("target-directory");
     fs::create_dir(&target).expect("target directory fixture should exist");
@@ -203,18 +224,14 @@ fn test_local_temp_file_indeterminate_persist_failure_disables_cleanup() {
     let error = temporary
         .persist_with(&target, LocalPersistOptions::new().with_overwrite())
         .expect_err("a file cannot replace a directory");
+    assert_eq!(LocalPersistFailureState::NotPublished, error.state());
     let (_io, mut temporary, _requested, _resolved, _stage) =
         error.into_parts();
-    assert!(temporary.cleanup().is_err());
-    let error = temporary
-        .persist(&target)
-        .expect_err("indeterminate resources must reject persistence retries");
-    let (_io, temporary, _requested, _resolved, _stage) = error.into_parts();
-    drop(temporary);
+    temporary
+        .cleanup()
+        .expect("known type conflicts must retain cleanup authority");
 
-    assert!(source.exists());
-    fs::remove_file(source)
-        .expect("indeterminate fixture should be removed manually");
+    assert!(!source.exists());
 }
 
 /// Verifies rooted temporary files reject host-absolute persist targets while
