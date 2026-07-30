@@ -39,6 +39,7 @@ use super::rooted_parent_mode::RootedParentMode;
 pub(crate) type RootedDirectoryEntry = (OsString, libc::stat);
 
 /// Reads immediate entries from the opened root directory.
+#[inline(always)]
 pub(crate) fn read_root_directory(
     root: &File,
     diagnostic_root: &Path,
@@ -308,7 +309,9 @@ fn read_directory_handle(
         let status = stat_child(directory, &c_name, diagnostic_path)?;
         entries.push((name, status));
     }
-    entries.sort_unstable_by(|left, right| left.0.cmp(&right.0));
+    entries.sort_unstable_by(|(left_name, _), (right_name, _)| {
+        left_name.cmp(right_name)
+    });
     Ok(entries)
 }
 

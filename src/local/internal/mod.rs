@@ -60,6 +60,8 @@ mod unix_nonblocking;
 mod unix_stat;
 #[cfg(windows)]
 mod windows_rooted;
+#[cfg(windows)]
+mod windows_rooted_staged_file;
 
 pub(crate) use atomic_file_install::install_atomic_file;
 pub(crate) use atomic_install_recovery::{
@@ -167,3 +169,5 @@ pub(crate) use windows_rooted::{
     rename_rooted_entry,
     set_rooted_permissions,
 };
+#[cfg(windows)]
+pub(super) use windows_rooted_staged_file::WindowsRootedStagedFile;

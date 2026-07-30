@@ -38,6 +38,8 @@ use crate::{
 
 #[cfg(any(unix, windows))]
 use super::internal::LocalAtomicPublicationMode;
+#[cfg(windows)]
+use super::internal::WindowsRootedStagedFile;
 #[cfg(coverage)]
 use super::internal::coverage_fault;
 #[cfg(unix)]
@@ -135,68 +137,6 @@ pub struct LocalRootAtomicWriter {
     #[cfg(windows)]
     /// Handle-relative staging lifecycle.
     staged_file: WindowsRootedStagedFile,
-}
-
-/// Owns a Windows rooted staging file and removes its name unless disarmed.
-#[cfg(windows)]
-#[derive(Debug)]
-struct WindowsRootedStagedFile {
-    /// Root capability used for cleanup and installation.
-    root: File,
-    /// Validated staging path beneath `root`.
-    path: LocalRelativePath,
-    /// Diagnostic-only absolute staging path.
-    diagnostic_path: PathBuf,
-    /// Open staging handle.
-    file: Option<File>,
-    /// Whether the staging name still requires cleanup.
-    armed: bool,
-}
-
-#[cfg(windows)]
-impl WindowsRootedStagedFile {
-    /// Returns the open staging file.
-    fn file(&self) -> &File {
-        self.file
-            .as_ref()
-            .expect("rooted staging file must remain open while armed")
-    }
-
-    /// Returns the open staging file mutably.
-    fn file_mut(&mut self) -> &mut File {
-        self.file
-            .as_mut()
-            .expect("rooted staging file must remain open while armed")
-    }
-
-    /// Closes and removes the staging entry.
-    fn cleanup(&mut self) -> io::Result<()> {
-        if let Some(file) = self.file.as_ref() {
-            let mut permissions = file.metadata()?.permissions();
-            if permissions.readonly() {
-                permissions.set_readonly(false);
-                file.set_permissions(permissions)?;
-            }
-        }
-        self.file.take();
-        if self.armed {
-            remove_rooted_entry(&self.root, Path::new(""), &self.path, false)?;
-            self.armed = false;
-        }
-        Ok(())
-    }
-
-    /// Marks the staging name as installed.
-    fn disarm(&mut self) {
-        self.armed = false;
-    }
-}
-
-#[cfg(windows)]
-impl Drop for WindowsRootedStagedFile {
-    fn drop(&mut self) {
-        let _ = self.cleanup();
-    }
 }
 
 impl LocalRootAtomicWriter {
@@ -517,6 +457,7 @@ impl LocalRootAtomicWriter {
     /// staging-file synchronization, replacement, or parent-directory
     /// synchronization fails.
     #[cfg_attr(not(any(unix, windows)), allow(unused_mut))]
+    #[inline]
     pub fn commit_recoverable(
         self,
     ) -> Result<(), LocalAtomicCommitError<Self>> {
