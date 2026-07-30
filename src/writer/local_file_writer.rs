@@ -80,7 +80,6 @@ impl LocalFileWriter {
     }
 
     /// Returns the current writer state.
-    #[must_use]
     #[inline(always)]
     pub const fn state(&self) -> LocalWriterState {
         self.state

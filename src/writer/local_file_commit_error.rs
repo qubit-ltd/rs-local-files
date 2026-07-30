@@ -60,7 +60,6 @@ impl LocalFileCommitError {
     }
 
     /// Returns the established publication state.
-    #[must_use]
     #[inline(always)]
     pub const fn state(&self) -> LocalWriterState {
         self.state
@@ -76,7 +75,6 @@ impl LocalFileCommitError {
 
     /// Consumes the failure into its error, state, and optional retryable
     /// writer.
-    #[must_use]
     #[inline]
     pub fn into_parts(
         self,

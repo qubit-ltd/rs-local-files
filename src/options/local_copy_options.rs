@@ -43,7 +43,6 @@ pub struct LocalCopyOptions {
 
 impl LocalCopyOptions {
     /// Creates conservative copy options.
-    #[must_use]
     #[inline]
     pub const fn new() -> Self {
         Self {
@@ -71,14 +70,12 @@ impl LocalCopyOptions {
     }
 
     /// Returns the metadata preservation policy.
-    #[must_use]
     #[inline(always)]
     pub const fn preserve_metadata(&self) -> LocalMetadataPreservePolicy {
         self.preserve_metadata
     }
 
     /// Returns the symbolic-link policy.
-    #[must_use]
     #[inline(always)]
     pub const fn symlink_policy(&self) -> LocalSymlinkPolicy {
         self.symlink
@@ -99,21 +96,18 @@ impl LocalCopyOptions {
     }
 
     /// Returns the required atomicity.
-    #[must_use]
     #[inline(always)]
     pub const fn atomicity(&self) -> LocalAtomicityRequirement {
         self.atomicity
     }
 
     /// Returns the required durability.
-    #[must_use]
     #[inline(always)]
     pub const fn durability(&self) -> LocalDurabilityRequirement {
         self.durability
     }
 
     /// Sets the destination file conflict policy.
-    #[must_use]
     #[inline(always)]
     pub const fn with_conflict(
         mut self,
@@ -124,7 +118,6 @@ impl LocalCopyOptions {
     }
 
     /// Sets the file/directory type conflict policy.
-    #[must_use]
     #[inline(always)]
     pub const fn with_type_conflict(
         mut self,
@@ -135,7 +128,6 @@ impl LocalCopyOptions {
     }
 
     /// Sets metadata preservation policy.
-    #[must_use]
     #[inline(always)]
     pub const fn with_metadata_preservation(
         mut self,
@@ -146,7 +138,6 @@ impl LocalCopyOptions {
     }
 
     /// Sets symbolic-link policy.
-    #[must_use]
     #[inline(always)]
     pub const fn with_symlink_policy(
         mut self,
@@ -157,7 +148,6 @@ impl LocalCopyOptions {
     }
 
     /// Authorizes copying a directory tree.
-    #[must_use]
     #[inline(always)]
     pub const fn with_recursive(mut self) -> Self {
         self.recursive = true;
@@ -165,7 +155,6 @@ impl LocalCopyOptions {
     }
 
     /// Creates missing target parent directories before copying.
-    #[must_use]
     #[inline(always)]
     pub const fn with_parent(mut self) -> Self {
         self.create_parent = true;
@@ -173,7 +162,6 @@ impl LocalCopyOptions {
     }
 
     /// Sets required publication atomicity.
-    #[must_use]
     #[inline(always)]
     pub const fn with_atomicity(
         mut self,
@@ -184,7 +172,6 @@ impl LocalCopyOptions {
     }
 
     /// Sets required durability.
-    #[must_use]
     #[inline(always)]
     pub const fn with_durability(
         mut self,

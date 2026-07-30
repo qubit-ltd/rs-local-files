@@ -23,7 +23,6 @@ pub struct LocalListOptions {
 
 impl LocalListOptions {
     /// Creates a non-recursive, no-follow listing policy.
-    #[must_use]
     #[inline]
     pub const fn new() -> Self {
         Self {
@@ -55,7 +54,6 @@ impl LocalListOptions {
     }
 
     /// Enables recursive traversal.
-    #[must_use]
     #[inline(always)]
     pub const fn with_recursive(mut self) -> Self {
         self.recursive = true;
@@ -63,7 +61,6 @@ impl LocalListOptions {
     }
 
     /// Enables symbolic-link following with cycle detection.
-    #[must_use]
     #[inline(always)]
     pub const fn with_follow_symlinks(mut self) -> Self {
         self.follow_symlinks = true;
@@ -75,7 +72,6 @@ impl LocalListOptions {
     /// # Parameters
     ///
     /// - `max_depth`: Maximum depth; zero yields no entries.
-    #[must_use]
     #[inline(always)]
     pub const fn with_max_depth(mut self, max_depth: usize) -> Self {
         self.max_depth = Some(max_depth);

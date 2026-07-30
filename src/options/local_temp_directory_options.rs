@@ -30,7 +30,6 @@ pub struct LocalTempDirectoryOptions {
 
 impl LocalTempDirectoryOptions {
     /// Creates default temporary-directory options.
-    #[must_use]
     #[inline]
     pub const fn new() -> Self {
         Self {
@@ -75,7 +74,6 @@ impl LocalTempDirectoryOptions {
     /// # Parameters
     ///
     /// - `parent`: Absolute or relative parent directory.
-    #[must_use]
     #[inline(always)]
     pub fn with_parent(mut self, parent: &Path) -> Self {
         self.parent = Some(parent.to_path_buf());
@@ -87,7 +85,6 @@ impl LocalTempDirectoryOptions {
     /// # Parameters
     ///
     /// - `prefix`: Prefix validated before entry creation.
-    #[must_use]
     #[inline(always)]
     pub fn with_prefix(mut self, prefix: &str) -> Self {
         self.prefix = Some(prefix.to_owned());
@@ -99,7 +96,6 @@ impl LocalTempDirectoryOptions {
     /// # Parameters
     ///
     /// - `suffix`: Suffix validated before entry creation.
-    #[must_use]
     #[inline(always)]
     pub fn with_suffix(mut self, suffix: &str) -> Self {
         self.suffix = Some(suffix.to_owned());
@@ -111,7 +107,6 @@ impl LocalTempDirectoryOptions {
     /// # Parameters
     ///
     /// - `max_attempts`: Positive attempt count.
-    #[must_use]
     #[inline(always)]
     pub const fn with_max_attempts(mut self, max_attempts: usize) -> Self {
         self.max_attempts = max_attempts;
