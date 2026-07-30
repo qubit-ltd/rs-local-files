@@ -16,6 +16,7 @@ use super::Metadata;
 
 /// One immediate child observed through an opened rooted directory.
 #[derive(Clone, Debug, Eq, PartialEq)]
+#[must_use]
 pub struct Entry {
     /// Native name of the immediate child.
     name: OsString,

@@ -10,6 +10,7 @@
 
 /// Options fixed for the lifetime of a local directory walker.
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+#[must_use = "list options have no effect unless they are used"]
 pub struct LocalListOptions {
     /// Whether child directories should be traversed.
     recursive: bool,

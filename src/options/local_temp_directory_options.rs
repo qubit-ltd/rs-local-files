@@ -15,6 +15,7 @@ use std::path::{
 
 /// Options for creating a cleanup-owned temporary directory.
 #[derive(Clone, Debug, Eq, PartialEq)]
+#[must_use = "temporary directory options have no effect unless they are used"]
 pub struct LocalTempDirectoryOptions {
     /// Optional parent directory; the process temporary directory is the
     /// default.

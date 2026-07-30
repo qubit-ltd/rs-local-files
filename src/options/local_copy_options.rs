@@ -21,6 +21,7 @@ use crate::{
 
 /// Unified options for copying a native file or directory tree.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
+#[must_use = "copy options have no effect unless they are used"]
 pub struct LocalCopyOptions {
     /// Destination file conflict policy.
     conflict: LocalCopyConflictPolicy,

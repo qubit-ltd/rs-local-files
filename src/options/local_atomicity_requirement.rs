@@ -10,6 +10,7 @@
 
 /// Required atomicity for a namespace publication operation.
 #[derive(Clone, Copy, Debug, Default, Eq, Hash, PartialEq)]
+#[must_use]
 pub enum LocalAtomicityRequirement {
     /// Success must be atomic and unsupported guarantees fail before side
     /// effects.

@@ -12,6 +12,7 @@
 
 /// Namespace state proven by a failed unified rename operation.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
+#[must_use]
 pub enum LocalRenameFailureState {
     /// The native namespace is proven unchanged.
     Unchanged,
