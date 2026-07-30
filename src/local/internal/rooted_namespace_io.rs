@@ -114,15 +114,53 @@ pub(crate) fn remove_rooted_entry(
     path: &LocalRelativePath,
     recursive: bool,
 ) -> Result<()> {
-    let diagnostic_path = diagnostic_root.join(path.as_path());
     let status = rooted_status(root, diagnostic_root, path)?;
-    if is_directory(status.st_mode) && recursive {
-        for (name, _) in read_rooted_directory(root, diagnostic_root, path)? {
-            let child = LocalRelativePath::new(path.as_path().join(name))
+    if !is_directory(status.st_mode) || !recursive {
+        return unlink_rooted_entry(
+            root,
+            diagnostic_root,
+            path,
+            is_directory(status.st_mode),
+        );
+    }
+
+    let mut work = vec![(path.clone(), false)];
+    while let Some((current, remove_directory)) = work.pop() {
+        if remove_directory {
+            unlink_rooted_entry(root, diagnostic_root, &current, true)?;
+            continue;
+        }
+        let status = rooted_status(root, diagnostic_root, &current)?;
+        if !is_directory(status.st_mode) {
+            unlink_rooted_entry(root, diagnostic_root, &current, false)?;
+            continue;
+        }
+        work.push((current.clone(), true));
+        for (name, _) in read_rooted_directory(root, diagnostic_root, &current)?
+            .into_iter()
+            .rev()
+        {
+            let child = LocalRelativePath::new(current.as_path().join(name))
                 .expect("joining validated rooted components stays valid");
-            remove_rooted_entry(root, diagnostic_root, &child, true)?;
+            work.push((child, false));
         }
     }
+    Ok(())
+}
+
+/// Removes one rooted entry whose observed type is already known.
+///
+/// # Errors
+///
+/// Returns an I/O error when the parent cannot be opened securely or the
+/// entry cannot be removed.
+fn unlink_rooted_entry(
+    root: &File,
+    diagnostic_root: &Path,
+    path: &LocalRelativePath,
+    directory: bool,
+) -> Result<()> {
+    let diagnostic_path = diagnostic_root.join(path.as_path());
     let (parent, name, _) = open_rooted_parent(
         root,
         &diagnostic_path,
@@ -130,11 +168,7 @@ pub(crate) fn remove_rooted_entry(
         RootedParentMode::OpenExisting,
     )?
     .into_parts();
-    let flags = if is_directory(status.st_mode) {
-        libc::AT_REMOVEDIR
-    } else {
-        0
-    };
+    let flags = if directory { libc::AT_REMOVEDIR } else { 0 };
     // SAFETY: `parent` and `name` remain live for this non-retaining call.
     let result =
         unsafe { libc::unlinkat(parent.as_raw_fd(), name.as_ptr(), flags) };
