@@ -19,6 +19,55 @@ use qubit_local_files::{
     write,
 };
 
+/// Verifies rooted recursive removal handles a deep tree on a small stack.
+#[cfg(target_os = "linux")]
+#[test]
+fn test_rooted_remove_tree_handles_deep_tree_on_small_stack() {
+    const CHILD_ENV: &str = "QUBIT_LOCAL_FILES_ROOTED_REMOVE_SMALL_STACK_CHILD";
+    if std::env::var_os(CHILD_ENV).is_none() {
+        let executable = std::env::current_exe()
+            .expect("current test executable should be available");
+        let status = std::process::Command::new(executable)
+            .args([
+                "--exact",
+                "rooted::root_tests::test_rooted_remove_tree_handles_deep_tree_on_small_stack",
+                "--nocapture",
+            ])
+            .env(CHILD_ENV, "1")
+            .current_dir(std::env::temp_dir())
+            .status()
+            .expect("small-stack child test should launch");
+        assert!(status.success(), "small-stack child test should pass");
+        return;
+    }
+
+    let worker = std::thread::Builder::new()
+        .name("small-stack-rooted-remove-test".to_owned())
+        .stack_size(128 * 1024)
+        .spawn(|| {
+            let temporary =
+                tempfile::tempdir().expect("temporary root should be created");
+            let mut native_path = temporary.path().join("tree");
+            for _ in 0..512 {
+                native_path.push("d");
+            }
+            std::fs::create_dir_all(&native_path)
+                .expect("deep rooted tree should be created");
+            std::fs::write(native_path.join("leaf"), b"payload")
+                .expect("deep rooted leaf should be written");
+            let root =
+                rooted::Root::open(temporary.path()).expect("root should open");
+            let tree = rooted::Path::new("tree")
+                .expect("rooted tree path should validate");
+
+            root.remove_tree(&tree)
+                .expect("deep rooted tree should be removed");
+            assert!(!temporary.path().join("tree").exists());
+        })
+        .expect("small-stack thread should launch");
+    worker.join().expect("small-stack thread should complete");
+}
+
 /// Verifies rooted metadata preserves final symbolic links without abandoning
 /// the opened directory authority.
 #[cfg(unix)]
