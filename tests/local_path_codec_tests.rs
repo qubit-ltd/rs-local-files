@@ -11,7 +11,15 @@ use std::ffi::OsStr;
 #[cfg(unix)]
 use std::os::unix::ffi::OsStrExt;
 
-use proptest::prelude::*;
+#[cfg(any(unix, windows))]
+use proptest::{
+    prelude::{
+        Strategy,
+        any,
+        prop,
+    },
+    proptest,
+};
 use qubit_local_files::{
     LocalPathCodec,
     LocalPathCodecError,
