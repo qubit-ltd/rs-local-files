@@ -2048,7 +2048,7 @@ fn test_copy_dir_all_with_rejects_symlink_from_opened_handle() {
     assert!(!dst.join("link.txt").exists());
 
     let followed_dst = dir.join("followed-dst");
-    qubit_local_files::copy::directory(
+    let _ = qubit_local_files::copy::directory(
         &src,
         &followed_dst,
         LocalCopyDirOptions::new().follow_symlinks(),
@@ -2278,7 +2278,7 @@ fn test_copy_dir_all_with_does_not_preserve_permissions_by_default() {
     )
     .expect("source file permissions should be set");
 
-    qubit_local_files::copy::directory(
+    let _ = qubit_local_files::copy::directory(
         &src,
         &dst,
         LocalCopyDirOptions::default(),
@@ -2319,7 +2319,7 @@ fn test_copy_dir_all_with_preserves_permissions() {
     )
     .unwrap();
 
-    qubit_local_files::copy::directory(
+    let _ = qubit_local_files::copy::directory(
         &src,
         &dst,
         LocalCopyDirOptions::new().preserve_permissions(),
@@ -2351,7 +2351,7 @@ fn test_copy_dir_all_with_preserves_read_only_directory_permissions() {
     fs::write(src.join("data.txt"), b"data").unwrap();
     fs::set_permissions(&src, fs::Permissions::from_mode(0o555)).unwrap();
 
-    qubit_local_files::copy::directory(
+    let _ = qubit_local_files::copy::directory(
         &src,
         &dst,
         LocalCopyDirOptions::new().preserve_permissions(),
