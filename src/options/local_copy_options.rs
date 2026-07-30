@@ -32,6 +32,8 @@ pub struct LocalCopyOptions {
     symlink: LocalSymlinkPolicy,
     /// Whether copying a directory tree is authorized.
     recursive: bool,
+    /// Whether missing target parent directories are created.
+    create_parent: bool,
     /// Required publication atomicity.
     atomicity: LocalAtomicityRequirement,
     /// Required durability.
@@ -48,6 +50,7 @@ impl LocalCopyOptions {
             preserve_metadata: LocalMetadataPreservePolicy::None,
             symlink: LocalSymlinkPolicy::Reject,
             recursive: false,
+            create_parent: false,
             atomicity: LocalAtomicityRequirement::Preferred,
             durability: LocalDurabilityRequirement::NotRequired,
         }
@@ -79,6 +82,12 @@ impl LocalCopyOptions {
     #[must_use]
     pub const fn recursive(&self) -> bool {
         self.recursive
+    }
+
+    /// Reports whether missing target parent directories are created.
+    #[must_use]
+    pub const fn creates_parent(&self) -> bool {
+        self.create_parent
     }
 
     /// Returns the required atomicity.
@@ -137,6 +146,13 @@ impl LocalCopyOptions {
     #[must_use]
     pub const fn with_recursive(mut self) -> Self {
         self.recursive = true;
+        self
+    }
+
+    /// Creates missing target parent directories before copying.
+    #[must_use]
+    pub const fn with_parent(mut self) -> Self {
+        self.create_parent = true;
         self
     }
 

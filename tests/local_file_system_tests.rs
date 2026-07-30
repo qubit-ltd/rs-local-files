@@ -108,6 +108,29 @@ fn test_local_file_system_create_directory_reports_created_entries() {
     assert!(target.is_dir());
 }
 
+/// Verifies host copy can create missing destination parents on request.
+#[test]
+fn test_local_file_system_copy_creates_missing_parent() {
+    let directory = tempdir().expect("temporary directory should be created");
+    let source = directory.path().join("source");
+    let target = directory.path().join("nested/target");
+    fs::write(&source, b"payload").expect("source fixture should be written");
+
+    let _ = LocalFileSystem::copy(
+        &source,
+        &target,
+        &LocalCopyOptions::new().with_parent(),
+    )
+    .expect("copy should create the missing parent");
+
+    assert_eq!(
+        b"payload",
+        fs::read(&target)
+            .expect("copied target should read")
+            .as_slice()
+    );
+}
+
 /// Verifies callers may explicitly accept an already existing directory.
 #[test]
 fn test_local_file_system_create_directory_accepts_existing_directory() {
