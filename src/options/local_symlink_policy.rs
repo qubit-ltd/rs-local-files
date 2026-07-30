@@ -10,6 +10,7 @@
 
 /// Policy for symbolic links encountered during traversal.
 #[derive(Clone, Copy, Debug, Default, Eq, Hash, PartialEq)]
+#[must_use]
 pub enum LocalSymlinkPolicy {
     /// Reject symbolic links.
     #[default]

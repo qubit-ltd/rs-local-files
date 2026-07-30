@@ -10,6 +10,7 @@
 
 /// Native method used to complete a copy operation.
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
+#[must_use]
 pub enum LocalCopyMethod {
     /// Regular file bytes were copied into same-directory staging and
     /// published.

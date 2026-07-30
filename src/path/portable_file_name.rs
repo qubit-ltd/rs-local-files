@@ -20,6 +20,7 @@ use std::io;
 /// separators, dot components, trailing spaces or dots, control characters,
 /// and Windows-reserved device names.
 #[derive(Clone, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
+#[must_use]
 pub struct PortableFileName(Box<str>);
 
 impl PortableFileName {
