@@ -262,6 +262,7 @@ impl LocalTempDirectory {
 
     /// Removes the resource using the retained backend rather than a diagnostic
     /// path.
+    #[inline]
     fn remove(&self) -> Result<()> {
         match &self.backend {
             LocalTempResourceBackend::Host(_) => {
@@ -277,6 +278,7 @@ impl LocalTempDirectory {
 
     /// Rejects namespace cleanup after an indeterminate native publication
     /// attempt.
+    #[inline]
     fn ensure_cleanup_safe(&self) -> Result<()> {
         if self.state == LocalTempResourceState::Indeterminate {
             return Err(std::io::Error::other(
@@ -287,6 +289,7 @@ impl LocalTempDirectory {
     }
 
     /// Records whether a failed native install proves the source remains owned.
+    #[inline]
     fn record_native_persist_failure(&mut self, error: &std::io::Error) {
         self.state = if LocalPersistFailureState::from_error(
             LocalPersistStage::InstallDestination,

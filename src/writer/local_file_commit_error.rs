@@ -39,6 +39,7 @@ impl LocalFileCommitError {
     /// - `error`: Structured local filesystem failure.
     /// - `state`: Established publication state.
     /// - `writer`: Retryable writer when publication has not started.
+    #[inline]
     pub(crate) fn new(
         error: LocalFileError,
         state: LocalWriterState,

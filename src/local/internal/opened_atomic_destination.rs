@@ -323,6 +323,7 @@ where
 }
 
 /// Returns whether a coverage-only atomic destination fault is selected.
+#[inline]
 fn coverage_fault_enabled(name: &str) -> bool {
     #[cfg(coverage)]
     return super::coverage_fault::is_enabled(name);

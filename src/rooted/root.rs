@@ -102,6 +102,7 @@ impl Root {
     /// Returns a structured copy error when the source is unsupported,
     /// destination policies reject an entry, traversal fails, or a staged file
     /// cannot be installed.
+    #[inline(always)]
     pub fn copy(
         &self,
         source: &path::Path,
@@ -134,6 +135,7 @@ impl Root {
     /// Returns a structured copy error when the source is unsupported,
     /// destination policies reject an entry, traversal fails, staging cannot
     /// be installed, or required synchronization fails.
+    #[inline(always)]
     pub(crate) fn copy_with_durability(
         &self,
         source: &path::Path,

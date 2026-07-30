@@ -41,6 +41,7 @@ impl LocalFileMetadata {
     /// - `accessed_at`: Optional access time.
     /// - `modified_at`: Optional modification time.
     /// - `created_at`: Optional creation time.
+    #[inline]
     pub(crate) const fn from_parts(
         kind: LocalFileKind,
         len: u64,

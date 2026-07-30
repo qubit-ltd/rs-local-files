@@ -45,6 +45,7 @@ use super::statistics_overflow::{
 /// # Returns
 ///
 /// A structured recursive-copy error retaining the native source error.
+#[inline]
 pub(super) fn copy_dir_error(
     stage: LocalCopyDirStage,
     src: &Path,
@@ -75,6 +76,7 @@ pub(super) fn copy_dir_error(
 /// # Returns
 ///
 /// A structured error retaining primary and secondary cleanup context.
+#[inline]
 pub(super) fn copy_dir_error_with_staging(
     stage: LocalCopyDirStage,
     src: &Path,
@@ -102,6 +104,7 @@ pub(super) fn copy_dir_error_with_staging(
 /// # Returns
 ///
 /// The successful value or a structured recursive-copy error.
+#[inline(always)]
 pub(super) fn with_copy_context<T>(
     result: Result<T>,
     stage: LocalCopyDirStage,

@@ -117,6 +117,7 @@ fn configure_nonblocking_open(_options: &mut OpenOptions) {}
 ///
 /// Returns the native open error. On Unix, lease conflicts are retried to
 /// preserve ordinary blocking-open behavior.
+#[inline]
 fn open_configured_file(
     options: &OpenOptions,
     path: &Path,
@@ -331,6 +332,7 @@ fn open_writer_file(
 /// # Errors
 /// Returns a contextual I/O error when parent creation, inspection, opening, or
 /// post-open truncation fails.
+#[inline]
 pub(crate) fn open_native_writer_path(
     path: &Path,
     options: &write::OpenOptions,

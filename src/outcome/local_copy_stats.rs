@@ -32,6 +32,7 @@ impl LocalCopyStats {
     /// # Parameters
     ///
     /// - `stats`: Internal copy statistics.
+    #[inline]
     pub(crate) const fn from_internal(stats: LocalCopyDirStats) -> Self {
         Self {
             files: stats.files,

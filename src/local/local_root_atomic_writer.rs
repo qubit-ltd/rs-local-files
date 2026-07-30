@@ -817,6 +817,7 @@ impl LocalRootAtomicWriter {
     ///
     /// Returns the structured namespace-race error produced by the rooted
     /// identity verifier.
+    #[inline]
     fn verify_destination_for_commit(
         &mut self,
         destination: Option<&OpenedAtomicDestination>,
@@ -842,6 +843,7 @@ impl LocalRootAtomicWriter {
     /// # Returns
     ///
     /// The failure enriched with any staging cleanup error.
+    #[inline]
     fn finalize_failed_commit(
         mut self,
         error: LocalAtomicWriteError,
@@ -857,6 +859,7 @@ impl LocalRootAtomicWriter {
 
     #[cfg(windows)]
     /// Finalizes a consuming Windows commit failure.
+    #[inline]
     fn finalize_failed_commit(
         mut self,
         error: LocalAtomicWriteError,
@@ -1071,6 +1074,7 @@ fn sync_rooted_parent_chain(
 /// # Returns
 ///
 /// The successful value or a structured atomic error.
+#[inline]
 fn map_atomic_error<T>(
     result: io::Result<T>,
     stage: LocalAtomicWriteStage,
@@ -1100,6 +1104,7 @@ fn map_atomic_error<T>(
 /// # Returns
 ///
 /// An unsupported error that never falls back to ordinary path authority.
+#[inline]
 fn unsupported_atomic_error(path: &Path) -> LocalAtomicWriteError {
     LocalAtomicWriteError::new(
         LocalAtomicWriteStage::PrepareParent,

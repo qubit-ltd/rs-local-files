@@ -43,6 +43,7 @@ pub struct LocalCopyOptions {
 impl LocalCopyOptions {
     /// Creates conservative copy options.
     #[must_use]
+    #[inline]
     pub const fn new() -> Self {
         Self {
             conflict: LocalCopyConflictPolicy::Fail,

@@ -68,6 +68,7 @@ use super::unix_nonblocking::{
 ///
 /// Returns a contextual I/O error when the path is missing, linked, not a
 /// directory, or cannot be opened.
+#[inline]
 pub(crate) fn open_root_directory(path: &Path) -> Result<File> {
     let mut options = OpenOptions::new();
     options
@@ -365,6 +366,7 @@ pub(in crate::local) fn open_rooted_parent(
 ///
 /// Panics if `name` violates the validated-component invariant by containing
 /// an interior NUL.
+#[inline]
 fn open_directory_at(parent: &File, name: &OsStr) -> Result<File> {
     let name = component_c_string(name);
     open_file_at(
@@ -396,6 +398,7 @@ fn open_directory_at(parent: &File, name: &OsStr) -> Result<File> {
 ///
 /// Panics if `name` violates the validated-component invariant by containing
 /// an interior NUL.
+#[inline]
 fn create_directory_at(
     parent: &File,
     name: &OsStr,
@@ -505,6 +508,7 @@ fn reject_existing_non_file(
 /// # Errors
 ///
 /// Returns a contextual metadata error or `InvalidInput` for a non-directory.
+#[inline]
 fn verify_opened_directory(
     directory: &File,
     operation: &'static str,
@@ -534,6 +538,7 @@ fn verify_opened_directory(
 ///
 /// Returns a contextual metadata or descriptor error, or `InvalidInput` for a
 /// non-regular handle.
+#[inline]
 fn prepare_opened_rooted_regular_file(
     file: &File,
     restore_operation: &'static str,
@@ -589,6 +594,7 @@ fn component_c_string(component: &OsStr) -> CString {
 ///
 /// Returns a contextual error when `result` is `Err`, normalizing stable link
 /// and wrong-directory failures to `InvalidInput`.
+#[inline]
 fn rooted_open_result<T>(
     result: Result<T>,
     operation: &'static str,
