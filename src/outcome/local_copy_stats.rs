@@ -27,6 +27,18 @@ pub struct LocalCopyStats {
 }
 
 impl LocalCopyStats {
+    /// Creates statistics for one destination entry skipped before transfer.
+    #[inline(always)]
+    pub(crate) const fn skipped_one() -> Self {
+        Self {
+            files: 0,
+            directories: 0,
+            bytes: 0,
+            skipped: 1,
+            overwritten: 0,
+        }
+    }
+
     /// Converts statistics from the shared native copy implementation.
     ///
     /// # Parameters

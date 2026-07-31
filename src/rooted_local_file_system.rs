@@ -632,6 +632,32 @@ impl RootedLocalFileSystem {
                 .with_target(target.to_path_buf()),
             ));
         }
+        let target_is_directory = rooted_destination_is_directory(&self.root, &target_path)
+            .map_err(|error| rooted_copy_failure_unchanged(rooted_io_error(
+                LocalFileOperation::Copy,
+                target,
+                error,
+            )))?;
+        let target_exists = self.root.symlink_metadata(&target_path)
+            .map(|_| true)
+            .or_else(|error| (error.kind() == io::ErrorKind::NotFound).then_some(false).ok_or(error))
+            .map_err(|error| rooted_copy_failure_unchanged(rooted_io_error(
+                LocalFileOperation::Copy,
+                target,
+                error,
+            )))?;
+        if options.type_conflict() == crate::LocalCopyTypeConflictPolicy::Skip
+            && ((directory && !target_is_directory && target_exists)
+                || (!directory && target_is_directory))
+        {
+            return Ok(LocalCopyOutcome::new(
+                LocalCopyStats::skipped_one(),
+                if directory { LocalCopyMethod::Recursive } else { LocalCopyMethod::StagedFile },
+                false,
+                false,
+                options.preserve_metadata(),
+            ));
+        }
         if directory
             && options.atomicity() == crate::LocalAtomicityRequirement::Required
         {
@@ -648,14 +674,7 @@ impl RootedLocalFileSystem {
             && options.atomicity() == crate::LocalAtomicityRequirement::Required
             && options.type_conflict()
                 == crate::LocalCopyTypeConflictPolicy::Replace
-            && rooted_destination_is_directory(&self.root, &target_path)
-                .map_err(|error| {
-                    rooted_copy_failure_unchanged(rooted_io_error(
-                        LocalFileOperation::Copy,
-                        target,
-                        error,
-                    ))
-                })?
+            && target_is_directory
         {
             return Err(rooted_copy_failure_unchanged(
                 LocalFileError::new(
