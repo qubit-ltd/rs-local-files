@@ -12,6 +12,7 @@ use super::{
     LocalAtomicityRequirement,
     LocalDurabilityRequirement,
     LocalMetadataPreservePolicy,
+    LocalCopySourceMode,
     LocalSymlinkPolicy,
 };
 use crate::{
@@ -32,7 +33,7 @@ pub struct LocalCopyOptions {
     /// Symbolic-link traversal policy.
     symlink: LocalSymlinkPolicy,
     /// Whether copying a directory tree is authorized.
-    recursive: bool,
+    source_mode: LocalCopySourceMode,
     /// Whether missing target parent directories are created.
     create_parent: bool,
     /// Required publication atomicity.
@@ -50,7 +51,7 @@ impl LocalCopyOptions {
             type_conflict: LocalCopyTypeConflictPolicy::Fail,
             preserve_metadata: LocalMetadataPreservePolicy::None,
             symlink: LocalSymlinkPolicy::Reject,
-            recursive: false,
+            source_mode: LocalCopySourceMode::Auto,
             create_parent: false,
             atomicity: LocalAtomicityRequirement::Preferred,
             durability: LocalDurabilityRequirement::NotRequired,
@@ -81,11 +82,17 @@ impl LocalCopyOptions {
         self.symlink
     }
 
-    /// Reports whether directory-tree copying is authorized.
+    /// Returns the source kind accepted by this copy.
     #[must_use]
     #[inline(always)]
+    pub const fn source_mode(&self) -> LocalCopySourceMode {
+        self.source_mode
+    }
+
+    /// Reports whether this copy requires a directory tree source.
+    #[inline(always)]
     pub const fn recursive(&self) -> bool {
-        self.recursive
+        matches!(self.source_mode, LocalCopySourceMode::Tree)
     }
 
     /// Reports whether missing target parent directories are created.
@@ -147,11 +154,24 @@ impl LocalCopyOptions {
         self
     }
 
-    /// Authorizes copying a directory tree.
+    /// Requires a regular file source.
     #[inline(always)]
-    pub const fn with_recursive(mut self) -> Self {
-        self.recursive = true;
+    pub const fn with_file_source(mut self) -> Self {
+        self.source_mode = LocalCopySourceMode::File;
         self
+    }
+
+    /// Requires a directory-tree source.
+    #[inline(always)]
+    pub const fn with_tree_source(mut self) -> Self {
+        self.source_mode = LocalCopySourceMode::Tree;
+        self
+    }
+
+    /// Requires a directory-tree source.
+    #[inline(always)]
+    pub const fn with_recursive(self) -> Self {
+        self.with_tree_source()
     }
 
     /// Creates missing target parent directories before copying.

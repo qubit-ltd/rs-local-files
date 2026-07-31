@@ -147,6 +147,7 @@ pub use local_paths::LocalPaths;
 pub use options::{
     LocalAtomicityRequirement,
     LocalCopyOptions,
+    LocalCopySourceMode,
     LocalCreateDirectoryOptions,
     LocalDeleteOptions,
     LocalDurabilityRequirement,

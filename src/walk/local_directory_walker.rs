@@ -43,8 +43,7 @@ pub struct LocalDirectoryWalker {
     options: LocalListOptions,
     /// Open directory iterators, bounded by traversal depth.
     stack: Vec<WalkFrame>,
-    /// Canonical directory identities used only for follow-mode cycle
-    /// detection.
+    /// Canonical directory identities on the active follow-mode DFS path.
     followed_directories: HashSet<PathBuf>,
     /// Descriptor-relative traversal state for a rooted walker.
     rooted: Option<RootedWalkState>,
@@ -82,7 +81,7 @@ impl LocalDirectoryWalker {
         let entries =
             fs::read_dir(&root).map_err(|error| walk_io_error(&root, error))?;
         let mut followed_directories = HashSet::new();
-        if options.follows_symlinks() {
+        let root_identity = if options.follows_symlinks() {
             #[cfg(coverage)]
             if crate::local::coverage_fault_enabled("walker-root-canonicalize")
             {
@@ -97,14 +96,18 @@ impl LocalDirectoryWalker {
                 Ok(identity) => identity,
                 Err(error) => return Err(walk_io_error(&root, error)),
             };
-            followed_directories.insert(identity);
-        }
+            followed_directories.insert(identity.clone());
+            Some(identity)
+        } else {
+            None
+        };
         Ok(Self {
             root,
             options,
             stack: vec![WalkFrame {
                 entries,
                 relative: PathBuf::new(),
+                identity: root_identity,
                 entry_depth: 1,
             }],
             followed_directories,
@@ -208,7 +211,7 @@ impl LocalDirectoryWalker {
         relative: PathBuf,
         entry_depth: usize,
     ) -> LocalResult<()> {
-        if self.options.follows_symlinks() {
+        let identity = if self.options.follows_symlinks() {
             #[cfg(coverage)]
             if crate::local::coverage_fault_enabled(
                 "walker-descend-canonicalize",
@@ -224,19 +227,26 @@ impl LocalDirectoryWalker {
                 Ok(identity) => identity,
                 Err(error) => return Err(walk_io_error(path, error)),
             };
-            if !self.followed_directories.insert(identity) {
+            if self.followed_directories.contains(&identity) {
                 return Err(LocalFileError::new(
                     LocalFileErrorKind::InvalidInput,
                     LocalFileOperation::List,
                 )
                 .with_path(path.to_path_buf()));
             }
-        }
+            Some(identity)
+        } else {
+            None
+        };
         let entries =
             fs::read_dir(path).map_err(|error| walk_io_error(path, error))?;
+        if let Some(identity) = identity.as_ref() {
+            self.followed_directories.insert(identity.clone());
+        }
         self.stack.push(WalkFrame {
             entries,
             relative,
+            identity,
             entry_depth: entry_depth + 1,
         });
         Ok(())
@@ -274,7 +284,10 @@ impl Iterator for LocalDirectoryWalker {
                     )));
                 }
                 None => {
-                    self.stack.pop();
+                    let completed = self.stack.pop().expect("stack is non-empty");
+                    if let Some(identity) = completed.identity {
+                        self.followed_directories.remove(&identity);
+                    }
                     continue;
                 }
             };

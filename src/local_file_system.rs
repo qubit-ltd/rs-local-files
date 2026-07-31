@@ -351,9 +351,6 @@ impl LocalFileSystem {
                         &source, &target, error,
                     ))
                 })?;
-        reject_copy_alias(&source, &target, &source_metadata)
-            .map_err(copy_failure_unchanged)?;
-
         let followed_metadata;
         let effective_metadata = if source_metadata.file_type().is_symlink() {
             match options.symlink_policy() {
@@ -383,8 +380,11 @@ impl LocalFileSystem {
             &source_metadata
         };
 
+        reject_copy_alias(&source, &target, effective_metadata)
+            .map_err(copy_failure_unchanged)?;
+
         if effective_metadata.file_type().is_dir() {
-            if !options.recursive() {
+            if options.source_mode() == crate::LocalCopySourceMode::File {
                 return Err(copy_failure_unchanged(
                     LocalFileError::new(
                         LocalFileErrorKind::RequirementNotMet,
@@ -442,6 +442,32 @@ impl LocalFileSystem {
                 .with_target(target),
             ));
         }
+        if options.source_mode() == crate::LocalCopySourceMode::Tree {
+            return Err(copy_failure_unchanged(
+                LocalFileError::new(
+                    LocalFileErrorKind::RequirementNotMet,
+                    LocalFileOperation::Copy,
+                )
+                .with_path(source)
+                .with_target(target),
+            ));
+        }
+        if options.atomicity() == LocalAtomicityRequirement::Required
+            && options.type_conflict()
+                == crate::LocalCopyTypeConflictPolicy::Replace
+            && destination_is_directory(&target).map_err(|error| {
+                copy_failure_unchanged(copy_io_error(&source, &target, error))
+            })?
+        {
+            return Err(copy_failure_unchanged(
+                LocalFileError::new(
+                    LocalFileErrorKind::RequirementNotMet,
+                    LocalFileOperation::Copy,
+                )
+                .with_path(source)
+                .with_target(target),
+            ));
+        }
 
         let parent_dirs_to_sync = prepare_copy_parent(&target, options)
             .map_err(|error| {
@@ -461,7 +487,7 @@ impl LocalFileSystem {
             || {
                 fs::File::open(&target)
                     .and_then(|file| file.sync_all())
-                    .and_then(|()| sync_rename_parent(&target))
+                    .and_then(|()| sync_parent_directory(&target))
                     .and_then(|()| {
                         sync_created_parent_directories(&parent_dirs_to_sync)
                     })
@@ -476,7 +502,7 @@ impl LocalFileSystem {
         Ok(LocalCopyOutcome::new(
             LocalCopyStats::from_internal(stats),
             LocalCopyMethod::StagedFile,
-            true,
+            stats.atomic_publication(),
             durable,
             options.preserve_metadata(),
         ))
@@ -502,8 +528,16 @@ impl LocalFileSystem {
         options: &LocalCreateDirectoryOptions,
     ) -> LocalResult<LocalCreateDirectoryOutcome> {
         let bound = LocalPaths::bind_host_path(path)?;
-        let existed = coverage_io_fault("local-fs-create-directory-exists")
-            .map_or_else(|| bound.try_exists(), Err)
+        let existing_directory = coverage_io_fault("local-fs-create-directory-exists")
+            .map_or_else(|| fs::symlink_metadata(&bound), Err)
+            .map(|metadata| metadata.file_type().is_dir())
+            .or_else(|error| {
+                if error.kind() == io::ErrorKind::NotFound {
+                    Ok(false)
+                } else {
+                    Err(error)
+                }
+            })
             .map_err(|source| {
                 LocalFileError::from_io(
                     LocalFileOperation::CreateDirectory,
@@ -512,6 +546,7 @@ impl LocalFileSystem {
                     source,
                 )
             })?;
+        let existed = fs::symlink_metadata(&bound).is_ok();
         if existed && !options.exists_ok() {
             return Err(LocalFileError::from_io(
                 LocalFileOperation::CreateDirectory,
@@ -520,7 +555,7 @@ impl LocalFileSystem {
                 io::Error::from(io::ErrorKind::AlreadyExists),
             ));
         }
-        if existed && bound.is_dir() {
+        if existed && existing_directory {
             return Ok(LocalCreateDirectoryOutcome::new(false));
         }
         let result = if options.recursive() {
@@ -528,16 +563,23 @@ impl LocalFileSystem {
         } else {
             fs::create_dir(&bound)
         };
-        result
-            .map(|()| LocalCreateDirectoryOutcome::new(!existed))
-            .map_err(|source| {
-                LocalFileError::from_io(
-                    LocalFileOperation::CreateDirectory,
-                    Some(bound),
-                    None,
-                    source,
-                )
-            })
+        match result {
+            Ok(()) => Ok(LocalCreateDirectoryOutcome::new(!existed)),
+            Err(source)
+                if options.exists_ok()
+                    && source.kind() == io::ErrorKind::AlreadyExists
+                    && fs::symlink_metadata(&bound)
+                        .is_ok_and(|metadata| metadata.file_type().is_dir()) =>
+            {
+                Ok(LocalCreateDirectoryOutcome::new(false))
+            }
+            Err(source) => Err(LocalFileError::from_io(
+                LocalFileOperation::CreateDirectory,
+                Some(bound),
+                None,
+                source,
+            )),
+        }
     }
 
     /// Creates a cleanup-owned temporary file.
@@ -656,17 +698,23 @@ impl LocalFileSystem {
             )
             .with_path(bound));
         }
-        coverage_io_fault("local-fs-delete-file-remove")
+        match coverage_io_fault("local-fs-delete-file-remove")
             .map_or_else(|| fs::remove_file(&bound), Err)
-            .map(|()| LocalDeleteOutcome::new(true))
-            .map_err(|source| {
-                LocalFileError::from_io(
-                    LocalFileOperation::DeleteFile,
-                    Some(bound),
-                    None,
-                    source,
-                )
-            })
+        {
+            Ok(()) => Ok(LocalDeleteOutcome::new(true)),
+            Err(source)
+                if options.missing_ok()
+                    && source.kind() == io::ErrorKind::NotFound =>
+            {
+                Ok(LocalDeleteOutcome::new(false))
+            }
+            Err(source) => Err(LocalFileError::from_io(
+                LocalFileOperation::DeleteFile,
+                Some(bound),
+                None,
+                source,
+            )),
+        }
     }
 
     /// Deletes a native directory without following a final symbolic link.
@@ -711,16 +759,21 @@ impl LocalFileSystem {
             coverage_io_fault("local-fs-delete-directory-remove")
                 .map_or_else(|| fs::remove_dir(&bound), Err)
         };
-        result
-            .map(|()| LocalDeleteOutcome::new(true))
-            .map_err(|source| {
-                LocalFileError::from_io(
-                    LocalFileOperation::DeleteDirectory,
-                    Some(bound),
-                    None,
-                    source,
-                )
-            })
+        match result {
+            Ok(()) => Ok(LocalDeleteOutcome::new(true)),
+            Err(source)
+                if options.missing_ok()
+                    && source.kind() == io::ErrorKind::NotFound =>
+            {
+                Ok(LocalDeleteOutcome::new(false))
+            }
+            Err(source) => Err(LocalFileError::from_io(
+                LocalFileOperation::DeleteDirectory,
+                Some(bound),
+                None,
+                source,
+            )),
+        }
     }
 
     /// Renames a native entry with explicit overwrite and guarantee policy.
@@ -795,7 +848,7 @@ impl LocalFileSystem {
 
         let durable = published_durability(
             options.durability(),
-            || sync_rename_parent(&target),
+            || sync_rename_parents(&source, &target),
             LocalFileOperation::Rename,
             &source,
             &target,
@@ -827,7 +880,7 @@ fn sync_created_parent_directories(paths: &[PathBuf]) -> io::Result<()> {
         paths
             .iter()
             .rev()
-            .try_for_each(|path| fs::File::open(path)?.sync_all())
+            .try_for_each(|path| sync_parent_directory(path))
     }
     #[cfg(not(unix))]
     {
@@ -980,8 +1033,8 @@ fn rename_failure_indeterminate(error: LocalFileError) -> LocalRenameFailure {
 /// # Errors
 ///
 /// Returns native I/O errors from opening or synchronizing the parent.
-fn sync_rename_parent(target: &Path) -> io::Result<()> {
-    let parent = target.parent().unwrap_or(Path::new("."));
+fn sync_parent_directory(path: &Path) -> io::Result<()> {
+    let parent = path.parent().unwrap_or(Path::new("."));
     #[cfg(coverage)]
     if crate::local::coverage_fault_enabled("copy-parent-sync")
         || crate::local::coverage_fault_enabled("rename-parent-sync")
@@ -999,6 +1052,24 @@ fn sync_rename_parent(target: &Path) -> io::Result<()> {
             io::ErrorKind::Unsupported,
             "directory durability is not supported on this platform",
         ))
+    }
+}
+
+/// Synchronizes every parent directory changed by a completed rename.
+fn sync_rename_parents(source: &Path, target: &Path) -> io::Result<()> {
+    sync_parent_directory(source)?;
+    if source.parent() != target.parent() {
+        sync_parent_directory(target)?;
+    }
+    Ok(())
+}
+
+/// Reports whether the final destination entry is a real directory.
+fn destination_is_directory(path: &Path) -> io::Result<bool> {
+    match fs::symlink_metadata(path) {
+        Ok(metadata) => Ok(metadata.file_type().is_dir()),
+        Err(error) if error.kind() == io::ErrorKind::NotFound => Ok(false),
+        Err(error) => Err(error),
     }
 }
 
