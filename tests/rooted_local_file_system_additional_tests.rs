@@ -356,16 +356,16 @@ fn test_rooted_local_file_system_copy_enforces_directory_policies() {
     fs::write(source.join("child"), b"payload")
         .expect("source child should be written");
 
-    let non_recursive = rooted
+    let file_only = rooted
         .copy(
             Path::new("source"),
             Path::new("target"),
-            &LocalCopyOptions::new(),
+            &LocalCopyOptions::new().with_file_source(),
         )
-        .expect_err("directory copy must require recursion");
+        .expect_err("file-only copy must reject a directory source");
     assert_eq!(
         LocalFileErrorKind::RequirementNotMet,
-        non_recursive.error().kind()
+        file_only.error().kind()
     );
     let atomic_required = rooted
         .copy(
