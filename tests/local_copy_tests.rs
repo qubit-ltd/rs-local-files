@@ -96,12 +96,9 @@ fn test_local_file_system_copy_auto_detects_directory_sources() {
     let target = directory.path().join("target");
     fs::create_dir(&source).expect("source directory should be created");
 
-    let outcome = LocalFileSystem::copy(
-        &source,
-        &target,
-        &LocalCopyOptions::new(),
-    )
-    .expect("automatic source selection must copy a directory tree");
+    let outcome =
+        LocalFileSystem::copy(&source, &target, &LocalCopyOptions::new())
+            .expect("automatic source selection must copy a directory tree");
     assert_eq!(LocalCopyMethod::Recursive, outcome.method());
     assert!(target.is_dir());
 }

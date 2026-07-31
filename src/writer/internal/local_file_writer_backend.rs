@@ -16,25 +16,7 @@ use crate::local::{
     LocalRootAtomicWriter,
 };
 
-/// Recoverable staged-publication failure with its optional retained backend.
-#[derive(Debug)]
-pub(crate) struct LocalStagedCommitError {
-    /// Structured failure reported by the selected atomic writer.
-    error: LocalAtomicWriteError,
-    /// Staged backend retained before publication began.
-    backend: Option<Box<LocalFileWriterBackend>>,
-}
-
-impl LocalStagedCommitError {
-    /// Splits the failure into its error and optional retryable backend.
-    #[must_use]
-    #[inline]
-    pub(crate) fn into_parts(
-        self,
-    ) -> (LocalAtomicWriteError, Option<LocalFileWriterBackend>) {
-        (self.error, self.backend.map(|backend| *backend))
-    }
-}
+use super::LocalStagedCommitError;
 
 /// Native backend selected for one writer session.
 #[derive(Debug)]

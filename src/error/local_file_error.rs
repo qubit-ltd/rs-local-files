@@ -337,9 +337,7 @@ fn classify_io_error(error: &io::Error) -> LocalFileErrorKind {
         io::ErrorKind::Unsupported => LocalFileErrorKind::Unsupported,
         io::ErrorKind::OutOfMemory
         | io::ErrorKind::StorageFull
-        | io::ErrorKind::QuotaExceeded => {
-            LocalFileErrorKind::ResourceLimit
-        }
+        | io::ErrorKind::QuotaExceeded => LocalFileErrorKind::ResourceLimit,
         _ => LocalFileErrorKind::Io,
     }
 }
