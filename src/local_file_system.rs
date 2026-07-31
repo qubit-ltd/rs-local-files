@@ -383,7 +383,28 @@ impl LocalFileSystem {
         reject_copy_alias(&source, &target, effective_metadata)
             .map_err(copy_failure_unchanged)?;
 
-        if effective_metadata.file_type().is_dir() {
+        let target_is_directory = destination_is_directory(&target).map_err(|error| {
+            copy_failure_unchanged(copy_io_error(&source, &target, error))
+        })?;
+        let source_is_directory = effective_metadata.file_type().is_dir();
+        if options.type_conflict() == crate::LocalCopyTypeConflictPolicy::Skip
+            && ((source_is_directory && !target_is_directory && target.exists())
+                || (!source_is_directory && target_is_directory))
+        {
+            return Ok(LocalCopyOutcome::new(
+                LocalCopyStats::skipped_one(),
+                if source_is_directory {
+                    LocalCopyMethod::Recursive
+                } else {
+                    LocalCopyMethod::StagedFile
+                },
+                false,
+                false,
+                options.preserve_metadata(),
+            ));
+        }
+
+        if source_is_directory {
             if options.source_mode() == crate::LocalCopySourceMode::File {
                 return Err(copy_failure_unchanged(
                     LocalFileError::new(
@@ -455,9 +476,7 @@ impl LocalFileSystem {
         if options.atomicity() == LocalAtomicityRequirement::Required
             && options.type_conflict()
                 == crate::LocalCopyTypeConflictPolicy::Replace
-            && destination_is_directory(&target).map_err(|error| {
-                copy_failure_unchanged(copy_io_error(&source, &target, error))
-            })?
+            && target_is_directory
         {
             return Err(copy_failure_unchanged(
                 LocalFileError::new(
