@@ -121,7 +121,12 @@ fn test_local_temp_file_relative_parent_remains_bound_after_current_directory_ch
         let path = temporary.path().to_path_buf();
 
         assert!(path.is_absolute());
-        assert!(path.starts_with(creation.path()));
+        assert!(
+            path.starts_with(
+                fs::canonicalize(creation.path())
+                    .expect("creation directory should canonicalize")
+            )
+        );
         env::set_current_dir(later.path())
             .expect("later directory should become current");
         temporary

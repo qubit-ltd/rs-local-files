@@ -383,12 +383,15 @@ impl LocalFileSystem {
         reject_copy_alias(&source, &target, effective_metadata)
             .map_err(copy_failure_unchanged)?;
 
-        let target_is_directory = destination_is_directory(&target).map_err(|error| {
-            copy_failure_unchanged(copy_io_error(&source, &target, error))
-        })?;
+        let target_is_directory =
+            destination_is_directory(&target).map_err(|error| {
+                copy_failure_unchanged(copy_io_error(&source, &target, error))
+            })?;
         let source_is_directory = effective_metadata.file_type().is_dir();
         if options.type_conflict() == crate::LocalCopyTypeConflictPolicy::Skip
-            && ((source_is_directory && !target_is_directory && target.exists())
+            && ((source_is_directory
+                && !target_is_directory
+                && target.exists())
                 || (!source_is_directory && target_is_directory))
         {
             return Ok(LocalCopyOutcome::new(
@@ -547,24 +550,25 @@ impl LocalFileSystem {
         options: &LocalCreateDirectoryOptions,
     ) -> LocalResult<LocalCreateDirectoryOutcome> {
         let bound = LocalPaths::bind_host_path(path)?;
-        let existing_directory = coverage_io_fault("local-fs-create-directory-exists")
-            .map_or_else(|| fs::symlink_metadata(&bound), Err)
-            .map(|metadata| metadata.file_type().is_dir())
-            .or_else(|error| {
-                if error.kind() == io::ErrorKind::NotFound {
-                    Ok(false)
-                } else {
-                    Err(error)
-                }
-            })
-            .map_err(|source| {
-                LocalFileError::from_io(
-                    LocalFileOperation::CreateDirectory,
-                    Some(bound.clone()),
-                    None,
-                    source,
-                )
-            })?;
+        let existing_directory =
+            coverage_io_fault("local-fs-create-directory-exists")
+                .map_or_else(|| fs::symlink_metadata(&bound), Err)
+                .map(|metadata| metadata.file_type().is_dir())
+                .or_else(|error| {
+                    if error.kind() == io::ErrorKind::NotFound {
+                        Ok(false)
+                    } else {
+                        Err(error)
+                    }
+                })
+                .map_err(|source| {
+                    LocalFileError::from_io(
+                        LocalFileOperation::CreateDirectory,
+                        Some(bound.clone()),
+                        None,
+                        source,
+                    )
+                })?;
         let existed = fs::symlink_metadata(&bound).is_ok();
         if existed && !options.exists_ok() {
             return Err(LocalFileError::from_io(
@@ -587,8 +591,9 @@ impl LocalFileSystem {
             Err(source)
                 if options.exists_ok()
                     && source.kind() == io::ErrorKind::AlreadyExists
-                    && fs::symlink_metadata(&bound)
-                        .is_ok_and(|metadata| metadata.file_type().is_dir()) =>
+                    && fs::symlink_metadata(&bound).is_ok_and(|metadata| {
+                        metadata.file_type().is_dir()
+                    }) =>
             {
                 Ok(LocalCreateDirectoryOutcome::new(false))
             }

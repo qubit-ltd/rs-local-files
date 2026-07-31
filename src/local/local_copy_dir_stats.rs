@@ -26,7 +26,8 @@ pub struct LocalCopyDirStats {
 
     /// Number of existing destination entries replaced or merged.
     pub overwritten: u64,
-    /// Whether a completed file publication required a prior directory removal.
+    /// Whether a completed file publication required a prior directory
+    /// removal.
     pub(crate) non_atomic_publication: bool,
 }
 

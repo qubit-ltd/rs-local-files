@@ -8,5 +8,7 @@
 //! Private writer backend state.
 
 mod local_file_writer_backend;
+mod local_staged_commit_error;
 
 pub(crate) use local_file_writer_backend::LocalFileWriterBackend;
+pub(crate) use local_staged_commit_error::LocalStagedCommitError;

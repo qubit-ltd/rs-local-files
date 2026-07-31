@@ -284,7 +284,8 @@ impl Iterator for LocalDirectoryWalker {
                     )));
                 }
                 None => {
-                    let completed = self.stack.pop().expect("stack is non-empty");
+                    let completed =
+                        self.stack.pop().expect("stack is non-empty");
                     if let Some(identity) = completed.identity {
                         self.followed_directories.remove(&identity);
                     }
