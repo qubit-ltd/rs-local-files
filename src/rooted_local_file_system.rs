@@ -289,9 +289,11 @@ impl RootedLocalFileSystem {
     #[inline]
     pub fn metadata(&self, path: &Path) -> LocalResult<LocalFileMetadata> {
         if path.as_os_str().is_empty() {
-            return self.root.metadata().map(rooted_metadata).map_err(|error| {
-                rooted_io_error(LocalFileOperation::Metadata, path, error)
-            });
+            return self.root.metadata().map(rooted_metadata).map_err(
+                |error| {
+                    rooted_io_error(LocalFileOperation::Metadata, path, error)
+                },
+            );
         }
         let relative = rooted_path(path, LocalFileOperation::Metadata)?;
         self.root
@@ -547,12 +549,12 @@ impl RootedLocalFileSystem {
             Err(error)
                 if options.exists_ok()
                     && error.kind() == io::ErrorKind::AlreadyExists
-                    && self
-                        .root
-                        .symlink_metadata(&relative)
-                        .is_ok_and(|metadata| {
-                            metadata.kind() == crate::rooted::EntryKind::Directory
-                        }) =>
+                    && self.root.symlink_metadata(&relative).is_ok_and(
+                        |metadata| {
+                            metadata.kind()
+                                == crate::rooted::EntryKind::Directory
+                        },
+                    ) =>
             {
                 Ok(LocalCreateDirectoryOutcome::new(false))
             }
@@ -612,7 +614,9 @@ impl RootedLocalFileSystem {
                 ))
             })?;
         let directory = metadata.kind() == crate::rooted::EntryKind::Directory;
-        if directory && options.source_mode() == crate::LocalCopySourceMode::File {
+        if directory
+            && options.source_mode() == crate::LocalCopySourceMode::File
+        {
             return Err(rooted_copy_failure_unchanged(
                 LocalFileError::new(
                     LocalFileErrorKind::RequirementNotMet,
@@ -622,7 +626,9 @@ impl RootedLocalFileSystem {
                 .with_target(target.to_path_buf()),
             ));
         }
-        if !directory && options.source_mode() == crate::LocalCopySourceMode::Tree {
+        if !directory
+            && options.source_mode() == crate::LocalCopySourceMode::Tree
+        {
             return Err(rooted_copy_failure_unchanged(
                 LocalFileError::new(
                     LocalFileErrorKind::RequirementNotMet,
@@ -632,27 +638,43 @@ impl RootedLocalFileSystem {
                 .with_target(target.to_path_buf()),
             ));
         }
-        let target_is_directory = rooted_destination_is_directory(&self.root, &target_path)
-            .map_err(|error| rooted_copy_failure_unchanged(rooted_io_error(
-                LocalFileOperation::Copy,
-                target,
-                error,
-            )))?;
-        let target_exists = self.root.symlink_metadata(&target_path)
+        let target_is_directory =
+            rooted_destination_is_directory(&self.root, &target_path).map_err(
+                |error| {
+                    rooted_copy_failure_unchanged(rooted_io_error(
+                        LocalFileOperation::Copy,
+                        target,
+                        error,
+                    ))
+                },
+            )?;
+        let target_exists = self
+            .root
+            .symlink_metadata(&target_path)
             .map(|_| true)
-            .or_else(|error| (error.kind() == io::ErrorKind::NotFound).then_some(false).ok_or(error))
-            .map_err(|error| rooted_copy_failure_unchanged(rooted_io_error(
-                LocalFileOperation::Copy,
-                target,
-                error,
-            )))?;
+            .or_else(|error| {
+                (error.kind() == io::ErrorKind::NotFound)
+                    .then_some(false)
+                    .ok_or(error)
+            })
+            .map_err(|error| {
+                rooted_copy_failure_unchanged(rooted_io_error(
+                    LocalFileOperation::Copy,
+                    target,
+                    error,
+                ))
+            })?;
         if options.type_conflict() == crate::LocalCopyTypeConflictPolicy::Skip
             && ((directory && !target_is_directory && target_exists)
                 || (!directory && target_is_directory))
         {
             return Ok(LocalCopyOutcome::new(
                 LocalCopyStats::skipped_one(),
-                if directory { LocalCopyMethod::Recursive } else { LocalCopyMethod::StagedFile },
+                if directory {
+                    LocalCopyMethod::Recursive
+                } else {
+                    LocalCopyMethod::StagedFile
+                },
                 false,
                 false,
                 options.preserve_metadata(),
@@ -875,7 +897,8 @@ impl RootedLocalFileSystem {
             options.durability(),
             || {
                 self.root.sync_parent(&source_path)?;
-                if source_path.as_path().parent() != target_path.as_path().parent()
+                if source_path.as_path().parent()
+                    != target_path.as_path().parent()
                 {
                     self.root.sync_parent(&target_path)?;
                 }
@@ -904,7 +927,6 @@ fn sync_rooted_copy_parent_chain(
     }
     Ok(())
 }
-
 
 /// Wraps a rooted preflight failure that proves no namespace mutation occurred.
 #[must_use]
@@ -1034,7 +1056,9 @@ fn rooted_destination_is_directory(
     path: &crate::local::LocalRelativePath,
 ) -> io::Result<bool> {
     match root.symlink_metadata(path) {
-        Ok(metadata) => Ok(metadata.kind() == crate::rooted::EntryKind::Directory),
+        Ok(metadata) => {
+            Ok(metadata.kind() == crate::rooted::EntryKind::Directory)
+        }
         Err(error) if error.kind() == io::ErrorKind::NotFound => Ok(false),
         Err(error) => Err(error),
     }

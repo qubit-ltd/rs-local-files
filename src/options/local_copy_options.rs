@@ -10,9 +10,9 @@
 
 use super::{
     LocalAtomicityRequirement,
+    LocalCopySourceMode,
     LocalDurabilityRequirement,
     LocalMetadataPreservePolicy,
-    LocalCopySourceMode,
     LocalSymlinkPolicy,
 };
 use crate::{
@@ -83,7 +83,6 @@ impl LocalCopyOptions {
     }
 
     /// Returns the source kind accepted by this copy.
-    #[must_use]
     #[inline(always)]
     pub const fn source_mode(&self) -> LocalCopySourceMode {
         self.source_mode
