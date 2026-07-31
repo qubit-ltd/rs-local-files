@@ -36,4 +36,7 @@ pub enum LocalCopyTypeConflictPolicy {
     /// Remove the destination entry, including a directory tree, and replace
     /// it with the source entry.
     Replace,
+    /// Keep the existing destination entry and skip the conflicting source
+    /// entry.
+    Skip,
 }

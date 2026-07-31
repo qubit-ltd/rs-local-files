@@ -515,6 +515,9 @@ fn copy_file(
             ),
         ));
     }
+    let destination_directory_requires_removal = destination_metadata
+        .as_ref()
+        .is_some_and(|metadata| metadata.kind() == EntryKind::Directory);
     if let Some(metadata) = destination_metadata {
         if metadata.kind() != EntryKind::File {
             if options.type_conflict_policy() != TypeConflictPolicy::Replace {
@@ -658,6 +661,9 @@ fn copy_file(
         options,
         statistics,
     )?;
+    if destination_directory_requires_removal {
+        statistics.non_atomic_publication = true;
+    }
     Ok(statistics)
 }
 

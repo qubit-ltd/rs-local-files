@@ -29,6 +29,7 @@ use super::statistics_overflow::{
     byte_statistics_overflow_error,
     directory_statistics_overflow_error,
     file_statistics_overflow_error,
+    overwritten_statistics_overflow_error,
     skipped_statistics_overflow_error,
 };
 
@@ -156,6 +157,19 @@ pub(super) fn record_skipped_file(stats: &mut LocalCopyDirStats) -> Result<()> {
             Ok(())
         }
         None => Err(skipped_statistics_overflow_error()),
+    }
+}
+
+/// Records one destination entry replaced by a completed copy.
+pub(super) fn record_overwritten_entry(
+    stats: &mut LocalCopyDirStats,
+) -> Result<()> {
+    match stats.overwritten.checked_add(1) {
+        Some(overwritten) => {
+            stats.overwritten = overwritten;
+            Ok(())
+        }
+        None => Err(overwritten_statistics_overflow_error()),
     }
 }
 

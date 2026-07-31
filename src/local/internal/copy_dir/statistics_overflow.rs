@@ -35,6 +35,16 @@ pub(super) fn skipped_statistics_overflow_error() -> Error {
     statistics_overflow_error("skipped")
 }
 
+/// Creates the overflow error for the overwritten-entry counter.
+///
+/// # Returns
+///
+/// An `InvalidData` error identifying the overwritten-entry counter.
+#[inline(always)]
+pub(super) fn overwritten_statistics_overflow_error() -> Error {
+    statistics_overflow_error("overwritten")
+}
+
 /// Creates the overflow error for the copied-file counter.
 ///
 /// # Returns
