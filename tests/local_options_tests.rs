@@ -112,6 +112,7 @@ fn test_copy_rename_and_write_option_builders_retain_policies() {
         .with_metadata_preservation(LocalMetadataPreservePolicy::Permissions)
         .with_symlink_policy(LocalSymlinkPolicy::Follow)
         .with_recursive()
+        .with_parent()
         .with_atomicity(LocalAtomicityRequirement::Required)
         .with_durability(LocalDurabilityRequirement::Required);
     assert_eq!(copy.conflict(), LocalCopyConflictPolicy::Overwrite);
@@ -174,38 +175,34 @@ fn test_temporary_resource_option_builders_retain_configuration() {
 /// Verifies every option type exposes the documented conservative default.
 #[test]
 fn test_option_defaults_match_their_constructors() {
-    assert_eq!(
-        black_box(LocalCreateDirectoryOptions::default()),
-        LocalCreateDirectoryOptions::new()
+    let create_default = black_box(
+        LocalCreateDirectoryOptions::default
+            as fn() -> LocalCreateDirectoryOptions,
     );
-    assert_eq!(
-        black_box(LocalDeleteOptions::default()),
-        LocalDeleteOptions::new()
+    let delete_default =
+        black_box(LocalDeleteOptions::default as fn() -> LocalDeleteOptions);
+    let list_default =
+        black_box(LocalListOptions::default as fn() -> LocalListOptions);
+    let read_default =
+        black_box(LocalReadOptions::default as fn() -> LocalReadOptions);
+    let copy_default =
+        black_box(LocalCopyOptions::default as fn() -> LocalCopyOptions);
+    let rename_default =
+        black_box(LocalRenameOptions::default as fn() -> LocalRenameOptions);
+    let temp_file_default = black_box(
+        LocalTempFileOptions::default as fn() -> LocalTempFileOptions,
     );
-    assert_eq!(
-        black_box(LocalListOptions::default()),
-        LocalListOptions::new()
+    let temp_directory_default = black_box(
+        LocalTempDirectoryOptions::default as fn() -> LocalTempDirectoryOptions,
     );
-    assert_eq!(
-        black_box(LocalReadOptions::default()),
-        LocalReadOptions::new()
-    );
-    assert_eq!(
-        black_box(LocalCopyOptions::default()),
-        LocalCopyOptions::new()
-    );
-    assert_eq!(
-        black_box(LocalRenameOptions::default()),
-        LocalRenameOptions::new()
-    );
-    assert_eq!(
-        black_box(LocalTempFileOptions::default()),
-        LocalTempFileOptions::new()
-    );
-    assert_eq!(
-        black_box(LocalTempDirectoryOptions::default()),
-        LocalTempDirectoryOptions::new()
-    );
+    assert_eq!(create_default(), LocalCreateDirectoryOptions::new());
+    assert_eq!(delete_default(), LocalDeleteOptions::new());
+    assert_eq!(list_default(), LocalListOptions::new());
+    assert_eq!(read_default(), LocalReadOptions::new());
+    assert_eq!(copy_default(), LocalCopyOptions::new());
+    assert_eq!(rename_default(), LocalRenameOptions::new());
+    assert_eq!(temp_file_default(), LocalTempFileOptions::new());
+    assert_eq!(temp_directory_default(), LocalTempDirectoryOptions::new());
 }
 
 /// Verifies conservative option values are observable before any builder is

@@ -10,8 +10,31 @@
 
 use std::fs::File;
 
-use crate::local::LocalAtomicWriter;
-use crate::local::LocalRootAtomicWriter;
+use crate::local::{
+    LocalAtomicWriteError,
+    LocalAtomicWriter,
+    LocalRootAtomicWriter,
+};
+
+/// Recoverable staged-publication failure with its optional retained backend.
+#[derive(Debug)]
+pub(crate) struct LocalStagedCommitError {
+    /// Structured failure reported by the selected atomic writer.
+    error: LocalAtomicWriteError,
+    /// Staged backend retained before publication began.
+    backend: Option<Box<LocalFileWriterBackend>>,
+}
+
+impl LocalStagedCommitError {
+    /// Splits the failure into its error and optional retryable backend.
+    #[must_use]
+    #[inline]
+    pub(crate) fn into_parts(
+        self,
+    ) -> (LocalAtomicWriteError, Option<LocalFileWriterBackend>) {
+        (self.error, self.backend.map(|backend| *backend))
+    }
+}
 
 /// Native backend selected for one writer session.
 #[derive(Debug)]
@@ -22,4 +45,52 @@ pub(crate) enum LocalFileWriterBackend {
     Rooted(LocalRootAtomicWriter),
     /// Direct append to an existing file.
     Append(File),
+}
+
+impl LocalFileWriterBackend {
+    /// Commits a staged backend and preserves it when retry remains safe.
+    ///
+    /// # Panics
+    ///
+    /// Panics when called for the direct append backend.
+    pub(crate) fn commit_staged(self) -> Result<bool, LocalStagedCommitError> {
+        match self {
+            Self::Staged(writer) => writer
+                .commit_recoverable_with_durability()
+                .map_err(|commit_error| {
+                    let (error, retained) = commit_error.into_parts();
+                    LocalStagedCommitError {
+                        error,
+                        backend: retained.map(Self::Staged).map(Box::new),
+                    }
+                }),
+            Self::Rooted(writer) => writer
+                .commit_recoverable_with_durability()
+                .map_err(|commit_error| {
+                    let (error, retained) = commit_error.into_parts();
+                    LocalStagedCommitError {
+                        error,
+                        backend: retained.map(Self::Rooted).map(Box::new),
+                    }
+                }),
+            Self::Append(_) => {
+                unreachable!("direct append does not support staged commit")
+            }
+        }
+    }
+
+    /// Aborts a staged backend and removes its temporary file.
+    ///
+    /// # Panics
+    ///
+    /// Panics when called for the direct append backend.
+    pub(crate) fn abort_staged(self) -> Result<(), LocalAtomicWriteError> {
+        match self {
+            Self::Staged(writer) => writer.abort(),
+            Self::Rooted(writer) => writer.abort(),
+            Self::Append(_) => {
+                unreachable!("direct append does not support staged abort")
+            }
+        }
+    }
 }

@@ -61,7 +61,7 @@ fn test_rooted_local_file_system_runs_core_entry_workflow() {
             &LocalWriteOptions::new(LocalWriteMode::CreateNew),
         )
         .expect("rooted writer should open");
-    assert_eq!(parent.path().join(payload), writer.path());
+    assert_eq!(parent.path().join(payload), writer.diagnostic_path());
     writer
         .write_all(b"first")
         .expect("rooted writer should accept staged bytes");
@@ -100,6 +100,57 @@ fn test_rooted_local_file_system_runs_core_entry_workflow() {
         .expect("recursive rooted deletion should succeed");
     assert!(deleted.deleted());
     assert!(!parent.path().join("nested").exists());
+}
+
+/// Verifies rooted walkers and writers expose captured diagnostic paths after
+/// their opened root has moved, while descriptor-relative operations retain
+/// the original authority.
+#[cfg(unix)]
+#[test]
+fn test_rooted_sessions_report_diagnostic_paths_after_root_rename() {
+    let parent = tempdir().expect("temporary parent should be created");
+    let original = parent.path().join("original");
+    let renamed = parent.path().join("renamed");
+    fs::create_dir(&original).expect("original root should be created");
+    fs::write(original.join("listed"), b"authoritative")
+        .expect("listed fixture should be written");
+    let rooted = RootedLocalFileSystem::open(&original)
+        .expect("root authority should open");
+    fs::rename(&original, &renamed).expect("opened root should be renamed");
+    fs::create_dir(&original).expect("replacement root should be created");
+    fs::create_dir(original.join("listed"))
+        .expect("replacement entry should differ in type");
+
+    let entry = rooted
+        .list(Path::new(""), &LocalListOptions::new())
+        .expect("rooted listing should start")
+        .next()
+        .expect("opened root should still contain listed entry")
+        .expect("rooted listing should succeed");
+    assert_eq!(Path::new("listed"), entry.relative_path());
+    assert_eq!(original.join("listed"), entry.diagnostic_path());
+    assert_eq!(LocalFileKind::File, entry.metadata().kind());
+
+    let mut writer = rooted
+        .open_writer(
+            Path::new("written"),
+            &LocalWriteOptions::new(LocalWriteMode::CreateNew),
+        )
+        .expect("rooted writer should open through retained authority");
+    assert_eq!(original.join("written"), writer.diagnostic_path());
+    writer
+        .write_all(b"authoritative")
+        .expect("writer should retain opened root authority");
+    let _ = writer
+        .commit()
+        .expect("writer should publish through opened root");
+    assert_eq!(
+        b"authoritative",
+        fs::read(renamed.join("written"))
+            .expect("renamed root should receive writer output")
+            .as_slice(),
+    );
+    assert!(!original.join("written").exists());
 }
 
 /// Verifies rooted file operations report expected errors and missing-entry

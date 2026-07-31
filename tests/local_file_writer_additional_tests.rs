@@ -40,7 +40,7 @@ fn test_local_file_writer_append_commit_reports_direct_publication() {
     )
     .expect("append writer should open");
 
-    assert_eq!(target, writer.path());
+    assert_eq!(target, writer.diagnostic_path());
     assert_eq!(LocalWriterState::Open, writer.state());
     assert_eq!(
         7,

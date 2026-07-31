@@ -1,0 +1,20 @@
+[package]
+name = "qubit-local-files-fuzz"
+version = "0.0.0"
+edition = "2024"
+rust-version = "1.94"
+publish = false
+
+[package.metadata]
+cargo-fuzz = true
+
+[dependencies]
+libfuzzer-sys = "0.4"
+qubit-local-files = { path = ".." }
+
+[[bin]]
+name = "path_codec"
+path = "fuzz_targets/path_codec.rs"
+test = false
+doc = false
+bench = false

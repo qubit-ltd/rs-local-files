@@ -45,7 +45,7 @@ fn test_local_directory_walker_non_recursive_listing_retains_bound_root() {
     assert_eq!(PathBuf::from("nested"), entries[0].relative_path());
     assert_eq!(LocalFileKind::Directory, entries[0].metadata().kind());
     assert_eq!(PathBuf::from("top"), entries[1].relative_path());
-    assert_eq!(directory.path().join("top"), entries[1].path());
+    assert_eq!(directory.path().join("top"), entries[1].diagnostic_path(),);
 }
 
 /// Verifies a regular file cannot be opened as a directory traversal root.

@@ -1,8 +1,8 @@
 # Qubit Local Files 本地文件系统设计
 
 > 状态：已批准的目标设计。本文定义 `qubit-local-files` 的公共边界与平台语义；
-> 当前实现已完成统一入口、类型化 copy/rename failure、rooted temporary resource
-> 与路径 codec。本文仍保留尚未实施的 persistence option 与扩展状态模型目标。
+> 当前实现已完成统一入口、类型化 copy/rename failure、rooted temporary resource、
+> 路径 codec 与临时资源 persistence。本文描述当前公共边界与后续可选扩展。
 
 ## 1. 定位
 
@@ -60,10 +60,12 @@ error。
 
 ### 4.1 Host filesystem
 
-Host-wide 操作由零变体 enum 的关联方法组织：
+Host-wide 操作由不可构造 service struct 的关联方法组织：
 
 ```rust
-pub enum LocalFileSystem {}
+pub struct LocalFileSystem {
+    _private: (),
+}
 
 impl LocalFileSystem {
     pub fn metadata(path: &Path) -> LocalResult<LocalFileMetadata>;
@@ -110,8 +112,8 @@ impl LocalFileSystem {
 }
 ```
 
-零变体 enum 表达“不可实例化的关联方法命名空间”，避免 free function 和无意义的
-unit struct value。
+私有字段使该类型不能在 crate 外构造，同时将关联方法作为稳定的命名空间，避免 free
+function 和无意义的 unit struct value。
 
 ### 4.2 Rooted filesystem
 
@@ -532,7 +534,7 @@ Persist failure state 包括：
 - `PublishedSourceRetained`；
 - `Indeterminate`。
 
-当前 `LocalPersistOptions` 对 file 与 directory 提供同一套 overwrite 语义；
+`LocalPersistOptions` 对 file 与 directory 提供同一套 overwrite 语义；
 `persist_with_outcome` 返回实际的 target、publication method、atomicity 与 durability。
 当前 native 实现以同一 authority 内的 rename 发布，报告 `AtomicRename`、
 `atomic = true` 与 `durable = false`。`LocalPersistFailureState` 在已知未发布的错误上
