@@ -41,6 +41,7 @@ use super::error::{
     copy_dir_error,
     copy_dir_error_with_staging,
     record_copied_file,
+    record_overwritten_entry,
     record_skipped_file,
     with_copy_context,
 };
@@ -83,6 +84,7 @@ pub(crate) fn copy_file_with_options(
         dst,
         stats,
     )?;
+    let destination_existed = destination_metadata.is_some();
     let destination_directory_requires_removal = match destination_metadata {
         Some(metadata) if is_real_directory(&metadata) => {
             ensure_directory_can_be_replaced_by_file(
@@ -137,7 +139,20 @@ pub(crate) fn copy_file_with_options(
         src,
         dst,
         stats,
-    )
+    )?;
+    if destination_existed {
+        with_copy_context(
+            record_overwritten_entry(stats),
+            LocalCopyDirStage::UpdateStatistics,
+            src,
+            dst,
+            stats,
+        )?;
+    }
+    if destination_directory_requires_removal {
+        stats.non_atomic_publication = true;
+    }
+    Ok(())
 }
 
 /// Copies a source file into a private same-directory staging file.

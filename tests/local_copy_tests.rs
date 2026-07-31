@@ -88,20 +88,22 @@ fn test_local_file_system_copy_unifies_file_and_directory_copy() {
     );
 }
 
-/// Verifies directory copies require explicit recursion authorization.
+/// Verifies automatic source selection recognizes directory trees.
 #[test]
-fn test_local_file_system_copy_rejects_implicit_directory_recursion() {
+fn test_local_file_system_copy_auto_detects_directory_sources() {
     let directory = tempdir().expect("temporary directory should exist");
     let source = directory.path().join("source");
     let target = directory.path().join("target");
     fs::create_dir(&source).expect("source directory should be created");
 
-    let error =
-        LocalFileSystem::copy(&source, &target, &LocalCopyOptions::new())
-            .expect_err("directory copy must require explicit recursion");
-
-    assert_eq!(LocalFileErrorKind::RequirementNotMet, error.error().kind());
-    assert!(!target.exists());
+    let outcome = LocalFileSystem::copy(
+        &source,
+        &target,
+        &LocalCopyOptions::new(),
+    )
+    .expect("automatic source selection must copy a directory tree");
+    assert_eq!(LocalCopyMethod::Recursive, outcome.method());
+    assert!(target.is_dir());
 }
 
 /// Verifies source and hard-link alias detection before destructive overwrite.
@@ -145,13 +147,15 @@ fn test_local_file_system_copy_overwrite_replaces_target_symlink() {
     fs::write(&referent, b"old").expect("referent should be written");
     symlink(&referent, &target).expect("target symlink should be created");
 
-    let _outcome = LocalFileSystem::copy(
+    let outcome = LocalFileSystem::copy(
         &source,
         &target,
         &LocalCopyOptions::new()
             .with_conflict(LocalCopyConflictPolicy::Overwrite),
     )
     .expect("overwrite should replace the target entry");
+
+    assert_eq!(1, outcome.stats().overwritten());
 
     assert!(
         !fs::symlink_metadata(&target)

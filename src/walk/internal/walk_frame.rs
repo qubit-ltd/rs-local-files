@@ -20,6 +20,8 @@ pub(in crate::walk) struct WalkFrame {
     pub(in crate::walk) entries: ReadDir,
     /// Root-relative path of this directory.
     pub(in crate::walk) relative: PathBuf,
+    /// Canonical identity retained while this directory is on the DFS path.
+    pub(in crate::walk) identity: Option<PathBuf>,
     /// Depth assigned to entries returned by this iterator.
     pub(in crate::walk) entry_depth: usize,
 }

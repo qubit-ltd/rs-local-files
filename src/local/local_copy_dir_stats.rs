@@ -26,6 +26,8 @@ pub struct LocalCopyDirStats {
 
     /// Number of existing destination entries replaced or merged.
     pub overwritten: u64,
+    /// Whether a completed file publication required a prior directory removal.
+    pub(crate) non_atomic_publication: bool,
 }
 
 impl LocalCopyDirStats {
@@ -74,5 +76,12 @@ impl LocalCopyDirStats {
     #[inline(always)]
     pub const fn overwritten(&self) -> u64 {
         self.overwritten
+    }
+
+    /// Reports whether every completed file publication was atomic.
+    #[must_use]
+    #[inline(always)]
+    pub(crate) const fn atomic_publication(&self) -> bool {
+        !self.non_atomic_publication
     }
 }
