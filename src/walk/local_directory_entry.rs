@@ -19,8 +19,8 @@ use crate::LocalFileMetadata;
 #[derive(Clone, Debug)]
 #[must_use]
 pub struct LocalDirectoryEntry {
-    /// Bound host path.
-    path: PathBuf,
+    /// Non-authoritative path captured for diagnostics.
+    diagnostic_path: PathBuf,
     /// Path relative to the walker root.
     relative_path: PathBuf,
     /// Metadata observed using the walker's symlink policy.
@@ -32,27 +32,31 @@ impl LocalDirectoryEntry {
     ///
     /// # Parameters
     ///
-    /// - `path`: Bound native host path.
+    /// - `diagnostic_path`: Native path captured for diagnostics. Rooted
+    ///   traversal keeps descriptor authority even after this path changes.
     /// - `relative_path`: Path relative to the listing root.
     /// - `metadata`: Normalized entry metadata.
     #[inline(always)]
     pub(crate) const fn new(
-        path: PathBuf,
+        diagnostic_path: PathBuf,
         relative_path: PathBuf,
         metadata: LocalFileMetadata,
     ) -> Self {
         Self {
-            path,
+            diagnostic_path,
             relative_path,
             metadata,
         }
     }
 
-    /// Returns the bound native host path.
+    /// Returns the non-authoritative native path captured for diagnostics.
+    ///
+    /// Rooted walkers retain descriptor authority, so callers must use
+    /// [`Self::relative_path`] for an authority-local identity.
     #[must_use]
     #[inline(always)]
-    pub fn path(&self) -> &Path {
-        &self.path
+    pub fn diagnostic_path(&self) -> &Path {
+        &self.diagnostic_path
     }
 
     /// Returns the path relative to the listing root.

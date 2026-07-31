@@ -37,8 +37,8 @@ use super::internal::LocalFileWriterBackend;
 /// Stateful native byte output and destination publication session.
 #[derive(Debug)]
 pub struct LocalFileWriter {
-    /// Bound destination path.
-    path: PathBuf,
+    /// Non-authoritative destination path captured for diagnostics.
+    diagnostic_path: PathBuf,
     /// Selected native write backend while the session is open.
     backend: Option<LocalFileWriterBackend>,
     /// Policy fixed when the writer is opened.
@@ -54,17 +54,17 @@ impl LocalFileWriter {
     ///
     /// # Parameters
     ///
-    /// - `path`: Bound destination path.
+    /// - `diagnostic_path`: Destination path captured for diagnostics.
     /// - `backend`: Staged or append backend.
     /// - `options`: Writer policy.
     #[inline]
     pub(crate) const fn new(
-        path: PathBuf,
+        diagnostic_path: PathBuf,
         backend: LocalFileWriterBackend,
         options: LocalWriteOptions,
     ) -> Self {
         Self {
-            path,
+            diagnostic_path,
             backend: Some(backend),
             options,
             state: LocalWriterState::Open,
@@ -72,11 +72,14 @@ impl LocalFileWriter {
         }
     }
 
-    /// Returns the bound destination path.
+    /// Returns the non-authoritative destination path captured for diagnostics.
+    ///
+    /// Rooted writers retain descriptor authority, so this path can refer to a
+    /// replacement after the opened root is renamed.
     #[must_use]
     #[inline(always)]
-    pub fn path(&self) -> &Path {
-        &self.path
+    pub fn diagnostic_path(&self) -> &Path {
+        &self.diagnostic_path
     }
 
     /// Returns the current writer state.
@@ -100,7 +103,7 @@ impl LocalFileWriter {
         if self.state != LocalWriterState::Open {
             return Err(LocalFileCommitError::new(
                 writer_state_error(
-                    &self.path,
+                    &self.diagnostic_path,
                     LocalFileOperation::Commit,
                     self.state,
                 ),
@@ -113,75 +116,9 @@ impl LocalFileWriter {
             .take()
             .expect("open writer must retain one backend");
         match backend {
-            LocalFileWriterBackend::Staged(writer) => {
-                match writer.commit_recoverable_with_durability() {
-                    Ok(durable) => {
-                        self.state = LocalWriterState::Committed;
-                        Ok(LocalWriteOutcome::new(
-                            self.state,
-                            true,
-                            durable,
-                            self.bytes_written,
-                        ))
-                    }
-                    Err(commit_error) => {
-                        let (error, retained) = commit_error.into_parts();
-                        let state =
-                            atomic_destination_state(error.destination_state());
-                        let retained = retained.map(|writer| {
-                            self.retain_backend(LocalFileWriterBackend::Staged(
-                                writer,
-                            ))
-                        });
-                        Err(LocalFileCommitError::new(
-                            publication_error(
-                                atomic_write_error(
-                                    &self.path,
-                                    LocalFileOperation::Commit,
-                                    error,
-                                ),
-                                state,
-                            ),
-                            state,
-                            retained,
-                        ))
-                    }
-                }
-            }
-            LocalFileWriterBackend::Rooted(writer) => {
-                match writer.commit_recoverable_with_durability() {
-                    Ok(durable) => {
-                        self.state = LocalWriterState::Committed;
-                        Ok(LocalWriteOutcome::new(
-                            self.state,
-                            true,
-                            durable,
-                            self.bytes_written,
-                        ))
-                    }
-                    Err(commit_error) => {
-                        let (error, retained) = commit_error.into_parts();
-                        let state =
-                            atomic_destination_state(error.destination_state());
-                        let retained = retained.map(|writer| {
-                            self.retain_backend(LocalFileWriterBackend::Rooted(
-                                writer,
-                            ))
-                        });
-                        Err(LocalFileCommitError::new(
-                            publication_error(
-                                atomic_write_error(
-                                    &self.path,
-                                    LocalFileOperation::Commit,
-                                    error,
-                                ),
-                                state,
-                            ),
-                            state,
-                            retained,
-                        ))
-                    }
-                }
+            backend @ (LocalFileWriterBackend::Staged(_)
+            | LocalFileWriterBackend::Rooted(_)) => {
+                self.commit_staged_backend(backend)
             }
             LocalFileWriterBackend::Append(mut file) => {
                 #[cfg(coverage)]
@@ -198,7 +135,7 @@ impl LocalFileWriter {
                     return Err(LocalFileCommitError::new(
                         publication_error(
                             writer_io_error(
-                                &self.path,
+                                &self.diagnostic_path,
                                 LocalFileOperation::Commit,
                                 error,
                             ),
@@ -229,7 +166,7 @@ impl LocalFileWriter {
                             return Err(LocalFileCommitError::new(
                                 publication_error(
                                     writer_io_error(
-                                        &self.path,
+                                        &self.diagnostic_path,
                                         LocalFileOperation::Commit,
                                         error,
                                     ),
@@ -270,26 +207,11 @@ impl LocalFileWriter {
             .take()
             .expect("open writer must retain one backend");
         match backend {
-            LocalFileWriterBackend::Staged(writer) => {
-                if let Err(error) = writer.abort() {
+            backend @ (LocalFileWriterBackend::Staged(_)
+            | LocalFileWriterBackend::Rooted(_)) => {
+                if let Err(error) = backend.abort_staged() {
                     return Err(atomic_write_error(
-                        &self.path,
-                        LocalFileOperation::Abort,
-                        error,
-                    ));
-                }
-                self.state = aborted_state(previous_state);
-                Ok(LocalWriteOutcome::new(
-                    self.state,
-                    false,
-                    false,
-                    self.bytes_written,
-                ))
-            }
-            LocalFileWriterBackend::Rooted(writer) => {
-                if let Err(error) = writer.abort() {
-                    return Err(atomic_write_error(
-                        &self.path,
+                        &self.diagnostic_path,
                         LocalFileOperation::Abort,
                         error,
                     ));
@@ -315,7 +237,7 @@ impl LocalFileWriter {
                 let flush_result = file.flush();
                 if let Err(error) = flush_result {
                     return Err(writer_io_error(
-                        &self.path,
+                        &self.diagnostic_path,
                         LocalFileOperation::Abort,
                         error,
                     ));
@@ -338,6 +260,42 @@ impl LocalFileWriter {
         }
     }
 
+    /// Commits either staged backend through the shared publication contract.
+    fn commit_staged_backend(
+        &mut self,
+        backend: LocalFileWriterBackend,
+    ) -> Result<LocalWriteOutcome, LocalFileCommitError> {
+        match backend.commit_staged() {
+            Ok(durable) => {
+                self.state = LocalWriterState::Committed;
+                Ok(LocalWriteOutcome::new(
+                    self.state,
+                    true,
+                    durable,
+                    self.bytes_written,
+                ))
+            }
+            Err(commit_error) => {
+                let (error, retained) = commit_error.into_parts();
+                let state = atomic_destination_state(error.destination_state());
+                let retained =
+                    retained.map(|backend| self.retain_backend(backend));
+                Err(LocalFileCommitError::new(
+                    publication_error(
+                        atomic_write_error(
+                            &self.diagnostic_path,
+                            LocalFileOperation::Commit,
+                            error,
+                        ),
+                        state,
+                    ),
+                    state,
+                    retained,
+                ))
+            }
+        }
+    }
+
     /// Rebuilds a retryable writer without losing stream accounting.
     ///
     /// # Parameters
@@ -350,7 +308,7 @@ impl LocalFileWriter {
     #[inline]
     fn retain_backend(&self, backend: LocalFileWriterBackend) -> Self {
         Self {
-            path: self.path.clone(),
+            diagnostic_path: self.diagnostic_path.clone(),
             backend: Some(backend),
             options: self.options,
             state: self.state,
