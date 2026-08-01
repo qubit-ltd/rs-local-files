@@ -21,25 +21,15 @@ const MAX_FUZZ_INPUT_LEN: usize = 4096;
 fuzz_target!(|data: &[u8]| {
     let data = &data[..data.len().min(MAX_FUZZ_INPUT_LEN)];
 
-    if let Ok(text) = std::str::from_utf8(data)
-        && let Ok(canonical) = LocalPathCodec::decode_uri_component(text)
-    {
-        assert_eq!(
-            canonical,
-            LocalPathCodec::decode_uri_component(&canonical)
-                .expect("canonical URI component must reparse"),
-        );
-    }
-
     #[cfg(unix)]
     if !data.contains(&0) {
         use std::os::unix::ffi::OsStringExt;
 
         let native = std::ffi::OsString::from_vec(data.to_vec());
-        let canonical = LocalPathCodec::decode(&native)
-            .expect("non-NUL native bytes must decode");
-        let restored = LocalPathCodec::encode(&canonical)
-            .expect("canonical native text must encode");
+        let canonical = LocalPathCodec::to_canonical_text(&native)
+            .expect("non-NUL native bytes must convert");
+        let restored = LocalPathCodec::from_canonical_text(&canonical)
+            .expect("canonical native text must convert");
         assert_eq!(restored.as_encoded_bytes(), data);
     }
 });

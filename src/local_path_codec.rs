@@ -32,7 +32,7 @@ impl LocalPathCodec {
     /// The owned native component, or `LocalPathCodecError` when an escape is
     /// malformed, the text is non-canonical, or it cannot represent a native
     /// component on the current platform.
-    pub fn encode<'a>(
+    pub fn from_canonical_text<'a>(
         text: &'a str,
     ) -> Result<Cow<'a, OsStr>, LocalPathCodecError> {
         let native = platform::decode_canonical_text(text)?;
@@ -55,7 +55,7 @@ impl LocalPathCodec {
     /// Canonical text that preserves all representable native bytes or code
     /// units, or `LocalPathCodecError::NativeNul` when `native` contains NUL.
     #[inline(always)]
-    pub fn decode<'a>(
+    pub fn to_canonical_text<'a>(
         native: &'a OsStr,
     ) -> Result<Cow<'a, str>, LocalPathCodecError> {
         platform::encode_native_text(native)

@@ -8,10 +8,7 @@
 // qubit-style: allow source-test-pair
 // Covered by rename integration tests.
 
-use super::{
-    LocalAtomicityRequirement,
-    LocalDurabilityRequirement,
-};
+use super::LocalDurabilityRequirement;
 
 /// Options for renaming a native filesystem entry.
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
@@ -19,19 +16,16 @@ use super::{
 pub struct LocalRenameOptions {
     /// Whether an existing destination may be replaced.
     overwrite: bool,
-    /// Required atomicity.
-    atomicity: LocalAtomicityRequirement,
     /// Required durability.
     durability: LocalDurabilityRequirement,
 }
 
 impl LocalRenameOptions {
-    /// Creates no-replace rename options with preferred atomicity.
+    /// Creates no-replace rename options without required durability.
     #[inline]
     pub const fn new() -> Self {
         Self {
             overwrite: false,
-            atomicity: LocalAtomicityRequirement::Preferred,
             durability: LocalDurabilityRequirement::NotRequired,
         }
     }
@@ -41,12 +35,6 @@ impl LocalRenameOptions {
     #[inline(always)]
     pub const fn overwrite(&self) -> bool {
         self.overwrite
-    }
-
-    /// Returns the requested atomicity.
-    #[inline(always)]
-    pub const fn atomicity(&self) -> LocalAtomicityRequirement {
-        self.atomicity
     }
 
     /// Returns the requested durability.
@@ -59,16 +47,6 @@ impl LocalRenameOptions {
     #[inline(always)]
     pub const fn with_overwrite(mut self) -> Self {
         self.overwrite = true;
-        self
-    }
-
-    /// Sets the required atomicity.
-    #[inline(always)]
-    pub const fn with_atomicity(
-        mut self,
-        requirement: LocalAtomicityRequirement,
-    ) -> Self {
-        self.atomicity = requirement;
         self
     }
 
