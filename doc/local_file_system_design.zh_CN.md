@@ -293,7 +293,8 @@ Overwrite 默认替换 target entry，不跟随 target symlink 写入其指向�
 ### 5.3 Native path
 
 本 crate 原样接受 `Path` / `OsStr`，保留 Unix 非 UTF-8 byte 和 Windows native code
-unit。它不承担 URI percent decode 或 `qubit_fs::Path` hierarchy/component 转换；
+unit。它不承担 URI percent decode 或 `qubit_fs::Path` hierarchy/component 转换；URI
+解码属于 `rs-fs-local` provider 边界。
 只通过 `LocalPathCodec` 提供与 native string 可逆的 canonical text 编解码原语。
 
 内部拒绝 native NUL、无效 root/prefix 组合以及会把 child 解释成 absolute/prefixed
@@ -470,6 +471,9 @@ Native rename 成功、随后 parent durability 失败时必须返回 `Renamed`�
 - fail-fast 与 collect-errors 模式不能混为隐式行为；
 - symlink、mount/device 和最大深度策略在创建 walker 时固定；
 - rooted walker 始终从 root authority 派生 child handle。
+
+capability 将原子 rename、原子 replace 和临时资源无替换持久化分别建模；adapter 不得用
+单一 no-replace 标志推断全部三项保证。
 
 Walker drop 只释放本地 handle，不执行 namespace 修改。
 

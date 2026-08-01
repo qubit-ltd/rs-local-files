@@ -12,9 +12,15 @@
 
 use std::ffi::CString;
 use std::fs::File;
-use std::io::{Error, Result};
+use std::io::{
+    Error,
+    Result,
+};
 use std::os::fd::AsRawFd;
-use std::path::{Path, PathBuf};
+use std::path::{
+    Path,
+    PathBuf,
+};
 
 use log::warn;
 
@@ -157,7 +163,10 @@ impl RootedStagedFile {
     /// # Panics
     ///
     /// Panics if the staging entry was already disarmed.
-    pub(in crate::local) fn rename_to(&mut self, destination: &CString) -> Result<()> {
+    pub(in crate::local) fn rename_to(
+        &mut self,
+        destination: &CString,
+    ) -> Result<()> {
         self.close();
         let name = self
             .name
@@ -196,7 +205,10 @@ impl RootedStagedFile {
     pub(in crate::local) fn install_new_to(
         &mut self,
         destination: &CString,
-    ) -> std::result::Result<(), (Error, LocalAtomicDestinationState, AtomicStagingState)> {
+    ) -> std::result::Result<
+        (),
+        (Error, LocalAtomicDestinationState, AtomicStagingState),
+    > {
         self.close();
         let name = self
             .name
@@ -224,14 +236,18 @@ impl RootedStagedFile {
         };
         #[cfg(coverage)]
         if super::coverage_fault::is_enabled("atomic-install-unlink-persistent")
-            || super::coverage_fault::is_enabled("atomic-install-unlink-persistent-sync")
+            || super::coverage_fault::is_enabled(
+                "atomic-install-unlink-persistent-sync",
+            )
             || super::coverage_fault::is_enabled("rooted-copy-install-cleanup")
         {
             return Err(Error::from_raw_os_error(libc::EIO));
         }
         // SAFETY: the live parent descriptor and NUL-terminated name remain
         // valid for this non-retaining unlink operation.
-        let result = unsafe { libc::unlinkat(self.parent.as_raw_fd(), name.as_ptr(), 0) };
+        let result = unsafe {
+            libc::unlinkat(self.parent.as_raw_fd(), name.as_ptr(), 0)
+        };
         if result == -1 {
             return Err(Error::last_os_error());
         }

@@ -40,6 +40,7 @@
 #[must_use]
 #[non_exhaustive]
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
+#[allow(dead_code)]
 pub enum LocalAtomicWriteStage {
     /// Creating destination parent directories failed.
     PrepareParent,

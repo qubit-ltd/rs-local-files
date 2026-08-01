@@ -8,11 +8,21 @@
 //! Atomic-write errors.
 
 use std::error::Error;
-use std::fmt::{Display, Formatter, Result as FmtResult};
+use std::fmt::{
+    Display,
+    Formatter,
+    Result as FmtResult,
+};
 use std::io;
-use std::path::{Path, PathBuf};
+use std::path::{
+    Path,
+    PathBuf,
+};
 
-use crate::{LocalAtomicDestinationState, LocalAtomicWriteStage};
+use crate::{
+    LocalAtomicDestinationState,
+    LocalAtomicWriteStage,
+};
 
 /// Error returned by an atomic whole-file replacement.
 ///
@@ -43,6 +53,7 @@ pub struct LocalAtomicWriteError {
     source: io::Error,
 }
 
+#[allow(dead_code)]
 impl LocalAtomicWriteError {
     /// Creates an atomic-write error.
     ///
@@ -155,7 +166,9 @@ impl LocalAtomicWriteError {
 
     /// Consumes this error and returns staging cleanup details with its source.
     #[inline]
-    pub(crate) fn into_staging_parts(self) -> (Option<PathBuf>, Option<io::Error>, io::Error) {
+    pub(crate) fn into_staging_parts(
+        self,
+    ) -> (Option<PathBuf>, Option<io::Error>, io::Error) {
         (self.temporary_path, self.cleanup_error, self.source)
     }
 
@@ -168,7 +181,10 @@ impl LocalAtomicWriteError {
     /// # Returns
     /// This atomic-write error enriched with cleanup context.
     #[inline]
-    pub(crate) fn with_cleanup_error(mut self, cleanup_error: Option<io::Error>) -> Self {
+    pub(crate) fn with_cleanup_error(
+        mut self,
+        cleanup_error: Option<io::Error>,
+    ) -> Self {
         self.cleanup_error = cleanup_error;
         self
     }
@@ -182,7 +198,10 @@ impl LocalAtomicWriteError {
     /// # Returns
     /// This atomic-write error enriched with parent synchronization context.
     #[inline]
-    pub(crate) fn with_parent_sync_error(mut self, parent_sync_error: Option<io::Error>) -> Self {
+    pub(crate) fn with_parent_sync_error(
+        mut self,
+        parent_sync_error: Option<io::Error>,
+    ) -> Self {
         self.parent_sync_error = parent_sync_error;
         self
     }
@@ -210,7 +229,10 @@ impl Display for LocalAtomicWriteError {
                  synchronization also failed: {parent_sync_error}",
             ),
             (Some(cleanup_error), None) => {
-                write!(formatter, "; staging cleanup also failed: {cleanup_error}",)
+                write!(
+                    formatter,
+                    "; staging cleanup also failed: {cleanup_error}",
+                )
             }
             (None, Some(parent_sync_error)) => write!(
                 formatter,

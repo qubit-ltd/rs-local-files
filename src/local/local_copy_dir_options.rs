@@ -9,7 +9,10 @@
 
 use std::time::Duration;
 
-use crate::{LocalCopyConflictPolicy, LocalCopyTypeConflictPolicy};
+use crate::{
+    LocalCopyConflictPolicy,
+    LocalCopyTypeConflictPolicy,
+};
 
 /// Options controlling recursive directory copy behavior.
 ///
@@ -124,7 +127,10 @@ impl LocalCopyDirOptions {
     /// # Returns
     /// Updated directory copy options.
     #[inline(always)]
-    pub const fn with_conflict(mut self, conflict: LocalCopyConflictPolicy) -> Self {
+    pub const fn with_conflict(
+        mut self,
+        conflict: LocalCopyConflictPolicy,
+    ) -> Self {
         self.conflict = conflict;
         self
     }
@@ -146,7 +152,10 @@ impl LocalCopyDirOptions {
     /// # Returns
     /// Updated directory copy options.
     #[inline(always)]
-    pub const fn with_type_conflict(mut self, type_conflict: LocalCopyTypeConflictPolicy) -> Self {
+    pub const fn with_type_conflict(
+        mut self,
+        type_conflict: LocalCopyTypeConflictPolicy,
+    ) -> Self {
         self.type_conflict = type_conflict;
         self
     }
@@ -218,6 +227,7 @@ impl LocalCopyDirOptions {
     /// # Returns
     /// Updated directory copy options.
     #[inline(always)]
+    #[allow(dead_code)]
     pub const fn with_open_retry_timeout(mut self, timeout: Duration) -> Self {
         self.open_retry_timeout = Some(timeout);
         self

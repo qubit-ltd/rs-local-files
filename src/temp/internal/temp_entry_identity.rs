@@ -6,8 +6,13 @@
 //    Licensed under the Apache License, Version 2.0.
 // =============================================================================
 //! Stable identity checks for cleanup-owned host temporary entries.
+// qubit-style: allow source-test-pair
 
-use std::{fs, io, path::Path};
+use std::{
+    fs,
+    io,
+    path::Path,
+};
 
 /// Native identity captured when a host temporary entry is created.
 #[derive(Debug)]
@@ -48,10 +53,10 @@ impl TempEntryIdentity {
         {
             use std::os::unix::fs::MetadataExt;
 
-            return Ok(Self {
+            Ok(Self {
                 device: metadata.dev(),
                 inode: metadata.ino(),
-            });
+            })
         }
         #[cfg(windows)]
         {
@@ -90,4 +95,3 @@ impl PartialEq for TempEntryIdentity {
         }
     }
 }
-

@@ -6,8 +6,12 @@
 //    Licensed under the Apache License, Version 2.0.
 // =============================================================================
 //! Descriptor-relative directory entries.
+// qubit-style: allow source-test-pair
 
-use std::ffi::{OsStr, OsString};
+use std::ffi::{
+    OsStr,
+    OsString,
+};
 
 use super::Metadata;
 

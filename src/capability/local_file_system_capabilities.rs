@@ -18,8 +18,12 @@ pub struct LocalFileSystemCapabilities {
     path_limit: Option<LocalPathLimit>,
     /// Whether descriptor- or handle-relative rooted operations are available.
     rooted_operations: bool,
-    /// Whether native no-replace publication is available.
-    no_replace_publication: bool,
+    /// Whether an in-filesystem rename is atomic.
+    atomic_rename: bool,
+    /// Whether replacing a destination is atomic.
+    atomic_replace: bool,
+    /// Whether a temporary resource can be persisted without replacement.
+    atomic_temp_persist: bool,
     /// Whether directory durability synchronization is implemented.
     directory_durability: bool,
 }
@@ -34,7 +38,13 @@ impl LocalFileSystemCapabilities {
             // mounted filesystem, so report the limit as unknown.
             path_limit: None,
             rooted_operations: cfg!(any(unix, windows)),
-            no_replace_publication: cfg!(any(target_os = "linux", target_os = "macos", windows)),
+            atomic_rename: cfg!(any(unix, windows)),
+            atomic_replace: cfg!(any(unix, windows)),
+            atomic_temp_persist: cfg!(any(
+                target_os = "linux",
+                target_os = "macos",
+                windows
+            )),
             directory_durability: cfg!(unix),
         }
     }
@@ -53,11 +63,26 @@ impl LocalFileSystemCapabilities {
         self.rooted_operations
     }
 
-    /// Reports whether native no-replace publication is available.
+    /// Reports whether an in-filesystem rename is atomic.
     #[must_use]
     #[inline(always)]
-    pub const fn supports_no_replace_publication(self) -> bool {
-        self.no_replace_publication
+    pub const fn supports_atomic_rename(self) -> bool {
+        self.atomic_rename
+    }
+
+    /// Reports whether replacing an existing destination is atomic.
+    #[must_use]
+    #[inline(always)]
+    pub const fn supports_atomic_replace(self) -> bool {
+        self.atomic_replace
+    }
+
+    /// Reports whether temporary-resource persistence without replacement is
+    /// atomic.
+    #[must_use]
+    #[inline(always)]
+    pub const fn supports_atomic_temp_persist(self) -> bool {
+        self.atomic_temp_persist
     }
 
     /// Reports whether parent-directory durability synchronization is

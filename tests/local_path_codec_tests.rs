@@ -13,17 +13,25 @@ use std::os::unix::ffi::OsStrExt;
 
 #[cfg(any(unix, windows))]
 use proptest::{
-    prelude::{Strategy, any, prop},
+    prelude::{
+        Strategy,
+        any,
+        prop,
+    },
     proptest,
 };
-use qubit_local_files::{LocalPathCodec, LocalPathCodecError};
+use qubit_local_files::{
+    LocalPathCodec,
+    LocalPathCodecError,
+};
 
 /// Verifies native Unicode is retained while percent signs and controls use
 /// canonical uppercase escaped bytes.
 #[test]
 fn test_decode_preserves_unicode_and_escapes_percent_and_control_bytes() {
     assert_eq!(
-        LocalPathCodec::decode(OsStr::new("文档%name\n")).expect("native component should decode"),
+        LocalPathCodec::decode(OsStr::new("文档%name\n"))
+            .expect("native component should decode"),
         "文档%25name%0A",
     );
 }
@@ -100,39 +108,6 @@ fn test_encode_rejects_non_canonical_escape_aliases() {
     ));
 }
 
-/// Verifies URI component decoding produces canonical local path text without
-/// depending on a platform-native path representation.
-#[test]
-fn test_decode_uri_component_canonicalizes_escaped_bytes() {
-    assert_eq!(
-        "report final%25%0A",
-        LocalPathCodec::decode_uri_component("report%20final%25%0A")
-            .expect("URI component must decode")
-    );
-    assert_eq!(
-        "café",
-        LocalPathCodec::decode_uri_component("caf%C3%A9").expect("UTF-8 URI component must decode")
-    );
-    assert_eq!(
-        "%80",
-        LocalPathCodec::decode_uri_component("%80")
-            .expect("non-UTF-8 URI byte must remain canonical")
-    );
-}
-
-/// Verifies malformed percent encodings retain their URI byte offset.
-#[test]
-fn test_decode_uri_component_rejects_malformed_escape() {
-    assert!(matches!(
-        LocalPathCodec::decode_uri_component("name%G0"),
-        Err(LocalPathCodecError::InvalidEscape { offset: 4 }),
-    ));
-    assert!(matches!(
-        LocalPathCodec::decode_uri_component("name%00"),
-        Err(LocalPathCodecError::NativeNul),
-    ));
-}
-
 /// Verifies incomplete escape sequences identify the percent byte offset.
 #[test]
 fn test_encode_rejects_malformed_escape() {
@@ -166,15 +141,18 @@ fn test_path_codec_rejects_invalid_hex_and_native_nul() {
 fn test_unix_non_utf8_native_bytes_round_trip() {
     use std::{
         ffi::OsString,
-        os::unix::ffi::{OsStrExt, OsStringExt},
+        os::unix::ffi::{
+            OsStrExt,
+            OsStringExt,
+        },
     };
 
     let native = OsString::from_vec(vec![0x66, 0x80, 0x25]);
-    let decoded =
-        LocalPathCodec::decode(&native).expect("non-UTF-8 native component should decode");
+    let decoded = LocalPathCodec::decode(&native)
+        .expect("non-UTF-8 native component should decode");
     assert_eq!(decoded, "f%80%25");
-    let encoded =
-        LocalPathCodec::encode(&decoded).expect("canonical native component should encode");
+    let encoded = LocalPathCodec::encode(&decoded)
+        .expect("canonical native component should encode");
     assert_eq!(encoded.as_bytes(), [0x66, 0x80, 0x25]);
 }
 
@@ -185,14 +163,17 @@ fn test_unix_non_utf8_native_bytes_round_trip() {
 fn test_windows_unpaired_surrogate_round_trip() {
     use std::{
         ffi::OsString,
-        os::windows::ffi::{OsStrExt, OsStringExt},
+        os::windows::ffi::{
+            OsStrExt,
+            OsStringExt,
+        },
     };
 
     let native = OsString::from_wide(&[0x0066, 0xD800, 0x0025]);
-    let decoded =
-        LocalPathCodec::decode(&native).expect("unpaired surrogate native component should decode");
-    let encoded =
-        LocalPathCodec::encode(&decoded).expect("canonical native component should encode");
+    let decoded = LocalPathCodec::decode(&native)
+        .expect("unpaired surrogate native component should decode");
+    let encoded = LocalPathCodec::encode(&decoded)
+        .expect("canonical native component should encode");
     assert_eq!(
         encoded.encode_wide().collect::<Vec<_>>(),
         [0x0066, 0xD800, 0x0025]

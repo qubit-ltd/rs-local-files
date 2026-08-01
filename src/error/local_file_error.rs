@@ -10,12 +10,18 @@
 
 use std::{
     error::Error,
-    fmt, io,
-    path::{Path, PathBuf},
+    fmt,
+    io,
+    path::{
+        Path,
+        PathBuf,
+    },
 };
 
 use super::{
-    LocalFileErrorKind, LocalFileErrorSource, LocalFileOperation, LocalMutationState,
+    LocalFileErrorKind,
+    LocalFileErrorSource,
+    LocalFileOperation,
     LocalPathCodecError,
 };
 
@@ -32,8 +38,6 @@ pub struct LocalFileError {
     target: Option<PathBuf>,
     /// Typed source retained from the originating failure.
     source: Option<LocalFileErrorSource>,
-    /// Namespace state established after a mutating failure.
-    mutation_state: Option<LocalMutationState>,
 }
 
 impl LocalFileError {
@@ -45,14 +49,16 @@ impl LocalFileError {
     /// - `operation`: Operation that failed.
     #[must_use]
     #[inline(always)]
-    pub const fn new(kind: LocalFileErrorKind, operation: LocalFileOperation) -> Self {
+    pub const fn new(
+        kind: LocalFileErrorKind,
+        operation: LocalFileOperation,
+    ) -> Self {
         Self {
             kind,
             operation,
             path: None,
             target: None,
             source: None,
-            mutation_state: None,
         }
     }
 
@@ -82,7 +88,6 @@ impl LocalFileError {
             path,
             target,
             source: Some(LocalFileErrorSource::Io(source)),
-            mutation_state: None,
         }
     }
 
@@ -111,7 +116,6 @@ impl LocalFileError {
             path,
             target: None,
             source: Some(LocalFileErrorSource::PathCodec(error)),
-            mutation_state: None,
         }
     }
 
@@ -147,22 +151,6 @@ impl LocalFileError {
         self
     }
 
-    /// Records the namespace state established after a mutating failure.
-    ///
-    /// # Parameters
-    ///
-    /// - `state`: Most precise state proven by the native operation.
-    ///
-    /// # Returns
-    ///
-    /// The updated structured error.
-    #[must_use]
-    #[inline(always)]
-    pub const fn with_mutation_state(mut self, state: LocalMutationState) -> Self {
-        self.mutation_state = Some(state);
-        self
-    }
-
     /// Returns the stable failure classification.
     #[inline(always)]
     pub const fn kind(&self) -> LocalFileErrorKind {
@@ -187,18 +175,6 @@ impl LocalFileError {
     #[inline]
     pub fn target(&self) -> Option<&Path> {
         self.target.as_deref()
-    }
-
-    /// Returns the proven namespace state after failure.
-    ///
-    /// # Returns
-    ///
-    /// `Some` for mutating failures that established a publication state, or
-    /// `None` when no mutation state applies.
-    #[must_use]
-    #[inline(always)]
-    pub const fn mutation_state(&self) -> Option<LocalMutationState> {
-        self.mutation_state
     }
 
     /// Returns the typed source retained from the originating failure.
@@ -266,11 +242,12 @@ fn standard_io_error_kind(error: &LocalFileError) -> io::ErrorKind {
             LocalFileErrorKind::AlreadyExists => io::ErrorKind::AlreadyExists,
             LocalFileErrorKind::InvalidInput => io::ErrorKind::InvalidInput,
             LocalFileErrorKind::NotFound => io::ErrorKind::NotFound,
-            LocalFileErrorKind::PermissionDenied => io::ErrorKind::PermissionDenied,
-            LocalFileErrorKind::ResourceLimit => io::ErrorKind::StorageFull,
-            LocalFileErrorKind::RequirementNotMet | LocalFileErrorKind::Unsupported => {
-                io::ErrorKind::Unsupported
+            LocalFileErrorKind::PermissionDenied => {
+                io::ErrorKind::PermissionDenied
             }
+            LocalFileErrorKind::ResourceLimit => io::ErrorKind::StorageFull,
+            LocalFileErrorKind::RequirementNotMet
+            | LocalFileErrorKind::Unsupported => io::ErrorKind::Unsupported,
             _ => io::ErrorKind::Other,
         },
     }
@@ -321,9 +298,9 @@ fn classify_io_error(error: &io::Error) -> LocalFileErrorKind {
             LocalFileErrorKind::InvalidInput
         }
         io::ErrorKind::Unsupported => LocalFileErrorKind::Unsupported,
-        io::ErrorKind::OutOfMemory | io::ErrorKind::StorageFull | io::ErrorKind::QuotaExceeded => {
-            LocalFileErrorKind::ResourceLimit
-        }
+        io::ErrorKind::OutOfMemory
+        | io::ErrorKind::StorageFull
+        | io::ErrorKind::QuotaExceeded => LocalFileErrorKind::ResourceLimit,
         _ => LocalFileErrorKind::Io,
     }
 }

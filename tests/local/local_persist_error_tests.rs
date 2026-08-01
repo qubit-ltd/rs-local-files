@@ -36,7 +36,7 @@ fn test_persist_error_into_parts_returns_error_and_resource() {
     );
     assert!(StdError::source(&persist_error).is_some());
     assert_eq!(ErrorKind::AlreadyExists, persist_error.error().kind());
-    assert_eq!(ErrorKind::AlreadyExists, persist_error.kind());
+    assert_eq!(LocalFileErrorKind::AlreadyExists, persist_error.kind());
     assert_eq!(source, persist_error.resource().path());
     assert_eq!(source, persist_error.resource_mut().path());
     assert_eq!(
@@ -53,7 +53,7 @@ fn test_persist_error_into_parts_returns_error_and_resource() {
     let (error, resource, requested_target, resolved_target, stage, state) =
         persist_error.into_parts_with_state();
 
-    assert_eq!(ErrorKind::AlreadyExists, error.kind());
+    assert_eq!(LocalFileErrorKind::AlreadyExists, error.kind());
     assert_eq!(source, resource.path());
     assert_eq!(target, requested_target);
     assert_eq!(Some(target), resolved_target);
@@ -81,7 +81,7 @@ fn test_persist_error_without_resolved_target_retains_context() {
     let mut error = file
         .persist(&requested)
         .expect_err("rooted persistence must reject host-absolute targets");
-    assert_eq!(ErrorKind::InvalidInput, error.kind());
+    assert_eq!(LocalFileErrorKind::InvalidInput, error.kind());
     assert_eq!(requested, error.requested_target());
     assert_eq!(None, error.resolved_target());
     assert!(error.to_string().contains("requested target"));

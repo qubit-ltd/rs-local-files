@@ -6,6 +6,7 @@
 //    Licensed under the Apache License, Version 2.0.
 // =============================================================================
 //! Native write-open options.
+// qubit-style: allow source-test-pair
 
 use std::time::Duration;
 
@@ -59,6 +60,7 @@ impl OpenOptions {
     /// # Returns
     /// Updated options.
     #[inline]
+    #[allow(dead_code)]
     pub const fn with_parents(mut self) -> Self {
         self.create_parents = true;
         self

@@ -47,6 +47,8 @@ pub enum LocalFileOperation {
     CreateTempFile,
     /// Creating a temporary directory.
     CreateTempDirectory,
+    /// Persisting a temporary resource.
+    PersistTemp,
     /// Committing a writer or temporary resource.
     Commit,
     /// Aborting a writer.

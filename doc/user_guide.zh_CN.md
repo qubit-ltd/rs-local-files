@@ -3,7 +3,7 @@
 [English](user_guide.md) · [README](../README.zh_CN.md) ·
 [API 文档](https://docs.rs/qubit-local-files)
 
-本手册面向 Rust 1.94 及以上版本的 `qubit-local-files` 0.7 使用者，适用于直接操作主机
+本手册面向 Rust 1.94 及以上版本的 `qubit-local-files` 0.8 使用者，适用于直接操作主机
 文件系统，或需要把操作限制在一个已打开目录之下的应用。它不是 provider 注册表、远程
 文件系统 API，也不替代 provider 层的逻辑路径模型。
 
@@ -118,6 +118,9 @@ rooted 路径必须是相对后代。绝对路径、平台前缀、`.`、`..` �
 `LocalFileError` 包含 `LocalFileErrorKind`、`LocalFileOperation`、可用时的主/目标原生
 路径，以及可选的 `std::io::Error` 来源。发布操作用专门失败类型保存部分成功状态。
 
+`LocalPersistError` 同时保留临时资源和结构化的 `LocalFileError`；其 `state()` 是唯一的
+恢复状态来源。存在原生 I/O 错误时，可从结构化错误的 source 取得。
+
 | 症状 | 检查方式 |
 | --- | --- |
 | rooted 操作拒绝路径 | 传入相对后代，移除绝对前缀、`.`、`..` 与中间符号链接。 |
@@ -130,6 +133,7 @@ rooted 路径必须是相对后代。绝对路径、平台前缀、`.`、`..` �
 Linux、Windows 和 macOS 会进行运行时测试。FreeBSD 与 Android 仅做编译检查。
 `LocalFileSystem::capabilities()` 报告主机实现；`RootedLocalFileSystem::capabilities()`
 返回打开权限时缓存的快照。路径限制只有对目标文件系统验证成功时才是 `Some`。
+原子 rename、原子 replace 与临时资源原子持久化会分别报告，因为各平台支持并不相同。
 
 继续阅读 [README](../README.zh_CN.md)、[English user guide](user_guide.md) 或
 [API 文档](https://docs.rs/qubit-local-files)。

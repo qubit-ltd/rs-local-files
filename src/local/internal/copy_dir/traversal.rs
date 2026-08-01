@@ -11,16 +11,27 @@
 
 use std::collections::HashSet;
 use std::fs;
-use std::io::{Error, ErrorKind};
+use std::io::{
+    Error,
+    ErrorKind,
+};
 use std::path::Path;
 
-use crate::{LocalCopyDirOptions, LocalCopyDirStage, LocalCopyDirStats};
+use crate::{
+    LocalCopyDirOptions,
+    LocalCopyDirStage,
+    LocalCopyDirStats,
+};
 
 use super::super::directory_identity::DirectoryIdentity;
 use super::copy_dir_frame::CopyDirFrame;
 use super::copy_dir_result::CopyDirResult;
 use super::destination::ensure_copy_destination_dir;
-use super::error::{copy_dir_error, record_created_directory, with_copy_context};
+use super::error::{
+    copy_dir_error,
+    record_created_directory,
+    with_copy_context,
+};
 use super::source::inspect_copy_source_directory;
 use super::staged_copy::copy_file_with_options;
 
@@ -72,7 +83,10 @@ pub(super) fn copy_dir_iterative(
             let _ = active_sources.remove(completed.source_identity());
             if options.preserves_permissions() {
                 with_copy_context(
-                    fs::set_permissions(completed.dst(), completed.source_permissions().clone()),
+                    fs::set_permissions(
+                        completed.dst(),
+                        completed.source_permissions().clone(),
+                    ),
                     LocalCopyDirStage::PreservePermissions,
                     completed.src(),
                     completed.dst(),
@@ -112,7 +126,11 @@ pub(super) fn copy_dir_iterative(
             )?;
             frames.push(frame);
         } else if file_type.is_symlink() && options.follows_symlinks() {
-            if symlink_target_is_directory(&source_path, &destination_path, stats)? {
+            if symlink_target_is_directory(
+                &source_path,
+                &destination_path,
+                stats,
+            )? {
                 let frame = enter_copy_directory(
                     &source_path,
                     &destination_path,
@@ -123,10 +141,20 @@ pub(super) fn copy_dir_iterative(
                 )?;
                 frames.push(frame);
             } else {
-                copy_file_with_options(&source_path, &destination_path, options, stats)?;
+                copy_file_with_options(
+                    &source_path,
+                    &destination_path,
+                    options,
+                    stats,
+                )?;
             }
         } else {
-            copy_file_with_options(&source_path, &destination_path, options, stats)?;
+            copy_file_with_options(
+                &source_path,
+                &destination_path,
+                options,
+                stats,
+            )?;
         }
     }
     Ok(())
@@ -161,7 +189,11 @@ fn enter_copy_directory(
     stats: &mut LocalCopyDirStats,
 ) -> CopyDirResult<CopyDirFrame> {
     let (source_metadata, source_identity) = with_copy_context(
-        inspect_copy_source_directory(src, options.follows_symlinks(), destination_root),
+        inspect_copy_source_directory(
+            src,
+            options.follows_symlinks(),
+            destination_root,
+        ),
         LocalCopyDirStage::InspectSource,
         src,
         dst,
@@ -252,7 +284,10 @@ fn symlink_target_is_directory(
             stats,
             Error::new(
                 ErrorKind::Unsupported,
-                format!("unsupported symbolic link target type: {}", src.display(),),
+                format!(
+                    "unsupported symbolic link target type: {}",
+                    src.display(),
+                ),
             ),
         ))
     }
