@@ -8,30 +8,20 @@
 
 #[cfg(unix)]
 use std::io::IoSlice;
-use std::io::{
-    ErrorKind,
-    Write,
-};
+use std::io::{ErrorKind, Write};
 #[cfg(target_os = "linux")]
 use std::path::Path;
 #[cfg(target_os = "linux")]
 use std::time::Duration;
 
 use super::api_tests::{
-    LocalAtomicDestinationState,
-    LocalAtomicWriteOptions,
-    LocalAtomicWriteStage,
-    LocalAtomicWriter,
+    LocalAtomicDestinationState, LocalAtomicWriteOptions, LocalAtomicWriteStage, LocalAtomicWriter,
 };
 
 #[cfg(target_os = "linux")]
 use super::test_support::SourceReadLease;
 use super::test_support::{
-    CURRENT_DIR_LOCK,
-    CurrentDirGuard,
-    count_atomic_temp_files,
-    fs,
-    temp_dir,
+    CURRENT_DIR_LOCK, CurrentDirGuard, count_atomic_temp_files, fs, temp_dir,
 };
 
 /// Asserts at compile time that `T` implements `Send`.
@@ -48,11 +38,8 @@ fn test_atomic_writer_options_do_not_create_missing_parent_by_default() {
     let parent = dir.join("missing").join("nested");
     let path = parent.join("out.txt");
 
-    let error = qubit_local_files::atomic::begin_with(
-        &path,
-        LocalAtomicWriteOptions::new(),
-    )
-    .expect_err("missing parent should be rejected");
+    let error = qubit_local_files::atomic::begin_with(&path, LocalAtomicWriteOptions::new())
+        .expect_err("missing parent should be rejected");
 
     assert_eq!(std::io::ErrorKind::NotFound, error.kind());
     assert!(!parent.exists());
@@ -65,11 +52,9 @@ fn test_atomic_writer_options_can_create_missing_parents() {
     let parent = dir.join("missing").join("nested");
     let path = parent.join("out.txt");
 
-    let mut writer = qubit_local_files::atomic::begin_with(
-        &path,
-        LocalAtomicWriteOptions::new().with_parent(),
-    )
-    .expect("parent-enabled writer should begin");
+    let mut writer =
+        qubit_local_files::atomic::begin_with(&path, LocalAtomicWriteOptions::new().with_parent())
+            .expect("parent-enabled writer should begin");
     writer.write_all(b"payload").expect("payload should stage");
     writer.commit().expect("payload should commit");
 
@@ -83,15 +68,11 @@ fn test_atomic_writer_options_can_create_missing_parents() {
 fn test_atomic_writer_rejects_non_directory_parent() {
     let dir = temp_dir("atomic-writer-file-parent");
     let parent = dir.join("parent");
-    fs::write(&parent, b"not a directory")
-        .expect("parent file should be created");
+    fs::write(&parent, b"not a directory").expect("parent file should be created");
     let path = parent.join("payload");
 
-    let error = qubit_local_files::atomic::begin_with(
-        &path,
-        LocalAtomicWriteOptions::new(),
-    )
-    .expect_err("atomic writer must reject a file parent");
+    let error = qubit_local_files::atomic::begin_with(&path, LocalAtomicWriteOptions::new())
+        .expect_err("atomic writer must reject a file parent");
 
     assert_eq!(LocalAtomicWriteStage::PrepareParent, error.stage());
     assert_eq!(ErrorKind::NotADirectory, error.kind());
@@ -105,8 +86,7 @@ fn test_atomic_writer_rejects_non_directory_parent() {
 fn test_atomic_writer_create_new_rejects_existing_destination() {
     let dir = temp_dir("atomic-writer-create-new-existing");
     let path = dir.join("payload");
-    fs::write(&path, b"existing")
-        .expect("existing destination should be created");
+    fs::write(&path, b"existing").expect("existing destination should be created");
 
     let error = qubit_local_files::atomic::begin_with(
         &path,
@@ -127,13 +107,12 @@ fn test_local_atomic_writer_zero_open_retry_timeout_reports_timed_out() {
     let dir = temp_dir("atomic-writer-zero-open-retry-timeout");
     let path = dir.join("out.txt");
     fs::write(&path, b"original").expect("destination should be written");
-    let lease = SourceReadLease::acquire(&path)
-        .expect("destination read lease should be acquired");
+    let lease = SourceReadLease::acquire(&path).expect("destination read lease should be acquired");
     let options = LocalAtomicWriteOptions::new()
         .with_parent()
         .with_open_retry_timeout(Duration::ZERO);
-    let mut writer = qubit_local_files::atomic::begin_with(&path, options)
-        .expect("atomic writer should begin");
+    let mut writer =
+        qubit_local_files::atomic::begin_with(&path, options).expect("atomic writer should begin");
     writer
         .write_all(b"replacement")
         .expect("replacement should be staged");
@@ -155,8 +134,7 @@ fn test_local_atomic_writer_zero_open_retry_timeout_reports_timed_out() {
             .recv_timeout(Duration::from_secs(1))
             .expect("commit result should arrive after lease release")
     });
-    let error =
-        result.expect_err("zero timeout should reject the lease conflict");
+    let error = result.expect_err("zero timeout should reject the lease conflict");
 
     assert_eq!(
         LocalAtomicWriteStage::ReadDestinationMetadata,
@@ -176,8 +154,7 @@ fn test_local_atomic_writer_zero_open_retry_timeout_reports_timed_out() {
 fn test_local_atomic_writer_commits_written_contents() {
     let dir = temp_dir("atomic-writer-commit");
     let path = dir.join("out.txt");
-    let mut writer = qubit_local_files::atomic::begin(&path)
-        .expect("atomic writer should begin");
+    let mut writer = qubit_local_files::atomic::begin(&path).expect("atomic writer should begin");
     writer
         .write_all(b"committed")
         .expect("contents should write");
@@ -194,8 +171,7 @@ fn test_local_atomic_writer_commits_written_contents() {
 fn test_local_atomic_writer_forwards_vectored_writes() {
     let dir = temp_dir("atomic-writer-vectored");
     let path = dir.join("out.txt");
-    let mut writer = qubit_local_files::atomic::begin(&path)
-        .expect("atomic writer should begin");
+    let mut writer = qubit_local_files::atomic::begin(&path).expect("atomic writer should begin");
     let buffers = [IoSlice::new(b"ab"), IoSlice::new(b"cd")];
 
     let count = writer
@@ -258,9 +234,8 @@ fn test_local_atomic_writer_keeps_relative_destination_after_cwd_change() {
 
     let result = {
         let _guard = CurrentDirGuard::change_to(&creation_dir);
-        let mut writer =
-            qubit_local_files::atomic::begin(std::path::Path::new("out.txt"))
-                .expect("relative atomic writer should begin");
+        let mut writer = qubit_local_files::atomic::begin(std::path::Path::new("out.txt"))
+            .expect("relative atomic writer should begin");
         writer.write_all(b"committed").unwrap();
         std::env::set_current_dir(&later_dir).unwrap();
         writer.commit()
@@ -346,8 +321,7 @@ fn test_local_atomic_writer_retains_staging_when_destination_disappears() {
     let dir = temp_dir("atomic-writer-missing-destination");
     let path = dir.join("out.txt");
     fs::write(&path, b"original").expect("destination should be written");
-    let mut writer = qubit_local_files::atomic::begin(&path)
-        .expect("atomic writer should begin");
+    let mut writer = qubit_local_files::atomic::begin(&path).expect("atomic writer should begin");
     writer
         .write_all(b"replacement")
         .expect("replacement should be staged");
@@ -384,8 +358,7 @@ fn test_local_atomic_writer_recoverable_commit_returns_writer_for_abort() {
     let dir = temp_dir("atomic-writer-recoverable-commit");
     let path = dir.join("out.txt");
     fs::write(&path, b"original").expect("destination should be written");
-    let mut writer = qubit_local_files::atomic::begin(&path)
-        .expect("atomic writer should begin");
+    let mut writer = qubit_local_files::atomic::begin(&path).expect("atomic writer should begin");
     writer
         .write_all(b"replacement")
         .expect("replacement should be staged");
@@ -440,9 +413,8 @@ fn test_local_atomic_writer_drop_removes_staging_file() {
 fn test_local_atomic_writer_commit_recoverable_reports_optional_durability() {
     let dir = temp_dir("atomic-writer-optional-durability");
     let path = dir.join("out.txt");
-    let options = LocalAtomicWriteOptions::new().with_durability(
-        qubit_local_files::LocalDurabilityRequirement::NotRequired,
-    );
+    let options = LocalAtomicWriteOptions::new()
+        .with_durability(qubit_local_files::LocalDurabilityRequirement::NotRequired);
     let mut writer = qubit_local_files::atomic::begin_with(&path, options)
         .expect("optional-durability writer should begin");
     writer
@@ -478,11 +450,9 @@ fn atomic_staging_path(dir: &Path) -> std::path::PathBuf {
         .unwrap()
         .map(|entry| entry.unwrap().path())
         .find(|path| {
-            path.file_name().and_then(|name| name.to_str()).is_some_and(
-                |name| {
-                    name.starts_with(".atomic-write-") && name.ends_with(".tmp")
-                },
-            )
+            path.file_name()
+                .and_then(|name| name.to_str())
+                .is_some_and(|name| name.starts_with(".atomic-write-") && name.ends_with(".tmp"))
         })
         .expect("atomic staging path should exist")
 }

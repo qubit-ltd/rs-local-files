@@ -249,8 +249,8 @@ native metadata；`qubit-fs-local` 不应读取裸 `std::fs::Metadata` 后再实
   responsibility；
 - `path()` 返回 authority-local native path：host 为已绑定 host path，rooted 为
   root-relative descendant；
-- rooted persist、cleanup、child 和 descendant 操作始终使用保存的 root
-  descriptor/handle，不把诊断路径重新解析为授权依据。
+- rooted persist 和 cleanup 始终使用保存的 root descriptor/handle，不把诊断路径
+  重新解析为授权依据；`child` 与 `descendant` 只返回经过 lexical validation 的诊断路径。
 
 ### 4.5 命名
 
@@ -392,7 +392,6 @@ adapter 不通过 message 猜测状态。
 - file/directory type conflict policy；
 - metadata preserve policy；
 - symlink policy；
-- cross-device policy；
 - atomicity requirement；
 - durability requirement；
 - recursive traversal policy。
@@ -421,7 +420,7 @@ adapter 不通过 message 猜测状态。
 - source/target bytes 与 entry 统计；
 - metadata preserve 结果；
 - durability 结果；
-- 是否跨 device 或使用 fallback。
+- 实际使用的复制方法与是否满足请求的原子性、持久性保证。
 
 Required semantics 不能通过 outcome 静默降级。
 
@@ -572,16 +571,19 @@ impl RootedLocalFileSystem {
 `RootedLocalFileSystem::create_temp_directory`，而不是让 adapter 回退到 host temp。
 
 Rooted options 中的 parent 必须是经验证、不能逃逸 root 的 relative descendant。
-创建、persist、cleanup 及 temporary directory child 操作都从保存的 root authority
-执行。Root 的诊断路径在资源生命周期内被 rename 或替换，不得改变 cleanup target，
-也不能导致回退到 host-path 删除。
+创建、persist 与 cleanup 都从保存的 root authority 执行。Root 的诊断路径在资源
+生命周期内被 rename 或替换，不得改变 cleanup target，也不能导致回退到 host-path 删除。
 
 `LocalTempFile::close(&mut self)` 只关闭内容 I/O handle，状态仍为 `Owned`，path、
 persist、keep 和 cleanup responsibility 都继续保留。这使需要先关闭文件再交给外部
 进程的调用者不必把资源降级成裸路径。
 
-临时目录的 child API 只接受已经验证的单 component 或不能逃逸的 relative descendant。
-Child operation 仍执行 no-follow containment，不只做 lexical join。
+临时目录的 child API 只接受已经验证的单 component 或不能逃逸的 relative descendant，
+并返回对应的 lexical join；它不打开或验证子项，因此不提供 no-follow containment。
+
+临时资源在创建时记录 native entry identity。persist、cleanup 和 Drop 在操作前核对
+当前路径仍指向该 identity；若同一路径被外部同类型 entry 替换，资源转为
+indeterminate 并拒绝删除或发布该替换项。
 
 ## 12. 结构化错误
 
@@ -648,15 +650,14 @@ src/
 ├── writer/
 ├── temp/
 ├── error/
-└── platform/
-    ├── unix/
-    ├── windows/
-    └── portable/
+├── local/internal/
+├── rooted/
+└── temp/
 ```
 
 要求：
 
-- `cfg` 分支尽量停留在 `platform/`；
+- `cfg` 分支与相应的 local/rooted internal implementation 放在一起；
 - 公共层不复制同一业务状态机的 Unix/Windows 版本；
 - portable fallback 只有在满足同一公开契约时才启用；
 - platform capability 从真实实现派生，不靠调用者猜测。

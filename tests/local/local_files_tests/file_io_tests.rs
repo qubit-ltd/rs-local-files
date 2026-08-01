@@ -6,18 +6,8 @@
 //    Licensed under the Apache License, Version 2.0.
 // =============================================================================
 
-use qubit_local_files::{
-    directory,
-    metadata,
-    read,
-    write,
-};
-use std::io::{
-    Error,
-    ErrorKind,
-    Read,
-    Write,
-};
+use qubit_local_files::{directory, metadata, read, write};
+use std::io::{Error, ErrorKind, Read, Write};
 #[cfg(unix)]
 use std::os::unix::fs::symlink;
 
@@ -25,16 +15,12 @@ use std::os::unix::fs::symlink;
 use super::super::test_support::PermissionsExt;
 #[cfg(all(coverage, target_os = "linux"))]
 use super::super::test_support::run_in_coverage_fault_process;
-use super::super::test_support::{
-    fs,
-    temp_dir,
-};
+use super::super::test_support::{fs, temp_dir};
 
 #[test]
 fn test_open_helpers_reject_directories() {
     let directory = temp_dir("non-file-open");
-    let read_error = read::open(&directory)
-        .expect_err("directory reader should be rejected");
+    let read_error = read::open(&directory).expect_err("directory reader should be rejected");
     assert_eq!(ErrorKind::InvalidInput, read_error.kind());
 
     let write_error = write::open(&directory, &write::OpenOptions::default())
@@ -44,17 +30,12 @@ fn test_open_helpers_reject_directories() {
 }
 
 #[cfg(all(coverage, target_os = "linux"))]
-fn assert_injected_file_handle_error(
-    test_name: &str,
-    fault: &str,
-    expected_kind: ErrorKind,
-) {
+fn assert_injected_file_handle_error(test_name: &str, fault: &str, expected_kind: ErrorKind) {
     let Some(()) = run_in_coverage_fault_process(test_name, fault, move || {
         let directory = temp_dir(fault);
         let path = directory.join("data.txt");
         fs::write(&path, b"data").expect("fixture should be written");
-        let error =
-            read::open(&path).expect_err("injected validation should fail");
+        let error = read::open(&path).expect_err("injected validation should fail");
         assert_eq!(expected_kind, error.kind());
         fs::remove_dir_all(directory).unwrap();
     }) else {
@@ -69,11 +50,7 @@ fn test_open_reader_reports_injected_file_handle_metadata_error() {
         "local::local_files_tests::file_io_tests::",
         "test_open_reader_reports_injected_file_handle_metadata_error",
     );
-    assert_injected_file_handle_error(
-        TEST_NAME,
-        "file-handle-metadata",
-        ErrorKind::Other,
-    );
+    assert_injected_file_handle_error(TEST_NAME, "file-handle-metadata", ErrorKind::Other);
 }
 
 #[cfg(all(coverage, target_os = "linux"))]
@@ -83,11 +60,7 @@ fn test_open_reader_reports_injected_file_handle_type_error() {
         "local::local_files_tests::file_io_tests::",
         "test_open_reader_reports_injected_file_handle_type_error",
     );
-    assert_injected_file_handle_error(
-        TEST_NAME,
-        "file-handle-type",
-        ErrorKind::InvalidInput,
-    );
+    assert_injected_file_handle_error(TEST_NAME, "file-handle-type", ErrorKind::InvalidInput);
 }
 
 #[test]
@@ -98,8 +71,7 @@ fn test_open_reader_and_writer_replace_old_buffered_helpers() {
     {
         let mut writer = write::open(
             &path,
-            &write::OpenOptions::new(write::Mode::CreateOrTruncate)
-                .with_parents(),
+            &write::OpenOptions::new(write::Mode::CreateOrTruncate).with_parents(),
         )
         .expect("writer should be created");
         writer.write_all(b"abc").unwrap();
@@ -107,8 +79,8 @@ fn test_open_reader_and_writer_replace_old_buffered_helpers() {
     }
 
     {
-        let mut writer = write::open(&path, &write::OpenOptions::default())
-            .expect("writer should be created");
+        let mut writer =
+            write::open(&path, &write::OpenOptions::default()).expect("writer should be created");
         writer.write_all(b"xyz").unwrap();
         drop(writer);
     }
@@ -125,15 +97,13 @@ fn test_open_reader_and_writer_replace_old_buffered_helpers() {
 fn test_open_reader_returns_open_error() {
     let dir = temp_dir("open-error");
 
-    let error = read::open(&dir.join("missing.txt"))
-        .expect_err("missing file should return open error");
+    let error =
+        read::open(&dir.join("missing.txt")).expect_err("missing file should return open error");
 
     assert_eq!(ErrorKind::NotFound, error.kind());
     let source = std::error::Error::source(&error)
         .and_then(|source| source.downcast_ref::<Error>())
-        .expect(
-            "path context should retain the native I/O error as its source",
-        );
+        .expect("path context should retain the native I/O error as its source");
     assert_eq!(ErrorKind::NotFound, source.kind());
     fs::remove_dir_all(dir).unwrap();
 }
@@ -146,8 +116,7 @@ fn test_open_reader_returns_open_error_after_metadata_success() {
     fs::write(&path, b"payload").unwrap();
     fs::set_permissions(&path, fs::Permissions::from_mode(0o000)).unwrap();
 
-    let error = read::open(&path)
-        .expect_err("unreadable file should return open error");
+    let error = read::open(&path).expect_err("unreadable file should return open error");
 
     fs::set_permissions(&path, fs::Permissions::from_mode(0o600)).unwrap();
     assert_eq!(ErrorKind::PermissionDenied, error.kind());
@@ -169,17 +138,13 @@ fn test_open_writer_respects_modes_parent_creation_and_buffering_options() {
         drop(writer);
     }
 
-    let error =
-        write::open(&path, &write::OpenOptions::new(write::Mode::CreateNew))
-            .expect_err("create-new mode should reject existing files");
+    let error = write::open(&path, &write::OpenOptions::new(write::Mode::CreateNew))
+        .expect_err("create-new mode should reject existing files");
     assert_eq!(ErrorKind::AlreadyExists, error.kind());
 
     {
-        let mut writer = write::open(
-            &path,
-            &write::OpenOptions::new(write::Mode::AppendExisting),
-        )
-        .expect("append-existing writer should open existing files");
+        let mut writer = write::open(&path, &write::OpenOptions::new(write::Mode::AppendExisting))
+            .expect("append-existing writer should open existing files");
         writer.write_all(b"-two").unwrap();
         drop(writer);
     }
@@ -214,11 +179,8 @@ fn test_open_reader_and_writer_cover_unbuffered_and_append_or_create_modes() {
     assert_eq!(b"XYcdef", fs::read(&path).unwrap().as_slice());
 
     {
-        let mut writer = write::open(
-            &path,
-            &write::OpenOptions::new(write::Mode::AppendOrCreate),
-        )
-        .expect("append-or-create writer should open");
+        let mut writer = write::open(&path, &write::OpenOptions::new(write::Mode::AppendOrCreate))
+            .expect("append-or-create writer should open");
         writer.write_all(b"-tail").unwrap();
         drop(writer);
     }
@@ -232,8 +194,7 @@ fn test_open_reader_and_writer_cover_unbuffered_and_append_or_create_modes() {
 }
 
 #[test]
-fn test_open_writer_returns_open_error_for_missing_parent_without_parent_creation()
- {
+fn test_open_writer_returns_open_error_for_missing_parent_without_parent_creation() {
     let dir = temp_dir("open-writer-missing-parent");
 
     let error = write::open(

@@ -8,28 +8,18 @@
 
 use std::io::ErrorKind;
 
-use super::super::api_tests::{
-    LocalCopyConflictPolicy,
-    LocalCopyDirOptions,
-    LocalCopyDirStage,
-};
+use super::super::api_tests::{LocalCopyConflictPolicy, LocalCopyDirOptions, LocalCopyDirStage};
 
-use super::super::test_support::{
-    fs,
-    temp_dir,
-};
+use super::super::test_support::{fs, temp_dir};
 
 #[test]
 fn test_copy_dir_fail_and_skip_require_native_no_replace_installation() {
-    for conflict in
-        [LocalCopyConflictPolicy::Fail, LocalCopyConflictPolicy::Skip]
-    {
+    for conflict in [LocalCopyConflictPolicy::Fail, LocalCopyConflictPolicy::Skip] {
         let dir = temp_dir("copy-dir-unsupported-no-replace");
         let source = dir.join("source");
         let destination = dir.join("destination");
         fs::create_dir(&source).expect("source directory should be created");
-        fs::write(source.join("data.txt"), b"payload")
-            .expect("source file should be written");
+        fs::write(source.join("data.txt"), b"payload").expect("source file should be written");
 
         let error = qubit_local_files::copy::directory(
             &source,
@@ -52,14 +42,12 @@ fn test_copy_dir_overwrite_uses_ordinary_replacement() {
     let source = dir.join("source");
     let destination = dir.join("destination");
     fs::create_dir(&source).expect("source directory should be created");
-    fs::write(source.join("data.txt"), b"payload")
-        .expect("source file should be written");
+    fs::write(source.join("data.txt"), b"payload").expect("source file should be written");
 
     qubit_local_files::copy::directory(
         &source,
         &destination,
-        LocalCopyDirOptions::new()
-            .with_conflict(LocalCopyConflictPolicy::Overwrite),
+        LocalCopyDirOptions::new().with_conflict(LocalCopyConflictPolicy::Overwrite),
     )
     .expect("overwrite copy should use ordinary replacement");
 

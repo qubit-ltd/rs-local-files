@@ -9,10 +9,7 @@
 // qubit-style: allow source-test-pair
 // Covered through the public temporary-resource integration tests.
 
-use super::{
-    HostTempResourceBackend,
-    RootedTempResourceBackend,
-};
+use super::{HostTempResourceBackend, RootedTempResourceBackend};
 
 /// Identifies whether a temporary resource is host- or descriptor-relative.
 #[derive(Debug)]

@@ -8,9 +8,7 @@
 //! Native local file write operations.
 
 mod mode;
-mod open;
 mod open_options;
 
 pub use mode::Mode;
-pub use open::open;
 pub use open_options::OpenOptions;

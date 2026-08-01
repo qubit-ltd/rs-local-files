@@ -8,15 +8,8 @@
 //! Private portable file-name validation.
 // qubit-style: allow source-test-pair
 
-use std::io::{
-    Error,
-    ErrorKind,
-    Result,
-};
-use std::path::{
-    Component,
-    Path,
-};
+use std::io::{Error, ErrorKind, Result};
+use std::path::{Component, Path};
 
 /// Maximum byte length accepted for a portable UTF-8 file name.
 const MAX_PORTABLE_FILE_NAME_BYTES: usize = 255;
@@ -44,9 +37,7 @@ pub(crate) fn validate_portable_file_name_impl(name: &str) -> Result<()> {
     if name.len() > MAX_PORTABLE_FILE_NAME_BYTES {
         return Err(Error::new(
             ErrorKind::InvalidInput,
-            format!(
-                "portable file name exceeds {MAX_PORTABLE_FILE_NAME_BYTES} UTF-8 bytes"
-            ),
+            format!("portable file name exceeds {MAX_PORTABLE_FILE_NAME_BYTES} UTF-8 bytes"),
         ));
     }
     if name.ends_with([' ', '.']) {
@@ -64,9 +55,7 @@ pub(crate) fn validate_portable_file_name_impl(name: &str) -> Result<()> {
     }) {
         return Err(Error::new(
             ErrorKind::InvalidInput,
-            format!(
-                "portable file name contains forbidden character {character:?}"
-            ),
+            format!("portable file name contains forbidden character {character:?}"),
         ));
     }
     if is_windows_reserved_file_name(name) {
@@ -87,10 +76,7 @@ pub(crate) fn validate_portable_file_name_impl(name: &str) -> Result<()> {
 /// # Errors
 /// Returns [`ErrorKind::InvalidInput`] when `fragment` can behave like a path
 /// instead of a plain file-name fragment.
-pub(super) fn validate_file_name_fragment(
-    role: &str,
-    fragment: &str,
-) -> Result<()> {
+pub(super) fn validate_file_name_fragment(role: &str, fragment: &str) -> Result<()> {
     if fragment.contains('\0') {
         return Err(invalid_file_name_fragment_error(
             role,
@@ -159,12 +145,10 @@ fn is_windows_reserved_file_name(name: &str) -> bool {
         return true;
     }
 
-    let Some((suffix_index, suffix)) = base_name.char_indices().next_back()
-    else {
+    let Some((suffix_index, suffix)) = base_name.char_indices().next_back() else {
         return false;
     };
     let prefix = &base_name[..suffix_index];
     let reserved_digit = matches!(suffix, '1'..='9' | '¹' | '²' | '³');
-    (prefix.eq_ignore_ascii_case("COM") || prefix.eq_ignore_ascii_case("LPT"))
-        && reserved_digit
+    (prefix.eq_ignore_ascii_case("COM") || prefix.eq_ignore_ascii_case("LPT")) && reserved_digit
 }

@@ -14,16 +14,9 @@
 use std::io::Error;
 use std::path::Path;
 
-use crate::{
-    LocalCopyDirOptions,
-    LocalCopyDirStage,
-    LocalCopyDirStats,
-};
+use crate::{LocalCopyDirOptions, LocalCopyDirStage, LocalCopyDirStats};
 
-use crate::local::internal::path_operations::{
-    absolute_path,
-    canonicalize_existing_prefix,
-};
+use crate::local::internal::path_operations::{absolute_path, canonicalize_existing_prefix};
 
 use super::copy_dir_result::CopyDirResult;
 use super::error::with_copy_context;
@@ -53,13 +46,12 @@ pub(crate) fn copy_dir_all_with_paths(
     let mut stats = LocalCopyDirStats::default();
     let source_result = absolute_path(src);
     #[cfg(coverage)]
-    let source_result = if crate::local::internal::coverage_fault::is_enabled(
-        "copy-source-absolute",
-    ) {
-        Err(Error::from_raw_os_error(libc::EIO))
-    } else {
-        source_result
-    };
+    let source_result =
+        if crate::local::internal::coverage_fault::is_enabled("copy-source-absolute") {
+            Err(Error::from_raw_os_error(libc::EIO))
+        } else {
+            source_result
+        };
     let src = with_copy_context(
         source_result,
         LocalCopyDirStage::InspectSource,
@@ -74,9 +66,7 @@ pub(crate) fn copy_dir_all_with_paths(
     };
     #[cfg(coverage)]
     let destination_result =
-        if crate::local::internal::coverage_fault::is_enabled(
-            "copy-destination-absolute",
-        ) {
+        if crate::local::internal::coverage_fault::is_enabled("copy-destination-absolute") {
             Err(Error::from_raw_os_error(libc::EIO))
         } else {
             destination_result

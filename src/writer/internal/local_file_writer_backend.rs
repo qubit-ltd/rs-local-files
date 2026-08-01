@@ -10,11 +10,7 @@
 
 use std::fs::File;
 
-use crate::local::{
-    LocalAtomicWriteError,
-    LocalAtomicWriter,
-    LocalRootAtomicWriter,
-};
+use crate::local::{LocalAtomicWriteError, LocalAtomicWriter, LocalRootAtomicWriter};
 
 use super::LocalStagedCommitError;
 
@@ -37,24 +33,28 @@ impl LocalFileWriterBackend {
     /// Panics when called for the direct append backend.
     pub(crate) fn commit_staged(self) -> Result<bool, LocalStagedCommitError> {
         match self {
-            Self::Staged(writer) => writer
-                .commit_recoverable_with_durability()
-                .map_err(|commit_error| {
-                    let (error, retained) = commit_error.into_parts();
-                    LocalStagedCommitError {
-                        error,
-                        backend: retained.map(Self::Staged).map(Box::new),
-                    }
-                }),
-            Self::Rooted(writer) => writer
-                .commit_recoverable_with_durability()
-                .map_err(|commit_error| {
-                    let (error, retained) = commit_error.into_parts();
-                    LocalStagedCommitError {
-                        error,
-                        backend: retained.map(Self::Rooted).map(Box::new),
-                    }
-                }),
+            Self::Staged(writer) => {
+                writer
+                    .commit_recoverable_with_durability()
+                    .map_err(|commit_error| {
+                        let (error, retained) = commit_error.into_parts();
+                        LocalStagedCommitError {
+                            error,
+                            backend: retained.map(Self::Staged).map(Box::new),
+                        }
+                    })
+            }
+            Self::Rooted(writer) => {
+                writer
+                    .commit_recoverable_with_durability()
+                    .map_err(|commit_error| {
+                        let (error, retained) = commit_error.into_parts();
+                        LocalStagedCommitError {
+                            error,
+                            backend: retained.map(Self::Rooted).map(Box::new),
+                        }
+                    })
+            }
             Self::Append(_) => {
                 unreachable!("direct append does not support staged commit")
             }

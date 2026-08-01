@@ -11,11 +11,7 @@
 
 use std::collections::HashSet;
 use std::fs;
-use std::io::{
-    Error,
-    ErrorKind,
-    Result,
-};
+use std::io::{Error, ErrorKind, Result};
 use std::path::Path;
 
 #[cfg(coverage)]
@@ -54,8 +50,7 @@ pub(crate) fn dir_size_path(path: &Path) -> Result<u64> {
         ));
     }
     let canonical_path = fs::canonicalize(path)?;
-    let root_identity =
-        DirectoryIdentity::from_metadata(&metadata, &canonical_path);
+    let root_identity = DirectoryIdentity::from_metadata(&metadata, &canonical_path);
     dir_size_iterative(path, root_identity)
 }
 
@@ -74,10 +69,7 @@ pub(crate) fn dir_size_path(path: &Path) -> Result<u64> {
 ///
 /// # Panics
 /// Panics if the iterative traversal loses its root frame.
-fn dir_size_iterative(
-    path: &Path,
-    root_identity: DirectoryIdentity,
-) -> Result<u64> {
+fn dir_size_iterative(path: &Path, root_identity: DirectoryIdentity) -> Result<u64> {
     let mut active_directories = HashSet::new();
     let _ = active_directories.insert(root_identity.clone());
     let mut directories = vec![DirSizeFrame::new(
@@ -91,11 +83,10 @@ fn dir_size_iterative(
             .expect("directory-size traversal should retain its root frame");
         let entry = next_dir_size_entry(current);
         let Some(entry) = entry else {
-            let completed = directories.pop().expect(
-                "directory-size traversal should retain its root frame",
-            );
-            let (completed_path, completed_identity, completed_size) =
-                completed.into_parts();
+            let completed = directories
+                .pop()
+                .expect("directory-size traversal should retain its root frame");
+            let (completed_path, completed_identity, completed_size) = completed.into_parts();
             let _ = active_directories.remove(&completed_identity);
             let Some(parent) = directories.last_mut() else {
                 return Ok(completed_size);
@@ -118,8 +109,7 @@ fn dir_size_iterative(
         }
         if metadata.is_dir() {
             let canonical_path = fs::canonicalize(&entry_path)?;
-            let identity =
-                DirectoryIdentity::from_metadata(&metadata, &canonical_path);
+            let identity = DirectoryIdentity::from_metadata(&metadata, &canonical_path);
             if active_directories.contains(&identity) {
                 return Err(Error::new(
                     ErrorKind::InvalidInput,
@@ -133,9 +123,9 @@ fn dir_size_iterative(
             let _ = active_directories.insert(identity.clone());
             directories.push(DirSizeFrame::new(entry_path, identity, entries));
         } else if metadata.is_file() {
-            let current = directories.last_mut().expect(
-                "directory-size traversal should retain its root frame",
-            );
+            let current = directories
+                .last_mut()
+                .expect("directory-size traversal should retain its root frame");
             let current_size = checked_dir_size_add(
                 current.size(),
                 metadata.len(),
@@ -155,9 +145,7 @@ fn dir_size_iterative(
 /// # Returns
 /// The next entry result, or `None` when the directory is exhausted.
 #[inline]
-fn next_dir_size_entry(
-    frame: &mut DirSizeFrame,
-) -> Option<Result<fs::DirEntry>> {
+fn next_dir_size_entry(frame: &mut DirSizeFrame) -> Option<Result<fs::DirEntry>> {
     let entry = frame.next_entry();
     #[cfg(coverage)]
     let entry = entry.map(|entry| {

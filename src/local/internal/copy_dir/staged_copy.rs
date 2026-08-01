@@ -12,45 +12,26 @@
 use std::io::ErrorKind;
 use std::path::Path;
 
-use crate::{
-    LocalCopyConflictPolicy,
-    LocalCopyDirOptions,
-    LocalCopyDirStage,
-    LocalCopyDirStats,
-};
+use crate::{LocalCopyConflictPolicy, LocalCopyDirOptions, LocalCopyDirStage, LocalCopyDirStats};
 
 use crate::local::internal::StagedFile;
 use crate::local::internal::file_move::{
-    move_file_without_replacing,
-    parent_dir_for,
-    replace_file,
+    move_file_without_replacing, parent_dir_for, replace_file,
 };
-use crate::local::internal::temp_entry::{
-    DEFAULT_TEMP_ENTRY_RETRIES,
-    create_temp_file_in_dir,
-};
+use crate::local::internal::temp_entry::{DEFAULT_TEMP_ENTRY_RETRIES, create_temp_file_in_dir};
 
 use super::copy_dir_result::CopyDirResult;
 use super::destination::{
-    destination_metadata_if_exists,
-    ensure_directory_can_be_replaced_by_file,
-    existing_file_destination_should_be_skipped,
-    remove_destination_directory_if_unchanged,
+    destination_metadata_if_exists, ensure_directory_can_be_replaced_by_file,
+    existing_file_destination_should_be_skipped, remove_destination_directory_if_unchanged,
 };
 use super::error::{
-    copy_dir_error,
-    copy_dir_error_with_staging,
-    record_copied_file,
-    record_overwritten_entry,
-    record_skipped_file,
-    with_copy_context,
+    copy_dir_error, copy_dir_error_with_staging, record_copied_file, record_overwritten_entry,
+    record_skipped_file, with_copy_context,
 };
 use super::opened_copy_source::OpenedCopySource;
 use super::source::is_real_directory;
-use super::staging_io::{
-    copy_into_staging,
-    preserve_staged_permissions,
-};
+use super::staging_io::{copy_into_staging, preserve_staged_permissions};
 
 /// Prefix used by recursive-copy staging files.
 const COPY_FILE_TEMP_PREFIX: &str = ".copy-file-";
@@ -209,16 +190,9 @@ fn stage_copy_file(
         }
     };
     let (mut source_file, source_metadata) = opened_source.into_parts();
-    let copied =
-        copy_into_staging(src, dst, stats, &mut source_file, &mut staged_file)?;
+    let copied = copy_into_staging(src, dst, stats, &mut source_file, &mut staged_file)?;
     if options.preserves_permissions() {
-        preserve_staged_permissions(
-            src,
-            dst,
-            &source_metadata,
-            stats,
-            &mut staged_file,
-        )?;
+        preserve_staged_permissions(src, dst, &source_metadata, stats, &mut staged_file)?;
     }
     staged_file.close();
     Ok((staged_file, copied))
@@ -271,9 +245,7 @@ fn commit_staged_copy_file(
         LocalCopyConflictPolicy::Fail | LocalCopyConflictPolicy::Skip => {
             move_file_without_replacing(staged_file.path(), dst)
         }
-        LocalCopyConflictPolicy::Overwrite => {
-            replace_file(staged_file.path(), dst)
-        }
+        LocalCopyConflictPolicy::Overwrite => replace_file(staged_file.path(), dst),
     };
     match commit_result {
         Ok(()) => {

@@ -9,17 +9,11 @@
 use std::error::Error as StdError;
 use std::io::ErrorKind;
 
-use super::api_tests::{
-    LocalCopyDirOptions,
-    LocalCopyDirStage,
-};
+use super::api_tests::{LocalCopyDirOptions, LocalCopyDirStage};
 #[cfg(all(coverage, target_os = "linux"))]
 use super::test_support::run_in_coverage_fault_process;
 
-use super::test_support::{
-    fs,
-    temp_dir,
-};
+use super::test_support::{fs, temp_dir};
 
 #[test]
 fn test_copy_dir_all_with_returns_missing_source_error() {
@@ -27,12 +21,9 @@ fn test_copy_dir_all_with_returns_missing_source_error() {
     let missing = dir.join("missing");
     let destination = dir.join("dst");
 
-    let error = qubit_local_files::copy::directory(
-        &missing,
-        &destination,
-        LocalCopyDirOptions::default(),
-    )
-    .expect_err("missing source should return metadata error");
+    let error =
+        qubit_local_files::copy::directory(&missing, &destination, LocalCopyDirOptions::default())
+            .expect_err("missing source should return metadata error");
 
     assert_eq!(ErrorKind::NotFound, error.kind());
     assert_eq!(ErrorKind::NotFound, error.error().kind());
@@ -56,52 +47,45 @@ fn test_copy_dir_error_reports_staging_cleanup_context() {
         "local::local_copy_dir_error_tests::",
         "test_copy_dir_error_reports_staging_cleanup_context",
     );
-    let Some(()) = run_in_coverage_fault_process(
-        TEST_NAME,
-        "copy-staging-copy-cleanup",
-        || {
-            let dir = temp_dir("copy-dir-error-staging-cleanup");
-            let source = dir.join("source");
-            let destination = dir.join("destination");
-            fs::create_dir(&source)
-                .expect("source directory should be created");
-            fs::write(source.join("payload"), b"payload")
-                .expect("source payload should be written");
+    let Some(()) = run_in_coverage_fault_process(TEST_NAME, "copy-staging-copy-cleanup", || {
+        let dir = temp_dir("copy-dir-error-staging-cleanup");
+        let source = dir.join("source");
+        let destination = dir.join("destination");
+        fs::create_dir(&source).expect("source directory should be created");
+        fs::write(source.join("payload"), b"payload").expect("source payload should be written");
 
-            let error = qubit_local_files::copy::directory(
-                &source,
-                &destination,
-                LocalCopyDirOptions::default(),
-            )
-            .expect_err("injected staging copy and cleanup should fail");
+        let error = qubit_local_files::copy::directory(
+            &source,
+            &destination,
+            LocalCopyDirOptions::default(),
+        )
+        .expect_err("injected staging copy and cleanup should fail");
 
-            assert_eq!(LocalCopyDirStage::CopyFileContents, error.stage());
-            assert_eq!(source.join("payload"), error.source_path());
-            assert_eq!(destination.join("payload"), error.destination_path());
-            assert_eq!(0, error.stats().files());
-            let staging_path = error
-                .temporary_path()
-                .expect("failed staging cleanup should retain its path");
-            assert!(staging_path.starts_with(&destination));
-            assert_eq!(
-                Some(libc::EIO),
-                error.cleanup_error().and_then(std::io::Error::raw_os_error),
-            );
-            assert_eq!(
-                std::io::Error::from_raw_os_error(libc::EIO).kind(),
-                error.error().kind(),
-            );
-            let message = error.to_string();
-            assert!(message.contains("staging path"));
-            assert!(message.contains("staging cleanup also failed"));
-            let source_error = StdError::source(&error)
-                .expect("copy error should retain its primary source");
-            assert!(source_error.to_string().contains("Input/output error"));
+        assert_eq!(LocalCopyDirStage::CopyFileContents, error.stage());
+        assert_eq!(source.join("payload"), error.source_path());
+        assert_eq!(destination.join("payload"), error.destination_path());
+        assert_eq!(0, error.stats().files());
+        let staging_path = error
+            .temporary_path()
+            .expect("failed staging cleanup should retain its path");
+        assert!(staging_path.starts_with(&destination));
+        assert_eq!(
+            Some(libc::EIO),
+            error.cleanup_error().and_then(std::io::Error::raw_os_error),
+        );
+        assert_eq!(
+            std::io::Error::from_raw_os_error(libc::EIO).kind(),
+            error.error().kind(),
+        );
+        let message = error.to_string();
+        assert!(message.contains("staging path"));
+        assert!(message.contains("staging cleanup also failed"));
+        let source_error =
+            StdError::source(&error).expect("copy error should retain its primary source");
+        assert!(source_error.to_string().contains("Input/output error"));
 
-            fs::remove_dir_all(dir)
-                .expect("test directory should be removed after cleanup");
-        },
-    ) else {
+        fs::remove_dir_all(dir).expect("test directory should be removed after cleanup");
+    }) else {
         return;
     };
 }

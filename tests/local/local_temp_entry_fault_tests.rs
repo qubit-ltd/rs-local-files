@@ -8,10 +8,7 @@
 //! Coverage-only tests for native temporary-entry creation failures.
 
 use qubit_local_files::{
-    LocalFileErrorKind,
-    LocalFileSystem,
-    LocalTempDirectoryOptions,
-    LocalTempFileOptions,
+    LocalFileErrorKind, LocalFileSystem, LocalTempDirectoryOptions, LocalTempFileOptions,
 };
 use tempfile::tempdir;
 
@@ -25,18 +22,16 @@ fn test_temp_file_retries_injected_collision() {
         "local::local_temp_entry_fault_tests::",
         "test_temp_file_retries_injected_collision",
     );
-    let Some(()) =
-        run_in_coverage_fault_process(TEST_NAME, "temp-file-collision", || {
-            let parent = tempdir().expect("temporary parent should be created");
-            let mut temporary = LocalFileSystem::create_temp_file(
-                &LocalTempFileOptions::new().with_parent(parent.path()),
-            )
-            .expect("one injected collision should be retried");
-            temporary
-                .cleanup()
-                .expect("retried temporary file should clean up");
-        })
-    else {
+    let Some(()) = run_in_coverage_fault_process(TEST_NAME, "temp-file-collision", || {
+        let parent = tempdir().expect("temporary parent should be created");
+        let mut temporary = LocalFileSystem::create_temp_file(
+            &LocalTempFileOptions::new().with_parent(parent.path()),
+        )
+        .expect("one injected collision should be retried");
+        temporary
+            .cleanup()
+            .expect("retried temporary file should clean up");
+    }) else {
         return;
     };
 }
@@ -49,18 +44,16 @@ fn test_temp_file_reports_injected_creation_failure() {
         "local::local_temp_entry_fault_tests::",
         "test_temp_file_reports_injected_creation_failure",
     );
-    let Some(()) =
-        run_in_coverage_fault_process(TEST_NAME, "temp-file-open", || {
-            let parent = tempdir().expect("temporary parent should be created");
-            let error = LocalFileSystem::create_temp_file(
-                &LocalTempFileOptions::new().with_parent(parent.path()),
-            )
-            .expect_err("injected file creation failure should propagate");
+    let Some(()) = run_in_coverage_fault_process(TEST_NAME, "temp-file-open", || {
+        let parent = tempdir().expect("temporary parent should be created");
+        let error = LocalFileSystem::create_temp_file(
+            &LocalTempFileOptions::new().with_parent(parent.path()),
+        )
+        .expect_err("injected file creation failure should propagate");
 
-            assert_eq!(LocalFileErrorKind::Io, error.kind());
-            assert_eq!(Some(parent.path()), error.path());
-        })
-    else {
+        assert_eq!(LocalFileErrorKind::Io, error.kind());
+        assert_eq!(Some(parent.path()), error.path());
+    }) else {
         return;
     };
 }
@@ -73,20 +66,16 @@ fn test_temp_directory_retries_injected_collision() {
         "local::local_temp_entry_fault_tests::",
         "test_temp_directory_retries_injected_collision",
     );
-    let Some(()) = run_in_coverage_fault_process(
-        TEST_NAME,
-        "temp-directory-collision",
-        || {
-            let parent = tempdir().expect("temporary parent should be created");
-            let mut temporary = LocalFileSystem::create_temp_directory(
-                &LocalTempDirectoryOptions::new().with_parent(parent.path()),
-            )
-            .expect("one injected collision should be retried");
-            temporary
-                .cleanup()
-                .expect("retried temporary directory should clean up");
-        },
-    ) else {
+    let Some(()) = run_in_coverage_fault_process(TEST_NAME, "temp-directory-collision", || {
+        let parent = tempdir().expect("temporary parent should be created");
+        let mut temporary = LocalFileSystem::create_temp_directory(
+            &LocalTempDirectoryOptions::new().with_parent(parent.path()),
+        )
+        .expect("one injected collision should be retried");
+        temporary
+            .cleanup()
+            .expect("retried temporary directory should clean up");
+    }) else {
         return;
     };
 }
@@ -99,20 +88,16 @@ fn test_temp_directory_reports_injected_creation_failure() {
         "local::local_temp_entry_fault_tests::",
         "test_temp_directory_reports_injected_creation_failure",
     );
-    let Some(()) = run_in_coverage_fault_process(
-        TEST_NAME,
-        "temp-directory-create",
-        || {
-            let parent = tempdir().expect("temporary parent should be created");
-            let error = LocalFileSystem::create_temp_directory(
-                &LocalTempDirectoryOptions::new().with_parent(parent.path()),
-            )
-            .expect_err("injected directory creation failure should propagate");
+    let Some(()) = run_in_coverage_fault_process(TEST_NAME, "temp-directory-create", || {
+        let parent = tempdir().expect("temporary parent should be created");
+        let error = LocalFileSystem::create_temp_directory(
+            &LocalTempDirectoryOptions::new().with_parent(parent.path()),
+        )
+        .expect_err("injected directory creation failure should propagate");
 
-            assert_eq!(LocalFileErrorKind::Io, error.kind());
-            assert_eq!(Some(parent.path()), error.path());
-        },
-    ) else {
+        assert_eq!(LocalFileErrorKind::Io, error.kind());
+        assert_eq!(Some(parent.path()), error.path());
+    }) else {
         return;
     };
 }

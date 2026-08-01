@@ -8,22 +8,11 @@
 //! Recoverable temporary-resource persistence errors.
 
 use std::error::Error;
-use std::fmt::{
-    Debug,
-    Display,
-    Formatter,
-    Result as FmtResult,
-};
+use std::fmt::{Debug, Display, Formatter, Result as FmtResult};
 use std::io;
-use std::path::{
-    Path,
-    PathBuf,
-};
+use std::path::{Path, PathBuf};
 
-use crate::{
-    LocalPersistFailureState,
-    LocalPersistStage,
-};
+use crate::{LocalPersistFailureState, LocalPersistStage};
 
 /// Persistence error that returns ownership of the temporary resource.
 ///
@@ -179,9 +168,7 @@ impl<T> LocalPersistError<T> {
     /// }
     /// ```
     #[must_use = "the returned tuple retains the temporary resource and persistence context"]
-    pub fn into_parts(
-        self,
-    ) -> (io::Error, T, PathBuf, Option<PathBuf>, LocalPersistStage) {
+    pub fn into_parts(self) -> (io::Error, T, PathBuf, Option<PathBuf>, LocalPersistStage) {
         let (error, resource, requested_target, resolved_target, stage, _) =
             self.into_parts_with_state();
         (error, resource, requested_target, resolved_target, stage)

@@ -9,11 +9,7 @@
 // qubit-style: allow source-test-pair
 
 use std::ffi::OsStr;
-use std::sync::atomic::{
-    AtomicBool,
-    AtomicUsize,
-    Ordering,
-};
+use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 
 /// Environment variable carrying one isolated coverage fault name.
 const COVERAGE_FAULT_ENV: &str = "QUBIT_LOCAL_FILES_COVERAGE_FAULT";
@@ -34,8 +30,7 @@ static NTH_FAULT_OCCURRENCES: AtomicUsize = AtomicUsize::new(0);
 #[must_use]
 #[inline(always)]
 pub(crate) fn is_enabled(name: &str) -> bool {
-    std::env::var_os(COVERAGE_FAULT_ENV)
-        .is_some_and(|value| value == OsStr::new(name))
+    std::env::var_os(COVERAGE_FAULT_ENV).is_some_and(|value| value == OsStr::new(name))
 }
 
 /// Takes the selected fault once within its isolated subprocess.
@@ -68,7 +63,5 @@ pub(crate) fn take(name: &str) -> bool {
 #[must_use]
 #[inline]
 pub(crate) fn take_on_nth(name: &str, occurrence: usize) -> bool {
-    is_enabled(name)
-        && NTH_FAULT_OCCURRENCES.fetch_add(1, Ordering::Relaxed) + 1
-            == occurrence
+    is_enabled(name) && NTH_FAULT_OCCURRENCES.fetch_add(1, Ordering::Relaxed) + 1 == occurrence
 }

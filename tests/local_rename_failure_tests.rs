@@ -11,10 +11,7 @@
 use std::path::PathBuf;
 
 use qubit_local_files::{
-    LocalFileOperation,
-    LocalFileSystem,
-    LocalRenameFailureState,
-    LocalRenameOptions,
+    LocalFileOperation, LocalFileSystem, LocalRenameFailureState, LocalRenameOptions,
 };
 
 #[cfg(coverage)]
@@ -39,8 +36,7 @@ where
         action();
         return;
     }
-    let executable =
-        std::env::current_exe().expect("test executable should be available");
+    let executable = std::env::current_exe().expect("test executable should be available");
     let status = std::process::Command::new(executable)
         .arg("--exact")
         .arg(test_name)
@@ -56,12 +52,8 @@ where
 fn test_rename_missing_source_reports_unchanged() {
     let source = temp_path("missing-source");
     let target = temp_path("rename-target");
-    let failure = LocalFileSystem::rename(
-        &source,
-        &target,
-        &LocalRenameOptions::default(),
-    )
-    .expect_err("missing source must fail");
+    let failure = LocalFileSystem::rename(&source, &target, &LocalRenameOptions::default())
+        .expect_err("missing source must fail");
 
     assert_eq!(LocalRenameFailureState::Unchanged, failure.state());
     assert_eq!(LocalFileOperation::Rename, failure.error().operation());
@@ -75,11 +67,9 @@ fn test_rename_missing_source_reports_unchanged() {
 #[cfg(coverage)]
 #[test]
 fn test_rename_parent_durability_failure_reports_renamed() {
-    const TEST_NAME: &str =
-        "test_rename_parent_durability_failure_reports_renamed";
+    const TEST_NAME: &str = "test_rename_parent_durability_failure_reports_renamed";
     run_in_coverage_fault_process(TEST_NAME, "rename-parent-sync", || {
-        let directory =
-            tempfile::tempdir().expect("temporary directory should be created");
+        let directory = tempfile::tempdir().expect("temporary directory should be created");
         let source = directory.path().join("source");
         let target = directory.path().join("target");
         std::fs::write(&source, b"payload").expect("source should be written");
@@ -87,8 +77,7 @@ fn test_rename_parent_durability_failure_reports_renamed() {
         let failure = LocalFileSystem::rename(
             &source,
             &target,
-            &LocalRenameOptions::default()
-                .with_durability(LocalDurabilityRequirement::Required),
+            &LocalRenameOptions::default().with_durability(LocalDurabilityRequirement::Required),
         )
         .expect_err("parent durability fault must fail");
 
@@ -102,27 +91,16 @@ fn test_rename_parent_durability_failure_reports_renamed() {
 #[cfg(coverage)]
 #[test]
 fn test_rename_native_io_failure_reports_indeterminate() {
-    const TEST_NAME: &str =
-        "test_rename_native_io_failure_reports_indeterminate";
-    run_in_coverage_fault_process(
-        TEST_NAME,
-        "rename-native-indeterminate",
-        || {
-            let directory = tempfile::tempdir()
-                .expect("temporary directory should be created");
-            let source = directory.path().join("source");
-            let target = directory.path().join("target");
-            std::fs::write(&source, b"payload")
-                .expect("source should be written");
+    const TEST_NAME: &str = "test_rename_native_io_failure_reports_indeterminate";
+    run_in_coverage_fault_process(TEST_NAME, "rename-native-indeterminate", || {
+        let directory = tempfile::tempdir().expect("temporary directory should be created");
+        let source = directory.path().join("source");
+        let target = directory.path().join("target");
+        std::fs::write(&source, b"payload").expect("source should be written");
 
-            let failure = LocalFileSystem::rename(
-                &source,
-                &target,
-                &LocalRenameOptions::default(),
-            )
+        let failure = LocalFileSystem::rename(&source, &target, &LocalRenameOptions::default())
             .expect_err("native I/O fault must fail");
 
-            assert_eq!(LocalRenameFailureState::Indeterminate, failure.state());
-        },
-    );
+        assert_eq!(LocalRenameFailureState::Indeterminate, failure.state());
+    });
 }
