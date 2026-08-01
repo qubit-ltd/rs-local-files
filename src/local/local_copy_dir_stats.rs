@@ -6,10 +6,11 @@
 //    Licensed under the Apache License, Version 2.0.
 // =============================================================================
 //! Recursive directory copy statistics.
+// qubit-style: allow source-test-pair
 
 /// Statistics reported by recursive directory copy operations.
 #[non_exhaustive]
-#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
 #[must_use]
 pub struct LocalCopyDirStats {
     /// Number of regular files copied.
@@ -29,6 +30,23 @@ pub struct LocalCopyDirStats {
     /// Whether a completed file publication required a prior directory
     /// removal.
     pub(crate) non_atomic_publication: bool,
+    /// Whether every copied regular file was synchronized before publication.
+    pub(crate) files_durable: bool,
+}
+
+impl Default for LocalCopyDirStats {
+    #[inline(always)]
+    fn default() -> Self {
+        Self {
+            files: 0,
+            directories: 0,
+            bytes: 0,
+            skipped: 0,
+            overwritten: 0,
+            non_atomic_publication: false,
+            files_durable: true,
+        }
+    }
 }
 
 #[allow(dead_code)]
@@ -85,5 +103,12 @@ impl LocalCopyDirStats {
     #[inline(always)]
     pub(crate) const fn atomic_publication(&self) -> bool {
         !self.non_atomic_publication
+    }
+
+    /// Reports whether every copied file was synchronized before publication.
+    #[must_use]
+    #[inline(always)]
+    pub(crate) const fn files_durable(&self) -> bool {
+        self.files_durable
     }
 }

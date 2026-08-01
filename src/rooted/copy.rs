@@ -634,13 +634,14 @@ fn copy_file(
             io::Error::from_raw_os_error(libc::EIO),
         ))
     } else {
-        writer.commit()
+        writer.commit_with_durability()
     };
     #[cfg(not(coverage))]
-    let commit_result = writer.commit();
-    commit_result.map_err(|source_error| {
+    let commit_result = writer.commit_with_durability();
+    let file_durable = commit_result.map_err(|source_error| {
         rooted_commit_error(source, destination, statistics, source_error)
     })?;
+    statistics.files_durable &= file_durable;
     statistics.files =
         checked_add(statistics.files, 1, source, destination, statistics)?;
     statistics.bytes =

@@ -6,12 +6,14 @@
 //    Licensed under the Apache License, Version 2.0.
 // =============================================================================
 //! Recursive directory copy options.
+// qubit-style: allow source-test-pair
 
 use std::time::Duration;
 
 use crate::{
     LocalCopyConflictPolicy,
     LocalCopyTypeConflictPolicy,
+    LocalDurabilityRequirement,
 };
 
 /// Options controlling recursive directory copy behavior.
@@ -91,6 +93,9 @@ pub struct LocalCopyDirOptions {
 
     /// Optional limit for retrying a nonblocking source open.
     open_retry_timeout: Option<Duration>,
+
+    /// Synchronization policy for staged regular files.
+    durability: LocalDurabilityRequirement,
 }
 
 impl LocalCopyDirOptions {
@@ -107,7 +112,24 @@ impl LocalCopyDirOptions {
             follow_symlinks: false,
             preserve_permissions: false,
             open_retry_timeout: None,
+            durability: LocalDurabilityRequirement::NotRequired,
         }
+    }
+
+    /// Sets the synchronization policy for staged regular files.
+    #[inline(always)]
+    pub(crate) const fn with_durability(
+        mut self,
+        durability: LocalDurabilityRequirement,
+    ) -> Self {
+        self.durability = durability;
+        self
+    }
+
+    /// Returns the staged-file synchronization policy.
+    #[inline(always)]
+    pub(crate) const fn durability(&self) -> LocalDurabilityRequirement {
+        self.durability
     }
 
     /// Returns the destination file conflict policy.

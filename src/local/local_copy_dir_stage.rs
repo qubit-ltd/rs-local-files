@@ -6,6 +6,7 @@
 //    Licensed under the Apache License, Version 2.0.
 // =============================================================================
 //! Recursive-copy failure stages.
+// qubit-style: allow source-test-pair
 
 /// Stage at which a recursive directory copy failed.
 ///
@@ -52,6 +53,8 @@ pub enum LocalCopyDirStage {
     CopyFileContents,
     /// Applying source permissions to a destination entry failed.
     PreservePermissions,
+    /// Synchronizing a staged regular file failed before publication.
+    SynchronizeFile,
     /// Committing a staged file to its destination failed.
     CommitFile,
     /// Removing an uncommitted staging file after a skipped copy failed.

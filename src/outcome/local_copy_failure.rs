@@ -196,6 +196,7 @@ const fn copy_failure_state(
         LocalCopyDirStage::InspectSource
         | LocalCopyDirStage::InspectSourceEntry
         | LocalCopyDirStage::ReadSourceDirectory
+        | LocalCopyDirStage::SynchronizeFile
         | LocalCopyDirStage::CleanupTemporaryFile => {
             LocalCopyFailureState::Unchanged
         }

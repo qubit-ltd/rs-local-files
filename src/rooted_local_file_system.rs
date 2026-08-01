@@ -432,7 +432,7 @@ impl RootedLocalFileSystem {
         }
         if options.mode() != LocalWriteMode::Append
             && options.durability() == LocalDurabilityRequirement::Required
-            && !self.capabilities.supports_directory_durability()
+            && !self.capabilities.directory_durability_implemented()
         {
             return Err(LocalFileError::new(
                 LocalFileErrorKind::RequirementNotMet,
@@ -624,7 +624,7 @@ impl RootedLocalFileSystem {
         options: &LocalCopyOptions,
     ) -> LocalCopyResult {
         if options.durability() == LocalDurabilityRequirement::Required
-            && !self.capabilities.supports_directory_durability()
+            && !self.capabilities.directory_durability_implemented()
         {
             return Err(rooted_copy_failure_unchanged(
                 LocalFileError::new(
@@ -726,6 +726,18 @@ impl RootedLocalFileSystem {
                 .with_target(target.to_path_buf()),
             ));
         }
+        if directory
+            && options.durability() == LocalDurabilityRequirement::Required
+        {
+            return Err(rooted_copy_failure_unchanged(
+                LocalFileError::new(
+                    LocalFileErrorKind::RequirementNotMet,
+                    LocalFileOperation::Copy,
+                )
+                .with_path(source.to_path_buf())
+                .with_target(target.to_path_buf()),
+            ));
+        }
         if !directory
             && options.atomicity() == crate::LocalAtomicityRequirement::Required
             && options.type_conflict()
@@ -768,7 +780,7 @@ impl RootedLocalFileSystem {
             .map_err(|error| {
                 LocalCopyFailure::from_copy_dir_error(source, target, error)
             })?;
-        let durable = rooted_published_durability(
+        let parent_durable = rooted_published_durability(
             options.durability(),
             || {
                 self.root.sync_parent(&target_path)?;
@@ -787,6 +799,7 @@ impl RootedLocalFileSystem {
                 LocalCopyStats::from_internal(stats),
             )
         })?;
+        let durable = !directory && stats.files_durable() && parent_durable;
         Ok(LocalCopyOutcome::new(
             LocalCopyStats::from_internal(stats),
             if directory {
@@ -903,7 +916,7 @@ impl RootedLocalFileSystem {
         options: &LocalRenameOptions,
     ) -> LocalRenameResult {
         if options.durability() == LocalDurabilityRequirement::Required
-            && !self.capabilities.supports_directory_durability()
+            && !self.capabilities.directory_durability_implemented()
         {
             return Err(rooted_rename_failure_unchanged(
                 LocalFileError::new(
