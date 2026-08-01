@@ -6,6 +6,7 @@
 //    Licensed under the Apache License, Version 2.0.
 // =============================================================================
 //! Temporary-resource persistence failure stages.
+// qubit-style: allow source-test-pair
 
 /// Stage at which temporary-resource persistence failed.
 ///

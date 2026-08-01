@@ -7,6 +7,7 @@
 // =============================================================================
 //! Streaming durable atomic file replacement.
 // qubit-style: allow coverage-cfg
+// qubit-style: allow source-test-pair
 
 use std::fs;
 use std::io::{
