@@ -11,7 +11,11 @@
 
 use std::ffi::CString;
 use std::fs::File;
-use std::io::{Error, ErrorKind, Result};
+use std::io::{
+    Error,
+    ErrorKind,
+    Result,
+};
 
 /// Retries generated names until a rooted staging entry is opened.
 ///

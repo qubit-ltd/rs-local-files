@@ -8,11 +8,24 @@
 //! Recoverable temporary-resource persistence errors.
 
 use std::error::Error;
-use std::fmt::{Debug, Display, Formatter, Result as FmtResult};
+use std::fmt::{
+    Debug,
+    Display,
+    Formatter,
+    Result as FmtResult,
+};
 use std::io;
-use std::path::{Path, PathBuf};
+use std::path::{
+    Path,
+    PathBuf,
+};
 
-use crate::{LocalPersistFailureState, LocalPersistStage};
+use crate::{
+    LocalFileError,
+    LocalFileOperation,
+    LocalPersistFailureState,
+    LocalPersistStage,
+};
 
 /// Persistence error that returns ownership of the temporary resource.
 ///
@@ -27,8 +40,8 @@ use crate::{LocalPersistFailureState, LocalPersistStage};
 #[non_exhaustive]
 #[derive(Debug)]
 pub struct LocalPersistError<T> {
-    /// Native I/O error that prevented persistence.
-    error: io::Error,
+    /// Structured local filesystem error that prevented persistence.
+    error: Box<LocalFileError>,
     /// Temporary resource retained after the failed operation.
     resource: Box<T>,
     /// Target path supplied by the caller.
@@ -62,8 +75,14 @@ impl<T> LocalPersistError<T> {
         stage: LocalPersistStage,
     ) -> Self {
         let state = LocalPersistFailureState::from_error(stage, error.kind());
-        Self {
+        let error = LocalFileError::from_io(
+            LocalFileOperation::PersistTemp,
+            Some(requested_target.clone()),
+            resolved_target.clone(),
             error,
+        );
+        Self {
+            error: Box::new(error),
             resource: Box::new(resource),
             requested_target,
             resolved_target,
@@ -72,13 +91,13 @@ impl<T> LocalPersistError<T> {
         }
     }
 
-    /// Returns the native persistence error.
+    /// Returns the structured persistence error.
     ///
     /// # Returns
-    /// I/O error that prevented persistence.
+    /// Structured error that prevented persistence.
     #[must_use]
     #[inline(always)]
-    pub const fn error(&self) -> &io::Error {
+    pub const fn error(&self) -> &LocalFileError {
         &self.error
     }
 
@@ -139,13 +158,12 @@ impl<T> LocalPersistError<T> {
         self.state
     }
 
-    /// Returns the native I/O error kind.
+    /// Returns the stable persistence error kind.
     ///
     /// # Returns
-    /// Error kind reported by the retained native error.
-    #[must_use]
+    /// Stable classification reported by the retained structured error.
     #[inline]
-    pub fn kind(&self) -> io::ErrorKind {
+    pub const fn kind(&self) -> crate::LocalFileErrorKind {
         self.error.kind()
     }
 
@@ -168,7 +186,15 @@ impl<T> LocalPersistError<T> {
     /// }
     /// ```
     #[must_use = "the returned tuple retains the temporary resource and persistence context"]
-    pub fn into_parts(self) -> (io::Error, T, PathBuf, Option<PathBuf>, LocalPersistStage) {
+    pub fn into_parts(
+        self,
+    ) -> (
+        LocalFileError,
+        T,
+        PathBuf,
+        Option<PathBuf>,
+        LocalPersistStage,
+    ) {
         let (error, resource, requested_target, resolved_target, stage, _) =
             self.into_parts_with_state();
         (error, resource, requested_target, resolved_target, stage)
@@ -184,7 +210,7 @@ impl<T> LocalPersistError<T> {
     pub fn into_parts_with_state(
         self,
     ) -> (
-        io::Error,
+        LocalFileError,
         T,
         PathBuf,
         Option<PathBuf>,
@@ -200,7 +226,7 @@ impl<T> LocalPersistError<T> {
             state,
         } = self;
         (
-            error,
+            *error,
             *resource,
             requested_target,
             resolved_target,
@@ -240,7 +266,7 @@ impl<T> Error for LocalPersistError<T>
 where
     T: Debug,
 {
-    /// Returns the retained native I/O error.
+    /// Returns the retained structured error.
     #[inline(always)]
     fn source(&self) -> Option<&(dyn Error + 'static)> {
         Some(&self.error)

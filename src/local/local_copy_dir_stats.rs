@@ -31,6 +31,7 @@ pub struct LocalCopyDirStats {
     pub(crate) non_atomic_publication: bool,
 }
 
+#[allow(dead_code)]
 impl LocalCopyDirStats {
     /// Returns the number of regular files copied.
     ///
