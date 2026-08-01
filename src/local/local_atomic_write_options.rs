@@ -6,6 +6,7 @@
 //    Licensed under the Apache License, Version 2.0.
 // =============================================================================
 //! Atomic write options.
+// qubit-style: allow source-test-pair
 
 use std::time::Duration;
 
@@ -79,6 +80,7 @@ impl LocalAtomicWriteOptions {
     /// The configured timeout, or [`None`] when retries are unbounded.
     #[must_use]
     #[inline(always)]
+    #[cfg_attr(windows, allow(dead_code))]
     pub const fn open_retry_timeout(&self) -> Option<Duration> {
         self.open_retry_timeout
     }

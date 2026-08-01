@@ -14,6 +14,8 @@ use std::io::{
     SeekFrom,
 };
 
+#[cfg(windows)]
+use qubit_local_files::LocalFileErrorKind;
 use qubit_local_files::{
     LocalFileSystem,
     LocalReadOptions,
@@ -75,4 +77,27 @@ fn test_local_file_reader_supports_vectored_reads() {
     assert_eq!(count, 6);
     assert_eq!(&first, b"ab");
     assert_eq!(&second, b"cdef");
+}
+
+/// Verifies Windows host readers reject a final name-surrogate reparse point.
+#[cfg(windows)]
+#[test]
+fn test_local_file_reader_rejects_final_file_symlink_on_windows() {
+    use std::io::ErrorKind;
+    use std::os::windows::fs::symlink_file;
+
+    let directory = tempdir().expect("temporary directory should be created");
+    let target = directory.path().join("target");
+    let link = directory.path().join("link");
+    std::fs::write(&target, b"payload").expect("target should be written");
+    if let Err(error) = symlink_file(&target, &link) {
+        if error.kind() == ErrorKind::PermissionDenied {
+            return;
+        }
+        panic!("file symlink should be created: {error}");
+    }
+
+    let error = LocalFileSystem::open_reader(&link, &LocalReadOptions::new())
+        .expect_err("reader must not follow a final file symlink");
+    assert_eq!(LocalFileErrorKind::TypeConflict, error.kind());
 }
