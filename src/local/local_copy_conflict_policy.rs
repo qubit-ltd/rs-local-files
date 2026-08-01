@@ -6,6 +6,7 @@
 //    Licensed under the Apache License, Version 2.0.
 // =============================================================================
 //! Copy conflict policy.
+// qubit-style: allow source-test-pair
 
 /// Conflict policy for existing destination file entries.
 ///

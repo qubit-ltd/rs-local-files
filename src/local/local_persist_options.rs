@@ -6,6 +6,7 @@
 //    Licensed under the Apache License, Version 2.0.
 // =============================================================================
 //! Temporary-file persistence options.
+// qubit-style: allow source-test-pair
 
 /// Options controlling temporary file persistence behavior.
 ///

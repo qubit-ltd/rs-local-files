@@ -6,6 +6,7 @@
 //    Licensed under the Apache License, Version 2.0.
 // =============================================================================
 //! Atomic-write destination states.
+// qubit-style: allow source-test-pair
 
 /// Known state of the destination after an atomic-write failure.
 ///
