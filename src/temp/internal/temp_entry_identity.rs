@@ -34,12 +34,47 @@ pub(crate) struct TempEntryIdentity {
 impl TempEntryIdentity {
     /// Captures identity from a newly created regular file handle.
     pub(crate) fn from_file(file: &fs::File) -> io::Result<Self> {
-        Self::from_metadata(&file.metadata()?)
+        #[cfg(unix)]
+        {
+            Self::from_metadata(&file.metadata()?)
+        }
+        #[cfg(windows)]
+        {
+            Self::from_windows_file(file)
+        }
+        #[cfg(not(any(unix, windows)))]
+        {
+            let _ = file;
+            Err(io::Error::new(
+                io::ErrorKind::Unsupported,
+                "temporary entry identity is unsupported on this platform",
+            ))
+        }
     }
 
     /// Captures identity from a newly created directory path.
     pub(crate) fn from_path(path: &Path) -> io::Result<Self> {
-        Self::from_metadata(&fs::symlink_metadata(path)?)
+        #[cfg(windows)]
+        {
+            use std::os::windows::fs::OpenOptionsExt;
+
+            use windows_sys::Win32::Storage::FileSystem::{
+                FILE_FLAG_BACKUP_SEMANTICS,
+                FILE_FLAG_OPEN_REPARSE_POINT,
+            };
+
+            let file = fs::OpenOptions::new()
+                .read(true)
+                .custom_flags(
+                    FILE_FLAG_BACKUP_SEMANTICS | FILE_FLAG_OPEN_REPARSE_POINT,
+                )
+                .open(path)?;
+            Self::from_windows_file(&file)
+        }
+        #[cfg(not(windows))]
+        {
+            Self::from_metadata(&fs::symlink_metadata(path)?)
+        }
     }
 
     /// Returns whether `path` still names the captured entry.
@@ -48,6 +83,7 @@ impl TempEntryIdentity {
     }
 
     /// Captures the stable native identity reported by metadata.
+    #[cfg(not(windows))]
     fn from_metadata(metadata: &fs::Metadata) -> io::Result<Self> {
         #[cfg(unix)]
         {
@@ -58,15 +94,6 @@ impl TempEntryIdentity {
                 inode: metadata.ino(),
             })
         }
-        #[cfg(windows)]
-        {
-            use std::os::windows::fs::MetadataExt;
-
-            return Ok(Self {
-                volume: metadata.volume_serial_number().unwrap_or_default(),
-                file: metadata.file_index(),
-            });
-        }
         #[cfg(not(any(unix, windows)))]
         {
             let _ = metadata;
@@ -75,6 +102,35 @@ impl TempEntryIdentity {
                 "temporary entry identity is unsupported on this platform",
             ))
         }
+    }
+
+    #[cfg(windows)]
+    /// Captures volume and file identifiers from an opened Windows handle.
+    fn from_windows_file(file: &fs::File) -> io::Result<Self> {
+        use std::os::windows::io::AsRawHandle;
+
+        use windows_sys::Win32::Storage::FileSystem::{
+            BY_HANDLE_FILE_INFORMATION,
+            GetFileInformationByHandle,
+        };
+
+        let mut information = BY_HANDLE_FILE_INFORMATION::default();
+        // SAFETY: `file` owns a live handle and `information` is the matching
+        // writable output structure.
+        let result = unsafe {
+            GetFileInformationByHandle(
+                file.as_raw_handle(),
+                &raw mut information,
+            )
+        };
+        if result == 0 {
+            return Err(io::Error::last_os_error());
+        }
+        Ok(Self {
+            volume: u64::from(information.dwVolumeSerialNumber),
+            file: (u64::from(information.nFileIndexHigh) << 32)
+                | u64::from(information.nFileIndexLow),
+        })
     }
 }
 

@@ -7,6 +7,7 @@
 // =============================================================================
 //! Private local file reader and writer construction.
 // qubit-style: allow coverage-cfg
+// qubit-style: allow source-test-pair
 // Public APIs cannot force an opened regular-file metadata failure.
 
 use std::fs::{
@@ -20,6 +21,11 @@ use std::io::{
 };
 #[cfg(unix)]
 use std::os::fd::AsRawFd;
+#[cfg(windows)]
+use std::os::windows::{
+    fs::OpenOptionsExt,
+    io::AsRawHandle,
+};
 use std::path::Path;
 use std::time::Duration;
 
@@ -94,7 +100,17 @@ fn configure_nonblocking_open(options: &mut OpenOptions) {
     options.custom_flags(libc::O_NONBLOCK | libc::O_NOFOLLOW);
 }
 
-#[cfg(not(unix))]
+#[cfg(windows)]
+/// Opens the final Windows entry itself so validation cannot follow a racing
+/// name-surrogate reparse point.
+#[inline(always)]
+fn configure_nonblocking_open(options: &mut OpenOptions) {
+    use windows_sys::Win32::Storage::FileSystem::FILE_FLAG_OPEN_REPARSE_POINT;
+
+    options.custom_flags(FILE_FLAG_OPEN_REPARSE_POINT);
+}
+
+#[cfg(not(any(unix, windows)))]
 /// Leaves open flags unchanged on platforms without Unix descriptor flags.
 ///
 /// # Parameters
@@ -200,11 +216,52 @@ fn prepare_opened_regular_file(
     if !metadata.is_file() {
         return Err(path_not_regular_file_error(path));
     }
+    #[cfg(windows)]
+    reject_opened_name_surrogate(file, path)?;
     with_path_context(
         clear_transient_nonblocking(file),
         restore_operation,
         path,
     )
+}
+
+#[cfg(windows)]
+/// Rejects a name-surrogate reparse point observed on the opened handle.
+fn reject_opened_name_surrogate(file: &fs::File, path: &Path) -> Result<()> {
+    use std::mem::size_of;
+
+    use windows_sys::Win32::Storage::FileSystem::{
+        FILE_ATTRIBUTE_REPARSE_POINT,
+        FILE_ATTRIBUTE_TAG_INFO,
+        FileAttributeTagInfo,
+        GetFileInformationByHandleEx,
+    };
+
+    const IO_REPARSE_TAG_NAME_SURROGATE: u32 = 0x2000_0000;
+    let mut attributes = FILE_ATTRIBUTE_TAG_INFO::default();
+    // SAFETY: `file` owns a live handle and `attributes` is the matching
+    // writable buffer for `FileAttributeTagInfo`.
+    let result = unsafe {
+        GetFileInformationByHandleEx(
+            file.as_raw_handle(),
+            FileAttributeTagInfo,
+            (&raw mut attributes).cast(),
+            size_of::<FILE_ATTRIBUTE_TAG_INFO>() as u32,
+        )
+    };
+    if result == 0 {
+        return Err(add_path_context(
+            Error::last_os_error(),
+            "inspect opened file reparse tag",
+            path,
+        ));
+    }
+    if attributes.FileAttributes & FILE_ATTRIBUTE_REPARSE_POINT != 0
+        && attributes.ReparseTag & IO_REPARSE_TAG_NAME_SURROGATE != 0
+    {
+        return Err(path_not_regular_file_error(path));
+    }
+    Ok(())
 }
 
 /// Opens and validates one unbuffered regular file for reading.

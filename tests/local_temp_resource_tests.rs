@@ -8,7 +8,6 @@
 
 use std::fs;
 
-#[cfg(any(target_os = "linux", target_os = "macos"))]
 use qubit_local_files::{
     LocalFileSystem,
     LocalTempDirectoryOptions,
