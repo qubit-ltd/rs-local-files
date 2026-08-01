@@ -214,11 +214,11 @@ fn test_rooted_local_file_system_exposes_opened_anchor_and_capabilities() {
 
     assert_eq!(directory.path(), rooted.diagnostic_path());
     assert_eq!(
-        rooted.capabilities().supports_rooted_operations(),
+        rooted.capabilities().rooted_operations_implemented(),
         RootedLocalFileSystem::open(directory.path())
             .expect("second root authority should open")
             .capabilities()
-            .supports_rooted_operations(),
+            .rooted_operations_implemented(),
     );
 }
 
@@ -664,7 +664,7 @@ fn test_rooted_local_file_system_copy_and_rename_report_durability() {
     let rooted = RootedLocalFileSystem::open(directory.path())
         .expect("root authority should open");
     let supports_durability =
-        rooted.capabilities().supports_directory_durability();
+        rooted.capabilities().directory_durability_implemented();
 
     fs::write(directory.path().join("copy-source"), b"copy")
         .expect("rooted copy source should be written");
@@ -961,15 +961,18 @@ fn test_rooted_local_file_system_walker_reports_disappearing_child_directory() {
     let mut walker = rooted
         .list(Path::new(""), &LocalListOptions::new().with_recursive())
         .expect("rooted walker should enumerate its root first");
+    let entry = walker
+        .next()
+        .expect("rooted child should be yielded before descent")
+        .expect("rooted child metadata should be readable");
+    assert_eq!(Path::new("child"), entry.relative_path());
     fs::remove_dir_all(&child)
         .expect("concurrent actor should remove child before descent");
 
     let error = walker
         .next()
-        .expect("enumerated rooted child should still be yielded")
-        .expect_err(
-            "disappearing rooted child should fail when descent opens it",
-        );
+        .expect("deferred descendant opening should report an error")
+        .expect_err("disappearing rooted child should fail on descent");
     assert_eq!(LocalFileErrorKind::NotFound, error.kind());
     assert_eq!(Some(Path::new("child")), error.path());
 }
