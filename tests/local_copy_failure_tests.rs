@@ -97,7 +97,7 @@ fn test_copy_failure_reports_second_child_partial_publication() {
             let failure = LocalFileSystem::copy(
                 &source,
                 &target,
-                &LocalCopyOptions::default().with_recursive(),
+                &LocalCopyOptions::default().with_tree_source(),
             )
             .expect_err("second child staging fault must fail");
 
@@ -217,7 +217,7 @@ fn test_copy_failure_reports_indeterminate_for_destination_preparation_fault() {
             let failure = LocalFileSystem::copy(
                 &source,
                 &target,
-                &LocalCopyOptions::default().with_recursive(),
+                &LocalCopyOptions::default().with_tree_source(),
             )
             .expect_err("destination preparation fault must fail");
 
@@ -244,7 +244,7 @@ fn test_copy_failure_reports_unchanged_for_source_inspection_fault() {
         let failure = LocalFileSystem::copy(
             &source,
             &target,
-            &LocalCopyOptions::default().with_recursive(),
+            &LocalCopyOptions::default().with_tree_source(),
         )
         .expect_err("source inspection fault must fail before publication");
 

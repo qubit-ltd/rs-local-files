@@ -39,10 +39,10 @@ fn test_copy_directory_rejects_required_publication_guarantees() {
 
     for options in [
         LocalCopyOptions::new()
-            .with_recursive()
+            .with_tree_source()
             .with_atomicity(LocalAtomicityRequirement::Required),
         LocalCopyOptions::new()
-            .with_recursive()
+            .with_tree_source()
             .with_durability(LocalDurabilityRequirement::Required),
     ] {
         let error = LocalFileSystem::copy(

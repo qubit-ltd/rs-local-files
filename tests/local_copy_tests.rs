@@ -75,7 +75,7 @@ fn test_local_file_system_copy_unifies_file_and_directory_copy() {
     let tree_outcome = LocalFileSystem::copy(
         &source_directory,
         &target_directory,
-        &LocalCopyOptions::new().with_recursive(),
+        &LocalCopyOptions::new().with_tree_source(),
     )
     .expect("directory copy should succeed");
     assert_eq!(LocalCopyMethod::Recursive, tree_outcome.method());
