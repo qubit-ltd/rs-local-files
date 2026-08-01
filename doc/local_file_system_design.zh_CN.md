@@ -37,6 +37,12 @@ path 和操作系统文件 API，为以下使用者提供统一实现：
 - 通过 canonicalize 后的字符串比较代替 descriptor-relative 安全；
 - 承诺绕过操作系统本身无法避免的所有 TOCTOU race。
 
+特别地，临时资源的 `cleanup`/`Drop` 只承诺在删除前检查创建时身份，并在检查到
+普通替换时拒绝删除。身份检查与路径删除不是单个原子操作，inode/file ID 也可能被
+文件系统复用。因此，若并发者能够在同一目录中删除临时条目并在同名路径反复安装
+同类型条目，本 crate 不保证绝不会删除替换条目。需要该保证时，创建目录必须排除不受信任的
+并发写入，或使用 `keep` 移交责任后由上层完成同步与删除。
+
 ## 3. 依赖边界
 
 ```text
@@ -449,9 +455,10 @@ pub struct LocalRenameFailure {
 }
 ```
 
-`LocalRenameOptions` 明确 target conflict、replace、atomicity 和 durability
-requirement。Rename 只调用 native namespace primitive；跨 device、无法满足
-no-replace/atomic replace 或其他 requirement 时必须在可证明无副作用的阶段失败。
+`LocalRenameOptions` 只表达 overwrite 和 durability requirement。Rename 的原子性
+来自所选 native namespace primitive，而不是一个可独立降级的选项；跨 device、
+无法满足 no-replace/atomic replace 或其他 requirement 时必须在可证明无副作用的
+阶段失败。
 
 Native rename 成功、随后 parent durability 失败时必须返回 `Renamed`。只有 native
 原语能够证明 source/target 未改变时才能返回 `Unchanged`；普通未知 I/O error 映射为
