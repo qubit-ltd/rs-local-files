@@ -6,6 +6,8 @@
 //    Licensed under the Apache License, Version 2.0.
 // =============================================================================
 
+mod options;
+
 /// Verifies crate-root exports for the unified public API.
 #[test]
 fn test_crate_root_exports_unified_api_types() {
@@ -22,7 +24,7 @@ fn test_crate_root_exports_unified_api_types() {
     };
 
     let _: for<'a> fn(&'a str) -> Result<Cow<'a, OsStr>, LocalPathCodecError> =
-        LocalPathCodec::encode;
+        LocalPathCodec::from_canonical_text;
     let _: Option<LocalCopyFailureState> = None;
     let _: Option<LocalRenameFailureState> = None;
 }

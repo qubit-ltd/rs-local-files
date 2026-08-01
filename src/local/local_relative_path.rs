@@ -6,6 +6,7 @@
 //    Licensed under the Apache License, Version 2.0.
 // =============================================================================
 //! Validated relative paths for rooted filesystem operations.
+// qubit-style: allow source-test-pair
 
 use std::ffi::OsStr;
 use std::io::{

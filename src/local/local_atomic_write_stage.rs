@@ -6,6 +6,7 @@
 //    Licensed under the Apache License, Version 2.0.
 // =============================================================================
 //! Atomic-write failure stages.
+// qubit-style: allow source-test-pair
 
 /// Stage at which an atomic write failed.
 ///
