@@ -11,10 +11,7 @@
 // Private behavior is covered through public integration tests.
 
 use std::fs;
-use std::path::{
-    Path,
-    PathBuf,
-};
+use std::path::{Path, PathBuf};
 
 use super::super::directory_identity::DirectoryIdentity;
 
@@ -104,9 +101,7 @@ impl CopyDirFrame {
     /// The yielded result contains the filesystem error when an entry cannot
     /// be read.
     #[inline(always)]
-    pub(super) fn next_entry(
-        &mut self,
-    ) -> Option<std::io::Result<fs::DirEntry>> {
+    pub(super) fn next_entry(&mut self) -> Option<std::io::Result<fs::DirEntry>> {
         self.entries.next()
     }
 }

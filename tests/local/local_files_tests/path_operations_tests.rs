@@ -13,10 +13,7 @@ use super::super::test_support::run_in_coverage_fault_process;
 #[cfg(target_os = "linux")]
 use super::super::test_support::run_in_small_stack_process;
 #[cfg(unix)]
-use super::super::test_support::{
-    PermissionsExt,
-    short_temp_dir,
-};
+use super::super::test_support::{PermissionsExt, short_temp_dir};
 
 /// Asserts one injected directory-size traversal failure.
 #[cfg(all(coverage, target_os = "linux"))]
@@ -24,13 +21,10 @@ fn assert_injected_dir_size_error(test_name: &str, fault: &str, nested: bool) {
     let Some(()) = run_in_coverage_fault_process(test_name, fault, move || {
         let dir = temp_dir(fault);
         if nested {
-            fs::create_dir(dir.join("nested"))
-                .expect("nested directory should be created");
-            fs::write(dir.join("nested/data.txt"), b"data")
-                .expect("nested file should be written");
+            fs::create_dir(dir.join("nested")).expect("nested directory should be created");
+            fs::write(dir.join("nested/data.txt"), b"data").expect("nested file should be written");
         } else {
-            fs::write(dir.join("data.txt"), b"data")
-                .expect("file fixture should be written");
+            fs::write(dir.join("data.txt"), b"data").expect("file fixture should be written");
         }
 
         let error = qubit_local_files::directory::size(&dir)
@@ -91,11 +85,7 @@ fn test_dir_size_rejects_injected_directory_identity_cycle() {
         "local::local_files_tests::path_operations_tests::",
         "test_dir_size_rejects_injected_directory_identity_cycle",
     );
-    assert_injected_dir_size_error(
-        TEST_NAME,
-        "dir-size-directory-identity-cycle",
-        true,
-    );
+    assert_injected_dir_size_error(TEST_NAME, "dir-size-directory-identity-cycle", true);
 }
 
 /// Verifies normalization of injected file-size overflow.
@@ -117,16 +107,9 @@ fn test_dir_size_reports_injected_directory_overflow() {
         "local::local_files_tests::path_operations_tests::",
         "test_dir_size_reports_injected_directory_overflow",
     );
-    assert_injected_dir_size_error(
-        TEST_NAME,
-        "dir-size-directory-overflow",
-        true,
-    );
+    assert_injected_dir_size_error(TEST_NAME, "dir-size-directory-overflow", true);
 }
-use super::super::test_support::{
-    fs,
-    temp_dir,
-};
+use super::super::test_support::{fs, temp_dir};
 
 #[test]
 fn test_ensure_dir_and_ensure_parent_create_missing_directories() {
@@ -134,14 +117,10 @@ fn test_ensure_dir_and_ensure_parent_create_missing_directories() {
     let child_dir = dir.join("a").join("b");
     let child_file = dir.join("c").join("d").join("out.txt");
 
-    qubit_local_files::directory::create_all(&child_dir)
-        .expect("directory should be created");
-    qubit_local_files::directory::create_parent(&child_file)
-        .expect("parent should be created");
-    qubit_local_files::directory::create_parent(std::path::Path::new(
-        "parentless.txt",
-    ))
-    .expect("a parentless path should require no directory creation");
+    qubit_local_files::directory::create_all(&child_dir).expect("directory should be created");
+    qubit_local_files::directory::create_parent(&child_file).expect("parent should be created");
+    qubit_local_files::directory::create_parent(std::path::Path::new("parentless.txt"))
+        .expect("a parentless path should require no directory creation");
 
     assert!(child_dir.is_dir());
     assert!(child_file.parent().unwrap().is_dir());
@@ -155,11 +134,9 @@ fn test_dir_size_sums_regular_files_and_ignores_symlinks() {
     fs::write(dir.join("a.txt"), b"abc").unwrap();
     fs::write(dir.join("nested").join("b.txt"), b"12345").unwrap();
     #[cfg(unix)]
-    std::os::unix::fs::symlink(dir.join("a.txt"), dir.join("link.txt"))
-        .unwrap();
+    std::os::unix::fs::symlink(dir.join("a.txt"), dir.join("link.txt")).unwrap();
 
-    let size = qubit_local_files::directory::size(&dir)
-        .expect("directory size should be computed");
+    let size = qubit_local_files::directory::size(&dir).expect("directory size should be computed");
 
     assert_eq!(8, size);
     fs::remove_dir_all(dir).unwrap();
@@ -172,36 +149,27 @@ fn test_dir_size_handles_deep_tree_on_small_stack() {
         "local::local_files_tests::path_operations_tests::",
         "test_dir_size_handles_deep_tree_on_small_stack",
     );
-    const CHILD_ENVIRONMENT: &str =
-        "QUBIT_LOCAL_FILES_DIR_SIZE_SMALL_STACK_CHILD";
+    const CHILD_ENVIRONMENT: &str = "QUBIT_LOCAL_FILES_DIR_SIZE_SMALL_STACK_CHILD";
 
-    let Some(dir) =
-        run_in_small_stack_process(TEST_NAME, CHILD_ENVIRONMENT, || {
-            let dir = std::path::PathBuf::from(format!(
-                "/tmp/qio-{}-deep-dir-size",
-                std::process::id(),
-            ));
-            drop(fs::remove_dir_all(&dir));
-            let root = dir.join("root");
-            fs::create_dir_all(&root)
-                .expect("deep-tree root should be created");
-            let mut current = root.clone();
-            for _ in 0..512 {
-                current.push("d");
-                fs::create_dir(&current)
-                    .expect("deep-tree directory should be created");
-            }
-            fs::write(current.join("leaf"), b"x")
-                .expect("deep-tree leaf should be written");
+    let Some(dir) = run_in_small_stack_process(TEST_NAME, CHILD_ENVIRONMENT, || {
+        let dir =
+            std::path::PathBuf::from(format!("/tmp/qio-{}-deep-dir-size", std::process::id(),));
+        drop(fs::remove_dir_all(&dir));
+        let root = dir.join("root");
+        fs::create_dir_all(&root).expect("deep-tree root should be created");
+        let mut current = root.clone();
+        for _ in 0..512 {
+            current.push("d");
+            fs::create_dir(&current).expect("deep-tree directory should be created");
+        }
+        fs::write(current.join("leaf"), b"x").expect("deep-tree leaf should be written");
 
-            assert_eq!(
-                1,
-                qubit_local_files::directory::size(&root)
-                    .expect("deep-tree size should be computed"),
-            );
-            dir
-        })
-    else {
+        assert_eq!(
+            1,
+            qubit_local_files::directory::size(&root).expect("deep-tree size should be computed"),
+        );
+        dir
+    }) else {
         return;
     };
 
@@ -239,8 +207,8 @@ fn test_dir_size_returns_read_dir_error() {
     let dir = temp_dir("dir-size-read-error");
     fs::set_permissions(&dir, fs::Permissions::from_mode(0o300)).unwrap();
 
-    let error = qubit_local_files::directory::size(&dir)
-        .expect_err("unreadable directory should fail");
+    let error =
+        qubit_local_files::directory::size(&dir).expect_err("unreadable directory should fail");
 
     fs::set_permissions(&dir, fs::Permissions::from_mode(0o700)).unwrap();
     assert_eq!(ErrorKind::PermissionDenied, error.kind());
@@ -254,11 +222,9 @@ fn test_clean_dir_removes_children_and_keeps_directory() {
     fs::write(dir.join("nested").join("child.txt"), b"child").unwrap();
     fs::write(dir.join("file.txt"), b"file").unwrap();
     #[cfg(unix)]
-    std::os::unix::fs::symlink(dir.join("file.txt"), dir.join("link.txt"))
-        .unwrap();
+    std::os::unix::fs::symlink(dir.join("file.txt"), dir.join("link.txt")).unwrap();
 
-    qubit_local_files::directory::clear(&dir)
-        .expect("directory should be cleaned");
+    qubit_local_files::directory::clear(&dir).expect("directory should be cleaned");
 
     assert!(dir.is_dir());
     assert_eq!(0, fs::read_dir(&dir).unwrap().count());
@@ -296,8 +262,8 @@ fn test_clean_dir_returns_read_dir_error() {
     let dir = temp_dir("clean-dir-read-error");
     fs::set_permissions(&dir, fs::Permissions::from_mode(0o300)).unwrap();
 
-    let error = qubit_local_files::directory::clear(&dir)
-        .expect_err("unreadable directory should fail");
+    let error =
+        qubit_local_files::directory::clear(&dir).expect_err("unreadable directory should fail");
 
     fs::set_permissions(&dir, fs::Permissions::from_mode(0o700)).unwrap();
     assert_eq!(ErrorKind::PermissionDenied, error.kind());
@@ -314,8 +280,7 @@ fn test_remove_any_removes_files_directories_and_symlinks() {
     fs::write(nested.join("child.txt"), b"child").unwrap();
 
     qubit_local_files::remove::any(&file).expect("file should be removed");
-    qubit_local_files::remove::any(&nested)
-        .expect("directory should be removed");
+    qubit_local_files::remove::any(&nested).expect("directory should be removed");
 
     assert!(!file.exists());
     assert!(!nested.exists());
@@ -327,8 +292,7 @@ fn test_remove_any_removes_files_directories_and_symlinks() {
         fs::write(&target, b"target").unwrap();
         std::os::unix::fs::symlink(&target, &link).unwrap();
 
-        qubit_local_files::remove::any(&link)
-            .expect("symlink should be removed");
+        qubit_local_files::remove::any(&link).expect("symlink should be removed");
 
         assert!(target.exists());
         assert!(!link.exists());
@@ -352,8 +316,7 @@ fn test_remove_any_removes_directory_symlink_without_removing_target() {
         return;
     }
 
-    qubit_local_files::remove::any(&link)
-        .expect("directory symlink should be removed");
+    qubit_local_files::remove::any(&link).expect("directory symlink should be removed");
 
     assert!(!link.exists());
     assert!(target.is_dir());
@@ -365,8 +328,8 @@ fn test_remove_any_returns_missing_path_error() {
     let dir = temp_dir("remove-any-missing");
     let missing = dir.join("missing");
 
-    let error = qubit_local_files::remove::any(&missing)
-        .expect_err("missing path should return an error");
+    let error =
+        qubit_local_files::remove::any(&missing).expect_err("missing path should return an error");
 
     assert_eq!(ErrorKind::NotFound, error.kind());
     fs::remove_dir_all(dir).unwrap();

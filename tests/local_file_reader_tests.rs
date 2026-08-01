@@ -7,17 +7,9 @@
 // =============================================================================
 //! Behavioral coverage for synchronous local file readers.
 
-use std::io::{
-    IoSliceMut,
-    Read,
-    Seek,
-    SeekFrom,
-};
+use std::io::{IoSliceMut, Read, Seek, SeekFrom};
 
-use qubit_local_files::{
-    LocalFileSystem,
-    LocalReadOptions,
-};
+use qubit_local_files::{LocalFileSystem, LocalReadOptions};
 use tempfile::tempdir;
 
 /// Verifies readers expose the native handle and support sequential seeking.
@@ -27,9 +19,8 @@ fn test_local_file_reader_reads_and_seeks() {
     let path = directory.path().join("payload");
     std::fs::write(&path, b"abcdef").expect("fixture should be written");
 
-    let mut reader =
-        LocalFileSystem::open_reader(&path, &LocalReadOptions::new())
-            .expect("regular file should open for reading");
+    let mut reader = LocalFileSystem::open_reader(&path, &LocalReadOptions::new())
+        .expect("regular file should open for reading");
     assert!(
         reader
             .as_file()
@@ -60,13 +51,11 @@ fn test_local_file_reader_supports_vectored_reads() {
     let path = directory.path().join("payload");
     std::fs::write(&path, b"abcdef").expect("fixture should be written");
 
-    let mut reader =
-        LocalFileSystem::open_reader(&path, &LocalReadOptions::new())
-            .expect("regular file should open for reading");
+    let mut reader = LocalFileSystem::open_reader(&path, &LocalReadOptions::new())
+        .expect("regular file should open for reading");
     let mut first = [0_u8; 2];
     let mut second = [0_u8; 4];
-    let mut buffers =
-        [IoSliceMut::new(&mut first), IoSliceMut::new(&mut second)];
+    let mut buffers = [IoSliceMut::new(&mut first), IoSliceMut::new(&mut second)];
 
     let count = reader
         .read_vectored(&mut buffers)

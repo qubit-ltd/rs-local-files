@@ -9,11 +9,7 @@
 use std::fs;
 
 #[cfg(any(target_os = "linux", target_os = "macos"))]
-use qubit_local_files::{
-    LocalFileSystem,
-    LocalTempDirectoryOptions,
-    LocalTempFileOptions,
-};
+use qubit_local_files::{LocalFileSystem, LocalTempDirectoryOptions, LocalTempFileOptions};
 #[cfg(any(target_os = "linux", target_os = "macos"))]
 use std::os::unix::ffi::OsStringExt;
 use tempfile::tempdir;
@@ -77,10 +73,9 @@ fn test_local_file_system_create_temp_resources_create_missing_parent() {
     let file_parent = workspace.path().join("file-parent/nested");
     let directory_parent = workspace.path().join("directory-parent/nested");
 
-    let mut file = LocalFileSystem::create_temp_file(
-        &LocalTempFileOptions::new().with_parent(&file_parent),
-    )
-    .expect("temporary file should create its missing parent");
+    let mut file =
+        LocalFileSystem::create_temp_file(&LocalTempFileOptions::new().with_parent(&file_parent))
+            .expect("temporary file should create its missing parent");
     let file_path = file.path().to_path_buf();
     assert!(file_parent.is_dir());
     assert!(file_path.is_file());
@@ -104,10 +99,9 @@ fn test_local_file_system_create_temp_resources_create_missing_parent() {
 #[test]
 fn test_local_temp_file_persist_rejects_interior_nul_target() {
     let parent = tempdir().expect("temporary parent should be created");
-    let temporary = LocalFileSystem::create_temp_file(
-        &LocalTempFileOptions::new().with_parent(parent.path()),
-    )
-    .expect("temporary file should be created");
+    let temporary =
+        LocalFileSystem::create_temp_file(&LocalTempFileOptions::new().with_parent(parent.path()))
+            .expect("temporary file should be created");
     let source = temporary.path().to_path_buf();
     let target = parent
         .path()
@@ -121,8 +115,7 @@ fn test_local_temp_file_persist_rejects_interior_nul_target() {
         qubit_local_files::LocalPersistFailureState::NotPublished,
         error.state()
     );
-    let (_io, mut temporary, _requested, _resolved, _stage) =
-        error.into_parts();
+    let (_io, mut temporary, _requested, _resolved, _stage) = error.into_parts();
     temporary
         .cleanup()
         .expect("unpublished temporary file should retain cleanup authority");

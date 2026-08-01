@@ -13,10 +13,7 @@ use std::io::ErrorKind;
 use super::api_tests::LocalPersistStage;
 
 use super::test_support::temp_dir;
-use qubit_local_files::{
-    LocalTempFileOptions,
-    RootedLocalFileSystem,
-};
+use qubit_local_files::{LocalTempFileOptions, RootedLocalFileSystem};
 
 #[test]
 fn test_persist_error_into_parts_returns_error_and_resource() {
@@ -75,8 +72,7 @@ fn test_persist_error_into_parts_returns_error_and_resource() {
 #[test]
 fn test_persist_error_without_resolved_target_retains_context() {
     let dir = temp_dir("persist-error-unresolved-target");
-    let rooted =
-        RootedLocalFileSystem::open(&dir).expect("root authority should open");
+    let rooted = RootedLocalFileSystem::open(&dir).expect("root authority should open");
     let file = rooted
         .create_temp_file(&LocalTempFileOptions::new())
         .expect("rooted temporary file should be created");
@@ -91,9 +87,10 @@ fn test_persist_error_without_resolved_target_retains_context() {
     assert!(error.to_string().contains("requested target"));
     assert!(!error.to_string().contains("resolved as"));
 
-    error.resource_mut().cleanup().expect(
-        "unresolved persistence failure should retain cleanup authority",
-    );
+    error
+        .resource_mut()
+        .cleanup()
+        .expect("unresolved persistence failure should retain cleanup authority");
     let (_io, resource, _requested, resolved, _stage) = error.into_parts();
     assert_eq!(None, resolved);
     drop(resource);

@@ -8,10 +8,7 @@
 // qubit-style: allow source-test-pair
 // Covered by temporary resource integration tests.
 
-use std::path::{
-    Path,
-    PathBuf,
-};
+use std::path::{Path, PathBuf};
 
 /// Options for creating a cleanup-owned temporary file.
 #[derive(Clone, Debug, Eq, PartialEq)]

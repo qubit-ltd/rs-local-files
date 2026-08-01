@@ -8,30 +8,20 @@
 //! Cleanup-owned temporary directories with host or rooted authority.
 
 use std::{
-    io::Result,
-    path::{
-        Path,
-        PathBuf,
-    },
+    io::{Error, ErrorKind, Result},
+    path::{Path, PathBuf},
     sync::Arc,
 };
 
 use log::warn;
 
 use crate::{
-    LocalPersistError,
-    LocalPersistFailureState,
-    LocalPersistMethod,
-    LocalPersistOptions,
-    LocalPersistOutcome,
-    LocalPersistStage,
-    LocalRelativePath,
+    LocalPersistError, LocalPersistFailureState, LocalPersistMethod, LocalPersistOptions,
+    LocalPersistOutcome, LocalPersistStage, LocalRelativePath,
 };
 
 use super::internal::{
-    LocalTempResourceBackend,
-    LocalTempResourceState,
-    RootedTempResourceBackend,
+    LocalTempResourceBackend, LocalTempResourceState, RootedTempResourceBackend, TempEntryIdentity,
 };
 
 /// A temporary directory whose cleanup remains bound to its creating authority.
@@ -42,6 +32,10 @@ pub struct LocalTempDirectory {
     path: PathBuf,
     /// Authority and resource ownership state.
     backend: LocalTempResourceBackend,
+    /// Native identity captured when the temporary directory was created.
+    host_identity: Option<TempEntryIdentity>,
+    /// Rooted identity captured through the opened root authority.
+    rooted_identity: Option<crate::rooted::Metadata>,
     /// Namespace certainty governing cleanup and drop behavior.
     state: LocalTempResourceState,
 }
@@ -49,32 +43,31 @@ pub struct LocalTempDirectory {
 impl LocalTempDirectory {
     /// Builds a host temporary directory from its already-bound path.
     #[inline]
-    pub(crate) fn host(path: PathBuf) -> Self {
-        Self {
+    pub(crate) fn host(path: PathBuf) -> Result<Self> {
+        Ok(Self {
+            host_identity: Some(TempEntryIdentity::from_path(&path)?),
+            rooted_identity: None,
             path,
-            backend: LocalTempResourceBackend::Host(
-                super::internal::HostTempResourceBackend,
-            ),
+            backend: LocalTempResourceBackend::Host(super::internal::HostTempResourceBackend),
             state: LocalTempResourceState::Owned,
-        }
+        })
     }
 
     /// Builds a rooted temporary directory from the retained root authority.
     #[inline]
-    pub(crate) fn rooted(
-        root: Arc<crate::rooted::Root>,
-        path: PathBuf,
-    ) -> Self {
-        Self {
+    pub(crate) fn rooted(root: Arc<crate::rooted::Root>, path: PathBuf) -> Result<Self> {
+        let relative = LocalRelativePath::new(&path)
+            .expect("rooted temporary path was validated at creation");
+        Ok(Self {
+            host_identity: None,
+            rooted_identity: Some(root.symlink_metadata(&relative)?),
             path: path.clone(),
-            backend: LocalTempResourceBackend::Rooted(
-                RootedTempResourceBackend {
-                    root,
-                    relative_path: path,
-                },
-            ),
+            backend: LocalTempResourceBackend::Rooted(RootedTempResourceBackend {
+                root,
+                relative_path: path,
+            }),
             state: LocalTempResourceState::Owned,
-        }
+        })
     }
 
     /// Returns the authority-local generated path.
@@ -157,11 +150,18 @@ impl LocalTempDirectory {
         target: &Path,
         options: LocalPersistOptions,
     ) -> std::result::Result<LocalPersistOutcome, LocalPersistError<Self>> {
+        if let Err(error) = self.ensure_identity_matches() {
+            return Err(LocalPersistError::new(
+                error,
+                self,
+                target.to_path_buf(),
+                None,
+                LocalPersistStage::InstallDestination,
+            ));
+        }
         if self.state == LocalTempResourceState::Indeterminate {
             return Err(LocalPersistError::new(
-                std::io::Error::other(
-                    "temporary directory namespace state is indeterminate",
-                ),
+                std::io::Error::other("temporary directory namespace state is indeterminate"),
                 self,
                 target.to_path_buf(),
                 None,
@@ -195,9 +195,7 @@ impl LocalTempDirectory {
                 let result = if options.overwrites() {
                     std::fs::rename(&self.path, &target)
                 } else {
-                    crate::local::move_directory_without_replacing(
-                        &self.path, &target,
-                    )
+                    crate::local::move_directory_without_replacing(&self.path, &target)
                 };
                 if let Err(error) = result {
                     self.record_native_persist_failure(&error);
@@ -232,8 +230,8 @@ impl LocalTempDirectory {
                 };
                 let source = LocalRelativePath::new(&rooted.relative_path)
                     .expect("rooted temporary path was validated at creation");
-                let destination = LocalRelativePath::new(&target)
-                    .expect("persist target was validated");
+                let destination =
+                    LocalRelativePath::new(&target).expect("persist target was validated");
                 let result = if options.overwrites() {
                     rooted.root.rename(&source, &destination)
                 } else {
@@ -263,11 +261,10 @@ impl LocalTempDirectory {
     /// Removes the resource using the retained backend rather than a diagnostic
     /// path.
     #[inline]
-    fn remove(&self) -> Result<()> {
+    fn remove(&mut self) -> Result<()> {
+        self.ensure_identity_matches()?;
         match &self.backend {
-            LocalTempResourceBackend::Host(_) => {
-                std::fs::remove_dir_all(&self.path)
-            }
+            LocalTempResourceBackend::Host(_) => std::fs::remove_dir_all(&self.path),
             LocalTempResourceBackend::Rooted(rooted) => {
                 let path = LocalRelativePath::new(&rooted.relative_path)
                     .expect("rooted temporary path was validated at creation");
@@ -286,6 +283,41 @@ impl LocalTempDirectory {
             ));
         }
         Ok(())
+    }
+
+    /// Rejects operations when the authority path no longer names this directory.
+    fn ensure_identity_matches(&mut self) -> Result<()> {
+        let matches = match &self.backend {
+            LocalTempResourceBackend::Host(_) => self
+                .host_identity
+                .as_ref()
+                .expect("host temporary directory must retain host identity")
+                .matches_path(&self.path),
+            LocalTempResourceBackend::Rooted(rooted) => rooted
+                .root
+                .symlink_metadata(
+                    &LocalRelativePath::new(&rooted.relative_path)
+                        .expect("rooted temporary path was validated at creation"),
+                )
+                .map(|metadata| {
+                    metadata.is_same_file(
+                        self.rooted_identity
+                            .as_ref()
+                            .expect("rooted temporary directory must retain rooted identity"),
+                    )
+                }),
+        };
+        match matches {
+            Ok(true) => Ok(()),
+            Ok(false) => {
+                self.state = LocalTempResourceState::Indeterminate;
+                Err(Error::new(
+                    ErrorKind::InvalidInput,
+                    "temporary directory path no longer names the created entry",
+                ))
+            }
+            Err(error) => Err(error),
+        }
     }
 
     /// Records whether a failed native install proves the source remains owned.

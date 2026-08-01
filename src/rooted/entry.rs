@@ -7,10 +7,7 @@
 // =============================================================================
 //! Descriptor-relative directory entries.
 
-use std::ffi::{
-    OsStr,
-    OsString,
-};
+use std::ffi::{OsStr, OsString};
 
 use super::Metadata;
 

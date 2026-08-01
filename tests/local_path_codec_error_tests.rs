@@ -8,10 +8,7 @@
 
 use std::error::Error;
 
-use qubit_local_files::{
-    LocalFileErrorSource,
-    LocalPathCodecError,
-};
+use qubit_local_files::{LocalFileErrorSource, LocalPathCodecError};
 
 /// Verifies path codec failures are typed error sources without a secondary
 /// cause.
@@ -26,8 +23,7 @@ fn test_path_codec_error_is_a_typed_error_without_a_source() {
 /// Verifies the local error source retains a typed path codec failure.
 #[test]
 fn test_local_file_error_source_preserves_path_codec_error() {
-    let source =
-        LocalFileErrorSource::PathCodec(LocalPathCodecError::NonCanonicalText);
+    let source = LocalFileErrorSource::PathCodec(LocalPathCodecError::NonCanonicalText);
 
     assert!(matches!(
         source,

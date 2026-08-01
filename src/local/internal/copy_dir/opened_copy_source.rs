@@ -9,16 +9,8 @@
 // qubit-style: allow source-test-pair
 // Private behavior is covered through public integration tests.
 
-use std::fs::{
-    File,
-    Metadata,
-    OpenOptions,
-};
-use std::io::{
-    Error,
-    ErrorKind,
-    Result,
-};
+use std::fs::{File, Metadata, OpenOptions};
+use std::io::{Error, ErrorKind, Result};
 use std::path::Path;
 use std::time::Duration;
 
@@ -33,17 +25,12 @@ use std::os::windows::io::AsRawHandle;
 
 #[cfg(windows)]
 use windows_sys::Win32::Storage::FileSystem::{
-    FILE_ATTRIBUTE_TAG_INFO,
-    FILE_FLAG_OPEN_REPARSE_POINT,
-    FileAttributeTagInfo,
+    FILE_ATTRIBUTE_TAG_INFO, FILE_FLAG_OPEN_REPARSE_POINT, FileAttributeTagInfo,
     GetFileInformationByHandleEx,
 };
 
 #[cfg(unix)]
-use crate::local::internal::{
-    clear_nonblocking,
-    open_with_nonblocking_retry,
-};
+use crate::local::internal::{clear_nonblocking, open_with_nonblocking_retry};
 
 /// Open regular-file source and metadata read from the same handle.
 #[must_use = "the opened source handle and its authoritative metadata must be consumed together"]
@@ -106,9 +93,8 @@ fn open_copy_source(
         flags |= libc::O_NOFOLLOW;
     }
     options.read(true).custom_flags(flags);
-    let file =
-        open_with_nonblocking_retry(open_retry_timeout, || options.open(path))
-            .map_err(|error| normalize_unix_source_open_error(path, error))?;
+    let file = open_with_nonblocking_retry(open_retry_timeout, || options.open(path))
+        .map_err(|error| normalize_unix_source_open_error(path, error))?;
     let metadata = file.metadata()?;
     reject_non_regular_source(path, &metadata)?;
     clear_nonblocking(file.as_raw_fd())?;
@@ -120,9 +106,7 @@ fn open_copy_source(
 #[inline]
 fn normalize_unix_source_open_error(path: &Path, error: Error) -> Error {
     match error.raw_os_error() {
-        Some(libc::ELOOP | libc::ENXIO | libc::ENODEV) => {
-            invalid_copy_source(path)
-        }
+        Some(libc::ELOOP | libc::ENXIO | libc::ENODEV) => invalid_copy_source(path),
         _ => error,
     }
 }
@@ -157,9 +141,7 @@ fn open_copy_source(
     if result == 0 {
         return Err(Error::last_os_error());
     }
-    if !follow_symlinks
-        && tag_info.ReparseTag & IO_REPARSE_TAG_NAME_SURROGATE != 0
-    {
+    if !follow_symlinks && tag_info.ReparseTag & IO_REPARSE_TAG_NAME_SURROGATE != 0 {
         return Err(invalid_copy_source(path));
     }
     let metadata = file.metadata()?;
