@@ -7,16 +7,15 @@
 // =============================================================================
 
 #[cfg(unix)]
+use std::io::IoSlice;
+#[cfg(unix)]
 use std::{
     env,
     process::Command,
 };
 use std::{
     fs,
-    io::{
-        IoSlice,
-        Write,
-    },
+    io::Write,
 };
 
 #[cfg(unix)]
@@ -128,6 +127,39 @@ fn test_local_file_writer_append_rejects_target_symlink() {
 
     assert_eq!(LocalFileErrorKind::TypeConflict, error.kind());
     assert_eq!(b"original", fs::read(&referent).unwrap().as_slice());
+}
+
+/// Verifies Windows append rejects a final name-surrogate reparse point and
+/// leaves its referent unchanged.
+#[cfg(windows)]
+#[test]
+fn test_local_file_writer_append_rejects_target_symlink_on_windows() {
+    use std::io::ErrorKind;
+    use std::os::windows::fs::symlink_file;
+
+    let directory = tempdir().expect("temporary directory should be created");
+    let referent = directory.path().join("referent");
+    let target = directory.path().join("target");
+    fs::write(&referent, b"original").expect("referent should be written");
+    if let Err(error) = symlink_file(&referent, &target) {
+        if error.kind() == ErrorKind::PermissionDenied {
+            return;
+        }
+        panic!("file symlink should be created: {error}");
+    }
+
+    let error = LocalFileSystem::open_writer(
+        &target,
+        &LocalWriteOptions::new(LocalWriteMode::Append),
+    )
+    .expect_err("append must not follow a final file symlink");
+    assert_eq!(LocalFileErrorKind::TypeConflict, error.kind());
+    assert_eq!(
+        b"original",
+        fs::read(referent)
+            .expect("referent should remain readable")
+            .as_slice(),
+    );
 }
 
 /// Verifies create-new rejects an existing entry before writing.
