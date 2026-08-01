@@ -200,7 +200,7 @@ impl LocalFileSystem {
         }
         if options.mode() != LocalWriteMode::Append
             && options.durability() == LocalDurabilityRequirement::Required
-            && !Self::capabilities().supports_directory_durability()
+            && !Self::capabilities().directory_durability_implemented()
         {
             return Err(LocalFileError::new(
                 LocalFileErrorKind::RequirementNotMet,
@@ -504,15 +504,12 @@ impl LocalFileSystem {
             &mut stats,
         )
         .map_err(|error| copy_pipeline_failure(&source, &target, error))?;
-        let durable = published_durability(
+        let parent_durable = published_durability(
             options.durability(),
             || {
-                fs::File::open(&target)
-                    .and_then(|file| file.sync_all())
-                    .and_then(|()| sync_parent_directory(&target))
-                    .and_then(|()| {
-                        sync_created_parent_directories(&parent_dirs_to_sync)
-                    })
+                sync_parent_directory(&target).and_then(|()| {
+                    sync_created_parent_directories(&parent_dirs_to_sync)
+                })
             },
             LocalFileOperation::Copy,
             &source,
@@ -521,6 +518,7 @@ impl LocalFileSystem {
         .map_err(|error| {
             copy_failure_published(error, LocalCopyStats::from_internal(stats))
         })?;
+        let durable = stats.files_durable() && parent_durable;
         Ok(LocalCopyOutcome::new(
             LocalCopyStats::from_internal(stats),
             LocalCopyMethod::StagedFile,
@@ -1120,7 +1118,7 @@ fn require_directory_durability(
     target: &Path,
 ) -> LocalResult<()> {
     let supports_directory_durability =
-        LocalFileSystem::capabilities().supports_directory_durability();
+        LocalFileSystem::capabilities().directory_durability_implemented();
     #[cfg(coverage)]
     let supports_directory_durability = supports_directory_durability
         && !crate::local::coverage_fault_enabled(
@@ -1239,7 +1237,8 @@ pub(crate) fn internal_copy_options(
 ) -> crate::local::LocalCopyDirOptions {
     let mut result = crate::local::LocalCopyDirOptions::new()
         .with_conflict(options.conflict())
-        .with_type_conflict(options.type_conflict());
+        .with_type_conflict(options.type_conflict())
+        .with_durability(options.durability());
     if options.symlink_policy() == LocalSymlinkPolicy::Follow {
         result = result.follow_symlinks();
     }

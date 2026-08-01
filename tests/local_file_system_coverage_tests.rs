@@ -12,6 +12,8 @@ use std::{
     time::Duration,
 };
 
+#[cfg(unix)]
+use qubit_local_files::LocalSymlinkPolicy;
 use qubit_local_files::{
     LocalAtomicityRequirement,
     LocalCopyOptions,
@@ -22,7 +24,6 @@ use qubit_local_files::{
     LocalMetadataPreservePolicy,
     LocalReadOptions,
     LocalRenameOptions,
-    LocalSymlinkPolicy,
     LocalWriteMode,
     LocalWriteOptions,
 };
@@ -507,6 +508,43 @@ fn test_copy_and_rename_report_injected_parent_sync_failures() {
             );
         });
     }
+}
+
+/// Verifies required copy durability synchronizes the staging handle before
+/// publication, leaving an existing destination unchanged on sync failure.
+#[cfg(coverage)]
+#[test]
+fn test_copy_required_durability_syncs_staging_before_publication() {
+    const TEST_NAME: &str =
+        "test_copy_required_durability_syncs_staging_before_publication";
+    run_facade_fault(TEST_NAME, "copy-staging-file-sync", || {
+        let directory =
+            tempdir().expect("temporary directory should be created");
+        let source = directory.path().join("source");
+        let target = directory.path().join("target");
+        fs::write(&source, b"new").expect("source fixture should be written");
+        fs::write(&target, b"old").expect("target fixture should be written");
+
+        let failure = LocalFileSystem::copy(
+            &source,
+            &target,
+            &LocalCopyOptions::new()
+                .with_conflict(
+                    qubit_local_files::LocalCopyConflictPolicy::Overwrite,
+                )
+                .with_durability(LocalDurabilityRequirement::Required),
+        )
+        .expect_err("staging synchronization failure must stop publication");
+
+        assert_eq!(
+            qubit_local_files::LocalCopyFailureState::Unchanged,
+            failure.state()
+        );
+        assert_eq!(
+            b"old",
+            fs::read(&target).expect("target should remain").as_slice(),
+        );
+    });
 }
 
 /// Verifies a host lacking directory synchronization rejects a required

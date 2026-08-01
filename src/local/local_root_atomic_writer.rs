@@ -7,6 +7,7 @@
 // =============================================================================
 //! Streaming descriptor-relative atomic file replacement.
 // qubit-style: allow coverage-cfg
+// qubit-style: allow source-test-pair
 
 #[cfg(unix)]
 use std::ffi::CString;
@@ -62,7 +63,6 @@ use super::{
     create_rooted_directory,
     open_rooted_native_writer,
     read_rooted_symlink_metadata,
-    remove_rooted_entry,
     rename_rooted_entry,
     try_random_file_name,
 };
@@ -417,51 +417,14 @@ impl LocalRootAtomicWriter {
         ))
     }
 
-    /// Synchronizes and atomically replaces the rooted destination.
-    ///
-    /// Existing metadata is read from the opened destination during this call
-    /// and applied to staging before the identity check and replacement.
-    ///
-    /// # Returns
-    ///
-    /// `Ok(())` after the replacement and required directory synchronization
-    /// complete.
-    ///
-    /// # Errors
-    ///
-    /// Returns a structured error when metadata preservation, staging-file
-    /// synchronization, replacement, or parent-directory synchronization
-    /// fails. Inspect [`LocalAtomicWriteError::destination_state`] to determine
-    /// the known post-failure destination outcome.
-    #[inline(always)]
-    pub fn commit(self) -> Result<(), LocalAtomicWriteError> {
-        self.commit_recoverable().map_err(|error| {
+    /// Consumes the writer and reports whether requested durability completed.
+    #[inline]
+    pub(crate) fn commit_with_durability(
+        self,
+    ) -> Result<bool, LocalAtomicWriteError> {
+        self.commit_recoverable_with_durability().map_err(|error| {
             error.into_final_error_with(Self::finalize_failed_commit)
         })
-    }
-
-    /// Attempts to commit while retaining a recoverable rooted writer.
-    ///
-    /// Failures detected before installation begins return the writer through
-    /// [`LocalAtomicCommitError::writer`] so callers can retry or explicitly
-    /// abort it. Failures after installation begins are terminal and do not
-    /// return a writer.
-    ///
-    /// # Returns
-    ///
-    /// `Ok(())` after a successful commit.
-    ///
-    /// # Errors
-    ///
-    /// Returns a recoverable commit error when metadata preservation,
-    /// staging-file synchronization, replacement, or parent-directory
-    /// synchronization fails.
-    #[cfg_attr(not(any(unix, windows)), allow(unused_mut))]
-    #[inline]
-    pub fn commit_recoverable(
-        self,
-    ) -> Result<(), LocalAtomicCommitError<Self>> {
-        self.commit_recoverable_with_durability().map(|_| ())
     }
 
     /// Attempts commit and reports whether requested durability completed.
