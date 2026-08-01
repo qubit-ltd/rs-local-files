@@ -32,4 +32,23 @@ fuzz_target!(|data: &[u8]| {
             .expect("canonical native text must convert");
         assert_eq!(restored.as_encoded_bytes(), data);
     }
+
+    #[cfg(windows)]
+    {
+        use std::os::windows::ffi::{OsStringExt, OsStrExt};
+
+        let units = data
+            .chunks_exact(2)
+            .map(|chunk| u16::from_le_bytes([chunk[0], chunk[1]]))
+            .collect::<Vec<_>>();
+        if units.iter().any(|unit| *unit == 0) {
+            return;
+        }
+        let native = std::ffi::OsString::from_wide(&units);
+        let canonical = LocalPathCodec::to_canonical_text(&native)
+            .expect("non-NUL native UTF-16 must convert");
+        let restored = LocalPathCodec::from_canonical_text(&canonical)
+            .expect("canonical native text must convert");
+        assert_eq!(restored.encode_wide().collect::<Vec<_>>(), units);
+    }
 });
