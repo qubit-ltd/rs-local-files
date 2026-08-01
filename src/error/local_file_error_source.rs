@@ -8,11 +8,7 @@
 
 // qubit-style: allow source-test-pair
 // Error-source behavior is covered through the public error integration tests.
-use std::{
-    error::Error,
-    fmt,
-    io,
-};
+use std::{error::Error, fmt, io};
 
 use super::LocalPathCodecError;
 

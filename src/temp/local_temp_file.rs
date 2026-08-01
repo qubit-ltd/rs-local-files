@@ -9,38 +9,20 @@
 
 use std::{
     fs::File,
-    io::{
-        Error,
-        ErrorKind,
-        IoSlice,
-        Result,
-        Seek,
-        SeekFrom,
-        Write,
-    },
-    path::{
-        Path,
-        PathBuf,
-    },
+    io::{Error, ErrorKind, IoSlice, Result, Seek, SeekFrom, Write},
+    path::{Path, PathBuf},
     sync::Arc,
 };
 
 use log::warn;
 
 use crate::{
-    LocalPersistError,
-    LocalPersistFailureState,
-    LocalPersistMethod,
-    LocalPersistOptions,
-    LocalPersistOutcome,
-    LocalPersistStage,
-    LocalRelativePath,
+    LocalPersistError, LocalPersistFailureState, LocalPersistMethod, LocalPersistOptions,
+    LocalPersistOutcome, LocalPersistStage, LocalRelativePath,
 };
 
 use super::internal::{
-    LocalTempResourceBackend,
-    LocalTempResourceState,
-    RootedTempResourceBackend,
+    LocalTempResourceBackend, LocalTempResourceState, RootedTempResourceBackend, TempEntryIdentity,
 };
 
 /// A temporary file whose cleanup remains bound to its creating authority.
@@ -53,6 +35,10 @@ pub struct LocalTempFile {
     backend: LocalTempResourceBackend,
     /// The open native file, until explicitly closed.
     file: Option<File>,
+    /// Native identity captured when the temporary file was created.
+    host_identity: Option<TempEntryIdentity>,
+    /// Rooted identity captured through the opened root authority.
+    rooted_identity: Option<crate::rooted::Metadata>,
     /// Namespace certainty governing cleanup and drop behavior.
     state: LocalTempResourceState,
 }
@@ -60,35 +46,31 @@ pub struct LocalTempFile {
 impl LocalTempFile {
     /// Builds a host temporary file from its already-bound path and handle.
     #[inline]
-    pub(crate) fn host(path: PathBuf, file: File) -> Self {
-        Self {
+    pub(crate) fn host(path: PathBuf, file: File) -> Result<Self> {
+        Ok(Self {
             path,
-            backend: LocalTempResourceBackend::Host(
-                super::internal::HostTempResourceBackend,
-            ),
+            backend: LocalTempResourceBackend::Host(super::internal::HostTempResourceBackend),
+            host_identity: Some(TempEntryIdentity::from_file(&file)?),
+            rooted_identity: None,
             file: Some(file),
             state: LocalTempResourceState::Owned,
-        }
+        })
     }
 
     /// Builds a rooted temporary file from the retained root authority.
     #[inline]
-    pub(crate) fn rooted(
-        root: Arc<crate::rooted::Root>,
-        path: PathBuf,
-        file: File,
-    ) -> Self {
-        Self {
+    pub(crate) fn rooted(root: Arc<crate::rooted::Root>, path: PathBuf, file: File) -> Result<Self> {
+        Ok(Self {
             path: path.clone(),
-            backend: LocalTempResourceBackend::Rooted(
-                RootedTempResourceBackend {
-                    root,
-                    relative_path: path,
-                },
-            ),
+            backend: LocalTempResourceBackend::Rooted(RootedTempResourceBackend {
+                root,
+                relative_path: path,
+            }),
+            host_identity: None,
+            rooted_identity: Some(crate::rooted::Metadata::from_open_file(&file)?),
             file: Some(file),
             state: LocalTempResourceState::Owned,
-        }
+        })
     }
 
     /// Returns the authority-local generated path.
@@ -167,6 +149,15 @@ impl LocalTempFile {
         options: LocalPersistOptions,
     ) -> std::result::Result<LocalPersistOutcome, LocalPersistError<Self>> {
         self.close();
+        if let Err(error) = self.ensure_identity_matches() {
+            return Err(LocalPersistError::new(
+                error,
+                self,
+                target.to_path_buf(),
+                None,
+                LocalPersistStage::InstallDestination,
+            ));
+        }
         if self.state == LocalTempResourceState::Indeterminate {
             return Err(LocalPersistError::new(
                 Error::other("temporary file namespace state is indeterminate"),
@@ -239,8 +230,7 @@ impl LocalTempFile {
         };
         let source = LocalRelativePath::new(&rooted.relative_path)
             .expect("rooted temporary path was validated at creation");
-        let destination = LocalRelativePath::new(&target)
-            .expect("persist target was validated");
+        let destination = LocalRelativePath::new(&target).expect("persist target was validated");
         let result = if options.overwrites() {
             rooted.root.rename(&source, &destination)
         } else {
@@ -268,11 +258,10 @@ impl LocalTempFile {
     /// Removes the resource using the retained backend rather than a diagnostic
     /// path.
     #[inline]
-    fn remove(&self) -> Result<()> {
+    fn remove(&mut self) -> Result<()> {
+        self.ensure_identity_matches()?;
         match &self.backend {
-            LocalTempResourceBackend::Host(_) => {
-                std::fs::remove_file(&self.path)
-            }
+            LocalTempResourceBackend::Host(_) => std::fs::remove_file(&self.path),
             LocalTempResourceBackend::Rooted(rooted) => {
                 let path = LocalRelativePath::new(&rooted.relative_path)
                     .expect("rooted temporary path was validated at creation");
@@ -291,6 +280,41 @@ impl LocalTempFile {
             ));
         }
         Ok(())
+    }
+
+    /// Rejects operations when the authority path no longer names this file.
+    fn ensure_identity_matches(&mut self) -> Result<()> {
+        let matches = match &self.backend {
+            LocalTempResourceBackend::Host(_) => self
+                .host_identity
+                .as_ref()
+                .expect("host temporary file must retain host identity")
+                .matches_path(&self.path),
+            LocalTempResourceBackend::Rooted(rooted) => rooted
+                .root
+                .symlink_metadata(
+                    &LocalRelativePath::new(&rooted.relative_path)
+                        .expect("rooted temporary path was validated at creation"),
+                )
+                .map(|metadata| {
+                    metadata.is_same_file(
+                        self.rooted_identity
+                            .as_ref()
+                            .expect("rooted temporary file must retain rooted identity"),
+                    )
+                }),
+        };
+        match matches {
+            Ok(true) => Ok(()),
+            Ok(false) => {
+                self.state = LocalTempResourceState::Indeterminate;
+                Err(Error::new(
+                    ErrorKind::InvalidInput,
+                    "temporary file path no longer names the created entry",
+                ))
+            }
+            Err(error) => Err(error),
+        }
     }
 
     /// Records whether a failed native install proves the source remains owned.

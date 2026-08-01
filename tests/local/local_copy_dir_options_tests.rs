@@ -8,11 +8,7 @@
 
 use std::time::Duration;
 
-use super::api_tests::{
-    LocalCopyConflictPolicy,
-    LocalCopyDirOptions,
-    LocalCopyTypeConflictPolicy,
-};
+use super::api_tests::{LocalCopyConflictPolicy, LocalCopyDirOptions, LocalCopyTypeConflictPolicy};
 
 #[test]
 fn test_copy_dir_options_default_is_conservative() {

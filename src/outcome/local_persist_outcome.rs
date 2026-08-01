@@ -7,10 +7,7 @@
 // =============================================================================
 //! Structured successful temporary-resource persistence outcomes.
 
-use std::path::{
-    Path,
-    PathBuf,
-};
+use std::path::{Path, PathBuf};
 
 use crate::LocalPersistMethod;
 

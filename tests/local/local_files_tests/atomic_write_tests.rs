@@ -8,16 +8,9 @@
 
 #[cfg(coverage)]
 use super::super::api_tests::LocalAtomicWriteError;
-use super::super::api_tests::{
-    LocalAtomicDestinationState,
-    LocalAtomicWriteStage,
-};
+use super::super::api_tests::{LocalAtomicDestinationState, LocalAtomicWriteStage};
 use std::error::Error as StdError;
-use std::io::{
-    Error,
-    ErrorKind,
-    Write,
-};
+use std::io::{Error, ErrorKind, Write};
 
 #[cfg(unix)]
 use super::super::test_support::PermissionsExt;
@@ -26,18 +19,11 @@ use super::super::test_support::create_fifo;
 #[cfg(coverage)]
 use super::super::test_support::run_in_coverage_fault_process;
 use super::super::test_support::{
-    CURRENT_DIR_LOCK,
-    CurrentDirGuard,
-    count_atomic_temp_files,
-    fs,
-    temp_dir,
+    CURRENT_DIR_LOCK, CurrentDirGuard, count_atomic_temp_files, fs, temp_dir,
 };
 #[cfg(windows)]
 use super::super::test_support::{
-    alternate_data_stream_path,
-    clear_readonly_attribute,
-    path_with_interior_nul,
-    read_dacl_bytes,
+    alternate_data_stream_path, clear_readonly_attribute, path_with_interior_nul, read_dacl_bytes,
     set_world_full_control_dacl,
 };
 #[cfg(any(
@@ -46,20 +32,11 @@ use super::super::test_support::{
     target_os = "macos",
     target_os = "freebsd",
 ))]
-use super::super::test_support::{
-    get_user_xattr,
-    set_user_xattr,
-};
+use super::super::test_support::{get_user_xattr, set_user_xattr};
 #[cfg(target_os = "freebsd")]
-use super::super::test_support::{
-    install_supported_test_acl,
-    read_freebsd_acl_text,
-};
+use super::super::test_support::{install_supported_test_acl, read_freebsd_acl_text};
 #[cfg(target_os = "macos")]
-use super::super::test_support::{
-    read_macos_acl_text,
-    set_current_user_read_acl,
-};
+use super::super::test_support::{read_macos_acl_text, set_current_user_read_acl};
 #[cfg(target_os = "linux")]
 use super::copy_dir_tests::directory_write_restrictions_are_enforced;
 
@@ -78,8 +55,7 @@ fn run_atomic_write_fault(
         let dir = temp_dir(fault);
         let destination = dir.join("destination.txt");
         if destination_existed {
-            fs::write(&destination, b"old")
-                .expect("existing destination should be written");
+            fs::write(&destination, b"old").expect("existing destination should be written");
         }
         let result = qubit_local_files::atomic::write(&destination, b"new");
         (dir, destination, result)
@@ -93,8 +69,7 @@ fn assert_injected_metadata_error(test_name: &str, fault: &str) {
         run_in_coverage_fault_process(test_name, fault, move || {
             let dir = temp_dir(fault);
             let destination = dir.join("destination.txt");
-            fs::write(&destination, b"old")
-                .expect("existing destination should be written");
+            fs::write(&destination, b"old").expect("existing destination should be written");
             set_user_xattr(&destination, "user.coverage-source", b"value")
                 .expect("source xattr should be written");
             let result = qubit_local_files::atomic::write(&destination, b"new");
@@ -124,9 +99,7 @@ fn assert_injected_atomic_error(
     fault: &str,
     expected_stage: LocalAtomicWriteStage,
 ) {
-    let Some((dir, destination, result)) =
-        run_atomic_write_fault(test_name, fault, true)
-    else {
+    let Some((dir, destination, result)) = run_atomic_write_fault(test_name, fault, true) else {
         return;
     };
 
@@ -153,11 +126,11 @@ fn test_atomic_write_reports_injected_native_install_error() {
     let dir = temp_dir("atomic-injected-native-install-error");
     let destination = dir.join("destination.txt");
     let child_destination = destination.clone();
-    let Some(result) = run_in_coverage_fault_process(
-        TEST_NAME,
-        "atomic-install-before-native-call",
-        move || qubit_local_files::atomic::write(&child_destination, b"new"),
-    ) else {
+    let Some(result) =
+        run_in_coverage_fault_process(TEST_NAME, "atomic-install-before-native-call", move || {
+            qubit_local_files::atomic::write(&child_destination, b"new")
+        })
+    else {
         fs::remove_dir_all(dir).expect("test directory should be removed");
         return;
     };
@@ -245,11 +218,9 @@ fn test_atomic_write_reports_persistent_install_unlink_error() {
         "local::local_files_tests::atomic_write_tests::",
         "test_atomic_write_reports_persistent_install_unlink_error",
     );
-    let Some((dir, destination, result)) = run_atomic_write_fault(
-        TEST_NAME,
-        "atomic-install-unlink-persistent",
-        false,
-    ) else {
+    let Some((dir, destination, result)) =
+        run_atomic_write_fault(TEST_NAME, "atomic-install-unlink-persistent", false)
+    else {
         return;
     };
 
@@ -276,11 +247,9 @@ fn test_atomic_write_syncs_parent_after_install_unlink_recovery() {
         "local::local_files_tests::atomic_write_tests::",
         "test_atomic_write_syncs_parent_after_install_unlink_recovery",
     );
-    let Some((dir, destination, result)) = run_atomic_write_fault(
-        TEST_NAME,
-        "atomic-install-unlink-recover-sync",
-        false,
-    ) else {
+    let Some((dir, destination, result)) =
+        run_atomic_write_fault(TEST_NAME, "atomic-install-unlink-recover-sync", false)
+    else {
         return;
     };
 
@@ -292,9 +261,9 @@ fn test_atomic_write_syncs_parent_after_install_unlink_recovery() {
     );
     assert_eq!(
         Some(libc::EIO),
-        error.source().and_then(|source| {
-            source.downcast_ref::<Error>().and_then(Error::raw_os_error)
-        })
+        error
+            .source()
+            .and_then(|source| { source.downcast_ref::<Error>().and_then(Error::raw_os_error) })
     );
     assert!(error.cleanup_error().is_none());
     assert_eq!(b"new", fs::read(&destination).unwrap().as_slice());
@@ -311,11 +280,9 @@ fn test_atomic_write_retains_sync_error_with_indeterminate_staging() {
         "local::local_files_tests::atomic_write_tests::",
         "test_atomic_write_retains_sync_error_with_indeterminate_staging",
     );
-    let Some((dir, destination, result)) = run_atomic_write_fault(
-        TEST_NAME,
-        "atomic-install-unlink-indeterminate-sync",
-        false,
-    ) else {
+    let Some((dir, destination, result)) =
+        run_atomic_write_fault(TEST_NAME, "atomic-install-unlink-indeterminate-sync", false)
+    else {
         return;
     };
 
@@ -349,11 +316,9 @@ fn test_atomic_write_retains_sync_error_after_persistent_install_unlink() {
         "local::local_files_tests::atomic_write_tests::",
         "test_atomic_write_retains_sync_error_after_persistent_install_unlink",
     );
-    let Some((dir, destination, result)) = run_atomic_write_fault(
-        TEST_NAME,
-        "atomic-install-unlink-persistent-sync",
-        false,
-    ) else {
+    let Some((dir, destination, result)) =
+        run_atomic_write_fault(TEST_NAME, "atomic-install-unlink-persistent-sync", false)
+    else {
         return;
     };
 
@@ -414,11 +379,9 @@ fn test_atomic_write_preserves_staging_after_indeterminate_replace_error() {
         "local::local_files_tests::atomic_write_tests::",
         "test_atomic_write_preserves_staging_after_indeterminate_replace_error",
     );
-    let Some((dir, destination, result)) = run_atomic_write_fault(
-        TEST_NAME,
-        "atomic-install-replace-indeterminate",
-        true,
-    ) else {
+    let Some((dir, destination, result)) =
+        run_atomic_write_fault(TEST_NAME, "atomic-install-replace-indeterminate", true)
+    else {
         return;
     };
 
@@ -553,20 +516,17 @@ fn test_atomic_write_handles_injected_metadata_not_supported() {
         "local::local_files_tests::atomic_write_tests::",
         "test_atomic_write_handles_injected_metadata_not_supported",
     );
-    let Some((dir, destination, result)) = run_in_coverage_fault_process(
-        TEST_NAME,
-        "atomic-metadata-not-supported",
-        move || {
+    let Some((dir, destination, result)) =
+        run_in_coverage_fault_process(TEST_NAME, "atomic-metadata-not-supported", move || {
             let dir = temp_dir("atomic-metadata-not-supported");
             let destination = dir.join("destination.txt");
-            fs::write(&destination, b"old")
-                .expect("existing destination should be written");
+            fs::write(&destination, b"old").expect("existing destination should be written");
             set_user_xattr(&destination, "user.coverage-source", b"value")
                 .expect("source xattr should be written");
             let result = qubit_local_files::atomic::write(&destination, b"new");
             (dir, destination, result)
-        },
-    ) else {
+        })
+    else {
         return;
     };
 
@@ -642,10 +602,7 @@ fn test_atomic_write_limits_persistent_metadata_list_range() {
         "local::local_files_tests::atomic_write_tests::",
         "test_atomic_write_limits_persistent_metadata_list_range",
     );
-    assert_injected_metadata_error(
-        TEST_NAME,
-        "atomic-metadata-list-range-persistent",
-    );
+    assert_injected_metadata_error(TEST_NAME, "atomic-metadata-list-range-persistent");
 }
 
 /// Verifies propagation of an injected xattr-value buffer read error.
@@ -667,10 +624,7 @@ fn test_atomic_write_limits_persistent_metadata_value_range() {
         "local::local_files_tests::atomic_write_tests::",
         "test_atomic_write_limits_persistent_metadata_value_range",
     );
-    assert_injected_metadata_error(
-        TEST_NAME,
-        "atomic-metadata-value-range-persistent",
-    );
+    assert_injected_metadata_error(TEST_NAME, "atomic-metadata-value-range-persistent");
 }
 
 /// Verifies ordering and lookup of an injected security xattr name.
@@ -692,20 +646,17 @@ fn test_atomic_write_skips_injected_equal_metadata_value() {
         "local::local_files_tests::atomic_write_tests::",
         "test_atomic_write_skips_injected_equal_metadata_value",
     );
-    let Some((dir, destination, result)) = run_in_coverage_fault_process(
-        TEST_NAME,
-        "atomic-metadata-equal-value",
-        move || {
+    let Some((dir, destination, result)) =
+        run_in_coverage_fault_process(TEST_NAME, "atomic-metadata-equal-value", move || {
             let dir = temp_dir("atomic-metadata-equal-value");
             let destination = dir.join("destination.txt");
-            fs::write(&destination, b"old")
-                .expect("existing destination should be written");
+            fs::write(&destination, b"old").expect("existing destination should be written");
             set_user_xattr(&destination, "user.coverage-source", b"value")
                 .expect("source xattr should be written");
             let result = qubit_local_files::atomic::write(&destination, b"new");
             (dir, destination, result)
-        },
-    ) else {
+        })
+    else {
         return;
     };
 
@@ -770,11 +721,9 @@ fn test_atomic_write_retries_injected_destination_open_conflict() {
         "local::local_files_tests::atomic_write_tests::",
         "test_atomic_write_retries_injected_destination_open_conflict",
     );
-    let Some((dir, destination, result)) = run_atomic_write_fault(
-        TEST_NAME,
-        "atomic-destination-would-block",
-        true,
-    ) else {
+    let Some((dir, destination, result)) =
+        run_atomic_write_fault(TEST_NAME, "atomic-destination-would-block", true)
+    else {
         return;
     };
     result.expect("transient destination-open conflict should be retried");
@@ -867,8 +816,7 @@ fn test_atomic_write_reports_injected_identity_missing() {
         .temporary_path()
         .expect("indeterminate staging path should be retained");
     assert!(temporary_path.exists());
-    fs::remove_file(temporary_path)
-        .expect("retained staging file should be removed");
+    fs::remove_file(temporary_path).expect("retained staging file should be removed");
     fs::remove_dir_all(dir).expect("test directory should be removed");
 }
 
@@ -877,8 +825,7 @@ fn test_atomic_write_creates_parent_directories_and_replaces_file() {
     let dir = temp_dir("atomic-replace");
     let path = dir.join("nested").join("out.txt");
 
-    qubit_local_files::atomic::write(&path, b"first")
-        .expect("first atomic write should succeed");
+    qubit_local_files::atomic::write(&path, b"first").expect("first atomic write should succeed");
     qubit_local_files::atomic::write(&path, b"second")
         .expect("second atomic write should replace file");
 
@@ -895,8 +842,7 @@ fn test_atomic_write_does_not_replace_concurrently_created_destination() {
     writer
         .write_all(b"replacement")
         .expect("replacement contents should be staged");
-    fs::write(&path, b"concurrent")
-        .expect("concurrent destination should be installed");
+    fs::write(&path, b"concurrent").expect("concurrent destination should be installed");
 
     let error = writer
         .commit()
@@ -927,10 +873,7 @@ fn test_atomic_write_syncs_parents_of_newly_created_directories() {
 
     let result = qubit_local_files::atomic::write_with(&path, |writer| {
         writer.write_all(b"durable")?;
-        fs::set_permissions(
-            &first_created_parent,
-            fs::Permissions::from_mode(0o111),
-        )?;
+        fs::set_permissions(&first_created_parent, fs::Permissions::from_mode(0o111))?;
         permission_check_is_effective = matches!(
             fs::File::open(&first_created_parent),
             Err(error) if error.kind() == ErrorKind::PermissionDenied
@@ -938,18 +881,14 @@ fn test_atomic_write_syncs_parents_of_newly_created_directories() {
         Ok(())
     });
 
-    fs::set_permissions(
-        &first_created_parent,
-        fs::Permissions::from_mode(0o700),
-    )
-    .expect("created parent permissions should be restored");
+    fs::set_permissions(&first_created_parent, fs::Permissions::from_mode(0o700))
+        .expect("created parent permissions should be restored");
     if !permission_check_is_effective {
         fs::remove_dir_all(dir).expect("test directory should be removed");
         return;
     }
-    let error = result.expect_err(
-        "syncing the parent of a newly created directory should be attempted",
-    );
+    let error =
+        result.expect_err("syncing the parent of a newly created directory should be attempted");
 
     assert_eq!(LocalAtomicWriteStage::SyncParent, error.stage());
     assert_eq!(ErrorKind::PermissionDenied, error.kind());
@@ -985,8 +924,7 @@ fn test_atomic_write_handles_lexical_parent_aliases() {
     );
 
     let blocker = dir.join("blocker");
-    fs::write(&blocker, b"not a directory")
-        .expect("blocking file should be written");
+    fs::write(&blocker, b"not a directory").expect("blocking file should be written");
     let destination = dir.join("missing").join("..").join("blocker/out.txt");
     let error = qubit_local_files::atomic::write(&destination, b"blocked")
         .expect_err("aliased regular-file parent should be rejected");
@@ -1026,8 +964,7 @@ fn test_atomic_write_reports_parent_chain_creation_error() {
     let restricted = dir.join("restricted");
     let probe = restricted.join("probe");
     let destination = restricted.join("missing/out.txt");
-    fs::create_dir(&restricted)
-        .expect("restricted directory should be created");
+    fs::create_dir(&restricted).expect("restricted directory should be created");
     fs::set_permissions(&restricted, fs::Permissions::from_mode(0o500))
         .expect("restricted directory permissions should be set");
     let probe_result = fs::create_dir(&probe);
@@ -1082,12 +1019,9 @@ fn test_atomic_write_preserves_windows_dacl_and_stream() {
     let path = dir.join("out.txt");
     let stream = alternate_data_stream_path(&path, "qubit-stream");
     fs::write(&path, b"old").expect("destination fixture should be written");
-    fs::write(&stream, b"stream-data")
-        .expect("alternate data stream should be written");
-    set_world_full_control_dacl(&path)
-        .expect("custom destination DACL should be applied");
-    let original_dacl = read_dacl_bytes(&path)
-        .expect("custom destination DACL should be readable");
+    fs::write(&stream, b"stream-data").expect("alternate data stream should be written");
+    set_world_full_control_dacl(&path).expect("custom destination DACL should be applied");
+    let original_dacl = read_dacl_bytes(&path).expect("custom destination DACL should be readable");
     qubit_local_files::atomic::write(&path, b"new")
         .expect("native Windows replacement should preserve metadata");
 
@@ -1116,8 +1050,7 @@ fn test_atomic_write_rejects_windows_readonly_destination() {
         .expect("destination metadata should be readable")
         .permissions();
     permissions.set_readonly(true);
-    fs::set_permissions(&path, permissions)
-        .expect("destination readonly attribute should be set");
+    fs::set_permissions(&path, permissions).expect("destination readonly attribute should be set");
 
     let error = qubit_local_files::atomic::write(&path, b"new")
         .expect_err("ReplaceFileW should reject a readonly destination");
@@ -1137,8 +1070,7 @@ fn test_atomic_write_rejects_windows_readonly_destination() {
     );
     assert_eq!(0, count_atomic_temp_files(&dir));
 
-    clear_readonly_attribute(&path)
-        .expect("readonly attribute should be cleared for cleanup");
+    clear_readonly_attribute(&path).expect("readonly attribute should be cleared for cleanup");
     fs::remove_dir_all(dir).expect("test directory should be removed");
 }
 
@@ -1168,15 +1100,12 @@ fn test_atomic_write_ignores_windows_parent_sync_sharing_violation() {
             fs::remove_dir_all(dir).unwrap();
             return;
         }
-        Err(error) => panic!(
-            "parent directory should be locked for restricted sharing: {error}"
-        ),
+        Err(error) => panic!("parent directory should be locked for restricted sharing: {error}"),
     };
 
     let path = parent.join("out.txt");
-    qubit_local_files::atomic::write(&path, b"data").expect(
-        "atomic write should ignore unavailable Windows parent directory sync",
-    );
+    qubit_local_files::atomic::write(&path, b"data")
+        .expect("atomic write should ignore unavailable Windows parent directory sync");
     assert_eq!(b"data", fs::read(&path).unwrap().as_slice());
 
     drop(locked_parent);
@@ -1213,10 +1142,8 @@ fn test_atomic_write_preserves_commit_time_xattr() {
     let dir = temp_dir("atomic-commit-time-xattr");
     let path = dir.join("out.txt");
     fs::write(&path, b"old").expect("destination fixture should be written");
-    set_user_xattr(&path, XATTR_NAME, b"initial")
-        .expect("initial destination xattr should be set");
-    let mut writer = qubit_local_files::atomic::begin(&path)
-        .expect("atomic writer should begin");
+    set_user_xattr(&path, XATTR_NAME, b"initial").expect("initial destination xattr should be set");
+    let mut writer = qubit_local_files::atomic::begin(&path).expect("atomic writer should begin");
     set_user_xattr(&path, XATTR_NAME, b"latest")
         .expect("destination xattr should change before commit");
     writer
@@ -1240,12 +1167,9 @@ fn test_atomic_write_preserves_commit_time_macos_acl() {
     let dir = temp_dir("atomic-commit-time-macos-acl");
     let path = dir.join("out.txt");
     fs::write(&path, b"old").expect("destination fixture should be written");
-    let mut writer = qubit_local_files::atomic::begin(&path)
-        .expect("atomic writer should begin");
-    set_current_user_read_acl(&path)
-        .expect("explicit macOS ACL should be installed");
-    let expected_acl =
-        read_macos_acl_text(&path).expect("destination ACL should be readable");
+    let mut writer = qubit_local_files::atomic::begin(&path).expect("atomic writer should begin");
+    set_current_user_read_acl(&path).expect("explicit macOS ACL should be installed");
+    let expected_acl = read_macos_acl_text(&path).expect("destination ACL should be readable");
     writer
         .write_all(b"new")
         .expect("replacement contents should be staged");
@@ -1265,16 +1189,15 @@ fn test_atomic_write_preserves_commit_time_freebsd_acl() {
     let dir = temp_dir("atomic-commit-time-freebsd-acl");
     let path = dir.join("out.txt");
     fs::write(&path, b"old").expect("destination fixture should be written");
-    let mut writer = qubit_local_files::atomic::begin(&path)
-        .expect("atomic writer should begin");
+    let mut writer = qubit_local_files::atomic::begin(&path).expect("atomic writer should begin");
     let Some(acl_type) = install_supported_test_acl(&path)
         .expect("a supported FreeBSD ACL fixture should be installed")
     else {
         fs::remove_dir_all(dir).expect("test directory should be removed");
         return;
     };
-    let expected_acl = read_freebsd_acl_text(&path, acl_type)
-        .expect("destination ACL should be readable");
+    let expected_acl =
+        read_freebsd_acl_text(&path, acl_type).expect("destination ACL should be readable");
     writer
         .write_all(b"new")
         .expect("replacement contents should be staged");
@@ -1283,8 +1206,7 @@ fn test_atomic_write_preserves_commit_time_freebsd_acl() {
 
     assert_eq!(
         expected_acl,
-        read_freebsd_acl_text(&path, acl_type)
-            .expect("committed ACL should be readable"),
+        read_freebsd_acl_text(&path, acl_type).expect("committed ACL should be readable"),
     );
     fs::remove_dir_all(dir).expect("test directory should be removed");
 }
@@ -1297,8 +1219,7 @@ fn test_atomic_write_preserves_commit_time_mode() {
     fs::write(&path, b"old").expect("destination fixture should be written");
     fs::set_permissions(&path, fs::Permissions::from_mode(0o600))
         .expect("initial destination mode should be set");
-    let mut writer = qubit_local_files::atomic::begin(&path)
-        .expect("atomic writer should begin");
+    let mut writer = qubit_local_files::atomic::begin(&path).expect("atomic writer should begin");
     fs::set_permissions(&path, fs::Permissions::from_mode(0o640))
         .expect("destination mode should change before commit");
     writer
@@ -1342,11 +1263,8 @@ fn test_atomic_write_creates_missing_relative_parent_chain() {
     let dir = temp_dir("atomic-missing-relative-parent-chain");
     let _guard = CurrentDirGuard::change_to(&dir);
 
-    qubit_local_files::atomic::write(
-        std::path::Path::new("first/second/out.txt"),
-        b"relative",
-    )
-    .expect("relative parent chain should be created");
+    qubit_local_files::atomic::write(std::path::Path::new("first/second/out.txt"), b"relative")
+        .expect("relative parent chain should be created");
 
     assert_eq!(
         b"relative",
@@ -1364,8 +1282,7 @@ fn test_atomic_write_returns_parent_inspection_error() {
     let dir = temp_dir("atomic-parent-inspection-error");
     let restricted = dir.join("restricted");
     let path = restricted.join("missing").join("out.txt");
-    fs::create_dir(&restricted)
-        .expect("restricted directory should be created");
+    fs::create_dir(&restricted).expect("restricted directory should be created");
     fs::set_permissions(&restricted, fs::Permissions::from_mode(0o000))
         .expect("restricted directory permissions should be set");
     let probe = fs::metadata(restricted.join("missing"));
@@ -1443,10 +1360,7 @@ fn test_atomic_write_with_reports_temporary_cleanup_failure() {
     let restricted_dir = dir.clone();
     let error = qubit_local_files::atomic::write_with(&path, move |writer| {
         writer.write_all(b"new")?;
-        fs::set_permissions(
-            &restricted_dir,
-            fs::Permissions::from_mode(0o500),
-        )?;
+        fs::set_permissions(&restricted_dir, fs::Permissions::from_mode(0o500))?;
         Err(Error::other("write failed"))
     })
     .expect_err("write and staging cleanup should both fail");
@@ -1502,9 +1416,7 @@ fn test_atomic_write_with_uses_guarded_atomic_writer() {
 
     qubit_local_files::atomic::write_with(
         &path,
-        |writer: &mut qubit_local_files::atomic::Writer| {
-            writer.write_all(b"committed")
-        },
+        |writer: &mut qubit_local_files::atomic::Writer| writer.write_all(b"committed"),
     )
     .expect("guarded atomic callback should commit");
 
@@ -1652,8 +1564,7 @@ fn test_atomic_write_rejects_directory_destination() {
 
 #[cfg(unix)]
 #[test]
-fn test_atomic_write_returns_parent_sync_open_error_when_directory_is_not_readable()
- {
+fn test_atomic_write_returns_parent_sync_open_error_when_directory_is_not_readable() {
     let dir = temp_dir("atomic-parent-sync-open-error");
     let parent = dir.join("parent");
     fs::create_dir(&parent).unwrap();

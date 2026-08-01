@@ -25,6 +25,8 @@ pub enum LocalFileOperation {
     ComposePath,
     /// Reading entry metadata.
     Metadata,
+    /// Opening a rooted filesystem authority.
+    OpenRoot,
     /// Opening a file reader.
     OpenReader,
     /// Opening a file writer.

@@ -10,19 +10,12 @@
 
 use std::{
     error::Error,
-    fmt,
-    io,
-    path::{
-        Path,
-        PathBuf,
-    },
+    fmt, io,
+    path::{Path, PathBuf},
 };
 
 use super::{
-    LocalFileErrorKind,
-    LocalFileErrorSource,
-    LocalFileOperation,
-    LocalMutationState,
+    LocalFileErrorKind, LocalFileErrorSource, LocalFileOperation, LocalMutationState,
     LocalPathCodecError,
 };
 
@@ -52,10 +45,7 @@ impl LocalFileError {
     /// - `operation`: Operation that failed.
     #[must_use]
     #[inline(always)]
-    pub const fn new(
-        kind: LocalFileErrorKind,
-        operation: LocalFileOperation,
-    ) -> Self {
+    pub const fn new(kind: LocalFileErrorKind, operation: LocalFileOperation) -> Self {
         Self {
             kind,
             operation,
@@ -168,10 +158,7 @@ impl LocalFileError {
     /// The updated structured error.
     #[must_use]
     #[inline(always)]
-    pub const fn with_mutation_state(
-        mut self,
-        state: LocalMutationState,
-    ) -> Self {
+    pub const fn with_mutation_state(mut self, state: LocalMutationState) -> Self {
         self.mutation_state = Some(state);
         self
     }
@@ -279,12 +266,11 @@ fn standard_io_error_kind(error: &LocalFileError) -> io::ErrorKind {
             LocalFileErrorKind::AlreadyExists => io::ErrorKind::AlreadyExists,
             LocalFileErrorKind::InvalidInput => io::ErrorKind::InvalidInput,
             LocalFileErrorKind::NotFound => io::ErrorKind::NotFound,
-            LocalFileErrorKind::PermissionDenied => {
-                io::ErrorKind::PermissionDenied
-            }
+            LocalFileErrorKind::PermissionDenied => io::ErrorKind::PermissionDenied,
             LocalFileErrorKind::ResourceLimit => io::ErrorKind::StorageFull,
-            LocalFileErrorKind::RequirementNotMet
-            | LocalFileErrorKind::Unsupported => io::ErrorKind::Unsupported,
+            LocalFileErrorKind::RequirementNotMet | LocalFileErrorKind::Unsupported => {
+                io::ErrorKind::Unsupported
+            }
             _ => io::ErrorKind::Other,
         },
     }
@@ -335,9 +321,9 @@ fn classify_io_error(error: &io::Error) -> LocalFileErrorKind {
             LocalFileErrorKind::InvalidInput
         }
         io::ErrorKind::Unsupported => LocalFileErrorKind::Unsupported,
-        io::ErrorKind::OutOfMemory
-        | io::ErrorKind::StorageFull
-        | io::ErrorKind::QuotaExceeded => LocalFileErrorKind::ResourceLimit,
+        io::ErrorKind::OutOfMemory | io::ErrorKind::StorageFull | io::ErrorKind::QuotaExceeded => {
+            LocalFileErrorKind::ResourceLimit
+        }
         _ => LocalFileErrorKind::Io,
     }
 }

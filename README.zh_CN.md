@@ -61,7 +61,7 @@ assert_eq!(content, r#"{"version":1}"#);
 | `LocalTempFile` / `LocalTempDirectory` | 拥有清理责任，并支持 `keep` 与持久化。 |
 | `LocalFileNames` / `LocalPaths` | 不丢失 UTF-8 以外文件名信息的原生文件名和词法路径工具。 |
 
-所有文件系统操作都是关联方法或有状态资源的方法；旧式的自由函数命名空间不是公共 API。
+所有文件系统操作都是关联方法或有状态资源的方法；crate 不再保留旧式自由函数命名空间。
 
 ## 选择合适的权限范围
 

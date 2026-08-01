@@ -13,20 +13,12 @@
 
 use std::ffi::CString;
 use std::fs::File;
-use std::io::{
-    Error,
-    ErrorKind,
-};
+use std::io::{Error, ErrorKind};
 
-use crate::{
-    LocalAtomicDestinationState,
-    LocalAtomicWriteError,
-    LocalAtomicWriteStage,
-};
+use crate::{LocalAtomicDestinationState, LocalAtomicWriteError, LocalAtomicWriteStage};
 
 use super::opened_atomic_destination::{
-    OpenedAtomicDestination,
-    rooted_destination_identity_matches,
+    OpenedAtomicDestination, rooted_destination_identity_matches,
 };
 use super::rooted_atomic_write::inspect_rooted_atomic_destination;
 use super::rooted_staged_file::RootedStagedFile;
@@ -50,11 +42,7 @@ pub(in crate::local) fn verify_rooted_atomic_destination_identity(
     requested_path: &std::path::Path,
     staged_file: &RootedStagedFile,
 ) -> Result<(), LocalAtomicWriteError> {
-    match rooted_destination_identity_matches(
-        staged_file.parent(),
-        name,
-        destination,
-    ) {
+    match rooted_destination_identity_matches(staged_file.parent(), name, destination) {
         Ok(true) => Ok(()),
         Ok(false) => Err(identity_error(
             requested_path,
@@ -104,10 +92,7 @@ fn identity_error(
 }
 
 /// Classifies a rooted identity mismatch before replacement.
-fn rooted_mismatch_state(
-    parent: &File,
-    name: &CString,
-) -> LocalAtomicDestinationState {
+fn rooted_mismatch_state(parent: &File, name: &CString) -> LocalAtomicDestinationState {
     #[cfg(coverage)]
     if super::coverage_fault::is_enabled("rooted-identity-missing") {
         return LocalAtomicDestinationState::Missing;

@@ -44,8 +44,8 @@ where
     T: Send + 'static,
 {
     if std::env::var_os(child_environment).is_none() {
-        let executable = std::env::current_exe()
-            .expect("current test executable should be available");
+        let executable =
+            std::env::current_exe().expect("current test executable should be available");
         let status = Command::new(executable)
             .arg("--exact")
             .arg(test_name)

@@ -64,7 +64,7 @@ assert_eq!(content, r#"{"version":1}"#);
 | `LocalFileNames` / `LocalPaths` | Native filename and lexical-path helpers without lossy UTF-8 conversion. |
 
 All filesystem operations are associated methods or methods on stateful
-resources; legacy free-function namespaces are not public API.
+resources; the crate exposes no legacy free-function namespaces.
 
 ## Choose the right authority
 

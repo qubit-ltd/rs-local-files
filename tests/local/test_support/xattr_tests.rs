@@ -9,21 +9,13 @@
 //! Platform-native extended-attribute fixtures.
 
 use std::ffi::CString;
-use std::io::{
-    Error,
-    ErrorKind,
-    Result,
-};
+use std::io::{Error, ErrorKind, Result};
 use std::os::unix::ffi::OsStrExt;
 use std::path::Path;
 
 /// Sets one extended attribute on a filesystem path.
 #[cfg(any(target_os = "linux", target_os = "android"))]
-pub(crate) fn set_user_xattr(
-    path: &Path,
-    name: &str,
-    value: &[u8],
-) -> Result<()> {
+pub(crate) fn set_user_xattr(path: &Path, name: &str, value: &[u8]) -> Result<()> {
     let path = native_path(path)?;
     let name = native_name(name)?;
     // SAFETY: both C strings and the value buffer remain live for the
@@ -45,11 +37,7 @@ pub(crate) fn set_user_xattr(
 
 /// Sets one macOS extended attribute on a filesystem path.
 #[cfg(target_os = "macos")]
-pub(crate) fn set_user_xattr(
-    path: &Path,
-    name: &str,
-    value: &[u8],
-) -> Result<()> {
+pub(crate) fn set_user_xattr(path: &Path, name: &str, value: &[u8]) -> Result<()> {
     let path = native_path(path)?;
     let name = native_name(name)?;
     // SAFETY: both C strings and the value buffer remain live for the
@@ -72,11 +60,7 @@ pub(crate) fn set_user_xattr(
 
 /// Sets one FreeBSD user-namespace extended attribute.
 #[cfg(target_os = "freebsd")]
-pub(crate) fn set_user_xattr(
-    path: &Path,
-    name: &str,
-    value: &[u8],
-) -> Result<()> {
+pub(crate) fn set_user_xattr(path: &Path, name: &str, value: &[u8]) -> Result<()> {
     let path = native_path(path)?;
     let name = native_name(name)?;
     // SAFETY: both C strings and the value buffer remain live for the
@@ -110,14 +94,8 @@ pub(crate) fn get_user_xattr(path: &Path, name: &str) -> Result<Vec<u8>> {
     loop {
         // SAFETY: both C strings remain live and null output requests only the
         // current value length.
-        let length = unsafe {
-            libc::getxattr(
-                path.as_ptr(),
-                name.as_ptr(),
-                std::ptr::null_mut(),
-                0,
-            )
-        };
+        let length =
+            unsafe { libc::getxattr(path.as_ptr(), name.as_ptr(), std::ptr::null_mut(), 0) };
         if length == -1 {
             return Err(Error::last_os_error());
         }
@@ -152,16 +130,8 @@ pub(crate) fn get_user_xattr(path: &Path, name: &str) -> Result<Vec<u8>> {
     loop {
         // SAFETY: both C strings remain live and null output requests only the
         // current value length at position zero.
-        let length = unsafe {
-            libc::getxattr(
-                path.as_ptr(),
-                name.as_ptr(),
-                std::ptr::null_mut(),
-                0,
-                0,
-                0,
-            )
-        };
+        let length =
+            unsafe { libc::getxattr(path.as_ptr(), name.as_ptr(), std::ptr::null_mut(), 0, 0, 0) };
         if length == -1 {
             return Err(Error::last_os_error());
         }
@@ -242,14 +212,11 @@ pub(crate) fn get_user_xattr(path: &Path, name: &str) -> Result<Vec<u8>> {
 
 /// Converts a test path to a NUL-terminated native byte string.
 fn native_path(path: &Path) -> Result<CString> {
-    CString::new(path.as_os_str().as_bytes()).map_err(|_| {
-        Error::new(ErrorKind::InvalidInput, "xattr path contains NUL")
-    })
+    CString::new(path.as_os_str().as_bytes())
+        .map_err(|_| Error::new(ErrorKind::InvalidInput, "xattr path contains NUL"))
 }
 
 /// Converts an attribute name to a NUL-terminated native byte string.
 fn native_name(name: &str) -> Result<CString> {
-    CString::new(name).map_err(|_| {
-        Error::new(ErrorKind::InvalidInput, "xattr name contains NUL")
-    })
+    CString::new(name).map_err(|_| Error::new(ErrorKind::InvalidInput, "xattr name contains NUL"))
 }
