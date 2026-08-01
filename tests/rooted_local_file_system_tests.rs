@@ -376,7 +376,7 @@ fn test_rooted_copy_failure_reports_second_child_partial_publication() {
             .copy(
                 Path::new("source"),
                 Path::new("target"),
-                &LocalCopyOptions::default().with_recursive(),
+                &LocalCopyOptions::default().with_tree_source(),
             )
             .expect_err("second rooted child fault must fail");
 
@@ -690,7 +690,10 @@ fn test_rooted_local_file_system_create_new_preserves_concurrent_target() {
         .commit()
         .expect_err("rooted create-new must not replace a concurrent target");
 
-    assert_eq!(LocalWriterState::NotPublished, error.state());
+    assert_eq!(
+        qubit_local_files::LocalWriteFailureState::NotPublished,
+        error.state(),
+    );
     assert_eq!(
         b"concurrent",
         fs::read(&target)

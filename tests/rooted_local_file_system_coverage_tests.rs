@@ -554,7 +554,7 @@ fn test_rooted_local_file_system_create_new_commit_preserves_concurrent_target()
     );
 
     assert_eq!(
-        qubit_local_files::LocalWriterState::NotPublished,
+        qubit_local_files::LocalWriteFailureState::NotPublished,
         error.state()
     );
     assert_eq!(
@@ -766,11 +766,14 @@ fn test_rooted_local_file_system_returns_retryable_writer_before_publication() {
         .commit()
         .expect_err("missing rooted destination should prevent publication");
     assert_eq!(
-        qubit_local_files::LocalWriterState::NotPublished,
+        qubit_local_files::LocalWriteFailureState::NotPublished,
         error.state()
     );
     let (_cause, state, retryable) = error.into_parts();
-    assert_eq!(qubit_local_files::LocalWriterState::NotPublished, state);
+    assert_eq!(
+        qubit_local_files::LocalWriteFailureState::NotPublished,
+        state,
+    );
     let outcome = retryable
         .expect("rooted pre-publication failure should retain staging")
         .abort()
@@ -1161,7 +1164,7 @@ fn test_rooted_local_file_system_writer_reports_injected_install_failure() {
             "injected rooted installation failure must fail commit",
         );
         assert_eq!(
-            qubit_local_files::LocalWriterState::NotPublished,
+            qubit_local_files::LocalWriteFailureState::NotPublished,
             error.state()
         );
         let (_cause, _state, retained) = error.into_parts();

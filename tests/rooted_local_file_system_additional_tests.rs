@@ -228,7 +228,11 @@ fn test_rooted_local_file_system_append_commit_and_abort_report_states() {
         .write_all(b"-abort")
         .expect("second rooted append writer should accept bytes");
     let aborted_outcome = aborted.abort().expect("append abort should flush");
-    assert_eq!(LocalWriterState::Published, aborted_outcome.state());
+    assert_eq!(LocalWriterState::Aborted, aborted_outcome.state());
+    assert_eq!(
+        Some(qubit_local_files::LocalWriteFailureState::Published),
+        aborted_outcome.failure_state(),
+    );
     assert_eq!(
         b"base-commit-abort",
         fs::read(parent.path().join("payload"))
@@ -378,7 +382,7 @@ fn test_rooted_local_file_system_copy_enforces_directory_policies() {
             Path::new("source"),
             Path::new("target"),
             &LocalCopyOptions::new()
-                .with_recursive()
+                .with_tree_source()
                 .with_atomicity(LocalAtomicityRequirement::Required),
         )
         .expect_err("directory copy cannot promise required atomicity");
@@ -391,7 +395,7 @@ fn test_rooted_local_file_system_copy_enforces_directory_policies() {
         .copy(
             Path::new("source"),
             Path::new("target"),
-            &LocalCopyOptions::new().with_recursive(),
+            &LocalCopyOptions::new().with_tree_source(),
         )
         .expect("recursive rooted copy should succeed");
     assert_eq!(LocalCopyMethod::Recursive, outcome.method());

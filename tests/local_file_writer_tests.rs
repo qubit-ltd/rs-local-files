@@ -27,6 +27,7 @@ use qubit_local_files::{
     LocalWriteMode,
     LocalWriteOptions,
     LocalWriterState,
+    LocalWriteFailureState,
 };
 use tempfile::tempdir;
 
@@ -199,7 +200,7 @@ fn test_local_file_writer_create_new_preserves_concurrent_target() {
         .commit()
         .expect_err("create-new commit must not replace a concurrent target");
 
-    assert_eq!(LocalWriterState::NotPublished, error.state());
+    assert_eq!(LocalWriteFailureState::NotPublished, error.state());
     assert_eq!(
         b"concurrent",
         fs::read(&target)
@@ -288,7 +289,7 @@ fn test_local_file_writer_reports_parent_sync_result() {
                 let error = writer
                     .commit()
                     .expect_err("required durability must report sync failure");
-                assert_eq!(LocalWriterState::Published, error.state());
+                assert_eq!(LocalWriteFailureState::Published, error.state());
                 assert_eq!(
                     LocalFileErrorKind::PublicationIncomplete,
                     error.error().kind(),
@@ -369,7 +370,10 @@ fn run_indeterminate_append_case(case: &str) {
     writer
         .write_all(b"x")
         .expect_err("zero file-size limit should reject append");
-    assert_eq!(LocalWriterState::Indeterminate, writer.state());
+    assert_eq!(
+        Some(LocalWriteFailureState::Indeterminate),
+        writer.failure_state(),
+    );
     let write_after_failure = writer
         .write(b"x")
         .expect_err("indeterminate writer must reject further writes");
@@ -390,13 +394,17 @@ fn run_indeterminate_append_case(case: &str) {
             let error = writer
                 .commit()
                 .expect_err("indeterminate writer must not commit");
-            assert_eq!(LocalWriterState::Indeterminate, error.state());
+            assert_eq!(LocalWriteFailureState::Indeterminate, error.state());
         }
         "abort" => {
             let outcome = writer
                 .abort()
                 .expect("abort should close an indeterminate append writer");
-            assert_eq!(LocalWriterState::Indeterminate, outcome.state());
+            assert_eq!(LocalWriterState::Aborted, outcome.state());
+            assert_eq!(
+                Some(LocalWriteFailureState::Indeterminate),
+                outcome.failure_state(),
+            );
         }
         other => panic!("unexpected append regression case: {other}"),
     }

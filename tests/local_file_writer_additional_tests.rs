@@ -22,6 +22,7 @@ use qubit_local_files::{
     LocalWriteMode,
     LocalWriteOptions,
     LocalWriterState,
+    LocalWriteFailureState,
 };
 use tempfile::tempdir;
 
@@ -90,7 +91,11 @@ fn test_local_file_writer_append_abort_reports_aborted_and_published_states() {
         .expect("append writer should accept bytes");
     let published_outcome =
         published.abort().expect("append abort should flush");
-    assert_eq!(LocalWriterState::Published, published_outcome.state());
+    assert_eq!(LocalWriterState::Aborted, published_outcome.state());
+    assert_eq!(
+        Some(LocalWriteFailureState::Published),
+        published_outcome.failure_state(),
+    );
     assert_eq!(
         b"base-published",
         fs::read(&target)
@@ -175,10 +180,10 @@ fn test_local_file_writer_commit_conflict_preserves_concurrent_destination() {
     let error = writer
         .commit()
         .expect_err("commit must preserve a concurrently created target");
-    assert_eq!(LocalWriterState::NotPublished, error.state());
+    assert_eq!(LocalWriteFailureState::NotPublished, error.state());
     assert!(error.writer().is_none());
     let (_cause, state, retained) = error.into_parts();
-    assert_eq!(LocalWriterState::NotPublished, state);
+    assert_eq!(LocalWriteFailureState::NotPublished, state);
     assert!(retained.is_none());
     assert_eq!(
         b"concurrent",
@@ -208,14 +213,14 @@ fn test_local_file_commit_error_exposes_complete_public_context() {
     let error = writer
         .commit()
         .expect_err("concurrent destination must fail create-new commit");
-    assert_eq!(LocalWriterState::NotPublished, error.state());
+    assert_eq!(LocalWriteFailureState::NotPublished, error.state());
     assert_eq!(LocalFileErrorKind::AlreadyExists, error.error().kind());
     assert!(error.writer().is_none());
     assert!(error.to_string().contains("NotPublished"));
     assert!(StdError::source(&error).is_some());
 
     let (cause, state, retained) = error.into_parts();
-    assert_eq!(LocalWriterState::NotPublished, state);
+    assert_eq!(LocalWriteFailureState::NotPublished, state);
     assert_eq!(LocalFileErrorKind::AlreadyExists, cause.kind());
     assert!(retained.is_none());
 }
@@ -279,9 +284,9 @@ fn test_local_file_writer_returns_retryable_writer_before_publication() {
     let error = writer
         .commit()
         .expect_err("missing inspected destination should prevent publication");
-    assert_eq!(LocalWriterState::NotPublished, error.state());
+    assert_eq!(LocalWriteFailureState::NotPublished, error.state());
     let (_cause, state, retryable) = error.into_parts();
-    assert_eq!(LocalWriterState::NotPublished, state);
+    assert_eq!(LocalWriteFailureState::NotPublished, state);
     let outcome = retryable
         .expect("pre-publication failure should retain the staged writer")
         .abort()
@@ -407,9 +412,9 @@ fn test_local_file_writer_rooted_prepublication_failure_retains_writer() {
     let error = writer
         .commit()
         .expect_err("missing rooted destination must prevent publication");
-    assert_eq!(LocalWriterState::NotPublished, error.state());
+    assert_eq!(LocalWriteFailureState::NotPublished, error.state());
     let (_cause, state, retained) = error.into_parts();
-    assert_eq!(LocalWriterState::NotPublished, state);
+    assert_eq!(LocalWriteFailureState::NotPublished, state);
     let outcome = retained
         .expect("prepublication rooted failure should retain writer")
         .abort()
@@ -467,7 +472,7 @@ fn test_local_file_writer_reports_injected_replacement_failure() {
         let error = writer
             .commit()
             .expect_err("injected replacement failure must fail commit");
-        assert_eq!(LocalWriterState::NotPublished, error.state());
+        assert_eq!(LocalWriteFailureState::NotPublished, error.state());
         let (_cause, _state, retained) = error.into_parts();
         assert!(retained.is_none());
         assert_eq!(
@@ -502,7 +507,7 @@ fn test_local_file_writer_reports_injected_append_commit_flush_failure() {
         let error = writer
             .commit()
             .expect_err("injected append flush must fail commit");
-        assert_eq!(LocalWriterState::Indeterminate, error.state());
+        assert_eq!(LocalWriteFailureState::Indeterminate, error.state());
         assert_eq!(LocalFileErrorKind::Indeterminate, error.error().kind());
     });
 }
@@ -531,7 +536,7 @@ fn test_local_file_writer_reports_injected_required_append_sync_failure() {
         let error = writer
             .commit()
             .expect_err("injected append sync must fail commit");
-        assert_eq!(LocalWriterState::Published, error.state());
+        assert_eq!(LocalWriteFailureState::Published, error.state());
         assert_eq!(
             LocalFileErrorKind::PublicationIncomplete,
             error.error().kind(),

@@ -8,7 +8,10 @@
 // qubit-style: allow source-test-pair
 // Covered by writer integration tests.
 
-use super::LocalWriterState;
+use super::{
+    LocalWriteFailureState,
+    LocalWriterState,
+};
 
 /// Structured result of committing or aborting a local writer.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -22,6 +25,8 @@ pub struct LocalWriteOutcome {
     durable: bool,
     /// Bytes accepted by the writer stream.
     bytes_written: u64,
+    /// Failure state retained when a stream failure preceded terminal cleanup.
+    failure_state: Option<LocalWriteFailureState>,
 }
 
 impl LocalWriteOutcome {
@@ -39,12 +44,14 @@ impl LocalWriteOutcome {
         atomic: bool,
         durable: bool,
         bytes_written: u64,
+        failure_state: Option<LocalWriteFailureState>,
     ) -> Self {
         Self {
             state,
             atomic,
             durable,
             bytes_written,
+            failure_state,
         }
     }
 
@@ -73,5 +80,13 @@ impl LocalWriteOutcome {
     #[inline(always)]
     pub const fn bytes_written(self) -> u64 {
         self.bytes_written
+    }
+
+    /// Returns a failure state retained from an earlier stream or publication
+    /// error, or `None` when the terminal outcome is fully successful.
+    #[must_use]
+    #[inline(always)]
+    pub const fn failure_state(self) -> Option<LocalWriteFailureState> {
+        self.failure_state
     }
 }
