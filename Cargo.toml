@@ -48,8 +48,13 @@ windows-sys = { version = "0.61.2", features = [
 ] }
 
 [dev-dependencies]
+criterion = "0.5"
 proptest = "1.0"
 tempfile = "3.27"
+
+[[bench]]
+name = "local_files"
+harness = false
 
 [lints.rust]
 unexpected_cfgs = { level = "warn", check-cfg = ['cfg(coverage)'] }
