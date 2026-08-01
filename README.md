@@ -66,6 +66,16 @@ assert_eq!(content, r#"{"version":1}"#);
 All filesystem operations are associated methods or methods on stateful
 resources; the crate exposes no legacy free-function namespaces.
 
+Temporary-resource cleanup is ownership-aware, not a synchronization boundary.
+Before deleting, a guard checks that the path still has the identity captured
+at creation, so ordinary replacement is rejected. The identity check and path
+deletion are separate operating-system operations, however. If an untrusted
+actor can mutate the same directory concurrently, it can race those operations,
+and a filesystem may eventually reuse an identity. For example, removing a
+temporary file and repeatedly installing another file at the same name is
+outside the cleanup guarantee. Put temporary entries in a directory not
+writable by concurrent actors, or call `keep` and coordinate deletion yourself.
+
 ## Choose the right authority
 
 Use `LocalFileSystem` for host paths. Use `RootedLocalFileSystem` when one
@@ -93,8 +103,9 @@ atomicity.
 
 Linux, Windows, and macOS behavior is runtime-tested. FreeBSD and Android
 configuration paths are compile-checked only; this crate makes no runtime
-guarantee for those targets. Capability snapshots report only guarantees the
-selected implementation can provide; required atomicity or durability is
+guarantee for those targets. Capability snapshots report mechanisms implemented
+for the selected build; they do not probe a particular runtime filesystem.
+Required atomicity or durability is
 rejected before namespace changes when it cannot be met.
 
 ## Testing

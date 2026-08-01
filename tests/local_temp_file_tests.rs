@@ -540,8 +540,8 @@ fn test_local_temp_file_close_rejects_stream_access_and_allows_cleanup() {
 
 /// Verifies cleanup rejects a path that no longer names the created entry.
 ///
-/// A replacement must never be removed by a retry, even when the filesystem
-/// reuses the original inode number.
+/// This fixture installs a separately created replacement and therefore
+/// verifies the ordinary distinct-identity case, not identity reuse.
 #[test]
 fn test_local_temp_file_cleanup_rejects_replaced_entry() {
     let parent = tempdir().expect("temporary parent should be created");
