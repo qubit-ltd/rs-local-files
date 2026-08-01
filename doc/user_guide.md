@@ -63,13 +63,16 @@ symbolic link.
 
 `CreateNew` and `CreateOrReplace` use same-directory staging. `Append` changes
 an existing regular file directly and rejects required atomicity. A writer can
-be committed or aborted; a write, flush, or commit error can leave publication
-state indeterminate, so retain and inspect the returned resource/error where
-recovery is required.
+be committed or aborted; lifecycle (`LocalWriterState`) is separate from
+publication conclusion (`LocalWriteFailureState`). A write, flush, or commit
+error can leave publication state indeterminate, so retain and inspect the
+returned resource/error where recovery is required.
 
-`copy` selects file or directory behavior from source metadata. Its options
-separately control target conflict, type conflict, metadata, symbolic links,
-device boundaries, recursion, atomicity, and durability. Unsupported required
+`copy` selects file or directory behavior from source metadata. Use
+`with_file_source()` or `with_tree_source()` when the source kind must be
+explicit; `source_mode()` reports the selected mode. Its options separately
+control target conflict, type conflict, metadata, symbolic links, device
+boundaries, atomicity, and durability. Unsupported required
 guarantees are rejected before destructive changes. Self-copy and hard-link
 aliases are rejected; overwriting a symbolic-link target replaces that entry
 rather than following it.
