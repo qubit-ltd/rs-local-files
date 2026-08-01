@@ -15,11 +15,11 @@ use std::{
 
 use crate::rooted::Entry;
 
-/// One materialized immediate rooted directory listing in a lazy tree walk.
+/// One deferred immediate rooted directory listing in a lazy tree walk.
 #[derive(Debug)]
 pub(in crate::walk) struct RootedWalkFrame {
-    /// Remaining immediate entries returned by the rooted platform backend.
-    pub(in crate::walk) entries: IntoIter<Entry>,
+    /// Remaining immediate entries, initialized on the first iteration step.
+    pub(in crate::walk) entries: Option<IntoIter<Entry>>,
     /// Authority-relative path of the listed directory.
     pub(in crate::walk) authority_parent: PathBuf,
     /// Requested-list-root-relative path of the listed directory.

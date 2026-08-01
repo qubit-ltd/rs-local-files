@@ -130,8 +130,8 @@ impl LocalDirectoryWalker {
     ///
     /// # Errors
     ///
-    /// Returns `LocalFileError` when follow mode is requested, or the initial
-    /// rooted directory cannot be read.
+    /// Returns `LocalFileError` when follow mode is requested. Rooted directory
+    /// opening and enumeration errors are yielded by the iterator.
     pub(crate) fn open_rooted(
         root: Arc<crate::rooted::Root>,
         path: Option<crate::local::LocalRelativePath>,
@@ -146,11 +146,6 @@ impl LocalDirectoryWalker {
         let authority_parent = path
             .as_ref()
             .map_or_else(PathBuf::new, |path| path.as_path().to_path_buf());
-        let entries = match path.as_ref() {
-            Some(path) => root.read_dir(path),
-            None => root.read_root_dir(),
-        }
-        .map_err(|error| walk_io_error(&authority_parent, error))?;
         let diagnostic_root = root.path().join(&authority_parent);
         Ok(Self {
             root: diagnostic_root,
@@ -160,7 +155,7 @@ impl LocalDirectoryWalker {
             rooted: Some(RootedWalkState {
                 root,
                 stack: vec![RootedWalkFrame {
-                    entries: entries.into_iter(),
+                    entries: None,
                     authority_parent,
                     output_parent: PathBuf::new(),
                     entry_depth: 1,
@@ -347,7 +342,37 @@ fn next_rooted_entry(
         let entry_depth = frame.entry_depth;
         let authority_parent = frame.authority_parent.clone();
         let output_parent = frame.output_parent.clone();
-        let entry = match frame.entries.next() {
+        if frame.entries.is_none() {
+            let entries = if authority_parent.as_os_str().is_empty() {
+                state.root.read_root_dir()
+            } else {
+                let relative = match crate::local::LocalRelativePath::new(
+                    &authority_parent,
+                ) {
+                    Ok(relative) => relative,
+                    Err(error) => {
+                        return Some(Err(walk_io_error(
+                            &authority_parent,
+                            error,
+                        )));
+                    }
+                };
+                state.root.read_dir(&relative)
+            };
+            match entries {
+                Ok(entries) => frame.entries = Some(entries.into_iter()),
+                Err(error) => {
+                    state.stack.pop();
+                    return Some(Err(walk_io_error(&authority_parent, error)));
+                }
+            }
+        }
+        let entry = match frame
+            .entries
+            .as_mut()
+            .expect("rooted frame was initialized")
+            .next()
+        {
             Some(entry) => entry,
             None => {
                 state.stack.pop();
@@ -374,24 +399,8 @@ fn next_rooted_entry(
             false
         };
         if is_directory && may_descend {
-            let relative =
-                match crate::local::LocalRelativePath::new(&authority_path) {
-                    Ok(relative) => relative,
-                    Err(error) => {
-                        return Some(Err(walk_io_error(
-                            &authority_path,
-                            error,
-                        )));
-                    }
-                };
-            let entries = match state.root.read_dir(&relative) {
-                Ok(entries) => entries,
-                Err(error) => {
-                    return Some(Err(walk_io_error(&authority_path, error)));
-                }
-            };
             state.stack.push(RootedWalkFrame {
-                entries: entries.into_iter(),
+                entries: None,
                 authority_parent: authority_path.clone(),
                 output_parent: output_path.clone(),
                 entry_depth: entry_depth + 1,

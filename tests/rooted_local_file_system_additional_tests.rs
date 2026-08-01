@@ -280,7 +280,10 @@ fn test_rooted_local_file_system_list_handles_missing_and_zero_depth() {
 
     let missing_error = rooted
         .list(Path::new("missing"), &LocalListOptions::new())
-        .expect_err("missing rooted directories must not open as walkers");
+        .expect("missing rooted directory lookup should be deferred")
+        .next()
+        .expect("deferred lookup should yield its error")
+        .expect_err("missing rooted directory enumeration must fail");
     assert_eq!(LocalFileErrorKind::NotFound, missing_error.kind());
     let entries = rooted
         .list(Path::new(""), &LocalListOptions::new().with_max_depth(0))
@@ -329,13 +332,19 @@ fn test_rooted_local_file_system_reports_changed_child_during_recursive_list() {
         .list(Path::new(""), &LocalListOptions::new().with_recursive())
         .expect("rooted walker should open before the child changes");
 
+    let entry = walker
+        .next()
+        .expect("child directory should be yielded")
+        .expect("child metadata should be readable");
+    assert_eq!(Path::new("child"), entry.relative_path());
+
     fs::remove_dir(&child).expect("empty child directory should be removed");
     fs::write(&child, b"replacement")
         .expect("child path should become a regular file");
 
     let error = walker
         .next()
-        .expect("recorded child entry should be yielded")
+        .expect("deferred child descent should yield an error")
         .expect_err("recursive descent into the changed child must fail");
     assert_eq!(LocalFileErrorKind::Io, error.kind());
     assert_eq!(Some(Path::new("child")), error.path());

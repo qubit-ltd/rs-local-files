@@ -578,6 +578,26 @@ fn test_rooted_local_file_system_lists_descendants() {
     assert_eq!(Path::new("child"), entries[0].relative_path());
 }
 
+/// Verifies rooted directory enumeration starts when iteration advances.
+#[test]
+fn test_rooted_local_file_system_walker_defers_root_enumeration() {
+    let directory = tempdir().expect("temporary root should be created");
+    let rooted = RootedLocalFileSystem::open(directory.path())
+        .expect("root authority should open");
+    let mut walker = rooted
+        .list(Path::new(""), &LocalListOptions::new())
+        .expect("rooted walker should be created without enumerating");
+
+    fs::write(directory.path().join("late-entry"), b"payload")
+        .expect("entry should be created after walker construction");
+
+    let entry = walker
+        .next()
+        .expect("late entry should be observed")
+        .expect("late entry should be readable");
+    assert_eq!(Path::new("late-entry"), entry.relative_path());
+}
+
 /// Verifies rooted writer publication and unified copy remain
 /// descriptor-relative.
 #[test]
