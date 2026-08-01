@@ -88,12 +88,6 @@ impl LocalCopyOptions {
         self.source_mode
     }
 
-    /// Reports whether this copy requires a directory tree source.
-    #[inline(always)]
-    pub const fn recursive(&self) -> bool {
-        matches!(self.source_mode, LocalCopySourceMode::Tree)
-    }
-
     /// Reports whether missing target parent directories are created.
     #[must_use]
     #[inline(always)]
@@ -165,12 +159,6 @@ impl LocalCopyOptions {
     pub const fn with_tree_source(mut self) -> Self {
         self.source_mode = LocalCopySourceMode::Tree;
         self
-    }
-
-    /// Requires a directory-tree source.
-    #[inline(always)]
-    pub const fn with_recursive(self) -> Self {
-        self.with_tree_source()
     }
 
     /// Creates missing target parent directories before copying.

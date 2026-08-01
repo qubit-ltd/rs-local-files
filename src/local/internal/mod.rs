@@ -16,6 +16,7 @@ mod atomic_metadata;
 mod atomic_namespace_race;
 mod atomic_staging_state;
 mod copy_dir;
+mod copy_policy;
 #[cfg(coverage)]
 pub(crate) mod coverage_fault;
 mod directory_identity;
@@ -73,6 +74,11 @@ pub(crate) use atomic_staging_state::AtomicStagingState;
 pub(crate) use copy_dir::{
     copy_dir_all_with_paths,
     copy_file_with_options,
+};
+pub(crate) use copy_policy::{
+    copy_directory_guarantee_unavailable,
+    copy_file_replace_requires_atomicity,
+    copy_source_mode_mismatch,
 };
 pub(crate) use file_io::{
     open_native_reader_path,
