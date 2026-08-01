@@ -30,7 +30,7 @@ use qubit_local_files::{
 #[test]
 fn test_decode_preserves_unicode_and_escapes_percent_and_control_bytes() {
     assert_eq!(
-        LocalPathCodec::decode(OsStr::new("文档%name\n"))
+        LocalPathCodec::to_canonical_text(OsStr::new("文档%name\n"))
             .expect("native component should decode"),
         "文档%25name%0A",
     );
@@ -55,9 +55,9 @@ proptest! {
         };
 
         let native = OsString::from_vec(bytes.clone());
-        let canonical = LocalPathCodec::decode(&native)
+        let canonical = LocalPathCodec::to_canonical_text(&native)
             .expect("non-NUL native bytes should decode");
-        let encoded = LocalPathCodec::encode(&canonical)
+        let encoded = LocalPathCodec::from_canonical_text(&canonical)
             .expect("canonical text should encode");
         assert_eq!(encoded.as_bytes(), bytes);
     }
@@ -83,9 +83,9 @@ proptest! {
         };
 
         let native = OsString::from_wide(&units);
-        let canonical = LocalPathCodec::decode(&native)
+        let canonical = LocalPathCodec::to_canonical_text(&native)
             .expect("non-NUL native code units should decode");
-        let encoded = LocalPathCodec::encode(&canonical)
+        let encoded = LocalPathCodec::from_canonical_text(&canonical)
             .expect("canonical text should encode");
         assert_eq!(encoded.encode_wide().collect::<Vec<_>>(), units);
     }
@@ -95,15 +95,15 @@ proptest! {
 #[test]
 fn test_encode_rejects_non_canonical_escape_aliases() {
     assert!(matches!(
-        LocalPathCodec::encode("a%2fb"),
+        LocalPathCodec::from_canonical_text("a%2fb"),
         Err(LocalPathCodecError::NonCanonicalText),
     ));
     assert!(matches!(
-        LocalPathCodec::encode("a%2Fb"),
+        LocalPathCodec::from_canonical_text("a%2Fb"),
         Err(LocalPathCodecError::NonCanonicalText),
     ));
     assert!(matches!(
-        LocalPathCodec::encode("a%41b"),
+        LocalPathCodec::from_canonical_text("a%41b"),
         Err(LocalPathCodecError::NonCanonicalText),
     ));
 }
@@ -112,7 +112,7 @@ fn test_encode_rejects_non_canonical_escape_aliases() {
 #[test]
 fn test_encode_rejects_malformed_escape() {
     assert!(matches!(
-        LocalPathCodec::encode("a%4"),
+        LocalPathCodec::from_canonical_text("a%4"),
         Err(LocalPathCodecError::InvalidEscape { offset: 1 }),
     ));
 }
@@ -122,15 +122,15 @@ fn test_encode_rejects_malformed_escape() {
 #[test]
 fn test_path_codec_rejects_invalid_hex_and_native_nul() {
     assert!(matches!(
-        LocalPathCodec::encode("a%G0"),
+        LocalPathCodec::from_canonical_text("a%G0"),
         Err(LocalPathCodecError::InvalidEscape { offset: 1 }),
     ));
     assert!(matches!(
-        LocalPathCodec::encode("a%00"),
+        LocalPathCodec::from_canonical_text("a%00"),
         Err(LocalPathCodecError::NativeNul),
     ));
     assert!(matches!(
-        LocalPathCodec::decode(OsStr::new("a\0")),
+        LocalPathCodec::to_canonical_text(OsStr::new("a\0")),
         Err(LocalPathCodecError::NativeNul),
     ));
 }
@@ -148,10 +148,10 @@ fn test_unix_non_utf8_native_bytes_round_trip() {
     };
 
     let native = OsString::from_vec(vec![0x66, 0x80, 0x25]);
-    let decoded = LocalPathCodec::decode(&native)
+    let decoded = LocalPathCodec::to_canonical_text(&native)
         .expect("non-UTF-8 native component should decode");
     assert_eq!(decoded, "f%80%25");
-    let encoded = LocalPathCodec::encode(&decoded)
+    let encoded = LocalPathCodec::from_canonical_text(&decoded)
         .expect("canonical native component should encode");
     assert_eq!(encoded.as_bytes(), [0x66, 0x80, 0x25]);
 }
@@ -170,9 +170,9 @@ fn test_windows_unpaired_surrogate_round_trip() {
     };
 
     let native = OsString::from_wide(&[0x0066, 0xD800, 0x0025]);
-    let decoded = LocalPathCodec::decode(&native)
+    let decoded = LocalPathCodec::to_canonical_text(&native)
         .expect("unpaired surrogate native component should decode");
-    let encoded = LocalPathCodec::encode(&decoded)
+    let encoded = LocalPathCodec::from_canonical_text(&decoded)
         .expect("canonical native component should encode");
     assert_eq!(
         encoded.encode_wide().collect::<Vec<_>>(),

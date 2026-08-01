@@ -35,7 +35,6 @@ use qubit_local_files::{
     LocalPaths,
     LocalRenameFailureState,
     LocalRenameOptions,
-    path,
 };
 use tempfile::tempdir;
 
@@ -45,11 +44,11 @@ fn test_capability_snapshot_exposes_all_guarantees() {
     let capabilities = LocalFileSystem::capabilities();
 
     let _ = capabilities.path_limit();
-    let _ = capabilities.supports_rooted_operations();
-    let _ = capabilities.supports_atomic_rename();
-    let _ = capabilities.supports_atomic_replace();
-    let _ = capabilities.supports_atomic_temp_persist();
-    let _ = capabilities.supports_directory_durability();
+    let _ = capabilities.rooted_operations_implemented();
+    let _ = capabilities.atomic_rename_implemented();
+    let _ = capabilities.atomic_replace_implemented();
+    let _ = capabilities.atomic_temp_persist_implemented();
+    let _ = capabilities.directory_durability_implemented();
 }
 
 /// Verifies structured errors preserve each supported I/O classification and
@@ -213,59 +212,16 @@ fn test_path_codec_error_formats_each_public_variant() {
     }
 }
 
-/// Verifies public lexical helpers cover absent, empty, mismatched, and
-/// case-insensitive extension cases.
-#[test]
-fn test_path_helpers_handle_extension_edge_cases() {
-    let extensionless = Path::new("README");
-    let empty_extension = Path::new("archive.");
-    let dotted_name = Path::new(".gitignore");
-
-    assert_eq!(None, path::extension(extensionless));
-    assert_eq!(None, path::dot_extension(extensionless));
-    assert!(!path::has_extension(extensionless, "txt"));
-    assert!(!path::has_extension_ignore_ascii_case(extensionless, "txt"));
-    assert_eq!(Some(""), path::extension(empty_extension));
-    assert_eq!(Some(String::new()), path::dot_extension(empty_extension));
-    assert!(path::has_extension(empty_extension, "."));
-    assert_eq!(Some(".gitignore"), path::file_name(dotted_name));
-    assert_eq!(Some(".gitignore"), path::file_stem(dotted_name));
-    assert_eq!(Some(".gitignore"), path::file_prefix(dotted_name));
-    assert_eq!(None, path::extension(dotted_name));
-    assert!(path::has_extension_ignore_ascii_case(
-        Path::new("photo.JpG"),
-        ".jpg",
-    ));
-    assert!(!path::has_extension(Path::new("photo.JpG"), "jpg"));
-    assert!(
-        path::random_file_name()
-            .expect("a random name should be generated")
-            .starts_with("qubit-local-files-")
-    );
-    assert!(path::validate_portable_file_name("safe-name.txt").is_ok());
-    assert!(path::validate_portable_file_name("bad/name").is_err());
-}
-
 /// Verifies native filename helpers preserve platform components and reject
 /// invalid portable input without requiring UTF-8 path conversion.
 #[test]
 fn test_native_file_name_helpers_cover_component_and_validation_paths() {
     let value = Path::new("archive.tar.gz");
 
-    assert_eq!(
-        Some(OsStr::new("archive.tar.gz")),
-        LocalFileNames::file_name(value)
-    );
-    assert_eq!(
-        Some(OsStr::new("archive.tar")),
-        LocalFileNames::file_stem(value)
-    );
-    assert_eq!(
-        Some(OsStr::new("archive")),
-        LocalFileNames::file_prefix(value)
-    );
-    assert_eq!(Some(OsStr::new("gz")), LocalFileNames::extension(value));
-    assert_eq!(Some(".gz".into()), LocalFileNames::dot_extension(value));
+    assert_eq!(Some(OsStr::new("archive.tar.gz")), value.file_name());
+    assert_eq!(Some(OsStr::new("archive.tar")), value.file_stem());
+    assert_eq!(Some(OsStr::new("archive")), value.file_prefix());
+    assert_eq!(Some(OsStr::new("gz")), value.extension());
     assert!(
         LocalFileNames::validate_portable(OsStr::new("safe-name.txt")).is_ok()
     );
@@ -353,19 +309,11 @@ fn test_public_metadata_values_cover_file_directory_and_missing_cases() {
         .expect("directory metadata should be readable");
     assert_eq!(LocalFileKind::Directory, directory_metadata.kind());
 
-    assert!(
-        !qubit_local_files::metadata::exists(&directory.path().join("missing"))
-            .expect("missing path check should be readable")
-    );
-    assert!(
-        qubit_local_files::metadata::read(&empty_file)
-            .expect("followed metadata should be readable")
-            .is_file()
-    );
-    assert!(
-        qubit_local_files::metadata::symlink_metadata(&child_directory)
-            .expect("unfollowed metadata should be readable")
-            .is_dir()
+    assert_eq!(
+        LocalFileErrorKind::NotFound,
+        LocalFileSystem::metadata(&directory.path().join("missing"))
+            .expect_err("missing metadata should fail")
+            .kind(),
     );
 }
 

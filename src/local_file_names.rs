@@ -8,12 +8,9 @@
 // qubit-style: allow source-test-pair
 // Covered by filename and foundation integration tests.
 
-use std::{
-    ffi::{
-        OsStr,
-        OsString,
-    },
-    path::Path,
+use std::ffi::{
+    OsStr,
+    OsString,
 };
 
 use crate::{
@@ -66,47 +63,6 @@ impl LocalFileNames {
                     source,
                 )
             })
-    }
-
-    /// Returns the final native filename component.
-    #[must_use]
-    #[inline]
-    pub fn file_name(path: &Path) -> Option<&OsStr> {
-        path.file_name()
-    }
-
-    /// Returns the native filename without its final extension.
-    #[must_use]
-    #[inline]
-    pub fn file_stem(path: &Path) -> Option<&OsStr> {
-        path.file_stem()
-    }
-
-    /// Returns the native filename prefix before the first non-leading dot.
-    #[must_use]
-    #[inline]
-    pub fn file_prefix(path: &Path) -> Option<&OsStr> {
-        path.file_prefix()
-    }
-
-    /// Returns the final native extension without a leading dot.
-    #[must_use]
-    #[inline]
-    pub fn extension(path: &Path) -> Option<&OsStr> {
-        path.extension()
-    }
-
-    /// Returns the final extension including a leading dot.
-    ///
-    /// `None` means the path has no extension.
-    #[must_use]
-    #[inline]
-    pub fn dot_extension(path: &Path) -> Option<OsString> {
-        path.extension().map(|extension| {
-            let mut result = OsString::from(".");
-            result.push(extension);
-            result
-        })
     }
 
     /// Validates a conservative cross-platform filename component.

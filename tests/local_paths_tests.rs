@@ -205,19 +205,10 @@ fn test_local_paths_is_lexically_within_rejects_dot_components() {
 fn test_local_file_names_returns_native_components() {
     let path = PathBuf::from("archive.tar.gz");
 
-    assert_eq!(
-        Some(OsStr::new("archive.tar.gz")),
-        LocalFileNames::file_name(&path)
-    );
-    assert_eq!(
-        Some(OsStr::new("archive.tar")),
-        LocalFileNames::file_stem(&path)
-    );
-    assert_eq!(
-        Some(OsStr::new("archive")),
-        LocalFileNames::file_prefix(&path)
-    );
-    assert_eq!(Some(OsStr::new("gz")), LocalFileNames::extension(&path));
+    assert_eq!(Some(OsStr::new("archive.tar.gz")), path.file_name());
+    assert_eq!(Some(OsStr::new("archive.tar")), path.file_stem());
+    assert_eq!(Some(OsStr::new("archive")), path.file_prefix());
+    assert_eq!(Some(OsStr::new("gz")), path.extension());
 }
 
 /// Verifies conservative portable filename validation.

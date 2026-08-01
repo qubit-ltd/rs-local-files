@@ -10,26 +10,30 @@
 
 use super::LocalPathLimit;
 
-/// Immutable snapshot of native filesystem guarantees available to this crate.
+/// Immutable snapshot of filesystem mechanisms implemented by this build.
+///
+/// These flags describe code paths available for the current target. They do
+/// not probe a particular mount and therefore do not promise that every
+/// filesystem used at runtime supports the corresponding native operation.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 #[must_use]
 pub struct LocalFileSystemCapabilities {
     /// Known native path limit.
     path_limit: Option<LocalPathLimit>,
-    /// Whether descriptor- or handle-relative rooted operations are available.
+    /// Whether descriptor- or handle-relative rooted operations are compiled.
     rooted_operations: bool,
-    /// Whether an in-filesystem rename is atomic.
+    /// Whether native atomic rename support is implemented.
     atomic_rename: bool,
-    /// Whether replacing a destination is atomic.
+    /// Whether native atomic replacement support is implemented.
     atomic_replace: bool,
-    /// Whether a temporary resource can be persisted without replacement.
+    /// Whether native atomic no-replace persistence is implemented.
     atomic_temp_persist: bool,
     /// Whether directory durability synchronization is implemented.
     directory_durability: bool,
 }
 
 impl LocalFileSystemCapabilities {
-    /// Detects capabilities for the current build and runtime platform.
+    /// Detects mechanisms compiled for the current target platform.
     #[inline]
     pub(crate) const fn detect() -> Self {
         Self {
@@ -56,32 +60,31 @@ impl LocalFileSystemCapabilities {
         self.path_limit
     }
 
-    /// Reports whether secure rooted operations are available.
+    /// Reports whether secure rooted operations are implemented.
     #[must_use]
     #[inline(always)]
-    pub const fn supports_rooted_operations(self) -> bool {
+    pub const fn rooted_operations_implemented(self) -> bool {
         self.rooted_operations
     }
 
-    /// Reports whether an in-filesystem rename is atomic.
+    /// Reports whether native atomic rename is implemented.
     #[must_use]
     #[inline(always)]
-    pub const fn supports_atomic_rename(self) -> bool {
+    pub const fn atomic_rename_implemented(self) -> bool {
         self.atomic_rename
     }
 
-    /// Reports whether replacing an existing destination is atomic.
+    /// Reports whether native atomic replacement is implemented.
     #[must_use]
     #[inline(always)]
-    pub const fn supports_atomic_replace(self) -> bool {
+    pub const fn atomic_replace_implemented(self) -> bool {
         self.atomic_replace
     }
 
-    /// Reports whether temporary-resource persistence without replacement is
-    /// atomic.
+    /// Reports whether atomic no-replace temporary persistence is implemented.
     #[must_use]
     #[inline(always)]
-    pub const fn supports_atomic_temp_persist(self) -> bool {
+    pub const fn atomic_temp_persist_implemented(self) -> bool {
         self.atomic_temp_persist
     }
 
@@ -89,7 +92,7 @@ impl LocalFileSystemCapabilities {
     /// implemented.
     #[must_use]
     #[inline(always)]
-    pub const fn supports_directory_durability(self) -> bool {
+    pub const fn directory_durability_implemented(self) -> bool {
         self.directory_durability
     }
 }
