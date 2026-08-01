@@ -37,8 +37,11 @@ mod local_root_atomic_writer;
 #[cfg(unix)]
 pub(crate) use internal::sync_rooted_parent;
 pub(crate) use internal::{
+    copy_directory_guarantee_unavailable,
     copy_dir_all_with_paths,
+    copy_file_replace_requires_atomicity,
     copy_file_with_options,
+    copy_source_mode_mismatch,
     create_temp_dir_in_dir_with_affixes,
     create_temp_file_in_dir,
     ensure_parent_path,

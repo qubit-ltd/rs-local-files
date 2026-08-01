@@ -648,21 +648,10 @@ impl RootedLocalFileSystem {
                 ))
             })?;
         let directory = metadata.kind() == crate::rooted::EntryKind::Directory;
-        if directory
-            && options.source_mode() == crate::LocalCopySourceMode::File
-        {
-            return Err(rooted_copy_failure_unchanged(
-                LocalFileError::new(
-                    LocalFileErrorKind::RequirementNotMet,
-                    LocalFileOperation::Copy,
-                )
-                .with_path(source.to_path_buf())
-                .with_target(target.to_path_buf()),
-            ));
-        }
-        if !directory
-            && options.source_mode() == crate::LocalCopySourceMode::Tree
-        {
+        if crate::local::copy_source_mode_mismatch(
+            directory,
+            options.source_mode(),
+        ) {
             return Err(rooted_copy_failure_unchanged(
                 LocalFileError::new(
                     LocalFileErrorKind::RequirementNotMet,
@@ -714,9 +703,11 @@ impl RootedLocalFileSystem {
                 options.preserve_metadata(),
             ));
         }
-        if directory
-            && options.atomicity() == crate::LocalAtomicityRequirement::Required
-        {
+        if crate::local::copy_directory_guarantee_unavailable(
+            directory,
+            options.atomicity(),
+            options.durability(),
+        ) {
             return Err(rooted_copy_failure_unchanged(
                 LocalFileError::new(
                     LocalFileErrorKind::RequirementNotMet,
@@ -726,24 +717,12 @@ impl RootedLocalFileSystem {
                 .with_target(target.to_path_buf()),
             ));
         }
-        if directory
-            && options.durability() == LocalDurabilityRequirement::Required
-        {
-            return Err(rooted_copy_failure_unchanged(
-                LocalFileError::new(
-                    LocalFileErrorKind::RequirementNotMet,
-                    LocalFileOperation::Copy,
-                )
-                .with_path(source.to_path_buf())
-                .with_target(target.to_path_buf()),
-            ));
-        }
-        if !directory
-            && options.atomicity() == crate::LocalAtomicityRequirement::Required
-            && options.type_conflict()
-                == crate::LocalCopyTypeConflictPolicy::Replace
-            && target_is_directory
-        {
+        if crate::local::copy_file_replace_requires_atomicity(
+            directory,
+            options.atomicity(),
+            options.type_conflict(),
+            target_is_directory,
+        ) {
             return Err(rooted_copy_failure_unchanged(
                 LocalFileError::new(
                     LocalFileErrorKind::RequirementNotMet,

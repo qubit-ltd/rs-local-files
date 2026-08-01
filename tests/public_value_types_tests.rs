@@ -6,8 +6,6 @@
 //    Licensed under the Apache License, Version 2.0.
 // =============================================================================
 
-#![cfg(coverage)]
-
 use std::{
     error::Error,
     ffi::OsStr,
@@ -435,7 +433,7 @@ fn test_recursive_copy_outcome_reports_all_public_statistics() {
     let initial = LocalFileSystem::copy(
         &source,
         &target,
-        &LocalCopyOptions::new().with_recursive(),
+        &LocalCopyOptions::new().with_tree_source(),
     )
     .expect("directory should be copied");
     assert_eq!(LocalCopyMethod::Recursive, initial.method());
@@ -447,7 +445,7 @@ fn test_recursive_copy_outcome_reports_all_public_statistics() {
         &source,
         &target,
         &LocalCopyOptions::new()
-            .with_recursive()
+            .with_tree_source()
             .with_conflict(LocalCopyConflictPolicy::Skip),
     )
     .expect("existing child should be skipped");
@@ -457,7 +455,7 @@ fn test_recursive_copy_outcome_reports_all_public_statistics() {
         &source,
         &target,
         &LocalCopyOptions::new()
-            .with_recursive()
+            .with_tree_source()
             .with_conflict(LocalCopyConflictPolicy::Overwrite),
     )
     .expect("existing child should be overwritten");
