@@ -45,6 +45,11 @@ use super::internal::{
 };
 
 /// A temporary file whose cleanup remains bound to its creating authority.
+///
+/// Cleanup rejects ordinary path replacement by checking the identity captured
+/// at creation. The check and deletion are not atomic, so callers must exclude
+/// untrusted concurrent mutation of the containing directory; identity reuse
+/// and a check/delete race cannot be ruled out by this path-based API.
 #[must_use = "dropping the temporary-file guard removes its file"]
 #[derive(Debug)]
 pub struct LocalTempFile {
