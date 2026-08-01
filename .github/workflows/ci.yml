@@ -19,9 +19,7 @@ jobs:
     with:
       run_windows_tests: true
       run_macos_tests: true
-      # The pre-0.8 coverage-only suite exercised removed internal APIs. Keep
-      # publishing coverage while the replacement public-contract suite grows.
-      coverage_enforce_thresholds: "0"
+      coverage_enforce_thresholds: "1"
 
   unix-cross-check:
     name: Compile-only ${{ matrix.target }}
