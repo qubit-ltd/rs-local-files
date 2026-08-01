@@ -16,6 +16,7 @@ use qubit_local_files::{
     LocalFileKind,
     LocalFileSystem,
     LocalListOptions,
+    LocalWalkErrorPolicy,
 };
 use tempfile::tempdir;
 
@@ -230,4 +231,65 @@ fn test_local_directory_walker_rejects_unreadable_root_directory() {
 
     assert_eq!(LocalFileErrorKind::PermissionDenied, error.kind());
     assert_eq!(Some(root.as_path()), error.path());
+}
+
+/// Verifies the default fail-fast policy fuses a walker after its first
+/// iteration error.
+#[cfg(unix)]
+#[test]
+fn test_local_directory_walker_fail_fast_stops_after_error() {
+    use std::os::unix::fs::symlink;
+
+    let directory = tempdir().expect("temporary directory should be created");
+    symlink(directory.path().join("missing"), directory.path().join("dangling"))
+        .expect("dangling link fixture should be created");
+
+    let mut walker = LocalFileSystem::list(
+        directory.path(),
+        &LocalListOptions::new().with_follow_symlinks(),
+    )
+    .expect("walker should open");
+    assert!(walker
+        .next()
+        .expect("dangling link should produce an error")
+        .is_err());
+    assert!(walker.next().is_none());
+}
+
+/// Verifies the continue policy publishes later entries after an iteration
+/// error instead of fusing the walker.
+#[cfg(unix)]
+#[test]
+fn test_local_directory_walker_continue_policy_keeps_iterating() {
+    use std::os::unix::fs::symlink;
+
+    let directory = tempdir().expect("temporary directory should be created");
+    fs::write(directory.path().join("readable"), b"payload")
+        .expect("readable entry should be created");
+    symlink(directory.path().join("missing"), directory.path().join("dangling"))
+        .expect("dangling link fixture should be created");
+
+    let walker = LocalFileSystem::list(
+        directory.path(),
+        &LocalListOptions::new()
+            .with_follow_symlinks()
+            .with_error_policy(LocalWalkErrorPolicy::Continue),
+    )
+    .expect("walker should open");
+    let mut saw_error = false;
+    let mut saw_readable = false;
+    for result in walker {
+        match result {
+            Ok(entry) if entry.relative_path() == "readable" => {
+                saw_readable = true;
+            }
+            Err(error) => {
+                assert_eq!(LocalFileErrorKind::NotFound, error.kind());
+                saw_error = true;
+            }
+            Ok(_) => {}
+        }
+    }
+    assert!(saw_error);
+    assert!(saw_readable);
 }

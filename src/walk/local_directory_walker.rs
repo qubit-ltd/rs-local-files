@@ -24,6 +24,7 @@ use crate::{
     LocalFileOperation,
     LocalListOptions,
     LocalResult,
+    LocalWalkErrorPolicy,
 };
 
 // qubit-style: allow coverage-cfg
@@ -47,6 +48,8 @@ pub struct LocalDirectoryWalker {
     followed_directories: HashSet<PathBuf>,
     /// Descriptor-relative traversal state for a rooted walker.
     rooted: Option<RootedWalkState>,
+    /// Whether fail-fast error policy has terminated iteration.
+    terminated: bool,
 }
 
 impl LocalDirectoryWalker {
@@ -112,6 +115,7 @@ impl LocalDirectoryWalker {
             }],
             followed_directories,
             rooted: None,
+            terminated: false,
         })
     }
 
@@ -161,6 +165,7 @@ impl LocalDirectoryWalker {
                     entry_depth: 1,
                 }],
             }),
+            terminated: false,
         })
     }
 
@@ -253,8 +258,17 @@ impl Iterator for LocalDirectoryWalker {
 
     /// Produces the next entry, opening at most one new directory as needed.
     fn next(&mut self) -> Option<Self::Item> {
+        if self.terminated {
+            return None;
+        }
         if let Some(rooted) = self.rooted.as_mut() {
-            return next_rooted_entry(rooted, self.options);
+            let result = next_rooted_entry(rooted, self.options);
+            if matches!(&result, Some(Err(_)))
+                && self.options.error_policy() == LocalWalkErrorPolicy::FailFast
+            {
+                self.terminated = true;
+            }
+            return result;
         }
         loop {
             let frame = self.stack.last_mut()?;
@@ -273,6 +287,11 @@ impl Iterator for LocalDirectoryWalker {
             let entry = match next_entry {
                 Some(Ok(entry)) => entry,
                 Some(Err(error)) => {
+                    if self.options.error_policy()
+                        == LocalWalkErrorPolicy::FailFast
+                    {
+                        self.terminated = true;
+                    }
                     return Some(Err(walk_io_error(
                         &self.root.join(&relative_parent),
                         error,
@@ -304,7 +323,14 @@ impl Iterator for LocalDirectoryWalker {
             };
             let native_metadata = match native_metadata {
                 Ok(metadata) => metadata,
-                Err(error) => return Some(Err(walk_io_error(&path, error))),
+                Err(error) => {
+                    if self.options.error_policy()
+                        == LocalWalkErrorPolicy::FailFast
+                    {
+                        self.terminated = true;
+                    }
+                    return Some(Err(walk_io_error(&path, error)));
+                }
             };
             let is_directory = native_metadata.file_type().is_dir();
             let metadata = LocalFileMetadata::from_native(&native_metadata);
@@ -314,6 +340,11 @@ impl Iterator for LocalDirectoryWalker {
                 && let Err(error) =
                     self.descend(&path, relative.clone(), entry_depth)
             {
+                if self.options.error_policy()
+                    == LocalWalkErrorPolicy::FailFast
+                {
+                    self.terminated = true;
+                }
                 return Some(Err(error));
             }
             return Some(Ok(LocalDirectoryEntry::new(
