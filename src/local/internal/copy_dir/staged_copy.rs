@@ -7,6 +7,7 @@
 // =============================================================================
 //! Regular-file staging and commit for recursive directory copies.
 // qubit-style: allow source-test-pair
+// qubit-style: allow coverage-cfg
 // Private behavior is covered through public integration tests.
 
 use std::io::ErrorKind;
@@ -17,6 +18,7 @@ use crate::{
     LocalCopyDirOptions,
     LocalCopyDirStage,
     LocalCopyDirStats,
+    LocalDurabilityRequirement,
 };
 
 use crate::local::internal::StagedFile;
@@ -115,7 +117,8 @@ pub(crate) fn copy_file_with_options(
         None => false,
     };
 
-    let (staged_file, copied) = stage_copy_file(src, dst, options, stats)?;
+    let (staged_file, copied, file_durable) =
+        stage_copy_file(src, dst, options, stats)?;
     if !commit_staged_copy_file(
         src,
         dst,
@@ -152,6 +155,7 @@ pub(crate) fn copy_file_with_options(
     if destination_directory_requires_removal {
         stats.non_atomic_publication = true;
     }
+    stats.files_durable &= file_durable;
     Ok(())
 }
 
@@ -177,7 +181,7 @@ fn stage_copy_file(
     dst: &Path,
     options: LocalCopyDirOptions,
     stats: &LocalCopyDirStats,
-) -> CopyDirResult<(StagedFile, u64)> {
+) -> CopyDirResult<(StagedFile, u64, bool)> {
     let (temp_path, temp_file) = with_copy_context(
         create_temp_file_in_dir(
             parent_dir_for(dst),
@@ -220,8 +224,36 @@ fn stage_copy_file(
             &mut staged_file,
         )?;
     }
+    let file_durable = match options.durability() {
+        LocalDurabilityRequirement::NotRequired => false,
+        LocalDurabilityRequirement::Preferred => {
+            sync_staged_file(&staged_file).is_ok()
+        }
+        LocalDurabilityRequirement::Required => {
+            if let Err(source) = sync_staged_file(&staged_file) {
+                return Err(copy_dir_error_with_staging(
+                    LocalCopyDirStage::SynchronizeFile,
+                    src,
+                    dst,
+                    stats,
+                    source,
+                    &mut staged_file,
+                ));
+            }
+            true
+        }
+    };
     staged_file.close();
-    Ok((staged_file, copied))
+    Ok((staged_file, copied, file_durable))
+}
+
+/// Synchronizes staged file data before its namespace publication.
+fn sync_staged_file(staged_file: &StagedFile) -> std::io::Result<()> {
+    #[cfg(coverage)]
+    if crate::local::coverage_fault_enabled("copy-staging-file-sync") {
+        return Err(std::io::Error::from_raw_os_error(libc::EIO));
+    }
+    staged_file.file().sync_all()
 }
 
 /// Commits an already staged regular file according to destination policies.
