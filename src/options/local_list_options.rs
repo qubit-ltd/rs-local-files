@@ -8,6 +8,8 @@
 // qubit-style: allow source-test-pair
 // Covered by walker integration tests.
 
+use super::LocalWalkErrorPolicy;
+
 /// Options fixed for the lifetime of a local directory walker.
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
 #[must_use = "list options have no effect unless they are used"]
@@ -19,6 +21,8 @@ pub struct LocalListOptions {
     /// Maximum yielded descendant depth, where immediate children have depth
     /// one.
     max_depth: Option<usize>,
+    /// Policy applied when an entry or descendant cannot be inspected.
+    error_policy: LocalWalkErrorPolicy,
 }
 
 impl LocalListOptions {
@@ -29,6 +33,7 @@ impl LocalListOptions {
             recursive: false,
             follow_symlinks: false,
             max_depth: None,
+            error_policy: LocalWalkErrorPolicy::FailFast,
         }
     }
 
@@ -53,6 +58,12 @@ impl LocalListOptions {
         self.max_depth
     }
 
+    /// Returns the policy applied after an iteration error.
+    #[inline(always)]
+    pub const fn error_policy(&self) -> LocalWalkErrorPolicy {
+        self.error_policy
+    }
+
     /// Enables recursive traversal.
     #[inline(always)]
     pub const fn with_recursive(mut self) -> Self {
@@ -75,6 +86,16 @@ impl LocalListOptions {
     #[inline(always)]
     pub const fn with_max_depth(mut self, max_depth: usize) -> Self {
         self.max_depth = Some(max_depth);
+        self
+    }
+
+    /// Sets the policy applied after an iteration error.
+    #[inline(always)]
+    pub const fn with_error_policy(
+        mut self,
+        error_policy: LocalWalkErrorPolicy,
+    ) -> Self {
+        self.error_policy = error_policy;
         self
     }
 }

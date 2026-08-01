@@ -20,6 +20,7 @@ mod local_rename_options;
 mod local_symlink_policy;
 mod local_temp_directory_options;
 mod local_temp_file_options;
+mod local_walk_error_policy;
 mod local_write_mode;
 mod local_write_options;
 
@@ -36,5 +37,6 @@ pub use local_rename_options::LocalRenameOptions;
 pub use local_symlink_policy::LocalSymlinkPolicy;
 pub use local_temp_directory_options::LocalTempDirectoryOptions;
 pub use local_temp_file_options::LocalTempFileOptions;
+pub use local_walk_error_policy::LocalWalkErrorPolicy;
 pub use local_write_mode::LocalWriteMode;
 pub use local_write_options::LocalWriteOptions;

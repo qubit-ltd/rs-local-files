@@ -17,6 +17,7 @@ use qubit_local_files::{
     LocalAtomicityRequirement,
     LocalCopyConflictPolicy,
     LocalCopyOptions,
+    LocalCopySourceMode,
     LocalCopyTypeConflictPolicy,
     LocalCreateDirectoryOptions,
     LocalDeleteOptions,
@@ -29,6 +30,7 @@ use qubit_local_files::{
     LocalSymlinkPolicy,
     LocalTempDirectoryOptions,
     LocalTempFileOptions,
+    LocalWalkErrorPolicy,
     LocalWriteMode,
     LocalWriteOptions,
 };
@@ -90,6 +92,10 @@ fn test_list_and_read_option_builders_retain_policies() {
     assert!(black_box(LocalListOptions::recursive)(&listing));
     assert!(black_box(LocalListOptions::follows_symlinks)(&listing));
     assert_eq!(black_box(LocalListOptions::max_depth)(&listing), Some(3));
+    assert_eq!(
+        LocalWalkErrorPolicy::FailFast,
+        black_box(LocalListOptions::error_policy)(&listing),
+    );
 
     let timeout = Duration::from_millis(25);
     let reader = black_box(LocalReadOptions::new as fn() -> LocalReadOptions)();
@@ -111,7 +117,7 @@ fn test_copy_rename_and_write_option_builders_retain_policies() {
         .with_type_conflict(LocalCopyTypeConflictPolicy::Replace)
         .with_metadata_preservation(LocalMetadataPreservePolicy::Permissions)
         .with_symlink_policy(LocalSymlinkPolicy::Follow)
-        .with_recursive()
+        .with_tree_source()
         .with_parent()
         .with_atomicity(LocalAtomicityRequirement::Required)
         .with_durability(LocalDurabilityRequirement::Required);
@@ -122,7 +128,7 @@ fn test_copy_rename_and_write_option_builders_retain_policies() {
         LocalMetadataPreservePolicy::Permissions
     );
     assert_eq!(copy.symlink_policy(), LocalSymlinkPolicy::Follow);
-    assert!(copy.recursive());
+    assert_eq!(copy.source_mode(), LocalCopySourceMode::Tree);
     assert_eq!(copy.atomicity(), LocalAtomicityRequirement::Required);
     assert_eq!(copy.durability(), LocalDurabilityRequirement::Required);
 
@@ -237,7 +243,10 @@ fn test_option_constructors_expose_conservative_values() {
         LocalSymlinkPolicy::Reject,
         black_box(LocalCopyOptions::symlink_policy)(&copy)
     );
-    assert!(!black_box(LocalCopyOptions::recursive)(&copy));
+    assert_eq!(
+        LocalCopySourceMode::Auto,
+        black_box(LocalCopyOptions::source_mode)(&copy)
+    );
     assert_eq!(
         LocalAtomicityRequirement::Preferred,
         black_box(LocalCopyOptions::atomicity)(&copy)
