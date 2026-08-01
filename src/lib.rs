@@ -77,6 +77,7 @@ pub use options::{
     LocalSymlinkPolicy,
     LocalTempDirectoryOptions,
     LocalTempFileOptions,
+    LocalWalkErrorPolicy,
     LocalWriteMode,
     LocalWriteOptions,
 };
@@ -108,6 +109,7 @@ pub use walk::{
 pub use writer::{
     LocalFileCommitError,
     LocalFileWriter,
+    LocalWriteFailureState,
     LocalWriteOutcome,
     LocalWriterState,
 };

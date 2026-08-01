@@ -27,6 +27,7 @@ use crate::{
     LocalFileOperation,
     LocalResult,
     LocalWriteOptions,
+    LocalWriteFailureState,
     LocalWriteOutcome,
     LocalWriterState,
 };
@@ -46,6 +47,8 @@ pub struct LocalFileWriter {
     state: LocalWriterState,
     /// Bytes accepted by successful stream writes.
     bytes_written: u64,
+    /// Failure state retained after an uncertain stream write.
+    failure_state: Option<LocalWriteFailureState>,
 }
 
 impl LocalFileWriter {
@@ -68,6 +71,7 @@ impl LocalFileWriter {
             options,
             state: LocalWriterState::Open,
             bytes_written: 0,
+            failure_state: None,
         }
     }
 
@@ -87,6 +91,13 @@ impl LocalFileWriter {
         self.state
     }
 
+    /// Returns an uncertainty retained from an earlier stream failure.
+    #[must_use]
+    #[inline(always)]
+    pub const fn failure_state(&self) -> Option<LocalWriteFailureState> {
+        self.failure_state
+    }
+
     /// Commits bytes and destination publication.
     ///
     /// # Returns
@@ -99,14 +110,22 @@ impl LocalFileWriter {
     /// publication has not started. A `Published` state means the destination
     /// changed before a later durability failure.
     pub fn commit(mut self) -> Result<LocalWriteOutcome, LocalFileCommitError> {
-        if self.state != LocalWriterState::Open {
+        if self.state != LocalWriterState::Open
+            || self.failure_state == Some(LocalWriteFailureState::Indeterminate)
+        {
+            let failure_state = self
+                .failure_state
+                .unwrap_or(LocalWriteFailureState::NotPublished);
             return Err(LocalFileCommitError::new(
-                writer_state_error(
-                    &self.diagnostic_path,
-                    LocalFileOperation::Commit,
-                    self.state,
+                publication_error(
+                    writer_state_error(
+                        &self.diagnostic_path,
+                        LocalFileOperation::Commit,
+                        self.state,
+                    ),
+                    failure_state,
                 ),
-                self.state,
+                failure_state,
                 None,
             ));
         }
@@ -138,9 +157,9 @@ impl LocalFileWriter {
                                 LocalFileOperation::Commit,
                                 error,
                             ),
-                            LocalWriterState::Indeterminate,
+                            LocalWriteFailureState::Indeterminate,
                         ),
-                        LocalWriterState::Indeterminate,
+                        LocalWriteFailureState::Indeterminate,
                         None,
                     ));
                 }
@@ -169,9 +188,9 @@ impl LocalFileWriter {
                                         LocalFileOperation::Commit,
                                         error,
                                     ),
-                                    LocalWriterState::Published,
+                                    LocalWriteFailureState::Published,
                                 ),
-                                LocalWriterState::Published,
+                                LocalWriteFailureState::Published,
                                 None,
                             ));
                         }
@@ -184,6 +203,7 @@ impl LocalFileWriter {
                     false,
                     durable,
                     self.bytes_written,
+                    self.failure_state,
                 ))
             }
         }
@@ -200,7 +220,7 @@ impl LocalFileWriter {
     ///
     /// Returns `LocalFileError` when staging cleanup or append flush fails.
     pub fn abort(mut self) -> LocalResult<LocalWriteOutcome> {
-        let previous_state = self.state;
+        let previous_failure_state = self.failure_state;
         let backend = self
             .backend
             .take()
@@ -215,12 +235,13 @@ impl LocalFileWriter {
                         error,
                     ));
                 }
-                self.state = aborted_state(previous_state);
+                self.state = LocalWriterState::Aborted;
                 Ok(LocalWriteOutcome::new(
                     self.state,
                     false,
                     false,
                     self.bytes_written,
+                    self.failure_state,
                 ))
             }
             LocalFileWriterBackend::Append(mut file) => {
@@ -241,19 +262,17 @@ impl LocalFileWriter {
                         error,
                     ));
                 }
-                self.state =
-                    if previous_state == LocalWriterState::Indeterminate {
-                        LocalWriterState::Indeterminate
-                    } else if self.bytes_written == 0 {
-                        LocalWriterState::Aborted
-                    } else {
-                        LocalWriterState::Published
-                    };
+                self.state = LocalWriterState::Aborted;
+                self.failure_state = previous_failure_state.or_else(|| {
+                    (self.bytes_written > 0)
+                        .then_some(LocalWriteFailureState::Published)
+                });
                 Ok(LocalWriteOutcome::new(
                     self.state,
                     false,
                     false,
                     self.bytes_written,
+                    self.failure_state,
                 ))
             }
         }
@@ -272,6 +291,7 @@ impl LocalFileWriter {
                     true,
                     durable,
                     self.bytes_written,
+                    self.failure_state,
                 ))
             }
             Err(commit_error) => {
@@ -312,6 +332,7 @@ impl LocalFileWriter {
             options: self.options,
             state: self.state,
             bytes_written: self.bytes_written,
+            failure_state: self.failure_state,
         }
     }
 
@@ -340,7 +361,7 @@ impl LocalFileWriter {
         result: io::Result<T>,
     ) -> io::Result<T> {
         if result.is_err() {
-            self.state = LocalWriterState::Indeterminate;
+            self.failure_state = Some(LocalWriteFailureState::Indeterminate);
         }
         result
     }
@@ -349,7 +370,9 @@ impl LocalFileWriter {
 impl Write for LocalFileWriter {
     /// Writes bytes to staging or directly appends to the destination.
     fn write(&mut self, buffer: &[u8]) -> io::Result<usize> {
-        if self.state != LocalWriterState::Open {
+        if self.state != LocalWriterState::Open
+            || self.failure_state == Some(LocalWriteFailureState::Indeterminate)
+        {
             return Err(io::Error::new(
                 io::ErrorKind::BrokenPipe,
                 "local file writer is not open",
@@ -372,7 +395,9 @@ impl Write for LocalFileWriter {
 
     /// Writes vectored bytes to staging or directly appends to the destination.
     fn write_vectored(&mut self, buffers: &[IoSlice<'_>]) -> io::Result<usize> {
-        if self.state != LocalWriterState::Open {
+        if self.state != LocalWriterState::Open
+            || self.failure_state == Some(LocalWriteFailureState::Indeterminate)
+        {
             return Err(io::Error::new(
                 io::ErrorKind::BrokenPipe,
                 "local file writer is not open",
@@ -397,7 +422,9 @@ impl Write for LocalFileWriter {
 
     /// Flushes userspace buffers without publishing staged content.
     fn flush(&mut self) -> io::Result<()> {
-        if self.state != LocalWriterState::Open {
+        if self.state != LocalWriterState::Open
+            || self.failure_state == Some(LocalWriteFailureState::Indeterminate)
+        {
             return Err(io::Error::new(
                 io::ErrorKind::BrokenPipe,
                 "local file writer is not open",
@@ -424,17 +451,17 @@ impl Write for LocalFileWriter {
 /// Unified publication state.
 fn atomic_destination_state(
     state: crate::local::LocalAtomicDestinationState,
-) -> LocalWriterState {
+) -> LocalWriteFailureState {
     match state {
         crate::local::LocalAtomicDestinationState::Unchanged
         | crate::local::LocalAtomicDestinationState::Missing => {
-            LocalWriterState::NotPublished
+            LocalWriteFailureState::NotPublished
         }
         crate::local::LocalAtomicDestinationState::Replaced => {
-            LocalWriterState::Published
+            LocalWriteFailureState::Published
         }
         crate::local::LocalAtomicDestinationState::Indeterminate => {
-            LocalWriterState::Indeterminate
+            LocalWriteFailureState::Indeterminate
         }
     }
 }
@@ -481,25 +508,6 @@ fn writer_io_error(
     LocalFileError::from_io(operation, Some(path.to_path_buf()), None, error)
 }
 
-/// Returns the terminal state produced by successful staging cleanup.
-///
-/// # Parameters
-///
-/// - `previous_state`: State observed before abort began.
-///
-/// # Returns
-///
-/// `Indeterminate` when a prior stream failure made byte state uncertain;
-/// otherwise `Aborted`.
-#[inline]
-const fn aborted_state(previous_state: LocalWriterState) -> LocalWriterState {
-    if matches!(previous_state, LocalWriterState::Indeterminate) {
-        LocalWriterState::Indeterminate
-    } else {
-        LocalWriterState::Aborted
-    }
-}
-
 /// Builds a structured error for a forbidden writer state transition.
 ///
 /// # Parameters
@@ -540,18 +548,15 @@ fn writer_state_error(
 /// Error classified consistently with the observable publication state.
 fn publication_error(
     error: LocalFileError,
-    state: LocalWriterState,
+    state: LocalWriteFailureState,
 ) -> LocalFileError {
     match state {
-        LocalWriterState::NotPublished => error,
-        LocalWriterState::Published => {
+        LocalWriteFailureState::NotPublished => error,
+        LocalWriteFailureState::Published => {
             error.with_kind(LocalFileErrorKind::PublicationIncomplete)
         }
-        LocalWriterState::Indeterminate => {
+        LocalWriteFailureState::Indeterminate => {
             error.with_kind(LocalFileErrorKind::Indeterminate)
         }
-        LocalWriterState::Open
-        | LocalWriterState::Committed
-        | LocalWriterState::Aborted => error,
     }
 }

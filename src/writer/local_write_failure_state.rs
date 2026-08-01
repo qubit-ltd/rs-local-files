@@ -8,14 +8,14 @@
 // qubit-style: allow source-test-pair
 // Covered by writer integration tests.
 
-/// Lifecycle state of a native writer publication session.
+/// Namespace state established by a failed writer publication attempt.
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
 #[must_use]
-pub enum LocalWriterState {
-    /// The byte stream remains writable.
-    Open,
-    /// Commit completed successfully.
-    Committed,
-    /// Abort completed without publishing staged content.
-    Aborted,
+pub enum LocalWriteFailureState {
+    /// The destination was proven unchanged.
+    NotPublished,
+    /// The destination changed before a later failure.
+    Published,
+    /// The final destination state cannot be determined safely.
+    Indeterminate,
 }

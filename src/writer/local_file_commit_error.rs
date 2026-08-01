@@ -16,7 +16,7 @@ use std::{
 use crate::{
     LocalFileError,
     LocalFileWriter,
-    LocalWriterState,
+    LocalWriteFailureState,
 };
 
 /// Failed writer commit with publication state and an optional retryable
@@ -26,7 +26,7 @@ pub struct LocalFileCommitError {
     /// Structured local filesystem failure.
     error: LocalFileError,
     /// Publication state established by the failed attempt.
-    state: LocalWriterState,
+    state: LocalWriteFailureState,
     /// Writer retained only when retry or explicit abort remains safe.
     writer: Option<Box<LocalFileWriter>>,
 }
@@ -42,7 +42,7 @@ impl LocalFileCommitError {
     #[inline]
     pub(crate) fn new(
         error: LocalFileError,
-        state: LocalWriterState,
+        state: LocalWriteFailureState,
         writer: Option<LocalFileWriter>,
     ) -> Self {
         Self {
@@ -61,7 +61,7 @@ impl LocalFileCommitError {
 
     /// Returns the established publication state.
     #[inline(always)]
-    pub const fn state(&self) -> LocalWriterState {
+    pub const fn state(&self) -> LocalWriteFailureState {
         self.state
     }
 
@@ -78,7 +78,7 @@ impl LocalFileCommitError {
     #[inline]
     pub fn into_parts(
         self,
-    ) -> (LocalFileError, LocalWriterState, Option<LocalFileWriter>) {
+    ) -> (LocalFileError, LocalWriteFailureState, Option<LocalFileWriter>) {
         (self.error, self.state, self.writer.map(|writer| *writer))
     }
 }
