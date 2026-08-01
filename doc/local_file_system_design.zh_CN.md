@@ -196,11 +196,11 @@ UTF-8 或 lossy string。只有名称本身定义为 portable text 的 API 才�
 
 ```rust
 impl LocalPathCodec {
-    pub fn encode<'a>(
+    pub fn from_canonical_text<'a>(
         text: &'a str,
     ) -> Result<Cow<'a, OsStr>, LocalPathCodecError>;
 
-    pub fn decode<'a>(
+    pub fn to_canonical_text<'a>(
         native: &'a OsStr,
     ) -> Result<Cow<'a, str>, LocalPathCodecError>;
 }
@@ -214,19 +214,19 @@ percent-decoding，也不解释 provider hierarchy：
 - 合法、非 control 的 Unicode scalar 原样保留；
 - `%`、control character 的 UTF-8 byte、无效 UTF-8 byte 及 Windows WTF-8 中表示
   非配对 surrogate 的 byte 使用 uppercase `%HH`；
-- decode 后必须重新 encode 并与输入完全相等，因此 lowercase escape、不必要 escape
+- `from_canonical_text` 后必须重新 `to_canonical_text` 并与输入完全相等，因此 lowercase escape、不必要 escape
   和其他别名一律拒绝；
 - Unix 必须无损往返任意非 NUL filename byte；
 - Windows 必须无损往返 native UTF-16，包括非配对 surrogate；
 - `%`、控制 byte 和 codec escape 必须只有一种 canonical 拼写，拒绝别名和畸形
   escape；
-- encode 后产生 separator、root 或 prefix 的风险由调用方按“完整 path”还是“单一
+- `from_canonical_text` 后产生 separator、root 或 prefix 的风险由调用方按“完整 path”还是“单一
   component”的上下文继续校验；
 - 不支持稳定无损转换的平台必须返回明确的
   `LocalPathCodecError::UnsupportedNativeEncoding`，不能使用 lossy conversion。
 
 `qubit-fs-local` 可以定义 adapter-local codec 类型，实现
-`qubit_fs::NativePathCodec`，并把 `encode`/`decode` 委托给这里。平台字节、`OsStr`、
+`qubit_fs::NativePathCodec`，并把 `from_canonical_text`/`to_canonical_text` 委托给这里。平台字节、`OsStr`、
 WTF-8 等算法不得保留在 `qubit-fs` 或 adapter 中。
 
 不提供同功能的 free function 别名。
@@ -486,26 +486,26 @@ Walker drop 只释放本地 handle，不执行 namespace 修改。
 
 ## 10. Writer publication
 
-`LocalFileWriter` 同时是 byte output 和 publication session。状态包括：
+`LocalFileWriter` 同时是 byte output 和 publication session。生命周期状态包括：
 
 - `Open`；
 - `Committed`；
-- `Aborted`；
-- `NotPublished`；
-- `Published`；
-- `Indeterminate`。
+- `Aborted`。
+
+发布结论另用 `LocalWriteFailureState` 表示：
+
+- `NotPublished`：目标尚未被本次操作改变；
+- `Published`：目标已被改变或完整发布；
+- `Indeterminate`：无法确认目标最终状态。
 
 `LocalWriteOptions` 明确区分 `CreateNew`、`CreateOrReplace` 和 `Append`。
 前两者使用同目录 staging 与 publication；append 直接修改已存在 entry，因此拒绝
 `LocalAtomicityRequirement::Required`。`Preferred` 可以降级为 direct append，但
 commit 必须报告 `atomic = false`；写入 bytes 后 abort 也不能声称已经回滚。
 
-Commit failure 使用：
-
-- `RetryableNotPublished`；
-- `NotPublished`；
-- `Published`；
-- `Indeterminate`。
+Commit failure 使用 `LocalWriteFailureState`，并在
+`LocalWriteOutcome::failure_state()` 中保留已知的发布结论；生命周期则通过
+`LocalWriterState` 独立报告。
 
 只有 `Open` 状态允许继续 `Write`/`flush`。任一 byte-stream write/flush error 都把
 writer 置为 `Indeterminate`，因为普通 I/O error 不能证明 direct append 或 staging
