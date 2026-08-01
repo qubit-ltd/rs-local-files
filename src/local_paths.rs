@@ -419,7 +419,7 @@ fn decode_normal_component(component: &str) -> LocalResult<OsString> {
 /// is malformed, non-canonical, or unrepresentable on the current platform.
 #[inline]
 fn decode_canonical_component(component: &str) -> LocalResult<OsString> {
-    LocalPathCodec::encode(component)
+    LocalPathCodec::from_canonical_text(component)
         .map_err(|error| {
             LocalFileError::from_path_codec(
                 LocalFileOperation::ComposePath,
@@ -475,7 +475,7 @@ fn encode_normal_components(path: &Path) -> LocalResult<Vec<String>> {
         // `Path` components used for host I/O cannot contain native NUL.
         // Treat a violation as a programming-contract failure rather than a
         // recoverable canonicalization result.
-        let canonical = LocalPathCodec::decode(component)
+        let canonical = LocalPathCodec::to_canonical_text(component)
             .expect("host path components cannot contain native NUL")
             .into_owned();
         encoded.push(canonical);
@@ -601,7 +601,7 @@ fn to_canonical_absolute_components(path: &Path) -> LocalResult<Vec<String>> {
             return Err(invalid_path_error());
         };
         encoded.push(
-            LocalPathCodec::decode(component)
+            LocalPathCodec::to_canonical_text(component)
                 .expect("host path components cannot contain native NUL")
                 .into_owned(),
         );
@@ -700,7 +700,7 @@ fn to_canonical_absolute_components(path: &Path) -> LocalResult<Vec<String>> {
     if !matches!(native_components.next(), Some(Component::RootDir)) {
         return Err(invalid_path_error());
     }
-    let drive = LocalPathCodec::decode(prefix.as_os_str())
+    let drive = LocalPathCodec::to_canonical_text(prefix.as_os_str())
         .expect("host path prefixes cannot contain native NUL")
         .into_owned();
     if !is_windows_drive_component(&drive) {
@@ -712,7 +712,7 @@ fn to_canonical_absolute_components(path: &Path) -> LocalResult<Vec<String>> {
             return Err(invalid_path_error());
         };
         encoded.push(
-            LocalPathCodec::decode(component)
+            LocalPathCodec::to_canonical_text(component)
                 .expect("host path components cannot contain native NUL")
                 .into_owned(),
         );

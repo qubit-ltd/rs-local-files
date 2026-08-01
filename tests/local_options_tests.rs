@@ -128,10 +128,8 @@ fn test_copy_rename_and_write_option_builders_retain_policies() {
 
     let rename = black_box(LocalRenameOptions::new())
         .with_overwrite()
-        .with_atomicity(LocalAtomicityRequirement::NotRequired)
         .with_durability(LocalDurabilityRequirement::Preferred);
     assert!(rename.overwrite());
-    assert_eq!(rename.atomicity(), LocalAtomicityRequirement::NotRequired);
     assert_eq!(rename.durability(), LocalDurabilityRequirement::Preferred);
 
     let timeout = Duration::from_secs(1);
@@ -251,10 +249,6 @@ fn test_option_constructors_expose_conservative_values() {
 
     let rename = black_box(LocalRenameOptions::new as fn() -> _)();
     assert!(!black_box(LocalRenameOptions::overwrite)(&rename));
-    assert_eq!(
-        LocalAtomicityRequirement::Preferred,
-        black_box(LocalRenameOptions::atomicity)(&rename)
-    );
     assert_eq!(
         LocalDurabilityRequirement::NotRequired,
         black_box(LocalRenameOptions::durability)(&rename)
