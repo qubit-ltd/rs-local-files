@@ -34,6 +34,7 @@
 #[must_use]
 #[non_exhaustive]
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
+#[allow(dead_code)]
 pub enum LocalAtomicDestinationState {
     /// The destination was not modified by the failed operation.
     ///

@@ -10,7 +10,11 @@
 // Private behavior is covered through public integration tests.
 
 use std::fs;
-use std::io::{Error, ErrorKind, Result};
+use std::io::{
+    Error,
+    ErrorKind,
+    Result,
+};
 use std::path::Path;
 
 use super::super::directory_identity::DirectoryIdentity;
@@ -45,7 +49,8 @@ pub(super) fn inspect_copy_source_directory(
     }
     let canonical_source = fs::canonicalize(src)?;
     reject_destination_inside_source(src, &canonical_source, destination_root)?;
-    let source_identity = DirectoryIdentity::from_metadata(&source_metadata, &canonical_source);
+    let source_identity =
+        DirectoryIdentity::from_metadata(&source_metadata, &canonical_source);
     Ok((source_metadata, source_identity))
 }
 
@@ -64,7 +69,10 @@ pub(super) fn inspect_copy_source_directory(
 ///
 /// Returns an I/O error when metadata cannot be loaded, or `Unsupported` when
 /// a symbolic link is forbidden.
-pub(super) fn metadata_for_copy_source(path: &Path, follow_symlinks: bool) -> Result<fs::Metadata> {
+pub(super) fn metadata_for_copy_source(
+    path: &Path,
+    follow_symlinks: bool,
+) -> Result<fs::Metadata> {
     let metadata = fs::symlink_metadata(path)?;
     if metadata.file_type().is_symlink() {
         if follow_symlinks {
@@ -111,7 +119,9 @@ fn reject_destination_inside_source(
     canonical_source: &Path,
     destination: &Path,
 ) -> Result<()> {
-    if destination == canonical_source || destination.starts_with(canonical_source) {
+    if destination == canonical_source
+        || destination.starts_with(canonical_source)
+    {
         return Err(Error::new(
             ErrorKind::InvalidInput,
             format!(

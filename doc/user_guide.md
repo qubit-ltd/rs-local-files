@@ -3,7 +3,7 @@
 [中文](user_guide.zh_CN.md) · [README](../README.md) ·
 [API reference](https://docs.rs/qubit-local-files)
 
-This guide covers `qubit-local-files` 0.7 on Rust 1.94 or newer. It is for
+This guide covers `qubit-local-files` 0.8 on Rust 1.94 or newer. It is for
 applications that operate on the host filesystem or need operations restricted
 to one opened directory. It is not a provider registry, a remote filesystem
 API, or a replacement for provider-level logical paths.
@@ -137,6 +137,10 @@ primary and target paths when available, and an optional `std::io::Error`
 source. Publication operations use dedicated failure types to preserve
 partial-success state.
 
+`LocalPersistError` retains the temporary resource and its structured
+`LocalFileError`; its `state()` is the single recovery-state authority. Native
+I/O errors are available through the structured error source when present.
+
 | Symptom | Check |
 | --- | --- |
 | A rooted operation rejects a path | Pass a relative descendant; remove absolute prefixes, `.`, `..`, and intermediate symlinks. |
@@ -150,7 +154,8 @@ Linux, Windows, and macOS are runtime-tested. FreeBSD and Android are
 compile-checked only. `LocalFileSystem::capabilities()` reports the host
 implementation; `RootedLocalFileSystem::capabilities()` is the snapshot cached
 when opening the authority. A path limit is `Some` only when verified for the
-target filesystem.
+target filesystem. Atomic rename, atomic replacement, and atomic temporary
+persistence are reported independently because platform support differs.
 
 Continue with the [README](../README.md), [中文用户手册](user_guide.zh_CN.md),
 or the [API reference](https://docs.rs/qubit-local-files).

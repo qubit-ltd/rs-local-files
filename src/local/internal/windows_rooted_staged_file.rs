@@ -12,7 +12,10 @@
 use std::{
     fs::File,
     io,
-    path::{Path, PathBuf},
+    path::{
+        Path,
+        PathBuf,
+    },
 };
 
 use crate::LocalRelativePath;

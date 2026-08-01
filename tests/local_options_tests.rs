@@ -7,20 +7,38 @@
 // =============================================================================
 //! Public option-value coverage for local filesystem operations.
 
-use std::{hint::black_box, path::Path, time::Duration};
+use std::{
+    hint::black_box,
+    path::Path,
+    time::Duration,
+};
 
 use qubit_local_files::{
-    LocalAtomicityRequirement, LocalCopyConflictPolicy, LocalCopyOptions,
-    LocalCopyTypeConflictPolicy, LocalCreateDirectoryOptions, LocalDeleteOptions,
-    LocalDurabilityRequirement, LocalListOptions, LocalMetadataPreservePolicy, LocalPersistOptions,
-    LocalReadOptions, LocalRenameOptions, LocalSymlinkPolicy, LocalTempDirectoryOptions,
-    LocalTempFileOptions, LocalWriteMode, LocalWriteOptions,
+    LocalAtomicityRequirement,
+    LocalCopyConflictPolicy,
+    LocalCopyOptions,
+    LocalCopyTypeConflictPolicy,
+    LocalCreateDirectoryOptions,
+    LocalDeleteOptions,
+    LocalDurabilityRequirement,
+    LocalListOptions,
+    LocalMetadataPreservePolicy,
+    LocalPersistOptions,
+    LocalReadOptions,
+    LocalRenameOptions,
+    LocalSymlinkPolicy,
+    LocalTempDirectoryOptions,
+    LocalTempFileOptions,
+    LocalWriteMode,
+    LocalWriteOptions,
 };
 
 /// Verifies directory and deletion builders retain every configured policy.
 #[test]
 fn test_directory_and_delete_option_builders_retain_policies() {
-    let create = black_box(LocalCreateDirectoryOptions::new as fn() -> LocalCreateDirectoryOptions);
+    let create = black_box(
+        LocalCreateDirectoryOptions::new as fn() -> LocalCreateDirectoryOptions,
+    );
     let create_recursive = black_box(
         LocalCreateDirectoryOptions::with_recursive
             as fn(LocalCreateDirectoryOptions) -> LocalCreateDirectoryOptions,
@@ -37,12 +55,15 @@ fn test_directory_and_delete_option_builders_retain_policies() {
         &directory
     ));
 
-    let delete = black_box(LocalDeleteOptions::new as fn() -> LocalDeleteOptions);
+    let delete =
+        black_box(LocalDeleteOptions::new as fn() -> LocalDeleteOptions);
     let delete_recursive = black_box(
-        LocalDeleteOptions::with_recursive as fn(LocalDeleteOptions) -> LocalDeleteOptions,
+        LocalDeleteOptions::with_recursive
+            as fn(LocalDeleteOptions) -> LocalDeleteOptions,
     );
     let delete_missing_ok = black_box(
-        LocalDeleteOptions::with_missing_ok as fn(LocalDeleteOptions) -> LocalDeleteOptions,
+        LocalDeleteOptions::with_missing_ok
+            as fn(LocalDeleteOptions) -> LocalDeleteOptions,
     );
     let deletion = delete_missing_ok(delete_recursive(delete()));
     assert!(black_box(LocalDeleteOptions::recursive)(&deletion));
@@ -53,13 +74,17 @@ fn test_directory_and_delete_option_builders_retain_policies() {
 #[test]
 fn test_list_and_read_option_builders_retain_policies() {
     let list = black_box(LocalListOptions::new as fn() -> LocalListOptions);
-    let list_recursive =
-        black_box(LocalListOptions::with_recursive as fn(LocalListOptions) -> LocalListOptions);
+    let list_recursive = black_box(
+        LocalListOptions::with_recursive
+            as fn(LocalListOptions) -> LocalListOptions,
+    );
     let list_follow = black_box(
-        LocalListOptions::with_follow_symlinks as fn(LocalListOptions) -> LocalListOptions,
+        LocalListOptions::with_follow_symlinks
+            as fn(LocalListOptions) -> LocalListOptions,
     );
     let list_max_depth = black_box(
-        LocalListOptions::with_max_depth as fn(LocalListOptions, usize) -> LocalListOptions,
+        LocalListOptions::with_max_depth
+            as fn(LocalListOptions, usize) -> LocalListOptions,
     );
     let listing = list_max_depth(list_follow(list_recursive(list())), 3);
     assert!(black_box(LocalListOptions::recursive)(&listing));
@@ -150,17 +175,26 @@ fn test_temporary_resource_option_builders_retain_configuration() {
 /// Verifies every option type exposes the documented conservative default.
 #[test]
 fn test_option_defaults_match_their_constructors() {
-    let create_default =
-        black_box(LocalCreateDirectoryOptions::default as fn() -> LocalCreateDirectoryOptions);
-    let delete_default = black_box(LocalDeleteOptions::default as fn() -> LocalDeleteOptions);
-    let list_default = black_box(LocalListOptions::default as fn() -> LocalListOptions);
-    let read_default = black_box(LocalReadOptions::default as fn() -> LocalReadOptions);
-    let copy_default = black_box(LocalCopyOptions::default as fn() -> LocalCopyOptions);
-    let rename_default = black_box(LocalRenameOptions::default as fn() -> LocalRenameOptions);
-    let temp_file_default =
-        black_box(LocalTempFileOptions::default as fn() -> LocalTempFileOptions);
-    let temp_directory_default =
-        black_box(LocalTempDirectoryOptions::default as fn() -> LocalTempDirectoryOptions);
+    let create_default = black_box(
+        LocalCreateDirectoryOptions::default
+            as fn() -> LocalCreateDirectoryOptions,
+    );
+    let delete_default =
+        black_box(LocalDeleteOptions::default as fn() -> LocalDeleteOptions);
+    let list_default =
+        black_box(LocalListOptions::default as fn() -> LocalListOptions);
+    let read_default =
+        black_box(LocalReadOptions::default as fn() -> LocalReadOptions);
+    let copy_default =
+        black_box(LocalCopyOptions::default as fn() -> LocalCopyOptions);
+    let rename_default =
+        black_box(LocalRenameOptions::default as fn() -> LocalRenameOptions);
+    let temp_file_default = black_box(
+        LocalTempFileOptions::default as fn() -> LocalTempFileOptions,
+    );
+    let temp_directory_default = black_box(
+        LocalTempDirectoryOptions::default as fn() -> LocalTempDirectoryOptions,
+    );
     assert_eq!(create_default(), LocalCreateDirectoryOptions::new());
     assert_eq!(delete_default(), LocalDeleteOptions::new());
     assert_eq!(list_default(), LocalListOptions::new());
@@ -232,7 +266,8 @@ fn test_option_constructors_expose_conservative_values() {
     assert_eq!(None, black_box(LocalTempFileOptions::suffix)(&file));
     assert_eq!(256, black_box(LocalTempFileOptions::max_attempts)(&file));
 
-    let directory = black_box(LocalTempDirectoryOptions::default as fn() -> _)();
+    let directory =
+        black_box(LocalTempDirectoryOptions::default as fn() -> _)();
     assert_eq!(
         None,
         black_box(LocalTempDirectoryOptions::parent)(&directory)
@@ -250,7 +285,9 @@ fn test_option_constructors_expose_conservative_values() {
         black_box(LocalTempDirectoryOptions::max_attempts)(&directory)
     );
 
-    let writer = black_box(LocalWriteOptions::new as fn(_) -> _)(LocalWriteMode::CreateOrReplace);
+    let writer = black_box(LocalWriteOptions::new as fn(_) -> _)(
+        LocalWriteMode::CreateOrReplace,
+    );
     assert_eq!(
         LocalWriteMode::CreateOrReplace,
         black_box(LocalWriteOptions::mode)(&writer)
@@ -277,9 +314,9 @@ fn test_persist_options_expose_overwrite_policy() {
     let conservative = black_box(LocalPersistOptions::default as fn() -> _)();
     assert!(!black_box(LocalPersistOptions::overwrites)(&conservative));
 
-    let replacing = black_box(LocalPersistOptions::with_overwrite as fn(_) -> _)(black_box(
-        LocalPersistOptions::new as fn() -> _,
-    )());
+    let replacing = black_box(
+        LocalPersistOptions::with_overwrite as fn(_) -> _,
+    )(black_box(LocalPersistOptions::new as fn() -> _)());
     assert!(black_box(LocalPersistOptions::overwrites)(&replacing));
     assert_eq!(LocalPersistOptions::new(), LocalPersistOptions::default());
 }

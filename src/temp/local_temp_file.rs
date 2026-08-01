@@ -9,20 +9,39 @@
 
 use std::{
     fs::File,
-    io::{Error, ErrorKind, IoSlice, Result, Seek, SeekFrom, Write},
-    path::{Path, PathBuf},
+    io::{
+        Error,
+        ErrorKind,
+        IoSlice,
+        Result,
+        Seek,
+        SeekFrom,
+        Write,
+    },
+    path::{
+        Path,
+        PathBuf,
+    },
     sync::Arc,
 };
 
 use log::warn;
 
 use crate::{
-    LocalPersistError, LocalPersistFailureState, LocalPersistMethod, LocalPersistOptions,
-    LocalPersistOutcome, LocalPersistStage, LocalRelativePath,
+    LocalPersistError,
+    LocalPersistFailureState,
+    LocalPersistMethod,
+    LocalPersistOptions,
+    LocalPersistOutcome,
+    LocalPersistStage,
+    LocalRelativePath,
 };
 
 use super::internal::{
-    LocalTempResourceBackend, LocalTempResourceState, RootedTempResourceBackend, TempEntryIdentity,
+    LocalTempResourceBackend,
+    LocalTempResourceState,
+    RootedTempResourceBackend,
+    TempEntryIdentity,
 };
 
 /// A temporary file whose cleanup remains bound to its creating authority.
@@ -49,7 +68,9 @@ impl LocalTempFile {
     pub(crate) fn host(path: PathBuf, file: File) -> Result<Self> {
         Ok(Self {
             path,
-            backend: LocalTempResourceBackend::Host(super::internal::HostTempResourceBackend),
+            backend: LocalTempResourceBackend::Host(
+                super::internal::HostTempResourceBackend,
+            ),
             host_identity: Some(TempEntryIdentity::from_file(&file)?),
             rooted_identity: None,
             file: Some(file),
@@ -59,15 +80,23 @@ impl LocalTempFile {
 
     /// Builds a rooted temporary file from the retained root authority.
     #[inline]
-    pub(crate) fn rooted(root: Arc<crate::rooted::Root>, path: PathBuf, file: File) -> Result<Self> {
+    pub(crate) fn rooted(
+        root: Arc<crate::rooted::Root>,
+        path: PathBuf,
+        file: File,
+    ) -> Result<Self> {
         Ok(Self {
             path: path.clone(),
-            backend: LocalTempResourceBackend::Rooted(RootedTempResourceBackend {
-                root,
-                relative_path: path,
-            }),
+            backend: LocalTempResourceBackend::Rooted(
+                RootedTempResourceBackend {
+                    root,
+                    relative_path: path,
+                },
+            ),
             host_identity: None,
-            rooted_identity: Some(crate::rooted::Metadata::from_open_file(&file)?),
+            rooted_identity: Some(crate::rooted::Metadata::from_open_file(
+                &file,
+            )?),
             file: Some(file),
             state: LocalTempResourceState::Owned,
         })
@@ -230,7 +259,8 @@ impl LocalTempFile {
         };
         let source = LocalRelativePath::new(&rooted.relative_path)
             .expect("rooted temporary path was validated at creation");
-        let destination = LocalRelativePath::new(&target).expect("persist target was validated");
+        let destination = LocalRelativePath::new(&target)
+            .expect("persist target was validated");
         let result = if options.overwrites() {
             rooted.root.rename(&source, &destination)
         } else {
@@ -261,7 +291,9 @@ impl LocalTempFile {
     fn remove(&mut self) -> Result<()> {
         self.ensure_identity_matches()?;
         match &self.backend {
-            LocalTempResourceBackend::Host(_) => std::fs::remove_file(&self.path),
+            LocalTempResourceBackend::Host(_) => {
+                std::fs::remove_file(&self.path)
+            }
             LocalTempResourceBackend::Rooted(rooted) => {
                 let path = LocalRelativePath::new(&rooted.relative_path)
                     .expect("rooted temporary path was validated at creation");
@@ -293,15 +325,14 @@ impl LocalTempFile {
             LocalTempResourceBackend::Rooted(rooted) => rooted
                 .root
                 .symlink_metadata(
-                    &LocalRelativePath::new(&rooted.relative_path)
-                        .expect("rooted temporary path was validated at creation"),
+                    &LocalRelativePath::new(&rooted.relative_path).expect(
+                        "rooted temporary path was validated at creation",
+                    ),
                 )
                 .map(|metadata| {
-                    metadata.is_same_file(
-                        self.rooted_identity
-                            .as_ref()
-                            .expect("rooted temporary file must retain rooted identity"),
-                    )
+                    metadata.is_same_file(self.rooted_identity.as_ref().expect(
+                        "rooted temporary file must retain rooted identity",
+                    ))
                 }),
         };
         match matches {

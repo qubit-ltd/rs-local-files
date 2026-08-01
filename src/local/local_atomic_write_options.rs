@@ -116,7 +116,10 @@ impl LocalAtomicWriteOptions {
     ///
     /// Updated options carrying the durability policy.
     #[inline(always)]
-    pub const fn with_durability(mut self, durability: LocalDurabilityRequirement) -> Self {
+    pub const fn with_durability(
+        mut self,
+        durability: LocalDurabilityRequirement,
+    ) -> Self {
         self.durability = durability;
         self
     }

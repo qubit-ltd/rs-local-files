@@ -10,9 +10,16 @@
 // Private behavior is covered through public integration tests.
 
 use std::io;
-use std::path::{Path, PathBuf};
+use std::path::{
+    Path,
+    PathBuf,
+};
 
-use crate::{LocalAtomicDestinationState, LocalAtomicWriteError, LocalAtomicWriteStage};
+use crate::{
+    LocalAtomicDestinationState,
+    LocalAtomicWriteError,
+    LocalAtomicWriteStage,
+};
 
 use super::AtomicStagingState;
 
@@ -51,7 +58,10 @@ pub(crate) fn recover_atomic_install_error<S>(
     } = context;
     let cleanup_error = match staging_state {
         AtomicStagingState::Present => match cleanup_staging(staged_file) {
-            Ok(()) if destination_state == LocalAtomicDestinationState::Replaced => {
+            Ok(())
+                if destination_state
+                    == LocalAtomicDestinationState::Replaced =>
+            {
                 return sync_parent(staged_file).map_err(|error| {
                     LocalAtomicWriteError::new(
                         LocalAtomicWriteStage::SyncParent,
@@ -70,11 +80,12 @@ pub(crate) fn recover_atomic_install_error<S>(
             None
         }
     };
-    let parent_sync_error = if destination_state == LocalAtomicDestinationState::Replaced {
-        sync_parent(staged_file).err()
-    } else {
-        None
-    };
+    let parent_sync_error =
+        if destination_state == LocalAtomicDestinationState::Replaced {
+            sync_parent(staged_file).err()
+        } else {
+            None
+        };
     Err(LocalAtomicWriteError::new(
         LocalAtomicWriteStage::ReplaceDestination,
         path.to_path_buf(),

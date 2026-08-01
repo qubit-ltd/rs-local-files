@@ -6,6 +6,7 @@
 //    Licensed under the Apache License, Version 2.0.
 // =============================================================================
 //! Cross-platform rooted entry permissions.
+// qubit-style: allow source-test-pair
 
 /// Permissions observed or applied through a rooted filesystem capability.
 #[must_use]
@@ -17,6 +18,7 @@ pub struct Permissions {
     unix_mode: Option<u32>,
 }
 
+#[allow(dead_code)]
 impl Permissions {
     /// Creates a portable read-only or writable permission value.
     #[inline]
