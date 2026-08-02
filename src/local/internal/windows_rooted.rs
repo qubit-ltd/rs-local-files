@@ -93,6 +93,152 @@ const IO_REPARSE_TAG_NAME_SURROGATE: u32 = 0x2000_0000;
 const ROOTED_SHARE_MODE: u32 =
     FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE;
 
+/// Byte capacity used for each native directory-enumeration request.
+const DIRECTORY_READ_BUFFER_SIZE: usize = 64 * 1024;
+
+/// Lazily reads children from one opened Windows directory handle.
+#[derive(Debug)]
+pub(crate) struct RootedDirectoryReader {
+    /// Directory handle retained for enumeration and child inspection.
+    directory: File,
+    /// Aligned storage for native directory records.
+    buffer: Vec<usize>,
+    /// Number of valid bytes currently in `buffer`.
+    used: usize,
+    /// Offset of the next native record within `buffer`.
+    offset: usize,
+    /// Whether the next native request must restart enumeration.
+    restart: bool,
+    /// Whether the operating system reported that enumeration is complete.
+    exhausted: bool,
+}
+
+impl RootedDirectoryReader {
+    /// Creates a lazy enumerator for an already-opened directory handle.
+    fn new(directory: File) -> Self {
+        Self {
+            directory,
+            buffer: vec![0_usize; DIRECTORY_READ_BUFFER_SIZE.div_ceil(size_of::<usize>())],
+            used: 0,
+            offset: 0,
+            restart: true,
+            exhausted: false,
+        }
+    }
+
+    /// Reads the next child without following a final reparse point.
+    ///
+    /// Returns `Ok(None)` after all native records are consumed, and returns an
+    /// I/O error when native enumeration or child inspection fails.
+    pub(crate) fn next_entry(&mut self) -> Result<Option<(OsString, File)>> {
+        loop {
+            if self.offset >= self.used {
+                self.read_next_buffer()?;
+                if self.exhausted {
+                    return Ok(None);
+                }
+            }
+            let (name, next_offset) = self.current_name()?;
+            self.offset = next_offset;
+            if name == OsStr::new(".") || name == OsStr::new("..") {
+                continue;
+            }
+            let child = nt_open_at(
+                &self.directory,
+                &name,
+                FILE_READ_ATTRIBUTES | SYNCHRONIZE,
+                FILE_OPEN,
+                0,
+            )?;
+            return Ok(Some((name, child)));
+        }
+    }
+
+    /// Requests the next batch of native directory records.
+    fn read_next_buffer(&mut self) -> Result<()> {
+        let mut status_block = IO_STATUS_BLOCK::default();
+        // SAFETY: `buffer` and `status_block` are writable for this synchronous
+        // request. All optional callback and filter pointers are null.
+        let status = unsafe {
+            NtQueryDirectoryFile(
+                self.directory.as_raw_handle(),
+                null_mut(),
+                None,
+                null(),
+                &raw mut status_block,
+                self.buffer.as_mut_ptr().cast(),
+                DIRECTORY_READ_BUFFER_SIZE as u32,
+                FileDirectoryInformation,
+                false,
+                null(),
+                self.restart,
+            )
+        };
+        if status == STATUS_NO_MORE_FILES {
+            self.exhausted = true;
+            self.used = 0;
+            self.offset = 0;
+            return Ok(());
+        }
+        nt_result(status)?;
+        self.restart = false;
+        self.used = status_block.Information.min(DIRECTORY_READ_BUFFER_SIZE);
+        self.offset = 0;
+        if self.used == 0 {
+            return Err(Error::other("NtQueryDirectoryFile returned an empty record batch"));
+        }
+        Ok(())
+    }
+
+    /// Parses the current native directory record and advances its byte offset.
+    fn current_name(&self) -> Result<(OsString, usize)> {
+        let name_offset = std::mem::offset_of!(FILE_DIRECTORY_INFORMATION, FileName);
+        let remaining = self.used.checked_sub(self.offset).ok_or_else(|| {
+            Error::other("directory record offset exceeded the native result")
+        })?;
+        if remaining < name_offset {
+            return Err(Error::other("truncated directory record header"));
+        }
+        // SAFETY: the bounds check above ensures the fixed record header lies
+        // inside the valid native result buffer.
+        let information = unsafe {
+            &*self
+                .buffer
+                .as_ptr()
+                .cast::<u8>()
+                .add(self.offset)
+                .cast::<FILE_DIRECTORY_INFORMATION>()
+        };
+        let name_bytes = information.FileNameLength as usize;
+        let name_size = name_bytes
+            .checked_div(size_of::<u16>())
+            .filter(|_| name_bytes.is_multiple_of(size_of::<u16>()))
+            .ok_or_else(|| Error::other("directory record name has an invalid length"))?;
+        let name_end = name_offset.checked_add(name_bytes).ok_or_else(|| {
+            Error::other("directory record name length overflowed")
+        })?;
+        if name_end > remaining {
+            return Err(Error::other("truncated directory record name"));
+        }
+        // SAFETY: `name_end` was verified within the current native record.
+        let name = unsafe {
+            OsString::from_wide(std::slice::from_raw_parts(
+                information.FileName.as_ptr(),
+                name_size,
+            ))
+        };
+        let next_offset = if information.NextEntryOffset == 0 {
+            self.used
+        } else {
+            self.offset
+                .checked_add(information.NextEntryOffset as usize)
+                .filter(|next| *next > self.offset && *next <= self.used)
+                .ok_or_else(|| Error::other("directory record offset overflowed"))?
+        };
+        Ok((name, next_offset))
+    }
+}
+
 /// Opens an absolute root directory without following its final reparse point.
 ///
 /// # Errors
@@ -224,6 +370,16 @@ pub(crate) fn read_root_directory(
     read_directory_handle(root, diagnostic_root)
 }
 
+/// Opens a lazy reader for immediate children of the opened root.
+///
+/// Returns an I/O error when the root handle cannot be duplicated.
+pub(crate) fn open_root_directory_reader(
+    root: &File,
+    _diagnostic_root: &Path,
+) -> Result<RootedDirectoryReader> {
+    root.try_clone().map(RootedDirectoryReader::new)
+}
+
 /// Lists immediate children of a rooted descendant directory.
 ///
 /// # Errors
@@ -244,6 +400,25 @@ pub(crate) fn read_rooted_directory(
     )?;
     verify_real_directory(&directory)?;
     read_directory_handle(&directory, diagnostic_root)
+}
+
+/// Opens a lazy reader for immediate children of a rooted descendant.
+///
+/// Returns an I/O error when secure traversal or directory opening fails.
+pub(crate) fn open_rooted_directory_reader(
+    root: &File,
+    _diagnostic_root: &Path,
+    path: &LocalRelativePath,
+) -> Result<RootedDirectoryReader> {
+    let directory = open_entry(
+        root,
+        path,
+        FILE_LIST_DIRECTORY | FILE_READ_ATTRIBUTES | SYNCHRONIZE,
+        FILE_OPEN,
+        FILE_DIRECTORY_FILE,
+    )?;
+    verify_real_directory(&directory)?;
+    Ok(RootedDirectoryReader::new(directory))
 }
 
 /// Creates one rooted directory or directory chain.
@@ -502,74 +677,9 @@ fn read_directory_handle(
     _diagnostic_root: &Path,
 ) -> Result<Vec<(OsString, File)>> {
     let mut entries = Vec::new();
-    let mut restart = true;
-    loop {
-        let buffer_size = 64_usize * 1024;
-        let mut buffer =
-            vec![0_usize; buffer_size.div_ceil(size_of::<usize>())];
-        let mut status_block = IO_STATUS_BLOCK::default();
-        // SAFETY: `buffer` and `status_block` are writable for the duration of
-        // the synchronous query. Optional event, APC, context, and filter
-        // pointers are null.
-        let status = unsafe {
-            NtQueryDirectoryFile(
-                directory.as_raw_handle(),
-                null_mut(),
-                None,
-                null(),
-                &raw mut status_block,
-                buffer.as_mut_ptr().cast(),
-                buffer_size as u32,
-                FileDirectoryInformation,
-                false,
-                null(),
-                restart,
-            )
-        };
-        if status == STATUS_NO_MORE_FILES {
-            break;
-        }
-        nt_result(status)?;
-        restart = false;
-        let used = status_block.Information.min(buffer_size);
-        let buffer = buffer.as_ptr().cast::<u8>();
-        let mut offset = 0_usize;
-        while offset < used {
-            // SAFETY: NtQueryDirectoryFile returned a sequence of
-            // FILE_DIRECTORY_INFORMATION records within `used` bytes.
-            let information = unsafe {
-                &*buffer.add(offset).cast::<FILE_DIRECTORY_INFORMATION>()
-            };
-            let name_len =
-                information.FileNameLength as usize / size_of::<u16>();
-            // SAFETY: FileNameLength describes the inline UTF-16 name in this
-            // record and the record lies inside the returned buffer.
-            let name_units = unsafe {
-                std::slice::from_raw_parts(
-                    information.FileName.as_ptr(),
-                    name_len,
-                )
-            };
-            let name = OsString::from_wide(name_units);
-            if name != OsStr::new(".") && name != OsStr::new("..") {
-                let child = nt_open_at(
-                    directory,
-                    &name,
-                    FILE_READ_ATTRIBUTES | SYNCHRONIZE,
-                    FILE_OPEN,
-                    0,
-                )?;
-                entries.push((name, child));
-            }
-            if information.NextEntryOffset == 0 {
-                break;
-            }
-            offset = offset
-                .checked_add(information.NextEntryOffset as usize)
-                .ok_or_else(|| {
-                Error::other("directory record offset overflowed")
-            })?;
-        }
+    let mut reader = RootedDirectoryReader::new(directory.try_clone()?);
+    while let Some(entry) = reader.next_entry()? {
+        entries.push(entry);
     }
     entries
         .sort_by(|(left_name, _), (right_name, _)| left_name.cmp(right_name));

@@ -103,10 +103,9 @@ happened”.
 
 `LocalFileSystem::list` returns a lazy `LocalDirectoryWalker`. It opens and
 advances directories on demand; maximum depth, symbolic-link policy, and a
-64-handle default budget are fixed at creation. Rooted Unix enumeration also
-streams each directory instead of first collecting it into a vector. Exceeding
-the configured budget returns `ResourceLimit`, and dropping it only releases
-handles.
+64-handle default budget are fixed at creation. Rooted enumeration also streams
+each directory instead of first collecting it into a vector. Exceeding the
+configured budget returns `ResourceLimit`, and dropping it only releases handles.
 
 Temporary files and directories own cleanup while armed. Dropping them performs
 best-effort cleanup; `keep` disables cleanup and returns a stable absolute path.

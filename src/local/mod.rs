@@ -36,7 +36,7 @@ mod local_root_atomic_writer;
 
 #[cfg(unix)]
 pub(crate) use internal::sync_rooted_parent;
-#[cfg(unix)]
+#[cfg(any(unix, windows))]
 pub(crate) use internal::{
     RootedDirectoryReader,
     open_root_directory_reader,

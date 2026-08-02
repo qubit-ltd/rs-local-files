@@ -155,8 +155,11 @@ pub(crate) use unix_nonblocking::{
 };
 #[cfg(windows)]
 pub(crate) use windows_rooted::{
+    RootedDirectoryReader,
     create_rooted_directory,
     open_root_directory,
+    open_root_directory_reader,
+    open_rooted_directory_reader,
     open_rooted_native_reader,
     open_rooted_native_writer,
     read_root_directory,
