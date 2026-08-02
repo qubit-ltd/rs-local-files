@@ -100,16 +100,14 @@ impl LocalListOptions {
     }
 
     /// Sets the maximum number of concurrently open directory handles.
+    ///
+    /// A value of zero is invalid and is rejected when a walker is opened.
     #[inline(always)]
     pub const fn with_max_open_directories(
         mut self,
         max_open_directories: usize,
     ) -> Self {
-        self.max_open_directories = if max_open_directories == 0 {
-            1
-        } else {
-            max_open_directories
-        };
+        self.max_open_directories = max_open_directories;
         self
     }
 
