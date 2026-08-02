@@ -36,6 +36,8 @@ pub struct LocalFileError {
     path: Option<PathBuf>,
     /// Secondary or destination native path.
     target: Option<PathBuf>,
+    /// Stable explanation for policy or validation failures.
+    reason: Option<&'static str>,
     /// Typed source retained from the originating failure.
     source: Option<LocalFileErrorSource>,
 }
@@ -58,6 +60,7 @@ impl LocalFileError {
             operation,
             path: None,
             target: None,
+            reason: None,
             source: None,
         }
     }
@@ -87,6 +90,7 @@ impl LocalFileError {
             operation,
             path,
             target,
+            reason: None,
             source: Some(LocalFileErrorSource::Io(source)),
         }
     }
@@ -115,6 +119,7 @@ impl LocalFileError {
             operation,
             path,
             target: None,
+            reason: None,
             source: Some(LocalFileErrorSource::PathCodec(error)),
         }
     }
@@ -151,6 +156,23 @@ impl LocalFileError {
         self
     }
 
+    /// Adds a stable explanation for the failure.
+    ///
+    /// # Parameters
+    ///
+    /// - `reason`: Static human-readable explanation of the failed requirement
+    ///   or validation rule.
+    ///
+    /// # Returns
+    ///
+    /// The updated error.
+    #[must_use]
+    #[inline(always)]
+    pub const fn with_reason(mut self, reason: &'static str) -> Self {
+        self.reason = Some(reason);
+        self
+    }
+
     /// Returns the stable failure classification.
     #[inline(always)]
     pub const fn kind(&self) -> LocalFileErrorKind {
@@ -175,6 +197,13 @@ impl LocalFileError {
     #[inline]
     pub fn target(&self) -> Option<&Path> {
         self.target.as_deref()
+    }
+
+    /// Returns the stable human-readable explanation, when one was provided.
+    #[must_use]
+    #[inline(always)]
+    pub const fn reason(&self) -> Option<&str> {
+        self.reason
     }
 
     /// Returns the typed source retained from the originating failure.
@@ -266,6 +295,9 @@ impl fmt::Display for LocalFileError {
             "{:?} failed with {:?}",
             self.operation, self.kind
         )?;
+        if let Some(reason) = self.reason {
+            write!(formatter, ": {reason}")?;
+        }
         if let Some(path) = &self.path {
             write!(formatter, " at {}", path.display())?;
         }
