@@ -8,7 +8,7 @@
 
 use std::{fs, hint::black_box, io::Write};
 
-use criterion::{criterion_group, criterion_main, Criterion};
+use criterion::{Criterion, criterion_group, criterion_main};
 use qubit_local_files::{
     LocalCopyOptions, LocalFileSystem, LocalPathCodec, LocalWriteMode, LocalWriteOptions,
 };
@@ -49,16 +49,21 @@ fn bench_copy(c: &mut Criterion) {
     fs::write(source.join("payload"), b"payload").expect("benchmark source file should be written");
     let target = directory.path().join("target");
     c.bench_function("copy", |b| {
-        b.iter(|| {
-            let _ = fs::remove_dir_all(&target);
-            let outcome = LocalFileSystem::copy(
-                black_box(&source),
-                black_box(&target),
-                &LocalCopyOptions::default(),
-            )
-            .expect("benchmark copy should succeed");
-            black_box(outcome.stats().files());
-        });
+        b.iter_batched(
+            || {
+                let _ = fs::remove_dir_all(&target);
+            },
+            |_| {
+                let outcome = LocalFileSystem::copy(
+                    black_box(&source),
+                    black_box(&target),
+                    &LocalCopyOptions::default(),
+                )
+                .expect("benchmark copy should succeed");
+                black_box(outcome.stats().files());
+            },
+            criterion::BatchSize::SmallInput,
+        );
     });
 }
 
@@ -66,18 +71,23 @@ fn bench_writer(c: &mut Criterion) {
     let directory = tempdir().expect("benchmark directory should be created");
     let target = directory.path().join("target");
     c.bench_function("writer", |b| {
-        b.iter(|| {
-            let mut writer = LocalFileSystem::open_writer(
-                black_box(&target),
-                &LocalWriteOptions::new(LocalWriteMode::CreateOrReplace),
-            )
-            .expect("benchmark writer should open");
-            writer
-                .write_all(b"payload")
-                .expect("benchmark write should succeed");
-            let _ = black_box(writer.commit().expect("benchmark commit should succeed"));
-            fs::remove_file(&target).expect("benchmark target should be removed");
-        });
+        b.iter_batched(
+            || {
+                let _ = fs::remove_file(&target);
+            },
+            |_| {
+                let mut writer = LocalFileSystem::open_writer(
+                    black_box(&target),
+                    &LocalWriteOptions::new(LocalWriteMode::CreateOrReplace),
+                )
+                .expect("benchmark writer should open");
+                writer
+                    .write_all(b"payload")
+                    .expect("benchmark write should succeed");
+                let _ = black_box(writer.commit().expect("benchmark commit should succeed"));
+            },
+            criterion::BatchSize::SmallInput,
+        );
     });
 }
 

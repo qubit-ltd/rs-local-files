@@ -342,7 +342,8 @@ snapshot；`RootedLocalFileSystem` 在 `open` 时缓存与已打开 authority �
 Rooted recursive operation 默认不跟随 symlink、junction 或其他 reparse point。
 显式 follow 模式只有在能够持续证明 containment 时才可启用。
 
-跨 mount/device 是否允许由 option 控制，并在 outcome 中报告实际边界行为。
+当前不提供 mount/device 边界 option，也不承诺在递归操作中检测或报告该边界；调用方若有
+该隔离要求，必须在 crate 外建立专门策略。
 
 ## 7. Copy
 
@@ -472,12 +473,15 @@ Native rename 成功、随后 parent durability 失败时必须返回 `Renamed`�
 `LocalDirectoryWalker` 是惰性迭代器，不预先把整棵目录树读入内存：
 
 - 按需打开目录并产生 entry；
-- directory handle 的并发上限明确；
+- directory handle 的并发上限由 `LocalListOptions::max_open_directories`
+  明确控制，默认值为 64；达到上限时返回 `ResourceLimit`，不会继续消耗进程句柄；
 - 遍历顺序由 option 定义或明确为 unspecified；
 - 遇到错误时返回带 offending path 的结构化错误；
 - fail-fast 与 collect-errors 模式不能混为隐式行为；
-- symlink、mount/device 和最大深度策略在创建 walker 时固定；
-- rooted walker 始终从 root authority 派生 child handle。
+- symlink、最大深度和句柄预算策略在创建 walker 时固定；mount/device
+  边界策略尚未实现，不能视为当前契约；
+- rooted walker 始终从 root authority 派生 child handle，并且在 Unix 上按 entry 流式读取，
+  不为单个目录预先收集完整 `Vec`；
 
 capability 将原子 rename、原子 replace 和临时资源无替换持久化分别建模；adapter 不得用
 单一 no-replace 标志推断全部三项保证。
