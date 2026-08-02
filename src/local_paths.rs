@@ -126,11 +126,6 @@ impl LocalPaths {
     /// Returns `LocalFileError` with `ComposePath` when `path` contains a
     /// root, prefix, dot, parent, or no normal components.
     ///
-    /// # Panics
-    ///
-    /// Panics only if a native path component contains NUL. Such a component
-    /// cannot name a host filesystem entry and violates the native-path input
-    /// contract of this API.
     #[inline(always)]
     pub fn to_canonical_relative_components(
         path: &Path,
@@ -450,6 +445,33 @@ fn is_normal_native_component(component: &OsStr) -> bool {
         && Path::new(component).components().count() == 1
 }
 
+/// Encodes one native component while retaining codec failures as typed
+/// structured errors.
+///
+/// # Parameters
+///
+/// - `component`: Native component or Windows drive prefix to encode.
+///
+/// # Returns
+///
+/// The canonical escaped-byte representation.
+///
+/// # Errors
+///
+/// Returns a `ComposePath` error retaining the underlying path-codec failure.
+#[inline]
+fn encode_native_component(component: &OsStr) -> LocalResult<String> {
+    LocalPathCodec::to_canonical_text(component)
+        .map(|canonical| canonical.into_owned())
+        .map_err(|error| {
+            LocalFileError::from_path_codec(
+                LocalFileOperation::ComposePath,
+                None,
+                error,
+            )
+        })
+}
+
 /// Encodes normal native components from a relative or absolute descendant.
 ///
 /// # Parameters
@@ -464,21 +486,14 @@ fn is_normal_native_component(component: &OsStr) -> bool {
 /// # Errors
 ///
 /// Returns an invalid-input `ComposePath` error for a non-normal component.
-/// A NUL-containing native component violates the host-path contract and
-/// triggers the documented invariant panic instead.
+/// A NUL-containing native component is returned as a typed path-codec error.
 fn encode_normal_components(path: &Path) -> LocalResult<Vec<String>> {
     let mut encoded = Vec::new();
     for component in path.components() {
         let Component::Normal(component) = component else {
             return Err(invalid_path_error());
         };
-        // `Path` components used for host I/O cannot contain native NUL.
-        // Treat a violation as a programming-contract failure rather than a
-        // recoverable canonicalization result.
-        let canonical = LocalPathCodec::to_canonical_text(component)
-            .expect("host path components cannot contain native NUL")
-            .into_owned();
-        encoded.push(canonical);
+        encoded.push(encode_native_component(component)?);
     }
     Ok(encoded)
 }
@@ -582,10 +597,6 @@ fn from_canonical_absolute_components<'a>(
 /// Returns a `ComposePath` error when `path` is not absolute or has raw dot
 /// components.
 ///
-/// # Panics
-///
-/// Panics only if a native path component contains NUL, which cannot name a
-/// host filesystem entry and violates this API's input contract.
 #[cfg(unix)]
 fn to_canonical_absolute_components(path: &Path) -> LocalResult<Vec<String>> {
     if !path.is_absolute() || has_disallowed_component(path) {
@@ -600,11 +611,7 @@ fn to_canonical_absolute_components(path: &Path) -> LocalResult<Vec<String>> {
         let Component::Normal(component) = component else {
             return Err(invalid_path_error());
         };
-        encoded.push(
-            LocalPathCodec::to_canonical_text(component)
-                .expect("host path components cannot contain native NUL")
-                .into_owned(),
-        );
+        encoded.push(encode_native_component(component)?);
     }
     debug_assert!(matches!(
         LocalPaths::from_canonical_absolute_components(
@@ -700,9 +707,7 @@ fn to_canonical_absolute_components(path: &Path) -> LocalResult<Vec<String>> {
     if !matches!(native_components.next(), Some(Component::RootDir)) {
         return Err(invalid_path_error());
     }
-    let drive = LocalPathCodec::to_canonical_text(prefix.as_os_str())
-        .expect("host path prefixes cannot contain native NUL")
-        .into_owned();
+    let drive = encode_native_component(prefix.as_os_str())?;
     if !is_windows_drive_component(&drive) {
         return Err(invalid_path_error());
     }
@@ -711,11 +716,7 @@ fn to_canonical_absolute_components(path: &Path) -> LocalResult<Vec<String>> {
         let Component::Normal(component) = component else {
             return Err(invalid_path_error());
         };
-        encoded.push(
-            LocalPathCodec::to_canonical_text(component)
-                .expect("host path components cannot contain native NUL")
-                .into_owned(),
-        );
+        encoded.push(encode_native_component(component)?);
     }
     Ok(encoded)
 }

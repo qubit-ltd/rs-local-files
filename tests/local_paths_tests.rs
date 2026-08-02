@@ -7,7 +7,10 @@
 // =============================================================================
 
 use std::{
-    ffi::OsStr,
+    ffi::{
+        OsStr,
+        OsString,
+    },
     path::{
         Path,
         PathBuf,
@@ -173,6 +176,27 @@ fn test_canonical_relative_components_round_trip() {
             .expect("native relative path should encode"),
         vec!["safe".to_owned(), "a%25b".to_owned()],
     );
+}
+
+/// Verifies native NUL components become structured path-codec errors rather
+/// than panicking during public canonicalization.
+#[cfg(unix)]
+#[test]
+fn test_canonical_relative_components_reject_native_nul() {
+    use std::os::unix::ffi::OsStringExt;
+
+    let native = PathBuf::from(OsString::from_vec(vec![
+        b's', 0, b'a', b'f', b'e',
+    ]));
+    let error = LocalPaths::to_canonical_relative_components(&native)
+        .expect_err("native NUL must be reported as a path error");
+
+    assert_eq!(LocalFileErrorKind::InvalidPath, error.kind());
+    assert_eq!(LocalFileOperation::ComposePath, error.operation());
+    assert!(matches!(
+        error.source_kind(),
+        Some(qubit_local_files::LocalFileErrorSource::PathCodec(_))
+    ));
 }
 
 /// Verifies lexical containment for normalized native paths.
