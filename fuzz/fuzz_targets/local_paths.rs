@@ -27,8 +27,9 @@ fuzz_target!(|data: &[u8]| {
     ) else {
         return;
     };
-    let encoded = LocalPaths::to_canonical_relative_components(Path::new(&native))
-        .expect("validated relative paths must encode");
+    let encoded =
+        LocalPaths::to_canonical_relative_components(Path::new(&native))
+            .expect("validated relative paths must encode");
     let restored = LocalPaths::from_canonical_relative_components(
         encoded.iter().map(String::as_str),
     )

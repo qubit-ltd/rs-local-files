@@ -52,10 +52,7 @@ fn test_local_file_system_rooted_reports_scope_and_reads_relative_path() {
     let filesystem = LocalFileSystem::rooted(directory.path())
         .expect("Rooted filesystem should open");
 
-    assert_eq!(
-        LocalFileSystemScope::Rooted,
-        filesystem.scope(),
-    );
+    assert_eq!(LocalFileSystemScope::Rooted, filesystem.scope(),);
     assert_eq!(Some(directory.path()), filesystem.diagnostic_root());
     assert_eq!(
         LocalFileKind::File,
