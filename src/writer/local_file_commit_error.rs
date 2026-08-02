@@ -78,7 +78,11 @@ impl LocalFileCommitError {
     #[inline]
     pub fn into_parts(
         self,
-    ) -> (LocalFileError, LocalWriteFailureState, Option<LocalFileWriter>) {
+    ) -> (
+        LocalFileError,
+        LocalWriteFailureState,
+        Option<LocalFileWriter>,
+    ) {
         (self.error, self.state, self.writer.map(|writer| *writer))
     }
 }

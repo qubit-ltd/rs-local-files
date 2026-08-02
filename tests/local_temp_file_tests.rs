@@ -25,7 +25,6 @@ use qubit_local_files::{
     LocalPersistMethod,
     LocalPersistOptions,
     LocalTempFileOptions,
-    RootedLocalFileSystem,
 };
 use tempfile::tempdir;
 
@@ -62,10 +61,11 @@ fn run_in_deleted_current_directory_process(
 fn test_local_temp_file_close_retains_path_and_persist_responsibility() {
     let parent = tempdir().expect("temporary parent should be created");
     let target = parent.path().join("persisted");
-    let mut temporary = LocalFileSystem::create_temp_file(
-        &LocalTempFileOptions::new().with_parent(parent.path()),
-    )
-    .expect("temporary file should be created");
+    let mut temporary = LocalFileSystem::host()
+        .create_temp_file(
+            &LocalTempFileOptions::new().with_parent(parent.path()),
+        )
+        .expect("temporary file should be created");
     let path = temporary.path().to_path_buf();
 
     temporary.close();
@@ -85,10 +85,11 @@ fn test_local_temp_file_close_retains_path_and_persist_responsibility() {
 fn test_local_temp_file_persist_with_outcome_reports_atomic_rename() {
     let parent = tempdir().expect("temporary parent should be created");
     let target = parent.path().join("persisted");
-    let temporary = LocalFileSystem::create_temp_file(
-        &LocalTempFileOptions::new().with_parent(parent.path()),
-    )
-    .expect("temporary file should be created");
+    let temporary = LocalFileSystem::host()
+        .create_temp_file(
+            &LocalTempFileOptions::new().with_parent(parent.path()),
+        )
+        .expect("temporary file should be created");
 
     let outcome = temporary
         .persist_with_outcome(&target, LocalPersistOptions::new())
@@ -114,10 +115,12 @@ fn test_local_temp_file_relative_parent_remains_bound_after_current_directory_ch
         env::set_current_dir(creation.path())
             .expect("creation directory should become current");
 
-        let mut temporary = LocalFileSystem::create_temp_file(
-            &LocalTempFileOptions::new().with_parent(Path::new("temporary")),
-        )
-        .expect("temporary file should be created");
+        let mut temporary = LocalFileSystem::host()
+            .create_temp_file(
+                &LocalTempFileOptions::new()
+                    .with_parent(Path::new("temporary")),
+            )
+            .expect("temporary file should be created");
         let path = temporary.path().to_path_buf();
 
         assert!(path.is_absolute());
@@ -144,12 +147,13 @@ fn test_local_temp_file_relative_parent_remains_bound_after_current_directory_ch
 #[test]
 fn test_local_temp_file_rejects_zero_creation_attempts() {
     let parent = tempdir().expect("temporary parent should be created");
-    let error = LocalFileSystem::create_temp_file(
-        &LocalTempFileOptions::new()
-            .with_parent(parent.path())
-            .with_max_attempts(0),
-    )
-    .expect_err("zero creation attempts must be rejected");
+    let error = LocalFileSystem::host()
+        .create_temp_file(
+            &LocalTempFileOptions::new()
+                .with_parent(parent.path())
+                .with_max_attempts(0),
+        )
+        .expect_err("zero creation attempts must be rejected");
 
     assert_eq!(
         qubit_local_files::LocalFileErrorKind::InvalidOptions,
@@ -162,10 +166,11 @@ fn test_local_temp_file_rejects_zero_creation_attempts() {
 #[test]
 fn test_local_temp_file_reads_back_written_content_before_cleanup() {
     let parent = tempdir().expect("temporary parent should be created");
-    let mut temporary = LocalFileSystem::create_temp_file(
-        &LocalTempFileOptions::new().with_parent(parent.path()),
-    )
-    .expect("temporary file should be created");
+    let mut temporary = LocalFileSystem::host()
+        .create_temp_file(
+            &LocalTempFileOptions::new().with_parent(parent.path()),
+        )
+        .expect("temporary file should be created");
     let path = temporary.path().to_path_buf();
 
     assert_eq!(
@@ -199,10 +204,11 @@ fn test_local_temp_file_reads_back_written_content_before_cleanup() {
 #[test]
 fn test_local_temp_file_exposes_mutable_open_file_handle() {
     let parent = tempdir().expect("temporary parent should be created");
-    let mut temporary = LocalFileSystem::create_temp_file(
-        &LocalTempFileOptions::new().with_parent(parent.path()),
-    )
-    .expect("temporary file should be created");
+    let mut temporary = LocalFileSystem::host()
+        .create_temp_file(
+            &LocalTempFileOptions::new().with_parent(parent.path()),
+        )
+        .expect("temporary file should be created");
     let path = temporary.path().to_path_buf();
 
     temporary
@@ -231,10 +237,11 @@ fn test_local_temp_file_persist_rejects_non_directory_parent_and_retains_cleanup
     let blocked_parent = parent.path().join("blocked");
     fs::write(&blocked_parent, b"not a directory")
         .expect("blocked parent fixture should be written");
-    let temporary = LocalFileSystem::create_temp_file(
-        &LocalTempFileOptions::new().with_parent(parent.path()),
-    )
-    .expect("temporary file should be created");
+    let temporary = LocalFileSystem::host()
+        .create_temp_file(
+            &LocalTempFileOptions::new().with_parent(parent.path()),
+        )
+        .expect("temporary file should be created");
     let source = temporary.path().to_path_buf();
 
     let error = temporary
@@ -255,10 +262,11 @@ fn test_local_temp_file_known_persist_conflict_retains_cleanup() {
     let parent = tempdir().expect("temporary parent should be created");
     let target = parent.path().join("target-directory");
     fs::create_dir(&target).expect("target directory fixture should exist");
-    let temporary = LocalFileSystem::create_temp_file(
-        &LocalTempFileOptions::new().with_parent(parent.path()),
-    )
-    .expect("temporary file should be created");
+    let temporary = LocalFileSystem::host()
+        .create_temp_file(
+            &LocalTempFileOptions::new().with_parent(parent.path()),
+        )
+        .expect("temporary file should be created");
     let source = temporary.path().to_path_buf();
 
     let error = temporary
@@ -279,7 +287,7 @@ fn test_local_temp_file_known_persist_conflict_retains_cleanup() {
 #[test]
 fn test_rooted_temp_file_rejects_absolute_persist_target_and_cleans_up() {
     let parent = tempdir().expect("root parent should be created");
-    let rooted = RootedLocalFileSystem::open(parent.path())
+    let rooted = LocalFileSystem::rooted(parent.path())
         .expect("root authority should open");
     let temporary = rooted
         .create_temp_file(&LocalTempFileOptions::new())
@@ -303,7 +311,7 @@ fn test_rooted_temp_file_rejects_absolute_persist_target_and_cleans_up() {
 #[test]
 fn test_rooted_temp_file_persist_with_overwrite_replaces_target() {
     let parent = tempdir().expect("root parent should be created");
-    let rooted = RootedLocalFileSystem::open(parent.path())
+    let rooted = LocalFileSystem::rooted(parent.path())
         .expect("root authority should open");
     fs::write(parent.path().join("target"), b"existing")
         .expect("target fixture should be written");
@@ -335,7 +343,7 @@ fn test_rooted_temp_file_persist_with_overwrite_replaces_target() {
 #[test]
 fn test_rooted_temp_file_persist_publishes_absent_target() {
     let parent = tempdir().expect("root parent should be created");
-    let rooted = RootedLocalFileSystem::open(parent.path())
+    let rooted = LocalFileSystem::rooted(parent.path())
         .expect("root authority should open");
     let mut temporary = rooted
         .create_temp_file(&LocalTempFileOptions::new())
@@ -364,7 +372,7 @@ fn test_rooted_temp_file_persist_publishes_absent_target() {
 #[test]
 fn test_rooted_temp_file_cleanup_removes_entry() {
     let parent = tempdir().expect("root parent should be created");
-    let rooted = RootedLocalFileSystem::open(parent.path())
+    let rooted = LocalFileSystem::rooted(parent.path())
         .expect("root authority should open");
     let mut temporary = rooted
         .create_temp_file(&LocalTempFileOptions::new())
@@ -383,7 +391,7 @@ fn test_rooted_temp_file_cleanup_removes_entry() {
 #[test]
 fn test_rooted_temp_file_conflicts_and_invalid_targets_retain_cleanup() {
     let parent = tempdir().expect("root parent should be created");
-    let rooted = RootedLocalFileSystem::open(parent.path())
+    let rooted = LocalFileSystem::rooted(parent.path())
         .expect("root authority should open");
     fs::write(parent.path().join("occupied"), b"existing")
         .expect("occupied target should be written");
@@ -413,10 +421,11 @@ fn test_rooted_temp_file_conflicts_and_invalid_targets_retain_cleanup() {
 #[test]
 fn test_local_temp_file_drop_tolerates_missing_entry() {
     let parent = tempdir().expect("temporary parent should be created");
-    let temporary = LocalFileSystem::create_temp_file(
-        &LocalTempFileOptions::new().with_parent(parent.path()),
-    )
-    .expect("temporary file should be created");
+    let temporary = LocalFileSystem::host()
+        .create_temp_file(
+            &LocalTempFileOptions::new().with_parent(parent.path()),
+        )
+        .expect("temporary file should be created");
     let path = temporary.path().to_path_buf();
     fs::remove_file(&path).expect("fixture should remove the temporary file");
 
@@ -437,10 +446,11 @@ fn test_local_temp_file_persist_reports_deleted_current_directory() {
         let parent = tempdir().expect("temporary parent should be created");
         let cwd = parent.path().join("deleted-current-directory");
         fs::create_dir(&cwd).expect("current-directory fixture should exist");
-        let temporary = LocalFileSystem::create_temp_file(
-            &LocalTempFileOptions::new().with_parent(parent.path()),
-        )
-        .expect("temporary file should be created");
+        let temporary = LocalFileSystem::host()
+            .create_temp_file(
+                &LocalTempFileOptions::new().with_parent(parent.path()),
+            )
+            .expect("temporary file should be created");
         let source = temporary.path().to_path_buf();
 
         env::set_current_dir(&cwd)
@@ -469,11 +479,12 @@ fn test_local_temp_file_persist_reports_deleted_current_directory() {
 #[test]
 fn test_local_temp_file_keep_retains_path_after_drop() {
     let parent = tempdir().expect("temporary parent should be created");
-    let path = LocalFileSystem::create_temp_file(
-        &LocalTempFileOptions::new().with_parent(parent.path()),
-    )
-    .expect("temporary file should be created")
-    .keep();
+    let path = LocalFileSystem::host()
+        .create_temp_file(
+            &LocalTempFileOptions::new().with_parent(parent.path()),
+        )
+        .expect("temporary file should be created")
+        .keep();
 
     assert!(path.exists());
     fs::remove_file(path).expect("kept fixture should be removed manually");
@@ -486,10 +497,11 @@ fn test_local_temp_file_persist_respects_conflict_and_overwrite_policy() {
     let parent = tempdir().expect("temporary parent should be created");
     let target = parent.path().join("target");
     fs::write(&target, b"existing").expect("target fixture should exist");
-    let mut temporary = LocalFileSystem::create_temp_file(
-        &LocalTempFileOptions::new().with_parent(parent.path()),
-    )
-    .expect("temporary file should be created");
+    let mut temporary = LocalFileSystem::host()
+        .create_temp_file(
+            &LocalTempFileOptions::new().with_parent(parent.path()),
+        )
+        .expect("temporary file should be created");
     temporary
         .write_all(b"replacement")
         .expect("temporary file should accept bytes");
@@ -516,10 +528,11 @@ fn test_local_temp_file_persist_respects_conflict_and_overwrite_policy() {
 #[test]
 fn test_local_temp_file_close_rejects_stream_access_and_allows_cleanup() {
     let parent = tempdir().expect("temporary parent should be created");
-    let mut temporary = LocalFileSystem::create_temp_file(
-        &LocalTempFileOptions::new().with_parent(parent.path()),
-    )
-    .expect("temporary file should be created");
+    let mut temporary = LocalFileSystem::host()
+        .create_temp_file(
+            &LocalTempFileOptions::new().with_parent(parent.path()),
+        )
+        .expect("temporary file should be created");
     let path = temporary.path().to_path_buf();
 
     temporary.close();
@@ -545,10 +558,11 @@ fn test_local_temp_file_close_rejects_stream_access_and_allows_cleanup() {
 #[test]
 fn test_local_temp_file_cleanup_rejects_replaced_entry() {
     let parent = tempdir().expect("temporary parent should be created");
-    let mut temporary = LocalFileSystem::create_temp_file(
-        &LocalTempFileOptions::new().with_parent(parent.path()),
-    )
-    .expect("temporary file should be created");
+    let mut temporary = LocalFileSystem::host()
+        .create_temp_file(
+            &LocalTempFileOptions::new().with_parent(parent.path()),
+        )
+        .expect("temporary file should be created");
     let path = temporary.path().to_path_buf();
     let replacement = parent.path().join("replacement-file");
     fs::write(&replacement, b"restored")
@@ -571,10 +585,11 @@ fn test_local_temp_file_cleanup_rejects_replaced_entry() {
 #[test]
 fn test_local_temp_file_drop_tolerates_replaced_directory() {
     let parent = tempdir().expect("temporary parent should be created");
-    let temporary = LocalFileSystem::create_temp_file(
-        &LocalTempFileOptions::new().with_parent(parent.path()),
-    )
-    .expect("temporary file should be created");
+    let temporary = LocalFileSystem::host()
+        .create_temp_file(
+            &LocalTempFileOptions::new().with_parent(parent.path()),
+        )
+        .expect("temporary file should be created");
     let path = temporary.path().to_path_buf();
     fs::remove_file(&path).expect("fixture should remove the temporary file");
     fs::create_dir(&path)
@@ -592,10 +607,11 @@ fn test_local_temp_file_drop_tolerates_replaced_directory() {
 fn test_local_temp_file_persist_rejects_replaced_file() {
     let parent = tempdir().expect("temporary parent should be created");
     let target = parent.path().join("persisted");
-    let temporary = LocalFileSystem::create_temp_file(
-        &LocalTempFileOptions::new().with_parent(parent.path()),
-    )
-    .expect("temporary file should be created");
+    let temporary = LocalFileSystem::host()
+        .create_temp_file(
+            &LocalTempFileOptions::new().with_parent(parent.path()),
+        )
+        .expect("temporary file should be created");
     let path = temporary.path().to_path_buf();
     let original = parent.path().join("original");
     fs::rename(&path, &original)

@@ -32,9 +32,9 @@ fn test_local_directory_walker_non_recursive_listing_retains_bound_root() {
     fs::write(directory.path().join("top"), b"top")
         .expect("top-level fixture should be written");
 
-    let walker =
-        LocalFileSystem::list(directory.path(), &LocalListOptions::new())
-            .expect("directory should open for listing");
+    let walker = LocalFileSystem::host()
+        .list(directory.path(), &LocalListOptions::new())
+        .expect("directory should open for listing");
     assert_eq!(directory.path(), walker.root());
     let mut entries = walker
         .collect::<Result<Vec<_>, _>>()
@@ -56,7 +56,8 @@ fn test_local_directory_walker_rejects_regular_file_root() {
     let file = directory.path().join("file");
     fs::write(&file, b"payload").expect("file fixture should be written");
 
-    let error = LocalFileSystem::list(&file, &LocalListOptions::new())
+    let error = LocalFileSystem::host()
+        .list(&file, &LocalListOptions::new())
         .expect_err("regular files must not open as directory walkers");
 
     assert_eq!(LocalFileErrorKind::TypeConflict, error.kind());
@@ -70,7 +71,8 @@ fn test_local_directory_walker_rejects_missing_root() {
     let directory = tempdir().expect("temporary directory should be created");
     let missing = directory.path().join("missing");
 
-    let error = LocalFileSystem::list(&missing, &LocalListOptions::new())
+    let error = LocalFileSystem::host()
+        .list(&missing, &LocalListOptions::new())
         .expect_err("missing directories must not open as walkers");
 
     assert_eq!(LocalFileErrorKind::NotFound, error.kind());
@@ -85,13 +87,11 @@ fn test_local_directory_walker_zero_max_depth_yields_no_entries() {
     fs::write(directory.path().join("entry"), b"payload")
         .expect("entry fixture should be written");
 
-    let entries = LocalFileSystem::list(
-        directory.path(),
-        &LocalListOptions::new().with_max_depth(0),
-    )
-    .expect("walker should open")
-    .collect::<Result<Vec<_>, _>>()
-    .expect("zero-depth traversal should succeed");
+    let entries = LocalFileSystem::host()
+        .list(directory.path(), &LocalListOptions::new().with_max_depth(0))
+        .expect("walker should open")
+        .collect::<Result<Vec<_>, _>>()
+        .expect("zero-depth traversal should succeed");
 
     assert!(entries.is_empty());
 }
@@ -114,15 +114,16 @@ fn test_local_directory_walker_follow_mode_traverses_links_and_rejects_cycles()
     symlink(&target, directory.path().join("link"))
         .expect("directory link should be created");
 
-    let entries = LocalFileSystem::list(
-        directory.path(),
-        &LocalListOptions::new()
-            .with_recursive()
-            .with_follow_symlinks(),
-    )
-    .expect("follow-mode walker should open")
-    .collect::<Result<Vec<_>, _>>()
-    .expect("one symlinked directory should be traversable");
+    let entries = LocalFileSystem::host()
+        .list(
+            directory.path(),
+            &LocalListOptions::new()
+                .with_recursive()
+                .with_follow_symlinks(),
+        )
+        .expect("follow-mode walker should open")
+        .collect::<Result<Vec<_>, _>>()
+        .expect("one symlinked directory should be traversable");
     assert!(
         entries
             .iter()
@@ -131,15 +132,16 @@ fn test_local_directory_walker_follow_mode_traverses_links_and_rejects_cycles()
 
     symlink(directory.path(), target.join("cycle"))
         .expect("cycle link should be created");
-    let error = LocalFileSystem::list(
-        directory.path(),
-        &LocalListOptions::new()
-            .with_recursive()
-            .with_follow_symlinks(),
-    )
-    .expect("cycle walker should open")
-    .find_map(Result::err)
-    .expect("cycle detection should return a structured error");
+    let error = LocalFileSystem::host()
+        .list(
+            directory.path(),
+            &LocalListOptions::new()
+                .with_recursive()
+                .with_follow_symlinks(),
+        )
+        .expect("cycle walker should open")
+        .find_map(Result::err)
+        .expect("cycle detection should return a structured error");
 
     assert_eq!(LocalFileErrorKind::InvalidPath, error.kind());
 }
@@ -156,14 +158,15 @@ fn test_local_directory_walker_follow_mode_reports_dangling_link() {
     symlink(directory.path().join("missing"), &link)
         .expect("dangling link fixture should be created");
 
-    let error = LocalFileSystem::list(
-        directory.path(),
-        &LocalListOptions::new().with_follow_symlinks(),
-    )
-    .expect("follow-mode walker should open")
-    .next()
-    .expect("dangling entry should be observed")
-    .expect_err("follow-mode walker must resolve a symlink target");
+    let error = LocalFileSystem::host()
+        .list(
+            directory.path(),
+            &LocalListOptions::new().with_follow_symlinks(),
+        )
+        .expect("follow-mode walker should open")
+        .next()
+        .expect("dangling entry should be observed")
+        .expect_err("follow-mode walker must resolve a symlink target");
 
     assert_eq!(LocalFileErrorKind::NotFound, error.kind());
     assert_eq!(Some(link.as_path()), error.path());
@@ -189,11 +192,9 @@ fn test_local_directory_walker_reports_unreadable_child_directory() {
     fs::set_permissions(&child, fs::Permissions::from_mode(0o000))
         .expect("restricted child should become unreadable");
 
-    let mut walker = LocalFileSystem::list(
-        directory.path(),
-        &LocalListOptions::new().with_recursive(),
-    )
-    .expect("recursive walker should open before entering its child");
+    let mut walker = LocalFileSystem::host()
+        .list(directory.path(), &LocalListOptions::new().with_recursive())
+        .expect("recursive walker should open before entering its child");
     let result = walker
         .next()
         .expect("restricted directory entry should be read from its parent");
@@ -224,7 +225,8 @@ fn test_local_directory_walker_rejects_unreadable_root_directory() {
     fs::set_permissions(&root, fs::Permissions::from_mode(0o000))
         .expect("restricted root should become unreadable");
 
-    let error = LocalFileSystem::list(&root, &LocalListOptions::new())
+    let error = LocalFileSystem::host()
+        .list(&root, &LocalListOptions::new())
         .expect_err("unreadable traversal root must not open a walker");
     fs::set_permissions(&root, fs::Permissions::from_mode(0o700))
         .expect("restricted root permissions should be restored");
@@ -241,18 +243,24 @@ fn test_local_directory_walker_fail_fast_stops_after_error() {
     use std::os::unix::fs::symlink;
 
     let directory = tempdir().expect("temporary directory should be created");
-    symlink(directory.path().join("missing"), directory.path().join("dangling"))
-        .expect("dangling link fixture should be created");
-
-    let mut walker = LocalFileSystem::list(
-        directory.path(),
-        &LocalListOptions::new().with_follow_symlinks(),
+    symlink(
+        directory.path().join("missing"),
+        directory.path().join("dangling"),
     )
-    .expect("walker should open");
-    assert!(walker
-        .next()
-        .expect("dangling link should produce an error")
-        .is_err());
+    .expect("dangling link fixture should be created");
+
+    let mut walker = LocalFileSystem::host()
+        .list(
+            directory.path(),
+            &LocalListOptions::new().with_follow_symlinks(),
+        )
+        .expect("walker should open");
+    assert!(
+        walker
+            .next()
+            .expect("dangling link should produce an error")
+            .is_err()
+    );
     assert!(walker.next().is_none());
 }
 
@@ -266,16 +274,20 @@ fn test_local_directory_walker_continue_policy_keeps_iterating() {
     let directory = tempdir().expect("temporary directory should be created");
     fs::write(directory.path().join("readable"), b"payload")
         .expect("readable entry should be created");
-    symlink(directory.path().join("missing"), directory.path().join("dangling"))
-        .expect("dangling link fixture should be created");
-
-    let walker = LocalFileSystem::list(
-        directory.path(),
-        &LocalListOptions::new()
-            .with_follow_symlinks()
-            .with_error_policy(LocalWalkErrorPolicy::Continue),
+    symlink(
+        directory.path().join("missing"),
+        directory.path().join("dangling"),
     )
-    .expect("walker should open");
+    .expect("dangling link fixture should be created");
+
+    let walker = LocalFileSystem::host()
+        .list(
+            directory.path(),
+            &LocalListOptions::new()
+                .with_follow_symlinks()
+                .with_error_policy(LocalWalkErrorPolicy::Continue),
+        )
+        .expect("walker should open");
     let mut saw_error = false;
     let mut saw_readable = false;
     for result in walker {

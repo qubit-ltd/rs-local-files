@@ -29,13 +29,13 @@ qubit-local-files = "0.8"
 use std::io::{Read, Write};
 
 use qubit_local_files::{
-    LocalFileSystem, LocalReadOptions, LocalTempDirectoryOptions, LocalWriteMode,
-    LocalWriteOptions, LocalWriterState,
+    create_temp_directory, open_reader, open_writer, LocalReadOptions,
+    LocalTempDirectoryOptions, LocalWriteMode, LocalWriteOptions, LocalWriterState,
 };
 
-let work = LocalFileSystem::create_temp_directory(&LocalTempDirectoryOptions::new())?;
+let work = create_temp_directory(&LocalTempDirectoryOptions::new())?;
 let path = work.path().join("manifest.json");
-let mut writer = LocalFileSystem::open_writer(
+let mut writer = open_writer(
     &path,
     &LocalWriteOptions::new(LocalWriteMode::CreateOrReplace),
 )?;
@@ -44,7 +44,7 @@ let outcome = writer.commit()?;
 assert_eq!(outcome.state(), LocalWriterState::Committed);
 
 let mut content = String::new();
-LocalFileSystem::open_reader(&path, &LocalReadOptions::new())?
+open_reader(&path, &LocalReadOptions::new())?
     .read_to_string(&mut content)?;
 assert_eq!(content, r#"{"version":1}"#);
 # Ok::<(), Box<dyn std::error::Error>>(())
@@ -54,14 +54,17 @@ assert_eq!(content, r#"{"version":1}"#);
 
 | API | 适用场景 |
 | --- | --- |
-| `LocalFileSystem` | 主机范围的元数据、I/O、复制、重命名、遍历和临时条目。 |
-| `RootedLocalFileSystem` | 限定在一个已打开目录权限下的访问。 |
+| Host 便利函数 | 直接执行主机范围的元数据、I/O、复制、重命名、遍历和临时条目操作。 |
+| `LocalFileSystem::host()` | 可复用的进程可见主机命名空间服务。 |
+| `LocalFileSystem::rooted(root)` | 以相同操作访问一个已打开目录权限下的后代。 |
+| `LocalFileSystemScope` | 标识实例按主机路径还是 rooted 后代路径解释输入。 |
 | `LocalFileWriter` | 分阶段发布后的显式提交或中止。 |
 | `LocalDirectoryWalker` | 采用创建时固定策略的惰性目录枚举。 |
 | `LocalTempFile` / `LocalTempDirectory` | 拥有清理责任，并支持 `keep` 与持久化。 |
 | `LocalFileNames` / `LocalPaths` | 不丢失 UTF-8 以外文件名信息的原生文件名和词法路径工具。 |
 
-所有文件系统操作都是关联方法或有状态资源的方法；crate 不再保留旧式自由函数命名空间。
+普通应用可直接使用 Host 便利函数。需要保存配置、传递给其他组件或适配到更高层文件系统
+SPI 时，则使用接口一致的 `LocalFileSystem` 实例。
 
 临时资源清理会校验所有权，但它不是并发同步边界。guard 删除前会比较创建时保存的
 文件系统标识，因此通常能拒绝误删替换条目；但标识检查与按路径删除是两个独立操作，
@@ -70,9 +73,10 @@ assert_eq!(content, r#"{"version":1}"#);
 
 ## 选择合适的权限范围
 
-主机路径使用 `LocalFileSystem`。当一个已打开目录就是权限边界时，使用
-`RootedLocalFileSystem`：每个操作路径都必须是相对后代；绝对路径、平台前缀、`.`、`..`
-和中间符号链接都会被拒绝。之后重命名诊断用的根路径也不会重定向已打开的权限。
+主机路径可使用便利函数或 `LocalFileSystem::host()`。当一个已打开目录就是权限边界时，
+使用 `LocalFileSystem::rooted(root)`。两种实例提供相同操作，只改变路径解释方式。rooted
+路径必须是相对后代；绝对路径、平台前缀、`.`、`..` 和中间符号链接都会被拒绝。之后
+重命名诊断用的根路径也不会重定向已打开的权限。
 
 复制会根据源元数据选择文件或目录行为。复制和重命名失败会保留已证实的最强发布状态，
 因此调用方必须检查类型化失败，不能假设出错后目标未变。`CreateNew` 和

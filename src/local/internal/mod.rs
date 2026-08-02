@@ -15,6 +15,8 @@ mod atomic_metadata;
 #[cfg(unix)]
 mod atomic_namespace_race;
 mod atomic_staging_state;
+mod copy_destination_action;
+mod copy_destination_policy;
 mod copy_dir;
 mod copy_policy;
 #[cfg(coverage)]
@@ -24,6 +26,7 @@ mod file_io;
 mod file_move;
 mod file_name_generation;
 mod file_name_validation;
+mod host_local_file_system;
 mod io_result_context;
 mod local_atomic_publication_mode;
 #[cfg(unix)]
@@ -36,6 +39,8 @@ mod rooted_atomic_install;
 mod rooted_atomic_namespace_race;
 #[cfg(unix)]
 mod rooted_atomic_write;
+#[cfg(any(unix, windows))]
+mod rooted_directory_reader;
 #[cfg(unix)]
 mod rooted_file_io;
 #[cfg(unix)]
@@ -71,6 +76,8 @@ pub(crate) use atomic_metadata::preserve_atomic_metadata;
 #[cfg(unix)]
 pub(crate) use atomic_namespace_race::verify_atomic_destination_identity;
 pub(crate) use atomic_staging_state::AtomicStagingState;
+pub(crate) use copy_destination_action::CopyDestinationAction;
+pub(crate) use copy_destination_policy::decide_copy_destination;
 pub(crate) use copy_dir::{
     copy_dir_all_with_paths,
     copy_file_with_options,
@@ -93,6 +100,10 @@ pub(crate) use file_move::{
 };
 pub(crate) use file_name_generation::try_random_file_name;
 pub(crate) use file_name_validation::validate_portable_file_name_impl;
+pub(crate) use host_local_file_system::{
+    HostLocalFileSystem,
+    internal_copy_options,
+};
 pub(crate) use local_atomic_publication_mode::LocalAtomicPublicationMode;
 #[cfg(unix)]
 pub(super) use opened_atomic_destination::open_rooted_atomic_destination;
@@ -116,6 +127,8 @@ pub(super) use rooted_atomic_write::{
     create_rooted_staged_file,
     inspect_rooted_atomic_destination,
 };
+#[cfg(any(unix, windows))]
+pub(crate) use rooted_directory_reader::RootedDirectoryReader;
 #[cfg(unix)]
 pub(super) use rooted_file_io::open_rooted_parent;
 #[cfg(unix)]
@@ -128,7 +141,6 @@ pub(crate) use rooted_file_io::{
 };
 #[cfg(unix)]
 pub(crate) use rooted_namespace_io::{
-    RootedDirectoryReader,
     create_rooted_directory,
     open_root_directory_reader,
     open_rooted_directory_reader,
@@ -155,7 +167,6 @@ pub(crate) use unix_nonblocking::{
 };
 #[cfg(windows)]
 pub(crate) use windows_rooted::{
-    RootedDirectoryReader,
     create_rooted_directory,
     open_root_directory,
     open_root_directory_reader,

@@ -15,12 +15,13 @@ use std::io::{
 };
 
 use crate::local::{
+    CopyDestinationAction,
     LocalCopyConflictPolicy as ConflictPolicy,
     LocalCopyDirError as Error,
     LocalCopyDirOptions as Options,
     LocalCopyDirStage as Stage,
     LocalCopyDirStats as Statistics,
-    LocalCopyTypeConflictPolicy as TypeConflictPolicy,
+    decide_copy_destination,
 };
 use crate::{
     LocalAtomicWriteOptions,
@@ -333,19 +334,28 @@ fn prepare_directory(
             )?;
             Ok(true)
         }
-        Some(metadata) if metadata.kind() == EntryKind::Directory => {
-            match options.conflict_policy() {
-                ConflictPolicy::Fail => Err(error(
-                    Stage::PrepareDestination,
-                    source,
-                    destination,
-                    *statistics,
-                    io::Error::new(
-                        ErrorKind::AlreadyExists,
-                        "rooted copy destination directory already exists",
-                    ),
-                )),
-                ConflictPolicy::Skip => {
+        Some(metadata) => {
+            let destination_is_directory =
+                metadata.kind() == EntryKind::Directory;
+            match decide_copy_destination(
+                true,
+                Some(destination_is_directory),
+                options.conflict_policy(),
+                options.type_conflict_policy(),
+            ) {
+                Some(CopyDestinationAction::Merge) => {
+                    if options.conflict_policy() == ConflictPolicy::Overwrite {
+                        statistics.overwritten = checked_add(
+                            statistics.overwritten,
+                            1,
+                            source,
+                            destination,
+                            *statistics,
+                        )?;
+                    }
+                    Ok(true)
+                }
+                Some(CopyDestinationAction::Skip) => {
                     statistics.skipped = checked_add(
                         statistics.skipped,
                         1,
@@ -355,7 +365,37 @@ fn prepare_directory(
                     )?;
                     Ok(false)
                 }
-                ConflictPolicy::Overwrite => {
+                Some(CopyDestinationAction::Replace) => {
+                    let remove_result = if destination_is_directory {
+                        root.remove_tree(destination)
+                    } else {
+                        root.remove_file(destination)
+                    };
+                    remove_result.map_err(|source_error| {
+                        error(
+                            Stage::PrepareDestination,
+                            source,
+                            destination,
+                            *statistics,
+                            source_error,
+                        )
+                    })?;
+                    root.create_dir(destination).map_err(|source_error| {
+                        error(
+                            Stage::PrepareDestination,
+                            source,
+                            destination,
+                            *statistics,
+                            source_error,
+                        )
+                    })?;
+                    statistics.directories = checked_add(
+                        statistics.directories,
+                        1,
+                        source,
+                        destination,
+                        *statistics,
+                    )?;
                     statistics.overwritten = checked_add(
                         statistics.overwritten,
                         1,
@@ -365,56 +405,21 @@ fn prepare_directory(
                     )?;
                     Ok(true)
                 }
+                Some(CopyDestinationAction::Create) => unreachable!(
+                    "an observed destination cannot require creation"
+                ),
+                None => Err(error(
+                    Stage::PrepareDestination,
+                    source,
+                    destination,
+                    *statistics,
+                    io::Error::new(
+                        ErrorKind::AlreadyExists,
+                        "rooted copy destination has a conflicting entry",
+                    ),
+                )),
             }
         }
-        Some(_)
-            if options.type_conflict_policy()
-                == TypeConflictPolicy::Replace =>
-        {
-            root.remove_file(destination).map_err(|source_error| {
-                error(
-                    Stage::PrepareDestination,
-                    source,
-                    destination,
-                    *statistics,
-                    source_error,
-                )
-            })?;
-            root.create_dir(destination).map_err(|source_error| {
-                error(
-                    Stage::PrepareDestination,
-                    source,
-                    destination,
-                    *statistics,
-                    source_error,
-                )
-            })?;
-            statistics.directories = checked_add(
-                statistics.directories,
-                1,
-                source,
-                destination,
-                *statistics,
-            )?;
-            statistics.overwritten = checked_add(
-                statistics.overwritten,
-                1,
-                source,
-                destination,
-                *statistics,
-            )?;
-            Ok(true)
-        }
-        Some(_) => Err(error(
-            Stage::PrepareDestination,
-            source,
-            destination,
-            *statistics,
-            io::Error::new(
-                ErrorKind::AlreadyExists,
-                "rooted copy destination has a different entry type",
-            ),
-        )),
     }
 }
 
@@ -520,8 +525,45 @@ fn copy_file(
         .as_ref()
         .is_some_and(|metadata| metadata.kind() == EntryKind::Directory);
     if let Some(metadata) = destination_metadata {
-        if metadata.kind() != EntryKind::File {
-            if options.type_conflict_policy() != TypeConflictPolicy::Replace {
+        let action = decide_copy_destination(
+            false,
+            Some(metadata.kind() == EntryKind::Directory),
+            options.conflict_policy(),
+            options.type_conflict_policy(),
+        );
+        match action {
+            Some(CopyDestinationAction::Skip) => {
+                statistics.skipped = checked_add(
+                    statistics.skipped,
+                    1,
+                    source,
+                    destination,
+                    statistics,
+                )?;
+                return Ok(statistics);
+            }
+            Some(CopyDestinationAction::Replace) => {
+                if metadata.kind() == EntryKind::File {
+                    // The staged writer replaces regular files at commit.
+                } else {
+                    let remove_result =
+                        if metadata.kind() == EntryKind::Directory {
+                            root.remove_tree(destination)
+                        } else {
+                            root.remove_file(destination)
+                        };
+                    remove_result.map_err(|source_error| {
+                        error(
+                            Stage::PrepareDestination,
+                            source,
+                            destination,
+                            statistics,
+                            source_error,
+                        )
+                    })?;
+                }
+            }
+            None => {
                 return Err(error(
                     Stage::PrepareDestination,
                     source,
@@ -529,49 +571,16 @@ fn copy_file(
                     statistics,
                     io::Error::new(
                         ErrorKind::AlreadyExists,
-                        "rooted copy destination has a different entry type",
+                        "rooted copy destination has a conflicting entry",
                     ),
                 ));
             }
-            let remove_result = if metadata.kind() == EntryKind::Directory {
-                root.remove_tree(destination)
-            } else {
-                root.remove_file(destination)
-            };
-            remove_result.map_err(|source_error| {
-                error(
-                    Stage::PrepareDestination,
-                    source,
-                    destination,
-                    statistics,
-                    source_error,
+            Some(
+                CopyDestinationAction::Create | CopyDestinationAction::Merge,
+            ) => {
+                unreachable!(
+                    "a file destination cannot require create or merge"
                 )
-            })?;
-        } else {
-            match options.conflict_policy() {
-                ConflictPolicy::Fail => {
-                    return Err(error(
-                        Stage::PrepareDestination,
-                        source,
-                        destination,
-                        statistics,
-                        io::Error::new(
-                            ErrorKind::AlreadyExists,
-                            "rooted copy destination file already exists",
-                        ),
-                    ));
-                }
-                ConflictPolicy::Skip => {
-                    statistics.skipped = checked_add(
-                        statistics.skipped,
-                        1,
-                        source,
-                        destination,
-                        statistics,
-                    )?;
-                    return Ok(statistics);
-                }
-                ConflictPolicy::Overwrite => {}
             }
         }
     }

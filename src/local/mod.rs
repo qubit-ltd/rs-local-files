@@ -36,22 +36,20 @@ mod local_root_atomic_writer;
 
 #[cfg(unix)]
 pub(crate) use internal::sync_rooted_parent;
-#[cfg(any(unix, windows))]
 pub(crate) use internal::{
-    RootedDirectoryReader,
-    open_root_directory_reader,
-    open_rooted_directory_reader,
-};
-pub(crate) use internal::{
-    copy_directory_guarantee_unavailable,
+    CopyDestinationAction,
+    HostLocalFileSystem,
     copy_dir_all_with_paths,
+    copy_directory_guarantee_unavailable,
     copy_file_replace_requires_atomicity,
     copy_file_with_options,
     copy_source_mode_mismatch,
     create_temp_dir_in_dir_with_affixes,
     create_temp_file_in_dir,
+    decide_copy_destination,
     ensure_parent_path,
     ensure_parent_path_with_sync_dirs,
+    internal_copy_options,
     move_directory_without_replacing,
     move_file_without_replacing,
     open_native_reader_path,
@@ -59,6 +57,12 @@ pub(crate) use internal::{
     replace_file,
     try_random_file_name,
     validate_portable_file_name_impl,
+};
+#[cfg(any(unix, windows))]
+pub(crate) use internal::{
+    RootedDirectoryReader,
+    open_root_directory_reader,
+    open_rooted_directory_reader,
 };
 #[cfg(any(unix, windows))]
 pub(crate) use internal::{

@@ -31,13 +31,13 @@ through a writer, commits it, and reads the published result.
 use std::io::{Read, Write};
 
 use qubit_local_files::{
-    LocalFileSystem, LocalReadOptions, LocalTempDirectoryOptions, LocalWriteMode,
-    LocalWriteOptions, LocalWriterState,
+    create_temp_directory, open_reader, open_writer, LocalReadOptions,
+    LocalTempDirectoryOptions, LocalWriteMode, LocalWriteOptions, LocalWriterState,
 };
 
-let work = LocalFileSystem::create_temp_directory(&LocalTempDirectoryOptions::new())?;
+let work = create_temp_directory(&LocalTempDirectoryOptions::new())?;
 let path = work.path().join("manifest.json");
-let mut writer = LocalFileSystem::open_writer(
+let mut writer = open_writer(
     &path,
     &LocalWriteOptions::new(LocalWriteMode::CreateOrReplace),
 )?;
@@ -46,7 +46,7 @@ let outcome = writer.commit()?;
 assert_eq!(outcome.state(), LocalWriterState::Committed);
 
 let mut content = String::new();
-LocalFileSystem::open_reader(&path, &LocalReadOptions::new())?
+open_reader(&path, &LocalReadOptions::new())?
     .read_to_string(&mut content)?;
 assert_eq!(content, r#"{"version":1}"#);
 # Ok::<(), Box<dyn std::error::Error>>(())
@@ -56,15 +56,19 @@ assert_eq!(content, r#"{"version":1}"#);
 
 | API | Use it when you need |
 | --- | --- |
-| `LocalFileSystem` | Host-wide metadata, I/O, copy, rename, traversal, and temporary entries. |
-| `RootedLocalFileSystem` | Access beneath one opened directory authority. |
+| Host convenience functions | Direct host-wide metadata, I/O, copy, rename, traversal, and temporary entries. |
+| `LocalFileSystem::host()` | A reusable service over the process-visible host namespace. |
+| `LocalFileSystem::rooted(root)` | The same operations beneath one opened directory authority. |
+| `LocalFileSystemScope` | Whether an instance interprets paths as host paths or rooted descendants. |
 | `LocalFileWriter` | Explicit commit or abort after staged publication. |
 | `LocalDirectoryWalker` | Lazy directory enumeration with fixed creation-time policy. |
 | `LocalTempFile` / `LocalTempDirectory` | Owned cleanup, `keep`, and persistence operations. |
 | `LocalFileNames` / `LocalPaths` | Native filename and lexical-path helpers without lossy UTF-8 conversion. |
 
-All filesystem operations are associated methods or methods on stateful
-resources; the crate exposes no legacy free-function namespaces.
+Host convenience functions are the shortest path for ordinary applications.
+`LocalFileSystem` provides one consistent instance API when configuration must
+be stored, passed to another component, or adapted to a higher-level filesystem
+SPI.
 
 Temporary-resource cleanup is ownership-aware, not a synchronization boundary.
 Before deleting, a guard checks that the path still has the identity captured
@@ -78,11 +82,12 @@ writable by concurrent actors, or call `keep` and coordinate deletion yourself.
 
 ## Choose the right authority
 
-Use `LocalFileSystem` for host paths. Use `RootedLocalFileSystem` when one
-opened directory is the authority boundary: every operational path is a
-relative descendant, and absolute paths, prefixes, `.`, `..`, and intermediate
-symbolic links are rejected. Renaming the diagnostic root path later does not
-redirect the opened authority.
+Use the free functions or `LocalFileSystem::host()` for host paths. Use
+`LocalFileSystem::rooted(root)` when one opened directory is the authority
+boundary. Both instances expose the same operations; only path interpretation
+changes. Rooted paths must be relative descendants, and absolute paths,
+prefixes, `.`, `..`, and intermediate symbolic links are rejected. Renaming the
+diagnostic root path later does not redirect the opened authority.
 
 Copy chooses file or directory behavior from source metadata. Copy and rename
 failures retain the strongest proven publication state, so callers must inspect

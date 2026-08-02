@@ -19,10 +19,58 @@ use qubit_local_files::{
     LocalCopyMethod,
     LocalCopyOptions,
     LocalCopyStats,
+    LocalCopyTypeConflictPolicy,
     LocalFileErrorKind,
     LocalFileSystem,
 };
 use tempfile::tempdir;
+
+/// Verifies nested type conflicts honor `Skip` without traversing skipped
+/// source subtrees or modifying destination entries.
+#[test]
+fn test_copy_tree_skips_nested_type_conflicts() {
+    let directory = tempdir().expect("temporary directory should be created");
+    let source = directory.path().join("source");
+    let target = directory.path().join("target");
+    fs::create_dir_all(source.join("directory-to-file"))
+        .expect("source directories should be created");
+    fs::write(source.join("file-to-directory"), b"source-file")
+        .expect("source file should be written");
+    fs::write(source.join("directory-to-file/hidden"), b"hidden")
+        .expect("source subtree should be written");
+    fs::create_dir_all(target.join("file-to-directory"))
+        .expect("target directories should be created");
+    fs::write(target.join("file-to-directory/kept"), b"kept")
+        .expect("target child should be written");
+    fs::write(target.join("directory-to-file"), b"target-file")
+        .expect("target file should be written");
+
+    let outcome = LocalFileSystem::host()
+        .copy(
+            &source,
+            &target,
+            &LocalCopyOptions::new()
+                .with_tree_source()
+                .with_conflict(LocalCopyConflictPolicy::Overwrite)
+                .with_type_conflict(LocalCopyTypeConflictPolicy::Skip),
+        )
+        .expect("nested type conflicts should be skipped");
+
+    assert_eq!(2, outcome.stats().skipped());
+    assert_eq!(0, outcome.stats().files());
+    assert_eq!(
+        b"kept",
+        fs::read(target.join("file-to-directory/kept"))
+            .expect("target directory should remain")
+            .as_slice(),
+    );
+    assert_eq!(
+        b"target-file",
+        fs::read(target.join("directory-to-file"))
+            .expect("target file should remain")
+            .as_slice(),
+    );
+}
 
 /// Creates a process-specific path that is absent before each test use.
 fn temp_path(name: &str) -> PathBuf {
@@ -38,9 +86,9 @@ fn test_copy_failure_preserves_unchanged_state() {
     let source = temp_path("missing-source");
     let target = temp_path("missing-target");
 
-    let failure =
-        LocalFileSystem::copy(&source, &target, &LocalCopyOptions::default())
-            .expect_err("missing source must fail");
+    let failure = LocalFileSystem::host()
+        .copy(&source, &target, &LocalCopyOptions::default())
+        .expect_err("missing source must fail");
 
     assert_eq!(LocalCopyFailureState::Unchanged, failure.state());
     assert_eq!(&LocalCopyStats::default(), failure.partial_stats());
@@ -55,12 +103,9 @@ fn test_local_file_system_copy_unifies_file_and_directory_copy() {
     let target_file = directory.path().join("target.txt");
     fs::write(&source_file, b"file").expect("source file should be written");
 
-    let file_outcome = LocalFileSystem::copy(
-        &source_file,
-        &target_file,
-        &LocalCopyOptions::new(),
-    )
-    .expect("file copy should succeed");
+    let file_outcome = LocalFileSystem::host()
+        .copy(&source_file, &target_file, &LocalCopyOptions::new())
+        .expect("file copy should succeed");
     assert_eq!(LocalCopyMethod::StagedFile, file_outcome.method());
     assert_eq!(1, file_outcome.stats().files());
     assert_eq!(4, file_outcome.stats().bytes());
@@ -72,12 +117,13 @@ fn test_local_file_system_copy_unifies_file_and_directory_copy() {
     fs::write(source_directory.join("child"), b"tree")
         .expect("child should be written");
 
-    let tree_outcome = LocalFileSystem::copy(
-        &source_directory,
-        &target_directory,
-        &LocalCopyOptions::new().with_tree_source(),
-    )
-    .expect("directory copy should succeed");
+    let tree_outcome = LocalFileSystem::host()
+        .copy(
+            &source_directory,
+            &target_directory,
+            &LocalCopyOptions::new().with_tree_source(),
+        )
+        .expect("directory copy should succeed");
     assert_eq!(LocalCopyMethod::Recursive, tree_outcome.method());
     assert_eq!(1, tree_outcome.stats().files());
     assert_eq!(
@@ -96,9 +142,9 @@ fn test_local_file_system_copy_auto_detects_directory_sources() {
     let target = directory.path().join("target");
     fs::create_dir(&source).expect("source directory should be created");
 
-    let outcome =
-        LocalFileSystem::copy(&source, &target, &LocalCopyOptions::new())
-            .expect("automatic source selection must copy a directory tree");
+    let outcome = LocalFileSystem::host()
+        .copy(&source, &target, &LocalCopyOptions::new())
+        .expect("automatic source selection must copy a directory tree");
     assert_eq!(LocalCopyMethod::Recursive, outcome.method());
     assert!(target.is_dir());
 }
@@ -113,13 +159,14 @@ fn test_local_file_system_copy_rejects_hard_link_alias() {
     fs::write(&source, b"payload").expect("source should be written");
     fs::hard_link(&source, &alias).expect("hard-link alias should be created");
 
-    let error = LocalFileSystem::copy(
-        &source,
-        &alias,
-        &LocalCopyOptions::new()
-            .with_conflict(LocalCopyConflictPolicy::Overwrite),
-    )
-    .expect_err("copying onto a hard-link alias must be rejected");
+    let error = LocalFileSystem::host()
+        .copy(
+            &source,
+            &alias,
+            &LocalCopyOptions::new()
+                .with_conflict(LocalCopyConflictPolicy::Overwrite),
+        )
+        .expect_err("copying onto a hard-link alias must be rejected");
 
     assert_eq!(LocalFileErrorKind::InvalidOptions, error.error().kind());
     assert_eq!(
@@ -144,13 +191,14 @@ fn test_local_file_system_copy_overwrite_replaces_target_symlink() {
     fs::write(&referent, b"old").expect("referent should be written");
     symlink(&referent, &target).expect("target symlink should be created");
 
-    let outcome = LocalFileSystem::copy(
-        &source,
-        &target,
-        &LocalCopyOptions::new()
-            .with_conflict(LocalCopyConflictPolicy::Overwrite),
-    )
-    .expect("overwrite should replace the target entry");
+    let outcome = LocalFileSystem::host()
+        .copy(
+            &source,
+            &target,
+            &LocalCopyOptions::new()
+                .with_conflict(LocalCopyConflictPolicy::Overwrite),
+        )
+        .expect("overwrite should replace the target entry");
 
     assert_eq!(1, outcome.stats().overwritten());
 
@@ -174,6 +222,34 @@ fn test_local_file_system_copy_overwrite_replaces_target_symlink() {
     );
 }
 
+/// Verifies a dangling target symlink is still an existing type conflict.
+#[cfg(unix)]
+#[test]
+fn test_local_file_system_copy_skips_dangling_target_symlink() {
+    use std::os::unix::fs::symlink;
+
+    let directory = tempdir().expect("temporary directory should be created");
+    let source = directory.path().join("source");
+    let target = directory.path().join("target");
+    fs::create_dir(&source).expect("source directory should be created");
+    symlink("missing", &target)
+        .expect("dangling target symlink should be created");
+
+    let outcome = LocalFileSystem::host()
+        .copy(
+            &source,
+            &target,
+            &LocalCopyOptions::new()
+                .with_type_conflict(LocalCopyTypeConflictPolicy::Skip),
+        )
+        .expect("the type conflict should be skipped");
+
+    assert_eq!(1, outcome.stats().skipped());
+    let metadata =
+        fs::symlink_metadata(&target).expect("target symlink should remain");
+    assert!(metadata.file_type().is_symlink());
+}
+
 /// Verifies preferred file-copy durability reports a parent-sync downgrade.
 #[cfg(unix)]
 #[test]
@@ -189,13 +265,14 @@ fn test_local_copy_preferred_durability_reports_downgrade() {
     fs::set_permissions(&parent, fs::Permissions::from_mode(0o300))
         .expect("target parent should reject directory open");
 
-    let outcome = LocalFileSystem::copy(
-        &source,
-        &target,
-        &LocalCopyOptions::new()
-            .with_durability(LocalDurabilityRequirement::Preferred),
-    )
-    .expect("preferred copy durability may report a downgrade");
+    let outcome = LocalFileSystem::host()
+        .copy(
+            &source,
+            &target,
+            &LocalCopyOptions::new()
+                .with_durability(LocalDurabilityRequirement::Preferred),
+        )
+        .expect("preferred copy durability may report a downgrade");
 
     fs::set_permissions(&parent, fs::Permissions::from_mode(0o700))
         .expect("target parent permissions should be restored");

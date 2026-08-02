@@ -21,13 +21,14 @@ use tempfile::tempdir;
 #[test]
 fn test_local_file_system_create_temp_file_applies_options() {
     let parent = tempdir().expect("temporary parent should be created");
-    let mut file = LocalFileSystem::create_temp_file(
-        &LocalTempFileOptions::new()
-            .with_parent(parent.path())
-            .with_prefix("upload-")
-            .with_suffix(".part"),
-    )
-    .expect("temporary file should be created");
+    let mut file = LocalFileSystem::host()
+        .create_temp_file(
+            &LocalTempFileOptions::new()
+                .with_parent(parent.path())
+                .with_prefix("upload-")
+                .with_suffix(".part"),
+        )
+        .expect("temporary file should be created");
 
     assert!(file.path().is_absolute());
     let name = file
@@ -47,13 +48,14 @@ fn test_local_file_system_create_temp_file_applies_options() {
 #[test]
 fn test_local_file_system_create_temp_directory_applies_suffix() {
     let parent = tempdir().expect("temporary parent should be created");
-    let mut directory = LocalFileSystem::create_temp_directory(
-        &LocalTempDirectoryOptions::new()
-            .with_parent(parent.path())
-            .with_prefix("work-")
-            .with_suffix(".tmp"),
-    )
-    .expect("temporary directory should be created");
+    let mut directory = LocalFileSystem::host()
+        .create_temp_directory(
+            &LocalTempDirectoryOptions::new()
+                .with_parent(parent.path())
+                .with_prefix("work-")
+                .with_suffix(".tmp"),
+        )
+        .expect("temporary directory should be created");
 
     let path = directory.path().to_path_buf();
     let name = path
@@ -76,19 +78,21 @@ fn test_local_file_system_create_temp_resources_create_missing_parent() {
     let file_parent = workspace.path().join("file-parent/nested");
     let directory_parent = workspace.path().join("directory-parent/nested");
 
-    let mut file = LocalFileSystem::create_temp_file(
-        &LocalTempFileOptions::new().with_parent(&file_parent),
-    )
-    .expect("temporary file should create its missing parent");
+    let mut file = LocalFileSystem::host()
+        .create_temp_file(
+            &LocalTempFileOptions::new().with_parent(&file_parent),
+        )
+        .expect("temporary file should create its missing parent");
     let file_path = file.path().to_path_buf();
     assert!(file_parent.is_dir());
     assert!(file_path.is_file());
     file.cleanup().expect("temporary file should be removed");
 
-    let mut directory = LocalFileSystem::create_temp_directory(
-        &LocalTempDirectoryOptions::new().with_parent(&directory_parent),
-    )
-    .expect("temporary directory should create its missing parent");
+    let mut directory = LocalFileSystem::host()
+        .create_temp_directory(
+            &LocalTempDirectoryOptions::new().with_parent(&directory_parent),
+        )
+        .expect("temporary directory should create its missing parent");
     let directory_path = directory.path().to_path_buf();
     assert!(directory_parent.is_dir());
     assert!(directory_path.is_dir());
@@ -103,10 +107,11 @@ fn test_local_file_system_create_temp_resources_create_missing_parent() {
 #[test]
 fn test_local_temp_file_persist_rejects_interior_nul_target() {
     let parent = tempdir().expect("temporary parent should be created");
-    let temporary = LocalFileSystem::create_temp_file(
-        &LocalTempFileOptions::new().with_parent(parent.path()),
-    )
-    .expect("temporary file should be created");
+    let temporary = LocalFileSystem::host()
+        .create_temp_file(
+            &LocalTempFileOptions::new().with_parent(parent.path()),
+        )
+        .expect("temporary file should be created");
     let source = temporary.path().to_path_buf();
     let target = parent
         .path()
@@ -140,7 +145,7 @@ fn test_local_file_system_create_temp_file_rejects_separator_affix() {
         .expect("parent should be readable")
         .count();
 
-    let result = LocalFileSystem::create_temp_file(
+    let result = LocalFileSystem::host().create_temp_file(
         &LocalTempFileOptions::new()
             .with_parent(parent.path())
             .with_prefix("unsafe/"),

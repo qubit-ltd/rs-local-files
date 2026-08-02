@@ -19,10 +19,10 @@ use qubit_local_files::{
     LocalDurabilityRequirement,
     LocalFileErrorKind,
     LocalFileSystem,
+    LocalWriteFailureState,
     LocalWriteMode,
     LocalWriteOptions,
     LocalWriterState,
-    LocalWriteFailureState,
 };
 use tempfile::tempdir;
 
@@ -33,11 +33,9 @@ fn test_local_file_writer_append_commit_reports_direct_publication() {
     let directory = tempdir().expect("temporary directory should be created");
     let target = directory.path().join("payload");
     fs::write(&target, b"base").expect("payload fixture should be written");
-    let mut writer = LocalFileSystem::open_writer(
-        &target,
-        &LocalWriteOptions::new(LocalWriteMode::Append),
-    )
-    .expect("append writer should open");
+    let mut writer = LocalFileSystem::host()
+        .open_writer(&target, &LocalWriteOptions::new(LocalWriteMode::Append))
+        .expect("append writer should open");
 
     assert_eq!(target, writer.diagnostic_path());
     assert_eq!(LocalWriterState::Open, writer.state());
@@ -72,11 +70,9 @@ fn test_local_file_writer_append_abort_reports_aborted_and_published_states() {
     let target = directory.path().join("payload");
     fs::write(&target, b"base").expect("payload fixture should be written");
 
-    let mut untouched = LocalFileSystem::open_writer(
-        &target,
-        &LocalWriteOptions::new(LocalWriteMode::Append),
-    )
-    .expect("append writer should open");
+    let mut untouched = LocalFileSystem::host()
+        .open_writer(&target, &LocalWriteOptions::new(LocalWriteMode::Append))
+        .expect("append writer should open");
     let untouched_outcome =
         untouched.abort().expect("untouched append should abort");
     assert_eq!(LocalWriterState::Aborted, untouched_outcome.state());
@@ -88,11 +84,9 @@ fn test_local_file_writer_append_abort_reports_aborted_and_published_states() {
         repeated.kind(),
     );
 
-    let mut published = LocalFileSystem::open_writer(
-        &target,
-        &LocalWriteOptions::new(LocalWriteMode::Append),
-    )
-    .expect("second append writer should open");
+    let mut published = LocalFileSystem::host()
+        .open_writer(&target, &LocalWriteOptions::new(LocalWriteMode::Append))
+        .expect("second append writer should open");
     published
         .write_all(b"-published")
         .expect("append writer should accept bytes");
@@ -117,11 +111,12 @@ fn test_local_file_writer_append_abort_reports_aborted_and_published_states() {
 fn test_local_file_writer_creates_missing_parent_when_requested() {
     let directory = tempdir().expect("temporary directory should be created");
     let target = directory.path().join("nested/payload");
-    let mut writer = LocalFileSystem::open_writer(
-        &target,
-        &LocalWriteOptions::new(LocalWriteMode::CreateNew).with_parent(),
-    )
-    .expect("writer should create the requested parent directory");
+    let mut writer = LocalFileSystem::host()
+        .open_writer(
+            &target,
+            &LocalWriteOptions::new(LocalWriteMode::CreateNew).with_parent(),
+        )
+        .expect("writer should create the requested parent directory");
     writer
         .write_all(b"payload")
         .expect("staged writer should accept bytes");
@@ -142,11 +137,12 @@ fn test_local_file_writer_creates_missing_parent_when_requested() {
 fn test_local_file_writer_flushes_staging_without_publishing_destination() {
     let directory = tempdir().expect("temporary directory should be created");
     let target = directory.path().join("payload");
-    let mut writer = LocalFileSystem::open_writer(
-        &target,
-        &LocalWriteOptions::new(LocalWriteMode::CreateNew),
-    )
-    .expect("staged writer should open");
+    let mut writer = LocalFileSystem::host()
+        .open_writer(
+            &target,
+            &LocalWriteOptions::new(LocalWriteMode::CreateNew),
+        )
+        .expect("staged writer should open");
     writer
         .write_all(b"payload")
         .expect("staged writer should accept bytes");
@@ -173,11 +169,12 @@ fn test_local_file_writer_flushes_staging_without_publishing_destination() {
 fn test_local_file_writer_commit_conflict_preserves_concurrent_destination() {
     let directory = tempdir().expect("temporary directory should be created");
     let target = directory.path().join("payload");
-    let mut writer = LocalFileSystem::open_writer(
-        &target,
-        &LocalWriteOptions::new(LocalWriteMode::CreateNew),
-    )
-    .expect("create-new writer should open for an absent target");
+    let mut writer = LocalFileSystem::host()
+        .open_writer(
+            &target,
+            &LocalWriteOptions::new(LocalWriteMode::CreateNew),
+        )
+        .expect("create-new writer should open for an absent target");
     writer
         .write_all(b"staged")
         .expect("writer should accept staged bytes");
@@ -206,11 +203,12 @@ fn test_local_file_writer_commit_conflict_preserves_concurrent_destination() {
 fn test_local_file_commit_error_exposes_complete_public_context() {
     let directory = tempdir().expect("temporary directory should be created");
     let target = directory.path().join("payload");
-    let mut writer = LocalFileSystem::open_writer(
-        &target,
-        &LocalWriteOptions::new(LocalWriteMode::CreateNew),
-    )
-    .expect("create-new writer should open before the target exists");
+    let mut writer = LocalFileSystem::host()
+        .open_writer(
+            &target,
+            &LocalWriteOptions::new(LocalWriteMode::CreateNew),
+        )
+        .expect("create-new writer should open before the target exists");
     writer
         .write_all(b"staged")
         .expect("staged writer should accept payload");
@@ -244,12 +242,13 @@ fn test_local_file_writer_append_honors_durability_policies() {
         LocalDurabilityRequirement::Preferred,
         LocalDurabilityRequirement::Required,
     ] {
-        let mut writer = LocalFileSystem::open_writer(
-            &target,
-            &LocalWriteOptions::new(LocalWriteMode::Append)
-                .with_durability(requirement),
-        )
-        .expect("append writer should open for a regular file");
+        let mut writer = LocalFileSystem::host()
+            .open_writer(
+                &target,
+                &LocalWriteOptions::new(LocalWriteMode::Append)
+                    .with_durability(requirement),
+            )
+            .expect("append writer should open for a regular file");
         writer
             .write_all(b"+")
             .expect("append writer should accept one byte");
@@ -277,11 +276,12 @@ fn test_local_file_writer_returns_retryable_writer_before_publication() {
     let target = directory.path().join("payload");
     fs::write(&target, b"existing")
         .expect("existing payload should be written");
-    let mut writer = LocalFileSystem::open_writer(
-        &target,
-        &LocalWriteOptions::new(LocalWriteMode::CreateOrReplace),
-    )
-    .expect("replacement writer should open before destination removal");
+    let mut writer = LocalFileSystem::host()
+        .open_writer(
+            &target,
+            &LocalWriteOptions::new(LocalWriteMode::CreateOrReplace),
+        )
+        .expect("replacement writer should open before destination removal");
     writer
         .write_all(b"staged")
         .expect("replacement writer should accept staged bytes");
@@ -309,11 +309,12 @@ fn test_local_file_writer_returns_retryable_writer_before_publication() {
 fn test_local_file_writer_abort_reports_missing_host_staging_file() {
     let directory = tempdir().expect("temporary directory should be created");
     let target = directory.path().join("payload");
-    let mut writer = LocalFileSystem::open_writer(
-        &target,
-        &LocalWriteOptions::new(LocalWriteMode::CreateNew),
-    )
-    .expect("staged writer should open");
+    let mut writer = LocalFileSystem::host()
+        .open_writer(
+            &target,
+            &LocalWriteOptions::new(LocalWriteMode::CreateNew),
+        )
+        .expect("staged writer should open");
     let staging = fs::read_dir(directory.path())
         .expect("staging directory should be readable")
         .map(|entry| entry.expect("staging entry should be readable").path())
@@ -348,10 +349,10 @@ fn test_local_file_writer_abort_reports_missing_host_staging_file() {
 fn test_local_file_writer_rooted_sessions_report_commit_and_abort_outcomes() {
     use std::path::Path;
 
-    use qubit_local_files::RootedLocalFileSystem;
+    use qubit_local_files::LocalFileSystem;
 
     let directory = tempdir().expect("temporary directory should be created");
-    let rooted = RootedLocalFileSystem::open(directory.path())
+    let rooted = LocalFileSystem::rooted(directory.path())
         .expect("rooted filesystem should open");
 
     let mut committed = rooted
@@ -404,13 +405,13 @@ fn test_local_file_writer_rooted_sessions_report_commit_and_abort_outcomes() {
 fn test_local_file_writer_rooted_prepublication_failure_retains_writer() {
     use std::path::Path;
 
-    use qubit_local_files::RootedLocalFileSystem;
+    use qubit_local_files::LocalFileSystem;
 
     let directory = tempdir().expect("temporary directory should be created");
     let target = directory.path().join("payload");
     fs::write(&target, b"existing")
         .expect("existing rooted payload should be written");
-    let rooted = RootedLocalFileSystem::open(directory.path())
+    let rooted = LocalFileSystem::rooted(directory.path())
         .expect("rooted filesystem should open");
     let mut writer = rooted
         .open_writer(
@@ -475,11 +476,12 @@ fn test_local_file_writer_reports_injected_replacement_failure() {
         let target = directory.path().join("payload");
         fs::write(&target, b"existing")
             .expect("replacement destination should be written");
-        let mut writer = LocalFileSystem::open_writer(
-            &target,
-            &LocalWriteOptions::new(LocalWriteMode::CreateOrReplace),
-        )
-        .expect("replacement writer should open");
+        let mut writer = LocalFileSystem::host()
+            .open_writer(
+                &target,
+                &LocalWriteOptions::new(LocalWriteMode::CreateOrReplace),
+            )
+            .expect("replacement writer should open");
         writer
             .write_all(b"replacement")
             .expect("replacement writer should accept staged bytes");
@@ -510,11 +512,12 @@ fn test_local_file_writer_reports_injected_append_commit_flush_failure() {
         let directory = tempdir().expect("temporary directory should exist");
         let target = directory.path().join("payload");
         fs::write(&target, b"base").expect("payload should be written");
-        let mut writer = LocalFileSystem::open_writer(
-            &target,
-            &LocalWriteOptions::new(LocalWriteMode::Append),
-        )
-        .expect("append writer should open");
+        let mut writer = LocalFileSystem::host()
+            .open_writer(
+                &target,
+                &LocalWriteOptions::new(LocalWriteMode::Append),
+            )
+            .expect("append writer should open");
         writer
             .write_all(b"+")
             .expect("append write should succeed before flush fault");
@@ -538,12 +541,13 @@ fn test_local_file_writer_reports_injected_required_append_sync_failure() {
         let directory = tempdir().expect("temporary directory should exist");
         let target = directory.path().join("payload");
         fs::write(&target, b"base").expect("payload should be written");
-        let mut writer = LocalFileSystem::open_writer(
-            &target,
-            &LocalWriteOptions::new(LocalWriteMode::Append)
-                .with_durability(LocalDurabilityRequirement::Required),
-        )
-        .expect("append writer should open");
+        let mut writer = LocalFileSystem::host()
+            .open_writer(
+                &target,
+                &LocalWriteOptions::new(LocalWriteMode::Append)
+                    .with_durability(LocalDurabilityRequirement::Required),
+            )
+            .expect("append writer should open");
         writer
             .write_all(b"+")
             .expect("append write should succeed before sync fault");
@@ -570,11 +574,12 @@ fn test_local_file_writer_reports_injected_append_abort_flush_failure() {
         let directory = tempdir().expect("temporary directory should exist");
         let target = directory.path().join("payload");
         fs::write(&target, b"base").expect("payload should be written");
-        let writer = LocalFileSystem::open_writer(
-            &target,
-            &LocalWriteOptions::new(LocalWriteMode::Append),
-        )
-        .expect("append writer should open");
+        let mut writer = LocalFileSystem::host()
+            .open_writer(
+                &target,
+                &LocalWriteOptions::new(LocalWriteMode::Append),
+            )
+            .expect("append writer should open");
 
         let error = writer
             .abort()

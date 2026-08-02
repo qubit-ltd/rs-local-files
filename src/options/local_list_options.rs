@@ -101,7 +101,10 @@ impl LocalListOptions {
 
     /// Sets the maximum number of concurrently open directory handles.
     #[inline(always)]
-    pub const fn with_max_open_directories(mut self, max_open_directories: usize) -> Self {
+    pub const fn with_max_open_directories(
+        mut self,
+        max_open_directories: usize,
+    ) -> Self {
         self.max_open_directories = if max_open_directories == 0 {
             1
         } else {
@@ -112,7 +115,10 @@ impl LocalListOptions {
 
     /// Sets the policy applied after an iteration error.
     #[inline(always)]
-    pub const fn with_error_policy(mut self, error_policy: LocalWalkErrorPolicy) -> Self {
+    pub const fn with_error_policy(
+        mut self,
+        error_policy: LocalWalkErrorPolicy,
+    ) -> Self {
         self.error_policy = error_policy;
         self
     }

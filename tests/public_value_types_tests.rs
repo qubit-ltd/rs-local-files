@@ -39,7 +39,7 @@ use tempfile::tempdir;
 /// Verifies every capability accessor returns a coherent platform snapshot.
 #[test]
 fn test_capability_snapshot_exposes_all_guarantees() {
-    let capabilities = LocalFileSystem::capabilities();
+    let capabilities = LocalFileSystem::host().capabilities();
 
     let _ = capabilities.path_limit();
     let _ = capabilities.rooted_operations_implemented();
@@ -63,18 +63,12 @@ fn test_local_file_error_classifies_io_and_retains_context() {
             io::ErrorKind::NotADirectory,
             LocalFileErrorKind::NotDirectory,
         ),
-        (
-            io::ErrorKind::IsADirectory,
-            LocalFileErrorKind::IsDirectory,
-        ),
+        (io::ErrorKind::IsADirectory, LocalFileErrorKind::IsDirectory),
         (
             io::ErrorKind::PermissionDenied,
             LocalFileErrorKind::PermissionDenied,
         ),
-        (
-            io::ErrorKind::InvalidInput,
-            LocalFileErrorKind::InvalidPath,
-        ),
+        (io::ErrorKind::InvalidInput, LocalFileErrorKind::InvalidPath),
         (
             io::ErrorKind::InvalidData,
             LocalFileErrorKind::DataCorruption,
@@ -310,17 +304,20 @@ fn test_public_metadata_values_cover_file_directory_and_missing_cases() {
     fs::create_dir(&child_directory)
         .expect("child directory should be created");
 
-    let file_metadata = LocalFileSystem::metadata(&empty_file)
+    let file_metadata = LocalFileSystem::host()
+        .metadata(&empty_file)
         .expect("empty file metadata should be readable");
     assert_eq!(LocalFileKind::File, file_metadata.kind());
     assert!(file_metadata.is_empty());
-    let directory_metadata = LocalFileSystem::metadata(&child_directory)
+    let directory_metadata = LocalFileSystem::host()
+        .metadata(&child_directory)
         .expect("directory metadata should be readable");
     assert_eq!(LocalFileKind::Directory, directory_metadata.kind());
 
     assert_eq!(
         LocalFileErrorKind::NotFound,
-        LocalFileSystem::metadata(&directory.path().join("missing"))
+        LocalFileSystem::host()
+            .metadata(&directory.path().join("missing"))
             .expect_err("missing metadata should fail")
             .kind(),
     );
@@ -339,7 +336,8 @@ fn test_public_metadata_values_distinguish_symbolic_links() {
     fs::write(&referent, b"payload").expect("referent should be written");
     symlink(&referent, &link).expect("symbolic link should be created");
 
-    let metadata = LocalFileSystem::metadata(&link)
+    let metadata = LocalFileSystem::host()
+        .metadata(&link)
         .expect("symbolic link metadata should be readable");
     assert_eq!(LocalFileKind::Symlink, metadata.kind());
 }
@@ -356,7 +354,8 @@ fn test_public_metadata_values_classify_unix_socket_as_other() {
     let _listener = UnixListener::bind(&socket)
         .expect("Unix-domain socket should be created");
 
-    let metadata = LocalFileSystem::metadata(&socket)
+    let metadata = LocalFileSystem::host()
+        .metadata(&socket)
         .expect("socket metadata should be readable");
     assert_eq!(LocalFileKind::Other, metadata.kind());
 }
@@ -371,7 +370,8 @@ fn test_metadata_and_outcomes_expose_public_values() {
     let renamed_file = directory.path().join("renamed");
     fs::write(&file, b"payload").expect("test file should be written");
 
-    let metadata = LocalFileSystem::metadata(&file)
+    let metadata = LocalFileSystem::host()
+        .metadata(&file)
         .expect("file metadata should be readable");
     assert_eq!(LocalFileKind::File, metadata.kind());
     assert_eq!(7, metadata.len());
@@ -380,34 +380,34 @@ fn test_metadata_and_outcomes_expose_public_values() {
     let _ = metadata.modified_at();
     let _ = metadata.created_at();
 
-    let created = LocalFileSystem::create_directory(
-        &created_directory,
-        &LocalCreateDirectoryOptions::new(),
-    )
-    .expect("directory should be created");
+    let created = LocalFileSystem::host()
+        .create_directory(
+            &created_directory,
+            &LocalCreateDirectoryOptions::new(),
+        )
+        .expect("directory should be created");
     assert!(created.created());
-    let existing = LocalFileSystem::create_directory(
-        &created_directory,
-        &LocalCreateDirectoryOptions::new().with_exists_ok(),
-    )
-    .expect("existing directory should be accepted");
+    let existing = LocalFileSystem::host()
+        .create_directory(
+            &created_directory,
+            &LocalCreateDirectoryOptions::new().with_exists_ok(),
+        )
+        .expect("existing directory should be accepted");
     assert!(!existing.created());
 
-    let renamed = LocalFileSystem::rename(
-        &file,
-        &renamed_file,
-        &LocalRenameOptions::new(),
-    )
-    .expect("file should be renamed");
+    let renamed = LocalFileSystem::host()
+        .rename(&file, &renamed_file, &LocalRenameOptions::new())
+        .expect("file should be renamed");
     assert!(renamed.atomic());
     let _ = renamed.durable();
 
-    let copied = LocalFileSystem::copy(
-        &renamed_file,
-        &directory.path().join("copy"),
-        &LocalCopyOptions::new(),
-    )
-    .expect("file should be copied");
+    let copied = LocalFileSystem::host()
+        .copy(
+            &renamed_file,
+            &directory.path().join("copy"),
+            &LocalCopyOptions::new(),
+        )
+        .expect("file should be copied");
     assert_eq!(LocalCopyMethod::StagedFile, copied.method());
     assert_eq!(1, copied.stats().files());
     assert_eq!(7, copied.stats().bytes());
@@ -418,15 +418,16 @@ fn test_metadata_and_outcomes_expose_public_values() {
     let _ = copied.durable();
     let _ = copied.metadata_preservation();
 
-    let deleted =
-        LocalFileSystem::delete_file(&renamed_file, &LocalDeleteOptions::new())
-            .expect("file should be deleted");
+    let deleted = LocalFileSystem::host()
+        .delete_file(&renamed_file, &LocalDeleteOptions::new())
+        .expect("file should be deleted");
     assert!(deleted.deleted());
-    let missing = LocalFileSystem::delete_file(
-        &renamed_file,
-        &LocalDeleteOptions::new().with_missing_ok(),
-    )
-    .expect("missing file should be accepted");
+    let missing = LocalFileSystem::host()
+        .delete_file(
+            &renamed_file,
+            &LocalDeleteOptions::new().with_missing_ok(),
+        )
+        .expect("missing file should be accepted");
     assert!(!missing.deleted());
 }
 
@@ -441,35 +442,38 @@ fn test_recursive_copy_outcome_reports_all_public_statistics() {
     fs::write(source.join("child"), b"new")
         .expect("source child should be written");
 
-    let initial = LocalFileSystem::copy(
-        &source,
-        &target,
-        &LocalCopyOptions::new().with_tree_source(),
-    )
-    .expect("directory should be copied");
+    let initial = LocalFileSystem::host()
+        .copy(
+            &source,
+            &target,
+            &LocalCopyOptions::new().with_tree_source(),
+        )
+        .expect("directory should be copied");
     assert_eq!(LocalCopyMethod::Recursive, initial.method());
     assert_eq!(1, initial.stats().directories());
     assert_eq!(1, initial.stats().files());
     assert_eq!(3, initial.stats().bytes());
 
-    let skipped = LocalFileSystem::copy(
-        &source,
-        &target,
-        &LocalCopyOptions::new()
-            .with_tree_source()
-            .with_conflict(LocalCopyConflictPolicy::Skip),
-    )
-    .expect("existing child should be skipped");
+    let skipped = LocalFileSystem::host()
+        .copy(
+            &source,
+            &target,
+            &LocalCopyOptions::new()
+                .with_tree_source()
+                .with_conflict(LocalCopyConflictPolicy::Skip),
+        )
+        .expect("existing child should be skipped");
     assert_eq!(1, skipped.stats().skipped());
 
-    let overwritten = LocalFileSystem::copy(
-        &source,
-        &target,
-        &LocalCopyOptions::new()
-            .with_tree_source()
-            .with_conflict(LocalCopyConflictPolicy::Overwrite),
-    )
-    .expect("existing child should be overwritten");
+    let overwritten = LocalFileSystem::host()
+        .copy(
+            &source,
+            &target,
+            &LocalCopyOptions::new()
+                .with_tree_source()
+                .with_conflict(LocalCopyConflictPolicy::Overwrite),
+        )
+        .expect("existing child should be overwritten");
     let _ = overwritten.stats().overwritten();
 }
 
@@ -481,9 +485,9 @@ fn test_public_failure_values_expose_display_sources_and_parts() {
     let missing = directory.path().join("missing");
     let target = directory.path().join("target");
 
-    let copy_failure =
-        LocalFileSystem::copy(&missing, &target, &LocalCopyOptions::new())
-            .expect_err("missing copy source should fail");
+    let copy_failure = LocalFileSystem::host()
+        .copy(&missing, &target, &LocalCopyOptions::new())
+        .expect_err("missing copy source should fail");
     assert!(copy_failure.to_string().contains("copy failed"));
     assert!(Error::source(&copy_failure).is_some());
     let (error, state, stats, staging, cleanup) = copy_failure.into_parts();
@@ -493,9 +497,9 @@ fn test_public_failure_values_expose_display_sources_and_parts() {
     assert!(staging.is_none());
     assert!(cleanup.is_none());
 
-    let rename_failure =
-        LocalFileSystem::rename(&missing, &target, &LocalRenameOptions::new())
-            .expect_err("missing rename source should fail");
+    let rename_failure = LocalFileSystem::host()
+        .rename(&missing, &target, &LocalRenameOptions::new())
+        .expect_err("missing rename source should fail");
     assert!(rename_failure.to_string().contains("rename failed"));
     assert!(Error::source(&rename_failure).is_some());
     let (error, state) = rename_failure.into_parts();

@@ -296,7 +296,10 @@ impl Root {
     ///
     /// Returns an I/O error when secure traversal or directory enumeration
     /// cannot remain beneath this opened root.
-    pub(crate) fn open_dir_reader(&self, path: &path::Path) -> Result<DirectoryReader> {
+    pub(crate) fn open_dir_reader(
+        &self,
+        path: &path::Path,
+    ) -> Result<DirectoryReader> {
         DirectoryReader::open_descendant(&self.directory, &self.path, path)
     }
 

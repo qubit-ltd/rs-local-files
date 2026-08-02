@@ -64,75 +64,31 @@ error。
 
 ## 4. 公共类型组织
 
-### 4.1 Host filesystem
+### 4.1 统一 local filesystem service
 
-Host-wide 操作由不可构造 service struct 的关联方法组织：
+`LocalFileSystem` 是可构造、可传递的具体服务，在创建时选择 host 或 rooted
+namespace，之后通过同一套实例方法操作：
 
 ```rust
-pub struct LocalFileSystem {
-    _private: (),
-}
-
 impl LocalFileSystem {
-    pub fn metadata(path: &Path) -> LocalResult<LocalFileMetadata>;
-    pub fn open_reader(
-        path: &Path,
-        options: &LocalReadOptions,
-    ) -> LocalResult<LocalFileReader>;
-    pub fn open_writer(
-        path: &Path,
-        options: &LocalWriteOptions,
-    ) -> LocalResult<LocalFileWriter>;
-    pub fn copy(
-        source: &Path,
-        target: &Path,
-        options: &LocalCopyOptions,
-    ) -> LocalCopyResult;
-    pub fn list(
-        path: &Path,
-        options: &LocalListOptions,
-    ) -> LocalResult<LocalDirectoryWalker>;
-    pub fn create_directory(
-        path: &Path,
-        options: &LocalCreateDirectoryOptions,
-    ) -> LocalResult<LocalCreateDirectoryOutcome>;
-    pub fn delete_file(
-        path: &Path,
-        options: &LocalDeleteOptions,
-    ) -> LocalResult<LocalDeleteOutcome>;
-    pub fn delete_directory(
-        path: &Path,
-        options: &LocalDeleteOptions,
-    ) -> LocalResult<LocalDeleteOutcome>;
-    pub fn rename(
-        source: &Path,
-        target: &Path,
-        options: &LocalRenameOptions,
-    ) -> LocalRenameResult;
-    pub fn create_temp_file(
-        options: &LocalTempFileOptions,
-    ) -> LocalResult<LocalTempFile>;
-    pub fn create_temp_directory(
-        options: &LocalTempDirectoryOptions,
-    ) -> LocalResult<LocalTempDirectory>;
+    pub const fn host() -> Self;
+    pub fn rooted(root: &Path) -> LocalResult<Self>;
+    pub fn scope(&self) -> LocalFileSystemScope<'_>;
+    pub const fn capabilities(&self) -> LocalFileSystemCapabilities;
+
+    // metadata/open/list/copy/create/delete/rename/temp 操作均为 &self 方法
 }
 ```
 
-私有字段使该类型不能在 crate 外构造，同时将关联方法作为稳定的命名空间，避免 free
-function 和无意义的 unit struct value。
+这个类型不复制 `qubit-fs` 的 provider-neutral 门面：它只处理 native `Path`、本地
+option/result/error 和两种本地 namespace。Host 便利函数内部等价于临时构造
+`LocalFileSystem::host()`，供普通程序直接调用。
 
-### 4.2 Rooted filesystem
+### 4.2 Rooted authority
 
-Rooted authority 是有状态类型：
-
-```rust
-pub struct RootedLocalFileSystem {
-    // 已打开的 root descriptor/handle 与非权威诊断路径
-}
-```
-
-它通过 `RootedLocalFileSystem::open` 建立 root，后续操作使用实例方法。安全性依赖已
-打开 root descriptor/handle，不依赖 root path 字符串在之后仍指向同一目录。
+`LocalFileSystem::rooted` 建立 root，内部保存已打开的 descriptor/handle 与非权威
+诊断路径。安全性依赖已打开 root，不依赖 root path 字符串在之后仍指向
+同一目录。Rooted backend 不作为独立公开类型，避免 host/rooted API 演化分叉。
 
 ### 4.3 路径与文件名工具
 
@@ -264,7 +220,7 @@ native metadata；`qubit-fs-local` 不应读取裸 `std::fs::Metadata` 后再实
 
 ```text
 qubit_local_files::LocalFileSystem
-qubit_local_files::RootedLocalFileSystem
+qubit_local_files::LocalFileSystem::rooted(...)
 ```
 
 所属 crate 已经明确表达 native 层。需要同时导入 `qubit-fs` 时，上层 adapter 使用：
@@ -290,7 +246,7 @@ Host API 可以接受绝对或相对 native path。任何会跨越多个系统�
 
 ### 5.2 Final symlink
 
-`LocalFileSystem::metadata` 和 `RootedLocalFileSystem::metadata` 观察 final directory
+Host 便利函数 `metadata` 与 `LocalFileSystem::metadata` 观察 final directory
 entry 本身，不跟随 final symlink。未来若增加 follow 行为，必须使用新的明确 option
 或方法，不能改变现有入口的语义，也不能因某个平台 API 默认行为不同而改变。
 
@@ -334,8 +290,8 @@ handle、reparse-point-aware traversal 和 handle-relative 能力。
 `LocalPathLimit { value, unit }`，其中
 `LocalPathLengthUnit::{Bytes, Utf16CodeUnits}` 明确计量单位。Unix 通常是 bytes，
 Windows 是 UTF-16 code units；不能把 Windows 长度直接标成 byte limit，运行环境
-无法证明稳定上界时保持 unknown。`LocalFileSystem::capabilities()` 返回 host
-snapshot；`RootedLocalFileSystem` 在 `open` 时缓存与已打开 authority 对应的 snapshot。
+无法证明稳定上界时保持 unknown。Host 实例返回 host snapshot；rooted
+实例在打开 authority 时缓存对应 snapshot。
 
 ### 6.3 Symlink、junction 与 mount
 
@@ -349,8 +305,8 @@ Rooted recursive operation 默认不跟随 symlink、junction 或其他 reparse 
 
 ### 7.1 统一入口
 
-文件与目录复制使用同一个 `LocalFileSystem::copy` 或
-`RootedLocalFileSystem::copy`。实现根据 source metadata 选择 file、directory 或拒绝
+文件与目录复制使用同一个 `LocalFileSystem::copy`（或 host 便利函数 `copy`）。
+实现根据 source metadata 选择 file、directory 或拒绝
 特殊文件，不公开两套行为逐渐分叉的复制算法。
 
 两个入口都返回类型化结果：
@@ -565,10 +521,10 @@ Drop 只在 `Owned` 或 `CleanupRequired` 执行 best-effort cleanup；`Indeterm
 prefix 和 suffix。所有 affix 与最终随机 component 必须在创建 entry 前完成 native
 separator、NUL 和平台保留名称校验；失败不能留下临时条目。
 
-Host 与 rooted authority 提供对称入口：
+Host 与 rooted authority 通过同一类型提供对称入口：
 
 ```rust
-impl RootedLocalFileSystem {
+impl LocalFileSystem {
     pub fn create_temp_file(
         &self,
         options: &LocalTempFileOptions,
@@ -581,9 +537,8 @@ impl RootedLocalFileSystem {
 }
 ```
 
-也就是说，rooted public API 明确提供
-`RootedLocalFileSystem::create_temp_file` 与
-`RootedLocalFileSystem::create_temp_directory`，而不是让 adapter 回退到 host temp。
+也就是说，rooted 实例明确提供 `create_temp_file` 与
+`create_temp_directory`，而不是让 adapter 回退到 host temp。
 
 Rooted options 中的 parent 必须是经验证、不能逃逸 root 的 relative descendant。
 创建、persist 与 cleanup 都从保存的 root authority 执行。Root 的诊断路径在资源
