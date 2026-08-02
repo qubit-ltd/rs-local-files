@@ -213,10 +213,7 @@ fn test_rooted_local_file_system_exposes_opened_anchor_and_capabilities() {
     let rooted = LocalFileSystem::rooted(directory.path())
         .expect("root authority should open");
 
-    assert_eq!(
-        LocalFileSystemScope::Rooted,
-        rooted.scope(),
-    );
+    assert_eq!(LocalFileSystemScope::Rooted, rooted.scope(),);
     assert_eq!(Some(directory.path()), rooted.diagnostic_root());
     assert_eq!(
         rooted.capabilities().rooted_operations_implemented(),
