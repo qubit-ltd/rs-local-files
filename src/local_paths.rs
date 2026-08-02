@@ -239,7 +239,7 @@ impl LocalPaths {
             || has_disallowed_component(ancestor)
         {
             return Err(LocalFileError::new(
-                LocalFileErrorKind::InvalidInput,
+                LocalFileErrorKind::InvalidPath,
                 LocalFileOperation::ComposePath,
             )
             .with_path(path.to_path_buf())
@@ -272,7 +272,7 @@ impl LocalPaths {
             || has_disallowed_component(descendant)
         {
             return Err(LocalFileError::new(
-                LocalFileErrorKind::InvalidInput,
+                LocalFileErrorKind::InvalidPath,
                 LocalFileOperation::ComposePath,
             )
             .with_path(descendant.to_path_buf()));
@@ -329,7 +329,7 @@ fn has_raw_dot_component(path: &Path) -> bool {
 #[inline(always)]
 fn invalid_path_error() -> LocalFileError {
     LocalFileError::new(
-        LocalFileErrorKind::InvalidInput,
+        LocalFileErrorKind::InvalidPath,
         LocalFileOperation::ComposePath,
     )
 }

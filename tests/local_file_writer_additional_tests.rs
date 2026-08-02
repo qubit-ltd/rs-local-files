@@ -72,7 +72,7 @@ fn test_local_file_writer_append_abort_reports_aborted_and_published_states() {
     let target = directory.path().join("payload");
     fs::write(&target, b"base").expect("payload fixture should be written");
 
-    let untouched = LocalFileSystem::open_writer(
+    let mut untouched = LocalFileSystem::open_writer(
         &target,
         &LocalWriteOptions::new(LocalWriteMode::Append),
     )
@@ -80,6 +80,13 @@ fn test_local_file_writer_append_abort_reports_aborted_and_published_states() {
     let untouched_outcome =
         untouched.abort().expect("untouched append should abort");
     assert_eq!(LocalWriterState::Aborted, untouched_outcome.state());
+    let repeated = untouched
+        .abort()
+        .expect_err("completed append abort must be terminal");
+    assert_eq!(
+        qubit_local_files::LocalFileErrorKind::InvalidState,
+        repeated.kind(),
+    );
 
     let mut published = LocalFileSystem::open_writer(
         &target,
@@ -302,7 +309,7 @@ fn test_local_file_writer_returns_retryable_writer_before_publication() {
 fn test_local_file_writer_abort_reports_missing_host_staging_file() {
     let directory = tempdir().expect("temporary directory should be created");
     let target = directory.path().join("payload");
-    let writer = LocalFileSystem::open_writer(
+    let mut writer = LocalFileSystem::open_writer(
         &target,
         &LocalWriteOptions::new(LocalWriteMode::CreateNew),
     )
@@ -324,6 +331,14 @@ fn test_local_file_writer_abort_reports_missing_host_staging_file() {
     );
     assert_eq!(Some(target.as_path()), error.path());
     assert!(!target.exists());
+
+    let retry = writer
+        .abort()
+        .expect_err("failed abort must retain the writer for retry");
+    assert_eq!(
+        qubit_local_files::LocalFileOperation::Abort,
+        retry.operation(),
+    );
 }
 
 /// Verifies rooted facade writers preserve the shared writer outcome contract

@@ -13,12 +13,20 @@
 #[non_exhaustive]
 #[must_use]
 pub enum LocalFileErrorKind {
-    /// A path, filename, option, or state is invalid.
-    InvalidInput,
+    /// A native path or filename violates the operation's path contract.
+    InvalidPath,
+    /// Operation options are internally inconsistent or out of range.
+    InvalidOptions,
+    /// The resource is not in a state that permits the operation.
+    InvalidState,
     /// The requested entry does not exist.
     NotFound,
     /// The requested destination already exists.
     AlreadyExists,
+    /// A path component expected to be a directory is not a directory.
+    NotDirectory,
+    /// An operation expected a file but found a directory.
+    IsDirectory,
     /// Source and destination entry kinds conflict.
     TypeConflict,
     /// The operating system denied the operation.
@@ -29,6 +37,8 @@ pub enum LocalFileErrorKind {
     RequirementNotMet,
     /// A configured or operating-system resource limit was reached.
     ResourceLimit,
+    /// Native metadata or stored data failed structural validation.
+    DataCorruption,
     /// Publication did not complete.
     PublicationIncomplete,
     /// The final namespace state cannot be determined safely.

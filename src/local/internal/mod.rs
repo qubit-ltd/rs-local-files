@@ -128,7 +128,10 @@ pub(crate) use rooted_file_io::{
 };
 #[cfg(unix)]
 pub(crate) use rooted_namespace_io::{
+    RootedDirectoryReader,
     create_rooted_directory,
+    open_root_directory_reader,
+    open_rooted_directory_reader,
     read_root_directory,
     read_rooted_directory,
     remove_rooted_entry,

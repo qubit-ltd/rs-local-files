@@ -213,17 +213,27 @@ impl LocalFileWriter {
     ///
     /// # Returns
     ///
-    /// An `Aborted` outcome for staging. Append with accepted bytes returns
-    /// `Published` because direct writes cannot be rolled back.
+    /// An `Aborted` lifecycle outcome. Staged cleanup proves the destination
+    /// unchanged; append with accepted bytes records `Published` because
+    /// direct writes cannot be rolled back.
     ///
     /// # Errors
     ///
-    /// Returns `LocalFileError` when staging cleanup or append flush fails.
-    pub fn abort(mut self) -> LocalResult<LocalWriteOutcome> {
+    /// Returns `LocalFileError` when the writer is terminal, staging cleanup
+    /// fails, or append flushing fails. A cleanup failure retains the open
+    /// writer so the caller can retry abort.
+    pub fn abort(&mut self) -> LocalResult<LocalWriteOutcome> {
+        if self.state != LocalWriterState::Open {
+            return Err(writer_state_error(
+                &self.diagnostic_path,
+                LocalFileOperation::Abort,
+                self.state,
+            ));
+        }
         let previous_failure_state = self.failure_state;
         let backend = self
             .backend
-            .take()
+            .as_mut()
             .expect("open writer must retain one backend");
         match backend {
             backend @ (LocalFileWriterBackend::Staged(_)
@@ -244,7 +254,7 @@ impl LocalFileWriter {
                     self.failure_state,
                 ))
             }
-            LocalFileWriterBackend::Append(mut file) => {
+            LocalFileWriterBackend::Append(file) => {
                 #[cfg(coverage)]
                 let flush_result = if crate::local::coverage_fault_enabled(
                     "writer-append-abort-flush",
@@ -518,7 +528,7 @@ fn writer_io_error(
 ///
 /// # Returns
 ///
-/// An invalid-input error retaining the operation and path.
+/// An invalid-state error retaining the operation and path.
 #[inline]
 fn writer_state_error(
     path: &Path,
@@ -534,6 +544,7 @@ fn writer_state_error(
             format!("local file writer cannot transition from {state:?}"),
         ),
     )
+    .with_kind(LocalFileErrorKind::InvalidState)
 }
 
 /// Adds partial-publication classification to a terminal writer failure.

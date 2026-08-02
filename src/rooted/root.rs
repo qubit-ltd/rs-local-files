@@ -39,7 +39,10 @@ use crate::{
     write,
 };
 
-use super::path;
+use super::{
+    DirectoryReader,
+    path,
+};
 use super::{
     Entry,
     Metadata,
@@ -235,6 +238,15 @@ impl Root {
         }
     }
 
+    /// Opens a lazy reader for immediate children of this root directory.
+    ///
+    /// # Errors
+    ///
+    /// Returns an I/O error when the root descriptor cannot be enumerated.
+    pub(crate) fn open_root_dir_reader(&self) -> Result<DirectoryReader> {
+        DirectoryReader::open_root(&self.directory, &self.path)
+    }
+
     /// Lists immediate children of a descendant directory.
     ///
     /// # Errors
@@ -276,6 +288,16 @@ impl Root {
                 "descriptor-relative local roots are unsupported on this platform",
             ))
         }
+    }
+
+    /// Opens a lazy reader for immediate children of a descendant directory.
+    ///
+    /// # Errors
+    ///
+    /// Returns an I/O error when secure traversal or directory enumeration
+    /// cannot remain beneath this opened root.
+    pub(crate) fn open_dir_reader(&self, path: &path::Path) -> Result<DirectoryReader> {
+        DirectoryReader::open_descendant(&self.directory, &self.path, path)
     }
 
     /// Creates one descendant directory.

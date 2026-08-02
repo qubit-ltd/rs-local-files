@@ -10,11 +10,7 @@
 
 use std::time::Duration;
 
-use crate::{
-    LocalCopyConflictPolicy,
-    LocalCopyTypeConflictPolicy,
-    LocalDurabilityRequirement,
-};
+use crate::{LocalCopyConflictPolicy, LocalCopyTypeConflictPolicy, LocalDurabilityRequirement};
 
 /// Options controlling recursive directory copy behavior.
 ///
@@ -39,23 +35,6 @@ use crate::{
 /// before a failed file commit are not rolled back.
 ///
 /// Construct this non-exhaustive type through [`Self::new`] and its builders.
-/// Builder results must be used:
-///
-/// ```compile_fail
-/// #![deny(unused_must_use)]
-/// use qubit_local_files::copy::Options;
-///
-/// Options::new().follow_symlinks();
-/// ```
-///
-/// Configuration fields are private:
-///
-/// ```compile_fail
-/// use qubit_local_files::copy::Options;
-///
-/// let mut options = Options::default();
-/// options.follow_symlinks = true;
-/// ```
 #[must_use = "directory copy options have no effect unless they are used"]
 #[non_exhaustive]
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -118,10 +97,7 @@ impl LocalCopyDirOptions {
 
     /// Sets the synchronization policy for staged regular files.
     #[inline(always)]
-    pub(crate) const fn with_durability(
-        mut self,
-        durability: LocalDurabilityRequirement,
-    ) -> Self {
+    pub(crate) const fn with_durability(mut self, durability: LocalDurabilityRequirement) -> Self {
         self.durability = durability;
         self
     }
@@ -149,10 +125,7 @@ impl LocalCopyDirOptions {
     /// # Returns
     /// Updated directory copy options.
     #[inline(always)]
-    pub const fn with_conflict(
-        mut self,
-        conflict: LocalCopyConflictPolicy,
-    ) -> Self {
+    pub const fn with_conflict(mut self, conflict: LocalCopyConflictPolicy) -> Self {
         self.conflict = conflict;
         self
     }
@@ -174,10 +147,7 @@ impl LocalCopyDirOptions {
     /// # Returns
     /// Updated directory copy options.
     #[inline(always)]
-    pub const fn with_type_conflict(
-        mut self,
-        type_conflict: LocalCopyTypeConflictPolicy,
-    ) -> Self {
+    pub const fn with_type_conflict(mut self, type_conflict: LocalCopyTypeConflictPolicy) -> Self {
         self.type_conflict = type_conflict;
         self
     }

@@ -9,34 +9,16 @@
 // qubit-style: allow source-test-pair
 
 use std::error::Error;
-use std::fmt::{
-    Display,
-    Formatter,
-    Result as FmtResult,
-};
+use std::fmt::{Display, Formatter, Result as FmtResult};
 use std::io;
-use std::path::{
-    Path,
-    PathBuf,
-};
+use std::path::{Path, PathBuf};
 
-use crate::{
-    LocalCopyDirStage,
-    LocalCopyDirStats,
-};
+use crate::{LocalCopyDirStage, LocalCopyDirStats};
 
 /// Error returned by a recursive directory copy operation.
 ///
 /// Diagnostic state is exposed through read-only accessors so callers cannot
 /// mutate the stage, paths, statistics, or retained errors independently.
-///
-/// ```compile_fail
-/// use qubit_local_files::copy::Error;
-///
-/// fn overwrite_stage(error: Error) {
-///     let _ = error.stage;
-/// }
-/// ```
 #[non_exhaustive]
 #[derive(Debug)]
 pub struct LocalCopyDirError {
@@ -236,10 +218,7 @@ impl Display for LocalCopyDirError {
             write!(formatter, "; staging path '{}'", temporary_path.display())?;
         }
         if let Some(cleanup_error) = self.cleanup_error.as_ref() {
-            return write!(
-                formatter,
-                "; staging cleanup also failed: {cleanup_error}"
-            );
+            return write!(formatter, "; staging cleanup also failed: {cleanup_error}");
         }
         Ok(())
     }

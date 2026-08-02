@@ -152,7 +152,7 @@ fn test_local_temp_file_rejects_zero_creation_attempts() {
     .expect_err("zero creation attempts must be rejected");
 
     assert_eq!(
-        qubit_local_files::LocalFileErrorKind::InvalidInput,
+        qubit_local_files::LocalFileErrorKind::InvalidOptions,
         error.kind()
     );
 }

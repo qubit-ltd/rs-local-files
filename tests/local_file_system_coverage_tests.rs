@@ -182,7 +182,10 @@ fn test_copy_and_rename_reject_missing_sources_and_aliases() {
     let alias_error =
         LocalFileSystem::copy(&target, &target, &LocalCopyOptions::new())
             .expect_err("copying a path onto itself must fail");
-    assert_eq!(LocalFileErrorKind::InvalidInput, alias_error.error().kind());
+    assert_eq!(
+        LocalFileErrorKind::InvalidOptions,
+        alias_error.error().kind(),
+    );
 
     let rename_error = LocalFileSystem::rename(
         &missing,

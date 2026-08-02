@@ -66,7 +66,7 @@ impl LocalFileWriterBackend {
     /// # Panics
     ///
     /// Panics when called for the direct append backend.
-    pub(crate) fn abort_staged(self) -> Result<(), LocalAtomicWriteError> {
+    pub(crate) fn abort_staged(&mut self) -> Result<(), LocalAtomicWriteError> {
         match self {
             Self::Staged(writer) => writer.abort(),
             Self::Rooted(writer) => writer.abort(),

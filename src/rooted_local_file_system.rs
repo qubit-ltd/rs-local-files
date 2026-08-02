@@ -76,6 +76,13 @@ impl RootedLocalFileSystem {
     /// Returns `LocalFileError` when the directory cannot be bound and opened
     /// securely or the current platform lacks rooted primitives.
     pub fn open(path: &Path) -> LocalResult<Self> {
+        if std::fs::metadata(path).is_ok_and(|metadata| !metadata.is_dir()) {
+            return Err(LocalFileError::new(
+                LocalFileErrorKind::NotDirectory,
+                LocalFileOperation::OpenRoot,
+            )
+            .with_path(path.to_path_buf()));
+        }
         let root = crate::rooted::Root::open(path).map_err(|error| {
             LocalFileError::from_io(
                 LocalFileOperation::OpenRoot,
@@ -120,6 +127,11 @@ impl RootedLocalFileSystem {
             options.parent(),
             LocalFileOperation::CreateTempFile,
         )?;
+        validate_rooted_temp_parent(
+            &self.root,
+            &parent,
+            LocalFileOperation::CreateTempFile,
+        )?;
         if options.max_attempts() == 0 {
             return Err(rooted_io_error(
                 LocalFileOperation::CreateTempFile,
@@ -128,7 +140,8 @@ impl RootedLocalFileSystem {
                     io::ErrorKind::InvalidInput,
                     "temporary entry retry count must be greater than zero",
                 ),
-            ));
+            )
+            .with_kind(LocalFileErrorKind::InvalidOptions));
         }
         for _ in 0..options.max_attempts() {
             let candidate = temp_candidate(
@@ -215,6 +228,11 @@ impl RootedLocalFileSystem {
             options.parent(),
             LocalFileOperation::CreateTempDirectory,
         )?;
+        validate_rooted_temp_parent(
+            &self.root,
+            &parent,
+            LocalFileOperation::CreateTempDirectory,
+        )?;
         if options.max_attempts() == 0 {
             return Err(rooted_io_error(
                 LocalFileOperation::CreateTempDirectory,
@@ -223,7 +241,8 @@ impl RootedLocalFileSystem {
                     io::ErrorKind::InvalidInput,
                     "temporary entry retry count must be greater than zero",
                 ),
-            ));
+            )
+            .with_kind(LocalFileErrorKind::InvalidOptions));
         }
         for _ in 0..options.max_attempts() {
             let candidate = temp_candidate(
@@ -1108,6 +1127,33 @@ fn rooted_temp_parent(
     )
 }
 
+/// Confirms that a rooted temporary-resource parent is an existing directory.
+#[inline]
+fn validate_rooted_temp_parent(
+    root: &crate::rooted::Root,
+    parent: &Path,
+    operation: LocalFileOperation,
+) -> LocalResult<()> {
+    if parent.as_os_str().is_empty() {
+        return Ok(());
+    }
+    let relative = crate::local::LocalRelativePath::new(parent).map_err(|error| {
+        rooted_io_error(operation, parent, error)
+            .with_kind(LocalFileErrorKind::InvalidPath)
+    })?;
+    let metadata = root
+        .symlink_metadata(&relative)
+        .map_err(|error| rooted_io_error(operation, parent, error))?;
+    if metadata.kind() != crate::rooted::EntryKind::Directory {
+        return Err(LocalFileError::new(
+            LocalFileErrorKind::NotDirectory,
+            operation,
+        )
+        .with_path(parent.to_path_buf()));
+    }
+    Ok(())
+}
+
 /// Generates one rooted temporary-entry candidate beneath a validated parent.
 ///
 /// # Errors
@@ -1122,7 +1168,15 @@ fn temp_candidate(
 ) -> LocalResult<std::path::PathBuf> {
     crate::local::try_random_file_name("qubit-local-files-", prefix, suffix)
         .map(|name| parent.join(name))
-        .map_err(|error| rooted_io_error(operation, parent, error))
+        .map_err(|error| {
+            let invalid_options = error.kind() == io::ErrorKind::InvalidInput;
+            let error = rooted_io_error(operation, parent, error);
+            if invalid_options {
+                error.with_kind(LocalFileErrorKind::InvalidOptions)
+            } else {
+                error
+            }
+        })
 }
 
 /// Converts descriptor-relative metadata to the unified metadata type.

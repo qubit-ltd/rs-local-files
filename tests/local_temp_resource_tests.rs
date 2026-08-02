@@ -116,7 +116,7 @@ fn test_local_temp_file_persist_rejects_interior_nul_target() {
         .persist(&target)
         .expect_err("interior NUL must be rejected by native no-replace move");
     assert_eq!(
-        qubit_local_files::LocalFileErrorKind::InvalidInput,
+        qubit_local_files::LocalFileErrorKind::InvalidPath,
         error.kind()
     );
     assert_eq!(
