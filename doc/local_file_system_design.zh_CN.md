@@ -480,8 +480,8 @@ Native rename 成功、随后 parent durability 失败时必须返回 `Renamed`�
 - fail-fast 与 collect-errors 模式不能混为隐式行为；
 - symlink、最大深度和句柄预算策略在创建 walker 时固定；mount/device
   边界策略尚未实现，不能视为当前契约；
-- rooted walker 始终从 root authority 派生 child handle，并且在 Unix 上按 entry 流式读取，
-  不为单个目录预先收集完整 `Vec`；
+- rooted walker 始终从 root authority 派生 child handle，并按 entry 流式读取，不为单个
+  目录预先收集完整 `Vec`；
 
 capability 将原子 rename、原子 replace 和临时资源无替换持久化分别建模；adapter 不得用
 单一 no-replace 标志推断全部三项保证。
