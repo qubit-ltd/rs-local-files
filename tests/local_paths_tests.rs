@@ -124,7 +124,7 @@ fn assert_windows_unsupported_absolute_path(path: &Path) {
         .expect_err("unsupported Windows root authority must be rejected");
     assert!(matches!(
         error.kind(),
-        LocalFileErrorKind::Unsupported | LocalFileErrorKind::InvalidInput,
+        LocalFileErrorKind::Unsupported | LocalFileErrorKind::InvalidPath,
     ));
 }
 
@@ -145,7 +145,7 @@ fn test_canonical_relative_components_retain_path_codec_failure() {
     let error = LocalPaths::from_canonical_relative_components(vec!["bad%"])
         .expect_err("malformed percent escape must be rejected");
 
-    assert_eq!(LocalFileErrorKind::InvalidInput, error.kind());
+    assert_eq!(LocalFileErrorKind::InvalidPath, error.kind());
     assert_eq!(LocalFileOperation::ComposePath, error.operation());
     assert!(matches!(
         error.source_kind(),
@@ -196,7 +196,7 @@ fn test_local_paths_is_lexically_within_rejects_dot_components() {
     )
     .expect_err("parent traversal must be rejected");
 
-    assert_eq!(LocalFileErrorKind::InvalidInput, error.kind());
+    assert_eq!(LocalFileErrorKind::InvalidPath, error.kind());
     assert_eq!(LocalFileOperation::ComposePath, error.operation());
 }
 
@@ -217,6 +217,6 @@ fn test_local_file_names_rejects_reserved_portable_name() {
     let error = LocalFileNames::validate_portable(OsStr::new("CON.txt"))
         .expect_err("Windows reserved names must be rejected");
 
-    assert_eq!(LocalFileErrorKind::InvalidInput, error.kind());
+    assert_eq!(LocalFileErrorKind::InvalidPath, error.kind());
     assert_eq!(LocalFileOperation::ValidateName, error.operation());
 }

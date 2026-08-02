@@ -60,14 +60,25 @@ fn test_local_file_error_classifies_io_and_retains_context() {
             LocalFileErrorKind::AlreadyExists,
         ),
         (
+            io::ErrorKind::NotADirectory,
+            LocalFileErrorKind::NotDirectory,
+        ),
+        (
+            io::ErrorKind::IsADirectory,
+            LocalFileErrorKind::IsDirectory,
+        ),
+        (
             io::ErrorKind::PermissionDenied,
             LocalFileErrorKind::PermissionDenied,
         ),
         (
             io::ErrorKind::InvalidInput,
-            LocalFileErrorKind::InvalidInput,
+            LocalFileErrorKind::InvalidPath,
         ),
-        (io::ErrorKind::InvalidData, LocalFileErrorKind::InvalidInput),
+        (
+            io::ErrorKind::InvalidData,
+            LocalFileErrorKind::DataCorruption,
+        ),
         (io::ErrorKind::Unsupported, LocalFileErrorKind::Unsupported),
         (
             io::ErrorKind::OutOfMemory,
@@ -249,7 +260,7 @@ fn test_native_file_name_validation_rejects_non_utf8_component() {
 
     let error = LocalFileNames::validate_portable(OsStr::from_bytes(b"\xff"))
         .expect_err("non-UTF-8 names cannot satisfy portable-text rules");
-    assert_eq!(LocalFileErrorKind::InvalidInput, error.kind());
+    assert_eq!(LocalFileErrorKind::InvalidPath, error.kind());
     assert_eq!(LocalFileOperation::ValidateName, error.operation());
 }
 

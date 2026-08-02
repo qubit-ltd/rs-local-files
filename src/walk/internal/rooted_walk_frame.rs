@@ -8,18 +8,15 @@
 // qubit-style: allow source-test-pair
 // Covered by rooted walker integration tests.
 
-use std::{
-    path::PathBuf,
-    vec::IntoIter,
-};
+use std::path::PathBuf;
 
-use crate::rooted::Entry;
+use crate::rooted::DirectoryReader;
 
 /// One deferred immediate rooted directory listing in a lazy tree walk.
 #[derive(Debug)]
 pub(in crate::walk) struct RootedWalkFrame {
-    /// Remaining immediate entries, initialized on the first iteration step.
-    pub(in crate::walk) entries: Option<IntoIter<Entry>>,
+    /// Open immediate-entry reader, initialized on the first iteration step.
+    pub(in crate::walk) reader: Option<DirectoryReader>,
     /// Authority-relative path of the listed directory.
     pub(in crate::walk) authority_parent: PathBuf,
     /// Requested-list-root-relative path of the listed directory.

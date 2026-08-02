@@ -234,7 +234,7 @@ fn test_rooted_local_file_system_rejects_regular_file_anchor() {
     let error = RootedLocalFileSystem::open(&file)
         .expect_err("regular files cannot become rooted authorities");
 
-    assert_eq!(LocalFileErrorKind::InvalidInput, error.kind());
+    assert_eq!(LocalFileErrorKind::NotDirectory, error.kind());
     assert_eq!(
         qubit_local_files::LocalFileOperation::OpenRoot,
         error.operation()
@@ -282,14 +282,14 @@ fn test_rooted_local_file_system_temp_resources_use_descendant_parent() {
     let error = rooted
         .create_temp_file(&LocalTempFileOptions::new().with_prefix("bad/name"))
         .expect_err("path separator in temporary prefix must be rejected");
-    assert_eq!(LocalFileErrorKind::InvalidInput, error.kind());
+    assert_eq!(LocalFileErrorKind::InvalidOptions, error.kind());
 
     let retry_error = rooted
         .create_temp_directory(
             &LocalTempDirectoryOptions::new().with_max_attempts(0),
         )
         .expect_err("zero rooted directory retry budget must be rejected");
-    assert_eq!(LocalFileErrorKind::InvalidInput, retry_error.kind());
+    assert_eq!(LocalFileErrorKind::InvalidOptions, retry_error.kind());
 }
 
 /// Verifies rooted deletion and rename APIs cover successful, accepted-missing,
@@ -518,11 +518,11 @@ fn test_rooted_local_file_system_rejects_incompatible_entry_policies() {
     let delete_file_error = rooted
         .delete_file(Path::new("directory"), &LocalDeleteOptions::new())
         .expect_err("rooted directories cannot be deleted as files");
-    assert_eq!(LocalFileErrorKind::Io, delete_file_error.kind());
+    assert_eq!(LocalFileErrorKind::IsDirectory, delete_file_error.kind());
     let delete_directory_error = rooted
         .delete_directory(Path::new("file"), &LocalDeleteOptions::new())
         .expect_err("rooted files cannot be deleted as directories");
-    assert_eq!(LocalFileErrorKind::Io, delete_directory_error.kind());
+    assert_eq!(LocalFileErrorKind::NotDirectory, delete_directory_error.kind());
     let non_recursive_error = rooted
         .delete_directory(Path::new("directory"), &LocalDeleteOptions::new())
         .expect_err("non-empty rooted directory requires recursive deletion");
@@ -881,7 +881,7 @@ fn test_rooted_local_file_system_abort_reports_missing_staging_file() {
     let target = directory.path().join("payload");
     let rooted = RootedLocalFileSystem::open(directory.path())
         .expect("root authority should open");
-    let writer = rooted
+    let mut writer = rooted
         .open_writer(
             Path::new("payload"),
             &LocalWriteOptions::new(LocalWriteMode::CreateNew),
@@ -925,7 +925,7 @@ fn test_rooted_local_file_system_rejects_invalid_preflight_operands() {
             &LocalRenameOptions::new(),
         )
         .expect_err("rooted rename must reject lexical source escape");
-    assert_eq!(LocalFileErrorKind::InvalidInput, rename.error().kind());
+    assert_eq!(LocalFileErrorKind::InvalidPath, rename.error().kind());
     assert_eq!(
         qubit_local_files::LocalRenameFailureState::Unchanged,
         rename.state(),
@@ -1065,7 +1065,7 @@ fn test_rooted_local_file_system_rejects_invalid_generated_names_and_targets() {
         .expect_err(
             "rooted temporary file suffix must be a single name fragment",
         );
-    assert_eq!(LocalFileErrorKind::InvalidInput, temporary_file.kind());
+    assert_eq!(LocalFileErrorKind::InvalidOptions, temporary_file.kind());
     let temporary_directory = rooted
         .create_temp_directory(
             &LocalTempDirectoryOptions::new().with_prefix("invalid/"),
@@ -1073,19 +1073,22 @@ fn test_rooted_local_file_system_rejects_invalid_generated_names_and_targets() {
         .expect_err(
             "rooted temporary directory prefix must be a single name fragment",
         );
-    assert_eq!(LocalFileErrorKind::InvalidInput, temporary_directory.kind());
+    assert_eq!(
+        LocalFileErrorKind::InvalidOptions,
+        temporary_directory.kind(),
+    );
 
     let list = rooted
         .list(Path::new("../escape"), &LocalListOptions::new())
         .expect_err("rooted list must reject lexical escape paths");
-    assert_eq!(LocalFileErrorKind::InvalidInput, list.kind());
+    assert_eq!(LocalFileErrorKind::InvalidPath, list.kind());
     let writer = rooted
         .open_writer(
             Path::new("../escape"),
             &LocalWriteOptions::new(LocalWriteMode::CreateNew),
         )
         .expect_err("rooted writer must reject lexical escape paths");
-    assert_eq!(LocalFileErrorKind::InvalidInput, writer.kind());
+    assert_eq!(LocalFileErrorKind::InvalidPath, writer.kind());
 
     let copy = rooted
         .copy(
@@ -1094,7 +1097,7 @@ fn test_rooted_local_file_system_rejects_invalid_generated_names_and_targets() {
             &LocalCopyOptions::new(),
         )
         .expect_err("rooted copy must reject lexical target escape");
-    assert_eq!(LocalFileErrorKind::InvalidInput, copy.error().kind());
+    assert_eq!(LocalFileErrorKind::InvalidPath, copy.error().kind());
     assert_eq!(
         qubit_local_files::LocalCopyFailureState::Unchanged,
         copy.state(),
@@ -1106,7 +1109,7 @@ fn test_rooted_local_file_system_rejects_invalid_generated_names_and_targets() {
             &LocalRenameOptions::new(),
         )
         .expect_err("rooted rename must reject lexical target escape");
-    assert_eq!(LocalFileErrorKind::InvalidInput, rename.error().kind());
+    assert_eq!(LocalFileErrorKind::InvalidPath, rename.error().kind());
     assert_eq!(
         qubit_local_files::LocalRenameFailureState::Unchanged,
         rename.state(),

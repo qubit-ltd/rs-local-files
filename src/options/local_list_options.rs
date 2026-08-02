@@ -11,9 +11,11 @@
 use super::LocalWalkErrorPolicy;
 
 /// Options fixed for the lifetime of a local directory walker.
-#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
 #[must_use = "list options have no effect unless they are used"]
 pub struct LocalListOptions {
+    /// Maximum directory handles retained by a recursive walker.
+    max_open_directories: usize,
     /// Whether child directories should be traversed.
     recursive: bool,
     /// Whether symbolic links to directories should be traversed.
@@ -30,6 +32,7 @@ impl LocalListOptions {
     #[inline]
     pub const fn new() -> Self {
         Self {
+            max_open_directories: 64,
             recursive: false,
             follow_symlinks: false,
             max_depth: None,
@@ -56,6 +59,13 @@ impl LocalListOptions {
     #[inline(always)]
     pub const fn max_depth(&self) -> Option<usize> {
         self.max_depth
+    }
+
+    /// Returns the maximum number of concurrently open directory handles.
+    #[must_use]
+    #[inline(always)]
+    pub const fn max_open_directories(&self) -> usize {
+        self.max_open_directories
     }
 
     /// Returns the policy applied after an iteration error.
@@ -89,13 +99,29 @@ impl LocalListOptions {
         self
     }
 
+    /// Sets the maximum number of concurrently open directory handles.
+    #[inline(always)]
+    pub const fn with_max_open_directories(mut self, max_open_directories: usize) -> Self {
+        self.max_open_directories = if max_open_directories == 0 {
+            1
+        } else {
+            max_open_directories
+        };
+        self
+    }
+
     /// Sets the policy applied after an iteration error.
     #[inline(always)]
-    pub const fn with_error_policy(
-        mut self,
-        error_policy: LocalWalkErrorPolicy,
-    ) -> Self {
+    pub const fn with_error_policy(mut self, error_policy: LocalWalkErrorPolicy) -> Self {
         self.error_policy = error_policy;
         self
+    }
+}
+
+impl Default for LocalListOptions {
+    /// Returns the conservative listing policy.
+    #[inline]
+    fn default() -> Self {
+        Self::new()
     }
 }

@@ -251,7 +251,7 @@ fn test_rooted_local_file_system_rejects_zero_temp_attempts() {
     let file_error = rooted
         .create_temp_file(&LocalTempFileOptions::new().with_max_attempts(0))
         .expect_err("zero file retry budget must be rejected");
-    assert_eq!(LocalFileErrorKind::InvalidInput, file_error.kind());
+    assert_eq!(LocalFileErrorKind::InvalidOptions, file_error.kind());
 }
 
 /// Verifies rooted listing refuses symlink following because
@@ -350,7 +350,7 @@ fn test_rooted_local_file_system_reports_changed_child_during_recursive_list() {
         .next()
         .expect("deferred child descent should yield an error")
         .expect_err("recursive descent into the changed child must fail");
-    assert_eq!(LocalFileErrorKind::Io, error.kind());
+    assert_eq!(LocalFileErrorKind::NotDirectory, error.kind());
     assert_eq!(Some(Path::new("child")), error.path());
 }
 
@@ -421,15 +421,15 @@ fn test_rooted_local_file_system_rejects_lexical_escape_across_operations() {
             &LocalCreateDirectoryOptions::new(),
         )
         .expect_err("rooted directory creation must reject lexical escapes");
-    assert_eq!(LocalFileErrorKind::InvalidInput, create_error.kind());
+    assert_eq!(LocalFileErrorKind::InvalidPath, create_error.kind());
     let delete_error = rooted
         .delete_file(Path::new("../escape"), &LocalDeleteOptions::new())
         .expect_err("rooted file deletion must reject lexical escapes");
-    assert_eq!(LocalFileErrorKind::InvalidInput, delete_error.kind());
+    assert_eq!(LocalFileErrorKind::InvalidPath, delete_error.kind());
     let temporary_error = rooted
         .create_temp_file(
             &LocalTempFileOptions::new().with_parent(Path::new("../escape")),
         )
         .expect_err("rooted temporary parents must reject lexical escapes");
-    assert_eq!(LocalFileErrorKind::InvalidInput, temporary_error.kind());
+    assert_eq!(LocalFileErrorKind::InvalidPath, temporary_error.kind());
 }

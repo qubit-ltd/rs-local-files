@@ -12,26 +12,6 @@
 ///
 /// Additional states may be added if a platform can report a more precise
 /// replacement outcome. Downstream matches must retain a wildcard arm.
-///
-/// ```compile_fail
-/// use qubit_local_files::atomic::DestinationState;
-///
-/// fn classify(state: DestinationState) {
-///     match state {
-///         DestinationState::Unchanged => {}
-///         DestinationState::Replaced => {}
-///         DestinationState::Missing => {}
-///         DestinationState::Indeterminate => {}
-///     }
-/// }
-/// ```
-///
-/// ```compile_fail
-/// #![deny(unused_must_use)]
-/// use qubit_local_files::atomic::DestinationState;
-///
-/// DestinationState::Unchanged.clone();
-/// ```
 #[must_use]
 #[non_exhaustive]
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]

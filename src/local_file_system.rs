@@ -633,6 +633,10 @@ impl LocalFileSystem {
             .parent()
             .map_or_else(std::env::temp_dir, Path::to_path_buf);
         let parent = LocalPaths::bind_host_path(&parent)?;
+        validate_host_temp_parent(
+            &parent,
+            LocalFileOperation::CreateTempFile,
+        )?;
         crate::local::create_temp_file_in_dir(
             &parent,
             options.prefix(),
@@ -641,12 +645,18 @@ impl LocalFileSystem {
         )
         .and_then(|(path, file)| LocalTempFile::host(path, file))
         .map_err(|error| {
-            LocalFileError::from_io(
+            let invalid_options = error.kind() == io::ErrorKind::InvalidInput;
+            let error = LocalFileError::from_io(
                 LocalFileOperation::CreateTempFile,
                 Some(parent),
                 None,
                 error,
-            )
+            );
+            if invalid_options {
+                error.with_kind(LocalFileErrorKind::InvalidOptions)
+            } else {
+                error
+            }
         })
     }
 
@@ -673,6 +683,10 @@ impl LocalFileSystem {
             .parent()
             .map_or_else(std::env::temp_dir, Path::to_path_buf);
         let parent = LocalPaths::bind_host_path(&parent)?;
+        validate_host_temp_parent(
+            &parent,
+            LocalFileOperation::CreateTempDirectory,
+        )?;
         crate::local::create_temp_dir_in_dir_with_affixes(
             &parent,
             options.prefix(),
@@ -681,12 +695,18 @@ impl LocalFileSystem {
         )
         .and_then(LocalTempDirectory::host)
         .map_err(|error| {
-            LocalFileError::from_io(
+            let invalid_options = error.kind() == io::ErrorKind::InvalidInput;
+            let error = LocalFileError::from_io(
                 LocalFileOperation::CreateTempDirectory,
                 Some(parent),
                 None,
                 error,
-            )
+            );
+            if invalid_options {
+                error.with_kind(LocalFileErrorKind::InvalidOptions)
+            } else {
+                error
+            }
         })
     }
 
@@ -1350,16 +1370,46 @@ fn windows_file_identity(path: &Path) -> io::Result<(u32, u64)> {
 ///
 /// # Returns
 ///
-/// Invalid-input copy error.
+/// Invalid-options copy error.
 #[must_use]
 #[inline]
 fn copy_alias_error(source: &Path, target: &Path) -> LocalFileError {
     LocalFileError::new(
-        LocalFileErrorKind::InvalidInput,
+        LocalFileErrorKind::InvalidOptions,
         LocalFileOperation::Copy,
     )
     .with_path(source.to_path_buf())
     .with_target(target.to_path_buf())
+}
+
+/// Confirms that a host temporary-resource parent is an existing directory.
+#[inline]
+fn validate_host_temp_parent(
+    parent: &Path,
+    operation: LocalFileOperation,
+) -> LocalResult<()> {
+    let metadata = match fs::metadata(parent) {
+        Ok(metadata) => metadata,
+        Err(error) if error.kind() == io::ErrorKind::NotFound => {
+            return Ok(());
+        }
+        Err(error) => {
+            return Err(LocalFileError::from_io(
+                operation,
+                Some(parent.to_path_buf()),
+                None,
+                error,
+            ));
+        }
+    };
+    if !metadata.is_dir() {
+        return Err(LocalFileError::new(
+            LocalFileErrorKind::NotDirectory,
+            operation,
+        )
+        .with_path(parent.to_path_buf()));
+    }
+    Ok(())
 }
 
 /// Converts a pipeline failure into a lossless public copy failure.

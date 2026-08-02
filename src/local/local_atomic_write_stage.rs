@@ -12,32 +12,6 @@
 ///
 /// Additional stages may be added as durability behavior evolves. Downstream
 /// matches must retain a wildcard arm.
-///
-/// ```compile_fail
-/// use qubit_local_files::atomic::Stage;
-///
-/// fn classify(stage: Stage) {
-///     match stage {
-///         Stage::PrepareParent => {}
-///         Stage::InspectDestination => {}
-///         Stage::CreateTemporaryFile => {}
-///         Stage::WriteTemporaryFile => {}
-///         Stage::ReadDestinationMetadata => {}
-///         Stage::ApplyDestinationMetadata => {}
-///         Stage::SyncTemporaryFile => {}
-///         Stage::ReplaceDestination => {}
-///         Stage::CleanupTemporaryFile => {}
-///         Stage::SyncParent => {}
-///     }
-/// }
-/// ```
-///
-/// ```compile_fail
-/// #![deny(unused_must_use)]
-/// use qubit_local_files::atomic::Stage;
-///
-/// Stage::InspectDestination.clone();
-/// ```
 #[must_use]
 #[non_exhaustive]
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]

@@ -79,7 +79,7 @@ impl LocalFileNames {
     pub fn validate_portable(name: &OsStr) -> LocalResult<()> {
         let Some(name) = name.to_str() else {
             return Err(LocalFileError::new(
-                LocalFileErrorKind::InvalidInput,
+                LocalFileErrorKind::InvalidPath,
                 LocalFileOperation::ValidateName,
             ));
         };

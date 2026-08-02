@@ -121,7 +121,7 @@ fn test_local_file_system_copy_rejects_hard_link_alias() {
     )
     .expect_err("copying onto a hard-link alias must be rejected");
 
-    assert_eq!(LocalFileErrorKind::InvalidInput, error.error().kind());
+    assert_eq!(LocalFileErrorKind::InvalidOptions, error.error().kind());
     assert_eq!(
         b"payload",
         fs::read(&source)

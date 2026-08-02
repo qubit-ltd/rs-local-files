@@ -141,7 +141,7 @@ fn test_local_directory_walker_follow_mode_traverses_links_and_rejects_cycles()
     .find_map(Result::err)
     .expect("cycle detection should return a structured error");
 
-    assert_eq!(LocalFileErrorKind::InvalidInput, error.kind());
+    assert_eq!(LocalFileErrorKind::InvalidPath, error.kind());
 }
 
 /// Verifies follow-mode reports the dangling-link metadata failure at the

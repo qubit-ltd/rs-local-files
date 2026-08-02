@@ -8,6 +8,7 @@
 //! Descriptor-relative local filesystem operations.
 
 mod copy;
+mod directory_reader;
 mod entry;
 mod entry_kind;
 mod metadata;
@@ -22,3 +23,5 @@ pub use metadata::Metadata;
 pub use path::Path;
 pub use permissions::Permissions;
 pub use root::Root;
+
+pub(crate) use directory_reader::DirectoryReader;
