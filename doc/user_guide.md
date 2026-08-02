@@ -73,9 +73,9 @@ returned resource/error where recovery is required.
 `copy` selects file or directory behavior from source metadata. Use
 `with_file_source()` or `with_tree_source()` when the source kind must be
 explicit; `source_mode()` reports the selected mode. Its options separately
-control target conflict, type conflict, metadata, symbolic links, device
-boundaries, atomicity, and durability. Unsupported required
-guarantees are rejected before destructive changes. Self-copy and hard-link
+control target conflict, type conflict, metadata, symbolic links, atomicity,
+and durability. Mount and device boundaries are not part of the copy policy.
+Unsupported required guarantees are rejected before destructive changes. Self-copy and hard-link
 aliases are rejected; overwriting a symbolic-link target replaces that entry
 rather than following it.
 
@@ -107,10 +107,12 @@ happened”.
 advances directories on demand; maximum depth, symbolic-link policy, and a
 64-handle default budget are fixed at creation. Rooted enumeration also streams
 each directory instead of first collecting it into a vector. Exceeding the
-configured budget returns `ResourceLimit`, and dropping it only releases handles.
+configured budget returns `ResourceLimit`; a zero handle budget is invalid and
+returns `InvalidOptions`. Dropping it only releases handles.
 
 Temporary files and directories own cleanup while armed. Dropping them performs
-best-effort cleanup; `keep` disables cleanup and returns a stable absolute path.
+best-effort cleanup; `keep` disables cleanup and returns an authority-local path
+(absolute for Host and relative to the opened root for Rooted).
 Persistence failures retain the resource so the caller can retry, inspect,
 keep, or explicitly clean it. Prefixes and suffixes are checked before entry
 creation: native separators, NUL, and portable reserved-name violations do not
