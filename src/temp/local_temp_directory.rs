@@ -23,6 +23,8 @@ use std::{
 use log::warn;
 
 use crate::{
+    LocalFileError,
+    LocalFileOperation,
     LocalPersistError,
     LocalPersistFailureState,
     LocalPersistMethod,
@@ -30,8 +32,6 @@ use crate::{
     LocalPersistOutcome,
     LocalPersistStage,
     LocalRelativePath,
-    LocalFileError,
-    LocalFileOperation,
     LocalResult,
 };
 
