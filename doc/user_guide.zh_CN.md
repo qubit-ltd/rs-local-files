@@ -64,7 +64,7 @@ assert_eq!(text, r#"{"complete":true}"#);
 
 `copy` 根据源元数据选择文件或目录行为。需要固定源类型时使用 `with_file_source()` 或
 `with_tree_source()`，并通过 `source_mode()` 读取模式。其选项分别控制目标冲突、类型冲突、
-元数据、符号链接、设备边界、原子性和耐久性。无法满足的要求保证会在破坏性变更前被拒绝。
+元数据、符号链接、原子性和耐久性；复制策略不包含 mount 或 device 边界。无法满足的要求保证会在破坏性变更前被拒绝。
 自复制和硬链接别名会被拒绝；覆盖符号链接目标时会替换该条目而不跟随它。
 
 ```rust,no_run
@@ -92,10 +92,10 @@ match copy(
 
 `list` 和 `LocalFileSystem::list` 返回惰性的 `LocalDirectoryWalker`。它按需打开和推进目录；最大
 深度、符号链接策略与默认 64 个句柄的预算在创建时固定。超过预算会返回
-`ResourceLimit`，drop 只释放句柄。
+`ResourceLimit`；零句柄预算无效并返回 `InvalidOptions`，drop 只释放句柄。
 
 临时文件和目录在仍处于 armed 状态时拥有清理责任。drop 会尽力清理；`keep` 会关闭清理并
-返回稳定的绝对路径。持久化失败会保留资源，调用方可重试、检查、保留或显式清理。创建前会
+返回 authority-local 路径（Host 为绝对路径，Rooted 为相对于已打开 root 的相对路径）。持久化失败会保留资源，调用方可重试、检查、保留或显式清理。创建前会
 校验前缀和后缀：原生分隔符、NUL 与便携保留名称不会留下条目。
 
 ## Rooted 工作区

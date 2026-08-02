@@ -436,8 +436,8 @@ Native rename 成功、随后 parent durability 失败时必须返回 `Renamed`�
 - 遍历顺序由 option 定义或明确为 unspecified；
 - 遇到错误时返回带 offending path 的结构化错误；
 - fail-fast 与 collect-errors 模式不能混为隐式行为；
-- symlink、最大深度和句柄预算策略在创建 walker 时固定；mount/device
-  边界策略尚未实现，不能视为当前契约；
+- symlink、最大深度和句柄预算策略在创建 walker 时固定；当前契约不包含
+  mount/device 边界检测；
 - rooted walker 始终从 root authority 派生 child handle，并按 entry 流式读取，不为单个
   目录预先收集完整 `Vec`；
 
@@ -658,7 +658,7 @@ string。
 - 相对路径在操作开始时绑定；
 - source/target self-copy 与 hard-link alias；
 - overwrite 不跟随 target symlink；
-- recursive copy/walk 的 symlink、cycle、depth 和 device 边界；
+- recursive copy/walk 的 symlink、cycle 和 depth；mount/device 边界不属于当前契约；
 - rooted path lexical escape 与 symlink/reparse escape；
 - root 诊断路径被 rename 后 authority 仍稳定；
 - writer 每个 commit/abort failure state；
