@@ -90,7 +90,8 @@ match LocalFileSystem::copy(
 ## 遍历和临时资源
 
 `LocalFileSystem::list` 返回惰性的 `LocalDirectoryWalker`。它按需打开和推进目录；最大
-深度与符号链接策略在创建时固定，drop 只释放句柄。
+深度、符号链接策略与默认 64 个句柄的预算在创建时固定。超过预算会返回
+`ResourceLimit`，drop 只释放句柄。
 
 临时文件和目录在仍处于 armed 状态时拥有清理责任。drop 会尽力清理；`keep` 会关闭清理并
 返回稳定的绝对路径。持久化失败会保留资源，调用方可重试、检查、保留或显式清理。创建前会
@@ -110,6 +111,10 @@ for entry in walker {
 }
 # Ok::<(), Box<dyn std::error::Error>>(())
 ```
+
+walker 会按需打开并推进目录；最大深度、符号链接策略和默认 64 个目录句柄的预算会在创建时
+固定。超过预算返回 `ResourceLimit`。在 Unix 上，rooted walker 还会逐项读取目录，避免先将
+单个目录完整收集到 `Vec` 中。
 
 rooted 路径必须是相对后代。绝对路径、平台前缀、`.`、`..` 和中间符号链接都会被拒绝。诊断
 用根路径不是权限本身：`open` 之后重命名它不会重定向已打开的资源。词法包含关系可用于早期
