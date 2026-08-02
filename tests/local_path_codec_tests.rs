@@ -36,6 +36,23 @@ fn test_decode_preserves_unicode_and_escapes_percent_and_control_bytes() {
     );
 }
 
+/// Verifies ordinary Unix canonical text uses borrowed codec results.
+#[cfg(unix)]
+#[test]
+fn test_unix_plain_canonical_text_uses_borrowed_results() {
+    use std::borrow::Cow;
+
+    let text = "ordinary-unicode-文档";
+    assert!(matches!(
+        LocalPathCodec::from_canonical_text(text),
+        Ok(Cow::Borrowed(_)),
+    ));
+    assert!(matches!(
+        LocalPathCodec::to_canonical_text(OsStr::new(text)),
+        Ok(Cow::Borrowed(_)),
+    ));
+}
+
 // Verifies every non-NUL Unix byte sequence round-trips through canonical
 // text without losing native representation.
 #[cfg(unix)]

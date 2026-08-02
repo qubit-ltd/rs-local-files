@@ -14,6 +14,7 @@ use std::{
 };
 
 use qubit_local_files::{
+    LocalFileErrorKind,
     LocalFileSystem,
     LocalPersistFailureState,
     LocalPersistOptions,
@@ -214,7 +215,7 @@ fn test_local_temp_directory_cleanup_rejects_replaced_entry() {
     let error = temporary
         .cleanup()
         .expect_err("cleanup must reject the replacement directory");
-    assert_eq!(std::io::ErrorKind::InvalidInput, error.kind());
+    assert_eq!(LocalFileErrorKind::InvalidPath, error.kind());
     assert!(path.is_dir());
 }
 

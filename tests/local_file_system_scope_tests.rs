@@ -43,8 +43,7 @@ fn test_local_file_system_host_matches_convenience_functions() {
     assert_eq!(convenience.len(), instance.len());
 }
 
-/// Verifies Rooted scope exposes only a diagnostic root and interprets
-/// operation paths relative to its opened authority.
+/// Verifies Rooted scope and its separate diagnostic root accessor.
 #[test]
 fn test_local_file_system_rooted_reports_scope_and_reads_relative_path() {
     let directory = tempdir().expect("temporary directory should be created");
@@ -54,11 +53,10 @@ fn test_local_file_system_rooted_reports_scope_and_reads_relative_path() {
         .expect("Rooted filesystem should open");
 
     assert_eq!(
-        LocalFileSystemScope::Rooted {
-            diagnostic_root: directory.path(),
-        },
+        LocalFileSystemScope::Rooted,
         filesystem.scope(),
     );
+    assert_eq!(Some(directory.path()), filesystem.diagnostic_root());
     assert_eq!(
         LocalFileKind::File,
         filesystem

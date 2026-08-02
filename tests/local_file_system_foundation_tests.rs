@@ -29,6 +29,17 @@ fn test_local_file_system_capabilities_report_unknown_path_limit() {
     assert!(capabilities.path_limit().is_none());
 }
 
+/// Verifies the host snapshot only advertises native no-replace operations
+/// implemented by the host backend on this target.
+#[test]
+fn test_host_capabilities_match_host_no_replace_backend() {
+    let capabilities = LocalFileSystem::host().capabilities();
+    #[cfg(any(target_os = "linux", target_os = "macos", windows))]
+    assert!(capabilities.atomic_rename_implemented());
+    #[cfg(not(any(target_os = "linux", target_os = "macos", windows)))]
+    assert!(!capabilities.atomic_rename_implemented());
+}
+
 /// Verifies that generated names are portable single path components.
 #[test]
 fn test_local_file_names_generate_random_portable_components() {

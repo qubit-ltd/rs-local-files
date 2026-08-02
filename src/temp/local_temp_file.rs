@@ -35,6 +35,9 @@ use crate::{
     LocalPersistOutcome,
     LocalPersistStage,
     LocalRelativePath,
+    LocalFileError,
+    LocalFileOperation,
+    LocalResult,
 };
 
 use super::internal::{
@@ -122,10 +125,24 @@ impl LocalTempFile {
     }
 
     /// Removes the entry through the authority retained at creation time.
-    pub fn cleanup(&mut self) -> Result<()> {
+    pub fn cleanup(&mut self) -> LocalResult<()> {
         self.close();
-        self.ensure_cleanup_safe()?;
-        self.remove()?;
+        self.ensure_cleanup_safe().map_err(|error| {
+            LocalFileError::from_io(
+                LocalFileOperation::Cleanup,
+                Some(self.path.clone()),
+                None,
+                error,
+            )
+        })?;
+        self.remove().map_err(|error| {
+            LocalFileError::from_io(
+                LocalFileOperation::Cleanup,
+                Some(self.path.clone()),
+                None,
+                error,
+            )
+        })?;
         self.state = LocalTempResourceState::Released;
         Ok(())
     }
