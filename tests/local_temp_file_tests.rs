@@ -20,6 +20,7 @@ use std::{
 };
 
 use qubit_local_files::{
+    LocalFileErrorKind,
     LocalFileSystem,
     LocalPersistFailureState,
     LocalPersistMethod,
@@ -573,7 +574,7 @@ fn test_local_temp_file_cleanup_rejects_replaced_entry() {
     let error = temporary
         .cleanup()
         .expect_err("cleanup must reject the replacement entry");
-    assert_eq!(std::io::ErrorKind::InvalidInput, error.kind());
+    assert_eq!(LocalFileErrorKind::InvalidPath, error.kind());
     assert_eq!(
         fs::read(&path).expect("replacement must remain"),
         b"restored"
