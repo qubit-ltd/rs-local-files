@@ -90,12 +90,20 @@ impl LocalFileSystem {
 
     /// Returns the namespace in which this filesystem interprets paths.
     #[inline(always)]
-    pub fn scope(&self) -> LocalFileSystemScope<'_> {
+    pub fn scope(&self) -> LocalFileSystemScope {
         match &self.namespace {
             LocalNamespace::Host => LocalFileSystemScope::Host,
-            LocalNamespace::Rooted(rooted) => LocalFileSystemScope::Rooted {
-                diagnostic_root: rooted.diagnostic_path(),
-            },
+            LocalNamespace::Rooted(_) => LocalFileSystemScope::Rooted,
+        }
+    }
+
+    /// Returns the non-authoritative root path retained for diagnostics.
+    #[must_use]
+    #[inline(always)]
+    pub fn diagnostic_root(&self) -> Option<&Path> {
+        match &self.namespace {
+            LocalNamespace::Host => None,
+            LocalNamespace::Rooted(rooted) => Some(rooted.diagnostic_path()),
         }
     }
 
