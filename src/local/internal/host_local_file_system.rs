@@ -196,6 +196,7 @@ impl HostLocalFileSystem {
                 LocalFileErrorKind::RequirementNotMet,
                 LocalFileOperation::OpenWriter,
             )
+            .with_reason("append mode cannot provide required atomic publication")
             .with_path(bound));
         }
         if options.mode() != LocalWriteMode::Append
@@ -206,6 +207,7 @@ impl HostLocalFileSystem {
                 LocalFileErrorKind::RequirementNotMet,
                 LocalFileOperation::OpenWriter,
             )
+            .with_reason("required directory durability is unavailable on this host")
             .with_path(bound));
         }
         if options.creates_parent()
@@ -394,6 +396,7 @@ impl HostLocalFileSystem {
                         LocalFileErrorKind::RequirementNotMet,
                         LocalFileOperation::Copy,
                     )
+                    .with_reason("copy source is a directory but file mode was required")
                     .with_path(source)
                     .with_target(target),
                 ));
@@ -408,6 +411,7 @@ impl HostLocalFileSystem {
                         LocalFileErrorKind::RequirementNotMet,
                         LocalFileOperation::Copy,
                     )
+                    .with_reason("required directory copy guarantees are unavailable on this host")
                     .with_path(source)
                     .with_target(target),
                 ));
@@ -449,6 +453,7 @@ impl HostLocalFileSystem {
                     LocalFileErrorKind::RequirementNotMet,
                     LocalFileOperation::Copy,
                 )
+                .with_reason("copy source is a file but directory mode was required")
                 .with_path(source)
                 .with_target(target),
             ));
@@ -468,6 +473,7 @@ impl HostLocalFileSystem {
                     LocalFileErrorKind::RequirementNotMet,
                     LocalFileOperation::Copy,
                 )
+                .with_reason("required atomic replacement is unavailable for this copy")
                 .with_path(source)
                 .with_target(target),
             ));
@@ -1130,6 +1136,7 @@ fn require_directory_durability(
             LocalFileErrorKind::RequirementNotMet,
             operation,
         )
+        .with_reason("required directory durability is unavailable on this host")
         .with_path(source.to_path_buf())
         .with_target(target.to_path_buf()));
     }
