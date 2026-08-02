@@ -35,6 +35,10 @@ impl LocalPathCodec {
     pub fn from_canonical_text<'a>(
         text: &'a str,
     ) -> Result<Cow<'a, OsStr>, LocalPathCodecError> {
+        #[cfg(unix)]
+        if is_plain_canonical_text(text) {
+            return Ok(Cow::Borrowed(OsStr::new(text)));
+        }
         let native = platform::decode_canonical_text(text)?;
         let canonical = platform::encode_native_text(&native)
             .expect("decoded canonical text cannot contain a native NUL byte");
@@ -60,6 +64,14 @@ impl LocalPathCodec {
     ) -> Result<Cow<'a, str>, LocalPathCodecError> {
         platform::encode_native_text(native)
     }
+}
+
+#[cfg(unix)]
+#[inline]
+fn is_plain_canonical_text(text: &str) -> bool {
+    !text.as_bytes().contains(&0)
+        && !text.contains('%')
+        && !text.chars().any(char::is_control)
 }
 
 /// Platform-specific native path representation operations.
@@ -171,6 +183,13 @@ mod platform {
             let bytes = native.as_bytes();
             if bytes.contains(&0) {
                 return Err(LocalPathCodecError::NativeNul);
+            }
+            if let Ok(valid) = std::str::from_utf8(bytes) {
+                if !valid.contains('%')
+                    && !valid.chars().any(char::is_control)
+                {
+                    return Ok(Cow::Borrowed(valid));
+                }
             }
             let mut encoded = String::with_capacity(bytes.len());
             let mut remaining = bytes;

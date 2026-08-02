@@ -67,7 +67,7 @@ impl HostLocalFileSystem {
     /// Returns a snapshot of capabilities for the current host platform.
     #[inline(always)]
     pub const fn capabilities() -> LocalFileSystemCapabilities {
-        LocalFileSystemCapabilities::detect()
+        LocalFileSystemCapabilities::detect_host()
     }
 
     /// Reads metadata for the final directory entry without following a

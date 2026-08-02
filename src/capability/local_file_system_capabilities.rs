@@ -35,18 +35,47 @@ pub struct LocalFileSystemCapabilities {
 impl LocalFileSystemCapabilities {
     /// Detects mechanisms compiled for the current target platform.
     #[inline]
-    pub(crate) const fn detect() -> Self {
+    pub(crate) const fn detect_host() -> Self {
         Self {
             // PATH_MAX is a process-header bound, not a verified limit of the
             // target filesystem. This crate does not currently probe the
             // mounted filesystem, so report the limit as unknown.
             path_limit: None,
             rooted_operations: cfg!(any(unix, windows)),
-            atomic_rename: cfg!(any(unix, windows)),
+            atomic_rename: cfg!(any(
+                target_os = "linux",
+                target_os = "macos",
+                windows
+            )),
             atomic_replace: cfg!(any(unix, windows)),
             atomic_temp_persist: cfg!(any(
                 target_os = "linux",
                 target_os = "macos",
+                windows
+            )),
+            directory_durability: cfg!(unix),
+        }
+    }
+
+    /// Detects mechanisms compiled for a rooted authority on this target.
+    #[inline]
+    pub(crate) const fn detect_rooted() -> Self {
+        Self {
+            path_limit: None,
+            rooted_operations: cfg!(any(unix, windows)),
+            atomic_rename: cfg!(any(
+                target_os = "linux",
+                target_os = "android",
+                target_os = "macos",
+                target_os = "ios",
+                windows
+            )),
+            atomic_replace: cfg!(any(unix, windows)),
+            atomic_temp_persist: cfg!(any(
+                target_os = "linux",
+                target_os = "android",
+                target_os = "macos",
+                target_os = "ios",
                 windows
             )),
             directory_durability: cfg!(unix),

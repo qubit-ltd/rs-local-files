@@ -8,17 +8,12 @@
 //! Native namespace scope exposed by a local filesystem instance.
 // qubit-style: allow source-test-pair
 
-use std::path::Path;
-
 /// Namespace in which a [`crate::LocalFileSystem`] interprets paths.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 #[must_use]
-pub enum LocalFileSystemScope<'a> {
+pub enum LocalFileSystemScope {
     /// Paths use the process-visible Host namespace.
     Host,
     /// Paths are descendants of an opened root authority.
-    Rooted {
-        /// Non-authoritative path retained only for diagnostics.
-        diagnostic_root: &'a Path,
-    },
+    Rooted,
 }
