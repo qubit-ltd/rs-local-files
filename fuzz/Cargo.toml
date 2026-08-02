@@ -18,3 +18,10 @@ path = "fuzz_targets/path_codec.rs"
 test = false
 doc = false
 bench = false
+
+[[bin]]
+name = "local_paths"
+path = "fuzz_targets/local_paths.rs"
+test = false
+doc = false
+bench = false

@@ -160,7 +160,10 @@ I/O errors are available through the structured error source when present.
 Linux, Windows, and macOS are runtime-tested. FreeBSD and Android are
 compile-checked only. `LocalFileSystem::host().capabilities()` reports the host
 implementation; a rooted instance returns the snapshot cached when opening the
-authority. `scope()` lets integration code distinguish the two namespaces. A
+authority. `scope()` lets integration code distinguish the two namespaces, and
+`diagnostic_root()` exposes the non-authoritative rooted anchor separately. The
+host free functions are intentionally retained as convenience aliases for
+`LocalFileSystem::host()`. A
 path limit is `Some` only when verified for the target filesystem. Atomic
 rename, atomic replacement, and atomic temporary persistence are reported
 independently because platform support differs.
