@@ -24,7 +24,7 @@ use tempfile::tempdir;
 /// filesystem-specific limit.
 #[test]
 fn test_local_file_system_capabilities_report_unknown_path_limit() {
-    let capabilities = LocalFileSystem::capabilities();
+    let capabilities = LocalFileSystem::host().capabilities();
 
     assert!(capabilities.path_limit().is_none());
 }
@@ -62,7 +62,8 @@ fn test_local_file_system_metadata_does_not_follow_final_symlink() {
     fs::write(&target, b"payload").expect("target should be written");
     symlink(&target, &link).expect("symbolic link should be created");
 
-    let metadata = LocalFileSystem::metadata(&link)
+    let metadata = LocalFileSystem::host()
+        .metadata(&link)
         .expect("symbolic-link metadata should be available");
 
     assert_eq!(LocalFileKind::Symlink, metadata.kind());

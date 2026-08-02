@@ -26,6 +26,10 @@ use std::os::windows::fs::FileTypeExt;
 #[cfg(windows)]
 use crate::local::internal::file_move::remove_directory_symlink;
 use crate::local::internal::temp_entry::create_private_dir;
+use crate::local::{
+    CopyDestinationAction,
+    decide_copy_destination,
+};
 use crate::{
     LocalCopyConflictPolicy,
     LocalCopyDirStage,
@@ -58,48 +62,21 @@ use super::source::is_real_directory;
 /// Returns an I/O error when inspection, permitted removal, or creation fails.
 pub(super) fn ensure_copy_destination_dir(
     dst: &Path,
+    conflict: LocalCopyConflictPolicy,
     type_conflict: LocalCopyTypeConflictPolicy,
-) -> Result<bool> {
-    if prepare_existing_directory_destination(dst, type_conflict)? {
-        return Ok(false);
+) -> Result<CopyDestinationAction> {
+    let action =
+        prepare_existing_directory_destination(dst, conflict, type_conflict)?;
+    if action != CopyDestinationAction::Create {
+        return Ok(action);
     }
-    create_copy_destination_dir(dst)
-}
-
-/// Ensures policy permits replacing a destination directory with a file.
-///
-/// # Parameters
-///
-/// * `src` - Source file path.
-/// * `dst` - Destination occupied by a real directory.
-/// * `type_conflict` - File/directory conflict policy.
-/// * `stats` - Statistics accumulated before preparation.
-///
-/// # Errors
-///
-/// Returns a structured destination error when replacement is forbidden.
-pub(super) fn ensure_directory_can_be_replaced_by_file(
-    src: &Path,
-    dst: &Path,
-    type_conflict: LocalCopyTypeConflictPolicy,
-    stats: &LocalCopyDirStats,
-) -> CopyDirResult<()> {
-    if type_conflict == LocalCopyTypeConflictPolicy::Replace {
-        return Ok(());
-    }
-    Err(copy_dir_error(
-        LocalCopyDirStage::PrepareDestination,
-        src,
-        dst,
-        stats,
-        Error::new(
-            ErrorKind::AlreadyExists,
-            format!(
-                "destination type conflicts with source file: {}",
-                dst.display(),
-            ),
-        ),
-    ))
+    create_copy_destination_dir(dst).map(|created| {
+        if created {
+            CopyDestinationAction::Create
+        } else {
+            CopyDestinationAction::Merge
+        }
+    })
 }
 
 /// Applies file-conflict policy to an existing non-directory destination.
@@ -200,25 +177,32 @@ pub(super) fn remove_destination_directory_if_unchanged(
 /// fails.
 fn prepare_existing_directory_destination(
     dst: &Path,
+    conflict: LocalCopyConflictPolicy,
     type_conflict: LocalCopyTypeConflictPolicy,
-) -> Result<bool> {
+) -> Result<CopyDestinationAction> {
     let Some(metadata) = destination_metadata_if_exists(dst)? else {
-        return Ok(false);
+        return Ok(CopyDestinationAction::Create);
     };
-    if is_real_directory(&metadata) {
-        return Ok(true);
-    }
-    if type_conflict == LocalCopyTypeConflictPolicy::Fail {
-        return Err(Error::new(
+    let action = decide_copy_destination(
+        true,
+        Some(is_real_directory(&metadata)),
+        conflict,
+        type_conflict,
+    )
+    .ok_or_else(|| {
+        Error::new(
             ErrorKind::AlreadyExists,
             format!(
                 "destination type conflicts with source directory: {}",
                 dst.display(),
             ),
-        ));
+        )
+    })?;
+    if action == CopyDestinationAction::Replace {
+        remove_destination_non_directory_if_unchanged(dst)?;
+        return Ok(CopyDestinationAction::Create);
     }
-    remove_destination_non_directory_if_unchanged(dst)?;
-    Ok(false)
+    Ok(action)
 }
 
 /// Creates a private directory destination.

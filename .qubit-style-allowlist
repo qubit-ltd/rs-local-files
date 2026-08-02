@@ -27,7 +27,7 @@ coverage-cfg | src/local/local_atomic_writer.rs | Exercises parent synchronizati
 coverage-cfg | src/local/local_root_atomic_writer.rs | Exercises rooted parent synchronization after partial installation
 coverage-cfg | src/local/internal/rooted_namespace_io.rs | Exercises otherwise unreachable rooted namespace faults
 coverage-cfg | src/local/mod.rs | Exposes legacy local helpers only to coverage regression tests
-coverage-cfg | src/local_file_system.rs | Exercises otherwise unreachable local filesystem fault paths
+coverage-cfg | src/local/internal/host_local_file_system.rs | Exercises otherwise unreachable local filesystem fault paths
 coverage-cfg | src/local_paths.rs | Exercises otherwise unreachable host current-directory binding failures
 coverage-cfg | src/rooted/copy.rs | Exercises otherwise unreachable rooted copy fault paths
 coverage-cfg | src/rooted_local_file_system.rs | Exercises otherwise unreachable rooted temporary-resource and status failures

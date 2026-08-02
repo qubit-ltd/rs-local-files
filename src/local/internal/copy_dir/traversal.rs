@@ -17,6 +17,7 @@ use std::io::{
 };
 use std::path::Path;
 
+use crate::local::CopyDestinationAction;
 use crate::{
     LocalCopyDirOptions,
     LocalCopyDirStage,
@@ -30,6 +31,7 @@ use super::destination::ensure_copy_destination_dir;
 use super::error::{
     copy_dir_error,
     record_created_directory,
+    record_skipped_file,
     with_copy_context,
 };
 use super::source::inspect_copy_source_directory;
@@ -61,14 +63,17 @@ pub(super) fn copy_dir_iterative(
     stats: &mut LocalCopyDirStats,
 ) -> CopyDirResult<()> {
     let mut active_sources = HashSet::new();
-    let root_frame = enter_copy_directory(
+    let Some(root_frame) = enter_copy_directory(
         src,
         dst,
         options,
         destination_root,
         &mut active_sources,
         stats,
-    )?;
+    )?
+    else {
+        return Ok(());
+    };
     let mut frames = vec![root_frame];
 
     while !frames.is_empty() {
@@ -124,7 +129,9 @@ pub(super) fn copy_dir_iterative(
                 &mut active_sources,
                 stats,
             )?;
-            frames.push(frame);
+            if let Some(frame) = frame {
+                frames.push(frame);
+            }
         } else if file_type.is_symlink() && options.follows_symlinks() {
             if symlink_target_is_directory(
                 &source_path,
@@ -139,7 +146,9 @@ pub(super) fn copy_dir_iterative(
                     &mut active_sources,
                     stats,
                 )?;
-                frames.push(frame);
+                if let Some(frame) = frame {
+                    frames.push(frame);
+                }
             } else {
                 copy_file_with_options(
                     &source_path,
@@ -187,7 +196,7 @@ fn enter_copy_directory(
     destination_root: &Path,
     active_sources: &mut HashSet<DirectoryIdentity>,
     stats: &mut LocalCopyDirStats,
-) -> CopyDirResult<CopyDirFrame> {
+) -> CopyDirResult<Option<CopyDirFrame>> {
     let (source_metadata, source_identity) = with_copy_context(
         inspect_copy_source_directory(
             src,
@@ -211,14 +220,28 @@ fn enter_copy_directory(
             ),
         ));
     }
-    let created = with_copy_context(
-        ensure_copy_destination_dir(dst, options.type_conflict_policy()),
+    let action = with_copy_context(
+        ensure_copy_destination_dir(
+            dst,
+            options.conflict_policy(),
+            options.type_conflict_policy(),
+        ),
         LocalCopyDirStage::PrepareDestination,
         src,
         dst,
         stats,
     )?;
-    if created {
+    if action == CopyDestinationAction::Skip {
+        with_copy_context(
+            record_skipped_file(stats),
+            LocalCopyDirStage::UpdateStatistics,
+            src,
+            dst,
+            stats,
+        )?;
+        return Ok(None);
+    }
+    if action == CopyDestinationAction::Create {
         with_copy_context(
             record_created_directory(stats),
             LocalCopyDirStage::UpdateStatistics,
@@ -235,13 +258,13 @@ fn enter_copy_directory(
         stats,
     )?;
     let _ = active_sources.insert(source_identity.clone());
-    Ok(CopyDirFrame::new(
+    Ok(Some(CopyDirFrame::new(
         src.to_path_buf(),
         dst.to_path_buf(),
         source_identity,
         source_metadata.permissions(),
         entries,
-    ))
+    )))
 }
 
 /// Determines whether an allowed symbolic link targets a directory.

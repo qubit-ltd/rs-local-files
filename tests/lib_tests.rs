@@ -7,6 +7,7 @@
 // =============================================================================
 
 mod options;
+mod rooted;
 
 /// Verifies crate-root exports for the unified public API.
 #[test]

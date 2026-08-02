@@ -10,7 +10,11 @@
 
 use std::time::Duration;
 
-use crate::{LocalCopyConflictPolicy, LocalCopyTypeConflictPolicy, LocalDurabilityRequirement};
+use crate::{
+    LocalCopyConflictPolicy,
+    LocalCopyTypeConflictPolicy,
+    LocalDurabilityRequirement,
+};
 
 /// Options controlling recursive directory copy behavior.
 ///
@@ -97,7 +101,10 @@ impl LocalCopyDirOptions {
 
     /// Sets the synchronization policy for staged regular files.
     #[inline(always)]
-    pub(crate) const fn with_durability(mut self, durability: LocalDurabilityRequirement) -> Self {
+    pub(crate) const fn with_durability(
+        mut self,
+        durability: LocalDurabilityRequirement,
+    ) -> Self {
         self.durability = durability;
         self
     }
@@ -125,7 +132,10 @@ impl LocalCopyDirOptions {
     /// # Returns
     /// Updated directory copy options.
     #[inline(always)]
-    pub const fn with_conflict(mut self, conflict: LocalCopyConflictPolicy) -> Self {
+    pub const fn with_conflict(
+        mut self,
+        conflict: LocalCopyConflictPolicy,
+    ) -> Self {
         self.conflict = conflict;
         self
     }
@@ -147,7 +157,10 @@ impl LocalCopyDirOptions {
     /// # Returns
     /// Updated directory copy options.
     #[inline(always)]
-    pub const fn with_type_conflict(mut self, type_conflict: LocalCopyTypeConflictPolicy) -> Self {
+    pub const fn with_type_conflict(
+        mut self,
+        type_conflict: LocalCopyTypeConflictPolicy,
+    ) -> Self {
         self.type_conflict = type_conflict;
         self
     }

@@ -81,6 +81,7 @@ use windows_sys::Win32::Storage::FileSystem::{
 };
 use windows_sys::Win32::System::IO::IO_STATUS_BLOCK;
 
+use super::rooted_directory_reader::RootedDirectoryReader;
 use crate::local::LocalRelativePath;
 use crate::{
     read,
@@ -96,29 +97,15 @@ const ROOTED_SHARE_MODE: u32 =
 /// Byte capacity used for each native directory-enumeration request.
 const DIRECTORY_READ_BUFFER_SIZE: usize = 64 * 1024;
 
-/// Lazily reads children from one opened Windows directory handle.
-#[derive(Debug)]
-pub(crate) struct RootedDirectoryReader {
-    /// Directory handle retained for enumeration and child inspection.
-    directory: File,
-    /// Aligned storage for native directory records.
-    buffer: Vec<usize>,
-    /// Number of valid bytes currently in `buffer`.
-    used: usize,
-    /// Offset of the next native record within `buffer`.
-    offset: usize,
-    /// Whether the next native request must restart enumeration.
-    restart: bool,
-    /// Whether the operating system reported that enumeration is complete.
-    exhausted: bool,
-}
-
 impl RootedDirectoryReader {
     /// Creates a lazy enumerator for an already-opened directory handle.
     fn new(directory: File) -> Self {
         Self {
             directory,
-            buffer: vec![0_usize; DIRECTORY_READ_BUFFER_SIZE.div_ceil(size_of::<usize>())],
+            buffer: vec![
+                0_usize;
+                DIRECTORY_READ_BUFFER_SIZE.div_ceil(size_of::<usize>())
+            ],
             used: 0,
             offset: 0,
             restart: true,
@@ -185,17 +172,23 @@ impl RootedDirectoryReader {
         self.used = status_block.Information.min(DIRECTORY_READ_BUFFER_SIZE);
         self.offset = 0;
         if self.used == 0 {
-            return Err(Error::other("NtQueryDirectoryFile returned an empty record batch"));
+            return Err(Error::other(
+                "NtQueryDirectoryFile returned an empty record batch",
+            ));
         }
         Ok(())
     }
 
     /// Parses the current native directory record and advances its byte offset.
     fn current_name(&self) -> Result<(OsString, usize)> {
-        let name_offset = std::mem::offset_of!(FILE_DIRECTORY_INFORMATION, FileName);
-        let remaining = self.used.checked_sub(self.offset).ok_or_else(|| {
-            Error::other("directory record offset exceeded the native result")
-        })?;
+        let name_offset =
+            std::mem::offset_of!(FILE_DIRECTORY_INFORMATION, FileName);
+        let remaining =
+            self.used.checked_sub(self.offset).ok_or_else(|| {
+                Error::other(
+                    "directory record offset exceeded the native result",
+                )
+            })?;
         if remaining < name_offset {
             return Err(Error::other("truncated directory record header"));
         }
@@ -213,10 +206,13 @@ impl RootedDirectoryReader {
         let name_size = name_bytes
             .checked_div(size_of::<u16>())
             .filter(|_| name_bytes.is_multiple_of(size_of::<u16>()))
-            .ok_or_else(|| Error::other("directory record name has an invalid length"))?;
-        let name_end = name_offset.checked_add(name_bytes).ok_or_else(|| {
-            Error::other("directory record name length overflowed")
-        })?;
+            .ok_or_else(|| {
+                Error::other("directory record name has an invalid length")
+            })?;
+        let name_end =
+            name_offset.checked_add(name_bytes).ok_or_else(|| {
+                Error::other("directory record name length overflowed")
+            })?;
         if name_end > remaining {
             return Err(Error::other("truncated directory record name"));
         }
@@ -233,7 +229,9 @@ impl RootedDirectoryReader {
             self.offset
                 .checked_add(information.NextEntryOffset as usize)
                 .filter(|next| *next > self.offset && *next <= self.used)
-                .ok_or_else(|| Error::other("directory record offset overflowed"))?
+                .ok_or_else(|| {
+                    Error::other("directory record offset overflowed")
+                })?
         };
         Ok((name, next_offset))
     }

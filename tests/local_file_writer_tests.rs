@@ -24,10 +24,10 @@ use qubit_local_files::{
     LocalAtomicityRequirement,
     LocalFileErrorKind,
     LocalFileSystem,
+    LocalWriteFailureState,
     LocalWriteMode,
     LocalWriteOptions,
     LocalWriterState,
-    LocalWriteFailureState,
 };
 use tempfile::tempdir;
 
@@ -43,11 +43,12 @@ fn test_local_file_writer_publishes_staged_content_on_commit() {
     let target = directory.path().join("target");
     fs::write(&target, b"old").expect("target fixture should be written");
 
-    let mut writer = LocalFileSystem::open_writer(
-        &target,
-        &LocalWriteOptions::new(LocalWriteMode::CreateOrReplace),
-    )
-    .expect("staged writer should open");
+    let mut writer = LocalFileSystem::host()
+        .open_writer(
+            &target,
+            &LocalWriteOptions::new(LocalWriteMode::CreateOrReplace),
+        )
+        .expect("staged writer should open");
     writer
         .write_all(b"new")
         .expect("staged content should be written");
@@ -85,7 +86,8 @@ fn test_local_file_writer_replaces_target_symlink_entry() {
     symlink(&referent, &target).expect("target symlink should be created");
 
     let options = LocalWriteOptions::new(LocalWriteMode::CreateOrReplace);
-    let mut writer = LocalFileSystem::open_writer(&target, &options)
+    let mut writer = LocalFileSystem::host()
+        .open_writer(&target, &options)
         .expect("writer should accept a target symlink entry");
     writer
         .write_all(b"replacement")
@@ -120,11 +122,9 @@ fn test_local_file_writer_append_rejects_target_symlink() {
     fs::write(&referent, b"original").expect("referent should be written");
     symlink(&referent, &target).expect("target symlink should be created");
 
-    let error = LocalFileSystem::open_writer(
-        &target,
-        &LocalWriteOptions::new(LocalWriteMode::Append),
-    )
-    .expect_err("append must not follow a final symlink");
+    let error = LocalFileSystem::host()
+        .open_writer(&target, &LocalWriteOptions::new(LocalWriteMode::Append))
+        .expect_err("append must not follow a final symlink");
 
     assert_eq!(LocalFileErrorKind::TypeConflict, error.kind());
     assert_eq!(b"original", fs::read(&referent).unwrap().as_slice());
@@ -149,11 +149,9 @@ fn test_local_file_writer_append_rejects_target_symlink_on_windows() {
         panic!("file symlink should be created: {error}");
     }
 
-    let error = LocalFileSystem::open_writer(
-        &target,
-        &LocalWriteOptions::new(LocalWriteMode::Append),
-    )
-    .expect_err("append must not follow a final file symlink");
+    let error = LocalFileSystem::host()
+        .open_writer(&target, &LocalWriteOptions::new(LocalWriteMode::Append))
+        .expect_err("append must not follow a final file symlink");
     assert_eq!(LocalFileErrorKind::TypeConflict, error.kind());
     assert_eq!(
         b"original",
@@ -170,11 +168,12 @@ fn test_local_file_writer_create_new_rejects_existing_target() {
     let target = directory.path().join("target");
     fs::write(&target, b"old").expect("target fixture should be written");
 
-    let error = LocalFileSystem::open_writer(
-        &target,
-        &LocalWriteOptions::new(LocalWriteMode::CreateNew),
-    )
-    .expect_err("create-new must reject the existing target");
+    let error = LocalFileSystem::host()
+        .open_writer(
+            &target,
+            &LocalWriteOptions::new(LocalWriteMode::CreateNew),
+        )
+        .expect_err("create-new must reject the existing target");
 
     assert_eq!(LocalFileErrorKind::AlreadyExists, error.kind());
 }
@@ -185,11 +184,12 @@ fn test_local_file_writer_create_new_rejects_existing_target() {
 fn test_local_file_writer_create_new_preserves_concurrent_target() {
     let directory = tempdir().expect("temporary directory should be created");
     let target = directory.path().join("target");
-    let mut writer = LocalFileSystem::open_writer(
-        &target,
-        &LocalWriteOptions::new(LocalWriteMode::CreateNew),
-    )
-    .expect("create-new staging should open for an absent target");
+    let mut writer = LocalFileSystem::host()
+        .open_writer(
+            &target,
+            &LocalWriteOptions::new(LocalWriteMode::CreateNew),
+        )
+        .expect("create-new staging should open for an absent target");
     writer
         .write_all(b"staged")
         .expect("staged bytes should be written");
@@ -215,11 +215,12 @@ fn test_local_file_writer_abort_keeps_original_target() {
     let directory = tempdir().expect("temporary directory should be created");
     let target = directory.path().join("target");
     fs::write(&target, b"old").expect("target fixture should be written");
-    let mut writer = LocalFileSystem::open_writer(
-        &target,
-        &LocalWriteOptions::new(LocalWriteMode::CreateOrReplace),
-    )
-    .expect("staged writer should open");
+    let mut writer = LocalFileSystem::host()
+        .open_writer(
+            &target,
+            &LocalWriteOptions::new(LocalWriteMode::CreateOrReplace),
+        )
+        .expect("staged writer should open");
     writer
         .write_all(b"new")
         .expect("staging write should succeed");
@@ -242,12 +243,13 @@ fn test_local_file_writer_append_rejects_required_atomicity() {
     let target = directory.path().join("target");
     fs::write(&target, b"old").expect("target fixture should be written");
 
-    let error = LocalFileSystem::open_writer(
-        &target,
-        &LocalWriteOptions::new(LocalWriteMode::Append)
-            .with_atomicity(LocalAtomicityRequirement::Required),
-    )
-    .expect_err("direct append cannot provide required atomicity");
+    let error = LocalFileSystem::host()
+        .open_writer(
+            &target,
+            &LocalWriteOptions::new(LocalWriteMode::Append)
+                .with_atomicity(LocalAtomicityRequirement::Required),
+        )
+        .expect_err("direct append cannot provide required atomicity");
 
     assert_eq!(LocalFileErrorKind::RequirementNotMet, error.kind());
 }
@@ -267,12 +269,13 @@ fn test_local_file_writer_reports_parent_sync_result() {
         let parent = directory.path().join(format!("{requirement:?}"));
         fs::create_dir(&parent).expect("target parent should be created");
         let target = parent.join("target");
-        let mut writer = LocalFileSystem::open_writer(
-            &target,
-            &LocalWriteOptions::new(LocalWriteMode::CreateNew)
-                .with_durability(requirement),
-        )
-        .expect("staged writer should open before permissions change");
+        let mut writer = LocalFileSystem::host()
+            .open_writer(
+                &target,
+                &LocalWriteOptions::new(LocalWriteMode::CreateNew)
+                    .with_durability(requirement),
+            )
+            .expect("staged writer should open before permissions change");
         writer
             .write_all(b"published")
             .expect("staged bytes should be written");
@@ -362,11 +365,9 @@ fn run_indeterminate_append_case(case: &str) {
             "child process file-size limit should be installed",
         );
     }
-    let mut writer = LocalFileSystem::open_writer(
-        &target,
-        &LocalWriteOptions::new(LocalWriteMode::Append),
-    )
-    .expect("append writer should open before the failing write");
+    let mut writer = LocalFileSystem::host()
+        .open_writer(&target, &LocalWriteOptions::new(LocalWriteMode::Append))
+        .expect("append writer should open before the failing write");
     writer
         .write_all(b"x")
         .expect_err("zero file-size limit should reject append");

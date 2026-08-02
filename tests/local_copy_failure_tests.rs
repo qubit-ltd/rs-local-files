@@ -62,9 +62,9 @@ where
 fn test_copy_failure_exposes_typed_state_and_parts() {
     let source = temp_path("missing-source");
     let target = temp_path("copy-target");
-    let failure =
-        LocalFileSystem::copy(&source, &target, &LocalCopyOptions::default())
-            .expect_err("missing source must fail");
+    let failure = LocalFileSystem::host()
+        .copy(&source, &target, &LocalCopyOptions::default())
+        .expect_err("missing source must fail");
 
     assert_eq!(failure.state(), LocalCopyFailureState::Unchanged);
     assert_eq!(failure.partial_stats(), &LocalCopyStats::default());
@@ -94,12 +94,13 @@ fn test_copy_failure_reports_second_child_partial_publication() {
             fs::write(source.join("second"), b"second")
                 .expect("second child should be written");
 
-            let failure = LocalFileSystem::copy(
-                &source,
-                &target,
-                &LocalCopyOptions::default().with_tree_source(),
-            )
-            .expect_err("second child staging fault must fail");
+            let failure = LocalFileSystem::host()
+                .copy(
+                    &source,
+                    &target,
+                    &LocalCopyOptions::default().with_tree_source(),
+                )
+                .expect_err("second child staging fault must fail");
 
             assert_eq!(
                 LocalCopyFailureState::PartiallyPublished,
@@ -123,13 +124,14 @@ fn test_copy_failure_reports_published_after_parent_sync_fault() {
         let target = directory.path().join("target");
         fs::write(&source, b"payload").expect("source file should be written");
 
-        let failure = LocalFileSystem::copy(
-            &source,
-            &target,
-            &LocalCopyOptions::default()
-                .with_durability(LocalDurabilityRequirement::Required),
-        )
-        .expect_err("parent synchronization fault must fail");
+        let failure = LocalFileSystem::host()
+            .copy(
+                &source,
+                &target,
+                &LocalCopyOptions::default()
+                    .with_durability(LocalDurabilityRequirement::Required),
+            )
+            .expect_err("parent synchronization fault must fail");
 
         assert_eq!(LocalCopyFailureState::Published, failure.state());
         assert_eq!(1, failure.partial_stats().files());
@@ -159,12 +161,9 @@ fn test_copy_failure_retains_staging_only_for_cleanup_failure() {
             fs::write(&source, b"payload")
                 .expect("source file should be written");
 
-            let failure = LocalFileSystem::copy(
-                &source,
-                &target,
-                &LocalCopyOptions::default(),
-            )
-            .expect_err("staging and cleanup faults must fail");
+            let failure = LocalFileSystem::host()
+                .copy(&source, &target, &LocalCopyOptions::default())
+                .expect_err("staging and cleanup faults must fail");
 
             assert!(failure.staging_path().is_some());
             assert!(failure.cleanup_error().is_some());
@@ -185,12 +184,9 @@ fn test_copy_failure_omits_staging_after_successful_cleanup() {
         let target = directory.path().join("target");
         fs::write(&source, b"payload").expect("source file should be written");
 
-        let failure = LocalFileSystem::copy(
-            &source,
-            &target,
-            &LocalCopyOptions::default(),
-        )
-        .expect_err("staging fault must fail");
+        let failure = LocalFileSystem::host()
+            .copy(&source, &target, &LocalCopyOptions::default())
+            .expect_err("staging fault must fail");
 
         assert!(failure.staging_path().is_none());
         assert!(failure.cleanup_error().is_none());
@@ -214,12 +210,13 @@ fn test_copy_failure_reports_indeterminate_for_destination_preparation_fault() {
             fs::create_dir(&source)
                 .expect("source directory should be created");
 
-            let failure = LocalFileSystem::copy(
-                &source,
-                &target,
-                &LocalCopyOptions::default().with_tree_source(),
-            )
-            .expect_err("destination preparation fault must fail");
+            let failure = LocalFileSystem::host()
+                .copy(
+                    &source,
+                    &target,
+                    &LocalCopyOptions::default().with_tree_source(),
+                )
+                .expect_err("destination preparation fault must fail");
 
             assert_eq!(LocalCopyFailureState::Indeterminate, failure.state());
             assert_eq!(&LocalCopyStats::default(), failure.partial_stats());
@@ -241,12 +238,13 @@ fn test_copy_failure_reports_unchanged_for_source_inspection_fault() {
         let target = directory.path().join("target");
         fs::create_dir(&source).expect("source directory should be created");
 
-        let failure = LocalFileSystem::copy(
-            &source,
-            &target,
-            &LocalCopyOptions::default().with_tree_source(),
-        )
-        .expect_err("source inspection fault must fail before publication");
+        let failure = LocalFileSystem::host()
+            .copy(
+                &source,
+                &target,
+                &LocalCopyOptions::default().with_tree_source(),
+            )
+            .expect_err("source inspection fault must fail before publication");
 
         assert_eq!(LocalCopyFailureState::Unchanged, failure.state());
         assert_eq!(&LocalCopyStats::default(), failure.partial_stats());

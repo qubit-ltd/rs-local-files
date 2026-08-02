@@ -26,8 +26,8 @@ use crate::{
     LocalFileErrorKind,
     LocalFileOperation,
     LocalResult,
-    LocalWriteOptions,
     LocalWriteFailureState,
+    LocalWriteOptions,
     LocalWriteOutcome,
     LocalWriterState,
 };

@@ -53,7 +53,7 @@ use crate::{
 
 /// Descriptor- or handle-relative authority for one opened native directory.
 #[derive(Debug)]
-pub struct RootedLocalFileSystem {
+pub(crate) struct RootedLocalFileSystem {
     /// Existing secure rooted implementation.
     root: Arc<crate::rooted::Root>,
     /// Capability snapshot cached when the authority is opened.
@@ -772,7 +772,7 @@ impl RootedLocalFileSystem {
             .copy_with_durability(
                 &source_path,
                 &target_path,
-                crate::local_file_system::internal_copy_options(options),
+                crate::local::internal_copy_options(options),
                 options.durability(),
             )
             .map_err(|error| {
@@ -1137,10 +1137,11 @@ fn validate_rooted_temp_parent(
     if parent.as_os_str().is_empty() {
         return Ok(());
     }
-    let relative = crate::local::LocalRelativePath::new(parent).map_err(|error| {
-        rooted_io_error(operation, parent, error)
-            .with_kind(LocalFileErrorKind::InvalidPath)
-    })?;
+    let relative =
+        crate::local::LocalRelativePath::new(parent).map_err(|error| {
+            rooted_io_error(operation, parent, error)
+                .with_kind(LocalFileErrorKind::InvalidPath)
+        })?;
     let metadata = root
         .symlink_metadata(&relative)
         .map_err(|error| rooted_io_error(operation, parent, error))?;
