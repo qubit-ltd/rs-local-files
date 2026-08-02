@@ -47,7 +47,7 @@ fn test_is_lexically_within_distinguishes_equal_and_unrelated_paths() {
         Path::new("relative-root"),
     )
     .expect_err("mixed absolute and relative forms must be rejected");
-    assert_eq!(LocalFileErrorKind::InvalidInput, error.kind());
+    assert_eq!(LocalFileErrorKind::InvalidPath, error.kind());
     assert_eq!(LocalFileOperation::ComposePath, error.operation());
 }
 
@@ -64,7 +64,7 @@ fn test_compose_descendant_rejects_empty_absolute_and_dot_paths() {
     ] {
         let error = LocalPaths::compose_descendant(base, descendant)
             .expect_err("unsafe descendant shape must be rejected");
-        assert_eq!(LocalFileErrorKind::InvalidInput, error.kind());
+        assert_eq!(LocalFileErrorKind::InvalidPath, error.kind());
         assert_eq!(Some(descendant), error.path());
     }
 }
@@ -96,7 +96,7 @@ fn test_canonical_path_conversions_reject_unsafe_component_shapes() {
             .expect_err(
                 "absolute paths cannot be encoded as relative components",
             );
-    assert_eq!(LocalFileErrorKind::InvalidInput, error.kind());
+    assert_eq!(LocalFileErrorKind::InvalidPath, error.kind());
 
     #[cfg(unix)]
     {
@@ -109,7 +109,7 @@ fn test_canonical_path_conversions_reject_unsafe_component_shapes() {
                 .expect_err(
                     "an encoded separator cannot be an absolute component",
                 );
-        assert_eq!(LocalFileErrorKind::InvalidInput, error.kind());
+        assert_eq!(LocalFileErrorKind::InvalidPath, error.kind());
     }
 }
 

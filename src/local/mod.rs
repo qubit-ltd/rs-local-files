@@ -36,6 +36,12 @@ mod local_root_atomic_writer;
 
 #[cfg(unix)]
 pub(crate) use internal::sync_rooted_parent;
+#[cfg(unix)]
+pub(crate) use internal::{
+    RootedDirectoryReader,
+    open_root_directory_reader,
+    open_rooted_directory_reader,
+};
 pub(crate) use internal::{
     copy_directory_guarantee_unavailable,
     copy_dir_all_with_paths,

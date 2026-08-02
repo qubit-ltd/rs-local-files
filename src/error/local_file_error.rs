@@ -101,7 +101,7 @@ impl LocalFileError {
     ///
     /// # Returns
     ///
-    /// A structured invalid-input error whose source is `PathCodec(error)`.
+    /// A structured invalid-path error whose source is `PathCodec(error)`.
     #[must_use]
     #[allow(dead_code)]
     #[inline]
@@ -111,7 +111,7 @@ impl LocalFileError {
         error: LocalPathCodecError,
     ) -> Self {
         Self {
-            kind: LocalFileErrorKind::InvalidInput,
+            kind: LocalFileErrorKind::InvalidPath,
             operation,
             path,
             target: None,
@@ -240,12 +240,17 @@ fn standard_io_error_kind(error: &LocalFileError) -> io::ErrorKind {
         Some(LocalFileErrorSource::PathCodec(_)) => io::ErrorKind::InvalidInput,
         None => match error.kind {
             LocalFileErrorKind::AlreadyExists => io::ErrorKind::AlreadyExists,
-            LocalFileErrorKind::InvalidInput => io::ErrorKind::InvalidInput,
+            LocalFileErrorKind::InvalidPath
+            | LocalFileErrorKind::InvalidOptions
+            | LocalFileErrorKind::InvalidState => io::ErrorKind::InvalidInput,
+            LocalFileErrorKind::NotDirectory => io::ErrorKind::NotADirectory,
+            LocalFileErrorKind::IsDirectory => io::ErrorKind::IsADirectory,
             LocalFileErrorKind::NotFound => io::ErrorKind::NotFound,
             LocalFileErrorKind::PermissionDenied => {
                 io::ErrorKind::PermissionDenied
             }
             LocalFileErrorKind::ResourceLimit => io::ErrorKind::StorageFull,
+            LocalFileErrorKind::DataCorruption => io::ErrorKind::InvalidData,
             LocalFileErrorKind::RequirementNotMet
             | LocalFileErrorKind::Unsupported => io::ErrorKind::Unsupported,
             _ => io::ErrorKind::Other,
@@ -293,10 +298,11 @@ fn classify_io_error(error: &io::Error) -> LocalFileErrorKind {
     match error.kind() {
         io::ErrorKind::NotFound => LocalFileErrorKind::NotFound,
         io::ErrorKind::AlreadyExists => LocalFileErrorKind::AlreadyExists,
+        io::ErrorKind::NotADirectory => LocalFileErrorKind::NotDirectory,
+        io::ErrorKind::IsADirectory => LocalFileErrorKind::IsDirectory,
         io::ErrorKind::PermissionDenied => LocalFileErrorKind::PermissionDenied,
-        io::ErrorKind::InvalidInput | io::ErrorKind::InvalidData => {
-            LocalFileErrorKind::InvalidInput
-        }
+        io::ErrorKind::InvalidInput => LocalFileErrorKind::InvalidPath,
+        io::ErrorKind::InvalidData => LocalFileErrorKind::DataCorruption,
         io::ErrorKind::Unsupported => LocalFileErrorKind::Unsupported,
         io::ErrorKind::OutOfMemory
         | io::ErrorKind::StorageFull

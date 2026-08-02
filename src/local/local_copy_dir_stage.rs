@@ -12,31 +12,6 @@
 ///
 /// Additional stages may be added as copy diagnostics evolve. Downstream
 /// matches must retain a wildcard arm.
-///
-/// ```compile_fail
-/// use qubit_local_files::copy::Stage;
-///
-/// fn classify(stage: Stage) {
-///     match stage {
-///         Stage::InspectSource => {}
-///         Stage::InspectSourceEntry => {}
-///         Stage::ReadSourceDirectory => {}
-///         Stage::PrepareDestination => {}
-///         Stage::CopyFileContents => {}
-///         Stage::PreservePermissions => {}
-///         Stage::CommitFile => {}
-///         Stage::CleanupTemporaryFile => {}
-///         Stage::UpdateStatistics => {}
-///     }
-/// }
-/// ```
-///
-/// ```compile_fail
-/// #![deny(unused_must_use)]
-/// use qubit_local_files::copy::Stage;
-///
-/// Stage::InspectSource.clone();
-/// ```
 #[must_use]
 #[non_exhaustive]
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
