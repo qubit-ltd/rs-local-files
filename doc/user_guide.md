@@ -11,13 +11,15 @@ API, or a replacement for provider-level logical paths.
 ## Conceptual Model
 
 ```
-host paths ── LocalFileSystem ── native filesystem
-opened root ─ RootedLocalFileSystem ─ relative descendants only
+host paths ── convenience functions or LocalFileSystem::host()
+opened root ─ LocalFileSystem::rooted(root) ─ relative descendants only
 ```
 
-`LocalFileSystem` exposes host-wide associated methods. `RootedLocalFileSystem`
-is a stateful authority created with `open`; it keeps the opened root rather
-than repeatedly resolving a string path. Readers, writers, walkers, and
+Free functions provide the shortest host-wide API. `LocalFileSystem` is the
+configured service form: `host()` selects process-visible paths, while
+`rooted(root)` opens a directory authority and accepts only relative
+descendants. The two forms expose the same operations, so callers and adapters
+do not need separate host and rooted interfaces. Readers, writers, walkers, and
 temporary entries are owned stateful resources. `LocalFileNames` and
 `LocalPaths` provide native lexical utilities without converting names to UTF-8.
 
@@ -30,17 +32,17 @@ complete write, and inspect the result. The observable success condition is a
 ```rust
 use std::io::{Read, Write};
 use qubit_local_files::{
-    LocalCreateDirectoryOptions, LocalFileSystem, LocalReadOptions,
-    LocalWriteMode, LocalWriteOptions, LocalWriterState,
+    create_directory, open_reader, open_writer, LocalCreateDirectoryOptions,
+    LocalReadOptions, LocalWriteMode, LocalWriteOptions, LocalWriterState,
 };
 
 let output = std::path::Path::new("build/output");
-LocalFileSystem::create_directory(
+create_directory(
     output,
     &LocalCreateDirectoryOptions::new().with_recursive(),
 )?;
 let path = output.join("manifest.json");
-let mut writer = LocalFileSystem::open_writer(
+let mut writer = open_writer(
     &path,
     &LocalWriteOptions::new(LocalWriteMode::CreateOrReplace),
 )?;
@@ -48,7 +50,7 @@ writer.write_all(br#"{"complete":true}"#)?;
 let result = writer.commit()?;
 assert_eq!(result.state(), LocalWriterState::Committed);
 let mut text = String::new();
-LocalFileSystem::open_reader(&path, &LocalReadOptions::new())?
+open_reader(&path, &LocalReadOptions::new())?
     .read_to_string(&mut text)?;
 assert_eq!(text, r#"{"complete":true}"#);
 # Ok::<(), Box<dyn std::error::Error>>(())
@@ -78,9 +80,9 @@ aliases are rejected; overwriting a symbolic-link target replaces that entry
 rather than following it.
 
 ```rust,no_run
-use qubit_local_files::{LocalCopyFailureState, LocalCopyOptions, LocalFileSystem};
+use qubit_local_files::{copy, LocalCopyFailureState, LocalCopyOptions};
 
-match LocalFileSystem::copy(
+match copy(
     std::path::Path::new("source"),
     std::path::Path::new("backup"),
     &LocalCopyOptions::new(),
@@ -101,7 +103,7 @@ happened”.
 
 ## Walk and Temporary Resources
 
-`LocalFileSystem::list` returns a lazy `LocalDirectoryWalker`. It opens and
+`list` and `LocalFileSystem::list` return a lazy `LocalDirectoryWalker`. It opens and
 advances directories on demand; maximum depth, symbolic-link policy, and a
 64-handle default budget are fixed at creation. Rooted enumeration also streams
 each directory instead of first collecting it into a vector. Exceeding the
@@ -119,9 +121,9 @@ leave an entry behind.
 Use rooted access when processing untrusted relative names beneath a workspace.
 
 ```rust
-use qubit_local_files::{LocalListOptions, RootedLocalFileSystem};
+use qubit_local_files::{LocalFileSystem, LocalListOptions};
 
-let root = RootedLocalFileSystem::open(std::path::Path::new("workspace"))?;
+let root = LocalFileSystem::rooted(std::path::Path::new("workspace"))?;
 let walker = root.list(std::path::Path::new("assets"), &LocalListOptions::new())?;
 for entry in walker {
     println!("{}", entry?.path().display());
@@ -156,11 +158,12 @@ I/O errors are available through the structured error source when present.
 ## Platform Limits and Further Reading
 
 Linux, Windows, and macOS are runtime-tested. FreeBSD and Android are
-compile-checked only. `LocalFileSystem::capabilities()` reports the host
-implementation; `RootedLocalFileSystem::capabilities()` is the snapshot cached
-when opening the authority. A path limit is `Some` only when verified for the
-target filesystem. Atomic rename, atomic replacement, and atomic temporary
-persistence are reported independently because platform support differs.
+compile-checked only. `LocalFileSystem::host().capabilities()` reports the host
+implementation; a rooted instance returns the snapshot cached when opening the
+authority. `scope()` lets integration code distinguish the two namespaces. A
+path limit is `Some` only when verified for the target filesystem. Atomic
+rename, atomic replacement, and atomic temporary persistence are reported
+independently because platform support differs.
 
 Continue with the [README](../README.md), [中文用户手册](user_guide.zh_CN.md),
 or the [API reference](https://docs.rs/qubit-local-files).

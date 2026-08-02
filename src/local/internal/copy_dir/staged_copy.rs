@@ -31,11 +31,14 @@ use crate::local::internal::temp_entry::{
     DEFAULT_TEMP_ENTRY_RETRIES,
     create_temp_file_in_dir,
 };
+use crate::local::{
+    CopyDestinationAction,
+    decide_copy_destination,
+};
 
 use super::copy_dir_result::CopyDirResult;
 use super::destination::{
     destination_metadata_if_exists,
-    ensure_directory_can_be_replaced_by_file,
     existing_file_destination_should_be_skipped,
     remove_destination_directory_if_unchanged,
 };
@@ -89,13 +92,39 @@ pub(crate) fn copy_file_with_options(
     let destination_existed = destination_metadata.is_some();
     let destination_directory_requires_removal = match destination_metadata {
         Some(metadata) if is_real_directory(&metadata) => {
-            ensure_directory_can_be_replaced_by_file(
-                src,
-                dst,
+            let action = decide_copy_destination(
+                false,
+                Some(true),
+                options.conflict_policy(),
                 options.type_conflict_policy(),
-                stats,
-            )?;
-            true
+            );
+            match action {
+                Some(CopyDestinationAction::Replace) => true,
+                Some(CopyDestinationAction::Skip) => {
+                    return with_copy_context(
+                        record_skipped_file(stats),
+                        LocalCopyDirStage::UpdateStatistics,
+                        src,
+                        dst,
+                        stats,
+                    );
+                }
+                _ => {
+                    return Err(copy_dir_error(
+                        LocalCopyDirStage::PrepareDestination,
+                        src,
+                        dst,
+                        stats,
+                        std::io::Error::new(
+                            std::io::ErrorKind::AlreadyExists,
+                            format!(
+                                "destination type conflicts with source file: {}",
+                                dst.display(),
+                            ),
+                        ),
+                    ));
+                }
+            }
         }
         Some(_) => {
             if existing_file_destination_should_be_skipped(

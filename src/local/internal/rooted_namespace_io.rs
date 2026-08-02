@@ -10,11 +10,21 @@
 // qubit-style: allow source-test-pair
 // Private behavior is covered through public integration tests.
 
-use std::ffi::{CString, OsString};
+use std::ffi::{
+    CString,
+    OsString,
+};
 use std::fs::File;
-use std::io::{Error, ErrorKind, Result};
+use std::io::{
+    Error,
+    ErrorKind,
+    Result,
+};
 use std::os::fd::AsRawFd;
-use std::os::unix::ffi::{OsStrExt, OsStringExt};
+use std::os::unix::ffi::{
+    OsStrExt,
+    OsStringExt,
+};
 use std::path::Path;
 
 use rustix::fs::Dir;
@@ -22,22 +32,12 @@ use rustix::fs::Dir;
 use crate::LocalRelativePath;
 
 use super::path_operations::add_path_context;
+use super::rooted_directory_reader::RootedDirectoryReader;
 use super::rooted_file_io::open_rooted_parent;
 use super::rooted_parent_mode::RootedParentMode;
 
 /// A native child name and its no-follow metadata.
 pub(crate) type RootedDirectoryEntry = (OsString, libc::stat);
-
-/// Lazily reads entries from one already-opened rooted directory.
-#[derive(Debug)]
-pub(crate) struct RootedDirectoryReader {
-    /// Descriptor retained for metadata queries on yielded children.
-    directory: File,
-    /// Native stream that advances without materializing the whole directory.
-    stream: Dir,
-    /// Path used only to enrich native I/O errors.
-    diagnostic_path: std::path::PathBuf,
-}
 
 impl RootedDirectoryReader {
     /// Opens a reader over an already-authorized directory descriptor.
@@ -57,7 +57,9 @@ impl RootedDirectoryReader {
     ///
     /// Returns `Ok(None)` after the directory is exhausted, and returns an I/O
     /// error when enumeration or no-follow metadata inspection fails.
-    pub(crate) fn next_entry(&mut self) -> Result<Option<RootedDirectoryEntry>> {
+    pub(crate) fn next_entry(
+        &mut self,
+    ) -> Result<Option<RootedDirectoryEntry>> {
         loop {
             let entry = match self.stream.next() {
                 Some(entry) => entry?,
@@ -69,9 +71,10 @@ impl RootedDirectoryReader {
                 continue;
             }
             let name = OsString::from_vec(name.to_vec());
-            let c_name =
-                CString::new(name.as_bytes()).expect("directory entry names never contain NUL");
-            let status = stat_child(&self.directory, &c_name, &self.diagnostic_path)?;
+            let c_name = CString::new(name.as_bytes())
+                .expect("directory entry names never contain NUL");
+            let status =
+                stat_child(&self.directory, &c_name, &self.diagnostic_path)?;
             return Ok(Some((name, status)));
         }
     }
@@ -96,12 +99,21 @@ pub(crate) fn open_rooted_directory_reader(
     path: &LocalRelativePath,
 ) -> Result<RootedDirectoryReader> {
     let diagnostic_path = diagnostic_root.join(path.as_path());
-    let (parent, name, _) =
-        open_rooted_parent(root, &diagnostic_path, path, RootedParentMode::OpenExisting)?
-            .into_parts();
-    let directory = open_directory_component(&parent, &name).map_err(|error| {
-        add_path_context(error, "open rooted directory for listing", &diagnostic_path)
-    })?;
+    let (parent, name, _) = open_rooted_parent(
+        root,
+        &diagnostic_path,
+        path,
+        RootedParentMode::OpenExisting,
+    )?
+    .into_parts();
+    let directory =
+        open_directory_component(&parent, &name).map_err(|error| {
+            add_path_context(
+                error,
+                "open rooted directory for listing",
+                &diagnostic_path,
+            )
+        })?;
     RootedDirectoryReader::open(directory, &diagnostic_path)
 }
 
@@ -121,12 +133,21 @@ pub(crate) fn read_rooted_directory(
     path: &LocalRelativePath,
 ) -> Result<Vec<RootedDirectoryEntry>> {
     let diagnostic_path = diagnostic_root.join(path.as_path());
-    let (parent, name, _) =
-        open_rooted_parent(root, &diagnostic_path, path, RootedParentMode::OpenExisting)?
-            .into_parts();
-    let directory = open_directory_component(&parent, &name).map_err(|error| {
-        add_path_context(error, "open rooted directory for listing", &diagnostic_path)
-    })?;
+    let (parent, name, _) = open_rooted_parent(
+        root,
+        &diagnostic_path,
+        path,
+        RootedParentMode::OpenExisting,
+    )?
+    .into_parts();
+    let directory =
+        open_directory_component(&parent, &name).map_err(|error| {
+            add_path_context(
+                error,
+                "open rooted directory for listing",
+                &diagnostic_path,
+            )
+        })?;
     read_directory_handle(&directory, &diagnostic_path)
 }
 
@@ -144,9 +165,11 @@ pub(crate) fn create_rooted_directory(
     } else {
         RootedParentMode::OpenExisting
     };
-    let (parent, name, _) = open_rooted_parent(root, &diagnostic_path, path, mode)?.into_parts();
+    let (parent, name, _) =
+        open_rooted_parent(root, &diagnostic_path, path, mode)?.into_parts();
     // SAFETY: `parent` and `name` remain live for this non-retaining call.
-    let result = unsafe { libc::mkdirat(parent.as_raw_fd(), name.as_ptr(), 0o700) };
+    let result =
+        unsafe { libc::mkdirat(parent.as_raw_fd(), name.as_ptr(), 0o700) };
     if result == 0 {
         return Ok(());
     }
@@ -218,12 +241,17 @@ fn unlink_rooted_entry(
     directory: bool,
 ) -> Result<()> {
     let diagnostic_path = diagnostic_root.join(path.as_path());
-    let (parent, name, _) =
-        open_rooted_parent(root, &diagnostic_path, path, RootedParentMode::OpenExisting)?
-            .into_parts();
+    let (parent, name, _) = open_rooted_parent(
+        root,
+        &diagnostic_path,
+        path,
+        RootedParentMode::OpenExisting,
+    )?
+    .into_parts();
     let flags = if directory { libc::AT_REMOVEDIR } else { 0 };
     // SAFETY: `parent` and `name` remain live for this non-retaining call.
-    let result = unsafe { libc::unlinkat(parent.as_raw_fd(), name.as_ptr(), flags) };
+    let result =
+        unsafe { libc::unlinkat(parent.as_raw_fd(), name.as_ptr(), flags) };
     if result == 0 {
         Ok(())
     } else {
@@ -245,9 +273,13 @@ pub(crate) fn rename_rooted_entry(
 ) -> Result<()> {
     let source_path = diagnostic_root.join(source.as_path());
     let destination_path = diagnostic_root.join(destination.as_path());
-    let (source_parent, source_name, _) =
-        open_rooted_parent(root, &source_path, source, RootedParentMode::OpenExisting)?
-            .into_parts();
+    let (source_parent, source_name, _) = open_rooted_parent(
+        root,
+        &source_path,
+        source,
+        RootedParentMode::OpenExisting,
+    )?
+    .into_parts();
     let (destination_parent, destination_name, _) = open_rooted_parent(
         root,
         &destination_path,
@@ -301,24 +333,29 @@ pub(crate) fn set_rooted_permissions(
     mode: u32,
 ) -> Result<()> {
     let diagnostic_path = diagnostic_root.join(path.as_path());
-    let (parent, name, _) =
-        open_rooted_parent(root, &diagnostic_path, path, RootedParentMode::OpenExisting)?
-            .into_parts();
+    let (parent, name, _) = open_rooted_parent(
+        root,
+        &diagnostic_path,
+        path,
+        RootedParentMode::OpenExisting,
+    )?
+    .into_parts();
     let status = stat_child(&parent, &name, &diagnostic_path)?;
     let flags = if is_directory(status.st_mode as libc::mode_t) {
         libc::O_RDONLY | libc::O_DIRECTORY | libc::O_NOFOLLOW | libc::O_CLOEXEC
     } else {
         libc::O_RDONLY | libc::O_NONBLOCK | libc::O_NOFOLLOW | libc::O_CLOEXEC
     };
-    let entry = super::rooted_file_io::open_file_at(&parent, &name, flags, 0).map_err(|error| {
+    let entry = super::rooted_file_io::open_file_at(&parent, &name, flags, 0)
+        .map_err(|error| {
         add_path_context(
             error,
             "open rooted entry for permission update",
             &diagnostic_path,
         )
     })?;
-    let native_mode =
-        libc::mode_t::try_from(mode & 0o7777).expect("portable permission bits fit native mode");
+    let native_mode = libc::mode_t::try_from(mode & 0o7777)
+        .expect("portable permission bits fit native mode");
     // SAFETY: `entry` owns a valid descriptor for this non-retaining call.
     let result = unsafe { libc::fchmod(entry.as_raw_fd(), native_mode) };
     if result == 0 {
@@ -346,12 +383,14 @@ fn read_directory_handle(
             continue;
         }
         let name = OsString::from_vec(name.to_vec());
-        let c_name =
-            CString::new(name.as_bytes()).expect("directory entry names never contain NUL");
+        let c_name = CString::new(name.as_bytes())
+            .expect("directory entry names never contain NUL");
         let status = stat_child(directory, &c_name, diagnostic_path)?;
         entries.push((name, status));
     }
-    entries.sort_unstable_by(|(left_name, _), (right_name, _)| left_name.cmp(right_name));
+    entries.sort_unstable_by(|(left_name, _), (right_name, _)| {
+        left_name.cmp(right_name)
+    });
     Ok(entries)
 }
 
@@ -367,7 +406,11 @@ fn open_directory_component(parent: &File, name: &CString) -> Result<File> {
 }
 
 /// Reads no-follow metadata for one child of an open directory.
-fn stat_child(parent: &File, name: &CString, diagnostic_path: &Path) -> Result<libc::stat> {
+fn stat_child(
+    parent: &File,
+    name: &CString,
+    diagnostic_path: &Path,
+) -> Result<libc::stat> {
     let mut status = std::mem::MaybeUninit::<libc::stat>::uninit();
     // SAFETY: the output storage, descriptor, and name remain valid for this
     // non-retaining call.
@@ -397,7 +440,11 @@ fn rooted_status(
     diagnostic_root: &Path,
     path: &LocalRelativePath,
 ) -> Result<libc::stat> {
-    super::rooted_file_io::read_rooted_symlink_metadata(root, diagnostic_root, path)
+    super::rooted_file_io::read_rooted_symlink_metadata(
+        root,
+        diagnostic_root,
+        path,
+    )
 }
 
 /// Returns whether one native mode represents a directory.

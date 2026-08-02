@@ -21,10 +21,9 @@ use qubit_local_files::{
 fn test_local_persist_outcome_reports_published_path_and_guarantees() {
     let root = tempfile::tempdir().expect("test root must be created");
     let target = root.path().join("target.txt");
-    let mut temporary = LocalFileSystem::create_temp_file(
-        &LocalTempFileOptions::new().with_parent(root.path()),
-    )
-    .expect("temporary file must be created");
+    let mut temporary = LocalFileSystem::host()
+        .create_temp_file(&LocalTempFileOptions::new().with_parent(root.path()))
+        .expect("temporary file must be created");
     temporary
         .write_all(b"payload")
         .expect("temporary file must be writable");

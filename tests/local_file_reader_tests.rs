@@ -29,9 +29,9 @@ fn test_local_file_reader_reads_and_seeks() {
     let path = directory.path().join("payload");
     std::fs::write(&path, b"abcdef").expect("fixture should be written");
 
-    let mut reader =
-        LocalFileSystem::open_reader(&path, &LocalReadOptions::new())
-            .expect("regular file should open for reading");
+    let mut reader = LocalFileSystem::host()
+        .open_reader(&path, &LocalReadOptions::new())
+        .expect("regular file should open for reading");
     assert!(
         reader
             .as_file()
@@ -62,9 +62,9 @@ fn test_local_file_reader_supports_vectored_reads() {
     let path = directory.path().join("payload");
     std::fs::write(&path, b"abcdef").expect("fixture should be written");
 
-    let mut reader =
-        LocalFileSystem::open_reader(&path, &LocalReadOptions::new())
-            .expect("regular file should open for reading");
+    let mut reader = LocalFileSystem::host()
+        .open_reader(&path, &LocalReadOptions::new())
+        .expect("regular file should open for reading");
     let mut first = [0_u8; 2];
     let mut second = [0_u8; 4];
     let mut buffers =
@@ -97,7 +97,8 @@ fn test_local_file_reader_rejects_final_file_symlink_on_windows() {
         panic!("file symlink should be created: {error}");
     }
 
-    let error = LocalFileSystem::open_reader(&link, &LocalReadOptions::new())
+    let error = LocalFileSystem::host()
+        .open_reader(&link, &LocalReadOptions::new())
         .expect_err("reader must not follow a final file symlink");
     assert_eq!(LocalFileErrorKind::TypeConflict, error.kind());
 }

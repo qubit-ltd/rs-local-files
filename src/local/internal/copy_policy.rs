@@ -5,11 +5,14 @@
 //
 //    Licensed under the Apache License, Version 2.0.
 // =============================================================================
-// qubit-style: allow source-test-pair -- exercised through copy integration tests.
+// qubit-style: allow source-test-pair -- exercised through copy integration
+// tests.
 //! Shared, side-effect-free copy policy decisions.
 
 use crate::{
-    LocalAtomicityRequirement, LocalCopySourceMode, LocalCopyTypeConflictPolicy,
+    LocalAtomicityRequirement,
+    LocalCopySourceMode,
+    LocalCopyTypeConflictPolicy,
     LocalDurabilityRequirement,
 };
 

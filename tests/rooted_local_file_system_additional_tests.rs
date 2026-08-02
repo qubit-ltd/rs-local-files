@@ -23,13 +23,13 @@ use qubit_local_files::{
     LocalDeleteOptions,
     LocalFileErrorKind,
     LocalFileKind,
+    LocalFileSystem,
     LocalListOptions,
     LocalReadOptions,
     LocalTempFileOptions,
     LocalWriteMode,
     LocalWriteOptions,
     LocalWriterState,
-    RootedLocalFileSystem,
 };
 use tempfile::tempdir;
 
@@ -38,7 +38,7 @@ use tempfile::tempdir;
 #[test]
 fn test_rooted_local_file_system_runs_core_entry_workflow() {
     let parent = tempdir().expect("root parent should be created");
-    let rooted = RootedLocalFileSystem::open(parent.path())
+    let rooted = LocalFileSystem::rooted(parent.path())
         .expect("root authority should open");
     let create_options = LocalCreateDirectoryOptions::new().with_recursive();
 
@@ -114,8 +114,8 @@ fn test_rooted_sessions_report_diagnostic_paths_after_root_rename() {
     fs::create_dir(&original).expect("original root should be created");
     fs::write(original.join("listed"), b"authoritative")
         .expect("listed fixture should be written");
-    let rooted = RootedLocalFileSystem::open(&original)
-        .expect("root authority should open");
+    let rooted =
+        LocalFileSystem::rooted(&original).expect("root authority should open");
     fs::rename(&original, &renamed).expect("opened root should be renamed");
     fs::create_dir(&original).expect("replacement root should be created");
     fs::create_dir(original.join("listed"))
@@ -158,7 +158,7 @@ fn test_rooted_sessions_report_diagnostic_paths_after_root_rename() {
 #[test]
 fn test_rooted_local_file_system_handles_entry_type_and_missing_policies() {
     let parent = tempdir().expect("root parent should be created");
-    let rooted = RootedLocalFileSystem::open(parent.path())
+    let rooted = LocalFileSystem::rooted(parent.path())
         .expect("root authority should open");
     fs::create_dir(parent.path().join("directory"))
         .expect("directory fixture should be created");
@@ -198,7 +198,7 @@ fn test_rooted_local_file_system_handles_entry_type_and_missing_policies() {
 #[test]
 fn test_rooted_local_file_system_append_commit_and_abort_report_states() {
     let parent = tempdir().expect("root parent should be created");
-    let rooted = RootedLocalFileSystem::open(parent.path())
+    let rooted = LocalFileSystem::rooted(parent.path())
         .expect("root authority should open");
     fs::write(parent.path().join("payload"), b"base")
         .expect("payload fixture should be written");
@@ -245,7 +245,7 @@ fn test_rooted_local_file_system_append_commit_and_abort_report_states() {
 #[test]
 fn test_rooted_local_file_system_rejects_zero_temp_attempts() {
     let parent = tempdir().expect("root parent should be created");
-    let rooted = RootedLocalFileSystem::open(parent.path())
+    let rooted = LocalFileSystem::rooted(parent.path())
         .expect("root authority should open");
 
     let file_error = rooted
@@ -259,7 +259,7 @@ fn test_rooted_local_file_system_rejects_zero_temp_attempts() {
 #[test]
 fn test_rooted_local_file_system_rejects_follow_symlink_listing() {
     let parent = tempdir().expect("root parent should be created");
-    let rooted = RootedLocalFileSystem::open(parent.path())
+    let rooted = LocalFileSystem::rooted(parent.path())
         .expect("root authority should open");
 
     let error = rooted
@@ -277,7 +277,7 @@ fn test_rooted_local_file_system_rejects_follow_symlink_listing() {
 #[test]
 fn test_rooted_local_file_system_list_handles_missing_and_zero_depth() {
     let parent = tempdir().expect("root parent should be created");
-    let rooted = RootedLocalFileSystem::open(parent.path())
+    let rooted = LocalFileSystem::rooted(parent.path())
         .expect("root authority should open");
     fs::write(parent.path().join("entry"), b"payload")
         .expect("entry fixture should be written");
@@ -306,7 +306,7 @@ fn test_rooted_local_file_system_recursive_listing_honors_max_depth() {
     fs::create_dir_all(&nested).expect("nested fixture should be created");
     fs::write(nested.join("payload"), b"payload")
         .expect("nested payload should be written");
-    let rooted = RootedLocalFileSystem::open(parent.path())
+    let rooted = LocalFileSystem::rooted(parent.path())
         .expect("root authority should open");
 
     let entries = rooted
@@ -330,7 +330,7 @@ fn test_rooted_local_file_system_reports_changed_child_during_recursive_list() {
     let parent = tempdir().expect("root parent should be created");
     let child = parent.path().join("child");
     fs::create_dir(&child).expect("child directory should be created");
-    let rooted = RootedLocalFileSystem::open(parent.path())
+    let rooted = LocalFileSystem::rooted(parent.path())
         .expect("root authority should open");
     let mut walker = rooted
         .list(Path::new(""), &LocalListOptions::new().with_recursive())
@@ -359,7 +359,7 @@ fn test_rooted_local_file_system_reports_changed_child_during_recursive_list() {
 #[test]
 fn test_rooted_local_file_system_copy_enforces_directory_policies() {
     let parent = tempdir().expect("root parent should be created");
-    let rooted = RootedLocalFileSystem::open(parent.path())
+    let rooted = LocalFileSystem::rooted(parent.path())
         .expect("root authority should open");
     let source = parent.path().join("source");
     fs::create_dir(&source).expect("source directory should be created");
@@ -412,7 +412,7 @@ fn test_rooted_local_file_system_copy_enforces_directory_policies() {
 #[test]
 fn test_rooted_local_file_system_rejects_lexical_escape_across_operations() {
     let parent = tempdir().expect("root parent should be created");
-    let rooted = RootedLocalFileSystem::open(parent.path())
+    let rooted = LocalFileSystem::rooted(parent.path())
         .expect("root authority should open");
 
     let create_error = rooted
