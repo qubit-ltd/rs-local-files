@@ -72,6 +72,7 @@ impl LocalDirectoryWalker {
         root: PathBuf,
         options: LocalListOptions,
     ) -> LocalResult<Self> {
+        validate_options(&root, &options)?;
         let metadata = fs::symlink_metadata(&root)
             .map_err(|error| walk_io_error(&root, error))?;
         if !metadata.file_type().is_dir() {
@@ -141,16 +142,21 @@ impl LocalDirectoryWalker {
         path: Option<crate::local::LocalRelativePath>,
         options: LocalListOptions,
     ) -> LocalResult<Self> {
+        let diagnostic_root = root.path().join(
+            path.as_ref()
+                .map_or_else(PathBuf::new, |path| path.as_path().to_path_buf()),
+        );
+        validate_options(&diagnostic_root, &options)?;
         if options.follows_symlinks() {
             return Err(LocalFileError::new(
                 LocalFileErrorKind::RequirementNotMet,
                 LocalFileOperation::List,
-            ));
+            )
+            .with_reason("rooted directory walking cannot follow symbolic links safely"));
         }
         let authority_parent = path
             .as_ref()
             .map_or_else(PathBuf::new, |path| path.as_path().to_path_buf());
-        let diagnostic_root = root.path().join(&authority_parent);
         Ok(Self {
             root: diagnostic_root,
             options,
@@ -258,6 +264,31 @@ impl LocalDirectoryWalker {
         });
         Ok(())
     }
+}
+
+/// Validates options that must hold before a walker can be constructed.
+///
+/// # Parameters
+///
+/// - `root`: Diagnostic traversal root.
+/// - `options`: Traversal policy to validate.
+///
+/// # Errors
+///
+/// Returns `InvalidOptions` when the open-directory budget is zero.
+fn validate_options(
+    root: &Path,
+    options: &LocalListOptions,
+) -> LocalResult<()> {
+    if options.max_open_directories() == 0 {
+        return Err(LocalFileError::new(
+            LocalFileErrorKind::InvalidOptions,
+            LocalFileOperation::List,
+        )
+        .with_path(root.to_path_buf())
+        .with_reason("maximum open directory count must be greater than zero"));
+    }
+    Ok(())
 }
 
 impl Iterator for LocalDirectoryWalker {

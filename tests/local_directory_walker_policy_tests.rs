@@ -96,6 +96,27 @@ fn test_local_directory_walker_zero_max_depth_yields_no_entries() {
     assert!(entries.is_empty());
 }
 
+/// Verifies zero directory-handle budgets are rejected instead of being
+/// silently rewritten to one.
+#[test]
+fn test_local_directory_walker_rejects_zero_open_directory_budget() {
+    let directory = tempdir().expect("temporary directory should be created");
+
+    let error = LocalFileSystem::host()
+        .list(
+            directory.path(),
+            &LocalListOptions::new().with_max_open_directories(0),
+        )
+        .expect_err("zero directory-handle budgets must be invalid");
+
+    assert_eq!(LocalFileErrorKind::InvalidOptions, error.kind());
+    assert_eq!(Some(directory.path()), error.path());
+    assert_eq!(
+        Some("maximum open directory count must be greater than zero"),
+        error.reason(),
+    );
+}
+
 /// Verifies follow-mode resolves a symlinked directory and detects a traversal
 /// cycle rather than looping indefinitely.
 #[cfg(unix)]
