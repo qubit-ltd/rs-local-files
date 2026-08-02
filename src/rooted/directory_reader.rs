@@ -11,9 +11,6 @@ use std::fs::File;
 use std::io::Result;
 use std::path::Path;
 
-#[cfg(windows)]
-use std::vec::IntoIter;
-
 use crate::local;
 
 use super::{Entry, Metadata};
@@ -24,9 +21,9 @@ pub(crate) struct DirectoryReader {
     /// Platform-native directory enumerator.
     #[cfg(unix)]
     inner: local::RootedDirectoryReader,
-    /// Windows compatibility iterator pending native incremental enumeration.
+    /// Native stream that advances without materializing the whole directory.
     #[cfg(windows)]
-    inner: IntoIter<Entry>,
+    inner: local::RootedDirectoryReader,
 }
 
 impl DirectoryReader {
@@ -40,19 +37,7 @@ impl DirectoryReader {
         }
         #[cfg(windows)]
         {
-            local::read_root_directory(root, diagnostic_root)
-                .and_then(|entries| {
-                    entries
-                        .into_iter()
-                        .map(|(name, file)| {
-                            Metadata::from_open_file(&file)
-                                .map(|metadata| Entry::new(name, metadata))
-                        })
-                        .collect::<Result<Vec<_>>>()
-                })
-                .map(|entries| Self {
-                    inner: entries.into_iter(),
-                })
+            local::open_root_directory_reader(root, diagnostic_root).map(|inner| Self { inner })
         }
         #[cfg(not(any(unix, windows)))]
         {
@@ -80,19 +65,8 @@ impl DirectoryReader {
         }
         #[cfg(windows)]
         {
-            local::read_rooted_directory(root, diagnostic_root, path)
-                .and_then(|entries| {
-                    entries
-                        .into_iter()
-                        .map(|(name, file)| {
-                            Metadata::from_open_file(&file)
-                                .map(|metadata| Entry::new(name, metadata))
-                        })
-                        .collect::<Result<Vec<_>>>()
-                })
-                .map(|entries| Self {
-                    inner: entries.into_iter(),
-                })
+            local::open_rooted_directory_reader(root, diagnostic_root, path)
+                .map(|inner| Self { inner })
         }
         #[cfg(not(any(unix, windows)))]
         {
@@ -117,7 +91,13 @@ impl DirectoryReader {
         }
         #[cfg(windows)]
         {
-            Ok(self.inner.next())
+            self.inner.next_entry().and_then(|entry| {
+                entry
+                    .map(|(name, file)| {
+                        Metadata::from_open_file(&file).map(|metadata| Entry::new(name, metadata))
+                    })
+                    .transpose()
+            })
         }
         #[cfg(not(any(unix, windows)))]
         {
