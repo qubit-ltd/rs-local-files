@@ -93,7 +93,7 @@ impl RootedLocalFileSystem {
         })?;
         Ok(Self {
             root: Arc::new(root),
-            capabilities: LocalFileSystemCapabilities::detect(),
+            capabilities: LocalFileSystemCapabilities::detect_rooted(),
         })
     }
 
