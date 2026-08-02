@@ -55,6 +55,24 @@ fn test_local_file_error_requirement_not_met_is_structured() {
     assert!(error.source().is_none());
 }
 
+/// Verifies policy failures can expose a stable human-readable reason.
+#[test]
+fn test_local_file_error_reason_is_structured_and_displayed() {
+    let error = LocalFileError::new(
+        LocalFileErrorKind::RequirementNotMet,
+        LocalFileOperation::OpenWriter,
+    )
+    .with_reason("required atomic publication is unavailable");
+
+    assert_eq!(
+        Some("required atomic publication is unavailable"),
+        error.reason(),
+    );
+    assert!(error
+        .to_string()
+        .contains("required atomic publication is unavailable"));
+}
+
 /// Verifies conversion to a standard I/O error preserves the native error kind.
 #[test]
 fn test_local_file_error_into_io_error_preserves_kind_and_context() {

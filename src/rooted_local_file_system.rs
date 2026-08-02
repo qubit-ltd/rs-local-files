@@ -447,6 +447,7 @@ impl RootedLocalFileSystem {
                 LocalFileErrorKind::RequirementNotMet,
                 LocalFileOperation::OpenWriter,
             )
+            .with_reason("append mode cannot provide required atomic publication")
             .with_path(path.to_path_buf()));
         }
         if options.mode() != LocalWriteMode::Append
@@ -457,6 +458,7 @@ impl RootedLocalFileSystem {
                 LocalFileErrorKind::RequirementNotMet,
                 LocalFileOperation::OpenWriter,
             )
+            .with_reason("required directory durability is unavailable for this rooted authority")
             .with_path(path.to_path_buf()));
         }
         let relative = rooted_path(path, LocalFileOperation::OpenWriter)?;
@@ -650,6 +652,7 @@ impl RootedLocalFileSystem {
                     LocalFileErrorKind::RequirementNotMet,
                     LocalFileOperation::Copy,
                 )
+                .with_reason("required directory durability is unavailable for this rooted authority")
                 .with_path(source.to_path_buf())
                 .with_target(target.to_path_buf()),
             ));
@@ -676,6 +679,7 @@ impl RootedLocalFileSystem {
                     LocalFileErrorKind::RequirementNotMet,
                     LocalFileOperation::Copy,
                 )
+                .with_reason("copy source type does not satisfy the selected source mode")
                 .with_path(source.to_path_buf())
                 .with_target(target.to_path_buf()),
             ));
@@ -732,6 +736,7 @@ impl RootedLocalFileSystem {
                     LocalFileErrorKind::RequirementNotMet,
                     LocalFileOperation::Copy,
                 )
+                .with_reason("required copy guarantees are unavailable for this rooted authority")
                 .with_path(source.to_path_buf())
                 .with_target(target.to_path_buf()),
             ));
@@ -747,6 +752,7 @@ impl RootedLocalFileSystem {
                     LocalFileErrorKind::RequirementNotMet,
                     LocalFileOperation::Copy,
                 )
+                .with_reason("required atomic replacement is unavailable for this copy")
                 .with_path(source.to_path_buf())
                 .with_target(target.to_path_buf()),
             ));
@@ -921,6 +927,7 @@ impl RootedLocalFileSystem {
                     LocalFileErrorKind::RequirementNotMet,
                     LocalFileOperation::Rename,
                 )
+                .with_reason("required directory durability is unavailable for this rooted authority")
                 .with_path(source.to_path_buf())
                 .with_target(target.to_path_buf()),
             ));
