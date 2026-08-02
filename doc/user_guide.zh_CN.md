@@ -140,7 +140,9 @@ rooted 路径必须是相对后代。绝对路径、平台前缀、`.`、`..` �
 
 Linux、Windows 和 macOS 会进行运行时测试。FreeBSD 与 Android 仅做编译检查。
 可通过 `LocalFileSystem::host().capabilities()` 查看主机实现；rooted 实例返回打开
-权限时缓存的快照，`scope()` 供集成层区分两种命名空间。路径限制只有对目标文件系统验证成功时才是 `Some`。
+权限时缓存的快照，`scope()` 供集成层区分两种命名空间；Rooted 实例的诊断锚点通过
+`diagnostic_root()` 单独读取。Host free function 只是 `LocalFileSystem::host()` 的便捷别名。
+路径限制只有对目标文件系统验证成功时才是 `Some`。
 原子 rename、原子 replace 与临时资源原子持久化会分别报告，因为各平台支持并不相同。
 
 继续阅读 [README](../README.zh_CN.md)、[English user guide](user_guide.md) 或

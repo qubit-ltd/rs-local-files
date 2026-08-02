@@ -25,7 +25,7 @@ path 和操作系统文件 API，为以下使用者提供统一实现：
 3. 在 Unix 与 Windows 上使用各自可靠的 descriptor/handle-relative 原语；
 4. 所有操作返回结构化结果和错误，部分成功不能压缩成普通 I/O error；
 5. 相对路径、symlink、hard link、overwrite 和部分成功有明确规则；
-6. 公共工具由统一类型的关联方法或实例方法组织，不提供散落的 public free function；
+6. 公共工具的主语义由统一类型的关联方法或实例方法组织；Host 命名空间保留薄封装的 free function 作为便捷入口，并在文档中明确其等价于 `LocalFileSystem::host()`；
 7. 上层无需理解平台条件编译即可使用完整业务逻辑。
 
 非目标：
@@ -73,7 +73,8 @@ namespace，之后通过同一套实例方法操作：
 impl LocalFileSystem {
     pub const fn host() -> Self;
     pub fn rooted(root: &Path) -> LocalResult<Self>;
-    pub fn scope(&self) -> LocalFileSystemScope<'_>;
+    pub fn scope(&self) -> LocalFileSystemScope;
+    pub fn diagnostic_root(&self) -> Option<&Path>;
     pub const fn capabilities(&self) -> LocalFileSystemCapabilities;
 
     // metadata/open/list/copy/create/delete/rename/temp 操作均为 &self 方法
@@ -185,7 +186,8 @@ percent-decoding，也不解释 provider hierarchy：
 `qubit_fs::NativePathCodec`，并把 `from_canonical_text`/`to_canonical_text` 委托给这里。平台字节、`OsStr`、
 WTF-8 等算法不得保留在 `qubit-fs` 或 adapter 中。
 
-不提供同功能的 free function 别名。
+Host 便捷操作保留同功能的 free function 别名，以避免简单调用必须先写
+`LocalFileSystem::host()`；实例方法仍是需要显式 authority 时的规范入口。
 
 ### 4.4 有状态资源
 

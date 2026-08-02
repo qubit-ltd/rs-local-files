@@ -38,6 +38,16 @@ fn bench_path_codec(c: &mut Criterion) {
             black_box(restored);
         });
     });
+    let plain = std::ffi::OsStr::new("ordinary-unicode-文档");
+    c.bench_function("path_codec_plain", |b| {
+        b.iter(|| {
+            let canonical = LocalPathCodec::to_canonical_text(black_box(plain))
+                .expect("plain benchmark component should encode");
+            let restored = LocalPathCodec::from_canonical_text(&canonical)
+                .expect("plain benchmark component should decode");
+            black_box(restored);
+        });
+    });
 }
 
 fn bench_walk(c: &mut Criterion) {
