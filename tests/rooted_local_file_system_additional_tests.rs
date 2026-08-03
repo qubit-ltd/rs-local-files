@@ -153,6 +153,42 @@ fn test_rooted_sessions_report_diagnostic_paths_after_root_rename() {
     assert!(!original.join("written").exists());
 }
 
+/// Verifies followed rooted links continue to use the retained authority after
+/// the diagnostic root path is renamed.
+#[cfg(unix)]
+#[test]
+fn test_rooted_listing_follows_link_after_root_path_rename() {
+    use std::os::unix::fs::symlink;
+
+    let parent = tempdir().expect("temporary parent should be created");
+    let original = parent.path().join("original");
+    let renamed = parent.path().join("renamed");
+    fs::create_dir_all(original.join("target")).expect("target should exist");
+    fs::write(original.join("target/entry"), b"authoritative")
+        .expect("target entry should be written");
+    symlink("target", original.join("link")).expect("link should be created");
+    let rooted =
+        LocalFileSystem::rooted(&original).expect("root authority should open");
+
+    fs::rename(&original, &renamed).expect("diagnostic path should be renamed");
+
+    let entries = rooted
+        .list(Path::new("link"), &LocalListOptions::new().with_recursive())
+        .expect("rooted link should remain listable")
+        .collect::<Result<Vec<_>, _>>()
+        .expect("rooted link traversal should succeed");
+
+    assert_eq!(1, entries.len());
+    assert_eq!(Path::new("link/entry"), entries[0].relative_path());
+    assert_eq!(LocalFileKind::File, entries[0].metadata().kind());
+    assert_eq!(
+        b"authoritative",
+        fs::read(renamed.join("target/entry"))
+            .expect("authoritative target should remain readable")
+            .as_slice()
+    );
+}
+
 /// Verifies rooted file operations report expected errors and missing-entry
 /// policies without escaping the opened authority.
 #[test]

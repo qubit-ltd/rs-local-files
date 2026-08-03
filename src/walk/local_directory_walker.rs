@@ -493,17 +493,19 @@ fn next_rooted_entry(
         if metadata.kind() == crate::LocalFileKind::Symlink
             && state.symlink_policy.follows()
         {
+            let authority_root = state.root.authority_path();
             let diagnostic_path = state.root.path().join(&authority_path);
-            let target = match fs::canonicalize(&diagnostic_path) {
+            let authority_target = authority_root.join(&authority_path);
+            let target = match fs::canonicalize(&authority_target) {
                 Ok(target) => target,
                 Err(error) => {
                     return Some(Err(walk_io_error(&diagnostic_path, error)));
                 }
             };
-            let root = match fs::canonicalize(state.root.path()) {
+            let root = match fs::canonicalize(&authority_root) {
                 Ok(root) => root,
                 Err(error) => {
-                    return Some(Err(walk_io_error(state.root.path(), error)));
+                    return Some(Err(walk_io_error(&diagnostic_path, error)));
                 }
             };
             if !target.starts_with(&root) {

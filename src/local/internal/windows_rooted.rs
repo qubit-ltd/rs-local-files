@@ -28,7 +28,10 @@ use std::os::windows::io::{
     AsRawHandle,
     FromRawHandle,
 };
-use std::path::Path;
+use std::path::{
+    Path,
+    PathBuf,
+};
 use std::ptr::{
     null,
     null_mut,
@@ -69,6 +72,7 @@ use windows_sys::Win32::Storage::FileSystem::{
     FILE_FLAG_BACKUP_SEMANTICS,
     FILE_FLAG_OPEN_REPARSE_POINT,
     FILE_LIST_DIRECTORY,
+    FILE_NAME_NORMALIZED,
     FILE_READ_ATTRIBUTES,
     FILE_SHARE_DELETE,
     FILE_SHARE_READ,
@@ -76,6 +80,7 @@ use windows_sys::Win32::Storage::FileSystem::{
     FILE_WRITE_ATTRIBUTES,
     FileAttributeTagInfo,
     GetFileInformationByHandleEx,
+    GetFinalPathNameByHandleW,
     OPEN_EXISTING,
     SYNCHRONIZE,
 };
@@ -266,6 +271,23 @@ pub(crate) fn open_root_directory(path: &Path) -> Result<File> {
     let directory = unsafe { File::from_raw_handle(handle) };
     verify_real_directory(&directory)?;
     Ok(directory)
+}
+
+/// Returns the current native path of an opened root for symlink resolution.
+pub(crate) fn root_authority_path(root: &File, fallback: &Path) -> PathBuf {
+    let mut buffer = vec![0_u16; 512];
+    let length = unsafe {
+        GetFinalPathNameByHandleW(
+            root.as_raw_handle(),
+            buffer.as_mut_ptr(),
+            buffer.len() as u32,
+            FILE_NAME_NORMALIZED,
+        )
+    };
+    if length == 0 || length as usize >= buffer.len() {
+        return fallback.to_path_buf();
+    }
+    PathBuf::from(OsString::from_wide(&buffer[..length as usize]))
 }
 
 /// Reads metadata for a rooted entry without following the final component.

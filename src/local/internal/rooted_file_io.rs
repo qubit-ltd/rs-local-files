@@ -80,6 +80,39 @@ pub(crate) fn open_root_directory(path: &Path) -> Result<File> {
         .map(|()| directory)
 }
 
+/// Returns the current native path of an opened root for symlink resolution.
+///
+/// The path is derived from the retained descriptor rather than from the
+/// caller's diagnostic path, so it continues to identify the same directory
+/// after that path is renamed.
+pub(crate) fn root_authority_path(root: &File, fallback: &Path) -> PathBuf {
+    #[cfg(target_os = "macos")]
+    {
+        let mut buffer = [0_u8; libc::PATH_MAX as usize];
+        // SAFETY: `buffer` is writable storage of the size required by
+        // `F_GETPATH`, and `root` owns a live descriptor.
+        let result = unsafe {
+            libc::fcntl(root.as_raw_fd(), libc::F_GETPATH, buffer.as_mut_ptr())
+        };
+        if result == 0 {
+            let length = buffer
+                .iter()
+                .position(|byte| *byte == 0)
+                .unwrap_or(buffer.len());
+            return PathBuf::from(OsStr::from_bytes(&buffer[..length]));
+        }
+    }
+    #[cfg(not(target_os = "macos"))]
+    {
+        let descriptor_path =
+            PathBuf::from(format!("/proc/self/fd/{}", root.as_raw_fd()));
+        if let Ok(path) = std::fs::read_link(descriptor_path) {
+            return path;
+        }
+    }
+    fallback.to_path_buf()
+}
+
 /// Reads metadata for a final rooted entry without following a symbolic link.
 ///
 /// The traversal opens every parent through directory descriptors before using
