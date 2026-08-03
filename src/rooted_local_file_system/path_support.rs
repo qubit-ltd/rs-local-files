@@ -36,7 +36,12 @@ pub(super) fn rooted_path(
     operation: LocalFileOperation,
 ) -> LocalResult<crate::local::LocalRelativePath> {
     crate::local::LocalRelativePath::new(path).map_err(|error| {
-        LocalFileError::from_io(operation, Some(path.to_path_buf()), None, error)
+        LocalFileError::from_io(
+            operation,
+            Some(path.to_path_buf()),
+            None,
+            error,
+        )
     })
 }
 
@@ -50,7 +55,9 @@ pub(super) fn rooted_destination_is_directory(
     path: &crate::local::LocalRelativePath,
 ) -> io::Result<bool> {
     match root.symlink_metadata(path) {
-        Ok(metadata) => Ok(metadata.kind() == crate::rooted::EntryKind::Directory),
+        Ok(metadata) => {
+            Ok(metadata.kind() == crate::rooted::EntryKind::Directory)
+        }
         Err(error) if error.kind() == io::ErrorKind::NotFound => Ok(false),
         Err(error) => Err(error),
     }
@@ -69,7 +76,10 @@ pub(super) fn rooted_temp_parent(
 ) -> LocalResult<PathBuf> {
     parent.map_or_else(
         || Ok(PathBuf::new()),
-        |parent| rooted_path(parent, operation).map(|path| path.as_path().to_path_buf()),
+        |parent| {
+            rooted_path(parent, operation)
+                .map(|path| path.as_path().to_path_buf())
+        },
     )
 }
 
@@ -88,10 +98,11 @@ pub(super) fn validate_rooted_temp_parent(
     if parent.as_os_str().is_empty() {
         return Ok(());
     }
-    let relative = crate::local::LocalRelativePath::new(parent).map_err(|error| {
-        rooted_io_error(operation, parent, error)
-            .with_kind(LocalFileErrorKind::InvalidPath)
-    })?;
+    let relative =
+        crate::local::LocalRelativePath::new(parent).map_err(|error| {
+            rooted_io_error(operation, parent, error)
+                .with_kind(LocalFileErrorKind::InvalidPath)
+        })?;
     let metadata = root
         .symlink_metadata(&relative)
         .map_err(|error| rooted_io_error(operation, parent, error))?;
