@@ -17,6 +17,9 @@ use qubit_local_files::{
     LocalFileKind,
     LocalFileSystem,
     LocalListOptions,
+};
+#[cfg(unix)]
+use qubit_local_files::{
     LocalSymlinkPolicy,
     LocalWalkErrorPolicy,
 };
