@@ -151,6 +151,7 @@ pub(crate) use rooted_file_io::{
     open_rooted_native_reader,
     open_rooted_native_writer,
     read_rooted_symlink_metadata,
+    root_authority_path,
     sync_rooted_parent,
 };
 #[cfg(unix)]
@@ -196,6 +197,7 @@ pub(crate) use windows_rooted::{
     read_rooted_symlink_metadata,
     remove_rooted_entry,
     rename_rooted_entry,
+    root_authority_path,
     set_rooted_permissions,
 };
 #[cfg(windows)]

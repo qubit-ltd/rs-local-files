@@ -20,12 +20,16 @@ pub enum EntryKind {
     /// A symbolic link.
     Symlink,
     /// A named pipe (FIFO).
+    #[cfg(unix)]
     Fifo,
     /// A Unix-domain or platform-specific socket.
+    #[cfg(unix)]
     Socket,
     /// A block device.
+    #[cfg(unix)]
     BlockDevice,
     /// A character device.
+    #[cfg(unix)]
     CharDevice,
     /// A platform-specific special entry.
     Other,

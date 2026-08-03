@@ -1372,7 +1372,8 @@ pub(crate) fn resolve_rooted_path(
     if !symlink_policy.follows() {
         return Ok(RootedResolvedPath::Rooted(relative));
     }
-    let diagnostic = root.path().join(relative.as_path());
+    let authority_root = root.authority_path();
+    let diagnostic = authority_root.join(relative.as_path());
     let mut components = diagnostic.components().peekable();
     let mut current = PathBuf::new();
     let mut has_symlink = false;
@@ -1404,7 +1405,7 @@ pub(crate) fn resolve_rooted_path(
     let resolved = if follow_final {
         fs::canonicalize(&diagnostic)
     } else {
-        let parent = diagnostic.parent().unwrap_or(root.path());
+        let parent = diagnostic.parent().unwrap_or(&authority_root);
         fs::canonicalize(parent).map(|parent| {
             parent.join(
                 diagnostic
@@ -1414,7 +1415,7 @@ pub(crate) fn resolve_rooted_path(
         })
     }
     .map_err(|error| rooted_io_error(operation, path, error))?;
-    let canonical_root = fs::canonicalize(root.path())
+    let canonical_root = fs::canonicalize(&authority_root)
         .map_err(|error| rooted_io_error(operation, path, error))?;
     if resolved.starts_with(&canonical_root) {
         let relative = resolved
@@ -1603,9 +1604,13 @@ pub(crate) fn rooted_metadata(
         crate::rooted::EntryKind::File => LocalFileKind::File,
         crate::rooted::EntryKind::Directory => LocalFileKind::Directory,
         crate::rooted::EntryKind::Symlink => LocalFileKind::Symlink,
+        #[cfg(unix)]
         crate::rooted::EntryKind::Fifo => LocalFileKind::Fifo,
+        #[cfg(unix)]
         crate::rooted::EntryKind::Socket => LocalFileKind::Socket,
+        #[cfg(unix)]
         crate::rooted::EntryKind::BlockDevice => LocalFileKind::BlockDevice,
+        #[cfg(unix)]
         crate::rooted::EntryKind::CharDevice => LocalFileKind::CharDevice,
         crate::rooted::EntryKind::Other => LocalFileKind::Other,
     };
