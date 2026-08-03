@@ -646,7 +646,9 @@ fn from_canonical_absolute_components<'a>(
         return Err(invalid_path_error());
     };
     let native_drive = decode_canonical_component(drive)?;
-    if root != "" || !is_windows_drive_component(drive) || native_drive != drive
+    if !root.is_empty()
+        || !is_windows_drive_component(drive)
+        || native_drive != drive
     {
         return Err(invalid_path_error());
     }
