@@ -80,9 +80,9 @@ fn test_list_and_read_option_builders_retain_policies() {
         LocalListOptions::with_recursive
             as fn(LocalListOptions) -> LocalListOptions,
     );
-    let list_follow = black_box(
-        LocalListOptions::with_follow_symlinks
-            as fn(LocalListOptions) -> LocalListOptions,
+    let list_policy = black_box(
+        LocalListOptions::with_symlink_policy
+            as fn(LocalListOptions, LocalSymlinkPolicy) -> LocalListOptions,
     );
     let list_max_depth = black_box(
         LocalListOptions::with_max_depth
@@ -93,11 +93,20 @@ fn test_list_and_read_option_builders_retain_policies() {
             as fn(LocalListOptions, usize) -> LocalListOptions,
     );
     let listing = list_max_handles(
-        list_max_depth(list_follow(list_recursive(list())), 3),
+        list_max_depth(
+            list_policy(
+                list_recursive(list()),
+                LocalSymlinkPolicy::FollowWithinScope,
+            ),
+            3,
+        ),
         7,
     );
     assert!(black_box(LocalListOptions::recursive)(&listing));
-    assert!(black_box(LocalListOptions::follows_symlinks)(&listing));
+    assert_eq!(
+        Some(LocalSymlinkPolicy::FollowWithinScope),
+        black_box(LocalListOptions::symlink_policy)(&listing),
+    );
     assert_eq!(black_box(LocalListOptions::max_depth)(&listing), Some(3));
     assert_eq!(
         black_box(LocalListOptions::max_open_directories)(&listing),
@@ -127,7 +136,7 @@ fn test_copy_rename_and_write_option_builders_retain_policies() {
         .with_conflict(LocalCopyConflictPolicy::Overwrite)
         .with_type_conflict(LocalCopyTypeConflictPolicy::Replace)
         .with_metadata_preservation(LocalMetadataPreservePolicy::Permissions)
-        .with_symlink_policy(LocalSymlinkPolicy::Follow)
+        .with_symlink_policy(LocalSymlinkPolicy::FollowWithinScope)
         .with_tree_source()
         .with_parent()
         .with_atomicity(LocalAtomicityRequirement::Required)
@@ -138,7 +147,10 @@ fn test_copy_rename_and_write_option_builders_retain_policies() {
         copy.preserve_metadata(),
         LocalMetadataPreservePolicy::Permissions
     );
-    assert_eq!(copy.symlink_policy(), LocalSymlinkPolicy::Follow);
+    assert_eq!(
+        copy.symlink_policy_override(),
+        Some(LocalSymlinkPolicy::FollowWithinScope)
+    );
     assert_eq!(copy.source_mode(), LocalCopySourceMode::Tree);
     assert_eq!(copy.atomicity(), LocalAtomicityRequirement::Required);
     assert_eq!(copy.durability(), LocalDurabilityRequirement::Required);
@@ -234,7 +246,7 @@ fn test_option_constructors_expose_conservative_values() {
 
     let listing = black_box(LocalListOptions::new as fn() -> _)();
     assert!(!black_box(LocalListOptions::recursive)(&listing));
-    assert!(!black_box(LocalListOptions::follows_symlinks)(&listing));
+    assert_eq!(None, black_box(LocalListOptions::symlink_policy)(&listing));
     assert_eq!(None, black_box(LocalListOptions::max_depth)(&listing));
 
     let copy = black_box(LocalCopyOptions::new as fn() -> _)();
@@ -251,8 +263,8 @@ fn test_option_constructors_expose_conservative_values() {
         black_box(LocalCopyOptions::preserve_metadata)(&copy)
     );
     assert_eq!(
-        LocalSymlinkPolicy::Reject,
-        black_box(LocalCopyOptions::symlink_policy)(&copy)
+        None,
+        black_box(LocalCopyOptions::symlink_policy_override)(&copy)
     );
     assert_eq!(
         LocalCopySourceMode::Auto,

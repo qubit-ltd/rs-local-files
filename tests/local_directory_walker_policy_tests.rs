@@ -16,6 +16,7 @@ use qubit_local_files::{
     LocalFileKind,
     LocalFileSystem,
     LocalListOptions,
+    LocalSymlinkPolicy,
     LocalWalkErrorPolicy,
 };
 use tempfile::tempdir;
@@ -140,7 +141,7 @@ fn test_local_directory_walker_follow_mode_traverses_links_and_rejects_cycles()
             directory.path(),
             &LocalListOptions::new()
                 .with_recursive()
-                .with_follow_symlinks(),
+                .with_symlink_policy(LocalSymlinkPolicy::FollowWithinScope),
         )
         .expect("follow-mode walker should open")
         .collect::<Result<Vec<_>, _>>()
@@ -158,7 +159,7 @@ fn test_local_directory_walker_follow_mode_traverses_links_and_rejects_cycles()
             directory.path(),
             &LocalListOptions::new()
                 .with_recursive()
-                .with_follow_symlinks(),
+                .with_symlink_policy(LocalSymlinkPolicy::FollowWithinScope),
         )
         .expect("cycle walker should open")
         .find_map(Result::err)
@@ -182,7 +183,8 @@ fn test_local_directory_walker_follow_mode_reports_dangling_link() {
     let error = LocalFileSystem::host()
         .list(
             directory.path(),
-            &LocalListOptions::new().with_follow_symlinks(),
+            &LocalListOptions::new()
+                .with_symlink_policy(LocalSymlinkPolicy::FollowWithinScope),
         )
         .expect("follow-mode walker should open")
         .next()
@@ -273,7 +275,8 @@ fn test_local_directory_walker_fail_fast_stops_after_error() {
     let mut walker = LocalFileSystem::host()
         .list(
             directory.path(),
-            &LocalListOptions::new().with_follow_symlinks(),
+            &LocalListOptions::new()
+                .with_symlink_policy(LocalSymlinkPolicy::FollowWithinScope),
         )
         .expect("walker should open");
     assert!(
@@ -305,7 +308,7 @@ fn test_local_directory_walker_continue_policy_keeps_iterating() {
         .list(
             directory.path(),
             &LocalListOptions::new()
-                .with_follow_symlinks()
+                .with_symlink_policy(LocalSymlinkPolicy::FollowWithinScope)
                 .with_error_policy(LocalWalkErrorPolicy::Continue),
         )
         .expect("walker should open");
