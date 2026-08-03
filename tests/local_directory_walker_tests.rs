@@ -105,7 +105,7 @@ fn test_local_directory_walker_rejects_handle_budget_exhaustion() {
 /// Verifies that Host's default traversal follows symbolic links.
 #[cfg(unix)]
 #[test]
-fn test_local_directory_walker_follows_symlinks_by_default_on_host() {
+fn test_local_directory_walker_follows_links_by_default_on_host() {
     use std::os::unix::fs::symlink;
 
     let directory = tempdir().expect("temporary directory should be created");
