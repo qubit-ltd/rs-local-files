@@ -6,6 +6,7 @@ coverage-cfg | src/local/internal/atomic_metadata/preservation.rs | Exercises ot
 coverage-cfg | src/local/internal/atomic_namespace_race.rs | Exercises otherwise unreachable atomic namespace races
 coverage-cfg | src/local/internal/copy_dir/destination.rs | Exercises otherwise unreachable copy destination races
 coverage-cfg | src/local/internal/copy_dir/error.rs | Exercises otherwise unreachable copy statistics overflow
+coverage-cfg | src/capability/local_file_system_capabilities.rs | Instruments the public atomic-replacement capability accessor for coverage
 coverage-cfg | src/local/internal/copy_dir/facade.rs | Exercises otherwise unreachable absolute-path resolution failures
 coverage-cfg | src/local/internal/copy_dir/namespace_race.rs | Exercises otherwise unreachable copy namespace races
 coverage-cfg | src/local/internal/copy_dir/staging_io.rs | Exercises otherwise unreachable staging descriptor failures
@@ -21,6 +22,7 @@ coverage-cfg | src/local/internal/rooted_io_result.rs | Exercises otherwise unre
 coverage-cfg | src/local/internal/rooted_staged_file.rs | Exercises persistent descriptor-relative staging cleanup failures
 coverage-cfg | src/local/internal/staged_file.rs | Exercises persistent path-based staging cleanup failures
 coverage-cfg | src/local/internal/temp_entry.rs | Exercises otherwise unreachable temporary entry collision and creation failures
+coverage-cfg | src/options/local_temp_file_options.rs | Instruments the public temporary-file suffix builder for coverage
 coverage-cfg | src/local/internal/unix_nonblocking.rs | Exercises otherwise unreachable descriptor status failures
 coverage-cfg | src/local/local_atomic_writer.rs | Exercises parent synchronization after partial installation
 coverage-cfg | src/local/local_root_atomic_writer.rs | Exercises rooted parent synchronization after partial installation
