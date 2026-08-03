@@ -15,6 +15,8 @@ use std::{
     path::Path,
 };
 
+#[cfg(unix)]
+use qubit_local_files::LocalWriterState;
 use qubit_local_files::{
     LocalCopyConflictPolicy,
     LocalCopyOptions,
@@ -33,8 +35,6 @@ use qubit_local_files::{
     LocalWriteMode,
     LocalWriteOptions,
 };
-#[cfg(unix)]
-use qubit_local_files::LocalWriterState;
 #[cfg(coverage)]
 use qubit_local_files::{
     LocalCopyFailureState,
