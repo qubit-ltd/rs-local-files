@@ -18,7 +18,6 @@ use std::{
 
 use crate::{
     LocalCopyFailure,
-    LocalCopyFailureState,
     LocalCopyMethod,
     LocalCopyOptions,
     LocalCopyOutcome,
@@ -40,8 +39,6 @@ use crate::{
     LocalFileWriter,
     LocalListOptions,
     LocalReadOptions,
-    LocalRenameFailure,
-    LocalRenameFailureState,
     LocalRenameOptions,
     LocalRenameOutcome,
     LocalRenameResult,
@@ -53,6 +50,14 @@ use crate::{
     LocalTempFileOptions,
     LocalWriteMode,
     LocalWriteOptions,
+};
+use crate::local::{
+    copy_failure_published,
+    copy_failure_unchanged,
+    published_durability,
+    rename_failure_after_native_attempt,
+    rename_failure_renamed,
+    rename_failure_unchanged,
 };
 
 /// Descriptor- or handle-relative authority for one opened native directory.
@@ -509,8 +514,7 @@ impl RootedLocalFileSystem {
     ) -> LocalResult<LocalDirectoryWalker> {
         let symlink_policy = options
             .symlink_policy()
-            .unwrap_or(symlink_policy)
-            .for_scope(true);
+            .unwrap_or(symlink_policy);
         let relative = if path.as_os_str().is_empty() {
             None
         } else {
@@ -837,7 +841,7 @@ impl RootedLocalFileSystem {
         if options.durability() == LocalDurabilityRequirement::Required
             && !self.capabilities.directory_durability_implemented()
         {
-            return Err(rooted_copy_failure_unchanged(
+            return Err(copy_failure_unchanged(
                 LocalFileError::new(
                     LocalFileErrorKind::RequirementNotMet,
                     LocalFileOperation::Copy,
@@ -849,8 +853,7 @@ impl RootedLocalFileSystem {
         }
         let symlink_policy = options
             .symlink_policy_override()
-            .unwrap_or(symlink_policy)
-            .for_scope(true);
+            .unwrap_or(symlink_policy);
         let source_path = resolve_rooted_path(
             &self.root,
             source,
@@ -858,7 +861,7 @@ impl RootedLocalFileSystem {
             false,
             LocalFileOperation::Copy,
         )
-        .map_err(rooted_copy_failure_unchanged)?;
+        .map_err(copy_failure_unchanged)?;
         let target_path = resolve_rooted_path(
             &self.root,
             target,
@@ -866,7 +869,7 @@ impl RootedLocalFileSystem {
             false,
             LocalFileOperation::Copy,
         )
-        .map_err(rooted_copy_failure_unchanged)?;
+        .map_err(copy_failure_unchanged)?;
         if matches!(source_path, RootedResolvedPath::Host(_))
             || matches!(target_path, RootedResolvedPath::Host(_))
         {
@@ -904,7 +907,7 @@ impl RootedLocalFileSystem {
             && self.root.path().exists()
         {
             directory_contains_symlink(&source_diagnostic).map_err(|error| {
-                rooted_copy_failure_unchanged(rooted_io_error(
+                copy_failure_unchanged(rooted_io_error(
                     LocalFileOperation::Copy,
                     source,
                     error,
@@ -932,7 +935,7 @@ impl RootedLocalFileSystem {
         }
         let metadata =
             self.root.symlink_metadata(&source_path).map_err(|error| {
-                rooted_copy_failure_unchanged(rooted_io_error(
+                copy_failure_unchanged(rooted_io_error(
                     LocalFileOperation::Copy,
                     source,
                     error,
@@ -943,7 +946,7 @@ impl RootedLocalFileSystem {
             directory,
             options.source_mode(),
         ) {
-            return Err(rooted_copy_failure_unchanged(
+            return Err(copy_failure_unchanged(
                 LocalFileError::new(
                     LocalFileErrorKind::RequirementNotMet,
                     LocalFileOperation::Copy,
@@ -956,7 +959,7 @@ impl RootedLocalFileSystem {
         let target_is_directory =
             rooted_destination_is_directory(&self.root, &target_path).map_err(
                 |error| {
-                    rooted_copy_failure_unchanged(rooted_io_error(
+                    copy_failure_unchanged(rooted_io_error(
                         LocalFileOperation::Copy,
                         target,
                         error,
@@ -973,7 +976,7 @@ impl RootedLocalFileSystem {
                     .ok_or(error)
             })
             .map_err(|error| {
-                rooted_copy_failure_unchanged(rooted_io_error(
+                copy_failure_unchanged(rooted_io_error(
                     LocalFileOperation::Copy,
                     target,
                     error,
@@ -1000,7 +1003,7 @@ impl RootedLocalFileSystem {
             options.atomicity(),
             options.durability(),
         ) {
-            return Err(rooted_copy_failure_unchanged(
+            return Err(copy_failure_unchanged(
                 LocalFileError::new(
                     LocalFileErrorKind::RequirementNotMet,
                     LocalFileOperation::Copy,
@@ -1016,7 +1019,7 @@ impl RootedLocalFileSystem {
             options.type_conflict(),
             target_is_directory,
         ) {
-            return Err(rooted_copy_failure_unchanged(
+            return Err(copy_failure_unchanged(
                 LocalFileError::new(
                     LocalFileErrorKind::RequirementNotMet,
                     LocalFileOperation::Copy,
@@ -1037,7 +1040,7 @@ impl RootedLocalFileSystem {
             let parent = crate::local::LocalRelativePath::new(parent)
                 .expect("parent of a validated rooted path is valid");
             self.root.create_dir_all(&parent).map_err(|error| {
-                rooted_copy_failure_unchanged(rooted_io_error(
+                copy_failure_unchanged(rooted_io_error(
                     LocalFileOperation::Copy,
                     target,
                     error,
@@ -1058,7 +1061,7 @@ impl RootedLocalFileSystem {
             .map_err(|error| {
                 LocalCopyFailure::from_copy_dir_error(source, target, error)
             })?;
-        let parent_durable = rooted_published_durability(
+        let parent_durable = published_durability(
             options.durability(),
             || {
                 self.root.sync_parent(&target_path)?;
@@ -1072,7 +1075,7 @@ impl RootedLocalFileSystem {
             target,
         )
         .map_err(|error| {
-            rooted_copy_failure_published(
+            copy_failure_published(
                 error,
                 LocalCopyStats::from_internal(stats),
             )
@@ -1234,7 +1237,7 @@ impl RootedLocalFileSystem {
         if options.durability() == LocalDurabilityRequirement::Required
             && !self.capabilities.directory_durability_implemented()
         {
-            return Err(rooted_rename_failure_unchanged(
+            return Err(rename_failure_unchanged(
                 LocalFileError::new(
                     LocalFileErrorKind::RequirementNotMet,
                     LocalFileOperation::Rename,
@@ -1251,7 +1254,7 @@ impl RootedLocalFileSystem {
             false,
             LocalFileOperation::Rename,
         )
-        .map_err(rooted_rename_failure_unchanged)?;
+        .map_err(rename_failure_unchanged)?;
         let target_path = resolve_rooted_path(
             &self.root,
             target,
@@ -1259,7 +1262,7 @@ impl RootedLocalFileSystem {
             false,
             LocalFileOperation::Rename,
         )
-        .map_err(rooted_rename_failure_unchanged)?;
+        .map_err(rename_failure_unchanged)?;
         if matches!(source_path, RootedResolvedPath::Host(_))
             || matches!(target_path, RootedResolvedPath::Host(_))
         {
@@ -1285,9 +1288,9 @@ impl RootedLocalFileSystem {
                 .rename_without_replacing(&source_path, &target_path)
         };
         result.map_err(|error| {
-            rooted_rename_failure_after_native_attempt(source, target, error)
+            rename_failure_after_native_attempt(source, target, error)
         })?;
-        let durable = rooted_published_durability(
+        let durable = published_durability(
             options.durability(),
             || {
                 self.root.sync_parent(&source_path)?;
@@ -1302,7 +1305,7 @@ impl RootedLocalFileSystem {
             source,
             target,
         )
-        .map_err(rooted_rename_failure_renamed)?;
+        .map_err(rename_failure_renamed)?;
         Ok(LocalRenameOutcome::new(true, durable))
     }
 }
@@ -1491,97 +1494,6 @@ fn sync_rooted_copy_parent_chain(
         parent = path.as_path().parent().map(Path::to_path_buf);
     }
     Ok(())
-}
-
-/// Wraps a rooted preflight failure that proves no namespace mutation occurred.
-#[must_use]
-#[inline(always)]
-fn rooted_rename_failure_unchanged(
-    error: LocalFileError,
-) -> LocalRenameFailure {
-    LocalRenameFailure::new(error, LocalRenameFailureState::Unchanged)
-}
-
-/// Wraps a rooted failure after a completed native rename.
-#[inline(always)]
-fn rooted_rename_failure_renamed(error: LocalFileError) -> LocalRenameFailure {
-    LocalRenameFailure::new(error, LocalRenameFailureState::Renamed)
-}
-
-/// Maps a rooted native rename failure to the strongest guaranteed state.
-fn rooted_rename_failure_after_native_attempt(
-    source: &Path,
-    target: &Path,
-    error: io::Error,
-) -> LocalRenameFailure {
-    let state = match error.kind() {
-        io::ErrorKind::AlreadyExists
-        | io::ErrorKind::CrossesDevices
-        | io::ErrorKind::NotFound => LocalRenameFailureState::Unchanged,
-        _ => LocalRenameFailureState::Indeterminate,
-    };
-    LocalRenameFailure::new(
-        LocalFileError::from_io(
-            LocalFileOperation::Rename,
-            Some(source.to_path_buf()),
-            Some(target.to_path_buf()),
-            error,
-        ),
-        state,
-    )
-}
-
-/// Wraps a pre-publication rooted copy error with an unchanged state.
-#[inline]
-fn rooted_copy_failure_unchanged(error: LocalFileError) -> LocalCopyFailure {
-    LocalCopyFailure::new(
-        error,
-        LocalCopyFailureState::Unchanged,
-        LocalCopyStats::default(),
-        None,
-        None,
-    )
-}
-
-/// Wraps a rooted post-publication durability error with a published state.
-#[inline]
-fn rooted_copy_failure_published(
-    error: LocalFileError,
-    partial_stats: LocalCopyStats,
-) -> LocalCopyFailure {
-    LocalCopyFailure::new(
-        error,
-        LocalCopyFailureState::Published,
-        partial_stats,
-        None,
-        None,
-    )
-}
-
-/// Converts rooted post-publication synchronization into an achieved guarantee.
-#[inline]
-fn rooted_published_durability(
-    requirement: LocalDurabilityRequirement,
-    sync: impl FnOnce() -> io::Result<()>,
-    operation: LocalFileOperation,
-    source: &Path,
-    target: &Path,
-) -> LocalResult<bool> {
-    match requirement {
-        LocalDurabilityRequirement::NotRequired => Ok(false),
-        LocalDurabilityRequirement::Preferred => Ok(sync().is_ok()),
-        LocalDurabilityRequirement::Required => {
-            sync().map(|()| true).map_err(|error| {
-                LocalFileError::from_io(
-                    operation,
-                    Some(source.to_path_buf()),
-                    Some(target.to_path_buf()),
-                    error,
-                )
-                .with_kind(LocalFileErrorKind::PublicationIncomplete)
-            })
-        }
-    }
 }
 
 /// Validates a rooted descendant and preserves the offending native path.

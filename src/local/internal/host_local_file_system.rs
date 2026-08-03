@@ -19,7 +19,6 @@ use std::{
 use crate::{
     LocalAtomicityRequirement,
     LocalCopyFailure,
-    LocalCopyFailureState,
     LocalCopyMethod,
     LocalCopyOptions,
     LocalCopyOutcome,
@@ -42,8 +41,6 @@ use crate::{
     LocalMetadataPreservePolicy,
     LocalPaths,
     LocalReadOptions,
-    LocalRenameFailure,
-    LocalRenameFailureState,
     LocalRenameOptions,
     LocalRenameOutcome,
     LocalRenameResult,
@@ -55,6 +52,19 @@ use crate::{
     LocalTempFileOptions,
     LocalWriteMode,
     LocalWriteOptions,
+};
+#[cfg(coverage)]
+use crate::{
+    LocalRenameFailure,
+    LocalRenameFailureState,
+};
+use crate::local::{
+    copy_failure_published,
+    copy_failure_unchanged,
+    published_durability,
+    rename_failure_after_native_attempt,
+    rename_failure_renamed,
+    rename_failure_unchanged,
 };
 
 /// Host-wide native local filesystem service.
@@ -360,8 +370,7 @@ impl HostLocalFileSystem {
     ) -> LocalResult<LocalDirectoryWalker> {
         let policy = options
             .symlink_policy()
-            .unwrap_or(symlink_policy)
-            .for_scope(false);
+            .unwrap_or(symlink_policy);
         let bound = resolve_host_path(path, policy, true)?;
         LocalDirectoryWalker::open(bound, *options, policy)
     }
@@ -431,8 +440,7 @@ impl HostLocalFileSystem {
     ) -> LocalCopyResult {
         let symlink_policy = options
             .symlink_policy_override()
-            .unwrap_or(symlink_policy)
-            .for_scope(false);
+            .unwrap_or(symlink_policy);
         let [source, target] = LocalPaths::bind_host_paths([source, target])
             .map_err(copy_failure_unchanged)?;
         let source = resolve_host_path(&source, symlink_policy, false)
@@ -1404,35 +1412,6 @@ fn rename_io_error(
     )
 }
 
-/// Wraps a preflight failure that proves no namespace mutation occurred.
-#[inline(always)]
-fn rename_failure_unchanged(error: LocalFileError) -> LocalRenameFailure {
-    LocalRenameFailure::new(error, LocalRenameFailureState::Unchanged)
-}
-
-/// Wraps a failure after a completed native rename.
-#[inline(always)]
-fn rename_failure_renamed(error: LocalFileError) -> LocalRenameFailure {
-    LocalRenameFailure::new(error, LocalRenameFailureState::Renamed)
-}
-
-/// Maps a native rename failure to the strongest state guaranteed by its
-/// contract.
-#[inline]
-fn rename_failure_after_native_attempt(
-    source: &Path,
-    target: &Path,
-    error: io::Error,
-) -> LocalRenameFailure {
-    let state = match error.kind() {
-        io::ErrorKind::AlreadyExists
-        | io::ErrorKind::CrossesDevices
-        | io::ErrorKind::NotFound => LocalRenameFailureState::Unchanged,
-        _ => LocalRenameFailureState::Indeterminate,
-    };
-    LocalRenameFailure::new(rename_io_error(source, target, error), state)
-}
-
 /// Wraps a failure whose native rename effect cannot be proven.
 #[cfg(coverage)]
 #[inline(always)]
@@ -1531,49 +1510,6 @@ fn require_directory_durability(
     Ok(())
 }
 
-/// Converts post-publication synchronization into an achieved guarantee.
-///
-/// # Parameters
-///
-/// - `requirement`: Requested durability policy.
-/// - `sync`: File and parent synchronization operation after publication.
-/// - `operation`: Operation that already published its destination.
-/// - `source`: Primary path.
-/// - `target`: Destination path.
-///
-/// # Returns
-///
-/// `true` after completed synchronization, or `false` for a permitted
-/// preferred downgrade.
-///
-/// # Errors
-///
-/// Returns `PublicationIncomplete` with `Published` state when required
-/// synchronization fails after the namespace mutation.
-fn published_durability(
-    requirement: LocalDurabilityRequirement,
-    sync: impl FnOnce() -> io::Result<()>,
-    operation: LocalFileOperation,
-    source: &Path,
-    target: &Path,
-) -> LocalResult<bool> {
-    match requirement {
-        LocalDurabilityRequirement::NotRequired => Ok(false),
-        LocalDurabilityRequirement::Preferred => Ok(sync().is_ok()),
-        LocalDurabilityRequirement::Required => {
-            sync().map(|()| true).map_err(|error| {
-                LocalFileError::from_io(
-                    operation,
-                    Some(source.to_path_buf()),
-                    Some(target.to_path_buf()),
-                    error,
-                )
-                .with_kind(LocalFileErrorKind::PublicationIncomplete)
-            })
-        }
-    }
-}
-
 /// Opens the existing robust same-directory staged writer implementation.
 ///
 /// # Parameters
@@ -1629,15 +1565,13 @@ pub(crate) fn internal_copy_options(
     options: &LocalCopyOptions,
     symlink_policy: LocalSymlinkPolicy,
 ) -> crate::local::LocalCopyDirOptions {
+    let symlink_policy =
+        options.symlink_policy_override().unwrap_or(symlink_policy);
     let mut result = crate::local::LocalCopyDirOptions::new()
         .with_conflict(options.conflict())
         .with_type_conflict(options.type_conflict())
+        .with_symlink_policy(symlink_policy)
         .with_durability(options.durability());
-    let symlink_policy =
-        options.symlink_policy_override().unwrap_or(symlink_policy);
-    if symlink_policy.follows() {
-        result = result.follow_symlinks();
-    }
     if options.preserve_metadata() == LocalMetadataPreservePolicy::Permissions {
         result = result.preserve_permissions();
     }
@@ -1795,34 +1729,6 @@ fn copy_pipeline_failure(
     error: crate::local::LocalCopyDirError,
 ) -> LocalCopyFailure {
     LocalCopyFailure::from_copy_dir_error(source, target, error)
-}
-
-/// Wraps a pre-publication copy error with an unchanged destination state.
-#[inline]
-fn copy_failure_unchanged(error: LocalFileError) -> LocalCopyFailure {
-    LocalCopyFailure::new(
-        error,
-        LocalCopyFailureState::Unchanged,
-        LocalCopyStats::default(),
-        None,
-        None,
-    )
-}
-
-/// Wraps a post-publication durability error with a published destination
-/// state.
-#[inline]
-fn copy_failure_published(
-    error: LocalFileError,
-    partial_stats: LocalCopyStats,
-) -> LocalCopyFailure {
-    LocalCopyFailure::new(
-        error,
-        LocalCopyFailureState::Published,
-        partial_stats,
-        None,
-        None,
-    )
 }
 
 /// Adds both copy paths to a native I/O failure.

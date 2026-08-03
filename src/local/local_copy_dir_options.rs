@@ -14,6 +14,7 @@ use crate::{
     LocalCopyConflictPolicy,
     LocalCopyTypeConflictPolicy,
     LocalDurabilityRequirement,
+    LocalSymlinkPolicy,
 };
 
 /// Options controlling recursive directory copy behavior.
@@ -50,18 +51,18 @@ pub struct LocalCopyDirOptions {
     /// Policy for source and destination entry type mismatches.
     type_conflict: LocalCopyTypeConflictPolicy,
 
-    /// Whether symbolic links in the source tree should be followed.
+    /// Symbolic-link policy for the source tree.
     ///
-    /// When this is `false`, directory symbolic links are copied as final link
-    /// entries instead of being traversed. File symbolic links are always
-    /// copied as link entries rather than dereferenced.
+    /// `Reject` copies directory symbolic links as final link entries instead
+    /// of traversing them. File symbolic links are always copied as link
+    /// entries rather than dereferenced.
     ///
     /// File type is verified from the opened source handle. Directory
     /// traversal, destination reinspection, and destructive replacement remain
     /// separate path-based operations, so this policy is not a sandbox
     /// boundary when an untrusted actor can mutate either tree
     /// concurrently.
-    follow_symlinks: bool,
+    symlink_policy: LocalSymlinkPolicy,
 
     /// Whether to copy source permissions to destination entries after
     /// copying.
@@ -93,7 +94,7 @@ impl LocalCopyDirOptions {
         Self {
             conflict: LocalCopyConflictPolicy::Fail,
             type_conflict: LocalCopyTypeConflictPolicy::Fail,
-            follow_symlinks: false,
+            symlink_policy: LocalSymlinkPolicy::Reject,
             preserve_permissions: false,
             open_retry_timeout: None,
             durability: LocalDurabilityRequirement::NotRequired,
@@ -166,23 +167,25 @@ impl LocalCopyDirOptions {
         self
     }
 
-    /// Returns whether symbolic links will be followed.
+    /// Returns the symbolic-link policy used while traversing the source tree.
     ///
     /// # Returns
-    /// `true` when source symbolic links are followed.
-    #[must_use]
+    /// The configured source-tree symbolic-link policy.
     #[inline(always)]
-    pub const fn follows_symlinks(&self) -> bool {
-        self.follow_symlinks
+    pub(crate) const fn symlink_policy(&self) -> LocalSymlinkPolicy {
+        self.symlink_policy
     }
 
-    /// Enables following symbolic links in the source tree.
+    /// Sets the symbolic-link policy used while traversing the source tree.
     ///
     /// # Returns
     /// Updated directory copy options.
     #[inline(always)]
-    pub const fn follow_symlinks(mut self) -> Self {
-        self.follow_symlinks = true;
+    pub(crate) const fn with_symlink_policy(
+        mut self,
+        symlink_policy: LocalSymlinkPolicy,
+    ) -> Self {
+        self.symlink_policy = symlink_policy;
         self
     }
 

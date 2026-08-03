@@ -22,6 +22,8 @@ use std::io::{
 use std::path::Path;
 use std::time::Duration;
 
+use crate::LocalSymlinkPolicy;
+
 #[cfg(unix)]
 use std::os::fd::AsRawFd;
 #[cfg(unix)]
@@ -60,7 +62,7 @@ impl OpenedCopySource {
     /// # Parameters
     ///
     /// * `path` - Source entry to open.
-    /// * `follow_symlinks` - Whether the final symbolic link may be followed.
+    /// * `symlink_policy` - Symbolic-link policy for the final component.
     ///
     /// # Returns
     ///
@@ -74,10 +76,10 @@ impl OpenedCopySource {
     #[inline(always)]
     pub(super) fn open(
         path: &Path,
-        follow_symlinks: bool,
+        symlink_policy: LocalSymlinkPolicy,
         open_retry_timeout: Option<Duration>,
     ) -> Result<Self> {
-        open_copy_source(path, follow_symlinks, open_retry_timeout)
+        open_copy_source(path, symlink_policy, open_retry_timeout)
     }
 
     /// Splits this source into its open handle and authoritative metadata.
@@ -97,12 +99,12 @@ impl OpenedCopySource {
 #[cfg(unix)]
 fn open_copy_source(
     path: &Path,
-    follow_symlinks: bool,
+    symlink_policy: LocalSymlinkPolicy,
     open_retry_timeout: Option<Duration>,
 ) -> Result<OpenedCopySource> {
     let mut options = OpenOptions::new();
     let mut flags = libc::O_NONBLOCK;
-    if !follow_symlinks {
+    if !symlink_policy.follows() {
         flags |= libc::O_NOFOLLOW;
     }
     options.read(true).custom_flags(flags);
@@ -132,14 +134,14 @@ fn normalize_unix_source_open_error(path: &Path, error: Error) -> Error {
 #[cfg(windows)]
 fn open_copy_source(
     path: &Path,
-    follow_symlinks: bool,
+    symlink_policy: LocalSymlinkPolicy,
     _open_retry_timeout: Option<Duration>,
 ) -> Result<OpenedCopySource> {
     const IO_REPARSE_TAG_NAME_SURROGATE: u32 = 0x2000_0000;
 
     let mut options = OpenOptions::new();
     options.read(true);
-    if !follow_symlinks {
+    if !symlink_policy.follows() {
         options.custom_flags(FILE_FLAG_OPEN_REPARSE_POINT);
     }
     let file = options.open(path)?;
@@ -157,7 +159,7 @@ fn open_copy_source(
     if result == 0 {
         return Err(Error::last_os_error());
     }
-    if !follow_symlinks
+    if !symlink_policy.follows()
         && tag_info.ReparseTag & IO_REPARSE_TAG_NAME_SURROGATE != 0
     {
         return Err(invalid_copy_source(path));
@@ -171,7 +173,7 @@ fn open_copy_source(
 #[cfg(not(any(unix, windows)))]
 fn open_copy_source(
     path: &Path,
-    _follow_symlinks: bool,
+    _symlink_policy: LocalSymlinkPolicy,
     _open_retry_timeout: Option<Duration>,
 ) -> Result<OpenedCopySource> {
     let file = File::open(path)?;

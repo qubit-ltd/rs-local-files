@@ -17,6 +17,8 @@ use std::io::{
 };
 use std::path::Path;
 
+use crate::LocalSymlinkPolicy;
+
 use super::super::directory_identity::DirectoryIdentity;
 
 /// Inspects a source directory before recursive copy enters it.
@@ -24,7 +26,7 @@ use super::super::directory_identity::DirectoryIdentity;
 /// # Parameters
 ///
 /// * `src` - Source directory path.
-/// * `follow_symlinks` - Whether symbolic links may be followed.
+/// * `symlink_policy` - Symbolic-link policy used while inspecting the source.
 /// * `destination_root` - Canonical destination root including missing tail.
 ///
 /// # Returns
@@ -37,10 +39,10 @@ use super::super::directory_identity::DirectoryIdentity;
 /// or would contain the destination root.
 pub(super) fn inspect_copy_source_directory(
     src: &Path,
-    follow_symlinks: bool,
+    symlink_policy: LocalSymlinkPolicy,
     destination_root: &Path,
 ) -> Result<(fs::Metadata, DirectoryIdentity)> {
-    let source_metadata = metadata_for_copy_source(src, follow_symlinks)?;
+    let source_metadata = metadata_for_copy_source(src, symlink_policy)?;
     if !source_metadata.is_dir() {
         return Err(Error::new(
             ErrorKind::InvalidInput,
@@ -59,7 +61,7 @@ pub(super) fn inspect_copy_source_directory(
 /// # Parameters
 ///
 /// * `path` - Source path to inspect.
-/// * `follow_symlinks` - Whether a symbolic link may be followed.
+/// * `symlink_policy` - Symbolic-link policy used while inspecting the source.
 ///
 /// # Returns
 ///
@@ -71,11 +73,11 @@ pub(super) fn inspect_copy_source_directory(
 /// a symbolic link is forbidden.
 pub(super) fn metadata_for_copy_source(
     path: &Path,
-    follow_symlinks: bool,
+    symlink_policy: LocalSymlinkPolicy,
 ) -> Result<fs::Metadata> {
     let metadata = fs::symlink_metadata(path)?;
     if metadata.file_type().is_symlink() {
-        if follow_symlinks {
+        if symlink_policy.follows() {
             fs::metadata(path)
         } else {
             Err(Error::new(
