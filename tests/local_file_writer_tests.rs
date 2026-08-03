@@ -24,13 +24,14 @@ use qubit_local_files::{
     LocalAtomicityRequirement,
     LocalFileErrorKind,
     LocalFileSystem,
-    LocalFileWriter,
     LocalWriteFailureState,
     LocalWriteMode,
     LocalWriteOptions,
     LocalWritePublicationMethod,
     LocalWriterState,
 };
+#[cfg(unix)]
+use qubit_local_files::LocalFileWriter;
 use tempfile::tempdir;
 
 /// Environment switch used by the file-size-limit subprocess regression.
@@ -167,7 +168,7 @@ fn test_local_file_writer_append_follows_target_symlink_on_windows() {
     writer
         .write_all(b"-append")
         .expect("append should write through the link");
-    writer.commit().expect("append should commit");
+    let _ = writer.commit().expect("append should commit");
     assert_eq!(
         b"original-append",
         fs::read(referent)
