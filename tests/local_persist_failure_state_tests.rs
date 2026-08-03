@@ -9,15 +9,11 @@
 
 use qubit_local_files::LocalPersistFailureState;
 
-/// Verifies all currently exposed persistence failure states are comparable.
+/// Verifies the exposed persistence failure states are distinct.
 #[test]
 fn test_local_persist_failure_states_are_distinct() {
     assert_ne!(
         LocalPersistFailureState::NotPublished,
-        LocalPersistFailureState::PublishedSourceRetained
-    );
-    assert_ne!(
-        LocalPersistFailureState::PublishedSourceRetained,
         LocalPersistFailureState::Indeterminate
     );
 }
