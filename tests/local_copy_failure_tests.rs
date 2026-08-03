@@ -24,6 +24,12 @@ use qubit_local_files::{
 };
 
 #[cfg(coverage)]
+use qubit_local_files::{
+    LocalCopyConflictPolicy,
+    LocalMetadataPreservePolicy,
+};
+
+#[cfg(coverage)]
 use qubit_local_files::LocalDurabilityRequirement;
 
 /// Creates a process-specific path that is absent before each test use.
@@ -249,5 +255,189 @@ fn test_copy_failure_reports_unchanged_for_source_inspection_fault() {
         assert_eq!(LocalCopyFailureState::Unchanged, failure.state());
         assert_eq!(&LocalCopyStats::default(), failure.partial_stats());
         assert!(!target.exists());
+    });
+}
+
+/// Verifies recursive traversal rejects a coverage-injected directory cycle.
+#[cfg(coverage)]
+#[test]
+fn test_copy_failure_reports_directory_identity_cycle() {
+    const TEST_NAME: &str =
+        "test_copy_failure_reports_directory_identity_cycle";
+    run_in_coverage_fault_process(
+        TEST_NAME,
+        "copy-dir-directory-identity-cycle",
+        || {
+            let directory = tempfile::tempdir()
+                .expect("temporary directory should be created");
+            let source = directory.path().join("source");
+            let target = directory.path().join("target");
+            fs::create_dir_all(source.join("nested"))
+                .expect("nested source directory should be created");
+            fs::write(source.join("nested/payload"), b"payload")
+                .expect("source payload should be written");
+
+            LocalFileSystem::host()
+                .copy(
+                    &source,
+                    &target,
+                    &LocalCopyOptions::default().with_tree_source(),
+                )
+                .expect_err("injected directory cycle must fail");
+        },
+    );
+}
+
+/// Verifies a coverage-injected staging permission failure remains typed.
+#[cfg(coverage)]
+#[test]
+fn test_copy_failure_reports_staging_permission_failure() {
+    const TEST_NAME: &str =
+        "test_copy_failure_reports_staging_permission_failure";
+    run_in_coverage_fault_process(
+        TEST_NAME,
+        "copy-staging-permissions",
+        || {
+            let directory = tempfile::tempdir()
+                .expect("temporary directory should be created");
+            let source = directory.path().join("source");
+            let target = directory.path().join("target");
+            fs::write(&source, b"payload")
+                .expect("source payload should be written");
+
+            LocalFileSystem::host()
+                .copy(
+                    &source,
+                    &target,
+                    &LocalCopyOptions::default().with_metadata_preservation(
+                        LocalMetadataPreservePolicy::Permissions,
+                    ),
+                )
+                .expect_err("staging permission fault must fail");
+        },
+    );
+}
+
+/// Verifies a coverage-only directory-statistics overflow remains typed.
+#[cfg(coverage)]
+#[test]
+fn test_copy_failure_reports_directory_statistics_overflow() {
+    const TEST_NAME: &str =
+        "test_copy_failure_reports_directory_statistics_overflow";
+    run_in_coverage_fault_process(TEST_NAME, "copy-stats-directories", || {
+        let directory =
+            tempfile::tempdir().expect("temporary directory should be created");
+        let source = directory.path().join("source/nested");
+        let target = directory.path().join("target");
+        fs::create_dir_all(&source)
+            .expect("nested source directory should be created");
+        fs::write(source.join("payload"), b"payload")
+            .expect("source payload should be written");
+
+        LocalFileSystem::host()
+            .copy(
+                &directory.path().join("source"),
+                &target,
+                &LocalCopyOptions::default().with_tree_source(),
+            )
+            .expect_err("directory statistics overflow must fail");
+    });
+}
+
+/// Verifies a coverage-only skipped-file statistics overflow remains typed.
+#[cfg(coverage)]
+#[test]
+fn test_copy_failure_reports_skipped_statistics_overflow() {
+    const TEST_NAME: &str =
+        "test_copy_failure_reports_skipped_statistics_overflow";
+    run_in_coverage_fault_process(TEST_NAME, "copy-stats-skipped", || {
+        let directory =
+            tempfile::tempdir().expect("temporary directory should be created");
+        let source = directory.path().join("source");
+        let target = directory.path().join("target");
+        fs::write(&source, b"source")
+            .expect("source payload should be written");
+        fs::write(&target, b"target")
+            .expect("target payload should be written");
+
+        LocalFileSystem::host()
+            .copy(
+                &source,
+                &target,
+                &LocalCopyOptions::default()
+                    .with_conflict(LocalCopyConflictPolicy::Skip),
+            )
+            .expect_err("skipped statistics overflow must fail");
+    });
+}
+
+/// Verifies a coverage-only copied-file statistics overflow remains typed.
+#[cfg(coverage)]
+#[test]
+fn test_copy_failure_reports_file_statistics_overflow() {
+    const TEST_NAME: &str =
+        "test_copy_failure_reports_file_statistics_overflow";
+    run_in_coverage_fault_process(TEST_NAME, "copy-stats-files", || {
+        let directory =
+            tempfile::tempdir().expect("temporary directory should be created");
+        let source = directory.path().join("source");
+        let target = directory.path().join("target");
+        fs::write(&source, b"source")
+            .expect("source payload should be written");
+
+        LocalFileSystem::host()
+            .copy(&source, &target, &LocalCopyOptions::default())
+            .expect_err("file statistics overflow must fail");
+    });
+}
+
+/// Verifies a coverage-only copied-byte statistics overflow remains typed.
+#[cfg(coverage)]
+#[test]
+fn test_copy_failure_reports_byte_statistics_overflow() {
+    const TEST_NAME: &str =
+        "test_copy_failure_reports_byte_statistics_overflow";
+    run_in_coverage_fault_process(TEST_NAME, "copy-stats-bytes", || {
+        let directory =
+            tempfile::tempdir().expect("temporary directory should be created");
+        let source = directory.path().join("source");
+        let target = directory.path().join("target");
+        fs::write(&source, b"source")
+            .expect("source payload should be written");
+
+        LocalFileSystem::host()
+            .copy(&source, &target, &LocalCopyOptions::default())
+            .expect_err("byte statistics overflow must fail");
+    });
+}
+
+/// Verifies a coverage-only overwritten-entry statistics overflow remains
+/// typed.
+#[cfg(coverage)]
+#[test]
+fn test_copy_failure_reports_overwritten_statistics_overflow() {
+    const TEST_NAME: &str =
+        "test_copy_failure_reports_overwritten_statistics_overflow";
+    run_in_coverage_fault_process(TEST_NAME, "copy-stats-overwritten", || {
+        let directory =
+            tempfile::tempdir().expect("temporary directory should be created");
+        let source = directory.path().join("source");
+        let target = directory.path().join("target");
+        fs::create_dir(&source).expect("source directory should be created");
+        fs::write(source.join("payload"), b"source")
+            .expect("source payload should be written");
+        fs::create_dir(&target).expect("target directory should be created");
+        fs::write(target.join("payload"), b"target")
+            .expect("target payload should be written");
+
+        LocalFileSystem::host()
+            .copy(
+                &source,
+                &target,
+                &LocalCopyOptions::default()
+                    .with_tree_source()
+                    .with_conflict(LocalCopyConflictPolicy::Overwrite),
+            )
+            .expect_err("overwritten statistics overflow must fail");
     });
 }

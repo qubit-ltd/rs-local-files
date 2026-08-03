@@ -161,10 +161,21 @@ pub(super) fn record_skipped_file(stats: &mut LocalCopyDirStats) -> Result<()> {
 }
 
 /// Records one destination entry replaced by a completed copy.
+#[cfg_attr(coverage, inline(never))]
 pub(super) fn record_overwritten_entry(
     stats: &mut LocalCopyDirStats,
 ) -> Result<()> {
-    match stats.overwritten.checked_add(1) {
+    #[cfg(coverage)]
+    let overwritten = if crate::local::internal::coverage_fault::is_enabled(
+        "copy-stats-overwritten",
+    ) {
+        None
+    } else {
+        stats.overwritten.checked_add(1)
+    };
+    #[cfg(not(coverage))]
+    let overwritten = stats.overwritten.checked_add(1);
+    match overwritten {
         Some(overwritten) => {
             stats.overwritten = overwritten;
             Ok(())

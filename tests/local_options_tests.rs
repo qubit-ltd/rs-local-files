@@ -178,11 +178,17 @@ fn test_copy_rename_and_write_option_builders_retain_policies() {
 #[test]
 fn test_temporary_resource_option_builders_retain_configuration() {
     let parent = Path::new("temporary-parent");
-    let file = black_box(LocalTempFileOptions::new())
-        .with_parent(parent)
-        .with_prefix("file-")
-        .with_suffix(".tmp")
-        .with_max_attempts(4);
+    let with_suffix = black_box(
+        LocalTempFileOptions::with_suffix
+            as fn(LocalTempFileOptions, &str) -> LocalTempFileOptions,
+    );
+    let file = with_suffix(
+        black_box(LocalTempFileOptions::new())
+            .with_parent(parent)
+            .with_prefix("file-"),
+        ".tmp",
+    )
+    .with_max_attempts(4);
     assert_eq!(file.parent(), Some(parent));
     assert_eq!(file.prefix(), Some("file-"));
     assert_eq!(file.suffix(), Some(".tmp"));
