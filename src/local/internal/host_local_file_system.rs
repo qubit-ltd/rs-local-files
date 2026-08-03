@@ -110,8 +110,9 @@ impl HostLocalFileSystem {
         path: &Path,
         symlink_policy: LocalSymlinkPolicy,
     ) -> LocalResult<LocalFileMetadata> {
-        let bound = resolve_host_path(path, symlink_policy, false)?;
-        fs::symlink_metadata(&bound)
+        let bound = LocalPaths::bind_host_path(path)?;
+        let resolved = resolve_host_path(&bound, symlink_policy, false)?;
+        fs::symlink_metadata(&resolved)
             .map(|metadata| LocalFileMetadata::from_native(&metadata))
             .map_err(|source| {
                 LocalFileError::from_io(
@@ -1595,14 +1596,19 @@ fn reject_copy_alias(
 /// inspect its handle.
 #[cfg(windows)]
 fn windows_file_identity(path: &Path) -> io::Result<(u32, u64)> {
+    use std::os::windows::fs::OpenOptionsExt;
     use std::os::windows::io::AsRawHandle;
 
     use windows_sys::Win32::Storage::FileSystem::{
         BY_HANDLE_FILE_INFORMATION,
+        FILE_FLAG_BACKUP_SEMANTICS,
         GetFileInformationByHandle,
     };
 
-    let file = fs::File::open(path)?;
+    let file = fs::OpenOptions::new()
+        .read(true)
+        .custom_flags(FILE_FLAG_BACKUP_SEMANTICS)
+        .open(path)?;
     let mut information = BY_HANDLE_FILE_INFORMATION::default();
     // SAFETY: `file` owns a live handle and `information` is a correctly sized
     // writable buffer for `GetFileInformationByHandle`.
