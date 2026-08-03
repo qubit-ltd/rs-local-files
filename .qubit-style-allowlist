@@ -33,4 +33,5 @@ coverage-cfg | src/rooted/copy.rs | Exercises otherwise unreachable rooted copy 
 coverage-cfg | src/rooted_local_file_system.rs | Exercises otherwise unreachable rooted temporary-resource and status failures
 coverage-cfg | src/rooted/root.rs | Exercises otherwise unreachable rooted root fault paths
 coverage-cfg | src/walk/local_directory_walker.rs | Exercises otherwise unreachable native walker iterator and canonicalization failures
+multiple-public-types | src/rooted_local_file_system.rs | Rooted implementation and private resolved-path carrier share one module for policy dispatch
 coverage-cfg | src/writer/local_file_writer.rs | Exercises otherwise unreachable append flush and synchronization failures

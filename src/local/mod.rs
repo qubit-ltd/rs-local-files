@@ -40,6 +40,7 @@ pub(crate) use internal::{
     CopyDestinationAction,
     HostLocalFileSystem,
     copy_dir_all_with_paths,
+    copy_dir_all_with_paths_scoped,
     copy_directory_guarantee_unavailable,
     copy_file_replace_requires_atomicity,
     copy_file_with_options,
@@ -55,6 +56,7 @@ pub(crate) use internal::{
     open_native_reader_path,
     open_native_writer_path,
     replace_file,
+    resolve_host_path,
     try_random_file_name,
     validate_portable_file_name_impl,
 };

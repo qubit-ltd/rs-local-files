@@ -113,6 +113,7 @@ pub use outcome::{
     LocalRenameFailureState,
     LocalRenameOutcome,
     LocalRenameResult,
+    LocalWritePublicationMethod,
 };
 pub use temp::{
     LocalTempDirectory,

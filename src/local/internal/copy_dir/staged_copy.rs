@@ -188,6 +188,121 @@ pub(crate) fn copy_file_with_options(
     Ok(())
 }
 
+/// Copies a symbolic-link entry without dereferencing its final target.
+pub(crate) fn copy_symlink_with_options(
+    src: &Path,
+    dst: &Path,
+    options: LocalCopyDirOptions,
+    stats: &mut LocalCopyDirStats,
+) -> CopyDirResult<()> {
+    let destination_metadata = with_copy_context(
+        destination_metadata_if_exists(dst),
+        LocalCopyDirStage::PrepareDestination,
+        src,
+        dst,
+        stats,
+    )?;
+    let action = decide_copy_destination(
+        false,
+        destination_metadata.as_ref().map(is_real_directory),
+        options.conflict_policy(),
+        options.type_conflict_policy(),
+    )
+    .ok_or_else(|| {
+        copy_dir_error(
+            LocalCopyDirStage::PrepareDestination,
+            src,
+            dst,
+            stats,
+            std::io::Error::from(ErrorKind::AlreadyExists),
+        )
+    })?;
+    if action == CopyDestinationAction::Skip {
+        return with_copy_context(
+            record_skipped_file(stats),
+            LocalCopyDirStage::UpdateStatistics,
+            src,
+            dst,
+            stats,
+        );
+    }
+    if action == CopyDestinationAction::Replace {
+        let removal =
+            if destination_metadata.as_ref().is_some_and(is_real_directory) {
+                remove_destination_directory_if_unchanged(dst)
+            } else {
+                std::fs::remove_file(dst)
+            };
+        with_copy_context(
+            removal,
+            LocalCopyDirStage::PrepareDestination,
+            src,
+            dst,
+            stats,
+        )?;
+    }
+    let link_target = with_copy_context(
+        std::fs::read_link(src),
+        LocalCopyDirStage::CopyFileContents,
+        src,
+        dst,
+        stats,
+    )?;
+    with_copy_context(
+        create_symlink_entry(&link_target, src, dst),
+        LocalCopyDirStage::CommitFile,
+        src,
+        dst,
+        stats,
+    )?;
+    with_copy_context(
+        record_copied_file(stats, 0),
+        LocalCopyDirStage::UpdateStatistics,
+        src,
+        dst,
+        stats,
+    )?;
+    if destination_metadata.is_some() {
+        with_copy_context(
+            record_overwritten_entry(stats),
+            LocalCopyDirStage::UpdateStatistics,
+            src,
+            dst,
+            stats,
+        )?;
+    }
+    stats.non_atomic_publication = true;
+    stats.files_durable = false;
+    Ok(())
+}
+
+fn create_symlink_entry(
+    link_target: &Path,
+    _source: &Path,
+    target: &Path,
+) -> std::io::Result<()> {
+    #[cfg(unix)]
+    {
+        std::os::unix::fs::symlink(link_target, target)
+    }
+    #[cfg(windows)]
+    {
+        if std::fs::metadata(_source).is_ok_and(|metadata| metadata.is_dir()) {
+            std::os::windows::fs::symlink_dir(link_target, target)
+        } else {
+            std::os::windows::fs::symlink_file(link_target, target)
+        }
+    }
+    #[cfg(not(any(unix, windows)))]
+    {
+        let _ = (link_target, _source, target);
+        Err(std::io::Error::new(
+            ErrorKind::Unsupported,
+            "symbolic links are unsupported on this platform",
+        ))
+    }
+}
+
 /// Copies a source file into a private same-directory staging file.
 ///
 /// # Parameters

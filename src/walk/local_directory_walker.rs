@@ -24,6 +24,7 @@ use crate::{
     LocalFileOperation,
     LocalListOptions,
     LocalResult,
+    LocalSymlinkPolicy,
     LocalWalkErrorPolicy,
 };
 
@@ -50,6 +51,8 @@ pub struct LocalDirectoryWalker {
     rooted: Option<RootedWalkState>,
     /// Whether fail-fast error policy has terminated iteration.
     terminated: bool,
+    /// Symbolic-link policy fixed when the walker is created.
+    symlink_policy: LocalSymlinkPolicy,
 }
 
 impl LocalDirectoryWalker {
@@ -71,6 +74,7 @@ impl LocalDirectoryWalker {
     pub(crate) fn open(
         root: PathBuf,
         options: LocalListOptions,
+        symlink_policy: LocalSymlinkPolicy,
     ) -> LocalResult<Self> {
         validate_options(&root, &options)?;
         let metadata = fs::symlink_metadata(&root)
@@ -85,7 +89,7 @@ impl LocalDirectoryWalker {
         let entries =
             fs::read_dir(&root).map_err(|error| walk_io_error(&root, error))?;
         let mut followed_directories = HashSet::new();
-        let root_identity = if options.follows_symlinks() {
+        let root_identity = if symlink_policy.follows() {
             #[cfg(coverage)]
             if crate::local::coverage_fault_enabled("walker-root-canonicalize")
             {
@@ -117,6 +121,7 @@ impl LocalDirectoryWalker {
             followed_directories,
             rooted: None,
             terminated: false,
+            symlink_policy,
         })
     }
 
@@ -135,25 +140,38 @@ impl LocalDirectoryWalker {
     ///
     /// # Errors
     ///
-    /// Returns `LocalFileError` when follow mode is requested. Rooted directory
-    /// opening and enumeration errors are yielded by the iterator.
+    /// Returns `LocalFileError` when the rooted start path is invalid. Rooted
+    /// directory opening and enumeration errors are yielded by the iterator.
     pub(crate) fn open_rooted(
         root: Arc<crate::rooted::Root>,
         path: Option<crate::local::LocalRelativePath>,
         options: LocalListOptions,
+        symlink_policy: LocalSymlinkPolicy,
     ) -> LocalResult<Self> {
-        let diagnostic_root = root.path().join(
-            path.as_ref()
-                .map_or_else(PathBuf::new, |path| path.as_path().to_path_buf()),
-        );
+        Self::open_rooted_with_output(
+            root,
+            path,
+            PathBuf::new(),
+            options,
+            symlink_policy,
+        )
+    }
+
+    /// Creates a rooted walker with separate authority and logical output
+    /// paths, which preserves a symlink component in returned paths.
+    pub(crate) fn open_rooted_with_output(
+        root: Arc<crate::rooted::Root>,
+        path: Option<crate::local::LocalRelativePath>,
+        output_parent: PathBuf,
+        options: LocalListOptions,
+        symlink_policy: LocalSymlinkPolicy,
+    ) -> LocalResult<Self> {
+        let diagnostic_root = root
+            .path()
+            .join(path.as_ref().map_or_else(PathBuf::new, |path| {
+                path.as_path().to_path_buf()
+            }));
         validate_options(&diagnostic_root, &options)?;
-        if options.follows_symlinks() {
-            return Err(LocalFileError::new(
-                LocalFileErrorKind::RequirementNotMet,
-                LocalFileOperation::List,
-            )
-            .with_reason("rooted directory walking cannot follow symbolic links safely"));
-        }
         let authority_parent = path
             .as_ref()
             .map_or_else(PathBuf::new, |path| path.as_path().to_path_buf());
@@ -167,11 +185,15 @@ impl LocalDirectoryWalker {
                 stack: vec![RootedWalkFrame {
                     reader: None,
                     authority_parent,
-                    output_parent: PathBuf::new(),
+                    output_parent,
                     entry_depth: 1,
+                    identity: None,
                 }],
+                followed_directories: HashSet::new(),
+                symlink_policy,
             }),
             terminated: false,
+            symlink_policy,
         })
     }
 
@@ -224,7 +246,7 @@ impl LocalDirectoryWalker {
             )
             .with_path(path.to_path_buf()));
         }
-        let identity = if self.options.follows_symlinks() {
+        let identity = if self.symlink_policy.follows() {
             #[cfg(coverage)]
             if crate::local::coverage_fault_enabled(
                 "walker-descend-canonicalize",
@@ -286,7 +308,9 @@ fn validate_options(
             LocalFileOperation::List,
         )
         .with_path(root.to_path_buf())
-        .with_reason("maximum open directory count must be greater than zero"));
+        .with_reason(
+            "maximum open directory count must be greater than zero",
+        ));
     }
     Ok(())
 }
@@ -354,7 +378,7 @@ impl Iterator for LocalDirectoryWalker {
 
             let path = entry.path();
             let relative = relative_parent.join(entry.file_name());
-            let native_metadata = if self.options.follows_symlinks() {
+            let native_metadata = if self.symlink_policy.follows() {
                 fs::metadata(&path)
             } else {
                 fs::symlink_metadata(&path)
@@ -443,7 +467,11 @@ fn next_rooted_entry(
         {
             Ok(Some(entry)) => entry,
             Ok(None) => {
-                state.stack.pop();
+                if let Some(frame) = state.stack.pop()
+                    && let Some(identity) = frame.identity
+                {
+                    state.followed_directories.remove(&identity);
+                }
                 continue;
             }
             Err(error) => {
@@ -459,8 +487,59 @@ fn next_rooted_entry(
         }
         let authority_path = authority_parent.join(entry.name());
         let output_path = output_parent.join(entry.name());
-        let metadata =
+        let mut metadata =
             crate::rooted_local_file_system::rooted_metadata(entry.metadata());
+        let mut followed_directory = None;
+        if metadata.kind() == crate::LocalFileKind::Symlink
+            && state.symlink_policy.follows()
+        {
+            let diagnostic_path = state.root.path().join(&authority_path);
+            let target = match fs::canonicalize(&diagnostic_path) {
+                Ok(target) => target,
+                Err(error) => {
+                    return Some(Err(walk_io_error(&diagnostic_path, error)));
+                }
+            };
+            let root = match fs::canonicalize(state.root.path()) {
+                Ok(root) => root,
+                Err(error) => {
+                    return Some(Err(walk_io_error(state.root.path(), error)));
+                }
+            };
+            if !target.starts_with(&root) {
+                return Some(Err(LocalFileError::new(
+                    LocalFileErrorKind::InvalidPath,
+                    LocalFileOperation::List,
+                )
+                .with_reason(
+                    "symbolic-link resolution escaped the rooted scope",
+                )
+                .with_path(diagnostic_path)));
+            }
+            let target_metadata = match fs::metadata(&target) {
+                Ok(metadata) => metadata,
+                Err(error) => {
+                    return Some(Err(walk_io_error(&target, error)));
+                }
+            };
+            metadata = LocalFileMetadata::from_native(&target_metadata);
+            if metadata.kind() == crate::LocalFileKind::Directory {
+                let identity = target.clone();
+                if state.followed_directories.contains(&identity) {
+                    return Some(Err(LocalFileError::new(
+                        LocalFileErrorKind::InvalidPath,
+                        LocalFileOperation::List,
+                    )
+                    .with_reason("symbolic-link directory cycle detected")
+                    .with_path(diagnostic_path)));
+                }
+                let relative_target = match target.strip_prefix(&root) {
+                    Ok(relative) => relative.to_path_buf(),
+                    Err(_) => unreachable!("target was checked within root"),
+                };
+                followed_directory = Some((relative_target, identity));
+            }
+        }
         let is_directory = metadata.kind() == crate::LocalFileKind::Directory;
         let may_descend = if options.recursive() {
             match options.max_depth() {
@@ -478,11 +557,19 @@ fn next_rooted_entry(
                 )
                 .with_path(state.root.path().join(&authority_path))));
             }
+            let (authority_parent, identity) = followed_directory.map_or(
+                (authority_path.clone(), None),
+                |(target, identity)| {
+                    state.followed_directories.insert(identity.clone());
+                    (target, Some(identity))
+                },
+            );
             state.stack.push(RootedWalkFrame {
                 reader: None,
-                authority_parent: authority_path.clone(),
+                authority_parent,
                 output_parent: output_path.clone(),
                 entry_depth: entry_depth + 1,
+                identity,
             });
         }
         let diagnostic_path = state.root.path().join(&authority_path);

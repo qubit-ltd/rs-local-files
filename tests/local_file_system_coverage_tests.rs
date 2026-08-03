@@ -83,11 +83,10 @@ fn test_open_writer_append_rejects_unsupported_atomicity_and_directory() {
     assert_eq!(LocalFileErrorKind::TypeConflict, type_error.kind());
 }
 
-/// Verifies a final symbolic-link source is rejected by default and may be
-/// copied through only with the explicit follow policy.
+/// Verifies a final symbolic-link source is copied as a link entry by default.
 #[cfg(unix)]
 #[test]
-fn test_copy_symlink_requires_explicit_follow_policy() {
+fn test_copy_symlink_preserves_final_link_entry() {
     use std::os::unix::fs::symlink;
 
     let directory = tempdir().expect("temporary directory should be created");
@@ -97,25 +96,28 @@ fn test_copy_symlink_requires_explicit_follow_policy() {
     fs::write(&referent, b"payload").expect("referent should be written");
     symlink(&referent, &link).expect("file symlink should be created");
 
-    let rejection = LocalFileSystem::host()
+    let outcome = LocalFileSystem::host()
         .copy(&link, &target, &LocalCopyOptions::new())
-        .expect_err("default copy policy must reject a source symlink");
-    assert_eq!(LocalFileErrorKind::Unsupported, rejection.error().kind());
+        .expect("default copy should copy a source link entry");
+    assert!(!outcome.atomic());
+    assert_eq!(
+        referent,
+        fs::read_link(&target).expect("target link should exist")
+    );
 
+    let target_follow = directory.path().join("target-follow");
     let outcome = LocalFileSystem::host()
         .copy(
             &link,
-            &target,
+            &target_follow,
             &LocalCopyOptions::new()
-                .with_symlink_policy(LocalSymlinkPolicy::Follow),
+                .with_symlink_policy(LocalSymlinkPolicy::FollowWithinScope),
         )
-        .expect("follow policy should copy the referent file");
-    assert!(outcome.atomic());
+        .expect("explicit follow should still preserve the final link entry");
+    assert!(!outcome.atomic());
     assert_eq!(
-        b"payload",
-        fs::read(target)
-            .expect("followed target should be readable")
-            .as_slice(),
+        referent,
+        fs::read_link(target_follow).expect("target link should exist")
     );
 }
 
@@ -348,7 +350,6 @@ fn test_host_facade_reports_injected_native_io_failures() {
         "local-fs-open-reader-native",
         "local-fs-open-writer-append-metadata",
         "local-fs-open-writer-append-native",
-        "local-fs-copy-follow-metadata",
         "local-fs-copy-target-metadata",
     ] {
         run_facade_fault(TEST_NAME, fault, || {
@@ -415,31 +416,6 @@ fn test_host_facade_reports_injected_native_io_failures() {
                             &LocalWriteOptions::new(LocalWriteMode::Append),
                         )
                         .is_err()
-                }
-                "local-fs-copy-follow-metadata" => {
-                    #[cfg(unix)]
-                    {
-                        use std::os::unix::fs::symlink;
-
-                        let link = directory.path().join("link");
-                        symlink(&source, &link)
-                            .expect("source symlink should be created");
-                        LocalFileSystem::host()
-                            .copy(
-                                &link,
-                                &target,
-                                &LocalCopyOptions::new().with_symlink_policy(
-                                    LocalSymlinkPolicy::Follow,
-                                ),
-                            )
-                            .is_err()
-                    }
-                    #[cfg(not(unix))]
-                    {
-                        unreachable!(
-                            "copy follow metadata fault requires Unix symlinks"
-                        )
-                    }
                 }
                 "local-fs-copy-target-metadata" => {
                     fs::write(&target, b"existing")

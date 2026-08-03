@@ -50,6 +50,26 @@ pub(crate) fn copy_dir_all_with_paths(
     dst: &Path,
     options: LocalCopyDirOptions,
 ) -> CopyDirResult<LocalCopyDirStats> {
+    copy_dir_all_with_scope(src, dst, options, None)
+}
+
+/// Recursively copies a directory tree while constraining followed directory
+/// links to a canonical scope root.
+pub(crate) fn copy_dir_all_with_paths_scoped(
+    src: &Path,
+    dst: &Path,
+    options: LocalCopyDirOptions,
+    scope_root: &Path,
+) -> CopyDirResult<LocalCopyDirStats> {
+    copy_dir_all_with_scope(src, dst, options, Some(scope_root))
+}
+
+fn copy_dir_all_with_scope(
+    src: &Path,
+    dst: &Path,
+    options: LocalCopyDirOptions,
+    scope_root: Option<&Path>,
+) -> CopyDirResult<LocalCopyDirStats> {
     let mut stats = LocalCopyDirStats::default();
     let source_result = absolute_path(src);
     #[cfg(coverage)]
@@ -95,6 +115,25 @@ pub(crate) fn copy_dir_all_with_paths(
         &dst,
         &stats,
     )?;
-    copy_dir_iterative(&src, &dst, options, &destination_root, &mut stats)?;
+    let scope_root = scope_root
+        .map(std::fs::canonicalize)
+        .transpose()
+        .map_err(|error| {
+            super::error::copy_dir_error(
+                LocalCopyDirStage::InspectSource,
+                &src,
+                &dst,
+                &stats,
+                error,
+            )
+        })?;
+    copy_dir_iterative(
+        &src,
+        &dst,
+        options,
+        &destination_root,
+        scope_root.as_deref(),
+        &mut stats,
+    )?;
     Ok(stats)
 }

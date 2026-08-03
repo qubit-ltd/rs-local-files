@@ -30,8 +30,8 @@ pub struct LocalCopyOptions {
     type_conflict: LocalCopyTypeConflictPolicy,
     /// Source metadata preservation policy.
     preserve_metadata: LocalMetadataPreservePolicy,
-    /// Symbolic-link traversal policy.
-    symlink: LocalSymlinkPolicy,
+    /// Optional symbolic-link policy overriding the owning filesystem.
+    symlink: Option<LocalSymlinkPolicy>,
     /// Whether copying a directory tree is authorized.
     source_mode: LocalCopySourceMode,
     /// Whether missing target parent directories are created.
@@ -43,14 +43,15 @@ pub struct LocalCopyOptions {
 }
 
 impl LocalCopyOptions {
-    /// Creates conservative copy options.
+    /// Creates copy options that inherit the owning filesystem's
+    /// symbolic-link policy.
     #[inline]
     pub const fn new() -> Self {
         Self {
             conflict: LocalCopyConflictPolicy::Fail,
             type_conflict: LocalCopyTypeConflictPolicy::Fail,
             preserve_metadata: LocalMetadataPreservePolicy::None,
-            symlink: LocalSymlinkPolicy::Reject,
+            symlink: None,
             source_mode: LocalCopySourceMode::Auto,
             create_parent: false,
             atomicity: LocalAtomicityRequirement::Preferred,
@@ -76,9 +77,21 @@ impl LocalCopyOptions {
         self.preserve_metadata
     }
 
-    /// Returns the symbolic-link policy.
+    /// Returns the explicit symbolic-link policy, or
+    /// [`LocalSymlinkPolicy::Reject`] when this options value inherits its
+    /// owning filesystem.
     #[inline(always)]
     pub const fn symlink_policy(&self) -> LocalSymlinkPolicy {
+        match self.symlink {
+            Some(policy) => policy,
+            None => LocalSymlinkPolicy::Reject,
+        }
+    }
+
+    /// Returns the optional symbolic-link policy override.
+    #[must_use]
+    #[inline(always)]
+    pub const fn symlink_policy_override(&self) -> Option<LocalSymlinkPolicy> {
         self.symlink
     }
 
@@ -143,7 +156,7 @@ impl LocalCopyOptions {
         mut self,
         symlink: LocalSymlinkPolicy,
     ) -> Self {
-        self.symlink = symlink;
+        self.symlink = Some(symlink);
         self
     }
 

@@ -19,8 +19,9 @@ use crate::{
 /// Options controlling recursive directory copy behavior.
 ///
 /// The default is conservative: existing destination entries are not
-/// overwritten, symbolic links are not followed, and source permissions are not
-/// copied to destination entries. On Unix, newly created files therefore keep
+/// overwritten, directory symbolic links are not followed, and source
+/// permissions are not copied to destination entries. Final symbolic-link
+/// entries are copied as links. On Unix, newly created files therefore keep
 /// the private staging mode `0o600` and newly created directories use `0o700`,
 /// subject to a more restrictive process umask.
 ///
@@ -51,9 +52,9 @@ pub struct LocalCopyDirOptions {
 
     /// Whether symbolic links in the source tree should be followed.
     ///
-    /// When this is `false`, encountering a symbolic link returns
-    /// [`std::io::ErrorKind::Unsupported`]. This avoids accidentally copying
-    /// data outside the requested source tree.
+    /// When this is `false`, directory symbolic links are copied as final link
+    /// entries instead of being traversed. File symbolic links are always
+    /// copied as link entries rather than dereferenced.
     ///
     /// File type is verified from the opened source handle. Directory
     /// traversal, destination reinspection, and destructive replacement remain
