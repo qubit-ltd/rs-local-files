@@ -61,6 +61,11 @@ impl LocalFileSystem {
     /// Creates a filesystem over the process-visible Host namespace.
     ///
     /// Host defaults to [`LocalSymlinkPolicy::FollowAcrossScope`].
+    ///
+    /// # Returns
+    ///
+    /// A filesystem whose paths are interpreted by the process-visible Host
+    /// namespace.
     #[must_use]
     #[inline(always)]
     pub const fn host() -> Self {
@@ -95,6 +100,20 @@ impl LocalFileSystem {
     }
 
     /// Opens a rooted filesystem with an explicit symbolic-link policy.
+    ///
+    /// # Parameters
+    ///
+    /// - `root`: Existing native directory used as the authority root.
+    /// - `symlink_policy`: Policy applied to intermediate symbolic links.
+    ///
+    /// # Returns
+    ///
+    /// A filesystem whose later paths are validated descendants of `root`.
+    ///
+    /// # Errors
+    ///
+    /// Returns `LocalFileError` when the root is not a directory or cannot be
+    /// opened securely on the current platform.
     pub fn rooted_with_symlink_policy(
         root: &Path,
         symlink_policy: LocalSymlinkPolicy,
@@ -112,6 +131,14 @@ impl LocalFileSystem {
     /// The policy applies to subsequent operations made through the returned
     /// value. For rooted filesystems, `FollowAcrossScope` intentionally permits
     /// reads and mutations through links that resolve outside the opened root.
+    ///
+    /// # Parameters
+    ///
+    /// - `symlink_policy`: Policy to inherit for subsequent operations.
+    ///
+    /// # Returns
+    ///
+    /// This filesystem with the requested policy.
     #[must_use]
     #[inline(always)]
     pub fn with_symlink_policy(
@@ -123,6 +150,10 @@ impl LocalFileSystem {
     }
 
     /// Returns the symbolic-link policy inherited by operations.
+    ///
+    /// # Returns
+    ///
+    /// The policy applied to intermediate symbolic links by default.
     #[must_use = "the filesystem symlink policy must be used"]
     #[inline(always)]
     pub const fn symlink_policy(&self) -> LocalSymlinkPolicy {
@@ -130,6 +161,11 @@ impl LocalFileSystem {
     }
 
     /// Returns the namespace in which this filesystem interprets paths.
+    ///
+    /// # Returns
+    ///
+    /// [`LocalFileSystemScope::Host`] for a Host filesystem or
+    /// [`LocalFileSystemScope::Rooted`] for a rooted filesystem.
     #[must_use = "the filesystem scope must be used"]
     #[inline(always)]
     pub fn scope(&self) -> LocalFileSystemScope {
@@ -140,6 +176,10 @@ impl LocalFileSystem {
     }
 
     /// Returns the non-authoritative root path retained for diagnostics.
+    ///
+    /// Returns `Some` for rooted filesystems and `None` for the process-visible
+    /// Host namespace. The returned path is diagnostic context, not an
+    /// authority for later operations.
     #[must_use]
     #[inline(always)]
     pub fn diagnostic_root(&self) -> Option<&Path> {
@@ -150,6 +190,11 @@ impl LocalFileSystem {
     }
 
     /// Returns the build capability snapshot captured by this filesystem.
+    ///
+    /// # Returns
+    ///
+    /// A copy of the immutable capability snapshot for this build and
+    /// authority type.
     #[must_use = "the filesystem capabilities must be used"]
     #[inline(always)]
     pub const fn capabilities(&self) -> LocalFileSystemCapabilities {
@@ -159,6 +204,15 @@ impl LocalFileSystem {
     /// Reads metadata without following the final symbolic link.
     ///
     /// Intermediate path components follow the filesystem policy.
+    ///
+    /// # Parameters
+    ///
+    /// - `path`: Path to inspect in this filesystem's namespace.
+    ///
+    /// # Returns
+    ///
+    /// Metadata for the addressed entry, including the final link entry when
+    /// `path` names a symbolic link.
     ///
     /// # Errors
     ///
@@ -180,6 +234,15 @@ impl LocalFileSystem {
     /// Opens a synchronous regular-file reader.
     ///
     /// The final symbolic link is followed according to the filesystem policy.
+    ///
+    /// # Parameters
+    ///
+    /// - `path`: Regular-file path to open.
+    /// - `options`: Reader behavior and retry configuration.
+    ///
+    /// # Returns
+    ///
+    /// A reader that owns the opened file handle.
     ///
     /// # Errors
     ///
@@ -209,6 +272,15 @@ impl LocalFileSystem {
     /// `Append` and `CreateOrReplace` follow a final symbolic link and modify
     /// its target. `CreateNew` treats a final link as an existing entry.
     ///
+    /// # Parameters
+    ///
+    /// - `path`: Publication target path.
+    /// - `options`: Writer mode, replacement, durability, and retry policy.
+    ///
+    /// # Returns
+    ///
+    /// A writer session whose bytes are published only when committed.
+    ///
     /// # Errors
     ///
     /// Returns `LocalFileError` for invalid paths, conflicts, unsupported
@@ -237,6 +309,15 @@ impl LocalFileSystem {
     /// Directory links are followed according to the inherited policy and any
     /// option override. Returned paths remain logical paths through a link.
     ///
+    /// # Parameters
+    ///
+    /// - `path`: Directory from which to begin the walk.
+    /// - `options`: Recursion, depth, link, and error-handling policies.
+    ///
+    /// # Returns
+    ///
+    /// A lazy walker that opens descendants as they are iterated.
+    ///
     /// # Errors
     ///
     /// Returns `LocalFileError` for invalid paths, unsupported policies, or
@@ -264,6 +345,16 @@ impl LocalFileSystem {
     /// A final source link is copied as a link entry, while a final target link
     /// is replaced as an entry.
     ///
+    /// # Parameters
+    ///
+    /// - `source`: File or directory tree to copy.
+    /// - `destination`: Destination path to create or replace.
+    /// - `options`: Conflict, source-kind, and durability policy.
+    ///
+    /// # Returns
+    ///
+    /// Copy statistics and publication guarantees when successful.
+    ///
     /// # Errors
     ///
     /// Returns `LocalCopyFailure` with the strongest known destination state
@@ -289,6 +380,15 @@ impl LocalFileSystem {
     }
 
     /// Creates a directory with the selected parent policy.
+    ///
+    /// # Parameters
+    ///
+    /// - `path`: Directory path to create.
+    /// - `options`: Parent creation and existing-entry policy.
+    ///
+    /// # Returns
+    ///
+    /// An outcome indicating whether a new directory was created.
     ///
     /// # Errors
     ///
@@ -318,6 +418,15 @@ impl LocalFileSystem {
     /// A final symbolic link is deleted as an entry; intermediate components
     /// follow the inherited policy.
     ///
+    /// # Parameters
+    ///
+    /// - `path`: Non-directory entry to remove.
+    /// - `options`: Missing-entry policy.
+    ///
+    /// # Returns
+    ///
+    /// An outcome indicating whether an entry was deleted.
+    ///
     /// # Errors
     ///
     /// Returns `LocalFileError` for invalid paths, type conflicts, or native
@@ -344,6 +453,15 @@ impl LocalFileSystem {
     /// Deletes a directory according to the recursion policy.
     ///
     /// A final symbolic link is never recursively deleted through its target.
+    ///
+    /// # Parameters
+    ///
+    /// - `path`: Directory entry to remove.
+    /// - `options`: Recursion and missing-entry policy.
+    ///
+    /// # Returns
+    ///
+    /// An outcome indicating whether an entry was deleted.
     ///
     /// # Errors
     ///
@@ -372,6 +490,16 @@ impl LocalFileSystem {
     ///
     /// Intermediate components may resolve across the root when explicitly
     /// configured. Final source and destination links are renamed as entries.
+    ///
+    /// # Parameters
+    ///
+    /// - `source`: Entry to rename.
+    /// - `destination`: New entry path.
+    /// - `options`: Overwrite and durability policy.
+    ///
+    /// # Returns
+    ///
+    /// Rename publication state and any achieved durability guarantee.
     ///
     /// # Errors
     ///
@@ -402,6 +530,14 @@ impl LocalFileSystem {
     /// The returned resource retains this filesystem's symbolic-link policy
     /// for later persistence targets.
     ///
+    /// # Parameters
+    ///
+    /// - `options`: Parent, name-affix, and retry configuration.
+    ///
+    /// # Returns
+    ///
+    /// A cleanup-owned temporary file bound to this namespace.
+    ///
     /// # Errors
     ///
     /// Returns `LocalFileError` for invalid options, collisions, or native
@@ -428,6 +564,14 @@ impl LocalFileSystem {
     ///
     /// The returned resource retains this filesystem's symbolic-link policy
     /// for later persistence targets.
+    ///
+    /// # Parameters
+    ///
+    /// - `options`: Parent, name-affix, and retry configuration.
+    ///
+    /// # Returns
+    ///
+    /// A cleanup-owned temporary directory bound to this namespace.
     ///
     /// # Errors
     ///

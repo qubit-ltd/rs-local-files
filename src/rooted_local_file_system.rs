@@ -10,6 +10,7 @@
 
 mod path_support;
 
+pub(crate) use path_support::rooted_metadata;
 use path_support::{
     rooted_destination_is_directory,
     rooted_io_error,
@@ -18,7 +19,6 @@ use path_support::{
     temp_candidate,
     validate_rooted_temp_parent,
 };
-pub(crate) use path_support::rooted_metadata;
 
 use std::{
     fs,
