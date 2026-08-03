@@ -6,6 +6,8 @@
 //    Licensed under the Apache License, Version 2.0.
 // =============================================================================
 
+#[cfg(unix)]
+use std::ffi::OsString;
 use std::{
     ffi::OsStr,
     path::{
@@ -14,8 +16,6 @@ use std::{
     },
     sync::Mutex,
 };
-#[cfg(unix)]
-use std::ffi::OsString;
 
 use qubit_local_files::{
     LocalFileErrorKind,

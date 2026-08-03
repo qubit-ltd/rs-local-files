@@ -9,13 +9,6 @@
 use std::fs;
 use std::path::Path;
 
-use qubit_local_files::{
-    LocalFileKind,
-    LocalFileSystem,
-    LocalFileSystemScope,
-    LocalSymlinkPolicy,
-    metadata,
-};
 #[cfg(unix)]
 use qubit_local_files::{
     LocalCopyOptions,
@@ -26,6 +19,13 @@ use qubit_local_files::{
     LocalTempFileOptions,
     LocalWriteMode,
     LocalWriteOptions,
+};
+use qubit_local_files::{
+    LocalFileKind,
+    LocalFileSystem,
+    LocalFileSystemScope,
+    LocalSymlinkPolicy,
+    metadata,
 };
 use tempfile::tempdir;
 
