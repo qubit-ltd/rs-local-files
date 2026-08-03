@@ -20,6 +20,7 @@ include = [
     "/doc/local_file_system_design.zh_CN.md",
     "/doc/**/user_guide*.md",
     "/examples/**",
+    "/benches/**",
     "/resources/**",
     "/src/**",
     "/tests/**",
