@@ -9,6 +9,7 @@
 mod local;
 mod options;
 mod rooted;
+mod rooted_local_file_system;
 
 /// Verifies crate-root exports for the unified public API.
 #[test]

@@ -44,7 +44,10 @@ fn test_capability_snapshot_exposes_all_guarantees() {
     let _ = capabilities.path_limit();
     let _ = capabilities.rooted_operations_implemented();
     let _ = capabilities.atomic_rename_implemented();
-    let _ = capabilities.atomic_replace_implemented();
+    assert_eq!(
+        cfg!(any(unix, windows)),
+        capabilities.atomic_replace_implemented(),
+    );
     let _ = capabilities.atomic_temp_persist_implemented();
     let _ = capabilities.directory_durability_implemented();
 }
