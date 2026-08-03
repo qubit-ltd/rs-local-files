@@ -39,6 +39,7 @@ fn test_local_file_writer_append_commit_reports_direct_publication() {
 
     assert_eq!(target, writer.diagnostic_path());
     assert_eq!(LocalWriterState::Open, writer.state());
+    assert_eq!(None, writer.failure_state());
     assert_eq!(
         7,
         writer
