@@ -18,6 +18,28 @@ use qubit_local_files::{
 };
 use tempfile::tempdir;
 
+/// Verifies metadata errors retain the caller-visible path when an
+/// intermediate symbolic link is resolved for native inspection.
+#[cfg(unix)]
+#[test]
+fn test_local_file_system_metadata_preserves_logical_error_path() {
+    use std::os::unix::fs::symlink;
+
+    let directory = tempdir().expect("temporary directory should be created");
+    let target = directory.path().join("target");
+    let link = directory.path().join("link");
+    fs::create_dir(&target).expect("target directory should be created");
+    symlink(&target, &link).expect("intermediate symlink should be created");
+    let missing = link.join("missing");
+
+    let error = LocalFileSystem::host()
+        .metadata(&missing)
+        .expect_err("missing metadata should return an error");
+
+    assert_eq!(LocalFileErrorKind::NotFound, error.kind());
+    assert_eq!(Some(missing.as_path()), error.path());
+}
+
 /// Verifies host metadata reports regular files and preserves a missing-path
 /// error rather than synthesizing metadata.
 #[test]
