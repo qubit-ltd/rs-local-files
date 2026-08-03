@@ -8,6 +8,7 @@
 
 use std::{
     fs,
+    path::Path,
     path::PathBuf,
 };
 
@@ -20,6 +21,44 @@ use qubit_local_files::{
     LocalWalkErrorPolicy,
 };
 use tempfile::tempdir;
+
+/// Resolves the existing prefix of a path while preserving a missing leaf.
+///
+/// macOS commonly exposes `/var` through the `/private/var` symlink, so the
+/// bound path used by the filesystem can differ lexically from the fixture
+/// path even when both paths name the same entry.
+#[cfg(target_os = "macos")]
+fn bound_path(path: &Path) -> PathBuf {
+    let mut missing = Vec::new();
+    let mut current = path;
+    loop {
+        if let Ok(mut resolved) = fs::canonicalize(current) {
+            for component in missing.iter().rev() {
+                resolved.push(component);
+            }
+            return resolved;
+        }
+        let Some(name) = current.file_name() else {
+            return path.to_path_buf();
+        };
+        missing.push(name.to_owned());
+        let Some(parent) = current.parent() else {
+            return path.to_path_buf();
+        };
+        current = parent;
+    }
+}
+
+#[cfg(not(target_os = "macos"))]
+fn bound_path(path: &Path) -> PathBuf {
+    path.to_path_buf()
+}
+
+/// Asserts that a diagnostic path matches the filesystem's bound spelling.
+fn assert_bound_path(expected: &Path, actual: Option<&Path>) {
+    let expected = bound_path(expected);
+    assert_eq!(Some(expected.as_path()), actual);
+}
 
 /// Verifies non-recursive traversal returns only immediate entries and retains
 /// the bound root path for diagnostics.
@@ -36,7 +75,7 @@ fn test_local_directory_walker_non_recursive_listing_retains_bound_root() {
     let walker = LocalFileSystem::host()
         .list(directory.path(), &LocalListOptions::new())
         .expect("directory should open for listing");
-    assert_eq!(directory.path(), walker.root());
+    assert_eq!(bound_path(directory.path()), walker.root());
     let mut entries = walker
         .collect::<Result<Vec<_>, _>>()
         .expect("non-recursive traversal should succeed");
@@ -47,7 +86,10 @@ fn test_local_directory_walker_non_recursive_listing_retains_bound_root() {
     assert_eq!(PathBuf::from("nested"), entries[0].relative_path());
     assert_eq!(LocalFileKind::Directory, entries[0].metadata().kind());
     assert_eq!(PathBuf::from("top"), entries[1].relative_path());
-    assert_eq!(directory.path().join("top"), entries[1].diagnostic_path(),);
+    assert_eq!(
+        bound_path(&directory.path().join("top")),
+        entries[1].diagnostic_path(),
+    );
 }
 
 /// Verifies a regular file cannot be opened as a directory traversal root.
@@ -62,7 +104,7 @@ fn test_local_directory_walker_rejects_regular_file_root() {
         .expect_err("regular files must not open as directory walkers");
 
     assert_eq!(LocalFileErrorKind::TypeConflict, error.kind());
-    assert_eq!(Some(file.as_path()), error.path());
+    assert_bound_path(&file, error.path());
 }
 
 /// Verifies opening a missing traversal root preserves the path-specific
@@ -77,7 +119,7 @@ fn test_local_directory_walker_rejects_missing_root() {
         .expect_err("missing directories must not open as walkers");
 
     assert_eq!(LocalFileErrorKind::NotFound, error.kind());
-    assert_eq!(Some(missing.as_path()), error.path());
+    assert_bound_path(&missing, error.path());
 }
 
 /// Verifies a zero traversal depth yields no entries, including entries that
@@ -111,7 +153,7 @@ fn test_local_directory_walker_rejects_zero_open_directory_budget() {
         .expect_err("zero directory-handle budgets must be invalid");
 
     assert_eq!(LocalFileErrorKind::InvalidOptions, error.kind());
-    assert_eq!(Some(directory.path()), error.path());
+    assert_bound_path(directory.path(), error.path());
     assert_eq!(
         Some("maximum open directory count must be greater than zero"),
         error.reason(),
@@ -192,7 +234,7 @@ fn test_local_directory_walker_follow_mode_reports_dangling_link() {
         .expect_err("follow-mode walker must resolve a symlink target");
 
     assert_eq!(LocalFileErrorKind::NotFound, error.kind());
-    assert_eq!(Some(link.as_path()), error.path());
+    assert_bound_path(&link, error.path());
 }
 
 /// Verifies recursive traversal reports native child-directory opening errors
@@ -227,7 +269,7 @@ fn test_local_directory_walker_reports_unreadable_child_directory() {
     let error =
         result.expect_err("unreadable child descent must return an error");
     assert_eq!(LocalFileErrorKind::PermissionDenied, error.kind());
-    assert_eq!(Some(child.as_path()), error.path());
+    assert_bound_path(&child, error.path());
 }
 
 /// Verifies opening an unreadable traversal root reports the native directory
@@ -255,7 +297,7 @@ fn test_local_directory_walker_rejects_unreadable_root_directory() {
         .expect("restricted root permissions should be restored");
 
     assert_eq!(LocalFileErrorKind::PermissionDenied, error.kind());
-    assert_eq!(Some(root.as_path()), error.path());
+    assert_bound_path(&root, error.path());
 }
 
 /// Verifies the default fail-fast policy fuses a walker after its first
