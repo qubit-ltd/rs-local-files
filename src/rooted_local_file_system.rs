@@ -16,6 +16,16 @@ use std::{
     sync::Arc,
 };
 
+use crate::local::{
+    RootedResolvedPath,
+    copy_failure_published,
+    copy_failure_unchanged,
+    published_durability,
+    rename_failure_after_native_attempt,
+    rename_failure_renamed,
+    rename_failure_unchanged,
+    resolved_host_path,
+};
 use crate::{
     LocalCopyFailure,
     LocalCopyMethod,
@@ -50,14 +60,6 @@ use crate::{
     LocalTempFileOptions,
     LocalWriteMode,
     LocalWriteOptions,
-};
-use crate::local::{
-    copy_failure_published,
-    copy_failure_unchanged,
-    published_durability,
-    rename_failure_after_native_attempt,
-    rename_failure_renamed,
-    rename_failure_unchanged,
 };
 
 /// Descriptor- or handle-relative authority for one opened native directory.
@@ -512,9 +514,7 @@ impl RootedLocalFileSystem {
         options: &LocalListOptions,
         symlink_policy: LocalSymlinkPolicy,
     ) -> LocalResult<LocalDirectoryWalker> {
-        let symlink_policy = options
-            .symlink_policy()
-            .unwrap_or(symlink_policy);
+        let symlink_policy = options.symlink_policy().unwrap_or(symlink_policy);
         let relative = if path.as_os_str().is_empty() {
             None
         } else {
@@ -851,9 +851,8 @@ impl RootedLocalFileSystem {
                 .with_target(target.to_path_buf()),
             ));
         }
-        let symlink_policy = options
-            .symlink_policy_override()
-            .unwrap_or(symlink_policy);
+        let symlink_policy =
+            options.symlink_policy_override().unwrap_or(symlink_policy);
         let source_path = resolve_rooted_path(
             &self.root,
             source,
@@ -1075,10 +1074,7 @@ impl RootedLocalFileSystem {
             target,
         )
         .map_err(|error| {
-            copy_failure_published(
-                error,
-                LocalCopyStats::from_internal(stats),
-            )
+            copy_failure_published(error, LocalCopyStats::from_internal(stats))
         })?;
         let durable = !directory && stats.files_durable() && parent_durable;
         Ok(LocalCopyOutcome::new(
@@ -1307,28 +1303,6 @@ impl RootedLocalFileSystem {
         )
         .map_err(rename_failure_renamed)?;
         Ok(LocalRenameOutcome::new(true, durable))
-    }
-}
-
-/// Resolved path selected by a rooted operation.
-#[derive(Debug)]
-pub(crate) enum RootedResolvedPath {
-    /// Path that remains authorized by the opened root descriptor.
-    Rooted(crate::local::LocalRelativePath),
-    /// Host path required after an explicitly allowed root escape.
-    Host(PathBuf),
-}
-
-/// Converts a resolved rooted-or-host path into a native Host path.
-fn resolved_host_path(
-    root: &crate::rooted::Root,
-    path: RootedResolvedPath,
-) -> PathBuf {
-    match path {
-        RootedResolvedPath::Rooted(relative) => {
-            root.path().join(relative.as_path())
-        }
-        RootedResolvedPath::Host(path) => path,
     }
 }
 
@@ -1629,6 +1603,10 @@ pub(crate) fn rooted_metadata(
         crate::rooted::EntryKind::File => LocalFileKind::File,
         crate::rooted::EntryKind::Directory => LocalFileKind::Directory,
         crate::rooted::EntryKind::Symlink => LocalFileKind::Symlink,
+        crate::rooted::EntryKind::Fifo => LocalFileKind::Fifo,
+        crate::rooted::EntryKind::Socket => LocalFileKind::Socket,
+        crate::rooted::EntryKind::BlockDevice => LocalFileKind::BlockDevice,
+        crate::rooted::EntryKind::CharDevice => LocalFileKind::CharDevice,
         crate::rooted::EntryKind::Other => LocalFileKind::Other,
     };
     LocalFileMetadata::from_parts(

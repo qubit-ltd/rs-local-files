@@ -150,7 +150,12 @@ pub(super) fn copy(
                 durability,
             )
         }
-        EntryKind::Symlink | EntryKind::Other => Err(error(
+        EntryKind::Symlink
+        | EntryKind::Fifo
+        | EntryKind::Socket
+        | EntryKind::BlockDevice
+        | EntryKind::CharDevice
+        | EntryKind::Other => Err(error(
             Stage::InspectSource,
             source,
             destination,
@@ -251,7 +256,12 @@ fn copy_tree(
                                 });
                             }
                         }
-                        EntryKind::Symlink | EntryKind::Other => {
+                        EntryKind::Symlink
+                        | EntryKind::Fifo
+                        | EntryKind::Socket
+                        | EntryKind::BlockDevice
+                        | EntryKind::CharDevice
+                        | EntryKind::Other => {
                             return Err(error(
                                 Stage::InspectSourceEntry,
                                 &source_child,
