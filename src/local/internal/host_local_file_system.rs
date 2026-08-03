@@ -16,6 +16,14 @@ use std::{
     },
 };
 
+use crate::local::{
+    copy_failure_published,
+    copy_failure_unchanged,
+    published_durability,
+    rename_failure_after_native_attempt,
+    rename_failure_renamed,
+    rename_failure_unchanged,
+};
 use crate::{
     LocalAtomicityRequirement,
     LocalCopyFailure,
@@ -57,14 +65,6 @@ use crate::{
 use crate::{
     LocalRenameFailure,
     LocalRenameFailureState,
-};
-use crate::local::{
-    copy_failure_published,
-    copy_failure_unchanged,
-    published_durability,
-    rename_failure_after_native_attempt,
-    rename_failure_renamed,
-    rename_failure_unchanged,
 };
 
 /// Host-wide native local filesystem service.
@@ -368,9 +368,7 @@ impl HostLocalFileSystem {
         options: &LocalListOptions,
         symlink_policy: LocalSymlinkPolicy,
     ) -> LocalResult<LocalDirectoryWalker> {
-        let policy = options
-            .symlink_policy()
-            .unwrap_or(symlink_policy);
+        let policy = options.symlink_policy().unwrap_or(symlink_policy);
         let bound = resolve_host_path(path, policy, true)?;
         LocalDirectoryWalker::open(bound, *options, policy)
     }
@@ -438,9 +436,8 @@ impl HostLocalFileSystem {
         symlink_policy: LocalSymlinkPolicy,
         scope_root: Option<&Path>,
     ) -> LocalCopyResult {
-        let symlink_policy = options
-            .symlink_policy_override()
-            .unwrap_or(symlink_policy);
+        let symlink_policy =
+            options.symlink_policy_override().unwrap_or(symlink_policy);
         let [source, target] = LocalPaths::bind_host_paths([source, target])
             .map_err(copy_failure_unchanged)?;
         let source = resolve_host_path(&source, symlink_policy, false)
