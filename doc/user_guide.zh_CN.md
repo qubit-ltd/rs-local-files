@@ -20,6 +20,38 @@
 walker 与临时条目都是拥有资源的有状态对象。`LocalFileNames` 和 `LocalPaths` 提供原生
 词法工具，不会把文件名强制转换为 UTF-8。
 
+## 符号链接策略
+
+`LocalFileSystem` 实例保存一个由所有操作继承的符号链接策略。
+`LocalFileSystem::rooted(root)` 默认使用 `FollowWithinScope`：允许跟随链接，
+但解析结果必须仍位于已打开的 root 内。Host 默认使用 `FollowAcrossScope`，因为
+Host 没有更窄的 root 边界。可以通过 `with_symlink_policy` 选择 `Reject`、
+`FollowWithinScope` 或 `FollowAcrossScope`；`list` 和 `copy` 的 options 可以
+对单次操作覆盖策略。
+
+策略作用于所有中间路径组件。Rooted 配置为 `FollowAcrossScope` 时，像
+`etc/link/config` 这样的路径可以读写 `link` 指向的 root 外对象。这是显式授予的能力，
+适合把 Git checkout 通过符号链接接入 `/etc` 的场景。
+
+最终路径组件遵循真实文件系统中的操作语义：
+
+| 操作 | 最终符号链接 |
+| --- | --- |
+| `metadata` | 查看链接条目本身。 |
+| `open_reader` | 跟随链接读取目标。 |
+| `CreateNew` writer | 将已有链接视为已存在条目。 |
+| `Append` writer | 跟随链接追加到目标。 |
+| `CreateOrReplace` writer | 跟随链接替换目标，并保留链接。 |
+| `delete` | 删除链接条目。 |
+| `rename` | 移动或替换链接条目。 |
+| `copy` 源 | 复制链接条目本身。 |
+| `copy` 目标 | 替换目标链接条目。 |
+| `temp persist` | 通过 rename 发布并替换目标链接条目。 |
+
+目录遍历在有效策略允许时跟随目录链接。返回路径保持逻辑路径，例如 `link/child`，而不
+是规范化后的目标路径；递归遍历按底层目录对象身份检测循环。深度限制按逻辑路径条目计算，
+穿过链接不会额外增加一层。
+
 ## 场景：写入并检查导出产物
 
 导出程序需要创建 `build/output`，只在完整写入后发布 `manifest.json`，并读回结果。成功
@@ -117,9 +149,10 @@ walker 会按需打开并推进目录；最大深度、符号链接策略和默�
 固定。超过预算返回 `ResourceLimit`。rooted walker 还会逐项读取目录，避免先将单个目录完整
 收集到 `Vec` 中。
 
-rooted 路径必须是相对后代。绝对路径、平台前缀、`.`、`..` 和中间符号链接都会被拒绝。诊断
-用根路径不是权限本身：`open` 之后重命名它不会重定向已打开的资源。词法包含关系可用于早期
-分类，但不能替代基于描述符的权限控制。
+rooted 路径必须是相对后代。绝对路径、平台前缀、`.` 和 `..` 会被拒绝；中间符号链接遵循
+实例策略。`FollowWithinScope` 会拒绝解析到 root 外的链接，`FollowAcrossScope` 则允许该操作。
+诊断用根路径不是权限本身：`open` 之后重命名它不会重定向仍采用描述符权限的操作。词法包含
+关系可用于早期分类，但不能替代基于描述符的权限控制。
 
 ## 错误、诊断与排障
 
@@ -131,7 +164,7 @@ rooted 路径必须是相对后代。绝对路径、平台前缀、`.`、`..` �
 
 | 症状 | 检查方式 |
 | --- | --- |
-| rooted 操作拒绝路径 | 传入相对后代，移除绝对前缀、`.`、`..` 与中间符号链接。 |
+| rooted 操作拒绝路径 | 传入相对后代，移除绝对前缀、`.`、`..`；若中间链接越界是有意行为，选择 `FollowAcrossScope`。 |
 | 要求保证被拒绝 | 检查所选文件系统的 capability；仅在业务允许时放宽要求。 |
 | copy 或 rename 出错 | 先检查类型化失败状态，再决定重试、清理或认定目标不存在。 |
 | 临时条目仍存在 | 保留资源并调用显式生命周期方法；drop 清理只是尽力而为。 |
