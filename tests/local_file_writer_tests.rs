@@ -20,6 +20,8 @@ use std::{
 
 #[cfg(unix)]
 use qubit_local_files::LocalDurabilityRequirement;
+#[cfg(unix)]
+use qubit_local_files::LocalFileWriter;
 use qubit_local_files::{
     LocalAtomicityRequirement,
     LocalFileErrorKind,
@@ -30,8 +32,6 @@ use qubit_local_files::{
     LocalWritePublicationMethod,
     LocalWriterState,
 };
-#[cfg(unix)]
-use qubit_local_files::LocalFileWriter;
 use tempfile::tempdir;
 
 /// Environment switch used by the file-size-limit subprocess regression.

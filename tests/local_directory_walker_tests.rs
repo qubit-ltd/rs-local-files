@@ -11,13 +11,13 @@ use std::{
     path::PathBuf,
 };
 
+#[cfg(unix)]
+use qubit_local_files::LocalSymlinkPolicy;
 use qubit_local_files::{
     LocalFileKind,
     LocalFileSystem,
     LocalListOptions,
 };
-#[cfg(unix)]
-use qubit_local_files::LocalSymlinkPolicy;
 use tempfile::tempdir;
 
 /// Verifies lazy recursive traversal with stable root-relative paths.
