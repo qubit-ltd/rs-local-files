@@ -15,8 +15,9 @@ use qubit_local_files::{
     LocalFileKind,
     LocalFileSystem,
     LocalListOptions,
-    LocalSymlinkPolicy,
 };
+#[cfg(unix)]
+use qubit_local_files::LocalSymlinkPolicy;
 use tempfile::tempdir;
 
 /// Verifies lazy recursive traversal with stable root-relative paths.
@@ -133,12 +134,14 @@ fn test_local_directory_walker_can_reject_symlinks_per_operation() {
 
     let directory = tempdir().expect("temporary directory should be created");
     let outside = tempdir().expect("outside directory should be created");
-    symlink(outside.path(), directory.path().join("link"))
+    let directory_path = fs::canonicalize(directory.path())
+        .expect("temporary directory path should be canonicalized");
+    symlink(outside.path(), directory_path.join("link"))
         .expect("link should be created");
 
     let entries = LocalFileSystem::host()
         .list(
-            directory.path(),
+            &directory_path,
             &LocalListOptions::new()
                 .with_symlink_policy(LocalSymlinkPolicy::Reject),
         )
