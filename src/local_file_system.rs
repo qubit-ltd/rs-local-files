@@ -10,7 +10,11 @@
 
 use std::path::Path;
 
-use crate::local::HostLocalFileSystem;
+use crate::local::{
+    HostLocalFileSystem,
+    LocalNamespace,
+};
+use crate::rooted_local_file_system::RootedLocalFileSystem;
 use crate::{
     LocalCopyOptions,
     LocalCopyResult,
@@ -35,17 +39,7 @@ use crate::{
     LocalTempFile,
     LocalTempFileOptions,
     LocalWriteOptions,
-    rooted_local_file_system::RootedLocalFileSystem,
 };
-
-/// Closed native namespace implementation selected at construction.
-#[derive(Debug)]
-enum LocalNamespace {
-    /// Process-visible Host namespace.
-    Host,
-    /// Descriptor- or handle-relative Rooted namespace.
-    Rooted(RootedLocalFileSystem),
-}
 
 /// Synchronous local filesystem configured for Host or Rooted path access.
 ///
@@ -136,6 +130,7 @@ impl LocalFileSystem {
     }
 
     /// Returns the namespace in which this filesystem interprets paths.
+    #[must_use = "the filesystem scope must be used"]
     #[inline(always)]
     pub fn scope(&self) -> LocalFileSystemScope {
         match &self.namespace {
@@ -155,6 +150,7 @@ impl LocalFileSystem {
     }
 
     /// Returns the build capability snapshot captured by this filesystem.
+    #[must_use = "the filesystem capabilities must be used"]
     #[inline(always)]
     pub const fn capabilities(&self) -> LocalFileSystemCapabilities {
         self.capabilities

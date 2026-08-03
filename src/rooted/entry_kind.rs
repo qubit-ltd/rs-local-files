@@ -19,6 +19,14 @@ pub enum EntryKind {
     Directory,
     /// A symbolic link.
     Symlink,
+    /// A named pipe (FIFO).
+    Fifo,
+    /// A Unix-domain or platform-specific socket.
+    Socket,
+    /// A block device.
+    BlockDevice,
+    /// A character device.
+    CharDevice,
     /// A platform-specific special entry.
     Other,
 }

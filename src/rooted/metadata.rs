@@ -279,6 +279,14 @@ where
         EntryKind::Directory
     } else if file_type == T::from(libc::S_IFLNK) {
         EntryKind::Symlink
+    } else if file_type == T::from(libc::S_IFIFO) {
+        EntryKind::Fifo
+    } else if file_type == T::from(libc::S_IFSOCK) {
+        EntryKind::Socket
+    } else if file_type == T::from(libc::S_IFBLK) {
+        EntryKind::BlockDevice
+    } else if file_type == T::from(libc::S_IFCHR) {
+        EntryKind::CharDevice
     } else {
         EntryKind::Other
     }

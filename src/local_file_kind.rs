@@ -5,10 +5,9 @@
 //
 //    Licensed under the Apache License, Version 2.0.
 // =============================================================================
-// qubit-style: allow source-test-pair
-// Covered by metadata integration tests.
 
 /// Normalized kind of a native filesystem entry.
+#[non_exhaustive]
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
 #[must_use]
 pub enum LocalFileKind {
@@ -18,6 +17,14 @@ pub enum LocalFileKind {
     Directory,
     /// Symbolic link or Windows name-surrogate reparse point.
     Symlink,
-    /// FIFO, socket, device, or another platform-specific entry.
+    /// Named pipe (FIFO).
+    Fifo,
+    /// Unix-domain or platform-specific socket.
+    Socket,
+    /// Block device.
+    BlockDevice,
+    /// Character device.
+    CharDevice,
+    /// Another platform-specific entry that has no stable classification.
     Other,
 }

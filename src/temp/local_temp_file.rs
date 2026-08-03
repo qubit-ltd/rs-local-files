@@ -329,9 +329,7 @@ impl LocalTempFile {
                 }
             };
         let (result, target) = match resolved {
-            crate::rooted_local_file_system::RootedResolvedPath::Rooted(
-                destination,
-            ) => {
+            crate::local::RootedResolvedPath::Rooted(destination) => {
                 let result = if options.overwrites() {
                     rooted.root.rename(&source, &destination)
                 } else {
@@ -339,9 +337,7 @@ impl LocalTempFile {
                 };
                 (result, destination.as_path().to_path_buf())
             }
-            crate::rooted_local_file_system::RootedResolvedPath::Host(
-                destination,
-            ) => {
+            crate::local::RootedResolvedPath::Host(destination) => {
                 let source = rooted.root.path().join(source.as_path());
                 if let Err(error) =
                     crate::local::ensure_parent_path(&destination)

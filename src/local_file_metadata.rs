@@ -67,15 +67,7 @@ impl LocalFileMetadata {
     #[inline]
     pub(crate) fn from_native(metadata: &Metadata) -> Self {
         let file_type = metadata.file_type();
-        let kind = if file_type.is_file() {
-            LocalFileKind::File
-        } else if file_type.is_dir() {
-            LocalFileKind::Directory
-        } else if file_type.is_symlink() {
-            LocalFileKind::Symlink
-        } else {
-            LocalFileKind::Other
-        };
+        let kind = local_file_kind(file_type);
         Self {
             kind,
             len: metadata.len(),
@@ -124,5 +116,62 @@ impl LocalFileMetadata {
     #[inline(always)]
     pub const fn created_at(&self) -> Option<SystemTime> {
         self.created_at
+    }
+}
+
+/// Classifies a native file type without following its final path component.
+///
+/// # Parameters
+///
+/// - `file_type`: Native type bits observed for the final entry.
+///
+/// # Returns
+///
+/// The most specific platform-independent kind available for the entry.
+#[cfg(unix)]
+#[inline]
+fn local_file_kind(file_type: std::fs::FileType) -> LocalFileKind {
+    use std::os::unix::fs::FileTypeExt;
+
+    if file_type.is_file() {
+        LocalFileKind::File
+    } else if file_type.is_dir() {
+        LocalFileKind::Directory
+    } else if file_type.is_symlink() {
+        LocalFileKind::Symlink
+    } else if file_type.is_fifo() {
+        LocalFileKind::Fifo
+    } else if file_type.is_socket() {
+        LocalFileKind::Socket
+    } else if file_type.is_block_device() {
+        LocalFileKind::BlockDevice
+    } else if file_type.is_char_device() {
+        LocalFileKind::CharDevice
+    } else {
+        LocalFileKind::Other
+    }
+}
+
+/// Classifies a native file type on platforms without portable special-entry
+/// predicates.
+///
+/// # Parameters
+///
+/// - `file_type`: Native type bits observed for the final entry.
+///
+/// # Returns
+///
+/// The regular, directory, symlink, or fallback kind available on the target.
+#[cfg(not(unix))]
+#[inline]
+fn local_file_kind(file_type: std::fs::FileType) -> LocalFileKind {
+    if file_type.is_file() {
+        LocalFileKind::File
+    } else if file_type.is_dir() {
+        LocalFileKind::Directory
+    } else if file_type.is_symlink() {
+        LocalFileKind::Symlink
+    } else {
+        LocalFileKind::Other
     }
 }
