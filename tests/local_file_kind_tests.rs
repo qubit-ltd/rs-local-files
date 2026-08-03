@@ -8,6 +8,8 @@
 //! Integration coverage for native special-entry classification.
 
 #[cfg(unix)]
+use std::ffi::CString;
+#[cfg(unix)]
 use std::os::unix::fs::FileTypeExt;
 #[cfg(unix)]
 use std::os::unix::net::UnixListener;
@@ -30,9 +32,10 @@ fn test_host_metadata_classifies_fifo_and_socket() {
 
     let directory = tempdir().expect("special-entry directory must be created");
     let fifo = directory.path().join("fifo");
-    let result = unsafe {
-        libc::mkfifo(fifo.as_os_str().as_bytes().as_ptr().cast(), 0o600)
-    };
+    let fifo_name = CString::new(fifo.as_os_str().as_bytes())
+        .expect("FIFO path must not contain an interior NUL");
+    // SAFETY: `fifo_name` is a live NUL-terminated path for this call.
+    let result = unsafe { libc::mkfifo(fifo_name.as_ptr(), 0o600) };
     assert_eq!(0, result, "FIFO fixture must be created");
     let socket_path = directory.path().join("socket");
     let _socket =
@@ -64,9 +67,10 @@ fn test_rooted_metadata_classifies_fifo_and_socket() {
     let directory =
         tempdir().expect("rooted special-entry directory must exist");
     let fifo = directory.path().join("fifo");
-    let result = unsafe {
-        libc::mkfifo(fifo.as_os_str().as_bytes().as_ptr().cast(), 0o600)
-    };
+    let fifo_name = CString::new(fifo.as_os_str().as_bytes())
+        .expect("FIFO path must not contain an interior NUL");
+    // SAFETY: `fifo_name` is a live NUL-terminated path for this call.
+    let result = unsafe { libc::mkfifo(fifo_name.as_ptr(), 0o600) };
     assert_eq!(0, result, "rooted FIFO fixture must be created");
     let socket_path = directory.path().join("socket");
     let _socket = UnixListener::bind(&socket_path)
