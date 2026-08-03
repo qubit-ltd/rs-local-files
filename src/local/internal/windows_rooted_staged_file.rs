@@ -77,6 +77,9 @@ impl WindowsRootedStagedFile {
         if let Some(file) = self.file.as_ref() {
             let mut permissions = file.metadata()?.permissions();
             if permissions.readonly() {
+                // This Windows-only cleanup clears the read-only attribute;
+                // the Unix world-writable warning does not apply here.
+                #[allow(clippy::permissions_set_readonly_false)]
                 permissions.set_readonly(false);
                 file.set_permissions(permissions)?;
             }
