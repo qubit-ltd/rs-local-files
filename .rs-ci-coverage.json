@@ -28,7 +28,6 @@
       "src/local/internal/file_move.rs",
       "src/local/internal/file_name_validation.rs",
       "src/local/internal/host_local_file_system.rs",
-      "src/local/internal/host_local_file_system/path_resolution.rs",
       "src/local/internal/io_result_context.rs",
       "src/local/internal/opened_atomic_destination.rs",
       "src/local/internal/path_io_error.rs",
