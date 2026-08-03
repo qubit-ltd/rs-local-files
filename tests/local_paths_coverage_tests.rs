@@ -6,7 +6,10 @@
 //    Licensed under the Apache License, Version 2.0.
 // =============================================================================
 
-use std::path::Path;
+use std::{
+    io,
+    path::Path,
+};
 
 use qubit_local_files::{
     LocalFileErrorKind,
@@ -111,6 +114,14 @@ fn test_canonical_path_conversions_reject_unsafe_component_shapes() {
                 );
         assert_eq!(LocalFileErrorKind::InvalidPath, error.kind());
     }
+
+    let codec_error =
+        LocalPaths::from_canonical_relative_components(vec!["%2f"])
+            .expect_err("lowercase escape should produce a path codec error");
+    assert_eq!(
+        io::ErrorKind::InvalidInput,
+        codec_error.into_io_error().kind(),
+    );
 }
 
 /// Verifies direct bindings and conversions cover both successful relative
