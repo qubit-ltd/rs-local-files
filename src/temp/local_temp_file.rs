@@ -506,5 +506,5 @@ impl Drop for LocalTempFile {
 #[must_use]
 #[inline]
 fn closed_file_error() -> Error {
-    Error::new(ErrorKind::NotFound, "temporary file handle is closed")
+    Error::new(ErrorKind::BrokenPipe, "temporary file handle is closed")
 }
