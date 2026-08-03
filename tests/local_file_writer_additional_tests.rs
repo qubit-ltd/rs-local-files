@@ -26,6 +26,29 @@ use qubit_local_files::{
 };
 use tempfile::tempdir;
 
+/// Verifies Host writers retain the caller-visible destination after resolving
+/// an intermediate symbolic link for native access.
+#[cfg(unix)]
+#[test]
+fn test_local_file_writer_preserves_logical_diagnostic_path() {
+    use std::os::unix::fs::symlink;
+
+    let directory = tempdir().expect("temporary directory should be created");
+    let target = directory.path().join("target");
+    let link = directory.path().join("link");
+    fs::create_dir(&target).expect("target directory should be created");
+    symlink(&target, &link).expect("intermediate symlink should be created");
+    let logical = link.join("payload");
+    let physical = target.join("payload");
+    fs::write(&physical, b"base").expect("payload fixture should be written");
+
+    let writer = LocalFileSystem::host()
+        .open_writer(&logical, &LocalWriteOptions::new(LocalWriteMode::Append))
+        .expect("append writer should open through the symlink");
+
+    assert_eq!(logical, writer.diagnostic_path());
+}
+
 /// Verifies append commit flushes accepted vectored bytes and reports the
 /// direct-publication outcome.
 #[test]
