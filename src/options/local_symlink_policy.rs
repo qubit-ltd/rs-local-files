@@ -32,5 +32,4 @@ impl LocalSymlinkPolicy {
     pub const fn follows(self) -> bool {
         !matches!(self, Self::Reject)
     }
-
 }
