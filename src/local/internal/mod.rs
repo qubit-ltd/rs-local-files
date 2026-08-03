@@ -29,6 +29,7 @@ mod file_name_validation;
 mod host_local_file_system;
 mod io_result_context;
 mod local_atomic_publication_mode;
+mod local_namespace;
 #[cfg(unix)]
 mod opened_atomic_destination;
 mod path_io_error;
@@ -52,6 +53,7 @@ mod rooted_namespace_io;
 mod rooted_parent;
 #[cfg(unix)]
 mod rooted_parent_mode;
+mod rooted_resolved_path;
 #[cfg(unix)]
 mod rooted_staged_file;
 #[cfg(unix)]
@@ -108,6 +110,7 @@ pub(crate) use host_local_file_system::{
     internal_copy_options,
 };
 pub(crate) use local_atomic_publication_mode::LocalAtomicPublicationMode;
+pub(crate) use local_namespace::LocalNamespace;
 #[cfg(unix)]
 pub(super) use opened_atomic_destination::open_rooted_atomic_destination;
 #[cfg(unix)]
@@ -163,6 +166,10 @@ pub(crate) use rooted_namespace_io::{
 };
 #[cfg(unix)]
 pub(super) use rooted_parent_mode::RootedParentMode;
+pub(crate) use rooted_resolved_path::{
+    RootedResolvedPath,
+    resolved_host_path,
+};
 #[cfg(unix)]
 pub(super) use rooted_staged_file::RootedStagedFile;
 pub(crate) use staged_file::StagedFile;
