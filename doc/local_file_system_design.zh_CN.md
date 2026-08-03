@@ -517,7 +517,6 @@ Owned
 Persist failure state 包括：
 
 - `NotPublished`；
-- `PublishedSourceRetained`；
 - `Indeterminate`。
 
 `LocalPersistOptions` 对 file 与 directory 提供同一套 overwrite 语义；
@@ -525,7 +524,6 @@ Persist failure state 包括：
 当前 native 实现以同一 authority 内的 rename 发布，报告 `AtomicRename`、
 `atomic = true` 与 `durable = false`。`LocalPersistFailureState` 在已知未发布的错误上
 报告 `NotPublished`，无法证明结果的 native install error 报告 `Indeterminate`；
-`PublishedSourceRetained` 为未来分阶段 publish 实现保留。
 
 后续扩展可为 `LocalPersistOptions` 增加 atomicity、durability 和 metadata-preservation
 requirement；所有 `Required` requirement 必须在 namespace 修改前验证。
