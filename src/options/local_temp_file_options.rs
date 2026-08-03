@@ -7,6 +7,7 @@
 // =============================================================================
 // qubit-style: allow source-test-pair
 // Covered by temporary resource integration tests.
+// qubit-style: allow coverage-cfg
 
 use std::path::{
     Path,
@@ -96,7 +97,8 @@ impl LocalTempFileOptions {
     /// # Parameters
     ///
     /// - `suffix`: Suffix validated before entry creation.
-    #[inline(always)]
+    #[cfg_attr(coverage, inline(never))]
+    #[cfg_attr(not(coverage), inline(always))]
     pub fn with_suffix(mut self, suffix: &str) -> Self {
         self.suffix = Some(suffix.to_owned());
         self
