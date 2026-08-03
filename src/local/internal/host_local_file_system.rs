@@ -241,7 +241,9 @@ impl HostLocalFileSystem {
         use crate::writer::internal::LocalFileWriterBackend;
 
         let follow_final = options.mode() != LocalWriteMode::CreateNew;
-        let bound = resolve_host_path(path, symlink_policy, follow_final)?;
+        let diagnostic_path = LocalPaths::bind_host_path(path)?;
+        let bound =
+            resolve_host_path(&diagnostic_path, symlink_policy, follow_final)?;
         if options.mode() == LocalWriteMode::Append
             && options.atomicity() == LocalAtomicityRequirement::Required
         {
@@ -252,7 +254,7 @@ impl HostLocalFileSystem {
             .with_reason(
                 "append mode cannot provide required atomic publication",
             )
-            .with_path(bound));
+            .with_path(diagnostic_path.clone()));
         }
         if options.mode() != LocalWriteMode::Append
             && options.durability() == LocalDurabilityRequirement::Required
@@ -265,7 +267,7 @@ impl HostLocalFileSystem {
             .with_reason(
                 "required directory durability is unavailable on this host",
             )
-            .with_path(bound));
+            .with_path(diagnostic_path.clone()));
         }
         if options.creates_parent()
             && let Some(parent) = bound.parent()
@@ -275,7 +277,7 @@ impl HostLocalFileSystem {
                 .map_err(|error| {
                     LocalFileError::from_io(
                         LocalFileOperation::OpenWriter,
-                        Some(bound.clone()),
+                        Some(diagnostic_path.clone()),
                         None,
                         error,
                     )
@@ -283,10 +285,14 @@ impl HostLocalFileSystem {
         }
         let backend = match options.mode() {
             LocalWriteMode::CreateNew => LocalFileWriterBackend::Staged(
-                open_staged_writer(&bound, options)?,
+                open_staged_writer(&bound, options).map_err(|error| {
+                    error.with_path(diagnostic_path.clone())
+                })?,
             ),
             LocalWriteMode::CreateOrReplace => LocalFileWriterBackend::Staged(
-                open_staged_writer(&bound, options)?,
+                open_staged_writer(&bound, options).map_err(|error| {
+                    error.with_path(diagnostic_path.clone())
+                })?,
             ),
             LocalWriteMode::Append => {
                 let metadata =
@@ -295,7 +301,7 @@ impl HostLocalFileSystem {
                         .map_err(|error| {
                             LocalFileError::from_io(
                                 LocalFileOperation::OpenWriter,
-                                Some(bound.clone()),
+                                Some(diagnostic_path.clone()),
                                 None,
                                 error,
                             )
@@ -305,7 +311,7 @@ impl HostLocalFileSystem {
                         LocalFileErrorKind::TypeConflict,
                         LocalFileOperation::OpenWriter,
                     )
-                    .with_path(bound));
+                    .with_path(diagnostic_path.clone()));
                 }
                 let mut native_options = crate::write::OpenOptions::new(
                     crate::write::Mode::AppendExisting,
@@ -328,7 +334,7 @@ impl HostLocalFileSystem {
                         .map_err(|error| {
                             LocalFileError::from_io(
                                 LocalFileOperation::OpenWriter,
-                                Some(bound.clone()),
+                                Some(diagnostic_path.clone()),
                                 None,
                                 error,
                             )
@@ -336,7 +342,7 @@ impl HostLocalFileSystem {
                 LocalFileWriterBackend::Append(file)
             }
         };
-        Ok(LocalFileWriter::new(bound, backend, *options))
+        Ok(LocalFileWriter::new(diagnostic_path, backend, *options))
     }
 
     /// Creates a lazy native directory walker.
@@ -1567,6 +1573,11 @@ fn reject_copy_alias(
     }
     #[cfg(windows)]
     {
+        if source_metadata.file_type().is_dir()
+            || target_metadata.file_type().is_dir()
+        {
+            return Ok(());
+        }
         if !source_metadata.file_type().is_symlink()
             && !target_metadata.file_type().is_symlink()
             && windows_file_identity(source)
