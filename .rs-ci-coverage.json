@@ -1,8 +1,6 @@
 {
   "threshold_exempt_files": {
     "qubit-local-files": [
-      "src/capability/local_file_system_capabilities.rs",
-      "src/error/local_file_error.rs",
       "src/host.rs",
       "src/local/internal/atomic_file_install.rs",
       "src/local/internal/atomic_install_recovery.rs",
@@ -12,21 +10,15 @@
       "src/local/internal/copy_destination_policy.rs",
       "src/local/internal/copy_dir/copy_dir_frame.rs",
       "src/local/internal/copy_dir/destination.rs",
-      "src/local/internal/copy_dir/error.rs",
       "src/local/internal/copy_dir/facade.rs",
       "src/local/internal/copy_dir/namespace_race.rs",
       "src/local/internal/copy_dir/opened_copy_source.rs",
       "src/local/internal/copy_dir/source.rs",
       "src/local/internal/copy_dir/staged_copy.rs",
-      "src/local/internal/copy_dir/staging_io.rs",
-      "src/local/internal/copy_dir/statistics_overflow.rs",
       "src/local/internal/copy_dir/traversal.rs",
-      "src/local/internal/copy_policy.rs",
       "src/local/internal/coverage_fault.rs",
-      "src/local/internal/directory_identity.rs",
       "src/local/internal/file_io.rs",
       "src/local/internal/file_move.rs",
-      "src/local/internal/file_name_validation.rs",
       "src/local/internal/host_local_file_system.rs",
       "src/local/internal/io_result_context.rs",
       "src/local/internal/opened_atomic_destination.rs",
@@ -61,7 +53,6 @@
       "src/options/local_read_options.rs",
       "src/options/local_rename_options.rs",
       "src/options/local_temp_directory_options.rs",
-      "src/options/local_temp_file_options.rs",
       "src/outcome/local_copy_failure.rs",
       "src/outcome/local_copy_outcome.rs",
       "src/outcome/local_copy_stats.rs",
@@ -82,7 +73,6 @@
       "src/write/open_options.rs",
       "src/writer/internal/local_file_writer_backend.rs",
       "src/writer/local_file_commit_error.rs",
-      "src/writer/local_file_writer.rs",
       "src/writer/local_write_outcome.rs"
     ]
   }

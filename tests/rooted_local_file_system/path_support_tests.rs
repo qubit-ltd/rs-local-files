@@ -59,6 +59,13 @@ fn test_rooted_path_support_rejects_invalid_temp_parents() {
         )
         .expect_err("file rooted parent should be rejected");
     assert_eq!(LocalFileErrorKind::NotDirectory, not_directory.kind());
+
+    let escape = rooted
+        .create_temp_file(
+            &LocalTempFileOptions::new().with_parent(Path::new("../escape")),
+        )
+        .expect_err("rooted parent traversal should be rejected");
+    assert_eq!(LocalFileErrorKind::InvalidPath, escape.kind());
 }
 
 /// Verifies rooted temporary-name validation maps invalid affixes to options.
@@ -86,4 +93,24 @@ fn test_rooted_path_support_rejects_escape_paths() {
         .expect_err("parent traversal must be rejected");
     assert_eq!(LocalFileErrorKind::InvalidPath, error.kind());
     assert_eq!(Some(Path::new("../escape")), error.path());
+}
+
+/// Verifies rooted metadata preserves the final symbolic-link entry kind.
+#[cfg(unix)]
+#[test]
+fn test_rooted_path_support_reports_symlink_metadata() {
+    use std::os::unix::fs::symlink;
+
+    let directory = tempdir().expect("temporary directory should be created");
+    fs::write(directory.path().join("target"), b"payload")
+        .expect("link target should be written");
+    symlink("target", directory.path().join("link"))
+        .expect("symbolic link should be created");
+    let rooted = LocalFileSystem::rooted(directory.path())
+        .expect("root authority should open");
+
+    let metadata = rooted
+        .metadata(Path::new("link"))
+        .expect("rooted link metadata should be readable");
+    assert_eq!(qubit_local_files::LocalFileKind::Symlink, metadata.kind());
 }

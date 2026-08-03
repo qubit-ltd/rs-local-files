@@ -29,6 +29,7 @@ use qubit_local_files::{
     LocalFileNames,
     LocalFileOperation,
     LocalFileSystem,
+    LocalFileSystemCapabilities,
     LocalPathCodecError,
     LocalPaths,
     LocalRenameFailureState,
@@ -44,9 +45,13 @@ fn test_capability_snapshot_exposes_all_guarantees() {
     let _ = capabilities.path_limit();
     let _ = capabilities.rooted_operations_implemented();
     let _ = capabilities.atomic_rename_implemented();
+    let atomic_replace = std::hint::black_box(
+        LocalFileSystemCapabilities::atomic_replace_implemented
+            as fn(LocalFileSystemCapabilities) -> bool,
+    );
     assert_eq!(
         cfg!(any(unix, windows)),
-        capabilities.atomic_replace_implemented(),
+        std::hint::black_box(atomic_replace)(capabilities),
     );
     let _ = capabilities.atomic_temp_persist_implemented();
     let _ = capabilities.directory_durability_implemented();
@@ -246,6 +251,12 @@ fn test_native_file_name_helpers_cover_component_and_validation_paths() {
             .to_string()
             .contains("GenerateName")
     );
+    for invalid in ["bad\0name", "bad\\name", "../name"] {
+        assert!(
+            LocalFileNames::random_name_with(Some(invalid), None).is_err(),
+            "expected random-name fragment to be rejected: {invalid:?}",
+        );
+    }
 }
 
 /// Verifies native names without UTF-8 text are rejected before portable-name
@@ -476,7 +487,7 @@ fn test_recursive_copy_outcome_reports_all_public_statistics() {
                 .with_conflict(LocalCopyConflictPolicy::Overwrite),
         )
         .expect("existing child should be overwritten");
-    let _ = overwritten.stats().overwritten();
+    assert_eq!(1, overwritten.stats().overwritten());
 }
 
 /// Verifies public typed copy and rename failures expose diagnostic text,
