@@ -342,11 +342,10 @@ fn test_public_metadata_values_distinguish_symbolic_links() {
     assert_eq!(LocalFileKind::Symlink, metadata.kind());
 }
 
-/// Verifies metadata classifies Unix-domain sockets as entries outside the
-/// portable file, directory, and symlink kinds.
+/// Verifies metadata classifies Unix-domain sockets explicitly.
 #[cfg(unix)]
 #[test]
-fn test_public_metadata_values_classify_unix_socket_as_other() {
+fn test_public_metadata_values_classify_unix_socket() {
     use std::os::unix::net::UnixListener;
 
     let directory = tempdir().expect("temporary directory should be created");
@@ -357,7 +356,7 @@ fn test_public_metadata_values_classify_unix_socket_as_other() {
     let metadata = LocalFileSystem::host()
         .metadata(&socket)
         .expect("socket metadata should be readable");
-    assert_eq!(LocalFileKind::Other, metadata.kind());
+    assert_eq!(LocalFileKind::Socket, metadata.kind());
 }
 
 /// Verifies metadata and operation outcomes expose both changed and no-op
