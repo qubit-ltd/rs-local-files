@@ -8,6 +8,18 @@
 // qubit-style: allow coverage-cfg
 // qubit-style: allow multiple-public-types
 
+mod path_support;
+
+use path_support::{
+    rooted_destination_is_directory,
+    rooted_io_error,
+    rooted_path,
+    rooted_temp_parent,
+    temp_candidate,
+    validate_rooted_temp_parent,
+};
+pub(crate) use path_support::rooted_metadata;
+
 use std::{
     fs,
     io,
@@ -41,7 +53,6 @@ use crate::{
     LocalDurabilityRequirement,
     LocalFileError,
     LocalFileErrorKind,
-    LocalFileKind,
     LocalFileMetadata,
     LocalFileOperation,
     LocalFileReader,
@@ -1469,176 +1480,4 @@ fn sync_rooted_copy_parent_chain(
         parent = path.as_path().parent().map(Path::to_path_buf);
     }
     Ok(())
-}
-
-/// Validates a rooted descendant and preserves the offending native path.
-///
-/// # Parameters
-///
-/// - `path`: Candidate relative descendant.
-/// - `operation`: Operation requesting the path.
-///
-/// # Returns
-///
-/// Existing validated rooted path representation.
-///
-/// # Errors
-///
-/// Returns `LocalFileError` for empty, absolute, prefixed, dot, or parent
-/// paths.
-#[inline]
-fn rooted_path(
-    path: &Path,
-    operation: LocalFileOperation,
-) -> LocalResult<crate::local::LocalRelativePath> {
-    crate::local::LocalRelativePath::new(path).map_err(|error| {
-        LocalFileError::from_io(
-            operation,
-            Some(path.to_path_buf()),
-            None,
-            error,
-        )
-    })
-}
-
-/// Reports whether a rooted destination currently names a real directory.
-fn rooted_destination_is_directory(
-    root: &crate::rooted::Root,
-    path: &crate::local::LocalRelativePath,
-) -> io::Result<bool> {
-    match root.symlink_metadata(path) {
-        Ok(metadata) => {
-            Ok(metadata.kind() == crate::rooted::EntryKind::Directory)
-        }
-        Err(error) if error.kind() == io::ErrorKind::NotFound => Ok(false),
-        Err(error) => Err(error),
-    }
-}
-
-/// Validates an optional rooted temporary-resource parent.
-///
-/// # Errors
-/// Returns `LocalFileError` when the configured parent is not a normal
-/// relative descendant of the opened root.
-#[inline]
-fn rooted_temp_parent(
-    parent: Option<&Path>,
-    operation: LocalFileOperation,
-) -> LocalResult<std::path::PathBuf> {
-    parent.map_or_else(
-        || Ok(std::path::PathBuf::new()),
-        |parent| {
-            rooted_path(parent, operation)
-                .map(|path| path.as_path().to_path_buf())
-        },
-    )
-}
-
-/// Confirms that a rooted temporary-resource parent is an existing directory.
-#[inline]
-fn validate_rooted_temp_parent(
-    root: &crate::rooted::Root,
-    parent: &Path,
-    operation: LocalFileOperation,
-) -> LocalResult<()> {
-    if parent.as_os_str().is_empty() {
-        return Ok(());
-    }
-    let relative =
-        crate::local::LocalRelativePath::new(parent).map_err(|error| {
-            rooted_io_error(operation, parent, error)
-                .with_kind(LocalFileErrorKind::InvalidPath)
-        })?;
-    let metadata = root
-        .symlink_metadata(&relative)
-        .map_err(|error| rooted_io_error(operation, parent, error))?;
-    if metadata.kind() != crate::rooted::EntryKind::Directory {
-        return Err(LocalFileError::new(
-            LocalFileErrorKind::NotDirectory,
-            operation,
-        )
-        .with_path(parent.to_path_buf()));
-    }
-    Ok(())
-}
-
-/// Generates one rooted temporary-entry candidate beneath a validated parent.
-///
-/// # Errors
-/// Returns `LocalFileError` when an affix is invalid or randomness is
-/// unavailable.
-#[inline]
-fn temp_candidate(
-    parent: &Path,
-    prefix: Option<&str>,
-    suffix: Option<&str>,
-    operation: LocalFileOperation,
-) -> LocalResult<std::path::PathBuf> {
-    crate::local::try_random_file_name("qubit-local-files-", prefix, suffix)
-        .map(|name| parent.join(name))
-        .map_err(|error| {
-            let invalid_options = error.kind() == io::ErrorKind::InvalidInput;
-            let error = rooted_io_error(operation, parent, error);
-            if invalid_options {
-                error.with_kind(LocalFileErrorKind::InvalidOptions)
-            } else {
-                error
-            }
-        })
-}
-
-/// Converts descriptor-relative metadata to the unified metadata type.
-///
-/// # Parameters
-///
-/// - `metadata`: Existing rooted metadata.
-///
-/// # Returns
-///
-/// Unified normalized metadata.
-#[inline]
-pub(crate) fn rooted_metadata(
-    metadata: crate::rooted::Metadata,
-) -> LocalFileMetadata {
-    let kind = match metadata.kind() {
-        crate::rooted::EntryKind::File => LocalFileKind::File,
-        crate::rooted::EntryKind::Directory => LocalFileKind::Directory,
-        crate::rooted::EntryKind::Symlink => LocalFileKind::Symlink,
-        #[cfg(unix)]
-        crate::rooted::EntryKind::Fifo => LocalFileKind::Fifo,
-        #[cfg(unix)]
-        crate::rooted::EntryKind::Socket => LocalFileKind::Socket,
-        #[cfg(unix)]
-        crate::rooted::EntryKind::BlockDevice => LocalFileKind::BlockDevice,
-        #[cfg(unix)]
-        crate::rooted::EntryKind::CharDevice => LocalFileKind::CharDevice,
-        crate::rooted::EntryKind::Other => LocalFileKind::Other,
-    };
-    LocalFileMetadata::from_parts(
-        kind,
-        metadata.size(),
-        metadata.accessed_at(),
-        metadata.modified_at(),
-        metadata.created_at(),
-    )
-}
-
-/// Adds rooted operation and descendant context to a native I/O failure.
-///
-/// # Parameters
-///
-/// - `operation`: Rooted operation that failed.
-/// - `path`: Offending descendant path.
-/// - `error`: Native I/O failure.
-///
-/// # Returns
-///
-/// Structured rooted local filesystem error.
-#[inline(always)]
-fn rooted_io_error(
-    operation: LocalFileOperation,
-    path: &Path,
-    error: io::Error,
-) -> LocalFileError {
-    LocalFileError::from_io(operation, Some(path.to_path_buf()), None, error)
 }
