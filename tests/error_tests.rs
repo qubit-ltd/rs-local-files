@@ -68,9 +68,11 @@ fn test_local_file_error_reason_is_structured_and_displayed() {
         Some("required atomic publication is unavailable"),
         error.reason(),
     );
-    assert!(error
-        .to_string()
-        .contains("required atomic publication is unavailable"));
+    assert!(
+        error
+            .to_string()
+            .contains("required atomic publication is unavailable")
+    );
 }
 
 /// Verifies conversion to a standard I/O error preserves the native error kind.

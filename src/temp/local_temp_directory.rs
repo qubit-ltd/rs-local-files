@@ -33,6 +33,7 @@ use crate::{
     LocalPersistStage,
     LocalRelativePath,
     LocalResult,
+    LocalSymlinkPolicy,
 };
 
 use super::internal::{
@@ -48,6 +49,9 @@ use super::internal::{
 /// at creation. The check and deletion are not atomic, so callers must exclude
 /// untrusted concurrent mutation of the containing directory; identity reuse
 /// and a check/delete race cannot be ruled out by this path-based API.
+/// Persistence resolves intermediate symbolic links using the policy captured
+/// by the creating [`crate::LocalFileSystem`], while replacing a final link
+/// entry itself.
 #[must_use = "dropping the temporary-directory guard removes its directory"]
 #[derive(Debug)]
 pub struct LocalTempDirectory {
@@ -61,12 +65,17 @@ pub struct LocalTempDirectory {
     rooted_identity: Option<crate::rooted::Metadata>,
     /// Namespace certainty governing cleanup and drop behavior.
     state: LocalTempResourceState,
+    /// Symbolic-link policy retained for persistence targets.
+    symlink_policy: LocalSymlinkPolicy,
 }
 
 impl LocalTempDirectory {
     /// Builds a host temporary directory from its already-bound path.
     #[inline]
-    pub(crate) fn host(path: PathBuf) -> Result<Self> {
+    pub(crate) fn host(
+        path: PathBuf,
+        symlink_policy: LocalSymlinkPolicy,
+    ) -> Result<Self> {
         Ok(Self {
             host_identity: Some(TempEntryIdentity::from_path(&path)?),
             rooted_identity: None,
@@ -75,6 +84,7 @@ impl LocalTempDirectory {
                 super::internal::HostTempResourceBackend,
             ),
             state: LocalTempResourceState::Owned,
+            symlink_policy,
         })
     }
 
@@ -83,6 +93,7 @@ impl LocalTempDirectory {
     pub(crate) fn rooted(
         root: Arc<crate::rooted::Root>,
         path: PathBuf,
+        symlink_policy: LocalSymlinkPolicy,
     ) -> Result<Self> {
         let relative = LocalRelativePath::new(&path)
             .expect("rooted temporary path was validated at creation");
@@ -97,6 +108,7 @@ impl LocalTempDirectory {
                 },
             ),
             state: LocalTempResourceState::Owned,
+            symlink_policy,
         })
     }
 
@@ -218,7 +230,22 @@ impl LocalTempDirectory {
         match &self.backend {
             LocalTempResourceBackend::Host(_) => {
                 let target = match std::path::absolute(&requested_target) {
-                    Ok(target) => target,
+                    Ok(target) => match crate::local::resolve_host_path(
+                        &target,
+                        self.symlink_policy,
+                        false,
+                    ) {
+                        Ok(target) => target,
+                        Err(error) => {
+                            return Err(LocalPersistError::new(
+                                error.into_io_error(),
+                                self,
+                                requested_target,
+                                None,
+                                LocalPersistStage::ResolveTarget,
+                            ));
+                        }
+                    },
                     Err(error) => {
                         return Err(LocalPersistError::new(
                             error,
@@ -278,12 +305,59 @@ impl LocalTempDirectory {
                 };
                 let source = LocalRelativePath::new(&rooted.relative_path)
                     .expect("rooted temporary path was validated at creation");
-                let destination = LocalRelativePath::new(&target)
-                    .expect("persist target was validated");
-                let result = if options.overwrites() {
-                    rooted.root.rename(&source, &destination)
-                } else {
-                    rooted.root.rename_without_replacing(&source, &destination)
+                let resolved =
+                    match crate::rooted_local_file_system::resolve_rooted_path(
+                        &rooted.root,
+                        &target,
+                        self.symlink_policy,
+                        false,
+                        LocalFileOperation::PersistTemp,
+                    ) {
+                        Ok(resolved) => resolved,
+                        Err(error) => {
+                            return Err(LocalPersistError::new(
+                                error.into_io_error(),
+                                self,
+                                requested_target,
+                                None,
+                                LocalPersistStage::ResolveTarget,
+                            ));
+                        }
+                    };
+                let (result, target) = match resolved {
+                    crate::rooted_local_file_system::RootedResolvedPath::Rooted(
+                        destination,
+                    ) => {
+                        let result = if options.overwrites() {
+                            rooted.root.rename(&source, &destination)
+                        } else {
+                            rooted.root.rename_without_replacing(&source, &destination)
+                        };
+                        (result, destination.as_path().to_path_buf())
+                    }
+                    crate::rooted_local_file_system::RootedResolvedPath::Host(
+                        destination,
+                    ) => {
+                        let source = rooted.root.path().join(source.as_path());
+                        if let Err(error) = crate::local::ensure_parent_path(&destination) {
+                            return Err(LocalPersistError::new(
+                                error,
+                                self,
+                                requested_target,
+                                Some(destination),
+                                LocalPersistStage::PrepareParent,
+                            ));
+                        }
+                        let result = if options.overwrites() {
+                            std::fs::rename(&source, &destination)
+                        } else {
+                            crate::local::move_directory_without_replacing(
+                                &source,
+                                &destination,
+                            )
+                        };
+                        (result, destination)
+                    }
                 };
                 if let Err(error) = result {
                     self.record_native_persist_failure(&error);

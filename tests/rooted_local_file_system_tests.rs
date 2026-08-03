@@ -720,10 +720,10 @@ fn test_rooted_local_file_system_writes_and_copies_file() {
     );
 }
 
-/// Verifies that rooted overwrite publication replaces a final symlink entry.
+/// Verifies that rooted overwrite publication follows a final symlink.
 #[cfg(unix)]
 #[test]
-fn test_rooted_local_file_system_writer_replaces_final_symlink() {
+fn test_rooted_local_file_system_writer_follows_final_symlink() {
     use std::os::unix::fs::symlink;
 
     let directory = tempdir().expect("temporary directory should be created");
@@ -747,11 +747,12 @@ fn test_rooted_local_file_system_writer_replaces_final_symlink() {
     assert!(
         fs::symlink_metadata(&target)
             .expect("target metadata should exist")
-            .is_file(),
+            .file_type()
+            .is_symlink()
     );
     assert_eq!(
-        b"original".to_vec(),
-        fs::read(&referent).expect("referent should remain unchanged"),
+        b"replacement".to_vec(),
+        fs::read(&referent).expect("referent should be updated"),
     );
 }
 

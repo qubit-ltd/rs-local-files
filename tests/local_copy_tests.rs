@@ -149,6 +149,43 @@ fn test_local_file_system_copy_auto_detects_directory_sources() {
     assert!(target.is_dir());
 }
 
+/// Verifies recursive copies preserve nested final symlink entries instead of
+/// dereferencing file links.
+#[cfg(unix)]
+#[test]
+fn test_recursive_copy_preserves_nested_symlink_entry() {
+    use std::os::unix::fs::symlink;
+
+    let directory = tempdir().expect("temporary directory should exist");
+    let source = directory.path().join("source");
+    let target = directory.path().join("target");
+    fs::create_dir(&source).expect("source directory should be created");
+    fs::write(source.join("referent"), b"payload")
+        .expect("referent should be written");
+    symlink("referent", source.join("link"))
+        .expect("source symlink should be created");
+
+    let _ = LocalFileSystem::host()
+        .copy(
+            &source,
+            &target,
+            &LocalCopyOptions::new().with_tree_source(),
+        )
+        .expect("recursive copy should preserve the nested symlink");
+
+    assert_eq!(
+        PathBuf::from("referent"),
+        fs::read_link(target.join("link"))
+            .expect("target symlink should exist")
+    );
+    assert_eq!(
+        b"payload",
+        fs::read(target.join("referent"))
+            .expect("referent should be copied")
+            .as_slice()
+    );
+}
+
 /// Verifies source and hard-link alias detection before destructive overwrite.
 #[cfg(any(unix, windows))]
 #[test]

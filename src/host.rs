@@ -6,6 +6,12 @@
 //    Licensed under the Apache License, Version 2.0.
 // =============================================================================
 //! Convenience functions for the process-visible Host filesystem.
+//!
+//! These functions use [`crate::LocalSymlinkPolicy::FollowAcrossScope`] for
+//! intermediate path components. Final components retain native operation
+//! semantics: metadata, delete, rename, copy targets, and temporary-resource
+//! persistence operate on the link entry, while readers and writers that
+//! address existing content follow it.
 // qubit-style: allow source-test-pair
 
 use std::path::Path;

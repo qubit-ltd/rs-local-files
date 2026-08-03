@@ -185,10 +185,11 @@ mod platform {
                 return Err(LocalPathCodecError::NativeNul);
             }
             if let Ok(valid) = std::str::from_utf8(bytes)
-                && !valid.contains('%') && !valid.chars().any(char::is_control)
-                {
-                    return Ok(Cow::Borrowed(valid));
-                }
+                && !valid.contains('%')
+                && !valid.chars().any(char::is_control)
+            {
+                return Ok(Cow::Borrowed(valid));
+            }
             let mut encoded = String::with_capacity(bytes.len());
             let mut remaining = bytes;
             while !remaining.is_empty() {

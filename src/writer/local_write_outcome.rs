@@ -12,8 +12,12 @@ use super::{
     LocalWriteFailureState,
     LocalWriterState,
 };
+use crate::LocalWritePublicationMethod;
 
 /// Structured result of committing or aborting a local writer.
+///
+/// [`Self::publication_method`] reports the backend method directly; callers
+/// do not need to infer it from [`Self::atomic`].
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 #[must_use]
 pub struct LocalWriteOutcome {
@@ -21,6 +25,8 @@ pub struct LocalWriteOutcome {
     state: LocalWriterState,
     /// Whether destination publication was atomic.
     atomic: bool,
+    /// Native method used by the writer backend.
+    publication_method: LocalWritePublicationMethod,
     /// Whether requested durability synchronization completed.
     durable: bool,
     /// Bytes accepted by the writer stream.
@@ -42,6 +48,7 @@ impl LocalWriteOutcome {
     pub(crate) const fn new(
         state: LocalWriterState,
         atomic: bool,
+        publication_method: LocalWritePublicationMethod,
         durable: bool,
         bytes_written: u64,
         failure_state: Option<LocalWriteFailureState>,
@@ -49,6 +56,7 @@ impl LocalWriteOutcome {
         Self {
             state,
             atomic,
+            publication_method,
             durable,
             bytes_written,
             failure_state,
@@ -66,6 +74,13 @@ impl LocalWriteOutcome {
     #[inline(always)]
     pub const fn atomic(self) -> bool {
         self.atomic
+    }
+
+    /// Returns the native method used by this writer session.
+    #[must_use = "the publication method must be inspected or stored"]
+    #[inline(always)]
+    pub const fn publication_method(self) -> LocalWritePublicationMethod {
+        self.publication_method
     }
 
     /// Reports whether durability synchronization completed.
