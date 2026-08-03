@@ -87,14 +87,16 @@ impl LocalFileWriter {
     }
 
     /// Returns the current writer state.
-    #[inline(always)]
+    #[cfg_attr(coverage, inline(never))]
+    #[cfg_attr(not(coverage), inline(always))]
     pub const fn state(&self) -> LocalWriterState {
         self.state
     }
 
     /// Returns an uncertainty retained from an earlier stream failure.
     #[must_use]
-    #[inline(always)]
+    #[cfg_attr(coverage, inline(never))]
+    #[cfg_attr(not(coverage), inline(always))]
     pub const fn failure_state(&self) -> Option<LocalWriteFailureState> {
         self.failure_state
     }

@@ -24,6 +24,7 @@ use qubit_local_files::{
     LocalAtomicityRequirement,
     LocalFileErrorKind,
     LocalFileSystem,
+    LocalFileWriter,
     LocalWriteFailureState,
     LocalWriteMode,
     LocalWriteOptions,
@@ -385,9 +386,13 @@ fn run_indeterminate_append_case(case: &str) {
     writer
         .write_all(b"x")
         .expect_err("zero file-size limit should reject append");
+    let failure_state = std::hint::black_box(
+        LocalFileWriter::failure_state
+            as fn(&LocalFileWriter) -> Option<LocalWriteFailureState>,
+    );
     assert_eq!(
         Some(LocalWriteFailureState::Indeterminate),
-        writer.failure_state(),
+        std::hint::black_box(failure_state)(&writer),
     );
     let write_after_failure = writer
         .write(b"x")

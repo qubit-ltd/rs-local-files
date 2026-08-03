@@ -7,6 +7,7 @@
 // =============================================================================
 // qubit-style: allow source-test-pair
 // Covered by public capability integration tests.
+// qubit-style: allow coverage-cfg
 
 use super::LocalPathLimit;
 
@@ -105,7 +106,8 @@ impl LocalFileSystemCapabilities {
 
     /// Reports whether native atomic replacement is implemented.
     #[must_use]
-    #[inline(always)]
+    #[cfg_attr(coverage, inline(never))]
+    #[cfg_attr(not(coverage), inline(always))]
     pub const fn atomic_replace_implemented(self) -> bool {
         self.atomic_replace
     }

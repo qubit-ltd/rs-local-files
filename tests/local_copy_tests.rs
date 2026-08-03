@@ -14,6 +14,7 @@ use std::{
 #[cfg(unix)]
 use qubit_local_files::LocalDurabilityRequirement;
 use qubit_local_files::{
+    LocalAtomicityRequirement,
     LocalCopyConflictPolicy,
     LocalCopyFailureState,
     LocalCopyMethod,
@@ -147,6 +148,27 @@ fn test_local_file_system_copy_auto_detects_directory_sources() {
         .expect("automatic source selection must copy a directory tree");
     assert_eq!(LocalCopyMethod::Recursive, outcome.method());
     assert!(target.is_dir());
+}
+
+/// Verifies required atomic replacement rejects a file-to-directory conflict.
+#[test]
+fn test_local_file_system_copy_rejects_required_directory_replacement() {
+    let directory = tempdir().expect("temporary directory should be created");
+    let source = directory.path().join("source");
+    let target = directory.path().join("target");
+    fs::write(&source, b"payload").expect("source file should be written");
+    fs::create_dir(&target).expect("target directory should be created");
+
+    let error = LocalFileSystem::host()
+        .copy(
+            &source,
+            &target,
+            &LocalCopyOptions::new()
+                .with_atomicity(LocalAtomicityRequirement::Required)
+                .with_type_conflict(LocalCopyTypeConflictPolicy::Replace),
+        )
+        .expect_err("required atomic directory replacement must be rejected");
+    assert_eq!(LocalFileErrorKind::RequirementNotMet, error.error().kind());
 }
 
 /// Verifies recursive copies preserve nested final symlink entries instead of
