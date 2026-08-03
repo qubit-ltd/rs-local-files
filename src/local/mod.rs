@@ -66,6 +66,7 @@ pub(crate) use internal::{
     replace_file,
     resolve_host_path,
     resolved_host_path,
+    root_authority_path,
     try_random_file_name,
     validate_portable_file_name_impl,
 };

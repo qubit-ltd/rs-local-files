@@ -36,7 +36,7 @@ pub(crate) fn resolved_host_path(
 ) -> PathBuf {
     match path {
         RootedResolvedPath::Rooted(relative) => {
-            root.path().join(relative.as_path())
+            root.authority_path().join(relative.as_path())
         }
         RootedResolvedPath::Host(path) => path,
     }

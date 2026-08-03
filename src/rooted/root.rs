@@ -91,6 +91,22 @@ impl Root {
         &self.path
     }
 
+    /// Returns the current native path derived from the retained authority.
+    ///
+    /// This path is used only for resolving symbolic links; diagnostics keep
+    /// using [`Self::path`] captured at open time.
+    #[must_use]
+    pub(crate) fn authority_path(&self) -> PathBuf {
+        #[cfg(any(unix, windows))]
+        {
+            local::root_authority_path(&self.directory, &self.path)
+        }
+        #[cfg(not(any(unix, windows)))]
+        {
+            self.path.clone()
+        }
+    }
+
     /// Copies one descendant entry beneath this opened root.
     ///
     /// # Parameters

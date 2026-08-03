@@ -150,12 +150,18 @@ pub(super) fn copy(
                 durability,
             )
         }
-        EntryKind::Symlink
-        | EntryKind::Fifo
+        EntryKind::Symlink | EntryKind::Other => Err(error(
+            Stage::InspectSource,
+            source,
+            destination,
+            Statistics::default(),
+            unsupported_source_error(),
+        )),
+        #[cfg(unix)]
+        EntryKind::Fifo
         | EntryKind::Socket
         | EntryKind::BlockDevice
-        | EntryKind::CharDevice
-        | EntryKind::Other => Err(error(
+        | EntryKind::CharDevice => Err(error(
             Stage::InspectSource,
             source,
             destination,
@@ -256,12 +262,20 @@ fn copy_tree(
                                 });
                             }
                         }
-                        EntryKind::Symlink
-                        | EntryKind::Fifo
+                        EntryKind::Symlink | EntryKind::Other => {
+                            return Err(error(
+                                Stage::InspectSourceEntry,
+                                &source_child,
+                                &destination_child,
+                                statistics,
+                                unsupported_source_error(),
+                            ));
+                        }
+                        #[cfg(unix)]
+                        EntryKind::Fifo
                         | EntryKind::Socket
                         | EntryKind::BlockDevice
-                        | EntryKind::CharDevice
-                        | EntryKind::Other => {
+                        | EntryKind::CharDevice => {
                             return Err(error(
                                 Stage::InspectSourceEntry,
                                 &source_child,
