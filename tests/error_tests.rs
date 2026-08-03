@@ -90,3 +90,69 @@ fn test_local_file_error_into_io_error_preserves_kind_and_context() {
     assert_eq!(io::ErrorKind::NotFound, error.kind());
     assert!(error.to_string().contains("Metadata failed"));
 }
+
+/// Verifies source-free classifications map to their nearest standard I/O
+/// kinds and that typed sources can be consumed.
+#[test]
+fn test_local_file_error_adapts_source_free_kinds_and_consumes_source() {
+    for (error_kind, io_kind) in [
+        (
+            LocalFileErrorKind::AlreadyExists,
+            io::ErrorKind::AlreadyExists,
+        ),
+        (LocalFileErrorKind::InvalidPath, io::ErrorKind::InvalidInput),
+        (
+            LocalFileErrorKind::InvalidOptions,
+            io::ErrorKind::InvalidInput,
+        ),
+        (
+            LocalFileErrorKind::InvalidState,
+            io::ErrorKind::InvalidInput,
+        ),
+        (
+            LocalFileErrorKind::NotDirectory,
+            io::ErrorKind::NotADirectory,
+        ),
+        (LocalFileErrorKind::IsDirectory, io::ErrorKind::IsADirectory),
+        (LocalFileErrorKind::NotFound, io::ErrorKind::NotFound),
+        (
+            LocalFileErrorKind::PermissionDenied,
+            io::ErrorKind::PermissionDenied,
+        ),
+        (
+            LocalFileErrorKind::ResourceLimit,
+            io::ErrorKind::StorageFull,
+        ),
+        (
+            LocalFileErrorKind::DataCorruption,
+            io::ErrorKind::InvalidData,
+        ),
+        (
+            LocalFileErrorKind::RequirementNotMet,
+            io::ErrorKind::Unsupported,
+        ),
+        (LocalFileErrorKind::Unsupported, io::ErrorKind::Unsupported),
+        (LocalFileErrorKind::TypeConflict, io::ErrorKind::Other),
+        (
+            LocalFileErrorKind::PublicationIncomplete,
+            io::ErrorKind::Other,
+        ),
+        (LocalFileErrorKind::Indeterminate, io::ErrorKind::Other),
+        (LocalFileErrorKind::Io, io::ErrorKind::Other),
+    ] {
+        assert_eq!(
+            io_kind,
+            LocalFileError::new(error_kind, LocalFileOperation::Metadata)
+                .into_io_error()
+                .kind(),
+        );
+    }
+
+    let source = LocalFileError::from_io(
+        LocalFileOperation::OpenReader,
+        None,
+        None,
+        io::Error::from(io::ErrorKind::NotFound),
+    );
+    assert!(source.into_source().is_some());
+}

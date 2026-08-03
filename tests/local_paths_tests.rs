@@ -242,4 +242,33 @@ fn test_local_file_names_rejects_reserved_portable_name() {
 
     assert_eq!(LocalFileErrorKind::InvalidPath, error.kind());
     assert_eq!(LocalFileOperation::ValidateName, error.operation());
+
+    for invalid in [
+        "",
+        ".",
+        "..",
+        "name ",
+        "name.",
+        "name\n",
+        "name/name",
+        "name\\name",
+        "name<name",
+        "name>name",
+        "name:name",
+        "name\"name",
+        "name|name",
+        "name?name",
+        "name*name",
+        "COM1",
+        "lpt³.log",
+    ] {
+        assert!(
+            LocalFileNames::validate_portable(OsStr::new(invalid)).is_err(),
+            "expected portable name to be rejected: {invalid:?}",
+        );
+    }
+    assert!(
+        LocalFileNames::validate_portable(OsStr::new(&"x".repeat(256)))
+            .is_err()
+    );
 }
