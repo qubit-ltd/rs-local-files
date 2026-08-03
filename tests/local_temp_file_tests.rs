@@ -10,6 +10,7 @@ use std::{
     env,
     fs,
     io::{
+        ErrorKind,
         IoSlice,
         Seek,
         SeekFrom,
@@ -79,6 +80,24 @@ fn test_local_temp_file_close_retains_path_and_persist_responsibility() {
             .expect("closed file should persist")
     );
     assert!(target.exists());
+}
+
+/// Verifies closed temporary-file handles report the stream-closure error.
+#[test]
+fn test_local_temp_file_closed_handle_reports_broken_pipe() {
+    let parent = tempdir().expect("temporary parent should be created");
+    let mut temporary = LocalFileSystem::host()
+        .create_temp_file(
+            &LocalTempFileOptions::new().with_parent(parent.path()),
+        )
+        .expect("temporary file should be created");
+
+    temporary.close();
+
+    let error = temporary
+        .as_file_mut()
+        .expect_err("closed temporary file must reject handle access");
+    assert_eq!(ErrorKind::BrokenPipe, error.kind());
 }
 
 /// Verifies detailed persistence reports the actual atomic rename outcome.
