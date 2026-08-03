@@ -341,7 +341,7 @@ fn stage_copy_file(
     let mut staged_file = StagedFile::new(temp_path, temp_file);
     let opened_source = match OpenedCopySource::open(
         src,
-        options.follows_symlinks(),
+        options.symlink_policy(),
         options.open_retry_timeout(),
     ) {
         Ok(source) => source,

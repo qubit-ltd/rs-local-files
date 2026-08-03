@@ -134,7 +134,7 @@ pub(super) fn copy_dir_iterative(
                 frames.push(frame);
             }
         } else if file_type.is_symlink() {
-            if options.follows_symlinks()
+            if options.symlink_policy().follows()
                 && symlink_target_is_directory(
                     &source_path,
                     &destination_path,
@@ -204,7 +204,7 @@ fn enter_copy_directory(
     let (source_metadata, source_identity) = with_copy_context(
         inspect_copy_source_directory(
             src,
-            options.follows_symlinks(),
+            options.symlink_policy(),
             destination_root,
         ),
         LocalCopyDirStage::InspectSource,
