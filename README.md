@@ -70,6 +70,10 @@ Host convenience functions are the shortest path for ordinary applications.
 be stored, passed to another component, or adapted to a higher-level filesystem
 SPI.
 
+Symbolic-link behavior is configurable per `LocalFileSystem` instance; rooted
+defaults to `FollowWithinScope` and Host defaults to `FollowAcrossScope`. See
+the [user guide](doc/user_guide.md) for operation-specific final-link semantics.
+
 Temporary-resource cleanup is ownership-aware, not a synchronization boundary.
 Before deleting, a guard checks that the path still has the identity captured
 at creation, so ordinary replacement is rejected. The identity check and path
@@ -86,7 +90,9 @@ Use the free functions or `LocalFileSystem::host()` for host paths. Use
 `LocalFileSystem::rooted(root)` when one opened directory is the authority
 boundary. Both instances expose the same operations; only path interpretation
 changes. Rooted paths must be relative descendants, and absolute paths,
-prefixes, `.`, `..`, and intermediate symbolic links are rejected. Renaming the
+prefixes, `.`, and `..` are rejected. Intermediate symbolic links follow the
+configured policy: the default `FollowWithinScope` stays inside the opened
+root, while `FollowAcrossScope` intentionally permits an escape. Renaming the
 diagnostic root path later does not redirect the opened authority.
 
 Copy chooses file or directory behavior from source metadata. Copy and rename

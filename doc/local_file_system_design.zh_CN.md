@@ -248,11 +248,21 @@ Host API 可以接受绝对或相对 native path。任何会跨越多个系统�
 
 ### 5.2 Final symlink
 
-Host 便利函数 `metadata` 与 `LocalFileSystem::metadata` 观察 final directory
-entry 本身，不跟随 final symlink。未来若增加 follow 行为，必须使用新的明确 option
-或方法，不能改变现有入口的语义，也不能因某个平台 API 默认行为不同而改变。
+`LocalFileSystem` 实例保存符号链接解析策略。Rooted 默认
+`FollowWithinScope`，Host 默认 `FollowAcrossScope`；显式策略还可以是 `Reject`。
+策略统一作用于中间路径组件，Rooted 的 `FollowAcrossScope` 明确允许解析和修改越出
+root 的对象。
 
-Overwrite 默认替换 target entry，不跟随 target symlink 写入其指向对象。
+最终组件必须按操作系统操作语义处理，而不是使用一个全局的 follow/no-follow 布尔值：
+
+- `metadata` 查看链接 entry 本身；
+- reader、append writer 和 `CreateOrReplace` writer 跟随链接目标；
+- `CreateNew` 将最终链接视为已存在；
+- delete、rename、copy target 和 temp persist 操作链接 entry 本身；
+- copy source 复制链接 entry 本身。
+
+这样既支持 `/etc` 链接到 Git checkout 后的透明修改，也保持 `delete(link)` 与
+`rename(link, ...)` 不会误删或改写链接目标。
 
 ### 5.3 Native path
 
@@ -273,8 +283,9 @@ path 的输入。
 1. 从已打开 root descriptor/handle 出发；
 2. 逐 component 解析 descendant；
 3. 拒绝 absolute path、platform prefix、`.` 和逃逸用 `..`；
-4. 不通过中间 symlink 离开 root；
-5. 不因诊断路径被 rename 或替换而改变 authority；
+4. 按实例策略处理中间 symlink；`FollowWithinScope` 证明 containment，
+   `FollowAcrossScope` 明确允许越出 root；
+5. 不因诊断路径被 rename 或替换而改变仍采用 descriptor authority 的操作；
 6. 在返回 native path 仅供诊断时明确其不参与授权判断。
 
 ### 6.2 平台实现
@@ -297,8 +308,10 @@ Windows 是 UTF-16 code units；不能把 Windows 长度直接标成 byte limit�
 
 ### 6.3 Symlink、junction 与 mount
 
-Rooted recursive operation 默认不跟随 symlink、junction 或其他 reparse point。
-显式 follow 模式只有在能够持续证明 containment 时才可启用。
+Rooted recursive operation 默认继承 filesystem 的符号链接策略。跟随模式按底层目录对象
+身份检测循环，返回路径保留逻辑 link 组件；`FollowWithinScope` 持续证明 containment，
+`FollowAcrossScope` 允许目标在 root 外。Host 的 `FollowWithinScope` 与
+`FollowAcrossScope` 实际访问范围相同。
 
 当前不提供 mount/device 边界 option，也不承诺在递归操作中检测或报告该边界；调用方若有
 该隔离要求，必须在 crate 外建立专门策略。
@@ -373,8 +386,9 @@ adapter 不通过 message 猜测状态。
 - target symlink replacement 语义；
 - required atomicity 是否可满足。
 
-目录复制默认不遍历 symlink。启用 follow 时必须检测循环，并持续执行 containment
-检查。
+目录复制继承 filesystem 的 symlink policy；copy source 的最终 symlink 复制 entry 本身，
+递归目录中的 link 目录在允许跟随时才进入。跟随时必须检测循环；Rooted
+`FollowWithinScope` 持续执行 containment，`FollowAcrossScope` 允许目标越出 root。
 
 ### 7.3 Publication
 
@@ -657,7 +671,8 @@ string。
 
 - 相对路径在操作开始时绑定；
 - source/target self-copy 与 hard-link alias；
-- overwrite 不跟随 target symlink；
+- writer overwrite 跟随 final symlink 修改目标并保留链接；delete、rename、copy target
+  与 temp persist 替换 final symlink entry；
 - recursive copy/walk 的 symlink、cycle 和 depth；mount/device 边界不属于当前契约；
 - rooted path lexical escape 与 symlink/reparse escape；
 - root 诊断路径被 rename 后 authority 仍稳定；

@@ -23,6 +23,42 @@ do not need separate host and rooted interfaces. Readers, writers, walkers, and
 temporary entries are owned stateful resources. `LocalFileNames` and
 `LocalPaths` provide native lexical utilities without converting names to UTF-8.
 
+## Symbolic-link policy
+
+`LocalFileSystem` stores one symbolic-link policy inherited by all operations.
+`LocalFileSystem::rooted(root)` defaults to `FollowWithinScope`; it follows
+links only while the resolved path remains below the opened root. Host defaults
+to `FollowAcrossScope`, because Host has no narrower root boundary. Use
+`with_symlink_policy` to choose `Reject`, `FollowWithinScope`, or
+`FollowAcrossScope`; list and copy options can override the policy for one
+operation.
+
+The policy applies to every non-final path component. With
+`FollowAcrossScope`, a rooted path such as `etc/link/config` may read or modify
+the object reached by `link`, even when that object is outside the rooted
+directory. This is intentional for layouts such as a Git checkout linked into
+`/etc`.
+
+Final components retain native operation semantics:
+
+| Operation | Final symbolic link |
+| --- | --- |
+| `metadata` | Inspects the link entry itself. |
+| `open_reader` | Follows the link and reads its target. |
+| `CreateNew` writer | Treats an existing link as an existing entry. |
+| `Append` writer | Follows the link and appends to its target. |
+| `CreateOrReplace` writer | Follows the link, replaces its target, and preserves the link. |
+| `delete` | Removes the link entry. |
+| `rename` | Moves or replaces the link entry. |
+| `copy` source | Copies the link entry itself. |
+| `copy` target | Replaces the target link entry. |
+| `temp persist` | Publishes by rename and replaces the target link entry. |
+
+Listing follows directory links when the effective policy allows it. Returned
+paths remain logical paths through the link (for example, `link/child`), and
+recursive traversal detects directory-identity cycles. Depth counts logical
+entries; crossing a link does not add another level.
+
 ## Scenario: write and inspect an export
 
 An exporter must create `build/output`, publish `manifest.json` only after a
@@ -133,9 +169,12 @@ for entry in walker {
 # Ok::<(), Box<dyn std::error::Error>>(())
 ```
 
-Rooted paths must be relative descendants. Absolute paths, prefixes, `.`, `..`,
-and intermediate symbolic links are rejected. The diagnostic root path is not
-the authority: renaming it after `open` does not redirect the resource.
+Rooted paths must be relative descendants. Absolute paths, prefixes, `.`, and
+`..` are rejected. Intermediate symbolic links follow the configured policy;
+`FollowWithinScope` rejects a link that resolves outside the root, while
+`FollowAcrossScope` permits it. The diagnostic root path is not the authority
+for descriptor-relative operations: renaming it after `open` does not redirect
+those operations.
 Lexical containment is useful early classification, but it is not a substitute
 for descriptor-relative authorization.
 
@@ -152,7 +191,7 @@ I/O errors are available through the structured error source when present.
 
 | Symptom | Check |
 | --- | --- |
-| A rooted operation rejects a path | Pass a relative descendant; remove absolute prefixes, `.`, `..`, and intermediate symlinks. |
+| A rooted operation rejects a path | Pass a relative descendant; remove absolute prefixes, `.`, and `..`, or choose `FollowAcrossScope` when an intermediate link is intentionally outside the root. |
 | A required guarantee is rejected | Inspect the selected filesystem capabilities and relax the requirement only if the application permits it. |
 | Copy or rename returns an error | Inspect its typed failure state before retrying, cleanup, or treating the target as absent. |
 | A temporary entry remains | Retain the resource and call its explicit lifecycle method; drop cleanup is best effort. |
