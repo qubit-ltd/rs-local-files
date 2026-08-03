@@ -7,16 +7,15 @@
 // =============================================================================
 
 use std::{
-    ffi::{
-        OsStr,
-        OsString,
-    },
+    ffi::OsStr,
     path::{
         Path,
         PathBuf,
     },
     sync::Mutex,
 };
+#[cfg(unix)]
+use std::ffi::OsString;
 
 use qubit_local_files::{
     LocalFileErrorKind,
