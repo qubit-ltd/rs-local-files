@@ -77,17 +77,6 @@ impl LocalCopyOptions {
         self.preserve_metadata
     }
 
-    /// Returns the explicit symbolic-link policy, or
-    /// [`LocalSymlinkPolicy::Reject`] when this options value inherits its
-    /// owning filesystem.
-    #[inline(always)]
-    pub const fn symlink_policy(&self) -> LocalSymlinkPolicy {
-        match self.symlink {
-            Some(policy) => policy,
-            None => LocalSymlinkPolicy::Reject,
-        }
-    }
-
     /// Returns the optional symbolic-link policy override.
     #[must_use]
     #[inline(always)]

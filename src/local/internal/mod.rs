@@ -33,6 +33,7 @@ mod local_atomic_publication_mode;
 mod opened_atomic_destination;
 mod path_io_error;
 mod path_operations;
+mod publication_state;
 #[cfg(unix)]
 mod rooted_atomic_install;
 #[cfg(unix)]
@@ -119,6 +120,14 @@ pub(crate) use path_operations::{
     add_path_context,
     ensure_parent_path,
     ensure_parent_path_with_sync_dirs,
+};
+pub(crate) use publication_state::{
+    copy_failure_published,
+    copy_failure_unchanged,
+    published_durability,
+    rename_failure_after_native_attempt,
+    rename_failure_renamed,
+    rename_failure_unchanged,
 };
 #[cfg(unix)]
 pub(super) use rooted_atomic_install::install_rooted_atomic_file;

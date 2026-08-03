@@ -109,7 +109,7 @@ impl LocalFileSystem {
         Ok(Self {
             capabilities: rooted.capabilities(),
             namespace: LocalNamespace::Rooted(rooted),
-            symlink_policy: symlink_policy.for_scope(true),
+            symlink_policy,
         })
     }
 
@@ -124,8 +124,7 @@ impl LocalFileSystem {
         mut self,
         symlink_policy: LocalSymlinkPolicy,
     ) -> Self {
-        let rooted = matches!(&self.namespace, LocalNamespace::Rooted(_));
-        self.symlink_policy = symlink_policy.for_scope(rooted);
+        self.symlink_policy = symlink_policy;
         self
     }
 

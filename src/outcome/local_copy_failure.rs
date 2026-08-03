@@ -35,6 +35,13 @@ use super::LocalCopyFailureState;
 /// Failure details retained when a unified copy does not complete.
 #[derive(Debug)]
 pub struct LocalCopyFailure {
+    /// Heap-owned failure details kept off the result's hot path.
+    details: Box<LocalCopyFailureDetails>,
+}
+
+/// Heap-owned details for a failed copy operation.
+#[derive(Debug)]
+struct LocalCopyFailureDetails {
     /// Primary typed filesystem error.
     error: LocalFileError,
     /// Most precise destination state proven by native operations.
@@ -54,7 +61,7 @@ impl Display for LocalCopyFailure {
         write!(
             formatter,
             "copy failed with {:?} state: {}",
-            self.state, self.error
+            self.details.state, self.details.error
         )
     }
 }
@@ -63,7 +70,7 @@ impl Error for LocalCopyFailure {
     /// Returns the primary typed filesystem error.
     #[inline(always)]
     fn source(&self) -> Option<&(dyn Error + 'static)> {
-        Some(&self.error)
+        Some(&self.details.error)
     }
 }
 
@@ -71,7 +78,7 @@ impl LocalCopyFailure {
     /// Creates a typed copy failure from implementation facts.
     #[must_use]
     #[inline]
-    pub(crate) const fn new(
+    pub(crate) fn new(
         error: LocalFileError,
         state: LocalCopyFailureState,
         partial_stats: LocalCopyStats,
@@ -79,11 +86,13 @@ impl LocalCopyFailure {
         cleanup_error: Option<LocalFileError>,
     ) -> Self {
         Self {
-            error,
-            state,
-            partial_stats,
-            staging_path,
-            cleanup_error,
+            details: Box::new(LocalCopyFailureDetails {
+                error,
+                state,
+                partial_stats,
+                staging_path,
+                cleanup_error,
+            }),
         }
     }
 
@@ -132,35 +141,35 @@ impl LocalCopyFailure {
     /// Returns the primary typed filesystem error.
     #[must_use]
     #[inline(always)]
-    pub const fn error(&self) -> &LocalFileError {
-        &self.error
+    pub fn error(&self) -> &LocalFileError {
+        &self.details.error
     }
 
     /// Returns the most precise destination state proven by native operations.
     #[inline(always)]
-    pub const fn state(&self) -> LocalCopyFailureState {
-        self.state
+    pub fn state(&self) -> LocalCopyFailureState {
+        self.details.state
     }
 
     /// Returns statistics accumulated before the failure.
     #[must_use = "partial statistics retain copy progress"]
     #[inline(always)]
-    pub const fn partial_stats(&self) -> &LocalCopyStats {
-        &self.partial_stats
+    pub fn partial_stats(&self) -> &LocalCopyStats {
+        &self.details.partial_stats
     }
 
     /// Returns the retained staging path when cleanup failed.
     #[must_use]
     #[inline]
     pub fn staging_path(&self) -> Option<&Path> {
-        self.staging_path.as_deref()
+        self.details.staging_path.as_deref()
     }
 
     /// Returns the secondary staging-cleanup error when cleanup failed.
     #[must_use]
     #[inline(always)]
-    pub const fn cleanup_error(&self) -> Option<&LocalFileError> {
-        self.cleanup_error.as_ref()
+    pub fn cleanup_error(&self) -> Option<&LocalFileError> {
+        self.details.cleanup_error.as_ref()
     }
 
     /// Consumes this failure and returns every retained part.
@@ -174,12 +183,13 @@ impl LocalCopyFailure {
         Option<PathBuf>,
         Option<LocalFileError>,
     ) {
+        let details = *self.details;
         (
-            self.error,
-            self.state,
-            self.partial_stats,
-            self.staging_path,
-            self.cleanup_error,
+            details.error,
+            details.state,
+            details.partial_stats,
+            details.staging_path,
+            details.cleanup_error,
         )
     }
 }

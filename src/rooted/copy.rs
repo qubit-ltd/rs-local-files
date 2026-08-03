@@ -84,7 +84,7 @@ pub(super) fn copy(
     options: Options,
     durability: LocalDurabilityRequirement,
 ) -> Result<Statistics, Error> {
-    if options.follows_symlinks() {
+    if options.symlink_policy().follows() {
         return Err(error(
             Stage::InspectSource,
             source,

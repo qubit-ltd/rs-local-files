@@ -23,9 +23,6 @@ pub enum LocalSymlinkPolicy {
     /// explicit opt-in for rooted operations that intentionally address the
     /// object reached outside the opened root.
     FollowAcrossScope,
-    /// Legacy alias for normal follow behavior. It resolves to
-    /// `FollowWithinScope` for Rooted and `FollowAcrossScope` for Host.
-    Follow,
 }
 
 impl LocalSymlinkPolicy {
@@ -36,21 +33,4 @@ impl LocalSymlinkPolicy {
         !matches!(self, Self::Reject)
     }
 
-    /// Resolves the legacy follow value for a concrete filesystem scope.
-    #[must_use = "the normalized scope policy must be used"]
-    #[inline(always)]
-    pub const fn for_scope(self, rooted: bool) -> Self {
-        match self {
-            Self::Reject => Self::Reject,
-            Self::FollowWithinScope => Self::FollowWithinScope,
-            Self::FollowAcrossScope => Self::FollowAcrossScope,
-            Self::Follow => {
-                if rooted {
-                    Self::FollowWithinScope
-                } else {
-                    Self::FollowAcrossScope
-                }
-            }
-        }
-    }
 }
