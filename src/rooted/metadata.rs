@@ -115,11 +115,11 @@ impl Metadata {
             }
             let file_id = (u64::from(identity.nFileIndexHigh) << 32)
                 | u64::from(identity.nFileIndexLow);
-            return Ok(Self::from_windows_metadata(
+            Ok(Self::from_windows_metadata(
                 &metadata,
                 Some(u64::from(identity.dwVolumeSerialNumber)),
                 Some(file_id),
-            ));
+            ))
         }
         #[cfg(not(any(unix, windows)))]
         {
@@ -159,7 +159,6 @@ impl Metadata {
     }
 
     /// Builds rooted metadata from Windows metadata and handle identity.
-    #[must_use]
     #[cfg(windows)]
     fn from_windows_metadata(
         metadata: &fs::Metadata,
