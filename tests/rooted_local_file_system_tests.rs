@@ -32,8 +32,9 @@ use qubit_local_files::{
     LocalTempFileOptions,
     LocalWriteMode,
     LocalWriteOptions,
-    LocalWriterState,
 };
+#[cfg(unix)]
+use qubit_local_files::LocalWriterState;
 #[cfg(coverage)]
 use qubit_local_files::{
     LocalCopyFailureState,
