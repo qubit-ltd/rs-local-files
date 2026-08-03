@@ -22,8 +22,6 @@ use crate::LocalPersistStage;
 pub enum LocalPersistFailureState {
     /// The target was not published and the temporary resource remains owned.
     NotPublished,
-    /// The target was published, but cleanup of the source was not completed.
-    PublishedSourceRetained,
     /// A native install attempt left publication state unknown.
     Indeterminate,
 }
