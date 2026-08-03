@@ -80,6 +80,7 @@ pub(crate) use copy_destination_action::CopyDestinationAction;
 pub(crate) use copy_destination_policy::decide_copy_destination;
 pub(crate) use copy_dir::{
     copy_dir_all_with_paths,
+    copy_dir_all_with_paths_scoped,
     copy_file_with_options,
 };
 pub(crate) use copy_policy::{
@@ -100,6 +101,7 @@ pub(crate) use file_move::{
 };
 pub(crate) use file_name_generation::try_random_file_name;
 pub(crate) use file_name_validation::validate_portable_file_name_impl;
+pub(crate) use host_local_file_system::resolve_host_path;
 pub(crate) use host_local_file_system::{
     HostLocalFileSystem,
     internal_copy_options,

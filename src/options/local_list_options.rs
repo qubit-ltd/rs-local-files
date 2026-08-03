@@ -8,6 +8,7 @@
 // qubit-style: allow source-test-pair
 // Covered by walker integration tests.
 
+use super::LocalSymlinkPolicy;
 use super::LocalWalkErrorPolicy;
 
 /// Options fixed for the lifetime of a local directory walker.
@@ -18,8 +19,10 @@ pub struct LocalListOptions {
     max_open_directories: usize,
     /// Whether child directories should be traversed.
     recursive: bool,
-    /// Whether symbolic links to directories should be traversed.
+    /// Legacy follow flag retained for source compatibility.
     follow_symlinks: bool,
+    /// Optional policy overriding the owning filesystem's default.
+    symlink_policy: Option<LocalSymlinkPolicy>,
     /// Maximum yielded descendant depth, where immediate children have depth
     /// one.
     max_depth: Option<usize>,
@@ -28,13 +31,15 @@ pub struct LocalListOptions {
 }
 
 impl LocalListOptions {
-    /// Creates a non-recursive, no-follow listing policy.
+    /// Creates a non-recursive listing policy that inherits the filesystem's
+    /// symbolic-link policy.
     #[inline]
     pub const fn new() -> Self {
         Self {
             max_open_directories: 64,
             recursive: false,
             follow_symlinks: false,
+            symlink_policy: None,
             max_depth: None,
             error_policy: LocalWalkErrorPolicy::FailFast,
         }
@@ -47,11 +52,27 @@ impl LocalListOptions {
         self.recursive
     }
 
-    /// Reports whether symbolic links are followed.
+    /// Reports whether this options value explicitly permits link following.
+    ///
+    /// A `false` value does not override an owning filesystem's policy when no
+    /// explicit policy was set.
     #[must_use]
     #[inline(always)]
     pub const fn follows_symlinks(&self) -> bool {
-        self.follow_symlinks
+        if self.follow_symlinks {
+            return true;
+        }
+        match self.symlink_policy {
+            Some(LocalSymlinkPolicy::Reject) | None => false,
+            Some(_) => true,
+        }
+    }
+
+    /// Returns the optional policy override.
+    #[must_use]
+    #[inline(always)]
+    pub const fn symlink_policy(&self) -> Option<LocalSymlinkPolicy> {
+        self.symlink_policy
     }
 
     /// Returns the maximum yielded depth, or `None` for no explicit limit.
@@ -82,9 +103,22 @@ impl LocalListOptions {
     }
 
     /// Enables symbolic-link following with cycle detection.
+    ///
+    /// This sets a per-operation `FollowWithinScope` override.
     #[inline(always)]
     pub const fn with_follow_symlinks(mut self) -> Self {
         self.follow_symlinks = true;
+        self.symlink_policy = Some(LocalSymlinkPolicy::FollowWithinScope);
+        self
+    }
+
+    /// Overrides the owning filesystem's symbolic-link policy.
+    #[inline(always)]
+    pub const fn with_symlink_policy(
+        mut self,
+        symlink_policy: LocalSymlinkPolicy,
+    ) -> Self {
+        self.symlink_policy = Some(symlink_policy);
         self
     }
 

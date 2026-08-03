@@ -19,6 +19,7 @@ mod local_persist_outcome;
 mod local_rename_failure;
 mod local_rename_failure_state;
 mod local_rename_outcome;
+mod local_write_publication_method;
 
 pub use local_copy_failure::{
     LocalCopyFailure,
@@ -38,3 +39,4 @@ pub use local_rename_failure::{
 };
 pub use local_rename_failure_state::LocalRenameFailureState;
 pub use local_rename_outcome::LocalRenameOutcome;
+pub use local_write_publication_method::LocalWritePublicationMethod;

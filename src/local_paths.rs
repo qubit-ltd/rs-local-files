@@ -125,7 +125,6 @@ impl LocalPaths {
     ///
     /// Returns `LocalFileError` with `ComposePath` when `path` contains a
     /// root, prefix, dot, parent, or no normal components.
-    ///
     #[inline(always)]
     pub fn to_canonical_relative_components(
         path: &Path,
@@ -596,7 +595,6 @@ fn from_canonical_absolute_components<'a>(
 ///
 /// Returns a `ComposePath` error when `path` is not absolute or has raw dot
 /// components.
-///
 #[cfg(unix)]
 fn to_canonical_absolute_components(path: &Path) -> LocalResult<Vec<String>> {
     if !path.is_absolute() || has_disallowed_component(path) {

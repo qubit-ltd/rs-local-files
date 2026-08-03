@@ -15,6 +15,7 @@ use qubit_local_files::{
     LocalFileKind,
     LocalFileSystem,
     LocalListOptions,
+    LocalSymlinkPolicy,
 };
 use tempfile::tempdir;
 
@@ -101,10 +102,10 @@ fn test_local_directory_walker_rejects_handle_budget_exhaustion() {
     );
 }
 
-/// Verifies that default traversal observes but does not follow symbolic links.
+/// Verifies that Host's default traversal follows symbolic links.
 #[cfg(unix)]
 #[test]
-fn test_local_directory_walker_does_not_follow_symlinks_by_default() {
+fn test_local_directory_walker_follows_symlinks_by_default_on_host() {
     use std::os::unix::fs::symlink;
 
     let directory = tempdir().expect("temporary directory should be created");
@@ -121,5 +122,29 @@ fn test_local_directory_walker_does_not_follow_symlinks_by_default() {
         .expect("link entry should be observable");
 
     assert_eq!(1, entries.len());
+    assert_eq!(LocalFileKind::Directory, entries[0].metadata().kind());
+}
+
+/// Verifies an explicit reject override keeps the link entry visible.
+#[cfg(unix)]
+#[test]
+fn test_local_directory_walker_can_reject_symlinks_per_operation() {
+    use std::os::unix::fs::symlink;
+
+    let directory = tempdir().expect("temporary directory should be created");
+    let outside = tempdir().expect("outside directory should be created");
+    symlink(outside.path(), directory.path().join("link"))
+        .expect("link should be created");
+
+    let entries = LocalFileSystem::host()
+        .list(
+            directory.path(),
+            &LocalListOptions::new()
+                .with_symlink_policy(LocalSymlinkPolicy::Reject),
+        )
+        .expect("walker should be created")
+        .collect::<Result<Vec<_>, _>>()
+        .expect("reject mode should observe the link entry");
+
     assert_eq!(LocalFileKind::Symlink, entries[0].metadata().kind());
 }

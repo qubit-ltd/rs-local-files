@@ -141,13 +141,6 @@ impl LocalAtomicWriteOptions {
         self
     }
 
-    /// Enables replacement of a final symbolic-link entry.
-    #[inline(always)]
-    pub(crate) const fn with_target_symlink_replacement(mut self) -> Self {
-        self.replace_target_symlink = true;
-        self
-    }
-
     /// Reports whether final symbolic-link replacement is enabled.
     #[must_use]
     #[inline(always)]

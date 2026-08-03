@@ -254,26 +254,34 @@ fn test_rooted_local_file_system_rejects_zero_temp_attempts() {
     assert_eq!(LocalFileErrorKind::InvalidOptions, file_error.kind());
 }
 
-/// Verifies rooted listing refuses symlink following because
-/// descriptor-relative traversal deliberately avoids path-resolution authority.
+/// Verifies rooted listing follows links within the opened root by default.
+#[cfg(unix)]
 #[test]
-fn test_rooted_local_file_system_rejects_follow_symlink_listing() {
+fn test_rooted_local_file_system_follows_in_scope_symlink_listing() {
+    use std::os::unix::fs::symlink;
+
     let parent = tempdir().expect("root parent should be created");
+    fs::create_dir(parent.path().join("target"))
+        .expect("target directory should be created");
+    fs::write(parent.path().join("target/entry"), b"payload")
+        .expect("target entry should be written");
+    symlink("target", parent.path().join("link"))
+        .expect("in-scope link should be created");
     let rooted = LocalFileSystem::rooted(parent.path())
         .expect("root authority should open");
 
-    let error = rooted
-        .list(
-            Path::new(""),
-            &LocalListOptions::new().with_follow_symlinks(),
-        )
-        .expect_err("rooted traversal must reject symlink following");
+    let entries = rooted
+        .list(Path::new("link"), &LocalListOptions::new().with_recursive())
+        .expect("rooted traversal should follow the in-scope link")
+        .collect::<Result<Vec<_>, _>>()
+        .expect("in-scope traversal should succeed");
 
-    assert_eq!(LocalFileErrorKind::RequirementNotMet, error.kind());
+    assert_eq!(1, entries.len());
+    assert_eq!(Path::new("link/entry"), entries[0].relative_path());
 }
 
-/// Verifies rooted walkers report a missing descendant and honor a zero depth
-/// limit without opening any child entries.
+/// Verifies rooted listing validates its start directory before iteration and
+/// honors a zero depth limit without yielding child entries.
 #[test]
 fn test_rooted_local_file_system_list_handles_missing_and_zero_depth() {
     let parent = tempdir().expect("root parent should be created");
@@ -284,10 +292,7 @@ fn test_rooted_local_file_system_list_handles_missing_and_zero_depth() {
 
     let missing_error = rooted
         .list(Path::new("missing"), &LocalListOptions::new())
-        .expect("missing rooted directory lookup should be deferred")
-        .next()
-        .expect("deferred lookup should yield its error")
-        .expect_err("missing rooted directory enumeration must fail");
+        .expect_err("missing rooted directory should fail at list creation");
     assert_eq!(LocalFileErrorKind::NotFound, missing_error.kind());
     let entries = rooted
         .list(Path::new(""), &LocalListOptions::new().with_max_depth(0))

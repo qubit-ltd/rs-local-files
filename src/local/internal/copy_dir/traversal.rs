@@ -60,6 +60,7 @@ pub(super) fn copy_dir_iterative(
     dst: &Path,
     options: LocalCopyDirOptions,
     destination_root: &Path,
+    scope_root: Option<&Path>,
     stats: &mut LocalCopyDirStats,
 ) -> CopyDirResult<()> {
     let mut active_sources = HashSet::new();
@@ -132,12 +133,15 @@ pub(super) fn copy_dir_iterative(
             if let Some(frame) = frame {
                 frames.push(frame);
             }
-        } else if file_type.is_symlink() && options.follows_symlinks() {
-            if symlink_target_is_directory(
-                &source_path,
-                &destination_path,
-                stats,
-            )? {
+        } else if file_type.is_symlink() {
+            if options.follows_symlinks()
+                && symlink_target_is_directory(
+                    &source_path,
+                    &destination_path,
+                    stats,
+                    scope_root,
+                )?
+            {
                 let frame = enter_copy_directory(
                     &source_path,
                     &destination_path,
@@ -150,7 +154,7 @@ pub(super) fn copy_dir_iterative(
                     frames.push(frame);
                 }
             } else {
-                copy_file_with_options(
+                super::staged_copy::copy_symlink_with_options(
                     &source_path,
                     &destination_path,
                     options,
@@ -287,14 +291,45 @@ fn symlink_target_is_directory(
     src: &Path,
     dst: &Path,
     stats: &LocalCopyDirStats,
+    scope_root: Option<&Path>,
 ) -> CopyDirResult<bool> {
-    let target_metadata = with_copy_context(
+    if let Some(scope_root) = scope_root {
+        let target = with_copy_context(
+            fs::canonicalize(src),
+            LocalCopyDirStage::InspectSourceEntry,
+            src,
+            dst,
+            stats,
+        )?;
+        if !target.starts_with(scope_root) {
+            return Err(copy_dir_error(
+                LocalCopyDirStage::InspectSourceEntry,
+                src,
+                dst,
+                stats,
+                Error::new(
+                    ErrorKind::InvalidInput,
+                    format!(
+                        "followed symbolic-link directory escaped copy scope: {}",
+                        src.display()
+                    ),
+                ),
+            ));
+        }
+    }
+    let target_metadata = match with_copy_context(
         fs::metadata(src),
         LocalCopyDirStage::InspectSourceEntry,
         src,
         dst,
         stats,
-    )?;
+    ) {
+        Ok(metadata) => metadata,
+        Err(error) if error.error().kind() == ErrorKind::NotFound => {
+            return Ok(false);
+        }
+        Err(error) => return Err(error),
+    };
     if target_metadata.is_dir() {
         Ok(true)
     } else if target_metadata.is_file() {

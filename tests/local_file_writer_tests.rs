@@ -27,6 +27,7 @@ use qubit_local_files::{
     LocalWriteFailureState,
     LocalWriteMode,
     LocalWriteOptions,
+    LocalWritePublicationMethod,
     LocalWriterState,
 };
 use tempfile::tempdir;
@@ -64,6 +65,10 @@ fn test_local_file_writer_publishes_staged_content_on_commit() {
         .expect("commit should publish staged content");
     assert_eq!(LocalWriterState::Committed, outcome.state());
     assert!(outcome.atomic());
+    assert_eq!(
+        LocalWritePublicationMethod::AtomicRename,
+        outcome.publication_method()
+    );
     assert_eq!(3, outcome.bytes_written());
     assert_eq!(
         b"new",
@@ -73,10 +78,10 @@ fn test_local_file_writer_publishes_staged_content_on_commit() {
     );
 }
 
-/// Verifies that overwrite publication replaces a target symlink entry.
+/// Verifies that overwrite publication follows a target symlink.
 #[cfg(unix)]
 #[test]
-fn test_local_file_writer_replaces_target_symlink_entry() {
+fn test_local_file_writer_follows_target_symlink() {
     use std::os::unix::fs::symlink;
 
     let directory = tempdir().expect("temporary directory should be created");
@@ -98,22 +103,23 @@ fn test_local_file_writer_replaces_target_symlink_entry() {
     assert!(
         fs::symlink_metadata(&target)
             .expect("target metadata should be available")
-            .is_file(),
+            .file_type()
+            .is_symlink()
     );
     assert_eq!(
         b"replacement".to_vec(),
         fs::read(&target).expect("target should contain replacement"),
     );
     assert_eq!(
-        b"original".to_vec(),
-        fs::read(&referent).expect("referent should remain unchanged"),
+        b"replacement".to_vec(),
+        fs::read(&referent).expect("referent should be updated"),
     );
 }
 
-/// Verifies direct append rejects a final symbolic-link entry.
+/// Verifies direct append follows a final symbolic-link entry.
 #[cfg(unix)]
 #[test]
-fn test_local_file_writer_append_rejects_target_symlink() {
+fn test_local_file_writer_append_follows_target_symlink() {
     use std::os::unix::fs::symlink;
 
     let directory = tempdir().expect("temporary directory should exist");
@@ -122,19 +128,24 @@ fn test_local_file_writer_append_rejects_target_symlink() {
     fs::write(&referent, b"original").expect("referent should be written");
     symlink(&referent, &target).expect("target symlink should be created");
 
-    let error = LocalFileSystem::host()
+    let mut writer = LocalFileSystem::host()
         .open_writer(&target, &LocalWriteOptions::new(LocalWriteMode::Append))
-        .expect_err("append must not follow a final symlink");
-
-    assert_eq!(LocalFileErrorKind::TypeConflict, error.kind());
-    assert_eq!(b"original", fs::read(&referent).unwrap().as_slice());
+        .expect("append should follow a final symlink");
+    writer
+        .write_all(b"-append")
+        .expect("append should write to the referent");
+    let outcome = writer.commit().expect("append should commit");
+    assert_eq!(
+        LocalWritePublicationMethod::DirectAppend,
+        outcome.publication_method()
+    );
+    assert_eq!(b"original-append", fs::read(&referent).unwrap().as_slice());
 }
 
-/// Verifies Windows append rejects a final name-surrogate reparse point and
-/// leaves its referent unchanged.
+/// Verifies Windows append follows a final name-surrogate reparse point.
 #[cfg(windows)]
 #[test]
-fn test_local_file_writer_append_rejects_target_symlink_on_windows() {
+fn test_local_file_writer_append_follows_target_symlink_on_windows() {
     use std::io::ErrorKind;
     use std::os::windows::fs::symlink_file;
 
@@ -149,12 +160,15 @@ fn test_local_file_writer_append_rejects_target_symlink_on_windows() {
         panic!("file symlink should be created: {error}");
     }
 
-    let error = LocalFileSystem::host()
+    let mut writer = LocalFileSystem::host()
         .open_writer(&target, &LocalWriteOptions::new(LocalWriteMode::Append))
-        .expect_err("append must not follow a final file symlink");
-    assert_eq!(LocalFileErrorKind::TypeConflict, error.kind());
+        .expect("append should follow a final file symlink");
+    writer
+        .write_all(b"-append")
+        .expect("append should write through the link");
+    writer.commit().expect("append should commit");
     assert_eq!(
-        b"original",
+        b"original-append",
         fs::read(referent)
             .expect("referent should remain readable")
             .as_slice(),

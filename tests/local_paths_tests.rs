@@ -185,9 +185,8 @@ fn test_canonical_relative_components_round_trip() {
 fn test_canonical_relative_components_reject_native_nul() {
     use std::os::unix::ffi::OsStringExt;
 
-    let native = PathBuf::from(OsString::from_vec(vec![
-        b's', 0, b'a', b'f', b'e',
-    ]));
+    let native =
+        PathBuf::from(OsString::from_vec(vec![b's', 0, b'a', b'f', b'e']));
     let error = LocalPaths::to_canonical_relative_components(&native)
         .expect_err("native NUL must be reported as a path error");
 

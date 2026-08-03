@@ -29,6 +29,7 @@ use crate::{
     LocalWriteFailureState,
     LocalWriteOptions,
     LocalWriteOutcome,
+    LocalWritePublicationMethod,
     LocalWriterState,
 };
 
@@ -201,6 +202,7 @@ impl LocalFileWriter {
                 Ok(LocalWriteOutcome::new(
                     self.state,
                     false,
+                    LocalWritePublicationMethod::DirectAppend,
                     durable,
                     self.bytes_written,
                     self.failure_state,
@@ -249,6 +251,7 @@ impl LocalFileWriter {
                 Ok(LocalWriteOutcome::new(
                     self.state,
                     false,
+                    LocalWritePublicationMethod::AtomicRename,
                     false,
                     self.bytes_written,
                     self.failure_state,
@@ -280,6 +283,7 @@ impl LocalFileWriter {
                 Ok(LocalWriteOutcome::new(
                     self.state,
                     false,
+                    LocalWritePublicationMethod::DirectAppend,
                     false,
                     self.bytes_written,
                     self.failure_state,
@@ -299,6 +303,7 @@ impl LocalFileWriter {
                 Ok(LocalWriteOutcome::new(
                     self.state,
                     true,
+                    LocalWritePublicationMethod::AtomicRename,
                     durable,
                     self.bytes_written,
                     self.failure_state,
