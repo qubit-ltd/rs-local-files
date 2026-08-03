@@ -6,18 +6,21 @@
 //    Licensed under the Apache License, Version 2.0.
 // =============================================================================
 
+#[cfg(unix)]
 use std::{
     fs,
     io::Read,
     path::Path,
 };
 
+#[cfg(unix)]
 use qubit_local_files::{
     LocalFileErrorKind,
     LocalFileSystem,
     LocalReadOptions,
     LocalSymlinkPolicy,
 };
+#[cfg(unix)]
 use tempfile::tempdir;
 
 /// Verifies host resolution follows an intermediate symbolic link.

@@ -32,9 +32,9 @@ use qubit_local_files::{
     LocalTempFileOptions,
     LocalWriteMode,
     LocalWriteOptions,
-    LocalWriterState,
 };
-
+#[cfg(unix)]
+use qubit_local_files::LocalWriterState;
 #[cfg(coverage)]
 use qubit_local_files::{
     LocalCopyFailureState,
@@ -154,6 +154,7 @@ fn test_rooted_local_file_system_default_copy_and_rename_skip_sync() {
             "--nocapture",
         ])
         .env(CHILD_ENV, "1")
+        .env("LSAN_OPTIONS", "detect_leaks=0")
         .status()
         .expect("strace should launch the traced child");
     assert!(status.success(), "traced child should succeed");
