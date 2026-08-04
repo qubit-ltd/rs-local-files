@@ -160,6 +160,37 @@ fn test_local_file_system_open_reader_requires_regular_file() {
     assert_eq!(LocalFileErrorKind::TypeConflict, error.kind());
 }
 
+/// Verifies bounded prefix reads do not require the complete file length.
+#[test]
+fn test_local_file_system_read_prefix_is_bounded() {
+    let directory = tempdir().expect("temporary directory should be created");
+    let file = directory.path().join("payload");
+    fs::write(&file, b"0123456789").expect("fixture should be written");
+
+    let filesystem = LocalFileSystem::host();
+    assert_eq!(
+        b"0123".as_slice(),
+        filesystem
+            .read_prefix(&file, &LocalReadOptions::new(), 4)
+            .expect("prefix should be readable")
+            .as_slice()
+    );
+    assert!(
+        filesystem
+            .read_prefix(&file, &LocalReadOptions::new(), 0)
+            .expect("zero-length prefix should still open")
+            .is_empty()
+    );
+
+    let missing = directory.path().join("missing");
+    assert!(
+        filesystem
+            .read_prefix(&missing, &LocalReadOptions::new(), 4)
+            .is_err(),
+        "missing paths must still be validated"
+    );
+}
+
 /// Verifies no-replace rename and explicit overwrite behavior.
 #[test]
 fn test_local_file_system_rename_respects_overwrite_policy() {
