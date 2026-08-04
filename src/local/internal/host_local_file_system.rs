@@ -157,7 +157,7 @@ impl HostLocalFileSystem {
         options: &LocalReadOptions,
         symlink_policy: LocalSymlinkPolicy,
     ) -> LocalResult<LocalFileReader> {
-        let bound = resolve_host_path(path, symlink_policy, true)?;
+        let bound = resolve_host_path(path, symlink_policy, !cfg!(windows))?;
         let metadata = coverage_io_fault("local-fs-open-reader-metadata")
             .map_or_else(|| fs::metadata(&bound), Err)
             .map_err(|source| {
@@ -194,6 +194,17 @@ impl HostLocalFileSystem {
             )
             .map(LocalFileReader::new)
             .map_err(|source| {
+                #[cfg(windows)]
+                if source.kind() == std::io::ErrorKind::InvalidInput
+                    && fs::symlink_metadata(&bound)
+                        .is_ok_and(|metadata| metadata.file_type().is_symlink())
+                {
+                    return LocalFileError::new(
+                        LocalFileErrorKind::TypeConflict,
+                        LocalFileOperation::OpenReader,
+                    )
+                    .with_path(bound);
+                }
                 LocalFileError::from_io(
                     LocalFileOperation::OpenReader,
                     Some(bound),

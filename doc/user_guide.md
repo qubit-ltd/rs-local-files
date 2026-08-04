@@ -3,7 +3,7 @@
 [中文](user_guide.zh_CN.md) · [README](../README.md) ·
 [API reference](https://docs.rs/qubit-local-files)
 
-This guide covers `qubit-local-files` 0.8 on Rust 1.94 or newer. It is for
+This guide covers `qubit-local-files` 0.3 on Rust 1.94 or newer. It is for
 applications that operate on the host filesystem or need operations restricted
 to one opened directory. It is not a provider registry, a remote filesystem
 API, or a replacement for provider-level logical paths.
@@ -44,7 +44,7 @@ Final components retain native operation semantics:
 | Operation | Final symbolic link |
 | --- | --- |
 | `metadata` | Inspects the link entry itself. |
-| `open_reader` | Follows the link and reads its target. |
+| `open_reader` | Follows the link on Unix; rejects a final name-surrogate reparse point on Windows. |
 | `CreateNew` writer | Treats an existing link as an existing entry. |
 | `Append` writer | Follows the link and appends to its target. |
 | `CreateOrReplace` writer | Follows the link, replaces its target, and preserves the link. |
