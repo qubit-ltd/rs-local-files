@@ -9,6 +9,8 @@
 // Covered by host walker integration tests.
 
 use std::{
+    collections::HashSet,
+    ffi::OsString,
     fs::ReadDir,
     path::PathBuf,
 };
@@ -17,7 +19,9 @@ use std::{
 #[derive(Debug)]
 pub(in crate::walk) struct WalkFrame {
     /// Native iterator for immediate entries.
-    pub(in crate::walk) entries: ReadDir,
+    pub(in crate::walk) entries: Option<ReadDir>,
+    /// Names already yielded from this directory.
+    pub(in crate::walk) seen: HashSet<OsString>,
     /// Root-relative path of this directory.
     pub(in crate::walk) relative: PathBuf,
     /// Canonical identity retained while this directory is on the DFS path.
