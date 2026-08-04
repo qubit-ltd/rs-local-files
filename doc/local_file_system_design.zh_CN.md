@@ -256,7 +256,8 @@ root 的对象。
 最终组件必须按操作系统操作语义处理，而不是使用一个全局的 follow/no-follow 布尔值：
 
 - `metadata` 查看链接 entry 本身；
-- reader、append writer 和 `CreateOrReplace` writer 跟随链接目标；
+- Unix reader、append writer 和 `CreateOrReplace` writer 跟随链接目标；Windows
+  reader 拒绝最终 name-surrogate reparse point，append 与 replace 仍按 native 语义处理；
 - `CreateNew` 将最终链接视为已存在；
 - delete、rename、copy target 和 temp persist 操作链接 entry 本身；
 - copy source 复制链接 entry 本身。
