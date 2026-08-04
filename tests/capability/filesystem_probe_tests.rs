@@ -19,4 +19,6 @@ fn test_filesystem_probe_uses_nearest_existing_ancestor() {
 
     #[cfg(unix)]
     assert!(space.capacity_bytes().is_some());
+    #[cfg(not(unix))]
+    let _ = &space;
 }

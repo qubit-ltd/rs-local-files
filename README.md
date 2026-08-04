@@ -18,7 +18,7 @@ in [`qubit-fs-local`](https://crates.io/crates/qubit-fs-local).
 
 ```toml
 [dependencies]
-qubit-local-files = "0.8"
+qubit-local-files = "0.3"
 ```
 
 ## Quick Start: publish a generated file
