@@ -54,6 +54,7 @@ pub(crate) use internal::{
     decide_copy_destination,
     ensure_parent_path,
     ensure_parent_path_with_sync_dirs,
+    ensure_required_directory_durability,
     internal_copy_options,
     move_directory_without_replacing,
     move_file_without_replacing,
@@ -69,6 +70,7 @@ pub(crate) use internal::{
     root_authority_path,
     try_random_file_name,
     validate_portable_file_name_impl,
+    validate_temp_affixes,
 };
 #[cfg(any(unix, windows))]
 pub(crate) use internal::{

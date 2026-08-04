@@ -21,4 +21,6 @@ pub(crate) struct RootedTempResourceBackend {
     pub(crate) root: Arc<crate::rooted::Root>,
     /// Root-relative descendant path.
     pub(crate) relative_path: PathBuf,
+    /// Root-relative private cleanup sandbox.
+    pub(crate) sandbox_path: PathBuf,
 }

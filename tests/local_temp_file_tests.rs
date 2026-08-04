@@ -100,6 +100,42 @@ fn test_local_temp_file_closed_handle_reports_broken_pipe() {
     assert_eq!(ErrorKind::BrokenPipe, error.kind());
 }
 
+/// Verifies a temporary file is isolated in a private cleanup sandbox.
+#[test]
+fn test_local_temp_file_uses_private_cleanup_sandbox() {
+    let parent = tempdir().expect("temporary parent should be created");
+    let temporary = LocalFileSystem::host()
+        .create_temp_file(
+            &LocalTempFileOptions::new().with_parent(parent.path()),
+        )
+        .expect("temporary file should be created");
+    let resource_path = temporary.path().to_path_buf();
+    let sandbox = resource_path
+        .parent()
+        .expect("temporary file should have a sandbox parent")
+        .to_path_buf();
+
+    assert!(resource_path.starts_with(parent.path()));
+    assert_ne!(sandbox, parent.path());
+    assert!(sandbox.is_dir());
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+
+        assert_eq!(
+            0o700,
+            fs::metadata(&sandbox)
+                .expect("sandbox metadata should be readable")
+                .permissions()
+                .mode()
+                & 0o777
+        );
+    }
+
+    drop(temporary);
+    assert!(!sandbox.exists());
+}
+
 /// Verifies detailed persistence reports the actual atomic rename outcome.
 #[test]
 fn test_local_temp_file_persist_with_outcome_reports_atomic_rename() {

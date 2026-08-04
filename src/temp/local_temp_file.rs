@@ -57,6 +57,10 @@ use super::internal::{
 /// Persistence resolves intermediate symbolic links using the policy captured
 /// by the creating [`crate::LocalFileSystem`], while replacing a final link
 /// entry itself.
+///
+/// The file is created inside a private generated sandbox. Cleanup removes the
+/// file and then the empty sandbox; [`Self::keep`] transfers both to the
+/// caller.
 #[must_use = "dropping the temporary-file guard removes its file"]
 #[derive(Debug)]
 pub struct LocalTempFile {
@@ -81,13 +85,14 @@ impl LocalTempFile {
     #[inline]
     pub(crate) fn host(
         path: PathBuf,
+        sandbox_path: PathBuf,
         file: File,
         symlink_policy: LocalSymlinkPolicy,
     ) -> Result<Self> {
         Ok(Self {
             path,
             backend: LocalTempResourceBackend::Host(
-                super::internal::HostTempResourceBackend,
+                super::internal::HostTempResourceBackend { sandbox_path },
             ),
             host_identity: Some(TempEntryIdentity::from_file(&file)?),
             rooted_identity: None,
@@ -102,6 +107,7 @@ impl LocalTempFile {
     pub(crate) fn rooted(
         root: Arc<crate::rooted::Root>,
         path: PathBuf,
+        sandbox_path: PathBuf,
         file: File,
         symlink_policy: LocalSymlinkPolicy,
     ) -> Result<Self> {
@@ -111,6 +117,7 @@ impl LocalTempFile {
                 RootedTempResourceBackend {
                     root,
                     relative_path: path,
+                    sandbox_path,
                 },
             ),
             host_identity: None,
@@ -234,22 +241,24 @@ impl LocalTempFile {
         let requested_target = target.to_path_buf();
         if matches!(&self.backend, LocalTempResourceBackend::Host(_)) {
             let target = match std::path::absolute(&requested_target) {
-                Ok(target) => match crate::local::resolve_host_path(
-                    &target,
-                    self.symlink_policy,
-                    false,
-                ) {
-                    Ok(target) => target,
-                    Err(error) => {
-                        return Err(LocalPersistError::new(
-                            error.into_io_error(),
-                            self,
-                            requested_target,
-                            None,
-                            LocalPersistStage::ResolveTarget,
-                        ));
+                Ok(target) => {
+                    match crate::local::resolve_host_path(
+                        &target,
+                        self.symlink_policy,
+                        false,
+                    ) {
+                        Ok(target) => target,
+                        Err(error) => {
+                            return Err(LocalPersistError::new(
+                                error.into_io_error(),
+                                self,
+                                requested_target,
+                                None,
+                                LocalPersistStage::ResolveTarget,
+                            ));
+                        }
                     }
-                },
+                }
                 Err(error) => {
                     return Err(LocalPersistError::new(
                         error,
@@ -285,6 +294,7 @@ impl LocalTempFile {
                 ));
             }
             self.state = LocalTempResourceState::Released;
+            self.release_sandbox_best_effort();
             return Ok(LocalPersistOutcome::new(
                 target,
                 LocalPersistMethod::AtomicRename,
@@ -372,6 +382,7 @@ impl LocalTempFile {
             ));
         }
         self.state = LocalTempResourceState::Released;
+        self.release_sandbox_best_effort();
         Ok(LocalPersistOutcome::new(
             target,
             LocalPersistMethod::AtomicRename,
@@ -387,13 +398,38 @@ impl LocalTempFile {
         self.ensure_identity_matches()?;
         match &self.backend {
             LocalTempResourceBackend::Host(_) => {
-                std::fs::remove_file(&self.path)
+                std::fs::remove_file(&self.path)?;
+                self.release_sandbox_best_effort();
+                Ok(())
             }
             LocalTempResourceBackend::Rooted(rooted) => {
                 let path = LocalRelativePath::new(&rooted.relative_path)
                     .expect("rooted temporary path was validated at creation");
-                rooted.root.remove_file(&path)
+                rooted.root.remove_file(&path)?;
+                self.release_sandbox_best_effort();
+                Ok(())
             }
+        }
+    }
+
+    /// Removes the now-empty private sandbox after successful publication.
+    fn release_sandbox_best_effort(&self) {
+        let result = match &self.backend {
+            LocalTempResourceBackend::Host(host) => {
+                std::fs::remove_dir(&host.sandbox_path)
+            }
+            LocalTempResourceBackend::Rooted(rooted) => {
+                let sandbox = LocalRelativePath::new(&rooted.sandbox_path)
+                    .expect("rooted temporary sandbox path was validated at creation");
+                rooted.root.remove_empty_dir(&sandbox)
+            }
+        };
+        if let Err(error) = result {
+            warn!(
+                "failed to remove temporary file sandbox for {}: {}",
+                self.path.display(),
+                error
+            );
         }
     }
 

@@ -32,6 +32,7 @@ mod local_atomic_publication_mode;
 mod local_namespace;
 #[cfg(unix)]
 mod opened_atomic_destination;
+mod operation_policy;
 mod path_io_error;
 mod path_operations;
 mod publication_state;
@@ -118,6 +119,7 @@ pub(crate) use opened_atomic_destination::{
     OpenedAtomicDestination,
     open_atomic_destination,
 };
+pub(crate) use operation_policy::ensure_required_directory_durability;
 pub(crate) use path_operations::{
     absolute_path,
     add_path_context,
@@ -178,6 +180,7 @@ pub(crate) use temp_entry::{
     DEFAULT_TEMP_ENTRY_RETRIES,
     create_temp_dir_in_dir_with_affixes,
     create_temp_file_in_dir,
+    validate_temp_affixes,
 };
 #[cfg(unix)]
 pub(crate) use unix_nonblocking::{

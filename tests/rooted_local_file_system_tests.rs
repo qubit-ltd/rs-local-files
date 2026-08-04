@@ -231,6 +231,13 @@ fn test_rooted_temp_file_cleanup_ignores_replacement_diagnostic_root() {
     fs::rename(&original, &renamed)
         .expect("diagnostic root path should be renamed");
     fs::create_dir(&original).expect("replacement root should be created");
+    fs::create_dir_all(
+        original
+            .join(&relative_path)
+            .parent()
+            .expect("replacement parent should exist"),
+    )
+    .expect("replacement parent should be created");
     fs::write(original.join(&relative_path), b"replacement")
         .expect("replacement entry should be created");
 
@@ -260,6 +267,13 @@ fn test_rooted_temp_directory_cleanup_uses_retained_root_authority_after_replace
     fs::rename(&original, &renamed)
         .expect("diagnostic root path should be renamed");
     fs::create_dir(&original).expect("replacement root should be created");
+    fs::create_dir_all(
+        original
+            .join(&relative_path)
+            .parent()
+            .expect("replacement parent should exist"),
+    )
+    .expect("replacement parent should be created");
     fs::create_dir(original.join(&relative_path))
         .expect("replacement entry should be created");
     temporary
@@ -313,6 +327,13 @@ fn test_rooted_temp_file_drop_uses_retained_authority_after_root_replacement() {
         fs::rename(&original, &renamed)
             .expect("diagnostic root path should be renamed");
         fs::create_dir(&original).expect("replacement root should be created");
+        fs::create_dir_all(
+            original
+                .join(&relative_path)
+                .parent()
+                .expect("replacement parent should exist"),
+        )
+        .expect("replacement parent should be created");
         fs::write(original.join(&relative_path), b"replacement")
             .expect("replacement entry should be created");
         relative_path
@@ -675,7 +696,10 @@ fn test_rooted_local_file_system_walker_rejects_handle_budget_exhaustion() {
             Path::new(""),
             &LocalListOptions::new()
                 .with_recursive()
-                .with_max_open_directories(1),
+                .with_max_open_directories(1)
+                .with_reopen_policy(
+                    qubit_local_files::LocalDirectoryReopenPolicy::Fail,
+                ),
         )
         .expect("rooted walker should open");
 
@@ -685,6 +709,41 @@ fn test_rooted_local_file_system_walker_rejects_handle_budget_exhaustion() {
         .expect_err("opening nested directory must exceed the handle budget");
 
     assert_eq!(LocalFileErrorKind::ResourceLimit, error.kind());
+}
+
+/// Verifies rooted recursive traversal reopens readers beyond its handle
+/// budget while preserving authority-relative paths.
+#[test]
+fn test_rooted_local_file_system_walker_reopens_handle_frames() {
+    let directory = tempdir().expect("temporary root should be created");
+    let mut current = directory.path().to_path_buf();
+    for index in 0..4 {
+        current.push(format!("level-{index}"));
+        fs::create_dir(&current).expect("nested directory should be created");
+    }
+    fs::write(current.join("payload"), b"payload")
+        .expect("nested payload should be written");
+    let rooted = LocalFileSystem::rooted(directory.path())
+        .expect("root authority should open");
+
+    let entries = rooted
+        .list(
+            Path::new(""),
+            &LocalListOptions::new()
+                .with_recursive()
+                .with_max_open_directories(1)
+                .with_reopen_policy(
+                    qubit_local_files::LocalDirectoryReopenPolicy::Reopen,
+                ),
+        )
+        .expect("rooted walker should open")
+        .collect::<Result<Vec<_>, _>>()
+        .expect("rooted reopen traversal should succeed");
+
+    assert!(entries.iter().any(|entry| {
+        entry.relative_path()
+            == Path::new("level-0/level-1/level-2/level-3/payload")
+    }));
 }
 
 /// Verifies rooted writer publication and unified copy remain
