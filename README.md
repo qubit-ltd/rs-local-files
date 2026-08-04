@@ -83,6 +83,9 @@ and a filesystem may eventually reuse an identity. For example, removing a
 temporary file and repeatedly installing another file at the same name is
 outside the cleanup guarantee. Put temporary entries in a directory not
 writable by concurrent actors, or call `keep` and coordinate deletion yourself.
+Each temporary resource is created inside a private per-resource sandbox. The
+resource path therefore includes one generated sandbox component; `keep`
+transfers ownership of that sandbox together with the returned resource path.
 
 ## Choose the right authority
 
@@ -114,8 +117,10 @@ atomicity.
 
 Linux, Windows, and macOS behavior is runtime-tested. FreeBSD and Android
 configuration paths are compile-checked only; this crate makes no runtime
-guarantee for those targets. Capability snapshots report mechanisms implemented
-for the selected build; they do not probe a particular runtime filesystem.
+guarantee for those targets. Capability snapshots distinguish implemented
+mechanisms from runtime-verified support; they do not probe a particular
+runtime filesystem. Durable rename and copy are not advertised until a runtime
+authority verifies the active mount.
 Required atomicity or durability is
 rejected before namespace changes when it cannot be met.
 
