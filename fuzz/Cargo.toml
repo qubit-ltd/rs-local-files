@@ -25,3 +25,10 @@ path = "fuzz_targets/local_paths.rs"
 test = false
 doc = false
 bench = false
+
+[[bin]]
+name = "lifecycle"
+path = "fuzz_targets/lifecycle.rs"
+test = false
+doc = false
+bench = false
