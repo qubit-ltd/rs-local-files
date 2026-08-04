@@ -113,7 +113,8 @@ impl LocalDirectoryWalker {
             root,
             options,
             stack: vec![WalkFrame {
-                entries,
+                entries: Some(entries),
+                seen: HashSet::new(),
                 relative: PathBuf::new(),
                 identity: root_identity,
                 entry_depth: 1,
@@ -184,6 +185,7 @@ impl LocalDirectoryWalker {
                 root,
                 stack: vec![RootedWalkFrame {
                     reader: None,
+                    seen: HashSet::new(),
                     authority_parent,
                     output_parent,
                     entry_depth: 1,
@@ -239,12 +241,20 @@ impl LocalDirectoryWalker {
         relative: PathBuf,
         entry_depth: usize,
     ) -> LocalResult<()> {
-        if self.stack.len() >= self.options.max_open_directories() {
+        if self.stack.len() >= self.options.max_open_directories()
+            && self.options.reopen_policy()
+                == crate::LocalDirectoryReopenPolicy::Fail
+        {
             return Err(LocalFileError::new(
                 LocalFileErrorKind::ResourceLimit,
                 LocalFileOperation::List,
             )
             .with_path(path.to_path_buf()));
+        }
+        if self.stack.len() >= self.options.max_open_directories() {
+            for frame in &mut self.stack {
+                frame.entries = None;
+            }
         }
         let identity = if self.symlink_policy.follows() {
             #[cfg(coverage)]
@@ -279,7 +289,8 @@ impl LocalDirectoryWalker {
             self.followed_directories.insert(identity.clone());
         }
         self.stack.push(WalkFrame {
-            entries,
+            entries: Some(entries),
+            seen: HashSet::new(),
             relative,
             identity,
             entry_depth: entry_depth + 1,
@@ -336,7 +347,73 @@ impl Iterator for LocalDirectoryWalker {
             let frame = self.stack.last_mut()?;
             let entry_depth = frame.entry_depth;
             let relative_parent = frame.relative.clone();
-            let next_entry = frame.entries.next();
+            if frame.entries.is_none() {
+                let directory = self.root.join(&relative_parent);
+                if self.symlink_policy.follows() {
+                    let identity = match fs::canonicalize(&directory) {
+                        Ok(identity) => identity,
+                        Err(error) => {
+                            return Some(Err(walk_io_error(&directory, error)));
+                        }
+                    };
+                    if frame.identity.as_ref() != Some(&identity) {
+                        return Some(Err(
+                            LocalFileError::new(
+                                LocalFileErrorKind::InvalidPath,
+                                LocalFileOperation::List,
+                            )
+                            .with_reason(
+                                "directory identity changed while reopening walker frame",
+                            )
+                            .with_path(directory),
+                        ));
+                    }
+                } else {
+                    match fs::symlink_metadata(&directory) {
+                        Ok(metadata) if metadata.file_type().is_dir() => {}
+                        Ok(_) => {
+                            return Some(Err(
+                                LocalFileError::new(
+                                    LocalFileErrorKind::InvalidPath,
+                                    LocalFileOperation::List,
+                                )
+                                .with_reason(
+                                    "directory entry changed while reopening walker frame",
+                                )
+                                .with_path(directory),
+                            ));
+                        }
+                        Err(error) => {
+                            return Some(Err(walk_io_error(&directory, error)));
+                        }
+                    }
+                }
+                match fs::read_dir(&directory) {
+                    Ok(entries) => frame.entries = Some(entries),
+                    Err(error) => {
+                        if self.options.error_policy()
+                            == LocalWalkErrorPolicy::FailFast
+                        {
+                            self.terminated = true;
+                        }
+                        return Some(Err(walk_io_error(&directory, error)));
+                    }
+                }
+            }
+            let next_entry = loop {
+                let next = frame
+                    .entries
+                    .as_mut()
+                    .expect("host walker reader was initialized")
+                    .next();
+                match next {
+                    Some(Ok(entry)) if frame.seen.insert(entry.file_name()) => {
+                        break Some(Ok(entry));
+                    }
+                    Some(Ok(_)) => continue,
+                    other => break other,
+                }
+            };
             #[cfg(coverage)]
             let next_entry =
                 if crate::local::take_coverage_fault("walker-entry") {
@@ -459,13 +536,24 @@ fn next_rooted_entry(
                 }
             }
         }
-        let entry = match frame
+        let next_entry = frame
             .reader
             .as_mut()
             .expect("rooted frame reader was initialized")
-            .next_entry()
-        {
-            Ok(Some(entry)) => entry,
+            .next_entry();
+        let entry = match next_entry {
+            Ok(Some(entry)) => {
+                if !state
+                    .stack
+                    .last_mut()
+                    .expect("rooted walker stack is non-empty")
+                    .seen
+                    .insert(entry.name().to_os_string())
+                {
+                    continue;
+                }
+                entry
+            }
             Ok(None) => {
                 if let Some(frame) = state.stack.pop()
                     && let Some(identity) = frame.identity
@@ -552,12 +640,20 @@ fn next_rooted_entry(
             false
         };
         if is_directory && may_descend {
-            if state.stack.len() >= options.max_open_directories() {
+            if state.stack.len() >= options.max_open_directories()
+                && options.reopen_policy()
+                    == crate::LocalDirectoryReopenPolicy::Fail
+            {
                 return Some(Err(LocalFileError::new(
                     LocalFileErrorKind::ResourceLimit,
                     LocalFileOperation::List,
                 )
                 .with_path(state.root.path().join(&authority_path))));
+            }
+            if state.stack.len() >= options.max_open_directories() {
+                for frame in &mut state.stack {
+                    frame.reader = None;
+                }
             }
             let (authority_parent, identity) = followed_directory.map_or(
                 (authority_path.clone(), None),
@@ -568,6 +664,7 @@ fn next_rooted_entry(
             );
             state.stack.push(RootedWalkFrame {
                 reader: None,
+                seen: std::collections::HashSet::new(),
                 authority_parent,
                 output_parent: output_path.clone(),
                 entry_depth: entry_depth + 1,

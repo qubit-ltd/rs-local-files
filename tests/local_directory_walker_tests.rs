@@ -90,7 +90,10 @@ fn test_local_directory_walker_rejects_handle_budget_exhaustion() {
             directory.path(),
             &LocalListOptions::new()
                 .with_recursive()
-                .with_max_open_directories(1),
+                .with_max_open_directories(1)
+                .with_reopen_policy(
+                    qubit_local_files::LocalDirectoryReopenPolicy::Fail,
+                ),
         )
         .expect("walker should be created");
     let error = walker
@@ -100,6 +103,39 @@ fn test_local_directory_walker_rejects_handle_budget_exhaustion() {
     assert_eq!(
         qubit_local_files::LocalFileErrorKind::ResourceLimit,
         error.kind()
+    );
+}
+
+/// Verifies deep traversal can reopen frames instead of exhausting handles.
+#[test]
+fn test_local_directory_walker_reopens_frames_past_handle_budget() {
+    let directory = tempdir().expect("temporary directory should be created");
+    let mut current = directory.path().to_path_buf();
+    for index in 0..4 {
+        current.push(format!("level-{index}"));
+        fs::create_dir(&current).expect("nested directory should be created");
+    }
+    fs::write(current.join("payload"), b"payload")
+        .expect("deep payload should be written");
+
+    let entries = LocalFileSystem::host()
+        .list(
+            directory.path(),
+            &LocalListOptions::new()
+                .with_recursive()
+                .with_max_open_directories(1)
+                .with_reopen_policy(
+                    qubit_local_files::LocalDirectoryReopenPolicy::Reopen,
+                ),
+        )
+        .expect("walker should be created")
+        .collect::<Result<Vec<_>, _>>()
+        .expect("reopen traversal should succeed");
+
+    assert!(
+        entries.iter().any(|entry| {
+            entry.relative_path().ends_with("level-3/payload")
+        })
     );
 }
 

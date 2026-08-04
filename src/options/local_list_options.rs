@@ -8,8 +8,11 @@
 // qubit-style: allow source-test-pair
 // Covered by walker integration tests.
 
-use super::LocalSymlinkPolicy;
 use super::LocalWalkErrorPolicy;
+use super::{
+    LocalDirectoryReopenPolicy,
+    LocalSymlinkPolicy,
+};
 
 /// Options fixed for the lifetime of a local directory walker.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -17,6 +20,8 @@ use super::LocalWalkErrorPolicy;
 pub struct LocalListOptions {
     /// Maximum directory handles retained by a recursive walker.
     max_open_directories: usize,
+    /// Policy used when the recursive stack reaches the handle budget.
+    reopen_policy: LocalDirectoryReopenPolicy,
     /// Whether child directories should be traversed.
     recursive: bool,
     /// Optional policy overriding the owning filesystem's default.
@@ -35,6 +40,7 @@ impl LocalListOptions {
     pub const fn new() -> Self {
         Self {
             max_open_directories: 64,
+            reopen_policy: LocalDirectoryReopenPolicy::Reopen,
             recursive: false,
             symlink_policy: None,
             max_depth: None,
@@ -68,6 +74,12 @@ impl LocalListOptions {
     #[inline(always)]
     pub const fn max_open_directories(&self) -> usize {
         self.max_open_directories
+    }
+
+    /// Returns the policy used after the handle budget is reached.
+    #[inline(always)]
+    pub const fn reopen_policy(&self) -> LocalDirectoryReopenPolicy {
+        self.reopen_policy
     }
 
     /// Returns the policy applied after an iteration error.
@@ -116,6 +128,16 @@ impl LocalListOptions {
         self
     }
 
+    /// Sets the policy used after the handle budget is reached.
+    #[inline(always)]
+    pub const fn with_reopen_policy(
+        mut self,
+        reopen_policy: LocalDirectoryReopenPolicy,
+    ) -> Self {
+        self.reopen_policy = reopen_policy;
+        self
+    }
+
     /// Sets the policy applied after an iteration error.
     #[inline(always)]
     pub const fn with_error_policy(
@@ -128,7 +150,7 @@ impl LocalListOptions {
 }
 
 impl Default for LocalListOptions {
-    /// Returns the conservative listing policy.
+    /// Returns the adaptive listing policy with reader reopening enabled.
     #[inline]
     fn default() -> Self {
         Self::new()
