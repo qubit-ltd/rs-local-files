@@ -207,7 +207,9 @@ authority. `scope()` lets integration code distinguish the two namespaces, and
 `diagnostic_root()` exposes the non-authoritative rooted anchor separately. The
 host free functions are intentionally retained as convenience aliases for
 `LocalFileSystem::host()`. A
-path limit is `Some` only when verified for the target filesystem. Atomic
+`limits()` reports `SizeLimit::VariesByPath` for the host namespace; use
+`limits_at(path)` to obtain a finite value for the filesystem containing that
+path (or `Unknown` when probing is unavailable). Atomic
 rename, atomic replacement, and atomic temporary persistence are reported
 independently because platform support differs.
 

@@ -32,6 +32,14 @@ pub struct LocalFileSystemCapabilities {
 }
 
 impl LocalFileSystemCapabilities {
+    #[inline(always)]
+    const fn support(implemented: bool) -> LocalFileSystemCapabilitySupport {
+        match implemented {
+            true => LocalFileSystemCapabilitySupport::Implemented,
+            false => LocalFileSystemCapabilitySupport::Unknown,
+        }
+    }
+
     /// Detects mechanisms compiled for the current target platform.
     #[inline]
     pub(crate) const fn detect_host() -> Self {
@@ -95,11 +103,7 @@ impl LocalFileSystemCapabilities {
     pub const fn atomic_rename_support(
         self,
     ) -> LocalFileSystemCapabilitySupport {
-        if self.atomic_rename {
-            LocalFileSystemCapabilitySupport::Implemented
-        } else {
-            LocalFileSystemCapabilitySupport::Unknown
-        }
+        Self::support(self.atomic_rename)
     }
 
     /// Reports whether native atomic replacement is implemented.
@@ -115,11 +119,7 @@ impl LocalFileSystemCapabilities {
     pub const fn atomic_replace_support(
         self,
     ) -> LocalFileSystemCapabilitySupport {
-        if self.atomic_replace {
-            LocalFileSystemCapabilitySupport::Implemented
-        } else {
-            LocalFileSystemCapabilitySupport::Unknown
-        }
+        Self::support(self.atomic_replace)
     }
 
     /// Reports whether atomic no-replace temporary persistence is implemented.
@@ -134,11 +134,7 @@ impl LocalFileSystemCapabilities {
     pub const fn atomic_temp_persist_support(
         self,
     ) -> LocalFileSystemCapabilitySupport {
-        if self.atomic_temp_persist {
-            LocalFileSystemCapabilitySupport::Implemented
-        } else {
-            LocalFileSystemCapabilitySupport::Unknown
-        }
+        Self::support(self.atomic_temp_persist)
     }
 
     /// Reports whether parent-directory durability synchronization is
