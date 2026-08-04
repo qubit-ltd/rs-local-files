@@ -97,7 +97,9 @@ fn test_local_directory_persist_outcome_preserves_logical_target_path() {
         .expect("logical target must be made absolute");
 
     let temporary = LocalFileSystem::host()
-        .create_temp_directory(&LocalTempDirectoryOptions::new().with_parent(root.path()))
+        .create_temp_directory(
+            &LocalTempDirectoryOptions::new().with_parent(root.path()),
+        )
         .expect("temporary directory must be created");
 
     let outcome = temporary
