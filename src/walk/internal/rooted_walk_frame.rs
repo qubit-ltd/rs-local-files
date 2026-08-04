@@ -8,7 +8,11 @@
 // qubit-style: allow source-test-pair
 // Covered by rooted walker integration tests.
 
-use std::path::PathBuf;
+use std::{
+    collections::HashSet,
+    ffi::OsString,
+    path::PathBuf,
+};
 
 use crate::rooted::DirectoryReader;
 
@@ -17,6 +21,8 @@ use crate::rooted::DirectoryReader;
 pub(in crate::walk) struct RootedWalkFrame {
     /// Open immediate-entry reader, initialized on the first iteration step.
     pub(in crate::walk) reader: Option<DirectoryReader>,
+    /// Names already yielded from this directory.
+    pub(in crate::walk) seen: HashSet<OsString>,
     /// Authority-relative path of the listed directory.
     pub(in crate::walk) authority_parent: PathBuf,
     /// Requested-list-root-relative path of the listed directory.
