@@ -2,6 +2,8 @@
 //    Copyright (c) 2026 Haixing Hu.
 //
 //    SPDX-License-Identifier: Apache-2.0
+//
+//    Licensed under the Apache License, Version 2.0.
 // =============================================================================
 //! Best-effort probing for already opened native filesystem authorities.
 
@@ -49,9 +51,30 @@ pub(crate) fn space(file: &File) -> LocalFileSystemSpace {
         let stat = unsafe { stat.assume_init() };
         let block_size = stat.f_frsize;
         LocalFileSystemSpace::new(
-            stat.f_blocks.checked_mul(block_size),
-            stat.f_bfree.checked_mul(block_size),
-            stat.f_bavail.checked_mul(block_size),
+            #[cfg(target_os = "macos")]
+            {
+                u64::from(stat.f_blocks).checked_mul(block_size)
+            },
+            #[cfg(not(target_os = "macos"))]
+            {
+                stat.f_blocks.checked_mul(block_size)
+            },
+            #[cfg(target_os = "macos")]
+            {
+                u64::from(stat.f_bfree).checked_mul(block_size)
+            },
+            #[cfg(not(target_os = "macos"))]
+            {
+                stat.f_bfree.checked_mul(block_size)
+            },
+            #[cfg(target_os = "macos")]
+            {
+                u64::from(stat.f_bavail).checked_mul(block_size)
+            },
+            #[cfg(not(target_os = "macos"))]
+            {
+                stat.f_bavail.checked_mul(block_size)
+            },
         )
     }
     #[cfg(not(unix))]
