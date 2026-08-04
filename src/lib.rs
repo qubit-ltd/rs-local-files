@@ -40,6 +40,7 @@ mod writer;
 
 pub use capability::{
     LocalFileSystemCapabilities,
+    LocalFileSystemCapabilitySupport,
     LocalPathLengthUnit,
     LocalPathLimit,
 };
@@ -86,6 +87,7 @@ pub use options::{
     LocalCopySourceMode,
     LocalCreateDirectoryOptions,
     LocalDeleteOptions,
+    LocalDirectoryReopenPolicy,
     LocalDurabilityRequirement,
     LocalListOptions,
     LocalMetadataPreservePolicy,
