@@ -299,12 +299,11 @@ handle、reparse-point-aware traversal 和 handle-relative 能力。
 - 返回明确的 unsupported 或 requirement-not-met 错误；
 - capability 查询准确说明当前构建和运行平台能保证的行为。
 
-公开快照使用 `LocalFileSystemCapabilities`。单个 native path limit 使用
-`LocalPathLimit { value, unit }`，其中
-`LocalPathLengthUnit::{Bytes, Utf16CodeUnits}` 明确计量单位。Unix 通常是 bytes，
-Windows 是 UTF-16 code units；不能把 Windows 长度直接标成 byte limit，运行环境
-无法证明稳定上界时保持 unknown。Host 实例返回 host snapshot；rooted
-实例在打开 authority 时缓存对应 snapshot。
+公开快照使用 `LocalFileSystemCapabilities`。路径和文件名限制统一由
+`SizeLimit` 表示：`Maximum(value)` 是已验证的有限上限，`VariesByPath` 表示上限
+随目标 filesystem 而变化，`Unknown` 表示无法可靠探测。Host 实例的 `limits()`
+返回 `VariesByPath`，调用 `limits_at(path)` 才会针对目标路径探测；rooted 实例在
+打开 authority 时缓存对应 snapshot。
 
 ### 6.3 Symlink、junction 与 mount
 
