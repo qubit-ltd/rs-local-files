@@ -41,6 +41,8 @@ use super::internal::{
     LocalTempResourceState,
     RootedTempResourceBackend,
     TempEntryIdentity,
+    prepare_host_parent,
+    prepare_rooted_parent,
 };
 
 /// A temporary directory whose cleanup remains bound to its creating authority.
@@ -265,7 +267,9 @@ impl LocalTempDirectory {
                         ));
                     }
                 };
-                if let Err(error) = crate::local::ensure_parent_path(&target) {
+                if let Err(error) =
+                    prepare_host_parent(&target, options.creates_parent())
+                {
                     return Err(LocalPersistError::new(
                         error,
                         self,
@@ -336,6 +340,19 @@ impl LocalTempDirectory {
                     };
                 let (result, target) = match resolved {
                     crate::local::RootedResolvedPath::Rooted(destination) => {
+                        if let Err(error) = prepare_rooted_parent(
+                            &rooted.root,
+                            &destination,
+                            options.creates_parent(),
+                        ) {
+                            return Err(LocalPersistError::new(
+                                error,
+                                self,
+                                requested_target,
+                                Some(destination.as_path().to_path_buf()),
+                                LocalPersistStage::PrepareParent,
+                            ));
+                        }
                         let result = if options.overwrites() {
                             rooted.root.rename(&source, &destination)
                         } else {
@@ -347,9 +364,10 @@ impl LocalTempDirectory {
                     }
                     crate::local::RootedResolvedPath::Host(destination) => {
                         let source = rooted.root.path().join(source.as_path());
-                        if let Err(error) =
-                            crate::local::ensure_parent_path(&destination)
-                        {
+                        if let Err(error) = prepare_host_parent(
+                            &destination,
+                            options.creates_parent(),
+                        ) {
                             return Err(LocalPersistError::new(
                                 error,
                                 self,
