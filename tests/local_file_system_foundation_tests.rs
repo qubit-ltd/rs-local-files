@@ -41,6 +41,8 @@ fn test_host_file_system_space_observes_existing_directory() {
 
     #[cfg(unix)]
     assert!(space.capacity_bytes().is_some());
+    #[cfg(not(unix))]
+    let _ = &space;
 }
 
 /// Verifies capability snapshots distinguish implementation from guarantee.

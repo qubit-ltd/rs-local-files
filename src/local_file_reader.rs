@@ -58,6 +58,19 @@ impl Read for LocalFileReader {
         &mut self,
         buffers: &mut [IoSliceMut<'_>],
     ) -> io::Result<usize> {
+        #[cfg(windows)]
+        {
+            let mut total = 0;
+            for buffer in buffers {
+                let count = self.file.read(buffer)?;
+                total += count;
+                if count < buffer.len() {
+                    break;
+                }
+            }
+            Ok(total)
+        }
+        #[cfg(not(windows))]
         self.file.read_vectored(buffers)
     }
 }
