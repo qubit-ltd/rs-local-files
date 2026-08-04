@@ -217,8 +217,8 @@ impl LocalFileSystem {
     pub const fn limits(&self) -> LocalFileSystemLimits {
         match &self.namespace {
             LocalNamespace::Host => LocalFileSystemLimits::new(
-                crate::SizeLimit::Unrestricted,
-                crate::SizeLimit::Unrestricted,
+                crate::SizeLimit::VariesByPath,
+                crate::SizeLimit::VariesByPath,
             ),
             LocalNamespace::Rooted(rooted) => rooted.limits(),
         }
