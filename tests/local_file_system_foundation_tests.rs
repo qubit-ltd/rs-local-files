@@ -11,6 +11,7 @@ use qubit_local_files::LocalFileKind;
 use qubit_local_files::{
     LocalFileNames,
     LocalFileSystem,
+    LocalFileSystemCapabilitySupport,
 };
 #[cfg(unix)]
 use std::{
@@ -27,6 +28,21 @@ fn test_local_file_system_capabilities_report_unknown_path_limit() {
     let capabilities = LocalFileSystem::host().capabilities();
 
     assert!(capabilities.path_limit().is_none());
+}
+
+/// Verifies capability snapshots distinguish implementation from guarantee.
+#[test]
+fn test_local_file_system_capabilities_report_support_levels() {
+    let capabilities = LocalFileSystem::host().capabilities();
+
+    assert_eq!(
+        LocalFileSystemCapabilitySupport::Implemented,
+        capabilities.atomic_rename_support(),
+    );
+    assert_eq!(
+        LocalFileSystemCapabilitySupport::Unknown,
+        capabilities.durable_rename_support(),
+    );
 }
 
 /// Verifies the host snapshot only advertises native no-replace operations
