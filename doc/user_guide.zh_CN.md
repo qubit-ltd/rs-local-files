@@ -3,7 +3,7 @@
 [English](user_guide.md) · [README](../README.zh_CN.md) ·
 [API 文档](https://docs.rs/qubit-local-files)
 
-本手册面向 Rust 1.94 及以上版本的 `qubit-local-files` 0.8 使用者，适用于直接操作主机
+本手册面向 Rust 1.94 及以上版本的 `qubit-local-files` 0.3 使用者，适用于直接操作主机
 文件系统，或需要把操作限制在一个已打开目录之下的应用。它不是 provider 注册表、远程
 文件系统 API，也不替代 provider 层的逻辑路径模型。
 
@@ -38,7 +38,7 @@ Host 没有更窄的 root 边界。可以通过 `with_symlink_policy` 选择 `Re
 | 操作 | 最终符号链接 |
 | --- | --- |
 | `metadata` | 查看链接条目本身。 |
-| `open_reader` | 跟随链接读取目标。 |
+| `open_reader` | Unix 跟随链接；Windows 拒绝最终 name-surrogate reparse point。 |
 | `CreateNew` writer | 将已有链接视为已存在条目。 |
 | `Append` writer | 跟随链接追加到目标。 |
 | `CreateOrReplace` writer | 跟随链接替换目标，并保留链接。 |
@@ -148,8 +148,8 @@ for entry in walker {
 ```
 
 walker 会按需打开并推进目录；最大深度、符号链接策略和默认 64 个目录句柄的预算会在创建时
-固定。超过预算返回 `ResourceLimit`。rooted walker 还会逐项读取目录，避免先将单个目录完整
-收集到 `Vec` 中。
+固定。默认 `Reopen` 会在达到预算时关闭并重新打开活动 frame；显式选择 `Fail` 才返回
+`ResourceLimit`。rooted walker 还会逐项读取目录，避免先将单个目录完整收集到 `Vec` 中。
 
 rooted 路径必须是相对后代。绝对路径、平台前缀、`.` 和 `..` 会被拒绝；中间符号链接遵循
 实例策略。`FollowWithinScope` 会拒绝解析到 root 外的链接，`FollowAcrossScope` 则允许该操作。
