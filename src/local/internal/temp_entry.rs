@@ -35,6 +35,7 @@ use std::os::unix::fs::{
 use crate::local::internal::coverage_fault;
 use crate::local::try_random_file_name;
 
+use super::file_name_validation::validate_file_name_fragment;
 use super::path_operations::{
     add_path_context,
     ensure_dir_path,
@@ -42,6 +43,20 @@ use super::path_operations::{
 
 /// Default number of attempts used when creating a random temporary entry.
 pub(crate) const DEFAULT_TEMP_ENTRY_RETRIES: usize = 256;
+
+/// Validates caller-provided temporary-entry affixes before sandbox creation.
+pub(crate) fn validate_temp_affixes(
+    prefix: Option<&str>,
+    suffix: Option<&str>,
+) -> Result<()> {
+    if let Some(prefix) = prefix {
+        validate_file_name_fragment("prefix", prefix)?;
+    }
+    if let Some(suffix) = suffix {
+        validate_file_name_fragment("suffix", suffix)?;
+    }
+    Ok(())
+}
 
 /// Creates a unique temporary file in `dir`.
 ///

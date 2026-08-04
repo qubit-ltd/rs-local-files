@@ -32,11 +32,13 @@ use crate::local::{
     RootedResolvedPath,
     copy_failure_published,
     copy_failure_unchanged,
+    ensure_required_directory_durability,
     published_durability,
     rename_failure_after_native_attempt,
     rename_failure_renamed,
     rename_failure_unchanged,
     resolved_host_path,
+    validate_temp_affixes,
 };
 use crate::{
     LocalCopyFailure,
@@ -50,7 +52,6 @@ use crate::{
     LocalDeleteOptions,
     LocalDeleteOutcome,
     LocalDirectoryWalker,
-    LocalDurabilityRequirement,
     LocalFileError,
     LocalFileErrorKind,
     LocalFileMetadata,
@@ -188,13 +189,51 @@ impl RootedLocalFileSystem {
             )
             .with_kind(LocalFileErrorKind::InvalidOptions));
         }
+        validate_temp_affixes(options.prefix(), options.suffix()).map_err(
+            |error| {
+                rooted_io_error(
+                    LocalFileOperation::CreateTempFile,
+                    &parent,
+                    error,
+                )
+                .with_kind(LocalFileErrorKind::InvalidOptions)
+            },
+        )?;
         for _ in 0..options.max_attempts() {
-            let candidate = temp_candidate(
-                &parent,
+            let resource_name = crate::local::try_random_file_name(
+                "qubit-local-files-",
                 options.prefix(),
                 options.suffix(),
+            )
+            .map_err(|error| {
+                rooted_io_error(
+                    LocalFileOperation::CreateTempFile,
+                    &parent,
+                    error,
+                )
+            })?;
+            let sandbox = temp_candidate(
+                &parent,
+                Some("sandbox-"),
+                None,
                 LocalFileOperation::CreateTempFile,
             )?;
+            let sandbox_relative =
+                rooted_path(&sandbox, LocalFileOperation::CreateTempFile)?;
+            match self.root.create_dir(&sandbox_relative) {
+                Ok(()) => {}
+                Err(error) if error.kind() == io::ErrorKind::AlreadyExists => {
+                    continue;
+                }
+                Err(error) => {
+                    return Err(rooted_io_error(
+                        LocalFileOperation::CreateTempFile,
+                        sandbox_relative.as_path(),
+                        error,
+                    ));
+                }
+            }
+            let candidate = sandbox.join(resource_name);
             let relative =
                 rooted_path(&candidate, LocalFileOperation::CreateTempFile)?;
             #[cfg(coverage)]
@@ -221,24 +260,35 @@ impl RootedLocalFileSystem {
             );
             match opened {
                 Ok(file) => {
-                    return LocalTempFile::rooted(
+                    let cleanup_sandbox = sandbox.clone();
+                    let result = LocalTempFile::rooted(
                         Arc::clone(&self.root),
                         candidate,
+                        sandbox,
                         file,
                         symlink_policy,
-                    )
-                    .map_err(|error| {
-                        rooted_io_error(
-                            LocalFileOperation::CreateTempFile,
-                            relative.as_path(),
-                            error,
-                        )
-                    });
+                    );
+                    return match result {
+                        Ok(resource) => Ok(resource),
+                        Err(error) => {
+                            let _ = self.root.remove_tree(&rooted_path(
+                                &cleanup_sandbox,
+                                LocalFileOperation::CreateTempFile,
+                            )?);
+                            Err(rooted_io_error(
+                                LocalFileOperation::CreateTempFile,
+                                relative.as_path(),
+                                error,
+                            ))
+                        }
+                    };
                 }
                 Err(error) if error.kind() == io::ErrorKind::AlreadyExists => {
+                    let _ = self.root.remove_tree(&sandbox_relative);
                     continue;
                 }
                 Err(error) => {
+                    let _ = self.root.remove_tree(&sandbox_relative);
                     return Err(rooted_io_error(
                         LocalFileOperation::CreateTempFile,
                         relative.as_path(),
@@ -313,13 +363,51 @@ impl RootedLocalFileSystem {
             )
             .with_kind(LocalFileErrorKind::InvalidOptions));
         }
+        validate_temp_affixes(options.prefix(), options.suffix()).map_err(
+            |error| {
+                rooted_io_error(
+                    LocalFileOperation::CreateTempDirectory,
+                    &parent,
+                    error,
+                )
+                .with_kind(LocalFileErrorKind::InvalidOptions)
+            },
+        )?;
         for _ in 0..options.max_attempts() {
-            let candidate = temp_candidate(
-                &parent,
+            let resource_name = crate::local::try_random_file_name(
+                "qubit-local-files-",
                 options.prefix(),
                 options.suffix(),
+            )
+            .map_err(|error| {
+                rooted_io_error(
+                    LocalFileOperation::CreateTempDirectory,
+                    &parent,
+                    error,
+                )
+            })?;
+            let sandbox = temp_candidate(
+                &parent,
+                Some("sandbox-"),
+                None,
                 LocalFileOperation::CreateTempDirectory,
             )?;
+            let sandbox_relative =
+                rooted_path(&sandbox, LocalFileOperation::CreateTempDirectory)?;
+            match self.root.create_dir(&sandbox_relative) {
+                Ok(()) => {}
+                Err(error) if error.kind() == io::ErrorKind::AlreadyExists => {
+                    continue;
+                }
+                Err(error) => {
+                    return Err(rooted_io_error(
+                        LocalFileOperation::CreateTempDirectory,
+                        sandbox_relative.as_path(),
+                        error,
+                    ));
+                }
+            }
+            let candidate = sandbox.join(resource_name);
             let relative = rooted_path(
                 &candidate,
                 LocalFileOperation::CreateTempDirectory,
@@ -340,23 +428,34 @@ impl RootedLocalFileSystem {
             let created = self.root.create_dir(&relative);
             match created {
                 Ok(()) => {
-                    return LocalTempDirectory::rooted(
+                    let cleanup_sandbox = sandbox.clone();
+                    let result = LocalTempDirectory::rooted(
                         Arc::clone(&self.root),
                         candidate,
+                        sandbox,
                         symlink_policy,
-                    )
-                    .map_err(|error| {
-                        rooted_io_error(
-                            LocalFileOperation::CreateTempDirectory,
-                            relative.as_path(),
-                            error,
-                        )
-                    });
+                    );
+                    return match result {
+                        Ok(resource) => Ok(resource),
+                        Err(error) => {
+                            let _ = self.root.remove_tree(&rooted_path(
+                                &cleanup_sandbox,
+                                LocalFileOperation::CreateTempDirectory,
+                            )?);
+                            Err(rooted_io_error(
+                                LocalFileOperation::CreateTempDirectory,
+                                relative.as_path(),
+                                error,
+                            ))
+                        }
+                    };
                 }
                 Err(error) if error.kind() == io::ErrorKind::AlreadyExists => {
+                    let _ = self.root.remove_tree(&sandbox_relative);
                     continue;
                 }
                 Err(error) => {
+                    let _ = self.root.remove_tree(&sandbox_relative);
                     return Err(rooted_io_error(
                         LocalFileOperation::CreateTempDirectory,
                         relative.as_path(),
@@ -622,16 +721,15 @@ impl RootedLocalFileSystem {
             )
             .with_path(path.to_path_buf()));
         }
-        if options.mode() != LocalWriteMode::Append
-            && options.durability() == LocalDurabilityRequirement::Required
-            && !self.capabilities.directory_durability_implemented()
-        {
-            return Err(LocalFileError::new(
-                LocalFileErrorKind::RequirementNotMet,
+        if options.mode() != LocalWriteMode::Append {
+            ensure_required_directory_durability(
+                options.durability(),
                 LocalFileOperation::OpenWriter,
-            )
-            .with_reason("required directory durability is unavailable for this rooted authority")
-            .with_path(path.to_path_buf()));
+                path,
+                path,
+                self.capabilities.directory_durability_implemented(),
+                "required directory durability is unavailable for this rooted authority",
+            )?;
         }
         let resolved = resolve_rooted_path(
             &self.root,
@@ -849,19 +947,15 @@ impl RootedLocalFileSystem {
         options: &LocalCopyOptions,
         symlink_policy: LocalSymlinkPolicy,
     ) -> LocalCopyResult {
-        if options.durability() == LocalDurabilityRequirement::Required
-            && !self.capabilities.directory_durability_implemented()
-        {
-            return Err(copy_failure_unchanged(
-                LocalFileError::new(
-                    LocalFileErrorKind::RequirementNotMet,
-                    LocalFileOperation::Copy,
-                )
-                .with_reason("required directory durability is unavailable for this rooted authority")
-                .with_path(source.to_path_buf())
-                .with_target(target.to_path_buf()),
-            ));
-        }
+        ensure_required_directory_durability(
+            options.durability(),
+            LocalFileOperation::Copy,
+            source,
+            target,
+            self.capabilities.directory_durability_implemented(),
+            "required directory durability is unavailable for this rooted authority",
+        )
+        .map_err(copy_failure_unchanged)?;
         let symlink_policy =
             options.symlink_policy_override().unwrap_or(symlink_policy);
         let source_path = resolve_rooted_path(
@@ -1241,19 +1335,15 @@ impl RootedLocalFileSystem {
         options: &LocalRenameOptions,
         symlink_policy: LocalSymlinkPolicy,
     ) -> LocalRenameResult {
-        if options.durability() == LocalDurabilityRequirement::Required
-            && !self.capabilities.directory_durability_implemented()
-        {
-            return Err(rename_failure_unchanged(
-                LocalFileError::new(
-                    LocalFileErrorKind::RequirementNotMet,
-                    LocalFileOperation::Rename,
-                )
-                .with_reason("required directory durability is unavailable for this rooted authority")
-                .with_path(source.to_path_buf())
-                .with_target(target.to_path_buf()),
-            ));
-        }
+        ensure_required_directory_durability(
+            options.durability(),
+            LocalFileOperation::Rename,
+            source,
+            target,
+            self.capabilities.directory_durability_implemented(),
+            "required directory durability is unavailable for this rooted authority",
+        )
+        .map_err(rename_failure_unchanged)?;
         let source_path = resolve_rooted_path(
             &self.root,
             source,

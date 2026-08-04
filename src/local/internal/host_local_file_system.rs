@@ -24,10 +24,12 @@ use std::{
 use crate::local::{
     copy_failure_published,
     copy_failure_unchanged,
+    ensure_required_directory_durability,
     published_durability,
     rename_failure_after_native_attempt,
     rename_failure_renamed,
     rename_failure_unchanged,
+    validate_temp_affixes,
 };
 use crate::{
     LocalAtomicityRequirement,
@@ -42,7 +44,6 @@ use crate::{
     LocalDeleteOptions,
     LocalDeleteOutcome,
     LocalDirectoryWalker,
-    LocalDurabilityRequirement,
     LocalFileError,
     LocalFileErrorKind,
     LocalFileMetadata,
@@ -256,18 +257,22 @@ impl HostLocalFileSystem {
             )
             .with_path(diagnostic_path.clone()));
         }
-        if options.mode() != LocalWriteMode::Append
-            && options.durability() == LocalDurabilityRequirement::Required
-            && !Self::capabilities().directory_durability_implemented()
-        {
-            return Err(LocalFileError::new(
-                LocalFileErrorKind::RequirementNotMet,
+        if options.mode() != LocalWriteMode::Append {
+            let supports =
+                Self::capabilities().directory_durability_implemented();
+            #[cfg(coverage)]
+            let supports = supports
+                && !crate::local::coverage_fault_enabled(
+                    "local-fs-required-directory-durability",
+                );
+            ensure_required_directory_durability(
+                options.durability(),
                 LocalFileOperation::OpenWriter,
-            )
-            .with_reason(
+                &diagnostic_path,
+                &diagnostic_path,
+                supports,
                 "required directory durability is unavailable on this host",
-            )
-            .with_path(diagnostic_path.clone()));
+            )?;
         }
         if options.creates_parent()
             && let Some(parent) = bound.parent()
@@ -456,11 +461,19 @@ impl HostLocalFileSystem {
             .map_err(copy_failure_unchanged)?;
         let target = resolve_host_path(&target, symlink_policy, false)
             .map_err(copy_failure_unchanged)?;
-        require_directory_durability(
+        let supports = Self::capabilities().directory_durability_implemented();
+        #[cfg(coverage)]
+        let supports = supports
+            && !crate::local::coverage_fault_enabled(
+                "local-fs-required-directory-durability",
+            );
+        ensure_required_directory_durability(
             options.durability(),
             LocalFileOperation::Copy,
             &source,
             &target,
+            supports,
+            "required directory durability is unavailable on this host",
         )
         .map_err(copy_failure_unchanged)?;
         let source_metadata =
@@ -774,16 +787,53 @@ impl HostLocalFileSystem {
             .map_or_else(std::env::temp_dir, Path::to_path_buf);
         let parent = resolve_host_path(&parent, symlink_policy, true)?;
         validate_host_temp_parent(&parent, LocalFileOperation::CreateTempFile)?;
-        crate::local::create_temp_file_in_dir(
+        validate_temp_affixes(options.prefix(), options.suffix()).map_err(
+            |error| {
+                LocalFileError::from_io(
+                    LocalFileOperation::CreateTempFile,
+                    Some(parent.clone()),
+                    None,
+                    error,
+                )
+                .with_kind(LocalFileErrorKind::InvalidOptions)
+            },
+        )?;
+        let sandbox = crate::local::create_temp_dir_in_dir_with_affixes(
             &parent,
+            Some("sandbox-"),
+            None,
+            options.max_attempts(),
+        )
+        .map_err(|error| {
+            let invalid_options = error.kind() == io::ErrorKind::InvalidInput;
+            let error = LocalFileError::from_io(
+                LocalFileOperation::CreateTempFile,
+                Some(parent.clone()),
+                None,
+                error,
+            );
+            if invalid_options {
+                error.with_kind(LocalFileErrorKind::InvalidOptions)
+            } else {
+                error
+            }
+        })?;
+        let created = crate::local::create_temp_file_in_dir(
+            &sandbox,
             options.prefix(),
             options.suffix(),
             options.max_attempts(),
-        )
-        .and_then(|(path, file)| {
-            LocalTempFile::host(path, file, symlink_policy)
-        })
-        .map_err(|error| {
+        );
+        let result = match created {
+            Ok((path, file)) => {
+                LocalTempFile::host(path, sandbox.clone(), file, symlink_policy)
+            }
+            Err(error) => {
+                let _ = std::fs::remove_dir_all(&sandbox);
+                Err(error)
+            }
+        };
+        result.map_err(|error| {
             let invalid_options = error.kind() == io::ErrorKind::InvalidInput;
             let error = LocalFileError::from_io(
                 LocalFileOperation::CreateTempFile,
@@ -838,14 +888,53 @@ impl HostLocalFileSystem {
             &parent,
             LocalFileOperation::CreateTempDirectory,
         )?;
-        crate::local::create_temp_dir_in_dir_with_affixes(
+        validate_temp_affixes(options.prefix(), options.suffix()).map_err(
+            |error| {
+                LocalFileError::from_io(
+                    LocalFileOperation::CreateTempDirectory,
+                    Some(parent.clone()),
+                    None,
+                    error,
+                )
+                .with_kind(LocalFileErrorKind::InvalidOptions)
+            },
+        )?;
+        let sandbox = crate::local::create_temp_dir_in_dir_with_affixes(
             &parent,
+            Some("sandbox-"),
+            None,
+            options.max_attempts(),
+        )
+        .map_err(|error| {
+            let invalid_options = error.kind() == io::ErrorKind::InvalidInput;
+            let error = LocalFileError::from_io(
+                LocalFileOperation::CreateTempDirectory,
+                Some(parent.clone()),
+                None,
+                error,
+            );
+            if invalid_options {
+                error.with_kind(LocalFileErrorKind::InvalidOptions)
+            } else {
+                error
+            }
+        })?;
+        let created = crate::local::create_temp_dir_in_dir_with_affixes(
+            &sandbox,
             options.prefix(),
             options.suffix(),
             options.max_attempts(),
-        )
-        .and_then(|path| LocalTempDirectory::host(path, symlink_policy))
-        .map_err(|error| {
+        );
+        let result = match created {
+            Ok(path) => {
+                LocalTempDirectory::host(path, sandbox.clone(), symlink_policy)
+            }
+            Err(error) => {
+                let _ = std::fs::remove_dir_all(&sandbox);
+                Err(error)
+            }
+        };
+        result.map_err(|error| {
             let invalid_options = error.kind() == io::ErrorKind::InvalidInput;
             let error = LocalFileError::from_io(
                 LocalFileOperation::CreateTempDirectory,
@@ -1044,11 +1133,19 @@ impl HostLocalFileSystem {
             .map_err(rename_failure_unchanged)?;
         let target = resolve_host_path(&target, symlink_policy, false)
             .map_err(rename_failure_unchanged)?;
-        require_directory_durability(
+        let supports = Self::capabilities().directory_durability_implemented();
+        #[cfg(coverage)]
+        let supports = supports
+            && !crate::local::coverage_fault_enabled(
+                "local-fs-required-directory-durability",
+            );
+        ensure_required_directory_durability(
             options.durability(),
             LocalFileOperation::Rename,
             &source,
             &target,
+            supports,
+            "required directory durability is unavailable on this host",
         )
         .map_err(rename_failure_unchanged)?;
         let source_metadata =
@@ -1420,48 +1517,6 @@ fn destination_is_directory(path: &Path) -> io::Result<bool> {
         Err(error) if error.kind() == io::ErrorKind::NotFound => Ok(false),
         Err(error) => Err(error),
     }
-}
-
-/// Rejects a required parent-durability guarantee before namespace mutation.
-///
-/// # Parameters
-///
-/// - `requirement`: Requested durability policy.
-/// - `operation`: Mutating operation that would publish an entry.
-/// - `source`: Primary path.
-/// - `target`: Destination path.
-///
-/// # Errors
-///
-/// Returns `RequirementNotMet` when the host cannot provide directory
-/// durability at all.
-fn require_directory_durability(
-    requirement: LocalDurabilityRequirement,
-    operation: LocalFileOperation,
-    source: &Path,
-    target: &Path,
-) -> LocalResult<()> {
-    let supports_directory_durability =
-        HostLocalFileSystem::capabilities().directory_durability_implemented();
-    #[cfg(coverage)]
-    let supports_directory_durability = supports_directory_durability
-        && !crate::local::coverage_fault_enabled(
-            "local-fs-required-directory-durability",
-        );
-    if requirement == LocalDurabilityRequirement::Required
-        && !supports_directory_durability
-    {
-        return Err(LocalFileError::new(
-            LocalFileErrorKind::RequirementNotMet,
-            operation,
-        )
-        .with_reason(
-            "required directory durability is unavailable on this host",
-        )
-        .with_path(source.to_path_buf())
-        .with_target(target.to_path_buf()));
-    }
-    Ok(())
 }
 
 /// Opens the existing robust same-directory staged writer implementation.
