@@ -35,6 +35,25 @@ fn test_rooted_path_support_accepts_existing_temp_parent() {
     assert!(temporary.path().starts_with(Path::new("parent")));
 }
 
+/// Verifies explicit options create a missing rooted temporary-file parent.
+#[test]
+fn test_rooted_path_support_creates_missing_temp_parent() {
+    let directory = tempdir().expect("temporary directory should be created");
+    let rooted = LocalFileSystem::rooted(directory.path())
+        .expect("root authority should open");
+
+    let temporary = rooted
+        .create_temp_file(
+            &LocalTempFileOptions::new()
+                .with_parent(Path::new("missing/parent"))
+                .with_create_parent(),
+        )
+        .expect("explicit parent creation should create the rooted parent");
+
+    assert!(temporary.path().starts_with(Path::new("missing/parent")));
+    assert!(directory.path().join("missing/parent").is_dir());
+}
+
 /// Verifies rooted temporary-parent validation distinguishes missing and
 /// non-directory descendants.
 #[test]

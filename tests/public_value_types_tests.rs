@@ -42,7 +42,6 @@ use tempfile::tempdir;
 fn test_capability_snapshot_exposes_all_guarantees() {
     let capabilities = LocalFileSystem::host().capabilities();
 
-    let _ = capabilities.path_limit();
     let _ = capabilities.rooted_operations_implemented();
     let _ = capabilities.atomic_rename_implemented();
     let atomic_replace = std::hint::black_box(
