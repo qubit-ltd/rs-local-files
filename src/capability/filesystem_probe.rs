@@ -49,32 +49,11 @@ pub(crate) fn space(file: &File) -> LocalFileSystemSpace {
             return LocalFileSystemSpace::new(None, None, None);
         }
         let stat = unsafe { stat.assume_init() };
-        let block_size = stat.f_frsize;
+        let block_size = u64::from(stat.f_frsize);
         LocalFileSystemSpace::new(
-            #[cfg(target_os = "macos")]
-            {
-                u64::from(stat.f_blocks).checked_mul(block_size)
-            },
-            #[cfg(not(target_os = "macos"))]
-            {
-                stat.f_blocks.checked_mul(block_size)
-            },
-            #[cfg(target_os = "macos")]
-            {
-                u64::from(stat.f_bfree).checked_mul(block_size)
-            },
-            #[cfg(not(target_os = "macos"))]
-            {
-                stat.f_bfree.checked_mul(block_size)
-            },
-            #[cfg(target_os = "macos")]
-            {
-                u64::from(stat.f_bavail).checked_mul(block_size)
-            },
-            #[cfg(not(target_os = "macos"))]
-            {
-                stat.f_bavail.checked_mul(block_size)
-            },
+            u64::from(stat.f_blocks).checked_mul(block_size),
+            u64::from(stat.f_bfree).checked_mul(block_size),
+            u64::from(stat.f_bavail).checked_mul(block_size),
         )
     }
     #[cfg(not(unix))]
