@@ -7,11 +7,17 @@
 
 #![no_main]
 
-use std::{fs, path::PathBuf};
+use std::{
+    fs,
+    path::PathBuf,
+};
 
 use libfuzzer_sys::fuzz_target;
 use qubit_local_files::{
-    LocalFileSystem, LocalListOptions, LocalTempDirectoryOptions, LocalTempFileOptions,
+    LocalFileSystem,
+    LocalListOptions,
+    LocalTempDirectoryOptions,
+    LocalTempFileOptions,
 };
 
 const MAX_FUZZ_INPUT_LEN: usize = 256;
@@ -67,7 +73,8 @@ fuzz_target!(|data: &[u8]| {
                 }
             }
             3 => {
-                let options = LocalTempDirectoryOptions::new().with_parent(&root);
+                let options =
+                    LocalTempDirectoryOptions::new().with_parent(&root);
                 if let Ok(resource) = native.create_temp_directory(&options) {
                     let child = resource.path().join("nested");
                     let _ = fs::create_dir(&child);
@@ -87,5 +94,6 @@ fuzz_target!(|data: &[u8]| {
 });
 
 fn fuzz_root() -> PathBuf {
-    std::env::temp_dir().join(format!("qubit-local-files-fuzz-{}", std::process::id()))
+    std::env::temp_dir()
+        .join(format!("qubit-local-files-fuzz-{}", std::process::id()))
 }

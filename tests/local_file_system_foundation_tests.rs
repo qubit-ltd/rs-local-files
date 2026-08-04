@@ -12,6 +12,7 @@ use qubit_local_files::{
     LocalFileNames,
     LocalFileSystem,
     LocalFileSystemCapabilitySupport,
+    SizeLimit,
 };
 #[cfg(unix)]
 use std::{
@@ -24,10 +25,22 @@ use tempfile::tempdir;
 /// Verifies capabilities do not misrepresent a compile-time path bound as a
 /// filesystem-specific limit.
 #[test]
-fn test_local_file_system_capabilities_report_unknown_path_limit() {
-    let capabilities = LocalFileSystem::host().capabilities();
+fn test_host_file_system_limits_are_unrestricted() {
+    let limits = LocalFileSystem::host().limits();
 
-    assert!(capabilities.path_limit().is_none());
+    assert_eq!(SizeLimit::Unrestricted, limits.max_path_bytes());
+    assert_eq!(SizeLimit::Unrestricted, limits.max_file_name_bytes());
+}
+
+/// Verifies space observations are available without caching host limits.
+#[test]
+fn test_host_file_system_space_observes_existing_directory() {
+    let space = LocalFileSystem::host()
+        .space_at(std::env::temp_dir().as_path())
+        .expect("an existing host directory should be queryable");
+
+    #[cfg(unix)]
+    assert!(space.capacity_bytes().is_some());
 }
 
 /// Verifies capability snapshots distinguish implementation from guarantee.

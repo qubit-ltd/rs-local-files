@@ -27,6 +27,8 @@ pub struct LocalTempFileOptions {
     suffix: Option<String>,
     /// Maximum random-name creation attempts.
     max_attempts: usize,
+    /// Whether a missing parent directory is created before allocation.
+    create_parent: bool,
 }
 
 impl LocalTempFileOptions {
@@ -38,6 +40,7 @@ impl LocalTempFileOptions {
             prefix: None,
             suffix: None,
             max_attempts: 256,
+            create_parent: false,
         }
     }
 
@@ -68,6 +71,20 @@ impl LocalTempFileOptions {
     #[inline(always)]
     pub const fn max_attempts(&self) -> usize {
         self.max_attempts
+    }
+
+    /// Returns whether missing parent directories are created.
+    #[must_use]
+    #[inline(always)]
+    pub const fn creates_parent(&self) -> bool {
+        self.create_parent
+    }
+
+    /// Enables recursive creation of a missing parent directory.
+    #[inline(always)]
+    pub const fn with_create_parent(mut self) -> Self {
+        self.create_parent = true;
+        self
     }
 
     /// Sets the native parent directory.
