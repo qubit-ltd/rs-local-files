@@ -10,10 +10,7 @@
 
 use std::{
     fs::File,
-    path::{
-        Path,
-        PathBuf,
-    },
+    path::Path,
 };
 
 use crate::local::{
@@ -236,8 +233,17 @@ impl LocalFileSystem {
     pub fn limits_at(&self, path: &Path) -> LocalResult<LocalFileSystemLimits> {
         match &self.namespace {
             LocalNamespace::Host => {
-                probe_file(path, LocalFileOperation::Metadata)
-                    .map(|file| crate::capability::probe_limits(&file))
+                probe_file(path, LocalFileOperation::Metadata).map(|file| {
+                    file.map_or_else(
+                        || {
+                            LocalFileSystemLimits::new(
+                                crate::SizeLimit::Unknown,
+                                crate::SizeLimit::Unknown,
+                            )
+                        },
+                        |file| crate::capability::probe_limits(&file),
+                    )
+                })
             }
             LocalNamespace::Rooted(rooted) => {
                 let _ = crate::local::LocalRelativePath::new(path).map_err(
@@ -264,8 +270,12 @@ impl LocalFileSystem {
     pub fn space_at(&self, path: &Path) -> LocalResult<LocalFileSystemSpace> {
         match &self.namespace {
             LocalNamespace::Host => {
-                probe_file(path, LocalFileOperation::Metadata)
-                    .map(|file| crate::capability::probe_space(&file))
+                probe_file(path, LocalFileOperation::Metadata).map(|file| {
+                    file.map_or_else(
+                        || LocalFileSystemSpace::new(None, None, None),
+                        |file| crate::capability::probe_space(&file),
+                    )
+                })
             }
             LocalNamespace::Rooted(rooted) => {
                 let _ = crate::local::LocalRelativePath::new(path).map_err(
@@ -683,7 +693,10 @@ impl LocalFileSystem {
 ///
 /// Returns a structured error when an absolute host path cannot be formed or
 /// no existing ancestor can be opened.
-fn probe_file(path: &Path, operation: LocalFileOperation) -> LocalResult<File> {
+fn probe_file(
+    path: &Path,
+    operation: LocalFileOperation,
+) -> LocalResult<Option<File>> {
     let mut candidate = std::path::absolute(path).map_err(|error| {
         LocalFileError::from_io(
             operation,
@@ -694,25 +707,13 @@ fn probe_file(path: &Path, operation: LocalFileOperation) -> LocalResult<File> {
     })?;
     loop {
         match File::open(&candidate) {
-            Ok(file) => return Ok(file),
+            Ok(file) => return Ok(Some(file)),
             Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
                 if !candidate.pop() {
-                    return Err(LocalFileError::from_io(
-                        operation,
-                        Some(path.to_path_buf()),
-                        None,
-                        error,
-                    ));
+                    return Ok(None);
                 }
             }
-            Err(error) => {
-                return Err(LocalFileError::from_io(
-                    operation,
-                    Some(PathBuf::from(path)),
-                    None,
-                    error,
-                ));
-            }
+            Err(_) => return Ok(None),
         }
     }
 }
