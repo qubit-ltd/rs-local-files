@@ -7,12 +7,20 @@
 // =============================================================================
 //! Native local filesystem capability snapshots.
 
+mod filesystem_probe;
 mod local_file_system_capabilities;
 mod local_file_system_capability_support;
-mod local_path_length_unit;
-mod local_path_limit;
+mod local_file_system_limits;
+mod local_file_system_space;
+mod size_limit;
 
 pub use local_file_system_capabilities::LocalFileSystemCapabilities;
 pub use local_file_system_capability_support::LocalFileSystemCapabilitySupport;
-pub use local_path_length_unit::LocalPathLengthUnit;
-pub use local_path_limit::LocalPathLimit;
+pub use local_file_system_limits::LocalFileSystemLimits;
+pub use local_file_system_space::LocalFileSystemSpace;
+pub use size_limit::SizeLimit;
+
+pub(crate) use filesystem_probe::{
+    limits as probe_limits,
+    space as probe_space,
+};

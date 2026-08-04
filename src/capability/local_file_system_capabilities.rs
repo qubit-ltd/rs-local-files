@@ -9,10 +9,7 @@
 // Covered by public capability integration tests.
 // qubit-style: allow coverage-cfg
 
-use super::{
-    LocalFileSystemCapabilitySupport,
-    LocalPathLimit,
-};
+use super::LocalFileSystemCapabilitySupport;
 
 /// Immutable snapshot of filesystem mechanisms implemented by this build.
 ///
@@ -22,8 +19,6 @@ use super::{
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 #[must_use]
 pub struct LocalFileSystemCapabilities {
-    /// Known native path limit.
-    path_limit: Option<LocalPathLimit>,
     /// Whether descriptor- or handle-relative rooted operations are compiled.
     rooted_operations: bool,
     /// Whether native atomic rename support is implemented.
@@ -41,10 +36,6 @@ impl LocalFileSystemCapabilities {
     #[inline]
     pub(crate) const fn detect_host() -> Self {
         Self {
-            // PATH_MAX is a process-header bound, not a verified limit of the
-            // target filesystem. This crate does not currently probe the
-            // mounted filesystem, so report the limit as unknown.
-            path_limit: None,
             rooted_operations: cfg!(any(unix, windows)),
             atomic_rename: cfg!(any(
                 target_os = "linux",
@@ -65,7 +56,6 @@ impl LocalFileSystemCapabilities {
     #[inline]
     pub(crate) const fn detect_rooted() -> Self {
         Self {
-            path_limit: None,
             rooted_operations: cfg!(any(unix, windows)),
             atomic_rename: cfg!(any(
                 target_os = "linux",
@@ -84,13 +74,6 @@ impl LocalFileSystemCapabilities {
             )),
             directory_durability: cfg!(unix),
         }
-    }
-
-    /// Returns the native path limit, or `None` when no stable limit is known.
-    #[must_use]
-    #[inline(always)]
-    pub const fn path_limit(self) -> Option<LocalPathLimit> {
-        self.path_limit
     }
 
     /// Reports whether secure rooted operations are implemented.

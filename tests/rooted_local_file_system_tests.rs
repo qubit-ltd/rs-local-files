@@ -27,6 +27,8 @@ use qubit_local_files::{
     LocalFileKind,
     LocalFileSystem,
     LocalListOptions,
+    LocalPersistFailureState,
+    LocalPersistStage,
     LocalReadOptions,
     LocalRenameFailureState,
     LocalRenameOptions,
@@ -388,11 +390,9 @@ fn test_rooted_temp_file_persist_uses_retained_authority_after_root_rename() {
     assert!(renamed.join("persisted-target").exists());
 }
 
-/// Verifies an indeterminate native persist failure disables cleanup and drop
-/// removal.
+/// Verifies a missing parent fails before publication and retains cleanup.
 #[test]
-fn test_rooted_temp_file_indeterminate_persist_failure_skips_cleanup_and_drop()
-{
+fn test_rooted_temp_file_missing_parent_retains_cleanup() {
     let root_parent = tempdir().expect("root parent should exist");
     let root = LocalFileSystem::rooted(root_parent.path())
         .expect("root authority should open");
@@ -403,14 +403,18 @@ fn test_rooted_temp_file_indeterminate_persist_failure_skips_cleanup_and_drop()
 
     let error = temporary
         .persist(Path::new("missing-parent/target"))
-        .expect_err("missing rooted target parent should make publication indeterminate");
+        .expect_err(
+            "missing rooted target parent should fail before publication",
+        );
+    assert_eq!(LocalPersistStage::PrepareParent, error.stage());
+    assert_eq!(LocalPersistFailureState::NotPublished, error.state());
     let (_io, mut retained, _requested, _resolved, _stage) = error.into_parts();
 
-    assert!(retained.cleanup().is_err());
+    retained
+        .cleanup()
+        .expect("unpublished temporary file should remain cleanable");
     drop(retained);
-    assert!(root_parent.path().join(&source).exists());
-    fs::remove_file(root_parent.path().join(source))
-        .expect("fixture should be removed manually");
+    assert!(!root_parent.path().join(&source).exists());
 }
 
 /// Runs one coverage-only rooted-copy fault case in an isolated child process.

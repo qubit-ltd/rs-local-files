@@ -107,6 +107,18 @@ impl Root {
         }
     }
 
+    /// Clones the opened directory authority for a best-effort observation.
+    ///
+    /// # Errors
+    ///
+    /// Returns an I/O error when the operating system cannot duplicate the
+    /// already-opened authority handle.
+    #[cfg(any(unix, windows))]
+    #[inline]
+    pub(crate) fn try_clone_authority(&self) -> Result<File> {
+        self.directory.try_clone()
+    }
+
     /// Copies one descendant entry beneath this opened root.
     ///
     /// # Parameters

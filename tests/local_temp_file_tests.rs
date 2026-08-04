@@ -82,6 +82,24 @@ fn test_local_temp_file_close_retains_path_and_persist_responsibility() {
     assert!(target.exists());
 }
 
+/// Verifies explicit options create a missing host temporary-file parent.
+#[test]
+fn test_local_temp_file_create_parent_creates_missing_host_parent() {
+    let root = tempdir().expect("temporary root should be created");
+    let parent = root.path().join("missing").join("parent");
+
+    let temporary = LocalFileSystem::host()
+        .create_temp_file(
+            &LocalTempFileOptions::new()
+                .with_parent(&parent)
+                .with_create_parent(),
+        )
+        .expect("explicit parent creation should create the temporary parent");
+
+    assert!(parent.is_dir());
+    drop(temporary);
+}
+
 /// Verifies closed temporary-file handles report the stream-closure error.
 #[test]
 fn test_local_temp_file_closed_handle_reports_broken_pipe() {

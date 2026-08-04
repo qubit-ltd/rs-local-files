@@ -58,6 +58,8 @@ use crate::{
     LocalFileOperation,
     LocalFileReader,
     LocalFileSystemCapabilities,
+    LocalFileSystemLimits,
+    LocalFileSystemSpace,
     LocalFileWriter,
     LocalListOptions,
     LocalReadOptions,
@@ -81,6 +83,8 @@ pub(crate) struct RootedLocalFileSystem {
     root: Arc<crate::rooted::Root>,
     /// Capability snapshot cached when the authority is opened.
     capabilities: LocalFileSystemCapabilities,
+    /// Best-effort path limits captured from the opened root authority.
+    limits: LocalFileSystemLimits,
 }
 
 impl RootedLocalFileSystem {
@@ -114,9 +118,20 @@ impl RootedLocalFileSystem {
                 error,
             )
         })?;
+        let root = Arc::new(root);
+        let limits = root
+            .try_clone_authority()
+            .map(|file| crate::capability::probe_limits(&file))
+            .unwrap_or_else(|_| {
+                LocalFileSystemLimits::new(
+                    crate::SizeLimit::Unknown,
+                    crate::SizeLimit::Unknown,
+                )
+            });
         Ok(Self {
-            root: Arc::new(root),
+            root,
             capabilities: LocalFileSystemCapabilities::detect_rooted(),
+            limits,
         })
     }
 
@@ -131,6 +146,21 @@ impl RootedLocalFileSystem {
     #[inline(always)]
     pub const fn capabilities(&self) -> LocalFileSystemCapabilities {
         self.capabilities
+    }
+
+    /// Returns limits observed from the opened root authority.
+    #[inline(always)]
+    pub const fn limits(&self) -> LocalFileSystemLimits {
+        self.limits
+    }
+
+    /// Reads current space values from the opened root authority.
+    #[inline]
+    pub fn space(&self) -> LocalFileSystemSpace {
+        self.root
+            .try_clone_authority()
+            .map(|file| crate::capability::probe_space(&file))
+            .unwrap_or_else(|_| LocalFileSystemSpace::new(None, None, None))
     }
 
     /// Creates a cleanup-owned temporary file below this opened root.
@@ -173,6 +203,17 @@ impl RootedLocalFileSystem {
                 }
             }
         };
+        if options.creates_parent() && !parent.as_os_str().is_empty() {
+            let parent_path =
+                rooted_path(&parent, LocalFileOperation::CreateTempFile)?;
+            self.root.create_dir_all(&parent_path).map_err(|error| {
+                rooted_io_error(
+                    LocalFileOperation::CreateTempFile,
+                    &parent,
+                    error,
+                )
+            })?;
+        }
         validate_rooted_temp_parent(
             &self.root,
             &parent,
@@ -347,6 +388,17 @@ impl RootedLocalFileSystem {
                 }
             }
         };
+        if options.creates_parent() && !parent.as_os_str().is_empty() {
+            let parent_path =
+                rooted_path(&parent, LocalFileOperation::CreateTempDirectory)?;
+            self.root.create_dir_all(&parent_path).map_err(|error| {
+                rooted_io_error(
+                    LocalFileOperation::CreateTempDirectory,
+                    &parent,
+                    error,
+                )
+            })?;
+        }
         validate_rooted_temp_parent(
             &self.root,
             &parent,

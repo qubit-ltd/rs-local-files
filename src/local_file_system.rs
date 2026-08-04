@@ -8,7 +8,13 @@
 //! Configured Host or Rooted local filesystem service.
 // qubit-style: allow source-test-pair
 
-use std::path::Path;
+use std::{
+    fs::File,
+    path::{
+        Path,
+        PathBuf,
+    },
+};
 
 use crate::local::{
     HostLocalFileSystem,
@@ -23,10 +29,14 @@ use crate::{
     LocalDeleteOptions,
     LocalDeleteOutcome,
     LocalDirectoryWalker,
+    LocalFileError,
     LocalFileMetadata,
+    LocalFileOperation,
     LocalFileReader,
     LocalFileSystemCapabilities,
+    LocalFileSystemLimits,
     LocalFileSystemScope,
+    LocalFileSystemSpace,
     LocalFileWriter,
     LocalListOptions,
     LocalReadOptions,
@@ -199,6 +209,78 @@ impl LocalFileSystem {
     #[inline(always)]
     pub const fn capabilities(&self) -> LocalFileSystemCapabilities {
         self.capabilities
+    }
+
+    /// Returns path limits cached for this filesystem authority.
+    ///
+    /// Host spans multiple filesystems and therefore reports no global
+    /// preflight limit. Rooted instances retain the best-effort observation
+    /// made while opening their authority.
+    #[inline(always)]
+    pub const fn limits(&self) -> LocalFileSystemLimits {
+        match &self.namespace {
+            LocalNamespace::Host => LocalFileSystemLimits::new(
+                crate::SizeLimit::Unrestricted,
+                crate::SizeLimit::Unrestricted,
+            ),
+            LocalNamespace::Rooted(rooted) => rooted.limits(),
+        }
+    }
+
+    /// Observes path limits at `path` or its nearest existing ancestor.
+    ///
+    /// # Errors
+    ///
+    /// Returns `LocalFileError` only when the path cannot be interpreted in
+    /// this filesystem authority. Probe failures yield `Unknown` dimensions.
+    pub fn limits_at(&self, path: &Path) -> LocalResult<LocalFileSystemLimits> {
+        match &self.namespace {
+            LocalNamespace::Host => {
+                probe_file(path, LocalFileOperation::Metadata)
+                    .map(|file| crate::capability::probe_limits(&file))
+            }
+            LocalNamespace::Rooted(rooted) => {
+                let _ = crate::local::LocalRelativePath::new(path).map_err(
+                    |error| {
+                        LocalFileError::from_io(
+                            LocalFileOperation::Metadata,
+                            Some(path.to_path_buf()),
+                            None,
+                            error,
+                        )
+                    },
+                )?;
+                Ok(rooted.limits())
+            }
+        }
+    }
+
+    /// Observes dynamic space at `path` or its nearest existing ancestor.
+    ///
+    /// # Errors
+    ///
+    /// Returns `LocalFileError` only when the path cannot be interpreted in
+    /// this filesystem authority. Probe failures yield absent observations.
+    pub fn space_at(&self, path: &Path) -> LocalResult<LocalFileSystemSpace> {
+        match &self.namespace {
+            LocalNamespace::Host => {
+                probe_file(path, LocalFileOperation::Metadata)
+                    .map(|file| crate::capability::probe_space(&file))
+            }
+            LocalNamespace::Rooted(rooted) => {
+                let _ = crate::local::LocalRelativePath::new(path).map_err(
+                    |error| {
+                        LocalFileError::from_io(
+                            LocalFileOperation::Metadata,
+                            Some(path.to_path_buf()),
+                            None,
+                            error,
+                        )
+                    },
+                )?;
+                Ok(rooted.space())
+            }
+        }
     }
 
     /// Reads metadata without following the final symbolic link.
@@ -590,6 +672,46 @@ impl LocalFileSystem {
             }
             LocalNamespace::Rooted(rooted) => {
                 rooted.create_temp_directory(options, self.symlink_policy)
+            }
+        }
+    }
+}
+
+/// Opens `path` or its nearest existing ancestor for a non-authoritative probe.
+///
+/// # Errors
+///
+/// Returns a structured error when an absolute host path cannot be formed or
+/// no existing ancestor can be opened.
+fn probe_file(path: &Path, operation: LocalFileOperation) -> LocalResult<File> {
+    let mut candidate = std::path::absolute(path).map_err(|error| {
+        LocalFileError::from_io(
+            operation,
+            Some(path.to_path_buf()),
+            None,
+            error,
+        )
+    })?;
+    loop {
+        match File::open(&candidate) {
+            Ok(file) => return Ok(file),
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+                if !candidate.pop() {
+                    return Err(LocalFileError::from_io(
+                        operation,
+                        Some(path.to_path_buf()),
+                        None,
+                        error,
+                    ));
+                }
+            }
+            Err(error) => {
+                return Err(LocalFileError::from_io(
+                    operation,
+                    Some(PathBuf::from(path)),
+                    None,
+                    error,
+                ));
             }
         }
     }
