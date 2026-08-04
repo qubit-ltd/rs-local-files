@@ -25,11 +25,11 @@ use tempfile::tempdir;
 /// Verifies capabilities do not misrepresent a compile-time path bound as a
 /// filesystem-specific limit.
 #[test]
-fn test_host_file_system_limits_are_unrestricted() {
+fn test_host_file_system_limits_vary_by_path() {
     let limits = LocalFileSystem::host().limits();
 
-    assert_eq!(SizeLimit::Unrestricted, limits.max_path_bytes());
-    assert_eq!(SizeLimit::Unrestricted, limits.max_file_name_bytes());
+    assert_eq!(SizeLimit::VariesByPath, limits.max_path_bytes());
+    assert_eq!(SizeLimit::VariesByPath, limits.max_file_name_bytes());
 }
 
 /// Verifies space observations are available without caching host limits.
@@ -53,9 +53,32 @@ fn test_local_file_system_capabilities_report_support_levels() {
         capabilities.atomic_rename_support(),
     );
     assert_eq!(
+        LocalFileSystemCapabilitySupport::Implemented,
+        capabilities.atomic_replace_support(),
+    );
+    assert_eq!(
+        LocalFileSystemCapabilitySupport::Implemented,
+        capabilities.atomic_temp_persist_support(),
+    );
+    assert_eq!(
         LocalFileSystemCapabilitySupport::Unknown,
         capabilities.durable_rename_support(),
     );
+    assert_eq!(
+        LocalFileSystemCapabilitySupport::Unknown,
+        capabilities.durable_file_copy_support(),
+    );
+    assert!(capabilities.rooted_operations_implemented());
+    assert!(capabilities.atomic_rename_implemented());
+    assert!(capabilities.atomic_replace_implemented());
+    assert!(capabilities.atomic_temp_persist_implemented());
+    assert!(capabilities.directory_durability_implemented());
+
+    let rooted = tempfile::tempdir().expect("root should be created");
+    let rooted_capabilities = LocalFileSystem::rooted(rooted.path())
+        .expect("root authority should open")
+        .capabilities();
+    assert_eq!(capabilities, rooted_capabilities);
 }
 
 /// Verifies the host snapshot only advertises native no-replace operations
