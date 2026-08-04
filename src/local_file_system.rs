@@ -325,7 +325,8 @@ impl LocalFileSystem {
 
     /// Opens a synchronous regular-file reader.
     ///
-    /// The final symbolic link is followed according to the filesystem policy.
+    /// The final symbolic link is followed according to the filesystem policy
+    /// on Unix; Windows rejects a final name-surrogate reparse point.
     ///
     /// # Parameters
     ///

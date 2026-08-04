@@ -509,7 +509,7 @@ dependencies = [
 
 [[package]]
 name = "qubit-local-files"
-version = "0.8.0"
+version = "0.3.0"
 dependencies = [
  "criterion",
  "getrandom 0.4.2",
