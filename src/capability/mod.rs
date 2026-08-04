@@ -8,9 +8,11 @@
 //! Native local filesystem capability snapshots.
 
 mod local_file_system_capabilities;
+mod local_file_system_capability_support;
 mod local_path_length_unit;
 mod local_path_limit;
 
 pub use local_file_system_capabilities::LocalFileSystemCapabilities;
+pub use local_file_system_capability_support::LocalFileSystemCapabilitySupport;
 pub use local_path_length_unit::LocalPathLengthUnit;
 pub use local_path_limit::LocalPathLimit;

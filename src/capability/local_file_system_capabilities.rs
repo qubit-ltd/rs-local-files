@@ -9,7 +9,10 @@
 // Covered by public capability integration tests.
 // qubit-style: allow coverage-cfg
 
-use super::LocalPathLimit;
+use super::{
+    LocalFileSystemCapabilitySupport,
+    LocalPathLimit,
+};
 
 /// Immutable snapshot of filesystem mechanisms implemented by this build.
 ///
@@ -104,12 +107,36 @@ impl LocalFileSystemCapabilities {
         self.atomic_rename
     }
 
+    /// Returns the support level for native atomic rename.
+    #[inline(always)]
+    pub const fn atomic_rename_support(
+        self,
+    ) -> LocalFileSystemCapabilitySupport {
+        if self.atomic_rename {
+            LocalFileSystemCapabilitySupport::Implemented
+        } else {
+            LocalFileSystemCapabilitySupport::Unknown
+        }
+    }
+
     /// Reports whether native atomic replacement is implemented.
     #[must_use]
     #[cfg_attr(coverage, inline(never))]
     #[cfg_attr(not(coverage), inline(always))]
     pub const fn atomic_replace_implemented(self) -> bool {
         self.atomic_replace
+    }
+
+    /// Returns the support level for native atomic replacement.
+    #[inline(always)]
+    pub const fn atomic_replace_support(
+        self,
+    ) -> LocalFileSystemCapabilitySupport {
+        if self.atomic_replace {
+            LocalFileSystemCapabilitySupport::Implemented
+        } else {
+            LocalFileSystemCapabilitySupport::Unknown
+        }
     }
 
     /// Reports whether atomic no-replace temporary persistence is implemented.
@@ -119,11 +146,44 @@ impl LocalFileSystemCapabilities {
         self.atomic_temp_persist
     }
 
+    /// Returns the support level for atomic no-replace temporary persistence.
+    #[inline(always)]
+    pub const fn atomic_temp_persist_support(
+        self,
+    ) -> LocalFileSystemCapabilitySupport {
+        if self.atomic_temp_persist {
+            LocalFileSystemCapabilitySupport::Implemented
+        } else {
+            LocalFileSystemCapabilitySupport::Unknown
+        }
+    }
+
     /// Reports whether parent-directory durability synchronization is
     /// implemented.
     #[must_use]
     #[inline(always)]
     pub const fn directory_durability_implemented(self) -> bool {
         self.directory_durability
+    }
+
+    /// Returns the support level for durable rename publication.
+    ///
+    /// Directory synchronization is implemented on supported targets, but
+    /// this snapshot does not probe the active mount. Advertising a durable
+    /// guarantee therefore remains intentionally conservative.
+    #[inline(always)]
+    pub const fn durable_rename_support(
+        self,
+    ) -> LocalFileSystemCapabilitySupport {
+        let _ = self;
+        LocalFileSystemCapabilitySupport::Unknown
+    }
+
+    /// Returns the support level for durable file-copy publication.
+    #[inline(always)]
+    pub const fn durable_file_copy_support(
+        self,
+    ) -> LocalFileSystemCapabilitySupport {
+        self.durable_rename_support()
     }
 }
