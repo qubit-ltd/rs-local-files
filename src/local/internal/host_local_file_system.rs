@@ -786,6 +786,16 @@ impl HostLocalFileSystem {
             .parent()
             .map_or_else(std::env::temp_dir, Path::to_path_buf);
         let parent = resolve_host_path(&parent, symlink_policy, true)?;
+        if options.creates_parent() {
+            fs::create_dir_all(&parent).map_err(|error| {
+                LocalFileError::from_io(
+                    LocalFileOperation::CreateTempFile,
+                    Some(parent.clone()),
+                    None,
+                    error,
+                )
+            })?;
+        }
         validate_host_temp_parent(&parent, LocalFileOperation::CreateTempFile)?;
         validate_temp_affixes(options.prefix(), options.suffix()).map_err(
             |error| {
@@ -884,6 +894,16 @@ impl HostLocalFileSystem {
             .parent()
             .map_or_else(std::env::temp_dir, Path::to_path_buf);
         let parent = resolve_host_path(&parent, symlink_policy, true)?;
+        if options.creates_parent() {
+            fs::create_dir_all(&parent).map_err(|error| {
+                LocalFileError::from_io(
+                    LocalFileOperation::CreateTempDirectory,
+                    Some(parent.clone()),
+                    None,
+                    error,
+                )
+            })?;
+        }
         validate_host_temp_parent(
             &parent,
             LocalFileOperation::CreateTempDirectory,

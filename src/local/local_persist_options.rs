@@ -35,6 +35,8 @@
 pub struct LocalPersistOptions {
     /// Whether an existing target path may be overwritten.
     overwrite: bool,
+    /// Whether a missing target parent may be created before publication.
+    create_parent: bool,
 }
 
 impl LocalPersistOptions {
@@ -44,7 +46,10 @@ impl LocalPersistOptions {
     /// Options that reject existing destination paths.
     #[inline]
     pub const fn new() -> Self {
-        Self { overwrite: false }
+        Self {
+            overwrite: false,
+            create_parent: false,
+        }
     }
 
     /// Returns whether an existing target may be overwritten.
@@ -55,6 +60,20 @@ impl LocalPersistOptions {
     #[inline(always)]
     pub const fn overwrites(&self) -> bool {
         self.overwrite
+    }
+
+    /// Returns whether missing target parents may be created.
+    #[must_use]
+    #[inline(always)]
+    pub const fn creates_parent(&self) -> bool {
+        self.create_parent
+    }
+
+    /// Enables recursive creation of a missing target parent.
+    #[inline(always)]
+    pub const fn with_create_parent(mut self) -> Self {
+        self.create_parent = true;
+        self
     }
 
     /// Enables replacement of an existing target path.

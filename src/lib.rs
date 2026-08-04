@@ -41,8 +41,9 @@ mod writer;
 pub use capability::{
     LocalFileSystemCapabilities,
     LocalFileSystemCapabilitySupport,
-    LocalPathLengthUnit,
-    LocalPathLimit,
+    LocalFileSystemLimits,
+    LocalFileSystemSpace,
+    SizeLimit,
 };
 pub use error::{
     LocalFileError,
