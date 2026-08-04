@@ -123,10 +123,12 @@ match copy(
 ## 遍历和临时资源
 
 `list` 和 `LocalFileSystem::list` 返回惰性的 `LocalDirectoryWalker`。它按需打开和推进目录；最大
-深度、符号链接策略与默认 64 个句柄的预算在创建时固定。超过预算会返回
-`ResourceLimit`；零句柄预算无效并返回 `InvalidOptions`，drop 只释放句柄。
+深度、符号链接策略与句柄预算在创建时固定。默认 `Reopen` 策略会在达到预算时关闭并重新打开
+活动 frame；显式选择 `Fail` 才会返回 `ResourceLimit`。零句柄预算无效并返回 `InvalidOptions`，
+drop 只释放句柄。
 
-临时文件和目录在仍处于 armed 状态时拥有清理责任。drop 会尽力清理；`keep` 会关闭清理并
+临时文件和目录在仍处于 armed 状态时拥有清理责任。每个资源都创建在独立的私有 sandbox 中，
+sandbox 会和资源一起清理。drop 会尽力清理；`keep` 会关闭清理并
 返回 authority-local 路径（Host 为绝对路径，Rooted 为相对于已打开 root 的相对路径）。持久化失败会保留资源，调用方可重试、检查、保留或显式清理。创建前会
 校验前缀和后缀：原生分隔符、NUL 与便携保留名称不会留下条目。
 

@@ -446,7 +446,8 @@ Native rename 成功、随后 parent durability 失败时必须返回 `Renamed`�
 
 - 按需打开目录并产生 entry；
 - directory handle 的并发上限由 `LocalListOptions::max_open_directories`
-  明确控制，默认值为 64；达到上限时返回 `ResourceLimit`，不会继续消耗进程句柄；
+  明确控制，默认值为 64；默认 `Reopen` 策略达到上限时会关闭并重新打开活动
+  frame，显式 `Fail` 策略才返回 `ResourceLimit`；
 - 遍历顺序由 option 定义或明确为 unspecified；
 - 遇到错误时返回带 offending path 的结构化错误；
 - fail-fast 与 collect-errors 模式不能混为隐式行为；
@@ -457,6 +458,8 @@ Native rename 成功、随后 parent durability 失败时必须返回 `Renamed`�
 
 capability 将原子 rename、原子 replace 和临时资源无替换持久化分别建模；adapter 不得用
 单一 no-replace 标志推断全部三项保证。
+能力快照还区分 `Implemented`、`RuntimeVerified` 与 `Unknown`；当前实现不会在没有挂载点
+探测的情况下把目录 durability 映射为上层的 durable capability。
 
 Walker drop 只释放本地 handle，不执行 namespace 修改。
 
@@ -534,6 +537,9 @@ Drop 只在 `Owned` 或 `CleanupRequired` 执行 best-effort cleanup；`Indeterm
 `LocalTempFileOptions` 与 `LocalTempDirectoryOptions` 统一承载 parent directory、
 prefix 和 suffix。所有 affix 与最终随机 component 必须在创建 entry 前完成 native
 separator、NUL 和平台保留名称校验；失败不能留下临时条目。
+每个临时资源还会先创建一个私有 sandbox，再在其中创建实际 entry。cleanup 或成功
+persist 后会移除空 sandbox；`keep` 会把 sandbox 与资源一起交给调用方，避免共享
+parent 下的 cleanup 路径被并发替换。
 
 Host 与 rooted authority 通过同一类型提供对称入口：
 

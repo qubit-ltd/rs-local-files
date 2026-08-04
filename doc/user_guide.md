@@ -140,14 +140,16 @@ happened”.
 ## Walk and Temporary Resources
 
 `list` and `LocalFileSystem::list` return a lazy `LocalDirectoryWalker`. It opens and
-advances directories on demand; maximum depth, symbolic-link policy, and a
-64-handle default budget are fixed at creation. Rooted enumeration also streams
-each directory instead of first collecting it into a vector. Exceeding the
-configured budget returns `ResourceLimit`; a zero handle budget is invalid and
-returns `InvalidOptions`. Dropping it only releases handles.
+advances directories on demand; maximum depth, symbolic-link policy, and the
+handle budget are fixed at creation. The default `Reopen` policy closes and
+reopens active frames when the budget is reached, while `Fail` explicitly
+returns `ResourceLimit`; a zero handle budget is invalid and returns
+`InvalidOptions`. Rooted enumeration also streams each directory instead of
+first collecting it into a vector. Dropping it only releases handles.
 
-Temporary files and directories own cleanup while armed. Dropping them performs
-best-effort cleanup; `keep` disables cleanup and returns an authority-local path
+Temporary files and directories own cleanup while armed. Each resource lives in
+a private generated sandbox that is removed with the resource. Dropping them
+performs best-effort cleanup; `keep` disables cleanup and returns an authority-local path
 (absolute for Host and relative to the opened root for Rooted).
 Persistence failures retain the resource so the caller can retry, inspect,
 keep, or explicitly clean it. Prefixes and suffixes are checked before entry
