@@ -8,15 +8,16 @@
 //! Coverage for native path-length limits.
 
 use qubit_local_files::{
-    LocalPathLengthUnit,
-    LocalPathLimit,
+    LocalFileSystemLimits,
+    SizeLimit,
 };
 
 /// Verifies a path-length limit preserves both its numeric bound and unit.
 #[test]
-fn test_local_path_limit_preserves_value_and_unit() {
-    let limit = LocalPathLimit::new(260, LocalPathLengthUnit::Utf16CodeUnits);
+fn test_local_file_system_limits_preserve_each_dimension() {
+    let limits =
+        LocalFileSystemLimits::new(SizeLimit::Maximum(260), SizeLimit::Unknown);
 
-    assert_eq!(limit.value(), 260);
-    assert_eq!(limit.unit(), LocalPathLengthUnit::Utf16CodeUnits);
+    assert_eq!(SizeLimit::Maximum(260), limits.max_path_bytes());
+    assert_eq!(SizeLimit::Unknown, limits.max_file_name_bytes());
 }
