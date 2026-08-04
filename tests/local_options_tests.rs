@@ -188,11 +188,13 @@ fn test_temporary_resource_option_builders_retain_configuration() {
             .with_prefix("file-"),
         ".tmp",
     )
-    .with_max_attempts(4);
+    .with_max_attempts(4)
+    .with_create_parent();
     assert_eq!(file.parent(), Some(parent));
     assert_eq!(file.prefix(), Some("file-"));
     assert_eq!(file.suffix(), Some(".tmp"));
     assert_eq!(file.max_attempts(), 4);
+    assert!(file.creates_parent());
 
     let directory = black_box(LocalTempDirectoryOptions::new())
         .with_parent(parent)
