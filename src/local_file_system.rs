@@ -10,6 +10,7 @@
 
 use std::{
     fs::File,
+    io::Read,
     path::Path,
 };
 
@@ -358,6 +359,42 @@ impl LocalFileSystem {
                 rooted.open_reader(path, options, self.symlink_policy)
             }
         }
+    }
+
+    /// Reads at most max_bytes from a regular file.
+    ///
+    /// The file is opened and validated even when max_bytes is zero. Bytes
+    /// are read incrementally so the method never allocates the requested
+    /// limit up front.
+    pub fn read_prefix(
+        &self,
+        path: &Path,
+        options: &LocalReadOptions,
+        max_bytes: usize,
+    ) -> LocalResult<Vec<u8>> {
+        let mut reader = self.open_reader(path, options)?;
+        if max_bytes == 0 {
+            return Ok(Vec::new());
+        }
+        let mut result = Vec::with_capacity(max_bytes.min(8192));
+        let mut buffer = [0_u8; 8192];
+        while result.len() < max_bytes {
+            let read_len = (max_bytes - result.len()).min(buffer.len());
+            let count =
+                reader.read(&mut buffer[..read_len]).map_err(|source| {
+                    LocalFileError::from_io(
+                        LocalFileOperation::OpenReader,
+                        Some(path.to_path_buf()),
+                        None,
+                        source,
+                    )
+                })?;
+            if count == 0 {
+                break;
+            }
+            result.extend_from_slice(&buffer[..count]);
+        }
+        Ok(result)
     }
 
     /// Opens a synchronous writer publication session.

@@ -156,3 +156,21 @@ fn test_local_file_error_adapts_source_free_kinds_and_consumes_source() {
     );
     assert!(source.into_source().is_some());
 }
+
+/// Verifies optional path context and source accessors preserve their
+/// source-free semantics.
+#[test]
+fn test_local_file_error_exposes_optional_context_without_source() {
+    let error = LocalFileError::new(
+        LocalFileErrorKind::InvalidOptions,
+        LocalFileOperation::OpenWriter,
+    )
+    .with_path(Path::new("source").to_path_buf())
+    .with_target(Path::new("target").to_path_buf());
+
+    assert_eq!(Some(Path::new("source")), error.path());
+    assert_eq!(Some(Path::new("target")), error.target());
+    assert!(error.source_kind().is_none());
+    assert!(Error::source(&error).is_none());
+    assert!(error.into_source().is_none());
+}
