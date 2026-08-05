@@ -55,6 +55,16 @@ pub fn open_reader(
     LocalFileSystem::host().open_reader(path, options)
 }
 
+/// Reads at most max_bytes from a Host regular file.
+#[inline(always)]
+pub fn read_prefix(
+    path: &Path,
+    options: &LocalReadOptions,
+    max_bytes: usize,
+) -> LocalResult<Vec<u8>> {
+    LocalFileSystem::host().read_prefix(path, options, max_bytes)
+}
+
 /// Opens a Host writer publication session.
 #[inline(always)]
 pub fn open_writer(

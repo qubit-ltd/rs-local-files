@@ -37,6 +37,7 @@ use qubit_local_files::{
     metadata,
     open_reader,
     open_writer,
+    read_prefix,
     rename,
 };
 use tempfile::tempdir;
@@ -117,4 +118,19 @@ fn test_host_local_file_system_convenience_workflow() {
         .expect("source file should be deleted");
     let _ = delete_directory(&tree, &LocalDeleteOptions::new())
         .expect("tree should be deleted");
+}
+
+/// Verifies the Host prefix convenience function delegates to the same API.
+#[test]
+fn test_host_read_prefix_convenience() {
+    let directory = tempdir().expect("temporary directory should be created");
+    let path = directory.path().join("payload");
+    fs::write(&path, b"payload").expect("fixture should be written");
+
+    assert_eq!(
+        b"pay".as_slice(),
+        read_prefix(&path, &LocalReadOptions::new(), 3)
+            .expect("prefix should be readable")
+            .as_slice()
+    );
 }
