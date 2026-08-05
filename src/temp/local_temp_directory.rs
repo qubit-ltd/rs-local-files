@@ -238,18 +238,19 @@ impl LocalTempDirectory {
         let requested_target = target.to_path_buf();
         match &self.backend {
             LocalTempResourceBackend::Host(_) => {
-                let logical_target = match std::path::absolute(&requested_target) {
-                    Ok(target) => target,
-                    Err(error) => {
-                        return Err(LocalPersistError::new(
-                            error,
-                            self,
-                            requested_target,
-                            None,
-                            LocalPersistStage::ResolveTarget,
-                        ));
-                    }
-                };
+                let logical_target =
+                    match std::path::absolute(&requested_target) {
+                        Ok(target) => target,
+                        Err(error) => {
+                            return Err(LocalPersistError::new(
+                                error,
+                                self,
+                                requested_target,
+                                None,
+                                LocalPersistStage::ResolveTarget,
+                            ));
+                        }
+                    };
                 let target = match crate::local::resolve_host_path(
                     &logical_target,
                     self.symlink_policy,
