@@ -64,6 +64,7 @@ pub use host::{
     metadata,
     open_reader,
     open_writer,
+    read_prefix,
     rename,
 };
 pub use local::{
