@@ -51,7 +51,6 @@ impl LocalPaths {
     ///
     /// Returns `LocalFileError` with `ComposePath` when canonical decoding
     /// fails or the components do not form a supported absolute path.
-    #[inline]
     pub fn from_canonical_absolute_components<'a>(
         components: impl IntoIterator<Item = &'a str>,
     ) -> LocalResult<PathBuf> {
@@ -104,7 +103,6 @@ impl LocalPaths {
     ///
     /// Returns `LocalFileError` with `ComposePath` when the path is not a
     /// supported absolute shape or one component cannot be canonically encoded.
-    #[inline(always)]
     pub fn to_canonical_absolute_components(
         path: &Path,
     ) -> LocalResult<Vec<String>> {
@@ -125,7 +123,6 @@ impl LocalPaths {
     ///
     /// Returns `LocalFileError` with `ComposePath` when `path` contains a
     /// root, prefix, dot, parent, or no normal components.
-    #[inline(always)]
     pub fn to_canonical_relative_components(
         path: &Path,
     ) -> LocalResult<Vec<String>> {
