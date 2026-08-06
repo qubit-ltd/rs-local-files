@@ -135,6 +135,9 @@ pub use writer::{
     LocalWriterState,
 };
 
+#[cfg(coverage)]
+pub use rooted::Permissions;
+
 pub(crate) use local::{
     LocalRelativePath,
 };
