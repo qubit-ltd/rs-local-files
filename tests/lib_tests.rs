@@ -13,6 +13,8 @@ mod rooted_local_file_system;
 
 #[path = "capability/filesystem_probe_tests.rs"]
 mod filesystem_probe_tests;
+#[path = "capability/local_file_system_capabilities_tests.rs"]
+mod local_file_system_capabilities_tests;
 #[path = "options/local_directory_reopen_policy_tests.rs"]
 mod local_directory_reopen_policy_tests;
 #[path = "capability/local_file_system_limits_tests.rs"]
