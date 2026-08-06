@@ -39,6 +39,7 @@ use qubit_local_files::{
 #[cfg(coverage)]
 use qubit_local_files::{
     LocalAtomicWriteOptions,
+    LocalAtomicCommitError,
     LocalAtomicDestinationState,
     LocalAtomicWriteError,
     LocalAtomicWriteStage,
@@ -594,4 +595,45 @@ fn test_internal_atomic_write_error_accessors_and_parts() {
         )))
         .to_string()
         .contains("parent synchronization"));
+}
+
+/// Verifies coverage-only construction and recovery accessors for commit
+/// errors with and without a retained writer.
+#[cfg(coverage)]
+#[test]
+fn test_internal_atomic_commit_error_accessors_and_parts() {
+    let make_error = || {
+        LocalAtomicWriteError::coverage_new(
+            LocalAtomicWriteStage::ReplaceDestination,
+            Path::new("destination").to_path_buf(),
+            None,
+            LocalAtomicDestinationState::Indeterminate,
+            std::io::Error::from(std::io::ErrorKind::Other),
+        )
+    };
+
+    let mut retryable = LocalAtomicCommitError::coverage_new(
+        make_error(),
+        Some(String::from("writer")),
+    );
+    assert_eq!(std::io::ErrorKind::Other, retryable.error().kind());
+    assert_eq!(Some("writer"), retryable.writer().map(String::as_str));
+    retryable
+        .writer_mut()
+        .expect("writer should be retained")
+        .push_str("-updated");
+    assert!(retryable.to_string().contains("retained"));
+    assert!(std::error::Error::source(&retryable).is_some());
+    let finalized = retryable.coverage_into_final_error_with(|writer, error| {
+        assert_eq!("writer-updated", writer);
+        error
+    });
+    assert_eq!(std::io::ErrorKind::Other, finalized.kind());
+
+    let terminal = LocalAtomicCommitError::coverage_new(make_error(), None::<String>);
+    assert!(terminal.writer().is_none());
+    assert!(terminal.to_string().contains("unavailable"));
+    let (error, writer) = terminal.into_parts();
+    assert_eq!(std::io::ErrorKind::Other, error.kind());
+    assert!(writer.is_none());
 }

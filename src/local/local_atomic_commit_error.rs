@@ -38,6 +38,27 @@ pub struct LocalAtomicCommitError<T> {
 
 #[allow(dead_code)]
 impl<T> LocalAtomicCommitError<T> {
+    /// Coverage-only constructor for the private atomic-commit error value.
+    #[cfg(coverage)]
+    pub fn coverage_new(
+        error: LocalAtomicWriteError,
+        writer: Option<T>,
+    ) -> Self {
+        Self::new(error, writer)
+    }
+
+    /// Coverage-only access to finalization of retained writers.
+    #[cfg(coverage)]
+    pub fn coverage_into_final_error_with<F>(
+        self,
+        finalize_writer: F,
+    ) -> LocalAtomicWriteError
+    where
+        F: FnOnce(T, LocalAtomicWriteError) -> LocalAtomicWriteError,
+    {
+        self.into_final_error_with(finalize_writer)
+    }
+
     /// Creates an atomic-commit error with an optional retained writer.
     ///
     /// # Parameters
@@ -62,7 +83,8 @@ impl<T> LocalAtomicCommitError<T> {
     ///
     /// The failure produced by the commit attempt.
     #[must_use]
-    #[inline(always)]
+    #[cfg_attr(coverage, inline(never))]
+    #[cfg_attr(not(coverage), inline(always))]
     pub const fn error(&self) -> &LocalAtomicWriteError {
         &self.error
     }
@@ -74,7 +96,8 @@ impl<T> LocalAtomicCommitError<T> {
     /// `Some` for a pre-installation failure that permits retry or explicit
     /// abort, or `None` after installation began.
     #[must_use]
-    #[inline(always)]
+    #[cfg_attr(coverage, inline(never))]
+    #[cfg_attr(not(coverage), inline(always))]
     pub fn writer(&self) -> Option<&T> {
         self.writer.as_deref()
     }
@@ -86,7 +109,8 @@ impl<T> LocalAtomicCommitError<T> {
     /// `Some` for a pre-installation failure that permits additional staging
     /// writes, retry, or explicit abort, or `None` after installation began.
     #[must_use]
-    #[inline(always)]
+    #[cfg_attr(coverage, inline(never))]
+    #[cfg_attr(not(coverage), inline(always))]
     pub fn writer_mut(&mut self) -> Option<&mut T> {
         self.writer.as_deref_mut()
     }
@@ -98,7 +122,8 @@ impl<T> LocalAtomicCommitError<T> {
     /// The atomic-write failure and the writer retained for recovery, when
     /// recovery remains safe.
     #[must_use = "the returned writer may require retry or explicit abort"]
-    #[inline(always)]
+    #[cfg_attr(coverage, inline(never))]
+    #[cfg_attr(not(coverage), inline(always))]
     pub fn into_parts(self) -> (LocalAtomicWriteError, Option<T>) {
         let Self { error, writer } = self;
         (error, writer.map(|writer| *writer))

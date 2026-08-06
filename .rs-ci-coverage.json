@@ -33,7 +33,6 @@
       "src/local/internal/rooted_staging_retry.rs",
       "src/local/internal/temp_entry.rs",
       "src/local/internal/unix_nonblocking.rs",
-      "src/local/local_atomic_commit_error.rs",
       "src/local/local_atomic_writer.rs",
       "src/local/local_root_atomic_writer.rs",
       "src/local_file_system.rs",
