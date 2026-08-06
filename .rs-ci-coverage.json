@@ -36,7 +36,6 @@
       "src/local/local_atomic_commit_error.rs",
       "src/local/local_atomic_write_error.rs",
       "src/local/local_atomic_writer.rs",
-      "src/local/local_copy_dir_error.rs",
       "src/local/local_persist_error.rs",
       "src/local/local_root_atomic_writer.rs",
       "src/local_file_system.rs",
