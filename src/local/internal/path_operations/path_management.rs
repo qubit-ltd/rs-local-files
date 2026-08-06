@@ -27,6 +27,53 @@ use std::os::windows::fs::FileTypeExt;
 use super::super::file_move::remove_directory_symlink;
 use super::super::path_io_error::PathIoError;
 
+/// Coverage-only access to private path-management operations.
+#[cfg(coverage)]
+pub fn coverage_absolute_path(path: &Path) -> Result<PathBuf> {
+    absolute_path(path)
+}
+
+#[cfg(coverage)]
+pub fn coverage_canonicalize_existing_prefix(path: &Path) -> Result<PathBuf> {
+    canonicalize_existing_prefix(path)
+}
+
+#[cfg(coverage)]
+pub fn coverage_ensure_dir_path(path: &Path) -> Result<()> {
+    ensure_dir_path(path)
+}
+
+#[cfg(coverage)]
+pub fn coverage_ensure_parent_path(path: &Path) -> Result<()> {
+    ensure_parent_path(path)
+}
+
+#[cfg(coverage)]
+pub fn coverage_ensure_parent_path_with_sync_dirs(
+    path: &Path,
+) -> Result<Vec<PathBuf>> {
+    ensure_parent_path_with_sync_dirs(path)
+}
+
+#[cfg(coverage)]
+pub fn coverage_add_path_context(
+    error: Error,
+    operation: &'static str,
+    path: &Path,
+) -> Error {
+    add_path_context(error, operation, path)
+}
+
+#[cfg(coverage)]
+pub fn coverage_clean_dir_path(path: &Path) -> Result<()> {
+    clean_dir_path(path)
+}
+
+#[cfg(coverage)]
+pub fn coverage_remove_any_path(path: &Path) -> Result<()> {
+    remove_any_path(path)
+}
+
 /// Resolves `path` to a lexical absolute path at the current point in time.
 ///
 /// # Parameters
@@ -39,7 +86,8 @@ use super::super::path_io_error::PathIoError;
 /// # Errors
 /// Returns an I/O error when a relative path is supplied and the current
 /// working directory cannot be read.
-#[inline(always)]
+#[cfg_attr(coverage, inline(never))]
+#[cfg_attr(not(coverage), inline(always))]
 pub(crate) fn absolute_path(path: &Path) -> Result<PathBuf> {
     std::path::absolute(path)
 }
@@ -91,7 +139,8 @@ pub(crate) fn canonicalize_existing_prefix(path: &Path) -> Result<PathBuf> {
 /// # Errors
 /// Returns an I/O error when the directory or one of its ancestors cannot be
 /// created.
-#[inline(always)]
+#[cfg_attr(coverage, inline(never))]
+#[cfg_attr(not(coverage), inline(always))]
 pub(crate) fn ensure_dir_path(path: &Path) -> Result<()> {
     fs::create_dir_all(path)
 }
@@ -177,7 +226,8 @@ pub(crate) fn ensure_parent_path_with_sync_dirs(
 ///
 /// # Returns
 /// A new I/O error with the same [`ErrorKind`] and a more descriptive message.
-#[inline(always)]
+#[cfg_attr(coverage, inline(never))]
+#[cfg_attr(not(coverage), inline(always))]
 pub(crate) fn add_path_context(
     error: Error,
     operation: &'static str,

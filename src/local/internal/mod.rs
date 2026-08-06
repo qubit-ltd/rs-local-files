@@ -101,6 +101,17 @@ pub(crate) use copy_dir::{
     copy_dir_all_with_paths_scoped,
     copy_file_with_options,
 };
+#[cfg(coverage)]
+pub use path_operations::{
+    coverage_absolute_path,
+    coverage_add_path_context,
+    coverage_canonicalize_existing_prefix,
+    coverage_clean_dir_path,
+    coverage_ensure_dir_path,
+    coverage_ensure_parent_path,
+    coverage_ensure_parent_path_with_sync_dirs,
+    coverage_remove_any_path,
+};
 pub(crate) use copy_policy::{
     copy_directory_guarantee_unavailable,
     copy_file_replace_requires_atomicity,
