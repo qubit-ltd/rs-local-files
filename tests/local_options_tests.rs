@@ -44,6 +44,9 @@ use qubit_local_files::{
     LocalCopyDirStage,
     LocalCopyDirStats,
     LocalCopyStats,
+    LocalPersistError,
+    LocalPersistFailureState,
+    LocalPersistStage,
 };
 
 /// Verifies directory and deletion builders retain every configured policy.
@@ -486,4 +489,47 @@ fn test_internal_copy_error_accessors_and_parts() {
     assert!(contextual.temporary_path().is_some());
     assert!(contextual.cleanup_error().is_some());
     assert!(contextual.to_string().contains("cleanup"));
+}
+
+/// Verifies coverage-only construction and inspection of persistence errors.
+#[cfg(coverage)]
+#[test]
+fn test_internal_persist_error_accessors_and_parts() {
+    let mut error = LocalPersistError::coverage_new(
+        std::io::Error::from(std::io::ErrorKind::PermissionDenied),
+        7_u32,
+        Path::new("requested").to_path_buf(),
+        Some(Path::new("resolved").to_path_buf()),
+        LocalPersistStage::InstallDestination,
+    );
+    assert_eq!(LocalPersistFailureState::Indeterminate, error.state());
+    assert_eq!(LocalPersistStage::InstallDestination, error.stage());
+    assert_eq!(Path::new("requested"), error.requested_target());
+    assert_eq!(Path::new("resolved"), error.resolved_target().unwrap());
+    assert_eq!(qubit_local_files::LocalFileErrorKind::PermissionDenied, error.kind());
+    assert_eq!(7, *error.resource());
+    *error.resource_mut() = 8;
+    assert_eq!(8, *error.resource());
+    assert_eq!(qubit_local_files::LocalFileErrorKind::PermissionDenied, error.error().kind());
+    assert!(error.to_string().contains("resolved"));
+    assert!(std::error::Error::source(&error).is_some());
+    let (_, resource, requested, resolved, stage, state) =
+        error.into_parts_with_state();
+    assert_eq!(8, resource);
+    assert_eq!(Path::new("requested"), requested);
+    assert_eq!(Some(Path::new("resolved").to_path_buf()), resolved);
+    assert_eq!(LocalPersistStage::InstallDestination, stage);
+    assert_eq!(LocalPersistFailureState::Indeterminate, state);
+
+    let error = LocalPersistError::coverage_new(
+        std::io::Error::from(std::io::ErrorKind::NotFound),
+        (),
+        Path::new("requested").to_path_buf(),
+        None,
+        LocalPersistStage::ResolveTarget,
+    );
+    assert!(error.resolved_target().is_none());
+    assert!(error.to_string().contains("requested"));
+    let (_, _, _, resolved, _) = error.into_parts();
+    assert!(resolved.is_none());
 }
