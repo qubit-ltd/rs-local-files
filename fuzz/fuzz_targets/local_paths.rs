@@ -35,4 +35,8 @@ fuzz_target!(|data: &[u8]| {
     )
     .expect("encoded relative paths must decode");
     assert_eq!(restored, native);
+    let reencoded =
+        LocalPaths::to_canonical_relative_components(Path::new(&restored))
+            .expect("decoded relative paths must encode again");
+    assert_eq!(reencoded, encoded);
 });
