@@ -2,7 +2,6 @@
   "threshold_exempt_files": {
     "qubit-local-files": [
       "src/capability/filesystem_probe.rs",
-      "src/local/local_persist_failure_state.rs",
       "src/temp/internal/temp_parent.rs",
       "src/local/internal/atomic_file_install.rs",
       "src/local/internal/atomic_install_recovery.rs",

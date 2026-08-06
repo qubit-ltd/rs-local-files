@@ -358,6 +358,38 @@ fn test_local_temp_file_known_persist_conflict_retains_cleanup() {
     assert!(!source.exists());
 }
 
+/// Verifies a native persistence-install failure records indeterminate state.
+#[cfg(coverage)]
+#[test]
+fn test_local_temp_file_persist_reports_indeterminate_install() {
+    const TEST_NAME: &str =
+        "test_local_temp_file_persist_reports_indeterminate_install";
+    const COVERAGE_FAULT_ENV: &str = "QUBIT_LOCAL_FILES_COVERAGE_FAULT";
+    if std::env::var_os(COVERAGE_FAULT_ENV).is_none() {
+        let status = std::process::Command::new(
+            std::env::current_exe().expect("test executable should be available"),
+        )
+        .arg("--exact")
+        .arg(TEST_NAME)
+        .arg("--nocapture")
+        .env(COVERAGE_FAULT_ENV, "persist-install-indeterminate")
+        .status()
+        .expect("coverage fault child should launch");
+        assert!(status.success(), "coverage fault child should pass");
+        return;
+    }
+
+    let parent = tempfile::tempdir().expect("temporary parent should be created");
+    let temporary = LocalFileSystem::host()
+        .create_temp_file(&LocalTempFileOptions::new().with_parent(parent.path()))
+        .expect("temporary file should be created");
+    let target = parent.path().join("indeterminate-target");
+    let error = temporary
+        .persist(&target)
+        .expect_err("injected install failure should be reported");
+    assert_eq!(LocalPersistFailureState::Indeterminate, error.state());
+}
+
 /// Verifies rooted temporary files reject host-absolute persist targets while
 /// retaining their root-bound cleanup authority.
 #[test]
