@@ -5,20 +5,24 @@
 //
 //    Licensed under the Apache License, Version 2.0.
 // =============================================================================
-// qubit-style: allow coverage-cfg
 //! # Qubit Local Files
 //!
 //! Unified native local filesystem operations for Rust.
 //!
-//! Host convenience functions provide direct process-wide operations, while
-//! [`LocalFileSystem`] configures either Host access or descendant operations
+//! [`LocalFileSystem`] provides direct Host access or descendant operations
 //! anchored to an opened Rooted directory descriptor or handle.
 //! [`LocalFileNames`] and [`LocalPaths`] provide native lexical utilities,
 //! while readers, writers, walkers, and temporary resources retain explicit
 //! ownership and lifecycle state.
+//!
+//! The former crate-root Host convenience functions were removed. Use
+//! [`LocalFileSystem::host`] and its instance methods instead.
+//!
+//! ```compile_fail
+//! use qubit_local_files::open_writer;
+//! ```
 mod capability;
 mod error;
-mod host;
 mod local;
 mod local_file_kind;
 mod local_file_metadata;
@@ -39,40 +43,15 @@ mod write;
 mod writer;
 
 pub use capability::{
-    LocalFileSystemCapabilities,
-    LocalFileSystemLimits,
-    LocalFileSystemSpace,
-    SizeLimit,
+    LocalFileSystemCapabilities, LocalFileSystemLimits, LocalFileSystemSpace, SizeLimit,
 };
 pub use error::{
-    LocalFileError,
-    LocalFileErrorKind,
-    LocalFileErrorSource,
-    LocalFileOperation,
-    LocalPathCodecError,
-    LocalResult,
-};
-pub use host::{
-    copy,
-    create_directory,
-    create_temp_directory,
-    create_temp_file,
-    delete_directory,
-    delete_file,
-    list,
-    metadata,
-    open_reader,
-    open_writer,
-    read_prefix,
-    rename,
+    LocalFileError, LocalFileErrorKind, LocalFileErrorSource, LocalFileOperation,
+    LocalPathCodecError, LocalResult,
 };
 pub use local::{
-    LocalCopyConflictPolicy,
-    LocalCopyTypeConflictPolicy,
-    LocalPersistError,
-    LocalPersistFailureState,
-    LocalPersistOptions,
-    LocalPersistStage,
+    LocalCopyConflictPolicy, LocalCopyTypeConflictPolicy, LocalPersistError,
+    LocalPersistFailureState, LocalPersistOptions, LocalPersistStage,
 };
 pub use local_file_kind::LocalFileKind;
 pub use local_file_metadata::LocalFileMetadata;
@@ -83,127 +62,29 @@ pub use local_file_system_scope::LocalFileSystemScope;
 pub use local_path_codec::LocalPathCodec;
 pub use local_paths::LocalPaths;
 pub use options::{
-    LocalAtomicityRequirement,
-    LocalCopyOptions,
-    LocalCopySourceMode,
-    LocalCreateDirectoryOptions,
-    LocalDeleteOptions,
-    LocalDirectoryReopenPolicy,
-    LocalDurabilityRequirement,
-    LocalListOptions,
-    LocalMetadataPreservePolicy,
-    LocalReadOptions,
-    LocalRenameOptions,
-    LocalSymlinkPolicy,
-    LocalTempDirectoryOptions,
-    LocalTempFileOptions,
-    LocalWalkErrorPolicy,
-    LocalWriteMode,
+    LocalAtomicityRequirement, LocalCopyOptions, LocalCopySourceMode, LocalCreateDirectoryOptions,
+    LocalDeleteOptions, LocalDirectoryReopenPolicy, LocalDurabilityRequirement, LocalListOptions,
+    LocalMetadataPreservePolicy, LocalReadOptions, LocalRenameOptions, LocalSymlinkPolicy,
+    LocalTempDirectoryOptions, LocalTempFileOptions, LocalWalkErrorPolicy, LocalWriteMode,
     LocalWriteOptions,
 };
 pub use outcome::{
-    LocalCopyFailure,
-    LocalCopyFailureState,
-    LocalCopyMethod,
-    LocalCopyOutcome,
-    LocalCopyResult,
-    LocalCopyStats,
-    LocalCreateDirectoryOutcome,
-    LocalDeleteOutcome,
-    LocalPersistMethod,
-    LocalPersistOutcome,
-    LocalRenameFailure,
-    LocalRenameFailureState,
-    LocalRenameOutcome,
-    LocalRenameResult,
-    LocalWritePublicationMethod,
+    LocalCopyFailure, LocalCopyFailureState, LocalCopyMethod, LocalCopyOutcome, LocalCopyResult,
+    LocalCopyStats, LocalCreateDirectoryOutcome, LocalDeleteOutcome, LocalPersistMethod,
+    LocalPersistOutcome, LocalRenameFailure, LocalRenameFailureState, LocalRenameOutcome,
+    LocalRenameResult, LocalWritePublicationMethod,
 };
-pub use temp::{
-    LocalTempDirectory,
-    LocalTempFile,
-};
-pub use walk::{
-    LocalDirectoryEntry,
-    LocalDirectoryWalker,
-};
+pub use temp::{LocalTempDirectory, LocalTempFile};
+pub use walk::{LocalDirectoryEntry, LocalDirectoryWalker};
 pub use writer::{
-    LocalFileCommitError,
-    LocalFileWriter,
-    LocalWriteFailureState,
-    LocalWriteOutcome,
+    LocalFileCommitError, LocalFileWriter, LocalWriteFailureState, LocalWriteOutcome,
     LocalWriterState,
-};
-
-#[cfg(coverage)]
-pub use local::PathIoError;
-#[cfg(coverage)]
-pub use local::coverage_with_path_context;
-#[cfg(coverage)]
-pub use local::{
-    CoverageCopyDestinationAction,
-    coverage_decide_copy_destination,
-    coverage_is_enabled,
-    coverage_take,
-    coverage_take_on_nth,
-};
-#[cfg(coverage)]
-pub use local::{
-    coverage_absolute_path,
-    coverage_add_path_context,
-    coverage_canonicalize_existing_prefix,
-    coverage_clean_dir_path,
-    coverage_ensure_dir_path,
-    coverage_ensure_parent_path,
-    coverage_ensure_parent_path_with_sync_dirs,
-    coverage_remove_any_path,
-};
-#[cfg(coverage)]
-pub use local::{
-    coverage_inspect_copy_source_directory,
-    coverage_is_real_directory,
-    coverage_metadata_for_copy_source,
-    coverage_reject_destination_inside_source,
-};
-#[cfg(coverage)]
-pub use rooted::EntryKind as RootedEntryKind;
-#[cfg(coverage)]
-pub use rooted::Metadata as RootedMetadata;
-#[cfg(coverage)]
-pub use rooted::Permissions;
-#[cfg(coverage)]
-pub use rooted::coverage_entry_kind_from_mode;
-#[cfg(coverage)]
-pub use write::{
-    Mode as NativeWriteMode,
-    OpenOptions as NativeWriteOpenOptions,
 };
 
 pub(crate) use local::LocalRelativePath;
 
-#[cfg(not(coverage))]
 pub(crate) use local::{
-    LocalAtomicCommitError,
-    LocalAtomicDestinationState,
-    LocalAtomicWriteError,
-    LocalAtomicWriteOptions,
-    LocalAtomicWriteStage,
-    LocalCopyDirError,
-    LocalCopyDirOptions,
-    LocalCopyDirStage,
-    LocalCopyDirStats,
-};
-
-// Keep implementation-only option types visible to coverage integration tests
-// without expanding the normal public API.
-#[cfg(coverage)]
-pub use local::{
-    LocalAtomicCommitError,
-    LocalAtomicDestinationState,
-    LocalAtomicWriteError,
-    LocalAtomicWriteOptions,
-    LocalAtomicWriteStage,
-    LocalCopyDirError,
-    LocalCopyDirOptions,
-    LocalCopyDirStage,
-    LocalCopyDirStats,
+    LocalAtomicCommitError, LocalAtomicDestinationState, LocalAtomicWriteError,
+    LocalAtomicWriteOptions, LocalAtomicWriteStage, LocalCopyDirError, LocalCopyDirOptions,
+    LocalCopyDirStage, LocalCopyDirStats,
 };

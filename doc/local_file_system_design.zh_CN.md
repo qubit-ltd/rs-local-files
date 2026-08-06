@@ -25,7 +25,8 @@ path 和操作系统文件 API，为以下使用者提供统一实现：
 3. 在 Unix 与 Windows 上使用各自可靠的 descriptor/handle-relative 原语；
 4. 所有操作返回结构化结果和错误，部分成功不能压缩成普通 I/O error；
 5. 相对路径、symlink、hard link、overwrite 和部分成功有明确规则；
-6. 公共工具的主语义由统一类型的关联方法或实例方法组织；Host 命名空间保留薄封装的 free function 作为便捷入口，并在文档中明确其等价于 `LocalFileSystem::host()`；
+6. 公共工具的主语义由统一类型的关联方法或实例方法组织；Host 命名空间通过
+   `LocalFileSystem::host()` 提供与 rooted 对称的实例入口；
 7. 上层无需理解平台条件编译即可使用完整业务逻辑。
 
 非目标：
@@ -82,8 +83,8 @@ impl LocalFileSystem {
 ```
 
 这个类型不复制 `qubit-fs` 的 provider-neutral 门面：它只处理 native `Path`、本地
-option/result/error 和两种本地 namespace。Host 便利函数内部等价于临时构造
-`LocalFileSystem::host()`，供普通程序直接调用。
+option/result/error 和两种本地 namespace。Host 操作通过
+`LocalFileSystem::host()` 提供，供普通程序直接调用。
 
 ### 4.2 Rooted authority
 
@@ -186,8 +187,8 @@ percent-decoding，也不解释 provider hierarchy：
 `qubit_fs::NativePathCodec`，并把 `from_canonical_text`/`to_canonical_text` 委托给这里。平台字节、`OsStr`、
 WTF-8 等算法不得保留在 `qubit-fs` 或 adapter 中。
 
-Host 便捷操作保留同功能的 free function 别名，以避免简单调用必须先写
-`LocalFileSystem::host()`；实例方法仍是需要显式 authority 时的规范入口。
+Host 与 rooted 操作统一使用 `LocalFileSystem` 实例方法；需要访问进程可见命名空间时，
+先构造 `LocalFileSystem::host()`，再通过该实例调用具体操作。
 
 ### 4.4 有状态资源
 
@@ -320,7 +321,8 @@ Rooted recursive operation 默认继承 filesystem 的符号链接策略。跟�
 
 ### 7.1 统一入口
 
-文件与目录复制使用同一个 `LocalFileSystem::copy`（或 host 便利函数 `copy`）。
+文件与目录复制使用同一个 `LocalFileSystem::copy`；Host 操作通过
+`LocalFileSystem::host().copy` 调用。
 实现根据 source metadata 选择 file、directory 或拒绝
 特殊文件，不公开两套行为逐渐分叉的复制算法。
 
@@ -459,8 +461,8 @@ Native rename 成功、随后 parent durability 失败时必须返回 `Renamed`�
 capability 将原子 rename、原子 replace、临时资源无替换持久化、durable rename 和
 durable file copy 分别建模；adapter 不得用单一 no-replace 标志推断其他保证。
 能力快照只报告当前 target 是否实现了对应的完整操作协议，不探测挂载点，也不声称证明
-物理介质已经落盘。durable 能力分别通过 `supports_durable_rename()` 和
-`supports_durable_file_copy()` 查询，adapter 必须分别映射这两项能力。
+物理介质已经落盘。durable 能力分别通过 `implements_durable_rename()` 和
+`implements_durable_file_copy()` 查询，adapter 必须分别映射这两项能力。
 
 Walker drop 只释放本地 handle，不执行 namespace 修改。
 
