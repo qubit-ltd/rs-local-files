@@ -21,6 +21,7 @@ use qubit_local_files::{
     LocalCopyTypeConflictPolicy,
     LocalCreateDirectoryOptions,
     LocalDeleteOptions,
+    LocalDirectoryReopenPolicy,
     LocalDurabilityRequirement,
     LocalListOptions,
     LocalMetadataPreservePolicy,
@@ -116,6 +117,25 @@ fn test_list_and_read_option_builders_retain_policies() {
         LocalWalkErrorPolicy::FailFast,
         black_box(LocalListOptions::error_policy)(&listing),
     );
+    let listing = black_box(
+        LocalListOptions::with_reopen_policy
+            as fn(
+                LocalListOptions,
+                LocalDirectoryReopenPolicy,
+            ) -> LocalListOptions,
+    )(listing, LocalDirectoryReopenPolicy::Fail);
+    let listing = black_box(
+        LocalListOptions::with_error_policy
+            as fn(LocalListOptions, LocalWalkErrorPolicy) -> LocalListOptions,
+    )(listing, LocalWalkErrorPolicy::Continue);
+    assert_eq!(
+        LocalDirectoryReopenPolicy::Fail,
+        black_box(LocalListOptions::reopen_policy)(&listing),
+    );
+    assert_eq!(
+        LocalWalkErrorPolicy::Continue,
+        black_box(LocalListOptions::error_policy)(&listing),
+    );
 
     let timeout = Duration::from_millis(25);
     let reader = black_box(LocalReadOptions::new as fn() -> LocalReadOptions)();
@@ -137,6 +157,7 @@ fn test_copy_rename_and_write_option_builders_retain_policies() {
         .with_type_conflict(LocalCopyTypeConflictPolicy::Replace)
         .with_metadata_preservation(LocalMetadataPreservePolicy::Permissions)
         .with_symlink_policy(LocalSymlinkPolicy::FollowWithinScope)
+        .with_file_source()
         .with_tree_source()
         .with_parent()
         .with_atomicity(LocalAtomicityRequirement::Required)
@@ -152,6 +173,7 @@ fn test_copy_rename_and_write_option_builders_retain_policies() {
         Some(LocalSymlinkPolicy::FollowWithinScope)
     );
     assert_eq!(copy.source_mode(), LocalCopySourceMode::Tree);
+    assert!(copy.creates_parent());
     assert_eq!(copy.atomicity(), LocalAtomicityRequirement::Required);
     assert_eq!(copy.durability(), LocalDurabilityRequirement::Required);
 
@@ -205,6 +227,8 @@ fn test_temporary_resource_option_builders_retain_configuration() {
     assert_eq!(directory.prefix(), Some("directory-"));
     assert_eq!(directory.suffix(), Some(".tmp"));
     assert_eq!(directory.max_attempts(), 5);
+    assert!(!directory.creates_parent());
+    assert!(directory.with_create_parent().creates_parent());
 }
 
 /// Verifies every option type exposes the documented conservative default.
