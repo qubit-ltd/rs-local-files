@@ -55,6 +55,7 @@ use qubit_local_files::{
     LocalPersistStage,
     Permissions,
     PathIoError,
+    coverage_with_path_context,
     RootedEntryKind,
     RootedMetadata,
     coverage_entry_kind_from_mode,
@@ -764,4 +765,23 @@ fn test_internal_path_io_error_context() {
     assert!(error.to_string().contains("inspect entry"));
     assert!(error.to_string().contains("payload"));
     assert!(std::error::Error::source(&error).is_some());
+}
+
+/// Verifies context normalization preserves successes and enriches failures.
+#[cfg(coverage)]
+#[test]
+fn test_internal_io_result_context() {
+    assert_eq!(
+        7,
+        coverage_with_path_context(Ok::<_, std::io::Error>(7), "read", Path::new("payload"))
+            .expect("successful result should remain successful"),
+    );
+    let error = coverage_with_path_context::<()>(
+        Err(std::io::Error::from(std::io::ErrorKind::NotFound)),
+        "read",
+        Path::new("payload"),
+    )
+    .expect_err("error context should remain an error");
+    assert!(error.to_string().contains("payload"));
+    assert!(error.to_string().contains("read"));
 }

@@ -28,6 +28,8 @@ mod file_name_generation;
 mod file_name_validation;
 mod host_local_file_system;
 mod io_result_context;
+#[cfg(coverage)]
+pub use io_result_context::coverage_with_path_context;
 mod local_atomic_publication_mode;
 mod local_namespace;
 #[cfg(unix)]
