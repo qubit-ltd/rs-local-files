@@ -20,8 +20,6 @@ pub struct LocalCreateDirectoryOptions {
 
 impl LocalCreateDirectoryOptions {
     /// Creates options for creating exactly one directory entry.
-    #[cfg_attr(coverage, inline(never))]
-    #[cfg_attr(not(coverage), inline)]
     pub const fn new() -> Self {
         Self {
             recursive: false,
@@ -31,31 +29,23 @@ impl LocalCreateDirectoryOptions {
 
     /// Reports whether missing ancestors are created.
     #[must_use]
-    #[cfg_attr(coverage, inline(never))]
-    #[cfg_attr(not(coverage), inline(always))]
     pub const fn recursive(&self) -> bool {
         self.recursive
     }
 
     /// Reports whether an existing directory is accepted.
     #[must_use]
-    #[cfg_attr(coverage, inline(never))]
-    #[cfg_attr(not(coverage), inline(always))]
     pub const fn exists_ok(&self) -> bool {
         self.exists_ok
     }
 
     /// Enables recursive ancestor creation.
-    #[cfg_attr(coverage, inline(never))]
-    #[cfg_attr(not(coverage), inline(always))]
     pub const fn with_recursive(mut self) -> Self {
         self.recursive = true;
         self
     }
 
     /// Accepts an existing directory as a successful outcome.
-    #[cfg_attr(coverage, inline(never))]
-    #[cfg_attr(not(coverage), inline(always))]
     pub const fn with_exists_ok(mut self) -> Self {
         self.exists_ok = true;
         self

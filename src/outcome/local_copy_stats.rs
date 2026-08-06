@@ -35,15 +35,11 @@ impl LocalCopyStats {
 
     /// Coverage-only constructor for the native statistics conversion.
     #[cfg(coverage)]
-    pub fn coverage_from_internal(
-        stats: LocalCopyDirStats,
-    ) -> Self {
+    pub fn coverage_from_internal(stats: LocalCopyDirStats) -> Self {
         Self::from_internal(stats)
     }
 
     /// Creates statistics for one destination entry skipped before transfer.
-    #[cfg_attr(coverage, inline(never))]
-    #[cfg_attr(not(coverage), inline(always))]
     pub(crate) const fn skipped_one() -> Self {
         Self {
             files: 0,
@@ -59,8 +55,6 @@ impl LocalCopyStats {
     /// # Parameters
     ///
     /// - `stats`: Internal copy statistics.
-    #[cfg_attr(coverage, inline(never))]
-    #[cfg_attr(not(coverage), inline)]
     pub(crate) const fn from_internal(stats: LocalCopyDirStats) -> Self {
         Self {
             files: stats.files,
@@ -73,40 +67,30 @@ impl LocalCopyStats {
 
     /// Returns the number of regular files copied.
     #[must_use]
-    #[cfg_attr(coverage, inline(never))]
-    #[cfg_attr(not(coverage), inline(always))]
     pub const fn files(self) -> u64 {
         self.files
     }
 
     /// Returns the number of destination directories created.
     #[must_use]
-    #[cfg_attr(coverage, inline(never))]
-    #[cfg_attr(not(coverage), inline(always))]
     pub const fn directories(self) -> u64 {
         self.directories
     }
 
     /// Returns the number of regular-file bytes copied.
     #[must_use]
-    #[cfg_attr(coverage, inline(never))]
-    #[cfg_attr(not(coverage), inline(always))]
     pub const fn bytes(self) -> u64 {
         self.bytes
     }
 
     /// Returns the number of existing file destinations skipped.
     #[must_use]
-    #[cfg_attr(coverage, inline(never))]
-    #[cfg_attr(not(coverage), inline(always))]
     pub const fn skipped(self) -> u64 {
         self.skipped
     }
 
     /// Returns the number of destinations replaced or merged.
     #[must_use]
-    #[cfg_attr(coverage, inline(never))]
-    #[cfg_attr(not(coverage), inline(always))]
     pub const fn overwritten(self) -> u64 {
         self.overwritten
     }

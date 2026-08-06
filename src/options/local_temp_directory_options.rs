@@ -32,8 +32,6 @@ pub struct LocalTempDirectoryOptions {
 
 impl LocalTempDirectoryOptions {
     /// Creates default temporary-directory options.
-    #[cfg_attr(coverage, inline(never))]
-    #[cfg_attr(not(coverage), inline)]
     pub const fn new() -> Self {
         Self {
             parent: None,
@@ -47,47 +45,35 @@ impl LocalTempDirectoryOptions {
     /// Returns the configured parent, or `None` for the process temporary
     /// directory.
     #[must_use]
-    #[cfg_attr(coverage, inline(never))]
-    #[cfg_attr(not(coverage), inline(always))]
     pub fn parent(&self) -> Option<&Path> {
         self.parent.as_deref()
     }
 
     /// Returns the optional directory-name prefix.
     #[must_use]
-    #[cfg_attr(coverage, inline(never))]
-    #[cfg_attr(not(coverage), inline(always))]
     pub fn prefix(&self) -> Option<&str> {
         self.prefix.as_deref()
     }
 
     /// Returns the optional directory-name suffix.
     #[must_use]
-    #[cfg_attr(coverage, inline(never))]
-    #[cfg_attr(not(coverage), inline(always))]
     pub fn suffix(&self) -> Option<&str> {
         self.suffix.as_deref()
     }
 
     /// Returns the maximum random-name creation attempts.
     #[must_use]
-    #[cfg_attr(coverage, inline(never))]
-    #[cfg_attr(not(coverage), inline(always))]
     pub const fn max_attempts(&self) -> usize {
         self.max_attempts
     }
 
     /// Returns whether missing parent directories are created.
     #[must_use]
-    #[cfg_attr(coverage, inline(never))]
-    #[cfg_attr(not(coverage), inline(always))]
     pub const fn creates_parent(&self) -> bool {
         self.create_parent
     }
 
     /// Enables recursive creation of a missing parent directory.
-    #[cfg_attr(coverage, inline(never))]
-    #[cfg_attr(not(coverage), inline(always))]
     pub const fn with_create_parent(mut self) -> Self {
         self.create_parent = true;
         self
@@ -98,8 +84,6 @@ impl LocalTempDirectoryOptions {
     /// # Parameters
     ///
     /// - `parent`: Absolute or relative parent directory.
-    #[cfg_attr(coverage, inline(never))]
-    #[cfg_attr(not(coverage), inline(always))]
     pub fn with_parent(mut self, parent: &Path) -> Self {
         self.parent = Some(parent.to_path_buf());
         self
@@ -110,8 +94,6 @@ impl LocalTempDirectoryOptions {
     /// # Parameters
     ///
     /// - `prefix`: Prefix validated before entry creation.
-    #[cfg_attr(coverage, inline(never))]
-    #[cfg_attr(not(coverage), inline(always))]
     pub fn with_prefix(mut self, prefix: &str) -> Self {
         self.prefix = Some(prefix.to_owned());
         self
@@ -122,8 +104,6 @@ impl LocalTempDirectoryOptions {
     /// # Parameters
     ///
     /// - `suffix`: Suffix validated before entry creation.
-    #[cfg_attr(coverage, inline(never))]
-    #[cfg_attr(not(coverage), inline(always))]
     pub fn with_suffix(mut self, suffix: &str) -> Self {
         self.suffix = Some(suffix.to_owned());
         self
@@ -143,8 +123,6 @@ impl LocalTempDirectoryOptions {
 
 impl Default for LocalTempDirectoryOptions {
     /// Returns default temporary-directory options.
-    #[cfg_attr(coverage, inline(never))]
-    #[cfg_attr(not(coverage), inline)]
     fn default() -> Self {
         Self::new()
     }

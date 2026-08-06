@@ -44,8 +44,6 @@ pub fn coverage_with_path_context<T>(
 /// # Errors
 ///
 /// Returns the supplied error with path context when `result` is `Err`.
-#[cfg_attr(coverage, inline(never))]
-#[cfg_attr(not(coverage), inline)]
 pub(crate) fn with_path_context<T>(
     result: Result<T>,
     operation: &'static str,

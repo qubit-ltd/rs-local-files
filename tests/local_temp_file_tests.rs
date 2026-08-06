@@ -367,7 +367,8 @@ fn test_local_temp_file_persist_reports_indeterminate_install() {
     const COVERAGE_FAULT_ENV: &str = "QUBIT_LOCAL_FILES_COVERAGE_FAULT";
     if std::env::var_os(COVERAGE_FAULT_ENV).is_none() {
         let status = std::process::Command::new(
-            std::env::current_exe().expect("test executable should be available"),
+            std::env::current_exe()
+                .expect("test executable should be available"),
         )
         .arg("--exact")
         .arg(TEST_NAME)
@@ -379,9 +380,12 @@ fn test_local_temp_file_persist_reports_indeterminate_install() {
         return;
     }
 
-    let parent = tempfile::tempdir().expect("temporary parent should be created");
+    let parent =
+        tempfile::tempdir().expect("temporary parent should be created");
     let temporary = LocalFileSystem::host()
-        .create_temp_file(&LocalTempFileOptions::new().with_parent(parent.path()))
+        .create_temp_file(
+            &LocalTempFileOptions::new().with_parent(parent.path()),
+        )
         .expect("temporary file should be created");
     let target = parent.path().join("indeterminate-target");
     let error = temporary

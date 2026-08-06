@@ -30,8 +30,6 @@ impl LocalDeleteOutcome {
 
     /// Reports whether an entry was removed.
     #[must_use]
-    #[cfg_attr(coverage, inline(never))]
-    #[cfg_attr(not(coverage), inline(always))]
     pub const fn deleted(self) -> bool {
         self.deleted
     }

@@ -30,8 +30,6 @@ pub struct LocalPersistOutcome {
 
 impl LocalPersistOutcome {
     /// Creates a temporary-resource persistence outcome.
-    #[cfg_attr(coverage, inline(never))]
-    #[cfg_attr(not(coverage), inline)]
     pub(crate) const fn new(
         path: PathBuf,
         method: LocalPersistMethod,
@@ -48,39 +46,29 @@ impl LocalPersistOutcome {
 
     /// Returns the authority-local published path.
     #[must_use]
-    #[cfg_attr(coverage, inline(never))]
-    #[cfg_attr(not(coverage), inline(always))]
     pub fn path(&self) -> &Path {
         &self.path
     }
 
     /// Returns the native publication method.
-    #[cfg_attr(coverage, inline(never))]
-    #[cfg_attr(not(coverage), inline(always))]
     pub const fn method(&self) -> LocalPersistMethod {
         self.method
     }
 
     /// Reports whether publication was atomic.
     #[must_use]
-    #[cfg_attr(coverage, inline(never))]
-    #[cfg_attr(not(coverage), inline(always))]
     pub const fn atomic(&self) -> bool {
         self.atomic
     }
 
     /// Reports whether persistence durability was synchronized.
     #[must_use]
-    #[cfg_attr(coverage, inline(never))]
-    #[cfg_attr(not(coverage), inline(always))]
     pub const fn durable(&self) -> bool {
         self.durable
     }
 
     /// Returns the owned authority-local published path.
     #[must_use]
-    #[cfg_attr(coverage, inline(never))]
-    #[cfg_attr(not(coverage), inline(always))]
     pub fn into_path(self) -> PathBuf {
         self.path
     }

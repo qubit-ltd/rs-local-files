@@ -185,13 +185,15 @@ fn test_local_file_system_copy_conflict_policy_matrix() {
     LocalFileSystem::host()
         .copy(&source, &target, &LocalCopyOptions::new())
         .expect_err("existing file should fail under the default policy");
-    LocalFileSystem::host()
+    let outcome = LocalFileSystem::host()
         .copy(
             &source,
             &target,
-            &LocalCopyOptions::new().with_conflict(LocalCopyConflictPolicy::Overwrite),
+            &LocalCopyOptions::new()
+                .with_conflict(LocalCopyConflictPolicy::Overwrite),
         )
         .expect("overwrite policy should replace an existing file");
+    assert_eq!(1, outcome.stats().files());
     assert_eq!(b"source", fs::read(&target).unwrap().as_slice());
 
     fs::remove_file(&target).expect("file target should be removed");
@@ -216,16 +218,22 @@ fn test_recursive_copy_preserves_directory_permissions() {
     fs::set_permissions(&source, fs::Permissions::from_mode(0o750))
         .expect("source permissions should be configured");
 
-    LocalFileSystem::host()
+    let outcome = LocalFileSystem::host()
         .copy(
             &source,
             &target,
             &LocalCopyOptions::new()
                 .with_tree_source()
-                .with_metadata_preservation(LocalMetadataPreservePolicy::Permissions),
+                .with_metadata_preservation(
+                    LocalMetadataPreservePolicy::Permissions,
+                ),
         )
         .expect("recursive copy should preserve directory permissions");
-    assert_eq!(0o750, fs::metadata(&target).unwrap().permissions().mode() & 0o7777);
+    assert_eq!(1, outcome.stats().files());
+    assert_eq!(
+        0o750,
+        fs::metadata(&target).unwrap().permissions().mode() & 0o7777
+    );
 }
 
 /// Verifies recursive copies preserve nested final symlink entries instead of
