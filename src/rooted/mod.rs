@@ -20,6 +20,8 @@ pub use crate::local::LocalRootAtomicWriter as Writer;
 pub use entry::Entry;
 pub use entry_kind::EntryKind;
 pub use metadata::Metadata;
+#[cfg(coverage)]
+pub use metadata::coverage_entry_kind_from_mode;
 pub use path::Path;
 pub use permissions::Permissions;
 pub use root::Root;

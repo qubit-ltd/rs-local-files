@@ -54,6 +54,9 @@ use qubit_local_files::{
     LocalPersistFailureState,
     LocalPersistStage,
     Permissions,
+    RootedEntryKind,
+    RootedMetadata,
+    coverage_entry_kind_from_mode,
 };
 
 /// Verifies directory and deletion builders retain every configured policy.
@@ -696,4 +699,54 @@ fn test_internal_rooted_permissions_accessors() {
 
     let writable_without_mode = Permissions::from_read_only(false);
     assert_eq!(0o700, writable_without_mode.coverage_resolve_unix_mode(0o500));
+}
+
+/// Verifies coverage-only rooted metadata accessors and Unix special kinds.
+#[cfg(all(coverage, unix))]
+#[test]
+fn test_internal_rooted_metadata_accessors() {
+    use std::os::unix::fs::MetadataExt;
+
+    let directory = tempfile::tempdir().expect("metadata fixture directory should exist");
+    let path = directory.path().join("payload");
+    std::fs::write(&path, b"payload").expect("metadata fixture should be written");
+    let native = std::fs::metadata(&path).expect("native metadata should be available");
+    let metadata = RootedMetadata::coverage_from_native(&native);
+    let mut status: libc::stat = unsafe { std::mem::zeroed() };
+    status.st_mode = native.mode() as _;
+    status.st_size = native.size() as _;
+    status.st_atime = native.atime() as _;
+    status.st_atime_nsec = native.atime_nsec() as _;
+    status.st_mtime = native.mtime() as _;
+    status.st_mtime_nsec = native.mtime_nsec() as _;
+    status.st_ctime = native.ctime() as _;
+    status.st_ctime_nsec = native.ctime_nsec() as _;
+    status.st_dev = native.dev() as _;
+    status.st_ino = native.ino() as _;
+    let from_stat = RootedMetadata::coverage_from_stat(&status);
+    assert_eq!(RootedEntryKind::File, from_stat.kind());
+    assert_eq!(native.size(), from_stat.size());
+    let same = RootedMetadata::coverage_from_native(&native);
+    assert_eq!(RootedEntryKind::File, metadata.kind());
+    assert_eq!(7, metadata.size());
+    assert!(metadata.accessed_at().is_some());
+    assert!(metadata.modified_at().is_some());
+    assert!(metadata.created_at().is_some());
+    assert!(!metadata.permissions().is_read_only());
+    assert!(metadata.is_same_file(&same));
+    assert!(!metadata.is_same_file(&RootedMetadata::coverage_from_native(
+        &std::fs::metadata(directory.path()).unwrap(),
+    )));
+    assert_eq!(
+        RootedEntryKind::BlockDevice,
+        coverage_entry_kind_from_mode(libc::S_IFBLK as libc::mode_t),
+    );
+    assert_eq!(
+        RootedEntryKind::CharDevice,
+        coverage_entry_kind_from_mode(libc::S_IFCHR as libc::mode_t),
+    );
+    assert_eq!(
+        RootedEntryKind::Other,
+        coverage_entry_kind_from_mode(0o123 as libc::mode_t),
+    );
 }
