@@ -117,6 +117,17 @@ pub use internal::{
     coverage_decide_copy_destination,
     CoverageCopyDestinationAction,
 };
+#[cfg(coverage)]
+pub use internal::{
+    coverage_absolute_path,
+    coverage_add_path_context,
+    coverage_canonicalize_existing_prefix,
+    coverage_clean_dir_path,
+    coverage_ensure_dir_path,
+    coverage_ensure_parent_path,
+    coverage_ensure_parent_path_with_sync_dirs,
+    coverage_remove_any_path,
+};
 pub use local_persist_failure_state::LocalPersistFailureState;
 pub use local_persist_options::LocalPersistOptions;
 pub use local_persist_stage::LocalPersistStage;

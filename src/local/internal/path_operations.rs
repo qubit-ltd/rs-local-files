@@ -18,3 +18,14 @@ pub(crate) use path_management::{
     ensure_parent_path,
     ensure_parent_path_with_sync_dirs,
 };
+#[cfg(coverage)]
+pub use path_management::{
+    coverage_absolute_path,
+    coverage_add_path_context,
+    coverage_canonicalize_existing_prefix,
+    coverage_clean_dir_path,
+    coverage_ensure_dir_path,
+    coverage_ensure_parent_path,
+    coverage_ensure_parent_path_with_sync_dirs,
+    coverage_remove_any_path,
+};

@@ -63,6 +63,14 @@ use qubit_local_files::{
     coverage_take_on_nth,
     coverage_decide_copy_destination,
     CoverageCopyDestinationAction,
+    coverage_absolute_path,
+    coverage_add_path_context,
+    coverage_canonicalize_existing_prefix,
+    coverage_clean_dir_path,
+    coverage_ensure_dir_path,
+    coverage_ensure_parent_path,
+    coverage_ensure_parent_path_with_sync_dirs,
+    coverage_remove_any_path,
     RootedEntryKind,
     RootedMetadata,
     coverage_entry_kind_from_mode,
@@ -907,4 +915,75 @@ fn test_internal_copy_destination_policy_matrix() {
             )
         );
     }
+}
+
+/// Verifies coverage-only path-management operations across success and error
+/// cases.
+#[cfg(coverage)]
+#[test]
+fn test_internal_path_management_matrix() {
+    let root = tempfile::tempdir().expect("path-management root should exist");
+    let existing = root.path().join("existing");
+    std::fs::create_dir(&existing).expect("existing directory should be created");
+    assert!(coverage_absolute_path(Path::new("relative")).unwrap().is_absolute());
+    assert_eq!(
+        existing,
+        coverage_canonicalize_existing_prefix(&existing).unwrap()
+    );
+    let missing = root.path().join("missing/tail");
+    assert_eq!(
+        missing,
+        coverage_canonicalize_existing_prefix(&missing).unwrap()
+    );
+    let _ = coverage_canonicalize_existing_prefix(Path::new(""));
+
+    let created = root.path().join("created/nested");
+    coverage_ensure_dir_path(&created).expect("directory creation should succeed");
+    coverage_ensure_parent_path(&root.path().join("created/file"))
+        .expect("existing parent should be accepted");
+    coverage_ensure_parent_path(Path::new("file"))
+        .expect("a path without a parent should be accepted");
+    let sync_missing = root.path().join("sync/a/b/file");
+    let missing_dirs = coverage_ensure_parent_path_with_sync_dirs(&sync_missing)
+        .expect("missing parents should be created");
+    assert!(!missing_dirs.is_empty());
+    assert!(coverage_ensure_parent_path_with_sync_dirs(&sync_missing)
+        .unwrap()
+        .is_empty());
+    assert!(coverage_ensure_parent_path_with_sync_dirs(Path::new("file"))
+        .unwrap()
+        .is_empty());
+    let _ = coverage_ensure_parent_path_with_sync_dirs(Path::new("/tmp/file"));
+    let non_directory = root.path().join("non-directory");
+    std::fs::write(&non_directory, b"file").expect("file fixture should be written");
+    assert!(coverage_ensure_parent_path_with_sync_dirs(
+        &non_directory.join("child")
+    )
+    .is_err());
+    assert!(coverage_ensure_parent_path_with_sync_dirs(
+        Path::new("bad\0component/child")
+    )
+    .is_err());
+
+    let contextual = coverage_add_path_context(
+        std::io::Error::from(std::io::ErrorKind::NotFound),
+        "inspect",
+        Path::new("payload"),
+    );
+    assert!(contextual.to_string().contains("payload"));
+
+    let clean = root.path().join("clean");
+    std::fs::create_dir(&clean).expect("clean directory should be created");
+    let child = clean.join("child");
+    std::fs::write(&child, b"child").expect("child should be written");
+    coverage_clean_dir_path(&clean).expect("directory contents should be removed");
+    assert!(clean.is_dir());
+    let non_directory_child = clean.join("non-directory");
+    std::fs::write(&non_directory_child, b"child")
+        .expect("non-directory child should be written");
+    assert!(coverage_clean_dir_path(&non_directory_child).is_err());
+    let removable = root.path().join("removable");
+    std::fs::write(&removable, b"remove").expect("removable file should be written");
+    coverage_remove_any_path(&removable).expect("file should be removed");
+    coverage_remove_any_path(&clean).expect("directory should be removed");
 }

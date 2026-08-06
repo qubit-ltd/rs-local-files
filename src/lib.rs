@@ -160,6 +160,17 @@ pub use local::{
     coverage_decide_copy_destination,
     CoverageCopyDestinationAction,
 };
+#[cfg(coverage)]
+pub use local::{
+    coverage_absolute_path,
+    coverage_add_path_context,
+    coverage_canonicalize_existing_prefix,
+    coverage_clean_dir_path,
+    coverage_ensure_dir_path,
+    coverage_ensure_parent_path,
+    coverage_ensure_parent_path_with_sync_dirs,
+    coverage_remove_any_path,
+};
 
 pub(crate) use local::{
     LocalRelativePath,
