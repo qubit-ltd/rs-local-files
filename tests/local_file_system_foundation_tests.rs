@@ -11,7 +11,6 @@ use qubit_local_files::LocalFileKind;
 use qubit_local_files::{
     LocalFileNames,
     LocalFileSystem,
-    LocalFileSystemCapabilitySupport,
     SizeLimit,
 };
 #[cfg(unix)]
@@ -64,36 +63,17 @@ fn test_rooted_file_system_space_observes_nearest_existing_ancestor() {
     let _ = &space;
 }
 
-/// Verifies capability snapshots distinguish implementation from guarantee.
+/// Verifies capability snapshots expose independent operation guarantees.
 #[test]
-fn test_local_file_system_capabilities_report_support_levels() {
+fn test_local_file_system_capabilities_report_operation_support() {
     let capabilities = LocalFileSystem::host().capabilities();
 
-    assert_eq!(
-        LocalFileSystemCapabilitySupport::Implemented,
-        capabilities.atomic_rename_support(),
-    );
-    assert_eq!(
-        LocalFileSystemCapabilitySupport::Implemented,
-        capabilities.atomic_replace_support(),
-    );
-    assert_eq!(
-        LocalFileSystemCapabilitySupport::Implemented,
-        capabilities.atomic_temp_persist_support(),
-    );
-    assert_eq!(
-        LocalFileSystemCapabilitySupport::Unknown,
-        capabilities.durable_rename_support(),
-    );
-    assert_eq!(
-        LocalFileSystemCapabilitySupport::Unknown,
-        capabilities.durable_file_copy_support(),
-    );
-    assert!(capabilities.rooted_operations_implemented());
-    assert!(capabilities.atomic_rename_implemented());
-    assert!(capabilities.atomic_replace_implemented());
-    assert!(capabilities.atomic_temp_persist_implemented());
-    assert!(capabilities.directory_durability_implemented());
+    assert!(capabilities.supports_rooted_operations());
+    assert!(capabilities.supports_atomic_rename());
+    assert!(capabilities.supports_atomic_replace());
+    assert!(capabilities.supports_atomic_temp_persist());
+    assert_eq!(cfg!(unix), capabilities.supports_durable_rename());
+    assert_eq!(cfg!(unix), capabilities.supports_durable_file_copy(),);
 
     let rooted = tempfile::tempdir().expect("root should be created");
     let rooted_capabilities = LocalFileSystem::rooted(rooted.path())
@@ -108,9 +88,9 @@ fn test_local_file_system_capabilities_report_support_levels() {
 fn test_host_capabilities_match_host_no_replace_backend() {
     let capabilities = LocalFileSystem::host().capabilities();
     #[cfg(any(target_os = "linux", target_os = "macos", windows))]
-    assert!(capabilities.atomic_rename_implemented());
+    assert!(capabilities.supports_atomic_rename());
     #[cfg(not(any(target_os = "linux", target_os = "macos", windows)))]
-    assert!(!capabilities.atomic_rename_implemented());
+    assert!(!capabilities.supports_atomic_rename());
 }
 
 /// Verifies that generated names are portable single path components.
