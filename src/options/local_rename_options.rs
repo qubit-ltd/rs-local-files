@@ -22,7 +22,8 @@ pub struct LocalRenameOptions {
 
 impl LocalRenameOptions {
     /// Creates no-replace rename options without required durability.
-    #[inline]
+    #[cfg_attr(coverage, inline(never))]
+    #[cfg_attr(not(coverage), inline)]
     pub const fn new() -> Self {
         Self {
             overwrite: false,
@@ -32,26 +33,30 @@ impl LocalRenameOptions {
 
     /// Reports whether an existing destination may be replaced.
     #[must_use]
-    #[inline(always)]
+    #[cfg_attr(coverage, inline(never))]
+    #[cfg_attr(not(coverage), inline(always))]
     pub const fn overwrite(&self) -> bool {
         self.overwrite
     }
 
     /// Returns the requested durability.
-    #[inline(always)]
+    #[cfg_attr(coverage, inline(never))]
+    #[cfg_attr(not(coverage), inline(always))]
     pub const fn durability(&self) -> LocalDurabilityRequirement {
         self.durability
     }
 
     /// Allows replacement of an existing destination entry.
-    #[inline(always)]
+    #[cfg_attr(coverage, inline(never))]
+    #[cfg_attr(not(coverage), inline(always))]
     pub const fn with_overwrite(mut self) -> Self {
         self.overwrite = true;
         self
     }
 
     /// Sets the required durability.
-    #[inline(always)]
+    #[cfg_attr(coverage, inline(never))]
+    #[cfg_attr(not(coverage), inline(always))]
     pub const fn with_durability(
         mut self,
         requirement: LocalDurabilityRequirement,
