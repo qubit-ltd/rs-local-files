@@ -50,7 +50,6 @@
       "src/local_file_system.rs",
       "src/options/local_copy_options.rs",
       "src/options/local_list_options.rs",
-      "src/options/local_temp_directory_options.rs",
       "src/outcome/local_copy_failure.rs",
       "src/outcome/local_copy_stats.rs",
       "src/outcome/local_persist_outcome.rs",
