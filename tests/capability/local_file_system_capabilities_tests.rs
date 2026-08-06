@@ -2,6 +2,8 @@
 //    Copyright (c) 2026 Haixing Hu.
 //
 //    SPDX-License-Identifier: Apache-2.0
+//
+//    Licensed under the Apache License, Version 2.0.
 // =============================================================================
 //! Capability snapshot behavior tests.
 
@@ -12,10 +14,10 @@ use qubit_local_files::LocalFileSystem;
 fn test_local_file_system_capabilities_report_operation_protocols() {
     let capabilities = LocalFileSystem::host().capabilities();
 
-    assert!(capabilities.supports_rooted_operations());
-    assert!(capabilities.supports_atomic_rename());
-    assert!(capabilities.supports_atomic_replace());
-    assert!(capabilities.supports_atomic_temp_persist());
-    assert_eq!(cfg!(unix), capabilities.supports_durable_rename());
-    assert_eq!(cfg!(unix), capabilities.supports_durable_file_copy());
+    assert!(capabilities.implements_rooted_operations());
+    assert!(capabilities.implements_atomic_rename());
+    assert!(capabilities.implements_atomic_replace());
+    assert!(capabilities.implements_atomic_temp_persist());
+    assert_eq!(cfg!(unix), capabilities.implements_durable_rename());
+    assert_eq!(cfg!(unix), capabilities.implements_durable_file_copy());
 }

@@ -7,7 +7,6 @@
 // =============================================================================
 // qubit-style: allow source-test-pair
 // Covered by temporary resource integration tests.
-// qubit-style: allow coverage-cfg
 
 use std::path::{
     Path,

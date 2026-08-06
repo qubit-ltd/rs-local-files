@@ -30,6 +30,10 @@ include = [
 name = "qubit_local_files"
 doctest = true
 
+[features]
+default = []
+internal-test-support = []
+
 [dependencies]
 getrandom = "0.4"
 log = "0.4"
@@ -58,7 +62,7 @@ name = "local_files"
 harness = false
 
 [lints.rust]
-unexpected_cfgs = { level = "warn", check-cfg = ['cfg(coverage)'] }
+unexpected_cfgs = { level = "warn", check-cfg = [] }
 
 [package.metadata.rs-ci]
 sanitizers = ["address"]

@@ -9,12 +9,7 @@
 // qubit-style: allow source-test-pair
 
 use std::error::Error;
-use std::fmt::{
-    Debug,
-    Display,
-    Formatter,
-    Result as FmtResult,
-};
+use std::fmt::{Debug, Display, Formatter, Result as FmtResult};
 
 use crate::LocalAtomicWriteError;
 
@@ -38,27 +33,6 @@ pub struct LocalAtomicCommitError<T> {
 
 #[allow(dead_code)]
 impl<T> LocalAtomicCommitError<T> {
-    /// Coverage-only constructor for the private atomic-commit error value.
-    #[cfg(coverage)]
-    pub fn coverage_new(
-        error: LocalAtomicWriteError,
-        writer: Option<T>,
-    ) -> Self {
-        Self::new(error, writer)
-    }
-
-    /// Coverage-only access to finalization of retained writers.
-    #[cfg(coverage)]
-    pub fn coverage_into_final_error_with<F>(
-        self,
-        finalize_writer: F,
-    ) -> LocalAtomicWriteError
-    where
-        F: FnOnce(T, LocalAtomicWriteError) -> LocalAtomicWriteError,
-    {
-        self.into_final_error_with(finalize_writer)
-    }
-
     /// Creates an atomic-commit error with an optional retained writer.
     ///
     /// # Parameters
@@ -133,10 +107,7 @@ impl<T> LocalAtomicCommitError<T> {
     /// The finalized writer failure when recovery remained available, or the
     /// original terminal failure when no writer was retained.
     #[inline]
-    pub(crate) fn into_final_error_with<F>(
-        self,
-        finalize_writer: F,
-    ) -> LocalAtomicWriteError
+    pub(crate) fn into_final_error_with<F>(self, finalize_writer: F) -> LocalAtomicWriteError
     where
         F: FnOnce(T, LocalAtomicWriteError) -> LocalAtomicWriteError,
     {

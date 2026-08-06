@@ -7,7 +7,6 @@
 // =============================================================================
 //! Descriptor-relative atomic installation result normalization.
 // qubit-style: allow source-test-pair
-// qubit-style: allow coverage-cfg
 // Replacement failures after a validated live destination require externally
 // timed namespace or mount failures that public fixtures cannot force.
 
@@ -38,24 +37,22 @@ pub(in crate::local) fn install_rooted_atomic_file(
     destination_existed: bool,
 ) -> Result<(), (Error, LocalAtomicDestinationState, AtomicStagingState)> {
     if destination_existed {
-        #[cfg(coverage)]
-        let result = if super::coverage_fault::is_enabled("rooted-install")
-            || super::coverage_fault::is_enabled("rooted-install-indeterminate")
-            || super::coverage_fault::is_enabled("rooted-copy-install-cleanup")
+        #[cfg(feature = "internal-test-support")]
+        let result = if super::test_support::is_enabled("rooted-install")
+            || super::test_support::is_enabled("rooted-install-indeterminate")
+            || super::test_support::is_enabled("rooted-copy-install-cleanup")
         {
-            Err(Error::from_raw_os_error(libc::EIO))
+            Err(crate::local::test_fault_error())
         } else {
             staged_file.rename_to(destination)
         };
-        #[cfg(not(coverage))]
+        #[cfg(not(feature = "internal-test-support"))]
         let result = staged_file.rename_to(destination);
         match result {
             Ok(()) => Ok(()),
             Err(source) => {
                 let destination_state = replacement_error_state(&source);
-                let staging_state = if destination_state
-                    == LocalAtomicDestinationState::Unchanged
-                {
+                let staging_state = if destination_state == LocalAtomicDestinationState::Unchanged {
                     AtomicStagingState::Present
                 } else {
                     AtomicStagingState::Indeterminate

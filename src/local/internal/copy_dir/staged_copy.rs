@@ -7,55 +7,35 @@
 // =============================================================================
 //! Regular-file staging and commit for recursive directory copies.
 // qubit-style: allow source-test-pair
-// qubit-style: allow coverage-cfg
 // Private behavior is covered through public integration tests.
 
 use std::io::ErrorKind;
 use std::path::Path;
 
 use crate::{
-    LocalCopyConflictPolicy,
-    LocalCopyDirOptions,
-    LocalCopyDirStage,
-    LocalCopyDirStats,
+    LocalCopyConflictPolicy, LocalCopyDirOptions, LocalCopyDirStage, LocalCopyDirStats,
     LocalDurabilityRequirement,
 };
 
 use crate::local::internal::StagedFile;
 use crate::local::internal::file_move::{
-    move_file_without_replacing,
-    parent_dir_for,
-    replace_file,
+    move_file_without_replacing, parent_dir_for, replace_file,
 };
-use crate::local::internal::temp_entry::{
-    DEFAULT_TEMP_ENTRY_RETRIES,
-    create_temp_file_in_dir,
-};
-use crate::local::{
-    CopyDestinationAction,
-    decide_copy_destination,
-};
+use crate::local::internal::temp_entry::{DEFAULT_TEMP_ENTRY_RETRIES, create_temp_file_in_dir};
+use crate::local::{CopyDestinationAction, decide_copy_destination};
 
 use super::copy_dir_result::CopyDirResult;
 use super::destination::{
-    destination_metadata_if_exists,
-    existing_file_destination_should_be_skipped,
+    destination_metadata_if_exists, existing_file_destination_should_be_skipped,
     remove_destination_directory_if_unchanged,
 };
 use super::error::{
-    copy_dir_error,
-    copy_dir_error_with_staging,
-    record_copied_file,
-    record_overwritten_entry,
-    record_skipped_file,
-    with_copy_context,
+    copy_dir_error, copy_dir_error_with_staging, record_copied_file, record_overwritten_entry,
+    record_skipped_file, with_copy_context,
 };
 use super::opened_copy_source::OpenedCopySource;
 use super::source::is_real_directory;
-use super::staging_io::{
-    copy_into_staging,
-    preserve_staged_permissions,
-};
+use super::staging_io::{copy_into_staging, preserve_staged_permissions};
 
 /// Prefix used by recursive-copy staging files.
 const COPY_FILE_TEMP_PREFIX: &str = ".copy-file-";
@@ -146,8 +126,7 @@ pub(crate) fn copy_file_with_options(
         None => false,
     };
 
-    let (staged_file, copied, file_durable) =
-        stage_copy_file(src, dst, options, stats)?;
+    let (staged_file, copied, file_durable) = stage_copy_file(src, dst, options, stats)?;
     if !commit_staged_copy_file(
         src,
         dst,
@@ -227,12 +206,11 @@ pub(crate) fn copy_symlink_with_options(
         );
     }
     if action == CopyDestinationAction::Replace {
-        let removal =
-            if destination_metadata.as_ref().is_some_and(is_real_directory) {
-                remove_destination_directory_if_unchanged(dst)
-            } else {
-                std::fs::remove_file(dst)
-            };
+        let removal = if destination_metadata.as_ref().is_some_and(is_real_directory) {
+            remove_destination_directory_if_unchanged(dst)
+        } else {
+            std::fs::remove_file(dst)
+        };
         with_copy_context(
             removal,
             LocalCopyDirStage::PrepareDestination,
@@ -276,11 +254,7 @@ pub(crate) fn copy_symlink_with_options(
     Ok(())
 }
 
-fn create_symlink_entry(
-    link_target: &Path,
-    _source: &Path,
-    target: &Path,
-) -> std::io::Result<()> {
+fn create_symlink_entry(link_target: &Path, _source: &Path, target: &Path) -> std::io::Result<()> {
     #[cfg(unix)]
     {
         std::os::unix::fs::symlink(link_target, target)
@@ -339,40 +313,28 @@ fn stage_copy_file(
         stats,
     )?;
     let mut staged_file = StagedFile::new(temp_path, temp_file);
-    let opened_source = match OpenedCopySource::open(
-        src,
-        options.symlink_policy(),
-        options.open_retry_timeout(),
-    ) {
-        Ok(source) => source,
-        Err(source) => {
-            return Err(copy_dir_error_with_staging(
-                LocalCopyDirStage::CopyFileContents,
-                src,
-                dst,
-                stats,
-                source,
-                &mut staged_file,
-            ));
-        }
-    };
+    let opened_source =
+        match OpenedCopySource::open(src, options.symlink_policy(), options.open_retry_timeout()) {
+            Ok(source) => source,
+            Err(source) => {
+                return Err(copy_dir_error_with_staging(
+                    LocalCopyDirStage::CopyFileContents,
+                    src,
+                    dst,
+                    stats,
+                    source,
+                    &mut staged_file,
+                ));
+            }
+        };
     let (mut source_file, source_metadata) = opened_source.into_parts();
-    let copied =
-        copy_into_staging(src, dst, stats, &mut source_file, &mut staged_file)?;
+    let copied = copy_into_staging(src, dst, stats, &mut source_file, &mut staged_file)?;
     if options.preserves_permissions() {
-        preserve_staged_permissions(
-            src,
-            dst,
-            &source_metadata,
-            stats,
-            &mut staged_file,
-        )?;
+        preserve_staged_permissions(src, dst, &source_metadata, stats, &mut staged_file)?;
     }
     let file_durable = match options.durability() {
         LocalDurabilityRequirement::NotRequired => false,
-        LocalDurabilityRequirement::Preferred => {
-            sync_staged_file(&staged_file).is_ok()
-        }
+        LocalDurabilityRequirement::Preferred => sync_staged_file(&staged_file).is_ok(),
         LocalDurabilityRequirement::Required => {
             if let Err(source) = sync_staged_file(&staged_file) {
                 return Err(copy_dir_error_with_staging(
@@ -393,9 +355,9 @@ fn stage_copy_file(
 
 /// Synchronizes staged file data before its namespace publication.
 fn sync_staged_file(staged_file: &StagedFile) -> std::io::Result<()> {
-    #[cfg(coverage)]
-    if crate::local::coverage_fault_enabled("copy-staging-file-sync") {
-        return Err(std::io::Error::from_raw_os_error(libc::EIO));
+    #[cfg(feature = "internal-test-support")]
+    if crate::local::test_support_enabled("copy-staging-file-sync") {
+        return Err(crate::local::test_fault_error());
     }
     staged_file.file().sync_all()
 }
@@ -447,9 +409,7 @@ fn commit_staged_copy_file(
         LocalCopyConflictPolicy::Fail | LocalCopyConflictPolicy::Skip => {
             move_file_without_replacing(staged_file.path(), dst)
         }
-        LocalCopyConflictPolicy::Overwrite => {
-            replace_file(staged_file.path(), dst)
-        }
+        LocalCopyConflictPolicy::Overwrite => replace_file(staged_file.path(), dst),
     };
     match commit_result {
         Ok(()) => {
