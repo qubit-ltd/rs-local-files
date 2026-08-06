@@ -53,6 +53,8 @@ use qubit_local_files::{
     LocalPersistError,
     LocalPersistFailureState,
     LocalPersistStage,
+    NativeWriteMode,
+    NativeWriteOpenOptions,
     Permissions,
     PathIoError,
     coverage_with_path_context,
@@ -784,4 +786,20 @@ fn test_internal_io_result_context() {
     .expect_err("error context should remain an error");
     assert!(error.to_string().contains("payload"));
     assert!(error.to_string().contains("read"));
+}
+
+/// Verifies coverage-only native write-open option builders and defaults.
+#[cfg(coverage)]
+#[test]
+fn test_internal_native_write_open_options() {
+    let options = NativeWriteOpenOptions::default()
+        .with_parents()
+        .with_open_retry_timeout(Duration::from_millis(13));
+    assert_eq!(NativeWriteMode::CreateOrTruncate, options.mode());
+    assert!(options.creates_parents());
+    assert_eq!(Some(Duration::from_millis(13)), options.open_retry_timeout());
+    assert_eq!(
+        NativeWriteMode::AppendOrCreate,
+        NativeWriteOpenOptions::new(NativeWriteMode::AppendOrCreate).mode()
+    );
 }
