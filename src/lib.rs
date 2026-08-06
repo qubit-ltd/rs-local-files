@@ -147,6 +147,11 @@ pub use rooted::EntryKind as RootedEntryKind;
 pub use local::PathIoError;
 #[cfg(coverage)]
 pub use local::coverage_with_path_context;
+#[cfg(coverage)]
+pub use write::{
+    Mode as NativeWriteMode,
+    OpenOptions as NativeWriteOpenOptions,
+};
 
 pub(crate) use local::{
     LocalRelativePath,
