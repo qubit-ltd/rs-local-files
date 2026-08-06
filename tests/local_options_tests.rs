@@ -36,6 +36,12 @@ use qubit_local_files::{
     LocalWriteOptions,
 };
 
+#[cfg(coverage)]
+use qubit_local_files::{
+    LocalAtomicWriteOptions,
+    LocalCopyDirOptions,
+};
+
 /// Verifies directory and deletion builders retain every configured policy.
 #[test]
 fn test_directory_and_delete_option_builders_retain_policies() {
@@ -381,4 +387,18 @@ fn test_persist_options_expose_overwrite_policy() {
     )(LocalPersistOptions::new());
     assert!(black_box(LocalPersistOptions::creates_parent)(&with_parent));
     assert_eq!(LocalPersistOptions::new(), LocalPersistOptions::default());
+}
+
+/// Verifies coverage-only access to implementation option defaults and retry
+/// builders that are exercised indirectly by public operations.
+#[cfg(coverage)]
+#[test]
+fn test_internal_copy_and_atomic_option_defaults() {
+    let copy = LocalCopyDirOptions::default()
+        .with_open_retry_timeout(Duration::from_millis(3));
+    assert_eq!(Some(Duration::from_millis(3)), copy.open_retry_timeout());
+
+    let atomic = LocalAtomicWriteOptions::default()
+        .with_open_retry_timeout(Duration::from_millis(5));
+    assert_eq!(Some(Duration::from_millis(5)), atomic.open_retry_timeout());
 }
