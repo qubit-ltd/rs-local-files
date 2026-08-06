@@ -145,6 +145,8 @@ pub use rooted::coverage_entry_kind_from_mode;
 pub use rooted::EntryKind as RootedEntryKind;
 #[cfg(coverage)]
 pub use local::PathIoError;
+#[cfg(coverage)]
+pub use local::coverage_with_path_context;
 
 pub(crate) use local::{
     LocalRelativePath,
