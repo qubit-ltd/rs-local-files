@@ -143,6 +143,8 @@ pub use rooted::Metadata as RootedMetadata;
 pub use rooted::coverage_entry_kind_from_mode;
 #[cfg(coverage)]
 pub use rooted::EntryKind as RootedEntryKind;
+#[cfg(coverage)]
+pub use local::PathIoError;
 
 pub(crate) use local::{
     LocalRelativePath,

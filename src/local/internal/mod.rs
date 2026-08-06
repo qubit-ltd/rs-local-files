@@ -34,6 +34,8 @@ mod local_namespace;
 mod opened_atomic_destination;
 mod operation_policy;
 mod path_io_error;
+#[cfg(coverage)]
+pub use path_io_error::PathIoError;
 mod path_operations;
 mod publication_state;
 #[cfg(unix)]
