@@ -23,7 +23,6 @@
       "src/local/internal/host_local_file_system.rs",
       "src/local/internal/io_result_context.rs",
       "src/local/internal/opened_atomic_destination.rs",
-      "src/local/internal/path_io_error.rs",
       "src/local/internal/path_operations/path_management.rs",
       "src/local/internal/rooted_atomic_namespace_race.rs",
       "src/local/internal/rooted_atomic_write.rs",
