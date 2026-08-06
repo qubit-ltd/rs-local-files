@@ -49,11 +49,14 @@ pub(crate) fn space(file: &File) -> LocalFileSystemSpace {
             return LocalFileSystemSpace::new(None, None, None);
         }
         let stat = unsafe { stat.assume_init() };
-        let block_size = stat.f_frsize;
+        let block_size = stat.f_frsize as u128;
+        let bytes = |blocks| {
+            u64::try_from((blocks as u128).checked_mul(block_size)?).ok()
+        };
         LocalFileSystemSpace::new(
-            stat.f_blocks.checked_mul(block_size),
-            stat.f_bfree.checked_mul(block_size),
-            stat.f_bavail.checked_mul(block_size),
+            bytes(stat.f_blocks),
+            bytes(stat.f_bfree),
+            bytes(stat.f_bavail),
         )
     }
     #[cfg(not(unix))]

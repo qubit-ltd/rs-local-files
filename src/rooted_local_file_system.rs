@@ -21,7 +21,10 @@ use path_support::{
 };
 
 use std::{
-    fs,
+    fs::{
+        self,
+        File,
+    },
     io,
     path::Path,
     path::PathBuf,
@@ -154,13 +157,50 @@ impl RootedLocalFileSystem {
         self.limits
     }
 
-    /// Reads current space values from the opened root authority.
-    #[inline]
-    pub fn space(&self) -> LocalFileSystemSpace {
-        self.root
-            .try_clone_authority()
-            .map(|file| crate::capability::probe_space(&file))
-            .unwrap_or_else(|_| LocalFileSystemSpace::new(None, None, None))
+    /// Observes path limits at a rooted path or its nearest existing ancestor.
+    pub fn limits_at(
+        &self,
+        path: &Path,
+        symlink_policy: LocalSymlinkPolicy,
+    ) -> LocalResult<LocalFileSystemLimits> {
+        probe_rooted_file(
+            &self.root,
+            path,
+            symlink_policy,
+            LocalFileOperation::Metadata,
+        )
+        .map(|file| {
+            file.map_or_else(
+                || {
+                    LocalFileSystemLimits::new(
+                        crate::SizeLimit::Unknown,
+                        crate::SizeLimit::Unknown,
+                    )
+                },
+                |file| crate::capability::probe_limits(&file),
+            )
+        })
+    }
+
+    /// Observes dynamic space at a rooted path or its nearest existing
+    /// ancestor.
+    pub fn space_at(
+        &self,
+        path: &Path,
+        symlink_policy: LocalSymlinkPolicy,
+    ) -> LocalResult<LocalFileSystemSpace> {
+        probe_rooted_file(
+            &self.root,
+            path,
+            symlink_policy,
+            LocalFileOperation::Metadata,
+        )
+        .map(|file| {
+            file.map_or_else(
+                || LocalFileSystemSpace::new(None, None, None),
+                |file| crate::capability::probe_space(&file),
+            )
+        })
     }
 
     /// Creates a cleanup-owned temporary file below this opened root.
@@ -1511,6 +1551,59 @@ fn validate_rooted_list_start(
         }
     }
     Ok(())
+}
+
+/// Opens a rooted path or its nearest existing ancestor for probing.
+fn probe_rooted_file(
+    root: &crate::rooted::Root,
+    path: &Path,
+    symlink_policy: LocalSymlinkPolicy,
+    operation: LocalFileOperation,
+) -> LocalResult<Option<File>> {
+    let resolved =
+        resolve_rooted_path(root, path, symlink_policy, true, operation)?;
+    match resolved {
+        RootedResolvedPath::Host(path) => {
+            crate::local_file_system::probe_file(&path, operation)
+        }
+        RootedResolvedPath::Rooted(relative) => {
+            let mut candidate = relative.as_path().to_path_buf();
+            loop {
+                if candidate.as_os_str().is_empty() {
+                    return root.open_probe_root().map(Some).map_err(|error| {
+                        LocalFileError::from_io(
+                            operation,
+                            Some(path.to_path_buf()),
+                            None,
+                            error,
+                        )
+                    });
+                }
+                let candidate_path = crate::local::LocalRelativePath::new(
+                    &candidate,
+                )
+                .map_err(|error| {
+                    LocalFileError::from_io(
+                        operation,
+                        Some(path.to_path_buf()),
+                        None,
+                        error,
+                    )
+                })?;
+                match root.open_probe_file(&candidate_path) {
+                    Ok(file) => return Ok(Some(file)),
+                    Err(error)
+                        if error.kind() == std::io::ErrorKind::NotFound =>
+                    {
+                        if !candidate.pop() {
+                            return Ok(None);
+                        }
+                    }
+                    Err(_) => return Ok(None),
+                }
+            }
+        }
+    }
 }
 
 /// Resolves rooted path components while preserving final-entry semantics.

@@ -10,11 +10,10 @@
 // qubit-style: allow source-test-pair
 
 use std::fs::File;
-use std::io::Result;
-#[cfg(not(unix))]
 use std::io::{
     Error,
     ErrorKind,
+    Result,
 };
 use std::path::{
     Path,
@@ -45,6 +44,7 @@ use super::{
 };
 use super::{
     Entry,
+    EntryKind,
     Metadata,
     Permissions,
     Writer,
@@ -329,6 +329,55 @@ impl Root {
         path: &path::Path,
     ) -> Result<DirectoryReader> {
         DirectoryReader::open_descendant(&self.directory, &self.path, path)
+    }
+
+    /// Opens a regular file or directory for filesystem capability probing.
+    ///
+    /// The returned handle remains relative to this opened root authority, so
+    /// probing a descendant does not fall back to the diagnostic path.
+    #[cfg(any(unix, windows))]
+    pub(crate) fn open_probe_file(&self, path: &path::Path) -> Result<File> {
+        if path.as_path().as_os_str().is_empty() {
+            return self.try_clone_authority();
+        }
+        match self.symlink_metadata(path)?.kind() {
+            EntryKind::Directory => {
+                self.open_dir_reader(path)?.try_clone_directory()
+            }
+            EntryKind::File => {
+                self.open_reader(path, &read::OpenOptions::default())
+            }
+            _ => Err(Error::new(
+                ErrorKind::InvalidInput,
+                "capability probing requires a regular file or directory",
+            )),
+        }
+    }
+
+    /// Duplicates the root authority for capability probing.
+    #[cfg(any(unix, windows))]
+    pub(crate) fn open_probe_root(&self) -> Result<File> {
+        self.try_clone_authority()
+    }
+
+    /// Reports unsupported capability probing on platforms without rooted
+    /// descriptor primitives.
+    #[cfg(not(any(unix, windows)))]
+    pub(crate) fn open_probe_file(&self, _path: &path::Path) -> Result<File> {
+        Err(Error::new(
+            ErrorKind::Unsupported,
+            "rooted capability probing is unsupported on this platform",
+        ))
+    }
+
+    /// Reports unsupported capability probing on platforms without rooted
+    /// descriptor primitives.
+    #[cfg(not(any(unix, windows)))]
+    pub(crate) fn open_probe_root(&self) -> Result<File> {
+        Err(Error::new(
+            ErrorKind::Unsupported,
+            "rooted capability probing is unsupported on this platform",
+        ))
     }
 
     /// Creates one descendant directory.
