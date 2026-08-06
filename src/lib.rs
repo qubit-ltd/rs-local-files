@@ -137,6 +137,12 @@ pub use writer::{
 
 #[cfg(coverage)]
 pub use rooted::Permissions;
+#[cfg(coverage)]
+pub use rooted::Metadata as RootedMetadata;
+#[cfg(coverage)]
+pub use rooted::coverage_entry_kind_from_mode;
+#[cfg(coverage)]
+pub use rooted::EntryKind as RootedEntryKind;
 
 pub(crate) use local::{
     LocalRelativePath,
