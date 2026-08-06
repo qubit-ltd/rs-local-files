@@ -45,7 +45,6 @@
       "src/local/local_copy_dir_stats.rs",
       "src/local/local_persist_error.rs",
       "src/local/local_root_atomic_writer.rs",
-      "src/local_file_metadata.rs",
       "src/local_file_system.rs",
       "src/outcome/local_copy_failure.rs",
       "src/outcome/local_copy_stats.rs",
