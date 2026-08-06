@@ -8,10 +8,7 @@
 // qubit-style: allow source-test-pair
 // Covered by writer integration tests.
 
-use super::{
-    LocalWriteFailureState,
-    LocalWriterState,
-};
+use super::{LocalWriteFailureState, LocalWriterState};
 use crate::LocalWritePublicationMethod;
 
 /// Structured result of committing or aborting a local writer.

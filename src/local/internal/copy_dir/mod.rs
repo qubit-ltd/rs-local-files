@@ -15,20 +15,10 @@ mod facade;
 mod namespace_race;
 mod opened_copy_source;
 mod source;
-#[cfg(coverage)]
-pub use source::{
-    coverage_inspect_copy_source_directory,
-    coverage_is_real_directory,
-    coverage_metadata_for_copy_source,
-    coverage_reject_destination_inside_source,
-};
 mod staged_copy;
 mod staging_io;
 mod statistics_overflow;
 mod traversal;
 
-pub(crate) use facade::{
-    copy_dir_all_with_paths,
-    copy_dir_all_with_paths_scoped,
-};
+pub(crate) use facade::{copy_dir_all_with_paths, copy_dir_all_with_paths_scoped};
 pub(crate) use staged_copy::copy_file_with_options;

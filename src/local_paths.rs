@@ -5,28 +5,14 @@
 //
 //    Licensed under the Apache License, Version 2.0.
 // =============================================================================
-// qubit-style: allow coverage-cfg
 
 use std::{
     env,
-    ffi::{
-        OsStr,
-        OsString,
-    },
-    path::{
-        Component,
-        Path,
-        PathBuf,
-    },
+    ffi::{OsStr, OsString},
+    path::{Component, Path, PathBuf},
 };
 
-use crate::{
-    LocalFileError,
-    LocalFileErrorKind,
-    LocalFileOperation,
-    LocalPathCodec,
-    LocalResult,
-};
+use crate::{LocalFileError, LocalFileErrorKind, LocalFileOperation, LocalPathCodec, LocalResult};
 
 /// Native path validation, binding, and composition utilities.
 pub struct LocalPaths {
@@ -103,9 +89,7 @@ impl LocalPaths {
     ///
     /// Returns `LocalFileError` with `ComposePath` when the path is not a
     /// supported absolute shape or one component cannot be canonically encoded.
-    pub fn to_canonical_absolute_components(
-        path: &Path,
-    ) -> LocalResult<Vec<String>> {
+    pub fn to_canonical_absolute_components(path: &Path) -> LocalResult<Vec<String>> {
         to_canonical_absolute_components(path)
     }
 
@@ -123,9 +107,7 @@ impl LocalPaths {
     ///
     /// Returns `LocalFileError` with `ComposePath` when `path` contains a
     /// root, prefix, dot, parent, or no normal components.
-    pub fn to_canonical_relative_components(
-        path: &Path,
-    ) -> LocalResult<Vec<String>> {
+    pub fn to_canonical_relative_components(path: &Path) -> LocalResult<Vec<String>> {
         if path.is_absolute() || has_disallowed_component(path) {
             return Err(invalid_path_error());
         }
@@ -184,25 +166,17 @@ impl LocalPaths {
     pub fn bind_host_paths(paths: [&Path; 2]) -> LocalResult<[PathBuf; 2]> {
         let current = if paths.iter().any(|path| path.is_relative()) {
             Some(
-                current_directory_for_binding("local-paths-bind-cwd").map_err(
-                    |source| {
-                        LocalFileError::from_io(
-                            LocalFileOperation::BindPath,
-                            None,
-                            None,
-                            source,
-                        )
-                    },
-                )?,
+                current_directory_for_binding("local-paths-bind-cwd").map_err(|source| {
+                    LocalFileError::from_io(LocalFileOperation::BindPath, None, None, source)
+                })?,
             )
         } else {
             None
         };
         Ok(paths.map(|path| {
-            current.as_ref().map_or_else(
-                || path.to_path_buf(),
-                |directory| directory.join(path),
-            )
+            current
+                .as_ref()
+                .map_or_else(|| path.to_path_buf(), |directory| directory.join(path))
         }))
     }
 
@@ -221,10 +195,7 @@ impl LocalPaths {
     ///
     /// Returns `LocalFileError` when either input contains `.` or `..`, or when
     /// absolute and relative forms differ.
-    pub fn is_lexically_within(
-        path: &Path,
-        ancestor: &Path,
-    ) -> LocalResult<bool> {
+    pub fn is_lexically_within(path: &Path, ancestor: &Path) -> LocalResult<bool> {
         if path.is_absolute() != ancestor.is_absolute()
             || has_disallowed_component(path)
             || has_disallowed_component(ancestor)
@@ -254,10 +225,7 @@ impl LocalPaths {
     ///
     /// Returns `LocalFileError` for absolute, prefixed, dot, or parent
     /// components.
-    pub fn compose_descendant(
-        base: &Path,
-        descendant: &Path,
-    ) -> LocalResult<PathBuf> {
+    pub fn compose_descendant(base: &Path, descendant: &Path) -> LocalResult<PathBuf> {
         if descendant.as_os_str().is_empty()
             || descendant.is_absolute()
             || has_disallowed_component(descendant)
@@ -284,9 +252,9 @@ impl LocalPaths {
 #[must_use]
 #[inline]
 fn has_disallowed_component(path: &Path) -> bool {
-    path.components().any(|component| {
-        matches!(component, Component::CurDir | Component::ParentDir)
-    }) || has_raw_dot_component(path)
+    path.components()
+        .any(|component| matches!(component, Component::CurDir | Component::ParentDir))
+        || has_raw_dot_component(path)
 }
 
 /// Detects raw dot components that `Path::components` may normalize away.
@@ -329,7 +297,7 @@ fn invalid_path_error() -> LocalFileError {
 ///
 /// # Parameters
 ///
-/// - `fault`: Coverage-only fault selector for exercising the host I/O error
+/// - `fault`: Test-support-only fault selector for exercising the host I/O error
 ///   conversion.
 ///
 /// # Returns
@@ -339,12 +307,12 @@ fn invalid_path_error() -> LocalFileError {
 /// # Errors
 ///
 /// Returns the native current-directory I/O error, including a deterministic
-/// coverage-only error when the selected fault is enabled.
-#[cfg(coverage)]
+/// test-support-only error when the selected fault is enabled.
+#[cfg(feature = "internal-test-support")]
 #[inline]
 fn current_directory_for_binding(fault: &str) -> std::io::Result<PathBuf> {
-    if crate::local::coverage_fault_enabled(fault) {
-        return Err(std::io::Error::from_raw_os_error(libc::EIO));
+    if crate::local::test_support_enabled(fault) {
+        return Err(crate::local::test_fault_error());
     }
     env::current_dir()
 }
@@ -353,7 +321,7 @@ fn current_directory_for_binding(fault: &str) -> std::io::Result<PathBuf> {
 ///
 /// # Parameters
 ///
-/// - `fault`: Ignored outside coverage builds.
+/// - `fault`: Ignored when test support is disabled.
 ///
 /// # Returns
 ///
@@ -362,7 +330,7 @@ fn current_directory_for_binding(fault: &str) -> std::io::Result<PathBuf> {
 /// # Errors
 ///
 /// Returns the native current-directory I/O error.
-#[cfg(not(coverage))]
+#[cfg(not(feature = "internal-test-support"))]
 #[inline(always)]
 fn current_directory_for_binding(_fault: &str) -> std::io::Result<PathBuf> {
     env::current_dir()
@@ -412,11 +380,7 @@ fn decode_normal_component(component: &str) -> LocalResult<OsString> {
 fn decode_canonical_component(component: &str) -> LocalResult<OsString> {
     LocalPathCodec::from_canonical_text(component)
         .map_err(|error| {
-            LocalFileError::from_path_codec(
-                LocalFileOperation::ComposePath,
-                None,
-                error,
-            )
+            LocalFileError::from_path_codec(LocalFileOperation::ComposePath, None, error)
         })
         .map(|native| native.into_owned())
 }
@@ -460,11 +424,7 @@ fn encode_native_component(component: &OsStr) -> LocalResult<String> {
     LocalPathCodec::to_canonical_text(component)
         .map(|canonical| canonical.into_owned())
         .map_err(|error| {
-            LocalFileError::from_path_codec(
-                LocalFileOperation::ComposePath,
-                None,
-                error,
-            )
+            LocalFileError::from_path_codec(LocalFileOperation::ComposePath, None, error)
         })
 }
 
@@ -638,15 +598,11 @@ fn from_canonical_absolute_components<'a>(
     components: impl IntoIterator<Item = &'a str>,
 ) -> LocalResult<PathBuf> {
     let mut components = components.into_iter();
-    let (Some(root), Some(drive)) = (components.next(), components.next())
-    else {
+    let (Some(root), Some(drive)) = (components.next(), components.next()) else {
         return Err(invalid_path_error());
     };
     let native_drive = decode_canonical_component(drive)?;
-    if !root.is_empty()
-        || !is_windows_drive_component(drive)
-        || native_drive != drive
-    {
+    if !root.is_empty() || !is_windows_drive_component(drive) || native_drive != drive {
         return Err(invalid_path_error());
     }
     let mut path = PathBuf::from(format!("{drive}\\\\"));
@@ -783,9 +739,7 @@ fn has_raw_dot_component(path: &Path) -> bool {
         .encode_wide()
         .collect::<Vec<_>>()
         .split(separator)
-        .any(|component| {
-            component == [b'.' as u16] || component == [b'.' as u16; 2]
-        })
+        .any(|component| component == [b'.' as u16] || component == [b'.' as u16; 2])
 }
 
 /// Detects raw dot components on unsupported native targets.

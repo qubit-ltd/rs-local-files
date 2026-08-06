@@ -12,20 +12,6 @@ mod path_management;
 
 pub(super) use path_management::canonicalize_existing_prefix;
 pub(crate) use path_management::{
-    absolute_path,
-    add_path_context,
-    ensure_dir_path,
-    ensure_parent_path,
+    absolute_path, add_path_context, ensure_dir_path, ensure_parent_path,
     ensure_parent_path_with_sync_dirs,
-};
-#[cfg(coverage)]
-pub use path_management::{
-    coverage_absolute_path,
-    coverage_add_path_context,
-    coverage_canonicalize_existing_prefix,
-    coverage_clean_dir_path,
-    coverage_ensure_dir_path,
-    coverage_ensure_parent_path,
-    coverage_ensure_parent_path_with_sync_dirs,
-    coverage_remove_any_path,
 };

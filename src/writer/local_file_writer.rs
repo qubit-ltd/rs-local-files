@@ -5,32 +5,16 @@
 //
 //    Licensed under the Apache License, Version 2.0.
 // =============================================================================
-// qubit-style: allow coverage-cfg
 
 use std::{
-    io::{
-        self,
-        IoSlice,
-        Write,
-    },
-    path::{
-        Path,
-        PathBuf,
-    },
+    io::{self, IoSlice, Write},
+    path::{Path, PathBuf},
 };
 
 use crate::{
-    LocalDurabilityRequirement,
-    LocalFileCommitError,
-    LocalFileError,
-    LocalFileErrorKind,
-    LocalFileOperation,
-    LocalResult,
-    LocalWriteFailureState,
-    LocalWriteOptions,
-    LocalWriteOutcome,
-    LocalWritePublicationMethod,
-    LocalWriterState,
+    LocalDurabilityRequirement, LocalFileCommitError, LocalFileError, LocalFileErrorKind,
+    LocalFileOperation, LocalResult, LocalWriteFailureState, LocalWriteOptions, LocalWriteOutcome,
+    LocalWritePublicationMethod, LocalWriterState,
 };
 
 use super::internal::LocalFileWriterBackend;
@@ -133,20 +117,18 @@ impl LocalFileWriter {
             .take()
             .expect("open writer must retain one backend");
         match backend {
-            backend @ (LocalFileWriterBackend::Staged(_)
-            | LocalFileWriterBackend::Rooted(_)) => {
+            backend @ (LocalFileWriterBackend::Staged(_) | LocalFileWriterBackend::Rooted(_)) => {
                 self.commit_staged_backend(backend)
             }
             LocalFileWriterBackend::Append(mut file) => {
-                #[cfg(coverage)]
-                let flush_result = if crate::local::coverage_fault_enabled(
-                    "writer-append-commit-flush",
-                ) {
-                    Err(io::Error::from_raw_os_error(libc::EIO))
-                } else {
-                    file.flush()
-                };
-                #[cfg(not(coverage))]
+                #[cfg(feature = "internal-test-support")]
+                let flush_result =
+                    if crate::local::test_support_enabled("writer-append-commit-flush") {
+                        Err(crate::local::test_fault_error())
+                    } else {
+                        file.flush()
+                    };
+                #[cfg(not(feature = "internal-test-support"))]
                 let flush_result = file.flush();
                 if let Err(error) = flush_result {
                     return Err(LocalFileCommitError::new(
@@ -164,20 +146,16 @@ impl LocalFileWriter {
                 }
                 let durable = match self.options.durability() {
                     LocalDurabilityRequirement::NotRequired => false,
-                    LocalDurabilityRequirement::Preferred => {
-                        file.sync_all().is_ok()
-                    }
+                    LocalDurabilityRequirement::Preferred => file.sync_all().is_ok(),
                     LocalDurabilityRequirement::Required => {
-                        #[cfg(coverage)]
+                        #[cfg(feature = "internal-test-support")]
                         let sync_result =
-                            if crate::local::coverage_fault_enabled(
-                                "writer-append-required-sync",
-                            ) {
-                                Err(io::Error::from_raw_os_error(libc::EIO))
+                            if crate::local::test_support_enabled("writer-append-required-sync") {
+                                Err(crate::local::test_fault_error())
                             } else {
                                 file.sync_all()
                             };
-                        #[cfg(not(coverage))]
+                        #[cfg(not(feature = "internal-test-support"))]
                         let sync_result = file.sync_all();
                         if let Err(error) = sync_result {
                             return Err(LocalFileCommitError::new(
@@ -236,8 +214,7 @@ impl LocalFileWriter {
             .as_mut()
             .expect("open writer must retain one backend");
         match backend {
-            backend @ (LocalFileWriterBackend::Staged(_)
-            | LocalFileWriterBackend::Rooted(_)) => {
+            backend @ (LocalFileWriterBackend::Staged(_) | LocalFileWriterBackend::Rooted(_)) => {
                 if let Err(error) = backend.abort_staged() {
                     return Err(atomic_write_error(
                         &self.diagnostic_path,
@@ -256,15 +233,14 @@ impl LocalFileWriter {
                 ))
             }
             LocalFileWriterBackend::Append(file) => {
-                #[cfg(coverage)]
-                let flush_result = if crate::local::coverage_fault_enabled(
-                    "writer-append-abort-flush",
-                ) {
-                    Err(io::Error::from_raw_os_error(libc::EIO))
-                } else {
-                    file.flush()
-                };
-                #[cfg(not(coverage))]
+                #[cfg(feature = "internal-test-support")]
+                let flush_result =
+                    if crate::local::test_support_enabled("writer-append-abort-flush") {
+                        Err(crate::local::test_fault_error())
+                    } else {
+                        file.flush()
+                    };
+                #[cfg(not(feature = "internal-test-support"))]
                 let flush_result = file.flush();
                 if let Err(error) = flush_result {
                     return Err(writer_io_error(
@@ -275,8 +251,7 @@ impl LocalFileWriter {
                 }
                 self.state = LocalWriterState::Aborted;
                 self.failure_state = previous_failure_state.or_else(|| {
-                    (self.bytes_written > 0)
-                        .then_some(LocalWriteFailureState::Published)
+                    (self.bytes_written > 0).then_some(LocalWriteFailureState::Published)
                 });
                 Ok(LocalWriteOutcome::new(
                     self.state,
@@ -310,8 +285,7 @@ impl LocalFileWriter {
             Err(commit_error) => {
                 let (error, retained) = commit_error.into_parts();
                 let state = atomic_destination_state(error.destination_state());
-                let retained =
-                    retained.map(|backend| self.retain_backend(backend));
+                let retained = retained.map(|backend| self.retain_backend(backend));
                 Err(LocalFileCommitError::new(
                     publication_error(
                         atomic_write_error(
@@ -369,10 +343,7 @@ impl LocalFileWriter {
     ///
     /// The original result.
     #[inline]
-    fn observe_stream_result<T>(
-        &mut self,
-        result: io::Result<T>,
-    ) -> io::Result<T> {
+    fn observe_stream_result<T>(&mut self, result: io::Result<T>) -> io::Result<T> {
         if result.is_err() {
             self.failure_state = Some(LocalWriteFailureState::Indeterminate);
         }
@@ -392,12 +363,8 @@ impl Write for LocalFileWriter {
             ));
         }
         let result = match self.backend.as_mut() {
-            Some(LocalFileWriterBackend::Staged(writer)) => {
-                writer.write(buffer)
-            }
-            Some(LocalFileWriterBackend::Rooted(writer)) => {
-                writer.write(buffer)
-            }
+            Some(LocalFileWriterBackend::Staged(writer)) => writer.write(buffer),
+            Some(LocalFileWriterBackend::Rooted(writer)) => writer.write(buffer),
             Some(LocalFileWriterBackend::Append(file)) => file.write(buffer),
             None => unreachable!("open writer must retain one backend"),
         };
@@ -417,15 +384,9 @@ impl Write for LocalFileWriter {
             ));
         }
         let result = match self.backend.as_mut() {
-            Some(LocalFileWriterBackend::Staged(writer)) => {
-                writer.write_vectored(buffers)
-            }
-            Some(LocalFileWriterBackend::Rooted(writer)) => {
-                writer.write_vectored(buffers)
-            }
-            Some(LocalFileWriterBackend::Append(file)) => {
-                file.write_vectored(buffers)
-            }
+            Some(LocalFileWriterBackend::Staged(writer)) => writer.write_vectored(buffers),
+            Some(LocalFileWriterBackend::Rooted(writer)) => writer.write_vectored(buffers),
+            Some(LocalFileWriterBackend::Append(file)) => file.write_vectored(buffers),
             None => unreachable!("open writer must retain one backend"),
         };
         let written = self.observe_stream_result(result)?;
@@ -470,9 +431,7 @@ fn atomic_destination_state(
         | crate::local::LocalAtomicDestinationState::Missing => {
             LocalWriteFailureState::NotPublished
         }
-        crate::local::LocalAtomicDestinationState::Replaced => {
-            LocalWriteFailureState::Published
-        }
+        crate::local::LocalAtomicDestinationState::Replaced => LocalWriteFailureState::Published,
         crate::local::LocalAtomicDestinationState::Indeterminate => {
             LocalWriteFailureState::Indeterminate
         }
@@ -513,11 +472,7 @@ fn atomic_write_error(
 /// Structured writer error.
 #[must_use]
 #[inline(always)]
-fn writer_io_error(
-    path: &Path,
-    operation: LocalFileOperation,
-    error: io::Error,
-) -> LocalFileError {
+fn writer_io_error(path: &Path, operation: LocalFileOperation, error: io::Error) -> LocalFileError {
     LocalFileError::from_io(operation, Some(path.to_path_buf()), None, error)
 }
 
@@ -560,17 +515,12 @@ fn writer_state_error(
 /// # Returns
 ///
 /// Error classified consistently with the observable publication state.
-fn publication_error(
-    error: LocalFileError,
-    state: LocalWriteFailureState,
-) -> LocalFileError {
+fn publication_error(error: LocalFileError, state: LocalWriteFailureState) -> LocalFileError {
     match state {
         LocalWriteFailureState::NotPublished => error,
         LocalWriteFailureState::Published => {
             error.with_kind(LocalFileErrorKind::PublicationIncomplete)
         }
-        LocalWriteFailureState::Indeterminate => {
-            error.with_kind(LocalFileErrorKind::Indeterminate)
-        }
+        LocalWriteFailureState::Indeterminate => error.with_kind(LocalFileErrorKind::Indeterminate),
     }
 }
