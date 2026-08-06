@@ -5,12 +5,6 @@
 //
 //    Licensed under the Apache License, Version 2.0.
 // =============================================================================
-// qubit-style: allow source-test-pair
-// Covered by public capability integration tests.
-// qubit-style: allow coverage-cfg
-
-use super::LocalFileSystemCapabilitySupport;
-
 /// Immutable snapshot of filesystem mechanisms implemented by this build.
 ///
 /// These flags describe code paths available for the current target. They do
@@ -27,23 +21,14 @@ pub struct LocalFileSystemCapabilities {
     atomic_replace: bool,
     /// Whether native atomic no-replace persistence is implemented.
     atomic_temp_persist: bool,
-    /// Whether directory durability synchronization is implemented.
-    directory_durability: bool,
+    /// Whether durable rename publication is implemented.
+    durable_rename: bool,
+    /// Whether durable file-copy publication is implemented.
+    durable_file_copy: bool,
 }
 
 impl LocalFileSystemCapabilities {
-    #[cfg_attr(coverage, inline(never))]
-    #[cfg_attr(not(coverage), inline(always))]
-    const fn support(implemented: bool) -> LocalFileSystemCapabilitySupport {
-        match implemented {
-            true => LocalFileSystemCapabilitySupport::Implemented,
-            false => LocalFileSystemCapabilitySupport::Unknown,
-        }
-    }
-
     /// Detects mechanisms compiled for the current target platform.
-    #[cfg_attr(coverage, inline(never))]
-    #[cfg_attr(not(coverage), inline)]
     pub(crate) const fn detect_host() -> Self {
         Self {
             rooted_operations: cfg!(any(unix, windows)),
@@ -58,13 +43,12 @@ impl LocalFileSystemCapabilities {
                 target_os = "macos",
                 windows
             )),
-            directory_durability: cfg!(unix),
+            durable_rename: cfg!(unix),
+            durable_file_copy: cfg!(unix),
         }
     }
 
     /// Detects mechanisms compiled for a rooted authority on this target.
-    #[cfg_attr(coverage, inline(never))]
-    #[cfg_attr(not(coverage), inline)]
     pub(crate) const fn detect_rooted() -> Self {
         Self {
             rooted_operations: cfg!(any(unix, windows)),
@@ -83,98 +67,46 @@ impl LocalFileSystemCapabilities {
                 target_os = "ios",
                 windows
             )),
-            directory_durability: cfg!(unix),
+            durable_rename: cfg!(unix),
+            durable_file_copy: cfg!(unix),
         }
     }
 
     /// Reports whether secure rooted operations are implemented.
     #[must_use]
-    #[cfg_attr(coverage, inline(never))]
-    #[cfg_attr(not(coverage), inline(always))]
-    pub const fn rooted_operations_implemented(self) -> bool {
+    pub const fn supports_rooted_operations(self) -> bool {
         self.rooted_operations
     }
 
     /// Reports whether native atomic rename is implemented.
     #[must_use]
-    #[cfg_attr(coverage, inline(never))]
-    #[cfg_attr(not(coverage), inline(always))]
-    pub const fn atomic_rename_implemented(self) -> bool {
+    pub const fn supports_atomic_rename(self) -> bool {
         self.atomic_rename
-    }
-
-    /// Returns the support level for native atomic rename.
-    #[cfg_attr(coverage, inline(never))]
-    #[cfg_attr(not(coverage), inline(always))]
-    pub const fn atomic_rename_support(
-        self,
-    ) -> LocalFileSystemCapabilitySupport {
-        Self::support(self.atomic_rename)
     }
 
     /// Reports whether native atomic replacement is implemented.
     #[must_use]
-    #[cfg_attr(coverage, inline(never))]
-    #[cfg_attr(not(coverage), inline(always))]
-    pub const fn atomic_replace_implemented(self) -> bool {
+    pub const fn supports_atomic_replace(self) -> bool {
         self.atomic_replace
-    }
-
-    /// Returns the support level for native atomic replacement.
-    #[cfg_attr(coverage, inline(never))]
-    #[cfg_attr(not(coverage), inline(always))]
-    pub const fn atomic_replace_support(
-        self,
-    ) -> LocalFileSystemCapabilitySupport {
-        Self::support(self.atomic_replace)
     }
 
     /// Reports whether atomic no-replace temporary persistence is implemented.
     #[must_use]
-    #[cfg_attr(coverage, inline(never))]
-    #[cfg_attr(not(coverage), inline(always))]
-    pub const fn atomic_temp_persist_implemented(self) -> bool {
+    pub const fn supports_atomic_temp_persist(self) -> bool {
         self.atomic_temp_persist
     }
 
-    /// Returns the support level for atomic no-replace temporary persistence.
-    #[cfg_attr(coverage, inline(never))]
-    #[cfg_attr(not(coverage), inline(always))]
-    pub const fn atomic_temp_persist_support(
-        self,
-    ) -> LocalFileSystemCapabilitySupport {
-        Self::support(self.atomic_temp_persist)
-    }
-
-    /// Reports whether parent-directory durability synchronization is
-    /// implemented.
+    /// Reports whether the full durable rename publication protocol is
+    /// implemented for this target.
     #[must_use]
-    #[cfg_attr(coverage, inline(never))]
-    #[cfg_attr(not(coverage), inline(always))]
-    pub const fn directory_durability_implemented(self) -> bool {
-        self.directory_durability
+    pub const fn supports_durable_rename(self) -> bool {
+        self.durable_rename
     }
 
-    /// Returns the support level for durable rename publication.
-    ///
-    /// Directory synchronization is implemented on supported targets, but
-    /// this snapshot does not probe the active mount. Advertising a durable
-    /// guarantee therefore remains intentionally conservative.
-    #[cfg_attr(coverage, inline(never))]
-    #[cfg_attr(not(coverage), inline(always))]
-    pub const fn durable_rename_support(
-        self,
-    ) -> LocalFileSystemCapabilitySupport {
-        let _ = self;
-        LocalFileSystemCapabilitySupport::Unknown
-    }
-
-    /// Returns the support level for durable file-copy publication.
-    #[cfg_attr(coverage, inline(never))]
-    #[cfg_attr(not(coverage), inline(always))]
-    pub const fn durable_file_copy_support(
-        self,
-    ) -> LocalFileSystemCapabilitySupport {
-        self.durable_rename_support()
+    /// Reports whether the full durable file-copy publication protocol is
+    /// implemented for this target.
+    #[must_use]
+    pub const fn supports_durable_file_copy(self) -> bool {
+        self.durable_file_copy
     }
 }

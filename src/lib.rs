@@ -40,7 +40,6 @@ mod writer;
 
 pub use capability::{
     LocalFileSystemCapabilities,
-    LocalFileSystemCapabilitySupport,
     LocalFileSystemLimits,
     LocalFileSystemSpace,
     SizeLimit,
@@ -136,29 +135,16 @@ pub use writer::{
 };
 
 #[cfg(coverage)]
-pub use rooted::Permissions;
-#[cfg(coverage)]
-pub use rooted::Metadata as RootedMetadata;
-#[cfg(coverage)]
-pub use rooted::coverage_entry_kind_from_mode;
-#[cfg(coverage)]
-pub use rooted::EntryKind as RootedEntryKind;
-#[cfg(coverage)]
 pub use local::PathIoError;
 #[cfg(coverage)]
 pub use local::coverage_with_path_context;
 #[cfg(coverage)]
-pub use write::{
-    Mode as NativeWriteMode,
-    OpenOptions as NativeWriteOpenOptions,
-};
-#[cfg(coverage)]
 pub use local::{
+    CoverageCopyDestinationAction,
+    coverage_decide_copy_destination,
     coverage_is_enabled,
     coverage_take,
     coverage_take_on_nth,
-    coverage_decide_copy_destination,
-    CoverageCopyDestinationAction,
 };
 #[cfg(coverage)]
 pub use local::{
@@ -178,10 +164,21 @@ pub use local::{
     coverage_metadata_for_copy_source,
     coverage_reject_destination_inside_source,
 };
-
-pub(crate) use local::{
-    LocalRelativePath,
+#[cfg(coverage)]
+pub use rooted::EntryKind as RootedEntryKind;
+#[cfg(coverage)]
+pub use rooted::Metadata as RootedMetadata;
+#[cfg(coverage)]
+pub use rooted::Permissions;
+#[cfg(coverage)]
+pub use rooted::coverage_entry_kind_from_mode;
+#[cfg(coverage)]
+pub use write::{
+    Mode as NativeWriteMode,
+    OpenOptions as NativeWriteOpenOptions,
 };
+
+pub(crate) use local::LocalRelativePath;
 
 #[cfg(not(coverage))]
 pub(crate) use local::{
@@ -190,8 +187,8 @@ pub(crate) use local::{
     LocalAtomicWriteError,
     LocalAtomicWriteOptions,
     LocalAtomicWriteStage,
-    LocalCopyDirOptions,
     LocalCopyDirError,
+    LocalCopyDirOptions,
     LocalCopyDirStage,
     LocalCopyDirStats,
 };
@@ -203,10 +200,10 @@ pub use local::{
     LocalAtomicCommitError,
     LocalAtomicDestinationState,
     LocalAtomicWriteError,
-    LocalAtomicWriteStage,
     LocalAtomicWriteOptions,
-    LocalCopyDirOptions,
+    LocalAtomicWriteStage,
     LocalCopyDirError,
+    LocalCopyDirOptions,
     LocalCopyDirStage,
     LocalCopyDirStats,
 };
