@@ -133,8 +133,10 @@ fn test_local_temp_file_uses_private_cleanup_sandbox() {
         .expect("temporary file should have a sandbox parent")
         .to_path_buf();
 
-    assert!(resource_path.starts_with(parent.path()));
-    assert_ne!(sandbox, parent.path());
+    let canonical_parent = fs::canonicalize(parent.path())
+        .expect("temporary parent should canonicalize");
+    assert!(resource_path.starts_with(&canonical_parent));
+    assert_ne!(sandbox, canonical_parent);
     assert!(sandbox.is_dir());
     #[cfg(unix)]
     {
