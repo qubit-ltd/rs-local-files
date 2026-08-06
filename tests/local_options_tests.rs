@@ -53,6 +53,7 @@ use qubit_local_files::{
     LocalPersistError,
     LocalPersistFailureState,
     LocalPersistStage,
+    Permissions,
 };
 
 /// Verifies directory and deletion builders retain every configured policy.
@@ -677,4 +678,22 @@ fn test_internal_copy_failure_conversion_and_parts() {
     assert_eq!(0, stats.files());
     assert_eq!(Some(Path::new("temporary").to_path_buf()), staging);
     assert!(cleanup.is_some());
+}
+
+/// Verifies coverage-only rooted permission values and Unix-mode resolution.
+#[cfg(coverage)]
+#[test]
+fn test_internal_rooted_permissions_accessors() {
+    let writable = Permissions::from_unix_mode(0o2750);
+    assert!(!writable.is_read_only());
+    assert_eq!(Some(0o2750), writable.unix_mode());
+    assert_eq!(0o2750, writable.coverage_resolve_unix_mode(0o600));
+
+    let read_only = Permissions::from_read_only(true);
+    assert!(read_only.is_read_only());
+    assert_eq!(None, read_only.unix_mode());
+    assert_eq!(0o400, read_only.coverage_resolve_unix_mode(0o600));
+
+    let writable_without_mode = Permissions::from_read_only(false);
+    assert_eq!(0o700, writable_without_mode.coverage_resolve_unix_mode(0o500));
 }
