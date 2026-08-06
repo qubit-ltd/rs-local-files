@@ -32,3 +32,10 @@ path = "fuzz_targets/lifecycle.rs"
 test = false
 doc = false
 bench = false
+
+[[bin]]
+name = "rooted_lifecycle"
+path = "fuzz_targets/rooted_lifecycle.rs"
+test = false
+doc = false
+bench = false
