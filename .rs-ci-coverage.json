@@ -57,8 +57,7 @@
       "src/temp/local_temp_file.rs",
       "src/walk/local_directory_walker.rs",
       "src/write/open_options.rs",
-      "src/writer/internal/local_file_writer_backend.rs",
-      "src/writer/local_file_commit_error.rs"
+      "src/writer/internal/local_file_writer_backend.rs"
     ]
   }
 }

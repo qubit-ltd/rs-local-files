@@ -54,13 +54,15 @@ impl LocalFileCommitError {
 
     /// Returns the structured local filesystem failure.
     #[must_use]
-    #[inline(always)]
+    #[cfg_attr(coverage, inline(never))]
+    #[cfg_attr(not(coverage), inline(always))]
     pub const fn error(&self) -> &LocalFileError {
         &self.error
     }
 
     /// Returns the established publication state.
-    #[inline(always)]
+    #[cfg_attr(coverage, inline(never))]
+    #[cfg_attr(not(coverage), inline(always))]
     pub const fn state(&self) -> LocalWriteFailureState {
         self.state
     }
@@ -68,14 +70,16 @@ impl LocalFileCommitError {
     /// Returns a retryable writer, or `None` after publication may have
     /// started.
     #[must_use]
-    #[inline(always)]
+    #[cfg_attr(coverage, inline(never))]
+    #[cfg_attr(not(coverage), inline(always))]
     pub fn writer(&self) -> Option<&LocalFileWriter> {
         self.writer.as_deref()
     }
 
     /// Consumes the failure into its error, state, and optional retryable
     /// writer.
-    #[inline]
+    #[cfg_attr(coverage, inline(never))]
+    #[cfg_attr(not(coverage), inline)]
     pub fn into_parts(
         self,
     ) -> (
@@ -97,7 +101,8 @@ impl fmt::Display for LocalFileCommitError {
 
 impl Error for LocalFileCommitError {
     /// Returns the structured local filesystem failure.
-    #[inline(always)]
+    #[cfg_attr(coverage, inline(never))]
+    #[cfg_attr(not(coverage), inline(always))]
     fn source(&self) -> Option<&(dyn Error + 'static)> {
         Some(&self.error)
     }
