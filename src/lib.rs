@@ -140,8 +140,6 @@ pub(crate) use local::{
     LocalAtomicDestinationState,
     LocalAtomicWriteError,
     LocalAtomicWriteStage,
-    LocalCopyDirError,
-    LocalCopyDirStage,
     LocalRelativePath,
 };
 
@@ -149,6 +147,8 @@ pub(crate) use local::{
 pub(crate) use local::{
     LocalAtomicWriteOptions,
     LocalCopyDirOptions,
+    LocalCopyDirError,
+    LocalCopyDirStage,
     LocalCopyDirStats,
 };
 
@@ -158,5 +158,7 @@ pub(crate) use local::{
 pub use local::{
     LocalAtomicWriteOptions,
     LocalCopyDirOptions,
+    LocalCopyDirError,
+    LocalCopyDirStage,
     LocalCopyDirStats,
 };
