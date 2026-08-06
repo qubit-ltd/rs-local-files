@@ -257,7 +257,7 @@ impl LocalFileSystem {
                         )
                     },
                 )?;
-                Ok(rooted.limits())
+                rooted.limits_at(path, self.symlink_policy)
             }
         }
     }
@@ -289,7 +289,7 @@ impl LocalFileSystem {
                         )
                     },
                 )?;
-                Ok(rooted.space())
+                rooted.space_at(path, self.symlink_policy)
             }
         }
     }
@@ -731,7 +731,7 @@ impl LocalFileSystem {
 ///
 /// Returns a structured error when an absolute host path cannot be formed or
 /// no existing ancestor can be opened.
-fn probe_file(
+pub(crate) fn probe_file(
     path: &Path,
     operation: LocalFileOperation,
 ) -> LocalResult<Option<File>> {

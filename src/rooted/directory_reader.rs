@@ -118,4 +118,9 @@ impl DirectoryReader {
             ))
         }
     }
+
+    /// Duplicates the directory handle retained by this reader.
+    pub(crate) fn try_clone_directory(&self) -> Result<File> {
+        self.inner.try_clone_directory()
+    }
 }

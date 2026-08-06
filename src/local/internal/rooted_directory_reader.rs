@@ -40,3 +40,10 @@ pub(crate) struct RootedDirectoryReader {
     #[cfg(windows)]
     pub(super) exhausted: bool,
 }
+
+impl RootedDirectoryReader {
+    /// Duplicates the directory handle retained by this reader.
+    pub(crate) fn try_clone_directory(&self) -> std::io::Result<File> {
+        self.directory.try_clone()
+    }
+}
