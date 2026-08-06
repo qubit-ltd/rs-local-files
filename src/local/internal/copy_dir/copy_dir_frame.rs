@@ -47,8 +47,6 @@ impl CopyDirFrame {
     /// # Returns
     ///
     /// A frame ready to yield source entries.
-    #[cfg_attr(coverage, inline(never))]
-    #[cfg_attr(not(coverage), inline)]
     pub(super) fn new(
         src: PathBuf,
         dst: PathBuf,
@@ -67,32 +65,24 @@ impl CopyDirFrame {
 
     /// Returns the source directory path.
     #[must_use]
-    #[cfg_attr(coverage, inline(never))]
-    #[cfg_attr(not(coverage), inline(always))]
     pub(super) fn src(&self) -> &Path {
         &self.src
     }
 
     /// Returns the destination directory path.
     #[must_use]
-    #[cfg_attr(coverage, inline(never))]
-    #[cfg_attr(not(coverage), inline(always))]
     pub(super) fn dst(&self) -> &Path {
         &self.dst
     }
 
     /// Returns the filesystem-object source identity.
     #[must_use]
-    #[cfg_attr(coverage, inline(never))]
-    #[cfg_attr(not(coverage), inline(always))]
     pub(super) const fn source_identity(&self) -> &DirectoryIdentity {
         &self.source_identity
     }
 
     /// Returns the source permissions captured before traversal.
     #[must_use]
-    #[cfg_attr(coverage, inline(never))]
-    #[cfg_attr(not(coverage), inline(always))]
     pub(super) fn source_permissions(&self) -> &fs::Permissions {
         &self.source_permissions
     }
@@ -108,8 +98,6 @@ impl CopyDirFrame {
     ///
     /// The yielded result contains the filesystem error when an entry cannot
     /// be read.
-    #[cfg_attr(coverage, inline(never))]
-    #[cfg_attr(not(coverage), inline(always))]
     pub(super) fn next_entry(
         &mut self,
     ) -> Option<std::io::Result<fs::DirEntry>> {

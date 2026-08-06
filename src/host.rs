@@ -41,15 +41,11 @@ use crate::{
 };
 
 /// Reads Host metadata without following the final symbolic link.
-#[cfg_attr(coverage, inline(never))]
-#[cfg_attr(not(coverage), inline(always))]
 pub fn metadata(path: &Path) -> LocalResult<LocalFileMetadata> {
     LocalFileSystem::host().metadata(path)
 }
 
 /// Opens a Host regular-file reader.
-#[cfg_attr(coverage, inline(never))]
-#[cfg_attr(not(coverage), inline(always))]
 pub fn open_reader(
     path: &Path,
     options: &LocalReadOptions,
@@ -58,8 +54,6 @@ pub fn open_reader(
 }
 
 /// Reads at most max_bytes from a Host regular file.
-#[cfg_attr(coverage, inline(never))]
-#[cfg_attr(not(coverage), inline(always))]
 pub fn read_prefix(
     path: &Path,
     options: &LocalReadOptions,
@@ -69,8 +63,6 @@ pub fn read_prefix(
 }
 
 /// Opens a Host writer publication session.
-#[cfg_attr(coverage, inline(never))]
-#[cfg_attr(not(coverage), inline(always))]
 pub fn open_writer(
     path: &Path,
     options: &LocalWriteOptions,
@@ -79,8 +71,6 @@ pub fn open_writer(
 }
 
 /// Opens a lazy Host directory walker.
-#[cfg_attr(coverage, inline(never))]
-#[cfg_attr(not(coverage), inline(always))]
 pub fn list(
     path: &Path,
     options: &LocalListOptions,
@@ -90,8 +80,6 @@ pub fn list(
 
 /// Copies one Host regular file or directory tree.
 #[allow(clippy::result_large_err)]
-#[cfg_attr(coverage, inline(never))]
-#[cfg_attr(not(coverage), inline(always))]
 pub fn copy(
     source: &Path,
     destination: &Path,
@@ -101,8 +89,6 @@ pub fn copy(
 }
 
 /// Creates a Host directory.
-#[cfg_attr(coverage, inline(never))]
-#[cfg_attr(not(coverage), inline(always))]
 pub fn create_directory(
     path: &Path,
     options: &LocalCreateDirectoryOptions,
@@ -111,8 +97,6 @@ pub fn create_directory(
 }
 
 /// Deletes a Host non-directory entry.
-#[cfg_attr(coverage, inline(never))]
-#[cfg_attr(not(coverage), inline(always))]
 pub fn delete_file(
     path: &Path,
     options: &LocalDeleteOptions,
@@ -121,8 +105,6 @@ pub fn delete_file(
 }
 
 /// Deletes a Host directory according to the recursion policy.
-#[cfg_attr(coverage, inline(never))]
-#[cfg_attr(not(coverage), inline(always))]
 pub fn delete_directory(
     path: &Path,
     options: &LocalDeleteOptions,
@@ -132,8 +114,6 @@ pub fn delete_directory(
 
 /// Renames one Host entry.
 #[allow(clippy::result_large_err)]
-#[cfg_attr(coverage, inline(never))]
-#[cfg_attr(not(coverage), inline(always))]
 pub fn rename(
     source: &Path,
     destination: &Path,
@@ -143,8 +123,6 @@ pub fn rename(
 }
 
 /// Creates a cleanup-owned Host temporary file.
-#[cfg_attr(coverage, inline(never))]
-#[cfg_attr(not(coverage), inline(always))]
 pub fn create_temp_file(
     options: &LocalTempFileOptions,
 ) -> LocalResult<LocalTempFile> {
@@ -152,8 +130,6 @@ pub fn create_temp_file(
 }
 
 /// Creates a cleanup-owned Host temporary directory.
-#[cfg_attr(coverage, inline(never))]
-#[cfg_attr(not(coverage), inline(always))]
 pub fn create_temp_directory(
     options: &LocalTempDirectoryOptions,
 ) -> LocalResult<LocalTempDirectory> {

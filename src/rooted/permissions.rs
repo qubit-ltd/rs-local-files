@@ -27,8 +27,6 @@ impl Permissions {
     }
 
     /// Creates a portable read-only or writable permission value.
-    #[cfg_attr(coverage, inline(never))]
-    #[cfg_attr(not(coverage), inline)]
     pub const fn from_read_only(read_only: bool) -> Self {
         Self {
             read_only,
@@ -39,8 +37,6 @@ impl Permissions {
     /// Creates permissions from Unix mode bits.
     ///
     /// Bits outside the portable permission and special-bit range are ignored.
-    #[cfg_attr(coverage, inline(never))]
-    #[cfg_attr(not(coverage), inline)]
     pub const fn from_unix_mode(mode: u32) -> Self {
         let mode = mode & 0o7777;
         Self {
@@ -50,15 +46,11 @@ impl Permissions {
     }
 
     /// Returns whether the portable permission view disables writing.
-    #[cfg_attr(coverage, inline(never))]
-    #[cfg_attr(not(coverage), inline(always))]
     pub const fn is_read_only(self) -> bool {
         self.read_only
     }
 
     /// Returns exact Unix mode bits when they are available.
-    #[cfg_attr(coverage, inline(never))]
-    #[cfg_attr(not(coverage), inline(always))]
     pub const fn unix_mode(self) -> Option<u32> {
         self.unix_mode
     }
