@@ -36,7 +36,8 @@ pub struct LocalListOptions {
 impl LocalListOptions {
     /// Creates a non-recursive listing policy that inherits the filesystem's
     /// symbolic-link policy.
-    #[inline]
+    #[cfg_attr(coverage, inline(never))]
+    #[cfg_attr(not(coverage), inline)]
     pub const fn new() -> Self {
         Self {
             max_open_directories: 64,
@@ -50,34 +51,39 @@ impl LocalListOptions {
 
     /// Reports whether child directories are traversed.
     #[must_use]
-    #[inline(always)]
+    #[cfg_attr(coverage, inline(never))]
+    #[cfg_attr(not(coverage), inline(always))]
     pub const fn recursive(&self) -> bool {
         self.recursive
     }
 
     /// Returns the optional policy override.
     #[must_use]
-    #[inline(always)]
+    #[cfg_attr(coverage, inline(never))]
+    #[cfg_attr(not(coverage), inline(always))]
     pub const fn symlink_policy(&self) -> Option<LocalSymlinkPolicy> {
         self.symlink_policy
     }
 
     /// Returns the maximum yielded depth, or `None` for no explicit limit.
     #[must_use]
-    #[inline(always)]
+    #[cfg_attr(coverage, inline(never))]
+    #[cfg_attr(not(coverage), inline(always))]
     pub const fn max_depth(&self) -> Option<usize> {
         self.max_depth
     }
 
     /// Returns the maximum number of concurrently open directory handles.
     #[must_use]
-    #[inline(always)]
+    #[cfg_attr(coverage, inline(never))]
+    #[cfg_attr(not(coverage), inline(always))]
     pub const fn max_open_directories(&self) -> usize {
         self.max_open_directories
     }
 
     /// Returns the policy used after the handle budget is reached.
-    #[inline(always)]
+    #[cfg_attr(coverage, inline(never))]
+    #[cfg_attr(not(coverage), inline(always))]
     pub const fn reopen_policy(&self) -> LocalDirectoryReopenPolicy {
         self.reopen_policy
     }
@@ -89,14 +95,16 @@ impl LocalListOptions {
     }
 
     /// Enables recursive traversal.
-    #[inline(always)]
+    #[cfg_attr(coverage, inline(never))]
+    #[cfg_attr(not(coverage), inline(always))]
     pub const fn with_recursive(mut self) -> Self {
         self.recursive = true;
         self
     }
 
     /// Overrides the owning filesystem's symbolic-link policy.
-    #[inline(always)]
+    #[cfg_attr(coverage, inline(never))]
+    #[cfg_attr(not(coverage), inline(always))]
     pub const fn with_symlink_policy(
         mut self,
         symlink_policy: LocalSymlinkPolicy,
@@ -110,7 +118,8 @@ impl LocalListOptions {
     /// # Parameters
     ///
     /// - `max_depth`: Maximum depth; zero yields no entries.
-    #[inline(always)]
+    #[cfg_attr(coverage, inline(never))]
+    #[cfg_attr(not(coverage), inline(always))]
     pub const fn with_max_depth(mut self, max_depth: usize) -> Self {
         self.max_depth = Some(max_depth);
         self
@@ -119,7 +128,8 @@ impl LocalListOptions {
     /// Sets the maximum number of concurrently open directory handles.
     ///
     /// A value of zero is invalid and is rejected when a walker is opened.
-    #[inline(always)]
+    #[cfg_attr(coverage, inline(never))]
+    #[cfg_attr(not(coverage), inline(always))]
     pub const fn with_max_open_directories(
         mut self,
         max_open_directories: usize,
@@ -129,7 +139,8 @@ impl LocalListOptions {
     }
 
     /// Sets the policy used after the handle budget is reached.
-    #[inline(always)]
+    #[cfg_attr(coverage, inline(never))]
+    #[cfg_attr(not(coverage), inline(always))]
     pub const fn with_reopen_policy(
         mut self,
         reopen_policy: LocalDirectoryReopenPolicy,
@@ -139,7 +150,8 @@ impl LocalListOptions {
     }
 
     /// Sets the policy applied after an iteration error.
-    #[inline(always)]
+    #[cfg_attr(coverage, inline(never))]
+    #[cfg_attr(not(coverage), inline(always))]
     pub const fn with_error_policy(
         mut self,
         error_policy: LocalWalkErrorPolicy,
@@ -151,7 +163,8 @@ impl LocalListOptions {
 
 impl Default for LocalListOptions {
     /// Returns the adaptive listing policy with reader reopening enabled.
-    #[inline]
+    #[cfg_attr(coverage, inline(never))]
+    #[cfg_attr(not(coverage), inline)]
     fn default() -> Self {
         Self::new()
     }
