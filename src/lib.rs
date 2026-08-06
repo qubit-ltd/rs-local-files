@@ -142,7 +142,6 @@ pub(crate) use local::{
     LocalAtomicWriteStage,
     LocalCopyDirError,
     LocalCopyDirStage,
-    LocalCopyDirStats,
     LocalRelativePath,
 };
 
@@ -150,6 +149,7 @@ pub(crate) use local::{
 pub(crate) use local::{
     LocalAtomicWriteOptions,
     LocalCopyDirOptions,
+    LocalCopyDirStats,
 };
 
 // Keep implementation-only option types visible to coverage integration tests
@@ -158,4 +158,5 @@ pub(crate) use local::{
 pub use local::{
     LocalAtomicWriteOptions,
     LocalCopyDirOptions,
+    LocalCopyDirStats,
 };
