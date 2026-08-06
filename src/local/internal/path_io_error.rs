@@ -17,7 +17,7 @@ use std::path::{
 
 /// An I/O error annotated with the failed operation and path.
 #[derive(Debug)]
-pub(super) struct PathIoError {
+pub struct PathIoError {
     /// Description of the filesystem operation that failed.
     operation: &'static str,
     /// Path involved in the failed operation.
@@ -27,6 +27,16 @@ pub(super) struct PathIoError {
 }
 
 impl PathIoError {
+    /// Coverage-only constructor for path-aware I/O context.
+    #[cfg(coverage)]
+    pub fn coverage_new(
+        operation: &'static str,
+        path: &Path,
+        source: Error,
+    ) -> Self {
+        Self::new(operation, path, source)
+    }
+
     /// Creates path-aware context around an I/O error.
     ///
     /// # Parameters

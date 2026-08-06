@@ -105,6 +105,8 @@ pub use local_copy_dir_stage::LocalCopyDirStage;
 pub use local_copy_dir_stats::LocalCopyDirStats;
 pub use local_copy_type_conflict_policy::LocalCopyTypeConflictPolicy;
 pub use local_persist_error::LocalPersistError;
+#[cfg(coverage)]
+pub use internal::PathIoError;
 pub use local_persist_failure_state::LocalPersistFailureState;
 pub use local_persist_options::LocalPersistOptions;
 pub use local_persist_stage::LocalPersistStage;

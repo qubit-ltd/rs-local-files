@@ -54,6 +54,7 @@ use qubit_local_files::{
     LocalPersistFailureState,
     LocalPersistStage,
     Permissions,
+    PathIoError,
     RootedEntryKind,
     RootedMetadata,
     coverage_entry_kind_from_mode,
@@ -749,4 +750,18 @@ fn test_internal_rooted_metadata_accessors() {
         RootedEntryKind::Other,
         coverage_entry_kind_from_mode(0o123 as libc::mode_t),
     );
+}
+
+/// Verifies coverage-only path-aware I/O error formatting and source access.
+#[cfg(coverage)]
+#[test]
+fn test_internal_path_io_error_context() {
+    let error = PathIoError::coverage_new(
+        "inspect entry",
+        Path::new("payload"),
+        std::io::Error::from(std::io::ErrorKind::NotFound),
+    );
+    assert!(error.to_string().contains("inspect entry"));
+    assert!(error.to_string().contains("payload"));
+    assert!(std::error::Error::source(&error).is_some());
 }
