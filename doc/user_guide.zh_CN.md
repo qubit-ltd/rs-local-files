@@ -10,12 +10,12 @@
 ## 概念模型
 
 ```
-主机路径 ── 便利函数或 LocalFileSystem::host()
+主机路径 ── LocalFileSystem::host()
 已打开根目录 ─ LocalFileSystem::rooted(root) ─ 仅相对后代路径
 ```
 
-自由函数提供最简短的主机范围 API。`LocalFileSystem` 是可配置的服务形式：
-`host()` 选择进程可见路径，`rooted(root)` 打开目录权限并只接受相对后代。
+`LocalFileSystem` 是主机范围的服务形式：`host()` 选择进程可见路径，
+`rooted(root)` 打开目录权限并只接受相对后代。
 两种形式提供相同操作，调用方和适配器无需分别面向 host 和 rooted 接口。reader、writer、
 walker 与临时条目都是拥有资源的有状态对象。`LocalFileNames` 和 `LocalPaths` 提供原生
 词法工具，不会把文件名强制转换为 UTF-8。
@@ -60,17 +60,18 @@ Host 没有更窄的 root 边界。可以通过 `with_symlink_policy` 选择 `Re
 ```rust
 use std::io::{Read, Write};
 use qubit_local_files::{
-    create_directory, open_reader, open_writer, LocalCreateDirectoryOptions,
-    LocalReadOptions, LocalWriteMode, LocalWriteOptions, LocalWriterState,
+    LocalCreateDirectoryOptions, LocalFileSystem, LocalReadOptions, LocalWriteMode,
+    LocalWriteOptions, LocalWriterState,
 };
 
+let filesystem = LocalFileSystem::host();
 let output = std::path::Path::new("build/output");
-create_directory(
+filesystem.create_directory(
     output,
     &LocalCreateDirectoryOptions::new().with_recursive(),
 )?;
 let path = output.join("manifest.json");
-let mut writer = open_writer(
+let mut writer = filesystem.open_writer(
     &path,
     &LocalWriteOptions::new(LocalWriteMode::CreateOrReplace),
 )?;
@@ -78,7 +79,7 @@ writer.write_all(br#"{"complete":true}"#)?;
 let result = writer.commit()?;
 assert_eq!(result.state(), LocalWriterState::Committed);
 let mut text = String::new();
-open_reader(&path, &LocalReadOptions::new())?
+filesystem.open_reader(&path, &LocalReadOptions::new())?
     .read_to_string(&mut text)?;
 assert_eq!(text, r#"{"complete":true}"#);
 # Ok::<(), Box<dyn std::error::Error>>(())
@@ -94,15 +95,15 @@ assert_eq!(text, r#"{"complete":true}"#);
 （`LocalWriteFailureState`）分离；写入、刷新或提交失败可能使发布状态变为不确定，需要
 恢复时应保留并检查返回的资源或错误。
 
-`copy` 根据源元数据选择文件或目录行为。需要固定源类型时使用 `with_file_source()` 或
+`LocalFileSystem::copy` 根据源元数据选择文件或目录行为。需要固定源类型时使用 `with_file_source()` 或
 `with_tree_source()`，并通过 `source_mode()` 读取模式。其选项分别控制目标冲突、类型冲突、
 元数据、符号链接、原子性和耐久性；复制策略不包含 mount 或 device 边界。无法满足的要求保证会在破坏性变更前被拒绝。
 自复制和硬链接别名会被拒绝；覆盖符号链接目标时会替换该条目而不跟随它。
 
 ```rust,no_run
-use qubit_local_files::{copy, LocalCopyFailureState, LocalCopyOptions};
+use qubit_local_files::{LocalCopyFailureState, LocalCopyOptions, LocalFileSystem};
 
-match copy(
+match LocalFileSystem::host().copy(
     std::path::Path::new("source"),
     std::path::Path::new("backup"),
     &LocalCopyOptions::new(),
@@ -122,7 +123,7 @@ match copy(
 
 ## 遍历和临时资源
 
-`list` 和 `LocalFileSystem::list` 返回惰性的 `LocalDirectoryWalker`。它按需打开和推进目录；最大
+`LocalFileSystem::list` 返回惰性的 `LocalDirectoryWalker`。它按需打开和推进目录；最大
 深度、符号链接策略与句柄预算在创建时固定。默认 `Reopen` 策略会在达到预算时关闭并重新打开
 活动 frame；显式选择 `Fail` 才会返回 `ResourceLimit`。零句柄预算无效并返回 `InvalidOptions`，
 drop 只释放句柄。
@@ -176,8 +177,7 @@ rooted 路径必须是相对后代。绝对路径、平台前缀、`.` 和 `..` 
 Linux、Windows 和 macOS 会进行运行时测试。FreeBSD 与 Android 仅做编译检查。
 可通过 `LocalFileSystem::host().capabilities()` 查看主机实现；rooted 实例返回打开
 权限时缓存的快照，`scope()` 供集成层区分两种命名空间；Rooted 实例的诊断锚点通过
-`diagnostic_root()` 单独读取。Host free function 只是 `LocalFileSystem::host()` 的便捷别名。
-Host 命名空间的 `limits()` 返回 `SizeLimit::VariesByPath`；使用
+`diagnostic_root()` 单独读取。Host 命名空间的 `limits()` 返回 `SizeLimit::VariesByPath`；使用
 `limits_at(path)` 才会针对该路径所在文件系统返回有限值（无法探测时为
 `Unknown`）。
 原子 rename、原子 replace 与临时资源原子持久化会分别报告，因为各平台支持并不相同。

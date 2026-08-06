@@ -10,26 +10,15 @@
 
 use std::path::PathBuf;
 
-#[cfg(coverage)]
-use std::{
-    fs,
-    process::Command,
-};
+#[cfg(feature = "internal-test-support")]
+use std::{fs, process::Command};
 
-use qubit_local_files::{
-    LocalCopyFailureState,
-    LocalCopyOptions,
-    LocalCopyStats,
-    LocalFileSystem,
-};
+use qubit_local_files::{LocalCopyFailureState, LocalCopyOptions, LocalCopyStats, LocalFileSystem};
 
-#[cfg(coverage)]
-use qubit_local_files::{
-    LocalCopyConflictPolicy,
-    LocalMetadataPreservePolicy,
-};
+#[cfg(feature = "internal-test-support")]
+use qubit_local_files::{LocalCopyConflictPolicy, LocalMetadataPreservePolicy};
 
-#[cfg(coverage)]
+#[cfg(feature = "internal-test-support")]
 use qubit_local_files::LocalDurabilityRequirement;
 
 /// Creates a process-specific path that is absent before each test use.
@@ -40,27 +29,33 @@ fn temp_path(name: &str) -> PathBuf {
     ))
 }
 
-/// Runs one coverage-only fault case in an isolated child test process.
-#[cfg(coverage)]
-fn run_in_coverage_fault_process<F>(test_name: &str, fault: &str, action: F)
+/// Runs one test-support-only fault case in an isolated child test process.
+#[cfg(feature = "internal-test-support")]
+fn run_in_test_fault_process<F>(test_name: &str, fault: &str, action: F)
 where
     F: FnOnce(),
 {
-    const COVERAGE_FAULT_ENV: &str = "QUBIT_LOCAL_FILES_COVERAGE_FAULT";
-    if std::env::var_os(COVERAGE_FAULT_ENV).is_some() {
+    const TEST_FAULT_ENV: &str = "QUBIT_LOCAL_FILES_TEST_FAULT";
+    const TEST_FAULT_CHILD_ENV: &str = "QUBIT_LOCAL_FILES_TEST_FAULT_CHILD";
+    if std::env::var_os(TEST_FAULT_ENV)
+        .is_some_and(|selected| selected == std::ffi::OsStr::new(fault))
+    {
         action();
         return;
     }
-    let executable =
-        std::env::current_exe().expect("test executable should be available");
+    if std::env::var_os(TEST_FAULT_CHILD_ENV).is_some() {
+        return;
+    }
+    let executable = std::env::current_exe().expect("test executable should be available");
     let status = Command::new(executable)
         .arg("--exact")
         .arg(test_name)
         .arg("--nocapture")
-        .env(COVERAGE_FAULT_ENV, fault)
+        .env(TEST_FAULT_ENV, fault)
+        .env(TEST_FAULT_CHILD_ENV, "1")
         .status()
-        .expect("coverage fault child should launch");
-    assert!(status.success(), "coverage fault child should pass");
+        .expect("test fault child should launch");
+    assert!(status.success(), "test fault child should pass");
 }
 
 /// Verifies preflight failures retain an unchanged typed copy state.
@@ -80,52 +75,38 @@ fn test_copy_failure_exposes_typed_state_and_parts() {
 }
 
 /// Verifies a second-child fault retains prior recursive publication stats.
-#[cfg(coverage)]
+#[cfg(feature = "internal-test-support")]
 #[test]
 fn test_copy_failure_reports_second_child_partial_publication() {
-    const TEST_NAME: &str =
-        "test_copy_failure_reports_second_child_partial_publication";
-    run_in_coverage_fault_process(
-        TEST_NAME,
-        "copy-staging-copy-second",
-        || {
-            let directory = tempfile::tempdir()
-                .expect("temporary directory should be created");
-            let source = directory.path().join("source");
-            let target = directory.path().join("target");
-            fs::create_dir(&source)
-                .expect("source directory should be created");
-            fs::write(source.join("first"), b"first")
-                .expect("first child should be written");
-            fs::write(source.join("second"), b"second")
-                .expect("second child should be written");
+    const TEST_NAME: &str = "test_copy_failure_reports_second_child_partial_publication";
+    run_in_test_fault_process(TEST_NAME, "copy-staging-copy-second", || {
+        let directory = tempfile::tempdir().expect("temporary directory should be created");
+        let source = directory.path().join("source");
+        let target = directory.path().join("target");
+        fs::create_dir(&source).expect("source directory should be created");
+        fs::write(source.join("first"), b"first").expect("first child should be written");
+        fs::write(source.join("second"), b"second").expect("second child should be written");
 
-            let failure = LocalFileSystem::host()
-                .copy(
-                    &source,
-                    &target,
-                    &LocalCopyOptions::default().with_tree_source(),
-                )
-                .expect_err("second child staging fault must fail");
+        let failure = LocalFileSystem::host()
+            .copy(
+                &source,
+                &target,
+                &LocalCopyOptions::default().with_tree_source(),
+            )
+            .expect_err("second child staging fault must fail");
 
-            assert_eq!(
-                LocalCopyFailureState::PartiallyPublished,
-                failure.state()
-            );
-            assert_eq!(1, failure.partial_stats().files());
-        },
-    );
+        assert_eq!(LocalCopyFailureState::PartiallyPublished, failure.state());
+        assert_eq!(1, failure.partial_stats().files());
+    });
 }
 
 /// Verifies a parent synchronization failure follows completed publication.
-#[cfg(coverage)]
+#[cfg(feature = "internal-test-support")]
 #[test]
 fn test_copy_failure_reports_published_after_parent_sync_fault() {
-    const TEST_NAME: &str =
-        "test_copy_failure_reports_published_after_parent_sync_fault";
-    run_in_coverage_fault_process(TEST_NAME, "copy-parent-sync", || {
-        let directory =
-            tempfile::tempdir().expect("temporary directory should be created");
+    const TEST_NAME: &str = "test_copy_failure_reports_published_after_parent_sync_fault";
+    run_in_test_fault_process(TEST_NAME, "copy-parent-sync", || {
+        let directory = tempfile::tempdir().expect("temporary directory should be created");
         let source = directory.path().join("source");
         let target = directory.path().join("target");
         fs::write(&source, b"payload").expect("source file should be written");
@@ -134,8 +115,7 @@ fn test_copy_failure_reports_published_after_parent_sync_fault() {
             .copy(
                 &source,
                 &target,
-                &LocalCopyOptions::default()
-                    .with_durability(LocalDurabilityRequirement::Required),
+                &LocalCopyOptions::default().with_durability(LocalDurabilityRequirement::Required),
             )
             .expect_err("parent synchronization fault must fail");
 
@@ -151,41 +131,32 @@ fn test_copy_failure_reports_published_after_parent_sync_fault() {
 }
 
 /// Verifies staging context is retained only when cleanup also fails.
-#[cfg(coverage)]
+#[cfg(feature = "internal-test-support")]
 #[test]
 fn test_copy_failure_retains_staging_only_for_cleanup_failure() {
-    const TEST_NAME: &str =
-        "test_copy_failure_retains_staging_only_for_cleanup_failure";
-    run_in_coverage_fault_process(
-        TEST_NAME,
-        "copy-staging-copy-cleanup",
-        || {
-            let directory = tempfile::tempdir()
-                .expect("temporary directory should be created");
-            let source = directory.path().join("source");
-            let target = directory.path().join("target");
-            fs::write(&source, b"payload")
-                .expect("source file should be written");
+    const TEST_NAME: &str = "test_copy_failure_retains_staging_only_for_cleanup_failure";
+    run_in_test_fault_process(TEST_NAME, "copy-staging-copy-cleanup", || {
+        let directory = tempfile::tempdir().expect("temporary directory should be created");
+        let source = directory.path().join("source");
+        let target = directory.path().join("target");
+        fs::write(&source, b"payload").expect("source file should be written");
 
-            let failure = LocalFileSystem::host()
-                .copy(&source, &target, &LocalCopyOptions::default())
-                .expect_err("staging and cleanup faults must fail");
+        let failure = LocalFileSystem::host()
+            .copy(&source, &target, &LocalCopyOptions::default())
+            .expect_err("staging and cleanup faults must fail");
 
-            assert!(failure.staging_path().is_some());
-            assert!(failure.cleanup_error().is_some());
-        },
-    );
+        assert!(failure.staging_path().is_some());
+        assert!(failure.cleanup_error().is_some());
+    });
 }
 
 /// Verifies successful staging cleanup omits obsolete staging diagnostics.
-#[cfg(coverage)]
+#[cfg(feature = "internal-test-support")]
 #[test]
 fn test_copy_failure_omits_staging_after_successful_cleanup() {
-    const TEST_NAME: &str =
-        "test_copy_failure_omits_staging_after_successful_cleanup";
-    run_in_coverage_fault_process(TEST_NAME, "copy-staging-copy", || {
-        let directory =
-            tempfile::tempdir().expect("temporary directory should be created");
+    const TEST_NAME: &str = "test_copy_failure_omits_staging_after_successful_cleanup";
+    run_in_test_fault_process(TEST_NAME, "copy-staging-copy", || {
+        let directory = tempfile::tempdir().expect("temporary directory should be created");
         let source = directory.path().join("source");
         let target = directory.path().join("target");
         fs::write(&source, b"payload").expect("source file should be written");
@@ -201,45 +172,38 @@ fn test_copy_failure_omits_staging_after_successful_cleanup() {
 
 /// Verifies destination preparation errors without publication are
 /// conservative.
-#[cfg(coverage)]
+#[cfg(feature = "internal-test-support")]
 #[test]
 fn test_copy_failure_reports_indeterminate_for_destination_preparation_fault() {
-    const TEST_NAME: &str = "test_copy_failure_reports_indeterminate_for_destination_preparation_fault";
-    run_in_coverage_fault_process(
-        TEST_NAME,
-        "copy-destination-absolute",
-        || {
-            let directory = tempfile::tempdir()
-                .expect("temporary directory should be created");
-            let source = directory.path().join("source");
-            let target = directory.path().join("target");
-            fs::create_dir(&source)
-                .expect("source directory should be created");
+    const TEST_NAME: &str =
+        "test_copy_failure_reports_indeterminate_for_destination_preparation_fault";
+    run_in_test_fault_process(TEST_NAME, "copy-destination-absolute", || {
+        let directory = tempfile::tempdir().expect("temporary directory should be created");
+        let source = directory.path().join("source");
+        let target = directory.path().join("target");
+        fs::create_dir(&source).expect("source directory should be created");
 
-            let failure = LocalFileSystem::host()
-                .copy(
-                    &source,
-                    &target,
-                    &LocalCopyOptions::default().with_tree_source(),
-                )
-                .expect_err("destination preparation fault must fail");
+        let failure = LocalFileSystem::host()
+            .copy(
+                &source,
+                &target,
+                &LocalCopyOptions::default().with_tree_source(),
+            )
+            .expect_err("destination preparation fault must fail");
 
-            assert_eq!(LocalCopyFailureState::Indeterminate, failure.state());
-            assert_eq!(&LocalCopyStats::default(), failure.partial_stats());
-        },
-    );
+        assert_eq!(LocalCopyFailureState::Indeterminate, failure.state());
+        assert_eq!(&LocalCopyStats::default(), failure.partial_stats());
+    });
 }
 
 /// Verifies source inspection failures in the recursive pipeline prove that no
 /// destination publication began.
-#[cfg(coverage)]
+#[cfg(feature = "internal-test-support")]
 #[test]
 fn test_copy_failure_reports_unchanged_for_source_inspection_fault() {
-    const TEST_NAME: &str =
-        "test_copy_failure_reports_unchanged_for_source_inspection_fault";
-    run_in_coverage_fault_process(TEST_NAME, "copy-source-absolute", || {
-        let directory =
-            tempfile::tempdir().expect("temporary directory should be created");
+    const TEST_NAME: &str = "test_copy_failure_reports_unchanged_for_source_inspection_fault";
+    run_in_test_fault_process(TEST_NAME, "copy-source-absolute", || {
+        let directory = tempfile::tempdir().expect("temporary directory should be created");
         let source = directory.path().join("source");
         let target = directory.path().join("target");
         fs::create_dir(&source).expect("source directory should be created");
@@ -259,80 +223,62 @@ fn test_copy_failure_reports_unchanged_for_source_inspection_fault() {
 }
 
 /// Verifies recursive traversal rejects a coverage-injected directory cycle.
-#[cfg(coverage)]
+#[cfg(feature = "internal-test-support")]
 #[test]
 fn test_copy_failure_reports_directory_identity_cycle() {
-    const TEST_NAME: &str =
-        "test_copy_failure_reports_directory_identity_cycle";
-    run_in_coverage_fault_process(
-        TEST_NAME,
-        "copy-dir-directory-identity-cycle",
-        || {
-            let directory = tempfile::tempdir()
-                .expect("temporary directory should be created");
-            let source = directory.path().join("source");
-            let target = directory.path().join("target");
-            fs::create_dir_all(source.join("nested"))
-                .expect("nested source directory should be created");
-            fs::write(source.join("nested/payload"), b"payload")
-                .expect("source payload should be written");
+    const TEST_NAME: &str = "test_copy_failure_reports_directory_identity_cycle";
+    run_in_test_fault_process(TEST_NAME, "copy-dir-directory-identity-cycle", || {
+        let directory = tempfile::tempdir().expect("temporary directory should be created");
+        let source = directory.path().join("source");
+        let target = directory.path().join("target");
+        fs::create_dir_all(source.join("nested"))
+            .expect("nested source directory should be created");
+        fs::write(source.join("nested/payload"), b"payload")
+            .expect("source payload should be written");
 
-            LocalFileSystem::host()
-                .copy(
-                    &source,
-                    &target,
-                    &LocalCopyOptions::default().with_tree_source(),
-                )
-                .expect_err("injected directory cycle must fail");
-        },
-    );
+        LocalFileSystem::host()
+            .copy(
+                &source,
+                &target,
+                &LocalCopyOptions::default().with_tree_source(),
+            )
+            .expect_err("injected directory cycle must fail");
+    });
 }
 
 /// Verifies a coverage-injected staging permission failure remains typed.
-#[cfg(coverage)]
+#[cfg(feature = "internal-test-support")]
 #[test]
 fn test_copy_failure_reports_staging_permission_failure() {
-    const TEST_NAME: &str =
-        "test_copy_failure_reports_staging_permission_failure";
-    run_in_coverage_fault_process(
-        TEST_NAME,
-        "copy-staging-permissions",
-        || {
-            let directory = tempfile::tempdir()
-                .expect("temporary directory should be created");
-            let source = directory.path().join("source");
-            let target = directory.path().join("target");
-            fs::write(&source, b"payload")
-                .expect("source payload should be written");
+    const TEST_NAME: &str = "test_copy_failure_reports_staging_permission_failure";
+    run_in_test_fault_process(TEST_NAME, "copy-staging-permissions", || {
+        let directory = tempfile::tempdir().expect("temporary directory should be created");
+        let source = directory.path().join("source");
+        let target = directory.path().join("target");
+        fs::write(&source, b"payload").expect("source payload should be written");
 
-            LocalFileSystem::host()
-                .copy(
-                    &source,
-                    &target,
-                    &LocalCopyOptions::default().with_metadata_preservation(
-                        LocalMetadataPreservePolicy::Permissions,
-                    ),
-                )
-                .expect_err("staging permission fault must fail");
-        },
-    );
+        LocalFileSystem::host()
+            .copy(
+                &source,
+                &target,
+                &LocalCopyOptions::default()
+                    .with_metadata_preservation(LocalMetadataPreservePolicy::Permissions),
+            )
+            .expect_err("staging permission fault must fail");
+    });
 }
 
-/// Verifies a coverage-only directory-statistics overflow remains typed.
-#[cfg(coverage)]
+/// Verifies a test-support-only directory-statistics overflow remains typed.
+#[cfg(feature = "internal-test-support")]
 #[test]
 fn test_copy_failure_reports_directory_statistics_overflow() {
-    const TEST_NAME: &str =
-        "test_copy_failure_reports_directory_statistics_overflow";
-    run_in_coverage_fault_process(TEST_NAME, "copy-stats-directories", || {
-        let directory =
-            tempfile::tempdir().expect("temporary directory should be created");
+    const TEST_NAME: &str = "test_copy_failure_reports_directory_statistics_overflow";
+    run_in_test_fault_process(TEST_NAME, "copy-stats-directories", || {
+        let directory = tempfile::tempdir().expect("temporary directory should be created");
         let source = directory.path().join("source/nested");
         let target = directory.path().join("target");
-        fs::create_dir_all(&source)
-            .expect("nested source directory should be created");
-        fs::write(source.join("payload"), b"payload")
-            .expect("source payload should be written");
+        fs::create_dir_all(&source).expect("nested source directory should be created");
+        fs::write(source.join("payload"), b"payload").expect("source payload should be written");
 
         LocalFileSystem::host()
             .copy(
@@ -344,46 +290,38 @@ fn test_copy_failure_reports_directory_statistics_overflow() {
     });
 }
 
-/// Verifies a coverage-only skipped-file statistics overflow remains typed.
-#[cfg(coverage)]
+/// Verifies a test-support-only skipped-file statistics overflow remains typed.
+#[cfg(feature = "internal-test-support")]
 #[test]
 fn test_copy_failure_reports_skipped_statistics_overflow() {
-    const TEST_NAME: &str =
-        "test_copy_failure_reports_skipped_statistics_overflow";
-    run_in_coverage_fault_process(TEST_NAME, "copy-stats-skipped", || {
-        let directory =
-            tempfile::tempdir().expect("temporary directory should be created");
+    const TEST_NAME: &str = "test_copy_failure_reports_skipped_statistics_overflow";
+    run_in_test_fault_process(TEST_NAME, "copy-stats-skipped", || {
+        let directory = tempfile::tempdir().expect("temporary directory should be created");
         let source = directory.path().join("source");
         let target = directory.path().join("target");
-        fs::write(&source, b"source")
-            .expect("source payload should be written");
-        fs::write(&target, b"target")
-            .expect("target payload should be written");
+        fs::write(&source, b"source").expect("source payload should be written");
+        fs::write(&target, b"target").expect("target payload should be written");
 
         LocalFileSystem::host()
             .copy(
                 &source,
                 &target,
-                &LocalCopyOptions::default()
-                    .with_conflict(LocalCopyConflictPolicy::Skip),
+                &LocalCopyOptions::default().with_conflict(LocalCopyConflictPolicy::Skip),
             )
             .expect_err("skipped statistics overflow must fail");
     });
 }
 
-/// Verifies a coverage-only copied-file statistics overflow remains typed.
-#[cfg(coverage)]
+/// Verifies a test-support-only copied-file statistics overflow remains typed.
+#[cfg(feature = "internal-test-support")]
 #[test]
 fn test_copy_failure_reports_file_statistics_overflow() {
-    const TEST_NAME: &str =
-        "test_copy_failure_reports_file_statistics_overflow";
-    run_in_coverage_fault_process(TEST_NAME, "copy-stats-files", || {
-        let directory =
-            tempfile::tempdir().expect("temporary directory should be created");
+    const TEST_NAME: &str = "test_copy_failure_reports_file_statistics_overflow";
+    run_in_test_fault_process(TEST_NAME, "copy-stats-files", || {
+        let directory = tempfile::tempdir().expect("temporary directory should be created");
         let source = directory.path().join("source");
         let target = directory.path().join("target");
-        fs::write(&source, b"source")
-            .expect("source payload should be written");
+        fs::write(&source, b"source").expect("source payload should be written");
 
         LocalFileSystem::host()
             .copy(&source, &target, &LocalCopyOptions::default())
@@ -391,19 +329,16 @@ fn test_copy_failure_reports_file_statistics_overflow() {
     });
 }
 
-/// Verifies a coverage-only copied-byte statistics overflow remains typed.
-#[cfg(coverage)]
+/// Verifies a test-support-only copied-byte statistics overflow remains typed.
+#[cfg(feature = "internal-test-support")]
 #[test]
 fn test_copy_failure_reports_byte_statistics_overflow() {
-    const TEST_NAME: &str =
-        "test_copy_failure_reports_byte_statistics_overflow";
-    run_in_coverage_fault_process(TEST_NAME, "copy-stats-bytes", || {
-        let directory =
-            tempfile::tempdir().expect("temporary directory should be created");
+    const TEST_NAME: &str = "test_copy_failure_reports_byte_statistics_overflow";
+    run_in_test_fault_process(TEST_NAME, "copy-stats-bytes", || {
+        let directory = tempfile::tempdir().expect("temporary directory should be created");
         let source = directory.path().join("source");
         let target = directory.path().join("target");
-        fs::write(&source, b"source")
-            .expect("source payload should be written");
+        fs::write(&source, b"source").expect("source payload should be written");
 
         LocalFileSystem::host()
             .copy(&source, &target, &LocalCopyOptions::default())
@@ -411,24 +346,20 @@ fn test_copy_failure_reports_byte_statistics_overflow() {
     });
 }
 
-/// Verifies a coverage-only overwritten-entry statistics overflow remains
+/// Verifies a test-support-only overwritten-entry statistics overflow remains
 /// typed.
-#[cfg(coverage)]
+#[cfg(feature = "internal-test-support")]
 #[test]
 fn test_copy_failure_reports_overwritten_statistics_overflow() {
-    const TEST_NAME: &str =
-        "test_copy_failure_reports_overwritten_statistics_overflow";
-    run_in_coverage_fault_process(TEST_NAME, "copy-stats-overwritten", || {
-        let directory =
-            tempfile::tempdir().expect("temporary directory should be created");
+    const TEST_NAME: &str = "test_copy_failure_reports_overwritten_statistics_overflow";
+    run_in_test_fault_process(TEST_NAME, "copy-stats-overwritten", || {
+        let directory = tempfile::tempdir().expect("temporary directory should be created");
         let source = directory.path().join("source");
         let target = directory.path().join("target");
         fs::create_dir(&source).expect("source directory should be created");
-        fs::write(source.join("payload"), b"source")
-            .expect("source payload should be written");
+        fs::write(source.join("payload"), b"source").expect("source payload should be written");
         fs::create_dir(&target).expect("target directory should be created");
-        fs::write(target.join("payload"), b"target")
-            .expect("target payload should be written");
+        fs::write(target.join("payload"), b"target").expect("target payload should be written");
 
         LocalFileSystem::host()
             .copy(

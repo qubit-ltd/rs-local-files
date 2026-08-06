@@ -8,28 +8,9 @@
 //! Shared copy destination policy decisions.
 // qubit-style: allow source-test-pair
 
-use crate::{
-    LocalCopyConflictPolicy,
-    LocalCopyTypeConflictPolicy,
-};
+use crate::{LocalCopyConflictPolicy, LocalCopyTypeConflictPolicy};
 
 use super::CopyDestinationAction;
-
-/// Coverage-only access to the pure destination-policy decision matrix.
-#[cfg(coverage)]
-pub fn coverage_decide_copy_destination(
-    source_is_directory: bool,
-    destination_is_directory: Option<bool>,
-    conflict: LocalCopyConflictPolicy,
-    type_conflict: LocalCopyTypeConflictPolicy,
-) -> Option<CopyDestinationAction> {
-    decide_copy_destination(
-        source_is_directory,
-        destination_is_directory,
-        conflict,
-        type_conflict,
-    )
-}
 
 /// Selects the destination action without performing filesystem I/O.
 ///
@@ -61,19 +42,13 @@ pub(crate) const fn decide_copy_destination(
     if source_is_directory != destination_is_directory {
         return match type_conflict {
             LocalCopyTypeConflictPolicy::Fail => None,
-            LocalCopyTypeConflictPolicy::Replace => {
-                Some(CopyDestinationAction::Replace)
-            }
-            LocalCopyTypeConflictPolicy::Skip => {
-                Some(CopyDestinationAction::Skip)
-            }
+            LocalCopyTypeConflictPolicy::Replace => Some(CopyDestinationAction::Replace),
+            LocalCopyTypeConflictPolicy::Skip => Some(CopyDestinationAction::Skip),
         };
     }
     match conflict {
         LocalCopyConflictPolicy::Fail => None,
-        LocalCopyConflictPolicy::Overwrite => {
-            Some(CopyDestinationAction::Replace)
-        }
+        LocalCopyConflictPolicy::Overwrite => Some(CopyDestinationAction::Replace),
         LocalCopyConflictPolicy::Skip => Some(CopyDestinationAction::Skip),
     }
 }

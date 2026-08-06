@@ -7,7 +7,6 @@
 // =============================================================================
 //! Stable directory identities for cycle-safe filesystem traversal.
 // qubit-style: allow source-test-pair
-// qubit-style: allow coverage-cfg
 // Private behavior is covered through public integration tests.
 
 use std::fs::Metadata;
@@ -27,9 +26,7 @@ use std::os::windows::io::AsRawHandle;
 
 #[cfg(windows)]
 use windows_sys::Win32::Storage::FileSystem::{
-    BY_HANDLE_FILE_INFORMATION,
-    FILE_FLAG_BACKUP_SEMANTICS,
-    GetFileInformationByHandle,
+    BY_HANDLE_FILE_INFORMATION, FILE_FLAG_BACKUP_SEMANTICS, GetFileInformationByHandle,
 };
 
 /// Identifies one directory independently of the path used to reach it.
@@ -62,11 +59,8 @@ impl DirectoryIdentity {
     /// A stable identity suitable for active-ancestor cycle detection.
     #[cfg(unix)]
     #[inline]
-    pub(crate) fn from_metadata(
-        metadata: &Metadata,
-        canonical_path: &Path,
-    ) -> Self {
-        #[cfg(coverage)]
+    pub(crate) fn from_metadata(metadata: &Metadata, canonical_path: &Path) -> Self {
+        #[cfg(feature = "internal-test-support")]
         if injected_cycle_identity() {
             return Self::Native {
                 filesystem: 0,
@@ -91,11 +85,8 @@ impl DirectoryIdentity {
     ///
     /// A native Windows identity when available, otherwise the canonical path.
     #[cfg(windows)]
-    pub(crate) fn from_metadata(
-        metadata: &Metadata,
-        canonical_path: &Path,
-    ) -> Self {
-        #[cfg(coverage)]
+    pub(crate) fn from_metadata(metadata: &Metadata, canonical_path: &Path) -> Self {
+        #[cfg(feature = "internal-test-support")]
         if injected_cycle_identity() {
             return Self::Native {
                 filesystem: 0,
@@ -119,10 +110,7 @@ impl DirectoryIdentity {
     /// The canonical path wrapped as a directory identity.
     #[cfg(not(any(unix, windows)))]
     #[inline(always)]
-    pub(crate) fn from_metadata(
-        metadata: &Metadata,
-        canonical_path: &Path,
-    ) -> Self {
+    pub(crate) fn from_metadata(metadata: &Metadata, canonical_path: &Path) -> Self {
         let _ = metadata;
         Self::Canonical(canonical_path.to_path_buf())
     }
@@ -148,33 +136,26 @@ fn windows_native_identity(path: &Path) -> Option<DirectoryIdentity> {
     let mut information = BY_HANDLE_FILE_INFORMATION::default();
     // SAFETY: `directory` owns a valid handle for the duration of the call,
     // and `information` is a writable structure with the required layout.
-    let result = unsafe {
-        GetFileInformationByHandle(
-            directory.as_raw_handle(),
-            &raw mut information,
-        )
-    };
+    let result =
+        unsafe { GetFileInformationByHandle(directory.as_raw_handle(), &raw mut information) };
     if result == 0 {
         return None;
     }
     Some(DirectoryIdentity::Native {
         filesystem: u64::from(information.dwVolumeSerialNumber),
-        file: (u64::from(information.nFileIndexHigh) << 32)
-            | u64::from(information.nFileIndexLow),
+        file: (u64::from(information.nFileIndexHigh) << 32) | u64::from(information.nFileIndexLow),
     })
 }
 
-/// Reports whether traversal identities should collide in a coverage process.
+/// Reports whether traversal identities should collide in a test-support process.
 ///
 /// # Returns
 ///
 /// `true` when either directory-cycle fault is selected.
-#[cfg(all(coverage, any(unix, windows)))]
+#[cfg(all(feature = "internal-test-support", any(unix, windows)))]
 #[must_use]
 #[inline]
 fn injected_cycle_identity() -> bool {
-    super::coverage_fault::is_enabled("copy-dir-directory-identity-cycle")
-        || super::coverage_fault::is_enabled(
-            "dir-size-directory-identity-cycle",
-        )
+    super::test_support::is_enabled("copy-dir-directory-identity-cycle")
+        || super::test_support::is_enabled("dir-size-directory-identity-cycle")
 }

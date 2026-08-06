@@ -10,49 +10,12 @@
 // Private behavior is covered through public integration tests.
 
 use std::fs;
-use std::io::{
-    Error,
-    ErrorKind,
-    Result,
-};
+use std::io::{Error, ErrorKind, Result};
 use std::path::Path;
 
 use crate::LocalSymlinkPolicy;
 
 use super::super::directory_identity::DirectoryIdentity;
-
-/// Coverage-only source-policy entry points.
-#[cfg(coverage)]
-pub fn coverage_metadata_for_copy_source(
-    path: &Path,
-    symlink_policy: LocalSymlinkPolicy,
-) -> Result<fs::Metadata> {
-    metadata_for_copy_source(path, symlink_policy)
-}
-
-#[cfg(coverage)]
-pub fn coverage_inspect_copy_source_directory(
-    src: &Path,
-    symlink_policy: LocalSymlinkPolicy,
-    destination_root: &Path,
-) -> Result<()> {
-    inspect_copy_source_directory(src, symlink_policy, destination_root)
-        .map(|_| ())
-}
-
-#[cfg(coverage)]
-pub fn coverage_is_real_directory(metadata: &fs::Metadata) -> bool {
-    is_real_directory(metadata)
-}
-
-#[cfg(coverage)]
-pub fn coverage_reject_destination_inside_source(
-    src: &Path,
-    canonical_source: &Path,
-    destination: &Path,
-) -> Result<()> {
-    reject_destination_inside_source(src, canonical_source, destination)
-}
 
 /// Inspects a source directory before recursive copy enters it.
 ///
@@ -84,8 +47,7 @@ pub(super) fn inspect_copy_source_directory(
     }
     let canonical_source = fs::canonicalize(src)?;
     reject_destination_inside_source(src, &canonical_source, destination_root)?;
-    let source_identity =
-        DirectoryIdentity::from_metadata(&source_metadata, &canonical_source);
+    let source_identity = DirectoryIdentity::from_metadata(&source_metadata, &canonical_source);
     Ok((source_metadata, source_identity))
 }
 
@@ -153,9 +115,7 @@ fn reject_destination_inside_source(
     canonical_source: &Path,
     destination: &Path,
 ) -> Result<()> {
-    if destination == canonical_source
-        || destination.starts_with(canonical_source)
-    {
+    if destination == canonical_source || destination.starts_with(canonical_source) {
         return Err(Error::new(
             ErrorKind::InvalidInput,
             format!(

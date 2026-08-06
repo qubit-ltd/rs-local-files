@@ -7,23 +7,13 @@
 // =============================================================================
 //! Facade for the private recursive directory-copy pipeline.
 // qubit-style: allow source-test-pair
-// qubit-style: allow coverage-cfg
 // Private behavior is covered through public integration tests.
 
-#[cfg(coverage)]
-use std::io::Error;
 use std::path::Path;
 
-use crate::{
-    LocalCopyDirOptions,
-    LocalCopyDirStage,
-    LocalCopyDirStats,
-};
+use crate::{LocalCopyDirOptions, LocalCopyDirStage, LocalCopyDirStats};
 
-use crate::local::internal::path_operations::{
-    absolute_path,
-    canonicalize_existing_prefix,
-};
+use crate::local::internal::path_operations::{absolute_path, canonicalize_existing_prefix};
 
 use super::copy_dir_result::CopyDirResult;
 use super::error::with_copy_context;
@@ -72,11 +62,10 @@ fn copy_dir_all_with_scope(
 ) -> CopyDirResult<LocalCopyDirStats> {
     let mut stats = LocalCopyDirStats::default();
     let source_result = absolute_path(src);
-    #[cfg(coverage)]
-    let source_result = if crate::local::internal::coverage_fault::is_enabled(
-        "copy-source-absolute",
-    ) {
-        Err(Error::from_raw_os_error(libc::EIO))
+    #[cfg(feature = "internal-test-support")]
+    let source_result = if crate::local::internal::test_support::is_enabled("copy-source-absolute")
+    {
+        Err(crate::local::test_fault_error())
     } else {
         source_result
     };
@@ -92,12 +81,10 @@ fn copy_dir_all_with_scope(
     } else {
         absolute_path(dst)
     };
-    #[cfg(coverage)]
+    #[cfg(feature = "internal-test-support")]
     let destination_result =
-        if crate::local::internal::coverage_fault::is_enabled(
-            "copy-destination-absolute",
-        ) {
-            Err(Error::from_raw_os_error(libc::EIO))
+        if crate::local::internal::test_support::is_enabled("copy-destination-absolute") {
+            Err(crate::local::test_fault_error())
         } else {
             destination_result
         };
