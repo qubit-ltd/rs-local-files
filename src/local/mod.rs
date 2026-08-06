@@ -107,6 +107,8 @@ pub use local_copy_type_conflict_policy::LocalCopyTypeConflictPolicy;
 pub use local_persist_error::LocalPersistError;
 #[cfg(coverage)]
 pub use internal::PathIoError;
+#[cfg(coverage)]
+pub use internal::coverage_with_path_context;
 pub use local_persist_failure_state::LocalPersistFailureState;
 pub use local_persist_options::LocalPersistOptions;
 pub use local_persist_stage::LocalPersistStage;
