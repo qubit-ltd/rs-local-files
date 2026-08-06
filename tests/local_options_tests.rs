@@ -43,6 +43,7 @@ use qubit_local_files::{
     LocalCopyDirOptions,
     LocalCopyDirStage,
     LocalCopyDirStats,
+    LocalCopyStats,
 };
 
 /// Verifies directory and deletion builders retain every configured policy.
@@ -421,6 +422,26 @@ fn test_internal_copy_statistics_accessors() {
     assert_eq!(3, stats.bytes());
     assert_eq!(4, stats.skipped());
     assert_eq!(5, stats.overwritten());
+}
+
+/// Verifies native recursive-copy statistics are converted without loss.
+#[cfg(coverage)]
+#[test]
+fn test_public_copy_statistics_convert_native_values() {
+    let mut native = LocalCopyDirStats::default();
+    native.files = 2;
+    native.directories = 3;
+    native.bytes = 4;
+    native.skipped = 5;
+    native.overwritten = 6;
+    let stats = LocalCopyStats::coverage_from_internal(native);
+    assert_eq!(2, stats.files());
+    assert_eq!(3, stats.directories());
+    assert_eq!(4, stats.bytes());
+    assert_eq!(5, stats.skipped());
+    assert_eq!(6, stats.overwritten());
+    let skipped = LocalCopyStats::coverage_skipped_one();
+    assert_eq!(1, skipped.skipped());
 }
 
 /// Verifies coverage-only construction and inspection of native copy errors.
