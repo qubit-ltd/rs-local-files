@@ -33,8 +33,6 @@ impl OpenOptions {
     ///
     /// # Returns
     /// Options without parent creation and with ordinary unbounded open retry.
-    #[cfg_attr(coverage, inline(never))]
-    #[cfg_attr(not(coverage), inline(always))]
     pub const fn new(mode: Mode) -> Self {
         Self {
             mode,
@@ -44,16 +42,12 @@ impl OpenOptions {
     }
 
     /// Returns the native write mode.
-    #[cfg_attr(coverage, inline(never))]
-    #[cfg_attr(not(coverage), inline(always))]
     pub const fn mode(&self) -> Mode {
         self.mode
     }
 
     /// Returns whether missing parents are created.
     #[must_use]
-    #[cfg_attr(coverage, inline(never))]
-    #[cfg_attr(not(coverage), inline)]
     pub const fn creates_parents(&self) -> bool {
         self.create_parents
     }
@@ -63,8 +57,6 @@ impl OpenOptions {
     /// # Returns
     /// Updated options.
     #[allow(dead_code)]
-    #[cfg_attr(coverage, inline(never))]
-    #[cfg_attr(not(coverage), inline)]
     pub const fn with_parents(mut self) -> Self {
         self.create_parents = true;
         self
@@ -75,8 +67,6 @@ impl OpenOptions {
     /// `None` preserves ordinary unbounded blocking-open behavior. `Some`
     /// bounds retries, and a zero duration reports the first conflict.
     #[must_use]
-    #[cfg_attr(coverage, inline(never))]
-    #[cfg_attr(not(coverage), inline(always))]
     pub const fn open_retry_timeout(&self) -> Option<Duration> {
         self.open_retry_timeout
     }
@@ -88,8 +78,6 @@ impl OpenOptions {
     ///
     /// # Returns
     /// Updated options.
-    #[cfg_attr(coverage, inline(never))]
-    #[cfg_attr(not(coverage), inline)]
     pub const fn with_open_retry_timeout(mut self, timeout: Duration) -> Self {
         self.open_retry_timeout = Some(timeout);
         self
@@ -99,8 +87,6 @@ impl OpenOptions {
 impl Default for OpenOptions {
     /// Creates or truncates a file without parent creation and with ordinary
     /// unbounded open retry.
-    #[cfg_attr(coverage, inline(never))]
-    #[cfg_attr(not(coverage), inline)]
     fn default() -> Self {
         Self::new(Mode::default())
     }

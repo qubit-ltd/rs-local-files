@@ -6,7 +6,6 @@ coverage-cfg | src/local/internal/atomic_metadata/preservation.rs | Exercises ot
 coverage-cfg | src/local/internal/atomic_namespace_race.rs | Exercises otherwise unreachable atomic namespace races
 coverage-cfg | src/local/internal/copy_dir/destination.rs | Exercises otherwise unreachable copy destination races
 coverage-cfg | src/local/internal/copy_dir/error.rs | Exercises otherwise unreachable copy statistics overflow
-coverage-cfg | src/capability/local_file_system_capabilities.rs | Instruments the public atomic-replacement capability accessor for coverage
 coverage-cfg | src/local/internal/copy_dir/facade.rs | Exercises otherwise unreachable absolute-path resolution failures
 coverage-cfg | src/local/internal/copy_dir/namespace_race.rs | Exercises otherwise unreachable copy namespace races
 coverage-cfg | src/local/internal/copy_dir/staging_io.rs | Exercises otherwise unreachable staging descriptor failures
@@ -30,6 +29,7 @@ coverage-cfg | src/local/local_root_atomic_writer.rs | Exercises rooted parent s
 coverage-cfg | src/local/internal/rooted_namespace_io.rs | Exercises otherwise unreachable rooted namespace faults
 coverage-cfg | src/local/mod.rs | Exposes legacy local helpers only to coverage regression tests
 coverage-cfg | src/local/internal/host_local_file_system.rs | Exercises otherwise unreachable local filesystem fault paths
+coverage-cfg | src/local/internal/coverage_fault.rs | Isolates deterministic coverage fault selection from normal builds
 coverage-cfg | src/local_paths.rs | Exercises otherwise unreachable host current-directory binding failures
 coverage-cfg | src/rooted/copy.rs | Exercises otherwise unreachable rooted copy fault paths
 coverage-cfg | src/rooted_local_file_system.rs | Exercises otherwise unreachable rooted temporary-resource and status failures

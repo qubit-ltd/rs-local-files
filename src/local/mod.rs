@@ -9,7 +9,7 @@
 //! Concrete local filesystem APIs and their private implementation.
 
 mod internal;
-#[cfg(coverage)]
+pub(crate) use internal::coverage_fault::io_error as coverage_io_error;
 pub(crate) use internal::coverage_fault::is_enabled as coverage_fault_enabled;
 #[cfg(coverage)]
 pub(crate) use internal::coverage_fault::take as take_coverage_fault;
@@ -92,30 +92,17 @@ pub(crate) use internal::{
     set_rooted_permissions,
 };
 
-pub use local_atomic_commit_error::LocalAtomicCommitError;
-pub use local_atomic_destination_state::LocalAtomicDestinationState;
-pub use local_atomic_write_error::LocalAtomicWriteError;
-pub use local_atomic_write_options::LocalAtomicWriteOptions;
-pub use local_atomic_write_stage::LocalAtomicWriteStage;
-pub use local_atomic_writer::LocalAtomicWriter;
-pub use local_copy_conflict_policy::LocalCopyConflictPolicy;
-pub use local_copy_dir_error::LocalCopyDirError;
-pub use local_copy_dir_options::LocalCopyDirOptions;
-pub use local_copy_dir_stage::LocalCopyDirStage;
-pub use local_copy_dir_stats::LocalCopyDirStats;
-pub use local_copy_type_conflict_policy::LocalCopyTypeConflictPolicy;
-pub use local_persist_error::LocalPersistError;
 #[cfg(coverage)]
 pub use internal::PathIoError;
 #[cfg(coverage)]
 pub use internal::coverage_with_path_context;
 #[cfg(coverage)]
 pub use internal::{
+    CoverageCopyDestinationAction,
+    coverage_decide_copy_destination,
     coverage_is_enabled,
     coverage_take,
     coverage_take_on_nth,
-    coverage_decide_copy_destination,
-    CoverageCopyDestinationAction,
 };
 #[cfg(coverage)]
 pub use internal::{
@@ -135,6 +122,19 @@ pub use internal::{
     coverage_metadata_for_copy_source,
     coverage_reject_destination_inside_source,
 };
+pub use local_atomic_commit_error::LocalAtomicCommitError;
+pub use local_atomic_destination_state::LocalAtomicDestinationState;
+pub use local_atomic_write_error::LocalAtomicWriteError;
+pub use local_atomic_write_options::LocalAtomicWriteOptions;
+pub use local_atomic_write_stage::LocalAtomicWriteStage;
+pub use local_atomic_writer::LocalAtomicWriter;
+pub use local_copy_conflict_policy::LocalCopyConflictPolicy;
+pub use local_copy_dir_error::LocalCopyDirError;
+pub use local_copy_dir_options::LocalCopyDirOptions;
+pub use local_copy_dir_stage::LocalCopyDirStage;
+pub use local_copy_dir_stats::LocalCopyDirStats;
+pub use local_copy_type_conflict_policy::LocalCopyTypeConflictPolicy;
+pub use local_persist_error::LocalPersistError;
 pub use local_persist_failure_state::LocalPersistFailureState;
 pub use local_persist_options::LocalPersistOptions;
 pub use local_persist_stage::LocalPersistStage;

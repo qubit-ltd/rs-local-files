@@ -86,8 +86,6 @@ pub fn coverage_remove_any_path(path: &Path) -> Result<()> {
 /// # Errors
 /// Returns an I/O error when a relative path is supplied and the current
 /// working directory cannot be read.
-#[cfg_attr(coverage, inline(never))]
-#[cfg_attr(not(coverage), inline(always))]
 pub(crate) fn absolute_path(path: &Path) -> Result<PathBuf> {
     std::path::absolute(path)
 }
@@ -139,8 +137,6 @@ pub(crate) fn canonicalize_existing_prefix(path: &Path) -> Result<PathBuf> {
 /// # Errors
 /// Returns an I/O error when the directory or one of its ancestors cannot be
 /// created.
-#[cfg_attr(coverage, inline(never))]
-#[cfg_attr(not(coverage), inline(always))]
 pub(crate) fn ensure_dir_path(path: &Path) -> Result<()> {
     fs::create_dir_all(path)
 }
@@ -226,8 +222,6 @@ pub(crate) fn ensure_parent_path_with_sync_dirs(
 ///
 /// # Returns
 /// A new I/O error with the same [`ErrorKind`] and a more descriptive message.
-#[cfg_attr(coverage, inline(never))]
-#[cfg_attr(not(coverage), inline(always))]
 pub(crate) fn add_path_context(
     error: Error,
     operation: &'static str,

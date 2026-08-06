@@ -96,8 +96,6 @@ impl LocalAtomicWriteOptions {
     ///
     /// # Returns
     /// Updated options carrying the timeout.
-    #[cfg_attr(coverage, inline(never))]
-    #[cfg_attr(not(coverage), inline(always))]
     pub const fn with_open_retry_timeout(mut self, timeout: Duration) -> Self {
         self.open_retry_timeout = Some(timeout);
         self
@@ -159,8 +157,6 @@ impl LocalAtomicWriteOptions {
 
 impl Default for LocalAtomicWriteOptions {
     /// Returns the same policy as [`Self::new`].
-    #[cfg_attr(coverage, inline(never))]
-    #[cfg_attr(not(coverage), inline(always))]
     fn default() -> Self {
         Self::new()
     }

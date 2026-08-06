@@ -161,7 +161,6 @@ pub(super) fn record_skipped_file(stats: &mut LocalCopyDirStats) -> Result<()> {
 }
 
 /// Records one destination entry replaced by a completed copy.
-#[cfg_attr(coverage, inline(never))]
 pub(super) fn record_overwritten_entry(
     stats: &mut LocalCopyDirStats,
 ) -> Result<()> {

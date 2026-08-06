@@ -202,16 +202,12 @@ impl Metadata {
     }
 
     /// Returns the final entry type observed by the rooted operation.
-    #[cfg_attr(coverage, inline(never))]
-    #[cfg_attr(not(coverage), inline(always))]
     pub const fn kind(&self) -> EntryKind {
         self.kind
     }
 
     /// Returns the byte size reported by the rooted metadata operation.
     #[must_use]
-    #[cfg_attr(coverage, inline(never))]
-    #[cfg_attr(not(coverage), inline(always))]
     pub const fn size(&self) -> u64 {
         self.len
     }
@@ -219,8 +215,6 @@ impl Metadata {
     /// Returns the last access time, or `None` when the platform did not
     /// provide one.
     #[must_use]
-    #[cfg_attr(coverage, inline(never))]
-    #[cfg_attr(not(coverage), inline(always))]
     pub const fn accessed_at(&self) -> Option<SystemTime> {
         self.accessed_at
     }
@@ -228,8 +222,6 @@ impl Metadata {
     /// Returns the last modification time, or `None` when the platform did not
     /// provide one.
     #[must_use]
-    #[cfg_attr(coverage, inline(never))]
-    #[cfg_attr(not(coverage), inline(always))]
     pub const fn modified_at(&self) -> Option<SystemTime> {
         self.modified_at
     }
@@ -237,23 +229,17 @@ impl Metadata {
     /// Returns the creation time, or `None` when the platform did not provide
     /// one.
     #[must_use]
-    #[cfg_attr(coverage, inline(never))]
-    #[cfg_attr(not(coverage), inline(always))]
     pub const fn created_at(&self) -> Option<SystemTime> {
         self.created_at
     }
 
     /// Returns the permissions observed through the rooted operation.
-    #[cfg_attr(coverage, inline(never))]
-    #[cfg_attr(not(coverage), inline(always))]
     pub const fn permissions(&self) -> Permissions {
         self.permissions
     }
 
     /// Returns whether two metadata values identify the same native entry.
     #[must_use]
-    #[cfg_attr(coverage, inline(never))]
-    #[cfg_attr(not(coverage), inline(always))]
     pub const fn is_same_file(&self, other: &Self) -> bool {
         matches!(
             (self.device_id, self.file_id, other.device_id, other.file_id),

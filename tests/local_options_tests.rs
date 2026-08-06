@@ -38,10 +38,11 @@ use qubit_local_files::{
 
 #[cfg(coverage)]
 use qubit_local_files::{
-    LocalAtomicWriteOptions,
+    CoverageCopyDestinationAction,
     LocalAtomicCommitError,
     LocalAtomicDestinationState,
     LocalAtomicWriteError,
+    LocalAtomicWriteOptions,
     LocalAtomicWriteStage,
     LocalCopyDirError,
     LocalCopyDirOptions,
@@ -55,29 +56,28 @@ use qubit_local_files::{
     LocalPersistStage,
     NativeWriteMode,
     NativeWriteOpenOptions,
-    Permissions,
     PathIoError,
-    coverage_with_path_context,
-    coverage_is_enabled,
-    coverage_take,
-    coverage_take_on_nth,
-    coverage_decide_copy_destination,
-    CoverageCopyDestinationAction,
+    Permissions,
+    RootedEntryKind,
+    RootedMetadata,
     coverage_absolute_path,
     coverage_add_path_context,
     coverage_canonicalize_existing_prefix,
     coverage_clean_dir_path,
+    coverage_decide_copy_destination,
     coverage_ensure_dir_path,
     coverage_ensure_parent_path,
     coverage_ensure_parent_path_with_sync_dirs,
-    coverage_remove_any_path,
+    coverage_entry_kind_from_mode,
     coverage_inspect_copy_source_directory,
+    coverage_is_enabled,
     coverage_is_real_directory,
     coverage_metadata_for_copy_source,
     coverage_reject_destination_inside_source,
-    RootedEntryKind,
-    RootedMetadata,
-    coverage_entry_kind_from_mode,
+    coverage_remove_any_path,
+    coverage_take,
+    coverage_take_on_nth,
+    coverage_with_path_context,
 };
 
 /// Verifies directory and deletion builders retain every configured policy.
@@ -537,11 +537,17 @@ fn test_internal_persist_error_accessors_and_parts() {
     assert_eq!(LocalPersistStage::InstallDestination, error.stage());
     assert_eq!(Path::new("requested"), error.requested_target());
     assert_eq!(Path::new("resolved"), error.resolved_target().unwrap());
-    assert_eq!(qubit_local_files::LocalFileErrorKind::PermissionDenied, error.kind());
+    assert_eq!(
+        qubit_local_files::LocalFileErrorKind::PermissionDenied,
+        error.kind()
+    );
     assert_eq!(7, *error.resource());
     *error.resource_mut() = 8;
     assert_eq!(8, *error.resource());
-    assert_eq!(qubit_local_files::LocalFileErrorKind::PermissionDenied, error.error().kind());
+    assert_eq!(
+        qubit_local_files::LocalFileErrorKind::PermissionDenied,
+        error.error().kind()
+    );
     assert!(error.to_string().contains("resolved"));
     assert!(std::error::Error::source(&error).is_some());
     let (_, resource, requested, resolved, stage, state) =
@@ -587,12 +593,15 @@ fn test_internal_atomic_write_error_accessors_and_parts() {
         )));
     assert_eq!(LocalAtomicWriteStage::ReplaceDestination, error.stage());
     assert_eq!(Path::new("destination"), error.path());
+    assert_eq!(Some(Path::new("temporary")), error.temporary_path());
     assert_eq!(
-        Some(Path::new("temporary")),
-        error.temporary_path()
+        LocalAtomicDestinationState::Replaced,
+        error.destination_state()
     );
-    assert_eq!(LocalAtomicDestinationState::Replaced, error.destination_state());
-    assert_eq!(std::io::ErrorKind::Other, error.cleanup_error().unwrap().kind());
+    assert_eq!(
+        std::io::ErrorKind::Other,
+        error.cleanup_error().unwrap().kind()
+    );
     assert_eq!(
         std::io::ErrorKind::Interrupted,
         error.parent_sync_error().unwrap().kind()
@@ -610,18 +619,22 @@ fn test_internal_atomic_write_error_accessors_and_parts() {
     assert_eq!(std::io::ErrorKind::PermissionDenied, source.kind());
 
     assert!(base().to_string().contains("atomic write"));
-    assert!(base()
-        .coverage_with_cleanup_error(Some(std::io::Error::from(
-            std::io::ErrorKind::Other,
-        )))
-        .to_string()
-        .contains("staging cleanup"));
-    assert!(base()
-        .coverage_with_parent_sync_error(Some(std::io::Error::from(
-            std::io::ErrorKind::Interrupted,
-        )))
-        .to_string()
-        .contains("parent synchronization"));
+    assert!(
+        base()
+            .coverage_with_cleanup_error(Some(std::io::Error::from(
+                std::io::ErrorKind::Other,
+            )))
+            .to_string()
+            .contains("staging cleanup")
+    );
+    assert!(
+        base()
+            .coverage_with_parent_sync_error(Some(std::io::Error::from(
+                std::io::ErrorKind::Interrupted,
+            )))
+            .to_string()
+            .contains("parent synchronization")
+    );
 }
 
 /// Verifies coverage-only construction and recovery accessors for commit
@@ -651,13 +664,15 @@ fn test_internal_atomic_commit_error_accessors_and_parts() {
         .push_str("-updated");
     assert!(retryable.to_string().contains("retained"));
     assert!(std::error::Error::source(&retryable).is_some());
-    let finalized = retryable.coverage_into_final_error_with(|writer, error| {
-        assert_eq!("writer-updated", writer);
-        error
-    });
+    let finalized =
+        retryable.coverage_into_final_error_with(|writer, error| {
+            assert_eq!("writer-updated", writer);
+            error
+        });
     assert_eq!(std::io::ErrorKind::Other, finalized.kind());
 
-    let terminal = LocalAtomicCommitError::coverage_new(make_error(), None::<String>);
+    let terminal =
+        LocalAtomicCommitError::coverage_new(make_error(), None::<String>);
     assert!(terminal.writer().is_none());
     assert!(terminal.to_string().contains("unavailable"));
     let (error, writer) = terminal.into_parts();
@@ -719,7 +734,10 @@ fn test_internal_rooted_permissions_accessors() {
     assert_eq!(0o400, read_only.coverage_resolve_unix_mode(0o600));
 
     let writable_without_mode = Permissions::from_read_only(false);
-    assert_eq!(0o700, writable_without_mode.coverage_resolve_unix_mode(0o500));
+    assert_eq!(
+        0o700,
+        writable_without_mode.coverage_resolve_unix_mode(0o500)
+    );
 }
 
 /// Verifies coverage-only rooted metadata accessors and Unix special kinds.
@@ -728,10 +746,13 @@ fn test_internal_rooted_permissions_accessors() {
 fn test_internal_rooted_metadata_accessors() {
     use std::os::unix::fs::MetadataExt;
 
-    let directory = tempfile::tempdir().expect("metadata fixture directory should exist");
+    let directory =
+        tempfile::tempdir().expect("metadata fixture directory should exist");
     let path = directory.path().join("payload");
-    std::fs::write(&path, b"payload").expect("metadata fixture should be written");
-    let native = std::fs::metadata(&path).expect("native metadata should be available");
+    std::fs::write(&path, b"payload")
+        .expect("metadata fixture should be written");
+    let native =
+        std::fs::metadata(&path).expect("native metadata should be available");
     let metadata = RootedMetadata::coverage_from_native(&native);
     let mut status: libc::stat = unsafe { std::mem::zeroed() };
     status.st_mode = native.mode() as _;
@@ -755,9 +776,11 @@ fn test_internal_rooted_metadata_accessors() {
     assert!(metadata.created_at().is_some());
     assert!(!metadata.permissions().is_read_only());
     assert!(metadata.is_same_file(&same));
-    assert!(!metadata.is_same_file(&RootedMetadata::coverage_from_native(
-        &std::fs::metadata(directory.path()).unwrap(),
-    )));
+    assert!(
+        !metadata.is_same_file(&RootedMetadata::coverage_from_native(
+            &std::fs::metadata(directory.path()).unwrap(),
+        ))
+    );
     assert_eq!(
         RootedEntryKind::BlockDevice,
         coverage_entry_kind_from_mode(libc::S_IFBLK as libc::mode_t),
@@ -792,8 +815,12 @@ fn test_internal_path_io_error_context() {
 fn test_internal_io_result_context() {
     assert_eq!(
         7,
-        coverage_with_path_context(Ok::<_, std::io::Error>(7), "read", Path::new("payload"))
-            .expect("successful result should remain successful"),
+        coverage_with_path_context(
+            Ok::<_, std::io::Error>(7),
+            "read",
+            Path::new("payload")
+        )
+        .expect("successful result should remain successful"),
     );
     let error = coverage_with_path_context::<()>(
         Err(std::io::Error::from(std::io::ErrorKind::NotFound)),
@@ -814,7 +841,10 @@ fn test_internal_native_write_open_options() {
         .with_open_retry_timeout(Duration::from_millis(13));
     assert_eq!(NativeWriteMode::CreateOrTruncate, options.mode());
     assert!(options.creates_parents());
-    assert_eq!(Some(Duration::from_millis(13)), options.open_retry_timeout());
+    assert_eq!(
+        Some(Duration::from_millis(13)),
+        options.open_retry_timeout()
+    );
     assert_eq!(
         NativeWriteMode::AppendOrCreate,
         NativeWriteOpenOptions::new(NativeWriteMode::AppendOrCreate).mode()
@@ -829,7 +859,8 @@ fn test_internal_coverage_fault_selectors() {
     const ENV: &str = "QUBIT_LOCAL_FILES_COVERAGE_FAULT";
     if std::env::var_os(ENV).is_none() {
         let status = std::process::Command::new(
-            std::env::current_exe().expect("test executable should be available"),
+            std::env::current_exe()
+                .expect("test executable should be available"),
         )
         .arg("--exact")
         .arg(TEST_NAME)
@@ -928,8 +959,13 @@ fn test_internal_copy_destination_policy_matrix() {
 fn test_internal_path_management_matrix() {
     let root = tempfile::tempdir().expect("path-management root should exist");
     let existing = root.path().join("existing");
-    std::fs::create_dir(&existing).expect("existing directory should be created");
-    assert!(coverage_absolute_path(Path::new("relative")).unwrap().is_absolute());
+    std::fs::create_dir(&existing)
+        .expect("existing directory should be created");
+    assert!(
+        coverage_absolute_path(Path::new("relative"))
+            .unwrap()
+            .is_absolute()
+    );
     assert_eq!(
         existing,
         coverage_canonicalize_existing_prefix(&existing).unwrap()
@@ -942,32 +978,43 @@ fn test_internal_path_management_matrix() {
     let _ = coverage_canonicalize_existing_prefix(Path::new(""));
 
     let created = root.path().join("created/nested");
-    coverage_ensure_dir_path(&created).expect("directory creation should succeed");
+    coverage_ensure_dir_path(&created)
+        .expect("directory creation should succeed");
     coverage_ensure_parent_path(&root.path().join("created/file"))
         .expect("existing parent should be accepted");
     coverage_ensure_parent_path(Path::new("file"))
         .expect("a path without a parent should be accepted");
     let sync_missing = root.path().join("sync/a/b/file");
-    let missing_dirs = coverage_ensure_parent_path_with_sync_dirs(&sync_missing)
-        .expect("missing parents should be created");
+    let missing_dirs =
+        coverage_ensure_parent_path_with_sync_dirs(&sync_missing)
+            .expect("missing parents should be created");
     assert!(!missing_dirs.is_empty());
-    assert!(coverage_ensure_parent_path_with_sync_dirs(&sync_missing)
-        .unwrap()
-        .is_empty());
-    assert!(coverage_ensure_parent_path_with_sync_dirs(Path::new("file"))
-        .unwrap()
-        .is_empty());
+    assert!(
+        coverage_ensure_parent_path_with_sync_dirs(&sync_missing)
+            .unwrap()
+            .is_empty()
+    );
+    assert!(
+        coverage_ensure_parent_path_with_sync_dirs(Path::new("file"))
+            .unwrap()
+            .is_empty()
+    );
     let _ = coverage_ensure_parent_path_with_sync_dirs(Path::new("/tmp/file"));
     let non_directory = root.path().join("non-directory");
-    std::fs::write(&non_directory, b"file").expect("file fixture should be written");
-    assert!(coverage_ensure_parent_path_with_sync_dirs(
-        &non_directory.join("child")
-    )
-    .is_err());
-    assert!(coverage_ensure_parent_path_with_sync_dirs(
-        Path::new("bad\0component/child")
-    )
-    .is_err());
+    std::fs::write(&non_directory, b"file")
+        .expect("file fixture should be written");
+    assert!(
+        coverage_ensure_parent_path_with_sync_dirs(
+            &non_directory.join("child")
+        )
+        .is_err()
+    );
+    assert!(
+        coverage_ensure_parent_path_with_sync_dirs(Path::new(
+            "bad\0component/child"
+        ))
+        .is_err()
+    );
 
     let contextual = coverage_add_path_context(
         std::io::Error::from(std::io::ErrorKind::NotFound),
@@ -980,14 +1027,16 @@ fn test_internal_path_management_matrix() {
     std::fs::create_dir(&clean).expect("clean directory should be created");
     let child = clean.join("child");
     std::fs::write(&child, b"child").expect("child should be written");
-    coverage_clean_dir_path(&clean).expect("directory contents should be removed");
+    coverage_clean_dir_path(&clean)
+        .expect("directory contents should be removed");
     assert!(clean.is_dir());
     let non_directory_child = clean.join("non-directory");
     std::fs::write(&non_directory_child, b"child")
         .expect("non-directory child should be written");
     assert!(coverage_clean_dir_path(&non_directory_child).is_err());
     let removable = root.path().join("removable");
-    std::fs::write(&removable, b"remove").expect("removable file should be written");
+    std::fs::write(&removable, b"remove")
+        .expect("removable file should be written");
     coverage_remove_any_path(&removable).expect("file should be removed");
     coverage_remove_any_path(&clean).expect("directory should be removed");
 }
@@ -1001,56 +1050,60 @@ fn test_internal_copy_source_policy_matrix() {
     let file = source.join("file");
     std::fs::create_dir(&source).expect("source directory should be created");
     std::fs::write(&file, b"file").expect("source file should be written");
-    let source_metadata = coverage_metadata_for_copy_source(
-        &source,
-        LocalSymlinkPolicy::Reject,
-    )
-    .expect("directory metadata should be readable");
+    let source_metadata =
+        coverage_metadata_for_copy_source(&source, LocalSymlinkPolicy::Reject)
+            .expect("directory metadata should be readable");
     assert!(coverage_is_real_directory(&source_metadata));
-    let file_metadata = coverage_metadata_for_copy_source(
-        &file,
-        LocalSymlinkPolicy::Reject,
-    )
-    .expect("file metadata should be readable");
+    let file_metadata =
+        coverage_metadata_for_copy_source(&file, LocalSymlinkPolicy::Reject)
+            .expect("file metadata should be readable");
     assert!(!coverage_is_real_directory(&file_metadata));
-    assert!(coverage_inspect_copy_source_directory(
-        &source,
-        LocalSymlinkPolicy::Reject,
-        &root.path().join("destination"),
-    )
-    .is_ok());
-    assert!(coverage_inspect_copy_source_directory(
-        &source,
-        LocalSymlinkPolicy::Reject,
-        &source.join("nested"),
-    )
-    .is_err());
-    assert!(coverage_reject_destination_inside_source(
-        &source,
-        &source,
-        &source,
-    )
-    .is_err());
-    assert!(coverage_reject_destination_inside_source(
-        &source,
-        &source,
-        &root.path().join("other"),
-    )
-    .is_ok());
+    assert!(
+        coverage_inspect_copy_source_directory(
+            &source,
+            LocalSymlinkPolicy::Reject,
+            &root.path().join("destination"),
+        )
+        .is_ok()
+    );
+    assert!(
+        coverage_inspect_copy_source_directory(
+            &source,
+            LocalSymlinkPolicy::Reject,
+            &source.join("nested"),
+        )
+        .is_err()
+    );
+    assert!(
+        coverage_reject_destination_inside_source(&source, &source, &source,)
+            .is_err()
+    );
+    assert!(
+        coverage_reject_destination_inside_source(
+            &source,
+            &source,
+            &root.path().join("other"),
+        )
+        .is_ok()
+    );
 
     #[cfg(unix)]
     {
         std::os::unix::fs::symlink(&file, root.path().join("link"))
             .expect("source link should be created");
-        assert!(coverage_metadata_for_copy_source(
-            &root.path().join("link"),
-            LocalSymlinkPolicy::Reject,
-        )
-        .is_err());
-        assert!(coverage_metadata_for_copy_source(
-            &root.path().join("link"),
-            LocalSymlinkPolicy::FollowAcrossScope,
-        )
-        .is_ok());
+        assert!(
+            coverage_metadata_for_copy_source(
+                &root.path().join("link"),
+                LocalSymlinkPolicy::Reject,
+            )
+            .is_err()
+        );
+        assert!(
+            coverage_metadata_for_copy_source(
+                &root.path().join("link"),
+                LocalSymlinkPolicy::FollowAcrossScope,
+            )
+            .is_ok()
+        );
     }
 }

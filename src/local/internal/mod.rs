@@ -19,7 +19,6 @@ mod copy_destination_action;
 mod copy_destination_policy;
 mod copy_dir;
 mod copy_policy;
-#[cfg(coverage)]
 pub(crate) mod coverage_fault;
 mod directory_identity;
 mod file_io;
@@ -29,13 +28,13 @@ mod file_name_validation;
 mod host_local_file_system;
 mod io_result_context;
 #[cfg(coverage)]
-pub use io_result_context::coverage_with_path_context;
-#[cfg(coverage)]
 pub use coverage_fault::{
     coverage_is_enabled,
     coverage_take,
     coverage_take_on_nth,
 };
+#[cfg(coverage)]
+pub use io_result_context::coverage_with_path_context;
 mod local_atomic_publication_mode;
 mod local_namespace;
 #[cfg(unix)]
@@ -108,17 +107,6 @@ pub use copy_dir::{
     coverage_metadata_for_copy_source,
     coverage_reject_destination_inside_source,
 };
-#[cfg(coverage)]
-pub use path_operations::{
-    coverage_absolute_path,
-    coverage_add_path_context,
-    coverage_canonicalize_existing_prefix,
-    coverage_clean_dir_path,
-    coverage_ensure_dir_path,
-    coverage_ensure_parent_path,
-    coverage_ensure_parent_path_with_sync_dirs,
-    coverage_remove_any_path,
-};
 pub(crate) use copy_policy::{
     copy_directory_guarantee_unavailable,
     copy_file_replace_requires_atomicity,
@@ -157,6 +145,17 @@ pub(crate) use path_operations::{
     add_path_context,
     ensure_parent_path,
     ensure_parent_path_with_sync_dirs,
+};
+#[cfg(coverage)]
+pub use path_operations::{
+    coverage_absolute_path,
+    coverage_add_path_context,
+    coverage_canonicalize_existing_prefix,
+    coverage_clean_dir_path,
+    coverage_ensure_dir_path,
+    coverage_ensure_parent_path,
+    coverage_ensure_parent_path_with_sync_dirs,
+    coverage_remove_any_path,
 };
 pub(crate) use publication_state::{
     copy_failure_published,

@@ -20,8 +20,6 @@ pub struct LocalReadOptions {
 
 impl LocalReadOptions {
     /// Creates default reader options with unbounded platform retry behavior.
-    #[cfg_attr(coverage, inline(never))]
-    #[cfg_attr(not(coverage), inline(always))]
     pub const fn new() -> Self {
         Self {
             open_retry_timeout: None,
@@ -32,8 +30,6 @@ impl LocalReadOptions {
     ///
     /// `None` means no retry deadline.
     #[must_use]
-    #[cfg_attr(coverage, inline(never))]
-    #[cfg_attr(not(coverage), inline(always))]
     pub const fn open_retry_timeout(&self) -> Option<Duration> {
         self.open_retry_timeout
     }
@@ -47,8 +43,6 @@ impl LocalReadOptions {
     /// # Returns
     ///
     /// Updated reader options.
-    #[cfg_attr(coverage, inline(never))]
-    #[cfg_attr(not(coverage), inline(always))]
     pub const fn with_open_retry_timeout(mut self, timeout: Duration) -> Self {
         self.open_retry_timeout = Some(timeout);
         self

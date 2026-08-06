@@ -9,6 +9,8 @@
 // qubit-style: allow source-test-pair
 
 use std::ffi::OsStr;
+use std::io;
+#[cfg(coverage)]
 use std::sync::atomic::{
     AtomicBool,
     AtomicUsize,
@@ -18,9 +20,26 @@ use std::sync::atomic::{
 /// Environment variable carrying one isolated coverage fault name.
 const COVERAGE_FAULT_ENV: &str = "QUBIT_LOCAL_FILES_COVERAGE_FAULT";
 /// Whether the selected one-shot fault was already consumed in this process.
+#[cfg(coverage)]
 static ONE_SHOT_FAULT_TAKEN: AtomicBool = AtomicBool::new(false);
 /// Number of times the selected occurrence-counted fault has been observed.
+#[cfg(coverage)]
 static NTH_FAULT_OCCURRENCES: AtomicUsize = AtomicUsize::new(0);
+
+/// Returns a deterministic native I/O error for a selected coverage fault.
+///
+/// In ordinary builds no fault is selected and the operation proceeds with
+/// `None`; coverage builds consult the isolated subprocess selector.
+#[must_use]
+#[inline(always)]
+pub(crate) fn io_error(name: &str) -> Option<io::Error> {
+    #[cfg(coverage)]
+    if is_enabled(name) {
+        return Some(io::Error::from_raw_os_error(libc::EIO));
+    }
+    let _ = name;
+    None
+}
 
 /// Coverage-only access to selector matching.
 #[cfg(coverage)]
@@ -66,6 +85,7 @@ pub(crate) fn is_enabled(name: &str) -> bool {
 ///
 /// `true` only for the first matching call in the subprocess.
 #[inline(always)]
+#[cfg(coverage)]
 pub(crate) fn take(name: &str) -> bool {
     is_enabled(name)
         && ONE_SHOT_FAULT_TAKEN
@@ -85,6 +105,7 @@ pub(crate) fn take(name: &str) -> bool {
 /// `true` only for the requested matching invocation in the isolated process.
 #[must_use]
 #[inline]
+#[cfg(coverage)]
 pub(crate) fn take_on_nth(name: &str, occurrence: usize) -> bool {
     is_enabled(name)
         && NTH_FAULT_OCCURRENCES.fetch_add(1, Ordering::Relaxed) + 1

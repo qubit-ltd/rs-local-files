@@ -45,8 +45,6 @@ pub struct LocalCopyOptions {
 impl LocalCopyOptions {
     /// Creates copy options that inherit the owning filesystem's
     /// symbolic-link policy.
-    #[cfg_attr(coverage, inline(never))]
-    #[cfg_attr(not(coverage), inline)]
     pub const fn new() -> Self {
         Self {
             conflict: LocalCopyConflictPolicy::Fail,
@@ -61,66 +59,48 @@ impl LocalCopyOptions {
     }
 
     /// Returns the destination file conflict policy.
-    #[cfg_attr(coverage, inline(never))]
-    #[cfg_attr(not(coverage), inline(always))]
     pub const fn conflict(&self) -> LocalCopyConflictPolicy {
         self.conflict
     }
 
     /// Returns the file/directory type conflict policy.
-    #[cfg_attr(coverage, inline(never))]
-    #[cfg_attr(not(coverage), inline(always))]
     pub const fn type_conflict(&self) -> LocalCopyTypeConflictPolicy {
         self.type_conflict
     }
 
     /// Returns the metadata preservation policy.
-    #[cfg_attr(coverage, inline(never))]
-    #[cfg_attr(not(coverage), inline(always))]
     pub const fn preserve_metadata(&self) -> LocalMetadataPreservePolicy {
         self.preserve_metadata
     }
 
     /// Returns the optional symbolic-link policy override.
     #[must_use]
-    #[cfg_attr(coverage, inline(never))]
-    #[cfg_attr(not(coverage), inline(always))]
     pub const fn symlink_policy_override(&self) -> Option<LocalSymlinkPolicy> {
         self.symlink
     }
 
     /// Returns the source kind accepted by this copy.
-    #[cfg_attr(coverage, inline(never))]
-    #[cfg_attr(not(coverage), inline(always))]
     pub const fn source_mode(&self) -> LocalCopySourceMode {
         self.source_mode
     }
 
     /// Reports whether missing target parent directories are created.
     #[must_use]
-    #[cfg_attr(coverage, inline(never))]
-    #[cfg_attr(not(coverage), inline(always))]
     pub const fn creates_parent(&self) -> bool {
         self.create_parent
     }
 
     /// Returns the required atomicity.
-    #[cfg_attr(coverage, inline(never))]
-    #[cfg_attr(not(coverage), inline(always))]
     pub const fn atomicity(&self) -> LocalAtomicityRequirement {
         self.atomicity
     }
 
     /// Returns the required durability.
-    #[cfg_attr(coverage, inline(never))]
-    #[cfg_attr(not(coverage), inline(always))]
     pub const fn durability(&self) -> LocalDurabilityRequirement {
         self.durability
     }
 
     /// Sets the destination file conflict policy.
-    #[cfg_attr(coverage, inline(never))]
-    #[cfg_attr(not(coverage), inline(always))]
     pub const fn with_conflict(
         mut self,
         conflict: LocalCopyConflictPolicy,
@@ -130,8 +110,6 @@ impl LocalCopyOptions {
     }
 
     /// Sets the file/directory type conflict policy.
-    #[cfg_attr(coverage, inline(never))]
-    #[cfg_attr(not(coverage), inline(always))]
     pub const fn with_type_conflict(
         mut self,
         type_conflict: LocalCopyTypeConflictPolicy,
@@ -141,8 +119,6 @@ impl LocalCopyOptions {
     }
 
     /// Sets metadata preservation policy.
-    #[cfg_attr(coverage, inline(never))]
-    #[cfg_attr(not(coverage), inline(always))]
     pub const fn with_metadata_preservation(
         mut self,
         preserve_metadata: LocalMetadataPreservePolicy,
@@ -152,8 +128,6 @@ impl LocalCopyOptions {
     }
 
     /// Sets symbolic-link policy.
-    #[cfg_attr(coverage, inline(never))]
-    #[cfg_attr(not(coverage), inline(always))]
     pub const fn with_symlink_policy(
         mut self,
         symlink: LocalSymlinkPolicy,
@@ -163,32 +137,24 @@ impl LocalCopyOptions {
     }
 
     /// Requires a regular file source.
-    #[cfg_attr(coverage, inline(never))]
-    #[cfg_attr(not(coverage), inline(always))]
     pub const fn with_file_source(mut self) -> Self {
         self.source_mode = LocalCopySourceMode::File;
         self
     }
 
     /// Requires a directory-tree source.
-    #[cfg_attr(coverage, inline(never))]
-    #[cfg_attr(not(coverage), inline(always))]
     pub const fn with_tree_source(mut self) -> Self {
         self.source_mode = LocalCopySourceMode::Tree;
         self
     }
 
     /// Creates missing target parent directories before copying.
-    #[cfg_attr(coverage, inline(never))]
-    #[cfg_attr(not(coverage), inline(always))]
     pub const fn with_parent(mut self) -> Self {
         self.create_parent = true;
         self
     }
 
     /// Sets required publication atomicity.
-    #[cfg_attr(coverage, inline(never))]
-    #[cfg_attr(not(coverage), inline(always))]
     pub const fn with_atomicity(
         mut self,
         atomicity: LocalAtomicityRequirement,
@@ -198,8 +164,6 @@ impl LocalCopyOptions {
     }
 
     /// Sets required durability.
-    #[cfg_attr(coverage, inline(never))]
-    #[cfg_attr(not(coverage), inline(always))]
     pub const fn with_durability(
         mut self,
         durability: LocalDurabilityRequirement,
@@ -211,8 +175,6 @@ impl LocalCopyOptions {
 
 impl Default for LocalCopyOptions {
     /// Returns conservative copy defaults.
-    #[cfg_attr(coverage, inline(never))]
-    #[cfg_attr(not(coverage), inline)]
     fn default() -> Self {
         Self::new()
     }

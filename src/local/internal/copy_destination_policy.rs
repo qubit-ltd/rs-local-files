@@ -46,8 +46,6 @@ pub fn coverage_decide_copy_destination(
 /// `Some` with the permitted action, or `None` when the selected policy
 /// requires a conflict failure.
 #[must_use]
-#[cfg_attr(coverage, inline(never))]
-#[cfg_attr(not(coverage), inline(always))]
 pub(crate) const fn decide_copy_destination(
     source_is_directory: bool,
     destination_is_directory: Option<bool>,

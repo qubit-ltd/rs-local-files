@@ -235,8 +235,6 @@ impl LocalCopyDirOptions {
     ///
     /// # Returns
     /// Updated directory copy options.
-    #[cfg_attr(coverage, inline(never))]
-    #[cfg_attr(not(coverage), inline(always))]
     #[allow(dead_code)]
     pub const fn with_open_retry_timeout(mut self, timeout: Duration) -> Self {
         self.open_retry_timeout = Some(timeout);
@@ -250,8 +248,6 @@ impl Default for LocalCopyDirOptions {
     /// # Returns
     /// Options that do not overwrite existing destination entries, do not
     /// follow symbolic links, and do not preserve source permissions.
-    #[cfg_attr(coverage, inline(never))]
-    #[cfg_attr(not(coverage), inline)]
     fn default() -> Self {
         Self::new()
     }
