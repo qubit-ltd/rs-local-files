@@ -27,6 +27,20 @@ pub struct LocalCopyStats {
 }
 
 impl LocalCopyStats {
+    /// Coverage-only access to the native skipped-entry constructor.
+    #[cfg(coverage)]
+    pub fn coverage_skipped_one() -> Self {
+        Self::skipped_one()
+    }
+
+    /// Coverage-only constructor for the native statistics conversion.
+    #[cfg(coverage)]
+    pub fn coverage_from_internal(
+        stats: LocalCopyDirStats,
+    ) -> Self {
+        Self::from_internal(stats)
+    }
+
     /// Creates statistics for one destination entry skipped before transfer.
     #[cfg_attr(coverage, inline(never))]
     #[cfg_attr(not(coverage), inline(always))]

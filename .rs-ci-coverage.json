@@ -40,7 +40,6 @@
       "src/local/local_root_atomic_writer.rs",
       "src/local_file_system.rs",
       "src/outcome/local_copy_failure.rs",
-      "src/outcome/local_copy_stats.rs",
       "src/rooted/copy.rs",
       "src/rooted/metadata.rs",
       "src/rooted/permissions.rs",
