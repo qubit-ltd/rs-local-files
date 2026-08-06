@@ -24,7 +24,6 @@ use qubit_local_files::{
     LocalReadOptions,
     LocalWriteMode,
     LocalWriteOptions,
-    LocalWriterState,
 };
 use tempfile::tempdir;
 
@@ -149,7 +148,7 @@ fn bench_rooted_writer(c: &mut Criterion) {
                 let outcome = writer
                     .commit()
                     .expect("rooted benchmark commit should succeed");
-                assert_eq!(LocalWriterState::Committed, outcome.state());
+                let _ = black_box(outcome.state());
                 black_box(outcome.bytes_written());
             },
             criterion::BatchSize::SmallInput,
