@@ -40,6 +40,7 @@ use qubit_local_files::{
 use qubit_local_files::{
     LocalAtomicWriteOptions,
     LocalCopyDirOptions,
+    LocalCopyDirStats,
 };
 
 /// Verifies directory and deletion builders retain every configured policy.
@@ -401,4 +402,21 @@ fn test_internal_copy_and_atomic_option_defaults() {
     let atomic = LocalAtomicWriteOptions::default()
         .with_open_retry_timeout(Duration::from_millis(5));
     assert_eq!(Some(Duration::from_millis(5)), atomic.open_retry_timeout());
+}
+
+/// Verifies coverage-only access to the native recursive-copy statistics.
+#[cfg(coverage)]
+#[test]
+fn test_internal_copy_statistics_accessors() {
+    let mut stats = LocalCopyDirStats::default();
+    stats.files = 1;
+    stats.directories = 2;
+    stats.bytes = 3;
+    stats.skipped = 4;
+    stats.overwritten = 5;
+    assert_eq!(1, stats.files());
+    assert_eq!(2, stats.directories());
+    assert_eq!(3, stats.bytes());
+    assert_eq!(4, stats.skipped());
+    assert_eq!(5, stats.overwritten());
 }
