@@ -136,16 +136,16 @@ pub use writer::{
 };
 
 pub(crate) use local::{
-    LocalAtomicCommitError,
-    LocalAtomicDestinationState,
-    LocalAtomicWriteError,
-    LocalAtomicWriteStage,
     LocalRelativePath,
 };
 
 #[cfg(not(coverage))]
 pub(crate) use local::{
+    LocalAtomicCommitError,
+    LocalAtomicDestinationState,
+    LocalAtomicWriteError,
     LocalAtomicWriteOptions,
+    LocalAtomicWriteStage,
     LocalCopyDirOptions,
     LocalCopyDirError,
     LocalCopyDirStage,
@@ -156,6 +156,10 @@ pub(crate) use local::{
 // without expanding the normal public API.
 #[cfg(coverage)]
 pub use local::{
+    LocalAtomicCommitError,
+    LocalAtomicDestinationState,
+    LocalAtomicWriteError,
+    LocalAtomicWriteStage,
     LocalAtomicWriteOptions,
     LocalCopyDirOptions,
     LocalCopyDirError,
