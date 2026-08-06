@@ -171,6 +171,35 @@ fn test_local_file_system_copy_rejects_required_directory_replacement() {
     assert_eq!(LocalFileErrorKind::RequirementNotMet, error.error().kind());
 }
 
+/// Verifies file conflicts honor fail and overwrite policies, while type
+/// conflicts honor the default fail policy.
+#[test]
+fn test_local_file_system_copy_conflict_policy_matrix() {
+    let directory = tempdir().expect("temporary directory should be created");
+    let source = directory.path().join("source");
+    let target = directory.path().join("target");
+    fs::write(&source, b"source").expect("source should be written");
+    fs::write(&target, b"target").expect("target should be written");
+
+    LocalFileSystem::host()
+        .copy(&source, &target, &LocalCopyOptions::new())
+        .expect_err("existing file should fail under the default policy");
+    LocalFileSystem::host()
+        .copy(
+            &source,
+            &target,
+            &LocalCopyOptions::new().with_conflict(LocalCopyConflictPolicy::Overwrite),
+        )
+        .expect("overwrite policy should replace an existing file");
+    assert_eq!(b"source", fs::read(&target).unwrap().as_slice());
+
+    fs::remove_file(&target).expect("file target should be removed");
+    fs::create_dir(&target).expect("directory target should be created");
+    LocalFileSystem::host()
+        .copy(&source, &target, &LocalCopyOptions::new())
+        .expect_err("file-to-directory conflict should fail by default");
+}
+
 /// Verifies recursive copies preserve nested final symlink entries instead of
 /// dereferencing file links.
 #[cfg(unix)]
