@@ -7,18 +7,11 @@
 // =============================================================================
 //! Panic-safe ownership of an uncommitted staging file.
 // qubit-style: allow source-test-pair
-// qubit-style: allow coverage-cfg
 // Private behavior is covered through public integration tests.
 
-use std::fs::{
-    self,
-    File,
-};
+use std::fs::{self, File};
 use std::io::Result;
-use std::path::{
-    Path,
-    PathBuf,
-};
+use std::path::{Path, PathBuf};
 
 use log::warn;
 
@@ -124,15 +117,12 @@ impl StagedFile {
     pub(crate) fn cleanup(&mut self) -> Result<()> {
         self.close();
         if let Some(path) = self.path.as_ref() {
-            #[cfg(coverage)]
-            if super::coverage_fault::is_enabled(
-                "atomic-install-unlink-persistent",
-            ) || super::coverage_fault::is_enabled(
-                "atomic-install-unlink-persistent-sync",
-            ) || super::coverage_fault::is_enabled(
-                "copy-staging-copy-cleanup",
-            ) {
-                return Err(std::io::Error::from_raw_os_error(libc::EIO));
+            #[cfg(feature = "internal-test-support")]
+            if super::test_support::is_enabled("atomic-install-unlink-persistent")
+                || super::test_support::is_enabled("atomic-install-unlink-persistent-sync")
+                || super::test_support::is_enabled("copy-staging-copy-cleanup")
+            {
+                return Err(crate::local::test_fault_error());
             }
             fs::remove_file(path)?;
             let _ = self.path.take();

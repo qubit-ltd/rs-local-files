@@ -2,26 +2,20 @@
 //    Copyright (c) 2026 Haixing Hu.
 //
 //    SPDX-License-Identifier: Apache-2.0
+//
+//    Licensed under the Apache License, Version 2.0.
 // =============================================================================
 //! Rooted metadata, limits, and space observations.
 
 use std::path::Path;
 
 use crate::{
-    LocalFileMetadata,
-    LocalFileOperation,
-    LocalFileSystemLimits,
-    LocalFileSystemSpace,
-    LocalResult,
-    LocalSymlinkPolicy,
+    LocalFileMetadata, LocalFileOperation, LocalFileSystemLimits, LocalFileSystemSpace,
+    LocalResult, LocalSymlinkPolicy,
 };
 
 use super::{
-    RootedLocalFileSystem,
-    probe_rooted_file,
-    resolve_rooted_path,
-    rooted_io_error,
-    rooted_metadata,
+    RootedLocalFileSystem, probe_rooted_file, resolve_rooted_path, rooted_io_error, rooted_metadata,
 };
 
 impl RootedLocalFileSystem {
@@ -39,12 +33,7 @@ impl RootedLocalFileSystem {
         )
         .map(|file| {
             file.map_or_else(
-                || {
-                    LocalFileSystemLimits::new(
-                        crate::SizeLimit::Unknown,
-                        crate::SizeLimit::Unknown,
-                    )
-                },
+                || LocalFileSystemLimits::new(crate::SizeLimit::Unknown, crate::SizeLimit::Unknown),
                 |file| crate::capability::probe_limits(&file),
             )
         })
@@ -78,11 +67,11 @@ impl RootedLocalFileSystem {
         symlink_policy: LocalSymlinkPolicy,
     ) -> LocalResult<LocalFileMetadata> {
         if path.as_os_str().is_empty() {
-            return self.root.metadata().map(rooted_metadata).map_err(
-                |error| {
-                    rooted_io_error(LocalFileOperation::Metadata, path, error)
-                },
-            );
+            return self
+                .root
+                .metadata()
+                .map(rooted_metadata)
+                .map_err(|error| rooted_io_error(LocalFileOperation::Metadata, path, error));
         }
         match resolve_rooted_path(
             &self.root,
@@ -95,19 +84,11 @@ impl RootedLocalFileSystem {
                 .root
                 .symlink_metadata(&relative)
                 .map(rooted_metadata)
-                .map_err(|error| {
-                    rooted_io_error(LocalFileOperation::Metadata, path, error)
-                }),
+                .map_err(|error| rooted_io_error(LocalFileOperation::Metadata, path, error)),
             crate::local::RootedResolvedPath::Host(resolved) => {
                 std::fs::symlink_metadata(&resolved)
                     .map(|metadata| LocalFileMetadata::from_native(&metadata))
-                    .map_err(|error| {
-                        rooted_io_error(
-                            LocalFileOperation::Metadata,
-                            path,
-                            error,
-                        )
-                    })
+                    .map_err(|error| rooted_io_error(LocalFileOperation::Metadata, path, error))
             }
         }
     }

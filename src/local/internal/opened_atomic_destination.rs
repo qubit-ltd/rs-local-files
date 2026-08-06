@@ -7,33 +7,18 @@
 // =============================================================================
 //! Open Unix atomic destinations and stable file identity.
 // qubit-style: allow source-test-pair
-// qubit-style: allow coverage-cfg
 // Private behavior is covered through public integration tests.
 
 use std::ffi::CString;
-use std::fs::{
-    self,
-    File,
-    OpenOptions,
-};
-use std::io::{
-    Error,
-    ErrorKind,
-    Result,
-};
+use std::fs::{self, File, OpenOptions};
+use std::io::{Error, ErrorKind, Result};
 use std::os::fd::AsRawFd;
-use std::os::unix::fs::{
-    MetadataExt,
-    OpenOptionsExt,
-};
+use std::os::unix::fs::{MetadataExt, OpenOptionsExt};
 use std::path::Path;
 use std::time::Duration;
 
 use super::rooted_file_io::open_file_at;
-use super::unix_nonblocking::{
-    clear_nonblocking,
-    open_with_nonblocking_retry,
-};
+use super::unix_nonblocking::{clear_nonblocking, open_with_nonblocking_retry};
 use super::unix_stat::is_regular_file_mode;
 
 /// Open destination handle and Unix identity used by atomic replacement.
@@ -51,17 +36,14 @@ impl OpenedAtomicDestination {
     /// Constructs and validates destination identity from an open file.
     pub(crate) fn from_file(file: File) -> Result<Self> {
         let metadata_result = file.metadata();
-        #[cfg(coverage)]
-        let metadata_result =
-            if super::coverage_fault::is_enabled("atomic-destination-stat") {
-                Err(Error::from_raw_os_error(libc::EIO))
-            } else {
-                metadata_result
-            };
+        #[cfg(feature = "internal-test-support")]
+        let metadata_result = if super::test_support::is_enabled("atomic-destination-stat") {
+            Err(crate::local::test_fault_error())
+        } else {
+            metadata_result
+        };
         let metadata = metadata_result?;
-        if !metadata.is_file()
-            || coverage_fault_enabled("atomic-destination-type")
-        {
+        if !metadata.is_file() || test_support_enabled("atomic-destination-type") {
             return Err(invalid_atomic_destination());
         }
         clear_nonblocking(file.as_raw_fd())?;
@@ -99,9 +81,9 @@ pub(crate) fn open_atomic_destination(
     path: &Path,
     open_retry_timeout: Option<Duration>,
 ) -> Result<Option<OpenedAtomicDestination>> {
-    #[cfg(coverage)]
-    if super::coverage_fault::is_enabled("atomic-destination-open") {
-        return Err(Error::from_raw_os_error(libc::EIO));
+    #[cfg(feature = "internal-test-support")]
+    if super::test_support::is_enabled("atomic-destination-open") {
+        return Err(crate::local::test_fault_error());
     }
     let mut options = OpenOptions::new();
     options
@@ -109,7 +91,7 @@ pub(crate) fn open_atomic_destination(
         .custom_flags(libc::O_NOFOLLOW | libc::O_NONBLOCK);
     open_destination_with_retry(open_retry_timeout, || {
         let result = options.open(path);
-        #[cfg(coverage)]
+        #[cfg(feature = "internal-test-support")]
         let result = inject_destination_open_result(
             result,
             "atomic-destination-would-block",
@@ -125,17 +107,16 @@ pub(crate) fn destination_identity_matches(
     path: &Path,
     destination: &OpenedAtomicDestination,
 ) -> Result<bool> {
-    #[cfg(coverage)]
-    if super::coverage_fault::is_enabled("atomic-identity-mismatch") {
+    #[cfg(feature = "internal-test-support")]
+    if super::test_support::is_enabled("atomic-identity-mismatch") {
         return Ok(false);
     }
     let result = fs::symlink_metadata(path);
-    #[cfg(coverage)]
-    let result = if super::coverage_fault::is_enabled("atomic-identity-missing")
-    {
+    #[cfg(feature = "internal-test-support")]
+    let result = if super::test_support::is_enabled("atomic-identity-missing") {
         Err(Error::from(ErrorKind::NotFound))
-    } else if super::coverage_fault::is_enabled("atomic-identity-inspect") {
-        Err(Error::from_raw_os_error(libc::EIO))
+    } else if super::test_support::is_enabled("atomic-identity-inspect") {
+        Err(crate::local::test_fault_error())
     } else {
         result
     };
@@ -154,17 +135,16 @@ pub(in crate::local) fn open_rooted_atomic_destination(
     name: &CString,
     open_retry_timeout: Option<Duration>,
 ) -> Result<Option<OpenedAtomicDestination>> {
-    #[cfg(coverage)]
-    if super::coverage_fault::is_enabled("rooted-destination-open") {
-        return Err(Error::from_raw_os_error(libc::EIO));
-    } else if super::coverage_fault::is_enabled("rooted-destination-missing") {
+    #[cfg(feature = "internal-test-support")]
+    if super::test_support::is_enabled("rooted-destination-open") {
+        return Err(crate::local::test_fault_error());
+    } else if super::test_support::is_enabled("rooted-destination-missing") {
         return Ok(None);
     }
-    let flags =
-        libc::O_RDONLY | libc::O_NOFOLLOW | libc::O_NONBLOCK | libc::O_CLOEXEC;
+    let flags = libc::O_RDONLY | libc::O_NOFOLLOW | libc::O_NONBLOCK | libc::O_CLOEXEC;
     open_destination_with_retry(open_retry_timeout, || {
         let result = open_file_at(parent, name, flags, 0);
-        #[cfg(coverage)]
+        #[cfg(feature = "internal-test-support")]
         let result = inject_destination_open_result(
             result,
             "rooted-destination-would-block",
@@ -208,7 +188,7 @@ where
     }
 }
 
-/// Applies coverage-only failures to one native destination-open result.
+/// Applies test-support-only failures to one native destination-open result.
 ///
 /// # Parameters
 /// - `result`: Native open result before fault injection.
@@ -220,21 +200,21 @@ where
 /// The original result or the selected injected failure.
 ///
 /// # Errors
-/// Returns the selected retry, invalid-resource, or native coverage fault, or
+/// Returns the selected retry, invalid-resource, or native test fault, or
 /// preserves the native error in `result`.
-#[cfg(coverage)]
+#[cfg(feature = "internal-test-support")]
 fn inject_destination_open_result(
     result: Result<File>,
     would_block_fault: &str,
     invalid_fault: &str,
     native_fault: &str,
 ) -> Result<File> {
-    if super::coverage_fault::take(would_block_fault) {
+    if super::test_support::take(would_block_fault) {
         Err(Error::from(ErrorKind::WouldBlock))
-    } else if super::coverage_fault::is_enabled(invalid_fault) {
+    } else if super::test_support::is_enabled(invalid_fault) {
         Err(Error::from_raw_os_error(libc::ELOOP))
-    } else if super::coverage_fault::is_enabled(native_fault) {
-        Err(Error::from_raw_os_error(libc::EIO))
+    } else if super::test_support::is_enabled(native_fault) {
+        Err(crate::local::test_fault_error())
     } else {
         result
     }
@@ -246,20 +226,18 @@ pub(in crate::local) fn rooted_destination_identity_matches(
     name: &CString,
     destination: &OpenedAtomicDestination,
 ) -> Result<bool> {
-    #[cfg(coverage)]
-    if super::coverage_fault::is_enabled("rooted-identity-mismatch")
-        || super::coverage_fault::is_enabled("rooted-identity-missing")
+    #[cfg(feature = "internal-test-support")]
+    if super::test_support::is_enabled("rooted-identity-mismatch")
+        || super::test_support::is_enabled("rooted-identity-missing")
     {
         return Ok(false);
-    } else if super::coverage_fault::is_enabled("rooted-identity-inspect") {
-        return Err(Error::from_raw_os_error(libc::EIO));
+    } else if super::test_support::is_enabled("rooted-identity-inspect") {
+        return Err(crate::local::test_fault_error());
     }
     let Some(status) = rooted_destination_status(parent, name)? else {
         return Ok(false);
     };
-    if !is_regular_file_mode(status.st_mode)
-        || coverage_fault_enabled("rooted-status-type")
-    {
+    if !is_regular_file_mode(status.st_mode) || test_support_enabled("rooted-status-type") {
         return Ok(false);
     }
     let device = native_identity_component(status.st_dev)?;
@@ -268,15 +246,12 @@ pub(in crate::local) fn rooted_destination_identity_matches(
 }
 
 /// Reads rooted destination status without following the final entry.
-fn rooted_destination_status(
-    parent: &File,
-    name: &CString,
-) -> Result<Option<libc::stat>> {
-    #[cfg(coverage)]
-    if super::coverage_fault::is_enabled("rooted-status-missing") {
+fn rooted_destination_status(parent: &File, name: &CString) -> Result<Option<libc::stat>> {
+    #[cfg(feature = "internal-test-support")]
+    if super::test_support::is_enabled("rooted-status-missing") {
         return Ok(None);
-    } else if super::coverage_fault::is_enabled("rooted-status-error") {
-        return Err(Error::from_raw_os_error(libc::EIO));
+    } else if super::test_support::is_enabled("rooted-status-error") {
+        return Err(crate::local::test_fault_error());
     }
     let mut status = std::mem::MaybeUninit::<libc::stat>::uninit();
     // SAFETY: `status` is writable storage and the parent descriptor and name
@@ -306,8 +281,8 @@ fn native_identity_component<T>(value: T) -> Result<u64>
 where
     u64: TryFrom<T>,
 {
-    #[cfg(coverage)]
-    if super::coverage_fault::is_enabled("rooted-identity-overflow") {
+    #[cfg(feature = "internal-test-support")]
+    if super::test_support::is_enabled("rooted-identity-overflow") {
         return Err(Error::new(
             ErrorKind::InvalidData,
             "injected atomic destination identity overflow",
@@ -322,12 +297,12 @@ where
     }
 }
 
-/// Returns whether a coverage-only atomic destination fault is selected.
+/// Returns whether a test-support-only atomic destination fault is selected.
 #[inline]
-fn coverage_fault_enabled(name: &str) -> bool {
-    #[cfg(coverage)]
-    return super::coverage_fault::is_enabled(name);
-    #[cfg(not(coverage))]
+fn test_support_enabled(name: &str) -> bool {
+    #[cfg(feature = "internal-test-support")]
+    return super::test_support::is_enabled(name);
+    #[cfg(not(feature = "internal-test-support"))]
     {
         let _ = name;
         false

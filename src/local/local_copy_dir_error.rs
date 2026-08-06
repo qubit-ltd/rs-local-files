@@ -9,21 +9,11 @@
 // qubit-style: allow source-test-pair
 
 use std::error::Error;
-use std::fmt::{
-    Display,
-    Formatter,
-    Result as FmtResult,
-};
+use std::fmt::{Display, Formatter, Result as FmtResult};
 use std::io;
-use std::path::{
-    Path,
-    PathBuf,
-};
+use std::path::{Path, PathBuf};
 
-use crate::{
-    LocalCopyDirStage,
-    LocalCopyDirStats,
-};
+use crate::{LocalCopyDirStage, LocalCopyDirStats};
 
 /// Error returned by a recursive directory copy operation.
 ///
@@ -56,44 +46,6 @@ pub struct LocalCopyDirError {
 
 #[allow(dead_code)]
 impl LocalCopyDirError {
-    /// Coverage-only constructor for the private native error value.
-    #[cfg(coverage)]
-    pub fn coverage_new(
-        stage: LocalCopyDirStage,
-        source_path: PathBuf,
-        destination_path: PathBuf,
-        stats: LocalCopyDirStats,
-        error: io::Error,
-    ) -> Self {
-        Self::new(stage, source_path, destination_path, stats, error)
-    }
-
-    /// Coverage-only access to staging context construction.
-    #[cfg(coverage)]
-    pub fn coverage_with_staging_context(
-        self,
-        temporary_path: PathBuf,
-        cleanup_error: Option<io::Error>,
-    ) -> Self {
-        self.with_staging_context(temporary_path, cleanup_error)
-    }
-
-    /// Coverage-only access to the consuming parts decomposition.
-    #[cfg(coverage)]
-    pub fn coverage_into_parts(
-        self,
-    ) -> (
-        LocalCopyDirStage,
-        PathBuf,
-        PathBuf,
-        LocalCopyDirStats,
-        Option<Box<Path>>,
-        Option<io::Error>,
-        io::Error,
-    ) {
-        self.into_parts()
-    }
-
     /// Creates a recursive-copy error.
     ///
     /// # Parameters
@@ -257,10 +209,7 @@ impl Display for LocalCopyDirError {
             write!(formatter, "; staging path '{}'", temporary_path.display())?;
         }
         if let Some(cleanup_error) = self.cleanup_error.as_ref() {
-            return write!(
-                formatter,
-                "; staging cleanup also failed: {cleanup_error}"
-            );
+            return write!(formatter, "; staging cleanup also failed: {cleanup_error}");
         }
         Ok(())
     }

@@ -7,15 +7,10 @@
 // =============================================================================
 //! Result normalization for descriptor failures and namespace races.
 // qubit-style: allow source-test-pair
-// qubit-style: allow coverage-cfg
 // Public APIs retain live descriptors and cannot force these interleavings.
 
 use std::fs;
-use std::io::{
-    Error,
-    ErrorKind,
-    Result,
-};
+use std::io::{Error, ErrorKind, Result};
 use std::path::Path;
 
 use super::io_result_context::with_path_context;
@@ -39,18 +34,14 @@ use super::rooted_file_io::rooted_type_error;
 /// # Errors
 ///
 /// Returns a contextual operating-system error for any other negative result.
-pub(super) fn normalize_mkdirat_result(
-    result: libc::c_int,
-    diagnostic_path: &Path,
-) -> Result<()> {
-    #[cfg(coverage)]
-    let injected_error =
-        super::coverage_fault::is_enabled("rooted-mkdir-error");
-    #[cfg(not(coverage))]
+pub(super) fn normalize_mkdirat_result(result: libc::c_int, diagnostic_path: &Path) -> Result<()> {
+    #[cfg(feature = "internal-test-support")]
+    let injected_error = super::test_support::is_enabled("rooted-mkdir-error");
+    #[cfg(not(feature = "internal-test-support"))]
     let injected_error = false;
     if result == -1 || injected_error {
         let error = if injected_error {
-            Error::from_raw_os_error(libc::EIO)
+            crate::local::test_fault_error()
         } else {
             Error::last_os_error()
         };
@@ -81,13 +72,10 @@ pub(super) fn normalize_mkdirat_result(
 ///
 /// Returns a contextual operating-system error when the entry was not merely
 /// absent.
-pub(super) fn missing_rooted_entry(
-    error: Error,
-    diagnostic_path: &Path,
-) -> Result<()> {
-    #[cfg(coverage)]
-    let error = if super::coverage_fault::is_enabled("rooted-entry-inspect") {
-        Error::from_raw_os_error(libc::EIO)
+pub(super) fn missing_rooted_entry(error: Error, diagnostic_path: &Path) -> Result<()> {
+    #[cfg(feature = "internal-test-support")]
+    let error = if super::test_support::is_enabled("rooted-entry-inspect") {
+        crate::local::test_fault_error()
     } else {
         error
     };
@@ -122,13 +110,12 @@ pub(super) fn normalize_opened_directory_metadata(
     operation: &'static str,
     diagnostic_path: &Path,
 ) -> Result<()> {
-    #[cfg(coverage)]
-    let result =
-        if super::coverage_fault::is_enabled("rooted-directory-metadata") {
-            Err(Error::from_raw_os_error(libc::EIO))
-        } else {
-            result
-        };
+    #[cfg(feature = "internal-test-support")]
+    let result = if super::test_support::is_enabled("rooted-directory-metadata") {
+        Err(crate::local::test_fault_error())
+    } else {
+        result
+    };
     let metadata = with_path_context(result, operation, diagnostic_path)?;
     if !metadata.is_dir() || rooted_directory_type_fault_enabled() {
         return Err(rooted_type_error(diagnostic_path, "directory"));
@@ -155,38 +142,34 @@ pub(super) fn normalize_opened_regular_file_metadata(
     result: Result<fs::Metadata>,
     diagnostic_path: &Path,
 ) -> Result<()> {
-    #[cfg(coverage)]
-    let result = if super::coverage_fault::is_enabled("rooted-file-metadata") {
-        Err(Error::from_raw_os_error(libc::EIO))
+    #[cfg(feature = "internal-test-support")]
+    let result = if super::test_support::is_enabled("rooted-file-metadata") {
+        Err(crate::local::test_fault_error())
     } else {
         result
     };
-    let metadata = with_path_context(
-        result,
-        "inspect rooted file handle",
-        diagnostic_path,
-    )?;
+    let metadata = with_path_context(result, "inspect rooted file handle", diagnostic_path)?;
     if !metadata.is_file() || rooted_file_type_fault_enabled() {
         return Err(rooted_type_error(diagnostic_path, "regular file"));
     }
     Ok(())
 }
 
-/// Returns whether coverage should reject an opened directory's type.
+/// Returns whether test support should reject an opened directory's type.
 #[must_use]
 #[inline]
 fn rooted_directory_type_fault_enabled() -> bool {
-    #[cfg(coverage)]
-    return super::coverage_fault::is_enabled("rooted-directory-type");
-    #[cfg(not(coverage))]
+    #[cfg(feature = "internal-test-support")]
+    return super::test_support::is_enabled("rooted-directory-type");
+    #[cfg(not(feature = "internal-test-support"))]
     false
 }
 
-/// Returns whether coverage should reject an opened file's type.
+/// Returns whether test support should reject an opened file's type.
 #[inline]
 fn rooted_file_type_fault_enabled() -> bool {
-    #[cfg(coverage)]
-    return super::coverage_fault::is_enabled("rooted-file-type");
-    #[cfg(not(coverage))]
+    #[cfg(feature = "internal-test-support")]
+    return super::test_support::is_enabled("rooted-file-type");
+    #[cfg(not(feature = "internal-test-support"))]
     false
 }

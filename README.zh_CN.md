@@ -29,13 +29,14 @@ qubit-local-files = "0.3"
 use std::io::{Read, Write};
 
 use qubit_local_files::{
-    create_temp_directory, open_reader, open_writer, LocalReadOptions,
-    LocalTempDirectoryOptions, LocalWriteMode, LocalWriteOptions, LocalWriterState,
+    LocalFileSystem, LocalReadOptions, LocalTempDirectoryOptions, LocalWriteMode,
+    LocalWriteOptions, LocalWriterState,
 };
 
-let work = create_temp_directory(&LocalTempDirectoryOptions::new())?;
+let filesystem = LocalFileSystem::host();
+let work = filesystem.create_temp_directory(&LocalTempDirectoryOptions::new())?;
 let path = work.path().join("manifest.json");
-let mut writer = open_writer(
+let mut writer = filesystem.open_writer(
     &path,
     &LocalWriteOptions::new(LocalWriteMode::CreateOrReplace),
 )?;
@@ -44,7 +45,7 @@ let outcome = writer.commit()?;
 assert_eq!(outcome.state(), LocalWriterState::Committed);
 
 let mut content = String::new();
-open_reader(&path, &LocalReadOptions::new())?
+filesystem.open_reader(&path, &LocalReadOptions::new())?
     .read_to_string(&mut content)?;
 assert_eq!(content, r#"{"version":1}"#);
 # Ok::<(), Box<dyn std::error::Error>>(())
@@ -54,7 +55,6 @@ assert_eq!(content, r#"{"version":1}"#);
 
 | API | 适用场景 |
 | --- | --- |
-| Host 便利函数 | 直接执行主机范围的元数据、I/O、复制、重命名、遍历和临时条目操作。 |
 | `LocalFileSystem::host()` | 可复用的进程可见主机命名空间服务。 |
 | `LocalFileSystem::rooted(root)` | 以相同操作访问一个已打开目录权限下的后代。 |
 | `LocalFileSystemScope` | 标识实例按主机路径还是 rooted 后代路径解释输入。 |
@@ -63,8 +63,7 @@ assert_eq!(content, r#"{"version":1}"#);
 | `LocalTempFile` / `LocalTempDirectory` | 拥有清理责任，并支持 `keep` 与持久化。 |
 | `LocalFileNames` / `LocalPaths` | 不丢失 UTF-8 以外文件名信息的原生文件名和词法路径工具。 |
 
-普通应用可直接使用 Host 便利函数。需要保存配置、传递给其他组件或适配到更高层文件系统
-SPI 时，则使用接口一致的 `LocalFileSystem` 实例。
+需要保存配置、传递给其他组件或适配到更高层文件系统 SPI 时，使用 `LocalFileSystem` 实例。
 
 符号链接策略按 `LocalFileSystem` 实例配置；Rooted 默认
 `FollowWithinScope`，Host 默认 `FollowAcrossScope`。各类操作对最终链接的
@@ -79,7 +78,7 @@ SPI 时，则使用接口一致的 `LocalFileSystem` 实例。
 
 ## 选择合适的权限范围
 
-主机路径可使用便利函数或 `LocalFileSystem::host()`。当一个已打开目录就是权限边界时，
+主机路径使用 `LocalFileSystem::host()`。当一个已打开目录就是权限边界时，
 使用 `LocalFileSystem::rooted(root)`。两种实例提供相同操作，只改变路径解释方式。rooted
 路径必须是相对后代；绝对路径、平台前缀、`.` 和 `..` 会被拒绝。中间符号链接遵循实例
 策略：默认的 `FollowWithinScope` 保持在已打开 root 内，`FollowAcrossScope` 则显式允许越出。
@@ -101,9 +100,9 @@ SPI 时，则使用接口一致的 `LocalFileSystem` 实例。
 ## 平台范围
 
 Linux、Windows 和 macOS 的行为会在运行时测试。FreeBSD 和 Android 仅编译检查配置路径；
-本 crate 不承诺这些目标上的运行时保证。能力快照区分“构建已实现”和“运行时已验证”，不会探测具体的运行时文件系统；
-在活动挂载点经过运行时验证前，不会向上层宣称 rename/copy 的耐久性；
-无法满足要求的原子性或耐久性时，会在命名空间变更前拒绝操作。
+本 crate 不承诺这些目标上的运行时保证。能力快照只报告当前 target 是否实现了对应的完整操作协议，
+不会探测具体的运行时文件系统，也不声称证明底层硬件已经持久化数据；无法满足要求的原子性或耐久性时，
+会在命名空间变更前拒绝操作。
 
 ## 测试
 

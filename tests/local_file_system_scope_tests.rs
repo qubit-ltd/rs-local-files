@@ -11,28 +11,18 @@ use std::path::Path;
 
 #[cfg(unix)]
 use qubit_local_files::{
-    LocalCopyOptions,
-    LocalDeleteOptions,
-    LocalPersistOptions,
-    LocalReadOptions,
-    LocalRenameOptions,
-    LocalTempFileOptions,
-    LocalWriteMode,
-    LocalWriteOptions,
+    LocalCopyOptions, LocalDeleteOptions, LocalPersistOptions, LocalReadOptions,
+    LocalRenameOptions, LocalTempFileOptions,
 };
 use qubit_local_files::{
-    LocalFileKind,
-    LocalFileSystem,
-    LocalFileSystemScope,
-    LocalSymlinkPolicy,
-    metadata,
+    LocalFileKind, LocalFileSystem, LocalFileSystemScope, LocalSymlinkPolicy, LocalWriteMode,
+    LocalWriteOptions, LocalWriterState,
 };
 use tempfile::tempdir;
 
-/// Verifies Host methods and convenience functions inspect the same native
-/// namespace.
+/// Verifies Host methods inspect the process-visible native namespace.
 #[test]
-fn test_local_file_system_host_matches_convenience_functions() {
+fn test_local_file_system_host_inspects_native_namespace() {
     let directory = tempdir().expect("temporary directory should be created");
     let path = directory.path().join("payload");
     fs::write(&path, b"payload").expect("fixture should be written");
@@ -50,23 +40,45 @@ fn test_local_file_system_host_matches_convenience_functions() {
             .expect("Host instance should inspect the fixture",)
             .kind()
     );
-    let convenience = metadata(&path)
-        .expect("Host convenience function should inspect the fixture");
     let instance = filesystem
         .metadata(&path)
         .expect("Host instance should inspect the fixture");
-    assert_eq!(convenience.kind(), instance.kind());
-    assert_eq!(convenience.len(), instance.len());
+    assert_eq!(LocalFileKind::File, instance.kind());
+    assert_eq!(instance.len(), b"payload".len() as u64);
+}
+
+/// Verifies the Host facade publishes a file through the configured instance.
+#[test]
+fn test_local_file_system_host_writer_workflow() {
+    use std::io::Write;
+
+    let directory = tempdir().expect("temporary directory should be created");
+    let path = directory.path().join("payload");
+    let filesystem = LocalFileSystem::host();
+    let mut writer = filesystem
+        .open_writer(
+            &path,
+            &LocalWriteOptions::new(LocalWriteMode::CreateOrReplace),
+        )
+        .expect("Host writer should open");
+    writer
+        .write_all(b"payload")
+        .expect("Host writer should accept payload");
+    let outcome = writer.commit().expect("Host writer should commit");
+    assert_eq!(LocalWriterState::Committed, outcome.state());
+    assert_eq!(
+        b"payload",
+        fs::read(path).expect("payload should exist").as_slice()
+    );
 }
 
 /// Verifies Rooted scope and its separate diagnostic root accessor.
 #[test]
 fn test_local_file_system_rooted_reports_scope_and_reads_relative_path() {
     let directory = tempdir().expect("temporary directory should be created");
-    fs::write(directory.path().join("payload"), b"payload")
-        .expect("fixture should be written");
-    let filesystem = LocalFileSystem::rooted(directory.path())
-        .expect("Rooted filesystem should open");
+    fs::write(directory.path().join("payload"), b"payload").expect("fixture should be written");
+    let filesystem =
+        LocalFileSystem::rooted(directory.path()).expect("Rooted filesystem should open");
 
     assert_eq!(LocalFileSystemScope::Rooted, filesystem.scope(),);
     assert_eq!(
@@ -88,10 +100,7 @@ fn test_local_file_system_rooted_reports_scope_and_reads_relative_path() {
 #[cfg(unix)]
 #[test]
 fn test_rooted_follow_across_scope_applies_to_all_path_operations() {
-    use std::io::{
-        Read,
-        Write,
-    };
+    use std::io::{Read, Write};
     use std::os::unix::fs::symlink;
 
     let parent = tempdir().expect("parent should be created");
@@ -99,10 +108,8 @@ fn test_rooted_follow_across_scope_applies_to_all_path_operations() {
     let outside = parent.path().join("outside");
     fs::create_dir(&root_path).expect("root should be created");
     fs::create_dir(&outside).expect("outside should be created");
-    fs::write(outside.join("config"), b"old")
-        .expect("outside file should be written");
-    symlink(&outside, root_path.join("link"))
-        .expect("cross-scope link should be created");
+    fs::write(outside.join("config"), b"old").expect("outside file should be written");
+    symlink(&outside, root_path.join("link")).expect("cross-scope link should be created");
 
     let filesystem = LocalFileSystem::rooted(&root_path)
         .expect("rooted filesystem should open")
@@ -131,8 +138,7 @@ fn test_rooted_follow_across_scope_applies_to_all_path_operations() {
         .expect("writer should publish outside-root content");
     assert_eq!(b"new", fs::read(outside.join("config")).unwrap().as_slice());
 
-    fs::write(outside.join("rename-source"), b"rename")
-        .expect("rename source should be written");
+    fs::write(outside.join("rename-source"), b"rename").expect("rename source should be written");
     let _ = filesystem
         .rename(
             Path::new("link/rename-source"),
@@ -142,8 +148,7 @@ fn test_rooted_follow_across_scope_applies_to_all_path_operations() {
         .expect("rename should follow the cross-scope link");
     assert!(outside.join("renamed").exists());
 
-    fs::write(root_path.join("copy-source"), b"copy")
-        .expect("copy source should be written");
+    fs::write(root_path.join("copy-source"), b"copy").expect("copy source should be written");
     let _ = filesystem
         .copy(
             Path::new("copy-source"),
@@ -175,8 +180,7 @@ fn test_rooted_temp_persist_uses_the_filesystem_symlink_policy() {
     let outside = parent.path().join("outside");
     fs::create_dir(&root_path).expect("root should be created");
     fs::create_dir(&outside).expect("outside should be created");
-    symlink(&outside, root_path.join("link"))
-        .expect("cross-scope link should be created");
+    symlink(&outside, root_path.join("link")).expect("cross-scope link should be created");
 
     let filesystem = LocalFileSystem::rooted(&root_path)
         .expect("rooted filesystem should open")
@@ -195,8 +199,7 @@ fn test_rooted_temp_persist_uses_the_filesystem_symlink_policy() {
         fs::read(outside.join("published")).unwrap().as_slice()
     );
 
-    fs::write(outside.join("referent"), b"old")
-        .expect("referent should be written");
+    fs::write(outside.join("referent"), b"old").expect("referent should be written");
     symlink(outside.join("referent"), root_path.join("entry"))
         .expect("final link should be created");
     let mut temporary = filesystem
@@ -234,16 +237,12 @@ fn test_rooted_recursive_copy_follows_in_scope_directory_link() {
     let source = root.join("source");
     let target = root.join("target");
     let linked = root.join("linked");
-    fs::create_dir_all(source.join("nested"))
-        .expect("source directory should be created");
+    fs::create_dir_all(source.join("nested")).expect("source directory should be created");
     fs::create_dir(&linked).expect("linked directory should be created");
-    fs::write(linked.join("entry"), b"entry")
-        .expect("linked entry should be written");
-    symlink(&linked, source.join("link"))
-        .expect("in-scope directory link should be created");
+    fs::write(linked.join("entry"), b"entry").expect("linked entry should be written");
+    symlink(&linked, source.join("link")).expect("in-scope directory link should be created");
 
-    let filesystem =
-        LocalFileSystem::rooted(&root).expect("rooted filesystem should open");
+    let filesystem = LocalFileSystem::rooted(&root).expect("rooted filesystem should open");
     let _ = filesystem
         .copy(
             Path::new("source"),

@@ -7,15 +7,10 @@
 // =============================================================================
 //! Common strict metadata-preservation orchestration.
 // qubit-style: allow source-test-pair
-// qubit-style: allow coverage-cfg
 // Private behavior is covered through public integration tests.
 
 use std::fs::File;
-use std::io::{
-    Error,
-    ErrorKind,
-    Result,
-};
+use std::io::{Error, ErrorKind, Result};
 use std::os::fd::AsRawFd;
 use std::os::unix::fs::MetadataExt;
 
@@ -40,40 +35,32 @@ use super::macos::preserve_extended_metadata;
 /// # Errors
 ///
 /// Returns the first native error from metadata inspection or application.
-pub(crate) fn preserve_atomic_metadata(
-    source: &File,
-    staging: &File,
-) -> Result<()> {
-    #[cfg(coverage)]
-    let source_metadata = if super::super::coverage_fault::is_enabled(
-        "atomic-metadata-source-stat",
-    ) {
-        Err(Error::from_raw_os_error(libc::EIO))
+pub(crate) fn preserve_atomic_metadata(source: &File, staging: &File) -> Result<()> {
+    #[cfg(feature = "internal-test-support")]
+    let source_metadata = if super::super::test_support::is_enabled("atomic-metadata-source-stat") {
+        Err(crate::local::test_fault_error())
     } else {
         source.metadata()
     }?;
-    #[cfg(not(coverage))]
+    #[cfg(not(feature = "internal-test-support"))]
     let source_metadata = source.metadata()?;
-    #[cfg(coverage)]
-    let staging_metadata = if super::super::coverage_fault::is_enabled(
-        "atomic-metadata-staging-stat",
-    ) {
-        Err(Error::from_raw_os_error(libc::EIO))
+    #[cfg(feature = "internal-test-support")]
+    let staging_metadata = if super::super::test_support::is_enabled("atomic-metadata-staging-stat")
+    {
+        Err(crate::local::test_fault_error())
     } else {
         staging.metadata()
     }?;
-    #[cfg(not(coverage))]
+    #[cfg(not(feature = "internal-test-support"))]
     let staging_metadata = staging.metadata()?;
-    #[cfg(coverage)]
-    let forced_owner_error =
-        super::super::coverage_fault::is_enabled("atomic-metadata-owner");
-    #[cfg(coverage)]
-    let forced_owner_native_error = super::super::coverage_fault::is_enabled(
-        "atomic-metadata-owner-native",
-    );
-    #[cfg(not(coverage))]
+    #[cfg(feature = "internal-test-support")]
+    let forced_owner_error = super::super::test_support::is_enabled("atomic-metadata-owner");
+    #[cfg(feature = "internal-test-support")]
+    let forced_owner_native_error =
+        super::super::test_support::is_enabled("atomic-metadata-owner-native");
+    #[cfg(not(feature = "internal-test-support"))]
     let forced_owner_error = false;
-    #[cfg(not(coverage))]
+    #[cfg(not(feature = "internal-test-support"))]
     let forced_owner_native_error = false;
     if forced_owner_error
         || forced_owner_native_error
@@ -95,24 +82,23 @@ pub(crate) fn preserve_atomic_metadata(
         };
         if forced_owner_error || result == -1 {
             return Err(if forced_owner_error {
-                Error::from_raw_os_error(libc::EIO)
+                crate::local::test_fault_error()
             } else {
                 Error::last_os_error()
             });
         }
     }
     let mode = native_mode(source_metadata.mode())?;
-    #[cfg(coverage)]
-    let forced_mode_error =
-        super::super::coverage_fault::is_enabled("atomic-metadata-mode");
-    #[cfg(not(coverage))]
+    #[cfg(feature = "internal-test-support")]
+    let forced_mode_error = super::super::test_support::is_enabled("atomic-metadata-mode");
+    #[cfg(not(feature = "internal-test-support"))]
     let forced_mode_error = false;
     // SAFETY: the staging descriptor remains live and `mode` contains the
     // native Unix mode bits expected by `fchmod`.
     let result = unsafe { libc::fchmod(staging.as_raw_fd(), mode) };
     if forced_mode_error || result == -1 {
         return Err(if forced_mode_error {
-            Error::from_raw_os_error(libc::EIO)
+            crate::local::test_fault_error()
         } else {
             Error::last_os_error()
         });
@@ -125,15 +111,13 @@ fn native_mode<T>(mode: u32) -> Result<T>
 where
     T: TryFrom<u32>,
 {
-    #[cfg(coverage)]
-    let mode = if super::super::coverage_fault::is_enabled(
-        "atomic-metadata-native-mode",
-    ) {
+    #[cfg(feature = "internal-test-support")]
+    let mode = if super::super::test_support::is_enabled("atomic-metadata-native-mode") {
         None
     } else {
         T::try_from(mode).ok()
     };
-    #[cfg(not(coverage))]
+    #[cfg(not(feature = "internal-test-support"))]
     let mode = T::try_from(mode).ok();
     match mode {
         Some(mode) => Ok(mode),

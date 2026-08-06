@@ -20,12 +20,7 @@ pub struct Permissions {
 
 #[allow(dead_code)]
 impl Permissions {
-    /// Coverage-only access to rooted permission resolution.
-    #[cfg(coverage)]
-    pub const fn coverage_resolve_unix_mode(self, current_mode: u32) -> u32 {
-        self.resolve_unix_mode(current_mode)
-    }
-
+    /// Test-support-only access to rooted permission resolution.
     /// Creates a portable read-only or writable permission value.
     pub const fn from_read_only(read_only: bool) -> Self {
         Self {
