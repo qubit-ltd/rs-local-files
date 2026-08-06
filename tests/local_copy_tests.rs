@@ -23,6 +23,7 @@ use qubit_local_files::{
     LocalCopyTypeConflictPolicy,
     LocalFileErrorKind,
     LocalFileSystem,
+    LocalMetadataPreservePolicy,
 };
 use tempfile::tempdir;
 
@@ -198,6 +199,33 @@ fn test_local_file_system_copy_conflict_policy_matrix() {
     LocalFileSystem::host()
         .copy(&source, &target, &LocalCopyOptions::new())
         .expect_err("file-to-directory conflict should fail by default");
+}
+
+/// Verifies recursive copy reads and applies source directory permissions.
+#[cfg(unix)]
+#[test]
+fn test_recursive_copy_preserves_directory_permissions() {
+    use std::os::unix::fs::PermissionsExt;
+
+    let directory = tempdir().expect("temporary directory should be created");
+    let source = directory.path().join("source");
+    let target = directory.path().join("target");
+    fs::create_dir(&source).expect("source directory should be created");
+    fs::write(source.join("payload"), b"payload")
+        .expect("source payload should be written");
+    fs::set_permissions(&source, fs::Permissions::from_mode(0o750))
+        .expect("source permissions should be configured");
+
+    LocalFileSystem::host()
+        .copy(
+            &source,
+            &target,
+            &LocalCopyOptions::new()
+                .with_tree_source()
+                .with_metadata_preservation(LocalMetadataPreservePolicy::Permissions),
+        )
+        .expect("recursive copy should preserve directory permissions");
+    assert_eq!(0o750, fs::metadata(&target).unwrap().permissions().mode() & 0o7777);
 }
 
 /// Verifies recursive copies preserve nested final symlink entries instead of
