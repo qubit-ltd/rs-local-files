@@ -109,6 +109,12 @@ pub use local_persist_error::LocalPersistError;
 pub use internal::PathIoError;
 #[cfg(coverage)]
 pub use internal::coverage_with_path_context;
+#[cfg(coverage)]
+pub use internal::{
+    coverage_is_enabled,
+    coverage_take,
+    coverage_take_on_nth,
+};
 pub use local_persist_failure_state::LocalPersistFailureState;
 pub use local_persist_options::LocalPersistOptions;
 pub use local_persist_stage::LocalPersistStage;

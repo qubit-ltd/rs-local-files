@@ -30,6 +30,12 @@ mod host_local_file_system;
 mod io_result_context;
 #[cfg(coverage)]
 pub use io_result_context::coverage_with_path_context;
+#[cfg(coverage)]
+pub use coverage_fault::{
+    coverage_is_enabled,
+    coverage_take,
+    coverage_take_on_nth,
+};
 mod local_atomic_publication_mode;
 mod local_namespace;
 #[cfg(unix)]

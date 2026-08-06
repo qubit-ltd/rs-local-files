@@ -152,6 +152,12 @@ pub use write::{
     Mode as NativeWriteMode,
     OpenOptions as NativeWriteOpenOptions,
 };
+#[cfg(coverage)]
+pub use local::{
+    coverage_is_enabled,
+    coverage_take,
+    coverage_take_on_nth,
+};
 
 pub(crate) use local::{
     LocalRelativePath,

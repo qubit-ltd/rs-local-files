@@ -58,6 +58,9 @@ use qubit_local_files::{
     Permissions,
     PathIoError,
     coverage_with_path_context,
+    coverage_is_enabled,
+    coverage_take,
+    coverage_take_on_nth,
     RootedEntryKind,
     RootedMetadata,
     coverage_entry_kind_from_mode,
@@ -802,4 +805,33 @@ fn test_internal_native_write_open_options() {
         NativeWriteMode::AppendOrCreate,
         NativeWriteOpenOptions::new(NativeWriteMode::AppendOrCreate).mode()
     );
+}
+
+/// Verifies coverage-fault selector matching and consumption semantics.
+#[cfg(coverage)]
+#[test]
+fn test_internal_coverage_fault_selectors() {
+    const TEST_NAME: &str = "test_internal_coverage_fault_selectors";
+    const ENV: &str = "QUBIT_LOCAL_FILES_COVERAGE_FAULT";
+    if std::env::var_os(ENV).is_none() {
+        let status = std::process::Command::new(
+            std::env::current_exe().expect("test executable should be available"),
+        )
+        .arg("--exact")
+        .arg(TEST_NAME)
+        .arg("--nocapture")
+        .env(ENV, "coverage-fault-direct")
+        .status()
+        .expect("coverage fault child should launch");
+        assert!(status.success(), "coverage fault child should pass");
+        return;
+    }
+    assert!(coverage_is_enabled("coverage-fault-direct"));
+    assert!(!coverage_is_enabled("other-fault"));
+    assert!(coverage_take("coverage-fault-direct"));
+    assert!(!coverage_take("coverage-fault-direct"));
+    assert!(coverage_take_on_nth("coverage-fault-direct", 1));
+    assert!(coverage_take_on_nth("coverage-fault-direct", 2));
+    assert!(coverage_take_on_nth("coverage-fault-direct", 3));
+    assert!(!coverage_take_on_nth("coverage-fault-direct", 5));
 }

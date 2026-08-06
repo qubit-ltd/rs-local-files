@@ -22,6 +22,24 @@ static ONE_SHOT_FAULT_TAKEN: AtomicBool = AtomicBool::new(false);
 /// Number of times the selected occurrence-counted fault has been observed.
 static NTH_FAULT_OCCURRENCES: AtomicUsize = AtomicUsize::new(0);
 
+/// Coverage-only access to selector matching.
+#[cfg(coverage)]
+pub fn coverage_is_enabled(name: &str) -> bool {
+    is_enabled(name)
+}
+
+/// Coverage-only access to one-shot selector consumption.
+#[cfg(coverage)]
+pub fn coverage_take(name: &str) -> bool {
+    take(name)
+}
+
+/// Coverage-only access to occurrence-counted selector consumption.
+#[cfg(coverage)]
+pub fn coverage_take_on_nth(name: &str, occurrence: usize) -> bool {
+    take_on_nth(name, occurrence)
+}
+
 /// Returns whether the isolated test process selected `name`.
 ///
 /// # Parameters
