@@ -157,6 +157,8 @@ pub use local::{
     coverage_is_enabled,
     coverage_take,
     coverage_take_on_nth,
+    coverage_decide_copy_destination,
+    CoverageCopyDestinationAction,
 };
 
 pub(crate) use local::{

@@ -114,6 +114,8 @@ pub use internal::{
     coverage_is_enabled,
     coverage_take,
     coverage_take_on_nth,
+    coverage_decide_copy_destination,
+    CoverageCopyDestinationAction,
 };
 pub use local_persist_failure_state::LocalPersistFailureState;
 pub use local_persist_options::LocalPersistOptions;

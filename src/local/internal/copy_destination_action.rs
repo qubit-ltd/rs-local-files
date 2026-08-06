@@ -10,7 +10,7 @@
 
 /// Action selected after comparing one source and destination entry.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub(crate) enum CopyDestinationAction {
+pub enum CopyDestinationAction {
     /// Create a destination that is currently absent.
     Create,
     /// Traverse into an existing destination directory.

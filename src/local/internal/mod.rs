@@ -91,6 +91,10 @@ pub(crate) use atomic_metadata::preserve_atomic_metadata;
 pub(crate) use atomic_namespace_race::verify_atomic_destination_identity;
 pub(crate) use atomic_staging_state::AtomicStagingState;
 pub(crate) use copy_destination_action::CopyDestinationAction;
+#[cfg(coverage)]
+pub use copy_destination_action::CopyDestinationAction as CoverageCopyDestinationAction;
+#[cfg(coverage)]
+pub use copy_destination_policy::coverage_decide_copy_destination;
 pub(crate) use copy_destination_policy::decide_copy_destination;
 pub(crate) use copy_dir::{
     copy_dir_all_with_paths,

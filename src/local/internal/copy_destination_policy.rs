@@ -15,6 +15,22 @@ use crate::{
 
 use super::CopyDestinationAction;
 
+/// Coverage-only access to the pure destination-policy decision matrix.
+#[cfg(coverage)]
+pub fn coverage_decide_copy_destination(
+    source_is_directory: bool,
+    destination_is_directory: Option<bool>,
+    conflict: LocalCopyConflictPolicy,
+    type_conflict: LocalCopyTypeConflictPolicy,
+) -> Option<CopyDestinationAction> {
+    decide_copy_destination(
+        source_is_directory,
+        destination_is_directory,
+        conflict,
+        type_conflict,
+    )
+}
+
 /// Selects the destination action without performing filesystem I/O.
 ///
 /// # Parameters

@@ -61,6 +61,8 @@ use qubit_local_files::{
     coverage_is_enabled,
     coverage_take,
     coverage_take_on_nth,
+    coverage_decide_copy_destination,
+    CoverageCopyDestinationAction,
     RootedEntryKind,
     RootedMetadata,
     coverage_entry_kind_from_mode,
@@ -834,4 +836,75 @@ fn test_internal_coverage_fault_selectors() {
     assert!(coverage_take_on_nth("coverage-fault-direct", 2));
     assert!(coverage_take_on_nth("coverage-fault-direct", 3));
     assert!(!coverage_take_on_nth("coverage-fault-direct", 5));
+}
+
+/// Verifies every branch of the pure copy-destination policy matrix.
+#[cfg(coverage)]
+#[test]
+fn test_internal_copy_destination_policy_matrix() {
+    use qubit_local_files::{
+        LocalCopyConflictPolicy,
+        LocalCopyTypeConflictPolicy,
+    };
+
+    assert_eq!(
+        Some(CoverageCopyDestinationAction::Create),
+        coverage_decide_copy_destination(
+            false,
+            None,
+            LocalCopyConflictPolicy::Fail,
+            LocalCopyTypeConflictPolicy::Fail,
+        )
+    );
+    assert_eq!(
+        Some(CoverageCopyDestinationAction::Merge),
+        coverage_decide_copy_destination(
+            true,
+            Some(true),
+            LocalCopyConflictPolicy::Fail,
+            LocalCopyTypeConflictPolicy::Fail,
+        )
+    );
+    for (policy, expected) in [
+        (LocalCopyTypeConflictPolicy::Fail, None),
+        (
+            LocalCopyTypeConflictPolicy::Replace,
+            Some(CoverageCopyDestinationAction::Replace),
+        ),
+        (
+            LocalCopyTypeConflictPolicy::Skip,
+            Some(CoverageCopyDestinationAction::Skip),
+        ),
+    ] {
+        assert_eq!(
+            expected,
+            coverage_decide_copy_destination(
+                true,
+                Some(false),
+                LocalCopyConflictPolicy::Fail,
+                policy,
+            )
+        );
+    }
+    for (policy, expected) in [
+        (LocalCopyConflictPolicy::Fail, None),
+        (
+            LocalCopyConflictPolicy::Overwrite,
+            Some(CoverageCopyDestinationAction::Replace),
+        ),
+        (
+            LocalCopyConflictPolicy::Skip,
+            Some(CoverageCopyDestinationAction::Skip),
+        ),
+    ] {
+        assert_eq!(
+            expected,
+            coverage_decide_copy_destination(
+                false,
+                Some(false),
+                policy,
+                LocalCopyTypeConflictPolicy::Fail,
+            )
+        );
+    }
 }

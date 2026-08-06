@@ -9,7 +9,6 @@
       "src/local/internal/atomic_metadata/macos.rs",
       "src/local/internal/atomic_metadata/preservation.rs",
       "src/local/internal/atomic_namespace_race.rs",
-      "src/local/internal/copy_destination_policy.rs",
       "src/local/internal/copy_dir/destination.rs",
       "src/local/internal/copy_dir/facade.rs",
       "src/local/internal/copy_dir/namespace_race.rs",
