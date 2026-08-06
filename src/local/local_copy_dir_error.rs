@@ -56,6 +56,44 @@ pub struct LocalCopyDirError {
 
 #[allow(dead_code)]
 impl LocalCopyDirError {
+    /// Coverage-only constructor for the private native error value.
+    #[cfg(coverage)]
+    pub fn coverage_new(
+        stage: LocalCopyDirStage,
+        source_path: PathBuf,
+        destination_path: PathBuf,
+        stats: LocalCopyDirStats,
+        error: io::Error,
+    ) -> Self {
+        Self::new(stage, source_path, destination_path, stats, error)
+    }
+
+    /// Coverage-only access to staging context construction.
+    #[cfg(coverage)]
+    pub fn coverage_with_staging_context(
+        self,
+        temporary_path: PathBuf,
+        cleanup_error: Option<io::Error>,
+    ) -> Self {
+        self.with_staging_context(temporary_path, cleanup_error)
+    }
+
+    /// Coverage-only access to the consuming parts decomposition.
+    #[cfg(coverage)]
+    pub fn coverage_into_parts(
+        self,
+    ) -> (
+        LocalCopyDirStage,
+        PathBuf,
+        PathBuf,
+        LocalCopyDirStats,
+        Option<Box<Path>>,
+        Option<io::Error>,
+        io::Error,
+    ) {
+        self.into_parts()
+    }
+
     /// Creates a recursive-copy error.
     ///
     /// # Parameters
@@ -67,7 +105,8 @@ impl LocalCopyDirError {
     ///
     /// # Returns
     /// New recursive-copy error retaining the native source error.
-    #[inline(always)]
+    #[cfg_attr(coverage, inline(never))]
+    #[cfg_attr(not(coverage), inline(always))]
     pub(crate) fn new(
         stage: LocalCopyDirStage,
         source_path: PathBuf,
@@ -90,7 +129,8 @@ impl LocalCopyDirError {
     ///
     /// # Returns
     /// Failed recursive-copy stage.
-    #[inline(always)]
+    #[cfg_attr(coverage, inline(never))]
+    #[cfg_attr(not(coverage), inline(always))]
     pub const fn stage(&self) -> LocalCopyDirStage {
         self.stage
     }
@@ -100,7 +140,8 @@ impl LocalCopyDirError {
     /// # Returns
     /// Source path being processed.
     #[must_use]
-    #[inline(always)]
+    #[cfg_attr(coverage, inline(never))]
+    #[cfg_attr(not(coverage), inline(always))]
     pub fn source_path(&self) -> &Path {
         &self.source_path
     }
@@ -110,7 +151,8 @@ impl LocalCopyDirError {
     /// # Returns
     /// Destination path being processed.
     #[must_use]
-    #[inline(always)]
+    #[cfg_attr(coverage, inline(never))]
+    #[cfg_attr(not(coverage), inline(always))]
     pub fn destination_path(&self) -> &Path {
         &self.destination_path
     }
@@ -119,7 +161,8 @@ impl LocalCopyDirError {
     ///
     /// # Returns
     /// Partial recursive-copy statistics.
-    #[inline(always)]
+    #[cfg_attr(coverage, inline(never))]
+    #[cfg_attr(not(coverage), inline(always))]
     pub const fn stats(&self) -> &LocalCopyDirStats {
         &self.stats
     }
@@ -128,7 +171,8 @@ impl LocalCopyDirError {
     ///
     /// # Returns
     /// Staging path retained for diagnostics.
-    #[inline(always)]
+    #[cfg_attr(coverage, inline(never))]
+    #[cfg_attr(not(coverage), inline(always))]
     pub fn temporary_path(&self) -> Option<&Path> {
         self.temporary_path.as_deref()
     }
@@ -137,7 +181,8 @@ impl LocalCopyDirError {
     ///
     /// # Returns
     /// Cleanup error without replacing the primary source error.
-    #[inline(always)]
+    #[cfg_attr(coverage, inline(never))]
+    #[cfg_attr(not(coverage), inline(always))]
     pub fn cleanup_error(&self) -> Option<&io::Error> {
         self.cleanup_error.as_ref()
     }
@@ -147,7 +192,8 @@ impl LocalCopyDirError {
     /// # Returns
     /// Retained primary I/O error.
     #[must_use]
-    #[inline(always)]
+    #[cfg_attr(coverage, inline(never))]
+    #[cfg_attr(not(coverage), inline(always))]
     pub const fn error(&self) -> &io::Error {
         &self.error
     }
@@ -157,7 +203,8 @@ impl LocalCopyDirError {
     /// # Returns
     /// Error kind reported by the retained source error.
     #[must_use]
-    #[inline]
+    #[cfg_attr(coverage, inline(never))]
+    #[cfg_attr(not(coverage), inline)]
     pub fn kind(&self) -> io::ErrorKind {
         self.error.kind()
     }

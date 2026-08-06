@@ -39,7 +39,9 @@ use qubit_local_files::{
 #[cfg(coverage)]
 use qubit_local_files::{
     LocalAtomicWriteOptions,
+    LocalCopyDirError,
     LocalCopyDirOptions,
+    LocalCopyDirStage,
     LocalCopyDirStats,
 };
 
@@ -419,4 +421,48 @@ fn test_internal_copy_statistics_accessors() {
     assert_eq!(3, stats.bytes());
     assert_eq!(4, stats.skipped());
     assert_eq!(5, stats.overwritten());
+}
+
+/// Verifies coverage-only construction and inspection of native copy errors.
+#[cfg(coverage)]
+#[test]
+fn test_internal_copy_error_accessors_and_parts() {
+    let source = Path::new("source").to_path_buf();
+    let destination = Path::new("destination").to_path_buf();
+    let error = LocalCopyDirError::coverage_new(
+        LocalCopyDirStage::InspectSource,
+        source.clone(),
+        destination.clone(),
+        LocalCopyDirStats::default(),
+        std::io::Error::from(std::io::ErrorKind::NotFound),
+    );
+    assert_eq!(LocalCopyDirStage::InspectSource, error.stage());
+    assert_eq!(source, error.source_path());
+    assert_eq!(destination, error.destination_path());
+    assert_eq!(0, error.stats().files);
+    assert!(error.temporary_path().is_none());
+    assert!(error.cleanup_error().is_none());
+    assert_eq!(std::io::ErrorKind::NotFound, error.error().kind());
+    assert_eq!(std::io::ErrorKind::NotFound, error.kind());
+    assert!(error.to_string().contains("source"));
+    assert!(std::error::Error::source(&error).is_some());
+    let (_, _, _, _, temporary, cleanup, cause) = error.coverage_into_parts();
+    assert!(temporary.is_none());
+    assert!(cleanup.is_none());
+    assert_eq!(std::io::ErrorKind::NotFound, cause.kind());
+
+    let contextual = LocalCopyDirError::coverage_new(
+        LocalCopyDirStage::PrepareDestination,
+        Path::new("source").to_path_buf(),
+        Path::new("destination").to_path_buf(),
+        LocalCopyDirStats::default(),
+        std::io::Error::from(std::io::ErrorKind::PermissionDenied),
+    )
+    .coverage_with_staging_context(
+        Path::new("temporary").to_path_buf(),
+        Some(std::io::Error::from(std::io::ErrorKind::Other)),
+    );
+    assert!(contextual.temporary_path().is_some());
+    assert!(contextual.cleanup_error().is_some());
+    assert!(contextual.to_string().contains("cleanup"));
 }
