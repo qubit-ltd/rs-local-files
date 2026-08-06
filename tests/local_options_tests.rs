@@ -376,5 +376,9 @@ fn test_persist_options_expose_overwrite_policy() {
         LocalPersistOptions::with_overwrite as fn(_) -> _,
     )(black_box(LocalPersistOptions::new as fn() -> _)());
     assert!(black_box(LocalPersistOptions::overwrites)(&replacing));
+    let with_parent = black_box(
+        LocalPersistOptions::with_create_parent as fn(_) -> _,
+    )(LocalPersistOptions::new());
+    assert!(black_box(LocalPersistOptions::creates_parent)(&with_parent));
     assert_eq!(LocalPersistOptions::new(), LocalPersistOptions::default());
 }

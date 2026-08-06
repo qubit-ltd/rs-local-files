@@ -36,7 +36,8 @@ impl LocalDirectoryEntry {
     ///   traversal keeps descriptor authority even after this path changes.
     /// - `relative_path`: Path relative to the listing root.
     /// - `metadata`: Normalized entry metadata.
-    #[inline(always)]
+    #[cfg_attr(coverage, inline(never))]
+    #[cfg_attr(not(coverage), inline(always))]
     pub(crate) const fn new(
         diagnostic_path: PathBuf,
         relative_path: PathBuf,
@@ -54,20 +55,23 @@ impl LocalDirectoryEntry {
     /// Rooted walkers retain descriptor authority, so callers must use
     /// [`Self::relative_path`] for an authority-local identity.
     #[must_use]
-    #[inline(always)]
+    #[cfg_attr(coverage, inline(never))]
+    #[cfg_attr(not(coverage), inline(always))]
     pub fn diagnostic_path(&self) -> &Path {
         &self.diagnostic_path
     }
 
     /// Returns the path relative to the listing root.
     #[must_use]
-    #[inline(always)]
+    #[cfg_attr(coverage, inline(never))]
+    #[cfg_attr(not(coverage), inline(always))]
     pub fn relative_path(&self) -> &Path {
         &self.relative_path
     }
 
     /// Returns normalized metadata observed during traversal.
-    #[inline(always)]
+    #[cfg_attr(coverage, inline(never))]
+    #[cfg_attr(not(coverage), inline(always))]
     pub const fn metadata(&self) -> &LocalFileMetadata {
         &self.metadata
     }

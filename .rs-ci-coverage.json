@@ -2,7 +2,6 @@
   "threshold_exempt_files": {
     "qubit-local-files": [
       "src/capability/filesystem_probe.rs",
-      "src/capability/local_file_system_capabilities.rs",
       "src/local/local_persist_failure_state.rs",
       "src/temp/internal/temp_parent.rs",
       "src/host.rs",
@@ -45,10 +44,8 @@
       "src/local/local_copy_dir_options.rs",
       "src/local/local_copy_dir_stats.rs",
       "src/local/local_persist_error.rs",
-      "src/local/local_persist_options.rs",
       "src/local/local_root_atomic_writer.rs",
       "src/local_file_metadata.rs",
-      "src/local_file_names.rs",
       "src/local_file_reader.rs",
       "src/local_file_system.rs",
       "src/options/local_copy_options.rs",
@@ -71,7 +68,6 @@
       "src/write/open_options.rs",
       "src/writer/internal/local_file_writer_backend.rs",
       "src/writer/local_file_commit_error.rs",
-      "src/writer/local_file_writer.rs",
       "src/writer/local_write_outcome.rs"
     ]
   }
