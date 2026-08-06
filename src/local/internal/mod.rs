@@ -102,6 +102,13 @@ pub(crate) use copy_dir::{
     copy_file_with_options,
 };
 #[cfg(coverage)]
+pub use copy_dir::{
+    coverage_inspect_copy_source_directory,
+    coverage_is_real_directory,
+    coverage_metadata_for_copy_source,
+    coverage_reject_destination_inside_source,
+};
+#[cfg(coverage)]
 pub use path_operations::{
     coverage_absolute_path,
     coverage_add_path_context,

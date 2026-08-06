@@ -171,6 +171,13 @@ pub use local::{
     coverage_ensure_parent_path_with_sync_dirs,
     coverage_remove_any_path,
 };
+#[cfg(coverage)]
+pub use local::{
+    coverage_inspect_copy_source_directory,
+    coverage_is_real_directory,
+    coverage_metadata_for_copy_source,
+    coverage_reject_destination_inside_source,
+};
 
 pub(crate) use local::{
     LocalRelativePath,

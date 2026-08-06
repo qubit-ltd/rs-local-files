@@ -71,6 +71,10 @@ use qubit_local_files::{
     coverage_ensure_parent_path,
     coverage_ensure_parent_path_with_sync_dirs,
     coverage_remove_any_path,
+    coverage_inspect_copy_source_directory,
+    coverage_is_real_directory,
+    coverage_metadata_for_copy_source,
+    coverage_reject_destination_inside_source,
     RootedEntryKind,
     RootedMetadata,
     coverage_entry_kind_from_mode,
@@ -986,4 +990,67 @@ fn test_internal_path_management_matrix() {
     std::fs::write(&removable, b"remove").expect("removable file should be written");
     coverage_remove_any_path(&removable).expect("file should be removed");
     coverage_remove_any_path(&clean).expect("directory should be removed");
+}
+
+/// Verifies coverage-only copy-source metadata and containment policies.
+#[cfg(coverage)]
+#[test]
+fn test_internal_copy_source_policy_matrix() {
+    let root = tempfile::tempdir().expect("copy-source root should exist");
+    let source = root.path().join("source");
+    let file = source.join("file");
+    std::fs::create_dir(&source).expect("source directory should be created");
+    std::fs::write(&file, b"file").expect("source file should be written");
+    let source_metadata = coverage_metadata_for_copy_source(
+        &source,
+        LocalSymlinkPolicy::Reject,
+    )
+    .expect("directory metadata should be readable");
+    assert!(coverage_is_real_directory(&source_metadata));
+    let file_metadata = coverage_metadata_for_copy_source(
+        &file,
+        LocalSymlinkPolicy::Reject,
+    )
+    .expect("file metadata should be readable");
+    assert!(!coverage_is_real_directory(&file_metadata));
+    assert!(coverage_inspect_copy_source_directory(
+        &source,
+        LocalSymlinkPolicy::Reject,
+        &root.path().join("destination"),
+    )
+    .is_ok());
+    assert!(coverage_inspect_copy_source_directory(
+        &source,
+        LocalSymlinkPolicy::Reject,
+        &source.join("nested"),
+    )
+    .is_err());
+    assert!(coverage_reject_destination_inside_source(
+        &source,
+        &source,
+        &source,
+    )
+    .is_err());
+    assert!(coverage_reject_destination_inside_source(
+        &source,
+        &source,
+        &root.path().join("other"),
+    )
+    .is_ok());
+
+    #[cfg(unix)]
+    {
+        std::os::unix::fs::symlink(&file, root.path().join("link"))
+            .expect("source link should be created");
+        assert!(coverage_metadata_for_copy_source(
+            &root.path().join("link"),
+            LocalSymlinkPolicy::Reject,
+        )
+        .is_err());
+        assert!(coverage_metadata_for_copy_source(
+            &root.path().join("link"),
+            LocalSymlinkPolicy::FollowAcrossScope,
+        )
+        .is_ok());
+    }
 }
