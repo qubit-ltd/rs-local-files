@@ -24,6 +24,7 @@ use qubit_local_files::{
     LocalReadOptions,
     LocalWriteMode,
     LocalWriteOptions,
+    LocalWriterState,
 };
 use tempfile::tempdir;
 
@@ -123,6 +124,39 @@ fn bench_writer(c: &mut Criterion) {
     });
 }
 
+fn bench_rooted_writer(c: &mut Criterion) {
+    let directory = tempdir().expect("rooted benchmark directory should exist");
+    let filesystem = LocalFileSystem::rooted(directory.path())
+        .expect("rooted benchmark filesystem should open");
+    let target = std::path::Path::new("target");
+    c.bench_function("rooted_writer", |b| {
+        b.iter_batched(
+            || {
+                let _ = fs::remove_file(directory.path().join(target));
+            },
+            |_| {
+                let mut writer = filesystem
+                    .open_writer(
+                        target,
+                        &LocalWriteOptions::new(
+                            LocalWriteMode::CreateOrReplace,
+                        ),
+                    )
+                    .expect("rooted benchmark writer should open");
+                writer
+                    .write_all(b"payload")
+                    .expect("rooted benchmark write should succeed");
+                let outcome = writer
+                    .commit()
+                    .expect("rooted benchmark commit should succeed");
+                assert_eq!(LocalWriterState::Committed, outcome.state());
+                black_box(outcome.bytes_written());
+            },
+            criterion::BatchSize::SmallInput,
+        );
+    });
+}
+
 fn bench_read_prefix(c: &mut Criterion) {
     let directory = tempdir().expect("benchmark directory should be created");
     let path = directory.path().join("prefix-payload");
@@ -154,6 +188,7 @@ criterion_group!(
     bench_walk,
     bench_copy,
     bench_writer,
+    bench_rooted_writer,
     bench_read_prefix
 );
 criterion_main!(local_files);

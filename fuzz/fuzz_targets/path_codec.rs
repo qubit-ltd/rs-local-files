@@ -31,6 +31,10 @@ fuzz_target!(|data: &[u8]| {
         let restored = LocalPathCodec::from_canonical_text(&canonical)
             .expect("canonical native text must convert");
         assert_eq!(restored.as_encoded_bytes(), data);
+        let canonical_again =
+            LocalPathCodec::to_canonical_text(restored.as_ref())
+                .expect("decoded native bytes must encode again");
+        assert_eq!(canonical_again, canonical);
     }
 
     #[cfg(windows)]
@@ -53,5 +57,9 @@ fuzz_target!(|data: &[u8]| {
         let restored = LocalPathCodec::from_canonical_text(&canonical)
             .expect("canonical native text must convert");
         assert_eq!(restored.encode_wide().collect::<Vec<_>>(), units);
+        let canonical_again =
+            LocalPathCodec::to_canonical_text(restored.as_ref())
+                .expect("decoded native UTF-16 must encode again");
+        assert_eq!(canonical_again, canonical);
     }
 });
