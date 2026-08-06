@@ -56,6 +56,44 @@ pub struct LocalAtomicWriteError {
 
 #[allow(dead_code)]
 impl LocalAtomicWriteError {
+    /// Coverage-only constructor for the private atomic-write error value.
+    #[cfg(coverage)]
+    pub fn coverage_new(
+        stage: LocalAtomicWriteStage,
+        path: PathBuf,
+        temporary_path: Option<PathBuf>,
+        destination_state: LocalAtomicDestinationState,
+        source: io::Error,
+    ) -> Self {
+        Self::new(stage, path, temporary_path, destination_state, source)
+    }
+
+    /// Coverage-only access to staging cleanup context construction.
+    #[cfg(coverage)]
+    pub fn coverage_with_cleanup_error(
+        self,
+        cleanup_error: Option<io::Error>,
+    ) -> Self {
+        self.with_cleanup_error(cleanup_error)
+    }
+
+    /// Coverage-only access to parent synchronization context construction.
+    #[cfg(coverage)]
+    pub fn coverage_with_parent_sync_error(
+        self,
+        parent_sync_error: Option<io::Error>,
+    ) -> Self {
+        self.with_parent_sync_error(parent_sync_error)
+    }
+
+    /// Coverage-only access to staging parts decomposition.
+    #[cfg(coverage)]
+    pub fn coverage_into_staging_parts(
+        self,
+    ) -> (Option<PathBuf>, Option<io::Error>, io::Error) {
+        self.into_staging_parts()
+    }
+
     /// Creates an atomic-write error.
     ///
     /// # Parameters
@@ -90,7 +128,8 @@ impl LocalAtomicWriteError {
     ///
     /// # Returns
     /// Failed atomic-write stage.
-    #[inline(always)]
+    #[cfg_attr(coverage, inline(never))]
+    #[cfg_attr(not(coverage), inline(always))]
     pub const fn stage(&self) -> LocalAtomicWriteStage {
         self.stage
     }
@@ -100,7 +139,8 @@ impl LocalAtomicWriteError {
     /// # Returns
     /// Destination path supplied by the caller.
     #[must_use]
-    #[inline(always)]
+    #[cfg_attr(coverage, inline(never))]
+    #[cfg_attr(not(coverage), inline(always))]
     pub fn path(&self) -> &Path {
         &self.path
     }
@@ -110,7 +150,8 @@ impl LocalAtomicWriteError {
     /// # Returns
     /// Staging path retained for diagnostics. The entry is not guaranteed to
     /// exist after a completed replacement or a successful cleanup.
-    #[inline(always)]
+    #[cfg_attr(coverage, inline(never))]
+    #[cfg_attr(not(coverage), inline(always))]
     pub fn temporary_path(&self) -> Option<&Path> {
         self.temporary_path.as_deref()
     }
@@ -121,7 +162,8 @@ impl LocalAtomicWriteError {
     /// State reported by the failed operation. Callers must handle
     /// [`LocalAtomicDestinationState::Indeterminate`] conservatively and
     /// inspect the destination and staging path before retrying.
-    #[inline(always)]
+    #[cfg_attr(coverage, inline(never))]
+    #[cfg_attr(not(coverage), inline(always))]
     pub const fn destination_state(&self) -> LocalAtomicDestinationState {
         self.destination_state
     }
@@ -130,7 +172,8 @@ impl LocalAtomicWriteError {
     ///
     /// # Returns
     /// Cleanup error without replacing the primary source error.
-    #[inline(always)]
+    #[cfg_attr(coverage, inline(never))]
+    #[cfg_attr(not(coverage), inline(always))]
     pub fn cleanup_error(&self) -> Option<&io::Error> {
         self.cleanup_error.as_ref()
     }
@@ -140,7 +183,8 @@ impl LocalAtomicWriteError {
     ///
     /// # Returns
     /// Parent synchronization error without replacing the primary source error.
-    #[inline(always)]
+    #[cfg_attr(coverage, inline(never))]
+    #[cfg_attr(not(coverage), inline(always))]
     pub fn parent_sync_error(&self) -> Option<&io::Error> {
         self.parent_sync_error.as_ref()
     }
@@ -150,7 +194,8 @@ impl LocalAtomicWriteError {
     /// # Returns
     /// Retained primary I/O error without dynamic downcasting.
     #[must_use]
-    #[inline(always)]
+    #[cfg_attr(coverage, inline(never))]
+    #[cfg_attr(not(coverage), inline(always))]
     pub const fn source_error(&self) -> &io::Error {
         &self.source
     }
@@ -160,7 +205,8 @@ impl LocalAtomicWriteError {
     /// # Returns
     /// Error kind reported by the retained source error.
     #[must_use]
-    #[inline]
+    #[cfg_attr(coverage, inline(never))]
+    #[cfg_attr(not(coverage), inline)]
     pub fn kind(&self) -> io::ErrorKind {
         self.source.kind()
     }

@@ -39,6 +39,9 @@ use qubit_local_files::{
 #[cfg(coverage)]
 use qubit_local_files::{
     LocalAtomicWriteOptions,
+    LocalAtomicDestinationState,
+    LocalAtomicWriteError,
+    LocalAtomicWriteStage,
     LocalCopyDirError,
     LocalCopyDirOptions,
     LocalCopyDirStage,
@@ -532,4 +535,63 @@ fn test_internal_persist_error_accessors_and_parts() {
     assert!(error.to_string().contains("requested"));
     let (_, _, _, resolved, _) = error.into_parts();
     assert!(resolved.is_none());
+}
+
+/// Verifies coverage-only construction and inspection of atomic-write errors.
+#[cfg(coverage)]
+#[test]
+fn test_internal_atomic_write_error_accessors_and_parts() {
+    let base = || {
+        LocalAtomicWriteError::coverage_new(
+            LocalAtomicWriteStage::ReplaceDestination,
+            Path::new("destination").to_path_buf(),
+            Some(Path::new("temporary").to_path_buf()),
+            LocalAtomicDestinationState::Replaced,
+            std::io::Error::from(std::io::ErrorKind::PermissionDenied),
+        )
+    };
+    let error = base()
+        .coverage_with_cleanup_error(Some(std::io::Error::from(
+            std::io::ErrorKind::Other,
+        )))
+        .coverage_with_parent_sync_error(Some(std::io::Error::from(
+            std::io::ErrorKind::Interrupted,
+        )));
+    assert_eq!(LocalAtomicWriteStage::ReplaceDestination, error.stage());
+    assert_eq!(Path::new("destination"), error.path());
+    assert_eq!(
+        Some(Path::new("temporary")),
+        error.temporary_path()
+    );
+    assert_eq!(LocalAtomicDestinationState::Replaced, error.destination_state());
+    assert_eq!(std::io::ErrorKind::Other, error.cleanup_error().unwrap().kind());
+    assert_eq!(
+        std::io::ErrorKind::Interrupted,
+        error.parent_sync_error().unwrap().kind()
+    );
+    assert_eq!(
+        std::io::ErrorKind::PermissionDenied,
+        error.source_error().kind()
+    );
+    assert_eq!(std::io::ErrorKind::PermissionDenied, error.kind());
+    assert!(error.to_string().contains("parent synchronization"));
+    assert!(std::error::Error::source(&error).is_some());
+    let (temporary, cleanup, source) = error.coverage_into_staging_parts();
+    assert_eq!(Some(Path::new("temporary").to_path_buf()), temporary);
+    assert_eq!(Some(std::io::ErrorKind::Other), cleanup.map(|e| e.kind()));
+    assert_eq!(std::io::ErrorKind::PermissionDenied, source.kind());
+
+    assert!(base().to_string().contains("atomic write"));
+    assert!(base()
+        .coverage_with_cleanup_error(Some(std::io::Error::from(
+            std::io::ErrorKind::Other,
+        )))
+        .to_string()
+        .contains("staging cleanup"));
+    assert!(base()
+        .coverage_with_parent_sync_error(Some(std::io::Error::from(
+            std::io::ErrorKind::Interrupted,
+        )))
+        .to_string()
+        .contains("parent synchronization"));
 }
