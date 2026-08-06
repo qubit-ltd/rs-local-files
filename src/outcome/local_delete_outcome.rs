@@ -7,6 +7,7 @@
 // =============================================================================
 // qubit-style: allow source-test-pair
 // Covered by delete integration tests.
+// qubit-style: allow coverage-cfg
 
 /// Result of deleting a native entry.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -29,7 +30,8 @@ impl LocalDeleteOutcome {
 
     /// Reports whether an entry was removed.
     #[must_use]
-    #[inline(always)]
+    #[cfg_attr(coverage, inline(never))]
+    #[cfg_attr(not(coverage), inline(always))]
     pub const fn deleted(self) -> bool {
         self.deleted
     }
