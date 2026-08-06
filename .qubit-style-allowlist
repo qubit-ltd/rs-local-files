@@ -23,6 +23,7 @@ coverage-cfg | src/local/internal/rooted_staged_file.rs | Exercises persistent d
 coverage-cfg | src/local/internal/staged_file.rs | Exercises persistent path-based staging cleanup failures
 coverage-cfg | src/local/internal/temp_entry.rs | Exercises otherwise unreachable temporary entry collision and creation failures
 coverage-cfg | src/options/local_temp_file_options.rs | Instruments the public temporary-file suffix builder for coverage
+coverage-cfg | src/outcome/local_delete_outcome.rs | Preserves coverage visibility for the public deletion-state accessor
 coverage-cfg | src/local/internal/unix_nonblocking.rs | Exercises otherwise unreachable descriptor status failures
 coverage-cfg | src/local/local_atomic_writer.rs | Exercises parent synchronization after partial installation
 coverage-cfg | src/local/local_root_atomic_writer.rs | Exercises rooted parent synchronization after partial installation
