@@ -32,17 +32,9 @@ impl LocalFileSystemCapabilities {
     pub(crate) const fn detect_host() -> Self {
         Self {
             rooted_operations: cfg!(any(unix, windows)),
-            atomic_rename: cfg!(any(
-                target_os = "linux",
-                target_os = "macos",
-                windows
-            )),
+            atomic_rename: cfg!(any(target_os = "linux", target_os = "macos", windows)),
             atomic_replace: cfg!(any(unix, windows)),
-            atomic_temp_persist: cfg!(any(
-                target_os = "linux",
-                target_os = "macos",
-                windows
-            )),
+            atomic_temp_persist: cfg!(any(target_os = "linux", target_os = "macos", windows)),
             durable_rename: cfg!(unix),
             durable_file_copy: cfg!(unix),
         }
@@ -74,39 +66,39 @@ impl LocalFileSystemCapabilities {
 
     /// Reports whether secure rooted operations are implemented.
     #[must_use]
-    pub const fn supports_rooted_operations(self) -> bool {
+    pub const fn implements_rooted_operations(self) -> bool {
         self.rooted_operations
     }
 
     /// Reports whether native atomic rename is implemented.
     #[must_use]
-    pub const fn supports_atomic_rename(self) -> bool {
+    pub const fn implements_atomic_rename(self) -> bool {
         self.atomic_rename
     }
 
     /// Reports whether native atomic replacement is implemented.
     #[must_use]
-    pub const fn supports_atomic_replace(self) -> bool {
+    pub const fn implements_atomic_replace(self) -> bool {
         self.atomic_replace
     }
 
     /// Reports whether atomic no-replace temporary persistence is implemented.
     #[must_use]
-    pub const fn supports_atomic_temp_persist(self) -> bool {
+    pub const fn implements_atomic_temp_persist(self) -> bool {
         self.atomic_temp_persist
     }
 
     /// Reports whether the full durable rename publication protocol is
     /// implemented for this target.
     #[must_use]
-    pub const fn supports_durable_rename(self) -> bool {
+    pub const fn implements_durable_rename(self) -> bool {
         self.durable_rename
     }
 
     /// Reports whether the full durable file-copy publication protocol is
     /// implemented for this target.
     #[must_use]
-    pub const fn supports_durable_file_copy(self) -> bool {
+    pub const fn implements_durable_file_copy(self) -> bool {
         self.durable_file_copy
     }
 }

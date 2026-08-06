@@ -42,18 +42,18 @@ use tempfile::tempdir;
 fn test_capability_snapshot_exposes_all_guarantees() {
     let capabilities = LocalFileSystem::host().capabilities();
 
-    let _ = capabilities.supports_rooted_operations();
-    let _ = capabilities.supports_atomic_rename();
+    let _ = capabilities.implements_rooted_operations();
+    let _ = capabilities.implements_atomic_rename();
     let atomic_replace = std::hint::black_box(
-        LocalFileSystemCapabilities::supports_atomic_replace
+        LocalFileSystemCapabilities::implements_atomic_replace
             as fn(LocalFileSystemCapabilities) -> bool,
     );
     assert_eq!(
         cfg!(any(unix, windows)),
         std::hint::black_box(atomic_replace)(capabilities),
     );
-    let _ = capabilities.supports_atomic_temp_persist();
-    let _ = capabilities.supports_durable_file_copy();
+    let _ = capabilities.implements_atomic_temp_persist();
+    let _ = capabilities.implements_durable_file_copy();
 }
 
 /// Verifies structured errors preserve each supported I/O classification and

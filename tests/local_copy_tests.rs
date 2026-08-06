@@ -12,7 +12,10 @@ use std::{
 };
 
 #[cfg(unix)]
-use qubit_local_files::LocalDurabilityRequirement;
+use qubit_local_files::{
+    LocalDurabilityRequirement,
+    LocalMetadataPreservePolicy,
+};
 use qubit_local_files::{
     LocalAtomicityRequirement,
     LocalCopyConflictPolicy,
@@ -23,7 +26,6 @@ use qubit_local_files::{
     LocalCopyTypeConflictPolicy,
     LocalFileErrorKind,
     LocalFileSystem,
-    LocalMetadataPreservePolicy,
 };
 use tempfile::tempdir;
 

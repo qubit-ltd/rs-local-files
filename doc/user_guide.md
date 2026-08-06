@@ -11,12 +11,12 @@ API, or a replacement for provider-level logical paths.
 ## Conceptual Model
 
 ```
-host paths ── convenience functions or LocalFileSystem::host()
+host paths ── LocalFileSystem::host()
 opened root ─ LocalFileSystem::rooted(root) ─ relative descendants only
 ```
 
-Free functions provide the shortest host-wide API. `LocalFileSystem` is the
-configured service form: `host()` selects process-visible paths, while
+`LocalFileSystem` is the host-wide service form: `host()` selects
+process-visible paths, while
 `rooted(root)` opens a directory authority and accepts only relative
 descendants. The two forms expose the same operations, so callers and adapters
 do not need separate host and rooted interfaces. Readers, writers, walkers, and
@@ -68,17 +68,18 @@ complete write, and inspect the result. The observable success condition is a
 ```rust
 use std::io::{Read, Write};
 use qubit_local_files::{
-    create_directory, open_reader, open_writer, LocalCreateDirectoryOptions,
-    LocalReadOptions, LocalWriteMode, LocalWriteOptions, LocalWriterState,
+    LocalCreateDirectoryOptions, LocalFileSystem, LocalReadOptions, LocalWriteMode,
+    LocalWriteOptions, LocalWriterState,
 };
 
+let filesystem = LocalFileSystem::host();
 let output = std::path::Path::new("build/output");
-create_directory(
+filesystem.create_directory(
     output,
     &LocalCreateDirectoryOptions::new().with_recursive(),
 )?;
 let path = output.join("manifest.json");
-let mut writer = open_writer(
+let mut writer = filesystem.open_writer(
     &path,
     &LocalWriteOptions::new(LocalWriteMode::CreateOrReplace),
 )?;
@@ -86,7 +87,7 @@ writer.write_all(br#"{"complete":true}"#)?;
 let result = writer.commit()?;
 assert_eq!(result.state(), LocalWriterState::Committed);
 let mut text = String::new();
-open_reader(&path, &LocalReadOptions::new())?
+filesystem.open_reader(&path, &LocalReadOptions::new())?
     .read_to_string(&mut text)?;
 assert_eq!(text, r#"{"complete":true}"#);
 # Ok::<(), Box<dyn std::error::Error>>(())
@@ -106,7 +107,7 @@ publication conclusion (`LocalWriteFailureState`). A write, flush, or commit
 error can leave publication state indeterminate, so retain and inspect the
 returned resource/error where recovery is required.
 
-`copy` selects file or directory behavior from source metadata. Use
+`LocalFileSystem::copy` selects file or directory behavior from source metadata. Use
 `with_file_source()` or `with_tree_source()` when the source kind must be
 explicit; `source_mode()` reports the selected mode. Its options separately
 control target conflict, type conflict, metadata, symbolic links, atomicity,
@@ -116,9 +117,9 @@ aliases are rejected; overwriting a symbolic-link target replaces that entry
 rather than following it.
 
 ```rust,no_run
-use qubit_local_files::{copy, LocalCopyFailureState, LocalCopyOptions};
+use qubit_local_files::{LocalCopyFailureState, LocalCopyOptions, LocalFileSystem};
 
-match copy(
+match LocalFileSystem::host().copy(
     std::path::Path::new("source"),
     std::path::Path::new("backup"),
     &LocalCopyOptions::new(),
@@ -139,7 +140,7 @@ happened”.
 
 ## Walk and Temporary Resources
 
-`list` and `LocalFileSystem::list` return a lazy `LocalDirectoryWalker`. It opens and
+`LocalFileSystem::list` returns a lazy `LocalDirectoryWalker`. It opens and
 advances directories on demand; maximum depth, symbolic-link policy, and the
 handle budget are fixed at creation. The default `Reopen` policy closes and
 reopens active frames when the budget is reached, while `Fail` explicitly
@@ -204,9 +205,7 @@ Linux, Windows, and macOS are runtime-tested. FreeBSD and Android are
 compile-checked only. `LocalFileSystem::host().capabilities()` reports the host
 implementation; a rooted instance returns the snapshot cached when opening the
 authority. `scope()` lets integration code distinguish the two namespaces, and
-`diagnostic_root()` exposes the non-authoritative rooted anchor separately. The
-host free functions are intentionally retained as convenience aliases for
-`LocalFileSystem::host()`. A
+`diagnostic_root()` exposes the non-authoritative rooted anchor separately. A
 `limits()` reports `SizeLimit::VariesByPath` for the host namespace; use
 `limits_at(path)` to obtain a finite value for the filesystem containing that
 path (or `Unknown` when probing is unavailable). Atomic

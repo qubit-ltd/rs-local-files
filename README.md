@@ -31,13 +31,14 @@ through a writer, commits it, and reads the published result.
 use std::io::{Read, Write};
 
 use qubit_local_files::{
-    create_temp_directory, open_reader, open_writer, LocalReadOptions,
-    LocalTempDirectoryOptions, LocalWriteMode, LocalWriteOptions, LocalWriterState,
+    LocalFileSystem, LocalReadOptions, LocalTempDirectoryOptions, LocalWriteMode,
+    LocalWriteOptions, LocalWriterState,
 };
 
-let work = create_temp_directory(&LocalTempDirectoryOptions::new())?;
+let filesystem = LocalFileSystem::host();
+let work = filesystem.create_temp_directory(&LocalTempDirectoryOptions::new())?;
 let path = work.path().join("manifest.json");
-let mut writer = open_writer(
+let mut writer = filesystem.open_writer(
     &path,
     &LocalWriteOptions::new(LocalWriteMode::CreateOrReplace),
 )?;
@@ -46,7 +47,7 @@ let outcome = writer.commit()?;
 assert_eq!(outcome.state(), LocalWriterState::Committed);
 
 let mut content = String::new();
-open_reader(&path, &LocalReadOptions::new())?
+filesystem.open_reader(&path, &LocalReadOptions::new())?
     .read_to_string(&mut content)?;
 assert_eq!(content, r#"{"version":1}"#);
 # Ok::<(), Box<dyn std::error::Error>>(())
@@ -56,7 +57,6 @@ assert_eq!(content, r#"{"version":1}"#);
 
 | API | Use it when you need |
 | --- | --- |
-| Host convenience functions | Direct host-wide metadata, I/O, copy, rename, traversal, and temporary entries. |
 | `LocalFileSystem::host()` | A reusable service over the process-visible host namespace. |
 | `LocalFileSystem::rooted(root)` | The same operations beneath one opened directory authority. |
 | `LocalFileSystemScope` | Whether an instance interprets paths as host paths or rooted descendants. |
@@ -65,7 +65,6 @@ assert_eq!(content, r#"{"version":1}"#);
 | `LocalTempFile` / `LocalTempDirectory` | Owned cleanup, `keep`, and persistence operations. |
 | `LocalFileNames` / `LocalPaths` | Native filename and lexical-path helpers without lossy UTF-8 conversion. |
 
-Host convenience functions are the shortest path for ordinary applications.
 `LocalFileSystem` provides one consistent instance API when configuration must
 be stored, passed to another component, or adapted to a higher-level filesystem
 SPI.
@@ -89,7 +88,7 @@ transfers ownership of that sandbox together with the returned resource path.
 
 ## Choose the right authority
 
-Use the free functions or `LocalFileSystem::host()` for host paths. Use
+Use `LocalFileSystem::host()` for host paths. Use
 `LocalFileSystem::rooted(root)` when one opened directory is the authority
 boundary. Both instances expose the same operations; only path interpretation
 changes. Rooted paths must be relative descendants, and absolute paths,
@@ -117,12 +116,11 @@ atomicity.
 
 Linux, Windows, and macOS behavior is runtime-tested. FreeBSD and Android
 configuration paths are compile-checked only; this crate makes no runtime
-guarantee for those targets. Capability snapshots distinguish implemented
-mechanisms from runtime-verified support; they do not probe a particular
-runtime filesystem. Durable rename and copy are not advertised until a runtime
-authority verifies the active mount.
-Required atomicity or durability is
-rejected before namespace changes when it cannot be met.
+guarantee for those targets. Capability snapshots report whether this target
+implements each complete operation protocol; they do not probe a particular
+runtime filesystem or claim that the underlying hardware has persisted data.
+Required atomicity or durability is rejected before namespace changes when the
+protocol cannot be met.
 
 ## Testing
 
