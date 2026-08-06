@@ -44,7 +44,8 @@ impl Display for LocalRenameFailure {
 
 impl Error for LocalRenameFailure {
     /// Returns the primary typed filesystem error.
-    #[inline(always)]
+    #[cfg_attr(coverage, inline(never))]
+    #[cfg_attr(not(coverage), inline(always))]
     fn source(&self) -> Option<&(dyn Error + 'static)> {
         Some(&self.error)
     }
@@ -53,7 +54,8 @@ impl Error for LocalRenameFailure {
 impl LocalRenameFailure {
     /// Creates a typed rename failure from implementation facts.
     #[must_use]
-    #[inline]
+    #[cfg_attr(coverage, inline(never))]
+    #[cfg_attr(not(coverage), inline)]
     pub(crate) const fn new(
         error: LocalFileError,
         state: LocalRenameFailureState,
@@ -63,19 +65,22 @@ impl LocalRenameFailure {
 
     /// Returns the primary typed filesystem error.
     #[must_use]
-    #[inline(always)]
+    #[cfg_attr(coverage, inline(never))]
+    #[cfg_attr(not(coverage), inline(always))]
     pub const fn error(&self) -> &LocalFileError {
         &self.error
     }
 
     /// Returns the most precise namespace state proven by native operations.
-    #[inline(always)]
+    #[cfg_attr(coverage, inline(never))]
+    #[cfg_attr(not(coverage), inline(always))]
     pub const fn state(&self) -> LocalRenameFailureState {
         self.state
     }
 
     /// Consumes this failure and returns its error and proven state.
-    #[inline]
+    #[cfg_attr(coverage, inline(never))]
+    #[cfg_attr(not(coverage), inline)]
     pub fn into_parts(self) -> (LocalFileError, LocalRenameFailureState) {
         (self.error, self.state)
     }
