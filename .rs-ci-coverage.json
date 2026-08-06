@@ -17,7 +17,6 @@
       "src/local/internal/copy_dir/source.rs",
       "src/local/internal/copy_dir/staged_copy.rs",
       "src/local/internal/copy_dir/traversal.rs",
-      "src/local/internal/coverage_fault.rs",
       "src/local/internal/file_io.rs",
       "src/local/internal/file_move.rs",
       "src/local/internal/host_local_file_system.rs",
