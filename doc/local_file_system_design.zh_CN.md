@@ -456,10 +456,11 @@ Native rename 成功、随后 parent durability 失败时必须返回 `Renamed`�
 - rooted walker 始终从 root authority 派生 child handle，并按 entry 流式读取，不为单个
   目录预先收集完整 `Vec`；
 
-capability 将原子 rename、原子 replace 和临时资源无替换持久化分别建模；adapter 不得用
-单一 no-replace 标志推断全部三项保证。
-能力快照还区分 `Implemented`、`RuntimeVerified` 与 `Unknown`；当前实现不会在没有挂载点
-探测的情况下把目录 durability 映射为上层的 durable capability。
+capability 将原子 rename、原子 replace、临时资源无替换持久化、durable rename 和
+durable file copy 分别建模；adapter 不得用单一 no-replace 标志推断其他保证。
+能力快照只报告当前 target 是否实现了对应的完整操作协议，不探测挂载点，也不声称证明
+物理介质已经落盘。durable 能力分别通过 `supports_durable_rename()` 和
+`supports_durable_file_copy()` 查询，adapter 必须分别映射这两项能力。
 
 Walker drop 只释放本地 handle，不执行 namespace 修改。
 

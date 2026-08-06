@@ -216,11 +216,11 @@ fn test_rooted_local_file_system_exposes_opened_anchor_and_capabilities() {
     assert_eq!(LocalFileSystemScope::Rooted, rooted.scope(),);
     assert_eq!(Some(directory.path()), rooted.diagnostic_root());
     assert_eq!(
-        rooted.capabilities().rooted_operations_implemented(),
+        rooted.capabilities().supports_rooted_operations(),
         LocalFileSystem::rooted(directory.path())
             .expect("second root authority should open")
             .capabilities()
-            .rooted_operations_implemented(),
+            .supports_rooted_operations(),
     );
 }
 
@@ -669,7 +669,7 @@ fn test_rooted_local_file_system_copy_and_rename_report_durability() {
     let rooted = LocalFileSystem::rooted(directory.path())
         .expect("root authority should open");
     let supports_durability =
-        rooted.capabilities().directory_durability_implemented();
+        rooted.capabilities().supports_durable_file_copy();
 
     fs::write(directory.path().join("copy-source"), b"copy")
         .expect("rooted copy source should be written");

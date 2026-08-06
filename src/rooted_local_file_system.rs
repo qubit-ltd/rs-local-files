@@ -8,6 +8,8 @@
 // qubit-style: allow coverage-cfg
 // qubit-style: allow multiple-public-types
 
+#[path = "rooted_local_file_system/metadata.rs"]
+mod metadata_operations;
 mod path_support;
 
 pub(crate) use path_support::rooted_metadata;
@@ -57,12 +59,10 @@ use crate::{
     LocalDirectoryWalker,
     LocalFileError,
     LocalFileErrorKind,
-    LocalFileMetadata,
     LocalFileOperation,
     LocalFileReader,
     LocalFileSystemCapabilities,
     LocalFileSystemLimits,
-    LocalFileSystemSpace,
     LocalFileWriter,
     LocalListOptions,
     LocalReadOptions,
@@ -155,52 +155,6 @@ impl RootedLocalFileSystem {
     #[inline(always)]
     pub const fn limits(&self) -> LocalFileSystemLimits {
         self.limits
-    }
-
-    /// Observes path limits at a rooted path or its nearest existing ancestor.
-    pub fn limits_at(
-        &self,
-        path: &Path,
-        symlink_policy: LocalSymlinkPolicy,
-    ) -> LocalResult<LocalFileSystemLimits> {
-        probe_rooted_file(
-            &self.root,
-            path,
-            symlink_policy,
-            LocalFileOperation::Metadata,
-        )
-        .map(|file| {
-            file.map_or_else(
-                || {
-                    LocalFileSystemLimits::new(
-                        crate::SizeLimit::Unknown,
-                        crate::SizeLimit::Unknown,
-                    )
-                },
-                |file| crate::capability::probe_limits(&file),
-            )
-        })
-    }
-
-    /// Observes dynamic space at a rooted path or its nearest existing
-    /// ancestor.
-    pub fn space_at(
-        &self,
-        path: &Path,
-        symlink_policy: LocalSymlinkPolicy,
-    ) -> LocalResult<LocalFileSystemSpace> {
-        probe_rooted_file(
-            &self.root,
-            path,
-            symlink_policy,
-            LocalFileOperation::Metadata,
-        )
-        .map(|file| {
-            file.map_or_else(
-                || LocalFileSystemSpace::new(None, None, None),
-                |file| crate::capability::probe_space(&file),
-            )
-        })
     }
 
     /// Creates a cleanup-owned temporary file below this opened root.
@@ -566,61 +520,6 @@ impl RootedLocalFileSystem {
         ))
     }
 
-    /// Reads metadata for a final rooted entry without following a symlink.
-    ///
-    /// # Parameters
-    ///
-    /// - `path`: Validated relative descendant path.
-    ///
-    /// # Returns
-    ///
-    /// Normalized metadata for the rooted entry.
-    ///
-    /// # Errors
-    ///
-    /// Returns `LocalFileError` for lexical escape, symlink traversal, missing
-    /// entries, or native metadata failures.
-    #[inline]
-    pub fn metadata(
-        &self,
-        path: &Path,
-        symlink_policy: LocalSymlinkPolicy,
-    ) -> LocalResult<LocalFileMetadata> {
-        if path.as_os_str().is_empty() {
-            return self.root.metadata().map(rooted_metadata).map_err(
-                |error| {
-                    rooted_io_error(LocalFileOperation::Metadata, path, error)
-                },
-            );
-        }
-        match resolve_rooted_path(
-            &self.root,
-            path,
-            symlink_policy,
-            false,
-            LocalFileOperation::Metadata,
-        )? {
-            RootedResolvedPath::Rooted(relative) => self
-                .root
-                .symlink_metadata(&relative)
-                .map(rooted_metadata)
-                .map_err(|error| {
-                    rooted_io_error(LocalFileOperation::Metadata, path, error)
-                }),
-            RootedResolvedPath::Host(resolved) => {
-                fs::symlink_metadata(&resolved)
-                    .map(|metadata| LocalFileMetadata::from_native(&metadata))
-                    .map_err(|error| {
-                        rooted_io_error(
-                            LocalFileOperation::Metadata,
-                            path,
-                            error,
-                        )
-                    })
-            }
-        }
-    }
-
     /// Opens a descriptor-relative reader for a rooted regular file.
     ///
     /// # Parameters
@@ -819,7 +718,7 @@ impl RootedLocalFileSystem {
                 LocalFileOperation::OpenWriter,
                 path,
                 path,
-                self.capabilities.directory_durability_implemented(),
+                self.capabilities.supports_durable_file_copy(),
                 "required directory durability is unavailable for this rooted authority",
             )?;
         }
@@ -1044,7 +943,7 @@ impl RootedLocalFileSystem {
             LocalFileOperation::Copy,
             source,
             target,
-            self.capabilities.directory_durability_implemented(),
+            self.capabilities.supports_durable_file_copy(),
             "required directory durability is unavailable for this rooted authority",
         )
         .map_err(copy_failure_unchanged)?;
@@ -1432,7 +1331,7 @@ impl RootedLocalFileSystem {
             LocalFileOperation::Rename,
             source,
             target,
-            self.capabilities.directory_durability_implemented(),
+            self.capabilities.supports_durable_rename(),
             "required directory durability is unavailable for this rooted authority",
         )
         .map_err(rename_failure_unchanged)?;
