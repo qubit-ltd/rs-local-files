@@ -166,6 +166,13 @@ pub(crate) fn move_path_without_replacing(
     source: &Path,
     destination: &Path,
 ) -> Result<()> {
+    #[cfg(coverage)]
+    if crate::local::coverage_fault_enabled("persist-install-indeterminate") {
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::PermissionDenied,
+            "coverage-injected persistence install failure",
+        ));
+    }
     let source = c_path(source)?;
     let destination = c_path(destination)?;
     // SAFETY: both CString pointers are valid and live for the syscall;
