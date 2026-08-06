@@ -21,6 +21,39 @@ use crate::LocalSymlinkPolicy;
 
 use super::super::directory_identity::DirectoryIdentity;
 
+/// Coverage-only source-policy entry points.
+#[cfg(coverage)]
+pub fn coverage_metadata_for_copy_source(
+    path: &Path,
+    symlink_policy: LocalSymlinkPolicy,
+) -> Result<fs::Metadata> {
+    metadata_for_copy_source(path, symlink_policy)
+}
+
+#[cfg(coverage)]
+pub fn coverage_inspect_copy_source_directory(
+    src: &Path,
+    symlink_policy: LocalSymlinkPolicy,
+    destination_root: &Path,
+) -> Result<()> {
+    inspect_copy_source_directory(src, symlink_policy, destination_root)
+        .map(|_| ())
+}
+
+#[cfg(coverage)]
+pub fn coverage_is_real_directory(metadata: &fs::Metadata) -> bool {
+    is_real_directory(metadata)
+}
+
+#[cfg(coverage)]
+pub fn coverage_reject_destination_inside_source(
+    src: &Path,
+    canonical_source: &Path,
+    destination: &Path,
+) -> Result<()> {
+    reject_destination_inside_source(src, canonical_source, destination)
+}
+
 /// Inspects a source directory before recursive copy enters it.
 ///
 /// # Parameters
@@ -100,7 +133,8 @@ pub(super) fn metadata_for_copy_source(
 ///
 /// `true` only for a non-symbolic-link directory.
 #[must_use]
-#[inline(always)]
+#[cfg_attr(coverage, inline(never))]
+#[cfg_attr(not(coverage), inline(always))]
 pub(super) fn is_real_directory(metadata: &fs::Metadata) -> bool {
     metadata.is_dir() && !metadata.file_type().is_symlink()
 }

@@ -128,6 +128,13 @@ pub use internal::{
     coverage_ensure_parent_path_with_sync_dirs,
     coverage_remove_any_path,
 };
+#[cfg(coverage)]
+pub use internal::{
+    coverage_inspect_copy_source_directory,
+    coverage_is_real_directory,
+    coverage_metadata_for_copy_source,
+    coverage_reject_destination_inside_source,
+};
 pub use local_persist_failure_state::LocalPersistFailureState;
 pub use local_persist_options::LocalPersistOptions;
 pub use local_persist_stage::LocalPersistStage;
