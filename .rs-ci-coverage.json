@@ -37,7 +37,6 @@
       "src/local/local_root_atomic_writer.rs",
       "src/local_file_system.rs",
       "src/rooted/copy.rs",
-      "src/rooted/metadata.rs",
       "src/rooted/root.rs",
       "src/rooted_local_file_system.rs",
       "src/rooted_local_file_system/path_support.rs",

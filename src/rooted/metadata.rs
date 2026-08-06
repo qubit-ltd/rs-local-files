@@ -50,6 +50,18 @@ pub struct Metadata {
 }
 
 impl Metadata {
+    /// Coverage-only construction from native metadata.
+    #[cfg(all(coverage, unix))]
+    pub fn coverage_from_native(metadata: &fs::Metadata) -> Self {
+        Self::from_native(metadata)
+    }
+
+    /// Coverage-only construction from a Unix `stat` value.
+    #[cfg(all(coverage, unix))]
+    pub fn coverage_from_stat(status: &libc::stat) -> Self {
+        Self::from_stat(status)
+    }
+
     /// Builds rooted metadata from an opened native descriptor.
     ///
     /// # Parameters
@@ -190,14 +202,16 @@ impl Metadata {
     }
 
     /// Returns the final entry type observed by the rooted operation.
-    #[inline(always)]
+    #[cfg_attr(coverage, inline(never))]
+    #[cfg_attr(not(coverage), inline(always))]
     pub const fn kind(&self) -> EntryKind {
         self.kind
     }
 
     /// Returns the byte size reported by the rooted metadata operation.
     #[must_use]
-    #[inline(always)]
+    #[cfg_attr(coverage, inline(never))]
+    #[cfg_attr(not(coverage), inline(always))]
     pub const fn size(&self) -> u64 {
         self.len
     }
@@ -205,7 +219,8 @@ impl Metadata {
     /// Returns the last access time, or `None` when the platform did not
     /// provide one.
     #[must_use]
-    #[inline(always)]
+    #[cfg_attr(coverage, inline(never))]
+    #[cfg_attr(not(coverage), inline(always))]
     pub const fn accessed_at(&self) -> Option<SystemTime> {
         self.accessed_at
     }
@@ -213,7 +228,8 @@ impl Metadata {
     /// Returns the last modification time, or `None` when the platform did not
     /// provide one.
     #[must_use]
-    #[inline(always)]
+    #[cfg_attr(coverage, inline(never))]
+    #[cfg_attr(not(coverage), inline(always))]
     pub const fn modified_at(&self) -> Option<SystemTime> {
         self.modified_at
     }
@@ -221,19 +237,23 @@ impl Metadata {
     /// Returns the creation time, or `None` when the platform did not provide
     /// one.
     #[must_use]
-    #[inline(always)]
+    #[cfg_attr(coverage, inline(never))]
+    #[cfg_attr(not(coverage), inline(always))]
     pub const fn created_at(&self) -> Option<SystemTime> {
         self.created_at
     }
 
     /// Returns the permissions observed through the rooted operation.
-    #[inline(always)]
+    #[cfg_attr(coverage, inline(never))]
+    #[cfg_attr(not(coverage), inline(always))]
     pub const fn permissions(&self) -> Permissions {
         self.permissions
     }
 
     /// Returns whether two metadata values identify the same native entry.
     #[must_use]
+    #[cfg_attr(coverage, inline(never))]
+    #[cfg_attr(not(coverage), inline(always))]
     pub const fn is_same_file(&self, other: &Self) -> bool {
         matches!(
             (self.device_id, self.file_id, other.device_id, other.file_id),
@@ -289,6 +309,13 @@ where
     } else {
         EntryKind::Other
     }
+}
+
+/// Classifies Unix mode values for coverage tests without exposing the native
+/// helper as part of the normal API.
+#[cfg(all(coverage, unix))]
+pub fn coverage_entry_kind_from_mode(mode: libc::mode_t) -> EntryKind {
+    entry_kind_from_mode(mode)
 }
 
 /// Converts a non-negative Unix timestamp into [`SystemTime`].
