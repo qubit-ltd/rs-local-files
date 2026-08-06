@@ -47,6 +47,8 @@ use qubit_local_files::{
     LocalCopyDirOptions,
     LocalCopyDirStage,
     LocalCopyDirStats,
+    LocalCopyFailure,
+    LocalCopyFailureState,
     LocalCopyStats,
     LocalPersistError,
     LocalPersistFailureState,
@@ -636,4 +638,43 @@ fn test_internal_atomic_commit_error_accessors_and_parts() {
     let (error, writer) = terminal.into_parts();
     assert_eq!(std::io::ErrorKind::Other, error.kind());
     assert!(writer.is_none());
+}
+
+/// Verifies coverage-only conversion and accessors for structured copy errors.
+#[cfg(coverage)]
+#[test]
+fn test_internal_copy_failure_conversion_and_parts() {
+    let native = LocalCopyDirError::coverage_new(
+        LocalCopyDirStage::PrepareDestination,
+        Path::new("source").to_path_buf(),
+        Path::new("destination").to_path_buf(),
+        LocalCopyDirStats::default(),
+        std::io::Error::from(std::io::ErrorKind::PermissionDenied),
+    )
+    .coverage_with_staging_context(
+        Path::new("temporary").to_path_buf(),
+        Some(std::io::Error::from(std::io::ErrorKind::Other)),
+    );
+    let failure = LocalCopyFailure::coverage_from_copy_dir_error(
+        Path::new("source"),
+        Path::new("destination"),
+        native,
+    );
+    assert_eq!(LocalCopyFailureState::Indeterminate, failure.state());
+    assert_eq!(
+        qubit_local_files::LocalFileErrorKind::PermissionDenied,
+        failure.error().kind()
+    );
+    assert_eq!(0, failure.partial_stats().files());
+    assert_eq!(Some(Path::new("temporary")), failure.staging_path());
+    assert_eq!(
+        Some(qubit_local_files::LocalFileErrorKind::Io),
+        failure.cleanup_error().map(|error| error.kind())
+    );
+    assert!(std::error::Error::source(&failure).is_some());
+    let (_, state, stats, staging, cleanup) = failure.into_parts();
+    assert_eq!(LocalCopyFailureState::Indeterminate, state);
+    assert_eq!(0, stats.files());
+    assert_eq!(Some(Path::new("temporary").to_path_buf()), staging);
+    assert!(cleanup.is_some());
 }

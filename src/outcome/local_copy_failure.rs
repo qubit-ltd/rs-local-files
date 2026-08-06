@@ -54,16 +54,28 @@ impl Display for LocalCopyFailure {
 
 impl Error for LocalCopyFailure {
     /// Returns the primary typed filesystem error.
-    #[inline(always)]
+    #[cfg_attr(coverage, inline(never))]
+    #[cfg_attr(not(coverage), inline(always))]
     fn source(&self) -> Option<&(dyn Error + 'static)> {
         Some(&self.details.error)
     }
 }
 
 impl LocalCopyFailure {
+    /// Coverage-only conversion entry point for the native copy error value.
+    #[cfg(coverage)]
+    pub fn coverage_from_copy_dir_error(
+        source: &Path,
+        target: &Path,
+        error: LocalCopyDirError,
+    ) -> Self {
+        Self::from_copy_dir_error(source, target, error)
+    }
+
     /// Creates a typed copy failure from implementation facts.
     #[must_use]
-    #[inline]
+    #[cfg_attr(coverage, inline(never))]
+    #[cfg_attr(not(coverage), inline)]
     pub(crate) fn new(
         error: LocalFileError,
         state: LocalCopyFailureState,
@@ -84,7 +96,8 @@ impl LocalCopyFailure {
 
     /// Converts a structured native copy-pipeline error without losing facts.
     #[must_use]
-    #[inline]
+    #[cfg_attr(coverage, inline(never))]
+    #[cfg_attr(not(coverage), inline)]
     pub(crate) fn from_copy_dir_error(
         source: &Path,
         target: &Path,
@@ -126,40 +139,46 @@ impl LocalCopyFailure {
 
     /// Returns the primary typed filesystem error.
     #[must_use]
-    #[inline(always)]
+    #[cfg_attr(coverage, inline(never))]
+    #[cfg_attr(not(coverage), inline(always))]
     pub fn error(&self) -> &LocalFileError {
         &self.details.error
     }
 
     /// Returns the most precise destination state proven by native operations.
-    #[inline(always)]
+    #[cfg_attr(coverage, inline(never))]
+    #[cfg_attr(not(coverage), inline(always))]
     pub fn state(&self) -> LocalCopyFailureState {
         self.details.state
     }
 
     /// Returns statistics accumulated before the failure.
     #[must_use = "partial statistics retain copy progress"]
-    #[inline(always)]
+    #[cfg_attr(coverage, inline(never))]
+    #[cfg_attr(not(coverage), inline(always))]
     pub fn partial_stats(&self) -> &LocalCopyStats {
         &self.details.partial_stats
     }
 
     /// Returns the retained staging path when cleanup failed.
     #[must_use]
-    #[inline]
+    #[cfg_attr(coverage, inline(never))]
+    #[cfg_attr(not(coverage), inline)]
     pub fn staging_path(&self) -> Option<&Path> {
         self.details.staging_path.as_deref()
     }
 
     /// Returns the secondary staging-cleanup error when cleanup failed.
     #[must_use]
-    #[inline(always)]
+    #[cfg_attr(coverage, inline(never))]
+    #[cfg_attr(not(coverage), inline(always))]
     pub fn cleanup_error(&self) -> Option<&LocalFileError> {
         self.details.cleanup_error.as_ref()
     }
 
     /// Consumes this failure and returns every retained part.
-    #[inline]
+    #[cfg_attr(coverage, inline(never))]
+    #[cfg_attr(not(coverage), inline)]
     pub fn into_parts(
         self,
     ) -> (
