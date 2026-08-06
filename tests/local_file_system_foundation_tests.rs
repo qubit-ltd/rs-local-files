@@ -45,6 +45,25 @@ fn test_host_file_system_space_observes_existing_directory() {
     let _ = &space;
 }
 
+/// Verifies rooted space observations use the opened authority for missing
+/// descendants instead of the diagnostic root path.
+#[test]
+fn test_rooted_file_system_space_observes_nearest_existing_ancestor() {
+    let root = tempfile::tempdir().expect("temporary root should be created");
+    std::fs::create_dir(root.path().join("nested"))
+        .expect("nested directory should be created");
+    let filesystem = LocalFileSystem::rooted(root.path())
+        .expect("root authority should open");
+    let space = filesystem
+        .space_at(std::path::Path::new("nested/missing/child"))
+        .expect("missing rooted descendants should be probeable");
+
+    #[cfg(unix)]
+    assert!(space.capacity_bytes().is_some());
+    #[cfg(not(unix))]
+    let _ = &space;
+}
+
 /// Verifies capability snapshots distinguish implementation from guarantee.
 #[test]
 fn test_local_file_system_capabilities_report_support_levels() {
