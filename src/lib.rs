@@ -139,11 +139,23 @@ pub(crate) use local::{
     LocalAtomicCommitError,
     LocalAtomicDestinationState,
     LocalAtomicWriteError,
-    LocalAtomicWriteOptions,
     LocalAtomicWriteStage,
     LocalCopyDirError,
-    LocalCopyDirOptions,
     LocalCopyDirStage,
     LocalCopyDirStats,
     LocalRelativePath,
+};
+
+#[cfg(not(coverage))]
+pub(crate) use local::{
+    LocalAtomicWriteOptions,
+    LocalCopyDirOptions,
+};
+
+// Keep implementation-only option types visible to coverage integration tests
+// without expanding the normal public API.
+#[cfg(coverage)]
+pub use local::{
+    LocalAtomicWriteOptions,
+    LocalCopyDirOptions,
 };
