@@ -79,31 +79,11 @@ pub(crate) struct HostLocalFileSystem {
     _private: (),
 }
 
-#[allow(dead_code)]
 impl HostLocalFileSystem {
     /// Returns a snapshot of capabilities for the current host platform.
     #[inline(always)]
     pub const fn capabilities() -> LocalFileSystemCapabilities {
         LocalFileSystemCapabilities::detect_host()
-    }
-
-    /// Reads metadata for the final directory entry without following a
-    /// symlink.
-    ///
-    /// # Parameters
-    ///
-    /// - `path`: Native absolute or relative path.
-    ///
-    /// # Returns
-    ///
-    /// Normalized metadata for the final entry.
-    ///
-    /// # Errors
-    ///
-    /// Returns `LocalFileError` when the path cannot be inspected.
-    #[inline]
-    pub fn metadata(path: &Path) -> LocalResult<LocalFileMetadata> {
-        Self::metadata_with_policy(path, LocalSymlinkPolicy::FollowAcrossScope)
     }
 
     /// Reads metadata using an explicit path-resolution policy.
@@ -123,32 +103,6 @@ impl HostLocalFileSystem {
                     source,
                 )
             })
-    }
-
-    /// Opens a synchronous reader for a native regular file.
-    ///
-    /// # Parameters
-    ///
-    /// - `path`: Native absolute or relative file path.
-    /// - `options`: Reader open policy.
-    ///
-    /// # Returns
-    ///
-    /// An owned reader positioned at byte offset zero.
-    ///
-    /// # Errors
-    ///
-    /// Returns `LocalFileError` when the entry is not a regular file or cannot
-    /// be opened.
-    pub fn open_reader(
-        path: &Path,
-        options: &LocalReadOptions,
-    ) -> LocalResult<LocalFileReader> {
-        Self::open_reader_with_policy(
-            path,
-            options,
-            LocalSymlinkPolicy::FollowAcrossScope,
-        )
     }
 
     /// Opens a Host reader using an explicit symbolic-link policy.
@@ -212,36 +166,6 @@ impl HostLocalFileSystem {
                     source,
                 )
             })
-    }
-
-    /// Opens a native writer publication session.
-    ///
-    /// Create modes stage bytes in the destination directory. Append modifies
-    /// an existing regular file directly and therefore rejects required
-    /// atomicity.
-    ///
-    /// # Parameters
-    ///
-    /// - `path`: Native absolute or relative destination path.
-    /// - `options`: Publication mode and guarantee policy.
-    ///
-    /// # Returns
-    ///
-    /// A stateful writer in the `Open` state.
-    ///
-    /// # Errors
-    ///
-    /// Returns `LocalFileError` for invalid mode/guarantee combinations,
-    /// destination conflicts, invalid entry kinds, or native open failures.
-    pub fn open_writer(
-        path: &Path,
-        options: &LocalWriteOptions,
-    ) -> LocalResult<LocalFileWriter> {
-        Self::open_writer_with_policy(
-            path,
-            options,
-            LocalSymlinkPolicy::FollowAcrossScope,
-        )
     }
 
     /// Opens a Host writer using an explicit symbolic-link policy.
@@ -361,7 +285,7 @@ impl HostLocalFileSystem {
         Ok(LocalFileWriter::new(diagnostic_path, backend, *options))
     }
 
-    /// Creates a lazy native directory walker.
+    /// Opens a Host directory walker using an explicit symbolic-link policy.
     ///
     /// The root path is bound before the directory is opened, so later process
     /// working-directory changes cannot redirect traversal.
@@ -370,6 +294,8 @@ impl HostLocalFileSystem {
     ///
     /// - `path`: Native absolute or relative directory path.
     /// - `options`: Traversal policy fixed for the walker lifetime.
+    /// - `symlink_policy`: Default policy for symbolic links encountered by the
+    ///   walker.
     ///
     /// # Returns
     ///
@@ -378,66 +304,37 @@ impl HostLocalFileSystem {
     /// # Errors
     ///
     /// Returns `LocalFileError` when the root cannot be bound or opened.
-    #[inline]
-    pub fn list(
-        path: &Path,
-        options: &LocalListOptions,
-    ) -> LocalResult<LocalDirectoryWalker> {
-        Self::list_with_policy(
-            path,
-            options,
-            LocalSymlinkPolicy::FollowAcrossScope,
-        )
-    }
-
-    /// Opens a Host directory walker using an explicit symbolic-link policy.
     pub fn list_with_policy(
         path: &Path,
         options: &LocalListOptions,
         symlink_policy: LocalSymlinkPolicy,
     ) -> LocalResult<LocalDirectoryWalker> {
         let policy = options.symlink_policy().unwrap_or(symlink_policy);
-        let bound = resolve_host_path(path, policy, true)?;
+        let bound = resolve_host_path(
+            path,
+            LocalSymlinkPolicy::FollowAcrossScope,
+            true,
+        )?;
         LocalDirectoryWalker::open(bound, *options, policy)
     }
 
-    /// Copies a native regular file or directory tree through one unified
-    /// entry.
-    ///
-    /// Both paths are bound using one current-directory snapshot. Regular files
-    /// are staged in the target directory before publication; directory trees
-    /// use the shared iterative native copy pipeline.
+    /// Copies through a Host namespace using an explicit symbolic-link policy.
     ///
     /// # Parameters
     ///
     /// - `source`: Native source entry.
     /// - `target`: Native destination entry.
-    /// - `options`: Conflict, metadata, symlink, atomicity, and durability
-    ///   policy.
+    /// - `options`: Copy conflict, metadata, and guarantee policy.
+    /// - `symlink_policy`: Policy for symbolic links encountered in a tree.
     ///
     /// # Returns
     ///
-    /// Structured method, statistics, and achieved guarantees.
+    /// Structured copy statistics and achieved guarantees.
     ///
     /// # Errors
     ///
-    /// Returns `LocalCopyFailure` for source/target aliases, unsupported source
-    /// kinds, policy conflicts, failed staging, or unmet required guarantees.
-    #[allow(clippy::result_large_err)]
-    pub fn copy(
-        source: &Path,
-        target: &Path,
-        options: &LocalCopyOptions,
-    ) -> LocalCopyResult {
-        Self::copy_with_policy(
-            source,
-            target,
-            options,
-            LocalSymlinkPolicy::FollowAcrossScope,
-        )
-    }
-
-    /// Copies through a Host namespace using an explicit symbolic-link policy.
+    /// Returns `LocalCopyFailure` when source inspection, copying, or required
+    /// guarantees fail.
     #[allow(clippy::result_large_err)]
     pub fn copy_with_policy(
         source: &Path,
@@ -456,6 +353,24 @@ impl HostLocalFileSystem {
 
     /// Copies through a Host namespace while constraining followed directory
     /// links to an optional canonical scope root.
+    ///
+    /// # Parameters
+    ///
+    /// - `source`: Native source entry.
+    /// - `target`: Native destination entry.
+    /// - `options`: Copy conflict, metadata, and guarantee policy.
+    /// - `symlink_policy`: Policy for symbolic links encountered in a tree.
+    /// - `scope_root`: Optional canonical root that followed links must stay
+    ///   beneath.
+    ///
+    /// # Returns
+    ///
+    /// Structured copy statistics and achieved guarantees.
+    ///
+    /// # Errors
+    ///
+    /// Returns `LocalCopyFailure` when source inspection, copying, or required
+    /// guarantees fail.
     #[allow(clippy::result_large_err)]
     pub fn copy_with_policy_scoped(
         source: &Path,
@@ -468,10 +383,18 @@ impl HostLocalFileSystem {
             options.symlink_policy_override().unwrap_or(symlink_policy);
         let [source, target] = LocalPaths::bind_host_paths([source, target])
             .map_err(copy_failure_unchanged)?;
-        let source = resolve_host_path(&source, symlink_policy, false)
-            .map_err(copy_failure_unchanged)?;
-        let target = resolve_host_path(&target, symlink_policy, false)
-            .map_err(copy_failure_unchanged)?;
+        let source = resolve_host_path(
+            &source,
+            LocalSymlinkPolicy::FollowAcrossScope,
+            false,
+        )
+        .map_err(copy_failure_unchanged)?;
+        let target = resolve_host_path(
+            &target,
+            LocalSymlinkPolicy::FollowAcrossScope,
+            false,
+        )
+        .map_err(copy_failure_unchanged)?;
         let supports = Self::capabilities().directory_durability_implemented();
         #[cfg(coverage)]
         let supports = supports
@@ -669,12 +592,13 @@ impl HostLocalFileSystem {
         ))
     }
 
-    /// Creates a directory using explicit ancestor policy.
+    /// Creates a Host directory using an explicit symbolic-link policy.
     ///
     /// # Parameters
     ///
     /// - `path`: Native absolute or relative directory path.
     /// - `options`: Directory creation policy.
+    /// - `symlink_policy`: Policy for intermediate symbolic links.
     ///
     /// # Returns
     ///
@@ -684,18 +608,6 @@ impl HostLocalFileSystem {
     ///
     /// Returns `LocalFileError` when creation fails or an existing entry is not
     /// a directory.
-    pub fn create_directory(
-        path: &Path,
-        options: &LocalCreateDirectoryOptions,
-    ) -> LocalResult<LocalCreateDirectoryOutcome> {
-        Self::create_directory_with_policy(
-            path,
-            options,
-            LocalSymlinkPolicy::FollowAcrossScope,
-        )
-    }
-
-    /// Creates a Host directory using an explicit symbolic-link policy.
     pub fn create_directory_with_policy(
         path: &Path,
         options: &LocalCreateDirectoryOptions,
@@ -761,34 +673,23 @@ impl HostLocalFileSystem {
         }
     }
 
-    /// Creates a cleanup-owned temporary file.
+    /// Creates a Host cleanup-owned temporary file.
     ///
     /// The selected parent is bound before entry creation, and affixes are
     /// validated before any temporary entry is left behind.
-    ///
     /// # Parameters
     ///
     /// - `options`: Parent directory, filename affixes, and collision limit.
+    /// - `symlink_policy`: Policy for the temporary resource parent.
     ///
     /// # Returns
     ///
-    /// An open temporary file that removes its path on drop unless kept or
-    /// persisted.
+    /// An open temporary file that removes its path unless kept or persisted.
     ///
     /// # Errors
     ///
     /// Returns `LocalFileError` when the parent cannot be bound or created,
     /// affixes are invalid, or a unique file cannot be created.
-    pub fn create_temp_file(
-        options: &LocalTempFileOptions,
-    ) -> LocalResult<LocalTempFile> {
-        Self::create_temp_file_with_policy(
-            options,
-            LocalSymlinkPolicy::FollowAcrossScope,
-        )
-    }
-
-    /// Creates a Host temporary file using an explicit symbolic-link policy.
     pub fn create_temp_file_with_policy(
         options: &LocalTempFileOptions,
         symlink_policy: LocalSymlinkPolicy,
@@ -870,33 +771,23 @@ impl HostLocalFileSystem {
         })
     }
 
-    /// Creates a cleanup-owned temporary directory.
+    /// Creates a Host cleanup-owned temporary directory.
     ///
     /// # Parameters
     ///
     /// - `options`: Parent directory, directory-name affixes, and collision
     ///   limit.
+    /// - `symlink_policy`: Policy for the temporary resource parent.
     ///
     /// # Returns
     ///
-    /// A temporary directory that recursively removes itself on drop unless
-    /// kept or persisted.
+    /// A temporary directory that recursively removes itself unless kept or
+    /// persisted.
     ///
     /// # Errors
     ///
     /// Returns `LocalFileError` when the parent cannot be bound or created,
     /// affixes are invalid, or a unique directory cannot be created.
-    pub fn create_temp_directory(
-        options: &LocalTempDirectoryOptions,
-    ) -> LocalResult<LocalTempDirectory> {
-        Self::create_temp_directory_with_policy(
-            options,
-            LocalSymlinkPolicy::FollowAcrossScope,
-        )
-    }
-
-    /// Creates a Host temporary directory using an explicit symbolic-link
-    /// policy.
     pub fn create_temp_directory_with_policy(
         options: &LocalTempDirectoryOptions,
         symlink_policy: LocalSymlinkPolicy,
@@ -981,12 +872,14 @@ impl HostLocalFileSystem {
         })
     }
 
-    /// Deletes a native file or final symbolic-link entry.
+    /// Deletes a Host file or final symbolic-link entry using an explicit
+    /// symbolic-link policy.
     ///
     /// # Parameters
     ///
-    /// - `path`: Native absolute or relative path.
-    /// - `options`: Missing-entry policy; recursive mode is ignored for files.
+    /// - `path`: Native file or symbolic-link path.
+    /// - `options`: Missing-entry policy.
+    /// - `symlink_policy`: Policy for intermediate symbolic links.
     ///
     /// # Returns
     ///
@@ -995,18 +888,6 @@ impl HostLocalFileSystem {
     /// # Errors
     ///
     /// Returns `LocalFileError` when the entry is a directory or removal fails.
-    pub fn delete_file(
-        path: &Path,
-        options: &LocalDeleteOptions,
-    ) -> LocalResult<LocalDeleteOutcome> {
-        Self::delete_file_with_policy(
-            path,
-            options,
-            LocalSymlinkPolicy::FollowAcrossScope,
-        )
-    }
-
-    /// Deletes a Host entry using an explicit symbolic-link policy.
     pub fn delete_file_with_policy(
         path: &Path,
         options: &LocalDeleteOptions,
@@ -1047,12 +928,13 @@ impl HostLocalFileSystem {
         }
     }
 
-    /// Deletes a native directory without following a final symbolic link.
+    /// Deletes a Host directory without following a final symbolic link.
     ///
     /// # Parameters
     ///
-    /// - `path`: Native absolute or relative directory path.
+    /// - `path`: Native directory path.
     /// - `options`: Recursion and missing-entry policy.
+    /// - `symlink_policy`: Policy for intermediate symbolic links.
     ///
     /// # Returns
     ///
@@ -1062,18 +944,6 @@ impl HostLocalFileSystem {
     ///
     /// Returns `LocalFileError` when the entry is not a directory or removal
     /// fails.
-    pub fn delete_directory(
-        path: &Path,
-        options: &LocalDeleteOptions,
-    ) -> LocalResult<LocalDeleteOutcome> {
-        Self::delete_directory_with_policy(
-            path,
-            options,
-            LocalSymlinkPolicy::FollowAcrossScope,
-        )
-    }
-
-    /// Deletes a Host directory using an explicit symbolic-link policy.
     pub fn delete_directory_with_policy(
         path: &Path,
         options: &LocalDeleteOptions,
@@ -1119,7 +989,8 @@ impl HostLocalFileSystem {
         }
     }
 
-    /// Renames a native entry with explicit overwrite and guarantee policy.
+    /// Renames a Host entry with explicit overwrite, guarantee, and
+    /// symbolic-link policies.
     ///
     /// Both paths are bound using one current-directory snapshot.
     ///
@@ -1128,6 +999,7 @@ impl HostLocalFileSystem {
     /// - `source`: Existing source entry.
     /// - `target`: Destination entry.
     /// - `options`: Overwrite, atomicity, and durability requirements.
+    /// - `symlink_policy`: Policy for intermediate symbolic links.
     ///
     /// # Returns
     ///
@@ -1135,23 +1007,8 @@ impl HostLocalFileSystem {
     ///
     /// # Errors
     ///
-    /// Returns `LocalRenameFailure` when source inspection, publication, or
-    /// required durability fails. The failure retains the strongest namespace
-    /// state established by the native rename contract.
-    pub fn rename(
-        source: &Path,
-        target: &Path,
-        options: &LocalRenameOptions,
-    ) -> LocalRenameResult {
-        Self::rename_with_policy(
-            source,
-            target,
-            options,
-            LocalSymlinkPolicy::FollowAcrossScope,
-        )
-    }
-
-    /// Renames Host entries using an explicit symbolic-link policy.
+    /// Returns `LocalRenameFailure` when source inspection, publication, or a
+    /// required guarantee fails.
     pub fn rename_with_policy(
         source: &Path,
         target: &Path,
