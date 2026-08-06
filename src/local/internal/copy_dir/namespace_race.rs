@@ -7,18 +7,14 @@
 // =============================================================================
 //! Result normalization for externally timed copy-destination races.
 // qubit-style: allow source-test-pair
-// qubit-style: allow coverage-cfg
 // Public fixtures cannot deterministically interleave these namespace changes.
 
 use std::fs;
-use std::io::{
-    ErrorKind,
-    Result,
-};
+use std::io::{ErrorKind, Result};
 use std::path::Path;
 
-#[cfg(coverage)]
-use crate::local::internal::coverage_fault;
+#[cfg(feature = "internal-test-support")]
+use crate::local::internal::test_support;
 
 use super::source::is_real_directory;
 
@@ -56,9 +52,7 @@ where
         Ok(()) => Ok(true),
         Err(error) if error.kind() == ErrorKind::AlreadyExists => {
             let metadata = inspect(dst)?;
-            if is_real_directory(&metadata)
-                && !coverage_non_directory_race_enabled()
-            {
+            if is_real_directory(&metadata) && !test_non_directory_race_enabled() {
                 Ok(false)
             } else {
                 Err(error)
@@ -68,13 +62,13 @@ where
     }
 }
 
-/// Returns whether coverage should classify a racing entry as non-directory.
+/// Returns whether test support should classify a racing entry as non-directory.
 #[must_use]
 #[inline]
-fn coverage_non_directory_race_enabled() -> bool {
-    #[cfg(coverage)]
-    return coverage_fault::is_enabled("copy-directory-race-nondirectory");
-    #[cfg(not(coverage))]
+fn test_non_directory_race_enabled() -> bool {
+    #[cfg(feature = "internal-test-support")]
+    return test_support::is_enabled("copy-directory-race-nondirectory");
+    #[cfg(not(feature = "internal-test-support"))]
     false
 }
 
@@ -97,10 +91,7 @@ pub(super) fn removable_non_directory_metadata(
     result: Result<fs::Metadata>,
 ) -> Result<Option<fs::Metadata>> {
     match result {
-        Ok(metadata)
-            if is_real_directory(&metadata)
-                || coverage_removal_directory_race_enabled() =>
-        {
+        Ok(metadata) if is_real_directory(&metadata) || test_removal_directory_race_enabled() => {
             Ok(None)
         }
         Ok(metadata) => Ok(Some(metadata)),
@@ -109,11 +100,11 @@ pub(super) fn removable_non_directory_metadata(
     }
 }
 
-/// Returns whether coverage should classify a replacement race as directory.
+/// Returns whether test support should classify a replacement race as directory.
 #[inline]
-fn coverage_removal_directory_race_enabled() -> bool {
-    #[cfg(coverage)]
-    return coverage_fault::is_enabled("copy-removal-race-directory");
-    #[cfg(not(coverage))]
+fn test_removal_directory_race_enabled() -> bool {
+    #[cfg(feature = "internal-test-support")]
+    return test_support::is_enabled("copy-removal-race-directory");
+    #[cfg(not(feature = "internal-test-support"))]
     false
 }

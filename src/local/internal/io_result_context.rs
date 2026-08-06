@@ -14,16 +14,6 @@ use std::path::Path;
 
 use super::path_operations::add_path_context;
 
-/// Coverage-only entry point for context normalization.
-#[cfg(coverage)]
-pub fn coverage_with_path_context<T>(
-    result: Result<T>,
-    operation: &'static str,
-    path: &Path,
-) -> Result<T> {
-    with_path_context(result, operation, path)
-}
-
 /// Adds path context to an I/O result without a call-site closure.
 ///
 /// # Type Parameters

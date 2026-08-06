@@ -9,24 +9,11 @@
 // qubit-style: allow source-test-pair
 
 use std::error::Error;
-use std::fmt::{
-    Debug,
-    Display,
-    Formatter,
-    Result as FmtResult,
-};
+use std::fmt::{Debug, Display, Formatter, Result as FmtResult};
 use std::io;
-use std::path::{
-    Path,
-    PathBuf,
-};
+use std::path::{Path, PathBuf};
 
-use crate::{
-    LocalFileError,
-    LocalFileOperation,
-    LocalPersistFailureState,
-    LocalPersistStage,
-};
+use crate::{LocalFileError, LocalFileOperation, LocalPersistFailureState, LocalPersistStage};
 
 /// Persistence error that returns ownership of the temporary resource.
 ///
@@ -56,18 +43,6 @@ pub struct LocalPersistError<T> {
 }
 
 impl<T> LocalPersistError<T> {
-    /// Coverage-only constructor for the private persistence error value.
-    #[cfg(coverage)]
-    pub fn coverage_new(
-        error: io::Error,
-        resource: T,
-        requested_target: PathBuf,
-        resolved_target: Option<PathBuf>,
-        stage: LocalPersistStage,
-    ) -> Self {
-        Self::new(error, resource, requested_target, resolved_target, stage)
-    }
-
     /// Creates a recoverable persistence error.
     ///
     /// # Parameters

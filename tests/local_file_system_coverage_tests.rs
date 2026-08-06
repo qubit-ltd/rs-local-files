@@ -6,26 +6,14 @@
 //    Licensed under the Apache License, Version 2.0.
 // =============================================================================
 
-use std::{
-    fs,
-    io::Read,
-    time::Duration,
-};
+use std::{fs, io::Read, time::Duration};
 
 #[cfg(unix)]
 use qubit_local_files::LocalSymlinkPolicy;
 use qubit_local_files::{
-    LocalAtomicityRequirement,
-    LocalCopyOptions,
-    LocalDurabilityRequirement,
-    LocalFileErrorKind,
-    LocalFileSystem,
-    LocalListOptions,
-    LocalMetadataPreservePolicy,
-    LocalReadOptions,
-    LocalRenameOptions,
-    LocalWriteMode,
-    LocalWriteOptions,
+    LocalAtomicityRequirement, LocalCopyOptions, LocalDurabilityRequirement, LocalFileErrorKind,
+    LocalFileSystem, LocalListOptions, LocalMetadataPreservePolicy, LocalReadOptions,
+    LocalRenameOptions, LocalWriteMode, LocalWriteOptions,
 };
 use tempfile::tempdir;
 
@@ -47,9 +35,7 @@ fn test_copy_directory_rejects_required_publication_guarantees() {
     ] {
         let error = LocalFileSystem::host()
             .copy(&source, &directory.path().join("target"), &options)
-            .expect_err(
-                "unsupported directory guarantee must fail before copy",
-            );
+            .expect_err("unsupported directory guarantee must fail before copy");
         assert_eq!(LocalFileErrorKind::RequirementNotMet, error.error().kind());
     }
 }
@@ -110,8 +96,7 @@ fn test_copy_symlink_preserves_final_link_entry() {
         .copy(
             &link,
             &target_follow,
-            &LocalCopyOptions::new()
-                .with_symlink_policy(LocalSymlinkPolicy::FollowWithinScope),
+            &LocalCopyOptions::new().with_symlink_policy(LocalSymlinkPolicy::FollowWithinScope),
         )
         .expect("explicit follow should still preserve the final link entry");
     assert!(!outcome.atomic());
@@ -145,8 +130,7 @@ fn test_host_facade_uses_configured_reader_writer_and_list_policies() {
     let mut writer = LocalFileSystem::host()
         .open_writer(
             &file,
-            &LocalWriteOptions::new(LocalWriteMode::Append)
-                .with_open_retry_timeout(Duration::ZERO),
+            &LocalWriteOptions::new(LocalWriteMode::Append).with_open_retry_timeout(Duration::ZERO),
         )
         .expect("append writer should open with an explicit retry timeout");
     use std::io::Write;
@@ -216,9 +200,8 @@ fn test_host_facade_mutates_file_and_directory_entries() {
         .copy(
             &source,
             &target,
-            &LocalCopyOptions::new().with_metadata_preservation(
-                LocalMetadataPreservePolicy::Permissions,
-            ),
+            &LocalCopyOptions::new()
+                .with_metadata_preservation(LocalMetadataPreservePolicy::Permissions),
         )
         .expect("file copy should preserve the selected metadata policy");
     assert!(copy.atomic());
@@ -251,45 +234,46 @@ fn test_host_facade_mutates_file_and_directory_entries() {
     assert!(deleted_file.deleted());
 }
 
-/// Runs one coverage-only facade fault in an isolated child process.
-#[cfg(coverage)]
+/// Runs one test-support-only facade fault in an isolated child process.
+#[cfg(feature = "internal-test-support")]
 fn run_facade_fault<F>(test_name: &str, fault: &str, action: F)
 where
     F: FnOnce(),
 {
-    const COVERAGE_FAULT_ENV: &str = "QUBIT_LOCAL_FILES_COVERAGE_FAULT";
-    if let Some(selected) = std::env::var_os(COVERAGE_FAULT_ENV) {
-        if selected == std::ffi::OsStr::new(fault) {
-            action();
-        }
+    const TEST_FAULT_ENV: &str = "QUBIT_LOCAL_FILES_TEST_FAULT";
+    const TEST_FAULT_CHILD_ENV: &str = "QUBIT_LOCAL_FILES_TEST_FAULT_CHILD";
+    if std::env::var_os(TEST_FAULT_ENV)
+        .is_some_and(|selected| selected == std::ffi::OsStr::new(fault))
+    {
+        action();
         return;
     }
-    let executable = std::env::current_exe()
-        .expect("coverage test executable should be available");
+    if std::env::var_os(TEST_FAULT_CHILD_ENV).is_some() {
+        return;
+    }
+    let executable = std::env::current_exe().expect("coverage test executable should be available");
     let status = std::process::Command::new(executable)
         .arg("--exact")
         .arg(test_name)
         .arg("--nocapture")
-        .env(COVERAGE_FAULT_ENV, fault)
+        .env(TEST_FAULT_ENV, fault)
+        .env(TEST_FAULT_CHILD_ENV, "1")
         .status()
-        .expect("coverage fault child should launch");
-    assert!(status.success(), "coverage fault child should pass");
+        .expect("test fault child should launch");
+    assert!(status.success(), "test fault child should pass");
 }
 
 /// Verifies an injected native rename uncertainty retains its indeterminate
 /// public failure state.
-#[cfg(coverage)]
+#[cfg(feature = "internal-test-support")]
 #[test]
 fn test_rename_reports_injected_indeterminate_native_failure() {
-    const TEST_NAME: &str =
-        "test_rename_reports_injected_indeterminate_native_failure";
+    const TEST_NAME: &str = "test_rename_reports_injected_indeterminate_native_failure";
     run_facade_fault(TEST_NAME, "rename-native-indeterminate", || {
-        let directory =
-            tempdir().expect("temporary directory should be created");
+        let directory = tempdir().expect("temporary directory should be created");
         let source = directory.path().join("source");
         let target = directory.path().join("target");
-        fs::write(&source, b"payload")
-            .expect("source fixture should be written");
+        fs::write(&source, b"payload").expect("source fixture should be written");
 
         let error = LocalFileSystem::host()
             .rename(&source, &target, &LocalRenameOptions::new())
@@ -303,18 +287,15 @@ fn test_rename_reports_injected_indeterminate_native_failure() {
 
 /// Verifies an I/O failure reported by the native rename boundary preserves
 /// the indeterminate mutation state.
-#[cfg(coverage)]
+#[cfg(feature = "internal-test-support")]
 #[test]
 fn test_rename_reports_injected_native_boundary_failure() {
-    const TEST_NAME: &str =
-        "test_rename_reports_injected_native_boundary_failure";
+    const TEST_NAME: &str = "test_rename_reports_injected_native_boundary_failure";
     run_facade_fault(TEST_NAME, "local-fs-rename-native-error", || {
-        let directory =
-            tempdir().expect("temporary directory should be created");
+        let directory = tempdir().expect("temporary directory should be created");
         let source = directory.path().join("source");
         let target = directory.path().join("target");
-        fs::write(&source, b"payload")
-            .expect("source fixture should be written");
+        fs::write(&source, b"payload").expect("source fixture should be written");
 
         let error = LocalFileSystem::host()
             .rename(&source, &target, &LocalRenameOptions::new())
@@ -333,11 +314,10 @@ fn test_rename_reports_injected_native_boundary_failure() {
 
 /// Verifies host facade I/O conversions preserve structured failures at each
 /// native filesystem boundary.
-#[cfg(coverage)]
+#[cfg(feature = "internal-test-support")]
 #[test]
 fn test_host_facade_reports_injected_native_io_failures() {
-    const TEST_NAME: &str =
-        "test_host_facade_reports_injected_native_io_failures";
+    const TEST_NAME: &str = "test_host_facade_reports_injected_native_io_failures";
     for fault in [
         "local-fs-open-reader-metadata",
         "local-fs-open-writer-parent",
@@ -353,12 +333,10 @@ fn test_host_facade_reports_injected_native_io_failures() {
         "local-fs-copy-target-metadata",
     ] {
         run_facade_fault(TEST_NAME, fault, || {
-            let directory =
-                tempdir().expect("temporary directory should be created");
+            let directory = tempdir().expect("temporary directory should be created");
             let source = directory.path().join("source");
             let target = directory.path().join("target");
-            fs::write(&source, b"payload")
-                .expect("source fixture should be written");
+            fs::write(&source, b"payload").expect("source fixture should be written");
 
             let failed = match fault {
                 "local-fs-open-reader-metadata" => LocalFileSystem::host()
@@ -367,8 +345,7 @@ fn test_host_facade_reports_injected_native_io_failures() {
                 "local-fs-open-writer-parent" => LocalFileSystem::host()
                     .open_writer(
                         &directory.path().join("nested/target"),
-                        &LocalWriteOptions::new(LocalWriteMode::CreateNew)
-                            .with_parent(),
+                        &LocalWriteOptions::new(LocalWriteMode::CreateNew).with_parent(),
                     )
                     .is_err(),
                 "local-fs-copy-source-metadata" => LocalFileSystem::host()
@@ -381,26 +358,16 @@ fn test_host_facade_reports_injected_native_io_failures() {
                     )
                     .is_err(),
                 "local-fs-delete-file-remove" => LocalFileSystem::host()
-                    .delete_file(
-                        &source,
-                        &qubit_local_files::LocalDeleteOptions::new(),
-                    )
+                    .delete_file(&source, &qubit_local_files::LocalDeleteOptions::new())
                     .is_err(),
                 "local-fs-delete-directory-remove" => {
-                    fs::create_dir(&target)
-                        .expect("directory deletion fixture should be created");
+                    fs::create_dir(&target).expect("directory deletion fixture should be created");
                     LocalFileSystem::host()
-                        .delete_directory(
-                            &target,
-                            &qubit_local_files::LocalDeleteOptions::new(),
-                        )
+                        .delete_directory(&target, &qubit_local_files::LocalDeleteOptions::new())
                         .is_err()
                 }
                 "local-fs-delete-metadata" => LocalFileSystem::host()
-                    .delete_file(
-                        &source,
-                        &qubit_local_files::LocalDeleteOptions::new(),
-                    )
+                    .delete_file(&source, &qubit_local_files::LocalDeleteOptions::new())
                     .is_err(),
                 "local-fs-rename-source-metadata" => LocalFileSystem::host()
                     .rename(&source, &target, &LocalRenameOptions::new())
@@ -408,23 +375,18 @@ fn test_host_facade_reports_injected_native_io_failures() {
                 "local-fs-open-reader-native" => LocalFileSystem::host()
                     .open_reader(&source, &LocalReadOptions::new())
                     .is_err(),
-                "local-fs-open-writer-append-metadata"
-                | "local-fs-open-writer-append-native" => {
+                "local-fs-open-writer-append-metadata" | "local-fs-open-writer-append-native" => {
                     LocalFileSystem::host()
-                        .open_writer(
-                            &source,
-                            &LocalWriteOptions::new(LocalWriteMode::Append),
-                        )
+                        .open_writer(&source, &LocalWriteOptions::new(LocalWriteMode::Append))
                         .is_err()
                 }
                 "local-fs-copy-target-metadata" => {
-                    fs::write(&target, b"existing")
-                        .expect("target fixture should be written");
+                    fs::write(&target, b"existing").expect("target fixture should be written");
                     LocalFileSystem::host()
                         .copy(&source, &target, &LocalCopyOptions::new())
                         .is_err()
                 }
-                _ => unreachable!("every requested coverage fault is handled"),
+                _ => unreachable!("every requested test fault is handled"),
             };
             assert!(failed, "injected {fault} must fail the facade");
         });
@@ -433,45 +395,37 @@ fn test_host_facade_reports_injected_native_io_failures() {
 
 /// Verifies copy and rename report post-publication durability failures from
 /// the shared parent-sync native boundary.
-#[cfg(coverage)]
+#[cfg(feature = "internal-test-support")]
 #[test]
 fn test_copy_and_rename_report_injected_parent_sync_failures() {
-    const TEST_NAME: &str =
-        "test_copy_and_rename_report_injected_parent_sync_failures";
+    const TEST_NAME: &str = "test_copy_and_rename_report_injected_parent_sync_failures";
     for fault in ["copy-parent-sync", "rename-parent-sync"] {
         run_facade_fault(TEST_NAME, fault, || {
-            let directory =
-                tempdir().expect("temporary directory should be created");
+            let directory = tempdir().expect("temporary directory should be created");
             let source = directory.path().join("source");
             let target = directory.path().join("target");
-            fs::write(&source, b"payload")
-                .expect("source fixture should be written");
+            fs::write(&source, b"payload").expect("source fixture should be written");
 
             let failed = match fault {
                 "copy-parent-sync" => LocalFileSystem::host()
                     .copy(
                         &source,
                         &target,
-                        &LocalCopyOptions::new().with_durability(
-                            LocalDurabilityRequirement::Required,
-                        ),
+                        &LocalCopyOptions::new()
+                            .with_durability(LocalDurabilityRequirement::Required),
                     )
                     .is_err(),
                 "rename-parent-sync" => LocalFileSystem::host()
                     .rename(
                         &source,
                         &target,
-                        &LocalRenameOptions::new().with_durability(
-                            LocalDurabilityRequirement::Required,
-                        ),
+                        &LocalRenameOptions::new()
+                            .with_durability(LocalDurabilityRequirement::Required),
                     )
                     .is_err(),
                 _ => unreachable!("every parent-sync fault is handled"),
             };
-            assert!(
-                failed,
-                "injected {fault} must fail publication durability"
-            );
+            assert!(failed, "injected {fault} must fail publication durability");
             assert!(
                 target.exists(),
                 "native publication must precede parent sync"
@@ -482,14 +436,12 @@ fn test_copy_and_rename_report_injected_parent_sync_failures() {
 
 /// Verifies required copy durability synchronizes the staging handle before
 /// publication, leaving an existing destination unchanged on sync failure.
-#[cfg(coverage)]
+#[cfg(feature = "internal-test-support")]
 #[test]
 fn test_copy_required_durability_syncs_staging_before_publication() {
-    const TEST_NAME: &str =
-        "test_copy_required_durability_syncs_staging_before_publication";
+    const TEST_NAME: &str = "test_copy_required_durability_syncs_staging_before_publication";
     run_facade_fault(TEST_NAME, "copy-staging-file-sync", || {
-        let directory =
-            tempdir().expect("temporary directory should be created");
+        let directory = tempdir().expect("temporary directory should be created");
         let source = directory.path().join("source");
         let target = directory.path().join("target");
         fs::write(&source, b"new").expect("source fixture should be written");
@@ -500,14 +452,10 @@ fn test_copy_required_durability_syncs_staging_before_publication() {
                 &source,
                 &target,
                 &LocalCopyOptions::new()
-                    .with_conflict(
-                        qubit_local_files::LocalCopyConflictPolicy::Overwrite,
-                    )
+                    .with_conflict(qubit_local_files::LocalCopyConflictPolicy::Overwrite)
                     .with_durability(LocalDurabilityRequirement::Required),
             )
-            .expect_err(
-                "staging synchronization failure must stop publication",
-            );
+            .expect_err("staging synchronization failure must stop publication");
 
         assert_eq!(
             qubit_local_files::LocalCopyFailureState::Unchanged,
@@ -522,35 +470,24 @@ fn test_copy_required_durability_syncs_staging_before_publication() {
 
 /// Verifies a host lacking directory synchronization rejects a required
 /// durability request before the copy publishes its target.
-#[cfg(coverage)]
+#[cfg(feature = "internal-test-support")]
 #[test]
 fn test_copy_rejects_injected_missing_directory_durability() {
-    const TEST_NAME: &str =
-        "test_copy_rejects_injected_missing_directory_durability";
-    run_facade_fault(
-        TEST_NAME,
-        "local-fs-required-directory-durability",
-        || {
-            let directory =
-                tempdir().expect("temporary directory should be created");
-            let source = directory.path().join("source");
-            let target = directory.path().join("target");
-            fs::write(&source, b"payload")
-                .expect("source fixture should be written");
+    const TEST_NAME: &str = "test_copy_rejects_injected_missing_directory_durability";
+    run_facade_fault(TEST_NAME, "local-fs-required-directory-durability", || {
+        let directory = tempdir().expect("temporary directory should be created");
+        let source = directory.path().join("source");
+        let target = directory.path().join("target");
+        fs::write(&source, b"payload").expect("source fixture should be written");
 
-            let error = LocalFileSystem::host()
-                .copy(
-                    &source,
-                    &target,
-                    &LocalCopyOptions::new()
-                        .with_durability(LocalDurabilityRequirement::Required),
-                )
-                .expect_err("required durability must fail when unavailable");
-            assert_eq!(
-                LocalFileErrorKind::RequirementNotMet,
-                error.error().kind()
-            );
-            assert!(!target.exists(), "preflight must not publish a target");
-        },
-    );
+        let error = LocalFileSystem::host()
+            .copy(
+                &source,
+                &target,
+                &LocalCopyOptions::new().with_durability(LocalDurabilityRequirement::Required),
+            )
+            .expect_err("required durability must fail when unavailable");
+        assert_eq!(LocalFileErrorKind::RequirementNotMet, error.error().kind());
+        assert!(!target.exists(), "preflight must not publish a target");
+    });
 }
