@@ -7,22 +7,15 @@
 // =============================================================================
 //! Live-descriptor I/O normalization for recursive-copy staging.
 // qubit-style: allow source-test-pair
-// qubit-style: allow coverage-cfg
 // Public APIs retain both descriptors, so post-open copy and permission
 // failures cannot be induced deterministically by portable fixtures.
 
-use std::fs::{
-    File,
-    Metadata,
-};
+use std::fs::{File, Metadata};
 use std::io;
 use std::path::Path;
 
 use crate::local::internal::StagedFile;
-use crate::{
-    LocalCopyDirStage,
-    LocalCopyDirStats,
-};
+use crate::{LocalCopyDirStage, LocalCopyDirStats};
 
 use super::copy_dir_result::CopyDirResult;
 use super::error::copy_dir_error_with_staging;
@@ -52,20 +45,16 @@ pub(super) fn copy_into_staging(
     source_file: &mut File,
     staged_file: &mut StagedFile,
 ) -> CopyDirResult<u64> {
-    #[cfg(coverage)]
-    let result = if crate::local::internal::coverage_fault::is_enabled(
-        "copy-staging-copy",
-    ) || crate::local::internal::coverage_fault::is_enabled(
-        "copy-staging-copy-cleanup",
-    ) || crate::local::internal::coverage_fault::take_on_nth(
-        "copy-staging-copy-second",
-        2,
-    ) {
-        Err(io::Error::from_raw_os_error(libc::EIO))
+    #[cfg(feature = "internal-test-support")]
+    let result = if crate::local::internal::test_support::is_enabled("copy-staging-copy")
+        || crate::local::internal::test_support::is_enabled("copy-staging-copy-cleanup")
+        || crate::local::internal::test_support::take_on_nth("copy-staging-copy-second", 2)
+    {
+        Err(crate::local::test_fault_error())
     } else {
         io::copy(source_file, staged_file.file_mut())
     };
-    #[cfg(not(coverage))]
+    #[cfg(not(feature = "internal-test-support"))]
     let result = io::copy(source_file, staged_file.file_mut());
     match result {
         Ok(copied) => Ok(copied),
@@ -101,17 +90,15 @@ pub(super) fn preserve_staged_permissions(
     stats: &LocalCopyDirStats,
     staged_file: &mut StagedFile,
 ) -> CopyDirResult<()> {
-    #[cfg(coverage)]
-    let result = if crate::local::internal::coverage_fault::is_enabled(
-        "copy-staging-permissions",
-    ) {
-        Err(io::Error::from_raw_os_error(libc::EIO))
+    #[cfg(feature = "internal-test-support")]
+    let result = if crate::local::internal::test_support::is_enabled("copy-staging-permissions") {
+        Err(crate::local::test_fault_error())
     } else {
         staged_file
             .file()
             .set_permissions(source_metadata.permissions())
     };
-    #[cfg(not(coverage))]
+    #[cfg(not(feature = "internal-test-support"))]
     let result = staged_file
         .file()
         .set_permissions(source_metadata.permissions());

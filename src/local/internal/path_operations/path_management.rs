@@ -10,15 +10,8 @@
 
 use std::ffi::OsString;
 use std::fs;
-use std::io::{
-    Error,
-    ErrorKind,
-    Result,
-};
-use std::path::{
-    Path,
-    PathBuf,
-};
+use std::io::{Error, ErrorKind, Result};
+use std::path::{Path, PathBuf};
 
 #[cfg(windows)]
 use std::os::windows::fs::FileTypeExt;
@@ -26,53 +19,6 @@ use std::os::windows::fs::FileTypeExt;
 #[cfg(windows)]
 use super::super::file_move::remove_directory_symlink;
 use super::super::path_io_error::PathIoError;
-
-/// Coverage-only access to private path-management operations.
-#[cfg(coverage)]
-pub fn coverage_absolute_path(path: &Path) -> Result<PathBuf> {
-    absolute_path(path)
-}
-
-#[cfg(coverage)]
-pub fn coverage_canonicalize_existing_prefix(path: &Path) -> Result<PathBuf> {
-    canonicalize_existing_prefix(path)
-}
-
-#[cfg(coverage)]
-pub fn coverage_ensure_dir_path(path: &Path) -> Result<()> {
-    ensure_dir_path(path)
-}
-
-#[cfg(coverage)]
-pub fn coverage_ensure_parent_path(path: &Path) -> Result<()> {
-    ensure_parent_path(path)
-}
-
-#[cfg(coverage)]
-pub fn coverage_ensure_parent_path_with_sync_dirs(
-    path: &Path,
-) -> Result<Vec<PathBuf>> {
-    ensure_parent_path_with_sync_dirs(path)
-}
-
-#[cfg(coverage)]
-pub fn coverage_add_path_context(
-    error: Error,
-    operation: &'static str,
-    path: &Path,
-) -> Error {
-    add_path_context(error, operation, path)
-}
-
-#[cfg(coverage)]
-pub fn coverage_clean_dir_path(path: &Path) -> Result<()> {
-    clean_dir_path(path)
-}
-
-#[cfg(coverage)]
-pub fn coverage_remove_any_path(path: &Path) -> Result<()> {
-    remove_any_path(path)
-}
 
 /// Resolves `path` to a lexical absolute path at the current point in time.
 ///
@@ -174,9 +120,7 @@ pub(crate) fn ensure_parent_path(path: &Path) -> Result<()> {
 /// # Errors
 /// Returns an I/O error when a parent component cannot be inspected or
 /// created, or an existing component is not a directory.
-pub(crate) fn ensure_parent_path_with_sync_dirs(
-    path: &Path,
-) -> Result<Vec<PathBuf>> {
+pub(crate) fn ensure_parent_path_with_sync_dirs(path: &Path) -> Result<Vec<PathBuf>> {
     let Some(parent) = path
         .parent()
         .filter(|parent| !parent.as_os_str().is_empty())
@@ -222,11 +166,7 @@ pub(crate) fn ensure_parent_path_with_sync_dirs(
 ///
 /// # Returns
 /// A new I/O error with the same [`ErrorKind`] and a more descriptive message.
-pub(crate) fn add_path_context(
-    error: Error,
-    operation: &'static str,
-    path: &Path,
-) -> Error {
+pub(crate) fn add_path_context(error: Error, operation: &'static str, path: &Path) -> Error {
     Error::new(error.kind(), PathIoError::new(operation, path, error))
 }
 

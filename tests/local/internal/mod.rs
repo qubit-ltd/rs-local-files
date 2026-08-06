@@ -9,3 +9,6 @@
 mod publication_state;
 
 mod host_local_file_system;
+
+#[cfg(feature = "internal-test-support")]
+mod test_support_tests;

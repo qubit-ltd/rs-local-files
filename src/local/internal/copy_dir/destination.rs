@@ -7,42 +7,28 @@
 // =============================================================================
 //! Destination inspection, conflict policy, and type-stable removal.
 // qubit-style: allow source-test-pair
-// qubit-style: allow coverage-cfg
 // Private behavior is covered through public integration tests.
 
 use std::fs;
-use std::io::{
-    Error,
-    ErrorKind,
-    Result,
-};
+use std::io::{Error, ErrorKind, Result};
 use std::path::Path;
 
-#[cfg(coverage)]
-use crate::local::internal::coverage_fault;
+#[cfg(feature = "internal-test-support")]
+use crate::local::internal::test_support;
 #[cfg(windows)]
 use std::os::windows::fs::FileTypeExt;
 
 #[cfg(windows)]
 use crate::local::internal::file_move::remove_directory_symlink;
 use crate::local::internal::temp_entry::create_private_dir;
-use crate::local::{
-    CopyDestinationAction,
-    decide_copy_destination,
-};
+use crate::local::{CopyDestinationAction, decide_copy_destination};
 use crate::{
-    LocalCopyConflictPolicy,
-    LocalCopyDirStage,
-    LocalCopyDirStats,
-    LocalCopyTypeConflictPolicy,
+    LocalCopyConflictPolicy, LocalCopyDirStage, LocalCopyDirStats, LocalCopyTypeConflictPolicy,
 };
 
 use super::copy_dir_result::CopyDirResult;
 use super::error::copy_dir_error;
-use super::namespace_race::{
-    reconcile_directory_creation,
-    removable_non_directory_metadata,
-};
+use super::namespace_race::{reconcile_directory_creation, removable_non_directory_metadata};
 use super::source::is_real_directory;
 
 /// Ensures a directory-copy destination exists as a real directory.
@@ -65,8 +51,7 @@ pub(super) fn ensure_copy_destination_dir(
     conflict: LocalCopyConflictPolicy,
     type_conflict: LocalCopyTypeConflictPolicy,
 ) -> Result<CopyDestinationAction> {
-    let action =
-        prepare_existing_directory_destination(dst, conflict, type_conflict)?;
+    let action = prepare_existing_directory_destination(dst, conflict, type_conflict)?;
     if action != CopyDestinationAction::Create {
         return Ok(action);
     }
@@ -130,9 +115,7 @@ pub(super) fn existing_file_destination_should_be_skipped(
 /// # Errors
 ///
 /// Returns metadata errors other than `NotFound`.
-pub(super) fn destination_metadata_if_exists(
-    dst: &Path,
-) -> Result<Option<fs::Metadata>> {
+pub(super) fn destination_metadata_if_exists(dst: &Path) -> Result<Option<fs::Metadata>> {
     match inspect_destination_metadata(dst) {
         Ok(metadata) => Ok(Some(metadata)),
         Err(error) if error.kind() == ErrorKind::NotFound => Ok(None),
@@ -149,9 +132,7 @@ pub(super) fn destination_metadata_if_exists(
 /// # Errors
 ///
 /// Returns the I/O error reported while inspecting or removing the directory.
-pub(super) fn remove_destination_directory_if_unchanged(
-    dst: &Path,
-) -> Result<()> {
+pub(super) fn remove_destination_directory_if_unchanged(dst: &Path) -> Result<()> {
     match inspect_destination_metadata(dst) {
         Ok(metadata) if is_real_directory(&metadata) => fs::remove_dir_all(dst),
         Ok(_) => Ok(()),
@@ -222,26 +203,24 @@ fn prepare_existing_directory_destination(
 /// directory.
 fn create_copy_destination_dir(dst: &Path) -> Result<bool> {
     let result = create_private_dir(dst);
-    #[cfg(coverage)]
-    let result = if coverage_fault::is_enabled("copy-directory-race-existing")
-        || coverage_fault::is_enabled("copy-directory-race-nondirectory")
-        || coverage_fault::is_enabled("copy-directory-race-inspect")
+    #[cfg(feature = "internal-test-support")]
+    let result = if test_support::is_enabled("copy-directory-race-existing")
+        || test_support::is_enabled("copy-directory-race-nondirectory")
+        || test_support::is_enabled("copy-directory-race-inspect")
     {
         Err(Error::new(
             ErrorKind::AlreadyExists,
             "injected directory creation race",
         ))
-    } else if coverage_fault::is_enabled("copy-directory-create-error") {
+    } else if test_support::is_enabled("copy-directory-create-error") {
         Err(Error::other("injected directory creation failure"))
     } else {
         result
     };
     reconcile_directory_creation(dst, result, |path| {
-        #[cfg(coverage)]
-        if coverage_fault::is_enabled("copy-directory-race-inspect") {
-            return Err(Error::other(
-                "injected directory race inspection failure",
-            ));
+        #[cfg(feature = "internal-test-support")]
+        if test_support::is_enabled("copy-directory-race-inspect") {
+            return Err(Error::other("injected directory race inspection failure"));
         }
         inspect_destination_metadata(path)
     })
@@ -264,13 +243,13 @@ fn create_copy_destination_dir(dst: &Path) -> Result<bool> {
 /// Returns the I/O error reported while inspecting or removing the entry.
 fn remove_destination_non_directory_if_unchanged(dst: &Path) -> Result<()> {
     let result = inspect_destination_metadata(dst);
-    #[cfg(coverage)]
-    let result = if coverage_fault::is_enabled("copy-removal-race-not-found") {
+    #[cfg(feature = "internal-test-support")]
+    let result = if test_support::is_enabled("copy-removal-race-not-found") {
         Err(Error::new(
             ErrorKind::NotFound,
             "injected destination disappearance",
         ))
-    } else if coverage_fault::is_enabled("copy-removal-race-inspect") {
+    } else if test_support::is_enabled("copy-removal-race-inspect") {
         Err(Error::other("injected destination reinspection failure"))
     } else {
         result

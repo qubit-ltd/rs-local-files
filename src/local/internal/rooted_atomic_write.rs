@@ -7,16 +7,11 @@
 // =============================================================================
 //! Descriptor-relative atomic-write preparation.
 // qubit-style: allow source-test-pair
-// qubit-style: allow coverage-cfg
 // Private behavior is covered through public integration tests.
 
 use std::ffi::CString;
 use std::fs::File;
-use std::io::{
-    Error,
-    ErrorKind,
-    Result,
-};
+use std::io::{Error, ErrorKind, Result};
 use std::os::fd::AsRawFd;
 use std::path::Path;
 
@@ -79,9 +74,7 @@ pub(in crate::local) fn inspect_rooted_atomic_destination(
     if is_regular_file_mode(status.st_mode) {
         return Ok((true, true));
     }
-    if replace_target_symlink
-        && (status.st_mode as libc::mode_t & libc::S_IFMT) == libc::S_IFLNK
-    {
+    if replace_target_symlink && (status.st_mode as libc::mode_t & libc::S_IFMT) == libc::S_IFLNK {
         return Ok((true, false));
     }
     {
@@ -120,11 +113,9 @@ pub(in crate::local) fn create_rooted_staged_file(
     retry_rooted_staging_entry(
         DEFAULT_TEMP_ENTRY_RETRIES,
         || {
-            #[cfg(coverage)]
-            if super::coverage_fault::is_enabled("rooted-staging-generate") {
-                return Err(Error::other(
-                    "injected rooted staging filename failure",
-                ));
+            #[cfg(feature = "internal-test-support")]
+            if super::test_support::is_enabled("rooted-staging-generate") {
+                return Err(Error::other("injected rooted staging filename failure"));
             }
             try_random_file_name(
                 "qubit-local-files-",
@@ -133,20 +124,17 @@ pub(in crate::local) fn create_rooted_staged_file(
             )
         },
         |name| {
-            #[cfg(coverage)]
-            if super::coverage_fault::is_enabled("rooted-staging-collision") {
+            #[cfg(feature = "internal-test-support")]
+            if super::test_support::is_enabled("rooted-staging-collision") {
                 return Err(Error::new(
                     ErrorKind::AlreadyExists,
                     "injected rooted staging collision",
                 ));
-            } else if super::coverage_fault::is_enabled("rooted-staging-open") {
-                return Err(Error::other(
-                    "injected rooted staging open failure",
-                ));
+            } else if super::test_support::is_enabled("rooted-staging-open") {
+                return Err(Error::other("injected rooted staging open failure"));
             }
-            let native_name = CString::new(name.as_bytes()).expect(
-                "random_file_name_with guarantees generated names without NUL",
-            );
+            let native_name = CString::new(name.as_bytes())
+                .expect("random_file_name_with guarantees generated names without NUL");
             open_file_at(
                 &parent,
                 &native_name,
@@ -157,11 +145,6 @@ pub(in crate::local) fn create_rooted_staged_file(
         },
     )
     .map(|(name, native_name, file)| {
-        RootedStagedFile::new(
-            parent,
-            native_name,
-            file,
-            relative_parent.join(name),
-        )
+        RootedStagedFile::new(parent, native_name, file, relative_parent.join(name))
     })
 }
