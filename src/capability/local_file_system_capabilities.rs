@@ -32,7 +32,8 @@ pub struct LocalFileSystemCapabilities {
 }
 
 impl LocalFileSystemCapabilities {
-    #[inline(always)]
+    #[cfg_attr(coverage, inline(never))]
+    #[cfg_attr(not(coverage), inline(always))]
     const fn support(implemented: bool) -> LocalFileSystemCapabilitySupport {
         match implemented {
             true => LocalFileSystemCapabilitySupport::Implemented,
@@ -41,7 +42,8 @@ impl LocalFileSystemCapabilities {
     }
 
     /// Detects mechanisms compiled for the current target platform.
-    #[inline]
+    #[cfg_attr(coverage, inline(never))]
+    #[cfg_attr(not(coverage), inline)]
     pub(crate) const fn detect_host() -> Self {
         Self {
             rooted_operations: cfg!(any(unix, windows)),
@@ -61,7 +63,8 @@ impl LocalFileSystemCapabilities {
     }
 
     /// Detects mechanisms compiled for a rooted authority on this target.
-    #[inline]
+    #[cfg_attr(coverage, inline(never))]
+    #[cfg_attr(not(coverage), inline)]
     pub(crate) const fn detect_rooted() -> Self {
         Self {
             rooted_operations: cfg!(any(unix, windows)),
@@ -86,20 +89,23 @@ impl LocalFileSystemCapabilities {
 
     /// Reports whether secure rooted operations are implemented.
     #[must_use]
-    #[inline(always)]
+    #[cfg_attr(coverage, inline(never))]
+    #[cfg_attr(not(coverage), inline(always))]
     pub const fn rooted_operations_implemented(self) -> bool {
         self.rooted_operations
     }
 
     /// Reports whether native atomic rename is implemented.
     #[must_use]
-    #[inline(always)]
+    #[cfg_attr(coverage, inline(never))]
+    #[cfg_attr(not(coverage), inline(always))]
     pub const fn atomic_rename_implemented(self) -> bool {
         self.atomic_rename
     }
 
     /// Returns the support level for native atomic rename.
-    #[inline(always)]
+    #[cfg_attr(coverage, inline(never))]
+    #[cfg_attr(not(coverage), inline(always))]
     pub const fn atomic_rename_support(
         self,
     ) -> LocalFileSystemCapabilitySupport {
@@ -115,7 +121,8 @@ impl LocalFileSystemCapabilities {
     }
 
     /// Returns the support level for native atomic replacement.
-    #[inline(always)]
+    #[cfg_attr(coverage, inline(never))]
+    #[cfg_attr(not(coverage), inline(always))]
     pub const fn atomic_replace_support(
         self,
     ) -> LocalFileSystemCapabilitySupport {
@@ -124,13 +131,15 @@ impl LocalFileSystemCapabilities {
 
     /// Reports whether atomic no-replace temporary persistence is implemented.
     #[must_use]
-    #[inline(always)]
+    #[cfg_attr(coverage, inline(never))]
+    #[cfg_attr(not(coverage), inline(always))]
     pub const fn atomic_temp_persist_implemented(self) -> bool {
         self.atomic_temp_persist
     }
 
     /// Returns the support level for atomic no-replace temporary persistence.
-    #[inline(always)]
+    #[cfg_attr(coverage, inline(never))]
+    #[cfg_attr(not(coverage), inline(always))]
     pub const fn atomic_temp_persist_support(
         self,
     ) -> LocalFileSystemCapabilitySupport {
@@ -140,7 +149,8 @@ impl LocalFileSystemCapabilities {
     /// Reports whether parent-directory durability synchronization is
     /// implemented.
     #[must_use]
-    #[inline(always)]
+    #[cfg_attr(coverage, inline(never))]
+    #[cfg_attr(not(coverage), inline(always))]
     pub const fn directory_durability_implemented(self) -> bool {
         self.directory_durability
     }
@@ -150,7 +160,8 @@ impl LocalFileSystemCapabilities {
     /// Directory synchronization is implemented on supported targets, but
     /// this snapshot does not probe the active mount. Advertising a durable
     /// guarantee therefore remains intentionally conservative.
-    #[inline(always)]
+    #[cfg_attr(coverage, inline(never))]
+    #[cfg_attr(not(coverage), inline(always))]
     pub const fn durable_rename_support(
         self,
     ) -> LocalFileSystemCapabilitySupport {
@@ -159,7 +170,8 @@ impl LocalFileSystemCapabilities {
     }
 
     /// Returns the support level for durable file-copy publication.
-    #[inline(always)]
+    #[cfg_attr(coverage, inline(never))]
+    #[cfg_attr(not(coverage), inline(always))]
     pub const fn durable_file_copy_support(
         self,
     ) -> LocalFileSystemCapabilitySupport {
