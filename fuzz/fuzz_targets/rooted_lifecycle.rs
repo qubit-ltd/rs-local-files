@@ -27,6 +27,7 @@ use qubit_local_files::{
     LocalTempFileOptions,
     LocalWriteMode,
     LocalWriteOptions,
+    LocalWriterState,
 };
 
 const MAX_FUZZ_INPUT_LEN: usize = 256;
@@ -35,17 +36,24 @@ const MAX_OPERATIONS: usize = 16;
 fuzz_target!(|data: &[u8]| {
     let data = &data[..data.len().min(MAX_FUZZ_INPUT_LEN)];
     let root = fuzz_root();
-    let _ = fs::remove_dir_all(&root);
+    if root.exists() {
+        fs::remove_dir_all(&root)
+            .expect("stale rooted fuzz root should be removable");
+    }
     fs::create_dir_all(&root).expect("fuzz root should be creatable");
 
     let Ok(filesystem) = LocalFileSystem::rooted(&root) else {
-        let _ = fs::remove_dir_all(&root);
+        fs::remove_dir_all(&root)
+            .expect("unopenable rooted fuzz root should be removable");
         return;
     };
-    let _ = filesystem.create_directory(
-        Path::new("scratch"),
-        &LocalCreateDirectoryOptions::new().with_recursive(),
-    );
+    let scratch = filesystem
+        .create_directory(
+            Path::new("scratch"),
+            &LocalCreateDirectoryOptions::new().with_recursive(),
+        )
+        .expect("rooted fuzz scratch directory should be created");
+    assert!(scratch.created());
     for operation in data.chunks(2).take(MAX_OPERATIONS) {
         let opcode = operation.first().copied().unwrap_or_default() % 4;
         let selector = operation.get(1).copied().unwrap_or_default();
@@ -58,9 +66,13 @@ fuzz_target!(|data: &[u8]| {
                 if let Ok(mut resource) = filesystem.create_temp_file(&options)
                 {
                     let path = resource.path().to_path_buf();
-                    let _ = resource.write_all(data);
+                    resource.write_all(data).expect(
+                        "rooted temporary fuzz file should accept bytes",
+                    );
                     if selector & 1 == 0 {
-                        let _ = resource.cleanup();
+                        resource
+                            .cleanup()
+                            .expect("rooted temporary cleanup should succeed");
                     }
                     drop(resource);
                     assert!(!root.join(path).exists());
@@ -84,19 +96,31 @@ fuzz_target!(|data: &[u8]| {
                     target,
                     &LocalWriteOptions::new(LocalWriteMode::CreateOrReplace),
                 ) {
-                    let _ = writer.write_all(data);
-                    let _ = writer.commit();
+                    writer
+                        .write_all(data)
+                        .expect("rooted fuzz writer should accept bytes");
+                    let outcome = writer
+                        .commit()
+                        .expect("rooted fuzz writer should commit");
+                    assert_eq!(LocalWriterState::Committed, outcome.state());
                 }
             }
             _ => {
-                let _ = filesystem.delete_file(
-                    Path::new("scratch/payload"),
-                    &LocalDeleteOptions::new().with_missing_ok(),
+                let deleted = filesystem
+                    .delete_file(
+                        Path::new("scratch/payload"),
+                        &LocalDeleteOptions::new().with_missing_ok(),
+                    )
+                    .expect(
+                        "rooted fuzz delete should tolerate missing payload",
+                    );
+                assert!(
+                    deleted.deleted() || !root.join("scratch/payload").exists()
                 );
             }
         }
     }
-    let _ = fs::remove_dir_all(root);
+    fs::remove_dir_all(root).expect("rooted fuzz root should be removable");
 });
 
 fn fuzz_root() -> PathBuf {
