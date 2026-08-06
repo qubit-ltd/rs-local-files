@@ -32,14 +32,16 @@ impl LocalFileReader {
     /// # Parameters
     ///
     /// - `file`: Open native file handle.
-    #[inline(always)]
+    #[cfg_attr(coverage, inline(never))]
+    #[cfg_attr(not(coverage), inline(always))]
     pub(crate) const fn new(file: File) -> Self {
         Self { file }
     }
 
     /// Returns the underlying native file handle.
     #[must_use]
-    #[inline(always)]
+    #[cfg_attr(coverage, inline(never))]
+    #[cfg_attr(not(coverage), inline(always))]
     pub const fn as_file(&self) -> &File {
         &self.file
     }
@@ -47,13 +49,15 @@ impl LocalFileReader {
 
 impl Read for LocalFileReader {
     /// Reads bytes from the native file at its current offset.
-    #[inline(always)]
+    #[cfg_attr(coverage, inline(never))]
+    #[cfg_attr(not(coverage), inline(always))]
     fn read(&mut self, buffer: &mut [u8]) -> io::Result<usize> {
         self.file.read(buffer)
     }
 
     /// Reads bytes into multiple buffers from the current offset.
-    #[inline(always)]
+    #[cfg_attr(coverage, inline(never))]
+    #[cfg_attr(not(coverage), inline(always))]
     fn read_vectored(
         &mut self,
         buffers: &mut [IoSliceMut<'_>],
@@ -77,7 +81,8 @@ impl Read for LocalFileReader {
 
 impl Seek for LocalFileReader {
     /// Moves the native file cursor and returns its new byte offset.
-    #[inline]
+    #[cfg_attr(coverage, inline(never))]
+    #[cfg_attr(not(coverage), inline)]
     fn seek(&mut self, position: SeekFrom) -> io::Result<u64> {
         self.file.seek(position)
     }
