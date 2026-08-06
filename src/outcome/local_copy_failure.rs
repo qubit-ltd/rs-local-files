@@ -31,27 +31,13 @@ use crate::{
 };
 
 use super::LocalCopyFailureState;
+use super::internal::LocalCopyFailureDetails;
 
 /// Failure details retained when a unified copy does not complete.
 #[derive(Debug)]
 pub struct LocalCopyFailure {
     /// Heap-owned failure details kept off the result's hot path.
     details: Box<LocalCopyFailureDetails>,
-}
-
-/// Heap-owned details for a failed copy operation.
-#[derive(Debug)]
-struct LocalCopyFailureDetails {
-    /// Primary typed filesystem error.
-    error: LocalFileError,
-    /// Most precise destination state proven by native operations.
-    state: LocalCopyFailureState,
-    /// Statistics accumulated before the failure.
-    partial_stats: LocalCopyStats,
-    /// Retained staging path only when its cleanup failed.
-    staging_path: Option<PathBuf>,
-    /// Secondary cleanup error that prevented staging removal.
-    cleanup_error: Option<LocalFileError>,
 }
 
 impl Display for LocalCopyFailure {

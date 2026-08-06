@@ -7,6 +7,7 @@
 // =============================================================================
 //! Structured outcomes from native namespace operations.
 
+mod internal;
 mod local_copy_failure;
 mod local_copy_failure_state;
 mod local_copy_method;
