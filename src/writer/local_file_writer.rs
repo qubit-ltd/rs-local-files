@@ -429,7 +429,7 @@ impl Write for LocalFileWriter {
                     break;
                 }
             }
-            return Ok(written);
+            Ok(written)
         }
 
         #[cfg(not(windows))]
