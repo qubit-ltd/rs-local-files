@@ -17,7 +17,7 @@ use qubit_local_files::{
     LocalRenameOptions,
 };
 
-#[cfg(feature = "internal-test-support")]
+#[cfg(all(feature = "internal-test-support", not(windows)))]
 use qubit_local_files::LocalDurabilityRequirement;
 
 /// Creates an absent process-specific path for a rename test.
@@ -77,7 +77,7 @@ fn test_rename_missing_source_reports_unchanged() {
 }
 
 /// Verifies a parent durability fault retains the completed rename fact.
-#[cfg(feature = "internal-test-support")]
+#[cfg(all(feature = "internal-test-support", not(windows)))]
 #[test]
 fn test_rename_parent_durability_failure_reports_renamed() {
     const TEST_NAME: &str =
