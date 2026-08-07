@@ -15,6 +15,8 @@ use std::{
     path::Path,
 };
 
+#[cfg(not(windows))]
+use qubit_local_files::LocalPaths;
 use qubit_local_files::{
     LocalCopyConflictPolicy,
     LocalCopyFailureState,
@@ -31,7 +33,6 @@ use qubit_local_files::{
     LocalFileSystem,
     LocalFileSystemCapabilities,
     LocalPathCodecError,
-    LocalPaths,
     LocalRenameFailureState,
     LocalRenameOptions,
 };
@@ -273,6 +274,7 @@ fn test_native_file_name_validation_rejects_non_utf8_component() {
 
 /// Verifies path composition and binding preserve lexical authority on both
 /// accepted and rejected public inputs.
+#[cfg(not(windows))]
 #[test]
 fn test_local_paths_cover_public_composition_and_binding_cases() {
     let base = Path::new("/workspace");
