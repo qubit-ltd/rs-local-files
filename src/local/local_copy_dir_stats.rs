@@ -12,7 +12,7 @@
 #[non_exhaustive]
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 #[must_use]
-pub struct LocalCopyDirStats {
+pub(crate) struct LocalCopyDirStats {
     /// Number of regular files copied.
     pub files: u64,
 
@@ -55,7 +55,7 @@ impl LocalCopyDirStats {
     /// # Returns
     /// Copied regular-file count.
     #[must_use]
-    pub const fn files(&self) -> u64 {
+    pub(crate) const fn files(&self) -> u64 {
         self.files
     }
 
@@ -64,7 +64,7 @@ impl LocalCopyDirStats {
     /// # Returns
     /// Created directory count.
     #[must_use]
-    pub const fn directories(&self) -> u64 {
+    pub(crate) const fn directories(&self) -> u64 {
         self.directories
     }
 
@@ -73,7 +73,7 @@ impl LocalCopyDirStats {
     /// # Returns
     /// Copied byte count.
     #[must_use]
-    pub const fn bytes(&self) -> u64 {
+    pub(crate) const fn bytes(&self) -> u64 {
         self.bytes
     }
 
@@ -82,13 +82,13 @@ impl LocalCopyDirStats {
     /// # Returns
     /// Skipped entry count.
     #[must_use]
-    pub const fn skipped(&self) -> u64 {
+    pub(crate) const fn skipped(&self) -> u64 {
         self.skipped
     }
 
     /// Returns the number of destination entries overwritten.
     #[must_use]
-    pub const fn overwritten(&self) -> u64 {
+    pub(crate) const fn overwritten(&self) -> u64 {
         self.overwritten
     }
 
