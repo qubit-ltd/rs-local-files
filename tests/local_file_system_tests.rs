@@ -18,6 +18,7 @@ use qubit_local_files::{
     LocalCreateDirectoryOptions,
     LocalDeleteOptions,
     LocalFileErrorKind,
+    LocalFileOperation,
     LocalFileSystem,
     LocalReadOptions,
     LocalRenameOptions,
@@ -183,12 +184,10 @@ fn test_local_file_system_read_prefix_is_bounded() {
     );
 
     let missing = directory.path().join("missing");
-    assert!(
-        filesystem
-            .read_prefix(&missing, &LocalReadOptions::new(), 4)
-            .is_err(),
-        "missing paths must still be validated"
-    );
+    let error = filesystem
+        .read_prefix(&missing, &LocalReadOptions::new(), 4)
+        .expect_err("missing paths must still be validated");
+    assert_eq!(LocalFileOperation::OpenReader, error.operation());
 }
 
 /// Verifies no-replace rename and explicit overwrite behavior.
