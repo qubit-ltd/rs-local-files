@@ -23,7 +23,7 @@ use crate::{LocalAtomicDestinationState, LocalAtomicWriteStage};
 /// failures remain available without replacing the primary installation error.
 #[non_exhaustive]
 #[derive(Debug)]
-pub struct LocalAtomicWriteError {
+pub(crate) struct LocalAtomicWriteError {
     /// Stage at which the operation failed.
     stage: LocalAtomicWriteStage,
     /// Requested destination path.
@@ -80,7 +80,7 @@ impl LocalAtomicWriteError {
     ///
     /// # Returns
     /// Failed atomic-write stage.
-    pub const fn stage(&self) -> LocalAtomicWriteStage {
+    pub(crate) const fn stage(&self) -> LocalAtomicWriteStage {
         self.stage
     }
 
@@ -89,7 +89,7 @@ impl LocalAtomicWriteError {
     /// # Returns
     /// Destination path supplied by the caller.
     #[must_use]
-    pub fn path(&self) -> &Path {
+    pub(crate) fn path(&self) -> &Path {
         &self.path
     }
 
@@ -98,7 +98,7 @@ impl LocalAtomicWriteError {
     /// # Returns
     /// Staging path retained for diagnostics. The entry is not guaranteed to
     /// exist after a completed replacement or a successful cleanup.
-    pub fn temporary_path(&self) -> Option<&Path> {
+    pub(crate) fn temporary_path(&self) -> Option<&Path> {
         self.temporary_path.as_deref()
     }
 
@@ -108,7 +108,7 @@ impl LocalAtomicWriteError {
     /// State reported by the failed operation. Callers must handle
     /// [`LocalAtomicDestinationState::Indeterminate`] conservatively and
     /// inspect the destination and staging path before retrying.
-    pub const fn destination_state(&self) -> LocalAtomicDestinationState {
+    pub(crate) const fn destination_state(&self) -> LocalAtomicDestinationState {
         self.destination_state
     }
 
@@ -116,7 +116,7 @@ impl LocalAtomicWriteError {
     ///
     /// # Returns
     /// Cleanup error without replacing the primary source error.
-    pub fn cleanup_error(&self) -> Option<&io::Error> {
+    pub(crate) fn cleanup_error(&self) -> Option<&io::Error> {
         self.cleanup_error.as_ref()
     }
 
@@ -125,7 +125,7 @@ impl LocalAtomicWriteError {
     ///
     /// # Returns
     /// Parent synchronization error without replacing the primary source error.
-    pub fn parent_sync_error(&self) -> Option<&io::Error> {
+    pub(crate) fn parent_sync_error(&self) -> Option<&io::Error> {
         self.parent_sync_error.as_ref()
     }
 
@@ -134,7 +134,7 @@ impl LocalAtomicWriteError {
     /// # Returns
     /// Retained primary I/O error without dynamic downcasting.
     #[must_use]
-    pub const fn source_error(&self) -> &io::Error {
+    pub(crate) const fn source_error(&self) -> &io::Error {
         &self.source
     }
 
@@ -143,7 +143,7 @@ impl LocalAtomicWriteError {
     /// # Returns
     /// Error kind reported by the retained source error.
     #[must_use]
-    pub fn kind(&self) -> io::ErrorKind {
+    pub(crate) fn kind(&self) -> io::ErrorKind {
         self.source.kind()
     }
 

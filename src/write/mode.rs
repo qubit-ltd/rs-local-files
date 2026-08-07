@@ -13,7 +13,7 @@
 #[non_exhaustive]
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
 #[allow(dead_code)]
-pub enum Mode {
+pub(crate) enum Mode {
     /// Opens an existing file at offset zero without truncating it.
     OpenExistingAtStart,
     /// Creates a new file and fails if the target already exists.

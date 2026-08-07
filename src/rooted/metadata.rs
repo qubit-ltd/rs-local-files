@@ -24,7 +24,7 @@ use super::{EntryKind, Permissions};
 /// Metadata observed through an opened rooted directory authority.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 #[must_use]
-pub struct Metadata {
+pub(crate) struct Metadata {
     /// The observed entry type.
     kind: EntryKind,
     /// The observed byte length when the platform reports one.
@@ -175,45 +175,45 @@ impl Metadata {
     }
 
     /// Returns the final entry type observed by the rooted operation.
-    pub const fn kind(&self) -> EntryKind {
+    pub(crate) const fn kind(&self) -> EntryKind {
         self.kind
     }
 
     /// Returns the byte size reported by the rooted metadata operation.
     #[must_use]
-    pub const fn size(&self) -> u64 {
+    pub(crate) const fn size(&self) -> u64 {
         self.len
     }
 
     /// Returns the last access time, or `None` when the platform did not
     /// provide one.
     #[must_use]
-    pub const fn accessed_at(&self) -> Option<SystemTime> {
+    pub(crate) const fn accessed_at(&self) -> Option<SystemTime> {
         self.accessed_at
     }
 
     /// Returns the last modification time, or `None` when the platform did not
     /// provide one.
     #[must_use]
-    pub const fn modified_at(&self) -> Option<SystemTime> {
+    pub(crate) const fn modified_at(&self) -> Option<SystemTime> {
         self.modified_at
     }
 
     /// Returns the creation time, or `None` when the platform did not provide
     /// one.
     #[must_use]
-    pub const fn created_at(&self) -> Option<SystemTime> {
+    pub(crate) const fn created_at(&self) -> Option<SystemTime> {
         self.created_at
     }
 
     /// Returns the permissions observed through the rooted operation.
-    pub const fn permissions(&self) -> Permissions {
+    pub(crate) const fn permissions(&self) -> Permissions {
         self.permissions
     }
 
     /// Returns whether two metadata values identify the same native entry.
     #[must_use]
-    pub const fn is_same_file(&self, other: &Self) -> bool {
+    pub(crate) const fn is_same_file(&self, other: &Self) -> bool {
         matches!(
             (self.device_id, self.file_id, other.device_id, other.file_id),
             (Some(left_device), Some(left_file), Some(right_device), Some(right_file))

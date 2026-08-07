@@ -20,7 +20,7 @@ use crate::LocalDurabilityRequirement;
 #[must_use = "atomic write options have no effect unless they are used"]
 #[non_exhaustive]
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub struct LocalAtomicWriteOptions {
+pub(crate) struct LocalAtomicWriteOptions {
     /// Whether missing parent directories should be created before staging.
     create_parent: bool,
     /// Optional limit for retrying a nonblocking destination open.
@@ -39,7 +39,7 @@ impl LocalAtomicWriteOptions {
     /// # Returns
     /// Default atomic write options.
     #[inline(always)]
-    pub const fn new() -> Self {
+    pub(crate) const fn new() -> Self {
         Self {
             create_parent: false,
             open_retry_timeout: None,
@@ -55,7 +55,7 @@ impl LocalAtomicWriteOptions {
     /// `true` when parent creation is enabled.
     #[inline(always)]
     #[must_use]
-    pub const fn creates_parent(&self) -> bool {
+    pub(crate) const fn creates_parent(&self) -> bool {
         self.create_parent
     }
 
@@ -64,7 +64,7 @@ impl LocalAtomicWriteOptions {
     /// # Returns
     /// Updated options that create missing parent directories before staging.
     #[inline(always)]
-    pub const fn with_parent(mut self) -> Self {
+    pub(crate) const fn with_parent(mut self) -> Self {
         self.create_parent = true;
         self
     }
@@ -81,7 +81,7 @@ impl LocalAtomicWriteOptions {
     #[must_use]
     #[inline(always)]
     #[cfg_attr(windows, allow(dead_code))]
-    pub const fn open_retry_timeout(&self) -> Option<Duration> {
+    pub(crate) const fn open_retry_timeout(&self) -> Option<Duration> {
         self.open_retry_timeout
     }
 
@@ -96,14 +96,14 @@ impl LocalAtomicWriteOptions {
     ///
     /// # Returns
     /// Updated options carrying the timeout.
-    pub const fn with_open_retry_timeout(mut self, timeout: Duration) -> Self {
+    pub(crate) const fn with_open_retry_timeout(mut self, timeout: Duration) -> Self {
         self.open_retry_timeout = Some(timeout);
         self
     }
 
     /// Returns the requested durability for atomic publication.
     #[inline(always)]
-    pub const fn durability(&self) -> LocalDurabilityRequirement {
+    pub(crate) const fn durability(&self) -> LocalDurabilityRequirement {
         self.durability
     }
 
@@ -117,7 +117,7 @@ impl LocalAtomicWriteOptions {
     ///
     /// Updated options carrying the durability policy.
     #[inline(always)]
-    pub const fn with_durability(
+    pub(crate) const fn with_durability(
         mut self,
         durability: LocalDurabilityRequirement,
     ) -> Self {
@@ -135,7 +135,7 @@ impl LocalAtomicWriteOptions {
     ///
     /// Updated options enforcing create-new publication.
     #[inline(always)]
-    pub const fn with_create_new(mut self) -> Self {
+    pub(crate) const fn with_create_new(mut self) -> Self {
         self.publication_mode = LocalAtomicPublicationMode::CreateNew;
         self
     }

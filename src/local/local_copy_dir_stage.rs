@@ -15,7 +15,7 @@
 #[must_use]
 #[non_exhaustive]
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub enum LocalCopyDirStage {
+pub(crate) enum LocalCopyDirStage {
     /// Inspecting or canonicalizing the source directory failed.
     InspectSource,
     /// Inspecting a source directory entry failed or found an unsupported type.

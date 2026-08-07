@@ -11,7 +11,7 @@
 /// Permissions observed or applied through a rooted filesystem capability.
 #[must_use]
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub struct Permissions {
+pub(crate) struct Permissions {
     /// Whether write access is disabled by the portable permission view.
     read_only: bool,
     /// Exact Unix permission bits when supplied or observed on Unix.
@@ -22,7 +22,7 @@ pub struct Permissions {
 impl Permissions {
     /// Test-support-only access to rooted permission resolution.
     /// Creates a portable read-only or writable permission value.
-    pub const fn from_read_only(read_only: bool) -> Self {
+    pub(crate) const fn from_read_only(read_only: bool) -> Self {
         Self {
             read_only,
             unix_mode: None,
@@ -32,7 +32,7 @@ impl Permissions {
     /// Creates permissions from Unix mode bits.
     ///
     /// Bits outside the portable permission and special-bit range are ignored.
-    pub const fn from_unix_mode(mode: u32) -> Self {
+    pub(crate) const fn from_unix_mode(mode: u32) -> Self {
         let mode = mode & 0o7777;
         Self {
             read_only: mode & 0o222 == 0,
@@ -41,12 +41,12 @@ impl Permissions {
     }
 
     /// Returns whether the portable permission view disables writing.
-    pub const fn is_read_only(self) -> bool {
+    pub(crate) const fn is_read_only(self) -> bool {
         self.read_only
     }
 
     /// Returns exact Unix mode bits when they are available.
-    pub const fn unix_mode(self) -> Option<u32> {
+    pub(crate) const fn unix_mode(self) -> Option<u32> {
         self.unix_mode
     }
 

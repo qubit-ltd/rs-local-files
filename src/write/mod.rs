@@ -10,5 +10,5 @@
 mod mode;
 mod open_options;
 
-pub use mode::Mode;
-pub use open_options::OpenOptions;
+pub(crate) use mode::Mode;
+pub(crate) use open_options::OpenOptions;

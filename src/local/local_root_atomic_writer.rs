@@ -58,7 +58,7 @@ use crate::write::{Mode as WriteMode, OpenOptions as WriteOpenOptions};
 /// installed without replacing a concurrent creator.
 #[must_use = "rooted atomic writes have no effect unless committed"]
 #[derive(Debug)]
-pub struct LocalRootAtomicWriter {
+pub(crate) struct LocalRootAtomicWriter {
     /// Requested relative destination retained for structured errors.
     path: PathBuf,
     #[cfg(unix)]
@@ -372,7 +372,7 @@ impl LocalRootAtomicWriter {
     /// Returns a recoverable error before installation or a terminal error
     /// after destination state may have changed.
     #[cfg_attr(not(any(unix, windows)), allow(unused_mut))]
-    pub fn commit_recoverable_with_durability(
+    pub(crate) fn commit_recoverable_with_durability(
         mut self,
     ) -> Result<bool, LocalAtomicCommitError<Self>> {
         #[cfg(unix)]
@@ -414,7 +414,7 @@ impl LocalRootAtomicWriter {
     ///
     /// Returns a structured cleanup error when `unlinkat` fails.
     #[cfg_attr(not(any(unix, windows)), allow(unused_mut))]
-    pub fn abort(&mut self) -> Result<(), LocalAtomicWriteError> {
+    pub(crate) fn abort(&mut self) -> Result<(), LocalAtomicWriteError> {
         #[cfg(unix)]
         {
             let temporary_path = self.staged_file.diagnostic_path().to_path_buf();

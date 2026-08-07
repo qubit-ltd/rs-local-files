@@ -14,7 +14,7 @@ use std::time::Duration;
 #[must_use = "read-open options have no effect unless they are used"]
 #[non_exhaustive]
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
-pub struct OpenOptions {
+pub(crate) struct OpenOptions {
     /// Optional maximum time spent retrying Unix lease-conflicting opens.
     open_retry_timeout: Option<Duration>,
 }
@@ -26,7 +26,7 @@ impl OpenOptions {
     /// bounds retries, and a zero duration reports the first conflict.
     #[must_use]
     #[inline(always)]
-    pub const fn open_retry_timeout(&self) -> Option<Duration> {
+    pub(crate) const fn open_retry_timeout(&self) -> Option<Duration> {
         self.open_retry_timeout
     }
 
@@ -38,7 +38,7 @@ impl OpenOptions {
     /// # Returns
     /// Updated options.
     #[inline]
-    pub const fn with_open_retry_timeout(mut self, timeout: Duration) -> Self {
+    pub(crate) const fn with_open_retry_timeout(mut self, timeout: Duration) -> Self {
         self.open_retry_timeout = Some(timeout);
         self
     }

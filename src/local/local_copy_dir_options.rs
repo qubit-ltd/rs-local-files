@@ -44,7 +44,7 @@ use crate::{
 #[must_use = "directory copy options have no effect unless they are used"]
 #[non_exhaustive]
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub struct LocalCopyDirOptions {
+pub(crate) struct LocalCopyDirOptions {
     /// Policy for existing destination file entries.
     conflict: LocalCopyConflictPolicy,
 
@@ -90,7 +90,7 @@ impl LocalCopyDirOptions {
     /// Options that fail on destination conflicts, do not follow symbolic
     /// links, and do not preserve source permissions.
     #[inline]
-    pub const fn new() -> Self {
+    pub(crate) const fn new() -> Self {
         Self {
             conflict: LocalCopyConflictPolicy::Fail,
             type_conflict: LocalCopyTypeConflictPolicy::Fail,
@@ -122,7 +122,7 @@ impl LocalCopyDirOptions {
     /// # Returns
     /// Policy applied to existing destination file entries.
     #[inline(always)]
-    pub const fn conflict_policy(&self) -> LocalCopyConflictPolicy {
+    pub(crate) const fn conflict_policy(&self) -> LocalCopyConflictPolicy {
         self.conflict
     }
 
@@ -134,7 +134,7 @@ impl LocalCopyDirOptions {
     /// # Returns
     /// Updated directory copy options.
     #[inline(always)]
-    pub const fn with_conflict(
+    pub(crate) const fn with_conflict(
         mut self,
         conflict: LocalCopyConflictPolicy,
     ) -> Self {
@@ -147,7 +147,7 @@ impl LocalCopyDirOptions {
     /// # Returns
     /// Policy applied to source and destination type mismatches.
     #[inline(always)]
-    pub const fn type_conflict_policy(&self) -> LocalCopyTypeConflictPolicy {
+    pub(crate) const fn type_conflict_policy(&self) -> LocalCopyTypeConflictPolicy {
         self.type_conflict
     }
 
@@ -159,7 +159,7 @@ impl LocalCopyDirOptions {
     /// # Returns
     /// Updated directory copy options.
     #[inline(always)]
-    pub const fn with_type_conflict(
+    pub(crate) const fn with_type_conflict(
         mut self,
         type_conflict: LocalCopyTypeConflictPolicy,
     ) -> Self {
@@ -195,7 +195,7 @@ impl LocalCopyDirOptions {
     /// `true` when destination permissions are copied from the source.
     #[must_use]
     #[inline(always)]
-    pub const fn preserves_permissions(&self) -> bool {
+    pub(crate) const fn preserves_permissions(&self) -> bool {
         self.preserve_permissions
     }
 
@@ -204,7 +204,7 @@ impl LocalCopyDirOptions {
     /// # Returns
     /// Updated directory copy options.
     #[inline(always)]
-    pub const fn preserve_permissions(mut self) -> Self {
+    pub(crate) const fn preserve_permissions(mut self) -> Self {
         self.preserve_permissions = true;
         self
     }
@@ -220,7 +220,7 @@ impl LocalCopyDirOptions {
     /// The configured timeout, or `None` when retries are unbounded.
     #[must_use]
     #[inline(always)]
-    pub const fn open_retry_timeout(&self) -> Option<Duration> {
+    pub(crate) const fn open_retry_timeout(&self) -> Option<Duration> {
         self.open_retry_timeout
     }
 
@@ -236,7 +236,7 @@ impl LocalCopyDirOptions {
     /// # Returns
     /// Updated directory copy options.
     #[allow(dead_code)]
-    pub const fn with_open_retry_timeout(mut self, timeout: Duration) -> Self {
+    pub(crate) const fn with_open_retry_timeout(mut self, timeout: Duration) -> Self {
         self.open_retry_timeout = Some(timeout);
         self
     }

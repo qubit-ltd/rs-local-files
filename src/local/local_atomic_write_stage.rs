@@ -16,7 +16,7 @@
 #[non_exhaustive]
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 #[allow(dead_code)]
-pub enum LocalAtomicWriteStage {
+pub(crate) enum LocalAtomicWriteStage {
     /// Creating destination parent directories failed.
     PrepareParent,
     /// Inspecting an existing destination failed.

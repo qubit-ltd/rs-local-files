@@ -60,21 +60,21 @@ pub(crate) use internal::{
     read_rooted_symlink_metadata, remove_rooted_entry, rename_rooted_entry, set_rooted_permissions,
 };
 
-pub use local_atomic_commit_error::LocalAtomicCommitError;
-pub use local_atomic_destination_state::LocalAtomicDestinationState;
-pub use local_atomic_write_error::LocalAtomicWriteError;
-pub use local_atomic_write_options::LocalAtomicWriteOptions;
-pub use local_atomic_write_stage::LocalAtomicWriteStage;
-pub use local_atomic_writer::LocalAtomicWriter;
+pub(crate) use local_atomic_commit_error::LocalAtomicCommitError;
+pub(crate) use local_atomic_destination_state::LocalAtomicDestinationState;
+pub(crate) use local_atomic_write_error::LocalAtomicWriteError;
+pub(crate) use local_atomic_write_options::LocalAtomicWriteOptions;
+pub(crate) use local_atomic_write_stage::LocalAtomicWriteStage;
+pub(crate) use local_atomic_writer::LocalAtomicWriter;
 pub use local_copy_conflict_policy::LocalCopyConflictPolicy;
-pub use local_copy_dir_error::LocalCopyDirError;
-pub use local_copy_dir_options::LocalCopyDirOptions;
-pub use local_copy_dir_stage::LocalCopyDirStage;
-pub use local_copy_dir_stats::LocalCopyDirStats;
+pub(crate) use local_copy_dir_error::LocalCopyDirError;
+pub(crate) use local_copy_dir_options::LocalCopyDirOptions;
+pub(crate) use local_copy_dir_stage::LocalCopyDirStage;
+pub(crate) use local_copy_dir_stats::LocalCopyDirStats;
 pub use local_copy_type_conflict_policy::LocalCopyTypeConflictPolicy;
 pub use local_persist_error::LocalPersistError;
 pub use local_persist_failure_state::LocalPersistFailureState;
 pub use local_persist_options::LocalPersistOptions;
 pub use local_persist_stage::LocalPersistStage;
 pub use local_relative_path::LocalRelativePath;
-pub use local_root_atomic_writer::LocalRootAtomicWriter;
+pub(crate) use local_root_atomic_writer::LocalRootAtomicWriter;
