@@ -8,17 +8,17 @@
 
 use std::{
     fs,
-    io::{
-        Read,
-        Write,
-    },
+    io::Write,
     path::Path,
 };
 
+#[cfg(not(windows))]
 use qubit_local_files::{
     LocalAtomicityRequirement,
     LocalCopyMethod,
     LocalCopyOptions,
+};
+use qubit_local_files::{
     LocalCreateDirectoryOptions,
     LocalDeleteOptions,
     LocalFileErrorKind,
@@ -31,10 +31,13 @@ use qubit_local_files::{
     LocalWriteOptions,
     LocalWriterState,
 };
+#[cfg(not(windows))]
+use std::io::Read;
 use tempfile::tempdir;
 
 /// Verifies an opened rooted authority supports a complete create, write, read,
 /// list, and recursive-delete workflow without host-path authority.
+#[cfg(not(windows))]
 #[test]
 fn test_rooted_local_file_system_runs_core_entry_workflow() {
     let parent = tempdir().expect("root parent should be created");
@@ -397,6 +400,7 @@ fn test_rooted_local_file_system_reports_changed_child_during_recursive_list() {
 
 /// Verifies rooted copy enforces directory recursion and atomicity policies
 /// before publishing, then reports recursive success when both are accepted.
+#[cfg(not(windows))]
 #[test]
 fn test_rooted_local_file_system_copy_enforces_directory_policies() {
     let parent = tempdir().expect("root parent should be created");
