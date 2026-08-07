@@ -7,6 +7,8 @@
 // =============================================================================
 //! Context normalization for descriptor errors unavailable to public fixtures.
 // qubit-style: allow source-test-pair
+// qubit-style: allow inline-tests
+// qubit-style: allow explicit-imports
 // Live descriptors cannot be invalidated through the public API.
 
 use std::io::Result;
@@ -42,5 +44,31 @@ pub(crate) fn with_path_context<T>(
     match result {
         Ok(value) => Ok(value),
         Err(error) => Err(add_path_context(error, operation, path)),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn preserves_success_values() {
+        assert_eq!(
+            with_path_context(Ok(7_u8), "read", Path::new("a"))
+                .expect("success should remain successful"),
+            7
+        );
+    }
+
+    #[test]
+    fn enriches_errors_with_operation_and_path() {
+        let error = with_path_context::<()>(
+            Err(std::io::Error::new(std::io::ErrorKind::NotFound, "missing")),
+            "read",
+            Path::new("a"),
+        )
+        .expect_err("error should remain an error");
+        assert!(error.to_string().contains("failed to read 'a'"));
+        assert!(error.to_string().contains("missing"));
     }
 }
