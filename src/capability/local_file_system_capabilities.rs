@@ -43,8 +43,8 @@ impl LocalFileSystemCapabilities {
                 target_os = "macos",
                 windows
             )),
-            durable_rename: cfg!(unix),
-            durable_file_copy: cfg!(unix),
+            durable_rename: cfg!(any(unix, windows)),
+            durable_file_copy: cfg!(any(unix, windows)),
         }
     }
 
