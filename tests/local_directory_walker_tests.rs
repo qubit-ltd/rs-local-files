@@ -13,12 +13,15 @@ use std::{
 
 #[cfg(unix)]
 use qubit_local_files::LocalSymlinkPolicy;
+#[cfg(not(windows))]
 use qubit_local_files::{
     LocalDirectoryReopenPolicy,
+    LocalWalkErrorPolicy,
+};
+use qubit_local_files::{
     LocalFileKind,
     LocalFileSystem,
     LocalListOptions,
-    LocalWalkErrorPolicy,
 };
 use tempfile::tempdir;
 
@@ -142,6 +145,7 @@ fn test_local_directory_walker_reopens_frames_past_handle_budget() {
 }
 
 /// Verifies fail-fast traversal terminates after a reopened frame disappears.
+#[cfg(not(windows))]
 #[test]
 fn test_local_directory_walker_fail_fast_terminates_after_reopen_error() {
     let directory = tempdir().expect("temporary directory should be created");
@@ -181,6 +185,7 @@ fn test_local_directory_walker_fail_fast_terminates_after_reopen_error() {
 }
 
 /// Verifies continue traversal discards a frame that cannot be reopened.
+#[cfg(not(windows))]
 #[test]
 fn test_local_directory_walker_continue_discards_reopen_error_frame() {
     let directory = tempdir().expect("temporary directory should be created");
