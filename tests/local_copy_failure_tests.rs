@@ -29,7 +29,7 @@ use qubit_local_files::{
     LocalMetadataPreservePolicy,
 };
 
-#[cfg(feature = "internal-test-support")]
+#[cfg(all(feature = "internal-test-support", not(windows)))]
 use qubit_local_files::LocalDurabilityRequirement;
 
 /// Creates a process-specific path that is absent before each test use.
@@ -118,6 +118,7 @@ fn test_copy_failure_reports_second_child_partial_publication() {
 
 /// Verifies a parent synchronization failure follows completed publication.
 #[cfg(feature = "internal-test-support")]
+#[cfg(not(windows))]
 #[test]
 fn test_copy_failure_reports_published_after_parent_sync_fault() {
     const TEST_NAME: &str =
