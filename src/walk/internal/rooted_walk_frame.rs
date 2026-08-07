@@ -8,11 +8,7 @@
 // qubit-style: allow source-test-pair
 // Covered by rooted walker integration tests.
 
-use std::{
-    collections::HashSet,
-    ffi::OsString,
-    path::PathBuf,
-};
+use std::{collections::HashSet, ffi::OsString, path::PathBuf};
 
 use crate::rooted::DirectoryReader;
 
@@ -29,6 +25,6 @@ pub(in crate::walk) struct RootedWalkFrame {
     pub(in crate::walk) output_parent: PathBuf,
     /// Depth assigned to entries returned by this frame.
     pub(in crate::walk) entry_depth: usize,
-    /// Canonical directory identity retained for cycle detection.
-    pub(in crate::walk) identity: Option<PathBuf>,
+    /// Native directory identity retained for cycle detection.
+    pub(in crate::walk) identity: Option<crate::local::DirectoryIdentity>,
 }
