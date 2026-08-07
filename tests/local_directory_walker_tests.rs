@@ -6,12 +6,18 @@
 //    Licensed under the Apache License, Version 2.0.
 // =============================================================================
 
-use std::{fs, path::PathBuf};
+use std::{
+    fs,
+    path::PathBuf,
+};
 
 #[cfg(unix)]
 use qubit_local_files::LocalSymlinkPolicy;
 use qubit_local_files::{
-    LocalDirectoryReopenPolicy, LocalFileKind, LocalFileSystem, LocalListOptions,
+    LocalDirectoryReopenPolicy,
+    LocalFileKind,
+    LocalFileSystem,
+    LocalListOptions,
     LocalWalkErrorPolicy,
 };
 use tempfile::tempdir;
@@ -20,8 +26,10 @@ use tempfile::tempdir;
 #[test]
 fn test_local_directory_walker_recurses_lazily() {
     let directory = tempdir().expect("temporary directory should be created");
-    fs::create_dir(directory.path().join("nested")).expect("nested directory should be created");
-    fs::write(directory.path().join("root.txt"), b"root").expect("root file should be written");
+    fs::create_dir(directory.path().join("nested"))
+        .expect("nested directory should be created");
+    fs::write(directory.path().join("root.txt"), b"root")
+        .expect("root file should be written");
     fs::write(directory.path().join("nested/child.txt"), b"child")
         .expect("nested file should be written");
 
@@ -31,7 +39,8 @@ fn test_local_directory_walker_recurses_lazily() {
     let mut entries = walker
         .map(|entry| entry.expect("fixture traversal should succeed"))
         .collect::<Vec<_>>();
-    entries.sort_by(|left, right| left.relative_path().cmp(right.relative_path()));
+    entries
+        .sort_by(|left, right| left.relative_path().cmp(right.relative_path()));
 
     assert_eq!(
         vec![
@@ -51,8 +60,10 @@ fn test_local_directory_walker_recurses_lazily() {
 #[test]
 fn test_local_directory_walker_honors_max_depth() {
     let directory = tempdir().expect("temporary directory should be created");
-    fs::create_dir(directory.path().join("nested")).expect("nested directory should be created");
-    fs::write(directory.path().join("nested/child"), b"x").expect("child should be written");
+    fs::create_dir(directory.path().join("nested"))
+        .expect("nested directory should be created");
+    fs::write(directory.path().join("nested/child"), b"x")
+        .expect("child should be written");
 
     let entries = LocalFileSystem::host()
         .list(
@@ -71,8 +82,10 @@ fn test_local_directory_walker_honors_max_depth() {
 #[test]
 fn test_local_directory_walker_rejects_handle_budget_exhaustion() {
     let directory = tempdir().expect("temporary directory should be created");
-    fs::create_dir(directory.path().join("nested")).expect("nested directory should be created");
-    fs::write(directory.path().join("nested/child"), b"x").expect("child should be written");
+    fs::create_dir(directory.path().join("nested"))
+        .expect("nested directory should be created");
+    fs::write(directory.path().join("nested/child"), b"x")
+        .expect("child should be written");
 
     let mut walker = LocalFileSystem::host()
         .list(
@@ -80,7 +93,9 @@ fn test_local_directory_walker_rejects_handle_budget_exhaustion() {
             &LocalListOptions::new()
                 .with_recursive()
                 .with_max_open_directories(1)
-                .with_reopen_policy(qubit_local_files::LocalDirectoryReopenPolicy::Fail),
+                .with_reopen_policy(
+                    qubit_local_files::LocalDirectoryReopenPolicy::Fail,
+                ),
         )
         .expect("walker should be created");
     let error = walker
@@ -102,7 +117,8 @@ fn test_local_directory_walker_reopens_frames_past_handle_budget() {
         current.push(format!("level-{index}"));
         fs::create_dir(&current).expect("nested directory should be created");
     }
-    fs::write(current.join("payload"), b"payload").expect("deep payload should be written");
+    fs::write(current.join("payload"), b"payload")
+        .expect("deep payload should be written");
 
     let entries = LocalFileSystem::host()
         .list(
@@ -110,16 +126,18 @@ fn test_local_directory_walker_reopens_frames_past_handle_budget() {
             &LocalListOptions::new()
                 .with_recursive()
                 .with_max_open_directories(1)
-                .with_reopen_policy(qubit_local_files::LocalDirectoryReopenPolicy::Reopen),
+                .with_reopen_policy(
+                    qubit_local_files::LocalDirectoryReopenPolicy::Reopen,
+                ),
         )
         .expect("walker should be created")
         .collect::<Result<Vec<_>, _>>()
         .expect("reopen traversal should succeed");
 
     assert!(
-        entries
-            .iter()
-            .any(|entry| { entry.relative_path().ends_with("level-3/payload") })
+        entries.iter().any(|entry| {
+            entry.relative_path().ends_with("level-3/payload")
+        })
     );
 }
 
@@ -128,7 +146,8 @@ fn test_local_directory_walker_reopens_frames_past_handle_budget() {
 fn test_local_directory_walker_fail_fast_terminates_after_reopen_error() {
     let directory = tempdir().expect("temporary directory should be created");
     let moved = directory.path().with_extension("moved");
-    fs::create_dir(directory.path().join("nested")).expect("nested directory should be created");
+    fs::create_dir(directory.path().join("nested"))
+        .expect("nested directory should be created");
 
     let options = LocalListOptions::new()
         .with_recursive()
@@ -166,7 +185,8 @@ fn test_local_directory_walker_fail_fast_terminates_after_reopen_error() {
 fn test_local_directory_walker_continue_discards_reopen_error_frame() {
     let directory = tempdir().expect("temporary directory should be created");
     let moved = directory.path().with_extension("moved");
-    fs::create_dir(directory.path().join("nested")).expect("nested directory should be created");
+    fs::create_dir(directory.path().join("nested"))
+        .expect("nested directory should be created");
 
     let options = LocalListOptions::new()
         .with_recursive()
@@ -203,8 +223,10 @@ fn test_local_directory_walker_follows_links_by_default_on_host() {
 
     let directory = tempdir().expect("temporary directory should be created");
     let outside = tempdir().expect("outside directory should be created");
-    fs::write(outside.path().join("secret"), b"x").expect("outside file should be written");
-    symlink(outside.path(), directory.path().join("link")).expect("link should be created");
+    fs::write(outside.path().join("secret"), b"x")
+        .expect("outside file should be written");
+    symlink(outside.path(), directory.path().join("link"))
+        .expect("link should be created");
 
     let entries = LocalFileSystem::host()
         .list(directory.path(), &LocalListOptions::new())
@@ -226,12 +248,14 @@ fn test_local_directory_walker_can_reject_symlinks_per_operation() {
     let outside = tempdir().expect("outside directory should be created");
     let directory_path = fs::canonicalize(directory.path())
         .expect("temporary directory path should be canonicalized");
-    symlink(outside.path(), directory_path.join("link")).expect("link should be created");
+    symlink(outside.path(), directory_path.join("link"))
+        .expect("link should be created");
 
     let entries = LocalFileSystem::host()
         .list(
             &directory_path,
-            &LocalListOptions::new().with_symlink_policy(LocalSymlinkPolicy::Reject),
+            &LocalListOptions::new()
+                .with_symlink_policy(LocalSymlinkPolicy::Reject),
         )
         .expect("walker should be created")
         .collect::<Result<Vec<_>, _>>()
