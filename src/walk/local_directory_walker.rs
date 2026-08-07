@@ -777,6 +777,9 @@ fn native_directory_identity(
         fs::canonicalize(path).map_err(|error| walk_io_error(path, error))?;
     #[cfg(not(windows))]
     let identity_path = path;
+    #[cfg(windows)]
+    let identity = DirectoryIdentity::from_metadata(metadata, &identity_path);
+    #[cfg(not(windows))]
     let identity = DirectoryIdentity::from_metadata(metadata, identity_path);
     Ok(identity)
 }
