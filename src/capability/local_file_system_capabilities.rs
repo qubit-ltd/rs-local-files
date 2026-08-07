@@ -44,7 +44,7 @@ impl LocalFileSystemCapabilities {
                 windows
             )),
             durable_rename: cfg!(any(unix, windows)),
-            durable_file_copy: cfg!(any(unix, windows)),
+            durable_file_copy: cfg!(unix),
         }
     }
 
