@@ -13,16 +13,13 @@ use std::{
         Write,
     },
     path::Path,
-    time::Duration,
 };
 
 use qubit_local_files::{
     LocalAtomicityRequirement,
-    LocalCopyMethod,
     LocalCopyOptions,
     LocalCreateDirectoryOptions,
     LocalDeleteOptions,
-    LocalDurabilityRequirement,
     LocalFileErrorKind,
     LocalFileKind,
     LocalFileSystem,
@@ -35,6 +32,13 @@ use qubit_local_files::{
     LocalWriteMode,
     LocalWriteOptions,
 };
+#[cfg(not(windows))]
+use qubit_local_files::{
+    LocalCopyMethod,
+    LocalDurabilityRequirement,
+};
+#[cfg(not(windows))]
+use std::time::Duration;
 use tempfile::tempdir;
 
 /// Runs a test-support-only fault case in an isolated child test process.
@@ -297,6 +301,7 @@ fn test_rooted_local_file_system_temp_resources_use_descendant_parent() {
 
 /// Verifies rooted deletion and rename APIs cover successful, accepted-missing,
 /// conflict, and replacement paths while remaining descriptor-relative.
+#[cfg(not(windows))]
 #[test]
 fn test_rooted_local_file_system_deletes_and_renames_entries() {
     let directory = tempdir().expect("temporary directory should be created");
@@ -366,6 +371,7 @@ fn test_rooted_local_file_system_deletes_and_renames_entries() {
 
 /// Verifies rooted walkers expose their diagnostic root and staged writers
 /// accept vectored bytes before publication.
+#[cfg(not(windows))]
 #[test]
 fn test_rooted_local_file_system_walker_and_staged_writer_cover_accessors() {
     let directory = tempdir().expect("temporary directory should be created");
@@ -573,6 +579,7 @@ fn test_rooted_local_file_system_create_new_commit_preserves_concurrent_target()
 
 /// Verifies rooted directory, file-copy, and direct-writer branches retain
 /// their distinct conflict and parent-creation policies.
+#[cfg(not(windows))]
 #[test]
 fn test_rooted_local_file_system_exercises_directory_copy_and_writer_policies()
 {
@@ -664,6 +671,7 @@ fn test_rooted_local_file_system_exercises_directory_copy_and_writer_policies()
 
 /// Verifies rooted copy and rename distinguish preferred from required parent
 /// durability without weakening a platform's advertised capability contract.
+#[cfg(not(windows))]
 #[test]
 fn test_rooted_local_file_system_copy_and_rename_report_durability() {
     let directory = tempdir().expect("temporary directory should be created");
@@ -793,6 +801,7 @@ fn test_rooted_local_file_system_returns_retryable_writer_before_publication() {
 
 /// Verifies configured zero retry deadlines still permit the first rooted
 /// reader and writer open attempt when no conflicting lease exists.
+#[cfg(not(windows))]
 #[test]
 fn test_rooted_local_file_system_opens_reader_and_writer_with_retry_deadlines()
 {
