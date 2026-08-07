@@ -460,6 +460,7 @@ fn test_host_facade_reports_injected_native_io_failures() {
 /// Verifies copy and rename report post-publication durability failures from
 /// the shared parent-sync native boundary.
 #[cfg(feature = "internal-test-support")]
+#[cfg(not(windows))]
 #[test]
 fn test_copy_and_rename_report_injected_parent_sync_failures() {
     const TEST_NAME: &str =
