@@ -7,6 +7,7 @@
 // =============================================================================
 //! Regression coverage for shared operation preflight policy.
 
+#[cfg(not(windows))]
 use qubit_local_files::{
     LocalDurabilityRequirement,
     LocalFileSystem,
@@ -14,6 +15,7 @@ use qubit_local_files::{
 };
 
 /// Verifies required directory durability is honored by the host rename path.
+#[cfg(not(windows))]
 #[test]
 fn test_operation_policy_honors_required_durability() {
     let root = tempfile::tempdir().expect("temporary root should be created");

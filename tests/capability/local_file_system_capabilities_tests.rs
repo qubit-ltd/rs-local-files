@@ -18,9 +18,6 @@ fn test_local_file_system_capabilities_report_operation_protocols() {
     assert!(capabilities.implements_atomic_rename());
     assert!(capabilities.implements_atomic_replace());
     assert!(capabilities.implements_atomic_temp_persist());
-    assert_eq!(
-        cfg!(any(unix, windows)),
-        capabilities.implements_durable_rename(),
-    );
+    assert_eq!(cfg!(unix), capabilities.implements_durable_rename());
     assert_eq!(cfg!(unix), capabilities.implements_durable_file_copy());
 }
