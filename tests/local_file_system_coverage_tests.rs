@@ -12,9 +12,11 @@ use std::{fs, io::Read, time::Duration};
 use qubit_local_files::LocalSymlinkPolicy;
 use qubit_local_files::{
     LocalAtomicityRequirement, LocalCopyOptions, LocalDurabilityRequirement, LocalFileErrorKind,
-    LocalFileOperation, LocalFileSystem, LocalListOptions, LocalMetadataPreservePolicy,
+    LocalFileSystem, LocalListOptions, LocalMetadataPreservePolicy,
     LocalReadOptions, LocalRenameOptions, LocalWriteMode, LocalWriteOptions,
 };
+#[cfg(feature = "internal-test-support")]
+use qubit_local_files::LocalFileOperation;
 use tempfile::tempdir;
 
 /// Verifies copy rejects directory guarantees that the recursive native
