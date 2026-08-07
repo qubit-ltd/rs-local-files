@@ -17,6 +17,7 @@ use std::{
 use crate::local::{
     HostLocalFileSystem,
     LocalNamespace,
+    copy_failure_unchanged,
 };
 use crate::rooted_local_file_system::RootedLocalFileSystem;
 use crate::{
@@ -28,6 +29,7 @@ use crate::{
     LocalDeleteOutcome,
     LocalDirectoryWalker,
     LocalFileError,
+    LocalFileErrorKind,
     LocalFileMetadata,
     LocalFileOperation,
     LocalFileReader,
@@ -52,9 +54,10 @@ use crate::{
 /// Synchronous local filesystem configured for Host or Rooted path access.
 ///
 /// Every operation inherits [`Self::symlink_policy`]. Host instances default
-/// to [`LocalSymlinkPolicy::FollowAcrossScope`], while rooted instances default
-/// to [`LocalSymlinkPolicy::FollowWithinScope`]. The policy controls
-/// non-final path components; final-link behavior remains operation-specific.
+/// to [`LocalSymlinkPolicy::FollowAcrossScope`], while Rooted instances default
+/// to [`LocalSymlinkPolicy::FollowWithinScope`]. Rooted instances reject
+/// [`LocalSymlinkPolicy::FollowAcrossScope`]; the policy controls non-final
+/// path components and final-link behavior remains operation-specific.
 #[derive(Debug)]
 pub struct LocalFileSystem {
     /// Native namespace used by every operation.
@@ -126,6 +129,11 @@ impl LocalFileSystem {
         root: &Path,
         symlink_policy: LocalSymlinkPolicy,
     ) -> LocalResult<Self> {
+        validate_rooted_symlink_policy(
+            symlink_policy,
+            LocalFileOperation::OpenRoot,
+            Some(root),
+        )?;
         let rooted = RootedLocalFileSystem::open(root)?;
         Ok(Self {
             capabilities: rooted.capabilities(),
@@ -137,8 +145,8 @@ impl LocalFileSystem {
     /// Returns a copy of this filesystem using another symbolic-link policy.
     ///
     /// The policy applies to subsequent operations made through the returned
-    /// value. For rooted filesystems, `FollowAcrossScope` intentionally permits
-    /// reads and mutations through links that resolve outside the opened root.
+    /// value. Rooted filesystems reject
+    /// [`LocalSymlinkPolicy::FollowAcrossScope`].
     ///
     /// # Parameters
     ///
@@ -146,15 +154,26 @@ impl LocalFileSystem {
     ///
     /// # Returns
     ///
-    /// This filesystem with the requested policy.
-    #[must_use]
-    #[inline(always)]
+    /// This filesystem with the requested policy, or an error when the policy
+    /// is incompatible with its namespace.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`LocalFileErrorKind::InvalidOptions`] when a Rooted filesystem
+    /// is configured with [`LocalSymlinkPolicy::FollowAcrossScope`].
     pub fn with_symlink_policy(
         mut self,
         symlink_policy: LocalSymlinkPolicy,
-    ) -> Self {
+    ) -> LocalResult<Self> {
+        if let LocalNamespace::Rooted(rooted) = &self.namespace {
+            validate_rooted_symlink_policy(
+                symlink_policy,
+                LocalFileOperation::Configure,
+                Some(rooted.diagnostic_path()),
+            )?;
+        }
         self.symlink_policy = symlink_policy;
-        self
+        Ok(self)
     }
 
     /// Returns the symbolic-link policy inherited by operations.
@@ -380,10 +399,11 @@ impl LocalFileSystem {
         let mut buffer = [0_u8; 8192];
         while result.len() < max_bytes {
             let read_len = (max_bytes - result.len()).min(buffer.len());
-            let count =
-                reader.read(&mut buffer[..read_len]).map_err(|source| {
+            let count = crate::local::test_io_error("local-fs-read-prefix-read")
+                .map_or_else(|| reader.read(&mut buffer[..read_len]), Err)
+                .map_err(|source| {
                     LocalFileError::from_io(
-                        LocalFileOperation::OpenReader,
+                        LocalFileOperation::Read,
                         Some(path.to_path_buf()),
                         None,
                         source,
@@ -464,7 +484,13 @@ impl LocalFileSystem {
                 self.symlink_policy,
             ),
             LocalNamespace::Rooted(rooted) => {
-                rooted.list(path, options, self.symlink_policy)
+                let symlink_policy = options.symlink_policy().unwrap_or(self.symlink_policy);
+                validate_rooted_symlink_policy(
+                    symlink_policy,
+                    LocalFileOperation::List,
+                    Some(path),
+                )?;
+                rooted.list(path, options, symlink_policy)
             }
         }
     }
@@ -504,7 +530,16 @@ impl LocalFileSystem {
                 self.symlink_policy,
             ),
             LocalNamespace::Rooted(rooted) => {
-                rooted.copy(source, destination, options, self.symlink_policy)
+                let symlink_policy = options
+                    .symlink_policy_override()
+                    .unwrap_or(self.symlink_policy);
+                validate_rooted_symlink_policy(
+                    symlink_policy,
+                    LocalFileOperation::Copy,
+                    Some(source),
+                )
+                .map_err(copy_failure_unchanged)?;
+                rooted.copy(source, destination, options, symlink_policy)
             }
         }
     }
@@ -618,8 +653,8 @@ impl LocalFileSystem {
 
     /// Renames one entry using the configured symbolic-link policy.
     ///
-    /// Intermediate components may resolve across the root when explicitly
-    /// configured. Final source and destination links are renamed as entries.
+    /// Intermediate components remain within the opened root. Final source and
+    /// destination links are renamed as entries.
     ///
     /// # Parameters
     ///
@@ -723,6 +758,25 @@ impl LocalFileSystem {
             }
         }
     }
+}
+
+/// Rejects a symbolic-link policy that cannot preserve Rooted authority.
+fn validate_rooted_symlink_policy(
+    symlink_policy: LocalSymlinkPolicy,
+    operation: LocalFileOperation,
+    path: Option<&Path>,
+) -> LocalResult<()> {
+    if symlink_policy != LocalSymlinkPolicy::FollowAcrossScope {
+        return Ok(());
+    }
+    let mut error = LocalFileError::new(LocalFileErrorKind::InvalidOptions, operation)
+        .with_reason(
+            "FollowAcrossScope is not supported by Rooted filesystems because Rooted authority cannot escape its opened root",
+        );
+    if let Some(path) = path {
+        error = error.with_path(path.to_path_buf());
+    }
+    Err(error)
 }
 
 /// Opens `path` or its nearest existing ancestor for a non-authoritative probe.
