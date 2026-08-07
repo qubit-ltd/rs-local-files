@@ -10,12 +10,18 @@
 // Public APIs retain both descriptors, so post-open copy and permission
 // failures cannot be induced deterministically by portable fixtures.
 
-use std::fs::{File, Metadata};
+use std::fs::{
+    File,
+    Metadata,
+};
 use std::io;
 use std::path::Path;
 
 use crate::local::internal::StagedFile;
-use crate::{LocalCopyDirStage, LocalCopyDirStats};
+use crate::{
+    LocalCopyDirStage,
+    LocalCopyDirStats,
+};
 
 use super::copy_dir_result::CopyDirResult;
 use super::error::copy_dir_error_with_staging;
@@ -46,10 +52,14 @@ pub(super) fn copy_into_staging(
     staged_file: &mut StagedFile,
 ) -> CopyDirResult<u64> {
     #[cfg(feature = "internal-test-support")]
-    let result = if crate::local::internal::test_support::is_enabled("copy-staging-copy")
-        || crate::local::internal::test_support::is_enabled("copy-staging-copy-cleanup")
-        || crate::local::internal::test_support::take_on_nth("copy-staging-copy-second", 2)
-    {
+    let result = if crate::local::internal::test_support::is_enabled(
+        "copy-staging-copy",
+    ) || crate::local::internal::test_support::is_enabled(
+        "copy-staging-copy-cleanup",
+    ) || crate::local::internal::test_support::take_on_nth(
+        "copy-staging-copy-second",
+        2,
+    ) {
         Err(crate::local::test_fault_error())
     } else {
         io::copy(source_file, staged_file.file_mut())
@@ -91,7 +101,9 @@ pub(super) fn preserve_staged_permissions(
     staged_file: &mut StagedFile,
 ) -> CopyDirResult<()> {
     #[cfg(feature = "internal-test-support")]
-    let result = if crate::local::internal::test_support::is_enabled("copy-staging-permissions") {
+    let result = if crate::local::internal::test_support::is_enabled(
+        "copy-staging-permissions",
+    ) {
         Err(crate::local::test_fault_error())
     } else {
         staged_file

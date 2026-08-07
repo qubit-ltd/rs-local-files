@@ -11,12 +11,22 @@
 // commit-time handle open and the immediately following identity check.
 
 use std::fs;
-use std::io::{Error, ErrorKind};
+use std::io::{
+    Error,
+    ErrorKind,
+};
 use std::path::Path;
 
-use crate::{LocalAtomicDestinationState, LocalAtomicWriteError, LocalAtomicWriteStage};
+use crate::{
+    LocalAtomicDestinationState,
+    LocalAtomicWriteError,
+    LocalAtomicWriteStage,
+};
 
-use super::opened_atomic_destination::{OpenedAtomicDestination, destination_identity_matches};
+use super::opened_atomic_destination::{
+    OpenedAtomicDestination,
+    destination_identity_matches,
+};
 
 /// Verifies that a path still names its opened atomic destination.
 ///
@@ -89,7 +99,8 @@ fn identity_error(
 /// Classifies a pre-replacement destination identity mismatch.
 fn destination_mismatch_state(path: &Path) -> LocalAtomicDestinationState {
     #[cfg(feature = "internal-test-support")]
-    let metadata = if super::test_support::is_enabled("atomic-identity-missing") {
+    let metadata = if super::test_support::is_enabled("atomic-identity-missing")
+    {
         Err(Error::from_raw_os_error(libc::ENOENT))
     } else {
         fs::symlink_metadata(path)
@@ -97,7 +108,9 @@ fn destination_mismatch_state(path: &Path) -> LocalAtomicDestinationState {
     #[cfg(not(feature = "internal-test-support"))]
     let metadata = fs::symlink_metadata(path);
     match metadata {
-        Err(error) if error.kind() == ErrorKind::NotFound => LocalAtomicDestinationState::Missing,
+        Err(error) if error.kind() == ErrorKind::NotFound => {
+            LocalAtomicDestinationState::Missing
+        }
         _ => LocalAtomicDestinationState::Unchanged,
     }
 }

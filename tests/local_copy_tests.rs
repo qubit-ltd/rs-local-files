@@ -11,11 +11,6 @@ use std::{
     path::PathBuf,
 };
 
-#[cfg(unix)]
-use qubit_local_files::{
-    LocalDurabilityRequirement,
-    LocalMetadataPreservePolicy,
-};
 use qubit_local_files::{
     LocalAtomicityRequirement,
     LocalCopyConflictPolicy,
@@ -26,6 +21,11 @@ use qubit_local_files::{
     LocalCopyTypeConflictPolicy,
     LocalFileErrorKind,
     LocalFileSystem,
+};
+#[cfg(unix)]
+use qubit_local_files::{
+    LocalDurabilityRequirement,
+    LocalMetadataPreservePolicy,
 };
 use tempfile::tempdir;
 

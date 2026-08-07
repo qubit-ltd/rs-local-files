@@ -10,7 +10,11 @@
 // Public APIs retain live descriptors and cannot force these interleavings.
 
 use std::fs;
-use std::io::{Error, ErrorKind, Result};
+use std::io::{
+    Error,
+    ErrorKind,
+    Result,
+};
 use std::path::Path;
 
 use super::io_result_context::with_path_context;
@@ -34,7 +38,10 @@ use super::rooted_file_io::rooted_type_error;
 /// # Errors
 ///
 /// Returns a contextual operating-system error for any other negative result.
-pub(super) fn normalize_mkdirat_result(result: libc::c_int, diagnostic_path: &Path) -> Result<()> {
+pub(super) fn normalize_mkdirat_result(
+    result: libc::c_int,
+    diagnostic_path: &Path,
+) -> Result<()> {
     #[cfg(feature = "internal-test-support")]
     let injected_error = super::test_support::is_enabled("rooted-mkdir-error");
     #[cfg(not(feature = "internal-test-support"))]
@@ -72,7 +79,10 @@ pub(super) fn normalize_mkdirat_result(result: libc::c_int, diagnostic_path: &Pa
 ///
 /// Returns a contextual operating-system error when the entry was not merely
 /// absent.
-pub(super) fn missing_rooted_entry(error: Error, diagnostic_path: &Path) -> Result<()> {
+pub(super) fn missing_rooted_entry(
+    error: Error,
+    diagnostic_path: &Path,
+) -> Result<()> {
     #[cfg(feature = "internal-test-support")]
     let error = if super::test_support::is_enabled("rooted-entry-inspect") {
         crate::local::test_fault_error()
@@ -111,7 +121,8 @@ pub(super) fn normalize_opened_directory_metadata(
     diagnostic_path: &Path,
 ) -> Result<()> {
     #[cfg(feature = "internal-test-support")]
-    let result = if super::test_support::is_enabled("rooted-directory-metadata") {
+    let result = if super::test_support::is_enabled("rooted-directory-metadata")
+    {
         Err(crate::local::test_fault_error())
     } else {
         result
@@ -148,7 +159,11 @@ pub(super) fn normalize_opened_regular_file_metadata(
     } else {
         result
     };
-    let metadata = with_path_context(result, "inspect rooted file handle", diagnostic_path)?;
+    let metadata = with_path_context(
+        result,
+        "inspect rooted file handle",
+        diagnostic_path,
+    )?;
     if !metadata.is_file() || rooted_file_type_fault_enabled() {
         return Err(rooted_type_error(diagnostic_path, "regular file"));
     }

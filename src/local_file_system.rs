@@ -399,16 +399,17 @@ impl LocalFileSystem {
         let mut buffer = [0_u8; 8192];
         while result.len() < max_bytes {
             let read_len = (max_bytes - result.len()).min(buffer.len());
-            let count = crate::local::test_io_error("local-fs-read-prefix-read")
-                .map_or_else(|| reader.read(&mut buffer[..read_len]), Err)
-                .map_err(|source| {
-                    LocalFileError::from_io(
-                        LocalFileOperation::Read,
-                        Some(path.to_path_buf()),
-                        None,
-                        source,
-                    )
-                })?;
+            let count =
+                crate::local::test_io_error("local-fs-read-prefix-read")
+                    .map_or_else(|| reader.read(&mut buffer[..read_len]), Err)
+                    .map_err(|source| {
+                        LocalFileError::from_io(
+                            LocalFileOperation::Read,
+                            Some(path.to_path_buf()),
+                            None,
+                            source,
+                        )
+                    })?;
             if count == 0 {
                 break;
             }
@@ -484,7 +485,8 @@ impl LocalFileSystem {
                 self.symlink_policy,
             ),
             LocalNamespace::Rooted(rooted) => {
-                let symlink_policy = options.symlink_policy().unwrap_or(self.symlink_policy);
+                let symlink_policy =
+                    options.symlink_policy().unwrap_or(self.symlink_policy);
                 validate_rooted_symlink_policy(
                     symlink_policy,
                     LocalFileOperation::List,
