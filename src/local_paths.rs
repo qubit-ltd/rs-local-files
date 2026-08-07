@@ -228,7 +228,7 @@ impl LocalPaths {
         path: &Path,
         ancestor: &Path,
     ) -> LocalResult<bool> {
-        if path.is_absolute() != ancestor.is_absolute()
+        if path.has_root() != ancestor.has_root()
             || has_disallowed_component(path)
             || has_disallowed_component(ancestor)
         {
@@ -262,7 +262,7 @@ impl LocalPaths {
         descendant: &Path,
     ) -> LocalResult<PathBuf> {
         if descendant.as_os_str().is_empty()
-            || descendant.is_absolute()
+            || descendant.has_root()
             || has_disallowed_component(descendant)
         {
             return Err(LocalFileError::new(
