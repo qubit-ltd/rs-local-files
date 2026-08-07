@@ -8,7 +8,11 @@
 // qubit-style: allow source-test-pair
 // Covered by rooted walker integration tests.
 
-use std::{collections::HashSet, ffi::OsString, path::PathBuf};
+use std::{
+    collections::HashSet,
+    ffi::OsString,
+    path::PathBuf,
+};
 
 use crate::rooted::DirectoryReader;
 

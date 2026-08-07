@@ -8,7 +8,12 @@
 // qubit-style: allow source-test-pair
 // Covered by host walker integration tests.
 
-use std::{collections::HashSet, ffi::OsString, fs::ReadDir, path::PathBuf};
+use std::{
+    collections::HashSet,
+    ffi::OsString,
+    fs::ReadDir,
+    path::PathBuf,
+};
 
 /// One open directory in the lazy depth-first traversal stack.
 #[derive(Debug)]
