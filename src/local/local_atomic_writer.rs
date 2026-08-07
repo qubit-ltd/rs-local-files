@@ -65,7 +65,7 @@ const ATOMIC_WRITE_TEMP_PREFIX: &str = ".atomic-write-";
 /// filesystem containment must be anchored to an opened directory capability.
 #[must_use = "atomic writes have no effect unless the writer is committed"]
 #[derive(Debug)]
-pub struct LocalAtomicWriter {
+pub(crate) struct LocalAtomicWriter {
     /// Requested destination path.
     path: PathBuf,
     /// Absolute destination path used by filesystem operations.
@@ -222,7 +222,7 @@ impl LocalAtomicWriter {
     /// deciding whether the destination or retained staging path needs
     /// recovery.
     #[inline(always)]
-    pub fn commit(self) -> Result<(), LocalAtomicWriteError> {
+    pub(crate) fn commit(self) -> Result<(), LocalAtomicWriteError> {
         self.commit_recoverable()
             .map_err(|error| error.into_final_error_with(Self::finalize_failed_commit))
     }
@@ -244,7 +244,7 @@ impl LocalAtomicWriter {
     /// staging-file synchronization, destination replacement, or parent
     /// synchronization fails.
     #[inline]
-    pub fn commit_recoverable(self) -> Result<(), LocalAtomicCommitError<Self>> {
+    pub(crate) fn commit_recoverable(self) -> Result<(), LocalAtomicCommitError<Self>> {
         self.commit_recoverable_with_durability().map(|_| ())
     }
 
@@ -259,7 +259,7 @@ impl LocalAtomicWriter {
     ///
     /// Returns a recoverable error when publication did not begin, or a
     /// terminal error after destination state may have changed.
-    pub fn commit_recoverable_with_durability(
+    pub(crate) fn commit_recoverable_with_durability(
         mut self,
     ) -> Result<bool, LocalAtomicCommitError<Self>> {
         match self.commit_attempt() {
@@ -279,7 +279,7 @@ impl LocalAtomicWriter {
     /// # Errors
     /// Returns a structured cleanup error when the temporary file cannot be
     /// removed.
-    pub fn abort(&mut self) -> Result<(), LocalAtomicWriteError> {
+    pub(crate) fn abort(&mut self) -> Result<(), LocalAtomicWriteError> {
         let temporary_path = self.staged_file.path().to_path_buf();
         match self.staged_file.cleanup() {
             Ok(()) => Ok(()),

@@ -18,7 +18,7 @@ use super::Metadata;
 /// One immediate child observed through an opened rooted directory.
 #[derive(Clone, Debug, Eq, PartialEq)]
 #[must_use]
-pub struct Entry {
+pub(crate) struct Entry {
     /// Native name of the immediate child.
     name: OsString,
     /// Metadata captured without following the final symbolic link.
@@ -36,13 +36,13 @@ impl Entry {
     /// Returns the native name of this immediate child.
     #[must_use]
     #[inline(always)]
-    pub fn name(&self) -> &OsStr {
+    pub(crate) fn name(&self) -> &OsStr {
         &self.name
     }
 
     /// Returns metadata captured for the final child entry.
     #[inline(always)]
-    pub const fn metadata(&self) -> Metadata {
+    pub(crate) const fn metadata(&self) -> Metadata {
         self.metadata
     }
 }
