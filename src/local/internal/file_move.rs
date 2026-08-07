@@ -138,6 +138,13 @@ pub(crate) fn move_path_without_replacing(
     source: &Path,
     destination: &Path,
 ) -> Result<()> {
+    #[cfg(feature = "internal-test-support")]
+    if crate::local::test_support_enabled("persist-install-indeterminate") {
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::PermissionDenied,
+            "test-support-injected persistence install failure",
+        ));
+    }
     let source = c_path(source)?;
     let destination = c_path(destination)?;
     // SAFETY: both CString buffers are NUL-terminated and remain alive for the
@@ -208,6 +215,13 @@ pub(crate) fn move_path_without_replacing(
     source: &Path,
     destination: &Path,
 ) -> Result<()> {
+    #[cfg(feature = "internal-test-support")]
+    if crate::local::test_support_enabled("persist-install-indeterminate") {
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::PermissionDenied,
+            "test-support-injected persistence install failure",
+        ));
+    }
     let source = wide_path(source)?;
     let destination = wide_path(destination)?;
     // SAFETY: both UTF-16 buffers are NUL-terminated, contain no interior NUL,
