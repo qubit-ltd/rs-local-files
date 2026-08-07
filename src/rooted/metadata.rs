@@ -317,38 +317,6 @@ fn stat_times(
     )
 }
 
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use std::fs::File;
-
-    #[cfg(unix)]
-    #[test]
-    fn observes_open_file_and_identity() {
-        let file = File::open("Cargo.toml").expect("manifest exists");
-        let metadata =
-            Metadata::from_open_file(&file).expect("metadata available");
-        assert_eq!(metadata.kind(), EntryKind::File);
-        assert!(metadata.size() > 0);
-        assert!(metadata.is_same_file(&metadata));
-        assert!(metadata.accessed_at().is_some());
-        assert!(metadata.modified_at().is_some());
-        assert!(metadata.created_at().is_some());
-        let _ = metadata.permissions();
-    }
-
-    #[cfg(unix)]
-    #[test]
-    fn converts_modes_and_native_ids() {
-        assert_eq!(permission_mode(0o17777_u32), 0o7777);
-        assert_eq!(native_id(7_u32), Some(7));
-        assert_eq!(native_id(-1_i32), None);
-        let metadata = fs::metadata("Cargo.toml").expect("manifest exists");
-        let rooted = Metadata::from_native(&metadata);
-        assert_eq!(rooted.kind(), EntryKind::File);
-    }
-}
-
 /// Extracts portable timestamps from Apple and FreeBSD `stat` values.
 #[cfg(any(target_os = "macos", target_os = "ios", target_os = "freebsd"))]
 #[inline]
@@ -379,4 +347,34 @@ fn stat_times(
     _status: &libc::stat,
 ) -> (Option<SystemTime>, Option<SystemTime>, Option<SystemTime>) {
     (None, None, None)
+}
+
+#[cfg(all(test, unix))]
+mod tests {
+    use super::*;
+    use std::fs::File;
+
+    #[test]
+    fn observes_open_file_and_identity() {
+        let file = File::open("Cargo.toml").expect("manifest exists");
+        let metadata =
+            Metadata::from_open_file(&file).expect("metadata available");
+        assert_eq!(metadata.kind(), EntryKind::File);
+        assert!(metadata.size() > 0);
+        assert!(metadata.is_same_file(&metadata));
+        assert!(metadata.accessed_at().is_some());
+        assert!(metadata.modified_at().is_some());
+        assert!(metadata.created_at().is_some());
+        let _ = metadata.permissions();
+    }
+
+    #[test]
+    fn converts_modes_and_native_ids() {
+        assert_eq!(permission_mode(0o17777_u32), 0o7777);
+        assert_eq!(native_id(7_u32), Some(7));
+        assert_eq!(native_id(-1_i32), None);
+        let metadata = fs::metadata("Cargo.toml").expect("manifest exists");
+        let rooted = Metadata::from_native(&metadata);
+        assert_eq!(rooted.kind(), EntryKind::File);
+    }
 }
