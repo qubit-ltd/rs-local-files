@@ -7,7 +7,6 @@
 // =============================================================================
 
 use std::{
-    env,
     fs,
     io::{
         ErrorKind,
@@ -16,6 +15,11 @@ use std::{
         SeekFrom,
         Write,
     },
+};
+
+#[cfg(not(windows))]
+use std::{
+    env,
     path::Path,
     process::Command,
 };
@@ -32,6 +36,7 @@ use tempfile::tempdir;
 
 /// Runs a current-directory failure scenario in a child process so changing
 /// the process directory cannot affect concurrent tests.
+#[cfg(not(windows))]
 fn run_in_deleted_current_directory_process(
     test_name: &str,
     action: impl FnOnce(),
@@ -119,6 +124,7 @@ fn test_local_temp_file_closed_handle_reports_broken_pipe() {
 }
 
 /// Verifies a temporary file is isolated in a private cleanup sandbox.
+#[cfg(not(windows))]
 #[test]
 fn test_local_temp_file_uses_private_cleanup_sandbox() {
     let parent = tempdir().expect("temporary parent should be created");
@@ -179,6 +185,7 @@ fn test_local_temp_file_persist_with_outcome_reports_atomic_rename() {
 
 /// Verifies a relative temporary parent remains bound after the current
 /// directory changes.
+#[cfg(not(windows))]
 #[test]
 fn test_local_temp_file_relative_parent_remains_bound_after_current_directory_change()
  {
@@ -333,6 +340,7 @@ fn test_local_temp_file_persist_rejects_non_directory_parent_and_retains_cleanup
 }
 
 /// Verifies a known host type conflict preserves cleanup ownership.
+#[cfg(not(windows))]
 #[test]
 fn test_local_temp_file_known_persist_conflict_retains_cleanup() {
     let parent = tempdir().expect("temporary parent should be created");
@@ -431,6 +439,7 @@ fn test_rooted_temp_file_rejects_absolute_persist_target_and_cleans_up() {
 
 /// Verifies rooted temporary-file overwrite persistence replaces the final
 /// entry within the opened root.
+#[cfg(not(windows))]
 #[test]
 fn test_rooted_temp_file_persist_with_overwrite_replaces_target() {
     let parent = tempdir().expect("root parent should be created");
@@ -463,6 +472,7 @@ fn test_rooted_temp_file_persist_with_overwrite_replaces_target() {
 
 /// Verifies rooted temporary files can publish to an absent relative target
 /// and release automatic cleanup after publication.
+#[cfg(not(windows))]
 #[test]
 fn test_rooted_temp_file_persist_publishes_absent_target() {
     let parent = tempdir().expect("root parent should be created");
@@ -559,6 +569,7 @@ fn test_local_temp_file_drop_tolerates_missing_entry() {
 
 /// Verifies relative host persistence reports target-resolution failure when
 /// the process current directory was removed externally.
+#[cfg(not(windows))]
 #[test]
 fn test_local_temp_file_persist_reports_deleted_current_directory() {
     const TEST_NAME: &str =
