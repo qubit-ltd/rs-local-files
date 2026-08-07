@@ -1103,7 +1103,6 @@ fn rename_failure_indeterminate(error: LocalFileError) -> LocalRenameFailure {
 ///
 /// Returns native I/O errors from opening or synchronizing the parent.
 fn sync_parent_directory(path: &Path) -> io::Result<()> {
-    let parent = path.parent().unwrap_or(Path::new("."));
     if crate::local::test_support_enabled("copy-parent-sync")
         || crate::local::test_support_enabled("rename-parent-sync")
     {
@@ -1111,18 +1110,7 @@ fn sync_parent_directory(path: &Path) -> io::Result<()> {
             .or_else(|| crate::local::test_io_error("rename-parent-sync"))
             .expect("selected parent-sync fault should provide an I/O error"));
     }
-    #[cfg(unix)]
-    {
-        fs::File::open(parent)?.sync_all()
-    }
-    #[cfg(not(unix))]
-    {
-        let _ = parent;
-        Err(io::Error::new(
-            io::ErrorKind::Unsupported,
-            "directory durability is not supported on this platform",
-        ))
-    }
+    super::file_move::sync_parent_dir(path)
 }
 
 /// Synchronizes every parent directory changed by a completed rename.
