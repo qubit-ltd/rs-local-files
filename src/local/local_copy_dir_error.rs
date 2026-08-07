@@ -7,13 +7,25 @@
 // =============================================================================
 //! Recursive directory copy errors.
 // qubit-style: allow source-test-pair
+// qubit-style: allow inline-tests
+// qubit-style: allow explicit-imports
 
 use std::error::Error;
-use std::fmt::{Display, Formatter, Result as FmtResult};
+use std::fmt::{
+    Display,
+    Formatter,
+    Result as FmtResult,
+};
 use std::io;
-use std::path::{Path, PathBuf};
+use std::path::{
+    Path,
+    PathBuf,
+};
 
-use crate::{LocalCopyDirStage, LocalCopyDirStats};
+use crate::{
+    LocalCopyDirStage,
+    LocalCopyDirStats,
+};
 
 /// Error returned by a recursive directory copy operation.
 ///
@@ -209,7 +221,10 @@ impl Display for LocalCopyDirError {
             write!(formatter, "; staging path '{}'", temporary_path.display())?;
         }
         if let Some(cleanup_error) = self.cleanup_error.as_ref() {
-            return write!(formatter, "; staging cleanup also failed: {cleanup_error}");
+            return write!(
+                formatter,
+                "; staging cleanup also failed: {cleanup_error}"
+            );
         }
         Ok(())
     }
@@ -220,5 +235,45 @@ impl Error for LocalCopyDirError {
     #[inline(always)]
     fn source(&self) -> Option<&(dyn Error + 'static)> {
         Some(&self.error)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::LocalCopyDirStage;
+
+    #[test]
+    fn exposes_parts_and_formats_cleanup_context() {
+        let error = LocalCopyDirError::new(
+            LocalCopyDirStage::CopyFileContents,
+            "source".into(),
+            "destination".into(),
+            LocalCopyDirStats::default(),
+            io::Error::other("copy failed"),
+        )
+        .with_staging_context(
+            "staging".into(),
+            Some(io::Error::other("cleanup failed")),
+        );
+        assert_eq!(error.stage(), LocalCopyDirStage::CopyFileContents);
+        assert_eq!(error.source_path(), Path::new("source"));
+        assert_eq!(error.destination_path(), Path::new("destination"));
+        assert_eq!(error.stats(), &LocalCopyDirStats::default());
+        assert_eq!(error.temporary_path(), Some(Path::new("staging")));
+        assert!(error.cleanup_error().is_some());
+        assert_eq!(error.kind(), io::ErrorKind::Other);
+        assert!(error.to_string().contains("staging cleanup"));
+        assert!(std::error::Error::source(&error).is_some());
+        let (_, source, destination, _, staging, cleanup, native) =
+            error.into_parts();
+        assert_eq!(source, PathBuf::from("source"));
+        assert_eq!(destination, PathBuf::from("destination"));
+        assert_eq!(
+            staging.expect("staging path").as_ref(),
+            Path::new("staging")
+        );
+        assert!(cleanup.is_some());
+        assert_eq!(native.kind(), io::ErrorKind::Other);
     }
 }

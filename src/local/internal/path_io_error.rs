@@ -7,10 +7,15 @@
 // =============================================================================
 //! Path-aware I/O error context.
 // qubit-style: allow source-test-pair
+// qubit-style: allow inline-tests
+// qubit-style: allow explicit-imports
 // Private behavior is covered through public integration tests.
 
 use std::io::Error;
-use std::path::{Path, PathBuf};
+use std::path::{
+    Path,
+    PathBuf,
+};
 
 /// An I/O error annotated with the failed operation and path.
 #[derive(Debug)]
@@ -34,7 +39,11 @@ impl PathIoError {
     /// # Returns
     /// A contextual error retaining `source`.
     #[inline]
-    pub(super) fn new(operation: &'static str, path: &Path, source: Error) -> Self {
+    pub(super) fn new(
+        operation: &'static str,
+        path: &Path,
+        source: Error,
+    ) -> Self {
         Self {
             operation,
             path: path.to_path_buf(),
@@ -61,5 +70,23 @@ impl std::error::Error for PathIoError {
     #[inline(always)]
     fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
         Some(&self.source)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::error::Error as _;
+    use std::io::ErrorKind;
+
+    #[test]
+    fn formats_context_and_exposes_source() {
+        let source = Error::new(ErrorKind::PermissionDenied, "denied");
+        let error = PathIoError::new("write", Path::new("file"), source);
+        assert_eq!(error.to_string(), "failed to write 'file': denied");
+        assert_eq!(
+            error.source().expect("source is retained").to_string(),
+            "denied"
+        );
     }
 }

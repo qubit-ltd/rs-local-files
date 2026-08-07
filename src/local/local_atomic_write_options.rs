@@ -7,6 +7,8 @@
 // =============================================================================
 //! Atomic write options.
 // qubit-style: allow source-test-pair
+// qubit-style: allow inline-tests
+// qubit-style: allow explicit-imports
 
 use std::time::Duration;
 
@@ -96,7 +98,10 @@ impl LocalAtomicWriteOptions {
     ///
     /// # Returns
     /// Updated options carrying the timeout.
-    pub(crate) const fn with_open_retry_timeout(mut self, timeout: Duration) -> Self {
+    pub(crate) const fn with_open_retry_timeout(
+        mut self,
+        timeout: Duration,
+    ) -> Self {
         self.open_retry_timeout = Some(timeout);
         self
     }
@@ -159,5 +164,34 @@ impl Default for LocalAtomicWriteOptions {
     /// Returns the same policy as [`Self::new`].
     fn default() -> Self {
         Self::new()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn builders_update_every_policy() {
+        let options = LocalAtomicWriteOptions::new()
+            .with_parent()
+            .with_open_retry_timeout(Duration::from_secs(1))
+            .with_create_new()
+            .with_durability(LocalDurabilityRequirement::NotRequired);
+        assert!(options.creates_parent());
+        assert_eq!(options.open_retry_timeout(), Some(Duration::from_secs(1)));
+        assert_eq!(
+            options.publication_mode(),
+            LocalAtomicPublicationMode::CreateNew
+        );
+        assert_eq!(
+            options.durability(),
+            LocalDurabilityRequirement::NotRequired
+        );
+        assert!(!options.replaces_target_symlink());
+        assert_eq!(
+            LocalAtomicWriteOptions::default(),
+            LocalAtomicWriteOptions::new()
+        );
     }
 }

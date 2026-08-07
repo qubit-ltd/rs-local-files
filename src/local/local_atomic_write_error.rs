@@ -7,13 +7,25 @@
 // =============================================================================
 //! Atomic-write errors.
 // qubit-style: allow source-test-pair
+// qubit-style: allow inline-tests
+// qubit-style: allow explicit-imports
 
 use std::error::Error;
-use std::fmt::{Display, Formatter, Result as FmtResult};
+use std::fmt::{
+    Display,
+    Formatter,
+    Result as FmtResult,
+};
 use std::io;
-use std::path::{Path, PathBuf};
+use std::path::{
+    Path,
+    PathBuf,
+};
 
-use crate::{LocalAtomicDestinationState, LocalAtomicWriteStage};
+use crate::{
+    LocalAtomicDestinationState,
+    LocalAtomicWriteStage,
+};
 
 /// Error returned by an atomic whole-file replacement.
 ///
@@ -108,7 +120,9 @@ impl LocalAtomicWriteError {
     /// State reported by the failed operation. Callers must handle
     /// [`LocalAtomicDestinationState::Indeterminate`] conservatively and
     /// inspect the destination and staging path before retrying.
-    pub(crate) const fn destination_state(&self) -> LocalAtomicDestinationState {
+    pub(crate) const fn destination_state(
+        &self,
+    ) -> LocalAtomicDestinationState {
         self.destination_state
     }
 
@@ -149,7 +163,9 @@ impl LocalAtomicWriteError {
 
     /// Consumes this error and returns staging cleanup details with its source.
     #[inline]
-    pub(crate) fn into_staging_parts(self) -> (Option<PathBuf>, Option<io::Error>, io::Error) {
+    pub(crate) fn into_staging_parts(
+        self,
+    ) -> (Option<PathBuf>, Option<io::Error>, io::Error) {
         (self.temporary_path, self.cleanup_error, self.source)
     }
 
@@ -162,7 +178,10 @@ impl LocalAtomicWriteError {
     /// # Returns
     /// This atomic-write error enriched with cleanup context.
     #[inline]
-    pub(crate) fn with_cleanup_error(mut self, cleanup_error: Option<io::Error>) -> Self {
+    pub(crate) fn with_cleanup_error(
+        mut self,
+        cleanup_error: Option<io::Error>,
+    ) -> Self {
         self.cleanup_error = cleanup_error;
         self
     }
@@ -176,7 +195,10 @@ impl LocalAtomicWriteError {
     /// # Returns
     /// This atomic-write error enriched with parent synchronization context.
     #[inline]
-    pub(crate) fn with_parent_sync_error(mut self, parent_sync_error: Option<io::Error>) -> Self {
+    pub(crate) fn with_parent_sync_error(
+        mut self,
+        parent_sync_error: Option<io::Error>,
+    ) -> Self {
         self.parent_sync_error = parent_sync_error;
         self
     }
@@ -204,7 +226,10 @@ impl Display for LocalAtomicWriteError {
                  synchronization also failed: {parent_sync_error}",
             ),
             (Some(cleanup_error), None) => {
-                write!(formatter, "; staging cleanup also failed: {cleanup_error}",)
+                write!(
+                    formatter,
+                    "; staging cleanup also failed: {cleanup_error}",
+                )
             }
             (None, Some(parent_sync_error)) => write!(
                 formatter,
@@ -220,5 +245,72 @@ impl Error for LocalAtomicWriteError {
     #[inline(always)]
     fn source(&self) -> Option<&(dyn Error + 'static)> {
         Some(self.source_error())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::{
+        LocalAtomicDestinationState,
+        LocalAtomicWriteStage,
+    };
+
+    fn error() -> LocalAtomicWriteError {
+        LocalAtomicWriteError::new(
+            LocalAtomicWriteStage::ReplaceDestination,
+            "target".into(),
+            Some("staging".into()),
+            LocalAtomicDestinationState::Replaced,
+            io::Error::other("boom"),
+        )
+    }
+
+    #[test]
+    fn exposes_context_and_formats_secondary_errors() {
+        let error = error()
+            .with_cleanup_error(Some(io::Error::other("cleanup")))
+            .with_parent_sync_error(Some(io::Error::other("sync")));
+        assert_eq!(error.stage(), LocalAtomicWriteStage::ReplaceDestination);
+        assert_eq!(error.path(), Path::new("target"));
+        assert_eq!(error.temporary_path(), Some(Path::new("staging")));
+        assert_eq!(
+            error.destination_state(),
+            LocalAtomicDestinationState::Replaced
+        );
+        assert!(error.cleanup_error().is_some());
+        assert!(error.parent_sync_error().is_some());
+        assert_eq!(error.source_error().kind(), io::ErrorKind::Other);
+        assert_eq!(error.kind(), io::ErrorKind::Other);
+        let display = error.to_string();
+        assert!(display.contains("staging cleanup"));
+        assert!(display.contains("parent synchronization"));
+        assert!(error.source().is_some());
+    }
+
+    #[test]
+    fn splits_staging_parts_without_optional_context() {
+        let (path, cleanup, source) = error().into_staging_parts();
+        assert_eq!(path, Some("staging".into()));
+        assert!(cleanup.is_none());
+        assert_eq!(source.kind(), io::ErrorKind::Other);
+        let no_staging = LocalAtomicWriteError::new(
+            LocalAtomicWriteStage::PrepareParent,
+            "target".into(),
+            None,
+            LocalAtomicDestinationState::Unchanged,
+            io::Error::other("boom"),
+        );
+        assert!(!no_staging.to_string().contains("staging path"));
+        let cleanup_only =
+            error().with_cleanup_error(Some(io::Error::other("cleanup")));
+        assert!(cleanup_only.to_string().contains("staging cleanup"));
+        let parent_only =
+            error().with_parent_sync_error(Some(io::Error::other("sync")));
+        assert!(parent_only.to_string().contains("parent synchronization"));
+        let plain = error()
+            .with_cleanup_error(None)
+            .with_parent_sync_error(None);
+        assert!(plain.to_string().contains("atomic write"));
     }
 }

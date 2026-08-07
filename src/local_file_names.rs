@@ -7,6 +7,8 @@
 // =============================================================================
 // qubit-style: allow source-test-pair
 // Covered by filename and foundation integration tests.
+// qubit-style: allow inline-tests
+// qubit-style: allow explicit-imports
 
 use std::ffi::{
     OsStr,
@@ -91,5 +93,23 @@ impl LocalFileNames {
                 source,
             )
         })
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn generates_and_validates_portable_names() {
+        let generated = LocalFileNames::random_name().expect("random name");
+        LocalFileNames::validate_portable(&generated)
+            .expect("generated name is portable");
+        let affixed =
+            LocalFileNames::random_name_with(Some("pre-"), Some("-suf"))
+                .expect("affixed random name");
+        let text = affixed.to_str().expect("random name is UTF-8");
+        assert!(text.starts_with("pre-"));
+        assert!(text.ends_with("-suf"));
     }
 }
