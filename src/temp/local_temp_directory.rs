@@ -338,55 +338,26 @@ impl LocalTempDirectory {
                             ));
                         }
                     };
-                let (result, target) = match resolved {
-                    crate::local::RootedResolvedPath::Rooted(destination) => {
-                        if let Err(error) = prepare_rooted_parent(
-                            &rooted.root,
-                            &destination,
-                            options.creates_parent(),
-                        ) {
-                            return Err(LocalPersistError::new(
-                                error,
-                                self,
-                                requested_target,
-                                Some(destination.as_path().to_path_buf()),
-                                LocalPersistStage::PrepareParent,
-                            ));
-                        }
-                        let result = if options.overwrites() {
-                            rooted.root.rename(&source, &destination)
-                        } else {
-                            rooted
-                                .root
-                                .rename_without_replacing(&source, &destination)
-                        };
-                        (result, destination.as_path().to_path_buf())
-                    }
-                    crate::local::RootedResolvedPath::Host(destination) => {
-                        let source = rooted.root.path().join(source.as_path());
-                        if let Err(error) = prepare_host_parent(
-                            &destination,
-                            options.creates_parent(),
-                        ) {
-                            return Err(LocalPersistError::new(
-                                error,
-                                self,
-                                requested_target,
-                                Some(destination),
-                                LocalPersistStage::PrepareParent,
-                            ));
-                        }
-                        let result = if options.overwrites() {
-                            std::fs::rename(&source, &destination)
-                        } else {
-                            crate::local::move_directory_without_replacing(
-                                &source,
-                                &destination,
-                            )
-                        };
-                        (result, destination)
-                    }
+                let destination = resolved;
+                if let Err(error) = prepare_rooted_parent(
+                    &rooted.root,
+                    &destination,
+                    options.creates_parent(),
+                ) {
+                    return Err(LocalPersistError::new(
+                        error,
+                        self,
+                        requested_target,
+                        Some(destination.as_path().to_path_buf()),
+                        LocalPersistStage::PrepareParent,
+                    ));
+                }
+                let result = if options.overwrites() {
+                    rooted.root.rename(&source, &destination)
+                } else {
+                    rooted.root.rename_without_replacing(&source, &destination)
                 };
+                let target = destination.as_path().to_path_buf();
                 if let Err(error) = result {
                     self.record_native_persist_failure(&error);
                     return Err(LocalPersistError::new(

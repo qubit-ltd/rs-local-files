@@ -51,7 +51,6 @@ mod rooted_namespace_io;
 mod rooted_parent;
 #[cfg(unix)]
 mod rooted_parent_mode;
-mod rooted_resolved_path;
 #[cfg(unix)]
 mod rooted_staged_file;
 #[cfg(unix)]
@@ -132,7 +131,6 @@ pub(crate) use rooted_namespace_io::{
 };
 #[cfg(unix)]
 pub(super) use rooted_parent_mode::RootedParentMode;
-pub(crate) use rooted_resolved_path::{RootedResolvedPath, resolved_host_path};
 #[cfg(unix)]
 pub(super) use rooted_staged_file::RootedStagedFile;
 pub(crate) use staged_file::StagedFile;

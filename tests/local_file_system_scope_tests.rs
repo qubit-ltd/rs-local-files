@@ -9,14 +9,10 @@
 use std::fs;
 use std::path::Path;
 
-#[cfg(unix)]
 use qubit_local_files::{
-    LocalCopyOptions, LocalDeleteOptions, LocalPersistOptions, LocalReadOptions,
-    LocalRenameOptions, LocalTempFileOptions,
-};
-use qubit_local_files::{
-    LocalFileKind, LocalFileSystem, LocalFileSystemScope, LocalSymlinkPolicy, LocalWriteMode,
-    LocalWriteOptions, LocalWriterState,
+    LocalCopyOptions, LocalFileErrorKind, LocalFileKind, LocalFileOperation, LocalFileSystem,
+    LocalFileSystemScope, LocalListOptions, LocalSymlinkPolicy, LocalWriteMode, LocalWriteOptions,
+    LocalWriterState,
 };
 use tempfile::tempdir;
 
@@ -95,134 +91,107 @@ fn test_local_file_system_rooted_reports_scope_and_reads_relative_path() {
     );
 }
 
-/// Verifies that an explicit rooted across-scope policy applies to reads and
-/// mutations through intermediate symbolic links.
-#[cfg(unix)]
+/// Verifies Rooted construction rejects an across-scope policy precisely.
 #[test]
-fn test_rooted_follow_across_scope_applies_to_all_path_operations() {
-    use std::io::{Read, Write};
-    use std::os::unix::fs::symlink;
+fn test_rooted_constructor_rejects_follow_across_scope() {
+    let directory = tempdir().expect("temporary directory should be created");
 
-    let parent = tempdir().expect("parent should be created");
-    let root_path = parent.path().join("root");
-    let outside = parent.path().join("outside");
-    fs::create_dir(&root_path).expect("root should be created");
-    fs::create_dir(&outside).expect("outside should be created");
-    fs::write(outside.join("config"), b"old").expect("outside file should be written");
-    symlink(&outside, root_path.join("link")).expect("cross-scope link should be created");
+    let error = LocalFileSystem::rooted_with_symlink_policy(
+        directory.path(),
+        LocalSymlinkPolicy::FollowAcrossScope,
+    )
+    .expect_err("Rooted must reject FollowAcrossScope");
 
-    let filesystem = LocalFileSystem::rooted(&root_path)
-        .expect("rooted filesystem should open")
-        .with_symlink_policy(LocalSymlinkPolicy::FollowAcrossScope);
-
-    let mut reader = filesystem
-        .open_reader(Path::new("link/config"), &LocalReadOptions::new())
-        .expect("reader should follow the cross-scope link");
-    let mut content = String::new();
-    reader
-        .read_to_string(&mut content)
-        .expect("reader should read outside the root");
-    assert_eq!("old", content);
-
-    let mut writer = filesystem
-        .open_writer(
-            Path::new("link/config"),
-            &LocalWriteOptions::new(LocalWriteMode::CreateOrReplace),
-        )
-        .expect("writer should follow the cross-scope link");
-    writer
-        .write_all(b"new")
-        .expect("writer should stage outside-root content");
-    let _ = writer
-        .commit()
-        .expect("writer should publish outside-root content");
-    assert_eq!(b"new", fs::read(outside.join("config")).unwrap().as_slice());
-
-    fs::write(outside.join("rename-source"), b"rename").expect("rename source should be written");
-    let _ = filesystem
-        .rename(
-            Path::new("link/rename-source"),
-            Path::new("link/renamed"),
-            &LocalRenameOptions::new(),
-        )
-        .expect("rename should follow the cross-scope link");
-    assert!(outside.join("renamed").exists());
-
-    fs::write(root_path.join("copy-source"), b"copy").expect("copy source should be written");
-    let _ = filesystem
-        .copy(
-            Path::new("copy-source"),
-            Path::new("link/copied"),
-            &LocalCopyOptions::new(),
-        )
-        .expect("copy target should follow the cross-scope link");
+    assert_eq!(LocalFileErrorKind::InvalidOptions, error.kind());
+    assert_eq!(LocalFileOperation::OpenRoot, error.operation());
+    assert_eq!(Some(directory.path()), error.path());
     assert_eq!(
-        b"copy",
-        fs::read(outside.join("copied")).unwrap().as_slice()
+        Some(
+            "FollowAcrossScope is not supported by Rooted filesystems because Rooted authority cannot escape its opened root",
+        ),
+        error.reason(),
     );
-
-    let _ = filesystem
-        .delete_file(Path::new("link/copied"), &LocalDeleteOptions::new())
-        .expect("delete should follow the cross-scope link");
-    assert!(!outside.join("copied").exists());
 }
 
-/// Verifies that temporary-resource publication follows intermediate links
-/// while replacing a final link entry itself.
+/// Verifies an existing Rooted instance cannot enter an across-scope state.
+#[test]
+fn test_rooted_builder_rejects_follow_across_scope() {
+    let directory = tempdir().expect("temporary directory should be created");
+    let filesystem =
+        LocalFileSystem::rooted(directory.path()).expect("Rooted filesystem should open");
+
+    let error = filesystem
+        .with_symlink_policy(LocalSymlinkPolicy::FollowAcrossScope)
+        .expect_err("Rooted must reject FollowAcrossScope");
+
+    assert_eq!(LocalFileErrorKind::InvalidOptions, error.kind());
+    assert_eq!(LocalFileOperation::Configure, error.operation());
+    assert_eq!(Some(directory.path()), error.path());
+}
+
+/// Verifies per-operation Rooted overrides reject an across-scope policy.
+#[test]
+fn test_rooted_operation_overrides_reject_follow_across_scope() {
+    let directory = tempdir().expect("temporary directory should be created");
+    fs::write(directory.path().join("source"), b"source").expect("fixture should be written");
+    let filesystem =
+        LocalFileSystem::rooted(directory.path()).expect("Rooted filesystem should open");
+
+    let list_error = filesystem
+        .list(
+            Path::new("source"),
+            &LocalListOptions::new().with_symlink_policy(LocalSymlinkPolicy::FollowAcrossScope),
+        )
+        .expect_err("Rooted list override must reject FollowAcrossScope");
+    assert_eq!(LocalFileErrorKind::InvalidOptions, list_error.kind());
+    assert_eq!(LocalFileOperation::List, list_error.operation());
+
+    let copy_error = filesystem
+        .copy(
+            Path::new("source"),
+            Path::new("target"),
+            &LocalCopyOptions::new().with_symlink_policy(LocalSymlinkPolicy::FollowAcrossScope),
+        )
+        .expect_err("Rooted copy override must reject FollowAcrossScope");
+    assert_eq!(LocalFileErrorKind::InvalidOptions, copy_error.error().kind());
+    assert_eq!(LocalFileOperation::Copy, copy_error.error().operation());
+}
+
+/// Verifies Host retains support for an across-scope policy.
+#[test]
+fn test_host_builder_accepts_follow_across_scope() {
+    let filesystem = LocalFileSystem::host()
+        .with_symlink_policy(LocalSymlinkPolicy::FollowAcrossScope)
+        .expect("Host should accept FollowAcrossScope");
+
+    assert_eq!(
+        LocalSymlinkPolicy::FollowAcrossScope,
+        filesystem.symlink_policy(),
+    );
+}
+
+/// Verifies an actual escaping link remains a path error under the rooted
+/// default policy, distinct from an invalid policy configuration.
 #[cfg(unix)]
 #[test]
-fn test_rooted_temp_persist_uses_the_filesystem_symlink_policy() {
-    use std::io::Write;
+fn test_rooted_follow_within_reports_escaping_link_as_invalid_path() {
     use std::os::unix::fs::symlink;
 
     let parent = tempdir().expect("parent should be created");
-    let root_path = parent.path().join("root");
+    let root = parent.path().join("root");
     let outside = parent.path().join("outside");
-    fs::create_dir(&root_path).expect("root should be created");
+    fs::create_dir(&root).expect("root should be created");
     fs::create_dir(&outside).expect("outside should be created");
-    symlink(&outside, root_path.join("link")).expect("cross-scope link should be created");
+    fs::write(outside.join("payload"), b"outside").expect("outside fixture should be written");
+    symlink(&outside, root.join("link")).expect("escaping link should be created");
 
-    let filesystem = LocalFileSystem::rooted(&root_path)
-        .expect("rooted filesystem should open")
-        .with_symlink_policy(LocalSymlinkPolicy::FollowAcrossScope);
-    let mut temporary = filesystem
-        .create_temp_file(&LocalTempFileOptions::new())
-        .expect("temporary file should be created");
-    temporary
-        .write_all(b"outside")
-        .expect("temporary file should accept content");
-    let _ = temporary
-        .persist_with(Path::new("link/published"), LocalPersistOptions::new())
-        .expect("persist should follow the intermediate link");
-    assert_eq!(
-        b"outside".as_slice(),
-        fs::read(outside.join("published")).unwrap().as_slice()
-    );
+    let error = LocalFileSystem::rooted(&root)
+        .expect("Rooted filesystem should open")
+        .metadata(Path::new("link/payload"))
+        .expect_err("FollowWithinScope must reject an escaping link");
 
-    fs::write(outside.join("referent"), b"old").expect("referent should be written");
-    symlink(outside.join("referent"), root_path.join("entry"))
-        .expect("final link should be created");
-    let mut temporary = filesystem
-        .create_temp_file(&LocalTempFileOptions::new())
-        .expect("second temporary file should be created");
-    temporary
-        .write_all(b"new")
-        .expect("second temporary file should accept content");
-    let _ = temporary
-        .persist_with(
-            Path::new("entry"),
-            LocalPersistOptions::new().with_overwrite(),
-        )
-        .expect("persist should replace the final link entry");
-    assert_eq!(
-        b"old".as_slice(),
-        fs::read(outside.join("referent")).unwrap().as_slice()
-    );
-    assert!(!root_path.join("entry").is_symlink());
-    assert_eq!(
-        b"new".as_slice(),
-        fs::read(root_path.join("entry")).unwrap().as_slice()
-    );
+    assert_eq!(LocalFileErrorKind::InvalidPath, error.kind());
+    assert_eq!(LocalFileOperation::Metadata, error.operation());
 }
 
 /// Verifies rooted recursive copy follows in-scope directory links without
@@ -255,5 +224,80 @@ fn test_rooted_recursive_copy_follows_in_scope_directory_link() {
         fs::read(target.join("link/entry"))
             .expect("linked entry should be copied")
             .as_slice()
+    );
+}
+
+/// Verifies Rooted listing ignores a replacement diagnostic root.
+#[cfg(unix)]
+#[test]
+fn test_rooted_list_uses_opened_authority_after_diagnostic_root_replacement() {
+    let parent = tempdir().expect("parent should be created");
+    let original = parent.path().join("root");
+    let renamed = parent.path().join("renamed-root");
+    fs::create_dir(&original).expect("root should be created");
+    fs::write(original.join("original-entry"), b"original")
+        .expect("original entry should be written");
+    let filesystem = LocalFileSystem::rooted(&original).expect("Rooted filesystem should open");
+
+    fs::rename(&original, &renamed).expect("opened root should be renamed");
+    fs::create_dir(&original).expect("replacement root should be created");
+    fs::write(original.join("replacement-entry"), b"replacement")
+        .expect("replacement entry should be written");
+
+    let entries = filesystem
+        .list(Path::new(""), &LocalListOptions::new())
+        .expect("Rooted listing should open through retained authority")
+        .collect::<Result<Vec<_>, _>>()
+        .expect("Rooted listing should remain readable");
+    let paths = entries
+        .iter()
+        .map(|entry| entry.relative_path())
+        .collect::<Vec<_>>();
+
+    assert_eq!(vec![Path::new("original-entry")], paths);
+}
+
+/// Verifies Rooted symlink-aware copy ignores a replacement diagnostic root.
+#[cfg(unix)]
+#[test]
+fn test_rooted_copy_uses_opened_authority_after_diagnostic_root_replacement() {
+    use std::os::unix::fs::symlink;
+
+    let parent = tempdir().expect("parent should be created");
+    let original = parent.path().join("root");
+    let renamed = parent.path().join("renamed-root");
+    fs::create_dir_all(original.join("source")).expect("original source should be created");
+    fs::create_dir(original.join("linked")).expect("original link target should be created");
+    fs::write(original.join("linked/entry"), b"original")
+        .expect("original linked entry should be written");
+    symlink("../linked", original.join("source/link"))
+        .expect("original in-scope link should be created");
+    let filesystem = LocalFileSystem::rooted(&original).expect("Rooted filesystem should open");
+
+    fs::rename(&original, &renamed).expect("opened root should be renamed");
+    fs::create_dir_all(original.join("source")).expect("replacement source should be created");
+    fs::create_dir(original.join("linked")).expect("replacement link target should be created");
+    fs::write(original.join("linked/entry"), b"replacement")
+        .expect("replacement linked entry should be written");
+    symlink("../linked", original.join("source/link"))
+        .expect("replacement in-scope link should be created");
+
+    let _ = filesystem
+        .copy(
+            Path::new("source"),
+            Path::new("target"),
+            &LocalCopyOptions::new().with_tree_source(),
+        )
+        .expect("Rooted copy should use the retained authority");
+
+    assert_eq!(
+        b"original",
+        fs::read(renamed.join("target/link/entry"))
+            .expect("original authority should receive copied content")
+            .as_slice(),
+    );
+    assert!(
+        !original.join("target").exists(),
+        "replacement diagnostic root must remain unchanged",
     );
 }

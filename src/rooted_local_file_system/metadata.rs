@@ -73,23 +73,16 @@ impl RootedLocalFileSystem {
                 .map(rooted_metadata)
                 .map_err(|error| rooted_io_error(LocalFileOperation::Metadata, path, error));
         }
-        match resolve_rooted_path(
+        let relative = resolve_rooted_path(
             &self.root,
             path,
             symlink_policy,
             false,
             LocalFileOperation::Metadata,
-        )? {
-            crate::local::RootedResolvedPath::Rooted(relative) => self
-                .root
-                .symlink_metadata(&relative)
-                .map(rooted_metadata)
-                .map_err(|error| rooted_io_error(LocalFileOperation::Metadata, path, error)),
-            crate::local::RootedResolvedPath::Host(resolved) => {
-                std::fs::symlink_metadata(&resolved)
-                    .map(|metadata| LocalFileMetadata::from_native(&metadata))
-                    .map_err(|error| rooted_io_error(LocalFileOperation::Metadata, path, error))
-            }
-        }
+        )?;
+        self.root
+            .symlink_metadata(&relative)
+            .map(rooted_metadata)
+            .map_err(|error| rooted_io_error(LocalFileOperation::Metadata, path, error))
     }
 }

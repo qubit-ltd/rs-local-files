@@ -66,18 +66,6 @@ pub(super) fn copy(
     options: Options,
     durability: LocalDurabilityRequirement,
 ) -> Result<Statistics, Error> {
-    if options.symlink_policy().follows() {
-        return Err(error(
-            Stage::InspectSource,
-            source,
-            destination,
-            Statistics::default(),
-            io::Error::new(
-                ErrorKind::Unsupported,
-                "rooted copy never follows symbolic links",
-            ),
-        ));
-    }
     if source == destination {
         return Err(error(
             Stage::InspectSource,
@@ -169,6 +157,7 @@ fn copy_tree(
         destination: destination.clone(),
         metadata: source_metadata,
     }];
+    let mut active_sources = Vec::new();
     while let Some(item) = work.pop() {
         match item {
             Work::Enter {
@@ -176,6 +165,19 @@ fn copy_tree(
                 destination,
                 metadata,
             } => {
+                if active_sources.iter().any(|active| active == &source) {
+                    return Err(error(
+                        Stage::InspectSource,
+                        &source,
+                        &destination,
+                        statistics,
+                        io::Error::new(
+                            ErrorKind::InvalidInput,
+                            "rooted copy source directory cycle detected",
+                        ),
+                    ));
+                }
+                active_sources.push(source.clone());
                 #[cfg(feature = "internal-test-support")]
                 if crate::local::test_support_enabled("rooted-copy-directory-read") {
                     return Err(error(
@@ -237,6 +239,54 @@ fn copy_tree(
                             }
                         }
                         EntryKind::Symlink | EntryKind::Other => {
+                            if entry.metadata().kind() == EntryKind::Symlink
+                                && options.symlink_policy().follows()
+                            {
+                                let resolved =
+                                    crate::rooted_local_file_system::resolve_rooted_path(
+                                        root,
+                                        source_child.as_path(),
+                                        crate::LocalSymlinkPolicy::FollowWithinScope,
+                                        true,
+                                        crate::LocalFileOperation::Copy,
+                                    )
+                                    .map_err(|copy_error| {
+                                        error(
+                                            Stage::InspectSourceEntry,
+                                            &source_child,
+                                            &destination_child,
+                                            statistics,
+                                            copy_error.into_io_error(),
+                                        )
+                                    })?;
+                                let resolved_metadata = root.symlink_metadata(&resolved).map_err(
+                                    |source_error| {
+                                        error(
+                                            Stage::InspectSourceEntry,
+                                            &source_child,
+                                            &destination_child,
+                                            statistics,
+                                            source_error,
+                                        )
+                                    },
+                                )?;
+                                if resolved_metadata.kind() == EntryKind::Directory {
+                                    if prepare_directory(
+                                        root,
+                                        &resolved,
+                                        &destination_child,
+                                        options,
+                                        &mut statistics,
+                                    )? {
+                                        work.push(Work::Enter {
+                                            source: resolved,
+                                            destination: destination_child,
+                                            metadata: resolved_metadata,
+                                        });
+                                    }
+                                    continue;
+                                }
+                            }
                             return Err(error(
                                 Stage::InspectSourceEntry,
                                 &source_child,
@@ -265,7 +315,17 @@ fn copy_tree(
                 source,
                 destination,
                 metadata,
-            } => preserve_permissions(root, &source, &destination, metadata, options, statistics)?,
+            } => {
+                preserve_permissions(
+                    root,
+                    &source,
+                    &destination,
+                    metadata,
+                    options,
+                    statistics,
+                )?;
+                active_sources.pop();
+            }
         }
     }
     Ok(statistics)

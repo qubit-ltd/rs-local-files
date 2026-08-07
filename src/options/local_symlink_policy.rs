@@ -19,9 +19,11 @@ pub enum LocalSymlinkPolicy {
     /// On Host, this has the same native effect as `FollowAcrossScope` because
     /// Host has no configured root boundary.
     FollowWithinScope,
-    /// Follow links without applying a Rooted root boundary. This is an
-    /// explicit opt-in for rooted operations that intentionally address the
-    /// object reached outside the opened root.
+    /// Follow links without applying a Rooted root boundary.
+    ///
+    /// This policy is supported only by Host filesystems. Selecting it for a
+    /// Rooted filesystem returns `InvalidOptions` because Rooted authority is
+    /// limited to its opened root.
     FollowAcrossScope,
 }
 

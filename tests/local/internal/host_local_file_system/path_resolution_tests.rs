@@ -64,6 +64,7 @@ fn test_host_path_resolution_rejects_required_symbolic_link() {
 
     let error = LocalFileSystem::host()
         .with_symlink_policy(LocalSymlinkPolicy::Reject)
+        .expect("Host should accept Reject")
         .open_reader(&link, &LocalReadOptions::new())
         .expect_err("rejecting policy must reject a followed final link");
     assert_eq!(LocalFileErrorKind::Unsupported, error.kind());

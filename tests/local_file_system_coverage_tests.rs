@@ -12,8 +12,8 @@ use std::{fs, io::Read, time::Duration};
 use qubit_local_files::LocalSymlinkPolicy;
 use qubit_local_files::{
     LocalAtomicityRequirement, LocalCopyOptions, LocalDurabilityRequirement, LocalFileErrorKind,
-    LocalFileSystem, LocalListOptions, LocalMetadataPreservePolicy, LocalReadOptions,
-    LocalRenameOptions, LocalWriteMode, LocalWriteOptions,
+    LocalFileOperation, LocalFileSystem, LocalListOptions, LocalMetadataPreservePolicy,
+    LocalReadOptions, LocalRenameOptions, LocalWriteMode, LocalWriteOptions,
 };
 use tempfile::tempdir;
 
@@ -261,6 +261,24 @@ where
         .status()
         .expect("test fault child should launch");
     assert!(status.success(), "test fault child should pass");
+}
+
+/// Verifies a post-open prefix-read failure is attributed to the read stage.
+#[cfg(feature = "internal-test-support")]
+#[test]
+fn test_read_prefix_reports_injected_read_failure() {
+    const TEST_NAME: &str = "test_read_prefix_reports_injected_read_failure";
+    run_facade_fault(TEST_NAME, "local-fs-read-prefix-read", || {
+        let directory = tempdir().expect("temporary directory should be created");
+        let file = directory.path().join("payload");
+        fs::write(&file, b"payload").expect("fixture should be written");
+
+        let error = LocalFileSystem::host()
+            .read_prefix(&file, &LocalReadOptions::new(), 4)
+            .expect_err("injected read failure must be reported");
+        assert_eq!(LocalFileOperation::Read, error.operation());
+        assert_eq!(Some(file.as_path()), error.path());
+    });
 }
 
 /// Verifies an injected native rename uncertainty retains its indeterminate

@@ -13,6 +13,8 @@
 #[non_exhaustive]
 #[must_use]
 pub enum LocalFileOperation {
+    /// Configuring a filesystem instance.
+    Configure,
     /// Querying filesystem capabilities.
     Capabilities,
     /// Validating a native or portable filename.
@@ -29,6 +31,8 @@ pub enum LocalFileOperation {
     OpenRoot,
     /// Opening a file reader.
     OpenReader,
+    /// Reading bytes from an opened file.
+    Read,
     /// Opening a file writer.
     OpenWriter,
     /// Copying an entry.
