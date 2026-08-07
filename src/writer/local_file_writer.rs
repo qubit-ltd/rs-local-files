@@ -414,21 +414,42 @@ impl Write for LocalFileWriter {
                 "local file writer is not open",
             ));
         }
-        let result = match self.backend.as_mut() {
-            Some(LocalFileWriterBackend::Staged(writer)) => {
-                writer.write_vectored(buffers)
+
+        // Windows' standard file handle reports vectored writes as supported
+        // while only consuming the first slice.  Preserve the writer's
+        // cross-platform contract by completing the remaining slices through
+        // the ordinary write path.
+        #[cfg(windows)]
+        {
+            let mut written = 0;
+            for buffer in buffers {
+                let count = self.write(buffer)?;
+                written += count;
+                if count < buffer.len() {
+                    break;
+                }
             }
-            Some(LocalFileWriterBackend::Rooted(writer)) => {
-                writer.write_vectored(buffers)
-            }
-            Some(LocalFileWriterBackend::Append(file)) => {
-                file.write_vectored(buffers)
-            }
-            None => unreachable!("open writer must retain one backend"),
-        };
-        let written = self.observe_stream_result(result)?;
-        self.record_written(written);
-        Ok(written)
+            return Ok(written);
+        }
+
+        #[cfg(not(windows))]
+        {
+            let result = match self.backend.as_mut() {
+                Some(LocalFileWriterBackend::Staged(writer)) => {
+                    writer.write_vectored(buffers)
+                }
+                Some(LocalFileWriterBackend::Rooted(writer)) => {
+                    writer.write_vectored(buffers)
+                }
+                Some(LocalFileWriterBackend::Append(file)) => {
+                    file.write_vectored(buffers)
+                }
+                None => unreachable!("open writer must retain one backend"),
+            };
+            let written = self.observe_stream_result(result)?;
+            self.record_written(written);
+            Ok(written)
+        }
     }
 
     /// Flushes userspace buffers without publishing staged content.
