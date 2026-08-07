@@ -12,7 +12,11 @@ use std::io;
 #[cfg(feature = "internal-test-support")]
 use std::ffi::OsStr;
 #[cfg(feature = "internal-test-support")]
-use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
+use std::sync::atomic::{
+    AtomicBool,
+    AtomicUsize,
+    Ordering,
+};
 
 #[cfg(feature = "internal-test-support")]
 const TEST_FAULT_ENV: &str = "QUBIT_LOCAL_FILES_TEST_FAULT";
@@ -56,7 +60,9 @@ pub(crate) fn fault_error() -> io::Error {
     }
     #[cfg(all(feature = "internal-test-support", windows))]
     {
-        io::Error::from_raw_os_error(windows_sys::Win32::Foundation::ERROR_IO_DEVICE as i32)
+        io::Error::from_raw_os_error(
+            windows_sys::Win32::Foundation::ERROR_IO_DEVICE as i32,
+        )
     }
     #[cfg(not(feature = "internal-test-support"))]
     {
@@ -115,7 +121,8 @@ pub(crate) fn take_on_nth(name: &str, occurrence: usize) -> bool {
 #[cfg(feature = "internal-test-support")]
 #[inline(always)]
 fn is_enabled_impl(name: &str) -> bool {
-    std::env::var_os(TEST_FAULT_ENV).is_some_and(|value| value == OsStr::new(name))
+    std::env::var_os(TEST_FAULT_ENV)
+        .is_some_and(|value| value == OsStr::new(name))
 }
 
 #[cfg(not(feature = "internal-test-support"))]
@@ -137,5 +144,7 @@ fn take_impl(name: &str) -> bool {
 #[must_use]
 #[inline]
 fn take_on_nth_impl(name: &str, occurrence: usize) -> bool {
-    is_enabled_impl(name) && NTH_FAULT_OCCURRENCES.fetch_add(1, Ordering::Relaxed) + 1 == occurrence
+    is_enabled_impl(name)
+        && NTH_FAULT_OCCURRENCES.fetch_add(1, Ordering::Relaxed) + 1
+            == occurrence
 }

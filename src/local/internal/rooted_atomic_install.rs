@@ -52,7 +52,9 @@ pub(in crate::local) fn install_rooted_atomic_file(
             Ok(()) => Ok(()),
             Err(source) => {
                 let destination_state = replacement_error_state(&source);
-                let staging_state = if destination_state == LocalAtomicDestinationState::Unchanged {
+                let staging_state = if destination_state
+                    == LocalAtomicDestinationState::Unchanged
+                {
                     AtomicStagingState::Present
                 } else {
                     AtomicStagingState::Indeterminate

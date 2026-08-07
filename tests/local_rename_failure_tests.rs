@@ -11,7 +11,10 @@
 use std::path::PathBuf;
 
 use qubit_local_files::{
-    LocalFileOperation, LocalFileSystem, LocalRenameFailureState, LocalRenameOptions,
+    LocalFileOperation,
+    LocalFileSystem,
+    LocalRenameFailureState,
+    LocalRenameOptions,
 };
 
 #[cfg(feature = "internal-test-support")]
@@ -25,7 +28,8 @@ fn temp_path(name: &str) -> PathBuf {
     ))
 }
 
-/// Runs one test-support-only rename fault case in an isolated child test process.
+/// Runs one test-support-only rename fault case in an isolated child test
+/// process.
 #[cfg(feature = "internal-test-support")]
 fn run_in_test_fault_process<F>(test_name: &str, fault: &str, action: F)
 where
@@ -42,7 +46,8 @@ where
     if std::env::var_os(TEST_FAULT_CHILD_ENV).is_some() {
         return;
     }
-    let executable = std::env::current_exe().expect("test executable should be available");
+    let executable =
+        std::env::current_exe().expect("test executable should be available");
     let status = std::process::Command::new(executable)
         .arg("--exact")
         .arg(test_name)
@@ -75,9 +80,11 @@ fn test_rename_missing_source_reports_unchanged() {
 #[cfg(feature = "internal-test-support")]
 #[test]
 fn test_rename_parent_durability_failure_reports_renamed() {
-    const TEST_NAME: &str = "test_rename_parent_durability_failure_reports_renamed";
+    const TEST_NAME: &str =
+        "test_rename_parent_durability_failure_reports_renamed";
     run_in_test_fault_process(TEST_NAME, "rename-parent-sync", || {
-        let directory = tempfile::tempdir().expect("temporary directory should be created");
+        let directory =
+            tempfile::tempdir().expect("temporary directory should be created");
         let source = directory.path().join("source");
         let target = directory.path().join("target");
         std::fs::write(&source, b"payload").expect("source should be written");
@@ -101,9 +108,11 @@ fn test_rename_parent_durability_failure_reports_renamed() {
 #[cfg(feature = "internal-test-support")]
 #[test]
 fn test_rename_native_io_failure_reports_indeterminate() {
-    const TEST_NAME: &str = "test_rename_native_io_failure_reports_indeterminate";
+    const TEST_NAME: &str =
+        "test_rename_native_io_failure_reports_indeterminate";
     run_in_test_fault_process(TEST_NAME, "rename-native-indeterminate", || {
-        let directory = tempfile::tempdir().expect("temporary directory should be created");
+        let directory =
+            tempfile::tempdir().expect("temporary directory should be created");
         let source = directory.path().join("source");
         let target = directory.path().join("target");
         std::fs::write(&source, b"payload").expect("source should be written");

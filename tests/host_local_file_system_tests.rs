@@ -8,13 +8,25 @@
 
 use std::{
     fs,
-    io::{Read, Write},
+    io::{
+        Read,
+        Write,
+    },
 };
 
 use qubit_local_files::{
-    LocalCopyOptions, LocalCreateDirectoryOptions, LocalDeleteOptions, LocalFileKind,
-    LocalFileSystem, LocalListOptions, LocalReadOptions, LocalRenameOptions,
-    LocalTempDirectoryOptions, LocalTempFileOptions, LocalWriteMode, LocalWriteOptions,
+    LocalCopyOptions,
+    LocalCreateDirectoryOptions,
+    LocalDeleteOptions,
+    LocalFileKind,
+    LocalFileSystem,
+    LocalListOptions,
+    LocalReadOptions,
+    LocalRenameOptions,
+    LocalTempDirectoryOptions,
+    LocalTempFileOptions,
+    LocalWriteMode,
+    LocalWriteOptions,
 };
 use tempfile::tempdir;
 
@@ -40,12 +52,18 @@ fn test_host_local_file_system_workflow() {
     let filesystem = LocalFileSystem::host();
     let tree = directory.path().join("tree");
     let _ = filesystem
-        .create_directory(&tree, &LocalCreateDirectoryOptions::new().with_recursive())
+        .create_directory(
+            &tree,
+            &LocalCreateDirectoryOptions::new().with_recursive(),
+        )
         .expect("directory should be created");
 
     let source = tree.join("source");
     let mut writer = filesystem
-        .open_writer(&source, &LocalWriteOptions::new(LocalWriteMode::CreateNew))
+        .open_writer(
+            &source,
+            &LocalWriteOptions::new(LocalWriteMode::CreateNew),
+        )
         .expect("writer should open");
     writer
         .write_all(b"payload")
