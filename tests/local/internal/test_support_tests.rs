@@ -8,7 +8,11 @@
 
 use std::fs;
 
-use qubit_local_files::{LocalDeleteOptions, LocalFileErrorKind, LocalFileSystem};
+use qubit_local_files::{
+    LocalDeleteOptions,
+    LocalFileErrorKind,
+    LocalFileSystem,
+};
 use tempfile::tempdir;
 
 /// Verifies a selected native fault is isolated to a child test process.
@@ -22,7 +26,8 @@ fn test_test_support_injects_selected_fault_only_in_child_process() {
 
     match std::env::var(CHILD_ENV).as_deref() {
         Ok("normal") => {
-            let directory = tempdir().expect("temporary directory should be created");
+            let directory =
+                tempdir().expect("temporary directory should be created");
             let file = directory.path().join("payload");
             fs::write(&file, b"payload").expect("fixture should be written");
 
@@ -32,7 +37,8 @@ fn test_test_support_injects_selected_fault_only_in_child_process() {
             return;
         }
         Ok("fault") => {
-            let directory = tempdir().expect("temporary directory should be created");
+            let directory =
+                tempdir().expect("temporary directory should be created");
             let file = directory.path().join("payload");
             fs::write(&file, b"payload").expect("fixture should be written");
 
@@ -49,7 +55,8 @@ fn test_test_support_injects_selected_fault_only_in_child_process() {
         }
     }
 
-    let executable = std::env::current_exe().expect("test executable should be available");
+    let executable =
+        std::env::current_exe().expect("test executable should be available");
     let normal_status = std::process::Command::new(&executable)
         .arg("--exact")
         .arg(TEST_NAME)

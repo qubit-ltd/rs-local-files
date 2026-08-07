@@ -43,15 +43,26 @@ mod write;
 mod writer;
 
 pub use capability::{
-    LocalFileSystemCapabilities, LocalFileSystemLimits, LocalFileSystemSpace, SizeLimit,
+    LocalFileSystemCapabilities,
+    LocalFileSystemLimits,
+    LocalFileSystemSpace,
+    SizeLimit,
 };
 pub use error::{
-    LocalFileError, LocalFileErrorKind, LocalFileErrorSource, LocalFileOperation,
-    LocalPathCodecError, LocalResult,
+    LocalFileError,
+    LocalFileErrorKind,
+    LocalFileErrorSource,
+    LocalFileOperation,
+    LocalPathCodecError,
+    LocalResult,
 };
 pub use local::{
-    LocalCopyConflictPolicy, LocalCopyTypeConflictPolicy, LocalPersistError,
-    LocalPersistFailureState, LocalPersistOptions, LocalPersistStage,
+    LocalCopyConflictPolicy,
+    LocalCopyTypeConflictPolicy,
+    LocalPersistError,
+    LocalPersistFailureState,
+    LocalPersistOptions,
+    LocalPersistStage,
 };
 pub use local_file_kind::LocalFileKind;
 pub use local_file_metadata::LocalFileMetadata;
@@ -62,29 +73,67 @@ pub use local_file_system_scope::LocalFileSystemScope;
 pub use local_path_codec::LocalPathCodec;
 pub use local_paths::LocalPaths;
 pub use options::{
-    LocalAtomicityRequirement, LocalCopyOptions, LocalCopySourceMode, LocalCreateDirectoryOptions,
-    LocalDeleteOptions, LocalDirectoryReopenPolicy, LocalDurabilityRequirement, LocalListOptions,
-    LocalMetadataPreservePolicy, LocalReadOptions, LocalRenameOptions, LocalSymlinkPolicy,
-    LocalTempDirectoryOptions, LocalTempFileOptions, LocalWalkErrorPolicy, LocalWriteMode,
+    LocalAtomicityRequirement,
+    LocalCopyOptions,
+    LocalCopySourceMode,
+    LocalCreateDirectoryOptions,
+    LocalDeleteOptions,
+    LocalDirectoryReopenPolicy,
+    LocalDurabilityRequirement,
+    LocalListOptions,
+    LocalMetadataPreservePolicy,
+    LocalReadOptions,
+    LocalRenameOptions,
+    LocalSymlinkPolicy,
+    LocalTempDirectoryOptions,
+    LocalTempFileOptions,
+    LocalWalkErrorPolicy,
+    LocalWriteMode,
     LocalWriteOptions,
 };
 pub use outcome::{
-    LocalCopyFailure, LocalCopyFailureState, LocalCopyMethod, LocalCopyOutcome, LocalCopyResult,
-    LocalCopyStats, LocalCreateDirectoryOutcome, LocalDeleteOutcome, LocalPersistMethod,
-    LocalPersistOutcome, LocalRenameFailure, LocalRenameFailureState, LocalRenameOutcome,
-    LocalRenameResult, LocalWritePublicationMethod,
+    LocalCopyFailure,
+    LocalCopyFailureState,
+    LocalCopyMethod,
+    LocalCopyOutcome,
+    LocalCopyResult,
+    LocalCopyStats,
+    LocalCreateDirectoryOutcome,
+    LocalDeleteOutcome,
+    LocalPersistMethod,
+    LocalPersistOutcome,
+    LocalRenameFailure,
+    LocalRenameFailureState,
+    LocalRenameOutcome,
+    LocalRenameResult,
+    LocalWritePublicationMethod,
 };
-pub use temp::{LocalTempDirectory, LocalTempFile};
-pub use walk::{LocalDirectoryEntry, LocalDirectoryWalker};
+pub use temp::{
+    LocalTempDirectory,
+    LocalTempFile,
+};
+pub use walk::{
+    LocalDirectoryEntry,
+    LocalDirectoryWalker,
+};
 pub use writer::{
-    LocalFileCommitError, LocalFileWriter, LocalWriteFailureState, LocalWriteOutcome,
+    LocalFileCommitError,
+    LocalFileWriter,
+    LocalWriteFailureState,
+    LocalWriteOutcome,
     LocalWriterState,
 };
 
 pub(crate) use local::LocalRelativePath;
 
 pub(crate) use local::{
-    LocalAtomicCommitError, LocalAtomicDestinationState, LocalAtomicWriteError,
-    LocalAtomicWriteOptions, LocalAtomicWriteStage, LocalCopyDirError, LocalCopyDirOptions,
-    LocalCopyDirStage, LocalCopyDirStats,
+    LocalAtomicCommitError,
+    LocalAtomicDestinationState,
+    LocalAtomicWriteError,
+    LocalAtomicWriteOptions,
+    LocalAtomicWriteStage,
+    LocalCopyDirError,
+    LocalCopyDirOptions,
+    LocalCopyDirStage,
+    LocalCopyDirStats,
 };

@@ -10,7 +10,10 @@
 // Public fixtures cannot deterministically interleave these namespace changes.
 
 use std::fs;
-use std::io::{ErrorKind, Result};
+use std::io::{
+    ErrorKind,
+    Result,
+};
 use std::path::Path;
 
 #[cfg(feature = "internal-test-support")]
@@ -52,7 +55,9 @@ where
         Ok(()) => Ok(true),
         Err(error) if error.kind() == ErrorKind::AlreadyExists => {
             let metadata = inspect(dst)?;
-            if is_real_directory(&metadata) && !test_non_directory_race_enabled() {
+            if is_real_directory(&metadata)
+                && !test_non_directory_race_enabled()
+            {
                 Ok(false)
             } else {
                 Err(error)
@@ -62,7 +67,8 @@ where
     }
 }
 
-/// Returns whether test support should classify a racing entry as non-directory.
+/// Returns whether test support should classify a racing entry as
+/// non-directory.
 #[must_use]
 #[inline]
 fn test_non_directory_race_enabled() -> bool {
@@ -91,7 +97,10 @@ pub(super) fn removable_non_directory_metadata(
     result: Result<fs::Metadata>,
 ) -> Result<Option<fs::Metadata>> {
     match result {
-        Ok(metadata) if is_real_directory(&metadata) || test_removal_directory_race_enabled() => {
+        Ok(metadata)
+            if is_real_directory(&metadata)
+                || test_removal_directory_race_enabled() =>
+        {
             Ok(None)
         }
         Ok(metadata) => Ok(Some(metadata)),
@@ -100,7 +109,8 @@ pub(super) fn removable_non_directory_metadata(
     }
 }
 
-/// Returns whether test support should classify a replacement race as directory.
+/// Returns whether test support should classify a replacement race as
+/// directory.
 #[inline]
 fn test_removal_directory_race_enabled() -> bool {
     #[cfg(feature = "internal-test-support")]
