@@ -8,11 +8,7 @@
 // qubit-style: allow source-test-pair
 // Covered by rooted walker integration tests.
 
-use std::{
-    collections::HashSet,
-    path::PathBuf,
-    sync::Arc,
-};
+use std::{collections::HashSet, sync::Arc};
 
 use crate::rooted::Root;
 
@@ -25,8 +21,8 @@ pub(in crate::walk) struct RootedWalkState {
     pub(in crate::walk) root: Arc<Root>,
     /// Pending depth-first directory frames.
     pub(in crate::walk) stack: Vec<RootedWalkFrame>,
-    /// Canonical directory identities on the active rooted DFS path.
-    pub(in crate::walk) followed_directories: HashSet<PathBuf>,
+    /// Native directory identities on the active rooted DFS path.
+    pub(in crate::walk) followed_directories: HashSet<crate::local::DirectoryIdentity>,
     /// Symbolic-link policy fixed for this rooted walk.
     pub(in crate::walk) symlink_policy: crate::LocalSymlinkPolicy,
 }
