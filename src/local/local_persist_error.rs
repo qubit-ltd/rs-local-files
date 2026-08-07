@@ -7,13 +7,28 @@
 // =============================================================================
 //! Recoverable temporary-resource persistence errors.
 // qubit-style: allow source-test-pair
+// qubit-style: allow inline-tests
+// qubit-style: allow explicit-imports
 
 use std::error::Error;
-use std::fmt::{Debug, Display, Formatter, Result as FmtResult};
+use std::fmt::{
+    Debug,
+    Display,
+    Formatter,
+    Result as FmtResult,
+};
 use std::io;
-use std::path::{Path, PathBuf};
+use std::path::{
+    Path,
+    PathBuf,
+};
 
-use crate::{LocalFileError, LocalFileOperation, LocalPersistFailureState, LocalPersistStage};
+use crate::{
+    LocalFileError,
+    LocalFileOperation,
+    LocalPersistFailureState,
+    LocalPersistStage,
+};
 
 /// Persistence error that returns ownership of the temporary resource.
 ///
@@ -249,5 +264,54 @@ where
     /// Returns the retained structured error.
     fn source(&self) -> Option<&(dyn Error + 'static)> {
         Some(&self.error)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::{
+        LocalPersistFailureState,
+        LocalPersistStage,
+    };
+
+    #[test]
+    fn exposes_recoverable_context_and_parts() {
+        let mut error = LocalPersistError::new(
+            io::Error::new(io::ErrorKind::NotFound, "missing"),
+            String::from("resource"),
+            "requested".into(),
+            Some("resolved".into()),
+            LocalPersistStage::PrepareParent,
+        );
+        assert_eq!(error.resource(), "resource");
+        error.resource_mut().push('!');
+        assert_eq!(error.resource(), "resource!");
+        assert_eq!(error.requested_target(), Path::new("requested"));
+        assert_eq!(error.resolved_target(), Some(Path::new("resolved")));
+        assert_eq!(error.stage(), LocalPersistStage::PrepareParent);
+        assert_eq!(error.state(), LocalPersistFailureState::NotPublished);
+        assert_eq!(error.kind(), crate::LocalFileErrorKind::NotFound);
+        assert!(error.to_string().contains("resolved as 'resolved'"));
+        assert!(std::error::Error::source(&error).is_some());
+        let (error, resource, requested, resolved, stage, state) =
+            error.into_parts_with_state();
+        assert_eq!(resource, "resource!");
+        assert_eq!(requested, PathBuf::from("requested"));
+        assert_eq!(resolved, Some(PathBuf::from("resolved")));
+        assert_eq!(stage, LocalPersistStage::PrepareParent);
+        assert_eq!(state, LocalPersistFailureState::NotPublished);
+        assert_eq!(error.kind(), crate::LocalFileErrorKind::NotFound);
+
+        let error = LocalPersistError::new(
+            io::Error::other("unknown"),
+            (),
+            "requested".into(),
+            None,
+            LocalPersistStage::InstallDestination,
+        );
+        assert!(error.to_string().contains("requested target 'requested'"));
+        assert_eq!(error.state(), LocalPersistFailureState::Indeterminate);
+        let _ = error.into_parts();
     }
 }

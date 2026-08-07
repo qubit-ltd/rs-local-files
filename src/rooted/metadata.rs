@@ -7,6 +7,8 @@
 // =============================================================================
 //! Descriptor-relative entry metadata.
 // qubit-style: allow source-test-pair
+// qubit-style: allow inline-tests
+// qubit-style: allow explicit-imports
 
 use std::fs;
 #[cfg(unix)]
@@ -17,9 +19,15 @@ use std::os::unix::fs::MetadataExt;
 use std::os::windows::io::AsRawHandle;
 use std::time::SystemTime;
 #[cfg(unix)]
-use std::time::{Duration, UNIX_EPOCH};
+use std::time::{
+    Duration,
+    UNIX_EPOCH,
+};
 
-use super::{EntryKind, Permissions};
+use super::{
+    EntryKind,
+    Permissions,
+};
 
 /// Metadata observed through an opened rooted directory authority.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -91,19 +99,24 @@ impl Metadata {
         #[cfg(windows)]
         {
             use windows_sys::Win32::Storage::FileSystem::{
-                BY_HANDLE_FILE_INFORMATION, GetFileInformationByHandle,
+                BY_HANDLE_FILE_INFORMATION,
+                GetFileInformationByHandle,
             };
 
             let mut identity = BY_HANDLE_FILE_INFORMATION::default();
             // SAFETY: `file` owns a live handle and `identity` is a correctly
             // sized writable buffer for `GetFileInformationByHandle`.
-            let result =
-                unsafe { GetFileInformationByHandle(file.as_raw_handle(), &raw mut identity) };
+            let result = unsafe {
+                GetFileInformationByHandle(
+                    file.as_raw_handle(),
+                    &raw mut identity,
+                )
+            };
             if result == 0 {
                 return Err(std::io::Error::last_os_error());
             }
-            let file_id =
-                (u64::from(identity.nFileIndexHigh) << 32) | u64::from(identity.nFileIndexLow);
+            let file_id = (u64::from(identity.nFileIndexHigh) << 32)
+                | u64::from(identity.nFileIndexLow);
             Ok(Self::from_windows_metadata(
                 &metadata,
                 Some(u64::from(identity.dwVolumeSerialNumber)),
@@ -139,7 +152,9 @@ impl Metadata {
             accessed_at,
             modified_at,
             created_at,
-            permissions: Permissions::from_unix_mode(permission_mode(status.st_mode)),
+            permissions: Permissions::from_unix_mode(permission_mode(
+                status.st_mode,
+            )),
             device_id: native_id(status.st_dev),
             file_id: native_id(status.st_ino),
         }
@@ -168,7 +183,9 @@ impl Metadata {
             accessed_at: metadata.accessed().ok(),
             modified_at: metadata.modified().ok(),
             created_at: metadata.created().ok(),
-            permissions: Permissions::from_read_only(metadata.permissions().readonly()),
+            permissions: Permissions::from_read_only(
+                metadata.permissions().readonly(),
+            ),
             device_id,
             file_id,
         }
@@ -281,14 +298,18 @@ where
 {
     let seconds = u64::try_from(seconds).ok()?;
     let nanoseconds = nanoseconds.try_into().ok()?;
-    UNIX_EPOCH
-        .checked_add(Duration::from_secs(seconds).saturating_add(Duration::from_nanos(nanoseconds)))
+    UNIX_EPOCH.checked_add(
+        Duration::from_secs(seconds)
+            .saturating_add(Duration::from_nanos(nanoseconds)),
+    )
 }
 
 /// Extracts portable timestamps from Linux and Android `stat` values.
 #[cfg(any(target_os = "linux", target_os = "android"))]
 #[inline]
-fn stat_times(status: &libc::stat) -> (Option<SystemTime>, Option<SystemTime>, Option<SystemTime>) {
+fn stat_times(
+    status: &libc::stat,
+) -> (Option<SystemTime>, Option<SystemTime>, Option<SystemTime>) {
     (
         system_time(status.st_atime, status.st_atime_nsec),
         system_time(status.st_mtime, status.st_mtime_nsec),
@@ -296,10 +317,44 @@ fn stat_times(status: &libc::stat) -> (Option<SystemTime>, Option<SystemTime>, O
     )
 }
 
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::fs::File;
+
+    #[cfg(unix)]
+    #[test]
+    fn observes_open_file_and_identity() {
+        let file = File::open("Cargo.toml").expect("manifest exists");
+        let metadata =
+            Metadata::from_open_file(&file).expect("metadata available");
+        assert_eq!(metadata.kind(), EntryKind::File);
+        assert!(metadata.size() > 0);
+        assert!(metadata.is_same_file(&metadata));
+        assert!(metadata.accessed_at().is_some());
+        assert!(metadata.modified_at().is_some());
+        assert!(metadata.created_at().is_some());
+        let _ = metadata.permissions();
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn converts_modes_and_native_ids() {
+        assert_eq!(permission_mode(0o17777_u32), 0o7777);
+        assert_eq!(native_id(7_u32), Some(7));
+        assert_eq!(native_id(-1_i32), None);
+        let metadata = fs::metadata("Cargo.toml").expect("manifest exists");
+        let rooted = Metadata::from_native(&metadata);
+        assert_eq!(rooted.kind(), EntryKind::File);
+    }
+}
+
 /// Extracts portable timestamps from Apple and FreeBSD `stat` values.
 #[cfg(any(target_os = "macos", target_os = "ios", target_os = "freebsd"))]
 #[inline]
-fn stat_times(status: &libc::stat) -> (Option<SystemTime>, Option<SystemTime>, Option<SystemTime>) {
+fn stat_times(
+    status: &libc::stat,
+) -> (Option<SystemTime>, Option<SystemTime>, Option<SystemTime>) {
     (
         system_time(status.st_atime, status.st_atime_nsec),
         system_time(status.st_mtime, status.st_mtime_nsec),

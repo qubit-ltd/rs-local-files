@@ -7,6 +7,8 @@
 // =============================================================================
 //! Native write-open options.
 // qubit-style: allow source-test-pair
+// qubit-style: allow inline-tests
+// qubit-style: allow explicit-imports
 
 use std::time::Duration;
 
@@ -78,7 +80,10 @@ impl OpenOptions {
     ///
     /// # Returns
     /// Updated options.
-    pub(crate) const fn with_open_retry_timeout(mut self, timeout: Duration) -> Self {
+    pub(crate) const fn with_open_retry_timeout(
+        mut self,
+        timeout: Duration,
+    ) -> Self {
         self.open_retry_timeout = Some(timeout);
         self
     }
@@ -89,5 +94,24 @@ impl Default for OpenOptions {
     /// unbounded open retry.
     fn default() -> Self {
         Self::new(Mode::default())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn builders_update_open_behavior() {
+        let options = OpenOptions::new(Mode::AppendOrCreate)
+            .with_parents()
+            .with_open_retry_timeout(Duration::from_millis(5));
+        assert_eq!(options.mode(), Mode::AppendOrCreate);
+        assert!(options.creates_parents());
+        assert_eq!(
+            options.open_retry_timeout(),
+            Some(Duration::from_millis(5))
+        );
+        assert_eq!(OpenOptions::default().mode(), Mode::default());
     }
 }

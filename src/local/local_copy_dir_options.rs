@@ -7,6 +7,8 @@
 // =============================================================================
 //! Recursive directory copy options.
 // qubit-style: allow source-test-pair
+// qubit-style: allow inline-tests
+// qubit-style: allow explicit-imports
 
 use std::time::Duration;
 
@@ -147,7 +149,9 @@ impl LocalCopyDirOptions {
     /// # Returns
     /// Policy applied to source and destination type mismatches.
     #[inline(always)]
-    pub(crate) const fn type_conflict_policy(&self) -> LocalCopyTypeConflictPolicy {
+    pub(crate) const fn type_conflict_policy(
+        &self,
+    ) -> LocalCopyTypeConflictPolicy {
         self.type_conflict
     }
 
@@ -236,7 +240,10 @@ impl LocalCopyDirOptions {
     /// # Returns
     /// Updated directory copy options.
     #[allow(dead_code)]
-    pub(crate) const fn with_open_retry_timeout(mut self, timeout: Duration) -> Self {
+    pub(crate) const fn with_open_retry_timeout(
+        mut self,
+        timeout: Duration,
+    ) -> Self {
         self.open_retry_timeout = Some(timeout);
         self
     }
@@ -250,5 +257,38 @@ impl Default for LocalCopyDirOptions {
     /// follow symbolic links, and do not preserve source permissions.
     fn default() -> Self {
         Self::new()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::time::Duration;
+
+    #[test]
+    fn builders_update_every_policy() {
+        let options = LocalCopyDirOptions::new()
+            .with_conflict(LocalCopyConflictPolicy::Overwrite)
+            .with_type_conflict(LocalCopyTypeConflictPolicy::Replace)
+            .with_symlink_policy(LocalSymlinkPolicy::FollowWithinScope)
+            .preserve_permissions()
+            .with_open_retry_timeout(Duration::from_secs(1))
+            .with_durability(LocalDurabilityRequirement::Required);
+        assert_eq!(
+            options.conflict_policy(),
+            LocalCopyConflictPolicy::Overwrite
+        );
+        assert_eq!(
+            options.type_conflict_policy(),
+            LocalCopyTypeConflictPolicy::Replace
+        );
+        assert_eq!(
+            options.symlink_policy(),
+            LocalSymlinkPolicy::FollowWithinScope
+        );
+        assert!(options.preserves_permissions());
+        assert_eq!(options.open_retry_timeout(), Some(Duration::from_secs(1)));
+        assert_eq!(options.durability(), LocalDurabilityRequirement::Required);
+        assert_eq!(LocalCopyDirOptions::default(), LocalCopyDirOptions::new());
     }
 }
