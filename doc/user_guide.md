@@ -28,16 +28,15 @@ temporary entries are owned stateful resources. `LocalFileNames` and
 `LocalFileSystem` stores one symbolic-link policy inherited by all operations.
 `LocalFileSystem::rooted(root)` defaults to `FollowWithinScope`; it follows
 links only while the resolved path remains below the opened root. Host defaults
-to `FollowAcrossScope`, because Host has no narrower root boundary. Use
-`with_symlink_policy` to choose `Reject`, `FollowWithinScope`, or
-`FollowAcrossScope`; list and copy options can override the policy for one
-operation.
+to `FollowAcrossScope`, because Host has no narrower root boundary. Rooted
+supports only `Reject` and `FollowWithinScope`; configuring
+`FollowAcrossScope` returns `InvalidOptions`. The fallible
+`with_symlink_policy` method and list/copy options can select a supported policy.
 
 The policy applies to every non-final path component. With
-`FollowAcrossScope`, a rooted path such as `etc/link/config` may read or modify
-the object reached by `link`, even when that object is outside the rooted
-directory. This is intentional for layouts such as a Git checkout linked into
-`/etc`.
+`FollowWithinScope`, a rooted path such as `etc/link/config` is rejected when
+`link` resolves outside the opened directory. `FollowAcrossScope` is available
+only in Host mode.
 
 Final components retain native operation semantics:
 
@@ -174,9 +173,10 @@ for entry in walker {
 
 Rooted paths must be relative descendants. Absolute paths, prefixes, `.`, and
 `..` are rejected. Intermediate symbolic links follow the configured policy;
-`FollowWithinScope` rejects a link that resolves outside the root, while
-`FollowAcrossScope` permits it. The diagnostic root path is not the authority
-for descriptor-relative operations: renaming it after `open` does not redirect
+`FollowWithinScope` rejects a link that resolves outside the root. The
+Rooted namespace does not support `FollowAcrossScope`; that configuration
+returns `InvalidOptions`. The diagnostic root path is not the authority for
+descriptor-relative operations: renaming it after `open` does not redirect
 those operations.
 Lexical containment is useful early classification, but it is not a substitute
 for descriptor-relative authorization.
@@ -194,7 +194,7 @@ I/O errors are available through the structured error source when present.
 
 | Symptom | Check |
 | --- | --- |
-| A rooted operation rejects a path | Pass a relative descendant; remove absolute prefixes, `.`, and `..`, or choose `FollowAcrossScope` when an intermediate link is intentionally outside the root. |
+| A rooted operation rejects a path | Pass a relative descendant and remove absolute prefixes, `.`, and `..`; an escaping intermediate link returns `InvalidPath`, while selecting `FollowAcrossScope` returns `InvalidOptions`. |
 | A required guarantee is rejected | Inspect the selected filesystem capabilities and relax the requirement only if the application permits it. |
 | Copy or rename returns an error | Inspect its typed failure state before retrying, cleanup, or treating the target as absent. |
 | A temporary entry remains | Retain the resource and call its explicit lifecycle method; drop cleanup is best effort. |

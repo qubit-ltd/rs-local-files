@@ -97,9 +97,9 @@ option/result/error 和两种本地 namespace。Host 操作通过
 无状态工具按类型组织：
 
 ```rust
-pub enum LocalFileNames {}
-pub enum LocalPaths {}
-pub enum LocalPathCodec {}
+pub struct LocalFileNames { _private: () }
+pub struct LocalPaths { _private: () }
+pub struct LocalPathCodec { _private: () }
 ```
 
 `LocalFileNames` 负责 native filename 校验、随机安全名称和保留名称规则；
@@ -251,8 +251,8 @@ Host API 可以接受绝对或相对 native path。任何会跨越多个系统�
 
 `LocalFileSystem` 实例保存符号链接解析策略。Rooted 默认
 `FollowWithinScope`，Host 默认 `FollowAcrossScope`；显式策略还可以是 `Reject`。
-策略统一作用于中间路径组件，Rooted 的 `FollowAcrossScope` 明确允许解析和修改越出
-root 的对象。
+策略统一作用于中间路径组件。Rooted 仅支持 `Reject` 和 `FollowWithinScope`；选择
+`FollowAcrossScope` 会返回 `InvalidOptions`，因为 Rooted authority 不能越出已打开的 root。
 
 最终组件必须按操作系统操作语义处理，而不是使用一个全局的 follow/no-follow 布尔值：
 
@@ -263,8 +263,8 @@ root 的对象。
 - delete、rename、copy target 和 temp persist 操作链接 entry 本身；
 - copy source 复制链接 entry 本身。
 
-这样既支持 `/etc` 链接到 Git checkout 后的透明修改，也保持 `delete(link)` 与
-`rename(link, ...)` 不会误删或改写链接目标。
+Host 可以支持 `/etc` 链接到 Git checkout 后的透明修改；Rooted 则保持
+`delete(link)` 与 `rename(link, ...)` 不会误删或改写链接目标。
 
 ### 5.3 Native path
 
@@ -285,8 +285,8 @@ path 的输入。
 1. 从已打开 root descriptor/handle 出发；
 2. 逐 component 解析 descendant；
 3. 拒绝 absolute path、platform prefix、`.` 和逃逸用 `..`；
-4. 按实例策略处理中间 symlink；`FollowWithinScope` 证明 containment，
-   `FollowAcrossScope` 明确允许越出 root；
+4. 按实例策略处理中间 symlink；Rooted 的 `FollowWithinScope` 证明 containment，
+   Rooted 不支持 `FollowAcrossScope`；
 5. 不因诊断路径被 rename 或替换而改变仍采用 descriptor authority 的操作；
 6. 在返回 native path 仅供诊断时明确其不参与授权判断。
 
@@ -310,8 +310,8 @@ handle、reparse-point-aware traversal 和 handle-relative 能力。
 ### 6.3 Symlink、junction 与 mount
 
 Rooted recursive operation 默认继承 filesystem 的符号链接策略。跟随模式按底层目录对象
-身份检测循环，返回路径保留逻辑 link 组件；`FollowWithinScope` 持续证明 containment，
-`FollowAcrossScope` 允许目标在 root 外。Host 的 `FollowWithinScope` 与
+身份检测循环，返回路径保留逻辑 link 组件；Rooted 的 `FollowWithinScope` 持续证明 containment，
+而 `FollowAcrossScope` 仅适用于 Host。Host 的 `FollowWithinScope` 与
 `FollowAcrossScope` 实际访问范围相同。
 
 当前不提供 mount/device 边界 option，也不承诺在递归操作中检测或报告该边界；调用方若有
@@ -390,7 +390,7 @@ adapter 不通过 message 猜测状态。
 
 目录复制继承 filesystem 的 symlink policy；copy source 的最终 symlink 复制 entry 本身，
 递归目录中的 link 目录在允许跟随时才进入。跟随时必须检测循环；Rooted
-`FollowWithinScope` 持续执行 containment，`FollowAcrossScope` 允许目标越出 root。
+`FollowWithinScope` 持续执行 containment，`FollowAcrossScope` 仅在 Host 中可用。
 
 ### 7.3 Publication
 

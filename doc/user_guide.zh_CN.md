@@ -25,13 +25,13 @@ walker 与临时条目都是拥有资源的有状态对象。`LocalFileNames` �
 `LocalFileSystem` 实例保存一个由所有操作继承的符号链接策略。
 `LocalFileSystem::rooted(root)` 默认使用 `FollowWithinScope`：允许跟随链接，
 但解析结果必须仍位于已打开的 root 内。Host 默认使用 `FollowAcrossScope`，因为
-Host 没有更窄的 root 边界。可以通过 `with_symlink_policy` 选择 `Reject`、
-`FollowWithinScope` 或 `FollowAcrossScope`；`list` 和 `copy` 的 options 可以
-对单次操作覆盖策略。
+Host 没有更窄的 root 边界。Rooted 仅支持 `Reject` 和 `FollowWithinScope`；配置
+`FollowAcrossScope` 会返回 `InvalidOptions`。可失败的 `with_symlink_policy` 以及
+`list`、`copy` options 可以选择受支持的策略。
 
-策略作用于所有中间路径组件。Rooted 配置为 `FollowAcrossScope` 时，像
-`etc/link/config` 这样的路径可以读写 `link` 指向的 root 外对象。这是显式授予的能力，
-适合把 Git checkout 通过符号链接接入 `/etc` 的场景。
+策略作用于所有中间路径组件。Rooted 使用 `FollowWithinScope` 时，像
+`etc/link/config` 这样的路径若通过 `link` 越出已打开 root，会返回 `InvalidPath`。
+`FollowAcrossScope` 仅适用于 Host。
 
 最终路径组件遵循真实文件系统中的操作语义：
 
@@ -153,7 +153,8 @@ walker 会按需打开并推进目录；最大深度、符号链接策略和默�
 `ResourceLimit`。rooted walker 还会逐项读取目录，避免先将单个目录完整收集到 `Vec` 中。
 
 rooted 路径必须是相对后代。绝对路径、平台前缀、`.` 和 `..` 会被拒绝；中间符号链接遵循
-实例策略。`FollowWithinScope` 会拒绝解析到 root 外的链接，`FollowAcrossScope` 则允许该操作。
+实例策略。`FollowWithinScope` 会拒绝解析到 root 外的链接；Rooted 不支持
+`FollowAcrossScope`，配置该策略会返回 `InvalidOptions`。
 诊断用根路径不是权限本身：`open` 之后重命名它不会重定向仍采用描述符权限的操作。词法包含
 关系可用于早期分类，但不能替代基于描述符的权限控制。
 
@@ -167,7 +168,7 @@ rooted 路径必须是相对后代。绝对路径、平台前缀、`.` 和 `..` 
 
 | 症状 | 检查方式 |
 | --- | --- |
-| rooted 操作拒绝路径 | 传入相对后代，移除绝对前缀、`.`、`..`；若中间链接越界是有意行为，选择 `FollowAcrossScope`。 |
+| rooted 操作拒绝路径 | 传入相对后代并移除绝对前缀、`.`、`..`；中间链接越界返回 `InvalidPath`，选择 `FollowAcrossScope` 则返回 `InvalidOptions`。 |
 | 要求保证被拒绝 | 检查所选文件系统的 capability；仅在业务允许时放宽要求。 |
 | copy 或 rename 出错 | 先检查类型化失败状态，再决定重试、清理或认定目标不存在。 |
 | 临时条目仍存在 | 保留资源并调用显式生命周期方法；drop 清理只是尽力而为。 |

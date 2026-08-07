@@ -66,8 +66,9 @@ assert_eq!(content, r#"{"version":1}"#);
 需要保存配置、传递给其他组件或适配到更高层文件系统 SPI 时，使用 `LocalFileSystem` 实例。
 
 符号链接策略按 `LocalFileSystem` 实例配置；Rooted 默认
-`FollowWithinScope`，Host 默认 `FollowAcrossScope`。各类操作对最终链接的
-具体语义请参阅[用户手册](doc/user_guide.zh_CN.md)。
+`FollowWithinScope`，Host 默认 `FollowAcrossScope`。Rooted 仅支持
+`Reject` 和 `FollowWithinScope`；选择 `FollowAcrossScope` 会返回
+`InvalidOptions`。各类操作对最终链接的具体语义请参阅[用户手册](doc/user_guide.zh_CN.md)。
 
 临时资源清理会校验所有权，但它不是并发同步边界。guard 删除前会比较创建时保存的
 文件系统标识，因此通常能拒绝误删替换条目；但标识检查与按路径删除是两个独立操作，
@@ -81,8 +82,9 @@ assert_eq!(content, r#"{"version":1}"#);
 主机路径使用 `LocalFileSystem::host()`。当一个已打开目录就是权限边界时，
 使用 `LocalFileSystem::rooted(root)`。两种实例提供相同操作，只改变路径解释方式。rooted
 路径必须是相对后代；绝对路径、平台前缀、`.` 和 `..` 会被拒绝。中间符号链接遵循实例
-策略：默认的 `FollowWithinScope` 保持在已打开 root 内，`FollowAcrossScope` 则显式允许越出。
-之后重命名诊断用的根路径也不会重定向已打开的权限。
+策略：默认的 `FollowWithinScope` 保持在已打开 root 内；`FollowAcrossScope` 仅适用于
+Host，Rooted 会拒绝该配置，因此任何操作都不能越出已打开的权限。之后重命名诊断用的
+根路径也不会重定向已打开的权限。
 
 复制会根据源元数据选择文件或目录行为。复制和重命名失败会保留已证实的最强发布状态，
 因此调用方必须检查类型化失败，不能假设出错后目标未变。`CreateNew` 和
