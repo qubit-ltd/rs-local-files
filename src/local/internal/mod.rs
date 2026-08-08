@@ -57,6 +57,7 @@ mod rooted_staged_file;
 mod rooted_staging_retry;
 mod staged_file;
 mod temp_entry;
+pub(crate) mod test_fault_guard;
 pub(crate) mod test_support;
 #[cfg(unix)]
 mod unix_nonblocking;
