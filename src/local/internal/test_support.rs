@@ -7,6 +7,8 @@
 // =============================================================================
 //! Private fault injection support used by deterministic integration tests.
 
+#[cfg(feature = "internal-test-support")]
+use super::test_fault_guard::TestFaultGuard;
 use std::io;
 
 #[cfg(feature = "internal-test-support")]
@@ -26,14 +28,6 @@ static NTH_FAULT_OCCURRENCES: AtomicUsize = AtomicUsize::new(0);
 
 #[cfg(feature = "internal-test-support")]
 static ACTIVE_FAULT: Mutex<Option<String>> = Mutex::new(None);
-
-/// Scoped controller for one deterministic test fault in the current process.
-#[cfg(feature = "internal-test-support")]
-#[doc(hidden)]
-#[derive(Debug)]
-pub struct TestFaultGuard {
-    active: bool,
-}
 
 /// Installs one deterministic test fault for the current process.
 #[cfg(feature = "internal-test-support")]

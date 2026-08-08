@@ -1,17 +1,15 @@
 // =============================================================================
-//    Copyright (c) 2026 Haixing Hu.
+//    Copyright (c) 2025 - 2026 Haixing Hu.
 //
 //    SPDX-License-Identifier: Apache-2.0
 //
 //    Licensed under the Apache License, Version 2.0.
 // =============================================================================
+//! Scoped test fault guard for deterministic fault injection.
 
-mod publication_state;
-
-mod host_local_file_system;
-
+#[derive(Debug)]
 #[cfg(feature = "internal-test-support")]
-mod test_fault_guard_tests;
-
-#[cfg(feature = "internal-test-support")]
-mod test_support_tests;
+#[doc(hidden)]
+pub struct TestFaultGuard {
+    pub(crate) active: bool,
+}
