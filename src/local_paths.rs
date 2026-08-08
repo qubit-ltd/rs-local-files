@@ -8,24 +8,11 @@
 
 use std::{
     env,
-    ffi::{
-        OsStr,
-        OsString,
-    },
-    path::{
-        Component,
-        Path,
-        PathBuf,
-    },
+    ffi::{OsStr, OsString},
+    path::{Component, Path, PathBuf},
 };
 
-use crate::{
-    LocalFileError,
-    LocalFileErrorKind,
-    LocalFileOperation,
-    LocalPathCodec,
-    LocalResult,
-};
+use crate::{LocalFileError, LocalFileErrorKind, LocalFileOperation, LocalPathCodec, LocalResult};
 
 /// Native path validation, binding, and composition utilities.
 pub struct LocalPaths {
@@ -34,109 +21,44 @@ pub struct LocalPaths {
 }
 
 impl LocalPaths {
-    /// Decodes canonical components into an absolute native path.
+    /// Decodes canonical components in the selected filesystem scope.
     ///
-    /// # Parameters
-    ///
-    /// - `components`: Canonical escaped-byte components in the platform's
-    ///   absolute-path shape.
-    ///
-    /// # Returns
-    ///
-    /// An absolute native path without dot, parent, separator, root, or prefix
-    /// components outside its required platform root. Unix paths use an empty
-    /// first component as the root marker; Windows paths use `""`, the drive
-    /// component (for example `"C:"`), and then normal descendants.
-    ///
-    /// # Errors
-    ///
-    /// Returns `LocalFileError` with `ComposePath` when canonical decoding
-    /// fails or the components do not form a supported absolute path.
-    pub fn from_canonical_absolute_components<'a>(
+    /// Host paths are absolute and omit an artificial root marker. Rooted
+    /// paths are relative descendants, with an empty component sequence
+    /// representing the opened authority root.
+    pub fn from_canonical_components<'a>(
+        scope: crate::LocalFileSystemScope,
         components: impl IntoIterator<Item = &'a str>,
     ) -> LocalResult<PathBuf> {
-        from_canonical_absolute_components(components)
+        match scope {
+            crate::LocalFileSystemScope::Host => from_canonical_host_components(components),
+            crate::LocalFileSystemScope::Rooted => {
+                let mut path = PathBuf::new();
+                for component in components {
+                    path.push(decode_normal_component(component)?);
+                }
+                Ok(path)
+            }
+        }
     }
 
-    /// Decodes canonical components into a relative native path.
+    /// Encodes a native path as canonical components in the selected scope.
     ///
-    /// # Parameters
-    ///
-    /// - `components`: Canonical escaped-byte components, each of which must
-    ///   decode to one normal relative component.
-    ///
-    /// # Returns
-    ///
-    /// A relative native path consisting solely of normal components.
-    ///
-    /// # Errors
-    ///
-    /// Returns `LocalFileError` with `ComposePath` when canonical decoding
-    /// fails or a component would alter path authority.
-    pub fn from_canonical_relative_components<'a>(
-        components: impl IntoIterator<Item = &'a str>,
-    ) -> LocalResult<PathBuf> {
-        let mut path = PathBuf::new();
-        let mut has_component = false;
-        for component in components {
-            path.push(decode_normal_component(component)?);
-            has_component = true;
-        }
-        if !has_component {
-            return Err(invalid_path_error());
-        }
-        Ok(path)
-    }
-
-    /// Encodes an absolute native path as canonical components.
-    ///
-    /// # Parameters
-    ///
-    /// - `path`: Native absolute path using only the supported platform root
-    ///   and normal descendant components.
-    ///
-    /// # Returns
-    ///
-    /// Canonical escaped-byte components in the platform's absolute-path
-    /// shape. Unix output starts with an empty root marker. Windows output
-    /// starts with an empty marker followed by the drive component (for
-    /// example `"C:"`) before normal descendants.
-    ///
-    /// # Errors
-    ///
-    /// Returns `LocalFileError` with `ComposePath` when the path is not a
-    /// supported absolute shape or one component cannot be canonically encoded.
-    pub fn to_canonical_absolute_components(
+    /// Host output contains the platform root authority; rooted output is
+    /// relative and is empty for the authority root.
+    pub fn to_canonical_components(
+        scope: crate::LocalFileSystemScope,
         path: &Path,
     ) -> LocalResult<Vec<String>> {
-        to_canonical_absolute_components(path)
-    }
-
-    /// Encodes a relative native path as canonical components.
-    ///
-    /// # Parameters
-    ///
-    /// - `path`: Native relative path consisting solely of normal components.
-    ///
-    /// # Returns
-    ///
-    /// Canonical escaped-byte components in lexical order.
-    ///
-    /// # Errors
-    ///
-    /// Returns `LocalFileError` with `ComposePath` when `path` contains a
-    /// root, prefix, dot, parent, or no normal components.
-    pub fn to_canonical_relative_components(
-        path: &Path,
-    ) -> LocalResult<Vec<String>> {
-        if path.is_absolute() || has_disallowed_component(path) {
-            return Err(invalid_path_error());
+        match scope {
+            crate::LocalFileSystemScope::Host => to_canonical_host_components(path),
+            crate::LocalFileSystemScope::Rooted => {
+                if path.is_absolute() || has_disallowed_component(path) {
+                    return Err(invalid_path_error());
+                }
+                encode_normal_components(path)
+            }
         }
-        let components = encode_normal_components(path)?;
-        if components.is_empty() {
-            return Err(invalid_path_error());
-        }
-        Ok(components)
     }
 
     /// Binds a relative host path to one current-working-directory snapshot.
@@ -187,25 +109,17 @@ impl LocalPaths {
     pub fn bind_host_paths(paths: [&Path; 2]) -> LocalResult<[PathBuf; 2]> {
         let current = if paths.iter().any(|path| path.is_relative()) {
             Some(
-                current_directory_for_binding("local-paths-bind-cwd").map_err(
-                    |source| {
-                        LocalFileError::from_io(
-                            LocalFileOperation::BindPath,
-                            None,
-                            None,
-                            source,
-                        )
-                    },
-                )?,
+                current_directory_for_binding("local-paths-bind-cwd").map_err(|source| {
+                    LocalFileError::from_io(LocalFileOperation::BindPath, None, None, source)
+                })?,
             )
         } else {
             None
         };
         Ok(paths.map(|path| {
-            current.as_ref().map_or_else(
-                || path.to_path_buf(),
-                |directory| directory.join(path),
-            )
+            current
+                .as_ref()
+                .map_or_else(|| path.to_path_buf(), |directory| directory.join(path))
         }))
     }
 
@@ -224,10 +138,7 @@ impl LocalPaths {
     ///
     /// Returns `LocalFileError` when either input contains `.` or `..`, or when
     /// absolute and relative forms differ.
-    pub fn is_lexically_within(
-        path: &Path,
-        ancestor: &Path,
-    ) -> LocalResult<bool> {
+    pub fn is_lexically_within(path: &Path, ancestor: &Path) -> LocalResult<bool> {
         if path.has_root() != ancestor.has_root()
             || has_disallowed_component(path)
             || has_disallowed_component(ancestor)
@@ -257,10 +168,7 @@ impl LocalPaths {
     ///
     /// Returns `LocalFileError` for absolute, prefixed, dot, or parent
     /// components.
-    pub fn compose_descendant(
-        base: &Path,
-        descendant: &Path,
-    ) -> LocalResult<PathBuf> {
+    pub fn compose_descendant(base: &Path, descendant: &Path) -> LocalResult<PathBuf> {
         if descendant.as_os_str().is_empty()
             || descendant.has_root()
             || has_disallowed_component(descendant)
@@ -287,9 +195,9 @@ impl LocalPaths {
 #[must_use]
 #[inline]
 fn has_disallowed_component(path: &Path) -> bool {
-    path.components().any(|component| {
-        matches!(component, Component::CurDir | Component::ParentDir)
-    }) || has_raw_dot_component(path)
+    path.components()
+        .any(|component| matches!(component, Component::CurDir | Component::ParentDir))
+        || has_raw_dot_component(path)
 }
 
 /// Detects raw dot components that `Path::components` may normalize away.
@@ -415,11 +323,7 @@ fn decode_normal_component(component: &str) -> LocalResult<OsString> {
 fn decode_canonical_component(component: &str) -> LocalResult<OsString> {
     LocalPathCodec::from_canonical_text(component)
         .map_err(|error| {
-            LocalFileError::from_path_codec(
-                LocalFileOperation::ComposePath,
-                None,
-                error,
-            )
+            LocalFileError::from_path_codec(LocalFileOperation::ComposePath, None, error)
         })
         .map(|native| native.into_owned())
 }
@@ -463,11 +367,7 @@ fn encode_native_component(component: &OsStr) -> LocalResult<String> {
     LocalPathCodec::to_canonical_text(component)
         .map(|canonical| canonical.into_owned())
         .map_err(|error| {
-            LocalFileError::from_path_codec(
-                LocalFileOperation::ComposePath,
-                None,
-                error,
-            )
+            LocalFileError::from_path_codec(LocalFileOperation::ComposePath, None, error)
         })
 }
 
@@ -551,11 +451,11 @@ const fn has_native_separator(_component: &OsStr) -> bool {
     true
 }
 
-/// Builds a Unix absolute path from canonical path components.
+/// Builds a Unix Host path from canonical path components.
 ///
 /// # Parameters
 ///
-/// - `components`: Canonical components beginning with the empty root marker.
+/// - `components`: Canonical descendant components; an empty sequence is `/`.
 ///
 /// # Returns
 ///
@@ -563,17 +463,12 @@ const fn has_native_separator(_component: &OsStr) -> bool {
 ///
 /// # Errors
 ///
-/// Returns a `ComposePath` error when the root marker or any component is
-/// malformed.
+/// Returns a `ComposePath` error when any component is malformed.
 #[cfg(unix)]
 #[inline(never)]
-fn from_canonical_absolute_components<'a>(
+fn from_canonical_host_components<'a>(
     components: impl IntoIterator<Item = &'a str>,
 ) -> LocalResult<PathBuf> {
-    let mut components = components.into_iter();
-    if components.next() != Some("") {
-        return Err(invalid_path_error());
-    }
     let mut path = PathBuf::from("/");
     for component in components {
         path.push(decode_normal_component(component)?);
@@ -581,7 +476,7 @@ fn from_canonical_absolute_components<'a>(
     Ok(path)
 }
 
-/// Encodes a Unix absolute native path into canonical components.
+/// Encodes a Unix Host path into canonical components.
 ///
 /// # Parameters
 ///
@@ -589,14 +484,14 @@ fn from_canonical_absolute_components<'a>(
 ///
 /// # Returns
 ///
-/// Components beginning with the empty Unix root component.
+/// Components contain only normal descendants; `/` is represented by `[]`.
 ///
 /// # Errors
 ///
 /// Returns a `ComposePath` error when `path` is not absolute or has raw dot
 /// components.
 #[cfg(unix)]
-fn to_canonical_absolute_components(path: &Path) -> LocalResult<Vec<String>> {
+fn to_canonical_host_components(path: &Path) -> LocalResult<Vec<String>> {
     if !path.is_absolute() || has_disallowed_component(path) {
         return Err(invalid_path_error());
     }
@@ -604,7 +499,7 @@ fn to_canonical_absolute_components(path: &Path) -> LocalResult<Vec<String>> {
     if !matches!(native_components.next(), Some(Component::RootDir)) {
         return Err(invalid_path_error());
     }
-    let mut encoded = vec![String::new()];
+    let mut encoded = Vec::new();
     for component in native_components {
         let Component::Normal(component) = component else {
             return Err(invalid_path_error());
@@ -612,7 +507,8 @@ fn to_canonical_absolute_components(path: &Path) -> LocalResult<Vec<String>> {
         encoded.push(encode_native_component(component)?);
     }
     debug_assert!(matches!(
-        LocalPaths::from_canonical_absolute_components(
+        LocalPaths::from_canonical_components(
+            crate::LocalFileSystemScope::Host,
             encoded.iter().map(String::as_str),
         ),
         Ok(decoded) if decoded == path
@@ -620,12 +516,11 @@ fn to_canonical_absolute_components(path: &Path) -> LocalResult<Vec<String>> {
     Ok(encoded)
 }
 
-/// Builds a Windows drive-rooted path from canonical path components.
+/// Builds a Windows Host path from canonical path components.
 ///
 /// # Parameters
 ///
-/// - `components`: Canonical components beginning with an empty root marker and
-///   drive component.
+/// - `components`: Canonical components beginning with a drive component.
 ///
 /// # Returns
 ///
@@ -633,23 +528,18 @@ fn to_canonical_absolute_components(path: &Path) -> LocalResult<Vec<String>> {
 ///
 /// # Errors
 ///
-/// Returns a `ComposePath` error when the root marker, drive, or any component
-/// is malformed.
+/// Returns a `ComposePath` error when the drive or any component is malformed.
 #[cfg(windows)]
 #[inline(never)]
-fn from_canonical_absolute_components<'a>(
+fn from_canonical_host_components<'a>(
     components: impl IntoIterator<Item = &'a str>,
 ) -> LocalResult<PathBuf> {
     let mut components = components.into_iter();
-    let (Some(root), Some(drive)) = (components.next(), components.next())
-    else {
+    let Some(drive) = components.next() else {
         return Err(invalid_path_error());
     };
     let native_drive = decode_canonical_component(drive)?;
-    if !root.is_empty()
-        || !is_windows_drive_component(drive)
-        || native_drive != drive
-    {
+    if !is_windows_drive_component(drive) || native_drive != drive {
         return Err(invalid_path_error());
     }
     let mut path = PathBuf::from(format!("{drive}\\\\"));
@@ -674,7 +564,7 @@ fn is_windows_drive_component(component: &str) -> bool {
     matches!(component.as_bytes(), [letter, b':'] if letter.is_ascii_alphabetic())
 }
 
-/// Encodes a Windows drive-rooted path into canonical components.
+/// Encodes a Windows Host path into canonical components.
 ///
 /// # Parameters
 ///
@@ -682,15 +572,14 @@ fn is_windows_drive_component(component: &str) -> bool {
 ///
 /// # Returns
 ///
-/// Components beginning with an empty root marker and a canonical drive
-/// component.
+/// Components beginning with a canonical drive component.
 ///
 /// # Errors
 ///
 /// Returns a `ComposePath` unsupported error for UNC, device, and rooted
 /// relative paths; returns invalid input for malformed lexical descendants.
 #[cfg(windows)]
-fn to_canonical_absolute_components(path: &Path) -> LocalResult<Vec<String>> {
+fn to_canonical_host_components(path: &Path) -> LocalResult<Vec<String>> {
     if !path.is_absolute() || has_disallowed_component(path) {
         return Err(invalid_path_error());
     }
@@ -711,7 +600,7 @@ fn to_canonical_absolute_components(path: &Path) -> LocalResult<Vec<String>> {
     if !is_windows_drive_component(&drive) {
         return Err(invalid_path_error());
     }
-    let mut encoded = vec![String::new(), drive];
+    let mut encoded = vec![drive];
     for component in native_components {
         let Component::Normal(component) = component else {
             return Err(invalid_path_error());
@@ -736,7 +625,7 @@ fn to_canonical_absolute_components(path: &Path) -> LocalResult<Vec<String>> {
 /// Always returns a `ComposePath` unsupported error.
 #[cfg(not(any(unix, windows)))]
 #[inline(never)]
-fn from_canonical_absolute_components<'a>(
+fn from_canonical_host_components<'a>(
     _components: impl IntoIterator<Item = &'a str>,
 ) -> LocalResult<PathBuf> {
     Err(LocalFileError::new(
@@ -760,7 +649,7 @@ fn from_canonical_absolute_components<'a>(
 /// Always returns a `ComposePath` unsupported-platform error.
 #[cfg(not(any(unix, windows)))]
 #[inline(always)]
-fn to_canonical_absolute_components(_path: &Path) -> LocalResult<Vec<String>> {
+fn to_canonical_host_components(_path: &Path) -> LocalResult<Vec<String>> {
     Err(LocalFileError::new(
         LocalFileErrorKind::Unsupported,
         LocalFileOperation::ComposePath,
@@ -786,9 +675,7 @@ fn has_raw_dot_component(path: &Path) -> bool {
         .encode_wide()
         .collect::<Vec<_>>()
         .split(separator)
-        .any(|component| {
-            component == [b'.' as u16] || component == [b'.' as u16; 2]
-        })
+        .any(|component| component == [b'.' as u16] || component == [b'.' as u16; 2])
 }
 
 /// Detects raw dot components on unsupported native targets.
