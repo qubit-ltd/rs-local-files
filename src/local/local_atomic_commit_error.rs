@@ -11,7 +11,12 @@
 // qubit-style: allow explicit-imports
 
 use std::error::Error;
-use std::fmt::{Debug, Display, Formatter, Result as FmtResult};
+use std::fmt::{
+    Debug,
+    Display,
+    Formatter,
+    Result as FmtResult,
+};
 
 use crate::LocalAtomicWriteError;
 
@@ -109,7 +114,10 @@ impl<T> LocalAtomicCommitError<T> {
     /// The finalized writer failure when recovery remained available, or the
     /// original terminal failure when no writer was retained.
     #[inline]
-    pub(crate) fn into_final_error_with<F>(self, finalize_writer: F) -> LocalAtomicWriteError
+    pub(crate) fn into_final_error_with<F>(
+        self,
+        finalize_writer: F,
+    ) -> LocalAtomicWriteError
     where
         F: FnOnce(T, LocalAtomicWriteError) -> LocalAtomicWriteError,
     {
@@ -150,7 +158,10 @@ where
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{LocalAtomicDestinationState, LocalAtomicWriteStage};
+    use crate::{
+        LocalAtomicDestinationState,
+        LocalAtomicWriteStage,
+    };
     use std::io;
 
     fn error() -> LocalAtomicWriteError {
@@ -177,12 +188,11 @@ mod tests {
 
     #[test]
     fn finalizes_or_returns_terminal_error() {
-        let result = LocalAtomicCommitError::new(error(), Some(3_u8)).into_final_error_with(
-            |writer, error| {
+        let result = LocalAtomicCommitError::new(error(), Some(3_u8))
+            .into_final_error_with(|writer, error| {
                 assert_eq!(writer, 3);
                 error
-            },
-        );
+            });
         assert_eq!(result.kind(), io::ErrorKind::Other);
         let terminal = LocalAtomicCommitError::<u8>::new(error(), None);
         assert!(terminal.writer().is_none());

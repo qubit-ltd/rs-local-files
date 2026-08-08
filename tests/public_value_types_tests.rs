@@ -6,15 +6,35 @@
 //    Licensed under the Apache License, Version 2.0.
 // =============================================================================
 
-use std::{error::Error, ffi::OsStr, fmt, fs, io, path::Path};
+use std::{
+    error::Error,
+    ffi::OsStr,
+    fmt,
+    fs,
+    io,
+    path::Path,
+};
 
 #[cfg(not(windows))]
 use qubit_local_files::LocalPaths;
 use qubit_local_files::{
-    LocalCopyConflictPolicy, LocalCopyFailureState, LocalCopyMethod, LocalCopyOptions,
-    LocalCreateDirectoryOptions, LocalDeleteOptions, LocalFileError, LocalFileErrorKind,
-    LocalFileErrorSource, LocalFileKind, LocalFileNames, LocalFileOperation, LocalFileSystem,
-    LocalFileSystemCapabilities, LocalPathCodecError, LocalRenameFailureState, LocalRenameOptions,
+    LocalCopyConflictPolicy,
+    LocalCopyFailureState,
+    LocalCopyMethod,
+    LocalCopyOptions,
+    LocalCreateDirectoryOptions,
+    LocalDeleteOptions,
+    LocalFileError,
+    LocalFileErrorKind,
+    LocalFileErrorSource,
+    LocalFileKind,
+    LocalFileNames,
+    LocalFileOperation,
+    LocalFileSystem,
+    LocalFileSystemCapabilities,
+    LocalPathCodecError,
+    LocalRenameFailureState,
+    LocalRenameOptions,
 };
 use tempfile::tempdir;
 
@@ -100,12 +120,16 @@ fn test_local_file_error_classifies_io_and_retains_context() {
 /// standard-error chaining behavior.
 #[test]
 fn test_local_file_error_sources_preserve_typed_causes() {
-    let io_source = LocalFileErrorSource::Io(io::Error::from(io::ErrorKind::PermissionDenied));
+    let io_source = LocalFileErrorSource::Io(io::Error::from(
+        io::ErrorKind::PermissionDenied,
+    ));
     assert!(io_source.to_string().contains("permission denied"));
     assert!(Error::source(&io_source).is_some());
 
     let codec_source =
-        LocalFileErrorSource::PathCodec(LocalPathCodecError::InvalidEscape { offset: 4 });
+        LocalFileErrorSource::PathCodec(LocalPathCodecError::InvalidEscape {
+            offset: 4,
+        });
     assert!(codec_source.to_string().contains("4"));
     assert!(Error::source(&codec_source).is_some());
 }
@@ -159,9 +183,12 @@ fn test_local_file_error_display_propagates_formatter_failure() {
     }
 
     for successful_writes in 0..16 {
-        let error = LocalFileError::new(LocalFileErrorKind::Io, LocalFileOperation::Metadata)
-            .with_path("source".into())
-            .with_target("target".into());
+        let error = LocalFileError::new(
+            LocalFileErrorKind::Io,
+            LocalFileOperation::Metadata,
+        )
+        .with_path("source".into())
+        .with_target("target".into());
         let mut writer = RejectingWriter { successful_writes };
         let _ = fmt::write(&mut writer, format_args!("{error}"));
     }
@@ -206,7 +233,9 @@ fn test_native_file_name_helpers_cover_component_and_validation_paths() {
     assert_eq!(Some(OsStr::new("archive.tar")), value.file_stem());
     assert_eq!(Some(OsStr::new("archive")), value.file_prefix());
     assert_eq!(Some(OsStr::new("gz")), value.extension());
-    assert!(LocalFileNames::validate_portable(OsStr::new("safe-name.txt")).is_ok());
+    assert!(
+        LocalFileNames::validate_portable(OsStr::new("safe-name.txt")).is_ok()
+    );
     assert!(LocalFileNames::validate_portable(OsStr::new("bad/name")).is_err());
     assert!(
         LocalFileNames::random_name()
@@ -216,7 +245,9 @@ fn test_native_file_name_helpers_cover_component_and_validation_paths() {
     );
     assert!(
         LocalFileNames::random_name_with(Some("invalid/name"), None)
-            .expect_err("path separators must be rejected in a random-name prefix")
+            .expect_err(
+                "path separators must be rejected in a random-name prefix"
+            )
             .to_string()
             .contains("GenerateName")
     );
@@ -253,16 +284,24 @@ fn test_local_paths_cover_public_composition_and_binding_cases() {
         LocalPaths::compose_descendant(base, Path::new("nested/file"))
             .expect("normal descendant should compose"),
     );
-    assert!(LocalPaths::compose_descendant(base, Path::new("../escape")).is_err());
+    assert!(
+        LocalPaths::compose_descendant(base, Path::new("../escape")).is_err()
+    );
     assert!(LocalPaths::compose_descendant(base, Path::new("")).is_err());
     assert!(
-        !LocalPaths::is_lexically_within(Path::new("/workspace-other/file"), base,)
-            .expect("separate normalized absolute paths should compare"),
+        !LocalPaths::is_lexically_within(
+            Path::new("/workspace-other/file"),
+            base,
+        )
+        .expect("separate normalized absolute paths should compare"),
     );
-    assert!(LocalPaths::is_lexically_within(Path::new("relative"), base).is_err());
+    assert!(
+        LocalPaths::is_lexically_within(Path::new("relative"), base).is_err()
+    );
     assert_eq!(
         base,
-        LocalPaths::bind_host_path(base).expect("absolute host path should remain unchanged"),
+        LocalPaths::bind_host_path(base)
+            .expect("absolute host path should remain unchanged"),
     );
     assert!(
         LocalPaths::to_canonical_components(
@@ -281,7 +320,8 @@ fn test_public_metadata_values_cover_file_directory_and_missing_cases() {
     let empty_file = directory.path().join("empty");
     let child_directory = directory.path().join("child-directory");
     fs::write(&empty_file, []).expect("empty file should be written");
-    fs::create_dir(&child_directory).expect("child directory should be created");
+    fs::create_dir(&child_directory)
+        .expect("child directory should be created");
 
     let file_metadata = LocalFileSystem::host()
         .metadata(&empty_file)
@@ -329,7 +369,8 @@ fn test_public_metadata_values_classify_unix_socket() {
 
     let directory = tempdir().expect("temporary directory should be created");
     let socket = directory.path().join("socket");
-    let _listener = UnixListener::bind(&socket).expect("Unix-domain socket should be created");
+    let _listener = UnixListener::bind(&socket)
+        .expect("Unix-domain socket should be created");
 
     let metadata = LocalFileSystem::host()
         .metadata(&socket)
@@ -358,7 +399,10 @@ fn test_metadata_and_outcomes_expose_public_values() {
     let _ = metadata.created_at();
 
     let created = LocalFileSystem::host()
-        .create_directory(&created_directory, &LocalCreateDirectoryOptions::new())
+        .create_directory(
+            &created_directory,
+            &LocalCreateDirectoryOptions::new(),
+        )
         .expect("directory should be created");
     assert!(created.created());
     let existing = LocalFileSystem::host()
@@ -397,7 +441,10 @@ fn test_metadata_and_outcomes_expose_public_values() {
         .expect("file should be deleted");
     assert!(deleted.deleted());
     let missing = LocalFileSystem::host()
-        .delete_file(&renamed_file, &LocalDeleteOptions::new().with_missing_ok())
+        .delete_file(
+            &renamed_file,
+            &LocalDeleteOptions::new().with_missing_ok(),
+        )
         .expect("missing file should be accepted");
     assert!(!missing.deleted());
 }
@@ -410,7 +457,8 @@ fn test_recursive_copy_outcome_reports_all_public_statistics() {
     let source = directory.path().join("source");
     let target = directory.path().join("target");
     fs::create_dir(&source).expect("source directory should be created");
-    fs::write(source.join("child"), b"new").expect("source child should be written");
+    fs::write(source.join("child"), b"new")
+        .expect("source child should be written");
 
     let initial = LocalFileSystem::host()
         .copy(

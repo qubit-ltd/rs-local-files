@@ -16,7 +16,6 @@ use std::{
     },
     path::Path,
 };
-use std::os::unix::fs::symlink;
 
 use qubit_local_files::LocalWriterState;
 use qubit_local_files::{
@@ -27,7 +26,6 @@ use qubit_local_files::{
     LocalDeleteOptions,
     LocalFileErrorKind,
     LocalFileKind,
-    LocalFileOperation,
     LocalFileSystem,
     LocalListOptions,
     LocalPersistFailureState,
@@ -44,6 +42,7 @@ use qubit_local_files::{
 use qubit_local_files::{
     LocalCopyFailureState,
     LocalDurabilityRequirement,
+    LocalFileOperation,
 };
 use tempfile::tempdir;
 
@@ -846,8 +845,7 @@ fn test_rooted_follow_rejects_unavailable_authority_path() {
     const TEST_NAME: &str =
         "test_rooted_follow_rejects_unavailable_authority_path";
     run_in_test_fault_process(TEST_NAME, "root-authority-path", || {
-        let directory =
-            tempdir().expect("temporary root should be created");
+        let directory = tempdir().expect("temporary root should be created");
         fs::create_dir(directory.path().join("real"))
             .expect("real directory should be created");
         fs::write(directory.path().join("real/payload"), b"payload")

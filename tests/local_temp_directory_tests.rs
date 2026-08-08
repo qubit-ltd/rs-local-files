@@ -555,7 +555,8 @@ fn test_local_temp_directory_cleanup_reports_and_retries_sandbox_failure() {
             let parent = tempdir().expect("temporary parent should be created");
             let mut temporary = LocalFileSystem::host()
                 .create_temp_directory(
-                    &LocalTempDirectoryOptions::new().with_parent(parent.path()),
+                    &LocalTempDirectoryOptions::new()
+                        .with_parent(parent.path()),
                 )
                 .expect("temporary directory should be created");
             let resource = temporary.path().to_path_buf();
