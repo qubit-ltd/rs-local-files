@@ -321,6 +321,9 @@ impl fmt::Display for LocalFileError {
         if let Some(target) = &self.target {
             write!(formatter, " targeting {}", target.display())?;
         }
+        if let Some(source) = &self.source {
+            write!(formatter, "; caused by {source}")?;
+        }
         Ok(())
     }
 }
