@@ -48,7 +48,7 @@ fuzz_target!(|data: &[u8]| {
                     std::io::Write::write_all(&mut resource, data)
                         .expect("temporary fuzz file should accept bytes");
                     if selector & 1 == 0 {
-                        resource
+                        let _outcome = resource
                             .cleanup()
                             .expect("temporary file cleanup should succeed");
                     }
@@ -78,7 +78,7 @@ fuzz_target!(|data: &[u8]| {
                 if let Ok(mut resource) = native.create_temp_file(&options) {
                     std::io::Write::write_all(&mut resource, data)
                         .expect("persist source should accept bytes");
-                    resource.persist(&target).expect(
+                    let _outcome = resource.persist(&target).expect(
                         "temporary file should persist to an absent target",
                     );
                     assert_eq!(
