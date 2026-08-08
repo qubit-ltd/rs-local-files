@@ -94,15 +94,14 @@ impl Root {
     ///
     /// This path is used only for resolving symbolic links; diagnostics keep
     /// using [`Self::path`] captured at open time.
-    #[must_use]
-    pub(crate) fn authority_path(&self) -> PathBuf {
+    pub(crate) fn authority_path(&self) -> Result<PathBuf> {
         #[cfg(any(unix, windows))]
         {
-            local::root_authority_path(&self.directory, &self.path)
+            local::root_authority_path(&self.directory)
         }
         #[cfg(not(any(unix, windows)))]
         {
-            self.path.clone()
+            Ok(self.path.clone())
         }
     }
 

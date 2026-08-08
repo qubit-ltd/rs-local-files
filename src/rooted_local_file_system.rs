@@ -1299,7 +1299,9 @@ pub(crate) fn resolve_rooted_path(
     if !symlink_policy.follows() {
         return Ok(relative);
     }
-    let authority_root = root.authority_path();
+    let authority_root = root
+        .authority_path()
+        .map_err(|error| rooted_io_error(operation, path, error))?;
     let diagnostic = authority_root.join(relative.as_path());
     let mut components = diagnostic.components().peekable();
     let mut current = PathBuf::new();

@@ -37,6 +37,8 @@ fn test_test_support_injects_selected_fault_only_in_child_process() {
             return;
         }
         Ok("fault") => {
+            let _fault = qubit_local_files::install_test_fault(FAULT)
+                .expect("fault controller should install");
             let directory =
                 tempdir().expect("temporary directory should be created");
             let file = directory.path().join("payload");
@@ -76,4 +78,28 @@ fn test_test_support_injects_selected_fault_only_in_child_process() {
         .status()
         .expect("fault child should launch");
     assert!(fault_status.success(), "fault child should pass");
+}
+
+/// Verifies that explicit fault guards control and then release one fault.
+#[cfg(feature = "internal-test-support")]
+#[test]
+fn test_explicit_test_fault_guard_scopes_controller() {
+    const FAULT: &str = "local-fs-delete-file-remove";
+    let directory = tempdir().expect("temporary directory should be created");
+    let file = directory.path().join("payload");
+    fs::write(&file, b"payload").expect("fixture should be written");
+
+    {
+        let _fault = qubit_local_files::install_test_fault(FAULT)
+            .expect("fault controller should install");
+        let error = LocalFileSystem::host()
+            .delete_file(&file, &LocalDeleteOptions::new())
+            .expect_err("explicitly selected fault should fail deletion");
+        assert_eq!(LocalFileErrorKind::Io, error.kind());
+        assert!(qubit_local_files::install_test_fault("other").is_err());
+    }
+
+    let _ = LocalFileSystem::host()
+        .delete_file(&file, &LocalDeleteOptions::new())
+        .expect("fault controller should be disabled after drop");
 }
