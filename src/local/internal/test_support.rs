@@ -10,13 +10,13 @@
 use std::io;
 
 #[cfg(feature = "internal-test-support")]
+use std::sync::Mutex;
+#[cfg(feature = "internal-test-support")]
 use std::sync::atomic::{
     AtomicBool,
     AtomicUsize,
     Ordering,
 };
-#[cfg(feature = "internal-test-support")]
-use std::sync::Mutex;
 
 #[cfg(feature = "internal-test-support")]
 static ONE_SHOT_FAULT_TAKEN: AtomicBool = AtomicBool::new(false);

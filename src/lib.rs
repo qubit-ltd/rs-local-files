@@ -64,6 +64,12 @@ pub use local::{
     LocalPersistOptions,
     LocalPersistStage,
 };
+#[cfg(feature = "internal-test-support")]
+#[doc(hidden)]
+pub use local::{
+    TestFaultGuard,
+    install_test_fault,
+};
 pub use local_file_kind::LocalFileKind;
 pub use local_file_metadata::LocalFileMetadata;
 pub use local_file_names::LocalFileNames;
@@ -112,12 +118,6 @@ pub use outcome::{
 pub use temp::{
     LocalTempDirectory,
     LocalTempFile,
-};
-#[cfg(feature = "internal-test-support")]
-#[doc(hidden)]
-pub use local::{
-    install_test_fault,
-    TestFaultGuard,
 };
 pub use walk::{
     LocalDirectoryEntry,

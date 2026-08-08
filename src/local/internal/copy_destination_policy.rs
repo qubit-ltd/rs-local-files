@@ -10,7 +10,10 @@
 // qubit-style: allow inline-tests
 // qubit-style: allow explicit-imports
 
-use crate::{LocalCopyConflictPolicy, LocalCopyTypeConflictPolicy};
+use crate::{
+    LocalCopyConflictPolicy,
+    LocalCopyTypeConflictPolicy,
+};
 
 use super::CopyDestinationAction;
 
@@ -44,13 +47,19 @@ pub(crate) const fn decide_copy_destination(
     if source_is_directory != destination_is_directory {
         return match type_conflict {
             LocalCopyTypeConflictPolicy::Fail => None,
-            LocalCopyTypeConflictPolicy::Replace => Some(CopyDestinationAction::Replace),
-            LocalCopyTypeConflictPolicy::Skip => Some(CopyDestinationAction::Skip),
+            LocalCopyTypeConflictPolicy::Replace => {
+                Some(CopyDestinationAction::Replace)
+            }
+            LocalCopyTypeConflictPolicy::Skip => {
+                Some(CopyDestinationAction::Skip)
+            }
         };
     }
     match conflict {
         LocalCopyConflictPolicy::Fail => None,
-        LocalCopyConflictPolicy::Overwrite => Some(CopyDestinationAction::Replace),
+        LocalCopyConflictPolicy::Overwrite => {
+            Some(CopyDestinationAction::Replace)
+        }
         LocalCopyConflictPolicy::Skip => Some(CopyDestinationAction::Skip),
     }
 }
@@ -62,7 +71,10 @@ pub(crate) const fn decide_copy_destination(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{LocalCopyConflictPolicy, LocalCopyTypeConflictPolicy};
+    use crate::{
+        LocalCopyConflictPolicy,
+        LocalCopyTypeConflictPolicy,
+    };
 
     #[test]
     fn selects_create_and_merge_actions() {
@@ -100,7 +112,12 @@ mod tests {
             ),
         ] {
             assert_eq!(
-                decide_copy_destination(true, Some(false), LocalCopyConflictPolicy::Fail, policy,),
+                decide_copy_destination(
+                    true,
+                    Some(false),
+                    LocalCopyConflictPolicy::Fail,
+                    policy,
+                ),
                 expected
             );
         }

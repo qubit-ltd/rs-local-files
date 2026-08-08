@@ -6,6 +6,7 @@
 //    Licensed under the Apache License, Version 2.0.
 // =============================================================================
 //! Cleanup state reported by temporary-resource persistence.
+// qubit-style: allow source-test-pair
 
 /// Cleanup state achieved after a temporary resource was published.
 #[must_use]

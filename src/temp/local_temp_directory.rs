@@ -439,7 +439,9 @@ impl LocalTempDirectory {
     fn cleanup_path(&self) -> PathBuf {
         match &self.backend {
             LocalTempResourceBackend::Host(host) => host.sandbox_path.clone(),
-            LocalTempResourceBackend::Rooted(rooted) => rooted.sandbox_path.clone(),
+            LocalTempResourceBackend::Rooted(rooted) => {
+                rooted.sandbox_path.clone()
+            }
         }
     }
 

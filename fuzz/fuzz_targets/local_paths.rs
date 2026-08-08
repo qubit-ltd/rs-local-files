@@ -9,10 +9,16 @@
 
 #![no_main]
 
-use std::path::{Path, PathBuf};
+use std::path::{
+    Path,
+    PathBuf,
+};
 
 use libfuzzer_sys::fuzz_target;
-use qubit_local_files::{LocalFileSystemScope, LocalPaths};
+use qubit_local_files::{
+    LocalFileSystemScope,
+    LocalPaths,
+};
 
 const MAX_FUZZ_INPUT_LEN: usize = 4096;
 const MAX_COMPONENTS: usize = 128;
@@ -28,18 +34,22 @@ fuzz_target!(|data: &[u8]| {
     ) else {
         return;
     };
-    let encoded =
-        LocalPaths::to_canonical_components(LocalFileSystemScope::Rooted, Path::new(&native))
-            .expect("validated rooted paths must encode");
+    let encoded = LocalPaths::to_canonical_components(
+        LocalFileSystemScope::Rooted,
+        Path::new(&native),
+    )
+    .expect("validated rooted paths must encode");
     let restored = LocalPaths::from_canonical_components(
         LocalFileSystemScope::Rooted,
         encoded.iter().map(String::as_str),
     )
     .expect("encoded rooted paths must decode");
     assert_eq!(restored, native);
-    let reencoded =
-        LocalPaths::to_canonical_components(LocalFileSystemScope::Rooted, Path::new(&restored))
-            .expect("decoded rooted paths must encode again");
+    let reencoded = LocalPaths::to_canonical_components(
+        LocalFileSystemScope::Rooted,
+        Path::new(&restored),
+    )
+    .expect("decoded rooted paths must encode again");
     assert_eq!(reencoded, encoded);
 
     #[cfg(unix)]
@@ -64,8 +74,10 @@ fn fuzz_host_unix(data: &[u8]) {
         }
         native.push(OsString::from_vec(component.to_vec()));
     }
-    let Ok(encoded) = LocalPaths::to_canonical_components(LocalFileSystemScope::Host, &native)
-    else {
+    let Ok(encoded) = LocalPaths::to_canonical_components(
+        LocalFileSystemScope::Host,
+        &native,
+    ) else {
         return;
     };
     let restored = LocalPaths::from_canonical_components(
@@ -92,8 +104,10 @@ fn fuzz_host_windows(data: &[u8]) {
         }
         native.push(OsString::from_wide(&[units]));
     }
-    let Ok(encoded) = LocalPaths::to_canonical_components(LocalFileSystemScope::Host, &native)
-    else {
+    let Ok(encoded) = LocalPaths::to_canonical_components(
+        LocalFileSystemScope::Host,
+        &native,
+    ) else {
         return;
     };
     let restored = LocalPaths::from_canonical_components(
