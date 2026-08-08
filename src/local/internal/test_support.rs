@@ -10,22 +10,66 @@
 use std::io;
 
 #[cfg(feature = "internal-test-support")]
-use std::ffi::OsStr;
-#[cfg(feature = "internal-test-support")]
 use std::sync::atomic::{
     AtomicBool,
     AtomicUsize,
     Ordering,
 };
-
 #[cfg(feature = "internal-test-support")]
-const TEST_FAULT_ENV: &str = "QUBIT_LOCAL_FILES_TEST_FAULT";
+use std::sync::Mutex;
 
 #[cfg(feature = "internal-test-support")]
 static ONE_SHOT_FAULT_TAKEN: AtomicBool = AtomicBool::new(false);
 
 #[cfg(feature = "internal-test-support")]
 static NTH_FAULT_OCCURRENCES: AtomicUsize = AtomicUsize::new(0);
+
+#[cfg(feature = "internal-test-support")]
+static ACTIVE_FAULT: Mutex<Option<String>> = Mutex::new(None);
+
+/// Scoped controller for one deterministic test fault in the current process.
+#[cfg(feature = "internal-test-support")]
+#[doc(hidden)]
+#[derive(Debug)]
+pub struct TestFaultGuard {
+    active: bool,
+}
+
+/// Installs one deterministic test fault for the current process.
+#[cfg(feature = "internal-test-support")]
+#[doc(hidden)]
+pub fn install_test_fault(name: &str) -> io::Result<TestFaultGuard> {
+    let mut active = ACTIVE_FAULT
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner);
+    if active.is_some() {
+        return Err(io::Error::new(
+            io::ErrorKind::AlreadyExists,
+            "a test fault controller is already installed",
+        ));
+    }
+    *active = Some(name.to_owned());
+    ONE_SHOT_FAULT_TAKEN.store(false, Ordering::Relaxed);
+    NTH_FAULT_OCCURRENCES.store(0, Ordering::Relaxed);
+    Ok(TestFaultGuard { active: true })
+}
+
+#[cfg(feature = "internal-test-support")]
+impl Drop for TestFaultGuard {
+    /// Releases the process-wide selector and occurrence counters.
+    fn drop(&mut self) {
+        if !self.active {
+            return;
+        }
+        let mut active = ACTIVE_FAULT
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        active.take();
+        ONE_SHOT_FAULT_TAKEN.store(false, Ordering::Relaxed);
+        NTH_FAULT_OCCURRENCES.store(0, Ordering::Relaxed);
+        self.active = false;
+    }
+}
 
 /// Returns a deterministic native I/O error for a selected test fault.
 ///
@@ -121,8 +165,11 @@ pub(crate) fn take_on_nth(name: &str, occurrence: usize) -> bool {
 #[cfg(feature = "internal-test-support")]
 #[inline(always)]
 fn is_enabled_impl(name: &str) -> bool {
-    std::env::var_os(TEST_FAULT_ENV)
-        .is_some_and(|value| value == OsStr::new(name))
+    ACTIVE_FAULT
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner)
+        .as_deref()
+        == Some(name)
 }
 
 #[cfg(not(feature = "internal-test-support"))]

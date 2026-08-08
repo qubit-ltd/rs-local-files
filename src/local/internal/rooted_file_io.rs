@@ -85,7 +85,16 @@ pub(crate) fn open_root_directory(path: &Path) -> Result<File> {
 /// The path is derived from the retained descriptor rather than from the
 /// caller's diagnostic path, so it continues to identify the same directory
 /// after that path is renamed.
-pub(crate) fn root_authority_path(root: &File, fallback: &Path) -> PathBuf {
+///
+/// # Errors
+///
+/// Returns an I/O error when the operating system cannot recover the path from
+/// the retained descriptor. The caller's diagnostic path is never used as a
+/// fallback.
+pub(crate) fn root_authority_path(root: &File) -> Result<PathBuf> {
+    if let Some(error) = crate::local::test_io_error("root-authority-path") {
+        return Err(error);
+    }
     #[cfg(target_os = "macos")]
     {
         let mut buffer = [0_u8; libc::PATH_MAX as usize];
@@ -99,18 +108,20 @@ pub(crate) fn root_authority_path(root: &File, fallback: &Path) -> PathBuf {
                 .iter()
                 .position(|byte| *byte == 0)
                 .unwrap_or(buffer.len());
-            return PathBuf::from(OsStr::from_bytes(&buffer[..length]));
+            return Ok(PathBuf::from(OsStr::from_bytes(&buffer[..length])));
         }
+        return Err(Error::last_os_error());
     }
     #[cfg(not(target_os = "macos"))]
     {
         let descriptor_path =
             PathBuf::from(format!("/proc/self/fd/{}", root.as_raw_fd()));
-        if let Ok(path) = std::fs::read_link(descriptor_path) {
-            return path;
-        }
+        with_path_context(
+            std::fs::read_link(&descriptor_path),
+            "resolve root authority path",
+            &descriptor_path,
+        )
     }
-    fallback.to_path_buf()
 }
 
 /// Reads metadata for a final rooted entry without following a symbolic link.

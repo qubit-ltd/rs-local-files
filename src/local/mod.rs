@@ -12,6 +12,10 @@ pub(crate) use internal::test_support::fault_error as test_fault_error;
 pub(crate) use internal::test_support::io_error as test_io_error;
 pub(crate) use internal::test_support::is_enabled as test_support_enabled;
 #[cfg(feature = "internal-test-support")]
+pub use internal::test_support::install_test_fault;
+#[cfg(feature = "internal-test-support")]
+pub use internal::test_support::TestFaultGuard;
+#[cfg(feature = "internal-test-support")]
 pub(crate) use internal::test_support::take as take_test_support;
 #[cfg(feature = "internal-test-support")]
 pub(crate) use internal::test_support::take_on_nth as take_test_support_on_nth;

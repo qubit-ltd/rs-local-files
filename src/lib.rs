@@ -100,6 +100,7 @@ pub use outcome::{
     LocalCopyStats,
     LocalCreateDirectoryOutcome,
     LocalDeleteOutcome,
+    LocalPersistCleanupState,
     LocalPersistMethod,
     LocalPersistOutcome,
     LocalRenameFailure,
@@ -111,6 +112,12 @@ pub use outcome::{
 pub use temp::{
     LocalTempDirectory,
     LocalTempFile,
+};
+#[cfg(feature = "internal-test-support")]
+#[doc(hidden)]
+pub use local::{
+    install_test_fault,
+    TestFaultGuard,
 };
 pub use walk::{
     LocalDirectoryEntry,

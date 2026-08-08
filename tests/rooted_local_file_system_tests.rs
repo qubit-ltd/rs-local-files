@@ -16,6 +16,7 @@ use std::{
     },
     path::Path,
 };
+use std::os::unix::fs::symlink;
 
 use qubit_local_files::LocalWriterState;
 use qubit_local_files::{
@@ -26,6 +27,7 @@ use qubit_local_files::{
     LocalDeleteOptions,
     LocalFileErrorKind,
     LocalFileKind,
+    LocalFileOperation,
     LocalFileSystem,
     LocalListOptions,
     LocalPersistFailureState,
@@ -357,12 +359,10 @@ fn test_rooted_temp_file_persisted_target_survives_drop() {
         .expect("rooted temp file should be created");
     let target = Path::new("persisted-target");
 
-    assert_eq!(
-        target,
-        temporary
-            .persist(target)
-            .expect("rooted file should persist")
-    );
+    let outcome = temporary
+        .persist(target)
+        .expect("rooted file should persist");
+    assert_eq!(target, outcome.path());
     assert!(root_parent.path().join(target).exists());
 }
 
@@ -382,12 +382,10 @@ fn test_rooted_temp_file_persist_uses_retained_authority_after_root_rename() {
 
     fs::rename(&original, &renamed)
         .expect("diagnostic root path should be renamed");
-    assert_eq!(
-        Path::new("persisted-target"),
-        temporary
-            .persist(Path::new("persisted-target"))
-            .expect("persist must use retained root authority")
-    );
+    let outcome = temporary
+        .persist(Path::new("persisted-target"))
+        .expect("persist must use retained root authority");
+    assert_eq!(Path::new("persisted-target"), outcome.path());
     assert!(renamed.join("persisted-target").exists());
 }
 
@@ -430,6 +428,8 @@ where
     if std::env::var_os(TEST_FAULT_ENV)
         .is_some_and(|selected| selected == std::ffi::OsStr::new(fault))
     {
+        let _fault = qubit_local_files::install_test_fault(fault)
+            .expect("test fault controller should install");
         action();
         return;
     }
@@ -837,6 +837,33 @@ fn test_rooted_local_file_system_writer_follows_final_symlink() {
         b"replacement".to_vec(),
         fs::read(&referent).expect("referent should be updated"),
     );
+}
+
+/// Verifies rooted symlink following fails when authority-path recovery fails.
+#[cfg(feature = "internal-test-support")]
+#[test]
+fn test_rooted_follow_rejects_unavailable_authority_path() {
+    const TEST_NAME: &str =
+        "test_rooted_follow_rejects_unavailable_authority_path";
+    run_in_test_fault_process(TEST_NAME, "root-authority-path", || {
+        let directory =
+            tempdir().expect("temporary root should be created");
+        fs::create_dir(directory.path().join("real"))
+            .expect("real directory should be created");
+        fs::write(directory.path().join("real/payload"), b"payload")
+            .expect("payload should be written");
+        symlink("real/payload", directory.path().join("link"))
+            .expect("rooted symlink should be created");
+        let rooted = LocalFileSystem::rooted(directory.path())
+            .expect("root authority should open");
+
+        let error = rooted
+            .open_reader(Path::new("link"), &LocalReadOptions::new())
+            .expect_err(
+                "authority-path failure must not use diagnostic fallback",
+            );
+        assert_eq!(LocalFileOperation::OpenReader, error.operation());
+    });
 }
 
 /// Verifies rooted create-new commit preserves a concurrently created entry.

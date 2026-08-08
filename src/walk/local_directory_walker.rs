@@ -166,7 +166,9 @@ impl LocalDirectoryWalker {
         let authority_parent = path
             .as_ref()
             .map_or_else(PathBuf::new, |path| path.as_path().to_path_buf());
-        let authority_root = root.authority_path();
+        let authority_root = root
+            .authority_path()
+            .map_err(|error| walk_io_error(&diagnostic_root, error))?;
         let authority_start = authority_root.join(&authority_parent);
         let start_metadata = fs::metadata(&authority_start)
             .map_err(|error| walk_io_error(&diagnostic_root, error))?;
@@ -618,7 +620,15 @@ fn next_rooted_entry(
         if metadata.kind() == crate::LocalFileKind::Symlink
             && state.symlink_policy.follows()
         {
-            let authority_root = state.root.authority_path();
+            let authority_root = match state.root.authority_path() {
+                Ok(path) => path,
+                Err(error) => {
+                    return Some(Err(walk_io_error(
+                        &state.root.path().join(&authority_path),
+                        error,
+                    )));
+                }
+            };
             let diagnostic_path = state.root.path().join(&authority_path);
             let authority_target = authority_root.join(&authority_path);
             let target = match fs::canonicalize(&authority_target) {
@@ -675,7 +685,15 @@ fn next_rooted_entry(
         }
         let is_directory = metadata.kind() == crate::LocalFileKind::Directory;
         if is_directory && followed_directory.is_none() {
-            let authority_root = state.root.authority_path();
+            let authority_root = match state.root.authority_path() {
+                Ok(path) => path,
+                Err(error) => {
+                    return Some(Err(walk_io_error(
+                        &state.root.path().join(&authority_path),
+                        error,
+                    )));
+                }
+            };
             let authority_target = authority_root.join(&authority_path);
             let target_metadata = match fs::metadata(&authority_target) {
                 Ok(metadata) => metadata,

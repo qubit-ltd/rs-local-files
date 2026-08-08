@@ -274,20 +274,36 @@ pub(crate) fn open_root_directory(path: &Path) -> Result<File> {
 }
 
 /// Returns the current native path of an opened root for symlink resolution.
-pub(crate) fn root_authority_path(root: &File, fallback: &Path) -> PathBuf {
-    let mut buffer = vec![0_u16; 512];
-    let length = unsafe {
-        GetFinalPathNameByHandleW(
-            root.as_raw_handle(),
-            buffer.as_mut_ptr(),
-            buffer.len() as u32,
-            FILE_NAME_NORMALIZED,
-        )
-    };
-    if length == 0 || length as usize >= buffer.len() {
-        return fallback.to_path_buf();
+///
+/// # Errors
+///
+/// Returns an I/O error when the operating system cannot recover the path from
+/// the retained handle. The caller's diagnostic path is never used as a
+/// fallback.
+pub(crate) fn root_authority_path(root: &File) -> Result<PathBuf> {
+    if let Some(error) = crate::local::test_io_error("root-authority-path") {
+        return Err(error);
     }
-    PathBuf::from(OsString::from_wide(&buffer[..length as usize]))
+    let mut buffer = vec![0_u16; 512];
+    loop {
+        let length = unsafe {
+            GetFinalPathNameByHandleW(
+                root.as_raw_handle(),
+                buffer.as_mut_ptr(),
+                buffer.len() as u32,
+                FILE_NAME_NORMALIZED,
+            )
+        };
+        if length == 0 {
+            return Err(Error::last_os_error());
+        }
+        if (length as usize) < buffer.len() {
+            return Ok(PathBuf::from(OsString::from_wide(
+                &buffer[..length as usize],
+            )));
+        }
+        buffer.resize(length as usize + 1, 0);
+    }
 }
 
 /// Reads metadata for a rooted entry without following the final component.

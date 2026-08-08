@@ -51,6 +51,8 @@ where
     if std::env::var_os(TEST_FAULT_ENV)
         .is_some_and(|selected| selected == std::ffi::OsStr::new(fault))
     {
+        let _fault = qubit_local_files::install_test_fault(fault)
+            .expect("test fault controller should install");
         action();
         return;
     }
