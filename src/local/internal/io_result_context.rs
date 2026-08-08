@@ -47,6 +47,10 @@ pub(crate) fn with_path_context<T>(
     }
 }
 
+// These tests pin the private error-context adapter's exact source/path
+// propagation. The public API only returns the fully assembled error and
+// cannot isolate this adapter; exposing a hook would be an undesirable test
+// seam. Public error integration tests cover the observable result.
 #[cfg(test)]
 mod tests {
     use super::*;

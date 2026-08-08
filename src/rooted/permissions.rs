@@ -63,6 +63,10 @@ impl Permissions {
     }
 }
 
+// This module tests private permission-resolution arithmetic over native mode
+// bits. Public APIs expose only filesystem observations and cannot inject
+// synthetic modes; a test hook would make platform details public. Rooted
+// metadata and permission integration tests cover the observable contract.
 #[cfg(test)]
 mod tests {
     use super::*;

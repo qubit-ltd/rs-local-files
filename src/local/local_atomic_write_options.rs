@@ -98,10 +98,7 @@ impl LocalAtomicWriteOptions {
     ///
     /// # Returns
     /// Updated options carrying the timeout.
-    pub(crate) const fn with_open_retry_timeout(
-        mut self,
-        timeout: Duration,
-    ) -> Self {
+    pub(crate) const fn with_open_retry_timeout(mut self, timeout: Duration) -> Self {
         self.open_retry_timeout = Some(timeout);
         self
     }
@@ -122,10 +119,7 @@ impl LocalAtomicWriteOptions {
     ///
     /// Updated options carrying the durability policy.
     #[inline(always)]
-    pub(crate) const fn with_durability(
-        mut self,
-        durability: LocalDurabilityRequirement,
-    ) -> Self {
+    pub(crate) const fn with_durability(mut self, durability: LocalDurabilityRequirement) -> Self {
         self.durability = durability;
         self
     }
@@ -167,6 +161,10 @@ impl Default for LocalAtomicWriteOptions {
     }
 }
 
+// These tests cover the private option value used by the atomic writer. Its
+// fields are intentionally not a public API, and exposing setters just for
+// tests would make internal policy commitments permanent. Public option and
+// writer tests cover all supported caller-visible combinations.
 #[cfg(test)]
 mod tests {
     use super::*;

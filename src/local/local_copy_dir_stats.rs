@@ -109,6 +109,10 @@ impl LocalCopyDirStats {
     }
 }
 
+// These tests exercise private recursive-copy counters before they are folded
+// into the public LocalCopyStats. The intermediate accumulator is not exposed
+// and cannot be validated through public APIs without a test hook. Public copy
+// statistics tests cover the published aggregate.
 #[cfg(test)]
 mod tests {
     use super::*;

@@ -11,24 +11,11 @@
 // qubit-style: allow explicit-imports
 
 use std::error::Error;
-use std::fmt::{
-    Debug,
-    Display,
-    Formatter,
-    Result as FmtResult,
-};
+use std::fmt::{Debug, Display, Formatter, Result as FmtResult};
 use std::io;
-use std::path::{
-    Path,
-    PathBuf,
-};
+use std::path::{Path, PathBuf};
 
-use crate::{
-    LocalFileError,
-    LocalFileOperation,
-    LocalPersistFailureState,
-    LocalPersistStage,
-};
+use crate::{LocalFileError, LocalFileOperation, LocalPersistFailureState, LocalPersistStage};
 
 /// Persistence error that returns ownership of the temporary resource.
 ///
@@ -267,13 +254,15 @@ where
     }
 }
 
+// This module tests private persistence failure stages and retained-resource
+// ownership. Public persistence APIs expose only the stable outcome, so these
+// states cannot be isolated externally; adding visibility for tests would
+// freeze implementation details. Temp-resource integration tests cover the
+// public retry and cleanup behavior.
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{
-        LocalPersistFailureState,
-        LocalPersistStage,
-    };
+    use crate::{LocalPersistFailureState, LocalPersistStage};
 
     #[test]
     fn exposes_recoverable_context_and_parts() {
@@ -294,8 +283,7 @@ mod tests {
         assert_eq!(error.kind(), crate::LocalFileErrorKind::NotFound);
         assert!(error.to_string().contains("resolved as 'resolved'"));
         assert!(std::error::Error::source(&error).is_some());
-        let (error, resource, requested, resolved, stage, state) =
-            error.into_parts_with_state();
+        let (error, resource, requested, resolved, stage, state) = error.into_parts_with_state();
         assert_eq!(resource, "resource!");
         assert_eq!(requested, PathBuf::from("requested"));
         assert_eq!(resolved, Some(PathBuf::from("resolved")));

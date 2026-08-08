@@ -86,6 +86,10 @@ impl LocalCopyStats {
     }
 }
 
+// The constructors under test are crate-private bridges from the recursive
+// copy engine. Public integration tests cover LocalCopyStats accessors and
+// filesystem outcomes; exposing these constructors would leak an internal
+// accumulator representation.
 #[cfg(test)]
 mod tests {
     use super::*;
