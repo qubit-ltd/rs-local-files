@@ -154,6 +154,8 @@ impl Drop for StagedFile {
         if let Err(error) = self.cleanup()
             && let Some(path) = self.path.as_ref()
         {
+            // TODO: Route cleanup diagnostics through caller-controlled
+            // redaction, sampling, and metrics policy.
             warn!(
                 "failed to remove uncommitted staging file '{}': {}",
                 path.display(),

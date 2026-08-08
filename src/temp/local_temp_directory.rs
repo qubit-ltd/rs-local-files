@@ -138,15 +138,28 @@ impl LocalTempDirectory {
                 error,
             )
         })?;
-        self.remove().map_err(|error| {
-            LocalFileError::from_io(
-                LocalFileOperation::Cleanup,
-                Some(self.path.clone()),
-                None,
-                error,
-            )
-        })?;
-        self.state = LocalTempResourceState::Released;
+        if self.state == LocalTempResourceState::Owned {
+            self.remove_resource().map_err(|error| {
+                LocalFileError::from_io(
+                    LocalFileOperation::Cleanup,
+                    Some(self.path.clone()),
+                    None,
+                    error,
+                )
+            })?;
+            self.state = LocalTempResourceState::SandboxPending;
+        }
+        if self.state == LocalTempResourceState::SandboxPending {
+            self.release_sandbox().map_err(|error| {
+                LocalFileError::from_io(
+                    LocalFileOperation::Cleanup,
+                    Some(self.cleanup_path()),
+                    None,
+                    error,
+                )
+            })?;
+            self.state = LocalTempResourceState::Released;
+        }
         Ok(())
     }
 
@@ -183,7 +196,7 @@ impl LocalTempDirectory {
     pub fn persist(
         self,
         target: impl AsRef<Path>,
-    ) -> std::result::Result<PathBuf, LocalPersistError<Self>> {
+    ) -> std::result::Result<LocalPersistOutcome, LocalPersistError<Self>> {
         self.persist_with(target, LocalPersistOptions::new())
     }
 
@@ -191,17 +204,6 @@ impl LocalTempDirectory {
     /// creating authority.
     #[inline(always)]
     pub fn persist_with(
-        self,
-        target: impl AsRef<Path>,
-        options: LocalPersistOptions,
-    ) -> std::result::Result<PathBuf, LocalPersistError<Self>> {
-        self.persist_with_outcome(target, options)
-            .map(LocalPersistOutcome::into_path)
-    }
-
-    /// Persists the directory and reports the achieved publication guarantees.
-    #[inline(always)]
-    pub fn persist_with_outcome(
         self,
         target: impl AsRef<Path>,
         options: LocalPersistOptions,
@@ -295,13 +297,21 @@ impl LocalTempDirectory {
                         LocalPersistStage::InstallDestination,
                     ));
                 }
+                let cleanup_error = self.release_sandbox().err().map(|error| {
+                    LocalFileError::from_io(
+                        LocalFileOperation::Cleanup,
+                        Some(self.cleanup_path()),
+                        None,
+                        error,
+                    )
+                });
                 self.state = LocalTempResourceState::Released;
-                self.release_sandbox_best_effort();
                 Ok(LocalPersistOutcome::new(
                     logical_target,
                     LocalPersistMethod::AtomicRename,
                     true,
                     false,
+                    cleanup_error,
                 ))
             }
             LocalTempResourceBackend::Rooted(rooted) => {
@@ -368,13 +378,21 @@ impl LocalTempDirectory {
                         LocalPersistStage::InstallDestination,
                     ));
                 }
+                let cleanup_error = self.release_sandbox().err().map(|error| {
+                    LocalFileError::from_io(
+                        LocalFileOperation::Cleanup,
+                        Some(self.cleanup_path()),
+                        None,
+                        error,
+                    )
+                });
                 self.state = LocalTempResourceState::Released;
-                self.release_sandbox_best_effort();
                 Ok(LocalPersistOutcome::new(
                     target,
                     LocalPersistMethod::AtomicRename,
                     true,
                     false,
+                    cleanup_error,
                 ))
             }
         }
@@ -383,27 +401,29 @@ impl LocalTempDirectory {
     /// Removes the resource using the retained backend rather than a diagnostic
     /// path.
     #[inline]
-    fn remove(&mut self) -> Result<()> {
+    fn remove_resource(&mut self) -> Result<()> {
         self.ensure_identity_matches()?;
         match &self.backend {
             LocalTempResourceBackend::Host(_) => {
                 std::fs::remove_dir_all(&self.path)?;
-                self.release_sandbox_best_effort();
                 Ok(())
             }
             LocalTempResourceBackend::Rooted(rooted) => {
                 let path = LocalRelativePath::new(&rooted.relative_path)
                     .expect("rooted temporary path was validated at creation");
                 rooted.root.remove_tree(&path)?;
-                self.release_sandbox_best_effort();
                 Ok(())
             }
         }
     }
 
-    /// Removes the now-empty private sandbox after successful publication.
-    fn release_sandbox_best_effort(&self) {
-        let result = match &self.backend {
+    /// Removes the now-empty private sandbox.
+    fn release_sandbox(&self) -> Result<()> {
+        #[cfg(feature = "internal-test-support")]
+        if crate::local::take_test_support("temp-directory-sandbox-remove") {
+            return Err(crate::local::test_fault_error());
+        }
+        match &self.backend {
             LocalTempResourceBackend::Host(host) => {
                 std::fs::remove_dir(&host.sandbox_path)
             }
@@ -412,13 +432,14 @@ impl LocalTempDirectory {
                     .expect("rooted temporary sandbox path was validated at creation");
                 rooted.root.remove_empty_dir(&sandbox)
             }
-        };
-        if let Err(error) = result {
-            warn!(
-                "failed to remove temporary directory sandbox for {}: {}",
-                self.path.display(),
-                error
-            );
+        }
+    }
+
+    /// Returns the authority-local sandbox path used for cleanup diagnostics.
+    fn cleanup_path(&self) -> PathBuf {
+        match &self.backend {
+            LocalTempResourceBackend::Host(host) => host.sandbox_path.clone(),
+            LocalTempResourceBackend::Rooted(rooted) => rooted.sandbox_path.clone(),
         }
     }
 
@@ -488,14 +509,46 @@ impl LocalTempDirectory {
 impl Drop for LocalTempDirectory {
     /// Performs best-effort cleanup only while the directory remains owned.
     fn drop(&mut self) {
-        if matches!(self.state, LocalTempResourceState::Owned)
-            && let Err(error) = self.remove()
-        {
-            warn!(
-                "failed to remove temporary directory {}: {}",
-                self.path.display(),
-                error
-            );
+        match self.state {
+            LocalTempResourceState::Owned => {
+                if let Err(error) = self.remove_resource() {
+                    // TODO: Route cleanup diagnostics through caller-controlled
+                    // redaction, sampling, and metrics policy.
+                    warn!(
+                        "failed to remove temporary directory {}: {}",
+                        self.path.display(),
+                        error
+                    );
+                    return;
+                }
+                self.state = LocalTempResourceState::SandboxPending;
+                if let Err(error) = self.release_sandbox() {
+                    // TODO: Route cleanup diagnostics through caller-controlled
+                    // redaction, sampling, and metrics policy.
+                    warn!(
+                        "failed to remove temporary directory sandbox for {}: {}",
+                        self.path.display(),
+                        error
+                    );
+                } else {
+                    self.state = LocalTempResourceState::Released;
+                }
+            }
+            LocalTempResourceState::SandboxPending => {
+                if let Err(error) = self.release_sandbox() {
+                    // TODO: Route cleanup diagnostics through caller-controlled
+                    // redaction, sampling, and metrics policy.
+                    warn!(
+                        "failed to remove temporary directory sandbox for {}: {}",
+                        self.path.display(),
+                        error
+                    );
+                } else {
+                    self.state = LocalTempResourceState::Released;
+                }
+            }
+            LocalTempResourceState::Indeterminate
+            | LocalTempResourceState::Released => {}
         }
     }
 }
