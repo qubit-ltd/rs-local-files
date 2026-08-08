@@ -128,7 +128,7 @@ fn test_copy_symlink_preserves_final_link_entry() {
 #[test]
 fn test_host_facade_uses_configured_reader_writer_and_list_policies() {
     let directory = tempdir().expect("temporary directory should be created");
-    let _capabilities = LocalFileSystem::host().capabilities();
+    let _capabilities = LocalFileSystem::host().protocols();
     let file = directory.path().join("payload");
     fs::write(&file, b"payload").expect("file fixture should be written");
 

@@ -5,16 +5,16 @@
 //
 //    Licensed under the Apache License, Version 2.0.
 // =============================================================================
-//! Native local filesystem capability snapshots.
+//! Native local filesystem protocol snapshots.
 
 mod filesystem_probe;
-mod local_file_system_capabilities;
 mod local_file_system_limits;
+mod local_file_system_protocols;
 mod local_file_system_space;
 mod size_limit;
 
-pub use local_file_system_capabilities::LocalFileSystemCapabilities;
 pub use local_file_system_limits::LocalFileSystemLimits;
+pub use local_file_system_protocols::LocalFileSystemProtocols;
 pub use local_file_system_space::LocalFileSystemSpace;
 pub use size_limit::SizeLimit;
 
