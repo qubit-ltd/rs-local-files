@@ -6,17 +6,9 @@
 //    Licensed under the Apache License, Version 2.0.
 // =============================================================================
 
-use std::{
-    error::Error,
-    io,
-    path::Path,
-};
+use std::{error::Error, io, path::Path};
 
-use qubit_local_files::{
-    LocalFileError,
-    LocalFileErrorKind,
-    LocalFileOperation,
-};
+use qubit_local_files::{LocalFileError, LocalFileErrorKind, LocalFileOperation};
 
 /// Verifies that native I/O errors retain structured operation and path
 /// context.
@@ -154,6 +146,11 @@ fn test_local_file_error_adapts_source_free_kinds_and_consumes_source() {
         None,
         io::Error::from(io::ErrorKind::NotFound),
     );
+    assert_eq!(
+        Some(io::ErrorKind::NotFound),
+        source.io_error().map(io::Error::kind)
+    );
+    assert_eq!(io::ErrorKind::NotFound, source.io_error_kind());
     assert!(source.into_source().is_some());
 }
 
@@ -170,7 +167,7 @@ fn test_local_file_error_exposes_optional_context_without_source() {
 
     assert_eq!(Some(Path::new("source")), error.path());
     assert_eq!(Some(Path::new("target")), error.target());
-    assert!(error.source_kind().is_none());
+    assert!(error.typed_source().is_none());
     assert!(Error::source(&error).is_none());
     assert!(error.into_source().is_none());
 }
