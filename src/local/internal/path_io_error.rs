@@ -12,10 +12,7 @@
 // Private behavior is covered through public integration tests.
 
 use std::io::Error;
-use std::path::{
-    Path,
-    PathBuf,
-};
+use std::path::{Path, PathBuf};
 
 /// An I/O error annotated with the failed operation and path.
 #[derive(Debug)]
@@ -39,11 +36,7 @@ impl PathIoError {
     /// # Returns
     /// A contextual error retaining `source`.
     #[inline]
-    pub(super) fn new(
-        operation: &'static str,
-        path: &Path,
-        source: Error,
-    ) -> Self {
+    pub(super) fn new(operation: &'static str, path: &Path, source: Error) -> Self {
         Self {
             operation,
             path: path.to_path_buf(),
@@ -73,6 +66,10 @@ impl std::error::Error for PathIoError {
     }
 }
 
+// This module verifies the private path-aware I/O wrapper and its source
+// chaining. The public API cannot construct every intermediate wrapper state;
+// making it public solely for tests would expand the error contract. Facade
+// and native error integration tests cover the externally visible mapping.
 #[cfg(test)]
 mod tests {
     use super::*;

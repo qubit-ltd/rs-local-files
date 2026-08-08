@@ -11,21 +11,11 @@
 // qubit-style: allow explicit-imports
 
 use std::error::Error;
-use std::fmt::{
-    Display,
-    Formatter,
-    Result as FmtResult,
-};
+use std::fmt::{Display, Formatter, Result as FmtResult};
 use std::io;
-use std::path::{
-    Path,
-    PathBuf,
-};
+use std::path::{Path, PathBuf};
 
-use crate::{
-    LocalCopyDirStage,
-    LocalCopyDirStats,
-};
+use crate::{LocalCopyDirStage, LocalCopyDirStats};
 
 /// Error returned by a recursive directory copy operation.
 ///
@@ -221,10 +211,7 @@ impl Display for LocalCopyDirError {
             write!(formatter, "; staging path '{}'", temporary_path.display())?;
         }
         if let Some(cleanup_error) = self.cleanup_error.as_ref() {
-            return write!(
-                formatter,
-                "; staging cleanup also failed: {cleanup_error}"
-            );
+            return write!(formatter, "; staging cleanup also failed: {cleanup_error}");
         }
         Ok(())
     }
@@ -238,6 +225,10 @@ impl Error for LocalCopyDirError {
     }
 }
 
+// This module validates private recursive-copy failure parts and cleanup
+// context. Public callers receive the facade error/outcome and cannot observe
+// each intermediate part without an unstable API. Copy failure integration
+// tests cover the externally retained diagnostics.
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -252,10 +243,7 @@ mod tests {
             LocalCopyDirStats::default(),
             io::Error::other("copy failed"),
         )
-        .with_staging_context(
-            "staging".into(),
-            Some(io::Error::other("cleanup failed")),
-        );
+        .with_staging_context("staging".into(), Some(io::Error::other("cleanup failed")));
         assert_eq!(error.stage(), LocalCopyDirStage::CopyFileContents);
         assert_eq!(error.source_path(), Path::new("source"));
         assert_eq!(error.destination_path(), Path::new("destination"));
@@ -265,8 +253,7 @@ mod tests {
         assert_eq!(error.kind(), io::ErrorKind::Other);
         assert!(error.to_string().contains("staging cleanup"));
         assert!(std::error::Error::source(&error).is_some());
-        let (_, source, destination, _, staging, cleanup, native) =
-            error.into_parts();
+        let (_, source, destination, _, staging, cleanup, native) = error.into_parts();
         assert_eq!(source, PathBuf::from("source"));
         assert_eq!(destination, PathBuf::from("destination"));
         assert_eq!(

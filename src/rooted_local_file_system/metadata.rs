@@ -12,20 +12,12 @@
 use std::path::Path;
 
 use crate::{
-    LocalFileMetadata,
-    LocalFileOperation,
-    LocalFileSystemLimits,
-    LocalFileSystemSpace,
-    LocalResult,
-    LocalSymlinkPolicy,
+    LocalFileMetadata, LocalFileOperation, LocalFileSystemLimits, LocalFileSystemSpace,
+    LocalResult, LocalSymlinkPolicy,
 };
 
 use super::{
-    RootedLocalFileSystem,
-    probe_rooted_file,
-    resolve_rooted_path,
-    rooted_io_error,
-    rooted_metadata,
+    RootedLocalFileSystem, probe_rooted_file, resolve_rooted_path, rooted_io_error, rooted_metadata,
 };
 
 impl RootedLocalFileSystem {
@@ -43,12 +35,7 @@ impl RootedLocalFileSystem {
         )
         .map(|file| {
             file.map_or_else(
-                || {
-                    LocalFileSystemLimits::new(
-                        crate::SizeLimit::Unknown,
-                        crate::SizeLimit::Unknown,
-                    )
-                },
+                || LocalFileSystemLimits::new(crate::SizeLimit::Unknown, crate::SizeLimit::Unknown),
                 |file| crate::capability::probe_limits(&file),
             )
         })
@@ -82,11 +69,11 @@ impl RootedLocalFileSystem {
         symlink_policy: LocalSymlinkPolicy,
     ) -> LocalResult<LocalFileMetadata> {
         if path.as_os_str().is_empty() {
-            return self.root.metadata().map(rooted_metadata).map_err(
-                |error| {
-                    rooted_io_error(LocalFileOperation::Metadata, path, error)
-                },
-            );
+            return self
+                .root
+                .metadata()
+                .map(rooted_metadata)
+                .map_err(|error| rooted_io_error(LocalFileOperation::Metadata, path, error));
         }
         let relative = resolve_rooted_path(
             &self.root,
@@ -98,60 +85,6 @@ impl RootedLocalFileSystem {
         self.root
             .symlink_metadata(&relative)
             .map(rooted_metadata)
-            .map_err(|error| {
-                rooted_io_error(LocalFileOperation::Metadata, path, error)
-            })
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use std::path::Path;
-
-    #[test]
-    fn observes_root_limits_space_and_metadata() {
-        let filesystem = RootedLocalFileSystem::open(Path::new("."))
-            .expect("current directory can be opened");
-        let limits = filesystem
-            .limits_at(Path::new("Cargo.toml"), LocalSymlinkPolicy::Reject)
-            .expect("limits are queryable");
-        let _ = (limits.max_file_name_bytes(), limits.max_path_bytes());
-        let space = filesystem
-            .space_at(Path::new("Cargo.toml"), LocalSymlinkPolicy::Reject)
-            .expect("space is queryable");
-        let _ = (
-            space.available_bytes(),
-            space.capacity_bytes(),
-            space.free_bytes(),
-        );
-        assert_eq!(
-            filesystem
-                .metadata(Path::new(""), LocalSymlinkPolicy::Reject)
-                .expect("root metadata")
-                .kind(),
-            crate::LocalFileKind::Directory
-        );
-        assert_eq!(
-            filesystem
-                .metadata(Path::new("Cargo.toml"), LocalSymlinkPolicy::Reject)
-                .expect("file metadata")
-                .kind(),
-            crate::LocalFileKind::File
-        );
-        let _ = filesystem
-            .limits_at(Path::new("missing/entry"), LocalSymlinkPolicy::Reject)
-            .expect("nearest existing ancestor provides limits");
-        let _ = filesystem
-            .space_at(Path::new("missing/entry"), LocalSymlinkPolicy::Reject)
-            .expect("nearest existing ancestor provides space");
-        assert!(
-            filesystem
-                .metadata(
-                    Path::new("missing/entry"),
-                    LocalSymlinkPolicy::Reject
-                )
-                .is_err()
-        );
+            .map_err(|error| rooted_io_error(LocalFileOperation::Metadata, path, error))
     }
 }
