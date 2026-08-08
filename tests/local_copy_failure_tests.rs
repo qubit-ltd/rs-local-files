@@ -115,6 +115,12 @@ fn test_copy_failure_reports_second_child_partial_publication() {
 
         assert_eq!(LocalCopyFailureState::PartiallyPublished, failure.state());
         assert_eq!(1, failure.partial_stats().files());
+        assert_eq!(Some(source.as_path()), failure.request_source_path(),);
+        assert_eq!(Some(target.as_path()), failure.request_target_path(),);
+        let failed_source = source.join("second");
+        let failed_target = target.join("second");
+        assert_eq!(Some(failed_source.as_path()), failure.failed_source_path());
+        assert_eq!(Some(failed_target.as_path()), failure.failed_target_path());
     });
 }
 

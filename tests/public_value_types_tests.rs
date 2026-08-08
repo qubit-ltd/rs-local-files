@@ -31,7 +31,7 @@ use qubit_local_files::{
     LocalFileNames,
     LocalFileOperation,
     LocalFileSystem,
-    LocalFileSystemCapabilities,
+    LocalFileSystemProtocols,
     LocalPathCodecError,
     LocalRenameFailureState,
     LocalRenameOptions,
@@ -41,20 +41,20 @@ use tempfile::tempdir;
 /// Verifies every capability accessor returns a coherent platform snapshot.
 #[test]
 fn test_capability_snapshot_exposes_all_guarantees() {
-    let capabilities = LocalFileSystem::host().capabilities();
+    let capabilities = LocalFileSystem::host().protocols();
 
-    let _ = capabilities.implements_rooted_operations();
-    let _ = capabilities.implements_atomic_rename();
+    let _ = capabilities.supports_rooted_operations();
+    let _ = capabilities.supports_atomic_rename();
     let atomic_replace = std::hint::black_box(
-        LocalFileSystemCapabilities::implements_atomic_replace
-            as fn(LocalFileSystemCapabilities) -> bool,
+        LocalFileSystemProtocols::supports_atomic_replace
+            as fn(LocalFileSystemProtocols) -> bool,
     );
     assert_eq!(
         cfg!(any(unix, windows)),
         std::hint::black_box(atomic_replace)(capabilities),
     );
-    let _ = capabilities.implements_atomic_temp_persist();
-    let _ = capabilities.implements_durable_file_copy();
+    let _ = capabilities.supports_atomic_temp_persist();
+    let _ = capabilities.supports_durable_file_copy();
 }
 
 /// Verifies structured errors preserve each supported I/O classification and
@@ -105,6 +105,7 @@ fn test_local_file_error_classifies_io_and_retains_context() {
         assert!(error.typed_source().is_some());
         assert!(Error::source(&error).is_some());
         assert!(error.to_string().contains("targeting target"));
+        assert!(error.to_string().contains("caused by"));
     }
 
     let error = LocalFileError::new(
@@ -508,12 +509,11 @@ fn test_public_failure_values_expose_display_sources_and_parts() {
         .expect_err("missing copy source should fail");
     assert!(copy_failure.to_string().contains("copy failed"));
     assert!(Error::source(&copy_failure).is_some());
-    let (error, state, stats, staging, cleanup) = copy_failure.into_parts();
-    assert_eq!(LocalCopyFailureState::Unchanged, state);
-    assert_eq!(LocalFileOperation::Copy, error.operation());
-    assert_eq!(0, stats.files());
-    assert!(staging.is_none());
-    assert!(cleanup.is_none());
+    assert_eq!(LocalCopyFailureState::Unchanged, copy_failure.state());
+    assert_eq!(LocalFileOperation::Copy, copy_failure.error().operation(),);
+    assert_eq!(0, copy_failure.partial_stats().files());
+    assert!(copy_failure.staging_path().is_none());
+    assert!(copy_failure.cleanup_error().is_none());
 
     let rename_failure = LocalFileSystem::host()
         .rename(&missing, &target, &LocalRenameOptions::new())
