@@ -48,7 +48,28 @@ impl Display for LocalCopyFailure {
             formatter,
             "copy failed with {:?} state: {}",
             self.details.state, self.details.error
-        )
+        )?;
+        if let (
+            Some(request_source),
+            Some(request_target),
+            Some(failed_source),
+            Some(failed_target),
+        ) = (
+            self.details.request_source_path.as_deref(),
+            self.details.request_target_path.as_deref(),
+            self.details.failed_source_path.as_deref(),
+            self.details.failed_target_path.as_deref(),
+        ) && (request_source != failed_source
+            || request_target != failed_target)
+        {
+            write!(
+                formatter,
+                " while processing {} -> {}",
+                failed_source.display(),
+                failed_target.display(),
+            )?;
+        }
+        Ok(())
     }
 }
 
@@ -71,6 +92,10 @@ impl LocalCopyFailure {
     ) -> Self {
         Self {
             details: Box::new(LocalCopyFailureDetails {
+                request_source_path: error.path().map(Path::to_path_buf),
+                request_target_path: error.target().map(Path::to_path_buf),
+                failed_source_path: error.path().map(Path::to_path_buf),
+                failed_target_path: error.target().map(Path::to_path_buf),
                 error,
                 state,
                 partial_stats,
@@ -89,8 +114,8 @@ impl LocalCopyFailure {
     ) -> Self {
         let (
             stage,
-            _failed_source,
-            _failed_target,
+            failed_source,
+            failed_target,
             stats,
             staging_path,
             cleanup_error,
@@ -118,13 +143,41 @@ impl LocalCopyFailure {
             .as_ref()
             .and(staging_path.as_deref())
             .map(Path::to_path_buf);
-        Self::new(error, state, partial_stats, staging_path, cleanup_error)
+        let mut failure =
+            Self::new(error, state, partial_stats, staging_path, cleanup_error);
+        failure.details.failed_source_path = Some(failed_source);
+        failure.details.failed_target_path = Some(failed_target);
+        failure
     }
 
     /// Returns the primary typed filesystem error.
     #[must_use]
     pub fn error(&self) -> &LocalFileError {
         &self.details.error
+    }
+
+    /// Returns the source path supplied for the copy request.
+    #[must_use]
+    pub fn request_source_path(&self) -> Option<&Path> {
+        self.details.request_source_path.as_deref()
+    }
+
+    /// Returns the destination path supplied for the copy request.
+    #[must_use]
+    pub fn request_target_path(&self) -> Option<&Path> {
+        self.details.request_target_path.as_deref()
+    }
+
+    /// Returns the source entry being processed when the copy failed.
+    #[must_use]
+    pub fn failed_source_path(&self) -> Option<&Path> {
+        self.details.failed_source_path.as_deref()
+    }
+
+    /// Returns the destination entry being processed when the copy failed.
+    #[must_use]
+    pub fn failed_target_path(&self) -> Option<&Path> {
+        self.details.failed_target_path.as_deref()
     }
 
     /// Returns the most precise destination state proven by native operations.
@@ -148,26 +201,6 @@ impl LocalCopyFailure {
     #[must_use]
     pub fn cleanup_error(&self) -> Option<&LocalFileError> {
         self.details.cleanup_error.as_ref()
-    }
-
-    /// Consumes this failure and returns every retained part.
-    pub fn into_parts(
-        self,
-    ) -> (
-        LocalFileError,
-        LocalCopyFailureState,
-        LocalCopyStats,
-        Option<PathBuf>,
-        Option<LocalFileError>,
-    ) {
-        let details = *self.details;
-        (
-            details.error,
-            details.state,
-            details.partial_stats,
-            details.staging_path,
-            details.cleanup_error,
-        )
     }
 }
 

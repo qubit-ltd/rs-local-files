@@ -20,6 +20,14 @@ use crate::{
 /// Heap-owned details retained off [`crate::LocalCopyFailure`]'s hot path.
 #[derive(Debug)]
 pub(crate) struct LocalCopyFailureDetails {
+    /// Source path supplied for the copy request.
+    pub(crate) request_source_path: Option<PathBuf>,
+    /// Destination path supplied for the copy request.
+    pub(crate) request_target_path: Option<PathBuf>,
+    /// Source entry being processed when the copy failed.
+    pub(crate) failed_source_path: Option<PathBuf>,
+    /// Destination entry being processed when the copy failed.
+    pub(crate) failed_target_path: Option<PathBuf>,
     /// Primary typed filesystem error.
     pub(crate) error: LocalFileError,
     /// Most precise destination state proven by native operations.
