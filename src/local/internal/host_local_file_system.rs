@@ -45,7 +45,7 @@ use crate::{
     LocalFileError,
     LocalFileErrorKind,
     LocalFileOperation,
-    LocalFileSystemCapabilities,
+    LocalFileSystemProtocols,
     LocalMetadataPreservePolicy,
     LocalPaths,
     LocalRenameOptions,
@@ -72,10 +72,10 @@ pub(crate) struct HostLocalFileSystem {
 }
 
 impl HostLocalFileSystem {
-    /// Returns a snapshot of capabilities for the current host platform.
+    /// Returns the native protocols compiled for the current host platform.
     #[inline(always)]
-    pub const fn capabilities() -> LocalFileSystemCapabilities {
-        LocalFileSystemCapabilities::detect_host()
+    pub const fn protocols() -> LocalFileSystemProtocols {
+        LocalFileSystemProtocols::detect_host()
     }
 
     /// Copies through a Host namespace using an explicit symbolic-link policy.
@@ -156,7 +156,7 @@ impl HostLocalFileSystem {
         )
         .map_err(copy_failure_unchanged)?;
         let implements_durability =
-            Self::capabilities().implements_durable_file_copy();
+            Self::protocols().supports_durable_file_copy();
         let implements_durability = implements_durability
             && !crate::local::test_support_enabled(
                 "local-fs-required-directory-durability",
@@ -778,8 +778,7 @@ impl HostLocalFileSystem {
             .map_err(rename_failure_unchanged)?;
         let target = resolve_host_path(&target, symlink_policy, false)
             .map_err(rename_failure_unchanged)?;
-        let implements_durability =
-            Self::capabilities().implements_durable_rename();
+        let implements_durability = Self::protocols().supports_durable_rename();
         let implements_durability = implements_durability
             && !crate::local::test_support_enabled(
                 "local-fs-required-directory-durability",

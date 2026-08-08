@@ -176,7 +176,7 @@ rooted 路径必须是相对后代。绝对路径、平台前缀、`.` 和 `..` 
 ## 平台限制与延伸阅读
 
 Linux、Windows 和 macOS 会进行运行时测试。FreeBSD 与 Android 仅做编译检查。
-可通过 `LocalFileSystem::host().capabilities()` 查看主机实现；rooted 实例返回打开
+可通过 `LocalFileSystem::host().protocols()` 查看主机实现；rooted 实例返回打开
 权限时缓存的快照，`scope()` 供集成层区分两种命名空间；Rooted 实例的诊断锚点通过
 `diagnostic_root()` 单独读取。Host 命名空间的 `limits()` 返回 `SizeLimit::VariesByPath`；使用
 `limits_at(path)` 才会针对该路径所在文件系统返回有限值（无法探测时为

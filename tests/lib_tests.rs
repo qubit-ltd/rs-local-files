@@ -15,10 +15,10 @@ mod rooted_local_file_system;
 mod filesystem_probe_tests;
 #[path = "options/local_directory_reopen_policy_tests.rs"]
 mod local_directory_reopen_policy_tests;
-#[path = "capability/local_file_system_capabilities_tests.rs"]
-mod local_file_system_capabilities_tests;
 #[path = "capability/local_file_system_limits_tests.rs"]
 mod local_file_system_limits_tests;
+#[path = "capability/local_file_system_protocols_tests.rs"]
+mod local_file_system_protocols_tests;
 #[path = "capability/local_file_system_space_tests.rs"]
 mod local_file_system_space_tests;
 #[path = "local/internal/operation_policy_tests.rs"]

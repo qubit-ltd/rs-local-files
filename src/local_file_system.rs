@@ -33,8 +33,8 @@ use crate::{
     LocalFileMetadata,
     LocalFileOperation,
     LocalFileReader,
-    LocalFileSystemCapabilities,
     LocalFileSystemLimits,
+    LocalFileSystemProtocols,
     LocalFileSystemScope,
     LocalFileSystemSpace,
     LocalFileWriter,
@@ -62,8 +62,8 @@ use crate::{
 pub struct LocalFileSystem {
     /// Native namespace used by every operation.
     namespace: LocalNamespace,
-    /// Build capability snapshot retained for stable reporting.
-    capabilities: LocalFileSystemCapabilities,
+    /// Build protocol snapshot retained for stable reporting.
+    capabilities: LocalFileSystemProtocols,
     /// Symbolic-link resolution policy inherited by operations.
     symlink_policy: LocalSymlinkPolicy,
 }
@@ -82,7 +82,7 @@ impl LocalFileSystem {
     pub const fn host() -> Self {
         Self {
             namespace: LocalNamespace::Host,
-            capabilities: HostLocalFileSystem::capabilities(),
+            capabilities: HostLocalFileSystem::protocols(),
             symlink_policy: LocalSymlinkPolicy::FollowAcrossScope,
         }
     }
@@ -136,7 +136,7 @@ impl LocalFileSystem {
         )?;
         let rooted = RootedLocalFileSystem::open(root)?;
         Ok(Self {
-            capabilities: rooted.capabilities(),
+            capabilities: rooted.protocols(),
             namespace: LocalNamespace::Rooted(rooted),
             symlink_policy,
         })
@@ -216,15 +216,15 @@ impl LocalFileSystem {
         }
     }
 
-    /// Returns the build capability snapshot captured by this filesystem.
+    /// Returns the native protocol snapshot captured by this filesystem.
     ///
     /// # Returns
     ///
-    /// A copy of the immutable capability snapshot for this build and
+    /// A copy of the immutable protocol snapshot for this build and
     /// authority type.
-    #[must_use = "the filesystem capabilities must be used"]
+    #[must_use = "the filesystem protocols must be used"]
     #[inline(always)]
-    pub const fn capabilities(&self) -> LocalFileSystemCapabilities {
+    pub const fn protocols(&self) -> LocalFileSystemProtocols {
         self.capabilities
     }
 
