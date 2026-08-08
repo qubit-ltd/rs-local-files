@@ -116,30 +116,24 @@ Adapter 需要的完整 native path 组合也由 `LocalPaths` 组织：
 
 ```rust
 impl LocalPaths {
-    pub fn from_canonical_absolute_components<'a>(
+    pub fn from_canonical_components<'a>(
+        scope: LocalFileSystemScope,
         components: impl IntoIterator<Item = &'a str>,
     ) -> LocalResult<PathBuf>;
 
-    pub fn from_canonical_relative_components<'a>(
-        components: impl IntoIterator<Item = &'a str>,
-    ) -> LocalResult<PathBuf>;
-
-    pub fn to_canonical_absolute_components(
-        path: &Path,
-    ) -> LocalResult<Vec<String>>;
-
-    pub fn to_canonical_relative_components(
+    pub fn to_canonical_components(
+        scope: LocalFileSystemScope,
         path: &Path,
     ) -> LocalResult<Vec<String>>;
 }
 ```
 
 这些方法内部使用 `LocalPathCodec`，并负责 separator、root、prefix、drive 与 component
-边界；上层不能逐 component `PathBuf::push` 后再复制一套 Windows/Unix 判断。Windows
-absolute host path 第一版使用明确的 drive-absolute canonical form
-`/<drive>:/...`；UNC/remote authority 在没有独立、无歧义的 provider authority
-映射前返回 unsupported。Rooted conversion 始终使用 relative form，不接受 drive、
-UNC 或其他 prefix。
+边界；上层不能逐 component `PathBuf::push` 后再复制一套 Windows/Unix 判断。
+`Host` scope 的 Unix root 使用空序列表示 `/`，Windows 使用首个 drive component；
+`Rooted` scope 的空序列表示已打开 authority root，其余组件始终是安全的 relative
+descendant。UNC/remote authority 在没有独立、无歧义的 provider authority 映射前返回
+unsupported。
 
 `LocalPaths::is_lexically_within` 返回 `LocalResult<bool>`，拒绝含 `.`/`..` 或
 absolute/relative form 不一致的输入。它只提供 early lexical classification；copy
