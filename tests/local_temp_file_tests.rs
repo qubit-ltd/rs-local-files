@@ -428,10 +428,9 @@ fn test_local_temp_file_persist_reports_indeterminate_install() {
         return;
     }
 
-    let _fault = qubit_local_files::install_test_fault(
-        "persist-install-indeterminate",
-    )
-    .expect("test fault controller should install");
+    let _fault =
+        qubit_local_files::install_test_fault("persist-install-indeterminate")
+            .expect("test fault controller should install");
 
     let parent =
         tempfile::tempdir().expect("temporary parent should be created");
