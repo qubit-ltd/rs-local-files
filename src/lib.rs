@@ -43,8 +43,8 @@ mod write;
 mod writer;
 
 pub use capability::{
-    LocalFileSystemCapabilities,
     LocalFileSystemLimits,
+    LocalFileSystemProtocols,
     LocalFileSystemSpace,
     SizeLimit,
 };

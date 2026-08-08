@@ -66,19 +66,19 @@ fn test_rooted_file_system_space_observes_nearest_existing_ancestor() {
 /// Verifies capability snapshots expose independent operation guarantees.
 #[test]
 fn test_local_file_system_capabilities_report_operation_support() {
-    let capabilities = LocalFileSystem::host().capabilities();
+    let capabilities = LocalFileSystem::host().protocols();
 
-    assert!(capabilities.implements_rooted_operations());
-    assert!(capabilities.implements_atomic_rename());
-    assert!(capabilities.implements_atomic_replace());
-    assert!(capabilities.implements_atomic_temp_persist());
-    assert_eq!(cfg!(unix), capabilities.implements_durable_rename());
-    assert_eq!(cfg!(unix), capabilities.implements_durable_file_copy(),);
+    assert!(capabilities.supports_rooted_operations());
+    assert!(capabilities.supports_atomic_rename());
+    assert!(capabilities.supports_atomic_replace());
+    assert!(capabilities.supports_atomic_temp_persist());
+    assert_eq!(cfg!(unix), capabilities.supports_durable_rename());
+    assert_eq!(cfg!(unix), capabilities.supports_durable_file_copy(),);
 
     let rooted = tempfile::tempdir().expect("root should be created");
     let rooted_capabilities = LocalFileSystem::rooted(rooted.path())
         .expect("root authority should open")
-        .capabilities();
+        .protocols();
     assert_eq!(capabilities, rooted_capabilities);
 }
 
@@ -86,11 +86,11 @@ fn test_local_file_system_capabilities_report_operation_support() {
 /// implemented by the host backend on this target.
 #[test]
 fn test_host_capabilities_match_host_no_replace_backend() {
-    let capabilities = LocalFileSystem::host().capabilities();
+    let capabilities = LocalFileSystem::host().protocols();
     #[cfg(any(target_os = "linux", target_os = "macos", windows))]
-    assert!(capabilities.implements_atomic_rename());
+    assert!(capabilities.supports_atomic_rename());
     #[cfg(not(any(target_os = "linux", target_os = "macos", windows)))]
-    assert!(!capabilities.implements_atomic_rename());
+    assert!(!capabilities.supports_atomic_rename());
 }
 
 /// Verifies that generated names are portable single path components.

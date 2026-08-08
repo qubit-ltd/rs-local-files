@@ -5,14 +5,14 @@
 //
 //    Licensed under the Apache License, Version 2.0.
 // =============================================================================
-/// Immutable snapshot of filesystem mechanisms implemented by this build.
+/// Immutable snapshot of filesystem protocols implemented by this build.
 ///
 /// These flags describe code paths available for the current target. They do
 /// not probe a particular mount and therefore do not promise that every
 /// filesystem used at runtime supports the corresponding native operation.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 #[must_use]
-pub struct LocalFileSystemCapabilities {
+pub struct LocalFileSystemProtocols {
     /// Whether descriptor- or handle-relative rooted operations are compiled.
     rooted_operations: bool,
     /// Whether native atomic rename support is implemented.
@@ -27,8 +27,8 @@ pub struct LocalFileSystemCapabilities {
     durable_file_copy: bool,
 }
 
-impl LocalFileSystemCapabilities {
-    /// Detects mechanisms compiled for the current target platform.
+impl LocalFileSystemProtocols {
+    /// Detects protocols compiled for the current target platform.
     pub(crate) const fn detect_host() -> Self {
         Self {
             rooted_operations: cfg!(any(unix, windows)),
@@ -48,7 +48,7 @@ impl LocalFileSystemCapabilities {
         }
     }
 
-    /// Detects mechanisms compiled for a rooted authority on this target.
+    /// Detects protocols compiled for a rooted authority on this target.
     pub(crate) const fn detect_rooted() -> Self {
         Self {
             rooted_operations: cfg!(any(unix, windows)),
@@ -74,39 +74,39 @@ impl LocalFileSystemCapabilities {
 
     /// Reports whether secure rooted operations are implemented.
     #[must_use]
-    pub const fn implements_rooted_operations(self) -> bool {
+    pub const fn supports_rooted_operations(self) -> bool {
         self.rooted_operations
     }
 
     /// Reports whether native atomic rename is implemented.
     #[must_use]
-    pub const fn implements_atomic_rename(self) -> bool {
+    pub const fn supports_atomic_rename(self) -> bool {
         self.atomic_rename
     }
 
     /// Reports whether native atomic replacement is implemented.
     #[must_use]
-    pub const fn implements_atomic_replace(self) -> bool {
+    pub const fn supports_atomic_replace(self) -> bool {
         self.atomic_replace
     }
 
     /// Reports whether atomic no-replace temporary persistence is implemented.
     #[must_use]
-    pub const fn implements_atomic_temp_persist(self) -> bool {
+    pub const fn supports_atomic_temp_persist(self) -> bool {
         self.atomic_temp_persist
     }
 
     /// Reports whether the full durable rename publication protocol is
     /// implemented for this target.
     #[must_use]
-    pub const fn implements_durable_rename(self) -> bool {
+    pub const fn supports_durable_rename(self) -> bool {
         self.durable_rename
     }
 
     /// Reports whether the full durable file-copy publication protocol is
     /// implemented for this target.
     #[must_use]
-    pub const fn implements_durable_file_copy(self) -> bool {
+    pub const fn supports_durable_file_copy(self) -> bool {
         self.durable_file_copy
     }
 }

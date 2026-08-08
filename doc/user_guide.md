@@ -202,7 +202,7 @@ I/O errors are available through the structured error source when present.
 ## Platform Limits and Further Reading
 
 Linux, Windows, and macOS are runtime-tested. FreeBSD and Android are
-compile-checked only. `LocalFileSystem::host().capabilities()` reports the host
+compile-checked only. `LocalFileSystem::host().protocols()` reports the host
 implementation; a rooted instance returns the snapshot cached when opening the
 authority. `scope()` lets integration code distinguish the two namespaces, and
 `diagnostic_root()` exposes the non-authoritative rooted anchor separately. A

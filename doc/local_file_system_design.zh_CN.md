@@ -76,7 +76,7 @@ impl LocalFileSystem {
     pub fn rooted(root: &Path) -> LocalResult<Self>;
     pub fn scope(&self) -> LocalFileSystemScope;
     pub fn diagnostic_root(&self) -> Option<&Path>;
-    pub const fn capabilities(&self) -> LocalFileSystemCapabilities;
+    pub const fn capabilities(&self) -> LocalFileSystemProtocols;
 
     // metadata/open/list/copy/create/delete/rename/temp 操作均为 &self 方法
 }
@@ -295,7 +295,7 @@ handle、reparse-point-aware traversal 和 handle-relative 能力。
 - 返回明确的 unsupported 或 requirement-not-met 错误；
 - capability 查询准确说明当前构建和运行平台能保证的行为。
 
-公开快照使用 `LocalFileSystemCapabilities`。路径和文件名限制统一由
+公开快照使用 `LocalFileSystemProtocols`。路径和文件名限制统一由
 `SizeLimit` 表示：`Maximum(value)` 是已验证的有限上限，`VariesByPath` 表示上限
 随目标 filesystem 而变化，`Unknown` 表示无法可靠探测。Host 实例的 `limits()`
 返回 `VariesByPath`，调用 `limits_at(path)` 才会针对目标路径探测；rooted 实例在

@@ -58,8 +58,8 @@ use crate::{
     LocalFileErrorKind,
     LocalFileOperation,
     LocalFileReader,
-    LocalFileSystemCapabilities,
     LocalFileSystemLimits,
+    LocalFileSystemProtocols,
     LocalFileWriter,
     LocalListOptions,
     LocalReadOptions,
@@ -82,7 +82,7 @@ pub(crate) struct RootedLocalFileSystem {
     /// Existing secure rooted implementation.
     root: Arc<crate::rooted::Root>,
     /// Capability snapshot cached when the authority is opened.
-    capabilities: LocalFileSystemCapabilities,
+    capabilities: LocalFileSystemProtocols,
     /// Best-effort path limits captured from the opened root authority.
     limits: LocalFileSystemLimits,
 }
@@ -130,7 +130,7 @@ impl RootedLocalFileSystem {
             });
         Ok(Self {
             root,
-            capabilities: LocalFileSystemCapabilities::detect_rooted(),
+            capabilities: LocalFileSystemProtocols::detect_rooted(),
             limits,
         })
     }
@@ -142,9 +142,9 @@ impl RootedLocalFileSystem {
         self.root.path()
     }
 
-    /// Returns the capability snapshot cached for this opened authority.
+    /// Returns the native protocol snapshot cached for this opened authority.
     #[inline(always)]
-    pub const fn capabilities(&self) -> LocalFileSystemCapabilities {
+    pub const fn protocols(&self) -> LocalFileSystemProtocols {
         self.capabilities
     }
 
@@ -652,7 +652,7 @@ impl RootedLocalFileSystem {
                 LocalFileOperation::OpenWriter,
                 path,
                 path,
-                self.capabilities.implements_durable_file_copy(),
+                self.capabilities.supports_durable_file_copy(),
                 "required directory durability is unavailable for this rooted authority",
             )?;
         }
@@ -857,7 +857,7 @@ impl RootedLocalFileSystem {
             LocalFileOperation::Copy,
             source,
             target,
-            self.capabilities.implements_durable_file_copy(),
+            self.capabilities.supports_durable_file_copy(),
             "required directory durability is unavailable for this rooted authority",
         )
         .map_err(copy_failure_unchanged)?;
@@ -1157,7 +1157,7 @@ impl RootedLocalFileSystem {
             LocalFileOperation::Rename,
             source,
             target,
-            self.capabilities.implements_durable_rename(),
+            self.capabilities.supports_durable_rename(),
             "required directory durability is unavailable for this rooted authority",
         )
         .map_err(rename_failure_unchanged)?;
