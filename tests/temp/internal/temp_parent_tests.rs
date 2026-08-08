@@ -22,8 +22,9 @@ fn test_temp_parent_creates_persist_destination_parent_when_enabled() {
         .create_temp_file(&LocalTempFileOptions::new().with_parent(root.path()))
         .expect("temporary file should be created");
 
-    temporary
+    let outcome = temporary
         .persist_with(&target, LocalPersistOptions::new().with_create_parent())
         .expect("explicit parent creation should publish the temporary file");
+    assert!(outcome.path().ends_with("target"));
     assert!(target.is_file());
 }

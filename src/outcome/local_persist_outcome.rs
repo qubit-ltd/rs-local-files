@@ -12,11 +12,15 @@ use std::path::{
     PathBuf,
 };
 
-use crate::LocalPersistMethod;
+use crate::{
+    LocalFileError,
+    LocalPersistCleanupState,
+    LocalPersistMethod,
+};
 
 /// Guarantees actually achieved while persisting a temporary resource.
 #[must_use]
-#[derive(Clone, Debug, Eq, PartialEq)]
+#[derive(Debug)]
 pub struct LocalPersistOutcome {
     /// Authority-local path at which the resource was published.
     path: PathBuf,
@@ -26,6 +30,8 @@ pub struct LocalPersistOutcome {
     atomic: bool,
     /// Whether persistence durability was synchronized.
     durable: bool,
+    /// Cleanup error retained after successful publication, when any.
+    cleanup_error: Option<LocalFileError>,
 }
 
 impl LocalPersistOutcome {
@@ -35,12 +41,14 @@ impl LocalPersistOutcome {
         method: LocalPersistMethod,
         atomic: bool,
         durable: bool,
+        cleanup_error: Option<LocalFileError>,
     ) -> Self {
         Self {
             path,
             method,
             atomic,
             durable,
+            cleanup_error,
         }
     }
 
@@ -67,9 +75,24 @@ impl LocalPersistOutcome {
         self.durable
     }
 
-    /// Returns the owned authority-local published path.
+    /// Returns the cleanup state achieved after publication.
+    pub const fn cleanup_state(&self) -> LocalPersistCleanupState {
+        if self.cleanup_error.is_some() {
+            LocalPersistCleanupState::ResidualSandbox
+        } else {
+            LocalPersistCleanupState::Complete
+        }
+    }
+
+    /// Returns the cleanup error retained after successful publication.
     #[must_use]
-    pub fn into_path(self) -> PathBuf {
-        self.path
+    pub const fn cleanup_error(&self) -> Option<&LocalFileError> {
+        self.cleanup_error.as_ref()
+    }
+
+    /// Returns the published path and any retained cleanup error.
+    #[must_use]
+    pub fn into_parts(self) -> (PathBuf, Option<LocalFileError>) {
+        (self.path, self.cleanup_error)
     }
 }

@@ -520,7 +520,8 @@ Persist failure state 包括：
 - `Indeterminate`。
 
 `LocalPersistOptions` 对 file 与 directory 提供同一套 overwrite 语义；
-`persist_with_outcome` 返回实际的 target、publication method、atomicity 与 durability。
+`persist_with` 返回实际的 target、publication method、atomicity、durability 与
+sandbox cleanup state。
 当前 native 实现以同一 authority 内的 rename 发布，报告 `AtomicRename`、
 `atomic = true` 与 `durable = false`。`LocalPersistFailureState` 在已知未发布的错误上
 报告 `NotPublished`，无法证明结果的 native install error 报告 `Indeterminate`；

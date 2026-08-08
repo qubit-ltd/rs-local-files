@@ -34,6 +34,37 @@ use qubit_local_files::{
 };
 use tempfile::tempdir;
 
+#[cfg(feature = "internal-test-support")]
+fn run_in_test_fault_process<F>(test_name: &str, fault: &str, action: F)
+where
+    F: FnOnce(),
+{
+    const TEST_FAULT_ENV: &str = "QUBIT_LOCAL_FILES_TEST_FAULT";
+    const TEST_FAULT_CHILD_ENV: &str = "QUBIT_LOCAL_FILES_TEST_FAULT_CHILD";
+    if std::env::var_os(TEST_FAULT_ENV)
+        .is_some_and(|selected| selected == std::ffi::OsStr::new(fault))
+    {
+        let _fault = qubit_local_files::install_test_fault(fault)
+            .expect("test fault controller should install");
+        action();
+        return;
+    }
+    if std::env::var_os(TEST_FAULT_CHILD_ENV).is_some() {
+        return;
+    }
+    let executable =
+        std::env::current_exe().expect("test executable should be available");
+    let status = std::process::Command::new(executable)
+        .arg("--exact")
+        .arg(test_name)
+        .arg("--nocapture")
+        .env(TEST_FAULT_ENV, fault)
+        .env(TEST_FAULT_CHILD_ENV, "1")
+        .status()
+        .expect("test fault child should launch");
+    assert!(status.success(), "test fault child should pass");
+}
+
 /// Runs a current-directory failure scenario in a child process so changing
 /// the process directory cannot affect concurrent tests.
 #[cfg(not(windows))]
@@ -78,12 +109,10 @@ fn test_local_temp_file_close_retains_path_and_persist_responsibility() {
     temporary.close();
 
     assert_eq!(path, temporary.path());
-    assert_eq!(
-        target,
-        temporary
-            .persist(&target)
-            .expect("closed file should persist")
-    );
+    let outcome = temporary
+        .persist(&target)
+        .expect("closed file should persist");
+    assert_eq!(target, outcome.path());
     assert!(target.exists());
 }
 
@@ -164,7 +193,7 @@ fn test_local_temp_file_uses_private_cleanup_sandbox() {
 
 /// Verifies detailed persistence reports the actual atomic rename outcome.
 #[test]
-fn test_local_temp_file_persist_with_outcome_reports_atomic_rename() {
+fn test_local_temp_file_persist_reports_atomic_rename() {
     let parent = tempdir().expect("temporary parent should be created");
     let target = parent.path().join("persisted");
     let temporary = LocalFileSystem::host()
@@ -174,7 +203,7 @@ fn test_local_temp_file_persist_with_outcome_reports_atomic_rename() {
         .expect("temporary file should be created");
 
     let outcome = temporary
-        .persist_with_outcome(&target, LocalPersistOptions::new())
+        .persist_with(&target, LocalPersistOptions::new())
         .expect("temporary file should persist");
 
     assert_eq!(target, outcome.path());
@@ -399,6 +428,11 @@ fn test_local_temp_file_persist_reports_indeterminate_install() {
         return;
     }
 
+    let _fault = qubit_local_files::install_test_fault(
+        "persist-install-indeterminate",
+    )
+    .expect("test fault controller should install");
+
     let parent =
         tempfile::tempdir().expect("temporary parent should be created");
     let temporary = LocalFileSystem::host()
@@ -461,7 +495,7 @@ fn test_rooted_temp_file_persist_with_overwrite_replaces_target() {
         )
         .expect("rooted overwrite should publish the temporary file");
 
-    assert_eq!(std::path::Path::new("target"), persisted);
+    assert_eq!(std::path::Path::new("target"), persisted.path());
     assert_eq!(
         b"replacement",
         fs::read(parent.path().join("target"))
@@ -486,12 +520,10 @@ fn test_rooted_temp_file_persist_publishes_absent_target() {
         .expect("rooted temporary file should accept bytes");
     let source = temporary.path().to_path_buf();
 
-    assert_eq!(
-        std::path::Path::new("published"),
-        temporary
-            .persist(std::path::Path::new("published"))
-            .expect("rooted temporary file should publish"),
-    );
+    let outcome = temporary
+        .persist(std::path::Path::new("published"))
+        .expect("rooted temporary file should publish");
+    assert_eq!(std::path::Path::new("published"), outcome.path());
     assert!(!parent.path().join(source).exists());
     assert_eq!(
         b"payload",
@@ -650,7 +682,7 @@ fn test_local_temp_file_persist_respects_conflict_and_overwrite_policy() {
     let persisted = temporary
         .persist_with(&target, LocalPersistOptions::new().with_overwrite())
         .expect("explicit overwrite should publish the temporary file");
-    assert_eq!(target, persisted);
+    assert_eq!(target, persisted.path());
     assert_eq!(
         b"replacement",
         fs::read(&target).expect("target should read").as_slice()
@@ -683,6 +715,43 @@ fn test_local_temp_file_close_rejects_stream_access_and_allows_cleanup() {
         .cleanup()
         .expect("closed temporary file should clean up");
     assert!(!path.exists());
+}
+
+/// Verifies cleanup reports and retries a sandbox removal failure.
+#[cfg(feature = "internal-test-support")]
+#[test]
+fn test_local_temp_file_cleanup_reports_and_retries_sandbox_failure() {
+    run_in_test_fault_process(
+        "test_local_temp_file_cleanup_reports_and_retries_sandbox_failure",
+        "temp-file-sandbox-remove",
+        || {
+            let parent = tempdir().expect("temporary parent should be created");
+            let mut temporary = LocalFileSystem::host()
+                .create_temp_file(
+                    &LocalTempFileOptions::new().with_parent(parent.path()),
+                )
+                .expect("temporary file should be created");
+            let resource = temporary.path().to_path_buf();
+            let sandbox = resource
+                .parent()
+                .expect("temporary file should have a sandbox")
+                .to_path_buf();
+
+            let error = temporary
+                .cleanup()
+                .expect_err("sandbox failure should be reported");
+            assert_eq!(
+                qubit_local_files::LocalFileOperation::Cleanup,
+                error.operation()
+            );
+            assert!(!resource.exists());
+            assert!(sandbox.exists());
+            temporary
+                .cleanup()
+                .expect("sandbox cleanup should be retryable");
+            assert!(!sandbox.exists());
+        },
+    );
 }
 
 /// Verifies cleanup rejects a path that no longer names the created entry.

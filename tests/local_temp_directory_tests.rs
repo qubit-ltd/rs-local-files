@@ -17,6 +17,37 @@ use std::{
     process::Command,
 };
 
+#[cfg(feature = "internal-test-support")]
+fn run_in_test_fault_process<F>(test_name: &str, fault: &str, action: F)
+where
+    F: FnOnce(),
+{
+    const TEST_FAULT_ENV: &str = "QUBIT_LOCAL_FILES_TEST_FAULT";
+    const TEST_FAULT_CHILD_ENV: &str = "QUBIT_LOCAL_FILES_TEST_FAULT_CHILD";
+    if std::env::var_os(TEST_FAULT_ENV)
+        .is_some_and(|selected| selected == std::ffi::OsStr::new(fault))
+    {
+        let _fault = qubit_local_files::install_test_fault(fault)
+            .expect("test fault controller should install");
+        action();
+        return;
+    }
+    if std::env::var_os(TEST_FAULT_CHILD_ENV).is_some() {
+        return;
+    }
+    let executable =
+        std::env::current_exe().expect("test executable should be available");
+    let status = std::process::Command::new(executable)
+        .arg("--exact")
+        .arg(test_name)
+        .arg("--nocapture")
+        .env(TEST_FAULT_ENV, fault)
+        .env(TEST_FAULT_CHILD_ENV, "1")
+        .status()
+        .expect("test fault child should launch");
+    assert!(status.success(), "test fault child should pass");
+}
+
 #[cfg(not(windows))]
 use qubit_local_files::LocalPersistFailureState;
 use qubit_local_files::{
@@ -108,8 +139,8 @@ fn test_local_temp_directory_persist_with_overwrite_replaces_empty_destination()
         .persist_with(&target, LocalPersistOptions::new().with_overwrite())
         .expect("overwrite persistence should replace an empty directory");
 
-    assert_eq!(persisted, target);
-    assert!(persisted.is_dir());
+    assert_eq!(target, persisted.path());
+    assert!(persisted.path().is_dir());
 }
 
 /// Verifies a relative temporary parent remains bound after the current
@@ -172,10 +203,10 @@ fn test_local_temp_directory_persist_publishes_absent_destination() {
         .persist(&target)
         .expect("no-replace persistence should publish an absent destination");
 
-    assert_eq!(target, persisted);
+    assert_eq!(target, persisted.path());
     assert_eq!(
         b"contents",
-        fs::read(persisted.join("payload"))
+        fs::read(persisted.path().join("payload"))
             .expect("published child should read")
             .as_slice()
     );
@@ -194,9 +225,10 @@ fn test_local_temp_directory_persist_releases_cleanup_ownership() {
         .expect("temporary directory should be created");
     let source = temporary.path().to_path_buf();
 
-    temporary
+    let outcome = temporary
         .persist(&target)
         .expect("temporary directory should persist");
+    assert_eq!(target, outcome.path());
 
     assert!(!source.exists());
     assert!(target.is_dir());
@@ -334,7 +366,7 @@ fn test_local_temp_directory_persist_conflict_retains_resource_for_overwrite() {
     let persisted = temporary
         .persist_with(&target, LocalPersistOptions::new().with_overwrite())
         .expect("explicit overwrite should publish the temporary tree");
-    assert_eq!(target, persisted);
+    assert_eq!(target, persisted.path());
     assert_eq!(
         b"replacement",
         fs::read(target.join("payload"))
@@ -435,12 +467,10 @@ fn test_rooted_temp_directory_persist_supports_new_and_overwrite_targets() {
         .create_temp_directory(&LocalTempDirectoryOptions::new())
         .expect("first rooted temporary directory should be created");
 
-    assert_eq!(
-        Path::new("fresh-target"),
-        temporary
-            .persist(Path::new("fresh-target"))
-            .expect("rooted directory should publish to an absent target"),
-    );
+    let outcome = temporary
+        .persist(Path::new("fresh-target"))
+        .expect("rooted directory should publish to an absent target");
+    assert_eq!(Path::new("fresh-target"), outcome.path());
     assert!(parent.path().join("fresh-target").is_dir());
 
     fs::create_dir(parent.path().join("replacement-target"))
@@ -449,15 +479,13 @@ fn test_rooted_temp_directory_persist_supports_new_and_overwrite_targets() {
         .create_temp_directory(&LocalTempDirectoryOptions::new())
         .expect("second rooted temporary directory should be created");
 
-    assert_eq!(
-        Path::new("replacement-target"),
-        temporary
-            .persist_with(
-                Path::new("replacement-target"),
-                LocalPersistOptions::new().with_overwrite(),
-            )
-            .expect("rooted overwrite should replace the empty target"),
-    );
+    let outcome = temporary
+        .persist_with(
+            Path::new("replacement-target"),
+            LocalPersistOptions::new().with_overwrite(),
+        )
+        .expect("rooted overwrite should replace the empty target");
+    assert_eq!(Path::new("replacement-target"), outcome.path());
     assert!(parent.path().join("replacement-target").is_dir());
 }
 
@@ -514,6 +542,43 @@ fn test_rooted_temp_directory_conflicts_and_invalid_targets_retain_cleanup() {
         .cleanup()
         .expect("conflicted rooted directory should remain cleanup-safe");
     assert!(!parent.path().join(source).exists());
+}
+
+/// Verifies directory cleanup reports and retries a sandbox removal failure.
+#[cfg(feature = "internal-test-support")]
+#[test]
+fn test_local_temp_directory_cleanup_reports_and_retries_sandbox_failure() {
+    run_in_test_fault_process(
+        "test_local_temp_directory_cleanup_reports_and_retries_sandbox_failure",
+        "temp-directory-sandbox-remove",
+        || {
+            let parent = tempdir().expect("temporary parent should be created");
+            let mut temporary = LocalFileSystem::host()
+                .create_temp_directory(
+                    &LocalTempDirectoryOptions::new().with_parent(parent.path()),
+                )
+                .expect("temporary directory should be created");
+            let resource = temporary.path().to_path_buf();
+            let sandbox = resource
+                .parent()
+                .expect("temporary directory should have a sandbox")
+                .to_path_buf();
+
+            let error = temporary
+                .cleanup()
+                .expect_err("sandbox failure should be reported");
+            assert_eq!(
+                qubit_local_files::LocalFileOperation::Cleanup,
+                error.operation()
+            );
+            assert!(!resource.exists());
+            assert!(sandbox.exists());
+            temporary
+                .cleanup()
+                .expect("sandbox cleanup should be retryable");
+            assert!(!sandbox.exists());
+        },
+    );
 }
 
 /// Verifies dropping an externally removed directory is best effort and does

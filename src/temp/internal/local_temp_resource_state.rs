@@ -17,6 +17,8 @@ pub(crate) enum LocalTempResourceState {
     Owned,
     /// The native namespace result is unknown; no cleanup operation is safe.
     Indeterminate,
+    /// The resource is gone, but its private sandbox still needs cleanup.
+    SandboxPending,
     /// The resource was kept, cleaned, or fully persisted.
     Released,
 }
