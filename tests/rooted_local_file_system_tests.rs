@@ -842,6 +842,8 @@ fn test_rooted_local_file_system_writer_follows_final_symlink() {
 #[cfg(feature = "internal-test-support")]
 #[test]
 fn test_rooted_follow_rejects_unavailable_authority_path() {
+    use std::os::unix::fs::symlink;
+
     const TEST_NAME: &str =
         "test_rooted_follow_rejects_unavailable_authority_path";
     run_in_test_fault_process(TEST_NAME, "root-authority-path", || {
