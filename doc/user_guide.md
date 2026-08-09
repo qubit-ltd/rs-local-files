@@ -149,7 +149,8 @@ first collecting it into a vector. Dropping it only releases handles.
 
 Temporary files and directories own cleanup while armed. Each resource lives in
 a private generated sandbox that is removed with the resource. Dropping them
-performs best-effort cleanup; `keep` disables cleanup and returns an authority-local path
+performs best-effort cleanup; call `cleanup()` when the caller must observe a
+cleanup failure. `keep` disables cleanup and returns an authority-local path
 (absolute for Host and relative to the opened root for Rooted).
 Persistence failures retain the resource so the caller can retry, inspect,
 keep, or explicitly clean it. Prefixes and suffixes are checked before entry

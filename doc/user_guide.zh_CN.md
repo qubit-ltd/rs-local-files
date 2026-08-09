@@ -129,7 +129,8 @@ match LocalFileSystem::host().copy(
 drop 只释放句柄。
 
 临时文件和目录在仍处于 armed 状态时拥有清理责任。每个资源都创建在独立的私有 sandbox 中，
-sandbox 会和资源一起清理。drop 会尽力清理；`keep` 会关闭清理并
+sandbox 会和资源一起清理。需要观察清理失败时应显式调用 `cleanup()`；drop 只会尽力清理。
+`keep` 会关闭清理并
 返回 authority-local 路径（Host 为绝对路径，Rooted 为相对于已打开 root 的相对路径）。持久化失败会保留资源，调用方可重试、检查、保留或显式清理。创建前会
 校验前缀和后缀：原生分隔符、NUL 与便携保留名称不会留下条目。
 

@@ -64,13 +64,15 @@ assert_eq!(content, r#"{"version":1}"#);
 | `LocalFileNames` / `LocalPaths` | 不丢失 UTF-8 以外文件名信息的原生文件名和词法路径工具。 |
 
 需要保存配置、传递给其他组件或适配到更高层文件系统 SPI 时，使用 `LocalFileSystem` 实例。
+该句柄可以廉价克隆；rooted 克隆会共享已打开的权限。
 
 符号链接策略按 `LocalFileSystem` 实例配置；Rooted 默认
 `FollowWithinScope`，Host 默认 `FollowAcrossScope`。Rooted 仅支持
 `Reject` 和 `FollowWithinScope`；选择 `FollowAcrossScope` 会返回
 `InvalidOptions`。各类操作对最终链接的具体语义请参阅[用户手册](doc/user_guide.zh_CN.md)。
 
-临时资源清理会校验所有权，但它不是并发同步边界。guard 删除前会比较创建时保存的
+临时资源清理会校验所有权，但它不是并发同步边界。调用方需要观察清理失败时应显式调用
+`cleanup()`；drop 只提供尽力而为的兜底。guard 删除前会比较创建时保存的
 文件系统标识，因此通常能拒绝误删替换条目；但标识检查与按路径删除是两个独立操作，
 文件系统也可能复用标识。例如，不受信任的并发者删除临时文件后，反复在同一名称上安装新文件，
 这不在清理契约的保证范围内。应将临时资源放在并发者无写权的目录，或调用 `keep` 后由上层协调删除。
