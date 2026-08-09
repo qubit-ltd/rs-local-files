@@ -11,7 +11,7 @@
 use crate::rooted_local_file_system::RootedLocalFileSystem;
 
 /// Closed native namespace implementation selected at construction.
-#[derive(Debug)]
+#[derive(Clone, Debug)]
 pub(crate) enum LocalNamespace {
     /// Process-visible Host namespace.
     Host,

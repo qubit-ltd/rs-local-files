@@ -49,6 +49,17 @@ fn test_local_file_system_host_inspects_native_namespace() {
     assert_eq!(instance.len(), b"payload".len() as u64);
 }
 
+/// Verifies cloning a Host handle preserves its cheap, stateless semantics.
+#[test]
+fn test_local_file_system_clone_preserves_host_configuration() {
+    let filesystem = LocalFileSystem::host();
+    let clone = filesystem.clone();
+
+    assert_eq!(filesystem.scope(), clone.scope());
+    assert_eq!(filesystem.protocols(), clone.protocols());
+    assert_eq!(filesystem.symlink_policy(), clone.symlink_policy());
+}
+
 /// Verifies the Host facade publishes a file through the configured instance.
 #[test]
 fn test_local_file_system_host_writer_workflow() {
@@ -96,6 +107,20 @@ fn test_local_file_system_rooted_reports_scope_and_reads_relative_path() {
             .expect("Rooted instance should inspect a relative fixture")
             .kind(),
     );
+}
+
+/// Verifies cloning a Rooted handle shares its opened authority safely.
+#[test]
+fn test_local_file_system_clone_preserves_rooted_authority() {
+    let directory = tempdir().expect("temporary directory should be created");
+    let filesystem = LocalFileSystem::rooted(directory.path())
+        .expect("Rooted filesystem should open");
+    let clone = filesystem.clone();
+
+    assert_eq!(filesystem.scope(), clone.scope());
+    assert_eq!(filesystem.protocols(), clone.protocols());
+    assert_eq!(filesystem.symlink_policy(), clone.symlink_policy());
+    assert_eq!(filesystem.diagnostic_root(), clone.diagnostic_root());
 }
 
 /// Verifies Rooted construction rejects an across-scope policy precisely.
