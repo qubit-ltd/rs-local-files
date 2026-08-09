@@ -26,6 +26,7 @@ use crate::LocalWritePublicationMethod;
 use crate::LocalWriterState;
 
 /// Stateful native byte output and destination publication session.
+#[must_use = "a local writer has no effect unless it is committed or aborted"]
 #[derive(Debug)]
 pub struct LocalFileWriter {
     /// Non-authoritative destination path captured for diagnostics.
