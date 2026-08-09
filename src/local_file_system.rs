@@ -52,7 +52,10 @@ use crate::rooted_local_file_system::RootedLocalFileSystem;
 /// to [`LocalSymlinkPolicy::FollowWithinScope`]. Rooted instances reject
 /// [`LocalSymlinkPolicy::FollowAcrossScope`]; the policy controls non-final
 /// path components and final-link behavior remains operation-specific.
-#[derive(Debug)]
+///
+/// Cloning a filesystem handle is cheap: Host handles copy their stateless
+/// configuration, while Rooted handles share the opened authority.
+#[derive(Clone, Debug)]
 pub struct LocalFileSystem {
     /// Native namespace used by every operation.
     namespace: LocalNamespace,
