@@ -12,7 +12,7 @@ use std::path::Path;
 use std::path::PathBuf;
 use std::sync::Arc;
 
-use qubit_budget::{ResourceBudget, ResourceLimit};
+use qubit_budget::{ResourceLimit, ResourcePool};
 
 use super::internal::RootedWalkFrame;
 use super::internal::RootedWalkState;
@@ -46,7 +46,7 @@ pub struct LocalDirectoryWalker {
     /// Open directory iterators, bounded by traversal depth.
     stack: Vec<WalkFrame>,
     /// Current number of open native directory readers.
-    open_directories: ResourceBudget,
+    open_directories: ResourcePool<WalkerResource>,
     /// Native directory identities on the active DFS path.
     followed_directories: HashSet<DirectoryIdentity>,
     /// Descriptor-relative traversal state for a rooted walker.
@@ -87,10 +87,9 @@ impl LocalDirectoryWalker {
             )
             .with_path(root));
         }
-        let mut open_directories =
-            ResourceBudget::new(ResourceLimit::new(options.max_open_directories()));
+        let mut open_directories = directory_pool(&options);
         open_directories
-            .try_consume(WalkerResource::OpenDirectory, 1)
+            .try_acquire(1)
             .expect("validated non-zero directory capacity accepts root");
         let entries = fs::read_dir(&root).map_err(|error| walk_io_error(&root, error))?;
         #[cfg(feature = "internal-test-support")]
@@ -177,9 +176,7 @@ impl LocalDirectoryWalker {
             root: diagnostic_root,
             options,
             stack: Vec::new(),
-            open_directories: ResourceBudget::new(ResourceLimit::new(
-                options.max_open_directories(),
-            )),
+            open_directories: directory_pool(&options),
             followed_directories: HashSet::new(),
             rooted: Some(RootedWalkState {
                 root,
@@ -259,13 +256,13 @@ impl LocalDirectoryWalker {
     fn acquire_host_directory(&mut self, path: &Path) -> LocalResult<()> {
         match self
             .open_directories
-            .try_consume(WalkerResource::OpenDirectory, 1)
+            .try_acquire(1)
         {
             Ok(()) => Ok(()),
             Err(_) if self.options.reopen_policy() == LocalDirectoryReopenPolicy::Reopen => {
                 self.close_all_host_frames();
                 self.open_directories
-                    .try_consume(WalkerResource::OpenDirectory, 1)
+                    .try_acquire(1)
                     .map_err(|_| directory_limit_error(path))
             }
             Err(_) => Err(directory_limit_error(path)),
@@ -418,7 +415,7 @@ impl LocalDirectoryWalker {
 ///
 /// This function updates the frame and pool together. It panics only when
 /// their internal occupancy invariant was already violated.
-fn close_host_frame(frame: &mut WalkFrame, pool: &mut ResourceBudget) {
+fn close_host_frame(frame: &mut WalkFrame, pool: &mut ResourcePool<WalkerResource>) {
     if frame.entries.take().is_some() {
         pool.release(1)
             .expect("one host reader was recorded as open");
@@ -460,6 +457,17 @@ fn validate_options(root: &Path, options: &LocalListOptions) -> LocalResult<()> 
         .with_reason("maximum open directory count must be greater than zero"));
     }
     Ok(())
+}
+
+/// Creates the finite pool that accounts for opened directory readers.
+fn directory_pool(options: &LocalListOptions) -> ResourcePool<WalkerResource> {
+    ResourcePool::new(
+        WalkerResource::OpenDirectory,
+        ResourceLimit::new(
+            u64::try_from(options.max_open_directories())
+                .expect("directory limit fits u64"),
+        ),
+    )
 }
 
 impl Iterator for LocalDirectoryWalker {
@@ -580,7 +588,10 @@ impl Iterator for LocalDirectoryWalker {
 ///
 /// This function updates the frame and pool together. It panics only when
 /// their internal occupancy invariant was already violated.
-fn close_rooted_frame(frame: &mut RootedWalkFrame, pool: &mut ResourceBudget) {
+fn close_rooted_frame(
+    frame: &mut RootedWalkFrame,
+    pool: &mut ResourcePool<WalkerResource>,
+) {
     if frame.reader.take().is_some() {
         pool.release(1)
             .expect("one rooted reader was recorded as open");
@@ -593,7 +604,10 @@ fn close_rooted_frame(frame: &mut RootedWalkFrame, pool: &mut ResourceBudget) {
 ///
 /// - `state`: Rooted traversal state containing retained frames.
 /// - `pool`: Pool that recorded every open rooted reader.
-fn close_all_rooted_frames(state: &mut RootedWalkState, pool: &mut ResourceBudget) {
+fn close_all_rooted_frames(
+    state: &mut RootedWalkState,
+    pool: &mut ResourcePool<WalkerResource>,
+) {
     for frame in &mut state.stack {
         close_rooted_frame(frame, pool);
     }
@@ -611,7 +625,7 @@ fn close_all_rooted_frames(state: &mut RootedWalkState, pool: &mut ResourceBudge
 /// Returns the removed frame, or `None` when traversal is complete.
 fn pop_rooted_frame(
     state: &mut RootedWalkState,
-    pool: &mut ResourceBudget,
+    pool: &mut ResourcePool<WalkerResource>,
 ) -> Option<RootedWalkFrame> {
     let mut frame = state.stack.pop()?;
     close_rooted_frame(&mut frame, pool);
@@ -634,14 +648,14 @@ fn pop_rooted_frame(
 fn acquire_rooted_directory(
     state: &mut RootedWalkState,
     options: LocalListOptions,
-    pool: &mut ResourceBudget,
+    pool: &mut ResourcePool<WalkerResource>,
     path: &Path,
 ) -> LocalResult<()> {
-    match pool.try_consume(WalkerResource::OpenDirectory, 1) {
+    match pool.try_acquire(1) {
         Ok(()) => Ok(()),
         Err(_) if options.reopen_policy() == LocalDirectoryReopenPolicy::Reopen => {
             close_all_rooted_frames(state, pool);
-            pool.try_consume(WalkerResource::OpenDirectory, 1)
+            pool.try_acquire(1)
                 .map_err(|_| directory_limit_error(path))
         }
         Err(_) => Err(directory_limit_error(path)),
@@ -662,7 +676,7 @@ fn acquire_rooted_directory(
 fn next_rooted_entry(
     state: &mut RootedWalkState,
     options: LocalListOptions,
-    pool: &mut ResourceBudget,
+    pool: &mut ResourcePool<WalkerResource>,
 ) -> Option<LocalResult<LocalDirectoryEntry>> {
     loop {
         let frame = state.stack.last()?;
