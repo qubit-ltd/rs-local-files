@@ -10,10 +10,8 @@
 // Private behavior is covered through public integration tests.
 
 use std::fs::File;
-use std::io::{
-    Error,
-    Result,
-};
+use std::io::Error;
+use std::io::Result;
 use std::os::fd::AsRawFd;
 
 /// Copies ACLs and extended attributes through the native copyfile API.

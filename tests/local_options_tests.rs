@@ -7,34 +7,30 @@
 // =============================================================================
 //! Public option-value coverage for local filesystem operations.
 
-use std::{
-    hint::black_box,
-    path::Path,
-    time::Duration,
-};
+use std::hint::black_box;
+use std::path::Path;
+use std::time::Duration;
 
-use qubit_local_files::{
-    LocalAtomicityRequirement,
-    LocalCopyConflictPolicy,
-    LocalCopyOptions,
-    LocalCopySourceMode,
-    LocalCopyTypeConflictPolicy,
-    LocalCreateDirectoryOptions,
-    LocalDeleteOptions,
-    LocalDirectoryReopenPolicy,
-    LocalDurabilityRequirement,
-    LocalListOptions,
-    LocalMetadataPreservePolicy,
-    LocalPersistOptions,
-    LocalReadOptions,
-    LocalRenameOptions,
-    LocalSymlinkPolicy,
-    LocalTempDirectoryOptions,
-    LocalTempFileOptions,
-    LocalWalkErrorPolicy,
-    LocalWriteMode,
-    LocalWriteOptions,
-};
+use qubit_local_files::LocalAtomicityRequirement;
+use qubit_local_files::LocalCopyConflictPolicy;
+use qubit_local_files::LocalCopyOptions;
+use qubit_local_files::LocalCopySourceMode;
+use qubit_local_files::LocalCopyTypeConflictPolicy;
+use qubit_local_files::LocalCreateDirectoryOptions;
+use qubit_local_files::LocalDeleteOptions;
+use qubit_local_files::LocalDirectoryReopenPolicy;
+use qubit_local_files::LocalDurabilityRequirement;
+use qubit_local_files::LocalListOptions;
+use qubit_local_files::LocalMetadataPreservePolicy;
+use qubit_local_files::LocalPersistOptions;
+use qubit_local_files::LocalReadOptions;
+use qubit_local_files::LocalRenameOptions;
+use qubit_local_files::LocalSymlinkPolicy;
+use qubit_local_files::LocalTempDirectoryOptions;
+use qubit_local_files::LocalTempFileOptions;
+use qubit_local_files::LocalWalkErrorPolicy;
+use qubit_local_files::LocalWriteMode;
+use qubit_local_files::LocalWriteOptions;
 
 /// Verifies directory and deletion builders retain every configured policy.
 #[test]

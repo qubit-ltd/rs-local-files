@@ -6,23 +6,19 @@
 //    Licensed under the Apache License, Version 2.0.
 // =============================================================================
 
-use std::{
-    fs,
-    io::Read,
-};
+use std::fs;
+use std::io::Read;
 
+use qubit_local_files::LocalCopyOptions;
+use qubit_local_files::LocalCreateDirectoryOptions;
+use qubit_local_files::LocalDeleteOptions;
 #[cfg(unix)]
 use qubit_local_files::LocalDurabilityRequirement;
-use qubit_local_files::{
-    LocalCopyOptions,
-    LocalCreateDirectoryOptions,
-    LocalDeleteOptions,
-    LocalFileErrorKind,
-    LocalFileOperation,
-    LocalFileSystem,
-    LocalReadOptions,
-    LocalRenameOptions,
-};
+use qubit_local_files::LocalFileErrorKind;
+use qubit_local_files::LocalFileOperation;
+use qubit_local_files::LocalFileSystem;
+use qubit_local_files::LocalReadOptions;
+use qubit_local_files::LocalRenameOptions;
 use tempfile::tempdir;
 
 /// Verifies default host copy and rename avoid durability synchronization.

@@ -9,40 +9,29 @@
 // qubit-style: allow source-test-pair
 // Public APIs cannot force an opened regular-file metadata failure.
 
-use std::fs::{
-    self,
-    OpenOptions,
-};
-use std::io::{
-    Error,
-    ErrorKind,
-    Result,
-};
+use std::fs::OpenOptions;
+use std::fs::{self};
+use std::io::Error;
+use std::io::ErrorKind;
+use std::io::Result;
 #[cfg(unix)]
 use std::os::fd::AsRawFd;
 #[cfg(windows)]
-use std::os::windows::{
-    fs::OpenOptionsExt,
-    io::AsRawHandle,
-};
+use std::os::windows::fs::OpenOptionsExt;
+#[cfg(windows)]
+use std::os::windows::io::AsRawHandle;
 use std::path::Path;
 use std::time::Duration;
 
-use crate::{
-    read,
-    write,
-};
-
 use super::io_result_context::with_path_context;
-use super::path_operations::{
-    add_path_context,
-    ensure_parent_path,
-};
+use super::path_operations::add_path_context;
+use super::path_operations::ensure_parent_path;
 #[cfg(unix)]
-use super::unix_nonblocking::{
-    clear_nonblocking,
-    open_with_nonblocking_retry,
-};
+use super::unix_nonblocking::clear_nonblocking;
+#[cfg(unix)]
+use super::unix_nonblocking::open_with_nonblocking_retry;
+use crate::read;
+use crate::write;
 
 /// Creates the canonical error for a non-regular-file target.
 ///
@@ -229,12 +218,10 @@ fn prepare_opened_regular_file(
 fn reject_opened_name_surrogate(file: &fs::File, path: &Path) -> Result<()> {
     use std::mem::size_of;
 
-    use windows_sys::Win32::Storage::FileSystem::{
-        FILE_ATTRIBUTE_REPARSE_POINT,
-        FILE_ATTRIBUTE_TAG_INFO,
-        FileAttributeTagInfo,
-        GetFileInformationByHandleEx,
-    };
+    use windows_sys::Win32::Storage::FileSystem::FILE_ATTRIBUTE_REPARSE_POINT;
+    use windows_sys::Win32::Storage::FileSystem::FILE_ATTRIBUTE_TAG_INFO;
+    use windows_sys::Win32::Storage::FileSystem::FileAttributeTagInfo;
+    use windows_sys::Win32::Storage::FileSystem::GetFileInformationByHandleEx;
 
     const IO_REPARSE_TAG_NAME_SURROGATE: u32 = 0x2000_0000;
     let mut attributes = FILE_ATTRIBUTE_TAG_INFO::default();

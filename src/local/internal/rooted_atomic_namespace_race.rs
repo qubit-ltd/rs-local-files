@@ -12,23 +12,16 @@
 
 use std::ffi::CString;
 use std::fs::File;
-use std::io::{
-    Error,
-    ErrorKind,
-};
+use std::io::Error;
+use std::io::ErrorKind;
 
-use crate::{
-    LocalAtomicDestinationState,
-    LocalAtomicWriteError,
-    LocalAtomicWriteStage,
-};
-
-use super::opened_atomic_destination::{
-    OpenedAtomicDestination,
-    rooted_destination_identity_matches,
-};
+use super::opened_atomic_destination::OpenedAtomicDestination;
+use super::opened_atomic_destination::rooted_destination_identity_matches;
 use super::rooted_atomic_write::inspect_rooted_atomic_destination;
 use super::rooted_staged_file::RootedStagedFile;
+use crate::LocalAtomicDestinationState;
+use crate::LocalAtomicWriteError;
+use crate::LocalAtomicWriteStage;
 
 /// Verifies that a rooted entry still names its opened destination.
 ///

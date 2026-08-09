@@ -7,11 +7,11 @@
 // =============================================================================
 
 #[cfg(unix)]
-use qubit_local_files::{
-    LocalDurabilityRequirement,
-    LocalFileSystem,
-    LocalRenameOptions,
-};
+use qubit_local_files::LocalDurabilityRequirement;
+#[cfg(unix)]
+use qubit_local_files::LocalFileSystem;
+#[cfg(unix)]
+use qubit_local_files::LocalRenameOptions;
 #[cfg(unix)]
 use tempfile::tempdir;
 

@@ -11,70 +11,60 @@
 mod metadata_operations;
 mod path_support;
 
+use std::fs::File;
+use std::fs::{self};
+use std::io;
+use std::path::Path;
+use std::path::PathBuf;
+use std::sync::Arc;
+
+use path_support::rooted_destination_is_directory;
+use path_support::rooted_io_error;
 pub(crate) use path_support::rooted_metadata;
-use path_support::{
-    rooted_destination_is_directory,
-    rooted_io_error,
-    rooted_path,
-    rooted_temp_parent,
-    temp_candidate,
-    validate_rooted_temp_parent,
-};
+use path_support::rooted_path;
+use path_support::rooted_temp_parent;
+use path_support::temp_candidate;
+use path_support::validate_rooted_temp_parent;
 
-use std::{
-    fs::{
-        self,
-        File,
-    },
-    io,
-    path::Path,
-    path::PathBuf,
-    sync::Arc,
-};
-
-use crate::local::{
-    copy_failure_published,
-    copy_failure_unchanged,
-    ensure_required_directory_durability,
-    published_durability,
-    rename_failure_after_native_attempt,
-    rename_failure_renamed,
-    rename_failure_unchanged,
-    validate_temp_affixes,
-};
-use crate::{
-    LocalCopyFailure,
-    LocalCopyMethod,
-    LocalCopyOptions,
-    LocalCopyOutcome,
-    LocalCopyResult,
-    LocalCopyStats,
-    LocalCreateDirectoryOptions,
-    LocalCreateDirectoryOutcome,
-    LocalDeleteOptions,
-    LocalDeleteOutcome,
-    LocalDirectoryWalker,
-    LocalFileError,
-    LocalFileErrorKind,
-    LocalFileOperation,
-    LocalFileReader,
-    LocalFileSystemLimits,
-    LocalFileSystemProtocols,
-    LocalFileWriter,
-    LocalListOptions,
-    LocalReadOptions,
-    LocalRenameOptions,
-    LocalRenameOutcome,
-    LocalRenameResult,
-    LocalResult,
-    LocalSymlinkPolicy,
-    LocalTempDirectory,
-    LocalTempDirectoryOptions,
-    LocalTempFile,
-    LocalTempFileOptions,
-    LocalWriteMode,
-    LocalWriteOptions,
-};
+use crate::LocalCopyFailure;
+use crate::LocalCopyMethod;
+use crate::LocalCopyOptions;
+use crate::LocalCopyOutcome;
+use crate::LocalCopyResult;
+use crate::LocalCopyStats;
+use crate::LocalCreateDirectoryOptions;
+use crate::LocalCreateDirectoryOutcome;
+use crate::LocalDeleteOptions;
+use crate::LocalDeleteOutcome;
+use crate::LocalDirectoryWalker;
+use crate::LocalFileError;
+use crate::LocalFileErrorKind;
+use crate::LocalFileOperation;
+use crate::LocalFileReader;
+use crate::LocalFileSystemLimits;
+use crate::LocalFileSystemProtocols;
+use crate::LocalFileWriter;
+use crate::LocalListOptions;
+use crate::LocalReadOptions;
+use crate::LocalRenameOptions;
+use crate::LocalRenameOutcome;
+use crate::LocalRenameResult;
+use crate::LocalResult;
+use crate::LocalSymlinkPolicy;
+use crate::LocalTempDirectory;
+use crate::LocalTempDirectoryOptions;
+use crate::LocalTempFile;
+use crate::LocalTempFileOptions;
+use crate::LocalWriteMode;
+use crate::LocalWriteOptions;
+use crate::local::copy_failure_published;
+use crate::local::copy_failure_unchanged;
+use crate::local::ensure_required_directory_durability;
+use crate::local::published_durability;
+use crate::local::rename_failure_after_native_attempt;
+use crate::local::rename_failure_renamed;
+use crate::local::rename_failure_unchanged;
+use crate::local::validate_temp_affixes;
 
 /// Descriptor- or handle-relative authority for one opened native directory.
 #[derive(Debug)]

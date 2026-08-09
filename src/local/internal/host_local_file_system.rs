@@ -10,60 +10,50 @@
 mod io_operations;
 mod path_resolution;
 
+use std::fs;
+use std::io;
+use std::path::Path;
+use std::path::PathBuf;
+
 pub(crate) use path_resolution::resolve_host_path;
 
-use std::{
-    fs,
-    io,
-    path::{
-        Path,
-        PathBuf,
-    },
-};
-
-use crate::local::{
-    copy_failure_published,
-    copy_failure_unchanged,
-    ensure_required_directory_durability,
-    published_durability,
-    rename_failure_after_native_attempt,
-    rename_failure_renamed,
-    rename_failure_unchanged,
-    validate_temp_affixes,
-};
-use crate::{
-    LocalCopyFailure,
-    LocalCopyMethod,
-    LocalCopyOptions,
-    LocalCopyOutcome,
-    LocalCopyResult,
-    LocalCopyStats,
-    LocalCreateDirectoryOptions,
-    LocalCreateDirectoryOutcome,
-    LocalDeleteOptions,
-    LocalDeleteOutcome,
-    LocalFileError,
-    LocalFileErrorKind,
-    LocalFileOperation,
-    LocalFileSystemProtocols,
-    LocalMetadataPreservePolicy,
-    LocalPaths,
-    LocalRenameOptions,
-    LocalRenameOutcome,
-    LocalRenameResult,
-    LocalResult,
-    LocalSymlinkPolicy,
-    LocalTempDirectory,
-    LocalTempDirectoryOptions,
-    LocalTempFile,
-    LocalTempFileOptions,
-    LocalWriteMode,
-    LocalWriteOptions,
-};
-use crate::{
-    LocalRenameFailure,
-    LocalRenameFailureState,
-};
+use crate::LocalCopyFailure;
+use crate::LocalCopyMethod;
+use crate::LocalCopyOptions;
+use crate::LocalCopyOutcome;
+use crate::LocalCopyResult;
+use crate::LocalCopyStats;
+use crate::LocalCreateDirectoryOptions;
+use crate::LocalCreateDirectoryOutcome;
+use crate::LocalDeleteOptions;
+use crate::LocalDeleteOutcome;
+use crate::LocalFileError;
+use crate::LocalFileErrorKind;
+use crate::LocalFileOperation;
+use crate::LocalFileSystemProtocols;
+use crate::LocalMetadataPreservePolicy;
+use crate::LocalPaths;
+use crate::LocalRenameFailure;
+use crate::LocalRenameFailureState;
+use crate::LocalRenameOptions;
+use crate::LocalRenameOutcome;
+use crate::LocalRenameResult;
+use crate::LocalResult;
+use crate::LocalSymlinkPolicy;
+use crate::LocalTempDirectory;
+use crate::LocalTempDirectoryOptions;
+use crate::LocalTempFile;
+use crate::LocalTempFileOptions;
+use crate::LocalWriteMode;
+use crate::LocalWriteOptions;
+use crate::local::copy_failure_published;
+use crate::local::copy_failure_unchanged;
+use crate::local::ensure_required_directory_durability;
+use crate::local::published_durability;
+use crate::local::rename_failure_after_native_attempt;
+use crate::local::rename_failure_renamed;
+use crate::local::rename_failure_unchanged;
+use crate::local::validate_temp_affixes;
 
 /// Host-wide native local filesystem service.
 pub(crate) struct HostLocalFileSystem {
@@ -1275,11 +1265,9 @@ fn windows_file_identity(path: &Path) -> io::Result<(u32, u64)> {
     use std::os::windows::fs::OpenOptionsExt;
     use std::os::windows::io::AsRawHandle;
 
-    use windows_sys::Win32::Storage::FileSystem::{
-        BY_HANDLE_FILE_INFORMATION,
-        FILE_FLAG_BACKUP_SEMANTICS,
-        GetFileInformationByHandle,
-    };
+    use windows_sys::Win32::Storage::FileSystem::BY_HANDLE_FILE_INFORMATION;
+    use windows_sys::Win32::Storage::FileSystem::FILE_FLAG_BACKUP_SEMANTICS;
+    use windows_sys::Win32::Storage::FileSystem::GetFileInformationByHandle;
 
     let file = fs::OpenOptions::new()
         .read(true)

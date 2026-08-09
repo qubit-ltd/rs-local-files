@@ -9,16 +9,12 @@
 // qubit-style: allow source-test-pair
 
 use std::ffi::OsStr;
-use std::io::{
-    Error,
-    ErrorKind,
-    Result,
-};
-use std::path::{
-    Component,
-    Path,
-    PathBuf,
-};
+use std::io::Error;
+use std::io::ErrorKind;
+use std::io::Result;
+use std::path::Component;
+use std::path::Path;
+use std::path::PathBuf;
 
 /// An owned, validated path accepted by [`crate::rooted::Root`].
 ///

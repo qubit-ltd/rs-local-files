@@ -8,10 +8,8 @@
 
 use std::error::Error;
 
-use qubit_local_files::{
-    LocalFileErrorSource,
-    LocalPathCodecError,
-};
+use qubit_local_files::LocalFileErrorSource;
+use qubit_local_files::LocalPathCodecError;
 
 /// Verifies path codec failures are typed error sources without a secondary
 /// cause.

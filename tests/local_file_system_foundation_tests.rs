@@ -7,17 +7,15 @@
 // =============================================================================
 
 #[cfg(unix)]
-use qubit_local_files::LocalFileKind;
-use qubit_local_files::{
-    LocalFileNames,
-    LocalFileSystem,
-    SizeLimit,
-};
+use std::fs;
 #[cfg(unix)]
-use std::{
-    fs,
-    time::SystemTime,
-};
+use std::time::SystemTime;
+
+#[cfg(unix)]
+use qubit_local_files::LocalFileKind;
+use qubit_local_files::LocalFileNames;
+use qubit_local_files::LocalFileSystem;
+use qubit_local_files::SizeLimit;
 #[cfg(unix)]
 use tempfile::tempdir;
 

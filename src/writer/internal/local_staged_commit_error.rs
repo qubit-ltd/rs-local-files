@@ -9,9 +9,8 @@
 // qubit-style: allow source-test-pair
 // Covered by writer integration tests.
 
-use crate::local::LocalAtomicWriteError;
-
 use super::LocalFileWriterBackend;
+use crate::local::LocalAtomicWriteError;
 
 /// Recoverable staged-publication failure with its optional retained backend.
 #[derive(Debug)]

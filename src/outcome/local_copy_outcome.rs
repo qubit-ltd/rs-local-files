@@ -8,10 +8,8 @@
 // qubit-style: allow source-test-pair
 // Covered by copy integration tests.
 
-use super::{
-    LocalCopyMethod,
-    LocalCopyStats,
-};
+use super::LocalCopyMethod;
+use super::LocalCopyStats;
 use crate::LocalMetadataPreservePolicy;
 
 /// Structured result of a native file or directory copy.

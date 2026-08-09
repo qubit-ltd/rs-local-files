@@ -7,21 +7,17 @@
 // =============================================================================
 //! Public persistence outcome coverage.
 
-use std::io::Write;
-
 #[cfg(unix)]
 use std::fs;
-
+use std::io::Write;
 #[cfg(unix)]
 use std::os::unix::fs::symlink;
 
-use qubit_local_files::{
-    LocalFileSystem,
-    LocalPersistCleanupState,
-    LocalPersistMethod,
-    LocalPersistOptions,
-    LocalTempFileOptions,
-};
+use qubit_local_files::LocalFileSystem;
+use qubit_local_files::LocalPersistCleanupState;
+use qubit_local_files::LocalPersistMethod;
+use qubit_local_files::LocalPersistOptions;
+use qubit_local_files::LocalTempFileOptions;
 
 #[cfg(feature = "internal-test-support")]
 fn run_in_test_fault_process<F>(test_name: &str, fault: &str, action: F)

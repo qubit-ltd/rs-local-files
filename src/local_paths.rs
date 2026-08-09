@@ -6,26 +6,18 @@
 //    Licensed under the Apache License, Version 2.0.
 // =============================================================================
 
-use std::{
-    env,
-    ffi::{
-        OsStr,
-        OsString,
-    },
-    path::{
-        Component,
-        Path,
-        PathBuf,
-    },
-};
+use std::env;
+use std::ffi::OsStr;
+use std::ffi::OsString;
+use std::path::Component;
+use std::path::Path;
+use std::path::PathBuf;
 
-use crate::{
-    LocalFileError,
-    LocalFileErrorKind,
-    LocalFileOperation,
-    LocalPathCodec,
-    LocalResult,
-};
+use crate::LocalFileError;
+use crate::LocalFileErrorKind;
+use crate::LocalFileOperation;
+use crate::LocalPathCodec;
+use crate::LocalResult;
 
 /// Native path validation, binding, and composition utilities.
 pub struct LocalPaths {

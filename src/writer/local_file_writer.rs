@@ -6,33 +6,24 @@
 //    Licensed under the Apache License, Version 2.0.
 // =============================================================================
 
-use std::{
-    io::{
-        self,
-        IoSlice,
-        Write,
-    },
-    path::{
-        Path,
-        PathBuf,
-    },
-};
-
-use crate::{
-    LocalDurabilityRequirement,
-    LocalFileCommitError,
-    LocalFileError,
-    LocalFileErrorKind,
-    LocalFileOperation,
-    LocalResult,
-    LocalWriteFailureState,
-    LocalWriteOptions,
-    LocalWriteOutcome,
-    LocalWritePublicationMethod,
-    LocalWriterState,
-};
+use std::io::IoSlice;
+use std::io::Write;
+use std::io::{self};
+use std::path::Path;
+use std::path::PathBuf;
 
 use super::internal::LocalFileWriterBackend;
+use crate::LocalDurabilityRequirement;
+use crate::LocalFileCommitError;
+use crate::LocalFileError;
+use crate::LocalFileErrorKind;
+use crate::LocalFileOperation;
+use crate::LocalResult;
+use crate::LocalWriteFailureState;
+use crate::LocalWriteOptions;
+use crate::LocalWriteOutcome;
+use crate::LocalWritePublicationMethod;
+use crate::LocalWriterState;
 
 /// Stateful native byte output and destination publication session.
 #[derive(Debug)]

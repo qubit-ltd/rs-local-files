@@ -10,18 +10,13 @@
 
 use std::ffi::OsString;
 use std::fs;
-use std::io::{
-    Error,
-    ErrorKind,
-    Result,
-};
-use std::path::{
-    Path,
-    PathBuf,
-};
-
+use std::io::Error;
+use std::io::ErrorKind;
+use std::io::Result;
 #[cfg(windows)]
 use std::os::windows::fs::FileTypeExt;
+use std::path::Path;
+use std::path::PathBuf;
 
 #[cfg(windows)]
 use super::super::file_move::remove_directory_symlink;

@@ -8,22 +8,16 @@
 // qubit-style: allow source-test-pair
 // Covered by structured error integration tests.
 
-use std::{
-    error::Error,
-    fmt,
-    io,
-    path::{
-        Path,
-        PathBuf,
-    },
-};
+use std::error::Error;
+use std::fmt;
+use std::io;
+use std::path::Path;
+use std::path::PathBuf;
 
-use super::{
-    LocalFileErrorKind,
-    LocalFileErrorSource,
-    LocalFileOperation,
-    LocalPathCodecError,
-};
+use super::LocalFileErrorKind;
+use super::LocalFileErrorSource;
+use super::LocalFileOperation;
+use super::LocalPathCodecError;
 
 /// Structured failure from a local filesystem operation.
 #[derive(Debug)]

@@ -7,23 +7,17 @@
 // =============================================================================
 //! Host-path binding and symbolic-link resolution.
 
-use std::{
-    fs,
-    io,
-    path::{
-        Path,
-        PathBuf,
-    },
-};
+use std::fs;
+use std::io;
+use std::path::Path;
+use std::path::PathBuf;
 
-use crate::{
-    LocalFileError,
-    LocalFileErrorKind,
-    LocalFileOperation,
-    LocalPaths,
-    LocalResult,
-    LocalSymlinkPolicy,
-};
+use crate::LocalFileError;
+use crate::LocalFileErrorKind;
+use crate::LocalFileOperation;
+use crate::LocalPaths;
+use crate::LocalResult;
+use crate::LocalSymlinkPolicy;
 
 /// Resolves Host path components according to a symbolic-link policy.
 ///

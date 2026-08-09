@@ -10,32 +10,27 @@
 use std::fs;
 use std::path::Path;
 
+use super::HostLocalFileSystem;
+use super::open_staged_writer;
+use super::resolve_host_path;
+use super::test_io_fault;
+use crate::LocalAtomicityRequirement;
+use crate::LocalDirectoryWalker;
+use crate::LocalFileError;
+use crate::LocalFileErrorKind;
+use crate::LocalFileMetadata;
+use crate::LocalFileOperation;
+use crate::LocalFileReader;
+use crate::LocalFileWriter;
+use crate::LocalListOptions;
+use crate::LocalPaths;
+use crate::LocalReadOptions;
+use crate::LocalResult;
+use crate::LocalSymlinkPolicy;
+use crate::LocalWriteMode;
+use crate::LocalWriteOptions;
 use crate::local::ensure_required_directory_durability;
 use crate::writer::internal::LocalFileWriterBackend;
-use crate::{
-    LocalAtomicityRequirement,
-    LocalDirectoryWalker,
-    LocalFileError,
-    LocalFileErrorKind,
-    LocalFileMetadata,
-    LocalFileOperation,
-    LocalFileReader,
-    LocalFileWriter,
-    LocalListOptions,
-    LocalPaths,
-    LocalReadOptions,
-    LocalResult,
-    LocalSymlinkPolicy,
-    LocalWriteMode,
-    LocalWriteOptions,
-};
-
-use super::{
-    HostLocalFileSystem,
-    open_staged_writer,
-    resolve_host_path,
-    test_io_fault,
-};
 
 impl HostLocalFileSystem {
     /// Reads metadata using an explicit path-resolution policy.

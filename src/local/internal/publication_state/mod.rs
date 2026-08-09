@@ -11,13 +11,9 @@ mod copy_failure;
 mod durability;
 mod rename_failure;
 
-pub(crate) use copy_failure::{
-    copy_failure_published,
-    copy_failure_unchanged,
-};
+pub(crate) use copy_failure::copy_failure_published;
+pub(crate) use copy_failure::copy_failure_unchanged;
 pub(crate) use durability::published_durability;
-pub(crate) use rename_failure::{
-    rename_failure_after_native_attempt,
-    rename_failure_renamed,
-    rename_failure_unchanged,
-};
+pub(crate) use rename_failure::rename_failure_after_native_attempt;
+pub(crate) use rename_failure::rename_failure_renamed;
+pub(crate) use rename_failure::rename_failure_unchanged;

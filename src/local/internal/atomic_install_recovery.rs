@@ -10,18 +10,13 @@
 // Private behavior is covered through public integration tests.
 
 use std::io;
-use std::path::{
-    Path,
-    PathBuf,
-};
-
-use crate::{
-    LocalAtomicDestinationState,
-    LocalAtomicWriteError,
-    LocalAtomicWriteStage,
-};
+use std::path::Path;
+use std::path::PathBuf;
 
 use super::AtomicStagingState;
+use crate::LocalAtomicDestinationState;
+use crate::LocalAtomicWriteError;
+use crate::LocalAtomicWriteStage;
 
 /// Context retained while recovering a failed atomic installation.
 pub(crate) struct AtomicInstallRecovery<'a> {

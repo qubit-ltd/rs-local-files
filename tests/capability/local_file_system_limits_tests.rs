@@ -7,10 +7,8 @@
 // =============================================================================
 //! Coverage for native filesystem limit values.
 
-use qubit_local_files::{
-    LocalFileSystemLimits,
-    SizeLimit,
-};
+use qubit_local_files::LocalFileSystemLimits;
+use qubit_local_files::SizeLimit;
 
 /// Verifies limits preserve independent finite and path-dependent dimensions.
 #[test]

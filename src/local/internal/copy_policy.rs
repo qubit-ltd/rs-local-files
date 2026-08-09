@@ -9,12 +9,10 @@
 // tests.
 //! Shared, side-effect-free copy policy decisions.
 
-use crate::{
-    LocalAtomicityRequirement,
-    LocalCopySourceMode,
-    LocalCopyTypeConflictPolicy,
-    LocalDurabilityRequirement,
-};
+use crate::LocalAtomicityRequirement;
+use crate::LocalCopySourceMode;
+use crate::LocalCopyTypeConflictPolicy;
+use crate::LocalDurabilityRequirement;
 
 /// Reports whether the configured source mode rejects the observed kind.
 #[inline]

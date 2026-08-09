@@ -7,18 +7,18 @@
 // =============================================================================
 //! Private fault injection support used by deterministic integration tests.
 
-#[cfg(feature = "internal-test-support")]
-use super::test_fault_guard::TestFaultGuard;
 use std::io;
-
 #[cfg(feature = "internal-test-support")]
 use std::sync::Mutex;
 #[cfg(feature = "internal-test-support")]
-use std::sync::atomic::{
-    AtomicBool,
-    AtomicUsize,
-    Ordering,
-};
+use std::sync::atomic::AtomicBool;
+#[cfg(feature = "internal-test-support")]
+use std::sync::atomic::AtomicUsize;
+#[cfg(feature = "internal-test-support")]
+use std::sync::atomic::Ordering;
+
+#[cfg(feature = "internal-test-support")]
+use super::test_fault_guard::TestFaultGuard;
 
 #[cfg(feature = "internal-test-support")]
 static ONE_SHOT_FAULT_TAKEN: AtomicBool = AtomicBool::new(false);

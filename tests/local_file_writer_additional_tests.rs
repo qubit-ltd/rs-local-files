@@ -6,24 +6,18 @@
 //    Licensed under the Apache License, Version 2.0.
 // =============================================================================
 
-use std::{
-    error::Error as StdError,
-    fs,
-    io::{
-        IoSlice,
-        Write,
-    },
-};
+use std::error::Error as StdError;
+use std::fs;
+use std::io::IoSlice;
+use std::io::Write;
 
-use qubit_local_files::{
-    LocalDurabilityRequirement,
-    LocalFileErrorKind,
-    LocalFileSystem,
-    LocalWriteFailureState,
-    LocalWriteMode,
-    LocalWriteOptions,
-    LocalWriterState,
-};
+use qubit_local_files::LocalDurabilityRequirement;
+use qubit_local_files::LocalFileErrorKind;
+use qubit_local_files::LocalFileSystem;
+use qubit_local_files::LocalWriteFailureState;
+use qubit_local_files::LocalWriteMode;
+use qubit_local_files::LocalWriteOptions;
+use qubit_local_files::LocalWriterState;
 use tempfile::tempdir;
 
 /// Verifies Host writers retain the caller-visible destination after resolving

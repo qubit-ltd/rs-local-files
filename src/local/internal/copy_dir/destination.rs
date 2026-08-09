@@ -10,39 +10,29 @@
 // Private behavior is covered through public integration tests.
 
 use std::fs;
-use std::io::{
-    Error,
-    ErrorKind,
-    Result,
-};
-use std::path::Path;
-
-#[cfg(feature = "internal-test-support")]
-use crate::local::internal::test_support;
+use std::io::Error;
+use std::io::ErrorKind;
+use std::io::Result;
 #[cfg(windows)]
 use std::os::windows::fs::FileTypeExt;
-
-#[cfg(windows)]
-use crate::local::internal::file_move::remove_directory_symlink;
-use crate::local::internal::temp_entry::create_private_dir;
-use crate::local::{
-    CopyDestinationAction,
-    decide_copy_destination,
-};
-use crate::{
-    LocalCopyConflictPolicy,
-    LocalCopyDirStage,
-    LocalCopyDirStats,
-    LocalCopyTypeConflictPolicy,
-};
+use std::path::Path;
 
 use super::copy_dir_result::CopyDirResult;
 use super::error::copy_dir_error;
-use super::namespace_race::{
-    reconcile_directory_creation,
-    removable_non_directory_metadata,
-};
+use super::namespace_race::reconcile_directory_creation;
+use super::namespace_race::removable_non_directory_metadata;
 use super::source::is_real_directory;
+use crate::LocalCopyConflictPolicy;
+use crate::LocalCopyDirStage;
+use crate::LocalCopyDirStats;
+use crate::LocalCopyTypeConflictPolicy;
+use crate::local::CopyDestinationAction;
+use crate::local::decide_copy_destination;
+#[cfg(windows)]
+use crate::local::internal::file_move::remove_directory_symlink;
+use crate::local::internal::temp_entry::create_private_dir;
+#[cfg(feature = "internal-test-support")]
+use crate::local::internal::test_support;
 
 /// Ensures a directory-copy destination exists as a real directory.
 ///

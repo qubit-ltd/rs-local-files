@@ -8,14 +8,10 @@
 //! Private random file-name generation.
 // qubit-style: allow source-test-pair
 
-use std::io::{
-    Error,
-    Result,
-};
-use std::time::{
-    SystemTime,
-    UNIX_EPOCH,
-};
+use std::io::Error;
+use std::io::Result;
+use std::time::SystemTime;
+use std::time::UNIX_EPOCH;
 
 use super::file_name_validation::validate_file_name_fragment;
 

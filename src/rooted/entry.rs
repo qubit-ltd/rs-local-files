@@ -8,10 +8,8 @@
 //! Descriptor-relative directory entries.
 // qubit-style: allow source-test-pair
 
-use std::ffi::{
-    OsStr,
-    OsString,
-};
+use std::ffi::OsStr;
+use std::ffi::OsString;
 
 use super::Metadata;
 

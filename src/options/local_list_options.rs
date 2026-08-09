@@ -8,11 +8,9 @@
 // qubit-style: allow source-test-pair
 // Covered by walker integration tests.
 
+use super::LocalDirectoryReopenPolicy;
+use super::LocalSymlinkPolicy;
 use super::LocalWalkErrorPolicy;
-use super::{
-    LocalDirectoryReopenPolicy,
-    LocalSymlinkPolicy,
-};
 
 /// Options fixed for the lifetime of a local directory walker.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]

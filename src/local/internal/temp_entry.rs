@@ -9,36 +9,25 @@
 // qubit-style: allow source-test-pair
 // Private behavior is covered through public integration tests.
 
-use std::fs::{
-    DirBuilder,
-    File,
-    OpenOptions,
-};
-use std::io::{
-    Error,
-    ErrorKind,
-    Result,
-};
-use std::path::{
-    Path,
-    PathBuf,
-};
-
+use std::fs::DirBuilder;
+use std::fs::File;
+use std::fs::OpenOptions;
+use std::io::Error;
+use std::io::ErrorKind;
+use std::io::Result;
 #[cfg(unix)]
-use std::os::unix::fs::{
-    DirBuilderExt,
-    OpenOptionsExt,
-};
+use std::os::unix::fs::DirBuilderExt;
+#[cfg(unix)]
+use std::os::unix::fs::OpenOptionsExt;
+use std::path::Path;
+use std::path::PathBuf;
 
+use super::file_name_validation::validate_file_name_fragment;
+use super::path_operations::add_path_context;
+use super::path_operations::ensure_dir_path;
 #[cfg(feature = "internal-test-support")]
 use crate::local::internal::test_support;
 use crate::local::try_random_file_name;
-
-use super::file_name_validation::validate_file_name_fragment;
-use super::path_operations::{
-    add_path_context,
-    ensure_dir_path,
-};
 
 /// Default number of attempts used when creating a random temporary entry.
 pub(crate) const DEFAULT_TEMP_ENTRY_RETRIES: usize = 256;

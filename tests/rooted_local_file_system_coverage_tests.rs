@@ -6,39 +6,32 @@
 //    Licensed under the Apache License, Version 2.0.
 // =============================================================================
 
-use std::{
-    fs,
-    io::{
-        Read,
-        Write,
-    },
-    path::Path,
-};
-
-use qubit_local_files::{
-    LocalAtomicityRequirement,
-    LocalCopyOptions,
-    LocalCreateDirectoryOptions,
-    LocalDeleteOptions,
-    LocalFileErrorKind,
-    LocalFileKind,
-    LocalFileSystem,
-    LocalFileSystemScope,
-    LocalListOptions,
-    LocalReadOptions,
-    LocalRenameOptions,
-    LocalTempDirectoryOptions,
-    LocalTempFileOptions,
-    LocalWriteMode,
-    LocalWriteOptions,
-};
-#[cfg(not(windows))]
-use qubit_local_files::{
-    LocalCopyMethod,
-    LocalDurabilityRequirement,
-};
+use std::fs;
+use std::io::Read;
+use std::io::Write;
+use std::path::Path;
 #[cfg(not(windows))]
 use std::time::Duration;
+
+use qubit_local_files::LocalAtomicityRequirement;
+#[cfg(not(windows))]
+use qubit_local_files::LocalCopyMethod;
+use qubit_local_files::LocalCopyOptions;
+use qubit_local_files::LocalCreateDirectoryOptions;
+use qubit_local_files::LocalDeleteOptions;
+#[cfg(not(windows))]
+use qubit_local_files::LocalDurabilityRequirement;
+use qubit_local_files::LocalFileErrorKind;
+use qubit_local_files::LocalFileKind;
+use qubit_local_files::LocalFileSystem;
+use qubit_local_files::LocalFileSystemScope;
+use qubit_local_files::LocalListOptions;
+use qubit_local_files::LocalReadOptions;
+use qubit_local_files::LocalRenameOptions;
+use qubit_local_files::LocalTempDirectoryOptions;
+use qubit_local_files::LocalTempFileOptions;
+use qubit_local_files::LocalWriteMode;
+use qubit_local_files::LocalWriteOptions;
 use tempfile::tempdir;
 
 /// Runs a test-support-only fault case in an isolated child test process.

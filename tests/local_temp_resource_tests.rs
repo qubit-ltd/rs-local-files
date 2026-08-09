@@ -7,14 +7,12 @@
 // =============================================================================
 
 use std::fs;
-
-use qubit_local_files::{
-    LocalFileSystem,
-    LocalTempDirectoryOptions,
-    LocalTempFileOptions,
-};
 #[cfg(any(target_os = "linux", target_os = "macos"))]
 use std::os::unix::ffi::OsStringExt;
+
+use qubit_local_files::LocalFileSystem;
+use qubit_local_files::LocalTempDirectoryOptions;
+use qubit_local_files::LocalTempFileOptions;
 use tempfile::tempdir;
 
 /// Verifies temporary-file options bind the parent and apply both affixes.

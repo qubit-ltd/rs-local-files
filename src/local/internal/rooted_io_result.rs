@@ -10,11 +10,9 @@
 // Public APIs retain live descriptors and cannot force these interleavings.
 
 use std::fs;
-use std::io::{
-    Error,
-    ErrorKind,
-    Result,
-};
+use std::io::Error;
+use std::io::ErrorKind;
+use std::io::Result;
 use std::path::Path;
 
 use super::io_result_context::with_path_context;

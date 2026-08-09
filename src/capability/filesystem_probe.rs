@@ -9,11 +9,9 @@
 
 use std::fs::File;
 
-use super::{
-    LocalFileSystemLimits,
-    LocalFileSystemSpace,
-    SizeLimit,
-};
+use super::LocalFileSystemLimits;
+use super::LocalFileSystemSpace;
+use super::SizeLimit;
 
 /// Reads stable path limits without turning probe failures into I/O failures.
 #[inline]
@@ -39,10 +37,8 @@ pub(crate) fn limits(file: &File) -> LocalFileSystemLimits {
 pub(crate) fn space(file: &File) -> LocalFileSystemSpace {
     #[cfg(unix)]
     {
-        use std::{
-            mem::MaybeUninit,
-            os::fd::AsRawFd,
-        };
+        use std::mem::MaybeUninit;
+        use std::os::fd::AsRawFd;
         let mut stat = MaybeUninit::<libc::statvfs>::zeroed();
         // SAFETY: `file` owns a live descriptor and `stat` is writable.
         if unsafe { libc::fstatvfs(file.as_raw_fd(), stat.as_mut_ptr()) } != 0 {

@@ -6,27 +6,22 @@
 //    Licensed under the Apache License, Version 2.0.
 // =============================================================================
 
-use std::{
-    fs,
-    path::PathBuf,
-};
+use std::fs;
+use std::path::PathBuf;
 
-use qubit_local_files::{
-    LocalAtomicityRequirement,
-    LocalCopyConflictPolicy,
-    LocalCopyFailureState,
-    LocalCopyMethod,
-    LocalCopyOptions,
-    LocalCopyStats,
-    LocalCopyTypeConflictPolicy,
-    LocalFileErrorKind,
-    LocalFileSystem,
-};
+use qubit_local_files::LocalAtomicityRequirement;
+use qubit_local_files::LocalCopyConflictPolicy;
+use qubit_local_files::LocalCopyFailureState;
+use qubit_local_files::LocalCopyMethod;
+use qubit_local_files::LocalCopyOptions;
+use qubit_local_files::LocalCopyStats;
+use qubit_local_files::LocalCopyTypeConflictPolicy;
 #[cfg(unix)]
-use qubit_local_files::{
-    LocalDurabilityRequirement,
-    LocalMetadataPreservePolicy,
-};
+use qubit_local_files::LocalDurabilityRequirement;
+use qubit_local_files::LocalFileErrorKind;
+use qubit_local_files::LocalFileSystem;
+#[cfg(unix)]
+use qubit_local_files::LocalMetadataPreservePolicy;
 use tempfile::tempdir;
 
 /// Verifies nested type conflicts honor `Skip` without traversing skipped

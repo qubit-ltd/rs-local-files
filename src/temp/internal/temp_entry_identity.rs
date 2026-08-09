@@ -8,11 +8,9 @@
 //! Stable identity checks for cleanup-owned host temporary entries.
 // qubit-style: allow source-test-pair
 
-use std::{
-    fs,
-    io,
-    path::Path,
-};
+use std::fs;
+use std::io;
+use std::path::Path;
 
 /// Native identity captured when a host temporary entry is created.
 #[derive(Debug)]
@@ -58,10 +56,8 @@ impl TempEntryIdentity {
         {
             use std::os::windows::fs::OpenOptionsExt;
 
-            use windows_sys::Win32::Storage::FileSystem::{
-                FILE_FLAG_BACKUP_SEMANTICS,
-                FILE_FLAG_OPEN_REPARSE_POINT,
-            };
+            use windows_sys::Win32::Storage::FileSystem::FILE_FLAG_BACKUP_SEMANTICS;
+            use windows_sys::Win32::Storage::FileSystem::FILE_FLAG_OPEN_REPARSE_POINT;
 
             let file = fs::OpenOptions::new()
                 .read(true)
@@ -109,10 +105,8 @@ impl TempEntryIdentity {
     fn from_windows_file(file: &fs::File) -> io::Result<Self> {
         use std::os::windows::io::AsRawHandle;
 
-        use windows_sys::Win32::Storage::FileSystem::{
-            BY_HANDLE_FILE_INFORMATION,
-            GetFileInformationByHandle,
-        };
+        use windows_sys::Win32::Storage::FileSystem::BY_HANDLE_FILE_INFORMATION;
+        use windows_sys::Win32::Storage::FileSystem::GetFileInformationByHandle;
 
         let mut information = BY_HANDLE_FILE_INFORMATION::default();
         // SAFETY: `file` owns a live handle and `information` is the matching

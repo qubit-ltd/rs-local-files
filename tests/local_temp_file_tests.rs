@@ -6,32 +6,25 @@
 //    Licensed under the Apache License, Version 2.0.
 // =============================================================================
 
-use std::{
-    fs,
-    io::{
-        ErrorKind,
-        IoSlice,
-        Seek,
-        SeekFrom,
-        Write,
-    },
-};
-
 #[cfg(not(windows))]
-use std::{
-    env,
-    path::Path,
-    process::Command,
-};
+use std::env;
+use std::fs;
+use std::io::ErrorKind;
+use std::io::IoSlice;
+use std::io::Seek;
+use std::io::SeekFrom;
+use std::io::Write;
+#[cfg(not(windows))]
+use std::path::Path;
+#[cfg(not(windows))]
+use std::process::Command;
 
-use qubit_local_files::{
-    LocalFileErrorKind,
-    LocalFileSystem,
-    LocalPersistFailureState,
-    LocalPersistMethod,
-    LocalPersistOptions,
-    LocalTempFileOptions,
-};
+use qubit_local_files::LocalFileErrorKind;
+use qubit_local_files::LocalFileSystem;
+use qubit_local_files::LocalPersistFailureState;
+use qubit_local_files::LocalPersistMethod;
+use qubit_local_files::LocalPersistOptions;
+use qubit_local_files::LocalTempFileOptions;
 use tempfile::tempdir;
 
 #[cfg(feature = "internal-test-support")]

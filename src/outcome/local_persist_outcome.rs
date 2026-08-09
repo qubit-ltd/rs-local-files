@@ -7,16 +7,12 @@
 // =============================================================================
 //! Structured successful temporary-resource persistence outcomes.
 
-use std::path::{
-    Path,
-    PathBuf,
-};
+use std::path::Path;
+use std::path::PathBuf;
 
-use crate::{
-    LocalFileError,
-    LocalPersistCleanupState,
-    LocalPersistMethod,
-};
+use crate::LocalFileError;
+use crate::LocalPersistCleanupState;
+use crate::LocalPersistMethod;
 
 /// Guarantees actually achieved while persisting a temporary resource.
 #[must_use]

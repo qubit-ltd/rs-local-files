@@ -8,15 +8,11 @@
 //! Private portable file-name validation.
 // qubit-style: allow source-test-pair
 
-use std::io::{
-    Error,
-    ErrorKind,
-    Result,
-};
-use std::path::{
-    Component,
-    Path,
-};
+use std::io::Error;
+use std::io::ErrorKind;
+use std::io::Result;
+use std::path::Component;
+use std::path::Path;
 
 /// Maximum byte length accepted for a portable UTF-8 file name.
 const MAX_PORTABLE_FILE_NAME_BYTES: usize = 255;

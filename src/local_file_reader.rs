@@ -8,16 +8,12 @@
 // qubit-style: allow source-test-pair
 // Covered by host and rooted reader integration tests.
 
-use std::{
-    fs::File,
-    io::{
-        self,
-        IoSliceMut,
-        Read,
-        Seek,
-        SeekFrom,
-    },
-};
+use std::fs::File;
+use std::io::IoSliceMut;
+use std::io::Read;
+use std::io::Seek;
+use std::io::SeekFrom;
+use std::io::{self};
 
 /// Owned synchronous reader for an opened native regular file.
 #[derive(Debug)]

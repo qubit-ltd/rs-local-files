@@ -8,16 +8,12 @@
 // qubit-style: allow source-test-pair
 // Covered by writer integration tests.
 
-use std::{
-    error::Error,
-    fmt,
-};
+use std::error::Error;
+use std::fmt;
 
-use crate::{
-    LocalFileError,
-    LocalFileWriter,
-    LocalWriteFailureState,
-};
+use crate::LocalFileError;
+use crate::LocalFileWriter;
+use crate::LocalWriteFailureState;
 
 /// Failed writer commit with publication state and an optional retryable
 /// writer.

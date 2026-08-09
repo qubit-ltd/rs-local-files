@@ -13,11 +13,10 @@
 use std::ffi::CString;
 use std::io::Error;
 
-use crate::LocalAtomicDestinationState;
-
 use super::atomic_file_install::replacement_error_state;
 use super::atomic_staging_state::AtomicStagingState;
 use super::rooted_staged_file::RootedStagedFile;
+use crate::LocalAtomicDestinationState;
 
 /// Installs a rooted staging file according to its initial destination state.
 ///

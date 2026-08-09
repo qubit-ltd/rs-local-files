@@ -8,10 +8,8 @@
 // qubit-style: allow source-test-pair
 // Covered by walker integration tests.
 
-use std::path::{
-    Path,
-    PathBuf,
-};
+use std::path::Path;
+use std::path::PathBuf;
 
 use crate::LocalFileMetadata;
 

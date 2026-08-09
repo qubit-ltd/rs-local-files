@@ -9,50 +9,33 @@
 // qubit-style: allow source-test-pair
 // Private behavior is covered through public integration tests.
 
-use std::ffi::{
-    CString,
-    OsStr,
-};
-use std::fs::{
-    File,
-    OpenOptions,
-};
-use std::io::{
-    Error,
-    ErrorKind,
-    Result,
-};
-use std::os::fd::{
-    AsRawFd,
-    FromRawFd,
-};
+use std::ffi::CString;
+use std::ffi::OsStr;
+use std::fs::File;
+use std::fs::OpenOptions;
+use std::io::Error;
+use std::io::ErrorKind;
+use std::io::Result;
+use std::os::fd::AsRawFd;
+use std::os::fd::FromRawFd;
 use std::os::unix::ffi::OsStrExt;
 use std::os::unix::fs::OpenOptionsExt;
-use std::path::{
-    Path,
-    PathBuf,
-};
-
-use crate::{
-    LocalRelativePath,
-    read,
-    write,
-};
+use std::path::Path;
+use std::path::PathBuf;
 
 use super::io_result_context::with_path_context;
 use super::path_operations::add_path_context;
-use super::rooted_io_result::{
-    missing_rooted_entry,
-    normalize_mkdirat_result,
-    normalize_opened_directory_metadata,
-    normalize_opened_regular_file_metadata,
-};
+use super::rooted_io_result::missing_rooted_entry;
+use super::rooted_io_result::normalize_mkdirat_result;
+use super::rooted_io_result::normalize_opened_directory_metadata;
+use super::rooted_io_result::normalize_opened_regular_file_metadata;
 use super::rooted_parent::RootedParent;
 use super::rooted_parent_mode::RootedParentMode;
-use super::unix_nonblocking::{
-    clear_nonblocking,
-    open_with_nonblocking_retry,
-};
+use super::unix_nonblocking::clear_nonblocking;
+use super::unix_nonblocking::open_with_nonblocking_retry;
+use crate::LocalRelativePath;
+use crate::read;
+use crate::write;
 
 /// Opens a no-follow directory handle for a root path.
 ///

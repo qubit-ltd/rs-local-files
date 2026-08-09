@@ -11,22 +11,17 @@
 
 use std::path::Path;
 
-use crate::{
-    LocalFileMetadata,
-    LocalFileOperation,
-    LocalFileSystemLimits,
-    LocalFileSystemSpace,
-    LocalResult,
-    LocalSymlinkPolicy,
-};
-
-use super::{
-    RootedLocalFileSystem,
-    probe_rooted_file,
-    resolve_rooted_path,
-    rooted_io_error,
-    rooted_metadata,
-};
+use super::RootedLocalFileSystem;
+use super::probe_rooted_file;
+use super::resolve_rooted_path;
+use super::rooted_io_error;
+use super::rooted_metadata;
+use crate::LocalFileMetadata;
+use crate::LocalFileOperation;
+use crate::LocalFileSystemLimits;
+use crate::LocalFileSystemSpace;
+use crate::LocalResult;
+use crate::LocalSymlinkPolicy;
 
 impl RootedLocalFileSystem {
     /// Observes path limits at a rooted path or its nearest existing ancestor.

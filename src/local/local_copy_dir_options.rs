@@ -12,12 +12,10 @@
 
 use std::time::Duration;
 
-use crate::{
-    LocalCopyConflictPolicy,
-    LocalCopyTypeConflictPolicy,
-    LocalDurabilityRequirement,
-    LocalSymlinkPolicy,
-};
+use crate::LocalCopyConflictPolicy;
+use crate::LocalCopyTypeConflictPolicy;
+use crate::LocalDurabilityRequirement;
+use crate::LocalSymlinkPolicy;
 
 /// Options controlling recursive directory copy behavior.
 ///
@@ -266,8 +264,9 @@ impl Default for LocalCopyDirOptions {
 // cover every observable option effect.
 #[cfg(test)]
 mod tests {
-    use super::*;
     use std::time::Duration;
+
+    use super::*;
 
     #[test]
     fn builders_update_every_policy() {

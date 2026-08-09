@@ -7,18 +7,14 @@
 // =============================================================================
 //! Post-publication durability translation.
 
-use std::{
-    io,
-    path::Path,
-};
+use std::io;
+use std::path::Path;
 
-use crate::{
-    LocalDurabilityRequirement,
-    LocalFileError,
-    LocalFileErrorKind,
-    LocalFileOperation,
-    LocalResult,
-};
+use crate::LocalDurabilityRequirement;
+use crate::LocalFileError;
+use crate::LocalFileErrorKind;
+use crate::LocalFileOperation;
+use crate::LocalResult;
 
 /// Converts post-publication synchronization into an achieved guarantee.
 ///

@@ -11,20 +11,14 @@
 
 use std::path::Path;
 
-use crate::{
-    LocalCopyDirOptions,
-    LocalCopyDirStage,
-    LocalCopyDirStats,
-};
-
-use crate::local::internal::path_operations::{
-    absolute_path,
-    canonicalize_existing_prefix,
-};
-
 use super::copy_dir_result::CopyDirResult;
 use super::error::with_copy_context;
 use super::traversal::copy_dir_iterative;
+use crate::LocalCopyDirOptions;
+use crate::LocalCopyDirStage;
+use crate::LocalCopyDirStats;
+use crate::local::internal::path_operations::absolute_path;
+use crate::local::internal::path_operations::canonicalize_existing_prefix;
 
 /// Recursively copies a directory tree with the supplied options.
 ///

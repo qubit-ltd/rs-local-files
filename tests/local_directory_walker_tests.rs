@@ -6,23 +6,18 @@
 //    Licensed under the Apache License, Version 2.0.
 // =============================================================================
 
-use std::{
-    fs,
-    path::PathBuf,
-};
+use std::fs;
+use std::path::PathBuf;
 
+#[cfg(not(windows))]
+use qubit_local_files::LocalDirectoryReopenPolicy;
+use qubit_local_files::LocalFileKind;
+use qubit_local_files::LocalFileSystem;
+use qubit_local_files::LocalListOptions;
 #[cfg(unix)]
 use qubit_local_files::LocalSymlinkPolicy;
 #[cfg(not(windows))]
-use qubit_local_files::{
-    LocalDirectoryReopenPolicy,
-    LocalWalkErrorPolicy,
-};
-use qubit_local_files::{
-    LocalFileKind,
-    LocalFileSystem,
-    LocalListOptions,
-};
+use qubit_local_files::LocalWalkErrorPolicy;
 use tempfile::tempdir;
 
 /// Verifies lazy recursive traversal with stable root-relative paths.

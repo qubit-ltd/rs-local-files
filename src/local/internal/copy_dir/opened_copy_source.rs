@@ -9,21 +9,12 @@
 // qubit-style: allow source-test-pair
 // Private behavior is covered through public integration tests.
 
-use std::fs::{
-    File,
-    Metadata,
-    OpenOptions,
-};
-use std::io::{
-    Error,
-    ErrorKind,
-    Result,
-};
-use std::path::Path;
-use std::time::Duration;
-
-use crate::LocalSymlinkPolicy;
-
+use std::fs::File;
+use std::fs::Metadata;
+use std::fs::OpenOptions;
+use std::io::Error;
+use std::io::ErrorKind;
+use std::io::Result;
 #[cfg(unix)]
 use std::os::fd::AsRawFd;
 #[cfg(unix)]
@@ -32,20 +23,23 @@ use std::os::unix::fs::OpenOptionsExt;
 use std::os::windows::fs::OpenOptionsExt;
 #[cfg(windows)]
 use std::os::windows::io::AsRawHandle;
+use std::path::Path;
+use std::time::Duration;
 
 #[cfg(windows)]
-use windows_sys::Win32::Storage::FileSystem::{
-    FILE_ATTRIBUTE_TAG_INFO,
-    FILE_FLAG_OPEN_REPARSE_POINT,
-    FileAttributeTagInfo,
-    GetFileInformationByHandleEx,
-};
+use windows_sys::Win32::Storage::FileSystem::FILE_ATTRIBUTE_TAG_INFO;
+#[cfg(windows)]
+use windows_sys::Win32::Storage::FileSystem::FILE_FLAG_OPEN_REPARSE_POINT;
+#[cfg(windows)]
+use windows_sys::Win32::Storage::FileSystem::FileAttributeTagInfo;
+#[cfg(windows)]
+use windows_sys::Win32::Storage::FileSystem::GetFileInformationByHandleEx;
 
+use crate::LocalSymlinkPolicy;
 #[cfg(unix)]
-use crate::local::internal::{
-    clear_nonblocking,
-    open_with_nonblocking_retry,
-};
+use crate::local::internal::clear_nonblocking;
+#[cfg(unix)]
+use crate::local::internal::open_with_nonblocking_retry;
 
 /// Open regular-file source and metadata read from the same handle.
 #[must_use = "the opened source handle and its authoritative metadata must be consumed together"]

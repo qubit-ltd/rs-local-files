@@ -11,11 +11,9 @@
 
 use std::path::PathBuf;
 
-use crate::{
-    LocalCopyFailureState,
-    LocalCopyStats,
-    LocalFileError,
-};
+use crate::LocalCopyFailureState;
+use crate::LocalCopyStats;
+use crate::LocalFileError;
 
 /// Heap-owned details retained off [`crate::LocalCopyFailure`]'s hot path.
 #[derive(Debug)]

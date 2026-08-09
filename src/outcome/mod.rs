@@ -23,10 +23,8 @@ mod local_rename_failure_state;
 mod local_rename_outcome;
 mod local_write_publication_method;
 
-pub use local_copy_failure::{
-    LocalCopyFailure,
-    LocalCopyResult,
-};
+pub use local_copy_failure::LocalCopyFailure;
+pub use local_copy_failure::LocalCopyResult;
 pub use local_copy_failure_state::LocalCopyFailureState;
 pub use local_copy_method::LocalCopyMethod;
 pub use local_copy_outcome::LocalCopyOutcome;
@@ -36,10 +34,8 @@ pub use local_delete_outcome::LocalDeleteOutcome;
 pub use local_persist_cleanup_state::LocalPersistCleanupState;
 pub use local_persist_method::LocalPersistMethod;
 pub use local_persist_outcome::LocalPersistOutcome;
-pub use local_rename_failure::{
-    LocalRenameFailure,
-    LocalRenameResult,
-};
+pub use local_rename_failure::LocalRenameFailure;
+pub use local_rename_failure::LocalRenameResult;
 pub use local_rename_failure_state::LocalRenameFailureState;
 pub use local_rename_outcome::LocalRenameOutcome;
 pub use local_write_publication_method::LocalWritePublicationMethod;

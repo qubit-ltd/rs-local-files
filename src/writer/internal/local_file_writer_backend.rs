@@ -10,13 +10,10 @@
 
 use std::fs::File;
 
-use crate::local::{
-    LocalAtomicWriteError,
-    LocalAtomicWriter,
-    LocalRootAtomicWriter,
-};
-
 use super::LocalStagedCommitError;
+use crate::local::LocalAtomicWriteError;
+use crate::local::LocalAtomicWriter;
+use crate::local::LocalRootAtomicWriter;
 
 /// Native backend selected for one writer session.
 #[derive(Debug)]

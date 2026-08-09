@@ -8,17 +8,13 @@
 // qubit-style: allow source-test-pair
 // Covered by copy integration tests.
 
-use super::{
-    LocalAtomicityRequirement,
-    LocalCopySourceMode,
-    LocalDurabilityRequirement,
-    LocalMetadataPreservePolicy,
-    LocalSymlinkPolicy,
-};
-use crate::{
-    LocalCopyConflictPolicy,
-    LocalCopyTypeConflictPolicy,
-};
+use super::LocalAtomicityRequirement;
+use super::LocalCopySourceMode;
+use super::LocalDurabilityRequirement;
+use super::LocalMetadataPreservePolicy;
+use super::LocalSymlinkPolicy;
+use crate::LocalCopyConflictPolicy;
+use crate::LocalCopyTypeConflictPolicy;
 
 /// Unified options for copying a native file or directory tree.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]

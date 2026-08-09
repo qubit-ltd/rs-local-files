@@ -10,12 +10,9 @@
 // qubit-style: allow inline-tests
 // qubit-style: allow explicit-imports
 
-use crate::{
-    LocalCopyConflictPolicy,
-    LocalCopyTypeConflictPolicy,
-};
-
 use super::CopyDestinationAction;
+use crate::LocalCopyConflictPolicy;
+use crate::LocalCopyTypeConflictPolicy;
 
 /// Selects the destination action without performing filesystem I/O.
 ///
@@ -71,10 +68,8 @@ pub(crate) const fn decide_copy_destination(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{
-        LocalCopyConflictPolicy,
-        LocalCopyTypeConflictPolicy,
-    };
+    use crate::LocalCopyConflictPolicy;
+    use crate::LocalCopyTypeConflictPolicy;
 
     #[test]
     fn selects_create_and_merge_actions() {

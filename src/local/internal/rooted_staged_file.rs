@@ -11,22 +11,17 @@
 
 use std::ffi::CString;
 use std::fs::File;
-use std::io::{
-    Error,
-    Result,
-};
+use std::io::Error;
+use std::io::Result;
 use std::os::fd::AsRawFd;
-use std::path::{
-    Path,
-    PathBuf,
-};
+use std::path::Path;
+use std::path::PathBuf;
 
 use log::warn;
 
-use crate::LocalAtomicDestinationState;
-
 use super::atomic_file_install::install_new_atomic_file_at;
 use super::atomic_staging_state::AtomicStagingState;
+use crate::LocalAtomicDestinationState;
 
 /// Owns an uncommitted staging entry relative to its open parent directory.
 ///

@@ -7,22 +7,16 @@
 // =============================================================================
 //! Rooted-path validation and metadata conversion helpers.
 
-use std::{
-    io,
-    path::{
-        Path,
-        PathBuf,
-    },
-};
+use std::io;
+use std::path::Path;
+use std::path::PathBuf;
 
-use crate::{
-    LocalFileError,
-    LocalFileErrorKind,
-    LocalFileKind,
-    LocalFileMetadata,
-    LocalFileOperation,
-    LocalResult,
-};
+use crate::LocalFileError;
+use crate::LocalFileErrorKind;
+use crate::LocalFileKind;
+use crate::LocalFileMetadata;
+use crate::LocalFileOperation;
+use crate::LocalResult;
 
 /// Validates a rooted descendant and preserves the offending native path.
 ///

@@ -7,48 +7,37 @@
 // =============================================================================
 //! Cleanup-owned temporary files with host or rooted authority.
 
-use std::{
-    fs::File,
-    io::{
-        Error,
-        ErrorKind,
-        IoSlice,
-        Result,
-        Seek,
-        SeekFrom,
-        Write,
-    },
-    path::{
-        Path,
-        PathBuf,
-    },
-    sync::Arc,
-};
+use std::fs::File;
+use std::io::Error;
+use std::io::ErrorKind;
+use std::io::IoSlice;
+use std::io::Result;
+use std::io::Seek;
+use std::io::SeekFrom;
+use std::io::Write;
+use std::path::Path;
+use std::path::PathBuf;
+use std::sync::Arc;
 
 use log::warn;
 
-use crate::{
-    LocalFileError,
-    LocalFileOperation,
-    LocalPersistError,
-    LocalPersistFailureState,
-    LocalPersistMethod,
-    LocalPersistOptions,
-    LocalPersistOutcome,
-    LocalPersistStage,
-    LocalRelativePath,
-    LocalResult,
-    LocalSymlinkPolicy,
-};
-
-use super::internal::{
-    LocalTempResourceBackend,
-    LocalTempResourceState,
-    RootedTempResourceBackend,
-    TempEntryIdentity,
-    prepare_host_parent,
-    prepare_rooted_parent,
-};
+use super::internal::LocalTempResourceBackend;
+use super::internal::LocalTempResourceState;
+use super::internal::RootedTempResourceBackend;
+use super::internal::TempEntryIdentity;
+use super::internal::prepare_host_parent;
+use super::internal::prepare_rooted_parent;
+use crate::LocalFileError;
+use crate::LocalFileOperation;
+use crate::LocalPersistError;
+use crate::LocalPersistFailureState;
+use crate::LocalPersistMethod;
+use crate::LocalPersistOptions;
+use crate::LocalPersistOutcome;
+use crate::LocalPersistStage;
+use crate::LocalRelativePath;
+use crate::LocalResult;
+use crate::LocalSymlinkPolicy;
 
 /// A temporary file whose cleanup remains bound to its creating authority.
 ///

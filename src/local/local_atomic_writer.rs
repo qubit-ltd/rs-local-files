@@ -9,50 +9,42 @@
 // qubit-style: allow source-test-pair
 
 use std::fs;
-use std::io::{
-    self,
-    ErrorKind,
-    Write,
-};
-use std::path::{
-    Path,
-    PathBuf,
-};
+use std::io::ErrorKind;
+use std::io::Write;
+use std::io::{self};
+use std::path::Path;
+use std::path::PathBuf;
 #[cfg(unix)]
 use std::time::Duration;
 
-use crate::{
-    LocalAtomicCommitError,
-    LocalAtomicDestinationState,
-    LocalAtomicWriteError,
-    LocalAtomicWriteOptions,
-    LocalAtomicWriteStage,
-    LocalDurabilityRequirement,
-};
-
+use super::internal::AtomicInstallRecovery;
+use super::internal::DEFAULT_TEMP_ENTRY_RETRIES;
+use super::internal::LocalAtomicPublicationMode;
+#[cfg(unix)]
+use super::internal::OpenedAtomicDestination;
+use super::internal::StagedFile;
+use super::internal::absolute_path;
+use super::internal::add_path_context;
+use super::internal::create_temp_file_in_dir;
+use super::internal::ensure_parent_path_with_sync_dirs;
+use super::internal::install_atomic_file;
+#[cfg(unix)]
+use super::internal::open_atomic_destination;
+use super::internal::parent_dir_for;
+#[cfg(unix)]
+use super::internal::preserve_atomic_metadata;
+use super::internal::recover_atomic_install_error;
+use super::internal::sync_parent_dir;
 #[cfg(feature = "internal-test-support")]
 use super::internal::test_support;
-use super::internal::{
-    AtomicInstallRecovery,
-    DEFAULT_TEMP_ENTRY_RETRIES,
-    LocalAtomicPublicationMode,
-    StagedFile,
-    absolute_path,
-    add_path_context,
-    create_temp_file_in_dir,
-    ensure_parent_path_with_sync_dirs,
-    install_atomic_file,
-    parent_dir_for,
-    recover_atomic_install_error,
-    sync_parent_dir,
-};
 #[cfg(unix)]
-use super::internal::{
-    OpenedAtomicDestination,
-    open_atomic_destination,
-    preserve_atomic_metadata,
-    verify_atomic_destination_identity,
-};
+use super::internal::verify_atomic_destination_identity;
+use crate::LocalAtomicCommitError;
+use crate::LocalAtomicDestinationState;
+use crate::LocalAtomicWriteError;
+use crate::LocalAtomicWriteOptions;
+use crate::LocalAtomicWriteStage;
+use crate::LocalDurabilityRequirement;
 
 /// Default suffix used by atomic-write temporary files.
 const ATOMIC_WRITE_TEMP_SUFFIX: &str = ".tmp";

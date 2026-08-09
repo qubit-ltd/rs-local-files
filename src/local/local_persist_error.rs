@@ -11,24 +11,18 @@
 // qubit-style: allow explicit-imports
 
 use std::error::Error;
-use std::fmt::{
-    Debug,
-    Display,
-    Formatter,
-    Result as FmtResult,
-};
+use std::fmt::Debug;
+use std::fmt::Display;
+use std::fmt::Formatter;
+use std::fmt::Result as FmtResult;
 use std::io;
-use std::path::{
-    Path,
-    PathBuf,
-};
+use std::path::Path;
+use std::path::PathBuf;
 
-use crate::{
-    LocalFileError,
-    LocalFileOperation,
-    LocalPersistFailureState,
-    LocalPersistStage,
-};
+use crate::LocalFileError;
+use crate::LocalFileOperation;
+use crate::LocalPersistFailureState;
+use crate::LocalPersistStage;
 
 /// Persistence error that returns ownership of the temporary resource.
 ///
@@ -275,10 +269,8 @@ where
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{
-        LocalPersistFailureState,
-        LocalPersistStage,
-    };
+    use crate::LocalPersistFailureState;
+    use crate::LocalPersistStage;
 
     #[test]
     fn exposes_recoverable_context_and_parts() {

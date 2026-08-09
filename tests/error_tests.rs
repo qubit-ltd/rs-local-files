@@ -6,17 +6,13 @@
 //    Licensed under the Apache License, Version 2.0.
 // =============================================================================
 
-use std::{
-    error::Error,
-    io,
-    path::Path,
-};
+use std::error::Error;
+use std::io;
+use std::path::Path;
 
-use qubit_local_files::{
-    LocalFileError,
-    LocalFileErrorKind,
-    LocalFileOperation,
-};
+use qubit_local_files::LocalFileError;
+use qubit_local_files::LocalFileErrorKind;
+use qubit_local_files::LocalFileOperation;
 
 /// Verifies that native I/O errors retain structured operation and path
 /// context.

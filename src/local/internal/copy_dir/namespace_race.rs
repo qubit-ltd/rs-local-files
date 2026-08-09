@@ -10,16 +10,13 @@
 // Public fixtures cannot deterministically interleave these namespace changes.
 
 use std::fs;
-use std::io::{
-    ErrorKind,
-    Result,
-};
+use std::io::ErrorKind;
+use std::io::Result;
 use std::path::Path;
 
+use super::source::is_real_directory;
 #[cfg(feature = "internal-test-support")]
 use crate::local::internal::test_support;
-
-use super::source::is_real_directory;
 
 /// Reconciles a directory-creation result with a concurrent creator.
 ///

@@ -9,31 +9,24 @@
 // qubit-style: allow source-test-pair
 // Private behavior is covered through public integration tests.
 
-use std::ffi::{
-    CString,
-    OsString,
-};
+use std::ffi::CString;
+use std::ffi::OsString;
 use std::fs::File;
-use std::io::{
-    Error,
-    ErrorKind,
-    Result,
-};
+use std::io::Error;
+use std::io::ErrorKind;
+use std::io::Result;
 use std::os::fd::AsRawFd;
-use std::os::unix::ffi::{
-    OsStrExt,
-    OsStringExt,
-};
+use std::os::unix::ffi::OsStrExt;
+use std::os::unix::ffi::OsStringExt;
 use std::path::Path;
 
 use rustix::fs::Dir;
-
-use crate::LocalRelativePath;
 
 use super::path_operations::add_path_context;
 use super::rooted_directory_reader::RootedDirectoryReader;
 use super::rooted_file_io::open_rooted_parent;
 use super::rooted_parent_mode::RootedParentMode;
+use crate::LocalRelativePath;
 
 /// A native child name and its no-follow metadata.
 pub(crate) type RootedDirectoryEntry = (OsString, libc::stat);

@@ -10,16 +10,13 @@
 // Private behavior is covered through public integration tests.
 
 #[cfg(unix)]
-use std::ffi::{
-    CStr,
-    CString,
-};
+use std::ffi::CStr;
+#[cfg(unix)]
+use std::ffi::CString;
+use std::io::Error;
 #[cfg(unix)]
 use std::io::ErrorKind;
-use std::io::{
-    Error,
-    Result,
-};
+use std::io::Result;
 #[cfg(unix)]
 use std::os::fd::RawFd;
 #[cfg(unix)]
@@ -29,8 +26,6 @@ use std::path::Path;
 #[cfg(windows)]
 use windows_sys::Win32::Storage::FileSystem::ReplaceFileW;
 
-use crate::LocalAtomicDestinationState;
-
 use super::atomic_staging_state::AtomicStagingState;
 #[cfg(not(unix))]
 use super::file_move::move_file_without_replacing;
@@ -38,6 +33,7 @@ use super::file_move::move_file_without_replacing;
 use super::file_move::replace_file;
 #[cfg(windows)]
 use super::file_move::wide_path;
+use crate::LocalAtomicDestinationState;
 
 /// Installs a staged atomic file according to its initial destination state.
 pub(crate) fn install_atomic_file(

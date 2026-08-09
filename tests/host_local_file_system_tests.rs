@@ -6,28 +6,22 @@
 //    Licensed under the Apache License, Version 2.0.
 // =============================================================================
 
-use std::{
-    fs,
-    io::{
-        Read,
-        Write,
-    },
-};
+use std::fs;
+use std::io::Read;
+use std::io::Write;
 
-use qubit_local_files::{
-    LocalCopyOptions,
-    LocalCreateDirectoryOptions,
-    LocalDeleteOptions,
-    LocalFileKind,
-    LocalFileSystem,
-    LocalListOptions,
-    LocalReadOptions,
-    LocalRenameOptions,
-    LocalTempDirectoryOptions,
-    LocalTempFileOptions,
-    LocalWriteMode,
-    LocalWriteOptions,
-};
+use qubit_local_files::LocalCopyOptions;
+use qubit_local_files::LocalCreateDirectoryOptions;
+use qubit_local_files::LocalDeleteOptions;
+use qubit_local_files::LocalFileKind;
+use qubit_local_files::LocalFileSystem;
+use qubit_local_files::LocalListOptions;
+use qubit_local_files::LocalReadOptions;
+use qubit_local_files::LocalRenameOptions;
+use qubit_local_files::LocalTempDirectoryOptions;
+use qubit_local_files::LocalTempFileOptions;
+use qubit_local_files::LocalWriteMode;
+use qubit_local_files::LocalWriteOptions;
 use tempfile::tempdir;
 
 /// Verifies the Host filesystem inspects the process-visible native namespace.

@@ -11,22 +11,15 @@
 // commit-time handle open and the immediately following identity check.
 
 use std::fs;
-use std::io::{
-    Error,
-    ErrorKind,
-};
+use std::io::Error;
+use std::io::ErrorKind;
 use std::path::Path;
 
-use crate::{
-    LocalAtomicDestinationState,
-    LocalAtomicWriteError,
-    LocalAtomicWriteStage,
-};
-
-use super::opened_atomic_destination::{
-    OpenedAtomicDestination,
-    destination_identity_matches,
-};
+use super::opened_atomic_destination::OpenedAtomicDestination;
+use super::opened_atomic_destination::destination_identity_matches;
+use crate::LocalAtomicDestinationState;
+use crate::LocalAtomicWriteError;
+use crate::LocalAtomicWriteStage;
 
 /// Verifies that a path still names its opened atomic destination.
 ///

@@ -8,18 +8,13 @@
 
 //! Typed failures from unified rename operations.
 
-use std::{
-    error::Error,
-    fmt::{
-        Display,
-        Formatter,
-        Result as FmtResult,
-    },
-};
-
-use crate::LocalFileError;
+use std::error::Error;
+use std::fmt::Display;
+use std::fmt::Formatter;
+use std::fmt::Result as FmtResult;
 
 use super::LocalRenameFailureState;
+use crate::LocalFileError;
 
 /// Failure details retained when a unified rename does not complete.
 #[derive(Debug)]

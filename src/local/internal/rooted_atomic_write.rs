@@ -11,21 +11,18 @@
 
 use std::ffi::CString;
 use std::fs::File;
-use std::io::{
-    Error,
-    ErrorKind,
-    Result,
-};
+use std::io::Error;
+use std::io::ErrorKind;
+use std::io::Result;
 use std::os::fd::AsRawFd;
 use std::path::Path;
-
-use crate::local::try_random_file_name;
 
 use super::rooted_file_io::open_file_at;
 use super::rooted_staged_file::RootedStagedFile;
 use super::rooted_staging_retry::retry_rooted_staging_entry;
 use super::temp_entry::DEFAULT_TEMP_ENTRY_RETRIES;
 use super::unix_stat::is_regular_file_mode;
+use crate::local::try_random_file_name;
 
 /// Prefix used by descriptor-relative atomic staging entries.
 const ROOTED_ATOMIC_TEMP_PREFIX: &str = ".atomic-write-";

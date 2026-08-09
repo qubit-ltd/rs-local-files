@@ -7,11 +7,9 @@
 // =============================================================================
 //! Public behavior coverage for shared temporary parent preparation.
 
-use qubit_local_files::{
-    LocalFileSystem,
-    LocalPersistOptions,
-    LocalTempFileOptions,
-};
+use qubit_local_files::LocalFileSystem;
+use qubit_local_files::LocalPersistOptions;
+use qubit_local_files::LocalTempFileOptions;
 
 /// Verifies persistence creates a missing parent only when explicitly enabled.
 #[test]

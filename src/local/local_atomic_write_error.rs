@@ -11,21 +11,15 @@
 // qubit-style: allow explicit-imports
 
 use std::error::Error;
-use std::fmt::{
-    Display,
-    Formatter,
-    Result as FmtResult,
-};
+use std::fmt::Display;
+use std::fmt::Formatter;
+use std::fmt::Result as FmtResult;
 use std::io;
-use std::path::{
-    Path,
-    PathBuf,
-};
+use std::path::Path;
+use std::path::PathBuf;
 
-use crate::{
-    LocalAtomicDestinationState,
-    LocalAtomicWriteStage,
-};
+use crate::LocalAtomicDestinationState;
+use crate::LocalAtomicWriteStage;
 
 /// Error returned by an atomic whole-file replacement.
 ///
@@ -255,10 +249,8 @@ impl Error for LocalAtomicWriteError {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{
-        LocalAtomicDestinationState,
-        LocalAtomicWriteStage,
-    };
+    use crate::LocalAtomicDestinationState;
+    use crate::LocalAtomicWriteStage;
 
     fn error() -> LocalAtomicWriteError {
         LocalAtomicWriteError::new(
