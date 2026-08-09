@@ -25,7 +25,9 @@ impl LocalStagedCommitError {
     /// Splits the failure into its error and optional retryable backend.
     #[must_use]
     #[inline]
-    pub(crate) fn into_parts(self) -> (LocalAtomicWriteError, Option<LocalFileWriterBackend>) {
+    pub(crate) fn into_parts(
+        self,
+    ) -> (LocalAtomicWriteError, Option<LocalFileWriterBackend>) {
         (self.error, self.backend.map(|backend| *backend))
     }
 }
