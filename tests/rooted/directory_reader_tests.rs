@@ -18,12 +18,11 @@ use tempfile::tempdir;
 #[test]
 fn test_rooted_directory_reader_yields_children_lazily() {
     let directory = tempdir().expect("temporary directory should be created");
-    fs::write(directory.path().join("first"), b"first")
-        .expect("first fixture should be written");
+    fs::write(directory.path().join("first"), b"first").expect("first fixture should be written");
     fs::write(directory.path().join("second"), b"second")
         .expect("second fixture should be written");
-    let filesystem = LocalFileSystem::rooted(directory.path())
-        .expect("Rooted filesystem should open");
+    let filesystem =
+        LocalFileSystem::rooted(directory.path()).expect("Rooted filesystem should open");
     let walker = filesystem
         .list(Path::new(""), &LocalListOptions::new())
         .expect("Rooted directory walker should open");
