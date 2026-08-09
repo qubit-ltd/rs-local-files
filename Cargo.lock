@@ -434,9 +434,7 @@ dependencies = [
 
 [[package]]
 name = "qubit-budget"
-version = "0.2.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "838905f7003616e6576c78506a3c4702153c5b3cd316a6d0b170b290e6079437"
+version = "0.4.0"
 
 [[package]]
 name = "qubit-local-files"
