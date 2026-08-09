@@ -10,7 +10,9 @@ use std::fs;
 #[cfg(any(target_os = "linux", target_os = "macos"))]
 use std::os::unix::ffi::OsStringExt;
 
+use qubit_local_files::LocalFileErrorKind;
 use qubit_local_files::LocalFileSystem;
+use qubit_local_files::LocalPersistFailureState;
 use qubit_local_files::LocalTempDirectoryOptions;
 use qubit_local_files::LocalTempFileOptions;
 use tempfile::tempdir;
@@ -118,14 +120,8 @@ fn test_local_temp_file_persist_rejects_interior_nul_target() {
     let error = temporary
         .persist(&target)
         .expect_err("interior NUL must be rejected by native no-replace move");
-    assert_eq!(
-        qubit_local_files::LocalFileErrorKind::InvalidPath,
-        error.kind()
-    );
-    assert_eq!(
-        qubit_local_files::LocalPersistFailureState::NotPublished,
-        error.state()
-    );
+    assert_eq!(LocalFileErrorKind::InvalidPath, error.kind());
+    assert_eq!(LocalPersistFailureState::NotPublished, error.state());
     let (_io, mut temporary, _requested, _resolved, _stage) =
         error.into_parts();
     temporary

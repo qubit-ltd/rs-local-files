@@ -12,8 +12,8 @@
 use std::ffi::CString;
 #[cfg(any(unix, windows))]
 use std::fs::File;
+use std::io;
 use std::io::Write;
-use std::io::{self};
 use std::path::Path;
 use std::path::PathBuf;
 #[cfg(unix)]
@@ -89,46 +89,45 @@ use crate::write::OpenOptions as WriteOpenOptions;
 pub(crate) struct LocalRootAtomicWriter {
     /// Requested relative destination retained for structured errors.
     path: PathBuf,
-    #[cfg(unix)]
     /// Optional limit for retrying a nonblocking destination open.
+    #[cfg(unix)]
     open_retry_timeout: Option<Duration>,
-    #[cfg(unix)]
     /// Final destination entry name within the staging parent.
+    #[cfg(unix)]
     final_name: CString,
-    #[cfg(unix)]
     /// Parents whose newly created child entries require synchronization.
+    #[cfg(unix)]
     parent_dirs_to_sync: Vec<File>,
-    #[cfg(unix)]
     /// Whether a regular destination existed when this writer began.
+    #[cfg(unix)]
     destination_existed: bool,
-    #[cfg(unix)]
     /// Whether existing regular-file metadata must be preserved.
+    #[cfg(unix)]
     preserve_destination_metadata: bool,
-    #[cfg(unix)]
     /// Durability requested for staging and parent synchronization.
-    durability: LocalDurabilityRequirement,
     #[cfg(unix)]
+    durability: LocalDurabilityRequirement,
     /// Descriptor-relative staging lifecycle.
+    #[cfg(unix)]
     staged_file: RootedStagedFile,
-    #[cfg(windows)]
     /// Final rooted destination.
+    #[cfg(windows)]
     destination: LocalRelativePath,
-    #[cfg(windows)]
     /// Whether a regular destination existed when this writer began.
+    #[cfg(windows)]
     destination_existed: bool,
-    #[cfg(windows)]
     /// Whether existing regular-file metadata must be preserved.
+    #[cfg(windows)]
     preserve_destination_metadata: bool,
-    #[cfg(windows)]
     /// Durability requested for staging and parent synchronization.
-    durability: LocalDurabilityRequirement,
     #[cfg(windows)]
+    durability: LocalDurabilityRequirement,
     /// Handle-relative staging lifecycle.
+    #[cfg(windows)]
     staged_file: WindowsRootedStagedFile,
 }
 
 impl LocalRootAtomicWriter {
-    #[cfg(unix)]
     /// Creates a rooted atomic writer from an open root capability.
     ///
     /// # Parameters
@@ -146,6 +145,7 @@ impl LocalRootAtomicWriter {
     ///
     /// Returns a structured error for parent preparation, destination
     /// inspection, or staging-file creation failures.
+    #[cfg(unix)]
     pub(crate) fn new(
         root: &File,
         diagnostic_root: &Path,
@@ -216,8 +216,8 @@ impl LocalRootAtomicWriter {
         })
     }
 
-    #[cfg(windows)]
     /// Creates a Windows rooted atomic writer from an open root capability.
+    #[cfg(windows)]
     pub(crate) fn new(
         root: &File,
         diagnostic_root: &Path,
@@ -504,8 +504,8 @@ impl LocalRootAtomicWriter {
         }
     }
 
-    #[cfg(windows)]
     /// Runs one handle-relative Windows commit attempt.
+    #[cfg(windows)]
     fn commit_attempt_windows(
         &mut self,
     ) -> Result<bool, LocalAtomicWriteError> {
@@ -638,13 +638,13 @@ impl LocalRootAtomicWriter {
         Ok(false)
     }
 
-    #[cfg(unix)]
     /// Runs one rooted commit attempt without consuming recoverable staging.
     ///
     /// # Errors
     ///
     /// Returns the structured commit failure. Errors raised before installation
     /// leave the staging handle open for the public recoverable commit API.
+    #[cfg(unix)]
     fn commit_attempt(&mut self) -> Result<bool, LocalAtomicWriteError> {
         let destination = self.open_destination_for_commit()?;
         self.preserve_destination_metadata(destination.as_ref())?;
@@ -654,7 +654,6 @@ impl LocalRootAtomicWriter {
         Ok(file_durable && parent_durable)
     }
 
-    #[cfg(unix)]
     /// Opens the existing rooted destination for commit-time metadata.
     ///
     /// # Returns
@@ -667,6 +666,7 @@ impl LocalRootAtomicWriter {
     /// Returns a structured metadata-stage error when the destination cannot
     /// be opened or disappeared before commit. The staging writer remains
     /// available for retry or explicit abort.
+    #[cfg(unix)]
     fn open_destination_for_commit(
         &mut self,
     ) -> Result<Option<OpenedAtomicDestination>, LocalAtomicWriteError> {
@@ -700,7 +700,6 @@ impl LocalRootAtomicWriter {
         }
     }
 
-    #[cfg(unix)]
     /// Copies strict metadata from a rooted destination to staging.
     ///
     /// # Parameters
@@ -711,6 +710,7 @@ impl LocalRootAtomicWriter {
     ///
     /// Returns a structured metadata-application error while retaining staging
     /// when platform metadata cannot be preserved.
+    #[cfg(unix)]
     fn preserve_destination_metadata(
         &mut self,
         destination: Option<&OpenedAtomicDestination>,
@@ -731,13 +731,13 @@ impl LocalRootAtomicWriter {
         )
     }
 
-    #[cfg(unix)]
     /// Synchronizes the rooted staging file before installation.
     ///
     /// # Errors
     ///
     /// Returns a structured staging synchronization error while retaining
     /// staging when the native synchronization fails.
+    #[cfg(unix)]
     fn sync_temporary_file(&mut self) -> Result<bool, LocalAtomicWriteError> {
         match self.durability {
             LocalDurabilityRequirement::NotRequired => Ok(false),
@@ -757,7 +757,6 @@ impl LocalRootAtomicWriter {
         }
     }
 
-    #[cfg(unix)]
     /// Verifies that the rooted destination still names the opened file.
     ///
     /// # Parameters
@@ -768,6 +767,7 @@ impl LocalRootAtomicWriter {
     ///
     /// Returns the structured namespace-race error produced by the rooted
     /// identity verifier.
+    #[cfg(unix)]
     #[inline]
     fn verify_destination_for_commit(
         &mut self,
@@ -784,7 +784,6 @@ impl LocalRootAtomicWriter {
         )
     }
 
-    #[cfg(unix)]
     /// Applies the historical cleanup policy for consuming commit failures.
     ///
     /// # Parameters
@@ -794,6 +793,7 @@ impl LocalRootAtomicWriter {
     /// # Returns
     ///
     /// The failure enriched with any staging cleanup error.
+    #[cfg(unix)]
     #[inline]
     fn finalize_failed_commit(
         mut self,
@@ -808,8 +808,8 @@ impl LocalRootAtomicWriter {
         }
     }
 
-    #[cfg(windows)]
     /// Finalizes a consuming Windows commit failure.
+    #[cfg(windows)]
     #[inline]
     fn finalize_failed_commit(
         mut self,
@@ -822,7 +822,6 @@ impl LocalRootAtomicWriter {
         }
     }
 
-    #[cfg(not(any(unix, windows)))]
     /// Returns an unsupported failure after a non-Unix commit attempt.
     ///
     /// # Parameters
@@ -832,6 +831,7 @@ impl LocalRootAtomicWriter {
     /// # Returns
     ///
     /// The unchanged unsupported failure.
+    #[cfg(not(any(unix, windows)))]
     #[inline(always)]
     fn finalize_failed_commit(
         self,
@@ -840,13 +840,13 @@ impl LocalRootAtomicWriter {
         error
     }
 
-    #[cfg(unix)]
     /// Installs rooted staging and synchronizes the parent descriptor chain.
     ///
     /// # Errors
     ///
     /// Returns the structured installation or recovery error, or a parent
     /// synchronization error after the destination has been replaced.
+    #[cfg(unix)]
     fn install_and_sync_parent(
         &mut self,
     ) -> Result<bool, LocalAtomicWriteError> {
@@ -1009,7 +1009,6 @@ fn sync_rooted_parent_chain(
     Ok(())
 }
 
-#[cfg(any(unix, windows))]
 /// Adds structured atomic context to a native I/O result.
 ///
 /// # Parameters
@@ -1023,6 +1022,7 @@ fn sync_rooted_parent_chain(
 /// # Returns
 ///
 /// The successful value or a structured atomic error.
+#[cfg(any(unix, windows))]
 #[inline]
 fn map_atomic_error<T>(
     result: io::Result<T>,
@@ -1043,7 +1043,6 @@ fn map_atomic_error<T>(
     }
 }
 
-#[cfg(not(unix))]
 /// Creates a structured unsupported rooted atomic-write error.
 ///
 /// # Parameters
@@ -1053,6 +1052,7 @@ fn map_atomic_error<T>(
 /// # Returns
 ///
 /// An unsupported error that never falls back to ordinary path authority.
+#[cfg(not(unix))]
 #[inline]
 fn unsupported_atomic_error(path: &Path) -> LocalAtomicWriteError {
     LocalAtomicWriteError::new(

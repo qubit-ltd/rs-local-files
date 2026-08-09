@@ -20,6 +20,7 @@ use qubit_local_files::LocalCopyOptions;
 use qubit_local_files::LocalCopyTypeConflictPolicy;
 use qubit_local_files::LocalCreateDirectoryOptions;
 use qubit_local_files::LocalDeleteOptions;
+use qubit_local_files::LocalDirectoryReopenPolicy;
 #[cfg(feature = "internal-test-support")]
 use qubit_local_files::LocalDurabilityRequirement;
 use qubit_local_files::LocalFileErrorKind;
@@ -35,9 +36,14 @@ use qubit_local_files::LocalRenameFailureState;
 use qubit_local_files::LocalRenameOptions;
 use qubit_local_files::LocalTempDirectoryOptions;
 use qubit_local_files::LocalTempFileOptions;
+use qubit_local_files::LocalWriteFailureState;
 use qubit_local_files::LocalWriteMode;
 use qubit_local_files::LocalWriteOptions;
 use qubit_local_files::LocalWriterState;
+#[cfg(feature = "internal-test-support")]
+use qubit_local_files::install_test_fault;
+#[cfg(target_os = "linux")]
+use tempfile::NamedTempFile;
 use tempfile::tempdir;
 
 /// Verifies rooted recursive copy preserves nested type-conflict destinations
@@ -140,8 +146,7 @@ fn test_rooted_local_file_system_default_copy_and_rename_skip_sync() {
         );
         return;
     }
-    let trace =
-        tempfile::NamedTempFile::new().expect("trace file should be created");
+    let trace = NamedTempFile::new().expect("trace file should be created");
     let status = std::process::Command::new("strace")
         .args(["-f", "-e", "trace=fsync", "-o"])
         .arg(trace.path())
@@ -421,7 +426,7 @@ where
     if std::env::var_os(TEST_FAULT_ENV)
         .is_some_and(|selected| selected == std::ffi::OsStr::new(fault))
     {
-        let _fault = qubit_local_files::install_test_fault(fault)
+        let _fault = install_test_fault(fault)
             .expect("test fault controller should install");
         action();
         return;
@@ -468,10 +473,7 @@ fn test_rooted_copy_failure_reports_second_child_partial_publication() {
             )
             .expect_err("second rooted child fault must fail");
 
-        assert_eq!(
-            qubit_local_files::LocalCopyFailureState::PartiallyPublished,
-            failure.state()
-        );
+        assert_eq!(LocalCopyFailureState::PartiallyPublished, failure.state());
         assert_eq!(1, failure.partial_stats().files());
     });
 }
@@ -691,9 +693,7 @@ fn test_rooted_local_file_system_walker_rejects_handle_budget_exhaustion() {
             &LocalListOptions::new()
                 .with_recursive()
                 .with_max_open_directories(1)
-                .with_reopen_policy(
-                    qubit_local_files::LocalDirectoryReopenPolicy::Fail,
-                ),
+                .with_reopen_policy(LocalDirectoryReopenPolicy::Fail),
         )
         .expect("rooted walker should open");
 
@@ -726,9 +726,7 @@ fn test_rooted_local_file_system_walker_reopens_handle_frames() {
             &LocalListOptions::new()
                 .with_recursive()
                 .with_max_open_directories(1)
-                .with_reopen_policy(
-                    qubit_local_files::LocalDirectoryReopenPolicy::Reopen,
-                ),
+                .with_reopen_policy(LocalDirectoryReopenPolicy::Reopen),
         )
         .expect("rooted walker should open")
         .collect::<Result<Vec<_>, _>>()
@@ -883,10 +881,7 @@ fn test_rooted_local_file_system_create_new_preserves_concurrent_target() {
         .commit()
         .expect_err("rooted create-new must not replace a concurrent target");
 
-    assert_eq!(
-        qubit_local_files::LocalWriteFailureState::NotPublished,
-        error.state(),
-    );
+    assert_eq!(LocalWriteFailureState::NotPublished, error.state(),);
     assert_eq!(
         b"concurrent",
         fs::read(&target)

@@ -144,7 +144,6 @@ fn invalid_relative_path_error(path: &Path) -> Error {
     )
 }
 
-#[cfg(unix)]
 /// Reports whether a Unix path contains an embedded NUL byte.
 ///
 /// # Parameters
@@ -154,6 +153,7 @@ fn invalid_relative_path_error(path: &Path) -> Error {
 /// # Returns
 ///
 /// `true` when the path contains NUL; otherwise, `false`.
+#[cfg(unix)]
 #[must_use]
 #[inline]
 fn contains_nul(path: &Path) -> bool {
@@ -162,7 +162,6 @@ fn contains_nul(path: &Path) -> bool {
     path.as_os_str().as_bytes().contains(&0)
 }
 
-#[cfg(windows)]
 /// Reports whether a Windows path contains an embedded NUL unit.
 ///
 /// # Parameters
@@ -172,6 +171,7 @@ fn contains_nul(path: &Path) -> bool {
 /// # Returns
 ///
 /// `true` when the path contains NUL; otherwise, `false`.
+#[cfg(windows)]
 #[must_use]
 #[inline]
 fn contains_nul(path: &Path) -> bool {
@@ -180,7 +180,6 @@ fn contains_nul(path: &Path) -> bool {
     path.as_os_str().encode_wide().any(|unit| unit == 0)
 }
 
-#[cfg(not(any(unix, windows)))]
 /// Reports whether a fallback path representation contains NUL.
 ///
 /// # Parameters
@@ -190,13 +189,13 @@ fn contains_nul(path: &Path) -> bool {
 /// # Returns
 ///
 /// `true` when the path contains NUL; otherwise, `false`.
+#[cfg(not(any(unix, windows)))]
 #[must_use]
 #[inline]
 fn contains_nul(path: &Path) -> bool {
     path.to_string_lossy().contains('\0')
 }
 
-#[cfg(unix)]
 /// Reports whether Unix path bytes contain an explicit `.` component.
 ///
 /// [`Path::components`] normalizes some current-directory components, so the
@@ -209,6 +208,7 @@ fn contains_nul(path: &Path) -> bool {
 /// # Returns
 ///
 /// `true` when any slash-delimited component is exactly `.`.
+#[cfg(unix)]
 #[must_use]
 #[inline]
 fn contains_explicit_dot_component(path: &Path) -> bool {
@@ -220,7 +220,6 @@ fn contains_explicit_dot_component(path: &Path) -> bool {
         .any(|component| component == b".")
 }
 
-#[cfg(windows)]
 /// Reports whether Windows path units contain an explicit `.` component.
 ///
 /// # Parameters
@@ -230,6 +229,7 @@ fn contains_explicit_dot_component(path: &Path) -> bool {
 /// # Returns
 ///
 /// `true` when any slash-delimited component is exactly `.`.
+#[cfg(windows)]
 #[must_use]
 #[inline]
 fn contains_explicit_dot_component(path: &Path) -> bool {
@@ -241,7 +241,6 @@ fn contains_explicit_dot_component(path: &Path) -> bool {
         .any(|component| component == [u16::from(b'.')])
 }
 
-#[cfg(not(any(unix, windows)))]
 /// Reports whether a fallback path contains an explicit `.` component.
 ///
 /// # Parameters
@@ -251,6 +250,7 @@ fn contains_explicit_dot_component(path: &Path) -> bool {
 /// # Returns
 ///
 /// `true` when any slash-delimited component is exactly `.`.
+#[cfg(not(any(unix, windows)))]
 #[must_use]
 #[inline]
 fn contains_explicit_dot_component(path: &Path) -> bool {

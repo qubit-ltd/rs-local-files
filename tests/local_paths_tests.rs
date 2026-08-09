@@ -14,6 +14,7 @@ use std::path::PathBuf;
 use std::sync::Mutex;
 
 use qubit_local_files::LocalFileErrorKind;
+use qubit_local_files::LocalFileErrorSource;
 use qubit_local_files::LocalFileNames;
 use qubit_local_files::LocalFileOperation;
 use qubit_local_files::LocalFileSystemScope;
@@ -158,7 +159,7 @@ fn test_rooted_canonical_components_retain_path_codec_failure() {
     assert_eq!(LocalFileOperation::ComposePath, error.operation());
     assert!(matches!(
         error.typed_source(),
-        Some(qubit_local_files::LocalFileErrorSource::PathCodec(_))
+        Some(LocalFileErrorSource::PathCodec(_))
     ));
 }
 
@@ -231,7 +232,7 @@ fn test_rooted_canonical_components_reject_native_nul() {
     assert_eq!(LocalFileOperation::ComposePath, error.operation());
     assert!(matches!(
         error.typed_source(),
-        Some(qubit_local_files::LocalFileErrorSource::PathCodec(_))
+        Some(LocalFileErrorSource::PathCodec(_))
     ));
 }
 

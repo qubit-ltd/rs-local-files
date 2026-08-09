@@ -23,7 +23,7 @@ where
     if std::env::var_os(TEST_FAULT_ENV)
         .is_some_and(|selected| selected == std::ffi::OsStr::new(fault))
     {
-        let _fault = qubit_local_files::install_test_fault(fault)
+        let _fault = install_test_fault(fault)
             .expect("test fault controller should install");
         action();
         return;
@@ -45,11 +45,14 @@ where
 }
 
 use qubit_local_files::LocalFileErrorKind;
+use qubit_local_files::LocalFileOperation;
 use qubit_local_files::LocalFileSystem;
 #[cfg(not(windows))]
 use qubit_local_files::LocalPersistFailureState;
 use qubit_local_files::LocalPersistOptions;
 use qubit_local_files::LocalTempDirectoryOptions;
+#[cfg(feature = "internal-test-support")]
+use qubit_local_files::install_test_fault;
 use tempfile::tempdir;
 
 /// Runs a current-directory failure scenario in a child process so changing
@@ -110,10 +113,7 @@ fn test_local_temp_directory_rejects_zero_creation_attempts() {
         )
         .expect_err("zero creation attempts must be rejected");
 
-    assert_eq!(
-        qubit_local_files::LocalFileErrorKind::InvalidOptions,
-        error.kind()
-    );
+    assert_eq!(LocalFileErrorKind::InvalidOptions, error.kind());
 }
 
 /// Verifies directory persistence honors the requested replacement policy.
@@ -562,10 +562,7 @@ fn test_local_temp_directory_cleanup_reports_and_retries_sandbox_failure() {
             let error = temporary
                 .cleanup()
                 .expect_err("sandbox failure should be reported");
-            assert_eq!(
-                qubit_local_files::LocalFileOperation::Cleanup,
-                error.operation()
-            );
+            assert_eq!(LocalFileOperation::Cleanup, error.operation());
             assert!(!resource.exists());
             assert!(sandbox.exists());
             temporary

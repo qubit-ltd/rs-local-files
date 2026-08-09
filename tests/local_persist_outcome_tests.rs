@@ -18,6 +18,8 @@ use qubit_local_files::LocalPersistCleanupState;
 use qubit_local_files::LocalPersistMethod;
 use qubit_local_files::LocalPersistOptions;
 use qubit_local_files::LocalTempFileOptions;
+#[cfg(feature = "internal-test-support")]
+use qubit_local_files::install_test_fault;
 
 #[cfg(feature = "internal-test-support")]
 fn run_in_test_fault_process<F>(test_name: &str, fault: &str, action: F)
@@ -29,7 +31,7 @@ where
     if std::env::var_os(TEST_FAULT_ENV)
         .is_some_and(|selected| selected == std::ffi::OsStr::new(fault))
     {
-        let _fault = qubit_local_files::install_test_fault(fault)
+        let _fault = install_test_fault(fault)
             .expect("test fault controller should install");
         action();
         return;

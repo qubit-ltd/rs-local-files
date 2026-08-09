@@ -16,6 +16,8 @@ use qubit_local_files::LocalFileOperation;
 use qubit_local_files::LocalFileSystem;
 use qubit_local_files::LocalRenameFailureState;
 use qubit_local_files::LocalRenameOptions;
+#[cfg(feature = "internal-test-support")]
+use qubit_local_files::install_test_fault;
 
 /// Creates an absent process-specific path for a rename test.
 fn temp_path(name: &str) -> PathBuf {
@@ -37,7 +39,7 @@ where
     if std::env::var_os(TEST_FAULT_ENV)
         .is_some_and(|selected| selected == std::ffi::OsStr::new(fault))
     {
-        let _fault = qubit_local_files::install_test_fault(fault)
+        let _fault = install_test_fault(fault)
             .expect("test fault controller should install");
         action();
         return;
