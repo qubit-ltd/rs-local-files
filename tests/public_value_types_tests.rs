@@ -27,6 +27,8 @@ use qubit_local_files::LocalFileNames;
 use qubit_local_files::LocalFileOperation;
 use qubit_local_files::LocalFileSystem;
 use qubit_local_files::LocalFileSystemProtocols;
+#[cfg(not(windows))]
+use qubit_local_files::LocalFileSystemScope;
 use qubit_local_files::LocalPathCodecError;
 #[cfg(not(windows))]
 use qubit_local_files::LocalPaths;
@@ -302,7 +304,7 @@ fn test_local_paths_cover_public_composition_and_binding_cases() {
     );
     assert!(
         LocalPaths::to_canonical_components(
-            qubit_local_files::LocalFileSystemScope::Rooted,
+            LocalFileSystemScope::Rooted,
             Path::new(""),
         )
         .is_ok()

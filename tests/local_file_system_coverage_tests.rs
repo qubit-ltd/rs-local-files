@@ -11,7 +11,12 @@ use std::io::Read;
 use std::time::Duration;
 
 use qubit_local_files::LocalAtomicityRequirement;
+use qubit_local_files::LocalCopyConflictPolicy;
+#[cfg(feature = "internal-test-support")]
+use qubit_local_files::LocalCopyFailureState;
 use qubit_local_files::LocalCopyOptions;
+use qubit_local_files::LocalCreateDirectoryOptions;
+use qubit_local_files::LocalDeleteOptions;
 use qubit_local_files::LocalDurabilityRequirement;
 use qubit_local_files::LocalFileErrorKind;
 #[cfg(feature = "internal-test-support")]
@@ -20,11 +25,15 @@ use qubit_local_files::LocalFileSystem;
 use qubit_local_files::LocalListOptions;
 use qubit_local_files::LocalMetadataPreservePolicy;
 use qubit_local_files::LocalReadOptions;
+#[cfg(feature = "internal-test-support")]
+use qubit_local_files::LocalRenameFailureState;
 use qubit_local_files::LocalRenameOptions;
 #[cfg(unix)]
 use qubit_local_files::LocalSymlinkPolicy;
 use qubit_local_files::LocalWriteMode;
 use qubit_local_files::LocalWriteOptions;
+#[cfg(feature = "internal-test-support")]
+use qubit_local_files::install_test_fault;
 use tempfile::tempdir;
 
 /// Verifies copy rejects directory guarantees that the recursive native
@@ -233,18 +242,15 @@ fn test_host_facade_mutates_file_and_directory_entries() {
 
     let tree = directory.path().join("tree");
     let created = LocalFileSystem::host()
-        .create_directory(
-            &tree,
-            &qubit_local_files::LocalCreateDirectoryOptions::new(),
-        )
+        .create_directory(&tree, &LocalCreateDirectoryOptions::new())
         .expect("directory should be created");
     assert!(created.created());
     let deleted_directory = LocalFileSystem::host()
-        .delete_directory(&tree, &qubit_local_files::LocalDeleteOptions::new())
+        .delete_directory(&tree, &LocalDeleteOptions::new())
         .expect("empty directory should be deleted");
     assert!(deleted_directory.deleted());
     let deleted_file = LocalFileSystem::host()
-        .delete_file(&renamed, &qubit_local_files::LocalDeleteOptions::new())
+        .delete_file(&renamed, &LocalDeleteOptions::new())
         .expect("regular file should be deleted");
     assert!(deleted_file.deleted());
 }
@@ -260,7 +266,7 @@ where
     if std::env::var_os(TEST_FAULT_ENV)
         .is_some_and(|selected| selected == std::ffi::OsStr::new(fault))
     {
-        let _fault = qubit_local_files::install_test_fault(fault)
+        let _fault = install_test_fault(fault)
             .expect("test fault controller should install");
         action();
         return;
@@ -318,10 +324,7 @@ fn test_rename_reports_injected_indeterminate_native_failure() {
         let error = LocalFileSystem::host()
             .rename(&source, &target, &LocalRenameOptions::new())
             .expect_err("injected native uncertainty must fail rename");
-        assert_eq!(
-            qubit_local_files::LocalRenameFailureState::Indeterminate,
-            error.state(),
-        );
+        assert_eq!(LocalRenameFailureState::Indeterminate, error.state(),);
     });
 }
 
@@ -343,10 +346,7 @@ fn test_rename_reports_injected_native_boundary_failure() {
         let error = LocalFileSystem::host()
             .rename(&source, &target, &LocalRenameOptions::new())
             .expect_err("injected native rename failure must be reported");
-        assert_eq!(
-            qubit_local_files::LocalRenameFailureState::Indeterminate,
-            error.state()
-        );
+        assert_eq!(LocalRenameFailureState::Indeterminate, error.state());
         assert!(source.exists(), "injected pre-native failure keeps source");
         assert!(
             !target.exists(),
@@ -401,30 +401,21 @@ fn test_host_facade_reports_injected_native_io_failures() {
                 "local-fs-create-directory-exists" => LocalFileSystem::host()
                     .create_directory(
                         &target,
-                        &qubit_local_files::LocalCreateDirectoryOptions::new(),
+                        &LocalCreateDirectoryOptions::new(),
                     )
                     .is_err(),
                 "local-fs-delete-file-remove" => LocalFileSystem::host()
-                    .delete_file(
-                        &source,
-                        &qubit_local_files::LocalDeleteOptions::new(),
-                    )
+                    .delete_file(&source, &LocalDeleteOptions::new())
                     .is_err(),
                 "local-fs-delete-directory-remove" => {
                     fs::create_dir(&target)
                         .expect("directory deletion fixture should be created");
                     LocalFileSystem::host()
-                        .delete_directory(
-                            &target,
-                            &qubit_local_files::LocalDeleteOptions::new(),
-                        )
+                        .delete_directory(&target, &LocalDeleteOptions::new())
                         .is_err()
                 }
                 "local-fs-delete-metadata" => LocalFileSystem::host()
-                    .delete_file(
-                        &source,
-                        &qubit_local_files::LocalDeleteOptions::new(),
-                    )
+                    .delete_file(&source, &LocalDeleteOptions::new())
                     .is_err(),
                 "local-fs-rename-source-metadata" => LocalFileSystem::host()
                     .rename(&source, &target, &LocalRenameOptions::new())
@@ -525,19 +516,14 @@ fn test_copy_required_durability_syncs_staging_before_publication() {
                 &source,
                 &target,
                 &LocalCopyOptions::new()
-                    .with_conflict(
-                        qubit_local_files::LocalCopyConflictPolicy::Overwrite,
-                    )
+                    .with_conflict(LocalCopyConflictPolicy::Overwrite)
                     .with_durability(LocalDurabilityRequirement::Required),
             )
             .expect_err(
                 "staging synchronization failure must stop publication",
             );
 
-        assert_eq!(
-            qubit_local_files::LocalCopyFailureState::Unchanged,
-            failure.state()
-        );
+        assert_eq!(LocalCopyFailureState::Unchanged, failure.state());
         assert_eq!(
             b"old",
             fs::read(&target).expect("target should remain").as_slice(),

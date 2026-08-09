@@ -11,6 +11,7 @@ use std::path::PathBuf;
 
 #[cfg(not(windows))]
 use qubit_local_files::LocalDirectoryReopenPolicy;
+use qubit_local_files::LocalFileErrorKind;
 use qubit_local_files::LocalFileKind;
 use qubit_local_files::LocalFileSystem;
 use qubit_local_files::LocalListOptions;
@@ -91,19 +92,14 @@ fn test_local_directory_walker_rejects_handle_budget_exhaustion() {
             &LocalListOptions::new()
                 .with_recursive()
                 .with_max_open_directories(1)
-                .with_reopen_policy(
-                    qubit_local_files::LocalDirectoryReopenPolicy::Fail,
-                ),
+                .with_reopen_policy(LocalDirectoryReopenPolicy::Fail),
         )
         .expect("walker should be created");
     let error = walker
         .find_map(Result::err)
         .expect("descending beyond the handle budget should fail");
 
-    assert_eq!(
-        qubit_local_files::LocalFileErrorKind::ResourceLimit,
-        error.kind()
-    );
+    assert_eq!(LocalFileErrorKind::ResourceLimit, error.kind());
 }
 
 /// Verifies deep traversal can reopen frames instead of exhausting handles.
@@ -124,9 +120,7 @@ fn test_local_directory_walker_reopens_frames_past_handle_budget() {
             &LocalListOptions::new()
                 .with_recursive()
                 .with_max_open_directories(1)
-                .with_reopen_policy(
-                    qubit_local_files::LocalDirectoryReopenPolicy::Reopen,
-                ),
+                .with_reopen_policy(LocalDirectoryReopenPolicy::Reopen),
         )
         .expect("walker should be created")
         .collect::<Result<Vec<_>, _>>()

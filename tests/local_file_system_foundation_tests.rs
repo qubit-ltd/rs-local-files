@@ -16,7 +16,6 @@ use qubit_local_files::LocalFileKind;
 use qubit_local_files::LocalFileNames;
 use qubit_local_files::LocalFileSystem;
 use qubit_local_files::SizeLimit;
-#[cfg(unix)]
 use tempfile::tempdir;
 
 /// Verifies capabilities do not misrepresent a compile-time path bound as a
@@ -46,7 +45,7 @@ fn test_host_file_system_space_observes_existing_directory() {
 /// descendants instead of the diagnostic root path.
 #[test]
 fn test_rooted_file_system_space_observes_nearest_existing_ancestor() {
-    let root = tempfile::tempdir().expect("temporary root should be created");
+    let root = tempdir().expect("temporary root should be created");
     std::fs::create_dir(root.path().join("nested"))
         .expect("nested directory should be created");
     let filesystem = LocalFileSystem::rooted(root.path())
@@ -73,7 +72,7 @@ fn test_local_file_system_capabilities_report_operation_support() {
     assert_eq!(cfg!(unix), capabilities.supports_durable_rename());
     assert_eq!(cfg!(unix), capabilities.supports_durable_file_copy(),);
 
-    let rooted = tempfile::tempdir().expect("root should be created");
+    let rooted = tempdir().expect("root should be created");
     let rooted_capabilities = LocalFileSystem::rooted(rooted.path())
         .expect("root authority should open")
         .protocols();

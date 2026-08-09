@@ -9,9 +9,9 @@
 // qubit-style: allow source-test-pair
 
 use std::fs;
+use std::io;
 use std::io::ErrorKind;
 use std::io::Write;
-use std::io::{self};
 use std::path::Path;
 use std::path::PathBuf;
 #[cfg(unix)]
@@ -92,8 +92,8 @@ pub(crate) struct LocalAtomicWriter {
     preserve_destination_metadata: bool,
     /// Durability requested for this publication.
     durability: LocalDurabilityRequirement,
-    #[cfg(unix)]
     /// Optional limit for retrying a nonblocking destination open.
+    #[cfg(unix)]
     open_retry_timeout: Option<Duration>,
     /// Owned same-directory staging file.
     staged_file: StagedFile,
@@ -384,7 +384,6 @@ impl LocalAtomicWriter {
         Ok(file_durable && parent_durable)
     }
 
-    #[cfg(unix)]
     /// Opens the existing destination that supplies commit-time metadata.
     ///
     /// # Returns
@@ -397,6 +396,7 @@ impl LocalAtomicWriter {
     /// Returns a structured metadata-stage error when the destination cannot
     /// be opened or disappeared before commit. The staging writer remains
     /// available for retry or explicit abort.
+    #[cfg(unix)]
     fn open_destination_for_commit(
         &mut self,
     ) -> Result<Option<OpenedAtomicDestination>, LocalAtomicWriteError> {
@@ -429,7 +429,6 @@ impl LocalAtomicWriter {
         }
     }
 
-    #[cfg(unix)]
     /// Copies strict metadata from an opened destination to staging.
     ///
     /// # Parameters
@@ -440,6 +439,7 @@ impl LocalAtomicWriter {
     ///
     /// Returns a structured metadata-application error while retaining staging
     /// when platform metadata cannot be preserved.
+    #[cfg(unix)]
     fn preserve_destination_metadata(
         &mut self,
         destination: Option<&OpenedAtomicDestination>,
@@ -460,13 +460,13 @@ impl LocalAtomicWriter {
         )
     }
 
-    #[cfg(not(any(unix, windows)))]
     /// Rejects an existing destination without strict metadata support.
     ///
     /// # Errors
     ///
     /// Returns a structured unsupported metadata-application error while
     /// retaining staging when the destination already exists.
+    #[cfg(not(any(unix, windows)))]
     fn reject_unsupported_metadata_preservation(
         &mut self,
     ) -> Result<(), LocalAtomicWriteError> {
@@ -510,7 +510,6 @@ impl LocalAtomicWriter {
         }
     }
 
-    #[cfg(unix)]
     /// Verifies that the opened destination still names the final entry.
     ///
     /// # Parameters
@@ -521,6 +520,7 @@ impl LocalAtomicWriter {
     ///
     /// Returns the structured namespace-race error produced by the identity
     /// verifier while retaining staging for retry or explicit abort.
+    #[cfg(unix)]
     #[inline]
     fn verify_destination_for_commit(
         &mut self,
@@ -537,13 +537,13 @@ impl LocalAtomicWriter {
         )
     }
 
-    #[cfg(not(unix))]
     /// Verifies that an existing non-Unix destination remains present.
     ///
     /// # Errors
     ///
     /// Returns a structured replacement-stage error when destination
     /// inspection fails or the destination disappeared before installation.
+    #[cfg(not(unix))]
     fn verify_non_unix_destination_for_commit(
         &mut self,
     ) -> Result<(), LocalAtomicWriteError> {

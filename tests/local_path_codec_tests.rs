@@ -60,12 +60,8 @@ proptest! {
             0..256,
         ),
     ) {
-        use std::{
-            ffi::OsString,
-            os::unix::ffi::{
-                OsStringExt,
-            },
-        };
+        use std::ffi::OsString;
+        use std::os::unix::ffi::OsStringExt;
 
         let native = OsString::from_vec(bytes.clone());
         let canonical = LocalPathCodec::to_canonical_text(&native)
@@ -87,13 +83,9 @@ proptest! {
             0..256,
         ),
     ) {
-        use std::{
-            ffi::OsString,
-            os::windows::ffi::{
-                OsStrExt,
-                OsStringExt,
-            },
-        };
+        use std::ffi::OsString;
+        use std::os::windows::ffi::OsStrExt;
+        use std::os::windows::ffi::OsStringExt;
 
         let native = OsString::from_wide(&units);
         let canonical = LocalPathCodec::to_canonical_text(&native)

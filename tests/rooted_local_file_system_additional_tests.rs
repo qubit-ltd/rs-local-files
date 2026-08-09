@@ -26,6 +26,7 @@ use qubit_local_files::LocalFileSystem;
 use qubit_local_files::LocalListOptions;
 use qubit_local_files::LocalReadOptions;
 use qubit_local_files::LocalTempFileOptions;
+use qubit_local_files::LocalWriteFailureState;
 use qubit_local_files::LocalWriteMode;
 use qubit_local_files::LocalWriteOptions;
 use qubit_local_files::LocalWriterState;
@@ -265,7 +266,7 @@ fn test_rooted_local_file_system_append_commit_and_abort_report_states() {
     let aborted_outcome = aborted.abort().expect("append abort should flush");
     assert_eq!(LocalWriterState::Aborted, aborted_outcome.state());
     assert_eq!(
-        Some(qubit_local_files::LocalWriteFailureState::Published),
+        Some(LocalWriteFailureState::Published),
         aborted_outcome.failure_state(),
     );
     assert_eq!(

@@ -11,6 +11,7 @@ use std::fs;
 use qubit_local_files::LocalDeleteOptions;
 use qubit_local_files::LocalFileErrorKind;
 use qubit_local_files::LocalFileSystem;
+use qubit_local_files::install_test_fault;
 use tempfile::tempdir;
 
 /// Verifies a selected native fault is isolated to a child test process.
@@ -35,7 +36,7 @@ fn test_test_support_injects_selected_fault_only_in_child_process() {
             return;
         }
         Ok("fault") => {
-            let _fault = qubit_local_files::install_test_fault(FAULT)
+            let _fault = install_test_fault(FAULT)
                 .expect("fault controller should install");
             let directory =
                 tempdir().expect("temporary directory should be created");
@@ -88,13 +89,13 @@ fn test_explicit_test_fault_guard_scopes_controller() {
     fs::write(&file, b"payload").expect("fixture should be written");
 
     {
-        let _fault = qubit_local_files::install_test_fault(FAULT)
-            .expect("fault controller should install");
+        let _fault =
+            install_test_fault(FAULT).expect("fault controller should install");
         let error = LocalFileSystem::host()
             .delete_file(&file, &LocalDeleteOptions::new())
             .expect_err("explicitly selected fault should fail deletion");
         assert_eq!(LocalFileErrorKind::Io, error.kind());
-        assert!(qubit_local_files::install_test_fault("other").is_err());
+        assert!(install_test_fault("other").is_err());
     }
 
     let _ = LocalFileSystem::host()

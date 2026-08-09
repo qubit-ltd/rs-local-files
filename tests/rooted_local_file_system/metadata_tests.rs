@@ -9,10 +9,8 @@
 
 use std::fs;
 
-use qubit_local_files::{
-    LocalFileKind,
-    LocalFileSystem,
-};
+use qubit_local_files::LocalFileKind;
+use qubit_local_files::LocalFileSystem;
 use tempfile::tempdir;
 
 /// Verifies the split Rooted metadata module retains authority-relative reads.

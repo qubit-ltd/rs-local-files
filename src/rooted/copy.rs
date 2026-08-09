@@ -8,8 +8,8 @@
 //! Descriptor-relative file and directory copying.
 // qubit-style: allow source-test-pair
 
+use std::io;
 use std::io::ErrorKind;
-use std::io::{self};
 
 use super::EntryKind;
 use super::Metadata;

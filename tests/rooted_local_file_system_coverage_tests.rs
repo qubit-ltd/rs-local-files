@@ -14,6 +14,7 @@ use std::path::Path;
 use std::time::Duration;
 
 use qubit_local_files::LocalAtomicityRequirement;
+use qubit_local_files::LocalCopyFailureState;
 #[cfg(not(windows))]
 use qubit_local_files::LocalCopyMethod;
 use qubit_local_files::LocalCopyOptions;
@@ -23,15 +24,21 @@ use qubit_local_files::LocalDeleteOptions;
 use qubit_local_files::LocalDurabilityRequirement;
 use qubit_local_files::LocalFileErrorKind;
 use qubit_local_files::LocalFileKind;
+use qubit_local_files::LocalFileOperation;
 use qubit_local_files::LocalFileSystem;
 use qubit_local_files::LocalFileSystemScope;
 use qubit_local_files::LocalListOptions;
 use qubit_local_files::LocalReadOptions;
+use qubit_local_files::LocalRenameFailureState;
 use qubit_local_files::LocalRenameOptions;
 use qubit_local_files::LocalTempDirectoryOptions;
 use qubit_local_files::LocalTempFileOptions;
+use qubit_local_files::LocalWriteFailureState;
 use qubit_local_files::LocalWriteMode;
 use qubit_local_files::LocalWriteOptions;
+use qubit_local_files::LocalWriterState;
+#[cfg(feature = "internal-test-support")]
+use qubit_local_files::install_test_fault;
 use tempfile::tempdir;
 
 /// Runs a test-support-only fault case in an isolated child test process.
@@ -48,7 +55,7 @@ where
     if std::env::var_os(TEST_FAULT_ENV)
         .is_some_and(|selected| selected == std::ffi::OsStr::new(fault))
     {
-        let _fault = qubit_local_files::install_test_fault(fault)
+        let _fault = install_test_fault(fault)
             .expect("test fault controller should install");
         action();
         return;
@@ -237,10 +244,7 @@ fn test_rooted_local_file_system_rejects_regular_file_anchor() {
         .expect_err("regular files cannot become rooted authorities");
 
     assert_eq!(LocalFileErrorKind::NotDirectory, error.kind());
-    assert_eq!(
-        qubit_local_files::LocalFileOperation::OpenRoot,
-        error.operation()
-    );
+    assert_eq!(LocalFileOperation::OpenRoot, error.operation());
     assert_eq!(Some(file.as_path()), error.path());
 }
 
@@ -433,10 +437,7 @@ fn test_rooted_local_file_system_writer_abort_discards_staging() {
     let outcome = writer.abort().expect("rooted writer should abort");
 
     assert!(!directory.path().join("discarded").exists());
-    assert_eq!(
-        qubit_local_files::LocalWriterState::Aborted,
-        outcome.state()
-    );
+    assert_eq!(LocalWriterState::Aborted, outcome.state());
 }
 
 /// Verifies rooted metadata, reader, and append writer operations retain
@@ -560,10 +561,7 @@ fn test_rooted_local_file_system_create_new_commit_preserves_concurrent_target()
         "rooted create-new commit must not replace concurrent target",
     );
 
-    assert_eq!(
-        qubit_local_files::LocalWriteFailureState::NotPublished,
-        error.state()
-    );
+    assert_eq!(LocalWriteFailureState::NotPublished, error.state());
     assert_eq!(
         b"concurrent",
         fs::read(directory.path().join("target"))
@@ -773,23 +771,14 @@ fn test_rooted_local_file_system_returns_retryable_writer_before_publication() {
     let error = writer
         .commit()
         .expect_err("missing rooted destination should prevent publication");
-    assert_eq!(
-        qubit_local_files::LocalWriteFailureState::NotPublished,
-        error.state()
-    );
+    assert_eq!(LocalWriteFailureState::NotPublished, error.state());
     let (_cause, state, retryable) = error.into_parts();
-    assert_eq!(
-        qubit_local_files::LocalWriteFailureState::NotPublished,
-        state,
-    );
+    assert_eq!(LocalWriteFailureState::NotPublished, state,);
     let outcome = retryable
         .expect("rooted pre-publication failure should retain staging")
         .abort()
         .expect("retained rooted staging should clean up");
-    assert_eq!(
-        qubit_local_files::LocalWriterState::Aborted,
-        outcome.state()
-    );
+    assert_eq!(LocalWriterState::Aborted, outcome.state());
     assert!(!directory.path().join("payload").exists());
 }
 
@@ -909,10 +898,7 @@ fn test_rooted_local_file_system_abort_reports_missing_staging_file() {
     let error = writer
         .abort()
         .expect_err("missing rooted staging file must report cleanup failure");
-    assert_eq!(
-        qubit_local_files::LocalFileOperation::Abort,
-        error.operation()
-    );
+    assert_eq!(LocalFileOperation::Abort, error.operation());
     assert_eq!(Some(target.as_path()), error.path());
     assert!(!target.exists());
 }
@@ -935,10 +921,7 @@ fn test_rooted_local_file_system_rejects_invalid_preflight_operands() {
         )
         .expect_err("rooted rename must reject lexical source escape");
     assert_eq!(LocalFileErrorKind::InvalidPath, rename.error().kind());
-    assert_eq!(
-        qubit_local_files::LocalRenameFailureState::Unchanged,
-        rename.state(),
-    );
+    assert_eq!(LocalRenameFailureState::Unchanged, rename.state(),);
     assert!(directory.path().join("source").exists());
 
     let staged = rooted
@@ -1107,10 +1090,7 @@ fn test_rooted_local_file_system_rejects_invalid_generated_names_and_targets() {
         )
         .expect_err("rooted copy must reject lexical target escape");
     assert_eq!(LocalFileErrorKind::InvalidPath, copy.error().kind());
-    assert_eq!(
-        qubit_local_files::LocalCopyFailureState::Unchanged,
-        copy.state(),
-    );
+    assert_eq!(LocalCopyFailureState::Unchanged, copy.state(),);
     let rename = rooted
         .rename(
             Path::new("source"),
@@ -1119,10 +1099,7 @@ fn test_rooted_local_file_system_rejects_invalid_generated_names_and_targets() {
         )
         .expect_err("rooted rename must reject lexical target escape");
     assert_eq!(LocalFileErrorKind::InvalidPath, rename.error().kind());
-    assert_eq!(
-        qubit_local_files::LocalRenameFailureState::Unchanged,
-        rename.state(),
-    );
+    assert_eq!(LocalRenameFailureState::Unchanged, rename.state(),);
 }
 
 /// Runs one test-support-only rooted writer fault in an isolated child process.
@@ -1136,7 +1113,7 @@ where
     if std::env::var_os(TEST_FAULT_ENV)
         .is_some_and(|selected| selected == std::ffi::OsStr::new(fault))
     {
-        let _fault = qubit_local_files::install_test_fault(fault)
+        let _fault = install_test_fault(fault)
             .expect("test fault controller should install");
         action();
         return;
@@ -1184,10 +1161,7 @@ fn test_rooted_local_file_system_writer_reports_injected_install_failure() {
         let error = writer.commit().expect_err(
             "injected rooted installation failure must fail commit",
         );
-        assert_eq!(
-            qubit_local_files::LocalWriteFailureState::NotPublished,
-            error.state()
-        );
+        assert_eq!(LocalWriteFailureState::NotPublished, error.state());
         let (_cause, _state, retained) = error.into_parts();
         assert!(retained.is_none());
     });

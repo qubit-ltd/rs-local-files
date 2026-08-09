@@ -16,6 +16,8 @@ use std::path::Path;
 #[cfg(unix)]
 use qubit_local_files::LocalFileErrorKind;
 #[cfg(unix)]
+use qubit_local_files::LocalFileKind;
+#[cfg(unix)]
 use qubit_local_files::LocalFileSystem;
 #[cfg(unix)]
 use qubit_local_files::LocalReadOptions;
@@ -103,5 +105,5 @@ fn test_host_path_resolution_preserves_final_link_for_metadata() {
     let metadata = LocalFileSystem::host()
         .metadata(Path::new(&link))
         .expect("metadata should inspect the final link entry");
-    assert_eq!(qubit_local_files::LocalFileKind::Symlink, metadata.kind());
+    assert_eq!(LocalFileKind::Symlink, metadata.kind());
 }

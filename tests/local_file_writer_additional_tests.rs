@@ -13,11 +13,13 @@ use std::io::Write;
 
 use qubit_local_files::LocalDurabilityRequirement;
 use qubit_local_files::LocalFileErrorKind;
+use qubit_local_files::LocalFileOperation;
 use qubit_local_files::LocalFileSystem;
 use qubit_local_files::LocalWriteFailureState;
 use qubit_local_files::LocalWriteMode;
 use qubit_local_files::LocalWriteOptions;
 use qubit_local_files::LocalWriterState;
+use qubit_local_files::install_test_fault;
 use tempfile::tempdir;
 
 /// Verifies Host writers retain the caller-visible destination after resolving
@@ -97,10 +99,7 @@ fn test_local_file_writer_append_abort_reports_aborted_and_published_states() {
     let repeated = untouched
         .abort()
         .expect_err("completed append abort must be terminal");
-    assert_eq!(
-        qubit_local_files::LocalFileErrorKind::InvalidState,
-        repeated.kind(),
-    );
+    assert_eq!(LocalFileErrorKind::InvalidState, repeated.kind(),);
 
     let mut published = LocalFileSystem::host()
         .open_writer(&target, &LocalWriteOptions::new(LocalWriteMode::Append))
@@ -344,20 +343,14 @@ fn test_local_file_writer_abort_reports_missing_host_staging_file() {
     let error = writer.abort().expect_err(
         "missing host staging file must report explicit cleanup failure",
     );
-    assert_eq!(
-        qubit_local_files::LocalFileOperation::Abort,
-        error.operation()
-    );
+    assert_eq!(LocalFileOperation::Abort, error.operation());
     assert_eq!(Some(target.as_path()), error.path());
     assert!(!target.exists());
 
     let retry = writer
         .abort()
         .expect_err("failed abort must retain the writer for retry");
-    assert_eq!(
-        qubit_local_files::LocalFileOperation::Abort,
-        retry.operation(),
-    );
+    assert_eq!(LocalFileOperation::Abort, retry.operation(),);
 }
 
 /// Verifies rooted facade writers preserve the shared writer outcome contract
@@ -469,7 +462,7 @@ where
     if std::env::var_os(TEST_FAULT_ENV)
         .is_some_and(|selected| selected == std::ffi::OsStr::new(fault))
     {
-        let _fault = qubit_local_files::install_test_fault(fault)
+        let _fault = install_test_fault(fault)
             .expect("test fault controller should install");
         action();
         return;
@@ -611,9 +604,6 @@ fn test_local_file_writer_reports_injected_append_abort_flush_failure() {
         let error = writer
             .abort()
             .expect_err("injected append flush must fail abort");
-        assert_eq!(
-            qubit_local_files::LocalFileOperation::Abort,
-            error.operation()
-        );
+        assert_eq!(LocalFileOperation::Abort, error.operation());
     });
 }

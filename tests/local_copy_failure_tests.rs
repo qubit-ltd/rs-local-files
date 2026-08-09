@@ -24,6 +24,8 @@ use qubit_local_files::LocalDurabilityRequirement;
 use qubit_local_files::LocalFileSystem;
 #[cfg(feature = "internal-test-support")]
 use qubit_local_files::LocalMetadataPreservePolicy;
+#[cfg(feature = "internal-test-support")]
+use qubit_local_files::install_test_fault;
 
 /// Creates a process-specific path that is absent before each test use.
 fn temp_path(name: &str) -> PathBuf {
@@ -44,7 +46,7 @@ where
     if std::env::var_os(TEST_FAULT_ENV)
         .is_some_and(|selected| selected == std::ffi::OsStr::new(fault))
     {
-        let _fault = qubit_local_files::install_test_fault(fault)
+        let _fault = install_test_fault(fault)
             .expect("test fault controller should install");
         action();
         return;

@@ -20,11 +20,14 @@ use std::path::Path;
 use std::process::Command;
 
 use qubit_local_files::LocalFileErrorKind;
+use qubit_local_files::LocalFileOperation;
 use qubit_local_files::LocalFileSystem;
 use qubit_local_files::LocalPersistFailureState;
 use qubit_local_files::LocalPersistMethod;
 use qubit_local_files::LocalPersistOptions;
 use qubit_local_files::LocalTempFileOptions;
+#[cfg(feature = "internal-test-support")]
+use qubit_local_files::install_test_fault;
 use tempfile::tempdir;
 
 #[cfg(feature = "internal-test-support")]
@@ -37,7 +40,7 @@ where
     if std::env::var_os(TEST_FAULT_ENV)
         .is_some_and(|selected| selected == std::ffi::OsStr::new(fault))
     {
-        let _fault = qubit_local_files::install_test_fault(fault)
+        let _fault = install_test_fault(fault)
             .expect("test fault controller should install");
         action();
         return;
@@ -260,10 +263,7 @@ fn test_local_temp_file_rejects_zero_creation_attempts() {
         )
         .expect_err("zero creation attempts must be rejected");
 
-    assert_eq!(
-        qubit_local_files::LocalFileErrorKind::InvalidOptions,
-        error.kind()
-    );
+    assert_eq!(LocalFileErrorKind::InvalidOptions, error.kind());
 }
 
 /// Verifies open temporary files implement the ordinary seekable write stream
@@ -421,12 +421,10 @@ fn test_local_temp_file_persist_reports_indeterminate_install() {
         return;
     }
 
-    let _fault =
-        qubit_local_files::install_test_fault("persist-install-indeterminate")
-            .expect("test fault controller should install");
+    let _fault = install_test_fault("persist-install-indeterminate")
+        .expect("test fault controller should install");
 
-    let parent =
-        tempfile::tempdir().expect("temporary parent should be created");
+    let parent = tempdir().expect("temporary parent should be created");
     let temporary = LocalFileSystem::host()
         .create_temp_file(
             &LocalTempFileOptions::new().with_parent(parent.path()),
@@ -732,10 +730,7 @@ fn test_local_temp_file_cleanup_reports_and_retries_sandbox_failure() {
             let error = temporary
                 .cleanup()
                 .expect_err("sandbox failure should be reported");
-            assert_eq!(
-                qubit_local_files::LocalFileOperation::Cleanup,
-                error.operation()
-            );
+            assert_eq!(LocalFileOperation::Cleanup, error.operation());
             assert!(!resource.exists());
             assert!(sandbox.exists());
             temporary

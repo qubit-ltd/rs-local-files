@@ -100,8 +100,8 @@ impl TempEntryIdentity {
         }
     }
 
-    #[cfg(windows)]
     /// Captures volume and file identifiers from an opened Windows handle.
+    #[cfg(windows)]
     fn from_windows_file(file: &fs::File) -> io::Result<Self> {
         use std::os::windows::io::AsRawHandle;
 

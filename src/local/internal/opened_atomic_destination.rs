@@ -10,9 +10,9 @@
 // Private behavior is covered through public integration tests.
 
 use std::ffi::CString;
+use std::fs;
 use std::fs::File;
 use std::fs::OpenOptions;
-use std::fs::{self};
 use std::io::Error;
 use std::io::ErrorKind;
 use std::io::Result;
