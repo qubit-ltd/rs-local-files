@@ -45,7 +45,10 @@ impl LocalFileError {
     /// - `operation`: Operation that failed.
     #[must_use]
     #[inline(always)]
-    pub const fn new(kind: LocalFileErrorKind, operation: LocalFileOperation) -> Self {
+    pub const fn new(
+        kind: LocalFileErrorKind,
+        operation: LocalFileOperation,
+    ) -> Self {
         Self {
             kind,
             operation,
@@ -283,12 +286,13 @@ fn standard_io_error_kind(error: &LocalFileError) -> io::ErrorKind {
             LocalFileErrorKind::NotDirectory => io::ErrorKind::NotADirectory,
             LocalFileErrorKind::IsDirectory => io::ErrorKind::IsADirectory,
             LocalFileErrorKind::NotFound => io::ErrorKind::NotFound,
-            LocalFileErrorKind::PermissionDenied => io::ErrorKind::PermissionDenied,
+            LocalFileErrorKind::PermissionDenied => {
+                io::ErrorKind::PermissionDenied
+            }
             LocalFileErrorKind::ResourceLimit => io::ErrorKind::StorageFull,
             LocalFileErrorKind::DataCorruption => io::ErrorKind::InvalidData,
-            LocalFileErrorKind::RequirementNotMet | LocalFileErrorKind::Unsupported => {
-                io::ErrorKind::Unsupported
-            }
+            LocalFileErrorKind::RequirementNotMet
+            | LocalFileErrorKind::Unsupported => io::ErrorKind::Unsupported,
             _ => io::ErrorKind::Other,
         },
     }
@@ -346,9 +350,9 @@ fn classify_io_error(error: &io::Error) -> LocalFileErrorKind {
         io::ErrorKind::InvalidInput => LocalFileErrorKind::InvalidPath,
         io::ErrorKind::InvalidData => LocalFileErrorKind::DataCorruption,
         io::ErrorKind::Unsupported => LocalFileErrorKind::Unsupported,
-        io::ErrorKind::OutOfMemory | io::ErrorKind::StorageFull | io::ErrorKind::QuotaExceeded => {
-            LocalFileErrorKind::ResourceLimit
-        }
+        io::ErrorKind::OutOfMemory
+        | io::ErrorKind::StorageFull
+        | io::ErrorKind::QuotaExceeded => LocalFileErrorKind::ResourceLimit,
         _ => LocalFileErrorKind::Io,
     }
 }

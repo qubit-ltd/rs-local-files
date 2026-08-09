@@ -99,7 +99,7 @@ checksum = "0ceec5bc11778974d1bcb055b18002eba7f4b3518b6a0081b3af5f21666da9ad"
 
 [[package]]
 name = "qubit-budget"
-version = "0.2.0"
+version = "0.4.0"
 
 [[package]]
 name = "qubit-local-files"
@@ -160,11 +160,3 @@ checksum = "ae137229bcbd6cdf0f7b80a31df61766145077ddf49416a728b02cb3921ff3fc"
 dependencies = [
  "windows-link",
 ]
-
-[[patch.unused]]
-name = "qubit-clock"
-version = "0.12.1"
-
-[[patch.unused]]
-name = "qubit-retry"
-version = "0.18.0"
