@@ -13,8 +13,8 @@ use qubit_local_files::LocalFileSystem;
 
 #[test]
 fn observes_root_limits_space_and_metadata() {
-    let filesystem = LocalFileSystem::rooted(Path::new("."))
-        .expect("current directory can be opened");
+    let filesystem =
+        LocalFileSystem::rooted(Path::new(".")).expect("current directory can be opened");
     let limits = filesystem
         .limits_at(Path::new("Cargo.toml"))
         .expect("limits are queryable");

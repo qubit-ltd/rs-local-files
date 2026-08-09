@@ -102,9 +102,8 @@ fn open_copy_source(
         flags |= libc::O_NOFOLLOW;
     }
     options.read(true).custom_flags(flags);
-    let file =
-        open_with_nonblocking_retry(open_retry_timeout, || options.open(path))
-            .map_err(|error| normalize_unix_source_open_error(path, error))?;
+    let file = open_with_nonblocking_retry(open_retry_timeout, || options.open(path))
+        .map_err(|error| normalize_unix_source_open_error(path, error))?;
     let metadata = file.metadata()?;
     reject_non_regular_source(path, &metadata)?;
     clear_nonblocking(file.as_raw_fd())?;
@@ -116,9 +115,7 @@ fn open_copy_source(
 #[inline]
 fn normalize_unix_source_open_error(path: &Path, error: Error) -> Error {
     match error.raw_os_error() {
-        Some(libc::ELOOP | libc::ENXIO | libc::ENODEV) => {
-            invalid_copy_source(path)
-        }
+        Some(libc::ELOOP | libc::ENXIO | libc::ENODEV) => invalid_copy_source(path),
         _ => error,
     }
 }
@@ -153,9 +150,7 @@ fn open_copy_source(
     if result == 0 {
         return Err(Error::last_os_error());
     }
-    if !symlink_policy.follows()
-        && tag_info.ReparseTag & IO_REPARSE_TAG_NAME_SURROGATE != 0
-    {
+    if !symlink_policy.follows() && tag_info.ReparseTag & IO_REPARSE_TAG_NAME_SURROGATE != 0 {
         return Err(invalid_copy_source(path));
     }
     let metadata = file.metadata()?;
