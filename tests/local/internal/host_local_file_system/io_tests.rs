@@ -9,12 +9,11 @@
 
 use std::fs;
 
-use qubit_local_files::{
-    LocalFileSystem,
-    LocalReadOptions,
-    LocalWriteMode,
-    LocalWriteOptions,
-};
+use qubit_local_files::LocalFileSystem;
+use qubit_local_files::LocalReadOptions;
+use qubit_local_files::LocalWriteMode;
+use qubit_local_files::LocalWriteOptions;
+use qubit_local_files::LocalWriterState;
 use tempfile::tempdir;
 
 /// Verifies the split Host I/O module preserves reader and writer behavior.
@@ -33,7 +32,7 @@ fn test_host_io_operations_round_trip_file_bytes() {
     std::io::Write::write_all(&mut writer, b"payload")
         .expect("Host writer should accept bytes");
     let outcome = writer.commit().expect("Host writer should commit");
-    assert_eq!(qubit_local_files::LocalWriterState::Committed, outcome.state());
+    assert_eq!(LocalWriterState::Committed, outcome.state());
 
     let bytes = filesystem
         .read_prefix(&path, &LocalReadOptions::new(), 32)

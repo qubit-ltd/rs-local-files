@@ -9,8 +9,8 @@
 // qubit-style: allow source-test-pair
 // Public APIs cannot force an opened regular-file metadata failure.
 
+use std::fs;
 use std::fs::OpenOptions;
-use std::fs::{self};
 use std::io::Error;
 use std::io::ErrorKind;
 use std::io::Result;
@@ -71,12 +71,12 @@ fn reject_existing_non_file(path: &Path) -> Result<()> {
     }
 }
 
-#[cfg(unix)]
 /// Adds a non-blocking open flag to prevent a concurrent FIFO replacement from
 /// hanging the opening thread.
 ///
 /// # Parameters
 /// - `options`: Open options to update.
+#[cfg(unix)]
 #[inline(always)]
 fn configure_nonblocking_open(options: &mut OpenOptions) {
     use std::os::unix::fs::OpenOptionsExt;
@@ -88,9 +88,9 @@ fn configure_nonblocking_open(options: &mut OpenOptions) {
     options.custom_flags(libc::O_NONBLOCK | libc::O_NOFOLLOW);
 }
 
-#[cfg(windows)]
 /// Opens the final Windows entry itself so validation cannot follow a racing
 /// name-surrogate reparse point.
+#[cfg(windows)]
 #[inline(always)]
 fn configure_nonblocking_open(options: &mut OpenOptions) {
     use windows_sys::Win32::Storage::FileSystem::FILE_FLAG_OPEN_REPARSE_POINT;
@@ -98,11 +98,11 @@ fn configure_nonblocking_open(options: &mut OpenOptions) {
     options.custom_flags(FILE_FLAG_OPEN_REPARSE_POINT);
 }
 
-#[cfg(not(any(unix, windows)))]
 /// Leaves open flags unchanged on platforms without Unix descriptor flags.
 ///
 /// # Parameters
 /// - `options`: Open options that remain unchanged.
+#[cfg(not(any(unix, windows)))]
 #[inline(always)]
 fn configure_nonblocking_open(_options: &mut OpenOptions) {}
 
@@ -213,8 +213,8 @@ fn prepare_opened_regular_file(
     )
 }
 
-#[cfg(windows)]
 /// Rejects a name-surrogate reparse point observed on the opened handle.
+#[cfg(windows)]
 fn reject_opened_name_surrogate(file: &fs::File, path: &Path) -> Result<()> {
     use std::mem::size_of;
 

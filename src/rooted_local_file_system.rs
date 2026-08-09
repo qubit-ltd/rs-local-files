@@ -11,8 +11,8 @@
 mod metadata_operations;
 mod path_support;
 
+use std::fs;
 use std::fs::File;
-use std::fs::{self};
 use std::io;
 use std::path::Path;
 use std::path::PathBuf;

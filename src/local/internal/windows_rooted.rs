@@ -47,6 +47,7 @@ use windows_sys::Win32::Foundation::OBJ_CASE_INSENSITIVE;
 use windows_sys::Win32::Foundation::STATUS_NO_MORE_FILES;
 use windows_sys::Win32::Foundation::UNICODE_STRING;
 use windows_sys::Win32::Storage::FileSystem::CreateFileW;
+use windows_sys::Win32::Storage::FileSystem::DELETE;
 use windows_sys::Win32::Storage::FileSystem::FILE_APPEND_DATA;
 use windows_sys::Win32::Storage::FileSystem::FILE_ATTRIBUTE_DIRECTORY;
 use windows_sys::Win32::Storage::FileSystem::FILE_ATTRIBUTE_NORMAL;
@@ -537,9 +538,7 @@ fn delete_rooted_entry(root: &File, path: &LocalRelativePath) -> Result<()> {
     let entry = open_entry_no_follow(
         root,
         path,
-        windows_sys::Win32::Storage::FileSystem::DELETE
-            | FILE_READ_ATTRIBUTES
-            | SYNCHRONIZE,
+        DELETE | FILE_READ_ATTRIBUTES | SYNCHRONIZE,
         FILE_OPEN,
         0,
     )?;

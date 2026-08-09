@@ -10,6 +10,7 @@ use std::fs;
 use std::path::Path;
 
 use qubit_local_files::LocalFileErrorKind;
+use qubit_local_files::LocalFileKind;
 use qubit_local_files::LocalFileSystem;
 use qubit_local_files::LocalTempFileOptions;
 use tempfile::tempdir;
@@ -127,5 +128,5 @@ fn test_rooted_path_support_reports_symlink_metadata() {
     let metadata = rooted
         .metadata(Path::new("link"))
         .expect("rooted link metadata should be readable");
-    assert_eq!(qubit_local_files::LocalFileKind::Symlink, metadata.kind());
+    assert_eq!(LocalFileKind::Symlink, metadata.kind());
 }

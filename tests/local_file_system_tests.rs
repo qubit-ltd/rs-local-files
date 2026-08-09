@@ -19,6 +19,8 @@ use qubit_local_files::LocalFileOperation;
 use qubit_local_files::LocalFileSystem;
 use qubit_local_files::LocalReadOptions;
 use qubit_local_files::LocalRenameOptions;
+#[cfg(target_os = "linux")]
+use tempfile::NamedTempFile;
 use tempfile::tempdir;
 
 /// Verifies default host copy and rename avoid durability synchronization.
@@ -57,8 +59,7 @@ fn test_local_file_system_default_copy_and_rename_skip_sync() {
         );
         return;
     }
-    let trace =
-        tempfile::NamedTempFile::new().expect("trace file should be created");
+    let trace = NamedTempFile::new().expect("trace file should be created");
     let status = std::process::Command::new("strace")
         .args(["-f", "-e", "trace=fsync", "-o"])
         .arg(trace.path())
