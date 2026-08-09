@@ -68,6 +68,7 @@ assert_eq!(content, r#"{"version":1}"#);
 `LocalFileSystem` provides one consistent instance API when configuration must
 be stored, passed to another component, or adapted to a higher-level filesystem
 SPI.
+The handle is cheaply cloneable; rooted clones share the opened authority.
 
 Symbolic-link behavior is configurable per `LocalFileSystem` instance; Rooted
 defaults to `FollowWithinScope` and Host defaults to `FollowAcrossScope`. Rooted
@@ -76,6 +77,8 @@ returns `InvalidOptions`. See the [user guide](doc/user_guide.md) for
 operation-specific final-link semantics.
 
 Temporary-resource cleanup is ownership-aware, not a synchronization boundary.
+Call `cleanup()` when the caller must observe cleanup failures; dropping a
+resource is only a best-effort fallback.
 Before deleting, a guard checks that the path still has the identity captured
 at creation, so ordinary replacement is rejected. The identity check and path
 deletion are separate operating-system operations, however. If an untrusted

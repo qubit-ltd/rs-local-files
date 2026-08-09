@@ -76,7 +76,7 @@ impl LocalFileSystem {
     pub fn rooted(root: &Path) -> LocalResult<Self>;
     pub fn scope(&self) -> LocalFileSystemScope;
     pub fn diagnostic_root(&self) -> Option<&Path>;
-    pub const fn capabilities(&self) -> LocalFileSystemProtocols;
+    pub const fn protocols(&self) -> LocalFileSystemProtocols;
 
     // metadata/open/list/copy/create/delete/rename/temp 操作均为 &self 方法
 }
