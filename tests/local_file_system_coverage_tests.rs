@@ -6,29 +6,25 @@
 //    Licensed under the Apache License, Version 2.0.
 // =============================================================================
 
-use std::{
-    fs,
-    io::Read,
-    time::Duration,
-};
+use std::fs;
+use std::io::Read;
+use std::time::Duration;
 
+use qubit_local_files::LocalAtomicityRequirement;
+use qubit_local_files::LocalCopyOptions;
+use qubit_local_files::LocalDurabilityRequirement;
+use qubit_local_files::LocalFileErrorKind;
 #[cfg(feature = "internal-test-support")]
 use qubit_local_files::LocalFileOperation;
+use qubit_local_files::LocalFileSystem;
+use qubit_local_files::LocalListOptions;
+use qubit_local_files::LocalMetadataPreservePolicy;
+use qubit_local_files::LocalReadOptions;
+use qubit_local_files::LocalRenameOptions;
 #[cfg(unix)]
 use qubit_local_files::LocalSymlinkPolicy;
-use qubit_local_files::{
-    LocalAtomicityRequirement,
-    LocalCopyOptions,
-    LocalDurabilityRequirement,
-    LocalFileErrorKind,
-    LocalFileSystem,
-    LocalListOptions,
-    LocalMetadataPreservePolicy,
-    LocalReadOptions,
-    LocalRenameOptions,
-    LocalWriteMode,
-    LocalWriteOptions,
-};
+use qubit_local_files::LocalWriteMode;
+use qubit_local_files::LocalWriteOptions;
 use tempfile::tempdir;
 
 /// Verifies copy rejects directory guarantees that the recursive native

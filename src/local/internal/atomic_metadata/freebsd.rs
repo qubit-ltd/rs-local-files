@@ -10,16 +10,12 @@
 // Private behavior is covered through public integration tests.
 
 use std::collections::BTreeSet;
-use std::ffi::{
-    CString,
-    c_void,
-};
+use std::ffi::CString;
+use std::ffi::c_void;
 use std::fs::File;
-use std::io::{
-    Error,
-    ErrorKind,
-    Result,
-};
+use std::io::Error;
+use std::io::ErrorKind;
+use std::io::Result;
 use std::os::fd::AsRawFd;
 
 /// FreeBSD POSIX.1e access ACL type.

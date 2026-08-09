@@ -9,26 +9,20 @@
 
 #![no_main]
 
-use std::{
-    fs,
-    io::Write,
-    path::{
-        Path,
-        PathBuf,
-    },
-};
+use std::fs;
+use std::io::Write;
+use std::path::Path;
+use std::path::PathBuf;
 
 use libfuzzer_sys::fuzz_target;
-use qubit_local_files::{
-    LocalCreateDirectoryOptions,
-    LocalDeleteOptions,
-    LocalFileSystem,
-    LocalTempDirectoryOptions,
-    LocalTempFileOptions,
-    LocalWriteMode,
-    LocalWriteOptions,
-    LocalWriterState,
-};
+use qubit_local_files::LocalCreateDirectoryOptions;
+use qubit_local_files::LocalDeleteOptions;
+use qubit_local_files::LocalFileSystem;
+use qubit_local_files::LocalTempDirectoryOptions;
+use qubit_local_files::LocalTempFileOptions;
+use qubit_local_files::LocalWriteMode;
+use qubit_local_files::LocalWriteOptions;
+use qubit_local_files::LocalWriterState;
 
 const MAX_FUZZ_INPUT_LEN: usize = 256;
 const MAX_OPERATIONS: usize = 16;

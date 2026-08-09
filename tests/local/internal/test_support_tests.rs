@@ -8,11 +8,9 @@
 
 use std::fs;
 
-use qubit_local_files::{
-    LocalDeleteOptions,
-    LocalFileErrorKind,
-    LocalFileSystem,
-};
+use qubit_local_files::LocalDeleteOptions;
+use qubit_local_files::LocalFileErrorKind;
+use qubit_local_files::LocalFileSystem;
 use tempfile::tempdir;
 
 /// Verifies a selected native fault is isolated to a child test process.

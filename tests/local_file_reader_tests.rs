@@ -7,19 +7,15 @@
 // =============================================================================
 //! Behavioral coverage for synchronous local file readers.
 
-use std::io::{
-    IoSliceMut,
-    Read,
-    Seek,
-    SeekFrom,
-};
+use std::io::IoSliceMut;
+use std::io::Read;
+use std::io::Seek;
+use std::io::SeekFrom;
 
 #[cfg(windows)]
 use qubit_local_files::LocalFileErrorKind;
-use qubit_local_files::{
-    LocalFileSystem,
-    LocalReadOptions,
-};
+use qubit_local_files::LocalFileSystem;
+use qubit_local_files::LocalReadOptions;
 use tempfile::tempdir;
 
 /// Verifies readers expose the native handle and support sequential seeking.

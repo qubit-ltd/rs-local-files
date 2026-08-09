@@ -10,16 +10,13 @@
 // Private behavior is covered through public integration tests.
 
 use std::fs;
-use std::io::{
-    Error,
-    ErrorKind,
-    Result,
-};
+use std::io::Error;
+use std::io::ErrorKind;
+use std::io::Result;
 use std::path::Path;
 
-use crate::LocalSymlinkPolicy;
-
 use super::super::directory_identity::DirectoryIdentity;
+use crate::LocalSymlinkPolicy;
 
 /// Inspects a source directory before recursive copy enters it.
 ///

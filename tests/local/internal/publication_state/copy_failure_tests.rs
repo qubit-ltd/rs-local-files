@@ -6,12 +6,10 @@
 //    Licensed under the Apache License, Version 2.0.
 // =============================================================================
 
-use qubit_local_files::{
-    LocalCopyFailureState,
-    LocalCopyOptions,
-    LocalFileErrorKind,
-    LocalFileSystem,
-};
+use qubit_local_files::LocalCopyFailureState;
+use qubit_local_files::LocalCopyOptions;
+use qubit_local_files::LocalFileErrorKind;
+use qubit_local_files::LocalFileSystem;
 use tempfile::tempdir;
 
 /// Verifies a copy failure before publication reports an unchanged target.

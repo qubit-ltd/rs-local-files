@@ -9,45 +9,33 @@
 // qubit-style: allow source-test-pair
 
 use std::fs::File;
-use std::io::{
-    Error,
-    ErrorKind,
-    Result,
-};
-use std::path::{
-    Path,
-    PathBuf,
-};
+use std::io::Error;
+use std::io::ErrorKind;
+use std::io::Result;
+use std::path::Path;
+use std::path::PathBuf;
 
+use super::DirectoryReader;
+use super::Entry;
+use super::EntryKind;
+use super::Metadata;
+use super::Permissions;
+use super::Writer;
+use super::path;
+#[cfg(not(any(unix, windows)))]
+use crate::LocalAtomicDestinationState;
+use crate::LocalAtomicWriteError;
+use crate::LocalAtomicWriteOptions;
+#[cfg(not(any(unix, windows)))]
+use crate::LocalAtomicWriteStage;
+use crate::LocalCopyDirError;
+use crate::LocalCopyDirOptions;
+use crate::LocalCopyDirStats;
+use crate::LocalDurabilityRequirement;
 #[cfg(any(unix, windows))]
 use crate::local;
-#[cfg(not(any(unix, windows)))]
-use crate::{
-    LocalAtomicDestinationState,
-    LocalAtomicWriteStage,
-};
-use crate::{
-    LocalAtomicWriteError,
-    LocalAtomicWriteOptions,
-    LocalCopyDirError,
-    LocalCopyDirOptions,
-    LocalCopyDirStats,
-    LocalDurabilityRequirement,
-    read,
-    write,
-};
-
-use super::{
-    DirectoryReader,
-    path,
-};
-use super::{
-    Entry,
-    EntryKind,
-    Metadata,
-    Permissions,
-    Writer,
-};
+use crate::read;
+use crate::write;
 
 /// An opened directory descriptor that authorizes contained operations.
 #[must_use]

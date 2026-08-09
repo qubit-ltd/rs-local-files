@@ -7,10 +7,8 @@
 // =============================================================================
 //! Coverage for native path-length limits.
 
-use qubit_local_files::{
-    LocalFileSystemLimits,
-    SizeLimit,
-};
+use qubit_local_files::LocalFileSystemLimits;
+use qubit_local_files::SizeLimit;
 
 /// Verifies a path-length limit preserves both its numeric bound and unit.
 #[test]

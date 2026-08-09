@@ -39,10 +39,8 @@ fuzz_target!(|data: &[u8]| {
 
     #[cfg(windows)]
     {
-        use std::os::windows::ffi::{
-            OsStrExt,
-            OsStringExt,
-        };
+        use std::os::windows::ffi::OsStrExt;
+        use std::os::windows::ffi::OsStringExt;
 
         let units = data
             .chunks_exact(2)

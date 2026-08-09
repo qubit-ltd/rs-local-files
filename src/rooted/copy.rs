@@ -8,33 +8,24 @@
 //! Descriptor-relative file and directory copying.
 // qubit-style: allow source-test-pair
 
-use std::io::{
-    self,
-    ErrorKind,
-};
+use std::io::ErrorKind;
+use std::io::{self};
 
-use crate::local::{
-    CopyDestinationAction,
-    LocalCopyConflictPolicy as ConflictPolicy,
-    LocalCopyDirError as Error,
-    LocalCopyDirOptions as Options,
-    LocalCopyDirStage as Stage,
-    LocalCopyDirStats as Statistics,
-    decide_copy_destination,
-};
-use crate::{
-    LocalAtomicWriteOptions,
-    LocalCopyDirError,
-    LocalDurabilityRequirement,
-    read,
-};
-
-use super::{
-    EntryKind,
-    Metadata,
-    Path,
-    Root,
-};
+use super::EntryKind;
+use super::Metadata;
+use super::Path;
+use super::Root;
+use crate::LocalAtomicWriteOptions;
+use crate::LocalCopyDirError;
+use crate::LocalDurabilityRequirement;
+use crate::local::CopyDestinationAction;
+use crate::local::LocalCopyConflictPolicy as ConflictPolicy;
+use crate::local::LocalCopyDirError as Error;
+use crate::local::LocalCopyDirOptions as Options;
+use crate::local::LocalCopyDirStage as Stage;
+use crate::local::LocalCopyDirStats as Statistics;
+use crate::local::decide_copy_destination;
+use crate::read;
 
 /// Deferred work for iterative rooted directory copying.
 enum Work {

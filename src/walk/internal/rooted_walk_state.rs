@@ -8,14 +8,11 @@
 // qubit-style: allow source-test-pair
 // Covered by rooted walker integration tests.
 
-use std::{
-    collections::HashSet,
-    sync::Arc,
-};
-
-use crate::rooted::Root;
+use std::collections::HashSet;
+use std::sync::Arc;
 
 use super::RootedWalkFrame;
+use crate::rooted::Root;
 
 /// Descriptor-relative state retained by a rooted directory walker.
 #[derive(Debug)]

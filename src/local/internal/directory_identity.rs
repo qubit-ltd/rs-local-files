@@ -10,11 +10,6 @@
 // Private behavior is covered through public integration tests.
 
 use std::fs::Metadata;
-use std::path::Path;
-
-#[cfg(not(unix))]
-use std::path::PathBuf;
-
 #[cfg(windows)]
 use std::fs::OpenOptions;
 #[cfg(unix)]
@@ -23,13 +18,16 @@ use std::os::unix::fs::MetadataExt;
 use std::os::windows::fs::OpenOptionsExt;
 #[cfg(windows)]
 use std::os::windows::io::AsRawHandle;
+use std::path::Path;
+#[cfg(not(unix))]
+use std::path::PathBuf;
 
 #[cfg(windows)]
-use windows_sys::Win32::Storage::FileSystem::{
-    BY_HANDLE_FILE_INFORMATION,
-    FILE_FLAG_BACKUP_SEMANTICS,
-    GetFileInformationByHandle,
-};
+use windows_sys::Win32::Storage::FileSystem::BY_HANDLE_FILE_INFORMATION;
+#[cfg(windows)]
+use windows_sys::Win32::Storage::FileSystem::FILE_FLAG_BACKUP_SEMANTICS;
+#[cfg(windows)]
+use windows_sys::Win32::Storage::FileSystem::GetFileInformationByHandle;
 
 /// Identifies one directory independently of the path used to reach it.
 #[derive(Clone, Debug, Eq, Hash, PartialEq)]

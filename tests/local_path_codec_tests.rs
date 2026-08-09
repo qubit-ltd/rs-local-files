@@ -7,23 +7,19 @@
 // =============================================================================
 
 use std::ffi::OsStr;
-
 #[cfg(unix)]
 use std::os::unix::ffi::OsStrExt;
 
 #[cfg(any(unix, windows))]
-use proptest::{
-    prelude::{
-        Strategy,
-        any,
-        prop,
-    },
-    proptest,
-};
-use qubit_local_files::{
-    LocalPathCodec,
-    LocalPathCodecError,
-};
+use proptest::prelude::Strategy;
+#[cfg(any(unix, windows))]
+use proptest::prelude::any;
+#[cfg(any(unix, windows))]
+use proptest::prelude::prop;
+#[cfg(any(unix, windows))]
+use proptest::proptest;
+use qubit_local_files::LocalPathCodec;
+use qubit_local_files::LocalPathCodecError;
 
 /// Verifies native Unicode is retained while percent signs and controls use
 /// canonical uppercase escaped bytes.
@@ -156,13 +152,9 @@ fn test_path_codec_rejects_invalid_hex_and_native_nul() {
 #[cfg(unix)]
 #[test]
 fn test_unix_non_utf8_native_bytes_round_trip() {
-    use std::{
-        ffi::OsString,
-        os::unix::ffi::{
-            OsStrExt,
-            OsStringExt,
-        },
-    };
+    use std::ffi::OsString;
+    use std::os::unix::ffi::OsStrExt;
+    use std::os::unix::ffi::OsStringExt;
 
     let native = OsString::from_vec(vec![0x66, 0x80, 0x25]);
     let decoded = LocalPathCodec::to_canonical_text(&native)
@@ -178,13 +170,9 @@ fn test_unix_non_utf8_native_bytes_round_trip() {
 #[cfg(windows)]
 #[test]
 fn test_windows_unpaired_surrogate_round_trip() {
-    use std::{
-        ffi::OsString,
-        os::windows::ffi::{
-            OsStrExt,
-            OsStringExt,
-        },
-    };
+    use std::ffi::OsString;
+    use std::os::windows::ffi::OsStrExt;
+    use std::os::windows::ffi::OsStringExt;
 
     let native = OsString::from_wide(&[0x0066, 0xD800, 0x0025]);
     let decoded = LocalPathCodec::to_canonical_text(&native)

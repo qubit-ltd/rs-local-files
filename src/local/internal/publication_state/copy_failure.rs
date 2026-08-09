@@ -7,12 +7,10 @@
 // =============================================================================
 //! Copy publication-state constructors.
 
-use crate::{
-    LocalCopyFailure,
-    LocalCopyFailureState,
-    LocalCopyStats,
-    LocalFileError,
-};
+use crate::LocalCopyFailure;
+use crate::LocalCopyFailureState;
+use crate::LocalCopyStats;
+use crate::LocalFileError;
 
 /// Wraps a pre-publication copy error with an unchanged destination state.
 ///

@@ -10,17 +10,13 @@
 // qubit-style: allow inline-tests
 // qubit-style: allow explicit-imports
 
-use std::ffi::{
-    OsStr,
-    OsString,
-};
+use std::ffi::OsStr;
+use std::ffi::OsString;
 
-use crate::{
-    LocalFileError,
-    LocalFileErrorKind,
-    LocalFileOperation,
-    LocalResult,
-};
+use crate::LocalFileError;
+use crate::LocalFileErrorKind;
+use crate::LocalFileOperation;
+use crate::LocalResult;
 
 /// Stateless native and portable filename operations.
 pub struct LocalFileNames {

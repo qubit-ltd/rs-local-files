@@ -7,19 +7,20 @@
 // =============================================================================
 
 #[cfg(unix)]
-use std::{
-    fs,
-    io::Read,
-    path::Path,
-};
+use std::fs;
+#[cfg(unix)]
+use std::io::Read;
+#[cfg(unix)]
+use std::path::Path;
 
 #[cfg(unix)]
-use qubit_local_files::{
-    LocalFileErrorKind,
-    LocalFileSystem,
-    LocalReadOptions,
-    LocalSymlinkPolicy,
-};
+use qubit_local_files::LocalFileErrorKind;
+#[cfg(unix)]
+use qubit_local_files::LocalFileSystem;
+#[cfg(unix)]
+use qubit_local_files::LocalReadOptions;
+#[cfg(unix)]
+use qubit_local_files::LocalSymlinkPolicy;
 #[cfg(unix)]
 use tempfile::tempdir;
 

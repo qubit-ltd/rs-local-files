@@ -8,48 +8,42 @@
 //! Configured Host or Rooted local filesystem service.
 // qubit-style: allow source-test-pair
 
-use std::{
-    fs::File,
-    io::Read,
-    path::Path,
-};
+use std::fs::File;
+use std::io::Read;
+use std::path::Path;
 
-use crate::local::{
-    HostLocalFileSystem,
-    LocalNamespace,
-    copy_failure_unchanged,
-};
+use crate::LocalCopyOptions;
+use crate::LocalCopyResult;
+use crate::LocalCreateDirectoryOptions;
+use crate::LocalCreateDirectoryOutcome;
+use crate::LocalDeleteOptions;
+use crate::LocalDeleteOutcome;
+use crate::LocalDirectoryWalker;
+use crate::LocalFileError;
+use crate::LocalFileErrorKind;
+use crate::LocalFileMetadata;
+use crate::LocalFileOperation;
+use crate::LocalFileReader;
+use crate::LocalFileSystemLimits;
+use crate::LocalFileSystemProtocols;
+use crate::LocalFileSystemScope;
+use crate::LocalFileSystemSpace;
+use crate::LocalFileWriter;
+use crate::LocalListOptions;
+use crate::LocalReadOptions;
+use crate::LocalRenameOptions;
+use crate::LocalRenameResult;
+use crate::LocalResult;
+use crate::LocalSymlinkPolicy;
+use crate::LocalTempDirectory;
+use crate::LocalTempDirectoryOptions;
+use crate::LocalTempFile;
+use crate::LocalTempFileOptions;
+use crate::LocalWriteOptions;
+use crate::local::HostLocalFileSystem;
+use crate::local::LocalNamespace;
+use crate::local::copy_failure_unchanged;
 use crate::rooted_local_file_system::RootedLocalFileSystem;
-use crate::{
-    LocalCopyOptions,
-    LocalCopyResult,
-    LocalCreateDirectoryOptions,
-    LocalCreateDirectoryOutcome,
-    LocalDeleteOptions,
-    LocalDeleteOutcome,
-    LocalDirectoryWalker,
-    LocalFileError,
-    LocalFileErrorKind,
-    LocalFileMetadata,
-    LocalFileOperation,
-    LocalFileReader,
-    LocalFileSystemLimits,
-    LocalFileSystemProtocols,
-    LocalFileSystemScope,
-    LocalFileSystemSpace,
-    LocalFileWriter,
-    LocalListOptions,
-    LocalReadOptions,
-    LocalRenameOptions,
-    LocalRenameResult,
-    LocalResult,
-    LocalSymlinkPolicy,
-    LocalTempDirectory,
-    LocalTempDirectoryOptions,
-    LocalTempFile,
-    LocalTempFileOptions,
-    LocalWriteOptions,
-};
 
 /// Synchronous local filesystem configured for Host or Rooted path access.
 ///

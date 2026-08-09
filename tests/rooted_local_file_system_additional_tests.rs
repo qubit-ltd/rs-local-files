@@ -6,33 +6,29 @@
 //    Licensed under the Apache License, Version 2.0.
 // =============================================================================
 
-use std::{
-    fs,
-    io::Write,
-    path::Path,
-};
-
-#[cfg(not(windows))]
-use qubit_local_files::{
-    LocalAtomicityRequirement,
-    LocalCopyMethod,
-    LocalCopyOptions,
-};
-use qubit_local_files::{
-    LocalCreateDirectoryOptions,
-    LocalDeleteOptions,
-    LocalFileErrorKind,
-    LocalFileKind,
-    LocalFileSystem,
-    LocalListOptions,
-    LocalReadOptions,
-    LocalTempFileOptions,
-    LocalWriteMode,
-    LocalWriteOptions,
-    LocalWriterState,
-};
+use std::fs;
 #[cfg(not(windows))]
 use std::io::Read;
+use std::io::Write;
+use std::path::Path;
+
+#[cfg(not(windows))]
+use qubit_local_files::LocalAtomicityRequirement;
+#[cfg(not(windows))]
+use qubit_local_files::LocalCopyMethod;
+#[cfg(not(windows))]
+use qubit_local_files::LocalCopyOptions;
+use qubit_local_files::LocalCreateDirectoryOptions;
+use qubit_local_files::LocalDeleteOptions;
+use qubit_local_files::LocalFileErrorKind;
+use qubit_local_files::LocalFileKind;
+use qubit_local_files::LocalFileSystem;
+use qubit_local_files::LocalListOptions;
+use qubit_local_files::LocalReadOptions;
+use qubit_local_files::LocalTempFileOptions;
+use qubit_local_files::LocalWriteMode;
+use qubit_local_files::LocalWriteOptions;
+use qubit_local_files::LocalWriterState;
 use tempfile::tempdir;
 
 /// Verifies an opened rooted authority supports a complete create, write, read,

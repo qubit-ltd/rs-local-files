@@ -11,12 +11,10 @@
 // qubit-style: allow explicit-imports
 
 use std::error::Error;
-use std::fmt::{
-    Debug,
-    Display,
-    Formatter,
-    Result as FmtResult,
-};
+use std::fmt::Debug;
+use std::fmt::Display;
+use std::fmt::Formatter;
+use std::fmt::Result as FmtResult;
 
 use crate::LocalAtomicWriteError;
 
@@ -157,12 +155,11 @@ where
 // weaken the state machine; writer integration tests cover terminal behavior.
 #[cfg(test)]
 mod tests {
-    use super::*;
-    use crate::{
-        LocalAtomicDestinationState,
-        LocalAtomicWriteStage,
-    };
     use std::io;
+
+    use super::*;
+    use crate::LocalAtomicDestinationState;
+    use crate::LocalAtomicWriteStage;
 
     fn error() -> LocalAtomicWriteError {
         LocalAtomicWriteError::new(

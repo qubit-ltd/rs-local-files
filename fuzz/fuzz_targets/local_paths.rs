@@ -9,16 +9,12 @@
 
 #![no_main]
 
-use std::path::{
-    Path,
-    PathBuf,
-};
+use std::path::Path;
+use std::path::PathBuf;
 
 use libfuzzer_sys::fuzz_target;
-use qubit_local_files::{
-    LocalFileSystemScope,
-    LocalPaths,
-};
+use qubit_local_files::LocalFileSystemScope;
+use qubit_local_files::LocalPaths;
 
 const MAX_FUZZ_INPUT_LEN: usize = 4096;
 const MAX_COMPONENTS: usize = 128;

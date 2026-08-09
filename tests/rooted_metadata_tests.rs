@@ -6,10 +6,8 @@
 
 use std::path::Path;
 
-use qubit_local_files::{
-    LocalFileKind,
-    LocalFileSystem,
-};
+use qubit_local_files::LocalFileKind;
+use qubit_local_files::LocalFileSystem;
 
 #[test]
 fn observes_root_limits_space_and_metadata() {

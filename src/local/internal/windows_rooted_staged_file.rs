@@ -9,18 +9,13 @@
 // qubit-style: allow source-test-pair
 // Covered through the public rooted atomic-writer integration tests.
 
-use std::{
-    fs::File,
-    io,
-    path::{
-        Path,
-        PathBuf,
-    },
-};
-
-use crate::LocalRelativePath;
+use std::fs::File;
+use std::io;
+use std::path::Path;
+use std::path::PathBuf;
 
 use super::remove_rooted_entry;
+use crate::LocalRelativePath;
 
 /// Owns a Windows rooted staging file and removes its name unless disarmed.
 #[must_use = "discarding an armed staging file triggers best-effort cleanup"]

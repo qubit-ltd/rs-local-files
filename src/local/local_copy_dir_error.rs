@@ -11,21 +11,15 @@
 // qubit-style: allow explicit-imports
 
 use std::error::Error;
-use std::fmt::{
-    Display,
-    Formatter,
-    Result as FmtResult,
-};
+use std::fmt::Display;
+use std::fmt::Formatter;
+use std::fmt::Result as FmtResult;
 use std::io;
-use std::path::{
-    Path,
-    PathBuf,
-};
+use std::path::Path;
+use std::path::PathBuf;
 
-use crate::{
-    LocalCopyDirStage,
-    LocalCopyDirStats,
-};
+use crate::LocalCopyDirStage;
+use crate::LocalCopyDirStats;
 
 /// Error returned by a recursive directory copy operation.
 ///

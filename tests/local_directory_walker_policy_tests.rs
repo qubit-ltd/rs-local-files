@@ -6,23 +6,18 @@
 //    Licensed under the Apache License, Version 2.0.
 // =============================================================================
 
-use std::{
-    fs,
-    path::Path,
-    path::PathBuf,
-};
+use std::fs;
+use std::path::Path;
+use std::path::PathBuf;
 
-use qubit_local_files::{
-    LocalFileErrorKind,
-    LocalFileKind,
-    LocalFileSystem,
-    LocalListOptions,
-};
+use qubit_local_files::LocalFileErrorKind;
+use qubit_local_files::LocalFileKind;
+use qubit_local_files::LocalFileSystem;
+use qubit_local_files::LocalListOptions;
 #[cfg(unix)]
-use qubit_local_files::{
-    LocalSymlinkPolicy,
-    LocalWalkErrorPolicy,
-};
+use qubit_local_files::LocalSymlinkPolicy;
+#[cfg(unix)]
+use qubit_local_files::LocalWalkErrorPolicy;
 use tempfile::tempdir;
 
 /// Runs a test-support-only fault case in an isolated child test process.

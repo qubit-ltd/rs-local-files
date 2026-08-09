@@ -38,63 +38,67 @@ mod local_persist_stage;
 mod local_relative_path;
 mod local_root_atomic_writer;
 
+pub(crate) use internal::CopyDestinationAction;
+pub(crate) use internal::DirectoryIdentity;
+pub(crate) use internal::HostLocalFileSystem;
+pub(crate) use internal::LocalNamespace;
+#[cfg(any(unix, windows))]
+pub(crate) use internal::RootedDirectoryReader;
+pub(crate) use internal::copy_dir_all_with_paths;
+pub(crate) use internal::copy_dir_all_with_paths_scoped;
+pub(crate) use internal::copy_directory_guarantee_unavailable;
+pub(crate) use internal::copy_failure_published;
+pub(crate) use internal::copy_failure_unchanged;
+pub(crate) use internal::copy_file_replace_requires_atomicity;
+pub(crate) use internal::copy_file_with_options;
+pub(crate) use internal::copy_source_mode_mismatch;
+#[cfg(any(unix, windows))]
+pub(crate) use internal::create_rooted_directory;
+pub(crate) use internal::create_temp_dir_in_dir_with_affixes;
+pub(crate) use internal::create_temp_file_in_dir;
+pub(crate) use internal::decide_copy_destination;
+pub(crate) use internal::ensure_parent_path;
+pub(crate) use internal::ensure_parent_path_with_sync_dirs;
+pub(crate) use internal::ensure_required_directory_durability;
+pub(crate) use internal::internal_copy_options;
+pub(crate) use internal::move_directory_without_replacing;
+pub(crate) use internal::move_file_without_replacing;
+pub(crate) use internal::open_native_reader_path;
+pub(crate) use internal::open_native_writer_path;
+#[cfg(any(unix, windows))]
+pub(crate) use internal::open_root_directory;
+#[cfg(any(unix, windows))]
+pub(crate) use internal::open_root_directory_reader;
+#[cfg(any(unix, windows))]
+pub(crate) use internal::open_rooted_directory_reader;
+#[cfg(any(unix, windows))]
+pub(crate) use internal::open_rooted_native_reader;
+#[cfg(any(unix, windows))]
+pub(crate) use internal::open_rooted_native_writer;
+pub(crate) use internal::published_durability;
+#[cfg(any(unix, windows))]
+pub(crate) use internal::read_root_directory;
+#[cfg(any(unix, windows))]
+pub(crate) use internal::read_rooted_directory;
+#[cfg(any(unix, windows))]
+pub(crate) use internal::read_rooted_symlink_metadata;
+#[cfg(any(unix, windows))]
+pub(crate) use internal::remove_rooted_entry;
+pub(crate) use internal::rename_failure_after_native_attempt;
+pub(crate) use internal::rename_failure_renamed;
+pub(crate) use internal::rename_failure_unchanged;
+#[cfg(any(unix, windows))]
+pub(crate) use internal::rename_rooted_entry;
+pub(crate) use internal::replace_file;
+pub(crate) use internal::resolve_host_path;
+pub(crate) use internal::root_authority_path;
+#[cfg(any(unix, windows))]
+pub(crate) use internal::set_rooted_permissions;
 #[cfg(unix)]
 pub(crate) use internal::sync_rooted_parent;
-pub(crate) use internal::{
-    CopyDestinationAction,
-    DirectoryIdentity,
-    HostLocalFileSystem,
-    LocalNamespace,
-    copy_dir_all_with_paths,
-    copy_dir_all_with_paths_scoped,
-    copy_directory_guarantee_unavailable,
-    copy_failure_published,
-    copy_failure_unchanged,
-    copy_file_replace_requires_atomicity,
-    copy_file_with_options,
-    copy_source_mode_mismatch,
-    create_temp_dir_in_dir_with_affixes,
-    create_temp_file_in_dir,
-    decide_copy_destination,
-    ensure_parent_path,
-    ensure_parent_path_with_sync_dirs,
-    ensure_required_directory_durability,
-    internal_copy_options,
-    move_directory_without_replacing,
-    move_file_without_replacing,
-    open_native_reader_path,
-    open_native_writer_path,
-    published_durability,
-    rename_failure_after_native_attempt,
-    rename_failure_renamed,
-    rename_failure_unchanged,
-    replace_file,
-    resolve_host_path,
-    root_authority_path,
-    try_random_file_name,
-    validate_portable_file_name_impl,
-    validate_temp_affixes,
-};
-#[cfg(any(unix, windows))]
-pub(crate) use internal::{
-    RootedDirectoryReader,
-    open_root_directory_reader,
-    open_rooted_directory_reader,
-};
-#[cfg(any(unix, windows))]
-pub(crate) use internal::{
-    create_rooted_directory,
-    open_root_directory,
-    open_rooted_native_reader,
-    open_rooted_native_writer,
-    read_root_directory,
-    read_rooted_directory,
-    read_rooted_symlink_metadata,
-    remove_rooted_entry,
-    rename_rooted_entry,
-    set_rooted_permissions,
-};
-
+pub(crate) use internal::try_random_file_name;
+pub(crate) use internal::validate_portable_file_name_impl;
+pub(crate) use internal::validate_temp_affixes;
 pub(crate) use local_atomic_commit_error::LocalAtomicCommitError;
 pub(crate) use local_atomic_destination_state::LocalAtomicDestinationState;
 pub(crate) use local_atomic_write_error::LocalAtomicWriteError;

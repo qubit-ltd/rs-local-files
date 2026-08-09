@@ -6,16 +6,12 @@
 //    Licensed under the Apache License, Version 2.0.
 // =============================================================================
 
-use std::{
-    fs,
-    path::Path,
-};
+use std::fs;
+use std::path::Path;
 
-use qubit_local_files::{
-    LocalFileErrorKind,
-    LocalFileSystem,
-    LocalTempFileOptions,
-};
+use qubit_local_files::LocalFileErrorKind;
+use qubit_local_files::LocalFileSystem;
+use qubit_local_files::LocalTempFileOptions;
 use tempfile::tempdir;
 
 /// Verifies rooted temporary parents accept an existing descendant directory.

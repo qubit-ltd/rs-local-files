@@ -12,64 +12,66 @@
 use std::ffi::CString;
 #[cfg(any(unix, windows))]
 use std::fs::File;
-use std::io::{
-    self,
-    Write,
-};
-use std::path::{
-    Path,
-    PathBuf,
-};
+use std::io::Write;
+use std::io::{self};
+use std::path::Path;
+use std::path::PathBuf;
 #[cfg(unix)]
 use std::time::Duration;
 
-use crate::{
-    LocalAtomicCommitError,
-    LocalAtomicDestinationState,
-    LocalAtomicWriteError,
-    LocalAtomicWriteStage,
-    LocalDurabilityRequirement,
-};
-#[cfg(any(unix, windows))]
-use crate::{
-    LocalAtomicWriteOptions,
-    LocalRelativePath,
-};
-
+#[cfg(windows)]
+use super::create_rooted_directory;
+#[cfg(unix)]
+use super::internal::AtomicInstallRecovery;
 #[cfg(any(unix, windows))]
 use super::internal::LocalAtomicPublicationMode;
+#[cfg(unix)]
+use super::internal::OpenedAtomicDestination;
+#[cfg(unix)]
+use super::internal::RootedParentMode;
+#[cfg(unix)]
+use super::internal::RootedStagedFile;
 #[cfg(windows)]
 use super::internal::WindowsRootedStagedFile;
+#[cfg(unix)]
+use super::internal::create_rooted_staged_file;
+#[cfg(unix)]
+use super::internal::inspect_rooted_atomic_destination;
+#[cfg(unix)]
+use super::internal::install_rooted_atomic_file;
+#[cfg(unix)]
+use super::internal::open_rooted_atomic_destination;
+#[cfg(unix)]
+use super::internal::open_rooted_parent;
+#[cfg(unix)]
+use super::internal::preserve_atomic_metadata;
+#[cfg(unix)]
+use super::internal::recover_atomic_install_error;
 #[cfg(all(feature = "internal-test-support", unix))]
 use super::internal::test_support;
 #[cfg(unix)]
-use super::internal::{
-    AtomicInstallRecovery,
-    OpenedAtomicDestination,
-    RootedParentMode,
-    RootedStagedFile,
-    create_rooted_staged_file,
-    inspect_rooted_atomic_destination,
-    install_rooted_atomic_file,
-    open_rooted_atomic_destination,
-    open_rooted_parent,
-    preserve_atomic_metadata,
-    recover_atomic_install_error,
-    verify_rooted_atomic_destination_identity,
-};
+use super::internal::verify_rooted_atomic_destination_identity;
 #[cfg(windows)]
-use super::{
-    create_rooted_directory,
-    open_rooted_native_writer,
-    read_rooted_symlink_metadata,
-    rename_rooted_entry,
-    try_random_file_name,
-};
+use super::open_rooted_native_writer;
 #[cfg(windows)]
-use crate::write::{
-    Mode as WriteMode,
-    OpenOptions as WriteOpenOptions,
-};
+use super::read_rooted_symlink_metadata;
+#[cfg(windows)]
+use super::rename_rooted_entry;
+#[cfg(windows)]
+use super::try_random_file_name;
+use crate::LocalAtomicCommitError;
+use crate::LocalAtomicDestinationState;
+use crate::LocalAtomicWriteError;
+#[cfg(any(unix, windows))]
+use crate::LocalAtomicWriteOptions;
+use crate::LocalAtomicWriteStage;
+use crate::LocalDurabilityRequirement;
+#[cfg(any(unix, windows))]
+use crate::LocalRelativePath;
+#[cfg(windows)]
+use crate::write::Mode as WriteMode;
+#[cfg(windows)]
+use crate::write::OpenOptions as WriteOpenOptions;
 
 /// A streaming atomic writer contained by an open [`crate::rooted::Root`].
 ///
