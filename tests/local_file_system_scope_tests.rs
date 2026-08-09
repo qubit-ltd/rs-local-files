@@ -89,10 +89,9 @@ fn test_local_file_system_host_writer_workflow() {
 #[test]
 fn test_local_file_system_rooted_reports_scope_and_reads_relative_path() {
     let directory = tempdir().expect("temporary directory should be created");
-    fs::write(directory.path().join("payload"), b"payload")
-        .expect("fixture should be written");
-    let filesystem = LocalFileSystem::rooted(directory.path())
-        .expect("Rooted filesystem should open");
+    fs::write(directory.path().join("payload"), b"payload").expect("fixture should be written");
+    let filesystem =
+        LocalFileSystem::rooted(directory.path()).expect("Rooted filesystem should open");
 
     assert_eq!(LocalFileSystemScope::Rooted, filesystem.scope(),);
     assert_eq!(
@@ -113,8 +112,8 @@ fn test_local_file_system_rooted_reports_scope_and_reads_relative_path() {
 #[test]
 fn test_local_file_system_clone_preserves_rooted_authority() {
     let directory = tempdir().expect("temporary directory should be created");
-    let filesystem = LocalFileSystem::rooted(directory.path())
-        .expect("Rooted filesystem should open");
+    let filesystem =
+        LocalFileSystem::rooted(directory.path()).expect("Rooted filesystem should open");
     let clone = filesystem.clone();
 
     assert_eq!(filesystem.scope(), clone.scope());
@@ -149,8 +148,8 @@ fn test_rooted_constructor_rejects_follow_across_scope() {
 #[test]
 fn test_rooted_builder_rejects_follow_across_scope() {
     let directory = tempdir().expect("temporary directory should be created");
-    let filesystem = LocalFileSystem::rooted(directory.path())
-        .expect("Rooted filesystem should open");
+    let filesystem =
+        LocalFileSystem::rooted(directory.path()).expect("Rooted filesystem should open");
 
     let error = filesystem
         .with_symlink_policy(LocalSymlinkPolicy::FollowAcrossScope)
@@ -165,16 +164,14 @@ fn test_rooted_builder_rejects_follow_across_scope() {
 #[test]
 fn test_rooted_operation_overrides_reject_follow_across_scope() {
     let directory = tempdir().expect("temporary directory should be created");
-    fs::write(directory.path().join("source"), b"source")
-        .expect("fixture should be written");
-    let filesystem = LocalFileSystem::rooted(directory.path())
-        .expect("Rooted filesystem should open");
+    fs::write(directory.path().join("source"), b"source").expect("fixture should be written");
+    let filesystem =
+        LocalFileSystem::rooted(directory.path()).expect("Rooted filesystem should open");
 
     let list_error = filesystem
         .list(
             Path::new("source"),
-            &LocalListOptions::new()
-                .with_symlink_policy(LocalSymlinkPolicy::FollowAcrossScope),
+            &LocalListOptions::new().with_symlink_policy(LocalSymlinkPolicy::FollowAcrossScope),
         )
         .expect_err("Rooted list override must reject FollowAcrossScope");
     assert_eq!(LocalFileErrorKind::InvalidOptions, list_error.kind());
@@ -184,8 +181,7 @@ fn test_rooted_operation_overrides_reject_follow_across_scope() {
         .copy(
             Path::new("source"),
             Path::new("target"),
-            &LocalCopyOptions::new()
-                .with_symlink_policy(LocalSymlinkPolicy::FollowAcrossScope),
+            &LocalCopyOptions::new().with_symlink_policy(LocalSymlinkPolicy::FollowAcrossScope),
         )
         .expect_err("Rooted copy override must reject FollowAcrossScope");
     assert_eq!(
@@ -220,10 +216,8 @@ fn test_rooted_follow_within_reports_escaping_link_as_invalid_path() {
     let outside = parent.path().join("outside");
     fs::create_dir(&root).expect("root should be created");
     fs::create_dir(&outside).expect("outside should be created");
-    fs::write(outside.join("payload"), b"outside")
-        .expect("outside fixture should be written");
-    symlink(&outside, root.join("link"))
-        .expect("escaping link should be created");
+    fs::write(outside.join("payload"), b"outside").expect("outside fixture should be written");
+    symlink(&outside, root.join("link")).expect("escaping link should be created");
 
     let error = LocalFileSystem::rooted(&root)
         .expect("Rooted filesystem should open")
@@ -246,16 +240,12 @@ fn test_rooted_recursive_copy_follows_in_scope_directory_link() {
     let source = root.join("source");
     let target = root.join("target");
     let linked = root.join("linked");
-    fs::create_dir_all(source.join("nested"))
-        .expect("source directory should be created");
+    fs::create_dir_all(source.join("nested")).expect("source directory should be created");
     fs::create_dir(&linked).expect("linked directory should be created");
-    fs::write(linked.join("entry"), b"entry")
-        .expect("linked entry should be written");
-    symlink(&linked, source.join("link"))
-        .expect("in-scope directory link should be created");
+    fs::write(linked.join("entry"), b"entry").expect("linked entry should be written");
+    symlink(&linked, source.join("link")).expect("in-scope directory link should be created");
 
-    let filesystem =
-        LocalFileSystem::rooted(&root).expect("rooted filesystem should open");
+    let filesystem = LocalFileSystem::rooted(&root).expect("rooted filesystem should open");
     let _ = filesystem
         .copy(
             Path::new("source"),
@@ -281,8 +271,7 @@ fn test_rooted_list_uses_opened_authority_after_diagnostic_root_replacement() {
     fs::create_dir(&original).expect("root should be created");
     fs::write(original.join("original-entry"), b"original")
         .expect("original entry should be written");
-    let filesystem = LocalFileSystem::rooted(&original)
-        .expect("Rooted filesystem should open");
+    let filesystem = LocalFileSystem::rooted(&original).expect("Rooted filesystem should open");
 
     fs::rename(&original, &renamed).expect("opened root should be renamed");
     fs::create_dir(&original).expect("replacement root should be created");
@@ -311,22 +300,17 @@ fn test_rooted_copy_uses_opened_authority_after_diagnostic_root_replacement() {
     let parent = tempdir().expect("parent should be created");
     let original = parent.path().join("root");
     let renamed = parent.path().join("renamed-root");
-    fs::create_dir_all(original.join("source"))
-        .expect("original source should be created");
-    fs::create_dir(original.join("linked"))
-        .expect("original link target should be created");
+    fs::create_dir_all(original.join("source")).expect("original source should be created");
+    fs::create_dir(original.join("linked")).expect("original link target should be created");
     fs::write(original.join("linked/entry"), b"original")
         .expect("original linked entry should be written");
     symlink("../linked", original.join("source/link"))
         .expect("original in-scope link should be created");
-    let filesystem = LocalFileSystem::rooted(&original)
-        .expect("Rooted filesystem should open");
+    let filesystem = LocalFileSystem::rooted(&original).expect("Rooted filesystem should open");
 
     fs::rename(&original, &renamed).expect("opened root should be renamed");
-    fs::create_dir_all(original.join("source"))
-        .expect("replacement source should be created");
-    fs::create_dir(original.join("linked"))
-        .expect("replacement link target should be created");
+    fs::create_dir_all(original.join("source")).expect("replacement source should be created");
+    fs::create_dir(original.join("linked")).expect("replacement link target should be created");
     fs::write(original.join("linked/entry"), b"replacement")
         .expect("replacement linked entry should be written");
     symlink("../linked", original.join("source/link"))

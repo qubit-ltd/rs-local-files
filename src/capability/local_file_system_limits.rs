@@ -19,10 +19,7 @@ pub struct LocalFileSystemLimits {
 
 impl LocalFileSystemLimits {
     /// Creates limits from independently observed native dimensions.
-    pub const fn new(
-        max_path_bytes: SizeLimit,
-        max_file_name_bytes: SizeLimit,
-    ) -> Self {
+    pub const fn new(max_path_bytes: SizeLimit, max_file_name_bytes: SizeLimit) -> Self {
         Self {
             max_path_bytes,
             max_file_name_bytes,

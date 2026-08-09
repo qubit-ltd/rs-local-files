@@ -63,8 +63,7 @@ fn test_local_file_reader_supports_vectored_reads() {
         .expect("regular file should open for reading");
     let mut first = [0_u8; 2];
     let mut second = [0_u8; 4];
-    let mut buffers =
-        [IoSliceMut::new(&mut first), IoSliceMut::new(&mut second)];
+    let mut buffers = [IoSliceMut::new(&mut first), IoSliceMut::new(&mut second)];
 
     let count = reader
         .read_vectored(&mut buffers)
