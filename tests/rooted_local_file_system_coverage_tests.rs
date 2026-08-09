@@ -20,6 +20,8 @@ use qubit_local_files::LocalCopyMethod;
 use qubit_local_files::LocalCopyOptions;
 use qubit_local_files::LocalCreateDirectoryOptions;
 use qubit_local_files::LocalDeleteOptions;
+#[cfg(feature = "internal-test-support")]
+use qubit_local_files::LocalDirectoryReopenPolicy;
 #[cfg(not(windows))]
 use qubit_local_files::LocalDurabilityRequirement;
 use qubit_local_files::LocalFileErrorKind;
@@ -33,6 +35,8 @@ use qubit_local_files::LocalRenameFailureState;
 use qubit_local_files::LocalRenameOptions;
 use qubit_local_files::LocalTempDirectoryOptions;
 use qubit_local_files::LocalTempFileOptions;
+#[cfg(feature = "internal-test-support")]
+use qubit_local_files::LocalWalkErrorPolicy;
 use qubit_local_files::LocalWriteFailureState;
 use qubit_local_files::LocalWriteMode;
 use qubit_local_files::LocalWriteOptions;
@@ -970,6 +974,36 @@ fn test_rooted_local_file_system_walker_reports_disappearing_child_directory() {
         .expect_err("disappearing rooted child should fail on descent");
     assert_eq!(LocalFileErrorKind::NotFound, error.kind());
     assert_eq!(Some(Path::new("child")), error.path());
+}
+
+/// Verifies a rooted path-validation failure returns its reserved reader slot
+/// before a continuing walker advances to the next frame.
+#[cfg(feature = "internal-test-support")]
+#[test]
+fn test_rooted_local_file_system_walker_rolls_back_path_validation_failure() {
+    const TEST_NAME: &str = "test_rooted_local_file_system_walker_rolls_back_path_validation_failure";
+    run_in_test_fault_process(TEST_NAME, "walker-rooted-relative-path", || {
+        let directory = tempdir().expect("temporary root should be created");
+        let rooted = LocalFileSystem::rooted(directory.path())
+            .expect("root authority should open");
+        let mut walker = rooted
+            .list(
+                Path::new(""),
+                &LocalListOptions::new()
+                    .with_recursive()
+                    .with_max_open_directories(1)
+                    .with_reopen_policy(LocalDirectoryReopenPolicy::Fail)
+                    .with_error_policy(LocalWalkErrorPolicy::Continue),
+            )
+            .expect("rooted walker should open");
+
+        let error = walker
+            .next()
+            .expect("path validation failure should be yielded")
+            .expect_err("invalid rooted path should fail");
+        assert_eq!(LocalFileErrorKind::InvalidPath, error.kind());
+        assert!(walker.next().is_none());
+    });
 }
 
 /// Verifies rooted append maps a native regular-file open failure after the

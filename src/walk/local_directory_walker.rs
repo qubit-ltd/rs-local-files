@@ -749,6 +749,14 @@ fn next_rooted_entry(
         let output_parent = frame.output_parent.clone();
         let needs_reader = frame.reader.is_none();
         if needs_reader {
+            #[cfg(feature = "internal-test-support")]
+            let authority_parent = if crate::local::test_support_enabled(
+                "walker-rooted-relative-path",
+            ) {
+                PathBuf::from("../invalid")
+            } else {
+                authority_parent.clone()
+            };
             let diagnostic_path = state.root.path().join(&authority_parent);
             if let Err(error) =
                 acquire_rooted_directory(state, options, pool, &diagnostic_path)
@@ -768,6 +776,14 @@ fn next_rooted_entry(
                 ) {
                     Ok(relative) => relative,
                     Err(error) => {
+                        pool.release(1).expect(
+                            "invalid rooted path had reserved one rooted slot",
+                        );
+                        let failed = pop_rooted_frame(state, pool)
+                            .expect("rooted walker stack is non-empty");
+                        if let Some(identity) = failed.identity {
+                            state.followed_directories.remove(&identity);
+                        }
                         return Some(Err(walk_io_error(
                             &authority_parent,
                             error,
