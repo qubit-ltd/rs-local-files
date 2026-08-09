@@ -9,19 +9,17 @@
 use std::fs;
 use std::path::Path;
 
-use qubit_local_files::{
-    LocalCopyOptions,
-    LocalFileErrorKind,
-    LocalFileKind,
-    LocalFileOperation,
-    LocalFileSystem,
-    LocalFileSystemScope,
-    LocalListOptions,
-    LocalSymlinkPolicy,
-    LocalWriteMode,
-    LocalWriteOptions,
-    LocalWriterState,
-};
+use qubit_local_files::LocalCopyOptions;
+use qubit_local_files::LocalFileErrorKind;
+use qubit_local_files::LocalFileKind;
+use qubit_local_files::LocalFileOperation;
+use qubit_local_files::LocalFileSystem;
+use qubit_local_files::LocalFileSystemScope;
+use qubit_local_files::LocalListOptions;
+use qubit_local_files::LocalSymlinkPolicy;
+use qubit_local_files::LocalWriteMode;
+use qubit_local_files::LocalWriteOptions;
+use qubit_local_files::LocalWriterState;
 use tempfile::tempdir;
 
 /// Verifies Host methods inspect the process-visible native namespace.

@@ -12,49 +12,33 @@
 use std::io::ErrorKind;
 use std::path::Path;
 
-use crate::{
-    LocalCopyConflictPolicy,
-    LocalCopyDirOptions,
-    LocalCopyDirStage,
-    LocalCopyDirStats,
-    LocalDurabilityRequirement,
-};
-
-use crate::local::internal::StagedFile;
-use crate::local::internal::file_move::{
-    move_file_without_replacing,
-    parent_dir_for,
-    replace_file,
-};
-use crate::local::internal::temp_entry::{
-    DEFAULT_TEMP_ENTRY_RETRIES,
-    create_temp_file_in_dir,
-};
-use crate::local::{
-    CopyDestinationAction,
-    decide_copy_destination,
-};
-
 use super::copy_dir_result::CopyDirResult;
-use super::destination::{
-    destination_metadata_if_exists,
-    existing_file_destination_should_be_skipped,
-    remove_destination_directory_if_unchanged,
-};
-use super::error::{
-    copy_dir_error,
-    copy_dir_error_with_staging,
-    record_copied_file,
-    record_overwritten_entry,
-    record_skipped_file,
-    with_copy_context,
-};
+use super::destination::destination_metadata_if_exists;
+use super::destination::existing_file_destination_should_be_skipped;
+use super::destination::remove_destination_directory_if_unchanged;
+use super::error::copy_dir_error;
+use super::error::copy_dir_error_with_staging;
+use super::error::record_copied_file;
+use super::error::record_overwritten_entry;
+use super::error::record_skipped_file;
+use super::error::with_copy_context;
 use super::opened_copy_source::OpenedCopySource;
 use super::source::is_real_directory;
-use super::staging_io::{
-    copy_into_staging,
-    preserve_staged_permissions,
-};
+use super::staging_io::copy_into_staging;
+use super::staging_io::preserve_staged_permissions;
+use crate::LocalCopyConflictPolicy;
+use crate::LocalCopyDirOptions;
+use crate::LocalCopyDirStage;
+use crate::LocalCopyDirStats;
+use crate::LocalDurabilityRequirement;
+use crate::local::CopyDestinationAction;
+use crate::local::decide_copy_destination;
+use crate::local::internal::StagedFile;
+use crate::local::internal::file_move::move_file_without_replacing;
+use crate::local::internal::file_move::parent_dir_for;
+use crate::local::internal::file_move::replace_file;
+use crate::local::internal::temp_entry::DEFAULT_TEMP_ENTRY_RETRIES;
+use crate::local::internal::temp_entry::create_temp_file_in_dir;
 
 /// Prefix used by recursive-copy staging files.
 const COPY_FILE_TEMP_PREFIX: &str = ".copy-file-";

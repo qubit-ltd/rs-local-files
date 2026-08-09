@@ -11,31 +11,24 @@
 
 use std::collections::HashSet;
 use std::fs;
-use std::io::{
-    Error,
-    ErrorKind,
-};
+use std::io::Error;
+use std::io::ErrorKind;
 use std::path::Path;
-
-use crate::local::CopyDestinationAction;
-use crate::{
-    LocalCopyDirOptions,
-    LocalCopyDirStage,
-    LocalCopyDirStats,
-};
 
 use super::super::directory_identity::DirectoryIdentity;
 use super::copy_dir_frame::CopyDirFrame;
 use super::copy_dir_result::CopyDirResult;
 use super::destination::ensure_copy_destination_dir;
-use super::error::{
-    copy_dir_error,
-    record_created_directory,
-    record_skipped_file,
-    with_copy_context,
-};
+use super::error::copy_dir_error;
+use super::error::record_created_directory;
+use super::error::record_skipped_file;
+use super::error::with_copy_context;
 use super::source::inspect_copy_source_directory;
 use super::staged_copy::copy_file_with_options;
+use crate::LocalCopyDirOptions;
+use crate::LocalCopyDirStage;
+use crate::LocalCopyDirStats;
+use crate::local::CopyDestinationAction;
 
 /// Copies one source directory tree without recursive function calls.
 ///

@@ -9,89 +9,69 @@
 // qubit-style: allow source-test-pair
 // Platform behavior is covered through public rooted integration tests.
 
-use std::ffi::{
-    OsStr,
-    OsString,
-};
+use std::ffi::OsStr;
+use std::ffi::OsString;
 use std::fs::File;
-use std::io::{
-    Error,
-    ErrorKind,
-    Result,
-};
+use std::io::Error;
+use std::io::ErrorKind;
+use std::io::Result;
 use std::mem::size_of;
-use std::os::windows::ffi::{
-    OsStrExt,
-    OsStringExt,
-};
-use std::os::windows::io::{
-    AsRawHandle,
-    FromRawHandle,
-};
-use std::path::{
-    Path,
-    PathBuf,
-};
-use std::ptr::{
-    null,
-    null_mut,
-};
+use std::os::windows::ffi::OsStrExt;
+use std::os::windows::ffi::OsStringExt;
+use std::os::windows::io::AsRawHandle;
+use std::os::windows::io::FromRawHandle;
+use std::path::Path;
+use std::path::PathBuf;
+use std::ptr::null;
+use std::ptr::null_mut;
 
 use windows_sys::Wdk::Foundation::OBJECT_ATTRIBUTES;
-use windows_sys::Wdk::Storage::FileSystem::{
-    FILE_CREATE,
-    FILE_DIRECTORY_FILE,
-    FILE_DIRECTORY_INFORMATION,
-    FILE_NON_DIRECTORY_FILE,
-    FILE_OPEN,
-    FILE_OPEN_IF,
-    FILE_OPEN_REPARSE_POINT,
-    FILE_OVERWRITE_IF,
-    FILE_SYNCHRONOUS_IO_NONALERT,
-    FileDirectoryInformation,
-    NtCreateFile,
-    NtQueryDirectoryFile,
-    RtlNtStatusToDosErrorNoTeb,
-};
-use windows_sys::Win32::Foundation::{
-    GENERIC_READ,
-    GENERIC_WRITE,
-    HANDLE,
-    INVALID_HANDLE_VALUE,
-    OBJ_CASE_INSENSITIVE,
-    STATUS_NO_MORE_FILES,
-    UNICODE_STRING,
-};
-use windows_sys::Win32::Storage::FileSystem::{
-    CreateFileW,
-    FILE_APPEND_DATA,
-    FILE_ATTRIBUTE_DIRECTORY,
-    FILE_ATTRIBUTE_NORMAL,
-    FILE_ATTRIBUTE_REPARSE_POINT,
-    FILE_ATTRIBUTE_TAG_INFO,
-    FILE_FLAG_BACKUP_SEMANTICS,
-    FILE_FLAG_OPEN_REPARSE_POINT,
-    FILE_LIST_DIRECTORY,
-    FILE_NAME_NORMALIZED,
-    FILE_READ_ATTRIBUTES,
-    FILE_SHARE_DELETE,
-    FILE_SHARE_READ,
-    FILE_SHARE_WRITE,
-    FILE_WRITE_ATTRIBUTES,
-    FileAttributeTagInfo,
-    GetFileInformationByHandleEx,
-    GetFinalPathNameByHandleW,
-    OPEN_EXISTING,
-    SYNCHRONIZE,
-};
+use windows_sys::Wdk::Storage::FileSystem::FILE_CREATE;
+use windows_sys::Wdk::Storage::FileSystem::FILE_DIRECTORY_FILE;
+use windows_sys::Wdk::Storage::FileSystem::FILE_DIRECTORY_INFORMATION;
+use windows_sys::Wdk::Storage::FileSystem::FILE_NON_DIRECTORY_FILE;
+use windows_sys::Wdk::Storage::FileSystem::FILE_OPEN;
+use windows_sys::Wdk::Storage::FileSystem::FILE_OPEN_IF;
+use windows_sys::Wdk::Storage::FileSystem::FILE_OPEN_REPARSE_POINT;
+use windows_sys::Wdk::Storage::FileSystem::FILE_OVERWRITE_IF;
+use windows_sys::Wdk::Storage::FileSystem::FILE_SYNCHRONOUS_IO_NONALERT;
+use windows_sys::Wdk::Storage::FileSystem::FileDirectoryInformation;
+use windows_sys::Wdk::Storage::FileSystem::NtCreateFile;
+use windows_sys::Wdk::Storage::FileSystem::NtQueryDirectoryFile;
+use windows_sys::Wdk::Storage::FileSystem::RtlNtStatusToDosErrorNoTeb;
+use windows_sys::Win32::Foundation::GENERIC_READ;
+use windows_sys::Win32::Foundation::GENERIC_WRITE;
+use windows_sys::Win32::Foundation::HANDLE;
+use windows_sys::Win32::Foundation::INVALID_HANDLE_VALUE;
+use windows_sys::Win32::Foundation::OBJ_CASE_INSENSITIVE;
+use windows_sys::Win32::Foundation::STATUS_NO_MORE_FILES;
+use windows_sys::Win32::Foundation::UNICODE_STRING;
+use windows_sys::Win32::Storage::FileSystem::CreateFileW;
+use windows_sys::Win32::Storage::FileSystem::FILE_APPEND_DATA;
+use windows_sys::Win32::Storage::FileSystem::FILE_ATTRIBUTE_DIRECTORY;
+use windows_sys::Win32::Storage::FileSystem::FILE_ATTRIBUTE_NORMAL;
+use windows_sys::Win32::Storage::FileSystem::FILE_ATTRIBUTE_REPARSE_POINT;
+use windows_sys::Win32::Storage::FileSystem::FILE_ATTRIBUTE_TAG_INFO;
+use windows_sys::Win32::Storage::FileSystem::FILE_FLAG_BACKUP_SEMANTICS;
+use windows_sys::Win32::Storage::FileSystem::FILE_FLAG_OPEN_REPARSE_POINT;
+use windows_sys::Win32::Storage::FileSystem::FILE_LIST_DIRECTORY;
+use windows_sys::Win32::Storage::FileSystem::FILE_NAME_NORMALIZED;
+use windows_sys::Win32::Storage::FileSystem::FILE_READ_ATTRIBUTES;
+use windows_sys::Win32::Storage::FileSystem::FILE_SHARE_DELETE;
+use windows_sys::Win32::Storage::FileSystem::FILE_SHARE_READ;
+use windows_sys::Win32::Storage::FileSystem::FILE_SHARE_WRITE;
+use windows_sys::Win32::Storage::FileSystem::FILE_WRITE_ATTRIBUTES;
+use windows_sys::Win32::Storage::FileSystem::FileAttributeTagInfo;
+use windows_sys::Win32::Storage::FileSystem::GetFileInformationByHandleEx;
+use windows_sys::Win32::Storage::FileSystem::GetFinalPathNameByHandleW;
+use windows_sys::Win32::Storage::FileSystem::OPEN_EXISTING;
+use windows_sys::Win32::Storage::FileSystem::SYNCHRONIZE;
 use windows_sys::Win32::System::IO::IO_STATUS_BLOCK;
 
 use super::rooted_directory_reader::RootedDirectoryReader;
 use crate::local::LocalRelativePath;
-use crate::{
-    read,
-    write,
-};
+use crate::read;
+use crate::write;
 
 /// Reparse-tag bit identifying name-surrogate entries.
 const IO_REPARSE_TAG_NAME_SURROGATE: u32 = 0x2000_0000;
@@ -771,11 +751,9 @@ fn handle_attributes(file: &File) -> Result<FILE_ATTRIBUTE_TAG_INFO> {
 
 /// Deletes the entry identified by an already opened handle.
 fn delete_open_entry(entry: &File) -> Result<()> {
-    use windows_sys::Win32::Storage::FileSystem::{
-        FILE_DISPOSITION_INFO,
-        FileDispositionInfo,
-        SetFileInformationByHandle,
-    };
+    use windows_sys::Win32::Storage::FileSystem::FILE_DISPOSITION_INFO;
+    use windows_sys::Win32::Storage::FileSystem::FileDispositionInfo;
+    use windows_sys::Win32::Storage::FileSystem::SetFileInformationByHandle;
 
     let disposition = FILE_DISPOSITION_INFO { DeleteFile: true };
     // SAFETY: `entry` was opened with DELETE access and `disposition` matches
@@ -802,12 +780,10 @@ fn rename_open_entry(
     destination: &LocalRelativePath,
     overwrite: bool,
 ) -> Result<()> {
-    use windows_sys::Win32::Storage::FileSystem::{
-        DELETE,
-        FILE_RENAME_INFO,
-        FileRenameInfo,
-        SetFileInformationByHandle,
-    };
+    use windows_sys::Win32::Storage::FileSystem::DELETE;
+    use windows_sys::Win32::Storage::FileSystem::FILE_RENAME_INFO;
+    use windows_sys::Win32::Storage::FileSystem::FileRenameInfo;
+    use windows_sys::Win32::Storage::FileSystem::SetFileInformationByHandle;
 
     let source = open_entry_no_follow(
         root,

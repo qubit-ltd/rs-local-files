@@ -11,10 +11,8 @@
 // Private behavior is covered through public integration tests.
 
 use std::fs;
-use std::path::{
-    Path,
-    PathBuf,
-};
+use std::path::Path;
+use std::path::PathBuf;
 
 use super::super::directory_identity::DirectoryIdentity;
 

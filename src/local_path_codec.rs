@@ -7,10 +7,8 @@
 // =============================================================================
 //! Canonical escaped-byte conversion for native path components.
 
-use std::{
-    borrow::Cow,
-    ffi::OsStr,
-};
+use std::borrow::Cow;
+use std::ffi::OsStr;
 
 use crate::LocalPathCodecError;
 
@@ -144,25 +142,16 @@ mod platform {
 
     #[cfg(unix)]
     mod native {
-        use std::{
-            borrow::Cow,
-            ffi::{
-                OsStr,
-                OsString,
-            },
-            os::unix::ffi::{
-                OsStrExt,
-                OsStringExt,
-            },
-        };
+        use std::borrow::Cow;
+        use std::ffi::OsStr;
+        use std::ffi::OsString;
+        use std::os::unix::ffi::OsStrExt;
+        use std::os::unix::ffi::OsStringExt;
 
+        use super::decode_escaped_bytes;
+        use super::push_escaped_byte;
+        use super::push_scalar;
         use crate::LocalPathCodecError;
-
-        use super::{
-            decode_escaped_bytes,
-            push_escaped_byte,
-            push_scalar,
-        };
 
         /// Decodes canonical bytes to a Unix native component.
         pub(crate) fn decode_canonical_text(
@@ -223,26 +212,17 @@ mod platform {
 
     #[cfg(windows)]
     mod native {
-        use std::{
-            borrow::Cow,
-            char::decode_utf16,
-            ffi::{
-                OsStr,
-                OsString,
-            },
-            os::windows::ffi::{
-                OsStrExt,
-                OsStringExt,
-            },
-        };
+        use std::borrow::Cow;
+        use std::char::decode_utf16;
+        use std::ffi::OsStr;
+        use std::ffi::OsString;
+        use std::os::windows::ffi::OsStrExt;
+        use std::os::windows::ffi::OsStringExt;
 
+        use super::decode_escaped_bytes;
+        use super::push_escaped_byte;
+        use super::push_scalar;
         use crate::LocalPathCodecError;
-
-        use super::{
-            decode_escaped_bytes,
-            push_escaped_byte,
-            push_scalar,
-        };
 
         /// Decodes canonical WTF-8 bytes to a Windows native component.
         pub(crate) fn decode_canonical_text(
@@ -353,13 +333,9 @@ mod platform {
 
     #[cfg(not(any(unix, windows)))]
     mod native {
-        use std::{
-            borrow::Cow,
-            ffi::{
-                OsStr,
-                OsString,
-            },
-        };
+        use std::borrow::Cow;
+        use std::ffi::OsStr;
+        use std::ffi::OsString;
 
         use crate::LocalPathCodecError;
 
@@ -380,8 +356,6 @@ mod platform {
         }
     }
 
-    pub(crate) use native::{
-        decode_canonical_text,
-        encode_native_text,
-    };
+    pub(crate) use native::decode_canonical_text;
+    pub(crate) use native::encode_native_text;
 }

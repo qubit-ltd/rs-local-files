@@ -7,10 +7,8 @@
 // =============================================================================
 //! Shared temporary-resource parent preparation.
 
-use std::{
-    io,
-    path::Path,
-};
+use std::io;
+use std::path::Path;
 
 /// Prepares a host target parent before any publication attempt.
 #[inline]

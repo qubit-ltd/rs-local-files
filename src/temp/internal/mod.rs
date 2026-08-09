@@ -19,7 +19,5 @@ pub(crate) use local_temp_resource_backend::LocalTempResourceBackend;
 pub(crate) use local_temp_resource_state::LocalTempResourceState;
 pub(crate) use rooted_temp_resource_backend::RootedTempResourceBackend;
 pub(crate) use temp_entry_identity::TempEntryIdentity;
-pub(crate) use temp_parent::{
-    host as prepare_host_parent,
-    rooted as prepare_rooted_parent,
-};
+pub(crate) use temp_parent::host as prepare_host_parent;
+pub(crate) use temp_parent::rooted as prepare_rooted_parent;

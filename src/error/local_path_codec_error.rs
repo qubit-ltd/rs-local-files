@@ -6,10 +6,8 @@
 //    Licensed under the Apache License, Version 2.0.
 // =============================================================================
 
-use std::{
-    error::Error,
-    fmt,
-};
+use std::error::Error;
+use std::fmt;
 
 /// Failure while converting between canonical path text and a native path
 /// component.

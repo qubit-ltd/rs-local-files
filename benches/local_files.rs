@@ -6,25 +6,19 @@
 //    Licensed under the Apache License, Version 2.0.
 // =============================================================================
 
-use std::{
-    fs,
-    hint::black_box,
-    io::Write,
-};
+use std::fs;
+use std::hint::black_box;
+use std::io::Write;
 
-use criterion::{
-    Criterion,
-    criterion_group,
-    criterion_main,
-};
-use qubit_local_files::{
-    LocalCopyOptions,
-    LocalFileSystem,
-    LocalPathCodec,
-    LocalReadOptions,
-    LocalWriteMode,
-    LocalWriteOptions,
-};
+use criterion::Criterion;
+use criterion::criterion_group;
+use criterion::criterion_main;
+use qubit_local_files::LocalCopyOptions;
+use qubit_local_files::LocalFileSystem;
+use qubit_local_files::LocalPathCodec;
+use qubit_local_files::LocalReadOptions;
+use qubit_local_files::LocalWriteMode;
+use qubit_local_files::LocalWriteOptions;
 use tempfile::tempdir;
 
 fn bench_path_codec(c: &mut Criterion) {

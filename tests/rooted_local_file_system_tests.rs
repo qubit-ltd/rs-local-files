@@ -8,42 +8,36 @@
 
 #![cfg(not(windows))]
 
-use std::{
-    fs,
-    io::{
-        Read,
-        Write,
-    },
-    path::Path,
-};
+use std::fs;
+use std::io::Read;
+use std::io::Write;
+use std::path::Path;
 
-use qubit_local_files::LocalWriterState;
-use qubit_local_files::{
-    LocalCopyConflictPolicy,
-    LocalCopyOptions,
-    LocalCopyTypeConflictPolicy,
-    LocalCreateDirectoryOptions,
-    LocalDeleteOptions,
-    LocalFileErrorKind,
-    LocalFileKind,
-    LocalFileSystem,
-    LocalListOptions,
-    LocalPersistFailureState,
-    LocalPersistStage,
-    LocalReadOptions,
-    LocalRenameFailureState,
-    LocalRenameOptions,
-    LocalTempDirectoryOptions,
-    LocalTempFileOptions,
-    LocalWriteMode,
-    LocalWriteOptions,
-};
+use qubit_local_files::LocalCopyConflictPolicy;
 #[cfg(feature = "internal-test-support")]
-use qubit_local_files::{
-    LocalCopyFailureState,
-    LocalDurabilityRequirement,
-    LocalFileOperation,
-};
+use qubit_local_files::LocalCopyFailureState;
+use qubit_local_files::LocalCopyOptions;
+use qubit_local_files::LocalCopyTypeConflictPolicy;
+use qubit_local_files::LocalCreateDirectoryOptions;
+use qubit_local_files::LocalDeleteOptions;
+#[cfg(feature = "internal-test-support")]
+use qubit_local_files::LocalDurabilityRequirement;
+use qubit_local_files::LocalFileErrorKind;
+use qubit_local_files::LocalFileKind;
+#[cfg(feature = "internal-test-support")]
+use qubit_local_files::LocalFileOperation;
+use qubit_local_files::LocalFileSystem;
+use qubit_local_files::LocalListOptions;
+use qubit_local_files::LocalPersistFailureState;
+use qubit_local_files::LocalPersistStage;
+use qubit_local_files::LocalReadOptions;
+use qubit_local_files::LocalRenameFailureState;
+use qubit_local_files::LocalRenameOptions;
+use qubit_local_files::LocalTempDirectoryOptions;
+use qubit_local_files::LocalTempFileOptions;
+use qubit_local_files::LocalWriteMode;
+use qubit_local_files::LocalWriteOptions;
+use qubit_local_files::LocalWriterState;
 use tempfile::tempdir;
 
 /// Verifies rooted recursive copy preserves nested type-conflict destinations

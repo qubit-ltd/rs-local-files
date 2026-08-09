@@ -8,29 +8,22 @@
 
 //! Integration tests for typed unified-copy failures.
 
+#[cfg(feature = "internal-test-support")]
+use std::fs;
 use std::path::PathBuf;
+#[cfg(feature = "internal-test-support")]
+use std::process::Command;
 
 #[cfg(feature = "internal-test-support")]
-use std::{
-    fs,
-    process::Command,
-};
-
-use qubit_local_files::{
-    LocalCopyFailureState,
-    LocalCopyOptions,
-    LocalCopyStats,
-    LocalFileSystem,
-};
-
-#[cfg(feature = "internal-test-support")]
-use qubit_local_files::{
-    LocalCopyConflictPolicy,
-    LocalMetadataPreservePolicy,
-};
-
+use qubit_local_files::LocalCopyConflictPolicy;
+use qubit_local_files::LocalCopyFailureState;
+use qubit_local_files::LocalCopyOptions;
+use qubit_local_files::LocalCopyStats;
 #[cfg(all(feature = "internal-test-support", not(windows)))]
 use qubit_local_files::LocalDurabilityRequirement;
+use qubit_local_files::LocalFileSystem;
+#[cfg(feature = "internal-test-support")]
+use qubit_local_files::LocalMetadataPreservePolicy;
 
 /// Creates a process-specific path that is absent before each test use.
 fn temp_path(name: &str) -> PathBuf {

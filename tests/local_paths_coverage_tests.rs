@@ -6,17 +6,13 @@
 //    Licensed under the Apache License, Version 2.0.
 // =============================================================================
 
-use std::{
-    io,
-    path::Path,
-};
+use std::io;
+use std::path::Path;
 
-use qubit_local_files::{
-    LocalFileErrorKind,
-    LocalFileOperation,
-    LocalFileSystemScope,
-    LocalPaths,
-};
+use qubit_local_files::LocalFileErrorKind;
+use qubit_local_files::LocalFileOperation;
+use qubit_local_files::LocalFileSystemScope;
+use qubit_local_files::LocalPaths;
 
 /// Verifies absolute host paths remain unchanged when binding a path group.
 #[test]
@@ -220,10 +216,8 @@ fn test_path_conversions_cover_rooted_binding_and_normal_components() {
 #[cfg(unix)]
 #[test]
 fn test_host_conversions_encode_non_utf8_native_components() {
-    use std::{
-        ffi::OsString,
-        os::unix::ffi::OsStringExt,
-    };
+    use std::ffi::OsString;
+    use std::os::unix::ffi::OsStringExt;
 
     let relative = std::path::PathBuf::from(OsString::from_vec(vec![0xff]));
     assert_eq!(

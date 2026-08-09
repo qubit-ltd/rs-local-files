@@ -6,34 +6,25 @@
 //    Licensed under the Apache License, Version 2.0.
 // =============================================================================
 
-use std::{
-    collections::HashSet,
-    fs,
-    path::{
-        Path,
-        PathBuf,
-    },
-    sync::Arc,
-};
+use std::collections::HashSet;
+use std::fs;
+use std::path::Path;
+use std::path::PathBuf;
+use std::sync::Arc;
 
+use super::internal::RootedWalkFrame;
+use super::internal::RootedWalkState;
+use super::internal::WalkFrame;
+use crate::LocalDirectoryEntry;
+use crate::LocalFileError;
+use crate::LocalFileErrorKind;
+use crate::LocalFileMetadata;
+use crate::LocalFileOperation;
+use crate::LocalListOptions;
+use crate::LocalResult;
+use crate::LocalSymlinkPolicy;
+use crate::LocalWalkErrorPolicy;
 use crate::local::DirectoryIdentity;
-use crate::{
-    LocalDirectoryEntry,
-    LocalFileError,
-    LocalFileErrorKind,
-    LocalFileMetadata,
-    LocalFileOperation,
-    LocalListOptions,
-    LocalResult,
-    LocalSymlinkPolicy,
-    LocalWalkErrorPolicy,
-};
-
-use super::internal::{
-    RootedWalkFrame,
-    RootedWalkState,
-    WalkFrame,
-};
 
 /// Lazy depth-first iterator over native local directory entries.
 #[derive(Debug)]

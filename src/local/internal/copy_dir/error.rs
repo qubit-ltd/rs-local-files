@@ -9,28 +9,20 @@
 // qubit-style: allow source-test-pair
 // Private behavior is covered through public integration tests.
 
-use std::io::{
-    Error,
-    Result,
-};
+use std::io::Error;
+use std::io::Result;
 use std::path::Path;
 
-use crate::{
-    LocalCopyDirError,
-    LocalCopyDirStage,
-    LocalCopyDirStats,
-};
-
-use crate::local::internal::StagedFile;
-
 use super::copy_dir_result::CopyDirResult;
-use super::statistics_overflow::{
-    byte_statistics_overflow_error,
-    directory_statistics_overflow_error,
-    file_statistics_overflow_error,
-    overwritten_statistics_overflow_error,
-    skipped_statistics_overflow_error,
-};
+use super::statistics_overflow::byte_statistics_overflow_error;
+use super::statistics_overflow::directory_statistics_overflow_error;
+use super::statistics_overflow::file_statistics_overflow_error;
+use super::statistics_overflow::overwritten_statistics_overflow_error;
+use super::statistics_overflow::skipped_statistics_overflow_error;
+use crate::LocalCopyDirError;
+use crate::LocalCopyDirStage;
+use crate::LocalCopyDirStats;
+use crate::local::internal::StagedFile;
 
 /// Builds a recursive-copy error from the current entry and statistics.
 ///

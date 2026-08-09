@@ -17,17 +17,14 @@ use std::ops::BitAnd;
 use std::os::unix::fs::MetadataExt;
 #[cfg(windows)]
 use std::os::windows::io::AsRawHandle;
+#[cfg(unix)]
+use std::time::Duration;
 use std::time::SystemTime;
 #[cfg(unix)]
-use std::time::{
-    Duration,
-    UNIX_EPOCH,
-};
+use std::time::UNIX_EPOCH;
 
-use super::{
-    EntryKind,
-    Permissions,
-};
+use super::EntryKind;
+use super::Permissions;
 
 /// Metadata observed through an opened rooted directory authority.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -98,10 +95,8 @@ impl Metadata {
         }
         #[cfg(windows)]
         {
-            use windows_sys::Win32::Storage::FileSystem::{
-                BY_HANDLE_FILE_INFORMATION,
-                GetFileInformationByHandle,
-            };
+            use windows_sys::Win32::Storage::FileSystem::BY_HANDLE_FILE_INFORMATION;
+            use windows_sys::Win32::Storage::FileSystem::GetFileInformationByHandle;
 
             let mut identity = BY_HANDLE_FILE_INFORMATION::default();
             // SAFETY: `file` owns a live handle and `identity` is a correctly
@@ -356,8 +351,9 @@ fn stat_times(
 // observations.
 #[cfg(all(test, unix))]
 mod tests {
-    use super::*;
     use std::fs::File;
+
+    use super::*;
 
     #[test]
     fn observes_open_file_and_identity() {

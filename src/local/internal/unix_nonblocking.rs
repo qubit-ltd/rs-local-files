@@ -10,17 +10,13 @@
 // Public APIs keep descriptors live, so native `fcntl` failures cannot be
 // induced deterministically by integration fixtures.
 
-use std::io::{
-    Error,
-    ErrorKind,
-    Result,
-};
+use std::io::Error;
+use std::io::ErrorKind;
+use std::io::Result;
 use std::os::fd::RawFd;
 use std::thread;
-use std::time::{
-    Duration,
-    Instant,
-};
+use std::time::Duration;
+use std::time::Instant;
 
 /// Initial sleep after one scheduler yield for a conflicting file lease.
 const INITIAL_OPEN_RETRY_DELAY: Duration = Duration::from_micros(50);

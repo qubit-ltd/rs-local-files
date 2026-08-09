@@ -10,21 +10,16 @@
 // Public APIs retain both descriptors, so post-open copy and permission
 // failures cannot be induced deterministically by portable fixtures.
 
-use std::fs::{
-    File,
-    Metadata,
-};
+use std::fs::File;
+use std::fs::Metadata;
 use std::io;
 use std::path::Path;
 
-use crate::local::internal::StagedFile;
-use crate::{
-    LocalCopyDirStage,
-    LocalCopyDirStats,
-};
-
 use super::copy_dir_result::CopyDirResult;
 use super::error::copy_dir_error_with_staging;
+use crate::LocalCopyDirStage;
+use crate::LocalCopyDirStats;
+use crate::local::internal::StagedFile;
 
 /// Copies one open source handle into an armed staging file.
 ///

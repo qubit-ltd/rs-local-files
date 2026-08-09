@@ -8,14 +8,12 @@
 
 use std::fs;
 
-use qubit_local_files::{
-    LocalCreateDirectoryOptions,
-    LocalDeleteOptions,
-    LocalFileErrorKind,
-    LocalFileKind,
-    LocalFileSystem,
-    LocalReadOptions,
-};
+use qubit_local_files::LocalCreateDirectoryOptions;
+use qubit_local_files::LocalDeleteOptions;
+use qubit_local_files::LocalFileErrorKind;
+use qubit_local_files::LocalFileKind;
+use qubit_local_files::LocalFileSystem;
+use qubit_local_files::LocalReadOptions;
 use tempfile::tempdir;
 
 /// Verifies metadata errors retain the caller-visible path when an

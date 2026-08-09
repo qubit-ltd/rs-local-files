@@ -9,10 +9,8 @@
 // qubit-style: allow source-test-pair
 // Portable integration fixtures cannot force counters beyond `u64::MAX`.
 
-use std::io::{
-    Error,
-    ErrorKind,
-};
+use std::io::Error;
+use std::io::ErrorKind;
 
 /// Creates the overflow error for the directory counter.
 ///

@@ -7,17 +7,13 @@
 // =============================================================================
 //! Rename publication-state constructors.
 
-use std::{
-    io,
-    path::Path,
-};
+use std::io;
+use std::path::Path;
 
-use crate::{
-    LocalFileError,
-    LocalFileOperation,
-    LocalRenameFailure,
-    LocalRenameFailureState,
-};
+use crate::LocalFileError;
+use crate::LocalFileOperation;
+use crate::LocalRenameFailure;
+use crate::LocalRenameFailureState;
 
 /// Wraps a pre-publication rename error.
 ///

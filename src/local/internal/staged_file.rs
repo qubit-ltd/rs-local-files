@@ -9,15 +9,11 @@
 // qubit-style: allow source-test-pair
 // Private behavior is covered through public integration tests.
 
-use std::fs::{
-    self,
-    File,
-};
+use std::fs::File;
+use std::fs::{self};
 use std::io::Result;
-use std::path::{
-    Path,
-    PathBuf,
-};
+use std::path::Path;
+use std::path::PathBuf;
 
 use log::warn;
 

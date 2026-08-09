@@ -16,7 +16,7 @@ mod path;
 mod permissions;
 mod root;
 
-pub(crate) use crate::local::LocalRootAtomicWriter as Writer;
+pub(crate) use directory_reader::DirectoryReader;
 pub(crate) use entry::Entry;
 pub(crate) use entry_kind::EntryKind;
 pub(crate) use metadata::Metadata;
@@ -24,4 +24,4 @@ pub(crate) use path::Path;
 pub(crate) use permissions::Permissions;
 pub(crate) use root::Root;
 
-pub(crate) use directory_reader::DirectoryReader;
+pub(crate) use crate::local::LocalRootAtomicWriter as Writer;

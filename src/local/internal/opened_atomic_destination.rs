@@ -10,29 +10,21 @@
 // Private behavior is covered through public integration tests.
 
 use std::ffi::CString;
-use std::fs::{
-    self,
-    File,
-    OpenOptions,
-};
-use std::io::{
-    Error,
-    ErrorKind,
-    Result,
-};
+use std::fs::File;
+use std::fs::OpenOptions;
+use std::fs::{self};
+use std::io::Error;
+use std::io::ErrorKind;
+use std::io::Result;
 use std::os::fd::AsRawFd;
-use std::os::unix::fs::{
-    MetadataExt,
-    OpenOptionsExt,
-};
+use std::os::unix::fs::MetadataExt;
+use std::os::unix::fs::OpenOptionsExt;
 use std::path::Path;
 use std::time::Duration;
 
 use super::rooted_file_io::open_file_at;
-use super::unix_nonblocking::{
-    clear_nonblocking,
-    open_with_nonblocking_retry,
-};
+use super::unix_nonblocking::clear_nonblocking;
+use super::unix_nonblocking::open_with_nonblocking_retry;
 use super::unix_stat::is_regular_file_mode;
 
 /// Open destination handle and Unix identity used by atomic replacement.

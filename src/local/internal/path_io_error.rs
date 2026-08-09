@@ -12,10 +12,8 @@
 // Private behavior is covered through public integration tests.
 
 use std::io::Error;
-use std::path::{
-    Path,
-    PathBuf,
-};
+use std::path::Path;
+use std::path::PathBuf;
 
 /// An I/O error annotated with the failed operation and path.
 #[derive(Debug)]
@@ -79,9 +77,10 @@ impl std::error::Error for PathIoError {
 // and native error integration tests cover the externally visible mapping.
 #[cfg(test)]
 mod tests {
-    use super::*;
     use std::error::Error as _;
     use std::io::ErrorKind;
+
+    use super::*;
 
     #[test]
     fn formats_context_and_exposes_source() {

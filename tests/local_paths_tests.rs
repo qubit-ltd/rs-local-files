@@ -6,24 +6,18 @@
 //    Licensed under the Apache License, Version 2.0.
 // =============================================================================
 
+use std::ffi::OsStr;
 #[cfg(unix)]
 use std::ffi::OsString;
-use std::{
-    ffi::OsStr,
-    path::{
-        Path,
-        PathBuf,
-    },
-    sync::Mutex,
-};
+use std::path::Path;
+use std::path::PathBuf;
+use std::sync::Mutex;
 
-use qubit_local_files::{
-    LocalFileErrorKind,
-    LocalFileNames,
-    LocalFileOperation,
-    LocalFileSystemScope,
-    LocalPaths,
-};
+use qubit_local_files::LocalFileErrorKind;
+use qubit_local_files::LocalFileNames;
+use qubit_local_files::LocalFileOperation;
+use qubit_local_files::LocalFileSystemScope;
+use qubit_local_files::LocalPaths;
 
 /// Serializes current-directory-sensitive assertions within this test target.
 static CURRENT_DIRECTORY_LOCK: Mutex<()> = Mutex::new(());

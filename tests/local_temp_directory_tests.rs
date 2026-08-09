@@ -6,16 +6,12 @@
 //    Licensed under the Apache License, Version 2.0.
 // =============================================================================
 
-use std::{
-    fs,
-    path::Path,
-};
-
 #[cfg(not(windows))]
-use std::{
-    env,
-    process::Command,
-};
+use std::env;
+use std::fs;
+use std::path::Path;
+#[cfg(not(windows))]
+use std::process::Command;
 
 #[cfg(feature = "internal-test-support")]
 fn run_in_test_fault_process<F>(test_name: &str, fault: &str, action: F)
@@ -48,14 +44,12 @@ where
     assert!(status.success(), "test fault child should pass");
 }
 
+use qubit_local_files::LocalFileErrorKind;
+use qubit_local_files::LocalFileSystem;
 #[cfg(not(windows))]
 use qubit_local_files::LocalPersistFailureState;
-use qubit_local_files::{
-    LocalFileErrorKind,
-    LocalFileSystem,
-    LocalPersistOptions,
-    LocalTempDirectoryOptions,
-};
+use qubit_local_files::LocalPersistOptions;
+use qubit_local_files::LocalTempDirectoryOptions;
 use tempfile::tempdir;
 
 /// Runs a current-directory failure scenario in a child process so changing

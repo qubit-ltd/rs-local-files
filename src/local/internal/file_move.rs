@@ -19,51 +19,63 @@ use std::ffi::CString;
 #[cfg(not(windows))]
 use std::fs;
 use std::fs::File;
-use std::io::{
-    Error,
-    ErrorKind,
-    Result,
-};
-use std::path::Path;
-
+use std::io::Error;
+use std::io::ErrorKind;
+use std::io::Result;
 #[cfg(any(target_os = "linux", target_os = "macos"))]
 use std::os::unix::ffi::OsStrExt;
 #[cfg(windows)]
 use std::os::windows::ffi::OsStrExt;
 #[cfg(windows)]
-use std::os::windows::io::{
-    AsRawHandle,
-    FromRawHandle,
-};
+use std::os::windows::io::AsRawHandle;
+#[cfg(windows)]
+use std::os::windows::io::FromRawHandle;
+use std::path::Path;
 
 #[cfg(windows)]
-use windows_sys::Win32::Foundation::{
-    GENERIC_READ,
-    INVALID_HANDLE_VALUE,
-};
+use windows_sys::Win32::Foundation::GENERIC_READ;
 #[cfg(windows)]
-use windows_sys::Win32::Storage::FileSystem::{
-    CreateFileW,
-    DELETE,
-    FILE_ATTRIBUTE_DIRECTORY,
-    FILE_ATTRIBUTE_REPARSE_POINT,
-    FILE_ATTRIBUTE_TAG_INFO,
-    FILE_DISPOSITION_INFO,
-    FILE_FLAG_BACKUP_SEMANTICS,
-    FILE_FLAG_OPEN_REPARSE_POINT,
-    FILE_READ_ATTRIBUTES,
-    FILE_SHARE_DELETE,
-    FILE_SHARE_READ,
-    FILE_SHARE_WRITE,
-    FileAttributeTagInfo,
-    FileDispositionInfo,
-    GetFileInformationByHandleEx,
-    MOVEFILE_REPLACE_EXISTING,
-    MOVEFILE_WRITE_THROUGH,
-    MoveFileExW,
-    OPEN_EXISTING,
-    SetFileInformationByHandle,
-};
+use windows_sys::Win32::Foundation::INVALID_HANDLE_VALUE;
+#[cfg(windows)]
+use windows_sys::Win32::Storage::FileSystem::CreateFileW;
+#[cfg(windows)]
+use windows_sys::Win32::Storage::FileSystem::DELETE;
+#[cfg(windows)]
+use windows_sys::Win32::Storage::FileSystem::FILE_ATTRIBUTE_DIRECTORY;
+#[cfg(windows)]
+use windows_sys::Win32::Storage::FileSystem::FILE_ATTRIBUTE_REPARSE_POINT;
+#[cfg(windows)]
+use windows_sys::Win32::Storage::FileSystem::FILE_ATTRIBUTE_TAG_INFO;
+#[cfg(windows)]
+use windows_sys::Win32::Storage::FileSystem::FILE_DISPOSITION_INFO;
+#[cfg(windows)]
+use windows_sys::Win32::Storage::FileSystem::FILE_FLAG_BACKUP_SEMANTICS;
+#[cfg(windows)]
+use windows_sys::Win32::Storage::FileSystem::FILE_FLAG_OPEN_REPARSE_POINT;
+#[cfg(windows)]
+use windows_sys::Win32::Storage::FileSystem::FILE_READ_ATTRIBUTES;
+#[cfg(windows)]
+use windows_sys::Win32::Storage::FileSystem::FILE_SHARE_DELETE;
+#[cfg(windows)]
+use windows_sys::Win32::Storage::FileSystem::FILE_SHARE_READ;
+#[cfg(windows)]
+use windows_sys::Win32::Storage::FileSystem::FILE_SHARE_WRITE;
+#[cfg(windows)]
+use windows_sys::Win32::Storage::FileSystem::FileAttributeTagInfo;
+#[cfg(windows)]
+use windows_sys::Win32::Storage::FileSystem::FileDispositionInfo;
+#[cfg(windows)]
+use windows_sys::Win32::Storage::FileSystem::GetFileInformationByHandleEx;
+#[cfg(windows)]
+use windows_sys::Win32::Storage::FileSystem::MOVEFILE_REPLACE_EXISTING;
+#[cfg(windows)]
+use windows_sys::Win32::Storage::FileSystem::MOVEFILE_WRITE_THROUGH;
+#[cfg(windows)]
+use windows_sys::Win32::Storage::FileSystem::MoveFileExW;
+#[cfg(windows)]
+use windows_sys::Win32::Storage::FileSystem::OPEN_EXISTING;
+#[cfg(windows)]
+use windows_sys::Win32::Storage::FileSystem::SetFileInformationByHandle;
 
 /// Windows reparse-tag bit identifying name-surrogate tags.
 #[cfg(windows)]

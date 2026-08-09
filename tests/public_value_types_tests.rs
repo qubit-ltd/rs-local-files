@@ -6,36 +6,32 @@
 //    Licensed under the Apache License, Version 2.0.
 // =============================================================================
 
-use std::{
-    error::Error,
-    ffi::OsStr,
-    fmt,
-    fs,
-    io,
-    path::Path,
-};
+use std::error::Error;
+use std::ffi::OsStr;
+use std::fmt;
+use std::fs;
+use std::io;
+use std::path::Path;
 
+use qubit_local_files::LocalCopyConflictPolicy;
+use qubit_local_files::LocalCopyFailureState;
+use qubit_local_files::LocalCopyMethod;
+use qubit_local_files::LocalCopyOptions;
+use qubit_local_files::LocalCreateDirectoryOptions;
+use qubit_local_files::LocalDeleteOptions;
+use qubit_local_files::LocalFileError;
+use qubit_local_files::LocalFileErrorKind;
+use qubit_local_files::LocalFileErrorSource;
+use qubit_local_files::LocalFileKind;
+use qubit_local_files::LocalFileNames;
+use qubit_local_files::LocalFileOperation;
+use qubit_local_files::LocalFileSystem;
+use qubit_local_files::LocalFileSystemProtocols;
+use qubit_local_files::LocalPathCodecError;
 #[cfg(not(windows))]
 use qubit_local_files::LocalPaths;
-use qubit_local_files::{
-    LocalCopyConflictPolicy,
-    LocalCopyFailureState,
-    LocalCopyMethod,
-    LocalCopyOptions,
-    LocalCreateDirectoryOptions,
-    LocalDeleteOptions,
-    LocalFileError,
-    LocalFileErrorKind,
-    LocalFileErrorSource,
-    LocalFileKind,
-    LocalFileNames,
-    LocalFileOperation,
-    LocalFileSystem,
-    LocalFileSystemProtocols,
-    LocalPathCodecError,
-    LocalRenameFailureState,
-    LocalRenameOptions,
-};
+use qubit_local_files::LocalRenameFailureState;
+use qubit_local_files::LocalRenameOptions;
 use tempfile::tempdir;
 
 /// Verifies every capability accessor returns a coherent platform snapshot.

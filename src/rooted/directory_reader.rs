@@ -11,12 +11,9 @@ use std::fs::File;
 use std::io::Result;
 use std::path::Path;
 
+use super::Entry;
+use super::Metadata;
 use crate::local;
-
-use super::{
-    Entry,
-    Metadata,
-};
 
 /// A single opened rooted directory whose children are yielded on demand.
 #[derive(Debug)]

@@ -8,30 +8,21 @@
 
 //! Typed failures from unified copy operations.
 
-use std::{
-    error::Error,
-    fmt::{
-        Display,
-        Formatter,
-        Result as FmtResult,
-    },
-    io,
-    path::{
-        Path,
-        PathBuf,
-    },
-};
-
-use crate::{
-    LocalCopyDirError,
-    LocalCopyDirStage,
-    LocalCopyStats,
-    LocalFileError,
-    LocalFileOperation,
-};
+use std::error::Error;
+use std::fmt::Display;
+use std::fmt::Formatter;
+use std::fmt::Result as FmtResult;
+use std::io;
+use std::path::Path;
+use std::path::PathBuf;
 
 use super::LocalCopyFailureState;
 use super::internal::LocalCopyFailureDetails;
+use crate::LocalCopyDirError;
+use crate::LocalCopyDirStage;
+use crate::LocalCopyStats;
+use crate::LocalFileError;
+use crate::LocalFileOperation;
 
 /// Failure details retained when a unified copy does not complete.
 #[derive(Debug)]

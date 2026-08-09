@@ -9,13 +9,11 @@
 
 use std::path::Path;
 
-use crate::{
-    LocalDurabilityRequirement,
-    LocalFileError,
-    LocalFileErrorKind,
-    LocalFileOperation,
-    LocalResult,
-};
+use crate::LocalDurabilityRequirement;
+use crate::LocalFileError;
+use crate::LocalFileErrorKind;
+use crate::LocalFileOperation;
+use crate::LocalResult;
 
 /// Rejects a required directory-durability guarantee before namespace
 /// mutation.
