@@ -18,6 +18,7 @@ use super::LocalFileErrorKind;
 use super::LocalFileErrorSource;
 use super::LocalFileOperation;
 use super::LocalPathCodecError;
+use super::LocalResourceLimitError;
 
 /// Structured failure from a local filesystem operation.
 #[derive(Debug)]
@@ -118,6 +119,35 @@ impl LocalFileError {
         }
     }
 
+    /// Converts a local resource budget failure and preserves its facts.
+    ///
+    /// # Parameters
+    ///
+    /// - `operation`: Operation that failed.
+    /// - `path`: Optional primary path.
+    /// - `source`: Resource budget facts to retain as the typed source.
+    ///
+    /// # Returns
+    ///
+    /// A structured resource-limit error whose source is
+    /// `ResourceLimit(source)`.
+    #[must_use]
+    #[inline]
+    pub(crate) fn from_resource_limit(
+        operation: LocalFileOperation,
+        path: Option<PathBuf>,
+        source: LocalResourceLimitError,
+    ) -> Self {
+        Self {
+            kind: LocalFileErrorKind::ResourceLimit,
+            operation,
+            path,
+            target: None,
+            reason: None,
+            source: Some(LocalFileErrorSource::ResourceLimit(source)),
+        }
+    }
+
     /// Adds a primary path to this error.
     ///
     /// # Parameters
@@ -204,12 +234,22 @@ impl LocalFileError {
     ///
     /// # Returns
     ///
-    /// `Some` contains an I/O or path codec source; `None` means this error
-    /// was constructed without an originating source.
+    /// `Some` contains an I/O, path codec, or resource-limit source; `None`
+    /// means this error was constructed without an originating source.
     #[must_use]
     #[inline(always)]
     pub const fn typed_source(&self) -> Option<&LocalFileErrorSource> {
         self.source.as_ref()
+    }
+
+    /// Returns the retained local resource-limit source, when present.
+    #[must_use]
+    #[inline]
+    pub fn resource_limit_error(&self) -> Option<&LocalResourceLimitError> {
+        match self.source.as_ref() {
+            Some(LocalFileErrorSource::ResourceLimit(error)) => Some(error),
+            _ => None,
+        }
     }
 
     /// Returns the retained native I/O source, when the failure originated in
@@ -234,8 +274,8 @@ impl LocalFileError {
     ///
     /// # Returns
     ///
-    /// `Some` contains an I/O or path codec source; `None` means this error
-    /// was constructed without an originating source.
+    /// `Some` contains an I/O, path codec, or resource-limit source; `None`
+    /// means this error was constructed without an originating source.
     #[must_use]
     #[inline(always)]
     pub fn into_source(self) -> Option<LocalFileErrorSource> {
@@ -278,6 +318,7 @@ fn standard_io_error_kind(error: &LocalFileError) -> io::ErrorKind {
     match error.source.as_ref() {
         Some(LocalFileErrorSource::Io(source)) => source.kind(),
         Some(LocalFileErrorSource::PathCodec(_)) => io::ErrorKind::InvalidInput,
+        Some(LocalFileErrorSource::ResourceLimit(_)) => io::ErrorKind::Other,
         None => match error.kind {
             LocalFileErrorKind::AlreadyExists => io::ErrorKind::AlreadyExists,
             LocalFileErrorKind::InvalidPath
@@ -289,7 +330,7 @@ fn standard_io_error_kind(error: &LocalFileError) -> io::ErrorKind {
             LocalFileErrorKind::PermissionDenied => {
                 io::ErrorKind::PermissionDenied
             }
-            LocalFileErrorKind::ResourceLimit => io::ErrorKind::StorageFull,
+            LocalFileErrorKind::ResourceLimit => io::ErrorKind::Other,
             LocalFileErrorKind::DataCorruption => io::ErrorKind::InvalidData,
             LocalFileErrorKind::RequirementNotMet
             | LocalFileErrorKind::Unsupported => io::ErrorKind::Unsupported,

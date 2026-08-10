@@ -34,6 +34,7 @@ use qubit_local_files::LocalPersistStage;
 use qubit_local_files::LocalReadOptions;
 use qubit_local_files::LocalRenameFailureState;
 use qubit_local_files::LocalRenameOptions;
+use qubit_local_files::LocalResourceKind;
 use qubit_local_files::LocalTempDirectoryOptions;
 use qubit_local_files::LocalTempFileOptions;
 use qubit_local_files::LocalWriteFailureState;
@@ -709,6 +710,13 @@ fn test_rooted_local_file_system_walker_rejects_handle_budget_exhaustion() {
         .expect_err("opening nested directory must exceed the handle budget");
 
     assert_eq!(LocalFileErrorKind::ResourceLimit, error.kind());
+    let source = error
+        .resource_limit_error()
+        .expect("budget facts should be retained");
+    assert_eq!(LocalResourceKind::OpenDirectory, source.resource());
+    assert_eq!(1, source.limit());
+    assert_eq!(0, source.remaining());
+    assert_eq!(1, source.requested());
 }
 
 /// Verifies rooted recursive traversal reopens readers beyond its handle

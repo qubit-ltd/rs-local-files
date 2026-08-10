@@ -51,6 +51,8 @@ pub use error::LocalFileErrorKind;
 pub use error::LocalFileErrorSource;
 pub use error::LocalFileOperation;
 pub use error::LocalPathCodecError;
+pub use error::LocalResourceKind;
+pub use error::LocalResourceLimitError;
 pub use error::LocalResult;
 pub(crate) use local::LocalAtomicCommitError;
 pub(crate) use local::LocalAtomicDestinationState;

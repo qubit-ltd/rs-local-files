@@ -13,6 +13,7 @@ use std::fmt;
 use std::io;
 
 use super::LocalPathCodecError;
+use super::LocalResourceLimitError;
 
 /// Typed source retained by a local filesystem operation failure.
 #[derive(Debug)]
@@ -22,6 +23,8 @@ pub enum LocalFileErrorSource {
     Io(io::Error),
     /// Canonical native path conversion failure.
     PathCodec(LocalPathCodecError),
+    /// Local resource budget could not satisfy an acquisition request.
+    ResourceLimit(LocalResourceLimitError),
 }
 
 impl fmt::Display for LocalFileErrorSource {
@@ -30,6 +33,7 @@ impl fmt::Display for LocalFileErrorSource {
         match self {
             Self::Io(error) => error.fmt(formatter),
             Self::PathCodec(error) => error.fmt(formatter),
+            Self::ResourceLimit(error) => error.fmt(formatter),
         }
     }
 }
@@ -41,6 +45,7 @@ impl Error for LocalFileErrorSource {
         match self {
             Self::Io(error) => Some(error),
             Self::PathCodec(error) => Some(error),
+            Self::ResourceLimit(error) => Some(error),
         }
     }
 }
