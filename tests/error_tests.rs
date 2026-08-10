@@ -13,6 +13,8 @@ use std::path::Path;
 use qubit_local_files::LocalFileError;
 use qubit_local_files::LocalFileErrorKind;
 use qubit_local_files::LocalFileOperation;
+use qubit_local_files::LocalResourceKind;
+use qubit_local_files::LocalResourceLimitError;
 
 /// Verifies that native I/O errors retain structured operation and path
 /// context.
@@ -115,10 +117,7 @@ fn test_local_file_error_adapts_source_free_kinds_and_consumes_source() {
             LocalFileErrorKind::PermissionDenied,
             io::ErrorKind::PermissionDenied,
         ),
-        (
-            LocalFileErrorKind::ResourceLimit,
-            io::ErrorKind::StorageFull,
-        ),
+        (LocalFileErrorKind::ResourceLimit, io::ErrorKind::Other),
         (
             LocalFileErrorKind::DataCorruption,
             io::ErrorKind::InvalidData,
@@ -174,4 +173,27 @@ fn test_local_file_error_exposes_optional_context_without_source() {
     assert!(error.typed_source().is_none());
     assert!(Error::source(&error).is_none());
     assert!(error.into_source().is_none());
+}
+
+/// Verifies resource-limit errors preserve the complete budget facts and source
+/// chain.
+#[test]
+fn test_local_resource_limit_error_preserves_budget_facts() {
+    let source =
+        LocalResourceLimitError::new(LocalResourceKind::OpenDirectory, 4, 0, 1);
+    assert_eq!(LocalResourceKind::OpenDirectory, source.resource());
+    assert_eq!(4, source.limit());
+    assert_eq!(0, source.remaining());
+    assert_eq!(1, source.requested());
+    assert!(source.to_string().contains("open directory"));
+    assert!(std::error::Error::source(&source).is_none());
+
+    let error = LocalFileError::new(
+        LocalFileErrorKind::ResourceLimit,
+        LocalFileOperation::List,
+    )
+    .with_path(Path::new("root/child").to_path_buf());
+    assert_eq!(LocalFileErrorKind::ResourceLimit, error.kind());
+    assert!(error.resource_limit_error().is_none());
+    assert_eq!(io::ErrorKind::Other, error.into_io_error().kind());
 }

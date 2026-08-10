@@ -15,6 +15,7 @@ use qubit_local_files::LocalFileErrorKind;
 use qubit_local_files::LocalFileKind;
 use qubit_local_files::LocalFileSystem;
 use qubit_local_files::LocalListOptions;
+use qubit_local_files::LocalResourceKind;
 #[cfg(unix)]
 use qubit_local_files::LocalSymlinkPolicy;
 #[cfg(not(windows))]
@@ -100,6 +101,13 @@ fn test_local_directory_walker_rejects_handle_budget_exhaustion() {
         .expect("descending beyond the handle budget should fail");
 
     assert_eq!(LocalFileErrorKind::ResourceLimit, error.kind());
+    let source = error
+        .resource_limit_error()
+        .expect("budget facts should be retained");
+    assert_eq!(LocalResourceKind::OpenDirectory, source.resource());
+    assert_eq!(1, source.limit());
+    assert_eq!(0, source.remaining());
+    assert_eq!(1, source.requested());
 }
 
 /// Verifies deep traversal can reopen frames instead of exhausting handles.
