@@ -9,12 +9,15 @@
 use std::fs;
 use std::hint::black_box;
 use std::io::Write;
+use std::path::Path;
 
 use criterion::Criterion;
 use criterion::criterion_group;
 use criterion::criterion_main;
 use qubit_local_files::LocalCopyOptions;
+use qubit_local_files::LocalDirectoryReopenPolicy;
 use qubit_local_files::LocalFileSystem;
+use qubit_local_files::LocalListOptions;
 use qubit_local_files::LocalPathCodec;
 use qubit_local_files::LocalReadOptions;
 use qubit_local_files::LocalWriteMode;
@@ -59,6 +62,77 @@ fn bench_walk(c: &mut Criterion) {
             black_box(walker.count());
         });
     });
+}
+
+fn bench_walk_handle_budget(c: &mut Criterion) {
+    let directory = tempdir().expect("budget benchmark directory should exist");
+    let tree = directory.path().join("tree");
+    fs::create_dir(&tree).expect("budget benchmark tree should be created");
+    let mut current = tree.clone();
+    for depth in 0..32 {
+        for index in 0..4 {
+            fs::write(
+                current.join(format!("entry-{depth}-{index}")),
+                b"payload",
+            )
+            .expect("budget benchmark entry should be written");
+        }
+        current.push(format!("level-{depth}"));
+        fs::create_dir(&current)
+            .expect("budget benchmark level should be created");
+    }
+    fs::write(current.join("payload"), b"payload")
+        .expect("budget benchmark leaf should be written");
+
+    let host = LocalFileSystem::host();
+    let rooted = LocalFileSystem::rooted(directory.path())
+        .expect("budget rooted benchmark filesystem should open");
+    let mut group = c.benchmark_group("walk_handle_budget");
+    for max_open_directories in [1, 4, 64] {
+        let options = LocalListOptions::new()
+            .with_recursive()
+            .with_max_open_directories(max_open_directories)
+            .with_reopen_policy(LocalDirectoryReopenPolicy::Reopen);
+        let host_count = host
+            .list(&tree, &options)
+            .expect("host budget benchmark should open")
+            .collect::<Result<Vec<_>, _>>()
+            .expect("host budget benchmark fixture should be valid")
+            .len();
+        let rooted_count = rooted
+            .list(Path::new("tree"), &options)
+            .expect("rooted budget benchmark should open")
+            .collect::<Result<Vec<_>, _>>()
+            .expect("rooted budget benchmark fixture should be valid")
+            .len();
+
+        group.bench_function(
+            format!("host_reopen_{max_open_directories}"),
+            |bench| {
+                bench.iter(|| {
+                    let count = host
+                        .list(black_box(&tree), &options)
+                        .map(|walker| walker.count())
+                        .unwrap_or_default();
+                    black_box(count);
+                });
+            },
+        );
+        group.bench_function(
+            format!("rooted_reopen_{max_open_directories}"),
+            |bench| {
+                bench.iter(|| {
+                    let count = rooted
+                        .list(black_box(Path::new("tree")), &options)
+                        .map(|walker| walker.count())
+                        .unwrap_or_default();
+                    black_box(count);
+                });
+            },
+        );
+        black_box((host_count, rooted_count));
+    }
+    group.finish();
 }
 
 fn bench_copy(c: &mut Criterion) {
@@ -179,6 +253,7 @@ criterion_group!(
     local_files,
     bench_path_codec,
     bench_walk,
+    bench_walk_handle_budget,
     bench_copy,
     bench_writer,
     bench_rooted_writer,
