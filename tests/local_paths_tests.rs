@@ -30,9 +30,8 @@ fn test_local_paths_bind_host_paths_uses_absolute_paths() {
     let _lock = CURRENT_DIRECTORY_LOCK
         .lock()
         .expect("current-directory test lock should be available");
-    let [source, target] =
-        LocalPaths::bind_host_paths([Path::new("source"), Path::new("target")])
-            .expect("relative paths should bind against the current directory");
+    let [source, target] = LocalPaths::bind_host_paths([Path::new("source"), Path::new("target")])
+        .expect("relative paths should bind against the current directory");
 
     assert!(source.is_absolute());
     assert!(target.is_absolute());
@@ -43,20 +42,16 @@ fn test_local_paths_bind_host_paths_uses_absolute_paths() {
 /// caller-owned vector.
 #[test]
 fn test_canonical_component_decoders_accept_iterators() {
-    let relative = LocalPaths::from_canonical_components(
-        LocalFileSystemScope::Rooted,
-        ["safe", "a%25b"],
-    )
-    .expect("relative iterator components should decode");
+    let relative =
+        LocalPaths::from_canonical_components(LocalFileSystemScope::Rooted, ["safe", "a%25b"])
+            .expect("relative iterator components should decode");
     assert_eq!(Path::new("safe/a%b"), relative);
 
     #[cfg(unix)]
     {
-        let absolute = LocalPaths::from_canonical_components(
-            LocalFileSystemScope::Host,
-            ["tmp", "safe"],
-        )
-        .expect("absolute iterator components should decode");
+        let absolute =
+            LocalPaths::from_canonical_components(LocalFileSystemScope::Host, ["tmp", "safe"])
+                .expect("absolute iterator components should decode");
         assert_eq!(Path::new("/tmp/safe"), absolute);
     }
 }
@@ -65,18 +60,13 @@ fn test_canonical_component_decoders_accept_iterators() {
 #[cfg(unix)]
 #[test]
 fn test_host_canonical_components_round_trip_unix_path() {
-    let native = LocalPaths::from_canonical_components(
-        LocalFileSystemScope::Host,
-        ["tmp", "a%25b"],
-    )
-    .expect("canonical absolute path should decode");
+    let native =
+        LocalPaths::from_canonical_components(LocalFileSystemScope::Host, ["tmp", "a%25b"])
+            .expect("canonical absolute path should decode");
     assert_eq!(native, Path::new("/tmp/a%b"));
     assert_eq!(
-        LocalPaths::to_canonical_components(
-            LocalFileSystemScope::Host,
-            &native
-        )
-        .expect("native absolute path should encode"),
+        LocalPaths::to_canonical_components(LocalFileSystemScope::Host, &native)
+            .expect("native absolute path should encode"),
         vec!["tmp".to_owned(), "a%25b".to_owned()],
     );
 }
@@ -86,18 +76,13 @@ fn test_host_canonical_components_round_trip_unix_path() {
 #[cfg(windows)]
 #[test]
 fn test_host_canonical_components_round_trip_windows_drive_path() {
-    let native = LocalPaths::from_canonical_components(
-        LocalFileSystemScope::Host,
-        ["C:", "work", "file"],
-    )
-    .expect("canonical Windows absolute path should decode");
+    let native =
+        LocalPaths::from_canonical_components(LocalFileSystemScope::Host, ["C:", "work", "file"])
+            .expect("canonical Windows absolute path should decode");
     assert_eq!(native, Path::new(r"C:\work\file"));
     assert_eq!(
-        LocalPaths::to_canonical_components(
-            LocalFileSystemScope::Host,
-            &native
-        )
-        .expect("native Windows absolute path should encode"),
+        LocalPaths::to_canonical_components(LocalFileSystemScope::Host, &native)
+            .expect("native Windows absolute path should encode"),
         vec!["C:".to_owned(), "work".to_owned(), "file".to_owned(),],
     );
 }
@@ -124,9 +109,8 @@ fn test_host_canonical_components_rejects_windows_unsupported_roots() {
 /// kind.
 #[cfg(windows)]
 fn assert_windows_unsupported_absolute_path(path: &Path) {
-    let error =
-        LocalPaths::to_canonical_components(LocalFileSystemScope::Host, path)
-            .expect_err("unsupported Windows root authority must be rejected");
+    let error = LocalPaths::to_canonical_components(LocalFileSystemScope::Host, path)
+        .expect_err("unsupported Windows root authority must be rejected");
     assert!(matches!(
         error.kind(),
         LocalFileErrorKind::Unsupported | LocalFileErrorKind::InvalidPath,
@@ -136,11 +120,9 @@ fn assert_windows_unsupported_absolute_path(path: &Path) {
 /// Verifies canonical relative paths cannot escape through a parent component.
 #[test]
 fn test_rooted_canonical_components_reject_parent_escape() {
-    let error = LocalPaths::from_canonical_components(
-        LocalFileSystemScope::Rooted,
-        vec!["safe", ".."],
-    )
-    .expect_err("parent traversal must be rejected");
+    let error =
+        LocalPaths::from_canonical_components(LocalFileSystemScope::Rooted, vec!["safe", ".."])
+            .expect_err("parent traversal must be rejected");
 
     assert_eq!(LocalFileOperation::ComposePath, error.operation());
 }
@@ -149,11 +131,8 @@ fn test_rooted_canonical_components_reject_parent_escape() {
 /// degrading it to an untyped invalid-input error.
 #[test]
 fn test_rooted_canonical_components_retain_path_codec_failure() {
-    let error = LocalPaths::from_canonical_components(
-        LocalFileSystemScope::Rooted,
-        vec!["bad%"],
-    )
-    .expect_err("malformed percent escape must be rejected");
+    let error = LocalPaths::from_canonical_components(LocalFileSystemScope::Rooted, vec!["bad%"])
+        .expect_err("malformed percent escape must be rejected");
 
     assert_eq!(LocalFileErrorKind::InvalidPath, error.kind());
     assert_eq!(LocalFileOperation::ComposePath, error.operation());
@@ -167,29 +146,21 @@ fn test_rooted_canonical_components_retain_path_codec_failure() {
 #[test]
 fn test_absolute_conversion_rejects_relative_shape() {
     assert!(
-        LocalPaths::from_canonical_components(
-            LocalFileSystemScope::Host,
-            vec!["a", "%2F"],
-        )
-        .is_err()
+        LocalPaths::from_canonical_components(LocalFileSystemScope::Host, vec!["a", "%2F"],)
+            .is_err()
     );
 }
 
 /// Verifies canonical relative components round-trip through native paths.
 #[test]
 fn test_rooted_canonical_components_round_trip() {
-    let native = LocalPaths::from_canonical_components(
-        LocalFileSystemScope::Rooted,
-        vec!["safe", "a%25b"],
-    )
-    .expect("canonical relative path should decode");
+    let native =
+        LocalPaths::from_canonical_components(LocalFileSystemScope::Rooted, vec!["safe", "a%25b"])
+            .expect("canonical relative path should decode");
     assert_eq!(native, Path::new("safe/a%b"));
     assert_eq!(
-        LocalPaths::to_canonical_components(
-            LocalFileSystemScope::Rooted,
-            &native
-        )
-        .expect("native relative path should encode"),
+        LocalPaths::to_canonical_components(LocalFileSystemScope::Rooted, &native)
+            .expect("native relative path should encode"),
         vec!["safe".to_owned(), "a%25b".to_owned()],
     );
 }
@@ -205,11 +176,8 @@ fn test_rooted_canonical_components_round_trip_authority_root() {
     assert!(native.as_os_str().is_empty());
     assert_eq!(
         Vec::<String>::new(),
-        LocalPaths::to_canonical_components(
-            LocalFileSystemScope::Rooted,
-            &native,
-        )
-        .expect("the rooted authority root should encode as empty"),
+        LocalPaths::to_canonical_components(LocalFileSystemScope::Rooted, &native,)
+            .expect("the rooted authority root should encode as empty"),
     );
 }
 
@@ -220,13 +188,9 @@ fn test_rooted_canonical_components_round_trip_authority_root() {
 fn test_rooted_canonical_components_reject_native_nul() {
     use std::os::unix::ffi::OsStringExt;
 
-    let native =
-        PathBuf::from(OsString::from_vec(vec![b's', 0, b'a', b'f', b'e']));
-    let error = LocalPaths::to_canonical_components(
-        LocalFileSystemScope::Rooted,
-        &native,
-    )
-    .expect_err("native NUL must be reported as a path error");
+    let native = PathBuf::from(OsString::from_vec(vec![b's', 0, b'a', b'f', b'e']));
+    let error = LocalPaths::to_canonical_components(LocalFileSystemScope::Rooted, &native)
+        .expect_err("native NUL must be reported as a path error");
 
     assert_eq!(LocalFileErrorKind::InvalidPath, error.kind());
     assert_eq!(LocalFileOperation::ComposePath, error.operation());
@@ -240,22 +204,16 @@ fn test_rooted_canonical_components_reject_native_nul() {
 #[test]
 fn test_local_paths_is_lexically_within_accepts_descendant() {
     assert!(
-        LocalPaths::is_lexically_within(
-            Path::new("/root/a"),
-            Path::new("/root")
-        )
-        .expect("normalized paths should be comparable"),
+        LocalPaths::is_lexically_within(Path::new("/root/a"), Path::new("/root"))
+            .expect("normalized paths should be comparable"),
     );
 }
 
 /// Verifies that dot components are rejected instead of silently normalized.
 #[test]
 fn test_local_paths_is_lexically_within_rejects_dot_components() {
-    let error = LocalPaths::is_lexically_within(
-        Path::new("/root/../escape"),
-        Path::new("/root"),
-    )
-    .expect_err("parent traversal must be rejected");
+    let error = LocalPaths::is_lexically_within(Path::new("/root/../escape"), Path::new("/root"))
+        .expect_err("parent traversal must be rejected");
 
     assert_eq!(LocalFileErrorKind::InvalidPath, error.kind());
     assert_eq!(LocalFileOperation::ComposePath, error.operation());
@@ -305,8 +263,5 @@ fn test_local_file_names_rejects_reserved_portable_name() {
             "expected portable name to be rejected: {invalid:?}",
         );
     }
-    assert!(
-        LocalFileNames::validate_portable(OsStr::new(&"x".repeat(256)))
-            .is_err()
-    );
+    assert!(LocalFileNames::validate_portable(OsStr::new(&"x".repeat(256))).is_err());
 }

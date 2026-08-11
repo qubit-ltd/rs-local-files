@@ -50,8 +50,7 @@ impl Display for LocalCopyFailure {
             self.details.request_target_path.as_deref(),
             self.details.failed_source_path.as_deref(),
             self.details.failed_target_path.as_deref(),
-        ) && (request_source != failed_source
-            || request_target != failed_target)
+        ) && (request_source != failed_source || request_target != failed_target)
         {
             write!(
                 formatter,
@@ -103,15 +102,8 @@ impl LocalCopyFailure {
         target: &Path,
         error: LocalCopyDirError,
     ) -> Self {
-        let (
-            stage,
-            failed_source,
-            failed_target,
-            stats,
-            staging_path,
-            cleanup_error,
-            primary,
-        ) = error.into_parts();
+        let (stage, failed_source, failed_target, stats, staging_path, cleanup_error, primary) =
+            error.into_parts();
         let partial_stats = LocalCopyStats::from_internal(stats);
         let state = copy_failure_state(stage, partial_stats);
         let primary_kind = primary.kind();
@@ -134,8 +126,7 @@ impl LocalCopyFailure {
             .as_ref()
             .and(staging_path.as_deref())
             .map(Path::to_path_buf);
-        let mut failure =
-            Self::new(error, state, partial_stats, staging_path, cleanup_error);
+        let mut failure = Self::new(error, state, partial_stats, staging_path, cleanup_error);
         failure.details.failed_source_path = Some(failed_source);
         failure.details.failed_target_path = Some(failed_target);
         failure
@@ -208,16 +199,12 @@ const fn copy_failure_state(
         | LocalCopyDirStage::InspectSourceEntry
         | LocalCopyDirStage::ReadSourceDirectory
         | LocalCopyDirStage::SynchronizeFile
-        | LocalCopyDirStage::CleanupTemporaryFile => {
-            LocalCopyFailureState::Unchanged
-        }
+        | LocalCopyDirStage::CleanupTemporaryFile => LocalCopyFailureState::Unchanged,
         LocalCopyDirStage::PrepareDestination
         | LocalCopyDirStage::CopyFileContents
         | LocalCopyDirStage::PreservePermissions
         | LocalCopyDirStage::CommitFile
-        | LocalCopyDirStage::UpdateStatistics => {
-            LocalCopyFailureState::Indeterminate
-        }
+        | LocalCopyDirStage::UpdateStatistics => LocalCopyFailureState::Indeterminate,
     }
 }
 
