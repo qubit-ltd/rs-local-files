@@ -50,11 +50,29 @@ impl Read for LocalFileReader {
         &mut self,
         buffers: &mut [IoSliceMut<'_>],
     ) -> io::Result<usize> {
-        #[cfg(windows)]
+        #[cfg(any(windows, feature = "internal-test-support"))]
         {
             let mut total = 0;
             for buffer in buffers {
-                let count = self.file.read(buffer)?;
+                #[cfg(feature = "internal-test-support")]
+                let result = if total > 0 {
+                    if crate::local::test_support_enabled(
+                        "local-file-reader-vectored-read-after-first",
+                    ) {
+                        Err(io::Error::other("injected vectored read failure"))
+                    } else {
+                        self.file.read(buffer)
+                    }
+                } else {
+                    self.file.read(buffer)
+                };
+                #[cfg(not(feature = "internal-test-support"))]
+                let result = self.file.read(buffer);
+                let count = match result {
+                    Ok(count) => count,
+                    Err(_) if total > 0 => return Ok(total),
+                    Err(error) => return Err(error),
+                };
                 total += count;
                 if count < buffer.len() {
                     break;
@@ -62,7 +80,7 @@ impl Read for LocalFileReader {
             }
             Ok(total)
         }
-        #[cfg(not(windows))]
+        #[cfg(all(not(windows), not(feature = "internal-test-support")))]
         self.file.read_vectored(buffers)
     }
 }
