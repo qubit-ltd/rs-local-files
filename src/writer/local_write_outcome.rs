@@ -28,7 +28,7 @@ pub struct LocalWriteOutcome {
     /// Whether requested durability synchronization completed.
     durable: bool,
     /// Bytes accepted by the writer stream.
-    bytes_written: u64,
+    bytes_written: usize,
     /// Failure state retained when a stream failure preceded terminal cleanup.
     failure_state: Option<LocalWriteFailureState>,
 }
@@ -47,7 +47,7 @@ impl LocalWriteOutcome {
         atomic: bool,
         publication_method: LocalWritePublicationMethod,
         durable: bool,
-        bytes_written: u64,
+        bytes_written: usize,
         failure_state: Option<LocalWriteFailureState>,
     ) -> Self {
         Self {
@@ -85,7 +85,7 @@ impl LocalWriteOutcome {
 
     /// Returns the number of bytes accepted by the writer stream.
     #[must_use]
-    pub const fn bytes_written(self) -> u64 {
+    pub const fn bytes_written(self) -> usize {
         self.bytes_written
     }
 
