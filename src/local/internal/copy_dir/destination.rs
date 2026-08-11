@@ -54,8 +54,7 @@ pub(super) fn ensure_copy_destination_dir(
     conflict: LocalCopyConflictPolicy,
     type_conflict: LocalCopyTypeConflictPolicy,
 ) -> Result<CopyDestinationAction> {
-    let action =
-        prepare_existing_directory_destination(dst, conflict, type_conflict)?;
+    let action = prepare_existing_directory_destination(dst, conflict, type_conflict)?;
     if action != CopyDestinationAction::Create {
         return Ok(action);
     }
@@ -119,9 +118,7 @@ pub(super) fn existing_file_destination_should_be_skipped(
 /// # Errors
 ///
 /// Returns metadata errors other than `NotFound`.
-pub(super) fn destination_metadata_if_exists(
-    dst: &Path,
-) -> Result<Option<fs::Metadata>> {
+pub(super) fn destination_metadata_if_exists(dst: &Path) -> Result<Option<fs::Metadata>> {
     match inspect_destination_metadata(dst) {
         Ok(metadata) => Ok(Some(metadata)),
         Err(error) if error.kind() == ErrorKind::NotFound => Ok(None),
@@ -138,9 +135,7 @@ pub(super) fn destination_metadata_if_exists(
 /// # Errors
 ///
 /// Returns the I/O error reported while inspecting or removing the directory.
-pub(super) fn remove_destination_directory_if_unchanged(
-    dst: &Path,
-) -> Result<()> {
+pub(super) fn remove_destination_directory_if_unchanged(dst: &Path) -> Result<()> {
     match inspect_destination_metadata(dst) {
         Ok(metadata) if is_real_directory(&metadata) => fs::remove_dir_all(dst),
         Ok(_) => Ok(()),
@@ -228,9 +223,7 @@ fn create_copy_destination_dir(dst: &Path) -> Result<bool> {
     reconcile_directory_creation(dst, result, |path| {
         #[cfg(feature = "internal-test-support")]
         if test_support::is_enabled("copy-directory-race-inspect") {
-            return Err(Error::other(
-                "injected directory race inspection failure",
-            ));
+            return Err(Error::other("injected directory race inspection failure"));
         }
         inspect_destination_metadata(path)
     })

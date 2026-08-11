@@ -46,10 +46,8 @@ fn test_host_file_system_space_observes_existing_directory() {
 #[test]
 fn test_rooted_file_system_space_observes_nearest_existing_ancestor() {
     let root = tempdir().expect("temporary root should be created");
-    std::fs::create_dir(root.path().join("nested"))
-        .expect("nested directory should be created");
-    let filesystem = LocalFileSystem::rooted(root.path())
-        .expect("root authority should open");
+    std::fs::create_dir(root.path().join("nested")).expect("nested directory should be created");
+    let filesystem = LocalFileSystem::rooted(root.path()).expect("root authority should open");
     let space = filesystem
         .space_at(std::path::Path::new("nested/missing/child"))
         .expect("missing rooted descendants should be probeable");
@@ -93,11 +91,9 @@ fn test_host_capabilities_match_host_no_replace_backend() {
 /// Verifies that generated names are portable single path components.
 #[test]
 fn test_local_file_names_generate_random_portable_components() {
-    let first = LocalFileNames::random_name()
-        .expect("a random filename should be generated");
-    let second =
-        LocalFileNames::random_name_with(Some("prefix-"), Some(".tmp"))
-            .expect("a random filename with affixes should be generated");
+    let first = LocalFileNames::random_name().expect("a random filename should be generated");
+    let second = LocalFileNames::random_name_with(Some("prefix-"), Some(".tmp"))
+        .expect("a random filename with affixes should be generated");
 
     assert_ne!(first, second);
     let second_text = second
