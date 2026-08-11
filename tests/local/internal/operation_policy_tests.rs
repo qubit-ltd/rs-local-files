@@ -27,8 +27,7 @@ fn test_operation_policy_honors_required_durability() {
         .rename(
             &source,
             &target,
-            &LocalRenameOptions::new()
-                .with_durability(LocalDurabilityRequirement::Required),
+            &LocalRenameOptions::new().with_durability(LocalDurabilityRequirement::Required),
         )
         .expect("host rename should meet its required durability policy");
 

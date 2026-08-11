@@ -32,17 +32,9 @@ impl LocalFileSystemProtocols {
     pub(crate) const fn detect_host() -> Self {
         Self {
             rooted_operations: cfg!(any(unix, windows)),
-            atomic_rename: cfg!(any(
-                target_os = "linux",
-                target_os = "macos",
-                windows
-            )),
+            atomic_rename: cfg!(any(target_os = "linux", target_os = "macos", windows)),
             atomic_replace: cfg!(any(unix, windows)),
-            atomic_temp_persist: cfg!(any(
-                target_os = "linux",
-                target_os = "macos",
-                windows
-            )),
+            atomic_temp_persist: cfg!(any(target_os = "linux", target_os = "macos", windows)),
             durable_rename: cfg!(unix),
             durable_file_copy: cfg!(unix),
         }
