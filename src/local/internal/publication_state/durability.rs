@@ -46,16 +46,14 @@ pub(crate) fn published_durability(
     match requirement {
         LocalDurabilityRequirement::NotRequired => Ok(false),
         LocalDurabilityRequirement::Preferred => Ok(sync().is_ok()),
-        LocalDurabilityRequirement::Required => {
-            sync().map(|()| true).map_err(|error| {
-                LocalFileError::from_io(
-                    operation,
-                    Some(source.to_path_buf()),
-                    Some(target.to_path_buf()),
-                    error,
-                )
-                .with_kind(LocalFileErrorKind::PublicationIncomplete)
-            })
-        }
+        LocalDurabilityRequirement::Required => sync().map(|()| true).map_err(|error| {
+            LocalFileError::from_io(
+                operation,
+                Some(source.to_path_buf()),
+                Some(target.to_path_buf()),
+                error,
+            )
+            .with_kind(LocalFileErrorKind::PublicationIncomplete)
+        }),
     }
 }

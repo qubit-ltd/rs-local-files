@@ -46,10 +46,7 @@ impl Read for LocalFileReader {
     }
 
     /// Reads bytes into multiple buffers from the current offset.
-    fn read_vectored(
-        &mut self,
-        buffers: &mut [IoSliceMut<'_>],
-    ) -> io::Result<usize> {
+    fn read_vectored(&mut self, buffers: &mut [IoSliceMut<'_>]) -> io::Result<usize> {
         #[cfg(any(windows, feature = "internal-test-support"))]
         {
             let mut total = 0;

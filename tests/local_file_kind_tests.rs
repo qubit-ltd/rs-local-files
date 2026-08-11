@@ -37,8 +37,7 @@ fn test_host_metadata_classifies_fifo_and_socket() {
     let result = unsafe { libc::mkfifo(fifo_name.as_ptr(), 0o600) };
     assert_eq!(0, result, "FIFO fixture must be created");
     let socket_path = directory.path().join("socket");
-    let _socket =
-        UnixListener::bind(&socket_path).expect("socket fixture must bind");
+    let _socket = UnixListener::bind(&socket_path).expect("socket fixture must bind");
     let filesystem = LocalFileSystem::host();
 
     assert_eq!(
@@ -63,8 +62,7 @@ fn test_host_metadata_classifies_fifo_and_socket() {
 fn test_rooted_metadata_classifies_fifo_and_socket() {
     use std::os::unix::ffi::OsStrExt;
 
-    let directory =
-        tempdir().expect("rooted special-entry directory must exist");
+    let directory = tempdir().expect("rooted special-entry directory must exist");
     let fifo = directory.path().join("fifo");
     let fifo_name = CString::new(fifo.as_os_str().as_bytes())
         .expect("FIFO path must not contain an interior NUL");
@@ -72,10 +70,8 @@ fn test_rooted_metadata_classifies_fifo_and_socket() {
     let result = unsafe { libc::mkfifo(fifo_name.as_ptr(), 0o600) };
     assert_eq!(0, result, "rooted FIFO fixture must be created");
     let socket_path = directory.path().join("socket");
-    let _socket = UnixListener::bind(&socket_path)
-        .expect("rooted socket fixture must bind");
-    let filesystem =
-        LocalFileSystem::rooted(directory.path()).expect("root must open");
+    let _socket = UnixListener::bind(&socket_path).expect("rooted socket fixture must bind");
+    let filesystem = LocalFileSystem::rooted(directory.path()).expect("root must open");
 
     assert_eq!(
         LocalFileKind::Fifo,
@@ -99,8 +95,8 @@ fn test_rooted_metadata_classifies_fifo_and_socket() {
 #[test]
 fn test_host_metadata_classifies_character_device() {
     let path = Path::new("/dev/null");
-    let metadata = std::fs::symlink_metadata(path)
-        .expect("Unix null device must be available for this test");
+    let metadata =
+        std::fs::symlink_metadata(path).expect("Unix null device must be available for this test");
     assert!(metadata.file_type().is_char_device());
 
     assert_eq!(

@@ -79,9 +79,7 @@ fn test_local_file_system_create_temp_resources_create_missing_parent() {
     let directory_parent = workspace.path().join("directory-parent/nested");
 
     let mut file = LocalFileSystem::host()
-        .create_temp_file(
-            &LocalTempFileOptions::new().with_parent(&file_parent),
-        )
+        .create_temp_file(&LocalTempFileOptions::new().with_parent(&file_parent))
         .expect("temporary file should create its missing parent");
     let file_path = file.path().to_path_buf();
     assert!(file_parent.is_dir());
@@ -89,9 +87,7 @@ fn test_local_file_system_create_temp_resources_create_missing_parent() {
     file.cleanup().expect("temporary file should be removed");
 
     let mut directory = LocalFileSystem::host()
-        .create_temp_directory(
-            &LocalTempDirectoryOptions::new().with_parent(&directory_parent),
-        )
+        .create_temp_directory(&LocalTempDirectoryOptions::new().with_parent(&directory_parent))
         .expect("temporary directory should create its missing parent");
     let directory_path = directory.path().to_path_buf();
     assert!(directory_parent.is_dir());
@@ -108,9 +104,7 @@ fn test_local_file_system_create_temp_resources_create_missing_parent() {
 fn test_local_temp_file_persist_rejects_interior_nul_target() {
     let parent = tempdir().expect("temporary parent should be created");
     let temporary = LocalFileSystem::host()
-        .create_temp_file(
-            &LocalTempFileOptions::new().with_parent(parent.path()),
-        )
+        .create_temp_file(&LocalTempFileOptions::new().with_parent(parent.path()))
         .expect("temporary file should be created");
     let source = temporary.path().to_path_buf();
     let target = parent
@@ -122,8 +116,7 @@ fn test_local_temp_file_persist_rejects_interior_nul_target() {
         .expect_err("interior NUL must be rejected by native no-replace move");
     assert_eq!(LocalFileErrorKind::InvalidPath, error.kind());
     assert_eq!(LocalPersistFailureState::NotPublished, error.state());
-    let (_io, mut temporary, _requested, _resolved, _stage) =
-        error.into_parts();
+    let (_io, mut temporary, _requested, _resolved, _stage) = error.into_parts();
     temporary
         .cleanup()
         .expect("unpublished temporary file should retain cleanup authority");

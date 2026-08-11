@@ -115,9 +115,7 @@ impl LocalRelativePath {
     pub fn join_component(&self, child: &OsStr) -> Result<Self> {
         let child_path = Path::new(child);
         let mut components = child_path.components();
-        if !matches!(components.next(), Some(Component::Normal(_)))
-            || components.next().is_some()
-        {
+        if !matches!(components.next(), Some(Component::Normal(_))) || components.next().is_some() {
             return Err(invalid_relative_path_error(child_path));
         }
         self.join(child_path)
