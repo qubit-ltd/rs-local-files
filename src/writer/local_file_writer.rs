@@ -38,7 +38,7 @@ pub struct LocalFileWriter {
     /// Current observable session state.
     state: LocalWriterState,
     /// Bytes accepted by successful stream writes.
-    bytes_written: u64,
+    bytes_written: usize,
     /// Failure state retained after an uncertain stream write.
     failure_state: Option<LocalWriteFailureState>,
 }
@@ -346,7 +346,7 @@ impl LocalFileWriter {
     /// - `written`: Bytes accepted by the backend.
     #[inline]
     fn record_written(&mut self, written: usize) {
-        self.bytes_written = self.bytes_written.saturating_add(written as u64);
+        self.bytes_written = self.bytes_written.saturating_add(written);
     }
 
     /// Marks an ordinary stream error as indeterminate.
