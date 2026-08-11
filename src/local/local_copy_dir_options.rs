@@ -103,7 +103,10 @@ impl LocalCopyDirOptions {
 
     /// Sets the synchronization policy for staged regular files.
     #[inline(always)]
-    pub(crate) const fn with_durability(mut self, durability: LocalDurabilityRequirement) -> Self {
+    pub(crate) const fn with_durability(
+        mut self,
+        durability: LocalDurabilityRequirement,
+    ) -> Self {
         self.durability = durability;
         self
     }
@@ -131,7 +134,10 @@ impl LocalCopyDirOptions {
     /// # Returns
     /// Updated directory copy options.
     #[inline(always)]
-    pub(crate) const fn with_conflict(mut self, conflict: LocalCopyConflictPolicy) -> Self {
+    pub(crate) const fn with_conflict(
+        mut self,
+        conflict: LocalCopyConflictPolicy,
+    ) -> Self {
         self.conflict = conflict;
         self
     }
@@ -141,7 +147,9 @@ impl LocalCopyDirOptions {
     /// # Returns
     /// Policy applied to source and destination type mismatches.
     #[inline(always)]
-    pub(crate) const fn type_conflict_policy(&self) -> LocalCopyTypeConflictPolicy {
+    pub(crate) const fn type_conflict_policy(
+        &self,
+    ) -> LocalCopyTypeConflictPolicy {
         self.type_conflict
     }
 
@@ -175,7 +183,10 @@ impl LocalCopyDirOptions {
     /// # Returns
     /// Updated directory copy options.
     #[inline(always)]
-    pub(crate) const fn with_symlink_policy(mut self, symlink_policy: LocalSymlinkPolicy) -> Self {
+    pub(crate) const fn with_symlink_policy(
+        mut self,
+        symlink_policy: LocalSymlinkPolicy,
+    ) -> Self {
         self.symlink_policy = symlink_policy;
         self
     }
@@ -227,7 +238,10 @@ impl LocalCopyDirOptions {
     /// # Returns
     /// Updated directory copy options.
     #[allow(dead_code)]
-    pub(crate) const fn with_open_retry_timeout(mut self, timeout: Duration) -> Self {
+    pub(crate) const fn with_open_retry_timeout(
+        mut self,
+        timeout: Duration,
+    ) -> Self {
         self.open_retry_timeout = Some(timeout);
         self
     }
