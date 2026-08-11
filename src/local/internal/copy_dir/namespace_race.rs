@@ -52,7 +52,9 @@ where
         Ok(()) => Ok(true),
         Err(error) if error.kind() == ErrorKind::AlreadyExists => {
             let metadata = inspect(dst)?;
-            if is_real_directory(&metadata) && !test_non_directory_race_enabled() {
+            if is_real_directory(&metadata)
+                && !test_non_directory_race_enabled()
+            {
                 Ok(false)
             } else {
                 Err(error)
@@ -92,7 +94,10 @@ pub(super) fn removable_non_directory_metadata(
     result: Result<fs::Metadata>,
 ) -> Result<Option<fs::Metadata>> {
     match result {
-        Ok(metadata) if is_real_directory(&metadata) || test_removal_directory_race_enabled() => {
+        Ok(metadata)
+            if is_real_directory(&metadata)
+                || test_removal_directory_race_enabled() =>
+        {
             Ok(None)
         }
         Ok(metadata) => Ok(Some(metadata)),

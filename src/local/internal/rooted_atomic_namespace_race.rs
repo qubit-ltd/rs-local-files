@@ -42,7 +42,11 @@ pub(in crate::local) fn verify_rooted_atomic_destination_identity(
     requested_path: &std::path::Path,
     staged_file: &RootedStagedFile,
 ) -> Result<(), LocalAtomicWriteError> {
-    match rooted_destination_identity_matches(staged_file.parent(), name, destination) {
+    match rooted_destination_identity_matches(
+        staged_file.parent(),
+        name,
+        destination,
+    ) {
         Ok(true) => Ok(()),
         Ok(false) => Err(identity_error(
             requested_path,
@@ -92,7 +96,10 @@ fn identity_error(
 }
 
 /// Classifies a rooted identity mismatch before replacement.
-fn rooted_mismatch_state(parent: &File, name: &CString) -> LocalAtomicDestinationState {
+fn rooted_mismatch_state(
+    parent: &File,
+    name: &CString,
+) -> LocalAtomicDestinationState {
     #[cfg(feature = "internal-test-support")]
     if super::test_support::is_enabled("rooted-identity-missing") {
         return LocalAtomicDestinationState::Missing;
