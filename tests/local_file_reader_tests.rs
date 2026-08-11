@@ -65,7 +65,8 @@ fn test_local_file_reader_supports_vectored_reads() {
         .expect("regular file should open for reading");
     let mut first = [0_u8; 2];
     let mut second = [0_u8; 4];
-    let mut buffers = [IoSliceMut::new(&mut first), IoSliceMut::new(&mut second)];
+    let mut buffers =
+        [IoSliceMut::new(&mut first), IoSliceMut::new(&mut second)];
 
     let count = reader
         .read_vectored(&mut buffers)
@@ -79,7 +80,8 @@ fn test_local_file_reader_supports_vectored_reads() {
 /// Verifies a vectored read retains bytes read before a later native error.
 #[cfg(feature = "internal-test-support")]
 #[test]
-fn test_local_file_reader_vectored_read_retains_prior_bytes_after_later_error() {
+fn test_local_file_reader_vectored_read_retains_prior_bytes_after_later_error()
+{
     let directory = tempdir().expect("temporary directory should be created");
     let path = directory.path().join("payload");
     std::fs::write(&path, b"abcdef").expect("fixture should be written");
@@ -87,11 +89,13 @@ fn test_local_file_reader_vectored_read_retains_prior_bytes_after_later_error() 
     let mut reader = LocalFileSystem::host()
         .open_reader(&path, &LocalReadOptions::new())
         .expect("regular file should open for reading");
-    let _fault = install_test_fault("local-file-reader-vectored-read-after-first")
-        .expect("test fault should install");
+    let _fault =
+        install_test_fault("local-file-reader-vectored-read-after-first")
+            .expect("test fault should install");
     let mut first = [0_u8; 2];
     let mut second = [0_u8; 4];
-    let mut buffers = [IoSliceMut::new(&mut first), IoSliceMut::new(&mut second)];
+    let mut buffers =
+        [IoSliceMut::new(&mut first), IoSliceMut::new(&mut second)];
 
     let count = reader
         .read_vectored(&mut buffers)
