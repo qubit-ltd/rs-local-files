@@ -96,7 +96,9 @@ impl CopyDirFrame {
     ///
     /// The yielded result contains the filesystem error when an entry cannot
     /// be read.
-    pub(super) fn next_entry(&mut self) -> Option<std::io::Result<fs::DirEntry>> {
+    pub(super) fn next_entry(
+        &mut self,
+    ) -> Option<std::io::Result<fs::DirEntry>> {
         self.entries.next()
     }
 }

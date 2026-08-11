@@ -112,7 +112,10 @@ impl<T> LocalAtomicCommitError<T> {
     /// The finalized writer failure when recovery remained available, or the
     /// original terminal failure when no writer was retained.
     #[inline]
-    pub(crate) fn into_final_error_with<F>(self, finalize_writer: F) -> LocalAtomicWriteError
+    pub(crate) fn into_final_error_with<F>(
+        self,
+        finalize_writer: F,
+    ) -> LocalAtomicWriteError
     where
         F: FnOnce(T, LocalAtomicWriteError) -> LocalAtomicWriteError,
     {
@@ -182,12 +185,11 @@ mod tests {
 
     #[test]
     fn finalizes_or_returns_terminal_error() {
-        let result = LocalAtomicCommitError::new(error(), Some(3_u8)).into_final_error_with(
-            |writer, error| {
+        let result = LocalAtomicCommitError::new(error(), Some(3_u8))
+            .into_final_error_with(|writer, error| {
                 assert_eq!(writer, 3);
                 error
-            },
-        );
+            });
         assert_eq!(result.kind(), io::ErrorKind::Other);
         let terminal = LocalAtomicCommitError::<u8>::new(error(), None);
         assert!(terminal.writer().is_none());
