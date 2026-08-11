@@ -38,12 +38,7 @@ impl RootedLocalFileSystem {
         )
         .map(|file| {
             file.map_or_else(
-                || {
-                    LocalFileSystemLimits::new(
-                        crate::SizeLimit::Unknown,
-                        crate::SizeLimit::Unknown,
-                    )
-                },
+                || LocalFileSystemLimits::new(crate::SizeLimit::Unknown, crate::SizeLimit::Unknown),
                 |file| crate::capability::probe_limits(&file),
             )
         })
@@ -77,11 +72,11 @@ impl RootedLocalFileSystem {
         symlink_policy: LocalSymlinkPolicy,
     ) -> LocalResult<LocalFileMetadata> {
         if path.as_os_str().is_empty() {
-            return self.root.metadata().map(rooted_metadata).map_err(
-                |error| {
-                    rooted_io_error(LocalFileOperation::Metadata, path, error)
-                },
-            );
+            return self
+                .root
+                .metadata()
+                .map(rooted_metadata)
+                .map_err(|error| rooted_io_error(LocalFileOperation::Metadata, path, error));
         }
         let relative = resolve_rooted_path(
             &self.root,
@@ -93,8 +88,6 @@ impl RootedLocalFileSystem {
         self.root
             .symlink_metadata(&relative)
             .map(rooted_metadata)
-            .map_err(|error| {
-                rooted_io_error(LocalFileOperation::Metadata, path, error)
-            })
+            .map_err(|error| rooted_io_error(LocalFileOperation::Metadata, path, error))
     }
 }

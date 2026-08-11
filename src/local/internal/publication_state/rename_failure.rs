@@ -19,9 +19,7 @@ use crate::LocalRenameFailureState;
 ///
 /// The returned failure proves that the destination namespace is unchanged.
 #[inline(always)]
-pub(crate) fn rename_failure_unchanged(
-    error: LocalFileError,
-) -> LocalRenameFailure {
+pub(crate) fn rename_failure_unchanged(error: LocalFileError) -> LocalRenameFailure {
     LocalRenameFailure::new(error, LocalRenameFailureState::Unchanged)
 }
 
@@ -30,9 +28,7 @@ pub(crate) fn rename_failure_unchanged(
 /// The returned failure records that the destination was renamed before the
 /// subsequent error occurred.
 #[inline]
-pub(crate) fn rename_failure_renamed(
-    error: LocalFileError,
-) -> LocalRenameFailure {
+pub(crate) fn rename_failure_renamed(error: LocalFileError) -> LocalRenameFailure {
     LocalRenameFailure::new(error, LocalRenameFailureState::Renamed)
 }
 
@@ -55,9 +51,9 @@ pub(crate) fn rename_failure_after_native_attempt(
     error: io::Error,
 ) -> LocalRenameFailure {
     let state = match error.kind() {
-        io::ErrorKind::AlreadyExists
-        | io::ErrorKind::CrossesDevices
-        | io::ErrorKind::NotFound => LocalRenameFailureState::Unchanged,
+        io::ErrorKind::AlreadyExists | io::ErrorKind::CrossesDevices | io::ErrorKind::NotFound => {
+            LocalRenameFailureState::Unchanged
+        }
         _ => LocalRenameFailureState::Indeterminate,
     };
     LocalRenameFailure::new(

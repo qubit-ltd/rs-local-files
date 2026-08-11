@@ -39,16 +39,14 @@ where
     if std::env::var_os(TEST_FAULT_ENV)
         .is_some_and(|selected| selected == std::ffi::OsStr::new(fault))
     {
-        let _fault = install_test_fault(fault)
-            .expect("test fault controller should install");
+        let _fault = install_test_fault(fault).expect("test fault controller should install");
         action();
         return;
     }
     if std::env::var_os(TEST_FAULT_CHILD_ENV).is_some() {
         return;
     }
-    let executable =
-        std::env::current_exe().expect("test executable should be available");
+    let executable = std::env::current_exe().expect("test executable should be available");
     let status = std::process::Command::new(executable)
         .arg("--exact")
         .arg(test_name)
@@ -81,11 +79,9 @@ fn test_rename_missing_source_reports_unchanged() {
 #[cfg(all(feature = "internal-test-support", not(windows)))]
 #[test]
 fn test_rename_parent_durability_failure_reports_renamed() {
-    const TEST_NAME: &str =
-        "test_rename_parent_durability_failure_reports_renamed";
+    const TEST_NAME: &str = "test_rename_parent_durability_failure_reports_renamed";
     run_in_test_fault_process(TEST_NAME, "rename-parent-sync", || {
-        let directory =
-            tempfile::tempdir().expect("temporary directory should be created");
+        let directory = tempfile::tempdir().expect("temporary directory should be created");
         let source = directory.path().join("source");
         let target = directory.path().join("target");
         std::fs::write(&source, b"payload").expect("source should be written");
@@ -109,11 +105,9 @@ fn test_rename_parent_durability_failure_reports_renamed() {
 #[cfg(feature = "internal-test-support")]
 #[test]
 fn test_rename_native_io_failure_reports_indeterminate() {
-    const TEST_NAME: &str =
-        "test_rename_native_io_failure_reports_indeterminate";
+    const TEST_NAME: &str = "test_rename_native_io_failure_reports_indeterminate";
     run_in_test_fault_process(TEST_NAME, "rename-native-indeterminate", || {
-        let directory =
-            tempfile::tempdir().expect("temporary directory should be created");
+        let directory = tempfile::tempdir().expect("temporary directory should be created");
         let source = directory.path().join("source");
         let target = directory.path().join("target");
         std::fs::write(&source, b"payload").expect("source should be written");

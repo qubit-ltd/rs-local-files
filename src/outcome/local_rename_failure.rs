@@ -47,10 +47,7 @@ impl Error for LocalRenameFailure {
 impl LocalRenameFailure {
     /// Creates a typed rename failure from implementation facts.
     #[must_use]
-    pub(crate) const fn new(
-        error: LocalFileError,
-        state: LocalRenameFailureState,
-    ) -> Self {
+    pub(crate) const fn new(error: LocalFileError, state: LocalRenameFailureState) -> Self {
         Self { error, state }
     }
 
@@ -72,5 +69,4 @@ impl LocalRenameFailure {
 }
 
 /// Result returned by unified rename operations.
-pub type LocalRenameResult =
-    Result<super::LocalRenameOutcome, LocalRenameFailure>;
+pub type LocalRenameResult = Result<super::LocalRenameOutcome, LocalRenameFailure>;
