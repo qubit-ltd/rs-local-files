@@ -28,13 +28,11 @@ pub enum LocalPersistFailureState {
 
 impl LocalPersistFailureState {
     /// Classifies a failure from its stage and native error kind.
-    pub(crate) const fn from_error(
-        stage: LocalPersistStage,
-        kind: io::ErrorKind,
-    ) -> Self {
+    pub(crate) const fn from_error(stage: LocalPersistStage, kind: io::ErrorKind) -> Self {
         match stage {
-            LocalPersistStage::ResolveTarget
-            | LocalPersistStage::PrepareParent => Self::NotPublished,
+            LocalPersistStage::ResolveTarget | LocalPersistStage::PrepareParent => {
+                Self::NotPublished
+            }
             LocalPersistStage::InstallDestination
                 if matches!(
                     kind,
