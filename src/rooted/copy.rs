@@ -87,16 +87,15 @@ pub(super) fn copy(
         ));
     }
 
-    let source_metadata =
-        root.symlink_metadata(source).map_err(|source_error| {
-            error(
-                Stage::InspectSource,
-                source,
-                destination,
-                Statistics::default(),
-                source_error,
-            )
-        })?;
+    let source_metadata = root.symlink_metadata(source).map_err(|source_error| {
+        error(
+            Stage::InspectSource,
+            source,
+            destination,
+            Statistics::default(),
+            source_error,
+        )
+    })?;
     match source_metadata.kind() {
         EntryKind::File => copy_file(
             root,
@@ -136,16 +135,15 @@ pub(super) fn copy(
             unsupported_source_error(),
         )),
         #[cfg(unix)]
-        EntryKind::Fifo
-        | EntryKind::Socket
-        | EntryKind::BlockDevice
-        | EntryKind::CharDevice => Err(error(
-            Stage::InspectSource,
-            source,
-            destination,
-            Statistics::default(),
-            unsupported_source_error(),
-        )),
+        EntryKind::Fifo | EntryKind::Socket | EntryKind::BlockDevice | EntryKind::CharDevice => {
+            Err(error(
+                Stage::InspectSource,
+                source,
+                destination,
+                Statistics::default(),
+                unsupported_source_error(),
+            ))
+        }
     }
 }
 
@@ -159,8 +157,7 @@ fn copy_tree(
     durability: LocalDurabilityRequirement,
 ) -> Result<Statistics, Error> {
     let mut statistics = Statistics::default();
-    if !prepare_directory(root, source, destination, options, &mut statistics)?
-    {
+    if !prepare_directory(root, source, destination, options, &mut statistics)? {
         return Ok(statistics);
     }
     let mut work = vec![Work::Enter {
@@ -190,9 +187,7 @@ fn copy_tree(
                 }
                 active_sources.push(source.clone());
                 #[cfg(feature = "internal-test-support")]
-                if crate::local::test_support_enabled(
-                    "rooted-copy-directory-read",
-                ) {
+                if crate::local::test_support_enabled("rooted-copy-directory-read") {
                     return Err(error(
                         Stage::ReadSourceDirectory,
                         &source,
@@ -201,16 +196,15 @@ fn copy_tree(
                         io::Error::from(ErrorKind::PermissionDenied),
                     ));
                 }
-                let entries =
-                    root.read_dir(&source).map_err(|source_error| {
-                        error(
-                            Stage::ReadSourceDirectory,
-                            &source,
-                            &destination,
-                            statistics,
-                            source_error,
-                        )
-                    })?;
+                let entries = root.read_dir(&source).map_err(|source_error| {
+                    error(
+                        Stage::ReadSourceDirectory,
+                        &source,
+                        &destination,
+                        statistics,
+                        source_error,
+                    )
+                })?;
                 work.push(Work::Finish {
                     source: source.clone(),
                     destination: destination.clone(),
@@ -220,14 +214,12 @@ fn copy_tree(
                     // `Root::read_dir` constructs entries only from native
                     // directory names, which are guaranteed normal relative
                     // components. Revalidating them cannot fail.
-                    let source_child =
-                        source.join_component(entry.name()).expect(
-                            "root directory entry names are normal components",
-                        );
-                    let destination_child =
-                        destination.join_component(entry.name()).expect(
-                            "root directory entry names are normal components",
-                        );
+                    let source_child = source
+                        .join_component(entry.name())
+                        .expect("root directory entry names are normal components");
+                    let destination_child = destination
+                        .join_component(entry.name())
+                        .expect("root directory entry names are normal components");
                     match entry.metadata().kind() {
                         EntryKind::File => {
                             statistics = copy_file(
@@ -275,9 +267,8 @@ fn copy_tree(
                                             copy_error.into_io_error(),
                                         )
                                     })?;
-                                let resolved_metadata = root
-                                    .symlink_metadata(&resolved)
-                                    .map_err(|source_error| {
+                                let resolved_metadata =
+                                    root.symlink_metadata(&resolved).map_err(|source_error| {
                                         error(
                                             Stage::InspectSourceEntry,
                                             &source_child,
@@ -286,9 +277,7 @@ fn copy_tree(
                                             source_error,
                                         )
                                     })?;
-                                if resolved_metadata.kind()
-                                    == EntryKind::Directory
-                                {
+                                if resolved_metadata.kind() == EntryKind::Directory {
                                     if prepare_directory(
                                         root,
                                         &resolved,
@@ -334,14 +323,7 @@ fn copy_tree(
                 destination,
                 metadata,
             } => {
-                preserve_permissions(
-                    root,
-                    &source,
-                    &destination,
-                    metadata,
-                    options,
-                    statistics,
-                )?;
+                preserve_permissions(root, &source, &destination, metadata, options, statistics)?;
                 active_sources.pop();
             }
         }
@@ -373,9 +355,7 @@ fn prepare_directory(
         None => {
             #[cfg(feature = "internal-test-support")]
             {
-                if crate::local::test_support_enabled(
-                    "rooted-copy-directory-create",
-                ) {
+                if crate::local::test_support_enabled("rooted-copy-directory-create") {
                     return Err(error(
                         Stage::PrepareDestination,
                         source,
@@ -394,18 +374,12 @@ fn prepare_directory(
                     source_error,
                 )
             })?;
-            statistics.directories = checked_add(
-                statistics.directories,
-                1,
-                source,
-                destination,
-                *statistics,
-            )?;
+            statistics.directories =
+                checked_add(statistics.directories, 1, source, destination, *statistics)?;
             Ok(true)
         }
         Some(metadata) => {
-            let destination_is_directory =
-                metadata.kind() == EntryKind::Directory;
+            let destination_is_directory = metadata.kind() == EntryKind::Directory;
             match decide_copy_destination(
                 true,
                 Some(destination_is_directory),
@@ -425,13 +399,8 @@ fn prepare_directory(
                     Ok(true)
                 }
                 Some(CopyDestinationAction::Skip) => {
-                    statistics.skipped = checked_add(
-                        statistics.skipped,
-                        1,
-                        source,
-                        destination,
-                        *statistics,
-                    )?;
+                    statistics.skipped =
+                        checked_add(statistics.skipped, 1, source, destination, *statistics)?;
                     Ok(false)
                 }
                 Some(CopyDestinationAction::Replace) => {
@@ -458,26 +427,14 @@ fn prepare_directory(
                             source_error,
                         )
                     })?;
-                    statistics.directories = checked_add(
-                        statistics.directories,
-                        1,
-                        source,
-                        destination,
-                        *statistics,
-                    )?;
-                    statistics.overwritten = checked_add(
-                        statistics.overwritten,
-                        1,
-                        source,
-                        destination,
-                        *statistics,
-                    )?;
+                    statistics.directories =
+                        checked_add(statistics.directories, 1, source, destination, *statistics)?;
+                    statistics.overwritten =
+                        checked_add(statistics.overwritten, 1, source, destination, *statistics)?;
                     Ok(true)
                 }
                 Some(CopyDestinationAction::Create) => {
-                    unreachable!(
-                        "an observed destination cannot require creation"
-                    )
+                    unreachable!("an observed destination cannot require creation")
                 }
                 None => Err(error(
                     Stage::PrepareDestination,
@@ -535,13 +492,12 @@ fn copy_file(
             )
         })?;
     #[cfg(feature = "internal-test-support")]
-    let source_metadata_result = if crate::local::test_support_enabled(
-        "rooted-copy-source-metadata-native",
-    ) {
-        Err(crate::local::test_fault_error())
-    } else {
-        Metadata::from_open_file(&reader)
-    };
+    let source_metadata_result =
+        if crate::local::test_support_enabled("rooted-copy-source-metadata-native") {
+            Err(crate::local::test_fault_error())
+        } else {
+            Metadata::from_open_file(&reader)
+        };
     #[cfg(not(feature = "internal-test-support"))]
     let source_metadata_result = Metadata::from_open_file(&reader);
     let source_metadata = source_metadata_result.map_err(|source_error| {
@@ -555,9 +511,7 @@ fn copy_file(
     })?;
     #[cfg(feature = "internal-test-support")]
     {
-        if crate::local::test_support_enabled(
-            "rooted-copy-destination-metadata",
-        ) {
+        if crate::local::test_support_enabled("rooted-copy-destination-metadata") {
             return Err(error(
                 Stage::PrepareDestination,
                 source,
@@ -567,16 +521,15 @@ fn copy_file(
             ));
         }
     }
-    let destination_metadata =
-        optional_metadata(root, destination).map_err(|source_error| {
-            error(
-                Stage::PrepareDestination,
-                source,
-                destination,
-                statistics,
-                source_error,
-            )
-        })?;
+    let destination_metadata = optional_metadata(root, destination).map_err(|source_error| {
+        error(
+            Stage::PrepareDestination,
+            source,
+            destination,
+            statistics,
+            source_error,
+        )
+    })?;
     if destination_metadata
         .as_ref()
         .is_some_and(|metadata| source_metadata.is_same_file(metadata))
@@ -604,25 +557,19 @@ fn copy_file(
         );
         match action {
             Some(CopyDestinationAction::Skip) => {
-                statistics.skipped = checked_add(
-                    statistics.skipped,
-                    1,
-                    source,
-                    destination,
-                    statistics,
-                )?;
+                statistics.skipped =
+                    checked_add(statistics.skipped, 1, source, destination, statistics)?;
                 return Ok(statistics);
             }
             Some(CopyDestinationAction::Replace) => {
                 if metadata.kind() == EntryKind::File {
                     // The staged writer replaces regular files at commit.
                 } else {
-                    let remove_result =
-                        if metadata.kind() == EntryKind::Directory {
-                            root.remove_tree(destination)
-                        } else {
-                            root.remove_file(destination)
-                        };
+                    let remove_result = if metadata.kind() == EntryKind::Directory {
+                        root.remove_tree(destination)
+                    } else {
+                        root.remove_file(destination)
+                    };
                     remove_result.map_err(|source_error| {
                         error(
                             Stage::PrepareDestination,
@@ -646,12 +593,8 @@ fn copy_file(
                     ),
                 ));
             }
-            Some(
-                CopyDestinationAction::Create | CopyDestinationAction::Merge,
-            ) => {
-                unreachable!(
-                    "a file destination cannot require create or merge"
-                )
+            Some(CopyDestinationAction::Create | CopyDestinationAction::Merge) => {
+                unreachable!("a file destination cannot require create or merge")
             }
         }
     }
@@ -673,8 +616,7 @@ fn copy_file(
             LocalAtomicWriteOptions::new().with_durability(durability),
         )
         .map_err(|source_error| {
-            let source_error =
-                io::Error::new(source_error.kind(), source_error);
+            let source_error = io::Error::new(source_error.kind(), source_error);
             error(
                 Stage::PrepareDestination,
                 source,
@@ -684,9 +626,7 @@ fn copy_file(
             )
         })?;
     #[cfg(feature = "internal-test-support")]
-    let copy_result = if crate::local::test_support_enabled(
-        "rooted-copy-file-contents-native",
-    ) {
+    let copy_result = if crate::local::test_support_enabled("rooted-copy-file-contents-native") {
         Err(crate::local::test_fault_error())
     } else {
         io::copy(&mut reader, &mut writer)
@@ -703,37 +643,28 @@ fn copy_file(
         )
     })?;
     #[cfg(feature = "internal-test-support")]
-    let commit_result =
-        if crate::local::test_support_enabled("rooted-copy-file-commit-native")
-        {
-            Err(crate::LocalAtomicWriteError::new(
-                crate::LocalAtomicWriteStage::ReplaceDestination,
-                destination.as_path().to_path_buf(),
-                None,
-                crate::LocalAtomicDestinationState::Unchanged,
-                crate::local::test_fault_error(),
-            ))
-        } else {
-            writer.commit_with_durability()
-        };
+    let commit_result = if crate::local::test_support_enabled("rooted-copy-file-commit-native") {
+        Err(crate::LocalAtomicWriteError::new(
+            crate::LocalAtomicWriteStage::ReplaceDestination,
+            destination.as_path().to_path_buf(),
+            None,
+            crate::LocalAtomicDestinationState::Unchanged,
+            crate::local::test_fault_error(),
+        ))
+    } else {
+        writer.commit_with_durability()
+    };
     #[cfg(not(feature = "internal-test-support"))]
     let commit_result = writer.commit_with_durability();
     let file_durable = commit_result.map_err(|source_error| {
         rooted_commit_error(source, destination, statistics, source_error)
     })?;
     statistics.files_durable &= file_durable;
-    statistics.files =
-        checked_add(statistics.files, 1, source, destination, statistics)?;
-    statistics.bytes =
-        checked_add(statistics.bytes, bytes, source, destination, statistics)?;
+    statistics.files = checked_add(statistics.files, 1, source, destination, statistics)?;
+    statistics.bytes = checked_add(statistics.bytes, bytes, source, destination, statistics)?;
     if destination_metadata.is_some() {
-        statistics.overwritten = checked_add(
-            statistics.overwritten,
-            1,
-            source,
-            destination,
-            statistics,
-        )?;
+        statistics.overwritten =
+            checked_add(statistics.overwritten, 1, source, destination, statistics)?;
     }
     preserve_permissions(
         root,
@@ -790,8 +721,7 @@ fn rooted_commit_error(
     statistics: Statistics,
     source_error: crate::LocalAtomicWriteError,
 ) -> Error {
-    let (temporary_path, cleanup_error, source_error) =
-        source_error.into_staging_parts();
+    let (temporary_path, cleanup_error, source_error) = source_error.into_staging_parts();
     let source_kind = source_error.kind();
     let copy_error = error(
         Stage::CommitFile,
@@ -812,9 +742,7 @@ fn rooted_commit_error(
 fn optional_metadata(root: &Root, path: &Path) -> io::Result<Option<Metadata>> {
     match root.symlink_metadata(path) {
         Ok(metadata) => Ok(Some(metadata)),
-        Err(source_error) if source_error.kind() == ErrorKind::NotFound => {
-            Ok(None)
-        }
+        Err(source_error) if source_error.kind() == ErrorKind::NotFound => Ok(None),
         Err(source_error) => Err(source_error),
     }
 }
@@ -828,9 +756,7 @@ fn checked_add(
     statistics: Statistics,
 ) -> Result<u64, Error> {
     #[cfg(feature = "internal-test-support")]
-    let result = if crate::local::test_support_enabled(
-        "rooted-copy-statistics-overflow",
-    ) {
+    let result = if crate::local::test_support_enabled("rooted-copy-statistics-overflow") {
         None
     } else {
         value.checked_add(addition)

@@ -36,8 +36,7 @@ pub(crate) fn clear_nonblocking(descriptor: RawFd) -> Result<()> {
     // SAFETY: callers retain ownership of the live descriptor for both
     // non-retaining `fcntl` calls.
     #[cfg(feature = "internal-test-support")]
-    let flags = if super::test_support::is_enabled("unix-clear-nonblocking-get")
-    {
+    let flags = if super::test_support::is_enabled("unix-clear-nonblocking-get") {
         -1
     } else {
         unsafe { libc::fcntl(descriptor, libc::F_GETFL) }
@@ -53,22 +52,13 @@ pub(crate) fn clear_nonblocking(descriptor: RawFd) -> Result<()> {
     // SAFETY: the descriptor remains live and `F_SETFL` accepts status flags
     // returned by `F_GETFL` with `O_NONBLOCK` cleared.
     #[cfg(feature = "internal-test-support")]
-    let result =
-        if super::test_support::is_enabled("unix-clear-nonblocking-set") {
-            -1
-        } else {
-            unsafe {
-                libc::fcntl(
-                    descriptor,
-                    libc::F_SETFL,
-                    flags & !libc::O_NONBLOCK,
-                )
-            }
-        };
-    #[cfg(not(feature = "internal-test-support"))]
-    let result = unsafe {
-        libc::fcntl(descriptor, libc::F_SETFL, flags & !libc::O_NONBLOCK)
+    let result = if super::test_support::is_enabled("unix-clear-nonblocking-set") {
+        -1
+    } else {
+        unsafe { libc::fcntl(descriptor, libc::F_SETFL, flags & !libc::O_NONBLOCK) }
     };
+    #[cfg(not(feature = "internal-test-support"))]
+    let result = unsafe { libc::fcntl(descriptor, libc::F_SETFL, flags & !libc::O_NONBLOCK) };
     if result == -1 {
         return Err(Error::last_os_error());
     }
@@ -96,10 +86,7 @@ pub(crate) fn clear_nonblocking(descriptor: RawFd) -> Result<()> {
 ///
 /// Returns [`ErrorKind::TimedOut`] when the configured duration expires after
 /// a lease conflict, or returns any non-conflict open error unchanged.
-pub(crate) fn open_with_nonblocking_retry<F, T>(
-    timeout: Option<Duration>,
-    mut open: F,
-) -> Result<T>
+pub(crate) fn open_with_nonblocking_retry<F, T>(timeout: Option<Duration>, mut open: F) -> Result<T>
 where
     F: FnMut() -> Result<T>,
 {
@@ -109,15 +96,11 @@ where
         match open() {
             Err(error) if error.kind() == ErrorKind::WouldBlock => {
                 if let Some(timeout) = timeout {
-                    let remaining =
-                        timeout.saturating_sub(started_at.elapsed());
+                    let remaining = timeout.saturating_sub(started_at.elapsed());
                     if remaining.is_zero() {
                         return Err(open_retry_timed_out(timeout));
                     }
-                    wait_for_nonblocking_open_retry(
-                        &mut retry_delay,
-                        Some(remaining),
-                    );
+                    wait_for_nonblocking_open_retry(&mut retry_delay, Some(remaining));
                     if started_at.elapsed() >= timeout {
                         return Err(open_retry_timed_out(timeout));
                     }
@@ -131,10 +114,7 @@ where
 }
 
 /// Waits before the next nonblocking open attempt.
-fn wait_for_nonblocking_open_retry(
-    delay: &mut Duration,
-    remaining: Option<Duration>,
-) {
+fn wait_for_nonblocking_open_retry(delay: &mut Duration, remaining: Option<Duration>) {
     if delay.is_zero() {
         thread::yield_now();
         *delay = INITIAL_OPEN_RETRY_DELAY;

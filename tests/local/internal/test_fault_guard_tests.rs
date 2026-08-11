@@ -13,8 +13,8 @@ use qubit_local_files::install_test_fault;
 #[cfg(feature = "internal-test-support")]
 #[test]
 fn test_test_fault_guard_blocks_nested_installations() {
-    let _guard = install_test_fault("root-authority-path")
-        .expect("fault controller should be installed");
+    let _guard =
+        install_test_fault("root-authority-path").expect("fault controller should be installed");
 
     assert!(install_test_fault("other").is_err());
 }
