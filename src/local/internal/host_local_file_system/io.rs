@@ -43,12 +43,7 @@ impl HostLocalFileSystem {
         fs::symlink_metadata(&resolved)
             .map(|metadata| LocalFileMetadata::from_native(&metadata))
             .map_err(|source| {
-                LocalFileError::from_io(
-                    LocalFileOperation::Metadata,
-                    Some(bound),
-                    None,
-                    source,
-                )
+                LocalFileError::from_io(LocalFileOperation::Metadata, Some(bound), None, source)
             })
     }
 
@@ -76,21 +71,14 @@ impl HostLocalFileSystem {
             )
             .with_path(bound));
         }
-        let native_options = options.open_retry_timeout().map_or_else(
-            crate::read::OpenOptions::default,
-            |timeout| {
-                crate::read::OpenOptions::default()
-                    .with_open_retry_timeout(timeout)
-            },
-        );
+        let native_options = options
+            .open_retry_timeout()
+            .map_or_else(crate::read::OpenOptions::default, |timeout| {
+                crate::read::OpenOptions::default().with_open_retry_timeout(timeout)
+            });
         test_io_fault("local-fs-open-reader-native")
             .map_or_else(
-                || {
-                    crate::local::open_native_reader_path(
-                        &bound,
-                        &native_options,
-                    )
-                },
+                || crate::local::open_native_reader_path(&bound, &native_options),
                 Err,
             )
             .map(LocalFileReader::new)
@@ -106,12 +94,7 @@ impl HostLocalFileSystem {
                     )
                     .with_path(bound);
                 }
-                LocalFileError::from_io(
-                    LocalFileOperation::OpenReader,
-                    Some(bound),
-                    None,
-                    source,
-                )
+                LocalFileError::from_io(LocalFileOperation::OpenReader, Some(bound), None, source)
             })
     }
 
@@ -123,8 +106,7 @@ impl HostLocalFileSystem {
     ) -> LocalResult<LocalFileWriter> {
         let follow_final = options.mode() != LocalWriteMode::CreateNew;
         let diagnostic_path = LocalPaths::bind_host_path(path)?;
-        let bound =
-            resolve_host_path(&diagnostic_path, symlink_policy, follow_final)?;
+        let bound = resolve_host_path(&diagnostic_path, symlink_policy, follow_final)?;
         if options.mode() == LocalWriteMode::Append
             && options.atomicity() == LocalAtomicityRequirement::Required
         {
@@ -132,14 +114,11 @@ impl HostLocalFileSystem {
                 LocalFileErrorKind::RequirementNotMet,
                 LocalFileOperation::OpenWriter,
             )
-            .with_reason(
-                "append mode cannot provide required atomic publication",
-            )
+            .with_reason("append mode cannot provide required atomic publication")
             .with_path(diagnostic_path.clone()));
         }
         if options.mode() != LocalWriteMode::Append {
-            let implements_durability =
-                Self::protocols().supports_durable_file_copy();
+            let implements_durability = Self::protocols().supports_durable_file_copy();
             ensure_required_directory_durability(
                 options.durability(),
                 LocalFileOperation::OpenWriter,
@@ -166,23 +145,21 @@ impl HostLocalFileSystem {
         let backend = match options.mode() {
             LocalWriteMode::CreateNew | LocalWriteMode::CreateOrReplace => {
                 LocalFileWriterBackend::Staged(
-                    open_staged_writer(&bound, options).map_err(|error| {
-                        error.with_path(diagnostic_path.clone())
-                    })?,
+                    open_staged_writer(&bound, options)
+                        .map_err(|error| error.with_path(diagnostic_path.clone()))?,
                 )
             }
             LocalWriteMode::Append => {
-                let metadata =
-                    test_io_fault("local-fs-open-writer-append-metadata")
-                        .map_or_else(|| fs::symlink_metadata(&bound), Err)
-                        .map_err(|error| {
-                            LocalFileError::from_io(
-                                LocalFileOperation::OpenWriter,
-                                Some(diagnostic_path.clone()),
-                                None,
-                                error,
-                            )
-                        })?;
+                let metadata = test_io_fault("local-fs-open-writer-append-metadata")
+                    .map_or_else(|| fs::symlink_metadata(&bound), Err)
+                    .map_err(|error| {
+                        LocalFileError::from_io(
+                            LocalFileOperation::OpenWriter,
+                            Some(diagnostic_path.clone()),
+                            None,
+                            error,
+                        )
+                    })?;
                 if !metadata.file_type().is_file() {
                     return Err(LocalFileError::new(
                         LocalFileErrorKind::TypeConflict,
@@ -190,21 +167,14 @@ impl HostLocalFileSystem {
                     )
                     .with_path(diagnostic_path.clone()));
                 }
-                let mut native_options = crate::write::OpenOptions::new(
-                    crate::write::Mode::AppendExisting,
-                );
+                let mut native_options =
+                    crate::write::OpenOptions::new(crate::write::Mode::AppendExisting);
                 if let Some(timeout) = options.open_retry_timeout() {
-                    native_options =
-                        native_options.with_open_retry_timeout(timeout);
+                    native_options = native_options.with_open_retry_timeout(timeout);
                 }
                 let file = test_io_fault("local-fs-open-writer-append-native")
                     .map_or_else(
-                        || {
-                            crate::local::open_native_writer_path(
-                                &bound,
-                                &native_options,
-                            )
-                        },
+                        || crate::local::open_native_writer_path(&bound, &native_options),
                         Err,
                     )
                     .map_err(|error| {
@@ -228,11 +198,7 @@ impl HostLocalFileSystem {
         symlink_policy: LocalSymlinkPolicy,
     ) -> LocalResult<LocalDirectoryWalker> {
         let policy = options.symlink_policy().unwrap_or(symlink_policy);
-        let bound = resolve_host_path(
-            path,
-            LocalSymlinkPolicy::FollowAcrossScope,
-            true,
-        )?;
+        let bound = resolve_host_path(path, LocalSymlinkPolicy::FollowAcrossScope, true)?;
         LocalDirectoryWalker::open(bound, *options, policy)
     }
 }

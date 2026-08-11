@@ -19,15 +19,11 @@ use tempfile::tempdir;
 #[test]
 fn test_rooted_path_support_accepts_existing_temp_parent() {
     let directory = tempdir().expect("temporary directory should be created");
-    fs::create_dir(directory.path().join("parent"))
-        .expect("temporary parent should be created");
-    let rooted = LocalFileSystem::rooted(directory.path())
-        .expect("root authority should open");
+    fs::create_dir(directory.path().join("parent")).expect("temporary parent should be created");
+    let rooted = LocalFileSystem::rooted(directory.path()).expect("root authority should open");
 
     let temporary = rooted
-        .create_temp_file(
-            &LocalTempFileOptions::new().with_parent(Path::new("parent")),
-        )
+        .create_temp_file(&LocalTempFileOptions::new().with_parent(Path::new("parent")))
         .expect("existing rooted parent should be accepted");
     assert!(temporary.path().starts_with(Path::new("parent")));
 }
@@ -36,8 +32,7 @@ fn test_rooted_path_support_accepts_existing_temp_parent() {
 #[test]
 fn test_rooted_path_support_creates_missing_temp_parent() {
     let directory = tempdir().expect("temporary directory should be created");
-    let rooted = LocalFileSystem::rooted(directory.path())
-        .expect("root authority should open");
+    let rooted = LocalFileSystem::rooted(directory.path()).expect("root authority should open");
 
     let temporary = rooted
         .create_temp_file(
@@ -57,29 +52,21 @@ fn test_rooted_path_support_creates_missing_temp_parent() {
 fn test_rooted_path_support_rejects_invalid_temp_parents() {
     let directory = tempdir().expect("temporary directory should be created");
     let file = directory.path().join("file");
-    fs::write(&file, b"not a directory")
-        .expect("file fixture should be written");
-    let rooted = LocalFileSystem::rooted(directory.path())
-        .expect("root authority should open");
+    fs::write(&file, b"not a directory").expect("file fixture should be written");
+    let rooted = LocalFileSystem::rooted(directory.path()).expect("root authority should open");
 
     let missing = rooted
-        .create_temp_file(
-            &LocalTempFileOptions::new().with_parent(Path::new("missing")),
-        )
+        .create_temp_file(&LocalTempFileOptions::new().with_parent(Path::new("missing")))
         .expect_err("missing rooted parent should be rejected");
     assert_eq!(LocalFileErrorKind::NotFound, missing.kind());
 
     let not_directory = rooted
-        .create_temp_file(
-            &LocalTempFileOptions::new().with_parent(Path::new("file")),
-        )
+        .create_temp_file(&LocalTempFileOptions::new().with_parent(Path::new("file")))
         .expect_err("file rooted parent should be rejected");
     assert_eq!(LocalFileErrorKind::NotDirectory, not_directory.kind());
 
     let escape = rooted
-        .create_temp_file(
-            &LocalTempFileOptions::new().with_parent(Path::new("../escape")),
-        )
+        .create_temp_file(&LocalTempFileOptions::new().with_parent(Path::new("../escape")))
         .expect_err("rooted parent traversal should be rejected");
     assert_eq!(LocalFileErrorKind::InvalidPath, escape.kind());
 }
@@ -88,8 +75,7 @@ fn test_rooted_path_support_rejects_invalid_temp_parents() {
 #[test]
 fn test_rooted_path_support_rejects_invalid_temp_affixes() {
     let directory = tempdir().expect("temporary directory should be created");
-    let rooted = LocalFileSystem::rooted(directory.path())
-        .expect("root authority should open");
+    let rooted = LocalFileSystem::rooted(directory.path()).expect("root authority should open");
 
     let error = rooted
         .create_temp_file(&LocalTempFileOptions::new().with_prefix("bad/name"))
@@ -101,8 +87,7 @@ fn test_rooted_path_support_rejects_invalid_temp_affixes() {
 #[test]
 fn test_rooted_path_support_rejects_escape_paths() {
     let directory = tempdir().expect("temporary directory should be created");
-    let rooted = LocalFileSystem::rooted(directory.path())
-        .expect("root authority should open");
+    let rooted = LocalFileSystem::rooted(directory.path()).expect("root authority should open");
 
     let error = rooted
         .metadata(Path::new("../escape"))
@@ -118,12 +103,9 @@ fn test_rooted_path_support_reports_symlink_metadata() {
     use std::os::unix::fs::symlink;
 
     let directory = tempdir().expect("temporary directory should be created");
-    fs::write(directory.path().join("target"), b"payload")
-        .expect("link target should be written");
-    symlink("target", directory.path().join("link"))
-        .expect("symbolic link should be created");
-    let rooted = LocalFileSystem::rooted(directory.path())
-        .expect("root authority should open");
+    fs::write(directory.path().join("target"), b"payload").expect("link target should be written");
+    symlink("target", directory.path().join("link")).expect("symbolic link should be created");
+    let rooted = LocalFileSystem::rooted(directory.path()).expect("root authority should open");
 
     let metadata = rooted
         .metadata(Path::new("link"))
