@@ -82,7 +82,10 @@ pub(super) fn copy_dir_iterative(
             let _ = active_sources.remove(completed.source_identity());
             if options.preserves_permissions() {
                 with_copy_context(
-                    fs::set_permissions(completed.dst(), completed.source_permissions().clone()),
+                    fs::set_permissions(
+                        completed.dst(),
+                        completed.source_permissions().clone(),
+                    ),
                     LocalCopyDirStage::PreservePermissions,
                     completed.src(),
                     completed.dst(),
@@ -125,7 +128,12 @@ pub(super) fn copy_dir_iterative(
             }
         } else if file_type.is_symlink() {
             if options.symlink_policy().follows()
-                && symlink_target_is_directory(&source_path, &destination_path, stats, scope_root)?
+                && symlink_target_is_directory(
+                    &source_path,
+                    &destination_path,
+                    stats,
+                    scope_root,
+                )?
             {
                 let frame = enter_copy_directory(
                     &source_path,
@@ -147,7 +155,12 @@ pub(super) fn copy_dir_iterative(
                 )?;
             }
         } else {
-            copy_file_with_options(&source_path, &destination_path, options, stats)?;
+            copy_file_with_options(
+                &source_path,
+                &destination_path,
+                options,
+                stats,
+            )?;
         }
     }
     Ok(())
@@ -182,7 +195,11 @@ fn enter_copy_directory(
     stats: &mut LocalCopyDirStats,
 ) -> CopyDirResult<Option<CopyDirFrame>> {
     let (source_metadata, source_identity) = with_copy_context(
-        inspect_copy_source_directory(src, options.symlink_policy(), destination_root),
+        inspect_copy_source_directory(
+            src,
+            options.symlink_policy(),
+            destination_root,
+        ),
         LocalCopyDirStage::InspectSource,
         src,
         dst,
@@ -318,7 +335,10 @@ fn symlink_target_is_directory(
             stats,
             Error::new(
                 ErrorKind::Unsupported,
-                format!("unsupported symbolic link target type: {}", src.display(),),
+                format!(
+                    "unsupported symbolic link target type: {}",
+                    src.display(),
+                ),
             ),
         ))
     }

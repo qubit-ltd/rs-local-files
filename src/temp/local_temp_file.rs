@@ -82,9 +82,9 @@ impl LocalTempFile {
     ) -> Result<Self> {
         Ok(Self {
             path,
-            backend: LocalTempResourceBackend::Host(super::internal::HostTempResourceBackend {
-                sandbox_path,
-            }),
+            backend: LocalTempResourceBackend::Host(
+                super::internal::HostTempResourceBackend { sandbox_path },
+            ),
             host_identity: Some(TempEntryIdentity::from_file(&file)?),
             rooted_identity: None,
             file: Some(file),
@@ -104,13 +104,17 @@ impl LocalTempFile {
     ) -> Result<Self> {
         Ok(Self {
             path: path.clone(),
-            backend: LocalTempResourceBackend::Rooted(RootedTempResourceBackend {
-                root,
-                relative_path: path,
-                sandbox_path,
-            }),
+            backend: LocalTempResourceBackend::Rooted(
+                RootedTempResourceBackend {
+                    root,
+                    relative_path: path,
+                    sandbox_path,
+                },
+            ),
             host_identity: None,
-            rooted_identity: Some(crate::rooted::Metadata::from_open_file(&file)?),
+            rooted_identity: Some(crate::rooted::Metadata::from_open_file(
+                &file,
+            )?),
             file: Some(file),
             state: LocalTempResourceState::Owned,
             symlink_policy,
@@ -257,7 +261,9 @@ impl LocalTempFile {
                     ));
                 }
             };
-            if let Err(error) = prepare_host_parent(&target, options.creates_parent()) {
+            if let Err(error) =
+                prepare_host_parent(&target, options.creates_parent())
+            {
                 return Err(LocalPersistError::new(
                     error,
                     self,
@@ -315,28 +321,31 @@ impl LocalTempFile {
         };
         let source = LocalRelativePath::new(&rooted.relative_path)
             .expect("rooted temporary path was validated at creation");
-        let resolved = match crate::rooted_local_file_system::resolve_rooted_path(
-            &rooted.root,
-            &target,
-            self.symlink_policy,
-            false,
-            LocalFileOperation::PersistTemp,
-        ) {
-            Ok(resolved) => resolved,
-            Err(error) => {
-                return Err(LocalPersistError::new(
-                    error.into_io_error(),
-                    self,
-                    requested_target,
-                    None,
-                    LocalPersistStage::ResolveTarget,
-                ));
-            }
-        };
+        let resolved =
+            match crate::rooted_local_file_system::resolve_rooted_path(
+                &rooted.root,
+                &target,
+                self.symlink_policy,
+                false,
+                LocalFileOperation::PersistTemp,
+            ) {
+                Ok(resolved) => resolved,
+                Err(error) => {
+                    return Err(LocalPersistError::new(
+                        error.into_io_error(),
+                        self,
+                        requested_target,
+                        None,
+                        LocalPersistStage::ResolveTarget,
+                    ));
+                }
+            };
         let destination = resolved;
-        if let Err(error) =
-            prepare_rooted_parent(&rooted.root, &destination, options.creates_parent())
-        {
+        if let Err(error) = prepare_rooted_parent(
+            &rooted.root,
+            &destination,
+            options.creates_parent(),
+        ) {
             return Err(LocalPersistError::new(
                 error,
                 self,
@@ -405,7 +414,9 @@ impl LocalTempFile {
             return Err(crate::local::test_fault_error());
         }
         match &self.backend {
-            LocalTempResourceBackend::Host(host) => std::fs::remove_dir(&host.sandbox_path),
+            LocalTempResourceBackend::Host(host) => {
+                std::fs::remove_dir(&host.sandbox_path)
+            }
             LocalTempResourceBackend::Rooted(rooted) => {
                 let sandbox = LocalRelativePath::new(&rooted.sandbox_path)
                     .expect("rooted temporary sandbox path was validated at creation");
@@ -418,7 +429,9 @@ impl LocalTempFile {
     fn cleanup_path(&self) -> PathBuf {
         match &self.backend {
             LocalTempResourceBackend::Host(host) => host.sandbox_path.clone(),
-            LocalTempResourceBackend::Rooted(rooted) => rooted.sandbox_path.clone(),
+            LocalTempResourceBackend::Rooted(rooted) => {
+                rooted.sandbox_path.clone()
+            }
         }
     }
 
@@ -445,15 +458,14 @@ impl LocalTempFile {
             LocalTempResourceBackend::Rooted(rooted) => rooted
                 .root
                 .symlink_metadata(
-                    &LocalRelativePath::new(&rooted.relative_path)
-                        .expect("rooted temporary path was validated at creation"),
+                    &LocalRelativePath::new(&rooted.relative_path).expect(
+                        "rooted temporary path was validated at creation",
+                    ),
                 )
                 .map(|metadata| {
-                    metadata.is_same_file(
-                        self.rooted_identity
-                            .as_ref()
-                            .expect("rooted temporary file must retain rooted identity"),
-                    )
+                    metadata.is_same_file(self.rooted_identity.as_ref().expect(
+                        "rooted temporary file must retain rooted identity",
+                    ))
                 }),
         };
         match matches {
@@ -568,7 +580,8 @@ impl Drop for LocalTempFile {
                     self.state = LocalTempResourceState::Released;
                 }
             }
-            LocalTempResourceState::Indeterminate | LocalTempResourceState::Released => {}
+            LocalTempResourceState::Indeterminate
+            | LocalTempResourceState::Released => {}
         }
     }
 }

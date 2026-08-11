@@ -179,7 +179,8 @@ fn test_local_file_error_exposes_optional_context_without_source() {
 /// chain.
 #[test]
 fn test_local_resource_limit_error_preserves_budget_facts() {
-    let source = LocalResourceLimitError::new(LocalResourceKind::OpenDirectory, 4, 0, 1);
+    let source =
+        LocalResourceLimitError::new(LocalResourceKind::OpenDirectory, 4, 0, 1);
     assert_eq!(LocalResourceKind::OpenDirectory, source.resource());
     assert_eq!(4, source.limit());
     assert_eq!(0, source.remaining());
@@ -187,8 +188,11 @@ fn test_local_resource_limit_error_preserves_budget_facts() {
     assert!(source.to_string().contains("open directory"));
     assert!(std::error::Error::source(&source).is_none());
 
-    let error = LocalFileError::new(LocalFileErrorKind::ResourceLimit, LocalFileOperation::List)
-        .with_path(Path::new("root/child").to_path_buf());
+    let error = LocalFileError::new(
+        LocalFileErrorKind::ResourceLimit,
+        LocalFileOperation::List,
+    )
+    .with_path(Path::new("root/child").to_path_buf());
     assert_eq!(LocalFileErrorKind::ResourceLimit, error.kind());
     assert!(error.resource_limit_error().is_none());
     assert_eq!(io::ErrorKind::Other, error.into_io_error().kind());

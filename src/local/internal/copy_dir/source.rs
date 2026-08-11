@@ -48,7 +48,8 @@ pub(super) fn inspect_copy_source_directory(
     }
     let canonical_source = fs::canonicalize(src)?;
     reject_destination_inside_source(src, &canonical_source, destination_root)?;
-    let source_identity = DirectoryIdentity::from_metadata(&source_metadata, &canonical_source);
+    let source_identity =
+        DirectoryIdentity::from_metadata(&source_metadata, &canonical_source);
     Ok((source_metadata, source_identity))
 }
 
@@ -116,7 +117,9 @@ fn reject_destination_inside_source(
     canonical_source: &Path,
     destination: &Path,
 ) -> Result<()> {
-    if destination == canonical_source || destination.starts_with(canonical_source) {
+    if destination == canonical_source
+        || destination.starts_with(canonical_source)
+    {
         return Err(Error::new(
             ErrorKind::InvalidInput,
             format!(

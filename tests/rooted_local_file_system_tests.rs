@@ -76,7 +76,8 @@ fn test_copy_tree_skips_nested_type_conflicts() {
         b"target-file",
     )
     .expect("target file should be written");
-    let rooted = LocalFileSystem::rooted(directory.path()).expect("root authority should open");
+    let rooted = LocalFileSystem::rooted(directory.path())
+        .expect("root authority should open");
 
     let outcome = rooted
         .copy(
@@ -114,7 +115,8 @@ fn test_rooted_local_file_system_default_copy_and_rename_skip_sync() {
         let directory = tempdir().expect("temporary root should be created");
         fs::write(directory.path().join("copy-source"), b"copy")
             .expect("copy source should be written");
-        let rooted = LocalFileSystem::rooted(directory.path()).expect("root authority should open");
+        let rooted = LocalFileSystem::rooted(directory.path())
+            .expect("root authority should open");
         let _ = rooted
             .copy(
                 Path::new("copy-source"),
@@ -140,7 +142,9 @@ fn test_rooted_local_file_system_default_copy_and_rename_skip_sync() {
         .output()
         .is_err()
     {
-        eprintln!("skipping default rooted sync trace because strace is unavailable");
+        eprintln!(
+            "skipping default rooted sync trace because strace is unavailable"
+        );
         return;
     }
     let trace = NamedTempFile::new().expect("trace file should be created");
@@ -158,7 +162,8 @@ fn test_rooted_local_file_system_default_copy_and_rename_skip_sync() {
         .status()
         .expect("strace should launch the traced child");
     assert!(status.success(), "traced child should succeed");
-    let trace = fs::read_to_string(trace.path()).expect("trace should be readable");
+    let trace =
+        fs::read_to_string(trace.path()).expect("trace should be readable");
     assert!(
         !trace.contains("fsync("),
         "default durability must not synchronize: {trace}"
@@ -171,7 +176,8 @@ fn test_rooted_local_file_system_copy_creates_missing_parent() {
     let directory = tempdir().expect("temporary root should be created");
     fs::write(directory.path().join("source"), b"payload")
         .expect("source fixture should be written");
-    let rooted = LocalFileSystem::rooted(directory.path()).expect("root authority should open");
+    let rooted = LocalFileSystem::rooted(directory.path())
+        .expect("root authority should open");
 
     let _ = rooted
         .copy(
@@ -192,17 +198,20 @@ fn test_rooted_local_file_system_copy_creates_missing_parent() {
 /// Verifies cleanup follows the root descriptor after its diagnostic path
 /// moves.
 #[test]
-fn test_rooted_temp_file_cleanup_uses_retained_root_authority_after_root_rename() {
+fn test_rooted_temp_file_cleanup_uses_retained_root_authority_after_root_rename()
+ {
     let root_parent = tempdir().expect("root parent should exist");
     let original = root_parent.path().join("original-root");
     let renamed = root_parent.path().join("renamed-root");
     fs::create_dir(&original).expect("root should be created");
-    let root = LocalFileSystem::rooted(&original).expect("root authority should open");
+    let root =
+        LocalFileSystem::rooted(&original).expect("root authority should open");
 
     let mut temp = root
         .create_temp_file(&LocalTempFileOptions::new())
         .expect("rooted temp file should be created");
-    fs::rename(&original, &renamed).expect("diagnostic root path should be renamed");
+    fs::rename(&original, &renamed)
+        .expect("diagnostic root path should be renamed");
     temp.cleanup()
         .expect("cleanup must use retained root authority");
 
@@ -216,13 +225,15 @@ fn test_rooted_temp_file_cleanup_ignores_replacement_diagnostic_root() {
     let original = root_parent.path().join("original-root");
     let renamed = root_parent.path().join("renamed-root");
     fs::create_dir(&original).expect("root should be created");
-    let root = LocalFileSystem::rooted(&original).expect("root authority should open");
+    let root =
+        LocalFileSystem::rooted(&original).expect("root authority should open");
     let mut temp = root
         .create_temp_file(&LocalTempFileOptions::new())
         .expect("rooted temp file should be created");
     let relative_path = temp.path().to_path_buf();
 
-    fs::rename(&original, &renamed).expect("diagnostic root path should be renamed");
+    fs::rename(&original, &renamed)
+        .expect("diagnostic root path should be renamed");
     fs::create_dir(&original).expect("replacement root should be created");
     fs::create_dir_all(
         original
@@ -244,18 +255,21 @@ fn test_rooted_temp_file_cleanup_ignores_replacement_diagnostic_root() {
 /// Verifies directory cleanup follows retained root authority after
 /// replacement.
 #[test]
-fn test_rooted_temp_directory_cleanup_uses_retained_root_authority_after_replacement() {
+fn test_rooted_temp_directory_cleanup_uses_retained_root_authority_after_replacement()
+ {
     let root_parent = tempdir().expect("root parent should exist");
     let original = root_parent.path().join("original-root");
     let renamed = root_parent.path().join("renamed-root");
     fs::create_dir(&original).expect("root should be created");
-    let root = LocalFileSystem::rooted(&original).expect("root authority should open");
+    let root =
+        LocalFileSystem::rooted(&original).expect("root authority should open");
     let mut temporary = root
         .create_temp_directory(&LocalTempDirectoryOptions::new())
         .expect("rooted temp directory should be created");
     let relative_path = temporary.path().to_path_buf();
 
-    fs::rename(&original, &renamed).expect("diagnostic root path should be renamed");
+    fs::rename(&original, &renamed)
+        .expect("diagnostic root path should be renamed");
     fs::create_dir(&original).expect("replacement root should be created");
     fs::create_dir_all(
         original
@@ -264,7 +278,8 @@ fn test_rooted_temp_directory_cleanup_uses_retained_root_authority_after_replace
             .expect("replacement parent should exist"),
     )
     .expect("replacement parent should be created");
-    fs::create_dir(original.join(&relative_path)).expect("replacement entry should be created");
+    fs::create_dir(original.join(&relative_path))
+        .expect("replacement entry should be created");
     temporary
         .cleanup()
         .expect("directory cleanup must use retained root authority");
@@ -277,13 +292,15 @@ fn test_rooted_temp_directory_cleanup_uses_retained_root_authority_after_replace
 #[test]
 fn test_rooted_temp_file_persist_conflict_retains_cleanup_responsibility() {
     let root_parent = tempdir().expect("root parent should exist");
-    let root = LocalFileSystem::rooted(root_parent.path()).expect("root authority should open");
+    let root = LocalFileSystem::rooted(root_parent.path())
+        .expect("root authority should open");
     let temporary = root
         .create_temp_file(&LocalTempFileOptions::new())
         .expect("rooted temp file should be created");
     let source = temporary.path().to_path_buf();
     let target = Path::new("existing-target");
-    fs::write(root_parent.path().join(target), b"existing").expect("target should exist");
+    fs::write(root_parent.path().join(target), b"existing")
+        .expect("target should exist");
 
     let mut error = temporary
         .persist(target)
@@ -304,13 +321,15 @@ fn test_rooted_temp_file_drop_uses_retained_authority_after_root_replacement() {
     let original = root_parent.path().join("original-root");
     let renamed = root_parent.path().join("renamed-root");
     fs::create_dir(&original).expect("root should be created");
-    let root = LocalFileSystem::rooted(&original).expect("root authority should open");
+    let root =
+        LocalFileSystem::rooted(&original).expect("root authority should open");
     let relative_path = {
         let temporary = root
             .create_temp_file(&LocalTempFileOptions::new())
             .expect("rooted temp file should be created");
         let relative_path = temporary.path().to_path_buf();
-        fs::rename(&original, &renamed).expect("diagnostic root path should be renamed");
+        fs::rename(&original, &renamed)
+            .expect("diagnostic root path should be renamed");
         fs::create_dir(&original).expect("replacement root should be created");
         fs::create_dir_all(
             original
@@ -332,7 +351,8 @@ fn test_rooted_temp_file_drop_uses_retained_authority_after_root_replacement() {
 #[test]
 fn test_rooted_temp_file_persisted_target_survives_drop() {
     let root_parent = tempdir().expect("root parent should exist");
-    let root = LocalFileSystem::rooted(root_parent.path()).expect("root authority should open");
+    let root = LocalFileSystem::rooted(root_parent.path())
+        .expect("root authority should open");
     let temporary = root
         .create_temp_file(&LocalTempFileOptions::new())
         .expect("rooted temp file should be created");
@@ -353,12 +373,14 @@ fn test_rooted_temp_file_persist_uses_retained_authority_after_root_rename() {
     let original = root_parent.path().join("original-root");
     let renamed = root_parent.path().join("renamed-root");
     fs::create_dir(&original).expect("root should be created");
-    let root = LocalFileSystem::rooted(&original).expect("root authority should open");
+    let root =
+        LocalFileSystem::rooted(&original).expect("root authority should open");
     let temporary = root
         .create_temp_file(&LocalTempFileOptions::new())
         .expect("rooted temp file should be created");
 
-    fs::rename(&original, &renamed).expect("diagnostic root path should be renamed");
+    fs::rename(&original, &renamed)
+        .expect("diagnostic root path should be renamed");
     let outcome = temporary
         .persist(Path::new("persisted-target"))
         .expect("persist must use retained root authority");
@@ -370,7 +392,8 @@ fn test_rooted_temp_file_persist_uses_retained_authority_after_root_rename() {
 #[test]
 fn test_rooted_temp_file_missing_parent_retains_cleanup() {
     let root_parent = tempdir().expect("root parent should exist");
-    let root = LocalFileSystem::rooted(root_parent.path()).expect("root authority should open");
+    let root = LocalFileSystem::rooted(root_parent.path())
+        .expect("root authority should open");
     let temporary = root
         .create_temp_file(&LocalTempFileOptions::new())
         .expect("rooted temp file should be created");
@@ -378,7 +401,9 @@ fn test_rooted_temp_file_missing_parent_retains_cleanup() {
 
     let error = temporary
         .persist(Path::new("missing-parent/target"))
-        .expect_err("missing rooted target parent should fail before publication");
+        .expect_err(
+            "missing rooted target parent should fail before publication",
+        );
     assert_eq!(LocalPersistStage::PrepareParent, error.stage());
     assert_eq!(LocalPersistFailureState::NotPublished, error.state());
     let (_io, mut retained, _requested, _resolved, _stage) = error.into_parts();
@@ -402,14 +427,16 @@ where
     if std::env::var_os(TEST_FAULT_ENV)
         .is_some_and(|selected| selected == std::ffi::OsStr::new(fault))
     {
-        let _fault = install_test_fault(fault).expect("test fault controller should install");
+        let _fault = install_test_fault(fault)
+            .expect("test fault controller should install");
         action();
         return;
     }
     if std::env::var_os(TEST_FAULT_CHILD_ENV).is_some() {
         return;
     }
-    let executable = std::env::current_exe().expect("test executable should be available");
+    let executable =
+        std::env::current_exe().expect("test executable should be available");
     let status = std::process::Command::new(executable)
         .arg("--exact")
         .arg(test_name)
@@ -425,14 +452,19 @@ where
 #[cfg(feature = "internal-test-support")]
 #[test]
 fn test_rooted_copy_failure_reports_second_child_partial_publication() {
-    const TEST_NAME: &str = "test_rooted_copy_failure_reports_second_child_partial_publication";
+    const TEST_NAME: &str =
+        "test_rooted_copy_failure_reports_second_child_partial_publication";
     run_in_test_fault_process(TEST_NAME, "rooted-copy-file-second", || {
-        let directory = tempdir().expect("temporary directory should be created");
+        let directory =
+            tempdir().expect("temporary directory should be created");
         let source = directory.path().join("source");
         fs::create_dir(&source).expect("source directory should be created");
-        fs::write(source.join("first"), b"first").expect("first child should be written");
-        fs::write(source.join("second"), b"second").expect("second child should be written");
-        let rooted = LocalFileSystem::rooted(directory.path()).expect("root authority should open");
+        fs::write(source.join("first"), b"first")
+            .expect("first child should be written");
+        fs::write(source.join("second"), b"second")
+            .expect("second child should be written");
+        let rooted = LocalFileSystem::rooted(directory.path())
+            .expect("root authority should open");
 
         let failure = rooted
             .copy(
@@ -451,17 +483,22 @@ fn test_rooted_copy_failure_reports_second_child_partial_publication() {
 #[cfg(feature = "internal-test-support")]
 #[test]
 fn test_rooted_copy_failure_retains_stats_after_parent_sync_fault() {
-    const TEST_NAME: &str = "test_rooted_copy_failure_retains_stats_after_parent_sync_fault";
+    const TEST_NAME: &str =
+        "test_rooted_copy_failure_retains_stats_after_parent_sync_fault";
     run_in_test_fault_process(TEST_NAME, "rooted-copy-parent-sync", || {
-        let directory = tempdir().expect("temporary directory should be created");
-        fs::write(directory.path().join("source"), b"payload").expect("source should be written");
-        let rooted = LocalFileSystem::rooted(directory.path()).expect("root authority should open");
+        let directory =
+            tempdir().expect("temporary directory should be created");
+        fs::write(directory.path().join("source"), b"payload")
+            .expect("source should be written");
+        let rooted = LocalFileSystem::rooted(directory.path())
+            .expect("root authority should open");
 
         let failure = rooted
             .copy(
                 Path::new("source"),
                 Path::new("target"),
-                &LocalCopyOptions::default().with_durability(LocalDurabilityRequirement::Required),
+                &LocalCopyOptions::default()
+                    .with_durability(LocalDurabilityRequirement::Required),
             )
             .expect_err("rooted parent sync fault must fail");
 
@@ -475,18 +512,24 @@ fn test_rooted_copy_failure_retains_stats_after_parent_sync_fault() {
 #[cfg(feature = "internal-test-support")]
 #[test]
 fn test_rooted_copy_failure_retains_cleanup_staging_context() {
-    const TEST_NAME: &str = "test_rooted_copy_failure_retains_cleanup_staging_context";
+    const TEST_NAME: &str =
+        "test_rooted_copy_failure_retains_cleanup_staging_context";
     run_in_test_fault_process(TEST_NAME, "rooted-copy-install-cleanup", || {
-        let directory = tempdir().expect("temporary directory should be created");
-        fs::write(directory.path().join("source"), b"payload").expect("source should be written");
-        fs::write(directory.path().join("target"), b"existing").expect("target should be written");
-        let rooted = LocalFileSystem::rooted(directory.path()).expect("root authority should open");
+        let directory =
+            tempdir().expect("temporary directory should be created");
+        fs::write(directory.path().join("source"), b"payload")
+            .expect("source should be written");
+        fs::write(directory.path().join("target"), b"existing")
+            .expect("target should be written");
+        let rooted = LocalFileSystem::rooted(directory.path())
+            .expect("root authority should open");
 
         let failure = rooted
             .copy(
                 Path::new("source"),
                 Path::new("target"),
-                &LocalCopyOptions::default().with_conflict(LocalCopyConflictPolicy::Overwrite),
+                &LocalCopyOptions::default()
+                    .with_conflict(LocalCopyConflictPolicy::Overwrite),
             )
             .expect_err("rooted install and cleanup faults must fail");
 
@@ -506,11 +549,15 @@ fn test_rooted_copy_failure_retains_cleanup_staging_context() {
 #[cfg(feature = "internal-test-support")]
 #[test]
 fn test_rooted_rename_parent_durability_failure_reports_renamed() {
-    const TEST_NAME: &str = "test_rooted_rename_parent_durability_failure_reports_renamed";
+    const TEST_NAME: &str =
+        "test_rooted_rename_parent_durability_failure_reports_renamed";
     run_in_test_fault_process(TEST_NAME, "rooted-rename-parent-sync", || {
-        let directory = tempdir().expect("temporary directory should be created");
-        fs::write(directory.path().join("source"), b"payload").expect("source should be written");
-        let rooted = LocalFileSystem::rooted(directory.path()).expect("root authority should open");
+        let directory =
+            tempdir().expect("temporary directory should be created");
+        fs::write(directory.path().join("source"), b"payload")
+            .expect("source should be written");
+        let rooted = LocalFileSystem::rooted(directory.path())
+            .expect("root authority should open");
 
         let failure = rooted
             .rename(
@@ -531,11 +578,15 @@ fn test_rooted_rename_parent_durability_failure_reports_renamed() {
 #[cfg(feature = "internal-test-support")]
 #[test]
 fn test_rooted_rename_native_io_failure_reports_indeterminate() {
-    const TEST_NAME: &str = "test_rooted_rename_native_io_failure_reports_indeterminate";
+    const TEST_NAME: &str =
+        "test_rooted_rename_native_io_failure_reports_indeterminate";
     run_in_test_fault_process(TEST_NAME, "rooted-rename-indeterminate", || {
-        let directory = tempdir().expect("temporary directory should be created");
-        fs::write(directory.path().join("source"), b"payload").expect("source should be written");
-        let rooted = LocalFileSystem::rooted(directory.path()).expect("root authority should open");
+        let directory =
+            tempdir().expect("temporary directory should be created");
+        fs::write(directory.path().join("source"), b"payload")
+            .expect("source should be written");
+        let rooted = LocalFileSystem::rooted(directory.path())
+            .expect("root authority should open");
 
         let failure = rooted
             .rename(
@@ -553,7 +604,8 @@ fn test_rooted_rename_native_io_failure_reports_indeterminate() {
 #[test]
 fn test_rooted_rename_missing_source_reports_unchanged() {
     let directory = tempdir().expect("temporary directory should be created");
-    let rooted = LocalFileSystem::rooted(directory.path()).expect("root authority should open");
+    let rooted = LocalFileSystem::rooted(directory.path())
+        .expect("root authority should open");
 
     let failure = rooted
         .rename(
@@ -571,7 +623,8 @@ fn test_rooted_rename_missing_source_reports_unchanged() {
 #[test]
 fn test_rooted_local_file_system_rejects_lexical_escape() {
     let directory = tempdir().expect("temporary root should be created");
-    let rooted = LocalFileSystem::rooted(directory.path()).expect("root authority should open");
+    let rooted = LocalFileSystem::rooted(directory.path())
+        .expect("root authority should open");
 
     let error = rooted
         .metadata(Path::new("../escape"))
@@ -584,9 +637,12 @@ fn test_rooted_local_file_system_rejects_lexical_escape() {
 #[test]
 fn test_rooted_local_file_system_lists_descendants() {
     let directory = tempdir().expect("temporary root should be created");
-    fs::create_dir(directory.path().join("nested")).expect("nested directory should be created");
-    fs::write(directory.path().join("nested/child"), b"x").expect("child should be written");
-    let rooted = LocalFileSystem::rooted(directory.path()).expect("root authority should open");
+    fs::create_dir(directory.path().join("nested"))
+        .expect("nested directory should be created");
+    fs::write(directory.path().join("nested/child"), b"x")
+        .expect("child should be written");
+    let rooted = LocalFileSystem::rooted(directory.path())
+        .expect("root authority should open");
 
     let entries = rooted
         .list(
@@ -605,7 +661,8 @@ fn test_rooted_local_file_system_lists_descendants() {
 #[test]
 fn test_rooted_local_file_system_walker_defers_root_enumeration() {
     let directory = tempdir().expect("temporary root should be created");
-    let rooted = LocalFileSystem::rooted(directory.path()).expect("root authority should open");
+    let rooted = LocalFileSystem::rooted(directory.path())
+        .expect("root authority should open");
     let mut walker = rooted
         .list(Path::new(""), &LocalListOptions::new())
         .expect("rooted walker should be created without enumerating");
@@ -625,10 +682,12 @@ fn test_rooted_local_file_system_walker_defers_root_enumeration() {
 #[test]
 fn test_rooted_local_file_system_walker_rejects_handle_budget_exhaustion() {
     let directory = tempdir().expect("temporary root should be created");
-    fs::create_dir(directory.path().join("nested")).expect("nested directory should be created");
+    fs::create_dir(directory.path().join("nested"))
+        .expect("nested directory should be created");
     fs::write(directory.path().join("nested/child"), b"payload")
         .expect("nested child should be written");
-    let rooted = LocalFileSystem::rooted(directory.path()).expect("root authority should open");
+    let rooted = LocalFileSystem::rooted(directory.path())
+        .expect("root authority should open");
     let mut walker = rooted
         .list(
             Path::new(""),
@@ -670,8 +729,10 @@ fn test_rooted_local_file_system_walker_reopens_handle_frames() {
         current.push(format!("level-{index}"));
         fs::create_dir(&current).expect("nested directory should be created");
     }
-    fs::write(current.join("payload"), b"payload").expect("nested payload should be written");
-    let rooted = LocalFileSystem::rooted(directory.path()).expect("root authority should open");
+    fs::write(current.join("payload"), b"payload")
+        .expect("nested payload should be written");
+    let rooted = LocalFileSystem::rooted(directory.path())
+        .expect("root authority should open");
 
     let entries = rooted
         .list(
@@ -686,7 +747,8 @@ fn test_rooted_local_file_system_walker_reopens_handle_frames() {
         .expect("rooted reopen traversal should succeed");
 
     assert!(entries.iter().any(|entry| {
-        entry.relative_path() == Path::new("level-0/level-1/level-2/level-3/payload")
+        entry.relative_path()
+            == Path::new("level-0/level-1/level-2/level-3/payload")
     }));
 }
 
@@ -695,7 +757,8 @@ fn test_rooted_local_file_system_walker_reopens_handle_frames() {
 #[test]
 fn test_rooted_local_file_system_writes_and_copies_file() {
     let directory = tempdir().expect("temporary root should be created");
-    let rooted = LocalFileSystem::rooted(directory.path()).expect("root authority should open");
+    let rooted = LocalFileSystem::rooted(directory.path())
+        .expect("root authority should open");
     let mut writer = rooted
         .open_writer(
             Path::new("source"),
@@ -727,7 +790,8 @@ fn test_rooted_local_file_system_writes_and_copies_file() {
 #[test]
 fn test_rooted_writer_commit_reports_state() {
     let directory = tempdir().expect("temporary root should be created");
-    let rooted = LocalFileSystem::rooted(directory.path()).expect("root authority should open");
+    let rooted = LocalFileSystem::rooted(directory.path())
+        .expect("root authority should open");
     let payload = b"payload";
     let mut writer = rooted
         .open_writer(
@@ -755,7 +819,8 @@ fn test_rooted_local_file_system_writer_follows_final_symlink() {
     let target = directory.path().join("target");
     fs::write(&referent, b"original").expect("referent should be written");
     symlink("referent", &target).expect("target symlink should be created");
-    let root = LocalFileSystem::rooted(directory.path()).expect("rooted filesystem should open");
+    let root = LocalFileSystem::rooted(directory.path())
+        .expect("rooted filesystem should open");
 
     let options = LocalWriteOptions::new(LocalWriteMode::CreateOrReplace);
     let mut writer = root
@@ -785,19 +850,24 @@ fn test_rooted_local_file_system_writer_follows_final_symlink() {
 fn test_rooted_follow_rejects_unavailable_authority_path() {
     use std::os::unix::fs::symlink;
 
-    const TEST_NAME: &str = "test_rooted_follow_rejects_unavailable_authority_path";
+    const TEST_NAME: &str =
+        "test_rooted_follow_rejects_unavailable_authority_path";
     run_in_test_fault_process(TEST_NAME, "root-authority-path", || {
         let directory = tempdir().expect("temporary root should be created");
-        fs::create_dir(directory.path().join("real")).expect("real directory should be created");
+        fs::create_dir(directory.path().join("real"))
+            .expect("real directory should be created");
         fs::write(directory.path().join("real/payload"), b"payload")
             .expect("payload should be written");
         symlink("real/payload", directory.path().join("link"))
             .expect("rooted symlink should be created");
-        let rooted = LocalFileSystem::rooted(directory.path()).expect("root authority should open");
+        let rooted = LocalFileSystem::rooted(directory.path())
+            .expect("root authority should open");
 
         let error = rooted
             .open_reader(Path::new("link"), &LocalReadOptions::new())
-            .expect_err("authority-path failure must not use diagnostic fallback");
+            .expect_err(
+                "authority-path failure must not use diagnostic fallback",
+            );
         assert_eq!(LocalFileOperation::OpenReader, error.operation());
     });
 }
@@ -807,7 +877,8 @@ fn test_rooted_follow_rejects_unavailable_authority_path() {
 fn test_rooted_local_file_system_create_new_preserves_concurrent_target() {
     let directory = tempdir().expect("temporary directory should be created");
     let target = directory.path().join("target");
-    let root = LocalFileSystem::rooted(directory.path()).expect("rooted filesystem should open");
+    let root = LocalFileSystem::rooted(directory.path())
+        .expect("rooted filesystem should open");
     let mut writer = root
         .open_writer(
             Path::new("target"),
@@ -817,7 +888,8 @@ fn test_rooted_local_file_system_create_new_preserves_concurrent_target() {
     writer
         .write_all(b"staged")
         .expect("staged bytes should be written");
-    fs::write(&target, b"concurrent").expect("concurrent target should be created");
+    fs::write(&target, b"concurrent")
+        .expect("concurrent target should be created");
 
     let error = writer
         .commit()
@@ -836,9 +908,12 @@ fn test_rooted_local_file_system_create_new_preserves_concurrent_target() {
 #[test]
 fn test_rooted_local_file_system_deletes_entries() {
     let directory = tempdir().expect("temporary root should be created");
-    fs::create_dir(directory.path().join("tree")).expect("tree should be created");
-    fs::write(directory.path().join("tree/child"), b"x").expect("child should be written");
-    let rooted = LocalFileSystem::rooted(directory.path()).expect("root authority should open");
+    fs::create_dir(directory.path().join("tree"))
+        .expect("tree should be created");
+    fs::write(directory.path().join("tree/child"), b"x")
+        .expect("child should be written");
+    let rooted = LocalFileSystem::rooted(directory.path())
+        .expect("root authority should open");
 
     let outcome = rooted
         .delete_directory(
@@ -859,11 +934,15 @@ fn test_rooted_local_file_system_survives_root_path_rename() {
     let original = parent.path().join("original");
     let renamed = parent.path().join("renamed");
     fs::create_dir(&original).expect("root fixture should be created");
-    let rooted = LocalFileSystem::rooted(&original).expect("root authority should open");
+    let rooted =
+        LocalFileSystem::rooted(&original).expect("root authority should open");
     fs::rename(&original, &renamed).expect("diagnostic path should be renamed");
 
     let _outcome = rooted
-        .create_directory(Path::new("nested"), &LocalCreateDirectoryOptions::new())
+        .create_directory(
+            Path::new("nested"),
+            &LocalCreateDirectoryOptions::new(),
+        )
         .expect("descriptor-relative creation should still succeed");
 
     assert!(renamed.join("nested").is_dir());
@@ -875,8 +954,10 @@ fn test_rooted_local_file_system_survives_root_path_rename() {
 #[test]
 fn test_rooted_local_file_system_reads_regular_file() {
     let directory = tempdir().expect("temporary root should be created");
-    fs::write(directory.path().join("payload"), b"content").expect("fixture should be written");
-    let rooted = LocalFileSystem::rooted(directory.path()).expect("root authority should open");
+    fs::write(directory.path().join("payload"), b"content")
+        .expect("fixture should be written");
+    let rooted = LocalFileSystem::rooted(directory.path())
+        .expect("root authority should open");
 
     let metadata = rooted
         .metadata(Path::new("payload"))
@@ -897,9 +978,12 @@ fn test_rooted_local_file_system_reads_regular_file() {
 #[test]
 fn test_rooted_local_file_system_rename_respects_overwrite() {
     let directory = tempdir().expect("temporary root should be created");
-    fs::write(directory.path().join("source"), b"new").expect("source should be written");
-    fs::write(directory.path().join("target"), b"old").expect("target should be written");
-    let rooted = LocalFileSystem::rooted(directory.path()).expect("root authority should open");
+    fs::write(directory.path().join("source"), b"new")
+        .expect("source should be written");
+    fs::write(directory.path().join("target"), b"old")
+        .expect("target should be written");
+    let rooted = LocalFileSystem::rooted(directory.path())
+        .expect("root authority should open");
 
     let error = rooted
         .rename(

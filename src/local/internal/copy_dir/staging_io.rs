@@ -47,10 +47,14 @@ pub(super) fn copy_into_staging(
     staged_file: &mut StagedFile,
 ) -> CopyDirResult<u64> {
     #[cfg(feature = "internal-test-support")]
-    let result = if crate::local::internal::test_support::is_enabled("copy-staging-copy")
-        || crate::local::internal::test_support::is_enabled("copy-staging-copy-cleanup")
-        || crate::local::internal::test_support::take_on_nth("copy-staging-copy-second", 2)
-    {
+    let result = if crate::local::internal::test_support::is_enabled(
+        "copy-staging-copy",
+    ) || crate::local::internal::test_support::is_enabled(
+        "copy-staging-copy-cleanup",
+    ) || crate::local::internal::test_support::take_on_nth(
+        "copy-staging-copy-second",
+        2,
+    ) {
         Err(crate::local::test_fault_error())
     } else {
         io::copy(source_file, staged_file.file_mut())
@@ -92,7 +96,9 @@ pub(super) fn preserve_staged_permissions(
     staged_file: &mut StagedFile,
 ) -> CopyDirResult<()> {
     #[cfg(feature = "internal-test-support")]
-    let result = if crate::local::internal::test_support::is_enabled("copy-staging-permissions") {
+    let result = if crate::local::internal::test_support::is_enabled(
+        "copy-staging-permissions",
+    ) {
         Err(crate::local::test_fault_error())
     } else {
         staged_file

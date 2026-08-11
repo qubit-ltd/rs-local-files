@@ -80,13 +80,19 @@ impl LocalWriteOptions {
     }
 
     /// Sets the required atomicity.
-    pub const fn with_atomicity(mut self, atomicity: LocalAtomicityRequirement) -> Self {
+    pub const fn with_atomicity(
+        mut self,
+        atomicity: LocalAtomicityRequirement,
+    ) -> Self {
         self.atomicity = atomicity;
         self
     }
 
     /// Sets the required durability.
-    pub const fn with_durability(mut self, durability: LocalDurabilityRequirement) -> Self {
+    pub const fn with_durability(
+        mut self,
+        durability: LocalDurabilityRequirement,
+    ) -> Self {
         self.durability = durability;
         self
     }

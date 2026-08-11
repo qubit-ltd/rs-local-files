@@ -14,9 +14,9 @@ use std::path::Path;
 #[inline]
 pub(crate) fn host(target: &Path, create_parent: bool) -> io::Result<()> {
     if create_parent {
-        let parent = target
-            .parent()
-            .ok_or_else(|| io::Error::new(io::ErrorKind::InvalidInput, "target has no parent"))?;
+        let parent = target.parent().ok_or_else(|| {
+            io::Error::new(io::ErrorKind::InvalidInput, "target has no parent")
+        })?;
         std::fs::create_dir_all(parent)
     } else {
         crate::local::ensure_parent_path(target)

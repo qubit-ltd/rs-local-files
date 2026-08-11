@@ -15,7 +15,10 @@ use std::io::Result;
 use std::os::fd::AsRawFd;
 
 /// Copies ACLs and extended attributes through the native copyfile API.
-pub(super) fn preserve_extended_metadata(source: &File, staging: &File) -> Result<()> {
+pub(super) fn preserve_extended_metadata(
+    source: &File,
+    staging: &File,
+) -> Result<()> {
     let flags = libc::COPYFILE_ACL | libc::COPYFILE_XATTR;
     // SAFETY: both descriptors remain live for this non-retaining call. A
     // null copyfile state requests the default state, and both flags are
