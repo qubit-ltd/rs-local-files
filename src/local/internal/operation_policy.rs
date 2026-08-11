@@ -26,12 +26,13 @@ pub(crate) fn ensure_required_directory_durability(
     reason: &'static str,
 ) -> LocalResult<()> {
     if requirement == LocalDurabilityRequirement::Required && !supported {
-        return Err(
-            LocalFileError::new(LocalFileErrorKind::RequirementNotMet, operation)
-                .with_reason(reason)
-                .with_path(source.to_path_buf())
-                .with_target(target.to_path_buf()),
-        );
+        return Err(LocalFileError::new(
+            LocalFileErrorKind::RequirementNotMet,
+            operation,
+        )
+        .with_reason(reason)
+        .with_path(source.to_path_buf())
+        .with_target(target.to_path_buf()));
     }
     Ok(())
 }

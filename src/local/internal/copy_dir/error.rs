@@ -45,7 +45,13 @@ pub(super) fn copy_dir_error(
     stats: &LocalCopyDirStats,
     source: Error,
 ) -> LocalCopyDirError {
-    LocalCopyDirError::new(stage, src.to_path_buf(), dst.to_path_buf(), *stats, source)
+    LocalCopyDirError::new(
+        stage,
+        src.to_path_buf(),
+        dst.to_path_buf(),
+        *stats,
+        source,
+    )
 }
 
 /// Builds a recursive-copy error and attempts explicit staging cleanup.
@@ -102,10 +108,13 @@ pub(super) fn with_copy_context<T>(
 }
 
 /// Records one newly created destination directory.
-pub(super) fn record_created_directory(stats: &mut LocalCopyDirStats) -> Result<()> {
+pub(super) fn record_created_directory(
+    stats: &mut LocalCopyDirStats,
+) -> Result<()> {
     #[cfg(feature = "internal-test-support")]
-    let directories = if crate::local::internal::test_support::is_enabled("copy-stats-directories")
-    {
+    let directories = if crate::local::internal::test_support::is_enabled(
+        "copy-stats-directories",
+    ) {
         None
     } else {
         stats.directories.checked_add(1)
@@ -124,7 +133,9 @@ pub(super) fn record_created_directory(stats: &mut LocalCopyDirStats) -> Result<
 /// Records one skipped destination file.
 pub(super) fn record_skipped_file(stats: &mut LocalCopyDirStats) -> Result<()> {
     #[cfg(feature = "internal-test-support")]
-    let skipped = if crate::local::internal::test_support::is_enabled("copy-stats-skipped") {
+    let skipped = if crate::local::internal::test_support::is_enabled(
+        "copy-stats-skipped",
+    ) {
         None
     } else {
         stats.skipped.checked_add(1)
@@ -141,10 +152,13 @@ pub(super) fn record_skipped_file(stats: &mut LocalCopyDirStats) -> Result<()> {
 }
 
 /// Records one destination entry replaced by a completed copy.
-pub(super) fn record_overwritten_entry(stats: &mut LocalCopyDirStats) -> Result<()> {
+pub(super) fn record_overwritten_entry(
+    stats: &mut LocalCopyDirStats,
+) -> Result<()> {
     #[cfg(feature = "internal-test-support")]
-    let overwritten = if crate::local::internal::test_support::is_enabled("copy-stats-overwritten")
-    {
+    let overwritten = if crate::local::internal::test_support::is_enabled(
+        "copy-stats-overwritten",
+    ) {
         None
     } else {
         stats.overwritten.checked_add(1)
@@ -161,13 +175,18 @@ pub(super) fn record_overwritten_entry(stats: &mut LocalCopyDirStats) -> Result<
 }
 
 /// Atomically records one committed file and its copied byte count.
-pub(super) fn record_copied_file(stats: &mut LocalCopyDirStats, bytes: u64) -> Result<()> {
+pub(super) fn record_copied_file(
+    stats: &mut LocalCopyDirStats,
+    bytes: u64,
+) -> Result<()> {
     #[cfg(feature = "internal-test-support")]
-    let files = if crate::local::internal::test_support::is_enabled("copy-stats-files") {
-        None
-    } else {
-        stats.files.checked_add(1)
-    };
+    let files =
+        if crate::local::internal::test_support::is_enabled("copy-stats-files")
+        {
+            None
+        } else {
+            stats.files.checked_add(1)
+        };
     #[cfg(not(feature = "internal-test-support"))]
     let files = stats.files.checked_add(1);
     let files = match files {
@@ -175,11 +194,13 @@ pub(super) fn record_copied_file(stats: &mut LocalCopyDirStats, bytes: u64) -> R
         None => return Err(file_statistics_overflow_error()),
     };
     #[cfg(feature = "internal-test-support")]
-    let total_bytes = if crate::local::internal::test_support::is_enabled("copy-stats-bytes") {
-        None
-    } else {
-        stats.bytes.checked_add(bytes)
-    };
+    let total_bytes =
+        if crate::local::internal::test_support::is_enabled("copy-stats-bytes")
+        {
+            None
+        } else {
+            stats.bytes.checked_add(bytes)
+        };
     #[cfg(not(feature = "internal-test-support"))]
     let total_bytes = stats.bytes.checked_add(bytes);
     match total_bytes {

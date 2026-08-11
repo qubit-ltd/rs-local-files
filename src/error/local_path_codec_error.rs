@@ -36,14 +36,17 @@ impl fmt::Display for LocalPathCodecError {
             Self::InvalidEscape { offset } => {
                 write!(formatter, "invalid path escape at byte offset {offset}")
             }
-            Self::NonCanonicalText => formatter.write_str("non-canonical path text"),
-            Self::NativeNul => formatter.write_str("native path value contains NUL"),
+            Self::NonCanonicalText => {
+                formatter.write_str("non-canonical path text")
+            }
+            Self::NativeNul => {
+                formatter.write_str("native path value contains NUL")
+            }
             Self::UnsupportedNativeEncoding => {
                 formatter.write_str("native path encoding is unsupported")
             }
-            Self::UnrepresentableNativeValue => {
-                formatter.write_str("path text cannot represent a native path value")
-            }
+            Self::UnrepresentableNativeValue => formatter
+                .write_str("path text cannot represent a native path value"),
         }
     }
 }
