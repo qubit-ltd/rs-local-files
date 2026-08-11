@@ -14,10 +14,10 @@ use std::io::SeekFrom;
 
 #[cfg(windows)]
 use qubit_local_files::LocalFileErrorKind;
-#[cfg(feature = "internal-test-support")]
-use qubit_local_files::install_test_fault;
 use qubit_local_files::LocalFileSystem;
 use qubit_local_files::LocalReadOptions;
+#[cfg(feature = "internal-test-support")]
+use qubit_local_files::install_test_fault;
 use tempfile::tempdir;
 
 /// Verifies readers expose the native handle and support sequential seeking.
@@ -65,8 +65,7 @@ fn test_local_file_reader_supports_vectored_reads() {
         .expect("regular file should open for reading");
     let mut first = [0_u8; 2];
     let mut second = [0_u8; 4];
-    let mut buffers =
-        [IoSliceMut::new(&mut first), IoSliceMut::new(&mut second)];
+    let mut buffers = [IoSliceMut::new(&mut first), IoSliceMut::new(&mut second)];
 
     let count = reader
         .read_vectored(&mut buffers)
@@ -92,8 +91,7 @@ fn test_local_file_reader_vectored_read_retains_prior_bytes_after_later_error() 
         .expect("test fault should install");
     let mut first = [0_u8; 2];
     let mut second = [0_u8; 4];
-    let mut buffers =
-        [IoSliceMut::new(&mut first), IoSliceMut::new(&mut second)];
+    let mut buffers = [IoSliceMut::new(&mut first), IoSliceMut::new(&mut second)];
 
     let count = reader
         .read_vectored(&mut buffers)

@@ -87,10 +87,7 @@ impl LocalListOptions {
     }
 
     /// Overrides the owning filesystem's symbolic-link policy.
-    pub const fn with_symlink_policy(
-        mut self,
-        symlink_policy: LocalSymlinkPolicy,
-    ) -> Self {
+    pub const fn with_symlink_policy(mut self, symlink_policy: LocalSymlinkPolicy) -> Self {
         self.symlink_policy = Some(symlink_policy);
         self
     }
@@ -108,28 +105,19 @@ impl LocalListOptions {
     /// Sets the maximum number of concurrently open directory handles.
     ///
     /// A value of zero is invalid and is rejected when a walker is opened.
-    pub const fn with_max_open_directories(
-        mut self,
-        max_open_directories: usize,
-    ) -> Self {
+    pub const fn with_max_open_directories(mut self, max_open_directories: usize) -> Self {
         self.max_open_directories = max_open_directories;
         self
     }
 
     /// Sets the policy used after the handle budget is reached.
-    pub const fn with_reopen_policy(
-        mut self,
-        reopen_policy: LocalDirectoryReopenPolicy,
-    ) -> Self {
+    pub const fn with_reopen_policy(mut self, reopen_policy: LocalDirectoryReopenPolicy) -> Self {
         self.reopen_policy = reopen_policy;
         self
     }
 
     /// Sets the policy applied after an iteration error.
-    pub const fn with_error_policy(
-        mut self,
-        error_policy: LocalWalkErrorPolicy,
-    ) -> Self {
+    pub const fn with_error_policy(mut self, error_policy: LocalWalkErrorPolicy) -> Self {
         self.error_policy = error_policy;
         self
     }

@@ -35,10 +35,8 @@ fn test_host_path_resolution_follows_intermediate_symlink() {
     let directory = tempdir().expect("temporary directory should be created");
     let target = directory.path().join("target");
     fs::create_dir(&target).expect("target directory should be created");
-    fs::write(target.join("payload"), b"payload")
-        .expect("target payload should be written");
-    symlink(&target, directory.path().join("link"))
-        .expect("intermediate link should be created");
+    fs::write(target.join("payload"), b"payload").expect("target payload should be written");
+    symlink(&target, directory.path().join("link")).expect("intermediate link should be created");
 
     let mut reader = LocalFileSystem::host()
         .open_reader(

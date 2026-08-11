@@ -28,9 +28,8 @@ fn bench_path_codec(c: &mut Criterion) {
     let native = std::ffi::OsStr::new("manifest%2Fready");
     c.bench_function("path_codec", |b| {
         b.iter(|| {
-            let canonical =
-                LocalPathCodec::to_canonical_text(black_box(native))
-                    .expect("benchmark component should encode");
+            let canonical = LocalPathCodec::to_canonical_text(black_box(native))
+                .expect("benchmark component should encode");
             let restored = LocalPathCodec::from_canonical_text(&canonical)
                 .expect("benchmark component should decode");
             black_box(restored);
@@ -71,15 +70,11 @@ fn bench_walk_handle_budget(c: &mut Criterion) {
     let mut current = tree.clone();
     for depth in 0..32 {
         for index in 0..4 {
-            fs::write(
-                current.join(format!("entry-{depth}-{index}")),
-                b"payload",
-            )
-            .expect("budget benchmark entry should be written");
+            fs::write(current.join(format!("entry-{depth}-{index}")), b"payload")
+                .expect("budget benchmark entry should be written");
         }
         current.push(format!("level-{depth}"));
-        fs::create_dir(&current)
-            .expect("budget benchmark level should be created");
+        fs::create_dir(&current).expect("budget benchmark level should be created");
     }
     fs::write(current.join("payload"), b"payload")
         .expect("budget benchmark leaf should be written");
@@ -106,30 +101,24 @@ fn bench_walk_handle_budget(c: &mut Criterion) {
             .expect("rooted budget benchmark fixture should be valid")
             .len();
 
-        group.bench_function(
-            format!("host_reopen_{max_open_directories}"),
-            |bench| {
-                bench.iter(|| {
-                    let count = host
-                        .list(black_box(&tree), &options)
-                        .map(|walker| walker.count())
-                        .unwrap_or_default();
-                    black_box(count);
-                });
-            },
-        );
-        group.bench_function(
-            format!("rooted_reopen_{max_open_directories}"),
-            |bench| {
-                bench.iter(|| {
-                    let count = rooted
-                        .list(black_box(Path::new("tree")), &options)
-                        .map(|walker| walker.count())
-                        .unwrap_or_default();
-                    black_box(count);
-                });
-            },
-        );
+        group.bench_function(format!("host_reopen_{max_open_directories}"), |bench| {
+            bench.iter(|| {
+                let count = host
+                    .list(black_box(&tree), &options)
+                    .map(|walker| walker.count())
+                    .unwrap_or_default();
+                black_box(count);
+            });
+        });
+        group.bench_function(format!("rooted_reopen_{max_open_directories}"), |bench| {
+            bench.iter(|| {
+                let count = rooted
+                    .list(black_box(Path::new("tree")), &options)
+                    .map(|walker| walker.count())
+                    .unwrap_or_default();
+                black_box(count);
+            });
+        });
         black_box((host_count, rooted_count));
     }
     group.finish();
@@ -139,8 +128,7 @@ fn bench_copy(c: &mut Criterion) {
     let directory = tempdir().expect("benchmark directory should be created");
     let source = directory.path().join("source");
     fs::create_dir(&source).expect("benchmark source should be created");
-    fs::write(source.join("payload"), b"payload")
-        .expect("benchmark source file should be written");
+    fs::write(source.join("payload"), b"payload").expect("benchmark source file should be written");
     let target = directory.path().join("target");
     c.bench_function("copy", |b| {
         b.iter_batched(
@@ -174,17 +162,13 @@ fn bench_writer(c: &mut Criterion) {
                 let mut writer = LocalFileSystem::host()
                     .open_writer(
                         black_box(&target),
-                        &LocalWriteOptions::new(
-                            LocalWriteMode::CreateOrReplace,
-                        ),
+                        &LocalWriteOptions::new(LocalWriteMode::CreateOrReplace),
                     )
                     .expect("benchmark writer should open");
                 writer
                     .write_all(b"payload")
                     .expect("benchmark write should succeed");
-                let _ = black_box(
-                    writer.commit().expect("benchmark commit should succeed"),
-                );
+                let _ = black_box(writer.commit().expect("benchmark commit should succeed"));
             },
             criterion::BatchSize::SmallInput,
         );
@@ -193,8 +177,8 @@ fn bench_writer(c: &mut Criterion) {
 
 fn bench_rooted_writer(c: &mut Criterion) {
     let directory = tempdir().expect("rooted benchmark directory should exist");
-    let filesystem = LocalFileSystem::rooted(directory.path())
-        .expect("rooted benchmark filesystem should open");
+    let filesystem =
+        LocalFileSystem::rooted(directory.path()).expect("rooted benchmark filesystem should open");
     let target = std::path::Path::new("target");
     c.bench_function("rooted_writer", |b| {
         b.iter_batched(
@@ -205,9 +189,7 @@ fn bench_rooted_writer(c: &mut Criterion) {
                 let mut writer = filesystem
                     .open_writer(
                         target,
-                        &LocalWriteOptions::new(
-                            LocalWriteMode::CreateOrReplace,
-                        ),
+                        &LocalWriteOptions::new(LocalWriteMode::CreateOrReplace),
                     )
                     .expect("rooted benchmark writer should open");
                 writer
@@ -227,8 +209,7 @@ fn bench_rooted_writer(c: &mut Criterion) {
 fn bench_read_prefix(c: &mut Criterion) {
     let directory = tempdir().expect("benchmark directory should be created");
     let path = directory.path().join("prefix-payload");
-    fs::write(&path, vec![0x5a_u8; 1 << 20])
-        .expect("benchmark prefix payload should be written");
+    fs::write(&path, vec![0x5a_u8; 1 << 20]).expect("benchmark prefix payload should be written");
     let filesystem = LocalFileSystem::host();
     let mut group = c.benchmark_group("read_prefix");
     for max_bytes in [4 * 1024, 64 * 1024, 1 << 20] {
@@ -236,11 +217,7 @@ fn bench_read_prefix(c: &mut Criterion) {
         group.bench_function(format!("max_{max_bytes}"), |bench| {
             bench.iter(|| {
                 let bytes = filesystem
-                    .read_prefix(
-                        black_box(&path),
-                        &LocalReadOptions::new(),
-                        max_bytes,
-                    )
+                    .read_prefix(black_box(&path), &LocalReadOptions::new(), max_bytes)
                     .expect("benchmark prefix read should succeed");
                 black_box(bytes.len());
             });
