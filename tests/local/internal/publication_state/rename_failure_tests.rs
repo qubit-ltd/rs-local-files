@@ -15,8 +15,7 @@ use tempfile::tempdir;
 /// Verifies a native rename failure before publication reports unchanged state.
 #[test]
 fn test_rename_failure_before_publication_is_unchanged() {
-    let directory =
-        tempdir().expect("rename fixture directory must be created");
+    let directory = tempdir().expect("rename fixture directory must be created");
     let failure = LocalFileSystem::host()
         .rename(
             &directory.path().join("missing"),
