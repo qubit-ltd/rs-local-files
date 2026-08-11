@@ -31,14 +31,16 @@ where
     if std::env::var_os(TEST_FAULT_ENV)
         .is_some_and(|selected| selected == std::ffi::OsStr::new(fault))
     {
-        let _fault = install_test_fault(fault).expect("test fault controller should install");
+        let _fault = install_test_fault(fault)
+            .expect("test fault controller should install");
         action();
         return;
     }
     if std::env::var_os(TEST_FAULT_CHILD_ENV).is_some() {
         return;
     }
-    let executable = std::env::current_exe().expect("test executable should be available");
+    let executable =
+        std::env::current_exe().expect("test executable should be available");
     let status = std::process::Command::new(executable)
         .arg("--exact")
         .arg(test_name)
@@ -87,9 +89,11 @@ fn test_local_file_persist_outcome_preserves_logical_target_path() {
     let real_parent = root.path().join("real");
     fs::create_dir(&real_parent).expect("real parent must be created");
     let logical_parent = root.path().join("logical");
-    symlink(&real_parent, &logical_parent).expect("logical parent symlink must be created");
+    symlink(&real_parent, &logical_parent)
+        .expect("logical parent symlink must be created");
     let target = logical_parent.join("target.txt");
-    let expected = std::path::absolute(&target).expect("logical target must be made absolute");
+    let expected = std::path::absolute(&target)
+        .expect("logical target must be made absolute");
 
     let mut temporary = LocalFileSystem::host()
         .create_temp_file(&LocalTempFileOptions::new().with_parent(root.path()))
@@ -118,12 +122,16 @@ fn test_local_directory_persist_outcome_preserves_logical_target_path() {
     let real_parent = root.path().join("real");
     fs::create_dir(&real_parent).expect("real parent must be created");
     let logical_parent = root.path().join("logical");
-    symlink(&real_parent, &logical_parent).expect("logical parent symlink must be created");
+    symlink(&real_parent, &logical_parent)
+        .expect("logical parent symlink must be created");
     let target = logical_parent.join("target");
-    let expected = std::path::absolute(&target).expect("logical target must be made absolute");
+    let expected = std::path::absolute(&target)
+        .expect("logical target must be made absolute");
 
     let temporary = LocalFileSystem::host()
-        .create_temp_directory(&LocalTempDirectoryOptions::new().with_parent(root.path()))
+        .create_temp_directory(
+            &LocalTempDirectoryOptions::new().with_parent(root.path()),
+        )
         .expect("temporary directory must be created");
 
     let outcome = temporary
@@ -145,12 +153,14 @@ fn test_local_persist_outcome_reports_residual_sandbox_cleanup() {
             let root = tempfile::tempdir().expect("test root must be created");
             let target = root.path().join("target.txt");
             let temporary = LocalFileSystem::host()
-                .create_temp_file(&LocalTempFileOptions::new().with_parent(root.path()))
+                .create_temp_file(
+                    &LocalTempFileOptions::new().with_parent(root.path()),
+                )
                 .expect("temporary file must be created");
 
-            let outcome = temporary
-                .persist(&target)
-                .expect("publication should succeed despite sandbox cleanup failure");
+            let outcome = temporary.persist(&target).expect(
+                "publication should succeed despite sandbox cleanup failure",
+            );
 
             assert_eq!(target, outcome.path());
             assert_eq!(
