@@ -67,7 +67,10 @@ fn test_local_file_system_create_directory_reports_policy_and_type_errors() {
     let directory = tempdir().expect("temporary directory should be created");
     let missing_parent_target = directory.path().join("missing/child");
     let missing_parent_error = LocalFileSystem::host()
-        .create_directory(&missing_parent_target, &LocalCreateDirectoryOptions::new())
+        .create_directory(
+            &missing_parent_target,
+            &LocalCreateDirectoryOptions::new(),
+        )
         .expect_err("non-recursive creation must reject a missing parent");
     assert!(matches!(
         missing_parent_error.kind(),
@@ -84,7 +87,10 @@ fn test_local_file_system_create_directory_reports_policy_and_type_errors() {
     let file = directory.path().join("file");
     fs::write(&file, b"payload").expect("file fixture should be written");
     let type_error = LocalFileSystem::host()
-        .create_directory(&file, &LocalCreateDirectoryOptions::new().with_exists_ok())
+        .create_directory(
+            &file,
+            &LocalCreateDirectoryOptions::new().with_exists_ok(),
+        )
         .expect_err("a regular file cannot satisfy a directory request");
     assert_eq!(LocalFileErrorKind::TypeConflict, type_error.kind());
 }
@@ -96,12 +102,16 @@ fn test_local_file_system_delete_handles_missing_and_type_conflicts() {
     let directory = tempdir().expect("temporary directory should be created");
     let missing_file = directory.path().join("missing-file");
     let missing_outcome = LocalFileSystem::host()
-        .delete_file(&missing_file, &LocalDeleteOptions::new().with_missing_ok())
+        .delete_file(
+            &missing_file,
+            &LocalDeleteOptions::new().with_missing_ok(),
+        )
         .expect("missing file should be accepted by policy");
     assert!(!missing_outcome.deleted());
 
     let child_directory = directory.path().join("directory");
-    fs::create_dir(&child_directory).expect("directory fixture should be created");
+    fs::create_dir(&child_directory)
+        .expect("directory fixture should be created");
     let file_delete_error = LocalFileSystem::host()
         .delete_file(&child_directory, &LocalDeleteOptions::new())
         .expect_err("directory must not be deleted as a file");
@@ -124,7 +134,10 @@ fn test_local_file_system_delete_handles_missing_and_type_conflicts() {
 fn test_local_file_system_open_reader_reports_missing_and_directory_errors() {
     let directory = tempdir().expect("temporary directory should be created");
     let missing_error = LocalFileSystem::host()
-        .open_reader(&directory.path().join("missing"), &LocalReadOptions::new())
+        .open_reader(
+            &directory.path().join("missing"),
+            &LocalReadOptions::new(),
+        )
         .expect_err("missing files must not open as readers");
     assert_eq!(LocalFileErrorKind::NotFound, missing_error.kind());
 
