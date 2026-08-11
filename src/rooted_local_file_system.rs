@@ -113,7 +113,10 @@ impl RootedLocalFileSystem {
             .try_clone_authority()
             .map(|file| crate::capability::probe_limits(&file))
             .unwrap_or_else(|_| {
-                LocalFileSystemLimits::new(crate::SizeLimit::Unknown, crate::SizeLimit::Unknown)
+                LocalFileSystemLimits::new(
+                    crate::SizeLimit::Unknown,
+                    crate::SizeLimit::Unknown,
+                )
             });
         Ok(Self {
             root,

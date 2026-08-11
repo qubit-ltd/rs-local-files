@@ -97,13 +97,19 @@ impl LocalCopyOptions {
     }
 
     /// Sets the destination file conflict policy.
-    pub const fn with_conflict(mut self, conflict: LocalCopyConflictPolicy) -> Self {
+    pub const fn with_conflict(
+        mut self,
+        conflict: LocalCopyConflictPolicy,
+    ) -> Self {
         self.conflict = conflict;
         self
     }
 
     /// Sets the file/directory type conflict policy.
-    pub const fn with_type_conflict(mut self, type_conflict: LocalCopyTypeConflictPolicy) -> Self {
+    pub const fn with_type_conflict(
+        mut self,
+        type_conflict: LocalCopyTypeConflictPolicy,
+    ) -> Self {
         self.type_conflict = type_conflict;
         self
     }
@@ -118,7 +124,10 @@ impl LocalCopyOptions {
     }
 
     /// Sets symbolic-link policy.
-    pub const fn with_symlink_policy(mut self, symlink: LocalSymlinkPolicy) -> Self {
+    pub const fn with_symlink_policy(
+        mut self,
+        symlink: LocalSymlinkPolicy,
+    ) -> Self {
         self.symlink = Some(symlink);
         self
     }
@@ -142,13 +151,19 @@ impl LocalCopyOptions {
     }
 
     /// Sets required publication atomicity.
-    pub const fn with_atomicity(mut self, atomicity: LocalAtomicityRequirement) -> Self {
+    pub const fn with_atomicity(
+        mut self,
+        atomicity: LocalAtomicityRequirement,
+    ) -> Self {
         self.atomicity = atomicity;
         self
     }
 
     /// Sets required durability.
-    pub const fn with_durability(mut self, durability: LocalDurabilityRequirement) -> Self {
+    pub const fn with_durability(
+        mut self,
+        durability: LocalDurabilityRequirement,
+    ) -> Self {
         self.durability = durability;
         self
     }

@@ -30,14 +30,19 @@ impl DirectoryReader {
     /// Opens a lazy reader for the already-opened root directory.
     ///
     /// Returns an I/O error when the root cannot be enumerated.
-    pub(crate) fn open_root(root: &File, diagnostic_root: &Path) -> Result<Self> {
+    pub(crate) fn open_root(
+        root: &File,
+        diagnostic_root: &Path,
+    ) -> Result<Self> {
         #[cfg(unix)]
         {
-            local::open_root_directory_reader(root, diagnostic_root).map(|inner| Self { inner })
+            local::open_root_directory_reader(root, diagnostic_root)
+                .map(|inner| Self { inner })
         }
         #[cfg(windows)]
         {
-            local::open_root_directory_reader(root, diagnostic_root).map(|inner| Self { inner })
+            local::open_root_directory_reader(root, diagnostic_root)
+                .map(|inner| Self { inner })
         }
         #[cfg(not(any(unix, windows)))]
         {
@@ -86,7 +91,9 @@ impl DirectoryReader {
         #[cfg(unix)]
         {
             self.inner.next_entry().map(|entry| {
-                entry.map(|(name, status)| Entry::new(name, Metadata::from_stat(&status)))
+                entry.map(|(name, status)| {
+                    Entry::new(name, Metadata::from_stat(&status))
+                })
             })
         }
         #[cfg(windows)]
@@ -94,7 +101,8 @@ impl DirectoryReader {
             self.inner.next_entry().and_then(|entry| {
                 entry
                     .map(|(name, file)| {
-                        Metadata::from_open_file(&file).map(|metadata| Entry::new(name, metadata))
+                        Metadata::from_open_file(&file)
+                            .map(|metadata| Entry::new(name, metadata))
                     })
                     .transpose()
             })

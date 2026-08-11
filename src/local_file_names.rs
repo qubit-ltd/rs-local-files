@@ -47,11 +47,19 @@ impl LocalFileNames {
     /// Returns `LocalFileError` when an affix is invalid or the
     /// operating-system random source fails.
     #[inline]
-    pub fn random_name_with(prefix: Option<&str>, suffix: Option<&str>) -> LocalResult<OsString> {
+    pub fn random_name_with(
+        prefix: Option<&str>,
+        suffix: Option<&str>,
+    ) -> LocalResult<OsString> {
         crate::local::try_random_file_name("qubit-local-files-", prefix, suffix)
             .map(OsString::from)
             .map_err(|source| {
-                LocalFileError::from_io(LocalFileOperation::GenerateName, None, None, source)
+                LocalFileError::from_io(
+                    LocalFileOperation::GenerateName,
+                    None,
+                    None,
+                    source,
+                )
             })
     }
 
@@ -74,7 +82,12 @@ impl LocalFileNames {
             ));
         };
         crate::local::validate_portable_file_name_impl(name).map_err(|source| {
-            LocalFileError::from_io(LocalFileOperation::ValidateName, None, None, source)
+            LocalFileError::from_io(
+                LocalFileOperation::ValidateName,
+                None,
+                None,
+                source,
+            )
         })
     }
 }

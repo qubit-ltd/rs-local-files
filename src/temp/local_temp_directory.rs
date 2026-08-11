@@ -76,9 +76,9 @@ impl LocalTempDirectory {
             host_identity: Some(TempEntryIdentity::from_path(&path)?),
             rooted_identity: None,
             path,
-            backend: LocalTempResourceBackend::Host(super::internal::HostTempResourceBackend {
-                sandbox_path,
-            }),
+            backend: LocalTempResourceBackend::Host(
+                super::internal::HostTempResourceBackend { sandbox_path },
+            ),
             state: LocalTempResourceState::Owned,
             symlink_policy,
         })
@@ -92,17 +92,19 @@ impl LocalTempDirectory {
         sandbox_path: PathBuf,
         symlink_policy: LocalSymlinkPolicy,
     ) -> Result<Self> {
-        let relative =
-            LocalRelativePath::new(&path).expect("rooted temporary path was validated at creation");
+        let relative = LocalRelativePath::new(&path)
+            .expect("rooted temporary path was validated at creation");
         Ok(Self {
             host_identity: None,
             rooted_identity: Some(root.symlink_metadata(&relative)?),
             path: path.clone(),
-            backend: LocalTempResourceBackend::Rooted(RootedTempResourceBackend {
-                root,
-                relative_path: path,
-                sandbox_path,
-            }),
+            backend: LocalTempResourceBackend::Rooted(
+                RootedTempResourceBackend {
+                    root,
+                    relative_path: path,
+                    sandbox_path,
+                },
+            ),
             state: LocalTempResourceState::Owned,
             symlink_policy,
         })
@@ -215,7 +217,9 @@ impl LocalTempDirectory {
         }
         if self.state == LocalTempResourceState::Indeterminate {
             return Err(LocalPersistError::new(
-                std::io::Error::other("temporary directory namespace state is indeterminate"),
+                std::io::Error::other(
+                    "temporary directory namespace state is indeterminate",
+                ),
                 self,
                 target.to_path_buf(),
                 None,
@@ -225,18 +229,19 @@ impl LocalTempDirectory {
         let requested_target = target.to_path_buf();
         match &self.backend {
             LocalTempResourceBackend::Host(_) => {
-                let logical_target = match std::path::absolute(&requested_target) {
-                    Ok(target) => target,
-                    Err(error) => {
-                        return Err(LocalPersistError::new(
-                            error,
-                            self,
-                            requested_target,
-                            None,
-                            LocalPersistStage::ResolveTarget,
-                        ));
-                    }
-                };
+                let logical_target =
+                    match std::path::absolute(&requested_target) {
+                        Ok(target) => target,
+                        Err(error) => {
+                            return Err(LocalPersistError::new(
+                                error,
+                                self,
+                                requested_target,
+                                None,
+                                LocalPersistStage::ResolveTarget,
+                            ));
+                        }
+                    };
                 let target = match crate::local::resolve_host_path(
                     &logical_target,
                     self.symlink_policy,
@@ -253,7 +258,9 @@ impl LocalTempDirectory {
                         ));
                     }
                 };
-                if let Err(error) = prepare_host_parent(&target, options.creates_parent()) {
+                if let Err(error) =
+                    prepare_host_parent(&target, options.creates_parent())
+                {
                     return Err(LocalPersistError::new(
                         error,
                         self,
@@ -265,7 +272,9 @@ impl LocalTempDirectory {
                 let result = if options.overwrites() {
                     std::fs::rename(&self.path, &target)
                 } else {
-                    crate::local::move_directory_without_replacing(&self.path, &target)
+                    crate::local::move_directory_without_replacing(
+                        &self.path, &target,
+                    )
                 };
                 if let Err(error) = result {
                     self.record_native_persist_failure(&error);
@@ -309,28 +318,31 @@ impl LocalTempDirectory {
                 };
                 let source = LocalRelativePath::new(&rooted.relative_path)
                     .expect("rooted temporary path was validated at creation");
-                let resolved = match crate::rooted_local_file_system::resolve_rooted_path(
-                    &rooted.root,
-                    &target,
-                    self.symlink_policy,
-                    false,
-                    LocalFileOperation::PersistTemp,
-                ) {
-                    Ok(resolved) => resolved,
-                    Err(error) => {
-                        return Err(LocalPersistError::new(
-                            error.into_io_error(),
-                            self,
-                            requested_target,
-                            None,
-                            LocalPersistStage::ResolveTarget,
-                        ));
-                    }
-                };
+                let resolved =
+                    match crate::rooted_local_file_system::resolve_rooted_path(
+                        &rooted.root,
+                        &target,
+                        self.symlink_policy,
+                        false,
+                        LocalFileOperation::PersistTemp,
+                    ) {
+                        Ok(resolved) => resolved,
+                        Err(error) => {
+                            return Err(LocalPersistError::new(
+                                error.into_io_error(),
+                                self,
+                                requested_target,
+                                None,
+                                LocalPersistStage::ResolveTarget,
+                            ));
+                        }
+                    };
                 let destination = resolved;
-                if let Err(error) =
-                    prepare_rooted_parent(&rooted.root, &destination, options.creates_parent())
-                {
+                if let Err(error) = prepare_rooted_parent(
+                    &rooted.root,
+                    &destination,
+                    options.creates_parent(),
+                ) {
                     return Err(LocalPersistError::new(
                         error,
                         self,
@@ -401,7 +413,9 @@ impl LocalTempDirectory {
             return Err(crate::local::test_fault_error());
         }
         match &self.backend {
-            LocalTempResourceBackend::Host(host) => std::fs::remove_dir(&host.sandbox_path),
+            LocalTempResourceBackend::Host(host) => {
+                std::fs::remove_dir(&host.sandbox_path)
+            }
             LocalTempResourceBackend::Rooted(rooted) => {
                 let sandbox = LocalRelativePath::new(&rooted.sandbox_path)
                     .expect("rooted temporary sandbox path was validated at creation");
@@ -414,7 +428,9 @@ impl LocalTempDirectory {
     fn cleanup_path(&self) -> PathBuf {
         match &self.backend {
             LocalTempResourceBackend::Host(host) => host.sandbox_path.clone(),
-            LocalTempResourceBackend::Rooted(rooted) => rooted.sandbox_path.clone(),
+            LocalTempResourceBackend::Rooted(rooted) => {
+                rooted.sandbox_path.clone()
+            }
         }
     }
 
@@ -522,7 +538,8 @@ impl Drop for LocalTempDirectory {
                     self.state = LocalTempResourceState::Released;
                 }
             }
-            LocalTempResourceState::Indeterminate | LocalTempResourceState::Released => {}
+            LocalTempResourceState::Indeterminate
+            | LocalTempResourceState::Released => {}
         }
     }
 }
