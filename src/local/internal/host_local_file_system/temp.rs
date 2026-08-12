@@ -273,6 +273,11 @@ pub(crate) fn internal_copy_options(
         .with_type_conflict(options.type_conflict())
         .with_symlink_policy(symlink_policy)
         .with_durability(options.durability());
+    if let Some(value) = options.max_depth() { result = result.with_max_depth(value); }
+    if let Some(value) = options.max_entries() { result = result.with_max_entries(value); }
+    if let Some(value) = options.max_bytes() { result = result.with_max_bytes(value); }
+    if let Some(value) = options.max_open_directories() { result = result.with_max_open_directories(value); }
+    if let Some(value) = options.deadline() { result = result.with_deadline(value); }
     if options.preserve_metadata() == LocalMetadataPreservePolicy::Permissions {
         result = result.preserve_permissions();
     }

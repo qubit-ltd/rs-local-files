@@ -81,6 +81,11 @@ pub(crate) struct LocalCopyDirOptions {
 
     /// Synchronization policy for staged regular files.
     durability: LocalDurabilityRequirement,
+    max_depth: Option<usize>,
+    max_entries: Option<usize>,
+    max_bytes: Option<u64>,
+    max_open_directories: Option<usize>,
+    deadline: Option<Duration>,
 }
 
 impl LocalCopyDirOptions {
@@ -98,12 +103,20 @@ impl LocalCopyDirOptions {
             preserve_permissions: false,
             open_retry_timeout: None,
             durability: LocalDurabilityRequirement::NotRequired,
+            max_depth: None,
+            max_entries: None,
+            max_bytes: None,
+            max_open_directories: None,
+            deadline: None,
         }
     }
 
     /// Sets the synchronization policy for staged regular files.
     #[inline(always)]
-    pub(crate) const fn with_durability(mut self, durability: LocalDurabilityRequirement) -> Self {
+    pub(crate) const fn with_durability(
+        mut self,
+        durability: LocalDurabilityRequirement,
+    ) -> Self {
         self.durability = durability;
         self
     }
@@ -112,6 +125,46 @@ impl LocalCopyDirOptions {
     #[inline(always)]
     pub(crate) const fn durability(&self) -> LocalDurabilityRequirement {
         self.durability
+    }
+
+    pub(crate) const fn max_depth(&self) -> Option<usize> {
+        self.max_depth
+    }
+    pub(crate) const fn max_entries(&self) -> Option<usize> {
+        self.max_entries
+    }
+    pub(crate) const fn max_bytes(&self) -> Option<u64> {
+        self.max_bytes
+    }
+    pub(crate) const fn max_open_directories(&self) -> Option<usize> {
+        self.max_open_directories
+    }
+    pub(crate) const fn deadline(&self) -> Option<Duration> {
+        self.deadline
+    }
+
+    pub(crate) const fn with_max_depth(mut self, value: usize) -> Self {
+        self.max_depth = Some(value);
+        self
+    }
+    pub(crate) const fn with_max_entries(mut self, value: usize) -> Self {
+        self.max_entries = Some(value);
+        self
+    }
+    pub(crate) const fn with_max_bytes(mut self, value: u64) -> Self {
+        self.max_bytes = Some(value);
+        self
+    }
+    pub(crate) const fn with_max_open_directories(
+        mut self,
+        value: usize,
+    ) -> Self {
+        self.max_open_directories = Some(value);
+        self
+    }
+    pub(crate) const fn with_deadline(mut self, value: Duration) -> Self {
+        self.deadline = Some(value);
+        self
     }
 
     /// Returns the destination file conflict policy.
@@ -131,7 +184,10 @@ impl LocalCopyDirOptions {
     /// # Returns
     /// Updated directory copy options.
     #[inline(always)]
-    pub(crate) const fn with_conflict(mut self, conflict: LocalCopyConflictPolicy) -> Self {
+    pub(crate) const fn with_conflict(
+        mut self,
+        conflict: LocalCopyConflictPolicy,
+    ) -> Self {
         self.conflict = conflict;
         self
     }
@@ -141,7 +197,9 @@ impl LocalCopyDirOptions {
     /// # Returns
     /// Policy applied to source and destination type mismatches.
     #[inline(always)]
-    pub(crate) const fn type_conflict_policy(&self) -> LocalCopyTypeConflictPolicy {
+    pub(crate) const fn type_conflict_policy(
+        &self,
+    ) -> LocalCopyTypeConflictPolicy {
         self.type_conflict
     }
 
@@ -175,7 +233,10 @@ impl LocalCopyDirOptions {
     /// # Returns
     /// Updated directory copy options.
     #[inline(always)]
-    pub(crate) const fn with_symlink_policy(mut self, symlink_policy: LocalSymlinkPolicy) -> Self {
+    pub(crate) const fn with_symlink_policy(
+        mut self,
+        symlink_policy: LocalSymlinkPolicy,
+    ) -> Self {
         self.symlink_policy = symlink_policy;
         self
     }
@@ -227,7 +288,10 @@ impl LocalCopyDirOptions {
     /// # Returns
     /// Updated directory copy options.
     #[allow(dead_code)]
-    pub(crate) const fn with_open_retry_timeout(mut self, timeout: Duration) -> Self {
+    pub(crate) const fn with_open_retry_timeout(
+        mut self,
+        timeout: Duration,
+    ) -> Self {
         self.open_retry_timeout = Some(timeout);
         self
     }
