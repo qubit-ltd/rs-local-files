@@ -25,7 +25,8 @@ fn test_test_support_injects_selected_fault_only_in_child_process() {
 
     match std::env::var(CHILD_ENV).as_deref() {
         Ok("normal") => {
-            let directory = tempdir().expect("temporary directory should be created");
+            let directory =
+                tempdir().expect("temporary directory should be created");
             let file = directory.path().join("payload");
             fs::write(&file, b"payload").expect("fixture should be written");
 
@@ -35,8 +36,10 @@ fn test_test_support_injects_selected_fault_only_in_child_process() {
             return;
         }
         Ok("fault") => {
-            let _fault = install_test_fault(FAULT).expect("fault controller should install");
-            let directory = tempdir().expect("temporary directory should be created");
+            let _fault = install_test_fault(FAULT)
+                .expect("fault controller should install");
+            let directory =
+                tempdir().expect("temporary directory should be created");
             let file = directory.path().join("payload");
             fs::write(&file, b"payload").expect("fixture should be written");
 
@@ -53,7 +56,8 @@ fn test_test_support_injects_selected_fault_only_in_child_process() {
         }
     }
 
-    let executable = std::env::current_exe().expect("test executable should be available");
+    let executable =
+        std::env::current_exe().expect("test executable should be available");
     let normal_status = std::process::Command::new(&executable)
         .arg("--exact")
         .arg(TEST_NAME)
@@ -85,7 +89,8 @@ fn test_explicit_test_fault_guard_scopes_controller() {
     fs::write(&file, b"payload").expect("fixture should be written");
 
     {
-        let _fault = install_test_fault(FAULT).expect("fault controller should install");
+        let _fault =
+            install_test_fault(FAULT).expect("fault controller should install");
         let error = LocalFileSystem::host()
             .delete_file(&file, &LocalDeleteOptions::new())
             .expect_err("explicitly selected fault should fail deletion");

@@ -30,14 +30,21 @@ unsafe extern "C" {
     fn acl_get_fd_np(file: libc::c_int, acl_type: u32) -> *mut c_void;
 
     /// Applies a descriptor ACL of the requested native type.
-    fn acl_set_fd_np(file: libc::c_int, acl: *mut c_void, acl_type: u32) -> libc::c_int;
+    fn acl_set_fd_np(
+        file: libc::c_int,
+        acl: *mut c_void,
+        acl_type: u32,
+    ) -> libc::c_int;
 
     /// Releases an ACL allocated by the native ACL API.
     fn acl_free(object: *mut c_void) -> libc::c_int;
 }
 
 /// Copies the native ACL and both extended-attribute namespaces to staging.
-pub(super) fn preserve_extended_metadata(source: &File, staging: &File) -> Result<()> {
+pub(super) fn preserve_extended_metadata(
+    source: &File,
+    staging: &File,
+) -> Result<()> {
     preserve_acl(source, staging)?;
     preserve_namespace(source, staging, libc::EXTATTR_NAMESPACE_USER)?;
     preserve_namespace(source, staging, libc::EXTATTR_NAMESPACE_SYSTEM)
@@ -70,7 +77,8 @@ fn get_acl(file: &File, acl_type: u32) -> Result<*mut c_void> {
 fn apply_acl(staging: &File, acl: *mut c_void, acl_type: u32) -> Result<()> {
     // SAFETY: `acl` came from `acl_get_fd_np`, the staging descriptor remains
     // live, and `acl_type` is the same native flavor used to obtain the ACL.
-    let set_result = unsafe { acl_set_fd_np(staging.as_raw_fd(), acl, acl_type) };
+    let set_result =
+        unsafe { acl_set_fd_np(staging.as_raw_fd(), acl, acl_type) };
     let set_error = (set_result == -1).then(Error::last_os_error);
     // SAFETY: `acl` is a non-null allocation returned by `acl_get_fd_np` and
     // has not previously been released.
@@ -85,7 +93,11 @@ fn apply_acl(staging: &File, acl: *mut c_void, acl_type: u32) -> Result<()> {
 }
 
 /// Synchronizes one FreeBSD extended-attribute namespace.
-fn preserve_namespace(source: &File, staging: &File, namespace: libc::c_int) -> Result<()> {
+fn preserve_namespace(
+    source: &File,
+    staging: &File,
+    namespace: libc::c_int,
+) -> Result<()> {
     let source_names = list_attributes(source, namespace)?;
     let staging_names = list_attributes(staging, namespace)?;
     for name in staging_names.difference(&source_names) {
@@ -103,13 +115,22 @@ fn preserve_namespace(source: &File, staging: &File, namespace: libc::c_int) -> 
 }
 
 /// Lists the length-prefixed names in one descriptor namespace.
-fn list_attributes(file: &File, namespace: libc::c_int) -> Result<BTreeSet<Vec<u8>>> {
+fn list_attributes(
+    file: &File,
+    namespace: libc::c_int,
+) -> Result<BTreeSet<Vec<u8>>> {
     let mut remaining_attempts = XATTR_SIZE_RACE_ATTEMPTS;
     loop {
         // SAFETY: the descriptor remains live and null output requests only
         // the current byte length of the namespace's name list.
-        let length =
-            unsafe { libc::extattr_list_fd(file.as_raw_fd(), namespace, std::ptr::null_mut(), 0) };
+        let length = unsafe {
+            libc::extattr_list_fd(
+                file.as_raw_fd(),
+                namespace,
+                std::ptr::null_mut(),
+                0,
+            )
+        };
         if length == -1 {
             let error = Error::last_os_error();
             if is_not_supported(&error) {
@@ -133,7 +154,9 @@ fn list_attributes(file: &File, namespace: libc::c_int) -> Result<BTreeSet<Vec<u
         };
         if read == -1 {
             let error = Error::last_os_error();
-            if error.raw_os_error() == Some(libc::ERANGE) && remaining_attempts > 1 {
+            if error.raw_os_error() == Some(libc::ERANGE)
+                && remaining_attempts > 1
+            {
                 remaining_attempts -= 1;
                 continue;
             }
@@ -177,7 +200,11 @@ fn parse_attribute_names(buffer: &[u8]) -> Result<BTreeSet<Vec<u8>>> {
 }
 
 /// Gets one required extended-attribute value.
-fn get_attribute(file: &File, namespace: libc::c_int, name: &[u8]) -> Result<Vec<u8>> {
+fn get_attribute(
+    file: &File,
+    namespace: libc::c_int,
+    name: &[u8],
+) -> Result<Vec<u8>> {
     get_optional_attribute(file, namespace, name)?.ok_or_else(|| {
         Error::new(
             ErrorKind::NotFound,
@@ -230,7 +257,9 @@ fn get_optional_attribute(
         };
         if read == -1 {
             let error = Error::last_os_error();
-            if error.raw_os_error() == Some(libc::ERANGE) && remaining_attempts > 1 {
+            if error.raw_os_error() == Some(libc::ERANGE)
+                && remaining_attempts > 1
+            {
                 remaining_attempts -= 1;
                 continue;
             }
@@ -245,7 +274,12 @@ fn get_optional_attribute(
 }
 
 /// Sets one descriptor-based extended attribute.
-fn set_attribute(file: &File, namespace: libc::c_int, name: &[u8], value: &[u8]) -> Result<()> {
+fn set_attribute(
+    file: &File,
+    namespace: libc::c_int,
+    name: &[u8],
+    value: &[u8],
+) -> Result<()> {
     let name = native_name(name)?;
     // SAFETY: the descriptor, name, and value remain live for the call, and
     // the supplied length matches the value buffer.
@@ -271,10 +305,16 @@ fn set_attribute(file: &File, namespace: libc::c_int, name: &[u8], value: &[u8])
 }
 
 /// Removes one descriptor-based extended attribute.
-fn remove_attribute(file: &File, namespace: libc::c_int, name: &[u8]) -> Result<()> {
+fn remove_attribute(
+    file: &File,
+    namespace: libc::c_int,
+    name: &[u8],
+) -> Result<()> {
     let name = native_name(name)?;
     // SAFETY: the descriptor and name remain live for this non-retaining call.
-    let result = unsafe { libc::extattr_delete_fd(file.as_raw_fd(), namespace, name.as_ptr()) };
+    let result = unsafe {
+        libc::extattr_delete_fd(file.as_raw_fd(), namespace, name.as_ptr())
+    };
     if result == -1 {
         let error = Error::last_os_error();
         if is_missing_attribute(&error) {
@@ -316,5 +356,7 @@ fn is_not_supported(error: &Error) -> bool {
 #[inline]
 fn is_unsupported_acl_type(error: &Error) -> bool {
     let code = error.raw_os_error();
-    code == Some(libc::EINVAL) || code == Some(libc::ENOTSUP) || code == Some(libc::EOPNOTSUPP)
+    code == Some(libc::EINVAL)
+        || code == Some(libc::ENOTSUP)
+        || code == Some(libc::EOPNOTSUPP)
 }
