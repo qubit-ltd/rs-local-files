@@ -43,13 +43,16 @@ impl OpenedAtomicDestination {
     pub(crate) fn from_file(file: File) -> Result<Self> {
         let metadata_result = file.metadata();
         #[cfg(feature = "internal-test-support")]
-        let metadata_result = if super::test_support::is_enabled("atomic-destination-stat") {
-            Err(crate::local::test_fault_error())
-        } else {
-            metadata_result
-        };
+        let metadata_result =
+            if super::test_support::is_enabled("atomic-destination-stat") {
+                Err(crate::local::test_fault_error())
+            } else {
+                metadata_result
+            };
         let metadata = metadata_result?;
-        if !metadata.is_file() || test_support_enabled("atomic-destination-type") {
+        if !metadata.is_file()
+            || test_support_enabled("atomic-destination-type")
+        {
             return Err(invalid_atomic_destination());
         }
         clear_nonblocking(file.as_raw_fd())?;
@@ -147,7 +150,8 @@ pub(in crate::local) fn open_rooted_atomic_destination(
     } else if super::test_support::is_enabled("rooted-destination-missing") {
         return Ok(None);
     }
-    let flags = libc::O_RDONLY | libc::O_NOFOLLOW | libc::O_NONBLOCK | libc::O_CLOEXEC;
+    let flags =
+        libc::O_RDONLY | libc::O_NOFOLLOW | libc::O_NONBLOCK | libc::O_CLOEXEC;
     open_destination_with_retry(open_retry_timeout, || {
         let result = open_file_at(parent, name, flags, 0);
         #[cfg(feature = "internal-test-support")]
@@ -243,7 +247,9 @@ pub(in crate::local) fn rooted_destination_identity_matches(
     let Some(status) = rooted_destination_status(parent, name)? else {
         return Ok(false);
     };
-    if !is_regular_file_mode(status.st_mode) || test_support_enabled("rooted-status-type") {
+    if !is_regular_file_mode(status.st_mode)
+        || test_support_enabled("rooted-status-type")
+    {
         return Ok(false);
     }
     let device = native_identity_component(status.st_dev)?;
@@ -252,7 +258,10 @@ pub(in crate::local) fn rooted_destination_identity_matches(
 }
 
 /// Reads rooted destination status without following the final entry.
-fn rooted_destination_status(parent: &File, name: &CString) -> Result<Option<libc::stat>> {
+fn rooted_destination_status(
+    parent: &File,
+    name: &CString,
+) -> Result<Option<libc::stat>> {
     #[cfg(feature = "internal-test-support")]
     if super::test_support::is_enabled("rooted-status-missing") {
         return Ok(None);
