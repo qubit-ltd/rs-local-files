@@ -19,7 +19,8 @@ use tempfile::tempdir;
 #[cfg(unix)]
 #[test]
 fn test_required_rename_durability_is_reported() {
-    let directory = tempdir().expect("rename fixture directory must be created");
+    let directory =
+        tempdir().expect("rename fixture directory must be created");
     let source = directory.path().join("source");
     let target = directory.path().join("target");
     std::fs::write(&source, b"payload").expect("rename source must be written");
@@ -28,7 +29,8 @@ fn test_required_rename_durability_is_reported() {
         .rename(
             &source,
             &target,
-            &LocalRenameOptions::new().with_durability(LocalDurabilityRequirement::Required),
+            &LocalRenameOptions::new()
+                .with_durability(LocalDurabilityRequirement::Required),
         )
         .expect("required durable rename must succeed");
 

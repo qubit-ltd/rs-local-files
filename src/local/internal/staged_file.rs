@@ -120,9 +120,11 @@ impl StagedFile {
         self.close();
         if let Some(path) = self.path.as_ref() {
             #[cfg(feature = "internal-test-support")]
-            if super::test_support::is_enabled("atomic-install-unlink-persistent")
-                || super::test_support::is_enabled("atomic-install-unlink-persistent-sync")
-                || super::test_support::is_enabled("copy-staging-copy-cleanup")
+            if super::test_support::is_enabled(
+                "atomic-install-unlink-persistent",
+            ) || super::test_support::is_enabled(
+                "atomic-install-unlink-persistent-sync",
+            ) || super::test_support::is_enabled("copy-staging-copy-cleanup")
             {
                 return Err(crate::local::test_fault_error());
             }
