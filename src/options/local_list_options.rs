@@ -8,6 +8,8 @@
 // qubit-style: allow source-test-pair
 // Covered by walker integration tests.
 
+use std::time::Duration;
+
 use super::LocalDirectoryReopenPolicy;
 use super::LocalSymlinkPolicy;
 use super::LocalWalkErrorPolicy;
@@ -27,6 +29,12 @@ pub struct LocalListOptions {
     /// Maximum yielded descendant depth, where immediate children have depth
     /// one.
     max_depth: Option<usize>,
+    /// Optional cap on entries yielded by this walker.
+    max_entries: Option<usize>,
+    /// Optional cap on bytes retained by duplicate-name tracking.
+    max_seen_name_bytes: Option<usize>,
+    /// Optional wall-clock deadline for the complete traversal.
+    deadline: Option<Duration>,
     /// Policy applied when an entry or descendant cannot be inspected.
     error_policy: LocalWalkErrorPolicy,
 }
@@ -41,6 +49,9 @@ impl LocalListOptions {
             recursive: false,
             symlink_policy: None,
             max_depth: None,
+            max_entries: None,
+            max_seen_name_bytes: None,
+            deadline: None,
             error_policy: LocalWalkErrorPolicy::FailFast,
         }
     }
@@ -61,6 +72,24 @@ impl LocalListOptions {
     #[must_use]
     pub const fn max_depth(&self) -> Option<usize> {
         self.max_depth
+    }
+
+    /// Returns the maximum number of entries yielded by this walker.
+    #[must_use]
+    pub const fn max_entries(&self) -> Option<usize> {
+        self.max_entries
+    }
+
+    /// Returns the maximum bytes retained by duplicate-name tracking.
+    #[must_use]
+    pub const fn max_seen_name_bytes(&self) -> Option<usize> {
+        self.max_seen_name_bytes
+    }
+
+    /// Returns the optional wall-clock deadline.
+    #[must_use]
+    pub const fn deadline(&self) -> Option<Duration> {
+        self.deadline
     }
 
     /// Returns the maximum number of concurrently open directory handles.
@@ -87,7 +116,10 @@ impl LocalListOptions {
     }
 
     /// Overrides the owning filesystem's symbolic-link policy.
-    pub const fn with_symlink_policy(mut self, symlink_policy: LocalSymlinkPolicy) -> Self {
+    pub const fn with_symlink_policy(
+        mut self,
+        symlink_policy: LocalSymlinkPolicy,
+    ) -> Self {
         self.symlink_policy = Some(symlink_policy);
         self
     }
@@ -102,22 +134,52 @@ impl LocalListOptions {
         self
     }
 
+    /// Limits the number of entries yielded by the walker.
+    pub const fn with_max_entries(mut self, max_entries: usize) -> Self {
+        self.max_entries = Some(max_entries);
+        self
+    }
+
+    /// Limits memory retained for duplicate-name tracking.
+    pub const fn with_max_seen_name_bytes(
+        mut self,
+        max_seen_name_bytes: usize,
+    ) -> Self {
+        self.max_seen_name_bytes = Some(max_seen_name_bytes);
+        self
+    }
+
+    /// Sets a wall-clock deadline for the complete traversal.
+    pub const fn with_deadline(mut self, deadline: Duration) -> Self {
+        self.deadline = Some(deadline);
+        self
+    }
+
     /// Sets the maximum number of concurrently open directory handles.
     ///
     /// A value of zero is invalid and is rejected when a walker is opened.
-    pub const fn with_max_open_directories(mut self, max_open_directories: usize) -> Self {
+    pub const fn with_max_open_directories(
+        mut self,
+        max_open_directories: usize,
+    ) -> Self {
         self.max_open_directories = max_open_directories;
         self
     }
 
     /// Sets the policy used after the handle budget is reached.
-    pub const fn with_reopen_policy(mut self, reopen_policy: LocalDirectoryReopenPolicy) -> Self {
+    pub const fn with_reopen_policy(
+        mut self,
+        reopen_policy: LocalDirectoryReopenPolicy,
+    ) -> Self {
         self.reopen_policy = reopen_policy;
         self
     }
 
     /// Sets the policy applied after an iteration error.
-    pub const fn with_error_policy(mut self, error_policy: LocalWalkErrorPolicy) -> Self {
+    pub const fn with_error_policy(
+        mut self,
+        error_policy: LocalWalkErrorPolicy,
+    ) -> Self {
         self.error_policy = error_policy;
         self
     }

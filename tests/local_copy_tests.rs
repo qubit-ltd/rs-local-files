@@ -111,8 +111,10 @@ fn test_local_file_system_copy_unifies_file_and_directory_copy() {
 
     let source_directory = directory.path().join("source-directory");
     let target_directory = directory.path().join("target-directory");
-    fs::create_dir(&source_directory).expect("source directory should be created");
-    fs::write(source_directory.join("child"), b"tree").expect("child should be written");
+    fs::create_dir(&source_directory)
+        .expect("source directory should be created");
+    fs::write(source_directory.join("child"), b"tree")
+        .expect("child should be written");
 
     let tree_outcome = LocalFileSystem::host()
         .copy(
@@ -129,6 +131,27 @@ fn test_local_file_system_copy_unifies_file_and_directory_copy() {
             .expect("child should copy")
             .as_slice()
     );
+}
+
+#[test]
+fn test_local_file_system_copy_honors_entry_and_byte_budgets() {
+    let directory = tempdir().expect("temporary directory should be created");
+    let source = directory.path().join("source");
+    let target = directory.path().join("target");
+    fs::create_dir(&source).expect("source directory should be created");
+    fs::write(source.join("child"), b"payload")
+        .expect("child should be written");
+    let failure = LocalFileSystem::host()
+        .copy(
+            &source,
+            &target,
+            &LocalCopyOptions::new()
+                .with_tree_source()
+                .with_max_entries(1)
+                .with_max_bytes(2),
+        )
+        .expect_err("copy budgets should reject the file entry");
+    assert_eq!(LocalFileErrorKind::ResourceLimit, failure.error().kind());
 }
 
 /// Verifies automatic source selection recognizes directory trees.
@@ -184,7 +207,8 @@ fn test_local_file_system_copy_conflict_policy_matrix() {
         .copy(
             &source,
             &target,
-            &LocalCopyOptions::new().with_conflict(LocalCopyConflictPolicy::Overwrite),
+            &LocalCopyOptions::new()
+                .with_conflict(LocalCopyConflictPolicy::Overwrite),
         )
         .expect("overwrite policy should replace an existing file");
     assert_eq!(1, outcome.stats().files());
@@ -207,7 +231,8 @@ fn test_recursive_copy_preserves_directory_permissions() {
     let source = directory.path().join("source");
     let target = directory.path().join("target");
     fs::create_dir(&source).expect("source directory should be created");
-    fs::write(source.join("payload"), b"payload").expect("source payload should be written");
+    fs::write(source.join("payload"), b"payload")
+        .expect("source payload should be written");
     fs::set_permissions(&source, fs::Permissions::from_mode(0o750))
         .expect("source permissions should be configured");
 
@@ -217,7 +242,9 @@ fn test_recursive_copy_preserves_directory_permissions() {
             &target,
             &LocalCopyOptions::new()
                 .with_tree_source()
-                .with_metadata_preservation(LocalMetadataPreservePolicy::Permissions),
+                .with_metadata_preservation(
+                    LocalMetadataPreservePolicy::Permissions,
+                ),
         )
         .expect("recursive copy should preserve directory permissions");
     assert_eq!(1, outcome.stats().files());
@@ -238,8 +265,10 @@ fn test_recursive_copy_preserves_nested_symlink_entry() {
     let source = directory.path().join("source");
     let target = directory.path().join("target");
     fs::create_dir(&source).expect("source directory should be created");
-    fs::write(source.join("referent"), b"payload").expect("referent should be written");
-    symlink("referent", source.join("link")).expect("source symlink should be created");
+    fs::write(source.join("referent"), b"payload")
+        .expect("referent should be written");
+    symlink("referent", source.join("link"))
+        .expect("source symlink should be created");
 
     let _ = LocalFileSystem::host()
         .copy(
@@ -251,7 +280,8 @@ fn test_recursive_copy_preserves_nested_symlink_entry() {
 
     assert_eq!(
         PathBuf::from("referent"),
-        fs::read_link(target.join("link")).expect("target symlink should exist")
+        fs::read_link(target.join("link"))
+            .expect("target symlink should exist")
     );
     assert_eq!(
         b"payload",
@@ -275,7 +305,8 @@ fn test_local_file_system_copy_rejects_hard_link_alias() {
         .copy(
             &source,
             &alias,
-            &LocalCopyOptions::new().with_conflict(LocalCopyConflictPolicy::Overwrite),
+            &LocalCopyOptions::new()
+                .with_conflict(LocalCopyConflictPolicy::Overwrite),
         )
         .expect_err("copying onto a hard-link alias must be rejected");
 
@@ -306,7 +337,8 @@ fn test_local_file_system_copy_overwrite_replaces_target_symlink() {
         .copy(
             &source,
             &target,
-            &LocalCopyOptions::new().with_conflict(LocalCopyConflictPolicy::Overwrite),
+            &LocalCopyOptions::new()
+                .with_conflict(LocalCopyConflictPolicy::Overwrite),
         )
         .expect("overwrite should replace the target entry");
 
@@ -342,18 +374,21 @@ fn test_local_file_system_copy_skips_dangling_target_symlink() {
     let source = directory.path().join("source");
     let target = directory.path().join("target");
     fs::create_dir(&source).expect("source directory should be created");
-    symlink("missing", &target).expect("dangling target symlink should be created");
+    symlink("missing", &target)
+        .expect("dangling target symlink should be created");
 
     let outcome = LocalFileSystem::host()
         .copy(
             &source,
             &target,
-            &LocalCopyOptions::new().with_type_conflict(LocalCopyTypeConflictPolicy::Skip),
+            &LocalCopyOptions::new()
+                .with_type_conflict(LocalCopyTypeConflictPolicy::Skip),
         )
         .expect("the type conflict should be skipped");
 
     assert_eq!(1, outcome.stats().skipped());
-    let metadata = fs::symlink_metadata(&target).expect("target symlink should remain");
+    let metadata =
+        fs::symlink_metadata(&target).expect("target symlink should remain");
     assert!(metadata.file_type().is_symlink());
 }
 
@@ -376,7 +411,8 @@ fn test_local_copy_preferred_durability_reports_downgrade() {
         .copy(
             &source,
             &target,
-            &LocalCopyOptions::new().with_durability(LocalDurabilityRequirement::Preferred),
+            &LocalCopyOptions::new()
+                .with_durability(LocalDurabilityRequirement::Preferred),
         )
         .expect("preferred copy durability may report a downgrade");
 
