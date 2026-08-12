@@ -18,6 +18,12 @@ use std::fmt;
 pub enum LocalResourceKind {
     /// A currently open native directory reader.
     OpenDirectory,
+    /// A yielded or processed directory entry.
+    Entry,
+    /// Bytes retained by duplicate-name tracking.
+    SeenNameBytes,
+    /// Bytes copied by a tree-copy operation.
+    CopiedBytes,
 }
 
 impl fmt::Display for LocalResourceKind {
@@ -25,6 +31,9 @@ impl fmt::Display for LocalResourceKind {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Self::OpenDirectory => formatter.write_str("open directory"),
+            Self::Entry => formatter.write_str("entry"),
+            Self::SeenNameBytes => formatter.write_str("seen-name bytes"),
+            Self::CopiedBytes => formatter.write_str("copied bytes"),
         }
     }
 }

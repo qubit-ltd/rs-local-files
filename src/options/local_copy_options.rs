@@ -8,6 +8,8 @@
 // qubit-style: allow source-test-pair
 // Covered by copy integration tests.
 
+use std::time::Duration;
+
 use super::LocalAtomicityRequirement;
 use super::LocalCopySourceMode;
 use super::LocalDurabilityRequirement;
@@ -36,6 +38,16 @@ pub struct LocalCopyOptions {
     atomicity: LocalAtomicityRequirement,
     /// Required durability.
     durability: LocalDurabilityRequirement,
+    /// Optional maximum descendant depth for tree copies.
+    max_depth: Option<usize>,
+    /// Optional maximum number of source entries processed.
+    max_entries: Option<usize>,
+    /// Optional maximum source bytes copied.
+    max_bytes: Option<u64>,
+    /// Optional maximum concurrently open source directories.
+    max_open_directories: Option<usize>,
+    /// Optional wall-clock deadline for the complete copy.
+    deadline: Option<Duration>,
 }
 
 impl LocalCopyOptions {
@@ -51,6 +63,11 @@ impl LocalCopyOptions {
             create_parent: false,
             atomicity: LocalAtomicityRequirement::Preferred,
             durability: LocalDurabilityRequirement::NotRequired,
+            max_depth: None,
+            max_entries: None,
+            max_bytes: None,
+            max_open_directories: None,
+            deadline: None,
         }
     }
 
@@ -96,14 +113,41 @@ impl LocalCopyOptions {
         self.durability
     }
 
+    /// Returns the optional maximum tree depth.
+    pub const fn max_depth(&self) -> Option<usize> {
+        self.max_depth
+    }
+    /// Returns the optional maximum source-entry count.
+    pub const fn max_entries(&self) -> Option<usize> {
+        self.max_entries
+    }
+    /// Returns the optional maximum source-byte count.
+    pub const fn max_bytes(&self) -> Option<u64> {
+        self.max_bytes
+    }
+    /// Returns the optional maximum open-directory count.
+    pub const fn max_open_directories(&self) -> Option<usize> {
+        self.max_open_directories
+    }
+    /// Returns the optional wall-clock deadline.
+    pub const fn deadline(&self) -> Option<Duration> {
+        self.deadline
+    }
+
     /// Sets the destination file conflict policy.
-    pub const fn with_conflict(mut self, conflict: LocalCopyConflictPolicy) -> Self {
+    pub const fn with_conflict(
+        mut self,
+        conflict: LocalCopyConflictPolicy,
+    ) -> Self {
         self.conflict = conflict;
         self
     }
 
     /// Sets the file/directory type conflict policy.
-    pub const fn with_type_conflict(mut self, type_conflict: LocalCopyTypeConflictPolicy) -> Self {
+    pub const fn with_type_conflict(
+        mut self,
+        type_conflict: LocalCopyTypeConflictPolicy,
+    ) -> Self {
         self.type_conflict = type_conflict;
         self
     }
@@ -118,7 +162,10 @@ impl LocalCopyOptions {
     }
 
     /// Sets symbolic-link policy.
-    pub const fn with_symlink_policy(mut self, symlink: LocalSymlinkPolicy) -> Self {
+    pub const fn with_symlink_policy(
+        mut self,
+        symlink: LocalSymlinkPolicy,
+    ) -> Self {
         self.symlink = Some(symlink);
         self
     }
@@ -142,14 +189,49 @@ impl LocalCopyOptions {
     }
 
     /// Sets required publication atomicity.
-    pub const fn with_atomicity(mut self, atomicity: LocalAtomicityRequirement) -> Self {
+    pub const fn with_atomicity(
+        mut self,
+        atomicity: LocalAtomicityRequirement,
+    ) -> Self {
         self.atomicity = atomicity;
         self
     }
 
     /// Sets required durability.
-    pub const fn with_durability(mut self, durability: LocalDurabilityRequirement) -> Self {
+    pub const fn with_durability(
+        mut self,
+        durability: LocalDurabilityRequirement,
+    ) -> Self {
         self.durability = durability;
+        self
+    }
+
+    /// Limits recursive tree depth.
+    pub const fn with_max_depth(mut self, max_depth: usize) -> Self {
+        self.max_depth = Some(max_depth);
+        self
+    }
+    /// Limits the number of source entries processed.
+    pub const fn with_max_entries(mut self, max_entries: usize) -> Self {
+        self.max_entries = Some(max_entries);
+        self
+    }
+    /// Limits source bytes copied.
+    pub const fn with_max_bytes(mut self, max_bytes: u64) -> Self {
+        self.max_bytes = Some(max_bytes);
+        self
+    }
+    /// Limits concurrently open source directories.
+    pub const fn with_max_open_directories(
+        mut self,
+        max_open_directories: usize,
+    ) -> Self {
+        self.max_open_directories = Some(max_open_directories);
+        self
+    }
+    /// Sets a wall-clock deadline for the complete copy.
+    pub const fn with_deadline(mut self, deadline: Duration) -> Self {
+        self.deadline = Some(deadline);
         self
     }
 }
