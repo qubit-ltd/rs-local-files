@@ -127,6 +127,7 @@ implements each complete operation protocol; they do not probe a particular
 runtime filesystem or claim that the underlying hardware has persisted data.
 Required atomicity or durability is rejected before namespace changes when the
 protocol cannot be met.
+Windows Host path conversion intentionally does not support UNC paths.
 
 ## Testing
 

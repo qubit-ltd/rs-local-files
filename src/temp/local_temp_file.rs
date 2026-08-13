@@ -545,8 +545,11 @@ impl Drop for LocalTempFile {
         match self.state {
             LocalTempResourceState::Owned => {
                 if let Err(error) = self.remove_resource() {
-                    // TODO: Route cleanup diagnostics through caller-controlled
-                    // redaction, sampling, and metrics policy.
+                    // TODO(deferred): Route cleanup diagnostics through
+                    // caller-controlled redaction, sampling, and metrics
+                    // policy. This is intentionally
+                    // postponed until that policy is
+                    // designed; keep the current warning behavior unchanged.
                     warn!(
                         "failed to remove temporary file {}: {}",
                         self.path.display(),
@@ -556,8 +559,11 @@ impl Drop for LocalTempFile {
                 }
                 self.state = LocalTempResourceState::SandboxPending;
                 if let Err(error) = self.release_sandbox() {
-                    // TODO: Route cleanup diagnostics through caller-controlled
-                    // redaction, sampling, and metrics policy.
+                    // TODO(deferred): Route cleanup diagnostics through
+                    // caller-controlled redaction, sampling, and metrics
+                    // policy. This is intentionally
+                    // postponed until that policy is
+                    // designed; keep the current warning behavior unchanged.
                     warn!(
                         "failed to remove temporary file sandbox for {}: {}",
                         self.path.display(),
@@ -569,8 +575,11 @@ impl Drop for LocalTempFile {
             }
             LocalTempResourceState::SandboxPending => {
                 if let Err(error) = self.release_sandbox() {
-                    // TODO: Route cleanup diagnostics through caller-controlled
-                    // redaction, sampling, and metrics policy.
+                    // TODO(deferred): Route cleanup diagnostics through
+                    // caller-controlled redaction, sampling, and metrics
+                    // policy. This is intentionally
+                    // postponed until that policy is
+                    // designed; keep the current warning behavior unchanged.
                     warn!(
                         "failed to remove temporary file sandbox for {}: {}",
                         self.path.display(),
