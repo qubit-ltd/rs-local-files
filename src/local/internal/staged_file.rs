@@ -150,8 +150,11 @@ impl Drop for StagedFile {
         if let Err(error) = self.cleanup()
             && let Some(path) = self.path.as_ref()
         {
-            // TODO: Route cleanup diagnostics through caller-controlled
-            // redaction, sampling, and metrics policy.
+            // TODO(deferred): Route cleanup diagnostics through
+            // caller-controlled redaction, sampling, and metrics
+            // policy. This is intentionally postponed until that
+            // policy is designed; keep the current warning behavior
+            // unchanged for now.
             warn!(
                 "failed to remove uncommitted staging file '{}': {}",
                 path.display(),
