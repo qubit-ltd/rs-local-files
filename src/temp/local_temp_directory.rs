@@ -503,8 +503,11 @@ impl Drop for LocalTempDirectory {
         match self.state {
             LocalTempResourceState::Owned => {
                 if let Err(error) = self.remove_resource() {
-                    // TODO: Route cleanup diagnostics through caller-controlled
-                    // redaction, sampling, and metrics policy.
+                    // TODO(deferred): Route cleanup diagnostics through
+                    // caller-controlled redaction, sampling, and metrics
+                    // policy. This is intentionally
+                    // postponed until that policy is
+                    // designed; keep the current warning behavior unchanged.
                     warn!(
                         "failed to remove temporary directory {}: {}",
                         self.path.display(),
@@ -514,8 +517,11 @@ impl Drop for LocalTempDirectory {
                 }
                 self.state = LocalTempResourceState::SandboxPending;
                 if let Err(error) = self.release_sandbox() {
-                    // TODO: Route cleanup diagnostics through caller-controlled
-                    // redaction, sampling, and metrics policy.
+                    // TODO(deferred): Route cleanup diagnostics through
+                    // caller-controlled redaction, sampling, and metrics
+                    // policy. This is intentionally
+                    // postponed until that policy is
+                    // designed; keep the current warning behavior unchanged.
                     warn!(
                         "failed to remove temporary directory sandbox for {}: {}",
                         self.path.display(),
@@ -527,8 +533,11 @@ impl Drop for LocalTempDirectory {
             }
             LocalTempResourceState::SandboxPending => {
                 if let Err(error) = self.release_sandbox() {
-                    // TODO: Route cleanup diagnostics through caller-controlled
-                    // redaction, sampling, and metrics policy.
+                    // TODO(deferred): Route cleanup diagnostics through
+                    // caller-controlled redaction, sampling, and metrics
+                    // policy. This is intentionally
+                    // postponed until that policy is
+                    // designed; keep the current warning behavior unchanged.
                     warn!(
                         "failed to remove temporary directory sandbox for {}: {}",
                         self.path.display(),
