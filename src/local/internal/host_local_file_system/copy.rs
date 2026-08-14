@@ -249,12 +249,15 @@ impl HostLocalFileSystem {
                 copy_failure_unchanged(copy_io_error(&source, &target, error))
             })?;
 
+        let internal_options = internal_copy_options(options, symlink_policy);
+        let mut budget = crate::local::CopyBudget::new(internal_options);
         let mut stats = crate::local::LocalCopyDirStats::default();
         crate::local::copy_file_with_options(
             &source,
             &target,
-            internal_copy_options(options, symlink_policy),
+            internal_options,
             &mut stats,
+            &mut budget,
         )
         .map_err(|error| copy_pipeline_failure(&source, &target, error))?;
         let parent_durable = published_durability(

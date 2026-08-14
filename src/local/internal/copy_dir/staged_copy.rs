@@ -31,6 +31,7 @@ use crate::LocalCopyDirOptions;
 use crate::LocalCopyDirStage;
 use crate::LocalCopyDirStats;
 use crate::LocalDurabilityRequirement;
+use crate::local::CopyBudget;
 use crate::local::CopyDestinationAction;
 use crate::local::decide_copy_destination;
 use crate::local::internal::StagedFile;
@@ -54,6 +55,7 @@ const COPY_FILE_TEMP_SUFFIX: &str = ".tmp";
 /// * `dst` - Destination file path.
 /// * `options` - Recursive-copy behavior options.
 /// * `stats` - Mutable statistics accumulator.
+/// * `budget` - Shared resource state for the complete copy.
 ///
 /// # Errors
 ///
@@ -64,6 +66,7 @@ pub(crate) fn copy_file_with_options(
     dst: &Path,
     options: LocalCopyDirOptions,
     stats: &mut LocalCopyDirStats,
+    budget: &mut CopyBudget,
 ) -> CopyDirResult<()> {
     let destination_metadata = with_copy_context(
         destination_metadata_if_exists(dst),
@@ -130,7 +133,7 @@ pub(crate) fn copy_file_with_options(
     };
 
     let (staged_file, copied, file_durable) =
-        stage_copy_file(src, dst, options, stats)?;
+        stage_copy_file(src, dst, options, stats, budget)?;
     if !commit_staged_copy_file(
         src,
         dst,
@@ -308,6 +311,7 @@ fn stage_copy_file(
     dst: &Path,
     options: LocalCopyDirOptions,
     stats: &LocalCopyDirStats,
+    budget: &mut CopyBudget,
 ) -> CopyDirResult<(StagedFile, u64, bool)> {
     let (temp_path, temp_file) = with_copy_context(
         create_temp_file_in_dir(
@@ -340,8 +344,14 @@ fn stage_copy_file(
         }
     };
     let (mut source_file, source_metadata) = opened_source.into_parts();
-    let copied =
-        copy_into_staging(src, dst, stats, &mut source_file, &mut staged_file)?;
+    let copied = copy_into_staging(
+        src,
+        dst,
+        stats,
+        &mut source_file,
+        &mut staged_file,
+        budget,
+    )?;
     if options.preserves_permissions() {
         preserve_staged_permissions(
             src,

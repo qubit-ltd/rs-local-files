@@ -72,16 +72,19 @@ impl LocalCopyOptions {
     }
 
     /// Returns the destination file conflict policy.
+    #[inline(always)]
     pub const fn conflict(&self) -> LocalCopyConflictPolicy {
         self.conflict
     }
 
     /// Returns the file/directory type conflict policy.
+    #[inline(always)]
     pub const fn type_conflict(&self) -> LocalCopyTypeConflictPolicy {
         self.type_conflict
     }
 
     /// Returns the metadata preservation policy.
+    #[inline(always)]
     pub const fn preserve_metadata(&self) -> LocalMetadataPreservePolicy {
         self.preserve_metadata
     }
@@ -93,6 +96,7 @@ impl LocalCopyOptions {
     }
 
     /// Returns the source kind accepted by this copy.
+    #[inline(always)]
     pub const fn source_mode(&self) -> LocalCopySourceMode {
         self.source_mode
     }
@@ -104,32 +108,44 @@ impl LocalCopyOptions {
     }
 
     /// Returns the required atomicity.
+    #[inline(always)]
     pub const fn atomicity(&self) -> LocalAtomicityRequirement {
         self.atomicity
     }
 
     /// Returns the required durability.
+    #[inline(always)]
     pub const fn durability(&self) -> LocalDurabilityRequirement {
         self.durability
     }
 
     /// Returns the optional maximum tree depth.
+    #[must_use]
+    #[inline(always)]
     pub const fn max_depth(&self) -> Option<usize> {
         self.max_depth
     }
     /// Returns the optional maximum source-entry count.
+    #[must_use]
+    #[inline(always)]
     pub const fn max_entries(&self) -> Option<usize> {
         self.max_entries
     }
     /// Returns the optional maximum source-byte count.
+    #[must_use]
+    #[inline(always)]
     pub const fn max_bytes(&self) -> Option<u64> {
         self.max_bytes
     }
     /// Returns the optional maximum open-directory count.
+    #[must_use]
+    #[inline(always)]
     pub const fn max_open_directories(&self) -> Option<usize> {
         self.max_open_directories
     }
     /// Returns the optional wall-clock deadline.
+    #[must_use]
+    #[inline(always)]
     pub const fn deadline(&self) -> Option<Duration> {
         self.deadline
     }

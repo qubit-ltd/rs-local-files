@@ -287,6 +287,44 @@ pub(crate) fn root_authority_path(root: &File) -> Result<PathBuf> {
     }
 }
 
+/// Reads one final symbolic-link target after securely opening its parent.
+pub(crate) fn read_rooted_link(
+    root: &File,
+    _diagnostic_root: &Path,
+    path: &LocalRelativePath,
+) -> Result<PathBuf> {
+    let (parent, name) = open_parent(root, path)?;
+    std::fs::read_link(root_authority_path(&parent)?.join(name))
+}
+
+/// Creates one final symbolic link after securely opening its parent.
+pub(crate) fn create_rooted_symlink(
+    root: &File,
+    _diagnostic_root: &Path,
+    target: &Path,
+    path: &LocalRelativePath,
+    targets_directory: bool,
+) -> Result<()> {
+    let (parent, name) = open_parent(root, path)?;
+    let destination = root_authority_path(&parent)?.join(name);
+    if targets_directory {
+        std::os::windows::fs::symlink_dir(target, destination)
+    } else {
+        std::os::windows::fs::symlink_file(target, destination)
+    }
+}
+
+/// Reports whether a rooted symbolic link currently resolves to a directory.
+pub(crate) fn rooted_link_targets_directory(
+    root: &File,
+    path: &LocalRelativePath,
+) -> bool {
+    open_parent(root, path)
+        .and_then(|(parent, name)| Ok(root_authority_path(&parent)?.join(name)))
+        .and_then(std::fs::metadata)
+        .is_ok_and(|metadata| metadata.is_dir())
+}
+
 /// Reads metadata for a rooted entry without following the final component.
 ///
 /// # Errors

@@ -217,6 +217,92 @@ impl Root {
         }
     }
 
+    /// Reads the target stored in a final symbolic-link entry.
+    ///
+    /// # Parameters
+    ///
+    /// * `path` - Validated rooted path naming the symbolic link.
+    ///
+    /// # Returns
+    ///
+    /// The link target exactly as stored in the directory entry.
+    ///
+    /// # Errors
+    ///
+    /// Returns an I/O error when the final entry is not a readable symbolic
+    /// link or descriptor-relative traversal fails.
+    pub(crate) fn read_link(&self, path: &path::Path) -> Result<PathBuf> {
+        #[cfg(any(unix, windows))]
+        {
+            local::read_rooted_link(&self.directory, &self.path, path)
+        }
+        #[cfg(not(any(unix, windows)))]
+        {
+            let _ = path;
+            Err(Error::new(
+                ErrorKind::Unsupported,
+                "symbolic links are unsupported on this platform",
+            ))
+        }
+    }
+
+    /// Creates a final symbolic-link entry beneath this opened root.
+    ///
+    /// # Parameters
+    ///
+    /// * `target`: Link target stored verbatim in the new entry.
+    /// * `path`: Validated rooted destination path.
+    /// * `targets_directory`: Whether Windows must create a directory link.
+    ///
+    /// # Errors
+    ///
+    /// Returns an I/O error when the platform rejects link creation or the
+    /// destination cannot be addressed beneath this root.
+    pub(crate) fn create_symlink(
+        &self,
+        target: &Path,
+        path: &path::Path,
+        targets_directory: bool,
+    ) -> Result<()> {
+        #[cfg(unix)]
+        {
+            let _ = targets_directory;
+            local::create_rooted_symlink(
+                &self.directory,
+                &self.path,
+                target,
+                path,
+            )
+        }
+        #[cfg(windows)]
+        {
+            local::create_rooted_symlink(
+                &self.directory,
+                &self.path,
+                target,
+                path,
+                targets_directory,
+            )
+        }
+        #[cfg(not(any(unix, windows)))]
+        {
+            let _ = (target, path, targets_directory);
+            Err(Error::new(
+                ErrorKind::Unsupported,
+                "symbolic links are unsupported on this platform",
+            ))
+        }
+    }
+
+    /// Reports whether a symbolic link currently resolves to a directory.
+    ///
+    /// Broken links and non-directory targets return `false`.
+    #[cfg(windows)]
+    #[must_use]
+    pub(crate) fn symlink_targets_directory(&self, path: &path::Path) -> bool {
+        local::rooted_link_targets_directory(&self.directory, path)
+    }
+
     /// Lists immediate children of the opened root directory.
     ///
     /// # Errors

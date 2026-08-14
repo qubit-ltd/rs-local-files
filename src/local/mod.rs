@@ -38,6 +38,7 @@ mod local_persist_stage;
 mod local_relative_path;
 mod local_root_atomic_writer;
 
+pub(crate) use internal::CopyBudget;
 pub(crate) use internal::CopyDestinationAction;
 pub(crate) use internal::DirectoryIdentity;
 pub(crate) use internal::HostLocalFileSystem;
@@ -54,6 +55,8 @@ pub(crate) use internal::copy_file_with_options;
 pub(crate) use internal::copy_source_mode_mismatch;
 #[cfg(any(unix, windows))]
 pub(crate) use internal::create_rooted_directory;
+#[cfg(any(unix, windows))]
+pub(crate) use internal::create_rooted_symlink;
 pub(crate) use internal::create_temp_dir_in_dir_with_affixes;
 pub(crate) use internal::create_temp_file_in_dir;
 pub(crate) use internal::decide_copy_destination;
@@ -81,6 +84,8 @@ pub(crate) use internal::read_root_directory;
 #[cfg(any(unix, windows))]
 pub(crate) use internal::read_rooted_directory;
 #[cfg(any(unix, windows))]
+pub(crate) use internal::read_rooted_link;
+#[cfg(any(unix, windows))]
 pub(crate) use internal::read_rooted_symlink_metadata;
 #[cfg(any(unix, windows))]
 pub(crate) use internal::remove_rooted_entry;
@@ -92,6 +97,8 @@ pub(crate) use internal::rename_rooted_entry;
 pub(crate) use internal::replace_file;
 pub(crate) use internal::resolve_host_path;
 pub(crate) use internal::root_authority_path;
+#[cfg(windows)]
+pub(crate) use internal::rooted_link_targets_directory;
 #[cfg(any(unix, windows))]
 pub(crate) use internal::set_rooted_permissions;
 #[cfg(unix)]

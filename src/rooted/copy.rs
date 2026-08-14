@@ -18,6 +18,7 @@ use super::Root;
 use crate::LocalAtomicWriteOptions;
 use crate::LocalCopyDirError;
 use crate::LocalDurabilityRequirement;
+use crate::local::CopyBudget;
 use crate::local::CopyDestinationAction;
 use crate::local::LocalCopyConflictPolicy as ConflictPolicy;
 use crate::local::LocalCopyDirError as Error;
@@ -37,6 +38,8 @@ enum Work {
         destination: Path,
         /// Source metadata applied after all children are installed.
         metadata: Metadata,
+        /// Depth of this directory beneath the copied tree root.
+        depth: usize,
     },
     /// Applies source permissions after a directory's children are installed.
     Finish {
@@ -87,6 +90,16 @@ pub(super) fn copy(
         ));
     }
 
+    let mut budget = CopyBudget::new(options);
+    budget.check_deadline().map_err(|source_error| {
+        error(
+            Stage::InspectSource,
+            source,
+            destination,
+            Statistics::default(),
+            source_error,
+        )
+    })?;
     let source_metadata =
         root.symlink_metadata(source).map_err(|source_error| {
             error(
@@ -105,6 +118,7 @@ pub(super) fn copy(
             &options,
             durability,
             Statistics::default(),
+            &mut budget,
         ),
         EntryKind::Directory => {
             if destination.as_path().starts_with(source.as_path()) {
@@ -126,9 +140,17 @@ pub(super) fn copy(
                 source_metadata,
                 &options,
                 durability,
+                &mut budget,
             )
         }
-        EntryKind::Symlink | EntryKind::Other => Err(error(
+        EntryKind::Symlink => copy_symlink(
+            root,
+            source,
+            destination,
+            &options,
+            Statistics::default(),
+        ),
+        EntryKind::Other => Err(error(
             Stage::InspectSource,
             source,
             destination,
@@ -157,8 +179,19 @@ fn copy_tree(
     source_metadata: Metadata,
     options: &Options,
     durability: LocalDurabilityRequirement,
+    budget: &mut CopyBudget,
 ) -> Result<Statistics, Error> {
     let mut statistics = Statistics::default();
+    budget.acquire_directory().map_err(|source_error| {
+        error(
+            Stage::ReadSourceDirectory,
+            source,
+            destination,
+            statistics,
+            source_error,
+        )
+    })?;
+    budget.release_directory();
     if !prepare_directory(root, source, destination, options, &mut statistics)?
     {
         return Ok(statistics);
@@ -167,6 +200,7 @@ fn copy_tree(
         source: source.clone(),
         destination: destination.clone(),
         metadata: source_metadata,
+        depth: 0,
     }];
     let mut active_sources = Vec::new();
     while let Some(item) = work.pop() {
@@ -175,7 +209,17 @@ fn copy_tree(
                 source,
                 destination,
                 metadata,
+                depth,
             } => {
+                budget.check_deadline().map_err(|source_error| {
+                    error(
+                        Stage::ReadSourceDirectory,
+                        &source,
+                        &destination,
+                        statistics,
+                        source_error,
+                    )
+                })?;
                 if active_sources.iter().any(|active| active == &source) {
                     return Err(error(
                         Stage::InspectSource,
@@ -201,16 +245,26 @@ fn copy_tree(
                         io::Error::from(ErrorKind::PermissionDenied),
                     ));
                 }
-                let entries =
-                    root.read_dir(&source).map_err(|source_error| {
-                        error(
-                            Stage::ReadSourceDirectory,
-                            &source,
-                            &destination,
-                            statistics,
-                            source_error,
-                        )
-                    })?;
+                budget.acquire_directory().map_err(|source_error| {
+                    error(
+                        Stage::ReadSourceDirectory,
+                        &source,
+                        &destination,
+                        statistics,
+                        source_error,
+                    )
+                })?;
+                let entries_result = root.read_dir(&source);
+                budget.release_directory();
+                let entries = entries_result.map_err(|source_error| {
+                    error(
+                        Stage::ReadSourceDirectory,
+                        &source,
+                        &destination,
+                        statistics,
+                        source_error,
+                    )
+                })?;
                 work.push(Work::Finish {
                     source: source.clone(),
                     destination: destination.clone(),
@@ -228,6 +282,27 @@ fn copy_tree(
                         destination.join_component(entry.name()).expect(
                             "root directory entry names are normal components",
                         );
+                    let child_depth = depth.saturating_add(1);
+                    budget.check_depth(child_depth).map_err(
+                        |source_error| {
+                            error(
+                                Stage::InspectSourceEntry,
+                                &source_child,
+                                &destination_child,
+                                statistics,
+                                source_error,
+                            )
+                        },
+                    )?;
+                    budget.charge_entry().map_err(|source_error| {
+                        error(
+                            Stage::UpdateStatistics,
+                            &source_child,
+                            &destination_child,
+                            statistics,
+                            source_error,
+                        )
+                    })?;
                     match entry.metadata().kind() {
                         EntryKind::File => {
                             statistics = copy_file(
@@ -237,6 +312,7 @@ fn copy_tree(
                                 options,
                                 durability,
                                 statistics,
+                                budget,
                             )?;
                         }
                         EntryKind::Directory => {
@@ -251,13 +327,12 @@ fn copy_tree(
                                     source: source_child,
                                     destination: destination_child,
                                     metadata: entry.metadata(),
+                                    depth: child_depth,
                                 });
                             }
                         }
-                        EntryKind::Symlink | EntryKind::Other => {
-                            if entry.metadata().kind() == EntryKind::Symlink
-                                && options.symlink_policy().follows()
-                            {
+                        EntryKind::Symlink => {
+                            if options.symlink_policy().follows() {
                                 let resolved =
                                     crate::rooted_local_file_system::resolve_rooted_path(
                                         root,
@@ -300,11 +375,29 @@ fn copy_tree(
                                             source: resolved,
                                             destination: destination_child,
                                             metadata: resolved_metadata,
+                                            depth: child_depth,
                                         });
                                     }
                                     continue;
                                 }
+                                statistics = copy_symlink(
+                                    root,
+                                    &source_child,
+                                    &destination_child,
+                                    options,
+                                    statistics,
+                                )?;
+                                continue;
                             }
+                            statistics = copy_symlink(
+                                root,
+                                &source_child,
+                                &destination_child,
+                                options,
+                                statistics,
+                            )?;
+                        }
+                        EntryKind::Other => {
                             return Err(error(
                                 Stage::InspectSourceEntry,
                                 &source_child,
@@ -346,6 +439,115 @@ fn copy_tree(
             }
         }
     }
+    Ok(statistics)
+}
+
+/// Copies one final symbolic-link entry without dereferencing it.
+fn copy_symlink(
+    root: &Root,
+    source: &Path,
+    destination: &Path,
+    options: &Options,
+    mut statistics: Statistics,
+) -> Result<Statistics, Error> {
+    let destination_metadata =
+        optional_metadata(root, destination).map_err(|source_error| {
+            error(
+                Stage::PrepareDestination,
+                source,
+                destination,
+                statistics,
+                source_error,
+            )
+        })?;
+    let destination_is_directory = destination_metadata
+        .as_ref()
+        .is_some_and(|metadata| metadata.kind() == EntryKind::Directory);
+    let action = decide_copy_destination(
+        false,
+        destination_metadata
+            .as_ref()
+            .map(|_| destination_is_directory),
+        options.conflict_policy(),
+        options.type_conflict_policy(),
+    )
+    .ok_or_else(|| {
+        error(
+            Stage::PrepareDestination,
+            source,
+            destination,
+            statistics,
+            io::Error::from(ErrorKind::AlreadyExists),
+        )
+    })?;
+    match action {
+        CopyDestinationAction::Skip => {
+            statistics.skipped = checked_add(
+                statistics.skipped,
+                1,
+                source,
+                destination,
+                statistics,
+            )?;
+            return Ok(statistics);
+        }
+        CopyDestinationAction::Replace => {
+            let removal = if destination_is_directory {
+                root.remove_tree(destination)
+            } else {
+                root.remove_file(destination)
+            };
+            removal.map_err(|source_error| {
+                error(
+                    Stage::PrepareDestination,
+                    source,
+                    destination,
+                    statistics,
+                    source_error,
+                )
+            })?;
+        }
+        CopyDestinationAction::Create => {}
+        CopyDestinationAction::Merge => {
+            unreachable!("a symbolic link destination cannot require merge")
+        }
+    }
+    let link_target = root.read_link(source).map_err(|source_error| {
+        error(
+            Stage::CopyFileContents,
+            source,
+            destination,
+            statistics,
+            source_error,
+        )
+    })?;
+    #[cfg(windows)]
+    let targets_directory = root.symlink_targets_directory(source);
+    #[cfg(not(windows))]
+    let targets_directory = false;
+    root.create_symlink(&link_target, destination, targets_directory)
+        .map_err(|source_error| {
+            error(
+                Stage::CommitFile,
+                source,
+                destination,
+                statistics,
+                source_error,
+            )
+        })?;
+    statistics.files =
+        checked_add(statistics.files, 1, source, destination, statistics)?;
+    if destination_metadata.is_some() {
+        statistics.overwritten = checked_add(
+            statistics.overwritten,
+            1,
+            source,
+            destination,
+            statistics,
+        )?;
+    }
+    statistics.non_atomic_publication = true;
+    statistics.files_durable = false;
     Ok(statistics)
 }
 
@@ -502,7 +704,17 @@ fn copy_file(
     options: &Options,
     durability: LocalDurabilityRequirement,
     mut statistics: Statistics,
+    budget: &mut CopyBudget,
 ) -> Result<Statistics, Error> {
+    budget.check_deadline().map_err(|source_error| {
+        error(
+            Stage::InspectSourceEntry,
+            source,
+            destination,
+            statistics,
+            source_error,
+        )
+    })?;
     #[cfg(feature = "internal-test-support")]
     if crate::local::take_test_support_on_nth("rooted-copy-file-second", 2) {
         return Err(error(
@@ -689,10 +901,10 @@ fn copy_file(
     ) {
         Err(crate::local::test_fault_error())
     } else {
-        io::copy(&mut reader, &mut writer)
+        budget.copy(&mut reader, &mut writer)
     };
     #[cfg(not(feature = "internal-test-support"))]
-    let copy_result = io::copy(&mut reader, &mut writer);
+    let copy_result = budget.copy(&mut reader, &mut writer);
     let bytes = copy_result.map_err(|source_error| {
         error(
             Stage::CopyFileContents,
@@ -872,6 +1084,6 @@ fn error(
 fn unsupported_source_error() -> io::Error {
     io::Error::new(
         ErrorKind::Unsupported,
-        "rooted copy supports only regular files and directories",
+        "rooted copy supports only regular files, directories, and symbolic links",
     )
 }

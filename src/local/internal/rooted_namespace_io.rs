@@ -19,8 +19,11 @@ use std::os::fd::AsRawFd;
 use std::os::unix::ffi::OsStrExt;
 use std::os::unix::ffi::OsStringExt;
 use std::path::Path;
+use std::path::PathBuf;
 
 use rustix::fs::Dir;
+use rustix::fs::readlinkat;
+use rustix::fs::symlinkat;
 
 use super::path_operations::add_path_context;
 use super::rooted_directory_reader::RootedDirectoryReader;
@@ -141,6 +144,55 @@ pub(crate) fn read_rooted_directory(
             )
         })?;
     read_directory_handle(&directory, &diagnostic_path)
+}
+
+/// Reads one final symbolic-link target through its opened parent authority.
+pub(crate) fn read_rooted_link(
+    root: &File,
+    diagnostic_root: &Path,
+    path: &LocalRelativePath,
+) -> Result<PathBuf> {
+    let diagnostic_path = diagnostic_root.join(path.as_path());
+    let (parent, name, _) = open_rooted_parent(
+        root,
+        &diagnostic_path,
+        path,
+        RootedParentMode::OpenExisting,
+    )?
+    .into_parts();
+    readlinkat(&parent, &name, Vec::new())
+        .map(|target| PathBuf::from(OsString::from_vec(target.into_bytes())))
+        .map_err(|error| {
+            add_path_context(
+                Error::from(error),
+                "read rooted symbolic link",
+                &diagnostic_path,
+            )
+        })
+}
+
+/// Creates one final symbolic link through its opened parent authority.
+pub(crate) fn create_rooted_symlink(
+    root: &File,
+    diagnostic_root: &Path,
+    target: &Path,
+    path: &LocalRelativePath,
+) -> Result<()> {
+    let diagnostic_path = diagnostic_root.join(path.as_path());
+    let (parent, name, _) = open_rooted_parent(
+        root,
+        &diagnostic_path,
+        path,
+        RootedParentMode::OpenExisting,
+    )?
+    .into_parts();
+    symlinkat(target, &parent, &name).map_err(|error| {
+        add_path_context(
+            Error::from(error),
+            "create rooted symbolic link",
+            &diagnostic_path,
+        )
+    })
 }
 
 /// Creates one rooted directory, optionally creating missing parents.
