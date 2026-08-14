@@ -14,6 +14,7 @@ mod atomic_metadata;
 #[cfg(unix)]
 mod atomic_namespace_race;
 mod atomic_staging_state;
+mod copy_budget;
 mod copy_destination_action;
 mod copy_destination_policy;
 mod copy_dir;
@@ -76,6 +77,7 @@ pub(crate) use atomic_metadata::preserve_atomic_metadata;
 #[cfg(unix)]
 pub(crate) use atomic_namespace_race::verify_atomic_destination_identity;
 pub(crate) use atomic_staging_state::AtomicStagingState;
+pub(crate) use copy_budget::CopyBudget;
 pub(crate) use copy_destination_action::CopyDestinationAction;
 pub(crate) use copy_destination_policy::decide_copy_destination;
 pub(crate) use copy_dir::copy_dir_all_with_paths;
@@ -143,6 +145,8 @@ pub(crate) use rooted_file_io::sync_rooted_parent;
 #[cfg(unix)]
 pub(crate) use rooted_namespace_io::create_rooted_directory;
 #[cfg(unix)]
+pub(crate) use rooted_namespace_io::create_rooted_symlink;
+#[cfg(unix)]
 pub(crate) use rooted_namespace_io::open_root_directory_reader;
 #[cfg(unix)]
 pub(crate) use rooted_namespace_io::open_rooted_directory_reader;
@@ -150,6 +154,8 @@ pub(crate) use rooted_namespace_io::open_rooted_directory_reader;
 pub(crate) use rooted_namespace_io::read_root_directory;
 #[cfg(unix)]
 pub(crate) use rooted_namespace_io::read_rooted_directory;
+#[cfg(unix)]
+pub(crate) use rooted_namespace_io::read_rooted_link;
 #[cfg(unix)]
 pub(crate) use rooted_namespace_io::remove_rooted_entry;
 #[cfg(unix)]
@@ -172,6 +178,8 @@ pub(crate) use unix_nonblocking::open_with_nonblocking_retry;
 #[cfg(windows)]
 pub(crate) use windows_rooted::create_rooted_directory;
 #[cfg(windows)]
+pub(crate) use windows_rooted::create_rooted_symlink;
+#[cfg(windows)]
 pub(crate) use windows_rooted::open_root_directory;
 #[cfg(windows)]
 pub(crate) use windows_rooted::open_root_directory_reader;
@@ -186,6 +194,8 @@ pub(crate) use windows_rooted::read_root_directory;
 #[cfg(windows)]
 pub(crate) use windows_rooted::read_rooted_directory;
 #[cfg(windows)]
+pub(crate) use windows_rooted::read_rooted_link;
+#[cfg(windows)]
 pub(crate) use windows_rooted::read_rooted_symlink_metadata;
 #[cfg(windows)]
 pub(crate) use windows_rooted::remove_rooted_entry;
@@ -193,6 +203,8 @@ pub(crate) use windows_rooted::remove_rooted_entry;
 pub(crate) use windows_rooted::rename_rooted_entry;
 #[cfg(windows)]
 pub(crate) use windows_rooted::root_authority_path;
+#[cfg(windows)]
+pub(crate) use windows_rooted::rooted_link_targets_directory;
 #[cfg(windows)]
 pub(crate) use windows_rooted::set_rooted_permissions;
 #[cfg(windows)]

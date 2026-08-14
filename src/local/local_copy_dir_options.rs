@@ -81,10 +81,20 @@ pub(crate) struct LocalCopyDirOptions {
 
     /// Synchronization policy for staged regular files.
     durability: LocalDurabilityRequirement,
+
+    /// Maximum descendant depth beneath the copied tree root.
     max_depth: Option<usize>,
+
+    /// Maximum number of source entries processed.
     max_entries: Option<usize>,
+
+    /// Maximum number of actual source bytes copied.
     max_bytes: Option<u64>,
+
+    /// Maximum concurrently open source-directory readers.
     max_open_directories: Option<usize>,
+
+    /// Relative wall-clock deadline for the complete copy.
     deadline: Option<Duration>,
 }
 
@@ -127,34 +137,57 @@ impl LocalCopyDirOptions {
         self.durability
     }
 
+    /// Returns the maximum descendant depth.
+    #[must_use]
+    #[inline(always)]
     pub(crate) const fn max_depth(&self) -> Option<usize> {
         self.max_depth
     }
+    /// Returns the maximum number of processed source entries.
+    #[must_use]
+    #[inline(always)]
     pub(crate) const fn max_entries(&self) -> Option<usize> {
         self.max_entries
     }
+    /// Returns the maximum number of actual source bytes copied.
+    #[must_use]
+    #[inline(always)]
     pub(crate) const fn max_bytes(&self) -> Option<u64> {
         self.max_bytes
     }
+    /// Returns the maximum concurrently open source directories.
+    #[must_use]
+    #[inline(always)]
     pub(crate) const fn max_open_directories(&self) -> Option<usize> {
         self.max_open_directories
     }
+    /// Returns the relative wall-clock deadline.
+    #[must_use]
+    #[inline(always)]
     pub(crate) const fn deadline(&self) -> Option<Duration> {
         self.deadline
     }
 
+    /// Sets the maximum descendant depth.
+    #[inline(always)]
     pub(crate) const fn with_max_depth(mut self, value: usize) -> Self {
         self.max_depth = Some(value);
         self
     }
+    /// Sets the maximum number of processed source entries.
+    #[inline(always)]
     pub(crate) const fn with_max_entries(mut self, value: usize) -> Self {
         self.max_entries = Some(value);
         self
     }
+    /// Sets the maximum number of actual source bytes copied.
+    #[inline(always)]
     pub(crate) const fn with_max_bytes(mut self, value: u64) -> Self {
         self.max_bytes = Some(value);
         self
     }
+    /// Sets the maximum concurrently open source directories.
+    #[inline(always)]
     pub(crate) const fn with_max_open_directories(
         mut self,
         value: usize,
@@ -162,6 +195,8 @@ impl LocalCopyDirOptions {
         self.max_open_directories = Some(value);
         self
     }
+    /// Sets the wall-clock deadline for the complete copy.
+    #[inline(always)]
     pub(crate) const fn with_deadline(mut self, value: Duration) -> Self {
         self.deadline = Some(value);
         self

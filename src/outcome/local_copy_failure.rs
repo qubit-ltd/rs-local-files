@@ -23,6 +23,7 @@ use crate::LocalCopyDirStage;
 use crate::LocalCopyStats;
 use crate::LocalFileError;
 use crate::LocalFileOperation;
+use crate::LocalResourceLimitError;
 
 /// Failure details retained when a unified copy does not complete.
 #[derive(Debug)]
@@ -114,13 +115,27 @@ impl LocalCopyFailure {
         ) = error.into_parts();
         let partial_stats = LocalCopyStats::from_internal(stats);
         let state = copy_failure_state(stage, partial_stats);
-        let primary_kind = primary.kind();
-        let error = LocalFileError::from_io(
-            LocalFileOperation::Copy,
-            Some(source.to_path_buf()),
-            Some(target.to_path_buf()),
-            io::Error::new(primary_kind, primary),
-        );
+        let resource_limit = primary
+            .get_ref()
+            .and_then(|source| source.downcast_ref::<LocalResourceLimitError>())
+            .copied();
+        let error = match resource_limit {
+            Some(resource_limit) => LocalFileError::from_resource_limit(
+                LocalFileOperation::Copy,
+                Some(source.to_path_buf()),
+                resource_limit,
+            )
+            .with_target(target.to_path_buf()),
+            None => {
+                let primary_kind = primary.kind();
+                LocalFileError::from_io(
+                    LocalFileOperation::Copy,
+                    Some(source.to_path_buf()),
+                    Some(target.to_path_buf()),
+                    io::Error::new(primary_kind, primary),
+                )
+            }
+        };
         let cleanup_error = cleanup_error.map(|cleanup_error| {
             let cleanup_kind = cleanup_error.kind();
             LocalFileError::from_io(

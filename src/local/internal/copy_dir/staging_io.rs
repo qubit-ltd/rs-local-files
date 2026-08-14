@@ -12,13 +12,13 @@
 
 use std::fs::File;
 use std::fs::Metadata;
-use std::io;
 use std::path::Path;
 
 use super::copy_dir_result::CopyDirResult;
 use super::error::copy_dir_error_with_staging;
 use crate::LocalCopyDirStage;
 use crate::LocalCopyDirStats;
+use crate::local::CopyBudget;
 use crate::local::internal::StagedFile;
 
 /// Copies one open source handle into an armed staging file.
@@ -30,6 +30,7 @@ use crate::local::internal::StagedFile;
 /// * `stats` - Recursive-copy statistics snapshot attached to a failure.
 /// * `source_file` - Open source descriptor positioned at its beginning.
 /// * `staged_file` - Armed destination staging file.
+/// * `budget` - Shared resource state for the complete copy.
 ///
 /// # Returns
 ///
@@ -45,6 +46,7 @@ pub(super) fn copy_into_staging(
     stats: &LocalCopyDirStats,
     source_file: &mut File,
     staged_file: &mut StagedFile,
+    budget: &mut CopyBudget,
 ) -> CopyDirResult<u64> {
     #[cfg(feature = "internal-test-support")]
     let result = if crate::local::internal::test_support::is_enabled(
@@ -57,10 +59,10 @@ pub(super) fn copy_into_staging(
     ) {
         Err(crate::local::test_fault_error())
     } else {
-        io::copy(source_file, staged_file.file_mut())
+        budget.copy(source_file, staged_file.file_mut())
     };
     #[cfg(not(feature = "internal-test-support"))]
-    let result = io::copy(source_file, staged_file.file_mut());
+    let result = budget.copy(source_file, staged_file.file_mut());
     match result {
         Ok(copied) => Ok(copied),
         Err(source) => Err(copy_dir_error_with_staging(
