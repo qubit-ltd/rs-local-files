@@ -177,9 +177,9 @@ percent-decoding，也不解释 provider hierarchy：
 - 不支持稳定无损转换的平台必须返回明确的
   `LocalPathCodecError::UnsupportedNativeEncoding`，不能使用 lossy conversion。
 
-`qubit-fs-local` 可以定义 adapter-local codec 类型，实现
-`qubit_fs::NativePathCodec`，并把 `from_canonical_text`/`to_canonical_text` 委托给这里。平台字节、`OsStr`、
-WTF-8 等算法不得保留在 `qubit-fs` 或 adapter 中。
+`LocalPathCodec` 和 `LocalPaths` 是本 crate 的平台边界；`qubit-fs-local` 通过
+`LocalPaths` 使用它们完成逻辑路径与 native 路径转换。平台字节、`OsStr`、WTF-8
+等算法不得复制到 `qubit-fs` 或 adapter 中。
 
 Host 与 rooted 操作统一使用 `LocalFileSystem` 实例方法；需要访问进程可见命名空间时，
 先构造 `LocalFileSystem::host()`，再通过该实例调用具体操作。
