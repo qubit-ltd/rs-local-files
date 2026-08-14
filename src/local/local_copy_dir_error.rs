@@ -261,6 +261,7 @@ mod tests {
         assert_eq!(error.temporary_path(), Some(Path::new("staging")));
         assert!(error.cleanup_error().is_some());
         assert_eq!(error.kind(), io::ErrorKind::Other);
+        assert_eq!(error.error().kind(), io::ErrorKind::Other);
         assert!(error.to_string().contains("staging cleanup"));
         assert!(std::error::Error::source(&error).is_some());
         let (_, source, destination, _, staging, cleanup, native) =

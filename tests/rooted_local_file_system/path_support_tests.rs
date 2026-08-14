@@ -10,6 +10,7 @@ use std::fs;
 use std::path::Path;
 
 use qubit_local_files::LocalFileErrorKind;
+#[cfg(unix)]
 use qubit_local_files::LocalFileKind;
 use qubit_local_files::LocalFileSystem;
 use qubit_local_files::LocalTempFileOptions;

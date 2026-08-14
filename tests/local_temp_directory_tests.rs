@@ -45,6 +45,7 @@ where
 }
 
 use qubit_local_files::LocalFileErrorKind;
+#[cfg(feature = "internal-test-support")]
 use qubit_local_files::LocalFileOperation;
 use qubit_local_files::LocalFileSystem;
 #[cfg(not(windows))]

@@ -9,7 +9,6 @@
 use std::fs;
 use std::path::PathBuf;
 
-#[cfg(not(windows))]
 use qubit_local_files::LocalDirectoryReopenPolicy;
 use qubit_local_files::LocalFileErrorKind;
 use qubit_local_files::LocalFileKind;

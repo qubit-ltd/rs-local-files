@@ -13,6 +13,7 @@ use qubit_local_files::LocalFileErrorKind;
 use qubit_local_files::LocalFileOperation;
 use qubit_local_files::LocalFileSystemScope;
 use qubit_local_files::LocalPaths;
+#[cfg(feature = "internal-test-support")]
 use qubit_local_files::install_test_fault;
 
 /// Verifies absolute host paths remain unchanged when binding a path group.
