@@ -16,6 +16,8 @@ use std::fmt;
 #[non_exhaustive]
 #[must_use]
 pub enum LocalResourceKind {
+    /// Descendant depth beneath a traversal or copy root.
+    Depth,
     /// A currently open native directory reader.
     OpenDirectory,
     /// A yielded or processed directory entry.
@@ -30,6 +32,7 @@ impl fmt::Display for LocalResourceKind {
     /// Formats the resource dimension for human-readable diagnostics.
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
+            Self::Depth => formatter.write_str("depth"),
             Self::OpenDirectory => formatter.write_str("open directory"),
             Self::Entry => formatter.write_str("entry"),
             Self::SeenNameBytes => formatter.write_str("seen-name bytes"),

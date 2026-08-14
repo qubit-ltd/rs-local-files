@@ -11,6 +11,7 @@
 use std::fs::File;
 use std::io::Read;
 use std::path::Path;
+use std::time::Instant;
 
 use crate::LocalCopyOptions;
 use crate::LocalCopyResult;
@@ -427,7 +428,8 @@ impl LocalFileSystem {
     ///
     /// # Returns
     ///
-    /// A writer session whose bytes are published only when committed.
+    /// A writer session. Staged modes publish only when committed; `Append`
+    /// modifies the existing file directly as bytes are written.
     ///
     /// # Errors
     ///
@@ -521,6 +523,19 @@ impl LocalFileSystem {
         destination: &Path,
         options: &LocalCopyOptions,
     ) -> LocalCopyResult {
+        if options.deadline().is_some_and(|duration| {
+            Instant::now().checked_add(duration).is_none()
+        }) {
+            return Err(copy_failure_unchanged(
+                LocalFileError::new(
+                    LocalFileErrorKind::InvalidOptions,
+                    LocalFileOperation::Copy,
+                )
+                .with_reason("copy deadline exceeds the monotonic clock range")
+                .with_path(source.to_path_buf())
+                .with_target(destination.to_path_buf()),
+            ));
+        }
         match &self.namespace {
             LocalNamespace::Host => HostLocalFileSystem::copy_with_policy(
                 source,
