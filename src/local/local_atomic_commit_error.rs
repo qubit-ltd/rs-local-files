@@ -174,6 +174,7 @@ mod tests {
     #[test]
     fn retains_and_splits_recoverable_writer() {
         let mut commit = LocalAtomicCommitError::new(error(), Some(7_u8));
+        assert_eq!(commit.error().kind(), io::ErrorKind::Other);
         assert_eq!(commit.writer(), Some(&7));
         assert_eq!(commit.writer_mut().map(|value| *value), Some(7));
         assert!(commit.to_string().contains("retained"));

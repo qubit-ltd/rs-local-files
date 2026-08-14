@@ -231,11 +231,20 @@ fn test_temporary_resource_option_builders_retain_configuration() {
     assert_eq!(file.max_attempts(), 4);
     assert!(file.creates_parent());
 
-    let directory = black_box(LocalTempDirectoryOptions::new())
-        .with_parent(parent)
-        .with_prefix("directory-")
-        .with_suffix(".tmp")
-        .with_max_attempts(5);
+    let with_directory_max_attempts = black_box(
+        LocalTempDirectoryOptions::with_max_attempts
+            as fn(
+                LocalTempDirectoryOptions,
+                usize,
+            ) -> LocalTempDirectoryOptions,
+    );
+    let directory = with_directory_max_attempts(
+        black_box(LocalTempDirectoryOptions::new())
+            .with_parent(parent)
+            .with_prefix("directory-")
+            .with_suffix(".tmp"),
+        5,
+    );
     assert_eq!(directory.parent(), Some(parent));
     assert_eq!(directory.prefix(), Some("directory-"));
     assert_eq!(directory.suffix(), Some(".tmp"));

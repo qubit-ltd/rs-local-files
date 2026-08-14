@@ -11,6 +11,7 @@ use std::io::Read;
 use std::time::Duration;
 
 use qubit_local_files::LocalAtomicityRequirement;
+#[cfg(feature = "internal-test-support")]
 use qubit_local_files::LocalCopyConflictPolicy;
 #[cfg(feature = "internal-test-support")]
 use qubit_local_files::LocalCopyFailureState;
