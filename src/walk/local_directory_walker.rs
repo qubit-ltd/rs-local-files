@@ -80,6 +80,7 @@ impl LocalDirectoryWalker {
         symlink_policy: LocalSymlinkPolicy,
     ) -> LocalResult<Self> {
         validate_options(&root, &options)?;
+        let deadline = walker_deadline(&root, &options)?;
         let metadata = fs::symlink_metadata(&root)
             .map_err(|error| walk_io_error(&root, error))?;
         if !metadata.file_type().is_dir() {
@@ -128,9 +129,7 @@ impl LocalDirectoryWalker {
             seen_name_budget: options.max_seen_name_bytes().map(|limit| {
                 ResourceBudget::new(LocalResourceKind::SeenNameBytes, limit)
             }),
-            deadline: options
-                .deadline()
-                .map(|duration| Instant::now() + duration),
+            deadline,
         })
     }
 
@@ -181,6 +180,7 @@ impl LocalDirectoryWalker {
                 path.as_path().to_path_buf()
             }));
         validate_options(&diagnostic_root, &options)?;
+        let deadline = walker_deadline(&diagnostic_root, &options)?;
         let authority_parent = path
             .as_ref()
             .map_or_else(PathBuf::new, |path| path.as_path().to_path_buf());
@@ -221,9 +221,7 @@ impl LocalDirectoryWalker {
             seen_name_budget: options.max_seen_name_bytes().map(|limit| {
                 ResourceBudget::new(LocalResourceKind::SeenNameBytes, limit)
             }),
-            deadline: options
-                .deadline()
-                .map(|duration| Instant::now() + duration),
+            deadline,
         })
     }
 
@@ -539,6 +537,39 @@ fn validate_options(
     Ok(())
 }
 
+/// Converts the relative deadline into one checked monotonic instant.
+///
+/// # Parameters
+///
+/// - `root`: Diagnostic traversal root used for invalid-option context.
+/// - `options`: Traversal options containing the relative deadline.
+///
+/// # Returns
+///
+/// The fixed deadline, or `None` when no deadline was configured.
+///
+/// # Errors
+///
+/// Returns `InvalidOptions` when the duration exceeds the monotonic clock
+/// range.
+fn walker_deadline(
+    root: &Path,
+    options: &LocalListOptions,
+) -> LocalResult<Option<Instant>> {
+    let Some(duration) = options.deadline() else {
+        return Ok(None);
+    };
+    let Some(deadline) = Instant::now().checked_add(duration) else {
+        return Err(LocalFileError::new(
+            LocalFileErrorKind::InvalidOptions,
+            LocalFileOperation::List,
+        )
+        .with_path(root.to_path_buf())
+        .with_reason("listing deadline exceeds the monotonic clock range"));
+    };
+    Ok(Some(deadline))
+}
+
 /// Creates the finite pool that accounts for opened directory readers.
 fn directory_pool(
     options: &LocalListOptions,
@@ -598,8 +629,7 @@ impl Iterator for LocalDirectoryWalker {
                 &mut self.seen_name_budget,
                 self.deadline,
             );
-            if matches!(&result, Some(Err(_)))
-                && self.options.error_policy() == LocalWalkErrorPolicy::FailFast
+            if matches!(&result, Some(Err(error)) if is_terminal_walk_error(error, self.options.error_policy()))
             {
                 self.terminated = true;
             }
@@ -664,11 +694,17 @@ impl Iterator for LocalDirectoryWalker {
                     continue;
                 }
             };
+            if self
+                .options
+                .max_depth()
+                .is_some_and(|max_depth| entry_depth > max_depth)
+            {
+                continue;
+            }
             if let Some(budget) = self.entry_budget.as_mut()
                 && let Err(error) = budget.try_consume(1)
             {
-                self.terminated = self.options.error_policy()
-                    == LocalWalkErrorPolicy::FailFast;
+                self.terminated = true;
                 return Some(Err(directory_limit_error(
                     &self.root.join(&relative_parent),
                     error,
@@ -678,21 +714,12 @@ impl Iterator for LocalDirectoryWalker {
                 && let Err(error) =
                     budget.try_consume(name_bytes(&entry.file_name()))
             {
-                self.terminated = self.options.error_policy()
-                    == LocalWalkErrorPolicy::FailFast;
+                self.terminated = true;
                 return Some(Err(directory_limit_error(
                     &self.root.join(&relative_parent),
                     error,
                 )));
             }
-            if self
-                .options
-                .max_depth()
-                .is_some_and(|max_depth| entry_depth > max_depth)
-            {
-                continue;
-            }
-
             let path = entry.path();
             let relative = relative_parent.join(entry.file_name());
             let native_metadata = if self.symlink_policy.follows() {
@@ -734,6 +761,19 @@ impl Iterator for LocalDirectoryWalker {
             )));
         }
     }
+}
+
+/// Reports whether an iterator error must terminate global traversal state.
+#[must_use]
+fn is_terminal_walk_error(
+    error: &LocalFileError,
+    policy: LocalWalkErrorPolicy,
+) -> bool {
+    policy == LocalWalkErrorPolicy::FailFast
+        || error.kind() == LocalFileErrorKind::ResourceLimit
+        || error
+            .io_error()
+            .is_some_and(|source| source.kind() == std::io::ErrorKind::TimedOut)
 }
 
 /// Closes one rooted frame reader and returns its pool capacity.
@@ -1007,6 +1047,12 @@ fn next_rooted_entry(
                 return Some(Err(walk_io_error(&authority_parent, error)));
             }
         };
+        if options
+            .max_depth()
+            .is_some_and(|max_depth| entry_depth > max_depth)
+        {
+            continue;
+        }
         if let Some(budget) = entry_budget.as_mut()
             && let Err(error) = budget.try_consume(1)
         {
@@ -1016,12 +1062,6 @@ fn next_rooted_entry(
             && let Err(error) = budget.try_consume(name_bytes(entry.name()))
         {
             return Some(Err(directory_limit_error(state.root.path(), error)));
-        }
-        if options
-            .max_depth()
-            .is_some_and(|max_depth| entry_depth > max_depth)
-        {
-            continue;
         }
         let authority_path = authority_parent.join(entry.name());
         let output_path = output_parent.join(entry.name());
