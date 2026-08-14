@@ -78,6 +78,9 @@ fn test_local_persist_outcome_reports_published_path_and_guarantees() {
     assert_eq!(LocalPersistCleanupState::Complete, outcome.cleanup_state());
     assert!(outcome.cleanup_error().is_none());
     assert_eq!(target, outcome.path());
+    let (published_path, cleanup_error) = outcome.into_parts();
+    assert_eq!(target, published_path);
+    assert!(cleanup_error.is_none());
 }
 
 /// Verifies Host persistence keeps the caller-visible path when an

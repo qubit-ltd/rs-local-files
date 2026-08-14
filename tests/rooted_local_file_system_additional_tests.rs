@@ -383,11 +383,15 @@ fn test_rooted_local_file_system_reports_changed_child_during_recursive_list() {
         .expect("child metadata should be readable");
     assert_eq!(Path::new("child"), entry.relative_path());
 
-    fs::remove_dir(&child).expect("empty child directory should be removed");
-    fs::create_dir(parent.path().join("replacement-padding"))
-        .expect("replacement padding directory should be created");
-    fs::create_dir(&child)
-        .expect("child path should be recreated as a directory");
+    let original = parent.path().join("original-child");
+    let replacement = parent.path().join("replacement-child");
+    fs::create_dir(&replacement).expect(
+        "replacement directory should be created with another identity",
+    );
+    fs::rename(&child, &original)
+        .expect("observed child should move without freeing its identity");
+    fs::rename(&replacement, &child)
+        .expect("known-distinct replacement should take the child path");
 
     let error = walker
         .next()

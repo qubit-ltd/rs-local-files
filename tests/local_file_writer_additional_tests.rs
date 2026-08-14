@@ -19,6 +19,7 @@ use qubit_local_files::LocalWriteFailureState;
 use qubit_local_files::LocalWriteMode;
 use qubit_local_files::LocalWriteOptions;
 use qubit_local_files::LocalWriterState;
+#[cfg(all(feature = "internal-test-support", unix))]
 use qubit_local_files::install_test_fault;
 use tempfile::tempdir;
 

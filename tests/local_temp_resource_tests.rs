@@ -10,8 +10,10 @@ use std::fs;
 #[cfg(any(target_os = "linux", target_os = "macos"))]
 use std::os::unix::ffi::OsStringExt;
 
+#[cfg(any(target_os = "linux", target_os = "macos"))]
 use qubit_local_files::LocalFileErrorKind;
 use qubit_local_files::LocalFileSystem;
+#[cfg(any(target_os = "linux", target_os = "macos"))]
 use qubit_local_files::LocalPersistFailureState;
 use qubit_local_files::LocalTempDirectoryOptions;
 use qubit_local_files::LocalTempFileOptions;

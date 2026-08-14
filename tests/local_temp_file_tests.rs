@@ -20,6 +20,7 @@ use std::path::Path;
 use std::process::Command;
 
 use qubit_local_files::LocalFileErrorKind;
+#[cfg(feature = "internal-test-support")]
 use qubit_local_files::LocalFileOperation;
 use qubit_local_files::LocalFileSystem;
 use qubit_local_files::LocalPersistFailureState;
