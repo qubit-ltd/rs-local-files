@@ -110,10 +110,8 @@ fn bench_walk_handle_budget(c: &mut Criterion) {
             format!("host_reopen_{max_open_directories}"),
             |bench| {
                 bench.iter(|| {
-                    let count = host
-                        .list(black_box(&tree), &options)
-                        .map(|walker| walker.count())
-                        .unwrap_or_default();
+                    let count =
+                        count_entries(&host, black_box(&tree), &options);
                     black_box(count);
                 });
             },
@@ -122,10 +120,11 @@ fn bench_walk_handle_budget(c: &mut Criterion) {
             format!("rooted_reopen_{max_open_directories}"),
             |bench| {
                 bench.iter(|| {
-                    let count = rooted
-                        .list(black_box(Path::new("tree")), &options)
-                        .map(|walker| walker.count())
-                        .unwrap_or_default();
+                    let count = count_entries(
+                        &rooted,
+                        black_box(Path::new("tree")),
+                        &options,
+                    );
                     black_box(count);
                 });
             },
@@ -133,6 +132,22 @@ fn bench_walk_handle_budget(c: &mut Criterion) {
         black_box((host_count, rooted_count));
     }
     group.finish();
+}
+
+/// Counts a complete traversal and fails the benchmark on any entry error.
+fn count_entries(
+    filesystem: &LocalFileSystem,
+    path: &Path,
+    options: &LocalListOptions,
+) -> usize {
+    filesystem
+        .list(path, options)
+        .and_then(|mut walker| {
+            walker.try_fold(0_usize, |count, entry| {
+                entry.map(|_| count.saturating_add(1))
+            })
+        })
+        .expect("benchmark traversal should complete without errors")
 }
 
 fn bench_copy(c: &mut Criterion) {
