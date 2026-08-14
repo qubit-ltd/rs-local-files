@@ -31,7 +31,7 @@ pub struct LocalListOptions {
     max_depth: Option<usize>,
     /// Optional cap on entries yielded by this walker.
     max_entries: Option<usize>,
-    /// Optional cap on bytes retained by duplicate-name tracking.
+    /// Optional cap on cumulative names observed by duplicate-name tracking.
     max_seen_name_bytes: Option<usize>,
     /// Optional wall-clock deadline for the complete traversal.
     deadline: Option<Duration>,
@@ -80,7 +80,8 @@ impl LocalListOptions {
         self.max_entries
     }
 
-    /// Returns the maximum bytes retained by duplicate-name tracking.
+    /// Returns the maximum cumulative name bytes observed by duplicate-name
+    /// tracking.
     #[must_use]
     pub const fn max_seen_name_bytes(&self) -> Option<usize> {
         self.max_seen_name_bytes
@@ -99,6 +100,7 @@ impl LocalListOptions {
     }
 
     /// Returns the policy used after the handle budget is reached.
+    #[inline(always)]
     pub const fn reopen_policy(&self) -> LocalDirectoryReopenPolicy {
         self.reopen_policy
     }
@@ -140,7 +142,9 @@ impl LocalListOptions {
         self
     }
 
-    /// Limits memory retained for duplicate-name tracking.
+    /// Limits cumulative name bytes observed by duplicate-name tracking.
+    ///
+    /// Capacity is not released when a completed directory frame is popped.
     pub const fn with_max_seen_name_bytes(
         mut self,
         max_seen_name_bytes: usize,

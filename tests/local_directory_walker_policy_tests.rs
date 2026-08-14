@@ -9,6 +9,7 @@
 use std::fs;
 use std::path::Path;
 use std::path::PathBuf;
+use std::time::Duration;
 
 use qubit_local_files::LocalFileErrorKind;
 use qubit_local_files::LocalFileKind;
@@ -16,7 +17,6 @@ use qubit_local_files::LocalFileSystem;
 use qubit_local_files::LocalListOptions;
 #[cfg(unix)]
 use qubit_local_files::LocalSymlinkPolicy;
-#[cfg(unix)]
 use qubit_local_files::LocalWalkErrorPolicy;
 #[cfg(feature = "internal-test-support")]
 use qubit_local_files::install_test_fault;
@@ -169,6 +169,72 @@ fn test_local_directory_walker_zero_max_depth_yields_no_entries() {
         .expect("zero-depth traversal should succeed");
 
     assert!(entries.is_empty());
+}
+
+/// Verifies zero depth is applied before entry and name budgets.
+#[test]
+fn test_local_directory_walker_zero_depth_does_not_consume_yield_budgets() {
+    let directory = tempdir().expect("temporary directory should be created");
+    fs::write(directory.path().join("entry"), b"payload")
+        .expect("entry fixture should be written");
+
+    let entries = LocalFileSystem::host()
+        .list(
+            directory.path(),
+            &LocalListOptions::new()
+                .with_max_depth(0)
+                .with_max_entries(0)
+                .with_max_seen_name_bytes(0),
+        )
+        .expect("walker should open")
+        .collect::<Result<Vec<_>, _>>()
+        .expect("zero-depth traversal should not consume yield budgets");
+
+    assert!(entries.is_empty());
+}
+
+/// Verifies an exhausted global resource budget terminates Continue traversal.
+#[test]
+fn test_local_directory_walker_resource_limit_terminates_continue_policy() {
+    let directory = tempdir().expect("temporary directory should be created");
+    fs::write(directory.path().join("first"), b"first")
+        .expect("first entry should be written");
+    fs::write(directory.path().join("second"), b"second")
+        .expect("second entry should be written");
+    let mut walker = LocalFileSystem::host()
+        .list(
+            directory.path(),
+            &LocalListOptions::new()
+                .with_max_entries(0)
+                .with_error_policy(LocalWalkErrorPolicy::Continue),
+        )
+        .expect("walker should open");
+
+    assert!(
+        walker
+            .next()
+            .expect("resource limit should be yielded")
+            .is_err(),
+    );
+    assert!(
+        walker.next().is_none(),
+        "resource exhaustion must terminate"
+    );
+}
+
+/// Verifies an unrepresentable monotonic deadline is rejected without panic.
+#[test]
+fn test_local_directory_walker_rejects_unrepresentable_deadline() {
+    let directory = tempdir().expect("temporary directory should be created");
+
+    let error = LocalFileSystem::host()
+        .list(
+            directory.path(),
+            &LocalListOptions::new().with_deadline(Duration::MAX),
+        )
+        .expect_err("unrepresentable deadline should be invalid");
+
+    assert_eq!(LocalFileErrorKind::InvalidOptions, error.kind());
 }
 
 /// Verifies zero directory-handle budgets are rejected instead of being
