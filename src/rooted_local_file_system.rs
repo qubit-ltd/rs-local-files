@@ -20,7 +20,6 @@ mod support;
 mod temp;
 
 pub(super) use std::fs;
-pub(super) use std::fs::File;
 pub(super) use std::io;
 pub(super) use std::path::Path;
 pub(super) use std::path::PathBuf;
@@ -33,7 +32,6 @@ pub(crate) use path_support::rooted_path;
 pub(crate) use path_support::rooted_temp_parent;
 pub(crate) use path_support::temp_candidate;
 pub(crate) use path_support::validate_rooted_temp_parent;
-pub(super) use support::probe_rooted_file;
 pub(crate) use support::resolve_rooted_path;
 pub(super) use support::sync_rooted_copy_parent_chain;
 pub(super) use support::validate_rooted_list_start;
@@ -81,6 +79,8 @@ pub(super) use crate::local::validate_temp_affixes;
 /// Descriptor- or handle-relative authority for one opened native directory.
 #[derive(Clone, Debug)]
 pub(crate) struct RootedLocalFileSystem {
+    /// New handle-bound authority used by migrated operations.
+    authority: Arc<crate::authority::Authority>,
     /// Existing secure rooted implementation.
     root: Arc<crate::rooted::Root>,
     /// Capability snapshot cached when the authority is opened.
@@ -112,6 +112,10 @@ impl RootedLocalFileSystem {
             )
             .with_path(path.to_path_buf()));
         }
+        let authority = crate::authority::RootedAuthority::open(
+            path,
+            LocalSymlinkPolicy::FollowWithinScope,
+        )?;
         let root = crate::rooted::Root::open(path).map_err(|error| {
             LocalFileError::from_io(
                 LocalFileOperation::OpenRoot,
@@ -131,10 +135,18 @@ impl RootedLocalFileSystem {
                 )
             });
         Ok(Self {
+            authority: Arc::new(crate::authority::Authority::Rooted(authority)),
             root,
             capabilities: LocalFileSystemProtocols::detect_rooted(),
             limits,
         })
+    }
+
+    /// Returns the handle-bound authority used by migrated operations.
+    #[must_use]
+    #[inline(always)]
+    pub(crate) fn authority(&self) -> &crate::authority::Authority {
+        &self.authority
     }
 
     /// Returns the non-authoritative diagnostic path captured at open time.
