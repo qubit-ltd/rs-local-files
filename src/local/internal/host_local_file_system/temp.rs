@@ -9,6 +9,26 @@
 // Host temp operations.
 // qubit-style: allow source-test-pair
 
+use super::HostLocalFileSystem;
+use super::LocalCopyOptions;
+use super::LocalFileError;
+use super::LocalFileErrorKind;
+use super::LocalFileOperation;
+use super::LocalMetadataPreservePolicy;
+use super::LocalResult;
+use super::LocalSymlinkPolicy;
+use super::LocalTempDirectory;
+use super::LocalTempDirectoryOptions;
+use super::LocalTempFile;
+use super::LocalTempFileOptions;
+use super::LocalWriteMode;
+use super::LocalWriteOptions;
+use super::Path;
+use super::fs;
+use super::io;
+use super::resolve_host_path;
+use super::validate_temp_affixes;
+
 impl HostLocalFileSystem {
     /// Creates a Host cleanup-owned temporary file.
     ///
@@ -208,7 +228,6 @@ impl HostLocalFileSystem {
             }
         })
     }
-
 }
 
 /// Opens the existing robust same-directory staged writer implementation.
@@ -225,7 +244,7 @@ impl HostLocalFileSystem {
 /// # Errors
 ///
 /// Returns `LocalFileError` when staging cannot be prepared.
-fn open_staged_writer(
+pub(crate) fn open_staged_writer(
     path: &Path,
     options: &LocalWriteOptions,
 ) -> LocalResult<crate::local::LocalAtomicWriter> {
@@ -273,17 +292,26 @@ pub(crate) fn internal_copy_options(
         .with_type_conflict(options.type_conflict())
         .with_symlink_policy(symlink_policy)
         .with_durability(options.durability());
-    if let Some(value) = options.max_depth() { result = result.with_max_depth(value); }
-    if let Some(value) = options.max_entries() { result = result.with_max_entries(value); }
-    if let Some(value) = options.max_bytes() { result = result.with_max_bytes(value); }
-    if let Some(value) = options.max_open_directories() { result = result.with_max_open_directories(value); }
-    if let Some(value) = options.deadline() { result = result.with_deadline(value); }
+    if let Some(value) = options.max_depth() {
+        result = result.with_max_depth(value);
+    }
+    if let Some(value) = options.max_entries() {
+        result = result.with_max_entries(value);
+    }
+    if let Some(value) = options.max_bytes() {
+        result = result.with_max_bytes(value);
+    }
+    if let Some(value) = options.max_open_directories() {
+        result = result.with_max_open_directories(value);
+    }
+    if let Some(value) = options.deadline() {
+        result = result.with_deadline(value);
+    }
     if options.preserve_metadata() == LocalMetadataPreservePolicy::Permissions {
         result = result.preserve_permissions();
     }
     result
 }
-
 
 /// Confirms that a host temporary-resource parent is an existing directory.
 #[inline]

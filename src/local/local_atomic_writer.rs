@@ -25,8 +25,10 @@ use super::internal::OpenedAtomicDestination;
 use super::internal::StagedFile;
 use super::internal::absolute_path;
 use super::internal::add_path_context;
+use super::internal::commit_recoverably;
 use super::internal::create_temp_file_in_dir;
 use super::internal::ensure_parent_path_with_sync_dirs;
+use super::internal::finalize_failed_commit;
 use super::internal::install_atomic_file;
 #[cfg(unix)]
 use super::internal::open_atomic_destination;
@@ -35,6 +37,7 @@ use super::internal::parent_dir_for;
 use super::internal::preserve_atomic_metadata;
 use super::internal::recover_atomic_install_error;
 use super::internal::sync_parent_dir;
+use super::internal::synchronize_staging_file;
 #[cfg(feature = "internal-test-support")]
 use super::internal::test_support;
 #[cfg(unix)]
@@ -284,15 +287,11 @@ impl LocalAtomicWriter {
     /// Returns a recoverable error when publication did not begin, or a
     /// terminal error after destination state may have changed.
     pub(crate) fn commit_recoverable_with_durability(
-        mut self,
+        self,
     ) -> Result<bool, LocalAtomicCommitError<Self>> {
-        match self.commit_attempt() {
-            Ok(durable) => Ok(durable),
-            Err(error) if self.staged_file.is_open() => {
-                Err(LocalAtomicCommitError::new(error, Some(self)))
-            }
-            Err(error) => Err(LocalAtomicCommitError::new(error, None)),
-        }
+        commit_recoverably(self, Self::commit_attempt, |writer| {
+            writer.staged_file.is_open()
+        })
     }
 
     /// Aborts the staged replacement and removes its temporary file.
@@ -492,22 +491,19 @@ impl LocalAtomicWriter {
     /// Returns a structured staging synchronization error while retaining
     /// staging when the native synchronization fails.
     fn sync_temporary_file(&mut self) -> Result<bool, LocalAtomicWriteError> {
-        match self.durability {
-            LocalDurabilityRequirement::NotRequired => Ok(false),
-            LocalDurabilityRequirement::Preferred => {
-                Ok(self.staged_file.file().sync_all().is_ok())
-            }
-            LocalDurabilityRequirement::Required => {
+        synchronize_staging_file(
+            self.staged_file.file(),
+            self.durability,
+            |result| {
                 with_atomic_context(
-                    self.staged_file.file().sync_all(),
+                    result,
                     LocalAtomicWriteStage::SyncTemporaryFile,
                     &self.path,
                     Some(self.staged_file.path().to_path_buf()),
                     LocalAtomicDestinationState::Unchanged,
-                )?;
-                Ok(true)
-            }
-        }
+                )
+            },
+        )
     }
 
     /// Verifies that the opened destination still names the final entry.
@@ -595,16 +591,18 @@ impl LocalAtomicWriter {
     /// The failure enriched with any staging cleanup error.
     #[inline]
     fn finalize_failed_commit(
-        mut self,
+        self,
         error: LocalAtomicWriteError,
     ) -> LocalAtomicWriteError {
-        if error.destination_state() == LocalAtomicDestinationState::Unchanged {
-            error.with_cleanup_error(self.staged_file.cleanup().err())
-        } else {
-            self.staged_file.close();
-            self.staged_file.disarm();
-            error
-        }
+        finalize_failed_commit(
+            self,
+            error,
+            |writer| writer.staged_file.cleanup(),
+            |writer| {
+                writer.staged_file.close();
+                writer.staged_file.disarm();
+            },
+        )
     }
 
     /// Installs staging and synchronizes the destination parent chain.

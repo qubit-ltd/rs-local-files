@@ -9,6 +9,33 @@
 // Host copy operations.
 // qubit-style: allow source-test-pair
 
+use super::HostLocalFileSystem;
+use super::LocalCopyFailure;
+use super::LocalCopyMethod;
+use super::LocalCopyOptions;
+use super::LocalCopyOutcome;
+use super::LocalCopyResult;
+use super::LocalCopyStats;
+use super::LocalFileError;
+use super::LocalFileErrorKind;
+use super::LocalFileOperation;
+use super::LocalPaths;
+use super::LocalResult;
+use super::LocalSymlinkPolicy;
+use super::Path;
+use super::PathBuf;
+use super::copy_failure_published;
+use super::copy_failure_unchanged;
+use super::destination_is_directory;
+use super::ensure_required_directory_durability;
+use super::fs;
+use super::io;
+use super::published_durability;
+use super::resolve_host_path;
+use super::sync_parent_directory;
+use super::test_io_fault;
+use crate::local::internal::internal_copy_options;
+
 impl HostLocalFileSystem {
     /// Copies through a Host namespace using an explicit symbolic-link policy.
     ///
@@ -283,7 +310,6 @@ impl HostLocalFileSystem {
             options.preserve_metadata(),
         ))
     }
-
 }
 
 /// Creates missing copy target parents and returns directories requiring sync.
@@ -451,7 +477,6 @@ fn sync_created_parent_directories(paths: &[PathBuf]) -> io::Result<()> {
     }
 }
 
-
 /// Rejects textual self-copy and native hard-link aliases.
 ///
 /// # Parameters
@@ -571,7 +596,6 @@ fn copy_alias_error(source: &Path, target: &Path) -> LocalFileError {
     .with_path(source.to_path_buf())
     .with_target(target.to_path_buf())
 }
-
 
 /// Converts a pipeline failure into a lossless public copy failure.
 #[inline(always)]

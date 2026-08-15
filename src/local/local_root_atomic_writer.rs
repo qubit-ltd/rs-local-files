@@ -33,8 +33,10 @@ use super::internal::RootedParentMode;
 use super::internal::RootedStagedFile;
 #[cfg(windows)]
 use super::internal::WindowsRootedStagedFile;
+use super::internal::commit_recoverably;
 #[cfg(unix)]
 use super::internal::create_rooted_staged_file;
+use super::internal::finalize_failed_commit;
 #[cfg(unix)]
 use super::internal::inspect_rooted_atomic_destination;
 #[cfg(unix)]
@@ -47,6 +49,7 @@ use super::internal::open_rooted_parent;
 use super::internal::preserve_atomic_metadata;
 #[cfg(unix)]
 use super::internal::recover_atomic_install_error;
+use super::internal::synchronize_staging_file;
 #[cfg(all(feature = "internal-test-support", unix))]
 use super::internal::test_support;
 #[cfg(unix)]
@@ -426,19 +429,14 @@ impl LocalRootAtomicWriter {
     ///
     /// Returns a recoverable error before installation or a terminal error
     /// after destination state may have changed.
-    #[cfg_attr(not(any(unix, windows)), allow(unused_mut))]
     pub(crate) fn commit_recoverable_with_durability(
-        mut self,
+        self,
     ) -> Result<bool, LocalAtomicCommitError<Self>> {
         #[cfg(unix)]
         {
-            match self.commit_attempt() {
-                Ok(durable) => Ok(durable),
-                Err(error) if self.staged_file.is_open() => {
-                    Err(LocalAtomicCommitError::new(error, Some(self)))
-                }
-                Err(error) => Err(LocalAtomicCommitError::new(error, None)),
-            }
+            commit_recoverably(self, Self::commit_attempt, |writer| {
+                writer.staged_file.is_open()
+            })
         }
         #[cfg(windows)]
         {
@@ -448,13 +446,9 @@ impl LocalRootAtomicWriter {
                     Some(self),
                 ));
             }
-            match self.commit_attempt_windows() {
-                Ok(durable) => Ok(durable),
-                Err(error) if self.staged_file.armed => {
-                    Err(LocalAtomicCommitError::new(error, Some(self)))
-                }
-                Err(error) => Err(LocalAtomicCommitError::new(error, None)),
-            }
+            commit_recoverably(self, Self::commit_attempt_windows, |writer| {
+                writer.staged_file.armed
+            })
         }
         #[cfg(not(any(unix, windows)))]
         {
@@ -739,22 +733,19 @@ impl LocalRootAtomicWriter {
     /// staging when the native synchronization fails.
     #[cfg(unix)]
     fn sync_temporary_file(&mut self) -> Result<bool, LocalAtomicWriteError> {
-        match self.durability {
-            LocalDurabilityRequirement::NotRequired => Ok(false),
-            LocalDurabilityRequirement::Preferred => {
-                Ok(self.staged_file.file().sync_all().is_ok())
-            }
-            LocalDurabilityRequirement::Required => {
+        synchronize_staging_file(
+            self.staged_file.file(),
+            self.durability,
+            |result| {
                 map_atomic_error(
-                    self.staged_file.file().sync_all(),
+                    result,
                     LocalAtomicWriteStage::SyncTemporaryFile,
                     &self.path,
                     Some(self.staged_file.diagnostic_path().to_path_buf()),
                     LocalAtomicDestinationState::Unchanged,
-                )?;
-                Ok(true)
-            }
-        }
+                )
+            },
+        )
     }
 
     /// Verifies that the rooted destination still names the opened file.
@@ -796,16 +787,18 @@ impl LocalRootAtomicWriter {
     #[cfg(unix)]
     #[inline]
     fn finalize_failed_commit(
-        mut self,
+        self,
         error: LocalAtomicWriteError,
     ) -> LocalAtomicWriteError {
-        if error.destination_state() == LocalAtomicDestinationState::Unchanged {
-            error.with_cleanup_error(self.staged_file.cleanup().err())
-        } else {
-            self.staged_file.close();
-            self.staged_file.disarm();
-            error
-        }
+        finalize_failed_commit(
+            self,
+            error,
+            |writer| writer.staged_file.cleanup(),
+            |writer| {
+                writer.staged_file.close();
+                writer.staged_file.disarm();
+            },
+        )
     }
 
     /// Finalizes a consuming Windows commit failure.
@@ -815,11 +808,12 @@ impl LocalRootAtomicWriter {
         mut self,
         error: LocalAtomicWriteError,
     ) -> LocalAtomicWriteError {
-        if error.destination_state() == LocalAtomicDestinationState::Unchanged {
-            error.with_cleanup_error(self.staged_file.cleanup().err())
-        } else {
-            error
-        }
+        finalize_failed_commit(
+            self,
+            error,
+            |writer| writer.staged_file.cleanup(),
+            |_| {},
+        )
     }
 
     /// Returns an unsupported failure after a non-Unix commit attempt.
