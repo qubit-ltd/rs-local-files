@@ -6,7 +6,6 @@
 //    Licensed under the Apache License, Version 2.0.
 // =============================================================================
 
-use std::env;
 use std::ffi::OsStr;
 use std::ffi::OsString;
 use std::path::Component;
@@ -15,35 +14,73 @@ use std::path::PathBuf;
 
 use crate::LocalFileError;
 use crate::LocalFileErrorKind;
+use crate::LocalFileNames;
 use crate::LocalFileOperation;
+use crate::LocalFileSystemScope;
 use crate::LocalPathCodec;
 use crate::LocalResult;
+use crate::RelativePath;
 
-/// Native path validation, binding, and composition utilities.
+/// Scope-bound native path validation and canonical conversion.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+#[must_use]
 pub struct LocalPaths {
-    /// Prevents construction of this stateless utility type.
-    _private: (),
+    /// Namespace in which native paths are interpreted.
+    scope: LocalFileSystemScope,
+    /// Filename policy associated with the namespace.
+    names: LocalFileNames,
 }
 
 impl LocalPaths {
+    /// Creates path operations for the process-visible host namespace.
+    #[inline(always)]
+    pub const fn host() -> Self {
+        Self {
+            scope: LocalFileSystemScope::Host,
+            names: LocalFileNames::native(),
+        }
+    }
+
+    /// Creates path operations for authority-relative rooted paths.
+    #[inline(always)]
+    pub const fn rooted() -> Self {
+        Self {
+            scope: LocalFileSystemScope::Rooted,
+            names: LocalFileNames::native(),
+        }
+    }
+
+    /// Returns the namespace interpreted by this path object.
+    #[inline(always)]
+    pub const fn scope(&self) -> LocalFileSystemScope {
+        self.scope
+    }
+
+    /// Returns the native filename policy for this path namespace.
+    #[inline(always)]
+    pub const fn file_names(&self) -> LocalFileNames {
+        self.names
+    }
+
     /// Decodes canonical components in the selected filesystem scope.
     ///
     /// Host paths are absolute and omit an artificial root marker. Rooted
     /// paths are relative descendants, with an empty component sequence
     /// representing the opened authority root.
     pub fn from_canonical_components<'a>(
-        scope: crate::LocalFileSystemScope,
+        &self,
         components: impl IntoIterator<Item = &'a str>,
     ) -> LocalResult<PathBuf> {
-        match scope {
-            crate::LocalFileSystemScope::Host => {
+        match self.scope {
+            LocalFileSystemScope::Host => {
                 from_canonical_host_components(components)
             }
-            crate::LocalFileSystemScope::Rooted => {
+            LocalFileSystemScope::Rooted => {
                 let mut path = PathBuf::new();
                 for component in components {
                     path.push(decode_normal_component(component)?);
                 }
+                self.validate_native_form(&path)?;
                 Ok(path)
             }
         }
@@ -54,155 +91,36 @@ impl LocalPaths {
     /// Host output contains the platform root authority; rooted output is
     /// relative and is empty for the authority root.
     pub fn to_canonical_components(
-        scope: crate::LocalFileSystemScope,
+        &self,
         path: &Path,
     ) -> LocalResult<Vec<String>> {
-        match scope {
-            crate::LocalFileSystemScope::Host => {
-                to_canonical_host_components(path)
-            }
-            crate::LocalFileSystemScope::Rooted => {
-                if path.is_absolute() || has_disallowed_component(path) {
-                    return Err(invalid_path_error());
-                }
-                encode_normal_components(path)
+        match self.scope {
+            LocalFileSystemScope::Host => to_canonical_host_components(path),
+            LocalFileSystemScope::Rooted => {
+                let relative = RelativePath::parse(path)?;
+                encode_normal_components(relative.as_path())
             }
         }
     }
 
-    /// Binds a relative host path to one current-working-directory snapshot.
-    ///
-    /// Absolute paths are returned unchanged.
+    /// Validates a native path against this object's namespace shape.
     ///
     /// # Parameters
     ///
-    /// - `path`: Native absolute or relative host path.
-    ///
-    /// # Returns
-    ///
-    /// An absolute path that remains stable if the process working directory
-    /// changes.
+    /// - `path`: Native path to validate.
     ///
     /// # Errors
     ///
-    /// Returns `LocalFileError` when the current directory cannot be read.
-    pub fn bind_host_path(path: &Path) -> LocalResult<PathBuf> {
-        if path.is_absolute() {
-            return Ok(path.to_path_buf());
+    /// Returns an invalid-path error when a rooted path is absolute, prefixed,
+    /// or contains a dot or parent component.
+    #[inline]
+    fn validate_native_form(&self, path: &Path) -> LocalResult<()> {
+        match self.scope {
+            LocalFileSystemScope::Host => Ok(()),
+            LocalFileSystemScope::Rooted => {
+                RelativePath::parse(path).map(|_| ())
+            }
         }
-        current_directory_for_binding("local-path-bind-cwd")
-            .map(|current| current.join(path))
-            .map_err(|source| {
-                LocalFileError::from_io(
-                    LocalFileOperation::BindPath,
-                    Some(path.to_path_buf()),
-                    None,
-                    source,
-                )
-            })
-    }
-
-    /// Binds multiple host paths using exactly one current-directory snapshot.
-    ///
-    /// # Parameters
-    ///
-    /// - `paths`: Pair of native absolute or relative paths.
-    ///
-    /// # Returns
-    ///
-    /// Absolute paths bound to the same host namespace snapshot.
-    ///
-    /// # Errors
-    ///
-    /// Returns `LocalFileError` when the current directory cannot be read.
-    pub fn bind_host_paths(paths: [&Path; 2]) -> LocalResult<[PathBuf; 2]> {
-        let current = if paths.iter().any(|path| path.is_relative()) {
-            Some(
-                current_directory_for_binding("local-paths-bind-cwd").map_err(
-                    |source| {
-                        LocalFileError::from_io(
-                            LocalFileOperation::BindPath,
-                            None,
-                            None,
-                            source,
-                        )
-                    },
-                )?,
-            )
-        } else {
-            None
-        };
-        Ok(paths.map(|path| {
-            current.as_ref().map_or_else(
-                || path.to_path_buf(),
-                |directory| directory.join(path),
-            )
-        }))
-    }
-
-    /// Tests normalized lexical containment without accessing the filesystem.
-    ///
-    /// # Parameters
-    ///
-    /// - `path`: Candidate descendant path.
-    /// - `ancestor`: Candidate ancestor path.
-    ///
-    /// # Returns
-    ///
-    /// `true` when `path` is equal to or lexically below `ancestor`.
-    ///
-    /// # Errors
-    ///
-    /// Returns `LocalFileError` when either input contains `.` or `..`, or when
-    /// absolute and relative forms differ.
-    pub fn is_lexically_within(
-        path: &Path,
-        ancestor: &Path,
-    ) -> LocalResult<bool> {
-        if path.has_root() != ancestor.has_root()
-            || has_disallowed_component(path)
-            || has_disallowed_component(ancestor)
-        {
-            return Err(LocalFileError::new(
-                LocalFileErrorKind::InvalidPath,
-                LocalFileOperation::ComposePath,
-            )
-            .with_path(path.to_path_buf())
-            .with_target(ancestor.to_path_buf()));
-        }
-        Ok(path.starts_with(ancestor))
-    }
-
-    /// Composes a validated relative descendant beneath a native base path.
-    ///
-    /// # Parameters
-    ///
-    /// - `base`: Native base path.
-    /// - `descendant`: Relative path containing only normal components.
-    ///
-    /// # Returns
-    ///
-    /// The lexically joined path.
-    ///
-    /// # Errors
-    ///
-    /// Returns `LocalFileError` for absolute, prefixed, dot, or parent
-    /// components.
-    pub fn compose_descendant(
-        base: &Path,
-        descendant: &Path,
-    ) -> LocalResult<PathBuf> {
-        if descendant.as_os_str().is_empty()
-            || descendant.has_root()
-            || has_disallowed_component(descendant)
-        {
-            return Err(LocalFileError::new(
-                LocalFileErrorKind::InvalidPath,
-                LocalFileOperation::ComposePath,
-            )
-            .with_path(descendant.to_path_buf()));
-        }
-        Ok(base.join(descendant))
     }
 }
 
@@ -259,49 +177,6 @@ fn invalid_path_error() -> LocalFileError {
     )
 }
 
-/// Reads the host current directory used to bind a relative path.
-///
-/// # Parameters
-///
-/// - `fault`: Test-support-only fault selector for exercising the host I/O
-///   error conversion.
-///
-/// # Returns
-///
-/// The current directory snapshot used for relative host paths.
-///
-/// # Errors
-///
-/// Returns the native current-directory I/O error, including a deterministic
-/// test-support-only error when the selected fault is enabled.
-#[cfg(feature = "internal-test-support")]
-#[inline]
-fn current_directory_for_binding(fault: &str) -> std::io::Result<PathBuf> {
-    if crate::local::test_support_enabled(fault) {
-        return Err(crate::local::test_fault_error());
-    }
-    env::current_dir()
-}
-
-/// Reads the host current directory used to bind a relative path.
-///
-/// # Parameters
-///
-/// - `fault`: Ignored when test support is disabled.
-///
-/// # Returns
-///
-/// The current directory snapshot used for relative host paths.
-///
-/// # Errors
-///
-/// Returns the native current-directory I/O error.
-#[cfg(not(feature = "internal-test-support"))]
-#[inline(always)]
-fn current_directory_for_binding(_fault: &str) -> std::io::Result<PathBuf> {
-    env::current_dir()
-}
-
 /// Decodes one canonical component and verifies it is one native normal
 /// component.
 ///
@@ -344,15 +219,7 @@ fn decode_normal_component(component: &str) -> LocalResult<OsString> {
 /// is malformed, non-canonical, or unrepresentable on the current platform.
 #[inline]
 fn decode_canonical_component(component: &str) -> LocalResult<OsString> {
-    LocalPathCodec::from_canonical_text(component)
-        .map_err(|error| {
-            LocalFileError::from_path_codec(
-                LocalFileOperation::ComposePath,
-                None,
-                error,
-            )
-        })
-        .map(|native| native.into_owned())
+    LocalPathCodec::decode_component(component)
 }
 
 /// Reports whether one native string is exactly one safe normal component.
@@ -391,15 +258,7 @@ fn is_normal_native_component(component: &OsStr) -> bool {
 /// Returns a `ComposePath` error retaining the underlying path-codec failure.
 #[inline]
 fn encode_native_component(component: &OsStr) -> LocalResult<String> {
-    LocalPathCodec::to_canonical_text(component)
-        .map(|canonical| canonical.into_owned())
-        .map_err(|error| {
-            LocalFileError::from_path_codec(
-                LocalFileOperation::ComposePath,
-                None,
-                error,
-            )
-        })
+    LocalPathCodec::encode_component(component)
 }
 
 /// Encodes normal native components from a relative or absolute descendant.
@@ -538,10 +397,8 @@ fn to_canonical_host_components(path: &Path) -> LocalResult<Vec<String>> {
         encoded.push(encode_native_component(component)?);
     }
     debug_assert!(matches!(
-        LocalPaths::from_canonical_components(
-            crate::LocalFileSystemScope::Host,
-            encoded.iter().map(String::as_str),
-        ),
+        LocalPaths::host()
+            .from_canonical_components(encoded.iter().map(String::as_str)),
         Ok(decoded) if decoded == path
     ));
     Ok(encoded)

@@ -99,7 +99,6 @@ pub(crate) use file_move::parent_dir_for;
 pub(crate) use file_move::replace_file;
 pub(crate) use file_move::sync_parent_dir;
 pub(crate) use file_name_generation::try_random_file_name;
-pub(crate) use file_name_validation::validate_portable_file_name_impl;
 pub(crate) use host_local_file_system::HostLocalFileSystem;
 pub(crate) use host_local_file_system::internal_copy_options;
 pub(crate) use host_local_file_system::resolve_host_path;

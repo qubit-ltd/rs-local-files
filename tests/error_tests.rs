@@ -208,6 +208,10 @@ fn test_resource_limit_error_formats_all_resource_kinds_and_chains() {
         (LocalResourceKind::OpenDirectory, "open directory"),
         (LocalResourceKind::Entry, "entry"),
         (LocalResourceKind::SeenNameBytes, "seen-name bytes"),
+        (
+            LocalResourceKind::PathComponentBytes,
+            "path-component bytes",
+        ),
         (LocalResourceKind::CopiedBytes, "copied bytes"),
     ];
 

@@ -11,8 +11,8 @@
 use std::time::Duration;
 
 use super::LocalDirectoryReopenPolicy;
-use super::LocalSymlinkPolicy;
 use super::LocalWalkErrorPolicy;
+use crate::policy::LocalSymlinkPolicy;
 
 /// Options fixed for the lifetime of a local directory walker.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
