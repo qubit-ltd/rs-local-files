@@ -7,7 +7,6 @@
 // =============================================================================
 // qubit-style: allow source-test-pair
 // Covered by copy integration tests.
-// qubit-style: allow inline-tests
 // qubit-style: allow explicit-imports
 
 use crate::local::LocalCopyDirStats;
@@ -83,35 +82,5 @@ impl LocalCopyStats {
     #[must_use]
     pub const fn overwritten(self) -> u64 {
         self.overwritten
-    }
-}
-
-// The constructors under test are crate-private bridges from the recursive
-// copy engine. Public integration tests cover LocalCopyStats accessors and
-// filesystem outcomes; exposing these constructors would leak an internal
-// accumulator representation.
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use crate::local::LocalCopyDirStats;
-
-    #[test]
-    fn exposes_skipped_and_internal_counts() {
-        let skipped = LocalCopyStats::skipped_one();
-        assert_eq!(skipped.skipped(), 1);
-        let stats = LocalCopyStats::from_internal(LocalCopyDirStats {
-            files: 1,
-            directories: 2,
-            bytes: 3,
-            skipped: 4,
-            overwritten: 5,
-            non_atomic_publication: false,
-            files_durable: true,
-        });
-        assert_eq!(
-            (stats.files(), stats.directories(), stats.bytes()),
-            (1, 2, 3)
-        );
-        assert_eq!((stats.skipped(), stats.overwritten()), (4, 5));
     }
 }

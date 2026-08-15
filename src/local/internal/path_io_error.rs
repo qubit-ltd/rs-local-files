@@ -78,12 +78,14 @@ impl std::error::Error for PathIoError {
 #[cfg(test)]
 mod tests {
     use std::error::Error as _;
+    use std::io::Error;
     use std::io::ErrorKind;
+    use std::path::Path;
 
-    use super::*;
+    use super::PathIoError;
 
     #[test]
-    fn formats_context_and_exposes_source() {
+    fn test_path_io_error_formats_context_and_exposes_source() {
         let source = Error::new(ErrorKind::PermissionDenied, "denied");
         let error = PathIoError::new("write", Path::new("file"), source);
         assert_eq!(error.to_string(), "failed to write 'file': denied");

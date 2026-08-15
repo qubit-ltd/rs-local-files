@@ -53,10 +53,12 @@ pub(crate) fn with_path_context<T>(
 // seam. Public error integration tests cover the observable result.
 #[cfg(test)]
 mod tests {
-    use super::*;
+    use std::path::Path;
+
+    use super::with_path_context;
 
     #[test]
-    fn preserves_success_values() {
+    fn test_with_path_context_preserves_success_values() {
         assert_eq!(
             with_path_context(Ok(7_u8), "read", Path::new("a"))
                 .expect("success should remain successful"),
@@ -65,7 +67,7 @@ mod tests {
     }
 
     #[test]
-    fn enriches_errors_with_operation_and_path() {
+    fn test_with_path_context_enriches_errors_with_operation_and_path() {
         let error = with_path_context::<()>(
             Err(std::io::Error::new(std::io::ErrorKind::NotFound, "missing")),
             "read",
