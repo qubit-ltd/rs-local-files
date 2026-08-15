@@ -491,7 +491,12 @@ fn directory_limit_error(
     path: &Path,
     error: InsufficientBudgetError<LocalResourceKind, usize>,
 ) -> LocalFileError {
-    let InsufficientBudgetError { resource, limit, remaining, requested } = error;
+    let InsufficientBudgetError {
+        resource,
+        limit,
+        remaining,
+        requested,
+    } = error;
     LocalFileError::from_resource_limit(
         LocalFileOperation::List,
         Some(path.to_path_buf()),
