@@ -484,6 +484,63 @@ where
     assert!(status.success(), "coverage writer fault child should pass");
 }
 
+/// Verifies host atomic writers preserve the documented outcome for native
+/// destination inspection, identity, and installation fault boundaries.
+#[cfg(all(feature = "internal-test-support", unix))]
+#[test]
+fn test_local_file_writer_exercises_atomic_install_fault_boundaries() {
+    const TEST_NAME: &str =
+        "test_local_file_writer_exercises_atomic_install_fault_boundaries";
+    for (fault, existing, fails) in [
+        ("atomic-destination-stat", true, true),
+        ("atomic-destination-type", true, true),
+        ("atomic-destination-open", true, true),
+        ("atomic-destination-would-block", true, false),
+        ("atomic-destination-invalid", true, true),
+        ("atomic-destination-native", true, true),
+        ("atomic-identity-mismatch", true, true),
+        ("atomic-identity-missing", true, true),
+        ("atomic-identity-inspect", true, true),
+        ("atomic-install-replace", true, true),
+        ("atomic-install-replace-indeterminate", true, true),
+        ("atomic-install-before-native-call", false, true),
+        ("atomic-install-fallback", false, false),
+        ("atomic-install-link", false, true),
+        ("atomic-install-unlink", false, false),
+        ("atomic-install-unlink-persistent", false, true),
+        ("atomic-install-unlink-persistent-sync", false, true),
+        ("atomic-install-unlink-recover-sync", false, true),
+        ("atomic-install-unlink-indeterminate-sync", false, true),
+    ] {
+        run_host_writer_fault(TEST_NAME, fault, || {
+            let directory =
+                tempdir().expect("temporary directory should be created");
+            let target = directory.path().join("payload");
+            if existing {
+                fs::write(&target, b"existing")
+                    .expect("replacement target should be written");
+            }
+            let mode = if existing {
+                LocalWriteMode::CreateOrReplace
+            } else {
+                LocalWriteMode::CreateNew
+            };
+            let mut writer = LocalFileSystem::host()
+                .open_writer(&target, &LocalWriteOptions::new(mode))
+                .expect("atomic writer should open");
+            writer
+                .write_all(b"replacement")
+                .expect("staging writer should accept replacement bytes");
+
+            assert_eq!(
+                fails,
+                writer.commit().is_err(),
+                "selected {fault} should have the documented outcome",
+            );
+        });
+    }
+}
+
 /// Verifies a host staged replacement fault is surfaced as a not-published
 /// facade commit failure after native installation cleanup consumes staging.
 #[cfg(all(feature = "internal-test-support", unix))]
