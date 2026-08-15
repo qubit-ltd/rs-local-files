@@ -1,4 +1,4 @@
-//! Fault plans owned by one filesystem instance.
+//! Instance-local deterministic fault plans.
 #![allow(dead_code)]
 
 use std::collections::VecDeque;
@@ -6,32 +6,7 @@ use std::io;
 use std::sync::Arc;
 use std::sync::Mutex;
 
-/// Native operation boundary at which a deterministic test fault is injected.
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub enum TestFaultPoint {
-    /// Metadata observation.
-    Metadata,
-    /// Directory walk opening.
-    WalkOpen,
-    /// Copy source read.
-    CopyRead,
-    /// Copy destination write.
-    CopyWrite,
-    /// Publication flush.
-    PublicationFlush,
-    /// Publication file synchronization.
-    PublicationSyncFile,
-    /// Publication installation.
-    PublicationInstall,
-    /// Publication parent synchronization.
-    PublicationSyncParent,
-    /// Publication cleanup.
-    PublicationCleanup,
-    /// Temporary-resource identity verification.
-    TempIdentity,
-    /// Temporary-resource cleanup.
-    TempCleanup,
-}
+use super::TestFaultPoint;
 
 #[derive(Debug)]
 struct TestFault {
