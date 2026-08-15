@@ -7,7 +7,6 @@
 // =============================================================================
 //! Recursive directory copy options.
 // qubit-style: allow source-test-pair
-// qubit-style: allow inline-tests
 // qubit-style: allow explicit-imports
 
 use std::time::Duration;
@@ -340,43 +339,5 @@ impl Default for LocalCopyDirOptions {
     /// follow symbolic links, and do not preserve source permissions.
     fn default() -> Self {
         Self::new()
-    }
-}
-
-// These tests pin the private recursive-copy option normalization. The public
-// copy options intentionally hide this internal representation; widening it
-// for tests would leak implementation policy. Public copy integration tests
-// cover every observable option effect.
-#[cfg(test)]
-mod tests {
-    use std::time::Duration;
-
-    use super::*;
-
-    #[test]
-    fn builders_update_every_policy() {
-        let options = LocalCopyDirOptions::new()
-            .with_conflict(LocalCopyConflictPolicy::Overwrite)
-            .with_type_conflict(LocalCopyTypeConflictPolicy::Replace)
-            .with_symlink_policy(LocalSymlinkPolicy::FollowWithinScope)
-            .preserve_permissions()
-            .with_open_retry_timeout(Duration::from_secs(1))
-            .with_durability(LocalDurabilityRequirement::Required);
-        assert_eq!(
-            options.conflict_policy(),
-            LocalCopyConflictPolicy::Overwrite
-        );
-        assert_eq!(
-            options.type_conflict_policy(),
-            LocalCopyTypeConflictPolicy::Replace
-        );
-        assert_eq!(
-            options.symlink_policy(),
-            LocalSymlinkPolicy::FollowWithinScope
-        );
-        assert!(options.preserves_permissions());
-        assert_eq!(options.open_retry_timeout(), Some(Duration::from_secs(1)));
-        assert_eq!(options.durability(), LocalDurabilityRequirement::Required);
-        assert_eq!(LocalCopyDirOptions::default(), LocalCopyDirOptions::new());
     }
 }

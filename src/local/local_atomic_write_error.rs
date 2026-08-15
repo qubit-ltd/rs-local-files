@@ -7,7 +7,6 @@
 // =============================================================================
 //! Atomic-write errors.
 // qubit-style: allow source-test-pair
-// qubit-style: allow inline-tests
 // qubit-style: allow explicit-imports
 
 use std::error::Error;
@@ -239,74 +238,5 @@ impl Error for LocalAtomicWriteError {
     #[inline(always)]
     fn source(&self) -> Option<&(dyn Error + 'static)> {
         Some(self.source_error())
-    }
-}
-
-// This module tests private atomic-writer failure decomposition and retry
-// ownership. The public writer API cannot manufacture each internal failure
-// state, and a test hook would expose unstable state-machine details. Public
-// writer integration tests cover the resulting retry and terminal behavior.
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use crate::LocalAtomicDestinationState;
-    use crate::LocalAtomicWriteStage;
-
-    fn error() -> LocalAtomicWriteError {
-        LocalAtomicWriteError::new(
-            LocalAtomicWriteStage::ReplaceDestination,
-            "target".into(),
-            Some("staging".into()),
-            LocalAtomicDestinationState::Replaced,
-            io::Error::other("boom"),
-        )
-    }
-
-    #[test]
-    fn exposes_context_and_formats_secondary_errors() {
-        let error = error()
-            .with_cleanup_error(Some(io::Error::other("cleanup")))
-            .with_parent_sync_error(Some(io::Error::other("sync")));
-        assert_eq!(error.stage(), LocalAtomicWriteStage::ReplaceDestination);
-        assert_eq!(error.path(), Path::new("target"));
-        assert_eq!(error.temporary_path(), Some(Path::new("staging")));
-        assert_eq!(
-            error.destination_state(),
-            LocalAtomicDestinationState::Replaced
-        );
-        assert!(error.cleanup_error().is_some());
-        assert!(error.parent_sync_error().is_some());
-        assert_eq!(error.source_error().kind(), io::ErrorKind::Other);
-        assert_eq!(error.kind(), io::ErrorKind::Other);
-        let display = error.to_string();
-        assert!(display.contains("staging cleanup"));
-        assert!(display.contains("parent synchronization"));
-        assert!(error.source().is_some());
-    }
-
-    #[test]
-    fn splits_staging_parts_without_optional_context() {
-        let (path, cleanup, source) = error().into_staging_parts();
-        assert_eq!(path, Some("staging".into()));
-        assert!(cleanup.is_none());
-        assert_eq!(source.kind(), io::ErrorKind::Other);
-        let no_staging = LocalAtomicWriteError::new(
-            LocalAtomicWriteStage::PrepareParent,
-            "target".into(),
-            None,
-            LocalAtomicDestinationState::Unchanged,
-            io::Error::other("boom"),
-        );
-        assert!(!no_staging.to_string().contains("staging path"));
-        let cleanup_only =
-            error().with_cleanup_error(Some(io::Error::other("cleanup")));
-        assert!(cleanup_only.to_string().contains("staging cleanup"));
-        let parent_only =
-            error().with_parent_sync_error(Some(io::Error::other("sync")));
-        assert!(parent_only.to_string().contains("parent synchronization"));
-        let plain = error()
-            .with_cleanup_error(None)
-            .with_parent_sync_error(None);
-        assert!(plain.to_string().contains("atomic write"));
     }
 }

@@ -344,38 +344,17 @@ fn stat_times(
     (None, None, None)
 }
 
-// These tests exercise private descriptor metadata conversion and platform
-// identity helpers. Public metadata cannot supply synthetic native metadata
-// or inspect these intermediate identities; adding such hooks would enlarge
-// the API for testing only. Rooted metadata integration tests cover public
-// observations.
+// These tests directly exercise private Unix conversion helpers. Descriptor
+// metadata contracts are tested from `src/tests/rooted/metadata_tests.rs`.
 #[cfg(all(test, unix))]
 mod tests {
-    use std::fs::File;
-
-    use super::*;
-
-    #[test]
-    fn observes_open_file_and_identity() {
-        let file = File::open("Cargo.toml").expect("manifest exists");
-        let metadata =
-            Metadata::from_open_file(&file).expect("metadata available");
-        assert_eq!(metadata.kind(), EntryKind::File);
-        assert!(metadata.size() > 0);
-        assert!(metadata.is_same_file(&metadata));
-        assert!(metadata.accessed_at().is_some());
-        assert!(metadata.modified_at().is_some());
-        assert!(metadata.created_at().is_some());
-        let _ = metadata.permissions();
-    }
+    use super::native_id;
+    use super::permission_mode;
 
     #[test]
-    fn converts_modes_and_native_ids() {
+    fn test_metadata_normalizes_permission_modes_and_native_ids() {
         assert_eq!(permission_mode(0o17777_u32), 0o7777);
         assert_eq!(native_id(7_u32), Some(7));
         assert_eq!(native_id(-1_i32), None);
-        let metadata = fs::metadata("Cargo.toml").expect("manifest exists");
-        let rooted = Metadata::from_native(&metadata);
-        assert_eq!(rooted.kind(), EntryKind::File);
     }
 }
