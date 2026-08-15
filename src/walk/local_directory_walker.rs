@@ -13,7 +13,7 @@ use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::Instant;
 
-use qubit_budget::BudgetError;
+use qubit_budget::InsufficientBudgetError;
 use qubit_budget::ResourceBudget;
 use qubit_budget::ResourcePool;
 
@@ -489,25 +489,14 @@ fn close_host_frame(
 #[must_use]
 fn directory_limit_error(
     path: &Path,
-    error: BudgetError<LocalResourceKind, usize>,
+    error: InsufficientBudgetError<LocalResourceKind, usize>,
 ) -> LocalFileError {
-    match error {
-        BudgetError::Insufficient {
-            resource,
-            limit,
-            remaining,
-            requested,
-        } => LocalFileError::from_resource_limit(
-            LocalFileOperation::List,
-            Some(path.to_path_buf()),
-            LocalResourceLimitError::new(resource, limit, remaining, requested),
-        ),
-        BudgetError::LimitExceeded { .. } => LocalFileError::new(
-            LocalFileErrorKind::ResourceLimit,
-            LocalFileOperation::List,
-        )
-        .with_path(path.to_path_buf()),
-    }
+    let InsufficientBudgetError { resource, limit, remaining, requested } = error;
+    LocalFileError::from_resource_limit(
+        LocalFileOperation::List,
+        Some(path.to_path_buf()),
+        LocalResourceLimitError::new(resource, limit, remaining, requested),
+    )
 }
 
 /// Validates options that must hold before a walker can be constructed.
