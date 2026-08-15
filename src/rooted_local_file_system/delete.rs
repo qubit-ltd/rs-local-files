@@ -9,6 +9,17 @@
 // Rooted delete operations.
 // qubit-style: allow source-test-pair
 
+use super::LocalDeleteOptions;
+use super::LocalDeleteOutcome;
+use super::LocalFileOperation;
+use super::LocalResult;
+use super::LocalSymlinkPolicy;
+use super::Path;
+use super::RootedLocalFileSystem;
+use super::io;
+use super::resolve_rooted_path;
+use super::rooted_io_error;
+
 impl RootedLocalFileSystem {
     /// Deletes a rooted file or final symbolic-link entry.
     ///
@@ -103,5 +114,4 @@ impl RootedLocalFileSystem {
             )),
         }
     }
-
 }

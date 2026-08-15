@@ -9,6 +9,19 @@
 // Rooted directory operations.
 // qubit-style: allow source-test-pair
 
+use super::LocalCreateDirectoryOptions;
+use super::LocalCreateDirectoryOutcome;
+use super::LocalFileError;
+use super::LocalFileErrorKind;
+use super::LocalFileOperation;
+use super::LocalResult;
+use super::LocalSymlinkPolicy;
+use super::Path;
+use super::RootedLocalFileSystem;
+use super::io;
+use super::resolve_rooted_path;
+use super::rooted_io_error;
+
 impl RootedLocalFileSystem {
     /// Creates a directory below the opened root.
     ///
@@ -107,5 +120,4 @@ impl RootedLocalFileSystem {
             )),
         }
     }
-
 }

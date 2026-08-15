@@ -25,7 +25,7 @@ use crate::LocalResult;
 /// Returns `LocalFileError` for empty, absolute, prefixed, dot, or parent
 /// paths.
 #[inline]
-pub(super) fn rooted_path(
+pub(crate) fn rooted_path(
     path: &Path,
     operation: LocalFileOperation,
 ) -> LocalResult<crate::local::LocalRelativePath> {
@@ -44,7 +44,7 @@ pub(super) fn rooted_path(
 /// # Errors
 ///
 /// Returns native metadata errors other than an absent final entry.
-pub(super) fn rooted_destination_is_directory(
+pub(crate) fn rooted_destination_is_directory(
     root: &crate::rooted::Root,
     path: &crate::local::LocalRelativePath,
 ) -> io::Result<bool> {
@@ -64,7 +64,7 @@ pub(super) fn rooted_destination_is_directory(
 /// Returns `LocalFileError` when the configured parent is not a normal
 /// relative descendant of the opened root.
 #[inline]
-pub(super) fn rooted_temp_parent(
+pub(crate) fn rooted_temp_parent(
     parent: Option<&Path>,
     operation: LocalFileOperation,
 ) -> LocalResult<PathBuf> {
@@ -84,7 +84,7 @@ pub(super) fn rooted_temp_parent(
 /// Returns `LocalFileError` when the parent cannot be read or is not a
 /// directory.
 #[inline]
-pub(super) fn validate_rooted_temp_parent(
+pub(crate) fn validate_rooted_temp_parent(
     root: &crate::rooted::Root,
     parent: &Path,
     operation: LocalFileOperation,
@@ -117,7 +117,7 @@ pub(super) fn validate_rooted_temp_parent(
 /// Returns `LocalFileError` when an affix is invalid or randomness is
 /// unavailable.
 #[inline]
-pub(super) fn temp_candidate(
+pub(crate) fn temp_candidate(
     parent: &Path,
     prefix: Option<&str>,
     suffix: Option<&str>,
@@ -166,7 +166,7 @@ pub(crate) fn rooted_metadata(
 
 /// Adds rooted operation and descendant context to a native I/O failure.
 #[inline(always)]
-pub(super) fn rooted_io_error(
+pub(crate) fn rooted_io_error(
     operation: LocalFileOperation,
     path: &Path,
     error: io::Error,

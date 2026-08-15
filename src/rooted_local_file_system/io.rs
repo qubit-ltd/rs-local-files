@@ -9,6 +9,29 @@
 // Rooted io operations.
 // qubit-style: allow source-test-pair
 
+use super::Arc;
+use super::LocalDirectoryWalker;
+use super::LocalFileError;
+use super::LocalFileErrorKind;
+use super::LocalFileOperation;
+use super::LocalFileReader;
+use super::LocalFileWriter;
+use super::LocalListOptions;
+use super::LocalReadOptions;
+use super::LocalResult;
+use super::LocalSymlinkPolicy;
+use super::LocalWriteMode;
+use super::LocalWriteOptions;
+use super::Path;
+use super::PathBuf;
+use super::RootedLocalFileSystem;
+use super::ensure_required_directory_durability;
+use super::io;
+use super::resolve_rooted_path;
+use super::rooted_io_error;
+use super::rooted_path;
+use super::validate_rooted_list_start;
+
 impl RootedLocalFileSystem {
     /// Opens a descriptor-relative reader for a rooted regular file.
     ///
@@ -240,5 +263,4 @@ impl RootedLocalFileSystem {
         let diagnostic = self.root.path().join(relative.as_path());
         Ok(LocalFileWriter::new(diagnostic, backend, *options))
     }
-
 }

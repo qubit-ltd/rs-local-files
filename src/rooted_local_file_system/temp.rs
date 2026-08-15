@@ -9,6 +9,25 @@
 // Rooted temp operations.
 // qubit-style: allow source-test-pair
 
+use super::Arc;
+use super::LocalFileErrorKind;
+use super::LocalFileOperation;
+use super::LocalResult;
+use super::LocalSymlinkPolicy;
+use super::LocalTempDirectory;
+use super::LocalTempDirectoryOptions;
+use super::LocalTempFile;
+use super::LocalTempFileOptions;
+use super::RootedLocalFileSystem;
+use super::io;
+use super::resolve_rooted_path;
+use super::rooted_io_error;
+use super::rooted_path;
+use super::rooted_temp_parent;
+use super::temp_candidate;
+use super::validate_rooted_temp_parent;
+use super::validate_temp_affixes;
+
 impl RootedLocalFileSystem {
     /// Creates a cleanup-owned temporary file below this opened root.
     ///
@@ -354,5 +373,4 @@ impl RootedLocalFileSystem {
             ),
         ))
     }
-
 }

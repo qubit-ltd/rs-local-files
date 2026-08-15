@@ -9,6 +9,20 @@
 // Rooted rename operations.
 // qubit-style: allow source-test-pair
 
+use super::LocalFileOperation;
+use super::LocalRenameOptions;
+use super::LocalRenameOutcome;
+use super::LocalRenameResult;
+use super::LocalSymlinkPolicy;
+use super::Path;
+use super::RootedLocalFileSystem;
+use super::ensure_required_directory_durability;
+use super::published_durability;
+use super::rename_failure_after_native_attempt;
+use super::rename_failure_renamed;
+use super::rename_failure_unchanged;
+use super::resolve_rooted_path;
+
 impl RootedLocalFileSystem {
     /// Renames one rooted entry to another without leaving the authority.
     ///

@@ -358,7 +358,7 @@ root-relative descendant。只有 staging cleanup 确认失败时才保留它及
 `cleanup_error`；没有遗留 staging 时两者都为 `None`。
 
 `LocalCopyFailure` 提供 `error()`、`state()`、`partial_stats()`、
-`staging_path()`、`cleanup_error()` 和 consuming decomposition；字段保持私有，
+`staging_path()` 和 `cleanup_error()`；字段保持私有，
 adapter 不通过 message 猜测状态。
 
 `LocalCopyOptions` 至少明确：
@@ -455,8 +455,8 @@ Native rename 成功、随后 parent durability 失败时必须返回 `Renamed`�
 capability 将原子 rename、原子 replace、临时资源无替换持久化、durable rename 和
 durable file copy 分别建模；adapter 不得用单一 no-replace 标志推断其他保证。
 能力快照只报告当前 target 是否实现了对应的完整操作协议，不探测挂载点，也不声称证明
-物理介质已经落盘。durable 能力分别通过 `implements_durable_rename()` 和
-`implements_durable_file_copy()` 查询，adapter 必须分别映射这两项能力。
+物理介质已经落盘。durable 能力分别通过 `supports_durable_rename()` 和
+`supports_durable_file_copy()` 查询，adapter 必须分别映射这两项能力。
 
 Walker drop 只释放本地 handle，不执行 namespace 修改。
 

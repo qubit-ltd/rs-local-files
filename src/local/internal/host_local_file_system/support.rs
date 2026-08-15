@@ -9,6 +9,8 @@
 // Host support operations.
 // qubit-style: allow source-test-pair
 
+use super::io;
+
 /// Returns an injected native I/O failure selected by test-support tests.
 ///
 /// # Parameters
@@ -19,6 +21,6 @@
 ///
 /// `Some` deterministic I/O error only when the matching test fault is
 /// enabled; `None` otherwise.
-fn test_io_fault(fault: &str) -> Option<io::Error> {
+pub(crate) fn test_io_fault(fault: &str) -> Option<io::Error> {
     crate::local::test_io_error(fault)
 }

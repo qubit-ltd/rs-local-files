@@ -9,6 +9,28 @@
 // Host rename operations.
 // qubit-style: allow source-test-pair
 
+use super::HostLocalFileSystem;
+use super::LocalFileError;
+use super::LocalFileOperation;
+use super::LocalPaths;
+use super::LocalRenameFailure;
+use super::LocalRenameFailureState;
+use super::LocalRenameOptions;
+use super::LocalRenameOutcome;
+use super::LocalRenameResult;
+use super::LocalSymlinkPolicy;
+use super::Path;
+use super::ensure_required_directory_durability;
+use super::fs;
+use super::io;
+use super::published_durability;
+use super::rename_failure_after_native_attempt;
+use super::rename_failure_renamed;
+use super::rename_failure_unchanged;
+use super::resolve_host_path;
+use super::test_io_fault;
+use crate::local::internal::sync_parent_dir;
+
 impl HostLocalFileSystem {
     /// Renames a Host entry with explicit overwrite, guarantee, and
     /// symbolic-link policies.
@@ -145,7 +167,7 @@ fn rename_failure_indeterminate(error: LocalFileError) -> LocalRenameFailure {
 /// # Errors
 ///
 /// Returns native I/O errors from opening or synchronizing the parent.
-fn sync_parent_directory(path: &Path) -> io::Result<()> {
+pub(crate) fn sync_parent_directory(path: &Path) -> io::Result<()> {
     if crate::local::test_support_enabled("copy-parent-sync")
         || crate::local::test_support_enabled("rename-parent-sync")
     {
@@ -153,7 +175,7 @@ fn sync_parent_directory(path: &Path) -> io::Result<()> {
             .or_else(|| crate::local::test_io_error("rename-parent-sync"))
             .expect("selected parent-sync fault should provide an I/O error"));
     }
-    super::file_move::sync_parent_dir(path)
+    sync_parent_dir(path)
 }
 
 /// Synchronizes every parent directory changed by a completed rename.
@@ -166,7 +188,7 @@ fn sync_rename_parents(source: &Path, target: &Path) -> io::Result<()> {
 }
 
 /// Reports whether the final destination entry is a real directory.
-fn destination_is_directory(path: &Path) -> io::Result<bool> {
+pub(crate) fn destination_is_directory(path: &Path) -> io::Result<bool> {
     match fs::symlink_metadata(path) {
         Ok(metadata) => Ok(metadata.file_type().is_dir()),
         Err(error) if error.kind() == io::ErrorKind::NotFound => Ok(false),

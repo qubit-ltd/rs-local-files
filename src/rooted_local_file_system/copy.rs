@@ -9,6 +9,28 @@
 // Rooted copy operations.
 // qubit-style: allow source-test-pair
 
+use super::LocalCopyFailure;
+use super::LocalCopyMethod;
+use super::LocalCopyOptions;
+use super::LocalCopyOutcome;
+use super::LocalCopyResult;
+use super::LocalCopyStats;
+use super::LocalFileError;
+use super::LocalFileErrorKind;
+use super::LocalFileOperation;
+use super::LocalSymlinkPolicy;
+use super::Path;
+use super::RootedLocalFileSystem;
+use super::copy_failure_published;
+use super::copy_failure_unchanged;
+use super::ensure_required_directory_durability;
+use super::io;
+use super::published_durability;
+use super::resolve_rooted_path;
+use super::rooted_destination_is_directory;
+use super::rooted_io_error;
+use super::sync_rooted_copy_parent_chain;
+
 impl RootedLocalFileSystem {
     /// Copies one rooted regular file or directory tree.
     ///
@@ -215,5 +237,4 @@ impl RootedLocalFileSystem {
             options.preserve_metadata(),
         ))
     }
-
 }

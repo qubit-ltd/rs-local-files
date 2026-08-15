@@ -9,8 +9,21 @@
 // Rooted support operations.
 // qubit-style: allow source-test-pair
 
+use super::File;
+use super::LocalFileError;
+use super::LocalFileErrorKind;
+use super::LocalFileOperation;
+use super::LocalResult;
+use super::LocalSymlinkPolicy;
+use super::Path;
+use super::PathBuf;
+use super::fs;
+use super::io;
+use super::rooted_io_error;
+use super::rooted_path;
+
 /// Validates that the requested rooted listing start exists as a directory.
-fn validate_rooted_list_start(
+pub(crate) fn validate_rooted_list_start(
     root: &crate::rooted::Root,
     path: &Path,
     symlink_policy: LocalSymlinkPolicy,
@@ -49,7 +62,7 @@ fn validate_rooted_list_start(
 }
 
 /// Opens a rooted path or its nearest existing ancestor for probing.
-fn probe_rooted_file(
+pub(crate) fn probe_rooted_file(
     root: &crate::rooted::Root,
     path: &Path,
     symlink_policy: LocalSymlinkPolicy,
@@ -175,7 +188,7 @@ pub(crate) fn resolve_rooted_path(
 }
 
 /// Synchronizes ancestors that may have gained newly created directories.
-fn sync_rooted_copy_parent_chain(
+pub(crate) fn sync_rooted_copy_parent_chain(
     root: &crate::rooted::Root,
     target: &crate::local::LocalRelativePath,
 ) -> io::Result<()> {
