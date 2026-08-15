@@ -28,10 +28,9 @@ fn bench_path_codec(c: &mut Criterion) {
     let native = std::ffi::OsStr::new("manifest%2Fready");
     c.bench_function("path_codec", |b| {
         b.iter(|| {
-            let canonical =
-                LocalPathCodec::to_canonical_text(black_box(native))
-                    .expect("benchmark component should encode");
-            let restored = LocalPathCodec::from_canonical_text(&canonical)
+            let canonical = LocalPathCodec::encode_component(black_box(native))
+                .expect("benchmark component should encode");
+            let restored = LocalPathCodec::decode_component(&canonical)
                 .expect("benchmark component should decode");
             black_box(restored);
         });
@@ -39,9 +38,9 @@ fn bench_path_codec(c: &mut Criterion) {
     let plain = std::ffi::OsStr::new("ordinary-unicode-文档");
     c.bench_function("path_codec_plain", |b| {
         b.iter(|| {
-            let canonical = LocalPathCodec::to_canonical_text(black_box(plain))
+            let canonical = LocalPathCodec::encode_component(black_box(plain))
                 .expect("plain benchmark component should encode");
-            let restored = LocalPathCodec::from_canonical_text(&canonical)
+            let restored = LocalPathCodec::decode_component(&canonical)
                 .expect("plain benchmark component should decode");
             black_box(restored);
         });

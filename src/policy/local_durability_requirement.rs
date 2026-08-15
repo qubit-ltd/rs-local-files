@@ -6,19 +6,17 @@
 //    Licensed under the Apache License, Version 2.0.
 // =============================================================================
 // qubit-style: allow source-test-pair
-// Covered through operation option integration tests.
+// Covered through operation policy integration tests.
 
-/// Required atomicity for a namespace publication operation.
+/// Required storage durability for a completed operation.
 #[derive(Clone, Copy, Debug, Default, Eq, Hash, PartialEq)]
 #[must_use]
-pub enum LocalAtomicityRequirement {
-    /// Success must be atomic and unsupported guarantees fail before side
-    /// effects.
+pub enum LocalDurabilityRequirement {
+    /// File data and relevant parent namespace updates must be synchronized.
     Required,
-    /// Prefer an atomic method but permit a reported non-atomic result.
-    #[default]
+    /// Prefer synchronization but permit an explicitly reported downgrade.
     Preferred,
-    /// Do not require atomicity, although an implementation may still provide
-    /// it.
+    /// Do not require explicit synchronization.
+    #[default]
     NotRequired,
 }

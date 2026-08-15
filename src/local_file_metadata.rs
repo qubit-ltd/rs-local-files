@@ -12,6 +12,7 @@ use std::fs::Metadata;
 use std::time::SystemTime;
 
 use crate::LocalFileKind;
+use crate::LocalFilePermissions;
 
 /// Normalized metadata for a native filesystem entry.
 #[derive(Clone, Debug)]
@@ -27,6 +28,8 @@ pub struct LocalFileMetadata {
     modified_at: Option<SystemTime>,
     /// Creation time when exposed by the platform.
     created_at: Option<SystemTime>,
+    /// Read-only and platform-specific mode observations.
+    permissions: LocalFilePermissions,
 }
 
 impl LocalFileMetadata {
@@ -52,6 +55,7 @@ impl LocalFileMetadata {
             accessed_at,
             modified_at,
             created_at,
+            permissions: LocalFilePermissions::new(false, None),
         }
     }
 
@@ -64,12 +68,14 @@ impl LocalFileMetadata {
     pub(crate) fn from_native(metadata: &Metadata) -> Self {
         let file_type = metadata.file_type();
         let kind = local_file_kind(file_type);
+        let permissions = local_file_permissions(metadata);
         Self {
             kind,
             len: metadata.len(),
             accessed_at: metadata.accessed().ok(),
             modified_at: metadata.modified().ok(),
             created_at: metadata.created().ok(),
+            permissions,
         }
     }
 
@@ -107,6 +113,26 @@ impl LocalFileMetadata {
     pub const fn created_at(&self) -> Option<SystemTime> {
         self.created_at
     }
+
+    /// Returns permissions observed with this metadata value.
+    pub const fn permissions(&self) -> LocalFilePermissions {
+        self.permissions
+    }
+}
+
+#[cfg(unix)]
+fn local_file_permissions(metadata: &Metadata) -> LocalFilePermissions {
+    use std::os::unix::fs::MetadataExt;
+
+    LocalFilePermissions::new(
+        metadata.permissions().readonly(),
+        Some(metadata.mode() & 0o7777),
+    )
+}
+
+#[cfg(not(unix))]
+fn local_file_permissions(metadata: &Metadata) -> LocalFilePermissions {
+    LocalFilePermissions::new(metadata.permissions().readonly(), None)
 }
 
 /// Classifies a native file type without following its final path component.

@@ -7,8 +7,6 @@
 // =============================================================================
 
 use std::ffi::OsStr;
-#[cfg(unix)]
-use std::os::unix::ffi::OsStrExt;
 
 #[cfg(any(unix, windows))]
 use proptest::prelude::Strategy;
@@ -18,39 +16,24 @@ use proptest::prelude::any;
 use proptest::prelude::prop;
 #[cfg(any(unix, windows))]
 use proptest::proptest;
+use qubit_local_files::LocalFileError;
+use qubit_local_files::LocalFileErrorSource;
 use qubit_local_files::LocalPathCodec;
 use qubit_local_files::LocalPathCodecError;
 
-/// Verifies native Unicode is retained while percent signs and controls use
-/// canonical uppercase escaped bytes.
+/// Verifies Unicode is retained while percent and controls use canonical
+/// uppercase escapes.
 #[test]
-fn test_decode_preserves_unicode_and_escapes_percent_and_control_bytes() {
+fn test_encode_component_preserves_unicode_and_escapes_special_bytes() {
     assert_eq!(
-        LocalPathCodec::to_canonical_text(OsStr::new("文档%name\n"))
-            .expect("native component should decode"),
         "文档%25name%0A",
+        LocalPathCodec::encode_component(OsStr::new("文档%name\n"))
+            .expect("native component should encode"),
     );
 }
 
-/// Verifies ordinary Unix canonical text uses borrowed codec results.
-#[cfg(unix)]
-#[test]
-fn test_unix_plain_canonical_text_uses_borrowed_results() {
-    use std::borrow::Cow;
-
-    let text = "ordinary-unicode-文档";
-    assert!(matches!(
-        LocalPathCodec::from_canonical_text(text),
-        Ok(Cow::Borrowed(_)),
-    ));
-    assert!(matches!(
-        LocalPathCodec::to_canonical_text(OsStr::new(text)),
-        Ok(Cow::Borrowed(_)),
-    ));
-}
-
-// Verifies every non-NUL Unix byte sequence round-trips through canonical
-// text without losing native representation.
+// Verifies every non-NUL Unix byte sequence round-trips without losing its
+// native representation.
 #[cfg(unix)]
 proptest! {
     #[test]
@@ -61,19 +44,20 @@ proptest! {
         ),
     ) {
         use std::ffi::OsString;
+        use std::os::unix::ffi::OsStrExt;
         use std::os::unix::ffi::OsStringExt;
 
         let native = OsString::from_vec(bytes.clone());
-        let canonical = LocalPathCodec::to_canonical_text(&native)
-            .expect("non-NUL native bytes should decode");
-        let encoded = LocalPathCodec::from_canonical_text(&canonical)
-            .expect("canonical text should encode");
-        assert_eq!(encoded.as_bytes(), bytes);
+        let canonical = LocalPathCodec::encode_component(&native)
+            .expect("non-NUL native bytes should encode");
+        let decoded = LocalPathCodec::decode_component(&canonical)
+            .expect("canonical text should decode");
+        assert_eq!(decoded.as_bytes(), bytes);
     }
 }
 
-// Verifies every non-NUL Windows UTF-16 sequence round-trips through
-// canonical text without losing unpaired surrogates.
+// Verifies every non-NUL Windows UTF-16 sequence round-trips without losing
+// unpaired surrogates.
 #[cfg(windows)]
 proptest! {
     #[test]
@@ -88,56 +72,49 @@ proptest! {
         use std::os::windows::ffi::OsStringExt;
 
         let native = OsString::from_wide(&units);
-        let canonical = LocalPathCodec::to_canonical_text(&native)
-            .expect("non-NUL native code units should decode");
-        let encoded = LocalPathCodec::from_canonical_text(&canonical)
-            .expect("canonical text should encode");
-        assert_eq!(encoded.encode_wide().collect::<Vec<_>>(), units);
+        let canonical = LocalPathCodec::encode_component(&native)
+            .expect("non-NUL native code units should encode");
+        let decoded = LocalPathCodec::decode_component(&canonical)
+            .expect("canonical text should decode");
+        assert_eq!(decoded.encode_wide().collect::<Vec<_>>(), units);
     }
 }
 
-/// Verifies aliases for literal text and lowercase escape digits are rejected.
+/// Verifies aliases for literal text and lowercase escapes are rejected.
 #[test]
-fn test_encode_rejects_non_canonical_escape_aliases() {
-    assert!(matches!(
-        LocalPathCodec::from_canonical_text("a%2fb"),
-        Err(LocalPathCodecError::NonCanonicalText),
-    ));
-    assert!(matches!(
-        LocalPathCodec::from_canonical_text("a%2Fb"),
-        Err(LocalPathCodecError::NonCanonicalText),
-    ));
-    assert!(matches!(
-        LocalPathCodec::from_canonical_text("a%41b"),
-        Err(LocalPathCodecError::NonCanonicalText),
-    ));
+fn test_decode_component_rejects_non_canonical_escape_aliases() {
+    for component in ["a%2fb", "a%2Fb", "a%41b"] {
+        assert_codec_error(
+            LocalPathCodec::decode_component(component)
+                .expect_err("escape alias must be rejected"),
+            LocalPathCodecError::NonCanonicalText,
+        );
+    }
 }
 
-/// Verifies incomplete escape sequences identify the percent byte offset.
+/// Verifies malformed escapes and native NUL retain their typed diagnostics.
 #[test]
-fn test_encode_rejects_malformed_escape() {
-    assert!(matches!(
-        LocalPathCodec::from_canonical_text("a%4"),
-        Err(LocalPathCodecError::InvalidEscape { offset: 1 }),
-    ));
-}
-
-/// Verifies invalid hexadecimal escapes and native NUL bytes retain their
-/// distinct canonical-path diagnostics.
-#[test]
-fn test_path_codec_rejects_invalid_hex_and_native_nul() {
-    assert!(matches!(
-        LocalPathCodec::from_canonical_text("a%G0"),
-        Err(LocalPathCodecError::InvalidEscape { offset: 1 }),
-    ));
-    assert!(matches!(
-        LocalPathCodec::from_canonical_text("a%00"),
-        Err(LocalPathCodecError::NativeNul),
-    ));
-    assert!(matches!(
-        LocalPathCodec::to_canonical_text(OsStr::new("a\0")),
-        Err(LocalPathCodecError::NativeNul),
-    ));
+fn test_path_codec_rejects_malformed_escape_and_native_nul() {
+    assert_codec_error(
+        LocalPathCodec::decode_component("a%4")
+            .expect_err("incomplete escape must be rejected"),
+        LocalPathCodecError::InvalidEscape { offset: 1 },
+    );
+    assert_codec_error(
+        LocalPathCodec::decode_component("a%G0")
+            .expect_err("invalid hexadecimal escape must be rejected"),
+        LocalPathCodecError::InvalidEscape { offset: 1 },
+    );
+    assert_codec_error(
+        LocalPathCodec::decode_component("a%00")
+            .expect_err("native NUL must be rejected"),
+        LocalPathCodecError::NativeNul,
+    );
+    assert_codec_error(
+        LocalPathCodec::encode_component(OsStr::new("a\0"))
+            .expect_err("native NUL must be rejected"),
+        LocalPathCodecError::NativeNul,
+    );
 }
 
 /// Verifies Unix non-UTF-8 native bytes round-trip through canonical text.
@@ -149,12 +126,12 @@ fn test_unix_non_utf8_native_bytes_round_trip() {
     use std::os::unix::ffi::OsStringExt;
 
     let native = OsString::from_vec(vec![0x66, 0x80, 0x25]);
-    let decoded = LocalPathCodec::to_canonical_text(&native)
-        .expect("non-UTF-8 native component should decode");
-    assert_eq!(decoded, "f%80%25");
-    let encoded = LocalPathCodec::from_canonical_text(&decoded)
-        .expect("canonical native component should encode");
-    assert_eq!(encoded.as_bytes(), [0x66, 0x80, 0x25]);
+    let canonical = LocalPathCodec::encode_component(&native)
+        .expect("non-UTF-8 native component should encode");
+    assert_eq!(canonical, "f%80%25");
+    let decoded = LocalPathCodec::decode_component(&canonical)
+        .expect("canonical native component should decode");
+    assert_eq!(decoded.as_bytes(), [0x66, 0x80, 0x25]);
 }
 
 /// Verifies Windows unpaired surrogate code units round-trip through canonical
@@ -167,12 +144,29 @@ fn test_windows_unpaired_surrogate_round_trip() {
     use std::os::windows::ffi::OsStringExt;
 
     let native = OsString::from_wide(&[0x0066, 0xD800, 0x0025]);
-    let decoded = LocalPathCodec::to_canonical_text(&native)
-        .expect("unpaired surrogate native component should decode");
-    let encoded = LocalPathCodec::from_canonical_text(&decoded)
-        .expect("canonical native component should encode");
+    let canonical = LocalPathCodec::encode_component(&native)
+        .expect("unpaired surrogate native component should encode");
+    let decoded = LocalPathCodec::decode_component(&canonical)
+        .expect("canonical native component should decode");
     assert_eq!(
-        encoded.encode_wide().collect::<Vec<_>>(),
+        decoded.encode_wide().collect::<Vec<_>>(),
         [0x0066, 0xD800, 0x0025]
     );
+}
+
+/// Asserts that a structured path error retains one expected codec failure.
+///
+/// # Parameters
+///
+/// - `error`: Structured public error returned by the codec.
+/// - `expected`: Expected typed codec source.
+///
+/// # Panics
+///
+/// Panics when the typed source is absent or differs from `expected`.
+fn assert_codec_error(error: LocalFileError, expected: LocalPathCodecError) {
+    assert!(matches!(
+        error.typed_source(),
+        Some(LocalFileErrorSource::PathCodec(actual)) if *actual == expected,
+    ));
 }

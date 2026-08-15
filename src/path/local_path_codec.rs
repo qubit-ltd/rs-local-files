@@ -7,73 +7,89 @@
 // =============================================================================
 //! Canonical escaped-byte conversion for native path components.
 
-use std::borrow::Cow;
 use std::ffi::OsStr;
+use std::ffi::OsString;
 
+use crate::LocalFileError;
+use crate::LocalFileOperation;
 use crate::LocalPathCodecError;
+use crate::LocalResult;
 
 /// Reversible canonical conversion for one native path component.
-pub struct LocalPathCodec {
-    /// Prevents construction of this stateless codec type.
-    _private: (),
-}
+pub struct LocalPathCodec;
 
 impl LocalPathCodec {
-    /// Converts canonical escaped-byte text to one native path component.
-    ///
-    /// # Parameters
-    ///
-    /// - `text`: Canonical text to decode.
-    ///
-    /// # Returns
-    ///
-    /// The owned native component, or `LocalPathCodecError` when an escape is
-    /// malformed, the text is non-canonical, or it cannot represent a native
-    /// component on the current platform.
-    pub fn from_canonical_text<'a>(
-        text: &'a str,
-    ) -> Result<Cow<'a, OsStr>, LocalPathCodecError> {
-        #[cfg(unix)]
-        if is_plain_canonical_text(text) {
-            return Ok(Cow::Borrowed(OsStr::new(text)));
-        }
-        let native = platform::decode_canonical_text(text)?;
-        let canonical = platform::encode_native_text(&native)
-            .expect("decoded canonical text cannot contain a native NUL byte");
-        if canonical != text {
-            return Err(LocalPathCodecError::NonCanonicalText);
-        }
-        Ok(Cow::Owned(native))
-    }
-
     /// Converts one native path component to canonical escaped-byte text.
     ///
     /// # Parameters
     ///
-    /// - `native`: Native component to encode.
+    /// - `component`: Native component to encode.
     ///
     /// # Returns
     ///
     /// Canonical text that preserves all representable native bytes or code
-    /// units, or `LocalPathCodecError::NativeNul` when `native` contains NUL.
-    #[inline(always)]
-    pub fn to_canonical_text<'a>(
-        native: &'a OsStr,
-    ) -> Result<Cow<'a, str>, LocalPathCodecError> {
-        platform::encode_native_text(native)
+    /// units.
+    ///
+    /// # Errors
+    ///
+    /// Returns a structured path error when the component contains native NUL
+    /// or the current platform has no reversible native encoding.
+    pub fn encode_component(component: &OsStr) -> LocalResult<String> {
+        platform_codec::encode_native_text(component)
+            .map(|encoded| encoded.into_owned())
+            .map_err(path_codec_error)
+    }
+
+    /// Converts canonical escaped-byte text to one native path component.
+    ///
+    /// # Parameters
+    ///
+    /// - `component`: Canonical text to decode.
+    ///
+    /// # Returns
+    ///
+    /// The owned native component.
+    ///
+    /// # Errors
+    ///
+    /// Returns a structured path error when an escape is malformed, the text
+    /// is non-canonical, contains native NUL, or cannot represent a native
+    /// component on the current platform.
+    pub fn decode_component(component: &str) -> LocalResult<OsString> {
+        let native = platform_codec::decode_canonical_text(component)
+            .map_err(path_codec_error)?;
+        let canonical = platform_codec::encode_native_text(&native)
+            .map_err(path_codec_error)?;
+        if canonical != component {
+            return Err(path_codec_error(
+                LocalPathCodecError::NonCanonicalText,
+            ));
+        }
+        Ok(native)
     }
 }
 
-#[cfg(unix)]
+/// Converts a codec error to the public structured path error.
+///
+/// # Parameters
+///
+/// - `error`: Native path codec failure.
+///
+/// # Returns
+///
+/// A compose-path error retaining the codec failure as its typed source.
+#[must_use]
 #[inline]
-fn is_plain_canonical_text(text: &str) -> bool {
-    !text.as_bytes().contains(&0)
-        && !text.contains('%')
-        && !text.chars().any(char::is_control)
+fn path_codec_error(error: LocalPathCodecError) -> LocalFileError {
+    LocalFileError::from_path_codec(
+        LocalFileOperation::ComposePath,
+        None,
+        error,
+    )
 }
 
 /// Platform-specific native path representation operations.
-mod platform {
+mod platform_codec {
     use crate::LocalPathCodecError;
 
     /// Decodes uppercase percent escapes and literal UTF-8 into raw bytes.

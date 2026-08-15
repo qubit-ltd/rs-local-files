@@ -21,6 +21,8 @@ pub(super) use std::io;
 pub(super) use std::path::Path;
 pub(super) use std::path::PathBuf;
 
+use path_resolution::bind_host_path;
+use path_resolution::bind_host_paths;
 pub(crate) use path_resolution::resolve_host_path;
 pub(super) use rename::destination_is_directory;
 pub(super) use rename::sync_parent_directory;
@@ -43,7 +45,6 @@ pub(super) use crate::LocalFileErrorKind;
 pub(super) use crate::LocalFileOperation;
 pub(super) use crate::LocalFileSystemProtocols;
 pub(super) use crate::LocalMetadataPreservePolicy;
-pub(super) use crate::LocalPaths;
 pub(super) use crate::LocalRenameFailure;
 pub(super) use crate::LocalRenameFailureState;
 pub(super) use crate::LocalRenameOptions;

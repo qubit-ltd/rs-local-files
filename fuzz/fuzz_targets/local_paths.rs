@@ -13,7 +13,6 @@ use std::path::Path;
 use std::path::PathBuf;
 
 use libfuzzer_sys::fuzz_target;
-use qubit_local_files::LocalFileSystemScope;
 use qubit_local_files::LocalPaths;
 
 const MAX_FUZZ_INPUT_LEN: usize = 4096;
@@ -24,28 +23,22 @@ fuzz_target!(|data: &[u8]| {
     let text = String::from_utf8_lossy(data);
     let components = text.split('\0').take(MAX_COMPONENTS).collect::<Vec<_>>();
 
-    let Ok(native) = LocalPaths::from_canonical_components(
-        LocalFileSystemScope::Rooted,
-        components.iter().copied(),
-    ) else {
+    let rooted = LocalPaths::rooted();
+    let Ok(native) =
+        rooted.from_canonical_components(components.iter().copied())
+    else {
         return;
     };
-    let encoded = LocalPaths::to_canonical_components(
-        LocalFileSystemScope::Rooted,
-        Path::new(&native),
-    )
-    .expect("validated rooted paths must encode");
-    let restored = LocalPaths::from_canonical_components(
-        LocalFileSystemScope::Rooted,
-        encoded.iter().map(String::as_str),
-    )
-    .expect("encoded rooted paths must decode");
+    let encoded = rooted
+        .to_canonical_components(Path::new(&native))
+        .expect("validated rooted paths must encode");
+    let restored = rooted
+        .from_canonical_components(encoded.iter().map(String::as_str))
+        .expect("encoded rooted paths must decode");
     assert_eq!(restored, native);
-    let reencoded = LocalPaths::to_canonical_components(
-        LocalFileSystemScope::Rooted,
-        Path::new(&restored),
-    )
-    .expect("decoded rooted paths must encode again");
+    let reencoded = rooted
+        .to_canonical_components(Path::new(&restored))
+        .expect("decoded rooted paths must encode again");
     assert_eq!(reencoded, encoded);
 
     #[cfg(unix)]
@@ -70,17 +63,13 @@ fn fuzz_host_unix(data: &[u8]) {
         }
         native.push(OsString::from_vec(component.to_vec()));
     }
-    let Ok(encoded) = LocalPaths::to_canonical_components(
-        LocalFileSystemScope::Host,
-        &native,
-    ) else {
+    let host = LocalPaths::host();
+    let Ok(encoded) = host.to_canonical_components(&native) else {
         return;
     };
-    let restored = LocalPaths::from_canonical_components(
-        LocalFileSystemScope::Host,
-        encoded.iter().map(String::as_str),
-    )
-    .expect("encoded Unix host paths must decode");
+    let restored = host
+        .from_canonical_components(encoded.iter().map(String::as_str))
+        .expect("encoded Unix host paths must decode");
     assert_eq!(restored, native);
 }
 
@@ -100,16 +89,12 @@ fn fuzz_host_windows(data: &[u8]) {
         }
         native.push(OsString::from_wide(&[units]));
     }
-    let Ok(encoded) = LocalPaths::to_canonical_components(
-        LocalFileSystemScope::Host,
-        &native,
-    ) else {
+    let host = LocalPaths::host();
+    let Ok(encoded) = host.to_canonical_components(&native) else {
         return;
     };
-    let restored = LocalPaths::from_canonical_components(
-        LocalFileSystemScope::Host,
-        encoded.iter().map(String::as_str),
-    )
-    .expect("encoded Windows host paths must decode");
+    let restored = host
+        .from_canonical_components(encoded.iter().map(String::as_str))
+        .expect("encoded Windows host paths must decode");
     assert_eq!(restored, native);
 }

@@ -32,6 +32,7 @@ doctest = true
 
 [features]
 default = []
+test-support = []
 internal-test-support = []
 
 [dependencies]

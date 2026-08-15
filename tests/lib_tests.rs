@@ -31,16 +31,16 @@ mod temp_parent_tests;
 /// Verifies crate-root exports for the unified public API.
 #[test]
 fn test_crate_root_exports_unified_api_types() {
-    use std::borrow::Cow;
     use std::ffi::OsStr;
+    use std::ffi::OsString;
 
     use qubit_local_files::LocalCopyFailureState;
     use qubit_local_files::LocalPathCodec;
-    use qubit_local_files::LocalPathCodecError;
     use qubit_local_files::LocalRenameFailureState;
+    use qubit_local_files::LocalResult;
 
-    let _: for<'a> fn(&'a str) -> Result<Cow<'a, OsStr>, LocalPathCodecError> =
-        LocalPathCodec::from_canonical_text;
+    let _: fn(&OsStr) -> LocalResult<String> = LocalPathCodec::encode_component;
+    let _: fn(&str) -> LocalResult<OsString> = LocalPathCodec::decode_component;
     let _: Option<LocalCopyFailureState> = None;
     let _: Option<LocalRenameFailureState> = None;
 }

@@ -10,14 +10,14 @@
 use std::fs;
 #[cfg(unix)]
 use std::io::Read;
-#[cfg(unix)]
+#[cfg(any(unix, windows))]
 use std::path::Path;
 
-#[cfg(unix)]
+#[cfg(any(unix, windows))]
 use qubit_local_files::LocalFileErrorKind;
 #[cfg(unix)]
 use qubit_local_files::LocalFileKind;
-#[cfg(unix)]
+#[cfg(any(unix, windows))]
 use qubit_local_files::LocalFileSystem;
 #[cfg(unix)]
 use qubit_local_files::LocalReadOptions;
@@ -106,4 +106,15 @@ fn test_host_path_resolution_preserves_final_link_for_metadata() {
         .metadata(Path::new(&link))
         .expect("metadata should inspect the final link entry");
     assert_eq!(LocalFileKind::Symlink, metadata.kind());
+}
+
+/// Verifies Host binding rejects Windows drive-relative authority prefixes.
+#[cfg(windows)]
+#[test]
+fn test_host_path_resolution_rejects_drive_relative_prefix() {
+    let error = LocalFileSystem::host()
+        .metadata(Path::new(r"C:escape"))
+        .expect_err("drive-relative prefixes must not escape Host binding");
+
+    assert_eq!(LocalFileErrorKind::InvalidPath, error.kind());
 }

@@ -27,10 +27,7 @@ use qubit_local_files::LocalFileNames;
 use qubit_local_files::LocalFileOperation;
 use qubit_local_files::LocalFileSystem;
 use qubit_local_files::LocalFileSystemProtocols;
-#[cfg(not(windows))]
-use qubit_local_files::LocalFileSystemScope;
 use qubit_local_files::LocalPathCodecError;
-#[cfg(not(windows))]
 use qubit_local_files::LocalPaths;
 use qubit_local_files::LocalRenameFailureState;
 use qubit_local_files::LocalRenameOptions;
@@ -227,32 +224,30 @@ fn test_path_codec_error_formats_each_public_variant() {
 #[test]
 fn test_native_file_name_helpers_cover_component_and_validation_paths() {
     let value = Path::new("archive.tar.gz");
+    let names = LocalFileNames::portable();
 
     assert_eq!(Some(OsStr::new("archive.tar.gz")), value.file_name());
     assert_eq!(Some(OsStr::new("archive.tar")), value.file_stem());
     assert_eq!(Some(OsStr::new("archive")), value.file_prefix());
     assert_eq!(Some(OsStr::new("gz")), value.extension());
+    assert!(names.validate(OsStr::new("safe-name.txt")).is_ok());
+    assert!(names.validate(OsStr::new("bad/name")).is_err());
     assert!(
-        LocalFileNames::validate_portable(OsStr::new("safe-name.txt")).is_ok()
-    );
-    assert!(LocalFileNames::validate_portable(OsStr::new("bad/name")).is_err());
-    assert!(
-        LocalFileNames::random_name()
+        names
+            .random_name()
             .expect("a random native name should be generated")
             .to_string_lossy()
             .starts_with("qubit-local-files-")
     );
-    assert!(
-        LocalFileNames::random_name_with(Some("invalid/name"), None)
-            .expect_err(
-                "path separators must be rejected in a random-name prefix"
-            )
-            .to_string()
-            .contains("GenerateName")
-    );
+    let error = names
+        .random_name_with(Some(OsStr::new("invalid/name")), None)
+        .expect_err("path separators must be rejected in a random-name prefix");
+    assert_eq!(LocalFileOperation::ValidateName, error.operation());
     for invalid in ["bad\0name", "bad\\name", "../name"] {
         assert!(
-            LocalFileNames::random_name_with(Some(invalid), None).is_err(),
+            names
+                .random_name_with(Some(OsStr::new(invalid)), None)
+                .is_err(),
             "expected random-name fragment to be rejected: {invalid:?}",
         );
     }
@@ -265,49 +260,20 @@ fn test_native_file_name_helpers_cover_component_and_validation_paths() {
 fn test_native_file_name_validation_rejects_non_utf8_component() {
     use std::os::unix::ffi::OsStrExt;
 
-    let error = LocalFileNames::validate_portable(OsStr::from_bytes(b"\xff"))
+    let error = LocalFileNames::portable()
+        .validate(OsStr::from_bytes(b"\xff"))
         .expect_err("non-UTF-8 names cannot satisfy portable-text rules");
     assert_eq!(LocalFileErrorKind::InvalidPath, error.kind());
     assert_eq!(LocalFileOperation::ValidateName, error.operation());
 }
 
-/// Verifies path composition and binding preserve lexical authority on both
-/// accepted and rejected public inputs.
-#[cfg(not(windows))]
+/// Verifies rooted path objects retain the authority-root representation.
 #[test]
-fn test_local_paths_cover_public_composition_and_binding_cases() {
-    let base = Path::new("/workspace");
-
-    assert_eq!(
-        Path::new("/workspace/nested/file"),
-        LocalPaths::compose_descendant(base, Path::new("nested/file"))
-            .expect("normal descendant should compose"),
-    );
+fn test_local_paths_cover_rooted_authority_root() {
     assert!(
-        LocalPaths::compose_descendant(base, Path::new("../escape")).is_err()
-    );
-    assert!(LocalPaths::compose_descendant(base, Path::new("")).is_err());
-    assert!(
-        !LocalPaths::is_lexically_within(
-            Path::new("/workspace-other/file"),
-            base,
-        )
-        .expect("separate normalized absolute paths should compare"),
-    );
-    assert!(
-        LocalPaths::is_lexically_within(Path::new("relative"), base).is_err()
-    );
-    assert_eq!(
-        base,
-        LocalPaths::bind_host_path(base)
-            .expect("absolute host path should remain unchanged"),
-    );
-    assert!(
-        LocalPaths::to_canonical_components(
-            LocalFileSystemScope::Rooted,
-            Path::new(""),
-        )
-        .is_ok()
+        LocalPaths::rooted()
+            .to_canonical_components(Path::new(""))
+            .is_ok()
     );
 }
 

@@ -19,11 +19,11 @@ use super::LocalCopyStats;
 use super::LocalFileError;
 use super::LocalFileErrorKind;
 use super::LocalFileOperation;
-use super::LocalPaths;
 use super::LocalResult;
 use super::LocalSymlinkPolicy;
 use super::Path;
 use super::PathBuf;
+use super::bind_host_paths;
 use super::copy_failure_published;
 use super::copy_failure_unchanged;
 use super::destination_is_directory;
@@ -100,7 +100,7 @@ impl HostLocalFileSystem {
     ) -> LocalCopyResult {
         let symlink_policy =
             options.symlink_policy_override().unwrap_or(symlink_policy);
-        let [source, target] = LocalPaths::bind_host_paths([source, target])
+        let [source, target] = bind_host_paths([source, target])
             .map_err(copy_failure_unchanged)?;
         let source = resolve_host_path(
             &source,

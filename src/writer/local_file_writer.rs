@@ -99,6 +99,7 @@ impl LocalFileWriter {
     /// Returns `LocalFileCommitError` with a retryable writer only when staged
     /// publication has not started. A `Published` state means the destination
     /// changed before a later durability failure.
+    #[allow(clippy::result_large_err)]
     pub fn commit(mut self) -> Result<LocalWriteOutcome, LocalFileCommitError> {
         if self.state != LocalWriterState::Open
             || self.failure_state == Some(LocalWriteFailureState::Indeterminate)
@@ -281,6 +282,7 @@ impl LocalFileWriter {
     }
 
     /// Commits either staged backend through the shared publication contract.
+    #[allow(clippy::result_large_err)]
     fn commit_staged_backend(
         &mut self,
         backend: LocalFileWriterBackend,
