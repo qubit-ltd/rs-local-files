@@ -278,6 +278,28 @@ fn test_local_temp_directory_resolves_safe_children() {
     );
 }
 
+/// Verifies cleanup is idempotent after a temporary directory has released
+/// both its owned entry and generated sandbox.
+#[test]
+fn test_local_temp_directory_cleanup_is_idempotent_after_release() {
+    let parent = tempdir().expect("temporary parent should be created");
+    let mut temporary = LocalFileSystem::host()
+        .create_temp_directory(
+            &LocalTempDirectoryOptions::new().with_parent(parent.path()),
+        )
+        .expect("temporary directory should be created");
+    let path = temporary.path().to_path_buf();
+
+    temporary
+        .cleanup()
+        .expect("first cleanup should remove the owned directory");
+    temporary
+        .cleanup()
+        .expect("released temporary directory should tolerate later cleanup");
+
+    assert!(!path.exists());
+}
+
 /// Verifies keeping a temporary directory leaves its complete tree intact.
 #[test]
 fn test_local_temp_directory_keep_retains_tree_after_drop() {

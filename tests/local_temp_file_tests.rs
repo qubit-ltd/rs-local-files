@@ -149,6 +149,37 @@ fn test_local_temp_file_closed_handle_reports_broken_pipe() {
     assert_eq!(ErrorKind::BrokenPipe, error.kind());
 }
 
+/// Verifies keeping a temporary file retains its contents after its guard is
+/// consumed and disables cleanup for the generated sandbox.
+#[test]
+fn test_local_temp_file_keep_retains_contents_after_guard_is_consumed() {
+    let parent = tempdir().expect("temporary parent should be created");
+    let path = {
+        let mut temporary = LocalFileSystem::host()
+            .create_temp_file(
+                &LocalTempFileOptions::new().with_parent(parent.path()),
+            )
+            .expect("temporary file should be created");
+        temporary
+            .write_all(b"payload")
+            .expect("temporary file should accept bytes");
+        temporary.keep()
+    };
+
+    assert_eq!(
+        b"payload",
+        fs::read(&path)
+            .expect("kept temporary file should remain readable")
+            .as_slice()
+    );
+    fs::remove_file(&path).expect("kept temporary file should be removable");
+    fs::remove_dir(
+        path.parent()
+            .expect("kept temporary file should retain its sandbox parent"),
+    )
+    .expect("empty temporary sandbox should be removable");
+}
+
 /// Verifies a temporary file is isolated in a private cleanup sandbox.
 #[cfg(not(windows))]
 #[test]
