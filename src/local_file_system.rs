@@ -375,6 +375,11 @@ impl LocalFileSystem {
     /// Returns `LocalFileError` only when the path cannot be interpreted in
     /// this filesystem authority. Probe failures yield `Unknown` dimensions.
     pub fn limits_at(&self, path: &Path) -> LocalResult<LocalFileSystemLimits> {
+        if matches!(self.namespace, LocalNamespace::Rooted(_))
+            && path.as_os_str().is_empty()
+        {
+            return Err(rooted_probe_requires_descendant(path));
+        }
         if let Some(authority) = self.authority() {
             let resolved = authority.resolve(path)?;
             return authority.filesystem_limits(&resolved);
@@ -399,6 +404,11 @@ impl LocalFileSystem {
     /// Returns `LocalFileError` only when the path cannot be interpreted in
     /// this filesystem authority. Probe failures yield absent observations.
     pub fn space_at(&self, path: &Path) -> LocalResult<LocalFileSystemSpace> {
+        if matches!(self.namespace, LocalNamespace::Rooted(_))
+            && path.as_os_str().is_empty()
+        {
+            return Err(rooted_probe_requires_descendant(path));
+        }
         if let Some(authority) = self.authority() {
             let resolved = authority.resolve(path)?;
             return authority.filesystem_space(&resolved);
@@ -496,6 +506,9 @@ impl LocalFileSystem {
                     error,
                 )
             })?;
+        if let LocalNamespace::Rooted(rooted) = &self.namespace {
+            return rooted.open_reader(path, options, self.symlink_policy);
+        }
         if let Some(authority) = self.authority() {
             let resolved = authority.resolve(path)?;
             let opened = authority.open_reader(&resolved)?;
@@ -726,12 +739,25 @@ impl LocalFileSystem {
     ) -> LocalResult<LocalCreateDirectoryOutcome> {
         if let Some(authority) = self.authority()
             && !options.recursive()
+            && matches!(self.namespace, LocalNamespace::Host)
         {
             let resolved = authority.resolve(path)?;
-            let existed = authority
-                .metadata(&resolved)
-                .map(|metadata| metadata.kind() == LocalFileKind::Directory)
-                .unwrap_or(false);
+            let existed = match authority.metadata(&resolved) {
+                Ok(metadata) if metadata.kind() == LocalFileKind::Directory => {
+                    true
+                }
+                Ok(_) => {
+                    return Err(LocalFileError::new(
+                        LocalFileErrorKind::TypeConflict,
+                        LocalFileOperation::CreateDirectory,
+                    )
+                    .with_path(path.to_path_buf()));
+                }
+                Err(error) if error.kind() == LocalFileErrorKind::NotFound => {
+                    false
+                }
+                Err(error) => return Err(error),
+            };
             if options.exists_ok() {
                 authority.create_directory(&resolved)?;
             } else {
@@ -880,6 +906,14 @@ impl LocalFileSystem {
         destination: &Path,
         options: &LocalRenameOptions,
     ) -> LocalRenameResult {
+        if let LocalNamespace::Rooted(rooted) = &self.namespace {
+            return rooted.rename(
+                source,
+                destination,
+                options,
+                self.symlink_policy,
+            );
+        }
         if let Some(authority) = self.authority() {
             let source = authority
                 .resolve(source)
@@ -987,6 +1021,18 @@ impl LocalFileSystem {
             }
         }
     }
+}
+
+/// Creates the structured error returned when a rooted capability probe does
+/// not identify a descendant entry.
+#[must_use]
+fn rooted_probe_requires_descendant(path: &Path) -> LocalFileError {
+    LocalFileError::new(
+        LocalFileErrorKind::InvalidPath,
+        LocalFileOperation::Capabilities,
+    )
+    .with_reason("rooted capability probes require a non-empty descendant path")
+    .with_path(path.to_path_buf())
 }
 
 /// Runs one migrated Host probe through a construction-time cwd authority.
