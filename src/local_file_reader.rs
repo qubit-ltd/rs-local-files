@@ -15,11 +15,19 @@ use std::io::Read;
 use std::io::Seek;
 use std::io::SeekFrom;
 
+use crate::platform::OpenedFile;
+
 /// Owned synchronous reader for an opened native regular file.
 #[derive(Debug)]
 pub struct LocalFileReader {
-    /// Native file handle.
-    file: File,
+    /// Native file handle and, for authority-opened readers, its observations.
+    file: LocalFileReaderInner,
+}
+
+#[derive(Debug)]
+enum LocalFileReaderInner {
+    Plain(File),
+    Opened(OpenedFile),
 }
 
 impl LocalFileReader {
@@ -29,20 +37,44 @@ impl LocalFileReader {
     ///
     /// - `file`: Open native file handle.
     pub(crate) const fn new(file: File) -> Self {
-        Self { file }
+        Self {
+            file: LocalFileReaderInner::Plain(file),
+        }
+    }
+
+    /// Wraps a descriptor together with observations captured from that same
+    /// descriptor.
+    pub(crate) fn from_opened(file: OpenedFile) -> Self {
+        Self {
+            file: LocalFileReaderInner::Opened(file),
+        }
     }
 
     /// Returns the underlying native file handle.
     #[must_use]
     pub const fn as_file(&self) -> &File {
-        &self.file
+        match &self.file {
+            LocalFileReaderInner::Plain(file) => file,
+            LocalFileReaderInner::Opened(file) => file.file(),
+        }
+    }
+
+    /// Returns metadata captured from an authority-opened descriptor.
+    pub fn metadata(&self) -> Option<&crate::LocalFileMetadata> {
+        match &self.file {
+            LocalFileReaderInner::Plain(_) => None,
+            LocalFileReaderInner::Opened(file) => Some(file.metadata()),
+        }
     }
 }
 
 impl Read for LocalFileReader {
     /// Reads bytes from the native file at its current offset.
     fn read(&mut self, buffer: &mut [u8]) -> io::Result<usize> {
-        self.file.read(buffer)
+        match &mut self.file {
+            LocalFileReaderInner::Plain(file) => file.read(buffer),
+            LocalFileReaderInner::Opened(file) => file.read(buffer),
+        }
     }
 
     /// Reads bytes into multiple buffers from the current offset.
@@ -61,13 +93,13 @@ impl Read for LocalFileReader {
                     ) {
                         Err(io::Error::other("injected vectored read failure"))
                     } else {
-                        self.file.read(buffer)
+                        self.read(buffer)
                     }
                 } else {
-                    self.file.read(buffer)
+                    self.read(buffer)
                 };
                 #[cfg(not(feature = "internal-test-support"))]
-                let result = self.file.read(buffer);
+                let result = self.read(buffer);
                 let count = match result {
                     Ok(count) => count,
                     Err(_) if total > 0 => return Ok(total),
@@ -81,13 +113,18 @@ impl Read for LocalFileReader {
             Ok(total)
         }
         #[cfg(all(not(windows), not(feature = "internal-test-support")))]
-        self.file.read_vectored(buffers)
+        self.as_file().read_vectored(buffers)
     }
 }
 
 impl Seek for LocalFileReader {
     /// Moves the native file cursor and returns its new byte offset.
     fn seek(&mut self, position: SeekFrom) -> io::Result<u64> {
-        self.file.seek(position)
+        match &mut self.file {
+            LocalFileReaderInner::Plain(file) => file.seek(position),
+            LocalFileReaderInner::Opened(file) => {
+                file.file_mut().seek(position)
+            }
+        }
     }
 }
