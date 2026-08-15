@@ -238,6 +238,196 @@ fn test_rooted_local_file_system_exposes_opened_anchor_and_capabilities() {
     );
 }
 
+/// Verifies rooted copying preserves a final symbolic-link entry instead of
+/// resolving it through the diagnostic root path.
+#[cfg(unix)]
+#[test]
+fn test_rooted_copy_preserves_final_symbolic_link_entry() {
+    use std::os::unix::fs::symlink;
+
+    let directory = tempdir().expect("temporary root should be created");
+    fs::write(directory.path().join("payload"), b"payload")
+        .expect("payload should be written");
+    symlink("payload", directory.path().join("source-link"))
+        .expect("source symbolic link should be created");
+    let rooted = LocalFileSystem::rooted(directory.path())
+        .expect("root authority should open");
+
+    let outcome = rooted
+        .copy(
+            Path::new("source-link"),
+            Path::new("target-link"),
+            &LocalCopyOptions::new(),
+        )
+        .expect("rooted symbolic link should copy");
+
+    assert_eq!(1, outcome.stats().files());
+    assert_eq!(
+        Path::new("payload"),
+        fs::read_link(directory.path().join("target-link"))
+            .expect("copied symbolic link should exist"),
+    );
+}
+
+/// Verifies rooted tree copy replaces an incompatible destination and retains
+/// nested regular files and symbolic-link entries.
+#[cfg(unix)]
+#[test]
+fn test_rooted_tree_copy_replaces_file_destination_and_preserves_nested_entries()
+ {
+    use std::os::unix::fs::symlink;
+
+    let directory = tempdir().expect("temporary root should be created");
+    fs::create_dir_all(directory.path().join("source/nested"))
+        .expect("source tree should be created");
+    fs::write(directory.path().join("source/nested/payload"), b"payload")
+        .expect("nested payload should be written");
+    symlink(
+        "nested/payload",
+        directory.path().join("source/payload-link"),
+    )
+    .expect("nested symbolic link should be created");
+    fs::write(directory.path().join("target"), b"conflicting file")
+        .expect("conflicting target should be written");
+    let rooted = LocalFileSystem::rooted(directory.path())
+        .expect("root authority should open");
+
+    let outcome = rooted
+        .copy(
+            Path::new("source"),
+            Path::new("target"),
+            &LocalCopyOptions::new()
+                .with_tree_source()
+                .with_type_conflict(LocalCopyTypeConflictPolicy::Replace),
+        )
+        .expect("rooted tree should replace the conflicting file");
+
+    assert_eq!(2, outcome.stats().files());
+    assert_eq!(2, outcome.stats().directories());
+    assert_eq!(
+        b"payload",
+        fs::read(directory.path().join("target/nested/payload"))
+            .expect("copied nested payload should be readable")
+            .as_slice(),
+    );
+    assert_eq!(
+        Path::new("nested/payload"),
+        fs::read_link(directory.path().join("target/payload-link"))
+            .expect("copied nested symbolic link should exist"),
+    );
+}
+
+/// Verifies rooted copy rejects unsupported FIFO sources before creating a
+/// destination entry.
+#[cfg(unix)]
+#[test]
+fn test_rooted_copy_rejects_fifo_source() {
+    use std::ffi::CString;
+    use std::os::unix::ffi::OsStrExt;
+
+    let directory = tempdir().expect("temporary root should be created");
+    let fifo = directory.path().join("source-fifo");
+    let native_path = CString::new(fifo.as_os_str().as_bytes())
+        .expect("temporary path should not contain NUL");
+    let result = unsafe { libc::mkfifo(native_path.as_ptr(), 0o600) };
+    assert_eq!(0, result, "FIFO fixture should be created");
+    let rooted = LocalFileSystem::rooted(directory.path())
+        .expect("root authority should open");
+
+    let error = rooted
+        .copy(
+            Path::new("source-fifo"),
+            Path::new("target"),
+            &LocalCopyOptions::new(),
+        )
+        .expect_err("rooted copy must reject FIFO sources");
+
+    assert_eq!(LocalFileErrorKind::Unsupported, error.error().kind());
+    assert!(!directory.path().join("target").exists());
+}
+
+/// Verifies rooted copies replace a final symbolic-link destination as an
+/// entry instead of writing through the link's referent.
+#[cfg(unix)]
+#[test]
+fn test_rooted_copy_replaces_final_symbolic_link_destination_for_regular_file()
+{
+    use std::os::unix::fs::symlink;
+
+    let directory = tempdir().expect("temporary root should be created");
+    fs::write(directory.path().join("source"), b"replacement")
+        .expect("source fixture should be written");
+    fs::write(directory.path().join("referent"), b"preserved")
+        .expect("link referent fixture should be written");
+    symlink("referent", directory.path().join("target"))
+        .expect("target symbolic link should be created");
+    let rooted = LocalFileSystem::rooted(directory.path())
+        .expect("root authority should open");
+
+    let outcome = rooted
+        .copy(
+            Path::new("source"),
+            Path::new("target"),
+            &LocalCopyOptions::new()
+                .with_conflict(LocalCopyConflictPolicy::Overwrite),
+        )
+        .expect("regular file should replace final symbolic-link entry");
+
+    assert_eq!(1, outcome.stats().overwritten());
+    assert!(
+        !fs::symlink_metadata(directory.path().join("target"))
+            .expect("target metadata should exist")
+            .file_type()
+            .is_symlink(),
+    );
+    assert_eq!(
+        b"replacement",
+        fs::read(directory.path().join("target"))
+            .expect("replacement target should read")
+            .as_slice(),
+    );
+    assert_eq!(
+        b"preserved",
+        fs::read(directory.path().join("referent"))
+            .expect("link referent should remain unchanged")
+            .as_slice(),
+    );
+}
+
+/// Verifies rooted create-new writers reject an existing entry before creating
+/// a descriptor-relative staging file.
+#[test]
+fn test_rooted_writer_create_new_rejects_existing_entry_before_staging() {
+    let directory = tempdir().expect("temporary root should be created");
+    fs::write(directory.path().join("payload"), b"existing")
+        .expect("existing rooted payload should be written");
+    let rooted = LocalFileSystem::rooted(directory.path())
+        .expect("root authority should open");
+
+    let error = rooted
+        .open_writer(
+            Path::new("payload"),
+            &LocalWriteOptions::new(LocalWriteMode::CreateNew),
+        )
+        .expect_err(
+            "rooted create-new writer must reject existing destination",
+        );
+
+    assert_eq!(LocalFileErrorKind::AlreadyExists, error.kind());
+    assert_eq!(
+        b"existing",
+        fs::read(directory.path().join("payload"))
+            .expect("existing rooted payload should remain")
+            .as_slice(),
+    );
+    assert_eq!(
+        1,
+        fs::read_dir(directory.path())
+            .expect("rooted directory should read")
+            .count(),
+    );
+}
+
 /// Verifies rooted temporary resources create configured parents, retain their
 /// opened authority while writing, and persist to configured descendants.
 #[test]
