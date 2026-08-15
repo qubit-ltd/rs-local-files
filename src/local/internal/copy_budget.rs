@@ -14,7 +14,7 @@ use std::io::Write;
 use std::time::Duration;
 use std::time::Instant;
 
-use qubit_budget::BudgetError;
+use qubit_budget::InsufficientBudgetError;
 use qubit_budget::ResourceBudget;
 use qubit_budget::ResourcePool;
 
@@ -201,39 +201,19 @@ fn resource_error(error: LocalResourceLimitError) -> io::Error {
 
 /// Converts a machine-sized budget failure without discarding its facts.
 fn usize_budget_error(
-    error: BudgetError<LocalResourceKind, usize>,
+    error: InsufficientBudgetError<LocalResourceKind, usize>,
 ) -> io::Error {
-    match error {
-        BudgetError::Insufficient {
-            resource,
-            limit,
-            remaining,
-            requested,
-        } => resource_error(LocalResourceLimitError::new(
-            resource, limit, remaining, requested,
-        )),
-        BudgetError::LimitExceeded { .. } => {
-            io::Error::other("unexpected point-limit copy budget failure")
-        }
-    }
+    let InsufficientBudgetError { resource, limit, remaining, requested } = error;
+    resource_error(LocalResourceLimitError::new(resource, limit, remaining, requested))
 }
 
 /// Converts a byte budget failure into structured machine-sized facts.
-fn u64_budget_error(error: BudgetError<LocalResourceKind, u64>) -> io::Error {
-    match error {
-        BudgetError::Insufficient {
-            resource,
-            limit,
-            remaining,
-            requested,
-        } => resource_error(LocalResourceLimitError::new(
-            resource,
-            usize::try_from(limit).unwrap_or(usize::MAX),
-            usize::try_from(remaining).unwrap_or(usize::MAX),
-            usize::try_from(requested).unwrap_or(usize::MAX),
-        )),
-        BudgetError::LimitExceeded { .. } => {
-            io::Error::other("unexpected point-limit copy budget failure")
-        }
-    }
+fn u64_budget_error(error: InsufficientBudgetError<LocalResourceKind, u64>) -> io::Error {
+    let InsufficientBudgetError { resource, limit, remaining, requested } = error;
+    resource_error(LocalResourceLimitError::new(
+        resource,
+        usize::try_from(limit).unwrap_or(usize::MAX),
+        usize::try_from(remaining).unwrap_or(usize::MAX),
+        usize::try_from(requested).unwrap_or(usize::MAX),
+    ))
 }
