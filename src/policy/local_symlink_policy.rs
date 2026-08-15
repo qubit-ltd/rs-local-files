@@ -6,7 +6,7 @@
 //    Licensed under the Apache License, Version 2.0.
 // =============================================================================
 // qubit-style: allow source-test-pair
-// Covered by copy and walker integration tests.
+// Covered by authority, copy, and walker integration tests.
 
 /// Policy for symbolic links encountered while resolving a local path.
 #[derive(Clone, Copy, Debug, Default, Eq, Hash, PartialEq)]

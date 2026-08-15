@@ -8,7 +8,7 @@
 // qubit-style: allow source-test-pair
 // Covered by rename integration tests.
 
-use super::LocalDurabilityRequirement;
+use crate::policy::LocalDurabilityRequirement;
 
 /// Options for renaming a native filesystem entry.
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]

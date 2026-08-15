@@ -24,6 +24,8 @@ pub enum LocalResourceKind {
     Entry,
     /// Bytes retained by duplicate-name tracking.
     SeenNameBytes,
+    /// Bytes used by one encoded native or portable path component.
+    PathComponentBytes,
     /// Bytes copied by a tree-copy operation.
     CopiedBytes,
 }
@@ -36,6 +38,9 @@ impl fmt::Display for LocalResourceKind {
             Self::OpenDirectory => formatter.write_str("open directory"),
             Self::Entry => formatter.write_str("entry"),
             Self::SeenNameBytes => formatter.write_str("seen-name bytes"),
+            Self::PathComponentBytes => {
+                formatter.write_str("path-component bytes")
+            }
             Self::CopiedBytes => formatter.write_str("copied bytes"),
         }
     }
