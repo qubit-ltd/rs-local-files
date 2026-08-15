@@ -7,7 +7,6 @@
 // =============================================================================
 //! Native write-open options.
 // qubit-style: allow source-test-pair
-// qubit-style: allow inline-tests
 // qubit-style: allow explicit-imports
 
 use std::time::Duration;
@@ -94,28 +93,5 @@ impl Default for OpenOptions {
     /// unbounded open retry.
     fn default() -> Self {
         Self::new(Mode::default())
-    }
-}
-
-// These tests cover private native OpenOptions assembly. The public writer API
-// intentionally exposes policy types rather than native builder flags, and a
-// visibility hook would leak platform-specific details. Writer integration
-// tests cover the resulting create/append behavior.
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn builders_update_open_behavior() {
-        let options = OpenOptions::new(Mode::AppendOrCreate)
-            .with_parents()
-            .with_open_retry_timeout(Duration::from_millis(5));
-        assert_eq!(options.mode(), Mode::AppendOrCreate);
-        assert!(options.creates_parents());
-        assert_eq!(
-            options.open_retry_timeout(),
-            Some(Duration::from_millis(5))
-        );
-        assert_eq!(OpenOptions::default().mode(), Mode::default());
     }
 }

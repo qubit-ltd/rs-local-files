@@ -7,7 +7,6 @@
 // =============================================================================
 //! Cross-platform rooted entry permissions.
 // qubit-style: allow source-test-pair
-// qubit-style: allow inline-tests
 // qubit-style: allow explicit-imports
 
 /// Permissions observed or applied through a rooted filesystem capability.
@@ -60,34 +59,5 @@ impl Permissions {
             None if self.read_only => current_mode & !0o222,
             None => current_mode | 0o200,
         }
-    }
-}
-
-// This module tests private permission-resolution arithmetic over native mode
-// bits. Public APIs expose only filesystem observations and cannot inject
-// synthetic modes; a test hook would make platform details public. Rooted
-// metadata and permission integration tests cover the observable contract.
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn resolves_portable_and_unix_permissions() {
-        let read_only = Permissions::from_read_only(true);
-        assert!(read_only.is_read_only());
-        assert_eq!(read_only.unix_mode(), None);
-        #[cfg(unix)]
-        assert_eq!(read_only.resolve_unix_mode(0o777), 0o555);
-
-        let writable = Permissions::from_read_only(false);
-        assert!(!writable.is_read_only());
-        #[cfg(unix)]
-        assert_eq!(writable.resolve_unix_mode(0o444), 0o644);
-
-        let exact = Permissions::from_unix_mode(0o17777);
-        assert_eq!(exact.unix_mode(), Some(0o7777));
-        assert!(!exact.is_read_only());
-        #[cfg(unix)]
-        assert_eq!(exact.resolve_unix_mode(0), 0o7777);
     }
 }

@@ -7,7 +7,6 @@
 // =============================================================================
 //! Recoverable atomic-commit errors.
 // qubit-style: allow source-test-pair
-// qubit-style: allow inline-tests
 // qubit-style: allow explicit-imports
 
 use std::error::Error;
@@ -146,55 +145,5 @@ where
     #[inline(always)]
     fn source(&self) -> Option<&(dyn Error + 'static)> {
         Some(&self.error)
-    }
-}
-
-// These tests exercise private commit-state transitions and ownership splits.
-// Public callers observe only terminal outcomes, so the intermediate states
-// cannot be verified through public APIs. Adding test-only constructors would
-// weaken the state machine; writer integration tests cover terminal behavior.
-#[cfg(test)]
-mod tests {
-    use std::io;
-
-    use super::*;
-    use crate::LocalAtomicDestinationState;
-    use crate::LocalAtomicWriteStage;
-
-    fn error() -> LocalAtomicWriteError {
-        LocalAtomicWriteError::new(
-            LocalAtomicWriteStage::ReplaceDestination,
-            "target".into(),
-            None,
-            LocalAtomicDestinationState::Unchanged,
-            io::Error::other("boom"),
-        )
-    }
-
-    #[test]
-    fn retains_and_splits_recoverable_writer() {
-        let mut commit = LocalAtomicCommitError::new(error(), Some(7_u8));
-        assert_eq!(commit.error().kind(), io::ErrorKind::Other);
-        assert_eq!(commit.writer(), Some(&7));
-        assert_eq!(commit.writer_mut().map(|value| *value), Some(7));
-        assert!(commit.to_string().contains("retained"));
-        assert!(std::error::Error::source(&commit).is_some());
-        let (error, writer) = commit.into_parts();
-        assert_eq!(writer, Some(7));
-        assert_eq!(error.kind(), io::ErrorKind::Other);
-    }
-
-    #[test]
-    fn finalizes_or_returns_terminal_error() {
-        let result = LocalAtomicCommitError::new(error(), Some(3_u8))
-            .into_final_error_with(|writer, error| {
-                assert_eq!(writer, 3);
-                error
-            });
-        assert_eq!(result.kind(), io::ErrorKind::Other);
-        let terminal = LocalAtomicCommitError::<u8>::new(error(), None);
-        assert!(terminal.writer().is_none());
-        assert!(terminal.to_string().contains("unavailable"));
-        let _ = terminal.into_final_error_with(|_, error| error);
     }
 }

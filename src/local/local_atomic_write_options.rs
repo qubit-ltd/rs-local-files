@@ -167,35 +167,20 @@ impl Default for LocalAtomicWriteOptions {
     }
 }
 
-// These tests cover the private option value used by the atomic writer. Its
-// fields are intentionally not a public API, and exposing setters just for
-// tests would make internal policy commitments permanent. Public option and
-// writer tests cover all supported caller-visible combinations.
+// This test verifies the publication mode hidden behind the private `internal`
+// module. The remaining crate-private option behavior is tested from
+// `src/tests/local/local_atomic_write_options_tests.rs`.
 #[cfg(test)]
 mod tests {
-    use super::*;
+    use super::LocalAtomicPublicationMode;
+    use super::LocalAtomicWriteOptions;
 
     #[test]
-    fn builders_update_every_policy() {
-        let options = LocalAtomicWriteOptions::new()
-            .with_parent()
-            .with_open_retry_timeout(Duration::from_secs(1))
-            .with_create_new()
-            .with_durability(LocalDurabilityRequirement::NotRequired);
-        assert!(options.creates_parent());
-        assert_eq!(options.open_retry_timeout(), Some(Duration::from_secs(1)));
+    fn test_local_atomic_write_options_maps_create_new_publication_mode() {
+        let options = LocalAtomicWriteOptions::new().with_create_new();
         assert_eq!(
             options.publication_mode(),
             LocalAtomicPublicationMode::CreateNew
-        );
-        assert_eq!(
-            options.durability(),
-            LocalDurabilityRequirement::NotRequired
-        );
-        assert!(!options.replaces_target_symlink());
-        assert_eq!(
-            LocalAtomicWriteOptions::default(),
-            LocalAtomicWriteOptions::new()
         );
     }
 }

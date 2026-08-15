@@ -7,7 +7,6 @@
 // =============================================================================
 //! Recursive directory copy statistics.
 // qubit-style: allow source-test-pair
-// qubit-style: allow inline-tests
 // qubit-style: allow explicit-imports
 
 /// Statistics reported by recursive directory copy operations.
@@ -106,35 +105,5 @@ impl LocalCopyDirStats {
     #[inline(always)]
     pub(crate) const fn files_durable(&self) -> bool {
         self.files_durable
-    }
-}
-
-// These tests exercise private recursive-copy counters before they are folded
-// into the public LocalCopyStats. The intermediate accumulator is not exposed
-// and cannot be validated through public APIs without a test hook. Public copy
-// statistics tests cover the published aggregate.
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn exposes_counts_and_publication_flags() {
-        let stats = LocalCopyDirStats {
-            files: 1,
-            directories: 2,
-            bytes: 3,
-            skipped: 4,
-            overwritten: 5,
-            non_atomic_publication: true,
-            files_durable: false,
-        };
-        assert_eq!(stats.files(), 1);
-        assert_eq!(stats.directories(), 2);
-        assert_eq!(stats.bytes(), 3);
-        assert_eq!(stats.skipped(), 4);
-        assert_eq!(stats.overwritten(), 5);
-        assert!(!stats.atomic_publication());
-        assert!(!stats.files_durable());
-        assert!(LocalCopyDirStats::default().files_durable());
     }
 }

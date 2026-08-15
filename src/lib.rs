@@ -42,6 +42,9 @@ mod walk;
 mod write;
 mod writer;
 
+#[cfg(test)]
+mod tests;
+
 pub use capability::LocalFileSystemLimits;
 pub use capability::LocalFileSystemProtocols;
 pub use capability::LocalFileSystemSpace;
