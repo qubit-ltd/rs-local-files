@@ -573,6 +573,74 @@ fn test_rooted_temp_file_cleanup_removes_entry() {
     assert!(!parent.path().join(path).exists());
 }
 
+/// Verifies rooted temporary files expose their stream, retain a relative
+/// path when kept, and never remove a replacement that takes their name.
+#[cfg(not(windows))]
+#[test]
+fn test_rooted_temp_file_stream_keep_and_cleanup_rejects_replacement() {
+    let parent = tempdir().expect("root parent should be created");
+    let rooted = LocalFileSystem::rooted(parent.path())
+        .expect("root authority should open");
+    let kept_path = {
+        let mut temporary = rooted
+            .create_temp_file(&LocalTempFileOptions::new())
+            .expect("rooted temporary file should be created");
+        assert_eq!(
+            7,
+            temporary
+                .write_vectored(&[IoSlice::new(b"root"), IoSlice::new(b"ed!")])
+                .expect("rooted temporary file should accept vectored bytes"),
+        );
+        temporary
+            .flush()
+            .expect("rooted temporary file should flush");
+        temporary
+            .seek(SeekFrom::Start(0))
+            .expect("rooted temporary file should seek");
+        assert!(
+            temporary
+                .as_file_mut()
+                .expect("rooted temporary file should expose its stream")
+                .metadata()
+                .expect("rooted temporary stream metadata should read")
+                .is_file(),
+        );
+        temporary.keep()
+    };
+    assert_eq!(
+        b"rooted!",
+        fs::read(parent.path().join(&kept_path))
+            .expect("kept rooted temporary file should remain")
+            .as_slice(),
+    );
+    fs::remove_file(parent.path().join(&kept_path))
+        .expect("kept rooted temporary file should be removable");
+
+    let mut temporary = rooted
+        .create_temp_file(&LocalTempFileOptions::new())
+        .expect("second rooted temporary file should be created");
+    let path = temporary.path().to_path_buf();
+    let original = parent.path().join("original");
+    fs::rename(parent.path().join(&path), &original)
+        .expect("original rooted temporary file should be retained");
+    fs::write(parent.path().join(&path), b"replacement")
+        .expect("replacement rooted file should be created");
+    let error = temporary
+        .cleanup()
+        .expect_err("rooted cleanup must reject a replacement entry");
+    assert_eq!(LocalFileErrorKind::InvalidPath, error.kind());
+    assert_eq!(
+        b"replacement",
+        fs::read(parent.path().join(&path))
+            .expect("replacement rooted file should remain")
+            .as_slice(),
+    );
+    fs::remove_file(parent.path().join(&path))
+        .expect("replacement rooted file should be removable");
+    fs::remove_file(original)
+        .expect("original rooted file should be removable");
+}
+
 /// Verifies rooted temporary files retain cleanup authority after a no-replace
 /// conflict and reject lexical escape targets.
 #[test]

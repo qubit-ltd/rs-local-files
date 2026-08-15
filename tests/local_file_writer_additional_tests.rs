@@ -149,6 +149,68 @@ fn test_local_file_writer_creates_missing_parent_when_requested() {
     );
 }
 
+/// Verifies host staged writers synchronize a newly created parent chain when
+/// the caller requires durable publication.
+#[cfg(not(windows))]
+#[test]
+fn test_local_file_writer_creates_nested_durable_parent_chain() {
+    let directory = tempdir().expect("temporary directory should be created");
+    let target = directory.path().join("one/two/three/payload");
+    let mut writer = LocalFileSystem::host()
+        .open_writer(
+            &target,
+            &LocalWriteOptions::new(LocalWriteMode::CreateNew)
+                .with_parent()
+                .with_durability(LocalDurabilityRequirement::Required),
+        )
+        .expect("writer should create and synchronize missing parents");
+    writer
+        .write_all(b"payload")
+        .expect("staged writer should accept bytes");
+    let outcome = writer
+        .commit()
+        .expect("durable staged writer should commit");
+
+    assert!(outcome.durable());
+    assert_eq!(
+        b"payload",
+        fs::read(&target)
+            .expect("durably published payload should read")
+            .as_slice(),
+    );
+}
+
+/// Verifies host create-new writers reject an existing entry before retaining
+/// any staging artifact.
+#[test]
+fn test_local_file_writer_create_new_rejects_existing_entry_before_staging() {
+    let directory = tempdir().expect("temporary directory should be created");
+    let target = directory.path().join("payload");
+    fs::write(&target, b"existing")
+        .expect("existing payload should be written");
+
+    let error = LocalFileSystem::host()
+        .open_writer(
+            &target,
+            &LocalWriteOptions::new(LocalWriteMode::CreateNew),
+        )
+        .expect_err("create-new writer must reject an existing destination");
+
+    assert_eq!(LocalFileErrorKind::AlreadyExists, error.kind());
+    assert_eq!(
+        b"existing",
+        fs::read(&target)
+            .expect("existing payload should remain")
+            .as_slice(),
+    );
+    assert_eq!(
+        1,
+        fs::read_dir(directory.path())
+            .expect("temporary directory should read")
+            .count(),
+    );
+}
+
 /// Verifies flushing a staged writer does not publish its destination before a
 /// later successful commit.
 #[test]

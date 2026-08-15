@@ -530,6 +530,63 @@ fn test_rooted_temp_directory_cleanup_removes_descendants() {
     assert!(!parent.path().join(path).exists());
 }
 
+/// Verifies rooted temporary-directory helpers retain relative paths, keep
+/// complete trees, and reject cleanup after an external replacement.
+#[cfg(not(windows))]
+#[test]
+fn test_rooted_temp_directory_helpers_keep_and_reject_replacement() {
+    let parent = tempdir().expect("root parent should be created");
+    let rooted = LocalFileSystem::rooted(parent.path())
+        .expect("root authority should open");
+    let kept_path = {
+        let temporary = rooted
+            .create_temp_directory(&LocalTempDirectoryOptions::new())
+            .expect("rooted temporary directory should be created");
+        let child = temporary
+            .child(Path::new("child"))
+            .expect("rooted child should resolve");
+        let descendant = temporary
+            .descendant(Path::new("nested/payload"))
+            .expect("rooted descendant should resolve");
+        assert_eq!(temporary.path().join("child"), child);
+        assert_eq!(temporary.path().join("nested/payload"), descendant);
+        fs::create_dir_all(parent.path().join(
+            descendant.parent().expect("descendant parent should exist"),
+        ))
+        .expect("rooted descendant parent should be created");
+        fs::write(parent.path().join(&descendant), b"payload")
+            .expect("rooted descendant should be written");
+        temporary.keep()
+    };
+    assert_eq!(
+        b"payload",
+        fs::read(parent.path().join(&kept_path).join("nested/payload"))
+            .expect("kept rooted directory tree should remain")
+            .as_slice(),
+    );
+    fs::remove_dir_all(parent.path().join(&kept_path))
+        .expect("kept rooted directory should be removable");
+
+    let mut temporary = rooted
+        .create_temp_directory(&LocalTempDirectoryOptions::new())
+        .expect("second rooted temporary directory should be created");
+    let path = temporary.path().to_path_buf();
+    let original = parent.path().join("original-directory");
+    fs::rename(parent.path().join(&path), &original)
+        .expect("original rooted directory should be retained");
+    fs::create_dir(parent.path().join(&path))
+        .expect("replacement rooted directory should be created");
+    let error = temporary
+        .cleanup()
+        .expect_err("rooted cleanup must reject replacement directory");
+    assert_eq!(LocalFileErrorKind::InvalidPath, error.kind());
+    assert!(parent.path().join(&path).is_dir());
+    fs::remove_dir(parent.path().join(&path))
+        .expect("replacement rooted directory should be removable");
+    fs::remove_dir(original)
+        .expect("original rooted directory should be removable");
+}
+
 /// Verifies rooted temporary directories retain cleanup authority after a
 /// no-replace publication conflict and reject lexical escape targets.
 #[test]
