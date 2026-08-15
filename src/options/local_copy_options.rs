@@ -10,13 +10,13 @@
 
 use std::time::Duration;
 
-use super::LocalAtomicityRequirement;
 use super::LocalCopySourceMode;
-use super::LocalDurabilityRequirement;
 use super::LocalMetadataPreservePolicy;
-use super::LocalSymlinkPolicy;
 use crate::LocalCopyConflictPolicy;
 use crate::LocalCopyTypeConflictPolicy;
+use crate::policy::LocalAtomicityRequirement;
+use crate::policy::LocalDurabilityRequirement;
+use crate::policy::LocalSymlinkPolicy;
 
 /// Unified options for copying a native file or directory tree.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]

@@ -35,6 +35,8 @@ pub struct LocalFileError {
     reason: Option<&'static str>,
     /// Typed source retained from the originating failure.
     source: Option<LocalFileErrorSource>,
+    /// Secondary cleanup failure retained without replacing the primary error.
+    cleanup_error: Option<Box<LocalFileError>>,
 }
 
 impl LocalFileError {
@@ -57,6 +59,7 @@ impl LocalFileError {
             target: None,
             reason: None,
             source: None,
+            cleanup_error: None,
         }
     }
 
@@ -87,6 +90,7 @@ impl LocalFileError {
             target,
             reason: None,
             source: Some(LocalFileErrorSource::Io(source)),
+            cleanup_error: None,
         }
     }
 
@@ -116,6 +120,7 @@ impl LocalFileError {
             target: None,
             reason: None,
             source: Some(LocalFileErrorSource::PathCodec(error)),
+            cleanup_error: None,
         }
     }
 
@@ -145,6 +150,7 @@ impl LocalFileError {
             target: None,
             reason: None,
             source: Some(LocalFileErrorSource::ResourceLimit(source)),
+            cleanup_error: None,
         }
     }
 
@@ -195,6 +201,19 @@ impl LocalFileError {
     pub const fn with_reason(mut self, reason: &'static str) -> Self {
         self.reason = Some(reason);
         self
+    }
+
+    /// Retains a cleanup failure without replacing this primary failure.
+    pub fn with_cleanup_error(mut self, cleanup: LocalFileError) -> Self {
+        self.cleanup_error = Some(Box::new(cleanup));
+        self
+    }
+
+    /// Returns the cleanup failure, when cleanup failed after the primary
+    /// operation had already produced an error.
+    #[must_use]
+    pub fn cleanup_error(&self) -> Option<&LocalFileError> {
+        self.cleanup_error.as_deref()
     }
 
     /// Returns the stable failure classification.
@@ -305,6 +324,16 @@ impl LocalFileError {
     #[inline(always)]
     pub(crate) const fn with_kind(mut self, kind: LocalFileErrorKind) -> Self {
         self.kind = kind;
+        self
+    }
+
+    /// Reclassifies the operation after a shared validation stage.
+    #[inline(always)]
+    pub(crate) const fn with_operation(
+        mut self,
+        operation: LocalFileOperation,
+    ) -> Self {
+        self.operation = operation;
         self
     }
 }
