@@ -201,3 +201,65 @@ pub(crate) fn sync_rooted_copy_parent_chain(
     }
     Ok(())
 }
+
+#[cfg(test)]
+mod tests {
+    use std::fs;
+    use std::path::Path;
+
+    use tempfile::tempdir;
+
+    use super::probe_rooted_file;
+    use super::resolve_rooted_path;
+    use super::sync_rooted_copy_parent_chain;
+    use super::validate_rooted_list_start;
+    use crate::LocalFileOperation;
+    use crate::LocalSymlinkPolicy;
+    use crate::local::LocalRelativePath;
+    use crate::rooted::Root;
+
+    /// Verifies rooted support resolves, validates, probes, and synchronizes
+    /// ordinary descendants using the retained descriptor authority.
+    #[test]
+    fn test_rooted_support_operates_on_contained_descendants() {
+        let directory = tempdir().expect("temporary root should be created");
+        fs::create_dir(directory.path().join("nested"))
+            .expect("nested directory should be created");
+        fs::write(directory.path().join("nested/payload"), b"payload")
+            .expect("payload should be written");
+        let root = Root::open(directory.path()).expect("root should open");
+        let path = Path::new("nested/payload");
+
+        let resolved = resolve_rooted_path(
+            &root,
+            path,
+            LocalSymlinkPolicy::Reject,
+            true,
+            LocalFileOperation::Metadata,
+        )
+        .expect("contained path should resolve");
+        assert_eq!(path, resolved.as_path());
+        validate_rooted_list_start(
+            &root,
+            Path::new("nested"),
+            LocalSymlinkPolicy::Reject,
+        )
+        .expect("nested directory should be a valid list start");
+        assert!(
+            probe_rooted_file(
+                &root,
+                Path::new("nested/missing"),
+                LocalSymlinkPolicy::Reject,
+                LocalFileOperation::Metadata,
+            )
+            .expect("nearest existing rooted ancestor should probe")
+            .is_some()
+        );
+        sync_rooted_copy_parent_chain(
+            &root,
+            &LocalRelativePath::new(path)
+                .expect("contained path should validate"),
+        )
+        .expect("contained parent chain should synchronize");
+    }
+}
