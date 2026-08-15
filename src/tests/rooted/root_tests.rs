@@ -31,15 +31,25 @@ fn test_root_authority_manages_descendant_entries() {
     let renamed = LocalRelativePath::new(Path::new("nested/renamed"))
         .expect("renamed path should be valid");
 
-    root.create_dir(&nested).expect("nested directory should be created");
-    root.ensure_dir(&nested).expect("existing directory should be accepted");
+    root.create_dir(&nested)
+        .expect("nested directory should be created");
+    root.ensure_dir(&nested)
+        .expect("existing directory should be accepted");
     fs::write(directory.path().join(file.as_path()), b"payload")
         .expect("fixture file should be written");
 
-    assert_eq!(EntryKind::Directory, root.metadata().expect("root metadata").kind());
-    assert_eq!(EntryKind::File, root.symlink_metadata(&file).expect("file metadata").kind());
-    root.open_probe_file(&file).expect("file should be probeable");
-    root.open_probe_file(&nested).expect("directory should be probeable");
+    assert_eq!(
+        EntryKind::Directory,
+        root.metadata().expect("root metadata").kind()
+    );
+    assert_eq!(
+        EntryKind::File,
+        root.symlink_metadata(&file).expect("file metadata").kind()
+    );
+    root.open_probe_file(&file)
+        .expect("file should be probeable");
+    root.open_probe_file(&nested)
+        .expect("directory should be probeable");
     root.open_probe_root().expect("root should be probeable");
     assert_eq!(1, root.read_dir(&nested).expect("nested entries").len());
     assert_eq!(1, root.read_root_dir().expect("root entries").len());
@@ -50,7 +60,8 @@ fn test_root_authority_manages_descendant_entries() {
 
     root.rename_without_replacing(&file, &renamed)
         .expect("file should rename without replacement");
-    root.rename(&renamed, &file).expect("file should rename with replacement");
+    root.rename(&renamed, &file)
+        .expect("file should rename with replacement");
     let mut reader = root
         .open_reader(&file, &crate::read::OpenOptions::default())
         .expect("rooted reader should open");
@@ -65,9 +76,11 @@ fn test_root_authority_manages_descendant_entries() {
         .expect("rooted writer should open")
         .write_all(b"appended")
         .expect("rooted writer should write fixture bytes");
-    root.remove_file(&appended).expect("appended file should be removed");
+    root.remove_file(&appended)
+        .expect("appended file should be removed");
     root.remove_file(&file).expect("file should be removed");
-    root.remove_empty_dir(&nested).expect("empty directory should be removed");
+    root.remove_empty_dir(&nested)
+        .expect("empty directory should be removed");
 
     let tree = LocalRelativePath::new(Path::new("tree/child"))
         .expect("tree path should be valid");
