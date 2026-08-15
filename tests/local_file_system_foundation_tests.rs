@@ -93,11 +93,16 @@ fn test_host_capabilities_match_host_no_replace_backend() {
 /// Verifies that generated names are portable single path components.
 #[test]
 fn test_local_file_names_generate_random_portable_components() {
-    let first = LocalFileNames::random_name()
+    let names = LocalFileNames::portable();
+    let first = names
+        .random_name()
         .expect("a random filename should be generated");
-    let second =
-        LocalFileNames::random_name_with(Some("prefix-"), Some(".tmp"))
-            .expect("a random filename with affixes should be generated");
+    let second = names
+        .random_name_with(
+            Some(std::ffi::OsStr::new("prefix-")),
+            Some(std::ffi::OsStr::new(".tmp")),
+        )
+        .expect("a random filename with affixes should be generated");
 
     assert_ne!(first, second);
     let second_text = second
@@ -105,9 +110,11 @@ fn test_local_file_names_generate_random_portable_components() {
         .expect("a portable random filename should be UTF-8");
     assert!(second_text.starts_with("prefix-"));
     assert!(second_text.ends_with(".tmp"));
-    LocalFileNames::validate_portable(first.as_os_str())
+    names
+        .validate(first.as_os_str())
         .expect("the default random filename should be portable");
-    LocalFileNames::validate_portable(second.as_os_str())
+    names
+        .validate(second.as_os_str())
         .expect("the affixed random filename should be portable");
 }
 
