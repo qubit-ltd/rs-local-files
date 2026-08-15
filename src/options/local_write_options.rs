@@ -10,9 +10,9 @@
 
 use std::time::Duration;
 
-use super::LocalAtomicityRequirement;
-use super::LocalDurabilityRequirement;
 use super::LocalWriteMode;
+use crate::policy::LocalAtomicityRequirement;
+use crate::policy::LocalDurabilityRequirement;
 
 /// Options fixed for a local file writer session.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]

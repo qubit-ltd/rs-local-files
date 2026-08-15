@@ -104,7 +104,6 @@ pub(crate) use internal::set_rooted_permissions;
 #[cfg(unix)]
 pub(crate) use internal::sync_rooted_parent;
 pub(crate) use internal::try_random_file_name;
-pub(crate) use internal::validate_portable_file_name_impl;
 pub(crate) use internal::validate_temp_affixes;
 pub(crate) use local_atomic_commit_error::LocalAtomicCommitError;
 pub(crate) use local_atomic_destination_state::LocalAtomicDestinationState;

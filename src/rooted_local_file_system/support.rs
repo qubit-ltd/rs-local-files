@@ -9,7 +9,6 @@
 // Rooted support operations.
 // qubit-style: allow source-test-pair
 
-use super::File;
 use super::LocalFileError;
 use super::LocalFileErrorKind;
 use super::LocalFileOperation;
@@ -59,48 +58,6 @@ pub(crate) fn validate_rooted_list_start(
         .with_path(path.as_path().to_path_buf()));
     }
     Ok(())
-}
-
-/// Opens a rooted path or its nearest existing ancestor for probing.
-pub(crate) fn probe_rooted_file(
-    root: &crate::rooted::Root,
-    path: &Path,
-    symlink_policy: LocalSymlinkPolicy,
-    operation: LocalFileOperation,
-) -> LocalResult<Option<File>> {
-    let relative =
-        resolve_rooted_path(root, path, symlink_policy, true, operation)?;
-    let mut candidate = relative.as_path().to_path_buf();
-    loop {
-        if candidate.as_os_str().is_empty() {
-            return root.open_probe_root().map(Some).map_err(|error| {
-                LocalFileError::from_io(
-                    operation,
-                    Some(path.to_path_buf()),
-                    None,
-                    error,
-                )
-            });
-        }
-        let candidate_path = crate::local::LocalRelativePath::new(&candidate)
-            .map_err(|error| {
-            LocalFileError::from_io(
-                operation,
-                Some(path.to_path_buf()),
-                None,
-                error,
-            )
-        })?;
-        match root.open_probe_file(&candidate_path) {
-            Ok(file) => return Ok(Some(file)),
-            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
-                if !candidate.pop() {
-                    return Ok(None);
-                }
-            }
-            Err(_) => return Ok(None),
-        }
-    }
 }
 
 /// Resolves rooted path components while preserving final-entry semantics.
@@ -209,7 +166,6 @@ mod tests {
 
     use tempfile::tempdir;
 
-    use super::probe_rooted_file;
     use super::resolve_rooted_path;
     use super::sync_rooted_copy_parent_chain;
     use super::validate_rooted_list_start;
@@ -245,16 +201,6 @@ mod tests {
             LocalSymlinkPolicy::Reject,
         )
         .expect("nested directory should be a valid list start");
-        assert!(
-            probe_rooted_file(
-                &root,
-                Path::new("nested/missing"),
-                LocalSymlinkPolicy::Reject,
-                LocalFileOperation::Metadata,
-            )
-            .expect("nearest existing rooted ancestor should probe")
-            .is_some()
-        );
         sync_rooted_copy_parent_chain(
             &root,
             &LocalRelativePath::new(path)
