@@ -9,5 +9,6 @@
 
 mod local;
 mod outcome;
+mod public_api_coverage_tests;
 mod rooted;
 mod write;
