@@ -29,6 +29,8 @@ use qubit_local_files::LocalFileKind;
 use qubit_local_files::LocalFileOperation;
 use qubit_local_files::LocalFileSystem;
 use qubit_local_files::LocalListOptions;
+#[cfg(feature = "internal-test-support")]
+use qubit_local_files::LocalMetadataPreservePolicy;
 use qubit_local_files::LocalPersistFailureState;
 use qubit_local_files::LocalPersistStage;
 use qubit_local_files::LocalReadOptions;
@@ -446,6 +448,226 @@ where
         .status()
         .expect("test fault child should launch");
     assert!(status.success(), "test fault child should pass");
+}
+
+/// Exercises a selected rooted regular-file copy fault through the public
+/// facade and checks that it remains a structured, unpublished failure.
+#[cfg(feature = "internal-test-support")]
+fn assert_rooted_file_copy_fault(
+    test_name: &str,
+    fault: &str,
+    preserve: bool,
+    expected_kind: LocalFileErrorKind,
+) {
+    run_in_test_fault_process(test_name, fault, || {
+        let directory =
+            tempdir().expect("temporary directory should be created");
+        fs::write(directory.path().join("source"), b"payload")
+            .expect("source should be written");
+        let rooted = LocalFileSystem::rooted(directory.path())
+            .expect("root authority should open");
+        let options = if preserve {
+            LocalCopyOptions::new().with_metadata_preservation(
+                LocalMetadataPreservePolicy::Permissions,
+            )
+        } else {
+            LocalCopyOptions::new()
+        };
+
+        let error = rooted
+            .copy(Path::new("source"), Path::new("target"), &options)
+            .expect_err("the injected rooted copy boundary must fail");
+
+        assert_eq!(expected_kind, error.error().kind());
+    });
+}
+
+/// Verifies a rooted source-open failure is reported before copying begins.
+#[cfg(feature = "internal-test-support")]
+#[test]
+fn test_rooted_copy_reports_injected_source_open_failure() {
+    assert_rooted_file_copy_fault(
+        "test_rooted_copy_reports_injected_source_open_failure",
+        "rooted-copy-source-open",
+        false,
+        LocalFileErrorKind::PermissionDenied,
+    );
+}
+
+/// Verifies a rooted handle-metadata failure remains structured.
+#[cfg(feature = "internal-test-support")]
+#[test]
+fn test_rooted_copy_reports_injected_source_metadata_failure() {
+    assert_rooted_file_copy_fault(
+        "test_rooted_copy_reports_injected_source_metadata_failure",
+        "rooted-copy-source-metadata-native",
+        false,
+        LocalFileErrorKind::Io,
+    );
+}
+
+/// Verifies destination inspection failures are retained by rooted copy.
+#[cfg(feature = "internal-test-support")]
+#[test]
+fn test_rooted_copy_reports_injected_destination_metadata_failure() {
+    assert_rooted_file_copy_fault(
+        "test_rooted_copy_reports_injected_destination_metadata_failure",
+        "rooted-copy-destination-metadata",
+        false,
+        LocalFileErrorKind::PermissionDenied,
+    );
+}
+
+/// Verifies a rooted staging-writer open failure is retained by copy.
+#[cfg(feature = "internal-test-support")]
+#[test]
+fn test_rooted_copy_reports_injected_writer_open_failure() {
+    assert_rooted_file_copy_fault(
+        "test_rooted_copy_reports_injected_writer_open_failure",
+        "rooted-copy-writer-open",
+        false,
+        LocalFileErrorKind::PermissionDenied,
+    );
+}
+
+/// Verifies a rooted byte-copy failure is reported with copy context.
+#[cfg(feature = "internal-test-support")]
+#[test]
+fn test_rooted_copy_reports_injected_contents_failure() {
+    assert_rooted_file_copy_fault(
+        "test_rooted_copy_reports_injected_contents_failure",
+        "rooted-copy-file-contents-native",
+        false,
+        LocalFileErrorKind::Io,
+    );
+}
+
+/// Verifies a rooted atomic-install failure is retained by copy.
+#[cfg(feature = "internal-test-support")]
+#[test]
+fn test_rooted_copy_reports_injected_commit_failure() {
+    assert_rooted_file_copy_fault(
+        "test_rooted_copy_reports_injected_commit_failure",
+        "rooted-copy-file-commit-native",
+        false,
+        LocalFileErrorKind::Io,
+    );
+}
+
+/// Verifies metadata-preserving rooted copy exposes permission failures.
+#[cfg(feature = "internal-test-support")]
+#[test]
+fn test_rooted_copy_reports_injected_permission_failure() {
+    assert_rooted_file_copy_fault(
+        "test_rooted_copy_reports_injected_permission_failure",
+        "rooted-copy-set-permissions",
+        true,
+        LocalFileErrorKind::PermissionDenied,
+    );
+}
+
+/// Verifies rooted copy reports statistic overflow without discarding context.
+#[cfg(feature = "internal-test-support")]
+#[test]
+fn test_rooted_copy_reports_injected_statistics_overflow() {
+    assert_rooted_file_copy_fault(
+        "test_rooted_copy_reports_injected_statistics_overflow",
+        "rooted-copy-statistics-overflow",
+        false,
+        LocalFileErrorKind::Io,
+    );
+}
+
+/// Verifies rooted copy maps native authority faults from source traversal,
+/// destination preparation, removal, and metadata preservation.
+#[cfg(feature = "internal-test-support")]
+#[test]
+fn test_rooted_copy_reports_injected_native_authority_failures() {
+    const TEST_NAME: &str =
+        "test_rooted_copy_reports_injected_native_authority_failures";
+    for fault in [
+        "rooted-copy-destination-metadata-native",
+        "rooted-copy-directory-read-native",
+        "rooted-copy-directory-create-native",
+        "rooted-copy-source-open-native",
+        "rooted-copy-set-permissions-native",
+        "rooted-copy-remove-file-native",
+        "rooted-copy-remove-tree-native",
+    ] {
+        run_in_test_fault_process(TEST_NAME, fault, || {
+            let directory =
+                tempdir().expect("temporary directory should be created");
+            let rooted = LocalFileSystem::rooted(directory.path())
+                .expect("root authority should open");
+            let (source, target, options) = match fault {
+                "rooted-copy-directory-read-native"
+                | "rooted-copy-directory-create-native" => {
+                    fs::create_dir(directory.path().join("source"))
+                        .expect("source directory should be created");
+                    (
+                        Path::new("source"),
+                        Path::new("target"),
+                        LocalCopyOptions::new().with_tree_source(),
+                    )
+                }
+                "rooted-copy-set-permissions-native" => {
+                    fs::write(directory.path().join("source"), b"payload")
+                        .expect("source should be written");
+                    (
+                        Path::new("source"),
+                        Path::new("target"),
+                        LocalCopyOptions::new().with_metadata_preservation(
+                            LocalMetadataPreservePolicy::Permissions,
+                        ),
+                    )
+                }
+                "rooted-copy-remove-file-native" => {
+                    std::os::unix::fs::symlink(
+                        "unrelated",
+                        directory.path().join("target"),
+                    )
+                    .expect("target symlink should be created");
+                    fs::write(directory.path().join("source"), b"payload")
+                        .expect("source should be written");
+                    (
+                        Path::new("source"),
+                        Path::new("target"),
+                        LocalCopyOptions::new()
+                            .with_conflict(LocalCopyConflictPolicy::Overwrite),
+                    )
+                }
+                "rooted-copy-remove-tree-native" => {
+                    fs::create_dir(directory.path().join("target"))
+                        .expect("target directory should be created");
+                    fs::write(directory.path().join("source"), b"payload")
+                        .expect("source should be written");
+                    (
+                        Path::new("source"),
+                        Path::new("target"),
+                        LocalCopyOptions::new()
+                            .with_conflict(LocalCopyConflictPolicy::Overwrite)
+                            .with_type_conflict(
+                                LocalCopyTypeConflictPolicy::Replace,
+                            ),
+                    )
+                }
+                _ => {
+                    fs::write(directory.path().join("source"), b"payload")
+                        .expect("source should be written");
+                    (
+                        Path::new("source"),
+                        Path::new("target"),
+                        LocalCopyOptions::new(),
+                    )
+                }
+            };
+
+            let error = rooted
+                .copy(source, target, &options)
+                .expect_err("the injected rooted native boundary must fail");
+            assert_eq!(LocalFileErrorKind::Io, error.error().kind());
+        });
+    }
 }
 
 /// Verifies rooted recursive failures retain exact published-child statistics.

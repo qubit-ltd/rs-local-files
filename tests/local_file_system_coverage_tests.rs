@@ -6,8 +6,13 @@
 //    Licensed under the Apache License, Version 2.0.
 // =============================================================================
 
+#[cfg(any(target_os = "linux", target_os = "android"))]
+use std::ffi::CString;
 use std::fs;
 use std::io::Read;
+#[cfg(any(target_os = "linux", target_os = "android"))]
+use std::os::unix::ffi::OsStrExt;
+use std::path::Path;
 use std::time::Duration;
 
 use qubit_local_files::LocalAtomicityRequirement;
@@ -16,6 +21,8 @@ use qubit_local_files::LocalCopyConflictPolicy;
 #[cfg(feature = "internal-test-support")]
 use qubit_local_files::LocalCopyFailureState;
 use qubit_local_files::LocalCopyOptions;
+#[cfg(feature = "internal-test-support")]
+use qubit_local_files::LocalCopyTypeConflictPolicy;
 use qubit_local_files::LocalCreateDirectoryOptions;
 use qubit_local_files::LocalDeleteOptions;
 use qubit_local_files::LocalDurabilityRequirement;
@@ -29,8 +36,11 @@ use qubit_local_files::LocalReadOptions;
 #[cfg(feature = "internal-test-support")]
 use qubit_local_files::LocalRenameFailureState;
 use qubit_local_files::LocalRenameOptions;
-#[cfg(unix)]
 use qubit_local_files::LocalSymlinkPolicy;
+#[cfg(feature = "internal-test-support")]
+use qubit_local_files::LocalTempDirectoryOptions;
+#[cfg(feature = "internal-test-support")]
+use qubit_local_files::LocalTempFileOptions;
 use qubit_local_files::LocalWriteMode;
 use qubit_local_files::LocalWriteOptions;
 #[cfg(feature = "internal-test-support")]
@@ -256,6 +266,99 @@ fn test_host_facade_mutates_file_and_directory_entries() {
     assert!(deleted_file.deleted());
 }
 
+/// Verifies atomic replacement retains descriptor-visible user metadata on
+/// Linux and Android filesystems that support extended attributes.
+#[cfg(any(target_os = "linux", target_os = "android"))]
+#[test]
+fn test_atomic_replacement_preserves_extended_attributes() {
+    use std::io::Write;
+
+    let directory = tempdir().expect("temporary directory should be created");
+    let path = directory.path().join("destination");
+    fs::write(&path, b"previous")
+        .expect("destination fixture should be written");
+    let native_path = CString::new(path.as_os_str().as_bytes())
+        .expect("temporary path should not contain NUL");
+    let attribute = CString::new("user.qubit-local-files-coverage")
+        .expect("attribute name should not contain NUL");
+    let value = b"preserved";
+
+    let set_result = unsafe {
+        libc::setxattr(
+            native_path.as_ptr(),
+            attribute.as_ptr(),
+            value.as_ptr().cast(),
+            value.len(),
+            0,
+        )
+    };
+    if set_result == -1 {
+        let error = std::io::Error::last_os_error();
+        if error.raw_os_error() == Some(libc::ENOTSUP) {
+            return;
+        }
+        panic!("destination xattr should be created: {error}");
+    }
+
+    let mut writer = LocalFileSystem::host()
+        .open_writer(
+            &path,
+            &LocalWriteOptions::new(LocalWriteMode::CreateOrReplace),
+        )
+        .expect("existing destination should open for atomic replacement");
+    writer
+        .write_all(b"replacement")
+        .expect("staging writer should accept replacement bytes");
+    let outcome = writer.commit().expect("atomic replacement should commit");
+    assert!(outcome.atomic());
+
+    let mut observed = [0_u8; 16];
+    let length = unsafe {
+        libc::getxattr(
+            native_path.as_ptr(),
+            attribute.as_ptr(),
+            observed.as_mut_ptr().cast(),
+            observed.len(),
+        )
+    };
+    assert_eq!(value.len() as isize, length);
+    assert_eq!(value, &observed[..length as usize]);
+}
+
+/// Verifies namespace metadata probes and symlink-policy transitions preserve
+/// the distinct host and rooted authority contracts.
+#[test]
+fn test_filesystem_namespace_capabilities_and_probe_variants() {
+    let directory = tempdir().expect("temporary directory should be created");
+    let host = LocalFileSystem::host()
+        .with_symlink_policy(LocalSymlinkPolicy::Reject)
+        .expect("host policy changes should be accepted");
+    assert_eq!(LocalSymlinkPolicy::Reject, host.symlink_policy(),);
+    let _ = host.limits();
+    let _ = host
+        .limits_at(&directory.path().join("missing/leaf"))
+        .expect("host limits should probe nearest existing ancestor");
+    let _ = host
+        .space_at(&directory.path().join("missing/leaf"))
+        .expect("host space should probe nearest existing ancestor");
+
+    let rooted = LocalFileSystem::rooted(directory.path())
+        .expect("rooted authority should open");
+    assert!(rooted.diagnostic_root().is_some());
+    let _ = rooted.limits();
+    let _ = rooted
+        .limits_at(Path::new("missing/leaf"))
+        .expect("rooted limits should probe nearest existing ancestor");
+    let _ = rooted
+        .space_at(Path::new("missing/leaf"))
+        .expect("rooted space should probe nearest existing ancestor");
+    assert!(
+        rooted
+            .with_symlink_policy(LocalSymlinkPolicy::FollowAcrossScope)
+            .is_err()
+    );
+}
+
 /// Runs one test-support-only facade fault in an isolated child process.
 #[cfg(feature = "internal-test-support")]
 fn run_facade_fault<F>(test_name: &str, fault: &str, action: F)
@@ -286,6 +389,87 @@ where
         .status()
         .expect("test fault child should launch");
     assert!(status.success(), "test fault child should pass");
+}
+
+/// Verifies metadata-preserving atomic replacement reports every injected
+/// native xattr and metadata boundary through the public writer API.
+#[cfg(all(
+    feature = "internal-test-support",
+    any(target_os = "linux", target_os = "android")
+))]
+#[test]
+fn test_atomic_replacement_exercises_metadata_fault_boundaries() {
+    const TEST_NAME: &str =
+        "test_atomic_replacement_exercises_metadata_fault_boundaries";
+    for (fault, fails) in [
+        ("atomic-metadata-source-stat", true),
+        ("atomic-metadata-staging-stat", true),
+        ("atomic-metadata-owner", true),
+        ("atomic-metadata-owner-native", true),
+        ("atomic-metadata-mode", true),
+        ("atomic-metadata-native-mode", true),
+        ("atomic-metadata-not-supported", false),
+        ("atomic-metadata-list", true),
+        ("atomic-metadata-list-read", true),
+        ("atomic-metadata-list-range", true),
+        ("atomic-metadata-list-range-persistent", true),
+        ("atomic-metadata-security-name", true),
+        ("atomic-metadata-invalid-name", true),
+        ("atomic-metadata-equal-value", false),
+        ("atomic-metadata-source-missing", true),
+        ("atomic-metadata-read", true),
+        ("atomic-metadata-value-range-persistent", true),
+        ("atomic-metadata-value-read", true),
+        ("atomic-metadata-write", true),
+        ("atomic-metadata-remove", true),
+        ("atomic-metadata-staging-list", true),
+    ] {
+        run_facade_fault(TEST_NAME, fault, || {
+            use std::io::Write;
+
+            let directory =
+                tempdir().expect("temporary directory should be created");
+            let path = directory.path().join("destination");
+            fs::write(&path, b"previous")
+                .expect("destination fixture should be written");
+            let native_path = CString::new(path.as_os_str().as_bytes())
+                .expect("temporary path should not contain NUL");
+            let attribute = CString::new("user.qubit-local-files-fault")
+                .expect("attribute name should not contain NUL");
+            let value = b"value";
+            let set_result = unsafe {
+                libc::setxattr(
+                    native_path.as_ptr(),
+                    attribute.as_ptr(),
+                    value.as_ptr().cast(),
+                    value.len(),
+                    0,
+                )
+            };
+            if set_result == -1 {
+                let error = std::io::Error::last_os_error();
+                if error.raw_os_error() == Some(libc::ENOTSUP) {
+                    return;
+                }
+                panic!("destination xattr should be created: {error}");
+            }
+
+            let mut writer = LocalFileSystem::host()
+                .open_writer(
+                    &path,
+                    &LocalWriteOptions::new(LocalWriteMode::CreateOrReplace),
+                )
+                .expect("existing destination should open for replacement");
+            writer
+                .write_all(b"replacement")
+                .expect("staging writer should accept replacement bytes");
+            assert_eq!(
+                fails,
+                writer.commit().is_err(),
+                "selected {fault} should have the documented outcome",
+            );
+        });
+    }
 }
 
 /// Verifies a post-open prefix-read failure is attributed to the read stage.
@@ -565,4 +749,144 @@ fn test_copy_rejects_injected_missing_directory_durability() {
             assert!(!target.exists(), "preflight must not publish a target");
         },
     );
+}
+
+/// Verifies host recursive-copy recovery either reports a native destination
+/// creation race or reconciles it into a complete tree publication.
+#[cfg(feature = "internal-test-support")]
+#[test]
+fn test_host_copy_reports_injected_destination_races() {
+    const TEST_NAME: &str = "test_host_copy_reports_injected_destination_races";
+    for fault in [
+        "copy-directory-create-error",
+        "copy-directory-race-existing",
+        "copy-directory-race-inspect",
+        "copy-directory-race-nondirectory",
+    ] {
+        run_facade_fault(TEST_NAME, fault, || {
+            let directory =
+                tempdir().expect("temporary directory should be created");
+            let source = directory.path().join("source");
+            fs::create_dir_all(source.join("nested"))
+                .expect("source tree should be created");
+            fs::write(source.join("nested/payload"), b"payload")
+                .expect("source payload should be written");
+
+            let target = directory.path().join("target");
+            let result = LocalFileSystem::host().copy(
+                &source,
+                &target,
+                &LocalCopyOptions::new().with_tree_source(),
+            );
+            if result.is_ok() {
+                assert_eq!(
+                    b"payload",
+                    fs::read(target.join("nested/payload"))
+                        .expect("a reconciled successful copy must publish the full tree")
+                        .as_slice(),
+                );
+            }
+        });
+    }
+}
+
+/// Verifies host recursive-copy replacement detects reinspection and removal
+/// races before it can claim a completed tree publication.
+#[cfg(feature = "internal-test-support")]
+#[test]
+fn test_host_copy_reports_injected_destination_removal_races() {
+    const TEST_NAME: &str =
+        "test_host_copy_reports_injected_destination_removal_races";
+    for fault in [
+        "copy-removal-race-directory",
+        "copy-removal-race-inspect",
+        "copy-removal-race-not-found",
+    ] {
+        run_facade_fault(TEST_NAME, fault, || {
+            let directory =
+                tempdir().expect("temporary directory should be created");
+            let source = directory.path().join("source");
+            fs::create_dir(&source)
+                .expect("source directory should be created");
+            fs::write(source.join("payload"), b"payload")
+                .expect("source payload should be written");
+            let target = directory.path().join("target");
+            fs::write(&target, b"conflicting file")
+                .expect("conflicting target should be written");
+
+            assert!(
+                LocalFileSystem::host()
+                    .copy(
+                        &source,
+                        &target,
+                        &LocalCopyOptions::new()
+                            .with_tree_source()
+                            .with_conflict(LocalCopyConflictPolicy::Overwrite)
+                            .with_type_conflict(
+                                LocalCopyTypeConflictPolicy::Replace
+                            ),
+                    )
+                    .is_err(),
+                "injected destination removal race {fault} must fail the copy",
+            );
+        });
+    }
+}
+
+/// Verifies host temporary-resource creation retries a one-shot collision and
+/// returns native creation failures without creating cleanup-owned resources.
+#[cfg(feature = "internal-test-support")]
+#[test]
+fn test_host_temp_resources_report_injected_creation_outcomes() {
+    const TEST_NAME: &str =
+        "test_host_temp_resources_report_injected_creation_outcomes";
+    for (fault, directory_resource, succeeds) in [
+        ("temp-file-collision", false, true),
+        ("temp-file-open", false, false),
+        ("temp-directory-collision", true, true),
+        ("temp-directory-create", true, false),
+    ] {
+        run_facade_fault(TEST_NAME, fault, || {
+            let directory =
+                tempdir().expect("temporary directory should be created");
+            let filesystem = LocalFileSystem::host();
+            if directory_resource {
+                let result = filesystem.create_temp_directory(
+                    &LocalTempDirectoryOptions::new()
+                        .with_parent(directory.path())
+                        .with_max_attempts(2),
+                );
+                if succeeds {
+                    let mut temporary =
+                        result.expect("a one-shot collision should be retried");
+                    temporary
+                        .cleanup()
+                        .expect("temporary directory should clean up");
+                } else {
+                    assert!(
+                        result.is_err(),
+                        "native directory creation fault must fail"
+                    );
+                }
+            } else {
+                let result = filesystem.create_temp_file(
+                    &LocalTempFileOptions::new()
+                        .with_parent(directory.path())
+                        .with_max_attempts(2),
+                );
+                if succeeds {
+                    let mut temporary =
+                        result.expect("a one-shot collision should be retried");
+                    temporary
+                        .cleanup()
+                        .expect("temporary file should clean up");
+                } else {
+                    assert!(
+                        result.is_err(),
+                        "native file creation fault must fail"
+                    );
+                }
+            }
+        });
+    }
 }

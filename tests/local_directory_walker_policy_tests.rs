@@ -497,3 +497,43 @@ fn test_local_directory_walker_detects_native_directory_identity_cycle() {
         },
     );
 }
+
+/// Verifies host walker fault boundaries retain structured errors while root,
+/// descent, reader-reopen, and entry iteration advance lazily.
+#[cfg(feature = "internal-test-support")]
+#[test]
+fn test_local_directory_walker_reports_injected_iteration_failures() {
+    const TEST_NAME: &str =
+        "test_local_directory_walker_reports_injected_iteration_failures";
+    for fault in [
+        "walker-root-canonicalize",
+        "walker-descend-canonicalize",
+        "walker-reopen-canonicalize",
+        "walker-entry",
+    ] {
+        run_walker_fault_process(TEST_NAME, fault, || {
+            let directory =
+                tempdir().expect("temporary directory should be created");
+            fs::create_dir_all(directory.path().join("nested/child"))
+                .expect("nested directory fixture should be created");
+            fs::write(
+                directory.path().join("nested/child/payload"),
+                b"payload",
+            )
+            .expect("nested payload should be written");
+            let options = LocalListOptions::new()
+                .with_recursive()
+                .with_max_open_directories(1);
+            let result =
+                LocalFileSystem::host().list(directory.path(), &options);
+
+            let error = match result {
+                Err(error) => error,
+                Ok(mut walker) => walker
+                    .find_map(Result::err)
+                    .expect("injected lazy walker fault should be yielded"),
+            };
+            assert_eq!(LocalFileErrorKind::Io, error.kind());
+        });
+    }
+}

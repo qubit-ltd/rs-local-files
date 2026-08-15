@@ -12,6 +12,7 @@ use std::path::Path;
 
 use qubit_local_files::LocalFileError;
 use qubit_local_files::LocalFileErrorKind;
+use qubit_local_files::LocalFileErrorSource;
 use qubit_local_files::LocalFileOperation;
 use qubit_local_files::LocalResourceKind;
 use qubit_local_files::LocalResourceLimitError;
@@ -196,4 +197,62 @@ fn test_local_resource_limit_error_preserves_budget_facts() {
     assert_eq!(LocalFileErrorKind::ResourceLimit, error.kind());
     assert!(error.resource_limit_error().is_none());
     assert_eq!(io::ErrorKind::Other, error.into_io_error().kind());
+}
+
+/// Verifies every resource kind has a stable diagnostic and that a resource
+/// limit can participate in the typed local-error source chain.
+#[test]
+fn test_resource_limit_error_formats_all_resource_kinds_and_chains() {
+    let cases = [
+        (LocalResourceKind::Depth, "depth"),
+        (LocalResourceKind::OpenDirectory, "open directory"),
+        (LocalResourceKind::Entry, "entry"),
+        (LocalResourceKind::SeenNameBytes, "seen-name bytes"),
+        (LocalResourceKind::CopiedBytes, "copied bytes"),
+    ];
+
+    for (resource, expected_name) in cases {
+        let error = LocalResourceLimitError::new(resource, 8, 2, 3);
+        assert!(error.to_string().contains(expected_name));
+
+        let source = LocalFileErrorSource::ResourceLimit(error);
+        assert!(source.to_string().contains(expected_name));
+        assert!(Error::source(&source).is_some());
+    }
+}
+
+/// Verifies resource-limit accessors remain callable through their stable
+/// public function signatures rather than only through inlined call sites.
+#[test]
+fn test_resource_limit_error_exposes_all_public_accessors() {
+    let construct = std::hint::black_box(
+        LocalResourceLimitError::new
+            as fn(
+                LocalResourceKind,
+                usize,
+                usize,
+                usize,
+            ) -> LocalResourceLimitError,
+    );
+    let resource = std::hint::black_box(
+        LocalResourceLimitError::resource
+            as fn(&LocalResourceLimitError) -> LocalResourceKind,
+    );
+    let limit = std::hint::black_box(
+        LocalResourceLimitError::limit as fn(&LocalResourceLimitError) -> usize,
+    );
+    let remaining = std::hint::black_box(
+        LocalResourceLimitError::remaining
+            as fn(&LocalResourceLimitError) -> usize,
+    );
+    let requested = std::hint::black_box(
+        LocalResourceLimitError::requested
+            as fn(&LocalResourceLimitError) -> usize,
+    );
+    let error = construct(LocalResourceKind::CopiedBytes, 10, 4, 6);
+
+    assert_eq!(LocalResourceKind::CopiedBytes, resource(&error));
+    assert_eq!(10, limit(&error));
+    assert_eq!(4, remaining(&error));
+    assert_eq!(6, requested(&error));
 }
