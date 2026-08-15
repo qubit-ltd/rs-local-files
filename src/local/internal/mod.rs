@@ -7,6 +7,7 @@
 // =============================================================================
 //! Private implementation support for local filesystem operations.
 
+mod atomic_commit_state;
 mod atomic_file_install;
 mod atomic_install_recovery;
 #[cfg(unix)]
@@ -69,6 +70,9 @@ mod windows_rooted;
 #[cfg(windows)]
 mod windows_rooted_staged_file;
 
+pub(crate) use atomic_commit_state::commit_recoverably;
+pub(crate) use atomic_commit_state::finalize_failed_commit;
+pub(crate) use atomic_commit_state::synchronize_staging_file;
 pub(crate) use atomic_file_install::install_atomic_file;
 pub(crate) use atomic_install_recovery::AtomicInstallRecovery;
 pub(crate) use atomic_install_recovery::recover_atomic_install_error;
