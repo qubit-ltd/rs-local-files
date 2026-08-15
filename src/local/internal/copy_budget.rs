@@ -203,13 +203,27 @@ fn resource_error(error: LocalResourceLimitError) -> io::Error {
 fn usize_budget_error(
     error: InsufficientBudgetError<LocalResourceKind, usize>,
 ) -> io::Error {
-    let InsufficientBudgetError { resource, limit, remaining, requested } = error;
-    resource_error(LocalResourceLimitError::new(resource, limit, remaining, requested))
+    let InsufficientBudgetError {
+        resource,
+        limit,
+        remaining,
+        requested,
+    } = error;
+    resource_error(LocalResourceLimitError::new(
+        resource, limit, remaining, requested,
+    ))
 }
 
 /// Converts a byte budget failure into structured machine-sized facts.
-fn u64_budget_error(error: InsufficientBudgetError<LocalResourceKind, u64>) -> io::Error {
-    let InsufficientBudgetError { resource, limit, remaining, requested } = error;
+fn u64_budget_error(
+    error: InsufficientBudgetError<LocalResourceKind, u64>,
+) -> io::Error {
+    let InsufficientBudgetError {
+        resource,
+        limit,
+        remaining,
+        requested,
+    } = error;
     resource_error(LocalResourceLimitError::new(
         resource,
         usize::try_from(limit).unwrap_or(usize::MAX),
