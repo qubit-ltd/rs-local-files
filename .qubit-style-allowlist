@@ -1,1 +1,2 @@
 multiple-public-types | src/rooted_local_file_system.rs | Rooted implementation and private resolved-path carrier share one module for policy dispatch
+multiple-public-types | src/authority/authority_path.rs | HostPath is the Host-specific variant payload sealed inside AuthorityPath

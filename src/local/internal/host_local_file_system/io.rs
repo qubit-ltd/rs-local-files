@@ -11,6 +11,7 @@ use std::fs;
 use std::path::Path;
 
 use super::HostLocalFileSystem;
+use super::bind_host_path;
 use super::open_staged_writer;
 use super::resolve_host_path;
 use super::test_io_fault;
@@ -23,7 +24,6 @@ use crate::LocalFileOperation;
 use crate::LocalFileReader;
 use crate::LocalFileWriter;
 use crate::LocalListOptions;
-use crate::LocalPaths;
 use crate::LocalReadOptions;
 use crate::LocalResult;
 use crate::LocalSymlinkPolicy;
@@ -38,7 +38,7 @@ impl HostLocalFileSystem {
         path: &Path,
         symlink_policy: LocalSymlinkPolicy,
     ) -> LocalResult<LocalFileMetadata> {
-        let bound = LocalPaths::bind_host_path(path)?;
+        let bound = bind_host_path(path)?;
         let resolved = resolve_host_path(&bound, symlink_policy, false)?;
         fs::symlink_metadata(&resolved)
             .map(|metadata| LocalFileMetadata::from_native(&metadata))
@@ -122,7 +122,7 @@ impl HostLocalFileSystem {
         symlink_policy: LocalSymlinkPolicy,
     ) -> LocalResult<LocalFileWriter> {
         let follow_final = options.mode() != LocalWriteMode::CreateNew;
-        let diagnostic_path = LocalPaths::bind_host_path(path)?;
+        let diagnostic_path = bind_host_path(path)?;
         let bound =
             resolve_host_path(&diagnostic_path, symlink_policy, follow_final)?;
         if options.mode() == LocalWriteMode::Append

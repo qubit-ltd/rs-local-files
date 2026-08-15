@@ -12,7 +12,6 @@
 use super::HostLocalFileSystem;
 use super::LocalFileError;
 use super::LocalFileOperation;
-use super::LocalPaths;
 use super::LocalRenameFailure;
 use super::LocalRenameFailureState;
 use super::LocalRenameOptions;
@@ -20,6 +19,7 @@ use super::LocalRenameOutcome;
 use super::LocalRenameResult;
 use super::LocalSymlinkPolicy;
 use super::Path;
+use super::bind_host_paths;
 use super::ensure_required_directory_durability;
 use super::fs;
 use super::io;
@@ -58,7 +58,7 @@ impl HostLocalFileSystem {
         options: &LocalRenameOptions,
         symlink_policy: LocalSymlinkPolicy,
     ) -> LocalRenameResult {
-        let [source, target] = LocalPaths::bind_host_paths([source, target])
+        let [source, target] = bind_host_paths([source, target])
             .map_err(rename_failure_unchanged)?;
         let source = resolve_host_path(&source, symlink_policy, false)
             .map_err(rename_failure_unchanged)?;

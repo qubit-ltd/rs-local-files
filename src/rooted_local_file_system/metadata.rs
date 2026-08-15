@@ -12,64 +12,15 @@
 use std::path::Path;
 
 use super::RootedLocalFileSystem;
-use super::probe_rooted_file;
 use super::resolve_rooted_path;
 use super::rooted_io_error;
 use super::rooted_metadata;
 use crate::LocalFileMetadata;
 use crate::LocalFileOperation;
-use crate::LocalFileSystemLimits;
-use crate::LocalFileSystemSpace;
 use crate::LocalResult;
 use crate::LocalSymlinkPolicy;
 
 impl RootedLocalFileSystem {
-    /// Observes path limits at a rooted path or its nearest existing ancestor.
-    pub fn limits_at(
-        &self,
-        path: &Path,
-        symlink_policy: LocalSymlinkPolicy,
-    ) -> LocalResult<LocalFileSystemLimits> {
-        probe_rooted_file(
-            &self.root,
-            path,
-            symlink_policy,
-            LocalFileOperation::Metadata,
-        )
-        .map(|file| {
-            file.map_or_else(
-                || {
-                    LocalFileSystemLimits::new(
-                        crate::SizeLimit::Unknown,
-                        crate::SizeLimit::Unknown,
-                    )
-                },
-                |file| crate::capability::probe_limits(&file),
-            )
-        })
-    }
-
-    /// Observes dynamic space at a rooted path or its nearest existing
-    /// ancestor.
-    pub fn space_at(
-        &self,
-        path: &Path,
-        symlink_policy: LocalSymlinkPolicy,
-    ) -> LocalResult<LocalFileSystemSpace> {
-        probe_rooted_file(
-            &self.root,
-            path,
-            symlink_policy,
-            LocalFileOperation::Metadata,
-        )
-        .map(|file| {
-            file.map_or_else(
-                || LocalFileSystemSpace::new(None, None, None),
-                |file| crate::capability::probe_space(&file),
-            )
-        })
-    }
-
     /// Reads metadata through the opened root authority.
     pub fn metadata(
         &self,
