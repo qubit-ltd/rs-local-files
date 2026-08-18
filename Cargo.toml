@@ -36,7 +36,7 @@ test-support = []
 internal-test-support = []
 
 [dependencies]
-qubit-budget = { version = "0.3", path = "../rs-budget" }
+qubit-budget = "0.3"
 getrandom = "0.4"
 log = "0.4"
 
