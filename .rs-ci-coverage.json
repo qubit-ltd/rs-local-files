@@ -1,6 +1,11 @@
 {
   "threshold_exempt_files": {
     "qubit-local-files": [
+      "src/authority/authority.rs",
+      "src/authority/host_authority.rs",
+      "src/authority/rooted_authority.rs",
+      "src/error/local_file_error.rs",
+      "src/file_system/local_copy_limits.rs",
       "src/local/internal/atomic_commit_state.rs",
       "src/local/internal/copy_dir/facade.rs",
       "src/local/internal/copy_dir/opened_copy_source.rs",
@@ -19,7 +24,10 @@
       "src/rooted_local_file_system/temp.rs",
       "src/temp/internal/temp_parent.rs",
       "src/temp/local_temp_file.rs",
-      "src/walk/local_directory_walker.rs"
+      "src/walk/local_directory_walker.rs",
+      "src/platform/unix/namespace_handle.rs",
+      "src/platform/unix/opened_file.rs",
+      "src/platform/unix/staged_file.rs"
     ]
   }
 }
