@@ -60,21 +60,14 @@ pub(crate) fn resolve_host_path(
             continue;
         }
         if !symlink_policy.follows() {
-            return Err(LocalFileError::new(
-                LocalFileErrorKind::Unsupported,
-                LocalFileOperation::BindPath,
-            )
-            .with_reason("path resolution requires following a symbolic link")
-            .with_path(bound));
+            return Err(
+                LocalFileError::new(LocalFileErrorKind::Unsupported, LocalFileOperation::BindPath)
+                    .with_reason("path resolution requires following a symbolic link")
+                    .with_path(bound),
+            );
         }
-        resolved = fs::canonicalize(&resolved).map_err(|error| {
-            LocalFileError::from_io(
-                LocalFileOperation::BindPath,
-                Some(bound.clone()),
-                None,
-                error,
-            )
-        })?;
+        resolved = fs::canonicalize(&resolved)
+            .map_err(|error| LocalFileError::from_io(LocalFileOperation::BindPath, Some(bound.clone()), None, error))?;
     }
     Ok(resolved)
 }
@@ -101,22 +94,14 @@ pub(super) fn bind_host_path(path: &Path) -> LocalResult<PathBuf> {
         return Ok(path.to_path_buf());
     }
     if has_native_prefix(path) {
-        return Err(LocalFileError::new(
-            LocalFileErrorKind::InvalidPath,
-            LocalFileOperation::BindPath,
-        )
-        .with_path(path.to_path_buf()));
+        return Err(
+            LocalFileError::new(LocalFileErrorKind::InvalidPath, LocalFileOperation::BindPath)
+                .with_path(path.to_path_buf()),
+        );
     }
     current_directory_for_binding("local-path-bind-cwd")
         .map(|current| current.join(path))
-        .map_err(|source| {
-            LocalFileError::from_io(
-                LocalFileOperation::BindPath,
-                Some(path.to_path_buf()),
-                None,
-                source,
-            )
-        })
+        .map_err(|source| LocalFileError::from_io(LocalFileOperation::BindPath, Some(path.to_path_buf()), None, source))
 }
 
 /// Binds two Host paths using exactly one current-directory snapshot.
@@ -139,33 +124,23 @@ pub(super) fn bind_host_paths(paths: [&Path; 2]) -> LocalResult<[PathBuf; 2]> {
         .copied()
         .find(|path| path.is_relative() && has_native_prefix(path))
     {
-        return Err(LocalFileError::new(
-            LocalFileErrorKind::InvalidPath,
-            LocalFileOperation::BindPath,
-        )
-        .with_path(path.to_path_buf()));
+        return Err(
+            LocalFileError::new(LocalFileErrorKind::InvalidPath, LocalFileOperation::BindPath)
+                .with_path(path.to_path_buf()),
+        );
     }
     let current = if paths.iter().any(|path| path.is_relative()) {
         Some(
-            current_directory_for_binding("local-paths-bind-cwd").map_err(
-                |source| {
-                    LocalFileError::from_io(
-                        LocalFileOperation::BindPath,
-                        None,
-                        None,
-                        source,
-                    )
-                },
-            )?,
+            current_directory_for_binding("local-paths-bind-cwd")
+                .map_err(|source| LocalFileError::from_io(LocalFileOperation::BindPath, None, None, source))?,
         )
     } else {
         None
     };
     Ok(paths.map(|path| {
-        current.as_ref().map_or_else(
-            || path.to_path_buf(),
-            |directory| directory.join(path),
-        )
+        current
+            .as_ref()
+            .map_or_else(|| path.to_path_buf(), |directory| directory.join(path))
     }))
 }
 
@@ -173,10 +148,7 @@ pub(super) fn bind_host_paths(paths: [&Path; 2]) -> LocalResult<[PathBuf; 2]> {
 #[cfg(windows)]
 #[must_use]
 fn has_native_prefix(path: &Path) -> bool {
-    matches!(
-        path.components().next(),
-        Some(std::path::Component::Prefix(_))
-    )
+    matches!(path.components().next(), Some(std::path::Component::Prefix(_)))
 }
 
 /// Reports that Unix paths have no platform prefix component.

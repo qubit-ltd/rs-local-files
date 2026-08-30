@@ -47,10 +47,7 @@ impl LocalRenameOptions {
     }
 
     /// Sets the required durability.
-    pub const fn with_durability(
-        mut self,
-        requirement: LocalDurabilityRequirement,
-    ) -> Self {
+    pub const fn with_durability(mut self, requirement: LocalDurabilityRequirement) -> Self {
         self.durability = requirement;
         self
     }

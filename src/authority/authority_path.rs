@@ -36,9 +36,7 @@ impl AuthorityPath {
     #[must_use]
     pub(crate) fn diagnostic_path(&self) -> &Path {
         match self {
-            Self::Host(HostPath::BoundCwd(path)) | Self::Rooted(path) => {
-                path.as_path()
-            }
+            Self::Host(HostPath::BoundCwd(path)) | Self::Rooted(path) => path.as_path(),
             Self::Host(HostPath::Absolute(path)) => path,
         }
     }

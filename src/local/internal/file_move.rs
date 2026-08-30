@@ -146,10 +146,7 @@ pub(crate) fn replace_file(source: &Path, destination: &Path) -> Result<()> {
 /// # Errors
 /// Returns the platform I/O error reported while moving the path.
 #[cfg(target_os = "macos")]
-pub(crate) fn move_path_without_replacing(
-    source: &Path,
-    destination: &Path,
-) -> Result<()> {
+pub(crate) fn move_path_without_replacing(source: &Path, destination: &Path) -> Result<()> {
     #[cfg(feature = "internal-test-support")]
     if crate::local::test_support_enabled("persist-install-indeterminate") {
         return Err(std::io::Error::new(
@@ -162,9 +159,7 @@ pub(crate) fn move_path_without_replacing(
     // SAFETY: both CString buffers are NUL-terminated and remain alive for the
     // call. `RENAME_EXCL` is a valid renamex_np flag and the function does not
     // retain either pointer.
-    let result = unsafe {
-        renamex_np(source.as_ptr(), destination.as_ptr(), RENAME_EXCL)
-    };
+    let result = unsafe { renamex_np(source.as_ptr(), destination.as_ptr(), RENAME_EXCL) };
     if result == 0 {
         Ok(())
     } else {
@@ -181,10 +176,7 @@ pub(crate) fn move_path_without_replacing(
 /// # Errors
 /// Returns the platform I/O error reported while moving the path.
 #[cfg(target_os = "linux")]
-pub(crate) fn move_path_without_replacing(
-    source: &Path,
-    destination: &Path,
-) -> Result<()> {
+pub(crate) fn move_path_without_replacing(source: &Path, destination: &Path) -> Result<()> {
     #[cfg(feature = "internal-test-support")]
     if crate::local::test_support_enabled("persist-install-indeterminate") {
         return Err(std::io::Error::new(
@@ -223,10 +215,7 @@ pub(crate) fn move_path_without_replacing(
 /// # Errors
 /// Returns the platform I/O error reported while moving the path.
 #[cfg(windows)]
-pub(crate) fn move_path_without_replacing(
-    source: &Path,
-    destination: &Path,
-) -> Result<()> {
+pub(crate) fn move_path_without_replacing(source: &Path, destination: &Path) -> Result<()> {
     #[cfg(feature = "internal-test-support")]
     if crate::local::test_support_enabled("persist-install-indeterminate") {
         return Err(std::io::Error::new(
@@ -239,13 +228,7 @@ pub(crate) fn move_path_without_replacing(
     // SAFETY: both UTF-16 buffers are NUL-terminated, contain no interior NUL,
     // and remain alive for the call. MOVEFILE_WRITE_THROUGH is a documented
     // MoveFileExW flag and the function does not retain either pointer.
-    let result = unsafe {
-        MoveFileExW(
-            source.as_ptr(),
-            destination.as_ptr(),
-            MOVEFILE_WRITE_THROUGH,
-        )
-    };
+    let result = unsafe { MoveFileExW(source.as_ptr(), destination.as_ptr(), MOVEFILE_WRITE_THROUGH) };
     if result == 0 {
         Err(std::io::Error::last_os_error())
     } else {
@@ -263,10 +246,7 @@ pub(crate) fn move_path_without_replacing(
 /// Returns the platform I/O error reported while moving the file.
 #[cfg(any(target_os = "linux", target_os = "macos", windows))]
 #[inline(always)]
-pub(crate) fn move_file_without_replacing(
-    source: &Path,
-    destination: &Path,
-) -> Result<()> {
+pub(crate) fn move_file_without_replacing(source: &Path, destination: &Path) -> Result<()> {
     move_path_without_replacing(source, destination)
 }
 
@@ -281,10 +261,7 @@ pub(crate) fn move_file_without_replacing(
 /// no-replace file move implementation.
 #[cfg(not(any(target_os = "linux", target_os = "macos", windows)))]
 #[inline]
-pub(crate) fn move_file_without_replacing(
-    source: &Path,
-    destination: &Path,
-) -> Result<()> {
+pub(crate) fn move_file_without_replacing(source: &Path, destination: &Path) -> Result<()> {
     Err(Error::new(
         ErrorKind::Unsupported,
         format!(
@@ -305,10 +282,7 @@ pub(crate) fn move_file_without_replacing(
 /// Returns the platform I/O error reported while moving the directory.
 #[cfg(any(target_os = "linux", target_os = "macos", windows))]
 #[inline(always)]
-pub(crate) fn move_directory_without_replacing(
-    source: &Path,
-    destination: &Path,
-) -> Result<()> {
+pub(crate) fn move_directory_without_replacing(source: &Path, destination: &Path) -> Result<()> {
     move_path_without_replacing(source, destination)
 }
 
@@ -364,12 +338,9 @@ pub(crate) fn remove_directory_symlink(path: &Path) -> Result<()> {
     if inspected == 0 {
         return Err(Error::last_os_error());
     }
-    let is_directory =
-        attributes.FileAttributes & FILE_ATTRIBUTE_DIRECTORY != 0;
-    let is_reparse_point =
-        attributes.FileAttributes & FILE_ATTRIBUTE_REPARSE_POINT != 0;
-    let is_name_surrogate =
-        attributes.ReparseTag & IO_REPARSE_TAG_NAME_SURROGATE != 0;
+    let is_directory = attributes.FileAttributes & FILE_ATTRIBUTE_DIRECTORY != 0;
+    let is_reparse_point = attributes.FileAttributes & FILE_ATTRIBUTE_REPARSE_POINT != 0;
+    let is_name_surrogate = attributes.ReparseTag & IO_REPARSE_TAG_NAME_SURROGATE != 0;
     if !is_directory || !is_reparse_point || !is_name_surrogate {
         return Err(Error::new(
             ErrorKind::AlreadyExists,
@@ -407,10 +378,7 @@ pub(crate) fn remove_directory_symlink(path: &Path) -> Result<()> {
 /// no-replace directory move implementation.
 #[cfg(not(any(target_os = "linux", target_os = "macos", windows)))]
 #[inline]
-pub(crate) fn move_directory_without_replacing(
-    source: &Path,
-    destination: &Path,
-) -> Result<()> {
+pub(crate) fn move_directory_without_replacing(source: &Path, destination: &Path) -> Result<()> {
     Err(Error::new(
         ErrorKind::Unsupported,
         format!(
@@ -514,8 +482,7 @@ pub(crate) fn sync_parent_dir(path: &Path) -> Result<()> {
 fn is_ignorable_windows_parent_sync_error(error: &Error) -> bool {
     const ERROR_SHARING_VIOLATION: i32 = 32;
 
-    error.kind() == ErrorKind::PermissionDenied
-        || error.raw_os_error() == Some(ERROR_SHARING_VIOLATION)
+    error.kind() == ErrorKind::PermissionDenied || error.raw_os_error() == Some(ERROR_SHARING_VIOLATION)
 }
 
 /// Gets the parent directory that should be synced for `path`.

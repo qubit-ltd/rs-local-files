@@ -40,11 +40,7 @@ use crate::local::internal::test_support;
 ///
 /// Returns the creation error when the failure was not `AlreadyExists`, the
 /// racing entry cannot be inspected, or that entry is not a real directory.
-pub(super) fn reconcile_directory_creation<I>(
-    dst: &Path,
-    result: Result<()>,
-    inspect: I,
-) -> Result<bool>
+pub(super) fn reconcile_directory_creation<I>(dst: &Path, result: Result<()>, inspect: I) -> Result<bool>
 where
     I: FnOnce(&Path) -> Result<fs::Metadata>,
 {
@@ -52,9 +48,7 @@ where
         Ok(()) => Ok(true),
         Err(error) if error.kind() == ErrorKind::AlreadyExists => {
             let metadata = inspect(dst)?;
-            if is_real_directory(&metadata)
-                && !test_non_directory_race_enabled()
-            {
+            if is_real_directory(&metadata) && !test_non_directory_race_enabled() {
                 Ok(false)
             } else {
                 Err(error)
@@ -90,16 +84,9 @@ fn test_non_directory_race_enabled() -> bool {
 /// # Errors
 ///
 /// Returns metadata errors other than `NotFound`.
-pub(super) fn removable_non_directory_metadata(
-    result: Result<fs::Metadata>,
-) -> Result<Option<fs::Metadata>> {
+pub(super) fn removable_non_directory_metadata(result: Result<fs::Metadata>) -> Result<Option<fs::Metadata>> {
     match result {
-        Ok(metadata)
-            if is_real_directory(&metadata)
-                || test_removal_directory_race_enabled() =>
-        {
-            Ok(None)
-        }
+        Ok(metadata) if is_real_directory(&metadata) || test_removal_directory_race_enabled() => Ok(None),
         Ok(metadata) => Ok(Some(metadata)),
         Err(error) if error.kind() == ErrorKind::NotFound => Ok(None),
         Err(error) => Err(error),

@@ -27,8 +27,7 @@ use qubit_local_files::LocalPathCodecError;
 fn test_encode_component_preserves_unicode_and_escapes_special_bytes() {
     assert_eq!(
         "文档%25name%0A",
-        LocalPathCodec::encode_component(OsStr::new("文档%name\n"))
-            .expect("native component should encode"),
+        LocalPathCodec::encode_component(OsStr::new("文档%name\n")).expect("native component should encode"),
     );
 }
 
@@ -85,8 +84,7 @@ proptest! {
 fn test_decode_component_rejects_non_canonical_escape_aliases() {
     for component in ["a%2fb", "a%2Fb", "a%41b"] {
         assert_codec_error(
-            LocalPathCodec::decode_component(component)
-                .expect_err("escape alias must be rejected"),
+            LocalPathCodec::decode_component(component).expect_err("escape alias must be rejected"),
             LocalPathCodecError::NonCanonicalText,
         );
     }
@@ -96,23 +94,19 @@ fn test_decode_component_rejects_non_canonical_escape_aliases() {
 #[test]
 fn test_path_codec_rejects_malformed_escape_and_native_nul() {
     assert_codec_error(
-        LocalPathCodec::decode_component("a%4")
-            .expect_err("incomplete escape must be rejected"),
+        LocalPathCodec::decode_component("a%4").expect_err("incomplete escape must be rejected"),
         LocalPathCodecError::InvalidEscape { offset: 1 },
     );
     assert_codec_error(
-        LocalPathCodec::decode_component("a%G0")
-            .expect_err("invalid hexadecimal escape must be rejected"),
+        LocalPathCodec::decode_component("a%G0").expect_err("invalid hexadecimal escape must be rejected"),
         LocalPathCodecError::InvalidEscape { offset: 1 },
     );
     assert_codec_error(
-        LocalPathCodec::decode_component("a%00")
-            .expect_err("native NUL must be rejected"),
+        LocalPathCodec::decode_component("a%00").expect_err("native NUL must be rejected"),
         LocalPathCodecError::NativeNul,
     );
     assert_codec_error(
-        LocalPathCodec::encode_component(OsStr::new("a\0"))
-            .expect_err("native NUL must be rejected"),
+        LocalPathCodec::encode_component(OsStr::new("a\0")).expect_err("native NUL must be rejected"),
         LocalPathCodecError::NativeNul,
     );
 }
@@ -126,11 +120,9 @@ fn test_unix_non_utf8_native_bytes_round_trip() {
     use std::os::unix::ffi::OsStringExt;
 
     let native = OsString::from_vec(vec![0x66, 0x80, 0x25]);
-    let canonical = LocalPathCodec::encode_component(&native)
-        .expect("non-UTF-8 native component should encode");
+    let canonical = LocalPathCodec::encode_component(&native).expect("non-UTF-8 native component should encode");
     assert_eq!(canonical, "f%80%25");
-    let decoded = LocalPathCodec::decode_component(&canonical)
-        .expect("canonical native component should decode");
+    let decoded = LocalPathCodec::decode_component(&canonical).expect("canonical native component should decode");
     assert_eq!(decoded.as_bytes(), [0x66, 0x80, 0x25]);
 }
 
@@ -144,14 +136,10 @@ fn test_windows_unpaired_surrogate_round_trip() {
     use std::os::windows::ffi::OsStringExt;
 
     let native = OsString::from_wide(&[0x0066, 0xD800, 0x0025]);
-    let canonical = LocalPathCodec::encode_component(&native)
-        .expect("unpaired surrogate native component should encode");
-    let decoded = LocalPathCodec::decode_component(&canonical)
-        .expect("canonical native component should decode");
-    assert_eq!(
-        decoded.encode_wide().collect::<Vec<_>>(),
-        [0x0066, 0xD800, 0x0025]
-    );
+    let canonical =
+        LocalPathCodec::encode_component(&native).expect("unpaired surrogate native component should encode");
+    let decoded = LocalPathCodec::decode_component(&canonical).expect("canonical native component should decode");
+    assert_eq!(decoded.encode_wide().collect::<Vec<_>>(), [0x0066, 0xD800, 0x0025]);
 }
 
 /// Asserts that a structured path error retains one expected codec failure.

@@ -26,9 +26,7 @@ pub(crate) fn commit_recoverably<W>(
 ) -> Result<bool, LocalAtomicCommitError<W>> {
     match attempt(&mut writer) {
         Ok(durable) => Ok(durable),
-        Err(error) if staging_is_open(&writer) => {
-            Err(LocalAtomicCommitError::new(error, Some(writer)))
-        }
+        Err(error) if staging_is_open(&writer) => Err(LocalAtomicCommitError::new(error, Some(writer))),
         Err(error) => Err(LocalAtomicCommitError::new(error, None)),
     }
 }
@@ -58,9 +56,7 @@ pub(crate) fn finalize_failed_commit<W>(
 pub(crate) fn synchronize_staging_file(
     file: &File,
     durability: LocalDurabilityRequirement,
-    map_required_error: impl FnOnce(
-        io::Result<()>,
-    ) -> Result<(), LocalAtomicWriteError>,
+    map_required_error: impl FnOnce(io::Result<()>) -> Result<(), LocalAtomicWriteError>,
 ) -> Result<bool, LocalAtomicWriteError> {
     match durability {
         LocalDurabilityRequirement::NotRequired => Ok(false),

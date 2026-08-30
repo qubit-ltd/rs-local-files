@@ -33,10 +33,7 @@ use crate::local::try_random_file_name;
 pub(crate) const DEFAULT_TEMP_ENTRY_RETRIES: usize = 256;
 
 /// Validates caller-provided temporary-entry affixes before sandbox creation.
-pub(crate) fn validate_temp_affixes(
-    prefix: Option<&str>,
-    suffix: Option<&str>,
-) -> Result<()> {
+pub(crate) fn validate_temp_affixes(prefix: Option<&str>, suffix: Option<&str>) -> Result<()> {
     if let Some(prefix) = prefix {
         validate_file_name_fragment("prefix", prefix)?;
     }
@@ -71,11 +68,7 @@ pub(crate) fn create_temp_file_in_dir(
     let mut attempt = 0;
     loop {
         attempt += 1;
-        let path = dir.join(try_random_file_name(
-            "qubit-local-files-",
-            prefix,
-            suffix,
-        )?);
+        let path = dir.join(try_random_file_name("qubit-local-files-", prefix, suffix)?);
         let mut options = OpenOptions::new();
         options.read(true).write(true).create_new(true);
         #[cfg(unix)]
@@ -99,11 +92,7 @@ pub(crate) fn create_temp_file_in_dir(
                 if should_retry_collision(&error, attempt, max_tries) {
                     continue;
                 }
-                return Err(add_path_context(
-                    error,
-                    "create temporary file",
-                    &path,
-                ));
+                return Err(add_path_context(error, "create temporary file", &path));
             }
         }
     }
@@ -133,11 +122,7 @@ pub(crate) fn create_temp_dir_in_dir_with_affixes(
     let mut attempt = 0;
     loop {
         attempt += 1;
-        let path = dir.join(try_random_file_name(
-            "qubit-local-files-",
-            prefix,
-            suffix,
-        )?);
+        let path = dir.join(try_random_file_name("qubit-local-files-", prefix, suffix)?);
         #[cfg(feature = "internal-test-support")]
         let created = if test_support::take("temp-directory-collision") {
             Err(Error::new(
@@ -145,9 +130,7 @@ pub(crate) fn create_temp_dir_in_dir_with_affixes(
                 "injected temporary directory collision",
             ))
         } else if test_support::is_enabled("temp-directory-create") {
-            Err(Error::other(
-                "injected temporary directory creation failure",
-            ))
+            Err(Error::other("injected temporary directory creation failure"))
         } else {
             create_private_dir(&path)
         };
@@ -159,11 +142,7 @@ pub(crate) fn create_temp_dir_in_dir_with_affixes(
                 if should_retry_collision(&error, attempt, max_tries) {
                     continue;
                 }
-                return Err(add_path_context(
-                    error,
-                    "create temporary directory",
-                    &path,
-                ));
+                return Err(add_path_context(error, "create temporary directory", &path));
             }
         }
     }
@@ -203,11 +182,7 @@ pub(crate) fn create_private_dir(path: &Path) -> Result<()> {
 /// `true` only for an existing entry when another attempt remains.
 #[must_use]
 #[inline(always)]
-fn should_retry_collision(
-    error: &Error,
-    attempt: usize,
-    max_tries: usize,
-) -> bool {
+fn should_retry_collision(error: &Error, attempt: usize, max_tries: usize) -> bool {
     error.kind() == ErrorKind::AlreadyExists && attempt < max_tries
 }
 

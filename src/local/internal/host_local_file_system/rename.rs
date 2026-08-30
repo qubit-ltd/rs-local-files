@@ -58,17 +58,12 @@ impl HostLocalFileSystem {
         options: &LocalRenameOptions,
         symlink_policy: LocalSymlinkPolicy,
     ) -> LocalRenameResult {
-        let [source, target] = bind_host_paths([source, target])
-            .map_err(rename_failure_unchanged)?;
-        let source = resolve_host_path(&source, symlink_policy, false)
-            .map_err(rename_failure_unchanged)?;
-        let target = resolve_host_path(&target, symlink_policy, false)
-            .map_err(rename_failure_unchanged)?;
+        let [source, target] = bind_host_paths([source, target]).map_err(rename_failure_unchanged)?;
+        let source = resolve_host_path(&source, symlink_policy, false).map_err(rename_failure_unchanged)?;
+        let target = resolve_host_path(&target, symlink_policy, false).map_err(rename_failure_unchanged)?;
         let implements_durability = Self::protocols().supports_durable_rename();
-        let implements_durability = implements_durability
-            && !crate::local::test_support_enabled(
-                "local-fs-required-directory-durability",
-            );
+        let implements_durability =
+            implements_durability && !crate::local::test_support_enabled("local-fs-required-directory-durability");
         ensure_required_directory_durability(
             options.durability(),
             LocalFileOperation::Rename,
@@ -80,11 +75,7 @@ impl HostLocalFileSystem {
         .map_err(rename_failure_unchanged)?;
         let source_metadata = test_io_fault("local-fs-rename-source-metadata")
             .map_or_else(|| fs::symlink_metadata(&source), Err)
-            .map_err(|error| {
-                rename_failure_unchanged(rename_io_error(
-                    &source, &target, error,
-                ))
-            })?;
+            .map_err(|error| rename_failure_unchanged(rename_io_error(&source, &target, error)))?;
         if crate::local::test_support_enabled("rename-native-indeterminate") {
             return Err(rename_failure_indeterminate(rename_io_error(
                 &source,
@@ -92,9 +83,7 @@ impl HostLocalFileSystem {
                 crate::local::test_fault_error(),
             )));
         }
-        let result = if let Some(error) =
-            test_io_fault("local-fs-rename-native-error")
-        {
+        let result = if let Some(error) = test_io_fault("local-fs-rename-native-error") {
             Err(error)
         } else {
             if options.overwrite() {
@@ -109,9 +98,7 @@ impl HostLocalFileSystem {
                 crate::local::move_file_without_replacing(&source, &target)
             }
         };
-        result.map_err(|error| {
-            rename_failure_after_native_attempt(&source, &target, error)
-        })?;
+        result.map_err(|error| rename_failure_after_native_attempt(&source, &target, error))?;
 
         let durable = published_durability(
             options.durability(),
@@ -139,11 +126,7 @@ impl HostLocalFileSystem {
 ///
 /// Structured rename error.
 #[inline]
-fn rename_io_error(
-    source: &Path,
-    target: &Path,
-    error: io::Error,
-) -> LocalFileError {
+fn rename_io_error(source: &Path, target: &Path, error: io::Error) -> LocalFileError {
     LocalFileError::from_io(
         LocalFileOperation::Rename,
         Some(source.to_path_buf()),

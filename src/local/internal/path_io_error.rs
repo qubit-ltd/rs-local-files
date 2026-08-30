@@ -37,11 +37,7 @@ impl PathIoError {
     /// # Returns
     /// A contextual error retaining `source`.
     #[inline]
-    pub(super) fn new(
-        operation: &'static str,
-        path: &Path,
-        source: Error,
-    ) -> Self {
+    pub(super) fn new(operation: &'static str, path: &Path, source: Error) -> Self {
         Self {
             operation,
             path: path.to_path_buf(),
@@ -89,9 +85,6 @@ mod tests {
         let source = Error::new(ErrorKind::PermissionDenied, "denied");
         let error = PathIoError::new("write", Path::new("file"), source);
         assert_eq!(error.to_string(), "failed to write 'file': denied");
-        assert_eq!(
-            error.source().expect("source is retained").to_string(),
-            "denied"
-        );
+        assert_eq!(error.source().expect("source is retained").to_string(), "denied");
     }
 }

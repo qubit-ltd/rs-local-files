@@ -49,19 +49,17 @@ impl CopyBudget {
     #[must_use]
     pub(crate) fn new(options: LocalCopyDirOptions) -> Self {
         Self {
-            entries: options.max_entries().map(|limit| {
-                ResourceBudget::new(LocalResourceKind::Entry, limit)
-            }),
-            bytes: options.max_bytes().map(|limit| {
-                ResourceBudget::new(LocalResourceKind::CopiedBytes, limit)
-            }),
-            open_directories: options.max_open_directories().map(|limit| {
-                ResourcePool::new(LocalResourceKind::OpenDirectory, limit)
-            }),
+            entries: options
+                .max_entries()
+                .map(|limit| ResourceBudget::new(LocalResourceKind::Entry, limit)),
+            bytes: options
+                .max_bytes()
+                .map(|limit| ResourceBudget::new(LocalResourceKind::CopiedBytes, limit)),
+            open_directories: options
+                .max_open_directories()
+                .map(|limit| ResourcePool::new(LocalResourceKind::OpenDirectory, limit)),
             max_depth: options.max_depth(),
-            deadline: options
-                .deadline()
-                .map(|duration| (Instant::now(), duration)),
+            deadline: options.deadline().map(|duration| (Instant::now(), duration)),
         }
     }
 
@@ -76,10 +74,7 @@ impl CopyBudget {
             .deadline
             .is_some_and(|(started, duration)| started.elapsed() >= duration)
         {
-            return Err(io::Error::new(
-                io::ErrorKind::TimedOut,
-                "local copy deadline exceeded",
-            ));
+            return Err(io::Error::new(io::ErrorKind::TimedOut, "local copy deadline exceeded"));
         }
         Ok(())
     }
@@ -145,8 +140,7 @@ impl CopyBudget {
     #[inline]
     pub(crate) fn release_directory(&mut self) {
         if let Some(pool) = self.open_directories.as_mut() {
-            pool.release(1)
-                .expect("copy directory reader held one budget slot");
+            pool.release(1).expect("copy directory reader held one budget slot");
         }
     }
 
@@ -168,11 +162,7 @@ impl CopyBudget {
     ///
     /// Returns an I/O error from either descriptor, a deadline error, or a
     /// structured copied-byte resource-limit error.
-    pub(crate) fn copy<R, W>(
-        &mut self,
-        reader: &mut R,
-        writer: &mut W,
-    ) -> io::Result<u64>
+    pub(crate) fn copy<R, W>(&mut self, reader: &mut R, writer: &mut W) -> io::Result<u64>
     where
         R: Read + ?Sized,
         W: Write + ?Sized,
@@ -200,24 +190,18 @@ fn resource_error(error: LocalResourceLimitError) -> io::Error {
 }
 
 /// Converts a machine-sized budget failure without discarding its facts.
-fn usize_budget_error(
-    error: InsufficientBudgetError<LocalResourceKind, usize>,
-) -> io::Error {
+fn usize_budget_error(error: InsufficientBudgetError<LocalResourceKind, usize>) -> io::Error {
     let InsufficientBudgetError {
         resource,
         limit,
         remaining,
         requested,
     } = error;
-    resource_error(LocalResourceLimitError::new(
-        resource, limit, remaining, requested,
-    ))
+    resource_error(LocalResourceLimitError::new(resource, limit, remaining, requested))
 }
 
 /// Converts a byte budget failure into structured machine-sized facts.
-fn u64_budget_error(
-    error: InsufficientBudgetError<LocalResourceKind, u64>,
-) -> io::Error {
+fn u64_budget_error(error: InsufficientBudgetError<LocalResourceKind, u64>) -> io::Error {
     let InsufficientBudgetError {
         resource,
         limit,

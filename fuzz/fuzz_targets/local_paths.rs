@@ -24,9 +24,7 @@ fuzz_target!(|data: &[u8]| {
     let components = text.split('\0').take(MAX_COMPONENTS).collect::<Vec<_>>();
 
     let rooted = LocalPaths::rooted();
-    let Ok(native) =
-        rooted.from_canonical_components(components.iter().copied())
-    else {
+    let Ok(native) = rooted.from_canonical_components(components.iter().copied()) else {
         return;
     };
     let encoded = rooted
@@ -54,10 +52,7 @@ fn fuzz_host_unix(data: &[u8]) {
     use std::os::unix::ffi::OsStringExt;
 
     let mut native = PathBuf::from("/");
-    for component in data
-        .split(|byte| *byte == 0 || *byte == b'/')
-        .take(MAX_COMPONENTS)
-    {
+    for component in data.split(|byte| *byte == 0 || *byte == b'/').take(MAX_COMPONENTS) {
         if component.is_empty() || component == b"." || component == b".." {
             continue;
         }

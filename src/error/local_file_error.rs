@@ -48,10 +48,7 @@ impl LocalFileError {
     /// - `operation`: Operation that failed.
     #[must_use]
     #[inline(always)]
-    pub const fn new(
-        kind: LocalFileErrorKind,
-        operation: LocalFileOperation,
-    ) -> Self {
+    pub const fn new(kind: LocalFileErrorKind, operation: LocalFileOperation) -> Self {
         Self {
             kind,
             operation,
@@ -329,10 +326,7 @@ impl LocalFileError {
 
     /// Reclassifies the operation after a shared validation stage.
     #[inline(always)]
-    pub(crate) const fn with_operation(
-        mut self,
-        operation: LocalFileOperation,
-    ) -> Self {
+    pub(crate) const fn with_operation(mut self, operation: LocalFileOperation) -> Self {
         self.operation = operation;
         self
     }
@@ -350,19 +344,16 @@ fn standard_io_error_kind(error: &LocalFileError) -> io::ErrorKind {
         Some(LocalFileErrorSource::ResourceLimit(_)) => io::ErrorKind::Other,
         None => match error.kind {
             LocalFileErrorKind::AlreadyExists => io::ErrorKind::AlreadyExists,
-            LocalFileErrorKind::InvalidPath
-            | LocalFileErrorKind::InvalidOptions
-            | LocalFileErrorKind::InvalidState => io::ErrorKind::InvalidInput,
+            LocalFileErrorKind::InvalidPath | LocalFileErrorKind::InvalidOptions | LocalFileErrorKind::InvalidState => {
+                io::ErrorKind::InvalidInput
+            }
             LocalFileErrorKind::NotDirectory => io::ErrorKind::NotADirectory,
             LocalFileErrorKind::IsDirectory => io::ErrorKind::IsADirectory,
             LocalFileErrorKind::NotFound => io::ErrorKind::NotFound,
-            LocalFileErrorKind::PermissionDenied => {
-                io::ErrorKind::PermissionDenied
-            }
+            LocalFileErrorKind::PermissionDenied => io::ErrorKind::PermissionDenied,
             LocalFileErrorKind::ResourceLimit => io::ErrorKind::Other,
             LocalFileErrorKind::DataCorruption => io::ErrorKind::InvalidData,
-            LocalFileErrorKind::RequirementNotMet
-            | LocalFileErrorKind::Unsupported => io::ErrorKind::Unsupported,
+            LocalFileErrorKind::RequirementNotMet | LocalFileErrorKind::Unsupported => io::ErrorKind::Unsupported,
             _ => io::ErrorKind::Other,
         },
     }
@@ -371,11 +362,7 @@ fn standard_io_error_kind(error: &LocalFileError) -> io::ErrorKind {
 impl fmt::Display for LocalFileError {
     /// Formats the structured operation and available native path context.
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(
-            formatter,
-            "{:?} failed with {:?}",
-            self.operation, self.kind
-        )?;
+        write!(formatter, "{:?} failed with {:?}", self.operation, self.kind)?;
         if let Some(reason) = self.reason {
             write!(formatter, ": {reason}")?;
         }
@@ -420,9 +407,9 @@ fn classify_io_error(error: &io::Error) -> LocalFileErrorKind {
         io::ErrorKind::InvalidInput => LocalFileErrorKind::InvalidPath,
         io::ErrorKind::InvalidData => LocalFileErrorKind::DataCorruption,
         io::ErrorKind::Unsupported => LocalFileErrorKind::Unsupported,
-        io::ErrorKind::OutOfMemory
-        | io::ErrorKind::StorageFull
-        | io::ErrorKind::QuotaExceeded => LocalFileErrorKind::ResourceLimit,
+        io::ErrorKind::OutOfMemory | io::ErrorKind::StorageFull | io::ErrorKind::QuotaExceeded => {
+            LocalFileErrorKind::ResourceLimit
+        }
         _ => LocalFileErrorKind::Io,
     }
 }

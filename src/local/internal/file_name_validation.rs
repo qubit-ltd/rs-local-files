@@ -23,15 +23,9 @@ use std::path::Path;
 /// # Errors
 /// Returns [`ErrorKind::InvalidInput`] when `fragment` can behave like a path
 /// instead of a plain file-name fragment.
-pub(super) fn validate_file_name_fragment(
-    role: &str,
-    fragment: &str,
-) -> Result<()> {
+pub(super) fn validate_file_name_fragment(role: &str, fragment: &str) -> Result<()> {
     if fragment.contains('\0') {
-        return Err(invalid_file_name_fragment_error(
-            role,
-            "NUL bytes are not allowed",
-        ));
+        return Err(invalid_file_name_fragment_error(role, "NUL bytes are not allowed"));
     }
     if fragment.contains('/') || fragment.contains('\\') {
         return Err(invalid_file_name_fragment_error(

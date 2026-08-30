@@ -79,10 +79,7 @@ impl OpenOptions {
     ///
     /// # Returns
     /// Updated options.
-    pub(crate) const fn with_open_retry_timeout(
-        mut self,
-        timeout: Duration,
-    ) -> Self {
+    pub(crate) const fn with_open_retry_timeout(mut self, timeout: Duration) -> Self {
         self.open_retry_timeout = Some(timeout);
         self
     }

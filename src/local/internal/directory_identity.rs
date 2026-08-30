@@ -59,16 +59,10 @@ impl DirectoryIdentity {
     /// A stable identity suitable for active-ancestor cycle detection.
     #[cfg(unix)]
     #[inline]
-    pub(crate) fn from_metadata(
-        metadata: &Metadata,
-        canonical_path: &Path,
-    ) -> Self {
+    pub(crate) fn from_metadata(metadata: &Metadata, canonical_path: &Path) -> Self {
         #[cfg(feature = "internal-test-support")]
         if injected_cycle_identity() {
-            return Self::Native {
-                filesystem: 0,
-                file: 0,
-            };
+            return Self::Native { filesystem: 0, file: 0 };
         }
         let _ = canonical_path;
         Self::Native {
@@ -88,20 +82,13 @@ impl DirectoryIdentity {
     ///
     /// A native Windows identity when available, otherwise the canonical path.
     #[cfg(windows)]
-    pub(crate) fn from_metadata(
-        metadata: &Metadata,
-        canonical_path: &Path,
-    ) -> Self {
+    pub(crate) fn from_metadata(metadata: &Metadata, canonical_path: &Path) -> Self {
         #[cfg(feature = "internal-test-support")]
         if injected_cycle_identity() {
-            return Self::Native {
-                filesystem: 0,
-                file: 0,
-            };
+            return Self::Native { filesystem: 0, file: 0 };
         }
         let _ = metadata;
-        windows_native_identity(canonical_path)
-            .unwrap_or_else(|| Self::Canonical(canonical_path.to_path_buf()))
+        windows_native_identity(canonical_path).unwrap_or_else(|| Self::Canonical(canonical_path.to_path_buf()))
     }
 
     /// Builds a canonical directory identity on other targets.
@@ -116,10 +103,7 @@ impl DirectoryIdentity {
     /// The canonical path wrapped as a directory identity.
     #[cfg(not(any(unix, windows)))]
     #[inline(always)]
-    pub(crate) fn from_metadata(
-        metadata: &Metadata,
-        canonical_path: &Path,
-    ) -> Self {
+    pub(crate) fn from_metadata(metadata: &Metadata, canonical_path: &Path) -> Self {
         let _ = metadata;
         Self::Canonical(canonical_path.to_path_buf())
     }
@@ -145,19 +129,13 @@ fn windows_native_identity(path: &Path) -> Option<DirectoryIdentity> {
     let mut information = BY_HANDLE_FILE_INFORMATION::default();
     // SAFETY: `directory` owns a valid handle for the duration of the call,
     // and `information` is a writable structure with the required layout.
-    let result = unsafe {
-        GetFileInformationByHandle(
-            directory.as_raw_handle(),
-            &raw mut information,
-        )
-    };
+    let result = unsafe { GetFileInformationByHandle(directory.as_raw_handle(), &raw mut information) };
     if result == 0 {
         return None;
     }
     Some(DirectoryIdentity::Native {
         filesystem: u64::from(information.dwVolumeSerialNumber),
-        file: (u64::from(information.nFileIndexHigh) << 32)
-            | u64::from(information.nFileIndexLow),
+        file: (u64::from(information.nFileIndexHigh) << 32) | u64::from(information.nFileIndexLow),
     })
 }
 

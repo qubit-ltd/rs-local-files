@@ -39,19 +39,13 @@ impl EntryIdentity {
         let mut information = BY_HANDLE_FILE_INFORMATION::default();
         // SAFETY: `file` owns a live handle and `information` is writable
         // storage with the exact layout expected by the API.
-        let result = unsafe {
-            GetFileInformationByHandle(
-                file.as_raw_handle(),
-                &raw mut information,
-            )
-        };
+        let result = unsafe { GetFileInformationByHandle(file.as_raw_handle(), &raw mut information) };
         if result == 0 {
             return Err(io::Error::last_os_error());
         }
         Ok(Self {
             volume: u64::from(information.dwVolumeSerialNumber),
-            file: (u64::from(information.nFileIndexHigh) << 32)
-                | u64::from(information.nFileIndexLow),
+            file: (u64::from(information.nFileIndexHigh) << 32) | u64::from(information.nFileIndexLow),
         })
     }
 
@@ -61,28 +55,14 @@ impl EntryIdentity {
     ///
     /// Returns the authority lookup error when the current entry identity
     /// cannot be observed.
-    pub(crate) fn matches_path(
-        &self,
-        namespace: &NamespaceHandle,
-        path: &RelativePath,
-    ) -> LocalResult<bool> {
-        namespace
-            .entry_identity(path)
-            .map(|current| current == *self)
+    pub(crate) fn matches_path(&self, namespace: &NamespaceHandle, path: &RelativePath) -> LocalResult<bool> {
+        namespace.entry_identity(path).map(|current| current == *self)
     }
 
     /// Converts an identity query into a structured metadata error.
-    pub(super) fn for_file(
-        file: &File,
-        path: &RelativePath,
-    ) -> LocalResult<Self> {
+    pub(super) fn for_file(file: &File, path: &RelativePath) -> LocalResult<Self> {
         Self::from_file(file).map_err(|error| {
-            super::namespace_handle::io_error(
-                LocalFileOperation::Metadata,
-                path.as_path(),
-                None,
-                error,
-            )
+            super::namespace_handle::io_error(LocalFileOperation::Metadata, path.as_path(), None, error)
         })
     }
 }

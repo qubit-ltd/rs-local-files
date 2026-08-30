@@ -18,11 +18,9 @@ use crate::RelativePath;
 #[test]
 fn test_namespace_handle_rejects_parent_escape_before_io() {
     let sandbox = tempfile::tempdir().expect("sandbox should be created");
-    let handle = NamespaceHandle::open_root(sandbox.path())
-        .expect("sandbox root should open");
+    let handle = NamespaceHandle::open_root(sandbox.path()).expect("sandbox root should open");
 
-    let error = RelativePath::parse(Path::new("../escape"))
-        .expect_err("parent escape should be rejected");
+    let error = RelativePath::parse(Path::new("../escape")).expect_err("parent escape should be rejected");
 
     assert_eq!(error.kind(), LocalFileErrorKind::InvalidPath);
     drop(handle);
@@ -35,15 +33,10 @@ fn test_namespace_handle_clone_survives_root_rename() {
     let root = sandbox.path().join("root");
     let moved_root = sandbox.path().join("moved-root");
     fs::create_dir(&root).expect("root directory should be created");
-    fs::write(root.join("entry"), b"original")
-        .expect("rooted entry should be created");
-    let handle =
-        NamespaceHandle::open_root(&root).expect("root authority should open");
-    let cloned = handle
-        .clone_handle()
-        .expect("root authority should be cloned");
-    let entry = RelativePath::parse(Path::new("entry"))
-        .expect("entry path should validate");
+    fs::write(root.join("entry"), b"original").expect("rooted entry should be created");
+    let handle = NamespaceHandle::open_root(&root).expect("root authority should open");
+    let cloned = handle.clone_handle().expect("root authority should be cloned");
+    let entry = RelativePath::parse(Path::new("entry")).expect("entry path should validate");
 
     fs::rename(&root, &moved_root).expect("root path should be renamed");
 
@@ -67,23 +60,16 @@ fn test_namespace_handle_clone_survives_root_rename() {
 #[test]
 fn test_entry_identity_distinguishes_same_path_replacement() {
     let sandbox = tempfile::tempdir().expect("sandbox should be created");
-    let handle = NamespaceHandle::open_root(sandbox.path())
-        .expect("sandbox root should open");
-    let entry = RelativePath::parse(Path::new("entry"))
-        .expect("entry path should validate");
-    fs::write(sandbox.path().join("entry"), b"original")
-        .expect("original entry should be created");
+    let handle = NamespaceHandle::open_root(sandbox.path()).expect("sandbox root should open");
+    let entry = RelativePath::parse(Path::new("entry")).expect("entry path should validate");
+    fs::write(sandbox.path().join("entry"), b"original").expect("original entry should be created");
     let original = handle
         .entry_identity(&entry)
         .expect("original identity should be observed");
 
-    fs::rename(
-        sandbox.path().join("entry"),
-        sandbox.path().join("retained-original"),
-    )
-    .expect("original entry should be retained under another name");
-    fs::write(sandbox.path().join("entry"), b"replacement")
-        .expect("replacement entry should be created");
+    fs::rename(sandbox.path().join("entry"), sandbox.path().join("retained-original"))
+        .expect("original entry should be retained under another name");
+    fs::write(sandbox.path().join("entry"), b"replacement").expect("replacement entry should be created");
 
     assert!(
         !original

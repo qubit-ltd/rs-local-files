@@ -32,15 +32,9 @@ impl TestFaultPlan {
 
     /// Takes the next matching fault, if one remains.
     pub(crate) fn take(&self, point: TestFaultPoint) -> Option<io::Error> {
-        let mut faults = self
-            .faults
-            .lock()
-            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        let mut faults = self.faults.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
         let index = faults.iter().position(|fault| fault.point == point)?;
         let fault = faults.remove(index)?;
-        Some(io::Error::new(
-            fault.kind,
-            "injected local filesystem fault",
-        ))
+        Some(io::Error::new(fault.kind, "injected local filesystem fault"))
     }
 }

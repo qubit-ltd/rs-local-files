@@ -57,38 +57,21 @@ impl RootedLocalFileSystem {
             "required directory durability is unavailable for this rooted authority",
         )
         .map_err(rename_failure_unchanged)?;
-        let source_path = resolve_rooted_path(
-            &self.root,
-            source,
-            symlink_policy,
-            false,
-            LocalFileOperation::Rename,
-        )
-        .map_err(rename_failure_unchanged)?;
-        let target_path = resolve_rooted_path(
-            &self.root,
-            target,
-            symlink_policy,
-            false,
-            LocalFileOperation::Rename,
-        )
-        .map_err(rename_failure_unchanged)?;
+        let source_path = resolve_rooted_path(&self.root, source, symlink_policy, false, LocalFileOperation::Rename)
+            .map_err(rename_failure_unchanged)?;
+        let target_path = resolve_rooted_path(&self.root, target, symlink_policy, false, LocalFileOperation::Rename)
+            .map_err(rename_failure_unchanged)?;
         let result = if options.overwrite() {
             self.root.rename(&source_path, &target_path)
         } else {
-            self.root
-                .rename_without_replacing(&source_path, &target_path)
+            self.root.rename_without_replacing(&source_path, &target_path)
         };
-        result.map_err(|error| {
-            rename_failure_after_native_attempt(source, target, error)
-        })?;
+        result.map_err(|error| rename_failure_after_native_attempt(source, target, error))?;
         let durable = published_durability(
             options.durability(),
             || {
                 self.root.sync_parent(&source_path)?;
-                if source_path.as_path().parent()
-                    != target_path.as_path().parent()
-                {
+                if source_path.as_path().parent() != target_path.as_path().parent() {
                     self.root.sync_parent(&target_path)?;
                 }
                 Ok(())

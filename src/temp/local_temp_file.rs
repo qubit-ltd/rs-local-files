@@ -82,9 +82,7 @@ impl LocalTempFile {
     ) -> Result<Self> {
         Ok(Self {
             path,
-            backend: LocalTempResourceBackend::Host(
-                super::internal::HostTempResourceBackend { sandbox_path },
-            ),
+            backend: LocalTempResourceBackend::Host(super::internal::HostTempResourceBackend { sandbox_path }),
             host_identity: Some(TempEntryIdentity::from_file(&file)?),
             rooted_identity: None,
             file: Some(file),
@@ -104,17 +102,13 @@ impl LocalTempFile {
     ) -> Result<Self> {
         Ok(Self {
             path: path.clone(),
-            backend: LocalTempResourceBackend::Rooted(
-                RootedTempResourceBackend {
-                    root,
-                    relative_path: path,
-                    sandbox_path,
-                },
-            ),
+            backend: LocalTempResourceBackend::Rooted(RootedTempResourceBackend {
+                root,
+                relative_path: path,
+                sandbox_path,
+            }),
             host_identity: None,
-            rooted_identity: Some(crate::rooted::Metadata::from_open_file(
-                &file,
-            )?),
+            rooted_identity: Some(crate::rooted::Metadata::from_open_file(&file)?),
             file: Some(file),
             state: LocalTempResourceState::Owned,
             symlink_policy,
@@ -139,32 +133,17 @@ impl LocalTempFile {
     pub fn cleanup(&mut self) -> LocalResult<()> {
         self.close();
         self.ensure_cleanup_safe().map_err(|error| {
-            LocalFileError::from_io(
-                LocalFileOperation::Cleanup,
-                Some(self.path.clone()),
-                None,
-                error,
-            )
+            LocalFileError::from_io(LocalFileOperation::Cleanup, Some(self.path.clone()), None, error)
         })?;
         if self.state == LocalTempResourceState::Owned {
             self.remove_resource().map_err(|error| {
-                LocalFileError::from_io(
-                    LocalFileOperation::Cleanup,
-                    Some(self.path.clone()),
-                    None,
-                    error,
-                )
+                LocalFileError::from_io(LocalFileOperation::Cleanup, Some(self.path.clone()), None, error)
             })?;
             self.state = LocalTempResourceState::SandboxPending;
         }
         if self.state == LocalTempResourceState::SandboxPending {
             self.release_sandbox().map_err(|error| {
-                LocalFileError::from_io(
-                    LocalFileOperation::Cleanup,
-                    Some(self.cleanup_path()),
-                    None,
-                    error,
-                )
+                LocalFileError::from_io(LocalFileOperation::Cleanup, Some(self.cleanup_path()), None, error)
             })?;
             self.state = LocalTempResourceState::Released;
         }
@@ -245,11 +224,7 @@ impl LocalTempFile {
                     ));
                 }
             };
-            let target = match crate::local::resolve_host_path(
-                &logical_target,
-                self.symlink_policy,
-                false,
-            ) {
+            let target = match crate::local::resolve_host_path(&logical_target, self.symlink_policy, false) {
                 Ok(target) => target,
                 Err(error) => {
                     return Err(LocalPersistError::new(
@@ -261,9 +236,7 @@ impl LocalTempFile {
                     ));
                 }
             };
-            if let Err(error) =
-                prepare_host_parent(&target, options.creates_parent())
-            {
+            if let Err(error) = prepare_host_parent(&target, options.creates_parent()) {
                 return Err(LocalPersistError::new(
                     error,
                     self,
@@ -288,12 +261,7 @@ impl LocalTempFile {
                 ));
             }
             let cleanup_error = self.release_sandbox().err().map(|error| {
-                LocalFileError::from_io(
-                    LocalFileOperation::Cleanup,
-                    Some(self.cleanup_path()),
-                    None,
-                    error,
-                )
+                LocalFileError::from_io(LocalFileOperation::Cleanup, Some(self.cleanup_path()), None, error)
             });
             self.state = LocalTempResourceState::Released;
             return Ok(LocalPersistOutcome::new(
@@ -319,33 +287,28 @@ impl LocalTempFile {
         let LocalTempResourceBackend::Rooted(rooted) = &self.backend else {
             unreachable!()
         };
-        let source = LocalRelativePath::new(&rooted.relative_path)
-            .expect("rooted temporary path was validated at creation");
-        let resolved =
-            match crate::rooted_local_file_system::resolve_rooted_path(
-                &rooted.root,
-                &target,
-                self.symlink_policy,
-                false,
-                LocalFileOperation::PersistTemp,
-            ) {
-                Ok(resolved) => resolved,
-                Err(error) => {
-                    return Err(LocalPersistError::new(
-                        error.into_io_error(),
-                        self,
-                        requested_target,
-                        None,
-                        LocalPersistStage::ResolveTarget,
-                    ));
-                }
-            };
-        let destination = resolved;
-        if let Err(error) = prepare_rooted_parent(
+        let source =
+            LocalRelativePath::new(&rooted.relative_path).expect("rooted temporary path was validated at creation");
+        let resolved = match crate::rooted_local_file_system::resolve_rooted_path(
             &rooted.root,
-            &destination,
-            options.creates_parent(),
+            &target,
+            self.symlink_policy,
+            false,
+            LocalFileOperation::PersistTemp,
         ) {
+            Ok(resolved) => resolved,
+            Err(error) => {
+                return Err(LocalPersistError::new(
+                    error.into_io_error(),
+                    self,
+                    requested_target,
+                    None,
+                    LocalPersistStage::ResolveTarget,
+                ));
+            }
+        };
+        let destination = resolved;
+        if let Err(error) = prepare_rooted_parent(&rooted.root, &destination, options.creates_parent()) {
             return Err(LocalPersistError::new(
                 error,
                 self,
@@ -370,14 +333,10 @@ impl LocalTempFile {
                 LocalPersistStage::InstallDestination,
             ));
         }
-        let cleanup_error = self.release_sandbox().err().map(|error| {
-            LocalFileError::from_io(
-                LocalFileOperation::Cleanup,
-                Some(self.cleanup_path()),
-                None,
-                error,
-            )
-        });
+        let cleanup_error = self
+            .release_sandbox()
+            .err()
+            .map(|error| LocalFileError::from_io(LocalFileOperation::Cleanup, Some(self.cleanup_path()), None, error));
         self.state = LocalTempResourceState::Released;
         Ok(LocalPersistOutcome::new(
             target,
@@ -414,9 +373,7 @@ impl LocalTempFile {
             return Err(crate::local::test_fault_error());
         }
         match &self.backend {
-            LocalTempResourceBackend::Host(host) => {
-                std::fs::remove_dir(&host.sandbox_path)
-            }
+            LocalTempResourceBackend::Host(host) => std::fs::remove_dir(&host.sandbox_path),
             LocalTempResourceBackend::Rooted(rooted) => {
                 let sandbox = LocalRelativePath::new(&rooted.sandbox_path)
                     .expect("rooted temporary sandbox path was validated at creation");
@@ -429,9 +386,7 @@ impl LocalTempFile {
     fn cleanup_path(&self) -> PathBuf {
         match &self.backend {
             LocalTempResourceBackend::Host(host) => host.sandbox_path.clone(),
-            LocalTempResourceBackend::Rooted(rooted) => {
-                rooted.sandbox_path.clone()
-            }
+            LocalTempResourceBackend::Rooted(rooted) => rooted.sandbox_path.clone(),
         }
     }
 
@@ -458,14 +413,15 @@ impl LocalTempFile {
             LocalTempResourceBackend::Rooted(rooted) => rooted
                 .root
                 .symlink_metadata(
-                    &LocalRelativePath::new(&rooted.relative_path).expect(
-                        "rooted temporary path was validated at creation",
-                    ),
+                    &LocalRelativePath::new(&rooted.relative_path)
+                        .expect("rooted temporary path was validated at creation"),
                 )
                 .map(|metadata| {
-                    metadata.is_same_file(self.rooted_identity.as_ref().expect(
-                        "rooted temporary file must retain rooted identity",
-                    ))
+                    metadata.is_same_file(
+                        self.rooted_identity
+                            .as_ref()
+                            .expect("rooted temporary file must retain rooted identity"),
+                    )
                 }),
         };
         match matches {
@@ -484,10 +440,8 @@ impl LocalTempFile {
     /// Records whether a failed native install proves the source remains owned.
     #[inline]
     fn record_native_persist_failure(&mut self, error: &Error) {
-        self.state = if LocalPersistFailureState::from_error(
-            LocalPersistStage::InstallDestination,
-            error.kind(),
-        ) == LocalPersistFailureState::NotPublished
+        self.state = if LocalPersistFailureState::from_error(LocalPersistStage::InstallDestination, error.kind())
+            == LocalPersistFailureState::NotPublished
         {
             LocalTempResourceState::Owned
         } else {
@@ -550,11 +504,7 @@ impl Drop for LocalTempFile {
                     // policy. This is intentionally
                     // postponed until that policy is
                     // designed; keep the current warning behavior unchanged.
-                    warn!(
-                        "failed to remove temporary file {}: {}",
-                        self.path.display(),
-                        error
-                    );
+                    warn!("failed to remove temporary file {}: {}", self.path.display(), error);
                     return;
                 }
                 self.state = LocalTempResourceState::SandboxPending;
@@ -589,8 +539,7 @@ impl Drop for LocalTempFile {
                     self.state = LocalTempResourceState::Released;
                 }
             }
-            LocalTempResourceState::Indeterminate
-            | LocalTempResourceState::Released => {}
+            LocalTempResourceState::Indeterminate | LocalTempResourceState::Released => {}
         }
     }
 }
