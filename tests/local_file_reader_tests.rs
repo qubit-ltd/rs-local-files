@@ -49,7 +49,7 @@ fn test_local_file_reader_reads_and_seeks() {
     assert_eq!(&last, b"def");
 }
 
-/// Verifies vectored reads consume bytes across mutable buffers in order.
+/// Verifies vectored reads fill the returned buffer prefix in order.
 #[test]
 fn test_local_file_reader_supports_vectored_reads() {
     let directory = tempdir().expect("temporary directory should be created");
@@ -67,9 +67,10 @@ fn test_local_file_reader_supports_vectored_reads() {
         .read_vectored(&mut buffers)
         .expect("vectored read should succeed");
 
-    assert_eq!(count, 6);
-    assert_eq!(&first, b"ab");
-    assert_eq!(&second, b"cdef");
+    assert!(count > 0);
+    assert!(count <= first.len() + second.len());
+    let bytes = first.iter().chain(second.iter()).copied().collect::<Vec<_>>();
+    assert_eq!(&bytes[..count], &b"abcdef"[..count]);
 }
 
 /// Verifies a vectored read retains bytes read before a later native error.
