@@ -11,7 +11,13 @@ use crate::local::LocalRelativePath;
 /// Pending work for one no-follow Rooted recursive deletion.
 pub(super) enum DeleteWork {
     /// Inspects an entry before deciding how to remove it.
-    Inspect(LocalRelativePath),
+    Inspect(
+        /// Authority-relative entry awaiting inspection.
+        LocalRelativePath,
+    ),
     /// Removes a directory after all of its children have been processed.
-    RemoveDirectory(LocalRelativePath),
+    RemoveDirectory(
+        /// Authority-relative directory awaiting post-order removal.
+        LocalRelativePath,
+    ),
 }

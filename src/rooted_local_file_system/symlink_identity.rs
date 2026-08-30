@@ -12,7 +12,15 @@ use std::path::PathBuf;
 #[derive(Clone, Debug, Eq, Hash, PartialEq)]
 pub(super) enum SymlinkIdentity {
     /// Stable native device and file identity.
-    Native(u64, u64),
+    Native(
+        /// Native device or volume identifier.
+        u64,
+        /// Native file identifier within the device or volume.
+        u64,
+    ),
     /// Namespace path used when native identity is unavailable.
-    NamespacePath(PathBuf),
+    NamespacePath(
+        /// Authority-relative path serving as the fallback identity.
+        PathBuf,
+    ),
 }
