@@ -9,6 +9,7 @@ use qubit_local_files::LocalCopyLimits;
 use qubit_local_files::LocalFileErrorKind;
 use qubit_local_files::LocalFileSystemBuilder;
 use qubit_local_files::LocalFileSystemScope;
+use qubit_local_files::LocalSymlinkPolicy;
 use qubit_local_files::LocalWalkLimits;
 
 #[test]
@@ -16,6 +17,7 @@ fn cloned_filesystem_shares_authority_and_limits() {
     let root = tempfile::tempdir().expect("temporary root");
     let limits = LocalWalkLimits::new().with_max_entries(32).with_max_open_handles(4);
     let filesystem = LocalFileSystemBuilder::rooted(root.path())
+        .symlink_policy(LocalSymlinkPolicy::FollowWithinScope)
         .walk_limits(limits)
         .build()
         .expect("rooted filesystem");
