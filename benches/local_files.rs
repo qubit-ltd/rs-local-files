@@ -55,7 +55,8 @@ fn bench_walk(c: &mut Criterion) {
     c.bench_function("walk", |b| {
         b.iter(|| {
             let walker = LocalFileSystem::host()
-                .list(black_box(directory.path()), &Default::default())
+                .expect("Host filesystem should open")
+                .list_with_options(black_box(directory.path()), &Default::default())
                 .expect("benchmark walker should open");
             black_box(walker.count());
         });
@@ -77,7 +78,7 @@ fn bench_walk_handle_budget(c: &mut Criterion) {
     }
     fs::write(current.join("payload"), b"payload").expect("budget benchmark leaf should be written");
 
-    let host = LocalFileSystem::host();
+    let host = LocalFileSystem::host().expect("Host filesystem should open");
     let rooted = LocalFileSystem::rooted(directory.path()).expect("budget rooted benchmark filesystem should open");
     let mut group = c.benchmark_group("walk_handle_budget");
     for max_open_directories in [1, 4, 64] {
@@ -86,13 +87,13 @@ fn bench_walk_handle_budget(c: &mut Criterion) {
             .with_max_open_directories(max_open_directories)
             .with_reopen_policy(LocalDirectoryReopenPolicy::Reopen);
         let host_count = host
-            .list(&tree, &options)
+            .list_with_options(&tree, &options)
             .expect("host budget benchmark should open")
             .collect::<Result<Vec<_>, _>>()
             .expect("host budget benchmark fixture should be valid")
             .len();
         let rooted_count = rooted
-            .list(Path::new("tree"), &options)
+            .list_with_options(Path::new("tree"), &options)
             .expect("rooted budget benchmark should open")
             .collect::<Result<Vec<_>, _>>()
             .expect("rooted budget benchmark fixture should be valid")
@@ -118,7 +119,7 @@ fn bench_walk_handle_budget(c: &mut Criterion) {
 /// Counts a complete traversal and fails the benchmark on any entry error.
 fn count_entries(filesystem: &LocalFileSystem, path: &Path, options: &LocalListOptions) -> usize {
     filesystem
-        .list(path, options)
+        .list_with_options(path, options)
         .and_then(|mut walker| walker.try_fold(0_usize, |count, entry| entry.map(|_| count.saturating_add(1))))
         .expect("benchmark traversal should complete without errors")
 }
@@ -136,7 +137,8 @@ fn bench_copy(c: &mut Criterion) {
             },
             |_| {
                 let outcome = LocalFileSystem::host()
-                    .copy(black_box(&source), black_box(&target), &LocalCopyOptions::default())
+                    .expect("Host filesystem should open")
+                    .copy_with_options(black_box(&source), black_box(&target), &LocalCopyOptions::default())
                     .expect("benchmark copy should succeed");
                 black_box(outcome.stats().files());
             },
@@ -155,7 +157,8 @@ fn bench_writer(c: &mut Criterion) {
             },
             |_| {
                 let mut writer = LocalFileSystem::host()
-                    .open_writer(
+                    .expect("Host filesystem should open")
+                    .open_writer_with_options(
                         black_box(&target),
                         &LocalWriteOptions::new(LocalWriteMode::CreateOrReplace),
                     )
@@ -179,7 +182,7 @@ fn bench_rooted_writer(c: &mut Criterion) {
             },
             |_| {
                 let mut writer = filesystem
-                    .open_writer(target, &LocalWriteOptions::new(LocalWriteMode::CreateOrReplace))
+                    .open_writer_with_options(target, &LocalWriteOptions::new(LocalWriteMode::CreateOrReplace))
                     .expect("rooted benchmark writer should open");
                 writer
                     .write_all(b"payload")
@@ -197,14 +200,14 @@ fn bench_read_prefix(c: &mut Criterion) {
     let directory = tempdir().expect("benchmark directory should be created");
     let path = directory.path().join("prefix-payload");
     fs::write(&path, vec![0x5a_u8; 1 << 20]).expect("benchmark prefix payload should be written");
-    let filesystem = LocalFileSystem::host();
+    let filesystem = LocalFileSystem::host().expect("Host filesystem should open");
     let mut group = c.benchmark_group("read_prefix");
     for max_bytes in [4 * 1024, 64 * 1024, 1 << 20] {
         group.throughput(criterion::Throughput::Bytes(max_bytes as u64));
         group.bench_function(format!("max_{max_bytes}"), |bench| {
             bench.iter(|| {
                 let bytes = filesystem
-                    .read_prefix(black_box(&path), &LocalReadOptions::new(), max_bytes)
+                    .read_prefix_with_options(black_box(&path), max_bytes, &LocalReadOptions::new())
                     .expect("benchmark prefix read should succeed");
                 black_box(bytes.len());
             });

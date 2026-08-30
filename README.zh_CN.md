@@ -29,23 +29,23 @@ qubit-local-files = "0.3"
 use std::io::{Read, Write};
 
 use qubit_local_files::{
-    LocalFileSystem, LocalReadOptions, LocalTempDirectoryOptions, LocalWriteMode,
-    LocalWriteOptions, LocalWriterState,
+    LocalFileSystem, LocalWriteMode, LocalWriteOptions, LocalWriterState,
 };
 
-let filesystem = LocalFileSystem::host();
-let work = filesystem.create_temp_directory(&LocalTempDirectoryOptions::new())?;
+let mut filesystem = LocalFileSystem::host()?;
+filesystem.set_default_write_options(LocalWriteOptions::new(
+    LocalWriteMode::CreateOrReplace,
+))?;
+
+let work = filesystem.create_temp_directory()?;
 let path = work.path().join("manifest.json");
-let mut writer = filesystem.open_writer(
-    &path,
-    &LocalWriteOptions::new(LocalWriteMode::CreateOrReplace),
-)?;
+let mut writer = filesystem.open_writer(&path)?;
 writer.write_all(br#"{"version":1}"#)?;
 let outcome = writer.commit()?;
 assert_eq!(outcome.state(), LocalWriterState::Committed);
 
 let mut content = String::new();
-filesystem.open_reader(&path, &LocalReadOptions::new())?
+filesystem.open_reader(&path)?
     .read_to_string(&mut content)?;
 assert_eq!(content, r#"{"version":1}"#);
 # Ok::<(), Box<dyn std::error::Error>>(())
@@ -63,8 +63,14 @@ assert_eq!(content, r#"{"version":1}"#);
 | `LocalTempFile` / `LocalTempDirectory` | 拥有清理责任，并支持 `keep` 与持久化。 |
 | `LocalFileNames` / `LocalPaths` | 不丢失 UTF-8 以外文件名信息的原生文件名和词法路径工具。 |
 
-需要保存配置、传递给其他组件或适配到更高层文件系统 SPI 时，使用 `LocalFileSystem` 实例。
-该句柄可以廉价克隆；rooted 克隆会共享已打开的权限。
+`LocalFileSystem` 是有状态的实例 API。每个实例拥有自己的当前目录、符号链接策略和九种
+操作的默认 Options。普通方法使用实例默认值；每个 `*_with_options` 方法都以传入的完整
+Options 替代实例默认值。clone 会复制全部可变状态，Rooted clone 只共享不可变的已打开
+authority。本 crate 不承诺共享可变配置时的线程安全；调用方可以每线程持有一个 clone，
+也可以自行添加同步包装。
+
+资源预算均由调用方选择。遍历和复制的深度、条目数、字节数、打开目录数、deadline、
+重复名称内存、打开重试时间以及临时名称尝试次数，在调用方显式设置前都不会形成库内隐藏上限。
 
 符号链接策略按 `LocalFileSystem` 实例配置；Rooted 默认
 `FollowWithinScope`，Host 默认 `FollowAcrossScope`。Rooted 仅支持
@@ -83,10 +89,16 @@ assert_eq!(content, r#"{"version":1}"#);
 
 主机路径使用 `LocalFileSystem::host()`。当一个已打开目录就是权限边界时，
 使用 `LocalFileSystem::rooted(root)`。两种实例提供相同操作，只改变路径解释方式。rooted
-路径必须是相对后代；绝对路径、平台前缀、`.` 和 `..` 会被拒绝。中间符号链接遵循实例
-策略：默认的 `FollowWithinScope` 保持在已打开 root 内；`FollowAcrossScope` 仅适用于
-Host，Rooted 会拒绝该配置，因此任何操作都不能越出已打开的权限。之后重命名诊断用的
-根路径也不会重定向已打开的权限。
+和 Host 实例都拥有自己的 namespace-absolute PWD。相对路径从该 PWD 开始；`.` 与空路径
+表示 PWD；`..` 会逐层规范化，只在试图越过 namespace root 时被拒绝。在 Rooted 实例中，
+`/etc/hosts` 是已打开 root 下的虚拟绝对路径，而不是 Host 的 `/etc/hosts`；native prefix
+会被拒绝。
+
+中间符号链接遵循实例策略。Rooted 的绝对链接目标会从虚拟 `/` 重新开始解析，默认
+`FollowWithinScope` 会阻止任何链接越出已打开的 authority。`FollowAcrossScope` 仅适用于
+Host，Rooted 会拒绝该配置。之后重命名诊断用 root 路径也不会重定向已打开的 authority。
+公共资源路径和错误路径统一使用可再次传入同一实例的 namespace-absolute 身份；底层物理
+路径仅在可获得时作为可选诊断信息提供。
 
 复制会根据源元数据选择文件或目录行为。复制和重命名失败会保留已证实的最强发布状态，
 因此调用方必须检查类型化失败，不能假设出错后目标未变。`CreateNew` 和
