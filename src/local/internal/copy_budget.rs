@@ -15,8 +15,9 @@ use std::time::Duration;
 use std::time::Instant;
 
 use qubit_budget::InsufficientBudgetError;
+use qubit_budget::ManagedResourcePermit;
+use qubit_budget::ManagedResourcePool;
 use qubit_budget::ResourceBudget;
-use qubit_budget::ResourcePool;
 
 use crate::LocalCopyDirOptions;
 use crate::LocalResourceKind;
@@ -32,7 +33,7 @@ pub(crate) struct CopyBudget {
     bytes: Option<ResourceBudget<LocalResourceKind, u64>>,
 
     /// Concurrent source-directory reader capacity.
-    open_directories: Option<ResourcePool<LocalResourceKind, usize>>,
+    open_directories: Option<ManagedResourcePool<LocalResourceKind, usize>>,
 
     /// Maximum source-entry depth beneath the copied root.
     max_depth: Option<usize>,
@@ -57,7 +58,7 @@ impl CopyBudget {
                 .map(|limit| ResourceBudget::new(LocalResourceKind::CopiedBytes, limit)),
             open_directories: options
                 .max_open_directories()
-                .map(|limit| ResourcePool::new(LocalResourceKind::OpenDirectory, limit)),
+                .map(|limit| ManagedResourcePool::new(LocalResourceKind::OpenDirectory, limit)),
             max_depth: options.max_depth(),
             deadline: options.deadline().map(|duration| (Instant::now(), duration)),
         }
@@ -120,28 +121,22 @@ impl CopyBudget {
 
     /// Acquires capacity for one source-directory reader.
     ///
+    /// # Returns
+    ///
+    /// `Some(permit)` when an open-directory limit is configured, or `None`
+    /// when this dimension is unconfigured. Dropping the permit returns its
+    /// capacity.
+    ///
     /// # Errors
     ///
     /// Returns a structured resource-limit error when the directory capacity
     /// is exhausted.
     #[inline]
-    pub(crate) fn acquire_directory(&mut self) -> io::Result<()> {
-        if let Some(pool) = self.open_directories.as_mut() {
-            pool.try_acquire(1).map_err(usize_budget_error)?;
-        }
-        Ok(())
-    }
-
-    /// Releases capacity held by one source-directory reader.
-    ///
-    /// # Panics
-    ///
-    /// Panics only when a backend violates the acquire/release invariant.
-    #[inline]
-    pub(crate) fn release_directory(&mut self) {
-        if let Some(pool) = self.open_directories.as_mut() {
-            pool.release(1).expect("copy directory reader held one budget slot");
-        }
+    pub(crate) fn acquire_directory(&self) -> io::Result<Option<ManagedResourcePermit<LocalResourceKind, usize>>> {
+        self.open_directories
+            .as_ref()
+            .map(|pool| pool.try_acquire(1).map_err(usize_budget_error))
+            .transpose()
     }
 
     /// Copies from an opened source while enforcing the actual byte limit.
