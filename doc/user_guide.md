@@ -11,17 +11,55 @@ API, or a replacement for provider-level logical paths.
 ## Conceptual Model
 
 ```
-host paths ── LocalFileSystem::host()
-opened root ─ LocalFileSystem::rooted(root) ─ relative descendants only
+Host namespace ── LocalFileSystem::host() ── captured Host PWD
+opened root ───── LocalFileSystem::rooted(root) ── virtual / and instance PWD
 ```
 
-`LocalFileSystem` is the host-wide service form: `host()` selects
-process-visible paths, while
-`rooted(root)` opens a directory authority and accepts only relative
-descendants. The two forms expose the same operations, so callers and adapters
-do not need separate host and rooted interfaces. Readers, writers, walkers, and
-temporary entries are owned stateful resources. `LocalFileNames` and
-`LocalPaths` provide native lexical utilities without converting names to UTF-8.
+`LocalFileSystem` is a stateful filesystem object. `host()` selects the
+process-visible namespace and captures the process current directory once.
+`rooted(root)` opens one directory authority, gives it the virtual root `/`,
+and starts with PWD `/`. Both forms accept namespace-absolute paths and paths
+relative to their own PWD, and expose the same operations. Readers, writers,
+walkers, and temporary entries are owned stateful resources. `LocalFileNames`
+and `LocalPaths` provide native lexical utilities without converting names to
+UTF-8.
+
+## Configure Once, Override Deliberately
+
+Each filesystem instance owns its PWD, symbolic-link policy, and defaults for
+read, write, list, copy, create-directory, delete, rename, temporary-file, and
+temporary-directory operations. Configure those values once with the
+`set_default_*_options` methods and then use ordinary operation methods.
+
+Every `*_with_options` method instead uses the supplied Options as a complete
+one-call replacement; it does not merge them with the instance defaults. To
+modify one field from an instance default, clone or copy that default
+explicitly, modify it, and pass the resulting value.
+
+```rust,no_run
+use qubit_local_files::{LocalFileSystem, LocalListOptions};
+
+let mut filesystem = LocalFileSystem::rooted(std::path::Path::new("/srv/app"))?;
+filesystem.set_current_directory(std::path::Path::new("/assets"))?;
+filesystem.set_default_list_options(
+    LocalListOptions::new().with_recursive().with_max_entries(10_000),
+)?;
+
+let default_walk = filesystem.list(std::path::Path::new("."))?;
+let one_level = filesystem.list_with_options(
+    std::path::Path::new("."),
+    &LocalListOptions::new(),
+)?;
+# drop((default_walk, one_level));
+# Ok::<(), Box<dyn std::error::Error>>(())
+```
+
+The initial Options contain no hidden business resource caps. Traversal and
+copy budgets, retry durations, deadlines, and temporary-name attempt limits
+apply only when the caller sets them. Cloning a filesystem snapshots its PWD
+and all configuration; Rooted clones share only the immutable opened authority.
+The crate does not promise synchronization for shared mutable configuration.
+Use one clone per thread or add a caller-owned synchronization wrapper.
 
 ## Symbolic-link policy
 
@@ -31,12 +69,15 @@ links only while the resolved path remains below the opened root. Host defaults
 to `FollowAcrossScope`, because Host has no narrower root boundary. Rooted
 supports only `Reject` and `FollowWithinScope`; configuring
 `FollowAcrossScope` returns `InvalidOptions`. The fallible
-`with_symlink_policy` method and list/copy options can select a supported policy.
+`set_symlink_policy` method and list/copy options can select a supported policy.
 
 The policy applies to every non-final path component. With
 `FollowWithinScope`, a rooted path such as `etc/link/config` is rejected when
 `link` resolves outside the opened directory. `FollowAcrossScope` is available
-only in Host mode.
+only in Host mode. A Rooted link target beginning with `/` restarts at the
+Rooted virtual root, not at the Host root. `.` and `..` in link targets retain
+their native lexical meaning, but resolving `..` across the virtual root
+returns `InvalidPath`.
 
 Final components retain native operation semantics:
 
@@ -67,26 +108,27 @@ complete write, and inspect the result. The observable success condition is a
 ```rust
 use std::io::{Read, Write};
 use qubit_local_files::{
-    LocalCreateDirectoryOptions, LocalFileSystem, LocalReadOptions, LocalWriteMode,
-    LocalWriteOptions, LocalWriterState,
+    LocalCreateDirectoryOptions, LocalFileSystem, LocalWriteMode, LocalWriteOptions,
+    LocalWriterState,
 };
 
-let filesystem = LocalFileSystem::host();
+let mut filesystem = LocalFileSystem::host()?;
+filesystem.set_default_create_directory_options(
+    LocalCreateDirectoryOptions::new().with_recursive(),
+)?;
+filesystem.set_default_write_options(LocalWriteOptions::new(
+    LocalWriteMode::CreateOrReplace,
+))?;
+
 let output = std::path::Path::new("build/output");
-filesystem.create_directory(
-    output,
-    &LocalCreateDirectoryOptions::new().with_recursive(),
-)?;
+filesystem.create_directory(output)?;
 let path = output.join("manifest.json");
-let mut writer = filesystem.open_writer(
-    &path,
-    &LocalWriteOptions::new(LocalWriteMode::CreateOrReplace),
-)?;
+let mut writer = filesystem.open_writer(&path)?;
 writer.write_all(br#"{"complete":true}"#)?;
 let result = writer.commit()?;
 assert_eq!(result.state(), LocalWriterState::Committed);
 let mut text = String::new();
-filesystem.open_reader(&path, &LocalReadOptions::new())?
+filesystem.open_reader(&path)?
     .read_to_string(&mut text)?;
 assert_eq!(text, r#"{"complete":true}"#);
 # Ok::<(), Box<dyn std::error::Error>>(())
@@ -106,19 +148,21 @@ publication conclusion (`LocalWriteFailureState`). A write, flush, or commit
 error can leave publication state indeterminate, so retain and inspect the
 returned resource/error where recovery is required.
 
-`LocalFileSystem::copy` selects file or directory behavior from source metadata. Use
-`with_file_source()` or `with_tree_source()` when the source kind must be
-explicit; `source_mode()` reports the selected mode. Its options separately
-control target conflict, type conflict, metadata, symbolic links, atomicity,
-and durability. Mount and device boundaries are not part of the copy policy.
-Unsupported required guarantees are rejected before destructive changes. Self-copy and hard-link
-aliases are rejected; overwriting a symbolic-link target replaces that entry
-rather than following it.
+`LocalFileSystem::copy` selects file or directory behavior from source
+metadata. Use `with_file_source()` or `with_tree_source()` when the source
+kind must be explicit; `source_mode()` reports the selected mode. Copy Options
+separately control target conflict, type conflict, metadata, symbolic links,
+atomicity, durability, and caller-selected resource budgets. Mount and device
+boundaries are not part of the copy policy. Unsupported required guarantees
+are rejected before destructive changes. Self-copy and hard-link aliases are
+rejected; overwriting a symbolic-link target replaces that entry rather than
+following it.
 
 ```rust,no_run
 use qubit_local_files::{LocalCopyFailureState, LocalCopyOptions, LocalFileSystem};
 
-match LocalFileSystem::host().copy(
+let filesystem = LocalFileSystem::host()?;
+match filesystem.copy_with_options(
     std::path::Path::new("source"),
     std::path::Path::new("backup"),
     &LocalCopyOptions::new(),
@@ -131,6 +175,7 @@ match LocalFileSystem::host().copy(
         LocalCopyFailureState::Indeterminate => println!("reconcile destination"),
     },
 }
+# Ok::<(), Box<dyn std::error::Error>>(())
 ```
 
 Rename reports `Unchanged`, `Renamed`, or `Indeterminate` through its typed
@@ -140,54 +185,69 @@ happened”.
 ## Walk and Temporary Resources
 
 `LocalFileSystem::list` returns a lazy `LocalDirectoryWalker`. It opens and
-advances directories on demand; maximum depth, symbolic-link policy, and the
-handle budget are fixed at creation. The default `Reopen` policy closes and
-reopens active frames when the budget is reached, while `Fail` explicitly
-returns `ResourceLimit`; a zero handle budget is invalid and returns
-`InvalidOptions`. Rooted enumeration also streams each directory instead of
-first collecting it into a vector. Dropping it only releases handles.
+advances directories on demand; its normalized root, Options, symbolic-link
+policy, PWD snapshot, and authority are fixed at creation. No depth, entry,
+name-memory, deadline, or open-directory budget exists by default. When a
+caller sets an open-directory budget, `Reopen` closes and later reopens active
+frames as needed, while `Fail` returns `ResourceLimit` at the boundary. A
+zero handle budget is invalid and returns `InvalidOptions`. Rooted enumeration
+streams each directory instead of first collecting it into a vector. Dropping
+the walker only releases handles.
 
 Temporary files and directories own cleanup while armed. Each resource lives in
 a private generated sandbox that is removed with the resource. Dropping them
 performs best-effort cleanup; call `cleanup()` when the caller must observe a
-cleanup failure. `keep` disables cleanup and returns an authority-local path
-(absolute for Host and relative to the opened root for Rooted).
-Persistence failures retain the resource so the caller can retry, inspect,
-keep, or explicitly clean it. Prefixes and suffixes are checked before entry
-creation: native separators, NUL, and portable reserved-name violations do not
-leave an entry behind.
+cleanup failure. `keep` disables cleanup. With no explicit parent, creation
+uses the filesystem PWD
+captured for that operation. `path()`, `keep`, and persistence outcomes all
+return namespace-absolute paths for both Host and Rooted, so they can be passed
+back to the same filesystem independently of later PWD changes. Persistence
+failures retain the resource so the caller can retry, inspect, keep, or
+explicitly clean it. Prefixes and suffixes are checked before entry creation:
+native separators, NUL, and portable reserved-name violations do not leave an
+entry behind. Name-collision attempts are unbounded unless the caller sets
+`max_attempts`.
 
 ## Rooted Workspaces
 
 Use rooted access when processing untrusted relative names beneath a workspace.
 
-```rust
-use qubit_local_files::{LocalFileSystem, LocalListOptions};
+```rust,no_run
+use qubit_local_files::LocalFileSystem;
 
-let root = LocalFileSystem::rooted(std::path::Path::new("workspace"))?;
-let walker = root.list(std::path::Path::new("assets"), &LocalListOptions::new())?;
+let mut root = LocalFileSystem::rooted(std::path::Path::new("workspace"))?;
+root.set_current_directory(std::path::Path::new("/assets"))?;
+let walker = root.list(std::path::Path::new("."))?;
 for entry in walker {
     println!("{}", entry?.path().display());
 }
 # Ok::<(), Box<dyn std::error::Error>>(())
 ```
 
-Rooted paths must be relative descendants. Absolute paths, prefixes, `.`, and
-`..` are rejected. Intermediate symbolic links follow the configured policy;
-`FollowWithinScope` rejects a link that resolves outside the root. The
-Rooted namespace does not support `FollowAcrossScope`; that configuration
-returns `InvalidOptions`. The diagnostic root path is not the authority for
-descriptor-relative operations: renaming it after `open` does not redirect
-those operations.
-Lexical containment is useful early classification, but it is not a substitute
-for descriptor-relative authorization.
+Rooted behaves like a private namespace rooted at the opened directory:
+`/etc/hosts` maps beneath that authority, while `etc/hosts` starts at the
+instance PWD. `.` and an empty path mean PWD; `a/./b` normalizes to `a/b`;
+`a/../b` normalizes to `b`. Parent components are accepted until one would
+cross virtual `/`; therefore `..` at PWD `/` and
+`a/./.././../b` at PWD `/` return `InvalidPath`. Native prefixes are
+always invalid in Rooted.
+
+Intermediate symbolic links follow the configured policy;
+`FollowWithinScope` rejects a link that resolves outside the root. Rooted
+does not support `FollowAcrossScope`; that configuration returns
+`InvalidOptions`. The construction-time path returned by `diagnostic_root()`
+is not the authority for descriptor-relative operations: renaming it after
+opening does not redirect those operations. Lexical containment is useful
+early classification, but it is not a substitute for handle-relative
+authorization.
 
 ## Errors, Diagnostics, and Troubleshooting
 
-`LocalFileError` carries a `LocalFileErrorKind`, a `LocalFileOperation`, native
-primary and target paths when available, and an optional `std::io::Error`
-source. Publication operations use dedicated failure types to preserve
-partial-success state.
+`LocalFileError` carries a `LocalFileErrorKind`, a `LocalFileOperation`,
+namespace-absolute primary and target paths when available, the operation's PWD
+snapshot, and an optional typed source. Physical paths are optional diagnostics
+and never define Rooted authority. Publication operations use dedicated failure
+types to preserve partial-success state.
 
 `LocalPersistError` retains the temporary resource and its structured
 `LocalFileError`; its `state()` is the single recovery-state authority. Native
@@ -195,7 +255,7 @@ I/O errors are available through the structured error source when present.
 
 | Symptom | Check |
 | --- | --- |
-| A rooted operation rejects a path | Pass a relative descendant and remove absolute prefixes, `.`, and `..`; an escaping intermediate link returns `InvalidPath`, while selecting `FollowAcrossScope` returns `InvalidOptions`. |
+| A Rooted operation rejects a path | Check whether lexical `..` or a followed link crosses virtual `/`, or whether the input contains a native prefix. Virtual absolute paths, `.`, and contained `..` are valid. Selecting `FollowAcrossScope` returns `InvalidOptions`. |
 | A required guarantee is rejected | Inspect the selected filesystem capabilities and relax the requirement only if the application permits it. |
 | Copy or rename returns an error | Inspect its typed failure state before retrying, cleanup, or treating the target as absent. |
 | A temporary entry remains | Retain the resource and call its explicit lifecycle method; drop cleanup is best effort. |
@@ -203,11 +263,11 @@ I/O errors are available through the structured error source when present.
 ## Platform Limits and Further Reading
 
 Linux, Windows, and macOS are runtime-tested. FreeBSD and Android are
-compile-checked only. `LocalFileSystem::host().protocols()` reports the host
-implementation; a rooted instance returns the snapshot cached when opening the
-authority. `scope()` lets integration code distinguish the two namespaces, and
-`diagnostic_root()` exposes the non-authoritative rooted anchor separately. A
-`limits()` reports `SizeLimit::VariesByPath` for the host namespace; use
+compile-checked only. `protocols()` reports the selected authority's protocol
+snapshot; a Rooted instance caches it when opening the authority. `scope()`
+lets integration code distinguish the two namespaces, and
+`diagnostic_root()` exposes the non-authoritative Rooted anchor separately.
+`limits()` reports `SizeLimit::VariesByPath` for the Host namespace; use
 `limits_at(path)` to obtain a finite value for the filesystem containing that
 path (or `Unknown` when probing is unavailable). Atomic
 rename, atomic replacement, and atomic temporary persistence are reported

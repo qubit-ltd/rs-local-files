@@ -40,7 +40,7 @@ fuzz_target!(|data: &[u8]| {
         return;
     };
     let scratch = filesystem
-        .create_directory(
+        .create_directory_with_options(
             Path::new("scratch"),
             &LocalCreateDirectoryOptions::new().with_recursive(),
         )
@@ -55,7 +55,7 @@ fuzz_target!(|data: &[u8]| {
                     .with_parent(Path::new("scratch"))
                     .with_create_parent()
                     .with_max_attempts(1 + usize::from(selector % 4));
-                if let Ok(mut resource) = filesystem.create_temp_file(&options) {
+                if let Ok(mut resource) = filesystem.create_temp_file_with_options(&options) {
                     let path = resource.path().to_path_buf();
                     resource
                         .write_all(data)
@@ -64,7 +64,7 @@ fuzz_target!(|data: &[u8]| {
                         resource.cleanup().expect("rooted temporary cleanup should succeed");
                     }
                     drop(resource);
-                    assert!(!root.join(path).exists());
+                    assert!(filesystem.metadata(&path).is_err());
                 }
             }
             1 => {
@@ -72,16 +72,16 @@ fuzz_target!(|data: &[u8]| {
                     .with_parent(Path::new("scratch"))
                     .with_create_parent()
                     .with_max_attempts(1 + usize::from(selector % 4));
-                if let Ok(resource) = filesystem.create_temp_directory(&options) {
+                if let Ok(resource) = filesystem.create_temp_directory_with_options(&options) {
                     let path = resource.path().to_path_buf();
                     drop(resource);
-                    assert!(!root.join(path).exists());
+                    assert!(filesystem.metadata(&path).is_err());
                 }
             }
             2 => {
                 let target = Path::new("scratch/payload");
-                if let Ok(mut writer) =
-                    filesystem.open_writer(target, &LocalWriteOptions::new(LocalWriteMode::CreateOrReplace))
+                if let Ok(mut writer) = filesystem
+                    .open_writer_with_options(target, &LocalWriteOptions::new(LocalWriteMode::CreateOrReplace))
                 {
                     writer.write_all(data).expect("rooted fuzz writer should accept bytes");
                     let outcome = writer.commit().expect("rooted fuzz writer should commit");
@@ -90,7 +90,7 @@ fuzz_target!(|data: &[u8]| {
             }
             _ => {
                 let deleted = filesystem
-                    .delete_file(
+                    .delete_file_with_options(
                         Path::new("scratch/payload"),
                         &LocalDeleteOptions::new().with_missing_ok(),
                     )

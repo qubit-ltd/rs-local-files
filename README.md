@@ -31,23 +31,23 @@ through a writer, commits it, and reads the published result.
 use std::io::{Read, Write};
 
 use qubit_local_files::{
-    LocalFileSystem, LocalReadOptions, LocalTempDirectoryOptions, LocalWriteMode,
-    LocalWriteOptions, LocalWriterState,
+    LocalFileSystem, LocalWriteMode, LocalWriteOptions, LocalWriterState,
 };
 
-let filesystem = LocalFileSystem::host();
-let work = filesystem.create_temp_directory(&LocalTempDirectoryOptions::new())?;
+let mut filesystem = LocalFileSystem::host()?;
+filesystem.set_default_write_options(LocalWriteOptions::new(
+    LocalWriteMode::CreateOrReplace,
+))?;
+
+let work = filesystem.create_temp_directory()?;
 let path = work.path().join("manifest.json");
-let mut writer = filesystem.open_writer(
-    &path,
-    &LocalWriteOptions::new(LocalWriteMode::CreateOrReplace),
-)?;
+let mut writer = filesystem.open_writer(&path)?;
 writer.write_all(br#"{"version":1}"#)?;
 let outcome = writer.commit()?;
 assert_eq!(outcome.state(), LocalWriterState::Committed);
 
 let mut content = String::new();
-filesystem.open_reader(&path, &LocalReadOptions::new())?
+filesystem.open_reader(&path)?
     .read_to_string(&mut content)?;
 assert_eq!(content, r#"{"version":1}"#);
 # Ok::<(), Box<dyn std::error::Error>>(())
@@ -65,10 +65,17 @@ assert_eq!(content, r#"{"version":1}"#);
 | `LocalTempFile` / `LocalTempDirectory` | Owned cleanup, `keep`, and persistence operations. |
 | `LocalFileNames` / `LocalPaths` | Native filename and lexical-path helpers without lossy UTF-8 conversion. |
 
-`LocalFileSystem` provides one consistent instance API when configuration must
-be stored, passed to another component, or adapted to a higher-level filesystem
-SPI.
-The handle is cheaply cloneable; rooted clones share the opened authority.
+`LocalFileSystem` is a stateful instance API. Each instance owns its current
+directory, symbolic-link policy, and nine operation-default Options values.
+Ordinary methods use those defaults; every `*_with_options` method uses the
+supplied complete Options value instead. Cloning snapshots all mutable state,
+while Rooted clones share only the immutable opened authority. The crate makes
+no thread-safety promise for shared mutable configuration; callers may keep one
+clone per thread or add their own synchronization.
+
+Resource budgets are opt-in. Listing and copy depth, entries, bytes, open
+directories, deadlines, duplicate-name memory, retry timeouts, and temporary
+name attempts are unbounded or disabled until the caller sets them explicitly.
 
 Symbolic-link behavior is configurable per `LocalFileSystem` instance; Rooted
 defaults to `FollowWithinScope` and Host defaults to `FollowAcrossScope`. Rooted
@@ -96,12 +103,19 @@ transfers ownership of that sandbox together with the returned resource path.
 Use `LocalFileSystem::host()` for host paths. Use
 `LocalFileSystem::rooted(root)` when one opened directory is the authority
 boundary. Both instances expose the same operations; only path interpretation
-changes. Rooted paths must be relative descendants, and absolute paths,
-prefixes, `.`, and `..` are rejected. Intermediate symbolic links follow the
-configured policy: the default `FollowWithinScope` stays inside the opened
-root. `FollowAcrossScope` is Host-only; Rooted rejects that configuration so no
-operation can escape its opened authority. Renaming the diagnostic root path
-later does not redirect the opened authority.
+changes. Each instance has its own namespace-absolute PWD. Relative paths start
+there; `.` and an empty path mean that PWD; `..` is normalized one component at
+a time and is rejected only if it would cross the namespace root. In a Rooted
+instance, `/etc/hosts` is a virtual absolute path beneath the opened root, not
+the Host path `/etc/hosts`. Native prefixes are rejected.
+
+Intermediate symbolic links follow the configured policy. Rooted absolute link
+targets restart at its virtual `/`, and `FollowWithinScope` prevents any link
+from escaping the opened authority. `FollowAcrossScope` is Host-only; Rooted
+rejects that configuration. Renaming the diagnostic root path later does not
+redirect the opened authority. Public resource and error paths use reusable
+namespace-absolute identities; physical paths, when available, are exposed
+only as optional diagnostics.
 
 Copy chooses file or directory behavior from source metadata. Copy and rename
 failures retain the strongest proven publication state, so callers must inspect

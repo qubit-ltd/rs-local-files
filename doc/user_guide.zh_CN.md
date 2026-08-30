@@ -10,15 +10,49 @@
 ## 概念模型
 
 ```
-主机路径 ── LocalFileSystem::host()
-已打开根目录 ─ LocalFileSystem::rooted(root) ─ 仅相对后代路径
+Host 命名空间 ── LocalFileSystem::host() ── 构造时捕获 Host PWD
+已打开根目录 ─── LocalFileSystem::rooted(root) ── 虚拟 / 与实例 PWD
 ```
 
-`LocalFileSystem` 是主机范围的服务形式：`host()` 选择进程可见路径，
-`rooted(root)` 打开目录权限并只接受相对后代。
-两种形式提供相同操作，调用方和适配器无需分别面向 host 和 rooted 接口。reader、writer、
-walker 与临时条目都是拥有资源的有状态对象。`LocalFileNames` 和 `LocalPaths` 提供原生
-词法工具，不会把文件名强制转换为 UTF-8。
+`LocalFileSystem` 是有状态的文件系统对象。`host()` 选择进程可见命名空间，并只在
+构造时捕获一次进程当前目录；`rooted(root)` 打开唯一目录 authority，将其映射为虚拟
+根 `/`，初始 PWD 为 `/`。两种形式都接受 namespace-absolute 路径以及相对于实例
+PWD 的路径，并提供相同操作。reader、writer、walker 与临时条目都是拥有资源的有状态
+对象。`LocalFileNames` 和 `LocalPaths` 提供原生词法工具，不会把文件名强制转换为
+UTF-8。
+
+## 配置一次，显式覆盖
+
+每个 filesystem 实例拥有自己的 PWD、符号链接策略，以及 read、write、list、copy、
+create-directory、delete、rename、temporary-file 和 temporary-directory 九种默认
+Options。调用方可以通过 `set_default_*_options` 一次配置，然后使用普通操作方法。
+
+每个 `*_with_options` 方法则把传入的 Options 当作该次调用的完整配置，不会与实例
+默认值合并。需要在默认值基础上只修改一个字段时，应显式 clone 或 copy 对应默认值，
+修改后再传入。
+
+```rust,no_run
+use qubit_local_files::{LocalFileSystem, LocalListOptions};
+
+let mut filesystem = LocalFileSystem::rooted(std::path::Path::new("/srv/app"))?;
+filesystem.set_current_directory(std::path::Path::new("/assets"))?;
+filesystem.set_default_list_options(
+    LocalListOptions::new().with_recursive().with_max_entries(10_000),
+)?;
+
+let default_walk = filesystem.list(std::path::Path::new("."))?;
+let one_level = filesystem.list_with_options(
+    std::path::Path::new("."),
+    &LocalListOptions::new(),
+)?;
+# drop((default_walk, one_level));
+# Ok::<(), Box<dyn std::error::Error>>(())
+```
+
+初始 Options 不包含隐藏的业务资源上限。遍历和复制预算、重试时长、deadline 与临时名称
+尝试次数，只有调用方显式设置后才生效。clone filesystem 会复制 PWD 与全部配置；
+Rooted clone 只共享不可变的已打开 authority。本 crate 不承诺共享可变配置时的同步；
+调用方应每线程持有一个 clone，或自行添加同步包装。
 
 ## 符号链接策略
 
@@ -26,12 +60,14 @@ walker 与临时条目都是拥有资源的有状态对象。`LocalFileNames` �
 `LocalFileSystem::rooted(root)` 默认使用 `FollowWithinScope`：允许跟随链接，
 但解析结果必须仍位于已打开的 root 内。Host 默认使用 `FollowAcrossScope`，因为
 Host 没有更窄的 root 边界。Rooted 仅支持 `Reject` 和 `FollowWithinScope`；配置
-`FollowAcrossScope` 会返回 `InvalidOptions`。可失败的 `with_symlink_policy` 以及
+`FollowAcrossScope` 会返回 `InvalidOptions`。可失败的 `set_symlink_policy` 以及
 `list`、`copy` options 可以选择受支持的策略。
 
 策略作用于所有中间路径组件。Rooted 使用 `FollowWithinScope` 时，像
 `etc/link/config` 这样的路径若通过 `link` 越出已打开 root，会返回 `InvalidPath`。
-`FollowAcrossScope` 仅适用于 Host。
+`FollowAcrossScope` 仅适用于 Host。Rooted 中以 `/` 开始的链接目标会从虚拟根重新
+开始，而不是从 Host 根开始。`.` 与 `..` 在链接目标中保留原生词法语义，但 `..`
+一旦越过虚拟根就返回 `InvalidPath`。
 
 最终路径组件遵循真实文件系统中的操作语义：
 
@@ -60,26 +96,27 @@ Host 没有更窄的 root 边界。Rooted 仅支持 `Reject` 和 `FollowWithinSc
 ```rust
 use std::io::{Read, Write};
 use qubit_local_files::{
-    LocalCreateDirectoryOptions, LocalFileSystem, LocalReadOptions, LocalWriteMode,
-    LocalWriteOptions, LocalWriterState,
+    LocalCreateDirectoryOptions, LocalFileSystem, LocalWriteMode, LocalWriteOptions,
+    LocalWriterState,
 };
 
-let filesystem = LocalFileSystem::host();
+let mut filesystem = LocalFileSystem::host()?;
+filesystem.set_default_create_directory_options(
+    LocalCreateDirectoryOptions::new().with_recursive(),
+)?;
+filesystem.set_default_write_options(LocalWriteOptions::new(
+    LocalWriteMode::CreateOrReplace,
+))?;
+
 let output = std::path::Path::new("build/output");
-filesystem.create_directory(
-    output,
-    &LocalCreateDirectoryOptions::new().with_recursive(),
-)?;
+filesystem.create_directory(output)?;
 let path = output.join("manifest.json");
-let mut writer = filesystem.open_writer(
-    &path,
-    &LocalWriteOptions::new(LocalWriteMode::CreateOrReplace),
-)?;
+let mut writer = filesystem.open_writer(&path)?;
 writer.write_all(br#"{"complete":true}"#)?;
 let result = writer.commit()?;
 assert_eq!(result.state(), LocalWriterState::Committed);
 let mut text = String::new();
-filesystem.open_reader(&path, &LocalReadOptions::new())?
+filesystem.open_reader(&path)?
     .read_to_string(&mut text)?;
 assert_eq!(text, r#"{"complete":true}"#);
 # Ok::<(), Box<dyn std::error::Error>>(())
@@ -95,15 +132,17 @@ assert_eq!(text, r#"{"complete":true}"#);
 （`LocalWriteFailureState`）分离；写入、刷新或提交失败可能使发布状态变为不确定，需要
 恢复时应保留并检查返回的资源或错误。
 
-`LocalFileSystem::copy` 根据源元数据选择文件或目录行为。需要固定源类型时使用 `with_file_source()` 或
-`with_tree_source()`，并通过 `source_mode()` 读取模式。其选项分别控制目标冲突、类型冲突、
-元数据、符号链接、原子性和耐久性；复制策略不包含 mount 或 device 边界。无法满足的要求保证会在破坏性变更前被拒绝。
-自复制和硬链接别名会被拒绝；覆盖符号链接目标时会替换该条目而不跟随它。
+`LocalFileSystem::copy` 根据源元数据选择文件或目录行为。需要固定源类型时使用
+`with_file_source()` 或 `with_tree_source()`，并通过 `source_mode()` 读取模式。
+Copy Options 分别控制目标冲突、类型冲突、元数据、符号链接、原子性、耐久性以及由调用方
+选择的资源预算；复制策略不包含 mount 或 device 边界。无法满足的要求保证会在破坏性变更
+前被拒绝。自复制和硬链接别名会被拒绝；覆盖符号链接目标时会替换该条目而不跟随它。
 
 ```rust,no_run
 use qubit_local_files::{LocalCopyFailureState, LocalCopyOptions, LocalFileSystem};
 
-match LocalFileSystem::host().copy(
+let filesystem = LocalFileSystem::host()?;
+match filesystem.copy_with_options(
     std::path::Path::new("source"),
     std::path::Path::new("backup"),
     &LocalCopyOptions::new(),
@@ -116,6 +155,7 @@ match LocalFileSystem::host().copy(
         LocalCopyFailureState::Indeterminate => println!("需要核对目标状态"),
     },
 }
+# Ok::<(), Box<dyn std::error::Error>>(())
 ```
 
 重命名也会通过类型化失败状态报告 `Unchanged`、`Renamed` 或 `Indeterminate`；出错并不等于
@@ -123,53 +163,61 @@ match LocalFileSystem::host().copy(
 
 ## 遍历和临时资源
 
-`LocalFileSystem::list` 返回惰性的 `LocalDirectoryWalker`。它按需打开和推进目录；最大
-深度、符号链接策略与句柄预算在创建时固定。默认 `Reopen` 策略会在达到预算时关闭并重新打开
-活动 frame；显式选择 `Fail` 才会返回 `ResourceLimit`。零句柄预算无效并返回 `InvalidOptions`，
-drop 只释放句柄。
+`LocalFileSystem::list` 返回惰性的 `LocalDirectoryWalker`。它按需打开和推进目录；
+规范化 root、Options、符号链接策略、PWD snapshot 和 authority 在创建时固定。默认不设置
+深度、条目数、名称内存、deadline 或打开目录数预算。调用方设置打开目录预算后，
+`Reopen` 会按需关闭并重新打开活动 frame，`Fail` 则会在边界返回 `ResourceLimit`。
+零句柄预算无效并返回 `InvalidOptions`。Rooted 会逐项读取目录，避免先收集到 `Vec`；
+drop walker 只释放句柄。
 
 临时文件和目录在仍处于 armed 状态时拥有清理责任。每个资源都创建在独立的私有 sandbox 中，
 sandbox 会和资源一起清理。需要观察清理失败时应显式调用 `cleanup()`；drop 只会尽力清理。
-`keep` 会关闭清理并
-返回 authority-local 路径（Host 为绝对路径，Rooted 为相对于已打开 root 的相对路径）。持久化失败会保留资源，调用方可重试、检查、保留或显式清理。创建前会
-校验前缀和后缀：原生分隔符、NUL 与便携保留名称不会留下条目。
+`keep` 会关闭清理。未显式指定 parent 时，在该次操作捕获的 filesystem PWD 下创建。
+`path()`、`keep` 和持久化结果对 Host 与 Rooted 都返回 namespace-absolute 路径，因此
+后续 PWD 即使变化，也能把它们再次传给同一个 filesystem。持久化失败会保留资源，调用方
+可重试、检查、保留或显式清理。创建前会校验前缀和后缀：原生分隔符、NUL 与便携保留名称
+不会留下条目。除非调用方设置 `max_attempts`，名称冲突尝试次数没有上限。
 
 ## Rooted 工作区
 
 处理工作区下不受信任的相对名称时，应使用 rooted 访问。
 
-```rust
-use qubit_local_files::{LocalFileSystem, LocalListOptions};
+```rust,no_run
+use qubit_local_files::LocalFileSystem;
 
-let root = LocalFileSystem::rooted(std::path::Path::new("workspace"))?;
-let walker = root.list(std::path::Path::new("assets"), &LocalListOptions::new())?;
+let mut root = LocalFileSystem::rooted(std::path::Path::new("workspace"))?;
+root.set_current_directory(std::path::Path::new("/assets"))?;
+let walker = root.list(std::path::Path::new("."))?;
 for entry in walker {
     println!("{}", entry?.path().display());
 }
 # Ok::<(), Box<dyn std::error::Error>>(())
 ```
 
-walker 会按需打开并推进目录；最大深度、符号链接策略和默认 64 个目录句柄的预算会在创建时
-固定。默认 `Reopen` 会在达到预算时关闭并重新打开活动 frame；显式选择 `Fail` 才返回
-`ResourceLimit`。rooted walker 还会逐项读取目录，避免先将单个目录完整收集到 `Vec` 中。
+Rooted 相当于以已打开目录为根的私有命名空间：`/etc/hosts` 映射到该 authority 下，
+`etc/hosts` 则从实例 PWD 开始。`.` 和空路径表示 PWD；`a/./b` 规范化为 `a/b`；
+`a/../b` 规范化为 `b`。只要未越过虚拟 `/`，parent component 就是合法的；因此在
+PWD `/` 下，`..` 和 `a/./.././../b` 都返回 `InvalidPath`。Rooted 始终拒绝
+native prefix。
 
-rooted 路径必须是相对后代。绝对路径、平台前缀、`.` 和 `..` 会被拒绝；中间符号链接遵循
-实例策略。`FollowWithinScope` 会拒绝解析到 root 外的链接；Rooted 不支持
-`FollowAcrossScope`，配置该策略会返回 `InvalidOptions`。
-诊断用根路径不是权限本身：`open` 之后重命名它不会重定向仍采用描述符权限的操作。词法包含
-关系可用于早期分类，但不能替代基于描述符的权限控制。
+中间符号链接遵循实例策略。`FollowWithinScope` 会拒绝解析到 root 外的链接；Rooted
+不支持 `FollowAcrossScope`，配置该策略会返回 `InvalidOptions`。构造时路径可通过
+`diagnostic_root()` 取得，但它不是 authority；打开后重命名该路径不会重定向基于 handle
+的操作。词法包含关系可用于早期分类，但不能替代基于 handle 的授权。
 
 ## 错误、诊断与排障
 
-`LocalFileError` 包含 `LocalFileErrorKind`、`LocalFileOperation`、可用时的主/目标原生
-路径，以及可选的 `std::io::Error` 来源。发布操作用专门失败类型保存部分成功状态。
+`LocalFileError` 包含 `LocalFileErrorKind`、`LocalFileOperation`、可用时的
+namespace-absolute 主/目标路径、操作使用的 PWD snapshot，以及可选的 typed source。
+物理路径只作为可选诊断信息，绝不定义 Rooted authority。发布操作用专门失败类型保存部分
+成功状态。
 
 `LocalPersistError` 同时保留临时资源和结构化的 `LocalFileError`；其 `state()` 是唯一的
 恢复状态来源。存在原生 I/O 错误时，可从结构化错误的 source 取得。
 
 | 症状 | 检查方式 |
 | --- | --- |
-| rooted 操作拒绝路径 | 传入相对后代并移除绝对前缀、`.`、`..`；中间链接越界返回 `InvalidPath`，选择 `FollowAcrossScope` 则返回 `InvalidOptions`。 |
+| Rooted 操作拒绝路径 | 检查词法 `..` 或被跟随的链接是否越过虚拟 `/`，以及是否包含 native prefix。虚拟绝对路径、`.` 和未越界的 `..` 都合法；选择 `FollowAcrossScope` 返回 `InvalidOptions`。 |
 | 要求保证被拒绝 | 检查所选文件系统的 capability；仅在业务允许时放宽要求。 |
 | copy 或 rename 出错 | 先检查类型化失败状态，再决定重试、清理或认定目标不存在。 |
 | 临时条目仍存在 | 保留资源并调用显式生命周期方法；drop 清理只是尽力而为。 |
@@ -177,8 +225,8 @@ rooted 路径必须是相对后代。绝对路径、平台前缀、`.` 和 `..` 
 ## 平台限制与延伸阅读
 
 Linux、Windows 和 macOS 会进行运行时测试。FreeBSD 与 Android 仅做编译检查。
-可通过 `LocalFileSystem::host().protocols()` 查看主机实现；rooted 实例返回打开
-权限时缓存的快照，`scope()` 供集成层区分两种命名空间；Rooted 实例的诊断锚点通过
+`protocols()` 返回所选 authority 的协议快照；Rooted 实例在打开 authority 时缓存该
+快照。`scope()` 供集成层区分两种命名空间；Rooted 实例的诊断锚点通过
 `diagnostic_root()` 单独读取。Host 命名空间的 `limits()` 返回 `SizeLimit::VariesByPath`；使用
 `limits_at(path)` 才会针对该路径所在文件系统返回有限值（无法探测时为
 `Unknown`）。
