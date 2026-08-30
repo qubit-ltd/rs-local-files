@@ -23,9 +23,13 @@ use crate::LocalResult;
 /// Resolves operation inputs against one normalized filesystem PWD snapshot.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub(crate) struct LocalPathResolver {
+    /// Namespace whose anchoring rules are applied to operation paths.
     scope: LocalFileSystemScope,
+    /// Normalized namespace-absolute PWD exposed by the owning filesystem.
     current_directory: PathBuf,
+    /// Normal components retained from the normalized PWD.
     current_components: Vec<OsString>,
+    /// Host-native prefix retained separately from normal components.
     current_prefix: Option<OsString>,
 }
 
@@ -207,6 +211,7 @@ fn directory_required(path: &Path) -> bool {
     path.as_os_str().is_empty() || has_trailing_separator_or_dot(path)
 }
 
+/// Reports whether a Unix path contains a native NUL byte.
 #[cfg(unix)]
 fn contains_native_nul(path: &Path) -> bool {
     use std::os::unix::ffi::OsStrExt;
@@ -214,6 +219,7 @@ fn contains_native_nul(path: &Path) -> bool {
     path.as_os_str().as_bytes().contains(&0)
 }
 
+/// Reports whether a Windows path contains a native NUL code unit.
 #[cfg(windows)]
 fn contains_native_nul(path: &Path) -> bool {
     use std::os::windows::ffi::OsStrExt;
@@ -221,11 +227,13 @@ fn contains_native_nul(path: &Path) -> bool {
     path.as_os_str().encode_wide().any(|unit| unit == 0)
 }
 
+/// Conservatively rejects paths on unsupported platforms.
 #[cfg(not(any(unix, windows)))]
 const fn contains_native_nul(_path: &Path) -> bool {
     true
 }
 
+/// Reports Unix syntax that preserves directory-qualified intent.
 #[cfg(unix)]
 fn has_trailing_separator_or_dot(path: &Path) -> bool {
     use std::os::unix::ffi::OsStrExt;
@@ -238,6 +246,7 @@ fn has_trailing_separator_or_dot(path: &Path) -> bool {
     final_component == b"." || final_component == b".."
 }
 
+/// Reports Windows syntax that preserves directory-qualified intent.
 #[cfg(windows)]
 fn has_trailing_separator_or_dot(path: &Path) -> bool {
     use std::os::windows::ffi::OsStrExt;
@@ -251,6 +260,7 @@ fn has_trailing_separator_or_dot(path: &Path) -> bool {
     final_component == [u16::from(b'.')] || final_component == [u16::from(b'.'), u16::from(b'.')]
 }
 
+/// Conservatively preserves directory intent on unsupported platforms.
 #[cfg(not(any(unix, windows)))]
 const fn has_trailing_separator_or_dot(_path: &Path) -> bool {
     false
