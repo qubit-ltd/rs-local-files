@@ -33,9 +33,7 @@ static ACTIVE_FAULT: Mutex<Option<String>> = Mutex::new(None);
 #[cfg(feature = "internal-test-support")]
 #[doc(hidden)]
 pub fn install_test_fault(name: &str) -> io::Result<TestFaultGuard> {
-    let mut active = ACTIVE_FAULT
-        .lock()
-        .unwrap_or_else(std::sync::PoisonError::into_inner);
+    let mut active = ACTIVE_FAULT.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
     if active.is_some() {
         return Err(io::Error::new(
             io::ErrorKind::AlreadyExists,
@@ -55,9 +53,7 @@ impl Drop for TestFaultGuard {
         if !self.active {
             return;
         }
-        let mut active = ACTIVE_FAULT
-            .lock()
-            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        let mut active = ACTIVE_FAULT.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
         active.take();
         ONE_SHOT_FAULT_TAKEN.store(false, Ordering::Relaxed);
         NTH_FAULT_OCCURRENCES.store(0, Ordering::Relaxed);
@@ -98,9 +94,7 @@ pub(crate) fn fault_error() -> io::Error {
     }
     #[cfg(all(feature = "internal-test-support", windows))]
     {
-        io::Error::from_raw_os_error(
-            windows_sys::Win32::Foundation::ERROR_IO_DEVICE as i32,
-        )
+        io::Error::from_raw_os_error(windows_sys::Win32::Foundation::ERROR_IO_DEVICE as i32)
     }
     #[cfg(not(feature = "internal-test-support"))]
     {
@@ -185,7 +179,5 @@ fn take_impl(name: &str) -> bool {
 #[must_use]
 #[inline]
 fn take_on_nth_impl(name: &str, occurrence: usize) -> bool {
-    is_enabled_impl(name)
-        && NTH_FAULT_OCCURRENCES.fetch_add(1, Ordering::Relaxed) + 1
-            == occurrence
+    is_enabled_impl(name) && NTH_FAULT_OCCURRENCES.fetch_add(1, Ordering::Relaxed) + 1 == occurrence
 }

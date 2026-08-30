@@ -43,8 +43,7 @@ fn copy_fixture(backend: Backend) -> CopyFixture {
     let directory = tempdir().expect("temporary directory should be created");
     let source = directory.path().join("source");
     fs::create_dir(&source).expect("source directory should be created");
-    fs::write(source.join("child"), b"payload")
-        .expect("source payload should be written");
+    fs::write(source.join("child"), b"payload").expect("source payload should be written");
     match backend {
         Backend::Host => CopyFixture {
             source,
@@ -55,26 +54,17 @@ fn copy_fixture(backend: Backend) -> CopyFixture {
         Backend::Rooted => CopyFixture {
             source: PathBuf::from("source"),
             target: PathBuf::from("target"),
-            filesystem: LocalFileSystem::rooted(directory.path())
-                .expect("root authority should open"),
+            filesystem: LocalFileSystem::rooted(directory.path()).expect("root authority should open"),
             _directory: directory,
         },
     }
 }
 
-fn assert_resource_limit(
-    backend: Backend,
-    options: LocalCopyOptions,
-    resource: LocalResourceKind,
-) -> LocalCopyFailure {
+fn assert_resource_limit(backend: Backend, options: LocalCopyOptions, resource: LocalResourceKind) -> LocalCopyFailure {
     let fixture = copy_fixture(backend);
     let failure = fixture
         .filesystem
-        .copy(
-            &fixture.source,
-            &fixture.target,
-            &options.with_tree_source(),
-        )
+        .copy(&fixture.source, &fixture.target, &options.with_tree_source())
         .expect_err("copy budget should reject the fixture");
     assert_eq!(
         LocalFileErrorKind::ResourceLimit,
@@ -153,9 +143,7 @@ fn test_copy_budget_matrix_enforces_deadline() {
             .copy(
                 &fixture.source,
                 &fixture.target,
-                &LocalCopyOptions::new()
-                    .with_tree_source()
-                    .with_deadline(Duration::ZERO),
+                &LocalCopyOptions::new().with_tree_source().with_deadline(Duration::ZERO),
             )
             .expect_err("an immediate copy deadline should expire");
         assert_eq!(LocalFileErrorKind::Io, failure.error().kind());
@@ -175,9 +163,7 @@ fn test_copy_budget_matrix_rejects_unrepresentable_deadline() {
             .copy(
                 &fixture.source,
                 &fixture.target,
-                &LocalCopyOptions::new()
-                    .with_tree_source()
-                    .with_deadline(Duration::MAX),
+                &LocalCopyOptions::new().with_tree_source().with_deadline(Duration::MAX),
             )
             .expect_err("an unrepresentable deadline should be invalid");
         assert_eq!(LocalFileErrorKind::InvalidOptions, failure.error().kind());
@@ -204,8 +190,7 @@ fn test_copy_backends_enforce_max_bytes_against_actual_stream_length() {
     assert_eq!(LocalFileErrorKind::ResourceLimit, failure.error().kind());
     assert!(!target.exists(), "failed staging must not publish a target");
 
-    let rooted_source =
-        PathBuf::from(format!("proc/{}/cmdline", std::process::id()));
+    let rooted_source = PathBuf::from(format!("proc/{}/cmdline", std::process::id()));
     let rooted_target = target
         .strip_prefix(Path::new("/"))
         .expect("temporary target should be absolute");
@@ -228,16 +213,11 @@ fn test_rooted_copy_preserves_final_and_nested_symlink_entries() {
     use std::os::unix::fs::symlink;
 
     let directory = tempdir().expect("temporary directory should be created");
-    fs::create_dir(directory.path().join("source"))
-        .expect("source directory should be created");
-    fs::write(directory.path().join("source/referent"), b"payload")
-        .expect("referent should be written");
-    symlink("referent", directory.path().join("source/link"))
-        .expect("nested source link should be created");
-    symlink("source/referent", directory.path().join("final-link"))
-        .expect("final source link should be created");
-    let rooted = LocalFileSystem::rooted(directory.path())
-        .expect("root authority should open");
+    fs::create_dir(directory.path().join("source")).expect("source directory should be created");
+    fs::write(directory.path().join("source/referent"), b"payload").expect("referent should be written");
+    symlink("referent", directory.path().join("source/link")).expect("nested source link should be created");
+    symlink("source/referent", directory.path().join("final-link")).expect("final source link should be created");
+    let rooted = LocalFileSystem::rooted(directory.path()).expect("root authority should open");
 
     let _ = rooted
         .copy(
@@ -256,12 +236,10 @@ fn test_rooted_copy_preserves_final_and_nested_symlink_entries() {
 
     assert_eq!(
         PathBuf::from("source/referent"),
-        fs::read_link(directory.path().join("final-copy"))
-            .expect("final copied link should be readable"),
+        fs::read_link(directory.path().join("final-copy")).expect("final copied link should be readable"),
     );
     assert_eq!(
         PathBuf::from("referent"),
-        fs::read_link(directory.path().join("tree-copy/link"))
-            .expect("nested copied link should be readable"),
+        fs::read_link(directory.path().join("tree-copy/link")).expect("nested copied link should be readable"),
     );
 }

@@ -40,18 +40,13 @@ pub(crate) fn install_atomic_file(
     staging: &Path,
     destination: &Path,
     destination_existed: bool,
-) -> std::result::Result<
-    (),
-    (Error, LocalAtomicDestinationState, AtomicStagingState),
-> {
+) -> std::result::Result<(), (Error, LocalAtomicDestinationState, AtomicStagingState)> {
     if destination_existed {
         match replace_existing_atomic_file(staging, destination) {
             Ok(()) => Ok(()),
             Err(source) => {
                 let destination_state = replacement_error_state(&source);
-                let staging_state = if destination_state
-                    == LocalAtomicDestinationState::Unchanged
-                {
+                let staging_state = if destination_state == LocalAtomicDestinationState::Unchanged {
                     AtomicStagingState::Present
                 } else {
                     AtomicStagingState::Indeterminate
@@ -65,15 +60,10 @@ pub(crate) fn install_atomic_file(
 }
 
 /// Atomically replaces an existing destination file.
-pub(crate) fn replace_existing_atomic_file(
-    staging: &Path,
-    destination: &Path,
-) -> Result<()> {
+pub(crate) fn replace_existing_atomic_file(staging: &Path, destination: &Path) -> Result<()> {
     #[cfg(all(feature = "internal-test-support", unix))]
     if super::test_support::is_enabled("atomic-install-replace")
-        || super::test_support::is_enabled(
-            "atomic-install-replace-indeterminate",
-        )
+        || super::test_support::is_enabled("atomic-install-replace-indeterminate")
     {
         return Err(crate::local::test_fault_error());
     }
@@ -109,32 +99,21 @@ pub(crate) fn replace_existing_atomic_file(
 pub(crate) fn install_new_atomic_file(
     staging: &Path,
     destination: &Path,
-) -> std::result::Result<
-    (),
-    (Error, LocalAtomicDestinationState, AtomicStagingState),
-> {
+) -> std::result::Result<(), (Error, LocalAtomicDestinationState, AtomicStagingState)> {
     #[cfg(unix)]
     {
         let staging = native_path(staging).map_err(unchanged_error)?;
         let destination = native_path(destination).map_err(unchanged_error)?;
-        install_new_atomic_file_at(
-            libc::AT_FDCWD,
-            &staging,
-            libc::AT_FDCWD,
-            &destination,
-        )
+        install_new_atomic_file_at(libc::AT_FDCWD, &staging, libc::AT_FDCWD, &destination)
     }
     #[cfg(not(unix))]
     {
-        move_file_without_replacing(staging, destination)
-            .map_err(unchanged_error)
+        move_file_without_replacing(staging, destination).map_err(unchanged_error)
     }
 }
 
 /// Classifies a native existing-file replacement failure.
-pub(crate) fn replacement_error_state(
-    error: &Error,
-) -> LocalAtomicDestinationState {
+pub(crate) fn replacement_error_state(error: &Error) -> LocalAtomicDestinationState {
     #[cfg(feature = "internal-test-support")]
     if super::test_support::is_enabled("atomic-install-replace-indeterminate")
         || super::test_support::is_enabled("rooted-install-indeterminate")
@@ -164,15 +143,11 @@ pub(crate) fn install_new_atomic_file_at(
     staging: &CStr,
     destination_parent: RawFd,
     destination: &CStr,
-) -> std::result::Result<
-    (),
-    (Error, LocalAtomicDestinationState, AtomicStagingState),
-> {
+) -> std::result::Result<(), (Error, LocalAtomicDestinationState, AtomicStagingState)> {
     #[cfg(any(target_os = "linux", target_os = "android"))]
     {
         #[cfg(feature = "internal-test-support")]
-        if super::test_support::is_enabled("atomic-install-before-native-call")
-        {
+        if super::test_support::is_enabled("atomic-install-before-native-call") {
             return Err(unchanged_error(crate::local::test_fault_error()));
         }
         #[cfg(feature = "internal-test-support")]
@@ -215,18 +190,10 @@ pub(crate) fn install_new_atomic_file_at(
             Error::last_os_error()
         };
         let code = error.raw_os_error();
-        if code != Some(libc::ENOSYS)
-            && code != Some(libc::EINVAL)
-            && code != Some(libc::EOPNOTSUPP)
-        {
+        if code != Some(libc::ENOSYS) && code != Some(libc::EINVAL) && code != Some(libc::EOPNOTSUPP) {
             return Err(unchanged_error(error));
         }
-        link_then_unlink(
-            staging_parent,
-            staging,
-            destination_parent,
-            destination,
-        )
+        link_then_unlink(staging_parent, staging, destination_parent, destination)
     }
     #[cfg(target_os = "macos")]
     {
@@ -248,12 +215,7 @@ pub(crate) fn install_new_atomic_file_at(
     }
     #[cfg(target_os = "freebsd")]
     {
-        link_then_unlink(
-            staging_parent,
-            staging,
-            destination_parent,
-            destination,
-        )
+        link_then_unlink(staging_parent, staging, destination_parent, destination)
     }
     #[cfg(not(any(
         target_os = "linux",
@@ -297,13 +259,9 @@ fn link_then_unlink(
     staging: &CStr,
     destination_parent: RawFd,
     destination: &CStr,
-) -> std::result::Result<
-    (),
-    (Error, LocalAtomicDestinationState, AtomicStagingState),
-> {
+) -> std::result::Result<(), (Error, LocalAtomicDestinationState, AtomicStagingState)> {
     #[cfg(feature = "internal-test-support")]
-    let forced_link_error =
-        super::test_support::is_enabled("atomic-install-link");
+    let forced_link_error = super::test_support::is_enabled("atomic-install-link");
     #[cfg(not(feature = "internal-test-support"))]
     let forced_link_error = false;
     // SAFETY: both directory descriptors and names remain live for this
@@ -339,9 +297,7 @@ fn link_then_unlink(
         }
     }
     #[cfg(feature = "internal-test-support")]
-    let staging_state = if super::test_support::is_enabled(
-        "atomic-install-unlink-indeterminate-sync",
-    ) {
+    let staging_state = if super::test_support::is_enabled("atomic-install-unlink-indeterminate-sync") {
         AtomicStagingState::Indeterminate
     } else {
         AtomicStagingState::Present
@@ -368,20 +324,11 @@ fn link_then_unlink(
 #[cfg(any(target_os = "linux", target_os = "android", target_os = "freebsd",))]
 fn unlink_staging_name(staging_parent: RawFd, staging: &CStr) -> Result<()> {
     #[cfg(feature = "internal-test-support")]
-    let forced_unlink_error =
-        super::test_support::take("atomic-install-unlink")
-            || super::test_support::is_enabled(
-                "atomic-install-unlink-persistent",
-            )
-            || super::test_support::is_enabled(
-                "atomic-install-unlink-persistent-sync",
-            )
-            || super::test_support::is_enabled(
-                "atomic-install-unlink-recover-sync",
-            )
-            || super::test_support::is_enabled(
-                "atomic-install-unlink-indeterminate-sync",
-            );
+    let forced_unlink_error = super::test_support::take("atomic-install-unlink")
+        || super::test_support::is_enabled("atomic-install-unlink-persistent")
+        || super::test_support::is_enabled("atomic-install-unlink-persistent-sync")
+        || super::test_support::is_enabled("atomic-install-unlink-recover-sync")
+        || super::test_support::is_enabled("atomic-install-unlink-indeterminate-sync");
     #[cfg(not(feature = "internal-test-support"))]
     let forced_unlink_error = false;
     // SAFETY: the staging directory descriptor and name remain live for this
@@ -407,18 +354,13 @@ fn unlink_staging_name(staging_parent: RawFd, staging: &CStr) -> Result<()> {
 fn native_path(path: &Path) -> Result<CString> {
     match CString::new(path.as_os_str().as_bytes()) {
         Ok(path) => Ok(path),
-        Err(_) => Err(Error::new(
-            ErrorKind::InvalidInput,
-            "atomic install path contains NUL",
-        )),
+        Err(_) => Err(Error::new(ErrorKind::InvalidInput, "atomic install path contains NUL")),
     }
 }
 
 /// Pairs an error with a destination known to be unmodified.
 #[inline]
-fn unchanged_error(
-    error: Error,
-) -> (Error, LocalAtomicDestinationState, AtomicStagingState) {
+fn unchanged_error(error: Error) -> (Error, LocalAtomicDestinationState, AtomicStagingState) {
     (
         error,
         LocalAtomicDestinationState::Unchanged,

@@ -77,8 +77,7 @@ use crate::write;
 /// Reparse-tag bit identifying name-surrogate entries.
 const IO_REPARSE_TAG_NAME_SURROGATE: u32 = 0x2000_0000;
 /// Access shared by synchronous relative opens.
-const ROOTED_SHARE_MODE: u32 =
-    FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE;
+const ROOTED_SHARE_MODE: u32 = FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE;
 
 /// Byte capacity used for each native directory-enumeration request.
 const DIRECTORY_READ_BUFFER_SIZE: usize = 64 * 1024;
@@ -88,10 +87,7 @@ impl RootedDirectoryReader {
     fn new(directory: File) -> Self {
         Self {
             directory,
-            buffer: vec![
-                0_usize;
-                DIRECTORY_READ_BUFFER_SIZE.div_ceil(size_of::<usize>())
-            ],
+            buffer: vec![0_usize; DIRECTORY_READ_BUFFER_SIZE.div_ceil(size_of::<usize>())],
             used: 0,
             offset: 0,
             restart: true,
@@ -116,13 +112,7 @@ impl RootedDirectoryReader {
             if name == OsStr::new(".") || name == OsStr::new("..") {
                 continue;
             }
-            let child = nt_open_at(
-                &self.directory,
-                &name,
-                FILE_READ_ATTRIBUTES | SYNCHRONIZE,
-                FILE_OPEN,
-                0,
-            )?;
+            let child = nt_open_at(&self.directory, &name, FILE_READ_ATTRIBUTES | SYNCHRONIZE, FILE_OPEN, 0)?;
             return Ok(Some((name, child)));
         }
     }
@@ -158,23 +148,18 @@ impl RootedDirectoryReader {
         self.used = status_block.Information.min(DIRECTORY_READ_BUFFER_SIZE);
         self.offset = 0;
         if self.used == 0 {
-            return Err(Error::other(
-                "NtQueryDirectoryFile returned an empty record batch",
-            ));
+            return Err(Error::other("NtQueryDirectoryFile returned an empty record batch"));
         }
         Ok(())
     }
 
     /// Parses the current native directory record and advances its byte offset.
     fn current_name(&self) -> Result<(OsString, usize)> {
-        let name_offset =
-            std::mem::offset_of!(FILE_DIRECTORY_INFORMATION, FileName);
-        let remaining =
-            self.used.checked_sub(self.offset).ok_or_else(|| {
-                Error::other(
-                    "directory record offset exceeded the native result",
-                )
-            })?;
+        let name_offset = std::mem::offset_of!(FILE_DIRECTORY_INFORMATION, FileName);
+        let remaining = self
+            .used
+            .checked_sub(self.offset)
+            .ok_or_else(|| Error::other("directory record offset exceeded the native result"))?;
         if remaining < name_offset {
             return Err(Error::other("truncated directory record header"));
         }
@@ -192,32 +177,22 @@ impl RootedDirectoryReader {
         let name_size = name_bytes
             .checked_div(size_of::<u16>())
             .filter(|_| name_bytes.is_multiple_of(size_of::<u16>()))
-            .ok_or_else(|| {
-                Error::other("directory record name has an invalid length")
-            })?;
-        let name_end =
-            name_offset.checked_add(name_bytes).ok_or_else(|| {
-                Error::other("directory record name length overflowed")
-            })?;
+            .ok_or_else(|| Error::other("directory record name has an invalid length"))?;
+        let name_end = name_offset
+            .checked_add(name_bytes)
+            .ok_or_else(|| Error::other("directory record name length overflowed"))?;
         if name_end > remaining {
             return Err(Error::other("truncated directory record name"));
         }
         // SAFETY: `name_end` was verified within the current native record.
-        let name = unsafe {
-            OsString::from_wide(std::slice::from_raw_parts(
-                information.FileName.as_ptr(),
-                name_size,
-            ))
-        };
+        let name = unsafe { OsString::from_wide(std::slice::from_raw_parts(information.FileName.as_ptr(), name_size)) };
         let next_offset = if information.NextEntryOffset == 0 {
             self.used
         } else {
             self.offset
                 .checked_add(information.NextEntryOffset as usize)
                 .filter(|next| *next > self.offset && *next <= self.used)
-                .ok_or_else(|| {
-                    Error::other("directory record offset overflowed")
-                })?
+                .ok_or_else(|| Error::other("directory record offset overflowed"))?
         };
         Ok((name, next_offset))
     }
@@ -279,20 +254,14 @@ pub(crate) fn root_authority_path(root: &File) -> Result<PathBuf> {
             return Err(Error::last_os_error());
         }
         if (length as usize) < buffer.len() {
-            return Ok(PathBuf::from(OsString::from_wide(
-                &buffer[..length as usize],
-            )));
+            return Ok(PathBuf::from(OsString::from_wide(&buffer[..length as usize])));
         }
         buffer.resize(length as usize + 1, 0);
     }
 }
 
 /// Reads one final symbolic-link target after securely opening its parent.
-pub(crate) fn read_rooted_link(
-    root: &File,
-    _diagnostic_root: &Path,
-    path: &LocalRelativePath,
-) -> Result<PathBuf> {
+pub(crate) fn read_rooted_link(root: &File, _diagnostic_root: &Path, path: &LocalRelativePath) -> Result<PathBuf> {
     let (parent, name) = open_parent(root, path)?;
     std::fs::read_link(root_authority_path(&parent)?.join(name))
 }
@@ -315,10 +284,7 @@ pub(crate) fn create_rooted_symlink(
 }
 
 /// Reports whether a rooted symbolic link currently resolves to a directory.
-pub(crate) fn rooted_link_targets_directory(
-    root: &File,
-    path: &LocalRelativePath,
-) -> bool {
+pub(crate) fn rooted_link_targets_directory(root: &File, path: &LocalRelativePath) -> bool {
     open_parent(root, path)
         .and_then(|(parent, name)| Ok(root_authority_path(&parent)?.join(name)))
         .and_then(std::fs::metadata)
@@ -336,13 +302,7 @@ pub(crate) fn read_rooted_symlink_metadata(
     _diagnostic_root: &Path,
     path: &LocalRelativePath,
 ) -> Result<File> {
-    open_entry_no_follow(
-        root,
-        path,
-        FILE_READ_ATTRIBUTES | SYNCHRONIZE,
-        FILE_OPEN,
-        0,
-    )
+    open_entry_no_follow(root, path, FILE_READ_ATTRIBUTES | SYNCHRONIZE, FILE_OPEN, 0)
 }
 
 /// Opens a rooted regular file for reading.
@@ -381,18 +341,9 @@ pub(crate) fn open_rooted_native_writer(
     options: &write::OpenOptions,
 ) -> Result<File> {
     if options.creates_parents()
-        && let Some(parent) = path
-            .as_path()
-            .parent()
-            .filter(|parent| !parent.as_os_str().is_empty())
+        && let Some(parent) = path.as_path().parent().filter(|parent| !parent.as_os_str().is_empty())
     {
-        create_rooted_directory(
-            root,
-            Path::new(""),
-            &LocalRelativePath::new(parent)?,
-            true,
-            true,
-        )?;
+        create_rooted_directory(root, Path::new(""), &LocalRelativePath::new(parent)?, true, true)?;
     }
     let (access, disposition) = match options.mode() {
         write::Mode::CreateOrTruncate => (GENERIC_WRITE, FILE_OVERWRITE_IF),
@@ -418,20 +369,14 @@ pub(crate) fn open_rooted_native_writer(
 ///
 /// Returns an I/O error when enumeration or child inspection fails.
 #[inline(always)]
-pub(crate) fn read_root_directory(
-    root: &File,
-    diagnostic_root: &Path,
-) -> Result<Vec<(OsString, File)>> {
+pub(crate) fn read_root_directory(root: &File, diagnostic_root: &Path) -> Result<Vec<(OsString, File)>> {
     read_directory_handle(root, diagnostic_root)
 }
 
 /// Opens a lazy reader for immediate children of the opened root.
 ///
 /// Returns an I/O error when the root handle cannot be duplicated.
-pub(crate) fn open_root_directory_reader(
-    root: &File,
-    _diagnostic_root: &Path,
-) -> Result<RootedDirectoryReader> {
+pub(crate) fn open_root_directory_reader(root: &File, _diagnostic_root: &Path) -> Result<RootedDirectoryReader> {
     root.try_clone().map(RootedDirectoryReader::new)
 }
 
@@ -514,11 +459,7 @@ pub(crate) fn create_rooted_directory(
                 verify_real_directory(&directory)?;
                 parent = directory;
             }
-            Err(source_error)
-                if !recursive
-                    && !final_component
-                    && source_error.kind() == ErrorKind::NotFound =>
-            {
+            Err(source_error) if !recursive && !final_component && source_error.kind() == ErrorKind::NotFound => {
                 return Err(source_error);
             }
             Err(source_error) => return Err(source_error),
@@ -549,8 +490,7 @@ pub(crate) fn remove_rooted_entry(
             delete_rooted_entry(root, &current)?;
             continue;
         }
-        let entry =
-            read_rooted_symlink_metadata(root, diagnostic_root, &current)?;
+        let entry = read_rooted_symlink_metadata(root, diagnostic_root, &current)?;
         if !entry.metadata()?.is_dir() {
             delete_rooted_entry(root, &current)?;
             continue;
@@ -573,13 +513,7 @@ pub(crate) fn remove_rooted_entry(
 /// Returns an I/O error when the entry cannot be opened or deleted.
 #[inline]
 fn delete_rooted_entry(root: &File, path: &LocalRelativePath) -> Result<()> {
-    let entry = open_entry_no_follow(
-        root,
-        path,
-        DELETE | FILE_READ_ATTRIBUTES | SYNCHRONIZE,
-        FILE_OPEN,
-        0,
-    )?;
+    let entry = open_entry_no_follow(root, path, DELETE | FILE_READ_ATTRIBUTES | SYNCHRONIZE, FILE_OPEN, 0)?;
     delete_open_entry(&entry)
 }
 
@@ -625,13 +559,7 @@ pub(crate) fn set_rooted_permissions(
 }
 
 /// Opens one validated rooted entry after securely opening every parent.
-fn open_entry(
-    root: &File,
-    path: &LocalRelativePath,
-    access: u32,
-    disposition: u32,
-    options: u32,
-) -> Result<File> {
+fn open_entry(root: &File, path: &LocalRelativePath, access: u32, disposition: u32, options: u32) -> Result<File> {
     let entry = open_entry_no_follow(root, path, access, disposition, options)?;
     verify_not_name_surrogate(&entry)?;
     Ok(entry)
@@ -652,18 +580,15 @@ fn open_entry_no_follow(
 }
 
 /// Opens and verifies every parent component beneath the root.
-fn open_parent(
-    root: &File,
-    path: &LocalRelativePath,
-) -> Result<(File, OsString)> {
+fn open_parent(root: &File, path: &LocalRelativePath) -> Result<(File, OsString)> {
     let mut components: Vec<OsString> = path
         .as_path()
         .components()
         .map(|component| component.as_os_str().to_os_string())
         .collect();
-    let name = components.pop().ok_or_else(|| {
-        Error::new(ErrorKind::InvalidInput, "rooted path is empty")
-    })?;
+    let name = components
+        .pop()
+        .ok_or_else(|| Error::new(ErrorKind::InvalidInput, "rooted path is empty"))?;
     let mut parent = root.try_clone()?;
     for component in components {
         let directory = nt_open_at(
@@ -680,13 +605,7 @@ fn open_parent(
 }
 
 /// Opens one name relative to an already opened directory handle.
-fn nt_open_at(
-    parent: &File,
-    name: &OsStr,
-    access: u32,
-    disposition: u32,
-    options: u32,
-) -> Result<File> {
+fn nt_open_at(parent: &File, name: &OsStr, access: u32, disposition: u32, options: u32) -> Result<File> {
     let name = unicode_string(name)?;
     let attributes = OBJECT_ATTRIBUTES {
         Length: size_of::<OBJECT_ATTRIBUTES>() as u32,
@@ -725,17 +644,13 @@ fn nt_open_at(
 }
 
 /// Enumerates one already opened directory with `NtQueryDirectoryFile`.
-fn read_directory_handle(
-    directory: &File,
-    _diagnostic_root: &Path,
-) -> Result<Vec<(OsString, File)>> {
+fn read_directory_handle(directory: &File, _diagnostic_root: &Path) -> Result<Vec<(OsString, File)>> {
     let mut entries = Vec::new();
     let mut reader = RootedDirectoryReader::new(directory.try_clone()?);
     while let Some(entry) = reader.next_entry()? {
         entries.push(entry);
     }
-    entries
-        .sort_by(|(left_name, _), (right_name, _)| left_name.cmp(right_name));
+    entries.sort_by(|(left_name, _), (right_name, _)| left_name.cmp(right_name));
     Ok(entries)
 }
 
@@ -822,34 +737,20 @@ fn rename_open_entry(
     use windows_sys::Win32::Storage::FileSystem::FileRenameInfo;
     use windows_sys::Win32::Storage::FileSystem::SetFileInformationByHandle;
 
-    let source = open_entry_no_follow(
-        root,
-        source,
-        DELETE | FILE_READ_ATTRIBUTES | SYNCHRONIZE,
-        FILE_OPEN,
-        0,
-    )?;
-    let destination_units: Vec<u16> =
-        destination.as_path().as_os_str().encode_wide().collect();
+    let source = open_entry_no_follow(root, source, DELETE | FILE_READ_ATTRIBUTES | SYNCHRONIZE, FILE_OPEN, 0)?;
+    let destination_units: Vec<u16> = destination.as_path().as_os_str().encode_wide().collect();
     let allocation = size_of::<FILE_RENAME_INFO>()
-        .checked_add(
-            destination_units.len().saturating_sub(1) * size_of::<u16>(),
-        )
-        .ok_or_else(|| {
-            Error::new(ErrorKind::InvalidInput, "rename buffer is too large")
-        })?;
+        .checked_add(destination_units.len().saturating_sub(1) * size_of::<u16>())
+        .ok_or_else(|| Error::new(ErrorKind::InvalidInput, "rename buffer is too large"))?;
     let mut buffer = vec![0_usize; allocation.div_ceil(size_of::<usize>())];
     // SAFETY: `Vec<usize>` provides alignment suitable for
     // `FILE_RENAME_INFO`, and the allocation includes the trailing UTF-16
     // name.
-    let information =
-        unsafe { &mut *buffer.as_mut_ptr().cast::<FILE_RENAME_INFO>() };
+    let information = unsafe { &mut *buffer.as_mut_ptr().cast::<FILE_RENAME_INFO>() };
     information.Anonymous.ReplaceIfExists = overwrite;
     information.RootDirectory = root.as_raw_handle();
-    information.FileNameLength =
-        u32::try_from(destination_units.len() * size_of::<u16>()).map_err(
-            |_| Error::new(ErrorKind::InvalidInput, "rename name is too long"),
-        )?;
+    information.FileNameLength = u32::try_from(destination_units.len() * size_of::<u16>())
+        .map_err(|_| Error::new(ErrorKind::InvalidInput, "rename name is too long"))?;
     // SAFETY: the allocation reserves enough trailing storage for the full
     // destination name and the source slice remains live for the copy.
     unsafe {
@@ -866,12 +767,7 @@ fn rename_open_entry(
             source.as_raw_handle(),
             FileRenameInfo,
             buffer.as_ptr().cast(),
-            u32::try_from(allocation).map_err(|_| {
-                Error::new(
-                    ErrorKind::InvalidInput,
-                    "rename buffer is too large",
-                )
-            })?,
+            u32::try_from(allocation).map_err(|_| Error::new(ErrorKind::InvalidInput, "rename buffer is too large"))?,
         )
     };
     if result == 0 {
@@ -902,18 +798,13 @@ fn unicode_string(value: &OsStr) -> Result<OwnedUnicodeString> {
         .len()
         .checked_mul(size_of::<u16>())
         .and_then(|length| u16::try_from(length).ok())
-        .ok_or_else(|| {
-            Error::new(ErrorKind::InvalidInput, "rooted component is too long")
-        })?;
+        .ok_or_else(|| Error::new(ErrorKind::InvalidInput, "rooted component is too long"))?;
     let header = UNICODE_STRING {
         Length: byte_len,
         MaximumLength: byte_len,
         Buffer: units.as_mut_ptr(),
     };
-    Ok(OwnedUnicodeString {
-        _units: units,
-        header,
-    })
+    Ok(OwnedUnicodeString { _units: units, header })
 }
 
 /// Converts a native path to a NUL-terminated UTF-16 string.

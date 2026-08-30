@@ -98,10 +98,7 @@ impl LocalAtomicWriteOptions {
     ///
     /// # Returns
     /// Updated options carrying the timeout.
-    pub(crate) const fn with_open_retry_timeout(
-        mut self,
-        timeout: Duration,
-    ) -> Self {
+    pub(crate) const fn with_open_retry_timeout(mut self, timeout: Duration) -> Self {
         self.open_retry_timeout = Some(timeout);
         self
     }
@@ -122,10 +119,7 @@ impl LocalAtomicWriteOptions {
     ///
     /// Updated options carrying the durability policy.
     #[inline(always)]
-    pub(crate) const fn with_durability(
-        mut self,
-        durability: LocalDurabilityRequirement,
-    ) -> Self {
+    pub(crate) const fn with_durability(mut self, durability: LocalDurabilityRequirement) -> Self {
         self.durability = durability;
         self
     }
@@ -178,9 +172,6 @@ mod tests {
     #[test]
     fn test_local_atomic_write_options_maps_create_new_publication_mode() {
         let options = LocalAtomicWriteOptions::new().with_create_new();
-        assert_eq!(
-            options.publication_mode(),
-            LocalAtomicPublicationMode::CreateNew
-        );
+        assert_eq!(options.publication_mode(), LocalAtomicPublicationMode::CreateNew);
     }
 }

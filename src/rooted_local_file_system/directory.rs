@@ -52,9 +52,7 @@ impl RootedLocalFileSystem {
             LocalFileOperation::CreateDirectory,
         )?;
         #[cfg(feature = "internal-test-support")]
-        let metadata = if crate::local::test_support_enabled(
-            "rooted-local-create-directory-status",
-        ) {
+        let metadata = if crate::local::test_support_enabled("rooted-local-create-directory-status") {
             Err(io::Error::from(io::ErrorKind::PermissionDenied))
         } else {
             self.root.symlink_metadata(&relative)
@@ -62,25 +60,16 @@ impl RootedLocalFileSystem {
         #[cfg(not(feature = "internal-test-support"))]
         let metadata = self.root.symlink_metadata(&relative);
         let existing_directory = match metadata {
-            Ok(metadata)
-                if metadata.kind() == crate::rooted::EntryKind::Directory =>
-            {
-                Some(true)
-            }
+            Ok(metadata) if metadata.kind() == crate::rooted::EntryKind::Directory => Some(true),
             Ok(_) => {
-                return Err(LocalFileError::new(
-                    LocalFileErrorKind::TypeConflict,
-                    LocalFileOperation::CreateDirectory,
-                )
-                .with_path(path.to_path_buf()));
+                return Err(
+                    LocalFileError::new(LocalFileErrorKind::TypeConflict, LocalFileOperation::CreateDirectory)
+                        .with_path(path.to_path_buf()),
+                );
             }
             Err(error) if error.kind() == io::ErrorKind::NotFound => None,
             Err(error) => {
-                return Err(rooted_io_error(
-                    LocalFileOperation::CreateDirectory,
-                    path,
-                    error,
-                ));
+                return Err(rooted_io_error(LocalFileOperation::CreateDirectory, path, error));
             }
         };
         let existed = existing_directory.is_some();
@@ -104,20 +93,14 @@ impl RootedLocalFileSystem {
             Err(error)
                 if options.exists_ok()
                     && error.kind() == io::ErrorKind::AlreadyExists
-                    && self.root.symlink_metadata(&relative).is_ok_and(
-                        |metadata| {
-                            metadata.kind()
-                                == crate::rooted::EntryKind::Directory
-                        },
-                    ) =>
+                    && self
+                        .root
+                        .symlink_metadata(&relative)
+                        .is_ok_and(|metadata| metadata.kind() == crate::rooted::EntryKind::Directory) =>
             {
                 Ok(LocalCreateDirectoryOutcome::new(false))
             }
-            Err(error) => Err(rooted_io_error(
-                LocalFileOperation::CreateDirectory,
-                path,
-                error,
-            )),
+            Err(error) => Err(rooted_io_error(LocalFileOperation::CreateDirectory, path, error)),
         }
     }
 }

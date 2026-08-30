@@ -57,9 +57,7 @@ impl StagedFile {
     #[must_use]
     #[inline(always)]
     pub(crate) fn path(&self) -> &Path {
-        self.path
-            .as_deref()
-            .expect("staging path has already been disarmed")
+        self.path.as_deref().expect("staging path has already been disarmed")
     }
 
     /// Returns the open staging file.
@@ -72,9 +70,7 @@ impl StagedFile {
     #[must_use]
     #[inline(always)]
     pub(crate) fn file(&self) -> &File {
-        self.file
-            .as_ref()
-            .expect("staging file handle has already been closed")
+        self.file.as_ref().expect("staging file handle has already been closed")
     }
 
     /// Returns the open staging file mutably.
@@ -87,9 +83,7 @@ impl StagedFile {
     #[must_use]
     #[inline(always)]
     pub(crate) fn file_mut(&mut self) -> &mut File {
-        self.file
-            .as_mut()
-            .expect("staging file handle has already been closed")
+        self.file.as_mut().expect("staging file handle has already been closed")
     }
 
     /// Returns whether the staging data handle remains open for recovery.
@@ -120,11 +114,9 @@ impl StagedFile {
         self.close();
         if let Some(path) = self.path.as_ref() {
             #[cfg(feature = "internal-test-support")]
-            if super::test_support::is_enabled(
-                "atomic-install-unlink-persistent",
-            ) || super::test_support::is_enabled(
-                "atomic-install-unlink-persistent-sync",
-            ) || super::test_support::is_enabled("copy-staging-copy-cleanup")
+            if super::test_support::is_enabled("atomic-install-unlink-persistent")
+                || super::test_support::is_enabled("atomic-install-unlink-persistent-sync")
+                || super::test_support::is_enabled("copy-staging-copy-cleanup")
             {
                 return Err(crate::local::test_fault_error());
             }

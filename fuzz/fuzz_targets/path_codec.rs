@@ -26,13 +26,11 @@ fuzz_target!(|data: &[u8]| {
         use std::os::unix::ffi::OsStringExt;
 
         let native = std::ffi::OsString::from_vec(data.to_vec());
-        let canonical = LocalPathCodec::encode_component(&native)
-            .expect("non-NUL native bytes must convert");
-        let restored = LocalPathCodec::decode_component(&canonical)
-            .expect("canonical native text must convert");
+        let canonical = LocalPathCodec::encode_component(&native).expect("non-NUL native bytes must convert");
+        let restored = LocalPathCodec::decode_component(&canonical).expect("canonical native text must convert");
         assert_eq!(restored.as_encoded_bytes(), data);
-        let canonical_again = LocalPathCodec::encode_component(&restored)
-            .expect("decoded native bytes must encode again");
+        let canonical_again =
+            LocalPathCodec::encode_component(&restored).expect("decoded native bytes must encode again");
         assert_eq!(canonical_again, canonical);
     }
 
@@ -49,13 +47,11 @@ fuzz_target!(|data: &[u8]| {
             return;
         }
         let native = std::ffi::OsString::from_wide(&units);
-        let canonical = LocalPathCodec::encode_component(&native)
-            .expect("non-NUL native UTF-16 must convert");
-        let restored = LocalPathCodec::decode_component(&canonical)
-            .expect("canonical native text must convert");
+        let canonical = LocalPathCodec::encode_component(&native).expect("non-NUL native UTF-16 must convert");
+        let restored = LocalPathCodec::decode_component(&canonical).expect("canonical native text must convert");
         assert_eq!(restored.encode_wide().collect::<Vec<_>>(), units);
-        let canonical_again = LocalPathCodec::encode_component(&restored)
-            .expect("decoded native UTF-16 must encode again");
+        let canonical_again =
+            LocalPathCodec::encode_component(&restored).expect("decoded native UTF-16 must encode again");
         assert_eq!(canonical_again, canonical);
     }
 });

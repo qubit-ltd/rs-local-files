@@ -20,10 +20,7 @@ use crate::SizeLimit;
 /// Probe failures are represented as unknown limits rather than operation
 /// failures.
 pub(super) fn limits(file: &File) -> LocalFileSystemLimits {
-    LocalFileSystemLimits::new(
-        pathconf(file, libc::_PC_PATH_MAX),
-        pathconf(file, libc::_PC_NAME_MAX),
-    )
+    LocalFileSystemLimits::new(pathconf(file, libc::_PC_PATH_MAX), pathconf(file, libc::_PC_NAME_MAX))
 }
 
 /// Reads dynamic capacity values from an already-opened filesystem handle.
@@ -40,14 +37,8 @@ pub(super) fn space(file: &File) -> LocalFileSystemSpace {
     // SAFETY: successful `fstatvfs` initialized the complete status value.
     let status = unsafe { status.assume_init() };
     let fragment_size = status.f_frsize as u128;
-    let bytes = |blocks| {
-        u64::try_from((blocks as u128).checked_mul(fragment_size)?).ok()
-    };
-    LocalFileSystemSpace::new(
-        bytes(status.f_blocks),
-        bytes(status.f_bfree),
-        bytes(status.f_bavail),
-    )
+    let bytes = |blocks| u64::try_from((blocks as u128).checked_mul(fragment_size)?).ok();
+    LocalFileSystemSpace::new(bytes(status.f_blocks), bytes(status.f_bfree), bytes(status.f_bavail))
 }
 
 /// Converts one `fpathconf` result into the explicit public limit state.

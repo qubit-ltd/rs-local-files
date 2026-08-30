@@ -39,9 +39,7 @@ pub(crate) fn resolve(
     let mut resolved = Vec::<OsString>::new();
     let mut followed_links = 0_u8;
     while let Some(component) = pending.pop_front() {
-        let candidate = relative_from_components(
-            resolved.iter().chain(std::iter::once(&component)),
-        )?;
+        let candidate = relative_from_components(resolved.iter().chain(std::iter::once(&component)))?;
         let metadata = match root.metadata(&candidate) {
             Ok(metadata) => metadata,
             Err(error) if error.kind() == LocalFileErrorKind::NotFound => {
@@ -109,11 +107,7 @@ fn path_components(path: &Path) -> VecDeque<OsString> {
 }
 
 /// Applies one relative link target to the resolved parent component stack.
-fn apply_link_target(
-    resolved: &mut Vec<OsString>,
-    target: &Path,
-    original: &Path,
-) -> LocalResult<()> {
+fn apply_link_target(resolved: &mut Vec<OsString>, target: &Path, original: &Path) -> LocalResult<()> {
     for component in target.components() {
         match component {
             Component::Normal(name) => resolved.push(name.to_os_string()),
@@ -151,11 +145,7 @@ fn relative_from_components<'component>(
 }
 
 /// Creates a structured symlink-policy or containment failure.
-fn symlink_error(
-    path: &Path,
-    kind: LocalFileErrorKind,
-    reason: &'static str,
-) -> LocalFileError {
+fn symlink_error(path: &Path, kind: LocalFileErrorKind, reason: &'static str) -> LocalFileError {
     LocalFileError::new(kind, LocalFileOperation::BindPath)
         .with_path(path.to_path_buf())
         .with_reason(reason)
