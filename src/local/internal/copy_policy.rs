@@ -16,10 +16,7 @@ use crate::LocalDurabilityRequirement;
 
 /// Reports whether the configured source mode rejects the observed kind.
 #[inline]
-pub(crate) fn copy_source_mode_mismatch(
-    source_is_directory: bool,
-    source_mode: LocalCopySourceMode,
-) -> bool {
+pub(crate) fn copy_source_mode_mismatch(source_is_directory: bool, source_mode: LocalCopySourceMode) -> bool {
     matches!(
         (source_is_directory, source_mode),
         (true, LocalCopySourceMode::File) | (false, LocalCopySourceMode::Tree)
@@ -34,8 +31,7 @@ pub(crate) fn copy_directory_guarantee_unavailable(
     durability: LocalDurabilityRequirement,
 ) -> bool {
     source_is_directory
-        && (atomicity == LocalAtomicityRequirement::Required
-            || durability == LocalDurabilityRequirement::Required)
+        && (atomicity == LocalAtomicityRequirement::Required || durability == LocalDurabilityRequirement::Required)
 }
 
 /// Reports whether replacing a directory would violate required atomicity.

@@ -43,10 +43,7 @@ impl RootedLocalFileSystem {
         options: &LocalTempFileOptions,
         symlink_policy: LocalSymlinkPolicy,
     ) -> LocalResult<LocalTempFile> {
-        let requested_parent = rooted_temp_parent(
-            options.parent(),
-            LocalFileOperation::CreateTempFile,
-        )?;
+        let requested_parent = rooted_temp_parent(options.parent(), LocalFileOperation::CreateTempFile)?;
         let parent = if requested_parent.as_os_str().is_empty() {
             requested_parent
         } else {
@@ -61,21 +58,12 @@ impl RootedLocalFileSystem {
             .to_path_buf()
         };
         if options.creates_parent() && !parent.as_os_str().is_empty() {
-            let parent_path =
-                rooted_path(&parent, LocalFileOperation::CreateTempFile)?;
-            self.root.create_dir_all(&parent_path).map_err(|error| {
-                rooted_io_error(
-                    LocalFileOperation::CreateTempFile,
-                    &parent,
-                    error,
-                )
-            })?;
+            let parent_path = rooted_path(&parent, LocalFileOperation::CreateTempFile)?;
+            self.root
+                .create_dir_all(&parent_path)
+                .map_err(|error| rooted_io_error(LocalFileOperation::CreateTempFile, &parent, error))?;
         }
-        validate_rooted_temp_parent(
-            &self.root,
-            &parent,
-            LocalFileOperation::CreateTempFile,
-        )?;
+        validate_rooted_temp_parent(&self.root, &parent, LocalFileOperation::CreateTempFile)?;
         if options.max_attempts() == 0 {
             return Err(rooted_io_error(
                 LocalFileOperation::CreateTempFile,
@@ -87,37 +75,16 @@ impl RootedLocalFileSystem {
             )
             .with_kind(LocalFileErrorKind::InvalidOptions));
         }
-        validate_temp_affixes(options.prefix(), options.suffix()).map_err(
-            |error| {
-                rooted_io_error(
-                    LocalFileOperation::CreateTempFile,
-                    &parent,
-                    error,
-                )
+        validate_temp_affixes(options.prefix(), options.suffix()).map_err(|error| {
+            rooted_io_error(LocalFileOperation::CreateTempFile, &parent, error)
                 .with_kind(LocalFileErrorKind::InvalidOptions)
-            },
-        )?;
+        })?;
         for _ in 0..options.max_attempts() {
-            let resource_name = crate::local::try_random_file_name(
-                "qubit-local-files-",
-                options.prefix(),
-                options.suffix(),
-            )
-            .map_err(|error| {
-                rooted_io_error(
-                    LocalFileOperation::CreateTempFile,
-                    &parent,
-                    error,
-                )
-            })?;
-            let sandbox = temp_candidate(
-                &parent,
-                Some("sandbox-"),
-                None,
-                LocalFileOperation::CreateTempFile,
-            )?;
-            let sandbox_relative =
-                rooted_path(&sandbox, LocalFileOperation::CreateTempFile)?;
+            let resource_name =
+                crate::local::try_random_file_name("qubit-local-files-", options.prefix(), options.suffix())
+                    .map_err(|error| rooted_io_error(LocalFileOperation::CreateTempFile, &parent, error))?;
+            let sandbox = temp_candidate(&parent, Some("sandbox-"), None, LocalFileOperation::CreateTempFile)?;
+            let sandbox_relative = rooted_path(&sandbox, LocalFileOperation::CreateTempFile)?;
             match self.root.create_dir(&sandbox_relative) {
                 Ok(()) => {}
                 Err(error) if error.kind() == io::ErrorKind::AlreadyExists => {
@@ -132,23 +99,16 @@ impl RootedLocalFileSystem {
                 }
             }
             let candidate = sandbox.join(resource_name);
-            let relative =
-                rooted_path(&candidate, LocalFileOperation::CreateTempFile)?;
+            let relative = rooted_path(&candidate, LocalFileOperation::CreateTempFile)?;
             #[cfg(feature = "internal-test-support")]
-            let opened = if crate::local::test_support_enabled(
-                "rooted-temp-file-collision",
-            ) {
+            let opened = if crate::local::test_support_enabled("rooted-temp-file-collision") {
                 Err(io::Error::from(io::ErrorKind::AlreadyExists))
-            } else if crate::local::test_support_enabled(
-                "rooted-temp-file-open",
-            ) {
+            } else if crate::local::test_support_enabled("rooted-temp-file-open") {
                 Err(io::Error::from(io::ErrorKind::PermissionDenied))
             } else {
                 self.root.open_writer(
                     &relative,
-                    &crate::write::OpenOptions::new(
-                        crate::write::Mode::CreateNew,
-                    ),
+                    &crate::write::OpenOptions::new(crate::write::Mode::CreateNew),
                 )
             };
             #[cfg(not(feature = "internal-test-support"))]
@@ -159,20 +119,14 @@ impl RootedLocalFileSystem {
             match opened {
                 Ok(file) => {
                     let cleanup_sandbox = sandbox.clone();
-                    let result = LocalTempFile::rooted(
-                        Arc::clone(&self.root),
-                        candidate,
-                        sandbox,
-                        file,
-                        symlink_policy,
-                    );
+                    let result =
+                        LocalTempFile::rooted(Arc::clone(&self.root), candidate, sandbox, file, symlink_policy);
                     return match result {
                         Ok(resource) => Ok(resource),
                         Err(error) => {
-                            let _ = self.root.remove_tree(&rooted_path(
-                                &cleanup_sandbox,
-                                LocalFileOperation::CreateTempFile,
-                            )?);
+                            let _ = self
+                                .root
+                                .remove_tree(&rooted_path(&cleanup_sandbox, LocalFileOperation::CreateTempFile)?);
                             Err(rooted_io_error(
                                 LocalFileOperation::CreateTempFile,
                                 relative.as_path(),
@@ -198,10 +152,7 @@ impl RootedLocalFileSystem {
         Err(rooted_io_error(
             LocalFileOperation::CreateTempFile,
             &parent,
-            io::Error::new(
-                io::ErrorKind::AlreadyExists,
-                "temporary file name attempts exhausted",
-            ),
+            io::Error::new(io::ErrorKind::AlreadyExists, "temporary file name attempts exhausted"),
         ))
     }
 
@@ -219,10 +170,7 @@ impl RootedLocalFileSystem {
         options: &LocalTempDirectoryOptions,
         symlink_policy: LocalSymlinkPolicy,
     ) -> LocalResult<LocalTempDirectory> {
-        let requested_parent = rooted_temp_parent(
-            options.parent(),
-            LocalFileOperation::CreateTempDirectory,
-        )?;
+        let requested_parent = rooted_temp_parent(options.parent(), LocalFileOperation::CreateTempDirectory)?;
         let parent = if requested_parent.as_os_str().is_empty() {
             requested_parent
         } else {
@@ -237,21 +185,12 @@ impl RootedLocalFileSystem {
             .to_path_buf()
         };
         if options.creates_parent() && !parent.as_os_str().is_empty() {
-            let parent_path =
-                rooted_path(&parent, LocalFileOperation::CreateTempDirectory)?;
-            self.root.create_dir_all(&parent_path).map_err(|error| {
-                rooted_io_error(
-                    LocalFileOperation::CreateTempDirectory,
-                    &parent,
-                    error,
-                )
-            })?;
+            let parent_path = rooted_path(&parent, LocalFileOperation::CreateTempDirectory)?;
+            self.root
+                .create_dir_all(&parent_path)
+                .map_err(|error| rooted_io_error(LocalFileOperation::CreateTempDirectory, &parent, error))?;
         }
-        validate_rooted_temp_parent(
-            &self.root,
-            &parent,
-            LocalFileOperation::CreateTempDirectory,
-        )?;
+        validate_rooted_temp_parent(&self.root, &parent, LocalFileOperation::CreateTempDirectory)?;
         if options.max_attempts() == 0 {
             return Err(rooted_io_error(
                 LocalFileOperation::CreateTempDirectory,
@@ -263,37 +202,16 @@ impl RootedLocalFileSystem {
             )
             .with_kind(LocalFileErrorKind::InvalidOptions));
         }
-        validate_temp_affixes(options.prefix(), options.suffix()).map_err(
-            |error| {
-                rooted_io_error(
-                    LocalFileOperation::CreateTempDirectory,
-                    &parent,
-                    error,
-                )
+        validate_temp_affixes(options.prefix(), options.suffix()).map_err(|error| {
+            rooted_io_error(LocalFileOperation::CreateTempDirectory, &parent, error)
                 .with_kind(LocalFileErrorKind::InvalidOptions)
-            },
-        )?;
+        })?;
         for _ in 0..options.max_attempts() {
-            let resource_name = crate::local::try_random_file_name(
-                "qubit-local-files-",
-                options.prefix(),
-                options.suffix(),
-            )
-            .map_err(|error| {
-                rooted_io_error(
-                    LocalFileOperation::CreateTempDirectory,
-                    &parent,
-                    error,
-                )
-            })?;
-            let sandbox = temp_candidate(
-                &parent,
-                Some("sandbox-"),
-                None,
-                LocalFileOperation::CreateTempDirectory,
-            )?;
-            let sandbox_relative =
-                rooted_path(&sandbox, LocalFileOperation::CreateTempDirectory)?;
+            let resource_name =
+                crate::local::try_random_file_name("qubit-local-files-", options.prefix(), options.suffix())
+                    .map_err(|error| rooted_io_error(LocalFileOperation::CreateTempDirectory, &parent, error))?;
+            let sandbox = temp_candidate(&parent, Some("sandbox-"), None, LocalFileOperation::CreateTempDirectory)?;
+            let sandbox_relative = rooted_path(&sandbox, LocalFileOperation::CreateTempDirectory)?;
             match self.root.create_dir(&sandbox_relative) {
                 Ok(()) => {}
                 Err(error) if error.kind() == io::ErrorKind::AlreadyExists => {
@@ -308,18 +226,11 @@ impl RootedLocalFileSystem {
                 }
             }
             let candidate = sandbox.join(resource_name);
-            let relative = rooted_path(
-                &candidate,
-                LocalFileOperation::CreateTempDirectory,
-            )?;
+            let relative = rooted_path(&candidate, LocalFileOperation::CreateTempDirectory)?;
             #[cfg(feature = "internal-test-support")]
-            let created = if crate::local::test_support_enabled(
-                "rooted-temp-directory-collision",
-            ) {
+            let created = if crate::local::test_support_enabled("rooted-temp-directory-collision") {
                 Err(io::Error::from(io::ErrorKind::AlreadyExists))
-            } else if crate::local::test_support_enabled(
-                "rooted-temp-directory-create",
-            ) {
+            } else if crate::local::test_support_enabled("rooted-temp-directory-create") {
                 Err(io::Error::from(io::ErrorKind::PermissionDenied))
             } else {
                 self.root.create_dir(&relative)
@@ -329,19 +240,13 @@ impl RootedLocalFileSystem {
             match created {
                 Ok(()) => {
                     let cleanup_sandbox = sandbox.clone();
-                    let result = LocalTempDirectory::rooted(
-                        Arc::clone(&self.root),
-                        candidate,
-                        sandbox,
-                        symlink_policy,
-                    );
+                    let result = LocalTempDirectory::rooted(Arc::clone(&self.root), candidate, sandbox, symlink_policy);
                     return match result {
                         Ok(resource) => Ok(resource),
                         Err(error) => {
-                            let _ = self.root.remove_tree(&rooted_path(
-                                &cleanup_sandbox,
-                                LocalFileOperation::CreateTempDirectory,
-                            )?);
+                            let _ = self
+                                .root
+                                .remove_tree(&rooted_path(&cleanup_sandbox, LocalFileOperation::CreateTempDirectory)?);
                             Err(rooted_io_error(
                                 LocalFileOperation::CreateTempDirectory,
                                 relative.as_path(),

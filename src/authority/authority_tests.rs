@@ -35,47 +35,35 @@ impl CurrentDirectoryGuard {
         let lock = CURRENT_DIRECTORY_LOCK
             .lock()
             .unwrap_or_else(|poisoned| poisoned.into_inner());
-        let original = env::current_dir()
-            .expect("original current directory should be readable");
-        env::set_current_dir(path)
-            .expect("test current directory should be set");
-        Self {
-            original,
-            _lock: lock,
-        }
+        let original = env::current_dir().expect("original current directory should be readable");
+        env::set_current_dir(path).expect("test current directory should be set");
+        Self { original, _lock: lock }
     }
 }
 
 impl Drop for CurrentDirectoryGuard {
     /// Restores the original process current directory.
     fn drop(&mut self) {
-        env::set_current_dir(&self.original)
-            .expect("original current directory should be restored");
+        env::set_current_dir(&self.original).expect("original current directory should be restored");
     }
 }
 
 /// Verifies relative Host paths remain bound to the construction cwd handle.
 #[test]
 fn test_host_authority_keeps_construction_cwd() {
-    let first = tempfile::tempdir()
-        .expect("first temporary directory should be created");
-    let second = tempfile::tempdir()
-        .expect("second temporary directory should be created");
-    fs::write(first.path().join("bound.txt"), b"first")
-        .expect("fixture should be written");
+    let first = tempfile::tempdir().expect("first temporary directory should be created");
+    let second = tempfile::tempdir().expect("second temporary directory should be created");
+    fs::write(first.path().join("bound.txt"), b"first").expect("fixture should be written");
     let _cwd = CurrentDirectoryGuard::set(first.path());
     let authority = HostAuthority::bind_current(LocalSymlinkPolicy::Reject)
         .expect("Host authority should bind the current directory");
-    env::set_current_dir(second.path())
-        .expect("process current directory should be changed");
+    env::set_current_dir(second.path()).expect("process current directory should be changed");
 
     let path = authority
         .resolve(Path::new("bound.txt"))
         .expect("relative path should resolve");
     assert_eq!(
-        authority
-            .read_all(&path)
-            .expect("bound file should be readable"),
+        authority.read_all(&path).expect("bound file should be readable"),
         b"first",
     );
 }
@@ -83,15 +71,12 @@ fn test_host_authority_keeps_construction_cwd() {
 /// Verifies a Rooted authority remains anchored after its path is renamed.
 #[test]
 fn test_rooted_authority_survives_diagnostic_root_rename() {
-    let parent =
-        tempfile::tempdir().expect("temporary parent should be created");
+    let parent = tempfile::tempdir().expect("temporary parent should be created");
     let root = parent.path().join("root");
     fs::create_dir(&root).expect("root directory should be created");
     fs::write(root.join("entry"), b"value").expect("fixture should be written");
-    let authority = RootedAuthority::open(&root, LocalSymlinkPolicy::Reject)
-        .expect("Rooted authority should open");
-    fs::rename(&root, parent.path().join("moved"))
-        .expect("diagnostic root path should be renamed");
+    let authority = RootedAuthority::open(&root, LocalSymlinkPolicy::Reject).expect("Rooted authority should open");
+    fs::rename(&root, parent.path().join("moved")).expect("diagnostic root path should be renamed");
 
     let path = authority
         .resolve(Path::new("entry"))
@@ -109,8 +94,7 @@ fn test_rooted_authority_survives_diagnostic_root_rename() {
 fn test_rooted_authority_rejects_parent_escape() {
     let root = tempfile::tempdir().expect("temporary root should be created");
     let authority =
-        RootedAuthority::open(root.path(), LocalSymlinkPolicy::Reject)
-            .expect("Rooted authority should open");
+        RootedAuthority::open(root.path(), LocalSymlinkPolicy::Reject).expect("Rooted authority should open");
 
     let error = authority
         .resolve(Path::new("../escape"))
@@ -125,25 +109,15 @@ fn test_rooted_authority_follows_contained_symlink() {
     use std::os::unix::fs::symlink;
 
     let root = tempfile::tempdir().expect("temporary root should be created");
-    fs::write(root.path().join("target"), b"inside")
-        .expect("target fixture should be written");
-    symlink("target", root.path().join("link"))
-        .expect("contained symbolic link should be created");
-    let authority = RootedAuthority::open(
-        root.path(),
-        LocalSymlinkPolicy::FollowWithinScope,
-    )
-    .expect("Rooted authority should open");
+    fs::write(root.path().join("target"), b"inside").expect("target fixture should be written");
+    symlink("target", root.path().join("link")).expect("contained symbolic link should be created");
+    let authority = RootedAuthority::open(root.path(), LocalSymlinkPolicy::FollowWithinScope)
+        .expect("Rooted authority should open");
 
     let path = authority
         .resolve(Path::new("link"))
         .expect("contained symbolic link should resolve");
-    assert_eq!(
-        authority
-            .read_all(&path)
-            .expect("target should be readable"),
-        b"inside",
-    );
+    assert_eq!(authority.read_all(&path).expect("target should be readable"), b"inside",);
 }
 
 /// Verifies relative symbolic-link targets cannot escape a retained root.
@@ -152,15 +126,12 @@ fn test_rooted_authority_follows_contained_symlink() {
 fn test_rooted_authority_rejects_symlink_parent_escape() {
     use std::os::unix::fs::symlink;
 
-    let parent =
-        tempfile::tempdir().expect("temporary parent should be created");
+    let parent = tempfile::tempdir().expect("temporary parent should be created");
     let root = parent.path().join("root");
     fs::create_dir(&root).expect("root directory should be created");
-    symlink("../outside", root.join("escape"))
-        .expect("escaping symbolic link should be created");
+    symlink("../outside", root.join("escape")).expect("escaping symbolic link should be created");
     let authority =
-        RootedAuthority::open(&root, LocalSymlinkPolicy::FollowWithinScope)
-            .expect("Rooted authority should open");
+        RootedAuthority::open(&root, LocalSymlinkPolicy::FollowWithinScope).expect("Rooted authority should open");
 
     let error = authority
         .resolve(Path::new("escape"))
@@ -175,13 +146,9 @@ fn test_rooted_authority_rejects_absolute_symlink_target() {
     use std::os::unix::fs::symlink;
 
     let root = tempfile::tempdir().expect("temporary root should be created");
-    symlink("/tmp/outside", root.path().join("escape"))
-        .expect("absolute symbolic link should be created");
-    let authority = RootedAuthority::open(
-        root.path(),
-        LocalSymlinkPolicy::FollowWithinScope,
-    )
-    .expect("Rooted authority should open");
+    symlink("/tmp/outside", root.path().join("escape")).expect("absolute symbolic link should be created");
+    let authority = RootedAuthority::open(root.path(), LocalSymlinkPolicy::FollowWithinScope)
+        .expect("Rooted authority should open");
 
     let error = authority
         .resolve(Path::new("escape"))
@@ -196,15 +163,10 @@ fn test_rooted_authority_rejects_symlink_cycle() {
     use std::os::unix::fs::symlink;
 
     let root = tempfile::tempdir().expect("temporary root should be created");
-    symlink("second", root.path().join("first"))
-        .expect("first symbolic link should be created");
-    symlink("first", root.path().join("second"))
-        .expect("second symbolic link should be created");
-    let authority = RootedAuthority::open(
-        root.path(),
-        LocalSymlinkPolicy::FollowWithinScope,
-    )
-    .expect("Rooted authority should open");
+    symlink("second", root.path().join("first")).expect("first symbolic link should be created");
+    symlink("first", root.path().join("second")).expect("second symbolic link should be created");
+    let authority = RootedAuthority::open(root.path(), LocalSymlinkPolicy::FollowWithinScope)
+        .expect("Rooted authority should open");
 
     let error = authority
         .resolve(Path::new("first"))
@@ -219,32 +181,23 @@ fn test_host_authority_follows_contained_bound_symlink() {
     use std::os::unix::fs::symlink;
 
     let root = tempfile::tempdir().expect("temporary root should be created");
-    fs::write(root.path().join("target"), b"bound")
-        .expect("target fixture should be written");
-    symlink("target", root.path().join("link"))
-        .expect("contained symbolic link should be created");
+    fs::write(root.path().join("target"), b"bound").expect("target fixture should be written");
+    symlink("target", root.path().join("link")).expect("contained symbolic link should be created");
     let _cwd = CurrentDirectoryGuard::set(root.path());
-    let authority =
-        HostAuthority::bind_current(LocalSymlinkPolicy::FollowWithinScope)
-            .expect("Host authority should bind the current directory");
+    let authority = HostAuthority::bind_current(LocalSymlinkPolicy::FollowWithinScope)
+        .expect("Host authority should bind the current directory");
 
     let path = authority
         .resolve(Path::new("link"))
         .expect("contained Host link should resolve");
-    assert_eq!(
-        authority
-            .read_all(&path)
-            .expect("target should be readable"),
-        b"bound",
-    );
+    assert_eq!(authority.read_all(&path).expect("target should be readable"), b"bound",);
 }
 
 /// Verifies Host rename accepts relative and absolute paths in one authority.
 #[test]
 fn test_host_authority_renames_bound_path_to_absolute_path() {
     let root = tempfile::tempdir().expect("temporary root should be created");
-    fs::write(root.path().join("source"), b"value")
-        .expect("source fixture should be written");
+    fs::write(root.path().join("source"), b"value").expect("source fixture should be written");
     let _cwd = CurrentDirectoryGuard::set(root.path());
     let authority = HostAuthority::bind_current(LocalSymlinkPolicy::Reject)
         .expect("Host authority should bind the current directory");
@@ -259,8 +212,7 @@ fn test_host_authority_renames_bound_path_to_absolute_path() {
         .rename(&source, &target, false)
         .expect("mixed Host rename should succeed");
     assert_eq!(
-        fs::read(root.path().join("target"))
-            .expect("renamed target should be readable"),
+        fs::read(root.path().join("target")).expect("renamed target should be readable"),
         b"value",
     );
 }

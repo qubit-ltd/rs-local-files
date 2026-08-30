@@ -62,11 +62,7 @@ mod install_error {
 
     impl StagedInstallError {
         /// Creates an installation failure and retains safe cleanup ownership.
-        pub(super) fn new(
-            error: LocalFileError,
-            state: StagedInstallState,
-            staged_file: Option<StagedFile>,
-        ) -> Self {
+        pub(super) fn new(error: LocalFileError, state: StagedInstallState, staged_file: Option<StagedFile>) -> Self {
             Self {
                 error: Box::new(error),
                 state,
@@ -92,9 +88,7 @@ mod install_error {
         }
 
         /// Consumes this failure into all retained native facts.
-        pub(crate) fn into_parts(
-            self,
-        ) -> (LocalFileError, StagedInstallState, Option<StagedFile>) {
+        pub(crate) fn into_parts(self) -> (LocalFileError, StagedInstallState, Option<StagedFile>) {
             (*self.error, self.state, self.staged_file)
         }
     }
@@ -122,22 +116,14 @@ impl StagedFile {
     ///
     /// Returns an open-writer error when randomness fails or sixteen exclusive
     /// creation attempts collide or fail.
-    pub(super) fn create(
-        parent: File,
-        diagnostic_target: &Path,
-    ) -> LocalResult<Self> {
+    pub(super) fn create(parent: File, diagnostic_target: &Path) -> LocalResult<Self> {
         let mut last_collision = None;
         for _ in 0..16 {
             let name = random_staging_name(diagnostic_target)?;
             match nt_open_at(
                 &parent,
                 &name,
-                GENERIC_READ
-                    | GENERIC_WRITE
-                    | DELETE
-                    | FILE_READ_ATTRIBUTES
-                    | FILE_WRITE_ATTRIBUTES
-                    | SYNCHRONIZE,
+                GENERIC_READ | GENERIC_WRITE | DELETE | FILE_READ_ATTRIBUTES | FILE_WRITE_ATTRIBUTES | SYNCHRONIZE,
                 FILE_CREATE,
                 FILE_NON_DIRECTORY_FILE,
             ) {
@@ -152,12 +138,7 @@ impl StagedFile {
                     last_collision = Some(error);
                 }
                 Err(error) => {
-                    return Err(io_error(
-                        LocalFileOperation::OpenWriter,
-                        diagnostic_target,
-                        None,
-                        error,
-                    ));
+                    return Err(io_error(LocalFileOperation::OpenWriter, diagnostic_target, None, error));
                 }
             }
         }
@@ -166,10 +147,7 @@ impl StagedFile {
             diagnostic_target,
             None,
             last_collision.unwrap_or_else(|| {
-                io::Error::new(
-                    io::ErrorKind::AlreadyExists,
-                    "staging name attempts were exhausted",
-                )
+                io::Error::new(io::ErrorKind::AlreadyExists, "staging name attempts were exhausted")
             }),
         ))
     }
@@ -181,9 +159,7 @@ impl StagedFile {
     /// Panics after the handle has been closed.
     #[must_use]
     pub(crate) fn file(&self) -> &File {
-        self.file
-            .as_ref()
-            .expect("staging handle has already been closed")
+        self.file.as_ref().expect("staging handle has already been closed")
     }
 
     /// Returns the retained staging handle mutably.
@@ -193,9 +169,7 @@ impl StagedFile {
     /// Panics after the handle has been closed.
     #[must_use]
     pub(crate) fn file_mut(&mut self) -> &mut File {
-        self.file
-            .as_mut()
-            .expect("staging handle has already been closed")
+        self.file.as_mut().expect("staging handle has already been closed")
     }
 
     /// Flushes userspace buffers and synchronizes staging contents.
@@ -204,22 +178,12 @@ impl StagedFile {
     ///
     /// Returns a commit error when flushing or handle synchronization fails.
     pub(crate) fn sync_contents(&mut self) -> LocalResult<()> {
-        self.file_mut().flush().map_err(|error| {
-            io_error(
-                LocalFileOperation::Commit,
-                &self.diagnostic_target,
-                None,
-                error,
-            )
-        })?;
-        self.file().sync_all().map_err(|error| {
-            io_error(
-                LocalFileOperation::Commit,
-                &self.diagnostic_target,
-                None,
-                error,
-            )
-        })
+        self.file_mut()
+            .flush()
+            .map_err(|error| io_error(LocalFileOperation::Commit, &self.diagnostic_target, None, error))?;
+        self.file()
+            .sync_all()
+            .map_err(|error| io_error(LocalFileOperation::Commit, &self.diagnostic_target, None, error))
     }
 
     /// Installs this staging entry at `target` within `namespace`.
@@ -234,8 +198,7 @@ impl StagedFile {
         target: &RelativePath,
         overwrite: bool,
     ) -> Result<(), StagedInstallError> {
-        let result =
-            rename_handle(self.file(), &namespace.handle, target, overwrite);
+        let result = rename_handle(self.file(), &namespace.handle, target, overwrite);
         match result {
             Ok(()) => {
                 self.armed = false;
@@ -253,8 +216,7 @@ impl StagedFile {
                     Some(target.as_path()),
                     native,
                 );
-                let staged_file = if state == StagedInstallState::Indeterminate
-                {
+                let staged_file = if state == StagedInstallState::Indeterminate {
                     self.armed = false;
                     None
                 } else {
@@ -279,35 +241,16 @@ impl StagedFile {
         let file = self.file();
         let mut permissions = file
             .metadata()
-            .map_err(|error| {
-                io_error(
-                    LocalFileOperation::Cleanup,
-                    &self.diagnostic_target,
-                    None,
-                    error,
-                )
-            })?
+            .map_err(|error| io_error(LocalFileOperation::Cleanup, &self.diagnostic_target, None, error))?
             .permissions();
         if permissions.readonly() {
             #[allow(clippy::permissions_set_readonly_false)]
             permissions.set_readonly(false);
-            file.set_permissions(permissions).map_err(|error| {
-                io_error(
-                    LocalFileOperation::Cleanup,
-                    &self.diagnostic_target,
-                    None,
-                    error,
-                )
-            })?;
+            file.set_permissions(permissions)
+                .map_err(|error| io_error(LocalFileOperation::Cleanup, &self.diagnostic_target, None, error))?;
         }
-        delete_handle(file).map_err(|error| {
-            io_error(
-                LocalFileOperation::Cleanup,
-                &self.diagnostic_target,
-                None,
-                error,
-            )
-        })?;
+        delete_handle(file)
+            .map_err(|error| io_error(LocalFileOperation::Cleanup, &self.diagnostic_target, None, error))?;
         self.armed = false;
         let _ = self.file.take();
         Ok(())

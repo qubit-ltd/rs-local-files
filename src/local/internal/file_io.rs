@@ -122,11 +122,7 @@ fn configure_nonblocking_open(_options: &mut OpenOptions) {}
 /// Returns the native open error. On Unix, lease conflicts are retried to
 /// preserve ordinary blocking-open behavior.
 #[inline]
-fn open_configured_file(
-    options: &OpenOptions,
-    path: &Path,
-    open_retry_timeout: Option<Duration>,
-) -> Result<fs::File> {
+fn open_configured_file(options: &OpenOptions, path: &Path, open_retry_timeout: Option<Duration>) -> Result<fs::File> {
     #[cfg(unix)]
     {
         open_with_nonblocking_retry(open_retry_timeout, || options.open(path))
@@ -190,12 +186,11 @@ fn prepare_opened_regular_file(
 ) -> Result<()> {
     let metadata_result = file.metadata();
     #[cfg(feature = "internal-test-support")]
-    let metadata_result =
-        if super::test_support::is_enabled("file-handle-metadata") {
-            Err(Error::other("injected opened-file metadata failure"))
-        } else {
-            metadata_result
-        };
+    let metadata_result = if super::test_support::is_enabled("file-handle-metadata") {
+        Err(Error::other("injected opened-file metadata failure"))
+    } else {
+        metadata_result
+    };
     let metadata = with_path_context(metadata_result, inspect_operation, path)?;
     #[cfg(feature = "internal-test-support")]
     if super::test_support::is_enabled("file-handle-type") {
@@ -206,11 +201,7 @@ fn prepare_opened_regular_file(
     }
     #[cfg(windows)]
     reject_opened_name_surrogate(file, path)?;
-    with_path_context(
-        clear_transient_nonblocking(file),
-        restore_operation,
-        path,
-    )
+    with_path_context(clear_transient_nonblocking(file), restore_operation, path)
 }
 
 /// Rejects a name-surrogate reparse point observed on the opened handle.
@@ -262,10 +253,7 @@ fn reject_opened_name_surrogate(file: &fs::File, path: &Path) -> Result<()> {
 /// # Errors
 /// Returns a contextual I/O error when the path cannot be inspected or opened,
 /// or when the opened object is not a regular file.
-fn open_reader_file(
-    path: &Path,
-    open_retry_timeout: Option<Duration>,
-) -> Result<fs::File> {
+fn open_reader_file(path: &Path, open_retry_timeout: Option<Duration>) -> Result<fs::File> {
     reject_existing_non_file(path)?;
     let mut open_options = OpenOptions::new();
     open_options.read(true);
@@ -294,10 +282,7 @@ fn open_reader_file(
 /// Returns a contextual I/O error when the path cannot be inspected or opened,
 /// or when the opened object is not a regular file.
 #[inline(always)]
-pub(crate) fn open_native_reader_path(
-    path: &Path,
-    options: &read::OpenOptions,
-) -> Result<fs::File> {
+pub(crate) fn open_native_reader_path(path: &Path, options: &read::OpenOptions) -> Result<fs::File> {
     open_reader_file(path, options.open_retry_timeout())
 }
 
@@ -354,11 +339,7 @@ fn open_writer_file(
         path,
     )?;
     if should_truncate {
-        with_path_context(
-            file.set_len(0),
-            "truncate opened file writer",
-            path,
-        )?;
+        with_path_context(file.set_len(0), "truncate opened file writer", path)?;
     }
     Ok(file)
 }
@@ -376,10 +357,7 @@ fn open_writer_file(
 /// Returns a contextual I/O error when parent creation, inspection, opening, or
 /// post-open truncation fails.
 #[inline]
-pub(crate) fn open_native_writer_path(
-    path: &Path,
-    options: &write::OpenOptions,
-) -> Result<fs::File> {
+pub(crate) fn open_native_writer_path(path: &Path, options: &write::OpenOptions) -> Result<fs::File> {
     open_writer_file(
         path,
         options.creates_parents(),

@@ -36,8 +36,7 @@ fn test_local_persist_error_exposes_recoverable_context_and_parts() {
     assert_eq!(error.kind(), LocalFileErrorKind::NotFound);
     assert!(error.to_string().contains("resolved as 'resolved'"));
     assert!(error.source().is_some());
-    let (error, resource, requested, resolved, stage, state) =
-        error.into_parts_with_state();
+    let (error, resource, requested, resolved, stage, state) = error.into_parts_with_state();
     assert_eq!(resource, "resource!");
     assert_eq!(requested, PathBuf::from("requested"));
     assert_eq!(resolved, Some(PathBuf::from("resolved")));

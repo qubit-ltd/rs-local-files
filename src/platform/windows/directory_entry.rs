@@ -28,16 +28,8 @@ pub(crate) struct PlatformDirectoryEntry {
 
 impl PlatformDirectoryEntry {
     /// Creates an entry from one opened-child observation.
-    pub(super) const fn new(
-        name: OsString,
-        kind: LocalFileKind,
-        identity: EntryIdentity,
-    ) -> Self {
-        Self {
-            name,
-            kind,
-            identity,
-        }
+    pub(super) const fn new(name: OsString, kind: LocalFileKind, identity: EntryIdentity) -> Self {
+        Self { name, kind, identity }
     }
 
     /// Returns the native immediate-child name.

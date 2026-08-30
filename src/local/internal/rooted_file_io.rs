@@ -57,10 +57,8 @@ pub(crate) fn open_root_directory(path: &Path) -> Result<File> {
     options
         .read(true)
         .custom_flags(libc::O_DIRECTORY | libc::O_NOFOLLOW | libc::O_CLOEXEC);
-    let directory =
-        rooted_open_result(options.open(path), "open root directory", path)?;
-    verify_opened_directory(&directory, "inspect root directory", path)
-        .map(|()| directory)
+    let directory = rooted_open_result(options.open(path), "open root directory", path)?;
+    verify_opened_directory(&directory, "inspect root directory", path).map(|()| directory)
 }
 
 /// Returns the current native path of an opened root for symlink resolution.
@@ -83,22 +81,16 @@ pub(crate) fn root_authority_path(root: &File) -> Result<PathBuf> {
         let mut buffer = [0_u8; libc::PATH_MAX as usize];
         // SAFETY: `buffer` is writable storage of the size required by
         // `F_GETPATH`, and `root` owns a live descriptor.
-        let result = unsafe {
-            libc::fcntl(root.as_raw_fd(), libc::F_GETPATH, buffer.as_mut_ptr())
-        };
+        let result = unsafe { libc::fcntl(root.as_raw_fd(), libc::F_GETPATH, buffer.as_mut_ptr()) };
         if result == 0 {
-            let length = buffer
-                .iter()
-                .position(|byte| *byte == 0)
-                .unwrap_or(buffer.len());
+            let length = buffer.iter().position(|byte| *byte == 0).unwrap_or(buffer.len());
             return Ok(PathBuf::from(OsStr::from_bytes(&buffer[..length])));
         }
         return Err(Error::last_os_error());
     }
     #[cfg(not(target_os = "macos"))]
     {
-        let descriptor_path =
-            PathBuf::from(format!("/proc/self/fd/{}", root.as_raw_fd()));
+        let descriptor_path = PathBuf::from(format!("/proc/self/fd/{}", root.as_raw_fd()));
         with_path_context(
             std::fs::read_link(&descriptor_path),
             "resolve root authority path",
@@ -134,13 +126,8 @@ pub(crate) fn read_rooted_symlink_metadata(
     path: &LocalRelativePath,
 ) -> Result<libc::stat> {
     let diagnostic_path = diagnostic_root.join(path.as_path());
-    let (parent, name, _parent_dirs_to_sync) = open_rooted_parent(
-        root,
-        &diagnostic_path,
-        path,
-        RootedParentMode::OpenExisting,
-    )?
-    .into_parts();
+    let (parent, name, _parent_dirs_to_sync) =
+        open_rooted_parent(root, &diagnostic_path, path, RootedParentMode::OpenExisting)?.into_parts();
     let mut status = std::mem::MaybeUninit::<libc::stat>::uninit();
     // SAFETY: the live parent descriptor and final component remain valid for
     // the duration of this non-retaining call, and `status` provides writable
@@ -172,28 +159,16 @@ pub(crate) fn open_rooted_native_reader(
     options: &read::OpenOptions,
 ) -> Result<File> {
     let diagnostic_path = diagnostic_root.join(path.as_path());
-    let (parent, name, _parent_dirs_to_sync) = open_rooted_parent(
-        root,
-        &diagnostic_path,
-        path,
-        RootedParentMode::OpenExisting,
-    )?
-    .into_parts();
+    let (parent, name, _parent_dirs_to_sync) =
+        open_rooted_parent(root, &diagnostic_path, path, RootedParentMode::OpenExisting)?.into_parts();
     reject_existing_non_file(&parent, &name, &diagnostic_path)?;
-    let flags =
-        libc::O_RDONLY | libc::O_NOFOLLOW | libc::O_CLOEXEC | libc::O_NONBLOCK;
+    let flags = libc::O_RDONLY | libc::O_NOFOLLOW | libc::O_CLOEXEC | libc::O_NONBLOCK;
     let file = rooted_open_result(
-        open_with_nonblocking_retry(options.open_retry_timeout(), || {
-            open_file_at(&parent, &name, flags, 0)
-        }),
+        open_with_nonblocking_retry(options.open_retry_timeout(), || open_file_at(&parent, &name, flags, 0)),
         "open rooted native file reader",
         &diagnostic_path,
     )?;
-    prepare_opened_rooted_regular_file(
-        &file,
-        "restore blocking rooted native file reader",
-        &diagnostic_path,
-    )?;
+    prepare_opened_rooted_regular_file(&file, "restore blocking rooted native file reader", &diagnostic_path)?;
     Ok(file)
 }
 
@@ -211,20 +186,15 @@ pub(crate) fn open_rooted_native_writer(
         RootedParentMode::OpenExisting
     };
     let (parent, name, _parent_dirs_to_sync) =
-        open_rooted_parent(root, &diagnostic_path, path, parent_mode)?
-            .into_parts();
+        open_rooted_parent(root, &diagnostic_path, path, parent_mode)?.into_parts();
     reject_existing_non_file(&parent, &name, &diagnostic_path)?;
     let mode = options.mode();
     let should_truncate = mode == write::Mode::CreateOrTruncate;
     let mut flags = libc::O_NOFOLLOW | libc::O_CLOEXEC | libc::O_NONBLOCK;
     match mode {
         write::Mode::OpenExistingAtStart => flags |= libc::O_WRONLY,
-        write::Mode::CreateNew => {
-            flags |= libc::O_WRONLY | libc::O_CREAT | libc::O_EXCL
-        }
-        write::Mode::CreateOrTruncate => {
-            flags |= libc::O_WRONLY | libc::O_CREAT
-        }
+        write::Mode::CreateNew => flags |= libc::O_WRONLY | libc::O_CREAT | libc::O_EXCL,
+        write::Mode::CreateOrTruncate => flags |= libc::O_WRONLY | libc::O_CREAT,
         write::Mode::AppendExisting => flags |= libc::O_WRONLY | libc::O_APPEND,
         write::Mode::AppendOrCreate => {
             flags |= libc::O_WRONLY | libc::O_APPEND | libc::O_CREAT;
@@ -237,11 +207,7 @@ pub(crate) fn open_rooted_native_writer(
         "open rooted native file writer",
         &diagnostic_path,
     )?;
-    prepare_opened_rooted_regular_file(
-        &file,
-        "restore blocking rooted native file writer",
-        &diagnostic_path,
-    )?;
+    prepare_opened_rooted_regular_file(&file, "restore blocking rooted native file writer", &diagnostic_path)?;
     if should_truncate {
         with_path_context(
             file.set_len(0),
@@ -260,19 +226,10 @@ pub(crate) fn open_rooted_native_writer(
 /// # Errors
 ///
 /// Returns an error when the parent cannot be opened securely or synchronized.
-pub(crate) fn sync_rooted_parent(
-    root: &File,
-    diagnostic_root: &Path,
-    path: &LocalRelativePath,
-) -> Result<()> {
+pub(crate) fn sync_rooted_parent(root: &File, diagnostic_root: &Path, path: &LocalRelativePath) -> Result<()> {
     let diagnostic_path = diagnostic_root.join(path.as_path());
-    let (parent, _name, _parent_dirs_to_sync) = open_rooted_parent(
-        root,
-        &diagnostic_path,
-        path,
-        RootedParentMode::OpenExisting,
-    )?
-    .into_parts();
+    let (parent, _name, _parent_dirs_to_sync) =
+        open_rooted_parent(root, &diagnostic_path, path, RootedParentMode::OpenExisting)?.into_parts();
     with_path_context(
         parent.sync_all(),
         "synchronize rooted parent directory",
@@ -314,11 +271,7 @@ pub(in crate::local) fn open_rooted_parent(
         .file_name()
         .expect("validated relative paths always have a final component");
     let final_name = component_c_string(final_name);
-    let mut directory = with_path_context(
-        root.try_clone(),
-        "clone root directory",
-        diagnostic_path,
-    )?;
+    let mut directory = with_path_context(root.try_clone(), "clone root directory", diagnostic_path)?;
     let parent = path.as_path().parent().unwrap_or(Path::new(""));
     let mut diagnostic_root = diagnostic_path.to_path_buf();
     for _ in path.as_path().components() {
@@ -332,10 +285,7 @@ pub(in crate::local) fn open_rooted_parent(
         let component_path = diagnostic_root.join(&traversed);
         directory = match open_directory_at(&directory, name) {
             Ok(next) => next,
-            Err(error)
-                if mode.creates_missing()
-                    && error.kind() == ErrorKind::NotFound =>
-            {
+            Err(error) if mode.creates_missing() && error.kind() == ErrorKind::NotFound => {
                 let parent_to_sync = if mode.tracks_sync() {
                     Some(with_path_context(
                         directory.try_clone(),
@@ -361,17 +311,9 @@ pub(in crate::local) fn open_rooted_parent(
                 ));
             }
         };
-        verify_opened_directory(
-            &directory,
-            "inspect rooted directory component",
-            &component_path,
-        )?;
+        verify_opened_directory(&directory, "inspect rooted directory component", &component_path)?;
     }
-    Ok(RootedParent::new(
-        directory,
-        final_name,
-        parent_dirs_to_sync,
-    ))
+    Ok(RootedParent::new(directory, final_name, parent_dirs_to_sync))
 }
 
 /// Opens one no-follow directory entry relative to `parent`.
@@ -426,16 +368,11 @@ fn open_directory_at(parent: &File, name: &OsStr) -> Result<File> {
 /// Panics if `name` violates the validated-component invariant by containing
 /// an interior NUL.
 #[inline]
-fn create_directory_at(
-    parent: &File,
-    name: &OsStr,
-    diagnostic_path: &Path,
-) -> Result<()> {
+fn create_directory_at(parent: &File, name: &OsStr, diagnostic_path: &Path) -> Result<()> {
     let name = component_c_string(name);
     // SAFETY: the parent descriptor and NUL-terminated component remain live;
     // `mkdirat` does not retain either value.
-    let result =
-        unsafe { libc::mkdirat(parent.as_raw_fd(), name.as_ptr(), 0o700) };
+    let result = unsafe { libc::mkdirat(parent.as_raw_fd(), name.as_ptr(), 0o700) };
     normalize_mkdirat_result(result, diagnostic_path)
 }
 
@@ -455,24 +392,12 @@ fn create_directory_at(
 /// # Errors
 ///
 /// Returns the operating-system error reported by `openat`.
-pub(super) fn open_file_at(
-    parent: &File,
-    name: &CString,
-    flags: libc::c_int,
-    mode: libc::mode_t,
-) -> Result<File> {
+pub(super) fn open_file_at(parent: &File, name: &CString, flags: libc::c_int, mode: libc::mode_t) -> Result<File> {
     // SAFETY: the parent descriptor and component string remain live for the
     // call. A successful descriptor is transferred immediately into `File`.
     // Variadic integer arguments require default C promotion. This cast is a
     // no-op on Linux and promotes narrower `mode_t` definitions on macOS.
-    let descriptor = unsafe {
-        libc::openat(
-            parent.as_raw_fd(),
-            name.as_ptr(),
-            flags,
-            libc::c_uint::from(mode),
-        )
-    };
+    let descriptor = unsafe { libc::openat(parent.as_raw_fd(), name.as_ptr(), flags, libc::c_uint::from(mode)) };
     if descriptor == -1 {
         return Err(Error::last_os_error());
     }
@@ -493,11 +418,7 @@ pub(super) fn open_file_at(
 ///
 /// Returns `InvalidInput` for stable links and non-files, or a contextual
 /// inspection error other than `NotFound`.
-fn reject_existing_non_file(
-    parent: &File,
-    name: &CString,
-    diagnostic_path: &Path,
-) -> Result<()> {
+fn reject_existing_non_file(parent: &File, name: &CString, diagnostic_path: &Path) -> Result<()> {
     let mut status = std::mem::MaybeUninit::<libc::stat>::uninit();
     // SAFETY: `status` points to writable storage, and the live parent and name
     // values remain valid for this non-retaining call.
@@ -536,16 +457,8 @@ fn reject_existing_non_file(
 ///
 /// Returns a contextual metadata error or `InvalidInput` for a non-directory.
 #[inline]
-fn verify_opened_directory(
-    directory: &File,
-    operation: &'static str,
-    diagnostic_path: &Path,
-) -> Result<()> {
-    normalize_opened_directory_metadata(
-        directory.metadata(),
-        operation,
-        diagnostic_path,
-    )
+fn verify_opened_directory(directory: &File, operation: &'static str, diagnostic_path: &Path) -> Result<()> {
+    normalize_opened_directory_metadata(directory.metadata(), operation, diagnostic_path)
 }
 
 /// Verifies an opened rooted file and restores blocking behavior.
@@ -572,13 +485,7 @@ fn prepare_opened_rooted_regular_file(
     diagnostic_path: &Path,
 ) -> Result<()> {
     normalize_opened_regular_file_metadata(file.metadata(), diagnostic_path)
-        .and_then(|()| {
-            with_path_context(
-                clear_nonblocking(file.as_raw_fd()),
-                restore_operation,
-                diagnostic_path,
-            )
-        })
+        .and_then(|()| with_path_context(clear_nonblocking(file.as_raw_fd()), restore_operation, diagnostic_path))
 }
 
 /// Converts a validated normal component to a native C string.
@@ -597,8 +504,7 @@ fn prepare_opened_rooted_regular_file(
 #[must_use]
 #[inline]
 fn component_c_string(component: &OsStr) -> CString {
-    CString::new(component.as_bytes())
-        .expect("LocalRelativePath guarantees components without NUL")
+    CString::new(component.as_bytes()).expect("LocalRelativePath guarantees components without NUL")
 }
 
 /// Adds rooted-open normalization and path context to an open result.
@@ -622,11 +528,7 @@ fn component_c_string(component: &OsStr) -> CString {
 /// Returns a contextual error when `result` is `Err`, normalizing stable link
 /// and wrong-directory failures to `InvalidInput`.
 #[inline]
-fn rooted_open_result<T>(
-    result: Result<T>,
-    operation: &'static str,
-    path: &Path,
-) -> Result<T> {
+fn rooted_open_result<T>(result: Result<T>, operation: &'static str, path: &Path) -> Result<T> {
     match result {
         Ok(value) => Ok(value),
         Err(error) => Err(rooted_open_error(error, operation, path)),
@@ -645,15 +547,9 @@ fn rooted_open_result<T>(
 ///
 /// A contextual error preserving ordinary kinds and making link denial
 /// deterministic across Unix implementations.
-fn rooted_open_error(
-    error: Error,
-    operation: &'static str,
-    path: &Path,
-) -> Error {
+fn rooted_open_error(error: Error, operation: &'static str, path: &Path) -> Error {
     let error = match error.raw_os_error() {
-        Some(code) if code == libc::ELOOP || code == libc::ENOTDIR => {
-            Error::new(ErrorKind::InvalidInput, error)
-        }
+        Some(code) if code == libc::ELOOP || code == libc::ENOTDIR => Error::new(ErrorKind::InvalidInput, error),
         _ => error,
     };
     add_path_context(error, operation, path)

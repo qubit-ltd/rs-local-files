@@ -36,10 +36,7 @@ use super::rooted_file_io::rooted_type_error;
 /// # Errors
 ///
 /// Returns a contextual operating-system error for any other negative result.
-pub(super) fn normalize_mkdirat_result(
-    result: libc::c_int,
-    diagnostic_path: &Path,
-) -> Result<()> {
+pub(super) fn normalize_mkdirat_result(result: libc::c_int, diagnostic_path: &Path) -> Result<()> {
     #[cfg(feature = "internal-test-support")]
     let injected_error = super::test_support::is_enabled("rooted-mkdir-error");
     #[cfg(not(feature = "internal-test-support"))]
@@ -51,11 +48,7 @@ pub(super) fn normalize_mkdirat_result(
             Error::last_os_error()
         };
         if error.kind() != ErrorKind::AlreadyExists {
-            return Err(add_path_context(
-                error,
-                "create rooted directory",
-                diagnostic_path,
-            ));
+            return Err(add_path_context(error, "create rooted directory", diagnostic_path));
         }
     }
     Ok(())
@@ -77,10 +70,7 @@ pub(super) fn normalize_mkdirat_result(
 ///
 /// Returns a contextual operating-system error when the entry was not merely
 /// absent.
-pub(super) fn missing_rooted_entry(
-    error: Error,
-    diagnostic_path: &Path,
-) -> Result<()> {
+pub(super) fn missing_rooted_entry(error: Error, diagnostic_path: &Path) -> Result<()> {
     #[cfg(feature = "internal-test-support")]
     let error = if super::test_support::is_enabled("rooted-entry-inspect") {
         crate::local::test_fault_error()
@@ -90,11 +80,7 @@ pub(super) fn missing_rooted_entry(
     if error.kind() == ErrorKind::NotFound {
         Ok(())
     } else {
-        Err(add_path_context(
-            error,
-            "inspect rooted file entry",
-            diagnostic_path,
-        ))
+        Err(add_path_context(error, "inspect rooted file entry", diagnostic_path))
     }
 }
 
@@ -119,8 +105,7 @@ pub(super) fn normalize_opened_directory_metadata(
     diagnostic_path: &Path,
 ) -> Result<()> {
     #[cfg(feature = "internal-test-support")]
-    let result = if super::test_support::is_enabled("rooted-directory-metadata")
-    {
+    let result = if super::test_support::is_enabled("rooted-directory-metadata") {
         Err(crate::local::test_fault_error())
     } else {
         result
@@ -157,11 +142,7 @@ pub(super) fn normalize_opened_regular_file_metadata(
     } else {
         result
     };
-    let metadata = with_path_context(
-        result,
-        "inspect rooted file handle",
-        diagnostic_path,
-    )?;
+    let metadata = with_path_context(result, "inspect rooted file handle", diagnostic_path)?;
     if !metadata.is_file() || rooted_file_type_fault_enabled() {
         return Err(rooted_type_error(diagnostic_path, "regular file"));
     }

@@ -42,18 +42,10 @@ fn test_copy_destination_policy_applies_type_conflict_policy() {
             LocalCopyTypeConflictPolicy::Replace,
             Some(CopyDestinationAction::Replace),
         ),
-        (
-            LocalCopyTypeConflictPolicy::Skip,
-            Some(CopyDestinationAction::Skip),
-        ),
+        (LocalCopyTypeConflictPolicy::Skip, Some(CopyDestinationAction::Skip)),
     ] {
         assert_eq!(
-            decide_copy_destination(
-                true,
-                Some(false),
-                LocalCopyConflictPolicy::Fail,
-                policy,
-            ),
+            decide_copy_destination(true, Some(false), LocalCopyConflictPolicy::Fail, policy,),
             expected
         );
     }
@@ -63,22 +55,11 @@ fn test_copy_destination_policy_applies_type_conflict_policy() {
 fn test_copy_destination_policy_applies_file_conflict_policy() {
     for (policy, expected) in [
         (LocalCopyConflictPolicy::Fail, None),
-        (
-            LocalCopyConflictPolicy::Overwrite,
-            Some(CopyDestinationAction::Replace),
-        ),
-        (
-            LocalCopyConflictPolicy::Skip,
-            Some(CopyDestinationAction::Skip),
-        ),
+        (LocalCopyConflictPolicy::Overwrite, Some(CopyDestinationAction::Replace)),
+        (LocalCopyConflictPolicy::Skip, Some(CopyDestinationAction::Skip)),
     ] {
         assert_eq!(
-            decide_copy_destination(
-                false,
-                Some(false),
-                policy,
-                LocalCopyTypeConflictPolicy::Fail,
-            ),
+            decide_copy_destination(false, Some(false), policy, LocalCopyTypeConflictPolicy::Fail,),
             expected
         );
     }

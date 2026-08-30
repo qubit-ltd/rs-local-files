@@ -33,11 +33,7 @@ const RANDOM_NAME_BYTES: usize = 16;
 /// fragment can behave like a path. Returns
 /// [`std::io::ErrorKind::Other`] when operating-system randomness is
 /// unavailable.
-pub(crate) fn try_random_file_name(
-    default_prefix: &str,
-    prefix: Option<&str>,
-    suffix: Option<&str>,
-) -> Result<String> {
+pub(crate) fn try_random_file_name(default_prefix: &str, prefix: Option<&str>, suffix: Option<&str>) -> Result<String> {
     let prefix = prefix.unwrap_or(default_prefix);
     let suffix = suffix.unwrap_or("");
     validate_file_name_fragment("prefix", prefix)?;
@@ -45,9 +41,7 @@ pub(crate) fn try_random_file_name(
     let timestamp = unix_timestamp_nanos();
     let process_id = std::process::id();
     let random = try_random_hex()?;
-    Ok(format!(
-        "{prefix}{timestamp:x}-{process_id:x}-{random}{suffix}"
-    ))
+    Ok(format!("{prefix}{timestamp:x}-{process_id:x}-{random}{suffix}"))
 }
 
 /// Returns the current Unix timestamp in nanoseconds.

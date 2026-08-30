@@ -28,34 +28,26 @@ pub(crate) fn validate_rooted_list_start(
     symlink_policy: LocalSymlinkPolicy,
 ) -> LocalResult<()> {
     if path.as_os_str().is_empty() {
-        let metadata = root.metadata().map_err(|error| {
-            rooted_io_error(LocalFileOperation::List, path, error)
-        })?;
+        let metadata = root
+            .metadata()
+            .map_err(|error| rooted_io_error(LocalFileOperation::List, path, error))?;
         if metadata.kind() != crate::rooted::EntryKind::Directory {
-            return Err(LocalFileError::new(
-                LocalFileErrorKind::TypeConflict,
-                LocalFileOperation::List,
-            )
-            .with_path(path.to_path_buf()));
+            return Err(
+                LocalFileError::new(LocalFileErrorKind::TypeConflict, LocalFileOperation::List)
+                    .with_path(path.to_path_buf()),
+            );
         }
         return Ok(());
     }
-    let path = resolve_rooted_path(
-        root,
-        path,
-        symlink_policy,
-        true,
-        LocalFileOperation::List,
-    )?;
-    let metadata = root.symlink_metadata(&path).map_err(|error| {
-        rooted_io_error(LocalFileOperation::List, path.as_path(), error)
-    })?;
+    let path = resolve_rooted_path(root, path, symlink_policy, true, LocalFileOperation::List)?;
+    let metadata = root
+        .symlink_metadata(&path)
+        .map_err(|error| rooted_io_error(LocalFileOperation::List, path.as_path(), error))?;
     if metadata.kind() != crate::rooted::EntryKind::Directory {
-        return Err(LocalFileError::new(
-            LocalFileErrorKind::TypeConflict,
-            LocalFileOperation::List,
-        )
-        .with_path(path.as_path().to_path_buf()));
+        return Err(
+            LocalFileError::new(LocalFileErrorKind::TypeConflict, LocalFileOperation::List)
+                .with_path(path.as_path().to_path_buf()),
+        );
     }
     Ok(())
 }
@@ -117,23 +109,19 @@ pub(crate) fn resolve_rooted_path(
         })
     }
     .map_err(|error| rooted_io_error(operation, path, error))?;
-    let canonical_root = fs::canonicalize(&authority_root)
-        .map_err(|error| rooted_io_error(operation, path, error))?;
+    let canonical_root = fs::canonicalize(&authority_root).map_err(|error| rooted_io_error(operation, path, error))?;
     if resolved.starts_with(&canonical_root) {
         let relative = resolved
             .strip_prefix(&canonical_root)
             .expect("a contained path has a root prefix");
-        let relative = crate::local::LocalRelativePath::new(relative)
-            .map_err(|error| rooted_io_error(operation, path, error))?;
+        let relative =
+            crate::local::LocalRelativePath::new(relative).map_err(|error| rooted_io_error(operation, path, error))?;
         return Ok(relative);
     }
     if symlink_policy == LocalSymlinkPolicy::FollowWithinScope {
-        return Err(LocalFileError::new(
-            LocalFileErrorKind::InvalidPath,
-            operation,
-        )
-        .with_reason("symbolic-link resolution escaped the rooted scope")
-        .with_path(path.to_path_buf()));
+        return Err(LocalFileError::new(LocalFileErrorKind::InvalidPath, operation)
+            .with_reason("symbolic-link resolution escaped the rooted scope")
+            .with_path(path.to_path_buf()));
     }
     Err(
         LocalFileError::new(LocalFileErrorKind::InvalidOptions, operation)
@@ -151,8 +139,7 @@ pub(crate) fn sync_rooted_copy_parent_chain(
 ) -> io::Result<()> {
     let mut parent = target.as_path().parent().map(Path::to_path_buf);
     while let Some(path) = parent.filter(|path| !path.as_os_str().is_empty()) {
-        let path = crate::local::LocalRelativePath::new(&path)
-            .expect("parent of a validated rooted path is valid");
+        let path = crate::local::LocalRelativePath::new(&path).expect("parent of a validated rooted path is valid");
         root.sync_parent(&path)?;
         parent = path.as_path().parent().map(Path::to_path_buf);
     }
@@ -179,10 +166,8 @@ mod tests {
     #[test]
     fn test_rooted_support_operates_on_contained_descendants() {
         let directory = tempdir().expect("temporary root should be created");
-        fs::create_dir(directory.path().join("nested"))
-            .expect("nested directory should be created");
-        fs::write(directory.path().join("nested/payload"), b"payload")
-            .expect("payload should be written");
+        fs::create_dir(directory.path().join("nested")).expect("nested directory should be created");
+        fs::write(directory.path().join("nested/payload"), b"payload").expect("payload should be written");
         let root = Root::open(directory.path()).expect("root should open");
         let path = Path::new("nested/payload");
 
@@ -195,16 +180,11 @@ mod tests {
         )
         .expect("contained path should resolve");
         assert_eq!(path, resolved.as_path());
-        validate_rooted_list_start(
-            &root,
-            Path::new("nested"),
-            LocalSymlinkPolicy::Reject,
-        )
-        .expect("nested directory should be a valid list start");
+        validate_rooted_list_start(&root, Path::new("nested"), LocalSymlinkPolicy::Reject)
+            .expect("nested directory should be a valid list start");
         sync_rooted_copy_parent_chain(
             &root,
-            &LocalRelativePath::new(path)
-                .expect("contained path should validate"),
+            &LocalRelativePath::new(path).expect("contained path should validate"),
         )
         .expect("contained parent chain should synchronize");
     }

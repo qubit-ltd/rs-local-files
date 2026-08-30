@@ -12,8 +12,5 @@ use qubit_local_files::LocalDirectoryReopenPolicy;
 /// Verifies the two directory-reopen policies remain distinct.
 #[test]
 fn test_local_directory_reopen_policy_states_are_distinct() {
-    assert_ne!(
-        LocalDirectoryReopenPolicy::Fail,
-        LocalDirectoryReopenPolicy::Reopen,
-    );
+    assert_ne!(LocalDirectoryReopenPolicy::Fail, LocalDirectoryReopenPolicy::Reopen,);
 }

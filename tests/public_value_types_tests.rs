@@ -40,10 +40,8 @@ fn test_capability_snapshot_exposes_all_guarantees() {
 
     let _ = capabilities.supports_rooted_operations();
     let _ = capabilities.supports_atomic_rename();
-    let atomic_replace = std::hint::black_box(
-        LocalFileSystemProtocols::supports_atomic_replace
-            as fn(LocalFileSystemProtocols) -> bool,
-    );
+    let atomic_replace =
+        std::hint::black_box(LocalFileSystemProtocols::supports_atomic_replace as fn(LocalFileSystemProtocols) -> bool);
     assert_eq!(
         cfg!(any(unix, windows)),
         std::hint::black_box(atomic_replace)(capabilities),
@@ -58,33 +56,15 @@ fn test_capability_snapshot_exposes_all_guarantees() {
 fn test_local_file_error_classifies_io_and_retains_context() {
     for (native, expected) in [
         (io::ErrorKind::NotFound, LocalFileErrorKind::NotFound),
-        (
-            io::ErrorKind::AlreadyExists,
-            LocalFileErrorKind::AlreadyExists,
-        ),
-        (
-            io::ErrorKind::NotADirectory,
-            LocalFileErrorKind::NotDirectory,
-        ),
+        (io::ErrorKind::AlreadyExists, LocalFileErrorKind::AlreadyExists),
+        (io::ErrorKind::NotADirectory, LocalFileErrorKind::NotDirectory),
         (io::ErrorKind::IsADirectory, LocalFileErrorKind::IsDirectory),
-        (
-            io::ErrorKind::PermissionDenied,
-            LocalFileErrorKind::PermissionDenied,
-        ),
+        (io::ErrorKind::PermissionDenied, LocalFileErrorKind::PermissionDenied),
         (io::ErrorKind::InvalidInput, LocalFileErrorKind::InvalidPath),
-        (
-            io::ErrorKind::InvalidData,
-            LocalFileErrorKind::DataCorruption,
-        ),
+        (io::ErrorKind::InvalidData, LocalFileErrorKind::DataCorruption),
         (io::ErrorKind::Unsupported, LocalFileErrorKind::Unsupported),
-        (
-            io::ErrorKind::OutOfMemory,
-            LocalFileErrorKind::ResourceLimit,
-        ),
-        (
-            io::ErrorKind::StorageFull,
-            LocalFileErrorKind::ResourceLimit,
-        ),
+        (io::ErrorKind::OutOfMemory, LocalFileErrorKind::ResourceLimit),
+        (io::ErrorKind::StorageFull, LocalFileErrorKind::ResourceLimit),
         (io::ErrorKind::Other, LocalFileErrorKind::Io),
     ] {
         let error = LocalFileError::from_io(
@@ -103,12 +83,9 @@ fn test_local_file_error_classifies_io_and_retains_context() {
         assert!(error.to_string().contains("caused by"));
     }
 
-    let error = LocalFileError::new(
-        LocalFileErrorKind::PublicationIncomplete,
-        LocalFileOperation::Commit,
-    )
-    .with_path("staging".into())
-    .with_target("published".into());
+    let error = LocalFileError::new(LocalFileErrorKind::PublicationIncomplete, LocalFileOperation::Commit)
+        .with_path("staging".into())
+        .with_target("published".into());
     assert!(error.into_source().is_none());
 }
 
@@ -116,16 +93,11 @@ fn test_local_file_error_classifies_io_and_retains_context() {
 /// standard-error chaining behavior.
 #[test]
 fn test_local_file_error_sources_preserve_typed_causes() {
-    let io_source = LocalFileErrorSource::Io(io::Error::from(
-        io::ErrorKind::PermissionDenied,
-    ));
+    let io_source = LocalFileErrorSource::Io(io::Error::from(io::ErrorKind::PermissionDenied));
     assert!(io_source.to_string().contains("permission denied"));
     assert!(Error::source(&io_source).is_some());
 
-    let codec_source =
-        LocalFileErrorSource::PathCodec(LocalPathCodecError::InvalidEscape {
-            offset: 4,
-        });
+    let codec_source = LocalFileErrorSource::PathCodec(LocalPathCodecError::InvalidEscape { offset: 4 });
     assert!(codec_source.to_string().contains("4"));
     assert!(Error::source(&codec_source).is_some());
 }
@@ -142,20 +114,12 @@ fn test_local_file_error_consumes_optional_typed_source() {
     )
     .into_source()
     .expect("I/O construction should retain its source");
-    assert!(
-        matches!(source, LocalFileErrorSource::Io(error) if error.kind() == io::ErrorKind::TimedOut)
-    );
+    assert!(matches!(source, LocalFileErrorSource::Io(error) if error.kind() == io::ErrorKind::TimedOut));
 
-    let error = LocalFileError::new(
-        LocalFileErrorKind::RequirementNotMet,
-        LocalFileOperation::OpenWriter,
-    );
+    let error = LocalFileError::new(LocalFileErrorKind::RequirementNotMet, LocalFileOperation::OpenWriter);
     assert!(error.typed_source().is_none());
     assert!(Error::source(&error).is_none());
-    assert_eq!(
-        "OpenWriter failed with RequirementNotMet",
-        error.to_string()
-    );
+    assert_eq!("OpenWriter failed with RequirementNotMet", error.to_string());
     assert!(error.into_source().is_none());
 }
 
@@ -179,12 +143,9 @@ fn test_local_file_error_display_propagates_formatter_failure() {
     }
 
     for successful_writes in 0..16 {
-        let error = LocalFileError::new(
-            LocalFileErrorKind::Io,
-            LocalFileOperation::Metadata,
-        )
-        .with_path("source".into())
-        .with_target("target".into());
+        let error = LocalFileError::new(LocalFileErrorKind::Io, LocalFileOperation::Metadata)
+            .with_path("source".into())
+            .with_target("target".into());
         let mut writer = RejectingWriter { successful_writes };
         let _ = fmt::write(&mut writer, format_args!("{error}"));
     }
@@ -194,19 +155,10 @@ fn test_local_file_error_display_propagates_formatter_failure() {
 #[test]
 fn test_path_codec_error_formats_each_public_variant() {
     let cases = [
-        (
-            LocalPathCodecError::InvalidEscape { offset: 7 },
-            "7".to_owned(),
-        ),
-        (
-            LocalPathCodecError::NonCanonicalText,
-            "non-canonical".to_owned(),
-        ),
+        (LocalPathCodecError::InvalidEscape { offset: 7 }, "7".to_owned()),
+        (LocalPathCodecError::NonCanonicalText, "non-canonical".to_owned()),
         (LocalPathCodecError::NativeNul, "NUL".to_owned()),
-        (
-            LocalPathCodecError::UnsupportedNativeEncoding,
-            "unsupported".to_owned(),
-        ),
+        (LocalPathCodecError::UnsupportedNativeEncoding, "unsupported".to_owned()),
         (
             LocalPathCodecError::UnrepresentableNativeValue,
             "cannot represent".to_owned(),
@@ -245,9 +197,7 @@ fn test_native_file_name_helpers_cover_component_and_validation_paths() {
     assert_eq!(LocalFileOperation::ValidateName, error.operation());
     for invalid in ["bad\0name", "bad\\name", "../name"] {
         assert!(
-            names
-                .random_name_with(Some(OsStr::new(invalid)), None)
-                .is_err(),
+            names.random_name_with(Some(OsStr::new(invalid)), None).is_err(),
             "expected random-name fragment to be rejected: {invalid:?}",
         );
     }
@@ -270,11 +220,7 @@ fn test_native_file_name_validation_rejects_non_utf8_component() {
 /// Verifies rooted path objects retain the authority-root representation.
 #[test]
 fn test_local_paths_cover_rooted_authority_root() {
-    assert!(
-        LocalPaths::rooted()
-            .to_canonical_components(Path::new(""))
-            .is_ok()
-    );
+    assert!(LocalPaths::rooted().to_canonical_components(Path::new("")).is_ok());
 }
 
 /// Verifies normalized metadata distinguishes empty files and directories,
@@ -285,8 +231,7 @@ fn test_public_metadata_values_cover_file_directory_and_missing_cases() {
     let empty_file = directory.path().join("empty");
     let child_directory = directory.path().join("child-directory");
     fs::write(&empty_file, []).expect("empty file should be written");
-    fs::create_dir(&child_directory)
-        .expect("child directory should be created");
+    fs::create_dir(&child_directory).expect("child directory should be created");
 
     let file_metadata = LocalFileSystem::host()
         .metadata(&empty_file)
@@ -334,8 +279,7 @@ fn test_public_metadata_values_classify_unix_socket() {
 
     let directory = tempdir().expect("temporary directory should be created");
     let socket = directory.path().join("socket");
-    let _listener = UnixListener::bind(&socket)
-        .expect("Unix-domain socket should be created");
+    let _listener = UnixListener::bind(&socket).expect("Unix-domain socket should be created");
 
     let metadata = LocalFileSystem::host()
         .metadata(&socket)
@@ -364,17 +308,11 @@ fn test_metadata_and_outcomes_expose_public_values() {
     let _ = metadata.created_at();
 
     let created = LocalFileSystem::host()
-        .create_directory(
-            &created_directory,
-            &LocalCreateDirectoryOptions::new(),
-        )
+        .create_directory(&created_directory, &LocalCreateDirectoryOptions::new())
         .expect("directory should be created");
     assert!(created.created());
     let existing = LocalFileSystem::host()
-        .create_directory(
-            &created_directory,
-            &LocalCreateDirectoryOptions::new().with_exists_ok(),
-        )
+        .create_directory(&created_directory, &LocalCreateDirectoryOptions::new().with_exists_ok())
         .expect("existing directory should be accepted");
     assert!(!existing.created());
 
@@ -385,11 +323,7 @@ fn test_metadata_and_outcomes_expose_public_values() {
     let _ = renamed.durable();
 
     let copied = LocalFileSystem::host()
-        .copy(
-            &renamed_file,
-            &directory.path().join("copy"),
-            &LocalCopyOptions::new(),
-        )
+        .copy(&renamed_file, &directory.path().join("copy"), &LocalCopyOptions::new())
         .expect("file should be copied");
     assert_eq!(LocalCopyMethod::StagedFile, copied.method());
     assert_eq!(1, copied.stats().files());
@@ -406,10 +340,7 @@ fn test_metadata_and_outcomes_expose_public_values() {
         .expect("file should be deleted");
     assert!(deleted.deleted());
     let missing = LocalFileSystem::host()
-        .delete_file(
-            &renamed_file,
-            &LocalDeleteOptions::new().with_missing_ok(),
-        )
+        .delete_file(&renamed_file, &LocalDeleteOptions::new().with_missing_ok())
         .expect("missing file should be accepted");
     assert!(!missing.deleted());
 }
@@ -422,15 +353,10 @@ fn test_recursive_copy_outcome_reports_all_public_statistics() {
     let source = directory.path().join("source");
     let target = directory.path().join("target");
     fs::create_dir(&source).expect("source directory should be created");
-    fs::write(source.join("child"), b"new")
-        .expect("source child should be written");
+    fs::write(source.join("child"), b"new").expect("source child should be written");
 
     let initial = LocalFileSystem::host()
-        .copy(
-            &source,
-            &target,
-            &LocalCopyOptions::new().with_tree_source(),
-        )
+        .copy(&source, &target, &LocalCopyOptions::new().with_tree_source())
         .expect("directory should be copied");
     assert_eq!(LocalCopyMethod::Recursive, initial.method());
     assert_eq!(1, initial.stats().directories());

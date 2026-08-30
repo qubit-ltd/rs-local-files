@@ -24,15 +24,10 @@ pub(crate) struct LocalFileSystemCore {
 
 impl LocalFileSystemCore {
     /// Returns an injected error for one operation boundary, when configured.
-    pub(crate) fn fail_if_requested(
-        &self,
-        point: crate::test_support::TestFaultPoint,
-    ) -> std::io::Result<()> {
+    pub(crate) fn fail_if_requested(&self, point: crate::test_support::TestFaultPoint) -> std::io::Result<()> {
         #[cfg(feature = "test-support")]
         {
-            if let Some(error) =
-                self.test_faults.as_ref().and_then(|plan| plan.take(point))
-            {
+            if let Some(error) = self.test_faults.as_ref().and_then(|plan| plan.take(point)) {
                 return Err(error);
             }
         }

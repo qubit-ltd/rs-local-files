@@ -41,18 +41,12 @@ impl Display for LocalCopyFailure {
             "copy failed with {:?} state: {}",
             self.details.state, self.details.error
         )?;
-        if let (
-            Some(request_source),
-            Some(request_target),
-            Some(failed_source),
-            Some(failed_target),
-        ) = (
+        if let (Some(request_source), Some(request_target), Some(failed_source), Some(failed_target)) = (
             self.details.request_source_path.as_deref(),
             self.details.request_target_path.as_deref(),
             self.details.failed_source_path.as_deref(),
             self.details.failed_target_path.as_deref(),
-        ) && (request_source != failed_source
-            || request_target != failed_target)
+        ) && (request_source != failed_source || request_target != failed_target)
         {
             write!(
                 formatter,
@@ -99,20 +93,8 @@ impl LocalCopyFailure {
 
     /// Converts a structured native copy-pipeline error without losing facts.
     #[must_use]
-    pub(crate) fn from_copy_dir_error(
-        source: &Path,
-        target: &Path,
-        error: LocalCopyDirError,
-    ) -> Self {
-        let (
-            stage,
-            failed_source,
-            failed_target,
-            stats,
-            staging_path,
-            cleanup_error,
-            primary,
-        ) = error.into_parts();
+    pub(crate) fn from_copy_dir_error(source: &Path, target: &Path, error: LocalCopyDirError) -> Self {
+        let (stage, failed_source, failed_target, stats, staging_path, cleanup_error, primary) = error.into_parts();
         let partial_stats = LocalCopyStats::from_internal(stats);
         let state = copy_failure_state(stage, partial_stats);
         let resource_limit = primary
@@ -149,8 +131,7 @@ impl LocalCopyFailure {
             .as_ref()
             .and(staging_path.as_deref())
             .map(Path::to_path_buf);
-        let mut failure =
-            Self::new(error, state, partial_stats, staging_path, cleanup_error);
+        let mut failure = Self::new(error, state, partial_stats, staging_path, cleanup_error);
         failure.details.failed_source_path = Some(failed_source);
         failure.details.failed_target_path = Some(failed_target);
         failure
@@ -211,10 +192,7 @@ impl LocalCopyFailure {
 }
 
 /// Maps structured native copy facts to the strongest proven failure state.
-const fn copy_failure_state(
-    stage: LocalCopyDirStage,
-    partial_stats: LocalCopyStats,
-) -> LocalCopyFailureState {
+const fn copy_failure_state(stage: LocalCopyDirStage, partial_stats: LocalCopyStats) -> LocalCopyFailureState {
     if partial_stats.files() > 0 || partial_stats.directories() > 0 {
         return LocalCopyFailureState::PartiallyPublished;
     }
@@ -223,16 +201,12 @@ const fn copy_failure_state(
         | LocalCopyDirStage::InspectSourceEntry
         | LocalCopyDirStage::ReadSourceDirectory
         | LocalCopyDirStage::SynchronizeFile
-        | LocalCopyDirStage::CleanupTemporaryFile => {
-            LocalCopyFailureState::Unchanged
-        }
+        | LocalCopyDirStage::CleanupTemporaryFile => LocalCopyFailureState::Unchanged,
         LocalCopyDirStage::PrepareDestination
         | LocalCopyDirStage::CopyFileContents
         | LocalCopyDirStage::PreservePermissions
         | LocalCopyDirStage::CommitFile
-        | LocalCopyDirStage::UpdateStatistics => {
-            LocalCopyFailureState::Indeterminate
-        }
+        | LocalCopyDirStage::UpdateStatistics => LocalCopyFailureState::Indeterminate,
     }
 }
 

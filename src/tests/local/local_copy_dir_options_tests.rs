@@ -24,18 +24,9 @@ fn test_local_copy_dir_options_builders_update_every_policy() {
         .preserve_permissions()
         .with_open_retry_timeout(Duration::from_secs(1))
         .with_durability(LocalDurabilityRequirement::Required);
-    assert_eq!(
-        options.conflict_policy(),
-        LocalCopyConflictPolicy::Overwrite
-    );
-    assert_eq!(
-        options.type_conflict_policy(),
-        LocalCopyTypeConflictPolicy::Replace
-    );
-    assert_eq!(
-        options.symlink_policy(),
-        LocalSymlinkPolicy::FollowWithinScope
-    );
+    assert_eq!(options.conflict_policy(), LocalCopyConflictPolicy::Overwrite);
+    assert_eq!(options.type_conflict_policy(), LocalCopyTypeConflictPolicy::Replace);
+    assert_eq!(options.symlink_policy(), LocalSymlinkPolicy::FollowWithinScope);
     assert!(options.preserves_permissions());
     assert_eq!(options.open_retry_timeout(), Some(Duration::from_secs(1)));
     assert_eq!(options.durability(), LocalDurabilityRequirement::Required);

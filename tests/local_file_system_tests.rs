@@ -29,34 +29,25 @@ use tempfile::tempdir;
 fn test_local_file_system_default_copy_and_rename_skip_sync() {
     const CHILD_ENV: &str = "QUBIT_LOCAL_FILES_DEFAULT_HOST_SYNC_CHILD";
     if std::env::var_os(CHILD_ENV).is_some() {
-        let directory =
-            tempdir().expect("temporary directory should be created");
+        let directory = tempdir().expect("temporary directory should be created");
         let copy_source = directory.path().join("copy-source");
         let copy_target = directory.path().join("copy-target");
-        fs::write(&copy_source, b"copy")
-            .expect("copy source should be written");
+        fs::write(&copy_source, b"copy").expect("copy source should be written");
         let _ = LocalFileSystem::host()
             .copy(&copy_source, &copy_target, &LocalCopyOptions::new())
             .expect("default copy should succeed");
 
         let rename_source = directory.path().join("rename-source");
         let rename_target = directory.path().join("rename-target");
-        fs::write(&rename_source, b"rename")
-            .expect("rename source should be written");
+        fs::write(&rename_source, b"rename").expect("rename source should be written");
         let _ = LocalFileSystem::host()
             .rename(&rename_source, &rename_target, &LocalRenameOptions::new())
             .expect("default rename should succeed");
         return;
     }
 
-    if std::process::Command::new("strace")
-        .arg("--version")
-        .output()
-        .is_err()
-    {
-        eprintln!(
-            "skipping default host sync trace because strace is unavailable"
-        );
+    if std::process::Command::new("strace").arg("--version").output().is_err() {
+        eprintln!("skipping default host sync trace because strace is unavailable");
         return;
     }
     let trace = NamedTempFile::new().expect("trace file should be created");
@@ -74,8 +65,7 @@ fn test_local_file_system_default_copy_and_rename_skip_sync() {
         .status()
         .expect("strace should launch the traced child");
     assert!(status.success(), "traced child should succeed");
-    let trace =
-        fs::read_to_string(trace.path()).expect("trace should be readable");
+    let trace = fs::read_to_string(trace.path()).expect("trace should be readable");
     assert!(
         !trace.contains("fsync("),
         "default durability must not synchronize: {trace}"
@@ -89,10 +79,7 @@ fn test_local_file_system_create_directory_reports_created_entries() {
     let target = directory.path().join("one/two");
 
     let outcome = LocalFileSystem::host()
-        .create_directory(
-            &target,
-            &LocalCreateDirectoryOptions::new().with_recursive(),
-        )
+        .create_directory(&target, &LocalCreateDirectoryOptions::new().with_recursive())
         .expect("recursive directory creation should succeed");
 
     assert!(outcome.created());
@@ -113,9 +100,7 @@ fn test_local_file_system_copy_creates_missing_parent() {
 
     assert_eq!(
         b"payload",
-        fs::read(&target)
-            .expect("copied target should read")
-            .as_slice()
+        fs::read(&target).expect("copied target should read").as_slice()
     );
 }
 
@@ -127,10 +112,7 @@ fn test_local_file_system_create_directory_accepts_existing_directory() {
     fs::create_dir(&target).expect("fixture directory should be created");
 
     let outcome = LocalFileSystem::host()
-        .create_directory(
-            &target,
-            &LocalCreateDirectoryOptions::new().with_exists_ok(),
-        )
+        .create_directory(&target, &LocalCreateDirectoryOptions::new().with_exists_ok())
         .expect("existing directory should be accepted");
 
     assert!(!outcome.created());
@@ -202,24 +184,16 @@ fn test_local_file_system_rename_respects_overwrite_policy() {
     assert_eq!(LocalFileErrorKind::AlreadyExists, error.error().kind());
     assert_eq!(
         b"old".as_slice(),
-        fs::read(&target)
-            .expect("target should remain readable")
-            .as_slice(),
+        fs::read(&target).expect("target should remain readable").as_slice(),
     );
 
     let outcome = LocalFileSystem::host()
-        .rename(
-            &source,
-            &target,
-            &LocalRenameOptions::new().with_overwrite(),
-        )
+        .rename(&source, &target, &LocalRenameOptions::new().with_overwrite())
         .expect("explicit overwrite should replace the target entry");
     assert!(outcome.atomic());
     assert_eq!(
         b"new".as_slice(),
-        fs::read(&target)
-            .expect("target should be replaced")
-            .as_slice(),
+        fs::read(&target).expect("target should be replaced").as_slice(),
     );
 }
 
@@ -249,17 +223,12 @@ fn test_local_file_system_rename_reports_parent_sync_result() {
         );
         match requirement {
             LocalDurabilityRequirement::Preferred => {
-                let outcome = result
-                    .expect("preferred durability may report a downgrade");
+                let outcome = result.expect("preferred durability may report a downgrade");
                 assert!(!outcome.durable());
             }
             LocalDurabilityRequirement::Required => {
-                let error = result
-                    .expect_err("required durability must report failure");
-                assert_eq!(
-                    LocalFileErrorKind::PublicationIncomplete,
-                    error.error().kind(),
-                );
+                let error = result.expect_err("required durability must report failure");
+                assert_eq!(LocalFileErrorKind::PublicationIncomplete, error.error().kind(),);
             }
             LocalDurabilityRequirement::NotRequired => unreachable!(),
         }
@@ -267,9 +236,7 @@ fn test_local_file_system_rename_reports_parent_sync_result() {
             .expect("target parent permissions should be restored");
         assert_eq!(
             b"payload",
-            fs::read(&target)
-                .expect("renamed target should remain")
-                .as_slice(),
+            fs::read(&target).expect("renamed target should remain").as_slice(),
         );
     }
 }
@@ -284,9 +251,7 @@ fn test_local_file_system_delete_uses_explicit_directory_recursion() {
 
     let error = LocalFileSystem::host()
         .delete_directory(&tree, &LocalDeleteOptions::new())
-        .expect_err(
-            "non-recursive deletion should reject a non-empty directory",
-        );
+        .expect_err("non-recursive deletion should reject a non-empty directory");
     assert!(matches!(
         error.kind(),
         LocalFileErrorKind::Io | LocalFileErrorKind::TypeConflict

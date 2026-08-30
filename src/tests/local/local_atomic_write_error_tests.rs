@@ -26,18 +26,14 @@ fn create_test_error() -> LocalAtomicWriteError {
 }
 
 #[test]
-fn test_local_atomic_write_error_exposes_context_and_formats_secondary_errors()
-{
+fn test_local_atomic_write_error_exposes_context_and_formats_secondary_errors() {
     let error = create_test_error()
         .with_cleanup_error(Some(io::Error::other("cleanup")))
         .with_parent_sync_error(Some(io::Error::other("sync")));
     assert_eq!(error.stage(), LocalAtomicWriteStage::ReplaceDestination);
     assert_eq!(error.path(), Path::new("target"));
     assert_eq!(error.temporary_path(), Some(Path::new("staging")));
-    assert_eq!(
-        error.destination_state(),
-        LocalAtomicDestinationState::Replaced
-    );
+    assert_eq!(error.destination_state(), LocalAtomicDestinationState::Replaced);
     assert!(error.cleanup_error().is_some());
     assert!(error.parent_sync_error().is_some());
     assert_eq!(error.source_error().kind(), io::ErrorKind::Other);
@@ -49,8 +45,7 @@ fn test_local_atomic_write_error_exposes_context_and_formats_secondary_errors()
 }
 
 #[test]
-fn test_local_atomic_write_error_splits_staging_parts_without_optional_context()
-{
+fn test_local_atomic_write_error_splits_staging_parts_without_optional_context() {
     let (path, cleanup, source) = create_test_error().into_staging_parts();
     assert_eq!(path, Some("staging".into()));
     assert!(cleanup.is_none());
@@ -63,11 +58,9 @@ fn test_local_atomic_write_error_splits_staging_parts_without_optional_context()
         io::Error::other("boom"),
     );
     assert!(!no_staging.to_string().contains("staging path"));
-    let cleanup_only = create_test_error()
-        .with_cleanup_error(Some(io::Error::other("cleanup")));
+    let cleanup_only = create_test_error().with_cleanup_error(Some(io::Error::other("cleanup")));
     assert!(cleanup_only.to_string().contains("staging cleanup"));
-    let parent_only = create_test_error()
-        .with_parent_sync_error(Some(io::Error::other("sync")));
+    let parent_only = create_test_error().with_parent_sync_error(Some(io::Error::other("sync")));
     assert!(parent_only.to_string().contains("parent synchronization"));
     let plain = create_test_error()
         .with_cleanup_error(None)

@@ -36,11 +36,7 @@ impl OpenedFile {
     /// - `file`: Open regular-file descriptor.
     /// - `metadata`: Metadata captured from `file`.
     /// - `identity`: Identity captured from the same metadata.
-    pub(super) const fn new(
-        file: File,
-        metadata: LocalFileMetadata,
-        identity: EntryIdentity,
-    ) -> Self {
+    pub(super) const fn new(file: File, metadata: LocalFileMetadata, identity: EntryIdentity) -> Self {
         Self {
             file,
             metadata,

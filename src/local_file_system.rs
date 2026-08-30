@@ -102,10 +102,7 @@ impl LocalFileSystem {
                 authority: None,
                 paths: crate::LocalPaths::host(),
                 protocols: HostLocalFileSystem::protocols(),
-                limits: LocalFileSystemLimits::new(
-                    crate::SizeLimit::VariesByPath,
-                    crate::SizeLimit::VariesByPath,
-                ),
+                limits: LocalFileSystemLimits::new(crate::SizeLimit::VariesByPath, crate::SizeLimit::VariesByPath),
                 walk_limits: LocalWalkLimits::default(),
                 copy_limits: LocalCopyLimits::default(),
                 #[cfg(feature = "test-support")]
@@ -116,14 +113,10 @@ impl LocalFileSystem {
 
     /// Creates a Host filesystem after binding the current directory handle.
     pub(crate) fn try_host() -> LocalResult<Self> {
-        let authority = crate::authority::HostAuthority::bind_current(
-            LocalSymlinkPolicy::FollowAcrossScope,
-        )?;
+        let authority = crate::authority::HostAuthority::bind_current(LocalSymlinkPolicy::FollowAcrossScope)?;
         let mut filesystem = Self::host();
         filesystem.core = Arc::new(LocalFileSystemCore {
-            authority: Some(Arc::new(crate::authority::Authority::Host(
-                authority,
-            ))),
+            authority: Some(Arc::new(crate::authority::Authority::Host(authority))),
             paths: crate::LocalPaths::host(),
             protocols: filesystem.capabilities,
             limits: filesystem.limits(),
@@ -152,10 +145,7 @@ impl LocalFileSystem {
     /// Returns `LocalFileError` when the root is not a directory or cannot be
     /// opened securely on the current platform.
     pub fn rooted(root: &Path) -> LocalResult<Self> {
-        Self::rooted_with_symlink_policy(
-            root,
-            LocalSymlinkPolicy::FollowWithinScope,
-        )
+        Self::rooted_with_symlink_policy(root, LocalSymlinkPolicy::FollowWithinScope)
     }
 
     /// Opens a rooted filesystem with an explicit symbolic-link policy.
@@ -173,20 +163,12 @@ impl LocalFileSystem {
     ///
     /// Returns `LocalFileError` when the root is not a directory or cannot be
     /// opened securely on the current platform.
-    pub fn rooted_with_symlink_policy(
-        root: &Path,
-        symlink_policy: LocalSymlinkPolicy,
-    ) -> LocalResult<Self> {
-        validate_rooted_symlink_policy(
-            symlink_policy,
-            LocalFileOperation::OpenRoot,
-            Some(root),
-        )?;
+    pub fn rooted_with_symlink_policy(root: &Path, symlink_policy: LocalSymlinkPolicy) -> LocalResult<Self> {
+        validate_rooted_symlink_policy(symlink_policy, LocalFileOperation::OpenRoot, Some(root))?;
         let rooted = RootedLocalFileSystem::open(root)?;
         let capabilities = rooted.protocols();
         let limits = rooted.limits();
-        let authority =
-            crate::authority::RootedAuthority::open(root, symlink_policy)?;
+        let authority = crate::authority::RootedAuthority::open(root, symlink_policy)?;
         Ok(Self {
             capabilities,
             namespace: LocalNamespace::Rooted(rooted),
@@ -194,9 +176,7 @@ impl LocalFileSystem {
             walk_limits: LocalWalkLimits::default(),
             copy_limits: LocalCopyLimits::default(),
             core: Arc::new(LocalFileSystemCore {
-                authority: Some(Arc::new(crate::authority::Authority::Rooted(
-                    authority,
-                ))),
+                authority: Some(Arc::new(crate::authority::Authority::Rooted(authority))),
                 paths: crate::LocalPaths::rooted(),
                 protocols: capabilities,
                 limits,
@@ -227,10 +207,7 @@ impl LocalFileSystem {
     ///
     /// Returns [`LocalFileErrorKind::InvalidOptions`] when a Rooted filesystem
     /// is configured with [`LocalSymlinkPolicy::FollowAcrossScope`].
-    pub fn with_symlink_policy(
-        mut self,
-        symlink_policy: LocalSymlinkPolicy,
-    ) -> LocalResult<Self> {
+    pub fn with_symlink_policy(mut self, symlink_policy: LocalSymlinkPolicy) -> LocalResult<Self> {
         if let LocalNamespace::Rooted(rooted) = &self.namespace {
             validate_rooted_symlink_policy(
                 symlink_policy,
@@ -266,11 +243,7 @@ impl LocalFileSystem {
     }
 
     /// Applies validated immutable resource limits during construction.
-    pub(crate) fn with_limits(
-        mut self,
-        walk_limits: LocalWalkLimits,
-        copy_limits: LocalCopyLimits,
-    ) -> Self {
+    pub(crate) fn with_limits(mut self, walk_limits: LocalWalkLimits, copy_limits: LocalCopyLimits) -> Self {
         self.walk_limits = walk_limits;
         self.copy_limits = copy_limits;
         self.core = Arc::new(LocalFileSystemCore {
@@ -293,10 +266,7 @@ impl LocalFileSystem {
 
     /// Replaces the immutable test-fault plan while constructing an instance.
     #[cfg(feature = "test-support")]
-    pub(crate) fn with_test_faults(
-        mut self,
-        test_faults: Option<crate::TestFaultPlan>,
-    ) -> Self {
+    pub(crate) fn with_test_faults(mut self, test_faults: Option<crate::TestFaultPlan>) -> Self {
         self.core = Arc::new(LocalFileSystemCore {
             authority: self.core.authority.clone(),
             paths: self.core.paths,
@@ -334,9 +304,7 @@ impl LocalFileSystem {
     pub fn diagnostic_root(&self) -> Option<&Path> {
         match &self.namespace {
             LocalNamespace::Host => None,
-            LocalNamespace::Rooted(rooted) => {
-                rooted.authority().diagnostic_root()
-            }
+            LocalNamespace::Rooted(rooted) => rooted.authority().diagnostic_root(),
         }
     }
 
@@ -360,10 +328,9 @@ impl LocalFileSystem {
     #[inline(always)]
     pub const fn limits(&self) -> LocalFileSystemLimits {
         match &self.namespace {
-            LocalNamespace::Host => LocalFileSystemLimits::new(
-                crate::SizeLimit::VariesByPath,
-                crate::SizeLimit::VariesByPath,
-            ),
+            LocalNamespace::Host => {
+                LocalFileSystemLimits::new(crate::SizeLimit::VariesByPath, crate::SizeLimit::VariesByPath)
+            }
             LocalNamespace::Rooted(rooted) => rooted.limits(),
         }
     }
@@ -375,9 +342,7 @@ impl LocalFileSystem {
     /// Returns `LocalFileError` only when the path cannot be interpreted in
     /// this filesystem authority. Probe failures yield `Unknown` dimensions.
     pub fn limits_at(&self, path: &Path) -> LocalResult<LocalFileSystemLimits> {
-        if matches!(self.namespace, LocalNamespace::Rooted(_))
-            && path.as_os_str().is_empty()
-        {
+        if matches!(self.namespace, LocalNamespace::Rooted(_)) && path.as_os_str().is_empty() {
             return Err(rooted_probe_requires_descendant(path));
         }
         if let Some(authority) = self.authority() {
@@ -404,9 +369,7 @@ impl LocalFileSystem {
     /// Returns `LocalFileError` only when the path cannot be interpreted in
     /// this filesystem authority. Probe failures yield absent observations.
     pub fn space_at(&self, path: &Path) -> LocalResult<LocalFileSystemSpace> {
-        if matches!(self.namespace, LocalNamespace::Rooted(_))
-            && path.as_os_str().is_empty()
-        {
+        if matches!(self.namespace, LocalNamespace::Rooted(_)) && path.as_os_str().is_empty() {
             return Err(rooted_probe_requires_descendant(path));
         }
         if let Some(authority) = self.authority() {
@@ -414,11 +377,9 @@ impl LocalFileSystem {
             return authority.filesystem_space(&resolved);
         }
         match &self.namespace {
-            LocalNamespace::Host => migrated_host_probe(
-                self.symlink_policy,
-                path,
-                crate::authority::Authority::filesystem_space,
-            ),
+            LocalNamespace::Host => {
+                migrated_host_probe(self.symlink_policy, path, crate::authority::Authority::filesystem_space)
+            }
             LocalNamespace::Rooted(rooted) => {
                 let resolved = rooted.authority().resolve(path)?;
                 rooted.authority().filesystem_space(&resolved)
@@ -448,28 +409,17 @@ impl LocalFileSystem {
         self.core
             .fail_if_requested(crate::test_support::TestFaultPoint::Metadata)
             .map_err(|error| {
-                LocalFileError::from_io(
-                    LocalFileOperation::Metadata,
-                    Some(path.to_path_buf()),
-                    None,
-                    error,
-                )
+                LocalFileError::from_io(LocalFileOperation::Metadata, Some(path.to_path_buf()), None, error)
             })?;
         if let Some(authority) = self.authority() {
-            let resolved =
-                authority.resolve_metadata(path).map_err(|error| {
-                    error.with_operation(LocalFileOperation::Metadata)
-                })?;
+            let resolved = authority
+                .resolve_metadata(path)
+                .map_err(|error| error.with_operation(LocalFileOperation::Metadata))?;
             return authority.metadata(&resolved);
         }
         match &self.namespace {
-            LocalNamespace::Host => HostLocalFileSystem::metadata_with_policy(
-                path,
-                self.symlink_policy,
-            ),
-            LocalNamespace::Rooted(rooted) => {
-                rooted.metadata(path, self.symlink_policy)
-            }
+            LocalNamespace::Host => HostLocalFileSystem::metadata_with_policy(path, self.symlink_policy),
+            LocalNamespace::Rooted(rooted) => rooted.metadata(path, self.symlink_policy),
         }
     }
 
@@ -491,20 +441,11 @@ impl LocalFileSystem {
     ///
     /// Returns `LocalFileError` for invalid paths, entry kinds, options, or
     /// native open failures.
-    pub fn open_reader(
-        &self,
-        path: &Path,
-        options: &LocalReadOptions,
-    ) -> LocalResult<LocalFileReader> {
+    pub fn open_reader(&self, path: &Path, options: &LocalReadOptions) -> LocalResult<LocalFileReader> {
         self.core
             .fail_if_requested(crate::test_support::TestFaultPoint::Metadata)
             .map_err(|error| {
-                LocalFileError::from_io(
-                    LocalFileOperation::OpenReader,
-                    Some(path.to_path_buf()),
-                    None,
-                    error,
-                )
+                LocalFileError::from_io(LocalFileOperation::OpenReader, Some(path.to_path_buf()), None, error)
             })?;
         if let LocalNamespace::Rooted(rooted) = &self.namespace {
             return rooted.open_reader(path, options, self.symlink_policy);
@@ -515,16 +456,8 @@ impl LocalFileSystem {
             return Ok(LocalFileReader::from_opened(opened));
         }
         match &self.namespace {
-            LocalNamespace::Host => {
-                HostLocalFileSystem::open_reader_with_policy(
-                    path,
-                    options,
-                    self.symlink_policy,
-                )
-            }
-            LocalNamespace::Rooted(rooted) => {
-                rooted.open_reader(path, options, self.symlink_policy)
-            }
+            LocalNamespace::Host => HostLocalFileSystem::open_reader_with_policy(path, options, self.symlink_policy),
+            LocalNamespace::Rooted(rooted) => rooted.open_reader(path, options, self.symlink_policy),
         }
     }
 
@@ -533,12 +466,7 @@ impl LocalFileSystem {
     /// The file is opened and validated even when max_bytes is zero. Bytes
     /// are read incrementally so the method never allocates the requested
     /// limit up front.
-    pub fn read_prefix(
-        &self,
-        path: &Path,
-        options: &LocalReadOptions,
-        max_bytes: usize,
-    ) -> LocalResult<Vec<u8>> {
+    pub fn read_prefix(&self, path: &Path, options: &LocalReadOptions, max_bytes: usize) -> LocalResult<Vec<u8>> {
         let mut reader = self.open_reader(path, options)?;
         if max_bytes == 0 {
             return Ok(Vec::new());
@@ -547,17 +475,11 @@ impl LocalFileSystem {
         let mut buffer = [0_u8; 8192];
         while result.len() < max_bytes {
             let read_len = (max_bytes - result.len()).min(buffer.len());
-            let count =
-                crate::local::test_io_error("local-fs-read-prefix-read")
-                    .map_or_else(|| reader.read(&mut buffer[..read_len]), Err)
-                    .map_err(|source| {
-                        LocalFileError::from_io(
-                            LocalFileOperation::Read,
-                            Some(path.to_path_buf()),
-                            None,
-                            source,
-                        )
-                    })?;
+            let count = crate::local::test_io_error("local-fs-read-prefix-read")
+                .map_or_else(|| reader.read(&mut buffer[..read_len]), Err)
+                .map_err(|source| {
+                    LocalFileError::from_io(LocalFileOperation::Read, Some(path.to_path_buf()), None, source)
+                })?;
             if count == 0 {
                 break;
             }
@@ -585,22 +507,10 @@ impl LocalFileSystem {
     ///
     /// Returns `LocalFileError` for invalid paths, conflicts, unsupported
     /// requirements, or native open failures.
-    pub fn open_writer(
-        &self,
-        path: &Path,
-        options: &LocalWriteOptions,
-    ) -> LocalResult<LocalFileWriter> {
+    pub fn open_writer(&self, path: &Path, options: &LocalWriteOptions) -> LocalResult<LocalFileWriter> {
         match &self.namespace {
-            LocalNamespace::Host => {
-                HostLocalFileSystem::open_writer_with_policy(
-                    path,
-                    options,
-                    self.symlink_policy,
-                )
-            }
-            LocalNamespace::Rooted(rooted) => {
-                rooted.open_writer(path, options, self.symlink_policy)
-            }
+            LocalNamespace::Host => HostLocalFileSystem::open_writer_with_policy(path, options, self.symlink_policy),
+            LocalNamespace::Rooted(rooted) => rooted.open_writer(path, options, self.symlink_policy),
         }
     }
 
@@ -622,19 +532,10 @@ impl LocalFileSystem {
     ///
     /// Returns `LocalFileError` for invalid paths, unsupported policies, or
     /// native directory-open failures.
-    pub fn list(
-        &self,
-        path: &Path,
-        options: &LocalListOptions,
-    ) -> LocalResult<LocalDirectoryWalker> {
+    pub fn list(&self, path: &Path, options: &LocalListOptions) -> LocalResult<LocalDirectoryWalker> {
         if let LocalNamespace::Rooted(_) = &self.namespace {
-            let symlink_policy =
-                options.symlink_policy().unwrap_or(self.symlink_policy);
-            validate_rooted_symlink_policy(
-                symlink_policy,
-                LocalFileOperation::List,
-                Some(path),
-            )?;
+            let symlink_policy = options.symlink_policy().unwrap_or(self.symlink_policy);
+            validate_rooted_symlink_policy(symlink_policy, LocalFileOperation::List, Some(path))?;
         }
         if let Some(authority) = self.authority() {
             let resolved = authority.resolve(path)?;
@@ -642,14 +543,9 @@ impl LocalFileSystem {
             let _ = directory.next_entry()?;
         }
         match &self.namespace {
-            LocalNamespace::Host => HostLocalFileSystem::list_with_policy(
-                path,
-                options,
-                self.symlink_policy,
-            ),
+            LocalNamespace::Host => HostLocalFileSystem::list_with_policy(path, options, self.symlink_policy),
             LocalNamespace::Rooted(rooted) => {
-                let symlink_policy =
-                    options.symlink_policy().unwrap_or(self.symlink_policy);
+                let symlink_policy = options.symlink_policy().unwrap_or(self.symlink_policy);
                 rooted.list(path, options, symlink_policy)
             }
         }
@@ -676,42 +572,26 @@ impl LocalFileSystem {
     /// Returns `LocalCopyFailure` with the strongest known destination state
     /// when validation or native copying fails.
     #[allow(clippy::result_large_err)]
-    pub fn copy(
-        &self,
-        source: &Path,
-        destination: &Path,
-        options: &LocalCopyOptions,
-    ) -> LocalCopyResult {
-        if options.deadline().is_some_and(|duration| {
-            Instant::now().checked_add(duration).is_none()
-        }) {
+    pub fn copy(&self, source: &Path, destination: &Path, options: &LocalCopyOptions) -> LocalCopyResult {
+        if options
+            .deadline()
+            .is_some_and(|duration| Instant::now().checked_add(duration).is_none())
+        {
             return Err(copy_failure_unchanged(
-                LocalFileError::new(
-                    LocalFileErrorKind::InvalidOptions,
-                    LocalFileOperation::Copy,
-                )
-                .with_reason("copy deadline exceeds the monotonic clock range")
-                .with_path(source.to_path_buf())
-                .with_target(destination.to_path_buf()),
+                LocalFileError::new(LocalFileErrorKind::InvalidOptions, LocalFileOperation::Copy)
+                    .with_reason("copy deadline exceeds the monotonic clock range")
+                    .with_path(source.to_path_buf())
+                    .with_target(destination.to_path_buf()),
             ));
         }
         match &self.namespace {
-            LocalNamespace::Host => HostLocalFileSystem::copy_with_policy(
-                source,
-                destination,
-                options,
-                self.symlink_policy,
-            ),
+            LocalNamespace::Host => {
+                HostLocalFileSystem::copy_with_policy(source, destination, options, self.symlink_policy)
+            }
             LocalNamespace::Rooted(rooted) => {
-                let symlink_policy = options
-                    .symlink_policy_override()
-                    .unwrap_or(self.symlink_policy);
-                validate_rooted_symlink_policy(
-                    symlink_policy,
-                    LocalFileOperation::Copy,
-                    Some(source),
-                )
-                .map_err(copy_failure_unchanged)?;
+                let symlink_policy = options.symlink_policy_override().unwrap_or(self.symlink_policy);
+                validate_rooted_symlink_policy(symlink_policy, LocalFileOperation::Copy, Some(source))
+                    .map_err(copy_failure_unchanged)?;
                 rooted.copy(source, destination, options, symlink_policy)
             }
         }
@@ -743,9 +623,7 @@ impl LocalFileSystem {
         {
             let resolved = authority.resolve(path)?;
             let existed = match authority.metadata(&resolved) {
-                Ok(metadata) if metadata.kind() == LocalFileKind::Directory => {
-                    true
-                }
+                Ok(metadata) if metadata.kind() == LocalFileKind::Directory => true,
                 Ok(_) => {
                     return Err(LocalFileError::new(
                         LocalFileErrorKind::TypeConflict,
@@ -753,9 +631,7 @@ impl LocalFileSystem {
                     )
                     .with_path(path.to_path_buf()));
                 }
-                Err(error) if error.kind() == LocalFileErrorKind::NotFound => {
-                    false
-                }
+                Err(error) if error.kind() == LocalFileErrorKind::NotFound => false,
                 Err(error) => return Err(error),
             };
             if options.exists_ok() {
@@ -767,15 +643,9 @@ impl LocalFileSystem {
         }
         match &self.namespace {
             LocalNamespace::Host => {
-                HostLocalFileSystem::create_directory_with_policy(
-                    path,
-                    options,
-                    self.symlink_policy,
-                )
+                HostLocalFileSystem::create_directory_with_policy(path, options, self.symlink_policy)
             }
-            LocalNamespace::Rooted(rooted) => {
-                rooted.create_directory(path, options, self.symlink_policy)
-            }
+            LocalNamespace::Rooted(rooted) => rooted.create_directory(path, options, self.symlink_policy),
         }
     }
 
@@ -797,35 +667,20 @@ impl LocalFileSystem {
     ///
     /// Returns `LocalFileError` for invalid paths, type conflicts, or native
     /// deletion failures.
-    pub fn delete_file(
-        &self,
-        path: &Path,
-        options: &LocalDeleteOptions,
-    ) -> LocalResult<LocalDeleteOutcome> {
+    pub fn delete_file(&self, path: &Path, options: &LocalDeleteOptions) -> LocalResult<LocalDeleteOutcome> {
         if let Some(authority) = self.authority() {
             let resolved = authority.resolve(path)?;
             match authority.delete_file(&resolved) {
                 Ok(()) => return Ok(LocalDeleteOutcome::new(true)),
-                Err(error)
-                    if options.missing_ok()
-                        && error.kind() == LocalFileErrorKind::NotFound =>
-                {
+                Err(error) if options.missing_ok() && error.kind() == LocalFileErrorKind::NotFound => {
                     return Ok(LocalDeleteOutcome::new(false));
                 }
                 Err(error) => return Err(error),
             }
         }
         match &self.namespace {
-            LocalNamespace::Host => {
-                HostLocalFileSystem::delete_file_with_policy(
-                    path,
-                    options,
-                    self.symlink_policy,
-                )
-            }
-            LocalNamespace::Rooted(rooted) => {
-                rooted.delete_file(path, options, self.symlink_policy)
-            }
+            LocalNamespace::Host => HostLocalFileSystem::delete_file_with_policy(path, options, self.symlink_policy),
+            LocalNamespace::Rooted(rooted) => rooted.delete_file(path, options, self.symlink_policy),
         }
     }
 
@@ -846,21 +701,14 @@ impl LocalFileSystem {
     ///
     /// Returns `LocalFileError` for invalid paths, type conflicts, non-empty
     /// directories, or native deletion failures.
-    pub fn delete_directory(
-        &self,
-        path: &Path,
-        options: &LocalDeleteOptions,
-    ) -> LocalResult<LocalDeleteOutcome> {
+    pub fn delete_directory(&self, path: &Path, options: &LocalDeleteOptions) -> LocalResult<LocalDeleteOutcome> {
         if let Some(authority) = self.authority()
             && !options.recursive()
         {
             let resolved = authority.resolve(path)?;
             match authority.delete_directory(&resolved) {
                 Ok(()) => return Ok(LocalDeleteOutcome::new(true)),
-                Err(error)
-                    if options.missing_ok()
-                        && error.kind() == LocalFileErrorKind::NotFound =>
-                {
+                Err(error) if options.missing_ok() && error.kind() == LocalFileErrorKind::NotFound => {
                     return Ok(LocalDeleteOutcome::new(false));
                 }
                 Err(error) => return Err(error),
@@ -868,15 +716,9 @@ impl LocalFileSystem {
         }
         match &self.namespace {
             LocalNamespace::Host => {
-                HostLocalFileSystem::delete_directory_with_policy(
-                    path,
-                    options,
-                    self.symlink_policy,
-                )
+                HostLocalFileSystem::delete_directory_with_policy(path, options, self.symlink_policy)
             }
-            LocalNamespace::Rooted(rooted) => {
-                rooted.delete_directory(path, options, self.symlink_policy)
-            }
+            LocalNamespace::Rooted(rooted) => rooted.delete_directory(path, options, self.symlink_policy),
         }
     }
 
@@ -900,27 +742,13 @@ impl LocalFileSystem {
     /// Returns `LocalRenameFailure` with the strongest proven namespace state
     /// when validation or native rename fails.
     #[allow(clippy::result_large_err)]
-    pub fn rename(
-        &self,
-        source: &Path,
-        destination: &Path,
-        options: &LocalRenameOptions,
-    ) -> LocalRenameResult {
+    pub fn rename(&self, source: &Path, destination: &Path, options: &LocalRenameOptions) -> LocalRenameResult {
         if let LocalNamespace::Rooted(rooted) = &self.namespace {
-            return rooted.rename(
-                source,
-                destination,
-                options,
-                self.symlink_policy,
-            );
+            return rooted.rename(source, destination, options, self.symlink_policy);
         }
         if let Some(authority) = self.authority() {
-            let source = authority
-                .resolve(source)
-                .map_err(rename_failure_unchanged)?;
-            let destination = authority
-                .resolve(destination)
-                .map_err(rename_failure_unchanged)?;
+            let source = authority.resolve(source).map_err(rename_failure_unchanged)?;
+            let destination = authority.resolve(destination).map_err(rename_failure_unchanged)?;
             if authority
                 .same_entry(&source, &destination)
                 .map_err(rename_failure_unchanged)?
@@ -932,8 +760,7 @@ impl LocalFileSystem {
                 .map_err(rename_failure_unchanged)?;
             let durable = match options.durability() {
                 LocalDurabilityRequirement::NotRequired => false,
-                LocalDurabilityRequirement::Preferred
-                | LocalDurabilityRequirement::Required => authority
+                LocalDurabilityRequirement::Preferred | LocalDurabilityRequirement::Required => authority
                     .sync_parent(&destination)
                     .map_err(rename_failure_renamed)
                     .map(|()| true)?,
@@ -941,15 +768,10 @@ impl LocalFileSystem {
             return Ok(LocalRenameOutcome::new(true, durable));
         }
         match &self.namespace {
-            LocalNamespace::Host => HostLocalFileSystem::rename_with_policy(
-                source,
-                destination,
-                options,
-                self.symlink_policy,
-            ),
-            LocalNamespace::Rooted(rooted) => {
-                rooted.rename(source, destination, options, self.symlink_policy)
+            LocalNamespace::Host => {
+                HostLocalFileSystem::rename_with_policy(source, destination, options, self.symlink_policy)
             }
+            LocalNamespace::Rooted(rooted) => rooted.rename(source, destination, options, self.symlink_policy),
         }
     }
 
@@ -970,20 +792,10 @@ impl LocalFileSystem {
     ///
     /// Returns `LocalFileError` for invalid options, collisions, or native
     /// creation failures.
-    pub fn create_temp_file(
-        &self,
-        options: &LocalTempFileOptions,
-    ) -> LocalResult<LocalTempFile> {
+    pub fn create_temp_file(&self, options: &LocalTempFileOptions) -> LocalResult<LocalTempFile> {
         match &self.namespace {
-            LocalNamespace::Host => {
-                HostLocalFileSystem::create_temp_file_with_policy(
-                    options,
-                    self.symlink_policy,
-                )
-            }
-            LocalNamespace::Rooted(rooted) => {
-                rooted.create_temp_file(options, self.symlink_policy)
-            }
+            LocalNamespace::Host => HostLocalFileSystem::create_temp_file_with_policy(options, self.symlink_policy),
+            LocalNamespace::Rooted(rooted) => rooted.create_temp_file(options, self.symlink_policy),
         }
     }
 
@@ -1005,20 +817,12 @@ impl LocalFileSystem {
     ///
     /// Returns `LocalFileError` for invalid options, collisions, or native
     /// creation failures.
-    pub fn create_temp_directory(
-        &self,
-        options: &LocalTempDirectoryOptions,
-    ) -> LocalResult<LocalTempDirectory> {
+    pub fn create_temp_directory(&self, options: &LocalTempDirectoryOptions) -> LocalResult<LocalTempDirectory> {
         match &self.namespace {
             LocalNamespace::Host => {
-                HostLocalFileSystem::create_temp_directory_with_policy(
-                    options,
-                    self.symlink_policy,
-                )
+                HostLocalFileSystem::create_temp_directory_with_policy(options, self.symlink_policy)
             }
-            LocalNamespace::Rooted(rooted) => {
-                rooted.create_temp_directory(options, self.symlink_policy)
-            }
+            LocalNamespace::Rooted(rooted) => rooted.create_temp_directory(options, self.symlink_policy),
         }
     }
 }
@@ -1027,26 +831,18 @@ impl LocalFileSystem {
 /// not identify a descendant entry.
 #[must_use]
 fn rooted_probe_requires_descendant(path: &Path) -> LocalFileError {
-    LocalFileError::new(
-        LocalFileErrorKind::InvalidPath,
-        LocalFileOperation::Capabilities,
-    )
-    .with_reason("rooted capability probes require a non-empty descendant path")
-    .with_path(path.to_path_buf())
+    LocalFileError::new(LocalFileErrorKind::InvalidPath, LocalFileOperation::Capabilities)
+        .with_reason("rooted capability probes require a non-empty descendant path")
+        .with_path(path.to_path_buf())
 }
 
 /// Runs one migrated Host probe through a construction-time cwd authority.
 fn migrated_host_probe<T>(
     symlink_policy: LocalSymlinkPolicy,
     path: &Path,
-    probe: fn(
-        &crate::authority::Authority,
-        &crate::authority::AuthorityPath,
-    ) -> LocalResult<T>,
+    probe: fn(&crate::authority::Authority, &crate::authority::AuthorityPath) -> LocalResult<T>,
 ) -> LocalResult<T> {
-    let authority = crate::authority::Authority::Host(
-        crate::authority::HostAuthority::bind_current(symlink_policy)?,
-    );
+    let authority = crate::authority::Authority::Host(crate::authority::HostAuthority::bind_current(symlink_policy)?);
     let resolved = authority.resolve(path)?;
     probe(&authority, &resolved)
 }

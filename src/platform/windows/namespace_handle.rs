@@ -94,9 +94,7 @@ impl NamespaceHandle {
     /// Returns an open-root error when the path cannot be opened as a real
     /// directory or denotes a name-surrogate reparse point.
     pub(crate) fn open_root(path: &Path) -> LocalResult<Self> {
-        let wide = wide_path(path).map_err(|error| {
-            io_error(LocalFileOperation::OpenRoot, path, None, error)
-        })?;
+        let wide = wide_path(path).map_err(|error| io_error(LocalFileOperation::OpenRoot, path, None, error))?;
         // SAFETY: `wide` is a live NUL-terminated UTF-16 path, optional
         // pointers are null, and successful ownership is transferred to File.
         let raw = unsafe {
@@ -120,9 +118,7 @@ impl NamespaceHandle {
         }
         // SAFETY: successful CreateFileW returned a uniquely owned handle.
         let handle = unsafe { File::from_raw_handle(raw) };
-        verify_real_directory(&handle).map_err(|error| {
-            io_error(LocalFileOperation::OpenRoot, path, None, error)
-        })?;
+        verify_real_directory(&handle).map_err(|error| io_error(LocalFileOperation::OpenRoot, path, None, error))?;
         Ok(Self { handle })
     }
 
@@ -135,14 +131,7 @@ impl NamespaceHandle {
         self.handle
             .try_clone()
             .map(|handle| Self { handle })
-            .map_err(|error| {
-                io_error(
-                    LocalFileOperation::OpenRoot,
-                    Path::new(""),
-                    None,
-                    error,
-                )
-            })
+            .map_err(|error| io_error(LocalFileOperation::OpenRoot, Path::new(""), None, error))
     }
 
     /// Reads no-follow metadata for a validated relative path.
@@ -150,22 +139,12 @@ impl NamespaceHandle {
     /// # Errors
     ///
     /// Returns a metadata error when the entry cannot be opened or inspected.
-    pub(crate) fn metadata(
-        &self,
-        path: &RelativePath,
-    ) -> LocalResult<LocalFileMetadata> {
+    pub(crate) fn metadata(&self, path: &RelativePath) -> LocalResult<LocalFileMetadata> {
         let entry = self.open_for_metadata(path)?;
         entry
             .metadata()
             .map(|metadata| LocalFileMetadata::from_native(&metadata))
-            .map_err(|error| {
-                io_error(
-                    LocalFileOperation::Metadata,
-                    path.as_path(),
-                    None,
-                    error,
-                )
-            })
+            .map_err(|error| io_error(LocalFileOperation::Metadata, path.as_path(), None, error))
     }
 
     /// Reads the target stored in a final name-surrogate reparse point.
@@ -177,25 +156,13 @@ impl NamespaceHandle {
     ///
     /// Returns a bind-path error when parent traversal, handle-path recovery,
     /// or native link reading fails.
-    pub(crate) fn read_link(
-        &self,
-        path: &RelativePath,
-    ) -> LocalResult<std::path::PathBuf> {
-        let (parent, name) =
-            open_parent(&self.handle, path).map_err(|error| {
-                io_error(
-                    LocalFileOperation::BindPath,
-                    path.as_path(),
-                    None,
-                    error,
-                )
-            })?;
-        let parent = handle_path(&parent).map_err(|error| {
-            io_error(LocalFileOperation::BindPath, path.as_path(), None, error)
-        })?;
-        std::fs::read_link(parent.join(name)).map_err(|error| {
-            io_error(LocalFileOperation::BindPath, path.as_path(), None, error)
-        })
+    pub(crate) fn read_link(&self, path: &RelativePath) -> LocalResult<std::path::PathBuf> {
+        let (parent, name) = open_parent(&self.handle, path)
+            .map_err(|error| io_error(LocalFileOperation::BindPath, path.as_path(), None, error))?;
+        let parent = handle_path(&parent)
+            .map_err(|error| io_error(LocalFileOperation::BindPath, path.as_path(), None, error))?;
+        std::fs::read_link(parent.join(name))
+            .map_err(|error| io_error(LocalFileOperation::BindPath, path.as_path(), None, error))
     }
 
     /// Opens a regular file while rejecting name-surrogate reparse points.
@@ -204,10 +171,7 @@ impl NamespaceHandle {
     ///
     /// Returns an open-reader error when traversal, opening, verification,
     /// metadata, or identity capture fails.
-    pub(crate) fn open_reader(
-        &self,
-        path: &RelativePath,
-    ) -> LocalResult<OpenedFile> {
+    pub(crate) fn open_reader(&self, path: &RelativePath) -> LocalResult<OpenedFile> {
         let file = open_entry(
             &self.handle,
             path,
@@ -215,38 +179,19 @@ impl NamespaceHandle {
             FILE_OPEN,
             FILE_NON_DIRECTORY_FILE,
         )
-        .map_err(|error| {
-            io_error(
-                LocalFileOperation::OpenReader,
-                path.as_path(),
-                None,
-                error,
-            )
-        })?;
-        let metadata = file.metadata().map_err(|error| {
-            io_error(
-                LocalFileOperation::OpenReader,
-                path.as_path(),
-                None,
-                error,
-            )
-        })?;
+        .map_err(|error| io_error(LocalFileOperation::OpenReader, path.as_path(), None, error))?;
+        let metadata = file
+            .metadata()
+            .map_err(|error| io_error(LocalFileOperation::OpenReader, path.as_path(), None, error))?;
         if !metadata.is_file() {
-            return Err(LocalFileError::new(
-                LocalFileErrorKind::TypeConflict,
-                LocalFileOperation::OpenReader,
-            )
-            .with_path(path.as_path().to_path_buf())
-            .with_reason("the opened entry is not a regular file"));
+            return Err(
+                LocalFileError::new(LocalFileErrorKind::TypeConflict, LocalFileOperation::OpenReader)
+                    .with_path(path.as_path().to_path_buf())
+                    .with_reason("the opened entry is not a regular file"),
+            );
         }
-        let identity = EntryIdentity::from_file(&file).map_err(|error| {
-            io_error(
-                LocalFileOperation::OpenReader,
-                path.as_path(),
-                None,
-                error,
-            )
-        })?;
+        let identity = EntryIdentity::from_file(&file)
+            .map_err(|error| io_error(LocalFileOperation::OpenReader, path.as_path(), None, error))?;
         Ok(OpenedFile::new(
             file,
             LocalFileMetadata::from_native(&metadata),
@@ -259,14 +204,11 @@ impl NamespaceHandle {
     /// # Errors
     ///
     /// Returns a list error when traversal or directory verification fails.
-    pub(crate) fn open_directory(
-        &self,
-        path: &RelativePath,
-    ) -> LocalResult<DirectoryCursor> {
+    pub(crate) fn open_directory(&self, path: &RelativePath) -> LocalResult<DirectoryCursor> {
         let directory = if path.as_path().as_os_str().is_empty() {
-            self.handle.try_clone().map_err(|error| {
-                io_error(LocalFileOperation::List, path.as_path(), None, error)
-            })?
+            self.handle
+                .try_clone()
+                .map_err(|error| io_error(LocalFileOperation::List, path.as_path(), None, error))?
         } else {
             open_entry(
                 &self.handle,
@@ -275,17 +217,11 @@ impl NamespaceHandle {
                 FILE_OPEN,
                 FILE_DIRECTORY_FILE,
             )
-            .map_err(|error| {
-                io_error(LocalFileOperation::List, path.as_path(), None, error)
-            })?
+            .map_err(|error| io_error(LocalFileOperation::List, path.as_path(), None, error))?
         };
-        verify_real_directory(&directory).map_err(|error| {
-            io_error(LocalFileOperation::List, path.as_path(), None, error)
-        })?;
-        Ok(DirectoryCursor::new(
-            directory,
-            path.as_path().to_path_buf(),
-        ))
+        verify_real_directory(&directory)
+            .map_err(|error| io_error(LocalFileOperation::List, path.as_path(), None, error))?;
+        Ok(DirectoryCursor::new(directory, path.as_path().to_path_buf()))
     }
 
     /// Creates a directory and accepts an existing real directory.
@@ -293,10 +229,7 @@ impl NamespaceHandle {
     /// # Errors
     ///
     /// Returns a create-directory error when traversal or creation fails.
-    pub(crate) fn create_directory(
-        &self,
-        path: &RelativePath,
-    ) -> LocalResult<()> {
+    pub(crate) fn create_directory(&self, path: &RelativePath) -> LocalResult<()> {
         self.create_directory_impl(path, FILE_OPEN_IF)
     }
 
@@ -306,10 +239,7 @@ impl NamespaceHandle {
     ///
     /// Returns a create-directory error when traversal or exclusive creation
     /// fails.
-    pub(crate) fn create_directory_new(
-        &self,
-        path: &RelativePath,
-    ) -> LocalResult<()> {
+    pub(crate) fn create_directory_new(&self, path: &RelativePath) -> LocalResult<()> {
         self.create_directory_impl(path, FILE_CREATE)
     }
 
@@ -318,30 +248,15 @@ impl NamespaceHandle {
     /// # Errors
     ///
     /// Returns an open-writer error when traversal or exclusive creation fails.
-    pub(crate) fn create_file_new(
-        &self,
-        path: &RelativePath,
-    ) -> LocalResult<File> {
+    pub(crate) fn create_file_new(&self, path: &RelativePath) -> LocalResult<File> {
         open_entry(
             &self.handle,
             path,
-            GENERIC_READ
-                | GENERIC_WRITE
-                | DELETE
-                | FILE_READ_ATTRIBUTES
-                | FILE_WRITE_ATTRIBUTES
-                | SYNCHRONIZE,
+            GENERIC_READ | GENERIC_WRITE | DELETE | FILE_READ_ATTRIBUTES | FILE_WRITE_ATTRIBUTES | SYNCHRONIZE,
             FILE_CREATE,
             FILE_NON_DIRECTORY_FILE,
         )
-        .map_err(|error| {
-            io_error(
-                LocalFileOperation::OpenWriter,
-                path.as_path(),
-                None,
-                error,
-            )
-        })
+        .map_err(|error| io_error(LocalFileOperation::OpenWriter, path.as_path(), None, error))
     }
 
     /// Deletes a non-directory final entry without following it.
@@ -360,10 +275,7 @@ impl NamespaceHandle {
     ///
     /// Returns a delete-directory error when opening, type checking, or
     /// deletion fails.
-    pub(crate) fn delete_directory(
-        &self,
-        path: &RelativePath,
-    ) -> LocalResult<()> {
+    pub(crate) fn delete_directory(&self, path: &RelativePath) -> LocalResult<()> {
         self.delete(path, true, LocalFileOperation::DeleteDirectory)
     }
 
@@ -373,12 +285,7 @@ impl NamespaceHandle {
     ///
     /// Returns a rename error when source opening or handle-relative rename
     /// fails. `overwrite` is passed directly to the atomic native operation.
-    pub(crate) fn rename(
-        &self,
-        source: &RelativePath,
-        target: &RelativePath,
-        overwrite: bool,
-    ) -> LocalResult<()> {
+    pub(crate) fn rename(&self, source: &RelativePath, target: &RelativePath, overwrite: bool) -> LocalResult<()> {
         self.rename_to(source, self, target, overwrite)
     }
 
@@ -410,15 +317,14 @@ impl NamespaceHandle {
                 error,
             )
         })?;
-        rename_handle(&source_file, &target_namespace.handle, target, overwrite)
-            .map_err(|error| {
-                io_error(
-                    LocalFileOperation::Rename,
-                    source.as_path(),
-                    Some(target.as_path()),
-                    error,
-                )
-            })
+        rename_handle(&source_file, &target_namespace.handle, target, overwrite).map_err(|error| {
+            io_error(
+                LocalFileOperation::Rename,
+                source.as_path(),
+                Some(target.as_path()),
+                error,
+            )
+        })
     }
 
     /// Creates a private staging file beside `target`.
@@ -427,19 +333,9 @@ impl NamespaceHandle {
     ///
     /// Returns an open-writer error when the parent cannot be opened or a
     /// unique private entry cannot be created.
-    pub(crate) fn create_staged_file(
-        &self,
-        target: &RelativePath,
-    ) -> LocalResult<StagedFile> {
-        let (parent, _) =
-            open_parent(&self.handle, target).map_err(|error| {
-                io_error(
-                    LocalFileOperation::OpenWriter,
-                    target.as_path(),
-                    None,
-                    error,
-                )
-            })?;
+    pub(crate) fn create_staged_file(&self, target: &RelativePath) -> LocalResult<StagedFile> {
+        let (parent, _) = open_parent(&self.handle, target)
+            .map_err(|error| io_error(LocalFileOperation::OpenWriter, target.as_path(), None, error))?;
         StagedFile::create(parent, target.as_path())
     }
 
@@ -448,10 +344,7 @@ impl NamespaceHandle {
     /// # Errors
     ///
     /// Returns a metadata error when opening or identity capture fails.
-    pub(crate) fn entry_identity(
-        &self,
-        path: &RelativePath,
-    ) -> LocalResult<EntryIdentity> {
+    pub(crate) fn entry_identity(&self, path: &RelativePath) -> LocalResult<EntryIdentity> {
         let file = self.open_for_metadata(path)?;
         EntryIdentity::for_file(&file, path)
     }
@@ -463,29 +356,17 @@ impl NamespaceHandle {
     /// Returns a commit error when the parent cannot be opened or flushed.
     pub(crate) fn sync_parent(&self, path: &RelativePath) -> LocalResult<()> {
         let parent = if path.as_path().as_os_str().is_empty() {
-            self.handle.try_clone().map_err(|error| {
-                io_error(
-                    LocalFileOperation::Commit,
-                    path.as_path(),
-                    None,
-                    error,
-                )
-            })?
+            self.handle
+                .try_clone()
+                .map_err(|error| io_error(LocalFileOperation::Commit, path.as_path(), None, error))?
         } else {
             open_parent(&self.handle, path)
                 .map(|(parent, _)| parent)
-                .map_err(|error| {
-                    io_error(
-                        LocalFileOperation::Commit,
-                        path.as_path(),
-                        None,
-                        error,
-                    )
-                })?
+                .map_err(|error| io_error(LocalFileOperation::Commit, path.as_path(), None, error))?
         };
-        parent.sync_all().map_err(|error| {
-            io_error(LocalFileOperation::Commit, path.as_path(), None, error)
-        })
+        parent
+            .sync_all()
+            .map_err(|error| io_error(LocalFileOperation::Commit, path.as_path(), None, error))
     }
 
     /// Reads best-effort path limits for the filesystem containing `path`.
@@ -493,12 +374,8 @@ impl NamespaceHandle {
     /// # Errors
     ///
     /// Returns a metadata error when the nearest parent cannot be opened.
-    pub(crate) fn filesystem_limits(
-        &self,
-        path: &RelativePath,
-    ) -> LocalResult<LocalFileSystemLimits> {
-        self.probe_handle(path)
-            .map(|file| filesystem_probe::limits(&file))
+    pub(crate) fn filesystem_limits(&self, path: &RelativePath) -> LocalResult<LocalFileSystemLimits> {
+        self.probe_handle(path).map(|file| filesystem_probe::limits(&file))
     }
 
     /// Reads best-effort capacity values for the filesystem containing `path`.
@@ -506,20 +383,12 @@ impl NamespaceHandle {
     /// # Errors
     ///
     /// Returns a metadata error when the nearest parent cannot be opened.
-    pub(crate) fn filesystem_space(
-        &self,
-        path: &RelativePath,
-    ) -> LocalResult<LocalFileSystemSpace> {
-        self.probe_handle(path)
-            .map(|file| filesystem_probe::space(&file))
+    pub(crate) fn filesystem_space(&self, path: &RelativePath) -> LocalResult<LocalFileSystemSpace> {
+        self.probe_handle(path).map(|file| filesystem_probe::space(&file))
     }
 
     /// Implements idempotent or exclusive directory creation.
-    fn create_directory_impl(
-        &self,
-        path: &RelativePath,
-        disposition: u32,
-    ) -> LocalResult<()> {
+    fn create_directory_impl(&self, path: &RelativePath, disposition: u32) -> LocalResult<()> {
         let directory = open_entry_no_follow(
             &self.handle,
             path,
@@ -527,31 +396,13 @@ impl NamespaceHandle {
             disposition,
             FILE_DIRECTORY_FILE,
         )
-        .map_err(|error| {
-            io_error(
-                LocalFileOperation::CreateDirectory,
-                path.as_path(),
-                None,
-                error,
-            )
-        })?;
-        verify_real_directory(&directory).map_err(|error| {
-            io_error(
-                LocalFileOperation::CreateDirectory,
-                path.as_path(),
-                None,
-                error,
-            )
-        })
+        .map_err(|error| io_error(LocalFileOperation::CreateDirectory, path.as_path(), None, error))?;
+        verify_real_directory(&directory)
+            .map_err(|error| io_error(LocalFileOperation::CreateDirectory, path.as_path(), None, error))
     }
 
     /// Deletes an opened entry after validating its directory expectation.
-    fn delete(
-        &self,
-        path: &RelativePath,
-        directory: bool,
-        operation: LocalFileOperation,
-    ) -> LocalResult<()> {
+    fn delete(&self, path: &RelativePath, directory: bool, operation: LocalFileOperation) -> LocalResult<()> {
         let entry = open_entry_no_follow(
             &self.handle,
             path,
@@ -560,70 +411,41 @@ impl NamespaceHandle {
             0,
         )
         .map_err(|error| io_error(operation, path.as_path(), None, error))?;
-        let is_directory =
-            entry.metadata().map(|metadata| metadata.is_dir()).map_err(
-                |error| io_error(operation, path.as_path(), None, error),
-            )?;
+        let is_directory = entry
+            .metadata()
+            .map(|metadata| metadata.is_dir())
+            .map_err(|error| io_error(operation, path.as_path(), None, error))?;
         if is_directory != directory {
-            return Err(LocalFileError::new(
-                LocalFileErrorKind::TypeConflict,
-                operation,
-            )
-            .with_path(path.as_path().to_path_buf())
-            .with_reason(
-                "the entry kind does not match the delete operation",
-            ));
+            return Err(LocalFileError::new(LocalFileErrorKind::TypeConflict, operation)
+                .with_path(path.as_path().to_path_buf())
+                .with_reason("the entry kind does not match the delete operation"));
         }
-        delete_handle(&entry)
-            .map_err(|error| io_error(operation, path.as_path(), None, error))
+        delete_handle(&entry).map_err(|error| io_error(operation, path.as_path(), None, error))
     }
 
     /// Opens the authority root or nearest parent for filesystem probing.
     fn probe_handle(&self, path: &RelativePath) -> LocalResult<File> {
         if path.as_path().as_os_str().is_empty() {
-            return self.handle.try_clone().map_err(|error| {
-                io_error(
-                    LocalFileOperation::Metadata,
-                    path.as_path(),
-                    None,
-                    error,
-                )
-            });
+            return self
+                .handle
+                .try_clone()
+                .map_err(|error| io_error(LocalFileOperation::Metadata, path.as_path(), None, error));
         }
         open_parent(&self.handle, path)
             .map(|(parent, _)| parent)
-            .map_err(|error| {
-                io_error(
-                    LocalFileOperation::Metadata,
-                    path.as_path(),
-                    None,
-                    error,
-                )
-            })
+            .map_err(|error| io_error(LocalFileOperation::Metadata, path.as_path(), None, error))
     }
 
     /// Opens the root or one final entry for no-follow metadata.
     fn open_for_metadata(&self, path: &RelativePath) -> LocalResult<File> {
         if path.as_path().as_os_str().is_empty() {
-            return self.handle.try_clone().map_err(|error| {
-                io_error(
-                    LocalFileOperation::Metadata,
-                    path.as_path(),
-                    None,
-                    error,
-                )
-            });
+            return self
+                .handle
+                .try_clone()
+                .map_err(|error| io_error(LocalFileOperation::Metadata, path.as_path(), None, error));
         }
-        open_entry_no_follow(
-            &self.handle,
-            path,
-            FILE_READ_ATTRIBUTES | SYNCHRONIZE,
-            FILE_OPEN,
-            0,
-        )
-        .map_err(|error| {
-            io_error(LocalFileOperation::Metadata, path.as_path(), None, error)
-        })
+        open_entry_no_follow(&self.handle, path, FILE_READ_ATTRIBUTES | SYNCHRONIZE, FILE_OPEN, 0)
+            .map_err(|error| io_error(LocalFileOperation::Metadata, path.as_path(), None, error))
     }
 }
 
@@ -653,18 +475,15 @@ pub(super) fn open_entry_no_follow(
 }
 
 /// Opens every parent component beneath `root` without following reparses.
-pub(super) fn open_parent(
-    root: &File,
-    path: &RelativePath,
-) -> io::Result<(File, OsString)> {
+pub(super) fn open_parent(root: &File, path: &RelativePath) -> io::Result<(File, OsString)> {
     let mut components: Vec<OsString> = path
         .as_path()
         .components()
         .map(|component| component.as_os_str().to_os_string())
         .collect();
-    let name = components.pop().ok_or_else(|| {
-        io::Error::new(ErrorKind::InvalidInput, "relative path is empty")
-    })?;
+    let name = components
+        .pop()
+        .ok_or_else(|| io::Error::new(ErrorKind::InvalidInput, "relative path is empty"))?;
     let mut parent = root.try_clone()?;
     for component in components {
         let directory = nt_open_at(
@@ -681,13 +500,7 @@ pub(super) fn open_parent(
 }
 
 /// Opens one child name relative to an already-opened directory handle.
-pub(super) fn nt_open_at(
-    parent: &File,
-    name: &OsStr,
-    access: u32,
-    disposition: u32,
-    options: u32,
-) -> io::Result<File> {
+pub(super) fn nt_open_at(parent: &File, name: &OsStr, access: u32, disposition: u32, options: u32) -> io::Result<File> {
     let name = unicode_string(name)?;
     let attributes = OBJECT_ATTRIBUTES {
         Length: size_of::<OBJECT_ATTRIBUTES>() as u32,
@@ -718,9 +531,7 @@ pub(super) fn nt_open_at(
     };
     nt_result(status)?;
     if handle.is_null() || handle == INVALID_HANDLE_VALUE {
-        return Err(io::Error::other(
-            "NtCreateFile returned an invalid handle",
-        ));
+        return Err(io::Error::other("NtCreateFile returned an invalid handle"));
     }
     // SAFETY: successful NtCreateFile returned a uniquely owned handle.
     Ok(unsafe { File::from_raw_handle(handle) })
@@ -731,18 +542,12 @@ pub(super) fn nt_open_at(
 /// Every destination parent is opened component-by-component first, so the
 /// rename cannot traverse a name-surrogate reparse point while resolving a
 /// multi-component destination.
-pub(super) fn rename_handle(
-    source: &File,
-    root: &File,
-    destination: &RelativePath,
-    overwrite: bool,
-) -> io::Result<()> {
+pub(super) fn rename_handle(source: &File, root: &File, destination: &RelativePath, overwrite: bool) -> io::Result<()> {
     use windows_sys::Win32::Storage::FileSystem::FILE_RENAME_INFO;
     use windows_sys::Win32::Storage::FileSystem::FileRenameInfo;
     use windows_sys::Win32::Storage::FileSystem::SetFileInformationByHandle;
 
-    let (destination_parent, destination_name) =
-        open_parent(root, destination)?;
+    let (destination_parent, destination_name) = open_parent(root, destination)?;
     let units: Vec<u16> = destination_name.encode_wide().collect();
     let allocation = size_of::<FILE_RENAME_INFO>()
         .checked_add(units.len().saturating_sub(1) * size_of::<u16>())
@@ -750,22 +555,15 @@ pub(super) fn rename_handle(
     let mut buffer = vec![0_usize; allocation.div_ceil(size_of::<usize>())];
     // SAFETY: Vec<usize> provides sufficient alignment and `allocation`
     // reserves the complete trailing UTF-16 name.
-    let information =
-        unsafe { &mut *buffer.as_mut_ptr().cast::<FILE_RENAME_INFO>() };
+    let information = unsafe { &mut *buffer.as_mut_ptr().cast::<FILE_RENAME_INFO>() };
     information.Anonymous.ReplaceIfExists = overwrite;
     information.RootDirectory = destination_parent.as_raw_handle();
     information.FileNameLength = u32::try_from(units.len() * size_of::<u16>())
-        .map_err(|_| {
-            io::Error::new(ErrorKind::InvalidInput, "rename name is too long")
-        })?;
+        .map_err(|_| io::Error::new(ErrorKind::InvalidInput, "rename name is too long"))?;
     // SAFETY: the allocation includes the complete trailing name and both
     // slices remain live for this non-overlapping copy.
     unsafe {
-        std::ptr::copy_nonoverlapping(
-            units.as_ptr(),
-            information.FileName.as_mut_ptr(),
-            units.len(),
-        );
+        std::ptr::copy_nonoverlapping(units.as_ptr(), information.FileName.as_mut_ptr(), units.len());
     }
     // SAFETY: `source` is open with DELETE access and the buffer contains a
     // complete FILE_RENAME_INFO structure.
@@ -774,8 +572,7 @@ pub(super) fn rename_handle(
             source.as_raw_handle(),
             FileRenameInfo,
             buffer.as_ptr().cast(),
-            u32::try_from(allocation)
-                .map_err(|_| io::Error::other("rename buffer is too large"))?,
+            u32::try_from(allocation).map_err(|_| io::Error::other("rename buffer is too large"))?,
         )
     };
     if result == 0 {
@@ -846,21 +643,16 @@ fn handle_path(file: &File) -> io::Result<std::path::PathBuf> {
             GetFinalPathNameByHandleW(
                 file.as_raw_handle(),
                 buffer.as_mut_ptr(),
-                u32::try_from(buffer.len()).map_err(|_| {
-                    io::Error::other("handle path buffer is too large")
-                })?,
+                u32::try_from(buffer.len()).map_err(|_| io::Error::other("handle path buffer is too large"))?,
                 FILE_NAME_NORMALIZED,
             )
         };
         if length == 0 {
             return Err(io::Error::last_os_error());
         }
-        let length = usize::try_from(length)
-            .map_err(|_| io::Error::other("invalid handle path length"))?;
+        let length = usize::try_from(length).map_err(|_| io::Error::other("invalid handle path length"))?;
         if length < buffer.len() {
-            return Ok(std::path::PathBuf::from(OsString::from_wide(
-                &buffer[..length],
-            )));
+            return Ok(std::path::PathBuf::from(OsString::from_wide(&buffer[..length])));
         }
         buffer.resize(length.saturating_add(1), 0);
     }
@@ -907,18 +699,13 @@ fn unicode_string(value: &OsStr) -> io::Result<OwnedUnicodeString> {
         .len()
         .checked_mul(size_of::<u16>())
         .and_then(|length| u16::try_from(length).ok())
-        .ok_or_else(|| {
-            io::Error::new(ErrorKind::InvalidInput, "component is too long")
-        })?;
+        .ok_or_else(|| io::Error::new(ErrorKind::InvalidInput, "component is too long"))?;
     let header = UNICODE_STRING {
         Length: byte_len,
         MaximumLength: byte_len,
         Buffer: units.as_mut_ptr(),
     };
-    Ok(OwnedUnicodeString {
-        _units: units,
-        header,
-    })
+    Ok(OwnedUnicodeString { _units: units, header })
 }
 
 /// Converts an absolute path to NUL-terminated UTF-16.
