@@ -14,7 +14,10 @@ use std::fs;
 use std::path::Path;
 use std::path::PathBuf;
 
+use qubit_budget::ManagedResourcePermit;
+
 use super::super::directory_identity::DirectoryIdentity;
+use crate::LocalResourceKind;
 
 /// Holds the lazy iterator and completion state for one source directory.
 #[must_use = "discarding an active copy frame abandons its directory traversal"]
@@ -29,6 +32,8 @@ pub(super) struct CopyDirFrame {
     source_permissions: fs::Permissions,
     /// Lazy iterator over direct source-directory entries.
     entries: fs::ReadDir,
+    /// Capacity permit retained for exactly as long as `entries` is open.
+    _directory_permit: Option<ManagedResourcePermit<LocalResourceKind, usize>>,
 }
 
 impl CopyDirFrame {
@@ -41,6 +46,7 @@ impl CopyDirFrame {
     /// * `source_identity` - Filesystem-object identity for cycle detection.
     /// * `source_permissions` - Permissions to apply after copying children.
     /// * `entries` - Lazy source-directory iterator.
+    /// * `directory_permit` - Capacity owned for the lifetime of `entries`.
     ///
     /// # Returns
     ///
@@ -51,6 +57,7 @@ impl CopyDirFrame {
         source_identity: DirectoryIdentity,
         source_permissions: fs::Permissions,
         entries: fs::ReadDir,
+        directory_permit: Option<ManagedResourcePermit<LocalResourceKind, usize>>,
     ) -> Self {
         Self {
             src,
@@ -58,6 +65,7 @@ impl CopyDirFrame {
             source_identity,
             source_permissions,
             entries,
+            _directory_permit: directory_permit,
         }
     }
 
