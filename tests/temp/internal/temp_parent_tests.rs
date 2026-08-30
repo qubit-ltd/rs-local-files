@@ -17,7 +17,8 @@ fn test_temp_parent_creates_persist_destination_parent_when_enabled() {
     let root = tempfile::tempdir().expect("temporary root should be created");
     let target = root.path().join("missing/target");
     let temporary = LocalFileSystem::host()
-        .create_temp_file(&LocalTempFileOptions::new().with_parent(root.path()))
+        .expect("Host filesystem should open")
+        .create_temp_file_with_options(&LocalTempFileOptions::new().with_parent(root.path()))
         .expect("temporary file should be created");
 
     let outcome = temporary

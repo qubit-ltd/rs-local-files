@@ -22,7 +22,7 @@ use tempfile::tempdir;
 /// filesystem-specific limit.
 #[test]
 fn test_host_file_system_limits_vary_by_path() {
-    let limits = LocalFileSystem::host().limits();
+    let limits = LocalFileSystem::host().expect("Host filesystem should open").limits();
 
     assert_eq!(SizeLimit::VariesByPath, limits.max_path_bytes());
     assert_eq!(SizeLimit::VariesByPath, limits.max_file_name_bytes());
@@ -32,6 +32,7 @@ fn test_host_file_system_limits_vary_by_path() {
 #[test]
 fn test_host_file_system_space_observes_existing_directory() {
     let space = LocalFileSystem::host()
+        .expect("Host filesystem should open")
         .space_at(std::env::temp_dir().as_path())
         .expect("an existing host directory should be queryable");
 
@@ -61,7 +62,9 @@ fn test_rooted_file_system_space_observes_nearest_existing_ancestor() {
 /// Verifies capability snapshots expose independent operation guarantees.
 #[test]
 fn test_local_file_system_capabilities_report_operation_support() {
-    let capabilities = LocalFileSystem::host().protocols();
+    let capabilities = LocalFileSystem::host()
+        .expect("Host filesystem should open")
+        .protocols();
 
     assert!(capabilities.supports_rooted_operations());
     assert!(capabilities.supports_atomic_rename());
@@ -81,7 +84,9 @@ fn test_local_file_system_capabilities_report_operation_support() {
 /// implemented by the host backend on this target.
 #[test]
 fn test_host_capabilities_match_host_no_replace_backend() {
-    let capabilities = LocalFileSystem::host().protocols();
+    let capabilities = LocalFileSystem::host()
+        .expect("Host filesystem should open")
+        .protocols();
     #[cfg(any(target_os = "linux", target_os = "macos", windows))]
     assert!(capabilities.supports_atomic_rename());
     #[cfg(not(any(target_os = "linux", target_os = "macos", windows)))]
@@ -125,6 +130,7 @@ fn test_local_file_system_metadata_does_not_follow_final_symlink() {
     symlink(&target, &link).expect("symbolic link should be created");
 
     let metadata = LocalFileSystem::host()
+        .expect("Host filesystem should open")
         .metadata(&link)
         .expect("symbolic-link metadata should be available");
 

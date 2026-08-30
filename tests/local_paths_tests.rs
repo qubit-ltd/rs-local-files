@@ -19,32 +19,37 @@ use qubit_local_files::LocalFileOperation;
 use qubit_local_files::LocalFileSystemScope;
 use qubit_local_files::LocalPaths;
 
-/// Verifies rooted path objects preserve authority-relative components and
-/// reject native roots.
+/// Verifies rooted path objects preserve virtual namespace-absolute paths.
 #[test]
-fn test_rooted_paths_reject_native_roots_and_round_trip_components() {
+fn test_rooted_paths_round_trip_virtual_absolute_components() {
     let paths = LocalPaths::rooted();
     let native = paths
         .from_canonical_components(["reports", "2026", "a.txt"])
         .expect("rooted canonical components should decode");
-    assert!(native.is_relative());
+    assert_eq!(Path::new("/reports/2026/a.txt"), native);
     assert_eq!(
         paths
             .to_canonical_components(&native)
             .expect("rooted native components should encode"),
         ["reports", "2026", "a.txt"],
     );
-    assert!(paths.to_canonical_components(Path::new("/escape")).is_err());
+    assert_eq!(
+        vec!["escape".to_owned()],
+        paths
+            .to_canonical_components(Path::new("/escape"))
+            .expect("rooted virtual absolute paths should encode"),
+    );
+    assert!(paths.to_canonical_components(Path::new("relative")).is_err());
 }
 
 /// Verifies canonical component decoders accept iterators without requiring a
 /// caller-owned vector.
 #[test]
 fn test_canonical_component_decoders_accept_iterators() {
-    let relative = LocalPaths::rooted()
+    let virtual_absolute = LocalPaths::rooted()
         .from_canonical_components(["safe", "a%25b"])
         .expect("relative iterator components should decode");
-    assert_eq!(Path::new("safe/a%b"), relative);
+    assert_eq!(Path::new("/safe/a%b"), virtual_absolute);
 
     #[cfg(unix)]
     {
@@ -150,14 +155,15 @@ fn test_absolute_conversion_rejects_relative_shape() {
     assert!(LocalPaths::host().from_canonical_components(["a", "%2F"]).is_err());
 }
 
-/// Verifies canonical relative components round-trip through native paths.
+/// Verifies canonical rooted components round-trip through virtual absolute
+/// paths.
 #[test]
 fn test_rooted_canonical_components_round_trip() {
     let paths = LocalPaths::rooted();
     let native = paths
         .from_canonical_components(["safe", "a%25b"])
         .expect("canonical relative path should decode");
-    assert_eq!(native, Path::new("safe/a%b"));
+    assert_eq!(native, Path::new("/safe/a%b"));
     assert_eq!(
         paths
             .to_canonical_components(&native)
@@ -173,7 +179,7 @@ fn test_rooted_canonical_components_round_trip_authority_root() {
     let native = paths
         .from_canonical_components(std::iter::empty::<&str>())
         .expect("empty rooted components should decode to the authority root");
-    assert!(native.as_os_str().is_empty());
+    assert_eq!(Path::new("/"), native);
     assert_eq!(
         Vec::<String>::new(),
         paths
@@ -189,7 +195,8 @@ fn test_rooted_canonical_components_round_trip_authority_root() {
 fn test_rooted_canonical_components_reject_native_nul() {
     use std::os::unix::ffi::OsStringExt;
 
-    let native = PathBuf::from(OsString::from_vec(vec![b's', 0, b'a', b'f', b'e']));
+    let mut native = PathBuf::from("/");
+    native.push(OsString::from_vec(vec![b's', 0, b'a', b'f', b'e']));
     let error = LocalPaths::rooted()
         .to_canonical_components(&native)
         .expect_err("native NUL must be reported as a path error");
@@ -245,7 +252,15 @@ fn test_local_file_names_rejects_reserved_portable_name() {
             "expected portable name to be rejected: {invalid:?}",
         );
     }
-    assert!(names.validate(OsStr::new(&"x".repeat(256))).is_err());
+    let long_name = "x".repeat(256);
+    assert!(names.validate(OsStr::new(&long_name)).is_ok());
+    assert!(
+        names
+            .with_max_component_bytes(255)
+            .expect("positive limits should be accepted")
+            .validate(OsStr::new(&long_name))
+            .is_err()
+    );
 }
 
 /// Verifies path values expose their bound scope and native filename policy.
@@ -284,7 +299,8 @@ fn test_rooted_paths_round_trip_unix_non_utf8_component() {
     use std::os::unix::ffi::OsStringExt;
 
     let paths = LocalPaths::rooted();
-    let native = PathBuf::from(OsString::from_vec(vec![b'a', 0x80, b'b']));
+    let mut native = PathBuf::from("/");
+    native.push(OsString::from_vec(vec![b'a', 0x80, b'b']));
     let canonical = paths
         .to_canonical_components(&native)
         .expect("Unix non-UTF-8 component should encode");
@@ -305,7 +321,8 @@ fn test_rooted_paths_round_trip_windows_unpaired_surrogate() {
     use std::os::windows::ffi::OsStringExt;
 
     let paths = LocalPaths::rooted();
-    let native = PathBuf::from(OsString::from_wide(&[0x0061, 0xD800, 0x0062]));
+    let mut native = PathBuf::from(std::path::MAIN_SEPARATOR_STR);
+    native.push(OsString::from_wide(&[0x0061, 0xD800, 0x0062]));
     let canonical = paths
         .to_canonical_components(&native)
         .expect("Windows unpaired surrogate component should encode");

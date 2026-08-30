@@ -37,7 +37,7 @@ fn test_host_metadata_classifies_fifo_and_socket() {
     assert_eq!(0, result, "FIFO fixture must be created");
     let socket_path = directory.path().join("socket");
     let _socket = UnixListener::bind(&socket_path).expect("socket fixture must bind");
-    let filesystem = LocalFileSystem::host();
+    let filesystem = LocalFileSystem::host().expect("Host filesystem should open");
 
     assert_eq!(
         LocalFileKind::Fifo,
@@ -99,6 +99,7 @@ fn test_host_metadata_classifies_character_device() {
     assert_eq!(
         LocalFileKind::CharDevice,
         LocalFileSystem::host()
+            .expect("Host filesystem should open")
             .metadata(path)
             .expect("character-device metadata must be readable")
             .kind(),

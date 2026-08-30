@@ -13,13 +13,19 @@ use std::path::Path;
 /// Prepares a host target parent before any publication attempt.
 #[inline]
 pub(crate) fn host(target: &Path, create_parent: bool) -> io::Result<()> {
+    let parent = target
+        .parent()
+        .ok_or_else(|| io::Error::new(io::ErrorKind::InvalidInput, "target has no parent"))?;
+    if parent.as_os_str().is_empty() {
+        return Ok(());
+    }
     if create_parent {
-        let parent = target
-            .parent()
-            .ok_or_else(|| io::Error::new(io::ErrorKind::InvalidInput, "target has no parent"))?;
-        std::fs::create_dir_all(parent)
+        return std::fs::create_dir_all(parent);
+    }
+    if std::fs::metadata(parent)?.is_dir() {
+        Ok(())
     } else {
-        crate::local::ensure_parent_path(target)
+        Err(io::Error::from(io::ErrorKind::NotADirectory))
     }
 }
 

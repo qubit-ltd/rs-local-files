@@ -19,7 +19,6 @@ use crate::LocalFileOperation;
 use crate::LocalFileSystemScope;
 use crate::LocalPathCodec;
 use crate::LocalResult;
-use crate::RelativePath;
 
 /// Scope-bound native path validation and canonical conversion.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -41,7 +40,7 @@ impl LocalPaths {
         }
     }
 
-    /// Creates path operations for authority-relative rooted paths.
+    /// Creates path operations for virtual namespace-absolute Rooted paths.
     #[inline(always)]
     pub const fn rooted() -> Self {
         Self {
@@ -65,17 +64,16 @@ impl LocalPaths {
     /// Decodes canonical components in the selected filesystem scope.
     ///
     /// Host paths are absolute and omit an artificial root marker. Rooted
-    /// paths are relative descendants, with an empty component sequence
-    /// representing the opened authority root.
+    /// paths are virtual namespace-absolute, with an empty component sequence
+    /// representing `/`.
     pub fn from_canonical_components<'a>(&self, components: impl IntoIterator<Item = &'a str>) -> LocalResult<PathBuf> {
         match self.scope {
             LocalFileSystemScope::Host => from_canonical_host_components(components),
             LocalFileSystemScope::Rooted => {
-                let mut path = PathBuf::new();
+                let mut path = PathBuf::from(std::path::MAIN_SEPARATOR_STR);
                 for component in components {
                     path.push(decode_normal_component(component)?);
                 }
-                self.validate_native_form(&path)?;
                 Ok(path)
             }
         }
@@ -83,35 +81,38 @@ impl LocalPaths {
 
     /// Encodes a native path as canonical components in the selected scope.
     ///
-    /// Host output contains the platform root authority; rooted output is
-    /// relative and is empty for the authority root.
+    /// Host output contains the platform root authority; Rooted input must be
+    /// virtual namespace-absolute and `/` encodes as an empty sequence.
     pub fn to_canonical_components(&self, path: &Path) -> LocalResult<Vec<String>> {
         match self.scope {
             LocalFileSystemScope::Host => to_canonical_host_components(path),
-            LocalFileSystemScope::Rooted => {
-                let relative = RelativePath::parse(path)?;
-                encode_normal_components(relative.as_path())
-            }
+            LocalFileSystemScope::Rooted => to_canonical_rooted_components(path),
         }
     }
+}
 
-    /// Validates a native path against this object's namespace shape.
-    ///
-    /// # Parameters
-    ///
-    /// - `path`: Native path to validate.
-    ///
-    /// # Errors
-    ///
-    /// Returns an invalid-path error when a rooted path is absolute, prefixed,
-    /// or contains a dot or parent component.
-    #[inline]
-    fn validate_native_form(&self, path: &Path) -> LocalResult<()> {
-        match self.scope {
-            LocalFileSystemScope::Host => Ok(()),
-            LocalFileSystemScope::Rooted => RelativePath::parse(path).map(|_| ()),
-        }
+/// Encodes one Rooted virtual namespace-absolute path.
+fn to_canonical_rooted_components(path: &Path) -> LocalResult<Vec<String>> {
+    if !path.has_root()
+        || path
+            .components()
+            .any(|component| matches!(component, Component::Prefix(_)))
+        || has_disallowed_component(path)
+    {
+        return Err(invalid_path_error());
     }
+    let mut components = path.components();
+    if !matches!(components.next(), Some(Component::RootDir)) {
+        return Err(invalid_path_error());
+    }
+    let mut encoded = Vec::new();
+    for component in components {
+        let Component::Normal(component) = component else {
+            return Err(invalid_path_error());
+        };
+        encoded.push(encode_native_component(component)?);
+    }
+    Ok(encoded)
 }
 
 /// Reports components that can change lexical authority.
@@ -243,32 +244,6 @@ fn is_normal_native_component(component: &OsStr) -> bool {
 #[inline]
 fn encode_native_component(component: &OsStr) -> LocalResult<String> {
     LocalPathCodec::encode_component(component)
-}
-
-/// Encodes normal native components from a relative or absolute descendant.
-///
-/// # Parameters
-///
-/// - `path`: Native path whose components have already passed root-shape
-///   validation.
-///
-/// # Returns
-///
-/// Canonical components in their original lexical order.
-///
-/// # Errors
-///
-/// Returns an invalid-input `ComposePath` error for a non-normal component.
-/// A NUL-containing native component is returned as a typed path-codec error.
-fn encode_normal_components(path: &Path) -> LocalResult<Vec<String>> {
-    let mut encoded = Vec::new();
-    for component in path.components() {
-        let Component::Normal(component) = component else {
-            return Err(invalid_path_error());
-        };
-        encoded.push(encode_native_component(component)?);
-    }
-    Ok(encoded)
 }
 
 /// Reports whether a native component contains a platform path separator.

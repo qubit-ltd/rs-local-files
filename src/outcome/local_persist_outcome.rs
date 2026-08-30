@@ -18,7 +18,7 @@ use crate::LocalPersistMethod;
 #[must_use]
 #[derive(Debug)]
 pub struct LocalPersistOutcome {
-    /// Authority-local path at which the resource was published.
+    /// Namespace-absolute path at which the resource was published.
     path: PathBuf,
     /// Native publication method.
     method: LocalPersistMethod,
@@ -48,7 +48,7 @@ impl LocalPersistOutcome {
         }
     }
 
-    /// Returns the authority-local published path.
+    /// Returns the namespace-absolute published path.
     #[must_use]
     pub fn path(&self) -> &Path {
         &self.path

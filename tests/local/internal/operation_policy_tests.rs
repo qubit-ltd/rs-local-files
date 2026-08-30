@@ -24,7 +24,8 @@ fn test_operation_policy_honors_required_durability() {
     std::fs::write(&source, b"source").expect("source should be written");
 
     let _error = LocalFileSystem::host()
-        .rename(
+        .expect("Host filesystem should open")
+        .rename_with_options(
             &source,
             &target,
             &LocalRenameOptions::new().with_durability(LocalDurabilityRequirement::Required),

@@ -10,6 +10,7 @@
 // qubit-style: allow explicit-imports
 
 use std::time::Duration;
+use std::time::Instant;
 
 use crate::LocalCopyConflictPolicy;
 use crate::LocalCopyTypeConflictPolicy;
@@ -93,8 +94,11 @@ pub(crate) struct LocalCopyDirOptions {
     /// Maximum concurrently open source-directory readers.
     max_open_directories: Option<usize>,
 
-    /// Relative wall-clock deadline for the complete copy.
+    /// Relative elapsed-time budget for the complete copy.
     deadline: Option<Duration>,
+
+    /// Monotonic operation-entry instant supplied by the public facade.
+    started_at: Option<Instant>,
 }
 
 impl LocalCopyDirOptions {
@@ -117,6 +121,7 @@ impl LocalCopyDirOptions {
             max_bytes: None,
             max_open_directories: None,
             deadline: None,
+            started_at: None,
         }
     }
 
@@ -157,11 +162,18 @@ impl LocalCopyDirOptions {
     pub(crate) const fn max_open_directories(&self) -> Option<usize> {
         self.max_open_directories
     }
-    /// Returns the relative wall-clock deadline.
+    /// Returns the relative elapsed-time budget.
     #[must_use]
     #[inline(always)]
     pub(crate) const fn deadline(&self) -> Option<Duration> {
         self.deadline
+    }
+
+    /// Returns the monotonic operation-entry instant when one was supplied.
+    #[must_use]
+    #[inline(always)]
+    pub(crate) const fn started_at(&self) -> Option<Instant> {
+        self.started_at
     }
 
     /// Sets the maximum descendant depth.
@@ -188,10 +200,17 @@ impl LocalCopyDirOptions {
         self.max_open_directories = Some(value);
         self
     }
-    /// Sets the wall-clock deadline for the complete copy.
+    /// Sets the maximum elapsed time for the complete copy.
     #[inline(always)]
     pub(crate) const fn with_deadline(mut self, value: Duration) -> Self {
         self.deadline = Some(value);
+        self
+    }
+
+    /// Records the monotonic instant at which the public operation began.
+    #[inline(always)]
+    pub(crate) const fn with_started_at(mut self, value: Instant) -> Self {
+        self.started_at = Some(value);
         self
     }
 
@@ -282,11 +301,11 @@ impl LocalCopyDirOptions {
     ///
     /// On Unix, this limits how long a copy waits for a regular source whose
     /// active file lease makes a nonblocking open return
-    /// [`std::io::ErrorKind::WouldBlock`]. `None` preserves the default
-    /// unbounded wait.
+    /// [`std::io::ErrorKind::WouldBlock`]. `None` performs only the initial
+    /// open attempt.
     ///
     /// # Returns
-    /// The configured timeout, or `None` when retries are unbounded.
+    /// The configured timeout, or `None` when retries are disabled.
     #[must_use]
     #[inline(always)]
     pub(crate) const fn open_retry_timeout(&self) -> Option<Duration> {

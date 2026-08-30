@@ -9,6 +9,7 @@
 
 mod copy;
 mod delete;
+mod delete_work;
 mod directory;
 #[path = "rooted_local_file_system/io.rs"]
 mod io_operations;
@@ -16,10 +17,11 @@ mod io_operations;
 mod metadata_operations;
 mod path_support;
 mod rename;
+mod resolution_step;
 mod support;
+mod symlink_identity;
 mod temp;
 
-pub(super) use std::fs;
 pub(super) use std::io;
 pub(super) use std::path::Path;
 pub(super) use std::path::PathBuf;
@@ -33,6 +35,7 @@ pub(crate) use path_support::rooted_temp_parent;
 pub(crate) use path_support::temp_candidate;
 pub(crate) use path_support::validate_rooted_temp_parent;
 pub(crate) use support::resolve_rooted_path;
+pub(crate) use support::resolve_rooted_path_allow_root;
 pub(super) use support::sync_rooted_copy_parent_chain;
 pub(super) use support::validate_rooted_list_start;
 
@@ -79,9 +82,7 @@ pub(super) use crate::local::validate_temp_affixes;
 /// Descriptor- or handle-relative authority for one opened native directory.
 #[derive(Clone, Debug)]
 pub(crate) struct RootedLocalFileSystem {
-    /// New handle-bound authority used by migrated operations.
-    authority: Arc<crate::authority::Authority>,
-    /// Existing secure rooted implementation.
+    /// The single opened descriptor or handle authority.
     root: Arc<crate::rooted::Root>,
     /// Capability snapshot cached when the authority is opened.
     capabilities: LocalFileSystemProtocols,
@@ -111,7 +112,6 @@ impl RootedLocalFileSystem {
                     .with_path(path.to_path_buf()),
             );
         }
-        let authority = crate::authority::RootedAuthority::open(path, LocalSymlinkPolicy::FollowWithinScope)?;
         let root = crate::rooted::Root::open(path).map_err(|error| {
             LocalFileError::from_io(LocalFileOperation::OpenRoot, Some(path.to_path_buf()), None, error)
         })?;
@@ -121,18 +121,10 @@ impl RootedLocalFileSystem {
             .map(|file| crate::capability::probe_limits(&file))
             .unwrap_or_else(|_| LocalFileSystemLimits::new(crate::SizeLimit::Unknown, crate::SizeLimit::Unknown));
         Ok(Self {
-            authority: Arc::new(crate::authority::Authority::Rooted(authority)),
             root,
             capabilities: LocalFileSystemProtocols::detect_rooted(),
             limits,
         })
-    }
-
-    /// Returns the handle-bound authority used by migrated operations.
-    #[must_use]
-    #[inline(always)]
-    pub(crate) fn authority(&self) -> &crate::authority::Authority {
-        &self.authority
     }
 
     /// Returns the non-authoritative diagnostic path captured at open time.
@@ -140,6 +132,68 @@ impl RootedLocalFileSystem {
     #[inline(always)]
     pub fn diagnostic_path(&self) -> &Path {
         self.root.path()
+    }
+
+    /// Validates that a normalized backend path resolves to a directory.
+    pub(crate) fn validate_directory(&self, path: &Path, symlink_policy: LocalSymlinkPolicy) -> LocalResult<()> {
+        validate_rooted_list_start(&self.root, path, symlink_policy)
+    }
+
+    /// Observes objective path limits through the nearest existing rooted
+    /// entry or ancestor.
+    pub(crate) fn limits_at(
+        &self,
+        path: &Path,
+        symlink_policy: LocalSymlinkPolicy,
+    ) -> LocalResult<LocalFileSystemLimits> {
+        let file = self.open_nearest_probe(path, symlink_policy)?;
+        Ok(crate::capability::probe_limits(&file))
+    }
+
+    /// Observes dynamic capacity through the nearest existing rooted entry or
+    /// ancestor.
+    pub(crate) fn space_at(
+        &self,
+        path: &Path,
+        symlink_policy: LocalSymlinkPolicy,
+    ) -> LocalResult<crate::LocalFileSystemSpace> {
+        let file = self.open_nearest_probe(path, symlink_policy)?;
+        Ok(crate::capability::probe_space(&file))
+    }
+
+    /// Opens the nearest existing entry for a capability probe.
+    fn open_nearest_probe(&self, path: &Path, symlink_policy: LocalSymlinkPolicy) -> LocalResult<std::fs::File> {
+        if path.as_os_str().is_empty() {
+            return self
+                .root
+                .open_probe_root()
+                .map_err(|error| rooted_io_error(LocalFileOperation::Capabilities, path, error));
+        }
+        let resolved = resolve_rooted_path(&self.root, path, symlink_policy, true, LocalFileOperation::Capabilities)?;
+        let mut candidate = resolved.as_path().to_path_buf();
+        loop {
+            if candidate.as_os_str().is_empty() {
+                return self
+                    .root
+                    .open_probe_root()
+                    .map_err(|error| rooted_io_error(LocalFileOperation::Capabilities, path, error));
+            }
+            let candidate_path = rooted_path(&candidate, LocalFileOperation::Capabilities)?;
+            match self.root.open_probe_file(&candidate_path) {
+                Ok(file) => return Ok(file),
+                Err(error) if error.kind() == io::ErrorKind::NotFound => {
+                    if !candidate.pop() {
+                        return self
+                            .root
+                            .open_probe_root()
+                            .map_err(|error| rooted_io_error(LocalFileOperation::Capabilities, path, error));
+                    }
+                }
+                Err(error) => {
+                    return Err(rooted_io_error(LocalFileOperation::Capabilities, path, error));
+                }
+            }
+        }
     }
 
     /// Returns the native protocol snapshot cached for this opened authority.

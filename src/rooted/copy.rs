@@ -142,7 +142,7 @@ pub(super) fn copy(
                 &mut budget,
             )
         }
-        EntryKind::Symlink => copy_symlink(root, source, destination, &options, Statistics::default()),
+        EntryKind::Symlink => copy_symlink(root, source, destination, &options, Statistics::default(), &mut budget),
         EntryKind::Other => Err(error(
             Stage::InspectSource,
             source,
@@ -345,10 +345,11 @@ fn copy_tree(
                                     continue;
                                 }
                                 statistics =
-                                    copy_symlink(root, &source_child, &destination_child, options, statistics)?;
+                                    copy_symlink(root, &source_child, &destination_child, options, statistics, budget)?;
                                 continue;
                             }
-                            statistics = copy_symlink(root, &source_child, &destination_child, options, statistics)?;
+                            statistics =
+                                copy_symlink(root, &source_child, &destination_child, options, statistics, budget)?;
                         }
                         EntryKind::Other => {
                             return Err(error(
@@ -392,6 +393,7 @@ fn copy_symlink(
     destination: &Path,
     options: &Options,
     mut statistics: Statistics,
+    budget: &mut CopyBudget,
 ) -> Result<Statistics, Error> {
     let destination_metadata = optional_metadata(root, destination)
         .map_err(|source_error| error(Stage::PrepareDestination, source, destination, statistics, source_error))?;
@@ -435,6 +437,9 @@ fn copy_symlink(
     }
     let link_target = root
         .read_link(source)
+        .map_err(|source_error| error(Stage::CopyFileContents, source, destination, statistics, source_error))?;
+    budget
+        .check_deadline()
         .map_err(|source_error| error(Stage::CopyFileContents, source, destination, statistics, source_error))?;
     #[cfg(windows)]
     let targets_directory = root.symlink_targets_directory(source);

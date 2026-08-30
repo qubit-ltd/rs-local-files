@@ -59,7 +59,9 @@ impl CopyBudget {
                 .max_open_directories()
                 .map(|limit| ResourcePool::new(LocalResourceKind::OpenDirectory, limit)),
             max_depth: options.max_depth(),
-            deadline: options.deadline().map(|duration| (Instant::now(), duration)),
+            deadline: options
+                .deadline()
+                .map(|duration| (options.started_at().unwrap_or_else(Instant::now), duration)),
         }
     }
 

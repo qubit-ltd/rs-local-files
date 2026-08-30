@@ -25,9 +25,15 @@ fn test_scope_aware_path_conversions_reject_unsafe_component_shapes() {
     }
 
     let error = rooted
-        .to_canonical_components(Path::new("/absolute"))
-        .expect_err("absolute paths cannot be encoded as relative components");
+        .to_canonical_components(Path::new("relative"))
+        .expect_err("relative paths cannot be encoded as rooted components");
     assert_eq!(LocalFileErrorKind::InvalidPath, error.kind());
+    assert_eq!(
+        vec!["absolute".to_owned()],
+        rooted
+            .to_canonical_components(Path::new("/absolute"))
+            .expect("rooted virtual absolute paths should encode"),
+    );
 
     #[cfg(unix)]
     {
@@ -49,25 +55,25 @@ fn test_scope_aware_path_conversions_reject_unsafe_component_shapes() {
     assert_eq!(LocalFileErrorKind::InvalidPath, codec_error.kind());
 }
 
-/// Verifies direct bindings and conversions cover both successful relative
-/// paths and their empty or dot-component rejection cases.
+/// Verifies direct bindings and conversions cover rooted virtual absolute
+/// paths and their root or dot-component cases.
 #[test]
 fn test_path_conversions_cover_rooted_binding_and_normal_components() {
     let rooted = LocalPaths::rooted();
     let canonical = rooted
         .from_canonical_components(["safe", "nested"])
         .expect("vector-backed canonical components should decode");
-    assert_eq!(Path::new("safe/nested"), canonical);
+    assert_eq!(Path::new("/safe/nested"), canonical);
     assert_eq!(
         vec!["safe".to_owned(), "nested".to_owned()],
         rooted
             .to_canonical_components(&canonical)
-            .expect("normal relative components should encode"),
+            .expect("normal rooted components should encode"),
     );
     assert!(rooted.from_canonical_components(Vec::<&str>::new()).is_ok());
     assert!(rooted.to_canonical_components(Path::new(".")).is_err());
     assert_eq!(
-        Path::new("single"),
+        Path::new("/single"),
         rooted
             .from_canonical_components(["single"])
             .expect("iterator-backed relative components should decode"),
@@ -102,12 +108,13 @@ fn test_host_conversions_encode_non_utf8_native_components() {
     use std::ffi::OsString;
     use std::os::unix::ffi::OsStringExt;
 
-    let relative = std::path::PathBuf::from(OsString::from_vec(vec![0xff]));
+    let mut virtual_absolute = std::path::PathBuf::from("/");
+    virtual_absolute.push(OsString::from_vec(vec![0xff]));
     assert_eq!(
         vec!["%FF".to_owned()],
         LocalPaths::rooted()
-            .to_canonical_components(&relative)
-            .expect("non-UTF-8 relative component should encode losslessly"),
+            .to_canonical_components(&virtual_absolute)
+            .expect("non-UTF-8 rooted component should encode losslessly"),
     );
 
     let mut absolute = std::path::PathBuf::from("/tmp");

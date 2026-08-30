@@ -57,7 +57,8 @@ fn test_local_persist_outcome_reports_published_path_and_guarantees() {
     let root = tempfile::tempdir().expect("test root must be created");
     let target = root.path().join("target.txt");
     let mut temporary = LocalFileSystem::host()
-        .create_temp_file(&LocalTempFileOptions::new().with_parent(root.path()))
+        .expect("Host filesystem should open")
+        .create_temp_file_with_options(&LocalTempFileOptions::new().with_parent(root.path()))
         .expect("temporary file must be created");
     temporary
         .write_all(b"payload")
@@ -93,7 +94,8 @@ fn test_local_file_persist_outcome_preserves_logical_target_path() {
     let expected = std::path::absolute(&target).expect("logical target must be made absolute");
 
     let mut temporary = LocalFileSystem::host()
-        .create_temp_file(&LocalTempFileOptions::new().with_parent(root.path()))
+        .expect("Host filesystem should open")
+        .create_temp_file_with_options(&LocalTempFileOptions::new().with_parent(root.path()))
         .expect("temporary file must be created");
     temporary
         .write_all(b"payload")
@@ -121,7 +123,8 @@ fn test_local_directory_persist_outcome_preserves_logical_target_path() {
     let expected = std::path::absolute(&target).expect("logical target must be made absolute");
 
     let temporary = LocalFileSystem::host()
-        .create_temp_directory(&LocalTempDirectoryOptions::new().with_parent(root.path()))
+        .expect("Host filesystem should open")
+        .create_temp_directory_with_options(&LocalTempDirectoryOptions::new().with_parent(root.path()))
         .expect("temporary directory must be created");
 
     let outcome = temporary
@@ -143,7 +146,8 @@ fn test_local_persist_outcome_reports_residual_sandbox_cleanup() {
             let root = tempfile::tempdir().expect("test root must be created");
             let target = root.path().join("target.txt");
             let temporary = LocalFileSystem::host()
-                .create_temp_file(&LocalTempFileOptions::new().with_parent(root.path()))
+                .expect("Host filesystem should open")
+                .create_temp_file_with_options(&LocalTempFileOptions::new().with_parent(root.path()))
                 .expect("temporary file must be created");
 
             let outcome = temporary

@@ -14,6 +14,7 @@ use qubit_local_files::LocalFileSystem;
 fn test_filesystem_probe_uses_nearest_existing_ancestor() {
     let root = tempfile::tempdir().expect("temporary root should be created");
     let space = LocalFileSystem::host()
+        .expect("Host filesystem should open")
         .space_at(&root.path().join("missing/child"))
         .expect("missing descendants should use the existing root");
 

@@ -41,7 +41,8 @@ fn test_local_file_writer_publishes_staged_content_on_commit() {
     fs::write(&target, b"old").expect("target fixture should be written");
 
     let mut writer = LocalFileSystem::host()
-        .open_writer(&target, &LocalWriteOptions::new(LocalWriteMode::CreateOrReplace))
+        .expect("Host filesystem should open")
+        .open_writer_with_options(&target, &LocalWriteOptions::new(LocalWriteMode::CreateOrReplace))
         .expect("staged writer should open");
     writer.write_all(b"new").expect("staged content should be written");
     assert_eq!(b"old", fs::read(&target).expect("old target should remain").as_slice());
@@ -68,7 +69,8 @@ fn test_local_file_writer_follows_target_symlink() {
 
     let options = LocalWriteOptions::new(LocalWriteMode::CreateOrReplace);
     let mut writer = LocalFileSystem::host()
-        .open_writer(&target, &options)
+        .expect("Host filesystem should open")
+        .open_writer_with_options(&target, &options)
         .expect("writer should accept a target symlink entry");
     writer.write_all(b"replacement").expect("replacement should be staged");
     let outcome = writer.commit().expect("replacement should publish");
@@ -103,7 +105,8 @@ fn test_local_file_writer_append_follows_target_symlink() {
     symlink(&referent, &target).expect("target symlink should be created");
 
     let mut writer = LocalFileSystem::host()
-        .open_writer(&target, &LocalWriteOptions::new(LocalWriteMode::Append))
+        .expect("Host filesystem should open")
+        .open_writer_with_options(&target, &LocalWriteOptions::new(LocalWriteMode::Append))
         .expect("append should follow a final symlink");
     writer
         .write_all(b"-append")
@@ -132,7 +135,8 @@ fn test_local_file_writer_append_follows_target_symlink_on_windows() {
     }
 
     let mut writer = LocalFileSystem::host()
-        .open_writer(&target, &LocalWriteOptions::new(LocalWriteMode::Append))
+        .expect("Host filesystem should open")
+        .open_writer_with_options(&target, &LocalWriteOptions::new(LocalWriteMode::Append))
         .expect("append should follow a final file symlink");
     writer
         .write_all(b"-append")
@@ -152,7 +156,8 @@ fn test_local_file_writer_create_new_rejects_existing_target() {
     fs::write(&target, b"old").expect("target fixture should be written");
 
     let error = LocalFileSystem::host()
-        .open_writer(&target, &LocalWriteOptions::new(LocalWriteMode::CreateNew))
+        .expect("Host filesystem should open")
+        .open_writer_with_options(&target, &LocalWriteOptions::new(LocalWriteMode::CreateNew))
         .expect_err("create-new must reject the existing target");
 
     assert_eq!(LocalFileErrorKind::AlreadyExists, error.kind());
@@ -165,7 +170,8 @@ fn test_local_file_writer_create_new_preserves_concurrent_target() {
     let directory = tempdir().expect("temporary directory should be created");
     let target = directory.path().join("target");
     let mut writer = LocalFileSystem::host()
-        .open_writer(&target, &LocalWriteOptions::new(LocalWriteMode::CreateNew))
+        .expect("Host filesystem should open")
+        .open_writer_with_options(&target, &LocalWriteOptions::new(LocalWriteMode::CreateNew))
         .expect("create-new staging should open for an absent target");
     writer.write_all(b"staged").expect("staged bytes should be written");
     fs::write(&target, b"concurrent").expect("concurrent target should be created");
@@ -188,7 +194,8 @@ fn test_local_file_writer_abort_keeps_original_target() {
     let target = directory.path().join("target");
     fs::write(&target, b"old").expect("target fixture should be written");
     let mut writer = LocalFileSystem::host()
-        .open_writer(&target, &LocalWriteOptions::new(LocalWriteMode::CreateOrReplace))
+        .expect("Host filesystem should open")
+        .open_writer_with_options(&target, &LocalWriteOptions::new(LocalWriteMode::CreateOrReplace))
         .expect("staged writer should open");
     writer.write_all(b"new").expect("staging write should succeed");
 
@@ -209,7 +216,8 @@ fn test_local_file_writer_append_rejects_required_atomicity() {
     fs::write(&target, b"old").expect("target fixture should be written");
 
     let error = LocalFileSystem::host()
-        .open_writer(
+        .expect("Host filesystem should open")
+        .open_writer_with_options(
             &target,
             &LocalWriteOptions::new(LocalWriteMode::Append).with_atomicity(LocalAtomicityRequirement::Required),
         )
@@ -234,7 +242,8 @@ fn test_local_file_writer_reports_parent_sync_result() {
         fs::create_dir(&parent).expect("target parent should be created");
         let target = parent.join("target");
         let mut writer = LocalFileSystem::host()
-            .open_writer(
+            .expect("Host filesystem should open")
+            .open_writer_with_options(
                 &target,
                 &LocalWriteOptions::new(LocalWriteMode::CreateNew).with_durability(requirement),
             )
@@ -315,7 +324,8 @@ fn run_indeterminate_append_case(case: &str) {
         );
     }
     let mut writer = LocalFileSystem::host()
-        .open_writer(&target, &LocalWriteOptions::new(LocalWriteMode::Append))
+        .expect("Host filesystem should open")
+        .open_writer_with_options(&target, &LocalWriteOptions::new(LocalWriteMode::Append))
         .expect("append writer should open before the failing write");
     writer
         .write_all(b"x")

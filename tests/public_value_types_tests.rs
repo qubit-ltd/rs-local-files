@@ -36,7 +36,9 @@ use tempfile::tempdir;
 /// Verifies every capability accessor returns a coherent platform snapshot.
 #[test]
 fn test_capability_snapshot_exposes_all_guarantees() {
-    let capabilities = LocalFileSystem::host().protocols();
+    let capabilities = LocalFileSystem::host()
+        .expect("Host filesystem should open")
+        .protocols();
 
     let _ = capabilities.supports_rooted_operations();
     let _ = capabilities.supports_atomic_rename();
@@ -217,10 +219,11 @@ fn test_native_file_name_validation_rejects_non_utf8_component() {
     assert_eq!(LocalFileOperation::ValidateName, error.operation());
 }
 
-/// Verifies rooted path objects retain the authority-root representation.
+/// Verifies rooted path objects retain the virtual-root representation.
 #[test]
-fn test_local_paths_cover_rooted_authority_root() {
-    assert!(LocalPaths::rooted().to_canonical_components(Path::new("")).is_ok());
+fn test_local_paths_cover_rooted_virtual_root() {
+    assert!(LocalPaths::rooted().to_canonical_components(Path::new("/")).is_ok());
+    assert!(LocalPaths::rooted().to_canonical_components(Path::new("")).is_err());
 }
 
 /// Verifies normalized metadata distinguishes empty files and directories,
@@ -234,11 +237,13 @@ fn test_public_metadata_values_cover_file_directory_and_missing_cases() {
     fs::create_dir(&child_directory).expect("child directory should be created");
 
     let file_metadata = LocalFileSystem::host()
+        .expect("Host filesystem should open")
         .metadata(&empty_file)
         .expect("empty file metadata should be readable");
     assert_eq!(LocalFileKind::File, file_metadata.kind());
     assert!(file_metadata.is_empty());
     let directory_metadata = LocalFileSystem::host()
+        .expect("Host filesystem should open")
         .metadata(&child_directory)
         .expect("directory metadata should be readable");
     assert_eq!(LocalFileKind::Directory, directory_metadata.kind());
@@ -246,6 +251,7 @@ fn test_public_metadata_values_cover_file_directory_and_missing_cases() {
     assert_eq!(
         LocalFileErrorKind::NotFound,
         LocalFileSystem::host()
+            .expect("Host filesystem should open")
             .metadata(&directory.path().join("missing"))
             .expect_err("missing metadata should fail")
             .kind(),
@@ -266,6 +272,7 @@ fn test_public_metadata_values_distinguish_symbolic_links() {
     symlink(&referent, &link).expect("symbolic link should be created");
 
     let metadata = LocalFileSystem::host()
+        .expect("Host filesystem should open")
         .metadata(&link)
         .expect("symbolic link metadata should be readable");
     assert_eq!(LocalFileKind::Symlink, metadata.kind());
@@ -282,6 +289,7 @@ fn test_public_metadata_values_classify_unix_socket() {
     let _listener = UnixListener::bind(&socket).expect("Unix-domain socket should be created");
 
     let metadata = LocalFileSystem::host()
+        .expect("Host filesystem should open")
         .metadata(&socket)
         .expect("socket metadata should be readable");
     assert_eq!(LocalFileKind::Socket, metadata.kind());
@@ -298,6 +306,7 @@ fn test_metadata_and_outcomes_expose_public_values() {
     fs::write(&file, b"payload").expect("test file should be written");
 
     let metadata = LocalFileSystem::host()
+        .expect("Host filesystem should open")
         .metadata(&file)
         .expect("file metadata should be readable");
     assert_eq!(LocalFileKind::File, metadata.kind());
@@ -308,22 +317,26 @@ fn test_metadata_and_outcomes_expose_public_values() {
     let _ = metadata.created_at();
 
     let created = LocalFileSystem::host()
-        .create_directory(&created_directory, &LocalCreateDirectoryOptions::new())
+        .expect("Host filesystem should open")
+        .create_directory_with_options(&created_directory, &LocalCreateDirectoryOptions::new())
         .expect("directory should be created");
     assert!(created.created());
     let existing = LocalFileSystem::host()
-        .create_directory(&created_directory, &LocalCreateDirectoryOptions::new().with_exists_ok())
+        .expect("Host filesystem should open")
+        .create_directory_with_options(&created_directory, &LocalCreateDirectoryOptions::new().with_exists_ok())
         .expect("existing directory should be accepted");
     assert!(!existing.created());
 
     let renamed = LocalFileSystem::host()
-        .rename(&file, &renamed_file, &LocalRenameOptions::new())
+        .expect("Host filesystem should open")
+        .rename_with_options(&file, &renamed_file, &LocalRenameOptions::new())
         .expect("file should be renamed");
     assert!(renamed.atomic());
     let _ = renamed.durable();
 
     let copied = LocalFileSystem::host()
-        .copy(&renamed_file, &directory.path().join("copy"), &LocalCopyOptions::new())
+        .expect("Host filesystem should open")
+        .copy_with_options(&renamed_file, &directory.path().join("copy"), &LocalCopyOptions::new())
         .expect("file should be copied");
     assert_eq!(LocalCopyMethod::StagedFile, copied.method());
     assert_eq!(1, copied.stats().files());
@@ -336,11 +349,13 @@ fn test_metadata_and_outcomes_expose_public_values() {
     let _ = copied.metadata_preservation();
 
     let deleted = LocalFileSystem::host()
-        .delete_file(&renamed_file, &LocalDeleteOptions::new())
+        .expect("Host filesystem should open")
+        .delete_file_with_options(&renamed_file, &LocalDeleteOptions::new())
         .expect("file should be deleted");
     assert!(deleted.deleted());
     let missing = LocalFileSystem::host()
-        .delete_file(&renamed_file, &LocalDeleteOptions::new().with_missing_ok())
+        .expect("Host filesystem should open")
+        .delete_file_with_options(&renamed_file, &LocalDeleteOptions::new().with_missing_ok())
         .expect("missing file should be accepted");
     assert!(!missing.deleted());
 }
@@ -356,7 +371,8 @@ fn test_recursive_copy_outcome_reports_all_public_statistics() {
     fs::write(source.join("child"), b"new").expect("source child should be written");
 
     let initial = LocalFileSystem::host()
-        .copy(&source, &target, &LocalCopyOptions::new().with_tree_source())
+        .expect("Host filesystem should open")
+        .copy_with_options(&source, &target, &LocalCopyOptions::new().with_tree_source())
         .expect("directory should be copied");
     assert_eq!(LocalCopyMethod::Recursive, initial.method());
     assert_eq!(1, initial.stats().directories());
@@ -364,7 +380,8 @@ fn test_recursive_copy_outcome_reports_all_public_statistics() {
     assert_eq!(3, initial.stats().bytes());
 
     let skipped = LocalFileSystem::host()
-        .copy(
+        .expect("Host filesystem should open")
+        .copy_with_options(
             &source,
             &target,
             &LocalCopyOptions::new()
@@ -375,7 +392,8 @@ fn test_recursive_copy_outcome_reports_all_public_statistics() {
     assert_eq!(1, skipped.stats().skipped());
 
     let overwritten = LocalFileSystem::host()
-        .copy(
+        .expect("Host filesystem should open")
+        .copy_with_options(
             &source,
             &target,
             &LocalCopyOptions::new()
@@ -395,7 +413,8 @@ fn test_public_failure_values_expose_display_sources_and_parts() {
     let target = directory.path().join("target");
 
     let copy_failure = LocalFileSystem::host()
-        .copy(&missing, &target, &LocalCopyOptions::new())
+        .expect("Host filesystem should open")
+        .copy_with_options(&missing, &target, &LocalCopyOptions::new())
         .expect_err("missing copy source should fail");
     assert!(copy_failure.to_string().contains("copy failed"));
     assert!(Error::source(&copy_failure).is_some());
@@ -406,7 +425,8 @@ fn test_public_failure_values_expose_display_sources_and_parts() {
     assert!(copy_failure.cleanup_error().is_none());
 
     let rename_failure = LocalFileSystem::host()
-        .rename(&missing, &target, &LocalRenameOptions::new())
+        .expect("Host filesystem should open")
+        .rename_with_options(&missing, &target, &LocalRenameOptions::new())
         .expect_err("missing rename source should fail");
     assert!(rename_failure.to_string().contains("rename failed"));
     assert!(Error::source(&rename_failure).is_some());

@@ -37,7 +37,8 @@ use crate::LocalRelativePath;
 use crate::read;
 use crate::write;
 
-/// Opens a no-follow directory handle for a root path.
+/// Opens a directory handle for a root path using ordinary final-link
+/// semantics exactly once during construction.
 ///
 /// # Parameters
 ///
@@ -49,54 +50,14 @@ use crate::write;
 ///
 /// # Errors
 ///
-/// Returns a contextual I/O error when the path is missing, linked, not a
+/// Returns a contextual I/O error when the resolved path is missing, is not a
 /// directory, or cannot be opened.
 #[inline]
 pub(crate) fn open_root_directory(path: &Path) -> Result<File> {
     let mut options = OpenOptions::new();
-    options
-        .read(true)
-        .custom_flags(libc::O_DIRECTORY | libc::O_NOFOLLOW | libc::O_CLOEXEC);
+    options.read(true).custom_flags(libc::O_DIRECTORY | libc::O_CLOEXEC);
     let directory = rooted_open_result(options.open(path), "open root directory", path)?;
     verify_opened_directory(&directory, "inspect root directory", path).map(|()| directory)
-}
-
-/// Returns the current native path of an opened root for symlink resolution.
-///
-/// The path is derived from the retained descriptor rather than from the
-/// caller's diagnostic path, so it continues to identify the same directory
-/// after that path is renamed.
-///
-/// # Errors
-///
-/// Returns an I/O error when the operating system cannot recover the path from
-/// the retained descriptor. The caller's diagnostic path is never used as a
-/// fallback.
-pub(crate) fn root_authority_path(root: &File) -> Result<PathBuf> {
-    if let Some(error) = crate::local::test_io_error("root-authority-path") {
-        return Err(error);
-    }
-    #[cfg(target_os = "macos")]
-    {
-        let mut buffer = [0_u8; libc::PATH_MAX as usize];
-        // SAFETY: `buffer` is writable storage of the size required by
-        // `F_GETPATH`, and `root` owns a live descriptor.
-        let result = unsafe { libc::fcntl(root.as_raw_fd(), libc::F_GETPATH, buffer.as_mut_ptr()) };
-        if result == 0 {
-            let length = buffer.iter().position(|byte| *byte == 0).unwrap_or(buffer.len());
-            return Ok(PathBuf::from(OsStr::from_bytes(&buffer[..length])));
-        }
-        return Err(Error::last_os_error());
-    }
-    #[cfg(not(target_os = "macos"))]
-    {
-        let descriptor_path = PathBuf::from(format!("/proc/self/fd/{}", root.as_raw_fd()));
-        with_path_context(
-            std::fs::read_link(&descriptor_path),
-            "resolve root authority path",
-            &descriptor_path,
-        )
-    }
 }
 
 /// Reads metadata for a final rooted entry without following a symbolic link.

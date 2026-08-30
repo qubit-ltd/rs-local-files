@@ -46,7 +46,7 @@ pub struct LocalCopyOptions {
     max_bytes: Option<u64>,
     /// Optional maximum concurrently open source directories.
     max_open_directories: Option<usize>,
-    /// Optional wall-clock deadline for the complete copy.
+    /// Optional elapsed-time budget for the complete copy.
     deadline: Option<Duration>,
 }
 
@@ -143,7 +143,7 @@ impl LocalCopyOptions {
     pub const fn max_open_directories(&self) -> Option<usize> {
         self.max_open_directories
     }
-    /// Returns the optional wall-clock deadline.
+    /// Returns the optional elapsed-time budget.
     #[must_use]
     #[inline(always)]
     pub const fn deadline(&self) -> Option<Duration> {
@@ -209,9 +209,19 @@ impl LocalCopyOptions {
         self.max_depth = Some(max_depth);
         self
     }
+    /// Removes the recursive tree-depth budget.
+    pub const fn without_max_depth(mut self) -> Self {
+        self.max_depth = None;
+        self
+    }
     /// Limits the number of source entries processed.
     pub const fn with_max_entries(mut self, max_entries: usize) -> Self {
         self.max_entries = Some(max_entries);
+        self
+    }
+    /// Removes the source-entry budget.
+    pub const fn without_max_entries(mut self) -> Self {
+        self.max_entries = None;
         self
     }
     /// Limits source bytes copied.
@@ -219,14 +229,29 @@ impl LocalCopyOptions {
         self.max_bytes = Some(max_bytes);
         self
     }
+    /// Removes the source-byte budget.
+    pub const fn without_max_bytes(mut self) -> Self {
+        self.max_bytes = None;
+        self
+    }
     /// Limits concurrently open source directories.
     pub const fn with_max_open_directories(mut self, max_open_directories: usize) -> Self {
         self.max_open_directories = Some(max_open_directories);
         self
     }
-    /// Sets a wall-clock deadline for the complete copy.
+    /// Removes the concurrently-open-directory budget.
+    pub const fn without_max_open_directories(mut self) -> Self {
+        self.max_open_directories = None;
+        self
+    }
+    /// Sets the maximum elapsed time for the complete copy.
     pub const fn with_deadline(mut self, deadline: Duration) -> Self {
         self.deadline = Some(deadline);
+        self
+    }
+    /// Removes the copy deadline.
+    pub const fn without_deadline(mut self) -> Self {
+        self.deadline = None;
         self
     }
 }

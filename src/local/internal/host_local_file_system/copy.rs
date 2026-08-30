@@ -9,6 +9,8 @@
 // Host copy operations.
 // qubit-style: allow source-test-pair
 
+use std::time::Instant;
+
 use super::HostLocalFileSystem;
 use super::LocalCopyFailure;
 use super::LocalCopyMethod;
@@ -60,8 +62,9 @@ impl HostLocalFileSystem {
         target: &Path,
         options: &LocalCopyOptions,
         symlink_policy: LocalSymlinkPolicy,
+        started_at: Instant,
     ) -> LocalCopyResult {
-        Self::copy_with_policy_scoped(source, target, options, symlink_policy, None)
+        Self::copy_with_policy_scoped(source, target, options, symlink_policy, started_at, None)
     }
 
     /// Copies through a Host namespace while constraining followed directory
@@ -90,14 +93,24 @@ impl HostLocalFileSystem {
         target: &Path,
         options: &LocalCopyOptions,
         symlink_policy: LocalSymlinkPolicy,
+        started_at: Instant,
         scope_root: Option<&Path>,
     ) -> LocalCopyResult {
         let symlink_policy = options.symlink_policy_override().unwrap_or(symlink_policy);
         let [source, target] = bind_host_paths([source, target]).map_err(copy_failure_unchanged)?;
-        let source =
-            resolve_host_path(&source, LocalSymlinkPolicy::FollowAcrossScope, false).map_err(copy_failure_unchanged)?;
-        let target =
-            resolve_host_path(&target, LocalSymlinkPolicy::FollowAcrossScope, false).map_err(copy_failure_unchanged)?;
+        let source = resolve_host_path(&source, symlink_policy, false).map_err(copy_failure_unchanged)?;
+        let target = resolve_host_path(&target, symlink_policy, false).map_err(copy_failure_unchanged)?;
+        let mut internal_options = internal_copy_options(options, symlink_policy, started_at);
+        let mut budget = crate::local::CopyBudget::new(internal_options);
+        budget
+            .check_deadline()
+            .map_err(|error| copy_failure_unchanged(copy_io_error(&source, &target, error)))?;
+        budget
+            .charge_entry()
+            .map_err(|error| copy_failure_unchanged(copy_io_error(&source, &target, error)))?;
+        if let Some(max_entries) = internal_options.max_entries() {
+            internal_options = internal_options.with_max_entries(max_entries - 1);
+        }
         let implements_durability = Self::protocols().supports_durable_file_copy();
         let implements_durability =
             implements_durability && !crate::local::test_support_enabled("local-fs-required-directory-durability");
@@ -122,7 +135,7 @@ impl HostLocalFileSystem {
                         .with_target(target),
                 ));
             }
-            return copy_symlink_entry(&source, &target, options);
+            return copy_symlink_entry(&source, &target, options, &mut budget);
         }
         let effective_metadata = &source_metadata;
 
@@ -152,7 +165,6 @@ impl HostLocalFileSystem {
             }
             prepare_copy_parent(&target, options)
                 .map_err(|error| copy_failure_unchanged(copy_io_error(&source, &target, error)))?;
-            let internal_options = internal_copy_options(options, symlink_policy);
             let stats = scope_root
                 .map_or_else(
                     || crate::local::copy_dir_all_with_paths(&source, &target, internal_options),
@@ -203,8 +215,6 @@ impl HostLocalFileSystem {
         let parent_dirs_to_sync = prepare_copy_parent(&target, options)
             .map_err(|error| copy_failure_unchanged(copy_io_error(&source, &target, error)))?;
 
-        let internal_options = internal_copy_options(options, symlink_policy);
-        let mut budget = crate::local::CopyBudget::new(internal_options);
         let mut stats = crate::local::LocalCopyDirStats::default();
         crate::local::copy_file_with_options(&source, &target, internal_options, &mut stats, &mut budget)
             .map_err(|error| copy_pipeline_failure(&source, &target, error))?;
@@ -239,7 +249,12 @@ fn prepare_copy_parent(target: &Path, options: &LocalCopyOptions) -> io::Result<
 
 /// Copies a final symbolic-link entry without dereferencing it.
 #[allow(clippy::result_large_err)]
-fn copy_symlink_entry(source: &Path, target: &Path, options: &LocalCopyOptions) -> LocalCopyResult {
+fn copy_symlink_entry(
+    source: &Path,
+    target: &Path,
+    options: &LocalCopyOptions,
+    budget: &mut crate::local::CopyBudget,
+) -> LocalCopyResult {
     let existing = match fs::symlink_metadata(target) {
         Ok(metadata) => Some(metadata),
         Err(error) if error.kind() == io::ErrorKind::NotFound => None,
@@ -291,6 +306,9 @@ fn copy_symlink_entry(source: &Path, target: &Path, options: &LocalCopyOptions) 
             return Err(copy_failure_unchanged(copy_io_error(source, target, error)));
         }
     };
+    budget
+        .check_deadline()
+        .map_err(|error| copy_failure_unchanged(copy_io_error(source, target, error)))?;
     if let Err(error) = create_symlink_entry(&link_target, source, target) {
         return Err(copy_failure_unchanged(copy_io_error(source, target, error)));
     }
