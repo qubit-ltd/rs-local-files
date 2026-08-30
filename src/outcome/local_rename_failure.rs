@@ -29,11 +29,7 @@ impl Display for LocalRenameFailure {
     /// Formats the primary rename failure and its proven namespace state.
     #[inline]
     fn fmt(&self, formatter: &mut Formatter<'_>) -> FmtResult {
-        write!(
-            formatter,
-            "rename failed with {:?} state: {}",
-            self.state, self.error
-        )
+        write!(formatter, "rename failed with {:?} state: {}", self.state, self.error)
     }
 }
 
@@ -47,10 +43,7 @@ impl Error for LocalRenameFailure {
 impl LocalRenameFailure {
     /// Creates a typed rename failure from implementation facts.
     #[must_use]
-    pub(crate) const fn new(
-        error: LocalFileError,
-        state: LocalRenameFailureState,
-    ) -> Self {
+    pub(crate) const fn new(error: LocalFileError, state: LocalRenameFailureState) -> Self {
         Self { error, state }
     }
 
@@ -72,5 +65,4 @@ impl LocalRenameFailure {
 }
 
 /// Result returned by unified rename operations.
-pub type LocalRenameResult =
-    Result<super::LocalRenameOutcome, LocalRenameFailure>;
+pub type LocalRenameResult = Result<super::LocalRenameOutcome, LocalRenameFailure>;

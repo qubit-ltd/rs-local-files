@@ -103,22 +103,14 @@ pub(crate) fn copy_file_with_options(
                         stats,
                         std::io::Error::new(
                             std::io::ErrorKind::AlreadyExists,
-                            format!(
-                                "destination type conflicts with source file: {}",
-                                dst.display(),
-                            ),
+                            format!("destination type conflicts with source file: {}", dst.display(),),
                         ),
                     ));
                 }
             }
         }
         Some(_) => {
-            if existing_file_destination_should_be_skipped(
-                src,
-                dst,
-                options.conflict_policy(),
-                stats,
-            )? {
+            if existing_file_destination_should_be_skipped(src, dst, options.conflict_policy(), stats)? {
                 return with_copy_context(
                     record_skipped_file(stats),
                     LocalCopyDirStage::UpdateStatistics,
@@ -132,8 +124,7 @@ pub(crate) fn copy_file_with_options(
         None => false,
     };
 
-    let (staged_file, copied, file_durable) =
-        stage_copy_file(src, dst, options, stats, budget)?;
+    let (staged_file, copied, file_durable) = stage_copy_file(src, dst, options, stats, budget)?;
     if !commit_staged_copy_file(
         src,
         dst,
@@ -213,19 +204,12 @@ pub(crate) fn copy_symlink_with_options(
         );
     }
     if action == CopyDestinationAction::Replace {
-        let removal =
-            if destination_metadata.as_ref().is_some_and(is_real_directory) {
-                remove_destination_directory_if_unchanged(dst)
-            } else {
-                std::fs::remove_file(dst)
-            };
-        with_copy_context(
-            removal,
-            LocalCopyDirStage::PrepareDestination,
-            src,
-            dst,
-            stats,
-        )?;
+        let removal = if destination_metadata.as_ref().is_some_and(is_real_directory) {
+            remove_destination_directory_if_unchanged(dst)
+        } else {
+            std::fs::remove_file(dst)
+        };
+        with_copy_context(removal, LocalCopyDirStage::PrepareDestination, src, dst, stats)?;
     }
     let link_target = with_copy_context(
         std::fs::read_link(src),
@@ -262,11 +246,7 @@ pub(crate) fn copy_symlink_with_options(
     Ok(())
 }
 
-fn create_symlink_entry(
-    link_target: &Path,
-    _source: &Path,
-    target: &Path,
-) -> std::io::Result<()> {
+fn create_symlink_entry(link_target: &Path, _source: &Path, target: &Path) -> std::io::Result<()> {
     #[cfg(unix)]
     {
         std::os::unix::fs::symlink(link_target, target)
@@ -326,11 +306,7 @@ fn stage_copy_file(
         stats,
     )?;
     let mut staged_file = StagedFile::new(temp_path, temp_file);
-    let opened_source = match OpenedCopySource::open(
-        src,
-        options.symlink_policy(),
-        options.open_retry_timeout(),
-    ) {
+    let opened_source = match OpenedCopySource::open(src, options.symlink_policy(), options.open_retry_timeout()) {
         Ok(source) => source,
         Err(source) => {
             return Err(copy_dir_error_with_staging(
@@ -344,28 +320,13 @@ fn stage_copy_file(
         }
     };
     let (mut source_file, source_metadata) = opened_source.into_parts();
-    let copied = copy_into_staging(
-        src,
-        dst,
-        stats,
-        &mut source_file,
-        &mut staged_file,
-        budget,
-    )?;
+    let copied = copy_into_staging(src, dst, stats, &mut source_file, &mut staged_file, budget)?;
     if options.preserves_permissions() {
-        preserve_staged_permissions(
-            src,
-            dst,
-            &source_metadata,
-            stats,
-            &mut staged_file,
-        )?;
+        preserve_staged_permissions(src, dst, &source_metadata, stats, &mut staged_file)?;
     }
     let file_durable = match options.durability() {
         LocalDurabilityRequirement::NotRequired => false,
-        LocalDurabilityRequirement::Preferred => {
-            sync_staged_file(&staged_file).is_ok()
-        }
+        LocalDurabilityRequirement::Preferred => sync_staged_file(&staged_file).is_ok(),
         LocalDurabilityRequirement::Required => {
             if let Err(source) = sync_staged_file(&staged_file) {
                 return Err(copy_dir_error_with_staging(
@@ -440,29 +401,20 @@ fn commit_staged_copy_file(
         LocalCopyConflictPolicy::Fail | LocalCopyConflictPolicy::Skip => {
             move_file_without_replacing(staged_file.path(), dst)
         }
-        LocalCopyConflictPolicy::Overwrite => {
-            replace_file(staged_file.path(), dst)
-        }
+        LocalCopyConflictPolicy::Overwrite => replace_file(staged_file.path(), dst),
     };
     match commit_result {
         Ok(()) => {
             staged_file.disarm();
             Ok(true)
         }
-        Err(error)
-            if conflict == LocalCopyConflictPolicy::Skip
-                && error.kind() == ErrorKind::AlreadyExists =>
-        {
+        Err(error) if conflict == LocalCopyConflictPolicy::Skip && error.kind() == ErrorKind::AlreadyExists => {
             let temporary_path = staged_file.path().to_path_buf();
             if let Err(source) = staged_file.cleanup() {
-                return Err(copy_dir_error(
-                    LocalCopyDirStage::CleanupTemporaryFile,
-                    src,
-                    dst,
-                    stats,
-                    source,
-                )
-                .with_staging_context(temporary_path, None));
+                return Err(
+                    copy_dir_error(LocalCopyDirStage::CleanupTemporaryFile, src, dst, stats, source)
+                        .with_staging_context(temporary_path, None),
+                );
             }
             Ok(false)
         }

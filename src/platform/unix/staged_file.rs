@@ -56,11 +56,7 @@ mod install_error {
 
     impl StagedInstallError {
         /// Creates an installation failure and retains safe cleanup ownership.
-        pub(super) fn new(
-            error: LocalFileError,
-            state: StagedInstallState,
-            staged_file: Option<StagedFile>,
-        ) -> Self {
+        pub(super) fn new(error: LocalFileError, state: StagedInstallState, staged_file: Option<StagedFile>) -> Self {
             Self {
                 error: Box::new(error),
                 state,
@@ -89,9 +85,7 @@ mod install_error {
         }
 
         /// Consumes this failure into all retained native facts.
-        pub(crate) fn into_parts(
-            self,
-        ) -> (LocalFileError, StagedInstallState, Option<StagedFile>) {
+        pub(crate) fn into_parts(self) -> (LocalFileError, StagedInstallState, Option<StagedFile>) {
             (*self.error, self.state, self.staged_file)
         }
     }
@@ -121,21 +115,14 @@ impl StagedFile {
     ///
     /// Returns an open-writer error when randomness is unavailable or sixteen
     /// exclusive creation attempts all collide or fail.
-    pub(super) fn create(
-        parent: File,
-        diagnostic_target: &Path,
-    ) -> LocalResult<Self> {
+    pub(super) fn create(parent: File, diagnostic_target: &Path) -> LocalResult<Self> {
         let mut last_collision = None;
         for _ in 0..16 {
             let name = random_staging_name(diagnostic_target)?;
             match open_file_at(
                 &parent,
                 &name,
-                libc::O_RDWR
-                    | libc::O_CREAT
-                    | libc::O_EXCL
-                    | libc::O_NOFOLLOW
-                    | libc::O_CLOEXEC,
+                libc::O_RDWR | libc::O_CREAT | libc::O_EXCL | libc::O_NOFOLLOW | libc::O_CLOEXEC,
                 0o600,
             ) {
                 Ok(file) => {
@@ -150,12 +137,7 @@ impl StagedFile {
                     last_collision = Some(error);
                 }
                 Err(error) => {
-                    return Err(io_error(
-                        LocalFileOperation::OpenWriter,
-                        diagnostic_target,
-                        None,
-                        error,
-                    ));
+                    return Err(io_error(LocalFileOperation::OpenWriter, diagnostic_target, None, error));
                 }
             }
         }
@@ -164,10 +146,7 @@ impl StagedFile {
             diagnostic_target,
             None,
             last_collision.unwrap_or_else(|| {
-                io::Error::new(
-                    io::ErrorKind::AlreadyExists,
-                    "staging name attempts were exhausted",
-                )
+                io::Error::new(io::ErrorKind::AlreadyExists, "staging name attempts were exhausted")
             }),
         ))
     }
@@ -203,22 +182,12 @@ impl StagedFile {
     /// Returns a commit error when flushing or `fsync` fails. The staging
     /// entry remains owned for retry or cleanup.
     pub(crate) fn sync_contents(&mut self) -> LocalResult<()> {
-        self.file_mut().flush().map_err(|error| {
-            io_error(
-                LocalFileOperation::Commit,
-                &self.diagnostic_target,
-                None,
-                error,
-            )
-        })?;
-        self.file().sync_all().map_err(|error| {
-            io_error(
-                LocalFileOperation::Commit,
-                &self.diagnostic_target,
-                None,
-                error,
-            )
-        })
+        self.file_mut()
+            .flush()
+            .map_err(|error| io_error(LocalFileOperation::Commit, &self.diagnostic_target, None, error))?;
+        self.file()
+            .sync_all()
+            .map_err(|error| io_error(LocalFileOperation::Commit, &self.diagnostic_target, None, error))
     }
 
     /// Installs this staging entry at `target` within `namespace`.
@@ -242,17 +211,16 @@ impl StagedFile {
         overwrite: bool,
     ) -> Result<(), StagedInstallError> {
         drop(self.file.take());
-        let (target_parent, target_name) =
-            match open_parent(namespace, target, LocalFileOperation::Commit) {
-                Ok(parent) => parent,
-                Err(error) => {
-                    return Err(StagedInstallError::new(
-                        error,
-                        StagedInstallState::Unchanged,
-                        Some(self),
-                    ));
-                }
-            };
+        let (target_parent, target_name) = match open_parent(namespace, target, LocalFileOperation::Commit) {
+            Ok(parent) => parent,
+            Err(error) => {
+                return Err(StagedInstallError::new(
+                    error,
+                    StagedInstallState::Unchanged,
+                    Some(self),
+                ));
+            }
+        };
         let name = self
             .name
             .as_ref()
@@ -288,8 +256,7 @@ impl StagedFile {
                     Some(target.as_path()),
                     native,
                 );
-                let staged_file = if state == StagedInstallState::Indeterminate
-                {
+                let staged_file = if state == StagedInstallState::Indeterminate {
                     let _ = self.name.take();
                     None
                 } else {
@@ -314,9 +281,7 @@ impl StagedFile {
         };
         // SAFETY: the parent descriptor and staging name remain live for this
         // non-retaining descriptor-relative unlink.
-        let result = unsafe {
-            libc::unlinkat(self.parent.as_raw_fd(), name.as_ptr(), 0)
-        };
+        let result = unsafe { libc::unlinkat(self.parent.as_raw_fd(), name.as_ptr(), 0) };
         if result == 0 {
             let _ = self.name.take();
             Ok(())
@@ -349,9 +314,7 @@ impl Drop for StagedFile {
         if let Err(error) = self.cleanup()
             && self.name.is_some()
         {
-            warn!(
-                "failed to remove uncommitted descriptor-relative staging file: {error}"
-            );
+            warn!("failed to remove uncommitted descriptor-relative staging file: {error}");
         }
     }
 }
@@ -443,12 +406,7 @@ fn install_no_replace(
 }
 
 /// Installs a staging file without replacement through hard-link publication.
-#[cfg(not(any(
-    target_os = "linux",
-    target_os = "android",
-    target_os = "macos",
-    target_os = "ios",
-)))]
+#[cfg(not(any(target_os = "linux", target_os = "android", target_os = "macos", target_os = "ios",)))]
 fn install_no_replace(
     staging_parent: &File,
     staging: &CStr,
@@ -477,21 +435,12 @@ fn link_then_unlink(
         )
     };
     if result == -1 {
-        return Err((
-            io::Error::last_os_error(),
-            StagedInstallState::Unchanged,
-        ));
+        return Err((io::Error::last_os_error(), StagedInstallState::Unchanged));
     }
     // SAFETY: the staging parent descriptor and name remain live for this
     // non-retaining unlink operation.
-    if unsafe {
-        libc::unlinkat(staging_parent.as_raw_fd(), staging.as_ptr(), 0)
-    } == -1
-    {
-        return Err((
-            io::Error::last_os_error(),
-            StagedInstallState::Published,
-        ));
+    if unsafe { libc::unlinkat(staging_parent.as_raw_fd(), staging.as_ptr(), 0) } == -1 {
+        return Err((io::Error::last_os_error(), StagedInstallState::Published));
     }
     Ok(())
 }

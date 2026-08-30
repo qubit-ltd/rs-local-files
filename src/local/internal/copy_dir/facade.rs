@@ -64,29 +64,19 @@ fn copy_dir_all_with_scope(
     let mut stats = LocalCopyDirStats::default();
     let source_result = absolute_path(src);
     #[cfg(feature = "internal-test-support")]
-    let source_result = if crate::local::internal::test_support::is_enabled(
-        "copy-source-absolute",
-    ) {
+    let source_result = if crate::local::internal::test_support::is_enabled("copy-source-absolute") {
         Err(crate::local::test_fault_error())
     } else {
         source_result
     };
-    let src = with_copy_context(
-        source_result,
-        LocalCopyDirStage::InspectSource,
-        src,
-        dst,
-        &stats,
-    )?;
+    let src = with_copy_context(source_result, LocalCopyDirStage::InspectSource, src, dst, &stats)?;
     let destination_result = if dst.as_os_str().is_empty() {
         Ok(dst.to_path_buf())
     } else {
         absolute_path(dst)
     };
     #[cfg(feature = "internal-test-support")]
-    let destination_result = if crate::local::internal::test_support::is_enabled(
-        "copy-destination-absolute",
-    ) {
+    let destination_result = if crate::local::internal::test_support::is_enabled("copy-destination-absolute") {
         Err(crate::local::test_fault_error())
     } else {
         destination_result
@@ -108,15 +98,7 @@ fn copy_dir_all_with_scope(
     let scope_root = scope_root
         .map(std::fs::canonicalize)
         .transpose()
-        .map_err(|error| {
-            super::error::copy_dir_error(
-                LocalCopyDirStage::InspectSource,
-                &src,
-                &dst,
-                &stats,
-                error,
-            )
-        })?;
+        .map_err(|error| super::error::copy_dir_error(LocalCopyDirStage::InspectSource, &src, &dst, &stats, error))?;
     copy_dir_iterative(
         &src,
         &dst,

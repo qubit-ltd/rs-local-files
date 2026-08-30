@@ -151,37 +151,25 @@ impl LocalCopyOptions {
     }
 
     /// Sets the destination file conflict policy.
-    pub const fn with_conflict(
-        mut self,
-        conflict: LocalCopyConflictPolicy,
-    ) -> Self {
+    pub const fn with_conflict(mut self, conflict: LocalCopyConflictPolicy) -> Self {
         self.conflict = conflict;
         self
     }
 
     /// Sets the file/directory type conflict policy.
-    pub const fn with_type_conflict(
-        mut self,
-        type_conflict: LocalCopyTypeConflictPolicy,
-    ) -> Self {
+    pub const fn with_type_conflict(mut self, type_conflict: LocalCopyTypeConflictPolicy) -> Self {
         self.type_conflict = type_conflict;
         self
     }
 
     /// Sets metadata preservation policy.
-    pub const fn with_metadata_preservation(
-        mut self,
-        preserve_metadata: LocalMetadataPreservePolicy,
-    ) -> Self {
+    pub const fn with_metadata_preservation(mut self, preserve_metadata: LocalMetadataPreservePolicy) -> Self {
         self.preserve_metadata = preserve_metadata;
         self
     }
 
     /// Sets symbolic-link policy.
-    pub const fn with_symlink_policy(
-        mut self,
-        symlink: LocalSymlinkPolicy,
-    ) -> Self {
+    pub const fn with_symlink_policy(mut self, symlink: LocalSymlinkPolicy) -> Self {
         self.symlink = Some(symlink);
         self
     }
@@ -205,19 +193,13 @@ impl LocalCopyOptions {
     }
 
     /// Sets required publication atomicity.
-    pub const fn with_atomicity(
-        mut self,
-        atomicity: LocalAtomicityRequirement,
-    ) -> Self {
+    pub const fn with_atomicity(mut self, atomicity: LocalAtomicityRequirement) -> Self {
         self.atomicity = atomicity;
         self
     }
 
     /// Sets required durability.
-    pub const fn with_durability(
-        mut self,
-        durability: LocalDurabilityRequirement,
-    ) -> Self {
+    pub const fn with_durability(mut self, durability: LocalDurabilityRequirement) -> Self {
         self.durability = durability;
         self
     }
@@ -238,10 +220,7 @@ impl LocalCopyOptions {
         self
     }
     /// Limits concurrently open source directories.
-    pub const fn with_max_open_directories(
-        mut self,
-        max_open_directories: usize,
-    ) -> Self {
+    pub const fn with_max_open_directories(mut self, max_open_directories: usize) -> Self {
         self.max_open_directories = Some(max_open_directories);
         self
     }

@@ -18,11 +18,7 @@ pub struct LocalFileSystemSpace {
 
 impl LocalFileSystemSpace {
     /// Creates space observations from independently available values.
-    pub const fn new(
-        capacity_bytes: Option<u64>,
-        free_bytes: Option<u64>,
-        available_bytes: Option<u64>,
-    ) -> Self {
+    pub const fn new(capacity_bytes: Option<u64>, free_bytes: Option<u64>, available_bytes: Option<u64>) -> Self {
         Self {
             capacity_bytes,
             free_bytes,

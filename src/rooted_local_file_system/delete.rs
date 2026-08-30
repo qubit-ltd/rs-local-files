@@ -42,27 +42,14 @@ impl RootedLocalFileSystem {
         options: &LocalDeleteOptions,
         symlink_policy: LocalSymlinkPolicy,
     ) -> LocalResult<LocalDeleteOutcome> {
-        let relative = resolve_rooted_path(
-            &self.root,
-            path,
-            symlink_policy,
-            false,
-            LocalFileOperation::DeleteFile,
-        )?;
+        let relative = resolve_rooted_path(&self.root, path, symlink_policy, false, LocalFileOperation::DeleteFile)?;
         let result = self.root.remove_file(&relative);
         match result {
             Ok(()) => Ok(LocalDeleteOutcome::new(true)),
-            Err(error)
-                if error.kind() == io::ErrorKind::NotFound
-                    && options.missing_ok() =>
-            {
+            Err(error) if error.kind() == io::ErrorKind::NotFound && options.missing_ok() => {
                 Ok(LocalDeleteOutcome::new(false))
             }
-            Err(error) => Err(rooted_io_error(
-                LocalFileOperation::DeleteFile,
-                path,
-                error,
-            )),
+            Err(error) => Err(rooted_io_error(LocalFileOperation::DeleteFile, path, error)),
         }
     }
 
@@ -101,17 +88,10 @@ impl RootedLocalFileSystem {
         };
         match result {
             Ok(()) => Ok(LocalDeleteOutcome::new(true)),
-            Err(error)
-                if error.kind() == io::ErrorKind::NotFound
-                    && options.missing_ok() =>
-            {
+            Err(error) if error.kind() == io::ErrorKind::NotFound && options.missing_ok() => {
                 Ok(LocalDeleteOutcome::new(false))
             }
-            Err(error) => Err(rooted_io_error(
-                LocalFileOperation::DeleteDirectory,
-                path,
-                error,
-            )),
+            Err(error) => Err(rooted_io_error(LocalFileOperation::DeleteDirectory, path, error)),
         }
     }
 }

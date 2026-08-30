@@ -34,11 +34,7 @@ impl LocalDirectoryEntry {
     ///   traversal keeps descriptor authority even after this path changes.
     /// - `relative_path`: Path relative to the listing root.
     /// - `metadata`: Normalized entry metadata.
-    pub(crate) const fn new(
-        diagnostic_path: PathBuf,
-        relative_path: PathBuf,
-        metadata: LocalFileMetadata,
-    ) -> Self {
+    pub(crate) const fn new(diagnostic_path: PathBuf, relative_path: PathBuf, metadata: LocalFileMetadata) -> Self {
         Self {
             diagnostic_path,
             relative_path,

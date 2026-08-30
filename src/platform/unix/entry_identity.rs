@@ -64,14 +64,8 @@ impl EntryIdentity {
     ///
     /// Returns the namespace lookup error when the path cannot be inspected.
     #[allow(dead_code)]
-    pub(crate) fn matches_path(
-        &self,
-        namespace: &NamespaceHandle,
-        path: &RelativePath,
-    ) -> LocalResult<bool> {
-        namespace
-            .entry_identity(path)
-            .map(|current| current == *self)
+    pub(crate) fn matches_path(&self, namespace: &NamespaceHandle, path: &RelativePath) -> LocalResult<bool> {
+        namespace.entry_identity(path).map(|current| current == *self)
     }
 }
 

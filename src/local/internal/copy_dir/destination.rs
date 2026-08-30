@@ -54,8 +54,7 @@ pub(super) fn ensure_copy_destination_dir(
     conflict: LocalCopyConflictPolicy,
     type_conflict: LocalCopyTypeConflictPolicy,
 ) -> Result<CopyDestinationAction> {
-    let action =
-        prepare_existing_directory_destination(dst, conflict, type_conflict)?;
+    let action = prepare_existing_directory_destination(dst, conflict, type_conflict)?;
     if action != CopyDestinationAction::Create {
         return Ok(action);
     }
@@ -119,9 +118,7 @@ pub(super) fn existing_file_destination_should_be_skipped(
 /// # Errors
 ///
 /// Returns metadata errors other than `NotFound`.
-pub(super) fn destination_metadata_if_exists(
-    dst: &Path,
-) -> Result<Option<fs::Metadata>> {
+pub(super) fn destination_metadata_if_exists(dst: &Path) -> Result<Option<fs::Metadata>> {
     match inspect_destination_metadata(dst) {
         Ok(metadata) => Ok(Some(metadata)),
         Err(error) if error.kind() == ErrorKind::NotFound => Ok(None),
@@ -138,9 +135,7 @@ pub(super) fn destination_metadata_if_exists(
 /// # Errors
 ///
 /// Returns the I/O error reported while inspecting or removing the directory.
-pub(super) fn remove_destination_directory_if_unchanged(
-    dst: &Path,
-) -> Result<()> {
+pub(super) fn remove_destination_directory_if_unchanged(dst: &Path) -> Result<()> {
     match inspect_destination_metadata(dst) {
         Ok(metadata) if is_real_directory(&metadata) => fs::remove_dir_all(dst),
         Ok(_) => Ok(()),
@@ -172,21 +167,13 @@ fn prepare_existing_directory_destination(
     let Some(metadata) = destination_metadata_if_exists(dst)? else {
         return Ok(CopyDestinationAction::Create);
     };
-    let action = decide_copy_destination(
-        true,
-        Some(is_real_directory(&metadata)),
-        conflict,
-        type_conflict,
-    )
-    .ok_or_else(|| {
-        Error::new(
-            ErrorKind::AlreadyExists,
-            format!(
-                "destination type conflicts with source directory: {}",
-                dst.display(),
-            ),
-        )
-    })?;
+    let action = decide_copy_destination(true, Some(is_real_directory(&metadata)), conflict, type_conflict)
+        .ok_or_else(|| {
+            Error::new(
+                ErrorKind::AlreadyExists,
+                format!("destination type conflicts with source directory: {}", dst.display(),),
+            )
+        })?;
     if action == CopyDestinationAction::Replace {
         remove_destination_non_directory_if_unchanged(dst)?;
         return Ok(CopyDestinationAction::Create);
@@ -216,10 +203,7 @@ fn create_copy_destination_dir(dst: &Path) -> Result<bool> {
         || test_support::is_enabled("copy-directory-race-nondirectory")
         || test_support::is_enabled("copy-directory-race-inspect")
     {
-        Err(Error::new(
-            ErrorKind::AlreadyExists,
-            "injected directory creation race",
-        ))
+        Err(Error::new(ErrorKind::AlreadyExists, "injected directory creation race"))
     } else if test_support::is_enabled("copy-directory-create-error") {
         Err(Error::other("injected directory creation failure"))
     } else {
@@ -228,9 +212,7 @@ fn create_copy_destination_dir(dst: &Path) -> Result<bool> {
     reconcile_directory_creation(dst, result, |path| {
         #[cfg(feature = "internal-test-support")]
         if test_support::is_enabled("copy-directory-race-inspect") {
-            return Err(Error::other(
-                "injected directory race inspection failure",
-            ));
+            return Err(Error::other("injected directory race inspection failure"));
         }
         inspect_destination_metadata(path)
     })
@@ -255,10 +237,7 @@ fn remove_destination_non_directory_if_unchanged(dst: &Path) -> Result<()> {
     let result = inspect_destination_metadata(dst);
     #[cfg(feature = "internal-test-support")]
     let result = if test_support::is_enabled("copy-removal-race-not-found") {
-        Err(Error::new(
-            ErrorKind::NotFound,
-            "injected destination disappearance",
-        ))
+        Err(Error::new(ErrorKind::NotFound, "injected destination disappearance"))
     } else if test_support::is_enabled("copy-removal-race-inspect") {
         Err(Error::other("injected destination reinspection failure"))
     } else {

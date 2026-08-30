@@ -23,9 +23,6 @@ fn test_local_copy_stats_exposes_skipped_and_internal_counts() {
         non_atomic_publication: false,
         files_durable: true,
     });
-    assert_eq!(
-        (stats.files(), stats.directories(), stats.bytes()),
-        (1, 2, 3)
-    );
+    assert_eq!((stats.files(), stats.directories(), stats.bytes()), (1, 2, 3));
     assert_eq!((stats.skipped(), stats.overwritten()), (4, 5));
 }

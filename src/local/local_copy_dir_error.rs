@@ -186,11 +186,7 @@ impl LocalCopyDirError {
     /// # Returns
     /// This copy error enriched with staging cleanup context.
     #[inline]
-    pub(crate) fn with_staging_context(
-        mut self,
-        temporary_path: PathBuf,
-        cleanup_error: Option<io::Error>,
-    ) -> Self {
+    pub(crate) fn with_staging_context(mut self, temporary_path: PathBuf, cleanup_error: Option<io::Error>) -> Self {
         self.temporary_path = Some(temporary_path.into_boxed_path());
         self.cleanup_error = cleanup_error;
         self
@@ -214,10 +210,7 @@ impl Display for LocalCopyDirError {
             write!(formatter, "; staging path '{}'", temporary_path.display())?;
         }
         if let Some(cleanup_error) = self.cleanup_error.as_ref() {
-            return write!(
-                formatter,
-                "; staging cleanup also failed: {cleanup_error}"
-            );
+            return write!(formatter, "; staging cleanup also failed: {cleanup_error}");
         }
         Ok(())
     }

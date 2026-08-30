@@ -61,9 +61,7 @@ fn test_public_host_facade_delegates_ordinary_operations() {
         .open_reader(&source, &LocalReadOptions::new())
         .expect("source reader should open");
     let mut content = String::new();
-    reader
-        .read_to_string(&mut content)
-        .expect("source reader should read");
+    reader.read_to_string(&mut content).expect("source reader should read");
     assert_eq!("payload", content);
     assert_eq!(
         b"pay",
@@ -106,18 +104,12 @@ fn test_public_host_facade_delegates_ordinary_operations() {
         .expect("file should be deleted");
 
     let mut temporary_file = filesystem
-        .create_temp_file(
-            &LocalTempFileOptions::new().with_parent(directory.path()),
-        )
+        .create_temp_file(&LocalTempFileOptions::new().with_parent(directory.path()))
         .expect("temporary file should be created");
     temporary_file.close();
-    temporary_file
-        .cleanup()
-        .expect("temporary file should clean up");
+    temporary_file.cleanup().expect("temporary file should clean up");
     let mut temporary_directory = filesystem
-        .create_temp_directory(
-            &LocalTempDirectoryOptions::new().with_parent(directory.path()),
-        )
+        .create_temp_directory(&LocalTempDirectoryOptions::new().with_parent(directory.path()))
         .expect("temporary directory should be created");
     temporary_directory
         .cleanup()
@@ -129,8 +121,7 @@ fn test_public_host_facade_delegates_ordinary_operations() {
 #[test]
 fn test_public_rooted_facade_delegates_relative_operations() {
     let directory = tempdir().expect("temporary root should be created");
-    let filesystem = LocalFileSystem::rooted(directory.path())
-        .expect("rooted filesystem should open");
+    let filesystem = LocalFileSystem::rooted(directory.path()).expect("rooted filesystem should open");
     assert_eq!(LocalFileSystemScope::Rooted, filesystem.scope());
     assert_eq!(Some(directory.path()), filesystem.diagnostic_root());
     let _ = filesystem.protocols();
@@ -143,10 +134,7 @@ fn test_public_rooted_facade_delegates_relative_operations() {
         .expect("rooted space should be available");
 
     let _ = filesystem
-        .create_directory(
-            Path::new("nested"),
-            &LocalCreateDirectoryOptions::new(),
-        )
+        .create_directory(Path::new("nested"), &LocalCreateDirectoryOptions::new())
         .expect("rooted directory should be created");
     let mut writer = filesystem
         .open_writer(
@@ -154,9 +142,7 @@ fn test_public_rooted_facade_delegates_relative_operations() {
             &LocalWriteOptions::new(LocalWriteMode::CreateOrReplace),
         )
         .expect("rooted writer should open");
-    writer
-        .write_all(b"payload")
-        .expect("rooted writer should write");
+    writer.write_all(b"payload").expect("rooted writer should write");
     let _ = writer.commit().expect("rooted writer should commit");
     let _ = filesystem
         .copy(
@@ -180,8 +166,7 @@ fn test_public_rooted_facade_delegates_relative_operations() {
 /// Verifies resource-limit diagnostics retain every supplied budget fact.
 #[test]
 fn test_resource_limit_error_retains_budget_facts() {
-    let error =
-        LocalResourceLimitError::new(LocalResourceKind::OpenDirectory, 8, 2, 3);
+    let error = LocalResourceLimitError::new(LocalResourceKind::OpenDirectory, 8, 2, 3);
 
     assert_eq!(LocalResourceKind::OpenDirectory, error.resource());
     assert_eq!(8, error.limit());
