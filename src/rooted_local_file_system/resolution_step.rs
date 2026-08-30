@@ -18,7 +18,13 @@ pub(super) enum ResolutionStep {
     /// Removes the most recently resolved normal component.
     Parent,
     /// Appends one normal namespace component.
-    Normal(OsString),
+    Normal(
+        /// Native component to append to the pending resolution queue.
+        OsString,
+    ),
     /// Ends expansion of the identified symbolic link.
-    EndSymlink(SymlinkIdentity),
+    EndSymlink(
+        /// Identity removed from the active-link set after expansion.
+        SymlinkIdentity,
+    ),
 }

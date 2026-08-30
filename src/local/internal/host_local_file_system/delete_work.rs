@@ -11,7 +11,13 @@ use std::path::PathBuf;
 /// Pending work for one no-follow Host recursive deletion.
 pub(super) enum DeleteWork {
     /// Inspects an entry before deciding how to remove it.
-    Inspect(PathBuf),
+    Inspect(
+        /// Native path of the entry awaiting inspection.
+        PathBuf,
+    ),
     /// Removes a directory after all of its children have been processed.
-    RemoveDirectory(PathBuf),
+    RemoveDirectory(
+        /// Native path of the directory awaiting post-order removal.
+        PathBuf,
+    ),
 }
