@@ -172,7 +172,7 @@ fn copy_tree(
     budget: &mut CopyBudget,
 ) -> Result<Statistics, Error> {
     let mut statistics = Statistics::default();
-    budget.acquire_directory().map_err(|source_error| {
+    let directory_permit = budget.acquire_directory().map_err(|source_error| {
         error(
             Stage::ReadSourceDirectory,
             source,
@@ -181,7 +181,7 @@ fn copy_tree(
             source_error,
         )
     })?;
-    budget.release_directory();
+    drop(directory_permit);
     if !prepare_directory(root, source, destination, options, &mut statistics)? {
         return Ok(statistics);
     }
@@ -229,7 +229,7 @@ fn copy_tree(
                         io::Error::from(ErrorKind::PermissionDenied),
                     ));
                 }
-                budget.acquire_directory().map_err(|source_error| {
+                let directory_permit = budget.acquire_directory().map_err(|source_error| {
                     error(
                         Stage::ReadSourceDirectory,
                         &source,
@@ -239,7 +239,7 @@ fn copy_tree(
                     )
                 })?;
                 let entries_result = root.read_dir(&source);
-                budget.release_directory();
+                drop(directory_permit);
                 let entries = entries_result.map_err(|source_error| {
                     error(
                         Stage::ReadSourceDirectory,

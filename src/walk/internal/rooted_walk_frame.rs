@@ -12,6 +12,9 @@ use std::collections::HashSet;
 use std::ffi::OsString;
 use std::path::PathBuf;
 
+use qubit_budget::ManagedResourcePermit;
+
+use crate::LocalResourceKind;
 use crate::rooted::DirectoryReader;
 
 /// One deferred immediate rooted directory listing in a lazy tree walk.
@@ -19,6 +22,8 @@ use crate::rooted::DirectoryReader;
 pub(in crate::walk) struct RootedWalkFrame {
     /// Open immediate-entry reader, initialized on the first iteration step.
     pub(in crate::walk) reader: Option<DirectoryReader>,
+    /// Capacity permit retained for exactly as long as `reader` is open.
+    pub(in crate::walk) directory_permit: Option<ManagedResourcePermit<LocalResourceKind, usize>>,
     /// Names already yielded from this directory.
     pub(in crate::walk) seen: HashSet<OsString>,
     /// Authority-relative path of the listed directory.

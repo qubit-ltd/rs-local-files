@@ -14,8 +14,9 @@ use std::sync::Arc;
 use std::time::Instant;
 
 use qubit_budget::InsufficientBudgetError;
+use qubit_budget::ManagedResourcePermit;
+use qubit_budget::ManagedResourcePool;
 use qubit_budget::ResourceBudget;
-use qubit_budget::ResourcePool;
 
 use super::internal::RootedWalkFrame;
 use super::internal::RootedWalkState;
@@ -44,7 +45,7 @@ pub struct LocalDirectoryWalker {
     /// Open directory iterators, bounded by traversal depth.
     stack: Vec<WalkFrame>,
     /// Current number of open native directory readers.
-    open_directories: ResourcePool<LocalResourceKind, usize>,
+    open_directories: ManagedResourcePool<LocalResourceKind, usize>,
     /// Native directory identities on the active DFS path.
     followed_directories: HashSet<DirectoryIdentity>,
     /// Descriptor-relative traversal state for a rooted walker.
@@ -87,8 +88,8 @@ impl LocalDirectoryWalker {
                 LocalFileError::new(LocalFileErrorKind::TypeConflict, LocalFileOperation::List).with_path(root),
             );
         }
-        let mut open_directories = directory_pool(&options);
-        open_directories
+        let open_directories = directory_pool(&options);
+        let directory_permit = open_directories
             .try_acquire(1)
             .expect("validated non-zero directory capacity accepts root");
         let entries = fs::read_dir(&root).map_err(|error| walk_io_error(&root, error))?;
@@ -107,6 +108,7 @@ impl LocalDirectoryWalker {
             options,
             stack: vec![WalkFrame {
                 entries: Some(entries),
+                directory_permit: Some(directory_permit),
                 seen: HashSet::new(),
                 relative: PathBuf::new(),
                 identity: Some(root_identity),
@@ -189,6 +191,7 @@ impl LocalDirectoryWalker {
                 root,
                 stack: vec![RootedWalkFrame {
                     reader: None,
+                    directory_permit: None,
                     seen: HashSet::new(),
                     authority_parent,
                     output_parent,
@@ -233,11 +236,11 @@ impl LocalDirectoryWalker {
 
     /// Closes every currently open host reader while retaining its frame.
     ///
-    /// Each closed reader releases exactly one acquired directory slot. The
+    /// Each closed reader drops exactly one acquired directory permit. The
     /// retained frames can later be reopened without changing DFS state.
     fn close_all_host_frames(&mut self) {
         for frame in &mut self.stack {
-            close_host_frame(frame, &mut self.open_directories);
+            close_host_frame(frame);
         }
     }
 
@@ -248,7 +251,7 @@ impl LocalDirectoryWalker {
     /// Returns the removed frame, or `None` when traversal has no host frame.
     fn pop_host_frame(&mut self) -> Option<WalkFrame> {
         let mut frame = self.stack.pop()?;
-        close_host_frame(&mut frame, &mut self.open_directories);
+        close_host_frame(&mut frame);
         Some(frame)
     }
 
@@ -264,9 +267,13 @@ impl LocalDirectoryWalker {
     /// exhausted and the configured policy is
     /// [`LocalDirectoryReopenPolicy::Fail`]. Under `Reopen`, all active
     /// readers are closed before retrying the acquisition.
-    fn acquire_host_directory(&mut self, path: &Path) -> LocalResult<()> {
+    ///
+    /// # Returns
+    ///
+    /// A permit that must remain owned for the opened reader's lifetime.
+    fn acquire_host_directory(&mut self, path: &Path) -> LocalResult<ManagedResourcePermit<LocalResourceKind, usize>> {
         match self.open_directories.try_acquire(1) {
-            Ok(()) => Ok(()),
+            Ok(permit) => Ok(permit),
             Err(_error) if self.options.reopen_policy() == LocalDirectoryReopenPolicy::Reopen => {
                 self.close_all_host_frames();
                 self.open_directories
@@ -310,19 +317,12 @@ impl LocalDirectoryWalker {
                     .with_path(path.to_path_buf()),
             );
         }
-        self.acquire_host_directory(path)?;
-        let entries = match fs::read_dir(path) {
-            Ok(entries) => entries,
-            Err(error) => {
-                self.open_directories
-                    .release(1)
-                    .expect("failed open had reserved one directory slot");
-                return Err(walk_io_error(path, error));
-            }
-        };
+        let directory_permit = self.acquire_host_directory(path)?;
+        let entries = fs::read_dir(path).map_err(|error| walk_io_error(path, error))?;
         self.followed_directories.insert(identity.clone());
         self.stack.push(WalkFrame {
             entries: Some(entries),
+            directory_permit: Some(directory_permit),
             seen: HashSet::new(),
             relative,
             identity: Some(identity),
@@ -380,22 +380,20 @@ impl LocalDirectoryWalker {
                     .with_path(directory),
             );
         }
-        if let Err(error) = self.acquire_host_directory(&directory) {
-            return self.handle_reopen_error(error);
-        }
+        let directory_permit = match self.acquire_host_directory(&directory) {
+            Ok(permit) => permit,
+            Err(error) => return self.handle_reopen_error(error),
+        };
         let entries = match fs::read_dir(&directory) {
             Ok(entries) => entries,
-            Err(error) => {
-                self.open_directories
-                    .release(1)
-                    .expect("failed reopen had reserved one directory slot");
-                return self.handle_reopen_error(walk_io_error(&directory, error));
-            }
+            Err(error) => return self.handle_reopen_error(walk_io_error(&directory, error)),
         };
-        self.stack
+        let frame = self
+            .stack
             .last_mut()
-            .expect("reopening requires a non-empty walker stack")
-            .entries = Some(entries);
+            .expect("reopening requires a non-empty walker stack");
+        frame.entries = Some(entries);
+        frame.directory_permit = Some(directory_permit);
         Ok(())
     }
 
@@ -413,19 +411,17 @@ impl LocalDirectoryWalker {
     }
 }
 
-/// Closes one host frame reader and returns its pool capacity.
+/// Closes one host frame reader and drops its capacity permit.
 ///
 /// # Parameters
 ///
 /// - `frame`: Host frame whose optional reader is closed.
-/// - `pool`: Pool that recorded every open host reader.
 ///
-/// This function updates the frame and pool together. It panics only when
-/// their internal occupancy invariant was already violated.
-fn close_host_frame(frame: &mut WalkFrame, pool: &mut ResourcePool<LocalResourceKind, usize>) {
-    if frame.entries.take().is_some() {
-        pool.release(1).expect("one host reader was recorded as open");
-    }
+/// The reader is dropped before its permit so capacity never becomes available
+/// while the native reader is still open.
+fn close_host_frame(frame: &mut WalkFrame) {
+    let _ = frame.entries.take();
+    let _ = frame.directory_permit.take();
 }
 
 /// Creates the established listing error for exhausted directory capacity.
@@ -504,8 +500,8 @@ fn walker_deadline(root: &Path, options: &LocalListOptions) -> LocalResult<Optio
 }
 
 /// Creates the finite pool that accounts for opened directory readers.
-fn directory_pool(options: &LocalListOptions) -> ResourcePool<LocalResourceKind, usize> {
-    ResourcePool::new(LocalResourceKind::OpenDirectory, options.max_open_directories())
+fn directory_pool(options: &LocalListOptions) -> ManagedResourcePool<LocalResourceKind, usize> {
+    ManagedResourcePool::new(LocalResourceKind::OpenDirectory, options.max_open_directories())
 }
 
 fn name_bytes(name: &std::ffi::OsStr) -> usize {
@@ -542,7 +538,7 @@ impl Iterator for LocalDirectoryWalker {
         }
         if let Some(state) = self.rooted.as_mut() {
             let options = self.options;
-            let pool = &mut self.open_directories;
+            let pool = &self.open_directories;
             let result = next_rooted_entry(
                 state,
                 options,
@@ -666,19 +662,17 @@ fn is_terminal_walk_error(error: &LocalFileError, policy: LocalWalkErrorPolicy) 
             .is_some_and(|source| source.kind() == std::io::ErrorKind::TimedOut)
 }
 
-/// Closes one rooted frame reader and returns its pool capacity.
+/// Closes one rooted frame reader and drops its capacity permit.
 ///
 /// # Parameters
 ///
 /// - `frame`: Rooted frame whose optional reader is closed.
-/// - `pool`: Pool that recorded every open rooted reader.
 ///
-/// This function updates the frame and pool together. It panics only when
-/// their internal occupancy invariant was already violated.
-fn close_rooted_frame(frame: &mut RootedWalkFrame, pool: &mut ResourcePool<LocalResourceKind, usize>) {
-    if frame.reader.take().is_some() {
-        pool.release(1).expect("one rooted reader was recorded as open");
-    }
+/// The reader is dropped before its permit so capacity never becomes available
+/// while the rooted reader is still open.
+fn close_rooted_frame(frame: &mut RootedWalkFrame) {
+    let _ = frame.reader.take();
+    let _ = frame.directory_permit.take();
 }
 
 /// Closes all rooted readers while retaining their traversal frames.
@@ -686,10 +680,9 @@ fn close_rooted_frame(frame: &mut RootedWalkFrame, pool: &mut ResourcePool<Local
 /// # Parameters
 ///
 /// - `state`: Rooted traversal state containing retained frames.
-/// - `pool`: Pool that recorded every open rooted reader.
-fn close_all_rooted_frames(state: &mut RootedWalkState, pool: &mut ResourcePool<LocalResourceKind, usize>) {
+fn close_all_rooted_frames(state: &mut RootedWalkState) {
     for frame in &mut state.stack {
-        close_rooted_frame(frame, pool);
+        close_rooted_frame(frame);
     }
 }
 
@@ -698,17 +691,12 @@ fn close_all_rooted_frames(state: &mut RootedWalkState, pool: &mut ResourcePool<
 /// # Parameters
 ///
 /// - `state`: Rooted traversal state containing the frame stack.
-/// - `pool`: Pool that recorded every open rooted reader.
-///
 /// # Returns
 ///
 /// Returns the removed frame, or `None` when traversal is complete.
-fn pop_rooted_frame(
-    state: &mut RootedWalkState,
-    pool: &mut ResourcePool<LocalResourceKind, usize>,
-) -> Option<RootedWalkFrame> {
+fn pop_rooted_frame(state: &mut RootedWalkState) -> Option<RootedWalkFrame> {
     let mut frame = state.stack.pop()?;
-    close_rooted_frame(&mut frame, pool);
+    close_rooted_frame(&mut frame);
     Some(frame)
 }
 
@@ -726,16 +714,20 @@ fn pop_rooted_frame(
 /// Returns [`LocalFileErrorKind::ResourceLimit`] when capacity is exhausted
 /// under `Fail`. Under `Reopen`, every open rooted reader is closed before
 /// acquisition is retried.
+///
+/// # Returns
+///
+/// A permit that must remain owned for the opened reader's lifetime.
 fn acquire_rooted_directory(
     state: &mut RootedWalkState,
     options: LocalListOptions,
-    pool: &mut ResourcePool<LocalResourceKind, usize>,
+    pool: &ManagedResourcePool<LocalResourceKind, usize>,
     path: &Path,
-) -> LocalResult<()> {
+) -> LocalResult<ManagedResourcePermit<LocalResourceKind, usize>> {
     match pool.try_acquire(1) {
-        Ok(()) => Ok(()),
+        Ok(permit) => Ok(permit),
         Err(_error) if options.reopen_policy() == LocalDirectoryReopenPolicy::Reopen => {
-            close_all_rooted_frames(state, pool);
+            close_all_rooted_frames(state);
             pool.try_acquire(1).map_err(|error| directory_limit_error(path, error))
         }
         Err(error) => Err(directory_limit_error(path, error)),
@@ -748,7 +740,7 @@ fn acquire_rooted_directory(
 ///
 /// - `state`: Rooted traversal state.
 /// - `options`: Fixed traversal policy.
-/// - `pool`: Shared occupancy for currently open rooted readers.
+/// - `pool`: Shared managed capacity for currently open rooted readers.
 ///
 /// # Returns
 ///
@@ -756,7 +748,7 @@ fn acquire_rooted_directory(
 fn next_rooted_entry(
     state: &mut RootedWalkState,
     options: LocalListOptions,
-    pool: &mut ResourcePool<LocalResourceKind, usize>,
+    pool: &ManagedResourcePool<LocalResourceKind, usize>,
     entry_budget: &mut Option<ResourceBudget<LocalResourceKind, usize>>,
     seen_name_budget: &mut Option<ResourceBudget<LocalResourceKind, usize>>,
     deadline: Option<Instant>,
@@ -781,22 +773,23 @@ fn next_rooted_entry(
                 authority_parent.clone()
             };
             let diagnostic_path = state.root.path().join(&authority_parent);
-            if let Err(error) = acquire_rooted_directory(state, options, pool, &diagnostic_path) {
-                let failed = pop_rooted_frame(state, pool).expect("rooted walker stack is non-empty");
-                if let Some(identity) = failed.identity {
-                    state.followed_directories.remove(&identity);
+            let directory_permit = match acquire_rooted_directory(state, options, pool, &diagnostic_path) {
+                Ok(permit) => permit,
+                Err(error) => {
+                    let failed = pop_rooted_frame(state).expect("rooted walker stack is non-empty");
+                    if let Some(identity) = failed.identity {
+                        state.followed_directories.remove(&identity);
+                    }
+                    return Some(Err(error));
                 }
-                return Some(Err(error));
-            }
+            };
             let reader = if authority_parent.as_os_str().is_empty() {
                 state.root.open_root_dir_reader()
             } else {
                 let relative = match crate::local::LocalRelativePath::new(&authority_parent) {
                     Ok(relative) => relative,
                     Err(error) => {
-                        pool.release(1)
-                            .expect("invalid rooted path had reserved one rooted slot");
-                        let failed = pop_rooted_frame(state, pool).expect("rooted walker stack is non-empty");
+                        let failed = pop_rooted_frame(state).expect("rooted walker stack is non-empty");
                         if let Some(identity) = failed.identity {
                             state.followed_directories.remove(&identity);
                         }
@@ -816,8 +809,7 @@ fn next_rooted_entry(
                         }) {
                         Ok(identity) => identity,
                         Err(error) => {
-                            pool.release(1).expect("failed identity check held one rooted slot");
-                            let failed = pop_rooted_frame(state, pool).expect("rooted walker stack is non-empty");
+                            let failed = pop_rooted_frame(state).expect("rooted walker stack is non-empty");
                             if let Some(identity) = failed.identity {
                                 state.followed_directories.remove(&identity);
                             }
@@ -825,8 +817,7 @@ fn next_rooted_entry(
                         }
                     };
                     if state.stack.last().and_then(|frame| frame.identity.as_ref()) != Some(&observed_identity) {
-                        pool.release(1).expect("identity mismatch held one rooted slot");
-                        let failed = pop_rooted_frame(state, pool).expect("rooted walker stack is non-empty");
+                        let failed = pop_rooted_frame(state).expect("rooted walker stack is non-empty");
                         if let Some(identity) = failed.identity {
                             state.followed_directories.remove(&identity);
                         }
@@ -837,11 +828,12 @@ fn next_rooted_entry(
                         .with_reason("directory identity changed while reopening walker frame")
                         .with_path(authority_parent.clone())));
                     }
-                    state.stack.last_mut().expect("rooted walker stack is non-empty").reader = Some(reader);
+                    let frame = state.stack.last_mut().expect("rooted walker stack is non-empty");
+                    frame.reader = Some(reader);
+                    frame.directory_permit = Some(directory_permit);
                 }
                 Err(error) => {
-                    pool.release(1).expect("failed open had reserved one rooted slot");
-                    let failed = pop_rooted_frame(state, pool).expect("rooted walker stack is non-empty");
+                    let failed = pop_rooted_frame(state).expect("rooted walker stack is non-empty");
                     if let Some(identity) = failed.identity {
                         state.followed_directories.remove(&identity);
                     }
@@ -871,7 +863,7 @@ fn next_rooted_entry(
                 entry
             }
             Ok(None) => {
-                if let Some(frame) = pop_rooted_frame(state, pool)
+                if let Some(frame) = pop_rooted_frame(state)
                     && let Some(identity) = frame.identity
                 {
                     state.followed_directories.remove(&identity);
@@ -879,7 +871,7 @@ fn next_rooted_entry(
                 continue;
             }
             Err(error) => {
-                if let Some(frame) = pop_rooted_frame(state, pool)
+                if let Some(frame) = pop_rooted_frame(state)
                     && let Some(identity) = frame.identity
                 {
                     state.followed_directories.remove(&identity);
@@ -1005,6 +997,7 @@ fn next_rooted_entry(
                 });
             state.stack.push(RootedWalkFrame {
                 reader: None,
+                directory_permit: None,
                 seen: std::collections::HashSet::new(),
                 authority_parent,
                 output_parent: output_path.clone(),
