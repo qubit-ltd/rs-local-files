@@ -14,6 +14,7 @@ use crate::LocalCopyDirOptions;
 use crate::LocalCopyTypeConflictPolicy;
 use crate::LocalDurabilityRequirement;
 use crate::LocalSymlinkPolicy;
+use crate::local::CopyBudget;
 
 #[test]
 fn test_local_copy_dir_options_builders_update_every_policy() {
@@ -31,4 +32,24 @@ fn test_local_copy_dir_options_builders_update_every_policy() {
     assert_eq!(options.open_retry_timeout(), Some(Duration::from_secs(1)));
     assert_eq!(options.durability(), LocalDurabilityRequirement::Required);
     assert_eq!(LocalCopyDirOptions::default(), LocalCopyDirOptions::new());
+}
+
+#[test]
+fn test_copy_budget_directory_permit_releases_capacity_on_drop() {
+    let options = LocalCopyDirOptions::new().with_max_open_directories(1);
+    let budget = CopyBudget::new(options);
+
+    let permit = budget
+        .acquire_directory()
+        .expect("first directory permit should fit")
+        .expect("configured limit should return a permit");
+    assert!(budget.acquire_directory().is_err());
+
+    drop(permit);
+    assert!(
+        budget
+            .acquire_directory()
+            .expect("dropped permit should restore capacity")
+            .is_some()
+    );
 }
