@@ -91,7 +91,6 @@ pub(super) fn copy_dir_iterative(
             .next_entry();
         let Some(entry) = entry else {
             let completed = frames.pop().expect("non-empty traversal stack should have a frame");
-            budget.release_directory();
             let _ = active_sources.remove(completed.source_identity());
             if options.preserves_permissions() {
                 with_copy_context(
@@ -263,6 +262,9 @@ fn enter_copy_directory(
             stats,
         )?;
     }
+    let directory_permit = budget
+        .acquire_directory()
+        .map_err(|source| copy_dir_error(LocalCopyDirStage::ReadSourceDirectory, src, dst, stats, source))?;
     let entries = with_copy_context(
         fs::read_dir(src),
         LocalCopyDirStage::ReadSourceDirectory,
@@ -270,9 +272,6 @@ fn enter_copy_directory(
         dst,
         stats,
     )?;
-    budget
-        .acquire_directory()
-        .map_err(|source| copy_dir_error(LocalCopyDirStage::ReadSourceDirectory, src, dst, stats, source))?;
     let _ = active_sources.insert(source_identity.clone());
     Ok(Some(CopyDirFrame::new(
         src.to_path_buf(),
@@ -280,6 +279,7 @@ fn enter_copy_directory(
         source_identity,
         source_metadata.permissions(),
         entries,
+        directory_permit,
     )))
 }
 
