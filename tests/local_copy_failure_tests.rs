@@ -66,7 +66,8 @@ fn test_copy_failure_exposes_typed_state_and_parts() {
     let source = temp_path("missing-source");
     let target = temp_path("copy-target");
     let failure = LocalFileSystem::host()
-        .copy(&source, &target, &LocalCopyOptions::default())
+        .expect("Host filesystem should open")
+        .copy_with_options(&source, &target, &LocalCopyOptions::default())
         .expect_err("missing source must fail");
 
     assert_eq!(failure.state(), LocalCopyFailureState::Unchanged);
@@ -90,7 +91,8 @@ fn test_copy_failure_reports_second_child_partial_publication() {
         fs::write(source.join("second"), b"second").expect("second child should be written");
 
         let failure = LocalFileSystem::host()
-            .copy(&source, &target, &LocalCopyOptions::default().with_tree_source())
+            .expect("Host filesystem should open")
+            .copy_with_options(&source, &target, &LocalCopyOptions::default().with_tree_source())
             .expect_err("second child staging fault must fail");
 
         assert_eq!(LocalCopyFailureState::PartiallyPublished, failure.state());
@@ -117,7 +119,8 @@ fn test_copy_failure_reports_published_after_parent_sync_fault() {
         fs::write(&source, b"payload").expect("source file should be written");
 
         let failure = LocalFileSystem::host()
-            .copy(
+            .expect("Host filesystem should open")
+            .copy_with_options(
                 &source,
                 &target,
                 &LocalCopyOptions::default().with_durability(LocalDurabilityRequirement::Required),
@@ -145,7 +148,8 @@ fn test_copy_failure_retains_staging_only_for_cleanup_failure() {
         fs::write(&source, b"payload").expect("source file should be written");
 
         let failure = LocalFileSystem::host()
-            .copy(&source, &target, &LocalCopyOptions::default())
+            .expect("Host filesystem should open")
+            .copy_with_options(&source, &target, &LocalCopyOptions::default())
             .expect_err("staging and cleanup faults must fail");
 
         assert!(failure.staging_path().is_some());
@@ -165,7 +169,8 @@ fn test_copy_failure_omits_staging_after_successful_cleanup() {
         fs::write(&source, b"payload").expect("source file should be written");
 
         let failure = LocalFileSystem::host()
-            .copy(&source, &target, &LocalCopyOptions::default())
+            .expect("Host filesystem should open")
+            .copy_with_options(&source, &target, &LocalCopyOptions::default())
             .expect_err("staging fault must fail");
 
         assert!(failure.staging_path().is_none());
@@ -186,7 +191,8 @@ fn test_copy_failure_reports_indeterminate_for_destination_preparation_fault() {
         fs::create_dir(&source).expect("source directory should be created");
 
         let failure = LocalFileSystem::host()
-            .copy(&source, &target, &LocalCopyOptions::default().with_tree_source())
+            .expect("Host filesystem should open")
+            .copy_with_options(&source, &target, &LocalCopyOptions::default().with_tree_source())
             .expect_err("destination preparation fault must fail");
 
         assert_eq!(LocalCopyFailureState::Indeterminate, failure.state());
@@ -207,7 +213,8 @@ fn test_copy_failure_reports_unchanged_for_source_inspection_fault() {
         fs::create_dir(&source).expect("source directory should be created");
 
         let failure = LocalFileSystem::host()
-            .copy(&source, &target, &LocalCopyOptions::default().with_tree_source())
+            .expect("Host filesystem should open")
+            .copy_with_options(&source, &target, &LocalCopyOptions::default().with_tree_source())
             .expect_err("source inspection fault must fail before publication");
 
         assert_eq!(LocalCopyFailureState::Unchanged, failure.state());
@@ -229,7 +236,8 @@ fn test_copy_failure_reports_directory_identity_cycle() {
         fs::write(source.join("nested/payload"), b"payload").expect("source payload should be written");
 
         LocalFileSystem::host()
-            .copy(&source, &target, &LocalCopyOptions::default().with_tree_source())
+            .expect("Host filesystem should open")
+            .copy_with_options(&source, &target, &LocalCopyOptions::default().with_tree_source())
             .expect_err("injected directory cycle must fail");
     });
 }
@@ -246,7 +254,8 @@ fn test_copy_failure_reports_staging_permission_failure() {
         fs::write(&source, b"payload").expect("source payload should be written");
 
         LocalFileSystem::host()
-            .copy(
+            .expect("Host filesystem should open")
+            .copy_with_options(
                 &source,
                 &target,
                 &LocalCopyOptions::default().with_metadata_preservation(LocalMetadataPreservePolicy::Permissions),
@@ -268,7 +277,8 @@ fn test_copy_failure_reports_directory_statistics_overflow() {
         fs::write(source.join("payload"), b"payload").expect("source payload should be written");
 
         LocalFileSystem::host()
-            .copy(
+            .expect("Host filesystem should open")
+            .copy_with_options(
                 &directory.path().join("source"),
                 &target,
                 &LocalCopyOptions::default().with_tree_source(),
@@ -290,7 +300,8 @@ fn test_copy_failure_reports_skipped_statistics_overflow() {
         fs::write(&target, b"target").expect("target payload should be written");
 
         LocalFileSystem::host()
-            .copy(
+            .expect("Host filesystem should open")
+            .copy_with_options(
                 &source,
                 &target,
                 &LocalCopyOptions::default().with_conflict(LocalCopyConflictPolicy::Skip),
@@ -311,7 +322,8 @@ fn test_copy_failure_reports_file_statistics_overflow() {
         fs::write(&source, b"source").expect("source payload should be written");
 
         LocalFileSystem::host()
-            .copy(&source, &target, &LocalCopyOptions::default())
+            .expect("Host filesystem should open")
+            .copy_with_options(&source, &target, &LocalCopyOptions::default())
             .expect_err("file statistics overflow must fail");
     });
 }
@@ -328,7 +340,8 @@ fn test_copy_failure_reports_byte_statistics_overflow() {
         fs::write(&source, b"source").expect("source payload should be written");
 
         LocalFileSystem::host()
-            .copy(&source, &target, &LocalCopyOptions::default())
+            .expect("Host filesystem should open")
+            .copy_with_options(&source, &target, &LocalCopyOptions::default())
             .expect_err("byte statistics overflow must fail");
     });
 }
@@ -349,7 +362,8 @@ fn test_copy_failure_reports_overwritten_statistics_overflow() {
         fs::write(target.join("payload"), b"target").expect("target payload should be written");
 
         LocalFileSystem::host()
-            .copy(
+            .expect("Host filesystem should open")
+            .copy_with_options(
                 &source,
                 &target,
                 &LocalCopyOptions::default()

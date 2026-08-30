@@ -56,7 +56,13 @@ pub(crate) fn rooted_destination_is_directory(
 pub(crate) fn rooted_temp_parent(parent: Option<&Path>, operation: LocalFileOperation) -> LocalResult<PathBuf> {
     parent.map_or_else(
         || Ok(PathBuf::new()),
-        |parent| rooted_path(parent, operation).map(|path| path.as_path().to_path_buf()),
+        |parent| {
+            if parent.as_os_str().is_empty() {
+                Ok(PathBuf::new())
+            } else {
+                rooted_path(parent, operation).map(|path| path.as_path().to_path_buf())
+            }
+        },
     )
 }
 

@@ -12,7 +12,9 @@ use qubit_local_files::LocalFileSystem;
 /// Verifies operation capability queries remain coherent on the host target.
 #[test]
 fn test_local_file_system_capabilities_report_operation_protocols() {
-    let capabilities = LocalFileSystem::host().protocols();
+    let capabilities = LocalFileSystem::host()
+        .expect("Host filesystem should open")
+        .protocols();
 
     assert!(capabilities.supports_rooted_operations());
     assert!(capabilities.supports_atomic_rename());

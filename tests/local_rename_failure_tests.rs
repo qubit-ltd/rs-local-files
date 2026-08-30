@@ -62,7 +62,8 @@ fn test_rename_missing_source_reports_unchanged() {
     let source = temp_path("missing-source");
     let target = temp_path("rename-target");
     let failure = LocalFileSystem::host()
-        .rename(&source, &target, &LocalRenameOptions::default())
+        .expect("Host filesystem should open")
+        .rename_with_options(&source, &target, &LocalRenameOptions::default())
         .expect_err("missing source must fail");
 
     assert_eq!(LocalRenameFailureState::Unchanged, failure.state());
@@ -85,7 +86,8 @@ fn test_rename_parent_durability_failure_reports_renamed() {
         std::fs::write(&source, b"payload").expect("source should be written");
 
         let failure = LocalFileSystem::host()
-            .rename(
+            .expect("Host filesystem should open")
+            .rename_with_options(
                 &source,
                 &target,
                 &LocalRenameOptions::default().with_durability(LocalDurabilityRequirement::Required),
@@ -110,7 +112,8 @@ fn test_rename_native_io_failure_reports_indeterminate() {
         std::fs::write(&source, b"payload").expect("source should be written");
 
         let failure = LocalFileSystem::host()
-            .rename(&source, &target, &LocalRenameOptions::default())
+            .expect("Host filesystem should open")
+            .rename_with_options(&source, &target, &LocalRenameOptions::default())
             .expect_err("native I/O fault must fail");
 
         assert_eq!(LocalRenameFailureState::Indeterminate, failure.state());

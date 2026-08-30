@@ -19,7 +19,6 @@ use std::os::windows::fs::OpenOptionsExt;
 #[cfg(windows)]
 use std::os::windows::io::AsRawHandle;
 use std::path::Path;
-#[cfg(not(unix))]
 use std::path::PathBuf;
 
 #[cfg(windows)]
@@ -41,11 +40,30 @@ pub(crate) enum DirectoryIdentity {
         file: u64,
     },
     /// Canonical-path fallback when native identity is unavailable.
-    #[cfg(not(unix))]
     Canonical(PathBuf),
 }
 
 impl DirectoryIdentity {
+    /// Builds an identity from descriptor-relative rooted metadata.
+    pub(crate) fn from_rooted_metadata(metadata: &crate::rooted::Metadata, fallback: &Path) -> Self {
+        #[cfg(all(feature = "internal-test-support", any(unix, windows)))]
+        if injected_cycle_identity() {
+            return Self::Native { filesystem: 0, file: 0 };
+        }
+        #[cfg(any(unix, windows))]
+        {
+            metadata.native_identity().map_or_else(
+                || Self::Canonical(fallback.to_path_buf()),
+                |(filesystem, file)| Self::Native { filesystem, file },
+            )
+        }
+        #[cfg(not(any(unix, windows)))]
+        {
+            let _ = metadata;
+            Self::Canonical(fallback.to_path_buf())
+        }
+    }
+
     /// Builds a directory identity from metadata and its canonical path.
     ///
     /// # Parameters

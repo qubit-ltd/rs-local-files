@@ -18,7 +18,6 @@ use std::path::PathBuf;
 use std::time::Duration;
 
 use super::internal::AtomicInstallRecovery;
-use super::internal::DEFAULT_TEMP_ENTRY_RETRIES;
 use super::internal::LocalAtomicPublicationMode;
 #[cfg(unix)]
 use super::internal::OpenedAtomicDestination;
@@ -190,7 +189,7 @@ impl LocalAtomicWriter {
                 parent,
                 Some(ATOMIC_WRITE_TEMP_PREFIX),
                 Some(ATOMIC_WRITE_TEMP_SUFFIX),
-                DEFAULT_TEMP_ENTRY_RETRIES,
+                None,
             ),
             LocalAtomicWriteStage::CreateTemporaryFile,
             path,

@@ -9,6 +9,8 @@
 // Rooted copy operations.
 // qubit-style: allow source-test-pair
 
+use std::time::Instant;
+
 use super::LocalCopyFailure;
 use super::LocalCopyMethod;
 use super::LocalCopyOptions;
@@ -55,6 +57,7 @@ impl RootedLocalFileSystem {
         target: &Path,
         options: &LocalCopyOptions,
         symlink_policy: LocalSymlinkPolicy,
+        started_at: Instant,
     ) -> LocalCopyResult {
         ensure_required_directory_durability(
             options.durability(),
@@ -66,6 +69,17 @@ impl RootedLocalFileSystem {
         )
         .map_err(copy_failure_unchanged)?;
         let symlink_policy = options.symlink_policy_override().unwrap_or(symlink_policy);
+        let mut internal_options = crate::local::internal_copy_options(options, symlink_policy, started_at);
+        let mut budget = crate::local::CopyBudget::new(internal_options);
+        budget
+            .check_deadline()
+            .map_err(|error| copy_failure_unchanged(rooted_io_error(LocalFileOperation::Copy, source, error)))?;
+        budget
+            .charge_entry()
+            .map_err(|error| copy_failure_unchanged(rooted_io_error(LocalFileOperation::Copy, source, error)))?;
+        if let Some(max_entries) = internal_options.max_entries() {
+            internal_options = internal_options.with_max_entries(max_entries - 1);
+        }
         let source_path = resolve_rooted_path(&self.root, source, symlink_policy, false, LocalFileOperation::Copy)
             .map_err(copy_failure_unchanged)?;
         let target_path = resolve_rooted_path(&self.root, target, symlink_policy, false, LocalFileOperation::Copy)
@@ -141,12 +155,7 @@ impl RootedLocalFileSystem {
         }
         let stats = self
             .root
-            .copy_with_durability(
-                &source_path,
-                &target_path,
-                crate::local::internal_copy_options(options, symlink_policy),
-                options.durability(),
-            )
+            .copy_with_durability(&source_path, &target_path, internal_options, options.durability())
             .map_err(|error| LocalCopyFailure::from_copy_dir_error(source, target, error))?;
         let parent_durable = published_durability(
             options.durability(),

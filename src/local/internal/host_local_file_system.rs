@@ -8,6 +8,7 @@
 
 mod copy;
 mod delete;
+mod delete_work;
 mod directory;
 #[path = "host_local_file_system/io.rs"]
 mod io_operations;

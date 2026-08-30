@@ -17,7 +17,8 @@ use tempfile::tempdir;
 fn test_copy_failure_before_publication_is_unchanged() {
     let directory = tempdir().expect("copy fixture directory must be created");
     let failure = LocalFileSystem::host()
-        .copy(
+        .expect("Host filesystem should open")
+        .copy_with_options(
             &directory.path().join("missing"),
             &directory.path().join("target"),
             &LocalCopyOptions::new(),

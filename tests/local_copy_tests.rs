@@ -39,7 +39,8 @@ fn test_copy_tree_skips_nested_type_conflicts() {
     fs::write(target.join("directory-to-file"), b"target-file").expect("target file should be written");
 
     let outcome = LocalFileSystem::host()
-        .copy(
+        .expect("Host filesystem should open")
+        .copy_with_options(
             &source,
             &target,
             &LocalCopyOptions::new()
@@ -77,7 +78,8 @@ fn test_copy_failure_preserves_unchanged_state() {
     let target = temp_path("missing-target");
 
     let failure = LocalFileSystem::host()
-        .copy(&source, &target, &LocalCopyOptions::default())
+        .expect("Host filesystem should open")
+        .copy_with_options(&source, &target, &LocalCopyOptions::default())
         .expect_err("missing source must fail");
 
     assert_eq!(LocalCopyFailureState::Unchanged, failure.state());
@@ -94,7 +96,8 @@ fn test_local_file_system_copy_unifies_file_and_directory_copy() {
     fs::write(&source_file, b"file").expect("source file should be written");
 
     let file_outcome = LocalFileSystem::host()
-        .copy(&source_file, &target_file, &LocalCopyOptions::new())
+        .expect("Host filesystem should open")
+        .copy_with_options(&source_file, &target_file, &LocalCopyOptions::new())
         .expect("file copy should succeed");
     assert_eq!(LocalCopyMethod::StagedFile, file_outcome.method());
     assert_eq!(1, file_outcome.stats().files());
@@ -106,7 +109,8 @@ fn test_local_file_system_copy_unifies_file_and_directory_copy() {
     fs::write(source_directory.join("child"), b"tree").expect("child should be written");
 
     let tree_outcome = LocalFileSystem::host()
-        .copy(
+        .expect("Host filesystem should open")
+        .copy_with_options(
             &source_directory,
             &target_directory,
             &LocalCopyOptions::new().with_tree_source(),
@@ -130,7 +134,8 @@ fn test_local_file_system_copy_honors_entry_and_byte_budgets() {
     fs::create_dir(&source).expect("source directory should be created");
     fs::write(source.join("child"), b"payload").expect("child should be written");
     let failure = LocalFileSystem::host()
-        .copy(
+        .expect("Host filesystem should open")
+        .copy_with_options(
             &source,
             &target,
             &LocalCopyOptions::new()
@@ -151,7 +156,8 @@ fn test_local_file_system_copy_auto_detects_directory_sources() {
     fs::create_dir(&source).expect("source directory should be created");
 
     let outcome = LocalFileSystem::host()
-        .copy(&source, &target, &LocalCopyOptions::new())
+        .expect("Host filesystem should open")
+        .copy_with_options(&source, &target, &LocalCopyOptions::new())
         .expect("automatic source selection must copy a directory tree");
     assert_eq!(LocalCopyMethod::Recursive, outcome.method());
     assert!(target.is_dir());
@@ -167,7 +173,8 @@ fn test_local_file_system_copy_rejects_required_directory_replacement() {
     fs::create_dir(&target).expect("target directory should be created");
 
     let error = LocalFileSystem::host()
-        .copy(
+        .expect("Host filesystem should open")
+        .copy_with_options(
             &source,
             &target,
             &LocalCopyOptions::new()
@@ -189,10 +196,12 @@ fn test_local_file_system_copy_conflict_policy_matrix() {
     fs::write(&target, b"target").expect("target should be written");
 
     LocalFileSystem::host()
-        .copy(&source, &target, &LocalCopyOptions::new())
+        .expect("Host filesystem should open")
+        .copy_with_options(&source, &target, &LocalCopyOptions::new())
         .expect_err("existing file should fail under the default policy");
     let outcome = LocalFileSystem::host()
-        .copy(
+        .expect("Host filesystem should open")
+        .copy_with_options(
             &source,
             &target,
             &LocalCopyOptions::new().with_conflict(LocalCopyConflictPolicy::Overwrite),
@@ -204,7 +213,8 @@ fn test_local_file_system_copy_conflict_policy_matrix() {
     fs::remove_file(&target).expect("file target should be removed");
     fs::create_dir(&target).expect("directory target should be created");
     LocalFileSystem::host()
-        .copy(&source, &target, &LocalCopyOptions::new())
+        .expect("Host filesystem should open")
+        .copy_with_options(&source, &target, &LocalCopyOptions::new())
         .expect_err("file-to-directory conflict should fail by default");
 }
 
@@ -222,7 +232,8 @@ fn test_recursive_copy_preserves_directory_permissions() {
     fs::set_permissions(&source, fs::Permissions::from_mode(0o750)).expect("source permissions should be configured");
 
     let outcome = LocalFileSystem::host()
-        .copy(
+        .expect("Host filesystem should open")
+        .copy_with_options(
             &source,
             &target,
             &LocalCopyOptions::new()
@@ -249,7 +260,8 @@ fn test_recursive_copy_preserves_nested_symlink_entry() {
     symlink("referent", source.join("link")).expect("source symlink should be created");
 
     let _ = LocalFileSystem::host()
-        .copy(&source, &target, &LocalCopyOptions::new().with_tree_source())
+        .expect("Host filesystem should open")
+        .copy_with_options(&source, &target, &LocalCopyOptions::new().with_tree_source())
         .expect("recursive copy should preserve the nested symlink");
 
     assert_eq!(
@@ -275,7 +287,8 @@ fn test_local_file_system_copy_rejects_hard_link_alias() {
     fs::hard_link(&source, &alias).expect("hard-link alias should be created");
 
     let error = LocalFileSystem::host()
-        .copy(
+        .expect("Host filesystem should open")
+        .copy_with_options(
             &source,
             &alias,
             &LocalCopyOptions::new().with_conflict(LocalCopyConflictPolicy::Overwrite),
@@ -304,7 +317,8 @@ fn test_local_file_system_copy_overwrite_replaces_target_symlink() {
     symlink(&referent, &target).expect("target symlink should be created");
 
     let outcome = LocalFileSystem::host()
-        .copy(
+        .expect("Host filesystem should open")
+        .copy_with_options(
             &source,
             &target,
             &LocalCopyOptions::new().with_conflict(LocalCopyConflictPolicy::Overwrite),
@@ -346,7 +360,8 @@ fn test_local_file_system_copy_skips_dangling_target_symlink() {
     symlink("missing", &target).expect("dangling target symlink should be created");
 
     let outcome = LocalFileSystem::host()
-        .copy(
+        .expect("Host filesystem should open")
+        .copy_with_options(
             &source,
             &target,
             &LocalCopyOptions::new().with_type_conflict(LocalCopyTypeConflictPolicy::Skip),
@@ -374,7 +389,8 @@ fn test_local_copy_preferred_durability_reports_downgrade() {
         .expect("target parent should reject directory open");
 
     let outcome = LocalFileSystem::host()
-        .copy(
+        .expect("Host filesystem should open")
+        .copy_with_options(
             &source,
             &target,
             &LocalCopyOptions::new().with_durability(LocalDurabilityRequirement::Preferred),

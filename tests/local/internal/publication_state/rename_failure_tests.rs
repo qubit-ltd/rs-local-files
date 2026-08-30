@@ -17,7 +17,8 @@ use tempfile::tempdir;
 fn test_rename_failure_before_publication_is_unchanged() {
     let directory = tempdir().expect("rename fixture directory must be created");
     let failure = LocalFileSystem::host()
-        .rename(
+        .expect("Host filesystem should open")
+        .rename_with_options(
             &directory.path().join("missing"),
             &directory.path().join("target"),
             &LocalRenameOptions::new(),

@@ -21,7 +21,6 @@
 //! ```compile_fail
 //! use qubit_local_files::open_writer;
 //! ```
-mod authority;
 mod capability;
 mod error;
 mod file_system;
@@ -35,7 +34,6 @@ mod local_file_system_scope;
 mod options;
 mod outcome;
 mod path;
-mod platform;
 pub mod policy;
 mod read;
 mod rooted;
@@ -61,9 +59,6 @@ pub use error::LocalPathCodecError;
 pub use error::LocalResourceKind;
 pub use error::LocalResourceLimitError;
 pub use error::LocalResult;
-pub use file_system::LocalCopyLimits;
-pub use file_system::LocalFileSystemBuilder;
-pub use file_system::LocalWalkLimits;
 pub(crate) use local::LocalAtomicCommitError;
 pub(crate) use local::LocalAtomicDestinationState;
 pub(crate) use local::LocalAtomicWriteError;
@@ -125,7 +120,6 @@ pub use outcome::LocalWritePublicationMethod;
 pub use path::LocalFileNames;
 pub use path::LocalPathCodec;
 pub use path::LocalPaths;
-pub(crate) use path::RelativePath;
 pub use policy::LocalAtomicityRequirement;
 pub use policy::LocalDurabilityRequirement;
 pub use policy::LocalSymlinkPolicy;

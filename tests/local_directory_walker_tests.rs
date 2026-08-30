@@ -7,6 +7,7 @@
 // =============================================================================
 
 use std::fs;
+use std::path::Path;
 use std::path::PathBuf;
 
 use qubit_local_files::LocalDirectoryReopenPolicy;
@@ -30,7 +31,8 @@ fn test_local_directory_walker_recurses_lazily() {
     fs::write(directory.path().join("nested/child.txt"), b"child").expect("nested file should be written");
 
     let walker = LocalFileSystem::host()
-        .list(directory.path(), &LocalListOptions::new().with_recursive())
+        .expect("Host filesystem should open")
+        .list_with_options(directory.path(), &LocalListOptions::new().with_recursive())
         .expect("walker should be created");
     let mut entries = walker
         .map(|entry| entry.expect("fixture traversal should succeed"))
@@ -59,7 +61,8 @@ fn test_local_directory_walker_honors_max_depth() {
     fs::write(directory.path().join("nested/child"), b"x").expect("child should be written");
 
     let entries = LocalFileSystem::host()
-        .list(
+        .expect("Host filesystem should open")
+        .list_with_options(
             directory.path(),
             &LocalListOptions::new().with_recursive().with_max_depth(1),
         )
@@ -77,7 +80,8 @@ fn test_local_directory_walker_honors_entry_and_name_budgets() {
     fs::write(directory.path().join("entry"), b"x").expect("entry should be written");
     fs::write(directory.path().join("second"), b"y").expect("second entry should be written");
     let mut walker = LocalFileSystem::host()
-        .list(
+        .expect("Host filesystem should open")
+        .list_with_options(
             directory.path(),
             &LocalListOptions::new().with_max_entries(1).with_max_seen_name_bytes(16),
         )
@@ -89,7 +93,8 @@ fn test_local_directory_walker_honors_entry_and_name_budgets() {
         .expect_err("second entry should exceed the entry budget");
     assert_eq!(LocalFileErrorKind::ResourceLimit, error.kind());
     let mut name_limited = LocalFileSystem::host()
-        .list(directory.path(), &LocalListOptions::new().with_max_seen_name_bytes(2))
+        .expect("Host filesystem should open")
+        .list_with_options(directory.path(), &LocalListOptions::new().with_max_seen_name_bytes(2))
         .expect("walker should be created");
     assert_eq!(
         LocalFileErrorKind::ResourceLimit,
@@ -109,7 +114,8 @@ fn test_local_directory_walker_rejects_handle_budget_exhaustion() {
     fs::write(directory.path().join("nested/child"), b"x").expect("child should be written");
 
     let mut walker = LocalFileSystem::host()
-        .list(
+        .expect("Host filesystem should open")
+        .list_with_options(
             directory.path(),
             &LocalListOptions::new()
                 .with_recursive()
@@ -141,7 +147,8 @@ fn test_local_directory_walker_reopens_frames_past_handle_budget() {
     fs::write(current.join("payload"), b"payload").expect("deep payload should be written");
 
     let entries = LocalFileSystem::host()
-        .list(
+        .expect("Host filesystem should open")
+        .list_with_options(
             directory.path(),
             &LocalListOptions::new()
                 .with_recursive()
@@ -173,7 +180,8 @@ fn test_local_directory_walker_fail_fast_terminates_after_reopen_error() {
         .with_reopen_policy(LocalDirectoryReopenPolicy::Reopen)
         .with_error_policy(LocalWalkErrorPolicy::FailFast);
     let mut walker = LocalFileSystem::host()
-        .list(directory.path(), &options)
+        .expect("Host filesystem should open")
+        .list_with_options(directory.path(), &options)
         .expect("walker should be created");
     assert_eq!(
         PathBuf::from("nested"),
@@ -206,7 +214,8 @@ fn test_local_directory_walker_continue_discards_reopen_error_frame() {
         .with_reopen_policy(LocalDirectoryReopenPolicy::Reopen)
         .with_error_policy(LocalWalkErrorPolicy::Continue);
     let mut walker = LocalFileSystem::host()
-        .list(directory.path(), &options)
+        .expect("Host filesystem should open")
+        .list_with_options(directory.path(), &options)
         .expect("walker should be created");
     let _ = walker
         .next()
@@ -233,13 +242,15 @@ fn test_local_directory_walker_follows_links_by_default_on_host() {
     symlink(outside.path(), directory.path().join("link")).expect("link should be created");
 
     let entries = LocalFileSystem::host()
-        .list(directory.path(), &LocalListOptions::new())
+        .expect("Host filesystem should open")
+        .list_with_options(directory.path(), &LocalListOptions::new().with_recursive())
         .expect("walker should be created")
         .collect::<Result<Vec<_>, _>>()
         .expect("link entry should be observable");
 
-    assert_eq!(1, entries.len());
-    assert_eq!(LocalFileKind::Directory, entries[0].metadata().kind());
+    assert_eq!(2, entries.len());
+    assert_eq!(LocalFileKind::Symlink, entries[0].metadata().kind());
+    assert_eq!(Path::new("link/secret"), entries[1].relative_path());
 }
 
 /// Verifies an explicit reject override keeps the link entry visible.
@@ -254,7 +265,8 @@ fn test_local_directory_walker_can_reject_symlinks_per_operation() {
     symlink(outside.path(), directory_path.join("link")).expect("link should be created");
 
     let entries = LocalFileSystem::host()
-        .list(
+        .expect("Host filesystem should open")
+        .list_with_options(
             &directory_path,
             &LocalListOptions::new().with_symlink_policy(LocalSymlinkPolicy::Reject),
         )

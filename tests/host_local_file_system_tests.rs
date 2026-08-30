@@ -32,6 +32,7 @@ fn test_host_local_file_system_inspects_native_namespace() {
     fs::write(&path, b"payload").expect("fixture should be written");
 
     let configured = LocalFileSystem::host()
+        .expect("Host filesystem should open")
         .metadata(&path)
         .expect("configured Host filesystem should inspect the fixture");
 
@@ -43,22 +44,22 @@ fn test_host_local_file_system_inspects_native_namespace() {
 #[test]
 fn test_host_local_file_system_workflow() {
     let directory = tempdir().expect("temporary directory should be created");
-    let filesystem = LocalFileSystem::host();
+    let filesystem = LocalFileSystem::host().expect("Host filesystem should open");
     let tree = directory.path().join("tree");
     let _ = filesystem
-        .create_directory(&tree, &LocalCreateDirectoryOptions::new().with_recursive())
+        .create_directory_with_options(&tree, &LocalCreateDirectoryOptions::new().with_recursive())
         .expect("directory should be created");
 
     let source = tree.join("source");
     let mut writer = filesystem
-        .open_writer(&source, &LocalWriteOptions::new(LocalWriteMode::CreateNew))
+        .open_writer_with_options(&source, &LocalWriteOptions::new(LocalWriteMode::CreateNew))
         .expect("writer should open");
     writer.write_all(b"payload").expect("payload should be written");
     let _ = writer.commit().expect("payload should be committed");
 
     let mut payload = Vec::new();
     filesystem
-        .open_reader(&source, &LocalReadOptions::new())
+        .open_reader_with_options(&source, &LocalReadOptions::new())
         .expect("reader should open")
         .read_to_end(&mut payload)
         .expect("payload should be read");
@@ -66,37 +67,37 @@ fn test_host_local_file_system_workflow() {
     assert_eq!(
         1,
         filesystem
-            .list(&tree, &LocalListOptions::new())
+            .list_with_options(&tree, &LocalListOptions::new())
             .expect("tree should list")
             .count()
     );
 
     let copied = tree.join("copied");
     let _ = filesystem
-        .copy(&source, &copied, &LocalCopyOptions::new())
+        .copy_with_options(&source, &copied, &LocalCopyOptions::new())
         .expect("file should be copied");
     let renamed = tree.join("renamed");
     let _ = filesystem
-        .rename(&copied, &renamed, &LocalRenameOptions::new())
+        .rename_with_options(&copied, &renamed, &LocalRenameOptions::new())
         .expect("file should be renamed");
     let _ = filesystem
-        .delete_file(&renamed, &LocalDeleteOptions::new())
+        .delete_file_with_options(&renamed, &LocalDeleteOptions::new())
         .expect("renamed file should be deleted");
 
     let temp_file = filesystem
-        .create_temp_file(&LocalTempFileOptions::new())
+        .create_temp_file_with_options(&LocalTempFileOptions::new())
         .expect("temporary file should be created");
     let temp_directory = filesystem
-        .create_temp_directory(&LocalTempDirectoryOptions::new())
+        .create_temp_directory_with_options(&LocalTempDirectoryOptions::new())
         .expect("temporary directory should be created");
     assert!(temp_file.path().exists());
     assert!(temp_directory.path().exists());
 
     let _ = filesystem
-        .delete_file(&source, &LocalDeleteOptions::new())
+        .delete_file_with_options(&source, &LocalDeleteOptions::new())
         .expect("source file should be deleted");
     let _ = filesystem
-        .delete_directory(&tree, &LocalDeleteOptions::new())
+        .delete_directory_with_options(&tree, &LocalDeleteOptions::new())
         .expect("tree should be deleted");
 }
 
@@ -107,11 +108,11 @@ fn test_host_read_prefix() {
     let path = directory.path().join("payload");
     fs::write(&path, b"payload").expect("fixture should be written");
 
-    let filesystem = LocalFileSystem::host();
+    let filesystem = LocalFileSystem::host().expect("Host filesystem should open");
     assert_eq!(
         b"pay".as_slice(),
         filesystem
-            .read_prefix(&path, &LocalReadOptions::new(), 3)
+            .read_prefix_with_options(&path, 3, &LocalReadOptions::new())
             .expect("prefix should be readable")
             .as_slice()
     );

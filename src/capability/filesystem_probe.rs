@@ -10,6 +10,7 @@
 use std::fs::File;
 
 use super::LocalFileSystemLimits;
+use super::LocalFileSystemSpace;
 use super::SizeLimit;
 
 /// Reads stable path limits without turning probe failures into I/O failures.
@@ -28,6 +29,35 @@ pub(crate) fn limits(file: &File) -> LocalFileSystemLimits {
     {
         let _ = file;
         LocalFileSystemLimits::new(SizeLimit::Unknown, SizeLimit::Unknown)
+    }
+}
+
+/// Reads dynamic capacity from an already-opened filesystem handle.
+///
+/// Probe failures are represented by unavailable dimensions.
+#[inline]
+pub(crate) fn space(file: &File) -> LocalFileSystemSpace {
+    #[cfg(unix)]
+    {
+        use std::mem::MaybeUninit;
+        use std::os::fd::AsRawFd;
+
+        let mut status = MaybeUninit::<libc::statvfs>::zeroed();
+        // SAFETY: `file` owns a live descriptor and `status` is writable
+        // storage for the complete `fstatvfs` result.
+        if unsafe { libc::fstatvfs(file.as_raw_fd(), status.as_mut_ptr()) } != 0 {
+            return LocalFileSystemSpace::new(None, None, None);
+        }
+        // SAFETY: successful `fstatvfs` initialized the complete value.
+        let status = unsafe { status.assume_init() };
+        let fragment_size = status.f_frsize as u128;
+        let bytes = |blocks| u64::try_from((blocks as u128).checked_mul(fragment_size)?).ok();
+        LocalFileSystemSpace::new(bytes(status.f_blocks), bytes(status.f_bfree), bytes(status.f_bavail))
+    }
+    #[cfg(not(unix))]
+    {
+        let _ = file;
+        LocalFileSystemSpace::new(None, None, None)
     }
 }
 

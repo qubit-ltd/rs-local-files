@@ -113,7 +113,6 @@ pub(super) use opened_atomic_destination::open_rooted_atomic_destination;
 pub(crate) use operation_policy::ensure_required_directory_durability;
 pub(crate) use path_operations::absolute_path;
 pub(crate) use path_operations::add_path_context;
-pub(crate) use path_operations::ensure_parent_path;
 pub(crate) use path_operations::ensure_parent_path_with_sync_dirs;
 pub(crate) use publication_state::copy_failure_published;
 pub(crate) use publication_state::copy_failure_unchanged;
@@ -142,8 +141,6 @@ pub(super) use rooted_file_io::open_rooted_parent;
 #[cfg(unix)]
 pub(crate) use rooted_file_io::read_rooted_symlink_metadata;
 #[cfg(unix)]
-pub(crate) use rooted_file_io::root_authority_path;
-#[cfg(unix)]
 pub(crate) use rooted_file_io::sync_rooted_parent;
 #[cfg(unix)]
 pub(crate) use rooted_namespace_io::create_rooted_directory;
@@ -170,7 +167,6 @@ pub(super) use rooted_parent_mode::RootedParentMode;
 #[cfg(unix)]
 pub(super) use rooted_staged_file::RootedStagedFile;
 pub(crate) use staged_file::StagedFile;
-pub(crate) use temp_entry::DEFAULT_TEMP_ENTRY_RETRIES;
 pub(crate) use temp_entry::create_temp_dir_in_dir_with_affixes;
 pub(crate) use temp_entry::create_temp_file_in_dir;
 pub(crate) use temp_entry::validate_temp_affixes;
@@ -204,8 +200,6 @@ pub(crate) use windows_rooted::read_rooted_symlink_metadata;
 pub(crate) use windows_rooted::remove_rooted_entry;
 #[cfg(windows)]
 pub(crate) use windows_rooted::rename_rooted_entry;
-#[cfg(windows)]
-pub(crate) use windows_rooted::root_authority_path;
 #[cfg(windows)]
 pub(crate) use windows_rooted::rooted_link_targets_directory;
 #[cfg(windows)]

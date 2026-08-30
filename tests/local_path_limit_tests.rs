@@ -62,3 +62,24 @@ fn test_local_file_names_enforce_configured_component_limit() {
     assert_eq!(3, limit.limit());
     assert_eq!(4, limit.requested());
 }
+
+/// Verifies component-size limits are caller-owned and can be cleared.
+#[test]
+fn test_local_file_names_component_limit_is_opt_in() {
+    let long_name = "a".repeat(300);
+    let names = LocalFileNames::portable();
+    assert_eq!(names.max_component_bytes(), None);
+    names
+        .validate(OsStr::new(&long_name))
+        .expect("portable validation must not invent a filesystem limit");
+
+    let names = names
+        .with_max_component_bytes(255)
+        .expect("positive explicit limit should be accepted");
+    assert_eq!(names.max_component_bytes(), Some(255));
+    let names = names.without_max_component_bytes();
+    assert_eq!(names.max_component_bytes(), None);
+    names
+        .validate(OsStr::new(&long_name))
+        .expect("clearing the explicit limit should remove the budget");
+}

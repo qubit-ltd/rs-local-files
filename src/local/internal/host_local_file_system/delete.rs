@@ -18,6 +18,7 @@ use super::LocalFileOperation;
 use super::LocalResult;
 use super::LocalSymlinkPolicy;
 use super::Path;
+use super::delete_work::DeleteWork;
 use super::fs;
 use super::io;
 use super::resolve_host_path;
@@ -99,11 +100,10 @@ impl HostLocalFileSystem {
                     .with_path(bound),
             );
         }
-        let result = if options.recursive() {
-            test_io_fault("local-fs-delete-directory-remove").map_or_else(|| fs::remove_dir_all(&bound), Err)
-        } else {
-            test_io_fault("local-fs-delete-directory-remove").map_or_else(|| fs::remove_dir(&bound), Err)
-        };
+        if options.recursive() {
+            return remove_host_directory_tree(&bound).map(|()| LocalDeleteOutcome::new(true));
+        }
+        let result = { test_io_fault("local-fs-delete-directory-remove").map_or_else(|| fs::remove_dir(&bound), Err) };
         match result {
             Ok(()) => Ok(LocalDeleteOutcome::new(true)),
             Err(source) if options.missing_ok() && source.kind() == io::ErrorKind::NotFound => {
@@ -116,6 +116,83 @@ impl HostLocalFileSystem {
                 source,
             )),
         }
+    }
+}
+
+/// Removes a Host directory tree while tracking the first failed entry.
+fn remove_host_directory_tree(path: &Path) -> LocalResult<()> {
+    let mut removed_any = false;
+    let mut work = vec![DeleteWork::Inspect(path.to_path_buf())];
+    while let Some(item) = work.pop() {
+        match item {
+            DeleteWork::Inspect(current) => {
+                let metadata =
+                    fs::symlink_metadata(&current).map_err(|error| delete_entry_error(&current, removed_any, error))?;
+                if metadata.file_type().is_dir() {
+                    let entries =
+                        fs::read_dir(&current).map_err(|error| delete_entry_error(&current, removed_any, error))?;
+                    let mut children = Vec::new();
+                    for entry in entries {
+                        let entry = entry.map_err(|error| delete_entry_error(&current, removed_any, error))?;
+                        children.push(entry.path());
+                    }
+                    work.push(DeleteWork::RemoveDirectory(current));
+                    for child in children.into_iter().rev() {
+                        work.push(DeleteWork::Inspect(child));
+                    }
+                } else {
+                    maybe_fail_host_delete(&current, removed_any)?;
+                    remove_host_non_directory(&current, &metadata)
+                        .map_err(|error| delete_entry_error(&current, removed_any, error))?;
+                    removed_any = true;
+                }
+            }
+            DeleteWork::RemoveDirectory(current) => {
+                maybe_fail_host_delete(&current, removed_any)?;
+                fs::remove_dir(&current).map_err(|error| delete_entry_error(&current, removed_any, error))?;
+                removed_any = true;
+            }
+        }
+    }
+    Ok(())
+}
+
+/// Removes one Host entry already known not to be a real directory.
+fn remove_host_non_directory(path: &Path, metadata: &fs::Metadata) -> io::Result<()> {
+    #[cfg(windows)]
+    {
+        use std::os::windows::fs::FileTypeExt;
+
+        if metadata.file_type().is_symlink_dir() {
+            return fs::remove_dir(path);
+        }
+    }
+    let _ = metadata;
+    fs::remove_file(path)
+}
+
+/// Injects the deterministic recursive-delete fault used by contract tests.
+fn maybe_fail_host_delete(path: &Path, removed_any: bool) -> LocalResult<()> {
+    #[cfg(feature = "internal-test-support")]
+    if crate::local::take_test_support_on_nth("host-delete-directory-entry-second", 2) {
+        return Err(delete_entry_error(path, removed_any, crate::local::test_fault_error()));
+    }
+    let _ = (path, removed_any);
+    Ok(())
+}
+
+/// Builds one recursive-delete error with exact partial-publication state.
+fn delete_entry_error(path: &Path, removed_any: bool, source: io::Error) -> LocalFileError {
+    let error = LocalFileError::from_io(
+        LocalFileOperation::DeleteDirectory,
+        Some(path.to_path_buf()),
+        None,
+        source,
+    );
+    if removed_any {
+        error.with_kind(LocalFileErrorKind::PublicationIncomplete)
+    } else {
+        error
     }
 }
 

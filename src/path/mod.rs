@@ -8,14 +8,16 @@
 //! Scope-bound native path and filename values.
 
 mod local_file_names;
+mod local_namespace_path;
 mod local_path_codec;
+mod local_path_resolver;
 mod local_paths;
-mod relative_path;
 
 #[cfg(test)]
-mod path_tests;
+mod local_path_resolver_tests;
 
 pub use local_file_names::LocalFileNames;
+pub(crate) use local_namespace_path::LocalNamespacePath;
 pub use local_path_codec::LocalPathCodec;
+pub(crate) use local_path_resolver::LocalPathResolver;
 pub use local_paths::LocalPaths;
-pub(crate) use relative_path::RelativePath;

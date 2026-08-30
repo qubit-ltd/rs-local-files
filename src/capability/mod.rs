@@ -14,6 +14,7 @@ mod local_file_system_space;
 mod size_limit;
 
 pub(crate) use filesystem_probe::limits as probe_limits;
+pub(crate) use filesystem_probe::space as probe_space;
 pub use local_file_system_limits::LocalFileSystemLimits;
 pub use local_file_system_protocols::LocalFileSystemProtocols;
 pub use local_file_system_space::LocalFileSystemSpace;
