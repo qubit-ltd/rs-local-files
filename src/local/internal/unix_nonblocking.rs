@@ -65,7 +65,7 @@ pub(crate) fn clear_nonblocking(descriptor: RawFd) -> Result<()> {
     Ok(())
 }
 
-/// Repeats a nonblocking open that conflicts with a file lease.
+/// Optionally repeats a nonblocking open that conflicts with a file lease.
 ///
 /// The first conflict yields the current time slice. Later conflicts sleep
 /// with exponentially increasing delay capped at ten milliseconds. This keeps
@@ -75,7 +75,8 @@ pub(crate) fn clear_nonblocking(descriptor: RawFd) -> Result<()> {
 ///
 /// # Parameters
 ///
-/// * `timeout` - Optional maximum duration spent resolving lease conflicts.
+/// * `timeout` - Explicit maximum duration spent resolving lease conflicts;
+///   `None` authorizes only the initial attempt.
 /// * `open` - Native nonblocking open attempt.
 ///
 /// # Returns
@@ -95,17 +96,16 @@ where
     loop {
         match open() {
             Err(error) if error.kind() == ErrorKind::WouldBlock => {
-                if let Some(timeout) = timeout {
-                    let remaining = timeout.saturating_sub(started_at.elapsed());
-                    if remaining.is_zero() {
-                        return Err(open_retry_timed_out(timeout));
-                    }
-                    wait_for_nonblocking_open_retry(&mut retry_delay, Some(remaining));
-                    if started_at.elapsed() >= timeout {
-                        return Err(open_retry_timed_out(timeout));
-                    }
-                } else {
-                    wait_for_nonblocking_open_retry(&mut retry_delay, None);
+                let Some(timeout) = timeout else {
+                    return Err(error);
+                };
+                let remaining = timeout.saturating_sub(started_at.elapsed());
+                if remaining.is_zero() {
+                    return Err(open_retry_timed_out(timeout));
+                }
+                wait_for_nonblocking_open_retry(&mut retry_delay, remaining);
+                if started_at.elapsed() >= timeout {
+                    return Err(open_retry_timed_out(timeout));
                 }
             }
             result => return result,
@@ -114,16 +114,13 @@ where
 }
 
 /// Waits before the next nonblocking open attempt.
-fn wait_for_nonblocking_open_retry(delay: &mut Duration, remaining: Option<Duration>) {
+fn wait_for_nonblocking_open_retry(delay: &mut Duration, remaining: Duration) {
     if delay.is_zero() {
         thread::yield_now();
         *delay = INITIAL_OPEN_RETRY_DELAY;
         return;
     }
-    let sleep_duration = match remaining {
-        Some(remaining) => remaining.min(*delay),
-        None => *delay,
-    };
+    let sleep_duration = remaining.min(*delay);
     thread::sleep(sleep_duration);
     *delay = delay.saturating_mul(2).min(MAX_OPEN_RETRY_DELAY);
 }
@@ -136,4 +133,40 @@ fn open_retry_timed_out(timeout: Duration) -> Error {
         ErrorKind::TimedOut,
         format!("timed out after {timeout:?} retrying a nonblocking file open"),
     )
+}
+
+#[cfg(test)]
+mod tests {
+    use std::cell::Cell;
+
+    use super::Duration;
+    use super::Error;
+    use super::ErrorKind;
+    use super::open_with_nonblocking_retry;
+
+    #[test]
+    fn no_timeout_performs_only_the_initial_attempt() {
+        let attempts = Cell::new(0_usize);
+        let error = open_with_nonblocking_retry(None, || {
+            attempts.set(attempts.get() + 1);
+            Err::<(), _>(Error::from(ErrorKind::WouldBlock))
+        })
+        .expect_err("an unauthorized retry must not occur");
+
+        assert_eq!(error.kind(), ErrorKind::WouldBlock);
+        assert_eq!(attempts.get(), 1);
+    }
+
+    #[test]
+    fn zero_timeout_performs_only_the_initial_attempt() {
+        let attempts = Cell::new(0_usize);
+        let error = open_with_nonblocking_retry(Some(Duration::ZERO), || {
+            attempts.set(attempts.get() + 1);
+            Err::<(), _>(Error::from(ErrorKind::WouldBlock))
+        })
+        .expect_err("an exhausted retry window must time out");
+
+        assert_eq!(error.kind(), ErrorKind::TimedOut);
+        assert_eq!(attempts.get(), 1);
+    }
 }

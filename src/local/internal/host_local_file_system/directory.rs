@@ -18,6 +18,7 @@ use super::LocalFileOperation;
 use super::LocalResult;
 use super::LocalSymlinkPolicy;
 use super::Path;
+use super::PathBuf;
 use super::fs;
 use super::io;
 use super::resolve_host_path;
@@ -78,11 +79,10 @@ impl HostLocalFileSystem {
         if existing_directory == Some(true) {
             return Ok(LocalCreateDirectoryOutcome::new(false));
         }
-        let result = if options.recursive() {
-            fs::create_dir_all(&bound)
-        } else {
-            fs::create_dir(&bound)
-        };
+        if options.recursive() {
+            return create_host_directory_tree(&bound, options.exists_ok()).map(LocalCreateDirectoryOutcome::new);
+        }
+        let result = fs::create_dir(&bound);
         match result {
             Ok(()) => Ok(LocalCreateDirectoryOutcome::new(!existed)),
             Err(source)
@@ -99,5 +99,87 @@ impl HostLocalFileSystem {
                 source,
             )),
         }
+    }
+}
+
+/// Creates each missing Host path component in shallow-to-deep order.
+///
+/// Returning the exact failed component lets the public facade distinguish an
+/// unchanged failure from a non-transactional partial publication.
+fn create_host_directory_tree(path: &Path, exists_ok: bool) -> LocalResult<bool> {
+    let mut current = PathBuf::new();
+    let mut created_any = false;
+    let mut created_target = false;
+    for component in path.components() {
+        current.push(component.as_os_str());
+        if !matches!(component, std::path::Component::Normal(_)) {
+            continue;
+        }
+        match fs::symlink_metadata(&current) {
+            Ok(metadata) if metadata.file_type().is_dir() => {
+                if current == path && !exists_ok {
+                    return Err(create_component_error(
+                        &current,
+                        created_any,
+                        io::Error::from(io::ErrorKind::AlreadyExists),
+                    ));
+                }
+            }
+            Ok(_) => {
+                return Err(create_component_error(
+                    &current,
+                    created_any,
+                    io::Error::new(
+                        io::ErrorKind::AlreadyExists,
+                        "directory path component is not a directory",
+                    ),
+                ));
+            }
+            Err(error) if error.kind() == io::ErrorKind::NotFound => {
+                #[cfg(feature = "internal-test-support")]
+                if crate::local::take_test_support_on_nth("host-create-directory-component-second", 2) {
+                    return Err(create_component_error(
+                        &current,
+                        created_any,
+                        crate::local::test_fault_error(),
+                    ));
+                }
+                match fs::create_dir(&current) {
+                    Ok(()) => {
+                        created_any = true;
+                        created_target = current == path;
+                    }
+                    Err(error) if error.kind() == io::ErrorKind::AlreadyExists => {
+                        let raced_directory =
+                            fs::symlink_metadata(&current).is_ok_and(|metadata| metadata.file_type().is_dir());
+                        if !raced_directory || (current == path && !exists_ok) {
+                            return Err(create_component_error(&current, created_any, error));
+                        }
+                    }
+                    Err(error) => {
+                        return Err(create_component_error(&current, created_any, error));
+                    }
+                }
+            }
+            Err(error) => {
+                return Err(create_component_error(&current, created_any, error));
+            }
+        }
+    }
+    Ok(created_target)
+}
+
+/// Builds one recursive-create error while retaining partial publication.
+fn create_component_error(path: &Path, created_any: bool, source: io::Error) -> LocalFileError {
+    let error = LocalFileError::from_io(
+        LocalFileOperation::CreateDirectory,
+        Some(path.to_path_buf()),
+        None,
+        source,
+    );
+    if created_any {
+        error.with_kind(LocalFileErrorKind::PublicationIncomplete)
+    } else {
+        error
     }
 }

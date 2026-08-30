@@ -84,7 +84,7 @@ fn test_list_and_read_option_builders_retain_policies() {
         black_box(LocalListOptions::symlink_policy)(&listing),
     );
     assert_eq!(black_box(LocalListOptions::max_depth)(&listing), Some(3));
-    assert_eq!(black_box(LocalListOptions::max_open_directories)(&listing), 7);
+    assert_eq!(black_box(LocalListOptions::max_open_directories)(&listing), Some(7));
     assert_eq!(listing.max_entries(), Some(11));
     assert_eq!(listing.max_seen_name_bytes(), Some(128));
     assert_eq!(listing.deadline(), Some(Duration::from_secs(2)));
@@ -186,7 +186,7 @@ fn test_temporary_resource_option_builders_retain_configuration() {
     assert_eq!(file.parent(), Some(parent));
     assert_eq!(file.prefix(), Some("file-"));
     assert_eq!(file.suffix(), Some(".tmp"));
-    assert_eq!(file.max_attempts(), 4);
+    assert_eq!(file.max_attempts(), Some(4));
     assert!(file.creates_parent());
 
     let with_directory_max_attempts = black_box(
@@ -203,7 +203,7 @@ fn test_temporary_resource_option_builders_retain_configuration() {
     assert_eq!(directory.parent(), Some(parent));
     assert_eq!(directory.prefix(), Some("directory-"));
     assert_eq!(directory.suffix(), Some(".tmp"));
-    assert_eq!(directory.max_attempts(), 5);
+    assert_eq!(directory.max_attempts(), Some(5));
     assert!(!directory.creates_parent());
     assert!(directory.with_create_parent().creates_parent());
 }
@@ -284,13 +284,13 @@ fn test_option_constructors_expose_conservative_values() {
     assert_eq!(None, black_box(LocalTempFileOptions::parent)(&file));
     assert_eq!(None, black_box(LocalTempFileOptions::prefix)(&file));
     assert_eq!(None, black_box(LocalTempFileOptions::suffix)(&file));
-    assert_eq!(256, black_box(LocalTempFileOptions::max_attempts)(&file));
+    assert_eq!(None, black_box(LocalTempFileOptions::max_attempts)(&file));
 
     let directory = black_box(LocalTempDirectoryOptions::default as fn() -> _)();
     assert_eq!(None, black_box(LocalTempDirectoryOptions::parent)(&directory));
     assert_eq!(None, black_box(LocalTempDirectoryOptions::prefix)(&directory));
     assert_eq!(None, black_box(LocalTempDirectoryOptions::suffix)(&directory));
-    assert_eq!(256, black_box(LocalTempDirectoryOptions::max_attempts)(&directory));
+    assert_eq!(None, black_box(LocalTempDirectoryOptions::max_attempts)(&directory));
 
     let writer = black_box(LocalWriteOptions::new as fn(_) -> _)(LocalWriteMode::CreateOrReplace);
     assert_eq!(
@@ -307,6 +307,61 @@ fn test_option_constructors_expose_conservative_values() {
         black_box(LocalWriteOptions::durability)(&writer)
     );
     assert_eq!(None, black_box(LocalWriteOptions::open_retry_timeout)(&writer));
+}
+
+/// Verifies caller-owned optional budgets are absent by default and can be
+/// explicitly cleared after cloning configured options.
+#[test]
+fn test_optional_budgets_can_be_cleared() {
+    let listing = LocalListOptions::new()
+        .with_max_depth(1)
+        .with_max_entries(2)
+        .with_max_seen_name_bytes(3)
+        .with_max_open_directories(4)
+        .with_deadline(Duration::from_secs(5))
+        .without_max_depth()
+        .without_max_entries()
+        .without_max_seen_name_bytes()
+        .without_max_open_directories()
+        .without_deadline();
+    assert_eq!(listing.max_depth(), None);
+    assert_eq!(listing.max_entries(), None);
+    assert_eq!(listing.max_seen_name_bytes(), None);
+    assert_eq!(listing.max_open_directories(), None);
+    assert_eq!(listing.deadline(), None);
+
+    let copy = LocalCopyOptions::new()
+        .with_max_depth(1)
+        .with_max_entries(2)
+        .with_max_bytes(3)
+        .with_max_open_directories(4)
+        .with_deadline(Duration::from_secs(5))
+        .without_max_depth()
+        .without_max_entries()
+        .without_max_bytes()
+        .without_max_open_directories()
+        .without_deadline();
+    assert_eq!(copy.max_depth(), None);
+    assert_eq!(copy.max_entries(), None);
+    assert_eq!(copy.max_bytes(), None);
+    assert_eq!(copy.max_open_directories(), None);
+    assert_eq!(copy.deadline(), None);
+
+    let read = LocalReadOptions::new()
+        .with_open_retry_timeout(Duration::ZERO)
+        .without_open_retry_timeout();
+    assert_eq!(read.open_retry_timeout(), None);
+    let write = LocalWriteOptions::new(LocalWriteMode::CreateNew)
+        .with_open_retry_timeout(Duration::ZERO)
+        .without_open_retry_timeout();
+    assert_eq!(write.open_retry_timeout(), None);
+
+    let file = LocalTempFileOptions::new().with_max_attempts(1).without_max_attempts();
+    assert_eq!(file.max_attempts(), None);
+    let directory = LocalTempDirectoryOptions::new()
+        .with_max_attempts(1)
+        .without_max_attempts();
+    assert_eq!(directory.max_attempts(), None);
 }
 
 /// Verifies temporary-resource persistence defaults to no replacement and can

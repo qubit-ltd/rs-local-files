@@ -15,15 +15,14 @@ use std::path::PathBuf;
 #[derive(Clone, Debug, Eq, PartialEq)]
 #[must_use = "temporary directory options have no effect unless they are used"]
 pub struct LocalTempDirectoryOptions {
-    /// Optional parent directory; the process temporary directory is the
-    /// default.
+    /// Optional parent directory; the owning filesystem's PWD is the default.
     parent: Option<PathBuf>,
     /// Optional directory-name prefix.
     prefix: Option<String>,
     /// Optional directory-name suffix.
     suffix: Option<String>,
-    /// Maximum random-name creation attempts.
-    max_attempts: usize,
+    /// Optional maximum random-name creation attempts.
+    max_attempts: Option<usize>,
     /// Whether a missing parent directory is created before allocation.
     create_parent: bool,
 }
@@ -35,13 +34,13 @@ impl LocalTempDirectoryOptions {
             parent: None,
             prefix: None,
             suffix: None,
-            max_attempts: 256,
+            max_attempts: None,
             create_parent: false,
         }
     }
 
-    /// Returns the configured parent, or `None` for the process temporary
-    /// directory.
+    /// Returns the configured parent, or `None` for the owning filesystem's
+    /// PWD.
     #[must_use]
     pub fn parent(&self) -> Option<&Path> {
         self.parent.as_deref()
@@ -59,9 +58,9 @@ impl LocalTempDirectoryOptions {
         self.suffix.as_deref()
     }
 
-    /// Returns the maximum random-name creation attempts.
+    /// Returns the optional maximum random-name creation attempts.
     #[must_use]
-    pub const fn max_attempts(&self) -> usize {
+    pub const fn max_attempts(&self) -> Option<usize> {
         self.max_attempts
     }
 
@@ -114,7 +113,13 @@ impl LocalTempDirectoryOptions {
     /// - `max_attempts`: Positive attempt count.
     #[inline(always)]
     pub const fn with_max_attempts(mut self, max_attempts: usize) -> Self {
-        self.max_attempts = max_attempts;
+        self.max_attempts = Some(max_attempts);
+        self
+    }
+
+    /// Removes the random-name attempt budget.
+    pub const fn without_max_attempts(mut self) -> Self {
+        self.max_attempts = None;
         self
     }
 }

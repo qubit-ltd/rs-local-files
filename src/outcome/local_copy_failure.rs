@@ -189,6 +189,49 @@ impl LocalCopyFailure {
     pub fn cleanup_error(&self) -> Option<&LocalFileError> {
         self.details.cleanup_error.as_ref()
     }
+
+    /// Rewrites backend-relative copy facts into one public namespace.
+    pub(crate) fn remap_namespace(
+        mut self,
+        request_source: &Path,
+        request_target: &Path,
+        backend_source: &Path,
+        backend_target: &Path,
+        rooted: bool,
+        current_directory: &Path,
+    ) -> Self {
+        let map_source = |path: &Path| map_backend_path(path, backend_source, request_source, rooted);
+        let map_target = |path: &Path| map_backend_path(path, backend_target, request_target, rooted);
+        self.details.request_source_path = Some(request_source.to_path_buf());
+        self.details.request_target_path = Some(request_target.to_path_buf());
+        self.details.failed_source_path = self.details.failed_source_path.as_deref().map(&map_source);
+        self.details.failed_target_path = self.details.failed_target_path.as_deref().map(&map_target);
+        let error_path = self.details.error.path().map(map_source);
+        let error_target = self.details.error.target().map(&map_target);
+        self.details
+            .error
+            .replace_paths(error_path, error_target, Some(current_directory.to_path_buf()));
+        if let Some(cleanup) = self.details.cleanup_error.as_mut() {
+            let path = cleanup.path().map(&map_target);
+            let target = cleanup.target().map(&map_target);
+            cleanup.replace_paths(path, target, Some(current_directory.to_path_buf()));
+        }
+        self.details.staging_path = self.details.staging_path.as_deref().map(map_target);
+        self
+    }
+}
+
+/// Maps one backend path through its logical request prefix.
+fn map_backend_path(path: &Path, backend_base: &Path, namespace_base: &Path, rooted: bool) -> PathBuf {
+    if let Ok(relative) = path.strip_prefix(backend_base) {
+        return namespace_base.join(relative);
+    }
+    if rooted && !path.is_absolute() {
+        let mut absolute = PathBuf::from(std::path::MAIN_SEPARATOR_STR);
+        absolute.push(path);
+        return absolute;
+    }
+    path.to_path_buf()
 }
 
 /// Maps structured native copy facts to the strongest proven failure state.

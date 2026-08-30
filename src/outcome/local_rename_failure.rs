@@ -12,6 +12,7 @@ use std::error::Error;
 use std::fmt::Display;
 use std::fmt::Formatter;
 use std::fmt::Result as FmtResult;
+use std::path::Path;
 
 use super::LocalRenameFailureState;
 use crate::LocalFileError;
@@ -20,7 +21,7 @@ use crate::LocalFileError;
 #[derive(Debug)]
 pub struct LocalRenameFailure {
     /// Primary typed filesystem error.
-    error: LocalFileError,
+    error: Box<LocalFileError>,
     /// Most precise namespace state proven by native operations.
     state: LocalRenameFailureState,
 }
@@ -36,21 +37,24 @@ impl Display for LocalRenameFailure {
 impl Error for LocalRenameFailure {
     /// Returns the primary typed filesystem error.
     fn source(&self) -> Option<&(dyn Error + 'static)> {
-        Some(&self.error)
+        Some(self.error.as_ref())
     }
 }
 
 impl LocalRenameFailure {
     /// Creates a typed rename failure from implementation facts.
     #[must_use]
-    pub(crate) const fn new(error: LocalFileError, state: LocalRenameFailureState) -> Self {
-        Self { error, state }
+    pub(crate) fn new(error: LocalFileError, state: LocalRenameFailureState) -> Self {
+        Self {
+            error: Box::new(error),
+            state,
+        }
     }
 
     /// Returns the primary typed filesystem error.
     #[must_use]
-    pub const fn error(&self) -> &LocalFileError {
-        &self.error
+    pub fn error(&self) -> &LocalFileError {
+        self.error.as_ref()
     }
 
     /// Returns the most precise namespace state proven by native operations.
@@ -60,7 +64,17 @@ impl LocalRenameFailure {
 
     /// Consumes this failure and returns its error and proven state.
     pub fn into_parts(self) -> (LocalFileError, LocalRenameFailureState) {
-        (self.error, self.state)
+        (*self.error, self.state)
+    }
+
+    /// Rewrites backend path context into normalized public operands.
+    pub(crate) fn remap_namespace(mut self, source: &Path, target: &Path, current_directory: &Path) -> Self {
+        self.error.replace_paths(
+            Some(source.to_path_buf()),
+            Some(target.to_path_buf()),
+            Some(current_directory.to_path_buf()),
+        );
+        self
     }
 }
 

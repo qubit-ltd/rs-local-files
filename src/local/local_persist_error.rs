@@ -87,6 +87,12 @@ impl<T> LocalPersistError<T> {
         }
     }
 
+    /// Attaches the PWD snapshot retained by the temporary resource.
+    pub(crate) fn with_current_directory(mut self, current_directory: PathBuf) -> Self {
+        self.error = Box::new((*self.error).with_current_directory(current_directory));
+        self
+    }
+
     /// Returns the structured persistence error.
     ///
     /// # Returns

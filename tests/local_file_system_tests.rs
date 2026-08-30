@@ -34,14 +34,16 @@ fn test_local_file_system_default_copy_and_rename_skip_sync() {
         let copy_target = directory.path().join("copy-target");
         fs::write(&copy_source, b"copy").expect("copy source should be written");
         let _ = LocalFileSystem::host()
-            .copy(&copy_source, &copy_target, &LocalCopyOptions::new())
+            .expect("Host filesystem should open")
+            .copy_with_options(&copy_source, &copy_target, &LocalCopyOptions::new())
             .expect("default copy should succeed");
 
         let rename_source = directory.path().join("rename-source");
         let rename_target = directory.path().join("rename-target");
         fs::write(&rename_source, b"rename").expect("rename source should be written");
         let _ = LocalFileSystem::host()
-            .rename(&rename_source, &rename_target, &LocalRenameOptions::new())
+            .expect("Host filesystem should open")
+            .rename_with_options(&rename_source, &rename_target, &LocalRenameOptions::new())
             .expect("default rename should succeed");
         return;
     }
@@ -79,7 +81,8 @@ fn test_local_file_system_create_directory_reports_created_entries() {
     let target = directory.path().join("one/two");
 
     let outcome = LocalFileSystem::host()
-        .create_directory(&target, &LocalCreateDirectoryOptions::new().with_recursive())
+        .expect("Host filesystem should open")
+        .create_directory_with_options(&target, &LocalCreateDirectoryOptions::new().with_recursive())
         .expect("recursive directory creation should succeed");
 
     assert!(outcome.created());
@@ -95,7 +98,8 @@ fn test_local_file_system_copy_creates_missing_parent() {
     fs::write(&source, b"payload").expect("source fixture should be written");
 
     let _ = LocalFileSystem::host()
-        .copy(&source, &target, &LocalCopyOptions::new().with_parent())
+        .expect("Host filesystem should open")
+        .copy_with_options(&source, &target, &LocalCopyOptions::new().with_parent())
         .expect("copy should create the missing parent");
 
     assert_eq!(
@@ -112,7 +116,8 @@ fn test_local_file_system_create_directory_accepts_existing_directory() {
     fs::create_dir(&target).expect("fixture directory should be created");
 
     let outcome = LocalFileSystem::host()
-        .create_directory(&target, &LocalCreateDirectoryOptions::new().with_exists_ok())
+        .expect("Host filesystem should open")
+        .create_directory_with_options(&target, &LocalCreateDirectoryOptions::new().with_exists_ok())
         .expect("existing directory should be accepted");
 
     assert!(!outcome.created());
@@ -126,7 +131,8 @@ fn test_local_file_system_open_reader_requires_regular_file() {
     fs::write(&file, b"content").expect("fixture should be written");
 
     let mut reader = LocalFileSystem::host()
-        .open_reader(&file, &LocalReadOptions::new())
+        .expect("Host filesystem should open")
+        .open_reader_with_options(&file, &LocalReadOptions::new())
         .expect("regular file should open");
     let mut content = String::new();
     reader
@@ -135,7 +141,8 @@ fn test_local_file_system_open_reader_requires_regular_file() {
     assert_eq!("content", content);
 
     let error = LocalFileSystem::host()
-        .open_reader(directory.path(), &LocalReadOptions::new())
+        .expect("Host filesystem should open")
+        .open_reader_with_options(directory.path(), &LocalReadOptions::new())
         .expect_err("directory must not be exposed as a file reader");
     assert_eq!(LocalFileErrorKind::TypeConflict, error.kind());
 }
@@ -147,24 +154,24 @@ fn test_local_file_system_read_prefix_is_bounded() {
     let file = directory.path().join("payload");
     fs::write(&file, b"0123456789").expect("fixture should be written");
 
-    let filesystem = LocalFileSystem::host();
+    let filesystem = LocalFileSystem::host().expect("Host filesystem should open");
     assert_eq!(
         b"0123".as_slice(),
         filesystem
-            .read_prefix(&file, &LocalReadOptions::new(), 4)
+            .read_prefix_with_options(&file, 4, &LocalReadOptions::new())
             .expect("prefix should be readable")
             .as_slice()
     );
     assert!(
         filesystem
-            .read_prefix(&file, &LocalReadOptions::new(), 0)
+            .read_prefix_with_options(&file, 0, &LocalReadOptions::new())
             .expect("zero-length prefix should still open")
             .is_empty()
     );
 
     let missing = directory.path().join("missing");
     let error = filesystem
-        .read_prefix(&missing, &LocalReadOptions::new(), 4)
+        .read_prefix_with_options(&missing, 4, &LocalReadOptions::new())
         .expect_err("missing paths must still be validated");
     assert_eq!(LocalFileOperation::OpenReader, error.operation());
 }
@@ -179,7 +186,8 @@ fn test_local_file_system_rename_respects_overwrite_policy() {
     fs::write(&target, b"old").expect("target fixture should be written");
 
     let error = LocalFileSystem::host()
-        .rename(&source, &target, &LocalRenameOptions::new())
+        .expect("Host filesystem should open")
+        .rename_with_options(&source, &target, &LocalRenameOptions::new())
         .expect_err("default rename must not replace an entry");
     assert_eq!(LocalFileErrorKind::AlreadyExists, error.error().kind());
     assert_eq!(
@@ -188,7 +196,8 @@ fn test_local_file_system_rename_respects_overwrite_policy() {
     );
 
     let outcome = LocalFileSystem::host()
-        .rename(&source, &target, &LocalRenameOptions::new().with_overwrite())
+        .expect("Host filesystem should open")
+        .rename_with_options(&source, &target, &LocalRenameOptions::new().with_overwrite())
         .expect("explicit overwrite should replace the target entry");
     assert!(outcome.atomic());
     assert_eq!(
@@ -216,11 +225,13 @@ fn test_local_file_system_rename_reports_parent_sync_result() {
         fs::create_dir(&parent).expect("target parent should be created");
         fs::set_permissions(&parent, fs::Permissions::from_mode(0o300))
             .expect("target parent should reject directory open");
-        let result = LocalFileSystem::host().rename(
-            &source,
-            &target,
-            &LocalRenameOptions::new().with_durability(requirement),
-        );
+        let result = LocalFileSystem::host()
+            .expect("Host filesystem should open")
+            .rename_with_options(
+                &source,
+                &target,
+                &LocalRenameOptions::new().with_durability(requirement),
+            );
         match requirement {
             LocalDurabilityRequirement::Preferred => {
                 let outcome = result.expect("preferred durability may report a downgrade");
@@ -250,7 +261,8 @@ fn test_local_file_system_delete_uses_explicit_directory_recursion() {
     fs::write(tree.join("child"), b"x").expect("tree child should be written");
 
     let error = LocalFileSystem::host()
-        .delete_directory(&tree, &LocalDeleteOptions::new())
+        .expect("Host filesystem should open")
+        .delete_directory_with_options(&tree, &LocalDeleteOptions::new())
         .expect_err("non-recursive deletion should reject a non-empty directory");
     assert!(matches!(
         error.kind(),
@@ -258,7 +270,8 @@ fn test_local_file_system_delete_uses_explicit_directory_recursion() {
     ));
 
     let outcome = LocalFileSystem::host()
-        .delete_directory(&tree, &LocalDeleteOptions::new().with_recursive())
+        .expect("Host filesystem should open")
+        .delete_directory_with_options(&tree, &LocalDeleteOptions::new().with_recursive())
         .expect("recursive deletion should remove the tree");
     assert!(outcome.deleted());
     assert!(!tree.exists());

@@ -14,6 +14,7 @@ use std::time::Duration;
 
 use qubit_local_files::LocalCopyFailure;
 use qubit_local_files::LocalCopyOptions;
+use qubit_local_files::LocalCopyTypeConflictPolicy;
 use qubit_local_files::LocalFileErrorKind;
 use qubit_local_files::LocalFileSystem;
 use qubit_local_files::LocalResourceKind;
@@ -48,7 +49,7 @@ fn copy_fixture(backend: Backend) -> CopyFixture {
         Backend::Host => CopyFixture {
             source,
             target: directory.path().join("target"),
-            filesystem: LocalFileSystem::host(),
+            filesystem: LocalFileSystem::host().expect("Host filesystem should open"),
             _directory: directory,
         },
         Backend::Rooted => CopyFixture {
@@ -64,7 +65,7 @@ fn assert_resource_limit(backend: Backend, options: LocalCopyOptions, resource: 
     let fixture = copy_fixture(backend);
     let failure = fixture
         .filesystem
-        .copy(&fixture.source, &fixture.target, &options.with_tree_source())
+        .copy_with_options(&fixture.source, &fixture.target, &options.with_tree_source())
         .expect_err("copy budget should reject the fixture");
     assert_eq!(
         LocalFileErrorKind::ResourceLimit,
@@ -106,6 +107,37 @@ fn test_copy_budget_matrix_enforces_max_entries() {
 }
 
 #[test]
+fn test_copy_entry_budget_counts_a_single_source_file() {
+    for backend in Backend::all() {
+        let directory = tempdir().expect("temporary directory should be created");
+        fs::write(directory.path().join("source"), b"payload").expect("source file should be written");
+        let (filesystem, source, target) = match backend {
+            Backend::Host => (
+                LocalFileSystem::host().expect("Host filesystem should open"),
+                directory.path().join("source"),
+                directory.path().join("target"),
+            ),
+            Backend::Rooted => (
+                LocalFileSystem::rooted(directory.path()).expect("root authority should open"),
+                PathBuf::from("source"),
+                PathBuf::from("target"),
+            ),
+        };
+
+        let failure = filesystem
+            .copy_with_options(&source, &target, &LocalCopyOptions::new().with_max_entries(0))
+            .expect_err("a zero-entry budget must reject one source file");
+
+        assert_eq!(LocalFileErrorKind::ResourceLimit, failure.error().kind());
+        assert_eq!(
+            Some(LocalResourceKind::Entry),
+            failure.error().resource_limit_error().map(|error| error.resource()),
+        );
+        assert!(!directory.path().join("target").exists());
+    }
+}
+
+#[test]
 fn test_copy_budget_matrix_enforces_max_bytes() {
     for backend in Backend::all() {
         let failure = assert_resource_limit(
@@ -140,7 +172,7 @@ fn test_copy_budget_matrix_enforces_deadline() {
         let fixture = copy_fixture(backend);
         let failure = fixture
             .filesystem
-            .copy(
+            .copy_with_options(
                 &fixture.source,
                 &fixture.target,
                 &LocalCopyOptions::new().with_tree_source().with_deadline(Duration::ZERO),
@@ -155,12 +187,86 @@ fn test_copy_budget_matrix_enforces_deadline() {
 }
 
 #[test]
+fn test_copy_deadline_precedes_type_conflict_skip_outcomes() {
+    for backend in Backend::all() {
+        let directory = tempdir().expect("temporary directory should be created");
+        fs::write(directory.path().join("source"), b"payload").expect("source file should be written");
+        fs::create_dir(directory.path().join("target")).expect("target directory should be created");
+        let (filesystem, source, target) = match backend {
+            Backend::Host => (
+                LocalFileSystem::host().expect("Host filesystem should open"),
+                directory.path().join("source"),
+                directory.path().join("target"),
+            ),
+            Backend::Rooted => (
+                LocalFileSystem::rooted(directory.path()).expect("root authority should open"),
+                PathBuf::from("source"),
+                PathBuf::from("target"),
+            ),
+        };
+
+        let failure = filesystem
+            .copy_with_options(
+                &source,
+                &target,
+                &LocalCopyOptions::new()
+                    .with_type_conflict(LocalCopyTypeConflictPolicy::Skip)
+                    .with_deadline(Duration::ZERO),
+            )
+            .expect_err("an expired deadline must precede a skip outcome");
+
+        assert_eq!(
+            Some(std::io::ErrorKind::TimedOut),
+            failure.error().io_error().map(std::io::Error::kind),
+        );
+    }
+}
+
+#[cfg(unix)]
+#[test]
+fn test_copy_deadline_applies_to_final_symlink_entries() {
+    use std::os::unix::fs::symlink;
+
+    for backend in Backend::all() {
+        let directory = tempdir().expect("temporary directory should be created");
+        fs::write(directory.path().join("referent"), b"payload").expect("referent should be written");
+        symlink("referent", directory.path().join("source")).expect("source symbolic link should be created");
+        let (filesystem, source, target) = match backend {
+            Backend::Host => (
+                LocalFileSystem::host().expect("Host filesystem should open"),
+                directory.path().join("source"),
+                directory.path().join("target"),
+            ),
+            Backend::Rooted => (
+                LocalFileSystem::rooted(directory.path()).expect("root authority should open"),
+                PathBuf::from("source"),
+                PathBuf::from("target"),
+            ),
+        };
+
+        let failure = filesystem
+            .copy_with_options(&source, &target, &LocalCopyOptions::new().with_deadline(Duration::ZERO))
+            .expect_err("an immediate deadline should reject a final symlink copy");
+
+        assert_eq!(LocalFileErrorKind::Io, failure.error().kind());
+        assert_eq!(
+            Some(std::io::ErrorKind::TimedOut),
+            failure.error().io_error().map(std::io::Error::kind),
+        );
+        assert!(
+            !directory.path().join("target").exists(),
+            "an expired copy must not publish its target",
+        );
+    }
+}
+
+#[test]
 fn test_copy_budget_matrix_rejects_unrepresentable_deadline() {
     for backend in Backend::all() {
         let fixture = copy_fixture(backend);
         let failure = fixture
             .filesystem
-            .copy(
+            .copy_with_options(
                 &fixture.source,
                 &fixture.target,
                 &LocalCopyOptions::new().with_tree_source().with_deadline(Duration::MAX),
@@ -184,7 +290,8 @@ fn test_copy_backends_enforce_max_bytes_against_actual_stream_length() {
     );
 
     let failure = LocalFileSystem::host()
-        .copy(source, &target, &LocalCopyOptions::new().with_max_bytes(0))
+        .expect("Host filesystem should open")
+        .copy_with_options(source, &target, &LocalCopyOptions::new().with_max_bytes(0))
         .expect_err("actual source bytes must exceed the zero budget");
 
     assert_eq!(LocalFileErrorKind::ResourceLimit, failure.error().kind());
@@ -196,7 +303,7 @@ fn test_copy_backends_enforce_max_bytes_against_actual_stream_length() {
         .expect("temporary target should be absolute");
     let failure = LocalFileSystem::rooted(Path::new("/"))
         .expect("filesystem root authority should open")
-        .copy(
+        .copy_with_options(
             &rooted_source,
             rooted_target,
             &LocalCopyOptions::new().with_max_bytes(0),
@@ -220,14 +327,14 @@ fn test_rooted_copy_preserves_final_and_nested_symlink_entries() {
     let rooted = LocalFileSystem::rooted(directory.path()).expect("root authority should open");
 
     let _ = rooted
-        .copy(
+        .copy_with_options(
             Path::new("final-link"),
             Path::new("final-copy"),
             &LocalCopyOptions::new(),
         )
         .expect("final symlink should be copied as a link entry");
     let _ = rooted
-        .copy(
+        .copy_with_options(
             Path::new("source"),
             Path::new("tree-copy"),
             &LocalCopyOptions::new().with_tree_source(),

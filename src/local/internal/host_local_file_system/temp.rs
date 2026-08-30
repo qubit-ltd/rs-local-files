@@ -9,6 +9,8 @@
 // Host temp operations.
 // qubit-style: allow source-test-pair
 
+use std::time::Instant;
+
 use super::HostLocalFileSystem;
 use super::LocalCopyOptions;
 use super::LocalFileError;
@@ -54,9 +56,7 @@ impl HostLocalFileSystem {
         let parent = options.parent().map_or_else(std::env::temp_dir, Path::to_path_buf);
         let parent = resolve_host_path(&parent, symlink_policy, true)?;
         if options.creates_parent() {
-            fs::create_dir_all(&parent).map_err(|error| {
-                LocalFileError::from_io(LocalFileOperation::CreateTempFile, Some(parent.clone()), None, error)
-            })?;
+            create_host_temp_parent(&parent, LocalFileOperation::CreateTempFile)?;
         }
         validate_host_temp_parent(&parent, LocalFileOperation::CreateTempFile)?;
         validate_temp_affixes(options.prefix(), options.suffix()).map_err(|error| {
@@ -119,14 +119,7 @@ impl HostLocalFileSystem {
         let parent = options.parent().map_or_else(std::env::temp_dir, Path::to_path_buf);
         let parent = resolve_host_path(&parent, symlink_policy, true)?;
         if options.creates_parent() {
-            fs::create_dir_all(&parent).map_err(|error| {
-                LocalFileError::from_io(
-                    LocalFileOperation::CreateTempDirectory,
-                    Some(parent.clone()),
-                    None,
-                    error,
-                )
-            })?;
+            create_host_temp_parent(&parent, LocalFileOperation::CreateTempDirectory)?;
         }
         validate_host_temp_parent(&parent, LocalFileOperation::CreateTempDirectory)?;
         validate_temp_affixes(options.prefix(), options.suffix()).map_err(|error| {
@@ -230,13 +223,15 @@ pub(crate) fn open_staged_writer(
 pub(crate) fn internal_copy_options(
     options: &LocalCopyOptions,
     symlink_policy: LocalSymlinkPolicy,
+    started_at: Instant,
 ) -> crate::local::LocalCopyDirOptions {
     let symlink_policy = options.symlink_policy_override().unwrap_or(symlink_policy);
     let mut result = crate::local::LocalCopyDirOptions::new()
         .with_conflict(options.conflict())
         .with_type_conflict(options.type_conflict())
         .with_symlink_policy(symlink_policy)
-        .with_durability(options.durability());
+        .with_durability(options.durability())
+        .with_started_at(started_at);
     if let Some(value) = options.max_depth() {
         result = result.with_max_depth(value);
     }
@@ -263,9 +258,6 @@ pub(crate) fn internal_copy_options(
 fn validate_host_temp_parent(parent: &Path, operation: LocalFileOperation) -> LocalResult<()> {
     let metadata = match fs::metadata(parent) {
         Ok(metadata) => metadata,
-        Err(error) if error.kind() == io::ErrorKind::NotFound => {
-            return Ok(());
-        }
         Err(error) => {
             return Err(LocalFileError::from_io(
                 operation,
@@ -279,4 +271,19 @@ fn validate_host_temp_parent(parent: &Path, operation: LocalFileOperation) -> Lo
         return Err(LocalFileError::new(LocalFileErrorKind::NotDirectory, operation).with_path(parent.to_path_buf()));
     }
     Ok(())
+}
+
+/// Creates a missing Host temporary parent while deferring an existing-file
+/// collision to the common type validator.
+fn create_host_temp_parent(parent: &Path, operation: LocalFileOperation) -> LocalResult<()> {
+    match fs::create_dir_all(parent) {
+        Ok(()) => Ok(()),
+        Err(error) if error.kind() == io::ErrorKind::AlreadyExists => Ok(()),
+        Err(error) => Err(LocalFileError::from_io(
+            operation,
+            Some(parent.to_path_buf()),
+            None,
+            error,
+        )),
+    }
 }

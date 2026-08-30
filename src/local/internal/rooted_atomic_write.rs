@@ -20,7 +20,6 @@ use std::path::Path;
 use super::rooted_file_io::open_file_at;
 use super::rooted_staged_file::RootedStagedFile;
 use super::rooted_staging_retry::retry_rooted_staging_entry;
-use super::temp_entry::DEFAULT_TEMP_ENTRY_RETRIES;
 use super::unix_stat::is_regular_file_mode;
 use crate::local::try_random_file_name;
 
@@ -109,7 +108,7 @@ pub(in crate::local) fn inspect_rooted_atomic_destination(
 /// Panics if the filename generator violates its no-NUL invariant.
 pub(in crate::local) fn create_rooted_staged_file(parent: File, relative_parent: &Path) -> Result<RootedStagedFile> {
     retry_rooted_staging_entry(
-        DEFAULT_TEMP_ENTRY_RETRIES,
+        None,
         || {
             #[cfg(feature = "internal-test-support")]
             if super::test_support::is_enabled("rooted-staging-generate") {
@@ -123,7 +122,7 @@ pub(in crate::local) fn create_rooted_staged_file(parent: File, relative_parent:
         },
         |name| {
             #[cfg(feature = "internal-test-support")]
-            if super::test_support::is_enabled("rooted-staging-collision") {
+            if super::test_support::take("rooted-staging-collision") {
                 return Err(Error::new(
                     ErrorKind::AlreadyExists,
                     "injected rooted staging collision",

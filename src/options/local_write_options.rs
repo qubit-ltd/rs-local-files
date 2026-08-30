@@ -96,4 +96,17 @@ impl LocalWriteOptions {
         self.open_retry_timeout = Some(timeout);
         self
     }
+
+    /// Disables library-level open retries.
+    pub const fn without_open_retry_timeout(mut self) -> Self {
+        self.open_retry_timeout = None;
+        self
+    }
+}
+
+impl Default for LocalWriteOptions {
+    /// Returns create-new options without hidden retries or resource limits.
+    fn default() -> Self {
+        Self::new(LocalWriteMode::CreateNew)
+    }
 }

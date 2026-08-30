@@ -23,11 +23,11 @@ use super::LocalSymlinkPolicy;
 use super::LocalWriteMode;
 use super::LocalWriteOptions;
 use super::Path;
-use super::PathBuf;
 use super::RootedLocalFileSystem;
 use super::ensure_required_directory_durability;
 use super::io;
 use super::resolve_rooted_path;
+use super::resolve_rooted_path_allow_root;
 use super::rooted_io_error;
 use super::rooted_path;
 use super::validate_rooted_list_start;
@@ -72,7 +72,7 @@ impl RootedLocalFileSystem {
         }
         self.root
             .open_reader(&relative, &native_options)
-            .map(LocalFileReader::new)
+            .and_then(LocalFileReader::from_file)
             .map_err(|error| rooted_io_error(LocalFileOperation::OpenReader, path, error))
     }
 
@@ -95,31 +95,34 @@ impl RootedLocalFileSystem {
     pub fn list(
         &self,
         path: &Path,
+        namespace_root: &Path,
         options: &LocalListOptions,
         symlink_policy: LocalSymlinkPolicy,
     ) -> LocalResult<LocalDirectoryWalker> {
         let symlink_policy = options.symlink_policy().unwrap_or(symlink_policy);
-        let relative = if path.as_os_str().is_empty() {
+        validate_rooted_list_start(&self.root, path, symlink_policy)?;
+        let authority_path = if path.as_os_str().is_empty() {
             None
+        } else if symlink_policy.follows() {
+            let resolved =
+                resolve_rooted_path_allow_root(&self.root, path, symlink_policy, true, LocalFileOperation::List)?;
+            if resolved.as_os_str().is_empty() {
+                None
+            } else {
+                Some(crate::local::LocalRelativePath::new(&resolved).map_err(|error| {
+                    rooted_io_error(LocalFileOperation::List, path, error).with_kind(LocalFileErrorKind::InvalidPath)
+                })?)
+            }
         } else {
             Some(rooted_path(path, LocalFileOperation::List)?)
         };
-        validate_rooted_list_start(&self.root, path, symlink_policy)?;
-        if relative.is_some() && symlink_policy.follows() {
-            let resolved = resolve_rooted_path(&self.root, path, symlink_policy, true, LocalFileOperation::List)?;
-            if relative.as_ref() != Some(&resolved) {
-                return LocalDirectoryWalker::open_rooted_with_output(
-                    Arc::clone(&self.root),
-                    Some(resolved),
-                    relative
-                        .as_ref()
-                        .map_or_else(PathBuf::new, |path| path.as_path().to_path_buf()),
-                    *options,
-                    symlink_policy,
-                );
-            }
-        }
-        LocalDirectoryWalker::open_rooted(Arc::clone(&self.root), relative, *options, symlink_policy)
+        LocalDirectoryWalker::open_rooted(
+            Arc::clone(&self.root),
+            authority_path,
+            namespace_root.to_path_buf(),
+            *options,
+            symlink_policy,
+        )
     }
 
     /// Opens a descriptor-relative writer publication session.

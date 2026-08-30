@@ -49,6 +49,7 @@ use super::internal::open_rooted_parent;
 use super::internal::preserve_atomic_metadata;
 #[cfg(unix)]
 use super::internal::recover_atomic_install_error;
+#[cfg(unix)]
 use super::internal::synchronize_staging_file;
 #[cfg(all(feature = "internal-test-support", unix))]
 use super::internal::test_support;
@@ -306,8 +307,7 @@ impl LocalRootAtomicWriter {
                 source,
             )
         })?;
-        let mut last_collision = None;
-        for _ in 0..32 {
+        loop {
             let name = try_random_file_name(".qubit-atomic-", None, Some(".tmp")).map_err(|source| {
                 LocalAtomicWriteError::new(
                     LocalAtomicWriteStage::CreateTemporaryFile,
@@ -349,9 +349,7 @@ impl LocalRootAtomicWriter {
                         durability: options.durability(),
                     });
                 }
-                Err(source) if source.kind() == io::ErrorKind::AlreadyExists => {
-                    last_collision = Some(source);
-                }
+                Err(source) if source.kind() == io::ErrorKind::AlreadyExists => {}
                 Err(source) => {
                     return Err(LocalAtomicWriteError::new(
                         LocalAtomicWriteStage::CreateTemporaryFile,
@@ -363,18 +361,6 @@ impl LocalRootAtomicWriter {
                 }
             }
         }
-        Err(LocalAtomicWriteError::new(
-            LocalAtomicWriteStage::CreateTemporaryFile,
-            requested_path,
-            Some(diagnostic_path),
-            LocalAtomicDestinationState::Unchanged,
-            last_collision.unwrap_or_else(|| {
-                io::Error::new(
-                    io::ErrorKind::AlreadyExists,
-                    "could not allocate a unique rooted staging file",
-                )
-            }),
-        ))
     }
 
     /// Consumes the writer and reports whether requested durability completed.
@@ -726,7 +712,7 @@ impl LocalRootAtomicWriter {
     /// Finalizes a consuming Windows commit failure.
     #[cfg(windows)]
     #[inline]
-    fn finalize_failed_commit(mut self, error: LocalAtomicWriteError) -> LocalAtomicWriteError {
+    fn finalize_failed_commit(self, error: LocalAtomicWriteError) -> LocalAtomicWriteError {
         finalize_failed_commit(self, error, |writer| writer.staged_file.cleanup(), |_| {})
     }
 

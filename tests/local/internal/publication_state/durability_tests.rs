@@ -25,7 +25,8 @@ fn test_required_rename_durability_is_reported() {
     std::fs::write(&source, b"payload").expect("rename source must be written");
 
     let outcome = LocalFileSystem::host()
-        .rename(
+        .expect("Host filesystem should open")
+        .rename_with_options(
             &source,
             &target,
             &LocalRenameOptions::new().with_durability(LocalDurabilityRequirement::Required),

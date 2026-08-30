@@ -38,7 +38,6 @@ use crate::local::internal::StagedFile;
 use crate::local::internal::file_move::move_file_without_replacing;
 use crate::local::internal::file_move::parent_dir_for;
 use crate::local::internal::file_move::replace_file;
-use crate::local::internal::temp_entry::DEFAULT_TEMP_ENTRY_RETRIES;
 use crate::local::internal::temp_entry::create_temp_file_in_dir;
 
 /// Prefix used by recursive-copy staging files.
@@ -298,7 +297,7 @@ fn stage_copy_file(
             parent_dir_for(dst),
             Some(COPY_FILE_TEMP_PREFIX),
             Some(COPY_FILE_TEMP_SUFFIX),
-            DEFAULT_TEMP_ENTRY_RETRIES,
+            None,
         ),
         LocalCopyDirStage::PrepareDestination,
         src,

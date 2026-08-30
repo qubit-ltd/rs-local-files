@@ -60,7 +60,6 @@ pub(crate) use internal::create_rooted_symlink;
 pub(crate) use internal::create_temp_dir_in_dir_with_affixes;
 pub(crate) use internal::create_temp_file_in_dir;
 pub(crate) use internal::decide_copy_destination;
-pub(crate) use internal::ensure_parent_path;
 pub(crate) use internal::ensure_parent_path_with_sync_dirs;
 pub(crate) use internal::ensure_required_directory_durability;
 pub(crate) use internal::internal_copy_options;
@@ -96,7 +95,6 @@ pub(crate) use internal::rename_failure_unchanged;
 pub(crate) use internal::rename_rooted_entry;
 pub(crate) use internal::replace_file;
 pub(crate) use internal::resolve_host_path;
-pub(crate) use internal::root_authority_path;
 #[cfg(windows)]
 pub(crate) use internal::rooted_link_targets_directory;
 #[cfg(any(unix, windows))]

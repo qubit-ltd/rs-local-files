@@ -31,7 +31,8 @@ fn test_test_support_injects_selected_fault_only_in_child_process() {
             fs::write(&file, b"payload").expect("fixture should be written");
 
             let _ = LocalFileSystem::host()
-                .delete_file(&file, &LocalDeleteOptions::new())
+                .expect("Host filesystem should open")
+                .delete_file_with_options(&file, &LocalDeleteOptions::new())
                 .expect("deletion without selector should succeed");
             return;
         }
@@ -42,7 +43,8 @@ fn test_test_support_injects_selected_fault_only_in_child_process() {
             fs::write(&file, b"payload").expect("fixture should be written");
 
             let error = LocalFileSystem::host()
-                .delete_file(&file, &LocalDeleteOptions::new())
+                .expect("Host filesystem should open")
+                .delete_file_with_options(&file, &LocalDeleteOptions::new())
                 .expect_err("selected fault should fail deletion");
             assert_eq!(LocalFileErrorKind::Io, error.kind());
             return;
@@ -88,13 +90,15 @@ fn test_explicit_test_fault_guard_scopes_controller() {
     {
         let _fault = install_test_fault(FAULT).expect("fault controller should install");
         let error = LocalFileSystem::host()
-            .delete_file(&file, &LocalDeleteOptions::new())
+            .expect("Host filesystem should open")
+            .delete_file_with_options(&file, &LocalDeleteOptions::new())
             .expect_err("explicitly selected fault should fail deletion");
         assert_eq!(LocalFileErrorKind::Io, error.kind());
         assert!(install_test_fault("other").is_err());
     }
 
     let _ = LocalFileSystem::host()
-        .delete_file(&file, &LocalDeleteOptions::new())
+        .expect("Host filesystem should open")
+        .delete_file_with_options(&file, &LocalDeleteOptions::new())
         .expect("fault controller should be disabled after drop");
 }

@@ -24,9 +24,9 @@ fn test_rooted_path_support_accepts_existing_temp_parent() {
     let rooted = LocalFileSystem::rooted(directory.path()).expect("root authority should open");
 
     let temporary = rooted
-        .create_temp_file(&LocalTempFileOptions::new().with_parent(Path::new("parent")))
+        .create_temp_file_with_options(&LocalTempFileOptions::new().with_parent(Path::new("parent")))
         .expect("existing rooted parent should be accepted");
-    assert!(temporary.path().starts_with(Path::new("parent")));
+    assert!(temporary.path().starts_with(Path::new("/parent")));
 }
 
 /// Verifies explicit options create a missing rooted temporary-file parent.
@@ -36,14 +36,14 @@ fn test_rooted_path_support_creates_missing_temp_parent() {
     let rooted = LocalFileSystem::rooted(directory.path()).expect("root authority should open");
 
     let temporary = rooted
-        .create_temp_file(
+        .create_temp_file_with_options(
             &LocalTempFileOptions::new()
                 .with_parent(Path::new("missing/parent"))
                 .with_create_parent(),
         )
         .expect("explicit parent creation should create the rooted parent");
 
-    assert!(temporary.path().starts_with(Path::new("missing/parent")));
+    assert!(temporary.path().starts_with(Path::new("/missing/parent")));
     assert!(directory.path().join("missing/parent").is_dir());
 }
 
@@ -57,17 +57,17 @@ fn test_rooted_path_support_rejects_invalid_temp_parents() {
     let rooted = LocalFileSystem::rooted(directory.path()).expect("root authority should open");
 
     let missing = rooted
-        .create_temp_file(&LocalTempFileOptions::new().with_parent(Path::new("missing")))
+        .create_temp_file_with_options(&LocalTempFileOptions::new().with_parent(Path::new("missing")))
         .expect_err("missing rooted parent should be rejected");
     assert_eq!(LocalFileErrorKind::NotFound, missing.kind());
 
     let not_directory = rooted
-        .create_temp_file(&LocalTempFileOptions::new().with_parent(Path::new("file")))
+        .create_temp_file_with_options(&LocalTempFileOptions::new().with_parent(Path::new("file")))
         .expect_err("file rooted parent should be rejected");
     assert_eq!(LocalFileErrorKind::NotDirectory, not_directory.kind());
 
     let escape = rooted
-        .create_temp_file(&LocalTempFileOptions::new().with_parent(Path::new("../escape")))
+        .create_temp_file_with_options(&LocalTempFileOptions::new().with_parent(Path::new("../escape")))
         .expect_err("rooted parent traversal should be rejected");
     assert_eq!(LocalFileErrorKind::InvalidPath, escape.kind());
 }
@@ -79,7 +79,7 @@ fn test_rooted_path_support_rejects_invalid_temp_affixes() {
     let rooted = LocalFileSystem::rooted(directory.path()).expect("root authority should open");
 
     let error = rooted
-        .create_temp_file(&LocalTempFileOptions::new().with_prefix("bad/name"))
+        .create_temp_file_with_options(&LocalTempFileOptions::new().with_prefix("bad/name"))
         .expect_err("path separators must be rejected in temporary prefixes");
     assert_eq!(LocalFileErrorKind::InvalidOptions, error.kind());
 }

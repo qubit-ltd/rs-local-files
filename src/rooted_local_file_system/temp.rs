@@ -64,7 +64,7 @@ impl RootedLocalFileSystem {
                 .map_err(|error| rooted_io_error(LocalFileOperation::CreateTempFile, &parent, error))?;
         }
         validate_rooted_temp_parent(&self.root, &parent, LocalFileOperation::CreateTempFile)?;
-        if options.max_attempts() == 0 {
+        if options.max_attempts() == Some(0) {
             return Err(rooted_io_error(
                 LocalFileOperation::CreateTempFile,
                 &parent,
@@ -79,7 +79,9 @@ impl RootedLocalFileSystem {
             rooted_io_error(LocalFileOperation::CreateTempFile, &parent, error)
                 .with_kind(LocalFileErrorKind::InvalidOptions)
         })?;
-        for _ in 0..options.max_attempts() {
+        let mut attempts = 0_usize;
+        loop {
+            attempts = attempts.saturating_add(1);
             let resource_name =
                 crate::local::try_random_file_name("qubit-local-files-", options.prefix(), options.suffix())
                     .map_err(|error| rooted_io_error(LocalFileOperation::CreateTempFile, &parent, error))?;
@@ -88,6 +90,9 @@ impl RootedLocalFileSystem {
             match self.root.create_dir(&sandbox_relative) {
                 Ok(()) => {}
                 Err(error) if error.kind() == io::ErrorKind::AlreadyExists => {
+                    if attempt_budget_exhausted(attempts, options.max_attempts()) {
+                        break;
+                    }
                     continue;
                 }
                 Err(error) => {
@@ -137,6 +142,9 @@ impl RootedLocalFileSystem {
                 }
                 Err(error) if error.kind() == io::ErrorKind::AlreadyExists => {
                     let _ = self.root.remove_tree(&sandbox_relative);
+                    if attempt_budget_exhausted(attempts, options.max_attempts()) {
+                        break;
+                    }
                     continue;
                 }
                 Err(error) => {
@@ -191,7 +199,7 @@ impl RootedLocalFileSystem {
                 .map_err(|error| rooted_io_error(LocalFileOperation::CreateTempDirectory, &parent, error))?;
         }
         validate_rooted_temp_parent(&self.root, &parent, LocalFileOperation::CreateTempDirectory)?;
-        if options.max_attempts() == 0 {
+        if options.max_attempts() == Some(0) {
             return Err(rooted_io_error(
                 LocalFileOperation::CreateTempDirectory,
                 &parent,
@@ -206,7 +214,9 @@ impl RootedLocalFileSystem {
             rooted_io_error(LocalFileOperation::CreateTempDirectory, &parent, error)
                 .with_kind(LocalFileErrorKind::InvalidOptions)
         })?;
-        for _ in 0..options.max_attempts() {
+        let mut attempts = 0_usize;
+        loop {
+            attempts = attempts.saturating_add(1);
             let resource_name =
                 crate::local::try_random_file_name("qubit-local-files-", options.prefix(), options.suffix())
                     .map_err(|error| rooted_io_error(LocalFileOperation::CreateTempDirectory, &parent, error))?;
@@ -215,6 +225,9 @@ impl RootedLocalFileSystem {
             match self.root.create_dir(&sandbox_relative) {
                 Ok(()) => {}
                 Err(error) if error.kind() == io::ErrorKind::AlreadyExists => {
+                    if attempt_budget_exhausted(attempts, options.max_attempts()) {
+                        break;
+                    }
                     continue;
                 }
                 Err(error) => {
@@ -257,6 +270,9 @@ impl RootedLocalFileSystem {
                 }
                 Err(error) if error.kind() == io::ErrorKind::AlreadyExists => {
                     let _ = self.root.remove_tree(&sandbox_relative);
+                    if attempt_budget_exhausted(attempts, options.max_attempts()) {
+                        break;
+                    }
                     continue;
                 }
                 Err(error) => {
@@ -278,4 +294,10 @@ impl RootedLocalFileSystem {
             ),
         ))
     }
+}
+
+/// Reports whether an explicitly configured collision budget is exhausted.
+#[must_use]
+fn attempt_budget_exhausted(attempts: usize, max_attempts: Option<usize>) -> bool {
+    max_attempts.is_some_and(|max_attempts| attempts >= max_attempts)
 }

@@ -12,8 +12,6 @@ use std::io::Read;
 use std::io::Seek;
 use std::io::SeekFrom;
 
-#[cfg(windows)]
-use qubit_local_files::LocalFileErrorKind;
 use qubit_local_files::LocalFileSystem;
 use qubit_local_files::LocalReadOptions;
 #[cfg(feature = "internal-test-support")]
@@ -28,7 +26,8 @@ fn test_local_file_reader_reads_and_seeks() {
     std::fs::write(&path, b"abcdef").expect("fixture should be written");
 
     let mut reader = LocalFileSystem::host()
-        .open_reader(&path, &LocalReadOptions::new())
+        .expect("Host filesystem should open")
+        .open_reader_with_options(&path, &LocalReadOptions::new())
         .expect("regular file should open for reading");
     assert!(
         reader
@@ -57,7 +56,8 @@ fn test_local_file_reader_supports_vectored_reads() {
     std::fs::write(&path, b"abcdef").expect("fixture should be written");
 
     let mut reader = LocalFileSystem::host()
-        .open_reader(&path, &LocalReadOptions::new())
+        .expect("Host filesystem should open")
+        .open_reader_with_options(&path, &LocalReadOptions::new())
         .expect("regular file should open for reading");
     let mut first = [0_u8; 2];
     let mut second = [0_u8; 4];
@@ -81,7 +81,8 @@ fn test_local_file_reader_vectored_read_retains_prior_bytes_after_later_error() 
     std::fs::write(&path, b"abcdef").expect("fixture should be written");
 
     let mut reader = LocalFileSystem::host()
-        .open_reader(&path, &LocalReadOptions::new())
+        .expect("Host filesystem should open")
+        .open_reader_with_options(&path, &LocalReadOptions::new())
         .expect("regular file should open for reading");
     let _fault = install_test_fault("local-file-reader-vectored-read-after-first").expect("test fault should install");
     let mut first = [0_u8; 2];
@@ -97,10 +98,10 @@ fn test_local_file_reader_vectored_read_retains_prior_bytes_after_later_error() 
     assert_eq!(&second, &[0_u8; 4]);
 }
 
-/// Verifies Windows host readers reject a final name-surrogate reparse point.
+/// Verifies Windows Host readers follow final links under the default policy.
 #[cfg(windows)]
 #[test]
-fn test_local_file_reader_rejects_final_file_symlink_on_windows() {
+fn test_local_file_reader_follows_final_file_symlink_on_windows() {
     use std::io::ErrorKind;
     use std::os::windows::fs::symlink_file;
 
@@ -115,8 +116,13 @@ fn test_local_file_reader_rejects_final_file_symlink_on_windows() {
         panic!("file symlink should be created: {error}");
     }
 
-    let error = LocalFileSystem::host()
-        .open_reader(&link, &LocalReadOptions::new())
-        .expect_err("reader must not follow a final file symlink");
-    assert_eq!(LocalFileErrorKind::TypeConflict, error.kind());
+    let mut reader = LocalFileSystem::host()
+        .expect("Host filesystem should open")
+        .open_reader_with_options(&link, &LocalReadOptions::new())
+        .expect("the default Host policy should follow a final file symlink");
+    let mut payload = Vec::new();
+    reader
+        .read_to_end(&mut payload)
+        .expect("linked file contents should be readable");
+    assert_eq!(b"payload", payload.as_slice());
 }

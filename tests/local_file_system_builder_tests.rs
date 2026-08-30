@@ -3,33 +3,42 @@
 //
 //    SPDX-License-Identifier: Apache-2.0
 // =============================================================================
-//! Public construction and immutable configuration coverage.
+//! Public construction and instance-configuration coverage.
 
-use qubit_local_files::LocalCopyLimits;
 use qubit_local_files::LocalFileErrorKind;
-use qubit_local_files::LocalFileSystemBuilder;
+use qubit_local_files::LocalFileSystem;
 use qubit_local_files::LocalFileSystemScope;
-use qubit_local_files::LocalWalkLimits;
+use qubit_local_files::LocalListOptions;
 
 #[test]
-fn cloned_filesystem_shares_authority_and_limits() {
+fn cloned_filesystem_shares_authority_but_copies_configuration() {
     let root = tempfile::tempdir().expect("temporary root");
-    let limits = LocalWalkLimits::new().with_max_entries(32).with_max_open_handles(4);
-    let filesystem = LocalFileSystemBuilder::rooted(root.path())
-        .walk_limits(limits)
-        .build()
-        .expect("rooted filesystem");
+    let mut filesystem = LocalFileSystem::rooted(root.path()).expect("rooted filesystem");
+    filesystem
+        .set_default_list_options(
+            LocalListOptions::new()
+                .with_max_entries(32)
+                .with_max_open_directories(4),
+        )
+        .expect("list defaults should be accepted");
 
-    let cloned = filesystem.clone();
+    let mut cloned = filesystem.clone();
     assert_eq!(cloned.scope(), LocalFileSystemScope::Rooted);
-    assert_eq!(cloned.walk_limits(), limits);
+    assert_eq!(cloned.default_list_options().max_entries(), Some(32));
+    cloned
+        .set_default_list_options(LocalListOptions::new())
+        .expect("clone defaults should remain configurable");
+    assert_eq!(filesystem.default_list_options().max_entries(), Some(32));
+    assert_eq!(cloned.default_list_options().max_entries(), None);
 }
 
 #[test]
-fn builder_rejects_zero_limits() {
-    let error = LocalFileSystemBuilder::host()
-        .copy_limits(LocalCopyLimits::new().with_max_bytes(0))
-        .build()
-        .expect_err("zero limits must be rejected");
+fn configuration_setters_reject_invalid_options_transactionally() {
+    let mut filesystem = LocalFileSystem::host().expect("Host filesystem should open");
+    let original = *filesystem.default_list_options();
+    let error = filesystem
+        .set_default_list_options(LocalListOptions::new().with_max_open_directories(0))
+        .expect_err("zero open-directory budgets must be rejected");
     assert_eq!(error.kind(), LocalFileErrorKind::InvalidOptions);
+    assert_eq!(filesystem.default_list_options(), &original);
 }

@@ -19,7 +19,7 @@ pub struct LocalReadOptions {
 }
 
 impl LocalReadOptions {
-    /// Creates default reader options with unbounded platform retry behavior.
+    /// Creates default reader options that perform only the initial open.
     pub const fn new() -> Self {
         Self {
             open_retry_timeout: None,
@@ -28,7 +28,7 @@ impl LocalReadOptions {
 
     /// Returns the configured Unix open retry timeout.
     ///
-    /// `None` means no retry deadline.
+    /// `None` means the library does not retry.
     #[must_use]
     pub const fn open_retry_timeout(&self) -> Option<Duration> {
         self.open_retry_timeout
@@ -45,6 +45,12 @@ impl LocalReadOptions {
     /// Updated reader options.
     pub const fn with_open_retry_timeout(mut self, timeout: Duration) -> Self {
         self.open_retry_timeout = Some(timeout);
+        self
+    }
+
+    /// Disables library-level open retries.
+    pub const fn without_open_retry_timeout(mut self) -> Self {
+        self.open_retry_timeout = None;
         self
     }
 }

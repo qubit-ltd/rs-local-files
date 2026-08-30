@@ -39,7 +39,8 @@ fn test_host_path_resolution_follows_intermediate_symlink() {
     symlink(&target, directory.path().join("link")).expect("intermediate link should be created");
 
     let mut reader = LocalFileSystem::host()
-        .open_reader(&directory.path().join("link/payload"), &LocalReadOptions::new())
+        .expect("Host filesystem should open")
+        .open_reader_with_options(&directory.path().join("link/payload"), &LocalReadOptions::new())
         .expect("host resolution should follow the intermediate link");
     let mut content = String::new();
     reader
@@ -60,10 +61,12 @@ fn test_host_path_resolution_rejects_required_symbolic_link() {
     let link = directory.path().join("link");
     symlink(&target, &link).expect("final link should be created");
 
-    let error = LocalFileSystem::host()
-        .with_symlink_policy(LocalSymlinkPolicy::Reject)
-        .expect("Host should accept Reject")
-        .open_reader(&link, &LocalReadOptions::new())
+    let mut filesystem = LocalFileSystem::host().expect("Host filesystem should open");
+    filesystem
+        .set_symlink_policy(LocalSymlinkPolicy::Reject)
+        .expect("Host should accept Reject");
+    let error = filesystem
+        .open_reader_with_options(&link, &LocalReadOptions::new())
         .expect_err("rejecting policy must reject a followed final link");
     assert_eq!(LocalFileErrorKind::Unsupported, error.kind());
 }
@@ -79,7 +82,8 @@ fn test_host_path_resolution_reports_dangling_followed_link() {
     symlink("missing-target", &link).expect("dangling link should be created");
 
     let error = LocalFileSystem::host()
-        .open_reader(&link, &LocalReadOptions::new())
+        .expect("Host filesystem should open")
+        .open_reader_with_options(&link, &LocalReadOptions::new())
         .expect_err("following a dangling link must fail");
     assert_eq!(LocalFileErrorKind::NotFound, error.kind());
 }
@@ -98,6 +102,7 @@ fn test_host_path_resolution_preserves_final_link_for_metadata() {
     symlink(&target, &link).expect("final link should be created");
 
     let metadata = LocalFileSystem::host()
+        .expect("Host filesystem should open")
         .metadata(Path::new(&link))
         .expect("metadata should inspect the final link entry");
     assert_eq!(LocalFileKind::Symlink, metadata.kind());
@@ -108,6 +113,7 @@ fn test_host_path_resolution_preserves_final_link_for_metadata() {
 #[test]
 fn test_host_path_resolution_rejects_drive_relative_prefix() {
     let error = LocalFileSystem::host()
+        .expect("Host filesystem should open")
         .metadata(Path::new(r"C:escape"))
         .expect_err("drive-relative prefixes must not escape Host binding");
 

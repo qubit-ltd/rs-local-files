@@ -27,9 +27,11 @@ pub struct LocalFileError {
     kind: LocalFileErrorKind,
     /// Operation that failed.
     operation: LocalFileOperation,
-    /// Primary native path involved in the operation.
+    /// Namespace-absolute PWD used to bind relative operation paths.
+    current_directory: Option<Box<PathBuf>>,
+    /// Primary path in the operation's public namespace.
     path: Option<PathBuf>,
-    /// Secondary or destination native path.
+    /// Secondary or destination path in the public namespace.
     target: Option<PathBuf>,
     /// Stable explanation for policy or validation failures.
     reason: Option<&'static str>,
@@ -52,6 +54,7 @@ impl LocalFileError {
         Self {
             kind,
             operation,
+            current_directory: None,
             path: None,
             target: None,
             reason: None,
@@ -65,8 +68,8 @@ impl LocalFileError {
     /// # Parameters
     ///
     /// - `operation`: Operation that failed.
-    /// - `path`: Optional primary path.
-    /// - `target`: Optional destination path.
+    /// - `path`: Optional primary public-namespace path.
+    /// - `target`: Optional destination public-namespace path.
     /// - `source`: Native I/O error.
     ///
     /// # Returns
@@ -80,9 +83,19 @@ impl LocalFileError {
         target: Option<PathBuf>,
         source: io::Error,
     ) -> Self {
+        if let Some(resource_limit) = source
+            .get_ref()
+            .and_then(|source| source.downcast_ref::<LocalResourceLimitError>())
+            .copied()
+        {
+            let mut error = Self::from_resource_limit(operation, path, resource_limit);
+            error.target = target;
+            return error;
+        }
         Self {
             kind: classify_io_error(&source),
             operation,
+            current_directory: None,
             path,
             target,
             reason: None,
@@ -113,6 +126,7 @@ impl LocalFileError {
         Self {
             kind: LocalFileErrorKind::InvalidPath,
             operation,
+            current_directory: None,
             path,
             target: None,
             reason: None,
@@ -143,6 +157,7 @@ impl LocalFileError {
         Self {
             kind: LocalFileErrorKind::ResourceLimit,
             operation,
+            current_directory: None,
             path,
             target: None,
             reason: None,
@@ -151,11 +166,19 @@ impl LocalFileError {
         }
     }
 
+    /// Adds the namespace-absolute PWD used for path binding.
+    #[must_use]
+    #[inline(always)]
+    pub fn with_current_directory(mut self, current_directory: PathBuf) -> Self {
+        self.current_directory = Some(Box::new(current_directory));
+        self
+    }
+
     /// Adds a primary path to this error.
     ///
     /// # Parameters
     ///
-    /// - `path`: Native path that was being accessed.
+    /// - `path`: Public-namespace path that was being accessed.
     ///
     /// # Returns
     ///
@@ -171,7 +194,7 @@ impl LocalFileError {
     ///
     /// # Parameters
     ///
-    /// - `target`: Native destination path.
+    /// - `target`: Public-namespace destination path.
     ///
     /// # Returns
     ///
@@ -181,6 +204,18 @@ impl LocalFileError {
     pub fn with_target(mut self, target: PathBuf) -> Self {
         self.target = Some(target);
         self
+    }
+
+    /// Replaces public namespace path context during facade remapping.
+    pub(crate) fn replace_paths(
+        &mut self,
+        path: Option<PathBuf>,
+        target: Option<PathBuf>,
+        current_directory: Option<PathBuf>,
+    ) {
+        self.path = path;
+        self.target = target;
+        self.current_directory = current_directory.map(Box::new);
     }
 
     /// Adds a stable explanation for the failure.
@@ -223,6 +258,13 @@ impl LocalFileError {
     #[inline(always)]
     pub const fn operation(&self) -> LocalFileOperation {
         self.operation
+    }
+
+    /// Returns the namespace-absolute PWD used to bind relative paths.
+    #[must_use]
+    #[inline(always)]
+    pub fn current_directory(&self) -> Option<&Path> {
+        self.current_directory.as_deref().map(PathBuf::as_path)
     }
 
     /// Returns the primary path, or `None` when no path applies.
@@ -365,6 +407,9 @@ impl fmt::Display for LocalFileError {
         write!(formatter, "{:?} failed with {:?}", self.operation, self.kind)?;
         if let Some(reason) = self.reason {
             write!(formatter, ": {reason}")?;
+        }
+        if let Some(current_directory) = &self.current_directory {
+            write!(formatter, " from PWD {}", current_directory.display())?;
         }
         if let Some(path) = &self.path {
             write!(formatter, " at {}", path.display())?;

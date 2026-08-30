@@ -21,10 +21,10 @@ use tempfile::tempdir;
 fn test_host_io_operations_round_trip_file_bytes() {
     let directory = tempdir().expect("I/O test directory should exist");
     let path = directory.path().join("payload");
-    let filesystem = LocalFileSystem::host();
+    let filesystem = LocalFileSystem::host().expect("Host filesystem should open");
 
     let mut writer = filesystem
-        .open_writer(
+        .open_writer_with_options(
             &path,
             &LocalWriteOptions::new(LocalWriteMode::CreateOrReplace),
         )
@@ -35,7 +35,7 @@ fn test_host_io_operations_round_trip_file_bytes() {
     assert_eq!(LocalWriterState::Committed, outcome.state());
 
     let bytes = filesystem
-        .read_prefix(&path, &LocalReadOptions::new(), 32)
+        .read_prefix_with_options(&path, 32, &LocalReadOptions::new())
         .expect("Host reader should read committed bytes");
     assert_eq!(b"payload", bytes.as_slice());
     assert_eq!(b"payload", fs::read(path).expect("payload should remain readable").as_slice());

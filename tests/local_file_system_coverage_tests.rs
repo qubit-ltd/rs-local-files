@@ -64,7 +64,8 @@ fn test_copy_directory_rejects_required_publication_guarantees() {
             .with_durability(LocalDurabilityRequirement::Required),
     ] {
         let error = LocalFileSystem::host()
-            .copy(&source, &directory.path().join("target"), &options)
+            .expect("Host filesystem should open")
+            .copy_with_options(&source, &directory.path().join("target"), &options)
             .expect_err("unsupported directory guarantee must fail before copy");
         assert_eq!(LocalFileErrorKind::RequirementNotMet, error.error().kind());
     }
@@ -79,7 +80,8 @@ fn test_open_writer_append_rejects_unsupported_atomicity_and_directory() {
     fs::write(&file, b"payload").expect("file fixture should be written");
 
     let atomicity_error = LocalFileSystem::host()
-        .open_writer(
+        .expect("Host filesystem should open")
+        .open_writer_with_options(
             &file,
             &LocalWriteOptions::new(LocalWriteMode::Append).with_atomicity(LocalAtomicityRequirement::Required),
         )
@@ -87,7 +89,8 @@ fn test_open_writer_append_rejects_unsupported_atomicity_and_directory() {
     assert_eq!(LocalFileErrorKind::RequirementNotMet, atomicity_error.kind());
 
     let type_error = LocalFileSystem::host()
-        .open_writer(directory.path(), &LocalWriteOptions::new(LocalWriteMode::Append))
+        .expect("Host filesystem should open")
+        .open_writer_with_options(directory.path(), &LocalWriteOptions::new(LocalWriteMode::Append))
         .expect_err("directories cannot be opened for direct append");
     assert_eq!(LocalFileErrorKind::TypeConflict, type_error.kind());
 }
@@ -106,14 +109,16 @@ fn test_copy_symlink_preserves_final_link_entry() {
     symlink(&referent, &link).expect("file symlink should be created");
 
     let outcome = LocalFileSystem::host()
-        .copy(&link, &target, &LocalCopyOptions::new())
+        .expect("Host filesystem should open")
+        .copy_with_options(&link, &target, &LocalCopyOptions::new())
         .expect("default copy should copy a source link entry");
     assert!(!outcome.atomic());
     assert_eq!(referent, fs::read_link(&target).expect("target link should exist"));
 
     let target_follow = directory.path().join("target-follow");
     let outcome = LocalFileSystem::host()
-        .copy(
+        .expect("Host filesystem should open")
+        .copy_with_options(
             &link,
             &target_follow,
             &LocalCopyOptions::new().with_symlink_policy(LocalSymlinkPolicy::FollowWithinScope),
@@ -131,12 +136,15 @@ fn test_copy_symlink_preserves_final_link_entry() {
 #[test]
 fn test_host_facade_uses_configured_reader_writer_and_list_policies() {
     let directory = tempdir().expect("temporary directory should be created");
-    let _capabilities = LocalFileSystem::host().protocols();
+    let _capabilities = LocalFileSystem::host()
+        .expect("Host filesystem should open")
+        .protocols();
     let file = directory.path().join("payload");
     fs::write(&file, b"payload").expect("file fixture should be written");
 
     let mut reader = LocalFileSystem::host()
-        .open_reader(&file, &LocalReadOptions::new().with_open_retry_timeout(Duration::ZERO))
+        .expect("Host filesystem should open")
+        .open_reader_with_options(&file, &LocalReadOptions::new().with_open_retry_timeout(Duration::ZERO))
         .expect("regular file should open with an explicit retry timeout");
     let mut content = String::new();
     reader
@@ -145,7 +153,8 @@ fn test_host_facade_uses_configured_reader_writer_and_list_policies() {
     assert_eq!("payload", content);
 
     let mut writer = LocalFileSystem::host()
-        .open_writer(
+        .expect("Host filesystem should open")
+        .open_writer_with_options(
             &file,
             &LocalWriteOptions::new(LocalWriteMode::Append).with_open_retry_timeout(Duration::ZERO),
         )
@@ -158,7 +167,8 @@ fn test_host_facade_uses_configured_reader_writer_and_list_policies() {
     assert!(!outcome.atomic());
 
     let walker = LocalFileSystem::host()
-        .list(directory.path(), &LocalListOptions::new())
+        .expect("Host filesystem should open")
+        .list_with_options(directory.path(), &LocalListOptions::new())
         .expect("directory walker should open");
     let entries = walker
         .collect::<Result<Vec<_>, _>>()
@@ -179,18 +189,21 @@ fn test_copy_and_rename_reject_missing_sources_and_aliases() {
     let target = directory.path().join("target");
 
     let copy_error = LocalFileSystem::host()
-        .copy(&missing, &target, &LocalCopyOptions::new())
+        .expect("Host filesystem should open")
+        .copy_with_options(&missing, &target, &LocalCopyOptions::new())
         .expect_err("missing copy source must fail");
     assert_eq!(LocalFileErrorKind::NotFound, copy_error.error().kind());
 
     fs::write(&target, b"payload").expect("alias fixture should be written");
     let alias_error = LocalFileSystem::host()
-        .copy(&target, &target, &LocalCopyOptions::new())
+        .expect("Host filesystem should open")
+        .copy_with_options(&target, &target, &LocalCopyOptions::new())
         .expect_err("copying a path onto itself must fail");
     assert_eq!(LocalFileErrorKind::InvalidOptions, alias_error.error().kind(),);
 
     let rename_error = LocalFileSystem::host()
-        .rename(&missing, &directory.path().join("renamed"), &LocalRenameOptions::new())
+        .expect("Host filesystem should open")
+        .rename_with_options(&missing, &directory.path().join("renamed"), &LocalRenameOptions::new())
         .expect_err("missing rename source must fail");
     assert_eq!(LocalFileErrorKind::NotFound, rename_error.error().kind());
 }
@@ -205,7 +218,8 @@ fn test_host_facade_mutates_file_and_directory_entries() {
     fs::write(&source, b"payload").expect("source fixture should be written");
 
     let copy = LocalFileSystem::host()
-        .copy(
+        .expect("Host filesystem should open")
+        .copy_with_options(
             &source,
             &target,
             &LocalCopyOptions::new().with_metadata_preservation(LocalMetadataPreservePolicy::Permissions),
@@ -216,21 +230,25 @@ fn test_host_facade_mutates_file_and_directory_entries() {
 
     let renamed = directory.path().join("renamed");
     let rename = LocalFileSystem::host()
-        .rename(&target, &renamed, &LocalRenameOptions::new())
+        .expect("Host filesystem should open")
+        .rename_with_options(&target, &renamed, &LocalRenameOptions::new())
         .expect("file rename should succeed when the target is absent");
     assert!(rename.atomic());
 
     let tree = directory.path().join("tree");
     let created = LocalFileSystem::host()
-        .create_directory(&tree, &LocalCreateDirectoryOptions::new())
+        .expect("Host filesystem should open")
+        .create_directory_with_options(&tree, &LocalCreateDirectoryOptions::new())
         .expect("directory should be created");
     assert!(created.created());
     let deleted_directory = LocalFileSystem::host()
-        .delete_directory(&tree, &LocalDeleteOptions::new())
+        .expect("Host filesystem should open")
+        .delete_directory_with_options(&tree, &LocalDeleteOptions::new())
         .expect("empty directory should be deleted");
     assert!(deleted_directory.deleted());
     let deleted_file = LocalFileSystem::host()
-        .delete_file(&renamed, &LocalDeleteOptions::new())
+        .expect("Host filesystem should open")
+        .delete_file_with_options(&renamed, &LocalDeleteOptions::new())
         .expect("regular file should be deleted");
     assert!(deleted_file.deleted());
 }
@@ -267,7 +285,8 @@ fn test_atomic_replacement_preserves_extended_attributes() {
     }
 
     let mut writer = LocalFileSystem::host()
-        .open_writer(&path, &LocalWriteOptions::new(LocalWriteMode::CreateOrReplace))
+        .expect("Host filesystem should open")
+        .open_writer_with_options(&path, &LocalWriteOptions::new(LocalWriteMode::CreateOrReplace))
         .expect("existing destination should open for atomic replacement");
     writer
         .write_all(b"replacement")
@@ -293,8 +312,8 @@ fn test_atomic_replacement_preserves_extended_attributes() {
 #[test]
 fn test_filesystem_namespace_capabilities_and_probe_variants() {
     let directory = tempdir().expect("temporary directory should be created");
-    let host = LocalFileSystem::host()
-        .with_symlink_policy(LocalSymlinkPolicy::Reject)
+    let mut host = LocalFileSystem::host().expect("Host filesystem should open");
+    host.set_symlink_policy(LocalSymlinkPolicy::Reject)
         .expect("host policy changes should be accepted");
     assert_eq!(LocalSymlinkPolicy::Reject, host.symlink_policy(),);
     let _ = host.limits();
@@ -305,7 +324,7 @@ fn test_filesystem_namespace_capabilities_and_probe_variants() {
         .space_at(&directory.path().join("missing/leaf"))
         .expect("host space should probe nearest existing ancestor");
 
-    let rooted = LocalFileSystem::rooted(directory.path()).expect("rooted authority should open");
+    let mut rooted = LocalFileSystem::rooted(directory.path()).expect("rooted authority should open");
     assert!(rooted.diagnostic_root().is_some());
     let _ = rooted.limits();
     let _ = rooted
@@ -316,7 +335,7 @@ fn test_filesystem_namespace_capabilities_and_probe_variants() {
         .expect("rooted space should probe nearest existing ancestor");
     assert!(
         rooted
-            .with_symlink_policy(LocalSymlinkPolicy::FollowAcrossScope)
+            .set_symlink_policy(LocalSymlinkPolicy::FollowAcrossScope)
             .is_err()
     );
 }
@@ -406,7 +425,8 @@ fn test_atomic_replacement_exercises_metadata_fault_boundaries() {
             }
 
             let mut writer = LocalFileSystem::host()
-                .open_writer(&path, &LocalWriteOptions::new(LocalWriteMode::CreateOrReplace))
+                .expect("Host filesystem should open")
+                .open_writer_with_options(&path, &LocalWriteOptions::new(LocalWriteMode::CreateOrReplace))
                 .expect("existing destination should open for replacement");
             writer
                 .write_all(b"replacement")
@@ -431,7 +451,8 @@ fn test_read_prefix_reports_injected_read_failure() {
         fs::write(&file, b"payload").expect("fixture should be written");
 
         let error = LocalFileSystem::host()
-            .read_prefix(&file, &LocalReadOptions::new(), 4)
+            .expect("Host filesystem should open")
+            .read_prefix_with_options(&file, 4, &LocalReadOptions::new())
             .expect_err("injected read failure must be reported");
         assert_eq!(LocalFileOperation::Read, error.operation());
         assert_eq!(Some(file.as_path()), error.path());
@@ -451,7 +472,8 @@ fn test_rename_reports_injected_indeterminate_native_failure() {
         fs::write(&source, b"payload").expect("source fixture should be written");
 
         let error = LocalFileSystem::host()
-            .rename(&source, &target, &LocalRenameOptions::new())
+            .expect("Host filesystem should open")
+            .rename_with_options(&source, &target, &LocalRenameOptions::new())
             .expect_err("injected native uncertainty must fail rename");
         assert_eq!(LocalRenameFailureState::Indeterminate, error.state(),);
     });
@@ -470,7 +492,8 @@ fn test_rename_reports_injected_native_boundary_failure() {
         fs::write(&source, b"payload").expect("source fixture should be written");
 
         let error = LocalFileSystem::host()
-            .rename(&source, &target, &LocalRenameOptions::new())
+            .expect("Host filesystem should open")
+            .rename_with_options(&source, &target, &LocalRenameOptions::new())
             .expect_err("injected native rename failure must be reported");
         assert_eq!(LocalRenameFailureState::Indeterminate, error.state());
         assert!(source.exists(), "injected pre-native failure keeps source");
@@ -506,47 +529,58 @@ fn test_host_facade_reports_injected_native_io_failures() {
 
             let failed = match fault {
                 "local-fs-open-reader-metadata" => LocalFileSystem::host()
-                    .open_reader(&source, &LocalReadOptions::new())
+                    .expect("Host filesystem should open")
+                    .open_reader_with_options(&source, &LocalReadOptions::new())
                     .is_err(),
                 "local-fs-open-writer-parent" => LocalFileSystem::host()
-                    .open_writer(
+                    .expect("Host filesystem should open")
+                    .open_writer_with_options(
                         &directory.path().join("nested/target"),
                         &LocalWriteOptions::new(LocalWriteMode::CreateNew).with_parent(),
                     )
                     .is_err(),
                 "local-fs-copy-source-metadata" => LocalFileSystem::host()
-                    .copy(&source, &target, &LocalCopyOptions::new())
+                    .expect("Host filesystem should open")
+                    .copy_with_options(&source, &target, &LocalCopyOptions::new())
                     .is_err(),
                 "local-fs-create-directory-exists" => LocalFileSystem::host()
-                    .create_directory(&target, &LocalCreateDirectoryOptions::new())
+                    .expect("Host filesystem should open")
+                    .create_directory_with_options(&target, &LocalCreateDirectoryOptions::new())
                     .is_err(),
                 "local-fs-delete-file-remove" => LocalFileSystem::host()
-                    .delete_file(&source, &LocalDeleteOptions::new())
+                    .expect("Host filesystem should open")
+                    .delete_file_with_options(&source, &LocalDeleteOptions::new())
                     .is_err(),
                 "local-fs-delete-directory-remove" => {
                     fs::create_dir(&target).expect("directory deletion fixture should be created");
                     LocalFileSystem::host()
-                        .delete_directory(&target, &LocalDeleteOptions::new())
+                        .expect("Host filesystem should open")
+                        .delete_directory_with_options(&target, &LocalDeleteOptions::new())
                         .is_err()
                 }
                 "local-fs-delete-metadata" => LocalFileSystem::host()
-                    .delete_file(&source, &LocalDeleteOptions::new())
+                    .expect("Host filesystem should open")
+                    .delete_file_with_options(&source, &LocalDeleteOptions::new())
                     .is_err(),
                 "local-fs-rename-source-metadata" => LocalFileSystem::host()
-                    .rename(&source, &target, &LocalRenameOptions::new())
+                    .expect("Host filesystem should open")
+                    .rename_with_options(&source, &target, &LocalRenameOptions::new())
                     .is_err(),
                 "local-fs-open-reader-native" => LocalFileSystem::host()
-                    .open_reader(&source, &LocalReadOptions::new())
+                    .expect("Host filesystem should open")
+                    .open_reader_with_options(&source, &LocalReadOptions::new())
                     .is_err(),
                 "local-fs-open-writer-append-metadata" | "local-fs-open-writer-append-native" => {
                     LocalFileSystem::host()
-                        .open_writer(&source, &LocalWriteOptions::new(LocalWriteMode::Append))
+                        .expect("Host filesystem should open")
+                        .open_writer_with_options(&source, &LocalWriteOptions::new(LocalWriteMode::Append))
                         .is_err()
                 }
                 "local-fs-copy-target-metadata" => {
                     fs::write(&target, b"existing").expect("target fixture should be written");
                     LocalFileSystem::host()
-                        .copy(&source, &target, &LocalCopyOptions::new())
+                        .expect("Host filesystem should open")
+                        .copy_with_options(&source, &target, &LocalCopyOptions::new())
                         .is_err()
                 }
                 _ => unreachable!("every requested test fault is handled"),
@@ -572,14 +606,16 @@ fn test_copy_and_rename_report_injected_parent_sync_failures() {
 
             let failed = match fault {
                 "copy-parent-sync" => LocalFileSystem::host()
-                    .copy(
+                    .expect("Host filesystem should open")
+                    .copy_with_options(
                         &source,
                         &target,
                         &LocalCopyOptions::new().with_durability(LocalDurabilityRequirement::Required),
                     )
                     .is_err(),
                 "rename-parent-sync" => LocalFileSystem::host()
-                    .rename(
+                    .expect("Host filesystem should open")
+                    .rename_with_options(
                         &source,
                         &target,
                         &LocalRenameOptions::new().with_durability(LocalDurabilityRequirement::Required),
@@ -607,7 +643,8 @@ fn test_copy_required_durability_syncs_staging_before_publication() {
         fs::write(&target, b"old").expect("target fixture should be written");
 
         let failure = LocalFileSystem::host()
-            .copy(
+            .expect("Host filesystem should open")
+            .copy_with_options(
                 &source,
                 &target,
                 &LocalCopyOptions::new()
@@ -634,7 +671,8 @@ fn test_copy_rejects_injected_missing_directory_durability() {
         fs::write(&source, b"payload").expect("source fixture should be written");
 
         let error = LocalFileSystem::host()
-            .copy(
+            .expect("Host filesystem should open")
+            .copy_with_options(
                 &source,
                 &target,
                 &LocalCopyOptions::new().with_durability(LocalDurabilityRequirement::Required),
@@ -664,7 +702,9 @@ fn test_host_copy_reports_injected_destination_races() {
             fs::write(source.join("nested/payload"), b"payload").expect("source payload should be written");
 
             let target = directory.path().join("target");
-            let result = LocalFileSystem::host().copy(&source, &target, &LocalCopyOptions::new().with_tree_source());
+            let result = LocalFileSystem::host()
+                .expect("Host filesystem should open")
+                .copy_with_options(&source, &target, &LocalCopyOptions::new().with_tree_source());
             if result.is_ok() {
                 assert_eq!(
                     b"payload",
@@ -698,7 +738,8 @@ fn test_host_copy_reports_injected_destination_removal_races() {
 
             assert!(
                 LocalFileSystem::host()
-                    .copy(
+                    .expect("Host filesystem should open")
+                    .copy_with_options(
                         &source,
                         &target,
                         &LocalCopyOptions::new()
@@ -727,9 +768,9 @@ fn test_host_temp_resources_report_injected_creation_outcomes() {
     ] {
         run_facade_fault(TEST_NAME, fault, || {
             let directory = tempdir().expect("temporary directory should be created");
-            let filesystem = LocalFileSystem::host();
+            let filesystem = LocalFileSystem::host().expect("Host filesystem should open");
             if directory_resource {
-                let result = filesystem.create_temp_directory(
+                let result = filesystem.create_temp_directory_with_options(
                     &LocalTempDirectoryOptions::new()
                         .with_parent(directory.path())
                         .with_max_attempts(2),
@@ -741,7 +782,7 @@ fn test_host_temp_resources_report_injected_creation_outcomes() {
                     assert!(result.is_err(), "native directory creation fault must fail");
                 }
             } else {
-                let result = filesystem.create_temp_file(
+                let result = filesystem.create_temp_file_with_options(
                     &LocalTempFileOptions::new()
                         .with_parent(directory.path())
                         .with_max_attempts(2),

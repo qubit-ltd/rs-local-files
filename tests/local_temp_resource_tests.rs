@@ -10,7 +10,6 @@ use std::fs;
 #[cfg(any(target_os = "linux", target_os = "macos"))]
 use std::os::unix::ffi::OsStringExt;
 
-#[cfg(any(target_os = "linux", target_os = "macos"))]
 use qubit_local_files::LocalFileErrorKind;
 use qubit_local_files::LocalFileSystem;
 #[cfg(any(target_os = "linux", target_os = "macos"))]
@@ -24,7 +23,8 @@ use tempfile::tempdir;
 fn test_local_file_system_create_temp_file_applies_options() {
     let parent = tempdir().expect("temporary parent should be created");
     let mut file = LocalFileSystem::host()
-        .create_temp_file(
+        .expect("Host filesystem should open")
+        .create_temp_file_with_options(
             &LocalTempFileOptions::new()
                 .with_parent(parent.path())
                 .with_prefix("upload-")
@@ -51,7 +51,8 @@ fn test_local_file_system_create_temp_file_applies_options() {
 fn test_local_file_system_create_temp_directory_applies_suffix() {
     let parent = tempdir().expect("temporary parent should be created");
     let mut directory = LocalFileSystem::host()
-        .create_temp_directory(
+        .expect("Host filesystem should open")
+        .create_temp_directory_with_options(
             &LocalTempDirectoryOptions::new()
                 .with_parent(parent.path())
                 .with_prefix("work-")
@@ -70,8 +71,8 @@ fn test_local_file_system_create_temp_directory_applies_suffix() {
     assert!(!path.exists());
 }
 
-/// Verifies temporary-resource creation creates a missing parent hierarchy
-/// before reserving either entry kind.
+/// Verifies explicit temporary-resource options create a missing parent
+/// hierarchy before reserving either entry kind.
 #[test]
 fn test_local_file_system_create_temp_resources_create_missing_parent() {
     let workspace = tempdir().expect("temporary workspace should be created");
@@ -79,7 +80,12 @@ fn test_local_file_system_create_temp_resources_create_missing_parent() {
     let directory_parent = workspace.path().join("directory-parent/nested");
 
     let mut file = LocalFileSystem::host()
-        .create_temp_file(&LocalTempFileOptions::new().with_parent(&file_parent))
+        .expect("Host filesystem should open")
+        .create_temp_file_with_options(
+            &LocalTempFileOptions::new()
+                .with_parent(&file_parent)
+                .with_create_parent(),
+        )
         .expect("temporary file should create its missing parent");
     let file_path = file.path().to_path_buf();
     assert!(file_parent.is_dir());
@@ -87,12 +93,33 @@ fn test_local_file_system_create_temp_resources_create_missing_parent() {
     file.cleanup().expect("temporary file should be removed");
 
     let mut directory = LocalFileSystem::host()
-        .create_temp_directory(&LocalTempDirectoryOptions::new().with_parent(&directory_parent))
+        .expect("Host filesystem should open")
+        .create_temp_directory_with_options(
+            &LocalTempDirectoryOptions::new()
+                .with_parent(&directory_parent)
+                .with_create_parent(),
+        )
         .expect("temporary directory should create its missing parent");
     let directory_path = directory.path().to_path_buf();
     assert!(directory_parent.is_dir());
     assert!(directory_path.is_dir());
     directory.cleanup().expect("temporary directory should be removed");
+}
+
+/// Verifies parent creation reports a stable type error when the requested
+/// parent already exists as a file.
+#[test]
+fn test_local_file_system_create_temp_file_rejects_file_parent() {
+    let directory = tempdir().expect("temporary directory should be created");
+    let parent = directory.path().join("not-a-directory");
+    std::fs::write(&parent, b"file").expect("file parent fixture should be written");
+    let filesystem = LocalFileSystem::host().expect("Host filesystem should open");
+
+    let error = filesystem
+        .create_temp_file_with_options(&LocalTempFileOptions::new().with_parent(&parent).with_create_parent())
+        .expect_err("a file cannot be used as a temporary parent");
+
+    assert_eq!(LocalFileErrorKind::NotDirectory, error.kind());
 }
 
 /// Verifies host no-replace persistence rejects an interior NUL in the target
@@ -102,7 +129,8 @@ fn test_local_file_system_create_temp_resources_create_missing_parent() {
 fn test_local_temp_file_persist_rejects_interior_nul_target() {
     let parent = tempdir().expect("temporary parent should be created");
     let temporary = LocalFileSystem::host()
-        .create_temp_file(&LocalTempFileOptions::new().with_parent(parent.path()))
+        .expect("Host filesystem should open")
+        .create_temp_file_with_options(&LocalTempFileOptions::new().with_parent(parent.path()))
         .expect("temporary file should be created");
     let source = temporary.path().to_path_buf();
     let target = parent
@@ -128,11 +156,13 @@ fn test_local_file_system_create_temp_file_rejects_separator_affix() {
     let parent = tempdir().expect("temporary parent should be created");
     let before = fs::read_dir(parent.path()).expect("parent should be readable").count();
 
-    let result = LocalFileSystem::host().create_temp_file(
-        &LocalTempFileOptions::new()
-            .with_parent(parent.path())
-            .with_prefix("unsafe/"),
-    );
+    let result = LocalFileSystem::host()
+        .expect("Host filesystem should open")
+        .create_temp_file_with_options(
+            &LocalTempFileOptions::new()
+                .with_parent(parent.path())
+                .with_prefix("unsafe/"),
+        );
 
     assert!(result.is_err());
     assert_eq!(

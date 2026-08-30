@@ -75,11 +75,11 @@ impl LocalAtomicWriteOptions {
     ///
     /// On Unix, this limits how long commit waits for an existing destination
     /// whose active file lease makes a nonblocking open return
-    /// [`std::io::ErrorKind::WouldBlock`]. [`None`] preserves the default
-    /// unbounded wait.
+    /// [`std::io::ErrorKind::WouldBlock`]. [`None`] performs only the initial
+    /// open attempt.
     ///
     /// # Returns
-    /// The configured timeout, or [`None`] when retries are unbounded.
+    /// The configured timeout, or [`None`] when retries are disabled.
     #[must_use]
     #[inline(always)]
     #[cfg_attr(windows, allow(dead_code))]

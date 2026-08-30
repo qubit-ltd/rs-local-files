@@ -123,14 +123,25 @@ fn test_local_file_error_adapts_source_free_kinds_and_consumes_source() {
 #[test]
 fn test_local_file_error_exposes_optional_context_without_source() {
     let error = LocalFileError::new(LocalFileErrorKind::InvalidOptions, LocalFileOperation::OpenWriter)
+        .with_current_directory(Path::new("/work").to_path_buf())
         .with_path(Path::new("source").to_path_buf())
         .with_target(Path::new("target").to_path_buf());
 
+    assert_eq!(Some(Path::new("/work")), error.current_directory());
     assert_eq!(Some(Path::new("source")), error.path());
     assert_eq!(Some(Path::new("target")), error.target());
     assert!(error.typed_source().is_none());
     assert!(Error::source(&error).is_none());
     assert!(error.into_source().is_none());
+}
+
+/// Verifies PWD changes have their own stable operation classification.
+#[test]
+fn test_set_current_directory_operation_is_public() {
+    assert_eq!(
+        LocalFileOperation::SetCurrentDirectory,
+        std::hint::black_box(LocalFileOperation::SetCurrentDirectory),
+    );
 }
 
 /// Verifies resource-limit errors preserve the complete budget facts and source

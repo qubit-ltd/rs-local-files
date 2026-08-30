@@ -54,7 +54,6 @@ use windows_sys::Win32::Storage::FileSystem::FILE_ATTRIBUTE_NORMAL;
 use windows_sys::Win32::Storage::FileSystem::FILE_ATTRIBUTE_REPARSE_POINT;
 use windows_sys::Win32::Storage::FileSystem::FILE_ATTRIBUTE_TAG_INFO;
 use windows_sys::Win32::Storage::FileSystem::FILE_FLAG_BACKUP_SEMANTICS;
-use windows_sys::Win32::Storage::FileSystem::FILE_FLAG_OPEN_REPARSE_POINT;
 use windows_sys::Win32::Storage::FileSystem::FILE_LIST_DIRECTORY;
 use windows_sys::Win32::Storage::FileSystem::FILE_NAME_NORMALIZED;
 use windows_sys::Win32::Storage::FileSystem::FILE_READ_ATTRIBUTES;
@@ -198,7 +197,8 @@ impl RootedDirectoryReader {
     }
 }
 
-/// Opens an absolute root directory without following its final reparse point.
+/// Opens an absolute root directory using ordinary final reparse-point
+/// semantics exactly once during construction.
 ///
 /// # Errors
 ///
@@ -216,7 +216,7 @@ pub(crate) fn open_root_directory(path: &Path) -> Result<File> {
             ROOTED_SHARE_MODE,
             null(),
             OPEN_EXISTING,
-            FILE_FLAG_BACKUP_SEMANTICS | FILE_FLAG_OPEN_REPARSE_POINT,
+            FILE_FLAG_BACKUP_SEMANTICS,
             null_mut(),
         )
     };
@@ -236,7 +236,7 @@ pub(crate) fn open_root_directory(path: &Path) -> Result<File> {
 /// Returns an I/O error when the operating system cannot recover the path from
 /// the retained handle. The caller's diagnostic path is never used as a
 /// fallback.
-pub(crate) fn root_authority_path(root: &File) -> Result<PathBuf> {
+fn root_authority_path(root: &File) -> Result<PathBuf> {
     if let Some(error) = crate::local::test_io_error("root-authority-path") {
         return Err(error);
     }

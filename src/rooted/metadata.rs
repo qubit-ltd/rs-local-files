@@ -218,6 +218,15 @@ impl Metadata {
                 if left_device == right_device && left_file == right_file
         )
     }
+
+    /// Returns a stable native entry identity when the platform supplied one.
+    #[must_use]
+    pub(crate) const fn native_identity(&self) -> Option<(u64, u64)> {
+        match (self.device_id, self.file_id) {
+            (Some(device), Some(file)) => Some((device, file)),
+            _ => None,
+        }
+    }
 }
 
 /// Converts a platform-native mode into portable permission bits.

@@ -15,19 +15,15 @@ use std::io::Read;
 use std::io::Seek;
 use std::io::SeekFrom;
 
-use crate::platform::OpenedFile;
+use crate::LocalFileMetadata;
 
 /// Owned synchronous reader for an opened native regular file.
 #[derive(Debug)]
 pub struct LocalFileReader {
-    /// Native file handle and, for authority-opened readers, its observations.
-    file: LocalFileReaderInner,
-}
-
-#[derive(Debug)]
-enum LocalFileReaderInner {
-    Plain(File),
-    Opened(OpenedFile),
+    /// Open native file handle.
+    file: File,
+    /// Metadata observed from the same handle after it was opened.
+    metadata: LocalFileMetadata,
 }
 
 impl LocalFileReader {
@@ -36,45 +32,27 @@ impl LocalFileReader {
     /// # Parameters
     ///
     /// - `file`: Open native file handle.
-    pub(crate) const fn new(file: File) -> Self {
-        Self {
-            file: LocalFileReaderInner::Plain(file),
-        }
-    }
-
-    /// Wraps a descriptor together with observations captured from that same
-    /// descriptor.
-    pub(crate) fn from_opened(file: OpenedFile) -> Self {
-        Self {
-            file: LocalFileReaderInner::Opened(file),
-        }
+    pub(crate) fn from_file(file: File) -> io::Result<Self> {
+        let metadata = LocalFileMetadata::from_native(&file.metadata()?);
+        Ok(Self { file, metadata })
     }
 
     /// Returns the underlying native file handle.
     #[must_use]
     pub const fn as_file(&self) -> &File {
-        match &self.file {
-            LocalFileReaderInner::Plain(file) => file,
-            LocalFileReaderInner::Opened(file) => file.file(),
-        }
+        &self.file
     }
 
-    /// Returns metadata captured from an authority-opened descriptor.
-    pub fn metadata(&self) -> Option<&crate::LocalFileMetadata> {
-        match &self.file {
-            LocalFileReaderInner::Plain(_) => None,
-            LocalFileReaderInner::Opened(file) => Some(file.metadata()),
-        }
+    /// Returns metadata captured from this reader's retained handle.
+    pub const fn metadata(&self) -> &LocalFileMetadata {
+        &self.metadata
     }
 }
 
 impl Read for LocalFileReader {
     /// Reads bytes from the native file at its current offset.
     fn read(&mut self, buffer: &mut [u8]) -> io::Result<usize> {
-        match &mut self.file {
-            LocalFileReaderInner::Plain(file) => file.read(buffer),
-            LocalFileReaderInner::Opened(file) => file.read(buffer),
-        }
+        self.file.read(buffer)
     }
 
     /// Reads bytes into multiple buffers from the current offset.
@@ -115,9 +93,6 @@ impl Read for LocalFileReader {
 impl Seek for LocalFileReader {
     /// Moves the native file cursor and returns its new byte offset.
     fn seek(&mut self, position: SeekFrom) -> io::Result<u64> {
-        match &mut self.file {
-            LocalFileReaderInner::Plain(file) => file.seek(position),
-            LocalFileReaderInner::Opened(file) => file.file_mut().seek(position),
-        }
+        self.file.seek(position)
     }
 }

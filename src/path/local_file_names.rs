@@ -17,8 +17,6 @@ use crate::LocalResourceKind;
 use crate::LocalResourceLimitError;
 use crate::LocalResult;
 
-/// Default maximum encoded size of one filename component.
-const DEFAULT_MAX_COMPONENT_BYTES: usize = 255;
 /// Number of random bytes encoded into a generated filename.
 const RANDOM_NAME_BYTES: usize = 16;
 
@@ -29,7 +27,7 @@ pub struct LocalFileNames {
     /// Rules applied to components.
     policy: LocalFileNamePolicy,
     /// Maximum native or portable encoded component size.
-    max_component_bytes: usize,
+    max_component_bytes: Option<usize>,
 }
 
 /// Filename validation policy selected by a path scope.
@@ -47,7 +45,7 @@ impl LocalFileNames {
     pub const fn portable() -> Self {
         Self {
             policy: LocalFileNamePolicy::Portable,
-            max_component_bytes: DEFAULT_MAX_COMPONENT_BYTES,
+            max_component_bytes: None,
         }
     }
 
@@ -56,8 +54,14 @@ impl LocalFileNames {
     pub(crate) const fn native() -> Self {
         Self {
             policy: LocalFileNamePolicy::Native,
-            max_component_bytes: DEFAULT_MAX_COMPONENT_BYTES,
+            max_component_bytes: None,
         }
+    }
+
+    /// Returns the caller-configured component-size budget.
+    #[must_use]
+    pub const fn max_component_bytes(&self) -> Option<usize> {
+        self.max_component_bytes
     }
 
     /// Reconfigures the maximum encoded size of one component.
@@ -77,8 +81,14 @@ impl LocalFileNames {
         if maximum == 0 {
             return Err(component_limit_error(1, maximum));
         }
-        self.max_component_bytes = maximum;
+        self.max_component_bytes = Some(maximum);
         Ok(self)
+    }
+
+    /// Removes the caller-configured component-size budget.
+    pub const fn without_max_component_bytes(mut self) -> Self {
+        self.max_component_bytes = None;
+        self
     }
 
     /// Validates one filename component according to this policy.
@@ -104,8 +114,10 @@ impl LocalFileNames {
                 native_component_bytes(name)?
             }
         };
-        if encoded_bytes > self.max_component_bytes {
-            return Err(component_limit_error(encoded_bytes, self.max_component_bytes));
+        if let Some(maximum) = self.max_component_bytes
+            && encoded_bytes > maximum
+        {
+            return Err(component_limit_error(encoded_bytes, maximum));
         }
         Ok(())
     }

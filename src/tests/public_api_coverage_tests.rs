@@ -11,30 +11,275 @@ use std::fs;
 use std::io::Read;
 use std::io::Write;
 use std::path::Path;
+use std::time::Duration;
 
 use tempfile::tempdir;
 
+use crate::LocalCopyConflictPolicy;
 use crate::LocalCopyOptions;
 use crate::LocalCreateDirectoryOptions;
 use crate::LocalDeleteOptions;
+use crate::LocalFileErrorKind;
 use crate::LocalFileSystem;
 use crate::LocalFileSystemScope;
 use crate::LocalListOptions;
+use crate::LocalPaths;
 use crate::LocalReadOptions;
 use crate::LocalRenameOptions;
 use crate::LocalResourceKind;
 use crate::LocalResourceLimitError;
+use crate::LocalSymlinkPolicy;
 use crate::LocalTempDirectoryOptions;
 use crate::LocalTempFileOptions;
 use crate::LocalWriteMode;
 use crate::LocalWriteOptions;
+
+/// Verifies per-instance defaults are observable, replaceable, and used by
+/// every convenience operation that omits an explicit options value.
+#[test]
+fn test_public_facade_uses_complete_instance_defaults() {
+    let directory = tempdir().expect("temporary directory should be created");
+    let mut filesystem = LocalFileSystem::host().expect("Host filesystem should open");
+
+    filesystem
+        .set_symlink_policy(LocalSymlinkPolicy::FollowAcrossScope)
+        .expect("Host symlink policy should be configurable");
+    assert_eq!(LocalSymlinkPolicy::FollowAcrossScope, filesystem.symlink_policy());
+    assert!(filesystem.diagnostic_root().is_none());
+    let _ = filesystem.protocols();
+    let _ = filesystem.limits();
+    let rooted_paths = LocalPaths::rooted();
+    assert_eq!(LocalFileSystemScope::Rooted, rooted_paths.scope());
+    let generated_name = rooted_paths
+        .file_names()
+        .random_name()
+        .expect("native random filename generation should succeed");
+    assert!(!generated_name.is_empty());
+
+    let read_options = LocalReadOptions::new().with_open_retry_timeout(Duration::ZERO);
+    filesystem
+        .set_default_read_options(read_options)
+        .expect("reader defaults should be configurable");
+    assert_eq!(
+        Some(Duration::ZERO),
+        filesystem.default_read_options().open_retry_timeout()
+    );
+
+    let write_options = LocalWriteOptions::new(LocalWriteMode::CreateOrReplace);
+    filesystem
+        .set_default_write_options(write_options)
+        .expect("writer defaults should be configurable");
+    assert_eq!(
+        LocalWriteMode::CreateOrReplace,
+        filesystem.default_write_options().mode()
+    );
+
+    assert!(
+        filesystem
+            .set_default_list_options(LocalListOptions::new().with_max_open_directories(0))
+            .is_err()
+    );
+    filesystem
+        .set_default_list_options(LocalListOptions::new().with_recursive())
+        .expect("listing defaults should be configurable");
+    assert!(filesystem.default_list_options().recursive());
+
+    assert!(
+        filesystem
+            .set_default_copy_options(LocalCopyOptions::new().with_deadline(Duration::MAX))
+            .is_err()
+    );
+    filesystem
+        .set_default_copy_options(LocalCopyOptions::new().with_conflict(LocalCopyConflictPolicy::Overwrite))
+        .expect("copy defaults should be configurable");
+    assert_eq!(
+        LocalCopyConflictPolicy::Overwrite,
+        filesystem.default_copy_options().conflict()
+    );
+
+    filesystem
+        .set_default_create_directory_options(LocalCreateDirectoryOptions::new().with_recursive())
+        .expect("directory-creation defaults should be configurable");
+    assert!(filesystem.default_create_directory_options().recursive());
+
+    filesystem
+        .set_default_delete_options(LocalDeleteOptions::new().with_recursive())
+        .expect("deletion defaults should be configurable");
+    assert!(filesystem.default_delete_options().recursive());
+
+    filesystem
+        .set_default_rename_options(LocalRenameOptions::new().with_overwrite())
+        .expect("rename defaults should be configurable");
+    assert!(filesystem.default_rename_options().overwrite());
+
+    assert!(
+        filesystem
+            .set_default_temp_file_options(LocalTempFileOptions::new().with_max_attempts(0))
+            .is_err()
+    );
+    filesystem
+        .set_default_temp_file_options(
+            LocalTempFileOptions::new()
+                .with_parent(directory.path())
+                .with_max_attempts(8),
+        )
+        .expect("temporary-file defaults should be configurable");
+    assert_eq!(Some(8), filesystem.default_temp_file_options().max_attempts());
+
+    assert!(
+        filesystem
+            .set_default_temp_directory_options(LocalTempDirectoryOptions::new().with_max_attempts(0))
+            .is_err()
+    );
+    filesystem
+        .set_default_temp_directory_options(
+            LocalTempDirectoryOptions::new()
+                .with_parent(directory.path())
+                .with_max_attempts(8),
+        )
+        .expect("temporary-directory defaults should be configurable");
+    assert_eq!(Some(8), filesystem.default_temp_directory_options().max_attempts());
+
+    let tree = directory.path().join("tree/nested");
+    let _ = filesystem
+        .create_directory(&tree)
+        .expect("configured recursive directory creation should succeed");
+
+    let source = directory.path().join("source");
+    let copied = directory.path().join("copied");
+    let renamed = directory.path().join("renamed");
+    let mut writer = filesystem.open_writer(&source).expect("default writer should open");
+    writer
+        .write_all(b"payload")
+        .expect("default writer should accept bytes");
+    let _ = writer.commit().expect("default writer should commit");
+
+    let mut reader = filesystem.open_reader(&source).expect("default reader should open");
+    assert_eq!(7, reader.metadata().len());
+    let permissions = reader.metadata().permissions();
+    let _ = permissions.is_read_only();
+    let _ = permissions.unix_mode();
+    let mut content = String::new();
+    reader.read_to_string(&mut content).expect("default reader should read");
+    assert_eq!("payload", content);
+    assert_eq!(b"pay", filesystem.read_prefix(&source, 3).unwrap().as_slice());
+
+    let _ = filesystem.copy(&source, &copied).expect("default copy should succeed");
+    let _ = filesystem
+        .rename(&copied, &renamed)
+        .expect("default rename should succeed");
+    filesystem
+        .list(directory.path())
+        .expect("default listing should open")
+        .collect::<Result<Vec<_>, _>>()
+        .expect("default listing should complete");
+    let _ = filesystem
+        .delete_file(&renamed)
+        .expect("default file deletion should succeed");
+    let _ = filesystem
+        .delete_directory(&directory.path().join("tree"))
+        .expect("default recursive directory deletion should succeed");
+
+    let mut temporary_file = filesystem
+        .create_temp_file()
+        .expect("default temporary file should be created");
+    temporary_file.close();
+    temporary_file
+        .cleanup()
+        .expect("default temporary file should clean up");
+    let mut temporary_directory = filesystem
+        .create_temp_directory()
+        .expect("default temporary directory should be created");
+    temporary_directory
+        .cleanup()
+        .expect("default temporary directory should clean up");
+}
+
+/// Verifies public failures from capability probes and protected Rooted
+/// operands retain their operation-level structured errors.
+#[cfg(unix)]
+#[test]
+fn test_public_facade_contextualizes_capability_and_root_operand_failures() {
+    use std::os::unix::fs::symlink;
+
+    let directory = tempdir().expect("temporary directory should be created");
+    let target = directory.path().join("target");
+    fs::create_dir(&target).expect("symlink target should be created");
+    let link = directory.path().join("link");
+    symlink(&target, &link).expect("host symlink should be created");
+
+    let mut host = LocalFileSystem::host().expect("Host filesystem should open");
+    host.set_symlink_policy(LocalSymlinkPolicy::Reject)
+        .expect("Host reject policy should be accepted");
+    assert_eq!(
+        LocalFileErrorKind::Unsupported,
+        host.limits_at(&link).unwrap_err().kind()
+    );
+    assert_eq!(
+        LocalFileErrorKind::Unsupported,
+        host.space_at(&link).unwrap_err().kind()
+    );
+
+    fs::write(directory.path().join("source"), b"payload").expect("rooted source should be created");
+    symlink("../../outside", directory.path().join("escape")).expect("escaping symlink should be created");
+    let rooted = LocalFileSystem::rooted(directory.path()).expect("Rooted filesystem should open");
+    assert_eq!(
+        LocalFileErrorKind::InvalidPath,
+        rooted.limits_at(Path::new("/escape")).unwrap_err().kind()
+    );
+    assert_eq!(
+        LocalFileErrorKind::InvalidPath,
+        rooted.space_at(Path::new("/escape")).unwrap_err().kind()
+    );
+
+    assert_eq!(
+        LocalFileErrorKind::InvalidPath,
+        rooted
+            .copy(Path::new(".."), Path::new("/target"))
+            .unwrap_err()
+            .error()
+            .kind()
+    );
+    assert_eq!(
+        LocalFileErrorKind::InvalidPath,
+        rooted
+            .copy(Path::new("/"), Path::new("/target"))
+            .unwrap_err()
+            .error()
+            .kind()
+    );
+    assert_eq!(
+        LocalFileErrorKind::InvalidPath,
+        rooted
+            .copy(Path::new("/source"), Path::new("/"))
+            .unwrap_err()
+            .error()
+            .kind()
+    );
+    assert_eq!(
+        LocalFileErrorKind::InvalidPath,
+        rooted
+            .rename(Path::new("/"), Path::new("/target"))
+            .unwrap_err()
+            .error()
+            .kind()
+    );
+    assert_eq!(
+        LocalFileErrorKind::InvalidPath,
+        rooted
+            .rename(Path::new("/source"), Path::new("/"))
+            .unwrap_err()
+            .error()
+            .kind()
+    );
+}
 
 /// Verifies the public facade delegates every ordinary host operation through
 /// the library crate, retaining the expected filesystem effects.
 #[test]
 fn test_public_host_facade_delegates_ordinary_operations() {
     let directory = tempdir().expect("temporary directory should be created");
-    let filesystem = LocalFileSystem::host();
+    let filesystem = LocalFileSystem::host().expect("Host filesystem should open");
     assert_eq!(LocalFileSystemScope::Host, filesystem.scope());
     assert!(filesystem.diagnostic_root().is_none());
     let _ = filesystem.protocols();
@@ -58,7 +303,7 @@ fn test_public_host_facade_delegates_ordinary_operations() {
             .len()
     );
     let mut reader = filesystem
-        .open_reader(&source, &LocalReadOptions::new())
+        .open_reader_with_options(&source, &LocalReadOptions::new())
         .expect("source reader should open");
     let mut content = String::new();
     reader.read_to_string(&mut content).expect("source reader should read");
@@ -66,57 +311,57 @@ fn test_public_host_facade_delegates_ordinary_operations() {
     assert_eq!(
         b"pay",
         filesystem
-            .read_prefix(&source, &LocalReadOptions::new(), 3)
+            .read_prefix_with_options(&source, 3, &LocalReadOptions::new())
             .expect("prefix should be readable")
             .as_slice()
     );
 
     let _ = filesystem
-        .copy(&source, &copied, &LocalCopyOptions::new())
+        .copy_with_options(&source, &copied, &LocalCopyOptions::new())
         .expect("file should copy");
     let _ = filesystem
-        .rename(&copied, &renamed, &LocalRenameOptions::new())
+        .rename_with_options(&copied, &renamed, &LocalRenameOptions::new())
         .expect("file should rename");
     let mut writer = filesystem
-        .open_writer(&renamed, &LocalWriteOptions::new(LocalWriteMode::Append))
+        .open_writer_with_options(&renamed, &LocalWriteOptions::new(LocalWriteMode::Append))
         .expect("append writer should open");
     writer.write_all(b"!").expect("append writer should write");
     let _ = writer.commit().expect("append writer should commit");
 
     let created = directory.path().join("created");
     let _ = filesystem
-        .create_directory(&created, &LocalCreateDirectoryOptions::new())
+        .create_directory_with_options(&created, &LocalCreateDirectoryOptions::new())
         .expect("directory should be created");
     assert_eq!(
         3,
         filesystem
-            .list(directory.path(), &LocalListOptions::new())
+            .list_with_options(directory.path(), &LocalListOptions::new())
             .expect("directory listing should open")
             .collect::<Result<Vec<_>, _>>()
             .expect("directory listing should complete")
             .len()
     );
     let _ = filesystem
-        .delete_directory(&created, &LocalDeleteOptions::new())
+        .delete_directory_with_options(&created, &LocalDeleteOptions::new())
         .expect("directory should be deleted");
     let _ = filesystem
-        .delete_file(&renamed, &LocalDeleteOptions::new())
+        .delete_file_with_options(&renamed, &LocalDeleteOptions::new())
         .expect("file should be deleted");
 
     let mut temporary_file = filesystem
-        .create_temp_file(&LocalTempFileOptions::new().with_parent(directory.path()))
+        .create_temp_file_with_options(&LocalTempFileOptions::new().with_parent(directory.path()))
         .expect("temporary file should be created");
     temporary_file.close();
     temporary_file.cleanup().expect("temporary file should clean up");
     let mut temporary_directory = filesystem
-        .create_temp_directory(&LocalTempDirectoryOptions::new().with_parent(directory.path()))
+        .create_temp_directory_with_options(&LocalTempDirectoryOptions::new().with_parent(directory.path()))
         .expect("temporary directory should be created");
     temporary_directory
         .cleanup()
         .expect("temporary directory should clean up");
 }
 
-/// Verifies rooted facade entry points accept relative descendants while
+/// Verifies Rooted facade entry points accept PWD-relative paths while
 /// preserving their opened authority and diagnostic root.
 #[test]
 fn test_public_rooted_facade_delegates_relative_operations() {
@@ -134,10 +379,10 @@ fn test_public_rooted_facade_delegates_relative_operations() {
         .expect("rooted space should be available");
 
     let _ = filesystem
-        .create_directory(Path::new("nested"), &LocalCreateDirectoryOptions::new())
+        .create_directory_with_options(Path::new("nested"), &LocalCreateDirectoryOptions::new())
         .expect("rooted directory should be created");
     let mut writer = filesystem
-        .open_writer(
+        .open_writer_with_options(
             Path::new("nested/source"),
             &LocalWriteOptions::new(LocalWriteMode::CreateOrReplace),
         )
@@ -145,21 +390,21 @@ fn test_public_rooted_facade_delegates_relative_operations() {
     writer.write_all(b"payload").expect("rooted writer should write");
     let _ = writer.commit().expect("rooted writer should commit");
     let _ = filesystem
-        .copy(
+        .copy_with_options(
             Path::new("nested/source"),
             Path::new("nested/copied"),
             &LocalCopyOptions::new(),
         )
         .expect("rooted file should copy");
     let _ = filesystem
-        .rename(
+        .rename_with_options(
             Path::new("nested/copied"),
             Path::new("nested/renamed"),
             &LocalRenameOptions::new(),
         )
         .expect("rooted file should rename");
     let _ = filesystem
-        .delete_file(Path::new("nested/renamed"), &LocalDeleteOptions::new())
+        .delete_file_with_options(Path::new("nested/renamed"), &LocalDeleteOptions::new())
         .expect("rooted file should be deleted");
 }
 

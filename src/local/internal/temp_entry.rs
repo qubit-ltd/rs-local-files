@@ -24,13 +24,9 @@ use std::path::PathBuf;
 
 use super::file_name_validation::validate_file_name_fragment;
 use super::path_operations::add_path_context;
-use super::path_operations::ensure_dir_path;
 #[cfg(feature = "internal-test-support")]
 use crate::local::internal::test_support;
 use crate::local::try_random_file_name;
-
-/// Default number of attempts used when creating a random temporary entry.
-pub(crate) const DEFAULT_TEMP_ENTRY_RETRIES: usize = 256;
 
 /// Validates caller-provided temporary-entry affixes before sandbox creation.
 pub(crate) fn validate_temp_affixes(prefix: Option<&str>, suffix: Option<&str>) -> Result<()> {
@@ -49,25 +45,24 @@ pub(crate) fn validate_temp_affixes(prefix: Option<&str>, suffix: Option<&str>) 
 /// - `dir`: Directory in which to create the file.
 /// - `prefix`: Optional file-name prefix.
 /// - `suffix`: Optional file-name suffix.
-/// - `max_tries`: Maximum number of generated names to try.
+/// - `max_tries`: Optional maximum number of generated names to try.
 ///
 /// # Returns
 /// The created temporary path and open file handle.
 ///
 /// # Errors
-/// Returns an I/O error when `dir` cannot be created, `max_tries` is zero, all
-/// generated names collide, or file creation fails.
+/// Returns an I/O error when `dir` does not exist, an explicit
+/// `max_tries` is zero, all authorized names collide, or file creation fails.
 pub(crate) fn create_temp_file_in_dir(
     dir: &Path,
     prefix: Option<&str>,
     suffix: Option<&str>,
-    max_tries: usize,
+    max_tries: Option<usize>,
 ) -> Result<(PathBuf, File)> {
     validate_max_tries(max_tries)?;
-    ensure_dir_path(dir)?;
-    let mut attempt = 0;
+    let mut attempt = 0_usize;
     loop {
-        attempt += 1;
+        attempt = attempt.saturating_add(1);
         let path = dir.join(try_random_file_name("qubit-local-files-", prefix, suffix)?);
         let mut options = OpenOptions::new();
         options.read(true).write(true).create_new(true);
@@ -105,23 +100,22 @@ pub(crate) fn create_temp_file_in_dir(
 /// - `dir`: Parent directory.
 /// - `prefix`: Optional generated-name prefix.
 /// - `suffix`: Optional generated-name suffix.
-/// - `max_tries`: Maximum collision attempts.
+/// - `max_tries`: Optional maximum collision attempts.
 ///
 /// # Errors
 ///
-/// Returns an I/O error when affix validation, parent creation, name
+/// Returns an I/O error when affix validation, parent lookup, name
 /// generation, or directory creation fails.
 pub(crate) fn create_temp_dir_in_dir_with_affixes(
     dir: &Path,
     prefix: Option<&str>,
     suffix: Option<&str>,
-    max_tries: usize,
+    max_tries: Option<usize>,
 ) -> Result<PathBuf> {
     validate_max_tries(max_tries)?;
-    ensure_dir_path(dir)?;
-    let mut attempt = 0;
+    let mut attempt = 0_usize;
     loop {
-        attempt += 1;
+        attempt = attempt.saturating_add(1);
         let path = dir.join(try_random_file_name("qubit-local-files-", prefix, suffix)?);
         #[cfg(feature = "internal-test-support")]
         let created = if test_support::take("temp-directory-collision") {
@@ -182,8 +176,8 @@ pub(crate) fn create_private_dir(path: &Path) -> Result<()> {
 /// `true` only for an existing entry when another attempt remains.
 #[must_use]
 #[inline(always)]
-fn should_retry_collision(error: &Error, attempt: usize, max_tries: usize) -> bool {
-    error.kind() == ErrorKind::AlreadyExists && attempt < max_tries
+fn should_retry_collision(error: &Error, attempt: usize, max_tries: Option<usize>) -> bool {
+    error.kind() == ErrorKind::AlreadyExists && max_tries.is_none_or(|max_tries| attempt < max_tries)
 }
 
 /// Validates a retry count.
@@ -194,8 +188,8 @@ fn should_retry_collision(error: &Error, attempt: usize, max_tries: usize) -> bo
 /// # Errors
 /// Returns [`ErrorKind::InvalidInput`] when `max_tries` is zero.
 #[inline]
-fn validate_max_tries(max_tries: usize) -> Result<()> {
-    if max_tries == 0 {
+fn validate_max_tries(max_tries: Option<usize>) -> Result<()> {
+    if max_tries == Some(0) {
         return Err(Error::new(
             ErrorKind::InvalidInput,
             "temporary entry retry count must be greater than zero",

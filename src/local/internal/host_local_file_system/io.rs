@@ -48,7 +48,7 @@ impl HostLocalFileSystem {
         options: &LocalReadOptions,
         symlink_policy: LocalSymlinkPolicy,
     ) -> LocalResult<LocalFileReader> {
-        let bound = resolve_host_path(path, symlink_policy, !cfg!(windows))?;
+        let bound = resolve_host_path(path, symlink_policy, true)?;
         let metadata = test_io_fault("local-fs-open-reader-metadata")
             .map_or_else(|| fs::metadata(&bound), Err)
             .map_err(|source| {
@@ -66,7 +66,7 @@ impl HostLocalFileSystem {
             });
         test_io_fault("local-fs-open-reader-native")
             .map_or_else(|| crate::local::open_native_reader_path(&bound, &native_options), Err)
-            .map(LocalFileReader::new)
+            .and_then(LocalFileReader::from_file)
             .map_err(|source| {
                 #[cfg(windows)]
                 if source.kind() == std::io::ErrorKind::InvalidInput
@@ -168,7 +168,7 @@ impl HostLocalFileSystem {
         symlink_policy: LocalSymlinkPolicy,
     ) -> LocalResult<LocalDirectoryWalker> {
         let policy = options.symlink_policy().unwrap_or(symlink_policy);
-        let bound = resolve_host_path(path, LocalSymlinkPolicy::FollowAcrossScope, true)?;
+        let bound = resolve_host_path(path, policy, true)?;
         LocalDirectoryWalker::open(bound, *options, policy)
     }
 }

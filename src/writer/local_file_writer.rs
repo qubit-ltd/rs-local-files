@@ -29,8 +29,12 @@ use crate::LocalWriterState;
 #[must_use = "a local writer has no effect unless it is committed or aborted"]
 #[derive(Debug)]
 pub struct LocalFileWriter {
+    /// Reusable namespace-absolute destination path.
+    path: PathBuf,
     /// Non-authoritative destination path captured for diagnostics.
-    diagnostic_path: PathBuf,
+    diagnostic_path: Option<PathBuf>,
+    /// Namespace-absolute PWD captured when the writer was opened.
+    current_directory: Option<PathBuf>,
     /// Selected native write backend while the session is open.
     backend: Option<LocalFileWriterBackend>,
     /// Policy fixed when the writer is opened.
@@ -52,13 +56,11 @@ impl LocalFileWriter {
     /// - `backend`: Staged or append backend.
     /// - `options`: Writer policy.
     #[inline]
-    pub(crate) const fn new(
-        diagnostic_path: PathBuf,
-        backend: LocalFileWriterBackend,
-        options: LocalWriteOptions,
-    ) -> Self {
+    pub(crate) fn new(diagnostic_path: PathBuf, backend: LocalFileWriterBackend, options: LocalWriteOptions) -> Self {
         Self {
-            diagnostic_path,
+            path: diagnostic_path.clone(),
+            diagnostic_path: Some(diagnostic_path),
+            current_directory: None,
             backend: Some(backend),
             options,
             state: LocalWriterState::Open,
@@ -67,14 +69,27 @@ impl LocalFileWriter {
         }
     }
 
+    /// Replaces the public identity with its normalized namespace path.
+    pub(crate) fn bind_namespace(mut self, path: PathBuf, current_directory: PathBuf) -> Self {
+        self.path = path;
+        self.current_directory = Some(current_directory);
+        self
+    }
+
+    /// Returns the reusable namespace-absolute destination path.
+    #[must_use]
+    pub fn path(&self) -> &Path {
+        &self.path
+    }
+
     /// Returns the non-authoritative destination path captured for diagnostics.
     ///
     /// Rooted writers retain descriptor authority, so this path can refer to a
     /// replacement after the opened root is renamed.
     #[must_use]
     #[inline(always)]
-    pub fn diagnostic_path(&self) -> &Path {
-        &self.diagnostic_path
+    pub fn diagnostic_path(&self) -> Option<&Path> {
+        self.diagnostic_path.as_deref()
     }
 
     /// Returns the current writer state.
@@ -104,10 +119,10 @@ impl LocalFileWriter {
         if self.state != LocalWriterState::Open || self.failure_state == Some(LocalWriteFailureState::Indeterminate) {
             let failure_state = self.failure_state.unwrap_or(LocalWriteFailureState::NotPublished);
             return Err(LocalFileCommitError::new(
-                publication_error(
-                    writer_state_error(&self.diagnostic_path, LocalFileOperation::Commit, self.state),
+                self.contextualize_error(publication_error(
+                    writer_state_error(&self.path, LocalFileOperation::Commit, self.state),
                     failure_state,
-                ),
+                )),
                 failure_state,
                 None,
             ));
@@ -128,10 +143,10 @@ impl LocalFileWriter {
                 let flush_result = file.flush();
                 if let Err(error) = flush_result {
                     return Err(LocalFileCommitError::new(
-                        publication_error(
-                            writer_io_error(&self.diagnostic_path, LocalFileOperation::Commit, error),
+                        self.contextualize_error(publication_error(
+                            writer_io_error(&self.path, LocalFileOperation::Commit, error),
                             LocalWriteFailureState::Indeterminate,
-                        ),
+                        )),
                         LocalWriteFailureState::Indeterminate,
                         None,
                     ));
@@ -150,10 +165,10 @@ impl LocalFileWriter {
                         let sync_result = file.sync_all();
                         if let Err(error) = sync_result {
                             return Err(LocalFileCommitError::new(
-                                publication_error(
-                                    writer_io_error(&self.diagnostic_path, LocalFileOperation::Commit, error),
+                                self.contextualize_error(publication_error(
+                                    writer_io_error(&self.path, LocalFileOperation::Commit, error),
                                     LocalWriteFailureState::Published,
-                                ),
+                                )),
                                 LocalWriteFailureState::Published,
                                 None,
                             ));
@@ -189,22 +204,22 @@ impl LocalFileWriter {
     /// writer so the caller can retry abort.
     pub fn abort(&mut self) -> LocalResult<LocalWriteOutcome> {
         if self.state != LocalWriterState::Open {
-            return Err(writer_state_error(
-                &self.diagnostic_path,
+            return Err(self.contextualize_error(writer_state_error(
+                &self.path,
                 LocalFileOperation::Abort,
                 self.state,
-            ));
+            )));
         }
         let previous_failure_state = self.failure_state;
         let backend = self.backend.as_mut().expect("open writer must retain one backend");
         match backend {
             backend @ (LocalFileWriterBackend::Staged(_) | LocalFileWriterBackend::Rooted(_)) => {
                 if let Err(error) = backend.abort_staged() {
-                    return Err(atomic_write_error(
-                        &self.diagnostic_path,
+                    return Err(self.contextualize_error(atomic_write_error(
+                        &self.path,
                         LocalFileOperation::Abort,
                         error,
-                    ));
+                    )));
                 }
                 self.state = LocalWriterState::Aborted;
                 Ok(LocalWriteOutcome::new(
@@ -226,7 +241,11 @@ impl LocalFileWriter {
                 #[cfg(not(feature = "internal-test-support"))]
                 let flush_result = file.flush();
                 if let Err(error) = flush_result {
-                    return Err(writer_io_error(&self.diagnostic_path, LocalFileOperation::Abort, error));
+                    return Err(self.contextualize_error(writer_io_error(
+                        &self.path,
+                        LocalFileOperation::Abort,
+                        error,
+                    )));
                 }
                 self.state = LocalWriterState::Aborted;
                 self.failure_state = previous_failure_state
@@ -266,10 +285,10 @@ impl LocalFileWriter {
                 let state = atomic_destination_state(error.destination_state());
                 let retained = retained.map(|backend| self.retain_backend(backend));
                 Err(LocalFileCommitError::new(
-                    publication_error(
-                        atomic_write_error(&self.diagnostic_path, LocalFileOperation::Commit, error),
+                    self.contextualize_error(publication_error(
+                        atomic_write_error(&self.path, LocalFileOperation::Commit, error),
                         state,
-                    ),
+                    )),
                     state,
                     retained,
                 ))
@@ -289,7 +308,9 @@ impl LocalFileWriter {
     #[inline]
     fn retain_backend(&self, backend: LocalFileWriterBackend) -> Self {
         Self {
+            path: self.path.clone(),
             diagnostic_path: self.diagnostic_path.clone(),
+            current_directory: self.current_directory.clone(),
             backend: Some(backend),
             options: self.options,
             state: self.state,
@@ -323,6 +344,14 @@ impl LocalFileWriter {
             self.failure_state = Some(LocalWriteFailureState::Indeterminate);
         }
         result
+    }
+
+    /// Attaches the creation-time PWD to one structured session error.
+    fn contextualize_error(&self, error: LocalFileError) -> LocalFileError {
+        match &self.current_directory {
+            Some(current_directory) => error.with_current_directory(current_directory.clone()),
+            None => error,
+        }
     }
 }
 
