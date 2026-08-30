@@ -13,11 +13,17 @@ use std::ffi::OsString;
 use std::fs::ReadDir;
 use std::path::PathBuf;
 
+use qubit_budget::ManagedResourcePermit;
+
+use crate::LocalResourceKind;
+
 /// One open directory in the lazy depth-first traversal stack.
 #[derive(Debug)]
 pub(in crate::walk) struct WalkFrame {
     /// Native iterator for immediate entries.
     pub(in crate::walk) entries: Option<ReadDir>,
+    /// Capacity permit retained for exactly as long as `entries` is open.
+    pub(in crate::walk) directory_permit: Option<ManagedResourcePermit<LocalResourceKind, usize>>,
     /// Names already yielded from this directory.
     pub(in crate::walk) seen: HashSet<OsString>,
     /// Root-relative path of this directory.
