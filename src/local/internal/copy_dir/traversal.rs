@@ -75,8 +75,7 @@ pub(super) fn copy_dir_iterative(
     let mut frames = vec![root_frame];
 
     while !frames.is_empty() {
-        let current_source =
-            frames.last().expect("non-empty traversal stack").src();
+        let current_source = frames.last().expect("non-empty traversal stack").src();
         budget.check_deadline().map_err(|source| {
             copy_dir_error(
                 LocalCopyDirStage::ReadSourceDirectory,
@@ -91,17 +90,12 @@ pub(super) fn copy_dir_iterative(
             .expect("non-empty traversal stack should have a frame")
             .next_entry();
         let Some(entry) = entry else {
-            let completed = frames
-                .pop()
-                .expect("non-empty traversal stack should have a frame");
+            let completed = frames.pop().expect("non-empty traversal stack should have a frame");
             budget.release_directory();
             let _ = active_sources.remove(completed.source_identity());
             if options.preserves_permissions() {
                 with_copy_context(
-                    fs::set_permissions(
-                        completed.dst(),
-                        completed.source_permissions().clone(),
-                    ),
+                    fs::set_permissions(completed.dst(), completed.source_permissions().clone()),
                     LocalCopyDirStage::PreservePermissions,
                     completed.src(),
                     completed.dst(),
@@ -111,9 +105,7 @@ pub(super) fn copy_dir_iterative(
             continue;
         };
 
-        let current = frames
-            .last()
-            .expect("active traversal should retain its current frame");
+        let current = frames.last().expect("active traversal should retain its current frame");
         let entry = with_copy_context(
             entry,
             LocalCopyDirStage::ReadSourceDirectory,
@@ -164,12 +156,7 @@ pub(super) fn copy_dir_iterative(
             }
         } else if file_type.is_symlink() {
             if options.symlink_policy().follows()
-                && symlink_target_is_directory(
-                    &source_path,
-                    &destination_path,
-                    stats,
-                    scope_root,
-                )?
+                && symlink_target_is_directory(&source_path, &destination_path, stats, scope_root)?
             {
                 let frame = enter_copy_directory(
                     &source_path,
@@ -185,21 +172,10 @@ pub(super) fn copy_dir_iterative(
                     frames.push(frame);
                 }
             } else {
-                super::staged_copy::copy_symlink_with_options(
-                    &source_path,
-                    &destination_path,
-                    options,
-                    stats,
-                )?;
+                super::staged_copy::copy_symlink_with_options(&source_path, &destination_path, options, stats)?;
             }
         } else {
-            copy_file_with_options(
-                &source_path,
-                &destination_path,
-                options,
-                stats,
-                &mut budget,
-            )?;
+            copy_file_with_options(&source_path, &destination_path, options, stats, &mut budget)?;
         }
     }
     Ok(())
@@ -236,30 +212,14 @@ fn enter_copy_directory(
     budget: &mut CopyBudget,
     depth: usize,
 ) -> CopyDirResult<Option<CopyDirFrame>> {
-    budget.check_deadline().map_err(|source| {
-        copy_dir_error(
-            LocalCopyDirStage::InspectSource,
-            src,
-            dst,
-            stats,
-            source,
-        )
-    })?;
-    budget.check_depth(depth).map_err(|source| {
-        copy_dir_error(
-            LocalCopyDirStage::InspectSource,
-            src,
-            dst,
-            stats,
-            source,
-        )
-    })?;
+    budget
+        .check_deadline()
+        .map_err(|source| copy_dir_error(LocalCopyDirStage::InspectSource, src, dst, stats, source))?;
+    budget
+        .check_depth(depth)
+        .map_err(|source| copy_dir_error(LocalCopyDirStage::InspectSource, src, dst, stats, source))?;
     let (source_metadata, source_identity) = with_copy_context(
-        inspect_copy_source_directory(
-            src,
-            options.symlink_policy(),
-            destination_root,
-        ),
+        inspect_copy_source_directory(src, options.symlink_policy(), destination_root),
         LocalCopyDirStage::InspectSource,
         src,
         dst,
@@ -278,11 +238,7 @@ fn enter_copy_directory(
         ));
     }
     let action = with_copy_context(
-        ensure_copy_destination_dir(
-            dst,
-            options.conflict_policy(),
-            options.type_conflict_policy(),
-        ),
+        ensure_copy_destination_dir(dst, options.conflict_policy(), options.type_conflict_policy()),
         LocalCopyDirStage::PrepareDestination,
         src,
         dst,
@@ -314,15 +270,9 @@ fn enter_copy_directory(
         dst,
         stats,
     )?;
-    budget.acquire_directory().map_err(|source| {
-        copy_dir_error(
-            LocalCopyDirStage::ReadSourceDirectory,
-            src,
-            dst,
-            stats,
-            source,
-        )
-    })?;
+    budget
+        .acquire_directory()
+        .map_err(|source| copy_dir_error(LocalCopyDirStage::ReadSourceDirectory, src, dst, stats, source))?;
     let _ = active_sources.insert(source_identity.clone());
     Ok(Some(CopyDirFrame::new(
         src.to_path_buf(),
@@ -371,10 +321,7 @@ fn symlink_target_is_directory(
                 stats,
                 Error::new(
                     ErrorKind::InvalidInput,
-                    format!(
-                        "followed symbolic-link directory escaped copy scope: {}",
-                        src.display()
-                    ),
+                    format!("followed symbolic-link directory escaped copy scope: {}", src.display()),
                 ),
             ));
         }
@@ -404,10 +351,7 @@ fn symlink_target_is_directory(
             stats,
             Error::new(
                 ErrorKind::Unsupported,
-                format!(
-                    "unsupported symbolic link target type: {}",
-                    src.display(),
-                ),
+                format!("unsupported symbolic link target type: {}", src.display(),),
             ),
         ))
     }

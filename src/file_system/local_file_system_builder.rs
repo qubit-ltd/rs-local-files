@@ -81,27 +81,17 @@ impl LocalFileSystemBuilder {
     pub fn build(self) -> LocalResult<LocalFileSystem> {
         validate_limits(self.walk_limits, self.copy_limits)?;
         let filesystem = match self.authority {
-            AuthoritySpec::Host => LocalFileSystem::try_host()?
-                .with_symlink_policy(self.symlink_policy)?,
-            AuthoritySpec::Rooted(root) => {
-                LocalFileSystem::rooted_with_symlink_policy(
-                    &root,
-                    self.symlink_policy,
-                )?
-            }
+            AuthoritySpec::Host => LocalFileSystem::try_host()?.with_symlink_policy(self.symlink_policy)?,
+            AuthoritySpec::Rooted(root) => LocalFileSystem::rooted_with_symlink_policy(&root, self.symlink_policy)?,
         };
-        let filesystem =
-            filesystem.with_limits(self.walk_limits, self.copy_limits);
+        let filesystem = filesystem.with_limits(self.walk_limits, self.copy_limits);
         #[cfg(feature = "test-support")]
         let filesystem = filesystem.with_test_faults(self.test_faults);
         Ok(filesystem)
     }
 }
 
-fn validate_limits(
-    walk_limits: LocalWalkLimits,
-    copy_limits: LocalCopyLimits,
-) -> LocalResult<()> {
+fn validate_limits(walk_limits: LocalWalkLimits, copy_limits: LocalCopyLimits) -> LocalResult<()> {
     if [
         walk_limits.max_entries(),
         walk_limits.max_open_handles(),
@@ -113,11 +103,10 @@ fn validate_limits(
     .flatten()
     .any(|value| value == 0)
     {
-        return Err(LocalFileError::new(
-            LocalFileErrorKind::InvalidOptions,
-            LocalFileOperation::Configure,
-        )
-        .with_reason("filesystem resource limits must be positive"));
+        return Err(
+            LocalFileError::new(LocalFileErrorKind::InvalidOptions, LocalFileOperation::Configure)
+                .with_reason("filesystem resource limits must be positive"),
+        );
     }
     Ok(())
 }

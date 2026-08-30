@@ -30,19 +30,14 @@ impl DirectoryReader {
     /// Opens a lazy reader for the already-opened root directory.
     ///
     /// Returns an I/O error when the root cannot be enumerated.
-    pub(crate) fn open_root(
-        root: &File,
-        diagnostic_root: &Path,
-    ) -> Result<Self> {
+    pub(crate) fn open_root(root: &File, diagnostic_root: &Path) -> Result<Self> {
         #[cfg(unix)]
         {
-            local::open_root_directory_reader(root, diagnostic_root)
-                .map(|inner| Self { inner })
+            local::open_root_directory_reader(root, diagnostic_root).map(|inner| Self { inner })
         }
         #[cfg(windows)]
         {
-            local::open_root_directory_reader(root, diagnostic_root)
-                .map(|inner| Self { inner })
+            local::open_root_directory_reader(root, diagnostic_root).map(|inner| Self { inner })
         }
         #[cfg(not(any(unix, windows)))]
         {
@@ -58,20 +53,14 @@ impl DirectoryReader {
     ///
     /// Returns an I/O error when secure traversal or enumeration cannot be
     /// performed.
-    pub(crate) fn open_descendant(
-        root: &File,
-        diagnostic_root: &Path,
-        path: &super::Path,
-    ) -> Result<Self> {
+    pub(crate) fn open_descendant(root: &File, diagnostic_root: &Path, path: &super::Path) -> Result<Self> {
         #[cfg(unix)]
         {
-            local::open_rooted_directory_reader(root, diagnostic_root, path)
-                .map(|inner| Self { inner })
+            local::open_rooted_directory_reader(root, diagnostic_root, path).map(|inner| Self { inner })
         }
         #[cfg(windows)]
         {
-            local::open_rooted_directory_reader(root, diagnostic_root, path)
-                .map(|inner| Self { inner })
+            local::open_rooted_directory_reader(root, diagnostic_root, path).map(|inner| Self { inner })
         }
         #[cfg(not(any(unix, windows)))]
         {
@@ -90,20 +79,15 @@ impl DirectoryReader {
     pub(crate) fn next_entry(&mut self) -> Result<Option<Entry>> {
         #[cfg(unix)]
         {
-            self.inner.next_entry().map(|entry| {
-                entry.map(|(name, status)| {
-                    Entry::new(name, Metadata::from_stat(&status))
-                })
-            })
+            self.inner
+                .next_entry()
+                .map(|entry| entry.map(|(name, status)| Entry::new(name, Metadata::from_stat(&status))))
         }
         #[cfg(windows)]
         {
             self.inner.next_entry().and_then(|entry| {
                 entry
-                    .map(|(name, file)| {
-                        Metadata::from_open_file(&file)
-                            .map(|metadata| Entry::new(name, metadata))
-                    })
+                    .map(|(name, file)| Metadata::from_open_file(&file).map(|metadata| Entry::new(name, metadata)))
                     .transpose()
             })
         }

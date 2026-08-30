@@ -64,13 +64,9 @@ impl NamespaceHandle {
     pub(crate) fn open_root(path: &Path) -> LocalResult<Self> {
         let descriptor = OpenOptions::new()
             .read(true)
-            .custom_flags(
-                libc::O_DIRECTORY | libc::O_NOFOLLOW | libc::O_CLOEXEC,
-            )
+            .custom_flags(libc::O_DIRECTORY | libc::O_NOFOLLOW | libc::O_CLOEXEC)
             .open(path)
-            .map_err(|error| {
-                io_error(LocalFileOperation::OpenRoot, path, None, error)
-            })?;
+            .map_err(|error| io_error(LocalFileOperation::OpenRoot, path, None, error))?;
         Ok(Self { descriptor })
     }
 
@@ -84,14 +80,7 @@ impl NamespaceHandle {
         self.descriptor
             .try_clone()
             .map(|descriptor| Self { descriptor })
-            .map_err(|error| {
-                io_error(
-                    LocalFileOperation::OpenRoot,
-                    Path::new(""),
-                    None,
-                    error,
-                )
-            })
+            .map_err(|error| io_error(LocalFileOperation::OpenRoot, Path::new(""), None, error))
     }
 
     /// Reads no-follow metadata for a validated relative path.
@@ -102,26 +91,15 @@ impl NamespaceHandle {
     ///
     /// Returns a metadata error when the entry cannot be inspected through
     /// this authority.
-    pub(crate) fn metadata(
-        &self,
-        path: &RelativePath,
-    ) -> LocalResult<LocalFileMetadata> {
+    pub(crate) fn metadata(&self, path: &RelativePath) -> LocalResult<LocalFileMetadata> {
         if path.as_path().as_os_str().is_empty() {
             return self
                 .descriptor
                 .metadata()
                 .map(|metadata| LocalFileMetadata::from_native(&metadata))
-                .map_err(|error| {
-                    io_error(
-                        LocalFileOperation::Metadata,
-                        path.as_path(),
-                        None,
-                        error,
-                    )
-                });
+                .map_err(|error| io_error(LocalFileOperation::Metadata, path.as_path(), None, error));
         }
-        status_at(self, path, LocalFileOperation::Metadata)
-            .map(|status| metadata_from_stat(&status))
+        status_at(self, path, LocalFileOperation::Metadata).map(|status| metadata_from_stat(&status))
     }
 
     /// Reads the target stored in a final symbolic-link entry.
@@ -129,12 +107,8 @@ impl NamespaceHandle {
     /// # Errors
     ///
     /// Returns a bind-path error when parent traversal or `readlinkat` fails.
-    pub(crate) fn read_link(
-        &self,
-        path: &RelativePath,
-    ) -> LocalResult<std::path::PathBuf> {
-        let (parent, name) =
-            open_parent(self, path, LocalFileOperation::BindPath)?;
+    pub(crate) fn read_link(&self, path: &RelativePath) -> LocalResult<std::path::PathBuf> {
+        let (parent, name) = open_parent(self, path, LocalFileOperation::BindPath)?;
         let mut buffer = vec![0_u8; 256];
         loop {
             // SAFETY: `parent` and `name` remain live, while `buffer` exposes
@@ -165,9 +139,7 @@ impl NamespaceHandle {
             })?;
             if length < buffer.len() {
                 buffer.truncate(length);
-                return Ok(std::path::PathBuf::from(OsString::from_vec(
-                    buffer,
-                )));
+                return Ok(std::path::PathBuf::from(OsString::from_vec(buffer)));
             }
             buffer.resize(buffer.len().saturating_mul(2), 0);
         }
@@ -183,37 +155,18 @@ impl NamespaceHandle {
     /// Returns an open-reader error when traversal fails, the final entry is
     /// not a regular file, or descriptor flags cannot be restored to blocking
     /// mode.
-    pub(crate) fn open_reader(
-        &self,
-        path: &RelativePath,
-    ) -> LocalResult<OpenedFile> {
-        let (parent, name) =
-            open_parent(self, path, LocalFileOperation::OpenReader)?;
+    pub(crate) fn open_reader(&self, path: &RelativePath) -> LocalResult<OpenedFile> {
+        let (parent, name) = open_parent(self, path, LocalFileOperation::OpenReader)?;
         let file = open_file_at(
             &parent,
             &name,
-            libc::O_RDONLY
-                | libc::O_NONBLOCK
-                | libc::O_NOFOLLOW
-                | libc::O_CLOEXEC,
+            libc::O_RDONLY | libc::O_NONBLOCK | libc::O_NOFOLLOW | libc::O_CLOEXEC,
             0,
         )
-        .map_err(|error| {
-            io_error(
-                LocalFileOperation::OpenReader,
-                path.as_path(),
-                None,
-                error,
-            )
-        })?;
-        let metadata = file.metadata().map_err(|error| {
-            io_error(
-                LocalFileOperation::OpenReader,
-                path.as_path(),
-                None,
-                error,
-            )
-        })?;
+        .map_err(|error| io_error(LocalFileOperation::OpenReader, path.as_path(), None, error))?;
+        let metadata = file
+            .metadata()
+            .map_err(|error| io_error(LocalFileOperation::OpenReader, path.as_path(), None, error))?;
         if !metadata.is_file() {
             return Err(type_error(
                 LocalFileOperation::OpenReader,
@@ -221,14 +174,8 @@ impl NamespaceHandle {
                 "regular file",
             ));
         }
-        clear_nonblocking(&file).map_err(|error| {
-            io_error(
-                LocalFileOperation::OpenReader,
-                path.as_path(),
-                None,
-                error,
-            )
-        })?;
+        clear_nonblocking(&file)
+            .map_err(|error| io_error(LocalFileOperation::OpenReader, path.as_path(), None, error))?;
         let identity = EntryIdentity::from_metadata(&metadata);
         Ok(OpenedFile::new(
             file,
@@ -245,20 +192,15 @@ impl NamespaceHandle {
     ///
     /// Returns a list error when traversal, directory opening, or native
     /// stream creation fails.
-    pub(crate) fn open_directory(
-        &self,
-        path: &RelativePath,
-    ) -> LocalResult<DirectoryCursor> {
+    pub(crate) fn open_directory(&self, path: &RelativePath) -> LocalResult<DirectoryCursor> {
         let directory = if path.as_path().as_os_str().is_empty() {
-            self.descriptor.try_clone().map_err(|error| {
-                io_error(LocalFileOperation::List, path.as_path(), None, error)
-            })?
+            self.descriptor
+                .try_clone()
+                .map_err(|error| io_error(LocalFileOperation::List, path.as_path(), None, error))?
         } else {
-            let (parent, name) =
-                open_parent(self, path, LocalFileOperation::List)?;
-            open_directory_at(&parent, &name).map_err(|error| {
-                io_error(LocalFileOperation::List, path.as_path(), None, error)
-            })?
+            let (parent, name) = open_parent(self, path, LocalFileOperation::List)?;
+            open_directory_at(&parent, &name)
+                .map_err(|error| io_error(LocalFileOperation::List, path.as_path(), None, error))?
         };
         DirectoryCursor::open(directory, path.as_path().to_path_buf())
     }
@@ -272,10 +214,7 @@ impl NamespaceHandle {
     ///
     /// Returns a create-directory error when traversal or creation fails, or
     /// when the existing entry is not a directory.
-    pub(crate) fn create_directory(
-        &self,
-        path: &RelativePath,
-    ) -> LocalResult<()> {
+    pub(crate) fn create_directory(&self, path: &RelativePath) -> LocalResult<()> {
         self.create_directory_impl(path, true)
     }
 
@@ -288,10 +227,7 @@ impl NamespaceHandle {
     ///
     /// Returns a create-directory error when traversal or creation fails,
     /// including an already-existing final entry.
-    pub(crate) fn create_directory_new(
-        &self,
-        path: &RelativePath,
-    ) -> LocalResult<()> {
+    pub(crate) fn create_directory_new(&self, path: &RelativePath) -> LocalResult<()> {
         self.create_directory_impl(path, false)
     }
 
@@ -302,30 +238,15 @@ impl NamespaceHandle {
     /// Returns an open-writer error when the parent cannot be traversed or the
     /// final entry already exists or cannot be created.
     #[allow(dead_code)]
-    pub(crate) fn create_file_new(
-        &self,
-        path: &RelativePath,
-    ) -> LocalResult<File> {
-        let (parent, name) =
-            open_parent(self, path, LocalFileOperation::OpenWriter)?;
+    pub(crate) fn create_file_new(&self, path: &RelativePath) -> LocalResult<File> {
+        let (parent, name) = open_parent(self, path, LocalFileOperation::OpenWriter)?;
         open_file_at(
             &parent,
             &name,
-            libc::O_RDWR
-                | libc::O_CREAT
-                | libc::O_EXCL
-                | libc::O_NOFOLLOW
-                | libc::O_CLOEXEC,
+            libc::O_RDWR | libc::O_CREAT | libc::O_EXCL | libc::O_NOFOLLOW | libc::O_CLOEXEC,
             0o600,
         )
-        .map_err(|error| {
-            io_error(
-                LocalFileOperation::OpenWriter,
-                path.as_path(),
-                None,
-                error,
-            )
-        })
+        .map_err(|error| io_error(LocalFileOperation::OpenWriter, path.as_path(), None, error))
     }
 
     /// Deletes a file or non-directory final entry without following it.
@@ -342,10 +263,7 @@ impl NamespaceHandle {
     /// # Errors
     ///
     /// Returns a delete-directory error when traversal or `unlinkat` fails.
-    pub(crate) fn delete_directory(
-        &self,
-        path: &RelativePath,
-    ) -> LocalResult<()> {
+    pub(crate) fn delete_directory(&self, path: &RelativePath) -> LocalResult<()> {
         unlink(self, path, true, LocalFileOperation::DeleteDirectory)
     }
 
@@ -362,12 +280,7 @@ impl NamespaceHandle {
     /// Returns a rename error when either parent cannot be traversed or the
     /// native atomic rename fails. Targets without atomic no-replace support
     /// return an unsupported error when `overwrite` is `false`.
-    pub(crate) fn rename(
-        &self,
-        source: &RelativePath,
-        target: &RelativePath,
-        overwrite: bool,
-    ) -> LocalResult<()> {
+    pub(crate) fn rename(&self, source: &RelativePath, target: &RelativePath, overwrite: bool) -> LocalResult<()> {
         self.rename_to(source, self, target, overwrite)
     }
 
@@ -384,10 +297,8 @@ impl NamespaceHandle {
         target: &RelativePath,
         overwrite: bool,
     ) -> LocalResult<()> {
-        let (source_parent, source_name) =
-            open_parent(self, source, LocalFileOperation::Rename)?;
-        let (target_parent, target_name) =
-            open_parent(target_namespace, target, LocalFileOperation::Rename)?;
+        let (source_parent, source_name) = open_parent(self, source, LocalFileOperation::Rename)?;
+        let (target_parent, target_name) = open_parent(target_namespace, target, LocalFileOperation::Rename)?;
         let result = if overwrite {
             // SAFETY: both parent descriptors and component strings remain
             // live for this non-retaining descriptor-relative rename.
@@ -400,12 +311,7 @@ impl NamespaceHandle {
                 )
             }
         } else {
-            rename_no_replace(
-                &source_parent,
-                &source_name,
-                &target_parent,
-                &target_name,
-            )?
+            rename_no_replace(&source_parent, &source_name, &target_parent, &target_name)?
         };
         if result == 0 {
             Ok(())
@@ -430,12 +336,8 @@ impl NamespaceHandle {
     /// secure random bytes cannot be generated, or a unique private entry
     /// cannot be created.
     #[allow(dead_code)]
-    pub(crate) fn create_staged_file(
-        &self,
-        target: &RelativePath,
-    ) -> LocalResult<StagedFile> {
-        let (parent, _) =
-            open_parent(self, target, LocalFileOperation::OpenWriter)?;
+    pub(crate) fn create_staged_file(&self, target: &RelativePath) -> LocalResult<StagedFile> {
+        let (parent, _) = open_parent(self, target, LocalFileOperation::OpenWriter)?;
         StagedFile::create(parent, target.as_path())
     }
 
@@ -446,26 +348,15 @@ impl NamespaceHandle {
     /// # Errors
     ///
     /// Returns a metadata error when the entry cannot be inspected.
-    pub(crate) fn entry_identity(
-        &self,
-        path: &RelativePath,
-    ) -> LocalResult<EntryIdentity> {
+    pub(crate) fn entry_identity(&self, path: &RelativePath) -> LocalResult<EntryIdentity> {
         if path.as_path().as_os_str().is_empty() {
             return self
                 .descriptor
                 .metadata()
                 .map(|metadata| EntryIdentity::from_metadata(&metadata))
-                .map_err(|error| {
-                    io_error(
-                        LocalFileOperation::Metadata,
-                        path.as_path(),
-                        None,
-                        error,
-                    )
-                });
+                .map_err(|error| io_error(LocalFileOperation::Metadata, path.as_path(), None, error));
         }
-        status_at(self, path, LocalFileOperation::Metadata)
-            .map(|status| EntryIdentity::from_stat(&status))
+        status_at(self, path, LocalFileOperation::Metadata).map(|status| EntryIdentity::from_stat(&status))
     }
 
     /// Synchronizes the directory containing `path`.
@@ -477,22 +368,16 @@ impl NamespaceHandle {
     /// Returns a commit error when the parent cannot be opened or synchronized.
     pub(crate) fn sync_parent(&self, path: &RelativePath) -> LocalResult<()> {
         let parent = if path.as_path().as_os_str().is_empty() {
-            self.descriptor.try_clone().map_err(|error| {
-                io_error(
-                    LocalFileOperation::Commit,
-                    path.as_path(),
-                    None,
-                    error,
-                )
-            })?
+            self.descriptor
+                .try_clone()
+                .map_err(|error| io_error(LocalFileOperation::Commit, path.as_path(), None, error))?
         } else {
-            let (parent, _) =
-                open_parent(self, path, LocalFileOperation::Commit)?;
+            let (parent, _) = open_parent(self, path, LocalFileOperation::Commit)?;
             parent
         };
-        parent.sync_all().map_err(|error| {
-            io_error(LocalFileOperation::Commit, path.as_path(), None, error)
-        })
+        parent
+            .sync_all()
+            .map_err(|error| io_error(LocalFileOperation::Commit, path.as_path(), None, error))
     }
 
     /// Reads best-effort path limits for the filesystem containing `path`.
@@ -503,12 +388,8 @@ impl NamespaceHandle {
     /// # Errors
     ///
     /// Returns a metadata error when the nearest parent cannot be traversed.
-    pub(crate) fn filesystem_limits(
-        &self,
-        path: &RelativePath,
-    ) -> LocalResult<LocalFileSystemLimits> {
-        self.probe_handle(path)
-            .map(|file| filesystem_probe::limits(&file))
+    pub(crate) fn filesystem_limits(&self, path: &RelativePath) -> LocalResult<LocalFileSystemLimits> {
+        self.probe_handle(path).map(|file| filesystem_probe::limits(&file))
     }
 
     /// Reads best-effort capacity values for the filesystem containing `path`.
@@ -516,37 +397,22 @@ impl NamespaceHandle {
     /// # Errors
     ///
     /// Returns a metadata error when the nearest parent cannot be traversed.
-    pub(crate) fn filesystem_space(
-        &self,
-        path: &RelativePath,
-    ) -> LocalResult<LocalFileSystemSpace> {
-        self.probe_handle(path)
-            .map(|file| filesystem_probe::space(&file))
+    pub(crate) fn filesystem_space(&self, path: &RelativePath) -> LocalResult<LocalFileSystemSpace> {
+        self.probe_handle(path).map(|file| filesystem_probe::space(&file))
     }
 
     /// Implements exclusive or idempotent directory creation.
-    fn create_directory_impl(
-        &self,
-        path: &RelativePath,
-        exists_ok: bool,
-    ) -> LocalResult<()> {
-        let (parent, name) =
-            open_parent(self, path, LocalFileOperation::CreateDirectory)?;
+    fn create_directory_impl(&self, path: &RelativePath, exists_ok: bool) -> LocalResult<()> {
+        let (parent, name) = open_parent(self, path, LocalFileOperation::CreateDirectory)?;
         // SAFETY: the parent descriptor and NUL-terminated child name remain
         // live for this non-retaining creation call.
-        let result =
-            unsafe { libc::mkdirat(parent.as_raw_fd(), name.as_ptr(), 0o700) };
+        let result = unsafe { libc::mkdirat(parent.as_raw_fd(), name.as_ptr(), 0o700) };
         if result == 0 {
             return Ok(());
         }
         let error = io::Error::last_os_error();
         if exists_ok && error.kind() == ErrorKind::AlreadyExists {
-            let status = stat_child(
-                &parent,
-                &name,
-                LocalFileOperation::CreateDirectory,
-                path.as_path(),
-            )?;
+            let status = stat_child(&parent, &name, LocalFileOperation::CreateDirectory, path.as_path())?;
             if kind_from_mode(status.st_mode) == LocalFileKind::Directory {
                 return Ok(());
             }
@@ -562,14 +428,10 @@ impl NamespaceHandle {
     /// Opens a descriptor suitable for filesystem-level probes.
     fn probe_handle(&self, path: &RelativePath) -> LocalResult<File> {
         if path.as_path().as_os_str().is_empty() {
-            return self.descriptor.try_clone().map_err(|error| {
-                io_error(
-                    LocalFileOperation::Metadata,
-                    path.as_path(),
-                    None,
-                    error,
-                )
-            });
+            return self
+                .descriptor
+                .try_clone()
+                .map_err(|error| io_error(LocalFileOperation::Metadata, path.as_path(), None, error));
         }
         let mut candidate = path.as_path().to_path_buf();
         loop {
@@ -578,24 +440,16 @@ impl NamespaceHandle {
                 Ok((parent, _)) => return Ok(parent),
                 Err(error) if error.kind() == LocalFileErrorKind::NotFound => {
                     let Some(parent) = relative.as_path().parent() else {
-                        return self.descriptor.try_clone().map_err(|source| {
-                            io_error(
-                                LocalFileOperation::Metadata,
-                                path.as_path(),
-                                None,
-                                source,
-                            )
-                        });
+                        return self
+                            .descriptor
+                            .try_clone()
+                            .map_err(|source| io_error(LocalFileOperation::Metadata, path.as_path(), None, source));
                     };
                     if parent.as_os_str().is_empty() {
-                        return self.descriptor.try_clone().map_err(|source| {
-                            io_error(
-                                LocalFileOperation::Metadata,
-                                path.as_path(),
-                                None,
-                                source,
-                            )
-                        });
+                        return self
+                            .descriptor
+                            .try_clone()
+                            .map_err(|source| io_error(LocalFileOperation::Metadata, path.as_path(), None, source));
                     }
                     candidate = parent.to_path_buf();
                 }
@@ -617,12 +471,9 @@ pub(super) fn open_parent(
     operation: LocalFileOperation,
 ) -> LocalResult<(File, CString)> {
     let Some(final_name) = path.as_path().file_name() else {
-        return Err(LocalFileError::new(
-            LocalFileErrorKind::InvalidPath,
-            operation,
-        )
-        .with_path(path.as_path().to_path_buf())
-        .with_reason("the authority root has no parent-relative entry name"));
+        return Err(LocalFileError::new(LocalFileErrorKind::InvalidPath, operation)
+            .with_path(path.as_path().to_path_buf())
+            .with_reason("the authority root has no parent-relative entry name"));
     };
     let mut directory = namespace
         .descriptor
@@ -631,10 +482,8 @@ pub(super) fn open_parent(
     if let Some(parent) = path.as_path().parent() {
         for component in parent.components() {
             let name = component_c_string(component.as_os_str());
-            directory =
-                open_directory_at(&directory, &name).map_err(|error| {
-                    io_error(operation, path.as_path(), None, error)
-                })?;
+            directory = open_directory_at(&directory, &name)
+                .map_err(|error| io_error(operation, path.as_path(), None, error))?;
         }
     }
     Ok((directory, component_c_string(final_name)))
@@ -645,22 +494,10 @@ pub(super) fn open_parent(
 /// # Errors
 ///
 /// Returns the native `openat` error.
-pub(super) fn open_file_at(
-    parent: &File,
-    name: &CStr,
-    flags: libc::c_int,
-    mode: libc::mode_t,
-) -> io::Result<File> {
+pub(super) fn open_file_at(parent: &File, name: &CStr, flags: libc::c_int, mode: libc::mode_t) -> io::Result<File> {
     // SAFETY: the parent descriptor and component string remain live for the
     // call. A successful descriptor is transferred immediately into `File`.
-    let descriptor = unsafe {
-        libc::openat(
-            parent.as_raw_fd(),
-            name.as_ptr(),
-            flags,
-            libc::c_uint::from(mode),
-        )
-    };
+    let descriptor = unsafe { libc::openat(parent.as_raw_fd(), name.as_ptr(), flags, libc::c_uint::from(mode)) };
     if descriptor == -1 {
         return Err(io::Error::last_os_error());
     }
@@ -711,12 +548,7 @@ pub(super) fn stat_child(
         )
     };
     if result == -1 {
-        return Err(io_error(
-            operation,
-            path,
-            None,
-            io::Error::last_os_error(),
-        ));
+        return Err(io_error(operation, path, None, io::Error::last_os_error()));
     }
     // SAFETY: successful `fstatat` initialized the complete status value.
     Ok(unsafe { status.assume_init() })
@@ -766,17 +598,12 @@ where
 {
     let seconds = u64::try_from(seconds).ok()?;
     let nanoseconds = nanoseconds.try_into().ok()?;
-    UNIX_EPOCH.checked_add(
-        Duration::from_secs(seconds)
-            .saturating_add(Duration::from_nanos(nanoseconds)),
-    )
+    UNIX_EPOCH.checked_add(Duration::from_secs(seconds).saturating_add(Duration::from_nanos(nanoseconds)))
 }
 
 /// Extracts timestamps from Linux and Android status values.
 #[cfg(any(target_os = "linux", target_os = "android"))]
-fn stat_times(
-    status: &libc::stat,
-) -> (Option<SystemTime>, Option<SystemTime>, Option<SystemTime>) {
+fn stat_times(status: &libc::stat) -> (Option<SystemTime>, Option<SystemTime>, Option<SystemTime>) {
     (
         system_time(status.st_atime, status.st_atime_nsec),
         system_time(status.st_mtime, status.st_mtime_nsec),
@@ -786,9 +613,7 @@ fn stat_times(
 
 /// Extracts timestamps from Apple and FreeBSD status values.
 #[cfg(any(target_os = "macos", target_os = "ios", target_os = "freebsd"))]
-fn stat_times(
-    status: &libc::stat,
-) -> (Option<SystemTime>, Option<SystemTime>, Option<SystemTime>) {
+fn stat_times(status: &libc::stat) -> (Option<SystemTime>, Option<SystemTime>, Option<SystemTime>) {
     (
         system_time(status.st_atime, status.st_atime_nsec),
         system_time(status.st_mtime, status.st_mtime_nsec),
@@ -804,9 +629,7 @@ fn stat_times(
     target_os = "ios",
     target_os = "freebsd",
 )))]
-fn stat_times(
-    _status: &libc::stat,
-) -> (Option<SystemTime>, Option<SystemTime>, Option<SystemTime>) {
+fn stat_times(_status: &libc::stat) -> (Option<SystemTime>, Option<SystemTime>, Option<SystemTime>) {
     (None, None, None)
 }
 
@@ -821,17 +644,11 @@ fn unlink(
     let flags = if directory { libc::AT_REMOVEDIR } else { 0 };
     // SAFETY: the parent descriptor and child name remain live for this
     // non-retaining unlink operation.
-    let result =
-        unsafe { libc::unlinkat(parent.as_raw_fd(), name.as_ptr(), flags) };
+    let result = unsafe { libc::unlinkat(parent.as_raw_fd(), name.as_ptr(), flags) };
     if result == 0 {
         Ok(())
     } else {
-        Err(io_error(
-            operation,
-            path.as_path(),
-            None,
-            io::Error::last_os_error(),
-        ))
+        Err(io_error(operation, path.as_path(), None, io::Error::last_os_error()))
     }
 }
 
@@ -847,10 +664,7 @@ fn clear_nonblocking(file: &File) -> io::Result<()> {
     }
     // SAFETY: `F_SETFL` accepts the status flags returned by `F_GETFL` after
     // clearing the nonblocking bit, and the descriptor remains live.
-    if unsafe {
-        libc::fcntl(file.as_raw_fd(), libc::F_SETFL, flags & !libc::O_NONBLOCK)
-    } == -1
-    {
+    if unsafe { libc::fcntl(file.as_raw_fd(), libc::F_SETFL, flags & !libc::O_NONBLOCK) } == -1 {
         return Err(io::Error::last_os_error());
     }
     Ok(())
@@ -859,16 +673,11 @@ fn clear_nonblocking(file: &File) -> io::Result<()> {
 /// Converts one validated native component into a C string.
 #[must_use]
 fn component_c_string(component: &OsStr) -> CString {
-    CString::new(component.as_bytes())
-        .expect("RelativePath guarantees components without NUL")
+    CString::new(component.as_bytes()).expect("RelativePath guarantees components without NUL")
 }
 
 /// Creates a structured wrong-type error.
-fn type_error(
-    operation: LocalFileOperation,
-    path: &Path,
-    expected: &'static str,
-) -> LocalFileError {
+fn type_error(operation: LocalFileOperation, path: &Path, expected: &'static str) -> LocalFileError {
     LocalFileError::new(LocalFileErrorKind::TypeConflict, operation)
         .with_path(path.to_path_buf())
         .with_reason(expected)
@@ -932,21 +741,15 @@ fn rename_no_replace(
 }
 
 /// Reports missing atomic no-replace rename support on other Unix targets.
-#[cfg(not(any(
-    target_os = "linux",
-    target_os = "android",
-    target_os = "macos",
-    target_os = "ios",
-)))]
+#[cfg(not(any(target_os = "linux", target_os = "android", target_os = "macos", target_os = "ios",)))]
 fn rename_no_replace(
     _source_parent: &File,
     _source_name: &CStr,
     _target_parent: &File,
     _target_name: &CStr,
 ) -> LocalResult<libc::c_int> {
-    Err(LocalFileError::new(
-        LocalFileErrorKind::Unsupported,
-        LocalFileOperation::Rename,
+    Err(
+        LocalFileError::new(LocalFileErrorKind::Unsupported, LocalFileOperation::Rename)
+            .with_reason("atomic descriptor-relative no-replace rename is unsupported"),
     )
-    .with_reason("atomic descriptor-relative no-replace rename is unsupported"))
 }

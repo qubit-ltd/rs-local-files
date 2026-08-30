@@ -35,16 +35,8 @@ impl PlatformDirectoryEntry {
     /// - `name`: Native immediate-child name.
     /// - `kind`: Normalized entry kind.
     /// - `identity`: Identity captured with `kind`.
-    pub(super) const fn new(
-        name: OsString,
-        kind: LocalFileKind,
-        identity: EntryIdentity,
-    ) -> Self {
-        Self {
-            name,
-            kind,
-            identity,
-        }
+    pub(super) const fn new(name: OsString, kind: LocalFileKind, identity: EntryIdentity) -> Self {
+        Self { name, kind, identity }
     }
 
     /// Returns the native immediate-child name.

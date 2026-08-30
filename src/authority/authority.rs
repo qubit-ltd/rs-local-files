@@ -60,20 +60,14 @@ impl Authority {
     }
 
     /// Reads metadata through the concrete authority.
-    pub(crate) fn metadata(
-        &self,
-        path: &AuthorityPath,
-    ) -> LocalResult<LocalFileMetadata> {
+    pub(crate) fn metadata(&self, path: &AuthorityPath) -> LocalResult<LocalFileMetadata> {
         match self {
             Self::Host(authority) => authority.metadata(path),
             Self::Rooted(authority) => authority.metadata(path),
         }
     }
 
-    pub(crate) fn resolve_metadata(
-        &self,
-        path: &Path,
-    ) -> LocalResult<AuthorityPath> {
+    pub(crate) fn resolve_metadata(&self, path: &Path) -> LocalResult<AuthorityPath> {
         match self {
             Self::Host(authority) => authority.resolve_metadata(path),
             Self::Rooted(authority) => authority.resolve_metadata(path),
@@ -81,10 +75,7 @@ impl Authority {
     }
 
     /// Opens a file reader through the concrete authority.
-    pub(crate) fn open_reader(
-        &self,
-        path: &AuthorityPath,
-    ) -> LocalResult<OpenedFile> {
+    pub(crate) fn open_reader(&self, path: &AuthorityPath) -> LocalResult<OpenedFile> {
         match self {
             Self::Host(authority) => authority.open_reader(path),
             Self::Rooted(authority) => authority.open_reader(path),
@@ -92,10 +83,7 @@ impl Authority {
     }
 
     /// Opens a directory cursor through the concrete authority.
-    pub(crate) fn open_directory(
-        &self,
-        path: &AuthorityPath,
-    ) -> LocalResult<DirectoryCursor> {
+    pub(crate) fn open_directory(&self, path: &AuthorityPath) -> LocalResult<DirectoryCursor> {
         match self {
             Self::Host(authority) => authority.open_directory(path),
             Self::Rooted(authority) => authority.open_directory(path),
@@ -103,10 +91,7 @@ impl Authority {
     }
 
     /// Creates a directory, accepting an existing directory.
-    pub(crate) fn create_directory(
-        &self,
-        path: &AuthorityPath,
-    ) -> LocalResult<()> {
+    pub(crate) fn create_directory(&self, path: &AuthorityPath) -> LocalResult<()> {
         match self {
             Self::Host(authority) => authority.create_directory(path),
             Self::Rooted(authority) => authority.create_directory(path),
@@ -114,10 +99,7 @@ impl Authority {
     }
 
     /// Creates a directory only when the final entry is absent.
-    pub(crate) fn create_directory_new(
-        &self,
-        path: &AuthorityPath,
-    ) -> LocalResult<()> {
+    pub(crate) fn create_directory_new(&self, path: &AuthorityPath) -> LocalResult<()> {
         match self {
             Self::Host(authority) => authority.create_directory_new(path),
             Self::Rooted(authority) => authority.create_directory_new(path),
@@ -126,10 +108,7 @@ impl Authority {
 
     /// Creates and opens a new private regular file.
     #[allow(dead_code)]
-    pub(crate) fn create_file_new(
-        &self,
-        path: &AuthorityPath,
-    ) -> LocalResult<File> {
+    pub(crate) fn create_file_new(&self, path: &AuthorityPath) -> LocalResult<File> {
         match self {
             Self::Host(authority) => authority.create_file_new(path),
             Self::Rooted(authority) => authority.create_file_new(path),
@@ -145,10 +124,7 @@ impl Authority {
     }
 
     /// Deletes an empty directory without following it.
-    pub(crate) fn delete_directory(
-        &self,
-        path: &AuthorityPath,
-    ) -> LocalResult<()> {
+    pub(crate) fn delete_directory(&self, path: &AuthorityPath) -> LocalResult<()> {
         match self {
             Self::Host(authority) => authority.delete_directory(path),
             Self::Rooted(authority) => authority.delete_directory(path),
@@ -156,28 +132,16 @@ impl Authority {
     }
 
     /// Renames an entry through the concrete authority.
-    pub(crate) fn rename(
-        &self,
-        source: &AuthorityPath,
-        target: &AuthorityPath,
-        overwrite: bool,
-    ) -> LocalResult<()> {
+    pub(crate) fn rename(&self, source: &AuthorityPath, target: &AuthorityPath, overwrite: bool) -> LocalResult<()> {
         match self {
-            Self::Host(authority) => {
-                authority.rename(source, target, overwrite)
-            }
-            Self::Rooted(authority) => {
-                authority.rename(source, target, overwrite)
-            }
+            Self::Host(authority) => authority.rename(source, target, overwrite),
+            Self::Rooted(authority) => authority.rename(source, target, overwrite),
         }
     }
 
     /// Creates a private staging file beside `target`.
     #[allow(dead_code)]
-    pub(crate) fn create_staged_file(
-        &self,
-        target: &AuthorityPath,
-    ) -> LocalResult<StagedFile> {
+    pub(crate) fn create_staged_file(&self, target: &AuthorityPath) -> LocalResult<StagedFile> {
         match self {
             Self::Host(authority) => authority.create_staged_file(target),
             Self::Rooted(authority) => authority.create_staged_file(target),
@@ -185,10 +149,7 @@ impl Authority {
     }
 
     /// Reads the native identity of an entry.
-    pub(crate) fn entry_identity(
-        &self,
-        path: &AuthorityPath,
-    ) -> LocalResult<EntryIdentity> {
+    pub(crate) fn entry_identity(&self, path: &AuthorityPath) -> LocalResult<EntryIdentity> {
         match self {
             Self::Host(authority) => authority.entry_identity(path),
             Self::Rooted(authority) => authority.entry_identity(path),
@@ -204,10 +165,7 @@ impl Authority {
     }
 
     /// Reads filesystem path limits through the concrete authority.
-    pub(crate) fn filesystem_limits(
-        &self,
-        path: &AuthorityPath,
-    ) -> LocalResult<LocalFileSystemLimits> {
+    pub(crate) fn filesystem_limits(&self, path: &AuthorityPath) -> LocalResult<LocalFileSystemLimits> {
         match self {
             Self::Host(authority) => authority.filesystem_limits(path),
             Self::Rooted(authority) => authority.filesystem_limits(path),
@@ -215,10 +173,7 @@ impl Authority {
     }
 
     /// Reads filesystem capacity through the concrete authority.
-    pub(crate) fn filesystem_space(
-        &self,
-        path: &AuthorityPath,
-    ) -> LocalResult<LocalFileSystemSpace> {
+    pub(crate) fn filesystem_space(&self, path: &AuthorityPath) -> LocalResult<LocalFileSystemSpace> {
         match self {
             Self::Host(authority) => authority.filesystem_space(path),
             Self::Rooted(authority) => authority.filesystem_space(path),
@@ -229,20 +184,14 @@ impl Authority {
     ///
     /// A missing target is reported as `false`; all other identity failures
     /// retain their structured error.
-    pub(crate) fn same_entry(
-        &self,
-        first: &AuthorityPath,
-        second: &AuthorityPath,
-    ) -> LocalResult<bool> {
+    pub(crate) fn same_entry(&self, first: &AuthorityPath, second: &AuthorityPath) -> LocalResult<bool> {
         if first == second {
             return Ok(true);
         }
         let first = self.entry_identity(first)?;
         match self.entry_identity(second) {
             Ok(second) => Ok(first == second),
-            Err(error) if error.kind() == LocalFileErrorKind::NotFound => {
-                Ok(false)
-            }
+            Err(error) if error.kind() == LocalFileErrorKind::NotFound => Ok(false),
             Err(error) => Err(error),
         }
     }

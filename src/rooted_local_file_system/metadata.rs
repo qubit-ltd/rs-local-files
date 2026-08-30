@@ -22,30 +22,18 @@ use crate::LocalSymlinkPolicy;
 
 impl RootedLocalFileSystem {
     /// Reads metadata through the opened root authority.
-    pub fn metadata(
-        &self,
-        path: &Path,
-        symlink_policy: LocalSymlinkPolicy,
-    ) -> LocalResult<LocalFileMetadata> {
+    pub fn metadata(&self, path: &Path, symlink_policy: LocalSymlinkPolicy) -> LocalResult<LocalFileMetadata> {
         if path.as_os_str().is_empty() {
-            return self.root.metadata().map(rooted_metadata).map_err(
-                |error| {
-                    rooted_io_error(LocalFileOperation::Metadata, path, error)
-                },
-            );
+            return self
+                .root
+                .metadata()
+                .map(rooted_metadata)
+                .map_err(|error| rooted_io_error(LocalFileOperation::Metadata, path, error));
         }
-        let relative = resolve_rooted_path(
-            &self.root,
-            path,
-            symlink_policy,
-            false,
-            LocalFileOperation::Metadata,
-        )?;
+        let relative = resolve_rooted_path(&self.root, path, symlink_policy, false, LocalFileOperation::Metadata)?;
         self.root
             .symlink_metadata(&relative)
             .map(rooted_metadata)
-            .map_err(|error| {
-                rooted_io_error(LocalFileOperation::Metadata, path, error)
-            })
+            .map_err(|error| rooted_io_error(LocalFileOperation::Metadata, path, error))
     }
 }

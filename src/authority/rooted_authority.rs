@@ -50,10 +50,7 @@ impl RootedAuthority {
     ///
     /// Returns an open-root or current-directory error when the diagnostic
     /// path cannot be formed or the directory handle cannot be opened.
-    pub(crate) fn open(
-        root: &Path,
-        symlink_policy: LocalSymlinkPolicy,
-    ) -> LocalResult<Self> {
+    pub(crate) fn open(root: &Path, symlink_policy: LocalSymlinkPolicy) -> LocalResult<Self> {
         let diagnostic_root = absolute_diagnostic_path(root)?;
         let root = NamespaceHandle::open_root(root)?;
         Ok(Self {
@@ -78,60 +75,40 @@ impl RootedAuthority {
     pub(crate) fn resolve(&self, path: &Path) -> LocalResult<AuthorityPath> {
         let path = RelativePath::parse(path)?;
         if self.symlink_policy == LocalSymlinkPolicy::FollowAcrossScope {
-            return Err(LocalFileError::new(
-                LocalFileErrorKind::InvalidOptions,
-                LocalFileOperation::BindPath,
-            )
-            .with_path(path.as_path().to_path_buf())
-            .with_reason(
-                "FollowAcrossScope is incompatible with Rooted authority",
-            ));
+            return Err(
+                LocalFileError::new(LocalFileErrorKind::InvalidOptions, LocalFileOperation::BindPath)
+                    .with_path(path.as_path().to_path_buf())
+                    .with_reason("FollowAcrossScope is incompatible with Rooted authority"),
+            );
         }
-        symlink_resolver::resolve(&self.root, &path, self.symlink_policy)
-            .map(AuthorityPath::Rooted)
+        symlink_resolver::resolve(&self.root, &path, self.symlink_policy).map(AuthorityPath::Rooted)
     }
 
     /// Reads metadata through the retained root handle.
-    pub(crate) fn metadata(
-        &self,
-        path: &AuthorityPath,
-    ) -> LocalResult<LocalFileMetadata> {
+    pub(crate) fn metadata(&self, path: &AuthorityPath) -> LocalResult<LocalFileMetadata> {
         self.root.metadata(rooted_path(path)?)
     }
 
-    pub(crate) fn resolve_metadata(
-        &self,
-        path: &Path,
-    ) -> LocalResult<AuthorityPath> {
+    pub(crate) fn resolve_metadata(&self, path: &Path) -> LocalResult<AuthorityPath> {
         let path = RelativePath::parse(path)?;
         if self.symlink_policy == LocalSymlinkPolicy::FollowAcrossScope {
-            return Err(LocalFileError::new(
-                LocalFileErrorKind::InvalidOptions,
-                LocalFileOperation::BindPath,
-            )
-            .with_path(path.as_path().to_path_buf())
-            .with_reason(
-                "FollowAcrossScope is incompatible with Rooted authority",
-            ));
+            return Err(
+                LocalFileError::new(LocalFileErrorKind::InvalidOptions, LocalFileOperation::BindPath)
+                    .with_path(path.as_path().to_path_buf())
+                    .with_reason("FollowAcrossScope is incompatible with Rooted authority"),
+            );
         }
-        symlink_resolver::resolve_parent(&self.root, &path, self.symlink_policy)
-            .map(AuthorityPath::Rooted)
+        symlink_resolver::resolve_parent(&self.root, &path, self.symlink_policy).map(AuthorityPath::Rooted)
     }
 
     /// Opens a reader through the retained root handle.
-    pub(crate) fn open_reader(
-        &self,
-        path: &AuthorityPath,
-    ) -> LocalResult<OpenedFile> {
+    pub(crate) fn open_reader(&self, path: &AuthorityPath) -> LocalResult<OpenedFile> {
         self.root.open_reader(rooted_path(path)?)
     }
 
     /// Reads an entire regular file through the retained root handle.
     #[cfg(test)]
-    pub(crate) fn read_all(
-        &self,
-        path: &AuthorityPath,
-    ) -> LocalResult<Vec<u8>> {
+    pub(crate) fn read_all(&self, path: &AuthorityPath) -> LocalResult<Vec<u8>> {
         let mut opened = self.open_reader(path)?;
         let mut bytes = Vec::new();
         opened.read_to_end(&mut bytes).map_err(|error| {
@@ -146,35 +123,23 @@ impl RootedAuthority {
     }
 
     /// Opens a lazy directory cursor through the retained root handle.
-    pub(crate) fn open_directory(
-        &self,
-        path: &AuthorityPath,
-    ) -> LocalResult<DirectoryCursor> {
+    pub(crate) fn open_directory(&self, path: &AuthorityPath) -> LocalResult<DirectoryCursor> {
         self.root.open_directory(rooted_path(path)?)
     }
 
     /// Creates a directory, accepting an existing directory.
-    pub(crate) fn create_directory(
-        &self,
-        path: &AuthorityPath,
-    ) -> LocalResult<()> {
+    pub(crate) fn create_directory(&self, path: &AuthorityPath) -> LocalResult<()> {
         self.root.create_directory(rooted_path(path)?)
     }
 
     /// Creates a directory only when the final entry is absent.
-    pub(crate) fn create_directory_new(
-        &self,
-        path: &AuthorityPath,
-    ) -> LocalResult<()> {
+    pub(crate) fn create_directory_new(&self, path: &AuthorityPath) -> LocalResult<()> {
         self.root.create_directory_new(rooted_path(path)?)
     }
 
     /// Creates and opens a new private regular file.
     #[allow(dead_code)]
-    pub(crate) fn create_file_new(
-        &self,
-        path: &AuthorityPath,
-    ) -> LocalResult<File> {
+    pub(crate) fn create_file_new(&self, path: &AuthorityPath) -> LocalResult<File> {
         self.root.create_file_new(rooted_path(path)?)
     }
 
@@ -184,38 +149,23 @@ impl RootedAuthority {
     }
 
     /// Deletes an empty directory without following it.
-    pub(crate) fn delete_directory(
-        &self,
-        path: &AuthorityPath,
-    ) -> LocalResult<()> {
+    pub(crate) fn delete_directory(&self, path: &AuthorityPath) -> LocalResult<()> {
         self.root.delete_directory(rooted_path(path)?)
     }
 
     /// Renames two paths within the retained root handle.
-    pub(crate) fn rename(
-        &self,
-        source: &AuthorityPath,
-        target: &AuthorityPath,
-        overwrite: bool,
-    ) -> LocalResult<()> {
-        self.root
-            .rename(rooted_path(source)?, rooted_path(target)?, overwrite)
+    pub(crate) fn rename(&self, source: &AuthorityPath, target: &AuthorityPath, overwrite: bool) -> LocalResult<()> {
+        self.root.rename(rooted_path(source)?, rooted_path(target)?, overwrite)
     }
 
     /// Creates a private staging file beside `target`.
     #[allow(dead_code)]
-    pub(crate) fn create_staged_file(
-        &self,
-        target: &AuthorityPath,
-    ) -> LocalResult<StagedFile> {
+    pub(crate) fn create_staged_file(&self, target: &AuthorityPath) -> LocalResult<StagedFile> {
         self.root.create_staged_file(rooted_path(target)?)
     }
 
     /// Reads the native identity of an entry through the root handle.
-    pub(crate) fn entry_identity(
-        &self,
-        path: &AuthorityPath,
-    ) -> LocalResult<EntryIdentity> {
+    pub(crate) fn entry_identity(&self, path: &AuthorityPath) -> LocalResult<EntryIdentity> {
         self.root.entry_identity(rooted_path(path)?)
     }
 
@@ -225,18 +175,12 @@ impl RootedAuthority {
     }
 
     /// Reads filesystem path limits through the nearest opened handle.
-    pub(crate) fn filesystem_limits(
-        &self,
-        path: &AuthorityPath,
-    ) -> LocalResult<LocalFileSystemLimits> {
+    pub(crate) fn filesystem_limits(&self, path: &AuthorityPath) -> LocalResult<LocalFileSystemLimits> {
         self.root.filesystem_limits(rooted_path(path)?)
     }
 
     /// Reads filesystem capacity through the nearest opened handle.
-    pub(crate) fn filesystem_space(
-        &self,
-        path: &AuthorityPath,
-    ) -> LocalResult<LocalFileSystemSpace> {
+    pub(crate) fn filesystem_space(&self, path: &AuthorityPath) -> LocalResult<LocalFileSystemSpace> {
         self.root.filesystem_space(rooted_path(path)?)
     }
 }
@@ -251,12 +195,9 @@ fn rooted_path(path: &AuthorityPath) -> LocalResult<&RelativePath> {
 
 /// Creates a structured error for an AuthorityPath variant mismatch.
 fn authority_mismatch(path: &AuthorityPath) -> LocalFileError {
-    LocalFileError::new(
-        LocalFileErrorKind::InvalidPath,
-        LocalFileOperation::BindPath,
-    )
-    .with_path(path.diagnostic_path().to_path_buf())
-    .with_reason("the path was constructed by a different authority kind")
+    LocalFileError::new(LocalFileErrorKind::InvalidPath, LocalFileOperation::BindPath)
+        .with_path(path.diagnostic_path().to_path_buf())
+        .with_reason("the path was constructed by a different authority kind")
 }
 
 /// Forms an absolute diagnostic path without canonicalizing or following it.
@@ -266,12 +207,5 @@ fn absolute_diagnostic_path(path: &Path) -> LocalResult<PathBuf> {
     }
     env::current_dir()
         .map(|cwd| cwd.join(path))
-        .map_err(|error| {
-            LocalFileError::from_io(
-                LocalFileOperation::OpenRoot,
-                Some(path.to_path_buf()),
-                None,
-                error,
-            )
-        })
+        .map_err(|error| LocalFileError::from_io(LocalFileOperation::OpenRoot, Some(path.to_path_buf()), None, error))
 }

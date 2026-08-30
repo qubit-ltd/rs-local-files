@@ -92,11 +92,7 @@ fn validate_relative_components(path: &Path) -> LocalResult<()> {
 #[must_use]
 #[inline]
 fn invalid_relative_path_error(path: &Path) -> LocalFileError {
-    LocalFileError::new(
-        LocalFileErrorKind::InvalidPath,
-        LocalFileOperation::ComposePath,
-    )
-    .with_path(path.to_path_buf())
+    LocalFileError::new(LocalFileErrorKind::InvalidPath, LocalFileOperation::ComposePath).with_path(path.to_path_buf())
 }
 
 /// Reports whether a Unix path contains an embedded NUL byte.

@@ -12,8 +12,5 @@ use qubit_local_files::LocalPersistMethod;
 /// Verifies temporary persistence currently reports native rename publication.
 #[test]
 fn test_local_persist_method_reports_atomic_rename() {
-    assert_eq!(
-        LocalPersistMethod::AtomicRename,
-        LocalPersistMethod::AtomicRename
-    );
+    assert_eq!(LocalPersistMethod::AtomicRename, LocalPersistMethod::AtomicRename);
 }
