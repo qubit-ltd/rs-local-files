@@ -122,13 +122,8 @@ pub(crate) fn ensure_parent_path(path: &Path) -> Result<()> {
 /// # Errors
 /// Returns an I/O error when a parent component cannot be inspected or
 /// created, or an existing component is not a directory.
-pub(crate) fn ensure_parent_path_with_sync_dirs(
-    path: &Path,
-) -> Result<Vec<PathBuf>> {
-    let Some(parent) = path
-        .parent()
-        .filter(|parent| !parent.as_os_str().is_empty())
-    else {
+pub(crate) fn ensure_parent_path_with_sync_dirs(path: &Path) -> Result<Vec<PathBuf>> {
+    let Some(parent) = path.parent().filter(|parent| !parent.as_os_str().is_empty()) else {
         return Ok(Vec::new());
     };
     let mut missing = Vec::new();
@@ -139,10 +134,7 @@ pub(crate) fn ensure_parent_path_with_sync_dirs(
             Ok(_) => {
                 return Err(Error::new(
                     ErrorKind::AlreadyExists,
-                    format!(
-                        "parent path component is not a directory: {}",
-                        current.display()
-                    ),
+                    format!("parent path component is not a directory: {}", current.display()),
                 ));
             }
             Err(error) if error.kind() == ErrorKind::NotFound => {
@@ -170,11 +162,7 @@ pub(crate) fn ensure_parent_path_with_sync_dirs(
 ///
 /// # Returns
 /// A new I/O error with the same [`ErrorKind`] and a more descriptive message.
-pub(crate) fn add_path_context(
-    error: Error,
-    operation: &'static str,
-    path: &Path,
-) -> Error {
+pub(crate) fn add_path_context(error: Error, operation: &'static str, path: &Path) -> Error {
     Error::new(error.kind(), PathIoError::new(operation, path, error))
 }
 

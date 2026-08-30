@@ -64,10 +64,7 @@ impl DirectoryCursor {
     pub(super) fn new(directory: File, path: PathBuf) -> Self {
         Self {
             directory,
-            buffer: vec![
-                0_usize;
-                DIRECTORY_READ_BUFFER_SIZE.div_ceil(size_of::<usize>())
-            ],
+            buffer: vec![0_usize; DIRECTORY_READ_BUFFER_SIZE.div_ceil(size_of::<usize>())],
             used: 0,
             offset: 0,
             restart: true,
@@ -88,57 +85,29 @@ impl DirectoryCursor {
     ///
     /// Returns a list error when native enumeration, record validation, child
     /// opening, metadata, or identity capture fails.
-    pub(crate) fn next_entry(
-        &mut self,
-    ) -> LocalResult<Option<PlatformDirectoryEntry>> {
+    pub(crate) fn next_entry(&mut self) -> LocalResult<Option<PlatformDirectoryEntry>> {
         loop {
             if self.offset >= self.used {
-                self.read_next_buffer().map_err(|error| {
-                    io_error(LocalFileOperation::List, &self.path, None, error)
-                })?;
+                self.read_next_buffer()
+                    .map_err(|error| io_error(LocalFileOperation::List, &self.path, None, error))?;
                 if self.exhausted {
                     return Ok(None);
                 }
             }
-            let (name, next_offset) = self.current_name().map_err(|error| {
-                io_error(LocalFileOperation::List, &self.path, None, error)
-            })?;
+            let (name, next_offset) = self
+                .current_name()
+                .map_err(|error| io_error(LocalFileOperation::List, &self.path, None, error))?;
             self.offset = next_offset;
             if name == OsStr::new(".") || name == OsStr::new("..") {
                 continue;
             }
-            let child = nt_open_at(
-                &self.directory,
-                &name,
-                FILE_READ_ATTRIBUTES | SYNCHRONIZE,
-                FILE_OPEN,
-                0,
-            )
-            .map_err(|error| {
-                io_error(
-                    LocalFileOperation::List,
-                    &self.path.join(&name),
-                    None,
-                    error,
-                )
-            })?;
-            let metadata = child.metadata().map_err(|error| {
-                io_error(
-                    LocalFileOperation::List,
-                    &self.path.join(&name),
-                    None,
-                    error,
-                )
-            })?;
-            let identity =
-                EntryIdentity::from_file(&child).map_err(|error| {
-                    io_error(
-                        LocalFileOperation::List,
-                        &self.path.join(&name),
-                        None,
-                        error,
-                    )
-                })?;
+            let child = nt_open_at(&self.directory, &name, FILE_READ_ATTRIBUTES | SYNCHRONIZE, FILE_OPEN, 0)
+                .map_err(|error| io_error(LocalFileOperation::List, &self.path.join(&name), None, error))?;
+            let metadata = child
+                .metadata()
+                .map_err(|error| io_error(LocalFileOperation::List, &self.path.join(&name), None, error))?;
+            let identity = EntryIdentity::from_file(&child)
+                .map_err(|error| io_error(LocalFileOperation::List, &self.path.join(&name), None, error))?;
             return Ok(Some(PlatformDirectoryEntry::new(
                 name,
                 LocalFileMetadata::from_native(&metadata).kind(),
@@ -178,21 +147,18 @@ impl DirectoryCursor {
         self.used = status_block.Information.min(DIRECTORY_READ_BUFFER_SIZE);
         self.offset = 0;
         if self.used == 0 {
-            return Err(io::Error::other(
-                "NtQueryDirectoryFile returned an empty record batch",
-            ));
+            return Err(io::Error::other("NtQueryDirectoryFile returned an empty record batch"));
         }
         Ok(())
     }
 
     /// Parses the current directory record and returns its next byte offset.
     fn current_name(&self) -> io::Result<(OsString, usize)> {
-        let name_offset =
-            std::mem::offset_of!(FILE_DIRECTORY_INFORMATION, FileName);
-        let remaining =
-            self.used.checked_sub(self.offset).ok_or_else(|| {
-                io::Error::other("directory record offset exceeded result size")
-            })?;
+        let name_offset = std::mem::offset_of!(FILE_DIRECTORY_INFORMATION, FileName);
+        let remaining = self
+            .used
+            .checked_sub(self.offset)
+            .ok_or_else(|| io::Error::other("directory record offset exceeded result size"))?;
         if remaining < name_offset {
             return Err(io::Error::other("truncated directory record header"));
         }
@@ -209,32 +175,23 @@ impl DirectoryCursor {
         let name_units = name_bytes
             .checked_div(size_of::<u16>())
             .filter(|_| name_bytes.is_multiple_of(size_of::<u16>()))
-            .ok_or_else(|| {
-                io::Error::other("directory record name has invalid length")
-            })?;
-        let name_end =
-            name_offset.checked_add(name_bytes).ok_or_else(|| {
-                io::Error::other("directory record name length overflowed")
-            })?;
+            .ok_or_else(|| io::Error::other("directory record name has invalid length"))?;
+        let name_end = name_offset
+            .checked_add(name_bytes)
+            .ok_or_else(|| io::Error::other("directory record name length overflowed"))?;
         if name_end > remaining {
             return Err(io::Error::other("truncated directory record name"));
         }
         // SAFETY: `name_end` was verified inside the current record.
-        let name = unsafe {
-            OsString::from_wide(std::slice::from_raw_parts(
-                information.FileName.as_ptr(),
-                name_units,
-            ))
-        };
+        let name =
+            unsafe { OsString::from_wide(std::slice::from_raw_parts(information.FileName.as_ptr(), name_units)) };
         let next_offset = if information.NextEntryOffset == 0 {
             self.used
         } else {
             self.offset
                 .checked_add(information.NextEntryOffset as usize)
                 .filter(|next| *next > self.offset && *next <= self.used)
-                .ok_or_else(|| {
-                    io::Error::other("directory record offset overflowed")
-                })?
+                .ok_or_else(|| io::Error::other("directory record offset overflowed"))?
         };
         Ok((name, next_offset))
     }

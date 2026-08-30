@@ -101,17 +101,11 @@ impl Metadata {
             let mut identity = BY_HANDLE_FILE_INFORMATION::default();
             // SAFETY: `file` owns a live handle and `identity` is a correctly
             // sized writable buffer for `GetFileInformationByHandle`.
-            let result = unsafe {
-                GetFileInformationByHandle(
-                    file.as_raw_handle(),
-                    &raw mut identity,
-                )
-            };
+            let result = unsafe { GetFileInformationByHandle(file.as_raw_handle(), &raw mut identity) };
             if result == 0 {
                 return Err(std::io::Error::last_os_error());
             }
-            let file_id = (u64::from(identity.nFileIndexHigh) << 32)
-                | u64::from(identity.nFileIndexLow);
+            let file_id = (u64::from(identity.nFileIndexHigh) << 32) | u64::from(identity.nFileIndexLow);
             Ok(Self::from_windows_metadata(
                 &metadata,
                 Some(u64::from(identity.dwVolumeSerialNumber)),
@@ -147,9 +141,7 @@ impl Metadata {
             accessed_at,
             modified_at,
             created_at,
-            permissions: Permissions::from_unix_mode(permission_mode(
-                status.st_mode,
-            )),
+            permissions: Permissions::from_unix_mode(permission_mode(status.st_mode)),
             device_id: native_id(status.st_dev),
             file_id: native_id(status.st_ino),
         }
@@ -157,11 +149,7 @@ impl Metadata {
 
     /// Builds rooted metadata from Windows metadata and handle identity.
     #[cfg(windows)]
-    fn from_windows_metadata(
-        metadata: &fs::Metadata,
-        device_id: Option<u64>,
-        file_id: Option<u64>,
-    ) -> Self {
+    fn from_windows_metadata(metadata: &fs::Metadata, device_id: Option<u64>, file_id: Option<u64>) -> Self {
         let file_type = metadata.file_type();
         let kind = if file_type.is_symlink() {
             EntryKind::Symlink
@@ -178,9 +166,7 @@ impl Metadata {
             accessed_at: metadata.accessed().ok(),
             modified_at: metadata.modified().ok(),
             created_at: metadata.created().ok(),
-            permissions: Permissions::from_read_only(
-                metadata.permissions().readonly(),
-            ),
+            permissions: Permissions::from_read_only(metadata.permissions().readonly()),
             device_id,
             file_id,
         }
@@ -293,18 +279,13 @@ where
 {
     let seconds = u64::try_from(seconds).ok()?;
     let nanoseconds = nanoseconds.try_into().ok()?;
-    UNIX_EPOCH.checked_add(
-        Duration::from_secs(seconds)
-            .saturating_add(Duration::from_nanos(nanoseconds)),
-    )
+    UNIX_EPOCH.checked_add(Duration::from_secs(seconds).saturating_add(Duration::from_nanos(nanoseconds)))
 }
 
 /// Extracts portable timestamps from Linux and Android `stat` values.
 #[cfg(any(target_os = "linux", target_os = "android"))]
 #[inline]
-fn stat_times(
-    status: &libc::stat,
-) -> (Option<SystemTime>, Option<SystemTime>, Option<SystemTime>) {
+fn stat_times(status: &libc::stat) -> (Option<SystemTime>, Option<SystemTime>, Option<SystemTime>) {
     (
         system_time(status.st_atime, status.st_atime_nsec),
         system_time(status.st_mtime, status.st_mtime_nsec),
@@ -315,9 +296,7 @@ fn stat_times(
 /// Extracts portable timestamps from Apple and FreeBSD `stat` values.
 #[cfg(any(target_os = "macos", target_os = "ios", target_os = "freebsd"))]
 #[inline]
-fn stat_times(
-    status: &libc::stat,
-) -> (Option<SystemTime>, Option<SystemTime>, Option<SystemTime>) {
+fn stat_times(status: &libc::stat) -> (Option<SystemTime>, Option<SystemTime>, Option<SystemTime>) {
     (
         system_time(status.st_atime, status.st_atime_nsec),
         system_time(status.st_mtime, status.st_mtime_nsec),
@@ -338,9 +317,7 @@ fn stat_times(
     ))
 ))]
 #[inline]
-fn stat_times(
-    _status: &libc::stat,
-) -> (Option<SystemTime>, Option<SystemTime>, Option<SystemTime>) {
+fn stat_times(_status: &libc::stat) -> (Option<SystemTime>, Option<SystemTime>, Option<SystemTime>) {
     (None, None, None)
 }
 

@@ -106,34 +106,20 @@ impl RootedLocalFileSystem {
     /// securely or the current platform lacks rooted primitives.
     pub fn open(path: &Path) -> LocalResult<Self> {
         if std::fs::metadata(path).is_ok_and(|metadata| !metadata.is_dir()) {
-            return Err(LocalFileError::new(
-                LocalFileErrorKind::NotDirectory,
-                LocalFileOperation::OpenRoot,
-            )
-            .with_path(path.to_path_buf()));
+            return Err(
+                LocalFileError::new(LocalFileErrorKind::NotDirectory, LocalFileOperation::OpenRoot)
+                    .with_path(path.to_path_buf()),
+            );
         }
-        let authority = crate::authority::RootedAuthority::open(
-            path,
-            LocalSymlinkPolicy::FollowWithinScope,
-        )?;
+        let authority = crate::authority::RootedAuthority::open(path, LocalSymlinkPolicy::FollowWithinScope)?;
         let root = crate::rooted::Root::open(path).map_err(|error| {
-            LocalFileError::from_io(
-                LocalFileOperation::OpenRoot,
-                Some(path.to_path_buf()),
-                None,
-                error,
-            )
+            LocalFileError::from_io(LocalFileOperation::OpenRoot, Some(path.to_path_buf()), None, error)
         })?;
         let root = Arc::new(root);
         let limits = root
             .try_clone_authority()
             .map(|file| crate::capability::probe_limits(&file))
-            .unwrap_or_else(|_| {
-                LocalFileSystemLimits::new(
-                    crate::SizeLimit::Unknown,
-                    crate::SizeLimit::Unknown,
-                )
-            });
+            .unwrap_or_else(|_| LocalFileSystemLimits::new(crate::SizeLimit::Unknown, crate::SizeLimit::Unknown));
         Ok(Self {
             authority: Arc::new(crate::authority::Authority::Rooted(authority)),
             root,

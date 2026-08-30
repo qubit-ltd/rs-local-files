@@ -22,9 +22,7 @@ use crate::LocalFileError;
 ///
 /// A copy failure with empty partial statistics and unchanged state.
 #[inline]
-pub(crate) fn copy_failure_unchanged(
-    error: LocalFileError,
-) -> LocalCopyFailure {
+pub(crate) fn copy_failure_unchanged(error: LocalFileError) -> LocalCopyFailure {
     LocalCopyFailure::new(
         error,
         LocalCopyFailureState::Unchanged,
@@ -45,15 +43,6 @@ pub(crate) fn copy_failure_unchanged(
 ///
 /// A copy failure marked as published with the supplied statistics.
 #[inline]
-pub(crate) fn copy_failure_published(
-    error: LocalFileError,
-    partial_stats: LocalCopyStats,
-) -> LocalCopyFailure {
-    LocalCopyFailure::new(
-        error,
-        LocalCopyFailureState::Published,
-        partial_stats,
-        None,
-        None,
-    )
+pub(crate) fn copy_failure_published(error: LocalFileError, partial_stats: LocalCopyStats) -> LocalCopyFailure {
+    LocalCopyFailure::new(error, LocalCopyFailureState::Published, partial_stats, None, None)
 }

@@ -28,11 +28,7 @@ pub(crate) struct OpenedFile {
 
 impl OpenedFile {
     /// Creates an opened-file observation from one verified handle.
-    pub(super) const fn new(
-        file: File,
-        metadata: LocalFileMetadata,
-        identity: EntryIdentity,
-    ) -> Self {
+    pub(super) const fn new(file: File, metadata: LocalFileMetadata, identity: EntryIdentity) -> Self {
         Self {
             file,
             metadata,

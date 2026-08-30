@@ -25,10 +25,7 @@ fn test_local_copy_dir_error_exposes_parts_and_formats_cleanup_context() {
         LocalCopyDirStats::default(),
         io::Error::other("copy failed"),
     )
-    .with_staging_context(
-        "staging".into(),
-        Some(io::Error::other("cleanup failed")),
-    );
+    .with_staging_context("staging".into(), Some(io::Error::other("cleanup failed")));
     assert_eq!(error.stage(), LocalCopyDirStage::CopyFileContents);
     assert_eq!(error.source_path(), Path::new("source"));
     assert_eq!(error.destination_path(), Path::new("destination"));
@@ -39,14 +36,10 @@ fn test_local_copy_dir_error_exposes_parts_and_formats_cleanup_context() {
     assert_eq!(error.error().kind(), io::ErrorKind::Other);
     assert!(error.to_string().contains("staging cleanup"));
     assert!(error.source().is_some());
-    let (_, source, destination, _, staging, cleanup, native) =
-        error.into_parts();
+    let (_, source, destination, _, staging, cleanup, native) = error.into_parts();
     assert_eq!(source, PathBuf::from("source"));
     assert_eq!(destination, PathBuf::from("destination"));
-    assert_eq!(
-        staging.expect("staging path").as_ref(),
-        Path::new("staging")
-    );
+    assert_eq!(staging.expect("staging path").as_ref(), Path::new("staging"));
     assert!(cleanup.is_some());
     assert_eq!(native.kind(), io::ErrorKind::Other);
 }

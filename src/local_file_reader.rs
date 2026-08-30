@@ -78,19 +78,14 @@ impl Read for LocalFileReader {
     }
 
     /// Reads bytes into multiple buffers from the current offset.
-    fn read_vectored(
-        &mut self,
-        buffers: &mut [IoSliceMut<'_>],
-    ) -> io::Result<usize> {
+    fn read_vectored(&mut self, buffers: &mut [IoSliceMut<'_>]) -> io::Result<usize> {
         #[cfg(any(windows, feature = "internal-test-support"))]
         {
             let mut total = 0;
             for buffer in buffers {
                 #[cfg(feature = "internal-test-support")]
                 let result = if total > 0 {
-                    if crate::local::test_support_enabled(
-                        "local-file-reader-vectored-read-after-first",
-                    ) {
+                    if crate::local::test_support_enabled("local-file-reader-vectored-read-after-first") {
                         Err(io::Error::other("injected vectored read failure"))
                     } else {
                         self.read(buffer)
@@ -122,9 +117,7 @@ impl Seek for LocalFileReader {
     fn seek(&mut self, position: SeekFrom) -> io::Result<u64> {
         match &mut self.file {
             LocalFileReaderInner::Plain(file) => file.seek(position),
-            LocalFileReaderInner::Opened(file) => {
-                file.file_mut().seek(position)
-            }
+            LocalFileReaderInner::Opened(file) => file.file_mut().seek(position),
         }
     }
 }

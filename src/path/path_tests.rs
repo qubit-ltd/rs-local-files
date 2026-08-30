@@ -13,8 +13,7 @@ use super::RelativePath;
 /// Verifies relative path values preserve normal authority-relative paths.
 #[test]
 fn test_relative_path_parse_preserves_normal_components() {
-    let relative = RelativePath::parse(Path::new("reports/2026/a.txt"))
-        .expect("normal rooted path should parse");
+    let relative = RelativePath::parse(Path::new("reports/2026/a.txt")).expect("normal rooted path should parse");
 
     assert_eq!(Path::new("reports/2026/a.txt"), relative.as_path());
 }

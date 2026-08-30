@@ -42,12 +42,7 @@ impl LocalResourceLimitError {
     ///
     /// A structured resource-limit error.
     #[inline(always)]
-    pub const fn new(
-        resource: LocalResourceKind,
-        limit: usize,
-        remaining: usize,
-        requested: usize,
-    ) -> Self {
+    pub const fn new(resource: LocalResourceKind, limit: usize, remaining: usize, requested: usize) -> Self {
         Self {
             resource,
             limit,

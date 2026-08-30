@@ -174,17 +174,8 @@ impl<T> LocalPersistError<T> {
     /// }
     /// ```
     #[must_use = "the returned tuple retains the temporary resource and persistence context"]
-    pub fn into_parts(
-        self,
-    ) -> (
-        LocalFileError,
-        T,
-        PathBuf,
-        Option<PathBuf>,
-        LocalPersistStage,
-    ) {
-        let (error, resource, requested_target, resolved_target, stage, _) =
-            self.into_parts_with_state();
+    pub fn into_parts(self) -> (LocalFileError, T, PathBuf, Option<PathBuf>, LocalPersistStage) {
+        let (error, resource, requested_target, resolved_target, stage, _) = self.into_parts_with_state();
         (error, resource, requested_target, resolved_target, stage)
     }
 
@@ -213,14 +204,7 @@ impl<T> LocalPersistError<T> {
             stage,
             state,
         } = self;
-        (
-            *error,
-            *resource,
-            requested_target,
-            resolved_target,
-            stage,
-            state,
-        )
+        (*error, *resource, requested_target, resolved_target, stage, state)
     }
 }
 

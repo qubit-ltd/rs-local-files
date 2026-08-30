@@ -85,10 +85,7 @@ fn test_path_conversions_cover_rooted_binding_and_normal_components() {
             host.to_canonical_components(&absolute)
                 .expect("normal absolute components should encode"),
         );
-        assert!(
-            host.to_canonical_components(Path::new("/tmp/./coverage"))
-                .is_err()
-        );
+        assert!(host.to_canonical_components(Path::new("/tmp/./coverage")).is_err());
         assert_eq!(
             Path::new("/"),
             host.from_canonical_components(Vec::<&str>::new())

@@ -14,9 +14,7 @@ use qubit_local_files::LocalWalkLimits;
 #[test]
 fn cloned_filesystem_shares_authority_and_limits() {
     let root = tempfile::tempdir().expect("temporary root");
-    let limits = LocalWalkLimits::new()
-        .with_max_entries(32)
-        .with_max_open_handles(4);
+    let limits = LocalWalkLimits::new().with_max_entries(32).with_max_open_handles(4);
     let filesystem = LocalFileSystemBuilder::rooted(root.path())
         .walk_limits(limits)
         .build()

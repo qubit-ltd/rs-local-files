@@ -38,11 +38,7 @@ impl RootedParent {
     ///
     /// A rooted parent result retaining all required descriptors.
     #[inline]
-    pub(in crate::local) fn new(
-        directory: File,
-        final_name: CString,
-        parent_dirs_to_sync: Vec<File>,
-    ) -> Self {
+    pub(in crate::local) fn new(directory: File, final_name: CString, parent_dirs_to_sync: Vec<File>) -> Self {
         Self {
             directory,
             final_name,

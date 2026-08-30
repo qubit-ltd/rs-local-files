@@ -48,12 +48,7 @@ impl DirectoryCursor {
     /// native directory stream.
     pub(super) fn open(directory: File, path: PathBuf) -> LocalResult<Self> {
         let stream = Dir::read_from(&directory).map_err(|error| {
-            crate::LocalFileError::from_io(
-                LocalFileOperation::List,
-                Some(path.clone()),
-                None,
-                error.into(),
-            )
+            crate::LocalFileError::from_io(LocalFileOperation::List, Some(path.clone()), None, error.into())
         })?;
         Ok(Self {
             directory,
@@ -73,9 +68,7 @@ impl DirectoryCursor {
     ///
     /// Returns a list error when enumeration or no-follow child inspection
     /// fails.
-    pub(crate) fn next_entry(
-        &mut self,
-    ) -> LocalResult<Option<PlatformDirectoryEntry>> {
+    pub(crate) fn next_entry(&mut self) -> LocalResult<Option<PlatformDirectoryEntry>> {
         loop {
             let entry = match self.stream.next() {
                 Some(result) => result.map_err(|error| {
@@ -93,8 +86,7 @@ impl DirectoryCursor {
                 continue;
             }
             let name = OsString::from_vec(bytes.to_vec());
-            let c_name = CString::new(name.as_bytes())
-                .expect("native directory entries never contain NUL");
+            let c_name = CString::new(name.as_bytes()).expect("native directory entries never contain NUL");
             let status = stat_child(
                 &self.directory,
                 &c_name,

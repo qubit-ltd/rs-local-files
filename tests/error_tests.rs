@@ -44,10 +44,7 @@ fn test_local_file_error_from_io_preserves_context() {
 /// Verifies that requirement failures do not masquerade as ordinary I/O errors.
 #[test]
 fn test_local_file_error_requirement_not_met_is_structured() {
-    let error = LocalFileError::new(
-        LocalFileErrorKind::RequirementNotMet,
-        LocalFileOperation::OpenWriter,
-    );
+    let error = LocalFileError::new(LocalFileErrorKind::RequirementNotMet, LocalFileOperation::OpenWriter);
 
     assert_eq!(LocalFileErrorKind::RequirementNotMet, error.kind());
     assert_eq!(LocalFileOperation::OpenWriter, error.operation());
@@ -57,21 +54,11 @@ fn test_local_file_error_requirement_not_met_is_structured() {
 /// Verifies policy failures can expose a stable human-readable reason.
 #[test]
 fn test_local_file_error_reason_is_structured_and_displayed() {
-    let error = LocalFileError::new(
-        LocalFileErrorKind::RequirementNotMet,
-        LocalFileOperation::OpenWriter,
-    )
-    .with_reason("required atomic publication is unavailable");
+    let error = LocalFileError::new(LocalFileErrorKind::RequirementNotMet, LocalFileOperation::OpenWriter)
+        .with_reason("required atomic publication is unavailable");
 
-    assert_eq!(
-        Some("required atomic publication is unavailable"),
-        error.reason(),
-    );
-    assert!(
-        error
-            .to_string()
-            .contains("required atomic publication is unavailable")
-    );
+    assert_eq!(Some("required atomic publication is unavailable"), error.reason(),);
+    assert!(error.to_string().contains("required atomic publication is unavailable"));
 }
 
 /// Verifies conversion to a standard I/O error preserves the native error kind.
@@ -95,44 +82,20 @@ fn test_local_file_error_into_io_error_preserves_kind_and_context() {
 #[test]
 fn test_local_file_error_adapts_source_free_kinds_and_consumes_source() {
     for (error_kind, io_kind) in [
-        (
-            LocalFileErrorKind::AlreadyExists,
-            io::ErrorKind::AlreadyExists,
-        ),
+        (LocalFileErrorKind::AlreadyExists, io::ErrorKind::AlreadyExists),
         (LocalFileErrorKind::InvalidPath, io::ErrorKind::InvalidInput),
-        (
-            LocalFileErrorKind::InvalidOptions,
-            io::ErrorKind::InvalidInput,
-        ),
-        (
-            LocalFileErrorKind::InvalidState,
-            io::ErrorKind::InvalidInput,
-        ),
-        (
-            LocalFileErrorKind::NotDirectory,
-            io::ErrorKind::NotADirectory,
-        ),
+        (LocalFileErrorKind::InvalidOptions, io::ErrorKind::InvalidInput),
+        (LocalFileErrorKind::InvalidState, io::ErrorKind::InvalidInput),
+        (LocalFileErrorKind::NotDirectory, io::ErrorKind::NotADirectory),
         (LocalFileErrorKind::IsDirectory, io::ErrorKind::IsADirectory),
         (LocalFileErrorKind::NotFound, io::ErrorKind::NotFound),
-        (
-            LocalFileErrorKind::PermissionDenied,
-            io::ErrorKind::PermissionDenied,
-        ),
+        (LocalFileErrorKind::PermissionDenied, io::ErrorKind::PermissionDenied),
         (LocalFileErrorKind::ResourceLimit, io::ErrorKind::Other),
-        (
-            LocalFileErrorKind::DataCorruption,
-            io::ErrorKind::InvalidData,
-        ),
-        (
-            LocalFileErrorKind::RequirementNotMet,
-            io::ErrorKind::Unsupported,
-        ),
+        (LocalFileErrorKind::DataCorruption, io::ErrorKind::InvalidData),
+        (LocalFileErrorKind::RequirementNotMet, io::ErrorKind::Unsupported),
         (LocalFileErrorKind::Unsupported, io::ErrorKind::Unsupported),
         (LocalFileErrorKind::TypeConflict, io::ErrorKind::Other),
-        (
-            LocalFileErrorKind::PublicationIncomplete,
-            io::ErrorKind::Other,
-        ),
+        (LocalFileErrorKind::PublicationIncomplete, io::ErrorKind::Other),
         (LocalFileErrorKind::Indeterminate, io::ErrorKind::Other),
         (LocalFileErrorKind::Io, io::ErrorKind::Other),
     ] {
@@ -150,10 +113,7 @@ fn test_local_file_error_adapts_source_free_kinds_and_consumes_source() {
         None,
         io::Error::from(io::ErrorKind::NotFound),
     );
-    assert_eq!(
-        Some(io::ErrorKind::NotFound),
-        source.io_error().map(io::Error::kind)
-    );
+    assert_eq!(Some(io::ErrorKind::NotFound), source.io_error().map(io::Error::kind));
     assert_eq!(io::ErrorKind::NotFound, source.io_error_kind());
     assert!(source.into_source().is_some());
 }
@@ -162,12 +122,9 @@ fn test_local_file_error_adapts_source_free_kinds_and_consumes_source() {
 /// source-free semantics.
 #[test]
 fn test_local_file_error_exposes_optional_context_without_source() {
-    let error = LocalFileError::new(
-        LocalFileErrorKind::InvalidOptions,
-        LocalFileOperation::OpenWriter,
-    )
-    .with_path(Path::new("source").to_path_buf())
-    .with_target(Path::new("target").to_path_buf());
+    let error = LocalFileError::new(LocalFileErrorKind::InvalidOptions, LocalFileOperation::OpenWriter)
+        .with_path(Path::new("source").to_path_buf())
+        .with_target(Path::new("target").to_path_buf());
 
     assert_eq!(Some(Path::new("source")), error.path());
     assert_eq!(Some(Path::new("target")), error.target());
@@ -180,8 +137,7 @@ fn test_local_file_error_exposes_optional_context_without_source() {
 /// chain.
 #[test]
 fn test_local_resource_limit_error_preserves_budget_facts() {
-    let source =
-        LocalResourceLimitError::new(LocalResourceKind::OpenDirectory, 4, 0, 1);
+    let source = LocalResourceLimitError::new(LocalResourceKind::OpenDirectory, 4, 0, 1);
     assert_eq!(LocalResourceKind::OpenDirectory, source.resource());
     assert_eq!(4, source.limit());
     assert_eq!(0, source.remaining());
@@ -189,11 +145,8 @@ fn test_local_resource_limit_error_preserves_budget_facts() {
     assert!(source.to_string().contains("open directory"));
     assert!(std::error::Error::source(&source).is_none());
 
-    let error = LocalFileError::new(
-        LocalFileErrorKind::ResourceLimit,
-        LocalFileOperation::List,
-    )
-    .with_path(Path::new("root/child").to_path_buf());
+    let error = LocalFileError::new(LocalFileErrorKind::ResourceLimit, LocalFileOperation::List)
+        .with_path(Path::new("root/child").to_path_buf());
     assert_eq!(LocalFileErrorKind::ResourceLimit, error.kind());
     assert!(error.resource_limit_error().is_none());
     assert_eq!(io::ErrorKind::Other, error.into_io_error().kind());
@@ -208,10 +161,7 @@ fn test_resource_limit_error_formats_all_resource_kinds_and_chains() {
         (LocalResourceKind::OpenDirectory, "open directory"),
         (LocalResourceKind::Entry, "entry"),
         (LocalResourceKind::SeenNameBytes, "seen-name bytes"),
-        (
-            LocalResourceKind::PathComponentBytes,
-            "path-component bytes",
-        ),
+        (LocalResourceKind::PathComponentBytes, "path-component bytes"),
         (LocalResourceKind::CopiedBytes, "copied bytes"),
     ];
 
@@ -230,29 +180,13 @@ fn test_resource_limit_error_formats_all_resource_kinds_and_chains() {
 #[test]
 fn test_resource_limit_error_exposes_all_public_accessors() {
     let construct = std::hint::black_box(
-        LocalResourceLimitError::new
-            as fn(
-                LocalResourceKind,
-                usize,
-                usize,
-                usize,
-            ) -> LocalResourceLimitError,
+        LocalResourceLimitError::new as fn(LocalResourceKind, usize, usize, usize) -> LocalResourceLimitError,
     );
-    let resource = std::hint::black_box(
-        LocalResourceLimitError::resource
-            as fn(&LocalResourceLimitError) -> LocalResourceKind,
-    );
-    let limit = std::hint::black_box(
-        LocalResourceLimitError::limit as fn(&LocalResourceLimitError) -> usize,
-    );
-    let remaining = std::hint::black_box(
-        LocalResourceLimitError::remaining
-            as fn(&LocalResourceLimitError) -> usize,
-    );
-    let requested = std::hint::black_box(
-        LocalResourceLimitError::requested
-            as fn(&LocalResourceLimitError) -> usize,
-    );
+    let resource =
+        std::hint::black_box(LocalResourceLimitError::resource as fn(&LocalResourceLimitError) -> LocalResourceKind);
+    let limit = std::hint::black_box(LocalResourceLimitError::limit as fn(&LocalResourceLimitError) -> usize);
+    let remaining = std::hint::black_box(LocalResourceLimitError::remaining as fn(&LocalResourceLimitError) -> usize);
+    let requested = std::hint::black_box(LocalResourceLimitError::requested as fn(&LocalResourceLimitError) -> usize);
     let error = construct(LocalResourceKind::CopiedBytes, 10, 4, 6);
 
     assert_eq!(LocalResourceKind::CopiedBytes, resource(&error));

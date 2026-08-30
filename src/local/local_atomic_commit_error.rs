@@ -111,10 +111,7 @@ impl<T> LocalAtomicCommitError<T> {
     /// The finalized writer failure when recovery remained available, or the
     /// original terminal failure when no writer was retained.
     #[inline]
-    pub(crate) fn into_final_error_with<F>(
-        self,
-        finalize_writer: F,
-    ) -> LocalAtomicWriteError
+    pub(crate) fn into_final_error_with<F>(self, finalize_writer: F) -> LocalAtomicWriteError
     where
         F: FnOnce(T, LocalAtomicWriteError) -> LocalAtomicWriteError,
     {

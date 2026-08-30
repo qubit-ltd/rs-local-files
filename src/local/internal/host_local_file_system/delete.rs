@@ -46,29 +46,17 @@ impl HostLocalFileSystem {
         symlink_policy: LocalSymlinkPolicy,
     ) -> LocalResult<LocalDeleteOutcome> {
         let bound = resolve_host_path(path, symlink_policy, false)?;
-        let Some(metadata) = metadata_for_delete(
-            &bound,
-            options,
-            LocalFileOperation::DeleteFile,
-        )?
-        else {
+        let Some(metadata) = metadata_for_delete(&bound, options, LocalFileOperation::DeleteFile)? else {
             return Ok(LocalDeleteOutcome::new(false));
         };
         if metadata.file_type().is_dir() {
-            return Err(LocalFileError::new(
-                LocalFileErrorKind::TypeConflict,
-                LocalFileOperation::DeleteFile,
-            )
-            .with_path(bound));
+            return Err(
+                LocalFileError::new(LocalFileErrorKind::TypeConflict, LocalFileOperation::DeleteFile).with_path(bound),
+            );
         }
-        match test_io_fault("local-fs-delete-file-remove")
-            .map_or_else(|| fs::remove_file(&bound), Err)
-        {
+        match test_io_fault("local-fs-delete-file-remove").map_or_else(|| fs::remove_file(&bound), Err) {
             Ok(()) => Ok(LocalDeleteOutcome::new(true)),
-            Err(source)
-                if options.missing_ok()
-                    && source.kind() == io::ErrorKind::NotFound =>
-            {
+            Err(source) if options.missing_ok() && source.kind() == io::ErrorKind::NotFound => {
                 Ok(LocalDeleteOutcome::new(false))
             }
             Err(source) => Err(LocalFileError::from_io(
@@ -102,34 +90,23 @@ impl HostLocalFileSystem {
         symlink_policy: LocalSymlinkPolicy,
     ) -> LocalResult<LocalDeleteOutcome> {
         let bound = resolve_host_path(path, symlink_policy, false)?;
-        let Some(metadata) = metadata_for_delete(
-            &bound,
-            options,
-            LocalFileOperation::DeleteDirectory,
-        )?
-        else {
+        let Some(metadata) = metadata_for_delete(&bound, options, LocalFileOperation::DeleteDirectory)? else {
             return Ok(LocalDeleteOutcome::new(false));
         };
         if !metadata.file_type().is_dir() {
-            return Err(LocalFileError::new(
-                LocalFileErrorKind::TypeConflict,
-                LocalFileOperation::DeleteDirectory,
-            )
-            .with_path(bound));
+            return Err(
+                LocalFileError::new(LocalFileErrorKind::TypeConflict, LocalFileOperation::DeleteDirectory)
+                    .with_path(bound),
+            );
         }
         let result = if options.recursive() {
-            test_io_fault("local-fs-delete-directory-remove")
-                .map_or_else(|| fs::remove_dir_all(&bound), Err)
+            test_io_fault("local-fs-delete-directory-remove").map_or_else(|| fs::remove_dir_all(&bound), Err)
         } else {
-            test_io_fault("local-fs-delete-directory-remove")
-                .map_or_else(|| fs::remove_dir(&bound), Err)
+            test_io_fault("local-fs-delete-directory-remove").map_or_else(|| fs::remove_dir(&bound), Err)
         };
         match result {
             Ok(()) => Ok(LocalDeleteOutcome::new(true)),
-            Err(source)
-                if options.missing_ok()
-                    && source.kind() == io::ErrorKind::NotFound =>
-            {
+            Err(source) if options.missing_ok() && source.kind() == io::ErrorKind::NotFound => {
                 Ok(LocalDeleteOutcome::new(false))
             }
             Err(source) => Err(LocalFileError::from_io(
@@ -164,16 +141,9 @@ fn metadata_for_delete(
     options: &LocalDeleteOptions,
     operation: LocalFileOperation,
 ) -> LocalResult<Option<fs::Metadata>> {
-    match test_io_fault("local-fs-delete-metadata")
-        .map_or_else(|| fs::symlink_metadata(path), Err)
-    {
+    match test_io_fault("local-fs-delete-metadata").map_or_else(|| fs::symlink_metadata(path), Err) {
         Ok(metadata) => Ok(Some(metadata)),
-        Err(error)
-            if error.kind() == io::ErrorKind::NotFound
-                && options.missing_ok() =>
-        {
-            Ok(None)
-        }
+        Err(error) if error.kind() == io::ErrorKind::NotFound && options.missing_ok() => Ok(None),
         Err(error) => Err(LocalFileError::from_io(
             operation,
             Some(path.to_path_buf()),

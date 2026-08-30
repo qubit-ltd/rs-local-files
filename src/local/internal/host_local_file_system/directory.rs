@@ -46,28 +46,26 @@ impl HostLocalFileSystem {
         symlink_policy: LocalSymlinkPolicy,
     ) -> LocalResult<LocalCreateDirectoryOutcome> {
         let bound = resolve_host_path(path, symlink_policy, false)?;
-        let existing_directory =
-            match test_io_fault("local-fs-create-directory-exists")
-                .map_or_else(|| fs::symlink_metadata(&bound), Err)
-            {
-                Ok(metadata) if metadata.file_type().is_dir() => Some(true),
-                Ok(_) => {
-                    return Err(LocalFileError::new(
-                        LocalFileErrorKind::TypeConflict,
-                        LocalFileOperation::CreateDirectory,
-                    )
-                    .with_path(bound));
-                }
-                Err(error) if error.kind() == io::ErrorKind::NotFound => None,
-                Err(source) => {
-                    return Err(LocalFileError::from_io(
-                        LocalFileOperation::CreateDirectory,
-                        Some(bound),
-                        None,
-                        source,
-                    ));
-                }
-            };
+        let existing_directory = match test_io_fault("local-fs-create-directory-exists")
+            .map_or_else(|| fs::symlink_metadata(&bound), Err)
+        {
+            Ok(metadata) if metadata.file_type().is_dir() => Some(true),
+            Ok(_) => {
+                return Err(
+                    LocalFileError::new(LocalFileErrorKind::TypeConflict, LocalFileOperation::CreateDirectory)
+                        .with_path(bound),
+                );
+            }
+            Err(error) if error.kind() == io::ErrorKind::NotFound => None,
+            Err(source) => {
+                return Err(LocalFileError::from_io(
+                    LocalFileOperation::CreateDirectory,
+                    Some(bound),
+                    None,
+                    source,
+                ));
+            }
+        };
         let existed = existing_directory.is_some();
         if existed && !options.exists_ok() {
             return Err(LocalFileError::from_io(
@@ -90,9 +88,7 @@ impl HostLocalFileSystem {
             Err(source)
                 if options.exists_ok()
                     && source.kind() == io::ErrorKind::AlreadyExists
-                    && fs::symlink_metadata(&bound).is_ok_and(|metadata| {
-                        metadata.file_type().is_dir()
-                    }) =>
+                    && fs::symlink_metadata(&bound).is_ok_and(|metadata| metadata.file_type().is_dir()) =>
             {
                 Ok(LocalCreateDirectoryOutcome::new(false))
             }
