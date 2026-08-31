@@ -10,18 +10,18 @@ use std::fs;
 use std::io::Read;
 use std::io::Write;
 
-use qubit_local_files::LocalCopyOptions;
-use qubit_local_files::LocalCreateDirectoryOptions;
-use qubit_local_files::LocalDeleteOptions;
-use qubit_local_files::LocalFileKind;
 use qubit_local_files::LocalFileSystem;
-use qubit_local_files::LocalListOptions;
-use qubit_local_files::LocalReadOptions;
-use qubit_local_files::LocalRenameOptions;
-use qubit_local_files::LocalTempDirectoryOptions;
-use qubit_local_files::LocalTempFileOptions;
-use qubit_local_files::LocalWriteMode;
-use qubit_local_files::LocalWriteOptions;
+use qubit_local_files::options::LocalCopyOptions;
+use qubit_local_files::options::LocalCreateDirectoryOptions;
+use qubit_local_files::options::LocalDeleteOptions;
+use qubit_local_files::options::LocalListOptions;
+use qubit_local_files::options::LocalReadOptions;
+use qubit_local_files::options::LocalRenameOptions;
+use qubit_local_files::options::LocalTempDirectoryOptions;
+use qubit_local_files::options::LocalTempFileOptions;
+use qubit_local_files::options::LocalWriteMode;
+use qubit_local_files::options::LocalWriteOptions;
+use qubit_local_files::outcome::LocalFileKind;
 use tempfile::tempdir;
 
 /// Verifies the Host filesystem inspects the process-visible native namespace.

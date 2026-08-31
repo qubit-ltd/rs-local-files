@@ -32,6 +32,14 @@ pub enum LocalCopyDirStage {
     SynchronizeFile,
     /// Committing a staged file to its destination failed.
     CommitFile,
+    /// Symbolic-link publication failed and rollback proved no destination
+    /// change.
+    PublishSymlinkUnchanged,
+    /// Symbolic-link publication failed after changing the destination.
+    PublishSymlinkPartially,
+    /// Symbolic-link publication failed without proving the destination state.
+    #[cfg(windows)]
+    PublishSymlinkIndeterminate,
     /// Removing an uncommitted staging file after a skipped copy failed.
     CleanupTemporaryFile,
     /// Updating exact recursive-copy statistics overflowed.

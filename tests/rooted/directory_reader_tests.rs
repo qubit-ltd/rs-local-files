@@ -10,7 +10,7 @@ use std::fs;
 use std::path::Path;
 
 use qubit_local_files::LocalFileSystem;
-use qubit_local_files::LocalListOptions;
+use qubit_local_files::options::LocalListOptions;
 use tempfile::tempdir;
 
 /// Verifies Rooted listing lazily yields authorized direct children and then

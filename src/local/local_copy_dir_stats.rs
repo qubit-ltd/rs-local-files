@@ -36,6 +36,7 @@ pub struct LocalCopyDirStats {
 }
 
 impl Default for LocalCopyDirStats {
+    /// Creates empty progress with durability preserved until disproven.
     fn default() -> Self {
         Self {
             files: 0,

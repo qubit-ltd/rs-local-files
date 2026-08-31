@@ -11,9 +11,9 @@ use std::io::Write;
 use std::path::Path;
 
 use qubit_local_files::LocalFileSystem;
-use qubit_local_files::LocalWriteMode;
-use qubit_local_files::LocalWriteOptions;
-use qubit_local_files::LocalWriterState;
+use qubit_local_files::options::LocalWriteMode;
+use qubit_local_files::options::LocalWriteOptions;
+use qubit_local_files::outcome::LocalWriterState;
 use tempfile::tempdir;
 
 /// Verifies shared atomic publication transitions preserve Host replacement.

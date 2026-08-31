@@ -7,19 +7,20 @@
 // =============================================================================
 
 use std::fs;
+#[cfg(unix)]
 use std::path::Path;
 use std::path::PathBuf;
 
-use qubit_local_files::LocalDirectoryReopenPolicy;
-use qubit_local_files::LocalFileErrorKind;
-use qubit_local_files::LocalFileKind;
 use qubit_local_files::LocalFileSystem;
-use qubit_local_files::LocalListOptions;
-use qubit_local_files::LocalResourceKind;
-#[cfg(unix)]
-use qubit_local_files::LocalSymlinkPolicy;
+use qubit_local_files::error::LocalFileErrorKind;
+use qubit_local_files::error::LocalResourceKind;
+use qubit_local_files::options::LocalDirectoryReopenPolicy;
+use qubit_local_files::options::LocalListOptions;
 #[cfg(not(windows))]
-use qubit_local_files::LocalWalkErrorPolicy;
+use qubit_local_files::options::LocalWalkErrorPolicy;
+use qubit_local_files::outcome::LocalFileKind;
+#[cfg(unix)]
+use qubit_local_files::policy::LocalSymlinkPolicy;
 use tempfile::tempdir;
 
 /// Verifies lazy recursive traversal with stable root-relative paths.

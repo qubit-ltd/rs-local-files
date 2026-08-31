@@ -17,8 +17,6 @@ use std::os::fd::AsRawFd;
 use std::path::Path;
 use std::path::PathBuf;
 
-use log::warn;
-
 use super::atomic_file_install::install_new_atomic_file_at;
 use super::atomic_staging_state::AtomicStagingState;
 use crate::LocalAtomicDestinationState;
@@ -202,7 +200,7 @@ impl RootedStagedFile {
 
     /// Closes and removes the uncommitted staging entry.
     ///
-    /// Cleanup remains armed after failure so [`Drop`] can retry and report it.
+    /// Cleanup remains armed after failure so the caller can retry.
     ///
     /// # Errors
     ///
@@ -240,14 +238,6 @@ impl RootedStagedFile {
 impl Drop for RootedStagedFile {
     /// Closes and best-effort removes an uncommitted rooted staging entry.
     fn drop(&mut self) {
-        if let Err(error) = self.cleanup()
-            && self.name.is_some()
-        {
-            warn!(
-                "failed to remove uncommitted rooted staging file '{}': {}",
-                self.diagnostic_path.display(),
-                error,
-            );
-        }
+        let _ = self.cleanup();
     }
 }

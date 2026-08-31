@@ -5,14 +5,26 @@
 //
 //    Licensed under the Apache License, Version 2.0.
 // =============================================================================
-/// Immutable snapshot of filesystem protocols implemented by this build.
+/// Immutable snapshot of filesystem operation capabilities implemented by this
+/// build.
 ///
 /// These flags describe code paths available for the current target. They do
 /// not probe a particular mount and therefore do not promise that every
 /// filesystem used at runtime supports the corresponding native operation.
+///
+/// # Examples
+///
+/// ```
+/// use qubit_local_files::LocalFileSystem;
+///
+/// let filesystem = LocalFileSystem::host()?;
+/// let capabilities = filesystem.capabilities();
+/// let _supports_atomic_replace = capabilities.supports_atomic_replace();
+/// # Ok::<(), qubit_local_files::LocalFileError>(())
+/// ```
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 #[must_use]
-pub struct LocalFileSystemProtocols {
+pub struct LocalFileSystemCapabilities {
     /// Whether descriptor- or handle-relative rooted operations are compiled.
     rooted_operations: bool,
     /// Whether native atomic rename support is implemented.
@@ -27,8 +39,8 @@ pub struct LocalFileSystemProtocols {
     durable_file_copy: bool,
 }
 
-impl LocalFileSystemProtocols {
-    /// Detects protocols compiled for the current target platform.
+impl LocalFileSystemCapabilities {
+    /// Detects capabilities compiled for the current target platform.
     pub(crate) const fn detect_host() -> Self {
         Self {
             rooted_operations: cfg!(any(unix, windows)),
@@ -40,7 +52,7 @@ impl LocalFileSystemProtocols {
         }
     }
 
-    /// Detects protocols compiled for a rooted authority on this target.
+    /// Detects capabilities compiled for a rooted authority on this target.
     pub(crate) const fn detect_rooted() -> Self {
         Self {
             rooted_operations: cfg!(any(unix, windows)),

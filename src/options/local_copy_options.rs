@@ -23,7 +23,7 @@ use crate::policy::LocalSymlinkPolicy;
 /// # Examples
 ///
 /// ```
-/// use qubit_local_files::{LocalCopyConflictPolicy, LocalCopyOptions};
+/// use qubit_local_files::options::{LocalCopyConflictPolicy, LocalCopyOptions};
 ///
 /// let options = LocalCopyOptions::new()
 ///     .with_conflict(LocalCopyConflictPolicy::Overwrite)

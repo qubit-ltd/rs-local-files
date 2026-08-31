@@ -5,9 +5,8 @@
 //
 //    Licensed under the Apache License, Version 2.0.
 // =============================================================================
-//! Host-path binding and symbolic-link resolution.
+//! Host-path validation and symbolic-link resolution.
 
-use std::env;
 use std::fs;
 use std::io;
 use std::path::Path;
@@ -72,39 +71,32 @@ pub(crate) fn resolve_host_path(
     Ok(resolved)
 }
 
-/// Binds a relative Host path to one current-working-directory snapshot.
-///
-/// Absolute paths are returned unchanged.
+/// Validates one path already resolved by the public Host facade.
 ///
 /// # Parameters
 ///
-/// - `path`: Native absolute or relative Host path.
+/// - `path`: Native absolute Host path.
 ///
 /// # Returns
 ///
-/// An absolute path that remains stable if the process working directory
-/// changes.
+/// An owned copy of the validated absolute path.
 ///
 /// # Errors
 ///
-/// Returns `LocalFileError` when a Windows drive-relative prefix is supplied
-/// or the current directory cannot be read.
+/// Returns `LocalFileError` when the internal caller violates the facade's
+/// absolute-path invariant.
 pub(super) fn bind_host_path(path: &Path) -> LocalResult<PathBuf> {
-    if path.is_absolute() {
-        return Ok(path.to_path_buf());
-    }
-    if has_native_prefix(path) {
+    if !path.is_absolute() {
         return Err(
             LocalFileError::new(LocalFileErrorKind::InvalidPath, LocalFileOperation::BindPath)
+                .with_reason("Host backend paths must be resolved by the public filesystem facade")
                 .with_path(path.to_path_buf()),
         );
     }
-    current_directory_for_binding("local-path-bind-cwd")
-        .map(|current| current.join(path))
-        .map_err(|source| LocalFileError::from_io(LocalFileOperation::BindPath, Some(path.to_path_buf()), None, source))
+    Ok(path.to_path_buf())
 }
 
-/// Binds two Host paths using exactly one current-directory snapshot.
+/// Validates two paths already resolved by the public Host facade.
 ///
 /// # Parameters
 ///
@@ -112,87 +104,12 @@ pub(super) fn bind_host_path(path: &Path) -> LocalResult<PathBuf> {
 ///
 /// # Returns
 ///
-/// Absolute paths bound to the same Host namespace snapshot.
+/// Owned copies of both validated absolute paths.
 ///
 /// # Errors
 ///
-/// Returns `LocalFileError` when either input has a Windows drive-relative
-/// prefix or the current directory cannot be read.
+/// Returns `LocalFileError` when either internal input violates the facade's
+/// absolute-path invariant.
 pub(super) fn bind_host_paths(paths: [&Path; 2]) -> LocalResult<[PathBuf; 2]> {
-    if let Some(path) = paths
-        .iter()
-        .copied()
-        .find(|path| path.is_relative() && has_native_prefix(path))
-    {
-        return Err(
-            LocalFileError::new(LocalFileErrorKind::InvalidPath, LocalFileOperation::BindPath)
-                .with_path(path.to_path_buf()),
-        );
-    }
-    let current = if paths.iter().any(|path| path.is_relative()) {
-        Some(
-            current_directory_for_binding("local-paths-bind-cwd")
-                .map_err(|source| LocalFileError::from_io(LocalFileOperation::BindPath, None, None, source))?,
-        )
-    } else {
-        None
-    };
-    Ok(paths.map(|path| {
-        current
-            .as_ref()
-            .map_or_else(|| path.to_path_buf(), |directory| directory.join(path))
-    }))
-}
-
-/// Reports whether a Windows path carries a namespace prefix.
-#[cfg(windows)]
-#[must_use]
-fn has_native_prefix(path: &Path) -> bool {
-    matches!(path.components().next(), Some(std::path::Component::Prefix(_)))
-}
-
-/// Reports that Unix paths have no platform prefix component.
-#[cfg(not(windows))]
-#[must_use]
-const fn has_native_prefix(_path: &Path) -> bool {
-    false
-}
-
-/// Reads the Host current directory used to bind a relative path.
-///
-/// # Parameters
-///
-/// - `fault`: Test-support-only fault selector.
-///
-/// # Returns
-///
-/// The current directory snapshot.
-///
-/// # Errors
-///
-/// Returns the native current-directory error or an enabled test fault.
-#[cfg(feature = "internal-test-support")]
-fn current_directory_for_binding(fault: &str) -> io::Result<PathBuf> {
-    if crate::local::test_support_enabled(fault) {
-        return Err(crate::local::test_fault_error());
-    }
-    env::current_dir()
-}
-
-/// Reads the Host current directory used to bind a relative path.
-///
-/// # Parameters
-///
-/// - `fault`: Ignored when test support is disabled.
-///
-/// # Returns
-///
-/// The current directory snapshot.
-///
-/// # Errors
-///
-/// Returns the native current-directory error.
-#[cfg(not(feature = "internal-test-support"))]
-fn current_directory_for_binding(_fault: &str) -> io::Result<PathBuf> {
-    env::current_dir()
+    Ok([bind_host_path(paths[0])?, bind_host_path(paths[1])?])
 }

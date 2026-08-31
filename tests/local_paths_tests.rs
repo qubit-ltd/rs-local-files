@@ -12,12 +12,12 @@ use std::ffi::OsString;
 use std::path::Path;
 use std::path::PathBuf;
 
-use qubit_local_files::LocalFileErrorKind;
-use qubit_local_files::LocalFileErrorSource;
-use qubit_local_files::LocalFileNames;
-use qubit_local_files::LocalFileOperation;
-use qubit_local_files::LocalFileSystemScope;
-use qubit_local_files::LocalPaths;
+use qubit_local_files::error::LocalFileErrorKind;
+use qubit_local_files::error::LocalFileErrorSource;
+use qubit_local_files::error::LocalFileOperation;
+use qubit_local_files::path::LocalFileNames;
+use qubit_local_files::path::LocalFileSystemScope;
+use qubit_local_files::path::LocalPaths;
 
 /// Verifies rooted path objects preserve virtual namespace-absolute paths.
 #[test]

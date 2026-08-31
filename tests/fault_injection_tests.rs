@@ -12,8 +12,8 @@
 use std::io::ErrorKind;
 
 use qubit_local_files::LocalFileSystem;
-use qubit_local_files::TestFaultPlan;
-use qubit_local_files::TestFaultPoint;
+use qubit_local_files::test_support::TestFaultPlan;
+use qubit_local_files::test_support::TestFaultPoint;
 
 #[test]
 fn metadata_fault_does_not_cross_filesystem_instances() {

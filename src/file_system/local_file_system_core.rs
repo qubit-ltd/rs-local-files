@@ -7,16 +7,20 @@
 // =============================================================================
 //! Shared immutable state retained by filesystem clones.
 
+use crate::LocalFileSystemCapabilities;
 use crate::LocalFileSystemLimits;
-use crate::LocalFileSystemProtocols;
 use crate::local::LocalNamespace;
 
 /// Immutable state shared by all clones of a configured filesystem.
 #[derive(Debug)]
 pub(crate) struct LocalFileSystemCore {
+    /// Native Host or opened Rooted authority selected at construction.
     pub(crate) namespace: LocalNamespace,
-    pub(crate) protocols: LocalFileSystemProtocols,
+    /// Immutable target capability snapshot shared by clones.
+    pub(crate) capabilities: LocalFileSystemCapabilities,
+    /// Authority-level path-limit observation shared by clones.
     pub(crate) limits: LocalFileSystemLimits,
+    /// Instance-local deterministic faults available only to tests.
     #[cfg(feature = "test-support")]
     pub(crate) test_faults: Option<crate::TestFaultPlan>,
 }

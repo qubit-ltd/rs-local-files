@@ -9,19 +9,19 @@
 use std::fs;
 use std::path::PathBuf;
 
-use qubit_local_files::LocalAtomicityRequirement;
-use qubit_local_files::LocalCopyConflictPolicy;
-use qubit_local_files::LocalCopyFailureState;
-use qubit_local_files::LocalCopyMethod;
-use qubit_local_files::LocalCopyOptions;
-use qubit_local_files::LocalCopyStats;
-use qubit_local_files::LocalCopyTypeConflictPolicy;
-#[cfg(unix)]
-use qubit_local_files::LocalDurabilityRequirement;
-use qubit_local_files::LocalFileErrorKind;
 use qubit_local_files::LocalFileSystem;
+use qubit_local_files::error::LocalFileErrorKind;
+use qubit_local_files::options::LocalCopyConflictPolicy;
+use qubit_local_files::options::LocalCopyOptions;
+use qubit_local_files::options::LocalCopyTypeConflictPolicy;
 #[cfg(unix)]
-use qubit_local_files::LocalMetadataPreservePolicy;
+use qubit_local_files::options::LocalMetadataPreservePolicy;
+use qubit_local_files::outcome::LocalCopyFailureState;
+use qubit_local_files::outcome::LocalCopyMethod;
+use qubit_local_files::outcome::LocalCopyStats;
+use qubit_local_files::policy::LocalAtomicityRequirement;
+#[cfg(unix)]
+use qubit_local_files::policy::LocalDurabilityRequirement;
 use tempfile::tempdir;
 
 /// Verifies nested type conflicts honor `Skip` without traversing skipped

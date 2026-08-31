@@ -48,6 +48,8 @@ pub use internal::LocalAtomicPublicationMode;
 pub(crate) use internal::LocalNamespace;
 #[cfg(any(unix, windows))]
 pub(crate) use internal::RootedDirectoryReader;
+pub(crate) use internal::RootedSymlinkCreateError;
+pub(crate) use internal::RootedSymlinkCreateFailureState;
 pub(crate) use internal::copy_dir_all_with_paths;
 pub(crate) use internal::copy_dir_all_with_paths_scoped;
 pub(crate) use internal::copy_directory_guarantee_unavailable;
@@ -80,6 +82,10 @@ pub(crate) use internal::open_rooted_directory_reader;
 pub(crate) use internal::open_rooted_native_reader;
 #[cfg(any(unix, windows))]
 pub(crate) use internal::open_rooted_native_writer;
+#[cfg(windows)]
+pub(crate) use internal::probe_windows_limits;
+#[cfg(windows)]
+pub(crate) use internal::probe_windows_space;
 pub(crate) use internal::published_durability;
 #[cfg(any(unix, windows))]
 pub(crate) use internal::read_root_directory;

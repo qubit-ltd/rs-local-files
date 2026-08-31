@@ -126,14 +126,23 @@ fn remove_host_directory_tree(path: &Path) -> LocalResult<()> {
     while let Some(item) = work.pop() {
         match item {
             DeleteWork::Inspect(current) => {
-                let metadata =
-                    fs::symlink_metadata(&current).map_err(|error| delete_entry_error(&current, removed_any, error))?;
+                let metadata = match fs::symlink_metadata(&current) {
+                    Ok(metadata) => metadata,
+                    Err(error) => return Err(delete_entry_error(&current, removed_any, error)),
+                };
                 if metadata.file_type().is_dir() {
-                    let entries =
-                        fs::read_dir(&current).map_err(|error| delete_entry_error(&current, removed_any, error))?;
+                    let entries = match fs::read_dir(&current) {
+                        Ok(entries) => entries,
+                        Err(error) => return Err(delete_entry_error(&current, removed_any, error)),
+                    };
                     let mut children = Vec::new();
                     for entry in entries {
-                        let entry = entry.map_err(|error| delete_entry_error(&current, removed_any, error))?;
+                        let entry = match entry {
+                            Ok(entry) => entry,
+                            Err(error) => {
+                                return Err(delete_entry_error(&current, removed_any, error));
+                            }
+                        };
                         children.push(entry.path());
                     }
                     work.push(DeleteWork::RemoveDirectory(current));
@@ -142,14 +151,17 @@ fn remove_host_directory_tree(path: &Path) -> LocalResult<()> {
                     }
                 } else {
                     maybe_fail_host_delete(&current, removed_any)?;
-                    remove_host_non_directory(&current, &metadata)
-                        .map_err(|error| delete_entry_error(&current, removed_any, error))?;
+                    if let Err(error) = remove_host_non_directory(&current, &metadata) {
+                        return Err(delete_entry_error(&current, removed_any, error));
+                    }
                     removed_any = true;
                 }
             }
             DeleteWork::RemoveDirectory(current) => {
                 maybe_fail_host_delete(&current, removed_any)?;
-                fs::remove_dir(&current).map_err(|error| delete_entry_error(&current, removed_any, error))?;
+                if let Err(error) = fs::remove_dir(&current) {
+                    return Err(delete_entry_error(&current, removed_any, error));
+                }
                 removed_any = true;
             }
         }

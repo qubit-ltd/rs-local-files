@@ -54,8 +54,8 @@ pub(super) use crate::LocalFileError;
 pub(super) use crate::LocalFileErrorKind;
 pub(super) use crate::LocalFileOperation;
 pub(super) use crate::LocalFileReader;
+pub(super) use crate::LocalFileSystemCapabilities;
 pub(super) use crate::LocalFileSystemLimits;
-pub(super) use crate::LocalFileSystemProtocols;
 pub(super) use crate::LocalFileWriter;
 pub(super) use crate::LocalListOptions;
 pub(super) use crate::LocalReadOptions;
@@ -85,7 +85,7 @@ pub(crate) struct RootedLocalFileSystem {
     /// The single opened descriptor or handle authority.
     root: Arc<crate::rooted::Root>,
     /// Capability snapshot cached when the authority is opened.
-    capabilities: LocalFileSystemProtocols,
+    capabilities: LocalFileSystemCapabilities,
     /// Best-effort path limits captured from the opened root authority.
     limits: LocalFileSystemLimits,
 }
@@ -106,23 +106,32 @@ impl RootedLocalFileSystem {
     /// Returns `LocalFileError` when the directory cannot be bound and opened
     /// securely or the current platform lacks rooted primitives.
     pub fn open(path: &Path) -> LocalResult<Self> {
-        if std::fs::metadata(path).is_ok_and(|metadata| !metadata.is_dir()) {
-            return Err(
-                LocalFileError::new(LocalFileErrorKind::NotDirectory, LocalFileOperation::OpenRoot)
-                    .with_path(path.to_path_buf()),
-            );
-        }
-        let root = crate::rooted::Root::open(path).map_err(|error| {
-            LocalFileError::from_io(LocalFileOperation::OpenRoot, Some(path.to_path_buf()), None, error)
-        })?;
+        let root = match crate::rooted::Root::open(path) {
+            Ok(root) => root,
+            Err(error) => {
+                return Err(LocalFileError::from_io(
+                    LocalFileOperation::OpenRoot,
+                    Some(path.to_path_buf()),
+                    None,
+                    error,
+                ));
+            }
+        };
         let root = Arc::new(root);
-        let limits = root
+        let limits = match root
             .try_clone_authority()
-            .map(|file| crate::capability::probe_limits(&file))
-            .unwrap_or_else(|_| LocalFileSystemLimits::new(crate::SizeLimit::Unknown, crate::SizeLimit::Unknown));
+            .and_then(|file| crate::capability::probe_limits(&file))
+        {
+            Ok(limits) => limits,
+            Err(_) => LocalFileSystemLimits::new(
+                crate::SizeLimit::Unknown,
+                crate::SizeLimit::Unknown,
+                crate::LocalPathLengthUnit::native(),
+            ),
+        };
         Ok(Self {
             root,
-            capabilities: LocalFileSystemProtocols::detect_rooted(),
+            capabilities: LocalFileSystemCapabilities::detect_rooted(),
             limits,
         })
     }
@@ -134,9 +143,9 @@ impl RootedLocalFileSystem {
         self.root.path()
     }
 
-    /// Returns the native protocol snapshot cached for this opened authority.
+    /// Returns the native capability snapshot cached for this opened authority.
     #[inline]
-    pub const fn protocols(&self) -> LocalFileSystemProtocols {
+    pub const fn capabilities(&self) -> LocalFileSystemCapabilities {
         self.capabilities
     }
 
@@ -159,7 +168,10 @@ impl RootedLocalFileSystem {
         symlink_policy: LocalSymlinkPolicy,
     ) -> LocalResult<LocalFileSystemLimits> {
         let file = self.open_nearest_probe(path, symlink_policy)?;
-        Ok(crate::capability::probe_limits(&file))
+        match crate::capability::probe_limits(&file) {
+            Ok(limits) => Ok(limits),
+            Err(error) => Err(rooted_io_error(LocalFileOperation::Capabilities, path, error)),
+        }
     }
 
     /// Observes dynamic capacity through the nearest existing rooted entry or
@@ -170,35 +182,38 @@ impl RootedLocalFileSystem {
         symlink_policy: LocalSymlinkPolicy,
     ) -> LocalResult<crate::LocalFileSystemSpace> {
         let file = self.open_nearest_probe(path, symlink_policy)?;
-        Ok(crate::capability::probe_space(&file))
+        match crate::capability::probe_space(&file) {
+            Ok(space) => Ok(space),
+            Err(error) => Err(rooted_io_error(LocalFileOperation::Capabilities, path, error)),
+        }
     }
 
     /// Opens the nearest existing entry for a capability probe.
     fn open_nearest_probe(&self, path: &Path, symlink_policy: LocalSymlinkPolicy) -> LocalResult<std::fs::File> {
         if path.as_os_str().is_empty() {
-            return self
-                .root
-                .open_probe_root()
-                .map_err(|error| rooted_io_error(LocalFileOperation::Capabilities, path, error));
+            return match self.root.open_probe_root() {
+                Ok(file) => Ok(file),
+                Err(error) => Err(rooted_io_error(LocalFileOperation::Capabilities, path, error)),
+            };
         }
         let resolved = resolve_rooted_path(&self.root, path, symlink_policy, true, LocalFileOperation::Capabilities)?;
         let mut candidate = resolved.as_path().to_path_buf();
         loop {
             if candidate.as_os_str().is_empty() {
-                return self
-                    .root
-                    .open_probe_root()
-                    .map_err(|error| rooted_io_error(LocalFileOperation::Capabilities, path, error));
+                return match self.root.open_probe_root() {
+                    Ok(file) => Ok(file),
+                    Err(error) => Err(rooted_io_error(LocalFileOperation::Capabilities, path, error)),
+                };
             }
             let candidate_path = rooted_path(&candidate, LocalFileOperation::Capabilities)?;
             match self.root.open_probe_file(&candidate_path) {
                 Ok(file) => return Ok(file),
                 Err(error) if error.kind() == io::ErrorKind::NotFound => {
                     if !candidate.pop() {
-                        return self
-                            .root
-                            .open_probe_root()
-                            .map_err(|error| rooted_io_error(LocalFileOperation::Capabilities, path, error));
+                        return match self.root.open_probe_root() {
+                            Ok(file) => Ok(file),
+                            Err(error) => Err(rooted_io_error(LocalFileOperation::Capabilities, path, error)),
+                        };
                     }
                 }
                 Err(error) => {

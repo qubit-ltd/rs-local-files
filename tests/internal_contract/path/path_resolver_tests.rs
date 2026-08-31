@@ -9,9 +9,9 @@
 
 use std::path::Path;
 
-use qubit_local_files::LocalFileErrorKind;
-use qubit_local_files::LocalFileSystemScope;
-use qubit_local_files::internal_test_support::LocalPathResolver;
+use qubit_local_files::error::LocalFileErrorKind;
+use qubit_local_files::path::LocalFileSystemScope;
+use qubit_local_files::test_support::internal_contract::LocalPathResolver;
 
 #[test]
 fn rooted_paths_use_virtual_absolute_and_pwd_semantics() {

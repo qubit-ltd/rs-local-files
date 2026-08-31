@@ -14,14 +14,14 @@ use std::path::Path;
 use criterion::Criterion;
 use criterion::criterion_group;
 use criterion::criterion_main;
-use qubit_local_files::LocalCopyOptions;
-use qubit_local_files::LocalDirectoryReopenPolicy;
 use qubit_local_files::LocalFileSystem;
-use qubit_local_files::LocalListOptions;
-use qubit_local_files::LocalPathCodec;
-use qubit_local_files::LocalReadOptions;
-use qubit_local_files::LocalWriteMode;
-use qubit_local_files::LocalWriteOptions;
+use qubit_local_files::options::LocalCopyOptions;
+use qubit_local_files::options::LocalDirectoryReopenPolicy;
+use qubit_local_files::options::LocalListOptions;
+use qubit_local_files::options::LocalReadOptions;
+use qubit_local_files::options::LocalWriteMode;
+use qubit_local_files::options::LocalWriteOptions;
+use qubit_local_files::path::LocalPathCodec;
 use tempfile::tempdir;
 
 fn bench_path_codec(c: &mut Criterion) {

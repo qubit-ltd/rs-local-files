@@ -16,7 +16,7 @@
 ///
 /// ```compile_fail
 /// #![deny(unused_must_use)]
-/// use qubit_local_files::LocalPersistOptions;
+/// use qubit_local_files::options::LocalPersistOptions;
 ///
 /// LocalPersistOptions::new().with_overwrite();
 /// ```
@@ -24,7 +24,7 @@
 /// Configuration fields are private:
 ///
 /// ```compile_fail
-/// use qubit_local_files::LocalPersistOptions;
+/// use qubit_local_files::options::LocalPersistOptions;
 ///
 /// let mut options = LocalPersistOptions::default();
 /// options.overwrite = true;

@@ -11,15 +11,15 @@ use std::path::Path;
 use std::path::PathBuf;
 use std::time::Duration;
 
-use qubit_local_files::LocalFileErrorKind;
-use qubit_local_files::LocalFileKind;
 use qubit_local_files::LocalFileSystem;
-use qubit_local_files::LocalListOptions;
+use qubit_local_files::error::LocalFileErrorKind;
+use qubit_local_files::options::LocalListOptions;
+use qubit_local_files::options::LocalWalkErrorPolicy;
+use qubit_local_files::outcome::LocalFileKind;
 #[cfg(unix)]
-use qubit_local_files::LocalSymlinkPolicy;
-use qubit_local_files::LocalWalkErrorPolicy;
+use qubit_local_files::policy::LocalSymlinkPolicy;
 #[cfg(feature = "internal-test-support")]
-use qubit_local_files::install_test_fault;
+use qubit_local_files::test_support::install_test_fault;
 use tempfile::tempdir;
 
 /// Runs a test-support-only fault case in an isolated child test process.

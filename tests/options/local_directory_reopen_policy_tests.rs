@@ -7,7 +7,7 @@
 // =============================================================================
 //! Coverage for directory-reopen policies.
 
-use qubit_local_files::LocalDirectoryReopenPolicy;
+use qubit_local_files::options::LocalDirectoryReopenPolicy;
 
 /// Verifies the two directory-reopen policies remain distinct.
 #[test]

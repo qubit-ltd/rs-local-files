@@ -9,20 +9,26 @@
 
 use std::ffi::OsStr;
 
-use qubit_local_files::LocalFileErrorKind;
-use qubit_local_files::LocalFileNames;
-use qubit_local_files::LocalFileOperation;
-use qubit_local_files::LocalFileSystemLimits;
-use qubit_local_files::LocalResourceKind;
-use qubit_local_files::SizeLimit;
+use qubit_local_files::capability::LocalFileSystemLimits;
+use qubit_local_files::capability::LocalPathLengthUnit;
+use qubit_local_files::capability::SizeLimit;
+use qubit_local_files::error::LocalFileErrorKind;
+use qubit_local_files::error::LocalFileOperation;
+use qubit_local_files::error::LocalResourceKind;
+use qubit_local_files::path::LocalFileNames;
 
 /// Verifies a path-length limit preserves both its numeric bound and unit.
 #[test]
 fn test_local_file_system_limits_preserve_each_dimension() {
-    let limits = LocalFileSystemLimits::new(SizeLimit::Maximum(260), SizeLimit::Unknown);
+    let limits = LocalFileSystemLimits::new(
+        SizeLimit::Maximum(260),
+        SizeLimit::Unknown,
+        LocalPathLengthUnit::Utf16CodeUnits,
+    );
 
-    assert_eq!(SizeLimit::Maximum(260), limits.max_path_bytes());
-    assert_eq!(SizeLimit::Unknown, limits.max_file_name_bytes());
+    assert_eq!(SizeLimit::Maximum(260), limits.max_path_length());
+    assert_eq!(SizeLimit::Unknown, limits.max_component_length());
+    assert_eq!(LocalPathLengthUnit::Utf16CodeUnits, limits.length_unit());
 }
 
 /// Verifies zero cannot configure a component byte limit.

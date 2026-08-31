@@ -19,6 +19,7 @@ use super::internal::TestFault;
 /// FIFO fault plan scoped to one filesystem instance.
 #[derive(Clone, Debug)]
 pub struct TestFaultPlan {
+    /// Shared FIFO retaining the remaining deterministic fault sequence.
     faults: Arc<Mutex<VecDeque<TestFault>>>,
 }
 

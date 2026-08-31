@@ -9,7 +9,7 @@
 
 use std::fs;
 
-use qubit_local_files::LocalFileKind;
+use qubit_local_files::outcome::LocalFileKind;
 use qubit_local_files::LocalFileSystem;
 use tempfile::tempdir;
 

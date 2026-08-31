@@ -11,16 +11,16 @@ use std::fs;
 use std::io::IoSlice;
 use std::io::Write;
 
-use qubit_local_files::LocalDurabilityRequirement;
-use qubit_local_files::LocalFileErrorKind;
-use qubit_local_files::LocalFileOperation;
 use qubit_local_files::LocalFileSystem;
-use qubit_local_files::LocalWriteFailureState;
-use qubit_local_files::LocalWriteMode;
-use qubit_local_files::LocalWriteOptions;
-use qubit_local_files::LocalWriterState;
+use qubit_local_files::error::LocalFileErrorKind;
+use qubit_local_files::error::LocalFileOperation;
+use qubit_local_files::options::LocalWriteMode;
+use qubit_local_files::options::LocalWriteOptions;
+use qubit_local_files::outcome::LocalWriteFailureState;
+use qubit_local_files::outcome::LocalWriterState;
+use qubit_local_files::policy::LocalDurabilityRequirement;
 #[cfg(all(feature = "internal-test-support", unix))]
-use qubit_local_files::install_test_fault;
+use qubit_local_files::test_support::install_test_fault;
 use tempfile::tempdir;
 
 /// Verifies Host writers retain the caller-visible destination after resolving

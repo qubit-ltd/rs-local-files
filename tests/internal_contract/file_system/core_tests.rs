@@ -11,8 +11,8 @@ use std::io::ErrorKind;
 use std::path::Path;
 
 use qubit_local_files::LocalFileSystem;
-use qubit_local_files::TestFaultPlan;
-use qubit_local_files::TestFaultPoint;
+use qubit_local_files::test_support::TestFaultPlan;
+use qubit_local_files::test_support::TestFaultPoint;
 
 #[test]
 fn fault_plans_are_instance_local() {

@@ -9,17 +9,17 @@
 use std::fs;
 use std::path::Path;
 
-use qubit_local_files::LocalCopyOptions;
-use qubit_local_files::LocalFileErrorKind;
-use qubit_local_files::LocalFileKind;
-use qubit_local_files::LocalFileOperation;
 use qubit_local_files::LocalFileSystem;
-use qubit_local_files::LocalFileSystemScope;
-use qubit_local_files::LocalListOptions;
-use qubit_local_files::LocalSymlinkPolicy;
-use qubit_local_files::LocalWriteMode;
-use qubit_local_files::LocalWriteOptions;
-use qubit_local_files::LocalWriterState;
+use qubit_local_files::error::LocalFileErrorKind;
+use qubit_local_files::error::LocalFileOperation;
+use qubit_local_files::options::LocalCopyOptions;
+use qubit_local_files::options::LocalListOptions;
+use qubit_local_files::options::LocalWriteMode;
+use qubit_local_files::options::LocalWriteOptions;
+use qubit_local_files::outcome::LocalFileKind;
+use qubit_local_files::outcome::LocalWriterState;
+use qubit_local_files::path::LocalFileSystemScope;
+use qubit_local_files::policy::LocalSymlinkPolicy;
 use tempfile::tempdir;
 
 /// Verifies Host methods inspect the process-visible native namespace.
@@ -53,7 +53,7 @@ fn test_local_file_system_clone_preserves_host_configuration() {
     let clone = filesystem.clone();
 
     assert_eq!(filesystem.scope(), clone.scope());
-    assert_eq!(filesystem.protocols(), clone.protocols());
+    assert_eq!(filesystem.capabilities(), clone.capabilities());
     assert_eq!(filesystem.symlink_policy(), clone.symlink_policy());
 }
 
@@ -101,7 +101,7 @@ fn test_local_file_system_clone_preserves_rooted_authority() {
     let clone = filesystem.clone();
 
     assert_eq!(filesystem.scope(), clone.scope());
-    assert_eq!(filesystem.protocols(), clone.protocols());
+    assert_eq!(filesystem.capabilities(), clone.capabilities());
     assert_eq!(filesystem.symlink_policy(), clone.symlink_policy());
     assert_eq!(filesystem.diagnostic_root(), clone.diagnostic_root());
 }

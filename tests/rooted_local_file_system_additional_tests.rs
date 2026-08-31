@@ -12,24 +12,24 @@ use std::io::Read;
 use std::io::Write;
 use std::path::Path;
 
-#[cfg(not(windows))]
-use qubit_local_files::LocalAtomicityRequirement;
-#[cfg(not(windows))]
-use qubit_local_files::LocalCopyMethod;
-#[cfg(not(windows))]
-use qubit_local_files::LocalCopyOptions;
-use qubit_local_files::LocalCreateDirectoryOptions;
-use qubit_local_files::LocalDeleteOptions;
-use qubit_local_files::LocalFileErrorKind;
-use qubit_local_files::LocalFileKind;
 use qubit_local_files::LocalFileSystem;
-use qubit_local_files::LocalListOptions;
-use qubit_local_files::LocalReadOptions;
-use qubit_local_files::LocalTempFileOptions;
-use qubit_local_files::LocalWriteFailureState;
-use qubit_local_files::LocalWriteMode;
-use qubit_local_files::LocalWriteOptions;
-use qubit_local_files::LocalWriterState;
+use qubit_local_files::error::LocalFileErrorKind;
+#[cfg(not(windows))]
+use qubit_local_files::options::LocalCopyOptions;
+use qubit_local_files::options::LocalCreateDirectoryOptions;
+use qubit_local_files::options::LocalDeleteOptions;
+use qubit_local_files::options::LocalListOptions;
+use qubit_local_files::options::LocalReadOptions;
+use qubit_local_files::options::LocalTempFileOptions;
+use qubit_local_files::options::LocalWriteMode;
+use qubit_local_files::options::LocalWriteOptions;
+#[cfg(not(windows))]
+use qubit_local_files::outcome::LocalCopyMethod;
+use qubit_local_files::outcome::LocalFileKind;
+use qubit_local_files::outcome::LocalWriteFailureState;
+use qubit_local_files::outcome::LocalWriterState;
+#[cfg(not(windows))]
+use qubit_local_files::policy::LocalAtomicityRequirement;
 use tempfile::tempdir;
 
 /// Verifies an opened rooted authority supports a complete create, write, read,

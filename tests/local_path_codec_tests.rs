@@ -17,9 +17,9 @@ use proptest::prelude::prop;
 #[cfg(any(unix, windows))]
 use proptest::proptest;
 use qubit_local_files::LocalFileError;
-use qubit_local_files::LocalFileErrorSource;
-use qubit_local_files::LocalPathCodec;
-use qubit_local_files::LocalPathCodecError;
+use qubit_local_files::error::LocalFileErrorSource;
+use qubit_local_files::error::LocalPathCodecError;
+use qubit_local_files::path::LocalPathCodec;
 
 /// Verifies Unicode is retained while percent and controls use canonical
 /// uppercase escapes.

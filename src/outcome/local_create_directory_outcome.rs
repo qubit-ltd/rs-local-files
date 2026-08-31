@@ -28,7 +28,7 @@ impl LocalCreateDirectoryOutcome {
 
     /// Reports whether the requested directory was newly created.
     #[must_use]
-    #[inline(always)]
+    #[inline]
     pub const fn created(self) -> bool {
         self.created
     }

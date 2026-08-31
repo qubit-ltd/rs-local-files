@@ -8,8 +8,10 @@
 
 use std::path::Path;
 
-use qubit_local_files::LocalFileKind;
 use qubit_local_files::LocalFileSystem;
+#[cfg(windows)]
+use qubit_local_files::capability::LocalPathLengthUnit;
+use qubit_local_files::outcome::LocalFileKind;
 
 #[test]
 fn observes_root_limits_space_and_metadata() {
@@ -17,11 +19,19 @@ fn observes_root_limits_space_and_metadata() {
     let limits = filesystem
         .limits_at(Path::new("Cargo.toml"))
         .expect("limits are queryable");
-    let _ = (limits.max_file_name_bytes(), limits.max_path_bytes());
+    let _ = (limits.max_component_length(), limits.max_path_length());
+    #[cfg(windows)]
+    assert_eq!(LocalPathLengthUnit::Utf16CodeUnits, limits.length_unit());
     let space = filesystem
         .space_at(Path::new("Cargo.toml"))
         .expect("space is queryable");
     let _ = (space.available_bytes(), space.capacity_bytes(), space.free_bytes());
+    if let (Some(capacity), Some(free), Some(available)) =
+        (space.capacity_bytes(), space.free_bytes(), space.available_bytes())
+    {
+        assert!(capacity >= free);
+        assert!(free >= available);
+    }
     assert_eq!(
         filesystem.metadata(Path::new("")).expect("root metadata").kind(),
         LocalFileKind::Directory
