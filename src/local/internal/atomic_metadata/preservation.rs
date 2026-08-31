@@ -122,7 +122,12 @@ where
     }
 }
 
-/// Rejects strict metadata replacement on an unsupported Unix platform.
+/// Rejects strict metadata replacement on a target without a supported native
+/// metadata-preservation implementation.
+///
+/// # Errors
+///
+/// Always returns an `Unsupported` I/O error.
 #[cfg(not(any(
     target_os = "linux",
     target_os = "android",
