@@ -10,7 +10,7 @@
 // Internal publication policy is covered through public atomic-writer tests.
 /// Publication policy enforced by the final atomic installation step.
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
-pub(crate) enum LocalAtomicPublicationMode {
+pub enum LocalAtomicPublicationMode {
     /// Install only when the destination is still absent.
     CreateNew,
     /// Create an absent destination or replace the entry observed at open.

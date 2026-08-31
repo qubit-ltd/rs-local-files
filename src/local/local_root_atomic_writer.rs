@@ -51,10 +51,12 @@ use super::internal::preserve_atomic_metadata;
 use super::internal::recover_atomic_install_error;
 #[cfg(unix)]
 use super::internal::synchronize_staging_file;
-#[cfg(all(feature = "internal-test-support", unix))]
-use super::internal::test_support;
 #[cfg(unix)]
 use super::internal::verify_rooted_atomic_destination_identity;
+use super::local_root_atomic_writer_support::map_atomic_error;
+use super::local_root_atomic_writer_support::sync_rooted_parent_chain;
+#[cfg(not(unix))]
+use super::local_root_atomic_writer_support::unsupported_atomic_error;
 #[cfg(windows)]
 use super::open_rooted_native_writer;
 #[cfg(windows)]
@@ -90,7 +92,7 @@ use crate::write::OpenOptions as WriteOpenOptions;
 /// installed without replacing a concurrent creator.
 #[must_use = "rooted atomic writes have no effect unless committed"]
 #[derive(Debug)]
-pub(crate) struct LocalRootAtomicWriter {
+pub struct LocalRootAtomicWriter {
     /// Requested relative destination retained for structured errors.
     path: PathBuf,
     /// Optional limit for retrying a nonblocking destination open.
@@ -845,90 +847,4 @@ impl Write for LocalRootAtomicWriter {
             ))
         }
     }
-}
-
-/// Synchronizes the final parent and newly created ancestor entries.
-///
-/// # Parameters
-///
-/// * `parent` - Final destination parent descriptor.
-/// * `parent_dirs_to_sync` - Ancestor descriptors ordered shallowest to
-///   deepest.
-///
-/// # Errors
-///
-/// Returns the first directory synchronization error.
-#[cfg(unix)]
-fn sync_rooted_parent_chain(parent: &File, parent_dirs_to_sync: &[File]) -> io::Result<()> {
-    #[cfg(feature = "internal-test-support")]
-    if test_support::is_enabled("atomic-install-unlink-recover-sync")
-        || test_support::is_enabled("atomic-install-unlink-persistent-sync")
-        || test_support::is_enabled("atomic-install-unlink-indeterminate-sync")
-        || test_support::is_enabled("rooted-preferred-parent-sync")
-    {
-        return Err(crate::local::test_fault_error());
-    }
-    parent.sync_all()?;
-    for directory in parent_dirs_to_sync.iter().rev() {
-        directory.sync_all()?;
-    }
-    Ok(())
-}
-
-/// Adds structured atomic context to a native I/O result.
-///
-/// # Parameters
-///
-/// * `result` - Native result to map.
-/// * `stage` - Atomic stage associated with failure.
-/// * `path` - Requested relative destination.
-/// * `temporary_path` - Optional diagnostic staging path.
-/// * `destination_state` - Known destination state after the failure.
-///
-/// # Returns
-///
-/// The successful value or a structured atomic error.
-#[cfg(any(unix, windows))]
-#[inline]
-fn map_atomic_error<T>(
-    result: io::Result<T>,
-    stage: LocalAtomicWriteStage,
-    path: &Path,
-    temporary_path: Option<PathBuf>,
-    destination_state: LocalAtomicDestinationState,
-) -> Result<T, LocalAtomicWriteError> {
-    match result {
-        Ok(value) => Ok(value),
-        Err(source) => Err(LocalAtomicWriteError::new(
-            stage,
-            path.to_path_buf(),
-            temporary_path,
-            destination_state,
-            source,
-        )),
-    }
-}
-
-/// Creates a structured unsupported rooted atomic-write error.
-///
-/// # Parameters
-///
-/// * `path` - Requested relative destination.
-///
-/// # Returns
-///
-/// An unsupported error that never falls back to ordinary path authority.
-#[cfg(not(unix))]
-#[inline]
-fn unsupported_atomic_error(path: &Path) -> LocalAtomicWriteError {
-    LocalAtomicWriteError::new(
-        LocalAtomicWriteStage::PrepareParent,
-        path.to_path_buf(),
-        None,
-        LocalAtomicDestinationState::Unchanged,
-        io::Error::new(
-            io::ErrorKind::Unsupported,
-            "secure rooted atomic writes are unsupported on this target",
-        ),
-    )
 }

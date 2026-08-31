@@ -12,11 +12,12 @@ use std::io::Read;
 use std::io::Write;
 use std::path::Path;
 
+use qubit_local_files::internal_test_support::EntryKind;
+use qubit_local_files::internal_test_support::InternalReadOptions;
+use qubit_local_files::internal_test_support::InternalWriteOptions;
+use qubit_local_files::internal_test_support::LocalRelativePath;
+use qubit_local_files::internal_test_support::Root;
 use tempfile::tempdir;
-
-use crate::LocalRelativePath;
-use crate::rooted::EntryKind;
-use crate::rooted::Root;
 
 /// Verifies an opened root performs descriptor-relative namespace operations
 /// without consulting the diagnostic path after opening.
@@ -52,7 +53,7 @@ fn test_root_authority_manages_descendant_entries() {
     root.rename(&renamed, &file)
         .expect("file should rename with replacement");
     let mut reader = root
-        .open_reader(&file, &crate::read::OpenOptions::default())
+        .open_reader(&file, &InternalReadOptions::default())
         .expect("rooted reader should open");
     let mut content = String::new();
     reader
@@ -60,7 +61,7 @@ fn test_root_authority_manages_descendant_entries() {
         .expect("rooted reader should read fixture content");
     assert_eq!("payload", content);
     let appended = LocalRelativePath::new(Path::new("nested/appended")).expect("appended path should be valid");
-    root.open_writer(&appended, &crate::write::OpenOptions::default())
+    root.open_writer(&appended, &InternalWriteOptions::default())
         .expect("rooted writer should open")
         .write_all(b"appended")
         .expect("rooted writer should write fixture bytes");

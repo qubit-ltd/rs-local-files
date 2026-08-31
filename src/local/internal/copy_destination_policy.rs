@@ -28,7 +28,7 @@ use crate::LocalCopyTypeConflictPolicy;
 /// `Some` with the permitted action, or `None` when the selected policy
 /// requires a conflict failure.
 #[must_use]
-pub(crate) const fn decide_copy_destination(
+pub const fn decide_copy_destination(
     source_is_directory: bool,
     destination_is_directory: Option<bool>,
     conflict: LocalCopyConflictPolicy,

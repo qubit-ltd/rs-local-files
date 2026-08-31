@@ -26,7 +26,7 @@ use crate::LocalCopyDirStats;
 /// mutate the stage, paths, statistics, or retained errors independently.
 #[non_exhaustive]
 #[derive(Debug)]
-pub(crate) struct LocalCopyDirError {
+pub struct LocalCopyDirError {
     /// Stage at which the copy failed.
     stage: LocalCopyDirStage,
     /// Source entry being processed when the failure occurred.
@@ -62,7 +62,7 @@ impl LocalCopyDirError {
     ///
     /// # Returns
     /// New recursive-copy error retaining the native source error.
-    pub(crate) fn new(
+    pub fn new(
         stage: LocalCopyDirStage,
         source_path: PathBuf,
         destination_path: PathBuf,
@@ -84,7 +84,7 @@ impl LocalCopyDirError {
     ///
     /// # Returns
     /// Failed recursive-copy stage.
-    pub(crate) const fn stage(&self) -> LocalCopyDirStage {
+    pub const fn stage(&self) -> LocalCopyDirStage {
         self.stage
     }
 
@@ -93,7 +93,7 @@ impl LocalCopyDirError {
     /// # Returns
     /// Source path being processed.
     #[must_use]
-    pub(crate) fn source_path(&self) -> &Path {
+    pub fn source_path(&self) -> &Path {
         &self.source_path
     }
 
@@ -102,7 +102,7 @@ impl LocalCopyDirError {
     /// # Returns
     /// Destination path being processed.
     #[must_use]
-    pub(crate) fn destination_path(&self) -> &Path {
+    pub fn destination_path(&self) -> &Path {
         &self.destination_path
     }
 
@@ -110,7 +110,7 @@ impl LocalCopyDirError {
     ///
     /// # Returns
     /// Partial recursive-copy statistics.
-    pub(crate) const fn stats(&self) -> &LocalCopyDirStats {
+    pub const fn stats(&self) -> &LocalCopyDirStats {
         &self.stats
     }
 
@@ -118,7 +118,7 @@ impl LocalCopyDirError {
     ///
     /// # Returns
     /// Staging path retained for diagnostics.
-    pub(crate) fn temporary_path(&self) -> Option<&Path> {
+    pub fn temporary_path(&self) -> Option<&Path> {
         self.temporary_path.as_deref()
     }
 
@@ -126,7 +126,7 @@ impl LocalCopyDirError {
     ///
     /// # Returns
     /// Cleanup error without replacing the primary source error.
-    pub(crate) fn cleanup_error(&self) -> Option<&io::Error> {
+    pub fn cleanup_error(&self) -> Option<&io::Error> {
         self.cleanup_error.as_ref()
     }
 
@@ -135,7 +135,7 @@ impl LocalCopyDirError {
     /// # Returns
     /// Retained primary I/O error.
     #[must_use]
-    pub(crate) const fn error(&self) -> &io::Error {
+    pub const fn error(&self) -> &io::Error {
         &self.error
     }
 
@@ -144,7 +144,7 @@ impl LocalCopyDirError {
     /// # Returns
     /// Error kind reported by the retained source error.
     #[must_use]
-    pub(crate) fn kind(&self) -> io::ErrorKind {
+    pub fn kind(&self) -> io::ErrorKind {
         self.error.kind()
     }
 
@@ -155,7 +155,7 @@ impl LocalCopyDirError {
     /// The copy stage, source and destination paths, partial statistics,
     /// optional staging path, optional cleanup error, and primary I/O error.
     #[inline(never)]
-    pub(crate) fn into_parts(
+    pub fn into_parts(
         self,
     ) -> (
         LocalCopyDirStage,
@@ -186,7 +186,7 @@ impl LocalCopyDirError {
     /// # Returns
     /// This copy error enriched with staging cleanup context.
     #[inline]
-    pub(crate) fn with_staging_context(mut self, temporary_path: PathBuf, cleanup_error: Option<io::Error>) -> Self {
+    pub fn with_staging_context(mut self, temporary_path: PathBuf, cleanup_error: Option<io::Error>) -> Self {
         self.temporary_path = Some(temporary_path.into_boxed_path());
         self.cleanup_error = cleanup_error;
         self

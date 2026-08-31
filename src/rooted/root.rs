@@ -40,7 +40,7 @@ use crate::write;
 /// An opened directory descriptor that authorizes contained operations.
 #[must_use]
 #[derive(Debug)]
-pub(crate) struct Root {
+pub struct Root {
     /// Absolute path retained only for diagnostics.
     path: PathBuf,
     /// Open descriptor used as the sole descendant authority.
@@ -54,7 +54,7 @@ impl Root {
     ///
     /// # Errors
     /// Returns an I/O error when the directory cannot be securely opened.
-    pub(crate) fn open(path: &Path) -> Result<Self> {
+    pub fn open(path: &Path) -> Result<Self> {
         let path = std::path::absolute(path)?;
         #[cfg(any(unix, windows))]
         {
@@ -74,7 +74,7 @@ impl Root {
     /// Returns the diagnostic path captured when the root was opened.
     #[must_use]
     #[inline(always)]
-    pub(crate) fn path(&self) -> &Path {
+    pub fn path(&self) -> &Path {
         &self.path
     }
 
@@ -86,7 +86,7 @@ impl Root {
     /// already-opened authority handle.
     #[cfg(any(unix, windows))]
     #[inline]
-    pub(crate) fn try_clone_authority(&self) -> Result<File> {
+    pub fn try_clone_authority(&self) -> Result<File> {
         self.directory.try_clone()
     }
 
@@ -108,7 +108,7 @@ impl Root {
     /// destination policies reject an entry, traversal fails, or a staged file
     /// cannot be installed.
     #[inline(always)]
-    pub(crate) fn copy(
+    pub fn copy(
         &self,
         source: &path::Path,
         destination: &path::Path,
@@ -125,7 +125,7 @@ impl Root {
     /// # Errors
     /// Returns an I/O error when the operating system cannot inspect the open
     /// root descriptor.
-    pub(crate) fn metadata(&self) -> Result<Metadata> {
+    pub fn metadata(&self) -> Result<Metadata> {
         #[cfg(unix)]
         {
             self.directory
@@ -158,7 +158,7 @@ impl Root {
     /// # Errors
     /// Returns an I/O error when traversal cannot remain beneath the opened
     /// root or when the final entry cannot be inspected.
-    pub(crate) fn symlink_metadata(&self, path: &path::Path) -> Result<Metadata> {
+    pub fn symlink_metadata(&self, path: &path::Path) -> Result<Metadata> {
         #[cfg(feature = "internal-test-support")]
         if local::take_test_support_on_nth("rooted-copy-destination-metadata-native", 2) {
             return Err(crate::local::test_fault_error());
@@ -197,7 +197,7 @@ impl Root {
     ///
     /// Returns an I/O error when the final entry is not a readable symbolic
     /// link or descriptor-relative traversal fails.
-    pub(crate) fn read_link(&self, path: &path::Path) -> Result<PathBuf> {
+    pub fn read_link(&self, path: &path::Path) -> Result<PathBuf> {
         #[cfg(any(unix, windows))]
         {
             local::read_rooted_link(&self.directory, &self.path, path)
@@ -224,7 +224,7 @@ impl Root {
     ///
     /// Returns an I/O error when the platform rejects link creation or the
     /// destination cannot be addressed beneath this root.
-    pub(crate) fn create_symlink(&self, target: &Path, path: &path::Path, targets_directory: bool) -> Result<()> {
+    pub fn create_symlink(&self, target: &Path, path: &path::Path, targets_directory: bool) -> Result<()> {
         #[cfg(unix)]
         {
             let _ = targets_directory;
@@ -249,7 +249,7 @@ impl Root {
     /// Broken links and non-directory targets return `false`.
     #[cfg(windows)]
     #[must_use]
-    pub(crate) fn symlink_targets_directory(&self, path: &path::Path) -> bool {
+    pub fn symlink_targets_directory(&self, path: &path::Path) -> bool {
         local::rooted_link_targets_directory(&self.directory, path)
     }
 
@@ -258,7 +258,7 @@ impl Root {
     /// # Errors
     /// Returns an I/O error when the descriptor cannot be enumerated or an
     /// entry cannot be inspected without following links.
-    pub(crate) fn read_root_dir(&self) -> Result<Vec<Entry>> {
+    pub fn read_root_dir(&self) -> Result<Vec<Entry>> {
         #[cfg(unix)]
         {
             local::read_root_directory(&self.directory, &self.path).map(|entries| {
@@ -289,7 +289,7 @@ impl Root {
     /// # Errors
     ///
     /// Returns an I/O error when the root descriptor cannot be enumerated.
-    pub(crate) fn open_root_dir_reader(&self) -> Result<DirectoryReader> {
+    pub fn open_root_dir_reader(&self) -> Result<DirectoryReader> {
         DirectoryReader::open_root(&self.directory, &self.path)
     }
 
@@ -298,7 +298,7 @@ impl Root {
     /// # Errors
     /// Returns an I/O error when traversal cannot remain beneath the opened
     /// root or the directory cannot be enumerated.
-    pub(crate) fn read_dir(&self, path: &path::Path) -> Result<Vec<Entry>> {
+    pub fn read_dir(&self, path: &path::Path) -> Result<Vec<Entry>> {
         #[cfg(feature = "internal-test-support")]
         if local::test_support_enabled("rooted-copy-directory-read-native") {
             return Err(crate::local::test_fault_error());
@@ -335,7 +335,7 @@ impl Root {
     ///
     /// Returns an I/O error when secure traversal or directory enumeration
     /// cannot remain beneath this opened root.
-    pub(crate) fn open_dir_reader(&self, path: &path::Path) -> Result<DirectoryReader> {
+    pub fn open_dir_reader(&self, path: &path::Path) -> Result<DirectoryReader> {
         DirectoryReader::open_descendant(&self.directory, &self.path, path)
     }
 
@@ -344,7 +344,7 @@ impl Root {
     /// The returned handle remains relative to this opened root authority, so
     /// probing a descendant does not fall back to the diagnostic path.
     #[cfg(any(unix, windows))]
-    pub(crate) fn open_probe_file(&self, path: &path::Path) -> Result<File> {
+    pub fn open_probe_file(&self, path: &path::Path) -> Result<File> {
         if path.as_path().as_os_str().is_empty() {
             return self.try_clone_authority();
         }
@@ -360,14 +360,14 @@ impl Root {
 
     /// Duplicates the root authority for capability probing.
     #[cfg(any(unix, windows))]
-    pub(crate) fn open_probe_root(&self) -> Result<File> {
+    pub fn open_probe_root(&self) -> Result<File> {
         self.try_clone_authority()
     }
 
     /// Reports unsupported capability probing on platforms without rooted
     /// descriptor primitives.
     #[cfg(not(any(unix, windows)))]
-    pub(crate) fn open_probe_file(&self, _path: &path::Path) -> Result<File> {
+    pub fn open_probe_file(&self, _path: &path::Path) -> Result<File> {
         Err(Error::new(
             ErrorKind::Unsupported,
             "rooted capability probing is unsupported on this platform",
@@ -377,7 +377,7 @@ impl Root {
     /// Reports unsupported capability probing on platforms without rooted
     /// descriptor primitives.
     #[cfg(not(any(unix, windows)))]
-    pub(crate) fn open_probe_root(&self) -> Result<File> {
+    pub fn open_probe_root(&self) -> Result<File> {
         Err(Error::new(
             ErrorKind::Unsupported,
             "rooted capability probing is unsupported on this platform",
@@ -389,7 +389,7 @@ impl Root {
     /// # Errors
     /// Returns an I/O error when secure traversal or creation fails, including
     /// when the parent is missing or the destination already exists.
-    pub(crate) fn create_dir(&self, path: &path::Path) -> Result<()> {
+    pub fn create_dir(&self, path: &path::Path) -> Result<()> {
         #[cfg(feature = "internal-test-support")]
         if local::test_support_enabled("rooted-copy-directory-create-native") {
             return Err(crate::local::test_fault_error());
@@ -414,7 +414,7 @@ impl Root {
     ///
     /// # Errors
     /// Returns an I/O error when secure traversal or creation fails.
-    pub(crate) fn create_dir_all(&self, path: &path::Path) -> Result<()> {
+    pub fn create_dir_all(&self, path: &path::Path) -> Result<()> {
         #[cfg(any(unix, windows))]
         {
             local::create_rooted_directory(&self.directory, &self.path, path, true, true)
@@ -434,7 +434,7 @@ impl Root {
     /// # Errors
     /// Returns an I/O error when secure traversal fails or an existing entry
     /// is not a directory.
-    pub(crate) fn ensure_dir(&self, path: &path::Path) -> Result<()> {
+    pub fn ensure_dir(&self, path: &path::Path) -> Result<()> {
         #[cfg(any(unix, windows))]
         {
             local::create_rooted_directory(&self.directory, &self.path, path, false, true)
@@ -455,7 +455,7 @@ impl Root {
     /// Returns an I/O error when secure traversal fails or an existing entry
     /// in the chain is not a directory.
     #[inline]
-    pub(crate) fn ensure_dir_all(&self, path: &path::Path) -> Result<()> {
+    pub fn ensure_dir_all(&self, path: &path::Path) -> Result<()> {
         self.create_dir_all(path)
     }
 
@@ -463,7 +463,7 @@ impl Root {
     ///
     /// # Errors
     /// Returns an I/O error when secure traversal or removal fails.
-    pub(crate) fn remove_file(&self, path: &path::Path) -> Result<()> {
+    pub fn remove_file(&self, path: &path::Path) -> Result<()> {
         #[cfg(any(unix, windows))]
         {
             if self.symlink_metadata(path)?.kind() == super::EntryKind::Directory {
@@ -492,7 +492,7 @@ impl Root {
     ///
     /// # Errors
     /// Returns an I/O error when secure traversal or removal fails.
-    pub(crate) fn remove_empty_dir(&self, path: &path::Path) -> Result<()> {
+    pub fn remove_empty_dir(&self, path: &path::Path) -> Result<()> {
         #[cfg(any(unix, windows))]
         {
             if self.symlink_metadata(path)?.kind() != super::EntryKind::Directory {
@@ -517,7 +517,7 @@ impl Root {
     ///
     /// # Errors
     /// Returns an I/O error when secure traversal or removal fails.
-    pub(crate) fn remove_tree(&self, path: &path::Path) -> Result<()> {
+    pub fn remove_tree(&self, path: &path::Path) -> Result<()> {
         #[cfg(any(unix, windows))]
         {
             if self.symlink_metadata(path)?.kind() != super::EntryKind::Directory {
@@ -547,7 +547,7 @@ impl Root {
     /// # Errors
     /// Returns an I/O error when secure traversal or the requested atomic
     /// rename fails.
-    pub(crate) fn rename(&self, source: &path::Path, destination: &path::Path) -> Result<()> {
+    pub fn rename(&self, source: &path::Path, destination: &path::Path) -> Result<()> {
         #[cfg(any(unix, windows))]
         {
             local::rename_rooted_entry(&self.directory, &self.path, source, destination, true)
@@ -567,7 +567,7 @@ impl Root {
     /// # Errors
     /// Returns an I/O error when secure traversal fails, the destination
     /// exists, or the requested atomic rename is unavailable.
-    pub(crate) fn rename_without_replacing(&self, source: &path::Path, destination: &path::Path) -> Result<()> {
+    pub fn rename_without_replacing(&self, source: &path::Path, destination: &path::Path) -> Result<()> {
         #[cfg(any(unix, windows))]
         {
             local::rename_rooted_entry(&self.directory, &self.path, source, destination, false)
@@ -587,7 +587,7 @@ impl Root {
     /// # Errors
     /// Returns an I/O error when traversal cannot remain beneath the opened
     /// root or the permission update fails.
-    pub(crate) fn set_permissions(&self, path: &path::Path, permissions: Permissions) -> Result<()> {
+    pub fn set_permissions(&self, path: &path::Path, permissions: Permissions) -> Result<()> {
         #[cfg(unix)]
         {
             let current_mode = self
@@ -622,7 +622,7 @@ impl Root {
     /// # Errors
     /// Returns an I/O error when traversal escapes through a link or the file
     /// cannot be opened.
-    pub(crate) fn open_reader(&self, path: &path::Path, options: &read::OpenOptions) -> Result<File> {
+    pub fn open_reader(&self, path: &path::Path, options: &read::OpenOptions) -> Result<File> {
         #[cfg(feature = "internal-test-support")]
         if local::test_support_enabled("rooted-copy-source-open-native") {
             return Err(crate::local::test_fault_error());
@@ -646,7 +646,7 @@ impl Root {
     /// # Errors
     /// Returns an I/O error when traversal escapes through a link or the file
     /// cannot be opened with the requested mode.
-    pub(crate) fn open_writer(&self, path: &path::Path, options: &write::OpenOptions) -> Result<File> {
+    pub fn open_writer(&self, path: &path::Path, options: &write::OpenOptions) -> Result<File> {
         #[cfg(any(unix, windows))]
         {
             local::open_rooted_native_writer(&self.directory, &self.path, path, options)
@@ -675,7 +675,7 @@ impl Root {
     /// Returns a structured atomic-write error when parent preparation or
     /// staging-file creation fails.
     #[inline]
-    pub(crate) fn begin_atomic_write(&self, path: &path::Path) -> std::result::Result<Writer, LocalAtomicWriteError> {
+    pub fn begin_atomic_write(&self, path: &path::Path) -> std::result::Result<Writer, LocalAtomicWriteError> {
         self.begin_atomic_write_with_options(path, LocalAtomicWriteOptions::new().with_parent())
     }
 
@@ -692,7 +692,7 @@ impl Root {
     /// # Errors
     /// Returns a structured atomic-write error when parent preparation,
     /// destination inspection, or staging-file creation fails.
-    pub(crate) fn begin_atomic_write_with_options(
+    pub fn begin_atomic_write_with_options(
         &self,
         path: &path::Path,
         options: LocalAtomicWriteOptions,
@@ -736,7 +736,7 @@ impl Root {
     /// destination policies reject an entry, traversal fails, staging cannot
     /// be installed, or required synchronization fails.
     #[inline(always)]
-    pub(crate) fn copy_with_durability(
+    pub fn copy_with_durability(
         &self,
         source: &path::Path,
         destination: &path::Path,
@@ -752,7 +752,7 @@ impl Root {
     ///
     /// Returns an I/O error when secure parent traversal or directory
     /// synchronization is unavailable or fails.
-    pub(crate) fn sync_parent(&self, path: &path::Path) -> Result<()> {
+    pub fn sync_parent(&self, path: &path::Path) -> Result<()> {
         #[cfg(feature = "internal-test-support")]
         if local::test_support_enabled("rooted-copy-parent-sync")
             || local::test_support_enabled("rooted-rename-parent-sync")

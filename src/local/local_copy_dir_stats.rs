@@ -13,7 +13,7 @@
 #[non_exhaustive]
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 #[must_use]
-pub(crate) struct LocalCopyDirStats {
+pub struct LocalCopyDirStats {
     /// Number of regular files copied.
     pub files: u64,
 
@@ -30,9 +30,9 @@ pub(crate) struct LocalCopyDirStats {
     pub overwritten: u64,
     /// Whether a completed file publication required a prior directory
     /// removal.
-    pub(crate) non_atomic_publication: bool,
+    pub non_atomic_publication: bool,
     /// Whether every copied regular file was synchronized before publication.
-    pub(crate) files_durable: bool,
+    pub files_durable: bool,
 }
 
 impl Default for LocalCopyDirStats {
@@ -56,7 +56,7 @@ impl LocalCopyDirStats {
     /// # Returns
     /// Copied regular-file count.
     #[must_use]
-    pub(crate) const fn files(&self) -> u64 {
+    pub const fn files(&self) -> u64 {
         self.files
     }
 
@@ -65,7 +65,7 @@ impl LocalCopyDirStats {
     /// # Returns
     /// Created directory count.
     #[must_use]
-    pub(crate) const fn directories(&self) -> u64 {
+    pub const fn directories(&self) -> u64 {
         self.directories
     }
 
@@ -74,7 +74,7 @@ impl LocalCopyDirStats {
     /// # Returns
     /// Copied byte count.
     #[must_use]
-    pub(crate) const fn bytes(&self) -> u64 {
+    pub const fn bytes(&self) -> u64 {
         self.bytes
     }
 
@@ -83,27 +83,27 @@ impl LocalCopyDirStats {
     /// # Returns
     /// Skipped entry count.
     #[must_use]
-    pub(crate) const fn skipped(&self) -> u64 {
+    pub const fn skipped(&self) -> u64 {
         self.skipped
     }
 
     /// Returns the number of destination entries overwritten.
     #[must_use]
-    pub(crate) const fn overwritten(&self) -> u64 {
+    pub const fn overwritten(&self) -> u64 {
         self.overwritten
     }
 
     /// Reports whether every completed file publication was atomic.
     #[must_use]
     #[inline(always)]
-    pub(crate) const fn atomic_publication(&self) -> bool {
+    pub const fn atomic_publication(&self) -> bool {
         !self.non_atomic_publication
     }
 
     /// Reports whether every copied file was synchronized before publication.
     #[must_use]
     #[inline(always)]
-    pub(crate) const fn files_durable(&self) -> bool {
+    pub const fn files_durable(&self) -> bool {
         self.files_durable
     }
 }

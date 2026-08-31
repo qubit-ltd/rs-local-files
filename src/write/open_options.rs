@@ -17,7 +17,7 @@ use super::Mode;
 #[must_use = "write-open options have no effect unless they are used"]
 #[non_exhaustive]
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub(crate) struct OpenOptions {
+pub struct OpenOptions {
     /// Native creation and positioning behavior.
     mode: Mode,
     /// Whether missing parent directories are created before opening.
@@ -34,7 +34,7 @@ impl OpenOptions {
     ///
     /// # Returns
     /// Options without parent creation and with ordinary unbounded open retry.
-    pub(crate) const fn new(mode: Mode) -> Self {
+    pub const fn new(mode: Mode) -> Self {
         Self {
             mode,
             create_parents: false,
@@ -43,13 +43,13 @@ impl OpenOptions {
     }
 
     /// Returns the native write mode.
-    pub(crate) const fn mode(&self) -> Mode {
+    pub const fn mode(&self) -> Mode {
         self.mode
     }
 
     /// Returns whether missing parents are created.
     #[must_use]
-    pub(crate) const fn creates_parents(&self) -> bool {
+    pub const fn creates_parents(&self) -> bool {
         self.create_parents
     }
 
@@ -58,7 +58,7 @@ impl OpenOptions {
     /// # Returns
     /// Updated options.
     #[allow(dead_code)]
-    pub(crate) const fn with_parents(mut self) -> Self {
+    pub const fn with_parents(mut self) -> Self {
         self.create_parents = true;
         self
     }
@@ -68,7 +68,7 @@ impl OpenOptions {
     /// `None` preserves ordinary unbounded blocking-open behavior. `Some`
     /// bounds retries, and a zero duration reports the first conflict.
     #[must_use]
-    pub(crate) const fn open_retry_timeout(&self) -> Option<Duration> {
+    pub const fn open_retry_timeout(&self) -> Option<Duration> {
         self.open_retry_timeout
     }
 
@@ -79,7 +79,7 @@ impl OpenOptions {
     ///
     /// # Returns
     /// Updated options.
-    pub(crate) const fn with_open_retry_timeout(mut self, timeout: Duration) -> Self {
+    pub const fn with_open_retry_timeout(mut self, timeout: Duration) -> Self {
         self.open_retry_timeout = Some(timeout);
         self
     }

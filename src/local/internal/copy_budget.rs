@@ -25,7 +25,7 @@ use crate::LocalResourceLimitError;
 
 /// Mutable resource state shared by both native copy backends.
 #[derive(Debug)]
-pub(crate) struct CopyBudget {
+pub struct CopyBudget {
     /// Maximum number of source entries that may be processed.
     entries: Option<ResourceBudget<LocalResourceKind, usize>>,
 
@@ -48,7 +48,7 @@ impl CopyBudget {
     /// The public copy facade rejects unrepresentable deadlines before
     /// dispatching to either backend.
     #[must_use]
-    pub(crate) fn new(options: LocalCopyDirOptions) -> Self {
+    pub fn new(options: LocalCopyDirOptions) -> Self {
         Self {
             entries: options
                 .max_entries()
@@ -72,7 +72,7 @@ impl CopyBudget {
     ///
     /// Returns [`io::ErrorKind::TimedOut`] once the deadline is reached.
     #[inline]
-    pub(crate) fn check_deadline(&self) -> io::Result<()> {
+    pub fn check_deadline(&self) -> io::Result<()> {
         if self
             .deadline
             .is_some_and(|(started, duration)| started.elapsed() >= duration)
@@ -93,7 +93,7 @@ impl CopyBudget {
     /// Returns a structured resource-limit error when `depth` exceeds the
     /// configured maximum.
     #[inline]
-    pub(crate) fn check_depth(&self, depth: usize) -> io::Result<()> {
+    pub fn check_depth(&self, depth: usize) -> io::Result<()> {
         if let Some(limit) = self.max_depth
             && depth > limit
         {
@@ -114,7 +114,7 @@ impl CopyBudget {
     /// Returns a structured resource-limit error when no entry capacity
     /// remains.
     #[inline]
-    pub(crate) fn charge_entry(&mut self) -> io::Result<()> {
+    pub fn charge_entry(&mut self) -> io::Result<()> {
         if let Some(budget) = self.entries.as_mut() {
             budget.try_consume(1).map_err(usize_budget_error)?;
         }
@@ -134,7 +134,7 @@ impl CopyBudget {
     /// Returns a structured resource-limit error when the directory capacity
     /// is exhausted.
     #[inline]
-    pub(crate) fn acquire_directory(&self) -> io::Result<Option<ManagedResourcePermit<LocalResourceKind, usize>>> {
+    pub fn acquire_directory(&self) -> io::Result<Option<ManagedResourcePermit<LocalResourceKind, usize>>> {
         self.open_directories
             .as_ref()
             .map(|pool| pool.try_acquire(1).map_err(usize_budget_error))
@@ -159,7 +159,7 @@ impl CopyBudget {
     ///
     /// Returns an I/O error from either descriptor, a deadline error, or a
     /// structured copied-byte resource-limit error.
-    pub(crate) fn copy<R, W>(&mut self, reader: &mut R, writer: &mut W) -> io::Result<u64>
+    pub fn copy<R, W>(&mut self, reader: &mut R, writer: &mut W) -> io::Result<u64>
     where
         R: Read + ?Sized,
         W: Write + ?Sized,

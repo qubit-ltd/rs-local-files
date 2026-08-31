@@ -33,7 +33,7 @@ doctest = true
 [features]
 default = []
 test-support = []
-internal-test-support = []
+internal-test-support = ["test-support"]
 
 [dependencies]
 qubit-budget = { version = "0.4", path = "../rs-budget" }

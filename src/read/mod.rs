@@ -9,4 +9,4 @@
 
 mod open_options;
 
-pub(crate) use open_options::OpenOptions;
+pub use open_options::OpenOptions;

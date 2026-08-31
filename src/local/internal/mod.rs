@@ -83,9 +83,9 @@ pub(crate) use atomic_metadata::preserve_atomic_metadata;
 #[cfg(unix)]
 pub(crate) use atomic_namespace_race::verify_atomic_destination_identity;
 pub(crate) use atomic_staging_state::AtomicStagingState;
-pub(crate) use copy_budget::CopyBudget;
-pub(crate) use copy_destination_action::CopyDestinationAction;
-pub(crate) use copy_destination_policy::decide_copy_destination;
+pub use copy_budget::CopyBudget;
+pub use copy_destination_action::CopyDestinationAction;
+pub use copy_destination_policy::decide_copy_destination;
 pub(crate) use copy_dir::copy_dir_all_with_paths;
 pub(crate) use copy_dir::copy_dir_all_with_paths_scoped;
 pub(crate) use copy_dir::copy_file_with_options;
@@ -104,7 +104,7 @@ pub(crate) use file_name_generation::try_random_file_name;
 pub(crate) use host_local_file_system::HostLocalFileSystem;
 pub(crate) use host_local_file_system::internal_copy_options;
 pub(crate) use host_local_file_system::resolve_host_path;
-pub(crate) use local_atomic_publication_mode::LocalAtomicPublicationMode;
+pub use local_atomic_publication_mode::LocalAtomicPublicationMode;
 pub(crate) use local_namespace::LocalNamespace;
 #[cfg(unix)]
 pub(crate) use opened_atomic_destination::OpenedAtomicDestination;

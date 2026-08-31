@@ -28,7 +28,7 @@ use crate::LocalAtomicWriteError;
 /// * `T` - Type of staging writer retained for recovery.
 #[non_exhaustive]
 #[derive(Debug)]
-pub(crate) struct LocalAtomicCommitError<T> {
+pub struct LocalAtomicCommitError<T> {
     /// Structured atomic-write failure.
     error: LocalAtomicWriteError,
     /// Writer retained after a recoverable pre-installation failure.
@@ -48,7 +48,7 @@ impl<T> LocalAtomicCommitError<T> {
     ///
     /// A commit error preserving the failure and optional writer.
     #[inline]
-    pub(crate) fn new(error: LocalAtomicWriteError, writer: Option<T>) -> Self {
+    pub fn new(error: LocalAtomicWriteError, writer: Option<T>) -> Self {
         Self {
             error,
             writer: writer.map(Box::new),
@@ -61,7 +61,7 @@ impl<T> LocalAtomicCommitError<T> {
     ///
     /// The failure produced by the commit attempt.
     #[must_use]
-    pub(crate) const fn error(&self) -> &LocalAtomicWriteError {
+    pub const fn error(&self) -> &LocalAtomicWriteError {
         &self.error
     }
 
@@ -72,7 +72,7 @@ impl<T> LocalAtomicCommitError<T> {
     /// `Some` for a pre-installation failure that permits retry or explicit
     /// abort, or `None` after installation began.
     #[must_use]
-    pub(crate) fn writer(&self) -> Option<&T> {
+    pub fn writer(&self) -> Option<&T> {
         self.writer.as_deref()
     }
 
@@ -83,7 +83,7 @@ impl<T> LocalAtomicCommitError<T> {
     /// `Some` for a pre-installation failure that permits additional staging
     /// writes, retry, or explicit abort, or `None` after installation began.
     #[must_use]
-    pub(crate) fn writer_mut(&mut self) -> Option<&mut T> {
+    pub fn writer_mut(&mut self) -> Option<&mut T> {
         self.writer.as_deref_mut()
     }
 
@@ -94,7 +94,7 @@ impl<T> LocalAtomicCommitError<T> {
     /// The atomic-write failure and the writer retained for recovery, when
     /// recovery remains safe.
     #[must_use = "the returned writer may require retry or explicit abort"]
-    pub(crate) fn into_parts(self) -> (LocalAtomicWriteError, Option<T>) {
+    pub fn into_parts(self) -> (LocalAtomicWriteError, Option<T>) {
         let Self { error, writer } = self;
         (error, writer.map(|writer| *writer))
     }
@@ -111,7 +111,7 @@ impl<T> LocalAtomicCommitError<T> {
     /// The finalized writer failure when recovery remained available, or the
     /// original terminal failure when no writer was retained.
     #[inline]
-    pub(crate) fn into_final_error_with<F>(self, finalize_writer: F) -> LocalAtomicWriteError
+    pub fn into_final_error_with<F>(self, finalize_writer: F) -> LocalAtomicWriteError
     where
         F: FnOnce(T, LocalAtomicWriteError) -> LocalAtomicWriteError,
     {

@@ -31,6 +31,7 @@ mod local_file_permissions;
 mod local_file_reader;
 mod local_file_system;
 mod local_file_system_scope;
+mod local_file_system_validation;
 mod options;
 mod outcome;
 mod path;
@@ -44,8 +45,34 @@ mod walk;
 mod write;
 mod writer;
 
-#[cfg(test)]
-mod tests;
+/// Internal contracts used by the integration-test suite.
+#[cfg(feature = "internal-test-support")]
+#[doc(hidden)]
+pub mod internal_test_support {
+    pub use crate::local::CopyBudget;
+    pub use crate::local::CopyDestinationAction;
+    pub use crate::local::LocalAtomicCommitError;
+    pub use crate::local::LocalAtomicDestinationState;
+    pub use crate::local::LocalAtomicPublicationMode;
+    pub use crate::local::LocalAtomicWriteError;
+    pub use crate::local::LocalAtomicWriteOptions;
+    pub use crate::local::LocalAtomicWriteStage;
+    pub use crate::local::LocalCopyDirError;
+    pub use crate::local::LocalCopyDirOptions;
+    pub use crate::local::LocalCopyDirStage;
+    pub use crate::local::LocalCopyDirStats;
+    pub use crate::local::LocalRelativePath;
+    pub use crate::local::decide_copy_destination;
+    pub use crate::path::LocalNamespacePath;
+    pub use crate::path::LocalPathResolver;
+    pub use crate::read::OpenOptions as InternalReadOptions;
+    pub use crate::rooted::EntryKind;
+    pub use crate::rooted::Metadata;
+    pub use crate::rooted::Permissions;
+    pub use crate::rooted::Root;
+    pub use crate::write::Mode;
+    pub use crate::write::OpenOptions as InternalWriteOptions;
+}
 
 pub use capability::LocalFileSystemLimits;
 pub use capability::LocalFileSystemProtocols;
@@ -118,6 +145,7 @@ pub use outcome::LocalRenameOutcome;
 pub use outcome::LocalRenameResult;
 pub use outcome::LocalWritePublicationMethod;
 pub use path::LocalFileNames;
+pub(crate) use path::LocalNamespacePath;
 pub use path::LocalPathCodec;
 pub use path::LocalPaths;
 pub use policy::LocalAtomicityRequirement;
@@ -125,7 +153,11 @@ pub use policy::LocalDurabilityRequirement;
 pub use policy::LocalSymlinkPolicy;
 pub use temp::LocalTempDirectory;
 pub use temp::LocalTempFile;
+#[cfg(feature = "test-support")]
+#[doc(hidden)]
 pub use test_support::TestFaultPlan;
+#[cfg(feature = "test-support")]
+#[doc(hidden)]
 pub use test_support::TestFaultPoint;
 pub use walk::LocalDirectoryEntry;
 pub use walk::LocalDirectoryWalker;
