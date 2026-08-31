@@ -30,9 +30,9 @@ through a writer, commits it, and reads the published result.
 ```rust
 use std::io::{Read, Write};
 
-use qubit_local_files::{
-    LocalFileSystem, LocalWriteMode, LocalWriteOptions, LocalWriterState,
-};
+use qubit_local_files::LocalFileSystem;
+use qubit_local_files::options::{LocalWriteMode, LocalWriteOptions};
+use qubit_local_files::outcome::LocalWriterState;
 
 let mut filesystem = LocalFileSystem::host()?;
 filesystem.set_default_write_options(LocalWriteOptions::new(
@@ -59,11 +59,11 @@ assert_eq!(content, r#"{"version":1}"#);
 | --- | --- |
 | `LocalFileSystem::host()` | A reusable service over the process-visible host namespace. |
 | `LocalFileSystem::rooted(root)` | The same operations beneath one opened directory authority. |
-| `LocalFileSystemScope` | Whether an instance interprets paths as host paths or rooted descendants. |
+| `path::LocalFileSystemScope` | Whether an instance interprets paths as host paths or rooted descendants. |
 | `LocalFileWriter` | Explicit commit or abort after staged publication. |
 | `LocalDirectoryWalker` | Lazy directory enumeration with fixed creation-time policy. |
 | `LocalTempFile` / `LocalTempDirectory` | Owned cleanup, `keep`, and persistence operations. |
-| `LocalFileNames` / `LocalPaths` | Native filename and lexical-path helpers without lossy UTF-8 conversion. |
+| `path::LocalFileNames` / `path::LocalPaths` | Native filename and lexical-path helpers without lossy UTF-8 conversion. |
 
 `LocalFileSystem` is a stateful instance API. Each instance owns its current
 directory, symbolic-link policy, and nine operation-default Options values.
@@ -85,7 +85,7 @@ operation-specific final-link semantics.
 
 Temporary-resource cleanup is ownership-aware, not a synchronization boundary.
 Call `cleanup()` when the caller must observe cleanup failures; dropping a
-resource is only a best-effort fallback.
+resource is a silent best-effort fallback and never reports or logs failure.
 Before deleting, a guard checks that the path still has the identity captured
 at creation, so ordinary replacement is rejected. The identity check and path
 deletion are separate operating-system operations, however. If an untrusted
@@ -116,6 +116,9 @@ rejects that configuration. Renaming the diagnostic root path later does not
 redirect the opened authority. Public resource and error paths use reusable
 namespace-absolute identities; physical paths, when available, are exposed
 only as optional diagnostics.
+On Windows, Rooted link inspection, link-kind detection, and link creation are
+all relative to opened handles. Copying a dangling link, or a link whose target
+is outside the Rooted authority, does not inspect or open that target.
 
 Copy chooses file or directory behavior from source metadata. Copy and rename
 failures retain the strongest proven publication state, so callers must inspect
@@ -136,12 +139,16 @@ atomicity.
 
 Linux, Windows, and macOS behavior is runtime-tested. FreeBSD and Android
 configuration paths are compile-checked only; this crate makes no runtime
-guarantee for those targets. Capability snapshots report whether this target
-implements each complete operation protocol; they do not probe a particular
+guarantee for those targets. `capabilities()` reports whether this build
+implements each complete operation protocol; it does not probe a particular
 runtime filesystem or claim that the underlying hardware has persisted data.
 Required atomicity or durability is rejected before namespace changes when the
 protocol cannot be met.
-Windows Host path conversion intentionally does not support UNC paths.
+Path-limit observations always include a unit: Unix reports bytes and Windows
+reports UTF-16 code units. Windows whole-path limits remain `Unknown` when the
+handle-relative namespace has no defensible fixed bound. `space_at()` and
+component limits are queried from the selected filesystem handle. Windows Host
+path conversion intentionally does not support UNC paths.
 
 ## Testing
 

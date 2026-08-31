@@ -32,7 +32,8 @@ Options。调用方可以通过 `set_default_*_options` 一次配置，然后使
 修改后再传入。
 
 ```rust,no_run
-use qubit_local_files::{LocalFileSystem, LocalListOptions};
+use qubit_local_files::LocalFileSystem;
+use qubit_local_files::options::LocalListOptions;
 
 let mut filesystem = LocalFileSystem::rooted(std::path::Path::new("/srv/app"))?;
 filesystem.set_current_directory(std::path::Path::new("/assets"))?;
@@ -95,10 +96,11 @@ Host 没有更窄的 root 边界。Rooted 仅支持 `Reject` 和 `FollowWithinSc
 
 ```rust
 use std::io::{Read, Write};
-use qubit_local_files::{
-    LocalCreateDirectoryOptions, LocalFileSystem, LocalWriteMode, LocalWriteOptions,
-    LocalWriterState,
+use qubit_local_files::LocalFileSystem;
+use qubit_local_files::options::{
+    LocalCreateDirectoryOptions, LocalWriteMode, LocalWriteOptions,
 };
+use qubit_local_files::outcome::LocalWriterState;
 
 let mut filesystem = LocalFileSystem::host()?;
 filesystem.set_default_create_directory_options(
@@ -139,7 +141,9 @@ Copy Options 分别控制目标冲突、类型冲突、元数据、符号链接�
 前被拒绝。自复制和硬链接别名会被拒绝；覆盖符号链接目标时会替换该条目而不跟随它。
 
 ```rust,no_run
-use qubit_local_files::{LocalCopyFailureState, LocalCopyOptions, LocalFileSystem};
+use qubit_local_files::LocalFileSystem;
+use qubit_local_files::options::LocalCopyOptions;
+use qubit_local_files::outcome::LocalCopyFailureState;
 
 let filesystem = LocalFileSystem::host()?;
 match filesystem.copy_with_options(
@@ -171,7 +175,7 @@ match filesystem.copy_with_options(
 drop walker 只释放句柄。
 
 临时文件和目录在仍处于 armed 状态时拥有清理责任。每个资源都创建在独立的私有 sandbox 中，
-sandbox 会和资源一起清理。需要观察清理失败时应显式调用 `cleanup()`；drop 只会尽力清理。
+sandbox 会和资源一起清理。需要观察清理失败时应显式调用 `cleanup()`；drop 只会静默地尽力清理。
 `keep` 会关闭清理。未显式指定 parent 时，在该次操作捕获的 filesystem PWD 下创建。
 `path()`、`keep` 和持久化结果对 Host 与 Rooted 都返回 namespace-absolute 路径，因此
 后续 PWD 即使变化，也能把它们再次传给同一个 filesystem。持久化失败会保留资源，调用方
@@ -204,6 +208,8 @@ native prefix。
 不支持 `FollowAcrossScope`，配置该策略会返回 `InvalidOptions`。构造时路径可通过
 `diagnostic_root()` 取得，但它不是 authority；打开后重命名该路径不会重定向基于 handle
 的操作。词法包含关系可用于早期分类，但不能替代基于 handle 的授权。
+Windows Rooted 的符号链接读取、类型判断和创建均相对于已打开 handle 执行；复制链接自身时
+不会打开其悬空或位于 authority 外的目标。
 
 ## 错误、诊断与排障
 
@@ -225,11 +231,12 @@ namespace-absolute 主/目标路径、操作使用的 PWD snapshot，以及可�
 ## 平台限制与延伸阅读
 
 Linux、Windows 和 macOS 会进行运行时测试。FreeBSD 与 Android 仅做编译检查。
-`protocols()` 返回所选 authority 的协议快照；Rooted 实例在打开 authority 时缓存该
+`capabilities()` 返回所选 authority 的 build capability 快照；Rooted 实例在打开 authority 时缓存该
 快照。`scope()` 供集成层区分两种命名空间；Rooted 实例的诊断锚点通过
 `diagnostic_root()` 单独读取。Host 命名空间的 `limits()` 返回 `SizeLimit::VariesByPath`；使用
 `limits_at(path)` 才会针对该路径所在文件系统返回有限值（无法探测时为
-`Unknown`）。
+`Unknown`）。两个数值限制都必须结合 `length_unit()` 解释：Unix 使用 byte，Windows
+使用 UTF-16 code unit，后者不得当成 UTF-8 byte 限制。
 原子 rename、原子 replace 与临时资源原子持久化会分别报告，因为各平台支持并不相同。
 
 继续阅读 [README](../README.zh_CN.md)、[English user guide](user_guide.md) 或

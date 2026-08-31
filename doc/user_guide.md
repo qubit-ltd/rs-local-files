@@ -37,7 +37,8 @@ modify one field from an instance default, clone or copy that default
 explicitly, modify it, and pass the resulting value.
 
 ```rust,no_run
-use qubit_local_files::{LocalFileSystem, LocalListOptions};
+use qubit_local_files::LocalFileSystem;
+use qubit_local_files::options::LocalListOptions;
 
 let mut filesystem = LocalFileSystem::rooted(std::path::Path::new("/srv/app"))?;
 filesystem.set_current_directory(std::path::Path::new("/assets"))?;
@@ -107,10 +108,11 @@ complete write, and inspect the result. The observable success condition is a
 
 ```rust
 use std::io::{Read, Write};
-use qubit_local_files::{
-    LocalCreateDirectoryOptions, LocalFileSystem, LocalWriteMode, LocalWriteOptions,
-    LocalWriterState,
+use qubit_local_files::LocalFileSystem;
+use qubit_local_files::options::{
+    LocalCreateDirectoryOptions, LocalWriteMode, LocalWriteOptions,
 };
+use qubit_local_files::outcome::LocalWriterState;
 
 let mut filesystem = LocalFileSystem::host()?;
 filesystem.set_default_create_directory_options(
@@ -159,7 +161,9 @@ rejected; overwriting a symbolic-link target replaces that entry rather than
 following it.
 
 ```rust,no_run
-use qubit_local_files::{LocalCopyFailureState, LocalCopyOptions, LocalFileSystem};
+use qubit_local_files::LocalFileSystem;
+use qubit_local_files::options::LocalCopyOptions;
+use qubit_local_files::outcome::LocalCopyFailureState;
 
 let filesystem = LocalFileSystem::host()?;
 match filesystem.copy_with_options(
@@ -196,7 +200,7 @@ the walker only releases handles.
 
 Temporary files and directories own cleanup while armed. Each resource lives in
 a private generated sandbox that is removed with the resource. Dropping them
-performs best-effort cleanup; call `cleanup()` when the caller must observe a
+performs silent best-effort cleanup; call `cleanup()` when the caller must observe a
 cleanup failure. `keep` disables cleanup. With no explicit parent, creation
 uses the filesystem PWD
 captured for that operation. `path()`, `keep`, and persistence outcomes all
@@ -240,6 +244,9 @@ is not the authority for descriptor-relative operations: renaming it after
 opening does not redirect those operations. Lexical containment is useful
 early classification, but it is not a substitute for handle-relative
 authorization.
+Windows Rooted symbolic-link reads, type checks, and creation remain relative
+to opened handles. Copying the link itself never opens its dangling or external
+target.
 
 ## Errors, Diagnostics, and Troubleshooting
 
@@ -263,13 +270,15 @@ I/O errors are available through the structured error source when present.
 ## Platform Limits and Further Reading
 
 Linux, Windows, and macOS are runtime-tested. FreeBSD and Android are
-compile-checked only. `protocols()` reports the selected authority's protocol
-snapshot; a Rooted instance caches it when opening the authority. `scope()`
+compile-checked only. `capabilities()` reports the selected authority's build
+capability snapshot; a Rooted instance caches it when opening the authority. `scope()`
 lets integration code distinguish the two namespaces, and
 `diagnostic_root()` exposes the non-authoritative Rooted anchor separately.
 `limits()` reports `SizeLimit::VariesByPath` for the Host namespace; use
 `limits_at(path)` to obtain a finite value for the filesystem containing that
-path (or `Unknown` when probing is unavailable). Atomic
+path (or `Unknown` when probing is unavailable). Interpret both numeric limits
+using `length_unit()`: Unix uses bytes and Windows uses UTF-16 code units, which
+must not be treated as UTF-8 byte limits. Atomic
 rename, atomic replacement, and atomic temporary persistence are reported
 independently because platform support differs.
 

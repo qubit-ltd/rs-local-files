@@ -28,9 +28,9 @@ qubit-local-files = "0.3"
 ```rust
 use std::io::{Read, Write};
 
-use qubit_local_files::{
-    LocalFileSystem, LocalWriteMode, LocalWriteOptions, LocalWriterState,
-};
+use qubit_local_files::LocalFileSystem;
+use qubit_local_files::options::{LocalWriteMode, LocalWriteOptions};
+use qubit_local_files::outcome::LocalWriterState;
 
 let mut filesystem = LocalFileSystem::host()?;
 filesystem.set_default_write_options(LocalWriteOptions::new(
@@ -57,11 +57,11 @@ assert_eq!(content, r#"{"version":1}"#);
 | --- | --- |
 | `LocalFileSystem::host()` | 可复用的进程可见主机命名空间服务。 |
 | `LocalFileSystem::rooted(root)` | 以相同操作访问一个已打开目录权限下的后代。 |
-| `LocalFileSystemScope` | 标识实例按主机路径还是 rooted 后代路径解释输入。 |
+| `path::LocalFileSystemScope` | 标识实例按主机路径还是 rooted 后代路径解释输入。 |
 | `LocalFileWriter` | 分阶段发布后的显式提交或中止。 |
 | `LocalDirectoryWalker` | 采用创建时固定策略的惰性目录枚举。 |
 | `LocalTempFile` / `LocalTempDirectory` | 拥有清理责任，并支持 `keep` 与持久化。 |
-| `LocalFileNames` / `LocalPaths` | 不丢失 UTF-8 以外文件名信息的原生文件名和词法路径工具。 |
+| `path::LocalFileNames` / `path::LocalPaths` | 不丢失 UTF-8 以外文件名信息的原生文件名和词法路径工具。 |
 
 `LocalFileSystem` 是有状态的实例 API。每个实例拥有自己的当前目录、符号链接策略和九种
 操作的默认 Options。普通方法使用实例默认值；每个 `*_with_options` 方法都以传入的完整
@@ -78,7 +78,7 @@ authority。本 crate 不承诺共享可变配置时的线程安全；调用方�
 `InvalidOptions`。各类操作对最终链接的具体语义请参阅[用户手册](doc/user_guide.zh_CN.md)。
 
 临时资源清理会校验所有权，但它不是并发同步边界。调用方需要观察清理失败时应显式调用
-`cleanup()`；drop 只提供尽力而为的兜底。guard 删除前会比较创建时保存的
+`cleanup()`；drop 只提供静默、尽力而为的兜底，不报告或记录失败。guard 删除前会比较创建时保存的
 文件系统标识，因此通常能拒绝误删替换条目；但标识检查与按路径删除是两个独立操作，
 文件系统也可能复用标识。例如，不受信任的并发者删除临时文件后，反复在同一名称上安装新文件，
 这不在清理契约的保证范围内。应将临时资源放在并发者无写权的目录，或调用 `keep` 后由上层协调删除。
@@ -99,6 +99,8 @@ authority。本 crate 不承诺共享可变配置时的线程安全；调用方�
 Host，Rooted 会拒绝该配置。之后重命名诊断用 root 路径也不会重定向已打开的 authority。
 公共资源路径和错误路径统一使用可再次传入同一实例的 namespace-absolute 身份；底层物理
 路径仅在可获得时作为可选诊断信息提供。
+Windows 上，Rooted 的链接读取、链接类型判断和链接创建都相对于已打开 handle 执行。
+复制悬空链接或目标位于 Rooted authority 外的链接时，不会查看或打开链接目标。
 
 复制会根据源元数据选择文件或目录行为。复制和重命名失败会保留已证实的最强发布状态，
 因此调用方必须检查类型化失败，不能假设出错后目标未变。`CreateNew` 和
@@ -116,10 +118,12 @@ Host，Rooted 会拒绝该配置。之后重命名诊断用 root 路径也不会
 ## 平台范围
 
 Linux、Windows 和 macOS 的行为会在运行时测试。FreeBSD 和 Android 仅编译检查配置路径；
-本 crate 不承诺这些目标上的运行时保证。能力快照只报告当前 target 是否实现了对应的完整操作协议，
-不会探测具体的运行时文件系统，也不声称证明底层硬件已经持久化数据；无法满足要求的原子性或耐久性时，
+本 crate 不承诺这些目标上的运行时保证。`capabilities()` 只报告当前 build 是否实现了
+对应的完整操作协议，不会探测具体的运行时文件系统，也不声称证明底层硬件已经持久化数据；无法满足要求的原子性或耐久性时，
 会在命名空间变更前拒绝操作。
-Windows Host 路径转换明确不支持 UNC 路径。
+路径限制观测始终携带单位：Unix 使用 byte，Windows 使用 UTF-16 code unit。handle-relative
+命名空间没有可证明的固定整路径上限时，Windows 的整路径限制保持 `Unknown`；`space_at()`
+与组件限制从所选文件系统 handle 查询。Windows Host 路径转换明确不支持 UNC 路径。
 
 ## 测试
 

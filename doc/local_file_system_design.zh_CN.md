@@ -181,7 +181,7 @@ pub struct LocalFileSystem {
 - namespace kind：Host 或 Rooted；
 - Rooted 的唯一根 descriptor/handle；
 - 非权威诊断 root；
-- protocol capability snapshot；
+- capability snapshot；
 - authority 级文件系统客观限制；
 - 已打开资源需要共享的私有平台状态。
 
@@ -209,7 +209,7 @@ impl LocalFileSystem {
 
 只有在当前 target 上能够建立本文规定的根 authority 和 containment 语义时，`rooted()`
 才成功；缺少这组基础原语时返回 `Unsupported`。原子 replace、durability 等可选能力不阻止
-构造，而由 protocol snapshot、Options requirement 和具体 operation outcome 表达。
+构造，而由 capability snapshot、Options requirement 和具体 operation outcome 表达。
 
 公共设计不使用独立 Builder。构造 authority 后，通过 `&mut self` setter 配置实例。
 
@@ -230,7 +230,7 @@ impl LocalFileSystem {
     ) -> LocalResult<()>;
 
     pub fn diagnostic_root(&self) -> Option<&Path>;
-    pub fn protocols(&self) -> LocalFileSystemProtocols;
+    pub fn capabilities(&self) -> LocalFileSystemCapabilities;
     pub fn limits(&self) -> LocalFileSystemLimits;
     pub fn limits_at(&self, path: &Path) -> LocalResult<LocalFileSystemLimits>;
     pub fn space_at(&self, path: &Path) -> LocalResult<LocalFileSystemSpace>;
@@ -1314,11 +1314,11 @@ path codec kind 或 cleanup error。
 
 专用 state 是恢复逻辑的一部分。Display message 只用于人类诊断，不能成为下游分支依据。
 
-## 20. Protocols、requirements 与运行时事实
+## 20. Capabilities、requirements 与运行时事实
 
-### 20.1 Protocol snapshot
+### 20.1 Capability snapshot
 
-`LocalFileSystemProtocols` 报告当前 build/target 是否实现完整协议：
+`LocalFileSystemCapabilities` 报告当前 build/target 是否实现完整协议：
 
 - rooted operations；
 - atomic rename；
@@ -1328,6 +1328,8 @@ path codec kind 或 cleanup error。
 - durable file copy。
 
 这些 flag 描述库实现能力，不代表任意 runtime mount、network filesystem 或硬件一定支持。
+路径限制的每个数值必须结合 `LocalPathLengthUnit` 解释：Unix 为 `Bytes`，Windows 为
+`Utf16CodeUnits`；无法证明的整路径上限保持 `Unknown`，不得将 UTF-16 限制换算为 UTF-8 byte。
 
 ### 20.2 Requirement
 
@@ -1486,12 +1488,9 @@ Provider identity、registry、URI、user metadata 和远程 capability 仍属�
 
 ```rust
 use std::path::Path;
-use qubit_local_files::{
-    LocalCopyOptions,
-    LocalFileSystem,
-    LocalListOptions,
-    LocalSymlinkPolicy,
-};
+use qubit_local_files::LocalFileSystem;
+use qubit_local_files::options::{LocalCopyOptions, LocalListOptions};
+use qubit_local_files::policy::LocalSymlinkPolicy;
 
 let mut filesystem = LocalFileSystem::rooted(Path::new("/srv/app"))?;
 filesystem.set_symlink_policy(LocalSymlinkPolicy::FollowWithinScope)?;
@@ -1528,7 +1527,7 @@ filesystem.copy_with_options(
     Path::new("/archive/input.bin"),
     &options,
 )?;
-# Ok::<(), qubit_local_files::LocalCopyFailure>(())
+# Ok::<(), qubit_local_files::outcome::LocalCopyFailure>(())
 ```
 
 显式 Options 是本次完整配置；实例的其他 copy defaults 不会隐式合并回来。
