@@ -7,7 +7,6 @@
 // =============================================================================
 //! Path-aware I/O error context.
 // qubit-style: allow source-test-pair
-// qubit-style: allow inline-tests
 // qubit-style: allow explicit-imports
 // Private behavior is covered through public integration tests.
 
@@ -64,27 +63,5 @@ impl std::error::Error for PathIoError {
     #[inline(always)]
     fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
         Some(&self.source)
-    }
-}
-
-// This module verifies the private path-aware I/O wrapper and its source
-// chaining. The public API cannot construct every intermediate wrapper state;
-// making it public solely for tests would expand the error contract. Facade
-// and native error integration tests cover the externally visible mapping.
-#[cfg(test)]
-mod tests {
-    use std::error::Error as _;
-    use std::io::Error;
-    use std::io::ErrorKind;
-    use std::path::Path;
-
-    use super::PathIoError;
-
-    #[test]
-    fn test_path_io_error_formats_context_and_exposes_source() {
-        let source = Error::new(ErrorKind::PermissionDenied, "denied");
-        let error = PathIoError::new("write", Path::new("file"), source);
-        assert_eq!(error.to_string(), "failed to write 'file': denied");
-        assert_eq!(error.source().expect("source is retained").to_string(), "denied");
     }
 }

@@ -129,19 +129,19 @@ impl RootedLocalFileSystem {
 
     /// Returns the non-authoritative diagnostic path captured at open time.
     #[must_use]
-    #[inline(always)]
+    #[inline]
     pub fn diagnostic_path(&self) -> &Path {
         self.root.path()
     }
 
     /// Returns the native protocol snapshot cached for this opened authority.
-    #[inline(always)]
+    #[inline]
     pub const fn protocols(&self) -> LocalFileSystemProtocols {
         self.capabilities
     }
 
     /// Returns limits observed from the opened root authority.
-    #[inline(always)]
+    #[inline]
     pub const fn limits(&self) -> LocalFileSystemLimits {
         self.limits
     }

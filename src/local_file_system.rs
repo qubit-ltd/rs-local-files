@@ -50,6 +50,11 @@ use crate::local::HostLocalFileSystem;
 use crate::local::LocalNamespace;
 use crate::local::copy_failure_unchanged;
 use crate::local::rename_failure_unchanged;
+use crate::local_file_system_validation::reject_directory_qualified_file;
+use crate::local_file_system_validation::validate_copy_options;
+use crate::local_file_system_validation::validate_list_options;
+use crate::local_file_system_validation::validate_scope_symlink_policy;
+use crate::local_file_system_validation::validate_temp_attempts;
 use crate::path::LocalNamespacePath;
 use crate::path::LocalPathResolver;
 use crate::rooted_local_file_system::RootedLocalFileSystem;
@@ -60,6 +65,21 @@ use crate::rooted_local_file_system::RootedLocalFileSystem;
 /// independent snapshot of the PWD, symlink policy, and all default Options.
 /// The type provides no contract for concurrent configuration mutation;
 /// callers that share one mutable instance may add their own lock.
+///
+/// # Examples
+///
+/// ```no_run
+/// use std::path::Path;
+///
+/// use qubit_local_files::LocalFileSystem;
+///
+/// # fn main() -> Result<(), Box<dyn std::error::Error>> {
+/// let filesystem = LocalFileSystem::host()?;
+/// let metadata = filesystem.metadata(Path::new("Cargo.toml"))?;
+/// assert!(metadata.len() > 0);
+/// # Ok(())
+/// # }
+/// ```
 #[derive(Clone, Debug)]
 pub struct LocalFileSystem {
     /// Immutable authority and capability state shared by opened resources.
@@ -115,7 +135,7 @@ impl LocalFileSystem {
     }
 
     /// Returns the namespace kind interpreted by this instance.
-    #[inline(always)]
+    #[inline]
     pub fn scope(&self) -> LocalFileSystemScope {
         match &self.core.namespace {
             LocalNamespace::Host => LocalFileSystemScope::Host,
@@ -124,7 +144,7 @@ impl LocalFileSystem {
     }
 
     /// Returns this instance's normalized namespace-absolute PWD.
-    #[inline(always)]
+    #[inline]
     pub fn current_directory(&self) -> &Path {
         &self.current_directory
     }
@@ -147,7 +167,8 @@ impl LocalFileSystem {
     }
 
     /// Returns the default symlink policy inherited by operations.
-    #[inline(always)]
+    #[cfg_attr(feature = "test-support", inline(never))]
+
     pub const fn symlink_policy(&self) -> LocalSymlinkPolicy {
         self.symlink_policy
     }
@@ -161,7 +182,8 @@ impl LocalFileSystem {
     }
 
     /// Returns the construction-time Rooted path used only for diagnostics.
-    #[inline(always)]
+    #[cfg_attr(feature = "test-support", inline(never))]
+
     pub fn diagnostic_root(&self) -> Option<&Path> {
         match &self.core.namespace {
             LocalNamespace::Host => None,
@@ -170,13 +192,15 @@ impl LocalFileSystem {
     }
 
     /// Returns the immutable protocol snapshot for this authority.
-    #[inline(always)]
+    #[cfg_attr(feature = "test-support", inline(never))]
+
     pub fn protocols(&self) -> LocalFileSystemProtocols {
         self.core.protocols
     }
 
     /// Returns authority-level objective path-limit observations.
-    #[inline(always)]
+    #[cfg_attr(feature = "test-support", inline(never))]
+
     pub fn limits(&self) -> LocalFileSystemLimits {
         self.core.limits
     }
@@ -239,7 +263,8 @@ impl LocalFileSystem {
     }
 
     /// Returns the default reader options.
-    #[inline(always)]
+    #[cfg_attr(feature = "test-support", inline(never))]
+
     pub const fn default_read_options(&self) -> &LocalReadOptions {
         &self.defaults.read
     }
@@ -251,7 +276,8 @@ impl LocalFileSystem {
     }
 
     /// Returns the default writer options.
-    #[inline(always)]
+    #[cfg_attr(feature = "test-support", inline(never))]
+
     pub const fn default_write_options(&self) -> &LocalWriteOptions {
         &self.defaults.write
     }
@@ -263,7 +289,8 @@ impl LocalFileSystem {
     }
 
     /// Returns the default listing options.
-    #[inline(always)]
+    #[cfg_attr(feature = "test-support", inline(never))]
+
     pub const fn default_list_options(&self) -> &LocalListOptions {
         &self.defaults.list
     }
@@ -277,7 +304,8 @@ impl LocalFileSystem {
     }
 
     /// Returns the default copy options.
-    #[inline(always)]
+    #[cfg_attr(feature = "test-support", inline(never))]
+
     pub const fn default_copy_options(&self) -> &LocalCopyOptions {
         &self.defaults.copy
     }
@@ -291,7 +319,8 @@ impl LocalFileSystem {
     }
 
     /// Returns the default directory-creation options.
-    #[inline(always)]
+    #[cfg_attr(feature = "test-support", inline(never))]
+
     pub const fn default_create_directory_options(&self) -> &LocalCreateDirectoryOptions {
         &self.defaults.create_directory
     }
@@ -303,7 +332,8 @@ impl LocalFileSystem {
     }
 
     /// Returns the default deletion options.
-    #[inline(always)]
+    #[cfg_attr(feature = "test-support", inline(never))]
+
     pub const fn default_delete_options(&self) -> &LocalDeleteOptions {
         &self.defaults.delete
     }
@@ -315,7 +345,8 @@ impl LocalFileSystem {
     }
 
     /// Returns the default rename options.
-    #[inline(always)]
+    #[cfg_attr(feature = "test-support", inline(never))]
+
     pub const fn default_rename_options(&self) -> &LocalRenameOptions {
         &self.defaults.rename
     }
@@ -327,7 +358,8 @@ impl LocalFileSystem {
     }
 
     /// Returns the default temporary-file options.
-    #[inline(always)]
+    #[cfg_attr(feature = "test-support", inline(never))]
+
     pub const fn default_temp_file_options(&self) -> &LocalTempFileOptions {
         &self.defaults.temp_file
     }
@@ -341,7 +373,8 @@ impl LocalFileSystem {
     }
 
     /// Returns the default temporary-directory options.
-    #[inline(always)]
+    #[cfg_attr(feature = "test-support", inline(never))]
+
     pub const fn default_temp_directory_options(&self) -> &LocalTempDirectoryOptions {
         &self.defaults.temp_directory
     }
@@ -1026,113 +1059,6 @@ fn operation_failure_path(error: &LocalFileError, scope: LocalFileSystemScope, f
             public
         }
     }
-}
-
-/// Rejects a file operation whose original syntax explicitly requires a
-/// directory.
-fn reject_directory_qualified_file(
-    path: &LocalNamespacePath,
-    operation: LocalFileOperation,
-    current_directory: &Path,
-) -> LocalResult<()> {
-    if !path.directory_required() {
-        return Ok(());
-    }
-    Err(LocalFileError::new(LocalFileErrorKind::InvalidPath, operation)
-        .with_reason("a directory-qualified path cannot be used as a file")
-        .with_path(path.namespace_absolute().to_path_buf())
-        .with_current_directory(current_directory.to_path_buf()))
-}
-
-/// Validates scope-dependent symlink policy.
-fn validate_scope_symlink_policy(
-    scope: LocalFileSystemScope,
-    policy: LocalSymlinkPolicy,
-    operation: LocalFileOperation,
-    path: Option<&Path>,
-) -> LocalResult<()> {
-    if scope != LocalFileSystemScope::Rooted || policy != LocalSymlinkPolicy::FollowAcrossScope {
-        return Ok(());
-    }
-    let mut error = LocalFileError::new(LocalFileErrorKind::InvalidOptions, operation)
-        .with_reason("FollowAcrossScope is incompatible with a Rooted filesystem");
-    if let Some(path) = path {
-        error = error.with_path(path.to_path_buf());
-    }
-    Err(error)
-}
-
-/// Validates listing budgets and scope policy without performing I/O.
-fn validate_list_options(
-    scope: LocalFileSystemScope,
-    default_policy: LocalSymlinkPolicy,
-    options: &LocalListOptions,
-    path: Option<&Path>,
-) -> LocalResult<()> {
-    let operation = if path.is_some() {
-        LocalFileOperation::List
-    } else {
-        LocalFileOperation::Configure
-    };
-    if options.max_open_directories() == Some(0) {
-        let mut error = LocalFileError::new(LocalFileErrorKind::InvalidOptions, operation)
-            .with_reason("maximum open directory count must be greater than zero");
-        if let Some(path) = path {
-            error = error.with_path(path.to_path_buf());
-        }
-        return Err(error);
-    }
-    validate_scope_symlink_policy(
-        scope,
-        options.symlink_policy().unwrap_or(default_policy),
-        operation,
-        path,
-    )
-}
-
-/// Validates copy budgets, policy, and monotonic deadline representation.
-fn validate_copy_options(
-    scope: LocalFileSystemScope,
-    default_policy: LocalSymlinkPolicy,
-    options: &LocalCopyOptions,
-    source: Option<&Path>,
-    destination: Option<&Path>,
-) -> LocalResult<()> {
-    let operation = if source.is_some() {
-        LocalFileOperation::Copy
-    } else {
-        LocalFileOperation::Configure
-    };
-    validate_scope_symlink_policy(
-        scope,
-        options.symlink_policy_override().unwrap_or(default_policy),
-        operation,
-        source,
-    )?;
-    if options
-        .deadline()
-        .is_some_and(|duration| Instant::now().checked_add(duration).is_none())
-    {
-        let mut error = LocalFileError::new(LocalFileErrorKind::InvalidOptions, operation)
-            .with_reason("copy deadline exceeds the monotonic clock range");
-        if let Some(source) = source {
-            error = error.with_path(source.to_path_buf());
-        }
-        if let Some(destination) = destination {
-            error = error.with_target(destination.to_path_buf());
-        }
-        return Err(error);
-    }
-    Ok(())
-}
-
-/// Validates an explicit temporary-name collision budget.
-fn validate_temp_attempts(max_attempts: Option<usize>, operation: LocalFileOperation) -> LocalResult<()> {
-    if max_attempts != Some(0) {
-        return Ok(());
-    }
-    Err(LocalFileError::new(LocalFileErrorKind::InvalidOptions, operation)
-        .with_reason("temporary entry attempt count must be greater than zero"))
 }
 
 /// Probes the nearest existing Host path after applying symlink policy.

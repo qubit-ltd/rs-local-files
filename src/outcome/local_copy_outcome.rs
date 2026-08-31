@@ -56,33 +56,33 @@ impl LocalCopyOutcome {
     }
 
     /// Returns aggregate copy statistics.
-    #[inline(always)]
+    #[inline]
     pub const fn stats(&self) -> LocalCopyStats {
         self.stats
     }
 
     /// Returns the method used to copy the entry.
-    #[inline(always)]
+    #[inline]
     pub const fn method(&self) -> LocalCopyMethod {
         self.method
     }
 
     /// Reports whether the entire destination publication was atomic.
     #[must_use]
-    #[inline(always)]
+    #[inline]
     pub const fn atomic(&self) -> bool {
         self.atomic
     }
 
     /// Reports whether durability synchronization completed.
     #[must_use]
-    #[inline(always)]
+    #[inline]
     pub const fn durable(&self) -> bool {
         self.durable
     }
 
     /// Returns metadata preservation applied by the copy pipeline.
-    #[inline(always)]
+    #[inline]
     pub const fn metadata_preservation(&self) -> LocalMetadataPreservePolicy {
         self.metadata_preservation
     }

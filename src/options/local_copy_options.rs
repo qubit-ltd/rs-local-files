@@ -19,6 +19,18 @@ use crate::policy::LocalDurabilityRequirement;
 use crate::policy::LocalSymlinkPolicy;
 
 /// Unified options for copying a native file or directory tree.
+///
+/// # Examples
+///
+/// ```
+/// use qubit_local_files::{LocalCopyConflictPolicy, LocalCopyOptions};
+///
+/// let options = LocalCopyOptions::new()
+///     .with_conflict(LocalCopyConflictPolicy::Overwrite)
+///     .with_parent();
+/// assert_eq!(options.conflict(), LocalCopyConflictPolicy::Overwrite);
+/// assert!(options.creates_parent());
+/// ```
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 #[must_use = "copy options have no effect unless they are used"]
 pub struct LocalCopyOptions {

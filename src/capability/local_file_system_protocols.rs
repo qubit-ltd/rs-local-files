@@ -65,8 +65,8 @@ impl LocalFileSystemProtocols {
     }
 
     /// Reports whether secure rooted operations are implemented.
+    #[cfg_attr(feature = "test-support", inline(never))]
     #[must_use]
-    #[inline(always)]
     pub const fn supports_rooted_operations(self) -> bool {
         self.rooted_operations
     }

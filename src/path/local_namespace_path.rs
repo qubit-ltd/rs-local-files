@@ -13,7 +13,7 @@ use std::path::PathBuf;
 /// A path normalized against one [`crate::LocalFileSystem`] PWD snapshot.
 #[derive(Clone, Debug, Eq, PartialEq)]
 #[must_use]
-pub(crate) struct LocalNamespacePath {
+pub struct LocalNamespacePath {
     /// Reusable namespace-absolute identity exposed by public values.
     namespace_absolute: PathBuf,
     /// Path representation consumed by the selected authority backend.
@@ -39,7 +39,7 @@ impl LocalNamespacePath {
 
     /// Returns the normalized namespace-absolute path.
     #[inline(always)]
-    pub(crate) fn namespace_absolute(&self) -> &Path {
+    pub fn namespace_absolute(&self) -> &Path {
         &self.namespace_absolute
     }
 
@@ -47,13 +47,13 @@ impl LocalNamespacePath {
     ///
     /// Rooted paths omit the virtual root. Host paths remain fully qualified.
     #[inline(always)]
-    pub(crate) fn authority_relative(&self) -> &Path {
+    pub fn authority_relative(&self) -> &Path {
         &self.authority_relative
     }
 
     /// Reports whether the original native syntax requires a directory.
     #[inline(always)]
-    pub(crate) const fn directory_required(&self) -> bool {
+    pub const fn directory_required(&self) -> bool {
         self.directory_required
     }
 }

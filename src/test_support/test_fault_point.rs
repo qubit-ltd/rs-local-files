@@ -8,6 +8,7 @@
 //! Native operation boundaries supported by deterministic test faults.
 
 /// Native operation boundary at which a deterministic test fault is injected.
+#[allow(dead_code)]
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum TestFaultPoint {
     /// Metadata observation.

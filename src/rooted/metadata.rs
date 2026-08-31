@@ -7,7 +7,6 @@
 // =============================================================================
 //! Descriptor-relative entry metadata.
 // qubit-style: allow source-test-pair
-// qubit-style: allow inline-tests
 // qubit-style: allow explicit-imports
 
 use std::fs;
@@ -29,7 +28,7 @@ use super::Permissions;
 /// Metadata observed through an opened rooted directory authority.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 #[must_use]
-pub(crate) struct Metadata {
+pub struct Metadata {
     /// The observed entry type.
     kind: EntryKind,
     /// The observed byte length when the platform reports one.
@@ -59,7 +58,7 @@ impl Metadata {
     /// # Returns
     /// Rooted metadata preserving the descriptor-observed entry type and size.
     #[cfg(unix)]
-    pub(crate) fn from_native(metadata: &fs::Metadata) -> Self {
+    pub fn from_native(metadata: &fs::Metadata) -> Self {
         let kind = entry_kind_from_mode(metadata.mode());
         Self {
             kind,
@@ -87,7 +86,7 @@ impl Metadata {
     /// # Errors
     ///
     /// Returns an I/O error when handle metadata cannot be inspected.
-    pub(crate) fn from_open_file(file: &fs::File) -> std::io::Result<Self> {
+    pub fn from_open_file(file: &fs::File) -> std::io::Result<Self> {
         let metadata = file.metadata()?;
         #[cfg(unix)]
         {
@@ -132,7 +131,7 @@ impl Metadata {
     /// # Returns
     /// Rooted metadata for the final entry represented by `status`.
     #[cfg(unix)]
-    pub(crate) fn from_stat(status: &libc::stat) -> Self {
+    pub fn from_stat(status: &libc::stat) -> Self {
         let kind = entry_kind_from_mode(status.st_mode);
         let (accessed_at, modified_at, created_at) = stat_times(status);
         Self {
@@ -173,45 +172,45 @@ impl Metadata {
     }
 
     /// Returns the final entry type observed by the rooted operation.
-    pub(crate) const fn kind(&self) -> EntryKind {
+    pub const fn kind(&self) -> EntryKind {
         self.kind
     }
 
     /// Returns the byte size reported by the rooted metadata operation.
     #[must_use]
-    pub(crate) const fn size(&self) -> u64 {
+    pub const fn size(&self) -> u64 {
         self.len
     }
 
     /// Returns the last access time, or `None` when the platform did not
     /// provide one.
     #[must_use]
-    pub(crate) const fn accessed_at(&self) -> Option<SystemTime> {
+    pub const fn accessed_at(&self) -> Option<SystemTime> {
         self.accessed_at
     }
 
     /// Returns the last modification time, or `None` when the platform did not
     /// provide one.
     #[must_use]
-    pub(crate) const fn modified_at(&self) -> Option<SystemTime> {
+    pub const fn modified_at(&self) -> Option<SystemTime> {
         self.modified_at
     }
 
     /// Returns the creation time, or `None` when the platform did not provide
     /// one.
     #[must_use]
-    pub(crate) const fn created_at(&self) -> Option<SystemTime> {
+    pub const fn created_at(&self) -> Option<SystemTime> {
         self.created_at
     }
 
     /// Returns the permissions observed through the rooted operation.
-    pub(crate) const fn permissions(&self) -> Permissions {
+    pub const fn permissions(&self) -> Permissions {
         self.permissions
     }
 
     /// Returns whether two metadata values identify the same native entry.
     #[must_use]
-    pub(crate) const fn is_same_file(&self, other: &Self) -> bool {
+    pub const fn is_same_file(&self, other: &Self) -> bool {
         matches!(
             (self.device_id, self.file_id, other.device_id, other.file_id),
             (Some(left_device), Some(left_file), Some(right_device), Some(right_file))
@@ -221,7 +220,7 @@ impl Metadata {
 
     /// Returns a stable native entry identity when the platform supplied one.
     #[must_use]
-    pub(crate) const fn native_identity(&self) -> Option<(u64, u64)> {
+    pub const fn native_identity(&self) -> Option<(u64, u64)> {
         match (self.device_id, self.file_id) {
             (Some(device), Some(file)) => Some((device, file)),
             _ => None,

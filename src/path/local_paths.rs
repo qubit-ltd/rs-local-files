@@ -21,6 +21,20 @@ use crate::LocalPathCodec;
 use crate::LocalResult;
 
 /// Scope-bound native path validation and canonical conversion.
+///
+/// # Examples
+///
+/// ```
+/// use std::path::Path;
+///
+/// use qubit_local_files::LocalPaths;
+///
+/// let paths = LocalPaths::rooted();
+/// let components = paths.to_canonical_components(Path::new("/reports/today"))?;
+/// let round_trip = paths.from_canonical_components(components.iter().map(String::as_str))?;
+/// assert_eq!(round_trip, Path::new("/reports/today"));
+/// # Ok::<(), qubit_local_files::LocalFileError>(())
+/// ```
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 #[must_use]
 pub struct LocalPaths {

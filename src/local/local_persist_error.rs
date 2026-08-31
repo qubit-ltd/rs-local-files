@@ -62,7 +62,7 @@ impl<T> LocalPersistError<T> {
     ///
     /// # Returns
     /// New persistence error owning both values.
-    #[inline(always)]
+    #[inline]
     pub(crate) fn new(
         error: io::Error,
         resource: T,
@@ -92,7 +92,7 @@ impl<T> LocalPersistError<T> {
     /// # Returns
     /// Structured error that prevented persistence.
     #[must_use]
-    #[inline(always)]
+    #[inline]
     pub const fn error(&self) -> &LocalFileError {
         &self.error
     }
@@ -102,7 +102,7 @@ impl<T> LocalPersistError<T> {
     /// # Returns
     /// Shared reference to the resource retained after failure.
     #[must_use]
-    #[inline(always)]
+    #[inline]
     pub const fn resource(&self) -> &T {
         &self.resource
     }
@@ -112,7 +112,7 @@ impl<T> LocalPersistError<T> {
     /// # Returns
     /// Mutable reference to the resource retained after failure.
     #[must_use]
-    #[inline(always)]
+    #[inline]
     pub const fn resource_mut(&mut self) -> &mut T {
         &mut self.resource
     }
@@ -122,7 +122,7 @@ impl<T> LocalPersistError<T> {
     /// # Returns
     /// Requested target before absolute-path resolution.
     #[must_use]
-    #[inline(always)]
+    #[inline]
     pub fn requested_target(&self) -> &Path {
         &self.requested_target
     }
@@ -131,7 +131,7 @@ impl<T> LocalPersistError<T> {
     ///
     /// # Returns
     /// Resolved target for parent preparation and destination installation.
-    #[inline(always)]
+    #[inline]
     pub fn resolved_target(&self) -> Option<&Path> {
         self.resolved_target.as_deref()
     }
@@ -140,7 +140,7 @@ impl<T> LocalPersistError<T> {
     ///
     /// # Returns
     /// Failed persistence stage.
-    #[inline(always)]
+    #[inline]
     pub const fn stage(&self) -> LocalPersistStage {
         self.stage
     }
@@ -149,7 +149,7 @@ impl<T> LocalPersistError<T> {
     ///
     /// # Returns
     /// A state describing whether the temporary resource remains safely owned.
-    #[inline(always)]
+    #[inline]
     pub const fn state(&self) -> LocalPersistFailureState {
         self.state
     }
@@ -158,7 +158,7 @@ impl<T> LocalPersistError<T> {
     ///
     /// # Returns
     /// Stable classification reported by the retained structured error.
-    #[inline(always)]
+    #[inline]
     pub const fn kind(&self) -> crate::LocalFileErrorKind {
         self.error.kind()
     }
