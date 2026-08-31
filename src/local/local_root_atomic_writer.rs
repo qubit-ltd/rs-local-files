@@ -54,6 +54,7 @@ use super::internal::synchronize_staging_file;
 #[cfg(unix)]
 use super::internal::verify_rooted_atomic_destination_identity;
 use super::local_root_atomic_writer_support::map_atomic_error;
+#[cfg(unix)]
 use super::local_root_atomic_writer_support::sync_rooted_parent_chain;
 #[cfg(not(unix))]
 use super::local_root_atomic_writer_support::unsupported_atomic_error;

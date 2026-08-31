@@ -7,7 +7,7 @@
 // =============================================================================
 //! Coverage for dynamic filesystem space values.
 
-use qubit_local_files::LocalFileSystemSpace;
+use qubit_local_files::capability::LocalFileSystemSpace;
 
 /// Verifies space fields retain independently known observations.
 #[test]

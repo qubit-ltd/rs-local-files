@@ -9,11 +9,11 @@
 use std::fs;
 use std::path::Path;
 
-use qubit_local_files::LocalFileErrorKind;
-#[cfg(unix)]
-use qubit_local_files::LocalFileKind;
 use qubit_local_files::LocalFileSystem;
-use qubit_local_files::LocalTempFileOptions;
+use qubit_local_files::error::LocalFileErrorKind;
+use qubit_local_files::options::LocalTempFileOptions;
+#[cfg(unix)]
+use qubit_local_files::outcome::LocalFileKind;
 use tempfile::tempdir;
 
 /// Verifies rooted temporary parents accept an existing descendant directory.

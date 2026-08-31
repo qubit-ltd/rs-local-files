@@ -40,7 +40,10 @@ pub(crate) enum DirectoryIdentity {
         file: u64,
     },
     /// Canonical-path fallback when native identity is unavailable.
-    Canonical(PathBuf),
+    Canonical(
+        /// Canonical path used only where native identifiers are unavailable.
+        PathBuf,
+    ),
 }
 
 impl DirectoryIdentity {

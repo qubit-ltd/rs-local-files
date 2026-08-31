@@ -19,16 +19,16 @@ use std::path::PathBuf;
 #[cfg(not(windows))]
 use std::process::Command;
 
-use qubit_local_files::LocalFileErrorKind;
-#[cfg(feature = "internal-test-support")]
-use qubit_local_files::LocalFileOperation;
 use qubit_local_files::LocalFileSystem;
-use qubit_local_files::LocalPersistFailureState;
-use qubit_local_files::LocalPersistMethod;
-use qubit_local_files::LocalPersistOptions;
-use qubit_local_files::LocalTempFileOptions;
+use qubit_local_files::error::LocalFileErrorKind;
 #[cfg(feature = "internal-test-support")]
-use qubit_local_files::install_test_fault;
+use qubit_local_files::error::LocalFileOperation;
+use qubit_local_files::options::LocalPersistOptions;
+use qubit_local_files::options::LocalTempFileOptions;
+use qubit_local_files::outcome::LocalPersistFailureState;
+use qubit_local_files::outcome::LocalPersistMethod;
+#[cfg(feature = "internal-test-support")]
+use qubit_local_files::test_support::install_test_fault;
 use tempfile::tempdir;
 
 fn rooted_host_path(root: &Path, virtual_path: &Path) -> PathBuf {
@@ -774,8 +774,7 @@ fn test_local_temp_file_cleanup_rejects_replaced_entry() {
     assert_eq!(fs::read(&path).expect("replacement must remain"), b"restored");
 }
 
-/// Verifies drop logs and tolerates a cleanup failure without removing a
-/// different entry that replaced the temporary file path.
+/// Verifies silent best-effort drop does not remove a different replacement.
 #[test]
 fn test_local_temp_file_drop_tolerates_replaced_directory() {
     let parent = tempdir().expect("temporary parent should be created");

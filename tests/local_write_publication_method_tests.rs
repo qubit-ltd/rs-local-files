@@ -6,7 +6,7 @@
 //    Licensed under the Apache License, Version 2.0.
 // =============================================================================
 
-use qubit_local_files::LocalWritePublicationMethod;
+use qubit_local_files::outcome::LocalWritePublicationMethod;
 
 /// Verifies the public writer publication-method values remain distinct.
 #[test]

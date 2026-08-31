@@ -7,7 +7,7 @@
 // =============================================================================
 //! Public persistence publication-method coverage.
 
-use qubit_local_files::LocalPersistMethod;
+use qubit_local_files::outcome::LocalPersistMethod;
 
 /// Verifies temporary persistence currently reports native rename publication.
 #[test]

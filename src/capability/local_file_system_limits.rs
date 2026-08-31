@@ -7,37 +7,71 @@
 // =============================================================================
 //! Stable native filesystem path limits.
 
+use super::LocalPathLengthUnit;
 use super::SizeLimit;
 
 /// Native path limits observed for one filesystem authority.
+///
+/// The numeric observations must always be interpreted in
+/// [`LocalPathLengthUnit`].
+///
+/// # Examples
+///
+/// ```
+/// use qubit_local_files::capability::{
+///     LocalFileSystemLimits, LocalPathLengthUnit, SizeLimit,
+/// };
+///
+/// let limits = LocalFileSystemLimits::new(
+///     SizeLimit::Unknown,
+///     SizeLimit::Maximum(255),
+///     LocalPathLengthUnit::Bytes,
+/// );
+/// assert_eq!(limits.max_component_length(), SizeLimit::Maximum(255));
+/// assert_eq!(limits.length_unit(), LocalPathLengthUnit::Bytes);
+/// ```
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 #[must_use]
 pub struct LocalFileSystemLimits {
-    max_path_bytes: SizeLimit,
-    max_file_name_bytes: SizeLimit,
+    /// Maximum complete-path length observed from the native authority.
+    max_path_length: SizeLimit,
+    /// Maximum single-component length observed from the native authority.
+    max_component_length: SizeLimit,
+    /// Native unit shared by both length observations.
+    length_unit: LocalPathLengthUnit,
 }
 
 impl LocalFileSystemLimits {
     /// Creates limits from independently observed native dimensions.
     #[inline]
-    pub const fn new(max_path_bytes: SizeLimit, max_file_name_bytes: SizeLimit) -> Self {
+    pub const fn new(
+        max_path_length: SizeLimit,
+        max_component_length: SizeLimit,
+        length_unit: LocalPathLengthUnit,
+    ) -> Self {
         Self {
-            max_path_bytes,
-            max_file_name_bytes,
+            max_path_length,
+            max_component_length,
+            length_unit,
         }
     }
 
-    /// Returns the maximum complete native path size in bytes.
+    /// Returns the maximum complete native path length in
+    /// [`Self::length_unit`].
     #[cfg_attr(feature = "test-support", inline(never))]
-
-    pub const fn max_path_bytes(&self) -> SizeLimit {
-        self.max_path_bytes
+    pub const fn max_path_length(&self) -> SizeLimit {
+        self.max_path_length
     }
 
-    /// Returns the maximum native file-name component size in bytes.
+    /// Returns the maximum native component length in [`Self::length_unit`].
     #[cfg_attr(feature = "test-support", inline(never))]
+    pub const fn max_component_length(&self) -> SizeLimit {
+        self.max_component_length
+    }
 
-    pub const fn max_file_name_bytes(&self) -> SizeLimit {
-        self.max_file_name_bytes
+    /// Returns the unit shared by both observed length dimensions.
+    #[inline(always)]
+    pub const fn length_unit(&self) -> LocalPathLengthUnit {
+        self.length_unit
     }
 }

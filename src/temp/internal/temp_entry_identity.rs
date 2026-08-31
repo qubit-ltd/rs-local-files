@@ -121,6 +121,7 @@ impl TempEntryIdentity {
 }
 
 impl PartialEq for TempEntryIdentity {
+    /// Compares the stable native identity components for this target.
     fn eq(&self, other: &Self) -> bool {
         #[cfg(unix)]
         {

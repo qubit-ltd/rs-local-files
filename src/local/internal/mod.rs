@@ -59,6 +59,8 @@ mod rooted_parent_mode;
 mod rooted_staged_file;
 #[cfg(unix)]
 mod rooted_staging_retry;
+mod rooted_symlink_create_error;
+mod rooted_symlink_create_failure_state;
 mod staged_file;
 mod temp_entry;
 pub(crate) mod test_fault_guard;
@@ -170,6 +172,8 @@ pub(crate) use rooted_namespace_io::set_rooted_permissions;
 pub(super) use rooted_parent_mode::RootedParentMode;
 #[cfg(unix)]
 pub(super) use rooted_staged_file::RootedStagedFile;
+pub(crate) use rooted_symlink_create_error::RootedSymlinkCreateError;
+pub(crate) use rooted_symlink_create_failure_state::RootedSymlinkCreateFailureState;
 pub(crate) use staged_file::StagedFile;
 pub(crate) use temp_entry::create_temp_dir_in_dir_with_affixes;
 pub(crate) use temp_entry::create_temp_file_in_dir;
@@ -192,6 +196,10 @@ pub(crate) use windows_rooted::open_rooted_directory_reader;
 pub(crate) use windows_rooted::open_rooted_native_reader;
 #[cfg(windows)]
 pub(crate) use windows_rooted::open_rooted_native_writer;
+#[cfg(windows)]
+pub(crate) use windows_rooted::probe_windows_limits;
+#[cfg(windows)]
+pub(crate) use windows_rooted::probe_windows_space;
 #[cfg(windows)]
 pub(crate) use windows_rooted::read_root_directory;
 #[cfg(windows)]

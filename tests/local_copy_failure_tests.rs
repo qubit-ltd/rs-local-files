@@ -14,18 +14,18 @@ use std::path::PathBuf;
 #[cfg(feature = "internal-test-support")]
 use std::process::Command;
 
-#[cfg(feature = "internal-test-support")]
-use qubit_local_files::LocalCopyConflictPolicy;
-use qubit_local_files::LocalCopyFailureState;
-use qubit_local_files::LocalCopyOptions;
-use qubit_local_files::LocalCopyStats;
-#[cfg(all(feature = "internal-test-support", not(windows)))]
-use qubit_local_files::LocalDurabilityRequirement;
 use qubit_local_files::LocalFileSystem;
 #[cfg(feature = "internal-test-support")]
-use qubit_local_files::LocalMetadataPreservePolicy;
+use qubit_local_files::options::LocalCopyConflictPolicy;
+use qubit_local_files::options::LocalCopyOptions;
 #[cfg(feature = "internal-test-support")]
-use qubit_local_files::install_test_fault;
+use qubit_local_files::options::LocalMetadataPreservePolicy;
+use qubit_local_files::outcome::LocalCopyFailureState;
+use qubit_local_files::outcome::LocalCopyStats;
+#[cfg(all(feature = "internal-test-support", not(windows)))]
+use qubit_local_files::policy::LocalDurabilityRequirement;
+#[cfg(feature = "internal-test-support")]
+use qubit_local_files::test_support::install_test_fault;
 
 /// Creates a process-specific path that is absent before each test use.
 fn temp_path(name: &str) -> PathBuf {
@@ -103,6 +103,34 @@ fn test_copy_failure_reports_second_child_partial_publication() {
         let failed_target = target.join("second");
         assert_eq!(Some(failed_source.as_path()), failure.failed_source_path());
         assert_eq!(Some(failed_target.as_path()), failure.failed_target_path());
+    });
+}
+
+/// Verifies a failed symlink replacement cannot report unchanged after the
+/// previous destination has already been removed.
+#[cfg(all(feature = "internal-test-support", unix))]
+#[test]
+fn test_symlink_replacement_failure_reports_partial_publication() {
+    use std::os::unix::fs::symlink;
+    use std::path::Path;
+
+    const TEST_NAME: &str = "test_symlink_replacement_failure_reports_partial_publication";
+    run_in_test_fault_process(TEST_NAME, "rooted-copy-symlink-create", || {
+        let directory = tempfile::tempdir().expect("temporary directory should be created");
+        symlink("referent", directory.path().join("source")).expect("source link should be created");
+        fs::write(directory.path().join("destination"), b"previous").expect("previous destination should be written");
+        let filesystem = LocalFileSystem::rooted(directory.path()).expect("Rooted filesystem should open");
+
+        let failure = filesystem
+            .copy_with_options(
+                Path::new("source"),
+                Path::new("destination"),
+                &LocalCopyOptions::new().with_conflict(LocalCopyConflictPolicy::Overwrite),
+            )
+            .expect_err("injected symlink publication should fail after replacement removal");
+
+        assert_eq!(LocalCopyFailureState::PartiallyPublished, failure.state());
+        assert!(!directory.path().join("destination").exists());
     });
 }
 

@@ -13,7 +13,7 @@
 #![no_main]
 
 use libfuzzer_sys::fuzz_target;
-use qubit_local_files::LocalPathCodec;
+use qubit_local_files::path::LocalPathCodec;
 
 /// Bounds direct fuzzer input and the codec's temporary allocations.
 const MAX_FUZZ_INPUT_LEN: usize = 4096;

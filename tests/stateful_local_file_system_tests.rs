@@ -13,17 +13,20 @@ use std::path::Path;
 use std::sync::Arc;
 use std::sync::Mutex;
 
-use qubit_local_files::LocalCopyConflictPolicy;
-use qubit_local_files::LocalCopyOptions;
-use qubit_local_files::LocalFileErrorKind;
-use qubit_local_files::LocalFileKind;
 use qubit_local_files::LocalFileSystem;
-use qubit_local_files::LocalListOptions;
-use qubit_local_files::LocalPersistStage;
+#[cfg(unix)]
 use qubit_local_files::LocalResult;
-use qubit_local_files::LocalSymlinkPolicy;
-use qubit_local_files::LocalTempDirectoryOptions;
-use qubit_local_files::LocalTempFileOptions;
+use qubit_local_files::error::LocalFileErrorKind;
+use qubit_local_files::options::LocalCopyConflictPolicy;
+use qubit_local_files::options::LocalCopyOptions;
+use qubit_local_files::options::LocalListOptions;
+use qubit_local_files::options::LocalTempDirectoryOptions;
+use qubit_local_files::options::LocalTempFileOptions;
+#[cfg(unix)]
+use qubit_local_files::outcome::LocalFileKind;
+use qubit_local_files::outcome::LocalPersistStage;
+use qubit_local_files::policy::LocalSymlinkPolicy;
+use tempfile::Builder;
 use tempfile::tempdir;
 
 #[test]
@@ -193,6 +196,40 @@ fn rooted_constructor_follows_its_one_time_root_symlink() {
     let filesystem = LocalFileSystem::rooted(&root_link).expect("root constructor should follow its final symlink");
     assert_eq!(filesystem.diagnostic_root(), Some(root_link.as_path()));
     assert_eq!(filesystem.metadata(Path::new("/value")).unwrap().len(), 7);
+}
+
+/// Verifies a relative constructor input is captured once as an absolute
+/// diagnostic path while operations remain bound to the opened authority.
+#[test]
+fn rooted_constructor_captures_one_absolute_diagnostic_snapshot() {
+    let current_directory = std::env::current_dir().expect("current directory should be readable");
+    let root = Builder::new()
+        .prefix("rooted-constructor-")
+        .tempdir_in(&current_directory)
+        .expect("relative root fixture should be created");
+    fs::write(root.path().join("value"), b"payload").expect("fixture should be written");
+    let relative = root
+        .path()
+        .strip_prefix(&current_directory)
+        .expect("fixture should be beneath the current directory");
+    let expected = std::path::absolute(relative).expect("diagnostic path should resolve");
+
+    let filesystem = LocalFileSystem::rooted(relative).expect("relative root authority should open");
+
+    assert_eq!(Some(expected.as_path()), filesystem.diagnostic_root());
+    assert_eq!(7, filesystem.metadata(Path::new("value")).unwrap().len());
+}
+
+/// Verifies a regular file cannot be opened as a Rooted directory authority.
+#[test]
+fn rooted_constructor_rejects_regular_file_authority() {
+    let directory = tempdir().expect("temporary directory should be created");
+    let file = directory.path().join("regular-file");
+    fs::write(&file, b"payload").expect("fixture should be written");
+
+    let error = LocalFileSystem::rooted(&file).expect_err("a regular file must not become a root authority");
+
+    assert_eq!(LocalFileErrorKind::NotDirectory, error.kind());
 }
 
 #[cfg(unix)]

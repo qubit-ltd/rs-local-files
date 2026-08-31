@@ -8,11 +8,11 @@
 //! Regression coverage for shared operation preflight policy.
 
 #[cfg(not(windows))]
-use qubit_local_files::LocalDurabilityRequirement;
-#[cfg(not(windows))]
 use qubit_local_files::LocalFileSystem;
 #[cfg(not(windows))]
-use qubit_local_files::LocalRenameOptions;
+use qubit_local_files::options::LocalRenameOptions;
+#[cfg(not(windows))]
+use qubit_local_files::policy::LocalDurabilityRequirement;
 
 /// Verifies required directory durability is honored by the host rename path.
 #[cfg(not(windows))]

@@ -9,16 +9,16 @@
 use std::fs;
 use std::io::Read;
 
-use qubit_local_files::LocalCopyOptions;
-use qubit_local_files::LocalCreateDirectoryOptions;
-use qubit_local_files::LocalDeleteOptions;
-#[cfg(unix)]
-use qubit_local_files::LocalDurabilityRequirement;
-use qubit_local_files::LocalFileErrorKind;
-use qubit_local_files::LocalFileOperation;
 use qubit_local_files::LocalFileSystem;
-use qubit_local_files::LocalReadOptions;
-use qubit_local_files::LocalRenameOptions;
+use qubit_local_files::error::LocalFileErrorKind;
+use qubit_local_files::error::LocalFileOperation;
+use qubit_local_files::options::LocalCopyOptions;
+use qubit_local_files::options::LocalCreateDirectoryOptions;
+use qubit_local_files::options::LocalDeleteOptions;
+use qubit_local_files::options::LocalReadOptions;
+use qubit_local_files::options::LocalRenameOptions;
+#[cfg(unix)]
+use qubit_local_files::policy::LocalDurabilityRequirement;
 #[cfg(target_os = "linux")]
 use tempfile::NamedTempFile;
 use tempfile::tempdir;

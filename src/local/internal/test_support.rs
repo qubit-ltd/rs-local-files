@@ -9,6 +9,8 @@
 
 use std::io;
 #[cfg(feature = "internal-test-support")]
+use std::sync::Condvar;
+#[cfg(feature = "internal-test-support")]
 use std::sync::Mutex;
 #[cfg(feature = "internal-test-support")]
 use std::sync::atomic::AtomicBool;
@@ -20,27 +22,54 @@ use std::sync::atomic::Ordering;
 #[cfg(feature = "internal-test-support")]
 use super::test_fault_guard::TestFaultGuard;
 
+/// Whether the selected one-shot fault has already been consumed.
 #[cfg(feature = "internal-test-support")]
 static ONE_SHOT_FAULT_TAKEN: AtomicBool = AtomicBool::new(false);
 
+/// Number of times the selected occurrence-counted boundary was reached.
 #[cfg(feature = "internal-test-support")]
 static NTH_FAULT_OCCURRENCES: AtomicUsize = AtomicUsize::new(0);
 
+/// Selector owner and name retained while one test controls fault injection.
 #[cfg(feature = "internal-test-support")]
-static ACTIVE_FAULT: Mutex<Option<String>> = Mutex::new(None);
+struct ActiveFault {
+    /// Test thread that owns the currently installed selector.
+    owner: std::thread::ThreadId,
+    /// Native fault boundary selected by the owning test.
+    name: String,
+}
+
+/// Process-local selector and waiter notification shared by integration tests.
+#[cfg(feature = "internal-test-support")]
+static ACTIVE_FAULT: (Mutex<Option<ActiveFault>>, Condvar) = (Mutex::new(None), Condvar::new());
 
 /// Installs one deterministic test fault for the current process.
 #[cfg(feature = "internal-test-support")]
 #[doc(hidden)]
 pub fn install_test_fault(name: &str) -> io::Result<TestFaultGuard> {
-    let mut active = ACTIVE_FAULT.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
-    if active.is_some() {
-        return Err(io::Error::new(
-            io::ErrorKind::AlreadyExists,
-            "a test fault controller is already installed",
-        ));
+    let owner = std::thread::current().id();
+    let mut active = ACTIVE_FAULT.0.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+    loop {
+        match active.as_ref() {
+            Some(current) if current.owner == owner => {
+                return Err(io::Error::new(
+                    io::ErrorKind::AlreadyExists,
+                    "a test fault controller is already installed on this thread",
+                ));
+            }
+            Some(_) => {
+                active = ACTIVE_FAULT
+                    .1
+                    .wait(active)
+                    .unwrap_or_else(std::sync::PoisonError::into_inner);
+            }
+            None => break,
+        }
     }
-    *active = Some(name.to_owned());
+    *active = Some(ActiveFault {
+        owner,
+        name: name.to_owned(),
+    });
     ONE_SHOT_FAULT_TAKEN.store(false, Ordering::Relaxed);
     NTH_FAULT_OCCURRENCES.store(0, Ordering::Relaxed);
     Ok(TestFaultGuard { active: true })
@@ -53,11 +82,12 @@ impl Drop for TestFaultGuard {
         if !self.active {
             return;
         }
-        let mut active = ACTIVE_FAULT.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+        let mut active = ACTIVE_FAULT.0.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
         active.take();
         ONE_SHOT_FAULT_TAKEN.store(false, Ordering::Relaxed);
         NTH_FAULT_OCCURRENCES.store(0, Ordering::Relaxed);
         self.active = false;
+        ACTIVE_FAULT.1.notify_one();
     }
 }
 
@@ -162,10 +192,11 @@ pub(crate) fn take_on_nth(name: &str, occurrence: usize) -> bool {
 #[inline(always)]
 fn is_enabled_impl(name: &str) -> bool {
     ACTIVE_FAULT
+        .0
         .lock()
         .unwrap_or_else(std::sync::PoisonError::into_inner)
-        .as_deref()
-        == Some(name)
+        .as_ref()
+        .is_some_and(|active| active.name == name)
 }
 
 /// Provides the disabled-feature result for fault-selector checks.

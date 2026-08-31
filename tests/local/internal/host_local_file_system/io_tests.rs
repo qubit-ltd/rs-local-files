@@ -10,10 +10,10 @@
 use std::fs;
 
 use qubit_local_files::LocalFileSystem;
-use qubit_local_files::LocalReadOptions;
-use qubit_local_files::LocalWriteMode;
-use qubit_local_files::LocalWriteOptions;
-use qubit_local_files::LocalWriterState;
+use qubit_local_files::options::LocalReadOptions;
+use qubit_local_files::options::LocalWriteMode;
+use qubit_local_files::options::LocalWriteOptions;
+use qubit_local_files::outcome::LocalWriterState;
 use tempfile::tempdir;
 
 /// Verifies the split Host I/O module preserves reader and writer behavior.

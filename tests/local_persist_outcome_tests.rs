@@ -14,12 +14,12 @@ use std::io::Write;
 use std::os::unix::fs::symlink;
 
 use qubit_local_files::LocalFileSystem;
-use qubit_local_files::LocalPersistCleanupState;
-use qubit_local_files::LocalPersistMethod;
-use qubit_local_files::LocalPersistOptions;
-use qubit_local_files::LocalTempFileOptions;
+use qubit_local_files::options::LocalPersistOptions;
+use qubit_local_files::options::LocalTempFileOptions;
+use qubit_local_files::outcome::LocalPersistCleanupState;
+use qubit_local_files::outcome::LocalPersistMethod;
 #[cfg(feature = "internal-test-support")]
-use qubit_local_files::install_test_fault;
+use qubit_local_files::test_support::install_test_fault;
 
 #[cfg(feature = "internal-test-support")]
 fn run_in_test_fault_process<F>(test_name: &str, fault: &str, action: F)
@@ -49,7 +49,7 @@ where
 }
 
 #[cfg(unix)]
-use qubit_local_files::LocalTempDirectoryOptions;
+use qubit_local_files::options::LocalTempDirectoryOptions;
 
 /// Verifies outcome accessors report the completed temporary-file publication.
 #[test]

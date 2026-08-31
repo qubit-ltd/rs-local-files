@@ -113,13 +113,19 @@ fn remove_rooted_directory_tree(root: &crate::rooted::Root, path: &crate::local:
     while let Some(item) = work.pop() {
         match item {
             DeleteWork::Inspect(current) => {
-                let metadata = root
-                    .symlink_metadata(&current)
-                    .map_err(|error| rooted_delete_entry_error(&current, removed_any, error))?;
+                let metadata = match root.symlink_metadata(&current) {
+                    Ok(metadata) => metadata,
+                    Err(error) => {
+                        return Err(rooted_delete_entry_error(&current, removed_any, error));
+                    }
+                };
                 if metadata.kind() == crate::rooted::EntryKind::Directory {
-                    let entries = root
-                        .read_dir(&current)
-                        .map_err(|error| rooted_delete_entry_error(&current, removed_any, error))?;
+                    let entries = match root.read_dir(&current) {
+                        Ok(entries) => entries,
+                        Err(error) => {
+                            return Err(rooted_delete_entry_error(&current, removed_any, error));
+                        }
+                    };
                     work.push(DeleteWork::RemoveDirectory(current.clone()));
                     for entry in entries.into_iter().rev() {
                         let child = current
@@ -129,15 +135,17 @@ fn remove_rooted_directory_tree(root: &crate::rooted::Root, path: &crate::local:
                     }
                 } else {
                     maybe_fail_rooted_delete(&current, removed_any)?;
-                    root.remove_file(&current)
-                        .map_err(|error| rooted_delete_entry_error(&current, removed_any, error))?;
+                    if let Err(error) = root.remove_file(&current) {
+                        return Err(rooted_delete_entry_error(&current, removed_any, error));
+                    }
                     removed_any = true;
                 }
             }
             DeleteWork::RemoveDirectory(current) => {
                 maybe_fail_rooted_delete(&current, removed_any)?;
-                root.remove_empty_dir(&current)
-                    .map_err(|error| rooted_delete_entry_error(&current, removed_any, error))?;
+                if let Err(error) = root.remove_empty_dir(&current) {
+                    return Err(rooted_delete_entry_error(&current, removed_any, error));
+                }
                 removed_any = true;
             }
         }

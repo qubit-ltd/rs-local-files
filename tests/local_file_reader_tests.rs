@@ -13,9 +13,9 @@ use std::io::Seek;
 use std::io::SeekFrom;
 
 use qubit_local_files::LocalFileSystem;
-use qubit_local_files::LocalReadOptions;
+use qubit_local_files::options::LocalReadOptions;
 #[cfg(feature = "internal-test-support")]
-use qubit_local_files::install_test_fault;
+use qubit_local_files::test_support::install_test_fault;
 use tempfile::tempdir;
 
 /// Verifies readers expose the native handle and support sequential seeking.

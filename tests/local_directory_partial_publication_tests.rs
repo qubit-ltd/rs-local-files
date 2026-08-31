@@ -12,11 +12,11 @@ use std::path::Path;
 use std::path::PathBuf;
 use std::process::Command;
 
-use qubit_local_files::LocalCreateDirectoryOptions;
-use qubit_local_files::LocalDeleteOptions;
-use qubit_local_files::LocalFileErrorKind;
 use qubit_local_files::LocalFileSystem;
-use qubit_local_files::install_test_fault;
+use qubit_local_files::error::LocalFileErrorKind;
+use qubit_local_files::options::LocalCreateDirectoryOptions;
+use qubit_local_files::options::LocalDeleteOptions;
+use qubit_local_files::test_support::install_test_fault;
 use tempfile::tempdir;
 
 #[derive(Clone, Copy, Debug)]

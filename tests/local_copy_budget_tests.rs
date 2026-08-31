@@ -12,12 +12,13 @@ use std::path::Path;
 use std::path::PathBuf;
 use std::time::Duration;
 
-use qubit_local_files::LocalCopyFailure;
-use qubit_local_files::LocalCopyOptions;
-use qubit_local_files::LocalCopyTypeConflictPolicy;
-use qubit_local_files::LocalFileErrorKind;
 use qubit_local_files::LocalFileSystem;
-use qubit_local_files::LocalResourceKind;
+use qubit_local_files::error::LocalFileErrorKind;
+use qubit_local_files::error::LocalResourceKind;
+use qubit_local_files::options::LocalCopyOptions;
+use qubit_local_files::options::LocalCopyTypeConflictPolicy;
+use qubit_local_files::outcome::LocalCopyFailure;
+use qubit_local_files::outcome::LocalCopyFailureState;
 use tempfile::TempDir;
 use tempfile::tempdir;
 
@@ -179,6 +180,7 @@ fn test_copy_budget_matrix_enforces_deadline() {
             )
             .expect_err("an immediate copy deadline should expire");
         assert_eq!(LocalFileErrorKind::Io, failure.error().kind());
+        assert_eq!(LocalCopyFailureState::Unchanged, failure.state());
         assert_eq!(
             Some(std::io::ErrorKind::TimedOut),
             failure.error().io_error().map(std::io::Error::kind),

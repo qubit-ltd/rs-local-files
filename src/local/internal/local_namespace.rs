@@ -16,5 +16,8 @@ pub(crate) enum LocalNamespace {
     /// Process-visible Host namespace.
     Host,
     /// Descriptor- or handle-relative Rooted namespace.
-    Rooted(RootedLocalFileSystem),
+    Rooted(
+        /// Opened Rooted authority and its immutable observations.
+        RootedLocalFileSystem,
+    ),
 }

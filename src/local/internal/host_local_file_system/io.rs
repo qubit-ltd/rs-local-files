@@ -96,7 +96,7 @@ impl HostLocalFileSystem {
             );
         }
         if options.mode() != LocalWriteMode::Append {
-            let implements_durability = Self::protocols().supports_durable_file_copy();
+            let implements_durability = Self::capabilities().supports_durable_file_copy();
             ensure_required_directory_durability(
                 options.durability(),
                 LocalFileOperation::OpenWriter,

@@ -19,8 +19,6 @@ use std::path::Path;
 use std::path::PathBuf;
 use std::sync::Arc;
 
-use log::warn;
-
 use super::internal::LocalTempResourceBackend;
 use super::internal::LocalTempResourceState;
 use super::internal::RootedTempResourceBackend;
@@ -569,52 +567,7 @@ impl Seek for LocalTempFile {
 impl Drop for LocalTempFile {
     /// Performs best-effort cleanup only while the resource remains owned.
     fn drop(&mut self) {
-        self.close();
-        match self.state {
-            LocalTempResourceState::Owned => {
-                if let Err(error) = self.remove_resource() {
-                    // TODO(deferred): Route cleanup diagnostics through
-                    // caller-controlled redaction, sampling, and metrics
-                    // policy. This is intentionally
-                    // postponed until that policy is
-                    // designed; keep the current warning behavior unchanged.
-                    warn!("failed to remove temporary file {}: {}", self.path.display(), error);
-                    return;
-                }
-                self.state = LocalTempResourceState::SandboxPending;
-                if let Err(error) = self.release_sandbox() {
-                    // TODO(deferred): Route cleanup diagnostics through
-                    // caller-controlled redaction, sampling, and metrics
-                    // policy. This is intentionally
-                    // postponed until that policy is
-                    // designed; keep the current warning behavior unchanged.
-                    warn!(
-                        "failed to remove temporary file sandbox for {}: {}",
-                        self.path.display(),
-                        error
-                    );
-                } else {
-                    self.state = LocalTempResourceState::Released;
-                }
-            }
-            LocalTempResourceState::SandboxPending => {
-                if let Err(error) = self.release_sandbox() {
-                    // TODO(deferred): Route cleanup diagnostics through
-                    // caller-controlled redaction, sampling, and metrics
-                    // policy. This is intentionally
-                    // postponed until that policy is
-                    // designed; keep the current warning behavior unchanged.
-                    warn!(
-                        "failed to remove temporary file sandbox for {}: {}",
-                        self.path.display(),
-                        error
-                    );
-                } else {
-                    self.state = LocalTempResourceState::Released;
-                }
-            }
-            LocalTempResourceState::Indeterminate | LocalTempResourceState::Released => {}
-        }
+        let _ = self.cleanup();
     }
 }
 

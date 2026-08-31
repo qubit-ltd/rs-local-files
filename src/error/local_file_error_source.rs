@@ -20,11 +20,20 @@ use super::LocalResourceLimitError;
 #[non_exhaustive]
 pub enum LocalFileErrorSource {
     /// Operating-system I/O failure.
-    Io(io::Error),
+    Io(
+        /// Retained operating-system error.
+        io::Error,
+    ),
     /// Canonical native path conversion failure.
-    PathCodec(LocalPathCodecError),
+    PathCodec(
+        /// Retained canonical path conversion error.
+        LocalPathCodecError,
+    ),
     /// Local resource budget could not satisfy an acquisition request.
-    ResourceLimit(LocalResourceLimitError),
+    ResourceLimit(
+        /// Retained structured resource-budget error.
+        LocalResourceLimitError,
+    ),
 }
 
 impl fmt::Display for LocalFileErrorSource {

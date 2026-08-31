@@ -232,7 +232,8 @@ impl Root {
         }
         #[cfg(windows)]
         {
-            local::create_rooted_symlink(&self.directory, &self.path, target, path, targets_directory)
+            self.create_symlink_for_copy(target, path, targets_directory)
+                .map_err(local::RootedSymlinkCreateError::into_io_error)
         }
         #[cfg(not(any(unix, windows)))]
         {
@@ -244,12 +245,57 @@ impl Root {
         }
     }
 
-    /// Reports whether a symbolic link currently resolves to a directory.
+    /// Creates a symbolic link while retaining publication and rollback facts.
+    pub(super) fn create_symlink_for_copy(
+        &self,
+        target: &Path,
+        path: &path::Path,
+        targets_directory: bool,
+    ) -> std::result::Result<(), local::RootedSymlinkCreateError> {
+        #[cfg(feature = "internal-test-support")]
+        if local::take_test_support("rooted-copy-symlink-create") {
+            return Err(local::RootedSymlinkCreateError::new(
+                local::RootedSymlinkCreateFailureState::Unchanged,
+                local::test_fault_error(),
+                None,
+            ));
+        }
+        #[cfg(unix)]
+        {
+            let _ = targets_directory;
+            local::create_rooted_symlink(&self.directory, &self.path, target, path).map_err(|primary| {
+                local::RootedSymlinkCreateError::new(local::RootedSymlinkCreateFailureState::Unchanged, primary, None)
+            })
+        }
+        #[cfg(windows)]
+        {
+            local::create_rooted_symlink(&self.directory, &self.path, target, path, targets_directory)
+        }
+        #[cfg(not(any(unix, windows)))]
+        {
+            let _ = (target, path, targets_directory);
+            Err(local::RootedSymlinkCreateError::new(
+                local::RootedSymlinkCreateFailureState::Unchanged,
+                Error::new(
+                    ErrorKind::Unsupported,
+                    "symbolic links are unsupported on this platform",
+                ),
+                None,
+            ))
+        }
+    }
+
+    /// Reports whether a symbolic-link entry was created as a directory link.
     ///
-    /// Broken links and non-directory targets return `false`.
+    /// This inspects only the final link handle and never dereferences its
+    /// target, so dangling and external links remain classifiable.
+    ///
+    /// # Errors
+    ///
+    /// Returns an I/O error when the final link cannot be opened or inspected.
     #[cfg(windows)]
     #[must_use]
-    pub fn symlink_targets_directory(&self, path: &path::Path) -> bool {
+    pub fn symlink_targets_directory(&self, path: &path::Path) -> Result<bool> {
         local::rooted_link_targets_directory(&self.directory, path)
     }
 

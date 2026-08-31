@@ -14,9 +14,9 @@ use std::path::PathBuf;
 
 use libfuzzer_sys::fuzz_target;
 use qubit_local_files::LocalFileSystem;
-use qubit_local_files::LocalListOptions;
-use qubit_local_files::LocalTempDirectoryOptions;
-use qubit_local_files::LocalTempFileOptions;
+use qubit_local_files::options::LocalListOptions;
+use qubit_local_files::options::LocalTempDirectoryOptions;
+use qubit_local_files::options::LocalTempFileOptions;
 
 const MAX_FUZZ_INPUT_LEN: usize = 256;
 const MAX_OPERATIONS: usize = 16;

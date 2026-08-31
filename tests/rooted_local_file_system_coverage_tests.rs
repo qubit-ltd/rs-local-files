@@ -13,39 +13,41 @@ use std::path::Path;
 #[cfg(not(windows))]
 use std::time::Duration;
 
-use qubit_local_files::LocalAtomicityRequirement;
-use qubit_local_files::LocalCopyConflictPolicy;
-use qubit_local_files::LocalCopyFailureState;
-#[cfg(not(windows))]
-use qubit_local_files::LocalCopyMethod;
-use qubit_local_files::LocalCopyOptions;
-use qubit_local_files::LocalCopyTypeConflictPolicy;
-use qubit_local_files::LocalCreateDirectoryOptions;
-use qubit_local_files::LocalDeleteOptions;
-#[cfg(feature = "internal-test-support")]
-use qubit_local_files::LocalDirectoryReopenPolicy;
-#[cfg(not(windows))]
-use qubit_local_files::LocalDurabilityRequirement;
-use qubit_local_files::LocalFileErrorKind;
-use qubit_local_files::LocalFileKind;
-use qubit_local_files::LocalFileOperation;
 use qubit_local_files::LocalFileSystem;
-use qubit_local_files::LocalFileSystemScope;
-use qubit_local_files::LocalListOptions;
-use qubit_local_files::LocalPersistOptions;
-use qubit_local_files::LocalReadOptions;
-use qubit_local_files::LocalRenameFailureState;
-use qubit_local_files::LocalRenameOptions;
-use qubit_local_files::LocalTempDirectoryOptions;
-use qubit_local_files::LocalTempFileOptions;
+use qubit_local_files::error::LocalFileErrorKind;
+use qubit_local_files::error::LocalFileOperation;
+#[cfg(unix)]
+use qubit_local_files::options::LocalCopyConflictPolicy;
+use qubit_local_files::options::LocalCopyOptions;
+#[cfg(unix)]
+use qubit_local_files::options::LocalCopyTypeConflictPolicy;
+use qubit_local_files::options::LocalCreateDirectoryOptions;
+use qubit_local_files::options::LocalDeleteOptions;
 #[cfg(feature = "internal-test-support")]
-use qubit_local_files::LocalWalkErrorPolicy;
-use qubit_local_files::LocalWriteFailureState;
-use qubit_local_files::LocalWriteMode;
-use qubit_local_files::LocalWriteOptions;
-use qubit_local_files::LocalWriterState;
+use qubit_local_files::options::LocalDirectoryReopenPolicy;
+use qubit_local_files::options::LocalListOptions;
+use qubit_local_files::options::LocalPersistOptions;
+use qubit_local_files::options::LocalReadOptions;
+use qubit_local_files::options::LocalRenameOptions;
+use qubit_local_files::options::LocalTempDirectoryOptions;
+use qubit_local_files::options::LocalTempFileOptions;
 #[cfg(feature = "internal-test-support")]
-use qubit_local_files::install_test_fault;
+use qubit_local_files::options::LocalWalkErrorPolicy;
+use qubit_local_files::options::LocalWriteMode;
+use qubit_local_files::options::LocalWriteOptions;
+use qubit_local_files::outcome::LocalCopyFailureState;
+#[cfg(not(windows))]
+use qubit_local_files::outcome::LocalCopyMethod;
+use qubit_local_files::outcome::LocalFileKind;
+use qubit_local_files::outcome::LocalRenameFailureState;
+use qubit_local_files::outcome::LocalWriteFailureState;
+use qubit_local_files::outcome::LocalWriterState;
+use qubit_local_files::path::LocalFileSystemScope;
+use qubit_local_files::policy::LocalAtomicityRequirement;
+#[cfg(not(windows))]
+use qubit_local_files::policy::LocalDurabilityRequirement;
+#[cfg(feature = "internal-test-support")]
+use qubit_local_files::test_support::install_test_fault;
 use tempfile::tempdir;
 
 /// Runs a test-support-only fault case in an isolated child test process.
@@ -189,10 +191,10 @@ fn test_rooted_local_file_system_exposes_opened_anchor_and_capabilities() {
     assert_eq!(LocalFileSystemScope::Rooted, rooted.scope(),);
     assert_eq!(Some(directory.path()), rooted.diagnostic_root());
     assert_eq!(
-        rooted.protocols().supports_rooted_operations(),
+        rooted.capabilities().supports_rooted_operations(),
         LocalFileSystem::rooted(directory.path())
             .expect("second root authority should open")
-            .protocols()
+            .capabilities()
             .supports_rooted_operations(),
     );
 }
@@ -976,7 +978,7 @@ fn test_rooted_copy_exercises_link_and_directory_destination_policies() {
 fn test_rooted_local_file_system_copy_and_rename_report_durability() {
     let directory = tempdir().expect("temporary directory should be created");
     let rooted = LocalFileSystem::rooted(directory.path()).expect("root authority should open");
-    let implements_durability = rooted.protocols().supports_durable_file_copy();
+    let implements_durability = rooted.capabilities().supports_durable_file_copy();
 
     fs::write(directory.path().join("copy-source"), b"copy").expect("rooted copy source should be written");
     let preferred_copy = rooted

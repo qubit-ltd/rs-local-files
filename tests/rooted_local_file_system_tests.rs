@@ -14,36 +14,36 @@ use std::io::Write;
 use std::path::Path;
 use std::path::PathBuf;
 
-use qubit_local_files::LocalCopyConflictPolicy;
-#[cfg(feature = "internal-test-support")]
-use qubit_local_files::LocalCopyFailureState;
-use qubit_local_files::LocalCopyOptions;
-use qubit_local_files::LocalCopyTypeConflictPolicy;
-use qubit_local_files::LocalCreateDirectoryOptions;
-use qubit_local_files::LocalDeleteOptions;
-use qubit_local_files::LocalDirectoryReopenPolicy;
-#[cfg(feature = "internal-test-support")]
-use qubit_local_files::LocalDurabilityRequirement;
-use qubit_local_files::LocalFileErrorKind;
-use qubit_local_files::LocalFileKind;
 use qubit_local_files::LocalFileSystem;
-use qubit_local_files::LocalListOptions;
+use qubit_local_files::error::LocalFileErrorKind;
+use qubit_local_files::error::LocalResourceKind;
+use qubit_local_files::options::LocalCopyConflictPolicy;
+use qubit_local_files::options::LocalCopyOptions;
+use qubit_local_files::options::LocalCopyTypeConflictPolicy;
+use qubit_local_files::options::LocalCreateDirectoryOptions;
+use qubit_local_files::options::LocalDeleteOptions;
+use qubit_local_files::options::LocalDirectoryReopenPolicy;
+use qubit_local_files::options::LocalListOptions;
 #[cfg(feature = "internal-test-support")]
-use qubit_local_files::LocalMetadataPreservePolicy;
-use qubit_local_files::LocalPersistFailureState;
-use qubit_local_files::LocalPersistStage;
-use qubit_local_files::LocalReadOptions;
-use qubit_local_files::LocalRenameFailureState;
-use qubit_local_files::LocalRenameOptions;
-use qubit_local_files::LocalResourceKind;
-use qubit_local_files::LocalTempDirectoryOptions;
-use qubit_local_files::LocalTempFileOptions;
-use qubit_local_files::LocalWriteFailureState;
-use qubit_local_files::LocalWriteMode;
-use qubit_local_files::LocalWriteOptions;
-use qubit_local_files::LocalWriterState;
+use qubit_local_files::options::LocalMetadataPreservePolicy;
+use qubit_local_files::options::LocalReadOptions;
+use qubit_local_files::options::LocalRenameOptions;
+use qubit_local_files::options::LocalTempDirectoryOptions;
+use qubit_local_files::options::LocalTempFileOptions;
+use qubit_local_files::options::LocalWriteMode;
+use qubit_local_files::options::LocalWriteOptions;
 #[cfg(feature = "internal-test-support")]
-use qubit_local_files::install_test_fault;
+use qubit_local_files::outcome::LocalCopyFailureState;
+use qubit_local_files::outcome::LocalFileKind;
+use qubit_local_files::outcome::LocalPersistFailureState;
+use qubit_local_files::outcome::LocalPersistStage;
+use qubit_local_files::outcome::LocalRenameFailureState;
+use qubit_local_files::outcome::LocalWriteFailureState;
+use qubit_local_files::outcome::LocalWriterState;
+#[cfg(feature = "internal-test-support")]
+use qubit_local_files::policy::LocalDurabilityRequirement;
+#[cfg(feature = "internal-test-support")]
+use qubit_local_files::test_support::install_test_fault;
 #[cfg(target_os = "linux")]
 use tempfile::NamedTempFile;
 use tempfile::tempdir;

@@ -8,6 +8,9 @@
 //! Deterministic, instance-local fault injection for tests.
 
 mod internal;
+#[cfg(feature = "internal-test-support")]
+#[doc(hidden)]
+pub mod internal_contract;
 mod test_fault_plan;
 mod test_fault_point;
 
@@ -15,3 +18,10 @@ mod test_fault_point;
 #[doc(hidden)]
 pub use test_fault_plan::TestFaultPlan;
 pub use test_fault_point::TestFaultPoint;
+
+#[cfg(feature = "internal-test-support")]
+#[doc(hidden)]
+pub use crate::local::TestFaultGuard;
+#[cfg(feature = "internal-test-support")]
+#[doc(hidden)]
+pub use crate::local::install_test_fault;

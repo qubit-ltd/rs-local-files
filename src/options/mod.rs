@@ -36,3 +36,7 @@ pub use local_temp_file_options::LocalTempFileOptions;
 pub use local_walk_error_policy::LocalWalkErrorPolicy;
 pub use local_write_mode::LocalWriteMode;
 pub use local_write_options::LocalWriteOptions;
+
+pub use crate::local::LocalCopyConflictPolicy;
+pub use crate::local::LocalCopyTypeConflictPolicy;
+pub use crate::local::LocalPersistOptions;

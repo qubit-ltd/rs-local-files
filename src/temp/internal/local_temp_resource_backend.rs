@@ -16,7 +16,13 @@ use super::RootedTempResourceBackend;
 #[derive(Debug)]
 pub(crate) enum LocalTempResourceBackend {
     /// A host path already bound at creation time.
-    Host(HostTempResourceBackend),
+    Host(
+        /// Bound Host resource ownership state.
+        HostTempResourceBackend,
+    ),
     /// A descendant authorized by an opened root handle.
-    Rooted(RootedTempResourceBackend),
+    Rooted(
+        /// Handle-authoritative Rooted resource ownership state.
+        RootedTempResourceBackend,
+    ),
 }

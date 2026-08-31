@@ -27,7 +27,7 @@ use crate::LocalResult;
 /// ```
 /// use std::path::Path;
 ///
-/// use qubit_local_files::LocalPaths;
+/// use qubit_local_files::path::LocalPaths;
 ///
 /// let paths = LocalPaths::rooted();
 /// let components = paths.to_canonical_components(Path::new("/reports/today"))?;

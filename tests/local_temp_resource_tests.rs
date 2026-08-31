@@ -10,12 +10,12 @@ use std::fs;
 #[cfg(any(target_os = "linux", target_os = "macos"))]
 use std::os::unix::ffi::OsStringExt;
 
-use qubit_local_files::LocalFileErrorKind;
 use qubit_local_files::LocalFileSystem;
+use qubit_local_files::error::LocalFileErrorKind;
+use qubit_local_files::options::LocalTempDirectoryOptions;
+use qubit_local_files::options::LocalTempFileOptions;
 #[cfg(any(target_os = "linux", target_os = "macos"))]
-use qubit_local_files::LocalPersistFailureState;
-use qubit_local_files::LocalTempDirectoryOptions;
-use qubit_local_files::LocalTempFileOptions;
+use qubit_local_files::outcome::LocalPersistFailureState;
 use tempfile::tempdir;
 
 /// Verifies temporary-file options bind the parent and apply both affixes.

@@ -175,7 +175,7 @@ impl<T> LocalPersistError<T> {
     ///
     /// ```compile_fail
     /// #![deny(unused_must_use)]
-    /// use qubit_local_files::LocalPersistError;
+    /// use qubit_local_files::error::LocalPersistError;
     ///
     /// fn discard(error: LocalPersistError<()>) {
     ///     error.into_parts();

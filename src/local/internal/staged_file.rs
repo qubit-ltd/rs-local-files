@@ -15,8 +15,6 @@ use std::io::Result;
 use std::path::Path;
 use std::path::PathBuf;
 
-use log::warn;
-
 /// Owns a staging file until its filesystem commit succeeds.
 ///
 /// Dropping an armed guard closes the file handle and best-effort removes its
@@ -105,8 +103,7 @@ impl StagedFile {
 
     /// Closes and removes the uncommitted staging file.
     ///
-    /// Cleanup remains armed when removal fails so [`Drop`] can retry and log
-    /// the failure.
+    /// Cleanup remains armed when removal fails so the caller can retry.
     ///
     /// # Errors
     /// Returns the I/O error reported while removing the staging path.
@@ -139,19 +136,6 @@ impl StagedFile {
 impl Drop for StagedFile {
     /// Closes and best-effort removes an uncommitted staging file.
     fn drop(&mut self) {
-        if let Err(error) = self.cleanup()
-            && let Some(path) = self.path.as_ref()
-        {
-            // TODO(deferred): Route cleanup diagnostics through
-            // caller-controlled redaction, sampling, and metrics
-            // policy. This is intentionally postponed until that
-            // policy is designed; keep the current warning behavior
-            // unchanged for now.
-            warn!(
-                "failed to remove uncommitted staging file '{}': {}",
-                path.display(),
-                error
-            );
-        }
+        let _ = self.cleanup();
     }
 }

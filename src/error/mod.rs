@@ -24,3 +24,6 @@ pub use local_path_codec_error::LocalPathCodecError;
 pub use local_resource_kind::LocalResourceKind;
 pub use local_resource_limit_error::LocalResourceLimitError;
 pub use local_result::LocalResult;
+
+pub use crate::local::LocalPersistError;
+pub use crate::writer::LocalFileCommitError;

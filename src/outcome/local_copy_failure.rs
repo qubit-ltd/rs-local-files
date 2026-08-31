@@ -192,7 +192,7 @@ impl LocalCopyFailure {
         self.details.staging_path.as_deref()
     }
 
-    /// Returns the secondary staging-cleanup error when cleanup failed.
+    /// Returns the secondary rollback or cleanup error when cleanup failed.
     #[must_use]
     #[inline(always)]
     pub fn cleanup_error(&self) -> Option<&LocalFileError> {
@@ -244,7 +244,10 @@ fn map_backend_path(path: &Path, backend_base: &Path, namespace_base: &Path, roo
 }
 
 /// Maps structured native copy facts to the strongest proven failure state.
-const fn copy_failure_state(stage: LocalCopyDirStage, partial_stats: LocalCopyStats) -> LocalCopyFailureState {
+pub(crate) const fn copy_failure_state(
+    stage: LocalCopyDirStage,
+    partial_stats: LocalCopyStats,
+) -> LocalCopyFailureState {
     if partial_stats.files() > 0 || partial_stats.directories() > 0 {
         return LocalCopyFailureState::PartiallyPublished;
     }
@@ -253,12 +256,16 @@ const fn copy_failure_state(stage: LocalCopyDirStage, partial_stats: LocalCopySt
         | LocalCopyDirStage::InspectSourceEntry
         | LocalCopyDirStage::ReadSourceDirectory
         | LocalCopyDirStage::SynchronizeFile
-        | LocalCopyDirStage::CleanupTemporaryFile => LocalCopyFailureState::Unchanged,
+        | LocalCopyDirStage::CleanupTemporaryFile
+        | LocalCopyDirStage::PublishSymlinkUnchanged => LocalCopyFailureState::Unchanged,
+        LocalCopyDirStage::PublishSymlinkPartially => LocalCopyFailureState::PartiallyPublished,
         LocalCopyDirStage::PrepareDestination
         | LocalCopyDirStage::CopyFileContents
         | LocalCopyDirStage::PreservePermissions
         | LocalCopyDirStage::CommitFile
         | LocalCopyDirStage::UpdateStatistics => LocalCopyFailureState::Indeterminate,
+        #[cfg(windows)]
+        LocalCopyDirStage::PublishSymlinkIndeterminate => LocalCopyFailureState::Indeterminate,
     }
 }
 

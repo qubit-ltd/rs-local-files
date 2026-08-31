@@ -10,14 +10,14 @@
 
 use std::path::PathBuf;
 
-#[cfg(all(feature = "internal-test-support", not(windows)))]
-use qubit_local_files::LocalDurabilityRequirement;
-use qubit_local_files::LocalFileOperation;
 use qubit_local_files::LocalFileSystem;
-use qubit_local_files::LocalRenameFailureState;
-use qubit_local_files::LocalRenameOptions;
+use qubit_local_files::error::LocalFileOperation;
+use qubit_local_files::options::LocalRenameOptions;
+use qubit_local_files::outcome::LocalRenameFailureState;
+#[cfg(all(feature = "internal-test-support", not(windows)))]
+use qubit_local_files::policy::LocalDurabilityRequirement;
 #[cfg(feature = "internal-test-support")]
-use qubit_local_files::install_test_fault;
+use qubit_local_files::test_support::install_test_fault;
 
 /// Creates an absent process-specific path for a rename test.
 fn temp_path(name: &str) -> PathBuf {

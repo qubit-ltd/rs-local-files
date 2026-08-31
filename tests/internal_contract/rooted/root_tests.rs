@@ -12,11 +12,11 @@ use std::io::Read;
 use std::io::Write;
 use std::path::Path;
 
-use qubit_local_files::internal_test_support::EntryKind;
-use qubit_local_files::internal_test_support::InternalReadOptions;
-use qubit_local_files::internal_test_support::InternalWriteOptions;
-use qubit_local_files::internal_test_support::LocalRelativePath;
-use qubit_local_files::internal_test_support::Root;
+use qubit_local_files::test_support::internal_contract::EntryKind;
+use qubit_local_files::test_support::internal_contract::InternalReadOptions;
+use qubit_local_files::test_support::internal_contract::InternalWriteOptions;
+use qubit_local_files::test_support::internal_contract::LocalRelativePath;
+use qubit_local_files::test_support::internal_contract::Root;
 use tempfile::tempdir;
 
 /// Verifies an opened root performs descriptor-relative namespace operations

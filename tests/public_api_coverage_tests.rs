@@ -13,26 +13,27 @@ use std::io::Write;
 use std::path::Path;
 use std::time::Duration;
 
-use qubit_local_files::LocalCopyConflictPolicy;
-use qubit_local_files::LocalCopyOptions;
-use qubit_local_files::LocalCreateDirectoryOptions;
-use qubit_local_files::LocalDeleteOptions;
-use qubit_local_files::LocalFileErrorKind;
 use qubit_local_files::LocalFileSystem;
-use qubit_local_files::LocalFileSystemLimits;
-use qubit_local_files::LocalFileSystemProtocols;
-use qubit_local_files::LocalFileSystemScope;
-use qubit_local_files::LocalListOptions;
-use qubit_local_files::LocalPaths;
-use qubit_local_files::LocalReadOptions;
-use qubit_local_files::LocalRenameOptions;
-use qubit_local_files::LocalResourceKind;
-use qubit_local_files::LocalResourceLimitError;
-use qubit_local_files::LocalSymlinkPolicy;
-use qubit_local_files::LocalTempDirectoryOptions;
-use qubit_local_files::LocalTempFileOptions;
-use qubit_local_files::LocalWriteMode;
-use qubit_local_files::LocalWriteOptions;
+use qubit_local_files::capability::LocalFileSystemCapabilities;
+use qubit_local_files::capability::LocalFileSystemLimits;
+#[cfg(unix)]
+use qubit_local_files::error::LocalFileErrorKind;
+use qubit_local_files::error::LocalResourceKind;
+use qubit_local_files::error::LocalResourceLimitError;
+use qubit_local_files::options::LocalCopyConflictPolicy;
+use qubit_local_files::options::LocalCopyOptions;
+use qubit_local_files::options::LocalCreateDirectoryOptions;
+use qubit_local_files::options::LocalDeleteOptions;
+use qubit_local_files::options::LocalListOptions;
+use qubit_local_files::options::LocalReadOptions;
+use qubit_local_files::options::LocalRenameOptions;
+use qubit_local_files::options::LocalTempDirectoryOptions;
+use qubit_local_files::options::LocalTempFileOptions;
+use qubit_local_files::options::LocalWriteMode;
+use qubit_local_files::options::LocalWriteOptions;
+use qubit_local_files::path::LocalFileSystemScope;
+use qubit_local_files::path::LocalPaths;
+use qubit_local_files::policy::LocalSymlinkPolicy;
 use tempfile::tempdir;
 
 /// Verifies per-instance defaults are observable, replaceable, and used by
@@ -51,10 +52,10 @@ fn test_public_facade_uses_complete_instance_defaults() {
     let diagnostic_root =
         std::hint::black_box(LocalFileSystem::diagnostic_root as fn(&LocalFileSystem) -> Option<&Path>);
     assert!(diagnostic_root(&filesystem).is_none());
-    let protocols =
-        std::hint::black_box(LocalFileSystem::protocols as fn(&LocalFileSystem) -> LocalFileSystemProtocols);
+    let capabilities =
+        std::hint::black_box(LocalFileSystem::capabilities as fn(&LocalFileSystem) -> LocalFileSystemCapabilities);
     let limits = std::hint::black_box(LocalFileSystem::limits as fn(&LocalFileSystem) -> LocalFileSystemLimits);
-    assert!(protocols(&filesystem).supports_rooted_operations());
+    assert!(capabilities(&filesystem).supports_rooted_operations());
     assert_eq!(limits(&filesystem), filesystem.limits());
     let rooted_paths = LocalPaths::rooted();
     assert_eq!(LocalFileSystemScope::Rooted, rooted_paths.scope());
@@ -331,7 +332,7 @@ fn test_public_host_facade_delegates_ordinary_operations() {
     let filesystem = LocalFileSystem::host().expect("Host filesystem should open");
     assert_eq!(LocalFileSystemScope::Host, filesystem.scope());
     assert!(filesystem.diagnostic_root().is_none());
-    let _ = filesystem.protocols();
+    let _ = filesystem.capabilities();
     let _ = filesystem.limits();
     let _ = filesystem
         .limits_at(directory.path())
@@ -418,7 +419,7 @@ fn test_public_rooted_facade_delegates_relative_operations() {
     let filesystem = LocalFileSystem::rooted(directory.path()).expect("rooted filesystem should open");
     assert_eq!(LocalFileSystemScope::Rooted, filesystem.scope());
     assert_eq!(Some(directory.path()), filesystem.diagnostic_root());
-    let _ = filesystem.protocols();
+    let _ = filesystem.capabilities();
     let _ = filesystem.limits();
     let _ = filesystem
         .limits_at(Path::new("missing/child"))

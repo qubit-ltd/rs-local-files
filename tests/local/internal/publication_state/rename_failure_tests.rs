@@ -6,10 +6,10 @@
 //    Licensed under the Apache License, Version 2.0.
 // =============================================================================
 
-use qubit_local_files::LocalFileErrorKind;
 use qubit_local_files::LocalFileSystem;
-use qubit_local_files::LocalRenameFailureState;
-use qubit_local_files::LocalRenameOptions;
+use qubit_local_files::error::LocalFileErrorKind;
+use qubit_local_files::options::LocalRenameOptions;
+use qubit_local_files::outcome::LocalRenameFailureState;
 use tempfile::tempdir;
 
 /// Verifies a native rename failure before publication reports unchanged state.

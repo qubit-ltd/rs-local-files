@@ -11,7 +11,9 @@
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 #[must_use]
 pub struct LocalFilePermissions {
+    /// Portable read-only observation derived from native permissions.
     read_only: bool,
+    /// Unix mode bits when the current platform exposes them.
     unix_mode: Option<u32>,
 }
 

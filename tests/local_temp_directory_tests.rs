@@ -41,16 +41,16 @@ where
     assert!(status.success(), "test fault child should pass");
 }
 
-use qubit_local_files::LocalFileErrorKind;
-#[cfg(feature = "internal-test-support")]
-use qubit_local_files::LocalFileOperation;
 use qubit_local_files::LocalFileSystem;
-#[cfg(not(windows))]
-use qubit_local_files::LocalPersistFailureState;
-use qubit_local_files::LocalPersistOptions;
-use qubit_local_files::LocalTempDirectoryOptions;
+use qubit_local_files::error::LocalFileErrorKind;
 #[cfg(feature = "internal-test-support")]
-use qubit_local_files::install_test_fault;
+use qubit_local_files::error::LocalFileOperation;
+use qubit_local_files::options::LocalPersistOptions;
+use qubit_local_files::options::LocalTempDirectoryOptions;
+#[cfg(not(windows))]
+use qubit_local_files::outcome::LocalPersistFailureState;
+#[cfg(feature = "internal-test-support")]
+use qubit_local_files::test_support::install_test_fault;
 use tempfile::tempdir;
 
 fn rooted_host_path(root: &Path, virtual_path: &Path) -> PathBuf {
@@ -608,8 +608,7 @@ fn test_local_temp_directory_drop_tolerates_missing_entry() {
     assert!(!path.exists());
 }
 
-/// Verifies drop logs and tolerates a cleanup failure without removing a file
-/// that replaced the temporary directory path.
+/// Verifies silent best-effort drop does not remove a replacement file.
 #[test]
 fn test_local_temp_directory_drop_tolerates_replaced_file() {
     let parent = tempdir().expect("temporary parent should be created");

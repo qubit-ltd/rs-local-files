@@ -19,11 +19,20 @@ use crate::local::LocalRootAtomicWriter;
 #[derive(Debug)]
 pub(crate) enum LocalFileWriterBackend {
     /// Same-directory staged publication.
-    Staged(LocalAtomicWriter),
+    Staged(
+        /// Host same-directory staging writer.
+        LocalAtomicWriter,
+    ),
     /// Descriptor- or handle-relative same-directory staged publication.
-    Rooted(LocalRootAtomicWriter),
+    Rooted(
+        /// Rooted descriptor- or handle-relative staging writer.
+        LocalRootAtomicWriter,
+    ),
     /// Direct append to an existing file.
-    Append(File),
+    Append(
+        /// Direct native handle opened for append.
+        File,
+    ),
 }
 
 impl LocalFileWriterBackend {

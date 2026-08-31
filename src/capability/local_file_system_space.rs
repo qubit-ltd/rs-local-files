@@ -11,8 +11,11 @@
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 #[must_use]
 pub struct LocalFileSystemSpace {
+    /// Total volume capacity in bytes, when the authority reports it.
     capacity_bytes: Option<u64>,
+    /// Unallocated volume capacity in bytes, including privileged reserve.
     free_bytes: Option<u64>,
+    /// Unallocated capacity in bytes available to the current caller.
     available_bytes: Option<u64>,
 }
 
@@ -29,21 +32,21 @@ impl LocalFileSystemSpace {
 
     /// Returns the total filesystem capacity when it can be observed.
     #[must_use]
-    #[inline(always)]
+    #[inline]
     pub const fn capacity_bytes(&self) -> Option<u64> {
         self.capacity_bytes
     }
 
     /// Returns filesystem free capacity, including reserved space, when known.
     #[must_use]
-    #[inline(always)]
+    #[inline]
     pub const fn free_bytes(&self) -> Option<u64> {
         self.free_bytes
     }
 
     /// Returns capacity currently available to the calling identity when known.
     #[must_use]
-    #[inline(always)]
+    #[inline]
     pub const fn available_bytes(&self) -> Option<u64> {
         self.available_bytes
     }

@@ -7,7 +7,7 @@
 // =============================================================================
 //! Coverage for explicit native limit states.
 
-use qubit_local_files::SizeLimit;
+use qubit_local_files::capability::SizeLimit;
 
 /// Verifies every public size-limit state remains distinguishable.
 #[test]

@@ -13,25 +13,25 @@ use std::fs;
 use std::io;
 use std::path::Path;
 
-use qubit_local_files::LocalCopyConflictPolicy;
-use qubit_local_files::LocalCopyFailureState;
-use qubit_local_files::LocalCopyMethod;
-use qubit_local_files::LocalCopyOptions;
-use qubit_local_files::LocalCreateDirectoryOptions;
-use qubit_local_files::LocalDeleteOptions;
 use qubit_local_files::LocalFileError;
-use qubit_local_files::LocalFileErrorKind;
-use qubit_local_files::LocalFileErrorSource;
-use qubit_local_files::LocalFileKind;
-use qubit_local_files::LocalFileNames;
-use qubit_local_files::LocalFileOperation;
 use qubit_local_files::LocalFileSystem;
-use qubit_local_files::LocalFileSystemLimits;
-use qubit_local_files::LocalFileSystemProtocols;
-use qubit_local_files::LocalPathCodecError;
-use qubit_local_files::LocalPaths;
-use qubit_local_files::LocalRenameFailureState;
-use qubit_local_files::LocalRenameOptions;
+use qubit_local_files::capability::LocalFileSystemCapabilities;
+use qubit_local_files::capability::LocalFileSystemLimits;
+use qubit_local_files::error::LocalFileErrorKind;
+use qubit_local_files::error::LocalFileErrorSource;
+use qubit_local_files::error::LocalFileOperation;
+use qubit_local_files::error::LocalPathCodecError;
+use qubit_local_files::options::LocalCopyConflictPolicy;
+use qubit_local_files::options::LocalCopyOptions;
+use qubit_local_files::options::LocalCreateDirectoryOptions;
+use qubit_local_files::options::LocalDeleteOptions;
+use qubit_local_files::options::LocalRenameOptions;
+use qubit_local_files::outcome::LocalCopyFailureState;
+use qubit_local_files::outcome::LocalCopyMethod;
+use qubit_local_files::outcome::LocalFileKind;
+use qubit_local_files::outcome::LocalRenameFailureState;
+use qubit_local_files::path::LocalFileNames;
+use qubit_local_files::path::LocalPaths;
 use tempfile::tempdir;
 
 /// Verifies every capability accessor returns a coherent platform snapshot.
@@ -39,16 +39,17 @@ use tempfile::tempdir;
 fn test_capability_snapshot_exposes_all_guarantees() {
     let filesystem = LocalFileSystem::host().expect("Host filesystem should open");
     let capabilities = std::hint::black_box(
-        LocalFileSystem::protocols as fn(&LocalFileSystem) -> LocalFileSystemProtocols,
+        LocalFileSystem::capabilities as fn(&LocalFileSystem) -> LocalFileSystemCapabilities,
     )(&filesystem);
 
     let supports_rooted = std::hint::black_box(
-        LocalFileSystemProtocols::supports_rooted_operations as fn(LocalFileSystemProtocols) -> bool,
+        LocalFileSystemCapabilities::supports_rooted_operations as fn(LocalFileSystemCapabilities) -> bool,
     );
     assert!(supports_rooted(capabilities));
     let _ = capabilities.supports_atomic_rename();
-    let atomic_replace =
-        std::hint::black_box(LocalFileSystemProtocols::supports_atomic_replace as fn(LocalFileSystemProtocols) -> bool);
+    let atomic_replace = std::hint::black_box(
+        LocalFileSystemCapabilities::supports_atomic_replace as fn(LocalFileSystemCapabilities) -> bool,
+    );
     assert_eq!(
         cfg!(any(unix, windows)),
         std::hint::black_box(atomic_replace)(capabilities),
@@ -58,10 +59,11 @@ fn test_capability_snapshot_exposes_all_guarantees() {
 
     let limits =
         std::hint::black_box(LocalFileSystem::limits as fn(&LocalFileSystem) -> LocalFileSystemLimits)(&filesystem);
-    let max_path_bytes = std::hint::black_box(LocalFileSystemLimits::max_path_bytes as fn(&LocalFileSystemLimits) -> _);
-    let max_file_name_bytes =
-        std::hint::black_box(LocalFileSystemLimits::max_file_name_bytes as fn(&LocalFileSystemLimits) -> _);
-    assert_eq!(max_path_bytes(&limits), max_file_name_bytes(&limits));
+    let max_path_length =
+        std::hint::black_box(LocalFileSystemLimits::max_path_length as fn(&LocalFileSystemLimits) -> _);
+    let max_component_length =
+        std::hint::black_box(LocalFileSystemLimits::max_component_length as fn(&LocalFileSystemLimits) -> _);
+    assert_eq!(max_path_length(&limits), max_component_length(&limits));
 }
 
 /// Verifies structured errors preserve each supported I/O classification and

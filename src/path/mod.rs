@@ -19,3 +19,5 @@ pub use local_namespace_path::LocalNamespacePath;
 pub use local_path_codec::LocalPathCodec;
 pub use local_path_resolver::LocalPathResolver;
 pub use local_paths::LocalPaths;
+
+pub use crate::local_file_system_scope::LocalFileSystemScope;

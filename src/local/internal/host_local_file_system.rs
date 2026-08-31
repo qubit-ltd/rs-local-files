@@ -44,7 +44,7 @@ pub(super) use crate::LocalDeleteOutcome;
 pub(super) use crate::LocalFileError;
 pub(super) use crate::LocalFileErrorKind;
 pub(super) use crate::LocalFileOperation;
-pub(super) use crate::LocalFileSystemProtocols;
+pub(super) use crate::LocalFileSystemCapabilities;
 pub(super) use crate::LocalMetadataPreservePolicy;
 pub(super) use crate::LocalRenameFailure;
 pub(super) use crate::LocalRenameFailureState;
@@ -75,9 +75,9 @@ pub(crate) struct HostLocalFileSystem {
 }
 
 impl HostLocalFileSystem {
-    /// Returns the native protocols compiled for the current host platform.
+    /// Returns the native capabilities compiled for the current host platform.
     #[inline(always)]
-    pub const fn protocols() -> LocalFileSystemProtocols {
-        LocalFileSystemProtocols::detect_host()
+    pub const fn capabilities() -> LocalFileSystemCapabilities {
+        LocalFileSystemCapabilities::detect_host()
     }
 }

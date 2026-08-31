@@ -7,7 +7,7 @@
 // =============================================================================
 //! Public persistence failure-state coverage.
 
-use qubit_local_files::LocalPersistFailureState;
+use qubit_local_files::outcome::LocalPersistFailureState;
 
 /// Verifies the exposed persistence failure states are distinct.
 #[test]

@@ -11,11 +11,11 @@ use std::io;
 use std::path::Path;
 
 use qubit_local_files::LocalFileError;
-use qubit_local_files::LocalFileErrorKind;
-use qubit_local_files::LocalFileErrorSource;
-use qubit_local_files::LocalFileOperation;
-use qubit_local_files::LocalResourceKind;
-use qubit_local_files::LocalResourceLimitError;
+use qubit_local_files::error::LocalFileErrorKind;
+use qubit_local_files::error::LocalFileErrorSource;
+use qubit_local_files::error::LocalFileOperation;
+use qubit_local_files::error::LocalResourceKind;
+use qubit_local_files::error::LocalResourceLimitError;
 
 /// Verifies that native I/O errors retain structured operation and path
 /// context.

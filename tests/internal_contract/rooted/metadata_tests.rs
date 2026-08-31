@@ -11,8 +11,8 @@
 use std::fs;
 use std::fs::File;
 
-use qubit_local_files::internal_test_support::EntryKind;
-use qubit_local_files::internal_test_support::Metadata;
+use qubit_local_files::test_support::internal_contract::EntryKind;
+use qubit_local_files::test_support::internal_contract::Metadata;
 
 #[test]
 fn test_rooted_metadata_observes_open_file_and_identity() {

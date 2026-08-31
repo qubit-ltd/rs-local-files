@@ -56,8 +56,18 @@ use crate::write;
 pub(crate) fn open_root_directory(path: &Path) -> Result<File> {
     let mut options = OpenOptions::new();
     options.read(true).custom_flags(libc::O_DIRECTORY | libc::O_CLOEXEC);
-    let directory = rooted_open_result(options.open(path), "open root directory", path)?;
-    verify_opened_directory(&directory, "inspect root directory", path).map(|()| directory)
+    let directory = options
+        .open(path)
+        .map_err(|error| add_path_context(error, "open root directory", path))?;
+    verify_opened_directory(&directory, "inspect root directory", path)
+        .map_err(|error| {
+            if error.kind() == ErrorKind::InvalidInput {
+                Error::new(ErrorKind::NotADirectory, error)
+            } else {
+                error
+            }
+        })
+        .map(|()| directory)
 }
 
 /// Reads metadata for a final rooted entry without following a symbolic link.

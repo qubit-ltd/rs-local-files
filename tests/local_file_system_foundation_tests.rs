@@ -11,11 +11,12 @@ use std::fs;
 #[cfg(unix)]
 use std::time::SystemTime;
 
-#[cfg(unix)]
-use qubit_local_files::LocalFileKind;
-use qubit_local_files::LocalFileNames;
 use qubit_local_files::LocalFileSystem;
-use qubit_local_files::SizeLimit;
+use qubit_local_files::capability::LocalPathLengthUnit;
+use qubit_local_files::capability::SizeLimit;
+#[cfg(unix)]
+use qubit_local_files::outcome::LocalFileKind;
+use qubit_local_files::path::LocalFileNames;
 use tempfile::tempdir;
 
 /// Verifies capabilities do not misrepresent a compile-time path bound as a
@@ -24,8 +25,12 @@ use tempfile::tempdir;
 fn test_host_file_system_limits_vary_by_path() {
     let limits = LocalFileSystem::host().expect("Host filesystem should open").limits();
 
-    assert_eq!(SizeLimit::VariesByPath, limits.max_path_bytes());
-    assert_eq!(SizeLimit::VariesByPath, limits.max_file_name_bytes());
+    assert_eq!(SizeLimit::VariesByPath, limits.max_path_length());
+    assert_eq!(SizeLimit::VariesByPath, limits.max_component_length());
+    #[cfg(unix)]
+    assert_eq!(LocalPathLengthUnit::Bytes, limits.length_unit());
+    #[cfg(windows)]
+    assert_eq!(LocalPathLengthUnit::Utf16CodeUnits, limits.length_unit());
 }
 
 /// Verifies space observations are available without caching host limits.
@@ -36,9 +41,9 @@ fn test_host_file_system_space_observes_existing_directory() {
         .space_at(std::env::temp_dir().as_path())
         .expect("an existing host directory should be queryable");
 
-    #[cfg(unix)]
+    #[cfg(any(unix, windows))]
     assert!(space.capacity_bytes().is_some());
-    #[cfg(not(unix))]
+    #[cfg(not(any(unix, windows)))]
     let _ = &space;
 }
 
@@ -53,9 +58,9 @@ fn test_rooted_file_system_space_observes_nearest_existing_ancestor() {
         .space_at(std::path::Path::new("nested/missing/child"))
         .expect("missing rooted descendants should be probeable");
 
-    #[cfg(unix)]
+    #[cfg(any(unix, windows))]
     assert!(space.capacity_bytes().is_some());
-    #[cfg(not(unix))]
+    #[cfg(not(any(unix, windows)))]
     let _ = &space;
 }
 
@@ -64,7 +69,7 @@ fn test_rooted_file_system_space_observes_nearest_existing_ancestor() {
 fn test_local_file_system_capabilities_report_operation_support() {
     let capabilities = LocalFileSystem::host()
         .expect("Host filesystem should open")
-        .protocols();
+        .capabilities();
 
     assert!(capabilities.supports_rooted_operations());
     assert!(capabilities.supports_atomic_rename());
@@ -76,7 +81,7 @@ fn test_local_file_system_capabilities_report_operation_support() {
     let rooted = tempdir().expect("root should be created");
     let rooted_capabilities = LocalFileSystem::rooted(rooted.path())
         .expect("root authority should open")
-        .protocols();
+        .capabilities();
     assert_eq!(capabilities, rooted_capabilities);
 }
 
@@ -86,7 +91,7 @@ fn test_local_file_system_capabilities_report_operation_support() {
 fn test_host_capabilities_match_host_no_replace_backend() {
     let capabilities = LocalFileSystem::host()
         .expect("Host filesystem should open")
-        .protocols();
+        .capabilities();
     #[cfg(any(target_os = "linux", target_os = "macos", windows))]
     assert!(capabilities.supports_atomic_rename());
     #[cfg(not(any(target_os = "linux", target_os = "macos", windows)))]

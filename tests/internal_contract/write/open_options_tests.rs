@@ -9,8 +9,8 @@
 
 use std::time::Duration;
 
-use qubit_local_files::internal_test_support::InternalWriteOptions as OpenOptions;
-use qubit_local_files::internal_test_support::Mode;
+use qubit_local_files::test_support::internal_contract::InternalWriteOptions as OpenOptions;
+use qubit_local_files::test_support::internal_contract::Mode;
 
 #[test]
 fn test_open_options_builders_update_open_behavior() {

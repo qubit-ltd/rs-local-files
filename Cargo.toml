@@ -38,7 +38,6 @@ internal-test-support = ["test-support"]
 [dependencies]
 qubit-budget = "0.4"
 getrandom = "0.4"
-log = "0.4"
 
 [target.'cfg(unix)'.dependencies]
 libc = "0.2"
@@ -48,10 +47,12 @@ rustix = { version = "1.1", features = ["fs"] }
 windows-sys = { version = "0.61.2", features = [
     "Wdk_Foundation",
     "Wdk_Storage_FileSystem",
+    "Wdk_System_SystemServices",
     "Win32_Foundation",
     "Win32_Security",
     "Win32_Storage_FileSystem",
     "Win32_System_IO",
+    "Win32_System_Ioctl",
 ] }
 
 [dev-dependencies]

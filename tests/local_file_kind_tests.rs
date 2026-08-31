@@ -17,9 +17,9 @@ use std::os::unix::net::UnixListener;
 use std::path::Path;
 
 #[cfg(unix)]
-use qubit_local_files::LocalFileKind;
-#[cfg(unix)]
 use qubit_local_files::LocalFileSystem;
+#[cfg(unix)]
+use qubit_local_files::outcome::LocalFileKind;
 #[cfg(unix)]
 use tempfile::tempdir;
 

@@ -10,9 +10,9 @@
 use windows_sys::Win32::Foundation::UNICODE_STRING;
 
 /// Owns UTF-16 storage and its borrowed `UNICODE_STRING` header.
-pub(super) struct OwnedUnicodeString {
+pub(in crate::local) struct OwnedUnicodeString {
     /// Stable UTF-16 storage referenced by `header`.
-    pub(super) _units: Vec<u16>,
+    pub(in crate::local) _units: Vec<u16>,
     /// NT string header passed to object attributes.
-    pub(super) header: UNICODE_STRING,
+    pub(in crate::local) header: UNICODE_STRING,
 }
