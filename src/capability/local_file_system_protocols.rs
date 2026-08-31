@@ -66,24 +66,28 @@ impl LocalFileSystemProtocols {
 
     /// Reports whether secure rooted operations are implemented.
     #[must_use]
+    #[inline(always)]
     pub const fn supports_rooted_operations(self) -> bool {
         self.rooted_operations
     }
 
     /// Reports whether native atomic rename is implemented.
     #[must_use]
+    #[inline(always)]
     pub const fn supports_atomic_rename(self) -> bool {
         self.atomic_rename
     }
 
     /// Reports whether native atomic replacement is implemented.
     #[must_use]
+    #[inline(always)]
     pub const fn supports_atomic_replace(self) -> bool {
         self.atomic_replace
     }
 
     /// Reports whether atomic no-replace temporary persistence is implemented.
     #[must_use]
+    #[inline(always)]
     pub const fn supports_atomic_temp_persist(self) -> bool {
         self.atomic_temp_persist
     }
@@ -91,6 +95,7 @@ impl LocalFileSystemProtocols {
     /// Reports whether the full durable rename publication protocol is
     /// implemented for this target.
     #[must_use]
+    #[inline(always)]
     pub const fn supports_durable_rename(self) -> bool {
         self.durable_rename
     }
@@ -98,6 +103,7 @@ impl LocalFileSystemProtocols {
     /// Reports whether the full durable file-copy publication protocol is
     /// implemented for this target.
     #[must_use]
+    #[inline(always)]
     pub const fn supports_durable_file_copy(self) -> bool {
         self.durable_file_copy
     }

@@ -31,12 +31,14 @@ impl LocalRenameOutcome {
 
     /// Reports whether the namespace change was atomic.
     #[must_use]
+    #[inline(always)]
     pub const fn atomic(self) -> bool {
         self.atomic
     }
 
     /// Reports whether parent-directory durability was synchronized.
     #[must_use]
+    #[inline(always)]
     pub const fn durable(self) -> bool {
         self.durable
     }

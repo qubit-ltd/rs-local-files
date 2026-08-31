@@ -29,6 +29,7 @@ impl LocalDeleteOutcome {
 
     /// Reports whether an entry was removed.
     #[must_use]
+    #[inline(always)]
     pub const fn deleted(self) -> bool {
         self.deleted
     }
