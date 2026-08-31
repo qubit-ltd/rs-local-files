@@ -1,3 +1,10 @@
+// =============================================================================
+//    Copyright (c) 2025 - 2026 Haixing Hu.
+//
+//    SPDX-License-Identifier: Apache-2.0
+//
+//    Licensed under the Apache License, Version 2.0.
+// =============================================================================
 //! Instance-local deterministic fault plans.
 #![allow(dead_code)]
 
@@ -7,12 +14,7 @@ use std::sync::Arc;
 use std::sync::Mutex;
 
 use super::TestFaultPoint;
-
-#[derive(Debug)]
-struct TestFault {
-    point: TestFaultPoint,
-    kind: io::ErrorKind,
-}
+use super::internal::TestFault;
 
 /// FIFO fault plan scoped to one filesystem instance.
 #[derive(Clone, Debug)]
@@ -22,6 +24,7 @@ pub struct TestFaultPlan {
 
 impl TestFaultPlan {
     /// Creates a plan that fails once at `point` with `kind`.
+    #[must_use]
     pub fn fail_once(point: TestFaultPoint, kind: io::ErrorKind) -> Self {
         let mut faults = VecDeque::new();
         faults.push_back(TestFault { point, kind });

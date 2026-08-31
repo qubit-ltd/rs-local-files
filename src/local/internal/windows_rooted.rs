@@ -45,7 +45,6 @@ use windows_sys::Win32::Foundation::HANDLE;
 use windows_sys::Win32::Foundation::INVALID_HANDLE_VALUE;
 use windows_sys::Win32::Foundation::OBJ_CASE_INSENSITIVE;
 use windows_sys::Win32::Foundation::STATUS_NO_MORE_FILES;
-use windows_sys::Win32::Foundation::UNICODE_STRING;
 use windows_sys::Win32::Storage::FileSystem::CreateFileW;
 use windows_sys::Win32::Storage::FileSystem::DELETE;
 use windows_sys::Win32::Storage::FileSystem::FILE_APPEND_DATA;
@@ -68,6 +67,7 @@ use windows_sys::Win32::Storage::FileSystem::OPEN_EXISTING;
 use windows_sys::Win32::Storage::FileSystem::SYNCHRONIZE;
 use windows_sys::Win32::System::IO::IO_STATUS_BLOCK;
 
+use super::OwnedUnicodeString;
 use super::rooted_directory_reader::RootedDirectoryReader;
 use crate::local::LocalRelativePath;
 use crate::read;
@@ -775,14 +775,6 @@ fn rename_open_entry(
     } else {
         Ok(())
     }
-}
-
-/// Owns a UTF-16 buffer and its borrowed `UNICODE_STRING` header.
-struct OwnedUnicodeString {
-    /// Stable UTF-16 storage referenced by `header`.
-    _units: Vec<u16>,
-    /// NT string header passed to object attributes.
-    header: UNICODE_STRING,
 }
 
 /// Builds one NT counted Unicode string without a trailing NUL.

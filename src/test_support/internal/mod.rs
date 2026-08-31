@@ -5,11 +5,8 @@
 //
 //    Licensed under the Apache License, Version 2.0.
 // =============================================================================
-//! Deterministic, instance-local fault injection for tests.
+//! Private helpers for deterministic fault plans.
 
-mod internal;
-mod test_fault_plan;
-mod test_fault_point;
+mod test_fault;
 
-pub use test_fault_plan::TestFaultPlan;
-pub use test_fault_point::TestFaultPoint;
+pub(super) use test_fault::TestFault;
