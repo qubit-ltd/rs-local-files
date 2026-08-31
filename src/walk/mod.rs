@@ -10,6 +10,7 @@
 mod internal;
 mod local_directory_entry;
 mod local_directory_walker;
+mod local_directory_walker_support;
 
 pub use local_directory_entry::LocalDirectoryEntry;
 pub use local_directory_walker::LocalDirectoryWalker;

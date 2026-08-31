@@ -5,10 +5,7 @@
 //
 //    Licensed under the Apache License, Version 2.0.
 // =============================================================================
-//! Crate-private contract tests.
 
-mod local;
-mod outcome;
-mod public_api_coverage_tests;
-mod rooted;
-mod write;
+mod metadata_tests;
+mod permissions_tests;
+mod root_tests;

@@ -5,10 +5,5 @@
 //
 //    Licensed under the Apache License, Version 2.0.
 // =============================================================================
-//! Native local file write operations.
 
-mod mode;
-mod open_options;
-
-pub use mode::Mode;
-pub use open_options::OpenOptions;
+mod core_tests;

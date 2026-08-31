@@ -46,13 +46,13 @@ impl LocalFileCommitError {
 
     /// Returns the structured local filesystem failure.
     #[must_use]
-    #[inline(always)]
+    #[inline]
     pub const fn error(&self) -> &LocalFileError {
         &self.error
     }
 
     /// Returns the established publication state.
-    #[inline(always)]
+    #[inline]
     pub const fn state(&self) -> LocalWriteFailureState {
         self.state
     }
@@ -60,7 +60,7 @@ impl LocalFileCommitError {
     /// Returns a retryable writer, or `None` after publication may have
     /// started.
     #[must_use]
-    #[inline(always)]
+    #[inline]
     pub fn writer(&self) -> Option<&LocalFileWriter> {
         self.writer.as_deref()
     }

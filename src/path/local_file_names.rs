@@ -22,6 +22,18 @@ use crate::path::internal::LocalFileNamePolicy;
 const RANDOM_NAME_BYTES: usize = 16;
 
 /// Configured validation and generation policy for filename components.
+///
+/// # Examples
+///
+/// ```
+/// use std::ffi::OsStr;
+///
+/// use qubit_local_files::LocalFileNames;
+///
+/// let names = LocalFileNames::portable().with_max_component_bytes(32)?;
+/// names.validate(OsStr::new("report.csv"))?;
+/// # Ok::<(), qubit_local_files::LocalFileError>(())
+/// ```
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 #[must_use]
 pub struct LocalFileNames {

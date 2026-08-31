@@ -28,7 +28,7 @@ use crate::LocalAtomicWriteStage;
 /// failures remain available without replacing the primary installation error.
 #[non_exhaustive]
 #[derive(Debug)]
-pub(crate) struct LocalAtomicWriteError {
+pub struct LocalAtomicWriteError {
     /// Stage at which the operation failed.
     stage: LocalAtomicWriteStage,
     /// Requested destination path.
@@ -63,7 +63,7 @@ impl LocalAtomicWriteError {
     /// # Returns
     /// New atomic-write error retaining the native source error.
     #[inline(always)]
-    pub(crate) fn new(
+    pub fn new(
         stage: LocalAtomicWriteStage,
         path: PathBuf,
         temporary_path: Option<PathBuf>,
@@ -85,7 +85,7 @@ impl LocalAtomicWriteError {
     ///
     /// # Returns
     /// Failed atomic-write stage.
-    pub(crate) const fn stage(&self) -> LocalAtomicWriteStage {
+    pub const fn stage(&self) -> LocalAtomicWriteStage {
         self.stage
     }
 
@@ -94,7 +94,7 @@ impl LocalAtomicWriteError {
     /// # Returns
     /// Destination path supplied by the caller.
     #[must_use]
-    pub(crate) fn path(&self) -> &Path {
+    pub fn path(&self) -> &Path {
         &self.path
     }
 
@@ -103,7 +103,7 @@ impl LocalAtomicWriteError {
     /// # Returns
     /// Staging path retained for diagnostics. The entry is not guaranteed to
     /// exist after a completed replacement or a successful cleanup.
-    pub(crate) fn temporary_path(&self) -> Option<&Path> {
+    pub fn temporary_path(&self) -> Option<&Path> {
         self.temporary_path.as_deref()
     }
 
@@ -113,7 +113,7 @@ impl LocalAtomicWriteError {
     /// State reported by the failed operation. Callers must handle
     /// [`LocalAtomicDestinationState::Indeterminate`] conservatively and
     /// inspect the destination and staging path before retrying.
-    pub(crate) const fn destination_state(&self) -> LocalAtomicDestinationState {
+    pub const fn destination_state(&self) -> LocalAtomicDestinationState {
         self.destination_state
     }
 
@@ -121,7 +121,7 @@ impl LocalAtomicWriteError {
     ///
     /// # Returns
     /// Cleanup error without replacing the primary source error.
-    pub(crate) fn cleanup_error(&self) -> Option<&io::Error> {
+    pub fn cleanup_error(&self) -> Option<&io::Error> {
         self.cleanup_error.as_ref()
     }
 
@@ -130,7 +130,7 @@ impl LocalAtomicWriteError {
     ///
     /// # Returns
     /// Parent synchronization error without replacing the primary source error.
-    pub(crate) fn parent_sync_error(&self) -> Option<&io::Error> {
+    pub fn parent_sync_error(&self) -> Option<&io::Error> {
         self.parent_sync_error.as_ref()
     }
 
@@ -139,7 +139,7 @@ impl LocalAtomicWriteError {
     /// # Returns
     /// Retained primary I/O error without dynamic downcasting.
     #[must_use]
-    pub(crate) const fn source_error(&self) -> &io::Error {
+    pub const fn source_error(&self) -> &io::Error {
         &self.source
     }
 
@@ -148,13 +148,13 @@ impl LocalAtomicWriteError {
     /// # Returns
     /// Error kind reported by the retained source error.
     #[must_use]
-    pub(crate) fn kind(&self) -> io::ErrorKind {
+    pub fn kind(&self) -> io::ErrorKind {
         self.source.kind()
     }
 
     /// Consumes this error and returns staging cleanup details with its source.
     #[inline]
-    pub(crate) fn into_staging_parts(self) -> (Option<PathBuf>, Option<io::Error>, io::Error) {
+    pub fn into_staging_parts(self) -> (Option<PathBuf>, Option<io::Error>, io::Error) {
         (self.temporary_path, self.cleanup_error, self.source)
     }
 
@@ -167,7 +167,7 @@ impl LocalAtomicWriteError {
     /// # Returns
     /// This atomic-write error enriched with cleanup context.
     #[inline]
-    pub(crate) fn with_cleanup_error(mut self, cleanup_error: Option<io::Error>) -> Self {
+    pub fn with_cleanup_error(mut self, cleanup_error: Option<io::Error>) -> Self {
         self.cleanup_error = cleanup_error;
         self
     }
@@ -181,7 +181,7 @@ impl LocalAtomicWriteError {
     /// # Returns
     /// This atomic-write error enriched with parent synchronization context.
     #[inline]
-    pub(crate) fn with_parent_sync_error(mut self, parent_sync_error: Option<io::Error>) -> Self {
+    pub fn with_parent_sync_error(mut self, parent_sync_error: Option<io::Error>) -> Self {
         self.parent_sync_error = parent_sync_error;
         self
     }

@@ -6,7 +6,6 @@
 //    Licensed under the Apache License, Version 2.0.
 // =============================================================================
 //! Rooted metadata, limits, and space observations.
-// qubit-style: allow inline-tests
 // qubit-style: allow explicit-imports
 
 use std::path::Path;

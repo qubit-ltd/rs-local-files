@@ -80,48 +80,48 @@ impl LocalFileMetadata {
     }
 
     /// Returns the normalized entry kind.
-    #[inline(always)]
+    #[inline]
     pub const fn kind(&self) -> LocalFileKind {
         self.kind
     }
 
     /// Returns the native metadata length in bytes.
     #[must_use]
-    #[inline(always)]
+    #[inline]
     pub const fn len(&self) -> u64 {
         self.len
     }
 
     /// Reports whether the entry length is zero.
     #[must_use]
-    #[inline(always)]
+    #[inline]
     pub const fn is_empty(&self) -> bool {
         self.len == 0
     }
 
     /// Returns the access time, or `None` when unavailable.
     #[must_use]
-    #[inline(always)]
+    #[inline]
     pub const fn accessed_at(&self) -> Option<SystemTime> {
         self.accessed_at
     }
 
     /// Returns the modification time, or `None` when unavailable.
     #[must_use]
-    #[inline(always)]
+    #[inline]
     pub const fn modified_at(&self) -> Option<SystemTime> {
         self.modified_at
     }
 
     /// Returns the creation time, or `None` when unavailable.
     #[must_use]
-    #[inline(always)]
+    #[inline]
     pub const fn created_at(&self) -> Option<SystemTime> {
         self.created_at
     }
 
     /// Returns permissions observed with this metadata value.
-    #[inline(always)]
+    #[inline]
     pub const fn permissions(&self) -> LocalFilePermissions {
         self.permissions
     }

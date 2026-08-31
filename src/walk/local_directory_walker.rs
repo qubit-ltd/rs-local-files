@@ -13,7 +13,6 @@ use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::Instant;
 
-use qubit_budget::InsufficientBudgetError;
 use qubit_budget::ManagedResourcePermit;
 use qubit_budget::ManagedResourcePool;
 use qubit_budget::ResourceBudget;
@@ -21,6 +20,13 @@ use qubit_budget::ResourceBudget;
 use super::internal::RootedWalkFrame;
 use super::internal::RootedWalkState;
 use super::internal::WalkFrame;
+use super::local_directory_walker_support::close_host_frame;
+use super::local_directory_walker_support::directory_limit_error;
+use super::local_directory_walker_support::directory_pool;
+use super::local_directory_walker_support::is_terminal_walk_error;
+use super::local_directory_walker_support::name_bytes;
+use super::local_directory_walker_support::validate_options;
+use super::local_directory_walker_support::walker_deadline;
 use crate::LocalDirectoryEntry;
 use crate::LocalDirectoryReopenPolicy;
 use crate::LocalFileError;
@@ -29,7 +35,6 @@ use crate::LocalFileMetadata;
 use crate::LocalFileOperation;
 use crate::LocalListOptions;
 use crate::LocalResourceKind;
-use crate::LocalResourceLimitError;
 use crate::LocalResult;
 use crate::LocalSymlinkPolicy;
 use crate::LocalWalkErrorPolicy;
@@ -437,126 +442,6 @@ impl LocalDirectoryWalker {
     }
 }
 
-/// Closes one host frame reader and drops its capacity permit.
-///
-/// # Parameters
-///
-/// - `frame`: Host frame whose optional reader is closed.
-///
-/// The reader is dropped before its permit so capacity never becomes available
-/// while the native reader is still open.
-fn close_host_frame(frame: &mut WalkFrame) {
-    let _ = frame.entries.take();
-    let _ = frame.directory_permit.take();
-}
-
-/// Creates the established listing error for exhausted directory capacity.
-///
-/// # Parameters
-///
-/// - `path`: Directory that could not obtain an open-reader slot.
-///
-/// # Returns
-///
-/// A [`LocalFileErrorKind::ResourceLimit`] error carrying the listing
-/// operation, path, and complete budget facts.
-#[must_use]
-fn directory_limit_error(path: &Path, error: InsufficientBudgetError<LocalResourceKind, usize>) -> LocalFileError {
-    let InsufficientBudgetError {
-        resource,
-        limit,
-        remaining,
-        requested,
-    } = error;
-    LocalFileError::from_resource_limit(
-        LocalFileOperation::List,
-        Some(path.to_path_buf()),
-        LocalResourceLimitError::new(resource, limit, remaining, requested),
-    )
-}
-
-/// Validates options that must hold before a walker can be constructed.
-///
-/// # Parameters
-///
-/// - `root`: Diagnostic traversal root.
-/// - `options`: Traversal policy to validate.
-///
-/// # Errors
-///
-/// Returns `InvalidOptions` when the open-directory budget is zero.
-fn validate_options(root: &Path, options: &LocalListOptions) -> LocalResult<()> {
-    if options.max_open_directories() == Some(0) {
-        return Err(
-            LocalFileError::new(LocalFileErrorKind::InvalidOptions, LocalFileOperation::List)
-                .with_path(root.to_path_buf())
-                .with_reason("maximum open directory count must be greater than zero"),
-        );
-    }
-    Ok(())
-}
-
-/// Converts the relative deadline into one checked monotonic instant.
-///
-/// # Parameters
-///
-/// - `root`: Diagnostic traversal root used for invalid-option context.
-/// - `options`: Traversal options containing the relative deadline.
-///
-/// # Returns
-///
-/// The fixed deadline, or `None` when no deadline was configured.
-///
-/// # Errors
-///
-/// Returns `InvalidOptions` when the duration exceeds the monotonic clock
-/// range.
-fn walker_deadline(root: &Path, options: &LocalListOptions) -> LocalResult<Option<Instant>> {
-    let Some(duration) = options.deadline() else {
-        return Ok(None);
-    };
-    let Some(deadline) = Instant::now().checked_add(duration) else {
-        return Err(
-            LocalFileError::new(LocalFileErrorKind::InvalidOptions, LocalFileOperation::List)
-                .with_path(root.to_path_buf())
-                .with_reason("listing deadline exceeds the monotonic clock range"),
-        );
-    };
-    Ok(Some(deadline))
-}
-
-/// Creates the finite pool that accounts for opened directory readers.
-fn directory_pool(options: &LocalListOptions) -> Option<ManagedResourcePool<LocalResourceKind, usize>> {
-    options
-        .max_open_directories()
-        .map(|limit| ManagedResourcePool::new(LocalResourceKind::OpenDirectory, limit))
-}
-
-/// Measures the platform-native storage size of one directory-entry name.
-///
-/// # Parameters
-///
-/// * `name` - Native name to measure.
-///
-/// # Returns
-/// The byte count used by the active platform representation.
-fn name_bytes(name: &std::ffi::OsStr) -> usize {
-    #[cfg(unix)]
-    {
-        use std::os::unix::ffi::OsStrExt;
-        name.as_bytes().len()
-    }
-    #[cfg(windows)]
-    {
-        use std::os::windows::ffi::OsStrExt;
-        name.encode_wide().count().saturating_mul(2)
-    }
-    #[cfg(not(any(unix, windows)))]
-    {
-        name.to_string_lossy().len()
-    }
-}
-
 impl LocalDirectoryWalker {
     /// Produces the next entry, opening at most one new directory as needed.
     fn next_entry(&mut self) -> Option<LocalResult<LocalDirectoryEntry>> {
@@ -714,16 +599,6 @@ impl Iterator for LocalDirectoryWalker {
             })
         })
     }
-}
-
-/// Reports whether an iterator error must terminate global traversal state.
-#[must_use]
-fn is_terminal_walk_error(error: &LocalFileError, policy: LocalWalkErrorPolicy) -> bool {
-    policy == LocalWalkErrorPolicy::FailFast
-        || error.kind() == LocalFileErrorKind::ResourceLimit
-        || error
-            .io_error()
-            .is_some_and(|source| source.kind() == std::io::ErrorKind::TimedOut)
 }
 
 /// Closes one rooted frame reader and drops its capacity permit.

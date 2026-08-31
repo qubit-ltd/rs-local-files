@@ -28,13 +28,15 @@ impl LocalFileSystemLimits {
     }
 
     /// Returns the maximum complete native path size in bytes.
-    #[inline(always)]
+    #[cfg_attr(feature = "test-support", inline(never))]
+
     pub const fn max_path_bytes(&self) -> SizeLimit {
         self.max_path_bytes
     }
 
     /// Returns the maximum native file-name component size in bytes.
-    #[inline(always)]
+    #[cfg_attr(feature = "test-support", inline(never))]
+
     pub const fn max_file_name_bytes(&self) -> SizeLimit {
         self.max_file_name_bytes
     }

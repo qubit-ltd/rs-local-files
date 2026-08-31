@@ -11,5 +11,7 @@ mod internal;
 mod test_fault_plan;
 mod test_fault_point;
 
+#[cfg(feature = "test-support")]
+#[doc(hidden)]
 pub use test_fault_plan::TestFaultPlan;
 pub use test_fault_point::TestFaultPoint;

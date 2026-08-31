@@ -17,7 +17,7 @@ use crate::local;
 
 /// A single opened rooted directory whose children are yielded on demand.
 #[derive(Debug)]
-pub(crate) struct DirectoryReader {
+pub struct DirectoryReader {
     /// Platform-native directory enumerator.
     #[cfg(unix)]
     inner: local::RootedDirectoryReader,
@@ -76,7 +76,7 @@ impl DirectoryReader {
     ///
     /// Returns `Ok(None)` once the directory is exhausted, and returns an I/O
     /// error when native enumeration or metadata inspection fails.
-    pub(crate) fn next_entry(&mut self) -> Result<Option<Entry>> {
+    pub fn next_entry(&mut self) -> Result<Option<Entry>> {
         #[cfg(unix)]
         {
             self.inner

@@ -7,7 +7,6 @@
 // =============================================================================
 //! Atomic write options.
 // qubit-style: allow source-test-pair
-// qubit-style: allow inline-tests
 // qubit-style: allow explicit-imports
 
 use std::time::Duration;
@@ -22,7 +21,7 @@ use crate::LocalDurabilityRequirement;
 #[must_use = "atomic write options have no effect unless they are used"]
 #[non_exhaustive]
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub(crate) struct LocalAtomicWriteOptions {
+pub struct LocalAtomicWriteOptions {
     /// Whether missing parent directories should be created before staging.
     create_parent: bool,
     /// Optional limit for retrying a nonblocking destination open.
@@ -41,7 +40,7 @@ impl LocalAtomicWriteOptions {
     /// # Returns
     /// Default atomic write options.
     #[inline(always)]
-    pub(crate) const fn new() -> Self {
+    pub const fn new() -> Self {
         Self {
             create_parent: false,
             open_retry_timeout: None,
@@ -57,7 +56,7 @@ impl LocalAtomicWriteOptions {
     /// `true` when parent creation is enabled.
     #[inline(always)]
     #[must_use]
-    pub(crate) const fn creates_parent(&self) -> bool {
+    pub const fn creates_parent(&self) -> bool {
         self.create_parent
     }
 
@@ -66,7 +65,7 @@ impl LocalAtomicWriteOptions {
     /// # Returns
     /// Updated options that create missing parent directories before staging.
     #[inline(always)]
-    pub(crate) const fn with_parent(mut self) -> Self {
+    pub const fn with_parent(mut self) -> Self {
         self.create_parent = true;
         self
     }
@@ -83,7 +82,7 @@ impl LocalAtomicWriteOptions {
     #[must_use]
     #[inline(always)]
     #[cfg_attr(windows, allow(dead_code))]
-    pub(crate) const fn open_retry_timeout(&self) -> Option<Duration> {
+    pub const fn open_retry_timeout(&self) -> Option<Duration> {
         self.open_retry_timeout
     }
 
@@ -98,14 +97,14 @@ impl LocalAtomicWriteOptions {
     ///
     /// # Returns
     /// Updated options carrying the timeout.
-    pub(crate) const fn with_open_retry_timeout(mut self, timeout: Duration) -> Self {
+    pub const fn with_open_retry_timeout(mut self, timeout: Duration) -> Self {
         self.open_retry_timeout = Some(timeout);
         self
     }
 
     /// Returns the requested durability for atomic publication.
     #[inline(always)]
-    pub(crate) const fn durability(&self) -> LocalDurabilityRequirement {
+    pub const fn durability(&self) -> LocalDurabilityRequirement {
         self.durability
     }
 
@@ -119,7 +118,7 @@ impl LocalAtomicWriteOptions {
     ///
     /// Updated options carrying the durability policy.
     #[inline(always)]
-    pub(crate) const fn with_durability(mut self, durability: LocalDurabilityRequirement) -> Self {
+    pub const fn with_durability(mut self, durability: LocalDurabilityRequirement) -> Self {
         self.durability = durability;
         self
     }
@@ -134,7 +133,7 @@ impl LocalAtomicWriteOptions {
     ///
     /// Updated options enforcing create-new publication.
     #[inline(always)]
-    pub(crate) const fn with_create_new(mut self) -> Self {
+    pub const fn with_create_new(mut self) -> Self {
         self.publication_mode = LocalAtomicPublicationMode::CreateNew;
         self
     }
@@ -142,14 +141,14 @@ impl LocalAtomicWriteOptions {
     /// Reports whether final symbolic-link replacement is enabled.
     #[must_use]
     #[inline(always)]
-    pub(crate) const fn replaces_target_symlink(&self) -> bool {
+    pub const fn replaces_target_symlink(&self) -> bool {
         self.replace_target_symlink
     }
 
     /// Returns the final installation policy.
     #[must_use]
     #[inline(always)]
-    pub(crate) const fn publication_mode(&self) -> LocalAtomicPublicationMode {
+    pub const fn publication_mode(&self) -> LocalAtomicPublicationMode {
         self.publication_mode
     }
 }
@@ -158,20 +157,5 @@ impl Default for LocalAtomicWriteOptions {
     /// Returns the same policy as [`Self::new`].
     fn default() -> Self {
         Self::new()
-    }
-}
-
-// This test verifies the publication mode hidden behind the private `internal`
-// module. The remaining crate-private option behavior is tested from
-// `src/tests/local/local_atomic_write_options_tests.rs`.
-#[cfg(test)]
-mod tests {
-    use super::LocalAtomicPublicationMode;
-    use super::LocalAtomicWriteOptions;
-
-    #[test]
-    fn test_local_atomic_write_options_maps_create_new_publication_mode() {
-        let options = LocalAtomicWriteOptions::new().with_create_new();
-        assert_eq!(options.publication_mode(), LocalAtomicPublicationMode::CreateNew);
     }
 }

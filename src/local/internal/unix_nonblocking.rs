@@ -134,39 +134,3 @@ fn open_retry_timed_out(timeout: Duration) -> Error {
         format!("timed out after {timeout:?} retrying a nonblocking file open"),
     )
 }
-
-#[cfg(test)]
-mod tests {
-    use std::cell::Cell;
-
-    use super::Duration;
-    use super::Error;
-    use super::ErrorKind;
-    use super::open_with_nonblocking_retry;
-
-    #[test]
-    fn no_timeout_performs_only_the_initial_attempt() {
-        let attempts = Cell::new(0_usize);
-        let error = open_with_nonblocking_retry(None, || {
-            attempts.set(attempts.get() + 1);
-            Err::<(), _>(Error::from(ErrorKind::WouldBlock))
-        })
-        .expect_err("an unauthorized retry must not occur");
-
-        assert_eq!(error.kind(), ErrorKind::WouldBlock);
-        assert_eq!(attempts.get(), 1);
-    }
-
-    #[test]
-    fn zero_timeout_performs_only_the_initial_attempt() {
-        let attempts = Cell::new(0_usize);
-        let error = open_with_nonblocking_retry(Some(Duration::ZERO), || {
-            attempts.set(attempts.get() + 1);
-            Err::<(), _>(Error::from(ErrorKind::WouldBlock))
-        })
-        .expect_err("an exhausted retry window must time out");
-
-        assert_eq!(error.kind(), ErrorKind::TimedOut);
-        assert_eq!(attempts.get(), 1);
-    }
-}

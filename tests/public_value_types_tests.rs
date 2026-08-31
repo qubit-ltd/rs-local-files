@@ -26,6 +26,7 @@ use qubit_local_files::LocalFileKind;
 use qubit_local_files::LocalFileNames;
 use qubit_local_files::LocalFileOperation;
 use qubit_local_files::LocalFileSystem;
+use qubit_local_files::LocalFileSystemLimits;
 use qubit_local_files::LocalFileSystemProtocols;
 use qubit_local_files::LocalPathCodecError;
 use qubit_local_files::LocalPaths;
@@ -36,11 +37,15 @@ use tempfile::tempdir;
 /// Verifies every capability accessor returns a coherent platform snapshot.
 #[test]
 fn test_capability_snapshot_exposes_all_guarantees() {
-    let capabilities = LocalFileSystem::host()
-        .expect("Host filesystem should open")
-        .protocols();
+    let filesystem = LocalFileSystem::host().expect("Host filesystem should open");
+    let capabilities = std::hint::black_box(
+        LocalFileSystem::protocols as fn(&LocalFileSystem) -> LocalFileSystemProtocols,
+    )(&filesystem);
 
-    let _ = capabilities.supports_rooted_operations();
+    let supports_rooted = std::hint::black_box(
+        LocalFileSystemProtocols::supports_rooted_operations as fn(LocalFileSystemProtocols) -> bool,
+    );
+    assert!(supports_rooted(capabilities));
     let _ = capabilities.supports_atomic_rename();
     let atomic_replace =
         std::hint::black_box(LocalFileSystemProtocols::supports_atomic_replace as fn(LocalFileSystemProtocols) -> bool);
@@ -50,6 +55,13 @@ fn test_capability_snapshot_exposes_all_guarantees() {
     );
     let _ = capabilities.supports_atomic_temp_persist();
     let _ = capabilities.supports_durable_file_copy();
+
+    let limits =
+        std::hint::black_box(LocalFileSystem::limits as fn(&LocalFileSystem) -> LocalFileSystemLimits)(&filesystem);
+    let max_path_bytes = std::hint::black_box(LocalFileSystemLimits::max_path_bytes as fn(&LocalFileSystemLimits) -> _);
+    let max_file_name_bytes =
+        std::hint::black_box(LocalFileSystemLimits::max_file_name_bytes as fn(&LocalFileSystemLimits) -> _);
+    assert_eq!(max_path_bytes(&limits), max_file_name_bytes(&limits));
 }
 
 /// Verifies structured errors preserve each supported I/O classification and
@@ -286,7 +298,14 @@ fn test_public_metadata_values_classify_unix_socket() {
 
     let directory = tempdir().expect("temporary directory should be created");
     let socket = directory.path().join("socket");
-    let _listener = UnixListener::bind(&socket).expect("Unix-domain socket should be created");
+    let _listener = match UnixListener::bind(&socket) {
+        Ok(listener) => listener,
+        Err(error) if error.kind() == std::io::ErrorKind::PermissionDenied => {
+            eprintln!("skipping Unix socket metadata classification: socket creation is not permitted");
+            return;
+        }
+        Err(error) => panic!("Unix-domain socket should be created: {error}"),
+    };
 
     let metadata = LocalFileSystem::host()
         .expect("Host filesystem should open")

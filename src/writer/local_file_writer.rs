@@ -78,7 +78,7 @@ impl LocalFileWriter {
 
     /// Returns the reusable namespace-absolute destination path.
     #[must_use]
-    #[inline(always)]
+    #[inline]
     pub fn path(&self) -> &Path {
         &self.path
     }
@@ -88,20 +88,20 @@ impl LocalFileWriter {
     /// Rooted writers retain descriptor authority, so this path can refer to a
     /// replacement after the opened root is renamed.
     #[must_use]
-    #[inline(always)]
+    #[inline]
     pub fn diagnostic_path(&self) -> Option<&Path> {
         self.diagnostic_path.as_deref()
     }
 
     /// Returns the current writer state.
-    #[inline(always)]
+    #[inline]
     pub const fn state(&self) -> LocalWriterState {
         self.state
     }
 
     /// Returns an uncertainty retained from an earlier stream failure.
     #[must_use]
-    #[inline(always)]
+    #[inline]
     pub const fn failure_state(&self) -> Option<LocalWriteFailureState> {
         self.failure_state
     }

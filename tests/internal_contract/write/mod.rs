@@ -5,6 +5,5 @@
 //
 //    Licensed under the Apache License, Version 2.0.
 // =============================================================================
-//! Crate-private tests for shared local implementation policies.
 
-mod copy_destination_policy_tests;
+mod open_options_tests;

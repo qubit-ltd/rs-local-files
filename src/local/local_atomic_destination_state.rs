@@ -16,7 +16,7 @@
 #[non_exhaustive]
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 #[allow(dead_code)]
-pub(crate) enum LocalAtomicDestinationState {
+pub enum LocalAtomicDestinationState {
     /// The destination was not modified by the failed operation.
     ///
     /// The implementation attempts to remove uncommitted staging in this

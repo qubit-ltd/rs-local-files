@@ -41,7 +41,7 @@ impl LocalResourceLimitError {
     /// # Returns
     ///
     /// A structured resource-limit error.
-    #[inline(always)]
+    #[inline]
     pub const fn new(resource: LocalResourceKind, limit: usize, remaining: usize, requested: usize) -> Self {
         Self {
             resource,
@@ -52,25 +52,25 @@ impl LocalResourceLimitError {
     }
 
     /// Returns the exhausted resource dimension.
-    #[inline(always)]
+    #[inline]
     pub const fn resource(&self) -> LocalResourceKind {
         self.resource
     }
 
     /// Returns the configured resource capacity.
-    #[inline(always)]
+    #[inline]
     pub const fn limit(&self) -> usize {
         self.limit
     }
 
     /// Returns the capacity remaining at acquisition time.
-    #[inline(always)]
+    #[inline]
     pub const fn remaining(&self) -> usize {
         self.remaining
     }
 
     /// Returns the number of units requested by the operation.
-    #[inline(always)]
+    #[inline]
     pub const fn requested(&self) -> usize {
         self.requested
     }

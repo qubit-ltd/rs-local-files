@@ -9,8 +9,8 @@
 
 use std::time::Duration;
 
-use crate::write::Mode;
-use crate::write::OpenOptions;
+use qubit_local_files::internal_test_support::InternalWriteOptions as OpenOptions;
+use qubit_local_files::internal_test_support::Mode;
 
 #[test]
 fn test_open_options_builders_update_open_behavior() {

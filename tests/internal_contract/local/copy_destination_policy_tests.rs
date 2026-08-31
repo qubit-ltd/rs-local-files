@@ -7,10 +7,10 @@
 // =============================================================================
 //! Crate-private contract tests for copy destination policy.
 
-use crate::LocalCopyConflictPolicy;
-use crate::LocalCopyTypeConflictPolicy;
-use crate::local::CopyDestinationAction;
-use crate::local::decide_copy_destination;
+use qubit_local_files::LocalCopyConflictPolicy;
+use qubit_local_files::LocalCopyTypeConflictPolicy;
+use qubit_local_files::internal_test_support::CopyDestinationAction;
+use qubit_local_files::internal_test_support::decide_copy_destination;
 
 #[test]
 fn test_copy_destination_policy_selects_create_and_merge_actions() {

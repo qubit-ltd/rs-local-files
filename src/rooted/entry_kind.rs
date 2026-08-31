@@ -12,7 +12,7 @@
 /// symbolic link.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 #[must_use]
-pub(crate) enum EntryKind {
+pub enum EntryKind {
     /// A regular file.
     File,
     /// A directory.

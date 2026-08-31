@@ -17,12 +17,12 @@ mod permissions;
 mod root;
 mod work;
 
-pub(crate) use directory_reader::DirectoryReader;
+pub use directory_reader::DirectoryReader;
 pub(crate) use entry::Entry;
-pub(crate) use entry_kind::EntryKind;
-pub(crate) use metadata::Metadata;
-pub(crate) use path::Path;
-pub(crate) use permissions::Permissions;
-pub(crate) use root::Root;
+pub use entry_kind::EntryKind;
+pub use metadata::Metadata;
+pub use path::Path;
+pub use permissions::Permissions;
+pub use root::Root;
 
 pub(crate) use crate::local::LocalRootAtomicWriter as Writer;

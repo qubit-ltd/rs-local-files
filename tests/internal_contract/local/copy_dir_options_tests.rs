@@ -9,12 +9,12 @@
 
 use std::time::Duration;
 
-use crate::LocalCopyConflictPolicy;
-use crate::LocalCopyDirOptions;
-use crate::LocalCopyTypeConflictPolicy;
-use crate::LocalDurabilityRequirement;
-use crate::LocalSymlinkPolicy;
-use crate::local::CopyBudget;
+use qubit_local_files::LocalCopyConflictPolicy;
+use qubit_local_files::LocalCopyTypeConflictPolicy;
+use qubit_local_files::LocalDurabilityRequirement;
+use qubit_local_files::LocalSymlinkPolicy;
+use qubit_local_files::internal_test_support::CopyBudget;
+use qubit_local_files::internal_test_support::LocalCopyDirOptions;
 
 #[test]
 fn test_local_copy_dir_options_builders_update_every_policy() {

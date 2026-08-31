@@ -8,10 +8,11 @@
 //! Internal tests for immutable core fault isolation.
 
 use std::io::ErrorKind;
+use std::path::Path;
 
-use crate::LocalFileSystem;
-use crate::TestFaultPlan;
-use crate::TestFaultPoint;
+use qubit_local_files::LocalFileSystem;
+use qubit_local_files::TestFaultPlan;
+use qubit_local_files::TestFaultPoint;
 
 #[test]
 fn fault_plans_are_instance_local() {
@@ -23,6 +24,6 @@ fn fault_plans_are_instance_local() {
         )));
     let healthy = LocalFileSystem::host().expect("Host filesystem should open");
 
-    assert!(failing.core.fail_if_requested(TestFaultPoint::Metadata).is_err());
-    assert!(healthy.core.fail_if_requested(TestFaultPoint::Metadata).is_ok());
+    assert!(failing.metadata(Path::new("Cargo.toml")).is_err());
+    assert!(healthy.metadata(Path::new("Cargo.toml")).is_ok());
 }

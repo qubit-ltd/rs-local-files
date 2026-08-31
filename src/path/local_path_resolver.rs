@@ -22,7 +22,7 @@ use crate::LocalResult;
 
 /// Resolves operation inputs against one normalized filesystem PWD snapshot.
 #[derive(Clone, Debug, Eq, PartialEq)]
-pub(crate) struct LocalPathResolver {
+pub struct LocalPathResolver {
     /// Namespace whose anchoring rules are applied to operation paths.
     scope: LocalFileSystemScope,
     /// Normalized namespace-absolute PWD exposed by the owning filesystem.
@@ -35,7 +35,7 @@ pub(crate) struct LocalPathResolver {
 
 impl LocalPathResolver {
     /// Creates a resolver from a normalized namespace-absolute PWD.
-    pub(crate) fn new(scope: LocalFileSystemScope, current_directory: &Path) -> LocalResult<Self> {
+    pub fn new(scope: LocalFileSystemScope, current_directory: &Path) -> LocalResult<Self> {
         reject_native_nul(current_directory)?;
         let (current_prefix, current_components) = parse_current_directory(scope, current_directory)?;
         Ok(Self {
@@ -48,12 +48,12 @@ impl LocalPathResolver {
 
     /// Returns the PWD snapshot used by this resolver.
     #[inline(always)]
-    pub(crate) fn current_directory(&self) -> &Path {
+    pub fn current_directory(&self) -> &Path {
         &self.current_directory
     }
 
     /// Normalizes one absolute or PWD-relative operation path.
-    pub(crate) fn resolve(&self, path: &Path) -> LocalResult<LocalNamespacePath> {
+    pub fn resolve(&self, path: &Path) -> LocalResult<LocalNamespacePath> {
         reject_native_nul(path)?;
         let directory_required = directory_required(path);
         let mut components = self.current_components.clone();

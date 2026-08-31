@@ -11,9 +11,9 @@ use std::error::Error as _;
 use std::io;
 use std::path::Path;
 
-use crate::LocalAtomicDestinationState;
-use crate::LocalAtomicWriteError;
-use crate::LocalAtomicWriteStage;
+use qubit_local_files::internal_test_support::LocalAtomicDestinationState;
+use qubit_local_files::internal_test_support::LocalAtomicWriteError;
+use qubit_local_files::internal_test_support::LocalAtomicWriteStage;
 
 fn create_test_error() -> LocalAtomicWriteError {
     LocalAtomicWriteError::new(

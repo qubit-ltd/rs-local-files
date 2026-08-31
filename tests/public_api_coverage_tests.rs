@@ -13,26 +13,27 @@ use std::io::Write;
 use std::path::Path;
 use std::time::Duration;
 
+use qubit_local_files::LocalCopyConflictPolicy;
+use qubit_local_files::LocalCopyOptions;
+use qubit_local_files::LocalCreateDirectoryOptions;
+use qubit_local_files::LocalDeleteOptions;
+use qubit_local_files::LocalFileErrorKind;
+use qubit_local_files::LocalFileSystem;
+use qubit_local_files::LocalFileSystemLimits;
+use qubit_local_files::LocalFileSystemProtocols;
+use qubit_local_files::LocalFileSystemScope;
+use qubit_local_files::LocalListOptions;
+use qubit_local_files::LocalPaths;
+use qubit_local_files::LocalReadOptions;
+use qubit_local_files::LocalRenameOptions;
+use qubit_local_files::LocalResourceKind;
+use qubit_local_files::LocalResourceLimitError;
+use qubit_local_files::LocalSymlinkPolicy;
+use qubit_local_files::LocalTempDirectoryOptions;
+use qubit_local_files::LocalTempFileOptions;
+use qubit_local_files::LocalWriteMode;
+use qubit_local_files::LocalWriteOptions;
 use tempfile::tempdir;
-
-use crate::LocalCopyConflictPolicy;
-use crate::LocalCopyOptions;
-use crate::LocalCreateDirectoryOptions;
-use crate::LocalDeleteOptions;
-use crate::LocalFileErrorKind;
-use crate::LocalFileSystem;
-use crate::LocalFileSystemScope;
-use crate::LocalListOptions;
-use crate::LocalPaths;
-use crate::LocalReadOptions;
-use crate::LocalRenameOptions;
-use crate::LocalResourceKind;
-use crate::LocalResourceLimitError;
-use crate::LocalSymlinkPolicy;
-use crate::LocalTempDirectoryOptions;
-use crate::LocalTempFileOptions;
-use crate::LocalWriteMode;
-use crate::LocalWriteOptions;
 
 /// Verifies per-instance defaults are observable, replaceable, and used by
 /// every convenience operation that omits an explicit options value.
@@ -44,10 +45,17 @@ fn test_public_facade_uses_complete_instance_defaults() {
     filesystem
         .set_symlink_policy(LocalSymlinkPolicy::FollowAcrossScope)
         .expect("Host symlink policy should be configurable");
-    assert_eq!(LocalSymlinkPolicy::FollowAcrossScope, filesystem.symlink_policy());
-    assert!(filesystem.diagnostic_root().is_none());
-    let _ = filesystem.protocols();
-    let _ = filesystem.limits();
+    let symlink_policy =
+        std::hint::black_box(LocalFileSystem::symlink_policy as fn(&LocalFileSystem) -> LocalSymlinkPolicy);
+    assert_eq!(LocalSymlinkPolicy::FollowAcrossScope, symlink_policy(&filesystem));
+    let diagnostic_root =
+        std::hint::black_box(LocalFileSystem::diagnostic_root as fn(&LocalFileSystem) -> Option<&Path>);
+    assert!(diagnostic_root(&filesystem).is_none());
+    let protocols =
+        std::hint::black_box(LocalFileSystem::protocols as fn(&LocalFileSystem) -> LocalFileSystemProtocols);
+    let limits = std::hint::black_box(LocalFileSystem::limits as fn(&LocalFileSystem) -> LocalFileSystemLimits);
+    assert!(protocols(&filesystem).supports_rooted_operations());
+    assert_eq!(limits(&filesystem), filesystem.limits());
     let rooted_paths = LocalPaths::rooted();
     assert_eq!(LocalFileSystemScope::Rooted, rooted_paths.scope());
     let generated_name = rooted_paths
@@ -62,7 +70,10 @@ fn test_public_facade_uses_complete_instance_defaults() {
         .expect("reader defaults should be configurable");
     assert_eq!(
         Some(Duration::ZERO),
-        filesystem.default_read_options().open_retry_timeout()
+        std::hint::black_box(LocalFileSystem::default_read_options as fn(&LocalFileSystem) -> &LocalReadOptions)(
+            &filesystem,
+        )
+        .open_retry_timeout()
     );
 
     let write_options = LocalWriteOptions::new(LocalWriteMode::CreateOrReplace);
@@ -71,7 +82,10 @@ fn test_public_facade_uses_complete_instance_defaults() {
         .expect("writer defaults should be configurable");
     assert_eq!(
         LocalWriteMode::CreateOrReplace,
-        filesystem.default_write_options().mode()
+        std::hint::black_box(LocalFileSystem::default_write_options as fn(&LocalFileSystem) -> &LocalWriteOptions)(
+            &filesystem,
+        )
+        .mode()
     );
 
     assert!(
@@ -82,7 +96,12 @@ fn test_public_facade_uses_complete_instance_defaults() {
     filesystem
         .set_default_list_options(LocalListOptions::new().with_recursive())
         .expect("listing defaults should be configurable");
-    assert!(filesystem.default_list_options().recursive());
+    assert!(
+        std::hint::black_box(LocalFileSystem::default_list_options as fn(&LocalFileSystem) -> &LocalListOptions)(
+            &filesystem,
+        )
+        .recursive()
+    );
 
     assert!(
         filesystem
@@ -94,23 +113,41 @@ fn test_public_facade_uses_complete_instance_defaults() {
         .expect("copy defaults should be configurable");
     assert_eq!(
         LocalCopyConflictPolicy::Overwrite,
-        filesystem.default_copy_options().conflict()
+        std::hint::black_box(LocalFileSystem::default_copy_options as fn(&LocalFileSystem) -> &LocalCopyOptions)(
+            &filesystem,
+        )
+        .conflict()
     );
 
     filesystem
         .set_default_create_directory_options(LocalCreateDirectoryOptions::new().with_recursive())
         .expect("directory-creation defaults should be configurable");
-    assert!(filesystem.default_create_directory_options().recursive());
+    assert!(
+        std::hint::black_box(
+            LocalFileSystem::default_create_directory_options as fn(&LocalFileSystem) -> &LocalCreateDirectoryOptions,
+        )(&filesystem)
+        .recursive()
+    );
 
     filesystem
         .set_default_delete_options(LocalDeleteOptions::new().with_recursive())
         .expect("deletion defaults should be configurable");
-    assert!(filesystem.default_delete_options().recursive());
+    assert!(
+        std::hint::black_box(LocalFileSystem::default_delete_options as fn(&LocalFileSystem) -> &LocalDeleteOptions)(
+            &filesystem,
+        )
+        .recursive()
+    );
 
     filesystem
         .set_default_rename_options(LocalRenameOptions::new().with_overwrite())
         .expect("rename defaults should be configurable");
-    assert!(filesystem.default_rename_options().overwrite());
+    assert!(
+        std::hint::black_box(LocalFileSystem::default_rename_options as fn(&LocalFileSystem) -> &LocalRenameOptions)(
+            &filesystem,
+        )
+        .overwrite()
+    );
 
     assert!(
         filesystem
@@ -124,7 +161,13 @@ fn test_public_facade_uses_complete_instance_defaults() {
                 .with_max_attempts(8),
         )
         .expect("temporary-file defaults should be configurable");
-    assert_eq!(Some(8), filesystem.default_temp_file_options().max_attempts());
+    assert_eq!(
+        Some(8),
+        std::hint::black_box(
+            LocalFileSystem::default_temp_file_options as fn(&LocalFileSystem) -> &LocalTempFileOptions,
+        )(&filesystem)
+        .max_attempts(),
+    );
 
     assert!(
         filesystem
@@ -138,7 +181,13 @@ fn test_public_facade_uses_complete_instance_defaults() {
                 .with_max_attempts(8),
         )
         .expect("temporary-directory defaults should be configurable");
-    assert_eq!(Some(8), filesystem.default_temp_directory_options().max_attempts());
+    assert_eq!(
+        Some(8),
+        std::hint::black_box(
+            LocalFileSystem::default_temp_directory_options as fn(&LocalFileSystem) -> &LocalTempDirectoryOptions,
+        )(&filesystem)
+        .max_attempts(),
+    );
 
     let tree = directory.path().join("tree/nested");
     let _ = filesystem

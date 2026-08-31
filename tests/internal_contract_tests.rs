@@ -5,8 +5,6 @@
 //
 //    Licensed under the Apache License, Version 2.0.
 // =============================================================================
-//! Crate-private rooted filesystem contract tests.
+#![cfg(feature = "internal-test-support")]
 
-mod metadata_tests;
-mod permissions_tests;
-mod root_tests;
+mod internal_contract;

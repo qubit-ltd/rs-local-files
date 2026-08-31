@@ -5,6 +5,5 @@
 //
 //    Licensed under the Apache License, Version 2.0.
 // =============================================================================
-//! Crate-private native write contract tests.
 
-mod open_options_tests;
+mod path_resolver_tests;
