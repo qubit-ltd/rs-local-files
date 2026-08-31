@@ -22,6 +22,7 @@ pub struct LocalRenameOptions {
 
 impl LocalRenameOptions {
     /// Creates no-replace rename options without required durability.
+    #[inline]
     pub const fn new() -> Self {
         Self {
             overwrite: false,
@@ -31,11 +32,13 @@ impl LocalRenameOptions {
 
     /// Reports whether an existing destination may be replaced.
     #[must_use]
+    #[inline(always)]
     pub const fn overwrite(&self) -> bool {
         self.overwrite
     }
 
     /// Returns the requested durability.
+    #[inline(always)]
     pub const fn durability(&self) -> LocalDurabilityRequirement {
         self.durability
     }

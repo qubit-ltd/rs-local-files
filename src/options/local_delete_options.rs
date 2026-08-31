@@ -20,6 +20,7 @@ pub struct LocalDeleteOptions {
 
 impl LocalDeleteOptions {
     /// Creates strict, non-recursive deletion options.
+    #[inline]
     pub const fn new() -> Self {
         Self {
             recursive: false,
@@ -29,12 +30,14 @@ impl LocalDeleteOptions {
 
     /// Reports whether directory deletion is recursive.
     #[must_use]
+    #[inline(always)]
     pub const fn recursive(&self) -> bool {
         self.recursive
     }
 
     /// Reports whether missing entries are accepted.
     #[must_use]
+    #[inline(always)]
     pub const fn missing_ok(&self) -> bool {
         self.missing_ok
     }

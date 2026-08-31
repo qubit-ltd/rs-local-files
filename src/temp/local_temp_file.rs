@@ -120,26 +120,6 @@ impl LocalTempFile {
         })
     }
 
-    /// Binds public paths and future relative persistence to the creating
-    /// filesystem's namespace snapshot.
-    pub(crate) fn bind_namespace(mut self, resolver: LocalPathResolver) -> LocalResult<Self> {
-        let input = match &self.backend {
-            LocalTempResourceBackend::Host(_) => self.path.clone(),
-            LocalTempResourceBackend::Rooted(rooted) => virtual_rooted_path(&rooted.relative_path),
-        };
-        self.path = resolver
-            .resolve(&input)
-            .map_err(|error| {
-                error
-                    .with_operation(LocalFileOperation::CreateTempFile)
-                    .with_current_directory(resolver.current_directory().to_path_buf())
-            })?
-            .namespace_absolute()
-            .to_path_buf();
-        self.resolver = Some(resolver);
-        Ok(self)
-    }
-
     /// Returns the namespace-absolute generated path.
     #[must_use]
     #[inline(always)]
@@ -223,6 +203,26 @@ impl LocalTempFile {
     #[inline(always)]
     pub fn as_file_mut(&mut self) -> Result<&mut File> {
         self.file.as_mut().ok_or_else(closed_file_error)
+    }
+
+    /// Binds public paths and future relative persistence to the creating
+    /// filesystem's namespace snapshot.
+    pub(crate) fn bind_namespace(mut self, resolver: LocalPathResolver) -> LocalResult<Self> {
+        let input = match &self.backend {
+            LocalTempResourceBackend::Host(_) => self.path.clone(),
+            LocalTempResourceBackend::Rooted(rooted) => virtual_rooted_path(&rooted.relative_path),
+        };
+        self.path = resolver
+            .resolve(&input)
+            .map_err(|error| {
+                error
+                    .with_operation(LocalFileOperation::CreateTempFile)
+                    .with_current_directory(resolver.current_directory().to_path_buf())
+            })?
+            .namespace_absolute()
+            .to_path_buf();
+        self.resolver = Some(resolver);
+        Ok(self)
     }
 
     /// Persists the file to a resolved public-API target path.

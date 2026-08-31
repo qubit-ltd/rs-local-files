@@ -134,6 +134,18 @@ impl RootedLocalFileSystem {
         self.root.path()
     }
 
+    /// Returns the native protocol snapshot cached for this opened authority.
+    #[inline(always)]
+    pub const fn protocols(&self) -> LocalFileSystemProtocols {
+        self.capabilities
+    }
+
+    /// Returns limits observed from the opened root authority.
+    #[inline(always)]
+    pub const fn limits(&self) -> LocalFileSystemLimits {
+        self.limits
+    }
+
     /// Validates that a normalized backend path resolves to a directory.
     pub(crate) fn validate_directory(&self, path: &Path, symlink_policy: LocalSymlinkPolicy) -> LocalResult<()> {
         validate_rooted_list_start(&self.root, path, symlink_policy)
@@ -194,17 +206,5 @@ impl RootedLocalFileSystem {
                 }
             }
         }
-    }
-
-    /// Returns the native protocol snapshot cached for this opened authority.
-    #[inline(always)]
-    pub const fn protocols(&self) -> LocalFileSystemProtocols {
-        self.capabilities
-    }
-
-    /// Returns limits observed from the opened root authority.
-    #[inline(always)]
-    pub const fn limits(&self) -> LocalFileSystemLimits {
-        self.limits
     }
 }

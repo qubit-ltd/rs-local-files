@@ -106,26 +106,6 @@ impl LocalTempDirectory {
         })
     }
 
-    /// Binds public paths and future relative persistence to the creating
-    /// filesystem's namespace snapshot.
-    pub(crate) fn bind_namespace(mut self, resolver: LocalPathResolver) -> LocalResult<Self> {
-        let input = match &self.backend {
-            LocalTempResourceBackend::Host(_) => self.path.clone(),
-            LocalTempResourceBackend::Rooted(rooted) => virtual_rooted_path(&rooted.relative_path),
-        };
-        self.path = resolver
-            .resolve(&input)
-            .map_err(|error| {
-                error
-                    .with_operation(LocalFileOperation::CreateTempDirectory)
-                    .with_current_directory(resolver.current_directory().to_path_buf())
-            })?
-            .namespace_absolute()
-            .to_path_buf();
-        self.resolver = Some(resolver);
-        Ok(self)
-    }
-
     /// Returns the namespace-absolute generated path.
     #[must_use]
     #[inline(always)]
@@ -214,6 +194,26 @@ impl LocalTempDirectory {
         options: LocalPersistOptions,
     ) -> std::result::Result<LocalPersistOutcome, LocalPersistError<Self>> {
         self.persist_with_path(target.as_ref(), options)
+    }
+
+    /// Binds public paths and future relative persistence to the creating
+    /// filesystem's namespace snapshot.
+    pub(crate) fn bind_namespace(mut self, resolver: LocalPathResolver) -> LocalResult<Self> {
+        let input = match &self.backend {
+            LocalTempResourceBackend::Host(_) => self.path.clone(),
+            LocalTempResourceBackend::Rooted(rooted) => virtual_rooted_path(&rooted.relative_path),
+        };
+        self.path = resolver
+            .resolve(&input)
+            .map_err(|error| {
+                error
+                    .with_operation(LocalFileOperation::CreateTempDirectory)
+                    .with_current_directory(resolver.current_directory().to_path_buf())
+            })?
+            .namespace_absolute()
+            .to_path_buf();
+        self.resolver = Some(resolver);
+        Ok(self)
     }
 
     /// Persists the directory to a resolved public-API target path.

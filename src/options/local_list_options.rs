@@ -42,6 +42,7 @@ pub struct LocalListOptions {
 impl LocalListOptions {
     /// Creates a non-recursive listing policy that inherits the filesystem's
     /// symbolic-link policy.
+    #[inline]
     pub const fn new() -> Self {
         Self {
             max_open_directories: None,
@@ -58,24 +59,28 @@ impl LocalListOptions {
 
     /// Reports whether child directories are traversed.
     #[must_use]
+    #[inline(always)]
     pub const fn recursive(&self) -> bool {
         self.recursive
     }
 
     /// Returns the optional policy override.
     #[must_use]
+    #[inline(always)]
     pub const fn symlink_policy(&self) -> Option<LocalSymlinkPolicy> {
         self.symlink_policy
     }
 
     /// Returns the maximum yielded depth, or `None` for no explicit limit.
     #[must_use]
+    #[inline(always)]
     pub const fn max_depth(&self) -> Option<usize> {
         self.max_depth
     }
 
     /// Returns the maximum number of entries yielded by this walker.
     #[must_use]
+    #[inline(always)]
     pub const fn max_entries(&self) -> Option<usize> {
         self.max_entries
     }
@@ -83,18 +88,21 @@ impl LocalListOptions {
     /// Returns the maximum cumulative name bytes observed by duplicate-name
     /// tracking.
     #[must_use]
+    #[inline(always)]
     pub const fn max_seen_name_bytes(&self) -> Option<usize> {
         self.max_seen_name_bytes
     }
 
     /// Returns the optional elapsed-time budget.
     #[must_use]
+    #[inline(always)]
     pub const fn deadline(&self) -> Option<Duration> {
         self.deadline
     }
 
     /// Returns the maximum number of concurrently open directory handles.
     #[must_use]
+    #[inline(always)]
     pub const fn max_open_directories(&self) -> Option<usize> {
         self.max_open_directories
     }

@@ -44,6 +44,7 @@ impl Error for LocalRenameFailure {
 impl LocalRenameFailure {
     /// Creates a typed rename failure from implementation facts.
     #[must_use]
+    #[inline(always)]
     pub(crate) fn new(error: LocalFileError, state: LocalRenameFailureState) -> Self {
         Self {
             error: Box::new(error),
@@ -58,11 +59,13 @@ impl LocalRenameFailure {
     }
 
     /// Returns the most precise namespace state proven by native operations.
+    #[inline(always)]
     pub const fn state(&self) -> LocalRenameFailureState {
         self.state
     }
 
     /// Consumes this failure and returns its error and proven state.
+    #[inline(always)]
     pub fn into_parts(self) -> (LocalFileError, LocalRenameFailureState) {
         (*self.error, self.state)
     }

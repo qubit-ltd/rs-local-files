@@ -91,6 +91,7 @@ impl LocalCopyOptions {
 
     /// Returns the optional symbolic-link policy override.
     #[must_use]
+    #[inline(always)]
     pub const fn symlink_policy_override(&self) -> Option<LocalSymlinkPolicy> {
         self.symlink
     }
@@ -103,6 +104,7 @@ impl LocalCopyOptions {
 
     /// Reports whether missing target parent directories are created.
     #[must_use]
+    #[inline(always)]
     pub const fn creates_parent(&self) -> bool {
         self.create_parent
     }

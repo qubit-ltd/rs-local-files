@@ -56,8 +56,11 @@ pub struct LocalDirectoryWalker {
     terminated: bool,
     /// Symbolic-link policy fixed when the walker is created.
     symlink_policy: LocalSymlinkPolicy,
+    /// Optional budget tracking yielded entries.
     entry_budget: Option<ResourceBudget<LocalResourceKind, usize>>,
+    /// Optional budget tracking memory used by duplicate-name detection.
     seen_name_budget: Option<ResourceBudget<LocalResourceKind, usize>>,
+    /// Monotonic deadline fixed when the walker is created.
     deadline: Option<Instant>,
 }
 
@@ -529,6 +532,14 @@ fn directory_pool(options: &LocalListOptions) -> Option<ManagedResourcePool<Loca
         .map(|limit| ManagedResourcePool::new(LocalResourceKind::OpenDirectory, limit))
 }
 
+/// Measures the platform-native storage size of one directory-entry name.
+///
+/// # Parameters
+///
+/// * `name` - Native name to measure.
+///
+/// # Returns
+/// The byte count used by the active platform representation.
 fn name_bytes(name: &std::ffi::OsStr) -> usize {
     #[cfg(unix)]
     {

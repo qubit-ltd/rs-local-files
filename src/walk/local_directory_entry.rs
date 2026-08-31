@@ -54,6 +54,7 @@ impl LocalDirectoryEntry {
 
     /// Returns the reusable namespace-absolute identity path.
     #[must_use]
+    #[inline(always)]
     pub fn path(&self) -> &Path {
         &self.path
     }
@@ -63,17 +64,20 @@ impl LocalDirectoryEntry {
     /// Rooted walkers retain descriptor authority, so callers must use
     /// [`Self::path`] for a reusable namespace identity.
     #[must_use]
+    #[inline(always)]
     pub fn diagnostic_path(&self) -> Option<&Path> {
         self.diagnostic_path.as_deref()
     }
 
     /// Returns the path relative to the listing root.
     #[must_use]
+    #[inline(always)]
     pub fn relative_path(&self) -> &Path {
         &self.relative_path
     }
 
     /// Returns normalized metadata observed during traversal.
+    #[inline(always)]
     pub const fn metadata(&self) -> &LocalFileMetadata {
         &self.metadata
     }

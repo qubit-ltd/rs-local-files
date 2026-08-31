@@ -239,6 +239,7 @@ impl LocalFileSystem {
     }
 
     /// Returns the default reader options.
+    #[inline(always)]
     pub const fn default_read_options(&self) -> &LocalReadOptions {
         &self.defaults.read
     }
@@ -250,6 +251,7 @@ impl LocalFileSystem {
     }
 
     /// Returns the default writer options.
+    #[inline(always)]
     pub const fn default_write_options(&self) -> &LocalWriteOptions {
         &self.defaults.write
     }
@@ -261,6 +263,7 @@ impl LocalFileSystem {
     }
 
     /// Returns the default listing options.
+    #[inline(always)]
     pub const fn default_list_options(&self) -> &LocalListOptions {
         &self.defaults.list
     }
@@ -274,6 +277,7 @@ impl LocalFileSystem {
     }
 
     /// Returns the default copy options.
+    #[inline(always)]
     pub const fn default_copy_options(&self) -> &LocalCopyOptions {
         &self.defaults.copy
     }
@@ -287,6 +291,7 @@ impl LocalFileSystem {
     }
 
     /// Returns the default directory-creation options.
+    #[inline(always)]
     pub const fn default_create_directory_options(&self) -> &LocalCreateDirectoryOptions {
         &self.defaults.create_directory
     }
@@ -298,6 +303,7 @@ impl LocalFileSystem {
     }
 
     /// Returns the default deletion options.
+    #[inline(always)]
     pub const fn default_delete_options(&self) -> &LocalDeleteOptions {
         &self.defaults.delete
     }
@@ -309,6 +315,7 @@ impl LocalFileSystem {
     }
 
     /// Returns the default rename options.
+    #[inline(always)]
     pub const fn default_rename_options(&self) -> &LocalRenameOptions {
         &self.defaults.rename
     }
@@ -320,6 +327,7 @@ impl LocalFileSystem {
     }
 
     /// Returns the default temporary-file options.
+    #[inline(always)]
     pub const fn default_temp_file_options(&self) -> &LocalTempFileOptions {
         &self.defaults.temp_file
     }
@@ -333,6 +341,7 @@ impl LocalFileSystem {
     }
 
     /// Returns the default temporary-directory options.
+    #[inline(always)]
     pub const fn default_temp_directory_options(&self) -> &LocalTempDirectoryOptions {
         &self.defaults.temp_directory
     }
@@ -882,6 +891,8 @@ impl LocalFileSystem {
     /// Installs an instance-local fault plan in test-support builds.
     #[cfg(feature = "test-support")]
     #[doc(hidden)]
+    #[must_use]
+    #[inline]
     pub fn with_test_faults(mut self, test_faults: Option<crate::TestFaultPlan>) -> Self {
         self.core = Arc::new(LocalFileSystemCore {
             namespace: self.core.namespace.clone(),

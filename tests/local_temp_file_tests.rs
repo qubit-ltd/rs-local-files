@@ -389,8 +389,8 @@ fn test_local_temp_file_persist_reports_indeterminate_install() {
     const TEST_FAULT_ENV: &str = "QUBIT_LOCAL_FILES_TEST_FAULT";
     const TEST_FAULT_CHILD_ENV: &str = "QUBIT_LOCAL_FILES_TEST_FAULT_CHILD";
     if std::env::var_os(TEST_FAULT_CHILD_ENV).is_some()
-        && !std::env::var_os(TEST_FAULT_ENV)
-            .is_some_and(|selected| selected == std::ffi::OsStr::new("persist-install-indeterminate"))
+        && std::env::var_os(TEST_FAULT_ENV)
+            .is_none_or(|selected| selected != std::ffi::OsStr::new("persist-install-indeterminate"))
     {
         return;
     }

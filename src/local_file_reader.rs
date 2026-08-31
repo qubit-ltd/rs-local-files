@@ -38,12 +38,13 @@ impl LocalFileReader {
     }
 
     /// Returns the underlying native file handle.
-    #[must_use]
+    #[inline(always)]
     pub const fn as_file(&self) -> &File {
         &self.file
     }
 
     /// Returns metadata captured from this reader's retained handle.
+    #[inline(always)]
     pub const fn metadata(&self) -> &LocalFileMetadata {
         &self.metadata
     }
