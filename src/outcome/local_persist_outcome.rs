@@ -50,28 +50,33 @@ impl LocalPersistOutcome {
 
     /// Returns the namespace-absolute published path.
     #[must_use]
+    #[inline(always)]
     pub fn path(&self) -> &Path {
         &self.path
     }
 
     /// Returns the native publication method.
+    #[inline(always)]
     pub const fn method(&self) -> LocalPersistMethod {
         self.method
     }
 
     /// Reports whether publication was atomic.
     #[must_use]
+    #[inline(always)]
     pub const fn atomic(&self) -> bool {
         self.atomic
     }
 
     /// Reports whether persistence durability was synchronized.
     #[must_use]
+    #[inline(always)]
     pub const fn durable(&self) -> bool {
         self.durable
     }
 
     /// Returns the cleanup state achieved after publication.
+    #[inline(always)]
     pub const fn cleanup_state(&self) -> LocalPersistCleanupState {
         if self.cleanup_error.is_some() {
             LocalPersistCleanupState::ResidualSandbox
@@ -82,12 +87,14 @@ impl LocalPersistOutcome {
 
     /// Returns the cleanup error retained after successful publication.
     #[must_use]
+    #[inline(always)]
     pub const fn cleanup_error(&self) -> Option<&LocalFileError> {
         self.cleanup_error.as_ref()
     }
 
     /// Returns the published path and any retained cleanup error.
     #[must_use]
+    #[inline(always)]
     pub fn into_parts(self) -> (PathBuf, Option<LocalFileError>) {
         (self.path, self.cleanup_error)
     }

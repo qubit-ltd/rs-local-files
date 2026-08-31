@@ -236,6 +236,8 @@ impl LocalFileError {
     }
 
     /// Retains a cleanup failure without replacing this primary failure.
+    #[must_use]
+    #[inline(always)]
     pub fn with_cleanup_error(mut self, cleanup: LocalFileError) -> Self {
         self.cleanup_error = Some(Box::new(cleanup));
         self
@@ -244,6 +246,7 @@ impl LocalFileError {
     /// Returns the cleanup failure, when cleanup failed after the primary
     /// operation had already produced an error.
     #[must_use]
+    #[inline(always)]
     pub fn cleanup_error(&self) -> Option<&LocalFileError> {
         self.cleanup_error.as_deref()
     }
@@ -347,6 +350,7 @@ impl LocalFileError {
     /// An I/O error that preserves the originating native kind when available
     /// and retains this structured error as its source.
     #[must_use]
+    #[inline]
     pub fn into_io_error(self) -> io::Error {
         io::Error::new(self.io_error_kind(), self)
     }

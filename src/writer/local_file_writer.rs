@@ -78,6 +78,7 @@ impl LocalFileWriter {
 
     /// Returns the reusable namespace-absolute destination path.
     #[must_use]
+    #[inline(always)]
     pub fn path(&self) -> &Path {
         &self.path
     }
@@ -93,12 +94,14 @@ impl LocalFileWriter {
     }
 
     /// Returns the current writer state.
+    #[inline(always)]
     pub const fn state(&self) -> LocalWriterState {
         self.state
     }
 
     /// Returns an uncertainty retained from an earlier stream failure.
     #[must_use]
+    #[inline(always)]
     pub const fn failure_state(&self) -> Option<LocalWriteFailureState> {
         self.failure_state
     }

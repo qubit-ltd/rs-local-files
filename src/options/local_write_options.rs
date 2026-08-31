@@ -47,22 +47,26 @@ impl LocalWriteOptions {
     }
 
     /// Returns the publication mode.
+    #[inline(always)]
     pub const fn mode(&self) -> LocalWriteMode {
         self.mode
     }
 
     /// Reports whether missing parent directories are created.
     #[must_use]
+    #[inline(always)]
     pub const fn creates_parent(&self) -> bool {
         self.create_parent
     }
 
     /// Returns the required atomicity.
+    #[inline(always)]
     pub const fn atomicity(&self) -> LocalAtomicityRequirement {
         self.atomicity
     }
 
     /// Returns the required durability.
+    #[inline(always)]
     pub const fn durability(&self) -> LocalDurabilityRequirement {
         self.durability
     }

@@ -20,6 +20,7 @@ pub struct LocalCreateDirectoryOptions {
 
 impl LocalCreateDirectoryOptions {
     /// Creates options for creating exactly one directory entry.
+    #[inline]
     pub const fn new() -> Self {
         Self {
             recursive: false,
@@ -29,12 +30,14 @@ impl LocalCreateDirectoryOptions {
 
     /// Reports whether missing ancestors are created.
     #[must_use]
+    #[inline(always)]
     pub const fn recursive(&self) -> bool {
         self.recursive
     }
 
     /// Reports whether an existing directory is accepted.
     #[must_use]
+    #[inline(always)]
     pub const fn exists_ok(&self) -> bool {
         self.exists_ok
     }
