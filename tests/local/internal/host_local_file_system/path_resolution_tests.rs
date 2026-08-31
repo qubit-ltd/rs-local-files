@@ -14,15 +14,15 @@ use std::io::Read;
 use std::path::Path;
 
 #[cfg(any(unix, windows))]
-use qubit_local_files::LocalFileErrorKind;
-#[cfg(unix)]
-use qubit_local_files::LocalFileKind;
-#[cfg(any(unix, windows))]
 use qubit_local_files::LocalFileSystem;
+#[cfg(any(unix, windows))]
+use qubit_local_files::error::LocalFileErrorKind;
 #[cfg(unix)]
-use qubit_local_files::LocalReadOptions;
+use qubit_local_files::options::LocalReadOptions;
 #[cfg(unix)]
-use qubit_local_files::LocalSymlinkPolicy;
+use qubit_local_files::outcome::LocalFileKind;
+#[cfg(unix)]
+use qubit_local_files::policy::LocalSymlinkPolicy;
 #[cfg(unix)]
 use tempfile::tempdir;
 

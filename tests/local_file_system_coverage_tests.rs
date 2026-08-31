@@ -15,36 +15,36 @@ use std::os::unix::ffi::OsStrExt;
 use std::path::Path;
 use std::time::Duration;
 
-use qubit_local_files::LocalAtomicityRequirement;
-#[cfg(feature = "internal-test-support")]
-use qubit_local_files::LocalCopyConflictPolicy;
-#[cfg(feature = "internal-test-support")]
-use qubit_local_files::LocalCopyFailureState;
-use qubit_local_files::LocalCopyOptions;
-#[cfg(feature = "internal-test-support")]
-use qubit_local_files::LocalCopyTypeConflictPolicy;
-use qubit_local_files::LocalCreateDirectoryOptions;
-use qubit_local_files::LocalDeleteOptions;
-use qubit_local_files::LocalDurabilityRequirement;
-use qubit_local_files::LocalFileErrorKind;
-#[cfg(feature = "internal-test-support")]
-use qubit_local_files::LocalFileOperation;
 use qubit_local_files::LocalFileSystem;
-use qubit_local_files::LocalListOptions;
-use qubit_local_files::LocalMetadataPreservePolicy;
-use qubit_local_files::LocalReadOptions;
+use qubit_local_files::error::LocalFileErrorKind;
 #[cfg(feature = "internal-test-support")]
-use qubit_local_files::LocalRenameFailureState;
-use qubit_local_files::LocalRenameOptions;
-use qubit_local_files::LocalSymlinkPolicy;
+use qubit_local_files::error::LocalFileOperation;
 #[cfg(feature = "internal-test-support")]
-use qubit_local_files::LocalTempDirectoryOptions;
+use qubit_local_files::options::LocalCopyConflictPolicy;
+use qubit_local_files::options::LocalCopyOptions;
 #[cfg(feature = "internal-test-support")]
-use qubit_local_files::LocalTempFileOptions;
-use qubit_local_files::LocalWriteMode;
-use qubit_local_files::LocalWriteOptions;
+use qubit_local_files::options::LocalCopyTypeConflictPolicy;
+use qubit_local_files::options::LocalCreateDirectoryOptions;
+use qubit_local_files::options::LocalDeleteOptions;
+use qubit_local_files::options::LocalListOptions;
+use qubit_local_files::options::LocalMetadataPreservePolicy;
+use qubit_local_files::options::LocalReadOptions;
+use qubit_local_files::options::LocalRenameOptions;
 #[cfg(feature = "internal-test-support")]
-use qubit_local_files::install_test_fault;
+use qubit_local_files::options::LocalTempDirectoryOptions;
+#[cfg(feature = "internal-test-support")]
+use qubit_local_files::options::LocalTempFileOptions;
+use qubit_local_files::options::LocalWriteMode;
+use qubit_local_files::options::LocalWriteOptions;
+#[cfg(feature = "internal-test-support")]
+use qubit_local_files::outcome::LocalCopyFailureState;
+#[cfg(feature = "internal-test-support")]
+use qubit_local_files::outcome::LocalRenameFailureState;
+use qubit_local_files::policy::LocalAtomicityRequirement;
+use qubit_local_files::policy::LocalDurabilityRequirement;
+use qubit_local_files::policy::LocalSymlinkPolicy;
+#[cfg(feature = "internal-test-support")]
+use qubit_local_files::test_support::install_test_fault;
 use tempfile::tempdir;
 
 /// Verifies copy rejects directory guarantees that the recursive native
@@ -138,7 +138,7 @@ fn test_host_facade_uses_configured_reader_writer_and_list_policies() {
     let directory = tempdir().expect("temporary directory should be created");
     let _capabilities = LocalFileSystem::host()
         .expect("Host filesystem should open")
-        .protocols();
+        .capabilities();
     let file = directory.path().join("payload");
     fs::write(&file, b"payload").expect("file fixture should be written");
 

@@ -7,7 +7,7 @@
 // =============================================================================
 //! Value coverage for local copy source modes.
 
-use qubit_local_files::LocalCopySourceMode;
+use qubit_local_files::options::LocalCopySourceMode;
 
 /// Verifies automatic source detection remains the conservative default.
 #[test]

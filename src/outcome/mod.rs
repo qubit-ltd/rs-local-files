@@ -25,6 +25,8 @@ mod local_write_publication_method;
 
 pub use local_copy_failure::LocalCopyFailure;
 pub use local_copy_failure::LocalCopyResult;
+#[cfg(feature = "internal-test-support")]
+pub(crate) use local_copy_failure::copy_failure_state;
 pub use local_copy_failure_state::LocalCopyFailureState;
 pub use local_copy_method::LocalCopyMethod;
 pub use local_copy_outcome::LocalCopyOutcome;
@@ -39,3 +41,13 @@ pub use local_rename_failure::LocalRenameResult;
 pub use local_rename_failure_state::LocalRenameFailureState;
 pub use local_rename_outcome::LocalRenameOutcome;
 pub use local_write_publication_method::LocalWritePublicationMethod;
+
+pub use crate::local::LocalPersistFailureState;
+pub use crate::local::LocalPersistStage;
+pub use crate::local_file_kind::LocalFileKind;
+pub use crate::local_file_metadata::LocalFileMetadata;
+pub use crate::local_file_permissions::LocalFilePermissions;
+pub use crate::walk::LocalDirectoryEntry;
+pub use crate::writer::LocalWriteFailureState;
+pub use crate::writer::LocalWriteOutcome;
+pub use crate::writer::LocalWriterState;

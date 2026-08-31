@@ -8,9 +8,9 @@
 
 use std::path::Path;
 
-use qubit_local_files::LocalFileErrorKind;
-use qubit_local_files::LocalFileOperation;
-use qubit_local_files::LocalPaths;
+use qubit_local_files::error::LocalFileErrorKind;
+use qubit_local_files::error::LocalFileOperation;
+use qubit_local_files::path::LocalPaths;
 
 /// Verifies canonical conversions reject empty, separator-bearing, and invalid
 /// root shapes before composing native paths.

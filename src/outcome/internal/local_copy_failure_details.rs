@@ -34,6 +34,6 @@ pub(crate) struct LocalCopyFailureDetails {
     pub(crate) partial_stats: LocalCopyStats,
     /// Retained staging path only when its cleanup failed.
     pub(crate) staging_path: Option<PathBuf>,
-    /// Secondary cleanup error that prevented staging removal.
+    /// Secondary error that prevented staging removal or publication rollback.
     pub(crate) cleanup_error: Option<LocalFileError>,
 }

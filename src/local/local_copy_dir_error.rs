@@ -122,7 +122,7 @@ impl LocalCopyDirError {
         self.temporary_path.as_deref()
     }
 
-    /// Returns the secondary staging cleanup error, when cleanup failed.
+    /// Returns the secondary rollback or cleanup error, when cleanup failed.
     ///
     /// # Returns
     /// Cleanup error without replacing the primary source error.
@@ -191,6 +191,13 @@ impl LocalCopyDirError {
         self.cleanup_error = cleanup_error;
         self
     }
+
+    /// Attaches a secondary cleanup failure without a staging path.
+    #[inline]
+    pub(crate) fn with_cleanup_error(mut self, cleanup_error: io::Error) -> Self {
+        self.cleanup_error = Some(cleanup_error);
+        self
+    }
 }
 
 impl Display for LocalCopyDirError {
@@ -210,7 +217,12 @@ impl Display for LocalCopyDirError {
             write!(formatter, "; staging path '{}'", temporary_path.display())?;
         }
         if let Some(cleanup_error) = self.cleanup_error.as_ref() {
-            return write!(formatter, "; staging cleanup also failed: {cleanup_error}");
+            let cleanup_kind = if self.temporary_path.is_some() {
+                "staging cleanup"
+            } else {
+                "publication rollback"
+            };
+            return write!(formatter, "; {cleanup_kind} also failed: {cleanup_error}");
         }
         Ok(())
     }

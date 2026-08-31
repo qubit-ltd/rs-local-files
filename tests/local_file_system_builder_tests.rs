@@ -5,10 +5,10 @@
 // =============================================================================
 //! Public construction and instance-configuration coverage.
 
-use qubit_local_files::LocalFileErrorKind;
 use qubit_local_files::LocalFileSystem;
-use qubit_local_files::LocalFileSystemScope;
-use qubit_local_files::LocalListOptions;
+use qubit_local_files::error::LocalFileErrorKind;
+use qubit_local_files::options::LocalListOptions;
+use qubit_local_files::path::LocalFileSystemScope;
 
 #[test]
 fn cloned_filesystem_shares_authority_but_copies_configuration() {

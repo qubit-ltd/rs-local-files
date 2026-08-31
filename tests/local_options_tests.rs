@@ -11,26 +11,26 @@ use std::hint::black_box;
 use std::path::Path;
 use std::time::Duration;
 
-use qubit_local_files::LocalAtomicityRequirement;
-use qubit_local_files::LocalCopyConflictPolicy;
-use qubit_local_files::LocalCopyOptions;
-use qubit_local_files::LocalCopySourceMode;
-use qubit_local_files::LocalCopyTypeConflictPolicy;
-use qubit_local_files::LocalCreateDirectoryOptions;
-use qubit_local_files::LocalDeleteOptions;
-use qubit_local_files::LocalDirectoryReopenPolicy;
-use qubit_local_files::LocalDurabilityRequirement;
-use qubit_local_files::LocalListOptions;
-use qubit_local_files::LocalMetadataPreservePolicy;
-use qubit_local_files::LocalPersistOptions;
-use qubit_local_files::LocalReadOptions;
-use qubit_local_files::LocalRenameOptions;
-use qubit_local_files::LocalSymlinkPolicy;
-use qubit_local_files::LocalTempDirectoryOptions;
-use qubit_local_files::LocalTempFileOptions;
-use qubit_local_files::LocalWalkErrorPolicy;
-use qubit_local_files::LocalWriteMode;
-use qubit_local_files::LocalWriteOptions;
+use qubit_local_files::options::LocalCopyConflictPolicy;
+use qubit_local_files::options::LocalCopyOptions;
+use qubit_local_files::options::LocalCopySourceMode;
+use qubit_local_files::options::LocalCopyTypeConflictPolicy;
+use qubit_local_files::options::LocalCreateDirectoryOptions;
+use qubit_local_files::options::LocalDeleteOptions;
+use qubit_local_files::options::LocalDirectoryReopenPolicy;
+use qubit_local_files::options::LocalListOptions;
+use qubit_local_files::options::LocalMetadataPreservePolicy;
+use qubit_local_files::options::LocalPersistOptions;
+use qubit_local_files::options::LocalReadOptions;
+use qubit_local_files::options::LocalRenameOptions;
+use qubit_local_files::options::LocalTempDirectoryOptions;
+use qubit_local_files::options::LocalTempFileOptions;
+use qubit_local_files::options::LocalWalkErrorPolicy;
+use qubit_local_files::options::LocalWriteMode;
+use qubit_local_files::options::LocalWriteOptions;
+use qubit_local_files::policy::LocalAtomicityRequirement;
+use qubit_local_files::policy::LocalDurabilityRequirement;
+use qubit_local_files::policy::LocalSymlinkPolicy;
 
 /// Verifies directory and deletion builders retain every configured policy.
 #[test]

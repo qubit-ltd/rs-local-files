@@ -19,7 +19,7 @@ use std::path::PathBuf;
 use super::LocalAtomicDestinationState;
 use super::LocalAtomicWriteError;
 use super::LocalAtomicWriteStage;
-#[cfg(feature = "internal-test-support")]
+#[cfg(all(unix, feature = "internal-test-support"))]
 use super::internal::test_support;
 
 /// Synchronizes the final parent and newly created ancestor entries.

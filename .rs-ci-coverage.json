@@ -6,7 +6,6 @@
       "src/local/internal/copy_dir/facade.rs",
       "src/local/internal/copy_dir/opened_copy_source.rs",
       "src/local/internal/copy_dir/traversal.rs",
-      "src/local/internal/host_local_file_system/copy.rs",
       "src/local/internal/host_local_file_system/directory.rs",
       "src/local/internal/host_local_file_system/temp.rs",
       "src/local/internal/path_operations/path_management.rs",
@@ -17,17 +16,14 @@
       "src/local/local_atomic_writer.rs",
       "src/local/local_root_atomic_writer.rs",
       "src/local/local_persist_error.rs",
-      "src/rooted/copy.rs",
       "src/rooted_local_file_system/copy.rs",
-      "src/rooted_local_file_system.rs",
       "src/rooted_local_file_system/directory.rs",
       "src/rooted_local_file_system/metadata.rs",
       "src/rooted_local_file_system/support.rs",
       "src/rooted_local_file_system/temp.rs",
       "src/temp/internal/temp_parent.rs",
-      "src/temp/local_temp_file.rs",
-      "src/outcome/local_copy_stats.rs",
-      "src/walk/local_directory_walker.rs"
+      "src/test_support/internal_contract.rs",
+      "src/outcome/local_copy_stats.rs"
     ]
   }
 }

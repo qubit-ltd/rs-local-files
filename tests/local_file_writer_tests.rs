@@ -15,18 +15,18 @@ use std::io::Write;
 #[cfg(unix)]
 use std::process::Command;
 
-use qubit_local_files::LocalAtomicityRequirement;
-#[cfg(unix)]
-use qubit_local_files::LocalDurabilityRequirement;
-use qubit_local_files::LocalFileErrorKind;
 use qubit_local_files::LocalFileSystem;
 #[cfg(unix)]
 use qubit_local_files::LocalFileWriter;
-use qubit_local_files::LocalWriteFailureState;
-use qubit_local_files::LocalWriteMode;
-use qubit_local_files::LocalWriteOptions;
-use qubit_local_files::LocalWritePublicationMethod;
-use qubit_local_files::LocalWriterState;
+use qubit_local_files::error::LocalFileErrorKind;
+use qubit_local_files::options::LocalWriteMode;
+use qubit_local_files::options::LocalWriteOptions;
+use qubit_local_files::outcome::LocalWriteFailureState;
+use qubit_local_files::outcome::LocalWritePublicationMethod;
+use qubit_local_files::outcome::LocalWriterState;
+use qubit_local_files::policy::LocalAtomicityRequirement;
+#[cfg(unix)]
+use qubit_local_files::policy::LocalDurabilityRequirement;
 use tempfile::tempdir;
 
 /// Environment switch used by the file-size-limit subprocess regression.

@@ -28,7 +28,7 @@ const RANDOM_NAME_BYTES: usize = 16;
 /// ```
 /// use std::ffi::OsStr;
 ///
-/// use qubit_local_files::LocalFileNames;
+/// use qubit_local_files::path::LocalFileNames;
 ///
 /// let names = LocalFileNames::portable().with_max_component_bytes(32)?;
 /// names.validate(OsStr::new("report.csv"))?;

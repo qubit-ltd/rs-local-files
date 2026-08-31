@@ -12,7 +12,10 @@
 #[must_use]
 pub enum SizeLimit {
     /// The inclusive finite maximum reported by the filesystem.
-    Maximum(u64),
+    Maximum(
+        /// Inclusive native limit in the unit carried by its observation.
+        u64,
+    ),
     /// The limit depends on the filesystem containing the queried path.
     VariesByPath,
     /// The filesystem, platform, or caller authority could not report it.

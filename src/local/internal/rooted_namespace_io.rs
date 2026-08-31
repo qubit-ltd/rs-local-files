@@ -89,8 +89,16 @@ pub(crate) fn open_rooted_directory_reader(
     let diagnostic_path = diagnostic_root.join(path.as_path());
     let (parent, name, _) =
         open_rooted_parent(root, &diagnostic_path, path, RootedParentMode::OpenExisting)?.into_parts();
-    let directory = open_directory_component(&parent, &name)
-        .map_err(|error| add_path_context(error, "open rooted directory for listing", &diagnostic_path))?;
+    let directory = match open_directory_component(&parent, &name) {
+        Ok(directory) => directory,
+        Err(error) => {
+            return Err(add_path_context(
+                error,
+                "open rooted directory for listing",
+                &diagnostic_path,
+            ));
+        }
+    };
     RootedDirectoryReader::open(directory, &diagnostic_path)
 }
 
@@ -119,9 +127,14 @@ pub(crate) fn read_rooted_link(root: &File, diagnostic_root: &Path, path: &Local
     let diagnostic_path = diagnostic_root.join(path.as_path());
     let (parent, name, _) =
         open_rooted_parent(root, &diagnostic_path, path, RootedParentMode::OpenExisting)?.into_parts();
-    readlinkat(&parent, &name, Vec::new())
-        .map(|target| PathBuf::from(OsString::from_vec(target.into_bytes())))
-        .map_err(|error| add_path_context(Error::from(error), "read rooted symbolic link", &diagnostic_path))
+    match readlinkat(&parent, &name, Vec::new()) {
+        Ok(target) => Ok(PathBuf::from(OsString::from_vec(target.into_bytes()))),
+        Err(error) => Err(add_path_context(
+            Error::from(error),
+            "read rooted symbolic link",
+            &diagnostic_path,
+        )),
+    }
 }
 
 /// Creates one final symbolic link through its opened parent authority.
@@ -134,8 +147,14 @@ pub(crate) fn create_rooted_symlink(
     let diagnostic_path = diagnostic_root.join(path.as_path());
     let (parent, name, _) =
         open_rooted_parent(root, &diagnostic_path, path, RootedParentMode::OpenExisting)?.into_parts();
-    symlinkat(target, &parent, &name)
-        .map_err(|error| add_path_context(Error::from(error), "create rooted symbolic link", &diagnostic_path))
+    match symlinkat(target, &parent, &name) {
+        Ok(()) => Ok(()),
+        Err(error) => Err(add_path_context(
+            Error::from(error),
+            "create rooted symbolic link",
+            &diagnostic_path,
+        )),
+    }
 }
 
 /// Creates one rooted directory, optionally creating missing parents.
@@ -296,8 +315,16 @@ pub(crate) fn set_rooted_permissions(
     } else {
         libc::O_RDONLY | libc::O_NONBLOCK | libc::O_NOFOLLOW | libc::O_CLOEXEC
     };
-    let entry = super::rooted_file_io::open_file_at(&parent, &name, flags, 0)
-        .map_err(|error| add_path_context(error, "open rooted entry for permission update", &diagnostic_path))?;
+    let entry = match super::rooted_file_io::open_file_at(&parent, &name, flags, 0) {
+        Ok(entry) => entry,
+        Err(error) => {
+            return Err(add_path_context(
+                error,
+                "open rooted entry for permission update",
+                &diagnostic_path,
+            ));
+        }
+    };
     let native_mode = libc::mode_t::try_from(mode & 0o7777).expect("portable permission bits fit native mode");
     // SAFETY: `entry` owns a valid descriptor for this non-retaining call.
     let result = unsafe { libc::fchmod(entry.as_raw_fd(), native_mode) };

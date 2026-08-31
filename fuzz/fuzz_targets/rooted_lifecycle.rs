@@ -15,14 +15,14 @@ use std::path::Path;
 use std::path::PathBuf;
 
 use libfuzzer_sys::fuzz_target;
-use qubit_local_files::LocalCreateDirectoryOptions;
-use qubit_local_files::LocalDeleteOptions;
 use qubit_local_files::LocalFileSystem;
-use qubit_local_files::LocalTempDirectoryOptions;
-use qubit_local_files::LocalTempFileOptions;
-use qubit_local_files::LocalWriteMode;
-use qubit_local_files::LocalWriteOptions;
-use qubit_local_files::LocalWriterState;
+use qubit_local_files::options::LocalCreateDirectoryOptions;
+use qubit_local_files::options::LocalDeleteOptions;
+use qubit_local_files::options::LocalTempDirectoryOptions;
+use qubit_local_files::options::LocalTempFileOptions;
+use qubit_local_files::options::LocalWriteMode;
+use qubit_local_files::options::LocalWriteOptions;
+use qubit_local_files::outcome::LocalWriterState;
 
 const MAX_FUZZ_INPUT_LEN: usize = 256;
 const MAX_OPERATIONS: usize = 16;

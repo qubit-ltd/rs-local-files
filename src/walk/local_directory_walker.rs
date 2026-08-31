@@ -92,7 +92,10 @@ impl LocalDirectoryWalker {
     ) -> LocalResult<Self> {
         validate_options(&root, &options)?;
         let deadline = walker_deadline(&root, &options)?;
-        let metadata = fs::symlink_metadata(&root).map_err(|error| walk_io_error(&root, error))?;
+        let metadata = match fs::symlink_metadata(&root) {
+            Ok(metadata) => metadata,
+            Err(error) => return Err(walk_io_error(&root, error)),
+        };
         if !metadata.file_type().is_dir() {
             return Err(
                 LocalFileError::new(LocalFileErrorKind::TypeConflict, LocalFileOperation::List).with_path(root),
@@ -103,7 +106,10 @@ impl LocalDirectoryWalker {
             pool.try_acquire(1)
                 .expect("validated non-zero directory capacity accepts root")
         });
-        let entries = fs::read_dir(&root).map_err(|error| walk_io_error(&root, error))?;
+        let entries = match fs::read_dir(&root) {
+            Ok(entries) => entries,
+            Err(error) => return Err(walk_io_error(&root, error)),
+        };
         #[cfg(feature = "internal-test-support")]
         if crate::local::test_support_enabled("walker-root-canonicalize") {
             return Err(walk_io_error(
@@ -178,19 +184,24 @@ impl LocalDirectoryWalker {
         options: LocalListOptions,
         symlink_policy: LocalSymlinkPolicy,
     ) -> LocalResult<Self> {
-        let diagnostic_root = root.path().join(
-            path.as_ref()
-                .map_or_else(PathBuf::new, |path| path.as_path().to_path_buf()),
-        );
+        let diagnostic_root = root.path().join(match path.as_ref() {
+            Some(path) => path.as_path().to_path_buf(),
+            None => PathBuf::new(),
+        });
         validate_options(&diagnostic_root, &options)?;
         let deadline = walker_deadline(&diagnostic_root, &options)?;
-        let authority_parent = path
-            .as_ref()
-            .map_or_else(PathBuf::new, |path| path.as_path().to_path_buf());
-        let start_metadata = path
-            .as_ref()
-            .map_or_else(|| root.metadata(), |path| root.symlink_metadata(path))
-            .map_err(|error| walk_io_error(&namespace_root, error))?;
+        let authority_parent = match path.as_ref() {
+            Some(path) => path.as_path().to_path_buf(),
+            None => PathBuf::new(),
+        };
+        let start_metadata = match path.as_ref() {
+            Some(path) => root.symlink_metadata(path),
+            None => root.metadata(),
+        };
+        let start_metadata = match start_metadata {
+            Ok(metadata) => metadata,
+            Err(error) => return Err(walk_io_error(&namespace_root, error)),
+        };
         let start_identity = DirectoryIdentity::from_rooted_metadata(&start_metadata, &authority_parent);
         let mut followed_directories = HashSet::new();
         followed_directories.insert(start_identity.clone());
@@ -304,12 +315,15 @@ impl LocalDirectoryWalker {
             Ok(permit) => Ok(Some(permit)),
             Err(_error) if self.options.reopen_policy() == LocalDirectoryReopenPolicy::Reopen => {
                 self.close_all_host_frames();
-                self.open_directories
+                match self
+                    .open_directories
                     .as_ref()
                     .expect("configured directory budget remains present")
                     .try_acquire(1)
-                    .map(Some)
-                    .map_err(|error| directory_limit_error(path, error))
+                {
+                    Ok(permit) => Ok(Some(permit)),
+                    Err(error) => Err(directory_limit_error(path, error)),
+                }
             }
             Err(error) => Err(directory_limit_error(path, error)),
         }
@@ -448,7 +462,7 @@ impl LocalDirectoryWalker {
         if self.terminated {
             return None;
         }
-        if self.deadline.is_some_and(|deadline| Instant::now() >= deadline) {
+        if matches!(self.deadline, Some(deadline) if Instant::now() >= deadline) {
             self.terminated = true;
             return Some(Err(walk_io_error(
                 &self.root,
@@ -588,8 +602,10 @@ impl LocalDirectoryWalker {
 }
 
 impl Iterator for LocalDirectoryWalker {
+    /// Structured directory entry or traversal failure produced per step.
     type Item = LocalResult<LocalDirectoryEntry>;
 
+    /// Advances the traversal while preserving its creation-time PWD context.
     fn next(&mut self) -> Option<Self::Item> {
         let current_directory = self.current_directory.clone();
         self.next_entry().map(|result| {
@@ -672,11 +688,14 @@ fn acquire_rooted_directory(
         Ok(permit) => Ok(Some(permit)),
         Err(_error) if options.reopen_policy() == LocalDirectoryReopenPolicy::Reopen => {
             close_all_rooted_frames(state);
-            pool.as_ref()
+            match pool
+                .as_ref()
                 .expect("configured directory budget remains present")
                 .try_acquire(1)
-                .map(Some)
-                .map_err(|error| directory_limit_error(path, error))
+            {
+                Ok(permit) => Ok(Some(permit)),
+                Err(error) => Err(directory_limit_error(path, error)),
+            }
         }
         Err(error) => Err(directory_limit_error(path, error)),
     }
@@ -703,7 +722,7 @@ fn next_rooted_entry(
     deadline: Option<Instant>,
 ) -> Option<LocalResult<LocalDirectoryEntry>> {
     loop {
-        if deadline.is_some_and(|deadline| Instant::now() >= deadline) {
+        if matches!(deadline, Some(deadline) if Instant::now() >= deadline) {
             return Some(Err(walk_io_error(
                 namespace_root,
                 std::io::Error::new(std::io::ErrorKind::TimedOut, "local listing deadline exceeded"),
