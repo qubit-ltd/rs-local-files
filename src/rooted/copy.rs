@@ -15,6 +15,7 @@ use super::EntryKind;
 use super::Metadata;
 use super::Path;
 use super::Root;
+use super::work::Work;
 use crate::LocalAtomicWriteOptions;
 use crate::LocalCopyDirError;
 use crate::LocalDurabilityRequirement;
@@ -27,30 +28,6 @@ use crate::local::LocalCopyDirStage as Stage;
 use crate::local::LocalCopyDirStats as Statistics;
 use crate::local::decide_copy_destination;
 use crate::read;
-
-/// Deferred work for iterative rooted directory copying.
-enum Work {
-    /// Copies the children of one directory.
-    Enter {
-        /// Validated source directory.
-        source: Path,
-        /// Validated destination directory.
-        destination: Path,
-        /// Source metadata applied after all children are installed.
-        metadata: Metadata,
-        /// Depth of this directory beneath the copied tree root.
-        depth: usize,
-    },
-    /// Applies source permissions after a directory's children are installed.
-    Finish {
-        /// Source directory retained for error context.
-        source: Path,
-        /// Destination directory whose permissions are finalized.
-        destination: Path,
-        /// Source metadata supplying portable permissions.
-        metadata: Metadata,
-    },
-}
 
 /// Copies one rooted entry beneath the same opened root.
 ///

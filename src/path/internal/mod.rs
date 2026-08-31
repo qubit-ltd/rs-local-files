@@ -5,11 +5,8 @@
 //
 //    Licensed under the Apache License, Version 2.0.
 // =============================================================================
-//! Deterministic, instance-local fault injection for tests.
+//! Private path helpers shared by the concrete path modules.
 
-mod internal;
-mod test_fault_plan;
-mod test_fault_point;
+mod local_file_name_policy;
 
-pub use test_fault_plan::TestFaultPlan;
-pub use test_fault_point::TestFaultPoint;
+pub(super) use local_file_name_policy::LocalFileNamePolicy;
