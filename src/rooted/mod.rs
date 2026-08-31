@@ -15,6 +15,7 @@ mod metadata;
 mod path;
 mod permissions;
 mod root;
+mod work;
 
 pub(crate) use directory_reader::DirectoryReader;
 pub(crate) use entry::Entry;

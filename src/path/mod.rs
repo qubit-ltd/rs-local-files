@@ -7,6 +7,7 @@
 // =============================================================================
 //! Scope-bound native path and filename values.
 
+mod internal;
 mod local_file_names;
 mod local_namespace_path;
 mod local_path_codec;

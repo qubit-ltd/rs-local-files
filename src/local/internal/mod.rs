@@ -32,6 +32,8 @@ mod local_namespace;
 #[cfg(unix)]
 mod opened_atomic_destination;
 mod operation_policy;
+#[cfg(windows)]
+mod owned_unicode_string;
 mod path_io_error;
 mod path_operations;
 mod publication_state;
@@ -111,6 +113,8 @@ pub(crate) use opened_atomic_destination::open_atomic_destination;
 #[cfg(unix)]
 pub(super) use opened_atomic_destination::open_rooted_atomic_destination;
 pub(crate) use operation_policy::ensure_required_directory_durability;
+#[cfg(windows)]
+pub(super) use owned_unicode_string::OwnedUnicodeString;
 pub(crate) use path_operations::absolute_path;
 pub(crate) use path_operations::add_path_context;
 pub(crate) use path_operations::ensure_parent_path_with_sync_dirs;

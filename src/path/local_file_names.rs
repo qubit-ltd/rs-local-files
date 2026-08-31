@@ -16,6 +16,7 @@ use crate::LocalFileOperation;
 use crate::LocalResourceKind;
 use crate::LocalResourceLimitError;
 use crate::LocalResult;
+use crate::path::internal::LocalFileNamePolicy;
 
 /// Number of random bytes encoded into a generated filename.
 const RANDOM_NAME_BYTES: usize = 16;
@@ -28,15 +29,6 @@ pub struct LocalFileNames {
     policy: LocalFileNamePolicy,
     /// Maximum native or portable encoded component size.
     max_component_bytes: Option<usize>,
-}
-
-/// Filename validation policy selected by a path scope.
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-enum LocalFileNamePolicy {
-    /// Conservative cross-platform UTF-8 filename rules.
-    Portable,
-    /// Lossless current-platform filename rules.
-    Native,
 }
 
 impl LocalFileNames {
