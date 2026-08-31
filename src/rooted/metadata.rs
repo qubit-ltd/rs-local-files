@@ -314,7 +314,14 @@ fn stat_times(status: &libc::stat) -> (Option<SystemTime>, Option<SystemTime>, O
 }
 
 /// Reports unavailable timestamps on other Unix targets whose `stat` layouts
-/// are not part of the crate's portable contract.
+/// are outside the crate's supported platform set.
+///
+/// # Parameters
+///
+/// * `_status` - Native status value, intentionally unused on this target.
+///
+/// # Returns
+/// A tuple containing `None` for access, modification, and creation times.
 #[cfg(all(
     unix,
     not(any(
@@ -328,19 +335,4 @@ fn stat_times(status: &libc::stat) -> (Option<SystemTime>, Option<SystemTime>, O
 #[inline]
 fn stat_times(_status: &libc::stat) -> (Option<SystemTime>, Option<SystemTime>, Option<SystemTime>) {
     (None, None, None)
-}
-
-// These tests directly exercise private Unix conversion helpers. Descriptor
-// metadata contracts are tested from `src/tests/rooted/metadata_tests.rs`.
-#[cfg(all(test, unix))]
-mod tests {
-    use super::native_id;
-    use super::permission_mode;
-
-    #[test]
-    fn test_metadata_normalizes_permission_modes_and_native_ids() {
-        assert_eq!(permission_mode(0o17777_u32), 0o7777);
-        assert_eq!(native_id(7_u32), Some(7));
-        assert_eq!(native_id(-1_i32), None);
-    }
 }

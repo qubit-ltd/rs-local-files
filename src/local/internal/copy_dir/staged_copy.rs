@@ -245,6 +245,19 @@ pub(crate) fn copy_symlink_with_options(
     Ok(())
 }
 
+/// Creates a symbolic link at `target` using the source entry type where the
+/// native platform requires that distinction.
+///
+/// # Parameters
+///
+/// * `link_target` - Link target stored in the new directory entry.
+/// * `_source` - Source entry used to determine the Windows link kind.
+/// * `target` - Destination link path.
+///
+/// # Errors
+///
+/// Returns the native link-creation error, or `Unsupported` on platforms that
+/// do not expose symbolic links.
 fn create_symlink_entry(link_target: &Path, _source: &Path, target: &Path) -> std::io::Result<()> {
     #[cfg(unix)]
     {

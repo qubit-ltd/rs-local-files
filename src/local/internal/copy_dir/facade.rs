@@ -55,6 +55,24 @@ pub(crate) fn copy_dir_all_with_paths_scoped(
     copy_dir_all_with_scope(src, dst, options, Some(scope_root))
 }
 
+/// Runs the recursive copy pipeline after resolving source, destination, and
+/// optional scope paths.
+///
+/// # Parameters
+///
+/// * `src` - Source directory path.
+/// * `dst` - Destination directory path.
+/// * `options` - Recursive-copy policies.
+/// * `scope_root` - Optional canonical root constraining followed links.
+///
+/// # Returns
+/// Exact statistics accumulated by the copy pipeline.
+///
+/// # Errors
+///
+/// Returns a structured copy error when path resolution, scope
+/// canonicalization, traversal, staging, publication, or statistics accounting
+/// fails.
 fn copy_dir_all_with_scope(
     src: &Path,
     dst: &Path,
