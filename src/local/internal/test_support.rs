@@ -150,6 +150,14 @@ pub(crate) fn take_on_nth(name: &str, occurrence: usize) -> bool {
     take_on_nth_impl(name, occurrence)
 }
 
+/// Reports whether the process-local fault selector matches `name`.
+///
+/// # Parameters
+///
+/// * `name` - Fault selector to compare with the installed selector.
+///
+/// # Returns
+/// `true` when the selector matches; otherwise `false`.
 #[cfg(feature = "internal-test-support")]
 #[inline(always)]
 fn is_enabled_impl(name: &str) -> bool {
@@ -160,12 +168,24 @@ fn is_enabled_impl(name: &str) -> bool {
         == Some(name)
 }
 
+/// Provides the disabled-feature result for fault-selector checks.
+///
+/// # Returns
+/// Always returns `false` when internal test support is disabled.
 #[cfg(not(feature = "internal-test-support"))]
 #[inline(always)]
 fn is_enabled_impl(_name: &str) -> bool {
     false
 }
 
+/// Takes the process-local one-shot fault when its selector matches.
+///
+/// # Parameters
+///
+/// * `name` - Fault selector to compare with the installed selector.
+///
+/// # Returns
+/// `true` only for the first matching call after installation.
 #[cfg(feature = "internal-test-support")]
 #[inline(always)]
 fn take_impl(name: &str) -> bool {
@@ -175,6 +195,15 @@ fn take_impl(name: &str) -> bool {
             .is_ok()
 }
 
+/// Takes a process-local fault on the requested one-based occurrence.
+///
+/// # Parameters
+///
+/// * `name` - Fault selector to compare with the installed selector.
+/// * `occurrence` - One-based matching invocation number.
+///
+/// # Returns
+/// `true` only when `name` is selected and the requested occurrence is reached.
 #[cfg(feature = "internal-test-support")]
 #[must_use]
 #[inline]
