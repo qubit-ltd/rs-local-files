@@ -41,6 +41,24 @@ use crate::LocalWalkErrorPolicy;
 use crate::local::DirectoryIdentity;
 
 /// Lazy depth-first iterator over native local directory entries.
+///
+/// # Examples
+///
+/// ```no_run
+/// use std::path::Path;
+///
+/// use qubit_local_files::LocalFileSystem;
+///
+/// # fn main() -> qubit_local_files::LocalResult<()> {
+/// let filesystem = LocalFileSystem::host()?;
+/// let walker = filesystem.list(Path::new("."))?;
+/// for entry in walker {
+///     let entry = entry?;
+///     println!("{}", entry.path().display());
+/// }
+/// # Ok(())
+/// # }
+/// ```
 #[derive(Debug)]
 pub struct LocalDirectoryWalker {
     /// Namespace-absolute traversal root exposed publicly.

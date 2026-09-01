@@ -52,6 +52,22 @@ use crate::path::LocalPathResolver;
 /// The file is created inside a private generated sandbox. Cleanup removes the
 /// file and then the empty sandbox. [`Self::keep`] atomically publishes the
 /// file outside that sandbox.
+///
+/// # Examples
+///
+/// ```no_run
+/// use std::io::Write;
+///
+/// use qubit_local_files::LocalFileSystem;
+///
+/// # fn main() -> Result<(), Box<dyn std::error::Error>> {
+/// let filesystem = LocalFileSystem::host()?;
+/// let mut temporary = filesystem.create_temp_file()?;
+/// temporary.write_all(b"temporary data")?;
+/// temporary.cleanup()?;
+/// # Ok(())
+/// # }
+/// ```
 #[must_use = "dropping the temporary-file guard removes its file"]
 #[derive(Debug)]
 pub struct LocalTempFile {
