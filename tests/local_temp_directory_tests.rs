@@ -283,7 +283,10 @@ fn test_local_temp_directory_keep_retains_tree_after_drop() {
         .expect("Host filesystem should open")
         .create_temp_directory_with_options(&LocalTempDirectoryOptions::new().with_parent(parent.path()))
         .expect("temporary directory should be created")
-        .keep();
+        .keep()
+        .expect("temporary directory should publish")
+        .into_parts()
+        .0;
     fs::write(path.join("child"), b"payload").expect("kept directory should accept a child");
 
     assert!(path.join("child").is_file());
@@ -506,7 +509,11 @@ fn test_rooted_temp_directory_helpers_keep_and_reject_replacement() {
         .expect("rooted descendant parent should be created");
         fs::write(rooted_host_path(parent.path(), &descendant), b"payload")
             .expect("rooted descendant should be written");
-        temporary.keep()
+        temporary
+            .keep()
+            .expect("rooted temporary directory should publish")
+            .into_parts()
+            .0
     };
     assert_eq!(
         b"payload",

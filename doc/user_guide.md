@@ -201,7 +201,9 @@ the walker only releases handles.
 Temporary files and directories own cleanup while armed. Each resource lives in
 a private generated sandbox that is removed with the resource. Dropping them
 performs silent best-effort cleanup; call `cleanup()` when the caller must observe a
-cleanup failure. `keep` disables cleanup. With no explicit parent, creation
+cleanup failure. `keep` atomically publishes to a generated sibling outside
+the sandbox and returns a `LocalPersistOutcome`; its cleanup state reports any
+residual sandbox. With no explicit parent, creation
 uses the filesystem PWD
 captured for that operation. `path()`, `keep`, and persistence outcomes all
 return namespace-absolute paths for both Host and Rooted, so they can be passed
