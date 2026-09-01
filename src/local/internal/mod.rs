@@ -7,6 +7,7 @@
 // =============================================================================
 //! Private implementation support for local filesystem operations.
 
+mod active_fault;
 mod atomic_commit_state;
 mod atomic_file_install;
 mod atomic_install_recovery;
