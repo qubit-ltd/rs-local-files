@@ -294,6 +294,38 @@ fn test_local_temp_directory_keep_retains_tree_after_drop() {
     fs::remove_dir_all(path).expect("kept fixture should be removed manually");
 }
 
+/// Verifies a generated directory keep collision retains the resource for
+/// retry.
+#[test]
+fn test_local_temp_directory_keep_conflict_retains_resource_for_retry() {
+    let parent = tempdir().expect("temporary parent should be created");
+    let temporary = LocalFileSystem::host()
+        .expect("Host filesystem should open")
+        .create_temp_directory_with_options(&LocalTempDirectoryOptions::new().with_parent(parent.path()))
+        .expect("temporary directory should be created");
+    let source = temporary.path().to_path_buf();
+    let target = source
+        .parent()
+        .and_then(Path::parent)
+        .expect("temporary resource should have a publication parent")
+        .join(source.file_name().expect("temporary resource should have a name"));
+    fs::create_dir(&target).expect("generated target should be reservable");
+
+    let error = temporary
+        .keep()
+        .expect_err("occupied generated target should reject keep");
+    let (_, temporary, requested, resolved, _) = error.into_parts();
+    assert_eq!(target, requested);
+    assert_eq!(Some(target.clone()), resolved);
+
+    fs::remove_dir(&target).expect("fixture collision should be removable");
+    let outcome = temporary
+        .keep()
+        .expect("retained temporary directory should retry keep");
+    assert_eq!(&target, outcome.path());
+    fs::remove_dir(target).expect("published fixture should be removable");
+}
+
 /// Verifies a temporary directory is isolated in a private cleanup sandbox.
 #[cfg(not(windows))]
 #[test]
