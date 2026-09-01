@@ -25,6 +25,7 @@ use qubit_local_files::error::LocalFileErrorKind;
 use qubit_local_files::error::LocalFileOperation;
 use qubit_local_files::options::LocalPersistOptions;
 use qubit_local_files::options::LocalTempFileOptions;
+use qubit_local_files::outcome::LocalPersistCleanupState;
 use qubit_local_files::outcome::LocalPersistFailureState;
 use qubit_local_files::outcome::LocalPersistMethod;
 #[cfg(feature = "internal-test-support")]
@@ -784,6 +785,29 @@ fn test_local_temp_file_cleanup_reports_and_retries_sandbox_failure() {
             assert!(sandbox.exists());
             temporary.cleanup().expect("sandbox cleanup should be retryable");
             assert!(!sandbox.exists());
+        },
+    );
+}
+
+/// Verifies keep reports residual sandbox cleanup without losing publication.
+#[cfg(feature = "internal-test-support")]
+#[test]
+fn test_local_temp_file_keep_reports_residual_sandbox_cleanup() {
+    run_in_test_fault_process(
+        "test_local_temp_file_keep_reports_residual_sandbox_cleanup",
+        "temp-file-sandbox-remove",
+        || {
+            let parent = tempdir().expect("temporary parent should be created");
+            let outcome = LocalFileSystem::host()
+                .expect("Host filesystem should open")
+                .create_temp_file_with_options(&LocalTempFileOptions::new().with_parent(parent.path()))
+                .expect("temporary file should be created")
+                .keep()
+                .expect("publication should succeed despite sandbox cleanup failure");
+            assert_eq!(LocalPersistCleanupState::ResidualSandbox, outcome.cleanup_state());
+            assert!(outcome.cleanup_error().is_some());
+            let (path, _) = outcome.into_parts();
+            fs::remove_file(&path).expect("published file should remain removable");
         },
     );
 }
