@@ -23,6 +23,9 @@ use crate::LocalCopyDirOptions;
 use crate::LocalResourceKind;
 use crate::LocalResourceLimitError;
 
+/// Maximum bytes requested from one blocking read.
+const COPY_CHUNK_SIZE: usize = 64 * 1024;
+
 /// Mutable resource state shared by both native copy backends.
 #[derive(Debug)]
 pub struct CopyBudget {
@@ -73,13 +76,7 @@ impl CopyBudget {
     /// Returns [`io::ErrorKind::TimedOut`] once the deadline is reached.
     #[inline]
     pub fn check_deadline(&self) -> io::Result<()> {
-        if self
-            .deadline
-            .is_some_and(|(started, duration)| started.elapsed() >= duration)
-        {
-            return Err(io::Error::new(io::ErrorKind::TimedOut, "local copy deadline exceeded"));
-        }
-        Ok(())
+        self.check_deadline_at(Instant::now())
     }
 
     /// Checks whether a descendant entry is within the configured depth.
@@ -164,19 +161,125 @@ impl CopyBudget {
         R: Read + ?Sized,
         W: Write + ?Sized,
     {
-        self.check_deadline()?;
-        let copied = match self.bytes.as_ref() {
-            Some(budget) => {
-                let read_limit = budget.remaining().saturating_add(1);
-                io::copy(&mut reader.take(read_limit), writer)?
+        self.copy_with_now(reader, writer, Instant::now)
+    }
+
+    /// Copies in bounded chunks, checking the cooperative deadline at every
+    /// read and write progress boundary.
+    pub(crate) fn copy_with_now<R, W, N>(&mut self, reader: &mut R, writer: &mut W, mut now: N) -> io::Result<u64>
+    where
+        R: Read + ?Sized,
+        W: Write + ?Sized,
+        N: FnMut() -> Instant,
+    {
+        let mut buffer = [0_u8; COPY_CHUNK_SIZE];
+        let mut copied = 0_u64;
+
+        loop {
+            self.check_deadline_at(now())?;
+            let read_capacity = self.read_capacity(buffer.len());
+            let read = match reader.read(&mut buffer[..read_capacity]) {
+                Ok(0) => return Ok(copied),
+                Ok(read) => read,
+                Err(error) if error.kind() == io::ErrorKind::Interrupted => continue,
+                Err(error) => return Err(error),
+            };
+            self.check_deadline_at(now())?;
+
+            let permitted = self.remaining_bytes().map_or(read, |remaining| {
+                usize::try_from(remaining).unwrap_or(usize::MAX).min(read)
+            });
+            self.write_all_with_deadline(writer, &buffer[..permitted], &mut copied, &mut now)?;
+
+            if permitted < read {
+                return Err(self.copied_bytes_exhausted(read - permitted));
             }
-            None => io::copy(reader, writer)?,
-        };
-        if let Some(budget) = self.bytes.as_mut() {
-            budget.try_consume(copied).map_err(u64_budget_error)?;
         }
-        self.check_deadline()?;
-        Ok(copied)
+    }
+
+    /// Checks the configured deadline against a supplied monotonic instant.
+    #[inline]
+    fn check_deadline_at(&self, now: Instant) -> io::Result<()> {
+        if self
+            .deadline
+            .is_some_and(|(started, duration)| now.saturating_duration_since(started) >= duration)
+        {
+            return Err(io::Error::new(io::ErrorKind::TimedOut, "local copy deadline exceeded"));
+        }
+        Ok(())
+    }
+
+    /// Returns the next read size, allowing one byte beyond a bounded source.
+    #[inline]
+    fn read_capacity(&self, chunk_size: usize) -> usize {
+        self.remaining_bytes().map_or(chunk_size, |remaining| {
+            usize::try_from(remaining.saturating_add(1))
+                .unwrap_or(usize::MAX)
+                .min(chunk_size)
+        })
+    }
+
+    /// Returns the remaining copied-byte capacity when it is bounded.
+    #[inline]
+    fn remaining_bytes(&self) -> Option<u64> {
+        self.bytes.as_ref().map(|budget| budget.remaining())
+    }
+
+    /// Writes a chunk completely while committing each successful partial
+    /// write to the copied-byte budget.
+    fn write_all_with_deadline<W, N>(
+        &mut self,
+        writer: &mut W,
+        mut source: &[u8],
+        copied: &mut u64,
+        now: &mut N,
+    ) -> io::Result<()>
+    where
+        W: Write + ?Sized,
+        N: FnMut() -> Instant,
+    {
+        while !source.is_empty() {
+            self.check_deadline_at(now())?;
+            let written = match writer.write(source) {
+                Ok(0) => {
+                    return Err(io::Error::new(
+                        io::ErrorKind::WriteZero,
+                        "failed to write copy staging data",
+                    ));
+                }
+                Ok(written) => written,
+                Err(error) if error.kind() == io::ErrorKind::Interrupted => continue,
+                Err(error) => return Err(error),
+            };
+            self.charge_bytes(written)?;
+            *copied = copied.saturating_add(u64::try_from(written).unwrap_or(u64::MAX));
+            source = &source[written..];
+            self.check_deadline_at(now())?;
+        }
+        Ok(())
+    }
+
+    /// Commits actual staging bytes to the configured budget.
+    #[inline]
+    fn charge_bytes(&mut self, amount: usize) -> io::Result<()> {
+        if let Some(budget) = self.bytes.as_mut() {
+            budget
+                .try_consume(u64::try_from(amount).unwrap_or(u64::MAX))
+                .map_err(u64_budget_error)?;
+        }
+        Ok(())
+    }
+
+    /// Constructs the existing copied-byte exhaustion error after staging the
+    /// portion that still fit.
+    #[inline]
+    fn copied_bytes_exhausted(&mut self, excess: usize) -> io::Error {
+        self.bytes
+            .as_mut()
+            .expect("an over-limit read requires a copied-byte budget")
+            .try_consume(u64::try_from(excess).unwrap_or(u64::MAX))
+            .map_err(u64_budget_error)
+            .expect_err("an over-limit read must exceed the exhausted copied-byte budget")
     }
 }
 
