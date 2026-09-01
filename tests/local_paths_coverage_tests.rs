@@ -10,6 +10,8 @@ use std::path::Path;
 
 use qubit_local_files::error::LocalFileErrorKind;
 use qubit_local_files::error::LocalFileOperation;
+use qubit_local_files::path::LocalFileSystemScope;
+use qubit_local_files::path::LocalPathResolver;
 use qubit_local_files::path::LocalPaths;
 
 /// Verifies canonical conversions reject empty, separator-bearing, and invalid
@@ -53,6 +55,15 @@ fn test_scope_aware_path_conversions_reject_unsafe_component_shapes() {
         .from_canonical_components(["%2f"])
         .expect_err("lowercase escape should produce a path codec error");
     assert_eq!(LocalFileErrorKind::InvalidPath, codec_error.kind());
+}
+
+/// Verifies resolver construction rejects a non-absolute Rooted namespace PWD.
+#[test]
+fn test_rooted_path_resolver_rejects_relative_current_directory() {
+    let error = LocalPathResolver::new(LocalFileSystemScope::Rooted, Path::new("relative"))
+        .expect_err("Rooted current directories must be virtual absolute paths");
+
+    assert_eq!(LocalFileErrorKind::InvalidPath, error.kind());
 }
 
 /// Verifies direct bindings and conversions cover rooted virtual absolute
