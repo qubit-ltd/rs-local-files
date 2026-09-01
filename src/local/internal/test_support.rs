@@ -20,6 +20,8 @@ use std::sync::atomic::AtomicUsize;
 use std::sync::atomic::Ordering;
 
 #[cfg(feature = "internal-test-support")]
+use super::active_fault::ActiveFault;
+#[cfg(feature = "internal-test-support")]
 use super::test_fault_guard::TestFaultGuard;
 
 /// Whether the selected one-shot fault has already been consumed.
@@ -29,15 +31,6 @@ static ONE_SHOT_FAULT_TAKEN: AtomicBool = AtomicBool::new(false);
 /// Number of times the selected occurrence-counted boundary was reached.
 #[cfg(feature = "internal-test-support")]
 static NTH_FAULT_OCCURRENCES: AtomicUsize = AtomicUsize::new(0);
-
-/// Selector owner and name retained while one test controls fault injection.
-#[cfg(feature = "internal-test-support")]
-struct ActiveFault {
-    /// Test thread that owns the currently installed selector.
-    owner: std::thread::ThreadId,
-    /// Native fault boundary selected by the owning test.
-    name: String,
-}
 
 /// Process-local selector and waiter notification shared by integration tests.
 #[cfg(feature = "internal-test-support")]
