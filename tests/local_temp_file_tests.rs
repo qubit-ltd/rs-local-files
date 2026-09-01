@@ -152,7 +152,7 @@ fn test_local_temp_file_keep_retains_contents_after_guard_is_consumed() {
         temporary
             .write_all(b"payload")
             .expect("temporary file should accept bytes");
-        temporary.keep()
+        temporary.keep().expect("temporary file should publish").into_parts().0
     };
 
     assert_eq!(
@@ -543,7 +543,11 @@ fn test_rooted_temp_file_stream_keep_and_cleanup_rejects_replacement() {
                 .expect("rooted temporary stream metadata should read")
                 .is_file(),
         );
-        temporary.keep()
+        temporary
+            .keep()
+            .expect("rooted temporary file should publish")
+            .into_parts()
+            .0
     };
     assert_eq!(
         b"rooted!",
@@ -663,7 +667,10 @@ fn test_local_temp_file_keep_retains_path_after_drop() {
         .expect("Host filesystem should open")
         .create_temp_file_with_options(&LocalTempFileOptions::new().with_parent(parent.path()))
         .expect("temporary file should be created")
-        .keep();
+        .keep()
+        .expect("temporary file should publish")
+        .into_parts()
+        .0;
 
     assert!(path.exists());
     fs::remove_file(path).expect("kept fixture should be removed manually");
