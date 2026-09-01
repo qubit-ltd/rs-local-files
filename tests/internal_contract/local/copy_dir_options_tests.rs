@@ -7,7 +7,9 @@
 // =============================================================================
 //! Crate-private contract tests for `LocalCopyDirOptions`.
 
+use std::io::Cursor;
 use std::time::Duration;
+use std::time::Instant;
 
 use qubit_local_files::options::LocalCopyConflictPolicy;
 use qubit_local_files::options::LocalCopyTypeConflictPolicy;
@@ -15,6 +17,7 @@ use qubit_local_files::policy::LocalDurabilityRequirement;
 use qubit_local_files::policy::LocalSymlinkPolicy;
 use qubit_local_files::test_support::internal_contract::CopyBudget;
 use qubit_local_files::test_support::internal_contract::LocalCopyDirOptions;
+use qubit_local_files::test_support::internal_contract::copy_with_clock;
 
 #[test]
 fn test_local_copy_dir_options_builders_update_every_policy() {
@@ -52,4 +55,31 @@ fn test_copy_budget_directory_permit_releases_capacity_on_drop() {
             .expect("dropped permit should restore capacity")
             .is_some()
     );
+}
+
+#[test]
+fn test_copy_budget_stops_at_the_next_chunk_deadline_boundary() {
+    let started = Instant::now();
+    let options = LocalCopyDirOptions::new()
+        .with_deadline(Duration::from_millis(1))
+        .with_started_at(started);
+    let mut budget = CopyBudget::new(options);
+    let source = vec![b'x'; 64 * 1024 + 1];
+    let mut reader = Cursor::new(source.clone());
+    let mut writer = Vec::new();
+    let mut calls = 0_usize;
+
+    let error = copy_with_clock(&mut budget, &mut reader, &mut writer, || {
+        calls += 1;
+        if calls <= 4 {
+            started
+        } else {
+            started + Duration::from_millis(1)
+        }
+    })
+    .expect_err("the second chunk must observe the expired deadline");
+
+    assert_eq!(std::io::ErrorKind::TimedOut, error.kind());
+    assert!(writer.len() < source.len());
+    assert_eq!(64 * 1024, writer.len());
 }

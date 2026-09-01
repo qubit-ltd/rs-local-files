@@ -18,6 +18,7 @@ use super::internal::LocalTempResourceBackend;
 use super::internal::LocalTempResourceState;
 use super::internal::RootedTempResourceBackend;
 use super::internal::TempEntryIdentity;
+use super::internal::generated_target;
 use super::internal::prepare_host_parent;
 use super::internal::prepare_rooted_parent;
 use crate::LocalFileError;
@@ -44,8 +45,8 @@ use crate::path::LocalPathResolver;
 /// entry itself.
 ///
 /// The directory is created inside a private generated sandbox. Cleanup
-/// removes the directory tree and then the empty sandbox; [`Self::keep`]
-/// transfers both to the caller.
+/// removes the directory tree and then the empty sandbox. [`Self::keep`]
+/// atomically publishes the directory outside that sandbox.
 #[must_use = "dropping the temporary-directory guard removes its directory"]
 #[derive(Debug)]
 pub struct LocalTempDirectory {
@@ -165,12 +166,18 @@ impl LocalTempDirectory {
         Ok(self.path.join(relative.as_path()))
     }
 
-    /// Disables cleanup and returns the namespace-absolute directory path.
-    #[must_use = "keeping the temporary directory disables automatic cleanup; retain the returned path"]
+    /// Atomically publishes the directory to a generated sibling outside its
+    /// private sandbox.
     #[inline]
-    pub fn keep(mut self) -> PathBuf {
-        self.state = LocalTempResourceState::Released;
-        self.path.clone()
+    pub fn keep(self) -> std::result::Result<LocalPersistOutcome, LocalPersistError<Self>> {
+        let requested_target = self.path.clone();
+        let target = match generated_target(&requested_target) {
+            Ok(target) => target,
+            Err(error) => {
+                return Err(self.persist_error(error, requested_target, None, LocalPersistStage::ResolveTarget));
+            }
+        };
+        self.persist_with_path(&target, LocalPersistOptions::new())
     }
 
     /// Persists the directory without replacement through its creating

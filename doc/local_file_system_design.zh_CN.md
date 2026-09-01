@@ -512,6 +512,9 @@ Options 不保存 filesystem 引用，也不在后台读取全局配置。
 wall clock。Walker 的计时从 `list()` 创建 walker 时开始，而不是第一次调用 `next()` 时
 开始。Open retry timeout 从第一次 open 尝试开始计算。
 
+复制 deadline 是合作式的分块边界：实现会在每个 bounded read/write chunk 前后检查 monotonic
+clock，因此可限制继续推进 I/O，但不会把已进入内核的单次系统调用误写成可强制取消。
+
 所有 `Option` 预算都必须同时提供清除方法，例如 `without_max_entries()`；调用方因此可以从
 实例默认 Options clone 后，显式恢复为无限制。`with_*` 不执行 I/O；依赖 scope、目标 mount
 或多个字段组合的校验由 filesystem setter 或 operation 入口完成。
@@ -1170,7 +1173,8 @@ Drop 只对仍可证明 owned 的资源执行 best-effort cleanup；`Indetermina
 ### 18.3 私有 sandbox
 
 每个临时资源在选定 parent 下先创建 private sandbox，再在 sandbox 中创建实际 entry。
-成功 cleanup 或 persist 后移除空 sandbox；`keep()` 把 sandbox 与资源路径一起移交调用方。
+成功 cleanup 或 persist 后移除空 sandbox；`keep()` 将资源原子发布到 sandbox 外生成的 sibling，
+并在 outcome 中报告 sandbox cleanup state。
 
 这样可以缩小共享 parent 中同名替换的攻击面，但不把 sandbox 宣称为跨不受信任并发写入者
 的绝对同步边界。
@@ -1180,8 +1184,9 @@ Drop 只对仍可证明 owned 的资源执行 best-effort cleanup；`Indetermina
 `LocalTempFile::close(&mut self)` 只关闭内容 I/O handle，资源仍然 owned；path、persist、keep
 和 cleanup 继续可用。这支持把已关闭文件交给要求 path 的外部进程。
 
-`keep(self)` 消耗资源并移交 cleanup responsibility，返回虚拟绝对路径。`cleanup(&mut self)`
-成功后进入 Cleaned；重复调用遵循明确的 idempotent/invalid-state contract，不能误删新 entry。
+`keep(self)` 消耗资源，原子发布到生成 sibling，并返回 `LocalPersistOutcome`（含目标路径、
+发布方式、原子性和 sandbox cleanup state）。`cleanup(&mut self)` 成功后进入 Cleaned；重复调用
+遵循明确的 idempotent/invalid-state contract，不能误删新 entry。
 
 ### 18.5 Persist
 

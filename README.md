@@ -96,7 +96,8 @@ outside the cleanup guarantee. Put temporary entries in a directory not
 writable by concurrent actors, or call `keep` and coordinate deletion yourself.
 Each temporary resource is created inside a private per-resource sandbox. The
 resource path therefore includes one generated sandbox component; `keep`
-transfers ownership of that sandbox together with the returned resource path.
+atomically publishes the entry to a generated sibling path, returns a
+`LocalPersistOutcome`, and reports whether sandbox cleanup left a residual.
 
 ## Choose the right authority
 
