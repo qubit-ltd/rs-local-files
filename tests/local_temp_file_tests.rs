@@ -169,6 +169,36 @@ fn test_local_temp_file_keep_retains_contents_after_guard_is_consumed() {
     .expect("empty temporary sandbox should be removable");
 }
 
+/// Verifies a generated keep collision preserves the guard for a later retry.
+#[test]
+fn test_local_temp_file_keep_conflict_retains_resource_for_retry() {
+    let parent = tempdir().expect("temporary parent should be created");
+    let temporary = LocalFileSystem::host()
+        .expect("Host filesystem should open")
+        .create_temp_file_with_options(&LocalTempFileOptions::new().with_parent(parent.path()))
+        .expect("temporary file should be created");
+    let source = temporary.path().to_path_buf();
+    let target = source
+        .parent()
+        .and_then(Path::parent)
+        .expect("temporary resource should have a publication parent")
+        .join(source.file_name().expect("temporary resource should have a name"));
+    fs::write(&target, b"existing").expect("generated target should be reservable");
+
+    let error = temporary
+        .keep()
+        .expect_err("occupied generated target should reject keep");
+    assert_eq!(LocalPersistFailureState::NotPublished, error.state());
+    let (_, temporary, requested, resolved, _) = error.into_parts();
+    assert_eq!(target, requested);
+    assert_eq!(Some(target.clone()), resolved);
+
+    fs::remove_file(&target).expect("fixture collision should be removable");
+    let outcome = temporary.keep().expect("retained temporary file should retry keep");
+    assert_eq!(&target, outcome.path());
+    fs::remove_file(target).expect("published fixture should be removable");
+}
+
 /// Verifies a temporary file is isolated in a private cleanup sandbox.
 #[cfg(not(windows))]
 #[test]
