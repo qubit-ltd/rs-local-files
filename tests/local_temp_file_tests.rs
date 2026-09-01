@@ -153,7 +153,9 @@ fn test_local_temp_file_keep_retains_contents_after_guard_is_consumed() {
         temporary
             .write_all(b"payload")
             .expect("temporary file should accept bytes");
-        temporary.keep().expect("temporary file should publish").into_parts().0
+        let outcome = temporary.keep().expect("temporary file should publish");
+        assert!(!outcome.durable());
+        outcome.into_parts().0
     };
 
     assert_eq!(
