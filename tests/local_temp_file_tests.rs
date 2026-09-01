@@ -103,6 +103,13 @@ fn test_local_temp_file_close_retains_path_and_persist_responsibility() {
     temporary.close();
 
     assert_eq!(path, temporary.path());
+    assert_eq!(
+        ErrorKind::BrokenPipe,
+        temporary
+            .seek(SeekFrom::Start(0))
+            .expect_err("closed file should reject seeks")
+            .kind()
+    );
     let outcome = temporary.persist(&target).expect("closed file should persist");
     assert_eq!(target, outcome.path());
     assert!(target.exists());
