@@ -7,9 +7,11 @@
 // =============================================================================
 //! Scoped test fault guard for deterministic fault injection.
 
+/// Releases one process-local deterministic fault selector when dropped.
 #[derive(Debug)]
 #[cfg(feature = "internal-test-support")]
 #[doc(hidden)]
 pub struct TestFaultGuard {
+    /// Whether this guard still owns the active selector.
     pub(crate) active: bool,
 }

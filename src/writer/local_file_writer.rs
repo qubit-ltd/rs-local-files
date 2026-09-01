@@ -26,6 +26,23 @@ use crate::LocalWritePublicationMethod;
 use crate::LocalWriterState;
 
 /// Stateful native byte output and destination publication session.
+///
+/// # Examples
+///
+/// ```no_run
+/// use std::io::Write;
+/// use std::path::Path;
+///
+/// use qubit_local_files::LocalFileSystem;
+///
+/// # fn main() -> Result<(), Box<dyn std::error::Error>> {
+/// let filesystem = LocalFileSystem::host()?;
+/// let mut writer = filesystem.open_writer(Path::new("output.txt"))?;
+/// writer.write_all(b"hello")?;
+/// let _outcome = writer.commit()?;
+/// # Ok(())
+/// # }
+/// ```
 #[must_use = "a local writer has no effect unless it is committed or aborted"]
 #[derive(Debug)]
 pub struct LocalFileWriter {

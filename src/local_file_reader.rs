@@ -18,6 +18,24 @@ use std::io::SeekFrom;
 use crate::LocalFileMetadata;
 
 /// Owned synchronous reader for an opened native regular file.
+///
+/// # Examples
+///
+/// ```no_run
+/// use std::io::Read;
+/// use std::path::Path;
+///
+/// use qubit_local_files::LocalFileSystem;
+///
+/// # fn main() -> Result<(), Box<dyn std::error::Error>> {
+/// let filesystem = LocalFileSystem::host()?;
+/// let mut reader = filesystem.open_reader(Path::new("Cargo.toml"))?;
+/// let mut contents = String::new();
+/// reader.read_to_string(&mut contents)?;
+/// assert!(!contents.is_empty());
+/// # Ok(())
+/// # }
+/// ```
 #[derive(Debug)]
 pub struct LocalFileReader {
     /// Open native file handle.

@@ -47,6 +47,21 @@ use crate::path::LocalPathResolver;
 /// The directory is created inside a private generated sandbox. Cleanup
 /// removes the directory tree and then the empty sandbox. [`Self::keep`]
 /// atomically publishes the directory outside that sandbox.
+///
+/// # Examples
+///
+/// ```no_run
+/// use qubit_local_files::LocalFileSystem;
+///
+/// # fn main() -> Result<(), Box<dyn std::error::Error>> {
+/// let filesystem = LocalFileSystem::host()?;
+/// let mut temporary = filesystem.create_temp_directory()?;
+/// let child = temporary.child(std::path::Path::new("child.txt"))?;
+/// assert!(child.ends_with("child.txt"));
+/// temporary.cleanup()?;
+/// # Ok(())
+/// # }
+/// ```
 #[must_use = "dropping the temporary-directory guard removes its directory"]
 #[derive(Debug)]
 pub struct LocalTempDirectory {
