@@ -42,6 +42,12 @@ where
     budget.copy_with_now(reader, writer, now)
 }
 
+/// Derives the generated publication target for a temporary resource path.
+#[doc(hidden)]
+pub fn generated_keep_target(resource: &std::path::Path) -> std::io::Result<std::path::PathBuf> {
+    crate::temp::internal::generated_target(resource)
+}
+
 /// Maps internal copy-stage facts to the public recovery state.
 pub const fn copy_failure_state(
     stage: crate::local::LocalCopyDirStage,
