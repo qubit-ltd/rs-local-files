@@ -93,6 +93,7 @@ fn test_generated_keep_target_promotes_only_well_formed_sandbox_paths() {
             .expect("sandboxed path should derive a sibling target")
     );
     assert!(generated_keep_target(std::path::Path::new("resource")).is_err());
+    assert!(generated_keep_target(std::path::Path::new("/parent/sandbox/..")).is_err());
     assert_eq!(
         std::path::Path::new("/resource"),
         generated_keep_target(std::path::Path::new("/sandbox/resource"))
