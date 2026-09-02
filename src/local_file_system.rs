@@ -51,6 +51,7 @@ use crate::LocalTempDirectoryOptions;
 use crate::LocalTempFile;
 use crate::LocalTempFileOptions;
 use crate::LocalWriteOptions;
+use crate::file_system::LocalCurrentDirectory;
 use crate::file_system::LocalFileSystemCore;
 use crate::file_system::LocalFileSystemDefaults;
 use crate::local::HostLocalFileSystem;
@@ -66,10 +67,12 @@ use crate::path::LocalNamespacePath;
 use crate::path::LocalPathResolver;
 use crate::rooted_local_file_system::RootedLocalFileSystem;
 
-/// Synchronous local filesystem with per-instance PWD and operation defaults.
+/// Synchronous local filesystem with native or virtual PWD semantics.
 ///
 /// Clones share only immutable authority state. Each clone receives an
-/// independent snapshot of the PWD, symlink policy, and all default Options.
+/// independent snapshot of the virtual PWD, symlink policy, and all default
+/// Options. Host instances read the process PWD when an operation binds a
+/// relative path and therefore observe process-global PWD changes.
 /// The type provides no contract for concurrent configuration mutation;
 /// callers that share one mutable instance may add their own lock.
 ///
@@ -91,8 +94,8 @@ use crate::rooted_local_file_system::RootedLocalFileSystem;
 pub struct LocalFileSystem {
     /// Immutable authority and capability state shared by opened resources.
     pub(crate) core: Arc<LocalFileSystemCore>,
-    /// Normalized namespace-absolute current directory.
-    current_directory: PathBuf,
+    /// Process-backed Host PWD or retained Rooted virtual PWD.
+    current_directory: LocalCurrentDirectory,
     /// Default symlink policy used by operations without an override.
     symlink_policy: LocalSymlinkPolicy,
     /// Per-instance operation defaults, copied by value on clone.
@@ -100,13 +103,8 @@ pub struct LocalFileSystem {
 }
 
 impl LocalFileSystem {
-    /// Captures the process current directory and creates a Host filesystem.
+    /// Creates a Host filesystem without reading the process PWD.
     pub fn host() -> LocalResult<Self> {
-        let current_directory = std::env::current_dir().map_err(|error| {
-            LocalFileError::from_io(LocalFileOperation::Configure, None, None, error)
-                .with_reason("failed to capture the Host filesystem current directory")
-        })?;
-        LocalPathResolver::new(LocalFileSystemScope::Host, &current_directory)?;
         let capabilities = HostLocalFileSystem::capabilities();
         Ok(Self {
             core: Arc::new(LocalFileSystemCore {
@@ -120,7 +118,7 @@ impl LocalFileSystem {
                 #[cfg(feature = "test-support")]
                 test_faults: None,
             }),
-            current_directory,
+            current_directory: LocalCurrentDirectory::Process,
             symlink_policy: LocalSymlinkPolicy::FollowAcrossScope,
             defaults: LocalFileSystemDefaults::default(),
         })
@@ -139,21 +137,34 @@ impl LocalFileSystem {
                 #[cfg(feature = "test-support")]
                 test_faults: None,
             }),
-            current_directory: PathBuf::from(std::path::MAIN_SEPARATOR_STR),
+            current_directory: LocalCurrentDirectory::Virtual(PathBuf::from(std::path::MAIN_SEPARATOR_STR)),
             symlink_policy: LocalSymlinkPolicy::FollowWithinScope,
             defaults: LocalFileSystemDefaults::default(),
         })
     }
 
-    /// Creates a resolver from one operation's PWD snapshot.
-    fn resolver(&self) -> LocalPathResolver {
-        LocalPathResolver::new(self.scope(), &self.current_directory)
-            .expect("LocalFileSystem stores a normalized namespace-absolute PWD")
+    /// Creates a resolver using one operation's PWD snapshot when required.
+    fn resolver_for(&self, path: &Path, operation: LocalFileOperation) -> LocalResult<LocalPathResolver> {
+        if self.scope() == LocalFileSystemScope::Host && path.is_absolute() {
+            return Ok(LocalPathResolver::absolute_host());
+        }
+        let current_directory = self.current_directory.snapshot(operation, Some(path))?;
+        LocalPathResolver::new(self.scope(), &current_directory).map_err(|error| error.with_operation(operation))
     }
 
-    /// Resolves one operation path with stable public error context.
-    fn resolve(&self, path: &Path, operation: LocalFileOperation) -> LocalResult<LocalNamespacePath> {
-        resolve_operation_path(&self.resolver(), path, operation)
+    /// Creates one resolver for a two-path operation from a single PWD
+    /// snapshot.
+    fn resolver_for_pair(
+        &self,
+        source: &Path,
+        target: &Path,
+        operation: LocalFileOperation,
+    ) -> LocalResult<LocalPathResolver> {
+        if self.scope() == LocalFileSystemScope::Host && source.is_absolute() && target.is_absolute() {
+            return Ok(LocalPathResolver::absolute_host());
+        }
+        let current_directory = self.current_directory.snapshot(operation, Some(source))?;
+        LocalPathResolver::new(self.scope(), &current_directory).map_err(|error| error.with_operation(operation))
     }
 
     /// Validates a directory using native lookup and the configured policy.
@@ -174,6 +185,7 @@ impl LocalFileSystem {
         &self,
         path: &LocalNamespacePath,
         operation: LocalFileOperation,
+        current_directory: Option<&Path>,
     ) -> LocalResult<()> {
         if !path.directory_required() {
             return Ok(());
@@ -184,21 +196,13 @@ impl LocalFileSystem {
             }
             LocalNamespace::Rooted(rooted) => rooted.metadata(path.authority_relative(), self.symlink_policy),
         }
-        .map_err(|error| {
-            operation_error(
-                error,
-                operation,
-                path.namespace_absolute(),
-                None,
-                self.current_directory(),
-            )
-        })?;
+        .map_err(|error| operation_error(error, operation, path.namespace_absolute(), None, current_directory))?;
         if metadata.kind() == LocalFileKind::Directory {
             return Ok(());
         }
-        Err(LocalFileError::new(LocalFileErrorKind::NotDirectory, operation)
-            .with_path(path.namespace_absolute().to_path_buf())
-            .with_current_directory(self.current_directory.clone()))
+        let error = LocalFileError::new(LocalFileErrorKind::NotDirectory, operation)
+            .with_path(path.namespace_absolute().to_path_buf());
+        Err(with_current_directory(error, current_directory))
     }
 
     /// Reports whether a path denotes the protected Rooted virtual root.
@@ -207,14 +211,19 @@ impl LocalFileSystem {
     }
 
     /// Rejects an operation that may remove or replace the Rooted virtual root.
-    fn reject_root_operand(&self, path: &LocalNamespacePath, operation: LocalFileOperation) -> LocalResult<()> {
+    fn reject_root_operand(
+        &self,
+        path: &LocalNamespacePath,
+        operation: LocalFileOperation,
+        current_directory: Option<&Path>,
+    ) -> LocalResult<()> {
         if !self.is_root_operand(path) {
             return Ok(());
         }
-        Err(LocalFileError::new(LocalFileErrorKind::InvalidPath, operation)
+        let error = LocalFileError::new(LocalFileErrorKind::InvalidPath, operation)
             .with_reason("the Rooted virtual root cannot be removed or replaced")
-            .with_path(path.namespace_absolute().to_path_buf())
-            .with_current_directory(self.current_directory.clone()))
+            .with_path(path.namespace_absolute().to_path_buf());
+        Err(with_current_directory(error, current_directory))
     }
 }
 
@@ -226,10 +235,8 @@ fn resolve_operation_path(
     operation: LocalFileOperation,
 ) -> LocalResult<LocalNamespacePath> {
     resolver.resolve(path).map_err(|error| {
-        error
-            .with_operation(operation)
-            .with_path(path.to_path_buf())
-            .with_current_directory(resolver.current_directory().to_path_buf())
+        let error = error.with_operation(operation).with_path(path.to_path_buf());
+        with_current_directory(error, resolver.current_directory())
     })
 }
 
@@ -239,16 +246,24 @@ fn operation_error(
     operation: LocalFileOperation,
     path: &Path,
     target: Option<&Path>,
-    current_directory: &Path,
+    current_directory: Option<&Path>,
 ) -> LocalFileError {
-    let error = error
-        .with_operation(operation)
-        .with_path(path.to_path_buf())
-        .with_current_directory(current_directory.to_path_buf());
+    let error = with_current_directory(
+        error.with_operation(operation).with_path(path.to_path_buf()),
+        current_directory,
+    );
     if let Some(target) = target {
         error.with_target(target.to_path_buf())
     } else {
         error
+    }
+}
+
+/// Attaches a PWD snapshot when path binding actually required one.
+fn with_current_directory(error: LocalFileError, current_directory: Option<&Path>) -> LocalFileError {
+    match current_directory {
+        Some(current_directory) => error.with_current_directory(current_directory.to_path_buf()),
+        None => error,
     }
 }
 

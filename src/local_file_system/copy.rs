@@ -25,6 +25,7 @@ use super::copy_failure_unchanged;
 use super::rename_failure_unchanged;
 use super::resolve_operation_path;
 use super::validate_copy_options;
+use super::with_current_directory;
 
 impl LocalFileSystem {
     /// Copies an entry using this instance's default copy options.
@@ -46,14 +47,16 @@ impl LocalFileSystem {
             Some(request_destination),
         )
         .map_err(|error| {
-            copy_failure_unchanged(
+            copy_failure_unchanged(with_current_directory(
                 error
                     .with_path(request_source.to_path_buf())
-                    .with_target(request_destination.to_path_buf())
-                    .with_current_directory(self.current_directory.clone()),
-            )
+                    .with_target(request_destination.to_path_buf()),
+                self.current_directory.virtual_path(),
+            ))
         })?;
-        let resolver = self.resolver();
+        let resolver = self
+            .resolver_for_pair(request_source, request_destination, LocalFileOperation::Copy)
+            .map_err(|error| copy_failure_unchanged(error.with_target(request_destination.to_path_buf())))?;
         let source = resolve_operation_path(&resolver, request_source, LocalFileOperation::Copy)
             .map_err(|error| copy_failure_unchanged(error.with_target(request_destination.to_path_buf())))?;
         let destination =
@@ -64,11 +67,11 @@ impl LocalFileSystem {
                         .with_target(request_destination.to_path_buf()),
                 )
             })?;
-        self.reject_root_operand(&source, LocalFileOperation::Copy)
+        self.reject_root_operand(&source, LocalFileOperation::Copy, resolver.current_directory())
             .map_err(|error| {
                 copy_failure_unchanged(error.with_target(destination.namespace_absolute().to_path_buf()))
             })?;
-        self.reject_root_operand(&destination, LocalFileOperation::Copy)
+        self.reject_root_operand(&destination, LocalFileOperation::Copy, resolver.current_directory())
             .map_err(|error| {
                 copy_failure_unchanged(
                     error
@@ -86,13 +89,14 @@ impl LocalFileSystem {
                 }
                 crate::LocalCopySourceMode::Tree => options,
                 crate::LocalCopySourceMode::File => {
-                    return Err(copy_failure_unchanged(
-                        LocalFileError::new(LocalFileErrorKind::NotDirectory, LocalFileOperation::Copy)
-                            .with_reason("directory-qualified copy paths are incompatible with file source mode")
-                            .with_path(source.namespace_absolute().to_path_buf())
-                            .with_target(destination.namespace_absolute().to_path_buf())
-                            .with_current_directory(self.current_directory.clone()),
-                    ));
+                    let error = LocalFileError::new(LocalFileErrorKind::NotDirectory, LocalFileOperation::Copy)
+                        .with_reason("directory-qualified copy paths are incompatible with file source mode")
+                        .with_path(source.namespace_absolute().to_path_buf())
+                        .with_target(destination.namespace_absolute().to_path_buf());
+                    return Err(copy_failure_unchanged(with_current_directory(
+                        error,
+                        resolver.current_directory(),
+                    )));
                 }
             }
         } else {
@@ -141,7 +145,9 @@ impl LocalFileSystem {
     ) -> LocalRenameResult {
         let request_source = source;
         let request_destination = destination;
-        let resolver = self.resolver();
+        let resolver = self
+            .resolver_for_pair(request_source, request_destination, LocalFileOperation::Rename)
+            .map_err(|error| rename_failure_unchanged(error.with_target(request_destination.to_path_buf())))?;
         let source = resolve_operation_path(&resolver, request_source, LocalFileOperation::Rename)
             .map_err(|error| rename_failure_unchanged(error.with_target(request_destination.to_path_buf())))?;
         let destination =
@@ -152,11 +158,11 @@ impl LocalFileSystem {
                         .with_target(request_destination.to_path_buf()),
                 )
             })?;
-        self.reject_root_operand(&source, LocalFileOperation::Rename)
+        self.reject_root_operand(&source, LocalFileOperation::Rename, resolver.current_directory())
             .map_err(|error| {
                 rename_failure_unchanged(error.with_target(destination.namespace_absolute().to_path_buf()))
             })?;
-        self.reject_root_operand(&destination, LocalFileOperation::Rename)
+        self.reject_root_operand(&destination, LocalFileOperation::Rename, resolver.current_directory())
             .map_err(|error| {
                 rename_failure_unchanged(
                     error
@@ -164,11 +170,11 @@ impl LocalFileSystem {
                         .with_target(destination.namespace_absolute().to_path_buf()),
                 )
             })?;
-        self.validate_directory_requirement(&source, LocalFileOperation::Rename)
+        self.validate_directory_requirement(&source, LocalFileOperation::Rename, resolver.current_directory())
             .map_err(|error| {
                 rename_failure_unchanged(error.with_target(destination.namespace_absolute().to_path_buf()))
             })?;
-        self.validate_directory_requirement(&destination, LocalFileOperation::Rename)
+        self.validate_directory_requirement(&destination, LocalFileOperation::Rename, resolver.current_directory())
             .map_err(|error| {
                 rename_failure_unchanged(
                     error

@@ -17,6 +17,8 @@ pub enum LocalFileOperation {
     Configure,
     /// Changing a filesystem instance's namespace current directory.
     SetCurrentDirectory,
+    /// Reading the filesystem current directory.
+    CurrentDirectory,
     /// Querying filesystem capabilities.
     Capabilities,
     /// Validating a native or portable filename.
