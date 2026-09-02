@@ -11,22 +11,25 @@ API, or a replacement for provider-level logical paths.
 ## Conceptual Model
 
 ```
-Host namespace ── LocalFileSystem::host() ── captured Host PWD
+Host namespace ── LocalFileSystem::host() ── operation-time process PWD
 opened root ───── LocalFileSystem::rooted(root) ── virtual / and instance PWD
 ```
 
 `LocalFileSystem` is a stateful filesystem object. `host()` selects the
-process-visible namespace and captures the process current directory once.
+process-visible namespace without reading the current directory. An absolute
+Host path never requires it; a relative Host path captures one process-PWD
+snapshot when its operation begins.
 `rooted(root)` opens one directory authority, gives it the virtual root `/`,
 and starts with PWD `/`. Both forms accept namespace-absolute paths and paths
-relative to their own PWD, and expose the same operations. Readers, writers,
+relative to the applicable PWD, and expose the same operations. Readers, writers,
 walkers, and temporary entries are owned stateful resources. `LocalFileNames`
 and `LocalPaths` provide native lexical utilities without converting names to
 UTF-8.
 
 ## Configure Once, Override Deliberately
 
-Each filesystem instance owns its PWD, symbolic-link policy, and defaults for
+Each Rooted instance owns a virtual PWD. Host instances instead observe the
+process-global PWD. Every instance owns its symbolic-link policy and defaults for
 read, write, list, copy, create-directory, delete, rename, temporary-file, and
 temporary-directory operations. Configure those values once with the
 `set_default_*_options` methods and then use ordinary operation methods.
@@ -57,8 +60,9 @@ let one_level = filesystem.list_with_options(
 
 The initial Options contain no hidden business resource caps. Traversal and
 copy budgets, retry durations, deadlines, and temporary-name attempt limits
-apply only when the caller sets them. Cloning a filesystem snapshots its PWD
-and all configuration; Rooted clones share only the immutable opened authority.
+apply only when the caller sets them. Cloning snapshots a Rooted virtual PWD
+and all configuration; Host clones continue to observe the same process PWD.
+Rooted clones share only the immutable opened authority.
 The crate does not promise synchronization for shared mutable configuration.
 Use one clone per thread or add a caller-owned synchronization wrapper.
 
