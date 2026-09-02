@@ -25,7 +25,9 @@ use super::Path;
 use super::operation_error;
 use super::operation_failure_path;
 use super::reject_directory_qualified_file;
+use super::resolve_operation_path;
 use super::validate_list_options;
+use super::with_current_directory;
 
 impl LocalFileSystem {
     /// Opens a directory walker using this instance's default list options.
@@ -35,14 +37,15 @@ impl LocalFileSystem {
 
     /// Opens a walker using one complete explicit options value.
     pub fn list_with_options(&self, path: &Path, options: &LocalListOptions) -> LocalResult<LocalDirectoryWalker> {
-        let resolved = self.resolve(path, LocalFileOperation::List)?;
+        let resolver = self.resolver_for(path, LocalFileOperation::List)?;
+        let resolved = resolve_operation_path(&resolver, path, LocalFileOperation::List)?;
         validate_list_options(
             self.scope(),
             self.symlink_policy,
             options,
             Some(resolved.namespace_absolute()),
         )
-        .map_err(|error| error.with_current_directory(self.current_directory.clone()))?;
+        .map_err(|error| with_current_directory(error, resolver.current_directory()))?;
         match &self.core.namespace {
             LocalNamespace::Host => {
                 HostLocalFileSystem::list_with_policy(resolved.authority_relative(), options, self.symlink_policy)
@@ -54,14 +57,14 @@ impl LocalFileSystem {
                 self.symlink_policy,
             ),
         }
-        .map(|walker| walker.bind_current_directory(self.current_directory.clone()))
+        .map(|walker| walker.bind_current_directory(resolver.current_directory().map(Path::to_path_buf)))
         .map_err(|error| {
             operation_error(
                 error,
                 LocalFileOperation::List,
                 resolved.namespace_absolute(),
                 None,
-                self.current_directory(),
+                resolver.current_directory(),
             )
         })
     }
@@ -77,16 +80,15 @@ impl LocalFileSystem {
         path: &Path,
         options: &LocalCreateDirectoryOptions,
     ) -> LocalResult<LocalCreateDirectoryOutcome> {
-        let resolved = self.resolve(path, LocalFileOperation::CreateDirectory)?;
+        let resolver = self.resolver_for(path, LocalFileOperation::CreateDirectory)?;
+        let resolved = resolve_operation_path(&resolver, path, LocalFileOperation::CreateDirectory)?;
         if self.is_root_operand(&resolved) {
             if options.exists_ok() {
                 return Ok(LocalCreateDirectoryOutcome::new(false));
             }
-            return Err(
-                LocalFileError::new(LocalFileErrorKind::AlreadyExists, LocalFileOperation::CreateDirectory)
-                    .with_path(resolved.namespace_absolute().to_path_buf())
-                    .with_current_directory(self.current_directory.clone()),
-            );
+            let error = LocalFileError::new(LocalFileErrorKind::AlreadyExists, LocalFileOperation::CreateDirectory)
+                .with_path(resolved.namespace_absolute().to_path_buf());
+            return Err(with_current_directory(error, resolver.current_directory()));
         }
         match &self.core.namespace {
             LocalNamespace::Host => HostLocalFileSystem::create_directory_with_policy(
@@ -105,7 +107,7 @@ impl LocalFileSystem {
                 LocalFileOperation::CreateDirectory,
                 &path,
                 None,
-                self.current_directory(),
+                resolver.current_directory(),
             )
         })
     }
@@ -121,9 +123,10 @@ impl LocalFileSystem {
         path: &Path,
         options: &LocalDeleteOptions,
     ) -> LocalResult<LocalDeleteOutcome> {
-        let resolved = self.resolve(path, LocalFileOperation::DeleteFile)?;
-        self.reject_root_operand(&resolved, LocalFileOperation::DeleteFile)?;
-        reject_directory_qualified_file(&resolved, LocalFileOperation::DeleteFile, self.current_directory())?;
+        let resolver = self.resolver_for(path, LocalFileOperation::DeleteFile)?;
+        let resolved = resolve_operation_path(&resolver, path, LocalFileOperation::DeleteFile)?;
+        self.reject_root_operand(&resolved, LocalFileOperation::DeleteFile, resolver.current_directory())?;
+        reject_directory_qualified_file(&resolved, LocalFileOperation::DeleteFile, resolver.current_directory())?;
         match &self.core.namespace {
             LocalNamespace::Host => HostLocalFileSystem::delete_file_with_policy(
                 resolved.authority_relative(),
@@ -140,7 +143,7 @@ impl LocalFileSystem {
                 LocalFileOperation::DeleteFile,
                 resolved.namespace_absolute(),
                 None,
-                self.current_directory(),
+                resolver.current_directory(),
             )
         })
     }
@@ -156,8 +159,13 @@ impl LocalFileSystem {
         path: &Path,
         options: &LocalDeleteOptions,
     ) -> LocalResult<LocalDeleteOutcome> {
-        let resolved = self.resolve(path, LocalFileOperation::DeleteDirectory)?;
-        self.reject_root_operand(&resolved, LocalFileOperation::DeleteDirectory)?;
+        let resolver = self.resolver_for(path, LocalFileOperation::DeleteDirectory)?;
+        let resolved = resolve_operation_path(&resolver, path, LocalFileOperation::DeleteDirectory)?;
+        self.reject_root_operand(
+            &resolved,
+            LocalFileOperation::DeleteDirectory,
+            resolver.current_directory(),
+        )?;
         match &self.core.namespace {
             LocalNamespace::Host => HostLocalFileSystem::delete_directory_with_policy(
                 resolved.authority_relative(),
@@ -175,7 +183,7 @@ impl LocalFileSystem {
                 LocalFileOperation::DeleteDirectory,
                 &path,
                 None,
-                self.current_directory(),
+                resolver.current_directory(),
             )
         })
     }

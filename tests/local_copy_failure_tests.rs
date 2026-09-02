@@ -8,7 +8,7 @@
 
 //! Integration tests for typed unified-copy failures.
 
-#[cfg(feature = "internal-test-support")]
+#[cfg(any(feature = "internal-test-support", unix))]
 use std::fs;
 use std::path::PathBuf;
 #[cfg(feature = "internal-test-support")]
@@ -71,10 +71,45 @@ fn test_copy_failure_exposes_typed_state_and_parts() {
         .expect_err("missing source must fail");
 
     assert_eq!(failure.state(), LocalCopyFailureState::Unchanged);
+    assert_eq!(Some(source.as_path()), failure.request_source_path());
+    assert_eq!(Some(target.as_path()), failure.request_target_path());
+    assert_eq!(Some(source.as_path()), failure.error().path());
+    assert!(failure.to_string().contains("copy failed with Unchanged state"));
     assert_eq!(failure.partial_stats(), &LocalCopyStats::default());
     assert!(failure.staging_path().is_none());
     assert!(failure.cleanup_error().is_none());
     assert!(!target.exists());
+}
+
+/// Verifies display diagnostics distinguish a failed descendant from the
+/// top-level copy request.
+#[cfg(unix)]
+#[test]
+fn test_copy_failure_display_reports_failed_descendant() {
+    use std::os::unix::fs::symlink;
+
+    use qubit_local_files::policy::LocalSymlinkPolicy;
+
+    let directory = tempfile::tempdir().expect("temporary directory should be created");
+    let source = directory.path().join("source");
+    let target = directory.path().join("target");
+    fs::create_dir(&source).expect("source directory should be created");
+    symlink(".", source.join("link")).expect("source link should be created");
+
+    let failure = LocalFileSystem::host()
+        .expect("Host filesystem should open")
+        .copy_with_options(
+            &source,
+            &target,
+            &LocalCopyOptions::new()
+                .with_tree_source()
+                .with_symlink_policy(LocalSymlinkPolicy::FollowWithinScope),
+        )
+        .expect_err("a descendant link cycle should fail the tree copy");
+
+    assert_ne!(failure.request_source_path(), failure.failed_source_path());
+    assert_ne!(failure.request_target_path(), failure.failed_target_path());
+    assert!(failure.to_string().contains("while processing"));
 }
 
 /// Verifies a second-child fault retains prior recursive publication stats.

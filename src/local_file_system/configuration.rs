@@ -13,6 +13,7 @@ use super::Arc;
 use super::LocalCopyOptions;
 use super::LocalCreateDirectoryOptions;
 use super::LocalDeleteOptions;
+use super::LocalFileError;
 use super::LocalFileOperation;
 use super::LocalFileSystem;
 #[cfg(feature = "test-support")]
@@ -34,6 +35,7 @@ use super::validate_copy_options;
 use super::validate_list_options;
 use super::validate_scope_symlink_policy;
 use super::validate_temp_attempts;
+use super::with_current_directory;
 
 impl LocalFileSystem {
     /// Returns the namespace kind interpreted by this instance.
@@ -45,15 +47,32 @@ impl LocalFileSystem {
         }
     }
 
-    /// Returns this instance's normalized namespace-absolute PWD.
-    #[inline]
-    pub fn current_directory(&self) -> &Path {
-        &self.current_directory
+    /// Returns the process PWD for Host or the retained virtual PWD for Rooted.
+    ///
+    /// Host queries the native process state on every call and returns an error
+    /// when that state is unavailable. Rooted returns an owned virtual
+    /// snapshot.
+    pub fn current_directory(&self) -> LocalResult<std::path::PathBuf> {
+        self.current_directory
+            .snapshot(LocalFileOperation::CurrentDirectory, None)
     }
 
-    /// Changes this instance's PWD after resolving and validating a directory.
+    /// Changes the process PWD for Host or the virtual PWD for Rooted.
+    ///
+    /// Host delegates directly to the native process operation. Rooted resolves
+    /// and validates the requested directory before changing instance state.
     pub fn set_current_directory(&mut self, path: &Path) -> LocalResult<()> {
-        let resolver = self.resolver();
+        if self.scope() == LocalFileSystemScope::Host {
+            return std::env::set_current_dir(path).map_err(|source| {
+                LocalFileError::from_io(
+                    LocalFileOperation::SetCurrentDirectory,
+                    Some(path.to_path_buf()),
+                    None,
+                    source,
+                )
+            });
+        }
+        let resolver = self.resolver_for(path, LocalFileOperation::SetCurrentDirectory)?;
         let resolved = resolve_operation_path(&resolver, path, LocalFileOperation::SetCurrentDirectory)?;
         self.validate_directory(&resolved).map_err(|error| {
             operation_error(
@@ -61,10 +80,13 @@ impl LocalFileSystem {
                 LocalFileOperation::SetCurrentDirectory,
                 resolved.namespace_absolute(),
                 None,
-                self.current_directory(),
+                resolver.current_directory(),
             )
         })?;
-        self.current_directory = resolved.namespace_absolute().to_path_buf();
+        let replaced = self
+            .current_directory
+            .replace_virtual(resolved.namespace_absolute().to_path_buf());
+        debug_assert!(replaced, "Rooted filesystem must retain a virtual PWD");
         Ok(())
     }
 
@@ -78,7 +100,7 @@ impl LocalFileSystem {
     /// Changes this instance's default symlink policy transactionally.
     pub fn set_symlink_policy(&mut self, policy: LocalSymlinkPolicy) -> LocalResult<()> {
         validate_scope_symlink_policy(self.scope(), policy, LocalFileOperation::Configure, None)
-            .map_err(|error| error.with_current_directory(self.current_directory.clone()))?;
+            .map_err(|error| with_current_directory(error, self.current_directory.virtual_path()))?;
         self.symlink_policy = policy;
         Ok(())
     }
@@ -129,7 +151,7 @@ impl LocalFileSystem {
     /// Replaces the default listing options after structural validation.
     pub fn set_default_list_options(&mut self, options: LocalListOptions) -> LocalResult<()> {
         validate_list_options(self.scope(), self.symlink_policy, &options, None)
-            .map_err(|error| error.with_current_directory(self.current_directory.clone()))?;
+            .map_err(|error| with_current_directory(error, self.current_directory.virtual_path()))?;
         self.defaults.list = options;
         Ok(())
     }
@@ -144,7 +166,7 @@ impl LocalFileSystem {
     /// Replaces the default copy options after structural validation.
     pub fn set_default_copy_options(&mut self, options: LocalCopyOptions) -> LocalResult<()> {
         validate_copy_options(self.scope(), self.symlink_policy, &options, None, None)
-            .map_err(|error| error.with_current_directory(self.current_directory.clone()))?;
+            .map_err(|error| with_current_directory(error, self.current_directory.virtual_path()))?;
         self.defaults.copy = options;
         Ok(())
     }
@@ -198,7 +220,7 @@ impl LocalFileSystem {
     /// Replaces the default temporary-file options after validation.
     pub fn set_default_temp_file_options(&mut self, options: LocalTempFileOptions) -> LocalResult<()> {
         validate_temp_attempts(options.max_attempts(), LocalFileOperation::Configure)
-            .map_err(|error| error.with_current_directory(self.current_directory.clone()))?;
+            .map_err(|error| with_current_directory(error, self.current_directory.virtual_path()))?;
         self.defaults.temp_file = options;
         Ok(())
     }
@@ -213,7 +235,7 @@ impl LocalFileSystem {
     /// Replaces the default temporary-directory options after validation.
     pub fn set_default_temp_directory_options(&mut self, options: LocalTempDirectoryOptions) -> LocalResult<()> {
         validate_temp_attempts(options.max_attempts(), LocalFileOperation::Configure)
-            .map_err(|error| error.with_current_directory(self.current_directory.clone()))?;
+            .map_err(|error| with_current_directory(error, self.current_directory.virtual_path()))?;
         self.defaults.temp_directory = options;
         Ok(())
     }

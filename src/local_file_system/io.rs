@@ -25,17 +25,22 @@ use super::Path;
 use super::Read;
 use super::operation_error;
 use super::reject_directory_qualified_file;
+use super::resolve_operation_path;
+use super::with_current_directory;
 
 impl LocalFileSystem {
     /// Reads final-entry metadata without following the final symlink.
     pub fn metadata(&self, path: &Path) -> LocalResult<LocalFileMetadata> {
+        let resolver = self.resolver_for(path, LocalFileOperation::Metadata)?;
+        let resolved = resolve_operation_path(&resolver, path, LocalFileOperation::Metadata)?;
         self.core
             .fail_if_requested(crate::test_support::TestFaultPoint::Metadata)
             .map_err(|error| {
-                LocalFileError::from_io(LocalFileOperation::Metadata, Some(path.to_path_buf()), None, error)
-                    .with_current_directory(self.current_directory.clone())
+                with_current_directory(
+                    LocalFileError::from_io(LocalFileOperation::Metadata, Some(path.to_path_buf()), None, error),
+                    resolver.current_directory(),
+                )
             })?;
-        let resolved = self.resolve(path, LocalFileOperation::Metadata)?;
         let metadata = match &self.core.namespace {
             LocalNamespace::Host => {
                 HostLocalFileSystem::metadata_with_policy(resolved.authority_relative(), self.symlink_policy)
@@ -48,15 +53,13 @@ impl LocalFileSystem {
                 LocalFileOperation::Metadata,
                 resolved.namespace_absolute(),
                 None,
-                self.current_directory(),
+                resolver.current_directory(),
             )
         })?;
         if resolved.directory_required() && metadata.kind() != LocalFileKind::Directory {
-            return Err(
-                LocalFileError::new(LocalFileErrorKind::NotDirectory, LocalFileOperation::Metadata)
-                    .with_path(resolved.namespace_absolute().to_path_buf())
-                    .with_current_directory(self.current_directory.clone()),
-            );
+            let error = LocalFileError::new(LocalFileErrorKind::NotDirectory, LocalFileOperation::Metadata)
+                .with_path(resolved.namespace_absolute().to_path_buf());
+            return Err(with_current_directory(error, resolver.current_directory()));
         }
         Ok(metadata)
     }
@@ -68,8 +71,9 @@ impl LocalFileSystem {
 
     /// Opens a reader using one complete explicit options value.
     pub fn open_reader_with_options(&self, path: &Path, options: &LocalReadOptions) -> LocalResult<LocalFileReader> {
-        let resolved = self.resolve(path, LocalFileOperation::OpenReader)?;
-        reject_directory_qualified_file(&resolved, LocalFileOperation::OpenReader, self.current_directory())?;
+        let resolver = self.resolver_for(path, LocalFileOperation::OpenReader)?;
+        let resolved = resolve_operation_path(&resolver, path, LocalFileOperation::OpenReader)?;
+        reject_directory_qualified_file(&resolved, LocalFileOperation::OpenReader, resolver.current_directory())?;
         match &self.core.namespace {
             LocalNamespace::Host => HostLocalFileSystem::open_reader_with_policy(
                 resolved.authority_relative(),
@@ -86,7 +90,7 @@ impl LocalFileSystem {
                 LocalFileOperation::OpenReader,
                 resolved.namespace_absolute(),
                 None,
-                self.current_directory(),
+                resolver.current_directory(),
             )
         })
     }
@@ -103,8 +107,8 @@ impl LocalFileSystem {
         max_bytes: usize,
         options: &LocalReadOptions,
     ) -> LocalResult<Vec<u8>> {
-        let error_path = self
-            .resolve(path, LocalFileOperation::Read)?
+        let resolver = self.resolver_for(path, LocalFileOperation::Read)?;
+        let error_path = resolve_operation_path(&resolver, path, LocalFileOperation::Read)?
             .namespace_absolute()
             .to_path_buf();
         let mut reader = self.open_reader_with_options(path, options)?;
@@ -117,17 +121,19 @@ impl LocalFileSystem {
             let read_len = (max_bytes - result.len()).min(buffer.len());
             #[cfg(feature = "internal-test-support")]
             if crate::local::take_test_support("local-fs-read-prefix-read") {
-                return Err(LocalFileError::from_io(
+                let error = LocalFileError::from_io(
                     LocalFileOperation::Read,
                     Some(error_path),
                     None,
                     std::io::Error::other("injected prefix read failure"),
-                )
-                .with_current_directory(self.current_directory.clone()));
+                );
+                return Err(with_current_directory(error, resolver.current_directory()));
             }
             let count = reader.read(&mut buffer[..read_len]).map_err(|source| {
-                LocalFileError::from_io(LocalFileOperation::Read, Some(error_path.clone()), None, source)
-                    .with_current_directory(self.current_directory.clone())
+                with_current_directory(
+                    LocalFileError::from_io(LocalFileOperation::Read, Some(error_path.clone()), None, source),
+                    resolver.current_directory(),
+                )
             })?;
             if count == 0 {
                 break;
@@ -144,9 +150,10 @@ impl LocalFileSystem {
 
     /// Opens a writer using one complete explicit options value.
     pub fn open_writer_with_options(&self, path: &Path, options: &LocalWriteOptions) -> LocalResult<LocalFileWriter> {
-        let resolved = self.resolve(path, LocalFileOperation::OpenWriter)?;
-        self.reject_root_operand(&resolved, LocalFileOperation::OpenWriter)?;
-        reject_directory_qualified_file(&resolved, LocalFileOperation::OpenWriter, self.current_directory())?;
+        let resolver = self.resolver_for(path, LocalFileOperation::OpenWriter)?;
+        let resolved = resolve_operation_path(&resolver, path, LocalFileOperation::OpenWriter)?;
+        self.reject_root_operand(&resolved, LocalFileOperation::OpenWriter, resolver.current_directory())?;
+        reject_directory_qualified_file(&resolved, LocalFileOperation::OpenWriter, resolver.current_directory())?;
         match &self.core.namespace {
             LocalNamespace::Host => HostLocalFileSystem::open_writer_with_policy(
                 resolved.authority_relative(),
@@ -160,7 +167,7 @@ impl LocalFileSystem {
         .map(|writer| {
             writer.bind_namespace(
                 resolved.namespace_absolute().to_path_buf(),
-                self.current_directory.clone(),
+                resolver.current_directory().map(Path::to_path_buf),
             )
         })
         .map_err(|error| {
@@ -169,7 +176,7 @@ impl LocalFileSystem {
                 LocalFileOperation::OpenWriter,
                 resolved.namespace_absolute(),
                 None,
-                self.current_directory(),
+                resolver.current_directory(),
             )
         })
     }

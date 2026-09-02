@@ -265,8 +265,8 @@ impl LocalDirectoryWalker {
 
     /// Binds the filesystem PWD snapshot used by yielded errors.
     #[must_use]
-    pub(crate) fn bind_current_directory(mut self, current_directory: PathBuf) -> Self {
-        self.current_directory = Some(current_directory);
+    pub(crate) fn bind_current_directory(mut self, current_directory: Option<PathBuf>) -> Self {
+        self.current_directory = current_directory;
         self
     }
 

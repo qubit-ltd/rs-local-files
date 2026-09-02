@@ -87,9 +87,9 @@ impl LocalFileWriter {
     }
 
     /// Replaces the public identity with its normalized namespace path.
-    pub(crate) fn bind_namespace(mut self, path: PathBuf, current_directory: PathBuf) -> Self {
+    pub(crate) fn bind_namespace(mut self, path: PathBuf, current_directory: Option<PathBuf>) -> Self {
         self.path = path;
-        self.current_directory = Some(current_directory);
+        self.current_directory = current_directory;
         self
     }
 

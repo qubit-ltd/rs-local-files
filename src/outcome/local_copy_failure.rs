@@ -207,7 +207,7 @@ impl LocalCopyFailure {
         backend_source: &Path,
         backend_target: &Path,
         rooted: bool,
-        current_directory: &Path,
+        current_directory: Option<&Path>,
     ) -> Self {
         let map_source = |path: &Path| map_backend_path(path, backend_source, request_source, rooted);
         let map_target = |path: &Path| map_backend_path(path, backend_target, request_target, rooted);
@@ -219,11 +219,11 @@ impl LocalCopyFailure {
         let error_target = self.details.error.target().map(&map_target);
         self.details
             .error
-            .replace_paths(error_path, error_target, Some(current_directory.to_path_buf()));
+            .replace_paths(error_path, error_target, current_directory.map(Path::to_path_buf));
         if let Some(cleanup) = self.details.cleanup_error.as_mut() {
             let path = cleanup.path().map(&map_target);
             let target = cleanup.target().map(&map_target);
-            cleanup.replace_paths(path, target, Some(current_directory.to_path_buf()));
+            cleanup.replace_paths(path, target, current_directory.map(Path::to_path_buf));
         }
         self.details.staging_path = self.details.staging_path.as_deref().map(map_target);
         self

@@ -25,15 +25,18 @@ use crate::LocalSymlinkPolicy;
 pub(super) fn reject_directory_qualified_file(
     path: &LocalNamespacePath,
     operation: LocalFileOperation,
-    current_directory: &Path,
+    current_directory: Option<&Path>,
 ) -> LocalResult<()> {
     if !path.directory_required() {
         return Ok(());
     }
-    Err(LocalFileError::new(LocalFileErrorKind::InvalidPath, operation)
+    let error = LocalFileError::new(LocalFileErrorKind::InvalidPath, operation)
         .with_reason("a directory-qualified path cannot be used as a file")
-        .with_path(path.namespace_absolute().to_path_buf())
-        .with_current_directory(current_directory.to_path_buf()))
+        .with_path(path.namespace_absolute().to_path_buf());
+    match current_directory {
+        Some(current_directory) => Err(error.with_current_directory(current_directory.to_path_buf())),
+        None => Err(error),
+    }
 }
 
 /// Validates scope-dependent symlink policy.

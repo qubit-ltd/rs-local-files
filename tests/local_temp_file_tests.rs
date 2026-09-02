@@ -665,8 +665,8 @@ fn test_local_temp_file_drop_tolerates_missing_entry() {
     assert!(!path.exists());
 }
 
-/// Verifies relative Host persistence uses its creation-time filesystem PWD
-/// without consulting the process current directory again.
+/// Verifies an absolute-parent Host temp file does not capture a PWD merely to
+/// support a later relative persistence target.
 #[cfg(not(windows))]
 #[test]
 fn test_local_temp_file_persist_reports_deleted_current_directory() {
@@ -678,7 +678,7 @@ fn test_local_temp_file_persist_reports_deleted_current_directory() {
         fs::create_dir(&cwd).expect("current-directory fixture should exist");
         env::set_current_dir(&cwd).expect("current directory should change to the fixture");
         let temporary = LocalFileSystem::host()
-            .expect("Host filesystem should capture the fixture PWD")
+            .expect("Host filesystem should open without capturing the fixture PWD")
             .create_temp_file_with_options(&LocalTempFileOptions::new().with_parent(parent.path()))
             .expect("temporary file should be created");
         let source = temporary.path().to_path_buf();
@@ -686,12 +686,12 @@ fn test_local_temp_file_persist_reports_deleted_current_directory() {
         fs::remove_dir(&cwd).expect("current-directory fixture should be removed externally");
         let error = temporary
             .persist(std::path::Path::new("relative-target"))
-            .expect_err("the captured PWD no longer has an existing target parent");
+            .expect_err("a relative target requires a creation-time PWD snapshot");
         env::set_current_dir(&original).expect("original current directory should be restored");
 
         let (io, mut temporary, _requested, resolved, _stage) = error.into_parts();
-        assert_eq!(LocalFileErrorKind::NotFound, io.kind());
-        assert_eq!(Some(cwd.join("relative-target").as_path()), resolved.as_deref());
+        assert_eq!(LocalFileErrorKind::InvalidPath, io.kind());
+        assert_eq!(None, resolved.as_deref());
         temporary
             .cleanup()
             .expect("target resolution failure should retain cleanup authority");

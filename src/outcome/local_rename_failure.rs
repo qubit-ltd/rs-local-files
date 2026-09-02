@@ -71,11 +71,11 @@ impl LocalRenameFailure {
     }
 
     /// Rewrites backend path context into normalized public operands.
-    pub(crate) fn remap_namespace(mut self, source: &Path, target: &Path, current_directory: &Path) -> Self {
+    pub(crate) fn remap_namespace(mut self, source: &Path, target: &Path, current_directory: Option<&Path>) -> Self {
         self.error.replace_paths(
             Some(source.to_path_buf()),
             Some(target.to_path_buf()),
-            Some(current_directory.to_path_buf()),
+            current_directory.map(Path::to_path_buf),
         );
         self
     }
