@@ -22,6 +22,14 @@ use super::SizeLimit;
 /// # Errors
 ///
 /// Returns the native query error when an objective limit cannot be observed.
+///
+/// # Parameters
+///
+/// - `file`: Open file handle queried for filesystem information.
+///
+/// # Returns
+///
+/// The filesystem limits observed from the open authority.
 #[inline]
 pub(crate) fn limits(file: &File) -> io::Result<LocalFileSystemLimits> {
     #[cfg(unix)]
