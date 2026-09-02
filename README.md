@@ -65,13 +65,17 @@ assert_eq!(content, r#"{"version":1}"#);
 | `LocalTempFile` / `LocalTempDirectory` | Owned cleanup, `keep`, and persistence operations. |
 | `path::LocalFileNames` / `path::LocalPaths` | Native filename and lexical-path helpers without lossy UTF-8 conversion. |
 
-`LocalFileSystem` is a stateful instance API. Each instance owns its current
-directory, symbolic-link policy, and nine operation-default Options values.
+`LocalFileSystem` is a stateful instance API. Rooted instances own a virtual
+current directory; Host instances read the process current directory only when
+an operation needs to bind a relative path. Each instance also owns its
+symbolic-link policy and nine operation-default Options values.
 Ordinary methods use those defaults; every `*_with_options` method uses the
 supplied complete Options value instead. Cloning snapshots all mutable state,
 while Rooted clones share only the immutable opened authority. The crate makes
 no thread-safety promise for shared mutable configuration; callers may keep one
-clone per thread or add their own synchronization.
+clone per thread or add their own synchronization. Calling
+`set_current_directory` on a Host instance changes the process-global current
+directory; calling it on a Rooted instance changes only that instance.
 
 Resource budgets are opt-in. Listing and copy depth, entries, bytes, open
 directories, deadlines, duplicate-name memory, retry timeouts, and temporary
@@ -104,11 +108,13 @@ atomically publishes the entry to a generated sibling path, returns a
 Use `LocalFileSystem::host()` for host paths. Use
 `LocalFileSystem::rooted(root)` when one opened directory is the authority
 boundary. Both instances expose the same operations; only path interpretation
-changes. Each instance has its own namespace-absolute PWD. Relative paths start
-there; `.` and an empty path mean that PWD; `..` is normalized one component at
-a time and is rejected only if it would cross the namespace root. In a Rooted
-instance, `/etc/hosts` is a virtual absolute path beneath the opened root, not
-the Host path `/etc/hosts`. Native prefixes are rejected.
+changes. Host absolute paths never query the process PWD. A Host relative path
+captures one process-PWD snapshot when the operation begins; a Rooted relative
+path uses the instance's virtual PWD. `.` and an empty path mean the applicable
+PWD; `..` is normalized one component at a time and is rejected only if it
+would cross the namespace root. In a Rooted instance, `/etc/hosts` is a virtual
+absolute path beneath the opened root, not the Host path `/etc/hosts`. Native
+prefixes are rejected.
 
 Intermediate symbolic links follow the configured policy. Rooted absolute link
 targets restart at its virtual `/`, and `FollowWithinScope` prevents any link

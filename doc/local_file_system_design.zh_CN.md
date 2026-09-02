@@ -46,8 +46,8 @@
 
 ### 2.1 对象状态显式可见
 
-`LocalFileSystem` 是有状态对象。每个实例持有自己的当前目录、默认操作 Options 和默认
-symlink 策略。调用方可以在应用初始化阶段完成配置，之后通过普通实例方法执行操作，无需
+`LocalFileSystem` 是有状态对象。Rooted 实例持有自己的虚拟当前目录；Host 实例按需读取
+进程当前目录。每个实例持有默认操作 Options 和默认 symlink 策略。调用方可以在应用初始化阶段完成配置，之后通过普通实例方法执行操作，无需
 反复传递相同参数。
 
 对象状态必须可查询；库不得在调用方不可见的位置叠加另一套默认 Options 或资源限制。
@@ -66,9 +66,10 @@ symlink 策略。调用方可以在应用初始化阶段完成配置，之后通
 
 ### 2.3 一个文件系统只有一个路径坐标系
 
-每个 `LocalFileSystem` 都有自己的 namespace 坐标系和当前工作目录。Rooted 只有一个虚拟
-根；Host 使用操作系统的 native root 集合。绝对路径从其对应 namespace root 开始，相对
-路径从该对象的当前目录开始。Rooted 文件系统对调用方表现为独立的虚拟文件系统，而不是
+每个 `LocalFileSystem` 都有自己的 namespace 坐标系。Rooted 还有实例虚拟当前目录；
+Host 使用进程全局当前目录。Rooted 只有一个虚拟根；Host 使用操作系统的 native root 集合。
+绝对路径从其对应 namespace root 开始，Host 绝对路径不读取 PWD；相对路径从操作开始时
+捕获的对应当前目录开始。Rooted 文件系统对调用方表现为独立的虚拟文件系统，而不是
 要求调用方传入特殊的 root-relative 路径。
 
 ### 2.4 Authority 来自句柄，不来自字符串
@@ -196,8 +197,9 @@ impl LocalFileSystem {
 }
 ```
 
-`host()` 捕获并验证进程在构造时的当前目录，作为实例初始 PWD。读取当前目录可能失败，
-因此构造返回 `LocalResult<Self>`，不得 panic 或伪造 fallback PWD。
+`host()` 不读取或保存进程当前目录。即使进程 PWD 暂时不可读取，Host filesystem 仍可构造，
+且绝对路径操作仍可执行。只有查询 PWD 或绑定相对路径的操作才读取进程 PWD，并在读取失败时
+返回带有实际 operation 和输入 path 的结构化错误。
 
 `rooted(root)` 中的 `root` 是一次性的 Host native path，用来打开 Rooted authority；它
 可以是 Host 绝对或相对路径。若为相对路径，构造时基于进程当前目录解析并打开。成功后：
@@ -220,7 +222,7 @@ impl LocalFileSystem {
 ```rust
 impl LocalFileSystem {
     pub fn scope(&self) -> LocalFileSystemScope;
-    pub fn current_directory(&self) -> &Path;
+    pub fn current_directory(&self) -> LocalResult<PathBuf>;
     pub fn set_current_directory(&mut self, path: &Path) -> LocalResult<()>;
 
     pub fn symlink_policy(&self) -> LocalSymlinkPolicy;
@@ -237,8 +239,10 @@ impl LocalFileSystem {
 }
 ```
 
-`set_current_directory()` 必须先规范化路径、在 authority 中解析、确认存在且为目录，全部
-成功后才能替换 PWD。失败时对象状态不变。
+Host 的 `set_current_directory()` 直接委托 `std::env::set_current_dir()`：native 调用成功即
+成功，失败即映射原始错误，不额外读取或预验证 PWD。它修改进程全局状态，因此所有 Host
+实例和进程内其他代码都可观察到变化。Rooted 的同名方法仍先规范化路径、在 authority 中
+解析、确认存在且为目录，全部成功后才替换实例虚拟 PWD；失败时对象状态不变。
 
 `set_symlink_policy()` 必须在修改前验证 scope 支持。Rooted 不接受
 `FollowAcrossScope`；失败时原策略不变。
@@ -523,16 +527,18 @@ clock，因此可限制继续推进 I/O，但不会把已进入内核的单次�
 
 ### 8.1 统一调用模型
 
-Host 和 Rooted 使用相同的路径规则：
+Host 和 Rooted 使用相同的词法路径规则，但 PWD 的所有权不同：
 
 - namespace-absolute path 从该 filesystem 的根开始；
-- relative path 从该实例的 PWD 开始；
+- Host relative path 从操作开始时捕获的进程 PWD 开始；
+- Rooted relative path 从实例虚拟 PWD 开始；
 - `.` 表示 PWD；
 - 空路径 `""` 也表示 PWD；
 - `..` 返回一层，但不得越过 namespace 根。
 
-PWD 始终保存为规范化的 namespace-absolute `PathBuf`。它不是进程全局工作目录，也不随
-进程后续调用 `set_current_dir()` 自动变化。
+Rooted PWD 始终保存为规范化的 namespace-absolute `PathBuf`，不随进程
+`set_current_dir()` 变化。Host 不保存 PWD；`current_directory()` 每次读取进程状态并返回
+owned `PathBuf`。
 
 ### 8.2 Rooted 映射
 
@@ -560,7 +566,7 @@ prefix 不属于 Rooted 虚拟路径语法，必须返回 `InvalidPath`，不能
 
 每次操作在任何 namespace I/O 前执行以下步骤：
 
-1. 捕获该实例当前 PWD；
+1. 仅当输入为相对路径时，捕获进程 PWD（Host）或复制实例虚拟 PWD（Rooted）；
 2. absolute input 以 namespace 根为初始 component stack；
 3. relative input 以 PWD components 为初始 stack；
 4. normal component 入栈；
@@ -604,15 +610,17 @@ PWD 为 `/work/project`：
 
 ### 8.4 双路径操作
 
-copy 和 rename 在操作开始时只捕获一次 PWD，source 与 destination 使用同一个快照解析。
+copy 和 rename 只要任一输入为相对路径，就在操作开始时只捕获一次 PWD，source 与
+destination 使用同一个快照解析；两个 Host 输入均为绝对路径时不读取 PWD。
 任何一个路径解析失败时，不得进入底层 namespace 修改；专用 failure state 必须为
 `Unchanged`。
 
 ### 8.5 set_current_directory
 
-`set_current_directory(path)` 使用与普通操作完全相同的 absolute/relative 和 root escape
-语义。它在旧 PWD 下解析输入，按 filesystem symlink policy 解析最终目标，确认目标存在且为
-目录，最后一次性替换 PWD；`Reject` 策略下，最终目录是链接时失败。
+Rooted 的 `set_current_directory(path)` 使用与普通操作相同的 absolute/relative 和 root
+escape 语义。它在旧虚拟 PWD 下解析输入，按 filesystem symlink policy 解析最终目标，确认
+目标存在且为目录，最后一次性替换虚拟 PWD；`Reject` 策略下，最终目录是链接时失败。Host
+setter 不执行这套预验证，而是直接修改进程 PWD。
 
 PWD 是逻辑 namespace path，而不是额外的授权根。Rooted 的 authority 根始终不变。PWD
 指向的条目若之后被重命名或删除，后续相对操作会按保存的逻辑路径重新解析，并可能返回
@@ -804,7 +812,7 @@ Hard link 可以让根内 entry 与根外 entry 指向同一 inode/file ID，但
 
 每个 `LocalFileSystem` 操作遵循相同阶段：
 
-1. 捕获实例 PWD、symlink policy 和所选 Options；
+1. 捕获 symlink policy、所选 Options，以及路径绑定实际需要的 PWD snapshot；
 2. 选择实例默认 Options 或显式完整 Options；
 3. 验证 Options 与已知 capability；
 4. 把所有输入路径规范化为 namespace-absolute path；
@@ -1163,7 +1171,7 @@ Drop 只对仍可证明 owned 的资源执行 best-effort cleanup；`Indetermina
 
 - `path()` 返回虚拟绝对路径；
 - 资源保存 authority；
-- 资源保存创建时 PWD snapshot；
+- 相对 parent（包括默认 parent）保存创建时 PWD snapshot；绝对 Host parent 不为未来操作额外读取 PWD；
 - 后续 filesystem PWD 变化不改变资源身份。
 
 随机 prefix、suffix 和最终 component 在创建 entry 前完成 separator、NUL 和平台保留名称
@@ -1195,8 +1203,9 @@ temp.persist(target)
 temp.persist_with(target, options)
 ```
 
-相对 target 基于 temp 创建时捕获的 PWD，而不是某个后来变化或已经销毁的
-`LocalFileSystem`。Absolute target 从同一 namespace root 开始。Rooted `/` 不能作为 target。
+相对 target 基于 temp 创建时已有的 PWD snapshot，而不是某个后来变化或已经销毁的
+`LocalFileSystem`。若 Host temp 以绝对 parent 创建而没有 PWD snapshot，相对 target 会被
+拒绝；absolute target 仍从同一 namespace root 开始。Rooted `/` 不能作为 target。
 
 Persist 在同一 authority 内使用 native rename/install。Outcome 报告：
 
@@ -1370,12 +1379,13 @@ Capability preflight 和 operation outcome 都不可省略：前者帮助规划�
 `LocalFileSystem::clone()`：
 
 - 共享 immutable authority core；
-- 复制 PWD；
+- Rooted 复制虚拟 PWD；Host clone 继续观察进程全局 PWD；
 - 复制 symlink policy；
 - 复制全部默认 Options。
 
-Clone 后修改一个实例的 PWD 或默认 Options 不影响另一个实例。Rooted clones 仍指向同一个
-打开的根 authority。
+Clone 后修改 Rooted 实例的虚拟 PWD 或任一实例的默认 Options 不影响另一个实例。Host
+setter 修改进程全局 PWD，因此所有 Host clones 都可观察。Rooted clones 仍指向同一个打开的
+根 authority。
 
 ### 21.2 配置与操作
 
@@ -1617,8 +1627,8 @@ production 对象的正常 state model。
 ### 26.4 Clone 与生命周期 tests
 
 - clone 共享 Rooted authority；
-- clone 的 PWD、symlink policy 和默认 Options 独立；
-- 进程 current directory 改变不影响已有 Host instance；
+- Rooted clone 的虚拟 PWD、symlink policy 和默认 Options 独立；
+- 进程 current directory 改变会被已有 Host instance 的后续相对操作观察到；
 - Reader、Writer、Walker 不受后续 PWD 修改影响；
 - temp persist relative target 使用创建时 PWD；
 - filesystem drop 后已打开资源仍遵循创建时 authority。
@@ -1682,7 +1692,7 @@ production 对象的正常 state model。
 
 1. 公共 API 与第 6 节一致；
 2. Options 选择满足完整替代规则；
-3. Host/Rooted 都具有实例 PWD；
+3. Host 按操作读取进程 PWD，Rooted 具有实例虚拟 PWD；
 4. Rooted absolute path、`.`、`..`、absolute symlink target 和 root escape 满足本文；
 5. Rooted 只有一个 authority；
 6. 所有公开资源身份路径使用虚拟绝对坐标；

@@ -63,11 +63,13 @@ assert_eq!(content, r#"{"version":1}"#);
 | `LocalTempFile` / `LocalTempDirectory` | 拥有清理责任，并支持 `keep` 与持久化。 |
 | `path::LocalFileNames` / `path::LocalPaths` | 不丢失 UTF-8 以外文件名信息的原生文件名和词法路径工具。 |
 
-`LocalFileSystem` 是有状态的实例 API。每个实例拥有自己的当前目录、符号链接策略和九种
+`LocalFileSystem` 是有状态的实例 API。Rooted 实例拥有自己的虚拟当前目录；Host
+实例只在操作需要绑定相对路径时读取进程当前目录。每个实例还拥有符号链接策略和九种
 操作的默认 Options。普通方法使用实例默认值；每个 `*_with_options` 方法都以传入的完整
 Options 替代实例默认值。clone 会复制全部可变状态，Rooted clone 只共享不可变的已打开
 authority。本 crate 不承诺共享可变配置时的线程安全；调用方可以每线程持有一个 clone，
-也可以自行添加同步包装。
+也可以自行添加同步包装。Host 实例的 `set_current_directory` 修改进程全局当前目录；
+Rooted 实例的同名方法只修改该实例。
 
 资源预算均由调用方选择。遍历和复制的深度、条目数、字节数、打开目录数、deadline、
 重复名称内存、打开重试时间以及临时名称尝试次数，在调用方显式设置前都不会形成库内隐藏上限。
@@ -88,9 +90,10 @@ authority。本 crate 不承诺共享可变配置时的线程安全；调用方�
 ## 选择合适的权限范围
 
 主机路径使用 `LocalFileSystem::host()`。当一个已打开目录就是权限边界时，
-使用 `LocalFileSystem::rooted(root)`。两种实例提供相同操作，只改变路径解释方式。rooted
-和 Host 实例都拥有自己的 namespace-absolute PWD。相对路径从该 PWD 开始；`.` 与空路径
-表示 PWD；`..` 会逐层规范化，只在试图越过 namespace root 时被拒绝。在 Rooted 实例中，
+使用 `LocalFileSystem::rooted(root)`。两种实例提供相同操作，只改变路径解释方式。Host
+绝对路径不会读取进程 PWD；Host 相对路径在操作开始时捕获一次进程 PWD，Rooted 相对路径
+使用实例的虚拟 PWD。`.` 与空路径表示对应的 PWD；`..` 会逐层规范化，只在试图越过
+namespace root 时被拒绝。在 Rooted 实例中，
 `/etc/hosts` 是已打开 root 下的虚拟绝对路径，而不是 Host 的 `/etc/hosts`；native prefix
 会被拒绝。
 

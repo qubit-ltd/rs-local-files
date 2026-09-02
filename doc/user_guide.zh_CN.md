@@ -10,20 +10,22 @@
 ## 概念模型
 
 ```
-Host 命名空间 ── LocalFileSystem::host() ── 构造时捕获 Host PWD
+Host 命名空间 ── LocalFileSystem::host() ── 操作时读取进程 PWD
 已打开根目录 ─── LocalFileSystem::rooted(root) ── 虚拟 / 与实例 PWD
 ```
 
-`LocalFileSystem` 是有状态的文件系统对象。`host()` 选择进程可见命名空间，并只在
-构造时捕获一次进程当前目录；`rooted(root)` 打开唯一目录 authority，将其映射为虚拟
+`LocalFileSystem` 是有状态的文件系统对象。`host()` 选择进程可见命名空间，但构造时
+不读取当前目录；Host 绝对路径从不依赖 PWD，相对路径在操作开始时捕获一次进程 PWD。
+`rooted(root)` 打开唯一目录 authority，将其映射为虚拟
 根 `/`，初始 PWD 为 `/`。两种形式都接受 namespace-absolute 路径以及相对于实例
-PWD 的路径，并提供相同操作。reader、writer、walker 与临时条目都是拥有资源的有状态
+对应 PWD 的路径，并提供相同操作。reader、writer、walker 与临时条目都是拥有资源的有状态
 对象。`LocalFileNames` 和 `LocalPaths` 提供原生词法工具，不会把文件名强制转换为
 UTF-8。
 
 ## 配置一次，显式覆盖
 
-每个 filesystem 实例拥有自己的 PWD、符号链接策略，以及 read、write、list、copy、
+每个 Rooted filesystem 实例拥有自己的虚拟 PWD；Host 实例观察进程全局 PWD。每个实例
+都拥有符号链接策略，以及 read、write、list、copy、
 create-directory、delete、rename、temporary-file 和 temporary-directory 九种默认
 Options。调用方可以通过 `set_default_*_options` 一次配置，然后使用普通操作方法。
 
@@ -51,7 +53,8 @@ let one_level = filesystem.list_with_options(
 ```
 
 初始 Options 不包含隐藏的业务资源上限。遍历和复制预算、重试时长、deadline 与临时名称
-尝试次数，只有调用方显式设置后才生效。clone filesystem 会复制 PWD 与全部配置；
+尝试次数，只有调用方显式设置后才生效。clone filesystem 会复制 Rooted 虚拟 PWD 与全部配置；
+Host clone 继续观察同一进程 PWD；
 Rooted clone 只共享不可变的已打开 authority。本 crate 不承诺共享可变配置时的同步；
 调用方应每线程持有一个 clone，或自行添加同步包装。
 
