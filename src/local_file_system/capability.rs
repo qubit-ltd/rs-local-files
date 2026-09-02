@@ -21,6 +21,7 @@ use super::LocalSymlinkPolicy;
 use super::Path;
 use super::fs;
 use super::operation_error;
+use super::resolve_operation_path;
 
 impl LocalFileSystem {
     /// Returns the immutable capability snapshot for this authority.
@@ -39,7 +40,8 @@ impl LocalFileSystem {
 
     /// Observes path limits at the requested path or nearest existing ancestor.
     pub fn limits_at(&self, path: &Path) -> LocalResult<LocalFileSystemLimits> {
-        let resolved = self.resolve(path, LocalFileOperation::Capabilities)?;
+        let resolver = self.resolver_for(path, LocalFileOperation::Capabilities)?;
+        let resolved = resolve_operation_path(&resolver, path, LocalFileOperation::Capabilities)?;
         match &self.core.namespace {
             LocalNamespace::Host => host_probe(&resolved, self.symlink_policy, crate::capability::probe_limits)
                 .map_err(|error| {
@@ -48,7 +50,7 @@ impl LocalFileSystem {
                         LocalFileOperation::Capabilities,
                         resolved.namespace_absolute(),
                         None,
-                        self.current_directory(),
+                        resolver.current_directory(),
                     )
                 }),
             LocalNamespace::Rooted(rooted) => rooted
@@ -59,7 +61,7 @@ impl LocalFileSystem {
                         LocalFileOperation::Capabilities,
                         resolved.namespace_absolute(),
                         None,
-                        self.current_directory(),
+                        resolver.current_directory(),
                     )
                 }),
         }
@@ -67,7 +69,8 @@ impl LocalFileSystem {
 
     /// Observes dynamic filesystem capacity at a path or existing ancestor.
     pub fn space_at(&self, path: &Path) -> LocalResult<LocalFileSystemSpace> {
-        let resolved = self.resolve(path, LocalFileOperation::Capabilities)?;
+        let resolver = self.resolver_for(path, LocalFileOperation::Capabilities)?;
+        let resolved = resolve_operation_path(&resolver, path, LocalFileOperation::Capabilities)?;
         match &self.core.namespace {
             LocalNamespace::Host => {
                 host_probe(&resolved, self.symlink_policy, crate::capability::probe_space).map_err(|error| {
@@ -76,7 +79,7 @@ impl LocalFileSystem {
                         LocalFileOperation::Capabilities,
                         resolved.namespace_absolute(),
                         None,
-                        self.current_directory(),
+                        resolver.current_directory(),
                     )
                 })
             }
@@ -88,7 +91,7 @@ impl LocalFileSystem {
                         LocalFileOperation::Capabilities,
                         resolved.namespace_absolute(),
                         None,
-                        self.current_directory(),
+                        resolver.current_directory(),
                     )
                 }),
         }

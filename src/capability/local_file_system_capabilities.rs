@@ -37,6 +37,8 @@ pub struct LocalFileSystemCapabilities {
     durable_rename: bool,
     /// Whether durable file-copy publication is implemented.
     durable_file_copy: bool,
+    /// Whether durable writer publication is implemented.
+    durable_write: bool,
 }
 
 impl LocalFileSystemCapabilities {
@@ -49,6 +51,7 @@ impl LocalFileSystemCapabilities {
             atomic_temp_persist: cfg!(any(target_os = "linux", target_os = "macos", windows)),
             durable_rename: cfg!(unix),
             durable_file_copy: cfg!(unix),
+            durable_write: cfg!(unix),
         }
     }
 
@@ -73,6 +76,7 @@ impl LocalFileSystemCapabilities {
             )),
             durable_rename: cfg!(unix),
             durable_file_copy: cfg!(unix),
+            durable_write: cfg!(unix),
         }
     }
 
@@ -92,14 +96,14 @@ impl LocalFileSystemCapabilities {
 
     /// Reports whether native atomic replacement is implemented.
     #[must_use]
-    #[inline(always)]
+    #[cfg_attr(feature = "test-support", inline(never))]
     pub const fn supports_atomic_replace(self) -> bool {
         self.atomic_replace
     }
 
     /// Reports whether atomic no-replace temporary persistence is implemented.
     #[must_use]
-    #[inline(always)]
+    #[cfg_attr(feature = "test-support", inline(never))]
     pub const fn supports_atomic_temp_persist(self) -> bool {
         self.atomic_temp_persist
     }
@@ -118,5 +122,13 @@ impl LocalFileSystemCapabilities {
     #[inline(always)]
     pub const fn supports_durable_file_copy(self) -> bool {
         self.durable_file_copy
+    }
+
+    /// Reports whether the full durable writer publication protocol is
+    /// implemented for this target.
+    #[must_use]
+    #[inline(always)]
+    pub const fn supports_durable_write(self) -> bool {
+        self.durable_write
     }
 }
