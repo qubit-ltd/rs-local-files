@@ -10,6 +10,8 @@
 use std::fs;
 use std::io::Write;
 use std::path::Path;
+#[cfg(not(windows))]
+use std::process::Command;
 use std::sync::Arc;
 use std::sync::Mutex;
 
@@ -17,6 +19,7 @@ use qubit_local_files::LocalFileSystem;
 #[cfg(unix)]
 use qubit_local_files::LocalResult;
 use qubit_local_files::error::LocalFileErrorKind;
+use qubit_local_files::error::LocalFileOperation;
 use qubit_local_files::options::LocalCopyConflictPolicy;
 use qubit_local_files::options::LocalCopyOptions;
 use qubit_local_files::options::LocalListOptions;
@@ -26,27 +29,51 @@ use qubit_local_files::options::LocalTempFileOptions;
 use qubit_local_files::outcome::LocalFileKind;
 use qubit_local_files::outcome::LocalPersistStage;
 use qubit_local_files::policy::LocalSymlinkPolicy;
+#[cfg(feature = "internal-test-support")]
+use qubit_local_files::test_support::install_test_fault;
 use tempfile::Builder;
 use tempfile::tempdir;
 
+static PROCESS_PWD_LOCK: Mutex<()> = Mutex::new(());
+
 #[test]
-fn host_captures_an_instance_pwd_and_clone_configuration_is_independent() {
+fn host_observes_process_pwd_and_clone_configuration_is_independent() {
+    let _pwd_guard = PROCESS_PWD_LOCK.lock().expect("process PWD lock should be available");
     let process_pwd = std::env::current_dir().expect("process PWD should be readable");
     let mut filesystem = LocalFileSystem::host().expect("Host filesystem should open");
-    assert_eq!(filesystem.current_directory(), process_pwd);
+    assert_eq!(
+        filesystem.current_directory().expect("Host PWD should be readable"),
+        process_pwd
+    );
 
     let directory = tempdir().expect("temporary directory should be created");
     filesystem
         .set_current_directory(directory.path())
         .expect("instance PWD should change");
+    let error = filesystem
+        .set_current_directory(&directory.path().join("missing"))
+        .expect_err("native PWD changes should report the operating-system failure");
+    assert_eq!(LocalFileOperation::SetCurrentDirectory, error.operation());
     let mut cloned = filesystem.clone();
     cloned
         .set_default_list_options(LocalListOptions::new().with_recursive())
         .expect("clone defaults should be configurable");
 
-    assert_eq!(filesystem.current_directory(), directory.path());
+    assert_eq!(
+        filesystem
+            .current_directory()
+            .expect("updated Host PWD should be readable"),
+        directory.path(),
+    );
+    assert_eq!(
+        cloned
+            .current_directory()
+            .expect("cloned Host filesystem should observe process PWD"),
+        directory.path(),
+    );
     assert!(!filesystem.default_list_options().recursive());
     assert!(cloned.default_list_options().recursive());
+    std::env::set_current_dir(process_pwd).expect("original process PWD should be restored");
 }
 
 #[test]
@@ -57,13 +84,25 @@ fn rooted_paths_observe_chroot_style_absolute_and_relative_semantics() {
     fs::write(directory.path().join("work/value"), b"work").expect("work fixture should be written");
 
     let mut filesystem = LocalFileSystem::rooted(directory.path()).expect("Rooted filesystem should open");
-    assert_eq!(filesystem.current_directory(), Path::new("/"));
+    assert_eq!(
+        filesystem.current_directory().expect("Rooted PWD should be available"),
+        Path::new("/"),
+    );
     assert_eq!(filesystem.metadata(Path::new("/at-root")).unwrap().len(), 4);
     filesystem
         .set_current_directory(Path::new("/work/project"))
         .expect("virtual PWD should change");
     assert_eq!(filesystem.metadata(Path::new("../value")).unwrap().len(), 4);
     assert_eq!(filesystem.metadata(Path::new("../../at-root")).unwrap().len(), 4);
+
+    let failure = filesystem
+        .copy_with_options(
+            Path::new("../../at-root/"),
+            Path::new("../../target"),
+            &LocalCopyOptions::new().with_file_source(),
+        )
+        .expect_err("file-only mode should reject directory-qualified copy syntax");
+    assert_eq!(LocalFileErrorKind::NotDirectory, failure.error().kind());
 
     let error = filesystem
         .metadata(Path::new("../../../outside"))
@@ -76,11 +115,16 @@ fn rooted_paths_observe_chroot_style_absolute_and_relative_semantics() {
 fn rooted_setters_are_transactional() {
     let directory = tempdir().expect("temporary root should be created");
     let mut filesystem = LocalFileSystem::rooted(directory.path()).expect("Rooted filesystem should open");
-    let original_pwd = filesystem.current_directory().to_path_buf();
+    let original_pwd = filesystem.current_directory().expect("Rooted PWD should be available");
     let original_policy = filesystem.symlink_policy();
 
     assert!(filesystem.set_current_directory(Path::new("missing")).is_err());
-    assert_eq!(filesystem.current_directory(), original_pwd);
+    assert_eq!(
+        filesystem
+            .current_directory()
+            .expect("Rooted PWD should remain available"),
+        original_pwd,
+    );
     assert!(
         filesystem
             .set_symlink_policy(LocalSymlinkPolicy::FollowAcrossScope)
@@ -174,11 +218,123 @@ fn host_temp_options_do_not_create_an_unrequested_parent() {
 
 #[test]
 fn callers_can_wrap_a_filesystem_in_their_own_lock() {
+    let _pwd_guard = PROCESS_PWD_LOCK.lock().expect("process PWD lock should be available");
     let filesystem = LocalFileSystem::host().expect("Host filesystem should open");
     let shared = Arc::new(Mutex::new(filesystem));
     let cloned = Arc::clone(&shared);
-    let thread = std::thread::spawn(move || cloned.lock().unwrap().current_directory().to_path_buf());
-    assert_eq!(thread.join().unwrap(), shared.lock().unwrap().current_directory());
+    let thread = std::thread::spawn(move || {
+        cloned
+            .lock()
+            .expect("shared filesystem lock should be available")
+            .current_directory()
+            .expect("Host PWD should be readable")
+    });
+    assert!(thread.join().expect("PWD thread should finish").is_absolute());
+}
+
+#[test]
+fn host_relative_operations_use_the_process_pwd() {
+    let _pwd_guard = PROCESS_PWD_LOCK.lock().expect("process PWD lock should be available");
+    let process_pwd = std::env::current_dir().expect("process PWD should be readable");
+    let directory = tempdir().expect("temporary directory should be created");
+    fs::write(directory.path().join("source"), b"payload").expect("source fixture should be written");
+    std::env::set_current_dir(directory.path()).expect("fixture PWD should be selected");
+
+    let filesystem = LocalFileSystem::host().expect("Host filesystem should open");
+    let metadata = filesystem.metadata(Path::new("source")).unwrap();
+    assert_eq!(7, metadata.len());
+    let _ = metadata.permissions().unix_mode();
+    assert_eq!(
+        b"pay",
+        filesystem.read_prefix(Path::new("source"), 3).unwrap().as_slice()
+    );
+    let limits = filesystem
+        .limits_at(Path::new("missing/child"))
+        .expect("limits should use the nearest existing ancestor");
+    let _ = limits.max_path_length();
+    let _ = filesystem
+        .space_at(Path::new("missing/child"))
+        .expect("space should use the nearest existing ancestor");
+    let _ = filesystem
+        .copy(Path::new("source"), Path::new("copied"))
+        .expect("relative copy should succeed");
+    let _ = filesystem
+        .rename(Path::new("copied"), Path::new("renamed"))
+        .expect("relative rename should succeed");
+    assert_eq!(b"payload", fs::read("renamed").unwrap().as_slice());
+
+    std::env::set_current_dir(process_pwd).expect("original process PWD should be restored");
+}
+
+#[cfg(feature = "internal-test-support")]
+#[test]
+fn read_prefix_preserves_context_for_a_post_open_read_failure() {
+    let _pwd_guard = PROCESS_PWD_LOCK.lock().expect("process PWD lock should be available");
+    let directory = tempdir().expect("temporary directory should be created");
+    let file = directory.path().join("payload");
+    fs::write(&file, b"payload").expect("fixture should be written");
+    let _fault = install_test_fault("local-fs-read-prefix-read").expect("test fault should install");
+
+    let error = LocalFileSystem::host()
+        .expect("Host filesystem should open")
+        .read_prefix(&file, 4)
+        .expect_err("injected read failure should be reported");
+
+    assert_eq!(LocalFileOperation::Read, error.operation());
+    assert_eq!(Some(file.as_path()), error.path());
+}
+
+/// Runs a scenario in a child process so process-global PWD mutations cannot
+/// affect concurrent tests.
+#[cfg(not(windows))]
+fn run_in_isolated_process(test_name: &str, action: impl FnOnce()) {
+    const CHILD_ENV: &str = "QUBIT_LOCAL_FILES_STATEFUL_DELETED_CWD_TEST";
+    if std::env::var_os(CHILD_ENV).is_some() {
+        action();
+        return;
+    }
+
+    let executable = std::env::current_exe().expect("test executable should be available");
+    let status = Command::new(executable)
+        .arg("--exact")
+        .arg(test_name)
+        .arg("--nocapture")
+        .env(CHILD_ENV, "1")
+        .status()
+        .expect("deleted-current-directory child should launch");
+    assert!(status.success(), "deleted-current-directory child should pass");
+}
+
+/// Verifies Host construction and absolute operations do not require a valid
+/// process PWD, while PWD-dependent operations report the query failure.
+#[cfg(not(windows))]
+#[test]
+fn host_reads_process_pwd_only_for_pwd_dependent_operations() {
+    const TEST_NAME: &str = "host_reads_process_pwd_only_for_pwd_dependent_operations";
+    run_in_isolated_process(TEST_NAME, || {
+        let parent = tempdir().expect("temporary parent should be created");
+        let removed = parent.path().join("removed-pwd");
+        fs::create_dir(&removed).expect("current-directory fixture should be created");
+        let absolute_file = parent.path().join("absolute-file");
+        fs::write(&absolute_file, b"payload").expect("absolute fixture should be written");
+        std::env::set_current_dir(&removed).expect("fixture PWD should be selected");
+        fs::remove_dir(&removed).expect("fixture PWD should be removed");
+
+        let filesystem = LocalFileSystem::host().expect("Host construction must not read the process PWD");
+        assert_eq!(
+            7,
+            filesystem
+                .metadata(&absolute_file)
+                .expect("absolute metadata must not read the process PWD")
+                .len(),
+        );
+        assert!(filesystem.current_directory().is_err());
+        let error = filesystem
+            .metadata(Path::new("relative"))
+            .expect_err("relative metadata must report the unavailable process PWD");
+        assert_eq!(LocalFileOperation::Metadata, error.operation());
+        assert_eq!(Some(Path::new("relative")), error.path());
+    });
 }
 
 #[cfg(unix)]
@@ -202,6 +358,7 @@ fn rooted_constructor_follows_its_one_time_root_symlink() {
 /// diagnostic path while operations remain bound to the opened authority.
 #[test]
 fn rooted_constructor_captures_one_absolute_diagnostic_snapshot() {
+    let _pwd_guard = PROCESS_PWD_LOCK.lock().expect("process PWD lock should be available");
     let current_directory = std::env::current_dir().expect("current directory should be readable");
     let root = Builder::new()
         .prefix("rooted-constructor-")

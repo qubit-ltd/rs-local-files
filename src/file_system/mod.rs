@@ -7,8 +7,10 @@
 // =============================================================================
 //! Shared local filesystem instance state.
 
+mod local_current_directory;
 mod local_file_system_core;
 mod local_file_system_defaults;
 
+pub(crate) use local_current_directory::LocalCurrentDirectory;
 pub(crate) use local_file_system_core::LocalFileSystemCore;
 pub(crate) use local_file_system_defaults::LocalFileSystemDefaults;

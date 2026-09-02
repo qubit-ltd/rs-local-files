@@ -226,9 +226,11 @@ impl LocalTempDirectory {
         self.path = resolver
             .resolve(&input)
             .map_err(|error| {
-                error
-                    .with_operation(LocalFileOperation::CreateTempDirectory)
-                    .with_current_directory(resolver.current_directory().to_path_buf())
+                let error = error.with_operation(LocalFileOperation::CreateTempDirectory);
+                match resolver.current_directory() {
+                    Some(current_directory) => error.with_current_directory(current_directory.to_path_buf()),
+                    None => error,
+                }
             })?
             .namespace_absolute()
             .to_path_buf();
@@ -452,17 +454,22 @@ impl LocalTempDirectory {
         let current_directory = self
             .resolver
             .as_ref()
-            .expect("temporary resource is bound by LocalFileSystem")
-            .current_directory()
-            .to_path_buf();
-        LocalPersistError::new(error, self, requested_target, resolved_target, stage)
-            .with_current_directory(current_directory)
+            .and_then(LocalPathResolver::current_directory)
+            .map(Path::to_path_buf);
+        let error = LocalPersistError::new(error, self, requested_target, resolved_target, stage);
+        match current_directory {
+            Some(current_directory) => error.with_current_directory(current_directory),
+            None => error,
+        }
     }
 
     /// Attaches the resource's creation-time PWD to a structured error.
     fn contextualize_error(&self, error: LocalFileError) -> LocalFileError {
         match &self.resolver {
-            Some(resolver) => error.with_current_directory(resolver.current_directory().to_path_buf()),
+            Some(resolver) => match resolver.current_directory() {
+                Some(current_directory) => error.with_current_directory(current_directory.to_path_buf()),
+                None => error,
+            },
             None => error,
         }
     }

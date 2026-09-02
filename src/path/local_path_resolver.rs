@@ -26,7 +26,7 @@ pub struct LocalPathResolver {
     /// Namespace whose anchoring rules are applied to operation paths.
     scope: LocalFileSystemScope,
     /// Normalized namespace-absolute PWD exposed by the owning filesystem.
-    current_directory: PathBuf,
+    current_directory: Option<PathBuf>,
     /// Normal components retained from the normalized PWD.
     current_components: Vec<OsString>,
     /// Host-native prefix retained separately from normal components.
@@ -40,7 +40,7 @@ impl LocalPathResolver {
         let (current_prefix, current_components) = parse_current_directory(scope, current_directory)?;
         Ok(Self {
             scope,
-            current_directory: current_directory.to_path_buf(),
+            current_directory: Some(current_directory.to_path_buf()),
             current_components,
             current_prefix,
         })
@@ -48,13 +48,31 @@ impl LocalPathResolver {
 
     /// Returns the PWD snapshot used by this resolver.
     #[inline(always)]
-    pub fn current_directory(&self) -> &Path {
-        &self.current_directory
+    pub fn current_directory(&self) -> Option<&Path> {
+        self.current_directory.as_deref()
+    }
+
+    /// Creates a Host resolver that can resolve absolute paths without a PWD.
+    #[must_use]
+    pub(crate) const fn absolute_host() -> Self {
+        Self {
+            scope: LocalFileSystemScope::Host,
+            current_directory: None,
+            current_components: Vec::new(),
+            current_prefix: None,
+        }
     }
 
     /// Normalizes one absolute or PWD-relative operation path.
     pub fn resolve(&self, path: &Path) -> LocalResult<LocalNamespacePath> {
         reject_native_nul(path)?;
+        if self.current_directory.is_none() && !path.is_absolute() {
+            return Err(
+                LocalFileError::new(LocalFileErrorKind::InvalidState, LocalFileOperation::BindPath)
+                    .with_path(path.to_path_buf())
+                    .with_reason("a relative Host path requires a process current directory snapshot"),
+            );
+        }
         let directory_required = directory_required(path);
         let mut components = self.current_components.clone();
         let mut prefix = self.current_prefix.clone();
