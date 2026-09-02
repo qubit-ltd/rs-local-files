@@ -56,6 +56,7 @@ fn test_capability_snapshot_exposes_all_guarantees() {
     );
     let _ = capabilities.supports_atomic_temp_persist();
     let _ = capabilities.supports_durable_file_copy();
+    let _ = capabilities.supports_durable_write();
 
     let limits =
         std::hint::black_box(LocalFileSystem::limits as fn(&LocalFileSystem) -> LocalFileSystemLimits)(&filesystem);
