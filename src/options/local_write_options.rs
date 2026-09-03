@@ -47,7 +47,7 @@ impl LocalWriteOptions {
     }
 
     /// Returns the publication mode.
-    #[must_use]
+    #[must_use = "inspect the publication mode"]
     // qubit-style: allow coverage-cfg
     #[cfg_attr(not(coverage), inline(always))]
     #[cfg_attr(coverage, inline(never))]
@@ -64,6 +64,7 @@ impl LocalWriteOptions {
     }
 
     /// Returns the required atomicity.
+    #[must_use = "inspect the requested atomicity"]
     #[cfg_attr(not(coverage), inline(always))]
     #[cfg_attr(coverage, inline(never))]
     pub const fn atomicity(&self) -> LocalAtomicityRequirement {
@@ -71,6 +72,7 @@ impl LocalWriteOptions {
     }
 
     /// Returns the required durability.
+    #[must_use = "inspect the requested durability"]
     #[cfg_attr(not(coverage), inline(always))]
     #[cfg_attr(coverage, inline(never))]
     pub const fn durability(&self) -> LocalDurabilityRequirement {

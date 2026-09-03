@@ -159,6 +159,7 @@ impl<T> LocalPersistError<T> {
     ///
     /// # Returns
     /// A state describing whether the temporary resource remains safely owned.
+    #[must_use = "inspect the retained persistence state"]
     #[cfg_attr(not(coverage), inline)]
     #[cfg_attr(coverage, inline(never))]
     pub const fn state(&self) -> LocalPersistFailureState {
@@ -169,6 +170,7 @@ impl<T> LocalPersistError<T> {
     ///
     /// # Returns
     /// Stable classification reported by the retained structured error.
+    #[must_use = "inspect the retained persistence error kind"]
     #[cfg_attr(not(coverage), inline)]
     #[cfg_attr(coverage, inline(never))]
     pub const fn kind(&self) -> crate::LocalFileErrorKind {

@@ -136,6 +136,7 @@ impl LocalCopyDirOptions {
     }
 
     /// Returns the staged-file synchronization policy.
+    #[must_use = "inspect the requested durability"]
     #[cfg_attr(not(coverage), inline(always))]
     #[cfg_attr(coverage, inline(never))]
     pub const fn durability(&self) -> LocalDurabilityRequirement {
@@ -282,6 +283,7 @@ impl LocalCopyDirOptions {
     ///
     /// # Returns
     /// The configured source-tree symbolic-link policy.
+    #[must_use = "inspect the source-tree symbolic-link policy"]
     #[cfg_attr(not(coverage), inline(always))]
     #[cfg_attr(coverage, inline(never))]
     pub const fn symlink_policy(&self) -> LocalSymlinkPolicy {

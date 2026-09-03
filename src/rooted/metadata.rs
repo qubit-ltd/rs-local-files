@@ -172,6 +172,7 @@ impl Metadata {
     }
 
     /// Returns the final entry type observed by the rooted operation.
+    #[must_use = "inspect the rooted entry kind"]
     pub const fn kind(&self) -> EntryKind {
         self.kind
     }

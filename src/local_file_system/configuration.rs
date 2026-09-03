@@ -45,7 +45,7 @@ impl LocalFileSystem {
     ///
     /// `Host` for process-wide native paths or `Rooted` for paths interpreted
     /// below a retained directory authority.
-    #[must_use]
+    #[must_use = "inspect which namespace this filesystem uses"]
     #[cfg_attr(not(coverage), inline)]
     #[cfg_attr(coverage, inline(never))]
     pub fn scope(&self) -> LocalFileSystemScope {
@@ -115,6 +115,7 @@ impl LocalFileSystem {
 
     /// Returns the default symlink policy inherited by operations that do not
     /// supply an explicit policy.
+    #[must_use = "inspect the default symbolic-link policy"]
     #[cfg_attr(not(coverage), inline)]
     #[cfg_attr(coverage, inline(never))]
     pub const fn symlink_policy(&self) -> LocalSymlinkPolicy {
@@ -144,6 +145,7 @@ impl LocalFileSystem {
     ///
     /// `Some` for a Rooted filesystem and `None` for Host. The path is not an
     /// authority and may become stale after a native rename or replacement.
+    #[must_use]
     #[cfg_attr(not(coverage), inline)]
     #[cfg_attr(coverage, inline(never))]
     pub fn diagnostic_root(&self) -> Option<&Path> {
