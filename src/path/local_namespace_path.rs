@@ -38,6 +38,7 @@ impl LocalNamespacePath {
     }
 
     /// Returns the normalized namespace-absolute path.
+    #[must_use]
     #[inline(always)]
     pub fn namespace_absolute(&self) -> &Path {
         &self.namespace_absolute
@@ -46,12 +47,14 @@ impl LocalNamespacePath {
     /// Returns the path representation consumed by the authority backend.
     ///
     /// Rooted paths omit the virtual root. Host paths remain fully qualified.
+    #[must_use]
     #[inline(always)]
     pub fn authority_relative(&self) -> &Path {
         &self.authority_relative
     }
 
     /// Reports whether the original native syntax requires a directory.
+    #[must_use]
     #[inline(always)]
     pub const fn directory_required(&self) -> bool {
         self.directory_required

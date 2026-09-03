@@ -91,7 +91,7 @@ impl<T> LocalPersistError<T> {
     ///
     /// # Returns
     /// Structured error that prevented persistence.
-    #[must_use]
+    #[must_use = "the structured persistence error should be inspected"]
     #[inline]
     pub const fn error(&self) -> &LocalFileError {
         &self.error
@@ -122,7 +122,7 @@ impl<T> LocalPersistError<T> {
     /// # Returns
     /// Requested target before absolute-path resolution.
     #[must_use]
-    #[inline]
+    #[inline(always)]
     pub fn requested_target(&self) -> &Path {
         &self.requested_target
     }
@@ -131,7 +131,8 @@ impl<T> LocalPersistError<T> {
     ///
     /// # Returns
     /// Resolved target for parent preparation and destination installation.
-    #[inline]
+    #[must_use]
+    #[inline(always)]
     pub fn resolved_target(&self) -> Option<&Path> {
         self.resolved_target.as_deref()
     }
@@ -140,7 +141,8 @@ impl<T> LocalPersistError<T> {
     ///
     /// # Returns
     /// Failed persistence stage.
-    #[inline]
+    #[must_use = "the failed persistence stage should be inspected"]
+    #[inline(always)]
     pub const fn stage(&self) -> LocalPersistStage {
         self.stage
     }

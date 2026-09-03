@@ -106,6 +106,7 @@ impl LocalFileSystem {
     }
 
     /// Returns the construction-time Rooted path used only for diagnostics.
+    #[must_use]
     #[cfg_attr(feature = "test-support", inline(never))]
 
     pub fn diagnostic_root(&self) -> Option<&Path> {
