@@ -235,7 +235,7 @@ impl Root {
     ///
     /// Returns an I/O error when the final link cannot be opened or inspected.
     #[cfg(windows)]
-    #[must_use]
+    #[must_use = "inspect the symbolic-link target kind"]
     pub fn symlink_targets_directory(&self, path: &path::Path) -> Result<bool> {
         local::rooted_link_targets_directory(&self.directory, path)
     }

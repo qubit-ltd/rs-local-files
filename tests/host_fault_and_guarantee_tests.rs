@@ -312,16 +312,17 @@ fn test_atomic_replacement_preserves_extended_attributes() {
 #[test]
 fn test_filesystem_namespace_capabilities_and_probe_variants() {
     let directory = tempdir().expect("temporary directory should be created");
+    let canonical_directory = fs::canonicalize(directory.path()).expect("temporary directory should canonicalize");
     let mut host = LocalFileSystem::host().expect("Host filesystem should open");
     host.set_symlink_policy(LocalSymlinkPolicy::Reject)
         .expect("host policy changes should be accepted");
     assert_eq!(LocalSymlinkPolicy::Reject, host.symlink_policy(),);
     let _ = host.limits();
     let _ = host
-        .limits_at(&directory.path().join("missing/leaf"))
+        .limits_at(&canonical_directory.join("missing/leaf"))
         .expect("host limits should probe nearest existing ancestor");
     let _ = host
-        .space_at(&directory.path().join("missing/leaf"))
+        .space_at(&canonical_directory.join("missing/leaf"))
         .expect("host space should probe nearest existing ancestor");
 
     let mut rooted = LocalFileSystem::rooted(directory.path()).expect("rooted authority should open");

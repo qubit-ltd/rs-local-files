@@ -5,6 +5,10 @@
 //
 //    Licensed under the Apache License, Version 2.0.
 // =============================================================================
+// Windows `std::io::Error` makes the stable public `LocalFileError` large;
+// boxing it solely for this lint would change the public error representation.
+#![cfg_attr(windows, allow(clippy::result_large_err))]
+
 //! # Qubit Local Files
 //!
 //! Unified native local filesystem operations for Rust.
