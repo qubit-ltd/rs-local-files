@@ -33,12 +33,12 @@ pub use crate::write::OpenOptions as InternalWriteOptions;
 
 /// Drives copy accounting with a deterministic monotonic clock.
 #[doc(hidden)]
-pub fn copy_with_clock<R, W, N>(budget: &mut CopyBudget, reader: &mut R, writer: &mut W, now: N) -> std::io::Result<u64>
-where
-    R: std::io::Read + ?Sized,
-    W: std::io::Write + ?Sized,
-    N: FnMut() -> std::time::Instant,
-{
+pub fn copy_with_clock(
+    budget: &mut CopyBudget,
+    reader: &mut dyn std::io::Read,
+    writer: &mut dyn std::io::Write,
+    now: &mut dyn FnMut() -> std::time::Instant,
+) -> std::io::Result<u64> {
     budget.copy_with_now(reader, writer, now)
 }
 
@@ -49,6 +49,7 @@ pub fn generated_keep_target(resource: &std::path::Path) -> std::io::Result<std:
 }
 
 /// Maps internal copy-stage facts to the public recovery state.
+#[cfg(windows)]
 pub const fn copy_failure_state(
     stage: crate::local::LocalCopyDirStage,
     stats: crate::outcome::LocalCopyStats,

@@ -70,14 +70,15 @@ fn test_copy_budget_stops_at_the_next_chunk_deadline_boundary() {
     let mut writer = Vec::new();
     let mut calls = 0_usize;
 
-    let error = copy_with_clock(&mut budget, &mut reader, &mut writer, || {
+    let mut now = || {
         calls += 1;
         if calls <= 4 {
             started
         } else {
             started + Duration::from_millis(1)
         }
-    })
+    };
+    let error = copy_with_clock(&mut budget, &mut reader, &mut writer, &mut now)
     .expect_err("the second chunk must observe the expired deadline");
 
     assert_eq!(std::io::ErrorKind::TimedOut, error.kind());
