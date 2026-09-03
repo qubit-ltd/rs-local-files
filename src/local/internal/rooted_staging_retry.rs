@@ -72,3 +72,87 @@ where
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use std::ffi::CString;
+    use std::fs::File;
+    use std::io::Error;
+    use std::io::ErrorKind;
+
+    use super::retry_rooted_staging_entry;
+
+    #[test]
+    fn test_retry_rooted_staging_entry_retries_collisions_and_returns_open_handle() {
+        let fixture = tempfile::NamedTempFile::new().expect("fixture file should be created");
+        let mut generated = 0_usize;
+        let mut opened = 0_usize;
+
+        let (name, native_name, file) = retry_rooted_staging_entry(
+            Some(3),
+            || {
+                generated += 1;
+                Ok(format!("staging-{generated}"))
+            },
+            |candidate| {
+                opened += 1;
+                if opened == 1 {
+                    return Err(Error::from(ErrorKind::AlreadyExists));
+                }
+                Ok((
+                    CString::new(candidate).expect("candidate has no NUL"),
+                    File::open(fixture.path())?,
+                ))
+            },
+        )
+        .expect("a later open attempt should succeed");
+
+        assert_eq!("staging-2", name);
+        assert_eq!(
+            CString::new("staging-2").expect("literal has no NUL"),
+            native_name
+        );
+        assert!(
+            file.metadata()
+                .expect("opened fixture should be queryable")
+                .is_file()
+        );
+        assert_eq!(2, generated);
+        assert_eq!(2, opened);
+    }
+
+    #[test]
+    fn test_retry_rooted_staging_entry_rejects_zero_and_exhausted_retry_budgets() {
+        let zero =
+            retry_rooted_staging_entry(Some(0), || Ok("unused".to_owned()), |_| unreachable!())
+                .expect_err("zero retries must be rejected");
+        assert_eq!(ErrorKind::InvalidInput, zero.kind());
+
+        let exhausted = retry_rooted_staging_entry(
+            Some(2),
+            || Ok("collision".to_owned()),
+            |_| Err(Error::from(ErrorKind::AlreadyExists)),
+        )
+        .expect_err("bounded collisions must exhaust the retry budget");
+        assert_eq!(ErrorKind::AlreadyExists, exhausted.kind());
+    }
+
+    #[test]
+    fn test_retry_rooted_staging_entry_propagates_generation_and_open_errors() {
+        let generated = retry_rooted_staging_entry::<_, fn(&str) -> _>(
+            None,
+            || Err(Error::from(ErrorKind::InvalidData)),
+            |_| unreachable!(),
+        )
+        .expect_err("generator errors must not be retried");
+        assert_eq!(ErrorKind::InvalidData, generated.kind());
+
+        let opened = retry_rooted_staging_entry(
+            None,
+            || Ok("candidate".to_owned()),
+            |_| Err(Error::from(ErrorKind::PermissionDenied)),
+        )
+        .expect_err("non-collision open errors must not be retried");
+        assert_eq!(ErrorKind::PermissionDenied, opened.kind());
+    }
+}

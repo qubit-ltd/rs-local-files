@@ -67,3 +67,83 @@ pub(crate) fn synchronize_staging_file(
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use std::io;
+    use std::path::PathBuf;
+
+    use super::commit_recoverably;
+    use super::finalize_failed_commit;
+    use super::synchronize_staging_file;
+    use crate::LocalAtomicDestinationState;
+    use crate::LocalAtomicWriteError;
+    use crate::LocalAtomicWriteStage;
+    use crate::LocalDurabilityRequirement;
+
+    fn write_error(state: LocalAtomicDestinationState) -> LocalAtomicWriteError {
+        LocalAtomicWriteError::new(
+            LocalAtomicWriteStage::ReplaceDestination,
+            PathBuf::from("target"),
+            Some(PathBuf::from("staging")),
+            state,
+            io::Error::from(io::ErrorKind::PermissionDenied),
+        )
+    }
+
+    #[test]
+    fn test_commit_recoverably_reports_success_and_retains_only_open_staging() {
+        assert!(commit_recoverably(1_u8, |_| Ok(true), |_| true).expect("success should be retained"));
+
+        let recoverable = commit_recoverably(2_u8, |_| Err(write_error(LocalAtomicDestinationState::Unchanged)), |_| true)
+            .expect_err("open staging should be returned to the caller");
+        assert_eq!(Some(&2), recoverable.writer());
+
+        let terminal = commit_recoverably(3_u8, |_| Err(write_error(LocalAtomicDestinationState::Unchanged)), |_| false)
+            .expect_err("closed staging must not be returned to the caller");
+        assert!(terminal.writer().is_none());
+    }
+
+    #[test]
+    fn test_finalize_failed_commit_preserves_cleanup_only_before_publication() {
+        let unchanged = finalize_failed_commit(
+            (),
+            write_error(LocalAtomicDestinationState::Unchanged),
+            |_| Err(io::Error::other("cleanup")),
+            |_| panic!("unchanged destination must not abandon"),
+        );
+        assert_eq!(Some(io::ErrorKind::Other), unchanged.cleanup_error().map(io::Error::kind));
+
+        let published = finalize_failed_commit(
+            false,
+            write_error(LocalAtomicDestinationState::Replaced),
+            |_| panic!("published destination must not clean up staging"),
+            |writer| *writer = true,
+        );
+        assert_eq!(LocalAtomicDestinationState::Replaced, published.destination_state());
+        assert!(published.cleanup_error().is_none());
+    }
+
+    #[test]
+    fn test_synchronize_staging_file_obeys_each_durability_requirement() {
+        let fixture = tempfile::NamedTempFile::new().expect("staging fixture should be created");
+        assert!(!synchronize_staging_file(
+            fixture.as_file(),
+            LocalDurabilityRequirement::NotRequired,
+            |_| unreachable!(),
+        )
+        .expect("not-required durability should skip synchronization"));
+        assert!(synchronize_staging_file(
+            fixture.as_file(),
+            LocalDurabilityRequirement::Preferred,
+            |_| unreachable!(),
+        )
+        .expect("preferred durability should synchronize a regular file"));
+        assert!(synchronize_staging_file(
+            fixture.as_file(),
+            LocalDurabilityRequirement::Required,
+            |result| result.map_err(|_| write_error(LocalAtomicDestinationState::Unchanged)),
+        )
+        .expect("required durability should synchronize a regular file"));
+    }
+}

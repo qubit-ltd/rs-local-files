@@ -464,3 +464,88 @@ fn classify_io_error(error: &io::Error) -> LocalFileErrorKind {
         _ => LocalFileErrorKind::Io,
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use std::error::Error;
+    use std::io;
+    use std::path::Path;
+
+    use super::LocalFileError;
+    use super::LocalFileErrorKind;
+    use super::LocalFileOperation;
+    use super::LocalPathCodecError;
+    use super::LocalResourceLimitError;
+    use crate::error::LocalResourceKind;
+
+    #[test]
+    fn test_internal_error_remapping_retains_every_context_field() {
+        let mut error = LocalFileError::from_path_codec(
+            LocalFileOperation::Read,
+            Some("original".into()),
+            LocalPathCodecError::NativeNul,
+        )
+        .with_kind(LocalFileErrorKind::InvalidOptions)
+        .with_operation(LocalFileOperation::OpenWriter);
+        error.replace_paths(
+            Some("source".into()),
+            Some("target".into()),
+            Some("/workspace".into()),
+        );
+
+        assert_eq!(LocalFileErrorKind::InvalidOptions, error.kind());
+        assert_eq!(LocalFileOperation::OpenWriter, error.operation());
+        assert_eq!(Some(Path::new("/workspace")), error.current_directory());
+        assert_eq!(Some(Path::new("source")), error.path());
+        assert_eq!(Some(Path::new("target")), error.target());
+        assert_eq!(io::ErrorKind::InvalidInput, error.io_error_kind());
+        assert!(error.typed_source().is_some());
+        assert!(error.io_error().is_none());
+        assert!(error.to_string().contains("caused by"));
+    }
+
+    #[test]
+    fn test_resource_limit_and_cleanup_sources_are_preserved_independently() {
+        let source = LocalResourceLimitError::new(LocalResourceKind::Entry, 4, 1, 2);
+        let error = LocalFileError::from_resource_limit(
+            LocalFileOperation::Copy,
+            Some("source".into()),
+            source,
+        )
+        .with_cleanup_error(LocalFileError::from_io(
+            LocalFileOperation::Cleanup,
+            Some("temporary".into()),
+            None,
+            io::Error::from(io::ErrorKind::PermissionDenied),
+        ));
+
+        assert_eq!(Some(&source), error.resource_limit_error());
+        assert!(error.io_error().is_none());
+        let cleanup = error
+            .cleanup_error()
+            .expect("cleanup error should be retained");
+        assert_eq!(LocalFileOperation::Cleanup, cleanup.operation());
+        assert_eq!(
+            Some(io::ErrorKind::PermissionDenied),
+            cleanup.io_error().map(io::Error::kind)
+        );
+        assert!(Error::source(&error).is_some());
+    }
+
+    #[test]
+    fn test_source_free_error_reason_maps_to_the_compatible_io_kind() {
+        let error = LocalFileError::new(
+            LocalFileErrorKind::RequirementNotMet,
+            LocalFileOperation::Commit,
+        )
+        .with_reason("the requested guarantee is unavailable");
+
+        assert_eq!(
+            Some("the requested guarantee is unavailable"),
+            error.reason()
+        );
+        assert_eq!(io::ErrorKind::Unsupported, error.io_error_kind());
+        assert!(error.typed_source().is_none());
+        assert!(error.to_string().contains("requested guarantee"));
+    }
+}
