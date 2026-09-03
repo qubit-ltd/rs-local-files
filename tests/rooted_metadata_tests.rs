@@ -14,7 +14,7 @@ use qubit_local_files::capability::LocalPathLengthUnit;
 use qubit_local_files::outcome::LocalFileKind;
 
 #[test]
-fn observes_root_limits_space_and_metadata() {
+fn test_observes_root_limits_space_and_metadata() {
     let filesystem = LocalFileSystem::rooted(Path::new(".")).expect("current directory can be opened");
     let limits = filesystem
         .limits_at(Path::new("Cargo.toml"))

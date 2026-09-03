@@ -14,7 +14,7 @@ use crate::path::LocalFileSystemScope;
 use crate::path::LocalPathResolver;
 
 #[test]
-fn rooted_paths_use_virtual_absolute_and_pwd_semantics() {
+fn test_rooted_paths_use_virtual_absolute_and_pwd_semantics() {
     let resolver = LocalPathResolver::new(LocalFileSystemScope::Rooted, Path::new("/work/project"))
         .expect("rooted resolver should accept virtual absolute PWD");
 
@@ -33,7 +33,7 @@ fn rooted_paths_use_virtual_absolute_and_pwd_semantics() {
 }
 
 #[test]
-fn rooted_paths_reject_virtual_root_escape() {
+fn test_rooted_paths_reject_virtual_root_escape() {
     let root = LocalPathResolver::new(LocalFileSystemScope::Rooted, Path::new("/"))
         .expect("rooted resolver should accept virtual root PWD");
     for path in ["..", "a/./.././../b"] {
@@ -52,7 +52,7 @@ fn rooted_paths_reject_virtual_root_escape() {
 }
 
 #[test]
-fn rooted_resolver_preserves_directory_intent() {
+fn test_rooted_resolver_preserves_directory_intent() {
     let resolver =
         LocalPathResolver::new(LocalFileSystemScope::Rooted, Path::new("/")).expect("rooted resolver should open");
     assert!(resolver.resolve(Path::new("missing/")).unwrap().directory_required());
@@ -63,7 +63,7 @@ fn rooted_resolver_preserves_directory_intent() {
 
 #[cfg(unix)]
 #[test]
-fn resolver_preserves_non_utf8_normal_components() {
+fn test_resolver_preserves_non_utf8_normal_components() {
     use std::ffi::OsString;
     use std::os::unix::ffi::OsStringExt;
     use std::path::PathBuf;
@@ -81,7 +81,7 @@ fn resolver_preserves_non_utf8_normal_components() {
 
 #[cfg(unix)]
 #[test]
-fn host_relative_paths_bind_to_instance_pwd() {
+fn test_host_relative_paths_bind_to_instance_pwd() {
     let resolver = LocalPathResolver::new(LocalFileSystemScope::Host, Path::new("/srv/app"))
         .expect("host resolver should accept absolute PWD");
     assert_resolution(
