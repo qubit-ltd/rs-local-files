@@ -34,6 +34,28 @@ pub(crate) fn copy_failure_unchanged(error: LocalFileError) -> LocalCopyFailure 
     )
 }
 
+/// Wraps a copy error after a destination mutation whose final namespace state
+/// cannot be proven by the Host implementation.
+///
+/// # Parameters
+///
+/// - `error`: Typed copy error raised after an irreversible destination step.
+///
+/// # Returns
+///
+/// A copy failure with indeterminate state and empty confirmed copy statistics.
+#[cfg_attr(not(coverage), inline)]
+#[cfg_attr(coverage, inline(never))]
+pub(crate) fn copy_failure_indeterminate(error: LocalFileError) -> LocalCopyFailure {
+    LocalCopyFailure::new(
+        error,
+        LocalCopyFailureState::Indeterminate,
+        LocalCopyStats::default(),
+        None,
+        None,
+    )
+}
+
 /// Wraps a post-publication copy error with partial statistics.
 ///
 /// # Parameters
