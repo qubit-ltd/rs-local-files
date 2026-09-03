@@ -53,6 +53,7 @@ pub(crate) use internal::RootedSymlinkCreateFailureState;
 pub(crate) use internal::copy_dir_all_with_paths;
 pub(crate) use internal::copy_dir_all_with_paths_scoped;
 pub(crate) use internal::copy_directory_guarantee_unavailable;
+pub(crate) use internal::copy_failure_indeterminate;
 pub(crate) use internal::copy_failure_published;
 pub(crate) use internal::copy_failure_unchanged;
 pub(crate) use internal::copy_file_replace_requires_atomicity;

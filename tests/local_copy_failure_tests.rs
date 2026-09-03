@@ -149,6 +149,35 @@ fn test_symlink_replacement_failure_reports_partial_publication() {
     });
 }
 
+/// Verifies Host symlink publication failures after replacement cannot report
+/// an unchanged destination.
+#[cfg(all(feature = "test-support", unix))]
+#[test]
+fn test_host_symlink_replacement_failure_does_not_report_unchanged() {
+    use std::os::unix::fs::symlink;
+
+    const TEST_NAME: &str = "test_host_symlink_replacement_failure_does_not_report_unchanged";
+    run_in_test_fault_process(TEST_NAME, "local-fs-copy-symlink-create", || {
+        let directory = tempfile::tempdir().expect("temporary directory should be created");
+        let source = directory.path().join("source");
+        let destination = directory.path().join("destination");
+        symlink("referent", &source).expect("source link should be created");
+        fs::write(&destination, b"previous").expect("previous destination should be written");
+
+        let failure = LocalFileSystem::host()
+            .expect("Host filesystem should open")
+            .copy_with_options(
+                &source,
+                &destination,
+                &LocalCopyOptions::new().with_conflict(LocalCopyConflictPolicy::Overwrite),
+            )
+            .expect_err("injected symlink publication should fail after replacement removal");
+
+        assert_ne!(LocalCopyFailureState::Unchanged, failure.state());
+        assert!(!destination.exists());
+    });
+}
+
 /// Verifies a parent synchronization failure follows completed publication.
 #[cfg(feature = "test-support")]
 #[cfg(not(windows))]

@@ -346,6 +346,99 @@ fn test_local_file_system_copy_symlink_policy_matrix() {
     }
 }
 
+/// Verifies a final symbolic-link source is rejected before an overwrite can
+/// remove the same source entry.
+#[cfg(unix)]
+#[test]
+fn test_local_file_system_copy_symlink_rejects_textual_self_alias_before_overwrite() {
+    use std::os::unix::fs::symlink;
+
+    let directory = tempdir().expect("temporary directory should be created");
+    let source = directory.path().join("source-link");
+    symlink("referent", &source).expect("source symlink should be created");
+
+    let failure = LocalFileSystem::host()
+        .expect("Host filesystem should open")
+        .copy_with_options(
+            &source,
+            &source,
+            &LocalCopyOptions::new().with_conflict(LocalCopyConflictPolicy::Overwrite),
+        )
+        .expect_err("a symbolic-link source cannot overwrite itself");
+
+    assert_eq!(LocalFileErrorKind::InvalidOptions, failure.error().kind());
+    assert_eq!(LocalCopyFailureState::Unchanged, failure.state());
+    assert!(
+        fs::symlink_metadata(&source)
+            .expect("source link must remain")
+            .file_type()
+            .is_symlink()
+    );
+}
+
+/// Verifies type-conflict replacement applies even when the file-conflict
+/// policy would otherwise skip an existing entry.
+#[cfg(unix)]
+#[test]
+fn test_local_file_system_copy_symlink_type_replace_overrides_file_skip() {
+    use std::os::unix::fs::symlink;
+
+    let directory = tempdir().expect("temporary directory should be created");
+    let source = directory.path().join("source-link");
+    let target = directory.path().join("target-directory");
+    symlink("referent", &source).expect("source symlink should be created");
+    fs::create_dir(&target).expect("directory target should be created");
+
+    let outcome = LocalFileSystem::host()
+        .expect("Host filesystem should open")
+        .copy_with_options(
+            &source,
+            &target,
+            &LocalCopyOptions::new()
+                .with_conflict(LocalCopyConflictPolicy::Skip)
+                .with_type_conflict(LocalCopyTypeConflictPolicy::Replace),
+        )
+        .expect("type replacement should replace the directory target");
+
+    assert_eq!(1, outcome.stats().overwritten());
+    assert_eq!(
+        PathBuf::from("referent"),
+        fs::read_link(&target).expect("target must become a symlink")
+    );
+}
+
+/// Verifies type-conflict skipping preserves a directory even when the
+/// file-conflict policy would otherwise overwrite an existing entry.
+#[cfg(unix)]
+#[test]
+fn test_local_file_system_copy_symlink_type_skip_overrides_file_overwrite() {
+    use std::os::unix::fs::symlink;
+
+    let directory = tempdir().expect("temporary directory should be created");
+    let source = directory.path().join("source-link");
+    let target = directory.path().join("target-directory");
+    symlink("referent", &source).expect("source symlink should be created");
+    fs::create_dir(&target).expect("directory target should be created");
+
+    let outcome = LocalFileSystem::host()
+        .expect("Host filesystem should open")
+        .copy_with_options(
+            &source,
+            &target,
+            &LocalCopyOptions::new()
+                .with_conflict(LocalCopyConflictPolicy::Overwrite)
+                .with_type_conflict(LocalCopyTypeConflictPolicy::Skip),
+        )
+        .expect("type skipping should preserve the directory target");
+
+    assert_eq!(1, outcome.stats().skipped());
+    assert!(
+        fs::symlink_metadata(&target)
+            .expect("target directory must remain")
+            .is_dir()
+    );
+}
+
 /// Verifies recursive symbolic-link publication applies entry conflict and
 /// type-conflict policies consistently with regular files.
 #[cfg(unix)]

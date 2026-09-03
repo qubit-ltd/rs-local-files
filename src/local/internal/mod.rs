@@ -121,6 +121,7 @@ pub(super) use owned_unicode_string::OwnedUnicodeString;
 pub(crate) use path_operations::absolute_path;
 pub(crate) use path_operations::add_path_context;
 pub(crate) use path_operations::ensure_parent_path_with_sync_dirs;
+pub(crate) use publication_state::copy_failure_indeterminate;
 pub(crate) use publication_state::copy_failure_published;
 pub(crate) use publication_state::copy_failure_unchanged;
 pub(crate) use publication_state::published_durability;

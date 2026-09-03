@@ -11,6 +11,7 @@
 
 use std::time::Instant;
 
+use super::CopyDestinationAction;
 use super::HostLocalFileSystem;
 use super::LocalCopyFailure;
 use super::LocalCopyMethod;
@@ -26,8 +27,10 @@ use super::LocalSymlinkPolicy;
 use super::Path;
 use super::PathBuf;
 use super::bind_host_paths;
+use super::copy_failure_indeterminate;
 use super::copy_failure_published;
 use super::copy_failure_unchanged;
+use super::decide_copy_destination;
 use super::destination_is_directory;
 use super::ensure_required_directory_durability;
 use super::fs;
@@ -133,6 +136,7 @@ impl HostLocalFileSystem {
                 return Err(copy_failure_unchanged(copy_io_error(&source, &target, error)));
             }
         };
+        reject_copy_alias(&source, &target, &source_metadata).map_err(copy_failure_unchanged)?;
         if source_metadata.file_type().is_symlink() {
             if options.source_mode() == crate::LocalCopySourceMode::Tree {
                 return Err(copy_failure_unchanged(
@@ -145,8 +149,6 @@ impl HostLocalFileSystem {
             return copy_symlink_entry(&source, &target, options, &mut budget);
         }
         let effective_metadata = &source_metadata;
-
-        reject_copy_alias(&source, &target, effective_metadata).map_err(copy_failure_unchanged)?;
 
         let source_is_directory = effective_metadata.file_type().is_dir();
         if source_is_directory {
@@ -285,46 +287,36 @@ fn copy_symlink_entry(
             return Err(copy_failure_unchanged(copy_io_error(source, target, error)));
         }
     };
-    if existing.is_some() {
-        if options.conflict() == crate::LocalCopyConflictPolicy::Skip {
-            return Ok(LocalCopyOutcome::new(
-                LocalCopyStats::skipped_one(),
-                LocalCopyMethod::StagedFile,
-                false,
-                false,
-                options.preserve_metadata(),
-            ));
-        }
-        if options.conflict() == crate::LocalCopyConflictPolicy::Fail {
+    let existing_is_directory = existing.as_ref().map(|metadata| metadata.file_type().is_dir());
+    let action = decide_copy_destination(
+        false,
+        existing_is_directory,
+        options.conflict(),
+        options.type_conflict(),
+    );
+    let action = match action {
+        Some(action) => action,
+        None => {
             return Err(copy_failure_unchanged(copy_io_error(
                 source,
                 target,
                 io::Error::from(io::ErrorKind::AlreadyExists),
             )));
         }
-        let existing_is_directory = match existing.as_ref() {
-            Some(metadata) => metadata.file_type().is_dir(),
-            None => false,
-        };
-        if existing_is_directory && options.type_conflict() == crate::LocalCopyTypeConflictPolicy::Fail {
-            return Err(copy_failure_unchanged(copy_io_error(
-                source,
-                target,
-                io::Error::from(io::ErrorKind::AlreadyExists),
-            )));
-        }
-        let remove_result = if existing_is_directory {
-            fs::remove_dir_all(target)
-        } else {
-            fs::remove_file(target)
-        };
-        if let Err(error) = remove_result {
-            return Err(copy_failure_unchanged(copy_io_error(source, target, error)));
-        }
+    };
+    if action == CopyDestinationAction::Skip {
+        return Ok(LocalCopyOutcome::new(
+            LocalCopyStats::skipped_one(),
+            LocalCopyMethod::StagedFile,
+            false,
+            false,
+            options.preserve_metadata(),
+        ));
     }
-    if let Err(error) = prepare_copy_parent(target, options) {
-        return Err(copy_failure_unchanged(copy_io_error(source, target, error)));
-    }
+    debug_assert!(matches!(
+        action,
+        CopyDestinationAction::Create | CopyDestinationAction::Replace
+    ));
     let link_target = match fs::read_link(source) {
         Ok(target) => target,
         Err(error) => {
@@ -334,8 +326,28 @@ fn copy_symlink_entry(
     if let Err(error) = budget.check_deadline() {
         return Err(copy_failure_unchanged(copy_io_error(source, target, error)));
     }
-    if let Err(error) = create_symlink_entry(&link_target, source, target) {
+    if let Err(error) = prepare_copy_parent(target, options) {
         return Err(copy_failure_unchanged(copy_io_error(source, target, error)));
+    }
+    if action == CopyDestinationAction::Replace {
+        let remove_result = if existing_is_directory == Some(true) {
+            fs::remove_dir_all(target)
+        } else {
+            fs::remove_file(target)
+        };
+        if let Err(error) = remove_result {
+            return Err(copy_failure_indeterminate(copy_io_error(source, target, error)));
+        }
+    }
+    let create_result = test_io_fault("local-fs-copy-symlink-create")
+        .map_or_else(|| create_symlink_entry(&link_target, source, target), Err);
+    if let Err(error) = create_result {
+        let failure = copy_io_error(source, target, error);
+        return if action == CopyDestinationAction::Replace {
+            Err(copy_failure_indeterminate(failure))
+        } else {
+            Err(copy_failure_unchanged(failure))
+        };
     }
     let stats = crate::local::LocalCopyDirStats {
         files: 1,
