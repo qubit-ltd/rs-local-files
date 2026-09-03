@@ -139,6 +139,7 @@ atomicity.
 - [User guide](doc/user_guide.md)
 - [用户手册](doc/user_guide.zh_CN.md)
 - [API reference](https://docs.rs/qubit-local-files)
+- [Design document](doc/local_file_system_design.md)
 - [中文设计文档](doc/local_file_system_design.zh_CN.md)
 - [中文 README](README.zh_CN.md)
 
@@ -151,6 +152,9 @@ implements each complete operation protocol; it does not probe a particular
 runtime filesystem or claim that the underlying hardware has persisted data.
 Required atomicity or durability is rejected before namespace changes when the
 protocol cannot be met.
+Atomic rename, atomic replacement, atomic temporary persistence, durable
+rename, durable file copy, and durable writer publication are reported as
+independent capabilities because their platform support differs.
 Path-limit observations always include a unit: Unix reports bytes and Windows
 reports UTF-16 code units. Windows whole-path limits remain `Unknown` when the
 handle-relative namespace has no defensible fixed bound. `space_at()` and

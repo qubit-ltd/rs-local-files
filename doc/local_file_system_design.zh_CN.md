@@ -1,8 +1,11 @@
 # Qubit Local Files 本地文件系统完整设计
 
+[English design document](local_file_system_design.md) ·
+[用户手册](user_guide.zh_CN.md) · [README](../README.zh_CN.md)
+
 > 状态：规范性设计文档
 >
-> 最后更新：2026-08-30
+> 最后更新：2026-09-03
 
 本文定义 `qubit-local-files` 的完整、稳定设计。公共 API、平台实现、测试、README 和用户
 指南都应与本文保持一致。本文描述库完成后的最终形态，不记录迁移历史，也不把临时实现
@@ -19,7 +22,7 @@
 | Rooted | 由一个已打开目录 descriptor/handle 锚定、对调用方呈现独立虚拟根 `/` 的本地 namespace |
 | namespace path | 调用方传给某个 `LocalFileSystem`、或由它返回的路径；只在该对象的坐标系内解释 |
 | Host diagnostic path | Rooted 对象对应的 Host 侧 best-effort 路径提示；只用于诊断，不授予访问能力 |
-| PWD | `LocalFileSystem` 实例自己的当前工作目录，是规范化的 namespace-absolute 逻辑路径 |
+| PWD | 当前适用的工作目录：Host 使用进程全局 PWD，Rooted 使用实例持有的 namespace-absolute 虚拟 PWD |
 | authority | 实际授予 namespace 访问能力的操作系统对象；Rooted 中是构造时打开的根 handle |
 | native path/name | 使用 `Path`/`OsStr` 表达、保留平台原生 byte 或 code unit 的路径或名称 |
 | canonical component | 为跨抽象层传输而定义、可逆编码成 UTF-8 的单个 native 名称组件 |
@@ -1340,6 +1343,7 @@ path codec kind 或 cleanup error。
 - atomic no-replace temp persist；
 - durable rename；
 - durable file copy。
+- durable writer publication。
 
 这些 flag 描述库实现能力，不代表任意 runtime mount、network filesystem 或硬件一定支持。
 路径限制的每个数值必须结合 `LocalPathLengthUnit` 解释：Unix 为 `Bytes`，Windows 为
