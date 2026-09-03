@@ -1,26 +1,19 @@
 {
   "threshold_exempt_files": {
     "qubit-local-files": [
-      "src/error/local_file_error.rs",
       "src/local/internal/atomic_commit_state.rs",
       "src/local/internal/copy_dir/facade.rs",
       "src/local/internal/copy_dir/opened_copy_source.rs",
       "src/local/internal/copy_dir/traversal.rs",
       "src/local/internal/host_local_file_system/directory.rs",
       "src/local/internal/host_local_file_system/temp.rs",
-      "src/local/internal/rooted_staging_retry.rs",
       "src/local/internal/copy_dir/destination.rs",
       "src/local/local_atomic_writer.rs",
       "src/local/local_root_atomic_writer.rs",
-      "src/local/local_persist_error.rs",
       "src/rooted_local_file_system/copy.rs",
       "src/rooted_local_file_system/directory.rs",
-      "src/rooted_local_file_system/metadata.rs",
       "src/rooted_local_file_system/support.rs",
-      "src/rooted_local_file_system/temp.rs",
-      "src/temp/internal/temp_parent.rs",
-      "src/test_support/internal_contract.rs",
-      "src/outcome/local_copy_stats.rs"
+      "src/rooted_local_file_system/temp.rs"
     ]
   }
 }
