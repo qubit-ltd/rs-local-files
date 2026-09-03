@@ -45,7 +45,7 @@ impl Error for LocalRenameFailure {
 
 impl LocalRenameFailure {
     /// Creates a typed rename failure from implementation facts.
-    #[must_use]
+    #[must_use = "handle the constructed rename failure"]
     #[cfg_attr(not(coverage), inline(always))]
     #[cfg_attr(coverage, inline(never))]
     pub(crate) fn new(error: LocalFileError, state: LocalRenameFailureState) -> Self {
@@ -56,13 +56,13 @@ impl LocalRenameFailure {
     }
 
     /// Returns the primary typed filesystem error.
-    #[must_use]
+    #[must_use = "inspect the primary rename error"]
     pub fn error(&self) -> &LocalFileError {
         self.error.as_ref()
     }
 
     /// Returns the most precise namespace state proven by native operations.
-    #[must_use]
+    #[must_use = "inspect the proven rename failure state"]
     #[cfg_attr(not(coverage), inline(always))]
     #[cfg_attr(coverage, inline(never))]
     pub const fn state(&self) -> LocalRenameFailureState {

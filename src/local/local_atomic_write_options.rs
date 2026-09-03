@@ -108,6 +108,7 @@ impl LocalAtomicWriteOptions {
     }
 
     /// Returns the requested durability for atomic publication.
+    #[must_use = "inspect the requested durability"]
     #[cfg_attr(not(coverage), inline(always))]
     #[cfg_attr(coverage, inline(never))]
     pub const fn durability(&self) -> LocalDurabilityRequirement {

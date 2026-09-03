@@ -61,6 +61,7 @@ impl LocalWriteOutcome {
     }
 
     /// Returns the terminal writer state.
+    #[must_use = "inspect the terminal writer state"]
     // qubit-style: allow coverage-cfg
     #[cfg_attr(not(coverage), inline)]
     #[cfg_attr(coverage, inline(never))]

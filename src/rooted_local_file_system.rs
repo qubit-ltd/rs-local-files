@@ -158,7 +158,7 @@ impl RootedLocalFileSystem {
     }
 
     /// Returns the native capability snapshot cached for this opened authority.
-    #[must_use]
+    #[must_use = "inspect the rooted capability snapshot"]
     #[cfg_attr(not(coverage), inline)]
     #[cfg_attr(coverage, inline(never))]
     pub const fn capabilities(&self) -> LocalFileSystemCapabilities {
@@ -166,7 +166,7 @@ impl RootedLocalFileSystem {
     }
 
     /// Returns limits observed from the opened root authority.
-    #[must_use]
+    #[must_use = "inspect the rooted path limits"]
     #[cfg_attr(not(coverage), inline)]
     #[cfg_attr(coverage, inline(never))]
     pub const fn limits(&self) -> LocalFileSystemLimits {

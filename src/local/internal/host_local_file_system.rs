@@ -85,6 +85,7 @@ pub(crate) struct HostLocalFileSystem {
 
 impl HostLocalFileSystem {
     /// Returns the native capabilities compiled for the current host platform.
+    #[must_use = "inspect the host capability snapshot"]
     // qubit-style: allow coverage-cfg
     #[cfg_attr(not(coverage), inline(always))]
     #[cfg_attr(coverage, inline(never))]

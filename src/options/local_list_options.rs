@@ -117,6 +117,7 @@ impl LocalListOptions {
     }
 
     /// Returns the policy used after the handle budget is reached.
+    #[must_use = "inspect the directory reopen policy"]
     #[cfg_attr(not(coverage), inline(always))]
     #[cfg_attr(coverage, inline(never))]
     pub const fn reopen_policy(&self) -> LocalDirectoryReopenPolicy {
@@ -124,6 +125,7 @@ impl LocalListOptions {
     }
 
     /// Returns the policy applied after an iteration error.
+    #[must_use = "inspect the listing error policy"]
     #[cfg_attr(not(coverage), inline(always))]
     #[cfg_attr(coverage, inline(never))]
     pub const fn error_policy(&self) -> LocalWalkErrorPolicy {
