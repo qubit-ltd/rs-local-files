@@ -6,6 +6,10 @@
 //    Licensed under the Apache License, Version 2.0.
 // =============================================================================
 
+// Windows `LocalFileError` remains public and large by contract; benchmark
+// closures propagate it without changing the observed workload.
+#![cfg_attr(windows, allow(clippy::result_large_err))]
+
 use std::fs;
 use std::hint::black_box;
 use std::io::Write;

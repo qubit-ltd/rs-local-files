@@ -44,13 +44,6 @@ impl RootedSymlinkCreateError {
     pub(crate) fn into_parts(self) -> (RootedSymlinkCreateFailureState, io::Error, Option<io::Error>) {
         (self.state, self.primary, self.cleanup)
     }
-
-    /// Converts this structured failure into one diagnostic I/O error.
-    #[cfg(windows)]
-    pub(crate) fn into_io_error(self) -> io::Error {
-        let kind = self.primary.kind();
-        io::Error::new(kind, self)
-    }
 }
 
 impl Display for RootedSymlinkCreateError {

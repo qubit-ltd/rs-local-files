@@ -245,7 +245,7 @@ pub(super) fn nt_open_at(parent: &File, name: &OsStr, access: u32, disposition: 
     let attributes = OBJECT_ATTRIBUTES {
         Length: size_of::<OBJECT_ATTRIBUTES>() as u32,
         RootDirectory: parent.as_raw_handle(),
-        ObjectName: &raw const name.header,
+        ObjectName: name.header(),
         Attributes: OBJ_CASE_INSENSITIVE,
         SecurityDescriptor: null(),
         SecurityQualityOfService: null(),
@@ -315,7 +315,7 @@ fn unicode_string(value: &OsStr) -> Result<OwnedUnicodeString> {
         MaximumLength: byte_len,
         Buffer: units.as_mut_ptr(),
     };
-    Ok(OwnedUnicodeString { _units: units, header })
+    Ok(OwnedUnicodeString::new(units, header))
 }
 /// Converts an NTSTATUS result into a standard I/O result.
 #[cfg_attr(not(coverage), inline)]
