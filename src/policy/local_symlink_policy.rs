@@ -9,6 +9,14 @@
 // Covered by authority, copy, and walker integration tests.
 
 /// Policy for symbolic links encountered while resolving a local path.
+///
+/// # Examples
+///
+/// ```
+/// use qubit_local_files::policy::LocalSymlinkPolicy;
+///
+/// assert!(!LocalSymlinkPolicy::Reject.follows());
+/// ```
 #[derive(Clone, Copy, Debug, Default, Eq, Hash, PartialEq)]
 #[must_use]
 pub enum LocalSymlinkPolicy {

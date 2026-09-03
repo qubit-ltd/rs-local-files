@@ -3,18 +3,19 @@
 [中文设计文档](local_file_system_design.zh_CN.md) ·
 [User guide](user_guide.md) · [README](../README.md)
 
-> Status: synchronized English translation
+> Status: synchronized high-level English summary
 >
 > Last updated: 2026-09-03
 
 The [Simplified Chinese design](local_file_system_design.zh_CN.md) is the
-normative source of truth. This document is its synchronized English
-translation: public APIs, platform implementations, tests, READMEs, and user
-guides must remain semantically aligned with both. It describes the intended
-completed system, not migration history or temporary implementation details.
-“Must”, “must not”, and “should” translate normative requirements from the
-Chinese source. Non-semantic modifiers such as a particular `const` or `inline`
-annotation are coding-policy details rather than API contracts.
+normative source of truth. This document is a synchronized high-level English
+summary: public APIs, platform implementations, tests, READMEs, and user guides
+must remain semantically aligned with both. Consult the Chinese design for exact
+signatures, defaults, state machines, and test matrices. It describes the
+intended completed system, not migration history or temporary implementation
+details. “Must”, “must not”, and “should” translate normative requirements from
+the Chinese source. Non-semantic modifiers such as a particular `const` or
+`inline` annotation are coding-policy details rather than API contracts.
 
 ## 0. Terminology
 

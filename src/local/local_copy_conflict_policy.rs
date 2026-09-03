@@ -9,6 +9,14 @@
 // qubit-style: allow source-test-pair
 
 /// Conflict policy for existing destination file entries.
+///
+/// # Examples
+///
+/// ```
+/// use qubit_local_files::options::LocalCopyConflictPolicy;
+///
+/// assert_eq!(LocalCopyConflictPolicy::Fail, LocalCopyConflictPolicy::default());
+/// ```
 #[must_use]
 #[non_exhaustive]
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]

@@ -185,105 +185,143 @@ impl LocalCopyOptions {
     }
 
     /// Sets the destination file conflict policy.
+    #[must_use = "use the configured copy options"]
+    #[inline(always)]
     pub const fn with_conflict(mut self, conflict: LocalCopyConflictPolicy) -> Self {
         self.conflict = conflict;
         self
     }
 
     /// Sets the file/directory type conflict policy.
+    #[must_use = "use the configured copy options"]
+    #[inline(always)]
     pub const fn with_type_conflict(mut self, type_conflict: LocalCopyTypeConflictPolicy) -> Self {
         self.type_conflict = type_conflict;
         self
     }
 
     /// Sets metadata preservation policy.
+    #[must_use = "use the configured copy options"]
+    #[inline(always)]
     pub const fn with_metadata_preservation(mut self, preserve_metadata: LocalMetadataPreservePolicy) -> Self {
         self.preserve_metadata = preserve_metadata;
         self
     }
 
     /// Sets symbolic-link policy.
+    #[must_use = "use the configured copy options"]
+    #[inline(always)]
     pub const fn with_symlink_policy(mut self, symlink: LocalSymlinkPolicy) -> Self {
         self.symlink = Some(symlink);
         self
     }
 
     /// Requires a regular file source.
+    #[must_use = "use the configured copy options"]
+    #[inline(always)]
     pub const fn with_file_source(mut self) -> Self {
         self.source_mode = LocalCopySourceMode::File;
         self
     }
 
     /// Requires a directory-tree source.
+    #[must_use = "use the configured copy options"]
+    #[inline(always)]
     pub const fn with_tree_source(mut self) -> Self {
         self.source_mode = LocalCopySourceMode::Tree;
         self
     }
 
     /// Creates missing target parent directories before copying.
+    #[must_use = "use the configured copy options"]
+    #[inline(always)]
     pub const fn with_parent(mut self) -> Self {
         self.create_parent = true;
         self
     }
 
     /// Sets required publication atomicity.
+    #[must_use = "use the configured copy options"]
+    #[inline(always)]
     pub const fn with_atomicity(mut self, atomicity: LocalAtomicityRequirement) -> Self {
         self.atomicity = atomicity;
         self
     }
 
     /// Sets required durability.
+    #[must_use = "use the configured copy options"]
+    #[inline(always)]
     pub const fn with_durability(mut self, durability: LocalDurabilityRequirement) -> Self {
         self.durability = durability;
         self
     }
 
     /// Limits recursive tree depth.
+    #[must_use = "use the configured copy options"]
+    #[inline(always)]
     pub const fn with_max_depth(mut self, max_depth: usize) -> Self {
         self.max_depth = Some(max_depth);
         self
     }
     /// Removes the recursive tree-depth budget.
+    #[must_use = "use the configured copy options"]
+    #[inline(always)]
     pub const fn without_max_depth(mut self) -> Self {
         self.max_depth = None;
         self
     }
     /// Limits the number of source entries processed.
+    #[must_use = "use the configured copy options"]
+    #[inline(always)]
     pub const fn with_max_entries(mut self, max_entries: usize) -> Self {
         self.max_entries = Some(max_entries);
         self
     }
     /// Removes the source-entry budget.
+    #[must_use = "use the configured copy options"]
+    #[inline(always)]
     pub const fn without_max_entries(mut self) -> Self {
         self.max_entries = None;
         self
     }
     /// Limits source bytes copied.
+    #[must_use = "use the configured copy options"]
+    #[inline(always)]
     pub const fn with_max_bytes(mut self, max_bytes: u64) -> Self {
         self.max_bytes = Some(max_bytes);
         self
     }
     /// Removes the source-byte budget.
+    #[must_use = "use the configured copy options"]
+    #[inline(always)]
     pub const fn without_max_bytes(mut self) -> Self {
         self.max_bytes = None;
         self
     }
     /// Limits concurrently open source directories.
+    #[must_use = "use the configured copy options"]
+    #[inline(always)]
     pub const fn with_max_open_directories(mut self, max_open_directories: usize) -> Self {
         self.max_open_directories = Some(max_open_directories);
         self
     }
     /// Removes the concurrently-open-directory budget.
+    #[must_use = "use the configured copy options"]
+    #[inline(always)]
     pub const fn without_max_open_directories(mut self) -> Self {
         self.max_open_directories = None;
         self
     }
     /// Sets the maximum elapsed time for the complete copy.
+    #[must_use = "use the configured copy options"]
+    #[inline(always)]
     pub const fn with_deadline(mut self, deadline: Duration) -> Self {
         self.deadline = Some(deadline);
         self
     }
     /// Removes the copy deadline.
+    #[must_use = "use the configured copy options"]
+    #[inline(always)]
     pub const fn without_deadline(mut self) -> Self {
         self.deadline = None;
         self
