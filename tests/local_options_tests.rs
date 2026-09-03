@@ -169,6 +169,52 @@ fn test_copy_rename_and_write_option_builders_retain_policies() {
     assert_eq!(writer.open_retry_timeout(), Some(timeout));
 }
 
+/// Verifies copy builders remain independently observable to coverage tools.
+#[test]
+fn test_copy_option_builders_are_independently_observable() {
+    let copy = black_box(LocalCopyOptions::new());
+    let with_conflict =
+        black_box(LocalCopyOptions::with_conflict as fn(LocalCopyOptions, LocalCopyConflictPolicy) -> LocalCopyOptions);
+    let copy = black_box(with_conflict)(black_box(copy), LocalCopyConflictPolicy::Overwrite);
+    assert_eq!(copy.conflict(), LocalCopyConflictPolicy::Overwrite);
+
+    let with_metadata_preservation = black_box(
+        LocalCopyOptions::with_metadata_preservation
+            as fn(LocalCopyOptions, LocalMetadataPreservePolicy) -> LocalCopyOptions,
+    );
+    let copy = black_box(with_metadata_preservation)(black_box(copy), LocalMetadataPreservePolicy::Permissions);
+    assert_eq!(copy.preserve_metadata(), LocalMetadataPreservePolicy::Permissions);
+
+    let with_file_source = black_box(LocalCopyOptions::with_file_source as fn(LocalCopyOptions) -> LocalCopyOptions);
+    let copy = black_box(with_file_source)(black_box(copy));
+    assert_eq!(copy.source_mode(), LocalCopySourceMode::File);
+
+    let with_parent = black_box(LocalCopyOptions::with_parent as fn(LocalCopyOptions) -> LocalCopyOptions);
+    let copy = black_box(with_parent)(black_box(copy));
+    assert!(copy.creates_parent());
+
+    let with_durability = black_box(
+        LocalCopyOptions::with_durability as fn(LocalCopyOptions, LocalDurabilityRequirement) -> LocalCopyOptions,
+    );
+    let copy = black_box(with_durability)(black_box(copy), LocalDurabilityRequirement::Required);
+    assert_eq!(copy.durability(), LocalDurabilityRequirement::Required);
+
+    let with_max_entries =
+        black_box(LocalCopyOptions::with_max_entries as fn(LocalCopyOptions, usize) -> LocalCopyOptions);
+    let copy = black_box(with_max_entries)(black_box(copy), 17);
+    assert_eq!(copy.max_entries(), Some(17));
+
+    let without_max_entries =
+        black_box(LocalCopyOptions::without_max_entries as fn(LocalCopyOptions) -> LocalCopyOptions);
+    let copy = black_box(without_max_entries)(black_box(copy));
+    assert_eq!(copy.max_entries(), None);
+
+    let with_max_open_directories =
+        black_box(LocalCopyOptions::with_max_open_directories as fn(LocalCopyOptions, usize) -> LocalCopyOptions);
+    let copy = black_box(with_max_open_directories)(black_box(copy), 5);
+    assert_eq!(copy.max_open_directories(), Some(5));
+}
+
 /// Verifies temporary-resource builders retain path and naming configuration.
 #[test]
 fn test_temporary_resource_option_builders_retain_configuration() {
