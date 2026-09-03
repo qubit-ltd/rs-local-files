@@ -29,7 +29,7 @@ use crate::options::LocalWriteOptions;
 /// Exercises the complete rooted facade through the crate's unit-test build,
 /// including recursive copy, staging publication, and temporary ownership.
 #[test]
-fn rooted_facade_workflow_preserves_namespace_and_lifecycle_contracts() {
+fn test_rooted_facade_workflow_preserves_namespace_and_lifecycle_contracts() {
     let directory = tempdir().expect("temporary root should be created");
     let filesystem = LocalFileSystem::rooted(directory.path()).expect("root authority should open");
 
@@ -121,7 +121,7 @@ fn rooted_facade_workflow_preserves_namespace_and_lifecycle_contracts() {
 /// Exercises host copy and temporary-resource paths through the unit-test
 /// library so that coverage does not depend on cross-crate inlining.
 #[test]
-fn host_facade_workflow_covers_copy_and_temporary_resource_paths() {
+fn test_host_facade_workflow_covers_copy_and_temporary_resource_paths() {
     let directory = tempdir().expect("temporary directory should be created");
     let source = directory.path().join("source");
     let target = directory.path().join("target");
@@ -152,7 +152,7 @@ fn host_facade_workflow_covers_copy_and_temporary_resource_paths() {
 /// Exercises rooted symbolic-link resolution in the unit-test build.
 #[cfg(unix)]
 #[test]
-fn rooted_facade_resolves_links_and_rejects_virtual_root_escape() {
+fn test_rooted_facade_resolves_links_and_rejects_virtual_root_escape() {
     use std::os::unix::fs::symlink;
 
     let directory = tempdir().expect("temporary root should be created");

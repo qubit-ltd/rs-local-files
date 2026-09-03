@@ -16,7 +16,7 @@ use qubit_local_files::test_support::TestFaultPlan;
 use qubit_local_files::test_support::TestFaultPoint;
 
 #[test]
-fn metadata_fault_does_not_cross_filesystem_instances() {
+fn test_metadata_fault_does_not_cross_filesystem_instances() {
     let executable = std::env::current_exe().expect("current executable");
     let failing = LocalFileSystem::host()
         .expect("Host filesystem should open")

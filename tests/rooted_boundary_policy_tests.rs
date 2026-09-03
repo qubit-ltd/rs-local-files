@@ -21,7 +21,7 @@ use tempfile::tempdir;
 /// Verifies rooted temporary resources reject invalid retry and naming
 /// policies before allocating an owned sandbox.
 #[test]
-fn rooted_temp_resources_validate_attempt_and_affix_policies() {
+fn test_rooted_temp_resources_validate_attempt_and_affix_policies() {
     let directory = tempdir().expect("temporary root should be created");
     let filesystem = LocalFileSystem::rooted(directory.path()).expect("root authority should open");
 
@@ -49,7 +49,7 @@ fn rooted_temp_resources_validate_attempt_and_affix_policies() {
 /// Verifies rooted temporary parents must already be directories unless the
 /// caller explicitly requests recursive parent creation.
 #[test]
-fn rooted_temp_resources_validate_parent_state() {
+fn test_rooted_temp_resources_validate_parent_state() {
     let directory = tempdir().expect("temporary root should be created");
     fs::write(directory.path().join("file-parent"), b"payload").expect("file parent fixture should be written");
     let filesystem = LocalFileSystem::rooted(directory.path()).expect("root authority should open");
@@ -78,7 +78,7 @@ fn rooted_temp_resources_validate_parent_state() {
 /// Verifies rooted directory creation distinguishes existing directories,
 /// incompatible entries, and missing ancestors.
 #[test]
-fn rooted_directory_creation_enforces_existing_entry_policies() {
+fn test_rooted_directory_creation_enforces_existing_entry_policies() {
     let directory = tempdir().expect("temporary root should be created");
     fs::create_dir(directory.path().join("existing")).expect("existing directory should be created");
     fs::write(directory.path().join("file"), b"payload").expect("file fixture should be written");
@@ -120,7 +120,7 @@ fn rooted_directory_creation_enforces_existing_entry_policies() {
 /// Verifies rooted listing validates both the virtual root and a requested
 /// final entry before producing a walker.
 #[test]
-fn rooted_listing_rejects_non_directory_start_entries() {
+fn test_rooted_listing_rejects_non_directory_start_entries() {
     let directory = tempdir().expect("temporary root should be created");
     fs::write(directory.path().join("file"), b"payload").expect("file fixture should be written");
     let filesystem = LocalFileSystem::rooted(directory.path()).expect("root authority should open");

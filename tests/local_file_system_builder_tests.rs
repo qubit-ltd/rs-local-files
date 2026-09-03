@@ -2,6 +2,8 @@
 //    Copyright (c) 2026 Haixing Hu.
 //
 //    SPDX-License-Identifier: Apache-2.0
+//
+//    Licensed under the Apache License, Version 2.0.
 // =============================================================================
 //! Public construction and instance-configuration coverage.
 
@@ -11,7 +13,7 @@ use qubit_local_files::options::LocalListOptions;
 use qubit_local_files::path::LocalFileSystemScope;
 
 #[test]
-fn cloned_filesystem_shares_authority_but_copies_configuration() {
+fn test_cloned_filesystem_shares_authority_but_copies_configuration() {
     let root = tempfile::tempdir().expect("temporary root");
     let mut filesystem = LocalFileSystem::rooted(root.path()).expect("rooted filesystem");
     filesystem
@@ -33,7 +35,7 @@ fn cloned_filesystem_shares_authority_but_copies_configuration() {
 }
 
 #[test]
-fn configuration_setters_reject_invalid_options_transactionally() {
+fn test_configuration_setters_reject_invalid_options_transactionally() {
     let mut filesystem = LocalFileSystem::host().expect("Host filesystem should open");
     let original = *filesystem.default_list_options();
     let error = filesystem
