@@ -11,6 +11,14 @@
 //! States proven when a unified copy operation fails.
 
 /// Namespace state proven by a failed unified copy operation.
+///
+/// # Examples
+///
+/// ```
+/// use qubit_local_files::outcome::LocalCopyFailureState;
+///
+/// assert_eq!(LocalCopyFailureState::Unchanged, LocalCopyFailureState::Unchanged);
+/// ```
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 #[must_use]
 pub enum LocalCopyFailureState {

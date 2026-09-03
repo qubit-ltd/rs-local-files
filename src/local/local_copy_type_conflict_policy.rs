@@ -9,6 +9,15 @@
 // qubit-style: allow source-test-pair
 
 /// Conflict policy when source and destination entry types differ.
+///
+/// # Examples
+///
+/// ```
+/// use qubit_local_files::options::LocalCopyTypeConflictPolicy;
+///
+/// let policy = LocalCopyTypeConflictPolicy::Replace;
+/// assert_ne!(LocalCopyTypeConflictPolicy::Fail, policy);
+/// ```
 #[must_use]
 #[non_exhaustive]
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]

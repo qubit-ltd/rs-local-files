@@ -81,6 +81,7 @@ impl LocalDirectoryEntry {
     }
 
     /// Returns normalized metadata observed during traversal.
+    #[must_use = "inspect the observed metadata"]
     #[cfg_attr(not(coverage), inline)]
     #[cfg_attr(coverage, inline(never))]
     pub const fn metadata(&self) -> &LocalFileMetadata {
