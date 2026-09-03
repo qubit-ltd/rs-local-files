@@ -33,6 +33,9 @@
 //! use qubit_local_files::LocalFileSystemProtocols;
 //! ```
 pub mod capability;
+// Compiles the exact README and user-guide Rust snippets as doctests.
+#[cfg(doctest)]
+mod documentation_tests;
 pub mod error;
 mod file_system;
 mod local;

@@ -115,6 +115,7 @@ Windows 上，Rooted 的链接读取、链接类型判断和链接创建都相�
 - [User guide](doc/user_guide.md)
 - [用户手册](doc/user_guide.zh_CN.md)
 - [API 文档](https://docs.rs/qubit-local-files)
+- [English design document](doc/local_file_system_design.md)
 - [本地文件系统设计文档](doc/local_file_system_design.zh_CN.md)
 - [English README](README.md)
 
@@ -124,6 +125,8 @@ Linux、Windows 和 macOS 的行为会在运行时测试。FreeBSD 和 Android �
 本 crate 不承诺这些目标上的运行时保证。`capabilities()` 只报告当前 build 是否实现了
 对应的完整操作协议，不会探测具体的运行时文件系统，也不声称证明底层硬件已经持久化数据；无法满足要求的原子性或耐久性时，
 会在命名空间变更前拒绝操作。
+原子 rename、原子 replace、临时资源原子持久化、耐久 rename、耐久文件复制和耐久 writer
+发布均独立报告，因为各平台对这些协议的支持不同。
 路径限制观测始终携带单位：Unix 使用 byte，Windows 使用 UTF-16 code unit。handle-relative
 命名空间没有可证明的固定整路径上限时，Windows 的整路径限制保持 `Unknown`；`space_at()`
 与组件限制从所选文件系统 handle 查询。Windows Host 路径转换明确不支持 UNC 路径。

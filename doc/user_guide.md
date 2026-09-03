@@ -1,6 +1,7 @@
 # Qubit Local Files User Guide
 
 [中文](user_guide.zh_CN.md) · [README](../README.md) ·
+[Design](local_file_system_design.md) ·
 [API reference](https://docs.rs/qubit-local-files)
 
 This guide covers `qubit-local-files` 0.3 on Rust 1.94 or newer. It is for
@@ -10,7 +11,7 @@ API, or a replacement for provider-level logical paths.
 
 ## Conceptual Model
 
-```
+```text
 Host namespace ── LocalFileSystem::host() ── operation-time process PWD
 opened root ───── LocalFileSystem::rooted(root) ── virtual / and instance PWD
 ```
@@ -110,7 +111,7 @@ An exporter must create `build/output`, publish `manifest.json` only after a
 complete write, and inspect the result. The observable success condition is a
 `Committed` writer outcome and the bytes read back from the published file.
 
-```rust
+```rust,no_run
 use std::io::{Read, Write};
 use qubit_local_files::LocalFileSystem;
 use qubit_local_files::options::{
@@ -284,9 +285,11 @@ lets integration code distinguish the two namespaces, and
 `limits_at(path)` to obtain a finite value for the filesystem containing that
 path (or `Unknown` when probing is unavailable). Interpret both numeric limits
 using `length_unit()`: Unix uses bytes and Windows uses UTF-16 code units, which
-must not be treated as UTF-8 byte limits. Atomic
-rename, atomic replacement, and atomic temporary persistence are reported
-independently because platform support differs.
+must not be treated as UTF-8 byte limits. Atomic rename, atomic replacement,
+atomic temporary persistence, durable rename, durable file copy, and durable
+writer publication are reported independently because platform support
+differs. These flags describe complete protocols implemented by the build;
+they do not prove persistence on a particular mount or storage device.
 
 Continue with the [README](../README.md), [中文用户手册](user_guide.zh_CN.md),
 or the [API reference](https://docs.rs/qubit-local-files).
