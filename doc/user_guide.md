@@ -4,10 +4,14 @@
 [Design](local_file_system_design.md) ·
 [API reference](https://docs.rs/qubit-local-files)
 
+## Purpose and Audience
+
 This guide covers `qubit-local-files` 0.3 on Rust 1.94 or newer. It is for
 applications that operate on the host filesystem or need operations restricted
 to one opened directory. It is not a provider registry, a remote filesystem
-API, or a replacement for provider-level logical paths.
+API, or a replacement for provider-level logical paths. The crate is
+synchronous; async applications should call it from an appropriate blocking
+execution context.
 
 ## Conceptual Model
 
@@ -26,6 +30,32 @@ relative to the applicable PWD, and expose the same operations. Readers, writers
 walkers, and temporary entries are owned stateful resources. `LocalFileNames`
 and `LocalPaths` provide native lexical utilities without converting names to
 UTF-8.
+
+## Installation and Minimal Configuration
+
+Add the crate to the application manifest:
+
+```toml
+[dependencies]
+qubit-local-files = "0.3"
+```
+
+Choose the authority before configuring operation policy. Host mode uses the
+process-visible namespace. Rooted mode opens one existing directory and treats
+it as virtual `/`; the constructor path is only a Host-side diagnostic after
+the authority is open.
+
+```rust,no_run
+use std::path::Path;
+
+use qubit_local_files::LocalFileSystem;
+
+let host = LocalFileSystem::host()?;
+let rooted = LocalFileSystem::rooted(Path::new("workspace"))?;
+assert!(host.diagnostic_root().is_none());
+assert!(rooted.diagnostic_root().is_some());
+# Ok::<(), Box<dyn std::error::Error>>(())
+```
 
 ## Configure Once, Override Deliberately
 
@@ -90,7 +120,7 @@ Final components retain native operation semantics:
 | Operation | Final symbolic link |
 | --- | --- |
 | `metadata` | Inspects the link entry itself. |
-| `open_reader` | Follows the link on Unix; rejects a final name-surrogate reparse point on Windows. |
+| `open_reader` | Follows the content target when the effective policy permits it; `Reject` returns an error. |
 | `CreateNew` writer | Treats an existing link as an existing entry. |
 | `Append` writer | Follows the link and appends to its target. |
 | `CreateOrReplace` writer | Follows the link, replaces its target, and preserves the link. |
@@ -99,6 +129,9 @@ Final components retain native operation semantics:
 | `copy` source | Copies the link entry itself. |
 | `copy` target | Replaces the target link entry. |
 | `temp persist` | Publishes by rename and replaces the target link entry. |
+
+Readers and writers accept only regular-file content targets. A permitted link
+must resolve to a regular file; directories and special files are rejected.
 
 Listing follows directory links when the effective policy allows it. Returned
 paths remain logical paths through the link (for example, `link/child`), and
@@ -205,11 +238,10 @@ the walker only releases handles.
 
 Temporary files and directories own cleanup while armed. Each resource lives in
 a private generated sandbox that is removed with the resource. Dropping them
-performs silent best-effort cleanup; call `cleanup()` when the caller must observe a
-cleanup failure. `keep` atomically publishes to a generated sibling outside
+performs silent best-effort cleanup; call `cleanup()` when the caller must
+observe a cleanup failure. `keep` atomically publishes to a generated sibling outside
 the sandbox and returns a `LocalPersistOutcome`; its cleanup state reports any
-residual sandbox. With no explicit parent, creation
-uses the filesystem PWD
+residual sandbox. With no explicit parent, creation uses the filesystem PWD
 captured for that operation. `path()`, `keep`, and persistence outcomes all
 return namespace-absolute paths for both Host and Rooted, so they can be passed
 back to the same filesystem independently of later PWD changes. Persistence
@@ -255,7 +287,7 @@ Windows Rooted symbolic-link reads, type checks, and creation remain relative
 to opened handles. Copying the link itself never opens its dangling or external
 target.
 
-## Errors, Diagnostics, and Troubleshooting
+## Errors and Diagnostics
 
 `LocalFileError` carries a `LocalFileErrorKind`, a `LocalFileOperation`,
 namespace-absolute primary and target paths when available, the operation's PWD
@@ -267,6 +299,8 @@ types to preserve partial-success state.
 `LocalFileError`; its `state()` is the single recovery-state authority. Native
 I/O errors are available through the structured error source when present.
 
+## Troubleshooting
+
 | Symptom | Check |
 | --- | --- |
 | A Rooted operation rejects a path | Check whether lexical `..` or a followed link crosses virtual `/`, or whether the input contains a native prefix. Virtual absolute paths, `.`, and contained `..` are valid. Selecting `FollowAcrossScope` returns `InvalidOptions`. |
@@ -274,12 +308,12 @@ I/O errors are available through the structured error source when present.
 | Copy or rename returns an error | Inspect its typed failure state before retrying, cleanup, or treating the target as absent. |
 | A temporary entry remains | Retain the resource and call its explicit lifecycle method; drop cleanup is best effort. |
 
-## Platform Limits and Further Reading
+## Limitations and Best Practices
 
 Linux, Windows, and macOS are runtime-tested. FreeBSD and Android are
 compile-checked only. `capabilities()` reports the selected authority's build
-capability snapshot; a Rooted instance caches it when opening the authority. `scope()`
-lets integration code distinguish the two namespaces, and
+capability snapshot; a Rooted instance caches it when opening the authority.
+`scope()` lets integration code distinguish the two namespaces, and
 `diagnostic_root()` exposes the non-authoritative Rooted anchor separately.
 `limits()` reports `SizeLimit::VariesByPath` for the Host namespace; use
 `limits_at(path)` to obtain a finite value for the filesystem containing that
@@ -293,5 +327,16 @@ implemented attempt protocol; same-filesystem placement and runtime namespace
 conditions still determine the operation outcome. These flags do not prove
 persistence on a particular mount or storage device.
 
+The crate does not bypass operating-system permissions, block mount or hard-link
+boundaries, eliminate every cross-platform race in an attacker-writable
+directory, or make an unbudgeted operation consume bounded application
+resources. Prefer Rooted mode for workspace authority, use trusted parents for
+cleanup-sensitive temporary entries, set explicit budgets for untrusted trees,
+inspect typed publication states after errors, and synchronize shared mutable
+configuration in caller code.
+
+## Further Reading
+
 Continue with the [README](../README.md), [中文用户手册](user_guide.zh_CN.md),
-or the [API reference](https://docs.rs/qubit-local-files).
+the [design document](local_file_system_design.md), or the
+[API reference](https://docs.rs/qubit-local-files).

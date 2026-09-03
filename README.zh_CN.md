@@ -51,6 +51,16 @@ assert_eq!(content, r#"{"version":1}"#);
 # Ok::<(), Box<dyn std::error::Error>>(())
 ```
 
+## 为什么需要这个项目
+
+如果只执行零散的文件操作，直接使用 `std::fs` 更简单；但当应用还需要稳定的权限边界、
+可复用的操作策略、有预算的目录遍历、分阶段发布，或在部分成功后安全恢复时，就必须自行
+定义一整套契约。`qubit-local-files` 将这些决策收敛到一个有状态的文件系统对象中，并用
+明确的结果类型报告实际状态。
+
+本 crate 只处理同步的本地文件系统操作，不提供远程存储、provider 注册、应用层授权或
+异步 I/O。
+
 ## 提供的能力
 
 | API | 适用场景 |
@@ -62,6 +72,8 @@ assert_eq!(content, r#"{"version":1}"#);
 | `LocalDirectoryWalker` | 采用创建时固定策略的惰性目录枚举。 |
 | `LocalTempFile` / `LocalTempDirectory` | 拥有清理责任，并支持 `keep` 与持久化。 |
 | `path::LocalFileNames` / `path::LocalPaths` | 不丢失 UTF-8 以外文件名信息的原生文件名和词法路径工具。 |
+
+Reader 和 writer 只接受普通文件；目录和特殊文件会被拒绝，不会被当作字节流打开。
 
 `LocalFileSystem` 是有状态的实例 API。Rooted 实例拥有自己的虚拟当前目录；Host
 实例只在操作需要绑定相对路径时读取进程当前目录。每个实例还拥有符号链接策略和九种
@@ -110,15 +122,6 @@ Windows 上，Rooted 的链接读取、链接类型判断和链接创建都相�
 `CreateOrReplace` 在目标目录中暂存；`Append` 会直接写入已有普通文件，不能满足要求的
 原子性。
 
-## 延伸阅读
-
-- [User guide](doc/user_guide.md)
-- [用户手册](doc/user_guide.zh_CN.md)
-- [API 文档](https://docs.rs/qubit-local-files)
-- [English design document](doc/local_file_system_design.md)
-- [本地文件系统设计文档](doc/local_file_system_design.zh_CN.md)
-- [English README](README.md)
-
 ## 平台范围
 
 Linux、Windows 和 macOS 的行为会在运行时测试。FreeBSD 和 Android 仅编译检查配置路径；
@@ -132,6 +135,15 @@ Linux、Windows 和 macOS 的行为会在运行时测试。FreeBSD 和 Android �
 路径限制观测始终携带单位：Unix 使用 byte，Windows 使用 UTF-16 code unit。handle-relative
 命名空间没有可证明的固定整路径上限时，Windows 的整路径限制保持 `Unknown`；`space_at()`
 与组件限制从所选文件系统 handle 查询。Windows Host 路径转换明确不支持 UNC 路径。
+
+## 延伸阅读
+
+- [User guide](doc/user_guide.md)
+- [用户手册](doc/user_guide.zh_CN.md)
+- [API 文档](https://docs.rs/qubit-local-files)
+- [English design document](doc/local_file_system_design.md)
+- [本地文件系统设计文档](doc/local_file_system_design.zh_CN.md)
+- [English README](README.md)
 
 ## 测试
 

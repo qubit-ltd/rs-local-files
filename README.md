@@ -53,6 +53,17 @@ assert_eq!(content, r#"{"version":1}"#);
 # Ok::<(), Box<dyn std::error::Error>>(())
 ```
 
+## Why This Project Exists
+
+`std::fs` is the right choice for isolated file operations. Applications that
+also need a stable authority boundary, reusable operation policy, bounded
+traversal, staged publication, or recovery after partial success otherwise
+have to design those contracts themselves. `qubit-local-files` keeps those
+decisions in one stateful filesystem object and reports outcomes explicitly.
+
+The crate remains synchronous and local: it does not provide remote storage,
+provider registration, application authorization, or async I/O.
+
 ## What It Provides
 
 | API | Use it when you need |
@@ -64,6 +75,9 @@ assert_eq!(content, r#"{"version":1}"#);
 | `LocalDirectoryWalker` | Lazy directory enumeration with fixed creation-time policy. |
 | `LocalTempFile` / `LocalTempDirectory` | Owned cleanup, `keep`, and persistence operations. |
 | `path::LocalFileNames` / `path::LocalPaths` | Native filename and lexical-path helpers without lossy UTF-8 conversion. |
+
+Readers and writers accept regular files only; directories and special files
+are rejected instead of being opened as byte streams.
 
 `LocalFileSystem` is a stateful instance API. Rooted instances own a virtual
 current directory; Host instances read the process current directory only when
@@ -134,15 +148,6 @@ unchanged. `CreateNew` and `CreateOrReplace` stage in the destination directory;
 `Append` writes an existing regular file directly and cannot satisfy required
 atomicity.
 
-## Learn More
-
-- [User guide](doc/user_guide.md)
-- [用户手册](doc/user_guide.zh_CN.md)
-- [API reference](https://docs.rs/qubit-local-files)
-- [Design document](doc/local_file_system_design.md)
-- [中文设计文档](doc/local_file_system_design.zh_CN.md)
-- [中文 README](README.zh_CN.md)
-
 ## Platform Scope
 
 Linux, Windows, and macOS behavior is runtime-tested. FreeBSD and Android
@@ -163,6 +168,15 @@ reports UTF-16 code units. Windows whole-path limits remain `Unknown` when the
 handle-relative namespace has no defensible fixed bound. `space_at()` and
 component limits are queried from the selected filesystem handle. Windows Host
 path conversion intentionally does not support UNC paths.
+
+## Learn More
+
+- [User guide](doc/user_guide.md)
+- [用户手册](doc/user_guide.zh_CN.md)
+- [API reference](https://docs.rs/qubit-local-files)
+- [Design document](doc/local_file_system_design.md)
+- [中文设计文档](doc/local_file_system_design.zh_CN.md)
+- [中文 README](README.zh_CN.md)
 
 ## Testing
 
