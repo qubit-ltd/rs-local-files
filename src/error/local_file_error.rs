@@ -252,12 +252,14 @@ impl LocalFileError {
     }
 
     /// Returns the stable failure classification.
+    #[must_use = "the stable error classification should be inspected"]
     #[inline(always)]
     pub const fn kind(&self) -> LocalFileErrorKind {
         self.kind
     }
 
     /// Returns the operation that failed.
+    #[must_use = "the failed operation should be inspected"]
     #[inline(always)]
     pub const fn operation(&self) -> LocalFileOperation {
         self.operation

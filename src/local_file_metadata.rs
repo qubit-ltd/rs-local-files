@@ -80,14 +80,17 @@ impl LocalFileMetadata {
     }
 
     /// Returns the normalized entry kind.
-    #[inline]
+    #[must_use = "the normalized entry kind should be inspected"]
+    #[cfg_attr(feature = "test-support", inline(never))]
+    #[cfg_attr(not(feature = "test-support"), inline(always))]
     pub const fn kind(&self) -> LocalFileKind {
         self.kind
     }
 
     /// Returns the native metadata length in bytes.
     #[must_use]
-    #[inline]
+    #[cfg_attr(feature = "test-support", inline(never))]
+    #[cfg_attr(not(feature = "test-support"), inline(always))]
     pub const fn len(&self) -> u64 {
         self.len
     }
@@ -121,6 +124,7 @@ impl LocalFileMetadata {
     }
 
     /// Returns permissions observed with this metadata value.
+    #[must_use = "the observed permissions should be inspected"]
     #[inline]
     pub const fn permissions(&self) -> LocalFilePermissions {
         self.permissions

@@ -62,6 +62,7 @@ impl LocalCopyDirError {
     ///
     /// # Returns
     /// New recursive-copy error retaining the native source error.
+    #[must_use = "the constructed recursive-copy error should be handled"]
     pub fn new(
         stage: LocalCopyDirStage,
         source_path: PathBuf,
@@ -84,6 +85,9 @@ impl LocalCopyDirError {
     ///
     /// # Returns
     /// Failed recursive-copy stage.
+    #[must_use = "the failed recursive-copy stage should be inspected"]
+    #[cfg_attr(feature = "test-support", inline(never))]
+    #[cfg_attr(not(feature = "test-support"), inline(always))]
     pub const fn stage(&self) -> LocalCopyDirStage {
         self.stage
     }
@@ -93,6 +97,8 @@ impl LocalCopyDirError {
     /// # Returns
     /// Source path being processed.
     #[must_use]
+    #[cfg_attr(feature = "test-support", inline(never))]
+    #[cfg_attr(not(feature = "test-support"), inline(always))]
     pub fn source_path(&self) -> &Path {
         &self.source_path
     }
@@ -102,6 +108,8 @@ impl LocalCopyDirError {
     /// # Returns
     /// Destination path being processed.
     #[must_use]
+    #[cfg_attr(feature = "test-support", inline(never))]
+    #[cfg_attr(not(feature = "test-support"), inline(always))]
     pub fn destination_path(&self) -> &Path {
         &self.destination_path
     }
@@ -110,6 +118,9 @@ impl LocalCopyDirError {
     ///
     /// # Returns
     /// Partial recursive-copy statistics.
+    #[must_use = "the partial copy statistics should be inspected"]
+    #[cfg_attr(feature = "test-support", inline(never))]
+    #[cfg_attr(not(feature = "test-support"), inline(always))]
     pub const fn stats(&self) -> &LocalCopyDirStats {
         &self.stats
     }
@@ -118,6 +129,9 @@ impl LocalCopyDirError {
     ///
     /// # Returns
     /// Staging path retained for diagnostics.
+    #[must_use]
+    #[cfg_attr(feature = "test-support", inline(never))]
+    #[cfg_attr(not(feature = "test-support"), inline(always))]
     pub fn temporary_path(&self) -> Option<&Path> {
         self.temporary_path.as_deref()
     }
@@ -126,6 +140,9 @@ impl LocalCopyDirError {
     ///
     /// # Returns
     /// Cleanup error without replacing the primary source error.
+    #[must_use]
+    #[cfg_attr(feature = "test-support", inline(never))]
+    #[cfg_attr(not(feature = "test-support"), inline(always))]
     pub fn cleanup_error(&self) -> Option<&io::Error> {
         self.cleanup_error.as_ref()
     }
@@ -135,6 +152,8 @@ impl LocalCopyDirError {
     /// # Returns
     /// Retained primary I/O error.
     #[must_use]
+    #[cfg_attr(feature = "test-support", inline(never))]
+    #[cfg_attr(not(feature = "test-support"), inline(always))]
     pub const fn error(&self) -> &io::Error {
         &self.error
     }
@@ -144,6 +163,8 @@ impl LocalCopyDirError {
     /// # Returns
     /// Error kind reported by the retained source error.
     #[must_use]
+    #[cfg_attr(feature = "test-support", inline(never))]
+    #[cfg_attr(not(feature = "test-support"), inline(always))]
     pub fn kind(&self) -> io::ErrorKind {
         self.error.kind()
     }
@@ -154,6 +175,7 @@ impl LocalCopyDirError {
     ///
     /// The copy stage, source and destination paths, partial statistics,
     /// optional staging path, optional cleanup error, and primary I/O error.
+    #[must_use = "the decomposed copy failure should be inspected"]
     #[inline(never)]
     pub fn into_parts(
         self,
@@ -185,6 +207,7 @@ impl LocalCopyDirError {
     ///
     /// # Returns
     /// This copy error enriched with staging cleanup context.
+    #[must_use]
     #[inline]
     pub fn with_staging_context(mut self, temporary_path: PathBuf, cleanup_error: Option<io::Error>) -> Self {
         self.temporary_path = Some(temporary_path.into_boxed_path());
@@ -193,6 +216,7 @@ impl LocalCopyDirError {
     }
 
     /// Attaches a secondary cleanup failure without a staging path.
+    #[must_use]
     #[inline]
     pub(crate) fn with_cleanup_error(mut self, cleanup_error: io::Error) -> Self {
         self.cleanup_error = Some(cleanup_error);
