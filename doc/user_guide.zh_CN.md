@@ -4,9 +4,12 @@
 [设计文档](local_file_system_design.zh_CN.md) ·
 [API 文档](https://docs.rs/qubit-local-files)
 
+## 手册目标与读者
+
 本手册面向 Rust 1.94 及以上版本的 `qubit-local-files` 0.3 使用者，适用于直接操作主机
 文件系统，或需要把操作限制在一个已打开目录之下的应用。它不是 provider 注册表、远程
-文件系统 API，也不替代 provider 层的逻辑路径模型。
+文件系统 API，也不替代 provider 层的逻辑路径模型。本 crate 提供同步 API；异步应用应在
+合适的 blocking 执行环境中调用。
 
 ## 概念模型
 
@@ -22,6 +25,30 @@ Host 命名空间 ── LocalFileSystem::host() ── 操作时读取进程 PW
 对应 PWD 的路径，并提供相同操作。reader、writer、walker 与临时条目都是拥有资源的有状态
 对象。`LocalFileNames` 和 `LocalPaths` 提供原生词法工具，不会把文件名强制转换为
 UTF-8。
+
+## 安装与最小配置
+
+在应用的 Cargo 清单中添加依赖：
+
+```toml
+[dependencies]
+qubit-local-files = "0.3"
+```
+
+配置操作策略前，先选择权限范围。Host 模式使用进程可见的命名空间；Rooted 模式打开一个
+已存在目录并将其映射为虚拟 `/`。权限句柄打开后，构造时传入的 Host 路径只用于诊断。
+
+```rust,no_run
+use std::path::Path;
+
+use qubit_local_files::LocalFileSystem;
+
+let host = LocalFileSystem::host()?;
+let rooted = LocalFileSystem::rooted(Path::new("workspace"))?;
+assert!(host.diagnostic_root().is_none());
+assert!(rooted.diagnostic_root().is_some());
+# Ok::<(), Box<dyn std::error::Error>>(())
+```
 
 ## 配置一次，显式覆盖
 
@@ -79,7 +106,7 @@ Host 没有更窄的 root 边界。Rooted 仅支持 `Reject` 和 `FollowWithinSc
 | 操作 | 最终符号链接 |
 | --- | --- |
 | `metadata` | 查看链接条目本身。 |
-| `open_reader` | Unix 跟随链接；Windows 拒绝最终 name-surrogate reparse point。 |
+| `open_reader` | 有效策略允许时跟随内容目标；使用 `Reject` 时返回错误。 |
 | `CreateNew` writer | 将已有链接视为已存在条目。 |
 | `Append` writer | 跟随链接追加到目标。 |
 | `CreateOrReplace` writer | 跟随链接替换目标，并保留链接。 |
@@ -88,6 +115,9 @@ Host 没有更窄的 root 边界。Rooted 仅支持 `Reject` 和 `FollowWithinSc
 | `copy` 源 | 复制链接条目本身。 |
 | `copy` 目标 | 替换目标链接条目。 |
 | `temp persist` | 通过 rename 发布并替换目标链接条目。 |
+
+Reader 和 writer 最终只接受普通文件内容。即使策略允许跟随链接，其目标也必须是普通文件；
+目录和特殊文件都会被拒绝。
 
 目录遍历在有效策略允许时跟随目录链接。返回路径保持逻辑路径，例如 `link/child`，而不
 是规范化后的目标路径；递归遍历按底层目录对象身份检测循环。深度限制按逻辑路径条目计算，
@@ -216,7 +246,7 @@ native prefix。
 Windows Rooted 的符号链接读取、类型判断和创建均相对于已打开 handle 执行；复制链接自身时
 不会打开其悬空或位于 authority 外的目标。
 
-## 错误、诊断与排障
+## 错误与诊断
 
 `LocalFileError` 包含 `LocalFileErrorKind`、`LocalFileOperation`、可用时的
 namespace-absolute 主/目标路径、操作使用的 PWD snapshot，以及可选的 typed source。
@@ -226,6 +256,8 @@ namespace-absolute 主/目标路径、操作使用的 PWD snapshot，以及可�
 `LocalPersistError` 同时保留临时资源和结构化的 `LocalFileError`；其 `state()` 是唯一的
 恢复状态来源。存在原生 I/O 错误时，可从结构化错误的 source 取得。
 
+## 排障
+
 | 症状 | 检查方式 |
 | --- | --- |
 | Rooted 操作拒绝路径 | 检查词法 `..` 或被跟随的链接是否越过虚拟 `/`，以及是否包含 native prefix。虚拟绝对路径、`.` 和未越界的 `..` 都合法；选择 `FollowAcrossScope` 返回 `InvalidOptions`。 |
@@ -233,11 +265,11 @@ namespace-absolute 主/目标路径、操作使用的 PWD snapshot，以及可�
 | copy 或 rename 出错 | 先检查类型化失败状态，再决定重试、清理或认定目标不存在。 |
 | 临时条目仍存在 | 保留资源并调用显式生命周期方法；drop 清理只是尽力而为。 |
 
-## 平台限制与延伸阅读
+## 限制与最佳实践
 
 Linux、Windows 和 macOS 会进行运行时测试。FreeBSD 与 Android 仅做编译检查。
-`capabilities()` 返回所选 authority 的 build capability 快照；Rooted 实例在打开 authority 时缓存该
-快照。`scope()` 供集成层区分两种命名空间；Rooted 实例的诊断锚点通过
+`capabilities()` 返回所选 authority 的 build capability 快照；Rooted 实例在打开
+authority 时缓存该快照。`scope()` 供集成层区分两种命名空间；Rooted 实例的诊断锚点通过
 `diagnostic_root()` 单独读取。Host 命名空间的 `limits()` 返回 `SizeLimit::VariesByPath`；使用
 `limits_at(path)` 才会针对该路径所在文件系统返回有限值（无法探测时为
 `Unknown`）。两个数值限制都必须结合 `length_unit()` 解释：Unix 使用 byte，Windows
@@ -248,5 +280,14 @@ Linux、Windows 和 macOS 会进行运行时测试。FreeBSD 与 Android 仅做�
 运行时 namespace 条件仍由实际操作 outcome 决定。这些 flag 不证明某个具体 mount 或存储
 设备已经完成持久化。
 
-继续阅读 [README](../README.zh_CN.md)、[English user guide](user_guide.md) 或
+本 crate 不会绕过操作系统权限，不默认阻止 mount 或 hard link 边界，也无法消除攻击者可写
+目录中的所有跨平台竞争；调用方未设置预算时，库也不承诺应用资源消耗有界。工作区权限隔离
+优先使用 Rooted 模式；需要可靠清理的临时资源应放在可信 parent 中；处理不受信任的目录树时
+应设置明确预算；操作失败后应检查类型化发布状态；多个线程需要修改同一实例时，由调用方提供
+同步机制。
+
+## 延伸阅读
+
+继续阅读 [README](../README.zh_CN.md)、[English user guide](user_guide.md)、
+[设计文档](local_file_system_design.zh_CN.md) 或
 [API 文档](https://docs.rs/qubit-local-files)。
