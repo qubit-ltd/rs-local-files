@@ -84,6 +84,7 @@ impl LocalCopyOptions {
     }
 
     /// Returns the destination file conflict policy.
+    #[must_use = "inspect the destination conflict policy"]
     // qubit-style: allow coverage-cfg
     #[cfg_attr(not(coverage), inline(always))]
     #[cfg_attr(coverage, inline(never))]
@@ -92,6 +93,7 @@ impl LocalCopyOptions {
     }
 
     /// Returns the file/directory type conflict policy.
+    #[must_use = "inspect the type-conflict policy"]
     #[cfg_attr(not(coverage), inline(always))]
     #[cfg_attr(coverage, inline(never))]
     pub const fn type_conflict(&self) -> LocalCopyTypeConflictPolicy {
@@ -99,6 +101,7 @@ impl LocalCopyOptions {
     }
 
     /// Returns the metadata preservation policy.
+    #[must_use = "inspect the metadata preservation policy"]
     #[cfg_attr(not(coverage), inline(always))]
     #[cfg_attr(coverage, inline(never))]
     pub const fn preserve_metadata(&self) -> LocalMetadataPreservePolicy {
@@ -114,6 +117,7 @@ impl LocalCopyOptions {
     }
 
     /// Returns the source kind accepted by this copy.
+    #[must_use = "inspect the source mode"]
     #[cfg_attr(not(coverage), inline(always))]
     #[cfg_attr(coverage, inline(never))]
     pub const fn source_mode(&self) -> LocalCopySourceMode {
@@ -129,6 +133,7 @@ impl LocalCopyOptions {
     }
 
     /// Returns the required atomicity.
+    #[must_use = "inspect the requested atomicity"]
     #[cfg_attr(not(coverage), inline(always))]
     #[cfg_attr(coverage, inline(never))]
     pub const fn atomicity(&self) -> LocalAtomicityRequirement {
@@ -136,6 +141,7 @@ impl LocalCopyOptions {
     }
 
     /// Returns the required durability.
+    #[must_use = "inspect the requested durability"]
     #[cfg_attr(not(coverage), inline(always))]
     #[cfg_attr(coverage, inline(never))]
     pub const fn durability(&self) -> LocalDurabilityRequirement {

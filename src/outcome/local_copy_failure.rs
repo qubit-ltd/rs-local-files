@@ -140,7 +140,7 @@ impl LocalCopyFailure {
     }
 
     /// Returns the primary typed filesystem error.
-    #[must_use]
+    #[must_use = "inspect the primary copy error"]
     #[cfg_attr(not(coverage), inline(always))]
     #[cfg_attr(coverage, inline(never))]
     pub fn error(&self) -> &LocalFileError {
@@ -180,7 +180,7 @@ impl LocalCopyFailure {
     }
 
     /// Returns the most precise destination state proven by native operations.
-    #[must_use]
+    #[must_use = "inspect the proven copy failure state"]
     #[cfg_attr(not(coverage), inline(always))]
     #[cfg_attr(coverage, inline(never))]
     pub fn state(&self) -> LocalCopyFailureState {

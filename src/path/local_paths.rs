@@ -67,7 +67,7 @@ impl LocalPaths {
     }
 
     /// Returns the namespace interpreted by this path object.
-    #[must_use]
+    #[must_use = "inspect the path namespace"]
     #[cfg_attr(not(coverage), inline(always))]
     #[cfg_attr(coverage, inline(never))]
     pub const fn scope(&self) -> LocalFileSystemScope {
@@ -75,7 +75,7 @@ impl LocalPaths {
     }
 
     /// Returns the native filename policy for this path namespace.
-    #[must_use]
+    #[must_use = "inspect the filename policy"]
     #[cfg_attr(not(coverage), inline(always))]
     #[cfg_attr(coverage, inline(never))]
     pub const fn file_names(&self) -> LocalFileNames {

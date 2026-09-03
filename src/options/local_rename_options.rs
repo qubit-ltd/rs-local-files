@@ -41,6 +41,7 @@ impl LocalRenameOptions {
     }
 
     /// Returns the requested durability.
+    #[must_use = "inspect the requested durability"]
     #[cfg_attr(not(coverage), inline(always))]
     #[cfg_attr(coverage, inline(never))]
     pub const fn durability(&self) -> LocalDurabilityRequirement {

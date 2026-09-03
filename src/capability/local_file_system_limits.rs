@@ -60,7 +60,7 @@ impl LocalFileSystemLimits {
 
     /// Returns the maximum complete native path length in
     /// [`Self::length_unit`].
-    #[must_use]
+    #[must_use = "inspect the maximum path length"]
     #[cfg_attr(not(coverage), inline)]
     #[cfg_attr(coverage, inline(never))]
     pub const fn max_path_length(&self) -> SizeLimit {
@@ -68,7 +68,7 @@ impl LocalFileSystemLimits {
     }
 
     /// Returns the maximum native component length in [`Self::length_unit`].
-    #[must_use]
+    #[must_use = "inspect the maximum component length"]
     #[cfg_attr(not(coverage), inline)]
     #[cfg_attr(coverage, inline(never))]
     pub const fn max_component_length(&self) -> SizeLimit {
@@ -76,7 +76,7 @@ impl LocalFileSystemLimits {
     }
 
     /// Returns the unit shared by both observed length dimensions.
-    #[must_use]
+    #[must_use = "inspect the native length unit"]
     #[cfg_attr(not(coverage), inline(always))]
     #[cfg_attr(coverage, inline(never))]
     pub const fn length_unit(&self) -> LocalPathLengthUnit {
