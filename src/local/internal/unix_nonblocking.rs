@@ -35,13 +35,13 @@ const MAX_OPEN_RETRY_DELAY: Duration = Duration::from_millis(10);
 pub(crate) fn clear_nonblocking(descriptor: RawFd) -> Result<()> {
     // SAFETY: callers retain ownership of the live descriptor for both
     // non-retaining `fcntl` calls.
-    #[cfg(feature = "internal-test-support")]
+    #[cfg(feature = "test-support")]
     let flags = if super::test_support::is_enabled("unix-clear-nonblocking-get") {
         -1
     } else {
         unsafe { libc::fcntl(descriptor, libc::F_GETFL) }
     };
-    #[cfg(not(feature = "internal-test-support"))]
+    #[cfg(not(feature = "test-support"))]
     let flags = unsafe { libc::fcntl(descriptor, libc::F_GETFL) };
     if flags == -1 {
         return Err(Error::last_os_error());
@@ -51,13 +51,13 @@ pub(crate) fn clear_nonblocking(descriptor: RawFd) -> Result<()> {
     }
     // SAFETY: the descriptor remains live and `F_SETFL` accepts status flags
     // returned by `F_GETFL` with `O_NONBLOCK` cleared.
-    #[cfg(feature = "internal-test-support")]
+    #[cfg(feature = "test-support")]
     let result = if super::test_support::is_enabled("unix-clear-nonblocking-set") {
         -1
     } else {
         unsafe { libc::fcntl(descriptor, libc::F_SETFL, flags & !libc::O_NONBLOCK) }
     };
-    #[cfg(not(feature = "internal-test-support"))]
+    #[cfg(not(feature = "test-support"))]
     let result = unsafe { libc::fcntl(descriptor, libc::F_SETFL, flags & !libc::O_NONBLOCK) };
     if result == -1 {
         return Err(Error::last_os_error());
@@ -127,7 +127,9 @@ fn wait_for_nonblocking_open_retry(delay: &mut Duration, remaining: Duration) {
 
 /// Creates the stable error returned when an open retry deadline expires.
 #[must_use]
-#[inline]
+// qubit-style: allow coverage-cfg
+#[cfg_attr(not(coverage), inline)]
+#[cfg_attr(coverage, inline(never))]
 fn open_retry_timed_out(timeout: Duration) -> Error {
     Error::new(
         ErrorKind::TimedOut,

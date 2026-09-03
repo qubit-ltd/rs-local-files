@@ -42,7 +42,7 @@ impl OpenedAtomicDestination {
     /// Constructs and validates destination identity from an open file.
     pub(crate) fn from_file(file: File) -> Result<Self> {
         let metadata_result = file.metadata();
-        #[cfg(feature = "internal-test-support")]
+        #[cfg(feature = "test-support")]
         let metadata_result = if super::test_support::is_enabled("atomic-destination-stat") {
             Err(crate::local::test_fault_error())
         } else {
@@ -62,21 +62,25 @@ impl OpenedAtomicDestination {
 
     /// Returns the open destination handle.
     #[must_use]
-    #[inline(always)]
+    // qubit-style: allow coverage-cfg
+    #[cfg_attr(not(coverage), inline(always))]
+    #[cfg_attr(coverage, inline(never))]
     pub(crate) fn file(&self) -> &File {
         &self.file
     }
 
     /// Returns the captured device identifier.
     #[must_use]
-    #[inline(always)]
+    #[cfg_attr(not(coverage), inline(always))]
+    #[cfg_attr(coverage, inline(never))]
     pub(crate) const fn device(&self) -> u64 {
         self.device
     }
 
     /// Returns the captured inode identifier.
     #[must_use]
-    #[inline(always)]
+    #[cfg_attr(not(coverage), inline(always))]
+    #[cfg_attr(coverage, inline(never))]
     pub(crate) const fn inode(&self) -> u64 {
         self.inode
     }
@@ -87,7 +91,7 @@ pub(crate) fn open_atomic_destination(
     path: &Path,
     open_retry_timeout: Option<Duration>,
 ) -> Result<Option<OpenedAtomicDestination>> {
-    #[cfg(feature = "internal-test-support")]
+    #[cfg(feature = "test-support")]
     if super::test_support::is_enabled("atomic-destination-open") {
         return Err(crate::local::test_fault_error());
     }
@@ -95,7 +99,7 @@ pub(crate) fn open_atomic_destination(
     options.read(true).custom_flags(libc::O_NOFOLLOW | libc::O_NONBLOCK);
     open_destination_with_retry(open_retry_timeout, || {
         let result = options.open(path);
-        #[cfg(feature = "internal-test-support")]
+        #[cfg(feature = "test-support")]
         let result = inject_destination_open_result(
             result,
             "atomic-destination-would-block",
@@ -108,12 +112,12 @@ pub(crate) fn open_atomic_destination(
 
 /// Checks whether a path still names the opened destination identity.
 pub(crate) fn destination_identity_matches(path: &Path, destination: &OpenedAtomicDestination) -> Result<bool> {
-    #[cfg(feature = "internal-test-support")]
+    #[cfg(feature = "test-support")]
     if super::test_support::is_enabled("atomic-identity-mismatch") {
         return Ok(false);
     }
     let result = fs::symlink_metadata(path);
-    #[cfg(feature = "internal-test-support")]
+    #[cfg(feature = "test-support")]
     let result = if super::test_support::is_enabled("atomic-identity-missing") {
         Err(Error::from(ErrorKind::NotFound))
     } else if super::test_support::is_enabled("atomic-identity-inspect") {
@@ -136,7 +140,7 @@ pub(in crate::local) fn open_rooted_atomic_destination(
     name: &CString,
     open_retry_timeout: Option<Duration>,
 ) -> Result<Option<OpenedAtomicDestination>> {
-    #[cfg(feature = "internal-test-support")]
+    #[cfg(feature = "test-support")]
     if super::test_support::is_enabled("rooted-destination-open") {
         return Err(crate::local::test_fault_error());
     } else if super::test_support::is_enabled("rooted-destination-missing") {
@@ -145,7 +149,7 @@ pub(in crate::local) fn open_rooted_atomic_destination(
     let flags = libc::O_RDONLY | libc::O_NOFOLLOW | libc::O_NONBLOCK | libc::O_CLOEXEC;
     open_destination_with_retry(open_retry_timeout, || {
         let result = open_file_at(parent, name, flags, 0);
-        #[cfg(feature = "internal-test-support")]
+        #[cfg(feature = "test-support")]
         let result = inject_destination_open_result(
             result,
             "rooted-destination-would-block",
@@ -198,7 +202,7 @@ where
 /// # Errors
 /// Returns the selected retry, invalid-resource, or native test fault, or
 /// preserves the native error in `result`.
-#[cfg(feature = "internal-test-support")]
+#[cfg(feature = "test-support")]
 fn inject_destination_open_result(
     result: Result<File>,
     would_block_fault: &str,
@@ -222,7 +226,7 @@ pub(in crate::local) fn rooted_destination_identity_matches(
     name: &CString,
     destination: &OpenedAtomicDestination,
 ) -> Result<bool> {
-    #[cfg(feature = "internal-test-support")]
+    #[cfg(feature = "test-support")]
     if super::test_support::is_enabled("rooted-identity-mismatch")
         || super::test_support::is_enabled("rooted-identity-missing")
     {
@@ -243,7 +247,7 @@ pub(in crate::local) fn rooted_destination_identity_matches(
 
 /// Reads rooted destination status without following the final entry.
 fn rooted_destination_status(parent: &File, name: &CString) -> Result<Option<libc::stat>> {
-    #[cfg(feature = "internal-test-support")]
+    #[cfg(feature = "test-support")]
     if super::test_support::is_enabled("rooted-status-missing") {
         return Ok(None);
     } else if super::test_support::is_enabled("rooted-status-error") {
@@ -277,7 +281,7 @@ fn native_identity_component<T>(value: T) -> Result<u64>
 where
     u64: TryFrom<T>,
 {
-    #[cfg(feature = "internal-test-support")]
+    #[cfg(feature = "test-support")]
     if super::test_support::is_enabled("rooted-identity-overflow") {
         return Err(Error::new(
             ErrorKind::InvalidData,
@@ -294,11 +298,12 @@ where
 }
 
 /// Returns whether a test-support-only atomic destination fault is selected.
-#[inline]
+#[cfg_attr(not(coverage), inline)]
+#[cfg_attr(coverage, inline(never))]
 fn test_support_enabled(name: &str) -> bool {
-    #[cfg(feature = "internal-test-support")]
+    #[cfg(feature = "test-support")]
     return super::test_support::is_enabled(name);
-    #[cfg(not(feature = "internal-test-support"))]
+    #[cfg(not(feature = "test-support"))]
     {
         let _ = name;
         false
@@ -307,7 +312,8 @@ fn test_support_enabled(name: &str) -> bool {
 
 /// Creates the stable type error for atomic destinations.
 #[must_use]
-#[inline(always)]
+#[cfg_attr(not(coverage), inline(always))]
+#[cfg_attr(coverage, inline(never))]
 pub(crate) fn invalid_atomic_destination() -> Error {
     Error::new(
         ErrorKind::InvalidInput,

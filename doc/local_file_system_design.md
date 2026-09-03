@@ -3,16 +3,18 @@
 [中文设计文档](local_file_system_design.zh_CN.md) ·
 [User guide](user_guide.md) · [README](../README.md)
 
-> Status: normative design
+> Status: synchronized English translation
 >
 > Last updated: 2026-09-03
 
-This document defines the stable design of `qubit-local-files`. Public APIs,
-platform implementations, tests, READMEs, and user guides must remain aligned
-with it. It describes the intended completed system, not migration history or
-temporary implementation details. “Must”, “must not”, and “should” express
-normative requirements. Non-semantic modifiers such as a particular `const` or
-`inline` annotation are coding-policy details rather than API contracts.
+The [Simplified Chinese design](local_file_system_design.zh_CN.md) is the
+normative source of truth. This document is its synchronized English
+translation: public APIs, platform implementations, tests, READMEs, and user
+guides must remain semantically aligned with both. It describes the intended
+completed system, not migration history or temporary implementation details.
+“Must”, “must not”, and “should” translate normative requirements from the
+Chinese source. Non-semantic modifiers such as a particular `const` or `inline`
+annotation are coding-policy details rather than API contracts.
 
 ## 0. Terminology
 
@@ -333,16 +335,25 @@ must inspect their typed state rather than infer “nothing happened” from `Er
 - Rooted operations;
 - atomic rename;
 - atomic replacement;
-- atomic no-replace temporary persistence;
+- the ability to attempt atomic no-replace temporary persistence;
 - durable rename;
 - durable file copy;
 - durable writer publication.
+
+The temporary-persistence query is
+`can_attempt_atomic_temp_persist()`. It describes whether this build and target
+implement the atomic attempt protocol; it does not promise that arbitrary
+source and target paths can complete atomically. Same-filesystem placement,
+namespace policy, mount behavior, and runtime races still decide each outcome.
+The deprecated `supports_atomic_temp_persist()` method is a source-compatibility
+alias with identical semantics and is not a stronger guarantee.
 
 Capabilities do not prove that a particular mount, network filesystem, cache,
 controller, or device persisted data. `Required` atomicity or durability is a
 precondition; `Preferred` permits a typed non-atomic/non-durable outcome;
 `NotRequired` avoids extra synchronization. Runtime facts that vary by path are
-probed against the selected authority and path.
+probed against the selected authority and path. Callers must combine the
+capability snapshot with the typed outcome of the actual operation.
 
 ## 21. Clone, Concurrency, and Threads
 
@@ -387,6 +398,13 @@ authority primitives. `walk`, `writer`, and `temp` own their resource lifecycle
 state. Internal extraction follows responsibility and testability; platform
 algorithms must not be merged solely to reduce line count.
 
+The only feature exposing deterministic fault injection is `test-support`; it
+is disabled by default and is not application API. Private contract tests live
+under `src/tests` and compile only for the crate's own test build. There is no
+second public "internal test" feature and no public re-export of private
+implementation contracts. Test hooks must not change the production state
+model.
+
 ## 26. Verification Strategy
 
 Verification follows contracts rather than line count:
@@ -401,13 +419,17 @@ Verification follows contracts rather than line count:
 - benchmarks represent codec, walk, handle-budget, copy, writer, Rooted writer,
   and prefix-read workloads;
 - bounded fuzz targets exercise codec, path, Host lifecycle, and Rooted
-  lifecycle invariants;
+  lifecycle invariants; lifecycle targets use unique per-process sandboxes,
+  bounded collision retries, and RAII cleanup, and never rely on ambient
+  machine paths;
 - Linux, Windows, and macOS are runtime-tested; FreeBSD and Android are
   compile-checked;
-- release compatibility checks exercise `qubit-fs-local` and `qubit-mime`;
-- coverage exemptions are limited to native/platform failures that cannot be
-  manufactured deterministically, not whole state machines with testable
-  contracts.
+- a scheduled and manually dispatchable compatibility workflow tests
+  `qubit-fs-local` and `qubit-mime` against the checked-out revision and their
+  complete local path-dependency closure;
+- the project-level coverage configuration grants no whole-file exemption;
+  state-machine branches are covered through public behavior, crate-private
+  contracts, or narrow deterministic fault injection.
 
 ## 27. Security Guarantees and Explicit Limits
 

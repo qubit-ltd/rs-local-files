@@ -74,7 +74,9 @@ pub(in crate::local) fn verify_rooted_atomic_destination_identity(
 /// # Returns
 ///
 /// A structured pre-installation failure.
-#[inline]
+// qubit-style: allow coverage-cfg
+#[cfg_attr(not(coverage), inline)]
+#[cfg_attr(coverage, inline(never))]
 fn identity_error(
     requested_path: &std::path::Path,
     source: Error,
@@ -93,7 +95,7 @@ fn identity_error(
 
 /// Classifies a rooted identity mismatch before replacement.
 fn rooted_mismatch_state(parent: &File, name: &CString) -> LocalAtomicDestinationState {
-    #[cfg(feature = "internal-test-support")]
+    #[cfg(feature = "test-support")]
     if super::test_support::is_enabled("rooted-identity-missing") {
         return LocalAtomicDestinationState::Missing;
     }

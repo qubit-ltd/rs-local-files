@@ -41,7 +41,9 @@ impl WindowsRootedStagedFile {
     /// Panics if the staging handle was closed before the staging name was
     /// disarmed.
     #[must_use]
-    #[inline(always)]
+    // qubit-style: allow coverage-cfg
+    #[cfg_attr(not(coverage), inline(always))]
+    #[cfg_attr(coverage, inline(never))]
     pub(in crate::local) fn file(&self) -> &File {
         self.file
             .as_ref()
@@ -55,7 +57,8 @@ impl WindowsRootedStagedFile {
     /// Panics if the staging handle was closed before the staging name was
     /// disarmed.
     #[must_use]
-    #[inline(always)]
+    #[cfg_attr(not(coverage), inline(always))]
+    #[cfg_attr(coverage, inline(never))]
     pub(in crate::local) fn file_mut(&mut self) -> &mut File {
         self.file
             .as_mut()
@@ -88,7 +91,8 @@ impl WindowsRootedStagedFile {
     }
 
     /// Marks the staging name as installed.
-    #[inline(always)]
+    #[cfg_attr(not(coverage), inline(always))]
+    #[cfg_attr(coverage, inline(never))]
     pub(in crate::local) fn disarm(&mut self) {
         self.armed = false;
     }

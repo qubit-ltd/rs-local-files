@@ -10,7 +10,6 @@
 #![no_main]
 
 use std::fs;
-use std::path::PathBuf;
 
 use libfuzzer_sys::fuzz_target;
 use qubit_local_files::LocalFileSystem;
@@ -18,32 +17,40 @@ use qubit_local_files::options::LocalListOptions;
 use qubit_local_files::options::LocalTempDirectoryOptions;
 use qubit_local_files::options::LocalTempFileOptions;
 
+mod support;
+
+use support::FuzzRoot;
+
 const MAX_FUZZ_INPUT_LEN: usize = 256;
 const MAX_OPERATIONS: usize = 16;
 
 fuzz_target!(|data: &[u8]| {
     let data = &data[..data.len().min(MAX_FUZZ_INPUT_LEN)];
-    let root = fuzz_root();
-    if root.exists() {
-        fs::remove_dir_all(&root).expect("stale fuzz root should be removable");
-    }
-    fs::create_dir_all(&root).expect("fuzz root should be creatable");
+    let Some(root) = FuzzRoot::create("lifecycle-fuzz") else {
+        return;
+    };
+    let root_path = root.path();
 
-    let native = LocalFileSystem::host().expect("Host filesystem should open");
+    let Ok(native) = LocalFileSystem::host() else {
+        return;
+    };
     for operation in data.chunks(2).take(MAX_OPERATIONS) {
         let opcode = operation.first().copied().unwrap_or_default() % 5;
         let selector = operation.get(1).copied().unwrap_or_default();
         match opcode {
             0 => {
                 let options = LocalTempFileOptions::new()
-                    .with_parent(&root)
+                    .with_parent(root_path)
                     .with_prefix("fuzz-")
                     .with_max_attempts(1 + usize::from(selector % 4));
                 if let Ok(mut resource) = native.create_temp_file_with_options(&options) {
                     let path = resource.path().to_path_buf();
-                    std::io::Write::write_all(&mut resource, data).expect("temporary fuzz file should accept bytes");
+                    if std::io::Write::write_all(&mut resource, data).is_err() {
+                        let _ = resource.cleanup();
+                        continue;
+                    }
                     if selector & 1 == 0 {
-                        let _outcome = resource.cleanup().expect("temporary file cleanup should succeed");
+                        assert!(resource.cleanup().is_ok());
                     }
                     drop(resource);
                     assert!(!path.exists());
@@ -51,52 +58,59 @@ fuzz_target!(|data: &[u8]| {
             }
             1 => {
                 let options = LocalTempDirectoryOptions::new()
-                    .with_parent(&root)
+                    .with_parent(root_path)
                     .with_prefix("fuzz-")
                     .with_max_attempts(1 + usize::from(selector % 4));
                 if let Ok(resource) = native.create_temp_directory_with_options(&options) {
                     let path = resource.path().to_path_buf();
                     if selector & 1 == 0 {
-                        fs::write(path.join("payload"), data).expect("temporary directory payload should be writable");
+                        if fs::write(path.join("payload"), data).is_err() {
+                            continue;
+                        }
                     }
                     drop(resource);
                     assert!(!path.exists());
                 }
             }
             2 => {
-                let target = root.join("persisted");
-                let options = LocalTempFileOptions::new().with_parent(&root);
+                let target = root_path.join("persisted");
+                let options = LocalTempFileOptions::new()
+                    .with_parent(root_path)
+                    .with_max_attempts(1 + usize::from(selector % 4));
                 if let Ok(mut resource) = native.create_temp_file_with_options(&options) {
-                    std::io::Write::write_all(&mut resource, data).expect("persist source should accept bytes");
+                    if std::io::Write::write_all(&mut resource, data).is_err() {
+                        let _ = resource.cleanup();
+                        continue;
+                    }
                     let _outcome = resource
                         .persist(&target)
                         .expect("temporary file should persist to an absent target");
                     assert_eq!(data, fs::read(&target).expect("persisted bytes should be readable"));
-                    fs::remove_file(target).expect("persisted target should be removable");
+                    let _ = fs::remove_file(target);
                 }
             }
             3 => {
-                let options = LocalTempDirectoryOptions::new().with_parent(&root);
+                let options = LocalTempDirectoryOptions::new()
+                    .with_parent(root_path)
+                    .with_max_attempts(1 + usize::from(selector % 4));
                 if let Ok(resource) = native.create_temp_directory_with_options(&options) {
                     let child = resource.path().join("nested");
-                    fs::create_dir(&child).expect("nested fuzz directory should be created");
-                    fs::write(child.join("payload"), data).expect("nested fuzz payload should be writable");
+                    if fs::create_dir(&child).is_err() || fs::write(child.join("payload"), data).is_err() {
+                        continue;
+                    }
                     let list_options = LocalListOptions::new().with_recursive();
                     let entries = native
                         .list_with_options(resource.path(), &list_options)
-                        .map(|walker| walker.collect::<Vec<_>>());
+                        .and_then(|walker| walker.collect::<Result<Vec<_>, _>>());
                     assert!(entries.is_ok(), "temporary directory listing should succeed");
                 }
             }
             _ => {
-                let entries = native.list_with_options(&root, &LocalListOptions::new());
-                assert!(entries.is_ok(), "fuzz root listing should open");
+                let entries = native
+                    .list_with_options(root_path, &LocalListOptions::new())
+                    .and_then(|walker| walker.collect::<Result<Vec<_>, _>>());
+                assert!(entries.is_ok(), "fuzz root listing should succeed");
             }
         }
     }
-    fs::remove_dir_all(root).expect("fuzz root should be removable");
 });
-
-fn fuzz_root() -> PathBuf {
-    std::env::temp_dir().join(format!("qubit-local-files-fuzz-{}", std::process::id()))
-}

@@ -25,7 +25,9 @@ impl OpenOptions {
     /// `None` preserves ordinary unbounded blocking-open behavior. `Some`
     /// bounds retries, and a zero duration reports the first conflict.
     #[must_use]
-    #[inline(always)]
+    // qubit-style: allow coverage-cfg
+    #[cfg_attr(not(coverage), inline(always))]
+    #[cfg_attr(coverage, inline(never))]
     pub(crate) const fn open_retry_timeout(&self) -> Option<Duration> {
         self.open_retry_timeout
     }
@@ -37,7 +39,8 @@ impl OpenOptions {
     ///
     /// # Returns
     /// Updated options.
-    #[inline]
+    #[cfg_attr(not(coverage), inline)]
+    #[cfg_attr(coverage, inline(never))]
     pub(crate) const fn with_open_retry_timeout(mut self, timeout: Duration) -> Self {
         self.open_retry_timeout = Some(timeout);
         self

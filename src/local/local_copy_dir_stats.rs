@@ -49,7 +49,6 @@ impl Default for LocalCopyDirStats {
         }
     }
 }
-
 #[allow(dead_code)]
 impl LocalCopyDirStats {
     /// Returns the number of regular files copied.
@@ -96,14 +95,17 @@ impl LocalCopyDirStats {
 
     /// Reports whether every completed file publication was atomic.
     #[must_use]
-    #[inline(always)]
+    // qubit-style: allow coverage-cfg
+    #[cfg_attr(not(coverage), inline(always))]
+    #[cfg_attr(coverage, inline(never))]
     pub const fn atomic_publication(&self) -> bool {
         !self.non_atomic_publication
     }
 
     /// Reports whether every copied file was synchronized before publication.
     #[must_use]
-    #[inline(always)]
+    #[cfg_attr(not(coverage), inline(always))]
+    #[cfg_attr(coverage, inline(never))]
     pub const fn files_durable(&self) -> bool {
         self.files_durable
     }

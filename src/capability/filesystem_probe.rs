@@ -30,7 +30,9 @@ use super::SizeLimit;
 /// # Returns
 ///
 /// The filesystem limits observed from the open authority.
-#[inline]
+// qubit-style: allow coverage-cfg
+#[cfg_attr(not(coverage), inline)]
+#[cfg_attr(coverage, inline(never))]
 pub(crate) fn limits(file: &File) -> io::Result<LocalFileSystemLimits> {
     #[cfg(unix)]
     {
@@ -62,7 +64,8 @@ pub(crate) fn limits(file: &File) -> io::Result<LocalFileSystemLimits> {
 /// # Errors
 ///
 /// Returns the native query error when capacity cannot be observed.
-#[inline]
+#[cfg_attr(not(coverage), inline)]
+#[cfg_attr(coverage, inline(never))]
 pub(crate) fn space(file: &File) -> io::Result<LocalFileSystemSpace> {
     #[cfg(unix)]
     {
@@ -98,7 +101,8 @@ pub(crate) fn space(file: &File) -> io::Result<LocalFileSystemSpace> {
 
 /// Converts one `fpathconf` result into the explicit public limit state.
 #[cfg(unix)]
-#[inline]
+#[cfg_attr(not(coverage), inline)]
+#[cfg_attr(coverage, inline(never))]
 fn pathconf(descriptor: std::os::fd::RawFd, name: libc::c_int) -> io::Result<SizeLimit> {
     let errno_available = clear_errno();
     let value = unsafe { libc::fpathconf(descriptor, name) };
@@ -125,7 +129,8 @@ fn pathconf(descriptor: std::os::fd::RawFd, name: libc::c_int) -> io::Result<Siz
     target_os = "hurd",
     target_os = "redox"
 ))]
-#[inline(always)]
+#[cfg_attr(not(coverage), inline(always))]
+#[cfg_attr(coverage, inline(never))]
 fn clear_errno() -> bool {
     // SAFETY: `__errno_location` returns this thread's writable errno slot.
     unsafe { *libc::__errno_location() = 0 };
@@ -134,7 +139,8 @@ fn clear_errno() -> bool {
 
 /// Clears the calling thread's POSIX errno before an indeterminate query.
 #[cfg(target_os = "android")]
-#[inline(always)]
+#[cfg_attr(not(coverage), inline(always))]
+#[cfg_attr(coverage, inline(never))]
 fn clear_errno() -> bool {
     // SAFETY: `__errno` returns this thread's writable errno slot.
     unsafe { *libc::__errno() = 0 };
@@ -143,7 +149,8 @@ fn clear_errno() -> bool {
 
 /// Clears the calling thread's POSIX errno before an indeterminate query.
 #[cfg(any(target_os = "macos", target_os = "ios", target_os = "freebsd"))]
-#[inline(always)]
+#[cfg_attr(not(coverage), inline(always))]
+#[cfg_attr(coverage, inline(never))]
 fn clear_errno() -> bool {
     // SAFETY: `__error` returns this thread's writable errno slot.
     unsafe { *libc::__error() = 0 };
@@ -152,7 +159,8 @@ fn clear_errno() -> bool {
 
 /// Clears the calling thread's POSIX errno before an indeterminate query.
 #[cfg(any(target_os = "netbsd", target_os = "openbsd"))]
-#[inline(always)]
+#[cfg_attr(not(coverage), inline(always))]
+#[cfg_attr(coverage, inline(never))]
 fn clear_errno() -> bool {
     // SAFETY: `__errno` returns this thread's writable errno slot.
     unsafe { *libc::__errno() = 0 };
@@ -161,7 +169,8 @@ fn clear_errno() -> bool {
 
 /// Clears the calling thread's POSIX errno before an indeterminate query.
 #[cfg(any(target_os = "solaris", target_os = "illumos"))]
-#[inline(always)]
+#[cfg_attr(not(coverage), inline(always))]
+#[cfg_attr(coverage, inline(never))]
 fn clear_errno() -> bool {
     // SAFETY: `___errno` returns this thread's writable errno slot.
     unsafe { *libc::___errno() = 0 };
@@ -170,7 +179,8 @@ fn clear_errno() -> bool {
 
 /// Clears the calling thread's POSIX errno before an indeterminate query.
 #[cfg(target_os = "aix")]
-#[inline(always)]
+#[cfg_attr(not(coverage), inline(always))]
+#[cfg_attr(coverage, inline(never))]
 fn clear_errno() -> bool {
     // SAFETY: `_Errno` returns this thread's writable errno slot.
     unsafe { *libc::_Errno() = 0 };
@@ -179,7 +189,8 @@ fn clear_errno() -> bool {
 
 /// Clears the calling thread's POSIX errno before an indeterminate query.
 #[cfg(target_os = "haiku")]
-#[inline(always)]
+#[cfg_attr(not(coverage), inline(always))]
+#[cfg_attr(coverage, inline(never))]
 fn clear_errno() -> bool {
     // SAFETY: `_errnop` returns this thread's writable errno slot.
     unsafe { *libc::_errnop() = 0 };
@@ -209,7 +220,8 @@ fn clear_errno() -> bool {
         target_os = "haiku"
     ))
 ))]
-#[inline(always)]
+#[cfg_attr(not(coverage), inline(always))]
+#[cfg_attr(coverage, inline(never))]
 fn clear_errno() -> bool {
     // Without a portable setter, a -1 result remains indeterminate rather
     // than being misclassified from stale thread-local errno.

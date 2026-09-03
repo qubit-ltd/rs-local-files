@@ -128,7 +128,7 @@ impl LocalDirectoryWalker {
             Ok(entries) => entries,
             Err(error) => return Err(walk_io_error(&root, error)),
         };
-        #[cfg(feature = "internal-test-support")]
+        #[cfg(feature = "test-support")]
         if crate::local::test_support_enabled("walker-root-canonicalize") {
             return Err(walk_io_error(
                 &root,
@@ -258,7 +258,9 @@ impl LocalDirectoryWalker {
 
     /// Returns the bound traversal root.
     #[must_use]
-    #[inline(always)]
+    // qubit-style: allow coverage-cfg
+    #[cfg_attr(not(coverage), inline(always))]
+    #[cfg_attr(coverage, inline(never))]
     pub fn root(&self) -> &Path {
         &self.root
     }
@@ -279,7 +281,8 @@ impl LocalDirectoryWalker {
     /// # Returns
     ///
     /// `true` when recursion and the configured depth limit permit descent.
-    #[inline(always)]
+    #[cfg_attr(not(coverage), inline(always))]
+    #[cfg_attr(coverage, inline(never))]
     fn may_descend(&self, entry_depth: usize) -> bool {
         self.options.recursive() && self.options.max_depth().is_none_or(|max_depth| entry_depth < max_depth)
     }
@@ -365,7 +368,7 @@ impl LocalDirectoryWalker {
         relative: PathBuf,
         entry_depth: usize,
     ) -> LocalResult<()> {
-        #[cfg(feature = "internal-test-support")]
+        #[cfg(feature = "test-support")]
         if crate::local::test_support_enabled("walker-descend-canonicalize") {
             return Err(walk_io_error(
                 path,
@@ -407,7 +410,7 @@ impl LocalDirectoryWalker {
     /// iteration cannot yield the same reopen error forever.
     fn reopen_host_frame(&mut self, relative_parent: &Path) -> LocalResult<()> {
         let directory = self.root.join(relative_parent);
-        #[cfg(feature = "internal-test-support")]
+        #[cfg(feature = "test-support")]
         if crate::local::test_support_enabled("walker-reopen-canonicalize") {
             return self.handle_reopen_error(walk_io_error(
                 &directory,
@@ -531,7 +534,7 @@ impl LocalDirectoryWalker {
                     other => break other,
                 }
             };
-            #[cfg(feature = "internal-test-support")]
+            #[cfg(feature = "test-support")]
             let next_entry = if crate::local::take_test_support("walker-entry") {
                 Some(Err(std::io::Error::other("injected walker directory entry failure")))
             } else {
@@ -752,7 +755,7 @@ fn next_rooted_entry(
         let output_parent = frame.output_parent.clone();
         let needs_reader = frame.reader.is_none();
         if needs_reader {
-            #[cfg(feature = "internal-test-support")]
+            #[cfg(feature = "test-support")]
             let authority_parent = if crate::local::test_support_enabled("walker-rooted-relative-path") {
                 PathBuf::from("../invalid")
             } else {
@@ -995,7 +998,8 @@ fn native_directory_identity(metadata: &fs::Metadata, path: &Path) -> LocalResul
 ///
 /// Structured listing error.
 #[must_use]
-#[inline]
+#[cfg_attr(not(coverage), inline)]
+#[cfg_attr(coverage, inline(never))]
 fn walk_io_error(path: &Path, error: std::io::Error) -> LocalFileError {
     LocalFileError::from_io(LocalFileOperation::List, Some(path.to_path_buf()), None, error)
 }

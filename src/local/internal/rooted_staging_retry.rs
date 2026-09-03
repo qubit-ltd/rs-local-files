@@ -108,24 +108,16 @@ mod tests {
         .expect("a later open attempt should succeed");
 
         assert_eq!("staging-2", name);
-        assert_eq!(
-            CString::new("staging-2").expect("literal has no NUL"),
-            native_name
-        );
-        assert!(
-            file.metadata()
-                .expect("opened fixture should be queryable")
-                .is_file()
-        );
+        assert_eq!(CString::new("staging-2").expect("literal has no NUL"), native_name);
+        assert!(file.metadata().expect("opened fixture should be queryable").is_file());
         assert_eq!(2, generated);
         assert_eq!(2, opened);
     }
 
     #[test]
     fn test_retry_rooted_staging_entry_rejects_zero_and_exhausted_retry_budgets() {
-        let zero =
-            retry_rooted_staging_entry(Some(0), || Ok("unused".to_owned()), |_| unreachable!())
-                .expect_err("zero retries must be rejected");
+        let zero = retry_rooted_staging_entry(Some(0), || Ok("unused".to_owned()), |_| unreachable!())
+            .expect_err("zero retries must be rejected");
         assert_eq!(ErrorKind::InvalidInput, zero.kind());
 
         let exhausted = retry_rooted_staging_entry(

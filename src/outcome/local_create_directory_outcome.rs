@@ -28,7 +28,9 @@ impl LocalCreateDirectoryOutcome {
 
     /// Reports whether the requested directory was newly created.
     #[must_use]
-    #[inline]
+    // qubit-style: allow coverage-cfg
+    #[cfg_attr(not(coverage), inline)]
+    #[cfg_attr(coverage, inline(never))]
     pub const fn created(self) -> bool {
         self.created
     }

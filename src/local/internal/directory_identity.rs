@@ -49,7 +49,7 @@ pub(crate) enum DirectoryIdentity {
 impl DirectoryIdentity {
     /// Builds an identity from descriptor-relative rooted metadata.
     pub(crate) fn from_rooted_metadata(metadata: &crate::rooted::Metadata, fallback: &Path) -> Self {
-        #[cfg(all(feature = "internal-test-support", any(unix, windows)))]
+        #[cfg(all(feature = "test-support", any(unix, windows)))]
         if injected_cycle_identity() {
             return Self::Native { filesystem: 0, file: 0 };
         }
@@ -79,9 +79,11 @@ impl DirectoryIdentity {
     ///
     /// A stable identity suitable for active-ancestor cycle detection.
     #[cfg(unix)]
-    #[inline]
+    // qubit-style: allow coverage-cfg
+    #[cfg_attr(not(coverage), inline)]
+    #[cfg_attr(coverage, inline(never))]
     pub(crate) fn from_metadata(metadata: &Metadata, canonical_path: &Path) -> Self {
-        #[cfg(feature = "internal-test-support")]
+        #[cfg(feature = "test-support")]
         if injected_cycle_identity() {
             return Self::Native { filesystem: 0, file: 0 };
         }
@@ -104,7 +106,7 @@ impl DirectoryIdentity {
     /// A native Windows identity when available, otherwise the canonical path.
     #[cfg(windows)]
     pub(crate) fn from_metadata(metadata: &Metadata, canonical_path: &Path) -> Self {
-        #[cfg(feature = "internal-test-support")]
+        #[cfg(feature = "test-support")]
         if injected_cycle_identity() {
             return Self::Native { filesystem: 0, file: 0 };
         }
@@ -123,7 +125,8 @@ impl DirectoryIdentity {
     ///
     /// The canonical path wrapped as a directory identity.
     #[cfg(not(any(unix, windows)))]
-    #[inline(always)]
+    #[cfg_attr(not(coverage), inline(always))]
+    #[cfg_attr(coverage, inline(never))]
     pub(crate) fn from_metadata(metadata: &Metadata, canonical_path: &Path) -> Self {
         let _ = metadata;
         Self::Canonical(canonical_path.to_path_buf())
@@ -166,9 +169,10 @@ fn windows_native_identity(path: &Path) -> Option<DirectoryIdentity> {
 /// # Returns
 ///
 /// `true` when either directory-cycle fault is selected.
-#[cfg(all(feature = "internal-test-support", any(unix, windows)))]
+#[cfg(all(feature = "test-support", any(unix, windows)))]
 #[must_use]
-#[inline]
+#[cfg_attr(not(coverage), inline)]
+#[cfg_attr(coverage, inline(never))]
 fn injected_cycle_identity() -> bool {
     super::test_support::is_enabled("copy-dir-directory-identity-cycle")
         || super::test_support::is_enabled("dir-size-directory-identity-cycle")

@@ -6,11 +6,11 @@
 //    Licensed under the Apache License, Version 2.0.
 // =============================================================================
 
-#[cfg(feature = "internal-test-support")]
+#[cfg(feature = "test-support")]
 use qubit_local_files::test_support::install_test_fault;
 
 /// Verifies that a fault guard cannot be nested for different selectors.
-#[cfg(feature = "internal-test-support")]
+#[cfg(feature = "test-support")]
 #[test]
 fn test_test_fault_guard_blocks_nested_installations() {
     let _guard = install_test_fault("root-authority-path").expect("fault controller should be installed");
@@ -20,7 +20,7 @@ fn test_test_fault_guard_blocks_nested_installations() {
 
 /// Verifies independent test threads serialize their process-wide selectors
 /// instead of observing a spurious nested-installation failure.
-#[cfg(feature = "internal-test-support")]
+#[cfg(feature = "test-support")]
 #[test]
 fn test_test_fault_guard_serializes_parallel_test_threads() {
     use std::sync::mpsc;

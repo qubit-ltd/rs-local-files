@@ -24,10 +24,19 @@ use crate::LocalResult;
 ///
 /// Returns `LocalFileError` for empty, absolute, prefixed, dot, or parent
 /// paths.
-#[inline]
+// qubit-style: allow coverage-cfg
+#[cfg_attr(not(coverage), inline)]
+#[cfg_attr(coverage, inline(never))]
 pub(crate) fn rooted_path(path: &Path, operation: LocalFileOperation) -> LocalResult<crate::local::LocalRelativePath> {
-    crate::local::LocalRelativePath::new(path)
-        .map_err(|error| LocalFileError::from_io(operation, Some(path.to_path_buf()), None, error))
+    match crate::local::LocalRelativePath::new(path) {
+        Ok(path) => Ok(path),
+        Err(error) => Err(LocalFileError::from_io(
+            operation,
+            Some(path.to_path_buf()),
+            None,
+            error,
+        )),
+    }
 }
 
 /// Reports whether a rooted destination currently names a real directory.
@@ -52,18 +61,18 @@ pub(crate) fn rooted_destination_is_directory(
 ///
 /// Returns `LocalFileError` when the configured parent is not a normal
 /// relative descendant of the opened root.
-#[inline]
+#[cfg_attr(not(coverage), inline)]
+#[cfg_attr(coverage, inline(never))]
 pub(crate) fn rooted_temp_parent(parent: Option<&Path>, operation: LocalFileOperation) -> LocalResult<PathBuf> {
-    parent.map_or_else(
-        || Ok(PathBuf::new()),
-        |parent| {
-            if parent.as_os_str().is_empty() {
-                Ok(PathBuf::new())
-            } else {
-                rooted_path(parent, operation).map(|path| path.as_path().to_path_buf())
-            }
-        },
-    )
+    let Some(parent) = parent else {
+        return Ok(PathBuf::new());
+    };
+    if parent.as_os_str().is_empty() {
+        Ok(PathBuf::new())
+    } else {
+        let path = rooted_path(parent, operation)?;
+        Ok(path.as_path().to_path_buf())
+    }
 }
 
 /// Confirms that a rooted temporary-resource parent is an existing directory.
@@ -72,7 +81,8 @@ pub(crate) fn rooted_temp_parent(parent: Option<&Path>, operation: LocalFileOper
 ///
 /// Returns `LocalFileError` when the parent cannot be read or is not a
 /// directory.
-#[inline]
+#[cfg_attr(not(coverage), inline)]
+#[cfg_attr(coverage, inline(never))]
 pub(crate) fn validate_rooted_temp_parent(
     root: &crate::rooted::Root,
     parent: &Path,
@@ -81,11 +91,16 @@ pub(crate) fn validate_rooted_temp_parent(
     if parent.as_os_str().is_empty() {
         return Ok(());
     }
-    let relative = crate::local::LocalRelativePath::new(parent)
-        .map_err(|error| rooted_io_error(operation, parent, error).with_kind(LocalFileErrorKind::InvalidPath))?;
-    let metadata = root
-        .symlink_metadata(&relative)
-        .map_err(|error| rooted_io_error(operation, parent, error))?;
+    let relative = match crate::local::LocalRelativePath::new(parent) {
+        Ok(relative) => relative,
+        Err(error) => {
+            return Err(rooted_io_error(operation, parent, error).with_kind(LocalFileErrorKind::InvalidPath));
+        }
+    };
+    let metadata = match root.symlink_metadata(&relative) {
+        Ok(metadata) => metadata,
+        Err(error) => return Err(rooted_io_error(operation, parent, error)),
+    };
     if metadata.kind() != crate::rooted::EntryKind::Directory {
         return Err(LocalFileError::new(LocalFileErrorKind::NotDirectory, operation).with_path(parent.to_path_buf()));
     }
@@ -98,28 +113,31 @@ pub(crate) fn validate_rooted_temp_parent(
 ///
 /// Returns `LocalFileError` when an affix is invalid or randomness is
 /// unavailable.
-#[inline]
+#[cfg_attr(not(coverage), inline)]
+#[cfg_attr(coverage, inline(never))]
 pub(crate) fn temp_candidate(
     parent: &Path,
     prefix: Option<&str>,
     suffix: Option<&str>,
     operation: LocalFileOperation,
 ) -> LocalResult<PathBuf> {
-    crate::local::try_random_file_name("qubit-local-files-", prefix, suffix)
-        .map(|name| parent.join(name))
-        .map_err(|error| {
+    match crate::local::try_random_file_name("qubit-local-files-", prefix, suffix) {
+        Ok(name) => Ok(parent.join(name)),
+        Err(error) => {
             let invalid_options = error.kind() == io::ErrorKind::InvalidInput;
             let error = rooted_io_error(operation, parent, error);
             if invalid_options {
-                error.with_kind(LocalFileErrorKind::InvalidOptions)
+                Err(error.with_kind(LocalFileErrorKind::InvalidOptions))
             } else {
-                error
+                Err(error)
             }
-        })
+        }
+    }
 }
 
 /// Converts descriptor-relative metadata to the unified metadata type.
-#[inline]
+#[cfg_attr(not(coverage), inline)]
+#[cfg_attr(coverage, inline(never))]
 pub(crate) fn rooted_metadata(metadata: crate::rooted::Metadata) -> LocalFileMetadata {
     let kind = match metadata.kind() {
         crate::rooted::EntryKind::File => LocalFileKind::File,
@@ -145,7 +163,8 @@ pub(crate) fn rooted_metadata(metadata: crate::rooted::Metadata) -> LocalFileMet
 }
 
 /// Adds rooted operation and descendant context to a native I/O failure.
-#[inline(always)]
+#[cfg_attr(not(coverage), inline(always))]
+#[cfg_attr(coverage, inline(never))]
 pub(crate) fn rooted_io_error(operation: LocalFileOperation, path: &Path, error: io::Error) -> LocalFileError {
     LocalFileError::from_io(operation, Some(path.to_path_buf()), None, error)
 }

@@ -9,9 +9,9 @@
 
 use std::time::Duration;
 
-use qubit_local_files::policy::LocalDurabilityRequirement;
-use qubit_local_files::test_support::internal_contract::LocalAtomicPublicationMode;
-use qubit_local_files::test_support::internal_contract::LocalAtomicWriteOptions;
+use crate::local::LocalAtomicPublicationMode;
+use crate::local::LocalAtomicWriteOptions;
+use crate::policy::LocalDurabilityRequirement;
 
 #[test]
 fn test_local_atomic_write_options_builders_update_accessible_policies() {

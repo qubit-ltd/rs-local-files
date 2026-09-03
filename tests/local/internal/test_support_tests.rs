@@ -15,7 +15,7 @@ use qubit_local_files::test_support::install_test_fault;
 use tempfile::tempdir;
 
 /// Verifies a selected native fault is isolated to a child test process.
-#[cfg(feature = "internal-test-support")]
+#[cfg(feature = "test-support")]
 #[test]
 fn test_test_support_injects_selected_fault_only_in_child_process() {
     const FAULT_ENV: &str = "QUBIT_LOCAL_FILES_TEST_FAULT";
@@ -79,7 +79,7 @@ fn test_test_support_injects_selected_fault_only_in_child_process() {
 }
 
 /// Verifies that explicit fault guards control and then release one fault.
-#[cfg(feature = "internal-test-support")]
+#[cfg(feature = "test-support")]
 #[test]
 fn test_explicit_test_fault_guard_scopes_controller() {
     const FAULT: &str = "local-fs-delete-file-remove";

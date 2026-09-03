@@ -6,11 +6,10 @@
 //    Licensed under the Apache License, Version 2.0.
 // =============================================================================
 
-#![cfg(feature = "internal-test-support")]
+#![cfg(feature = "test-support")]
 
 use std::path::Path;
 use std::path::PathBuf;
-use std::process::Command;
 
 use qubit_local_files::LocalFileSystem;
 use qubit_local_files::error::LocalFileErrorKind;
@@ -25,30 +24,12 @@ enum Backend {
     Rooted,
 }
 
-fn run_in_test_fault_process<F>(test_name: &str, fault: &str, action: F)
+fn run_in_test_fault_process<F>(_test_name: &str, fault: &str, action: F)
 where
     F: FnOnce(),
 {
-    const TEST_FAULT_ENV: &str = "QUBIT_LOCAL_FILES_TEST_FAULT";
-    const TEST_FAULT_CHILD_ENV: &str = "QUBIT_LOCAL_FILES_TEST_FAULT_CHILD";
-    if std::env::var_os(TEST_FAULT_ENV).is_some_and(|selected| selected == std::ffi::OsStr::new(fault)) {
-        let _fault = install_test_fault(fault).expect("test fault controller should install");
-        action();
-        return;
-    }
-    if std::env::var_os(TEST_FAULT_CHILD_ENV).is_some() {
-        return;
-    }
-    let executable = std::env::current_exe().expect("test executable should be available");
-    let status = Command::new(executable)
-        .arg("--exact")
-        .arg(test_name)
-        .arg("--nocapture")
-        .env(TEST_FAULT_ENV, fault)
-        .env(TEST_FAULT_CHILD_ENV, "1")
-        .status()
-        .expect("test fault child should launch");
-    assert!(status.success(), "test fault child should pass");
+    let _fault = install_test_fault(fault).expect("test fault controller should install");
+    action();
 }
 
 fn filesystem_and_path(backend: Backend, root: &Path, relative: &Path) -> (LocalFileSystem, PathBuf, PathBuf) {

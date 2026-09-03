@@ -31,7 +31,7 @@ use crate::local::decide_copy_destination;
 #[cfg(windows)]
 use crate::local::internal::file_move::remove_directory_symlink;
 use crate::local::internal::temp_entry::create_private_dir;
-#[cfg(feature = "internal-test-support")]
+#[cfg(feature = "test-support")]
 use crate::local::internal::test_support;
 
 /// Ensures a directory-copy destination exists as a real directory.
@@ -198,7 +198,7 @@ fn prepare_existing_directory_destination(
 /// directory.
 fn create_copy_destination_dir(dst: &Path) -> Result<bool> {
     let result = create_private_dir(dst);
-    #[cfg(feature = "internal-test-support")]
+    #[cfg(feature = "test-support")]
     let result = if test_support::is_enabled("copy-directory-race-existing")
         || test_support::is_enabled("copy-directory-race-nondirectory")
         || test_support::is_enabled("copy-directory-race-inspect")
@@ -210,7 +210,7 @@ fn create_copy_destination_dir(dst: &Path) -> Result<bool> {
         result
     };
     reconcile_directory_creation(dst, result, |path| {
-        #[cfg(feature = "internal-test-support")]
+        #[cfg(feature = "test-support")]
         if test_support::is_enabled("copy-directory-race-inspect") {
             return Err(Error::other("injected directory race inspection failure"));
         }
@@ -235,7 +235,7 @@ fn create_copy_destination_dir(dst: &Path) -> Result<bool> {
 /// Returns the I/O error reported while inspecting or removing the entry.
 fn remove_destination_non_directory_if_unchanged(dst: &Path) -> Result<()> {
     let result = inspect_destination_metadata(dst);
-    #[cfg(feature = "internal-test-support")]
+    #[cfg(feature = "test-support")]
     let result = if test_support::is_enabled("copy-removal-race-not-found") {
         Err(Error::new(ErrorKind::NotFound, "injected destination disappearance"))
     } else if test_support::is_enabled("copy-removal-race-inspect") {
@@ -271,7 +271,9 @@ fn remove_destination_non_directory_if_unchanged(dst: &Path) -> Result<()> {
 /// # Errors
 ///
 /// Returns the I/O error reported by `symlink_metadata`.
-#[inline(always)]
+// qubit-style: allow coverage-cfg
+#[cfg_attr(not(coverage), inline(always))]
+#[cfg_attr(coverage, inline(never))]
 fn inspect_destination_metadata(dst: &Path) -> Result<fs::Metadata> {
     fs::symlink_metadata(dst)
 }

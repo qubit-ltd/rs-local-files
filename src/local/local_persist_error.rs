@@ -62,7 +62,9 @@ impl<T> LocalPersistError<T> {
     ///
     /// # Returns
     /// New persistence error owning both values.
-    #[inline]
+    // qubit-style: allow coverage-cfg
+    #[cfg_attr(not(coverage), inline)]
+    #[cfg_attr(coverage, inline(never))]
     pub(crate) fn new(
         error: io::Error,
         resource: T,
@@ -92,7 +94,8 @@ impl<T> LocalPersistError<T> {
     /// # Returns
     /// Structured error that prevented persistence.
     #[must_use = "the structured persistence error should be inspected"]
-    #[inline]
+    #[cfg_attr(not(coverage), inline)]
+    #[cfg_attr(coverage, inline(never))]
     pub const fn error(&self) -> &LocalFileError {
         &self.error
     }
@@ -102,7 +105,8 @@ impl<T> LocalPersistError<T> {
     /// # Returns
     /// Shared reference to the resource retained after failure.
     #[must_use]
-    #[inline]
+    #[cfg_attr(not(coverage), inline)]
+    #[cfg_attr(coverage, inline(never))]
     pub const fn resource(&self) -> &T {
         &self.resource
     }
@@ -112,7 +116,8 @@ impl<T> LocalPersistError<T> {
     /// # Returns
     /// Mutable reference to the resource retained after failure.
     #[must_use]
-    #[inline]
+    #[cfg_attr(not(coverage), inline)]
+    #[cfg_attr(coverage, inline(never))]
     pub const fn resource_mut(&mut self) -> &mut T {
         &mut self.resource
     }
@@ -122,7 +127,8 @@ impl<T> LocalPersistError<T> {
     /// # Returns
     /// Requested target before absolute-path resolution.
     #[must_use]
-    #[inline(always)]
+    #[cfg_attr(not(coverage), inline(always))]
+    #[cfg_attr(coverage, inline(never))]
     pub fn requested_target(&self) -> &Path {
         &self.requested_target
     }
@@ -132,7 +138,8 @@ impl<T> LocalPersistError<T> {
     /// # Returns
     /// Resolved target for parent preparation and destination installation.
     #[must_use]
-    #[inline(always)]
+    #[cfg_attr(not(coverage), inline(always))]
+    #[cfg_attr(coverage, inline(never))]
     pub fn resolved_target(&self) -> Option<&Path> {
         self.resolved_target.as_deref()
     }
@@ -142,7 +149,8 @@ impl<T> LocalPersistError<T> {
     /// # Returns
     /// Failed persistence stage.
     #[must_use = "the failed persistence stage should be inspected"]
-    #[inline(always)]
+    #[cfg_attr(not(coverage), inline(always))]
+    #[cfg_attr(coverage, inline(never))]
     pub const fn stage(&self) -> LocalPersistStage {
         self.stage
     }
@@ -151,7 +159,8 @@ impl<T> LocalPersistError<T> {
     ///
     /// # Returns
     /// A state describing whether the temporary resource remains safely owned.
-    #[inline]
+    #[cfg_attr(not(coverage), inline)]
+    #[cfg_attr(coverage, inline(never))]
     pub const fn state(&self) -> LocalPersistFailureState {
         self.state
     }
@@ -160,7 +169,8 @@ impl<T> LocalPersistError<T> {
     ///
     /// # Returns
     /// Stable classification reported by the retained structured error.
-    #[inline]
+    #[cfg_attr(not(coverage), inline)]
+    #[cfg_attr(coverage, inline(never))]
     pub const fn kind(&self) -> crate::LocalFileErrorKind {
         self.error.kind()
     }
@@ -294,10 +304,7 @@ mod tests {
         assert_eq!("temporary-updated", error.resource());
         assert!(error.to_string().contains("resolved as '/resolved'"));
         assert!(Error::source(&error).is_some());
-        assert_eq!(
-            Some(Path::new("/workspace")),
-            error.error().current_directory()
-        );
+        assert_eq!(Some(Path::new("/workspace")), error.error().current_directory());
     }
 
     #[test]

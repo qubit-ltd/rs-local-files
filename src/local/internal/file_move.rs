@@ -103,7 +103,9 @@ unsafe extern "C" {
 /// # Errors
 /// Returns the platform I/O error reported while replacing the destination.
 #[cfg(not(windows))]
-#[inline(always)]
+// qubit-style: allow coverage-cfg
+#[cfg_attr(not(coverage), inline(always))]
+#[cfg_attr(coverage, inline(never))]
 pub(crate) fn replace_file(source: &Path, destination: &Path) -> Result<()> {
     fs::rename(source, destination)
 }
@@ -147,7 +149,7 @@ pub(crate) fn replace_file(source: &Path, destination: &Path) -> Result<()> {
 /// Returns the platform I/O error reported while moving the path.
 #[cfg(target_os = "macos")]
 pub(crate) fn move_path_without_replacing(source: &Path, destination: &Path) -> Result<()> {
-    #[cfg(feature = "internal-test-support")]
+    #[cfg(feature = "test-support")]
     if crate::local::test_support_enabled("persist-install-indeterminate") {
         return Err(std::io::Error::new(
             std::io::ErrorKind::PermissionDenied,
@@ -177,7 +179,7 @@ pub(crate) fn move_path_without_replacing(source: &Path, destination: &Path) -> 
 /// Returns the platform I/O error reported while moving the path.
 #[cfg(target_os = "linux")]
 pub(crate) fn move_path_without_replacing(source: &Path, destination: &Path) -> Result<()> {
-    #[cfg(feature = "internal-test-support")]
+    #[cfg(feature = "test-support")]
     if crate::local::test_support_enabled("persist-install-indeterminate") {
         return Err(std::io::Error::new(
             std::io::ErrorKind::PermissionDenied,
@@ -216,7 +218,7 @@ pub(crate) fn move_path_without_replacing(source: &Path, destination: &Path) -> 
 /// Returns the platform I/O error reported while moving the path.
 #[cfg(windows)]
 pub(crate) fn move_path_without_replacing(source: &Path, destination: &Path) -> Result<()> {
-    #[cfg(feature = "internal-test-support")]
+    #[cfg(feature = "test-support")]
     if crate::local::test_support_enabled("persist-install-indeterminate") {
         return Err(std::io::Error::new(
             std::io::ErrorKind::PermissionDenied,
@@ -245,7 +247,8 @@ pub(crate) fn move_path_without_replacing(source: &Path, destination: &Path) -> 
 /// # Errors
 /// Returns the platform I/O error reported while moving the file.
 #[cfg(any(target_os = "linux", target_os = "macos", windows))]
-#[inline(always)]
+#[cfg_attr(not(coverage), inline(always))]
+#[cfg_attr(coverage, inline(never))]
 pub(crate) fn move_file_without_replacing(source: &Path, destination: &Path) -> Result<()> {
     move_path_without_replacing(source, destination)
 }
@@ -260,7 +263,8 @@ pub(crate) fn move_file_without_replacing(source: &Path, destination: &Path) -> 
 /// Always returns [`ErrorKind::Unsupported`] because this target has no native
 /// no-replace file move implementation.
 #[cfg(not(any(target_os = "linux", target_os = "macos", windows)))]
-#[inline]
+#[cfg_attr(not(coverage), inline)]
+#[cfg_attr(coverage, inline(never))]
 pub(crate) fn move_file_without_replacing(source: &Path, destination: &Path) -> Result<()> {
     Err(Error::new(
         ErrorKind::Unsupported,
@@ -281,7 +285,8 @@ pub(crate) fn move_file_without_replacing(source: &Path, destination: &Path) -> 
 /// # Errors
 /// Returns the platform I/O error reported while moving the directory.
 #[cfg(any(target_os = "linux", target_os = "macos", windows))]
-#[inline(always)]
+#[cfg_attr(not(coverage), inline(always))]
+#[cfg_attr(coverage, inline(never))]
 pub(crate) fn move_directory_without_replacing(source: &Path, destination: &Path) -> Result<()> {
     move_path_without_replacing(source, destination)
 }
@@ -377,7 +382,8 @@ pub(crate) fn remove_directory_symlink(path: &Path) -> Result<()> {
 /// Always returns [`ErrorKind::Unsupported`] because this target has no native
 /// no-replace directory move implementation.
 #[cfg(not(any(target_os = "linux", target_os = "macos", windows)))]
-#[inline]
+#[cfg_attr(not(coverage), inline)]
+#[cfg_attr(coverage, inline(never))]
 pub(crate) fn move_directory_without_replacing(source: &Path, destination: &Path) -> Result<()> {
     Err(Error::new(
         ErrorKind::Unsupported,
@@ -400,7 +406,8 @@ pub(crate) fn move_directory_without_replacing(source: &Path, destination: &Path
 /// # Errors
 /// Returns [`ErrorKind::InvalidInput`] when the path contains an interior NUL.
 #[cfg(any(target_os = "linux", target_os = "macos"))]
-#[inline]
+#[cfg_attr(not(coverage), inline)]
+#[cfg_attr(coverage, inline(never))]
 fn c_path(path: &Path) -> Result<CString> {
     CString::new(path.as_os_str().as_bytes()).map_err(|_| {
         Error::new(
@@ -418,7 +425,8 @@ fn c_path(path: &Path) -> Result<CString> {
 /// # Errors
 /// Returns an I/O error when opening or syncing the parent directory fails.
 #[cfg(not(windows))]
-#[inline]
+#[cfg_attr(not(coverage), inline)]
+#[cfg_attr(coverage, inline(never))]
 pub(crate) fn sync_parent_dir(path: &Path) -> Result<()> {
     let parent_dir = parent_dir_for(path);
     let parent = File::open(parent_dir)?;
@@ -478,7 +486,8 @@ pub(crate) fn sync_parent_dir(path: &Path) -> Result<()> {
 /// unavailable on Windows.
 #[cfg(windows)]
 #[must_use]
-#[inline(always)]
+#[cfg_attr(not(coverage), inline(always))]
+#[cfg_attr(coverage, inline(never))]
 fn is_ignorable_windows_parent_sync_error(error: &Error) -> bool {
     const ERROR_SHARING_VIOLATION: i32 = 32;
 
@@ -493,7 +502,8 @@ fn is_ignorable_windows_parent_sync_error(error: &Error) -> bool {
 /// # Returns
 /// The parent directory, or the current directory for parentless paths.
 #[must_use]
-#[inline(always)]
+#[cfg_attr(not(coverage), inline(always))]
+#[cfg_attr(coverage, inline(never))]
 pub(crate) fn parent_dir_for(path: &Path) -> &Path {
     path.parent()
         .filter(|parent| !parent.as_os_str().is_empty())
@@ -511,7 +521,8 @@ pub(crate) fn parent_dir_for(path: &Path) -> &Path {
 /// # Errors
 /// Returns [`ErrorKind::InvalidInput`] when `path` contains an interior NUL.
 #[cfg(windows)]
-#[inline]
+#[cfg_attr(not(coverage), inline)]
+#[cfg_attr(coverage, inline(never))]
 pub(super) fn wide_path(path: &Path) -> Result<Vec<u16>> {
     let units: Vec<u16> = path.as_os_str().encode_wide().collect();
     if units.contains(&0) {

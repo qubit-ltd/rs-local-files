@@ -30,7 +30,9 @@ use crate::local::LocalRelativePath;
 /// # Errors
 ///
 /// Returns an I/O error when traversal or handle-relative rename fails.
-#[inline(always)]
+// qubit-style: allow coverage-cfg
+#[cfg_attr(not(coverage), inline(always))]
+#[cfg_attr(coverage, inline(never))]
 pub(crate) fn rename_rooted_entry(
     root: &File,
     _diagnostic_root: &Path,

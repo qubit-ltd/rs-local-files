@@ -26,20 +26,24 @@ pub struct Entry {
 impl Entry {
     /// Builds a rooted directory entry.
     #[cfg(any(unix, windows))]
-    #[inline]
+    // qubit-style: allow coverage-cfg
+    #[cfg_attr(not(coverage), inline)]
+    #[cfg_attr(coverage, inline(never))]
     pub(crate) const fn new(name: OsString, metadata: Metadata) -> Self {
         Self { name, metadata }
     }
 
     /// Returns the native name of this immediate child.
     #[must_use]
-    #[inline(always)]
+    #[cfg_attr(not(coverage), inline(always))]
+    #[cfg_attr(coverage, inline(never))]
     pub(crate) fn name(&self) -> &OsStr {
         &self.name
     }
 
     /// Returns metadata captured for the final child entry.
-    #[inline(always)]
+    #[cfg_attr(not(coverage), inline(always))]
+    #[cfg_attr(coverage, inline(never))]
     pub(crate) const fn metadata(&self) -> Metadata {
         self.metadata
     }

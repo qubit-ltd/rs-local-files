@@ -56,7 +56,9 @@ pub(super) fn validate_file_name_fragment(role: &str, fragment: &str) -> Result<
 /// # Returns
 /// An [`ErrorKind::InvalidInput`] error.
 #[must_use]
-#[inline]
+// qubit-style: allow coverage-cfg
+#[cfg_attr(not(coverage), inline)]
+#[cfg_attr(coverage, inline(never))]
 fn invalid_file_name_fragment_error(role: &str, reason: &str) -> Error {
     Error::new(
         ErrorKind::InvalidInput,

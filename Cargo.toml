@@ -34,7 +34,6 @@ doctest = true
 [features]
 default = []
 test-support = []
-internal-test-support = ["test-support"]
 
 [dependencies]
 qubit-budget = "0.4"
@@ -66,7 +65,7 @@ name = "local_files"
 harness = false
 
 [lints.rust]
-unexpected_cfgs = { level = "warn", check-cfg = [] }
+unexpected_cfgs = { level = "warn", check-cfg = ["cfg(coverage)"] }
 
 [package.metadata.rs-ci]
 sanitizers = ["address"]

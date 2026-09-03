@@ -6,6 +6,7 @@
 //    Licensed under the Apache License, Version 2.0.
 // =============================================================================
 // qubit-style: allow source-test-pair
+// qubit-style: allow coverage-cfg
 // Covered by structured error integration tests.
 
 use std::error::Error;
@@ -49,7 +50,8 @@ impl LocalFileError {
     /// - `kind`: Stable failure classification.
     /// - `operation`: Operation that failed.
     #[must_use]
-    #[inline(always)]
+    #[cfg_attr(not(coverage), inline(always))]
+    #[cfg_attr(coverage, inline(never))]
     pub const fn new(kind: LocalFileErrorKind, operation: LocalFileOperation) -> Self {
         Self {
             kind,
@@ -76,7 +78,8 @@ impl LocalFileError {
     ///
     /// A structured local filesystem error.
     #[must_use]
-    #[inline(always)]
+    #[cfg_attr(not(coverage), inline(always))]
+    #[cfg_attr(coverage, inline(never))]
     pub fn from_io(
         operation: LocalFileOperation,
         path: Option<PathBuf>,
@@ -117,7 +120,8 @@ impl LocalFileError {
     /// A structured invalid-path error whose source is `PathCodec(error)`.
     #[must_use]
     #[allow(dead_code)]
-    #[inline]
+    #[cfg_attr(not(coverage), inline)]
+    #[cfg_attr(coverage, inline(never))]
     pub(crate) fn from_path_codec(
         operation: LocalFileOperation,
         path: Option<PathBuf>,
@@ -148,7 +152,8 @@ impl LocalFileError {
     /// A structured resource-limit error whose source is
     /// `ResourceLimit(source)`.
     #[must_use]
-    #[inline]
+    #[cfg_attr(not(coverage), inline)]
+    #[cfg_attr(coverage, inline(never))]
     pub(crate) fn from_resource_limit(
         operation: LocalFileOperation,
         path: Option<PathBuf>,
@@ -168,7 +173,8 @@ impl LocalFileError {
 
     /// Adds the namespace-absolute PWD used for path binding.
     #[must_use]
-    #[inline(always)]
+    #[cfg_attr(not(coverage), inline(always))]
+    #[cfg_attr(coverage, inline(never))]
     pub fn with_current_directory(mut self, current_directory: PathBuf) -> Self {
         self.current_directory = Some(Box::new(current_directory));
         self
@@ -184,7 +190,8 @@ impl LocalFileError {
     ///
     /// The updated error.
     #[must_use]
-    #[inline(always)]
+    #[cfg_attr(not(coverage), inline(always))]
+    #[cfg_attr(coverage, inline(never))]
     pub fn with_path(mut self, path: PathBuf) -> Self {
         self.path = Some(path);
         self
@@ -200,7 +207,8 @@ impl LocalFileError {
     ///
     /// The updated error.
     #[must_use]
-    #[inline(always)]
+    #[cfg_attr(not(coverage), inline(always))]
+    #[cfg_attr(coverage, inline(never))]
     pub fn with_target(mut self, target: PathBuf) -> Self {
         self.target = Some(target);
         self
@@ -229,7 +237,8 @@ impl LocalFileError {
     ///
     /// The updated error.
     #[must_use]
-    #[inline(always)]
+    #[cfg_attr(not(coverage), inline(always))]
+    #[cfg_attr(coverage, inline(never))]
     pub const fn with_reason(mut self, reason: &'static str) -> Self {
         self.reason = Some(reason);
         self
@@ -237,7 +246,8 @@ impl LocalFileError {
 
     /// Retains a cleanup failure without replacing this primary failure.
     #[must_use]
-    #[inline(always)]
+    #[cfg_attr(not(coverage), inline(always))]
+    #[cfg_attr(coverage, inline(never))]
     pub fn with_cleanup_error(mut self, cleanup: LocalFileError) -> Self {
         self.cleanup_error = Some(Box::new(cleanup));
         self
@@ -246,49 +256,56 @@ impl LocalFileError {
     /// Returns the cleanup failure, when cleanup failed after the primary
     /// operation had already produced an error.
     #[must_use]
-    #[inline(always)]
+    #[cfg_attr(not(coverage), inline(always))]
+    #[cfg_attr(coverage, inline(never))]
     pub fn cleanup_error(&self) -> Option<&LocalFileError> {
         self.cleanup_error.as_deref()
     }
 
     /// Returns the stable failure classification.
     #[must_use = "the stable error classification should be inspected"]
-    #[inline(always)]
+    #[cfg_attr(not(coverage), inline(always))]
+    #[cfg_attr(coverage, inline(never))]
     pub const fn kind(&self) -> LocalFileErrorKind {
         self.kind
     }
 
     /// Returns the operation that failed.
     #[must_use = "the failed operation should be inspected"]
-    #[inline(always)]
+    #[cfg_attr(not(coverage), inline(always))]
+    #[cfg_attr(coverage, inline(never))]
     pub const fn operation(&self) -> LocalFileOperation {
         self.operation
     }
 
     /// Returns the namespace-absolute PWD used to bind relative paths.
     #[must_use]
-    #[inline(always)]
+    #[cfg_attr(not(coverage), inline(always))]
+    #[cfg_attr(coverage, inline(never))]
     pub fn current_directory(&self) -> Option<&Path> {
         self.current_directory.as_deref().map(PathBuf::as_path)
     }
 
     /// Returns the primary path, or `None` when no path applies.
     #[must_use]
-    #[inline(always)]
+    #[cfg_attr(not(coverage), inline(always))]
+    #[cfg_attr(coverage, inline(never))]
     pub fn path(&self) -> Option<&Path> {
         self.path.as_deref()
     }
 
     /// Returns the destination path, or `None` for single-path operations.
     #[must_use]
-    #[inline]
+    #[cfg_attr(not(coverage), inline)]
+    #[cfg_attr(coverage, inline(never))]
     pub fn target(&self) -> Option<&Path> {
         self.target.as_deref()
     }
 
     /// Returns the stable human-readable explanation, when one was provided.
     #[must_use]
-    #[inline(always)]
+    #[cfg_attr(not(coverage), inline(always))]
+    #[cfg_attr(coverage, inline(never))]
     pub const fn reason(&self) -> Option<&str> {
         self.reason
     }
@@ -300,14 +317,16 @@ impl LocalFileError {
     /// `Some` contains an I/O, path codec, or resource-limit source; `None`
     /// means this error was constructed without an originating source.
     #[must_use]
-    #[inline(always)]
+    #[cfg_attr(not(coverage), inline(always))]
+    #[cfg_attr(coverage, inline(never))]
     pub const fn typed_source(&self) -> Option<&LocalFileErrorSource> {
         self.source.as_ref()
     }
 
     /// Returns the retained local resource-limit source, when present.
     #[must_use]
-    #[inline]
+    #[cfg_attr(not(coverage), inline)]
+    #[cfg_attr(coverage, inline(never))]
     pub fn resource_limit_error(&self) -> Option<&LocalResourceLimitError> {
         match self.source.as_ref() {
             Some(LocalFileErrorSource::ResourceLimit(error)) => Some(error),
@@ -318,7 +337,8 @@ impl LocalFileError {
     /// Returns the retained native I/O source, when the failure originated in
     /// a standard-library I/O operation.
     #[must_use]
-    #[inline]
+    #[cfg_attr(not(coverage), inline)]
+    #[cfg_attr(coverage, inline(never))]
     pub fn io_error(&self) -> Option<&io::Error> {
         match self.source.as_ref() {
             Some(LocalFileErrorSource::Io(error)) => Some(error),
@@ -328,7 +348,8 @@ impl LocalFileError {
 
     /// Returns the standard I/O kind represented by this structured error.
     #[must_use]
-    #[inline]
+    #[cfg_attr(not(coverage), inline)]
+    #[cfg_attr(coverage, inline(never))]
     pub fn io_error_kind(&self) -> io::ErrorKind {
         standard_io_error_kind(self)
     }
@@ -340,7 +361,8 @@ impl LocalFileError {
     /// `Some` contains an I/O, path codec, or resource-limit source; `None`
     /// means this error was constructed without an originating source.
     #[must_use]
-    #[inline(always)]
+    #[cfg_attr(not(coverage), inline(always))]
+    #[cfg_attr(coverage, inline(never))]
     pub fn into_source(self) -> Option<LocalFileErrorSource> {
         self.source
     }
@@ -352,7 +374,8 @@ impl LocalFileError {
     /// An I/O error that preserves the originating native kind when available
     /// and retains this structured error as its source.
     #[must_use]
-    #[inline]
+    #[cfg_attr(not(coverage), inline)]
+    #[cfg_attr(coverage, inline(never))]
     pub fn into_io_error(self) -> io::Error {
         io::Error::new(self.io_error_kind(), self)
     }
@@ -366,14 +389,16 @@ impl LocalFileError {
     /// # Returns
     ///
     /// The reclassified error.
-    #[inline(always)]
+    #[cfg_attr(not(coverage), inline(always))]
+    #[cfg_attr(coverage, inline(never))]
     pub(crate) const fn with_kind(mut self, kind: LocalFileErrorKind) -> Self {
         self.kind = kind;
         self
     }
 
     /// Reclassifies the operation after a shared validation stage.
-    #[inline(always)]
+    #[cfg_attr(not(coverage), inline(always))]
+    #[cfg_attr(coverage, inline(never))]
     pub(crate) const fn with_operation(mut self, operation: LocalFileOperation) -> Self {
         self.operation = operation;
         self
@@ -384,7 +409,8 @@ impl LocalFileError {
 ///
 /// Native I/O sources retain their exact kind. Errors without one use the
 /// closest stable local classification.
-#[inline]
+#[cfg_attr(not(coverage), inline)]
+#[cfg_attr(coverage, inline(never))]
 fn standard_io_error_kind(error: &LocalFileError) -> io::ErrorKind {
     match error.source.as_ref() {
         Some(LocalFileErrorSource::Io(source)) => source.kind(),
@@ -432,7 +458,8 @@ impl fmt::Display for LocalFileError {
 
 impl Error for LocalFileError {
     /// Returns the concrete I/O or path codec source, if present.
-    #[inline]
+    #[cfg_attr(not(coverage), inline)]
+    #[cfg_attr(coverage, inline(never))]
     fn source(&self) -> Option<&(dyn Error + 'static)> {
         self.source.as_ref().and_then(Error::source)
     }
@@ -447,7 +474,8 @@ impl Error for LocalFileError {
 /// # Returns
 ///
 /// The stable local error kind corresponding to the native error.
-#[inline]
+#[cfg_attr(not(coverage), inline)]
+#[cfg_attr(coverage, inline(never))]
 fn classify_io_error(error: &io::Error) -> LocalFileErrorKind {
     match error.kind() {
         io::ErrorKind::NotFound => LocalFileErrorKind::NotFound,
@@ -487,11 +515,7 @@ mod tests {
         )
         .with_kind(LocalFileErrorKind::InvalidOptions)
         .with_operation(LocalFileOperation::OpenWriter);
-        error.replace_paths(
-            Some("source".into()),
-            Some("target".into()),
-            Some("/workspace".into()),
-        );
+        error.replace_paths(Some("source".into()), Some("target".into()), Some("/workspace".into()));
 
         assert_eq!(LocalFileErrorKind::InvalidOptions, error.kind());
         assert_eq!(LocalFileOperation::OpenWriter, error.operation());
@@ -507,23 +531,17 @@ mod tests {
     #[test]
     fn test_resource_limit_and_cleanup_sources_are_preserved_independently() {
         let source = LocalResourceLimitError::new(LocalResourceKind::Entry, 4, 1, 2);
-        let error = LocalFileError::from_resource_limit(
-            LocalFileOperation::Copy,
-            Some("source".into()),
-            source,
-        )
-        .with_cleanup_error(LocalFileError::from_io(
-            LocalFileOperation::Cleanup,
-            Some("temporary".into()),
-            None,
-            io::Error::from(io::ErrorKind::PermissionDenied),
-        ));
+        let error = LocalFileError::from_resource_limit(LocalFileOperation::Copy, Some("source".into()), source)
+            .with_cleanup_error(LocalFileError::from_io(
+                LocalFileOperation::Cleanup,
+                Some("temporary".into()),
+                None,
+                io::Error::from(io::ErrorKind::PermissionDenied),
+            ));
 
         assert_eq!(Some(&source), error.resource_limit_error());
         assert!(error.io_error().is_none());
-        let cleanup = error
-            .cleanup_error()
-            .expect("cleanup error should be retained");
+        let cleanup = error.cleanup_error().expect("cleanup error should be retained");
         assert_eq!(LocalFileOperation::Cleanup, cleanup.operation());
         assert_eq!(
             Some(io::ErrorKind::PermissionDenied),
@@ -534,16 +552,10 @@ mod tests {
 
     #[test]
     fn test_source_free_error_reason_maps_to_the_compatible_io_kind() {
-        let error = LocalFileError::new(
-            LocalFileErrorKind::RequirementNotMet,
-            LocalFileOperation::Commit,
-        )
-        .with_reason("the requested guarantee is unavailable");
+        let error = LocalFileError::new(LocalFileErrorKind::RequirementNotMet, LocalFileOperation::Commit)
+            .with_reason("the requested guarantee is unavailable");
 
-        assert_eq!(
-            Some("the requested guarantee is unavailable"),
-            error.reason()
-        );
+        assert_eq!(Some("the requested guarantee is unavailable"), error.reason());
         assert_eq!(io::ErrorKind::Unsupported, error.io_error_kind());
         assert!(error.typed_source().is_none());
         assert!(error.to_string().contains("requested guarantee"));

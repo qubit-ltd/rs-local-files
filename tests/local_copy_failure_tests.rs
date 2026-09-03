@@ -8,23 +8,21 @@
 
 //! Integration tests for typed unified-copy failures.
 
-#[cfg(any(feature = "internal-test-support", unix))]
+#[cfg(any(feature = "test-support", unix))]
 use std::fs;
 use std::path::PathBuf;
-#[cfg(feature = "internal-test-support")]
-use std::process::Command;
 
 use qubit_local_files::LocalFileSystem;
-#[cfg(feature = "internal-test-support")]
+#[cfg(feature = "test-support")]
 use qubit_local_files::options::LocalCopyConflictPolicy;
 use qubit_local_files::options::LocalCopyOptions;
-#[cfg(feature = "internal-test-support")]
+#[cfg(feature = "test-support")]
 use qubit_local_files::options::LocalMetadataPreservePolicy;
 use qubit_local_files::outcome::LocalCopyFailureState;
 use qubit_local_files::outcome::LocalCopyStats;
-#[cfg(all(feature = "internal-test-support", not(windows)))]
+#[cfg(all(feature = "test-support", not(windows)))]
 use qubit_local_files::policy::LocalDurabilityRequirement;
-#[cfg(feature = "internal-test-support")]
+#[cfg(feature = "test-support")]
 use qubit_local_files::test_support::install_test_fault;
 
 /// Creates a process-specific path that is absent before each test use.
@@ -33,31 +31,13 @@ fn temp_path(name: &str) -> PathBuf {
 }
 
 /// Runs one test-support-only fault case in an isolated child test process.
-#[cfg(feature = "internal-test-support")]
-fn run_in_test_fault_process<F>(test_name: &str, fault: &str, action: F)
+#[cfg(feature = "test-support")]
+fn run_in_test_fault_process<F>(_test_name: &str, fault: &str, action: F)
 where
     F: FnOnce(),
 {
-    const TEST_FAULT_ENV: &str = "QUBIT_LOCAL_FILES_TEST_FAULT";
-    const TEST_FAULT_CHILD_ENV: &str = "QUBIT_LOCAL_FILES_TEST_FAULT_CHILD";
-    if std::env::var_os(TEST_FAULT_ENV).is_some_and(|selected| selected == std::ffi::OsStr::new(fault)) {
-        let _fault = install_test_fault(fault).expect("test fault controller should install");
-        action();
-        return;
-    }
-    if std::env::var_os(TEST_FAULT_CHILD_ENV).is_some() {
-        return;
-    }
-    let executable = std::env::current_exe().expect("test executable should be available");
-    let status = Command::new(executable)
-        .arg("--exact")
-        .arg(test_name)
-        .arg("--nocapture")
-        .env(TEST_FAULT_ENV, fault)
-        .env(TEST_FAULT_CHILD_ENV, "1")
-        .status()
-        .expect("test fault child should launch");
-    assert!(status.success(), "test fault child should pass");
+    let _fault = install_test_fault(fault).expect("test fault controller should install");
+    action();
 }
 
 /// Verifies preflight failures retain an unchanged typed copy state.
@@ -113,7 +93,7 @@ fn test_copy_failure_display_reports_failed_descendant() {
 }
 
 /// Verifies a second-child fault retains prior recursive publication stats.
-#[cfg(feature = "internal-test-support")]
+#[cfg(feature = "test-support")]
 #[test]
 fn test_copy_failure_reports_second_child_partial_publication() {
     const TEST_NAME: &str = "test_copy_failure_reports_second_child_partial_publication";
@@ -143,7 +123,7 @@ fn test_copy_failure_reports_second_child_partial_publication() {
 
 /// Verifies a failed symlink replacement cannot report unchanged after the
 /// previous destination has already been removed.
-#[cfg(all(feature = "internal-test-support", unix))]
+#[cfg(all(feature = "test-support", unix))]
 #[test]
 fn test_symlink_replacement_failure_reports_partial_publication() {
     use std::os::unix::fs::symlink;
@@ -170,7 +150,7 @@ fn test_symlink_replacement_failure_reports_partial_publication() {
 }
 
 /// Verifies a parent synchronization failure follows completed publication.
-#[cfg(feature = "internal-test-support")]
+#[cfg(feature = "test-support")]
 #[cfg(not(windows))]
 #[test]
 fn test_copy_failure_reports_published_after_parent_sync_fault() {
@@ -200,7 +180,7 @@ fn test_copy_failure_reports_published_after_parent_sync_fault() {
 }
 
 /// Verifies staging context is retained only when cleanup also fails.
-#[cfg(feature = "internal-test-support")]
+#[cfg(feature = "test-support")]
 #[test]
 fn test_copy_failure_retains_staging_only_for_cleanup_failure() {
     const TEST_NAME: &str = "test_copy_failure_retains_staging_only_for_cleanup_failure";
@@ -221,7 +201,7 @@ fn test_copy_failure_retains_staging_only_for_cleanup_failure() {
 }
 
 /// Verifies successful staging cleanup omits obsolete staging diagnostics.
-#[cfg(feature = "internal-test-support")]
+#[cfg(feature = "test-support")]
 #[test]
 fn test_copy_failure_omits_staging_after_successful_cleanup() {
     const TEST_NAME: &str = "test_copy_failure_omits_staging_after_successful_cleanup";
@@ -243,7 +223,7 @@ fn test_copy_failure_omits_staging_after_successful_cleanup() {
 
 /// Verifies destination preparation errors without publication are
 /// conservative.
-#[cfg(feature = "internal-test-support")]
+#[cfg(feature = "test-support")]
 #[test]
 fn test_copy_failure_reports_indeterminate_for_destination_preparation_fault() {
     const TEST_NAME: &str = "test_copy_failure_reports_indeterminate_for_destination_preparation_fault";
@@ -265,7 +245,7 @@ fn test_copy_failure_reports_indeterminate_for_destination_preparation_fault() {
 
 /// Verifies source inspection failures in the recursive pipeline prove that no
 /// destination publication began.
-#[cfg(feature = "internal-test-support")]
+#[cfg(feature = "test-support")]
 #[test]
 fn test_copy_failure_reports_unchanged_for_source_inspection_fault() {
     const TEST_NAME: &str = "test_copy_failure_reports_unchanged_for_source_inspection_fault";
@@ -287,7 +267,7 @@ fn test_copy_failure_reports_unchanged_for_source_inspection_fault() {
 }
 
 /// Verifies recursive traversal rejects a coverage-injected directory cycle.
-#[cfg(feature = "internal-test-support")]
+#[cfg(feature = "test-support")]
 #[test]
 fn test_copy_failure_reports_directory_identity_cycle() {
     const TEST_NAME: &str = "test_copy_failure_reports_directory_identity_cycle";
@@ -306,7 +286,7 @@ fn test_copy_failure_reports_directory_identity_cycle() {
 }
 
 /// Verifies a coverage-injected staging permission failure remains typed.
-#[cfg(feature = "internal-test-support")]
+#[cfg(feature = "test-support")]
 #[test]
 fn test_copy_failure_reports_staging_permission_failure() {
     const TEST_NAME: &str = "test_copy_failure_reports_staging_permission_failure";
@@ -328,7 +308,7 @@ fn test_copy_failure_reports_staging_permission_failure() {
 }
 
 /// Verifies a test-support-only directory-statistics overflow remains typed.
-#[cfg(feature = "internal-test-support")]
+#[cfg(feature = "test-support")]
 #[test]
 fn test_copy_failure_reports_directory_statistics_overflow() {
     const TEST_NAME: &str = "test_copy_failure_reports_directory_statistics_overflow";
@@ -351,7 +331,7 @@ fn test_copy_failure_reports_directory_statistics_overflow() {
 }
 
 /// Verifies a test-support-only skipped-file statistics overflow remains typed.
-#[cfg(feature = "internal-test-support")]
+#[cfg(feature = "test-support")]
 #[test]
 fn test_copy_failure_reports_skipped_statistics_overflow() {
     const TEST_NAME: &str = "test_copy_failure_reports_skipped_statistics_overflow";
@@ -374,7 +354,7 @@ fn test_copy_failure_reports_skipped_statistics_overflow() {
 }
 
 /// Verifies a test-support-only copied-file statistics overflow remains typed.
-#[cfg(feature = "internal-test-support")]
+#[cfg(feature = "test-support")]
 #[test]
 fn test_copy_failure_reports_file_statistics_overflow() {
     const TEST_NAME: &str = "test_copy_failure_reports_file_statistics_overflow";
@@ -392,7 +372,7 @@ fn test_copy_failure_reports_file_statistics_overflow() {
 }
 
 /// Verifies a test-support-only copied-byte statistics overflow remains typed.
-#[cfg(feature = "internal-test-support")]
+#[cfg(feature = "test-support")]
 #[test]
 fn test_copy_failure_reports_byte_statistics_overflow() {
     const TEST_NAME: &str = "test_copy_failure_reports_byte_statistics_overflow";
@@ -411,7 +391,7 @@ fn test_copy_failure_reports_byte_statistics_overflow() {
 
 /// Verifies a test-support-only overwritten-entry statistics overflow remains
 /// typed.
-#[cfg(feature = "internal-test-support")]
+#[cfg(feature = "test-support")]
 #[test]
 fn test_copy_failure_reports_overwritten_statistics_overflow() {
     const TEST_NAME: &str = "test_copy_failure_reports_overwritten_statistics_overflow";

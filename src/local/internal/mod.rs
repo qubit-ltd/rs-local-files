@@ -158,7 +158,6 @@ pub(crate) use rooted_namespace_io::open_root_directory_reader;
 #[cfg(unix)]
 pub(crate) use rooted_namespace_io::open_rooted_directory_reader;
 #[cfg(unix)]
-pub(crate) use rooted_namespace_io::read_root_directory;
 #[cfg(unix)]
 pub(crate) use rooted_namespace_io::read_rooted_directory;
 #[cfg(unix)]
@@ -201,8 +200,6 @@ pub(crate) use windows_rooted::open_rooted_native_writer;
 pub(crate) use windows_rooted::probe_windows_limits;
 #[cfg(windows)]
 pub(crate) use windows_rooted::probe_windows_space;
-#[cfg(windows)]
-pub(crate) use windows_rooted::read_root_directory;
 #[cfg(windows)]
 pub(crate) use windows_rooted::read_rooted_directory;
 #[cfg(windows)]

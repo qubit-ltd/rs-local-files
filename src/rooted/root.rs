@@ -47,8 +47,6 @@ pub struct Root {
     #[cfg(any(unix, windows))]
     directory: File,
 }
-
-#[allow(dead_code)]
 impl Root {
     /// Opens and anchors a local filesystem root.
     ///
@@ -73,7 +71,9 @@ impl Root {
 
     /// Returns the diagnostic path captured when the root was opened.
     #[must_use]
-    #[inline(always)]
+    // qubit-style: allow coverage-cfg
+    #[cfg_attr(not(coverage), inline(always))]
+    #[cfg_attr(coverage, inline(never))]
     pub fn path(&self) -> &Path {
         &self.path
     }
@@ -85,36 +85,10 @@ impl Root {
     /// Returns an I/O error when the operating system cannot duplicate the
     /// already-opened authority handle.
     #[cfg(any(unix, windows))]
-    #[inline]
+    #[cfg_attr(not(coverage), inline)]
+    #[cfg_attr(coverage, inline(never))]
     pub fn try_clone_authority(&self) -> Result<File> {
         self.directory.try_clone()
-    }
-
-    /// Copies one descendant entry beneath this opened root.
-    ///
-    /// # Parameters
-    ///
-    /// * `source` - Existing rooted source entry.
-    /// * `destination` - Rooted destination entry beneath the same root.
-    /// * `options` - Explicit copy policies.
-    ///
-    /// # Returns
-    ///
-    /// Exact statistics accumulated by the completed copy.
-    ///
-    /// # Errors
-    ///
-    /// Returns a structured copy error when the source is unsupported,
-    /// destination policies reject an entry, traversal fails, or a staged file
-    /// cannot be installed.
-    #[inline(always)]
-    pub fn copy(
-        &self,
-        source: &path::Path,
-        destination: &path::Path,
-        options: LocalCopyDirOptions,
-    ) -> std::result::Result<LocalCopyDirStats, LocalCopyDirError> {
-        self.copy_with_durability(source, destination, options, LocalDurabilityRequirement::Required)
     }
 
     /// Reads metadata for the opened root directory through its descriptor.
@@ -159,7 +133,7 @@ impl Root {
     /// Returns an I/O error when traversal cannot remain beneath the opened
     /// root or when the final entry cannot be inspected.
     pub fn symlink_metadata(&self, path: &path::Path) -> Result<Metadata> {
-        #[cfg(feature = "internal-test-support")]
+        #[cfg(feature = "test-support")]
         if local::take_test_support_on_nth("rooted-copy-destination-metadata-native", 2) {
             return Err(crate::local::test_fault_error());
         }
@@ -212,39 +186,6 @@ impl Root {
         }
     }
 
-    /// Creates a final symbolic-link entry beneath this opened root.
-    ///
-    /// # Parameters
-    ///
-    /// * `target`: Link target stored verbatim in the new entry.
-    /// * `path`: Validated rooted destination path.
-    /// * `targets_directory`: Whether Windows must create a directory link.
-    ///
-    /// # Errors
-    ///
-    /// Returns an I/O error when the platform rejects link creation or the
-    /// destination cannot be addressed beneath this root.
-    pub fn create_symlink(&self, target: &Path, path: &path::Path, targets_directory: bool) -> Result<()> {
-        #[cfg(unix)]
-        {
-            let _ = targets_directory;
-            local::create_rooted_symlink(&self.directory, &self.path, target, path)
-        }
-        #[cfg(windows)]
-        {
-            self.create_symlink_for_copy(target, path, targets_directory)
-                .map_err(local::RootedSymlinkCreateError::into_io_error)
-        }
-        #[cfg(not(any(unix, windows)))]
-        {
-            let _ = (target, path, targets_directory);
-            Err(Error::new(
-                ErrorKind::Unsupported,
-                "symbolic links are unsupported on this platform",
-            ))
-        }
-    }
-
     /// Creates a symbolic link while retaining publication and rollback facts.
     pub(super) fn create_symlink_for_copy(
         &self,
@@ -252,7 +193,7 @@ impl Root {
         path: &path::Path,
         targets_directory: bool,
     ) -> std::result::Result<(), local::RootedSymlinkCreateError> {
-        #[cfg(feature = "internal-test-support")]
+        #[cfg(feature = "test-support")]
         if local::take_test_support("rooted-copy-symlink-create") {
             return Err(local::RootedSymlinkCreateError::new(
                 local::RootedSymlinkCreateFailureState::Unchanged,
@@ -299,37 +240,6 @@ impl Root {
         local::rooted_link_targets_directory(&self.directory, path)
     }
 
-    /// Lists immediate children of the opened root directory.
-    ///
-    /// # Errors
-    /// Returns an I/O error when the descriptor cannot be enumerated or an
-    /// entry cannot be inspected without following links.
-    pub fn read_root_dir(&self) -> Result<Vec<Entry>> {
-        #[cfg(unix)]
-        {
-            local::read_root_directory(&self.directory, &self.path).map(|entries| {
-                entries
-                    .into_iter()
-                    .map(|(name, status)| Entry::new(name, Metadata::from_stat(&status)))
-                    .collect()
-            })
-        }
-        #[cfg(windows)]
-        {
-            local::read_root_directory(&self.directory, &self.path)?
-                .into_iter()
-                .map(|(name, file)| Metadata::from_open_file(&file).map(|metadata| Entry::new(name, metadata)))
-                .collect()
-        }
-        #[cfg(not(any(unix, windows)))]
-        {
-            Err(Error::new(
-                ErrorKind::Unsupported,
-                "descriptor-relative local roots are unsupported on this platform",
-            ))
-        }
-    }
-
     /// Opens a lazy reader for immediate children of this root directory.
     ///
     /// # Errors
@@ -345,7 +255,7 @@ impl Root {
     /// Returns an I/O error when traversal cannot remain beneath the opened
     /// root or the directory cannot be enumerated.
     pub fn read_dir(&self, path: &path::Path) -> Result<Vec<Entry>> {
-        #[cfg(feature = "internal-test-support")]
+        #[cfg(feature = "test-support")]
         if local::test_support_enabled("rooted-copy-directory-read-native") {
             return Err(crate::local::test_fault_error());
         }
@@ -436,7 +346,7 @@ impl Root {
     /// Returns an I/O error when secure traversal or creation fails, including
     /// when the parent is missing or the destination already exists.
     pub fn create_dir(&self, path: &path::Path) -> Result<()> {
-        #[cfg(feature = "internal-test-support")]
+        #[cfg(feature = "test-support")]
         if local::test_support_enabled("rooted-copy-directory-create-native") {
             return Err(crate::local::test_fault_error());
         }
@@ -475,36 +385,6 @@ impl Root {
         }
     }
 
-    /// Ensures one descendant directory exists without creating parents.
-    ///
-    /// # Errors
-    /// Returns an I/O error when secure traversal fails or an existing entry
-    /// is not a directory.
-    pub fn ensure_dir(&self, path: &path::Path) -> Result<()> {
-        #[cfg(any(unix, windows))]
-        {
-            local::create_rooted_directory(&self.directory, &self.path, path, false, true)
-        }
-        #[cfg(not(any(unix, windows)))]
-        {
-            let _ = path;
-            Err(Error::new(
-                ErrorKind::Unsupported,
-                "descriptor-relative local roots are unsupported on this platform",
-            ))
-        }
-    }
-
-    /// Ensures a descendant directory and all of its parents exist.
-    ///
-    /// # Errors
-    /// Returns an I/O error when secure traversal fails or an existing entry
-    /// in the chain is not a directory.
-    #[inline]
-    pub fn ensure_dir_all(&self, path: &path::Path) -> Result<()> {
-        self.create_dir_all(path)
-    }
-
     /// Removes one descendant regular file or symbolic link.
     ///
     /// # Errors
@@ -518,7 +398,7 @@ impl Root {
                     "rooted remove_file does not remove directories",
                 ));
             }
-            #[cfg(feature = "internal-test-support")]
+            #[cfg(feature = "test-support")]
             if local::test_support_enabled("rooted-copy-remove-file-native") {
                 return Err(crate::local::test_fault_error());
             }
@@ -572,7 +452,7 @@ impl Root {
                     "rooted remove_tree requires a directory",
                 ));
             }
-            #[cfg(feature = "internal-test-support")]
+            #[cfg(feature = "test-support")]
             if local::test_support_enabled("rooted-copy-remove-tree-native") {
                 return Err(crate::local::test_fault_error());
             }
@@ -642,7 +522,7 @@ impl Root {
                 .unix_mode()
                 .expect("Unix rooted metadata always carries a mode");
             let mode = permissions.resolve_unix_mode(current_mode);
-            #[cfg(feature = "internal-test-support")]
+            #[cfg(feature = "test-support")]
             if local::test_support_enabled("rooted-copy-set-permissions-native") {
                 return Err(crate::local::test_fault_error());
             }
@@ -669,7 +549,7 @@ impl Root {
     /// Returns an I/O error when traversal escapes through a link or the file
     /// cannot be opened.
     pub fn open_reader(&self, path: &path::Path, options: &read::OpenOptions) -> Result<File> {
-        #[cfg(feature = "internal-test-support")]
+        #[cfg(feature = "test-support")]
         if local::test_support_enabled("rooted-copy-source-open-native") {
             return Err(crate::local::test_fault_error());
         }
@@ -705,24 +585,6 @@ impl Root {
                 "descriptor-relative local roots are unsupported on this platform",
             ))
         }
-    }
-
-    /// Begins a descriptor-relative atomic replacement and creates missing
-    /// parent directories.
-    ///
-    /// # Parameters
-    ///
-    /// * `path` - Validated non-empty relative destination beneath this root.
-    ///
-    /// # Returns
-    /// A staging writer that publishes only when committed.
-    ///
-    /// # Errors
-    /// Returns a structured atomic-write error when parent preparation or
-    /// staging-file creation fails.
-    #[inline]
-    pub fn begin_atomic_write(&self, path: &path::Path) -> std::result::Result<Writer, LocalAtomicWriteError> {
-        self.begin_atomic_write_with_options(path, LocalAtomicWriteOptions::new().with_parent())
     }
 
     /// Begins a descriptor-relative atomic replacement with explicit options.
@@ -781,7 +643,8 @@ impl Root {
     /// Returns a structured copy error when the source is unsupported,
     /// destination policies reject an entry, traversal fails, staging cannot
     /// be installed, or required synchronization fails.
-    #[inline(always)]
+    #[cfg_attr(not(coverage), inline(always))]
+    #[cfg_attr(coverage, inline(never))]
     pub fn copy_with_durability(
         &self,
         source: &path::Path,
@@ -799,7 +662,7 @@ impl Root {
     /// Returns an I/O error when secure parent traversal or directory
     /// synchronization is unavailable or fails.
     pub fn sync_parent(&self, path: &path::Path) -> Result<()> {
-        #[cfg(feature = "internal-test-support")]
+        #[cfg(feature = "test-support")]
         if local::test_support_enabled("rooted-copy-parent-sync")
             || local::test_support_enabled("rooted-rename-parent-sync")
         {

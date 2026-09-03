@@ -56,35 +56,41 @@ impl LocalCopyStats {
 
     /// Returns the number of regular files copied.
     #[must_use]
-    #[inline(always)]
+    // qubit-style: allow coverage-cfg
+    #[cfg_attr(not(coverage), inline(always))]
+    #[cfg_attr(coverage, inline(never))]
     pub const fn files(self) -> u64 {
         self.files
     }
 
     /// Returns the number of destination directories created.
     #[must_use]
-    #[inline(always)]
+    #[cfg_attr(not(coverage), inline(always))]
+    #[cfg_attr(coverage, inline(never))]
     pub const fn directories(self) -> u64 {
         self.directories
     }
 
     /// Returns the number of regular-file bytes copied.
     #[must_use]
-    #[inline(always)]
+    #[cfg_attr(not(coverage), inline(always))]
+    #[cfg_attr(coverage, inline(never))]
     pub const fn bytes(self) -> u64 {
         self.bytes
     }
 
     /// Returns the number of existing file destinations skipped.
     #[must_use]
-    #[inline(always)]
+    #[cfg_attr(not(coverage), inline(always))]
+    #[cfg_attr(coverage, inline(never))]
     pub const fn skipped(self) -> u64 {
         self.skipped
     }
 
     /// Returns the number of destinations replaced or merged.
     #[must_use]
-    #[inline(always)]
+    #[cfg_attr(not(coverage), inline(always))]
+    #[cfg_attr(coverage, inline(never))]
     pub const fn overwritten(self) -> u64 {
         self.overwritten
     }

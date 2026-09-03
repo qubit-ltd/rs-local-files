@@ -8,36 +8,36 @@
 //! Private fault injection support used by deterministic integration tests.
 
 use std::io;
-#[cfg(feature = "internal-test-support")]
+#[cfg(feature = "test-support")]
 use std::sync::Condvar;
-#[cfg(feature = "internal-test-support")]
+#[cfg(feature = "test-support")]
 use std::sync::Mutex;
-#[cfg(feature = "internal-test-support")]
+#[cfg(feature = "test-support")]
 use std::sync::atomic::AtomicBool;
-#[cfg(feature = "internal-test-support")]
+#[cfg(feature = "test-support")]
 use std::sync::atomic::AtomicUsize;
-#[cfg(feature = "internal-test-support")]
+#[cfg(feature = "test-support")]
 use std::sync::atomic::Ordering;
 
-#[cfg(feature = "internal-test-support")]
+#[cfg(feature = "test-support")]
 use super::active_fault::ActiveFault;
-#[cfg(feature = "internal-test-support")]
+#[cfg(feature = "test-support")]
 use super::test_fault_guard::TestFaultGuard;
 
 /// Whether the selected one-shot fault has already been consumed.
-#[cfg(feature = "internal-test-support")]
+#[cfg(feature = "test-support")]
 static ONE_SHOT_FAULT_TAKEN: AtomicBool = AtomicBool::new(false);
 
 /// Number of times the selected occurrence-counted boundary was reached.
-#[cfg(feature = "internal-test-support")]
+#[cfg(feature = "test-support")]
 static NTH_FAULT_OCCURRENCES: AtomicUsize = AtomicUsize::new(0);
 
 /// Process-local selector and waiter notification shared by integration tests.
-#[cfg(feature = "internal-test-support")]
+#[cfg(feature = "test-support")]
 static ACTIVE_FAULT: (Mutex<Option<ActiveFault>>, Condvar) = (Mutex::new(None), Condvar::new());
 
 /// Installs one deterministic test fault for the current process.
-#[cfg(feature = "internal-test-support")]
+#[cfg(feature = "test-support")]
 #[doc(hidden)]
 pub fn install_test_fault(name: &str) -> io::Result<TestFaultGuard> {
     let owner = std::thread::current().id();
@@ -68,7 +68,7 @@ pub fn install_test_fault(name: &str) -> io::Result<TestFaultGuard> {
     Ok(TestFaultGuard { active: true })
 }
 
-#[cfg(feature = "internal-test-support")]
+#[cfg(feature = "test-support")]
 impl Drop for TestFaultGuard {
     /// Releases the process-wide selector and occurrence counters.
     fn drop(&mut self) {
@@ -95,9 +95,11 @@ impl Drop for TestFaultGuard {
 /// `Some` with an I/O error when the feature is enabled and the subprocess
 /// selector matches `name`; otherwise `None`.
 #[must_use]
-#[inline(always)]
+// qubit-style: allow coverage-cfg
+#[cfg_attr(not(coverage), inline(always))]
+#[cfg_attr(coverage, inline(never))]
 pub(crate) fn io_error(name: &str) -> Option<io::Error> {
-    #[cfg(feature = "internal-test-support")]
+    #[cfg(feature = "test-support")]
     {
         if is_enabled(name) {
             return Some(fault_error());
@@ -109,17 +111,18 @@ pub(crate) fn io_error(name: &str) -> Option<io::Error> {
 
 /// Builds the platform-specific deterministic I/O failure used by selectors.
 #[must_use]
-#[inline]
+#[cfg_attr(not(coverage), inline)]
+#[cfg_attr(coverage, inline(never))]
 pub(crate) fn fault_error() -> io::Error {
-    #[cfg(all(feature = "internal-test-support", unix))]
+    #[cfg(all(feature = "test-support", unix))]
     {
         io::Error::from_raw_os_error(libc::EIO)
     }
-    #[cfg(all(feature = "internal-test-support", windows))]
+    #[cfg(all(feature = "test-support", windows))]
     {
         io::Error::from_raw_os_error(windows_sys::Win32::Foundation::ERROR_IO_DEVICE as i32)
     }
-    #[cfg(not(feature = "internal-test-support"))]
+    #[cfg(not(feature = "test-support"))]
     {
         io::Error::from(io::ErrorKind::Other)
     }
@@ -136,7 +139,8 @@ pub(crate) fn fault_error() -> io::Error {
 /// `true` only when the feature is enabled and the subprocess selector exactly
 /// matches `name`.
 #[must_use]
-#[inline(always)]
+#[cfg_attr(not(coverage), inline(always))]
+#[cfg_attr(coverage, inline(never))]
 pub(crate) fn is_enabled(name: &str) -> bool {
     is_enabled_impl(name)
 }
@@ -150,8 +154,9 @@ pub(crate) fn is_enabled(name: &str) -> bool {
 /// # Returns
 ///
 /// `true` only for the first matching call in the subprocess.
-#[cfg(feature = "internal-test-support")]
-#[inline(always)]
+#[cfg(feature = "test-support")]
+#[cfg_attr(not(coverage), inline(always))]
+#[cfg_attr(coverage, inline(never))]
 pub(crate) fn take(name: &str) -> bool {
     take_impl(name)
 }
@@ -166,9 +171,10 @@ pub(crate) fn take(name: &str) -> bool {
 /// # Returns
 ///
 /// `true` only for the requested matching invocation in the subprocess.
-#[cfg(feature = "internal-test-support")]
+#[cfg(feature = "test-support")]
 #[must_use]
-#[inline]
+#[cfg_attr(not(coverage), inline)]
+#[cfg_attr(coverage, inline(never))]
 pub(crate) fn take_on_nth(name: &str, occurrence: usize) -> bool {
     take_on_nth_impl(name, occurrence)
 }
@@ -181,23 +187,26 @@ pub(crate) fn take_on_nth(name: &str, occurrence: usize) -> bool {
 ///
 /// # Returns
 /// `true` when the selector matches; otherwise `false`.
-#[cfg(feature = "internal-test-support")]
-#[inline(always)]
+#[cfg(feature = "test-support")]
+#[cfg_attr(not(coverage), inline(always))]
+#[cfg_attr(coverage, inline(never))]
 fn is_enabled_impl(name: &str) -> bool {
+    let owner = std::thread::current().id();
     ACTIVE_FAULT
         .0
         .lock()
         .unwrap_or_else(std::sync::PoisonError::into_inner)
         .as_ref()
-        .is_some_and(|active| active.name == name)
+        .is_some_and(|active| active.owner == owner && active.name == name)
 }
 
 /// Provides the disabled-feature result for fault-selector checks.
 ///
 /// # Returns
 /// Always returns `false` when internal test support is disabled.
-#[cfg(not(feature = "internal-test-support"))]
-#[inline(always)]
+#[cfg(not(feature = "test-support"))]
+#[cfg_attr(not(coverage), inline(always))]
+#[cfg_attr(coverage, inline(never))]
 fn is_enabled_impl(_name: &str) -> bool {
     false
 }
@@ -210,8 +219,9 @@ fn is_enabled_impl(_name: &str) -> bool {
 ///
 /// # Returns
 /// `true` only for the first matching call after installation.
-#[cfg(feature = "internal-test-support")]
-#[inline(always)]
+#[cfg(feature = "test-support")]
+#[cfg_attr(not(coverage), inline(always))]
+#[cfg_attr(coverage, inline(never))]
 fn take_impl(name: &str) -> bool {
     is_enabled_impl(name)
         && ONE_SHOT_FAULT_TAKEN
@@ -228,9 +238,10 @@ fn take_impl(name: &str) -> bool {
 ///
 /// # Returns
 /// `true` only when `name` is selected and the requested occurrence is reached.
-#[cfg(feature = "internal-test-support")]
+#[cfg(feature = "test-support")]
 #[must_use]
-#[inline]
+#[cfg_attr(not(coverage), inline)]
+#[cfg_attr(coverage, inline(never))]
 fn take_on_nth_impl(name: &str, occurrence: usize) -> bool {
     is_enabled_impl(name) && NTH_FAULT_OCCURRENCES.fetch_add(1, Ordering::Relaxed) + 1 == occurrence
 }

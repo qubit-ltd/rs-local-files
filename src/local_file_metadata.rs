@@ -81,51 +81,57 @@ impl LocalFileMetadata {
 
     /// Returns the normalized entry kind.
     #[must_use = "the normalized entry kind should be inspected"]
-    #[cfg_attr(feature = "test-support", inline(never))]
-    #[cfg_attr(not(feature = "test-support"), inline(always))]
+    // qubit-style: allow coverage-cfg
+    #[cfg_attr(not(coverage), inline)]
+    #[cfg_attr(coverage, inline(never))]
     pub const fn kind(&self) -> LocalFileKind {
         self.kind
     }
 
     /// Returns the native metadata length in bytes.
     #[must_use]
-    #[cfg_attr(feature = "test-support", inline(never))]
-    #[cfg_attr(not(feature = "test-support"), inline(always))]
+    #[cfg_attr(not(coverage), inline)]
+    #[cfg_attr(coverage, inline(never))]
     pub const fn len(&self) -> u64 {
         self.len
     }
 
     /// Reports whether the entry length is zero.
     #[must_use]
-    #[inline]
+    #[cfg_attr(not(coverage), inline)]
+    #[cfg_attr(coverage, inline(never))]
     pub const fn is_empty(&self) -> bool {
         self.len == 0
     }
 
     /// Returns the access time, or `None` when unavailable.
     #[must_use]
-    #[inline]
+    #[cfg_attr(not(coverage), inline)]
+    #[cfg_attr(coverage, inline(never))]
     pub const fn accessed_at(&self) -> Option<SystemTime> {
         self.accessed_at
     }
 
     /// Returns the modification time, or `None` when unavailable.
     #[must_use]
-    #[inline]
+    #[cfg_attr(not(coverage), inline)]
+    #[cfg_attr(coverage, inline(never))]
     pub const fn modified_at(&self) -> Option<SystemTime> {
         self.modified_at
     }
 
     /// Returns the creation time, or `None` when unavailable.
     #[must_use]
-    #[inline]
+    #[cfg_attr(not(coverage), inline)]
+    #[cfg_attr(coverage, inline(never))]
     pub const fn created_at(&self) -> Option<SystemTime> {
         self.created_at
     }
 
     /// Returns permissions observed with this metadata value.
     #[must_use = "the observed permissions should be inspected"]
-    #[inline]
+    #[cfg_attr(not(coverage), inline)]
+    #[cfg_attr(coverage, inline(never))]
     pub const fn permissions(&self) -> LocalFilePermissions {
         self.permissions
     }
@@ -169,7 +175,8 @@ fn local_file_permissions(metadata: &Metadata) -> LocalFilePermissions {
 ///
 /// The most specific platform-independent kind available for the entry.
 #[cfg(unix)]
-#[inline]
+#[cfg_attr(not(coverage), inline)]
+#[cfg_attr(coverage, inline(never))]
 fn local_file_kind(file_type: std::fs::FileType) -> LocalFileKind {
     use std::os::unix::fs::FileTypeExt;
 
@@ -203,7 +210,8 @@ fn local_file_kind(file_type: std::fs::FileType) -> LocalFileKind {
 ///
 /// The regular, directory, symlink, or fallback kind available on the target.
 #[cfg(not(unix))]
-#[inline]
+#[cfg_attr(not(coverage), inline)]
+#[cfg_attr(coverage, inline(never))]
 fn local_file_kind(file_type: std::fs::FileType) -> LocalFileKind {
     if file_type.is_file() {
         LocalFileKind::File

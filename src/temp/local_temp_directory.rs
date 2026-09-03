@@ -6,6 +6,7 @@
 //    Licensed under the Apache License, Version 2.0.
 // =============================================================================
 //! Cleanup-owned temporary directories with host or rooted authority.
+// qubit-style: allow coverage-cfg
 
 use std::io::Error;
 use std::io::ErrorKind;
@@ -83,7 +84,8 @@ pub struct LocalTempDirectory {
 
 impl LocalTempDirectory {
     /// Builds a host temporary directory from its already-bound path.
-    #[inline]
+    #[cfg_attr(not(coverage), inline)]
+    #[cfg_attr(coverage, inline(never))]
     pub(crate) fn host(path: PathBuf, sandbox_path: PathBuf, symlink_policy: LocalSymlinkPolicy) -> Result<Self> {
         Ok(Self {
             host_identity: Some(TempEntryIdentity::from_path(&path)?),
@@ -97,7 +99,8 @@ impl LocalTempDirectory {
     }
 
     /// Builds a rooted temporary directory from the retained root authority.
-    #[inline]
+    #[cfg_attr(not(coverage), inline)]
+    #[cfg_attr(coverage, inline(never))]
     pub(crate) fn rooted(
         root: Arc<crate::rooted::Root>,
         path: PathBuf,
@@ -122,7 +125,8 @@ impl LocalTempDirectory {
 
     /// Returns the namespace-absolute generated path.
     #[must_use]
-    #[inline(always)]
+    #[cfg_attr(not(coverage), inline(always))]
+    #[cfg_attr(coverage, inline(never))]
     pub fn path(&self) -> &Path {
         &self.path
     }
@@ -175,7 +179,8 @@ impl LocalTempDirectory {
     }
 
     /// Resolves a normal relative descendant below this directory.
-    #[inline]
+    #[cfg_attr(not(coverage), inline)]
+    #[cfg_attr(coverage, inline(never))]
     pub fn descendant(&self, descendant: &Path) -> Result<PathBuf> {
         let relative = LocalRelativePath::new(descendant)?;
         Ok(self.path.join(relative.as_path()))
@@ -183,7 +188,8 @@ impl LocalTempDirectory {
 
     /// Atomically publishes the directory to a generated sibling outside its
     /// private sandbox.
-    #[inline]
+    #[cfg_attr(not(coverage), inline)]
+    #[cfg_attr(coverage, inline(never))]
     pub fn keep(self) -> std::result::Result<LocalPersistOutcome, LocalPersistError<Self>> {
         let requested_target = self.path.clone();
         let target = match generated_target(&requested_target) {
@@ -197,7 +203,8 @@ impl LocalTempDirectory {
 
     /// Persists the directory without replacement through its creating
     /// authority.
-    #[inline(always)]
+    #[cfg_attr(not(coverage), inline(always))]
+    #[cfg_attr(coverage, inline(never))]
     pub fn persist(
         self,
         target: impl AsRef<Path>,
@@ -207,7 +214,8 @@ impl LocalTempDirectory {
 
     /// Persists the directory with an explicit replacement policy through its
     /// creating authority.
-    #[inline(always)]
+    #[cfg_attr(not(coverage), inline(always))]
+    #[cfg_attr(coverage, inline(never))]
     pub fn persist_with(
         self,
         target: impl AsRef<Path>,
@@ -402,7 +410,8 @@ impl LocalTempDirectory {
 
     /// Removes the resource using the retained backend rather than a diagnostic
     /// path.
-    #[inline]
+    #[cfg_attr(not(coverage), inline)]
+    #[cfg_attr(coverage, inline(never))]
     fn remove_resource(&mut self) -> Result<()> {
         self.ensure_identity_matches()?;
         match &self.backend {
@@ -421,7 +430,7 @@ impl LocalTempDirectory {
 
     /// Removes the now-empty private sandbox.
     fn release_sandbox(&self) -> Result<()> {
-        #[cfg(feature = "internal-test-support")]
+        #[cfg(feature = "test-support")]
         if crate::local::take_test_support("temp-directory-sandbox-remove") {
             return Err(crate::local::test_fault_error());
         }
@@ -476,7 +485,8 @@ impl LocalTempDirectory {
 
     /// Rejects namespace cleanup after an indeterminate native publication
     /// attempt.
-    #[inline]
+    #[cfg_attr(not(coverage), inline)]
+    #[cfg_attr(coverage, inline(never))]
     fn ensure_cleanup_safe(&self) -> Result<()> {
         if self.state == LocalTempResourceState::Indeterminate {
             return Err(std::io::Error::other(
@@ -523,7 +533,8 @@ impl LocalTempDirectory {
     }
 
     /// Records whether a failed native install proves the source remains owned.
-    #[inline]
+    #[cfg_attr(not(coverage), inline)]
+    #[cfg_attr(coverage, inline(never))]
     fn record_native_persist_failure(&mut self, error: &std::io::Error) {
         self.state = if LocalPersistFailureState::from_error(LocalPersistStage::InstallDestination, error.kind())
             == LocalPersistFailureState::NotPublished

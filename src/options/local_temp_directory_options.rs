@@ -29,7 +29,9 @@ pub struct LocalTempDirectoryOptions {
 
 impl LocalTempDirectoryOptions {
     /// Creates default temporary-directory options.
-    #[inline]
+    // qubit-style: allow coverage-cfg
+    #[cfg_attr(not(coverage), inline)]
+    #[cfg_attr(coverage, inline(never))]
     pub const fn new() -> Self {
         Self {
             parent: None,
@@ -43,41 +45,47 @@ impl LocalTempDirectoryOptions {
     /// Returns the configured parent, or `None` for the owning filesystem's
     /// PWD.
     #[must_use]
-    #[inline(always)]
+    #[cfg_attr(not(coverage), inline(always))]
+    #[cfg_attr(coverage, inline(never))]
     pub fn parent(&self) -> Option<&Path> {
         self.parent.as_deref()
     }
 
     /// Returns the optional directory-name prefix.
     #[must_use]
-    #[inline(always)]
+    #[cfg_attr(not(coverage), inline(always))]
+    #[cfg_attr(coverage, inline(never))]
     pub fn prefix(&self) -> Option<&str> {
         self.prefix.as_deref()
     }
 
     /// Returns the optional directory-name suffix.
     #[must_use]
-    #[inline(always)]
+    #[cfg_attr(not(coverage), inline(always))]
+    #[cfg_attr(coverage, inline(never))]
     pub fn suffix(&self) -> Option<&str> {
         self.suffix.as_deref()
     }
 
     /// Returns the optional maximum random-name creation attempts.
     #[must_use]
-    #[inline(always)]
+    #[cfg_attr(not(coverage), inline(always))]
+    #[cfg_attr(coverage, inline(never))]
     pub const fn max_attempts(&self) -> Option<usize> {
         self.max_attempts
     }
 
     /// Returns whether missing parent directories are created.
     #[must_use]
-    #[inline(always)]
+    #[cfg_attr(not(coverage), inline(always))]
+    #[cfg_attr(coverage, inline(never))]
     pub const fn creates_parent(&self) -> bool {
         self.create_parent
     }
 
     /// Enables recursive creation of a missing parent directory.
-    #[inline(always)]
+    #[cfg_attr(not(coverage), inline(always))]
+    #[cfg_attr(coverage, inline(never))]
     pub const fn with_create_parent(mut self) -> Self {
         self.create_parent = true;
         self
@@ -118,14 +126,16 @@ impl LocalTempDirectoryOptions {
     /// # Parameters
     ///
     /// - `max_attempts`: Positive attempt count.
-    #[inline(always)]
+    #[cfg_attr(not(coverage), inline(always))]
+    #[cfg_attr(coverage, inline(never))]
     pub const fn with_max_attempts(mut self, max_attempts: usize) -> Self {
         self.max_attempts = Some(max_attempts);
         self
     }
 
     /// Removes the random-name attempt budget.
-    #[inline(always)]
+    #[cfg_attr(not(coverage), inline(always))]
+    #[cfg_attr(coverage, inline(never))]
     pub const fn without_max_attempts(mut self) -> Self {
         self.max_attempts = None;
         self

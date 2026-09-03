@@ -185,7 +185,7 @@ fn remove_host_non_directory(path: &Path, metadata: &fs::Metadata) -> io::Result
 
 /// Injects the deterministic recursive-delete fault used by contract tests.
 fn maybe_fail_host_delete(path: &Path, removed_any: bool) -> LocalResult<()> {
-    #[cfg(feature = "internal-test-support")]
+    #[cfg(feature = "test-support")]
     if crate::local::take_test_support_on_nth("host-delete-directory-entry-second", 2) {
         return Err(delete_entry_error(path, removed_any, crate::local::test_fault_error()));
     }

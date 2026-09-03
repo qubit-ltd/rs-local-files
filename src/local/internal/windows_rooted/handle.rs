@@ -103,7 +103,9 @@ pub(crate) fn open_root_directory(path: &Path) -> Result<File> {
 /// # Errors
 ///
 /// Returns an I/O error when traversal, opening, or metadata inspection fails.
-#[inline]
+// qubit-style: allow coverage-cfg
+#[cfg_attr(not(coverage), inline)]
+#[cfg_attr(coverage, inline(never))]
 pub(crate) fn read_rooted_symlink_metadata(
     root: &File,
     _diagnostic_root: &Path,
@@ -185,7 +187,8 @@ pub(super) fn open_entry(
 
 /// Opens one rooted entry without following or rejecting its final reparse
 /// point.
-#[inline]
+#[cfg_attr(not(coverage), inline)]
+#[cfg_attr(coverage, inline(never))]
 pub(super) fn open_entry_no_follow(
     root: &File,
     path: &LocalRelativePath,
@@ -198,7 +201,8 @@ pub(super) fn open_entry_no_follow(
 }
 
 /// Converts a native path to a NUL-terminated UTF-16 string.
-#[inline]
+#[cfg_attr(not(coverage), inline)]
+#[cfg_attr(coverage, inline(never))]
 fn wide_path(path: &Path) -> Result<Vec<u16>> {
     let units: Vec<u16> = path.as_os_str().encode_wide().collect();
     if units.contains(&0) {
@@ -314,7 +318,8 @@ fn unicode_string(value: &OsStr) -> Result<OwnedUnicodeString> {
     Ok(OwnedUnicodeString { _units: units, header })
 }
 /// Converts an NTSTATUS result into a standard I/O result.
-#[inline]
+#[cfg_attr(not(coverage), inline)]
+#[cfg_attr(coverage, inline(never))]
 pub(super) fn nt_result(status: i32) -> Result<()> {
     if status >= 0 {
         return Ok(());

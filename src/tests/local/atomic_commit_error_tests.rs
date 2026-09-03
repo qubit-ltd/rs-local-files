@@ -10,10 +10,10 @@
 use std::error::Error as _;
 use std::io;
 
-use qubit_local_files::test_support::internal_contract::LocalAtomicCommitError;
-use qubit_local_files::test_support::internal_contract::LocalAtomicDestinationState;
-use qubit_local_files::test_support::internal_contract::LocalAtomicWriteError;
-use qubit_local_files::test_support::internal_contract::LocalAtomicWriteStage;
+use crate::local::LocalAtomicCommitError;
+use crate::local::LocalAtomicDestinationState;
+use crate::local::LocalAtomicWriteError;
+use crate::local::LocalAtomicWriteStage;
 
 fn create_test_error() -> LocalAtomicWriteError {
     LocalAtomicWriteError::new(

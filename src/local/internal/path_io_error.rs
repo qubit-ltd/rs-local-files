@@ -35,7 +35,9 @@ impl PathIoError {
     ///
     /// # Returns
     /// A contextual error retaining `source`.
-    #[inline]
+    // qubit-style: allow coverage-cfg
+    #[cfg_attr(not(coverage), inline)]
+    #[cfg_attr(coverage, inline(never))]
     pub(super) fn new(operation: &'static str, path: &Path, source: Error) -> Self {
         Self {
             operation,
@@ -60,7 +62,8 @@ impl std::fmt::Display for PathIoError {
 
 impl std::error::Error for PathIoError {
     /// Returns the native I/O error that caused this contextual error.
-    #[inline(always)]
+    #[cfg_attr(not(coverage), inline(always))]
+    #[cfg_attr(coverage, inline(never))]
     fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
         Some(&self.source)
     }

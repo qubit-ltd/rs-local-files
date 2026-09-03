@@ -15,7 +15,7 @@ use std::io::Result;
 use std::path::Path;
 
 use super::source::is_real_directory;
-#[cfg(feature = "internal-test-support")]
+#[cfg(feature = "test-support")]
 use crate::local::internal::test_support;
 
 /// Reconciles a directory-creation result with a concurrent creator.
@@ -61,11 +61,13 @@ where
 /// Returns whether test support should classify a racing entry as
 /// non-directory.
 #[must_use]
-#[inline]
+// qubit-style: allow coverage-cfg
+#[cfg_attr(not(coverage), inline)]
+#[cfg_attr(coverage, inline(never))]
 fn test_non_directory_race_enabled() -> bool {
-    #[cfg(feature = "internal-test-support")]
+    #[cfg(feature = "test-support")]
     return test_support::is_enabled("copy-directory-race-nondirectory");
-    #[cfg(not(feature = "internal-test-support"))]
+    #[cfg(not(feature = "test-support"))]
     false
 }
 
@@ -95,10 +97,11 @@ pub(super) fn removable_non_directory_metadata(result: Result<fs::Metadata>) -> 
 
 /// Returns whether test support should classify a replacement race as
 /// directory.
-#[inline]
+#[cfg_attr(not(coverage), inline)]
+#[cfg_attr(coverage, inline(never))]
 fn test_removal_directory_race_enabled() -> bool {
-    #[cfg(feature = "internal-test-support")]
+    #[cfg(feature = "test-support")]
     return test_support::is_enabled("copy-removal-race-directory");
-    #[cfg(not(feature = "internal-test-support"))]
+    #[cfg(not(feature = "test-support"))]
     false
 }

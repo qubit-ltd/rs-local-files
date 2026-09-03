@@ -9,7 +9,7 @@
 
 /// Releases one process-local deterministic fault selector when dropped.
 #[derive(Debug)]
-#[cfg(feature = "internal-test-support")]
+#[cfg(feature = "test-support")]
 #[doc(hidden)]
 pub struct TestFaultGuard {
     /// Whether this guard still owns the active selector.

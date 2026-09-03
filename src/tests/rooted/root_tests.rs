@@ -12,12 +12,13 @@ use std::io::Read;
 use std::io::Write;
 use std::path::Path;
 
-use qubit_local_files::test_support::internal_contract::EntryKind;
-use qubit_local_files::test_support::internal_contract::InternalReadOptions;
-use qubit_local_files::test_support::internal_contract::InternalWriteOptions;
-use qubit_local_files::test_support::internal_contract::LocalRelativePath;
-use qubit_local_files::test_support::internal_contract::Root;
 use tempfile::tempdir;
+
+use crate::local::LocalRelativePath;
+use crate::read::OpenOptions as InternalReadOptions;
+use crate::rooted::EntryKind;
+use crate::rooted::Root;
+use crate::write::OpenOptions as InternalWriteOptions;
 
 /// Verifies an opened root performs descriptor-relative namespace operations
 /// without consulting the diagnostic path after opening.
@@ -30,7 +31,6 @@ fn test_root_authority_manages_descendant_entries() {
     let renamed = LocalRelativePath::new(Path::new("nested/renamed")).expect("renamed path should be valid");
 
     root.create_dir(&nested).expect("nested directory should be created");
-    root.ensure_dir(&nested).expect("existing directory should be accepted");
     fs::write(directory.path().join(file.as_path()), b"payload").expect("fixture file should be written");
 
     assert_eq!(EntryKind::Directory, root.metadata().expect("root metadata").kind());
@@ -42,7 +42,6 @@ fn test_root_authority_manages_descendant_entries() {
     root.open_probe_file(&nested).expect("directory should be probeable");
     root.open_probe_root().expect("root should be probeable");
     assert_eq!(1, root.read_dir(&nested).expect("nested entries").len());
-    assert_eq!(1, root.read_root_dir().expect("root entries").len());
 
     let mut reader = root.open_dir_reader(&nested).expect("nested reader");
     assert!(reader.next_entry().expect("reader entry").is_some());
@@ -71,7 +70,7 @@ fn test_root_authority_manages_descendant_entries() {
         .expect("empty directory should be removed");
 
     let tree = LocalRelativePath::new(Path::new("tree/child")).expect("tree path should be valid");
-    root.ensure_dir_all(&tree).expect("tree should be created");
+    root.create_dir_all(&tree).expect("tree should be created");
     root.remove_tree(&LocalRelativePath::new(Path::new("tree")).expect("tree root should be valid"))
         .expect("tree should be removed");
 }

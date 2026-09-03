@@ -5,12 +5,15 @@
 //
 //    Licensed under the Apache License, Version 2.0.
 // =============================================================================
-//! Deterministic, instance-local fault injection for tests.
+//! Deterministic fault injection for downstream adapter tests.
+//!
+//! This module is available only with the `test-support` feature. It is not a
+//! production API and does not carry the crate's normal semver compatibility
+//! promise. Instance-local plans validate isolated facade behavior; the
+//! process-local guard exists for native boundary and recovery-state tests that
+//! cannot be triggered through ordinary inputs.
 
 mod internal;
-#[cfg(feature = "internal-test-support")]
-#[doc(hidden)]
-pub mod internal_contract;
 mod test_fault_plan;
 mod test_fault_point;
 
@@ -19,9 +22,9 @@ mod test_fault_point;
 pub use test_fault_plan::TestFaultPlan;
 pub use test_fault_point::TestFaultPoint;
 
-#[cfg(feature = "internal-test-support")]
+#[cfg(feature = "test-support")]
 #[doc(hidden)]
 pub use crate::local::TestFaultGuard;
-#[cfg(feature = "internal-test-support")]
+#[cfg(feature = "test-support")]
 #[doc(hidden)]
 pub use crate::local::install_test_fault;

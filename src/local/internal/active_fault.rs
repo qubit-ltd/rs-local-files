@@ -8,7 +8,7 @@
 //! Process-local test fault selector state.
 
 /// Selector owner and name retained while one test controls fault injection.
-#[cfg(feature = "internal-test-support")]
+#[cfg(feature = "test-support")]
 pub(super) struct ActiveFault {
     /// Test thread that owns the currently installed selector.
     pub(super) owner: std::thread::ThreadId,

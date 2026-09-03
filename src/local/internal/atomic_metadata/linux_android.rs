@@ -23,7 +23,7 @@ const XATTR_SIZE_RACE_ATTEMPTS: usize = 8;
 /// Copies the complete descriptor-visible xattr set to staging.
 pub(super) fn preserve_extended_metadata(source: &File, staging: &File) -> Result<()> {
     let source_names = list_xattrs(source)?;
-    #[cfg(feature = "internal-test-support")]
+    #[cfg(feature = "test-support")]
     let source_names = {
         let mut source_names = source_names;
         if super::super::test_support::is_enabled("atomic-metadata-security-name") {
@@ -31,15 +31,15 @@ pub(super) fn preserve_extended_metadata(source: &File, staging: &File) -> Resul
         }
         source_names
     };
-    #[cfg(feature = "internal-test-support")]
+    #[cfg(feature = "test-support")]
     let staging_names = if super::super::test_support::is_enabled("atomic-metadata-staging-list") {
         Err(crate::local::test_fault_error())
     } else {
         list_xattrs(staging)
     }?;
-    #[cfg(not(feature = "internal-test-support"))]
+    #[cfg(not(feature = "test-support"))]
     let staging_names = list_xattrs(staging)?;
-    #[cfg(feature = "internal-test-support")]
+    #[cfg(feature = "test-support")]
     let staging_names = {
         let mut staging_names = staging_names;
         if super::super::test_support::is_enabled("atomic-metadata-remove") {
@@ -97,7 +97,7 @@ fn list_xattrs(file: &File) -> Result<BTreeSet<Vec<u8>>> {
 /// # Errors
 /// Returns the native `flistxattr` error or a selected test fault.
 fn query_xattr_list_length(file: &File) -> Result<usize> {
-    #[cfg(feature = "internal-test-support")]
+    #[cfg(feature = "test-support")]
     let forced_error = if super::super::test_support::is_enabled("atomic-metadata-not-supported") {
         Some(libc::ENOTSUP)
     } else if super::super::test_support::is_enabled("atomic-metadata-list") {
@@ -105,7 +105,7 @@ fn query_xattr_list_length(file: &File) -> Result<usize> {
     } else {
         None
     };
-    #[cfg(not(feature = "internal-test-support"))]
+    #[cfg(not(feature = "test-support"))]
     let forced_error = None;
     // SAFETY: the file descriptor is live and null output requests the current
     // list length without retaining pointers.
@@ -128,7 +128,7 @@ fn query_xattr_list_length(file: &File) -> Result<usize> {
 /// # Errors
 /// Returns the native `flistxattr` error or a selected test fault.
 fn read_xattr_list(file: &File, buffer: &mut [u8]) -> Result<usize> {
-    #[cfg(feature = "internal-test-support")]
+    #[cfg(feature = "test-support")]
     let forced_error = if super::super::test_support::is_enabled("atomic-metadata-list-read") {
         Some(libc::EIO)
     } else if super::super::test_support::is_enabled("atomic-metadata-list-range-persistent")
@@ -140,7 +140,7 @@ fn read_xattr_list(file: &File, buffer: &mut [u8]) -> Result<usize> {
     } else {
         None
     };
-    #[cfg(not(feature = "internal-test-support"))]
+    #[cfg(not(feature = "test-support"))]
     let forced_error = None;
     // SAFETY: `buffer` is writable for the requested length and the live
     // descriptor and buffer are not retained by the system call.
@@ -181,7 +181,7 @@ fn ordered_names(names: &BTreeSet<Vec<u8>>) -> Vec<&[u8]> {
 
 /// Gets one required extended-attribute value, retrying size races.
 fn get_xattr(file: &File, name: &[u8]) -> Result<Vec<u8>> {
-    #[cfg(feature = "internal-test-support")]
+    #[cfg(feature = "test-support")]
     let name = if super::super::test_support::is_enabled("atomic-metadata-invalid-name") {
         b"user.coverage\0invalid".as_slice()
     } else {
@@ -197,9 +197,11 @@ fn get_xattr(file: &File, name: &[u8]) -> Result<Vec<u8>> {
 }
 
 /// Gets an optional extended-attribute value, retrying size races.
-#[inline]
+// qubit-style: allow coverage-cfg
+#[cfg_attr(not(coverage), inline)]
+#[cfg_attr(coverage, inline(never))]
 fn get_optional_xattr(file: &File, name: &[u8]) -> Result<Option<Vec<u8>>> {
-    #[cfg(feature = "internal-test-support")]
+    #[cfg(feature = "test-support")]
     if super::super::test_support::is_enabled("atomic-metadata-equal-value") {
         return Ok(Some(b"value".to_vec()));
     }
@@ -244,7 +246,7 @@ fn get_xattr_inner(file: &File, name: &[u8]) -> Result<Option<Vec<u8>>> {
 /// # Errors
 /// Returns the native `fgetxattr` error or a selected test fault.
 fn query_xattr_value_length(file: &File, name: &CString) -> Result<usize> {
-    #[cfg(feature = "internal-test-support")]
+    #[cfg(feature = "test-support")]
     let forced_error = if super::super::test_support::is_enabled("atomic-metadata-source-missing") {
         Some(libc::ENODATA)
     } else if super::super::test_support::is_enabled("atomic-metadata-read") {
@@ -252,7 +254,7 @@ fn query_xattr_value_length(file: &File, name: &CString) -> Result<usize> {
     } else {
         None
     };
-    #[cfg(not(feature = "internal-test-support"))]
+    #[cfg(not(feature = "test-support"))]
     let forced_error = None;
     // SAFETY: the descriptor and name remain live, and null output asks only
     // for the current value length.
@@ -276,7 +278,7 @@ fn query_xattr_value_length(file: &File, name: &CString) -> Result<usize> {
 /// # Errors
 /// Returns the native `fgetxattr` error or a selected test fault.
 fn read_xattr_value(file: &File, name: &CString, value: &mut [u8]) -> Result<usize> {
-    #[cfg(feature = "internal-test-support")]
+    #[cfg(feature = "test-support")]
     let forced_error = if super::super::test_support::is_enabled("atomic-metadata-value-range-persistent") {
         Some(libc::ERANGE)
     } else if super::super::test_support::is_enabled("atomic-metadata-value-read") {
@@ -284,7 +286,7 @@ fn read_xattr_value(file: &File, name: &CString, value: &mut [u8]) -> Result<usi
     } else {
         None
     };
-    #[cfg(not(feature = "internal-test-support"))]
+    #[cfg(not(feature = "test-support"))]
     let forced_error = None;
     // SAFETY: `value` is writable for its full length and the descriptor and
     // name remain live for this non-retaining system call.
@@ -308,7 +310,8 @@ fn read_xattr_value(file: &File, name: &CString, value: &mut [u8]) -> Result<usi
 /// # Errors
 /// Returns the injected error or the operating system's last error when the
 /// native syscall returns `-1`.
-#[inline]
+#[cfg_attr(not(coverage), inline)]
+#[cfg_attr(coverage, inline(never))]
 fn xattr_size_result(result: isize, forced_error: Option<i32>) -> Result<usize> {
     if result == -1 {
         Err(forced_error.map_or_else(Error::last_os_error, Error::from_raw_os_error))
@@ -319,9 +322,9 @@ fn xattr_size_result(result: isize, forced_error: Option<i32>) -> Result<usize> 
 
 /// Sets one descriptor-based extended attribute.
 fn set_xattr(file: &File, name: &[u8], value: &[u8]) -> Result<()> {
-    #[cfg(feature = "internal-test-support")]
+    #[cfg(feature = "test-support")]
     let forced_error = super::super::test_support::is_enabled("atomic-metadata-write");
-    #[cfg(not(feature = "internal-test-support"))]
+    #[cfg(not(feature = "test-support"))]
     let forced_error = false;
     let name = native_name(name)?;
     // SAFETY: the descriptor, name, and value remain live for the call, and
@@ -343,9 +346,9 @@ fn set_xattr(file: &File, name: &[u8], value: &[u8]) -> Result<()> {
 
 /// Removes one descriptor-based extended attribute.
 fn remove_xattr(file: &File, name: &[u8]) -> Result<()> {
-    #[cfg(feature = "internal-test-support")]
+    #[cfg(feature = "test-support")]
     let forced_error = super::super::test_support::is_enabled("atomic-metadata-remove");
-    #[cfg(not(feature = "internal-test-support"))]
+    #[cfg(not(feature = "test-support"))]
     let forced_error = false;
     let name = native_name(name)?;
     // SAFETY: the descriptor and name remain live for this non-retaining call.
@@ -369,7 +372,8 @@ fn remove_xattr(file: &File, name: &[u8]) -> Result<()> {
 }
 
 /// Converts an xattr name to a native C string.
-#[inline]
+#[cfg_attr(not(coverage), inline)]
+#[cfg_attr(coverage, inline(never))]
 fn native_name(name: &[u8]) -> Result<CString> {
     match CString::new(name) {
         Ok(name) => Ok(name),
@@ -382,14 +386,16 @@ fn native_name(name: &[u8]) -> Result<CString> {
 
 /// Reports the platform's missing-attribute error.
 #[must_use]
-#[inline]
+#[cfg_attr(not(coverage), inline)]
+#[cfg_attr(coverage, inline(never))]
 fn is_missing_xattr(error: &Error) -> bool {
     error.raw_os_error() == Some(libc::ENODATA)
 }
 
 /// Reports that the filesystem exposes no extended-attribute interface.
 #[must_use]
-#[inline]
+#[cfg_attr(not(coverage), inline)]
+#[cfg_attr(coverage, inline(never))]
 fn is_not_supported(error: &Error) -> bool {
     let code = error.raw_os_error();
     code == Some(libc::ENOTSUP) || code == Some(libc::EOPNOTSUPP)

@@ -1,0 +1,116 @@
+name: Downstream compatibility
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: "23 3 * * 1"
+
+permissions:
+  contents: read
+
+jobs:
+  downstream:
+    name: Test rs-fs-local and rs-mime
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout rs-local-files
+        uses: actions/checkout@v6
+        with:
+          path: rust-common/rs-local-files
+          fetch-depth: 1
+
+      - name: Checkout rs-fs
+        uses: actions/checkout@v6
+        with:
+          repository: qubit-ltd/rs-fs
+          path: rust-common/rs-fs
+          fetch-depth: 1
+
+      - name: Checkout rs-fs-local
+        uses: actions/checkout@v6
+        with:
+          repository: qubit-ltd/rs-fs-local
+          path: rust-common/rs-fs-local
+          fetch-depth: 1
+
+      - name: Checkout rs-fs-registry
+        uses: actions/checkout@v6
+        with:
+          repository: qubit-ltd/rs-fs-registry
+          path: rust-common/rs-fs-registry
+          fetch-depth: 1
+
+      - name: Checkout rs-fs-testkit
+        uses: actions/checkout@v6
+        with:
+          repository: qubit-ltd/rs-fs-testkit
+          path: rust-common/rs-fs-testkit
+          fetch-depth: 1
+
+      - name: Checkout rs-redact
+        uses: actions/checkout@v6
+        with:
+          repository: qubit-ltd/rs-redact
+          path: rust-common/rs-redact
+          fetch-depth: 1
+
+      - name: Checkout rs-command
+        uses: actions/checkout@v6
+        with:
+          repository: qubit-ltd/rs-command
+          path: rust-common/rs-command
+          fetch-depth: 1
+
+      - name: Checkout rs-config
+        uses: actions/checkout@v6
+        with:
+          repository: qubit-ltd/rs-config
+          path: rust-common/rs-config
+          fetch-depth: 1
+
+      - name: Checkout rs-datatype
+        uses: actions/checkout@v6
+        with:
+          repository: qubit-ltd/rs-datatype
+          path: rust-common/rs-datatype
+          fetch-depth: 1
+
+      - name: Checkout rs-json
+        uses: actions/checkout@v6
+        with:
+          repository: qubit-ltd/rs-json
+          path: rust-common/rs-json
+          fetch-depth: 1
+
+      - name: Checkout rs-mime
+        uses: actions/checkout@v6
+        with:
+          repository: qubit-ltd/rs-mime
+          path: rust-common/rs-mime
+          fetch-depth: 1
+
+      - name: Checkout rs-spi
+        uses: actions/checkout@v6
+        with:
+          repository: qubit-ltd/rs-spi
+          path: rust-common/rs-spi
+          fetch-depth: 1
+
+      - name: Checkout rs-value
+        uses: actions/checkout@v6
+        with:
+          repository: qubit-ltd/rs-value
+          path: rust-common/rs-value
+          fetch-depth: 1
+
+      - name: Install Rust
+        run: rustup toolchain install 1.94 --profile minimal
+
+      - name: Test rs-fs-local
+        working-directory: rust-common/rs-fs-local
+        run: cargo +1.94 test --all-features
+
+      - name: Test rs-mime
+        working-directory: rust-common/rs-mime
+        run: cargo +1.94 test --all-features

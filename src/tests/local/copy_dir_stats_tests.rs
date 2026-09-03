@@ -7,7 +7,7 @@
 // =============================================================================
 //! Crate-private contract tests for `LocalCopyDirStats`.
 
-use qubit_local_files::test_support::internal_contract::LocalCopyDirStats;
+use crate::local::LocalCopyDirStats;
 
 #[test]
 fn test_local_copy_dir_stats_exposes_counts_and_publication_flags() {

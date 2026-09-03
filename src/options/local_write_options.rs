@@ -47,26 +47,31 @@ impl LocalWriteOptions {
     }
 
     /// Returns the publication mode.
-    #[inline(always)]
+    // qubit-style: allow coverage-cfg
+    #[cfg_attr(not(coverage), inline(always))]
+    #[cfg_attr(coverage, inline(never))]
     pub const fn mode(&self) -> LocalWriteMode {
         self.mode
     }
 
     /// Reports whether missing parent directories are created.
     #[must_use]
-    #[inline(always)]
+    #[cfg_attr(not(coverage), inline(always))]
+    #[cfg_attr(coverage, inline(never))]
     pub const fn creates_parent(&self) -> bool {
         self.create_parent
     }
 
     /// Returns the required atomicity.
-    #[inline(always)]
+    #[cfg_attr(not(coverage), inline(always))]
+    #[cfg_attr(coverage, inline(never))]
     pub const fn atomicity(&self) -> LocalAtomicityRequirement {
         self.atomicity
     }
 
     /// Returns the required durability.
-    #[inline(always)]
+    #[cfg_attr(not(coverage), inline(always))]
+    #[cfg_attr(coverage, inline(never))]
     pub const fn durability(&self) -> LocalDurabilityRequirement {
         self.durability
     }

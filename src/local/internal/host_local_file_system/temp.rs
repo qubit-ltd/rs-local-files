@@ -254,7 +254,9 @@ pub(crate) fn internal_copy_options(
 }
 
 /// Confirms that a host temporary-resource parent is an existing directory.
-#[inline]
+// qubit-style: allow coverage-cfg
+#[cfg_attr(not(coverage), inline)]
+#[cfg_attr(coverage, inline(never))]
 fn validate_host_temp_parent(parent: &Path, operation: LocalFileOperation) -> LocalResult<()> {
     let metadata = match fs::metadata(parent) {
         Ok(metadata) => metadata,

@@ -49,7 +49,9 @@ impl fmt::Display for LocalFileErrorSource {
 
 impl Error for LocalFileErrorSource {
     /// Returns the concrete I/O or codec error retained by this source.
-    #[inline]
+    // qubit-style: allow coverage-cfg
+    #[cfg_attr(not(coverage), inline)]
+    #[cfg_attr(coverage, inline(never))]
     fn source(&self) -> Option<&(dyn Error + 'static)> {
         match self {
             Self::Io(error) => Some(error),

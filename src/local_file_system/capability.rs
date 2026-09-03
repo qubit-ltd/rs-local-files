@@ -25,15 +25,16 @@ use super::resolve_operation_path;
 
 impl LocalFileSystem {
     /// Returns the immutable capability snapshot for this authority.
-    #[cfg_attr(feature = "test-support", inline(never))]
-
+    // qubit-style: allow coverage-cfg
+    #[cfg_attr(not(coverage), inline)]
+    #[cfg_attr(coverage, inline(never))]
     pub fn capabilities(&self) -> LocalFileSystemCapabilities {
         self.core.capabilities
     }
 
     /// Returns authority-level objective path-limit observations.
-    #[cfg_attr(feature = "test-support", inline(never))]
-
+    #[cfg_attr(not(coverage), inline)]
+    #[cfg_attr(coverage, inline(never))]
     pub fn limits(&self) -> LocalFileSystemLimits {
         self.core.limits
     }
@@ -107,16 +108,17 @@ fn host_probe<T>(
     let mut candidate = crate::local::resolve_host_path(path.authority_relative(), symlink_policy, true)?;
     loop {
         match open_host_probe(&candidate) {
-            Ok(file) => {
-                return probe(&file).map_err(|error| {
-                    LocalFileError::from_io(
+            Ok(file) => match probe(&file) {
+                Ok(value) => return Ok(value),
+                Err(error) => {
+                    return Err(LocalFileError::from_io(
                         LocalFileOperation::Capabilities,
                         Some(path.namespace_absolute().to_path_buf()),
                         None,
                         error,
-                    )
-                });
-            }
+                    ));
+                }
+            },
             Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
                 if !candidate.pop() {
                     return Err(LocalFileError::from_io(

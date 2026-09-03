@@ -58,6 +58,8 @@ mod temp;
 mod test_support;
 #[cfg(feature = "test-support")]
 pub mod test_support;
+#[cfg(test)]
+mod tests;
 mod walk;
 mod write;
 mod writer;

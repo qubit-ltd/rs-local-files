@@ -17,7 +17,9 @@ use std::ops::BitAnd;
 /// generic conversion preserves that platform ABI without target-specific
 /// casts at every call site.
 #[must_use]
-#[inline(always)]
+// qubit-style: allow coverage-cfg
+#[cfg_attr(not(coverage), inline(always))]
+#[cfg_attr(coverage, inline(never))]
 pub(crate) fn is_regular_file_mode<T>(mode: T) -> bool
 where
     T: BitAnd<Output = T> + Copy + From<libc::mode_t> + PartialEq,

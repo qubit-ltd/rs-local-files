@@ -76,7 +76,9 @@ pub(crate) struct HostLocalFileSystem {
 
 impl HostLocalFileSystem {
     /// Returns the native capabilities compiled for the current host platform.
-    #[inline(always)]
+    // qubit-style: allow coverage-cfg
+    #[cfg_attr(not(coverage), inline(always))]
+    #[cfg_attr(coverage, inline(never))]
     pub const fn capabilities() -> LocalFileSystemCapabilities {
         LocalFileSystemCapabilities::detect_host()
     }

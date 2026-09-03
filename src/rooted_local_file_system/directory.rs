@@ -52,13 +52,13 @@ impl RootedLocalFileSystem {
             false,
             LocalFileOperation::CreateDirectory,
         )?;
-        #[cfg(feature = "internal-test-support")]
+        #[cfg(feature = "test-support")]
         let metadata = if crate::local::test_support_enabled("rooted-local-create-directory-status") {
             Err(io::Error::from(io::ErrorKind::PermissionDenied))
         } else {
             self.root.symlink_metadata(&relative)
         };
-        #[cfg(not(feature = "internal-test-support"))]
+        #[cfg(not(feature = "test-support"))]
         let metadata = self.root.symlink_metadata(&relative);
         let existing_directory = match metadata {
             Ok(metadata) if metadata.kind() == crate::rooted::EntryKind::Directory => Some(true),
@@ -140,7 +140,7 @@ fn create_rooted_directory_tree(
                 ));
             }
             Err(error) if error.kind() == io::ErrorKind::NotFound => {
-                #[cfg(feature = "internal-test-support")]
+                #[cfg(feature = "test-support")]
                 if crate::local::take_test_support_on_nth("rooted-create-directory-component-second", 2) {
                     return Err(rooted_create_component_error(
                         &current,

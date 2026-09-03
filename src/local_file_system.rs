@@ -103,7 +103,23 @@ pub struct LocalFileSystem {
 }
 
 impl LocalFileSystem {
-    /// Creates a Host filesystem without reading the process PWD.
+    /// Creates a filesystem bound to the host namespace.
+    ///
+    /// Construction does not read or snapshot the process working directory.
+    /// Each later relative-path operation reads the process working directory
+    /// for that operation, so external calls to `std::env::set_current_dir`
+    /// remain observable.
+    ///
+    /// # Returns
+    ///
+    /// A Host-scoped filesystem with `FollowAcrossScope` symlink behavior and
+    /// the default operation options.
+    ///
+    /// # Errors
+    ///
+    /// Host construction is currently infallible. The `Result` return type is
+    /// retained so construction failures can be reported without a future API
+    /// break if a target requires native initialization.
     pub fn host() -> LocalResult<Self> {
         let capabilities = HostLocalFileSystem::capabilities();
         Ok(Self {
@@ -124,7 +140,27 @@ impl LocalFileSystem {
         })
     }
 
-    /// Opens one descriptor- or handle-authoritative Rooted filesystem.
+    /// Opens a descriptor- or handle-authoritative Rooted filesystem.
+    ///
+    /// The root path is resolved only while opening the authority. Later
+    /// operations remain anchored to the opened directory even if its original
+    /// path is renamed or replaced. Absolute operation paths are interpreted
+    /// inside this virtual root.
+    ///
+    /// # Parameters
+    ///
+    /// - `root`: Existing native directory to bind as the virtual root. A
+    ///   symbolic link is followed once during construction.
+    ///
+    /// # Returns
+    ///
+    /// A Rooted filesystem whose initial virtual working directory is `/` and
+    /// whose default symlink policy is `FollowWithinScope`.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`LocalFileError`] when `root` cannot be opened, does not name a
+    /// directory, or the target cannot provide the required rooted authority.
     pub fn rooted(root: &Path) -> LocalResult<Self> {
         let rooted = RootedLocalFileSystem::open(root)?;
         let capabilities = rooted.capabilities();

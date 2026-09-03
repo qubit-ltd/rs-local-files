@@ -72,7 +72,9 @@ impl LocalFileWriter {
     /// - `diagnostic_path`: Destination path captured for diagnostics.
     /// - `backend`: Staged or append backend.
     /// - `options`: Writer policy.
-    #[inline]
+    // qubit-style: allow coverage-cfg
+    #[cfg_attr(not(coverage), inline)]
+    #[cfg_attr(coverage, inline(never))]
     pub(crate) fn new(diagnostic_path: PathBuf, backend: LocalFileWriterBackend, options: LocalWriteOptions) -> Self {
         Self {
             path: diagnostic_path.clone(),
@@ -95,7 +97,8 @@ impl LocalFileWriter {
 
     /// Returns the reusable namespace-absolute destination path.
     #[must_use]
-    #[inline]
+    #[cfg_attr(not(coverage), inline)]
+    #[cfg_attr(coverage, inline(never))]
     pub fn path(&self) -> &Path {
         &self.path
     }
@@ -105,20 +108,23 @@ impl LocalFileWriter {
     /// Rooted writers retain descriptor authority, so this path can refer to a
     /// replacement after the opened root is renamed.
     #[must_use]
-    #[inline]
+    #[cfg_attr(not(coverage), inline)]
+    #[cfg_attr(coverage, inline(never))]
     pub fn diagnostic_path(&self) -> Option<&Path> {
         self.diagnostic_path.as_deref()
     }
 
     /// Returns the current writer state.
-    #[inline]
+    #[cfg_attr(not(coverage), inline)]
+    #[cfg_attr(coverage, inline(never))]
     pub const fn state(&self) -> LocalWriterState {
         self.state
     }
 
     /// Returns an uncertainty retained from an earlier stream failure.
     #[must_use]
-    #[inline]
+    #[cfg_attr(not(coverage), inline)]
+    #[cfg_attr(coverage, inline(never))]
     pub const fn failure_state(&self) -> Option<LocalWriteFailureState> {
         self.failure_state
     }
@@ -153,13 +159,13 @@ impl LocalFileWriter {
                 self.commit_staged_backend(backend)
             }
             LocalFileWriterBackend::Append(mut file) => {
-                #[cfg(feature = "internal-test-support")]
+                #[cfg(feature = "test-support")]
                 let flush_result = if crate::local::test_support_enabled("writer-append-commit-flush") {
                     Err(crate::local::test_fault_error())
                 } else {
                     file.flush()
                 };
-                #[cfg(not(feature = "internal-test-support"))]
+                #[cfg(not(feature = "test-support"))]
                 let flush_result = file.flush();
                 if let Err(error) = flush_result {
                     return Err(LocalFileCommitError::new(
@@ -175,13 +181,13 @@ impl LocalFileWriter {
                     LocalDurabilityRequirement::NotRequired => false,
                     LocalDurabilityRequirement::Preferred => file.sync_all().is_ok(),
                     LocalDurabilityRequirement::Required => {
-                        #[cfg(feature = "internal-test-support")]
+                        #[cfg(feature = "test-support")]
                         let sync_result = if crate::local::test_support_enabled("writer-append-required-sync") {
                             Err(crate::local::test_fault_error())
                         } else {
                             file.sync_all()
                         };
-                        #[cfg(not(feature = "internal-test-support"))]
+                        #[cfg(not(feature = "test-support"))]
                         let sync_result = file.sync_all();
                         if let Err(error) = sync_result {
                             return Err(LocalFileCommitError::new(
@@ -252,13 +258,13 @@ impl LocalFileWriter {
                 ))
             }
             LocalFileWriterBackend::Append(file) => {
-                #[cfg(feature = "internal-test-support")]
+                #[cfg(feature = "test-support")]
                 let flush_result = if crate::local::test_support_enabled("writer-append-abort-flush") {
                     Err(crate::local::test_fault_error())
                 } else {
                     file.flush()
                 };
-                #[cfg(not(feature = "internal-test-support"))]
+                #[cfg(not(feature = "test-support"))]
                 let flush_result = file.flush();
                 if let Err(error) = flush_result {
                     return Err(self.contextualize_error(writer_io_error(
@@ -325,7 +331,8 @@ impl LocalFileWriter {
     /// # Returns
     ///
     /// A writer carrying the original path, options, state, and byte count.
-    #[inline]
+    #[cfg_attr(not(coverage), inline)]
+    #[cfg_attr(coverage, inline(never))]
     fn retain_backend(&self, backend: LocalFileWriterBackend) -> Self {
         Self {
             path: self.path.clone(),
@@ -344,7 +351,8 @@ impl LocalFileWriter {
     /// # Parameters
     ///
     /// - `written`: Bytes accepted by the backend.
-    #[inline]
+    #[cfg_attr(not(coverage), inline)]
+    #[cfg_attr(coverage, inline(never))]
     fn record_written(&mut self, written: usize) {
         self.bytes_written = self.bytes_written.saturating_add(written);
     }
@@ -358,7 +366,8 @@ impl LocalFileWriter {
     /// # Returns
     ///
     /// The original result.
-    #[inline]
+    #[cfg_attr(not(coverage), inline)]
+    #[cfg_attr(coverage, inline(never))]
     fn observe_stream_result<T>(&mut self, result: io::Result<T>) -> io::Result<T> {
         if result.is_err() {
             self.failure_state = Some(LocalWriteFailureState::Indeterminate);
@@ -483,7 +492,8 @@ fn atomic_destination_state(state: crate::local::LocalAtomicDestinationState) ->
 ///
 /// Unified local filesystem error retaining the atomic error as its source.
 #[must_use]
-#[inline]
+#[cfg_attr(not(coverage), inline)]
+#[cfg_attr(coverage, inline(never))]
 fn atomic_write_error(
     path: &Path,
     operation: LocalFileOperation,
@@ -505,7 +515,8 @@ fn atomic_write_error(
 ///
 /// Structured writer error.
 #[must_use]
-#[inline(always)]
+#[cfg_attr(not(coverage), inline(always))]
+#[cfg_attr(coverage, inline(never))]
 fn writer_io_error(path: &Path, operation: LocalFileOperation, error: io::Error) -> LocalFileError {
     LocalFileError::from_io(operation, Some(path.to_path_buf()), None, error)
 }
@@ -521,7 +532,8 @@ fn writer_io_error(path: &Path, operation: LocalFileOperation, error: io::Error)
 /// # Returns
 ///
 /// An invalid-state error retaining the operation and path.
-#[inline]
+#[cfg_attr(not(coverage), inline)]
+#[cfg_attr(coverage, inline(never))]
 fn writer_state_error(path: &Path, operation: LocalFileOperation, state: LocalWriterState) -> LocalFileError {
     LocalFileError::from_io(
         operation,

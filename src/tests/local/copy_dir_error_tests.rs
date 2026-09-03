@@ -12,9 +12,9 @@ use std::io;
 use std::path::Path;
 use std::path::PathBuf;
 
-use qubit_local_files::test_support::internal_contract::LocalCopyDirError;
-use qubit_local_files::test_support::internal_contract::LocalCopyDirStage;
-use qubit_local_files::test_support::internal_contract::LocalCopyDirStats;
+use crate::local::LocalCopyDirError;
+use crate::local::LocalCopyDirStage;
+use crate::local::LocalCopyDirStats;
 
 #[test]
 fn test_local_copy_dir_error_exposes_parts_and_formats_cleanup_context() {

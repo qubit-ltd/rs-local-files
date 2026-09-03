@@ -36,7 +36,7 @@ pub(in crate::local) fn install_rooted_atomic_file(
     destination_existed: bool,
 ) -> Result<(), (Error, LocalAtomicDestinationState, AtomicStagingState)> {
     if destination_existed {
-        #[cfg(feature = "internal-test-support")]
+        #[cfg(feature = "test-support")]
         let result = if super::test_support::is_enabled("rooted-install")
             || super::test_support::is_enabled("rooted-install-indeterminate")
             || super::test_support::is_enabled("rooted-copy-install-cleanup")
@@ -45,7 +45,7 @@ pub(in crate::local) fn install_rooted_atomic_file(
         } else {
             staged_file.rename_to(destination)
         };
-        #[cfg(not(feature = "internal-test-support"))]
+        #[cfg(not(feature = "test-support"))]
         let result = staged_file.rename_to(destination);
         match result {
             Ok(()) => Ok(()),

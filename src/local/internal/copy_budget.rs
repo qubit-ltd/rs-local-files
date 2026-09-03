@@ -74,7 +74,9 @@ impl CopyBudget {
     /// # Errors
     ///
     /// Returns [`io::ErrorKind::TimedOut`] once the deadline is reached.
-    #[inline]
+    // qubit-style: allow coverage-cfg
+    #[cfg_attr(not(coverage), inline)]
+    #[cfg_attr(coverage, inline(never))]
     pub fn check_deadline(&self) -> io::Result<()> {
         self.check_deadline_at(Instant::now())
     }
@@ -89,7 +91,8 @@ impl CopyBudget {
     ///
     /// Returns a structured resource-limit error when `depth` exceeds the
     /// configured maximum.
-    #[inline]
+    #[cfg_attr(not(coverage), inline)]
+    #[cfg_attr(coverage, inline(never))]
     pub fn check_depth(&self, depth: usize) -> io::Result<()> {
         if let Some(limit) = self.max_depth
             && depth > limit
@@ -110,7 +113,8 @@ impl CopyBudget {
     ///
     /// Returns a structured resource-limit error when no entry capacity
     /// remains.
-    #[inline]
+    #[cfg_attr(not(coverage), inline)]
+    #[cfg_attr(coverage, inline(never))]
     pub fn charge_entry(&mut self) -> io::Result<()> {
         if let Some(budget) = self.entries.as_mut() {
             budget.try_consume(1).map_err(usize_budget_error)?;
@@ -130,7 +134,8 @@ impl CopyBudget {
     ///
     /// Returns a structured resource-limit error when the directory capacity
     /// is exhausted.
-    #[inline]
+    #[cfg_attr(not(coverage), inline)]
+    #[cfg_attr(coverage, inline(never))]
     pub fn acquire_directory(&self) -> io::Result<Option<ManagedResourcePermit<LocalResourceKind, usize>>> {
         self.open_directories
             .as_ref()
@@ -198,7 +203,8 @@ impl CopyBudget {
     }
 
     /// Checks the configured deadline against a supplied monotonic instant.
-    #[inline]
+    #[cfg_attr(not(coverage), inline)]
+    #[cfg_attr(coverage, inline(never))]
     fn check_deadline_at(&self, now: Instant) -> io::Result<()> {
         if self
             .deadline
@@ -210,7 +216,8 @@ impl CopyBudget {
     }
 
     /// Returns the next read size, allowing one byte beyond a bounded source.
-    #[inline]
+    #[cfg_attr(not(coverage), inline)]
+    #[cfg_attr(coverage, inline(never))]
     fn read_capacity(&self, chunk_size: usize) -> usize {
         self.remaining_bytes().map_or(chunk_size, |remaining| {
             usize::try_from(remaining.saturating_add(1))
@@ -220,7 +227,8 @@ impl CopyBudget {
     }
 
     /// Returns the remaining copied-byte capacity when it is bounded.
-    #[inline]
+    #[cfg_attr(not(coverage), inline)]
+    #[cfg_attr(coverage, inline(never))]
     fn remaining_bytes(&self) -> Option<u64> {
         self.bytes.as_ref().map(|budget| budget.remaining())
     }
@@ -260,7 +268,8 @@ impl CopyBudget {
     }
 
     /// Commits actual staging bytes to the configured budget.
-    #[inline]
+    #[cfg_attr(not(coverage), inline)]
+    #[cfg_attr(coverage, inline(never))]
     fn charge_bytes(&mut self, amount: usize) -> io::Result<()> {
         if let Some(budget) = self.bytes.as_mut() {
             budget
@@ -272,7 +281,8 @@ impl CopyBudget {
 
     /// Constructs the existing copied-byte exhaustion error after staging the
     /// portion that still fit.
-    #[inline]
+    #[cfg_attr(not(coverage), inline)]
+    #[cfg_attr(coverage, inline(never))]
     fn copied_bytes_exhausted(&mut self, excess: usize) -> io::Error {
         self.bytes
             .as_mut()
@@ -284,7 +294,8 @@ impl CopyBudget {
 }
 
 /// Wraps structured resource facts in the standard quota-exceeded channel.
-#[inline]
+#[cfg_attr(not(coverage), inline)]
+#[cfg_attr(coverage, inline(never))]
 fn resource_error(error: LocalResourceLimitError) -> io::Error {
     io::Error::new(io::ErrorKind::QuotaExceeded, error)
 }

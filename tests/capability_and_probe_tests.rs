@@ -33,6 +33,19 @@ fn test_host_file_system_limits_vary_by_path() {
     assert_eq!(LocalPathLengthUnit::Utf16CodeUnits, limits.length_unit());
 }
 
+/// Verifies Host path-limit probing resolves a missing descendant through its
+/// nearest existing authority instead of requiring the final entry to exist.
+#[test]
+fn test_host_file_system_limits_probe_missing_descendant() {
+    let root = tempdir().expect("temporary root should be created");
+    let limits = LocalFileSystem::host()
+        .expect("Host filesystem should open")
+        .limits_at(&root.path().join("missing/child"))
+        .expect("missing Host descendants should be probeable");
+
+    let _ = limits;
+}
+
 /// Verifies space observations are available without caching host limits.
 #[test]
 fn test_host_file_system_space_observes_existing_directory() {
@@ -74,7 +87,7 @@ fn test_local_file_system_capabilities_report_operation_support() {
     assert!(capabilities.supports_rooted_operations());
     assert!(capabilities.supports_atomic_rename());
     assert!(capabilities.supports_atomic_replace());
-    assert!(capabilities.supports_atomic_temp_persist());
+    assert!(capabilities.can_attempt_atomic_temp_persist());
     assert_eq!(cfg!(unix), capabilities.supports_durable_rename());
     assert_eq!(cfg!(unix), capabilities.supports_durable_file_copy(),);
     assert_eq!(cfg!(unix), capabilities.supports_durable_write());

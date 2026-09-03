@@ -42,7 +42,7 @@ pub(super) fn copy_file(
     budget
         .check_deadline()
         .map_err(|source_error| error(Stage::InspectSourceEntry, source, destination, statistics, source_error))?;
-    #[cfg(feature = "internal-test-support")]
+    #[cfg(feature = "test-support")]
     if crate::local::take_test_support_on_nth("rooted-copy-file-second", 2) {
         return Err(error(
             Stage::CopyFileContents,
@@ -52,7 +52,7 @@ pub(super) fn copy_file(
             crate::local::test_fault_error(),
         ));
     }
-    #[cfg(feature = "internal-test-support")]
+    #[cfg(feature = "test-support")]
     if crate::local::test_support_enabled("rooted-copy-source-open") {
         return Err(error(
             Stage::InspectSourceEntry,
@@ -65,17 +65,17 @@ pub(super) fn copy_file(
     let mut reader = root
         .open_reader(source, &read::OpenOptions::default())
         .map_err(|source_error| error(Stage::InspectSourceEntry, source, destination, statistics, source_error))?;
-    #[cfg(feature = "internal-test-support")]
+    #[cfg(feature = "test-support")]
     let source_metadata_result = if crate::local::test_support_enabled("rooted-copy-source-metadata-native") {
         Err(crate::local::test_fault_error())
     } else {
         Metadata::from_open_file(&reader)
     };
-    #[cfg(not(feature = "internal-test-support"))]
+    #[cfg(not(feature = "test-support"))]
     let source_metadata_result = Metadata::from_open_file(&reader);
     let source_metadata = source_metadata_result
         .map_err(|source_error| error(Stage::InspectSourceEntry, source, destination, statistics, source_error))?;
-    #[cfg(feature = "internal-test-support")]
+    #[cfg(feature = "test-support")]
     {
         if crate::local::test_support_enabled("rooted-copy-destination-metadata") {
             return Err(error(
@@ -150,7 +150,7 @@ pub(super) fn copy_file(
             }
         }
     }
-    #[cfg(feature = "internal-test-support")]
+    #[cfg(feature = "test-support")]
     {
         if crate::local::test_support_enabled("rooted-copy-writer-open") {
             return Err(error(
@@ -168,17 +168,17 @@ pub(super) fn copy_file(
             let source_error = io::Error::new(source_error.kind(), source_error);
             error(Stage::PrepareDestination, source, destination, statistics, source_error)
         })?;
-    #[cfg(feature = "internal-test-support")]
+    #[cfg(feature = "test-support")]
     let copy_result = if crate::local::test_support_enabled("rooted-copy-file-contents-native") {
         Err(crate::local::test_fault_error())
     } else {
         budget.copy(&mut reader, &mut writer)
     };
-    #[cfg(not(feature = "internal-test-support"))]
+    #[cfg(not(feature = "test-support"))]
     let copy_result = budget.copy(&mut reader, &mut writer);
     let bytes = copy_result
         .map_err(|source_error| error(Stage::CopyFileContents, source, destination, statistics, source_error))?;
-    #[cfg(feature = "internal-test-support")]
+    #[cfg(feature = "test-support")]
     let commit_result = if crate::local::test_support_enabled("rooted-copy-file-commit-native") {
         Err(crate::LocalAtomicWriteError::new(
             crate::LocalAtomicWriteStage::ReplaceDestination,
@@ -190,7 +190,7 @@ pub(super) fn copy_file(
     } else {
         writer.commit_with_durability()
     };
-    #[cfg(not(feature = "internal-test-support"))]
+    #[cfg(not(feature = "test-support"))]
     let commit_result = writer.commit_with_durability();
     let file_durable =
         commit_result.map_err(|source_error| rooted_commit_error(source, destination, statistics, source_error))?;
@@ -217,7 +217,7 @@ pub(super) fn preserve_permissions(
     statistics: Statistics,
 ) -> Result<(), Error> {
     if options.preserves_permissions() {
-        #[cfg(feature = "internal-test-support")]
+        #[cfg(feature = "test-support")]
         if crate::local::test_support_enabled("rooted-copy-set-permissions") {
             return Err(error(
                 Stage::PreservePermissions,

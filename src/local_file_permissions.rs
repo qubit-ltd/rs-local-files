@@ -19,21 +19,25 @@ pub struct LocalFilePermissions {
 
 impl LocalFilePermissions {
     /// Creates a permission observation.
-    #[inline]
+    // qubit-style: allow coverage-cfg
+    #[cfg_attr(not(coverage), inline)]
+    #[cfg_attr(coverage, inline(never))]
     pub const fn new(read_only: bool, unix_mode: Option<u32>) -> Self {
         Self { read_only, unix_mode }
     }
 
     /// Reports whether the native entry is read-only.
     #[must_use]
-    #[inline(always)]
+    #[cfg_attr(not(coverage), inline(always))]
+    #[cfg_attr(coverage, inline(never))]
     pub const fn is_read_only(self) -> bool {
         self.read_only
     }
 
     /// Returns Unix mode bits when the platform exposes them.
     #[must_use]
-    #[inline(always)]
+    #[cfg_attr(not(coverage), inline(always))]
+    #[cfg_attr(coverage, inline(never))]
     pub const fn unix_mode(self) -> Option<u32> {
         self.unix_mode
     }

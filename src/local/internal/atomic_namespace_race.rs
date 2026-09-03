@@ -73,7 +73,9 @@ pub(crate) fn verify_atomic_destination_identity(
 /// # Returns
 ///
 /// A structured pre-installation failure.
-#[inline]
+// qubit-style: allow coverage-cfg
+#[cfg_attr(not(coverage), inline)]
+#[cfg_attr(coverage, inline(never))]
 fn identity_error(
     requested_path: &Path,
     source: Error,
@@ -91,13 +93,13 @@ fn identity_error(
 
 /// Classifies a pre-replacement destination identity mismatch.
 fn destination_mismatch_state(path: &Path) -> LocalAtomicDestinationState {
-    #[cfg(feature = "internal-test-support")]
+    #[cfg(feature = "test-support")]
     let metadata = if super::test_support::is_enabled("atomic-identity-missing") {
         Err(Error::from_raw_os_error(libc::ENOENT))
     } else {
         fs::symlink_metadata(path)
     };
-    #[cfg(not(feature = "internal-test-support"))]
+    #[cfg(not(feature = "test-support"))]
     let metadata = fs::symlink_metadata(path);
     match metadata {
         Err(error) if error.kind() == ErrorKind::NotFound => LocalAtomicDestinationState::Missing,

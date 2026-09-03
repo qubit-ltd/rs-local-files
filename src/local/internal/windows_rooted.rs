@@ -18,7 +18,6 @@ mod volume_probe;
 pub(crate) use directory::create_rooted_directory;
 pub(crate) use directory::open_root_directory_reader;
 pub(crate) use directory::open_rooted_directory_reader;
-pub(crate) use directory::read_root_directory;
 pub(crate) use directory::read_rooted_directory;
 pub(crate) use directory::remove_rooted_entry;
 pub(crate) use handle::open_root_directory;

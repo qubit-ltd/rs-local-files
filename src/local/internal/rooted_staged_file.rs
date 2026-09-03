@@ -51,7 +51,9 @@ impl RootedStagedFile {
     /// # Returns
     ///
     /// A guard that removes the staging entry unless disarmed after commit.
-    #[inline]
+    // qubit-style: allow coverage-cfg
+    #[cfg_attr(not(coverage), inline)]
+    #[cfg_attr(coverage, inline(never))]
     pub(in crate::local) fn new(parent: File, name: CString, file: File, diagnostic_path: PathBuf) -> Self {
         Self {
             parent,
@@ -67,7 +69,8 @@ impl RootedStagedFile {
     ///
     /// The relative staging path retained by this guard.
     #[must_use]
-    #[inline(always)]
+    #[cfg_attr(not(coverage), inline(always))]
+    #[cfg_attr(coverage, inline(never))]
     pub(in crate::local) fn diagnostic_path(&self) -> &Path {
         &self.diagnostic_path
     }
@@ -82,7 +85,8 @@ impl RootedStagedFile {
     ///
     /// Panics after the data handle has been closed.
     #[must_use]
-    #[inline(always)]
+    #[cfg_attr(not(coverage), inline(always))]
+    #[cfg_attr(coverage, inline(never))]
     pub(in crate::local) fn file(&self) -> &File {
         self.file
             .as_ref()
@@ -99,7 +103,8 @@ impl RootedStagedFile {
     ///
     /// Panics after the data handle has been closed.
     #[must_use]
-    #[inline(always)]
+    #[cfg_attr(not(coverage), inline(always))]
+    #[cfg_attr(coverage, inline(never))]
     pub(in crate::local) fn file_mut(&mut self) -> &mut File {
         self.file
             .as_mut()
@@ -112,7 +117,8 @@ impl RootedStagedFile {
     ///
     /// `true` before installation begins or explicit cleanup closes the handle.
     #[must_use]
-    #[inline(always)]
+    #[cfg_attr(not(coverage), inline(always))]
+    #[cfg_attr(coverage, inline(never))]
     pub(in crate::local) const fn is_open(&self) -> bool {
         self.file.is_some()
     }
@@ -123,13 +129,15 @@ impl RootedStagedFile {
     ///
     /// The descriptor that authorizes staging entry operations.
     #[must_use]
-    #[inline(always)]
+    #[cfg_attr(not(coverage), inline(always))]
+    #[cfg_attr(coverage, inline(never))]
     pub(in crate::local) fn parent(&self) -> &File {
         &self.parent
     }
 
     /// Closes the staging data handle while leaving cleanup armed.
-    #[inline(always)]
+    #[cfg_attr(not(coverage), inline(always))]
+    #[cfg_attr(coverage, inline(never))]
     pub(in crate::local) fn close(&mut self) {
         drop(self.file.take());
     }
@@ -210,7 +218,7 @@ impl RootedStagedFile {
         let Some(name) = self.name.as_ref() else {
             return Ok(());
         };
-        #[cfg(feature = "internal-test-support")]
+        #[cfg(feature = "test-support")]
         if super::test_support::is_enabled("atomic-install-unlink-persistent")
             || super::test_support::is_enabled("atomic-install-unlink-persistent-sync")
             || super::test_support::is_enabled("rooted-copy-install-cleanup")
@@ -228,7 +236,8 @@ impl RootedStagedFile {
     }
 
     /// Disarms cleanup after the staging entry has been committed.
-    #[inline(always)]
+    #[cfg_attr(not(coverage), inline(always))]
+    #[cfg_attr(coverage, inline(never))]
     pub(in crate::local) fn disarm(&mut self) {
         self.close();
         let _ = self.name.take();

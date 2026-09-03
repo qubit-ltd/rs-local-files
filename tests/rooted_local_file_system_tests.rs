@@ -24,7 +24,7 @@ use qubit_local_files::options::LocalCreateDirectoryOptions;
 use qubit_local_files::options::LocalDeleteOptions;
 use qubit_local_files::options::LocalDirectoryReopenPolicy;
 use qubit_local_files::options::LocalListOptions;
-#[cfg(feature = "internal-test-support")]
+#[cfg(feature = "test-support")]
 use qubit_local_files::options::LocalMetadataPreservePolicy;
 use qubit_local_files::options::LocalReadOptions;
 use qubit_local_files::options::LocalRenameOptions;
@@ -32,7 +32,7 @@ use qubit_local_files::options::LocalTempDirectoryOptions;
 use qubit_local_files::options::LocalTempFileOptions;
 use qubit_local_files::options::LocalWriteMode;
 use qubit_local_files::options::LocalWriteOptions;
-#[cfg(feature = "internal-test-support")]
+#[cfg(feature = "test-support")]
 use qubit_local_files::outcome::LocalCopyFailureState;
 use qubit_local_files::outcome::LocalFileKind;
 use qubit_local_files::outcome::LocalPersistFailureState;
@@ -40,9 +40,9 @@ use qubit_local_files::outcome::LocalPersistStage;
 use qubit_local_files::outcome::LocalRenameFailureState;
 use qubit_local_files::outcome::LocalWriteFailureState;
 use qubit_local_files::outcome::LocalWriterState;
-#[cfg(feature = "internal-test-support")]
+#[cfg(feature = "test-support")]
 use qubit_local_files::policy::LocalDurabilityRequirement;
-#[cfg(feature = "internal-test-support")]
+#[cfg(feature = "test-support")]
 use qubit_local_files::test_support::install_test_fault;
 #[cfg(target_os = "linux")]
 use tempfile::NamedTempFile;
@@ -390,36 +390,18 @@ fn test_rooted_temp_file_missing_parent_retains_cleanup() {
 
 /// Runs one test-support-only rooted-copy fault case in an isolated child
 /// process.
-#[cfg(feature = "internal-test-support")]
-fn run_in_test_fault_process<F>(test_name: &str, fault: &str, action: F)
+#[cfg(feature = "test-support")]
+fn run_in_test_fault_process<F>(_test_name: &str, fault: &str, action: F)
 where
     F: FnOnce(),
 {
-    const TEST_FAULT_ENV: &str = "QUBIT_LOCAL_FILES_TEST_FAULT";
-    const TEST_FAULT_CHILD_ENV: &str = "QUBIT_LOCAL_FILES_TEST_FAULT_CHILD";
-    if std::env::var_os(TEST_FAULT_ENV).is_some_and(|selected| selected == std::ffi::OsStr::new(fault)) {
-        let _fault = install_test_fault(fault).expect("test fault controller should install");
-        action();
-        return;
-    }
-    if std::env::var_os(TEST_FAULT_CHILD_ENV).is_some() {
-        return;
-    }
-    let executable = std::env::current_exe().expect("test executable should be available");
-    let status = std::process::Command::new(executable)
-        .arg("--exact")
-        .arg(test_name)
-        .arg("--nocapture")
-        .env(TEST_FAULT_ENV, fault)
-        .env(TEST_FAULT_CHILD_ENV, "1")
-        .status()
-        .expect("test fault child should launch");
-    assert!(status.success(), "test fault child should pass");
+    let _fault = install_test_fault(fault).expect("test fault controller should install");
+    action();
 }
 
 /// Exercises a selected rooted regular-file copy fault through the public
 /// facade and checks that it remains a structured, unpublished failure.
-#[cfg(feature = "internal-test-support")]
+#[cfg(feature = "test-support")]
 fn assert_rooted_file_copy_fault(test_name: &str, fault: &str, preserve: bool, expected_kind: LocalFileErrorKind) {
     run_in_test_fault_process(test_name, fault, || {
         let directory = tempdir().expect("temporary directory should be created");
@@ -440,7 +422,7 @@ fn assert_rooted_file_copy_fault(test_name: &str, fault: &str, preserve: bool, e
 }
 
 /// Verifies a rooted source-open failure is reported before copying begins.
-#[cfg(feature = "internal-test-support")]
+#[cfg(feature = "test-support")]
 #[test]
 fn test_rooted_copy_reports_injected_source_open_failure() {
     assert_rooted_file_copy_fault(
@@ -452,7 +434,7 @@ fn test_rooted_copy_reports_injected_source_open_failure() {
 }
 
 /// Verifies a rooted handle-metadata failure remains structured.
-#[cfg(feature = "internal-test-support")]
+#[cfg(feature = "test-support")]
 #[test]
 fn test_rooted_copy_reports_injected_source_metadata_failure() {
     assert_rooted_file_copy_fault(
@@ -464,7 +446,7 @@ fn test_rooted_copy_reports_injected_source_metadata_failure() {
 }
 
 /// Verifies destination inspection failures are retained by rooted copy.
-#[cfg(feature = "internal-test-support")]
+#[cfg(feature = "test-support")]
 #[test]
 fn test_rooted_copy_reports_injected_destination_metadata_failure() {
     assert_rooted_file_copy_fault(
@@ -476,7 +458,7 @@ fn test_rooted_copy_reports_injected_destination_metadata_failure() {
 }
 
 /// Verifies a rooted staging-writer open failure is retained by copy.
-#[cfg(feature = "internal-test-support")]
+#[cfg(feature = "test-support")]
 #[test]
 fn test_rooted_copy_reports_injected_writer_open_failure() {
     assert_rooted_file_copy_fault(
@@ -488,7 +470,7 @@ fn test_rooted_copy_reports_injected_writer_open_failure() {
 }
 
 /// Verifies a rooted byte-copy failure is reported with copy context.
-#[cfg(feature = "internal-test-support")]
+#[cfg(feature = "test-support")]
 #[test]
 fn test_rooted_copy_reports_injected_contents_failure() {
     assert_rooted_file_copy_fault(
@@ -500,7 +482,7 @@ fn test_rooted_copy_reports_injected_contents_failure() {
 }
 
 /// Verifies a rooted atomic-install failure is retained by copy.
-#[cfg(feature = "internal-test-support")]
+#[cfg(feature = "test-support")]
 #[test]
 fn test_rooted_copy_reports_injected_commit_failure() {
     assert_rooted_file_copy_fault(
@@ -512,7 +494,7 @@ fn test_rooted_copy_reports_injected_commit_failure() {
 }
 
 /// Verifies metadata-preserving rooted copy exposes permission failures.
-#[cfg(feature = "internal-test-support")]
+#[cfg(feature = "test-support")]
 #[test]
 fn test_rooted_copy_reports_injected_permission_failure() {
     assert_rooted_file_copy_fault(
@@ -524,7 +506,7 @@ fn test_rooted_copy_reports_injected_permission_failure() {
 }
 
 /// Verifies rooted copy reports statistic overflow without discarding context.
-#[cfg(feature = "internal-test-support")]
+#[cfg(feature = "test-support")]
 #[test]
 fn test_rooted_copy_reports_injected_statistics_overflow() {
     assert_rooted_file_copy_fault(
@@ -537,7 +519,7 @@ fn test_rooted_copy_reports_injected_statistics_overflow() {
 
 /// Verifies rooted copy maps native authority faults from source traversal,
 /// destination preparation, removal, and metadata preservation.
-#[cfg(feature = "internal-test-support")]
+#[cfg(feature = "test-support")]
 #[test]
 fn test_rooted_copy_reports_injected_native_authority_failures() {
     const TEST_NAME: &str = "test_rooted_copy_reports_injected_native_authority_failures";
@@ -606,7 +588,7 @@ fn test_rooted_copy_reports_injected_native_authority_failures() {
 }
 
 /// Verifies rooted recursive failures retain exact published-child statistics.
-#[cfg(feature = "internal-test-support")]
+#[cfg(feature = "test-support")]
 #[test]
 fn test_rooted_copy_failure_reports_second_child_partial_publication() {
     const TEST_NAME: &str = "test_rooted_copy_failure_reports_second_child_partial_publication";
@@ -632,7 +614,7 @@ fn test_rooted_copy_failure_reports_second_child_partial_publication() {
 }
 
 /// Verifies rooted parent synchronization failures retain completed copy stats.
-#[cfg(feature = "internal-test-support")]
+#[cfg(feature = "test-support")]
 #[test]
 fn test_rooted_copy_failure_retains_stats_after_parent_sync_fault() {
     const TEST_NAME: &str = "test_rooted_copy_failure_retains_stats_after_parent_sync_fault";
@@ -656,7 +638,7 @@ fn test_rooted_copy_failure_retains_stats_after_parent_sync_fault() {
 
 /// Verifies rooted commit cleanup failures retain root-relative staging
 /// details.
-#[cfg(feature = "internal-test-support")]
+#[cfg(feature = "test-support")]
 #[test]
 fn test_rooted_copy_failure_retains_cleanup_staging_context() {
     const TEST_NAME: &str = "test_rooted_copy_failure_retains_cleanup_staging_context";
@@ -687,7 +669,7 @@ fn test_rooted_copy_failure_retains_cleanup_staging_context() {
 }
 
 /// Verifies a rooted parent durability fault retains the completed rename fact.
-#[cfg(feature = "internal-test-support")]
+#[cfg(feature = "test-support")]
 #[test]
 fn test_rooted_rename_parent_durability_failure_reports_renamed() {
     const TEST_NAME: &str = "test_rooted_rename_parent_durability_failure_reports_renamed";
@@ -711,7 +693,7 @@ fn test_rooted_rename_parent_durability_failure_reports_renamed() {
 }
 
 /// Verifies an I/O failure at the rooted native boundary remains conservative.
-#[cfg(feature = "internal-test-support")]
+#[cfg(feature = "test-support")]
 #[test]
 fn test_rooted_rename_native_io_failure_reports_indeterminate() {
     const TEST_NAME: &str = "test_rooted_rename_native_io_failure_reports_indeterminate";

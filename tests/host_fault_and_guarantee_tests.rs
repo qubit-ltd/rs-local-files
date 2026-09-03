@@ -17,12 +17,12 @@ use std::time::Duration;
 
 use qubit_local_files::LocalFileSystem;
 use qubit_local_files::error::LocalFileErrorKind;
-#[cfg(feature = "internal-test-support")]
+#[cfg(feature = "test-support")]
 use qubit_local_files::error::LocalFileOperation;
-#[cfg(feature = "internal-test-support")]
+#[cfg(feature = "test-support")]
 use qubit_local_files::options::LocalCopyConflictPolicy;
 use qubit_local_files::options::LocalCopyOptions;
-#[cfg(feature = "internal-test-support")]
+#[cfg(feature = "test-support")]
 use qubit_local_files::options::LocalCopyTypeConflictPolicy;
 use qubit_local_files::options::LocalCreateDirectoryOptions;
 use qubit_local_files::options::LocalDeleteOptions;
@@ -30,20 +30,20 @@ use qubit_local_files::options::LocalListOptions;
 use qubit_local_files::options::LocalMetadataPreservePolicy;
 use qubit_local_files::options::LocalReadOptions;
 use qubit_local_files::options::LocalRenameOptions;
-#[cfg(feature = "internal-test-support")]
+#[cfg(feature = "test-support")]
 use qubit_local_files::options::LocalTempDirectoryOptions;
-#[cfg(feature = "internal-test-support")]
+#[cfg(feature = "test-support")]
 use qubit_local_files::options::LocalTempFileOptions;
 use qubit_local_files::options::LocalWriteMode;
 use qubit_local_files::options::LocalWriteOptions;
-#[cfg(feature = "internal-test-support")]
+#[cfg(feature = "test-support")]
 use qubit_local_files::outcome::LocalCopyFailureState;
-#[cfg(feature = "internal-test-support")]
+#[cfg(feature = "test-support")]
 use qubit_local_files::outcome::LocalRenameFailureState;
 use qubit_local_files::policy::LocalAtomicityRequirement;
 use qubit_local_files::policy::LocalDurabilityRequirement;
 use qubit_local_files::policy::LocalSymlinkPolicy;
-#[cfg(feature = "internal-test-support")]
+#[cfg(feature = "test-support")]
 use qubit_local_files::test_support::install_test_fault;
 use tempfile::tempdir;
 
@@ -341,36 +341,18 @@ fn test_filesystem_namespace_capabilities_and_probe_variants() {
 }
 
 /// Runs one test-support-only facade fault in an isolated child process.
-#[cfg(feature = "internal-test-support")]
-fn run_facade_fault<F>(test_name: &str, fault: &str, action: F)
+#[cfg(feature = "test-support")]
+fn run_facade_fault<F>(_test_name: &str, fault: &str, action: F)
 where
     F: FnOnce(),
 {
-    const TEST_FAULT_ENV: &str = "QUBIT_LOCAL_FILES_TEST_FAULT";
-    const TEST_FAULT_CHILD_ENV: &str = "QUBIT_LOCAL_FILES_TEST_FAULT_CHILD";
-    if std::env::var_os(TEST_FAULT_ENV).is_some_and(|selected| selected == std::ffi::OsStr::new(fault)) {
-        let _fault = install_test_fault(fault).expect("test fault controller should install");
-        action();
-        return;
-    }
-    if std::env::var_os(TEST_FAULT_CHILD_ENV).is_some() {
-        return;
-    }
-    let executable = std::env::current_exe().expect("coverage test executable should be available");
-    let status = std::process::Command::new(executable)
-        .arg("--exact")
-        .arg(test_name)
-        .arg("--nocapture")
-        .env(TEST_FAULT_ENV, fault)
-        .env(TEST_FAULT_CHILD_ENV, "1")
-        .status()
-        .expect("test fault child should launch");
-    assert!(status.success(), "test fault child should pass");
+    let _fault = install_test_fault(fault).expect("test fault controller should install");
+    action();
 }
 
 /// Verifies metadata-preserving atomic replacement reports every injected
 /// native xattr and metadata boundary through the public writer API.
-#[cfg(all(feature = "internal-test-support", any(target_os = "linux", target_os = "android")))]
+#[cfg(all(feature = "test-support", any(target_os = "linux", target_os = "android")))]
 #[test]
 fn test_atomic_replacement_exercises_metadata_fault_boundaries() {
     const TEST_NAME: &str = "test_atomic_replacement_exercises_metadata_fault_boundaries";
@@ -441,7 +423,7 @@ fn test_atomic_replacement_exercises_metadata_fault_boundaries() {
 }
 
 /// Verifies a post-open prefix-read failure is attributed to the read stage.
-#[cfg(feature = "internal-test-support")]
+#[cfg(feature = "test-support")]
 #[test]
 fn test_read_prefix_reports_injected_read_failure() {
     const TEST_NAME: &str = "test_read_prefix_reports_injected_read_failure";
@@ -461,7 +443,7 @@ fn test_read_prefix_reports_injected_read_failure() {
 
 /// Verifies an injected native rename uncertainty retains its indeterminate
 /// public failure state.
-#[cfg(feature = "internal-test-support")]
+#[cfg(feature = "test-support")]
 #[test]
 fn test_rename_reports_injected_indeterminate_native_failure() {
     const TEST_NAME: &str = "test_rename_reports_injected_indeterminate_native_failure";
@@ -481,7 +463,7 @@ fn test_rename_reports_injected_indeterminate_native_failure() {
 
 /// Verifies an I/O failure reported by the native rename boundary preserves
 /// the indeterminate mutation state.
-#[cfg(feature = "internal-test-support")]
+#[cfg(feature = "test-support")]
 #[test]
 fn test_rename_reports_injected_native_boundary_failure() {
     const TEST_NAME: &str = "test_rename_reports_injected_native_boundary_failure";
@@ -503,7 +485,7 @@ fn test_rename_reports_injected_native_boundary_failure() {
 
 /// Verifies host facade I/O conversions preserve structured failures at each
 /// native filesystem boundary.
-#[cfg(feature = "internal-test-support")]
+#[cfg(feature = "test-support")]
 #[test]
 fn test_host_facade_reports_injected_native_io_failures() {
     const TEST_NAME: &str = "test_host_facade_reports_injected_native_io_failures";
@@ -592,7 +574,7 @@ fn test_host_facade_reports_injected_native_io_failures() {
 
 /// Verifies copy and rename report post-publication durability failures from
 /// the shared parent-sync native boundary.
-#[cfg(feature = "internal-test-support")]
+#[cfg(feature = "test-support")]
 #[cfg(not(windows))]
 #[test]
 fn test_copy_and_rename_report_injected_parent_sync_failures() {
@@ -631,7 +613,7 @@ fn test_copy_and_rename_report_injected_parent_sync_failures() {
 
 /// Verifies required copy durability synchronizes the staging handle before
 /// publication, leaving an existing destination unchanged on sync failure.
-#[cfg(feature = "internal-test-support")]
+#[cfg(feature = "test-support")]
 #[test]
 fn test_copy_required_durability_syncs_staging_before_publication() {
     const TEST_NAME: &str = "test_copy_required_durability_syncs_staging_before_publication";
@@ -660,7 +642,7 @@ fn test_copy_required_durability_syncs_staging_before_publication() {
 
 /// Verifies a host lacking directory synchronization rejects a required
 /// durability request before the copy publishes its target.
-#[cfg(feature = "internal-test-support")]
+#[cfg(feature = "test-support")]
 #[test]
 fn test_copy_rejects_injected_missing_directory_durability() {
     const TEST_NAME: &str = "test_copy_rejects_injected_missing_directory_durability";
@@ -685,7 +667,7 @@ fn test_copy_rejects_injected_missing_directory_durability() {
 
 /// Verifies host recursive-copy recovery either reports a native destination
 /// creation race or reconciles it into a complete tree publication.
-#[cfg(feature = "internal-test-support")]
+#[cfg(feature = "test-support")]
 #[test]
 fn test_host_copy_reports_injected_destination_races() {
     const TEST_NAME: &str = "test_host_copy_reports_injected_destination_races";
@@ -719,7 +701,7 @@ fn test_host_copy_reports_injected_destination_races() {
 
 /// Verifies host recursive-copy replacement detects reinspection and removal
 /// races before it can claim a completed tree publication.
-#[cfg(feature = "internal-test-support")]
+#[cfg(feature = "test-support")]
 #[test]
 fn test_host_copy_reports_injected_destination_removal_races() {
     const TEST_NAME: &str = "test_host_copy_reports_injected_destination_removal_races";
@@ -756,7 +738,7 @@ fn test_host_copy_reports_injected_destination_removal_races() {
 
 /// Verifies host temporary-resource creation retries a one-shot collision and
 /// returns native creation failures without creating cleanup-owned resources.
-#[cfg(feature = "internal-test-support")]
+#[cfg(feature = "test-support")]
 #[test]
 fn test_host_temp_resources_report_injected_creation_outcomes() {
     const TEST_NAME: &str = "test_host_temp_resources_report_injected_creation_outcomes";

@@ -11,14 +11,13 @@ use std::io::Cursor;
 use std::time::Duration;
 use std::time::Instant;
 
-use qubit_local_files::options::LocalCopyConflictPolicy;
-use qubit_local_files::options::LocalCopyTypeConflictPolicy;
-use qubit_local_files::policy::LocalDurabilityRequirement;
-use qubit_local_files::policy::LocalSymlinkPolicy;
-use qubit_local_files::test_support::internal_contract::CopyBudget;
-use qubit_local_files::test_support::internal_contract::LocalCopyDirOptions;
-use qubit_local_files::test_support::internal_contract::copy_with_clock;
-use qubit_local_files::test_support::internal_contract::generated_keep_target;
+use crate::local::CopyBudget;
+use crate::local::LocalCopyDirOptions;
+use crate::options::LocalCopyConflictPolicy;
+use crate::options::LocalCopyTypeConflictPolicy;
+use crate::policy::LocalDurabilityRequirement;
+use crate::policy::LocalSymlinkPolicy;
+use crate::temp::internal::generated_target;
 
 #[test]
 fn test_local_copy_dir_options_builders_update_every_policy() {
@@ -78,8 +77,9 @@ fn test_copy_budget_stops_at_the_next_chunk_deadline_boundary() {
             started + Duration::from_millis(1)
         }
     };
-    let error = copy_with_clock(&mut budget, &mut reader, &mut writer, &mut now)
-    .expect_err("the second chunk must observe the expired deadline");
+    let error = budget
+        .copy_with_now(&mut reader, &mut writer, &mut now)
+        .expect_err("the second chunk must observe the expired deadline");
 
     assert_eq!(std::io::ErrorKind::TimedOut, error.kind());
     assert!(writer.len() < source.len());
@@ -90,15 +90,15 @@ fn test_copy_budget_stops_at_the_next_chunk_deadline_boundary() {
 fn test_generated_keep_target_promotes_only_well_formed_sandbox_paths() {
     assert_eq!(
         std::path::Path::new("/parent/resource"),
-        generated_keep_target(std::path::Path::new("/parent/sandbox/resource"))
+        generated_target(std::path::Path::new("/parent/sandbox/resource"))
             .expect("sandboxed path should derive a sibling target")
     );
-    assert!(generated_keep_target(std::path::Path::new("resource")).is_err());
-    assert!(generated_keep_target(std::path::Path::new("/resource")).is_err());
-    assert!(generated_keep_target(std::path::Path::new("/parent/sandbox/..")).is_err());
+    assert!(generated_target(std::path::Path::new("resource")).is_err());
+    assert!(generated_target(std::path::Path::new("/resource")).is_err());
+    assert!(generated_target(std::path::Path::new("/parent/sandbox/..")).is_err());
     assert_eq!(
         std::path::Path::new("/resource"),
-        generated_keep_target(std::path::Path::new("/sandbox/resource"))
+        generated_target(std::path::Path::new("/sandbox/resource"))
             .expect("root sandbox should derive a root sibling target")
     );
 }

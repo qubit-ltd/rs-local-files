@@ -67,7 +67,9 @@ impl OpenedCopySource {
     /// Returns `InvalidInput` for a symbolic link that must not be followed or
     /// for an opened non-regular resource. Other open and metadata errors are
     /// returned unchanged.
-    #[inline(always)]
+    // qubit-style: allow coverage-cfg
+    #[cfg_attr(not(coverage), inline(always))]
+    #[cfg_attr(coverage, inline(never))]
     pub(super) fn open(
         path: &Path,
         symlink_policy: LocalSymlinkPolicy,
@@ -82,7 +84,8 @@ impl OpenedCopySource {
     ///
     /// Open source file followed by metadata read from that handle.
     #[must_use = "the opened source handle and authoritative metadata must both be retained"]
-    #[inline(always)]
+    #[cfg_attr(not(coverage), inline(always))]
+    #[cfg_attr(coverage, inline(never))]
     pub(super) fn into_parts(self) -> (File, Metadata) {
         (self.file, self.metadata)
     }
@@ -112,7 +115,8 @@ fn open_copy_source(
 
 /// Normalizes final-link and non-openable special-file errors.
 #[cfg(unix)]
-#[inline]
+#[cfg_attr(not(coverage), inline)]
+#[cfg_attr(coverage, inline(never))]
 fn normalize_unix_source_open_error(path: &Path, error: Error) -> Error {
     match error.raw_os_error() {
         Some(libc::ELOOP | libc::ENXIO | libc::ENODEV) => invalid_copy_source(path),
@@ -172,7 +176,8 @@ fn open_copy_source(
 }
 
 /// Rejects metadata that does not represent a regular file.
-#[inline]
+#[cfg_attr(not(coverage), inline)]
+#[cfg_attr(coverage, inline(never))]
 fn reject_non_regular_source(path: &Path, metadata: &Metadata) -> Result<()> {
     if metadata.is_file() {
         Ok(())
@@ -183,7 +188,8 @@ fn reject_non_regular_source(path: &Path, metadata: &Metadata) -> Result<()> {
 
 /// Creates the stable error used for a non-regular copy source.
 #[must_use]
-#[inline]
+#[cfg_attr(not(coverage), inline)]
+#[cfg_attr(coverage, inline(never))]
 fn invalid_copy_source(path: &Path) -> Error {
     Error::new(
         ErrorKind::InvalidInput,

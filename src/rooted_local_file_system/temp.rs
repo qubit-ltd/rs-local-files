@@ -59,9 +59,9 @@ impl RootedLocalFileSystem {
         };
         if options.creates_parent() && !parent.as_os_str().is_empty() {
             let parent_path = rooted_path(&parent, LocalFileOperation::CreateTempFile)?;
-            self.root
-                .create_dir_all(&parent_path)
-                .map_err(|error| rooted_io_error(LocalFileOperation::CreateTempFile, &parent, error))?;
+            if let Err(error) = self.root.create_dir_all(&parent_path) {
+                return Err(rooted_io_error(LocalFileOperation::CreateTempFile, &parent, error));
+            }
         }
         validate_rooted_temp_parent(&self.root, &parent, LocalFileOperation::CreateTempFile)?;
         if options.max_attempts() == Some(0) {
@@ -75,16 +75,20 @@ impl RootedLocalFileSystem {
             )
             .with_kind(LocalFileErrorKind::InvalidOptions));
         }
-        validate_temp_affixes(options.prefix(), options.suffix()).map_err(|error| {
-            rooted_io_error(LocalFileOperation::CreateTempFile, &parent, error)
-                .with_kind(LocalFileErrorKind::InvalidOptions)
-        })?;
+        if let Err(error) = validate_temp_affixes(options.prefix(), options.suffix()) {
+            return Err(rooted_io_error(LocalFileOperation::CreateTempFile, &parent, error)
+                .with_kind(LocalFileErrorKind::InvalidOptions));
+        }
         let mut attempts = 0_usize;
         loop {
             attempts = attempts.saturating_add(1);
             let resource_name =
-                crate::local::try_random_file_name("qubit-local-files-", options.prefix(), options.suffix())
-                    .map_err(|error| rooted_io_error(LocalFileOperation::CreateTempFile, &parent, error))?;
+                match crate::local::try_random_file_name("qubit-local-files-", options.prefix(), options.suffix()) {
+                    Ok(name) => name,
+                    Err(error) => {
+                        return Err(rooted_io_error(LocalFileOperation::CreateTempFile, &parent, error));
+                    }
+                };
             let sandbox = temp_candidate(&parent, Some("sandbox-"), None, LocalFileOperation::CreateTempFile)?;
             let sandbox_relative = rooted_path(&sandbox, LocalFileOperation::CreateTempFile)?;
             match self.root.create_dir(&sandbox_relative) {
@@ -105,7 +109,7 @@ impl RootedLocalFileSystem {
             }
             let candidate = sandbox.join(resource_name);
             let relative = rooted_path(&candidate, LocalFileOperation::CreateTempFile)?;
-            #[cfg(feature = "internal-test-support")]
+            #[cfg(feature = "test-support")]
             let opened = if crate::local::test_support_enabled("rooted-temp-file-collision") {
                 Err(io::Error::from(io::ErrorKind::AlreadyExists))
             } else if crate::local::test_support_enabled("rooted-temp-file-open") {
@@ -116,7 +120,7 @@ impl RootedLocalFileSystem {
                     &crate::write::OpenOptions::new(crate::write::Mode::CreateNew),
                 )
             };
-            #[cfg(not(feature = "internal-test-support"))]
+            #[cfg(not(feature = "test-support"))]
             let opened = self.root.open_writer(
                 &relative,
                 &crate::write::OpenOptions::new(crate::write::Mode::CreateNew),
@@ -194,9 +198,9 @@ impl RootedLocalFileSystem {
         };
         if options.creates_parent() && !parent.as_os_str().is_empty() {
             let parent_path = rooted_path(&parent, LocalFileOperation::CreateTempDirectory)?;
-            self.root
-                .create_dir_all(&parent_path)
-                .map_err(|error| rooted_io_error(LocalFileOperation::CreateTempDirectory, &parent, error))?;
+            if let Err(error) = self.root.create_dir_all(&parent_path) {
+                return Err(rooted_io_error(LocalFileOperation::CreateTempDirectory, &parent, error));
+            }
         }
         validate_rooted_temp_parent(&self.root, &parent, LocalFileOperation::CreateTempDirectory)?;
         if options.max_attempts() == Some(0) {
@@ -210,16 +214,20 @@ impl RootedLocalFileSystem {
             )
             .with_kind(LocalFileErrorKind::InvalidOptions));
         }
-        validate_temp_affixes(options.prefix(), options.suffix()).map_err(|error| {
-            rooted_io_error(LocalFileOperation::CreateTempDirectory, &parent, error)
-                .with_kind(LocalFileErrorKind::InvalidOptions)
-        })?;
+        if let Err(error) = validate_temp_affixes(options.prefix(), options.suffix()) {
+            return Err(rooted_io_error(LocalFileOperation::CreateTempDirectory, &parent, error)
+                .with_kind(LocalFileErrorKind::InvalidOptions));
+        }
         let mut attempts = 0_usize;
         loop {
             attempts = attempts.saturating_add(1);
             let resource_name =
-                crate::local::try_random_file_name("qubit-local-files-", options.prefix(), options.suffix())
-                    .map_err(|error| rooted_io_error(LocalFileOperation::CreateTempDirectory, &parent, error))?;
+                match crate::local::try_random_file_name("qubit-local-files-", options.prefix(), options.suffix()) {
+                    Ok(name) => name,
+                    Err(error) => {
+                        return Err(rooted_io_error(LocalFileOperation::CreateTempDirectory, &parent, error));
+                    }
+                };
             let sandbox = temp_candidate(&parent, Some("sandbox-"), None, LocalFileOperation::CreateTempDirectory)?;
             let sandbox_relative = rooted_path(&sandbox, LocalFileOperation::CreateTempDirectory)?;
             match self.root.create_dir(&sandbox_relative) {
@@ -240,7 +248,7 @@ impl RootedLocalFileSystem {
             }
             let candidate = sandbox.join(resource_name);
             let relative = rooted_path(&candidate, LocalFileOperation::CreateTempDirectory)?;
-            #[cfg(feature = "internal-test-support")]
+            #[cfg(feature = "test-support")]
             let created = if crate::local::test_support_enabled("rooted-temp-directory-collision") {
                 Err(io::Error::from(io::ErrorKind::AlreadyExists))
             } else if crate::local::test_support_enabled("rooted-temp-directory-create") {
@@ -248,7 +256,7 @@ impl RootedLocalFileSystem {
             } else {
                 self.root.create_dir(&relative)
             };
-            #[cfg(not(feature = "internal-test-support"))]
+            #[cfg(not(feature = "test-support"))]
             let created = self.root.create_dir(&relative);
             match created {
                 Ok(()) => {
