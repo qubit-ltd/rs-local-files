@@ -180,6 +180,7 @@ impl LocalCopyFailure {
     }
 
     /// Returns the most precise destination state proven by native operations.
+    #[must_use]
     #[cfg_attr(not(coverage), inline(always))]
     #[cfg_attr(coverage, inline(never))]
     pub fn state(&self) -> LocalCopyFailureState {

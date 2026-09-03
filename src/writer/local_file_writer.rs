@@ -491,7 +491,6 @@ fn atomic_destination_state(state: crate::local::LocalAtomicDestinationState) ->
 /// # Returns
 ///
 /// Unified local filesystem error retaining the atomic error as its source.
-#[must_use]
 #[cfg_attr(not(coverage), inline)]
 #[cfg_attr(coverage, inline(never))]
 fn atomic_write_error(
@@ -514,7 +513,6 @@ fn atomic_write_error(
 /// # Returns
 ///
 /// Structured writer error.
-#[must_use]
 #[cfg_attr(not(coverage), inline(always))]
 #[cfg_attr(coverage, inline(never))]
 fn writer_io_error(path: &Path, operation: LocalFileOperation, error: io::Error) -> LocalFileError {

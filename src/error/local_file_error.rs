@@ -22,6 +22,19 @@ use super::LocalPathCodecError;
 use super::LocalResourceLimitError;
 
 /// Structured failure from a local filesystem operation.
+///
+/// # Examples
+///
+/// ```
+/// use qubit_local_files::error::LocalFileError;
+/// use qubit_local_files::error::LocalFileErrorKind;
+/// use qubit_local_files::error::LocalFileOperation;
+///
+/// let error = LocalFileError::new(LocalFileErrorKind::NotFound, LocalFileOperation::Metadata);
+/// assert_eq!(error.kind(), LocalFileErrorKind::NotFound);
+/// assert_eq!(error.operation(), LocalFileOperation::Metadata);
+/// ```
+#[must_use]
 #[derive(Debug)]
 pub struct LocalFileError {
     /// Stable failure classification.
@@ -49,7 +62,6 @@ impl LocalFileError {
     ///
     /// - `kind`: Stable failure classification.
     /// - `operation`: Operation that failed.
-    #[must_use]
     #[cfg_attr(not(coverage), inline(always))]
     #[cfg_attr(coverage, inline(never))]
     pub const fn new(kind: LocalFileErrorKind, operation: LocalFileOperation) -> Self {
@@ -77,7 +89,6 @@ impl LocalFileError {
     /// # Returns
     ///
     /// A structured local filesystem error.
-    #[must_use]
     #[cfg_attr(not(coverage), inline(always))]
     #[cfg_attr(coverage, inline(never))]
     pub fn from_io(
@@ -118,7 +129,6 @@ impl LocalFileError {
     /// # Returns
     ///
     /// A structured invalid-path error whose source is `PathCodec(error)`.
-    #[must_use]
     #[allow(dead_code)]
     #[cfg_attr(not(coverage), inline)]
     #[cfg_attr(coverage, inline(never))]
@@ -151,7 +161,6 @@ impl LocalFileError {
     ///
     /// A structured resource-limit error whose source is
     /// `ResourceLimit(source)`.
-    #[must_use]
     #[cfg_attr(not(coverage), inline)]
     #[cfg_attr(coverage, inline(never))]
     pub(crate) fn from_resource_limit(
@@ -172,7 +181,6 @@ impl LocalFileError {
     }
 
     /// Adds the namespace-absolute PWD used for path binding.
-    #[must_use]
     #[cfg_attr(not(coverage), inline(always))]
     #[cfg_attr(coverage, inline(never))]
     pub fn with_current_directory(mut self, current_directory: PathBuf) -> Self {
@@ -189,7 +197,6 @@ impl LocalFileError {
     /// # Returns
     ///
     /// The updated error.
-    #[must_use]
     #[cfg_attr(not(coverage), inline(always))]
     #[cfg_attr(coverage, inline(never))]
     pub fn with_path(mut self, path: PathBuf) -> Self {
@@ -206,7 +213,6 @@ impl LocalFileError {
     /// # Returns
     ///
     /// The updated error.
-    #[must_use]
     #[cfg_attr(not(coverage), inline(always))]
     #[cfg_attr(coverage, inline(never))]
     pub fn with_target(mut self, target: PathBuf) -> Self {
@@ -236,7 +242,6 @@ impl LocalFileError {
     /// # Returns
     ///
     /// The updated error.
-    #[must_use]
     #[cfg_attr(not(coverage), inline(always))]
     #[cfg_attr(coverage, inline(never))]
     pub const fn with_reason(mut self, reason: &'static str) -> Self {
@@ -245,7 +250,6 @@ impl LocalFileError {
     }
 
     /// Retains a cleanup failure without replacing this primary failure.
-    #[must_use]
     #[cfg_attr(not(coverage), inline(always))]
     #[cfg_attr(coverage, inline(never))]
     pub fn with_cleanup_error(mut self, cleanup: LocalFileError) -> Self {
