@@ -61,6 +61,34 @@ fn test_copy_failure_exposes_typed_state_and_parts() {
     assert!(!target.exists());
 }
 
+/// Verifies Host copy failures preserve the logical path bound by a symlinked
+/// parent.
+#[cfg(unix)]
+#[test]
+fn test_host_copy_failure_preserves_bound_symlink_namespace() {
+    use std::os::unix::fs::symlink;
+
+    let directory = tempfile::tempdir().expect("temporary directory should be created");
+    let real = directory.path().join("real");
+    let alias = directory.path().join("alias");
+    fs::create_dir(&real).expect("real directory should be created");
+    symlink("real", &alias).expect("alias symlink should be created");
+
+    let source = alias.join("missing-source");
+    let target = alias.join("missing-target");
+    let failure = LocalFileSystem::host()
+        .expect("Host filesystem should open")
+        .copy_with_options(&source, &target, &LocalCopyOptions::default())
+        .expect_err("missing source must fail");
+
+    assert_eq!(Some(source.as_path()), failure.request_source_path());
+    assert_eq!(Some(target.as_path()), failure.request_target_path());
+    assert_eq!(Some(source.as_path()), failure.failed_source_path());
+    assert_eq!(Some(target.as_path()), failure.failed_target_path());
+    assert_eq!(Some(source.as_path()), failure.error().path());
+    assert_eq!(Some(target.as_path()), failure.error().target());
+}
+
 /// Verifies display diagnostics distinguish a failed descendant from the
 /// top-level copy request.
 #[cfg(unix)]

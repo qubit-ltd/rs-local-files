@@ -100,16 +100,67 @@ impl HostLocalFileSystem {
         scope_root: Option<&Path>,
     ) -> LocalCopyResult {
         let symlink_policy = options.symlink_policy_override().unwrap_or(symlink_policy);
-        let [source, target] = bind_host_paths([source, target]).map_err(copy_failure_unchanged)?;
-        let source = resolve_host_path(&source, symlink_policy, false).map_err(copy_failure_unchanged)?;
-        let target = resolve_host_path(&target, symlink_policy, false).map_err(copy_failure_unchanged)?;
+        let [bound_source, bound_target] = bind_host_paths([source, target]).map_err(copy_failure_unchanged)?;
+        let resolved_source =
+            resolve_host_path(&bound_source, symlink_policy, false).map_err(copy_failure_unchanged)?;
+        let resolved_target =
+            resolve_host_path(&bound_target, symlink_policy, false).map_err(copy_failure_unchanged)?;
+        Self::copy_resolved_with_policy(
+            &resolved_source,
+            &resolved_target,
+            options,
+            symlink_policy,
+            started_at,
+            scope_root,
+        )
+        .map_err(|failure| {
+            failure.remap_namespace(
+                &bound_source,
+                &bound_target,
+                &resolved_source,
+                &resolved_target,
+                false,
+                None,
+            )
+        })
+    }
+
+    /// Copies already-resolved Host paths while retaining backend coordinates.
+    ///
+    /// # Parameters
+    ///
+    /// - `source`: Existing absolute path used by the Host backend.
+    /// - `target`: Absolute destination path used by the Host backend.
+    /// - `options`: Copy conflict, metadata, and guarantee policy.
+    /// - `symlink_policy`: Policy for symbolic links encountered in a tree.
+    /// - `started_at`: Monotonic operation-entry instant for budget checks.
+    /// - `scope_root`: Optional canonical root constraining followed links.
+    ///
+    /// # Returns
+    ///
+    /// Structured copy statistics and achieved guarantees.
+    ///
+    /// # Errors
+    ///
+    /// Returns `LocalCopyFailure` when source inspection, copying, or required
+    /// guarantees fail. Paths in the failure remain backend-resolved until the
+    /// caller remaps them to the logical Host namespace.
+    #[allow(clippy::result_large_err)]
+    fn copy_resolved_with_policy(
+        source: &Path,
+        target: &Path,
+        options: &LocalCopyOptions,
+        symlink_policy: LocalSymlinkPolicy,
+        started_at: Instant,
+        scope_root: Option<&Path>,
+    ) -> LocalCopyResult {
         let mut internal_options = internal_copy_options(options, symlink_policy, started_at);
         let mut budget = crate::local::CopyBudget::new(internal_options);
         if let Err(error) = budget.check_deadline() {
-            return Err(copy_failure_unchanged(copy_io_error(&source, &target, error)));
+            return Err(copy_failure_unchanged(copy_io_error(source, target, error)));
         }
         if let Err(error) = budget.charge_entry() {
-            return Err(copy_failure_unchanged(copy_io_error(&source, &target, error)));
+            return Err(copy_failure_unchanged(copy_io_error(source, target, error)));
         }
         if let Some(max_entries) = internal_options.max_entries() {
             internal_options = internal_options.with_max_entries(max_entries - 1);
@@ -120,33 +171,33 @@ impl HostLocalFileSystem {
         ensure_required_directory_durability(
             options.durability(),
             LocalFileOperation::Copy,
-            &source,
-            &target,
+            source,
+            target,
             implements_durability,
             "required directory durability is unavailable on this host",
         )
         .map_err(copy_failure_unchanged)?;
         let source_metadata = match test_io_fault("local-fs-copy-source-metadata") {
             Some(error) => Err(error),
-            None => fs::symlink_metadata(&source),
+            None => fs::symlink_metadata(source),
         };
         let source_metadata = match source_metadata {
             Ok(metadata) => metadata,
             Err(error) => {
-                return Err(copy_failure_unchanged(copy_io_error(&source, &target, error)));
+                return Err(copy_failure_unchanged(copy_io_error(source, target, error)));
             }
         };
-        reject_copy_alias(&source, &target, &source_metadata).map_err(copy_failure_unchanged)?;
+        reject_copy_alias(source, target, &source_metadata).map_err(copy_failure_unchanged)?;
         if source_metadata.file_type().is_symlink() {
             if options.source_mode() == crate::LocalCopySourceMode::Tree {
                 return Err(copy_failure_unchanged(
                     LocalFileError::new(LocalFileErrorKind::RequirementNotMet, LocalFileOperation::Copy)
                         .with_reason("a symbolic-link entry is not a directory tree source")
-                        .with_path(source)
-                        .with_target(target),
+                        .with_path(source.to_path_buf())
+                        .with_target(target.to_path_buf()),
                 ));
             }
-            return copy_symlink_entry(&source, &target, options, &mut budget);
+            return copy_symlink_entry(source, target, options, &mut budget);
         }
         let effective_metadata = &source_metadata;
 
@@ -156,8 +207,8 @@ impl HostLocalFileSystem {
                 return Err(copy_failure_unchanged(
                     LocalFileError::new(LocalFileErrorKind::RequirementNotMet, LocalFileOperation::Copy)
                         .with_reason("copy source is a directory but file mode was required")
-                        .with_path(source)
-                        .with_target(target),
+                        .with_path(source.to_path_buf())
+                        .with_target(target.to_path_buf()),
                 ));
             }
             if crate::local::copy_directory_guarantee_unavailable(
@@ -168,22 +219,22 @@ impl HostLocalFileSystem {
                 return Err(copy_failure_unchanged(
                     LocalFileError::new(LocalFileErrorKind::RequirementNotMet, LocalFileOperation::Copy)
                         .with_reason("required directory copy guarantees are unavailable on this host")
-                        .with_path(source)
-                        .with_target(target),
+                        .with_path(source.to_path_buf())
+                        .with_target(target.to_path_buf()),
                 ));
             }
-            if let Err(error) = prepare_copy_parent(&target, options) {
-                return Err(copy_failure_unchanged(copy_io_error(&source, &target, error)));
+            if let Err(error) = prepare_copy_parent(target, options) {
+                return Err(copy_failure_unchanged(copy_io_error(source, target, error)));
             }
             let stats = match scope_root {
                 Some(scope_root) => {
-                    crate::local::copy_dir_all_with_paths_scoped(&source, &target, internal_options, scope_root)
+                    crate::local::copy_dir_all_with_paths_scoped(source, target, internal_options, scope_root)
                 }
-                None => crate::local::copy_dir_all_with_paths(&source, &target, internal_options),
+                None => crate::local::copy_dir_all_with_paths(source, target, internal_options),
             };
             let stats = match stats {
                 Ok(stats) => stats,
-                Err(error) => return Err(copy_pipeline_failure(&source, &target, error)),
+                Err(error) => return Err(copy_pipeline_failure(source, target, error)),
             };
             return Ok(LocalCopyOutcome::new(
                 LocalCopyStats::from_internal(stats),
@@ -196,22 +247,22 @@ impl HostLocalFileSystem {
         if !effective_metadata.file_type().is_file() {
             return Err(copy_failure_unchanged(
                 LocalFileError::new(LocalFileErrorKind::TypeConflict, LocalFileOperation::Copy)
-                    .with_path(source)
-                    .with_target(target),
+                    .with_path(source.to_path_buf())
+                    .with_target(target.to_path_buf()),
             ));
         }
         if crate::local::copy_source_mode_mismatch(source_is_directory, options.source_mode()) {
             return Err(copy_failure_unchanged(
                 LocalFileError::new(LocalFileErrorKind::RequirementNotMet, LocalFileOperation::Copy)
                     .with_reason("copy source is a file but directory mode was required")
-                    .with_path(source)
-                    .with_target(target),
+                    .with_path(source.to_path_buf())
+                    .with_target(target.to_path_buf()),
             ));
         }
-        let target_is_directory = match destination_is_directory(&target) {
+        let target_is_directory = match destination_is_directory(target) {
             Ok(target_is_directory) => target_is_directory,
             Err(error) => {
-                return Err(copy_failure_unchanged(copy_io_error(&source, &target, error)));
+                return Err(copy_failure_unchanged(copy_io_error(source, target, error)));
             }
         };
         if crate::local::copy_file_replace_requires_atomicity(
@@ -223,30 +274,30 @@ impl HostLocalFileSystem {
             return Err(copy_failure_unchanged(
                 LocalFileError::new(LocalFileErrorKind::RequirementNotMet, LocalFileOperation::Copy)
                     .with_reason("required atomic replacement is unavailable for this copy")
-                    .with_path(source)
-                    .with_target(target),
+                    .with_path(source.to_path_buf())
+                    .with_target(target.to_path_buf()),
             ));
         }
 
-        let parent_dirs_to_sync = match prepare_copy_parent(&target, options) {
+        let parent_dirs_to_sync = match prepare_copy_parent(target, options) {
             Ok(paths) => paths,
             Err(error) => {
-                return Err(copy_failure_unchanged(copy_io_error(&source, &target, error)));
+                return Err(copy_failure_unchanged(copy_io_error(source, target, error)));
             }
         };
 
         let mut stats = crate::local::LocalCopyDirStats::default();
         if let Err(error) =
-            crate::local::copy_file_with_options(&source, &target, internal_options, &mut stats, &mut budget)
+            crate::local::copy_file_with_options(source, target, internal_options, &mut stats, &mut budget)
         {
-            return Err(copy_pipeline_failure(&source, &target, error));
+            return Err(copy_pipeline_failure(source, target, error));
         }
         let parent_durable = published_durability(
             options.durability(),
-            || sync_parent_directory(&target).and_then(|()| sync_created_parent_directories(&parent_dirs_to_sync)),
+            || sync_parent_directory(target).and_then(|()| sync_created_parent_directories(&parent_dirs_to_sync)),
             LocalFileOperation::Copy,
-            &source,
-            &target,
+            source,
+            target,
         )
         .map_err(|error| copy_failure_published(error, LocalCopyStats::from_internal(stats)))?;
         let durable = stats.files_durable() && parent_durable;
