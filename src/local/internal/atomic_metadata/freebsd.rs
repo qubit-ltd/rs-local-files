@@ -263,21 +263,25 @@ fn remove_attribute(file: &File, namespace: libc::c_int, name: &[u8]) -> Result<
 }
 
 /// Converts an attribute name to a native C string.
-#[inline]
+// qubit-style: allow coverage-cfg
+#[cfg_attr(not(coverage), inline)]
+#[cfg_attr(coverage, inline(never))]
 fn native_name(name: &[u8]) -> Result<CString> {
     CString::new(name).map_err(|_| Error::new(ErrorKind::InvalidData, "extended-attribute name contains NUL"))
 }
 
 /// Reports an absent FreeBSD extended attribute.
 #[must_use]
-#[inline]
+#[cfg_attr(not(coverage), inline)]
+#[cfg_attr(coverage, inline(never))]
 fn is_missing_attribute(error: &Error) -> bool {
     error.raw_os_error() == Some(libc::ENOATTR)
 }
 
 /// Reports that a filesystem lacks an extended-attribute namespace.
 #[must_use]
-#[inline]
+#[cfg_attr(not(coverage), inline)]
+#[cfg_attr(coverage, inline(never))]
 fn is_not_supported(error: &Error) -> bool {
     let code = error.raw_os_error();
     code == Some(libc::ENOTSUP) || code == Some(libc::EOPNOTSUPP)
@@ -285,7 +289,8 @@ fn is_not_supported(error: &Error) -> bool {
 
 /// Reports that a filesystem does not use the requested ACL flavor.
 #[must_use]
-#[inline]
+#[cfg_attr(not(coverage), inline)]
+#[cfg_attr(coverage, inline(never))]
 fn is_unsupported_acl_type(error: &Error) -> bool {
     let code = error.raw_os_error();
     code == Some(libc::EINVAL) || code == Some(libc::ENOTSUP) || code == Some(libc::EOPNOTSUPP)

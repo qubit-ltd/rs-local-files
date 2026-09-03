@@ -183,16 +183,16 @@ pub(crate) fn copy_symlink_with_options(
         destination_metadata.as_ref().map(is_real_directory),
         options.conflict_policy(),
         options.type_conflict_policy(),
-    )
-    .ok_or_else(|| {
-        copy_dir_error(
+    );
+    let Some(action) = action else {
+        return Err(copy_dir_error(
             LocalCopyDirStage::PrepareDestination,
             src,
             dst,
             stats,
             std::io::Error::from(ErrorKind::AlreadyExists),
-        )
-    })?;
+        ));
+    };
     if action == CopyDestinationAction::Skip {
         return with_copy_context(
             record_skipped_file(stats),
@@ -359,7 +359,7 @@ fn stage_copy_file(
 
 /// Synchronizes staged file data before its namespace publication.
 fn sync_staged_file(staged_file: &StagedFile) -> std::io::Result<()> {
-    #[cfg(feature = "internal-test-support")]
+    #[cfg(feature = "test-support")]
     if crate::local::test_support_enabled("copy-staging-file-sync") {
         return Err(crate::local::test_fault_error());
     }

@@ -20,7 +20,9 @@ pub struct LocalReadOptions {
 
 impl LocalReadOptions {
     /// Creates default reader options that perform only the initial open.
-    #[inline]
+    // qubit-style: allow coverage-cfg
+    #[cfg_attr(not(coverage), inline)]
+    #[cfg_attr(coverage, inline(never))]
     pub const fn new() -> Self {
         Self {
             open_retry_timeout: None,
@@ -31,7 +33,8 @@ impl LocalReadOptions {
     ///
     /// `None` means the library does not retry.
     #[must_use]
-    #[inline(always)]
+    #[cfg_attr(not(coverage), inline(always))]
+    #[cfg_attr(coverage, inline(never))]
     pub const fn open_retry_timeout(&self) -> Option<Duration> {
         self.open_retry_timeout
     }

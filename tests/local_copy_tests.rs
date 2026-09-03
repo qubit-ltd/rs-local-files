@@ -218,6 +218,218 @@ fn test_local_file_system_copy_conflict_policy_matrix() {
         .expect_err("file-to-directory conflict should fail by default");
 }
 
+/// Verifies explicit source-kind requirements reject the opposite native entry
+/// before any destination mutation.
+#[test]
+fn test_local_file_system_copy_rejects_source_kind_mismatches() {
+    let directory = tempdir().expect("temporary directory should be created");
+    let source_file = directory.path().join("source-file");
+    let source_directory = directory.path().join("source-directory");
+    fs::write(&source_file, b"payload").expect("source file should be written");
+    fs::create_dir(&source_directory).expect("source directory should be created");
+
+    let file_error = LocalFileSystem::host()
+        .expect("Host filesystem should open")
+        .copy_with_options(
+            &source_file,
+            &directory.path().join("file-target"),
+            &LocalCopyOptions::new().with_tree_source(),
+        )
+        .expect_err("tree mode must reject a regular file source");
+    assert_eq!(LocalFileErrorKind::RequirementNotMet, file_error.error().kind());
+
+    let directory_error = LocalFileSystem::host()
+        .expect("Host filesystem should open")
+        .copy_with_options(
+            &source_directory,
+            &directory.path().join("directory-target"),
+            &LocalCopyOptions::new().with_file_source(),
+        )
+        .expect_err("file mode must reject a directory source");
+    assert_eq!(LocalFileErrorKind::RequirementNotMet, directory_error.error().kind());
+}
+
+/// Verifies final symbolic-link copies honor source, destination, type, parent,
+/// and durability policies without dereferencing the source entry.
+#[cfg(unix)]
+#[test]
+fn test_local_file_system_copy_symlink_policy_matrix() {
+    use std::os::unix::fs::symlink;
+
+    let directory = tempdir().expect("temporary directory should be created");
+    let referent = directory.path().join("referent");
+    let source = directory.path().join("source-link");
+    fs::write(&referent, b"payload").expect("referent should be written");
+    symlink("referent", &source).expect("source symlink should be created");
+
+    let tree_error = LocalFileSystem::host()
+        .expect("Host filesystem should open")
+        .copy_with_options(
+            &source,
+            &directory.path().join("tree-target"),
+            &LocalCopyOptions::new().with_tree_source(),
+        )
+        .expect_err("tree mode must reject a final symlink source");
+    assert_eq!(LocalFileErrorKind::RequirementNotMet, tree_error.error().kind());
+
+    let skip_target = directory.path().join("skip-target");
+    fs::write(&skip_target, b"existing").expect("skip target should be written");
+    let skipped = LocalFileSystem::host()
+        .expect("Host filesystem should open")
+        .copy_with_options(
+            &source,
+            &skip_target,
+            &LocalCopyOptions::new().with_conflict(LocalCopyConflictPolicy::Skip),
+        )
+        .expect("skip policy should retain an existing target");
+    assert_eq!(1, skipped.stats().skipped());
+    assert!(fs::symlink_metadata(&skip_target).unwrap().is_file());
+
+    let fail_target = directory.path().join("fail-target");
+    fs::write(&fail_target, b"existing").expect("fail target should be written");
+    LocalFileSystem::host()
+        .expect("Host filesystem should open")
+        .copy_with_options(&source, &fail_target, &LocalCopyOptions::new())
+        .expect_err("fail policy should reject an existing target");
+
+    let overwrite_target = directory.path().join("overwrite-target");
+    fs::write(&overwrite_target, b"existing").expect("overwrite target should be written");
+    let overwritten = LocalFileSystem::host()
+        .expect("Host filesystem should open")
+        .copy_with_options(
+            &source,
+            &overwrite_target,
+            &LocalCopyOptions::new().with_conflict(LocalCopyConflictPolicy::Overwrite),
+        )
+        .expect("overwrite policy should replace a file with the source link");
+    assert_eq!(1, overwritten.stats().overwritten());
+    assert_eq!(PathBuf::from("referent"), fs::read_link(&overwrite_target).unwrap());
+
+    let directory_target = directory.path().join("directory-target");
+    fs::create_dir(&directory_target).expect("directory target should be created");
+    LocalFileSystem::host()
+        .expect("Host filesystem should open")
+        .copy_with_options(
+            &source,
+            &directory_target,
+            &LocalCopyOptions::new().with_conflict(LocalCopyConflictPolicy::Overwrite),
+        )
+        .expect_err("default type policy should retain a directory target");
+    let replaced = LocalFileSystem::host()
+        .expect("Host filesystem should open")
+        .copy_with_options(
+            &source,
+            &directory_target,
+            &LocalCopyOptions::new()
+                .with_conflict(LocalCopyConflictPolicy::Overwrite)
+                .with_type_conflict(LocalCopyTypeConflictPolicy::Replace),
+        )
+        .expect("replace policy should replace a directory with the source link");
+    assert_eq!(1, replaced.stats().overwritten());
+    assert_eq!(PathBuf::from("referent"), fs::read_link(&directory_target).unwrap());
+
+    for (name, durability) in [
+        ("preferred", LocalDurabilityRequirement::Preferred),
+        ("required", LocalDurabilityRequirement::Required),
+    ] {
+        let target = directory.path().join("created-parent").join(name);
+        let outcome = LocalFileSystem::host()
+            .expect("Host filesystem should open")
+            .copy_with_options(
+                &source,
+                &target,
+                &LocalCopyOptions::new().with_parent().with_durability(durability),
+            )
+            .expect("symlink copy should satisfy the selected durability policy");
+        assert!(outcome.durable());
+        assert_eq!(PathBuf::from("referent"), fs::read_link(target).unwrap());
+    }
+}
+
+/// Verifies recursive symbolic-link publication applies entry conflict and
+/// type-conflict policies consistently with regular files.
+#[cfg(unix)]
+#[test]
+fn test_recursive_copy_symlink_destination_policy_matrix() {
+    use std::os::unix::fs::symlink;
+
+    let directory = tempdir().expect("temporary directory should be created");
+    let source = directory.path().join("source");
+    fs::create_dir(&source).expect("source directory should be created");
+    symlink("referent", source.join("link")).expect("source symlink should be created");
+
+    let skip_target = directory.path().join("skip-target");
+    fs::create_dir(&skip_target).expect("skip target should be created");
+    fs::write(skip_target.join("link"), b"existing").expect("skip fixture should be written");
+    let skipped = LocalFileSystem::host()
+        .expect("Host filesystem should open")
+        .copy_with_options(
+            &source,
+            &skip_target,
+            &LocalCopyOptions::new()
+                .with_tree_source()
+                .with_conflict(LocalCopyConflictPolicy::Skip),
+        )
+        .expect("skip policy should retain an existing nested entry");
+    assert_eq!(1, skipped.stats().skipped());
+
+    let fail_target = directory.path().join("fail-target");
+    fs::create_dir(&fail_target).expect("fail target should be created");
+    fs::write(fail_target.join("link"), b"existing").expect("fail fixture should be written");
+    LocalFileSystem::host()
+        .expect("Host filesystem should open")
+        .copy_with_options(&source, &fail_target, &LocalCopyOptions::new().with_tree_source())
+        .expect_err("fail policy should reject an existing nested entry");
+
+    let overwrite_target = directory.path().join("overwrite-target");
+    fs::create_dir(&overwrite_target).expect("overwrite target should be created");
+    fs::write(overwrite_target.join("link"), b"existing").expect("overwrite fixture should be written");
+    let overwritten = LocalFileSystem::host()
+        .expect("Host filesystem should open")
+        .copy_with_options(
+            &source,
+            &overwrite_target,
+            &LocalCopyOptions::new()
+                .with_tree_source()
+                .with_conflict(LocalCopyConflictPolicy::Overwrite),
+        )
+        .expect("overwrite policy should replace a nested file with a link");
+    assert_eq!(1, overwritten.stats().overwritten());
+    assert_eq!(
+        PathBuf::from("referent"),
+        fs::read_link(overwrite_target.join("link")).unwrap()
+    );
+
+    let directory_target = directory.path().join("directory-target");
+    fs::create_dir_all(directory_target.join("link")).expect("nested directory target should be created");
+    LocalFileSystem::host()
+        .expect("Host filesystem should open")
+        .copy_with_options(
+            &source,
+            &directory_target,
+            &LocalCopyOptions::new()
+                .with_tree_source()
+                .with_conflict(LocalCopyConflictPolicy::Overwrite),
+        )
+        .expect_err("default type policy should retain a nested directory");
+    let replaced = LocalFileSystem::host()
+        .expect("Host filesystem should open")
+        .copy_with_options(
+            &source,
+            &directory_target,
+            &LocalCopyOptions::new()
+                .with_tree_source()
+                .with_conflict(LocalCopyConflictPolicy::Overwrite)
+                .with_type_conflict(LocalCopyTypeConflictPolicy::Replace),
+        )
+        .expect("replace policy should replace a nested directory with a link");
+    assert_eq!(1, replaced.stats().overwritten());
+    assert_eq!(
+        PathBuf::from("referent"),
+        fs::read_link(directory_target.join("link")).unwrap()
+    );
+}
+
 /// Verifies recursive copy reads and applies source directory permissions.
 #[cfg(unix)]
 #[test]

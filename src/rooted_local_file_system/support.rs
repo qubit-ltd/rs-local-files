@@ -29,9 +29,10 @@ pub(crate) fn validate_rooted_list_start(
     symlink_policy: LocalSymlinkPolicy,
 ) -> LocalResult<()> {
     if path.as_os_str().is_empty() {
-        let metadata = root
-            .metadata()
-            .map_err(|error| rooted_io_error(LocalFileOperation::List, path, error))?;
+        let metadata = match root.metadata() {
+            Ok(metadata) => metadata,
+            Err(error) => return Err(rooted_io_error(LocalFileOperation::List, path, error)),
+        };
         if metadata.kind() != crate::rooted::EntryKind::Directory {
             return Err(
                 LocalFileError::new(LocalFileErrorKind::TypeConflict, LocalFileOperation::List)
@@ -42,13 +43,19 @@ pub(crate) fn validate_rooted_list_start(
     }
     let path = resolve_rooted_path_allow_root(root, path, symlink_policy, true, LocalFileOperation::List)?;
     let metadata = if path.as_os_str().is_empty() {
-        root.metadata()
-            .map_err(|error| rooted_io_error(LocalFileOperation::List, path.as_path(), error))?
+        match root.metadata() {
+            Ok(metadata) => metadata,
+            Err(error) => return Err(rooted_io_error(LocalFileOperation::List, path.as_path(), error)),
+        }
     } else {
-        let relative = crate::local::LocalRelativePath::new(&path)
-            .map_err(|error| rooted_io_error(LocalFileOperation::List, &path, error))?;
-        root.symlink_metadata(&relative)
-            .map_err(|error| rooted_io_error(LocalFileOperation::List, &path, error))?
+        let relative = match crate::local::LocalRelativePath::new(&path) {
+            Ok(relative) => relative,
+            Err(error) => return Err(rooted_io_error(LocalFileOperation::List, &path, error)),
+        };
+        match root.symlink_metadata(&relative) {
+            Ok(metadata) => metadata,
+            Err(error) => return Err(rooted_io_error(LocalFileOperation::List, &path, error)),
+        }
     };
     if metadata.kind() != crate::rooted::EntryKind::Directory {
         return Err(
@@ -68,8 +75,10 @@ pub(crate) fn resolve_rooted_path(
     operation: LocalFileOperation,
 ) -> LocalResult<crate::local::LocalRelativePath> {
     let resolved = resolve_rooted_path_allow_root(root, path, symlink_policy, follow_final, operation)?;
-    crate::local::LocalRelativePath::new(&resolved)
-        .map_err(|error| rooted_io_error(operation, path, error).with_kind(LocalFileErrorKind::InvalidPath))
+    match crate::local::LocalRelativePath::new(&resolved) {
+        Ok(path) => Ok(path),
+        Err(error) => Err(rooted_io_error(operation, path, error).with_kind(LocalFileErrorKind::InvalidPath)),
+    }
 }
 
 /// Resolves a rooted path while allowing the virtual root as the result.
@@ -119,7 +128,7 @@ fn resolve_rooted_symlinks(
             ResolutionStep::Normal(component) => {
                 let candidate =
                     relative_from_components(resolved.iter().chain(std::iter::once(&component)), original, operation)?;
-                let is_final = pending.iter().all(|step| matches!(step, ResolutionStep::EndSymlink(_)));
+                let is_final = pending.iter().all(is_end_symlink_step);
                 if is_final && !follow_final {
                     resolved.push(component);
                     continue;
@@ -141,18 +150,19 @@ fn resolve_rooted_symlinks(
                         .with_reason("symbolic-link traversal is rejected by policy")
                         .with_path(original.to_path_buf()));
                 }
-                let identity = metadata.native_identity().map_or_else(
-                    || SymlinkIdentity::NamespacePath(candidate.as_path().to_path_buf()),
-                    |(device, file)| SymlinkIdentity::Native(device, file),
-                );
+                let identity = match metadata.native_identity() {
+                    Some((device, file)) => SymlinkIdentity::Native(device, file),
+                    None => SymlinkIdentity::NamespacePath(candidate.as_path().to_path_buf()),
+                };
                 if !active_symlinks.insert(identity.clone()) {
                     return Err(LocalFileError::new(LocalFileErrorKind::InvalidPath, operation)
                         .with_reason("symbolic-link expansion cycle detected")
                         .with_path(original.to_path_buf()));
                 }
-                let target = root
-                    .read_link(&candidate)
-                    .map_err(|error| rooted_io_error(operation, original, error))?;
+                let target = match root.read_link(&candidate) {
+                    Ok(target) => target,
+                    Err(error) => return Err(rooted_io_error(operation, original, error)),
+                };
                 let mut replacement = steps_from_path(&target, original, operation)?;
                 replacement.push_back(ResolutionStep::EndSymlink(identity));
                 replacement.extend(pending);
@@ -161,6 +171,12 @@ fn resolve_rooted_symlinks(
         }
     }
     Ok(path_from_components(resolved.iter()))
+}
+
+/// Reports whether a pending resolution step only closes an expanded link.
+#[must_use]
+const fn is_end_symlink_step(step: &ResolutionStep) -> bool {
+    matches!(step, ResolutionStep::EndSymlink(_))
 }
 
 /// Converts native path syntax into pending virtual-root resolution steps.
@@ -199,8 +215,10 @@ fn relative_from_components<'component>(
     for component in components {
         path.push(component);
     }
-    crate::local::LocalRelativePath::new(&path)
-        .map_err(|error| rooted_io_error(operation, original, error).with_kind(LocalFileErrorKind::InvalidPath))
+    match crate::local::LocalRelativePath::new(&path) {
+        Ok(path) => Ok(path),
+        Err(error) => Err(rooted_io_error(operation, original, error).with_kind(LocalFileErrorKind::InvalidPath)),
+    }
 }
 
 /// Builds a rooted relative path, including the empty virtual-root spelling.
@@ -218,7 +236,10 @@ pub(crate) fn sync_rooted_copy_parent_chain(
     target: &crate::local::LocalRelativePath,
 ) -> io::Result<()> {
     let mut parent = target.as_path().parent().map(Path::to_path_buf);
-    while let Some(path) = parent.filter(|path| !path.as_os_str().is_empty()) {
+    while let Some(path) = parent {
+        if path.as_os_str().is_empty() {
+            break;
+        }
         let path = crate::local::LocalRelativePath::new(&path).expect("parent of a validated rooted path is valid");
         root.sync_parent(&path)?;
         parent = path.as_path().parent().map(Path::to_path_buf);

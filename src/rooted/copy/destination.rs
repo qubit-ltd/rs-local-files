@@ -46,7 +46,7 @@ pub(super) fn prepare_directory(
     };
     match destination_metadata {
         None => {
-            #[cfg(feature = "internal-test-support")]
+            #[cfg(feature = "test-support")]
             {
                 if crate::local::test_support_enabled("rooted-copy-directory-create") {
                     return Err(error(
@@ -152,13 +152,13 @@ pub(super) fn checked_add(
     destination: &Path,
     statistics: Statistics,
 ) -> Result<u64, Error> {
-    #[cfg(feature = "internal-test-support")]
+    #[cfg(feature = "test-support")]
     let result = if crate::local::test_support_enabled("rooted-copy-statistics-overflow") {
         None
     } else {
         value.checked_add(addition)
     };
-    #[cfg(not(feature = "internal-test-support"))]
+    #[cfg(not(feature = "test-support"))]
     let result = value.checked_add(addition);
     result.ok_or_else(|| {
         error(
@@ -172,7 +172,9 @@ pub(super) fn checked_add(
 }
 
 /// Creates one structured rooted-copy error.
-#[inline]
+// qubit-style: allow coverage-cfg
+#[cfg_attr(not(coverage), inline)]
+#[cfg_attr(coverage, inline(never))]
 pub(super) fn error(
     stage: Stage,
     source: &Path,
@@ -191,7 +193,8 @@ pub(super) fn error(
 
 /// Creates the stable error used for unsupported source entry types.
 #[must_use]
-#[inline(always)]
+#[cfg_attr(not(coverage), inline(always))]
+#[cfg_attr(coverage, inline(never))]
 pub(super) fn unsupported_source_error() -> io::Error {
     io::Error::new(
         ErrorKind::Unsupported,

@@ -24,7 +24,7 @@ use std::path::PathBuf;
 
 use super::file_name_validation::validate_file_name_fragment;
 use super::path_operations::add_path_context;
-#[cfg(feature = "internal-test-support")]
+#[cfg(feature = "test-support")]
 use crate::local::internal::test_support;
 use crate::local::try_random_file_name;
 
@@ -68,7 +68,7 @@ pub(crate) fn create_temp_file_in_dir(
         options.read(true).write(true).create_new(true);
         #[cfg(unix)]
         options.mode(0o600);
-        #[cfg(feature = "internal-test-support")]
+        #[cfg(feature = "test-support")]
         let opened = if test_support::take("temp-file-collision") {
             Err(Error::new(
                 ErrorKind::AlreadyExists,
@@ -79,7 +79,7 @@ pub(crate) fn create_temp_file_in_dir(
         } else {
             options.open(&path)
         };
-        #[cfg(not(feature = "internal-test-support"))]
+        #[cfg(not(feature = "test-support"))]
         let opened = options.open(&path);
         match opened {
             Ok(file) => return Ok((path, file)),
@@ -117,7 +117,7 @@ pub(crate) fn create_temp_dir_in_dir_with_affixes(
     loop {
         attempt = attempt.saturating_add(1);
         let path = dir.join(try_random_file_name("qubit-local-files-", prefix, suffix)?);
-        #[cfg(feature = "internal-test-support")]
+        #[cfg(feature = "test-support")]
         let created = if test_support::take("temp-directory-collision") {
             Err(Error::new(
                 ErrorKind::AlreadyExists,
@@ -128,7 +128,7 @@ pub(crate) fn create_temp_dir_in_dir_with_affixes(
         } else {
             create_private_dir(&path)
         };
-        #[cfg(not(feature = "internal-test-support"))]
+        #[cfg(not(feature = "test-support"))]
         let created = create_private_dir(&path);
         match created {
             Ok(()) => return Ok(path),
@@ -154,7 +154,9 @@ pub(crate) fn create_temp_dir_in_dir_with_affixes(
 ///
 /// # Errors
 /// Returns the I/O error reported while creating the directory.
-#[inline]
+// qubit-style: allow coverage-cfg
+#[cfg_attr(not(coverage), inline)]
+#[cfg_attr(coverage, inline(never))]
 pub(crate) fn create_private_dir(path: &Path) -> Result<()> {
     #[cfg(unix)]
     let mut builder = DirBuilder::new();
@@ -175,7 +177,8 @@ pub(crate) fn create_private_dir(path: &Path) -> Result<()> {
 /// # Returns
 /// `true` only for an existing entry when another attempt remains.
 #[must_use]
-#[inline(always)]
+#[cfg_attr(not(coverage), inline(always))]
+#[cfg_attr(coverage, inline(never))]
 fn should_retry_collision(error: &Error, attempt: usize, max_tries: Option<usize>) -> bool {
     error.kind() == ErrorKind::AlreadyExists && max_tries.is_none_or(|max_tries| attempt < max_tries)
 }
@@ -187,7 +190,8 @@ fn should_retry_collision(error: &Error, attempt: usize, max_tries: Option<usize
 ///
 /// # Errors
 /// Returns [`ErrorKind::InvalidInput`] when `max_tries` is zero.
-#[inline]
+#[cfg_attr(not(coverage), inline)]
+#[cfg_attr(coverage, inline(never))]
 fn validate_max_tries(max_tries: Option<usize>) -> Result<()> {
     if max_tries == Some(0) {
         return Err(Error::new(

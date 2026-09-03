@@ -19,13 +19,13 @@ use std::path::PathBuf;
 use super::LocalAtomicDestinationState;
 use super::LocalAtomicWriteError;
 use super::LocalAtomicWriteStage;
-#[cfg(all(unix, feature = "internal-test-support"))]
+#[cfg(all(unix, feature = "test-support"))]
 use super::internal::test_support;
 
 /// Synchronizes the final parent and newly created ancestor entries.
 #[cfg(unix)]
 pub(super) fn sync_rooted_parent_chain(parent: &File, parent_dirs_to_sync: &[File]) -> io::Result<()> {
-    #[cfg(feature = "internal-test-support")]
+    #[cfg(feature = "test-support")]
     if test_support::is_enabled("atomic-install-unlink-recover-sync")
         || test_support::is_enabled("atomic-install-unlink-persistent-sync")
         || test_support::is_enabled("atomic-install-unlink-indeterminate-sync")
@@ -42,7 +42,9 @@ pub(super) fn sync_rooted_parent_chain(parent: &File, parent_dirs_to_sync: &[Fil
 
 /// Adds structured atomic context to a native I/O result.
 #[cfg(any(unix, windows))]
-#[inline]
+// qubit-style: allow coverage-cfg
+#[cfg_attr(not(coverage), inline)]
+#[cfg_attr(coverage, inline(never))]
 pub(super) fn map_atomic_error<T>(
     result: io::Result<T>,
     stage: LocalAtomicWriteStage,
@@ -64,7 +66,8 @@ pub(super) fn map_atomic_error<T>(
 
 /// Creates a structured unsupported rooted atomic-write error.
 #[cfg(not(unix))]
-#[inline]
+#[cfg_attr(not(coverage), inline)]
+#[cfg_attr(coverage, inline(never))]
 pub(super) fn unsupported_atomic_error(path: &Path) -> LocalAtomicWriteError {
     LocalAtomicWriteError::new(
         LocalAtomicWriteStage::PrepareParent,

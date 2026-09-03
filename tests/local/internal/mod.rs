@@ -10,8 +10,8 @@ mod publication_state;
 
 mod host_local_file_system;
 
-#[cfg(feature = "internal-test-support")]
+#[cfg(feature = "test-support")]
 mod test_fault_guard_tests;
 
-#[cfg(feature = "internal-test-support")]
+#[cfg(feature = "test-support")]
 mod test_support_tests;

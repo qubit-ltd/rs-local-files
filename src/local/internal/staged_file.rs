@@ -37,7 +37,9 @@ impl StagedFile {
     ///
     /// # Returns
     /// A guard that removes `path` unless disarmed.
-    #[inline]
+    // qubit-style: allow coverage-cfg
+    #[cfg_attr(not(coverage), inline)]
+    #[cfg_attr(coverage, inline(never))]
     pub(crate) fn new(path: PathBuf, file: File) -> Self {
         Self {
             path: Some(path),
@@ -53,7 +55,8 @@ impl StagedFile {
     /// # Panics
     /// Panics when called after cleanup has been disarmed.
     #[must_use]
-    #[inline(always)]
+    #[cfg_attr(not(coverage), inline(always))]
+    #[cfg_attr(coverage, inline(never))]
     pub(crate) fn path(&self) -> &Path {
         self.path.as_deref().expect("staging path has already been disarmed")
     }
@@ -66,7 +69,8 @@ impl StagedFile {
     /// # Panics
     /// Panics when called after the handle has been closed.
     #[must_use]
-    #[inline(always)]
+    #[cfg_attr(not(coverage), inline(always))]
+    #[cfg_attr(coverage, inline(never))]
     pub(crate) fn file(&self) -> &File {
         self.file.as_ref().expect("staging file handle has already been closed")
     }
@@ -79,7 +83,8 @@ impl StagedFile {
     /// # Panics
     /// Panics when called after the handle has been closed.
     #[must_use]
-    #[inline(always)]
+    #[cfg_attr(not(coverage), inline(always))]
+    #[cfg_attr(coverage, inline(never))]
     pub(crate) fn file_mut(&mut self) -> &mut File {
         self.file.as_mut().expect("staging file handle has already been closed")
     }
@@ -90,13 +95,15 @@ impl StagedFile {
     ///
     /// `true` before installation begins or explicit cleanup closes the handle.
     #[must_use]
-    #[inline(always)]
+    #[cfg_attr(not(coverage), inline(always))]
+    #[cfg_attr(coverage, inline(never))]
     pub(crate) const fn is_open(&self) -> bool {
         self.file.is_some()
     }
 
     /// Closes the staging handle while keeping path cleanup armed.
-    #[inline(always)]
+    #[cfg_attr(not(coverage), inline(always))]
+    #[cfg_attr(coverage, inline(never))]
     pub(crate) fn close(&mut self) {
         drop(self.file.take());
     }
@@ -110,7 +117,7 @@ impl StagedFile {
     pub(crate) fn cleanup(&mut self) -> Result<()> {
         self.close();
         if let Some(path) = self.path.as_ref() {
-            #[cfg(feature = "internal-test-support")]
+            #[cfg(feature = "test-support")]
             if super::test_support::is_enabled("atomic-install-unlink-persistent")
                 || super::test_support::is_enabled("atomic-install-unlink-persistent-sync")
                 || super::test_support::is_enabled("copy-staging-copy-cleanup")
@@ -126,7 +133,8 @@ impl StagedFile {
     /// Disarms path cleanup after a successful filesystem commit.
     ///
     /// The staging handle is closed before the guard is disarmed.
-    #[inline(always)]
+    #[cfg_attr(not(coverage), inline(always))]
+    #[cfg_attr(coverage, inline(never))]
     pub(crate) fn disarm(&mut self) {
         self.close();
         let _ = self.path.take();

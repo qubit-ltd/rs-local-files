@@ -102,12 +102,6 @@ pub(crate) fn open_rooted_directory_reader(
     RootedDirectoryReader::open(directory, &diagnostic_path)
 }
 
-/// Reads immediate entries from the opened root directory.
-#[inline(always)]
-pub(crate) fn read_root_directory(root: &File, diagnostic_root: &Path) -> Result<Vec<RootedDirectoryEntry>> {
-    read_directory_handle(root, diagnostic_root)
-}
-
 /// Reads immediate entries from a rooted descendant directory.
 pub(crate) fn read_rooted_directory(
     root: &File,
@@ -266,7 +260,7 @@ pub(crate) fn rename_rooted_entry(
         open_rooted_parent(root, &source_path, source, RootedParentMode::OpenExisting)?.into_parts();
     let (destination_parent, destination_name, _) =
         open_rooted_parent(root, &destination_path, destination, RootedParentMode::OpenExisting)?.into_parts();
-    #[cfg(feature = "internal-test-support")]
+    #[cfg(feature = "test-support")]
     if super::test_support::is_enabled("rooted-rename-indeterminate") {
         return Err(add_path_context(
             crate::local::test_fault_error(),
@@ -359,7 +353,9 @@ fn read_directory_handle(directory: &File, diagnostic_path: &Path) -> Result<Vec
 }
 
 /// Opens a no-follow child directory from an already-open parent.
-#[inline]
+// qubit-style: allow coverage-cfg
+#[cfg_attr(not(coverage), inline)]
+#[cfg_attr(coverage, inline(never))]
 fn open_directory_component(parent: &File, name: &CString) -> Result<File> {
     super::rooted_file_io::open_file_at(
         parent,
@@ -394,20 +390,23 @@ fn stat_child(parent: &File, name: &CString, diagnostic_path: &Path) -> Result<l
 }
 
 /// Reads no-follow metadata for a rooted path.
-#[inline]
+#[cfg_attr(not(coverage), inline)]
+#[cfg_attr(coverage, inline(never))]
 fn rooted_status(root: &File, diagnostic_root: &Path, path: &LocalRelativePath) -> Result<libc::stat> {
     super::rooted_file_io::read_rooted_symlink_metadata(root, diagnostic_root, path)
 }
 
 /// Returns whether one native mode represents a directory.
-#[inline(always)]
+#[cfg_attr(not(coverage), inline(always))]
+#[cfg_attr(coverage, inline(never))]
 const fn is_directory(mode: libc::mode_t) -> bool {
     mode & libc::S_IFMT == libc::S_IFDIR
 }
 
 /// Performs an atomic no-replace rename where the platform supports it.
 #[cfg(any(target_os = "linux", target_os = "android"))]
-#[inline]
+#[cfg_attr(not(coverage), inline)]
+#[cfg_attr(coverage, inline(never))]
 fn rename_without_replacing(
     source_parent: &File,
     source_name: &CString,
@@ -429,7 +428,8 @@ fn rename_without_replacing(
 
 /// Performs an atomic no-replace rename on Apple platforms.
 #[cfg(any(target_os = "macos", target_os = "ios"))]
-#[inline]
+#[cfg_attr(not(coverage), inline)]
+#[cfg_attr(coverage, inline(never))]
 fn rename_without_replacing(
     source_parent: &File,
     source_name: &CString,
@@ -451,7 +451,8 @@ fn rename_without_replacing(
 
 /// Reports platforms without an atomic descriptor-relative no-replace rename.
 #[cfg(not(any(target_os = "linux", target_os = "android", target_os = "macos", target_os = "ios",)))]
-#[inline]
+#[cfg_attr(not(coverage), inline)]
+#[cfg_attr(coverage, inline(never))]
 fn rename_without_replacing(
     _source_parent: &File,
     _source_name: &CString,

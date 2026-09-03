@@ -286,10 +286,12 @@ lets integration code distinguish the two namespaces, and
 path (or `Unknown` when probing is unavailable). Interpret both numeric limits
 using `length_unit()`: Unix uses bytes and Windows uses UTF-16 code units, which
 must not be treated as UTF-8 byte limits. Atomic rename, atomic replacement,
-atomic temporary persistence, durable rename, durable file copy, and durable
-writer publication are reported independently because platform support
-differs. These flags describe complete protocols implemented by the build;
-they do not prove persistence on a particular mount or storage device.
+the ability to attempt atomic temporary persistence, durable rename, durable
+file copy, and durable writer publication are reported independently because
+platform support differs. `can_attempt_atomic_temp_persist()` describes an
+implemented attempt protocol; same-filesystem placement and runtime namespace
+conditions still determine the operation outcome. These flags do not prove
+persistence on a particular mount or storage device.
 
 Continue with the [README](../README.md), [中文用户手册](user_guide.zh_CN.md),
 or the [API reference](https://docs.rs/qubit-local-files).

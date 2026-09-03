@@ -38,29 +38,29 @@ use super::macos::preserve_extended_metadata;
 ///
 /// Returns the first native error from metadata inspection or application.
 pub(crate) fn preserve_atomic_metadata(source: &File, staging: &File) -> Result<()> {
-    #[cfg(feature = "internal-test-support")]
+    #[cfg(feature = "test-support")]
     let source_metadata = if super::super::test_support::is_enabled("atomic-metadata-source-stat") {
         Err(crate::local::test_fault_error())
     } else {
         source.metadata()
     }?;
-    #[cfg(not(feature = "internal-test-support"))]
+    #[cfg(not(feature = "test-support"))]
     let source_metadata = source.metadata()?;
-    #[cfg(feature = "internal-test-support")]
+    #[cfg(feature = "test-support")]
     let staging_metadata = if super::super::test_support::is_enabled("atomic-metadata-staging-stat") {
         Err(crate::local::test_fault_error())
     } else {
         staging.metadata()
     }?;
-    #[cfg(not(feature = "internal-test-support"))]
+    #[cfg(not(feature = "test-support"))]
     let staging_metadata = staging.metadata()?;
-    #[cfg(feature = "internal-test-support")]
+    #[cfg(feature = "test-support")]
     let forced_owner_error = super::super::test_support::is_enabled("atomic-metadata-owner");
-    #[cfg(feature = "internal-test-support")]
+    #[cfg(feature = "test-support")]
     let forced_owner_native_error = super::super::test_support::is_enabled("atomic-metadata-owner-native");
-    #[cfg(not(feature = "internal-test-support"))]
+    #[cfg(not(feature = "test-support"))]
     let forced_owner_error = false;
-    #[cfg(not(feature = "internal-test-support"))]
+    #[cfg(not(feature = "test-support"))]
     let forced_owner_native_error = false;
     if forced_owner_error
         || forced_owner_native_error
@@ -83,9 +83,9 @@ pub(crate) fn preserve_atomic_metadata(source: &File, staging: &File) -> Result<
         }
     }
     let mode = native_mode(source_metadata.mode())?;
-    #[cfg(feature = "internal-test-support")]
+    #[cfg(feature = "test-support")]
     let forced_mode_error = super::super::test_support::is_enabled("atomic-metadata-mode");
-    #[cfg(not(feature = "internal-test-support"))]
+    #[cfg(not(feature = "test-support"))]
     let forced_mode_error = false;
     // SAFETY: the staging descriptor remains live and `mode` contains the
     // native Unix mode bits expected by `fchmod`.
@@ -105,13 +105,13 @@ fn native_mode<T>(mode: u32) -> Result<T>
 where
     T: TryFrom<u32>,
 {
-    #[cfg(feature = "internal-test-support")]
+    #[cfg(feature = "test-support")]
     let mode = if super::super::test_support::is_enabled("atomic-metadata-native-mode") {
         None
     } else {
         T::try_from(mode).ok()
     };
-    #[cfg(not(feature = "internal-test-support"))]
+    #[cfg(not(feature = "test-support"))]
     let mode = T::try_from(mode).ok();
     match mode {
         Some(mode) => Ok(mode),
@@ -134,7 +134,9 @@ where
     target_os = "macos",
     target_os = "freebsd",
 )))]
-#[inline(always)]
+// qubit-style: allow coverage-cfg
+#[cfg_attr(not(coverage), inline(always))]
+#[cfg_attr(coverage, inline(never))]
 fn preserve_extended_metadata(_source: &File, _staging: &File) -> Result<()> {
     Err(Error::new(
         ErrorKind::Unsupported,

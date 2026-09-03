@@ -136,7 +136,7 @@ fn create_host_directory_tree(path: &Path, exists_ok: bool) -> LocalResult<bool>
                 ));
             }
             Err(error) if error.kind() == io::ErrorKind::NotFound => {
-                #[cfg(feature = "internal-test-support")]
+                #[cfg(feature = "test-support")]
                 if crate::local::take_test_support_on_nth("host-create-directory-component-second", 2) {
                     return Err(create_component_error(
                         &current,

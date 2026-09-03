@@ -29,7 +29,7 @@ use qubit_local_files::options::LocalTempFileOptions;
 use qubit_local_files::outcome::LocalFileKind;
 use qubit_local_files::outcome::LocalPersistStage;
 use qubit_local_files::policy::LocalSymlinkPolicy;
-#[cfg(feature = "internal-test-support")]
+#[cfg(feature = "test-support")]
 use qubit_local_files::test_support::install_test_fault;
 use tempfile::Builder;
 use tempfile::tempdir;
@@ -266,7 +266,7 @@ fn host_relative_operations_use_the_process_pwd() {
     std::env::set_current_dir(process_pwd).expect("original process PWD should be restored");
 }
 
-#[cfg(feature = "internal-test-support")]
+#[cfg(feature = "test-support")]
 #[test]
 fn read_prefix_preserves_context_for_a_post_open_read_failure() {
     let _pwd_guard = PROCESS_PWD_LOCK.lock().expect("process PWD lock should be available");

@@ -14,9 +14,9 @@ use qubit_local_files::LocalFileSystem;
 use qubit_local_files::error::LocalFileOperation;
 use qubit_local_files::options::LocalRenameOptions;
 use qubit_local_files::outcome::LocalRenameFailureState;
-#[cfg(all(feature = "internal-test-support", not(windows)))]
+#[cfg(all(feature = "test-support", not(windows)))]
 use qubit_local_files::policy::LocalDurabilityRequirement;
-#[cfg(feature = "internal-test-support")]
+#[cfg(feature = "test-support")]
 use qubit_local_files::test_support::install_test_fault;
 
 /// Creates an absent process-specific path for a rename test.
@@ -29,31 +29,13 @@ fn temp_path(name: &str) -> PathBuf {
 
 /// Runs one test-support-only rename fault case in an isolated child test
 /// process.
-#[cfg(feature = "internal-test-support")]
-fn run_in_test_fault_process<F>(test_name: &str, fault: &str, action: F)
+#[cfg(feature = "test-support")]
+fn run_in_test_fault_process<F>(_test_name: &str, fault: &str, action: F)
 where
     F: FnOnce(),
 {
-    const TEST_FAULT_ENV: &str = "QUBIT_LOCAL_FILES_TEST_FAULT";
-    const TEST_FAULT_CHILD_ENV: &str = "QUBIT_LOCAL_FILES_TEST_FAULT_CHILD";
-    if std::env::var_os(TEST_FAULT_ENV).is_some_and(|selected| selected == std::ffi::OsStr::new(fault)) {
-        let _fault = install_test_fault(fault).expect("test fault controller should install");
-        action();
-        return;
-    }
-    if std::env::var_os(TEST_FAULT_CHILD_ENV).is_some() {
-        return;
-    }
-    let executable = std::env::current_exe().expect("test executable should be available");
-    let status = std::process::Command::new(executable)
-        .arg("--exact")
-        .arg(test_name)
-        .arg("--nocapture")
-        .env(TEST_FAULT_ENV, fault)
-        .env(TEST_FAULT_CHILD_ENV, "1")
-        .status()
-        .expect("test fault child should launch");
-    assert!(status.success(), "test fault child should pass");
+    let _fault = install_test_fault(fault).expect("test fault controller should install");
+    action();
 }
 
 /// Verifies a missing source proves that the namespace remains unchanged.
@@ -75,7 +57,7 @@ fn test_rename_missing_source_reports_unchanged() {
 }
 
 /// Verifies a parent durability fault retains the completed rename fact.
-#[cfg(all(feature = "internal-test-support", not(windows)))]
+#[cfg(all(feature = "test-support", not(windows)))]
 #[test]
 fn test_rename_parent_durability_failure_reports_renamed() {
     const TEST_NAME: &str = "test_rename_parent_durability_failure_reports_renamed";
@@ -101,7 +83,7 @@ fn test_rename_parent_durability_failure_reports_renamed() {
 }
 
 /// Verifies an I/O failure at the native boundary remains conservative.
-#[cfg(feature = "internal-test-support")]
+#[cfg(feature = "test-support")]
 #[test]
 fn test_rename_native_io_failure_reports_indeterminate() {
     const TEST_NAME: &str = "test_rename_native_io_failure_reports_indeterminate";

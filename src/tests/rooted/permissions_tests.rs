@@ -7,7 +7,7 @@
 // =============================================================================
 //! Crate-private contract tests for rooted `Permissions`.
 
-use qubit_local_files::test_support::internal_contract::Permissions;
+use crate::rooted::Permissions;
 
 #[test]
 fn test_rooted_permissions_resolve_portable_and_unix_permissions() {

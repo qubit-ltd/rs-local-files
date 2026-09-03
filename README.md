@@ -152,9 +152,12 @@ implements each complete operation protocol; it does not probe a particular
 runtime filesystem or claim that the underlying hardware has persisted data.
 Required atomicity or durability is rejected before namespace changes when the
 protocol cannot be met.
-Atomic rename, atomic replacement, atomic temporary persistence, durable
-rename, durable file copy, and durable writer publication are reported as
-independent capabilities because their platform support differs.
+Atomic rename, atomic replacement, the ability to attempt atomic temporary
+persistence, durable rename, durable file copy, and durable writer publication
+are reported as independent capabilities because their platform support
+differs. `can_attempt_atomic_temp_persist()` is an implementation capability,
+not a promise for arbitrary source and target paths; the operation outcome
+reports what actually happened.
 Path-limit observations always include a unit: Unix reports bytes and Windows
 reports UTF-16 code units. Windows whole-path limits remain `Unknown` when the
 handle-relative namespace has no defensible fixed bound. `space_at()` and

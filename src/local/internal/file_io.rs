@@ -43,7 +43,9 @@ use crate::write;
 ///
 /// An `InvalidInput` error identifying the non-regular path.
 #[must_use]
-#[inline]
+// qubit-style: allow coverage-cfg
+#[cfg_attr(not(coverage), inline)]
+#[cfg_attr(coverage, inline(never))]
 fn path_not_regular_file_error(path: &Path) -> Error {
     Error::new(
         ErrorKind::InvalidInput,
@@ -77,7 +79,8 @@ fn reject_existing_non_file(path: &Path) -> Result<()> {
 /// # Parameters
 /// - `options`: Open options to update.
 #[cfg(unix)]
-#[inline(always)]
+#[cfg_attr(not(coverage), inline(always))]
+#[cfg_attr(coverage, inline(never))]
 fn configure_nonblocking_open(options: &mut OpenOptions) {
     use std::os::unix::fs::OpenOptionsExt;
 
@@ -91,7 +94,8 @@ fn configure_nonblocking_open(options: &mut OpenOptions) {
 /// Opens the final Windows entry itself so validation cannot follow a racing
 /// name-surrogate reparse point.
 #[cfg(windows)]
-#[inline(always)]
+#[cfg_attr(not(coverage), inline(always))]
+#[cfg_attr(coverage, inline(never))]
 fn configure_nonblocking_open(options: &mut OpenOptions) {
     use windows_sys::Win32::Storage::FileSystem::FILE_FLAG_OPEN_REPARSE_POINT;
 
@@ -103,7 +107,8 @@ fn configure_nonblocking_open(options: &mut OpenOptions) {
 /// # Parameters
 /// - `options`: Open options that remain unchanged.
 #[cfg(not(any(unix, windows)))]
-#[inline(always)]
+#[cfg_attr(not(coverage), inline(always))]
+#[cfg_attr(coverage, inline(never))]
 fn configure_nonblocking_open(_options: &mut OpenOptions) {}
 
 /// Opens a path with ordinary blocking semantics after applying safety flags.
@@ -121,7 +126,8 @@ fn configure_nonblocking_open(_options: &mut OpenOptions) {}
 ///
 /// Returns the native open error. On Unix, lease conflicts are retried to
 /// preserve ordinary blocking-open behavior.
-#[inline]
+#[cfg_attr(not(coverage), inline)]
+#[cfg_attr(coverage, inline(never))]
 fn open_configured_file(options: &OpenOptions, path: &Path, open_retry_timeout: Option<Duration>) -> Result<fs::File> {
     #[cfg(unix)]
     {
@@ -147,7 +153,8 @@ fn open_configured_file(options: &OpenOptions, path: &Path, open_retry_timeout: 
 /// # Errors
 ///
 /// Returns the native descriptor-status error on Unix.
-#[inline(always)]
+#[cfg_attr(not(coverage), inline(always))]
+#[cfg_attr(coverage, inline(never))]
 fn clear_transient_nonblocking(file: &fs::File) -> Result<()> {
     #[cfg(unix)]
     {
@@ -185,14 +192,14 @@ fn prepare_opened_regular_file(
     path: &Path,
 ) -> Result<()> {
     let metadata_result = file.metadata();
-    #[cfg(feature = "internal-test-support")]
+    #[cfg(feature = "test-support")]
     let metadata_result = if super::test_support::is_enabled("file-handle-metadata") {
         Err(Error::other("injected opened-file metadata failure"))
     } else {
         metadata_result
     };
     let metadata = with_path_context(metadata_result, inspect_operation, path)?;
-    #[cfg(feature = "internal-test-support")]
+    #[cfg(feature = "test-support")]
     if super::test_support::is_enabled("file-handle-type") {
         return Err(path_not_regular_file_error(path));
     }
@@ -281,7 +288,8 @@ fn open_reader_file(path: &Path, open_retry_timeout: Option<Duration>) -> Result
 /// # Errors
 /// Returns a contextual I/O error when the path cannot be inspected or opened,
 /// or when the opened object is not a regular file.
-#[inline(always)]
+#[cfg_attr(not(coverage), inline(always))]
+#[cfg_attr(coverage, inline(never))]
 pub(crate) fn open_native_reader_path(path: &Path, options: &read::OpenOptions) -> Result<fs::File> {
     open_reader_file(path, options.open_retry_timeout())
 }
@@ -356,7 +364,8 @@ fn open_writer_file(
 /// # Errors
 /// Returns a contextual I/O error when parent creation, inspection, opening, or
 /// post-open truncation fails.
-#[inline]
+#[cfg_attr(not(coverage), inline)]
+#[cfg_attr(coverage, inline(never))]
 pub(crate) fn open_native_writer_path(path: &Path, options: &write::OpenOptions) -> Result<fs::File> {
     open_writer_file(
         path,

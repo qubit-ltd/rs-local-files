@@ -37,7 +37,9 @@ use crate::local::internal::StagedFile;
 /// # Returns
 ///
 /// A structured recursive-copy error retaining the native source error.
-#[inline]
+// qubit-style: allow coverage-cfg
+#[cfg_attr(not(coverage), inline)]
+#[cfg_attr(coverage, inline(never))]
 pub(super) fn copy_dir_error(
     stage: LocalCopyDirStage,
     src: &Path,
@@ -62,7 +64,8 @@ pub(super) fn copy_dir_error(
 /// # Returns
 ///
 /// A structured error retaining primary and secondary cleanup context.
-#[inline]
+#[cfg_attr(not(coverage), inline)]
+#[cfg_attr(coverage, inline(never))]
 pub(super) fn copy_dir_error_with_staging(
     stage: LocalCopyDirStage,
     src: &Path,
@@ -89,7 +92,8 @@ pub(super) fn copy_dir_error_with_staging(
 /// # Returns
 ///
 /// The successful value or a structured recursive-copy error.
-#[inline(always)]
+#[cfg_attr(not(coverage), inline(always))]
+#[cfg_attr(coverage, inline(never))]
 pub(super) fn with_copy_context<T>(
     result: Result<T>,
     stage: LocalCopyDirStage,
@@ -102,13 +106,13 @@ pub(super) fn with_copy_context<T>(
 
 /// Records one newly created destination directory.
 pub(super) fn record_created_directory(stats: &mut LocalCopyDirStats) -> Result<()> {
-    #[cfg(feature = "internal-test-support")]
+    #[cfg(feature = "test-support")]
     let directories = if crate::local::internal::test_support::is_enabled("copy-stats-directories") {
         None
     } else {
         stats.directories.checked_add(1)
     };
-    #[cfg(not(feature = "internal-test-support"))]
+    #[cfg(not(feature = "test-support"))]
     let directories = stats.directories.checked_add(1);
     match directories {
         Some(directories) => {
@@ -121,13 +125,13 @@ pub(super) fn record_created_directory(stats: &mut LocalCopyDirStats) -> Result<
 
 /// Records one skipped destination file.
 pub(super) fn record_skipped_file(stats: &mut LocalCopyDirStats) -> Result<()> {
-    #[cfg(feature = "internal-test-support")]
+    #[cfg(feature = "test-support")]
     let skipped = if crate::local::internal::test_support::is_enabled("copy-stats-skipped") {
         None
     } else {
         stats.skipped.checked_add(1)
     };
-    #[cfg(not(feature = "internal-test-support"))]
+    #[cfg(not(feature = "test-support"))]
     let skipped = stats.skipped.checked_add(1);
     match skipped {
         Some(skipped) => {
@@ -140,13 +144,13 @@ pub(super) fn record_skipped_file(stats: &mut LocalCopyDirStats) -> Result<()> {
 
 /// Records one destination entry replaced by a completed copy.
 pub(super) fn record_overwritten_entry(stats: &mut LocalCopyDirStats) -> Result<()> {
-    #[cfg(feature = "internal-test-support")]
+    #[cfg(feature = "test-support")]
     let overwritten = if crate::local::internal::test_support::is_enabled("copy-stats-overwritten") {
         None
     } else {
         stats.overwritten.checked_add(1)
     };
-    #[cfg(not(feature = "internal-test-support"))]
+    #[cfg(not(feature = "test-support"))]
     let overwritten = stats.overwritten.checked_add(1);
     match overwritten {
         Some(overwritten) => {
@@ -159,25 +163,25 @@ pub(super) fn record_overwritten_entry(stats: &mut LocalCopyDirStats) -> Result<
 
 /// Atomically records one committed file and its copied byte count.
 pub(super) fn record_copied_file(stats: &mut LocalCopyDirStats, bytes: u64) -> Result<()> {
-    #[cfg(feature = "internal-test-support")]
+    #[cfg(feature = "test-support")]
     let files = if crate::local::internal::test_support::is_enabled("copy-stats-files") {
         None
     } else {
         stats.files.checked_add(1)
     };
-    #[cfg(not(feature = "internal-test-support"))]
+    #[cfg(not(feature = "test-support"))]
     let files = stats.files.checked_add(1);
     let files = match files {
         Some(files) => files,
         None => return Err(file_statistics_overflow_error()),
     };
-    #[cfg(feature = "internal-test-support")]
+    #[cfg(feature = "test-support")]
     let total_bytes = if crate::local::internal::test_support::is_enabled("copy-stats-bytes") {
         None
     } else {
         stats.bytes.checked_add(bytes)
     };
-    #[cfg(not(feature = "internal-test-support"))]
+    #[cfg(not(feature = "test-support"))]
     let total_bytes = stats.bytes.checked_add(bytes);
     match total_bytes {
         Some(total_bytes) => {

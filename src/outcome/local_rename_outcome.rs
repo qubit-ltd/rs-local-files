@@ -6,6 +6,7 @@
 //    Licensed under the Apache License, Version 2.0.
 // =============================================================================
 // qubit-style: allow source-test-pair
+// qubit-style: allow coverage-cfg
 // Covered by rename integration tests.
 
 /// Guarantees actually achieved by a native rename.
@@ -31,14 +32,16 @@ impl LocalRenameOutcome {
 
     /// Reports whether the namespace change was atomic.
     #[must_use]
-    #[inline]
+    #[cfg_attr(not(coverage), inline)]
+    #[cfg_attr(coverage, inline(never))]
     pub const fn atomic(self) -> bool {
         self.atomic
     }
 
     /// Reports whether parent-directory durability was synchronized.
     #[must_use]
-    #[inline]
+    #[cfg_attr(not(coverage), inline)]
+    #[cfg_attr(coverage, inline(never))]
     pub const fn durable(self) -> bool {
         self.durable
     }

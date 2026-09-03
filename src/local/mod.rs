@@ -8,16 +8,16 @@
 //! Concrete local filesystem APIs and their private implementation.
 
 mod internal;
-#[cfg(feature = "internal-test-support")]
+#[cfg(feature = "test-support")]
 pub use internal::test_fault_guard::TestFaultGuard;
 pub(crate) use internal::test_support::fault_error as test_fault_error;
-#[cfg(feature = "internal-test-support")]
+#[cfg(feature = "test-support")]
 pub use internal::test_support::install_test_fault;
 pub(crate) use internal::test_support::io_error as test_io_error;
 pub(crate) use internal::test_support::is_enabled as test_support_enabled;
-#[cfg(feature = "internal-test-support")]
+#[cfg(feature = "test-support")]
 pub(crate) use internal::test_support::take as take_test_support;
-#[cfg(feature = "internal-test-support")]
+#[cfg(feature = "test-support")]
 pub(crate) use internal::test_support::take_on_nth as take_test_support_on_nth;
 mod local_atomic_commit_error;
 mod local_atomic_destination_state;
@@ -43,8 +43,8 @@ pub use internal::CopyBudget;
 pub use internal::CopyDestinationAction;
 pub(crate) use internal::DirectoryIdentity;
 pub(crate) use internal::HostLocalFileSystem;
-#[cfg(feature = "internal-test-support")]
-pub use internal::LocalAtomicPublicationMode;
+#[cfg(test)]
+pub(crate) use internal::LocalAtomicPublicationMode;
 pub(crate) use internal::LocalNamespace;
 #[cfg(any(unix, windows))]
 pub(crate) use internal::RootedDirectoryReader;
@@ -88,7 +88,6 @@ pub(crate) use internal::probe_windows_limits;
 pub(crate) use internal::probe_windows_space;
 pub(crate) use internal::published_durability;
 #[cfg(any(unix, windows))]
-pub(crate) use internal::read_root_directory;
 #[cfg(any(unix, windows))]
 pub(crate) use internal::read_rooted_directory;
 #[cfg(any(unix, windows))]

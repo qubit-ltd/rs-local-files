@@ -54,7 +54,7 @@ fn test_capability_snapshot_exposes_all_guarantees() {
         cfg!(any(unix, windows)),
         std::hint::black_box(atomic_replace)(capabilities),
     );
-    let _ = capabilities.supports_atomic_temp_persist();
+    let _ = capabilities.can_attempt_atomic_temp_persist();
     let _ = capabilities.supports_durable_file_copy();
     let _ = capabilities.supports_durable_write();
 

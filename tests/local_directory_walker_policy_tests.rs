@@ -18,12 +18,12 @@ use qubit_local_files::options::LocalWalkErrorPolicy;
 use qubit_local_files::outcome::LocalFileKind;
 #[cfg(unix)]
 use qubit_local_files::policy::LocalSymlinkPolicy;
-#[cfg(feature = "internal-test-support")]
+#[cfg(feature = "test-support")]
 use qubit_local_files::test_support::install_test_fault;
 use tempfile::tempdir;
 
 /// Runs a test-support-only fault case in an isolated child test process.
-#[cfg(feature = "internal-test-support")]
+#[cfg(feature = "test-support")]
 fn run_walker_fault_process<F>(test_name: &str, fault: &str, action: F)
 where
     F: FnOnce(),
@@ -430,7 +430,7 @@ fn test_local_directory_walker_continue_policy_keeps_iterating() {
 }
 
 /// Verifies recursive traversal uses stable native directory identities.
-#[cfg(feature = "internal-test-support")]
+#[cfg(feature = "test-support")]
 #[test]
 fn test_local_directory_walker_detects_native_directory_identity_cycle() {
     const TEST_NAME: &str = "test_local_directory_walker_detects_native_directory_identity_cycle";
@@ -450,7 +450,7 @@ fn test_local_directory_walker_detects_native_directory_identity_cycle() {
 
 /// Verifies host walker fault boundaries retain structured errors while root,
 /// descent, reader-reopen, and entry iteration advance lazily.
-#[cfg(feature = "internal-test-support")]
+#[cfg(feature = "test-support")]
 #[test]
 fn test_local_directory_walker_reports_injected_iteration_failures() {
     const TEST_NAME: &str = "test_local_directory_walker_reports_injected_iteration_failures";

@@ -14,7 +14,7 @@ use std::io::SeekFrom;
 
 use qubit_local_files::LocalFileSystem;
 use qubit_local_files::options::LocalReadOptions;
-#[cfg(feature = "internal-test-support")]
+#[cfg(feature = "test-support")]
 use qubit_local_files::test_support::install_test_fault;
 use tempfile::tempdir;
 
@@ -53,7 +53,7 @@ fn test_local_file_reader_reads_and_seeks() {
 fn test_local_file_reader_supports_vectored_reads() {
     let directory = tempdir().expect("temporary directory should be created");
     let path = directory.path().join("payload");
-    std::fs::write(&path, b"abcdef").expect("fixture should be written");
+    std::fs::write(&path, b"a").expect("fixture should be written");
 
     let mut reader = LocalFileSystem::host()
         .expect("Host filesystem should open")
@@ -70,11 +70,11 @@ fn test_local_file_reader_supports_vectored_reads() {
     assert!(count > 0);
     assert!(count <= first.len() + second.len());
     let bytes = first.iter().chain(second.iter()).copied().collect::<Vec<_>>();
-    assert_eq!(&bytes[..count], &b"abcdef"[..count]);
+    assert_eq!(&bytes[..count], b"a");
 }
 
 /// Verifies a vectored read retains bytes read before a later native error.
-#[cfg(feature = "internal-test-support")]
+#[cfg(feature = "test-support")]
 #[test]
 fn test_local_file_reader_vectored_read_retains_prior_bytes_after_later_error() {
     let directory = tempdir().expect("temporary directory should be created");

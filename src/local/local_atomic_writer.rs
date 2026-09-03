@@ -27,7 +27,6 @@ use super::internal::add_path_context;
 use super::internal::commit_recoverably;
 use super::internal::create_temp_file_in_dir;
 use super::internal::ensure_parent_path_with_sync_dirs;
-use super::internal::finalize_failed_commit;
 use super::internal::install_atomic_file;
 #[cfg(unix)]
 use super::internal::open_atomic_destination;
@@ -37,7 +36,7 @@ use super::internal::preserve_atomic_metadata;
 use super::internal::recover_atomic_install_error;
 use super::internal::sync_parent_dir;
 use super::internal::synchronize_staging_file;
-#[cfg(feature = "internal-test-support")]
+#[cfg(feature = "test-support")]
 use super::internal::test_support;
 #[cfg(unix)]
 use super::internal::verify_atomic_destination_identity;
@@ -101,7 +100,6 @@ pub(crate) struct LocalAtomicWriter {
     staged_file: StagedFile,
 }
 
-#[allow(dead_code)]
 impl LocalAtomicWriter {
     /// Creates a streaming atomic writer for `path`.
     ///
@@ -209,52 +207,6 @@ impl LocalAtomicWriter {
         })
     }
 
-    /// Synchronizes and atomically replaces the destination.
-    ///
-    /// Existing Unix metadata is read from an opened destination during this
-    /// call, not when the writer was created. Windows delegates strict metadata
-    /// merging to `ReplaceFileW`. Immediately before replacement, commit
-    /// verifies the applicable destination type and identity rules.
-    ///
-    /// # Returns
-    ///
-    /// `Ok(())` after the replacement and required directory synchronization
-    /// complete.
-    ///
-    /// # Errors
-    ///
-    /// Returns a structured error when metadata preservation, staging-file
-    /// synchronization, destination replacement, or parent synchronization
-    /// fails. Inspect [`LocalAtomicWriteError::destination_state`] before
-    /// deciding whether the destination or retained staging path needs
-    /// recovery.
-    #[inline(always)]
-    pub(crate) fn commit(self) -> Result<(), LocalAtomicWriteError> {
-        self.commit_recoverable()
-            .map_err(|error| error.into_final_error_with(Self::finalize_failed_commit))
-    }
-
-    /// Attempts to commit while retaining a recoverable staging writer.
-    ///
-    /// Failures detected before installation begins return the writer through
-    /// [`LocalAtomicCommitError::writer`] so callers can retry or explicitly
-    /// abort it. Failures after installation begins are terminal and do not
-    /// return a writer.
-    ///
-    /// # Returns
-    ///
-    /// `Ok(())` after a successful commit.
-    ///
-    /// # Errors
-    ///
-    /// Returns a recoverable commit error when metadata preservation,
-    /// staging-file synchronization, destination replacement, or parent
-    /// synchronization fails.
-    #[inline]
-    pub(crate) fn commit_recoverable(self) -> Result<(), LocalAtomicCommitError<Self>> {
-        self.commit_recoverable_with_durability().map(|_| ())
-    }
-
     /// Attempts to commit and reports whether requested durability completed.
     ///
     /// # Returns
@@ -290,45 +242,6 @@ impl LocalAtomicWriter {
                 source,
             )),
         }
-    }
-
-    /// Writes all bytes and commits the destination.
-    #[inline(always)]
-    pub(crate) fn write_bytes(self, bytes: &[u8]) -> Result<(), LocalAtomicWriteError> {
-        self.write_with(|writer| writer.write_all(bytes))
-    }
-
-    /// Invokes caller-provided staging logic and commits the destination.
-    ///
-    /// The callback receives the guarded writer itself rather than a
-    /// [`std::fs::File`]. Exposing a file would let the callback retain a
-    /// cloned handle and mutate the committed inode after rename,
-    /// invalidating the atomic snapshot.
-    ///
-    /// # Parameters
-    /// - `write`: Callback that writes the complete staged contents.
-    ///
-    /// # Errors
-    /// Returns a structured error when the callback or commit sequence fails.
-    /// Callback errors are reported at
-    /// [`LocalAtomicWriteStage::WriteTemporaryFile`].
-    ///
-    /// # Panics
-    /// Propagates callback panics after the staging guard attempts best-effort
-    /// cleanup while unwinding.
-    #[inline]
-    pub(crate) fn write_with<F>(mut self, write: F) -> Result<(), LocalAtomicWriteError>
-    where
-        F: FnOnce(&mut Self) -> io::Result<()>,
-    {
-        let result = write(&mut self);
-        with_staging_cleanup(
-            result,
-            LocalAtomicWriteStage::WriteTemporaryFile,
-            &self.path,
-            &mut self.staged_file,
-        )?;
-        self.commit()
     }
 
     /// Runs one commit attempt without consuming recoverable staging state.
@@ -470,7 +383,9 @@ impl LocalAtomicWriter {
     /// Returns the structured namespace-race error produced by the identity
     /// verifier while retaining staging for retry or explicit abort.
     #[cfg(unix)]
-    #[inline]
+    // qubit-style: allow coverage-cfg
+    #[cfg_attr(not(coverage), inline)]
+    #[cfg_attr(coverage, inline(never))]
     fn verify_destination_for_commit(
         &mut self,
         destination: Option<&OpenedAtomicDestination>,
@@ -520,28 +435,6 @@ impl LocalAtomicWriter {
             ));
         }
         Ok(())
-    }
-
-    /// Applies the historical cleanup policy for consuming commit failures.
-    ///
-    /// # Parameters
-    ///
-    /// * `error` - Recoverable pre-installation failure to finalize.
-    ///
-    /// # Returns
-    ///
-    /// The failure enriched with any staging cleanup error.
-    #[inline]
-    fn finalize_failed_commit(self, error: LocalAtomicWriteError) -> LocalAtomicWriteError {
-        finalize_failed_commit(
-            self,
-            error,
-            |writer| writer.staged_file.cleanup(),
-            |writer| {
-                writer.staged_file.close();
-                writer.staged_file.disarm();
-            },
-        )
     }
 
     /// Installs staging and synchronizes the destination parent chain.
@@ -596,26 +489,30 @@ impl LocalAtomicWriter {
 
 impl Write for LocalAtomicWriter {
     /// Writes bytes into the private staging file.
-    #[inline(always)]
+    #[cfg_attr(not(coverage), inline(always))]
+    #[cfg_attr(coverage, inline(never))]
     fn write(&mut self, buffer: &[u8]) -> io::Result<usize> {
         self.staged_file.file_mut().write(buffer)
     }
 
     /// Writes bytes from multiple buffers into the private staging file.
-    #[inline(always)]
+    #[cfg_attr(not(coverage), inline(always))]
+    #[cfg_attr(coverage, inline(never))]
     fn write_vectored(&mut self, buffers: &[io::IoSlice<'_>]) -> io::Result<usize> {
         self.staged_file.file_mut().write_vectored(buffers)
     }
 
     /// Flushes userspace data into the private staging file.
-    #[inline(always)]
+    #[cfg_attr(not(coverage), inline(always))]
+    #[cfg_attr(coverage, inline(never))]
     fn flush(&mut self) -> io::Result<()> {
         self.staged_file.file_mut().flush()
     }
 }
 
 /// Adds atomic-write context to a native I/O result.
-#[inline]
+#[cfg_attr(not(coverage), inline)]
+#[cfg_attr(coverage, inline(never))]
 fn with_atomic_context<T>(
     result: io::Result<T>,
     stage: LocalAtomicWriteStage,
@@ -628,42 +525,9 @@ fn with_atomic_context<T>(
     })
 }
 
-/// Creates an atomic-write error and explicitly cleans up its staging file.
-#[inline]
-#[allow(dead_code)]
-fn atomic_error_with_staging(
-    stage: LocalAtomicWriteStage,
-    path: &Path,
-    source: io::Error,
-    staged_file: &mut StagedFile,
-) -> LocalAtomicWriteError {
-    let temporary_path = staged_file.path().to_path_buf();
-    let cleanup_error = staged_file.cleanup().err();
-    LocalAtomicWriteError::new(
-        stage,
-        path.to_path_buf(),
-        Some(temporary_path),
-        LocalAtomicDestinationState::Unchanged,
-        source,
-    )
-    .with_cleanup_error(cleanup_error)
-}
-
-/// Adds atomic-write context and cleanup to a staging operation result.
-#[inline(always)]
-#[allow(dead_code)]
-fn with_staging_cleanup<T>(
-    result: io::Result<T>,
-    stage: LocalAtomicWriteStage,
-    path: &Path,
-    staged_file: &mut StagedFile,
-) -> Result<T, LocalAtomicWriteError> {
-    result.map_err(|source| atomic_error_with_staging(stage, path, source, staged_file))
-}
-
 /// Synchronizes the destination and every newly created parent entry.
 fn sync_atomic_parent_chain(path: &Path, parent_dirs_to_sync: &[PathBuf]) -> io::Result<()> {
-    #[cfg(feature = "internal-test-support")]
+    #[cfg(feature = "test-support")]
     if test_support::is_enabled("atomic-install-unlink-recover-sync")
         || test_support::is_enabled("atomic-install-unlink-persistent-sync")
         || test_support::is_enabled("atomic-install-unlink-indeterminate-sync")

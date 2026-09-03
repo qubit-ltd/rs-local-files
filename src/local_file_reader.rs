@@ -57,16 +57,17 @@ impl LocalFileReader {
 
     /// Returns the underlying native file handle.
     #[must_use]
-    #[cfg_attr(feature = "test-support", inline(never))]
-    #[cfg_attr(not(feature = "test-support"), inline(always))]
+    // qubit-style: allow coverage-cfg
+    #[cfg_attr(not(coverage), inline)]
+    #[cfg_attr(coverage, inline(never))]
     pub const fn as_file(&self) -> &File {
         &self.file
     }
 
     /// Returns metadata captured from this reader's retained handle.
     #[must_use = "the retained-handle metadata should be inspected"]
-    #[cfg_attr(feature = "test-support", inline(never))]
-    #[cfg_attr(not(feature = "test-support"), inline(always))]
+    #[cfg_attr(not(coverage), inline)]
+    #[cfg_attr(coverage, inline(never))]
     pub const fn metadata(&self) -> &LocalFileMetadata {
         &self.metadata
     }
@@ -80,11 +81,11 @@ impl Read for LocalFileReader {
 
     /// Reads bytes into multiple buffers from the current offset.
     fn read_vectored(&mut self, buffers: &mut [IoSliceMut<'_>]) -> io::Result<usize> {
-        #[cfg(any(windows, feature = "internal-test-support"))]
+        #[cfg(any(windows, feature = "test-support"))]
         {
             let mut total = 0;
             for buffer in buffers {
-                #[cfg(feature = "internal-test-support")]
+                #[cfg(feature = "test-support")]
                 let result = if total > 0 {
                     if crate::local::test_support_enabled("local-file-reader-vectored-read-after-first") {
                         Err(io::Error::other("injected vectored read failure"))
@@ -94,7 +95,7 @@ impl Read for LocalFileReader {
                 } else {
                     self.read(buffer)
                 };
-                #[cfg(not(feature = "internal-test-support"))]
+                #[cfg(not(feature = "test-support"))]
                 let result = self.read(buffer);
                 let count = match result {
                     Ok(count) => count,
@@ -108,7 +109,7 @@ impl Read for LocalFileReader {
             }
             Ok(total)
         }
-        #[cfg(all(not(windows), not(feature = "internal-test-support")))]
+        #[cfg(all(not(windows), not(feature = "test-support")))]
         self.as_file().read_vectored(buffers)
     }
 }

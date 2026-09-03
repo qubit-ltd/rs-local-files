@@ -30,7 +30,9 @@ pub enum LocalSymlinkPolicy {
 impl LocalSymlinkPolicy {
     /// Reports whether path resolution may follow a symbolic link.
     #[must_use]
-    #[inline(always)]
+    // qubit-style: allow coverage-cfg
+    #[cfg_attr(not(coverage), inline(always))]
+    #[cfg_attr(coverage, inline(never))]
     pub const fn follows(self) -> bool {
         !matches!(self, Self::Reject)
     }

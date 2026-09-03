@@ -242,9 +242,11 @@ Linux、Windows 和 macOS 会进行运行时测试。FreeBSD 与 Android 仅做�
 `limits_at(path)` 才会针对该路径所在文件系统返回有限值（无法探测时为
 `Unknown`）。两个数值限制都必须结合 `length_unit()` 解释：Unix 使用 byte，Windows
 使用 UTF-16 code unit，后者不得当成 UTF-8 byte 限制。
-原子 rename、原子 replace、临时资源原子持久化、耐久 rename、耐久文件复制和耐久 writer
-发布会分别报告，因为各平台对这些完整协议的支持并不相同。这些 flag 描述当前 build 的
-实现能力，不证明某个具体 mount 或存储设备已经完成持久化。
+原子 rename、原子 replace、尝试临时资源原子持久化的能力、耐久 rename、耐久文件复制和
+耐久 writer 发布会分别报告，因为各平台对这些完整协议的支持并不相同。
+`can_attempt_atomic_temp_persist()` 描述 build 已实现原子尝试协议；是否同一 filesystem 及
+运行时 namespace 条件仍由实际操作 outcome 决定。这些 flag 不证明某个具体 mount 或存储
+设备已经完成持久化。
 
 继续阅读 [README](../README.zh_CN.md)、[English user guide](user_guide.md) 或
 [API 文档](https://docs.rs/qubit-local-files)。

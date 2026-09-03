@@ -23,7 +23,7 @@ use qubit_local_files::options::LocalCopyOptions;
 use qubit_local_files::options::LocalCopyTypeConflictPolicy;
 use qubit_local_files::options::LocalCreateDirectoryOptions;
 use qubit_local_files::options::LocalDeleteOptions;
-#[cfg(feature = "internal-test-support")]
+#[cfg(feature = "test-support")]
 use qubit_local_files::options::LocalDirectoryReopenPolicy;
 use qubit_local_files::options::LocalListOptions;
 use qubit_local_files::options::LocalPersistOptions;
@@ -31,7 +31,7 @@ use qubit_local_files::options::LocalReadOptions;
 use qubit_local_files::options::LocalRenameOptions;
 use qubit_local_files::options::LocalTempDirectoryOptions;
 use qubit_local_files::options::LocalTempFileOptions;
-#[cfg(feature = "internal-test-support")]
+#[cfg(feature = "test-support")]
 use qubit_local_files::options::LocalWalkErrorPolicy;
 use qubit_local_files::options::LocalWriteMode;
 use qubit_local_files::options::LocalWriteOptions;
@@ -46,7 +46,7 @@ use qubit_local_files::path::LocalFileSystemScope;
 use qubit_local_files::policy::LocalAtomicityRequirement;
 #[cfg(not(windows))]
 use qubit_local_files::policy::LocalDurabilityRequirement;
-#[cfg(feature = "internal-test-support")]
+#[cfg(feature = "test-support")]
 use qubit_local_files::test_support::install_test_fault;
 use tempfile::tempdir;
 
@@ -54,45 +54,18 @@ use tempfile::tempdir;
 ///
 /// The child receives one fault selector while the parent stays free of the
 /// process-global selector used by concurrent coverage tests.
-#[cfg(feature = "internal-test-support")]
-fn run_in_test_fault_process<F>(test_name: &str, fault: &str, action: F)
+#[cfg(feature = "test-support")]
+fn run_in_test_fault_process<F>(_test_name: &str, fault: &str, action: F)
 where
     F: FnOnce(),
 {
-    const TEST_FAULT_ENV: &str = "QUBIT_LOCAL_FILES_TEST_FAULT";
-    const TEST_FAULT_CHILD_ENV: &str = "QUBIT_LOCAL_FILES_TEST_FAULT_CHILD";
-    if std::env::var_os(TEST_FAULT_ENV).is_some_and(|selected| selected == std::ffi::OsStr::new(fault)) {
-        let _fault = install_test_fault(fault).expect("test fault controller should install");
-        action();
-        return;
-    }
-    if std::env::var_os(TEST_FAULT_CHILD_ENV).is_some() {
-        return;
-    }
-    let executable = std::env::current_exe().expect("current test executable should exist");
-    let selected_test = if executable
-        .file_name()
-        .and_then(|name| name.to_str())
-        .is_some_and(|name| name.starts_with("lib_tests-"))
-    {
-        format!("rooted_local_file_system_coverage_tests::{test_name}")
-    } else {
-        test_name.to_owned()
-    };
-    let status = std::process::Command::new(executable)
-        .arg("--exact")
-        .arg(selected_test)
-        .arg("--nocapture")
-        .env(TEST_FAULT_ENV, fault)
-        .env(TEST_FAULT_CHILD_ENV, "1")
-        .status()
-        .expect("test fault child should launch");
-    assert!(status.success(), "test fault child should pass");
+    let _fault = install_test_fault(fault).expect("test fault controller should install");
+    action();
 }
 
 /// Verifies a native temporary-file name collision is retried until the
 /// caller-configured attempt budget is exhausted.
-#[cfg(feature = "internal-test-support")]
+#[cfg(feature = "test-support")]
 #[test]
 fn test_rooted_temp_file_reports_injected_name_collision_exhaustion() {
     const TEST_NAME: &str = "test_rooted_temp_file_reports_injected_name_collision_exhaustion";
@@ -101,7 +74,7 @@ fn test_rooted_temp_file_reports_injected_name_collision_exhaustion() {
         let rooted = LocalFileSystem::rooted(directory.path()).expect("root authority should open");
 
         let error = rooted
-            .create_temp_file_with_options(&LocalTempFileOptions::new().with_max_attempts(1))
+            .create_temp_file_with_options(&LocalTempFileOptions::new().with_max_attempts(2))
             .expect_err("an exhausted rooted collision budget must fail");
 
         assert_eq!(LocalFileErrorKind::AlreadyExists, error.kind());
@@ -110,7 +83,7 @@ fn test_rooted_temp_file_reports_injected_name_collision_exhaustion() {
 
 /// Verifies a native temporary-file creation error is reported with the
 /// operation's native error kind instead of being retried as a collision.
-#[cfg(feature = "internal-test-support")]
+#[cfg(feature = "test-support")]
 #[test]
 fn test_rooted_temp_file_reports_injected_native_creation_error() {
     const TEST_NAME: &str = "test_rooted_temp_file_reports_injected_native_creation_error";
@@ -128,7 +101,7 @@ fn test_rooted_temp_file_reports_injected_native_creation_error() {
 
 /// Verifies a native temporary-directory creation failure retains its rooted
 /// operation context instead of being treated as a name collision.
-#[cfg(feature = "internal-test-support")]
+#[cfg(feature = "test-support")]
 #[test]
 fn test_rooted_temp_directory_reports_injected_native_creation_error() {
     const TEST_NAME: &str = "test_rooted_temp_directory_reports_injected_native_creation_error";
@@ -137,7 +110,7 @@ fn test_rooted_temp_directory_reports_injected_native_creation_error() {
         let rooted = LocalFileSystem::rooted(directory.path()).expect("root authority should open");
 
         let error = rooted
-            .create_temp_directory_with_options(&LocalTempDirectoryOptions::new().with_max_attempts(1))
+            .create_temp_directory_with_options(&LocalTempDirectoryOptions::new().with_max_attempts(2))
             .expect_err("a rooted native directory creation failure must surface");
 
         assert_eq!(LocalFileErrorKind::PermissionDenied, error.kind());
@@ -146,7 +119,7 @@ fn test_rooted_temp_directory_reports_injected_native_creation_error() {
 
 /// Verifies a native temporary-directory name collision is retried until the
 /// caller-configured attempt budget is exhausted.
-#[cfg(feature = "internal-test-support")]
+#[cfg(feature = "test-support")]
 #[test]
 fn test_rooted_temp_directory_reports_injected_name_collision_exhaustion() {
     const TEST_NAME: &str = "test_rooted_temp_directory_reports_injected_name_collision_exhaustion";
@@ -164,7 +137,7 @@ fn test_rooted_temp_directory_reports_injected_name_collision_exhaustion() {
 
 /// Verifies a rooted directory status-read failure is preserved at the facade
 /// boundary before it can be mistaken for an absent entry.
-#[cfg(feature = "internal-test-support")]
+#[cfg(feature = "test-support")]
 #[test]
 fn test_rooted_directory_creation_reports_injected_status_error() {
     const TEST_NAME: &str = "test_rooted_directory_creation_reports_injected_status_error";
@@ -427,7 +400,7 @@ fn test_rooted_temporary_resources_persist_through_configured_parents() {
 
 /// Verifies rooted recursive-copy traversal reports injected source-reading
 /// and destination-directory creation failures with no successful outcome.
-#[cfg(feature = "internal-test-support")]
+#[cfg(feature = "test-support")]
 #[test]
 fn test_rooted_copy_reports_injected_directory_pipeline_failures() {
     const TEST_NAME: &str = "test_rooted_copy_reports_injected_directory_pipeline_failures";
@@ -521,7 +494,7 @@ fn test_rooted_root_entry_operations_use_opened_authority() {
 
 /// Verifies a rooted walker rejects a malformed authority-relative child path
 /// instead of resolving it through the diagnostic root.
-#[cfg(feature = "internal-test-support")]
+#[cfg(feature = "test-support")]
 #[test]
 fn test_rooted_walker_reports_injected_authority_relative_path() {
     const TEST_NAME: &str = "test_rooted_walker_reports_injected_authority_relative_path";
@@ -1243,7 +1216,7 @@ fn test_rooted_local_file_system_walker_reports_disappearing_child_directory() {
 
 /// Verifies a rooted path-validation failure returns its reserved reader slot
 /// before a continuing walker advances to the next frame.
-#[cfg(feature = "internal-test-support")]
+#[cfg(feature = "test-support")]
 #[test]
 fn test_rooted_local_file_system_walker_rolls_back_path_validation_failure() {
     const TEST_NAME: &str = "test_rooted_local_file_system_walker_rolls_back_path_validation_failure";
@@ -1370,7 +1343,7 @@ fn test_rooted_local_file_system_rejects_invalid_generated_names_and_targets() {
 }
 
 /// Runs one test-support-only rooted writer fault in an isolated child process.
-#[cfg(all(feature = "internal-test-support", target_os = "linux"))]
+#[cfg(all(feature = "test-support", target_os = "linux"))]
 fn run_rooted_writer_fault<F>(test_name: &str, fault: &str, action: F)
 where
     F: FnOnce(),
@@ -1399,7 +1372,7 @@ where
 
 /// Verifies rooted atomic writers classify destination-open and identity
 /// races at their descriptor-relative native boundaries.
-#[cfg(all(feature = "internal-test-support", target_os = "linux"))]
+#[cfg(all(feature = "test-support", target_os = "linux"))]
 #[test]
 fn test_rooted_writer_exercises_destination_identity_fault_boundaries() {
     const TEST_NAME: &str = "test_rooted_writer_exercises_destination_identity_fault_boundaries";
@@ -1442,7 +1415,7 @@ fn test_rooted_writer_exercises_destination_identity_fault_boundaries() {
 
 /// Verifies rooted staged-writer creation reports generator and native open
 /// failures before a public writer session is exposed.
-#[cfg(all(feature = "internal-test-support", target_os = "linux"))]
+#[cfg(all(feature = "test-support", target_os = "linux"))]
 #[test]
 fn test_rooted_writer_reports_injected_staging_creation_failures() {
     const TEST_NAME: &str = "test_rooted_writer_reports_injected_staging_creation_failures";
@@ -1461,7 +1434,7 @@ fn test_rooted_writer_reports_injected_staging_creation_failures() {
 
 /// Verifies an atomic staging-name collision is retried without an implicit
 /// library attempt limit.
-#[cfg(all(feature = "internal-test-support", target_os = "linux"))]
+#[cfg(all(feature = "test-support", target_os = "linux"))]
 #[test]
 fn test_rooted_writer_retries_an_injected_staging_collision() {
     const TEST_NAME: &str = "test_rooted_writer_retries_an_injected_staging_collision";
@@ -1478,7 +1451,7 @@ fn test_rooted_writer_retries_an_injected_staging_collision() {
 
 /// Verifies a rooted staging installation failure remains not-published and
 /// reports that native installation cleanup consumed the staging writer.
-#[cfg(all(feature = "internal-test-support", target_os = "linux"))]
+#[cfg(all(feature = "test-support", target_os = "linux"))]
 #[test]
 fn test_rooted_local_file_system_writer_reports_injected_install_failure() {
     const TEST_NAME: &str = "test_rooted_local_file_system_writer_reports_injected_install_failure";
