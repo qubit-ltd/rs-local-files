@@ -62,6 +62,7 @@ impl LocalRenameFailure {
     }
 
     /// Returns the most precise namespace state proven by native operations.
+    #[must_use]
     #[cfg_attr(not(coverage), inline(always))]
     #[cfg_attr(coverage, inline(never))]
     pub const fn state(&self) -> LocalRenameFailureState {

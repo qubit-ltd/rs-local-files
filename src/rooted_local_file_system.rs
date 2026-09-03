@@ -7,19 +7,31 @@
 // =============================================================================
 // qubit-style: allow multiple-public-types
 
+// Implements rooted file and directory copy operations.
 mod copy;
+// Implements rooted deletion operations.
 mod delete;
+// Tracks rooted deletion work.
 mod delete_work;
+// Implements rooted directory operations.
 mod directory;
+// Implements rooted metadata, reader, and writer operations.
 #[path = "rooted_local_file_system/io.rs"]
 mod io_operations;
+// Implements rooted metadata conversion operations.
 #[path = "rooted_local_file_system/metadata.rs"]
 mod metadata_operations;
+// Provides shared rooted path and I/O helpers.
 mod path_support;
+// Implements rooted rename operations.
 mod rename;
+// Describes rooted path-resolution steps.
 mod resolution_step;
+// Provides rooted authority and validation helpers.
 mod support;
+// Tracks rooted symbolic-link identity state.
 mod symlink_identity;
+// Implements rooted temporary-resource operations.
 mod temp;
 
 pub(super) use std::io;
@@ -146,6 +158,7 @@ impl RootedLocalFileSystem {
     }
 
     /// Returns the native capability snapshot cached for this opened authority.
+    #[must_use]
     #[cfg_attr(not(coverage), inline)]
     #[cfg_attr(coverage, inline(never))]
     pub const fn capabilities(&self) -> LocalFileSystemCapabilities {
@@ -153,6 +166,7 @@ impl RootedLocalFileSystem {
     }
 
     /// Returns limits observed from the opened root authority.
+    #[must_use]
     #[cfg_attr(not(coverage), inline)]
     #[cfg_attr(coverage, inline(never))]
     pub const fn limits(&self) -> LocalFileSystemLimits {

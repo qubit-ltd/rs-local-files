@@ -9,6 +9,14 @@
 // Covered by structured error integration tests.
 
 /// Local filesystem operation that produced an error.
+///
+/// # Examples
+///
+/// ```
+/// use qubit_local_files::error::LocalFileOperation;
+///
+/// assert_eq!(LocalFileOperation::Read, LocalFileOperation::Read);
+/// ```
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
 #[non_exhaustive]
 #[must_use]

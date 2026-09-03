@@ -29,7 +29,6 @@ pub(super) fn close_host_frame(frame: &mut WalkFrame) {
 }
 
 /// Creates the established listing error for exhausted directory capacity.
-#[must_use]
 pub(super) fn directory_limit_error(
     path: &Path,
     error: InsufficientBudgetError<LocalResourceKind, usize>,

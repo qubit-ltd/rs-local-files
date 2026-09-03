@@ -47,7 +47,6 @@ impl LocalFileCommitError {
     }
 
     /// Returns the structured local filesystem failure.
-    #[must_use]
     #[cfg_attr(not(coverage), inline)]
     #[cfg_attr(coverage, inline(never))]
     pub const fn error(&self) -> &LocalFileError {

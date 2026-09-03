@@ -45,6 +45,7 @@ impl LocalFileSystem {
     ///
     /// `Host` for process-wide native paths or `Rooted` for paths interpreted
     /// below a retained directory authority.
+    #[must_use]
     #[cfg_attr(not(coverage), inline)]
     #[cfg_attr(coverage, inline(never))]
     pub fn scope(&self) -> LocalFileSystemScope {

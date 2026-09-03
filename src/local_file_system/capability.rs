@@ -25,6 +25,7 @@ use super::resolve_operation_path;
 
 impl LocalFileSystem {
     /// Returns the immutable capability snapshot for this authority.
+    #[must_use]
     // qubit-style: allow coverage-cfg
     #[cfg_attr(not(coverage), inline)]
     #[cfg_attr(coverage, inline(never))]
@@ -33,6 +34,7 @@ impl LocalFileSystem {
     }
 
     /// Returns authority-level objective path-limit observations.
+    #[must_use]
     #[cfg_attr(not(coverage), inline)]
     #[cfg_attr(coverage, inline(never))]
     pub fn limits(&self) -> LocalFileSystemLimits {
