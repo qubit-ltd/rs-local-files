@@ -47,6 +47,7 @@ impl LocalWriteOptions {
     }
 
     /// Returns the publication mode.
+    #[must_use]
     // qubit-style: allow coverage-cfg
     #[cfg_attr(not(coverage), inline(always))]
     #[cfg_attr(coverage, inline(never))]

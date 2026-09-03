@@ -9,4 +9,16 @@
 use super::LocalFileError;
 
 /// Result type used by local filesystem operations.
+///
+/// # Examples
+///
+/// ```
+/// use qubit_local_files::error::LocalResult;
+///
+/// fn validate() -> LocalResult<()> {
+///     Ok(())
+/// }
+///
+/// assert!(validate().is_ok());
+/// ```
 pub type LocalResult<T> = Result<T, LocalFileError>;

@@ -12,6 +12,14 @@
 use std::fmt;
 
 /// A resource dimension enforced by local filesystem operations.
+///
+/// # Examples
+///
+/// ```
+/// use qubit_local_files::error::LocalResourceKind;
+///
+/// assert_eq!(LocalResourceKind::Entry.to_string(), "entry");
+/// ```
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
 #[non_exhaustive]
 #[must_use]

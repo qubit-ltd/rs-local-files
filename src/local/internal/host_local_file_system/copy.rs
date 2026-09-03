@@ -500,7 +500,6 @@ fn windows_file_identity(path: &Path) -> io::Result<(u32, u64)> {
 /// # Returns
 ///
 /// Invalid-options copy error.
-#[must_use]
 #[cfg_attr(not(coverage), inline)]
 #[cfg_attr(coverage, inline(never))]
 fn copy_alias_error(source: &Path, target: &Path) -> LocalFileError {

@@ -11,6 +11,16 @@ use std::fmt;
 
 /// Failure while converting between canonical path text and a native path
 /// component.
+///
+/// # Examples
+///
+/// ```
+/// use qubit_local_files::error::LocalPathCodecError;
+///
+/// let error = LocalPathCodecError::InvalidEscape { offset: 3 };
+/// assert_eq!(error, LocalPathCodecError::InvalidEscape { offset: 3 });
+/// ```
+#[must_use]
 #[derive(Clone, Debug, Eq, PartialEq)]
 #[non_exhaustive]
 pub enum LocalPathCodecError {

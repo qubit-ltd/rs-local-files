@@ -8,6 +8,15 @@
 //! A best-effort native filesystem size limit.
 
 /// A finite, path-dependent, or unavailable native filesystem limit.
+///
+/// # Examples
+///
+/// ```
+/// use qubit_local_files::capability::SizeLimit;
+///
+/// assert_eq!(SizeLimit::Maximum(255), SizeLimit::Maximum(255));
+/// assert_ne!(SizeLimit::Unknown, SizeLimit::VariesByPath);
+/// ```
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
 #[must_use]
 pub enum SizeLimit {

@@ -9,6 +9,14 @@
 // Covered by structured error integration tests.
 
 /// Stable classification of local filesystem failures.
+///
+/// # Examples
+///
+/// ```
+/// use qubit_local_files::error::LocalFileErrorKind;
+///
+/// assert_eq!(LocalFileErrorKind::NotFound, LocalFileErrorKind::NotFound);
+/// ```
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
 #[non_exhaustive]
 #[must_use]

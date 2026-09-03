@@ -67,6 +67,7 @@ impl LocalPaths {
     }
 
     /// Returns the namespace interpreted by this path object.
+    #[must_use]
     #[cfg_attr(not(coverage), inline(always))]
     #[cfg_attr(coverage, inline(never))]
     pub const fn scope(&self) -> LocalFileSystemScope {
@@ -74,6 +75,7 @@ impl LocalPaths {
     }
 
     /// Returns the native filename policy for this path namespace.
+    #[must_use]
     #[cfg_attr(not(coverage), inline(always))]
     #[cfg_attr(coverage, inline(never))]
     pub const fn file_names(&self) -> LocalFileNames {
@@ -180,7 +182,6 @@ fn has_raw_dot_component(path: &Path) -> bool {
 ///
 /// A `ComposePath` invalid-input error with no native path context, because
 /// the rejected shape may not be safely representable as a path.
-#[must_use]
 #[cfg_attr(not(coverage), inline(always))]
 #[cfg_attr(coverage, inline(never))]
 fn invalid_path_error() -> LocalFileError {

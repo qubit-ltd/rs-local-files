@@ -15,6 +15,16 @@ use std::fmt;
 use super::LocalResourceKind;
 
 /// Structured budget facts for a local resource-limit failure.
+///
+/// # Examples
+///
+/// ```
+/// use qubit_local_files::error::LocalResourceKind;
+/// use qubit_local_files::error::LocalResourceLimitError;
+///
+/// let error = LocalResourceLimitError::new(LocalResourceKind::Entry, 4, 1, 2);
+/// assert_eq!(error.requested(), 2);
+/// ```
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 #[must_use]
 pub struct LocalResourceLimitError {

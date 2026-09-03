@@ -8,11 +8,17 @@
 //! Stateful Host or Rooted local filesystem service.
 // qubit-style: allow source-test-pair
 
+// Implements capability and filesystem-space observations.
 mod capability;
+// Implements instance scope, policy, and default-option configuration.
 mod configuration;
+// Implements copy and rename operations.
 mod copy;
+// Implements listing, creation, and deletion operations.
 mod directory;
+// Implements metadata, reader, and writer operations.
 mod io;
+// Implements temporary-file and temporary-directory operations.
 mod temp;
 
 use std::fs;

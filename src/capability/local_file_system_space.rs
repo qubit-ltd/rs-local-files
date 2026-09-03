@@ -8,6 +8,15 @@
 //! Dynamic native filesystem space observations.
 
 /// Dynamic space values observed for one filesystem authority.
+///
+/// # Examples
+///
+/// ```
+/// use qubit_local_files::capability::LocalFileSystemSpace;
+///
+/// let space = LocalFileSystemSpace::new(Some(1024), Some(768), Some(512));
+/// assert_eq!(space.available_bytes(), Some(512));
+/// ```
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 #[must_use]
 pub struct LocalFileSystemSpace {

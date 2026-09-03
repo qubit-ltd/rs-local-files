@@ -364,7 +364,6 @@ fn is_windows_reserved_file_name(name: &str) -> bool {
 }
 
 /// Creates a structured invalid filename error.
-#[must_use]
 #[cfg_attr(not(coverage), inline(always))]
 #[cfg_attr(coverage, inline(never))]
 fn invalid_name_error() -> LocalFileError {
@@ -381,7 +380,6 @@ fn invalid_name_error() -> LocalFileError {
 /// # Returns
 ///
 /// A validation error retaining complete resource-limit facts.
-#[must_use]
 fn component_limit_error(requested: usize, limit: usize) -> LocalFileError {
     LocalFileError::from_resource_limit(
         LocalFileOperation::ValidateName,

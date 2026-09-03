@@ -43,6 +43,7 @@ impl OpenOptions {
     }
 
     /// Returns the native write mode.
+    #[must_use]
     pub const fn mode(&self) -> Mode {
         self.mode
     }

@@ -997,7 +997,6 @@ fn native_directory_identity(metadata: &fs::Metadata, path: &Path) -> LocalResul
 /// # Returns
 ///
 /// Structured listing error.
-#[must_use]
 #[cfg_attr(not(coverage), inline)]
 #[cfg_attr(coverage, inline(never))]
 fn walk_io_error(path: &Path, error: std::io::Error) -> LocalFileError {

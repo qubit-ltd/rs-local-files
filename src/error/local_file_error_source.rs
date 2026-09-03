@@ -16,6 +16,18 @@ use super::LocalPathCodecError;
 use super::LocalResourceLimitError;
 
 /// Typed source retained by a local filesystem operation failure.
+///
+/// # Examples
+///
+/// ```
+/// use std::io;
+///
+/// use qubit_local_files::error::LocalFileErrorSource;
+///
+/// let source = LocalFileErrorSource::Io(io::Error::from(io::ErrorKind::NotFound));
+/// assert!(matches!(source, LocalFileErrorSource::Io(_)));
+/// ```
+#[must_use]
 #[derive(Debug)]
 #[non_exhaustive]
 pub enum LocalFileErrorSource {

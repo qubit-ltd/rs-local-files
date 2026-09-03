@@ -6,15 +6,24 @@
 //    Licensed under the Apache License, Version 2.0.
 // =============================================================================
 
+// Implements Host copy operations.
 mod copy;
+// Implements Host deletion operations.
 mod delete;
+// Tracks Host deletion work.
 mod delete_work;
+// Implements Host directory operations.
 mod directory;
+// Implements Host metadata, reader, writer, and listing operations.
 #[path = "host_local_file_system/io.rs"]
 mod io_operations;
+// Resolves Host paths against the process namespace.
 mod path_resolution;
+// Implements Host rename operations.
 mod rename;
+// Provides Host authority and fault-injection helpers.
 mod support;
+// Implements Host temporary-resource operations.
 mod temp;
 
 pub(super) use std::fs;

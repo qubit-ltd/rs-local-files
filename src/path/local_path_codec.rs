@@ -74,7 +74,6 @@ impl LocalPathCodec {
 /// # Returns
 ///
 /// A compose-path error retaining the codec failure as its typed source.
-#[must_use]
 // qubit-style: allow coverage-cfg
 #[cfg_attr(not(coverage), inline)]
 #[cfg_attr(coverage, inline(never))]
