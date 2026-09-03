@@ -56,13 +56,17 @@ impl LocalFileReader {
     }
 
     /// Returns the underlying native file handle.
-    #[inline]
+    #[must_use]
+    #[cfg_attr(feature = "test-support", inline(never))]
+    #[cfg_attr(not(feature = "test-support"), inline(always))]
     pub const fn as_file(&self) -> &File {
         &self.file
     }
 
     /// Returns metadata captured from this reader's retained handle.
-    #[inline]
+    #[must_use = "the retained-handle metadata should be inspected"]
+    #[cfg_attr(feature = "test-support", inline(never))]
+    #[cfg_attr(not(feature = "test-support"), inline(always))]
     pub const fn metadata(&self) -> &LocalFileMetadata {
         &self.metadata
     }
