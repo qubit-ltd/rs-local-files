@@ -8,6 +8,7 @@
 //! Atomic write options.
 // qubit-style: allow source-test-pair
 // qubit-style: allow explicit-imports
+// qubit-style: allow coverage-cfg
 
 use std::time::Duration;
 
@@ -39,7 +40,8 @@ impl LocalAtomicWriteOptions {
     ///
     /// # Returns
     /// Default atomic write options.
-    #[inline(always)]
+    #[cfg_attr(not(coverage), inline(always))]
+    #[cfg_attr(coverage, inline(never))]
     pub const fn new() -> Self {
         Self {
             create_parent: false,
@@ -54,7 +56,8 @@ impl LocalAtomicWriteOptions {
     ///
     /// # Returns
     /// `true` when parent creation is enabled.
-    #[inline(always)]
+    #[cfg_attr(not(coverage), inline(always))]
+    #[cfg_attr(coverage, inline(never))]
     #[must_use]
     pub const fn creates_parent(&self) -> bool {
         self.create_parent
@@ -64,7 +67,8 @@ impl LocalAtomicWriteOptions {
     ///
     /// # Returns
     /// Updated options that create missing parent directories before staging.
-    #[inline(always)]
+    #[cfg_attr(not(coverage), inline(always))]
+    #[cfg_attr(coverage, inline(never))]
     pub const fn with_parent(mut self) -> Self {
         self.create_parent = true;
         self
@@ -80,7 +84,8 @@ impl LocalAtomicWriteOptions {
     /// # Returns
     /// The configured timeout, or [`None`] when retries are disabled.
     #[must_use]
-    #[inline(always)]
+    #[cfg_attr(not(coverage), inline(always))]
+    #[cfg_attr(coverage, inline(never))]
     #[cfg_attr(windows, allow(dead_code))]
     pub const fn open_retry_timeout(&self) -> Option<Duration> {
         self.open_retry_timeout
@@ -103,7 +108,8 @@ impl LocalAtomicWriteOptions {
     }
 
     /// Returns the requested durability for atomic publication.
-    #[inline(always)]
+    #[cfg_attr(not(coverage), inline(always))]
+    #[cfg_attr(coverage, inline(never))]
     pub const fn durability(&self) -> LocalDurabilityRequirement {
         self.durability
     }
@@ -117,7 +123,8 @@ impl LocalAtomicWriteOptions {
     /// # Returns
     ///
     /// Updated options carrying the durability policy.
-    #[inline(always)]
+    #[cfg_attr(not(coverage), inline(always))]
+    #[cfg_attr(coverage, inline(never))]
     pub const fn with_durability(mut self, durability: LocalDurabilityRequirement) -> Self {
         self.durability = durability;
         self
@@ -132,7 +139,8 @@ impl LocalAtomicWriteOptions {
     /// # Returns
     ///
     /// Updated options enforcing create-new publication.
-    #[inline(always)]
+    #[cfg_attr(not(coverage), inline(always))]
+    #[cfg_attr(coverage, inline(never))]
     pub const fn with_create_new(mut self) -> Self {
         self.publication_mode = LocalAtomicPublicationMode::CreateNew;
         self
@@ -140,14 +148,16 @@ impl LocalAtomicWriteOptions {
 
     /// Reports whether final symbolic-link replacement is enabled.
     #[must_use]
-    #[inline(always)]
+    #[cfg_attr(not(coverage), inline(always))]
+    #[cfg_attr(coverage, inline(never))]
     pub const fn replaces_target_symlink(&self) -> bool {
         self.replace_target_symlink
     }
 
     /// Returns the final installation policy.
     #[must_use]
-    #[inline(always)]
+    #[cfg_attr(not(coverage), inline(always))]
+    #[cfg_attr(coverage, inline(never))]
     pub const fn publication_mode(&self) -> LocalAtomicPublicationMode {
         self.publication_mode
     }

@@ -61,7 +61,7 @@ pub(crate) fn install_atomic_file(
 
 /// Atomically replaces an existing destination file.
 pub(crate) fn replace_existing_atomic_file(staging: &Path, destination: &Path) -> Result<()> {
-    #[cfg(all(feature = "internal-test-support", unix))]
+    #[cfg(all(feature = "test-support", unix))]
     if super::test_support::is_enabled("atomic-install-replace")
         || super::test_support::is_enabled("atomic-install-replace-indeterminate")
     {
@@ -114,7 +114,7 @@ pub(crate) fn install_new_atomic_file(
 
 /// Classifies a native existing-file replacement failure.
 pub(crate) fn replacement_error_state(error: &Error) -> LocalAtomicDestinationState {
-    #[cfg(feature = "internal-test-support")]
+    #[cfg(feature = "test-support")]
     if super::test_support::is_enabled("atomic-install-replace-indeterminate")
         || super::test_support::is_enabled("rooted-install-indeterminate")
     {
@@ -146,11 +146,11 @@ pub(crate) fn install_new_atomic_file_at(
 ) -> std::result::Result<(), (Error, LocalAtomicDestinationState, AtomicStagingState)> {
     #[cfg(any(target_os = "linux", target_os = "android"))]
     {
-        #[cfg(feature = "internal-test-support")]
+        #[cfg(feature = "test-support")]
         if super::test_support::is_enabled("atomic-install-before-native-call") {
             return Err(unchanged_error(crate::local::test_fault_error()));
         }
-        #[cfg(feature = "internal-test-support")]
+        #[cfg(feature = "test-support")]
         let forced_fallback = [
             "atomic-install-fallback",
             "atomic-install-link",
@@ -162,7 +162,7 @@ pub(crate) fn install_new_atomic_file_at(
         ]
         .into_iter()
         .any(super::test_support::is_enabled);
-        #[cfg(not(feature = "internal-test-support"))]
+        #[cfg(not(feature = "test-support"))]
         let forced_fallback = false;
         let result = if forced_fallback {
             -1
@@ -260,9 +260,9 @@ fn link_then_unlink(
     destination_parent: RawFd,
     destination: &CStr,
 ) -> std::result::Result<(), (Error, LocalAtomicDestinationState, AtomicStagingState)> {
-    #[cfg(feature = "internal-test-support")]
+    #[cfg(feature = "test-support")]
     let forced_link_error = super::test_support::is_enabled("atomic-install-link");
-    #[cfg(not(feature = "internal-test-support"))]
+    #[cfg(not(feature = "test-support"))]
     let forced_link_error = false;
     // SAFETY: both directory descriptors and names remain live for this
     // non-retaining hard-link operation.
@@ -296,13 +296,13 @@ fn link_then_unlink(
             Err(error) => last_error = Some(error),
         }
     }
-    #[cfg(feature = "internal-test-support")]
+    #[cfg(feature = "test-support")]
     let staging_state = if super::test_support::is_enabled("atomic-install-unlink-indeterminate-sync") {
         AtomicStagingState::Indeterminate
     } else {
         AtomicStagingState::Present
     };
-    #[cfg(not(feature = "internal-test-support"))]
+    #[cfg(not(feature = "test-support"))]
     let staging_state = AtomicStagingState::Present;
     Err((
         last_error.expect("at least one staging unlink attempt should run"),
@@ -323,13 +323,13 @@ fn link_then_unlink(
 /// Returns the native `unlinkat` error or a selected test fault.
 #[cfg(any(target_os = "linux", target_os = "android", target_os = "freebsd",))]
 fn unlink_staging_name(staging_parent: RawFd, staging: &CStr) -> Result<()> {
-    #[cfg(feature = "internal-test-support")]
+    #[cfg(feature = "test-support")]
     let forced_unlink_error = super::test_support::take("atomic-install-unlink")
         || super::test_support::is_enabled("atomic-install-unlink-persistent")
         || super::test_support::is_enabled("atomic-install-unlink-persistent-sync")
         || super::test_support::is_enabled("atomic-install-unlink-recover-sync")
         || super::test_support::is_enabled("atomic-install-unlink-indeterminate-sync");
-    #[cfg(not(feature = "internal-test-support"))]
+    #[cfg(not(feature = "test-support"))]
     let forced_unlink_error = false;
     // SAFETY: the staging directory descriptor and name remain live for this
     // non-retaining unlink operation.
@@ -350,7 +350,9 @@ fn unlink_staging_name(staging_parent: RawFd, staging: &CStr) -> Result<()> {
 
 /// Converts a Unix path to a NUL-terminated byte string.
 #[cfg(unix)]
-#[inline]
+// qubit-style: allow coverage-cfg
+#[cfg_attr(not(coverage), inline)]
+#[cfg_attr(coverage, inline(never))]
 fn native_path(path: &Path) -> Result<CString> {
     match CString::new(path.as_os_str().as_bytes()) {
         Ok(path) => Ok(path),
@@ -359,7 +361,8 @@ fn native_path(path: &Path) -> Result<CString> {
 }
 
 /// Pairs an error with a destination known to be unmodified.
-#[inline]
+#[cfg_attr(not(coverage), inline)]
+#[cfg_attr(coverage, inline(never))]
 fn unchanged_error(error: Error) -> (Error, LocalAtomicDestinationState, AtomicStagingState) {
     (
         error,

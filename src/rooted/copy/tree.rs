@@ -87,7 +87,7 @@ pub(super) fn copy_tree(
                     ));
                 }
                 active_sources.push(source.clone());
-                #[cfg(feature = "internal-test-support")]
+                #[cfg(feature = "test-support")]
                 if crate::local::test_support_enabled("rooted-copy-directory-read") {
                     return Err(error(
                         Stage::ReadSourceDirectory,

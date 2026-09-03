@@ -168,16 +168,6 @@ impl RootedDirectoryReader {
     }
 }
 
-/// Lists immediate children of the opened root.
-///
-/// # Errors
-///
-/// Returns an I/O error when enumeration or child inspection fails.
-#[inline(always)]
-pub(crate) fn read_root_directory(root: &File, diagnostic_root: &Path) -> Result<Vec<(OsString, File)>> {
-    read_directory_handle(root, diagnostic_root)
-}
-
 /// Opens a lazy reader for immediate children of the opened root.
 ///
 /// Returns an I/O error when the root handle cannot be duplicated.
@@ -316,7 +306,9 @@ pub(crate) fn remove_rooted_entry(
 /// # Errors
 ///
 /// Returns an I/O error when the entry cannot be opened or deleted.
-#[inline]
+// qubit-style: allow coverage-cfg
+#[cfg_attr(not(coverage), inline)]
+#[cfg_attr(coverage, inline(never))]
 fn delete_rooted_entry(root: &File, path: &LocalRelativePath) -> Result<()> {
     let entry = open_entry_no_follow(root, path, DELETE | FILE_READ_ATTRIBUTES | SYNCHRONIZE, FILE_OPEN, 0)?;
     delete_open_entry(&entry)

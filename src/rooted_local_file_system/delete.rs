@@ -155,7 +155,7 @@ fn remove_rooted_directory_tree(root: &crate::rooted::Root, path: &crate::local:
 
 /// Injects the deterministic Rooted recursive-delete contract-test fault.
 fn maybe_fail_rooted_delete(path: &crate::local::LocalRelativePath, removed_any: bool) -> LocalResult<()> {
-    #[cfg(feature = "internal-test-support")]
+    #[cfg(feature = "test-support")]
     if crate::local::take_test_support_on_nth("rooted-delete-directory-entry-second", 2) {
         return Err(rooted_delete_entry_error(
             path,

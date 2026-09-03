@@ -6,6 +6,7 @@
 //    Licensed under the Apache License, Version 2.0.
 // =============================================================================
 //! Structured successful temporary-resource persistence outcomes.
+// qubit-style: allow coverage-cfg
 
 use std::path::Path;
 use std::path::PathBuf;
@@ -50,35 +51,40 @@ impl LocalPersistOutcome {
 
     /// Returns the namespace-absolute published path.
     #[must_use]
-    #[inline(always)]
+    #[cfg_attr(not(coverage), inline(always))]
+    #[cfg_attr(coverage, inline(never))]
     pub fn path(&self) -> &Path {
         &self.path
     }
 
     /// Returns the native publication method.
     #[must_use = "the persistence method should be inspected"]
-    #[inline]
+    #[cfg_attr(not(coverage), inline)]
+    #[cfg_attr(coverage, inline(never))]
     pub const fn method(&self) -> LocalPersistMethod {
         self.method
     }
 
     /// Reports whether publication was atomic.
     #[must_use]
-    #[inline]
+    #[cfg_attr(not(coverage), inline)]
+    #[cfg_attr(coverage, inline(never))]
     pub const fn atomic(&self) -> bool {
         self.atomic
     }
 
     /// Reports whether persistence durability was synchronized.
     #[must_use]
-    #[inline]
+    #[cfg_attr(not(coverage), inline)]
+    #[cfg_attr(coverage, inline(never))]
     pub const fn durable(&self) -> bool {
         self.durable
     }
 
     /// Returns the cleanup state achieved after publication.
     #[must_use = "the sandbox cleanup state should be inspected"]
-    #[inline]
+    #[cfg_attr(not(coverage), inline)]
+    #[cfg_attr(coverage, inline(never))]
     pub const fn cleanup_state(&self) -> LocalPersistCleanupState {
         if self.cleanup_error.is_some() {
             LocalPersistCleanupState::ResidualSandbox
@@ -89,14 +95,16 @@ impl LocalPersistOutcome {
 
     /// Returns the cleanup error retained after successful publication.
     #[must_use]
-    #[inline]
+    #[cfg_attr(not(coverage), inline)]
+    #[cfg_attr(coverage, inline(never))]
     pub const fn cleanup_error(&self) -> Option<&LocalFileError> {
         self.cleanup_error.as_ref()
     }
 
     /// Returns the published path and any retained cleanup error.
     #[must_use]
-    #[inline(always)]
+    #[cfg_attr(not(coverage), inline(always))]
+    #[cfg_attr(coverage, inline(never))]
     pub fn into_parts(self) -> (PathBuf, Option<LocalFileError>) {
         (self.path, self.cleanup_error)
     }

@@ -110,7 +110,7 @@ pub(in crate::local) fn create_rooted_staged_file(parent: File, relative_parent:
     retry_rooted_staging_entry(
         None,
         || {
-            #[cfg(feature = "internal-test-support")]
+            #[cfg(feature = "test-support")]
             if super::test_support::is_enabled("rooted-staging-generate") {
                 return Err(Error::other("injected rooted staging filename failure"));
             }
@@ -121,7 +121,7 @@ pub(in crate::local) fn create_rooted_staged_file(parent: File, relative_parent:
             )
         },
         |name| {
-            #[cfg(feature = "internal-test-support")]
+            #[cfg(feature = "test-support")]
             if super::test_support::take("rooted-staging-collision") {
                 return Err(Error::new(
                     ErrorKind::AlreadyExists,

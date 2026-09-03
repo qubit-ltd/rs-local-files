@@ -19,7 +19,7 @@ use qubit_local_files::options::LocalWriteOptions;
 use qubit_local_files::outcome::LocalWriteFailureState;
 use qubit_local_files::outcome::LocalWriterState;
 use qubit_local_files::policy::LocalDurabilityRequirement;
-#[cfg(all(feature = "internal-test-support", unix))]
+#[cfg(all(feature = "test-support", unix))]
 use qubit_local_files::test_support::install_test_fault;
 use tempfile::tempdir;
 
@@ -462,7 +462,7 @@ fn test_local_file_writer_rooted_prepublication_failure_retains_writer() {
 }
 
 /// Runs one test-support-only host writer fault in an isolated child process.
-#[cfg(all(feature = "internal-test-support", unix))]
+#[cfg(all(feature = "test-support", unix))]
 fn run_host_writer_fault<F>(test_name: &str, fault: &str, action: F)
 where
     F: FnOnce(),
@@ -491,7 +491,7 @@ where
 
 /// Verifies host atomic writers preserve the documented outcome for native
 /// destination inspection, identity, and installation fault boundaries.
-#[cfg(all(feature = "internal-test-support", unix))]
+#[cfg(all(feature = "test-support", unix))]
 #[test]
 fn test_local_file_writer_exercises_atomic_install_fault_boundaries() {
     const TEST_NAME: &str = "test_local_file_writer_exercises_atomic_install_fault_boundaries";
@@ -546,7 +546,7 @@ fn test_local_file_writer_exercises_atomic_install_fault_boundaries() {
 
 /// Verifies a host staged replacement fault is surfaced as a not-published
 /// facade commit failure after native installation cleanup consumes staging.
-#[cfg(all(feature = "internal-test-support", unix))]
+#[cfg(all(feature = "test-support", unix))]
 #[test]
 fn test_local_file_writer_reports_injected_replacement_failure() {
     const TEST_NAME: &str = "test_local_file_writer_reports_injected_replacement_failure";
@@ -579,7 +579,7 @@ fn test_local_file_writer_reports_injected_replacement_failure() {
 
 /// Verifies an injected direct-append flush failure is classified as an
 /// indeterminate publication after bytes may have reached the destination.
-#[cfg(all(feature = "internal-test-support", unix))]
+#[cfg(all(feature = "test-support", unix))]
 #[test]
 fn test_local_file_writer_reports_injected_append_commit_flush_failure() {
     const TEST_NAME: &str = "test_local_file_writer_reports_injected_append_commit_flush_failure";
@@ -603,7 +603,7 @@ fn test_local_file_writer_reports_injected_append_commit_flush_failure() {
 
 /// Verifies an injected required append synchronization failure reports a
 /// published-but-not-durable destination state.
-#[cfg(all(feature = "internal-test-support", unix))]
+#[cfg(all(feature = "test-support", unix))]
 #[test]
 fn test_local_file_writer_reports_injected_required_append_sync_failure() {
     const TEST_NAME: &str = "test_local_file_writer_reports_injected_required_append_sync_failure";
@@ -630,7 +630,7 @@ fn test_local_file_writer_reports_injected_required_append_sync_failure() {
 
 /// Verifies an injected direct-append abort flush failure retains the abort
 /// operation context instead of claiming a terminal outcome.
-#[cfg(all(feature = "internal-test-support", unix))]
+#[cfg(all(feature = "test-support", unix))]
 #[test]
 fn test_local_file_writer_reports_injected_append_abort_flush_failure() {
     const TEST_NAME: &str = "test_local_file_writer_reports_injected_append_abort_flush_failure";

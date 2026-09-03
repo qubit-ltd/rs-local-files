@@ -35,7 +35,9 @@ impl LocalFileCommitError {
     /// - `error`: Structured local filesystem failure.
     /// - `state`: Established publication state.
     /// - `writer`: Retryable writer when publication has not started.
-    #[inline]
+    // qubit-style: allow coverage-cfg
+    #[cfg_attr(not(coverage), inline)]
+    #[cfg_attr(coverage, inline(never))]
     pub(crate) fn new(error: LocalFileError, state: LocalWriteFailureState, writer: Option<LocalFileWriter>) -> Self {
         Self {
             error,
@@ -46,13 +48,15 @@ impl LocalFileCommitError {
 
     /// Returns the structured local filesystem failure.
     #[must_use]
-    #[inline]
+    #[cfg_attr(not(coverage), inline)]
+    #[cfg_attr(coverage, inline(never))]
     pub const fn error(&self) -> &LocalFileError {
         &self.error
     }
 
     /// Returns the established publication state.
-    #[inline]
+    #[cfg_attr(not(coverage), inline)]
+    #[cfg_attr(coverage, inline(never))]
     pub const fn state(&self) -> LocalWriteFailureState {
         self.state
     }
@@ -60,7 +64,8 @@ impl LocalFileCommitError {
     /// Returns a retryable writer, or `None` after publication may have
     /// started.
     #[must_use]
-    #[inline]
+    #[cfg_attr(not(coverage), inline)]
+    #[cfg_attr(coverage, inline(never))]
     pub fn writer(&self) -> Option<&LocalFileWriter> {
         self.writer.as_deref()
     }
@@ -74,7 +79,8 @@ impl LocalFileCommitError {
 
 impl fmt::Display for LocalFileCommitError {
     /// Formats the structured failure and established publication state.
-    #[inline]
+    #[cfg_attr(not(coverage), inline)]
+    #[cfg_attr(coverage, inline(never))]
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(formatter, "{} ({:?})", self.error, self.state)
     }

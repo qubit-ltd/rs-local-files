@@ -18,7 +18,9 @@ use crate::LocalRenameFailureState;
 /// Wraps a pre-publication rename error.
 ///
 /// The returned failure proves that the destination namespace is unchanged.
-#[inline(always)]
+// qubit-style: allow coverage-cfg
+#[cfg_attr(not(coverage), inline(always))]
+#[cfg_attr(coverage, inline(never))]
 pub(crate) fn rename_failure_unchanged(error: LocalFileError) -> LocalRenameFailure {
     LocalRenameFailure::new(error, LocalRenameFailureState::Unchanged)
 }
@@ -27,7 +29,8 @@ pub(crate) fn rename_failure_unchanged(error: LocalFileError) -> LocalRenameFail
 ///
 /// The returned failure records that the destination was renamed before the
 /// subsequent error occurred.
-#[inline]
+#[cfg_attr(not(coverage), inline)]
+#[cfg_attr(coverage, inline(never))]
 pub(crate) fn rename_failure_renamed(error: LocalFileError) -> LocalRenameFailure {
     LocalRenameFailure::new(error, LocalRenameFailureState::Renamed)
 }
@@ -44,7 +47,8 @@ pub(crate) fn rename_failure_renamed(error: LocalFileError) -> LocalRenameFailur
 /// # Returns
 ///
 /// A typed rename failure with the strongest proven publication state.
-#[inline]
+#[cfg_attr(not(coverage), inline)]
+#[cfg_attr(coverage, inline(never))]
 pub(crate) fn rename_failure_after_native_attempt(
     source: &Path,
     target: &Path,

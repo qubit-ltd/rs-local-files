@@ -28,7 +28,9 @@ impl RootedParentMode {
     ///
     /// `true` for either creation mode; otherwise, `false`.
     #[must_use]
-    #[inline(always)]
+    // qubit-style: allow coverage-cfg
+    #[cfg_attr(not(coverage), inline(always))]
+    #[cfg_attr(coverage, inline(never))]
     pub(in crate::local) const fn creates_missing(self) -> bool {
         matches!(self, Self::CreateMissing | Self::CreateMissingAndTrackSync)
     }
@@ -39,7 +41,8 @@ impl RootedParentMode {
     ///
     /// `true` only for creation with synchronization tracking.
     #[must_use]
-    #[inline(always)]
+    #[cfg_attr(not(coverage), inline(always))]
+    #[cfg_attr(coverage, inline(never))]
     pub(in crate::local) const fn tracks_sync(self) -> bool {
         matches!(self, Self::CreateMissingAndTrackSync)
     }

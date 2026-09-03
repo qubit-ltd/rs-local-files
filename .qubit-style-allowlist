@@ -1,2 +1,108 @@
 multiple-public-types | src/rooted_local_file_system.rs | Rooted implementation and private resolved-path carrier share one module for policy dispatch
 multiple-public-types | src/authority/authority_path.rs | HostPath is the Host-specific variant payload sealed inside AuthorityPath
+coverage-cfg | src/capability/local_file_system_capabilities.rs | Preserve coverage visibility for independently observable capability queries.
+coverage-cfg | src/local_file_system/configuration.rs | Preserve coverage visibility for public instance configuration accessors.
+coverage-cfg | src/error/local_file_error.rs | Preserve coverage visibility for structured error accessors and conversions.
+coverage-cfg | src/temp/local_temp_directory.rs | Preserve coverage visibility for temporary-directory lifecycle accessors.
+coverage-cfg | src/temp/local_temp_file.rs | Preserve coverage visibility for temporary-file lifecycle accessors.
+coverage-cfg | src/outcome/local_copy_failure.rs | Preserve coverage visibility for typed copy-failure recovery accessors.
+coverage-cfg | src/outcome/local_copy_outcome.rs | Preserve coverage visibility for copy outcome accessors.
+coverage-cfg | src/outcome/local_persist_outcome.rs | Preserve coverage visibility for persistence outcome accessors.
+coverage-cfg | src/outcome/local_rename_failure.rs | Preserve coverage visibility for rename failure accessors.
+coverage-cfg | src/path/local_file_names.rs | Preserve coverage visibility for native filename validation helpers.
+coverage-cfg | src/path/local_paths.rs | Preserve coverage visibility for scope-aware path utilities.
+coverage-cfg | src/outcome/local_rename_outcome.rs | Preserve coverage visibility for rename outcome accessors.
+coverage-cfg | src/local/local_atomic_write_options.rs | Preserve coverage visibility for atomic-write option accessors.
+coverage-cfg | src/temp/internal/temp_parent.rs | Coverage instrumentation keeps inline behavior measurable without source exemptions.
+coverage-cfg | src/local/local_atomic_write_error.rs | Coverage instrumentation keeps inline behavior measurable without source exemptions.
+coverage-cfg | src/local/internal/atomic_namespace_race.rs | Coverage instrumentation keeps inline behavior measurable without source exemptions.
+coverage-cfg | src/local/internal/atomic_metadata/linux_android.rs | Coverage instrumentation keeps inline behavior measurable without source exemptions.
+coverage-cfg | src/local/internal/atomic_metadata/preservation.rs | Coverage instrumentation keeps inline behavior measurable without source exemptions.
+coverage-cfg | src/local/internal/atomic_metadata/freebsd.rs | Coverage instrumentation keeps inline behavior measurable without source exemptions.
+coverage-cfg | src/local/internal/host_local_file_system.rs | Coverage instrumentation keeps inline behavior measurable without source exemptions.
+coverage-cfg | src/local/internal/atomic_file_install.rs | Coverage instrumentation keeps inline behavior measurable without source exemptions.
+coverage-cfg | src/local/internal/rooted_parent_mode.rs | Coverage instrumentation keeps inline behavior measurable without source exemptions.
+coverage-cfg | src/local/internal/rooted_staged_file.rs | Coverage instrumentation keeps inline behavior measurable without source exemptions.
+coverage-cfg | src/local/internal/windows_rooted_staged_file.rs | Coverage instrumentation keeps inline behavior measurable without source exemptions.
+coverage-cfg | src/local/internal/rooted_parent.rs | Coverage instrumentation keeps inline behavior measurable without source exemptions.
+coverage-cfg | src/local/internal/file_move.rs | Coverage instrumentation keeps inline behavior measurable without source exemptions.
+coverage-cfg | src/local/internal/copy_policy.rs | Coverage instrumentation keeps inline behavior measurable without source exemptions.
+coverage-cfg | src/local/internal/file_name_generation.rs | Coverage instrumentation keeps inline behavior measurable without source exemptions.
+coverage-cfg | src/local/internal/rooted_io_result.rs | Coverage instrumentation keeps inline behavior measurable without source exemptions.
+coverage-cfg | src/local/internal/unix_nonblocking.rs | Coverage instrumentation keeps inline behavior measurable without source exemptions.
+coverage-cfg | src/local/internal/test_support.rs | Coverage instrumentation keeps inline behavior measurable without source exemptions.
+coverage-cfg | src/local/internal/copy_dir/error.rs | Coverage instrumentation keeps inline behavior measurable without source exemptions.
+coverage-cfg | src/local/internal/copy_dir/opened_copy_source.rs | Coverage instrumentation keeps inline behavior measurable without source exemptions.
+coverage-cfg | src/local/internal/copy_dir/namespace_race.rs | Coverage instrumentation keeps inline behavior measurable without source exemptions.
+coverage-cfg | src/local/local_copy_dir_stats.rs | Coverage instrumentation keeps inline behavior measurable without source exemptions.
+coverage-cfg | src/local/internal/copy_dir/statistics_overflow.rs | Coverage instrumentation keeps inline behavior measurable without source exemptions.
+coverage-cfg | src/local/local_atomic_writer.rs | Coverage instrumentation keeps inline behavior measurable without source exemptions.
+coverage-cfg | src/local/internal/copy_dir/destination.rs | Coverage instrumentation keeps inline behavior measurable without source exemptions.
+coverage-cfg | src/local/local_atomic_commit_error.rs | Coverage instrumentation keeps inline behavior measurable without source exemptions.
+coverage-cfg | src/local/internal/opened_atomic_destination.rs | Coverage instrumentation keeps inline behavior measurable without source exemptions.
+coverage-cfg | src/local/internal/temp_entry.rs | Coverage instrumentation keeps inline behavior measurable without source exemptions.
+coverage-cfg | src/local/internal/file_io.rs | Coverage instrumentation keeps inline behavior measurable without source exemptions.
+coverage-cfg | src/local/internal/windows_rooted/directory.rs | Coverage instrumentation keeps inline behavior measurable without source exemptions.
+coverage-cfg | src/local/internal/windows_rooted/namespace_mutation.rs | Coverage instrumentation keeps inline behavior measurable without source exemptions.
+coverage-cfg | src/local/internal/file_name_validation.rs | Coverage instrumentation keeps inline behavior measurable without source exemptions.
+coverage-cfg | src/local/internal/windows_rooted/handle.rs | Coverage instrumentation keeps inline behavior measurable without source exemptions.
+coverage-cfg | src/local/internal/directory_identity.rs | Coverage instrumentation keeps inline behavior measurable without source exemptions.
+coverage-cfg | src/local/internal/unix_stat.rs | Coverage instrumentation keeps inline behavior measurable without source exemptions.
+coverage-cfg | src/local/local_copy_dir_error.rs | Coverage instrumentation keeps inline behavior measurable without source exemptions.
+coverage-cfg | src/local/internal/rooted_namespace_io.rs | Coverage instrumentation keeps inline behavior measurable without source exemptions.
+coverage-cfg | src/local/local_copy_dir_options.rs | Coverage instrumentation keeps inline behavior measurable without source exemptions.
+coverage-cfg | src/rooted/copy/destination.rs | Coverage instrumentation keeps inline behavior measurable without source exemptions.
+coverage-cfg | src/local/local_root_atomic_writer_support.rs | Coverage instrumentation keeps inline behavior measurable without source exemptions.
+coverage-cfg | src/local/internal/publication_state/rename_failure.rs | Coverage instrumentation keeps inline behavior measurable without source exemptions.
+coverage-cfg | src/local/local_persist_error.rs | Coverage instrumentation keeps inline behavior measurable without source exemptions.
+coverage-cfg | src/local/internal/publication_state/durability.rs | Coverage instrumentation keeps inline behavior measurable without source exemptions.
+coverage-cfg | src/local/internal/staged_file.rs | Coverage instrumentation keeps inline behavior measurable without source exemptions.
+coverage-cfg | src/local/local_root_atomic_writer.rs | Coverage instrumentation keeps inline behavior measurable without source exemptions.
+coverage-cfg | src/rooted/root.rs | Coverage instrumentation keeps inline behavior measurable without source exemptions.
+coverage-cfg | src/local/internal/publication_state/copy_failure.rs | Coverage instrumentation keeps inline behavior measurable without source exemptions.
+coverage-cfg | src/rooted/entry.rs | Coverage instrumentation keeps inline behavior measurable without source exemptions.
+coverage-cfg | src/local/internal/rooted_atomic_namespace_race.rs | Coverage instrumentation keeps inline behavior measurable without source exemptions.
+coverage-cfg | src/local/internal/path_io_error.rs | Coverage instrumentation keeps inline behavior measurable without source exemptions.
+coverage-cfg | src/rooted/metadata.rs | Coverage instrumentation keeps inline behavior measurable without source exemptions.
+coverage-cfg | src/local/local_relative_path.rs | Coverage instrumentation keeps inline behavior measurable without source exemptions.
+coverage-cfg | src/rooted/permissions.rs | Coverage instrumentation keeps inline behavior measurable without source exemptions.
+coverage-cfg | src/local/internal/host_local_file_system/copy.rs | Coverage instrumentation keeps inline behavior measurable without source exemptions.
+coverage-cfg | src/local/internal/host_local_file_system/temp.rs | Coverage instrumentation keeps inline behavior measurable without source exemptions.
+coverage-cfg | src/local/internal/host_local_file_system/rename.rs | Coverage instrumentation keeps inline behavior measurable without source exemptions.
+coverage-cfg | src/local/internal/rooted_file_io.rs | Coverage instrumentation keeps inline behavior measurable without source exemptions.
+coverage-cfg | src/local/internal/copy_budget.rs | Coverage instrumentation keeps inline behavior measurable without source exemptions.
+coverage-cfg | src/error/local_file_error_source.rs | Coverage instrumentation keeps inline behavior measurable without source exemptions.
+coverage-cfg | src/error/local_resource_limit_error.rs | Coverage instrumentation keeps inline behavior measurable without source exemptions.
+coverage-cfg | src/file_system/local_current_directory.rs | Coverage instrumentation keeps inline behavior measurable without source exemptions.
+coverage-cfg | src/rooted_local_file_system.rs | Coverage instrumentation keeps inline behavior measurable without source exemptions.
+coverage-cfg | src/rooted_local_file_system/path_support.rs | Coverage instrumentation keeps inline behavior measurable without source exemptions.
+coverage-cfg | src/local_file_system/capability.rs | Coverage instrumentation keeps inline behavior measurable without source exemptions.
+coverage-cfg | src/local_file_reader.rs | Coverage instrumentation keeps inline behavior measurable without source exemptions.
+coverage-cfg | src/read/open_options.rs | Coverage instrumentation keeps inline behavior measurable without source exemptions.
+coverage-cfg | src/local_file_metadata.rs | Coverage instrumentation keeps inline behavior measurable without source exemptions.
+coverage-cfg | src/policy/local_symlink_policy.rs | Coverage instrumentation keeps inline behavior measurable without source exemptions.
+coverage-cfg | src/local_file_permissions.rs | Coverage instrumentation keeps inline behavior measurable without source exemptions.
+coverage-cfg | src/writer/internal/local_staged_commit_error.rs | Coverage instrumentation keeps inline behavior measurable without source exemptions.
+coverage-cfg | src/outcome/local_create_directory_outcome.rs | Coverage instrumentation keeps inline behavior measurable without source exemptions.
+coverage-cfg | src/path/local_path_resolver.rs | Coverage instrumentation keeps inline behavior measurable without source exemptions.
+coverage-cfg | src/path/local_namespace_path.rs | Coverage instrumentation keeps inline behavior measurable without source exemptions.
+coverage-cfg | src/path/local_path_codec.rs | Coverage instrumentation keeps inline behavior measurable without source exemptions.
+coverage-cfg | src/outcome/local_delete_outcome.rs | Coverage instrumentation keeps inline behavior measurable without source exemptions.
+coverage-cfg | src/writer/local_file_commit_error.rs | Coverage instrumentation keeps inline behavior measurable without source exemptions.
+coverage-cfg | src/outcome/local_copy_stats.rs | Coverage instrumentation keeps inline behavior measurable without source exemptions.
+coverage-cfg | src/writer/local_file_writer.rs | Coverage instrumentation keeps inline behavior measurable without source exemptions.
+coverage-cfg | src/writer/local_write_outcome.rs | Coverage instrumentation keeps inline behavior measurable without source exemptions.
+coverage-cfg | src/capability/local_file_system_limits.rs | Coverage instrumentation keeps inline behavior measurable without source exemptions.
+coverage-cfg | src/walk/local_directory_walker.rs | Coverage instrumentation keeps inline behavior measurable without source exemptions.
+coverage-cfg | src/capability/filesystem_probe.rs | Coverage instrumentation keeps inline behavior measurable without source exemptions.
+coverage-cfg | src/walk/local_directory_entry.rs | Coverage instrumentation keeps inline behavior measurable without source exemptions.
+coverage-cfg | src/capability/local_file_system_space.rs | Coverage instrumentation keeps inline behavior measurable without source exemptions.
+coverage-cfg | src/options/local_rename_options.rs | Coverage instrumentation keeps inline behavior measurable without source exemptions.
+coverage-cfg | src/options/local_list_options.rs | Coverage instrumentation keeps inline behavior measurable without source exemptions.
+coverage-cfg | src/options/local_read_options.rs | Coverage instrumentation keeps inline behavior measurable without source exemptions.
+coverage-cfg | src/options/local_write_options.rs | Coverage instrumentation keeps inline behavior measurable without source exemptions.
+coverage-cfg | src/options/local_copy_options.rs | Coverage instrumentation keeps inline behavior measurable without source exemptions.
+coverage-cfg | src/options/local_temp_directory_options.rs | Coverage instrumentation keeps inline behavior measurable without source exemptions.
+coverage-cfg | src/options/local_temp_file_options.rs | Coverage instrumentation keeps inline behavior measurable without source exemptions.
+coverage-cfg | src/options/local_delete_options.rs | Coverage instrumentation keeps inline behavior measurable without source exemptions.
+coverage-cfg | src/options/local_create_directory_options.rs | Coverage instrumentation keeps inline behavior measurable without source exemptions.

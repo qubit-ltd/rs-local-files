@@ -1340,12 +1340,18 @@ path codec kind 或 cleanup error。
 - rooted operations；
 - atomic rename；
 - atomic replace；
-- atomic no-replace temp persist；
+- 可以尝试 atomic no-replace temp persist；
 - durable rename；
 - durable file copy。
 - durable writer publication。
 
+临时资源持久化的查询方法是 `can_attempt_atomic_temp_persist()`。它只表示当前 build/target
+实现了原子尝试协议，不承诺任意 source/target 都能原子完成；是否位于同一 filesystem、
+namespace policy、mount 行为和运行时竞争仍会决定每次调用的实际 outcome。已弃用的
+`supports_atomic_temp_persist()` 仅用于源码兼容，语义完全相同，不提供更强保证。
+
 这些 flag 描述库实现能力，不代表任意 runtime mount、network filesystem 或硬件一定支持。
+调用方必须同时检查 capability snapshot 和实际操作返回的 typed outcome。
 路径限制的每个数值必须结合 `LocalPathLengthUnit` 解释：Unix 为 `Bytes`，Windows 为
 `Utf16CodeUnits`；无法证明的整路径上限保持 `Unknown`，不得将 UTF-16 限制换算为 UTF-8 byte。
 
@@ -1585,8 +1591,10 @@ LocalFileSystem facade
 公共 facade 不包含平台 `cfg` 状态机。Unix/Windows module 只实现 primitive，不复制 copy、
 writer、persist 等业务状态机。
 
-Fault injection 只在明确 test-support feature 下可用，不属于默认应用 API。测试 hook 不能改变
-production 对象的正常 state model。
+确定性 fault injection 只通过唯一的 `test-support` feature 提供；该 feature 默认关闭，不属于
+应用 API。私有 contract tests 位于 `src/tests`，只在 crate 自身 test build 中编译。项目不再
+提供第二个 public “internal test” feature，也不公开 re-export 私有实现契约。测试 hook 不能
+改变 production 对象的正常 state model。
 
 ## 26. 验证策略
 
@@ -1658,6 +1666,12 @@ production 对象的正常 state model。
 - `qubit-fs-local` 全特性与 provider contract tests；
 - `qubit-mime` 临时文件集成测试；
 - README 和用户指南示例作为编译测试。
+
+Host/Rooted lifecycle fuzz targets 必须使用进程级唯一 sandbox、有限 collision retry 和 RAII
+cleanup，不依赖机器上的 ambient path。定时且可手动触发的 downstream compatibility workflow
+必须把当前 revision 与完整本地 path-dependency closure 一起 checkout，并测试
+`qubit-fs-local` 和 `qubit-mime`。项目 coverage 配置不得豁免整个文件；状态机分支应通过公开
+行为、crate-private contract 或窄范围确定性 fault injection 覆盖。
 
 测试必须验证可观察行为和真实操作结果，不能只验证字段 getter 已保存某个值。
 

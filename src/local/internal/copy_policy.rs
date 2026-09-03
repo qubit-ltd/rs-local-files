@@ -15,7 +15,9 @@ use crate::LocalCopyTypeConflictPolicy;
 use crate::LocalDurabilityRequirement;
 
 /// Reports whether the configured source mode rejects the observed kind.
-#[inline]
+// qubit-style: allow coverage-cfg
+#[cfg_attr(not(coverage), inline)]
+#[cfg_attr(coverage, inline(never))]
 pub(crate) fn copy_source_mode_mismatch(source_is_directory: bool, source_mode: LocalCopySourceMode) -> bool {
     matches!(
         (source_is_directory, source_mode),
@@ -24,7 +26,8 @@ pub(crate) fn copy_source_mode_mismatch(source_is_directory: bool, source_mode: 
 }
 
 /// Reports whether a directory copy asks for an unsupported guarantee.
-#[inline]
+#[cfg_attr(not(coverage), inline)]
+#[cfg_attr(coverage, inline(never))]
 pub(crate) fn copy_directory_guarantee_unavailable(
     source_is_directory: bool,
     atomicity: LocalAtomicityRequirement,
@@ -35,7 +38,8 @@ pub(crate) fn copy_directory_guarantee_unavailable(
 }
 
 /// Reports whether replacing a directory would violate required atomicity.
-#[inline]
+#[cfg_attr(not(coverage), inline)]
+#[cfg_attr(coverage, inline(never))]
 pub(crate) fn copy_file_replace_requires_atomicity(
     source_is_directory: bool,
     atomicity: LocalAtomicityRequirement,

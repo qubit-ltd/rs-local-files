@@ -34,7 +34,6 @@ pub struct LocalAtomicCommitError<T> {
     /// Writer retained after a recoverable pre-installation failure.
     writer: Option<Box<T>>,
 }
-
 #[allow(dead_code)]
 impl<T> LocalAtomicCommitError<T> {
     /// Creates an atomic-commit error with an optional retained writer.
@@ -47,7 +46,9 @@ impl<T> LocalAtomicCommitError<T> {
     /// # Returns
     ///
     /// A commit error preserving the failure and optional writer.
-    #[inline]
+    // qubit-style: allow coverage-cfg
+    #[cfg_attr(not(coverage), inline)]
+    #[cfg_attr(coverage, inline(never))]
     pub fn new(error: LocalAtomicWriteError, writer: Option<T>) -> Self {
         Self {
             error,
@@ -110,7 +111,8 @@ impl<T> LocalAtomicCommitError<T> {
     ///
     /// The finalized writer failure when recovery remained available, or the
     /// original terminal failure when no writer was retained.
-    #[inline]
+    #[cfg_attr(not(coverage), inline)]
+    #[cfg_attr(coverage, inline(never))]
     pub fn into_final_error_with<F>(self, finalize_writer: F) -> LocalAtomicWriteError
     where
         F: FnOnce(T, LocalAtomicWriteError) -> LocalAtomicWriteError,
@@ -139,7 +141,8 @@ where
     T: Debug,
 {
     /// Returns the structured atomic-write failure.
-    #[inline(always)]
+    #[cfg_attr(not(coverage), inline(always))]
+    #[cfg_attr(coverage, inline(never))]
     fn source(&self) -> Option<&(dyn Error + 'static)> {
         Some(&self.error)
     }

@@ -39,7 +39,9 @@ impl LocalCurrentDirectory {
     }
 
     /// Returns the retained virtual PWD, or `None` for process-backed state.
-    #[inline]
+    // qubit-style: allow coverage-cfg
+    #[cfg_attr(not(coverage), inline)]
+    #[cfg_attr(coverage, inline(never))]
     pub(crate) fn virtual_path(&self) -> Option<&Path> {
         match self {
             Self::Process => None,

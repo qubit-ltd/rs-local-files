@@ -25,8 +25,7 @@ mod local_write_publication_method;
 
 pub use local_copy_failure::LocalCopyFailure;
 pub use local_copy_failure::LocalCopyResult;
-#[cfg(feature = "internal-test-support")]
-#[cfg(windows)]
+#[cfg(all(test, windows))]
 pub(crate) use local_copy_failure::copy_failure_state;
 pub use local_copy_failure_state::LocalCopyFailureState;
 pub use local_copy_method::LocalCopyMethod;

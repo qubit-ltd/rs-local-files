@@ -75,7 +75,9 @@ impl LocalPathCodec {
 ///
 /// A compose-path error retaining the codec failure as its typed source.
 #[must_use]
-#[inline]
+// qubit-style: allow coverage-cfg
+#[cfg_attr(not(coverage), inline)]
+#[cfg_attr(coverage, inline(never))]
 fn path_codec_error(error: LocalPathCodecError) -> LocalFileError {
     LocalFileError::from_path_codec(LocalFileOperation::ComposePath, None, error)
 }
@@ -110,7 +112,8 @@ mod platform_codec {
     }
 
     /// Converts one ASCII hexadecimal digit to its nibble value.
-    #[inline]
+    #[cfg_attr(not(coverage), inline)]
+    #[cfg_attr(coverage, inline(never))]
     fn uppercase_hex(byte: u8) -> Option<u8> {
         match byte {
             b'0'..=b'9' => Some(byte - b'0'),
@@ -121,7 +124,8 @@ mod platform_codec {
     }
 
     /// Appends an uppercase percent escape for one native byte.
-    #[inline]
+    #[cfg_attr(not(coverage), inline)]
+    #[cfg_attr(coverage, inline(never))]
     fn push_escaped_byte(text: &mut String, byte: u8) {
         const HEX: &[u8; 16] = b"0123456789ABCDEF";
         text.push('%');
@@ -293,7 +297,8 @@ mod platform_codec {
 
         /// Encodes one unpaired UTF-16 surrogate as its three WTF-8 bytes.
         #[must_use]
-        #[inline]
+        #[cfg_attr(not(coverage), inline)]
+        #[cfg_attr(coverage, inline(never))]
         fn wtf8_surrogate_bytes(surrogate: u16) -> [u8; 3] {
             [
                 0xE0 | ((surrogate >> 12) as u8),
@@ -312,13 +317,15 @@ mod platform_codec {
         use crate::LocalPathCodecError;
 
         /// Reports that this platform has no supported reversible codec.
-        #[inline(always)]
+        #[cfg_attr(not(coverage), inline(always))]
+        #[cfg_attr(coverage, inline(never))]
         pub(crate) fn decode_canonical_text(_text: &str) -> Result<OsString, LocalPathCodecError> {
             Err(LocalPathCodecError::UnsupportedNativeEncoding)
         }
 
         /// Reports that this platform has no supported reversible codec.
-        #[inline(always)]
+        #[cfg_attr(not(coverage), inline(always))]
+        #[cfg_attr(coverage, inline(never))]
         pub(crate) fn encode_native_text<'a>(_native: &'a OsStr) -> Result<Cow<'a, str>, LocalPathCodecError> {
             Err(LocalPathCodecError::UnsupportedNativeEncoding)
         }

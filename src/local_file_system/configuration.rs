@@ -7,6 +7,7 @@
 // =============================================================================
 //! Stateful Host or Rooted local filesystem service.
 // qubit-style: allow source-test-pair
+// qubit-style: allow coverage-cfg
 
 #[cfg(feature = "test-support")]
 use super::Arc;
@@ -39,7 +40,13 @@ use super::with_current_directory;
 
 impl LocalFileSystem {
     /// Returns the namespace kind interpreted by this instance.
-    #[inline]
+    ///
+    /// # Returns
+    ///
+    /// `Host` for process-wide native paths or `Rooted` for paths interpreted
+    /// below a retained directory authority.
+    #[cfg_attr(not(coverage), inline)]
+    #[cfg_attr(coverage, inline(never))]
     pub fn scope(&self) -> LocalFileSystemScope {
         match &self.core.namespace {
             LocalNamespace::Host => LocalFileSystemScope::Host,
@@ -51,7 +58,12 @@ impl LocalFileSystem {
     ///
     /// Host queries the native process state on every call and returns an error
     /// when that state is unavailable. Rooted returns an owned virtual
-    /// snapshot.
+    /// snapshot. The returned path is owned and can outlive this filesystem.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`LocalFileError`] only when a Host instance cannot read the
+    /// process working directory.
     pub fn current_directory(&self) -> LocalResult<std::path::PathBuf> {
         self.current_directory
             .snapshot(LocalFileOperation::CurrentDirectory, None)
@@ -61,6 +73,16 @@ impl LocalFileSystem {
     ///
     /// Host delegates directly to the native process operation. Rooted resolves
     /// and validates the requested directory before changing instance state.
+    ///
+    /// # Parameters
+    ///
+    /// - `path`: Host-native path or Rooted virtual path to select.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`LocalFileError`] when the path cannot be resolved, escapes a
+    /// Rooted authority, violates the symlink policy, or is not a directory.
+    /// On error, a Rooted instance retains its previous virtual PWD.
     pub fn set_current_directory(&mut self, path: &Path) -> LocalResult<()> {
         if self.scope() == LocalFileSystemScope::Host {
             return std::env::set_current_dir(path).map_err(|source| {
@@ -90,14 +112,24 @@ impl LocalFileSystem {
         Ok(())
     }
 
-    /// Returns the default symlink policy inherited by operations.
-    #[cfg_attr(feature = "test-support", inline(never))]
-
+    /// Returns the default symlink policy inherited by operations that do not
+    /// supply an explicit policy.
+    #[cfg_attr(not(coverage), inline)]
+    #[cfg_attr(coverage, inline(never))]
     pub const fn symlink_policy(&self) -> LocalSymlinkPolicy {
         self.symlink_policy
     }
 
     /// Changes this instance's default symlink policy transactionally.
+    ///
+    /// # Parameters
+    ///
+    /// - `policy`: Policy inherited by subsequent operations.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`LocalFileError`] when the policy is invalid for the current
+    /// scope. The previous policy remains installed on error.
     pub fn set_symlink_policy(&mut self, policy: LocalSymlinkPolicy) -> LocalResult<()> {
         validate_scope_symlink_policy(self.scope(), policy, LocalFileOperation::Configure, None)
             .map_err(|error| with_current_directory(error, self.current_directory.virtual_path()))?;
@@ -106,9 +138,13 @@ impl LocalFileSystem {
     }
 
     /// Returns the construction-time Rooted path used only for diagnostics.
-    #[must_use]
-    #[cfg_attr(feature = "test-support", inline(never))]
-
+    ///
+    /// # Returns
+    ///
+    /// `Some` for a Rooted filesystem and `None` for Host. The path is not an
+    /// authority and may become stale after a native rename or replacement.
+    #[cfg_attr(not(coverage), inline)]
+    #[cfg_attr(coverage, inline(never))]
     pub fn diagnostic_root(&self) -> Option<&Path> {
         match &self.core.namespace {
             LocalNamespace::Host => None,
@@ -116,40 +152,55 @@ impl LocalFileSystem {
         }
     }
 
-    /// Returns the default reader options.
-    #[cfg_attr(feature = "test-support", inline(never))]
-
+    /// Returns the reader options inherited by calls without explicit options.
+    #[cfg_attr(not(coverage), inline)]
+    #[cfg_attr(coverage, inline(never))]
     pub const fn default_read_options(&self) -> &LocalReadOptions {
         &self.defaults.read
     }
 
-    /// Replaces the default reader options.
+    /// Replaces the reader options inherited by subsequent calls.
+    ///
+    /// # Errors
+    ///
+    /// This setter is currently infallible; its `Result` keeps all
+    /// configuration setters uniform and allows future validation.
     pub fn set_default_read_options(&mut self, options: LocalReadOptions) -> LocalResult<()> {
         self.defaults.read = options;
         Ok(())
     }
 
-    /// Returns the default writer options.
-    #[cfg_attr(feature = "test-support", inline(never))]
-
+    /// Returns the writer options inherited by calls without explicit options.
+    #[cfg_attr(not(coverage), inline)]
+    #[cfg_attr(coverage, inline(never))]
     pub const fn default_write_options(&self) -> &LocalWriteOptions {
         &self.defaults.write
     }
 
-    /// Replaces the default writer options.
+    /// Replaces the writer options inherited by subsequent calls.
+    ///
+    /// # Errors
+    ///
+    /// This setter is currently infallible; its `Result` keeps all
+    /// configuration setters uniform and allows future validation.
     pub fn set_default_write_options(&mut self, options: LocalWriteOptions) -> LocalResult<()> {
         self.defaults.write = options;
         Ok(())
     }
 
-    /// Returns the default listing options.
-    #[cfg_attr(feature = "test-support", inline(never))]
-
+    /// Returns the listing options inherited by calls without explicit options.
+    #[cfg_attr(not(coverage), inline)]
+    #[cfg_attr(coverage, inline(never))]
     pub const fn default_list_options(&self) -> &LocalListOptions {
         &self.defaults.list
     }
 
     /// Replaces the default listing options after structural validation.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`LocalFileError`] when recursion, symlink, or resource-limit
+    /// settings are invalid for this scope; existing defaults remain unchanged.
     pub fn set_default_list_options(&mut self, options: LocalListOptions) -> LocalResult<()> {
         validate_list_options(self.scope(), self.symlink_policy, &options, None)
             .map_err(|error| with_current_directory(error, self.current_directory.virtual_path()))?;
@@ -157,14 +208,19 @@ impl LocalFileSystem {
         Ok(())
     }
 
-    /// Returns the default copy options.
-    #[cfg_attr(feature = "test-support", inline(never))]
-
+    /// Returns the copy options inherited by calls without explicit options.
+    #[cfg_attr(not(coverage), inline)]
+    #[cfg_attr(coverage, inline(never))]
     pub const fn default_copy_options(&self) -> &LocalCopyOptions {
         &self.defaults.copy
     }
 
     /// Replaces the default copy options after structural validation.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`LocalFileError`] when the copy, symlink, atomicity, or budget
+    /// combination is invalid; existing defaults remain unchanged.
     pub fn set_default_copy_options(&mut self, options: LocalCopyOptions) -> LocalResult<()> {
         validate_copy_options(self.scope(), self.symlink_policy, &options, None, None)
             .map_err(|error| with_current_directory(error, self.current_directory.virtual_path()))?;
@@ -172,53 +228,74 @@ impl LocalFileSystem {
         Ok(())
     }
 
-    /// Returns the default directory-creation options.
-    #[cfg_attr(feature = "test-support", inline(never))]
-
+    /// Returns the directory-creation options inherited by defaulted calls.
+    #[cfg_attr(not(coverage), inline)]
+    #[cfg_attr(coverage, inline(never))]
     pub const fn default_create_directory_options(&self) -> &LocalCreateDirectoryOptions {
         &self.defaults.create_directory
     }
 
     /// Replaces the default directory-creation options.
+    ///
+    /// # Errors
+    ///
+    /// This setter is currently infallible; its `Result` keeps all
+    /// configuration setters uniform and allows future validation.
     pub fn set_default_create_directory_options(&mut self, options: LocalCreateDirectoryOptions) -> LocalResult<()> {
         self.defaults.create_directory = options;
         Ok(())
     }
 
-    /// Returns the default deletion options.
-    #[cfg_attr(feature = "test-support", inline(never))]
-
+    /// Returns the deletion options inherited by calls without explicit
+    /// options.
+    #[cfg_attr(not(coverage), inline)]
+    #[cfg_attr(coverage, inline(never))]
     pub const fn default_delete_options(&self) -> &LocalDeleteOptions {
         &self.defaults.delete
     }
 
     /// Replaces the default deletion options.
+    ///
+    /// # Errors
+    ///
+    /// This setter is currently infallible; its `Result` keeps all
+    /// configuration setters uniform and allows future validation.
     pub fn set_default_delete_options(&mut self, options: LocalDeleteOptions) -> LocalResult<()> {
         self.defaults.delete = options;
         Ok(())
     }
 
-    /// Returns the default rename options.
-    #[cfg_attr(feature = "test-support", inline(never))]
-
+    /// Returns the rename options inherited by calls without explicit options.
+    #[cfg_attr(not(coverage), inline)]
+    #[cfg_attr(coverage, inline(never))]
     pub const fn default_rename_options(&self) -> &LocalRenameOptions {
         &self.defaults.rename
     }
 
     /// Replaces the default rename options.
+    ///
+    /// # Errors
+    ///
+    /// This setter is currently infallible; its `Result` keeps all
+    /// configuration setters uniform and allows future validation.
     pub fn set_default_rename_options(&mut self, options: LocalRenameOptions) -> LocalResult<()> {
         self.defaults.rename = options;
         Ok(())
     }
 
-    /// Returns the default temporary-file options.
-    #[cfg_attr(feature = "test-support", inline(never))]
-
+    /// Returns the temporary-file options inherited by defaulted calls.
+    #[cfg_attr(not(coverage), inline)]
+    #[cfg_attr(coverage, inline(never))]
     pub const fn default_temp_file_options(&self) -> &LocalTempFileOptions {
         &self.defaults.temp_file
     }
 
     /// Replaces the default temporary-file options after validation.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`LocalFileError`] when the attempt budget is zero; existing
+    /// defaults remain unchanged.
     pub fn set_default_temp_file_options(&mut self, options: LocalTempFileOptions) -> LocalResult<()> {
         validate_temp_attempts(options.max_attempts(), LocalFileOperation::Configure)
             .map_err(|error| with_current_directory(error, self.current_directory.virtual_path()))?;
@@ -226,14 +303,19 @@ impl LocalFileSystem {
         Ok(())
     }
 
-    /// Returns the default temporary-directory options.
-    #[cfg_attr(feature = "test-support", inline(never))]
-
+    /// Returns the temporary-directory options inherited by defaulted calls.
+    #[cfg_attr(not(coverage), inline)]
+    #[cfg_attr(coverage, inline(never))]
     pub const fn default_temp_directory_options(&self) -> &LocalTempDirectoryOptions {
         &self.defaults.temp_directory
     }
 
     /// Replaces the default temporary-directory options after validation.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`LocalFileError`] when the attempt budget is zero; existing
+    /// defaults remain unchanged.
     pub fn set_default_temp_directory_options(&mut self, options: LocalTempDirectoryOptions) -> LocalResult<()> {
         validate_temp_attempts(options.max_attempts(), LocalFileOperation::Configure)
             .map_err(|error| with_current_directory(error, self.current_directory.virtual_path()))?;
@@ -244,8 +326,8 @@ impl LocalFileSystem {
     /// Installs an instance-local fault plan in test-support builds.
     #[cfg(feature = "test-support")]
     #[doc(hidden)]
-    #[must_use]
-    #[inline]
+    #[cfg_attr(not(coverage), inline)]
+    #[cfg_attr(coverage, inline(never))]
     pub fn with_test_faults(mut self, test_faults: Option<crate::TestFaultPlan>) -> Self {
         self.core = Arc::new(LocalFileSystemCore {
             namespace: self.core.namespace.clone(),

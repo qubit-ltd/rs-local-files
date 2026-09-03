@@ -119,7 +119,7 @@ impl LocalFileSystem {
         let mut buffer = [0_u8; 8192];
         while result.len() < max_bytes {
             let read_len = (max_bytes - result.len()).min(buffer.len());
-            #[cfg(feature = "internal-test-support")]
+            #[cfg(feature = "test-support")]
             if crate::local::take_test_support("local-fs-read-prefix-read") {
                 let error = LocalFileError::from_io(
                     LocalFileOperation::Read,

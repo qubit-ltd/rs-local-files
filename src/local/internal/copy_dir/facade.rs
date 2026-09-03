@@ -81,7 +81,7 @@ fn copy_dir_all_with_scope(
 ) -> CopyDirResult<LocalCopyDirStats> {
     let mut stats = LocalCopyDirStats::default();
     let source_result = absolute_path(src);
-    #[cfg(feature = "internal-test-support")]
+    #[cfg(feature = "test-support")]
     let source_result = if crate::local::internal::test_support::is_enabled("copy-source-absolute") {
         Err(crate::local::test_fault_error())
     } else {
@@ -93,7 +93,7 @@ fn copy_dir_all_with_scope(
     } else {
         absolute_path(dst)
     };
-    #[cfg(feature = "internal-test-support")]
+    #[cfg(feature = "test-support")]
     let destination_result = if crate::local::internal::test_support::is_enabled("copy-destination-absolute") {
         Err(crate::local::test_fault_error())
     } else {

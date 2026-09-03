@@ -70,7 +70,9 @@ impl LocalRelativePath {
     ///
     /// The sole path state owned by this value.
     #[must_use]
-    #[inline(always)]
+    // qubit-style: allow coverage-cfg
+    #[cfg_attr(not(coverage), inline(always))]
+    #[cfg_attr(coverage, inline(never))]
     pub fn as_path(&self) -> &Path {
         &self.path
     }
@@ -89,7 +91,8 @@ impl LocalRelativePath {
     ///
     /// Returns [`ErrorKind::InvalidInput`] when `child` is empty, absolute,
     /// contains a non-normal component, or contains an embedded NUL value.
-    #[inline]
+    #[cfg_attr(not(coverage), inline)]
+    #[cfg_attr(coverage, inline(never))]
     pub fn join<P>(&self, child: P) -> Result<Self>
     where
         P: AsRef<Path>,
@@ -131,7 +134,8 @@ impl LocalRelativePath {
 /// # Returns
 ///
 /// An invalid-input error describing the lexical contract.
-#[inline]
+#[cfg_attr(not(coverage), inline)]
+#[cfg_attr(coverage, inline(never))]
 fn invalid_relative_path_error(path: &Path) -> Error {
     Error::new(
         ErrorKind::InvalidInput,
@@ -153,7 +157,8 @@ fn invalid_relative_path_error(path: &Path) -> Error {
 /// `true` when the path contains NUL; otherwise, `false`.
 #[cfg(unix)]
 #[must_use]
-#[inline]
+#[cfg_attr(not(coverage), inline)]
+#[cfg_attr(coverage, inline(never))]
 fn contains_nul(path: &Path) -> bool {
     use std::os::unix::ffi::OsStrExt;
 
@@ -171,7 +176,8 @@ fn contains_nul(path: &Path) -> bool {
 /// `true` when the path contains NUL; otherwise, `false`.
 #[cfg(windows)]
 #[must_use]
-#[inline]
+#[cfg_attr(not(coverage), inline)]
+#[cfg_attr(coverage, inline(never))]
 fn contains_nul(path: &Path) -> bool {
     use std::os::windows::ffi::OsStrExt;
 
@@ -189,7 +195,8 @@ fn contains_nul(path: &Path) -> bool {
 /// `true` when the path contains NUL; otherwise, `false`.
 #[cfg(not(any(unix, windows)))]
 #[must_use]
-#[inline]
+#[cfg_attr(not(coverage), inline)]
+#[cfg_attr(coverage, inline(never))]
 fn contains_nul(path: &Path) -> bool {
     path.to_string_lossy().contains('\0')
 }
@@ -208,7 +215,8 @@ fn contains_nul(path: &Path) -> bool {
 /// `true` when any slash-delimited component is exactly `.`.
 #[cfg(unix)]
 #[must_use]
-#[inline]
+#[cfg_attr(not(coverage), inline)]
+#[cfg_attr(coverage, inline(never))]
 fn contains_explicit_dot_component(path: &Path) -> bool {
     use std::os::unix::ffi::OsStrExt;
 
@@ -229,7 +237,8 @@ fn contains_explicit_dot_component(path: &Path) -> bool {
 /// `true` when any slash-delimited component is exactly `.`.
 #[cfg(windows)]
 #[must_use]
-#[inline]
+#[cfg_attr(not(coverage), inline)]
+#[cfg_attr(coverage, inline(never))]
 fn contains_explicit_dot_component(path: &Path) -> bool {
     use std::os::windows::ffi::OsStrExt;
 
@@ -250,7 +259,8 @@ fn contains_explicit_dot_component(path: &Path) -> bool {
 /// `true` when any slash-delimited component is exactly `.`.
 #[cfg(not(any(unix, windows)))]
 #[must_use]
-#[inline]
+#[cfg_attr(not(coverage), inline)]
+#[cfg_attr(coverage, inline(never))]
 fn contains_explicit_dot_component(path: &Path) -> bool {
     path.to_string_lossy().split('/').any(|part| part == ".")
 }

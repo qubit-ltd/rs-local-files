@@ -41,8 +41,9 @@ impl LocalResourceLimitError {
     /// # Returns
     ///
     /// A structured resource-limit error.
-    #[cfg_attr(feature = "test-support", inline(never))]
-    #[cfg_attr(not(feature = "test-support"), inline(always))]
+    // qubit-style: allow coverage-cfg
+    #[cfg_attr(not(coverage), inline)]
+    #[cfg_attr(coverage, inline(never))]
     pub const fn new(resource: LocalResourceKind, limit: usize, remaining: usize, requested: usize) -> Self {
         Self {
             resource,
@@ -54,31 +55,32 @@ impl LocalResourceLimitError {
 
     /// Returns the exhausted resource dimension.
     #[must_use = "the exhausted resource dimension should be inspected"]
-    #[cfg_attr(feature = "test-support", inline(never))]
-    #[cfg_attr(not(feature = "test-support"), inline(always))]
+    #[cfg_attr(not(coverage), inline)]
+    #[cfg_attr(coverage, inline(never))]
     pub const fn resource(&self) -> LocalResourceKind {
         self.resource
     }
 
     /// Returns the configured resource capacity.
     #[must_use]
-    #[cfg_attr(feature = "test-support", inline(never))]
-    #[cfg_attr(not(feature = "test-support"), inline(always))]
+    #[cfg_attr(not(coverage), inline)]
+    #[cfg_attr(coverage, inline(never))]
     pub const fn limit(&self) -> usize {
         self.limit
     }
 
     /// Returns the capacity remaining at acquisition time.
     #[must_use]
-    #[cfg_attr(feature = "test-support", inline(never))]
-    #[cfg_attr(not(feature = "test-support"), inline(always))]
+    #[cfg_attr(not(coverage), inline)]
+    #[cfg_attr(coverage, inline(never))]
     pub const fn remaining(&self) -> usize {
         self.remaining
     }
 
     /// Returns the number of units requested by the operation.
     #[must_use]
-    #[inline]
+    #[cfg_attr(not(coverage), inline)]
+    #[cfg_attr(coverage, inline(never))]
     pub const fn requested(&self) -> usize {
         self.requested
     }

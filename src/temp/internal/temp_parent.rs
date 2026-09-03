@@ -11,11 +11,13 @@ use std::io;
 use std::path::Path;
 
 /// Prepares a host target parent before any publication attempt.
-#[inline]
+// qubit-style: allow coverage-cfg
+#[cfg_attr(not(coverage), inline)]
+#[cfg_attr(coverage, inline(never))]
 pub(crate) fn host(target: &Path, create_parent: bool) -> io::Result<()> {
     let parent = target
         .parent()
-        .ok_or_else(|| io::Error::new(io::ErrorKind::InvalidInput, "target has no parent"))?;
+        .ok_or(io::Error::new(io::ErrorKind::InvalidInput, "target has no parent"))?;
     if parent.as_os_str().is_empty() {
         return Ok(());
     }
@@ -30,7 +32,8 @@ pub(crate) fn host(target: &Path, create_parent: bool) -> io::Result<()> {
 }
 
 /// Prepares a rooted target parent before any publication attempt.
-#[inline]
+#[cfg_attr(not(coverage), inline)]
+#[cfg_attr(coverage, inline(never))]
 pub(crate) fn rooted(
     root: &crate::rooted::Root,
     target: &crate::local::LocalRelativePath,
