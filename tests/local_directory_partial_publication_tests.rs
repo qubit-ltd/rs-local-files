@@ -48,7 +48,7 @@ fn filesystem_and_path(backend: Backend, root: &Path, relative: &Path) -> (Local
 }
 
 #[test]
-fn recursive_create_reports_the_first_unfinished_path_after_partial_publication() {
+fn test_recursive_create_reports_the_first_unfinished_path_after_partial_publication() {
     const TEST_NAME: &str = "recursive_create_reports_the_first_unfinished_path_after_partial_publication";
     for (backend, fault) in [
         (Backend::Host, "host-create-directory-component-second"),
@@ -76,7 +76,7 @@ fn recursive_create_reports_the_first_unfinished_path_after_partial_publication(
 }
 
 #[test]
-fn recursive_delete_reports_the_failed_path_after_partial_publication() {
+fn test_recursive_delete_reports_the_failed_path_after_partial_publication() {
     const TEST_NAME: &str = "recursive_delete_reports_the_failed_path_after_partial_publication";
     for (backend, fault) in [
         (Backend::Host, "host-delete-directory-entry-second"),

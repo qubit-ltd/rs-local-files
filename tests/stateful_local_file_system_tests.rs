@@ -37,7 +37,7 @@ use tempfile::tempdir;
 static PROCESS_PWD_LOCK: Mutex<()> = Mutex::new(());
 
 #[test]
-fn host_observes_process_pwd_and_clone_configuration_is_independent() {
+fn test_host_observes_process_pwd_and_clone_configuration_is_independent() {
     let _pwd_guard = PROCESS_PWD_LOCK.lock().expect("process PWD lock should be available");
     let process_pwd = std::env::current_dir().expect("process PWD should be readable");
     let mut filesystem = LocalFileSystem::host().expect("Host filesystem should open");
@@ -77,7 +77,7 @@ fn host_observes_process_pwd_and_clone_configuration_is_independent() {
 }
 
 #[test]
-fn rooted_paths_observe_chroot_style_absolute_and_relative_semantics() {
+fn test_rooted_paths_observe_chroot_style_absolute_and_relative_semantics() {
     let directory = tempdir().expect("temporary root should be created");
     fs::create_dir_all(directory.path().join("work/project")).expect("fixture PWD should be created");
     fs::write(directory.path().join("at-root"), b"root").expect("root fixture should be written");
@@ -112,7 +112,7 @@ fn rooted_paths_observe_chroot_style_absolute_and_relative_semantics() {
 }
 
 #[test]
-fn rooted_setters_are_transactional() {
+fn test_rooted_setters_are_transactional() {
     let directory = tempdir().expect("temporary root should be created");
     let mut filesystem = LocalFileSystem::rooted(directory.path()).expect("Rooted filesystem should open");
     let original_pwd = filesystem.current_directory().expect("Rooted PWD should be available");
@@ -135,7 +135,7 @@ fn rooted_setters_are_transactional() {
 
 #[cfg(unix)]
 #[test]
-fn host_reject_policy_applies_to_listing_roots_and_copy_parents() {
+fn test_host_reject_policy_applies_to_listing_roots_and_copy_parents() {
     use std::os::unix::fs::symlink;
 
     let directory = tempdir().expect("temporary directory should be created");
@@ -178,7 +178,7 @@ fn host_reject_policy_applies_to_listing_roots_and_copy_parents() {
 }
 
 #[test]
-fn explicit_options_replace_instance_defaults() {
+fn test_explicit_options_replace_instance_defaults() {
     let directory = tempdir().expect("temporary root should be created");
     fs::write(directory.path().join("source"), b"payload").expect("source should be written");
     fs::write(directory.path().join("target"), b"old").expect("target should be written");
@@ -197,7 +197,7 @@ fn explicit_options_replace_instance_defaults() {
 }
 
 #[test]
-fn host_temp_options_do_not_create_an_unrequested_parent() {
+fn test_host_temp_options_do_not_create_an_unrequested_parent() {
     let directory = tempdir().expect("temporary directory should be created");
     let file_parent = directory.path().join("missing-file-parent");
     let directory_parent = directory.path().join("missing-directory-parent");
@@ -217,7 +217,7 @@ fn host_temp_options_do_not_create_an_unrequested_parent() {
 }
 
 #[test]
-fn callers_can_wrap_a_filesystem_in_their_own_lock() {
+fn test_callers_can_wrap_a_filesystem_in_their_own_lock() {
     let _pwd_guard = PROCESS_PWD_LOCK.lock().expect("process PWD lock should be available");
     let filesystem = LocalFileSystem::host().expect("Host filesystem should open");
     let shared = Arc::new(Mutex::new(filesystem));
@@ -233,7 +233,7 @@ fn callers_can_wrap_a_filesystem_in_their_own_lock() {
 }
 
 #[test]
-fn host_relative_operations_use_the_process_pwd() {
+fn test_host_relative_operations_use_the_process_pwd() {
     let _pwd_guard = PROCESS_PWD_LOCK.lock().expect("process PWD lock should be available");
     let process_pwd = std::env::current_dir().expect("process PWD should be readable");
     let directory = tempdir().expect("temporary directory should be created");
@@ -268,7 +268,7 @@ fn host_relative_operations_use_the_process_pwd() {
 
 #[cfg(feature = "test-support")]
 #[test]
-fn read_prefix_preserves_context_for_a_post_open_read_failure() {
+fn test_read_prefix_preserves_context_for_a_post_open_read_failure() {
     let _pwd_guard = PROCESS_PWD_LOCK.lock().expect("process PWD lock should be available");
     let directory = tempdir().expect("temporary directory should be created");
     let file = directory.path().join("payload");
@@ -309,7 +309,7 @@ fn run_in_isolated_process(test_name: &str, action: impl FnOnce()) {
 /// process PWD, while PWD-dependent operations report the query failure.
 #[cfg(not(windows))]
 #[test]
-fn host_reads_process_pwd_only_for_pwd_dependent_operations() {
+fn test_host_reads_process_pwd_only_for_pwd_dependent_operations() {
     const TEST_NAME: &str = "host_reads_process_pwd_only_for_pwd_dependent_operations";
     run_in_isolated_process(TEST_NAME, || {
         let parent = tempdir().expect("temporary parent should be created");
@@ -339,7 +339,7 @@ fn host_reads_process_pwd_only_for_pwd_dependent_operations() {
 
 #[cfg(unix)]
 #[test]
-fn rooted_constructor_follows_its_one_time_root_symlink() {
+fn test_rooted_constructor_follows_its_one_time_root_symlink() {
     use std::os::unix::fs::symlink;
 
     let directory = tempdir().expect("temporary directory should be created");
@@ -357,7 +357,7 @@ fn rooted_constructor_follows_its_one_time_root_symlink() {
 /// Verifies a relative constructor input is captured once as an absolute
 /// diagnostic path while operations remain bound to the opened authority.
 #[test]
-fn rooted_constructor_captures_one_absolute_diagnostic_snapshot() {
+fn test_rooted_constructor_captures_one_absolute_diagnostic_snapshot() {
     let _pwd_guard = PROCESS_PWD_LOCK.lock().expect("process PWD lock should be available");
     let current_directory = std::env::current_dir().expect("current directory should be readable");
     let root = Builder::new()
@@ -379,7 +379,7 @@ fn rooted_constructor_captures_one_absolute_diagnostic_snapshot() {
 
 /// Verifies a regular file cannot be opened as a Rooted directory authority.
 #[test]
-fn rooted_constructor_rejects_regular_file_authority() {
+fn test_rooted_constructor_rejects_regular_file_authority() {
     let directory = tempdir().expect("temporary directory should be created");
     let file = directory.path().join("regular-file");
     fs::write(&file, b"payload").expect("fixture should be written");
@@ -391,7 +391,7 @@ fn rooted_constructor_rejects_regular_file_authority() {
 
 #[cfg(unix)]
 #[test]
-fn rooted_symlink_targets_use_virtual_root_and_dot_parent_semantics() {
+fn test_rooted_symlink_targets_use_virtual_root_and_dot_parent_semantics() {
     use std::os::unix::fs::symlink;
 
     let directory = tempdir().expect("temporary root should be created");
@@ -414,7 +414,7 @@ fn rooted_symlink_targets_use_virtual_root_and_dot_parent_semantics() {
 
 #[cfg(unix)]
 #[test]
-fn rooted_symlink_escape_and_cycles_are_rejected() {
+fn test_rooted_symlink_escape_and_cycles_are_rejected() {
     use std::os::unix::fs::symlink;
 
     let directory = tempdir().expect("temporary root should be created");
@@ -437,7 +437,7 @@ fn rooted_symlink_escape_and_cycles_are_rejected() {
 /// authority-local diagnostic hints separately.
 #[cfg(unix)]
 #[test]
-fn rooted_walker_paths_and_symlink_entries_use_virtual_namespace_semantics() {
+fn test_rooted_walker_paths_and_symlink_entries_use_virtual_namespace_semantics() {
     use std::os::unix::fs::symlink;
 
     let directory = tempdir().expect("temporary root should be created");
@@ -473,7 +473,7 @@ fn rooted_walker_paths_and_symlink_entries_use_virtual_namespace_semantics() {
 /// rather than becoming an empty-path parsing failure.
 #[cfg(unix)]
 #[test]
-fn rooted_walker_can_follow_a_symlink_to_virtual_root() {
+fn test_rooted_walker_can_follow_a_symlink_to_virtual_root() {
     use std::os::unix::fs::symlink;
 
     let directory = tempdir().expect("temporary root should be created");
@@ -496,7 +496,7 @@ fn rooted_walker_can_follow_a_symlink_to_virtual_root() {
 /// Verifies temporary resources retain creation-time PWD semantics and expose
 /// only virtual namespace paths through their public identity APIs.
 #[test]
-fn rooted_temp_resources_retain_their_creation_pwd_snapshot() {
+fn test_rooted_temp_resources_retain_their_creation_pwd_snapshot() {
     let directory = tempdir().expect("temporary root should be created");
     fs::create_dir_all(directory.path().join("first")).expect("first PWD should be created");
     fs::create_dir_all(directory.path().join("second")).expect("second PWD should be created");
@@ -537,7 +537,7 @@ fn rooted_temp_resources_retain_their_creation_pwd_snapshot() {
 }
 
 #[test]
-fn temp_file_persist_preserves_directory_qualified_target_intent() {
+fn test_temp_file_persist_preserves_directory_qualified_target_intent() {
     let directory = tempdir().expect("temporary root should be created");
     let filesystem = LocalFileSystem::rooted(directory.path()).expect("Rooted filesystem should open");
     let mut temporary = filesystem.create_temp_file().expect("temporary file should be created");
@@ -559,7 +559,7 @@ fn temp_file_persist_preserves_directory_qualified_target_intent() {
 /// Verifies writers expose virtual destination identity and remain bound to
 /// the PWD snapshot captured when they were opened.
 #[test]
-fn rooted_writer_retains_its_open_time_pwd_snapshot() {
+fn test_rooted_writer_retains_its_open_time_pwd_snapshot() {
     let directory = tempdir().expect("temporary root should be created");
     fs::create_dir_all(directory.path().join("first")).expect("first PWD should be created");
     fs::create_dir_all(directory.path().join("second")).expect("second PWD should be created");
@@ -595,7 +595,7 @@ fn rooted_writer_retains_its_open_time_pwd_snapshot() {
 /// Verifies two-path failures retain normalized virtual operands and the PWD
 /// snapshot used to bind them.
 #[test]
-fn rooted_copy_and_rename_failures_report_virtual_paths() {
+fn test_rooted_copy_and_rename_failures_report_virtual_paths() {
     let directory = tempdir().expect("temporary root should be created");
     fs::create_dir(directory.path().join("work")).expect("PWD should be created");
     let mut filesystem = LocalFileSystem::rooted(directory.path()).expect("Rooted filesystem should open");
@@ -622,7 +622,7 @@ fn rooted_copy_and_rename_failures_report_virtual_paths() {
 /// Verifies walker errors retain the PWD from walker creation, even after the
 /// originating filesystem instance changes directory.
 #[test]
-fn rooted_walker_errors_retain_their_creation_pwd_snapshot() {
+fn test_rooted_walker_errors_retain_their_creation_pwd_snapshot() {
     let directory = tempdir().expect("temporary root should be created");
     fs::create_dir_all(directory.path().join("first/listing")).expect("first listing directory should be created");
     fs::create_dir(directory.path().join("second")).expect("second PWD should be created");
@@ -650,7 +650,7 @@ fn rooted_walker_errors_retain_their_creation_pwd_snapshot() {
 /// Verifies validation and protected-root failures consistently retain the
 /// instance PWD used by the public operation.
 #[test]
-fn rooted_facade_validation_errors_retain_pwd_context() {
+fn test_rooted_facade_validation_errors_retain_pwd_context() {
     let directory = tempdir().expect("temporary root should be created");
     fs::create_dir_all(directory.path().join("work")).expect("PWD should be created");
     fs::write(directory.path().join("work/file"), b"payload").expect("file should be written");
@@ -728,7 +728,7 @@ fn rooted_facade_validation_errors_retain_pwd_context() {
 /// Verifies two-path lexical failures preserve both caller inputs and the one
 /// PWD snapshot used to parse them.
 #[test]
-fn rooted_two_path_lexical_failures_preserve_request_context() {
+fn test_rooted_two_path_lexical_failures_preserve_request_context() {
     let directory = tempdir().expect("temporary root should be created");
     fs::create_dir_all(directory.path().join("work")).expect("PWD should be created");
     let mut filesystem = LocalFileSystem::rooted(directory.path()).expect("Rooted filesystem should open");
@@ -757,7 +757,7 @@ fn rooted_two_path_lexical_failures_preserve_request_context() {
 /// structured failures.
 #[cfg(unix)]
 #[test]
-fn rooted_writer_and_temp_cleanup_errors_retain_creation_pwd() {
+fn test_rooted_writer_and_temp_cleanup_errors_retain_creation_pwd() {
     let directory = tempdir().expect("temporary root should be created");
     fs::create_dir_all(directory.path().join("work")).expect("PWD should be created");
     let mut filesystem = LocalFileSystem::rooted(directory.path()).expect("Rooted filesystem should open");
@@ -789,7 +789,7 @@ fn rooted_writer_and_temp_cleanup_errors_retain_creation_pwd() {
 /// Verifies a temporary resource resolves failed persistence targets against
 /// its own creation-time PWD rather than later filesystem state.
 #[test]
-fn rooted_temp_persist_errors_retain_creation_pwd() {
+fn test_rooted_temp_persist_errors_retain_creation_pwd() {
     let directory = tempdir().expect("temporary root should be created");
     fs::create_dir_all(directory.path().join("first")).expect("first PWD should be created");
     fs::create_dir_all(directory.path().join("second")).expect("second PWD should be created");

@@ -6,13 +6,8 @@
 //    Licensed under the Apache License, Version 2.0.
 // =============================================================================
 
-mod operation_policy_tests;
-mod publication_state;
-
-mod host_local_file_system;
-
-#[cfg(feature = "test-support")]
-mod test_fault_guard_tests;
-
-#[cfg(feature = "test-support")]
-mod test_support_tests;
+mod filesystem_probe_tests;
+mod local_file_system_capabilities_tests;
+mod local_file_system_limits_tests;
+mod local_file_system_space_tests;
+mod size_limit_tests;

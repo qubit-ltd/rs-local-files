@@ -15,7 +15,7 @@ use crate::test_support::TestFaultPlan;
 use crate::test_support::TestFaultPoint;
 
 #[test]
-fn fault_plans_are_instance_local() {
+fn test_fault_plans_are_instance_local() {
     let failing = LocalFileSystem::host()
         .expect("Host filesystem should open")
         .with_test_faults(Some(TestFaultPlan::fail_once(
