@@ -1,6 +1,7 @@
 # Qubit Local Files 用户手册
 
 [English](user_guide.md) · [README](../README.zh_CN.md) ·
+[设计文档](local_file_system_design.zh_CN.md) ·
 [API 文档](https://docs.rs/qubit-local-files)
 
 本手册面向 Rust 1.94 及以上版本的 `qubit-local-files` 0.3 使用者，适用于直接操作主机
@@ -9,7 +10,7 @@
 
 ## 概念模型
 
-```
+```text
 Host 命名空间 ── LocalFileSystem::host() ── 操作时读取进程 PWD
 已打开根目录 ─── LocalFileSystem::rooted(root) ── 虚拟 / 与实例 PWD
 ```
@@ -97,7 +98,7 @@ Host 没有更窄的 root 边界。Rooted 仅支持 `Reject` 和 `FollowWithinSc
 导出程序需要创建 `build/output`，只在完整写入后发布 `manifest.json`，并读回结果。成功
 的可观察条件是 writer 返回 `Committed`，且能读取已经发布的字节。
 
-```rust
+```rust,no_run
 use std::io::{Read, Write};
 use qubit_local_files::LocalFileSystem;
 use qubit_local_files::options::{
@@ -241,7 +242,9 @@ Linux、Windows 和 macOS 会进行运行时测试。FreeBSD 与 Android 仅做�
 `limits_at(path)` 才会针对该路径所在文件系统返回有限值（无法探测时为
 `Unknown`）。两个数值限制都必须结合 `length_unit()` 解释：Unix 使用 byte，Windows
 使用 UTF-16 code unit，后者不得当成 UTF-8 byte 限制。
-原子 rename、原子 replace 与临时资源原子持久化会分别报告，因为各平台支持并不相同。
+原子 rename、原子 replace、临时资源原子持久化、耐久 rename、耐久文件复制和耐久 writer
+发布会分别报告，因为各平台对这些完整协议的支持并不相同。这些 flag 描述当前 build 的
+实现能力，不证明某个具体 mount 或存储设备已经完成持久化。
 
 继续阅读 [README](../README.zh_CN.md)、[English user guide](user_guide.md) 或
 [API 文档](https://docs.rs/qubit-local-files)。
