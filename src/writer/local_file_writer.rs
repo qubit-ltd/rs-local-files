@@ -115,6 +115,7 @@ impl LocalFileWriter {
     }
 
     /// Returns the current writer state.
+    #[must_use = "inspect the writer state"]
     #[cfg_attr(not(coverage), inline)]
     #[cfg_attr(coverage, inline(never))]
     pub const fn state(&self) -> LocalWriterState {

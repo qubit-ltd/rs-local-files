@@ -9,6 +9,15 @@
 // Covered through operation policy integration tests.
 
 /// Required storage durability for a completed operation.
+///
+/// # Examples
+///
+/// ```
+/// use qubit_local_files::policy::LocalDurabilityRequirement;
+///
+/// let requirement = LocalDurabilityRequirement::Required;
+/// assert_ne!(requirement, LocalDurabilityRequirement::NotRequired);
+/// ```
 #[derive(Clone, Copy, Debug, Default, Eq, Hash, PartialEq)]
 #[must_use]
 pub enum LocalDurabilityRequirement {

@@ -9,6 +9,14 @@
 // Covered through operation policy integration tests.
 
 /// Required atomicity for a namespace publication operation.
+///
+/// # Examples
+///
+/// ```
+/// use qubit_local_files::policy::LocalAtomicityRequirement;
+///
+/// assert_eq!(LocalAtomicityRequirement::Preferred, LocalAtomicityRequirement::default());
+/// ```
 #[derive(Clone, Copy, Debug, Default, Eq, Hash, PartialEq)]
 #[must_use]
 pub enum LocalAtomicityRequirement {

@@ -44,6 +44,8 @@ impl LocalPersistOptions {
     ///
     /// # Returns
     /// Options that reject existing destination paths.
+    #[must_use = "use the configured persistence options"]
+    #[inline(always)]
     pub const fn new() -> Self {
         Self {
             overwrite: false,
@@ -56,17 +58,21 @@ impl LocalPersistOptions {
     /// # Returns
     /// `true` when target replacement is enabled.
     #[must_use]
+    #[inline(always)]
     pub const fn overwrites(&self) -> bool {
         self.overwrite
     }
 
     /// Returns whether missing target parents may be created.
     #[must_use]
+    #[inline(always)]
     pub const fn creates_parent(&self) -> bool {
         self.create_parent
     }
 
     /// Enables recursive creation of a missing target parent.
+    #[must_use = "use the configured persistence options"]
+    #[inline(always)]
     pub const fn with_create_parent(mut self) -> Self {
         self.create_parent = true;
         self
@@ -76,6 +82,8 @@ impl LocalPersistOptions {
     ///
     /// # Returns
     /// Updated persistence options that permit overwriting.
+    #[must_use = "use the configured persistence options"]
+    #[inline(always)]
     pub const fn with_overwrite(mut self) -> Self {
         self.overwrite = true;
         self
