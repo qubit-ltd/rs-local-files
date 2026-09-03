@@ -186,7 +186,8 @@ impl LocalCopyOptions {
 
     /// Sets the destination file conflict policy.
     #[must_use = "use the configured copy options"]
-    #[inline(always)]
+    #[cfg_attr(not(coverage), inline(always))]
+    #[cfg_attr(coverage, inline(never))]
     pub const fn with_conflict(mut self, conflict: LocalCopyConflictPolicy) -> Self {
         self.conflict = conflict;
         self
@@ -202,7 +203,8 @@ impl LocalCopyOptions {
 
     /// Sets metadata preservation policy.
     #[must_use = "use the configured copy options"]
-    #[inline(always)]
+    #[cfg_attr(not(coverage), inline(always))]
+    #[cfg_attr(coverage, inline(never))]
     pub const fn with_metadata_preservation(mut self, preserve_metadata: LocalMetadataPreservePolicy) -> Self {
         self.preserve_metadata = preserve_metadata;
         self
@@ -218,7 +220,8 @@ impl LocalCopyOptions {
 
     /// Requires a regular file source.
     #[must_use = "use the configured copy options"]
-    #[inline(always)]
+    #[cfg_attr(not(coverage), inline(always))]
+    #[cfg_attr(coverage, inline(never))]
     pub const fn with_file_source(mut self) -> Self {
         self.source_mode = LocalCopySourceMode::File;
         self
@@ -234,7 +237,8 @@ impl LocalCopyOptions {
 
     /// Creates missing target parent directories before copying.
     #[must_use = "use the configured copy options"]
-    #[inline(always)]
+    #[cfg_attr(not(coverage), inline(always))]
+    #[cfg_attr(coverage, inline(never))]
     pub const fn with_parent(mut self) -> Self {
         self.create_parent = true;
         self
@@ -250,7 +254,8 @@ impl LocalCopyOptions {
 
     /// Sets required durability.
     #[must_use = "use the configured copy options"]
-    #[inline(always)]
+    #[cfg_attr(not(coverage), inline(always))]
+    #[cfg_attr(coverage, inline(never))]
     pub const fn with_durability(mut self, durability: LocalDurabilityRequirement) -> Self {
         self.durability = durability;
         self
@@ -272,14 +277,16 @@ impl LocalCopyOptions {
     }
     /// Limits the number of source entries processed.
     #[must_use = "use the configured copy options"]
-    #[inline(always)]
+    #[cfg_attr(not(coverage), inline(always))]
+    #[cfg_attr(coverage, inline(never))]
     pub const fn with_max_entries(mut self, max_entries: usize) -> Self {
         self.max_entries = Some(max_entries);
         self
     }
     /// Removes the source-entry budget.
     #[must_use = "use the configured copy options"]
-    #[inline(always)]
+    #[cfg_attr(not(coverage), inline(always))]
+    #[cfg_attr(coverage, inline(never))]
     pub const fn without_max_entries(mut self) -> Self {
         self.max_entries = None;
         self
@@ -300,7 +307,8 @@ impl LocalCopyOptions {
     }
     /// Limits concurrently open source directories.
     #[must_use = "use the configured copy options"]
-    #[inline(always)]
+    #[cfg_attr(not(coverage), inline(always))]
+    #[cfg_attr(coverage, inline(never))]
     pub const fn with_max_open_directories(mut self, max_open_directories: usize) -> Self {
         self.max_open_directories = Some(max_open_directories);
         self
