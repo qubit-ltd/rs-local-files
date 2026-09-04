@@ -509,19 +509,26 @@ fn test_local_file_writer_exercises_atomic_install_fault_boundaries() {
         ("atomic-install-replace-indeterminate", true, true),
         ("atomic-install-before-native-call", false, true),
         ("atomic-install-fallback", false, false),
-        #[cfg(not(target_os = "macos"))]
         ("atomic-install-link", false, true),
-        #[cfg(not(target_os = "macos"))]
         ("atomic-install-unlink", false, false),
-        #[cfg(not(target_os = "macos"))]
         ("atomic-install-unlink-persistent", false, true),
-        #[cfg(not(target_os = "macos"))]
         ("atomic-install-unlink-persistent-sync", false, true),
-        #[cfg(not(target_os = "macos"))]
         ("atomic-install-unlink-recover-sync", false, true),
-        #[cfg(not(target_os = "macos"))]
         ("atomic-install-unlink-indeterminate-sync", false, true),
     ] {
+        if cfg!(target_os = "macos")
+            && matches!(
+                fault,
+                "atomic-install-link"
+                    | "atomic-install-unlink"
+                    | "atomic-install-unlink-persistent"
+                    | "atomic-install-unlink-persistent-sync"
+                    | "atomic-install-unlink-recover-sync"
+                    | "atomic-install-unlink-indeterminate-sync"
+            )
+        {
+            continue;
+        }
         run_host_writer_fault(TEST_NAME, fault, || {
             let directory = tempdir().expect("temporary directory should be created");
             let target = directory.path().join("payload");
