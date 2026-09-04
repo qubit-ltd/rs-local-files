@@ -519,7 +519,7 @@ fn test_host_facade_reports_injected_native_io_failures() {
                     .expect("Host filesystem should open")
                     .open_writer_with_options(
                         &directory.path().join("nested/target"),
-                        &LocalWriteOptions::new(LocalWriteMode::CreateNew).with_parent(),
+                        &LocalWriteOptions::new(LocalWriteMode::CreateNew).with_create_parent(),
                     )
                     .is_err(),
                 "local-fs-copy-source-metadata" => LocalFileSystem::host()

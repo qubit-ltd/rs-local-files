@@ -128,8 +128,8 @@ Linux、Windows 和 macOS 的行为会在运行时测试。FreeBSD 和 Android �
 本 crate 不承诺这些目标上的运行时保证。`capabilities()` 只报告当前 build 是否实现了
 对应的完整操作协议，不会探测具体的运行时文件系统，也不声称证明底层硬件已经持久化数据；无法满足要求的原子性或耐久性时，
 会在命名空间变更前拒绝操作。
-原子 rename、原子 replace、尝试临时资源原子持久化的能力、耐久 rename、耐久文件复制和
-耐久 writer 发布均独立报告，因为各平台对这些协议的支持不同。
+原子 rename、原子 replace、尝试临时资源原子持久化的能力、耐久 rename、耐久文件复制、
+耐久 writer 发布和耐久临时文件持久化均独立报告，因为各平台对这些协议的支持不同。
 `can_attempt_atomic_temp_persist()` 只描述实现能力，不承诺任意 source/target 都能原子完成；
 实际结果以操作 outcome 为准。
 路径限制观测始终携带单位：Unix 使用 byte，Windows 使用 UTF-16 code unit。handle-relative

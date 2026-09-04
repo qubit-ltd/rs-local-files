@@ -30,6 +30,9 @@ use qubit_local_files::outcome::LocalPersistCleanupState;
 use qubit_local_files::outcome::LocalPersistFailureState;
 use qubit_local_files::outcome::LocalPersistMethod;
 #[cfg(feature = "test-support")]
+use qubit_local_files::outcome::LocalPersistStage;
+use qubit_local_files::policy::LocalDurabilityRequirement;
+#[cfg(feature = "test-support")]
 use qubit_local_files::test_support::install_test_fault;
 use tempfile::tempdir;
 
@@ -247,6 +250,183 @@ fn test_local_temp_file_persist_reports_atomic_rename() {
     assert!(outcome.atomic());
     assert!(!outcome.durable());
     assert_eq!(LocalPersistMethod::AtomicRename, outcome.method());
+}
+
+/// Verifies Unix Host persistence synchronizes file contents and destination
+/// publication when durability is required.
+#[cfg(unix)]
+#[test]
+fn test_local_temp_file_persist_reports_required_host_durability() {
+    let parent = tempdir().expect("temporary parent should be created");
+    let target = parent.path().join("durable").join("persisted");
+    let mut temporary = LocalFileSystem::host()
+        .expect("Host filesystem should open")
+        .create_temp_file_with_options(&LocalTempFileOptions::new().with_parent(parent.path()))
+        .expect("temporary file should be created");
+    temporary
+        .write_all(b"durable payload")
+        .expect("temporary file should be writable");
+
+    let outcome = temporary
+        .persist_with(
+            &target,
+            LocalPersistOptions::new()
+                .with_create_parent()
+                .with_durability(LocalDurabilityRequirement::Required),
+        )
+        .expect("required durable persistence should succeed on Unix");
+
+    assert!(outcome.durable());
+    assert_eq!(
+        b"durable payload".as_slice(),
+        fs::read(target).expect("published target should be readable"),
+    );
+}
+
+/// Verifies Unix Rooted persistence implements the same durable publication
+/// contract as Host persistence.
+#[cfg(unix)]
+#[test]
+fn test_local_temp_file_persist_reports_required_rooted_durability() {
+    let root = tempdir().expect("temporary root should be created");
+    let filesystem = LocalFileSystem::rooted(root.path()).expect("Rooted filesystem should open");
+    let mut temporary = filesystem
+        .create_temp_file_with_options(
+            &LocalTempFileOptions::new()
+                .with_parent(Path::new("scratch"))
+                .with_create_parent(),
+        )
+        .expect("rooted temporary file should be created");
+    temporary
+        .write_all(b"durable payload")
+        .expect("temporary file should be writable");
+
+    let outcome = temporary
+        .persist_with(
+            Path::new("published/nested/target"),
+            LocalPersistOptions::new()
+                .with_create_parent()
+                .with_durability(LocalDurabilityRequirement::Required),
+        )
+        .expect("required rooted durable persistence should succeed on Unix");
+
+    assert!(outcome.durable());
+    assert_eq!(
+        b"durable payload".as_slice(),
+        fs::read(root.path().join("published/nested/target")).expect("published target should be readable"),
+    );
+}
+
+/// Verifies preferred durability reports the synchronization actually
+/// achieved by Unix persistence.
+#[cfg(unix)]
+#[test]
+fn test_local_temp_file_persist_reports_preferred_durability() {
+    let parent = tempdir().expect("temporary parent should be created");
+    let target = parent.path().join("persisted");
+    let temporary = LocalFileSystem::host()
+        .expect("Host filesystem should open")
+        .create_temp_file_with_options(&LocalTempFileOptions::new().with_parent(parent.path()))
+        .expect("temporary file should be created");
+
+    let outcome = temporary
+        .persist_with(
+            &target,
+            LocalPersistOptions::new().with_durability(LocalDurabilityRequirement::Preferred),
+        )
+        .expect("preferred durable persistence should publish");
+
+    assert!(outcome.durable());
+}
+
+/// Verifies platforms without the full persistence protocol reject a required
+/// guarantee before changing namespace state.
+#[cfg(not(unix))]
+#[test]
+fn test_local_temp_file_rejects_unsupported_required_durability() {
+    let parent = tempdir().expect("temporary parent should be created");
+    let target = parent.path().join("persisted");
+    let temporary = LocalFileSystem::host()
+        .expect("Host filesystem should open")
+        .create_temp_file_with_options(&LocalTempFileOptions::new().with_parent(parent.path()))
+        .expect("temporary file should be created");
+    let source = temporary.path().to_path_buf();
+
+    let error = temporary
+        .persist_with(
+            &target,
+            LocalPersistOptions::new().with_durability(LocalDurabilityRequirement::Required),
+        )
+        .expect_err("unsupported required durability should fail before publication");
+
+    assert_eq!(LocalFileErrorKind::RequirementNotMet, error.kind());
+    assert_eq!(LocalPersistFailureState::NotPublished, error.state());
+    assert!(source.is_file());
+    assert!(!target.exists());
+}
+
+/// Verifies required source synchronization fails before publication and
+/// returns the still-owned temporary file.
+#[cfg(all(feature = "test-support", unix))]
+#[test]
+fn test_local_temp_file_required_source_sync_failure_is_not_published() {
+    run_in_test_fault_process(
+        "test_local_temp_file_required_source_sync_failure_is_not_published",
+        "temp-file-source-sync",
+        || {
+            let parent = tempdir().expect("temporary parent should be created");
+            let target = parent.path().join("persisted");
+            let temporary = LocalFileSystem::host()
+                .expect("Host filesystem should open")
+                .create_temp_file_with_options(&LocalTempFileOptions::new().with_parent(parent.path()))
+                .expect("temporary file should be created");
+            let source = temporary.path().to_path_buf();
+
+            let error = temporary
+                .persist_with(
+                    &target,
+                    LocalPersistOptions::new().with_durability(LocalDurabilityRequirement::Required),
+                )
+                .expect_err("injected source sync failure should reject persistence");
+
+            assert_eq!(LocalPersistStage::SynchronizeSource, error.stage());
+            assert_eq!(LocalPersistFailureState::NotPublished, error.state());
+            assert!(source.is_file());
+            assert!(!target.exists());
+        },
+    );
+}
+
+/// Verifies a required parent-sync failure reports an already-published target
+/// and never lets the returned guard delete it.
+#[cfg(all(feature = "test-support", unix))]
+#[test]
+fn test_local_temp_file_required_destination_sync_failure_is_published() {
+    run_in_test_fault_process(
+        "test_local_temp_file_required_destination_sync_failure_is_published",
+        "temp-file-parent-sync",
+        || {
+            let parent = tempdir().expect("temporary parent should be created");
+            let target = parent.path().join("persisted");
+            let temporary = LocalFileSystem::host()
+                .expect("Host filesystem should open")
+                .create_temp_file_with_options(&LocalTempFileOptions::new().with_parent(parent.path()))
+                .expect("temporary file should be created");
+
+            let error = temporary
+                .persist_with(
+                    &target,
+                    LocalPersistOptions::new().with_durability(LocalDurabilityRequirement::Required),
+                )
+                .expect_err("injected destination sync failure should report partial publication");
+
+            assert_eq!(LocalPersistStage::SynchronizeDestination, error.stage());
+            assert_eq!(LocalPersistFailureState::Published, error.state());
+            assert!(target.is_file());
+            drop(error);
+            assert!(target.is_file());
+        },
+    );
 }
 
 /// Verifies a relative temporary parent remains bound after the current

@@ -16,7 +16,7 @@ use crate::policy::LocalDurabilityRequirement;
 #[test]
 fn test_local_atomic_write_options_builders_update_accessible_policies() {
     let options = LocalAtomicWriteOptions::new()
-        .with_parent()
+        .with_create_parent()
         .with_open_retry_timeout(Duration::from_secs(1))
         .with_create_new()
         .with_durability(LocalDurabilityRequirement::NotRequired);

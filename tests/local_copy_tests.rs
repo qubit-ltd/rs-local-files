@@ -338,7 +338,7 @@ fn test_local_file_system_copy_symlink_policy_matrix() {
             .copy_with_options(
                 &source,
                 &target,
-                &LocalCopyOptions::new().with_parent().with_durability(durability),
+                &LocalCopyOptions::new().with_create_parent().with_durability(durability),
             )
             .expect("symlink copy should satisfy the selected durability policy");
         assert!(outcome.durable());

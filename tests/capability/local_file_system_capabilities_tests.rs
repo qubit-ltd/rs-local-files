@@ -26,6 +26,7 @@ fn test_local_file_system_capabilities_report_operation_support() {
     assert_eq!(cfg!(unix), capabilities.supports_durable_rename());
     assert_eq!(cfg!(unix), capabilities.supports_durable_file_copy());
     assert_eq!(cfg!(unix), capabilities.supports_durable_write());
+    assert_eq!(cfg!(unix), capabilities.supports_durable_temp_file_persist(),);
 }
 
 /// Verifies the compatibility query delegates to the explicitly conditional
