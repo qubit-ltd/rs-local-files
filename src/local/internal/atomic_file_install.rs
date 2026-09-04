@@ -144,12 +144,12 @@ pub(crate) fn install_new_atomic_file_at(
     destination_parent: RawFd,
     destination: &CStr,
 ) -> std::result::Result<(), (Error, LocalAtomicDestinationState, AtomicStagingState)> {
+    #[cfg(feature = "test-support")]
+    if super::test_support::is_enabled("atomic-install-before-native-call") {
+        return Err(unchanged_error(crate::local::test_fault_error()));
+    }
     #[cfg(any(target_os = "linux", target_os = "android"))]
     {
-        #[cfg(feature = "test-support")]
-        if super::test_support::is_enabled("atomic-install-before-native-call") {
-            return Err(unchanged_error(crate::local::test_fault_error()));
-        }
         #[cfg(feature = "test-support")]
         let forced_fallback = [
             "atomic-install-fallback",
