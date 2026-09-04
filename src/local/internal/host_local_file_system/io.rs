@@ -30,6 +30,7 @@ use crate::LocalSymlinkPolicy;
 use crate::LocalWriteMode;
 use crate::LocalWriteOptions;
 use crate::local::ensure_required_directory_durability;
+#[cfg(not(windows))]
 use crate::local::internal::canonicalize_existing_prefix;
 use crate::writer::internal::LocalFileWriterBackend;
 
@@ -170,6 +171,9 @@ impl HostLocalFileSystem {
     ) -> LocalResult<LocalDirectoryWalker> {
         let policy = options.symlink_policy().unwrap_or(symlink_policy);
         let bound = resolve_host_path(path, policy, true)?;
+        #[cfg(windows)]
+        let diagnostic = path.to_path_buf();
+        #[cfg(not(windows))]
         let diagnostic = canonicalize_existing_prefix(path).map_err(|error| {
             LocalFileError::from_io(LocalFileOperation::List, Some(path.to_path_buf()), None, error)
         })?;
