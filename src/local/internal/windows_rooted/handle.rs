@@ -39,6 +39,7 @@ use windows_sys::Win32::Foundation::INVALID_HANDLE_VALUE;
 use windows_sys::Win32::Foundation::OBJ_CASE_INSENSITIVE;
 use windows_sys::Win32::Foundation::UNICODE_STRING;
 use windows_sys::Win32::Storage::FileSystem::CreateFileW;
+use windows_sys::Win32::Storage::FileSystem::DELETE;
 use windows_sys::Win32::Storage::FileSystem::FILE_ADD_FILE;
 use windows_sys::Win32::Storage::FileSystem::FILE_APPEND_DATA;
 use windows_sys::Win32::Storage::FileSystem::FILE_ATTRIBUTE_NORMAL;
@@ -83,7 +84,7 @@ pub(crate) fn open_root_directory(path: &Path) -> Result<File> {
     let handle = unsafe {
         CreateFileW(
             wide.as_ptr(),
-            FILE_LIST_DIRECTORY | FILE_READ_ATTRIBUTES | FILE_ADD_FILE | FILE_DELETE_CHILD | SYNCHRONIZE,
+            FILE_LIST_DIRECTORY | FILE_READ_ATTRIBUTES | FILE_ADD_FILE | FILE_DELETE_CHILD | DELETE | SYNCHRONIZE,
             ROOTED_SHARE_MODE,
             null(),
             OPEN_EXISTING,
@@ -226,7 +227,7 @@ pub(super) fn open_parent_for_rename(root: &File, path: &LocalRelativePath) -> R
     open_parent_with_access(
         root,
         path,
-        FILE_LIST_DIRECTORY | FILE_READ_ATTRIBUTES | FILE_ADD_FILE | FILE_DELETE_CHILD | SYNCHRONIZE,
+        FILE_LIST_DIRECTORY | FILE_READ_ATTRIBUTES | FILE_ADD_FILE | FILE_DELETE_CHILD | DELETE | SYNCHRONIZE,
     )
 }
 
