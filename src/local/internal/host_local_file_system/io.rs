@@ -169,6 +169,6 @@ impl HostLocalFileSystem {
     ) -> LocalResult<LocalDirectoryWalker> {
         let policy = options.symlink_policy().unwrap_or(symlink_policy);
         let bound = resolve_host_path(path, policy, true)?;
-        LocalDirectoryWalker::open(bound, *options, policy)
+        LocalDirectoryWalker::open_with_diagnostic(bound, path.to_path_buf(), *options, policy)
     }
 }
