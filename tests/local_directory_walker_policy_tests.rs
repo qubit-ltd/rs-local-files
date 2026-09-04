@@ -85,7 +85,18 @@ fn bound_path(path: &Path) -> PathBuf {
 /// Asserts that a diagnostic path matches the filesystem's bound spelling.
 fn assert_bound_path(expected: &Path, actual: Option<&Path>) {
     let expected = bound_path(expected);
-    assert_eq!(Some(expected.as_path()), actual);
+    let actual = actual.expect("diagnostic path should be present");
+    assert_eq!(bound_path(actual), expected);
+}
+
+#[cfg(target_os = "macos")]
+fn assert_bound_paths(expected: &Path, actual: &Path) {
+    assert_eq!(bound_path(expected), bound_path(actual));
+}
+
+#[cfg(not(target_os = "macos"))]
+fn assert_bound_paths(expected: &Path, actual: &Path) {
+    assert_eq!(expected, actual);
 }
 
 /// Verifies non-recursive traversal returns only immediate entries and retains
@@ -101,7 +112,7 @@ fn test_local_directory_walker_non_recursive_listing_retains_bound_root() {
         .expect("Host filesystem should open")
         .list_with_options(directory.path(), &LocalListOptions::new())
         .expect("directory should open for listing");
-    assert_eq!(bound_path(directory.path()), walker.root());
+    assert_bound_paths(directory.path(), walker.root());
     let mut entries = walker
         .collect::<Result<Vec<_>, _>>()
         .expect("non-recursive traversal should succeed");

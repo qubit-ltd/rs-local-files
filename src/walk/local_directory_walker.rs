@@ -97,6 +97,8 @@ impl LocalDirectoryWalker {
         options: LocalListOptions,
         symlink_policy: LocalSymlinkPolicy,
     ) -> LocalResult<Self> {
+        #[cfg(target_os = "macos")]
+        let diagnostic_root = logical_macos_path(&diagnostic_root);
         validate_options(&diagnostic_root, &options)?;
         let deadline = walker_deadline(&diagnostic_root, &options)?;
         let metadata = match fs::symlink_metadata(&backend_root) {
@@ -468,6 +470,13 @@ impl LocalDirectoryWalker {
         }
         Err(error)
     }
+}
+
+#[cfg(target_os = "macos")]
+fn logical_macos_path(path: &Path) -> PathBuf {
+    let private_var = Path::new("/private/var");
+    path.strip_prefix(private_var)
+        .map_or_else(|_| path.to_path_buf(), |suffix| Path::new("/var").join(suffix))
 }
 
 impl LocalDirectoryWalker {
