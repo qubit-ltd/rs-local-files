@@ -842,7 +842,7 @@ fn test_rooted_local_file_system_exercises_directory_copy_and_writer_policies() 
     let mut writer = rooted
         .open_writer_with_options(
             Path::new("created-parent/payload"),
-            &LocalWriteOptions::new(LocalWriteMode::CreateOrReplace).with_parent(),
+            &LocalWriteOptions::new(LocalWriteMode::CreateOrReplace).with_create_parent(),
         )
         .expect("rooted writer should create requested parents");
     writer

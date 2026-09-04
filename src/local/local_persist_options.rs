@@ -5,12 +5,18 @@
 //
 //    Licensed under the Apache License, Version 2.0.
 // =============================================================================
-//! Temporary-file persistence options.
+//! Temporary-resource persistence options.
 // qubit-style: allow source-test-pair
+
+use crate::policy::LocalDurabilityRequirement;
 
 /// Options controlling temporary file persistence behavior.
 ///
-/// The default is conservative: existing destination paths are not overwritten.
+/// The default is conservative: existing destination paths are not overwritten,
+/// missing parents are not created, and durability is not required. Temporary
+/// files can request complete content and namespace durability. Temporary
+/// directories reject [`LocalDurabilityRequirement::Required`] because their
+/// arbitrary descendant contents cannot be proven synchronized.
 /// Construct this non-exhaustive type through [`Self::new`] and its builder.
 /// Builder results must be used:
 ///
@@ -37,19 +43,23 @@ pub struct LocalPersistOptions {
     overwrite: bool,
     /// Whether a missing target parent may be created before publication.
     create_parent: bool,
+    /// Required persistence durability.
+    durability: LocalDurabilityRequirement,
 }
 
 impl LocalPersistOptions {
     /// Returns conservative persistence options.
     ///
     /// # Returns
-    /// Options that reject existing destination paths.
+    /// Options that reject existing destination paths and do not require
+    /// durability.
     #[must_use = "use the configured persistence options"]
     #[inline(always)]
     pub const fn new() -> Self {
         Self {
             overwrite: false,
             create_parent: false,
+            durability: LocalDurabilityRequirement::NotRequired,
         }
     }
 
@@ -70,11 +80,26 @@ impl LocalPersistOptions {
         self.create_parent
     }
 
+    /// Returns the required persistence durability.
+    #[must_use = "inspect the requested persistence durability"]
+    #[inline(always)]
+    pub const fn durability(&self) -> LocalDurabilityRequirement {
+        self.durability
+    }
+
     /// Enables recursive creation of a missing target parent.
     #[must_use = "use the configured persistence options"]
     #[inline(always)]
     pub const fn with_create_parent(mut self) -> Self {
         self.create_parent = true;
+        self
+    }
+
+    /// Sets the required persistence durability.
+    #[must_use = "use the configured persistence options"]
+    #[inline(always)]
+    pub const fn with_durability(mut self, durability: LocalDurabilityRequirement) -> Self {
+        self.durability = durability;
         self
     }
 
@@ -91,7 +116,8 @@ impl LocalPersistOptions {
 }
 
 impl Default for LocalPersistOptions {
-    /// Returns conservative persistence options.
+    /// Returns conservative persistence options without a durability
+    /// requirement.
     ///
     /// # Returns
     /// Options that reject existing destination paths.

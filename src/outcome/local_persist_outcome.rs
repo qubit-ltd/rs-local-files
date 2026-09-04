@@ -73,7 +73,11 @@ impl LocalPersistOutcome {
         self.atomic
     }
 
-    /// Reports whether persistence durability was synchronized.
+    /// Reports whether temporary-file contents and destination namespace were
+    /// both synchronized.
+    ///
+    /// Temporary-directory persistence always reports `false` because the
+    /// guard cannot prove synchronization of arbitrary descendant contents.
     #[must_use]
     #[cfg_attr(not(coverage), inline)]
     #[cfg_attr(coverage, inline(never))]

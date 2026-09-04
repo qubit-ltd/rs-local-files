@@ -22,7 +22,9 @@ use super::internal::TempEntryIdentity;
 use super::internal::generated_target;
 use super::internal::prepare_host_parent;
 use super::internal::prepare_rooted_parent;
+use crate::LocalDurabilityRequirement;
 use crate::LocalFileError;
+use crate::LocalFileErrorKind;
 use crate::LocalFileOperation;
 use crate::LocalPersistError;
 use crate::LocalPersistFailureState;
@@ -262,6 +264,19 @@ impl LocalTempDirectory {
                 None,
                 LocalPersistStage::InstallDestination,
             ));
+        }
+        if options.durability() == LocalDurabilityRequirement::Required {
+            return Err(self
+                .persist_error(
+                    Error::new(
+                        ErrorKind::Unsupported,
+                        "required temporary-directory content durability cannot be guaranteed",
+                    ),
+                    target.to_path_buf(),
+                    None,
+                    LocalPersistStage::SynchronizeSource,
+                )
+                .with_kind(LocalFileErrorKind::RequirementNotMet));
         }
         let requested_target = target.to_path_buf();
         let resolved_target = match self

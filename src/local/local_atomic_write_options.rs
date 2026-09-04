@@ -69,7 +69,7 @@ impl LocalAtomicWriteOptions {
     /// Updated options that create missing parent directories before staging.
     #[cfg_attr(not(coverage), inline(always))]
     #[cfg_attr(coverage, inline(never))]
-    pub const fn with_parent(mut self) -> Self {
+    pub const fn with_create_parent(mut self) -> Self {
         self.create_parent = true;
         self
     }

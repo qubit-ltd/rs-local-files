@@ -40,6 +40,8 @@ pub struct LocalFileSystemCapabilities {
     durable_file_copy: bool,
     /// Whether durable writer publication is implemented.
     durable_write: bool,
+    /// Whether durable temporary-file persistence is implemented.
+    durable_temp_file_persist: bool,
 }
 
 impl LocalFileSystemCapabilities {
@@ -53,6 +55,7 @@ impl LocalFileSystemCapabilities {
             durable_rename: cfg!(unix),
             durable_file_copy: cfg!(unix),
             durable_write: cfg!(unix),
+            durable_temp_file_persist: cfg!(unix),
         }
     }
 
@@ -78,6 +81,7 @@ impl LocalFileSystemCapabilities {
             durable_rename: cfg!(unix),
             durable_file_copy: cfg!(unix),
             durable_write: cfg!(unix),
+            durable_temp_file_persist: cfg!(unix),
         }
     }
 
@@ -160,5 +164,14 @@ impl LocalFileSystemCapabilities {
     #[cfg_attr(coverage, inline(never))]
     pub const fn supports_durable_write(self) -> bool {
         self.durable_write
+    }
+
+    /// Reports whether temporary-file contents and destination namespace can
+    /// both be synchronized during persistence on this target.
+    #[must_use]
+    #[cfg_attr(not(coverage), inline(always))]
+    #[cfg_attr(coverage, inline(never))]
+    pub const fn supports_durable_temp_file_persist(self) -> bool {
+        self.durable_temp_file_persist
     }
 }

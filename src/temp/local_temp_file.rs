@@ -27,7 +27,9 @@ use super::internal::TempEntryIdentity;
 use super::internal::generated_target;
 use super::internal::prepare_host_parent;
 use super::internal::prepare_rooted_parent;
+use crate::LocalDurabilityRequirement;
 use crate::LocalFileError;
+use crate::LocalFileErrorKind;
 use crate::LocalFileOperation;
 use crate::LocalPersistError;
 use crate::LocalPersistFailureState;
@@ -262,7 +264,6 @@ impl LocalTempFile {
         target: &Path,
         options: LocalPersistOptions,
     ) -> std::result::Result<LocalPersistOutcome, LocalPersistError<Self>> {
-        self.close();
         if let Err(error) = self.ensure_identity_matches() {
             return Err(self.persist_error(error, target.to_path_buf(), None, LocalPersistStage::InstallDestination));
         }
@@ -274,6 +275,18 @@ impl LocalTempFile {
                 LocalPersistStage::InstallDestination,
             ));
         }
+        let file_durable = match self.synchronize_source(options.durability()) {
+            Ok(durable) => durable,
+            Err(error) => {
+                return Err(self.persist_error(
+                    error,
+                    target.to_path_buf(),
+                    None,
+                    LocalPersistStage::SynchronizeSource,
+                ));
+            }
+        };
+        self.close();
         let requested_target = target.to_path_buf();
         let resolved_target = match self
             .resolver
@@ -313,14 +326,17 @@ impl LocalTempFile {
                     ));
                 }
             };
-            if let Err(error) = prepare_host_parent(&target, options.creates_parent()) {
-                return Err(self.persist_error(
-                    error,
-                    requested_target,
-                    Some(namespace_target),
-                    LocalPersistStage::PrepareParent,
-                ));
-            }
+            let parent_dirs_to_sync = match prepare_host_parent(&target, options.creates_parent()) {
+                Ok(parent_dirs) => parent_dirs,
+                Err(error) => {
+                    return Err(self.persist_error(
+                        error,
+                        requested_target,
+                        Some(namespace_target),
+                        LocalPersistStage::PrepareParent,
+                    ));
+                }
+            };
             let result = if options.overwrites() {
                 crate::local::replace_file(&self.path, &target)
             } else {
@@ -335,6 +351,19 @@ impl LocalTempFile {
                     LocalPersistStage::InstallDestination,
                 ));
             }
+            self.state = LocalTempResourceState::SandboxPending;
+            let parent_durable =
+                match synchronize_host_publication(&self.path, &target, &parent_dirs_to_sync, options.durability()) {
+                    Ok(durable) => durable,
+                    Err(error) => {
+                        return Err(self.persist_error(
+                            error,
+                            requested_target,
+                            Some(namespace_target),
+                            LocalPersistStage::SynchronizeDestination,
+                        ));
+                    }
+                };
             let cleanup_error = self.release_sandbox().err().map(|error| {
                 self.contextualize_error(LocalFileError::from_io(
                     LocalFileOperation::Cleanup,
@@ -348,7 +377,7 @@ impl LocalTempFile {
                 namespace_target,
                 LocalPersistMethod::AtomicRename,
                 true,
-                false,
+                file_durable && parent_durable,
                 cleanup_error,
             ));
         }
@@ -408,6 +437,19 @@ impl LocalTempFile {
                 LocalPersistStage::InstallDestination,
             ));
         }
+        self.state = LocalTempResourceState::SandboxPending;
+        let parent_durable =
+            match synchronize_rooted_publication(&rooted.root, &source, &destination, options.durability()) {
+                Ok(durable) => durable,
+                Err(error) => {
+                    return Err(self.persist_error(
+                        error,
+                        requested_target,
+                        Some(namespace_target),
+                        LocalPersistStage::SynchronizeDestination,
+                    ));
+                }
+            };
         let cleanup_error = self.release_sandbox().err().map(|error| {
             self.contextualize_error(LocalFileError::from_io(
                 LocalFileOperation::Cleanup,
@@ -421,9 +463,54 @@ impl LocalTempFile {
             namespace_target,
             LocalPersistMethod::AtomicRename,
             true,
-            false,
+            file_durable && parent_durable,
             cleanup_error,
         ))
+    }
+
+    /// Synchronizes temporary file contents before namespace publication.
+    fn synchronize_source(&self, durability: LocalDurabilityRequirement) -> Result<bool> {
+        if durability == LocalDurabilityRequirement::NotRequired {
+            return Ok(false);
+        }
+        #[cfg(feature = "test-support")]
+        if crate::local::take_test_support("temp-file-source-sync") {
+            return Err(crate::local::test_fault_error());
+        }
+        let durability_supported = match &self.backend {
+            LocalTempResourceBackend::Host(_) => {
+                crate::LocalFileSystemCapabilities::detect_host().supports_durable_temp_file_persist()
+            }
+            LocalTempResourceBackend::Rooted(_) => {
+                crate::LocalFileSystemCapabilities::detect_rooted().supports_durable_temp_file_persist()
+            }
+        };
+        if !durability_supported {
+            return match durability {
+                LocalDurabilityRequirement::Required => Err(Error::new(
+                    ErrorKind::Unsupported,
+                    "required temporary-file persistence durability is unavailable on this platform",
+                )),
+                LocalDurabilityRequirement::Preferred | LocalDurabilityRequirement::NotRequired => Ok(false),
+            };
+        }
+        let synchronize = || -> Result<()> {
+            if let Some(file) = self.file.as_ref() {
+                return file.sync_all();
+            }
+            match &self.backend {
+                LocalTempResourceBackend::Host(_) => File::open(&self.path)?.sync_all(),
+                LocalTempResourceBackend::Rooted(rooted) => {
+                    let path = LocalRelativePath::new(&rooted.relative_path)?;
+                    rooted.root.open_probe_file(&path)?.sync_all()
+                }
+            }
+        };
+        match durability {
+            LocalDurabilityRequirement::Required => synchronize().map(|()| true),
+            LocalDurabilityRequirement::Preferred => Ok(synchronize().is_ok()),
+            LocalDurabilityRequirement::NotRequired => Ok(false),
+        }
     }
 
     /// Removes the resource using the retained backend rather than a diagnostic
@@ -483,7 +570,12 @@ impl LocalTempFile {
             .as_ref()
             .and_then(LocalPathResolver::current_directory)
             .map(Path::to_path_buf);
-        let error = LocalPersistError::new(error, self, requested_target, resolved_target, stage);
+        let requirement_not_met =
+            stage == LocalPersistStage::SynchronizeSource && error.kind() == ErrorKind::Unsupported;
+        let mut error = LocalPersistError::new(error, self, requested_target, resolved_target, stage);
+        if requirement_not_met {
+            error = error.with_kind(LocalFileErrorKind::RequirementNotMet);
+        }
         match current_directory {
             Some(current_directory) => error.with_current_directory(current_directory),
             None => error,
@@ -560,6 +652,65 @@ impl LocalTempFile {
         } else {
             LocalTempResourceState::Indeterminate
         };
+    }
+}
+
+/// Synchronizes both Host rename parents and every created destination parent.
+fn synchronize_host_publication(
+    source: &Path,
+    target: &Path,
+    created_parents: &[PathBuf],
+    durability: LocalDurabilityRequirement,
+) -> Result<bool> {
+    synchronize_destination(durability, || {
+        crate::local::sync_parent_dir(source)?;
+        crate::local::sync_parent_dir(target)?;
+        for directory in created_parents.iter().rev() {
+            crate::local::sync_parent_dir(directory)?;
+        }
+        Ok(())
+    })
+}
+
+/// Synchronizes both Rooted rename parents and the destination ancestor chain.
+fn synchronize_rooted_publication(
+    root: &crate::rooted::Root,
+    source: &LocalRelativePath,
+    target: &LocalRelativePath,
+    durability: LocalDurabilityRequirement,
+) -> Result<bool> {
+    synchronize_destination(durability, || {
+        root.sync_parent(source)?;
+        let mut current = target.as_path();
+        loop {
+            let relative = LocalRelativePath::new(current)?;
+            root.sync_parent(&relative)?;
+            let Some(parent) = current.parent() else {
+                break;
+            };
+            if parent.as_os_str().is_empty() {
+                break;
+            }
+            current = parent;
+        }
+        Ok(())
+    })
+}
+
+/// Applies preferred or required policy to one destination synchronization.
+fn synchronize_destination(
+    durability: LocalDurabilityRequirement,
+    synchronize: impl FnOnce() -> Result<()>,
+) -> Result<bool> {
+    #[cfg(feature = "test-support")]
+    if durability != LocalDurabilityRequirement::NotRequired && crate::local::take_test_support("temp-file-parent-sync")
+    {
+        return Err(crate::local::test_fault_error());
+    }
+    match durability {
+        LocalDurabilityRequirement::NotRequired => Ok(false),
+        LocalDurabilityRequirement::Preferred => Ok(synchronize().is_ok()),
+        LocalDurabilityRequirement::Required => synchronize().map(|()| true),
     }
 }
 

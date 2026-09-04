@@ -108,6 +108,7 @@ pub(crate) use internal::resolve_host_path;
 pub(crate) use internal::rooted_link_targets_directory;
 #[cfg(any(unix, windows))]
 pub(crate) use internal::set_rooted_permissions;
+pub(crate) use internal::sync_parent_dir;
 #[cfg(unix)]
 pub(crate) use internal::sync_rooted_parent;
 pub(crate) use internal::try_random_file_name;

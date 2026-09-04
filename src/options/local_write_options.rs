@@ -86,7 +86,7 @@ impl LocalWriteOptions {
     }
 
     /// Enables creation of missing parent directories.
-    pub const fn with_parent(mut self) -> Self {
+    pub const fn with_create_parent(mut self) -> Self {
         self.create_parent = true;
         self
     }

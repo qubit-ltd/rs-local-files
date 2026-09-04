@@ -19,20 +19,23 @@ use std::path::Path;
 use std::path::PathBuf;
 
 use crate::LocalFileError;
+use crate::LocalFileErrorKind;
 use crate::LocalFileOperation;
 use crate::LocalPersistFailureState;
 use crate::LocalPersistStage;
 
 /// Persistence error that returns ownership of the temporary resource.
 ///
-/// The stage distinguishes target resolution, parent preparation, and final
-/// installation. [`Self::requested_target`] always returns the caller's path;
+/// The stage distinguishes target resolution, parent preparation, source
+/// synchronization, final installation, and destination synchronization.
+/// [`Self::requested_target`] always returns the caller's path;
 /// [`Self::resolved_target`] returns the bound absolute path once resolution
 /// has succeeded. The resource remains available for retry, inspection, keep,
 /// or explicit cleanup only while the retained resource still has a known
-/// owned namespace entry. After an indeterminate native publish failure,
-/// temporary handles reject cleanup and their `Drop` implementation performs
-/// no namespace operation.
+/// owned namespace entry. A `Published` failure retains only residual sandbox
+/// cleanup and never removes the destination. After an indeterminate native
+/// publish failure, temporary handles reject cleanup and their `Drop`
+/// implementation performs no namespace operation.
 #[non_exhaustive]
 #[derive(Debug)]
 pub struct LocalPersistError<T> {
@@ -234,6 +237,13 @@ impl<T> LocalPersistError<T> {
         self.error = Box::new((*self.error).with_current_directory(current_directory));
         self
     }
+
+    /// Reclassifies a constructed persistence failure with a stable public
+    /// error kind while retaining its native source details.
+    pub(crate) fn with_kind(mut self, kind: LocalFileErrorKind) -> Self {
+        self.error = Box::new((*self.error).with_kind(kind));
+        self
+    }
 }
 
 impl<T> Display for LocalPersistError<T> {
@@ -327,5 +337,26 @@ mod tests {
         assert_eq!(LocalPersistStage::InstallDestination, stage);
         assert_eq!(LocalPersistFailureState::Indeterminate, state);
         assert_eq!(LocalFileOperation::PersistTemp, source.operation());
+    }
+
+    #[test]
+    fn test_persist_error_classifies_durability_failure_state() {
+        let source_error = LocalPersistError::new(
+            io::Error::from(io::ErrorKind::Other),
+            (),
+            PathBuf::from("requested"),
+            Some(PathBuf::from("/resolved")),
+            LocalPersistStage::SynchronizeSource,
+        );
+        assert_eq!(LocalPersistFailureState::NotPublished, source_error.state());
+
+        let destination_error = LocalPersistError::new(
+            io::Error::from(io::ErrorKind::Other),
+            (),
+            PathBuf::from("requested"),
+            Some(PathBuf::from("/resolved")),
+            LocalPersistStage::SynchronizeDestination,
+        );
+        assert_eq!(LocalPersistFailureState::Published, destination_error.state());
     }
 }

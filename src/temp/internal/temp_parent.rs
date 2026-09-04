@@ -9,23 +9,24 @@
 
 use std::io;
 use std::path::Path;
+use std::path::PathBuf;
 
 /// Prepares a host target parent before any publication attempt.
 // qubit-style: allow coverage-cfg
 #[cfg_attr(not(coverage), inline)]
 #[cfg_attr(coverage, inline(never))]
-pub(crate) fn host(target: &Path, create_parent: bool) -> io::Result<()> {
+pub(crate) fn host(target: &Path, create_parent: bool) -> io::Result<Vec<PathBuf>> {
     let parent = target
         .parent()
         .ok_or(io::Error::new(io::ErrorKind::InvalidInput, "target has no parent"))?;
     if parent.as_os_str().is_empty() {
-        return Ok(());
+        return Ok(Vec::new());
     }
     if create_parent {
-        return std::fs::create_dir_all(parent);
+        return crate::local::ensure_parent_path_with_sync_dirs(target);
     }
     if std::fs::metadata(parent)?.is_dir() {
-        Ok(())
+        Ok(Vec::new())
     } else {
         Err(io::Error::from(io::ErrorKind::NotADirectory))
     }

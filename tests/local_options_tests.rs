@@ -125,7 +125,7 @@ fn test_copy_rename_and_write_option_builders_retain_policies() {
         .with_symlink_policy(LocalSymlinkPolicy::FollowWithinScope)
         .with_file_source()
         .with_tree_source()
-        .with_parent()
+        .with_create_parent()
         .with_atomicity(LocalAtomicityRequirement::Required)
         .with_durability(LocalDurabilityRequirement::Required)
         .with_max_depth(3)
@@ -158,7 +158,7 @@ fn test_copy_rename_and_write_option_builders_retain_policies() {
 
     let timeout = Duration::from_secs(1);
     let writer = black_box(LocalWriteOptions::new(LocalWriteMode::CreateNew))
-        .with_parent()
+        .with_create_parent()
         .with_atomicity(LocalAtomicityRequirement::Required)
         .with_durability(LocalDurabilityRequirement::Preferred)
         .with_open_retry_timeout(timeout);
@@ -189,8 +189,9 @@ fn test_copy_option_builders_are_independently_observable() {
     let copy = black_box(with_file_source)(black_box(copy));
     assert_eq!(copy.source_mode(), LocalCopySourceMode::File);
 
-    let with_parent = black_box(LocalCopyOptions::with_parent as fn(LocalCopyOptions) -> LocalCopyOptions);
-    let copy = black_box(with_parent)(black_box(copy));
+    let with_create_parent =
+        black_box(LocalCopyOptions::with_create_parent as fn(LocalCopyOptions) -> LocalCopyOptions);
+    let copy = black_box(with_create_parent)(black_box(copy));
     assert!(copy.creates_parent());
 
     let with_durability = black_box(
@@ -410,12 +411,16 @@ fn test_optional_budgets_can_be_cleared() {
     assert_eq!(directory.max_attempts(), None);
 }
 
-/// Verifies temporary-resource persistence defaults to no replacement and can
-/// explicitly opt into replacement.
+/// Verifies temporary-resource persistence retains publication and durability
+/// policies.
 #[test]
 fn test_persist_options_expose_overwrite_policy() {
     let conservative = black_box(LocalPersistOptions::default as fn() -> _)();
     assert!(!black_box(LocalPersistOptions::overwrites)(&conservative));
+    assert_eq!(
+        LocalDurabilityRequirement::NotRequired,
+        black_box(LocalPersistOptions::durability)(&conservative),
+    );
 
     let replacing = black_box(LocalPersistOptions::with_overwrite as fn(_) -> _)(black_box(
         LocalPersistOptions::new as fn() -> _,
@@ -423,5 +428,13 @@ fn test_persist_options_expose_overwrite_policy() {
     assert!(black_box(LocalPersistOptions::overwrites)(&replacing));
     let with_parent = black_box(LocalPersistOptions::with_create_parent as fn(_) -> _)(LocalPersistOptions::new());
     assert!(black_box(LocalPersistOptions::creates_parent)(&with_parent));
+    for durability in [
+        LocalDurabilityRequirement::Required,
+        LocalDurabilityRequirement::Preferred,
+        LocalDurabilityRequirement::NotRequired,
+    ] {
+        let configured = black_box(LocalPersistOptions::with_durability)(LocalPersistOptions::new(), durability);
+        assert_eq!(durability, black_box(LocalPersistOptions::durability)(&configured));
+    }
     assert_eq!(LocalPersistOptions::new(), LocalPersistOptions::default());
 }

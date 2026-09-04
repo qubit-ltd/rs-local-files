@@ -129,7 +129,7 @@ fn test_local_file_writer_creates_missing_parent_when_requested() {
         .expect("Host filesystem should open")
         .open_writer_with_options(
             &target,
-            &LocalWriteOptions::new(LocalWriteMode::CreateNew).with_parent(),
+            &LocalWriteOptions::new(LocalWriteMode::CreateNew).with_create_parent(),
         )
         .expect("writer should create the requested parent directory");
     writer.write_all(b"payload").expect("staged writer should accept bytes");
@@ -154,7 +154,7 @@ fn test_local_file_writer_creates_nested_durable_parent_chain() {
         .open_writer_with_options(
             &target,
             &LocalWriteOptions::new(LocalWriteMode::CreateNew)
-                .with_parent()
+                .with_create_parent()
                 .with_durability(LocalDurabilityRequirement::Required),
         )
         .expect("writer should create and synchronize missing parents");

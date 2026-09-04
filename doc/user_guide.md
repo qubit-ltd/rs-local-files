@@ -321,8 +321,9 @@ path (or `Unknown` when probing is unavailable). Interpret both numeric limits
 using `length_unit()`: Unix uses bytes and Windows uses UTF-16 code units, which
 must not be treated as UTF-8 byte limits. Atomic rename, atomic replacement,
 the ability to attempt atomic temporary persistence, durable rename, durable
-file copy, and durable writer publication are reported independently because
-platform support differs. `can_attempt_atomic_temp_persist()` describes an
+file copy, durable writer publication, and durable temporary-file persistence
+are reported independently because platform support differs.
+`can_attempt_atomic_temp_persist()` describes an
 implemented attempt protocol; same-filesystem placement and runtime namespace
 conditions still determine the operation outcome. These flags do not prove
 persistence on a particular mount or storage device.

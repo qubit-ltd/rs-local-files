@@ -195,7 +195,7 @@ pub(crate) fn open_staged_writer(
         native_options = native_options.with_create_new();
     }
     if options.creates_parent() {
-        native_options = native_options.with_parent();
+        native_options = native_options.with_create_parent();
     }
     if let Some(timeout) = options.open_retry_timeout() {
         native_options = native_options.with_open_retry_timeout(timeout);

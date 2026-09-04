@@ -181,7 +181,7 @@ impl RootedLocalFileSystem {
                     atomic_options = atomic_options.with_create_new();
                 }
                 if options.creates_parent() {
-                    atomic_options = atomic_options.with_parent();
+                    atomic_options = atomic_options.with_create_parent();
                 }
                 if let Some(timeout) = options.open_retry_timeout() {
                     atomic_options = atomic_options.with_open_retry_timeout(timeout);
