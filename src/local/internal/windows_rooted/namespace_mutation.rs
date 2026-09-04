@@ -124,7 +124,7 @@ pub(super) fn rename_open_entry(
     } else {
         None
     };
-    let (destination_parent, destination_name) = open_parent_for_rename(root, destination)?;
+    let (destination_parent, destination_name) = open_parent_for_rename(root, destination, overwrite)?;
     let (mut buffer, information_length) = build_rename_information(destination_name.as_os_str(), overwrite)?;
     // SAFETY: `Vec<usize>` provides alignment suitable for the native
     // FILE_RENAME_INFORMATION payload.
