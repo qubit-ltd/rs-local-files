@@ -39,9 +39,11 @@ use windows_sys::Win32::Foundation::INVALID_HANDLE_VALUE;
 use windows_sys::Win32::Foundation::OBJ_CASE_INSENSITIVE;
 use windows_sys::Win32::Foundation::UNICODE_STRING;
 use windows_sys::Win32::Storage::FileSystem::CreateFileW;
+use windows_sys::Win32::Storage::FileSystem::FILE_ADD_FILE;
 use windows_sys::Win32::Storage::FileSystem::FILE_APPEND_DATA;
 use windows_sys::Win32::Storage::FileSystem::FILE_ATTRIBUTE_NORMAL;
 use windows_sys::Win32::Storage::FileSystem::FILE_ATTRIBUTE_TAG_INFO;
+use windows_sys::Win32::Storage::FileSystem::FILE_DELETE_CHILD;
 use windows_sys::Win32::Storage::FileSystem::FILE_FLAG_BACKUP_SEMANTICS;
 use windows_sys::Win32::Storage::FileSystem::FILE_LIST_DIRECTORY;
 use windows_sys::Win32::Storage::FileSystem::FILE_READ_ATTRIBUTES;
@@ -81,7 +83,7 @@ pub(crate) fn open_root_directory(path: &Path) -> Result<File> {
     let handle = unsafe {
         CreateFileW(
             wide.as_ptr(),
-            FILE_LIST_DIRECTORY | FILE_READ_ATTRIBUTES | SYNCHRONIZE,
+            FILE_LIST_DIRECTORY | FILE_READ_ATTRIBUTES | FILE_ADD_FILE | FILE_DELETE_CHILD | SYNCHRONIZE,
             ROOTED_SHARE_MODE,
             null(),
             OPEN_EXISTING,
@@ -216,6 +218,21 @@ fn wide_path(path: &Path) -> Result<Vec<u16>> {
 
 /// Opens and verifies every parent component beneath the root.
 pub(super) fn open_parent(root: &File, path: &LocalRelativePath) -> Result<(File, OsString)> {
+    open_parent_with_access(root, path, FILE_LIST_DIRECTORY | FILE_READ_ATTRIBUTES | SYNCHRONIZE)
+}
+
+/// Opens every parent component with the rights needed for a rooted rename.
+pub(super) fn open_parent_for_rename(root: &File, path: &LocalRelativePath) -> Result<(File, OsString)> {
+    open_parent_with_access(
+        root,
+        path,
+        FILE_LIST_DIRECTORY | FILE_READ_ATTRIBUTES | FILE_ADD_FILE | FILE_DELETE_CHILD | SYNCHRONIZE,
+    )
+}
+
+/// Opens and verifies every parent component with the requested directory
+/// rights.
+fn open_parent_with_access(root: &File, path: &LocalRelativePath, access: u32) -> Result<(File, OsString)> {
     let mut components: Vec<OsString> = path
         .as_path()
         .components()
@@ -226,13 +243,7 @@ pub(super) fn open_parent(root: &File, path: &LocalRelativePath) -> Result<(File
         .ok_or_else(|| Error::new(ErrorKind::InvalidInput, "rooted path is empty"))?;
     let mut parent = root.try_clone()?;
     for component in components {
-        let directory = nt_open_at(
-            &parent,
-            &component,
-            FILE_LIST_DIRECTORY | FILE_READ_ATTRIBUTES | SYNCHRONIZE,
-            FILE_OPEN,
-            FILE_DIRECTORY_FILE,
-        )?;
+        let directory = nt_open_at(&parent, &component, access, FILE_OPEN, FILE_DIRECTORY_FILE)?;
         verify_real_directory(&directory)?;
         parent = directory;
     }
