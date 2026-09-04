@@ -109,6 +109,21 @@ pub(super) fn rename_open_entry(
 ) -> Result<()> {
     use windows_sys::Win32::Storage::FileSystem::DELETE;
     let source = open_entry_no_follow(root, source, DELETE | FILE_READ_ATTRIBUTES | SYNCHRONIZE, FILE_OPEN, 0)?;
+    let _destination = if overwrite {
+        match open_entry_no_follow(
+            root,
+            destination,
+            DELETE | FILE_READ_ATTRIBUTES | SYNCHRONIZE,
+            FILE_OPEN,
+            0,
+        ) {
+            Ok(destination) => Some(destination),
+            Err(error) if error.kind() == ErrorKind::NotFound => None,
+            Err(error) => return Err(error),
+        }
+    } else {
+        None
+    };
     let (destination_parent, destination_name) = open_parent_for_rename(root, destination)?;
     let (mut buffer, information_length) = build_rename_information(destination_name.as_os_str(), overwrite)?;
     // SAFETY: `Vec<usize>` provides alignment suitable for the native
