@@ -18,12 +18,14 @@ use std::os::windows::io::AsRawHandle;
 use std::path::Path;
 
 use windows_sys::Wdk::Storage::FileSystem::FILE_OPEN;
+use windows_sys::Wdk::Storage::FileSystem::FILE_RENAME_INFORMATION;
+use windows_sys::Wdk::Storage::FileSystem::FileRenameInformation;
+use windows_sys::Wdk::Storage::FileSystem::NtSetInformationFile;
+use windows_sys::Wdk::Storage::FileSystem::RtlNtStatusToDosErrorNoTeb;
 use windows_sys::Win32::Storage::FileSystem::FILE_READ_ATTRIBUTES;
-use windows_sys::Win32::Storage::FileSystem::FILE_RENAME_INFO;
 use windows_sys::Win32::Storage::FileSystem::FILE_WRITE_ATTRIBUTES;
-use windows_sys::Win32::Storage::FileSystem::FileRenameInfo;
 use windows_sys::Win32::Storage::FileSystem::SYNCHRONIZE;
-use windows_sys::Win32::Storage::FileSystem::SetFileInformationByHandle;
+use windows_sys::Win32::System::IO::IO_STATUS_BLOCK;
 
 use super::handle::open_entry;
 use super::handle::open_entry_no_follow;
@@ -109,22 +111,25 @@ pub(super) fn rename_open_entry(
     let (destination_parent, destination_name) = open_parent(root, destination)?;
     let (mut buffer, information_length) = build_rename_information(destination_name.as_os_str(), overwrite)?;
     // SAFETY: `Vec<usize>` provides alignment suitable for the native
-    // FILE_RENAME_INFO payload.
-    let information = unsafe { &mut *buffer.as_mut_ptr().cast::<FILE_RENAME_INFO>() };
+    // FILE_RENAME_INFORMATION payload.
+    let information = unsafe { &mut *buffer.as_mut_ptr().cast::<FILE_RENAME_INFORMATION>() };
     information.RootDirectory = destination_parent.as_raw_handle();
+    let mut status_block = IO_STATUS_BLOCK::default();
     // SAFETY: `source` and the destination parent remain open, `buffer` is a
-    // complete FILE_RENAME_INFO payload, and the native call does not retain
-    // any pointer after returning.
-    let result = unsafe {
-        SetFileInformationByHandle(
+    // complete FILE_RENAME_INFORMATION payload, and the native call does not
+    // retain any pointer after returning.
+    let status = unsafe {
+        NtSetInformationFile(
             source.as_raw_handle(),
-            FileRenameInfo,
+            &raw mut status_block,
             buffer.as_ptr().cast(),
             information_length,
+            FileRenameInformation,
         )
     };
-    if result == 0 {
-        Err(Error::last_os_error())
+    if status < 0 {
+        let error = unsafe { RtlNtStatusToDosErrorNoTeb(status) };
+        Err(Error::from_raw_os_error(error as i32))
     } else {
         Ok(())
     }
@@ -141,18 +146,18 @@ pub(super) fn rename_open_entry(
 /// Returns `InvalidInput` if the UTF-16 name or complete payload length cannot
 /// be represented by the Windows API.
 fn build_rename_information(destination: &OsStr, overwrite: bool) -> Result<(Vec<usize>, u32)> {
-    use windows_sys::Win32::Storage::FileSystem::FILE_RENAME_INFO;
+    use windows_sys::Wdk::Storage::FileSystem::FILE_RENAME_INFORMATION;
 
     let destination_units: Vec<u16> = destination.encode_wide().collect();
     let file_name_bytes = destination_units
         .len()
         .checked_mul(size_of::<u16>())
         .ok_or_else(|| Error::new(ErrorKind::InvalidInput, "rename name is too long"))?;
-    let allocation = size_of::<FILE_RENAME_INFO>()
+    let allocation = size_of::<FILE_RENAME_INFORMATION>()
         .checked_add(file_name_bytes)
         .ok_or_else(|| Error::new(ErrorKind::InvalidInput, "rename buffer is too large"))?;
     let information_length = u32::try_from(
-        size_of::<FILE_RENAME_INFO>()
+        size_of::<FILE_RENAME_INFORMATION>()
             .checked_sub(size_of::<u16>())
             .and_then(|header| header.checked_add(file_name_bytes))
             .ok_or_else(|| Error::new(ErrorKind::InvalidInput, "rename buffer is too large"))?,
@@ -162,7 +167,7 @@ fn build_rename_information(destination: &OsStr, overwrite: bool) -> Result<(Vec
     // SAFETY: `Vec<usize>` provides alignment suitable for
     // `FILE_RENAME_INFORMATION`,
     // and the allocation includes the complete trailing UTF-16 name.
-    let information = unsafe { &mut *buffer.as_mut_ptr().cast::<FILE_RENAME_INFO>() };
+    let information = unsafe { &mut *buffer.as_mut_ptr().cast::<FILE_RENAME_INFORMATION>() };
     information.Anonymous.ReplaceIfExists = overwrite;
     information.FileNameLength =
         u32::try_from(file_name_bytes).map_err(|_| Error::new(ErrorKind::InvalidInput, "rename name is too long"))?;
@@ -184,7 +189,7 @@ mod tests {
     use std::os::windows::ffi::OsStrExt;
     use std::path::Path;
 
-    use windows_sys::Win32::Storage::FileSystem::FILE_RENAME_INFO;
+    use windows_sys::Wdk::Storage::FileSystem::FILE_RENAME_INFORMATION;
 
     use super::build_rename_information;
     use crate::local::LocalRelativePath;
@@ -195,12 +200,12 @@ mod tests {
         let destination = LocalRelativePath::new(Path::new("nested/renamed")).expect("destination should be valid");
         let (buffer, information_length) =
             build_rename_information(destination.as_path().as_os_str(), true).expect("rename payload should build");
-        let information = unsafe { &*buffer.as_ptr().cast::<FILE_RENAME_INFO>() };
+        let information = unsafe { &*buffer.as_ptr().cast::<FILE_RENAME_INFORMATION>() };
         let expected_name_bytes = destination.as_path().as_os_str().encode_wide().count() * size_of::<u16>();
 
         assert_eq!(
             information_length as usize,
-            size_of::<FILE_RENAME_INFO>() - size_of::<u16>() + expected_name_bytes
+            size_of::<FILE_RENAME_INFORMATION>() - size_of::<u16>() + expected_name_bytes
         );
         assert_eq!(information.FileNameLength as usize, expected_name_bytes);
         assert!(unsafe { information.Anonymous.ReplaceIfExists });
