@@ -318,11 +318,51 @@ fn operation_failure_path(error: &LocalFileError, scope: LocalFileSystemScope, f
         return fallback.to_path_buf();
     };
     match scope {
-        LocalFileSystemScope::Host => path.to_path_buf(),
+        LocalFileSystemScope::Host => map_host_failure_path(path, fallback),
         LocalFileSystemScope::Rooted => {
             let mut public = PathBuf::from(std::path::MAIN_SEPARATOR_STR);
             public.push(path);
             public
         }
     }
+}
+
+/// Rebinds a Host backend failure to the caller's path spelling.
+///
+/// macOS exposes `/var` through a `/private/var` symlink. The backend may
+/// resolve that alias before walking a partially published tree, while the
+/// public operand retains the spelling supplied by the caller. Comparing the
+/// nearest existing ancestors after canonicalization lets us restore the
+/// caller's namespace without requiring the failed tail to exist.
+fn map_host_failure_path(path: &Path, fallback: &Path) -> PathBuf {
+    let (path_base, path_tail) = split_existing_prefix(path);
+    let (fallback_base, _) = split_existing_prefix(fallback);
+    let Ok(path_canonical) = fs::canonicalize(&path_base) else {
+        return path.to_path_buf();
+    };
+    let Ok(fallback_canonical) = fs::canonicalize(&fallback_base) else {
+        return path.to_path_buf();
+    };
+    if path_canonical != fallback_canonical {
+        return path.to_path_buf();
+    }
+    fallback_base.join(path_tail)
+}
+
+/// Splits a path into its nearest existing ancestor and missing tail.
+fn split_existing_prefix(path: &Path) -> (PathBuf, PathBuf) {
+    let mut base = path.to_path_buf();
+    let mut tail = PathBuf::new();
+    while !base.exists() {
+        let Some(name) = base.file_name() else {
+            return (path.to_path_buf(), PathBuf::new());
+        };
+        let mut next_tail = PathBuf::from(name);
+        next_tail.push(&tail);
+        tail = next_tail;
+        if !base.pop() {
+            return (path.to_path_buf(), PathBuf::new());
+        }
+    }
+    (base, tail)
 }
