@@ -24,6 +24,7 @@ use windows_sys::Wdk::Storage::FileSystem::NtSetInformationFile;
 use windows_sys::Wdk::Storage::FileSystem::RtlNtStatusToDosErrorNoTeb;
 use windows_sys::Win32::Storage::FileSystem::FILE_READ_ATTRIBUTES;
 use windows_sys::Win32::Storage::FileSystem::FILE_WRITE_ATTRIBUTES;
+use windows_sys::Win32::Storage::FileSystem::FILE_WRITE_DATA;
 use windows_sys::Win32::Storage::FileSystem::SYNCHRONIZE;
 use windows_sys::Win32::System::IO::IO_STATUS_BLOCK;
 
@@ -107,7 +108,8 @@ pub(super) fn rename_open_entry(
     overwrite: bool,
 ) -> Result<()> {
     use windows_sys::Win32::Storage::FileSystem::DELETE;
-    let source = open_entry_no_follow(root, source, DELETE | FILE_READ_ATTRIBUTES | SYNCHRONIZE, FILE_OPEN, 0)?;
+    let source_access = DELETE | FILE_READ_ATTRIBUTES | SYNCHRONIZE | if overwrite { FILE_WRITE_DATA } else { 0 };
+    let source = open_entry_no_follow(root, source, source_access, FILE_OPEN, 0)?;
     if overwrite {
         match open_entry_no_follow(
             root,
