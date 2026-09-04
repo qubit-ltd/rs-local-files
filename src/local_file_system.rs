@@ -21,12 +21,16 @@ mod io;
 // Implements temporary-file and temporary-directory operations.
 mod temp;
 
+use std::fmt;
 use std::fs;
 use std::io::Read;
 use std::path::Path;
 use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::Instant;
+
+use qubit_redact::RedactedText;
+use qubit_redact::Redactor;
 
 use crate::LocalCopyOptions;
 use crate::LocalCopyResult;
@@ -96,7 +100,7 @@ use crate::rooted_local_file_system::RootedLocalFileSystem;
 /// # Ok(())
 /// # }
 /// ```
-#[derive(Clone, Debug)]
+#[derive(Clone)]
 pub struct LocalFileSystem {
     /// Immutable authority and capability state shared by opened resources.
     pub(crate) core: Arc<LocalFileSystemCore>,
@@ -106,6 +110,25 @@ pub struct LocalFileSystem {
     symlink_policy: LocalSymlinkPolicy,
     /// Per-instance operation defaults, copied by value on clone.
     defaults: LocalFileSystemDefaults,
+}
+
+impl fmt::Debug for LocalFileSystem {
+    /// Formats operational configuration while masking native and virtual
+    /// filesystem paths with a fail-closed policy.
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let diagnostic_root = self.diagnostic_root().map(redacted_path);
+        let current_directory = self.current_directory.virtual_path().map(redacted_path);
+        formatter
+            .debug_struct("LocalFileSystem")
+            .field("scope", &self.scope())
+            .field("diagnostic_root", &diagnostic_root)
+            .field("current_directory", &current_directory)
+            .field("symlink_policy", &self.symlink_policy)
+            .field("defaults", &self.defaults)
+            .field("capabilities", &self.core.capabilities)
+            .field("limits", &self.core.limits)
+            .finish()
+    }
 }
 
 impl LocalFileSystem {
@@ -307,6 +330,14 @@ fn with_current_directory(error: LocalFileError, current_directory: Option<&Path
         Some(current_directory) => error.with_current_directory(current_directory.to_path_buf()),
         None => error,
     }
+}
+
+/// Masks one diagnostic filesystem path without consulting mutable process
+/// policy.
+fn redacted_path(path: &Path) -> RedactedText {
+    Redactor::strict()
+        .redact_field("filesystem_path", &path.display())
+        .into_text_or_marker("<redaction incomplete>")
 }
 
 /// Selects the public path for an operation that may partially publish.
