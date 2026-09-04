@@ -20,13 +20,9 @@ use std::path::Path;
 
 use windows_sys::Wdk::Storage::FileSystem::FILE_OPEN;
 use windows_sys::Wdk::Storage::FileSystem::FILE_RENAME_INFORMATION;
-use windows_sys::Wdk::Storage::FileSystem::FileRenameInformation;
-use windows_sys::Wdk::Storage::FileSystem::NtSetInformationFile;
-use windows_sys::Wdk::Storage::FileSystem::RtlNtStatusToDosErrorNoTeb;
 use windows_sys::Win32::Storage::FileSystem::FILE_READ_ATTRIBUTES;
 use windows_sys::Win32::Storage::FileSystem::FILE_WRITE_ATTRIBUTES;
 use windows_sys::Win32::Storage::FileSystem::SYNCHRONIZE;
-use windows_sys::Win32::System::IO::IO_STATUS_BLOCK;
 
 use super::handle::open_entry;
 use super::handle::open_entry_no_follow;
@@ -130,40 +126,21 @@ pub(super) fn rename_open_entry(
     // FILE_RENAME_INFORMATION payload.
     let information = unsafe { &mut *buffer.as_mut_ptr().cast::<FILE_RENAME_INFORMATION>() };
     information.RootDirectory = destination_parent.as_raw_handle();
-    let mut status_block = IO_STATUS_BLOCK::default();
+    use windows_sys::Win32::Storage::FileSystem::FileRenameInfo;
+    use windows_sys::Win32::Storage::FileSystem::SetFileInformationByHandle;
     // SAFETY: `source` and the destination parent remain open, `buffer` is a
-    // complete FILE_RENAME_INFORMATION payload, and the native call does not
-    // retain any pointer after returning.
-    let status = if overwrite {
-        use windows_sys::Win32::Storage::FileSystem::FileRenameInfo;
-        use windows_sys::Win32::Storage::FileSystem::SetFileInformationByHandle;
-        let result = unsafe {
-            SetFileInformationByHandle(
-                source.as_raw_handle(),
-                FileRenameInfo,
-                buffer.as_ptr().cast(),
-                information_length,
-            )
-        };
-        if result == 0 {
-            let error = Error::last_os_error();
-            return Err(error);
-        }
-        0
-    } else {
-        unsafe {
-            NtSetInformationFile(
-                source.as_raw_handle(),
-                &raw mut status_block,
-                buffer.as_ptr().cast(),
-                information_length,
-                FileRenameInformation,
-            )
-        }
+    // complete FILE_RENAME_INFO payload, and the native call does not retain
+    // any pointer after returning.
+    let result = unsafe {
+        SetFileInformationByHandle(
+            source.as_raw_handle(),
+            FileRenameInfo,
+            buffer.as_ptr().cast(),
+            information_length,
+        )
     };
-    if status < 0 {
-        let error = unsafe { RtlNtStatusToDosErrorNoTeb(status) };
-        Err(Error::from_raw_os_error(error as i32))
+    if result == 0 {
+        Err(Error::last_os_error())
     } else {
         Ok(())
     }
