@@ -198,8 +198,8 @@ mod tests {
     #[test]
     fn rename_buffer_reports_complete_payload_length() {
         let destination = LocalRelativePath::new(Path::new("nested/renamed")).expect("destination should be valid");
-        let (buffer, information_length) = build_rename_information(destination.as_path().as_os_str(), true)
-            .expect("rename payload should build");
+        let (buffer, information_length) =
+            build_rename_information(destination.as_path().as_os_str(), true).expect("rename payload should build");
         let information = unsafe { &*buffer.as_ptr().cast::<FILE_RENAME_INFORMATION>() };
         let expected_name_bytes = destination.as_path().as_os_str().encode_wide().count() * size_of::<u16>();
 
