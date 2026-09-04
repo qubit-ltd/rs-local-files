@@ -142,6 +142,9 @@ pub(super) fn rename_open_entry(
     };
     if status < 0 {
         let error = unsafe { RtlNtStatusToDosErrorNoTeb(status) };
+        eprintln!(
+            "rooted rename failed: overwrite={overwrite}, source={source:?}, destination={destination:?}, ntstatus={status:#x}, win32={error}"
+        );
         Err(Error::from_raw_os_error(error as i32))
     } else {
         Ok(())
