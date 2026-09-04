@@ -509,11 +509,17 @@ fn test_local_file_writer_exercises_atomic_install_fault_boundaries() {
         ("atomic-install-replace-indeterminate", true, true),
         ("atomic-install-before-native-call", false, true),
         ("atomic-install-fallback", false, false),
+        #[cfg(not(target_os = "macos"))]
         ("atomic-install-link", false, true),
+        #[cfg(not(target_os = "macos"))]
         ("atomic-install-unlink", false, false),
+        #[cfg(not(target_os = "macos"))]
         ("atomic-install-unlink-persistent", false, true),
+        #[cfg(not(target_os = "macos"))]
         ("atomic-install-unlink-persistent-sync", false, true),
+        #[cfg(not(target_os = "macos"))]
         ("atomic-install-unlink-recover-sync", false, true),
+        #[cfg(not(target_os = "macos"))]
         ("atomic-install-unlink-indeterminate-sync", false, true),
     ] {
         run_host_writer_fault(TEST_NAME, fault, || {
