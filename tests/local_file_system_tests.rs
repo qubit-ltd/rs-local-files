@@ -23,6 +23,22 @@ use qubit_local_files::policy::LocalDurabilityRequirement;
 use tempfile::NamedTempFile;
 use tempfile::tempdir;
 
+/// Verifies Rooted filesystem diagnostics never expose native authority paths.
+#[test]
+fn test_local_file_system_debug_redacts_root_paths() {
+    let directory = tempdir().expect("temporary directory should be created");
+    let sensitive_root = directory.path().join("customer-secret-root-8f921d");
+    fs::create_dir(&sensitive_root).expect("sensitive rooted directory should be created");
+    let filesystem = LocalFileSystem::rooted(&sensitive_root).expect("Rooted filesystem should open");
+
+    let diagnostic = format!("{filesystem:?}");
+
+    assert!(diagnostic.contains("LocalFileSystem"));
+    assert!(diagnostic.contains("Rooted"));
+    assert!(diagnostic.contains("<redacted>"));
+    assert!(!diagnostic.contains("customer-secret-root-8f921d"));
+}
+
 /// Verifies default host copy and rename avoid durability synchronization.
 #[cfg(target_os = "linux")]
 #[test]
@@ -102,7 +118,7 @@ fn test_local_file_system_copy_creates_missing_parent() {
 
     let _ = LocalFileSystem::host()
         .expect("Host filesystem should open")
-        .copy_with_options(&source, &target, &LocalCopyOptions::new().with_parent())
+        .copy_with_options(&source, &target, &LocalCopyOptions::new().with_create_parent())
         .expect("copy should create the missing parent");
 
     assert_eq!(
