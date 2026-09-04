@@ -26,6 +26,7 @@ use windows_sys::Wdk::Storage::FileSystem::FILE_CREATE;
 use windows_sys::Wdk::Storage::FileSystem::FILE_DIRECTORY_FILE;
 use windows_sys::Wdk::Storage::FileSystem::FILE_NON_DIRECTORY_FILE;
 use windows_sys::Wdk::Storage::FileSystem::FILE_OPEN;
+use windows_sys::Wdk::Storage::FileSystem::FILE_OPEN_FOR_BACKUP_INTENT;
 use windows_sys::Wdk::Storage::FileSystem::FILE_OPEN_IF;
 use windows_sys::Wdk::Storage::FileSystem::FILE_OPEN_REPARSE_POINT;
 use windows_sys::Wdk::Storage::FileSystem::FILE_OVERWRITE_IF;
@@ -275,7 +276,7 @@ pub(super) fn nt_open_at(parent: &File, name: &OsStr, access: u32, disposition: 
             FILE_ATTRIBUTE_NORMAL,
             ROOTED_SHARE_MODE,
             disposition,
-            options | FILE_OPEN_REPARSE_POINT | FILE_SYNCHRONOUS_IO_NONALERT,
+            options | FILE_OPEN_FOR_BACKUP_INTENT | FILE_OPEN_REPARSE_POINT | FILE_SYNCHRONOUS_IO_NONALERT,
             null(),
             0,
         )
