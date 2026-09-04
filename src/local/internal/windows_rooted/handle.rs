@@ -230,7 +230,11 @@ pub(super) fn open_parent_for_rename(
 ) -> Result<(File, OsString)> {
     let access = FILE_LIST_DIRECTORY | FILE_READ_ATTRIBUTES | SYNCHRONIZE;
     let access = if overwrite {
-        access | FILE_ADD_FILE | FILE_DELETE_CHILD
+        let parent_requires_delete = path
+            .as_path()
+            .parent()
+            .is_some_and(|parent| !parent.as_os_str().is_empty());
+        access | FILE_ADD_FILE | FILE_DELETE_CHILD | if parent_requires_delete { DELETE } else { 0 }
     } else {
         access
     };
