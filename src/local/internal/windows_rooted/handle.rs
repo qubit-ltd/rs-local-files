@@ -39,7 +39,6 @@ use windows_sys::Win32::Foundation::INVALID_HANDLE_VALUE;
 use windows_sys::Win32::Foundation::OBJ_CASE_INSENSITIVE;
 use windows_sys::Win32::Foundation::UNICODE_STRING;
 use windows_sys::Win32::Storage::FileSystem::CreateFileW;
-use windows_sys::Win32::Storage::FileSystem::DELETE;
 use windows_sys::Win32::Storage::FileSystem::FILE_ADD_FILE;
 use windows_sys::Win32::Storage::FileSystem::FILE_APPEND_DATA;
 use windows_sys::Win32::Storage::FileSystem::FILE_ATTRIBUTE_NORMAL;
@@ -228,12 +227,12 @@ pub(super) fn open_parent_for_rename(
     path: &LocalRelativePath,
     overwrite: bool,
 ) -> Result<(File, OsString)> {
-    let access = FILE_LIST_DIRECTORY
-        | FILE_READ_ATTRIBUTES
-        | FILE_ADD_FILE
-        | FILE_DELETE_CHILD
-        | SYNCHRONIZE
-        | if overwrite { DELETE } else { 0 };
+    let access = FILE_LIST_DIRECTORY | FILE_READ_ATTRIBUTES | SYNCHRONIZE;
+    let access = if overwrite {
+        access | FILE_ADD_FILE | FILE_DELETE_CHILD
+    } else {
+        access
+    };
     open_parent_with_access(root, path, access)
 }
 
