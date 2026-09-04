@@ -335,18 +335,26 @@ fn operation_failure_path(error: &LocalFileError, scope: LocalFileSystemScope, f
 /// nearest existing ancestors after canonicalization lets us restore the
 /// caller's namespace without requiring the failed tail to exist.
 fn map_host_failure_path(path: &Path, fallback: &Path) -> PathBuf {
-    let (path_base, path_tail) = split_existing_prefix(path);
     let (fallback_base, _) = split_existing_prefix(fallback);
-    let Ok(path_canonical) = fs::canonicalize(&path_base) else {
-        return path.to_path_buf();
-    };
-    let Ok(fallback_canonical) = fs::canonicalize(&fallback_base) else {
-        return path.to_path_buf();
-    };
-    if path_canonical != fallback_canonical {
-        return path.to_path_buf();
+    let mut source = path.to_path_buf();
+    let mut tail = PathBuf::new();
+    loop {
+        if let (Ok(source_canonical), Ok(fallback_canonical)) =
+            (fs::canonicalize(&source), fs::canonicalize(&fallback_base))
+            && source_canonical == fallback_canonical
+        {
+            return fallback_base.join(tail);
+        }
+        let Some(name) = source.file_name() else {
+            return path.to_path_buf();
+        };
+        let mut next_tail = PathBuf::from(name);
+        next_tail.push(&tail);
+        tail = next_tail;
+        if !source.pop() {
+            return path.to_path_buf();
+        }
     }
-    fallback_base.join(path_tail)
 }
 
 /// Splits a path into its nearest existing ancestor and missing tail.
