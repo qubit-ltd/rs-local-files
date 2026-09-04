@@ -139,9 +139,13 @@ pub(super) fn rename_open_entry(
     }
     let mut status_block = IO_STATUS_BLOCK::default();
     let native_length = if overwrite {
-        information_length
-            .checked_add(size_of::<u16>() as u32)
-            .ok_or_else(|| Error::new(ErrorKind::InvalidInput, "rename buffer is too large"))?
+        u32::try_from(
+            buffer
+                .len()
+                .checked_mul(size_of::<usize>())
+                .ok_or_else(|| Error::new(ErrorKind::InvalidInput, "rename buffer is too large"))?,
+        )
+        .map_err(|_| Error::new(ErrorKind::InvalidInput, "rename buffer is too large"))?
     } else {
         information_length
     };
@@ -205,7 +209,7 @@ fn build_rename_information(destination: &OsStr, overwrite: bool) -> Result<(Vec
         .checked_mul(size_of::<u16>())
         .ok_or_else(|| Error::new(ErrorKind::InvalidInput, "rename name is too long"))?;
     let allocation = size_of::<FILE_RENAME_INFORMATION>()
-        .checked_add(file_name_bytes)
+        .checked_add(file_name_bytes.max(1024))
         .ok_or_else(|| Error::new(ErrorKind::InvalidInput, "rename buffer is too large"))?;
     let information_length = u32::try_from(
         size_of::<FILE_RENAME_INFORMATION>()
