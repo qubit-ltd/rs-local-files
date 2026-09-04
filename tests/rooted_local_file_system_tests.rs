@@ -169,7 +169,7 @@ fn test_rooted_local_file_system_copy_creates_missing_parent() {
         .copy_with_options(
             Path::new("source"),
             Path::new("nested/target"),
-            &LocalCopyOptions::new().with_parent(),
+            &LocalCopyOptions::new().with_create_parent(),
         )
         .expect("rooted copy should create the missing parent");
 

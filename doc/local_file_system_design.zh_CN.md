@@ -501,11 +501,17 @@ filesystem.copy_with_options(source, target, &options)?;
 - `LocalRenameOptions`：overwrite 与 durability；
 - `LocalTempFileOptions` / `LocalTempDirectoryOptions`：parent、prefix、suffix、名称尝试预算和
   父目录创建；
-- `LocalPersistOptions`：overwrite 与父目录创建。
+- `LocalPersistOptions`：overwrite、父目录创建与 durability。
 
 `LocalPersistOptions` 属于已经创建的临时资源。临时资源通常只 persist 一次，因此它不进入
 `LocalFileSystem` 的实例默认 Options；`persist(target)` 使用安全初始值，
 `persist_with(target, options)` 使用显式完整值。
+
+临时文件的 durable persist 在发布前同步文件内容，并在发布后同步目标父目录以及本次新建的
+父目录链；只有两部分都完成时 outcome 才报告 `durable = true`。临时目录允许调用方直接在
+目录树内创建任意后代，库无法证明所有后代内容都已同步，因此
+`LocalDurabilityRequirement::Required` 必须在 namespace 变更前返回
+`RequirementNotMet`，`Preferred` 可以继续发布但不得报告完整 durability。
 
 ### 7.5 Options 值语义与时间语义
 
@@ -1344,6 +1350,7 @@ path codec kind 或 cleanup error。
 - durable rename；
 - durable file copy。
 - durable writer publication。
+- durable temporary-file persistence。
 
 临时资源持久化的查询方法是 `can_attempt_atomic_temp_persist()`。它只表示当前 build/target
 实现了原子尝试协议，不承诺任意 source/target 都能原子完成；是否位于同一 filesystem、

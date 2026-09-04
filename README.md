@@ -158,9 +158,10 @@ runtime filesystem or claim that the underlying hardware has persisted data.
 Required atomicity or durability is rejected before namespace changes when the
 protocol cannot be met.
 Atomic rename, atomic replacement, the ability to attempt atomic temporary
-persistence, durable rename, durable file copy, and durable writer publication
-are reported as independent capabilities because their platform support
-differs. `can_attempt_atomic_temp_persist()` is an implementation capability,
+persistence, durable rename, durable file copy, durable writer publication,
+and durable temporary-file persistence are reported as independent
+capabilities because their platform support differs.
+`can_attempt_atomic_temp_persist()` is an implementation capability,
 not a promise for arbitrary source and target paths; the operation outcome
 reports what actually happened.
 Path-limit observations always include a unit: Unix reports bytes and Windows

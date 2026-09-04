@@ -29,8 +29,8 @@ use qubit_local_files::error::LocalFileErrorKind;
 use qubit_local_files::error::LocalFileOperation;
 use qubit_local_files::options::LocalPersistOptions;
 use qubit_local_files::options::LocalTempDirectoryOptions;
-#[cfg(not(windows))]
 use qubit_local_files::outcome::LocalPersistFailureState;
+use qubit_local_files::policy::LocalDurabilityRequirement;
 #[cfg(feature = "test-support")]
 use qubit_local_files::test_support::install_test_fault;
 use tempfile::tempdir;
@@ -114,6 +114,37 @@ fn test_local_temp_directory_persist_with_overwrite_replaces_empty_destination()
 
     assert_eq!(target, persisted.path());
     assert!(persisted.path().is_dir());
+}
+
+/// Verifies directory persistence rejects required durability before changing
+/// either source or destination namespace state.
+#[test]
+fn test_local_temp_directory_rejects_required_durability_before_publication() {
+    let parent = tempdir().expect("temporary parent should be created");
+    let target = parent.path().join("missing").join("published");
+    let temporary = LocalFileSystem::host()
+        .expect("Host filesystem should open")
+        .create_temp_directory_with_options(&LocalTempDirectoryOptions::new().with_parent(parent.path()))
+        .expect("temporary directory should be created");
+    let source = temporary.path().to_path_buf();
+
+    let error = temporary
+        .persist_with(
+            &target,
+            LocalPersistOptions::new()
+                .with_create_parent()
+                .with_durability(LocalDurabilityRequirement::Required),
+        )
+        .expect_err("directory content durability cannot be guaranteed");
+
+    assert_eq!(LocalFileErrorKind::RequirementNotMet, error.kind());
+    assert_eq!(LocalPersistFailureState::NotPublished, error.state());
+    assert!(source.is_dir());
+    assert!(!target.exists());
+    let (_, mut temporary, _, _, _) = error.into_parts();
+    temporary
+        .cleanup()
+        .expect("retained temporary directory should remain cleanable");
 }
 
 /// Verifies a relative temporary parent remains bound after the current

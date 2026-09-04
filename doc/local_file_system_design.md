@@ -337,7 +337,8 @@ must inspect their typed state rather than infer “nothing happened” from `Er
 - the ability to attempt atomic no-replace temporary persistence;
 - durable rename;
 - durable file copy;
-- durable writer publication.
+- durable writer publication;
+- durable temporary-file persistence.
 
 The temporary-persistence query is
 `can_attempt_atomic_temp_persist()`. It describes whether this build and target
@@ -538,7 +539,13 @@ filesystem nor read global configuration. A `deadline: Duration` starts at
 operation entry, uses a monotonic clock, and starts a walker at `list()` rather
 than its first `next()`. Copy deadlines are cooperative chunk boundaries, not
 claims to cancel a system call already in the kernel. `LocalPersistOptions`
-belongs to an existing temporary resource, not filesystem defaults.
+belongs to an existing temporary resource, not filesystem defaults, and
+controls overwrite, parent creation, and durability. Durable temporary-file
+persistence synchronizes file contents before publication and the destination
+parent chain after publication. Temporary directories cannot prove that
+arbitrary descendant contents were synchronized, so they reject `Required`
+durability before namespace mutation and never report full durability for a
+`Preferred` request.
 
 ### Path coordinate system and resolution
 
@@ -690,7 +697,8 @@ objects; callers branch on their typed state.
 
 Capabilities report implemented protocols for rooted operations, atomic rename
 and replacement, attempting atomic no-replace temporary persistence, durable
-rename/copy/write, and do not promise a particular mount or device outcome.
+rename/copy/write/temporary-file persistence, and do not promise a particular
+mount or device outcome.
 `can_attempt_atomic_temp_persist()` describes an attempt protocol only; the
 deprecated `supports_atomic_temp_persist()` is a source-compatible alias.
 `Required` rejects unavailable guarantees before mutation where possible;

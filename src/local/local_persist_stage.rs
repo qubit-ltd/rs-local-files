@@ -39,6 +39,10 @@ pub enum LocalPersistStage {
     ResolveTarget,
     /// Preparing the target's parent directory failed.
     PrepareParent,
+    /// Synchronizing temporary file contents before publication failed.
+    SynchronizeSource,
     /// Installing the temporary resource at the target failed.
     InstallDestination,
+    /// Synchronizing the published destination namespace failed.
+    SynchronizeDestination,
 }
