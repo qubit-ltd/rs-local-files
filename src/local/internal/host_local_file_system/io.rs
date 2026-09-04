@@ -173,6 +173,16 @@ impl HostLocalFileSystem {
         let diagnostic = canonicalize_existing_prefix(path).map_err(|error| {
             LocalFileError::from_io(LocalFileOperation::List, Some(path.to_path_buf()), None, error)
         })?;
+        #[cfg(target_os = "macos")]
+        let diagnostic = logical_macos_path(&diagnostic);
         LocalDirectoryWalker::open_with_diagnostic(bound, diagnostic, *options, policy)
     }
+}
+
+/// Restores the stable `/var` spelling used by macOS Host callers.
+#[cfg(target_os = "macos")]
+fn logical_macos_path(path: &Path) -> std::path::PathBuf {
+    let private_var = Path::new("/private/var");
+    path.strip_prefix(private_var)
+        .map_or_else(|_| path.to_path_buf(), |suffix| Path::new("/var").join(suffix))
 }
