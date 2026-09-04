@@ -39,6 +39,7 @@ use windows_sys::Win32::Foundation::INVALID_HANDLE_VALUE;
 use windows_sys::Win32::Foundation::OBJ_CASE_INSENSITIVE;
 use windows_sys::Win32::Foundation::UNICODE_STRING;
 use windows_sys::Win32::Storage::FileSystem::CreateFileW;
+use windows_sys::Win32::Storage::FileSystem::DELETE;
 use windows_sys::Win32::Storage::FileSystem::FILE_ADD_FILE;
 use windows_sys::Win32::Storage::FileSystem::FILE_APPEND_DATA;
 use windows_sys::Win32::Storage::FileSystem::FILE_ATTRIBUTE_NORMAL;
@@ -229,7 +230,7 @@ pub(super) fn open_parent_for_rename(
 ) -> Result<(File, OsString)> {
     let access = FILE_LIST_DIRECTORY | FILE_READ_ATTRIBUTES | SYNCHRONIZE;
     let access = if overwrite {
-        access | FILE_ADD_FILE | FILE_DELETE_CHILD
+        access | DELETE | FILE_ADD_FILE | FILE_DELETE_CHILD
     } else {
         access
     };
@@ -247,13 +248,59 @@ fn open_parent_with_access(root: &File, path: &LocalRelativePath, access: u32) -
     let name = components
         .pop()
         .ok_or_else(|| Error::new(ErrorKind::InvalidInput, "rooted path is empty"))?;
-    let mut parent = root.try_clone()?;
+    let mut parent = if components.is_empty() && access & DELETE != 0 {
+        nt_open_root_with_access(root, access)?
+    } else {
+        root.try_clone()?
+    };
     for component in components {
         let directory = nt_open_at(&parent, &component, access, FILE_OPEN, FILE_DIRECTORY_FILE)?;
         verify_real_directory(&directory)?;
         parent = directory;
     }
     Ok((parent, name))
+}
+
+/// Reopens the already validated root directory with additional rights.
+///
+/// A rooted mutation must not grant mutation rights to the long-lived root
+/// handle: doing so changes sharing semantics for every operation.  Instead,
+/// replacement renames reopen the same directory object relative to that
+/// handle, acquiring the extra rights only for the duration of the rename.
+fn nt_open_root_with_access(root: &File, access: u32) -> Result<File> {
+    let attributes = OBJECT_ATTRIBUTES {
+        Length: size_of::<OBJECT_ATTRIBUTES>() as u32,
+        RootDirectory: root.as_raw_handle(),
+        ObjectName: null(),
+        Attributes: OBJ_CASE_INSENSITIVE,
+        SecurityDescriptor: null(),
+        SecurityQualityOfService: null(),
+    };
+    let mut status_block = IO_STATUS_BLOCK::default();
+    let mut handle: HANDLE = null_mut();
+    // SAFETY: all pointers refer to live stack values; `root` remains open
+    // throughout the call and NtCreateFile does not retain attributes.
+    let status = unsafe {
+        NtCreateFile(
+            &raw mut handle,
+            access,
+            &raw const attributes,
+            &raw mut status_block,
+            null(),
+            FILE_ATTRIBUTE_NORMAL,
+            ROOTED_SHARE_MODE,
+            FILE_OPEN,
+            FILE_DIRECTORY_FILE | FILE_OPEN_REPARSE_POINT | FILE_SYNCHRONOUS_IO_NONALERT,
+            null(),
+            0,
+        )
+    };
+    nt_result(status)?;
+    if handle.is_null() || handle == INVALID_HANDLE_VALUE {
+        return Err(Error::other("NtCreateFile returned an invalid root handle"));
+    }
+    // SAFETY: successful NtCreateFile returned a uniquely owned handle.
+    Ok(unsafe { File::from_raw_handle(handle) })
 }
 
 /// Opens one name relative to an already opened directory handle.
