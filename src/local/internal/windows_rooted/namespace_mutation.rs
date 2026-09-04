@@ -25,6 +25,9 @@ use windows_sys::Wdk::Storage::FileSystem::FileRenameInformation;
 use windows_sys::Wdk::Storage::FileSystem::FileRenameInformationEx;
 use windows_sys::Wdk::Storage::FileSystem::NtSetInformationFile;
 use windows_sys::Wdk::Storage::FileSystem::RtlNtStatusToDosErrorNoTeb;
+use windows_sys::Win32::Foundation::STATUS_INVALID_INFO_CLASS;
+use windows_sys::Win32::Foundation::STATUS_INVALID_PARAMETER;
+use windows_sys::Win32::Foundation::STATUS_NOT_SUPPORTED;
 use windows_sys::Win32::Storage::FileSystem::FILE_READ_ATTRIBUTES;
 use windows_sys::Win32::Storage::FileSystem::FILE_WRITE_ATTRIBUTES;
 use windows_sys::Win32::Storage::FileSystem::SYNCHRONIZE;
@@ -123,17 +126,6 @@ pub(super) fn rename_open_entry(
         information.Anonymous.Flags = FILE_RENAME_REPLACE_IF_EXISTS | FILE_RENAME_POSIX_SEMANTICS;
     }
     let mut status_block = IO_STATUS_BLOCK::default();
-    let native_length = if overwrite {
-        u32::try_from(
-            buffer
-                .len()
-                .checked_mul(size_of::<usize>())
-                .ok_or_else(|| Error::new(ErrorKind::InvalidInput, "rename buffer is too large"))?,
-        )
-        .map_err(|_| Error::new(ErrorKind::InvalidInput, "rename buffer is too large"))?
-    } else {
-        information_length
-    };
     // SAFETY: `source` and the destination parent remain open, `buffer` is a
     // complete FILE_RENAME_INFORMATION payload, and the native call does not
     // retain any pointer after returning.
@@ -142,7 +134,7 @@ pub(super) fn rename_open_entry(
             source.as_raw_handle(),
             &raw mut status_block,
             buffer.as_ptr().cast(),
-            native_length,
+            information_length,
             if overwrite {
                 FileRenameInformationEx
             } else {
@@ -150,7 +142,7 @@ pub(super) fn rename_open_entry(
             },
         )
     };
-    if overwrite && status < 0 {
+    if overwrite && is_legacy_rename_status(status) {
         // Older Windows filesystems may reject the extended information
         // class. Retry with the original replacement contract.
         information.Anonymous.ReplaceIfExists = true;
@@ -191,7 +183,8 @@ fn build_rename_information(destination: &OsStr, overwrite: bool) -> Result<(Vec
         .checked_mul(size_of::<u16>())
         .ok_or_else(|| Error::new(ErrorKind::InvalidInput, "rename name is too long"))?;
     let allocation = size_of::<FILE_RENAME_INFORMATION>()
-        .checked_add(file_name_bytes.max(1024))
+        .checked_sub(size_of::<u16>())
+        .and_then(|header| header.checked_add(file_name_bytes))
         .ok_or_else(|| Error::new(ErrorKind::InvalidInput, "rename buffer is too large"))?;
     let information_length = u32::try_from(
         size_of::<FILE_RENAME_INFORMATION>()
@@ -220,6 +213,15 @@ fn build_rename_information(destination: &OsStr, overwrite: bool) -> Result<(Vec
     Ok((buffer, information_length))
 }
 
+/// Returns whether the extended rename information class is unavailable on
+/// the current filesystem and the legacy class is an appropriate fallback.
+fn is_legacy_rename_status(status: i32) -> bool {
+    matches!(
+        status,
+        STATUS_INVALID_INFO_CLASS | STATUS_INVALID_PARAMETER | STATUS_NOT_SUPPORTED
+    )
+}
+
 #[cfg(test)]
 mod tests {
     use std::mem::size_of;
@@ -228,7 +230,11 @@ mod tests {
 
     use windows_sys::Wdk::Storage::FileSystem::FILE_RENAME_INFORMATION;
 
+    use super::STATUS_INVALID_INFO_CLASS;
+    use super::STATUS_INVALID_PARAMETER;
+    use super::STATUS_NOT_SUPPORTED;
     use super::build_rename_information;
+    use super::is_legacy_rename_status;
     use crate::local::LocalRelativePath;
 
     /// Verifies rooted rename buffers include all UTF-16 filename bytes.
@@ -246,5 +252,13 @@ mod tests {
         );
         assert_eq!(information.FileNameLength as usize, expected_name_bytes);
         assert!(unsafe { information.Anonymous.ReplaceIfExists });
+    }
+
+    #[test]
+    fn legacy_rename_fallback_is_limited_to_unsupported_classes() {
+        assert!(is_legacy_rename_status(STATUS_INVALID_INFO_CLASS));
+        assert!(is_legacy_rename_status(STATUS_INVALID_PARAMETER));
+        assert!(is_legacy_rename_status(STATUS_NOT_SUPPORTED));
+        assert!(!is_legacy_rename_status(-1073741790));
     }
 }
