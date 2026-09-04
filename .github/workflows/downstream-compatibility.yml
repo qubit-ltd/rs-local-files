@@ -10,8 +10,15 @@ permissions:
 
 jobs:
   downstream:
-    name: Test rs-fs-local and rs-mime
-    runs-on: ubuntu-latest
+    name: Test rs-fs-local and rs-mime (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os:
+          - ubuntu-latest
+          - windows-latest
+          - macos-latest
 
     steps:
       - name: Checkout rs-local-files
