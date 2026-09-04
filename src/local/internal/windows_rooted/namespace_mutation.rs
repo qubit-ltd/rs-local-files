@@ -30,7 +30,7 @@ use windows_sys::Win32::System::IO::IO_STATUS_BLOCK;
 
 use super::handle::open_entry;
 use super::handle::open_entry_no_follow;
-use super::handle::open_parent;
+use super::handle::open_parent_for_rename;
 use crate::local::LocalRelativePath;
 
 /// Renames one rooted entry within the same opened root.
@@ -109,7 +109,7 @@ pub(super) fn rename_open_entry(
 ) -> Result<()> {
     use windows_sys::Win32::Storage::FileSystem::DELETE;
     let source = open_entry_no_follow(root, source, DELETE | FILE_READ_ATTRIBUTES | SYNCHRONIZE, FILE_OPEN, 0)?;
-    let (destination_parent, destination_name) = open_parent(root, destination)?;
+    let (destination_parent, destination_name) = open_parent_for_rename(root, destination)?;
     let (mut buffer, information_length) = build_rename_information(destination_name.as_os_str(), overwrite)?;
     // SAFETY: `Vec<usize>` provides alignment suitable for the native
     // FILE_RENAME_INFORMATION payload.
