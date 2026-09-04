@@ -126,6 +126,20 @@ fn test_local_directory_walker_non_recursive_listing_retains_bound_root() {
     assert_eq!(Some(expected.as_path()), entries[1].diagnostic_path());
 }
 
+/// Verifies Windows walker diagnostics preserve the caller's path spelling.
+#[cfg(windows)]
+#[test]
+fn test_local_directory_walker_preserves_windows_diagnostic_spelling() {
+    let directory = tempdir().expect("temporary directory should be created");
+    let requested = directory.path().to_path_buf();
+    let walker = LocalFileSystem::host()
+        .expect("Host filesystem should open")
+        .list_with_options(&requested, &LocalListOptions::new())
+        .expect("directory should open for listing");
+
+    assert_eq!(requested, walker.root());
+}
+
 /// Verifies a regular file cannot be opened as a directory traversal root.
 #[test]
 fn test_local_directory_walker_rejects_regular_file_root() {
