@@ -24,6 +24,7 @@ use windows_sys::Wdk::Storage::FileSystem::RtlNtStatusToDosErrorNoTeb;
 use windows_sys::Win32::Storage::FileSystem::FILE_READ_ATTRIBUTES;
 use windows_sys::Win32::Storage::FileSystem::FILE_WRITE_ATTRIBUTES;
 use windows_sys::Win32::Storage::FileSystem::SYNCHRONIZE;
+use windows_sys::Win32::System::IO::IO_STATUS_BLOCK;
 
 use super::handle::open_entry;
 use super::handle::open_entry_no_follow;
@@ -110,7 +111,7 @@ pub(super) fn rename_open_entry(
     // FILE_RENAME_INFORMATION payload.
     let information = unsafe { &mut *buffer.as_mut_ptr().cast::<FILE_RENAME_INFORMATION>() };
     information.RootDirectory = root.as_raw_handle();
-    let mut status_block = windows_sys::Win32::System::IO::IO_STATUS_BLOCK::default();
+    let mut status_block = IO_STATUS_BLOCK::default();
     // SAFETY: `source` and `root` remain open, `buffer` is a complete,
     // correctly aligned FILE_RENAME_INFORMATION payload, and the native call
     // does not retain any pointer after returning.
