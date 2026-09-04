@@ -8,17 +8,14 @@
 //! Handle-relative Windows namespace mutation primitives.
 
 use std::ffi::OsStr;
-use std::ffi::OsString;
 use std::fs::File;
 use std::io::Error;
 use std::io::ErrorKind;
 use std::io::Result;
 use std::mem::size_of;
 use std::os::windows::ffi::OsStrExt;
-use std::os::windows::ffi::OsStringExt;
 use std::os::windows::io::AsRawHandle;
 use std::path::Path;
-use std::path::PathBuf;
 
 use windows_sys::Wdk::Storage::FileSystem::FILE_OPEN;
 use windows_sys::Wdk::Storage::FileSystem::FILE_RENAME_INFORMATION;
@@ -30,7 +27,6 @@ use windows_sys::Wdk::Storage::FileSystem::NtSetInformationFile;
 use windows_sys::Wdk::Storage::FileSystem::RtlNtStatusToDosErrorNoTeb;
 use windows_sys::Win32::Storage::FileSystem::FILE_READ_ATTRIBUTES;
 use windows_sys::Win32::Storage::FileSystem::FILE_WRITE_ATTRIBUTES;
-use windows_sys::Win32::Storage::FileSystem::FILE_WRITE_DATA;
 use windows_sys::Win32::Storage::FileSystem::SYNCHRONIZE;
 use windows_sys::Win32::System::IO::IO_STATUS_BLOCK;
 
@@ -114,9 +110,7 @@ pub(super) fn rename_open_entry(
     overwrite: bool,
 ) -> Result<()> {
     use windows_sys::Win32::Storage::FileSystem::DELETE;
-    let source_path = source;
-    let source_access = DELETE | FILE_READ_ATTRIBUTES | SYNCHRONIZE | if overwrite { FILE_WRITE_DATA } else { 0 };
-    let source = open_entry_no_follow(root, source_path, source_access, FILE_OPEN, 0)?;
+    let source = open_entry_no_follow(root, source, DELETE | FILE_READ_ATTRIBUTES | SYNCHRONIZE, FILE_OPEN, 0)?;
     let (destination_parent, destination_name) = open_parent_for_rename(root, destination, overwrite)?;
     let (mut buffer, information_length) = build_rename_information(destination_name.as_os_str(), overwrite)?;
     // SAFETY: `Vec<usize>` provides alignment suitable for the native
@@ -171,57 +165,11 @@ pub(super) fn rename_open_entry(
         };
     }
     if status < 0 {
-        if overwrite && replace_by_root_handle_path(root, source_path, destination).is_ok() {
-            return Ok(());
-        }
         let error = unsafe { RtlNtStatusToDosErrorNoTeb(status) };
-        eprintln!(
-            "rooted rename failed: overwrite={overwrite}, source={source:?}, destination={destination:?}, ntstatus={status:#x}, win32={error}"
-        );
         Err(Error::from_raw_os_error(error as i32))
     } else {
         Ok(())
     }
-}
-
-fn wide_path(path: &Path) -> Result<Vec<u16>> {
-    let units: Vec<u16> = path.as_os_str().encode_wide().collect();
-    if units.contains(&0) {
-        return Err(Error::new(ErrorKind::InvalidInput, "path contains an interior NUL"));
-    }
-    Ok(units.into_iter().chain(Some(0)).collect())
-}
-
-/// Performs a final compatibility replacement through the path resolved from
-/// the opened root handle. This preserves a moved-root authority while
-/// retaining the native atomic replacement provided by MoveFileExW.
-fn replace_by_root_handle_path(root: &File, source: &LocalRelativePath, destination: &LocalRelativePath) -> Result<()> {
-    use windows_sys::Win32::Storage::FileSystem::GetFinalPathNameByHandleW;
-    use windows_sys::Win32::Storage::FileSystem::MOVEFILE_REPLACE_EXISTING;
-    use windows_sys::Win32::Storage::FileSystem::MoveFileExW;
-
-    let mut units = vec![0_u16; 512];
-    let length = loop {
-        let length =
-            unsafe { GetFinalPathNameByHandleW(root.as_raw_handle(), units.as_mut_ptr(), units.len() as u32, 0) };
-        if length == 0 {
-            return Err(Error::last_os_error());
-        }
-        if (length as usize) < units.len() {
-            break length as usize;
-        }
-        units.resize(length as usize + 1, 0);
-    };
-    let root_path = PathBuf::from(OsString::from_wide(&units[..length]));
-    let source_path = root_path.join(source.as_path());
-    let destination_path = root_path.join(destination.as_path());
-    let source = wide_path(source_path.as_path())?;
-    let destination = wide_path(destination_path.as_path())?;
-    let result = unsafe { MoveFileExW(source.as_ptr(), destination.as_ptr(), MOVEFILE_REPLACE_EXISTING) };
-    if result == 0 {
-        return Err(Error::last_os_error());
-    }
-    Ok(())
 }
 
 /// Builds the variable-sized `FILE_RENAME_INFO` payload required by Windows.
