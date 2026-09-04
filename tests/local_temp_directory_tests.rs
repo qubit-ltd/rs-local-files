@@ -716,3 +716,21 @@ fn test_local_temp_directory_child_rejects_prefix() {
     assert!(temporary.child(Path::new(r"C:\escape")).is_err());
     assert!(temporary.descendant(Path::new(r"C:\escape")).is_err());
 }
+
+/// Verifies Rooted temporary children retain virtual namespace-root semantics.
+#[cfg(windows)]
+#[test]
+fn test_rooted_temp_directory_child_has_virtual_namespace_root() {
+    let directory = tempdir().expect("temporary root should be created");
+    let temporary = LocalFileSystem::rooted(directory.path())
+        .expect("Rooted filesystem should open")
+        .create_temp_directory()
+        .expect("temporary directory should be created");
+
+    assert!(
+        temporary
+            .child(Path::new("child"))
+            .expect("child path should resolve")
+            .has_root()
+    );
+}
