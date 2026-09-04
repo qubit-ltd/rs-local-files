@@ -12,6 +12,7 @@ use std::fs::File;
 use std::io::Error;
 use std::io::ErrorKind;
 use std::io::Result;
+use std::mem::offset_of;
 use std::mem::size_of;
 use std::os::windows::ffi::OsStrExt;
 use std::os::windows::io::AsRawHandle;
@@ -157,9 +158,8 @@ fn build_rename_information(destination: &OsStr, overwrite: bool) -> Result<(Vec
         .checked_add(file_name_bytes)
         .ok_or_else(|| Error::new(ErrorKind::InvalidInput, "rename buffer is too large"))?;
     let information_length = u32::try_from(
-        size_of::<FILE_RENAME_INFORMATION>()
-            .checked_sub(size_of::<u16>())
-            .and_then(|header| header.checked_add(file_name_bytes))
+        offset_of!(FILE_RENAME_INFORMATION, FileName)
+            .checked_add(file_name_bytes)
             .ok_or_else(|| Error::new(ErrorKind::InvalidInput, "rename buffer is too large"))?,
     )
     .map_err(|_| Error::new(ErrorKind::InvalidInput, "rename buffer is too large"))?;
@@ -205,7 +205,7 @@ mod tests {
 
         assert_eq!(
             information_length as usize,
-            size_of::<FILE_RENAME_INFORMATION>() - size_of::<u16>() + expected_name_bytes
+            offset_of!(FILE_RENAME_INFORMATION, FileName) + expected_name_bytes
         );
         assert_eq!(information.FileNameLength as usize, expected_name_bytes);
         assert!(unsafe { information.Anonymous.ReplaceIfExists });

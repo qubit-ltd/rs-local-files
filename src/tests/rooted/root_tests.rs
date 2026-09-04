@@ -71,6 +71,7 @@ fn test_root_authority_manages_descendant_entries() {
         .read_to_string(&mut content)
         .expect("rooted reader should read fixture content");
     assert_eq!("payload", content);
+    drop(reader);
     let appended = LocalRelativePath::new(Path::new("nested/appended")).expect("appended path should be valid");
     root.open_writer(&appended, &InternalWriteOptions::default())
         .expect("rooted writer should open")
