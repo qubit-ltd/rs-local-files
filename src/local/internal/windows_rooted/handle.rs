@@ -84,7 +84,7 @@ pub(crate) fn open_root_directory(path: &Path) -> Result<File> {
     let handle = unsafe {
         CreateFileW(
             wide.as_ptr(),
-            FILE_LIST_DIRECTORY | FILE_READ_ATTRIBUTES | FILE_ADD_FILE | FILE_DELETE_CHILD | DELETE | SYNCHRONIZE,
+            FILE_LIST_DIRECTORY | FILE_READ_ATTRIBUTES | SYNCHRONIZE,
             ROOTED_SHARE_MODE,
             null(),
             OPEN_EXISTING,
@@ -248,7 +248,11 @@ fn open_parent_with_access(root: &File, path: &LocalRelativePath, access: u32) -
     let name = components
         .pop()
         .ok_or_else(|| Error::new(ErrorKind::InvalidInput, "rooted path is empty"))?;
-    let mut parent = root.try_clone()?;
+    let mut parent = if access & (FILE_ADD_FILE | FILE_DELETE_CHILD) != 0 {
+        nt_open_at(root, OsStr::new("."), access, FILE_OPEN, FILE_DIRECTORY_FILE)?
+    } else {
+        root.try_clone()?
+    };
     for component in components {
         let directory = nt_open_at(&parent, &component, access, FILE_OPEN, FILE_DIRECTORY_FILE)?;
         verify_real_directory(&directory)?;
