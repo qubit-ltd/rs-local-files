@@ -7,6 +7,7 @@
 // =============================================================================
 //! Handle-relative Windows namespace mutation primitives.
 
+use std::ffi::OsStr;
 use std::fs::File;
 use std::io::Error;
 use std::io::ErrorKind;
@@ -28,6 +29,7 @@ use windows_sys::Win32::System::IO::IO_STATUS_BLOCK;
 
 use super::handle::open_entry;
 use super::handle::open_entry_no_follow;
+use super::handle::open_parent;
 use crate::local::LocalRelativePath;
 
 /// Renames one rooted entry within the same opened root.
@@ -106,11 +108,12 @@ pub(super) fn rename_open_entry(
 ) -> Result<()> {
     use windows_sys::Win32::Storage::FileSystem::DELETE;
     let source = open_entry_no_follow(root, source, DELETE | FILE_READ_ATTRIBUTES | SYNCHRONIZE, FILE_OPEN, 0)?;
-    let (mut buffer, information_length) = build_rename_information(destination, overwrite)?;
+    let (destination_parent, destination_name) = open_parent(root, destination)?;
+    let (mut buffer, information_length) = build_rename_information(destination_name.as_os_str(), overwrite)?;
     // SAFETY: `Vec<usize>` provides alignment suitable for the native
     // FILE_RENAME_INFORMATION payload.
     let information = unsafe { &mut *buffer.as_mut_ptr().cast::<FILE_RENAME_INFORMATION>() };
-    information.RootDirectory = root.as_raw_handle();
+    information.RootDirectory = destination_parent.as_raw_handle();
     let mut status_block = IO_STATUS_BLOCK::default();
     // SAFETY: `source` and `root` remain open, `buffer` is a complete,
     // correctly aligned FILE_RENAME_INFORMATION payload, and the native call
@@ -142,10 +145,10 @@ pub(super) fn rename_open_entry(
 ///
 /// Returns `InvalidInput` if the UTF-16 name or complete payload length cannot
 /// be represented by the Windows API.
-fn build_rename_information(destination: &LocalRelativePath, overwrite: bool) -> Result<(Vec<usize>, u32)> {
+fn build_rename_information(destination: &OsStr, overwrite: bool) -> Result<(Vec<usize>, u32)> {
     use windows_sys::Wdk::Storage::FileSystem::FILE_RENAME_INFORMATION;
 
-    let destination_units: Vec<u16> = destination.as_path().as_os_str().encode_wide().collect();
+    let destination_units: Vec<u16> = destination.encode_wide().collect();
     let file_name_bytes = destination_units
         .len()
         .checked_mul(size_of::<u16>())
@@ -195,8 +198,8 @@ mod tests {
     #[test]
     fn rename_buffer_reports_complete_payload_length() {
         let destination = LocalRelativePath::new(Path::new("nested/renamed")).expect("destination should be valid");
-        let (buffer, information_length) =
-            build_rename_information(&destination, true).expect("rename payload should build");
+        let (buffer, information_length) = build_rename_information(destination.as_path().as_os_str(), true)
+            .expect("rename payload should build");
         let information = unsafe { &*buffer.as_ptr().cast::<FILE_RENAME_INFORMATION>() };
         let expected_name_bytes = destination.as_path().as_os_str().encode_wide().count() * size_of::<u16>();
 
