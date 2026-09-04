@@ -220,6 +220,42 @@ fn bench_read_prefix(c: &mut Criterion) {
     group.finish();
 }
 
+/// Compares Host and Rooted metadata lookup through a fixed deep path.
+fn bench_deep_metadata(c: &mut Criterion) {
+    let directory = tempdir().expect("deep metadata benchmark directory should exist");
+    let mut host_target = directory.path().to_path_buf();
+    let mut rooted_target = std::path::PathBuf::new();
+    for depth in 0..32 {
+        let component = format!("level-{depth}");
+        host_target.push(&component);
+        rooted_target.push(component);
+        fs::create_dir(&host_target).expect("deep metadata benchmark level should be created");
+    }
+    host_target.push("payload");
+    rooted_target.push("payload");
+    fs::write(&host_target, b"payload").expect("deep metadata benchmark payload should be written");
+    let host = LocalFileSystem::host().expect("Host filesystem should open");
+    let rooted = LocalFileSystem::rooted(directory.path()).expect("Rooted filesystem should open");
+    let mut group = c.benchmark_group("deep_metadata");
+    group.bench_function("host_depth_32", |bench| {
+        bench.iter(|| {
+            let metadata = host
+                .metadata(black_box(&host_target))
+                .expect("Host deep metadata lookup should succeed");
+            black_box(metadata.len());
+        });
+    });
+    group.bench_function("rooted_depth_32", |bench| {
+        bench.iter(|| {
+            let metadata = rooted
+                .metadata(black_box(&rooted_target))
+                .expect("Rooted deep metadata lookup should succeed");
+            black_box(metadata.len());
+        });
+    });
+    group.finish();
+}
+
 criterion_group!(
     local_files,
     bench_path_codec,
@@ -228,6 +264,7 @@ criterion_group!(
     bench_copy,
     bench_writer,
     bench_rooted_writer,
-    bench_read_prefix
+    bench_read_prefix,
+    bench_deep_metadata
 );
 criterion_main!(local_files);
