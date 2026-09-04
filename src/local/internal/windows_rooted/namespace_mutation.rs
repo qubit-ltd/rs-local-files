@@ -113,7 +113,7 @@ pub(super) fn rename_open_entry(
     use windows_sys::Win32::Storage::FileSystem::DELETE;
     let source_access = DELETE | FILE_READ_ATTRIBUTES | SYNCHRONIZE | if overwrite { FILE_WRITE_DATA } else { 0 };
     let source = open_entry_no_follow(root, source, source_access, FILE_OPEN, 0)?;
-    if overwrite {
+    let destination_entry = if overwrite {
         match open_entry_no_follow(
             root,
             destination,
@@ -121,11 +121,13 @@ pub(super) fn rename_open_entry(
             FILE_OPEN,
             0,
         ) {
-            Ok(_destination) => {}
-            Err(error) if error.kind() == ErrorKind::NotFound => {}
+            Ok(destination) => Some(destination),
+            Err(error) if error.kind() == ErrorKind::NotFound => None,
             Err(error) => return Err(error),
-        };
-    }
+        }
+    } else {
+        None
+    };
     let (destination_parent, destination_name) = open_parent_for_rename(root, destination, overwrite)?;
     let (mut buffer, information_length) = build_rename_information(destination_name.as_os_str(), overwrite)?;
     // SAFETY: `Vec<usize>` provides alignment suitable for the native
@@ -178,6 +180,22 @@ pub(super) fn rename_open_entry(
                 FileRenameInformation,
             )
         };
+        if status < 0 {
+            if let Some(destination) = destination_entry {
+                delete_open_entry(&destination)?;
+                drop(destination);
+                information.Anonymous.ReplaceIfExists = false;
+                status = unsafe {
+                    NtSetInformationFile(
+                        source.as_raw_handle(),
+                        &raw mut status_block,
+                        buffer.as_ptr().cast(),
+                        information_length,
+                        FileRenameInformation,
+                    )
+                };
+            }
+        }
     }
     if status < 0 {
         let error = unsafe { RtlNtStatusToDosErrorNoTeb(status) };
