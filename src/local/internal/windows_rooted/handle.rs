@@ -248,11 +248,7 @@ fn open_parent_with_access(root: &File, path: &LocalRelativePath, access: u32) -
     let name = components
         .pop()
         .ok_or_else(|| Error::new(ErrorKind::InvalidInput, "rooted path is empty"))?;
-    let mut parent = if access & (FILE_ADD_FILE | FILE_DELETE_CHILD) != 0 {
-        nt_open_at(root, OsStr::new("."), access, FILE_OPEN, FILE_DIRECTORY_FILE)?
-    } else {
-        root.try_clone()?
-    };
+    let mut parent = root.try_clone()?;
     for component in components {
         let directory = nt_open_at(&parent, &component, access, FILE_OPEN, FILE_DIRECTORY_FILE)?;
         verify_real_directory(&directory)?;
