@@ -205,7 +205,7 @@ mod tests {
 
         assert_eq!(
             information_length as usize,
-            offset_of!(FILE_RENAME_INFORMATION, FileName) + expected_name_bytes
+            std::mem::offset_of!(FILE_RENAME_INFORMATION, FileName) + expected_name_bytes
         );
         assert_eq!(information.FileNameLength as usize, expected_name_bytes);
         assert!(unsafe { information.Anonymous.ReplaceIfExists });
