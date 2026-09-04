@@ -249,7 +249,13 @@ fn open_parent_with_access(root: &File, path: &LocalRelativePath, access: u32) -
         .pop()
         .ok_or_else(|| Error::new(ErrorKind::InvalidInput, "rooted path is empty"))?;
     let mut parent = if components.is_empty() && access & DELETE != 0 {
-        nt_open_root_with_access(root, access)?
+        match nt_open_root_with_access(root, access) {
+            Ok(parent) => parent,
+            Err(error) => {
+                eprintln!("rooted rename root reopen failed: {error:?}");
+                return Err(error);
+            }
+        }
     } else {
         root.try_clone()?
     };
