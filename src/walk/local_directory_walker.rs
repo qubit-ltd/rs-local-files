@@ -63,6 +63,8 @@ use crate::local::DirectoryIdentity;
 pub struct LocalDirectoryWalker {
     /// Namespace-absolute traversal root exposed publicly.
     root: PathBuf,
+    /// Bound native traversal root used for filesystem operations.
+    backend_root: PathBuf,
     /// Filesystem PWD snapshot retained for errors yielded during iteration.
     current_directory: Option<PathBuf>,
     /// Policy fixed when the walker is created.
@@ -88,35 +90,23 @@ pub struct LocalDirectoryWalker {
 }
 
 impl LocalDirectoryWalker {
-    /// Opens a lazy walker rooted at a bound native directory.
-    ///
-    /// # Parameters
-    ///
-    /// - `root`: Bound absolute traversal root.
-    /// - `options`: Traversal policy fixed for the walker lifetime.
-    ///
-    /// # Returns
-    ///
-    /// A walker that opens descendants only as iteration advances.
-    ///
-    /// # Errors
-    ///
-    /// Returns `LocalFileError` when the root is not a directory or cannot be
-    /// opened.
-    pub(crate) fn open(
-        root: PathBuf,
+    /// Opens a Host walker with separate backend and diagnostic roots.
+    pub(crate) fn open_with_diagnostic(
+        backend_root: PathBuf,
+        diagnostic_root: PathBuf,
         options: LocalListOptions,
         symlink_policy: LocalSymlinkPolicy,
     ) -> LocalResult<Self> {
-        validate_options(&root, &options)?;
-        let deadline = walker_deadline(&root, &options)?;
-        let metadata = match fs::symlink_metadata(&root) {
+        validate_options(&diagnostic_root, &options)?;
+        let deadline = walker_deadline(&diagnostic_root, &options)?;
+        let metadata = match fs::symlink_metadata(&backend_root) {
             Ok(metadata) => metadata,
-            Err(error) => return Err(walk_io_error(&root, error)),
+            Err(error) => return Err(walk_io_error(&diagnostic_root, error)),
         };
         if !metadata.file_type().is_dir() {
             return Err(
-                LocalFileError::new(LocalFileErrorKind::TypeConflict, LocalFileOperation::List).with_path(root),
+                LocalFileError::new(LocalFileErrorKind::TypeConflict, LocalFileOperation::List)
+                    .with_path(diagnostic_root.clone()),
             );
         }
         let open_directories = directory_pool(&options);
@@ -124,22 +114,23 @@ impl LocalDirectoryWalker {
             pool.try_acquire(1)
                 .expect("validated non-zero directory capacity accepts root")
         });
-        let entries = match fs::read_dir(&root) {
+        let entries = match fs::read_dir(&backend_root) {
             Ok(entries) => entries,
-            Err(error) => return Err(walk_io_error(&root, error)),
+            Err(error) => return Err(walk_io_error(&diagnostic_root, error)),
         };
         #[cfg(feature = "test-support")]
         if crate::local::test_support_enabled("walker-root-canonicalize") {
             return Err(walk_io_error(
-                &root,
+                &diagnostic_root,
                 std::io::Error::other("injected walker root canonicalization failure"),
             ));
         }
-        let root_identity = native_directory_identity(&metadata, &root)?;
+        let root_identity = native_directory_identity(&metadata, &backend_root)?;
         let mut followed_directories = HashSet::new();
         followed_directories.insert(root_identity.clone());
         Ok(Self {
-            root,
+            root: diagnostic_root,
+            backend_root,
             current_directory: None,
             options,
             stack: vec![WalkFrame {
@@ -225,6 +216,7 @@ impl LocalDirectoryWalker {
         followed_directories.insert(start_identity.clone());
         Ok(Self {
             root: namespace_root,
+            backend_root: PathBuf::new(),
             current_directory: None,
             options,
             stack: Vec::new(),
@@ -409,11 +401,12 @@ impl LocalDirectoryWalker {
     /// identity changed. The failed frame is discarded in continue mode so
     /// iteration cannot yield the same reopen error forever.
     fn reopen_host_frame(&mut self, relative_parent: &Path) -> LocalResult<()> {
-        let directory = self.root.join(relative_parent);
+        let directory = self.backend_root.join(relative_parent);
+        let diagnostic_directory = self.root.join(relative_parent);
         #[cfg(feature = "test-support")]
         if crate::local::test_support_enabled("walker-reopen-canonicalize") {
             return self.handle_reopen_error(walk_io_error(
-                &directory,
+                &diagnostic_directory,
                 std::io::Error::other("injected walker reopen canonicalization failure"),
             ));
         }
@@ -428,11 +421,11 @@ impl LocalDirectoryWalker {
                 return self.handle_reopen_error(
                     LocalFileError::new(LocalFileErrorKind::InvalidPath, LocalFileOperation::List)
                         .with_reason("directory entry changed while reopening walker frame")
-                        .with_path(directory),
+                        .with_path(diagnostic_directory),
                 );
             }
             Err(error) => {
-                return self.handle_reopen_error(walk_io_error(&directory, error));
+                return self.handle_reopen_error(walk_io_error(&diagnostic_directory, error));
             }
         };
         let identity = match native_directory_identity(&metadata, &directory) {
@@ -443,7 +436,7 @@ impl LocalDirectoryWalker {
             return self.handle_reopen_error(
                 LocalFileError::new(LocalFileErrorKind::InvalidPath, LocalFileOperation::List)
                     .with_reason("directory identity changed while reopening walker frame")
-                    .with_path(directory),
+                    .with_path(diagnostic_directory),
             );
         }
         let directory_permit = match self.acquire_host_directory(&directory) {
@@ -452,7 +445,7 @@ impl LocalDirectoryWalker {
         };
         let entries = match fs::read_dir(&directory) {
             Ok(entries) => entries,
-            Err(error) => return self.handle_reopen_error(walk_io_error(&directory, error)),
+            Err(error) => return self.handle_reopen_error(walk_io_error(&diagnostic_directory, error)),
         };
         let frame = self
             .stack
