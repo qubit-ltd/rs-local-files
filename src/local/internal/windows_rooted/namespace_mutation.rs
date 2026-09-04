@@ -138,6 +138,13 @@ pub(super) fn rename_open_entry(
         information.Anonymous.Flags = FILE_RENAME_REPLACE_IF_EXISTS | FILE_RENAME_POSIX_SEMANTICS;
     }
     let mut status_block = IO_STATUS_BLOCK::default();
+    let native_length = if overwrite {
+        information_length
+            .checked_add(size_of::<u16>() as u32)
+            .ok_or_else(|| Error::new(ErrorKind::InvalidInput, "rename buffer is too large"))?
+    } else {
+        information_length
+    };
     // SAFETY: `source` and the destination parent remain open, `buffer` is a
     // complete FILE_RENAME_INFORMATION payload, and the native call does not
     // retain any pointer after returning.
@@ -146,7 +153,7 @@ pub(super) fn rename_open_entry(
             source.as_raw_handle(),
             &raw mut status_block,
             buffer.as_ptr().cast(),
-            information_length,
+            native_length,
             if overwrite {
                 FileRenameInformationEx
             } else {
