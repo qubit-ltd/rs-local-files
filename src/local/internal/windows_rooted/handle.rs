@@ -49,6 +49,7 @@ use windows_sys::Win32::Storage::FileSystem::FILE_READ_ATTRIBUTES;
 use windows_sys::Win32::Storage::FileSystem::FILE_SHARE_DELETE;
 use windows_sys::Win32::Storage::FileSystem::FILE_SHARE_READ;
 use windows_sys::Win32::Storage::FileSystem::FILE_SHARE_WRITE;
+use windows_sys::Win32::Storage::FileSystem::FILE_TRAVERSE;
 use windows_sys::Win32::Storage::FileSystem::FILE_WRITE_ATTRIBUTES;
 use windows_sys::Win32::Storage::FileSystem::FileAttributeTagInfo;
 use windows_sys::Win32::Storage::FileSystem::GetFileInformationByHandleEx;
@@ -82,7 +83,7 @@ pub(crate) fn open_root_directory(path: &Path) -> Result<File> {
     let handle = unsafe {
         CreateFileW(
             wide.as_ptr(),
-            FILE_LIST_DIRECTORY | FILE_READ_ATTRIBUTES | SYNCHRONIZE,
+            FILE_LIST_DIRECTORY | FILE_READ_ATTRIBUTES | FILE_TRAVERSE | SYNCHRONIZE,
             ROOTED_SHARE_MODE,
             null(),
             OPEN_EXISTING,
@@ -217,7 +218,11 @@ fn wide_path(path: &Path) -> Result<Vec<u16>> {
 
 /// Opens and verifies every parent component beneath the root.
 pub(super) fn open_parent(root: &File, path: &LocalRelativePath) -> Result<(File, OsString)> {
-    open_parent_with_access(root, path, FILE_LIST_DIRECTORY | FILE_READ_ATTRIBUTES | SYNCHRONIZE)
+    open_parent_with_access(
+        root,
+        path,
+        FILE_LIST_DIRECTORY | FILE_READ_ATTRIBUTES | FILE_TRAVERSE | SYNCHRONIZE,
+    )
 }
 
 /// Opens every parent component with the rights needed for a rooted rename.
