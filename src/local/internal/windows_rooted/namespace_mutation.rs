@@ -148,7 +148,7 @@ pub(super) fn rename_open_entry(
     // SAFETY: `source` and the destination parent remain open, `buffer` is a
     // complete FILE_RENAME_INFORMATION payload, and the native call does not
     // retain any pointer after returning.
-    let status = unsafe {
+    let mut status = unsafe {
         NtSetInformationFile(
             source.as_raw_handle(),
             &raw mut status_block,
@@ -161,6 +161,20 @@ pub(super) fn rename_open_entry(
             },
         )
     };
+    if overwrite && status < 0 {
+        // Older Windows filesystems may reject the extended information
+        // class. Retry with the original replacement contract.
+        information.Anonymous.ReplaceIfExists = true;
+        status = unsafe {
+            NtSetInformationFile(
+                source.as_raw_handle(),
+                &raw mut status_block,
+                buffer.as_ptr().cast(),
+                information_length,
+                FileRenameInformation,
+            )
+        };
+    }
     if status < 0 {
         let error = unsafe { RtlNtStatusToDosErrorNoTeb(status) };
         eprintln!(
