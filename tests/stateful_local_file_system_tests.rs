@@ -545,11 +545,14 @@ fn test_rooted_temp_resources_retain_their_creation_pwd_snapshot() {
         .create_temp_directory()
         .expect("temporary directory should be created in the second PWD");
     assert!(temporary_directory.path().starts_with(Path::new("/second")));
+    // Rooted paths are virtual namespace-absolute. On Windows they have a
+    // root directory but intentionally no drive prefix, so `is_absolute()`
+    // would incorrectly reject the valid `\second\...` spelling.
     assert!(
         temporary_directory
             .child(Path::new("child"))
             .expect("child path should resolve")
-            .is_absolute()
+            .has_root()
     );
 }
 
