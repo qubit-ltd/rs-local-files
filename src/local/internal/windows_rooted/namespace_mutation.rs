@@ -127,6 +127,25 @@ pub(super) fn rename_open_entry(
     // FILE_RENAME_INFORMATION payload.
     let information = unsafe { &mut *buffer.as_mut_ptr().cast::<FILE_RENAME_INFORMATION>() };
     information.RootDirectory = destination_parent.as_raw_handle();
+    if overwrite {
+        use windows_sys::Win32::Storage::FileSystem::FileRenameInfo;
+        use windows_sys::Win32::Storage::FileSystem::SetFileInformationByHandle;
+        // SAFETY: `source` and the destination parent remain open, `buffer`
+        // is a complete FILE_RENAME_INFO payload, and the native call does
+        // not retain any pointer after returning.
+        let result = unsafe {
+            SetFileInformationByHandle(
+                source.as_raw_handle(),
+                FileRenameInfo,
+                buffer.as_ptr().cast(),
+                information_length,
+            )
+        };
+        if result == 0 {
+            return Err(Error::last_os_error());
+        }
+        return Ok(());
+    }
     let mut status_block = IO_STATUS_BLOCK::default();
     // SAFETY: `source` and the destination parent remain open, `buffer` is a
     // complete FILE_RENAME_INFORMATION payload, and the native call does not
