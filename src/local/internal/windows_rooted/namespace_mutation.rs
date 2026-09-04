@@ -133,12 +133,15 @@ pub(super) fn rename_open_entry(
         // SAFETY: `source` and the destination parent remain open, `buffer`
         // is a complete FILE_RENAME_INFO payload, and the native call does
         // not retain any pointer after returning.
+        let win32_length = information_length
+            .checked_add(size_of::<u16>() as u32)
+            .ok_or_else(|| Error::new(ErrorKind::InvalidInput, "rename buffer is too large"))?;
         let result = unsafe {
             SetFileInformationByHandle(
                 source.as_raw_handle(),
                 FileRenameInfo,
                 buffer.as_ptr().cast(),
-                information_length,
+                win32_length,
             )
         };
         if result == 0 {
