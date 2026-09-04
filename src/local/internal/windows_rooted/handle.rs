@@ -230,7 +230,7 @@ pub(super) fn open_parent_for_rename(
 ) -> Result<(File, OsString)> {
     let access = FILE_LIST_DIRECTORY | FILE_READ_ATTRIBUTES | SYNCHRONIZE;
     let access = if overwrite {
-        access | DELETE | FILE_ADD_FILE | FILE_DELETE_CHILD
+        access | FILE_ADD_FILE | FILE_DELETE_CHILD
     } else {
         access
     };
@@ -248,7 +248,8 @@ fn open_parent_with_access(root: &File, path: &LocalRelativePath, access: u32) -
     let name = components
         .pop()
         .ok_or_else(|| Error::new(ErrorKind::InvalidInput, "rooted path is empty"))?;
-    let mut parent = if components.is_empty() && access & DELETE != 0 {
+    let mutation_rights = FILE_ADD_FILE | FILE_DELETE_CHILD;
+    let mut parent = if components.is_empty() && access & mutation_rights != 0 {
         match nt_open_root_with_access(root, access) {
             Ok(parent) => parent,
             Err(error) => {
