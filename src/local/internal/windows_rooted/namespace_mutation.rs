@@ -19,7 +19,10 @@ use std::path::Path;
 
 use windows_sys::Wdk::Storage::FileSystem::FILE_OPEN;
 use windows_sys::Wdk::Storage::FileSystem::FILE_RENAME_INFORMATION;
+use windows_sys::Wdk::Storage::FileSystem::FILE_RENAME_POSIX_SEMANTICS;
+use windows_sys::Wdk::Storage::FileSystem::FILE_RENAME_REPLACE_IF_EXISTS;
 use windows_sys::Wdk::Storage::FileSystem::FileRenameInformation;
+use windows_sys::Wdk::Storage::FileSystem::FileRenameInformationEx;
 use windows_sys::Wdk::Storage::FileSystem::NtSetInformationFile;
 use windows_sys::Wdk::Storage::FileSystem::RtlNtStatusToDosErrorNoTeb;
 use windows_sys::Win32::Storage::FileSystem::FILE_READ_ATTRIBUTES;
@@ -130,26 +133,9 @@ pub(super) fn rename_open_entry(
     let information = unsafe { &mut *buffer.as_mut_ptr().cast::<FILE_RENAME_INFORMATION>() };
     information.RootDirectory = destination_parent.as_raw_handle();
     if overwrite {
-        use windows_sys::Win32::Storage::FileSystem::FileRenameInfo;
-        use windows_sys::Win32::Storage::FileSystem::SetFileInformationByHandle;
-        // SAFETY: `source` and the destination parent remain open, `buffer`
-        // is a complete FILE_RENAME_INFO payload, and the native call does
-        // not retain any pointer after returning.
-        let win32_length = information_length
-            .checked_add(size_of::<u16>() as u32)
-            .ok_or_else(|| Error::new(ErrorKind::InvalidInput, "rename buffer is too large"))?;
-        let result = unsafe {
-            SetFileInformationByHandle(
-                source.as_raw_handle(),
-                FileRenameInfo,
-                buffer.as_ptr().cast(),
-                win32_length,
-            )
-        };
-        if result == 0 {
-            return Err(Error::last_os_error());
-        }
-        return Ok(());
+        // The POSIX rename mode allows an existing destination to be replaced
+        // atomically while preserving handle-relative traversal.
+        information.Anonymous.Flags = FILE_RENAME_REPLACE_IF_EXISTS | FILE_RENAME_POSIX_SEMANTICS;
     }
     let mut status_block = IO_STATUS_BLOCK::default();
     // SAFETY: `source` and the destination parent remain open, `buffer` is a
@@ -161,7 +147,11 @@ pub(super) fn rename_open_entry(
             &raw mut status_block,
             buffer.as_ptr().cast(),
             information_length,
-            FileRenameInformation,
+            if overwrite {
+                FileRenameInformationEx
+            } else {
+                FileRenameInformation
+            },
         )
     };
     if status < 0 {
