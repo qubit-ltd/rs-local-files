@@ -472,6 +472,10 @@ impl LocalDirectoryWalker {
     }
 }
 
+/// Converts macOS's private temporary-directory spelling to its public form.
+///
+/// Paths outside `/private/var` are returned unchanged. The conversion is
+/// lexical and does not access the filesystem.
 #[cfg(target_os = "macos")]
 fn logical_macos_path(path: &Path) -> PathBuf {
     let private_var = Path::new("/private/var");
