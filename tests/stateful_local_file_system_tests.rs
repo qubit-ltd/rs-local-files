@@ -36,14 +36,26 @@ use tempfile::tempdir;
 
 static PROCESS_PWD_LOCK: Mutex<()> = Mutex::new(());
 
+fn assert_path_eq(actual: &Path, expected: &Path) {
+    #[cfg(target_os = "macos")]
+    {
+        assert_eq!(
+            fs::canonicalize(actual).expect("actual path should resolve"),
+            fs::canonicalize(expected).expect("expected path should resolve"),
+        );
+    }
+    #[cfg(not(target_os = "macos"))]
+    assert_eq!(actual, expected);
+}
+
 #[test]
 fn test_host_observes_process_pwd_and_clone_configuration_is_independent() {
     let _pwd_guard = PROCESS_PWD_LOCK.lock().expect("process PWD lock should be available");
     let process_pwd = std::env::current_dir().expect("process PWD should be readable");
     let mut filesystem = LocalFileSystem::host().expect("Host filesystem should open");
-    assert_eq!(
-        filesystem.current_directory().expect("Host PWD should be readable"),
-        process_pwd
+    assert_path_eq(
+        &filesystem.current_directory().expect("Host PWD should be readable"),
+        &process_pwd,
     );
 
     let directory = tempdir().expect("temporary directory should be created");
@@ -59,14 +71,14 @@ fn test_host_observes_process_pwd_and_clone_configuration_is_independent() {
         .set_default_list_options(LocalListOptions::new().with_recursive())
         .expect("clone defaults should be configurable");
 
-    assert_eq!(
-        filesystem
+    assert_path_eq(
+        &filesystem
             .current_directory()
             .expect("updated Host PWD should be readable"),
         directory.path(),
     );
-    assert_eq!(
-        cloned
+    assert_path_eq(
+        &cloned
             .current_directory()
             .expect("cloned Host filesystem should observe process PWD"),
         directory.path(),
@@ -281,7 +293,7 @@ fn test_read_prefix_preserves_context_for_a_post_open_read_failure() {
         .expect_err("injected read failure should be reported");
 
     assert_eq!(LocalFileOperation::Read, error.operation());
-    assert_eq!(Some(file.as_path()), error.path());
+    assert_path_eq(error.path().expect("read failure should retain a path"), &file);
 }
 
 /// Runs a scenario in a child process so process-global PWD mutations cannot
@@ -373,7 +385,12 @@ fn test_rooted_constructor_captures_one_absolute_diagnostic_snapshot() {
 
     let filesystem = LocalFileSystem::rooted(relative).expect("relative root authority should open");
 
-    assert_eq!(Some(expected.as_path()), filesystem.diagnostic_root());
+    assert_path_eq(
+        filesystem
+            .diagnostic_root()
+            .expect("rooted diagnostic root should be available"),
+        &expected,
+    );
     assert_eq!(7, filesystem.metadata(Path::new("value")).unwrap().len());
 }
 
