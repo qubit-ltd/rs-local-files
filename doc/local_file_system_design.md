@@ -3,19 +3,17 @@
 [中文设计文档](local_file_system_design.zh_CN.md) ·
 [User guide](user_guide.md) · [README](../README.md)
 
-> Status: synchronized high-level English summary
+> Status: normative design specification
 >
 > Last updated: 2026-09-03
 
-The [Simplified Chinese design](local_file_system_design.zh_CN.md) is the
-normative source of truth. This document is a synchronized high-level English
-summary: public APIs, platform implementations, tests, READMEs, and user guides
-must remain semantically aligned with both. Consult the Chinese design for exact
-signatures, defaults, state machines, and test matrices. It describes the
-intended completed system, not migration history or temporary implementation
-details. “Must”, “must not”, and “should” translate normative requirements from
-the Chinese source. Non-semantic modifiers such as a particular `const` or
-`inline` annotation are coding-policy details rather than API contracts.
+This document and the [Simplified Chinese design](local_file_system_design.zh_CN.md)
+are equal, normative specifications. Public APIs, platform implementations,
+tests, READMEs, and user guides must remain semantically aligned with both.
+They describe the intended completed system, not migration history or temporary
+implementation details. “Must”, “must not”, and “should” express normative
+requirements. Non-semantic modifiers such as a particular `const` or `inline`
+annotation are coding-policy details rather than API contracts.
 
 ## 0. Terminology
 
@@ -452,3 +450,285 @@ Host and Rooted tests cover their distinct authorities, structured failures are
 preserved through downstream adapters, bilingual documentation stays aligned,
 all published Rust examples compile, configured CI and coverage gates pass, and
 the three maintained branches point to the same verified commit after release.
+
+## Appendix: Detailed Normative Clauses
+
+This appendix supplies the detailed rules, API shapes, examples, and verification
+matrix that are normative in both language editions. It is part of the design,
+not an implementation note.
+
+### Object model, constructors, and state
+
+Conceptually, `LocalFileSystem` consists of an immutable, clone-shared
+`Arc<LocalAuthorityCore>` and instance-owned `current_directory`, symlink policy,
+and default options for read, write, list, copy, create-directory, delete,
+rename, temporary file, and temporary directory operations. The exact source
+layout may differ, but these invariants must hold:
+
+- authority and its capability snapshot are immutable;
+- PWD and defaults belong to one instance and are copied on clone;
+- defaults are never placed in the shared `Arc`;
+- mutating a clone never mutates another clone's configuration;
+- there is no extra instance-level walk or copy hard limit; and
+- a Rooted filesystem has exactly one authority participating in operations.
+
+`host()` neither reads nor caches the process PWD. It remains constructible, and
+absolute-path operations remain usable, while the PWD is temporarily unreadable.
+Only operations which bind a relative path read it, and failures retain the
+actual operation and operand. `rooted(root)` resolves one Host-native constructor
+path, opens one authority, then exposes virtual `/` with PWD `/`. Its constructor
+path is diagnostic-only after opening. A target without the required rooted
+containment primitives returns `Unsupported`; optional publication and durability
+capabilities do not prevent construction.
+
+There is intentionally no public builder. Callers configure a constructed
+instance through `&mut self` setters. Host `set_current_directory` delegates
+directly to `std::env::set_current_dir`; it changes process-global state and does
+not pre-read or pre-validate PWD. Rooted first resolves and validates a directory
+under its authority, then atomically replaces its virtual PWD. A failed setter,
+including an unsupported `FollowAcrossScope` policy, leaves the prior state
+unchanged.
+
+### Public API and option selection
+
+The public state-and-fact API consists of `scope`, `current_directory`,
+`set_current_directory`, `symlink_policy`, `set_symlink_policy`,
+`diagnostic_root`, `capabilities`, `limits`, `limits_at`, and `space_at`.
+There is one getter/setter pair for each of the nine defaults. Setters validate
+structural, scope, and known capability constraints early, but operation entry
+points repeat relevant validation because explicit options and path-dependent
+runtime facts can differ.
+
+Every configurable operation has an ordinary entry point and a
+`*_with_options` entry point. The former uses its instance default; the latter
+uses its supplied complete value:
+
+```text
+effective_options = explicit_options.unwrap_or(instance_default_options)
+```
+
+No fields are implicitly merged, no instance hard cap is applied over explicit
+options, and the smaller of two limits is never silently selected. To alter one
+default for one call, callers clone that default and alter the clone explicitly.
+`symlink_policy_override: None` means inherit the filesystem policy; it is not a
+merge of two option objects. Metadata, capability, and space queries have no
+spurious `*_with_options` form.
+
+Initial defaults are: no read-open retry; `CreateNew`, no parent creation,
+preferred atomicity, and non-required durability for writing; non-recursive,
+inherited-link-policy, fail-fast lists; conflict/type-conflict failure,
+no metadata preservation, `Auto` source mode, no parent creation, preferred
+atomicity, and non-required durability for copying; non-recursive and
+exists-error create/delete; no-overwrite, non-required-durability rename; and
+PWD parent, default naming, and no parent creation for temporary resources.
+
+All resource limits use `Option` and initially equal `None`: depth, entries,
+seen-name bytes, copied bytes, open directories, deadlines, and temporary-name
+attempts. `None` always means that the caller set no budget. A reopen policy
+matters only when an open-directory budget exists; the crate must not substitute
+a hidden fixed handle threshold. `open_retry_timeout` explicitly authorizes
+library retries: `None` and zero perform only the first attempt, while a positive
+duration permits retries in that monotonic interval.
+
+Options are owned values with private fields, getters, consuming `with_*`
+methods, corresponding `without_*` methods for optional budgets, and at least
+`Clone`, `Debug`, and `Default`. `new()` and `Default` have identical initial
+semantics where `new()` takes no necessary parameter. Options neither retain a
+filesystem nor read global configuration. A `deadline: Duration` starts at
+operation entry, uses a monotonic clock, and starts a walker at `list()` rather
+than its first `next()`. Copy deadlines are cooperative chunk boundaries, not
+claims to cancel a system call already in the kernel. `LocalPersistOptions`
+belongs to an existing temporary resource, not filesystem defaults.
+
+### Path coordinate system and resolution
+
+Host and Rooted share lexical rules: namespace-absolute paths begin at their
+namespace root; relative Host paths begin at an operation-time process-PWD
+snapshot; relative Rooted paths begin at the instance virtual PWD; empty input
+and `.` mean PWD; and `..` removes one component but cannot cross the namespace
+root. Rooted stores a normalized namespace-absolute PWD; Host stores none.
+
+For a Rooted authority opened from `/srv/app`, virtual `/`, `/etc/hosts`, and
+`/var/data/a.txt` conceptually denote `/srv/app`, `/srv/app/etc/hosts`, and
+`/srv/app/var/data/a.txt`. This is explanatory only: access is handle-relative,
+never `diagnostic_root.join(...)`. `/srv/app/log` is still a *virtual* path and
+therefore conceptually denotes `/srv/app/srv/app/log`. Windows drive, UNC, and
+device prefixes are invalid Rooted syntax.
+
+Resolution captures PWD only for a relative input, starts a component stack at
+the namespace root or PWD, adds normal components, ignores `.` and empty
+components, and rejects `..` at root before producing a namespace-absolute path.
+It uses `std::path::Component` and native `OsStr`, never UTF-8 splitting.
+Examples at PWD `/` are `"" -> "/"`, `"a/./b" -> "/a/b"`,
+`"a/../b" -> "/b"`, and `".." -> InvalidPath`; at `/work/project`,
+`"../../tmp" -> "/tmp"` whereas `"../../../tmp" -> InvalidPath`.
+
+Resolution retains directory intent from trailing separators, trailing `.`, or
+other native forms until operation type checking. A writer must not turn
+`"missing/"` into a regular file. NUL, invalid prefixes, and values that cannot
+be represented losslessly are rejected. Copy and rename capture exactly one PWD
+snapshot if either operand is relative; if both Host operands are absolute they
+do not read PWD, and any lexical failure yields `Unchanged` without native
+mutation.
+
+Virtual `/` is addressable for metadata, list, limits, space, and temporary
+parents. It is never a writer target, copy source/destination, delete or rename
+operand, or persistence target; violations are `InvalidPath`. Host preserves
+native drive and prefix semantics, rejects ambiguous drive-relative forms such
+as `C:foo` unless the platform can resolve them unambiguously, and reports UNC or
+device support only when its complete authority contract is implemented.
+
+### Links, authority, and platform boundary
+
+`Reject` prohibits traversing a link; observing, deleting, or renaming the link
+entry itself is not traversal. `FollowWithinScope` permits traversal only while
+the resolved name remains in the filesystem namespace. `FollowAcrossScope` is
+Host-only. Rooted defaults to `FollowWithinScope`, Host to `FollowAcrossScope`.
+Link targets use the same component rules: relative targets begin at the link's
+directory and Rooted absolute targets restart at virtual `/`, never Host `/`.
+Cycles return a structured path error and must not be hidden behind a caller-
+invisible fixed expansion budget.
+
+Final-link semantics are stable: metadata observes the link itself; a reader
+follows an allowed target; `CreateNew` treats it as occupied; `Append` follows
+it; `CreateOrReplace` follows and replaces its referent while retaining the
+link; delete-file removes the link; delete-directory rejects it as the wrong
+type; rename moves the link; copy source copies it; copy destination and temp
+persist replace its entry. A platform that cannot provide these semantics must
+return `Unsupported` or `RequirementNotMet`.
+
+Unix implementations prefer descriptor-relative `*at` operations, final-link
+controls, Linux `openat2` containment resolution where available, and descriptor
+metadata. Windows implementations use opened directory handles, handle-relative
+resolution, reparse-aware metadata, file/volume identity, and native install
+primitives. No missing primitive may be replaced by `canonicalize` plus a string
+prefix comparison. Mount boundaries are allowed by default; hard-link aliases
+between copy source and target are detected and rejected.
+
+### Operations and recovery contracts
+
+Each operation captures policy, options, and needed PWD; validates capabilities;
+normalizes operands; completes provable preflight before destructive I/O; invokes
+the Host or Rooted backend; then maps all results and failures back into the
+namespace coordinate system. Open resources retain their own authority, path,
+options, and PWD snapshots.
+
+All public resource identity paths (`path`, `root`, `source_path`, `target_path`,
+and `staging_path`) are namespace-absolute and reusable with their owning
+filesystem. A directory entry exposes its namespace-absolute `path`, path
+relative to the walker root, optional diagnostic path, and metadata. Temporary
+and publication paths never expose an authority-relative private representation.
+
+Metadata observes the final entry itself and returns kind, length, permissions,
+reliable platform timestamps, and needed identity information. Absence is a
+structured `NotFound`, not `Option`. Readers own their native file, implement
+`Read + Seek`, and are not redirected by later rename or PWD changes.
+`read_prefix` reads at most the requested byte count and never silently loads a
+whole file. Objective path limits are distinct from application budgets; Host
+may report `VariesByPath`, while `limits_at` and `space_at` probe the nearest
+existing authority location and retain unknown facts as unknown.
+
+`CreateNew` and `CreateOrReplace` stage beside the destination, write and flush
+bytes, perform required file synchronization, install through a native rename,
+and synchronize the parent when required. A publication completed before parent
+sync failure is `Published`, not `NotPublished`. Append writes an existing regular
+file directly; it cannot satisfy required atomicity and cannot roll back bytes.
+Writer lifecycle is `Open`, `Committed`, or `Aborted`; failure knowledge is
+`NotPublished`, `Published`, or `Indeterminate` and is independent of lifecycle.
+
+Walkers are lazy `Iterator<Item = LocalResult<LocalDirectoryEntry>>` values.
+They never pre-collect a directory tree, fix creation-time policy and authority,
+and offer explicit depth, entry, seen-name-byte, open-directory, and deadline
+budgets. `FailFast` stops at the first error; continuation returns each error and
+continues only safe branches. Directory identity detects recursive followed-link
+cycles while output retains logical link paths. Dropping a walker releases
+resources only.
+
+Copy produces `Result<LocalCopyOutcome, LocalCopyFailure>` with destination
+state `Unchanged`, `PartiallyPublished`, `Published`, or `Indeterminate`. Failure
+retains request and failing operands, partial statistics, and staging context
+only when cleanup failed. Preflight covers self-copy, hard-link aliases,
+destination-inside-source, kinds, conflicts, requirements, and explicit budgets.
+File staging is destination-local; required semantics never silently degrade.
+Tree copies preserve partial entry statistics, reject unsupported special files
+by default, are not generally transactional, and never mutate the source.
+
+Recursive create and delete are likewise non-transactional. If they have already
+changed an entry when they fail, they report `PublicationIncomplete` and the
+first unfinished namespace-absolute path; otherwise they retain the original
+kind. Create's `exists_ok` accepts only an existing directory. File deletion
+removes a non-directory or link; directory deletion is separate and recursion is
+explicit. Rename always uses a same-authority native rename rather than a
+copy-delete emulation, reports `Unchanged`, `Renamed`, or `Indeterminate`, and
+cannot silently downgrade its atomic namespace transition.
+
+Temporary resources are RAII-owned entries. Drop performs best-effort cleanup
+only while ownership is proven; an indeterminate resource is never automatically
+removed. Creation validates names before I/O, stores creation-time PWD when
+needed, and creates a per-resource private sandbox. `keep(self)` installs a
+generated sibling and reports sandbox cleanup; `close` closes file I/O without
+giving up ownership; `cleanup` has an explicit repeat-call contract. Persist
+uses the creation-time PWD for a relative target, retains a typed stage and
+`NotPublished` or `Indeterminate` result, and never targets Rooted `/`.
+`child(component)` accepts one normal component; `descendant(path)` remains
+beneath the temporary directory. Identity checks reject ordinary replacement
+before deletion or publication, but identity checking and deletion cannot be
+claimed atomic across attacker-controlled concurrent replacement or identity
+reuse.
+
+### Errors, capabilities, concurrency, and verification
+
+`LocalFileError` stably exposes its kind, public operation, primary/target paths,
+PWD context, reason, typed source, and cleanup error. Lexical failures preserve
+the caller spelling and PWD snapshot; successful-resolution I/O errors use
+namespace-absolute paths. Kinds include invalid path/options/state, missing and
+existing entries, directory/type conflicts, permission, unsupported and unmet
+requirements, explicit or OS resource limits, corruption, incomplete
+publication, indeterminate state, and ordinary I/O. Display text is diagnostic
+only. Dedicated copy, rename, commit, and persistence failures are recovery
+objects; callers branch on their typed state.
+
+Capabilities report implemented protocols for rooted operations, atomic rename
+and replacement, attempting atomic no-replace temporary persistence, durable
+rename/copy/write, and do not promise a particular mount or device outcome.
+`can_attempt_atomic_temp_persist()` describes an attempt protocol only; the
+deprecated `supports_atomic_temp_persist()` is a source-compatible alias.
+`Required` rejects unavailable guarantees before mutation where possible;
+`Preferred` may safely downgrade but reports the outcome; `NotRequired` imposes
+no guarantee. Unix limits are bytes and Windows limits are UTF-16 code units;
+they are never converted into guessed UTF-8 byte limits.
+
+Cloning shares immutable authority, copies Rooted PWD, policy, and all defaults,
+and leaves Host clones observing global process PWD. Setters use `&mut self`;
+operations use `&self`; the crate provides no internal synchronization for
+concurrent configuration. Caller-owned locking is required for one mutable
+instance. Readers, writers, walkers, and temporary resources remain valid after
+the originating filesystem is reconfigured or dropped because they retain their
+creation-time state.
+
+`LocalPaths` converts namespace-absolute native paths to and from canonical
+components without PWD or I/O; empty Rooted components mean virtual `/`.
+`LocalFileNames` validates native components, applies explicit portable policy
+and optional component limits, and creates safe random names without pretending
+that every filesystem has a 255-unit limit. `LocalPathCodec` reversibly maps one
+native component to canonical UTF-8, rejects aliases and malformed/lowercase or
+unnecessary escapes, and has no lossy fallback on Unix or Windows.
+
+`qubit-fs-local` maps abstract requests and canonical paths into this crate's
+virtual paths and complete native options, then maps native typed outcomes back.
+It does not strip a Rooted leading slash, build another root-relative coordinate
+system, duplicate codecs or containment, or retain duplicate defaults. Provider
+identity, URI, registry, user metadata, and remote capability policy stay above
+this crate.
+
+Verification covers Host/Rooted API symmetry; complete options replacement;
+transactional setters; table/property path normalization; native path round
+trips; root authority persistence through diagnostic rename; link escape and
+cycles; clone/open-resource lifecycles; every writer/copy/rename/temp recovery
+state; explicit resource budgets and their absence; virtual-root operation
+rules; and downstream typed-state preservation. Linux, Windows, and macOS run
+behavioral tests; Android and FreeBSD are compile-checked only. CI must run
+all-feature tests and strict Clippy, downstream `qubit-fs-local` contracts and
+`qubit-mime` temporary-resource integration, and compile README/user-guide
+examples. Fuzz targets use process-unique bounded sandboxes, bounded collision
+retry, and RAII cleanup; coverage exempts no whole file.
