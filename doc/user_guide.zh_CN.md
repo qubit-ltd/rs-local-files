@@ -11,6 +11,22 @@
 文件系统 API，也不替代 provider 层的逻辑路径模型。本 crate 提供同步 API；异步应用应在
 合适的 blocking 执行环境中调用。
 
+## 递归删除预算
+
+`LocalDeleteOptions` 支持 `with_max_depth`、`with_max_entries`、
+`with_max_pending_path_bytes` 和 `with_deadline`。默认均不限，配套 `without_*`
+方法可独立移除限制。预算适用于递归目录删除；请求目录本身计为一个条目、深度为零。
+发现子条目后，在加入工作队列前扣减条目预算；待处理路径按原生编码长度计费，出队即释放。
+队列路径预算不包括分配器开销与枚举中的临时对象。Host 和 Rooted 均惰性枚举，
+同一时间最多打开一个目录读取器。期限在原生操作之间检查，不能中断正在阻塞的 I/O。
+
+删除任何条目前超限，返回 `ResourceLimit` 并保留类型化资源信息；已经删除条目后失败，
+返回 `PublicationIncomplete`，仍保留资源信息。期限错误保留 `TimedOut` I/O 类别。
+重试前应同时检查副作用分类与失败原因。
+
+实例默认 Options 是便利配置，不是强制上限；显式 `*_with_options` 会完整替换它们。
+需要请求无法放宽的 provider 上限时，应配置 `qubit-fs-local::LocalResourcePolicy`。
+
 ## 概念模型
 
 ```text
@@ -165,8 +181,11 @@ assert_eq!(text, r#"{"complete":true}"#);
 
 `CreateNew` 与 `CreateOrReplace` 使用目标目录内的暂存；`Append` 直接修改已有普通文件，
 因此拒绝要求的原子性。writer 的生命周期（`LocalWriterState`）与发布结论
-（`LocalWriteFailureState`）分离；写入、刷新或提交失败可能使发布状态变为不确定，需要
-恢复时应保留并检查返回的资源或错误。
+（`LocalWriteFailureState`）分离。`Interrupted` 和 `WouldBlock` 允许重试；其他流错误会
+禁止继续写入和提交：暂存写入保留 `NotPublished`，追加写入在此前已成功写入字节时为
+`Published`，否则为 `NotPublished`。仍可调用 abort 清理。提交失败仍可能报告
+`Indeterminate`，需要恢复时应保留并检查返回的资源或错误。向量写入可能成功但只写入
+部分字节，调用方应按返回的字节数推进缓冲区。
 
 `LocalFileSystem::copy` 根据源元数据选择文件或目录行为。需要固定源类型时使用
 `with_file_source()` 或 `with_tree_source()`，并通过 `source_mode()` 读取模式。
