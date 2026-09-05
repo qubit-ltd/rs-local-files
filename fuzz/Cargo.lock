@@ -131,7 +131,8 @@ dependencies = [
 
 [[package]]
 name = "qubit-redact"
-version = "0.5.0"
+version = "0.6.0"
+source = "git+https://github.com/qubit-ltd/rs-redact#9ae7349275b94562e79bcd9fc63db11994ccec75"
 dependencies = [
  "qubit-budget",
 ]
@@ -172,9 +173,9 @@ checksum = "f8fadd59c855ef2080decdef8ff161eb6661b86933c9d82e5ba29dc602a55aba"
 
 [[package]]
 name = "syn"
-version = "3.0.4"
+version = "3.0.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "e6275cddf4610d1775e6d1fe9469b2e77d0f39fd98fb7450901b821e0c53649f"
+checksum = "12df2e0110f65b775f769bb17ef989067a1d931b2eb822bd4346631eeada89f9"
 dependencies = [
  "proc-macro2",
  "quote",
