@@ -22,6 +22,7 @@ use super::delete_work::DeleteWork;
 use super::io;
 use super::resolve_rooted_path;
 use super::rooted_io_error;
+use crate::local::DeleteBudget;
 
 impl RootedLocalFileSystem {
     /// Deletes a rooted file or final symbolic-link entry.
@@ -85,7 +86,7 @@ impl RootedLocalFileSystem {
             LocalFileOperation::DeleteDirectory,
         )?;
         if options.recursive() {
-            return remove_rooted_directory_tree(&self.root, &relative)
+            return remove_rooted_directory_tree(&self.root, &relative, *options)
                 .map(|()| LocalDeleteOutcome::new(true))
                 .or_else(|error| {
                     if error.kind() == LocalFileErrorKind::NotFound && options.missing_ok() {
@@ -107,10 +108,26 @@ impl RootedLocalFileSystem {
 }
 
 /// Removes a Rooted directory tree and retains its first failed entry.
-fn remove_rooted_directory_tree(root: &crate::rooted::Root, path: &crate::local::LocalRelativePath) -> LocalResult<()> {
+fn remove_rooted_directory_tree(
+    root: &crate::rooted::Root,
+    path: &crate::local::LocalRelativePath,
+    options: LocalDeleteOptions,
+) -> LocalResult<()> {
     let mut removed_any = false;
-    let mut work = vec![DeleteWork::Inspect(path.clone())];
-    while let Some(item) = work.pop() {
+    let mut budget = DeleteBudget::new(options);
+    budget
+        .discover(0)
+        .and_then(|()| budget.reserve_path(path.as_path()))
+        .map_err(|error| rooted_delete_entry_error(path, false, error))?;
+    let mut work = vec![(DeleteWork::Inspect(path.clone()), 0_usize)];
+    while let Some((item, depth)) = work.pop() {
+        let current_path = match &item {
+            DeleteWork::Inspect(path) | DeleteWork::RemoveDirectory(path) => path,
+        };
+        budget.release_path(current_path.as_path());
+        budget
+            .check_deadline()
+            .map_err(|error| rooted_delete_entry_error(current_path, removed_any, error))?;
         match item {
             DeleteWork::Inspect(current) => {
                 let metadata = match root.symlink_metadata(&current) {
@@ -120,20 +137,41 @@ fn remove_rooted_directory_tree(root: &crate::rooted::Root, path: &crate::local:
                     }
                 };
                 if metadata.kind() == crate::rooted::EntryKind::Directory {
-                    let entries = match root.read_dir(&current) {
+                    let mut entries = match root.open_dir_reader(&current) {
                         Ok(entries) => entries,
                         Err(error) => {
                             return Err(rooted_delete_entry_error(&current, removed_any, error));
                         }
                     };
-                    work.push(DeleteWork::RemoveDirectory(current.clone()));
-                    for entry in entries.into_iter().rev() {
+                    budget
+                        .reserve_path(current.as_path())
+                        .map_err(|error| rooted_delete_entry_error(&current, removed_any, error))?;
+                    work.push((DeleteWork::RemoveDirectory(current.clone()), depth));
+                    let children_start = work.len();
+                    loop {
+                        budget
+                            .check_deadline()
+                            .map_err(|error| rooted_delete_entry_error(&current, removed_any, error))?;
+                        let Some(entry) = entries
+                            .next_entry()
+                            .map_err(|error| rooted_delete_entry_error(&current, removed_any, error))?
+                        else {
+                            break;
+                        };
                         let child = current
                             .join_component(entry.name())
                             .expect("rooted directory names are normal components");
-                        work.push(DeleteWork::Inspect(child));
+                        budget
+                            .discover(depth + 1)
+                            .and_then(|()| budget.reserve_path(child.as_path()))
+                            .map_err(|error| rooted_delete_entry_error(&child, removed_any, error))?;
+                        work.push((DeleteWork::Inspect(child), depth + 1));
                     }
+                    work[children_start..].reverse();
                 } else {
+                    budget
+                        .check_deadline()
+                        .map_err(|error| rooted_delete_entry_error(&current, removed_any, error))?;
                     maybe_fail_rooted_delete(&current, removed_any)?;
                     if let Err(error) = root.remove_file(&current) {
                         return Err(rooted_delete_entry_error(&current, removed_any, error));
