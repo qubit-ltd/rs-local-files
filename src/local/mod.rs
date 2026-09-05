@@ -41,6 +41,7 @@ mod local_root_atomic_writer_support;
 
 pub use internal::CopyBudget;
 pub use internal::CopyDestinationAction;
+pub(crate) use internal::DeleteBudget;
 pub(crate) use internal::DirectoryIdentity;
 pub(crate) use internal::HostLocalFileSystem;
 #[cfg(test)]
