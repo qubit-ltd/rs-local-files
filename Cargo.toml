@@ -37,7 +37,7 @@ test-support = []
 
 [dependencies]
 qubit-budget = "0.5"
-qubit-redact = { version = "0.5", path = "../rs-redact", default-features = false }
+qubit-redact = { version = "0.6", git = "https://github.com/qubit-ltd/rs-redact", default-features = false }
 getrandom = "0.4"
 
 [target.'cfg(unix)'.dependencies]
