@@ -60,7 +60,7 @@ pub struct LocalFileWriter {
     state: LocalWriterState,
     /// Bytes accepted by successful stream writes.
     bytes_written: usize,
-    /// Failure state retained after an uncertain stream write.
+    /// Publication certainty retained after a non-retryable stream failure.
     failure_state: Option<LocalWriteFailureState>,
 }
 
@@ -122,7 +122,7 @@ impl LocalFileWriter {
         self.state
     }
 
-    /// Returns an uncertainty retained from an earlier stream failure.
+    /// Returns publication certainty after a non-retryable stream failure.
     #[must_use]
     #[cfg_attr(not(coverage), inline)]
     #[cfg_attr(coverage, inline(never))]
@@ -143,7 +143,7 @@ impl LocalFileWriter {
     /// changed before a later durability failure.
     #[allow(clippy::result_large_err)]
     pub fn commit(mut self) -> Result<LocalWriteOutcome, LocalFileCommitError> {
-        if self.state != LocalWriterState::Open || self.failure_state == Some(LocalWriteFailureState::Indeterminate) {
+        if self.state != LocalWriterState::Open || self.failure_state.is_some() {
             let failure_state = self.failure_state.unwrap_or(LocalWriteFailureState::NotPublished);
             return Err(LocalFileCommitError::new(
                 self.contextualize_error(publication_error(
@@ -358,7 +358,11 @@ impl LocalFileWriter {
         self.bytes_written = self.bytes_written.saturating_add(written);
     }
 
-    /// Marks an ordinary stream error as indeterminate.
+    /// Records a fatal stream failure without losing known publication state.
+    ///
+    /// Interrupted and would-block errors leave the writer retryable. Staged
+    /// bytes have not reached the destination; append bytes already accepted
+    /// remain published even when a later write fails.
     ///
     /// # Parameters
     ///
@@ -370,8 +374,13 @@ impl LocalFileWriter {
     #[cfg_attr(not(coverage), inline)]
     #[cfg_attr(coverage, inline(never))]
     fn observe_stream_result<T>(&mut self, result: io::Result<T>) -> io::Result<T> {
-        if result.is_err() {
-            self.failure_state = Some(LocalWriteFailureState::Indeterminate);
+        if let Err(error) = &result
+            && !matches!(error.kind(), io::ErrorKind::Interrupted | io::ErrorKind::WouldBlock)
+        {
+            self.failure_state = Some(match &self.backend {
+                Some(LocalFileWriterBackend::Append(_)) if self.bytes_written > 0 => LocalWriteFailureState::Published,
+                _ => LocalWriteFailureState::NotPublished,
+            });
         }
         result
     }
@@ -388,11 +397,21 @@ impl LocalFileWriter {
 impl Write for LocalFileWriter {
     /// Writes bytes to staging or directly appends to the destination.
     fn write(&mut self, buffer: &[u8]) -> io::Result<usize> {
-        if self.state != LocalWriterState::Open || self.failure_state == Some(LocalWriteFailureState::Indeterminate) {
+        if self.state != LocalWriterState::Open || self.failure_state.is_some() {
             return Err(io::Error::new(
                 io::ErrorKind::BrokenPipe,
                 "local file writer is not open",
             ));
+        }
+        #[cfg(feature = "test-support")]
+        for (fault, kind) in [
+            ("local-writer-interrupted", io::ErrorKind::Interrupted),
+            ("local-writer-would-block", io::ErrorKind::WouldBlock),
+            ("local-writer-write-failed", io::ErrorKind::Other),
+        ] {
+            if crate::local::take_test_support(fault) {
+                return self.observe_stream_result(Err(io::Error::from(kind)));
+            }
         }
         let result = match self.backend.as_mut() {
             Some(LocalFileWriterBackend::Staged(writer)) => writer.write(buffer),
@@ -407,47 +426,29 @@ impl Write for LocalFileWriter {
 
     /// Writes vectored bytes to staging or directly appends to the destination.
     fn write_vectored(&mut self, buffers: &[IoSlice<'_>]) -> io::Result<usize> {
-        if self.state != LocalWriterState::Open || self.failure_state == Some(LocalWriteFailureState::Indeterminate) {
+        if self.state != LocalWriterState::Open || self.failure_state.is_some() {
             return Err(io::Error::new(
                 io::ErrorKind::BrokenPipe,
                 "local file writer is not open",
             ));
         }
 
-        // Windows' standard file handle reports vectored writes as supported
-        // while only consuming the first slice.  Preserve the writer's
-        // cross-platform contract by completing the remaining slices through
-        // the ordinary write path.
-        #[cfg(windows)]
-        {
-            let mut written = 0;
-            for buffer in buffers {
-                let count = self.write(buffer)?;
-                written += count;
-                if count < buffer.len() {
-                    break;
-                }
-            }
-            Ok(written)
-        }
-
-        #[cfg(not(windows))]
-        {
-            let result = match self.backend.as_mut() {
-                Some(LocalFileWriterBackend::Staged(writer)) => writer.write_vectored(buffers),
-                Some(LocalFileWriterBackend::Rooted(writer)) => writer.write_vectored(buffers),
-                Some(LocalFileWriterBackend::Append(file)) => file.write_vectored(buffers),
-                None => unreachable!("open writer must retain one backend"),
-            };
-            let written = self.observe_stream_result(result)?;
-            self.record_written(written);
-            Ok(written)
-        }
+        // Delegate one operation so short writes and failures retain the
+        // standard Write contract on every platform.
+        let result = match self.backend.as_mut() {
+            Some(LocalFileWriterBackend::Staged(writer)) => writer.write_vectored(buffers),
+            Some(LocalFileWriterBackend::Rooted(writer)) => writer.write_vectored(buffers),
+            Some(LocalFileWriterBackend::Append(file)) => file.write_vectored(buffers),
+            None => unreachable!("open writer must retain one backend"),
+        };
+        let written = self.observe_stream_result(result)?;
+        self.record_written(written);
+        Ok(written)
     }
 
     /// Flushes userspace buffers without publishing staged content.
     fn flush(&mut self) -> io::Result<()> {
-        if self.state != LocalWriterState::Open || self.failure_state == Some(LocalWriteFailureState::Indeterminate) {
+        if self.state != LocalWriterState::Open || self.failure_state.is_some() {
             return Err(io::Error::new(
                 io::ErrorKind::BrokenPipe,
                 "local file writer is not open",

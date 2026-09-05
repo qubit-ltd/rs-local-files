@@ -31,7 +31,7 @@ use tempfile::tempdir;
 
 /// Environment switch used by the file-size-limit subprocess regression.
 #[cfg(unix)]
-const INDETERMINATE_APPEND_CASE: &str = "QUBIT_LOCAL_FILES_INDETERMINATE_APPEND_CASE";
+const FAILED_APPEND_CASE: &str = "QUBIT_LOCAL_FILES_FAILED_APPEND_CASE";
 
 /// Verifies staged replacement is invisible until commit.
 #[test]
@@ -273,30 +273,31 @@ fn test_local_file_writer_reports_parent_sync_result() {
     }
 }
 
-/// Verifies a stream error permanently prevents append commit or clean abort.
+/// Verifies a failed first append prevents commit while retaining known
+/// publication state.
 #[cfg(unix)]
 #[test]
-fn test_local_file_writer_append_preserves_indeterminate_state() {
-    if let Ok(case) = env::var(INDETERMINATE_APPEND_CASE) {
-        run_indeterminate_append_case(&case);
+fn test_local_file_writer_append_preserves_not_published_state() {
+    if let Ok(case) = env::var(FAILED_APPEND_CASE) {
+        run_failed_append_case(&case);
         return;
     }
     let executable = env::current_exe().expect("current test executable should resolve");
     for case in ["commit", "abort"] {
         let status = Command::new(&executable)
             .arg("--exact")
-            .arg("test_local_file_writer_append_preserves_indeterminate_state")
+            .arg("test_local_file_writer_append_preserves_not_published_state")
             .arg("--nocapture")
-            .env(INDETERMINATE_APPEND_CASE, case)
+            .env(FAILED_APPEND_CASE, case)
             .status()
-            .expect("indeterminate append child should start");
-        assert!(status.success(), "indeterminate append {case} child should succeed");
+            .expect("failed append child should start");
+        assert!(status.success(), "failed append {case} child should succeed");
     }
 }
 
 /// Runs one append state transition under a zero-byte process file-size limit.
 #[cfg(unix)]
-fn run_indeterminate_append_case(case: &str) {
+fn run_failed_append_case(case: &str) {
     let directory = tempdir().expect("temporary directory should be created");
     let target = directory.path().join("target");
     fs::write(&target, b"existing").expect("target fixture should be written");
@@ -333,32 +334,28 @@ fn run_indeterminate_append_case(case: &str) {
     let failure_state =
         std::hint::black_box(LocalFileWriter::failure_state as fn(&LocalFileWriter) -> Option<LocalWriteFailureState>);
     assert_eq!(
-        Some(LocalWriteFailureState::Indeterminate),
+        Some(LocalWriteFailureState::NotPublished),
         std::hint::black_box(failure_state)(&writer),
     );
     let write_after_failure = writer
         .write(b"x")
-        .expect_err("indeterminate writer must reject further writes");
+        .expect_err("failed writer must reject further writes");
     assert_eq!(std::io::ErrorKind::BrokenPipe, write_after_failure.kind());
     let vectored_after_failure = writer
         .write_vectored(&[IoSlice::new(b"x")])
-        .expect_err("indeterminate writer must reject further vectored writes");
+        .expect_err("failed writer must reject further vectored writes");
     assert_eq!(std::io::ErrorKind::BrokenPipe, vectored_after_failure.kind());
-    let flush_after_failure = writer
-        .flush()
-        .expect_err("indeterminate writer must reject further flushes");
+    let flush_after_failure = writer.flush().expect_err("failed writer must reject further flushes");
     assert_eq!(std::io::ErrorKind::BrokenPipe, flush_after_failure.kind());
     match case {
         "commit" => {
-            let error = writer.commit().expect_err("indeterminate writer must not commit");
-            assert_eq!(LocalWriteFailureState::Indeterminate, error.state());
+            let error = writer.commit().expect_err("failed writer must not commit");
+            assert_eq!(LocalWriteFailureState::NotPublished, error.state());
         }
         "abort" => {
-            let outcome = writer
-                .abort()
-                .expect("abort should close an indeterminate append writer");
+            let outcome = writer.abort().expect("abort should close a failed append writer");
             assert_eq!(LocalWriterState::Aborted, outcome.state());
-            assert_eq!(Some(LocalWriteFailureState::Indeterminate), outcome.failure_state(),);
+            assert_eq!(Some(LocalWriteFailureState::NotPublished), outcome.failure_state(),);
         }
         other => panic!("unexpected append regression case: {other}"),
     }

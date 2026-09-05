@@ -726,20 +726,6 @@ impl Write for LocalTempFile {
     #[cfg_attr(not(coverage), inline(always))]
     #[cfg_attr(coverage, inline(never))]
     fn write_vectored(&mut self, buffers: &[IoSlice<'_>]) -> Result<usize> {
-        #[cfg(windows)]
-        {
-            let mut written = 0;
-            for buffer in buffers {
-                let count = self.write(buffer)?;
-                written += count;
-                if count < buffer.len() {
-                    break;
-                }
-            }
-            Ok(written)
-        }
-
-        #[cfg(not(windows))]
         self.as_file_mut()?.write_vectored(buffers)
     }
 
