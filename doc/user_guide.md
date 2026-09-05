@@ -13,6 +13,27 @@ API, or a replacement for provider-level logical paths. The crate is
 synchronous; async applications should call it from an appropriate blocking
 execution context.
 
+## Recursive deletion budgets
+
+`LocalDeleteOptions` accepts `with_max_depth`, `with_max_entries`,
+`with_max_pending_path_bytes`, and `with_deadline`. All are unbounded by default;
+matching `without_*` methods remove individual limits. Budgets apply to recursive
+directory deletion. The requested directory counts as one entry at depth zero.
+Every discovered child consumes entry capacity before entering the work queue;
+its native encoded path length consumes pending-path capacity until popped.
+This queue limit excludes allocator overhead and in-flight enumeration objects. Both Host
+and Rooted enumerate lazily with at most one directory reader open at a time.
+Deadlines are checked between native operations and cannot interrupt blocked I/O.
+
+Budget exhaustion before deletion retains `ResourceLimit` and typed resource
+facts. After any entry was removed, the error is `PublicationIncomplete` and
+still retains those facts; deadline errors retain `TimedOut` as their I/O kind.
+Inspect both the effect classification and the cause before retrying.
+
+Instance default Options are convenience configuration, not mandatory ceilings:
+explicit `*_with_options` replaces them completely. For a provider policy that
+requests cannot loosen, configure `qubit-fs-local::LocalResourcePolicy` instead.
+
 ## Conceptual Model
 
 ```text
@@ -184,9 +205,13 @@ symbolic link.
 `CreateNew` and `CreateOrReplace` use same-directory staging. `Append` changes
 an existing regular file directly and rejects required atomicity. A writer can
 be committed or aborted; lifecycle (`LocalWriterState`) is separate from
-publication conclusion (`LocalWriteFailureState`). A write, flush, or commit
-error can leave publication state indeterminate, so retain and inspect the
-returned resource/error where recovery is required.
+publication conclusion (`LocalWriteFailureState`). `Interrupted` and `WouldBlock`
+leave the writer usable for retry. Other stream errors prevent further writes
+and commit: staging retains `NotPublished`; append reports `Published` if earlier
+writes succeeded, otherwise `NotPublished`. Abort remains available for cleanup.
+Commit failures can still report `Indeterminate`, so retain and inspect the
+returned resource/error where recovery is required. Vectored writes may succeed
+with a short count; advance through the buffers by the returned byte count.
 
 `LocalFileSystem::copy` selects file or directory behavior from source
 metadata. Use `with_file_source()` or `with_tree_source()` when the source

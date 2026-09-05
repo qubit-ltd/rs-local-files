@@ -17,6 +17,9 @@ use crate::LocalTempDirectoryOptions;
 use crate::LocalTempFileOptions;
 use crate::LocalWriteOptions;
 
+/// Replaceable convenience configuration, not mandatory resource ceilings.
+///
+/// Explicit per-operation Options replace these values completely.
 /// Options copied independently by [`crate::LocalFileSystem::clone`].
 #[derive(Clone, Debug, Default)]
 pub(crate) struct LocalFileSystemDefaults {

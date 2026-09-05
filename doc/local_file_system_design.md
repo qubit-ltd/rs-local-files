@@ -642,6 +642,10 @@ sync failure is `Published`, not `NotPublished`. Append writes an existing regul
 file directly; it cannot satisfy required atomicity and cannot roll back bytes.
 Writer lifecycle is `Open`, `Committed`, or `Aborted`; failure knowledge is
 `NotPublished`, `Published`, or `Indeterminate` and is independent of lifecycle.
+`Interrupted` and `WouldBlock` permit retry. Other stream errors prevent further
+write/flush/commit but permit abort: staging retains `NotPublished`; append
+retains `Published` after a successful nonempty write, otherwise `NotPublished`.
+Vectored I/O delegates one native operation and may return a short byte count.
 
 Walkers are lazy `Iterator<Item = LocalResult<LocalDirectoryEntry>>` values.
 They never pre-collect a directory tree, fix creation-time policy and authority,
@@ -665,7 +669,13 @@ changed an entry when they fail, they report `PublicationIncomplete` and the
 first unfinished namespace-absolute path; otherwise they retain the original
 kind. Create's `exists_ok` accepts only an existing directory. File deletion
 removes a non-directory or link; directory deletion is separate and recursion is
-explicit. Rename always uses a same-authority native rename rather than a
+explicit. Recursive deletion accepts optional depth, discovered-entry, pending-path
+byte, and cooperative elapsed-time budgets. The root counts as one entry at depth
+zero. Pending bytes bound encoded paths in the work queue, excluding allocator
+overhead and in-flight enumeration objects; children are charged before queuing.
+Budget failures retain typed resource facts even after partial deletion. Native
+defaults remain replaceable; provider adapters enforce mandatory ceilings.
+Rename always uses a same-authority native rename rather than a
 copy-delete emulation, reports `Unchanged`, `Renamed`, or `Indeterminate`, and
 cannot silently downgrade its atomic namespace transition.
 
