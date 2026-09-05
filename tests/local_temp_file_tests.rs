@@ -29,7 +29,7 @@ use qubit_local_files::options::LocalTempFileOptions;
 use qubit_local_files::outcome::LocalPersistCleanupState;
 use qubit_local_files::outcome::LocalPersistFailureState;
 use qubit_local_files::outcome::LocalPersistMethod;
-#[cfg(feature = "test-support")]
+#[cfg(all(feature = "test-support", unix))]
 use qubit_local_files::outcome::LocalPersistStage;
 use qubit_local_files::policy::LocalDurabilityRequirement;
 #[cfg(feature = "test-support")]
@@ -489,12 +489,13 @@ fn test_local_temp_file_reads_back_written_content_before_cleanup() {
         .expect("temporary file should be created");
     let path = temporary.path().to_path_buf();
 
-    assert_eq!(
-        7,
-        temporary
-            .write_vectored(&[IoSlice::new(b"pay"), IoSlice::new(b"load")])
-            .expect("temporary file should accept vectored bytes")
-    );
+    let written = temporary
+        .write_vectored(&[IoSlice::new(b"pay"), IoSlice::new(b"load")])
+        .expect("temporary file should accept vectored bytes");
+    assert!((1..=7).contains(&written));
+    temporary
+        .write_all(&b"payload"[written..])
+        .expect("remaining bytes should be accepted");
     let offset = temporary
         .stream_position()
         .expect("temporary file should report its current offset");
