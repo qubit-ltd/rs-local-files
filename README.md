@@ -179,7 +179,15 @@ path conversion intentionally does not support UNC paths.
 - [中文设计文档](doc/local_file_system_design.zh_CN.md)
 - [中文 README](README.zh_CN.md)
 
+Recursive deletion also supports explicit depth, entry, pending-path byte, and deadline budgets;
+the requested directory counts as one entry at depth zero. Default Options are replaceable
+configuration, not mandatory ceilings. See the [user guide](doc/user_guide.md).
+
 ## Testing
+
+Local package verification uses `.cargo/config.toml` to retain the locked Git source
+for `qubit-redact`. Publishing to crates.io still requires that dependency version
+to be published to the registry first.
 
 ```bash
 # Run tests with the default feature set

@@ -145,7 +145,13 @@ Linux、Windows 和 macOS 的行为会在运行时测试。FreeBSD 和 Android �
 - [本地文件系统设计文档](doc/local_file_system_design.zh_CN.md)
 - [English README](README.md)
 
+递归删除也支持显式深度、条目数、待处理路径字节数与期限预算；请求目录计为一个条目、深度为零。
+默认 Options 是可替换的配置，不是强制上限。详见[用户手册](doc/user_guide.zh_CN.md)。
+
 ## 测试
+
+本地打包验证通过 `.cargo/config.toml` 保留锁文件固定的 `qubit-redact` Git 源。
+向 crates.io 发布时，仍需先将该依赖版本发布到 registry。
 
 ```bash
 # 使用默认 feature 集运行测试

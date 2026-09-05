@@ -497,7 +497,7 @@ filesystem.copy_with_options(source, target, &options)?;
 - `LocalCopyOptions`：冲突、类型冲突、metadata、symlink override、source mode、父目录、
   原子性、持久性、深度、条目、字节、打开目录和 deadline；
 - `LocalCreateDirectoryOptions`：递归与 exists-ok；
-- `LocalDeleteOptions`：递归与 missing-ok；
+- `LocalDeleteOptions`：递归、missing-ok，以及深度、已发现条目数、待处理路径字节数和 deadline；
 - `LocalRenameOptions`：overwrite 与 durability；
 - `LocalTempFileOptions` / `LocalTempDirectoryOptions`：parent、prefix、suffix、名称尝试预算和
   父目录创建；
@@ -957,8 +957,11 @@ pub enum LocalWriteFailureState {
 }
 ```
 
-生命周期与 namespace 事实是两个维度。只有 `Open` 可以继续 write/flush。普通 byte I/O
-error 不能自动证明没有副作用；无法证明时 failure state 为 `Indeterminate`。
+生命周期与 namespace 事实是两个维度。`Interrupted` 和 `WouldBlock` 允许重试；其他流错误
+会禁止继续 write/flush/commit，但仍可 abort 清理。暂存写入失败保留 `NotPublished`；
+追加写入在此前已成功写入字节时为 `Published`，否则为 `NotPublished`。提交阶段无法证明
+最终 namespace 事实时仍报告 `Indeterminate`。向量 I/O 只委托一次 native 操作，允许短写，
+调用方必须按返回字节数推进缓冲区。
 
 ### 14.3 Staged publication
 
@@ -1126,7 +1129,12 @@ file 和 directory delete 分开，避免调用方意外删除错误类型：
 - missing-ok 只改变 NotFound 结果，不吞掉 permission、type 或 I/O 错误；
 - Rooted `/` 永远不能删除。
 
-Recursive delete 不是事务。若至少一个 entry 已删除后失败，返回
+Recursive delete 可显式设置深度、已发现条目数、待处理路径字节数与协作式 deadline。
+根目录计为一个条目、深度为零；枚举子项时先扣减预算再入队。待处理路径预算统计队列内
+路径的原生编码字节，不包含分配器开销和枚举中的临时对象。默认均为 `None`，不限制；
+原生默认值可被显式 Options 替换，强制上限由 provider 适配层保证。
+
+Recursive delete 不是事务。预算失败即使发生在部分删除之后，也保留类型化资源事实。若至少一个 entry 已删除后失败，返回
 `LocalFileErrorKind::PublicationIncomplete`，`path` 指向失败的虚拟绝对 entry；已经完成的
 删除不回滚。尚未删除任何 entry 时保留原始错误 kind。`LocalDeleteOutcome` 只表示完整成功，
 调用方处理 `PublicationIncomplete` 时必须重新检查剩余树，不能根据 message 猜测状态。
