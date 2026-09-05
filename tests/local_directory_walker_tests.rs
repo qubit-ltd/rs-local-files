@@ -23,6 +23,41 @@ use qubit_local_files::outcome::LocalFileKind;
 use qubit_local_files::policy::LocalSymlinkPolicy;
 use tempfile::tempdir;
 
+/// Absolute listing operands use the same lexical parent normalization as
+/// metadata, even when the eliminated component is a symbolic link.
+#[cfg(unix)]
+#[test]
+fn test_host_list_normalizes_parent_before_following_symlinks() {
+    use std::os::unix::fs::symlink;
+
+    let directory = tempdir().expect("fixture directory should exist");
+    let root = fs::canonicalize(directory.path()).expect("fixture root should resolve");
+    fs::create_dir_all(root.join("work/data")).expect("lexical directory should exist");
+    fs::create_dir_all(root.join("other/sub")).expect("link target should exist");
+    fs::create_dir_all(root.join("other/data")).expect("physical directory should exist");
+    fs::write(root.join("work/data/expected"), b"expected").expect("lexical entry should exist");
+    fs::write(root.join("other/data/wrong"), b"wrong").expect("physical entry should exist");
+    symlink(root.join("other/sub"), root.join("work/link")).expect("link should exist");
+    let operand = root.join("work/link/../data");
+    let mut filesystem = LocalFileSystem::host().expect("Host should open");
+    for policy in [LocalSymlinkPolicy::FollowAcrossScope, LocalSymlinkPolicy::Reject] {
+        filesystem
+            .set_symlink_policy(policy)
+            .expect("Host policy should be valid");
+        assert_eq!(
+            LocalFileKind::Directory,
+            filesystem.metadata(&operand).expect("metadata should resolve").kind()
+        );
+        let entries = filesystem
+            .list(&operand)
+            .expect("listing should use lexical normalization")
+            .collect::<Result<Vec<_>, _>>()
+            .expect("listing should succeed");
+        assert_eq!(1, entries.len());
+        assert_eq!(Path::new("expected"), entries[0].relative_path());
+    }
+}
+
 /// Verifies lazy recursive traversal with stable root-relative paths.
 #[test]
 fn test_local_directory_walker_recurses_lazily() {

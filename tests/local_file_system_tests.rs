@@ -19,6 +19,8 @@ use qubit_local_files::options::LocalReadOptions;
 use qubit_local_files::options::LocalRenameOptions;
 #[cfg(unix)]
 use qubit_local_files::policy::LocalDurabilityRequirement;
+#[cfg(feature = "test-support")]
+use qubit_local_files::test_support::install_test_fault;
 #[cfg(target_os = "linux")]
 use tempfile::NamedTempFile;
 use tempfile::tempdir;
@@ -294,4 +296,34 @@ fn test_local_file_system_delete_uses_explicit_directory_recursion() {
         .expect("recursive deletion should remove the tree");
     assert!(outcome.deleted());
     assert!(!tree.exists());
+}
+
+/// One prefix operation binds a relative Host operand exactly once.
+#[cfg(feature = "test-support")]
+#[test]
+fn test_read_prefix_uses_one_process_pwd_snapshot() {
+    let filesystem = LocalFileSystem::host().expect("Host should open");
+    let expected = std::fs::read("Cargo.toml").expect("manifest should be readable");
+    let _fault = install_test_fault("local-pwd-second-snapshot").expect("snapshot fault should install");
+    assert_eq!(
+        &expected[..16],
+        filesystem
+            .read_prefix(std::path::Path::new("Cargo.toml"), 16)
+            .expect("prefix should not bind the path twice")
+    );
+}
+
+/// A transient read interruption is retried without losing accumulated bytes.
+#[cfg(feature = "test-support")]
+#[test]
+fn test_read_prefix_retries_interrupted_read() {
+    let filesystem = LocalFileSystem::host().expect("Host should open");
+    let expected = std::fs::read("Cargo.toml").expect("manifest should be readable");
+    let _fault = install_test_fault("local-prefix-interrupted").expect("read fault should install");
+    assert_eq!(
+        &expected[..16],
+        filesystem
+            .read_prefix(std::path::Path::new("Cargo.toml"), 16)
+            .expect("interrupted read should retry")
+    );
 }
