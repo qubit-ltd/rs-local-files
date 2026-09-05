@@ -48,12 +48,7 @@ impl LocalFileSystem {
         .map_err(|error| with_current_directory(error, resolver.current_directory()))?;
         match &self.core.namespace {
             LocalNamespace::Host => {
-                let host_path = if path.is_absolute() {
-                    path
-                } else {
-                    resolved.authority_relative()
-                };
-                HostLocalFileSystem::list_with_policy(host_path, options, self.symlink_policy)
+                HostLocalFileSystem::list_with_policy(resolved.authority_relative(), options, self.symlink_policy)
             }
             LocalNamespace::Rooted(rooted) => rooted.list(
                 resolved.authority_relative(),

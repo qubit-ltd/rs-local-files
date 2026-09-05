@@ -27,6 +27,7 @@ use super::operation_error;
 use super::reject_directory_qualified_file;
 use super::resolve_operation_path;
 use super::with_current_directory;
+use crate::path::LocalNamespacePath;
 
 impl LocalFileSystem {
     /// Reads final-entry metadata without following the final symlink.
@@ -73,7 +74,20 @@ impl LocalFileSystem {
     pub fn open_reader_with_options(&self, path: &Path, options: &LocalReadOptions) -> LocalResult<LocalFileReader> {
         let resolver = self.resolver_for(path, LocalFileOperation::OpenReader)?;
         let resolved = resolve_operation_path(&resolver, path, LocalFileOperation::OpenReader)?;
-        reject_directory_qualified_file(&resolved, LocalFileOperation::OpenReader, resolver.current_directory())?;
+        self.open_resolved_reader(&resolved, options, resolver.current_directory())
+    }
+
+    /// Opens an already-bound operand without querying the process PWD again.
+    ///
+    /// Returns an opened regular-file reader or a structured opening error
+    /// carrying the same namespace path and PWD snapshot as the caller.
+    fn open_resolved_reader(
+        &self,
+        resolved: &LocalNamespacePath,
+        options: &LocalReadOptions,
+        current_directory: Option<&Path>,
+    ) -> LocalResult<LocalFileReader> {
+        reject_directory_qualified_file(resolved, LocalFileOperation::OpenReader, current_directory)?;
         match &self.core.namespace {
             LocalNamespace::Host => HostLocalFileSystem::open_reader_with_policy(
                 resolved.authority_relative(),
@@ -90,7 +104,7 @@ impl LocalFileSystem {
                 LocalFileOperation::OpenReader,
                 resolved.namespace_absolute(),
                 None,
-                resolver.current_directory(),
+                current_directory,
             )
         })
     }
@@ -108,10 +122,9 @@ impl LocalFileSystem {
         options: &LocalReadOptions,
     ) -> LocalResult<Vec<u8>> {
         let resolver = self.resolver_for(path, LocalFileOperation::Read)?;
-        let error_path = resolve_operation_path(&resolver, path, LocalFileOperation::Read)?
-            .namespace_absolute()
-            .to_path_buf();
-        let mut reader = self.open_reader_with_options(path, options)?;
+        let resolved = resolve_operation_path(&resolver, path, LocalFileOperation::Read)?;
+        let error_path = resolved.namespace_absolute().to_path_buf();
+        let mut reader = self.open_resolved_reader(&resolved, options, resolver.current_directory())?;
         if max_bytes == 0 {
             return Ok(Vec::new());
         }
@@ -129,7 +142,18 @@ impl LocalFileSystem {
                 );
                 return Err(with_current_directory(error, resolver.current_directory()));
             }
-            let count = reader.read(&mut buffer[..read_len]).map_err(|source| {
+            #[cfg(feature = "test-support")]
+            let read_result = if crate::local::take_test_support("local-prefix-interrupted") {
+                Err(std::io::Error::from(std::io::ErrorKind::Interrupted))
+            } else {
+                reader.read(&mut buffer[..read_len])
+            };
+            #[cfg(not(feature = "test-support"))]
+            let read_result = reader.read(&mut buffer[..read_len]);
+            if matches!(&read_result, Err(error) if error.kind() == std::io::ErrorKind::Interrupted) {
+                continue;
+            }
+            let count = read_result.map_err(|source| {
                 with_current_directory(
                     LocalFileError::from_io(LocalFileOperation::Read, Some(error_path.clone()), None, source),
                     resolver.current_directory(),
