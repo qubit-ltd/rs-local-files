@@ -32,6 +32,8 @@ pub enum LocalResourceKind {
     Entry,
     /// Bytes retained by duplicate-name tracking.
     SeenNameBytes,
+    /// Encoded native bytes retained by pending recursive deletion paths.
+    PendingPathBytes,
     /// Bytes used by one encoded native or portable path component.
     PathComponentBytes,
     /// Bytes copied by a tree-copy operation.
@@ -45,6 +47,7 @@ impl fmt::Display for LocalResourceKind {
             Self::Depth => formatter.write_str("depth"),
             Self::OpenDirectory => formatter.write_str("open directory"),
             Self::Entry => formatter.write_str("entry"),
+            Self::PendingPathBytes => formatter.write_str("pending-path bytes"),
             Self::SeenNameBytes => formatter.write_str("seen-name bytes"),
             Self::PathComponentBytes => formatter.write_str("path-component bytes"),
             Self::CopiedBytes => formatter.write_str("copied bytes"),

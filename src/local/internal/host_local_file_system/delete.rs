@@ -23,6 +23,7 @@ use super::fs;
 use super::io;
 use super::resolve_host_path;
 use super::test_io_fault;
+use crate::local::DeleteBudget;
 
 impl HostLocalFileSystem {
     /// Deletes a Host file or final symbolic-link entry using an explicit
@@ -101,7 +102,7 @@ impl HostLocalFileSystem {
             );
         }
         if options.recursive() {
-            return remove_host_directory_tree(&bound).map(|()| LocalDeleteOutcome::new(true));
+            return remove_host_directory_tree(&bound, *options).map(|()| LocalDeleteOutcome::new(true));
         }
         let result = { test_io_fault("local-fs-delete-directory-remove").map_or_else(|| fs::remove_dir(&bound), Err) };
         match result {
@@ -120,10 +121,22 @@ impl HostLocalFileSystem {
 }
 
 /// Removes a Host directory tree while tracking the first failed entry.
-fn remove_host_directory_tree(path: &Path) -> LocalResult<()> {
+fn remove_host_directory_tree(path: &Path, options: LocalDeleteOptions) -> LocalResult<()> {
     let mut removed_any = false;
-    let mut work = vec![DeleteWork::Inspect(path.to_path_buf())];
-    while let Some(item) = work.pop() {
+    let mut budget = DeleteBudget::new(options);
+    budget
+        .discover(0)
+        .and_then(|()| budget.reserve_path(path))
+        .map_err(|error| delete_entry_error(path, false, error))?;
+    let mut work = vec![(DeleteWork::Inspect(path.to_path_buf()), 0_usize)];
+    while let Some((item, depth)) = work.pop() {
+        let current_path = match &item {
+            DeleteWork::Inspect(path) | DeleteWork::RemoveDirectory(path) => path,
+        };
+        budget.release_path(current_path);
+        budget
+            .check_deadline()
+            .map_err(|error| delete_entry_error(current_path, removed_any, error))?;
         match item {
             DeleteWork::Inspect(current) => {
                 let metadata = match fs::symlink_metadata(&current) {
@@ -135,21 +148,33 @@ fn remove_host_directory_tree(path: &Path) -> LocalResult<()> {
                         Ok(entries) => entries,
                         Err(error) => return Err(delete_entry_error(&current, removed_any, error)),
                     };
-                    let mut children = Vec::new();
+                    budget
+                        .reserve_path(&current)
+                        .map_err(|error| delete_entry_error(&current, removed_any, error))?;
+                    work.push((DeleteWork::RemoveDirectory(current.clone()), depth));
+                    let children_start = work.len();
                     for entry in entries {
+                        budget
+                            .check_deadline()
+                            .map_err(|error| delete_entry_error(&current, removed_any, error))?;
                         let entry = match entry {
                             Ok(entry) => entry,
                             Err(error) => {
                                 return Err(delete_entry_error(&current, removed_any, error));
                             }
                         };
-                        children.push(entry.path());
+                        let child = entry.path();
+                        budget
+                            .discover(depth + 1)
+                            .and_then(|()| budget.reserve_path(&child))
+                            .map_err(|error| delete_entry_error(&child, removed_any, error))?;
+                        work.push((DeleteWork::Inspect(child), depth + 1));
                     }
-                    work.push(DeleteWork::RemoveDirectory(current));
-                    for child in children.into_iter().rev() {
-                        work.push(DeleteWork::Inspect(child));
-                    }
+                    work[children_start..].reverse();
                 } else {
+                    budget
+                        .check_deadline()
+                        .map_err(|error| delete_entry_error(&current, removed_any, error))?;
                     maybe_fail_host_delete(&current, removed_any)?;
                     if let Err(error) = remove_host_non_directory(&current, &metadata) {
                         return Err(delete_entry_error(&current, removed_any, error));
