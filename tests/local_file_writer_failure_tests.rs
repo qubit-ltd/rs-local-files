@@ -23,6 +23,83 @@ use qubit_local_files::policy::LocalDurabilityRequirement;
 use qubit_local_files::test_support::install_test_fault;
 use tempfile::tempdir;
 
+/// Transient native errors leave the stream usable and preserve accounting.
+#[cfg(all(feature = "test-support", unix))]
+#[test]
+fn test_local_file_writer_retries_transient_stream_errors() {
+    for rooted in [false, true] {
+        for fault in ["local-writer-interrupted", "local-writer-would-block"] {
+            let directory = tempdir().expect("fixture should exist");
+            let filesystem = if rooted {
+                LocalFileSystem::rooted(directory.path())
+            } else {
+                LocalFileSystem::host()
+            }
+            .expect("filesystem should open");
+            let target = if rooted {
+                std::path::PathBuf::from("payload")
+            } else {
+                directory.path().join("payload")
+            };
+            let mut writer = filesystem.open_writer(&target).expect("writer should open");
+            let _fault = install_test_fault(fault).expect("fault should install");
+            if fault == "local-writer-would-block" {
+                let error = writer.write(b"payload").expect_err("initial write should block");
+                assert_eq!(std::io::ErrorKind::WouldBlock, error.kind());
+            }
+            writer
+                .write_all(b"payload")
+                .expect("transient failure should be retryable");
+            assert_eq!(None, writer.failure_state());
+            assert_eq!(7, writer.commit().expect("commit should succeed").bytes_written());
+            assert_eq!(
+                b"payload",
+                fs::read(directory.path().join("payload"))
+                    .expect("published bytes should exist")
+                    .as_slice()
+            );
+        }
+    }
+}
+
+/// A staging stream failure cannot make an untouched destination uncertain.
+#[cfg(all(feature = "test-support", unix))]
+#[test]
+fn test_local_file_writer_stream_failure_preserves_publication_certainty() {
+    for mode in [LocalWriteMode::CreateOrReplace, LocalWriteMode::Append] {
+        let directory = tempdir().expect("fixture should exist");
+        let target = directory.path().join("payload");
+        fs::write(&target, b"original").expect("original should exist");
+        let filesystem = LocalFileSystem::host().expect("Host should open");
+        let mut writer = filesystem
+            .open_writer_with_options(&target, &LocalWriteOptions::new(mode))
+            .expect("writer should open");
+        writer.write_all(b"+").expect("first write should succeed");
+        let _fault = install_test_fault("local-writer-write-failed").expect("fault should install");
+        writer.write(b"lost").expect_err("native write should fail");
+        let expected = if mode == LocalWriteMode::Append {
+            LocalWriteFailureState::Published
+        } else {
+            LocalWriteFailureState::NotPublished
+        };
+        assert_eq!(Some(expected), writer.failure_state());
+        let failure = writer
+            .commit()
+            .expect_err("failed stream must not publish truncated staging");
+        assert_eq!(expected, failure.state());
+        assert!(failure.writer().is_none());
+        let expected_bytes: &[u8] = if mode == LocalWriteMode::Append {
+            b"original+"
+        } else {
+            b"original"
+        };
+        assert_eq!(
+            expected_bytes,
+            fs::read(&target).expect("target should remain readable")
+        );
+    }
+}
+
 /// Verifies Host writers retain the caller-visible destination after resolving
 /// an intermediate symbolic link for native access.
 #[cfg(unix)]
@@ -62,12 +139,13 @@ fn test_local_file_writer_append_commit_reports_direct_publication() {
     assert_eq!(Some(target.as_path()), writer.diagnostic_path());
     assert_eq!(LocalWriterState::Open, writer.state());
     assert_eq!(None, writer.failure_state());
-    assert_eq!(
-        7,
-        writer
-            .write_vectored(&[IoSlice::new(b"-vec"), IoSlice::new(b"tor")])
-            .expect("append writer should accept vectored bytes")
-    );
+    let written = writer
+        .write_vectored(&[IoSlice::new(b"-vec"), IoSlice::new(b"tor")])
+        .expect("append writer should accept vectored bytes");
+    assert!((1..=7).contains(&written));
+    writer
+        .write_all(&b"-vector"[written..])
+        .expect("remaining bytes should be accepted");
     writer
         .flush()
         .expect("append writer should flush directly published bytes");
@@ -390,12 +468,13 @@ fn test_local_file_writer_rooted_sessions_report_commit_and_abort_outcomes() {
             &LocalWriteOptions::new(LocalWriteMode::CreateNew),
         )
         .expect("rooted staged writer should open");
-    assert_eq!(
-        6,
-        committed
-            .write_vectored(&[IoSlice::new(b"root"), IoSlice::new(b"ed")])
-            .expect("rooted writer should accept vectored bytes")
-    );
+    let written = committed
+        .write_vectored(&[IoSlice::new(b"root"), IoSlice::new(b"ed")])
+        .expect("rooted writer should accept vectored bytes");
+    assert!((1..=6).contains(&written));
+    committed
+        .write_all(&b"rooted"[written..])
+        .expect("remaining bytes should be accepted");
     committed.flush().expect("rooted staging should flush");
     let committed_outcome = committed.commit().expect("rooted staged writer should commit");
 
