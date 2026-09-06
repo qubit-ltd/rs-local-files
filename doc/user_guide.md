@@ -220,6 +220,10 @@ writes succeeded, otherwise `NotPublished`. Abort remains available for cleanup.
 Commit failures can still report `Indeterminate`, so retain and inspect the
 returned resource/error where recovery is required. Vectored writes may succeed
 with a short count; advance through the buffers by the returned byte count.
+When `create_parent` and required durability are selected, the atomic writer
+creates missing ancestors and synchronizes each newly created directory after
+publication; a failure at that point is reported as `Published` with an
+incomplete publication error.
 
 `LocalFileSystem::copy` selects file or directory behavior from source
 metadata. Use `with_file_source()` or `with_tree_source()` when the source
@@ -267,7 +271,10 @@ caller sets an open-directory budget, `Reopen` closes and later reopens active
 frames as needed, while `Fail` returns `ResourceLimit` at the boundary. A
 zero handle budget is invalid and returns `InvalidOptions`. Rooted enumeration
 streams each directory instead of first collecting it into a vector. Dropping
-the walker only releases handles.
+the walker only releases handles. Host enumeration keeps the requested
+namespace path as the public root even when a followed symbolic link points to
+another physical directory; the optional diagnostic path may still identify
+that physical access path.
 
 Temporary files and directories own cleanup while armed. Each resource lives in
 a private generated sandbox that is removed with the resource. Dropping them

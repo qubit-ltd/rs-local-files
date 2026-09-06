@@ -192,7 +192,9 @@ assert_eq!(text, r#"{"complete":true}"#);
 禁止继续写入和提交：暂存写入保留 `NotPublished`，追加写入在此前已成功写入字节时为
 `Published`，否则为 `NotPublished`。仍可调用 abort 清理。提交失败仍可能报告
 `Indeterminate`，需要恢复时应保留并检查返回的资源或错误。向量写入可能成功但只写入
-部分字节，调用方应按返回的字节数推进缓冲区。
+部分字节，调用方应按返回的字节数推进缓冲区。当同时启用 `create_parent` 与 Required 耐久性时，
+atomic writer 会创建缺失的祖先目录，并在发布后逐一同步新建目录；该阶段失败会以 `Published` 和
+不完整发布错误报告。
 
 `LocalFileSystem::copy` 根据源元数据选择文件或目录行为。需要固定源类型时使用
 `with_file_source()` 或 `with_tree_source()`，并通过 `source_mode()` 读取模式。
@@ -232,7 +234,8 @@ match filesystem.copy_with_options(
 深度、条目数、名称内存、deadline 或打开目录数预算。调用方设置打开目录预算后，
 `Reopen` 会按需关闭并重新打开活动 frame，`Fail` 则会在边界返回 `ResourceLimit`。
 零句柄预算无效并返回 `InvalidOptions`。Rooted 会逐项读取目录，避免先收集到 `Vec`；
-drop walker 只释放句柄。
+drop walker 只释放句柄。Host 列举即使跟随符号链接进入另一个物理目录，也会保留请求的
+namespace 路径作为公开 root；可选的 diagnostic path 仍可记录实际访问的物理路径。
 
 临时文件和目录在仍处于 armed 状态时拥有清理责任。每个资源都创建在独立的私有 sandbox 中，
 sandbox 会和资源一起清理。需要观察清理失败时应显式调用 `cleanup()`；drop 只会静默地尽力清理。
