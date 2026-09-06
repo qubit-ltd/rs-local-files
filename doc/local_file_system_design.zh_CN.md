@@ -1019,6 +1019,11 @@ Iterator<Item = LocalResult<LocalDirectoryEntry>>
 未设置时库不添加默认业务上限。设置 `max_open_directories` 后，
 `LocalDirectoryReopenPolicy` 决定达到预算时重新打开 frame 还是返回 `ResourceLimit`。
 
+Host 列举即使通过符号链接访问了另一个物理目录，公开 entry path 仍保留请求的 namespace
+root，diagnostic path 才可记录实际访问位置。Rooted 和 Host 的 tree copy 都按需推进
+directory reader；受限复制允许在仍持有 reader 预算时预读一个子项，不承诺条目排序，也不会
+把 native 目录缓冲区误当成应用已处理条目预算。
+
 ### 15.3 错误策略
 
 `LocalWalkErrorPolicy::FailFast` 在第一个错误终止；continue 模式逐项返回错误并继续可安全的
@@ -1102,6 +1107,10 @@ Tree copy 按 Options 控制递归、symlink、metadata 和预算。特殊文件
 能够普遍事务化整棵目录树。
 
 Copy 永远不得修改 source。
+
+writer 在创建缺失父目录并要求 Required durability 时，会在发布后逐一同步新增祖先。
+祖先链同步失败仍表示目标已经发布，返回 `Published` 与不完整发布错误；调用方必须检查
+类型化状态，目标字节仍可观察。
 
 ## 17. Directory create、delete 与 rename
 
