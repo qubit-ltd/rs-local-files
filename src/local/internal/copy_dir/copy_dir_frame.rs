@@ -26,6 +26,8 @@ pub(super) struct CopyDirFrame {
     src: PathBuf,
     /// Destination directory path paired with `src`.
     dst: PathBuf,
+    /// Descendant depth of this directory beneath the copied root.
+    depth: usize,
     /// Filesystem-object identity retained for active-cycle detection.
     source_identity: DirectoryIdentity,
     /// Source permissions captured for post-order preservation.
@@ -54,6 +56,7 @@ impl CopyDirFrame {
     pub(super) fn new(
         src: PathBuf,
         dst: PathBuf,
+        depth: usize,
         source_identity: DirectoryIdentity,
         source_permissions: fs::Permissions,
         entries: fs::ReadDir,
@@ -62,6 +65,7 @@ impl CopyDirFrame {
         Self {
             src,
             dst,
+            depth,
             source_identity,
             source_permissions,
             entries,
@@ -79,6 +83,12 @@ impl CopyDirFrame {
     #[must_use]
     pub(super) fn dst(&self) -> &Path {
         &self.dst
+    }
+
+    /// Returns the descendant depth of this directory.
+    #[must_use]
+    pub(super) const fn depth(&self) -> usize {
+        self.depth
     }
 
     /// Returns the filesystem-object source identity.

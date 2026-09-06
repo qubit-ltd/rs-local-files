@@ -14,6 +14,7 @@ use std::fs;
 use std::io::Error;
 use std::io::ErrorKind;
 use std::path::Path;
+use std::path::PathBuf;
 
 use super::super::directory_identity::DirectoryIdentity;
 use super::copy_dir_frame::CopyDirFrame;
@@ -30,6 +31,9 @@ use crate::LocalCopyDirStage;
 use crate::LocalCopyDirStats;
 use crate::local::CopyBudget;
 use crate::local::CopyDestinationAction;
+use crate::local::internal::CopyTreeBackend;
+use crate::local::internal::CopyTreeFrameContext;
+use crate::local::internal::copy_tree;
 
 /// Copies one source directory tree without recursive function calls.
 ///
@@ -57,14 +61,19 @@ pub(super) fn copy_dir_iterative(
     scope_root: Option<&Path>,
     stats: &mut LocalCopyDirStats,
 ) -> CopyDirResult<()> {
-    let mut active_sources = HashSet::new();
     let mut budget = CopyBudget::new(options);
+    let mut backend = HostCopyBackend {
+        options,
+        destination_root: destination_root.to_path_buf(),
+        scope_root: scope_root.map(Path::to_path_buf),
+        active_sources: HashSet::new(),
+    };
     let Some(root_frame) = enter_copy_directory(
         src,
         dst,
         options,
         destination_root,
-        &mut active_sources,
+        &mut backend.active_sources,
         stats,
         &mut budget,
         0,
@@ -72,66 +81,65 @@ pub(super) fn copy_dir_iterative(
     else {
         return Ok(());
     };
-    let mut frames = vec![root_frame];
+    copy_tree(&mut backend, root_frame, stats, &mut budget)
+}
 
-    while !frames.is_empty() {
-        let current_source = frames.last().expect("non-empty traversal stack").src();
-        budget.check_deadline().map_err(|source| {
-            copy_dir_error(
+struct HostCopyBackend {
+    options: LocalCopyDirOptions,
+    destination_root: PathBuf,
+    scope_root: Option<PathBuf>,
+    active_sources: HashSet<DirectoryIdentity>,
+}
+
+impl CopyTreeBackend for HostCopyBackend {
+    type Frame = CopyDirFrame;
+    type Entry = fs::DirEntry;
+
+    fn frame_context(&self, frame: &Self::Frame) -> CopyTreeFrameContext {
+        CopyTreeFrameContext {
+            source: frame.src().to_path_buf(),
+            destination: frame.dst().to_path_buf(),
+            depth: frame.depth(),
+        }
+    }
+
+    fn next_entry(
+        &mut self,
+        frame: &mut Self::Frame,
+        stats: &LocalCopyDirStats,
+    ) -> Result<Option<Self::Entry>, crate::LocalCopyDirError> {
+        let next = frame.next_entry();
+        match next {
+            Some(entry) => with_copy_context(
+                entry,
                 LocalCopyDirStage::ReadSourceDirectory,
-                current_source,
-                current_source,
+                frame.src(),
+                frame.dst(),
                 stats,
-                source,
             )
-        })?;
-        let entry = frames
-            .last_mut()
-            .expect("non-empty traversal stack should have a frame")
-            .next_entry();
-        let Some(entry) = entry else {
-            let completed = frames.pop().expect("non-empty traversal stack should have a frame");
-            let _ = active_sources.remove(completed.source_identity());
-            if options.preserves_permissions() {
-                with_copy_context(
-                    fs::set_permissions(completed.dst(), completed.source_permissions().clone()),
-                    LocalCopyDirStage::PreservePermissions,
-                    completed.src(),
-                    completed.dst(),
-                    stats,
-                )?;
-            }
-            continue;
-        };
+            .map(Some),
+            None => Ok(None),
+        }
+    }
 
-        let current = frames.last().expect("active traversal should retain its current frame");
-        let entry = with_copy_context(
-            entry,
-            LocalCopyDirStage::ReadSourceDirectory,
-            current.src(),
-            current.dst(),
-            stats,
-        )?;
+    fn child_context(&self, frame: &CopyTreeFrameContext, entry: &Self::Entry) -> CopyTreeFrameContext {
+        CopyTreeFrameContext {
+            source: entry.path(),
+            destination: frame.destination.join(entry.file_name()),
+            depth: frame.depth.saturating_add(1),
+        }
+    }
+
+    fn process_entry(
+        &mut self,
+        entry: Self::Entry,
+        frame: &CopyTreeFrameContext,
+        frames: &mut Vec<Self::Frame>,
+        stats: &mut LocalCopyDirStats,
+        budget: &mut CopyBudget,
+    ) -> Result<(), crate::LocalCopyDirError> {
         let source_path = entry.path();
-        let destination_path = current.dst().join(entry.file_name());
-        budget.check_depth(frames.len()).map_err(|source| {
-            copy_dir_error(
-                LocalCopyDirStage::InspectSourceEntry,
-                &source_path,
-                &destination_path,
-                stats,
-                source,
-            )
-        })?;
-        budget.charge_entry().map_err(|source| {
-            copy_dir_error(
-                LocalCopyDirStage::UpdateStatistics,
-                &source_path,
-                &destination_path,
-                stats,
-                source,
-            )
-        })?;
+        let destination_path = frame.destination.join(entry.file_name());
         let file_type = with_copy_context(
             entry.file_type(),
             LocalCopyDirStage::InspectSourceEntry,
@@ -140,44 +148,70 @@ pub(super) fn copy_dir_iterative(
             stats,
         )?;
         if file_type.is_dir() {
-            let frame = enter_copy_directory(
+            if let Some(child) = enter_copy_directory(
                 &source_path,
                 &destination_path,
-                options,
-                destination_root,
-                &mut active_sources,
+                self.options,
+                &self.destination_root,
+                &mut self.active_sources,
                 stats,
-                &mut budget,
-                frames.len(),
-            )?;
-            if let Some(frame) = frame {
-                frames.push(frame);
+                budget,
+                frame.depth.saturating_add(1),
+            )? {
+                frames.push(child);
             }
         } else if file_type.is_symlink() {
-            if options.symlink_policy().follows()
-                && symlink_target_is_directory(&source_path, &destination_path, stats, scope_root)?
+            if self.options.symlink_policy().follows()
+                && symlink_target_is_directory(&source_path, &destination_path, stats, self.scope_root.as_deref())?
             {
-                let frame = enter_copy_directory(
+                if let Some(child) = enter_copy_directory(
                     &source_path,
                     &destination_path,
-                    options,
-                    destination_root,
-                    &mut active_sources,
+                    self.options,
+                    &self.destination_root,
+                    &mut self.active_sources,
                     stats,
-                    &mut budget,
-                    frames.len(),
-                )?;
-                if let Some(frame) = frame {
-                    frames.push(frame);
+                    budget,
+                    frame.depth.saturating_add(1),
+                )? {
+                    frames.push(child);
                 }
             } else {
-                super::staged_copy::copy_symlink_with_options(&source_path, &destination_path, options, stats)?;
+                super::staged_copy::copy_symlink_with_options(&source_path, &destination_path, self.options, stats)?;
             }
         } else {
-            copy_file_with_options(&source_path, &destination_path, options, stats, &mut budget)?;
+            copy_file_with_options(&source_path, &destination_path, self.options, stats, budget)?;
         }
+        Ok(())
     }
-    Ok(())
+
+    fn finish_frame(
+        &mut self,
+        frame: Self::Frame,
+        stats: &mut LocalCopyDirStats,
+    ) -> Result<(), crate::LocalCopyDirError> {
+        let _ = self.active_sources.remove(frame.source_identity());
+        if self.options.preserves_permissions() {
+            with_copy_context(
+                fs::set_permissions(frame.dst(), frame.source_permissions().clone()),
+                LocalCopyDirStage::PreservePermissions,
+                frame.src(),
+                frame.dst(),
+                stats,
+            )?;
+        }
+        Ok(())
+    }
+
+    fn error(
+        &self,
+        stage: LocalCopyDirStage,
+        context: &CopyTreeFrameContext,
+        stats: &LocalCopyDirStats,
+        source_error: Error,
+    ) -> crate::LocalCopyDirError {
+        copy_dir_error(stage, &context.source, &context.destination, stats, source_error)
+    }
 }
 
 /// Enters one source directory and constructs its traversal frame.
@@ -276,6 +310,7 @@ fn enter_copy_directory(
     Ok(Some(CopyDirFrame::new(
         src.to_path_buf(),
         dst.to_path_buf(),
+        depth,
         source_identity,
         source_metadata.permissions(),
         entries,

@@ -26,10 +26,13 @@ use super::file::preserve_permissions;
 use crate::LocalDurabilityRequirement;
 use crate::LocalResourceKind;
 use crate::local::CopyBudget;
+use crate::local::CopyTreeBackend;
+use crate::local::CopyTreeFrameContext;
 use crate::local::LocalCopyDirError as Error;
 use crate::local::LocalCopyDirOptions as Options;
 use crate::local::LocalCopyDirStage as Stage;
 use crate::local::LocalCopyDirStats as Statistics;
+use crate::local::copy_tree as run_copy_tree;
 use crate::rooted::DirectoryReader;
 
 /// One active rooted directory reader retained until its children finish.
@@ -68,114 +71,107 @@ pub(super) fn copy_tree(
         return Ok(statistics);
     }
     let reader = open_root_reader(root, source, destination, statistics)?;
-    let mut frames = vec![CopyFrame {
+    let root_frame = CopyFrame {
         source: source.clone(),
         destination: destination.clone(),
         metadata: source_metadata,
         depth: 0,
         reader,
         directory_permit: root_permit,
-    }];
-    let mut active_sources = vec![source.clone()];
+    };
+    let mut backend = RootedCopyBackend {
+        root,
+        options,
+        durability,
+        active_sources: vec![source.clone()],
+    };
+    run_copy_tree(&mut backend, root_frame, &mut statistics, budget)?;
+    Ok(statistics)
+}
 
-    while !frames.is_empty() {
-        let (source, destination, depth) = {
-            let frame = frames.last().expect("non-empty frame stack");
-            (frame.source.clone(), frame.destination.clone(), frame.depth)
-        };
-        if let Err(source_error) = budget.check_deadline() {
-            return Err(error(
+struct RootedCopyBackend<'a> {
+    root: &'a Root,
+    options: &'a Options,
+    durability: LocalDurabilityRequirement,
+    active_sources: Vec<Path>,
+}
+
+impl CopyTreeBackend for RootedCopyBackend<'_> {
+    type Frame = CopyFrame;
+    type Entry = super::super::Entry;
+
+    fn frame_context(&self, frame: &Self::Frame) -> CopyTreeFrameContext {
+        CopyTreeFrameContext {
+            source: frame.source.as_path().to_path_buf(),
+            destination: frame.destination.as_path().to_path_buf(),
+            depth: frame.depth,
+        }
+    }
+
+    fn next_entry(&mut self, frame: &mut Self::Frame, stats: &Statistics) -> Result<Option<Self::Entry>, Error> {
+        match frame.reader.next_entry() {
+            Ok(entry) => Ok(entry),
+            Err(source_error) => Err(error(
                 Stage::ReadSourceDirectory,
-                &source,
-                &destination,
-                statistics,
+                &frame.source,
+                &frame.destination,
+                *stats,
                 source_error,
-            ));
+            )),
         }
-        let next = frames.last_mut().expect("non-empty frame stack").reader.next_entry();
-        let entry = match next {
-            Ok(Some(entry)) => entry,
-            Ok(None) => {
-                let frame = frames.pop().expect("non-empty frame stack");
-                preserve_permissions(
-                    root,
-                    &frame.source,
-                    &frame.destination,
-                    frame.metadata,
-                    options,
-                    statistics,
-                )?;
-                active_sources.pop();
-                drop(frame.directory_permit);
-                continue;
-            }
-            Err(source_error) => {
-                return Err(error(
-                    Stage::ReadSourceDirectory,
-                    &source,
-                    &destination,
-                    statistics,
-                    source_error,
-                ));
-            }
-        };
-        let source_child = source
-            .join_component(entry.name())
-            .expect("root directory entry names are normal components");
-        let destination_child = destination
-            .join_component(entry.name())
-            .expect("root directory entry names are normal components");
-        let child_depth = depth.saturating_add(1);
-        if let Err(source_error) = budget.check_depth(child_depth) {
-            return Err(error(
-                Stage::InspectSourceEntry,
-                &source_child,
-                &destination_child,
-                statistics,
-                source_error,
-            ));
-        }
-        if let Err(source_error) = budget.charge_entry() {
-            return Err(error(
-                Stage::UpdateStatistics,
-                &source_child,
-                &destination_child,
-                statistics,
-                source_error,
-            ));
-        }
+    }
 
+    fn child_context(&self, frame: &CopyTreeFrameContext, entry: &Self::Entry) -> CopyTreeFrameContext {
+        CopyTreeFrameContext {
+            source: frame.source.join(entry.name()),
+            destination: frame.destination.join(entry.name()),
+            depth: frame.depth.saturating_add(1),
+        }
+    }
+
+    fn process_entry(
+        &mut self,
+        entry: Self::Entry,
+        frame: &CopyTreeFrameContext,
+        frames: &mut Vec<Self::Frame>,
+        stats: &mut Statistics,
+        budget: &mut CopyBudget,
+    ) -> Result<(), Error> {
+        let source_child = Path::new(frame.source.join(entry.name())).expect("scheduler preserves rooted source paths");
+        let destination_child =
+            Path::new(frame.destination.join(entry.name())).expect("scheduler preserves rooted destination paths");
         match entry.metadata().kind() {
             EntryKind::File => {
-                statistics = copy_file(
-                    root,
+                *stats = copy_file(
+                    self.root,
                     &source_child,
                     &destination_child,
-                    options,
-                    durability,
-                    statistics,
+                    self.options,
+                    self.durability,
+                    *stats,
                     budget,
                 )?;
             }
             EntryKind::Directory => {
-                if prepare_directory(root, &source_child, &destination_child, options, &mut statistics)? {
+                if prepare_directory(self.root, &source_child, &destination_child, self.options, stats)? {
+                    let current = *stats;
                     push_directory(
-                        root,
+                        self.root,
                         &source_child,
                         &destination_child,
                         entry.metadata(),
-                        child_depth,
-                        &mut frames,
-                        &mut active_sources,
+                        frame.depth.saturating_add(1),
+                        frames,
+                        &mut self.active_sources,
                         budget,
-                        statistics,
+                        current,
                     )?;
                 }
             }
             EntryKind::Symlink => {
-                if options.symlink_policy().follows() {
+                if self.options.symlink_policy().follows() {
                     let resolved = match crate::rooted_local_file_system::resolve_rooted_path(
-                        root,
+                        self.root,
                         source_child.as_path(),
                         crate::LocalSymlinkPolicy::FollowWithinScope,
                         true,
@@ -187,43 +183,57 @@ pub(super) fn copy_tree(
                                 Stage::InspectSourceEntry,
                                 &source_child,
                                 &destination_child,
-                                statistics,
+                                *stats,
                                 copy_error.into_io_error(),
                             ));
                         }
                     };
-                    let resolved_metadata = match root.symlink_metadata(&resolved) {
+                    let resolved_metadata = match self.root.symlink_metadata(&resolved) {
                         Ok(metadata) => metadata,
                         Err(source_error) => {
                             return Err(error(
                                 Stage::InspectSourceEntry,
                                 &source_child,
                                 &destination_child,
-                                statistics,
+                                *stats,
                                 source_error,
                             ));
                         }
                     };
                     if resolved_metadata.kind() == EntryKind::Directory {
-                        if prepare_directory(root, &resolved, &destination_child, options, &mut statistics)? {
+                        if prepare_directory(self.root, &resolved, &destination_child, self.options, stats)? {
+                            let current = *stats;
                             push_directory(
-                                root,
+                                self.root,
                                 &resolved,
                                 &destination_child,
                                 resolved_metadata,
-                                child_depth,
-                                &mut frames,
-                                &mut active_sources,
+                                frame.depth.saturating_add(1),
+                                frames,
+                                &mut self.active_sources,
                                 budget,
-                                statistics,
+                                current,
                             )?;
                         }
                     } else {
-                        statistics =
-                            copy_symlink(root, &source_child, &destination_child, options, statistics, budget)?;
+                        *stats = copy_symlink(
+                            self.root,
+                            &source_child,
+                            &destination_child,
+                            self.options,
+                            *stats,
+                            budget,
+                        )?;
                     }
                 } else {
-                    statistics = copy_symlink(root, &source_child, &destination_child, options, statistics, budget)?;
+                    *stats = copy_symlink(
+                        self.root,
+                        &source_child,
+                        &destination_child,
+                        self.options,
+                        *stats,
+                        budget,
+                    )?;
                 }
             }
             EntryKind::Other => {
@@ -231,7 +241,7 @@ pub(super) fn copy_tree(
                     Stage::InspectSourceEntry,
                     &source_child,
                     &destination_child,
-                    statistics,
+                    *stats,
                     unsupported_source_error(),
                 ));
             }
@@ -241,13 +251,39 @@ pub(super) fn copy_tree(
                     Stage::InspectSourceEntry,
                     &source_child,
                     &destination_child,
-                    statistics,
+                    *stats,
                     unsupported_source_error(),
                 ));
             }
         }
+        Ok(())
     }
-    Ok(statistics)
+
+    fn finish_frame(&mut self, frame: Self::Frame, stats: &mut Statistics) -> Result<(), Error> {
+        preserve_permissions(
+            self.root,
+            &frame.source,
+            &frame.destination,
+            frame.metadata,
+            self.options,
+            *stats,
+        )?;
+        self.active_sources.pop();
+        drop(frame.directory_permit);
+        Ok(())
+    }
+
+    fn error(
+        &self,
+        stage: Stage,
+        context: &CopyTreeFrameContext,
+        stats: &Statistics,
+        source_error: io::Error,
+    ) -> Error {
+        let source = Path::new(&context.source).expect("scheduler preserves rooted source paths");
+        let destination = Path::new(&context.destination).expect("scheduler preserves rooted destination paths");
+        error(stage, &source, &destination, *stats, source_error)
+    }
 }
 
 fn open_root_reader(
