@@ -183,6 +183,13 @@ Recursive deletion also supports explicit depth, entry, pending-path byte, and d
 the requested directory counts as one entry at depth zero. Default Options are replaceable
 configuration, not mandatory ceilings. See the [user guide](doc/user_guide.md).
 
+Deletion has a strict operation/type contract: `delete_file` returns `IsDirectory` for an
+entity directory, while `delete_directory` returns `NotDirectory` for a file or final symbolic
+link. `missing_ok` only accepts a missing requested root. If a recursive operation removes
+entries before failing, its `LocalFileError` keeps `PublicationIncomplete`; inspect
+`effect_state()` and `cause_kind()` separately before retrying. A basic error returning
+`None` from `effect_state()` carries no effect evidence and must not be treated as `Unchanged`.
+
 ## Testing
 
 Local package verification uses `.cargo/config.toml` to retain the locked Git source
@@ -195,6 +202,9 @@ cargo test
 
 # Run tests with all declared features
 cargo test --all-features
+
+# Compare the Rooted metadata path at representative depths
+cargo bench --bench local_files -- deep_metadata
 
 # Project CI checks
 ./ci-check.sh

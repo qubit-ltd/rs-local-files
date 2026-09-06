@@ -148,6 +148,13 @@ Linux、Windows 和 macOS 的行为会在运行时测试。FreeBSD 和 Android �
 递归删除也支持显式深度、条目数、待处理路径字节数与期限预算；请求目录计为一个条目、深度为零。
 默认 Options 是可替换的配置，不是强制上限。详见[用户手册](doc/user_guide.zh_CN.md)。
 
+删除操作有明确的类型契约：`delete_file` 遇到实体目录返回 `IsDirectory`，
+`delete_directory` 遇到普通文件或最终符号链接返回 `NotDirectory`。`missing_ok` 只容忍请求
+根本身不存在。递归删除已移除条目后失败时，`LocalFileError` 保留
+`PublicationIncomplete`；重试前应分别检查 `effect_state()` 与 `cause_kind()`。
+基础错误的 `effect_state()` 返回 `None` 表示没有足够的副作用证据，不能当作
+`Unchanged`。
+
 ## 测试
 
 本地打包验证通过 `.cargo/config.toml` 保留锁文件固定的 `qubit-redact` Git 源。
@@ -159,6 +166,9 @@ cargo test
 
 # 使用项目声明的全部 feature 运行测试
 cargo test --all-features
+
+# 对照不同深度的 Rooted metadata 路径
+cargo bench --bench local_files -- deep_metadata
 
 # 运行项目 CI 检查
 ./ci-check.sh

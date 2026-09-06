@@ -1139,6 +1139,13 @@ Recursive delete 不是事务。预算失败即使发生在部分删除之后，
 删除不回滚。尚未删除任何 entry 时保留原始错误 kind。`LocalDeleteOutcome` 只表示完整成功，
 调用方处理 `PublicationIncomplete` 时必须重新检查剩余树，不能根据 message 猜测状态。
 
+Host 与 Rooted 的操作/类型契约保持一致：`delete_file` 遇到实体目录返回 `IsDirectory`，
+遇到最终符号链接（包括指向目录的链接）只删除链接自身；`delete_directory` 在递归和非递归
+模式下遇到普通文件或最终符号链接均返回 `NotDirectory`，且不删除该 entry。
+`missing_ok` 只把请求根本身不存在转换为 `deleted = false`；递归中的子项缺失及其他遍历
+失败仍返回错误。Rooted `/` 继续禁止删除。这些检查是不跟随链接的观察，不能宣称能抵抗
+不受信任并发改名者的原子替换。
+
 ### 17.3 Rename
 
 ```rust
@@ -1273,6 +1280,12 @@ pub struct LocalFileError {
 
 字段是概念模型；实现可以用等价的紧凑表示。必须可稳定查询 kind、operation、主路径、目标
 路径、PWD context、typed source 和 cleanup error。
+
+`LocalFileEffectState` 是基础错误的增量兼容词汇。`cause_kind()` 查询目前可知的底层原因；
+`effect_state()` 对 `PublicationIncomplete` 报告 `PartiallyApplied`，对 `Indeterminate`
+报告 `Indeterminate`。普通错误的 `effect_state()` 返回 `None`，表示基础错误没有足够的
+副作用证据，不表示 `Unchanged`。`Unchanged`、`Applied` 及精确恢复状态仍由 copy、rename、
+writer 和 persist 的专用 failure 类型负责。
 
 ### 19.2 Path context
 
@@ -1671,6 +1684,11 @@ writer、persist 等业务状态机。
 - 无显式预算时不存在固定库内 cap；
 - temp 每个 persist/cleanup/keep/identity-replacement state；
 - Rooted `/` 的允许与禁止操作矩阵。
+- delete_file/delete_directory 的普通文件、实体目录和最终符号链接类型契约；
+- 基础错误的 `cause_kind()` / `effect_state()` 查询，其中 `None` effect 不得解释为
+  `Unchanged`；
+- Rooted 无链接深路径的解析计数与深度 1、8、32、64、128 的 Host/Rooted benchmark；
+- Unix 默认与 `test-support` 的 vectored read 路径，以及 Windows 顺序回退的进度规则。
 
 ### 26.6 跨平台和下游
 
