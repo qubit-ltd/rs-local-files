@@ -585,3 +585,30 @@ pub(super) fn rooted_type_error(path: &Path, expected: &str) -> Error {
         format!("rooted path is not a {expected}: {}", path.display(),),
     )
 }
+
+#[cfg(test)]
+mod tests {
+    use std::fs;
+
+    use tempfile::tempdir;
+
+    use super::open_root_directory;
+    use super::rooted_type_error;
+    use super::sync_rooted_parent;
+    use crate::local::LocalRelativePath;
+
+    #[test]
+    fn rooted_parent_sync_and_type_error_preserve_native_contracts() {
+        let directory = tempdir().expect("temporary directory should be created");
+        let target = directory.path().join("target");
+        fs::write(&target, b"payload").expect("target should be written");
+        let root = open_root_directory(directory.path()).expect("root directory should open");
+        let relative =
+            LocalRelativePath::new(std::path::Path::new("target")).expect("target should be a validated relative path");
+
+        sync_rooted_parent(&root, directory.path(), &relative).expect("rooted parent should synchronize");
+        let error = rooted_type_error(std::path::Path::new("target"), "directory");
+        assert_eq!(std::io::ErrorKind::InvalidInput, error.kind());
+        assert!(error.to_string().contains("not a directory"));
+    }
+}
