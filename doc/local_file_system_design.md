@@ -281,6 +281,13 @@ budgets cover depth, entries, name bytes, deadlines, and open directories.
 Zero open-directory capacity is invalid. Drop releases resources but reports no
 late traversal error.
 
+Host listing keeps the requested namespace root in public entry paths even when
+the access path follows a symbolic link; an optional diagnostic path may expose
+the physical access location. Rooted and Host tree copies advance directory
+readers lazily. A bounded copy may inspect one child ahead while retaining the
+reader permit, does not promise entry ordering, and never turns the native
+directory buffer into an application entry budget.
+
 ## 16. Copy
 
 Copy auto-detects or validates file/tree source mode. Preflight rejects aliases,
@@ -294,6 +301,11 @@ mounts or devices.
 metadata preservation. `LocalCopyFailure` retains the underlying structured
 error plus `Unchanged`, `PartiallyPublished`, `Published`, or `Indeterminate`
 state and partial statistics.
+
+When a writer creates missing parents with required durability, it synchronizes
+each newly created ancestor after publication. Failure in that chain is reported
+as `Published` with an incomplete publication error; the target bytes remain
+observable and callers must inspect the typed state.
 
 ## 17. Create, Delete, and Rename
 

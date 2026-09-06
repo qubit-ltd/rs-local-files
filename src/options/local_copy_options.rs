@@ -266,6 +266,8 @@ impl LocalCopyOptions {
     }
 
     /// Limits recursive tree depth.
+    ///
+    /// The copied root is depth zero; each descendant consumes one level.
     #[must_use = "use the configured copy options"]
     #[cfg_attr(not(coverage), inline(always))]
     #[cfg_attr(coverage, inline(never))]
@@ -282,6 +284,8 @@ impl LocalCopyOptions {
         self
     }
     /// Limits the number of source entries processed.
+    ///
+    /// An entry is charged immediately before the backend processes it.
     #[must_use = "use the configured copy options"]
     #[cfg_attr(not(coverage), inline(always))]
     #[cfg_attr(coverage, inline(never))]

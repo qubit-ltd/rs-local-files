@@ -72,6 +72,10 @@ impl LocalFileSystem {
 
     /// Changes the process PWD for Host or the virtual PWD for Rooted.
     ///
+    /// A Host change is process-global: the mutable receiver does not isolate
+    /// this state from other Host instances or relative-path users. Prefer
+    /// absolute Host paths in library and multi-threaded code.
+    ///
     /// Host delegates directly to the native process operation. Rooted resolves
     /// and validates the requested directory before changing instance state.
     ///
