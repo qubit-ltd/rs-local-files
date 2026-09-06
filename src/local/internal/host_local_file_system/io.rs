@@ -30,8 +30,6 @@ use crate::LocalSymlinkPolicy;
 use crate::LocalWriteMode;
 use crate::LocalWriteOptions;
 use crate::local::ensure_required_directory_durability;
-#[cfg(not(windows))]
-use crate::local::internal::canonicalize_existing_prefix;
 use crate::writer::internal::LocalFileWriterBackend;
 
 impl HostLocalFileSystem {
@@ -98,7 +96,7 @@ impl HostLocalFileSystem {
             );
         }
         if options.mode() != LocalWriteMode::Append {
-            let implements_durability = Self::capabilities().supports_durable_file_copy();
+            let implements_durability = Self::capabilities().supports_durable_write();
             ensure_required_directory_durability(
                 options.durability(),
                 LocalFileOperation::OpenWriter,
@@ -109,18 +107,14 @@ impl HostLocalFileSystem {
             )?;
         }
         if options.creates_parent()
-            && let Some(parent) = bound.parent()
+            && let Some(error) = test_io_fault("local-fs-open-writer-parent")
         {
-            test_io_fault("local-fs-open-writer-parent")
-                .map_or_else(|| fs::create_dir_all(parent), Err)
-                .map_err(|error| {
-                    LocalFileError::from_io(
-                        LocalFileOperation::OpenWriter,
-                        Some(diagnostic_path.clone()),
-                        None,
-                        error,
-                    )
-                })?;
+            return Err(LocalFileError::from_io(
+                LocalFileOperation::OpenWriter,
+                Some(diagnostic_path.clone()),
+                None,
+                error,
+            ));
         }
         let backend = match options.mode() {
             LocalWriteMode::CreateNew | LocalWriteMode::CreateOrReplace => LocalFileWriterBackend::Staged(
@@ -174,9 +168,7 @@ impl HostLocalFileSystem {
         #[cfg(windows)]
         let diagnostic = path.to_path_buf();
         #[cfg(not(windows))]
-        let diagnostic = canonicalize_existing_prefix(path).map_err(|error| {
-            LocalFileError::from_io(LocalFileOperation::List, Some(path.to_path_buf()), None, error)
-        })?;
+        let diagnostic = path.to_path_buf();
         #[cfg(target_os = "macos")]
         let diagnostic = logical_macos_path(&diagnostic);
         LocalDirectoryWalker::open_with_diagnostic(bound, diagnostic, *options, policy)
