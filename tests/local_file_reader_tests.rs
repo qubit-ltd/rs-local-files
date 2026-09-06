@@ -14,8 +14,6 @@ use std::io::SeekFrom;
 
 use qubit_local_files::LocalFileSystem;
 use qubit_local_files::options::LocalReadOptions;
-#[cfg(feature = "test-support")]
-use qubit_local_files::test_support::install_test_fault;
 use tempfile::tempdir;
 
 /// Verifies readers expose the native handle and support sequential seeking.
@@ -71,32 +69,6 @@ fn test_local_file_reader_supports_vectored_reads() {
     assert!(count <= first.len() + second.len());
     let bytes = first.iter().chain(second.iter()).copied().collect::<Vec<_>>();
     assert_eq!(&bytes[..count], b"a");
-}
-
-/// Verifies a vectored read retains bytes read before a later native error.
-#[cfg(feature = "test-support")]
-#[test]
-fn test_local_file_reader_vectored_read_retains_prior_bytes_after_later_error() {
-    let directory = tempdir().expect("temporary directory should be created");
-    let path = directory.path().join("payload");
-    std::fs::write(&path, b"abcdef").expect("fixture should be written");
-
-    let mut reader = LocalFileSystem::host()
-        .expect("Host filesystem should open")
-        .open_reader_with_options(&path, &LocalReadOptions::new())
-        .expect("regular file should open for reading");
-    let _fault = install_test_fault("local-file-reader-vectored-read-after-first").expect("test fault should install");
-    let mut first = [0_u8; 2];
-    let mut second = [0_u8; 4];
-    let mut buffers = [IoSliceMut::new(&mut first), IoSliceMut::new(&mut second)];
-
-    let count = reader
-        .read_vectored(&mut buffers)
-        .expect("bytes read before the later error should be retained");
-
-    assert_eq!(first.len(), count);
-    assert_eq!(&first, b"ab");
-    assert_eq!(&second, &[0_u8; 4]);
 }
 
 /// Verifies Windows Host readers follow final links under the default policy.

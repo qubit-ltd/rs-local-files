@@ -15,6 +15,7 @@ mod metadata;
 mod path;
 mod permissions;
 mod root;
+mod rooted_resolution_cursor;
 mod work;
 
 pub use directory_reader::DirectoryReader;
@@ -24,5 +25,6 @@ pub use metadata::Metadata;
 pub use path::Path;
 pub use permissions::Permissions;
 pub use root::Root;
+pub(crate) use rooted_resolution_cursor::RootedResolutionCursor;
 
 pub(crate) use crate::local::LocalRootAtomicWriter as Writer;
