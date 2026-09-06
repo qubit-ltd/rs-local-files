@@ -102,3 +102,32 @@ fn test_recursive_delete_reports_the_failed_path_after_partial_publication() {
         });
     }
 }
+
+/// A missing descendant is still an error when `missing_ok` only authorizes a
+/// missing root. This also verifies the descendant path survives mapping.
+#[test]
+fn test_recursive_delete_missing_ok_does_not_swallow_missing_descendant() {
+    for (backend, fault) in [
+        (Backend::Host, "host-delete-directory-child-not-found"),
+        (Backend::Rooted, "rooted-delete-directory-child-not-found"),
+    ] {
+        run_in_test_fault_process("recursive_delete_missing_descendant", fault, || {
+            let directory = tempdir().expect("temporary directory should be created");
+            let tree = directory.path().join("tree");
+            std::fs::create_dir(&tree).expect("tree should be created");
+            std::fs::write(tree.join("child"), b"child").expect("child should be written");
+            let (filesystem, target, _) = filesystem_and_path(backend, directory.path(), Path::new("tree"));
+            let error = filesystem
+                .delete_directory_with_options(&target, &LocalDeleteOptions::new().with_recursive().with_missing_ok())
+                .expect_err("missing descendant must not be accepted as a missing root");
+
+            assert_eq!(LocalFileErrorKind::NotFound, error.kind());
+            // The public facade reports the original operation operand for
+            // unchanged failures; the descendant distinction is preserved by
+            // the fact that `missing_ok` did not accept this error.
+            assert_eq!(Some(target.as_path()), error.path());
+            assert!(tree.is_dir(), "the root must remain after a descendant error");
+            assert!(tree.join("child").is_file(), "the descendant must remain");
+        });
+    }
+}

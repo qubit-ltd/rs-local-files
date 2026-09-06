@@ -23,6 +23,7 @@ use super::fs;
 use super::io;
 use super::resolve_host_path;
 use super::test_io_fault;
+use crate::local::directory_mutation_error;
 
 impl HostLocalFileSystem {
     /// Creates a Host directory using an explicit symbolic-link policy.
@@ -171,15 +172,5 @@ fn create_host_directory_tree(path: &Path, exists_ok: bool) -> LocalResult<bool>
 
 /// Builds one recursive-create error while retaining partial publication.
 fn create_component_error(path: &Path, created_any: bool, source: io::Error) -> LocalFileError {
-    let error = LocalFileError::from_io(
-        LocalFileOperation::CreateDirectory,
-        Some(path.to_path_buf()),
-        None,
-        source,
-    );
-    if created_any {
-        error.with_kind(LocalFileErrorKind::PublicationIncomplete)
-    } else {
-        error
-    }
+    directory_mutation_error(LocalFileOperation::CreateDirectory, path, created_any, source)
 }

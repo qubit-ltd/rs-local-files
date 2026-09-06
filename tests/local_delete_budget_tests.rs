@@ -188,8 +188,9 @@ fn test_recursive_delete_deadlines_preserve_partial_effects() {
     use qubit_local_files::test_support::install_test_fault;
 
     for rooted in [false, true] {
-        // Rooted explicitly checks the final end-of-directory read as well.
-        let removal_check = if rooted { 7 } else { 6 };
+        // Both backends check the deadline immediately before native
+        // removal; rooted also checks the final end-of-directory read.
+        let removal_check = 7;
         for checkpoint in [2, 3, removal_check, removal_check + 1] {
             let fixture = tempdir().expect("fixture should exist");
             let tree = fixture.path().join("tree");
