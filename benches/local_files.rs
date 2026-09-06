@@ -151,6 +151,73 @@ fn bench_copy(c: &mut Criterion) {
     });
 }
 
+/// Measures bounded tree-copy traversal over wide source directories.
+fn bench_copy_budget_width(c: &mut Criterion) {
+    let mut group = c.benchmark_group("copy_budget_width");
+    group.sample_size(10);
+    for width in [100usize, 10_000] {
+        group.bench_function(format!("entries_{width}"), |bench| {
+            bench.iter_batched(
+                || {
+                    let directory = tempdir().expect("width benchmark directory should exist");
+                    let source = directory.path().join("source");
+                    fs::create_dir(&source).expect("width benchmark source should exist");
+                    for index in 0..width {
+                        fs::write(source.join(format!("entry-{index}")), b"x")
+                            .expect("width benchmark entry should be written");
+                    }
+                    (directory, source)
+                },
+                |(directory, source)| {
+                    let target = directory.path().join("target");
+                    let options = LocalCopyOptions::new().with_tree_source().with_max_entries(1);
+                    let limited = LocalFileSystem::host()
+                        .expect("width benchmark filesystem should open")
+                        .copy_with_options(black_box(&source), black_box(&target), &options);
+                    black_box(limited.is_err());
+                },
+                criterion::BatchSize::SmallInput,
+            );
+        });
+    }
+    group.finish();
+}
+
+/// Measures successful and depth-limited copies over progressively deeper
+/// trees.
+fn bench_copy_tree_depth(c: &mut Criterion) {
+    let mut group = c.benchmark_group("copy_tree_depth");
+    group.sample_size(10);
+    for depth in [1usize, 8, 32, 64] {
+        group.bench_function(format!("success_depth_{depth}"), |bench| {
+            bench.iter_batched(
+                || {
+                    let directory = tempdir().expect("depth benchmark directory should exist");
+                    let source = directory.path().join("source");
+                    let mut current = source.clone();
+                    for _ in 0..depth {
+                        fs::create_dir(&current).expect("depth benchmark level should exist");
+                        current.push("child");
+                    }
+                    fs::create_dir(&current).expect("depth benchmark leaf directory should exist");
+                    fs::write(current.join("payload"), b"payload").expect("depth benchmark payload should be written");
+                    (directory, source)
+                },
+                |(directory, source)| {
+                    let target = directory.path().join("target");
+                    let options = LocalCopyOptions::new().with_tree_source().with_max_depth(depth);
+                    let result = LocalFileSystem::host()
+                        .expect("depth benchmark filesystem should open")
+                        .copy_with_options(black_box(&source), black_box(&target), &options);
+                    black_box(result.is_ok());
+                },
+                criterion::BatchSize::SmallInput,
+            );
+        });
+    }
+    group.finish();
+}
+
 fn bench_writer(c: &mut Criterion) {
     let directory = tempdir().expect("benchmark directory should be created");
     let target = directory.path().join("target");
@@ -262,6 +329,8 @@ criterion_group!(
     bench_walk,
     bench_walk_handle_budget,
     bench_copy,
+    bench_copy_budget_width,
+    bench_copy_tree_depth,
     bench_writer,
     bench_rooted_writer,
     bench_read_prefix,
