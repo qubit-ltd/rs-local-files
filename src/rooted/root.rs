@@ -274,6 +274,7 @@ impl Root {
     /// # Errors
     /// Returns an I/O error when traversal cannot remain beneath the opened
     /// root or the directory cannot be enumerated.
+    #[allow(dead_code)]
     pub fn read_dir(&self, path: &path::Path) -> Result<Vec<Entry>> {
         #[cfg(feature = "test-support")]
         if local::test_support_enabled("rooted-copy-directory-read-native") {
