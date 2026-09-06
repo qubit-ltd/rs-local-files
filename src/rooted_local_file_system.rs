@@ -11,8 +11,6 @@
 mod copy;
 // Implements rooted deletion operations.
 mod delete;
-// Tracks rooted deletion work.
-mod delete_work;
 // Implements rooted directory operations.
 mod directory;
 // Implements rooted metadata, reader, and writer operations.

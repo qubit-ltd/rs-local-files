@@ -10,8 +10,6 @@
 mod copy;
 // Implements Host deletion operations.
 mod delete;
-// Tracks Host deletion work.
-mod delete_work;
 // Implements Host directory operations.
 mod directory;
 // Implements Host metadata, reader, writer, and listing operations.

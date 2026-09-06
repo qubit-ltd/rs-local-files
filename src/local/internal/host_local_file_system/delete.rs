@@ -18,12 +18,13 @@ use super::LocalFileOperation;
 use super::LocalResult;
 use super::LocalSymlinkPolicy;
 use super::Path;
-use super::delete_work::DeleteWork;
+use super::PathBuf;
 use super::fs;
 use super::io;
 use super::resolve_host_path;
 use super::test_io_fault;
-use crate::local::DeleteBudget;
+use crate::local::DeleteBackend;
+use crate::local::remove_directory_tree;
 
 impl HostLocalFileSystem {
     /// Deletes a Host file or final symbolic-link entry using an explicit
@@ -53,10 +54,12 @@ impl HostLocalFileSystem {
         };
         if metadata.file_type().is_dir() {
             return Err(
-                LocalFileError::new(LocalFileErrorKind::TypeConflict, LocalFileOperation::DeleteFile).with_path(bound),
+                LocalFileError::new(LocalFileErrorKind::IsDirectory, LocalFileOperation::DeleteFile).with_path(bound),
             );
         }
-        match test_io_fault("local-fs-delete-file-remove").map_or_else(|| fs::remove_file(&bound), Err) {
+        match test_io_fault("local-fs-delete-file-remove")
+            .map_or_else(|| remove_host_non_directory(&bound, &metadata), Err)
+        {
             Ok(()) => Ok(LocalDeleteOutcome::new(true)),
             Err(source) if options.missing_ok() && source.kind() == io::ErrorKind::NotFound => {
                 Ok(LocalDeleteOutcome::new(false))
@@ -97,12 +100,23 @@ impl HostLocalFileSystem {
         };
         if !metadata.file_type().is_dir() {
             return Err(
-                LocalFileError::new(LocalFileErrorKind::TypeConflict, LocalFileOperation::DeleteDirectory)
+                LocalFileError::new(LocalFileErrorKind::NotDirectory, LocalFileOperation::DeleteDirectory)
                     .with_path(bound),
             );
         }
         if options.recursive() {
-            return remove_host_directory_tree(&bound, *options).map(|()| LocalDeleteOutcome::new(true));
+            return match remove_directory_tree(&HostLocalFileSystem { _private: () }, &bound, *options) {
+                Ok(()) => Ok(LocalDeleteOutcome::new(true)),
+                Err(error)
+                    if options.missing_ok()
+                        && error.effect_state().is_none()
+                        && error.cause_kind() == Some(LocalFileErrorKind::NotFound)
+                        && error.path() == Some(bound.as_path()) =>
+                {
+                    Ok(LocalDeleteOutcome::new(false))
+                }
+                Err(error) => Err(error),
+            };
         }
         let result = { test_io_fault("local-fs-delete-directory-remove").map_or_else(|| fs::remove_dir(&bound), Err) };
         match result {
@@ -120,80 +134,6 @@ impl HostLocalFileSystem {
     }
 }
 
-/// Removes a Host directory tree while tracking the first failed entry.
-fn remove_host_directory_tree(path: &Path, options: LocalDeleteOptions) -> LocalResult<()> {
-    let mut removed_any = false;
-    let mut budget = DeleteBudget::new(options);
-    budget
-        .discover(0)
-        .and_then(|()| budget.reserve_path(path))
-        .map_err(|error| delete_entry_error(path, false, error))?;
-    let mut work = vec![(DeleteWork::Inspect(path.to_path_buf()), 0_usize)];
-    while let Some((item, depth)) = work.pop() {
-        let current_path = match &item {
-            DeleteWork::Inspect(path) | DeleteWork::RemoveDirectory(path) => path,
-        };
-        budget.release_path(current_path);
-        budget
-            .check_deadline()
-            .map_err(|error| delete_entry_error(current_path, removed_any, error))?;
-        match item {
-            DeleteWork::Inspect(current) => {
-                let metadata = match fs::symlink_metadata(&current) {
-                    Ok(metadata) => metadata,
-                    Err(error) => return Err(delete_entry_error(&current, removed_any, error)),
-                };
-                if metadata.file_type().is_dir() {
-                    let entries = match fs::read_dir(&current) {
-                        Ok(entries) => entries,
-                        Err(error) => return Err(delete_entry_error(&current, removed_any, error)),
-                    };
-                    budget
-                        .reserve_path(&current)
-                        .map_err(|error| delete_entry_error(&current, removed_any, error))?;
-                    work.push((DeleteWork::RemoveDirectory(current.clone()), depth));
-                    let children_start = work.len();
-                    for entry in entries {
-                        budget
-                            .check_deadline()
-                            .map_err(|error| delete_entry_error(&current, removed_any, error))?;
-                        let entry = match entry {
-                            Ok(entry) => entry,
-                            Err(error) => {
-                                return Err(delete_entry_error(&current, removed_any, error));
-                            }
-                        };
-                        let child = entry.path();
-                        budget
-                            .discover(depth + 1)
-                            .and_then(|()| budget.reserve_path(&child))
-                            .map_err(|error| delete_entry_error(&child, removed_any, error))?;
-                        work.push((DeleteWork::Inspect(child), depth + 1));
-                    }
-                    work[children_start..].reverse();
-                } else {
-                    budget
-                        .check_deadline()
-                        .map_err(|error| delete_entry_error(&current, removed_any, error))?;
-                    maybe_fail_host_delete(&current, removed_any)?;
-                    if let Err(error) = remove_host_non_directory(&current, &metadata) {
-                        return Err(delete_entry_error(&current, removed_any, error));
-                    }
-                    removed_any = true;
-                }
-            }
-            DeleteWork::RemoveDirectory(current) => {
-                maybe_fail_host_delete(&current, removed_any)?;
-                if let Err(error) = fs::remove_dir(&current) {
-                    return Err(delete_entry_error(&current, removed_any, error));
-                }
-                removed_any = true;
-            }
-        }
-    }
-    Ok(())
-}
-
 /// Removes one Host entry already known not to be a real directory.
 fn remove_host_non_directory(path: &Path, metadata: &fs::Metadata) -> io::Result<()> {
     #[cfg(windows)]
@@ -208,28 +148,50 @@ fn remove_host_non_directory(path: &Path, metadata: &fs::Metadata) -> io::Result
     fs::remove_file(path)
 }
 
-/// Injects the deterministic recursive-delete fault used by contract tests.
-fn maybe_fail_host_delete(path: &Path, removed_any: bool) -> LocalResult<()> {
-    #[cfg(feature = "test-support")]
-    if crate::local::take_test_support_on_nth("host-delete-directory-entry-second", 2) {
-        return Err(delete_entry_error(path, removed_any, crate::local::test_fault_error()));
-    }
-    let _ = (path, removed_any);
-    Ok(())
-}
+impl DeleteBackend for HostLocalFileSystem {
+    type Path = PathBuf;
+    type Metadata = fs::Metadata;
+    type Reader = fs::ReadDir;
 
-/// Builds one recursive-delete error with exact partial-publication state.
-fn delete_entry_error(path: &Path, removed_any: bool, source: io::Error) -> LocalFileError {
-    let error = LocalFileError::from_io(
-        LocalFileOperation::DeleteDirectory,
-        Some(path.to_path_buf()),
-        None,
-        source,
-    );
-    if removed_any {
-        error.with_kind(LocalFileErrorKind::PublicationIncomplete)
-    } else {
-        error
+    fn path<'a>(&self, value: &'a Self::Path) -> &'a Path {
+        value
+    }
+
+    fn metadata(&self, path: &Self::Path) -> io::Result<Self::Metadata> {
+        #[cfg(feature = "test-support")]
+        if crate::local::take_test_support_on_nth("host-delete-directory-child-not-found", 2) {
+            return Err(io::Error::from(io::ErrorKind::NotFound));
+        }
+        fs::symlink_metadata(path)
+    }
+
+    fn is_directory(&self, metadata: &Self::Metadata) -> bool {
+        metadata.file_type().is_dir()
+    }
+
+    fn open_directory(&self, path: &Self::Path) -> io::Result<Self::Reader> {
+        fs::read_dir(path)
+    }
+
+    fn next_child(&self, _parent: &Self::Path, reader: &mut Self::Reader) -> io::Result<Option<Self::Path>> {
+        reader.next().transpose().map(|entry| entry.map(|entry| entry.path()))
+    }
+
+    fn remove_non_directory(&self, path: &Self::Path, metadata: &Self::Metadata) -> io::Result<()> {
+        remove_host_non_directory(path, metadata)
+    }
+
+    fn remove_empty_directory(&self, path: &Self::Path) -> io::Result<()> {
+        fs::remove_dir(path)
+    }
+
+    fn before_remove(&self, path: &Self::Path) -> io::Result<()> {
+        #[cfg(feature = "test-support")]
+        if crate::local::take_test_support_on_nth("host-delete-directory-entry-second", 2) {
+            return Err(crate::local::test_fault_error());
+        }
+        let _ = path;
+        Ok(())
     }
 }
 

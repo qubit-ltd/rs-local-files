@@ -22,6 +22,7 @@ use super::RootedLocalFileSystem;
 use super::io;
 use super::resolve_rooted_path;
 use super::rooted_io_error;
+use crate::local::directory_mutation_error;
 
 impl RootedLocalFileSystem {
     /// Creates a directory below the opened root.
@@ -180,15 +181,5 @@ fn rooted_create_component_error(
     created_any: bool,
     source: io::Error,
 ) -> LocalFileError {
-    let error = LocalFileError::from_io(
-        LocalFileOperation::CreateDirectory,
-        Some(path.as_path().to_path_buf()),
-        None,
-        source,
-    );
-    if created_any {
-        error.with_kind(LocalFileErrorKind::PublicationIncomplete)
-    } else {
-        error
-    }
+    directory_mutation_error(LocalFileOperation::CreateDirectory, path.as_path(), created_any, source)
 }

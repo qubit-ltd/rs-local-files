@@ -21,8 +21,12 @@ mod copy_destination_action;
 mod copy_destination_policy;
 mod copy_dir;
 mod copy_policy;
+mod delete_backend;
 mod delete_budget;
+mod delete_tree;
+mod delete_work;
 mod directory_identity;
+mod directory_mutation_error;
 mod file_io;
 mod file_move;
 mod file_name_generation;
@@ -96,8 +100,10 @@ pub(crate) use copy_dir::copy_file_with_options;
 pub(crate) use copy_policy::copy_directory_guarantee_unavailable;
 pub(crate) use copy_policy::copy_file_replace_requires_atomicity;
 pub(crate) use copy_policy::copy_source_mode_mismatch;
-pub(crate) use delete_budget::DeleteBudget;
+pub(crate) use delete_backend::DeleteBackend;
+pub(crate) use delete_tree::remove_directory_tree;
 pub(crate) use directory_identity::DirectoryIdentity;
+pub(crate) use directory_mutation_error::directory_mutation_error;
 pub(crate) use file_io::open_native_reader_path;
 pub(crate) use file_io::open_native_writer_path;
 pub(crate) use file_move::move_directory_without_replacing;
@@ -145,11 +151,15 @@ pub(crate) use rooted_directory_reader::RootedDirectoryReader;
 #[cfg(unix)]
 pub(crate) use rooted_file_io::open_root_directory;
 #[cfg(unix)]
+pub(crate) use rooted_file_io::open_rooted_component_directory;
+#[cfg(unix)]
 pub(crate) use rooted_file_io::open_rooted_native_reader;
 #[cfg(unix)]
 pub(crate) use rooted_file_io::open_rooted_native_writer;
 #[cfg(unix)]
 pub(super) use rooted_file_io::open_rooted_parent;
+#[cfg(unix)]
+pub(crate) use rooted_file_io::read_rooted_component_metadata;
 #[cfg(unix)]
 pub(crate) use rooted_file_io::read_rooted_symlink_metadata;
 #[cfg(unix)]
@@ -162,7 +172,6 @@ pub(crate) use rooted_namespace_io::create_rooted_symlink;
 pub(crate) use rooted_namespace_io::open_root_directory_reader;
 #[cfg(unix)]
 pub(crate) use rooted_namespace_io::open_rooted_directory_reader;
-#[cfg(unix)]
 #[cfg(unix)]
 pub(crate) use rooted_namespace_io::read_rooted_directory;
 #[cfg(unix)]
@@ -196,6 +205,8 @@ pub(crate) use windows_rooted::open_root_directory;
 #[cfg(windows)]
 pub(crate) use windows_rooted::open_root_directory_reader;
 #[cfg(windows)]
+pub(crate) use windows_rooted::open_rooted_component_directory;
+#[cfg(windows)]
 pub(crate) use windows_rooted::open_rooted_directory_reader;
 #[cfg(windows)]
 pub(crate) use windows_rooted::open_rooted_native_reader;
@@ -205,6 +216,8 @@ pub(crate) use windows_rooted::open_rooted_native_writer;
 pub(crate) use windows_rooted::probe_windows_limits;
 #[cfg(windows)]
 pub(crate) use windows_rooted::probe_windows_space;
+#[cfg(windows)]
+pub(crate) use windows_rooted::read_rooted_component_metadata;
 #[cfg(windows)]
 pub(crate) use windows_rooted::read_rooted_directory;
 #[cfg(windows)]

@@ -41,7 +41,7 @@ mod local_root_atomic_writer_support;
 
 pub use internal::CopyBudget;
 pub use internal::CopyDestinationAction;
-pub(crate) use internal::DeleteBudget;
+pub(crate) use internal::DeleteBackend;
 pub(crate) use internal::DirectoryIdentity;
 pub(crate) use internal::HostLocalFileSystem;
 #[cfg(test)]
@@ -67,6 +67,7 @@ pub(crate) use internal::create_rooted_symlink;
 pub(crate) use internal::create_temp_dir_in_dir_with_affixes;
 pub(crate) use internal::create_temp_file_in_dir;
 pub use internal::decide_copy_destination;
+pub(crate) use internal::directory_mutation_error;
 pub(crate) use internal::ensure_parent_path_with_sync_dirs;
 pub(crate) use internal::ensure_required_directory_durability;
 pub(crate) use internal::internal_copy_options;
@@ -79,6 +80,8 @@ pub(crate) use internal::open_root_directory;
 #[cfg(any(unix, windows))]
 pub(crate) use internal::open_root_directory_reader;
 #[cfg(any(unix, windows))]
+pub(crate) use internal::open_rooted_component_directory;
+#[cfg(any(unix, windows))]
 pub(crate) use internal::open_rooted_directory_reader;
 #[cfg(any(unix, windows))]
 pub(crate) use internal::open_rooted_native_reader;
@@ -90,12 +93,14 @@ pub(crate) use internal::probe_windows_limits;
 pub(crate) use internal::probe_windows_space;
 pub(crate) use internal::published_durability;
 #[cfg(any(unix, windows))]
+pub(crate) use internal::read_rooted_component_metadata;
 #[cfg(any(unix, windows))]
 pub(crate) use internal::read_rooted_directory;
 #[cfg(any(unix, windows))]
 pub(crate) use internal::read_rooted_link;
 #[cfg(any(unix, windows))]
 pub(crate) use internal::read_rooted_symlink_metadata;
+pub(crate) use internal::remove_directory_tree;
 #[cfg(any(unix, windows))]
 pub(crate) use internal::remove_rooted_entry;
 pub(crate) use internal::rename_failure_after_native_attempt;
