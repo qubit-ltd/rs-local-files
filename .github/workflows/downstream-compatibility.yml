@@ -1,6 +1,14 @@
 name: Downstream compatibility
 
 on:
+  pull_request:
+    paths:
+      - ".github/workflows/downstream-compatibility.yml"
+      - "Cargo.toml"
+      - "Cargo.lock"
+      - ".cargo/**"
+      - "src/**"
+      - "tests/**"
   workflow_dispatch:
   schedule:
     - cron: "23 3 * * 1"

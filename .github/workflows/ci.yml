@@ -46,7 +46,31 @@ jobs:
         run: cargo +1.94 check --target ${{ matrix.target }}
 
   test-discovery:
-    name: Default-feature integration tests
+    name: Default-feature tests (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os:
+          - ubuntu-latest
+          - windows-latest
+          - macos-latest
+
+    steps:
+      - name: Checkout source
+        uses: actions/checkout@v6
+        with:
+          fetch-depth: 1
+          submodules: recursive
+
+      - name: Install Rust
+        run: rustup toolchain install 1.94 --profile minimal
+
+      - name: Run default-feature tests
+        run: cargo +1.94 test --locked --no-default-features
+
+  local-contract-regressions:
+    name: Local filesystem contract regressions
     runs-on: ubuntu-latest
 
     steps:
@@ -59,11 +83,17 @@ jobs:
       - name: Install Rust
         run: rustup toolchain install 1.94 --profile minimal
 
-      - name: Compile default-feature tests
-        run: cargo +1.94 test --no-default-features --no-run
+      - name: Check deletion contract
+        run: cargo +1.94 test --all-features --locked --test delete_contract_tests
 
-      - name: Run nested integration test discovery
-        run: >-
-          cargo +1.94 test --test lib_tests
-          options::local_copy_source_mode_tests::test_local_copy_source_modes_are_distinct
-          -- --exact
+      - name: Check deletion symlink contract
+        run: cargo +1.94 test --all-features --locked --test delete_contract_symlink_tests
+
+      - name: Check error cause and effect queries
+        run: cargo +1.94 test --all-features --locked --test error_tests
+
+      - name: Check vectored reader contract
+        run: cargo +1.94 test --all-features --locked --test local_file_reader_tests
+
+      - name: Check Rooted resolution fast path
+        run: cargo +1.94 test --all-features --locked --test rooted_resolution_fast_path_tests
