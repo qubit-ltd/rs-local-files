@@ -41,6 +41,8 @@ mod local_root_atomic_writer_support;
 
 pub use internal::CopyBudget;
 pub use internal::CopyDestinationAction;
+pub(crate) use internal::CopyTreeBackend;
+pub(crate) use internal::CopyTreeFrameContext;
 pub(crate) use internal::DeleteBackend;
 pub(crate) use internal::DirectoryIdentity;
 pub(crate) use internal::HostLocalFileSystem;
@@ -60,6 +62,7 @@ pub(crate) use internal::copy_failure_unchanged;
 pub(crate) use internal::copy_file_replace_requires_atomicity;
 pub(crate) use internal::copy_file_with_options;
 pub(crate) use internal::copy_source_mode_mismatch;
+pub(crate) use internal::copy_tree;
 #[cfg(any(unix, windows))]
 pub(crate) use internal::create_rooted_directory;
 #[cfg(any(unix, windows))]
