@@ -536,6 +536,10 @@ fn sync_atomic_parent_chain(path: &Path, parent_dirs_to_sync: &[PathBuf]) -> io:
     }
     sync_parent_dir(path)?;
     for directory in parent_dirs_to_sync.iter().rev() {
+        #[cfg(feature = "test-support")]
+        if test_support::is_enabled("atomic-writer-created-parent-sync") {
+            return Err(crate::local::test_fault_error());
+        }
         sync_parent_dir(directory)?;
     }
     Ok(())

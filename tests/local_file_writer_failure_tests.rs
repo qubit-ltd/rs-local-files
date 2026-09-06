@@ -248,6 +248,34 @@ fn test_local_file_writer_creates_nested_durable_parent_chain() {
     );
 }
 
+/// Verifies a required durable writer reports incomplete publication when a
+/// newly created ancestor cannot be synchronized after installation.
+#[cfg(all(feature = "test-support", unix))]
+#[test]
+fn test_local_file_writer_detects_created_ancestor_sync_failure() {
+    let directory = tempdir().expect("temporary directory should be created");
+    let target = directory.path().join("one/two/three/payload");
+    let mut writer = LocalFileSystem::host()
+        .expect("Host filesystem should open")
+        .open_writer_with_options(
+            &target,
+            &LocalWriteOptions::new(LocalWriteMode::CreateNew)
+                .with_create_parent()
+                .with_durability(LocalDurabilityRequirement::Required),
+        )
+        .expect("writer should create the requested parent chain");
+    writer.write_all(b"payload").expect("writer should accept bytes");
+    let _fault = install_test_fault("atomic-writer-created-parent-sync").expect("fault should install");
+
+    let error = writer.commit().expect_err("ancestor sync failure should be reported");
+    assert_eq!(LocalWriteFailureState::Published, error.state());
+    assert_eq!(LocalFileErrorKind::PublicationIncomplete, error.error().kind());
+    assert_eq!(
+        b"payload",
+        fs::read(&target).expect("published payload should remain").as_slice()
+    );
+}
+
 /// Verifies host create-new writers reject an existing entry before retaining
 /// any staging artifact.
 #[test]
