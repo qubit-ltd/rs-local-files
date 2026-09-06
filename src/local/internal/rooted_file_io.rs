@@ -124,6 +124,39 @@ pub(crate) fn read_rooted_symlink_metadata(
     Ok(unsafe { status.assume_init() })
 }
 
+/// Reads one child entry relative to an already-opened directory descriptor.
+///
+/// This primitive is intentionally limited to one component. It is used by
+/// the rooted resolution cursor so a deep path is not repeatedly traversed
+/// from the root descriptor.
+pub(crate) fn read_rooted_component_metadata(root: &File, name: &OsStr) -> Result<libc::stat> {
+    let name = component_c_string(name);
+    let mut status = std::mem::MaybeUninit::<libc::stat>::uninit();
+    // SAFETY: `status` is writable storage and the descriptor/name remain live
+    // for this non-retaining syscall.
+    let result = unsafe {
+        libc::fstatat(
+            root.as_raw_fd(),
+            name.as_ptr(),
+            status.as_mut_ptr(),
+            libc::AT_SYMLINK_NOFOLLOW,
+        )
+    };
+    if result == -1 {
+        return Err(Error::last_os_error());
+    }
+    // SAFETY: successful `fstatat` initialized the complete structure.
+    Ok(unsafe { status.assume_init() })
+}
+
+/// Opens one child directory relative to an already-opened directory
+/// descriptor without following a symbolic link.
+pub(crate) fn open_rooted_component_directory(root: &File, name: &OsStr) -> Result<File> {
+    let directory = open_directory_at(root, name)?;
+    verify_opened_directory(&directory, "inspect rooted resolution directory", Path::new(name))?;
+    Ok(directory)
+}
+
 /// Opens a native file reader relative to an anchored root descriptor.
 pub(crate) fn open_rooted_native_reader(
     root: &File,

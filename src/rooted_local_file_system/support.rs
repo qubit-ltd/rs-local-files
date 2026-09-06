@@ -90,7 +90,45 @@ pub(crate) fn resolve_rooted_path_allow_root(
     operation: LocalFileOperation,
 ) -> LocalResult<PathBuf> {
     let relative = rooted_path(path, operation)?;
+    if symlink_policy == LocalSymlinkPolicy::FollowAcrossScope {
+        return Err(LocalFileError::new(LocalFileErrorKind::InvalidOptions, operation)
+            .with_reason("FollowAcrossScope is incompatible with a Rooted filesystem")
+            .with_path(path.to_path_buf()));
+    }
+    if let Some(resolved) = try_resolve_without_symlinks(root, &relative, follow_final) {
+        return Ok(resolved);
+    }
     resolve_rooted_symlinks(root, relative, symlink_policy, follow_final, operation, path)
+}
+
+/// Checks a normal rooted path with one descriptor-relative operation per
+/// component. Any uncertainty deliberately returns `None`, allowing the
+/// original symlink-aware resolver to classify the path and its errors.
+fn try_resolve_without_symlinks(
+    root: &crate::rooted::Root,
+    path: &crate::local::LocalRelativePath,
+    follow_final: bool,
+) -> Option<PathBuf> {
+    let mut cursor = root.resolution_cursor().ok()?;
+    let mut components = path.as_path().components().peekable();
+    while let Some(component) = components.next() {
+        let name = component.as_os_str();
+        let final_component = components.peek().is_none();
+        if final_component && !follow_final {
+            return Some(path.as_path().to_path_buf());
+        }
+        let metadata = cursor.metadata(name).ok()?;
+        if metadata.kind() == crate::rooted::EntryKind::Symlink {
+            return None;
+        }
+        if !final_component {
+            if metadata.kind() != crate::rooted::EntryKind::Directory {
+                return None;
+            }
+            cursor.descend(name).ok()?;
+        }
+    }
+    Some(path.as_path().to_path_buf())
 }
 
 /// Expands symlinks from the retained root handle without consulting its

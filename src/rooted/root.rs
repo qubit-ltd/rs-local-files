@@ -20,6 +20,7 @@ use super::Entry;
 use super::EntryKind;
 use super::Metadata;
 use super::Permissions;
+use super::RootedResolutionCursor;
 use super::Writer;
 use super::path;
 #[cfg(not(any(unix, windows)))]
@@ -89,6 +90,25 @@ impl Root {
     #[cfg_attr(coverage, inline(never))]
     pub fn try_clone_authority(&self) -> Result<File> {
         self.directory.try_clone()
+    }
+
+    /// Starts a component-at-a-time observation from this rooted authority.
+    ///
+    /// The cursor is an internal optimization used by rooted path resolution.
+    /// It retains only one directory handle at a time and never changes the
+    /// authority represented by this root.
+    pub(crate) fn resolution_cursor(&self) -> Result<RootedResolutionCursor> {
+        #[cfg(any(unix, windows))]
+        {
+            RootedResolutionCursor::new(self.directory.try_clone()?)
+        }
+        #[cfg(not(any(unix, windows)))]
+        {
+            Err(Error::new(
+                ErrorKind::Unsupported,
+                "descriptor-relative rooted resolution is unsupported on this platform",
+            ))
+        }
     }
 
     /// Reads metadata for the opened root directory through its descriptor.

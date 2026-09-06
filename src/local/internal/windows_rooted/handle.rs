@@ -116,6 +116,26 @@ pub(crate) fn read_rooted_symlink_metadata(
     open_entry_no_follow(root, path, FILE_READ_ATTRIBUTES | SYNCHRONIZE, FILE_OPEN, 0)
 }
 
+/// Opens one child entry relative to an already-opened directory handle,
+/// retaining the final reparse point for classification by the caller.
+pub(crate) fn read_rooted_component_metadata(root: &File, name: &OsStr) -> Result<File> {
+    nt_open_at(root, name, FILE_READ_ATTRIBUTES | SYNCHRONIZE, FILE_OPEN, 0)
+}
+
+/// Opens and verifies one real child directory relative to an already-opened
+/// directory handle without following name-surrogate reparse points.
+pub(crate) fn open_rooted_component_directory(root: &File, name: &OsStr) -> Result<File> {
+    let directory = nt_open_at(
+        root,
+        name,
+        FILE_LIST_DIRECTORY | FILE_READ_ATTRIBUTES | FILE_TRAVERSE | SYNCHRONIZE,
+        FILE_OPEN,
+        FILE_DIRECTORY_FILE,
+    )?;
+    verify_real_directory(&directory)?;
+    Ok(directory)
+}
+
 /// Opens a rooted regular file for reading.
 ///
 /// # Errors
