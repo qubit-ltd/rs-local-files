@@ -24,6 +24,13 @@
 返回 `PublicationIncomplete`，仍保留资源信息。期限错误保留 `TimedOut` I/O 类别。
 重试前应同时检查副作用分类与失败原因。
 
+兼容查询将这两个维度分开：`LocalFileError::cause_kind()` 返回目前可知的底层原因，
+`LocalFileError::effect_state()` 对 `PublicationIncomplete` 返回
+`Some(LocalFileEffectState::PartiallyApplied)`，对 `Indeterminate` 返回
+`Some(LocalFileEffectState::Indeterminate)`。普通错误无法推断副作用时返回 `None`；
+这不表示 `Unchanged`。copy、rename、writer 和 persist 的专用 failure 类型仍是精确恢复
+状态的权威来源。
+
 实例默认 Options 是便利配置，不是强制上限；显式 `*_with_options` 会完整替换它们。
 需要请求无法放宽的 provider 上限时，应配置 `qubit-fs-local::LocalResourcePolicy`。
 
@@ -274,6 +281,37 @@ namespace-absolute 主/目标路径、操作使用的 PWD snapshot，以及可�
 
 `LocalPersistError` 同时保留临时资源和结构化的 `LocalFileError`；其 `state()` 是唯一的
 恢复状态来源。存在原生 I/O 错误时，可从结构化错误的 source 取得。
+
+基础错误提供了增量兼容查询，调用方可以在不取得错误所有权的情况下分别读取两个维度：
+
+```rust,no_run
+use qubit_local_files::error::{
+    LocalFileEffectState, LocalFileError, LocalFileErrorKind, LocalFileOperation,
+};
+
+let error = LocalFileError::new(
+    LocalFileErrorKind::NotFound,
+    LocalFileOperation::Metadata,
+);
+assert_eq!(error.cause_kind(), Some(LocalFileErrorKind::NotFound));
+assert_eq!(error.effect_state(), None);
+assert!(!matches!(
+    error.effect_state(),
+    Some(LocalFileEffectState::Unchanged)
+));
+# Ok::<(), Box<dyn std::error::Error>>(())
+```
+
+`effect_state()` 返回 `None` 表示基础错误没有足够证据推断命名空间副作用；它不表示
+`Unchanged`。
+
+Unix 上，默认 feature 与 `test-support` 构建中的 `LocalFileReader::read_vectored` 都使用
+文件描述符的原生向量读取路径。Windows 继续使用平台所需的顺序读取回退；如果后续 buffer
+读取失败，回退实现会返回已经累计读取的字节数，保持 `Read` 的进度语义。
+
+Rooted metadata 等操作对不含链接的普通路径使用私有的一次顺序目录 cursor。路径包含链接、
+缺失组件或原生错误时，会回到既有完整解析器，以保持链接策略和 authority 检查。该实现细节
+不改变调用方可依赖的路径与错误契约。
 
 ## 排障
 

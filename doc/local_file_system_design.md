@@ -305,6 +305,14 @@ supports explicit overwrite policy, reports durability, and retains
 cannot provide a finer recovery object still identify incomplete publication
 through a stable error kind and failed path.
 
+The operation/type contract is stable across Host and Rooted scopes. `delete_file` returns
+`IsDirectory` for an entity directory and removes a final symbolic link itself, including a link
+to a directory. `delete_directory` returns `NotDirectory` for a regular file or final symbolic
+link, in both recursive and non-recursive modes, and never removes that entry. `missing_ok` only
+turns a missing requested root into `deleted = false`; a missing child or any other traversal
+failure remains an error. Rooted `/` remains invalid. These checks are no-follow observations and
+do not claim atomicity against an untrusted concurrent renamer.
+
 ## 18. Temporary Resources
 
 A live temporary file or directory owns cleanup responsibility in an `Armed`
@@ -326,6 +334,14 @@ secondary namespace paths, the PWD snapshot when relevant, and typed/native
 sources. Display text is diagnostic and not a branching contract. Dedicated
 writer, copy, rename, and persistence failures are recovery objects; callers
 must inspect their typed state rather than infer “nothing happened” from `Err`.
+
+`LocalFileEffectState` is an additive compatibility vocabulary for the basic error type. The
+`cause_kind()` query reports the best available underlying cause; the `effect_state()` query
+reports `PartiallyApplied` for `PublicationIncomplete` and `Indeterminate` for `Indeterminate`
+when that effect is encoded by the outer kind. Ordinary errors return `None` from
+`effect_state()`, which means that the basic error has insufficient effect evidence and does not
+mean `Unchanged`. The `Unchanged`, `Applied`, and exact recovery states remain owned by dedicated
+copy, rename, writer, and persistence failure types.
 
 ## 20. Capabilities, Requirements, and Runtime Facts
 
@@ -417,7 +433,10 @@ Verification follows contracts rather than line count:
 - the exact bilingual README and user-guide Rust fences are included as
   doctests, preventing copied-example drift;
 - benchmarks represent codec, walk, handle-budget, copy, writer, Rooted writer,
-  and prefix-read workloads;
+  prefix-read, and Rooted deep-metadata workloads; deep-metadata fixtures use
+  depths 1, 8, 32, 64, and 128 and compare Host with Rooted before/after changes;
+- Unix vectored-reader tests cover both default and `test-support` builds, while
+  Windows tests cover the sequential fallback's progress and error behavior;
 - bounded fuzz targets exercise codec, path, Host lifecycle, and Rooted
   lifecycle invariants; lifecycle targets use unique per-process sandboxes,
   bounded collision retries, and RAII cleanup, and never rely on ambient

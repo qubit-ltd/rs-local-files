@@ -30,6 +30,14 @@ facts. After any entry was removed, the error is `PublicationIncomplete` and
 still retains those facts; deadline errors retain `TimedOut` as their I/O kind.
 Inspect both the effect classification and the cause before retrying.
 
+The compatibility queries make those two dimensions explicit:
+`LocalFileError::cause_kind()` reports the best known underlying cause, while
+`LocalFileError::effect_state()` returns `Some(LocalFileEffectState::PartiallyApplied)`
+for `PublicationIncomplete` and `Some(LocalFileEffectState::Indeterminate)` for
+`Indeterminate`. Ordinary errors have no inferred effect and return `None`; that
+value does not mean `Unchanged`. The dedicated copy, rename, writer, and persist
+failure types remain the authority for their precise recovery states.
+
 Instance default Options are convenience configuration, not mandatory ceilings:
 explicit `*_with_options` replaces them completely. For a provider policy that
 requests cannot loosen, configure `qubit-fs-local::LocalResourcePolicy` instead.
@@ -323,6 +331,42 @@ types to preserve partial-success state.
 `LocalPersistError` retains the temporary resource and its structured
 `LocalFileError`; its `state()` is the single recovery-state authority. Native
 I/O errors are available through the structured error source when present.
+
+The basic error exposes additive compatibility queries for callers that need
+both dimensions without taking ownership of the error:
+
+```rust,no_run
+use qubit_local_files::error::{
+    LocalFileEffectState, LocalFileError, LocalFileErrorKind, LocalFileOperation,
+};
+
+let error = LocalFileError::new(
+    LocalFileErrorKind::NotFound,
+    LocalFileOperation::Metadata,
+);
+assert_eq!(error.cause_kind(), Some(LocalFileErrorKind::NotFound));
+assert_eq!(error.effect_state(), None);
+assert!(!matches!(
+    error.effect_state(),
+    Some(LocalFileEffectState::Unchanged)
+));
+# Ok::<(), Box<dyn std::error::Error>>(())
+```
+
+`None` from `effect_state()` means that the basic error does not carry enough
+evidence to infer a namespace effect; it is not an `Unchanged` result.
+
+On Unix, `LocalFileReader::read_vectored` uses the file descriptor's native
+vectored read path in both the default and `test-support` builds. Windows keeps
+the sequential fallback required by its platform implementation; the fallback
+preserves `Read` progress by returning accumulated bytes when a later buffer
+read fails.
+
+For Rooted metadata and similar operations, ordinary paths with no links use a
+private one-pass directory cursor. Paths containing a link, a missing component,
+or a native error return through the existing full resolver, preserving link
+policy and authority checks. This is an implementation detail: callers should
+rely on the same path and error contracts in either case.
 
 ## Troubleshooting
 
