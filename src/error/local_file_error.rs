@@ -15,6 +15,7 @@ use std::io;
 use std::path::Path;
 use std::path::PathBuf;
 
+use super::LocalFileEffectState;
 use super::LocalFileErrorKind;
 use super::LocalFileErrorSource;
 use super::LocalFileOperation;
@@ -282,6 +283,49 @@ impl LocalFileError {
         self.operation
     }
 
+    /// Returns the best available classification of the underlying cause.
+    ///
+    /// For ordinary errors this is the stable classification returned by
+    /// [`Self::kind`]. Publication and indeterminate failures retain their
+    /// outer effect classification in `kind`; when a typed source is present,
+    /// this method exposes the source's cause classification separately.
+    ///
+    /// `None` means that a publication or indeterminate failure was created
+    /// without a typed source, so its cause cannot be inferred safely.
+    #[must_use = "the underlying error cause should be inspected"]
+    #[cfg_attr(not(coverage), inline)]
+    #[cfg_attr(coverage, inline(never))]
+    pub fn cause_kind(&self) -> Option<LocalFileErrorKind> {
+        if !matches!(
+            self.kind,
+            LocalFileErrorKind::PublicationIncomplete | LocalFileErrorKind::Indeterminate
+        ) {
+            return Some(self.kind);
+        }
+        match self.source.as_ref() {
+            Some(LocalFileErrorSource::Io(source)) => Some(classify_io_error(source)),
+            Some(LocalFileErrorSource::ResourceLimit(_)) => Some(LocalFileErrorKind::ResourceLimit),
+            Some(LocalFileErrorSource::PathCodec(_)) => Some(LocalFileErrorKind::InvalidPath),
+            None => None,
+        }
+    }
+
+    /// Returns the namespace effect state represented by this error.
+    ///
+    /// Basic errors do not contain enough evidence to infer an effect, so
+    /// they return `None`. In particular, `None` does not mean
+    /// [`LocalFileEffectState::Unchanged`].
+    #[must_use = "the namespace effect state should be inspected"]
+    #[cfg_attr(not(coverage), inline)]
+    #[cfg_attr(coverage, inline(never))]
+    pub fn effect_state(&self) -> Option<LocalFileEffectState> {
+        match self.kind {
+            LocalFileErrorKind::PublicationIncomplete => Some(LocalFileEffectState::PartiallyApplied),
+            LocalFileErrorKind::Indeterminate => Some(LocalFileEffectState::Indeterminate),
+            _ => None,
+        }
+    }
+
     /// Returns the namespace-absolute PWD used to bind relative paths.
     #[must_use]
     #[cfg_attr(not(coverage), inline(always))]
@@ -503,6 +547,7 @@ mod tests {
     use std::io;
     use std::path::Path;
 
+    use super::LocalFileEffectState;
     use super::LocalFileError;
     use super::LocalFileErrorKind;
     use super::LocalFileOperation;
@@ -563,5 +608,59 @@ mod tests {
         assert_eq!(io::ErrorKind::Unsupported, error.io_error_kind());
         assert!(error.typed_source().is_none());
         assert!(error.to_string().contains("requested guarantee"));
+    }
+
+    #[test]
+    fn test_effect_queries_preserve_cause_and_effect_for_reclassified_io() {
+        let error = LocalFileError::from_io(
+            LocalFileOperation::DeleteDirectory,
+            None,
+            None,
+            io::Error::from(io::ErrorKind::PermissionDenied),
+        )
+        .with_kind(LocalFileErrorKind::PublicationIncomplete);
+
+        assert_eq!(Some(LocalFileErrorKind::PermissionDenied), error.cause_kind());
+        assert_eq!(Some(LocalFileEffectState::PartiallyApplied), error.effect_state());
+        assert_eq!(io::ErrorKind::PermissionDenied, error.io_error_kind());
+        assert!(error.io_error().is_some());
+    }
+
+    #[test]
+    fn test_effect_queries_preserve_resource_limit_cause() {
+        let source = LocalResourceLimitError::new(LocalResourceKind::Entry, 4, 1, 2);
+        let error = LocalFileError::from_resource_limit(LocalFileOperation::Copy, None, source)
+            .with_kind(LocalFileErrorKind::PublicationIncomplete);
+
+        assert_eq!(Some(LocalFileErrorKind::ResourceLimit), error.cause_kind());
+        assert_eq!(Some(LocalFileEffectState::PartiallyApplied), error.effect_state());
+        assert!(error.resource_limit_error().is_some());
+    }
+
+    #[test]
+    fn test_effect_queries_map_path_codec_cause() {
+        let error = LocalFileError::from_path_codec(
+            LocalFileOperation::Read,
+            Some("source".into()),
+            LocalPathCodecError::NativeNul,
+        )
+        .with_kind(LocalFileErrorKind::Indeterminate);
+
+        assert_eq!(Some(LocalFileErrorKind::InvalidPath), error.cause_kind());
+        assert_eq!(Some(LocalFileEffectState::Indeterminate), error.effect_state());
+    }
+
+    #[test]
+    fn test_effect_queries_preserve_semantic_cause_reclassification() {
+        let error = LocalFileError::from_io(
+            LocalFileOperation::Copy,
+            None,
+            None,
+            io::Error::from(io::ErrorKind::InvalidInput),
+        )
+        .with_kind(LocalFileErrorKind::TypeConflict);
+
+        assert_eq!(Some(LocalFileErrorKind::TypeConflict), error.cause_kind());
+        assert_eq!(None, error.effect_state());
     }
 }

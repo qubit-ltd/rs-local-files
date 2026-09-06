@@ -7,6 +7,7 @@
 // =============================================================================
 //! Structured errors for native local filesystem operations.
 
+mod local_file_effect_state;
 mod local_file_error;
 mod local_file_error_kind;
 mod local_file_error_source;
@@ -16,6 +17,7 @@ mod local_resource_kind;
 mod local_resource_limit_error;
 mod local_result;
 
+pub use local_file_effect_state::LocalFileEffectState;
 pub use local_file_error::LocalFileError;
 pub use local_file_error_kind::LocalFileErrorKind;
 pub use local_file_error_source::LocalFileErrorSource;
