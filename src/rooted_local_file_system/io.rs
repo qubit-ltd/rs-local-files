@@ -163,7 +163,7 @@ impl RootedLocalFileSystem {
                 LocalFileOperation::OpenWriter,
                 path,
                 path,
-                self.capabilities.supports_durable_file_copy(),
+                self.capabilities.supports_durable_write(),
                 "required directory durability is unavailable for this rooted authority",
             )?;
         }
