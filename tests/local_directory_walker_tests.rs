@@ -58,6 +58,37 @@ fn test_host_list_normalizes_parent_before_following_symlinks() {
     }
 }
 
+/// Listing through a followed directory link preserves the caller's logical
+/// root in reusable entry paths.
+#[cfg(unix)]
+#[test]
+fn test_host_list_through_directory_symlink_preserves_namespace_root() {
+    use std::os::unix::fs::symlink;
+
+    let directory = tempdir().expect("fixture directory should exist");
+    let real = directory.path().join("real");
+    let alias = directory.path().join("alias");
+    fs::create_dir(&real).expect("real directory should be created");
+    fs::write(real.join("item"), b"item").expect("fixture item should be written");
+    symlink(&real, &alias).expect("directory alias should be created");
+
+    let entries = LocalFileSystem::host()
+        .expect("Host should open")
+        .list(&alias)
+        .expect("listing through the alias should open")
+        .collect::<Result<Vec<_>, _>>()
+        .expect("listing through the alias should succeed");
+
+    assert_eq!(PathBuf::from("item"), entries[0].relative_path());
+    assert_eq!(alias.join("item"), entries[0].path());
+    assert_eq!(
+        real.join("item"),
+        entries[0]
+            .diagnostic_path()
+            .expect("native diagnostic path should be retained")
+    );
+}
+
 /// Verifies lazy recursive traversal with stable root-relative paths.
 #[test]
 fn test_local_directory_walker_recurses_lazily() {
