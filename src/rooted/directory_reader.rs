@@ -54,6 +54,10 @@ impl DirectoryReader {
     /// Returns an I/O error when secure traversal or enumeration cannot be
     /// performed.
     pub(crate) fn open_descendant(root: &File, diagnostic_root: &Path, path: &super::Path) -> Result<Self> {
+        #[cfg(feature = "test-support")]
+        if local::test_support_enabled("rooted-copy-directory-read-native") {
+            return Err(crate::local::test_fault_error());
+        }
         #[cfg(unix)]
         {
             local::open_rooted_directory_reader(root, diagnostic_root, path).map(|inner| Self { inner })

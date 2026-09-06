@@ -16,7 +16,6 @@ mod path;
 mod permissions;
 mod root;
 mod rooted_resolution_cursor;
-mod work;
 
 pub use directory_reader::DirectoryReader;
 pub(crate) use entry::Entry;
