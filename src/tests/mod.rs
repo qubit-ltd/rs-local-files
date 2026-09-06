@@ -10,4 +10,5 @@ mod file_system;
 mod local;
 mod path;
 mod rooted;
+mod vectored_read_tests;
 mod write;

@@ -81,36 +81,12 @@ impl Read for LocalFileReader {
 
     /// Reads bytes into multiple buffers from the current offset.
     fn read_vectored(&mut self, buffers: &mut [IoSliceMut<'_>]) -> io::Result<usize> {
-        #[cfg(any(windows, feature = "test-support"))]
+        #[cfg(windows)]
         {
-            let mut total = 0;
-            for buffer in buffers {
-                #[cfg(feature = "test-support")]
-                let result = if total > 0 {
-                    if crate::local::test_support_enabled("local-file-reader-vectored-read-after-first") {
-                        Err(io::Error::other("injected vectored read failure"))
-                    } else {
-                        self.read(buffer)
-                    }
-                } else {
-                    self.read(buffer)
-                };
-                #[cfg(not(feature = "test-support"))]
-                let result = self.read(buffer);
-                let count = match result {
-                    Ok(count) => count,
-                    Err(_) if total > 0 => return Ok(total),
-                    Err(error) => return Err(error),
-                };
-                total += count;
-                if count < buffer.len() {
-                    break;
-                }
-            }
-            Ok(total)
+            crate::read::read_vectored_fallback(&mut self.file, buffers)
         }
-        #[cfg(all(not(windows), not(feature = "test-support")))]
-        self.as_file().read_vectored(buffers)
+        #[cfg(not(windows))]
+        self.file.read_vectored(buffers)
     }
 }
 
