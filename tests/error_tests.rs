@@ -11,6 +11,7 @@ use std::io;
 use std::path::Path;
 
 use qubit_local_files::LocalFileError;
+use qubit_local_files::error::LocalFileEffectState;
 use qubit_local_files::error::LocalFileErrorKind;
 use qubit_local_files::error::LocalFileErrorSource;
 use qubit_local_files::error::LocalFileOperation;
@@ -38,6 +39,48 @@ fn test_local_file_error_from_io_preserves_context() {
             .source()
             .and_then(|source| source.downcast_ref::<io::Error>())
             .map(io::Error::kind),
+    );
+}
+
+/// Verifies ordinary errors expose their stable classification as the cause
+/// without claiming a namespace effect.
+#[test]
+fn test_local_file_error_cause_and_effect_for_ordinary_error() {
+    let error = LocalFileError::from_io(
+        LocalFileOperation::Metadata,
+        None,
+        None,
+        io::Error::from(io::ErrorKind::PermissionDenied),
+    );
+
+    assert_eq!(Some(LocalFileErrorKind::PermissionDenied), error.cause_kind());
+    assert_eq!(None, error.effect_state());
+}
+
+/// Verifies effect markers remain conservative when no originating source is
+/// retained by the basic error.
+#[test]
+fn test_local_file_error_effect_markers_without_cause() {
+    let partial = LocalFileError::new(
+        LocalFileErrorKind::PublicationIncomplete,
+        LocalFileOperation::DeleteDirectory,
+    );
+    assert_eq!(None, partial.cause_kind());
+    assert_eq!(Some(LocalFileEffectState::PartiallyApplied), partial.effect_state());
+
+    let indeterminate = LocalFileError::new(LocalFileErrorKind::Indeterminate, LocalFileOperation::Rename);
+    assert_eq!(None, indeterminate.cause_kind());
+    assert_eq!(Some(LocalFileEffectState::Indeterminate), indeterminate.effect_state());
+}
+
+/// Verifies the effect-state vocabulary is publicly constructible and
+/// remains distinct from the absence of an inferred state.
+#[test]
+fn test_local_file_effect_state_variants_are_stable() {
+    assert_ne!(LocalFileEffectState::Unchanged, LocalFileEffectState::Applied);
+    assert_ne!(
+        LocalFileEffectState::PartiallyApplied,
+        LocalFileEffectState::Indeterminate
     );
 }
 
