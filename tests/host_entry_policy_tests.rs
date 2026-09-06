@@ -113,7 +113,7 @@ fn test_local_file_system_delete_handles_missing_and_type_conflicts() {
         .expect("Host filesystem should open")
         .delete_file_with_options(&child_directory, &LocalDeleteOptions::new())
         .expect_err("directory must not be deleted as a file");
-    assert_eq!(LocalFileErrorKind::TypeConflict, file_delete_error.kind());
+    assert_eq!(LocalFileErrorKind::IsDirectory, file_delete_error.kind());
 
     let file = directory.path().join("file");
     fs::write(&file, b"payload").expect("file fixture should be written");
@@ -121,7 +121,7 @@ fn test_local_file_system_delete_handles_missing_and_type_conflicts() {
         .expect("Host filesystem should open")
         .delete_directory_with_options(&file, &LocalDeleteOptions::new())
         .expect_err("regular files must not be deleted as directories");
-    assert_eq!(LocalFileErrorKind::TypeConflict, directory_delete_error.kind());
+    assert_eq!(LocalFileErrorKind::NotDirectory, directory_delete_error.kind());
 }
 
 /// Verifies host reader reports both missing entries and final entry kinds
