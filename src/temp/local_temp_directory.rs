@@ -237,6 +237,9 @@ impl LocalTempDirectory {
     ///
     /// Consumes this guard and resolves `target` against its creation-time
     /// namespace and PWD. `options` controls replacement and parent creation.
+    /// A relative target requires a PWD captured during creation; an absolute
+    /// Host parent therefore rejects it with `InvalidPath` and retains the
+    /// resource in the returned error.
     /// Required durability returns `RequirementNotMet` before publication;
     /// directory-content durability is not implemented. Successful publication
     /// returns an atomic rename outcome, `durable: false`, and any later

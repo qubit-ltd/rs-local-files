@@ -15,6 +15,18 @@ use crate::LocalFileKind;
 use crate::LocalFilePermissions;
 
 /// Normalized metadata for a native filesystem entry.
+///
+/// # Examples
+///
+/// ```
+/// use std::path::Path;
+/// use qubit_local_files::LocalFileSystem;
+///
+/// let filesystem = LocalFileSystem::host()?;
+/// let metadata = filesystem.metadata(Path::new("Cargo.toml"))?;
+/// assert!(metadata.len() > 0);
+/// # Ok::<(), qubit_local_files::LocalFileError>(())
+/// ```
 #[derive(Clone, Debug)]
 #[must_use]
 pub struct LocalFileMetadata {

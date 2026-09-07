@@ -85,9 +85,8 @@ fuzz_target!(|input: &[u8]| {
                 } else {
                     native_target.clone()
                 };
-                if let Ok(bytes) = fs::read(copied) {
-                    assert_eq!(data, bytes);
-                }
+                let bytes = fs::read(copied).expect("successful copy must leave a readable destination");
+                assert_eq!(data, bytes);
                 let deletion = if directory_source {
                     filesystem.delete_directory_with_options(
                         &target,
@@ -100,14 +99,14 @@ fuzz_target!(|input: &[u8]| {
                 } else {
                     filesystem.delete_file(&target)
                 };
-                if deletion.is_ok() {
-                    assert!(!native_target.exists());
-                }
+                deletion.expect("fixture deletion must succeed");
+                assert!(!native_target.exists());
             }
             Err(failure) => {
-                if mismatch {
-                    assert_eq!(LocalFileErrorKind::RequirementNotMet, failure.error().kind());
-                }
+                assert!(mismatch, "valid bounded fixture must copy successfully: {failure:?}");
+                assert_eq!(LocalFileErrorKind::RequirementNotMet, failure.error().kind());
+                assert_eq!(failure.state(), LocalCopyFailureState::Unchanged);
+                assert!(!native_target.exists());
                 if failure.state() == LocalCopyFailureState::Unchanged {
                     assert!(!native_target.exists());
                 }
@@ -118,8 +117,7 @@ fuzz_target!(|input: &[u8]| {
         } else {
             source.clone()
         };
-        if let Ok(bytes) = fs::read(source_payload) {
-            assert_eq!(data, bytes, "copy must never mutate source content");
-        }
+        let bytes = fs::read(source_payload).expect("copy must leave its source readable");
+        assert_eq!(data, bytes, "copy must never mutate source content");
     }
 });

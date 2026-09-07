@@ -174,6 +174,11 @@ path conversion intentionally does not support UNC paths.
 
 ## Learn More
 
+Configuration validation rejects impossible guarantees before filesystem I/O,
+and copy failures distinguish unchanged, partially published, published, and
+indeterminate destinations. See the user guide for the complete error and
+cleanup contract.
+
 - [User guide](doc/user_guide.md)
 - [用户手册](doc/user_guide.zh_CN.md)
 - [API reference](https://docs.rs/qubit-local-files)

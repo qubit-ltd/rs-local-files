@@ -4,6 +4,14 @@
 [Design](local_file_system_design.md) ·
 [API reference](https://docs.rs/qubit-local-files)
 
+## Operational contracts
+
+`LocalFileSystem` validates static option combinations before resolving or
+mutating paths. Copy failures report the strongest proven destination state;
+`Unchanged` means no destination mutation was proven, while `Indeterminate`
+means a native mutation result could not be established. A `read_prefix` error
+keeps the outer `Read` operation even when opening the reader failed.
+
 ## Purpose and Audience
 
 This guide covers `qubit-local-files` 0.3 on Rust 1.94 or newer. It is for
