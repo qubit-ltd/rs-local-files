@@ -5,10 +5,6 @@
 //
 //    Licensed under the Apache License, Version 2.0.
 // =============================================================================
+//! Private observation support for rooted contract tests.
 
-mod file_system;
-mod local;
-mod path;
-pub(crate) mod rooted;
-mod vectored_read_tests;
-mod write;
+pub(crate) mod resolution_observation;
