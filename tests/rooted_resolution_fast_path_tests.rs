@@ -23,12 +23,14 @@ use std::io::Write;
 use std::path::Path;
 
 use qubit_local_files::LocalFileSystem;
+#[cfg(unix)]
 use qubit_local_files::error::LocalFileErrorKind;
 use qubit_local_files::options::LocalCreateDirectoryOptions;
 use qubit_local_files::options::LocalListOptions;
 use qubit_local_files::options::LocalWriteMode;
 use qubit_local_files::options::LocalWriteOptions;
 use qubit_local_files::outcome::LocalFileKind;
+#[cfg(unix)]
 use qubit_local_files::policy::LocalSymlinkPolicy;
 use tempfile::tempdir;
 

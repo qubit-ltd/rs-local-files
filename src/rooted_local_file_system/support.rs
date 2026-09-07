@@ -23,6 +23,9 @@ use super::rooted_path;
 use super::symlink_identity::SymlinkIdentity;
 
 /// Validates that the requested rooted listing start exists as a directory.
+/// Applies `symlink_policy` to the start path; empty input selects the opened
+/// root. Returns a type conflict for a non-directory, or a path/policy/native
+/// inspection error with listing context.
 pub(crate) fn validate_rooted_list_start(
     root: &crate::rooted::Root,
     path: &Path,
@@ -67,6 +70,8 @@ pub(crate) fn validate_rooted_list_start(
 }
 
 /// Resolves rooted path components while preserving final-entry semantics.
+/// Uses [`resolve_rooted_path_allow_root`]'s policy and errors, but rejects an
+/// empty virtual-root result because the caller needs a non-empty descendant.
 pub(crate) fn resolve_rooted_path(
     root: &crate::rooted::Root,
     path: &Path,
@@ -82,6 +87,12 @@ pub(crate) fn resolve_rooted_path(
 }
 
 /// Resolves a rooted path while allowing the virtual root as the result.
+///
+/// `follow_final` selects whether the final component participates in link
+/// resolution; intermediate links always obey `symlink_policy`. Missing
+/// components are retained for later creation. Returns path-validation,
+/// forbidden-policy, cycle/escape, or native inspection/read-link errors with
+/// `operation` context. `FollowAcrossScope` is invalid for this authority.
 pub(crate) fn resolve_rooted_path_allow_root(
     root: &crate::rooted::Root,
     path: &Path,
@@ -101,9 +112,11 @@ pub(crate) fn resolve_rooted_path_allow_root(
     resolve_rooted_symlinks(root, relative, symlink_policy, follow_final, operation, path)
 }
 
-/// Checks a normal rooted path with one descriptor-relative operation per
-/// component. Any uncertainty deliberately returns `None`, allowing the
-/// original symlink-aware resolver to classify the path and its errors.
+/// Checks a normal rooted path with linear descriptor-relative work.
+/// Each intermediate component requires metadata inspection and a directory
+/// open; the final component is inspected only when `follow_final` is true.
+/// Any uncertainty returns `None`, allowing the symlink-aware resolver to
+/// classify the path and its errors.
 fn try_resolve_without_symlinks(
     root: &crate::rooted::Root,
     path: &crate::local::LocalRelativePath,
@@ -133,6 +146,10 @@ fn try_resolve_without_symlinks(
 
 /// Expands symlinks from the retained root handle without consulting its
 /// diagnostic path or imposing a fixed expansion-count budget.
+/// Tracks identities only during active expansion to reject cycles. Missing
+/// components remain lexical; rejected policy, virtual-root escape, invalid
+/// target syntax, and native inspection/read-link failures carry `original`
+/// and `operation` context.
 fn resolve_rooted_symlinks(
     root: &crate::rooted::Root,
     path: crate::local::LocalRelativePath,
@@ -142,6 +159,8 @@ fn resolve_rooted_symlinks(
     original: &Path,
 ) -> LocalResult<PathBuf> {
     use std::collections::HashSet;
+    #[cfg(test)]
+    crate::tests::rooted::support::resolution_observation::record_fallback();
     if symlink_policy == LocalSymlinkPolicy::FollowAcrossScope {
         return Err(LocalFileError::new(LocalFileErrorKind::InvalidOptions, operation)
             .with_reason("FollowAcrossScope is incompatible with a Rooted filesystem")
@@ -218,6 +237,8 @@ const fn is_end_symlink_step(step: &ResolutionStep) -> bool {
 }
 
 /// Converts native path syntax into pending virtual-root resolution steps.
+/// Returns `InvalidPath` for native prefixes; roots restart at the virtual
+/// root, dots disappear, and parents remain deferred traversal steps.
 fn steps_from_path(
     path: &Path,
     original: &Path,
@@ -244,6 +265,8 @@ fn steps_from_path(
 }
 
 /// Builds a non-empty rooted relative path from normalized native components.
+/// Returns `InvalidPath` with `original` and `operation` context when the
+/// assembled path fails relative-path validation.
 fn relative_from_components<'component>(
     components: impl Iterator<Item = &'component std::ffi::OsString>,
     original: &Path,
@@ -269,6 +292,9 @@ fn path_from_components<'component>(components: impl Iterator<Item = &'component
 }
 
 /// Synchronizes ancestors that may have gained newly created directories.
+/// Synchronizes the parents of `target`'s non-empty ancestors from deepest to
+/// shallowest; the caller synchronizes `target`'s immediate parent separately.
+/// Stops and propagates the first native synchronization failure.
 pub(crate) fn sync_rooted_copy_parent_chain(
     root: &crate::rooted::Root,
     target: &crate::local::LocalRelativePath,
