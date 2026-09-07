@@ -10,6 +10,8 @@
 // Private behavior is covered through public integration tests.
 
 use std::io::ErrorKind;
+#[cfg(windows)]
+use std::os::windows::fs::FileTypeExt;
 use std::path::Path;
 
 use super::copy_dir_result::CopyDirResult;
@@ -165,6 +167,11 @@ pub(crate) fn copy_file_with_options(
 }
 
 /// Copies a symbolic-link entry without dereferencing its final target.
+///
+/// Applies destination conflict policy and counts a copied link as one file
+/// with zero bytes. Returns inspection, removal, link-read, publication, or
+/// accounting errors. A removed conflicting destination is not restored when
+/// a later step fails.
 pub(crate) fn copy_symlink_with_options(
     src: &Path,
     dst: &Path,
@@ -203,10 +210,13 @@ pub(crate) fn copy_symlink_with_options(
         );
     }
     if action == CopyDestinationAction::Replace {
-        let removal = if destination_metadata.as_ref().is_some_and(is_real_directory) {
-            remove_destination_directory_if_unchanged(dst)
-        } else {
-            std::fs::remove_file(dst)
+        let removal = match destination_metadata.as_ref() {
+            Some(metadata) if is_real_directory(metadata) => remove_destination_directory_if_unchanged(dst),
+            #[cfg(windows)]
+            Some(metadata) if metadata.file_type().is_symlink_dir() => {
+                crate::local::internal::file_move::remove_directory_symlink(dst)
+            }
+            _ => std::fs::remove_file(dst),
         };
         with_copy_context(removal, LocalCopyDirStage::PrepareDestination, src, dst, stats)?;
     }
@@ -256,8 +266,8 @@ pub(crate) fn copy_symlink_with_options(
 ///
 /// # Errors
 ///
-/// Returns the native link-creation error, or `Unsupported` on platforms that
-/// do not expose symbolic links.
+/// Returns source-type inspection or native link-creation errors, or
+/// `Unsupported` on platforms that do not expose symbolic links.
 fn create_symlink_entry(link_target: &Path, _source: &Path, target: &Path) -> std::io::Result<()> {
     #[cfg(unix)]
     {
@@ -265,7 +275,7 @@ fn create_symlink_entry(link_target: &Path, _source: &Path, target: &Path) -> st
     }
     #[cfg(windows)]
     {
-        if std::fs::metadata(_source).is_ok_and(|metadata| metadata.is_dir()) {
+        if std::fs::symlink_metadata(_source)?.file_type().is_symlink_dir() {
             std::os::windows::fs::symlink_dir(link_target, target)
         } else {
             std::os::windows::fs::symlink_file(link_target, target)
@@ -289,10 +299,13 @@ fn create_symlink_entry(link_target: &Path, _source: &Path, target: &Path) -> st
 /// * `dst` - Final destination file path.
 /// * `options` - Recursive-copy behavior options.
 /// * `stats` - Statistics accumulated before staging.
+/// * `budget` - Shared byte and deadline budget charged while copying.
 ///
 /// # Returns
 ///
-/// An armed staging guard and the number of source bytes copied.
+/// An armed guard with its file handle closed, the copied byte count, and
+/// whether staging-file synchronization succeeded. The durability flag does
+/// not include the later destination-parent synchronization.
 ///
 /// # Errors
 ///
@@ -358,6 +371,9 @@ fn stage_copy_file(
 }
 
 /// Synchronizes staged file data before its namespace publication.
+///
+/// Returns native synchronization errors. The caller must keep the staging
+/// handle open; accessing a closed handle panics.
 fn sync_staged_file(staged_file: &StagedFile) -> std::io::Result<()> {
     #[cfg(feature = "test-support")]
     if crate::local::test_support_enabled("copy-staging-file-sync") {

@@ -13,7 +13,7 @@ use std::path::Path;
 
 use super::copy_dir_result::CopyDirResult;
 use super::error::with_copy_context;
-use super::traversal::copy_dir_iterative;
+use super::host_copy_backend::copy_dir_iterative;
 use crate::LocalCopyDirOptions;
 use crate::LocalCopyDirStage;
 use crate::LocalCopyDirStats;

@@ -111,7 +111,7 @@ fn test_rooted_paths_observe_chroot_style_absolute_and_relative_semantics() {
         .copy_with_options(
             Path::new("../../at-root/"),
             Path::new("../../target"),
-            &LocalCopyOptions::new().with_file_source(),
+            &LocalCopyOptions::new().with_entry_source(),
         )
         .expect_err("file-only mode should reject directory-qualified copy syntax");
     assert_eq!(LocalFileErrorKind::NotDirectory, failure.error().kind());
@@ -322,7 +322,7 @@ fn run_in_isolated_process(test_name: &str, action: impl FnOnce()) {
 #[cfg(not(windows))]
 #[test]
 fn test_host_reads_process_pwd_only_for_pwd_dependent_operations() {
-    const TEST_NAME: &str = "host_reads_process_pwd_only_for_pwd_dependent_operations";
+    const TEST_NAME: &str = "test_host_reads_process_pwd_only_for_pwd_dependent_operations";
     run_in_isolated_process(TEST_NAME, || {
         let parent = tempdir().expect("temporary parent should be created");
         let removed = parent.path().join("removed-pwd");

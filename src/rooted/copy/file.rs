@@ -30,6 +30,13 @@ use crate::local::decide_copy_destination;
 use crate::read;
 
 /// Copies one regular file with handle-authoritative source metadata.
+///
+/// Applies `options` to conflicts and permission preservation, charges copied
+/// bytes and deadline checks to `budget`, and requests `durability` from the
+/// staged writer. Returns updated statistics, including skipped entries.
+/// Native, budget, publication, permission, and counter-overflow failures
+/// retain prior statistics and any available staging cleanup error. Destination
+/// preparation can remove an incompatible entry before a later failure.
 pub(super) fn copy_file(
     root: &Root,
     source: &Path,
@@ -208,6 +215,10 @@ pub(super) fn copy_file(
 }
 
 /// Applies source permissions when requested by the caller.
+///
+/// Does nothing when preservation is disabled. A native permission failure
+/// returns the `PreservePermissions` stage and supplied statistics; it does
+/// not undo content already copied to the destination.
 pub(super) fn preserve_permissions(
     root: &Root,
     source: &Path,

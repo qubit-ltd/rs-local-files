@@ -362,7 +362,7 @@ fn test_rooted_local_file_system_copy_enforces_directory_policies() {
         .copy_with_options(
             Path::new("source"),
             Path::new("target"),
-            &LocalCopyOptions::new().with_file_source(),
+            &LocalCopyOptions::new().with_entry_source(),
         )
         .expect_err("file-only copy must reject a directory source");
     assert_eq!(LocalFileErrorKind::RequirementNotMet, file_only.error().kind());

@@ -18,7 +18,7 @@ fn test_local_copy_source_mode_defaults_to_auto() {
 /// Verifies all public source interpretations remain distinct.
 #[test]
 fn test_local_copy_source_modes_are_distinct() {
-    assert_ne!(LocalCopySourceMode::File, LocalCopySourceMode::Tree);
+    assert_ne!(LocalCopySourceMode::Entry, LocalCopySourceMode::Tree);
     assert_ne!(LocalCopySourceMode::Tree, LocalCopySourceMode::Auto);
-    assert_ne!(LocalCopySourceMode::Auto, LocalCopySourceMode::File);
+    assert_ne!(LocalCopySourceMode::Auto, LocalCopySourceMode::Entry);
 }

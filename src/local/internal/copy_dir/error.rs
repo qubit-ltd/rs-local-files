@@ -105,6 +105,11 @@ pub(super) fn with_copy_context<T>(
 }
 
 /// Records one newly created destination directory.
+///
+/// # Errors
+///
+/// Returns `InvalidData` on counter overflow without changing the counters.
+/// The caller must retain any native publication that already occurred.
 pub(super) fn record_created_directory(stats: &mut LocalCopyDirStats) -> Result<()> {
     #[cfg(feature = "test-support")]
     let directories = if crate::local::internal::test_support::is_enabled("copy-stats-directories") {
@@ -123,7 +128,12 @@ pub(super) fn record_created_directory(stats: &mut LocalCopyDirStats) -> Result<
     }
 }
 
-/// Records one skipped destination file.
+/// Records one skipped destination entry.
+///
+/// # Errors
+///
+/// Returns `InvalidData` on counter overflow without changing the counters.
+/// The caller must retain any native publication that already occurred.
 pub(super) fn record_skipped_file(stats: &mut LocalCopyDirStats) -> Result<()> {
     #[cfg(feature = "test-support")]
     let skipped = if crate::local::internal::test_support::is_enabled("copy-stats-skipped") {
@@ -142,7 +152,12 @@ pub(super) fn record_skipped_file(stats: &mut LocalCopyDirStats) -> Result<()> {
     }
 }
 
-/// Records one destination entry replaced by a completed copy.
+/// Records one replaced entry or directory merged under Overwrite policy.
+///
+/// # Errors
+///
+/// Returns `InvalidData` on counter overflow without changing the counters.
+/// The caller must retain any native publication that already occurred.
 pub(super) fn record_overwritten_entry(stats: &mut LocalCopyDirStats) -> Result<()> {
     #[cfg(feature = "test-support")]
     let overwritten = if crate::local::internal::test_support::is_enabled("copy-stats-overwritten") {
@@ -162,6 +177,11 @@ pub(super) fn record_overwritten_entry(stats: &mut LocalCopyDirStats) -> Result<
 }
 
 /// Atomically records one committed file and its copied byte count.
+///
+/// # Errors
+///
+/// Returns `InvalidData` on counter overflow without changing the counters.
+/// The caller must retain any native publication that already occurred.
 pub(super) fn record_copied_file(stats: &mut LocalCopyDirStats, bytes: u64) -> Result<()> {
     #[cfg(feature = "test-support")]
     let files = if crate::local::internal::test_support::is_enabled("copy-stats-files") {

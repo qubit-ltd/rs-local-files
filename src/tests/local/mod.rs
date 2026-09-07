@@ -15,3 +15,5 @@ mod copy_dir_options_tests;
 mod copy_dir_stats_tests;
 #[cfg(windows)]
 mod copy_failure_state_tests;
+
+mod copy_tree_tests;

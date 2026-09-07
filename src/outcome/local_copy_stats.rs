@@ -15,7 +15,7 @@ use crate::local::LocalCopyDirStats;
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
 #[must_use]
 pub struct LocalCopyStats {
-    /// Number of regular files copied.
+    /// Number of regular files and symbolic-link entries copied.
     files: u64,
     /// Number of destination directories created.
     directories: u64,
@@ -23,7 +23,8 @@ pub struct LocalCopyStats {
     bytes: u64,
     /// Number of existing destinations skipped.
     skipped: u64,
-    /// Number of existing entries replaced or merged.
+    /// Number of existing entries replaced, including directories merged under
+    /// the Overwrite conflict policy.
     overwritten: u64,
 }
 
@@ -54,7 +55,7 @@ impl LocalCopyStats {
         }
     }
 
-    /// Returns the number of regular files copied.
+    /// Returns the number of regular files and symbolic-link entries copied.
     #[must_use]
     // qubit-style: allow coverage-cfg
     #[cfg_attr(not(coverage), inline(always))]
@@ -79,7 +80,7 @@ impl LocalCopyStats {
         self.bytes
     }
 
-    /// Returns the number of existing file destinations skipped.
+    /// Returns the number of source entries skipped by destination policy.
     #[must_use]
     #[cfg_attr(not(coverage), inline(always))]
     #[cfg_attr(coverage, inline(never))]
@@ -87,7 +88,8 @@ impl LocalCopyStats {
         self.skipped
     }
 
-    /// Returns the number of destinations replaced or merged.
+    /// Returns the number of destinations replaced, including directories
+    /// merged under the Overwrite conflict policy.
     #[must_use]
     #[cfg_attr(not(coverage), inline(always))]
     #[cfg_attr(coverage, inline(never))]

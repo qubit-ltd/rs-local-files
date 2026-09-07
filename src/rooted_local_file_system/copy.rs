@@ -34,22 +34,26 @@ use super::rooted_io_error;
 use super::sync_rooted_copy_parent_chain;
 
 impl RootedLocalFileSystem {
-    /// Copies one rooted regular file or directory tree.
+    /// Copies one rooted regular file, symbolic-link entry, or directory tree.
     ///
     /// # Parameters
     ///
     /// - `source`: Validated relative source path.
     /// - `target`: Validated relative destination path.
     /// - `options`: Unified copy policy.
+    /// - `symlink_policy`: Inherited policy used without an explicit override.
+    /// - `started_at`: Original operation start used for deadline accounting.
     ///
     /// # Returns
     ///
-    /// Structured copy statistics and achieved atomicity.
+    /// Structured copy statistics and achieved atomicity and durability.
     ///
     /// # Errors
     ///
-    /// Returns `LocalCopyFailure` for invalid descendants, symbolic links,
-    /// conflicts, unsupported required guarantees, or native copy failures.
+    /// Returns `LocalCopyFailure` for invalid descendants, forbidden link
+    /// traversal, source-mode mismatches, conflicts, exhausted budgets,
+    /// unsupported required guarantees, or native copy failures. Final links
+    /// are copied as entries. Failures retain recorded partial publication.
     #[allow(clippy::result_large_err)]
     pub fn copy(
         &self,
@@ -88,11 +92,20 @@ impl RootedLocalFileSystem {
             .root
             .symlink_metadata(&source_path)
             .map_err(|error| copy_failure_unchanged(rooted_io_error(LocalFileOperation::Copy, source, error)))?;
-        let directory = metadata.kind() == crate::rooted::EntryKind::Directory;
-        if crate::local::copy_source_mode_mismatch(directory, options.source_mode()) {
+        let source_kind = super::rooted_metadata(metadata).kind();
+        let directory = source_kind == crate::LocalFileKind::Directory;
+        crate::local::validate_copy_source_kind(source_kind, options.source_mode()).map_err(|kind| {
+            copy_failure_unchanged(
+                LocalFileError::new(kind, LocalFileOperation::Copy)
+                    .with_reason("copy source kind is unsupported or does not satisfy the selected source mode")
+                    .with_path(source.to_path_buf())
+                    .with_target(target.to_path_buf()),
+            )
+        })?;
+        if crate::local::copy_source_guarantee_unavailable(source_kind, options.atomicity(), options.durability()) {
             return Err(copy_failure_unchanged(
                 LocalFileError::new(LocalFileErrorKind::RequirementNotMet, LocalFileOperation::Copy)
-                    .with_reason("copy source type does not satisfy the selected source mode")
+                    .with_reason("required copy guarantees are unavailable for this rooted authority")
                     .with_path(source.to_path_buf())
                     .with_target(target.to_path_buf()),
             ));
@@ -118,14 +131,6 @@ impl RootedLocalFileSystem {
                 false,
                 false,
                 options.preserve_metadata(),
-            ));
-        }
-        if crate::local::copy_directory_guarantee_unavailable(directory, options.atomicity(), options.durability()) {
-            return Err(copy_failure_unchanged(
-                LocalFileError::new(LocalFileErrorKind::RequirementNotMet, LocalFileOperation::Copy)
-                    .with_reason("required copy guarantees are unavailable for this rooted authority")
-                    .with_path(source.to_path_buf())
-                    .with_target(target.to_path_buf()),
             ));
         }
         if crate::local::copy_file_replace_requires_atomicity(
@@ -171,7 +176,8 @@ impl RootedLocalFileSystem {
             target,
         )
         .map_err(|error| copy_failure_published(error, LocalCopyStats::from_internal(stats)))?;
-        let durable = !directory && stats.files_durable() && parent_durable;
+        let content_durable = source_kind == crate::LocalFileKind::Symlink || stats.files_durable();
+        let durable = !directory && content_durable && parent_durable;
         Ok(LocalCopyOutcome::new(
             LocalCopyStats::from_internal(stats),
             if directory {

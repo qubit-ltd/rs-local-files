@@ -7,10 +7,11 @@
 // =============================================================================
 //! Descriptor-relative file and directory copying.
 // qubit-style: allow source-test-pair
+mod copy_frame;
 mod destination;
 mod file;
+mod rooted_copy_backend;
 mod symlink;
-mod tree;
 
 use std::io;
 use std::io::ErrorKind;
@@ -18,8 +19,8 @@ use std::io::ErrorKind;
 use destination::error;
 use destination::unsupported_source_error;
 use file::copy_file;
+use rooted_copy_backend::copy_tree;
 use symlink::copy_symlink;
-use tree::copy_tree;
 
 use super::EntryKind;
 use super::Metadata;
@@ -40,6 +41,7 @@ use crate::local::LocalCopyDirStats as Statistics;
 /// * `source` - Existing source entry.
 /// * `destination` - Destination entry beneath the same root.
 /// * `options` - Explicit copy policies.
+/// * `durability` - Synchronization requirement for staged regular files.
 ///
 /// # Returns
 ///
