@@ -46,7 +46,7 @@ jobs:
         run: cargo +1.94 check --target ${{ matrix.target }}
 
   test-discovery:
-    name: Default-feature tests (${{ matrix.os }})
+    name: Feature tests (${{ matrix.os }}, ${{ matrix.features }})
     runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
@@ -55,6 +55,9 @@ jobs:
           - ubuntu-latest
           - windows-latest
           - macos-latest
+        features:
+          - "--no-default-features"
+          - "--all-features"
 
     steps:
       - name: Checkout source
@@ -66,8 +69,8 @@ jobs:
       - name: Install Rust
         run: rustup toolchain install 1.94 --profile minimal
 
-      - name: Run default-feature tests
-        run: cargo +1.94 test --locked --no-default-features --no-fail-fast
+      - name: Run feature tests
+        run: cargo +1.94 test --locked ${{ matrix.features }} --no-fail-fast
 
   local-contract-regressions:
     name: Local filesystem contract regressions
