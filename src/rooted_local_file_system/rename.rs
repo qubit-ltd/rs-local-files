@@ -31,6 +31,8 @@ impl RootedLocalFileSystem {
     /// - `source`: Validated relative source path.
     /// - `target`: Validated relative destination path.
     /// - `options`: Overwrite and guarantee policy.
+    /// - `symlink_policy`: Policy for intermediate components; final symbolic
+    ///   links are renamed or replaced as entries.
     ///
     /// # Returns
     ///

@@ -60,7 +60,7 @@ impl fmt::Display for LocalFileErrorSource {
 }
 
 impl Error for LocalFileErrorSource {
-    /// Returns the concrete I/O or codec error retained by this source.
+    /// Returns the concrete I/O, codec, or resource-limit error retained here.
     // qubit-style: allow coverage-cfg
     #[cfg_attr(not(coverage), inline)]
     #[cfg_attr(coverage, inline(never))]

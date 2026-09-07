@@ -37,6 +37,11 @@ static NTH_FAULT_OCCURRENCES: AtomicUsize = AtomicUsize::new(0);
 static ACTIVE_FAULT: (Mutex<Option<ActiveFault>>, Condvar) = (Mutex::new(None), Condvar::new());
 
 /// Installs one deterministic test fault for the current process.
+///
+/// Only operations on the installing thread observe the selector. Waits until
+/// another thread's guard is released, but returns `AlreadyExists` rather
+/// than waiting if this thread already owns a guard. Dropping the returned
+/// guard releases the selector and wakes one waiting installer.
 #[cfg(feature = "test-support")]
 #[doc(hidden)]
 pub fn install_test_fault(name: &str) -> io::Result<TestFaultGuard> {
@@ -92,8 +97,8 @@ impl Drop for TestFaultGuard {
 ///
 /// # Returns
 ///
-/// `Some` with an I/O error when the feature is enabled and the subprocess
-/// selector matches `name`; otherwise `None`.
+/// `Some` with an I/O error when the feature is enabled and this thread's
+/// installed selector matches `name`; otherwise `None`.
 #[must_use]
 // qubit-style: allow coverage-cfg
 #[cfg_attr(not(coverage), inline(always))]
@@ -128,7 +133,7 @@ pub(crate) fn fault_error() -> io::Error {
     }
 }
 
-/// Returns whether the isolated test process selected `name`.
+/// Returns whether the calling test thread selected `name`.
 ///
 /// # Parameters
 ///
@@ -136,8 +141,8 @@ pub(crate) fn fault_error() -> io::Error {
 ///
 /// # Returns
 ///
-/// `true` only when the feature is enabled and the subprocess selector exactly
-/// matches `name`.
+/// `true` only when the feature is enabled and this thread owns an installed
+/// selector matching `name`.
 #[must_use]
 #[cfg_attr(not(coverage), inline(always))]
 #[cfg_attr(coverage, inline(never))]
@@ -145,7 +150,7 @@ pub(crate) fn is_enabled(name: &str) -> bool {
     is_enabled_impl(name)
 }
 
-/// Takes the selected fault once within its isolated subprocess.
+/// Takes the selected fault once during the owning thread's guard lifetime.
 ///
 /// # Parameters
 ///
@@ -153,7 +158,7 @@ pub(crate) fn is_enabled(name: &str) -> bool {
 ///
 /// # Returns
 ///
-/// `true` only for the first matching call in the subprocess.
+/// `true` only for the first matching call after installation on this thread.
 #[cfg(feature = "test-support")]
 #[cfg_attr(not(coverage), inline(always))]
 #[cfg_attr(coverage, inline(never))]
@@ -170,7 +175,7 @@ pub(crate) fn take(name: &str) -> bool {
 ///
 /// # Returns
 ///
-/// `true` only for the requested matching invocation in the subprocess.
+/// `true` only for the requested matching invocation on the owning thread.
 #[cfg(feature = "test-support")]
 #[must_use]
 #[cfg_attr(not(coverage), inline)]
@@ -186,7 +191,8 @@ pub(crate) fn take_on_nth(name: &str, occurrence: usize) -> bool {
 /// * `name` - Fault selector to compare with the installed selector.
 ///
 /// # Returns
-/// `true` when the selector matches; otherwise `false`.
+/// `true` when the calling thread owns the matching selector; otherwise
+/// `false`.
 #[cfg(feature = "test-support")]
 #[cfg_attr(not(coverage), inline(always))]
 #[cfg_attr(coverage, inline(never))]

@@ -87,6 +87,10 @@ impl LocalPaths {
     /// Host paths are absolute and omit an artificial root marker. Rooted
     /// paths are virtual namespace-absolute, with an empty component sequence
     /// representing `/`.
+    ///
+    /// Returns a typed codec error for invalid canonical text, `InvalidPath`
+    /// for unsafe component shapes or an invalid Windows drive, and
+    /// `Unsupported` for an unsupported native platform. Performs no I/O.
     pub fn from_canonical_components<'a>(&self, components: impl IntoIterator<Item = &'a str>) -> LocalResult<PathBuf> {
         match self.scope {
             LocalFileSystemScope::Host => from_canonical_host_components(components),
@@ -102,8 +106,14 @@ impl LocalPaths {
 
     /// Encodes a native path as canonical components in the selected scope.
     ///
-    /// Host output contains the platform root authority; Rooted input must be
-    /// virtual namespace-absolute and `/` encodes as an empty sequence.
+    /// Windows Host output begins with the drive; Unix Host output omits `/`.
+    /// Rooted input must be virtual namespace-absolute and `/` encodes as an
+    /// empty sequence. Performs no I/O.
+    ///
+    /// Returns `InvalidPath` for relative paths, raw dot components, or a
+    /// Rooted native prefix; `Unsupported` for Windows UNC/device authorities
+    /// or unsupported platforms; and a typed codec error for native NUL or
+    /// an unrepresentable component.
     pub fn to_canonical_components(&self, path: &Path) -> LocalResult<Vec<String>> {
         match self.scope {
             LocalFileSystemScope::Host => to_canonical_host_components(path),
@@ -113,6 +123,9 @@ impl LocalPaths {
 }
 
 /// Encodes one Rooted virtual namespace-absolute path.
+///
+/// Returns `InvalidPath` for a missing root, native prefix, or raw dot
+/// component, and propagates typed native component codec failures.
 fn to_canonical_rooted_components(path: &Path) -> LocalResult<Vec<String>> {
     if !path.has_root()
         || path
@@ -448,8 +461,9 @@ fn is_windows_drive_component(component: &str) -> bool {
 ///
 /// # Errors
 ///
-/// Returns a `ComposePath` unsupported error for UNC, device, and rooted
-/// relative paths; returns invalid input for malformed lexical descendants.
+/// Returns a `ComposePath` unsupported error for UNC and device authorities;
+/// returns `InvalidPath` for relative paths (including root-relative paths)
+/// or malformed lexical descendants. Propagates native component codec errors.
 #[cfg(windows)]
 fn to_canonical_host_components(path: &Path) -> LocalResult<Vec<String>> {
     if !path.is_absolute() || has_disallowed_component(path) {
@@ -508,7 +522,7 @@ fn from_canonical_host_components<'a>(_components: impl IntoIterator<Item = &'a 
 ///
 /// # Parameters
 ///
-/// - `path`: Ignored native path.
+/// - `_path`: Ignored native path.
 ///
 /// # Returns
 ///

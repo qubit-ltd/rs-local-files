@@ -176,6 +176,10 @@ impl LocalAtomicWriteError {
     }
 
     /// Consumes this error and returns staging cleanup details with its source.
+    ///
+    /// Returns the optional staging path, optional cleanup error, and primary
+    /// I/O error in that order. The stage, destination state, and parent-sync
+    /// error are discarded; inspect them before consuming the error if needed.
     #[must_use]
     #[cfg_attr(not(coverage), inline)]
     #[cfg_attr(coverage, inline(never))]

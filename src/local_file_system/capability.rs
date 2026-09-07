@@ -42,6 +42,10 @@ impl LocalFileSystem {
     }
 
     /// Observes path limits at the requested path or nearest existing ancestor.
+    ///
+    /// Returns namespace-resolution, symlink-policy, handle-open, or native
+    /// probe errors. Unsupported individual limits remain unknown in the
+    /// returned observation.
     pub fn limits_at(&self, path: &Path) -> LocalResult<LocalFileSystemLimits> {
         let resolver = self.resolver_for(path, LocalFileOperation::Capabilities)?;
         let resolved = resolve_operation_path(&resolver, path, LocalFileOperation::Capabilities)?;
@@ -71,6 +75,9 @@ impl LocalFileSystem {
     }
 
     /// Observes dynamic filesystem capacity at a path or existing ancestor.
+    ///
+    /// Returns namespace-resolution, symlink-policy, handle-open, or native
+    /// probe errors. Capacity is a snapshot and does not reserve free space.
     pub fn space_at(&self, path: &Path) -> LocalResult<LocalFileSystemSpace> {
         let resolver = self.resolver_for(path, LocalFileOperation::Capabilities)?;
         let resolved = resolve_operation_path(&resolver, path, LocalFileOperation::Capabilities)?;
@@ -102,6 +109,9 @@ impl LocalFileSystem {
 }
 
 /// Probes the nearest existing Host path after applying symlink policy.
+///
+/// Retries missing paths at their parent. Other resolution, open, or supplied
+/// `probe` errors are returned with capability-operation context.
 fn host_probe<T>(
     path: &LocalNamespacePath,
     symlink_policy: LocalSymlinkPolicy,
@@ -144,6 +154,8 @@ fn host_probe<T>(
 }
 
 /// Opens a Host file or directory for handle-based capability probing.
+///
+/// Returns native metadata or handle-open errors.
 fn open_host_probe(path: &Path) -> std::io::Result<fs::File> {
     if fs::metadata(path)?.is_dir() {
         crate::local::open_root_directory(path)

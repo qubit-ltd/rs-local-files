@@ -129,6 +129,9 @@ pub(crate) fn read_rooted_symlink_metadata(
 /// This primitive is intentionally limited to one component. It is used by
 /// the rooted resolution cursor so a deep path is not repeatedly traversed
 /// from the root descriptor.
+/// `name` must be one validated component without NUL or path separators.
+/// Returns native no-follow metadata errors; an interior NUL violates the
+/// caller invariant and panics during conversion.
 pub(crate) fn read_rooted_component_metadata(root: &File, name: &OsStr) -> Result<libc::stat> {
     let name = component_c_string(name);
     let mut status = std::mem::MaybeUninit::<libc::stat>::uninit();
@@ -151,6 +154,10 @@ pub(crate) fn read_rooted_component_metadata(root: &File, name: &OsStr) -> Resul
 
 /// Opens one child directory relative to an already-opened directory
 /// descriptor without following a symbolic link.
+///
+/// `name` has the same validated-component requirement as
+/// [`read_rooted_component_metadata`]. Returns native open or metadata errors,
+/// or `InvalidInput` when the opened handle is not a directory.
 pub(crate) fn open_rooted_component_directory(root: &File, name: &OsStr) -> Result<File> {
     let directory = open_directory_at(root, name)?;
     verify_opened_directory(&directory, "inspect rooted resolution directory", Path::new(name))?;
@@ -158,6 +165,11 @@ pub(crate) fn open_rooted_component_directory(root: &File, name: &OsStr) -> Resu
 }
 
 /// Opens a native file reader relative to an anchored root descriptor.
+///
+/// Requires a regular final entry and opens it without following links.
+/// Returns traversal, type, open, or descriptor-configuration errors. A
+/// positive retry timeout bounds nonblocking-open retries; the returned
+/// handle is restored to blocking mode.
 pub(crate) fn open_rooted_native_reader(
     root: &File,
     diagnostic_root: &Path,
@@ -179,6 +191,12 @@ pub(crate) fn open_rooted_native_reader(
 }
 
 /// Opens a native file writer relative to an anchored root descriptor.
+///
+/// Applies the requested create/append mode without following final links.
+/// Truncation occurs only after validating the opened regular-file handle.
+/// Returns traversal, type, open, descriptor-configuration, or truncation
+/// errors. Created parents or a newly created file can remain after failure.
+/// A positive retry timeout bounds nonblocking-open retries.
 pub(crate) fn open_rooted_native_writer(
     root: &File,
     diagnostic_root: &Path,

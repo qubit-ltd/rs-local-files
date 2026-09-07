@@ -11,29 +11,6 @@
 文件系统 API，也不替代 provider 层的逻辑路径模型。本 crate 提供同步 API；异步应用应在
 合适的 blocking 执行环境中调用。
 
-## 递归删除预算
-
-`LocalDeleteOptions` 支持 `with_max_depth`、`with_max_entries`、
-`with_max_pending_path_bytes` 和 `with_deadline`。默认均不限，配套 `without_*`
-方法可独立移除限制。预算适用于递归目录删除；请求目录本身计为一个条目、深度为零。
-发现子条目后，在加入工作队列前扣减条目预算；待处理路径按原生编码长度计费，出队即释放。
-队列路径预算不包括分配器开销与枚举中的临时对象。Host 和 Rooted 均惰性枚举，
-同一时间最多打开一个目录读取器。期限在原生操作之间检查，不能中断正在阻塞的 I/O。
-
-删除任何条目前超限，返回 `ResourceLimit` 并保留类型化资源信息；已经删除条目后失败，
-返回 `PublicationIncomplete`，仍保留资源信息。期限错误保留 `TimedOut` I/O 类别。
-重试前应同时检查副作用分类与失败原因。
-
-兼容查询将这两个维度分开：`LocalFileError::cause_kind()` 返回目前可知的底层原因，
-`LocalFileError::effect_state()` 对 `PublicationIncomplete` 返回
-`Some(LocalFileEffectState::PartiallyApplied)`，对 `Indeterminate` 返回
-`Some(LocalFileEffectState::Indeterminate)`。普通错误无法推断副作用时返回 `None`；
-这不表示 `Unchanged`。copy、rename、writer 和 persist 的专用 failure 类型仍是精确恢复
-状态的权威来源。
-
-实例默认 Options 是便利配置，不是强制上限；显式 `*_with_options` 会完整替换它们。
-需要请求无法放宽的 provider 上限时，应配置 `qubit-fs-local::LocalResourcePolicy`。
-
 ## 概念模型
 
 ```text
@@ -133,7 +110,8 @@ Host 没有更窄的 root 边界。Rooted 仅支持 `Reject` 和 `FollowWithinSc
 | `CreateNew` writer | 将已有链接视为已存在条目。 |
 | `Append` writer | 跟随链接追加到目标。 |
 | `CreateOrReplace` writer | 跟随链接替换目标，并保留链接。 |
-| `delete` | 删除链接条目。 |
+| `delete_file` | 删除链接条目本身，包括指向目录的链接。 |
+| `delete_directory` | 最终条目是链接时返回 `NotDirectory`。 |
 | `rename` | 移动或替换链接条目。 |
 | `copy` 源 | 复制链接条目本身。 |
 | `copy` 目标 | 替换目标链接条目。 |
@@ -197,7 +175,7 @@ atomic writer 会创建缺失的祖先目录，并在发布后逐一同步新建
 不完整发布错误报告。
 
 `LocalFileSystem::copy` 根据源元数据选择文件或目录行为。需要固定源类型时使用
-`with_file_source()` 或 `with_tree_source()`，并通过 `source_mode()` 读取模式。
+`with_entry_source()` 或 `with_tree_source()`，并通过 `source_mode()` 读取模式。
 Copy Options 分别控制目标冲突、类型冲突、元数据、符号链接、原子性、耐久性以及由调用方
 选择的资源预算；复制策略不包含 mount 或 device 边界。无法满足的要求保证会在破坏性变更
 前被拒绝。自复制和硬链接别名会被拒绝；覆盖符号链接目标时会替换该条目而不跟随它。
@@ -227,6 +205,31 @@ match filesystem.copy_with_options(
 重命名也会通过类型化失败状态报告 `Unchanged`、`Renamed` 或 `Indeterminate`；出错并不等于
 “什么都没发生”。
 
+### 复制源模式
+
+Host 与 Rooted 中，`files()` 包括复制的链接，`directories()` 只计入新建目录，
+`bytes()` 只计入普通文件字节。`overwritten()` 包括替换的条目和 `Overwrite` 策略下
+合并的已有目录，包括复制根目录；`Skip` 策略下的目录合并不计为覆盖。
+
+| 模式 | 普通文件 | 最终链接，包括悬空链接 | 实体目录 | 特殊文件 |
+| --- | --- | --- | --- | --- |
+| `Entry` | 复制内容 | 复制链接本身 | `RequirementNotMet` | `Unsupported` |
+| `Tree` | `RequirementNotMet` | `RequirementNotMet` | 复制目录树 | `Unsupported` |
+| `Auto` | 按条目复制 | 按条目复制 | 按目录树复制 | `Unsupported` |
+
+`with_entry_source()` 选择单个普通文件或链接条目，`with_tree_source()` 要求源为实体目录。
+`with_source_mode(LocalCopySourceMode::Auto)` 会明确恢复自动判断。源类型拒绝发生在创建
+目标父目录或修改目标之前。目录限定路径语法单独校验，可能在分派前返回 `NotDirectory`。
+旧的 `File` 变体和 `with_file_source()` 方法已移除，不保留兼容别名。
+源模式判断不跟随最终链接；递归目录树内部遇到的目录链接仍按有效遍历策略处理。
+源模式不会改变中间链接解析或目录树的链接遍历语义。
+
+目录树复制无法提供强制原子性或持久性，链接复制无法提供强制原子性。请求无法满足的
+`Required` 保证时，会在修改目标前返回 `RequirementNotMet`。链接持久性取决于平台能力，
+以及目标父目录和新建祖先目录的同步结果。
+Windows 复制链接会保留源链接的文件/目录类型，包括悬空链接；覆盖目标链接时不会删除
+该链接指向的内容。
+
 ## 遍历和临时资源
 
 `LocalFileSystem::list` 返回惰性的 `LocalDirectoryWalker`。它按需打开和推进目录；
@@ -245,6 +248,50 @@ sandbox 会和资源一起清理。需要观察清理失败时应显式调用 `c
 后续 PWD 即使变化，也能把它们再次传给同一个 filesystem。持久化失败会保留资源，调用方
 可重试、检查、保留或显式清理。创建前会校验前缀和后缀：原生分隔符、NUL 与便携保留名称
 不会留下条目。除非调用方设置 `max_attempts`，名称冲突尝试次数没有上限。
+
+## 场景：关闭临时文件后交给路径使用者
+
+MIME 检测器和外部程序通常需要重新按路径打开文件。应先写完内容，关闭原生句柄，
+再调用路径使用者，最后显式清理。`close()` 不会解除清理责任。下面用文件读取代替
+外部程序，让示例无需额外安装工具就能运行；应用可在回调中改为启动自己的工具。
+
+错误对同时保留主 I/O 错误与清理错误。创建失败发生在检查之前，保存在结构化错误
+位置。正式应用可用具名错误类型包装这两个独立信息，避免清理错误覆盖主错误。
+
+```rust
+use std::io;
+use std::io::Write;
+use std::path::Path;
+
+use qubit_local_files::LocalFileError;
+use qubit_local_files::LocalFileSystem;
+use qubit_local_files::options::LocalTempFileOptions;
+
+fn inspect_staged<R>(
+    payload: &[u8],
+    inspect: impl FnOnce(&Path) -> io::Result<R>,
+) -> Result<R, (Option<io::Error>, Option<LocalFileError>)> {
+    let filesystem = LocalFileSystem::host().map_err(|error| (None, Some(error)))?;
+    let options = LocalTempFileOptions::new()
+        .with_parent(&std::env::temp_dir())
+        .with_max_attempts(16);
+    let mut file = filesystem.create_temp_file_with_options(&options)
+        .map_err(|error| (None, Some(error)))?;
+    let staged = file.write_all(payload);
+    file.close();
+    let primary = staged.and_then(|()| inspect(file.path()));
+    match (primary, file.cleanup()) {
+        (Ok(value), Ok(())) => Ok(value),
+        (Err(primary), Ok(())) => Err((Some(primary), None)),
+        (Ok(_), Err(cleanup)) => Err((None, Some(cleanup))),
+        (Err(primary), Err(cleanup)) => Err((Some(primary), Some(cleanup))),
+    }
+}
+
+let bytes = inspect_staged(b"payload", |path| std::fs::read(path))
+    .expect("staging, inspection, and cleanup should succeed");
+assert_eq!(b"payload", bytes.as_slice());
+```
 
 ## Rooted 工作区
 
@@ -274,6 +321,30 @@ native prefix。
 的操作。词法包含关系可用于早期分类，但不能替代基于 handle 的授权。
 Windows Rooted 的符号链接读取、类型判断和创建均相对于已打开 handle 执行；复制链接自身时
 不会打开其悬空或位于 authority 外的目标。
+
+## 递归删除预算
+
+`LocalDeleteOptions` 支持 `with_max_depth`、`with_max_entries`、
+`with_max_pending_path_bytes` 和 `with_deadline`。默认均不限，配套 `without_*`
+方法可独立移除限制。预算适用于递归目录删除；请求目录本身计为一个条目、深度为零。
+发现子条目后，在加入工作队列前扣减条目预算；待处理路径按原生编码长度计费，出队即释放。
+队列路径预算不包括分配器开销与枚举中的临时对象。Host 和 Rooted 均惰性枚举，
+同一时间最多打开一个目录读取器。期限在原生操作之间检查，不能中断正在阻塞的 I/O。
+
+删除任何条目前超限，返回 `ResourceLimit` 并保留类型化资源信息；已经删除条目后失败，
+返回 `PublicationIncomplete`，仍保留资源信息。期限错误保留 `TimedOut` I/O 类别。
+重试前应同时检查副作用分类与失败原因。
+
+兼容查询将这两个维度分开：`LocalFileError::cause_kind()` 返回目前可知的底层原因，
+`LocalFileError::effect_state()` 对 `PublicationIncomplete` 返回
+`Some(LocalFileEffectState::PartiallyApplied)`，对 `Indeterminate` 返回
+`Some(LocalFileEffectState::Indeterminate)`。普通错误无法推断副作用时返回 `None`；
+这不表示 `Unchanged`。copy、rename、writer 和 persist 的专用 failure 类型仍是精确恢复
+状态的权威来源。
+
+实例默认 Options 是便利配置，不是强制上限；显式 `*_with_options` 会完整替换它们。
+需要请求无法放宽的 provider 上限时，应配置 `qubit-fs-local::LocalResourcePolicy`。
+
 
 ## 错误与诊断
 

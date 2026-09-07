@@ -35,16 +35,18 @@ const ROOTED_ATOMIC_TEMP_SUFFIX: &str = ".tmp";
 ///
 /// * `parent` - Open destination parent descriptor.
 /// * `name` - Final destination entry name.
+/// * `replace_target_symlink` - Whether a final link may be replaced as an
+///   entry without preserving its referent's metadata.
 ///
 /// # Returns
 ///
 /// A pair containing destination existence and whether regular-file metadata
-/// must be preserved.
+/// must be preserved. A missing entry returns `(false, false)`.
 ///
 /// # Errors
 ///
 /// Returns `InvalidInput` for a non-regular resource or a symbolic link when
-/// link-entry replacement is disabled.
+/// link-entry replacement is disabled, or propagates native inspection errors.
 pub(in crate::local) fn inspect_rooted_atomic_destination(
     parent: &File,
     name: &CString,

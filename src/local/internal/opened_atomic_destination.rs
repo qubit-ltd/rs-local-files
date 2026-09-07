@@ -40,6 +40,10 @@ pub(crate) struct OpenedAtomicDestination {
 
 impl OpenedAtomicDestination {
     /// Constructs and validates destination identity from an open file.
+    ///
+    /// Takes ownership of `file` and clears its nonblocking flag. Returns
+    /// `InvalidInput` for a non-regular handle, or propagates metadata and
+    /// descriptor-configuration errors; failure closes the owned handle.
     pub(crate) fn from_file(file: File) -> Result<Self> {
         let metadata_result = file.metadata();
         #[cfg(feature = "test-support")]
@@ -87,6 +91,10 @@ impl OpenedAtomicDestination {
 }
 
 /// Opens the current destination without following its final component.
+///
+/// Returns `None` when absent. A positive `open_retry_timeout` permits
+/// nonblocking-open retries. Links and unsupported resource kinds produce
+/// `InvalidInput`; other open or handle-validation errors are preserved.
 pub(crate) fn open_atomic_destination(
     path: &Path,
     open_retry_timeout: Option<Duration>,
@@ -111,6 +119,9 @@ pub(crate) fn open_atomic_destination(
 }
 
 /// Checks whether a path still names the opened destination identity.
+///
+/// Returns `false` for absence, a different identity, or a non-regular entry.
+/// Other no-follow metadata errors are propagated.
 pub(crate) fn destination_identity_matches(path: &Path, destination: &OpenedAtomicDestination) -> Result<bool> {
     #[cfg(feature = "test-support")]
     if super::test_support::is_enabled("atomic-identity-mismatch") {
@@ -135,6 +146,10 @@ pub(crate) fn destination_identity_matches(path: &Path, destination: &OpenedAtom
 }
 
 /// Opens the current rooted destination without following its final entry.
+///
+/// `name` is one child of the opened `parent`. Absence returns `None`; retry
+/// behavior and errors match [`open_atomic_destination`], using descriptor
+/// authority throughout.
 pub(in crate::local) fn open_rooted_atomic_destination(
     parent: &File,
     name: &CString,
@@ -163,6 +178,8 @@ pub(in crate::local) fn open_rooted_atomic_destination(
 /// Repeats a nonblocking destination open until it succeeds or is classified.
 ///
 /// # Parameters
+/// - `open_retry_timeout`: Positive elapsed retry budget, or `None`/zero for
+///   one native attempt.
 /// - `open`: Native path-based or descriptor-relative open attempt.
 ///
 /// # Returns
@@ -221,6 +238,10 @@ fn inject_destination_open_result(
 }
 
 /// Checks whether a rooted entry still names an opened destination identity.
+///
+/// Absence, a different identity, or a non-regular entry returns `false`.
+/// Inspection failures propagate; an identity outside `u64` returns
+/// `InvalidData` instead of truncating it.
 pub(in crate::local) fn rooted_destination_identity_matches(
     parent: &File,
     name: &CString,
@@ -246,6 +267,8 @@ pub(in crate::local) fn rooted_destination_identity_matches(
 }
 
 /// Reads rooted destination status without following the final entry.
+///
+/// Returns `None` for absence and propagates other `fstatat` errors.
 fn rooted_destination_status(parent: &File, name: &CString) -> Result<Option<libc::stat>> {
     #[cfg(feature = "test-support")]
     if super::test_support::is_enabled("rooted-status-missing") {
@@ -277,6 +300,8 @@ fn rooted_destination_status(parent: &File, name: &CString) -> Result<Option<lib
 }
 
 /// Converts a platform-native stat identity component to the public width.
+///
+/// Returns `InvalidData` when the value cannot be represented as `u64`.
 fn native_identity_component<T>(value: T) -> Result<u64>
 where
     u64: TryFrom<T>,

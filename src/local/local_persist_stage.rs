@@ -20,7 +20,9 @@
 ///     match stage {
 ///         LocalPersistStage::ResolveTarget => {}
 ///         LocalPersistStage::PrepareParent => {}
+///         LocalPersistStage::SynchronizeSource => {}
 ///         LocalPersistStage::InstallDestination => {}
+///         LocalPersistStage::SynchronizeDestination => {}
 ///     }
 /// }
 /// ```

@@ -37,6 +37,18 @@ pub(crate) struct AtomicInstallRecovery<'a> {
 /// The callbacks retain backend-specific authority: ordinary writers use
 /// path-based cleanup and synchronization, while rooted writers use opened
 /// directory descriptors. This function only owns the shared state machine.
+///
+/// `S` is the backend's retained staging state. Known-present staging is
+/// cleaned through `cleanup_staging`; indeterminate staging is disarmed
+/// instead. Parent synchronization is attempted only when the destination is
+/// known replaced.
+///
+/// # Errors
+///
+/// Retains the installation error and secondary cleanup/synchronization errors.
+/// When publication already succeeded and staging cleanup recovers, successful
+/// parent synchronization completes recovery; a sync failure is reported at
+/// `SyncParent` with the destination still known replaced.
 pub(crate) fn recover_atomic_install_error<S>(
     context: AtomicInstallRecovery<'_>,
     staged_file: &mut S,

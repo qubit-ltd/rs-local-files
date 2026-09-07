@@ -180,11 +180,11 @@ impl<T> LocalPersistError<T> {
         self.error.kind()
     }
 
-    /// Splits this error into the original compatibility values.
+    /// Splits this error into its retained values without publication state.
     ///
     /// # Returns
-    /// Native error, retained resource, requested target, resolved target, and
-    /// failure stage. Use [`Self::into_parts_with_state`] to retain the
+    /// Structured error, retained resource, requested target, resolved target,
+    /// and failure stage. Use [`Self::into_parts_with_state`] to retain the
     /// publication state too.
     ///
     /// Ignoring the returned tuple is rejected because it owns the retained
@@ -208,8 +208,8 @@ impl<T> LocalPersistError<T> {
     ///
     /// # Returns
     ///
-    /// The native error, temporary resource, requested target, resolved target,
-    /// failure stage, and publication state in that order.
+    /// The structured error, temporary resource, requested target, resolved
+    /// target, failure stage, and publication state in that order.
     #[must_use = "the returned tuple retains the temporary resource and persistence context"]
     pub fn into_parts_with_state(
         self,

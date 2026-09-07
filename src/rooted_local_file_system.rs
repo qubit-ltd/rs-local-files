@@ -172,12 +172,16 @@ impl RootedLocalFileSystem {
     }
 
     /// Validates that a normalized backend path resolves to a directory.
+    /// Propagates path/policy and native inspection errors; a resolved
+    /// non-directory returns a structured type-conflict error.
     pub(crate) fn validate_directory(&self, path: &Path, symlink_policy: LocalSymlinkPolicy) -> LocalResult<()> {
         validate_rooted_list_start(&self.root, path, symlink_policy)
     }
 
     /// Observes objective path limits through the nearest existing rooted
     /// entry or ancestor.
+    /// Propagates path/policy, native open, and capability-probe errors. A
+    /// successfully probed but unavailable limit is represented as unknown.
     pub(crate) fn limits_at(
         &self,
         path: &Path,
@@ -192,6 +196,8 @@ impl RootedLocalFileSystem {
 
     /// Observes dynamic capacity through the nearest existing rooted entry or
     /// ancestor.
+    /// Propagates path/policy, native open, and capacity-probe errors. The
+    /// returned observation does not reserve space for a later operation.
     pub(crate) fn space_at(
         &self,
         path: &Path,
@@ -205,6 +211,8 @@ impl RootedLocalFileSystem {
     }
 
     /// Opens the nearest existing entry for a capability probe.
+    /// Falls back to parents only for `NotFound`. Returns other path/policy or
+    /// native errors, including rejection of non-file/non-directory entries.
     fn open_nearest_probe(&self, path: &Path, symlink_policy: LocalSymlinkPolicy) -> LocalResult<std::fs::File> {
         if path.as_os_str().is_empty() {
             return match self.root.open_probe_root() {

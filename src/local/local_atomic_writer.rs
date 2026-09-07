@@ -56,16 +56,18 @@ const ATOMIC_WRITE_TEMP_PREFIX: &str = ".atomic-write-";
 /// A streaming same-directory atomic file writer.
 ///
 /// Bytes written through [`Write`] remain in a private staging file until
-/// [`Self::commit`] succeeds. Calling [`Self::abort`] or dropping the writer
-/// leaves the destination unchanged and removes the staging file on a
-/// best-effort basis. This initial API intentionally does not implement
-/// [`std::io::Seek`]. A relative destination is bound to the process current
-/// directory when the writer is created, so later current-directory changes
-/// do not redirect commit or cleanup operations.
+/// commit installs them. A later synchronization failure can report an error
+/// after publication. Before installation, [`Self::abort`] or dropping the
+/// writer leaves the destination unchanged and attempts staging cleanup.
+/// This API does not implement [`std::io::Seek`]. A relative destination
+/// is bound to the process current directory when the writer is created, so
+/// later current-directory changes do not redirect commit or cleanup
+/// operations.
 ///
 /// The destination must be absent or a regular file when this writer is
-/// created. Symbolic links, directories, sockets, FIFOs, devices, and other
-/// special files are rejected. On Unix, commit opens the current destination,
+/// created, except that internal copy options can allow replacement of a final
+/// symbolic-link entry. Directories, sockets, FIFOs, devices, and other special
+/// files are rejected. On Unix, commit opens the current regular destination,
 /// copies its strict platform-native metadata to staging, and verifies the
 /// opened file identity immediately before replacement. On Windows,
 /// `ReplaceFileW` merges the existing destination metadata during replacement.
@@ -105,7 +107,8 @@ impl LocalAtomicWriter {
     ///
     /// # Parameters
     /// - `path`: Destination path to replace on commit.
-    /// - `options`: Parent-directory preparation policy.
+    /// - `options`: Parent preparation, publication, durability, and open-retry
+    ///   policy, including the internal final-link replacement option.
     ///
     /// # Returns
     /// A writer owning a same-directory staging file.
@@ -225,7 +228,7 @@ impl LocalAtomicWriter {
     /// Aborts the staged replacement and removes its temporary file.
     ///
     /// The destination remains unchanged. If explicit cleanup fails, the
-    /// internal staging guard retries best-effort cleanup as this method exits.
+    /// caller can retry; the internal guard attempts cleanup again on drop.
     ///
     /// # Errors
     /// Returns a structured cleanup error when the temporary file cannot be
@@ -270,8 +273,8 @@ impl LocalAtomicWriter {
     ///
     /// # Returns
     ///
-    /// The opened destination when one existed at writer creation, or `None`
-    /// when this commit will install a new destination.
+    /// The opened regular destination when metadata preservation is required,
+    /// or `None` for a new entry or an allowed final-link replacement.
     ///
     /// # Errors
     ///
@@ -546,6 +549,9 @@ fn sync_atomic_parent_chain(path: &Path, parent_dirs_to_sync: &[PathBuf]) -> io:
 }
 
 /// Returns destination existence and metadata-preservation requirements.
+/// A missing entry returns `(false, false)`; a regular file returns
+/// `(true, true)`; an allowed final-link replacement returns `(true, false)`.
+/// Other kinds return `InvalidInput`, and native inspection failures propagate.
 fn existing_file_metadata(path: &Path, replace_target_symlink: bool) -> io::Result<(bool, bool)> {
     match fs::symlink_metadata(path) {
         Ok(metadata) if metadata.file_type().is_file() => Ok((true, true)),

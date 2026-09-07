@@ -85,7 +85,11 @@ fn path_codec_error(error: LocalPathCodecError) -> LocalFileError {
 mod platform_codec {
     use crate::LocalPathCodecError;
 
-    /// Decodes uppercase percent escapes and literal UTF-8 into raw bytes.
+    /// Decodes percent escapes and literal UTF-8 into raw bytes.
+    ///
+    /// Accepts either hexadecimal case; the public decoder checks canonical
+    /// spelling after decoding. Returns `InvalidEscape` with the byte offset
+    /// for an incomplete escape or a non-hexadecimal digit.
     fn decode_escaped_bytes(text: &str) -> Result<Vec<u8>, LocalPathCodecError> {
         let bytes = text.as_bytes();
         let mut decoded = Vec::with_capacity(bytes.len());

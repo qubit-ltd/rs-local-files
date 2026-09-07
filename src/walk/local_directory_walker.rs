@@ -91,6 +91,11 @@ pub struct LocalDirectoryWalker {
 
 impl LocalDirectoryWalker {
     /// Opens a Host walker with separate backend and diagnostic roots.
+    ///
+    /// Validates options, inspects the root without following its final link,
+    /// and eagerly opens its reader. Returns `InvalidOptions`, `TypeConflict`,
+    /// or a native inspection/open/identity error. Descendant work is lazy;
+    /// acquired handles and permits are released on construction failure.
     pub(crate) fn open_with_diagnostic(
         backend_root: PathBuf,
         diagnostic_root: PathBuf,
@@ -165,7 +170,9 @@ impl LocalDirectoryWalker {
     /// - `root`: Shared opened descriptor or handle authority.
     /// - `path`: Optional validated descendant; `None` selects the authority
     ///   root.
+    /// - `namespace_root`: Public namespace-absolute listing root.
     /// - `options`: Traversal policy fixed for the walker lifetime.
+    /// - `symlink_policy`: Policy applied when resolving followed descendants.
     ///
     /// # Returns
     ///
@@ -173,8 +180,9 @@ impl LocalDirectoryWalker {
     ///
     /// # Errors
     ///
-    /// Returns `LocalFileError` when the rooted start path is invalid. Rooted
-    /// directory opening and enumeration errors are yielded by the iterator.
+    /// Returns `LocalFileError` for invalid options or failed starting-entry
+    /// metadata inspection. Rooted directory opening and enumeration errors
+    /// are yielded by the iterator.
     pub(crate) fn open_rooted(
         root: Arc<crate::rooted::Root>,
         path: Option<crate::local::LocalRelativePath>,
@@ -187,6 +195,9 @@ impl LocalDirectoryWalker {
 
     /// Creates a rooted walker with separate authority and logical output
     /// paths, which preserves a symlink component in returned paths.
+    /// `output_parent` is relative to `namespace_root`; `path` is relative to
+    /// the retained authority. Uses [`Self::open_rooted`]'s validation and
+    /// error contract while retaining these separate path coordinates.
     pub(crate) fn open_rooted_with_output(
         root: Arc<crate::rooted::Root>,
         path: Option<crate::local::LocalRelativePath>,
@@ -349,12 +360,15 @@ impl LocalDirectoryWalker {
     /// # Parameters
     ///
     /// - `path`: Bound child path.
+    /// - `metadata`: Observed directory metadata used for native identity.
     /// - `relative`: Root-relative child path.
     /// - `entry_depth`: Depth of the child directory entry.
     ///
     /// # Errors
     ///
-    /// Returns `LocalFileError` for cycles or native directory-open failures.
+    /// Returns `LocalFileError` for cycles, exhausted directory capacity, or
+    /// native identity/open failures. Reopen policy may close existing readers
+    /// to acquire capacity before a subsequent open fails.
     fn descend(
         &mut self,
         path: &Path,
@@ -484,7 +498,10 @@ fn logical_macos_path(path: &Path) -> PathBuf {
 }
 
 impl LocalDirectoryWalker {
-    /// Produces the next entry, opening at most one new directory as needed.
+    /// Produces the next entry or error, opening or reopening readers as
+    /// needed. Returns `None` after exhaustion or termination. Applies
+    /// traversal, symlink, resource-budget, and deadline policies while
+    /// advancing frames.
     fn next_entry(&mut self) -> Option<LocalResult<LocalDirectoryEntry>> {
         if self.terminated {
             return None;
@@ -733,8 +750,12 @@ fn acquire_rooted_directory(
 /// # Parameters
 ///
 /// - `state`: Rooted traversal state.
+/// - `namespace_root`: Public listing root used for output and error paths.
 /// - `options`: Fixed traversal policy.
 /// - `pool`: Shared managed capacity for currently open rooted readers.
+/// - `entry_budget`: Optional cumulative entry allowance.
+/// - `seen_name_budget`: Optional cumulative native-name byte allowance.
+/// - `deadline`: Optional absolute monotonic traversal deadline.
 ///
 /// # Returns
 ///

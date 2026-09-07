@@ -28,8 +28,8 @@ use crate::LocalResult;
 ///
 /// # Returns
 ///
-/// `true` when synchronization completed, or `false` for a permitted
-/// preferred downgrade.
+/// `true` when synchronization completed. `NotRequired` returns `false`
+/// without invoking `sync`; a failed preferred attempt also returns `false`.
 ///
 /// # Errors
 ///

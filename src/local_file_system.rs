@@ -209,6 +209,9 @@ impl LocalFileSystem {
     }
 
     /// Creates a resolver using one operation's PWD snapshot when required.
+    ///
+    /// Absolute Host operands avoid PWD lookup. Returns snapshot or resolver
+    /// validation errors annotated with the requested operation.
     fn resolver_for(&self, path: &Path, operation: LocalFileOperation) -> LocalResult<LocalPathResolver> {
         if self.scope() == LocalFileSystemScope::Host && path.is_absolute() {
             return Ok(LocalPathResolver::absolute_host());
@@ -219,6 +222,8 @@ impl LocalFileSystem {
 
     /// Creates one resolver for a two-path operation from a single PWD
     /// snapshot.
+    /// Absolute Host pairs avoid PWD lookup; otherwise snapshot or resolver
+    /// validation errors retain the source operand's operation context.
     fn resolver_for_pair(
         &self,
         source: &Path,
@@ -233,6 +238,8 @@ impl LocalFileSystem {
     }
 
     /// Validates a directory using native lookup and the configured policy.
+    ///
+    /// Returns traversal, policy, type, or directory-opening errors.
     fn validate_directory(&self, path: &LocalNamespacePath) -> LocalResult<()> {
         match &self.core.namespace {
             LocalNamespace::Host => HostLocalFileSystem::list_with_policy(
@@ -246,6 +253,10 @@ impl LocalFileSystem {
     }
 
     /// Enforces directory-qualified native syntax before a namespace change.
+    ///
+    /// Unqualified operands require no lookup. Qualified operands propagate
+    /// metadata errors or return `NotDirectory` for a non-directory final
+    /// entry.
     fn validate_directory_requirement(
         &self,
         path: &LocalNamespacePath,
@@ -276,6 +287,8 @@ impl LocalFileSystem {
     }
 
     /// Rejects an operation that may remove or replace the Rooted virtual root.
+    ///
+    /// Returns `InvalidPath` for the protected root, without native mutation.
     fn reject_root_operand(
         &self,
         path: &LocalNamespacePath,
