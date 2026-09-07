@@ -127,6 +127,9 @@ fn test_recursive_delete_bounds_pending_paths_during_enumeration() {
         let fixture = tempdir().expect("fixture should exist");
         let tree = fixture.path().join("tree");
         fs::create_dir(&tree).expect("tree should exist");
+        // Host deletion resolves macOS /var before charging native paths.
+        #[cfg(target_os = "macos")]
+        let tree = fs::canonicalize(&tree).expect("budget fixture path should resolve");
         for name in ["one", "two", "six"] {
             fs::write(tree.join(name), b"data").expect("child should exist");
         }
