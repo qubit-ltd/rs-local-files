@@ -81,8 +81,9 @@ fn test_host_list_through_directory_symlink_preserves_namespace_root() {
 
     assert_eq!(PathBuf::from("item"), entries[0].relative_path());
     assert_eq!(alias.join("item"), entries[0].path());
+    // Diagnostic paths follow the physical directory, including macOS /var.
     assert_eq!(
-        real.join("item"),
+        fs::canonicalize(real.join("item")).expect("physical diagnostic path should resolve"),
         entries[0]
             .diagnostic_path()
             .expect("native diagnostic path should be retained")
