@@ -452,8 +452,8 @@ dependencies = [
 
 [[package]]
 name = "qubit-redact"
-version = "0.6.0"
-source = "git+https://github.com/qubit-ltd/rs-redact#0c3a37fe119814723deefebbf49dbe5e34ffaa33"
+version = "0.7.0"
+source = "git+https://github.com/qubit-ltd/rs-redact?branch=dev-starfish#41adde89b8b2b842bbb3e6c7a1d786a1818f2cc4"
 dependencies = [
  "qubit-budget",
 ]
@@ -876,3 +876,8 @@ name = "zmij"
 version = "1.0.23"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "29666d0abbfad1e3dc4dcf6144730dd3a3ab225bbbdac83319345b1b44ccfc1b"
+
+[[patch.unused]]
+name = "qubit-redact"
+version = "0.6.0"
+source = "git+https://github.com/qubit-ltd/rs-redact#3b2979a8f24240d59a8c19d3d5b4418236c6e5c5"
