@@ -20,8 +20,8 @@ use super::LocalTempFileOptions;
 use super::Path;
 use super::operation_error;
 use super::resolve_operation_path;
-use super::validate_temp_attempts;
 use super::with_current_directory;
+use crate::local_file_system_validation::validate_temp_options;
 
 impl LocalFileSystem {
     /// Creates a temporary file using this instance's default options.
@@ -41,9 +41,19 @@ impl LocalFileSystem {
     /// remain after failure. Use explicit cleanup to observe cleanup errors.
     pub fn create_temp_file_with_options(&self, options: &LocalTempFileOptions) -> LocalResult<LocalTempFile> {
         let parent = options.parent().unwrap_or_else(|| Path::new(""));
+        validate_temp_options(
+            options.prefix(),
+            options.suffix(),
+            options.max_attempts(),
+            LocalFileOperation::CreateTempFile,
+        )
+        .map_err(|error| {
+            with_current_directory(
+                error.with_path(parent.to_path_buf()),
+                self.current_directory.virtual_path(),
+            )
+        })?;
         let resolver = self.resolver_for(parent, LocalFileOperation::CreateTempFile)?;
-        validate_temp_attempts(options.max_attempts(), LocalFileOperation::CreateTempFile)
-            .map_err(|error| with_current_directory(error, resolver.current_directory()))?;
         let resolved = resolve_operation_path(&resolver, parent, LocalFileOperation::CreateTempFile)?;
         let options = options.clone().with_parent(resolved.authority_relative());
         let resource = match &self.core.namespace {
@@ -82,9 +92,19 @@ impl LocalFileSystem {
         options: &LocalTempDirectoryOptions,
     ) -> LocalResult<LocalTempDirectory> {
         let parent = options.parent().unwrap_or_else(|| Path::new(""));
+        validate_temp_options(
+            options.prefix(),
+            options.suffix(),
+            options.max_attempts(),
+            LocalFileOperation::CreateTempDirectory,
+        )
+        .map_err(|error| {
+            with_current_directory(
+                error.with_path(parent.to_path_buf()),
+                self.current_directory.virtual_path(),
+            )
+        })?;
         let resolver = self.resolver_for(parent, LocalFileOperation::CreateTempDirectory)?;
-        validate_temp_attempts(options.max_attempts(), LocalFileOperation::CreateTempDirectory)
-            .map_err(|error| with_current_directory(error, resolver.current_directory()))?;
         let resolved = resolve_operation_path(&resolver, parent, LocalFileOperation::CreateTempDirectory)?;
         let options = options.clone().with_parent(resolved.authority_relative());
         let resource = match &self.core.namespace {

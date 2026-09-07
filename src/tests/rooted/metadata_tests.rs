@@ -23,7 +23,10 @@ fn test_rooted_metadata_observes_open_file_and_identity() {
     assert!(metadata.is_same_file(&metadata));
     assert!(metadata.accessed_at().is_some());
     assert!(metadata.modified_at().is_some());
-    assert!(metadata.created_at().is_some());
+    assert_eq!(
+        metadata.created_at(),
+        file.metadata().expect("native metadata available").created().ok()
+    );
     let _ = metadata.permissions();
 }
 

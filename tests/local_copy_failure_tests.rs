@@ -282,7 +282,7 @@ fn test_copy_failure_omits_staging_after_successful_cleanup() {
 /// conservative.
 #[cfg(feature = "test-support")]
 #[test]
-fn test_copy_failure_reports_indeterminate_for_destination_preparation_fault() {
+fn test_copy_failure_reports_unchanged_for_destination_preparation_fault() {
     const TEST_NAME: &str = "test_copy_failure_reports_indeterminate_for_destination_preparation_fault";
     run_in_test_fault_process(TEST_NAME, "copy-destination-absolute", || {
         let directory = tempfile::tempdir().expect("temporary directory should be created");
@@ -295,7 +295,7 @@ fn test_copy_failure_reports_indeterminate_for_destination_preparation_fault() {
             .copy_with_options(&source, &target, &LocalCopyOptions::default().with_tree_source())
             .expect_err("destination preparation fault must fail");
 
-        assert_eq!(LocalCopyFailureState::Indeterminate, failure.state());
+        assert_eq!(LocalCopyFailureState::Unchanged, failure.state());
         assert_eq!(&LocalCopyStats::default(), failure.partial_stats());
     });
 }

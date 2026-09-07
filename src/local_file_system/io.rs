@@ -85,7 +85,12 @@ impl LocalFileSystem {
     pub fn open_reader_with_options(&self, path: &Path, options: &LocalReadOptions) -> LocalResult<LocalFileReader> {
         let resolver = self.resolver_for(path, LocalFileOperation::OpenReader)?;
         let resolved = resolve_operation_path(&resolver, path, LocalFileOperation::OpenReader)?;
-        self.open_resolved_reader(&resolved, options, resolver.current_directory())
+        self.open_resolved_reader(
+            &resolved,
+            options,
+            LocalFileOperation::OpenReader,
+            resolver.current_directory(),
+        )
     }
 
     /// Opens an already-bound operand without querying the process PWD again.
@@ -96,9 +101,10 @@ impl LocalFileSystem {
         &self,
         resolved: &LocalNamespacePath,
         options: &LocalReadOptions,
+        operation: LocalFileOperation,
         current_directory: Option<&Path>,
     ) -> LocalResult<LocalFileReader> {
-        reject_directory_qualified_file(resolved, LocalFileOperation::OpenReader, current_directory)?;
+        reject_directory_qualified_file(resolved, operation, current_directory)?;
         match &self.core.namespace {
             LocalNamespace::Host => HostLocalFileSystem::open_reader_with_policy(
                 resolved.authority_relative(),
@@ -109,15 +115,7 @@ impl LocalFileSystem {
                 rooted.open_reader(resolved.authority_relative(), options, self.symlink_policy)
             }
         }
-        .map_err(|error| {
-            operation_error(
-                error,
-                LocalFileOperation::OpenReader,
-                resolved.namespace_absolute(),
-                None,
-                current_directory,
-            )
-        })
+        .map_err(|error| operation_error(error, operation, resolved.namespace_absolute(), None, current_directory))
     }
 
     /// Reads at most `max_bytes` using the default reader options.
@@ -143,7 +141,12 @@ impl LocalFileSystem {
         let resolver = self.resolver_for(path, LocalFileOperation::Read)?;
         let resolved = resolve_operation_path(&resolver, path, LocalFileOperation::Read)?;
         let error_path = resolved.namespace_absolute().to_path_buf();
-        let mut reader = self.open_resolved_reader(&resolved, options, resolver.current_directory())?;
+        let mut reader = self.open_resolved_reader(
+            &resolved,
+            options,
+            LocalFileOperation::Read,
+            resolver.current_directory(),
+        )?;
         if max_bytes == 0 {
             return Ok(Vec::new());
         }
@@ -202,6 +205,17 @@ impl LocalFileSystem {
     /// an error. Commit or abort a staging writer explicitly when its final
     /// publication or cleanup result must be observed.
     pub fn open_writer_with_options(&self, path: &Path, options: &LocalWriteOptions) -> LocalResult<LocalFileWriter> {
+        crate::local_file_system_validation::validate_write_options(
+            options,
+            self.capabilities(),
+            LocalFileOperation::OpenWriter,
+        )
+        .map_err(|error| {
+            with_current_directory(
+                error.with_path(path.to_path_buf()),
+                self.current_directory.virtual_path(),
+            )
+        })?;
         let resolver = self.resolver_for(path, LocalFileOperation::OpenWriter)?;
         let resolved = resolve_operation_path(&resolver, path, LocalFileOperation::OpenWriter)?;
         self.reject_root_operand(&resolved, LocalFileOperation::OpenWriter, resolver.current_directory())?;

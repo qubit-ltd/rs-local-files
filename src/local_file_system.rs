@@ -72,7 +72,6 @@ use crate::local_file_system_validation::reject_directory_qualified_file;
 use crate::local_file_system_validation::validate_copy_options;
 use crate::local_file_system_validation::validate_list_options;
 use crate::local_file_system_validation::validate_scope_symlink_policy;
-use crate::local_file_system_validation::validate_temp_attempts;
 use crate::path::LocalNamespacePath;
 use crate::path::LocalPathResolver;
 use crate::rooted_local_file_system::RootedLocalFileSystem;

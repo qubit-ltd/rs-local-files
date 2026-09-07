@@ -194,7 +194,7 @@ fn test_local_file_system_read_prefix_is_bounded() {
     let error = filesystem
         .read_prefix_with_options(&missing, 4, &LocalReadOptions::new())
         .expect_err("missing paths must still be validated");
-    assert_eq!(LocalFileOperation::OpenReader, error.operation());
+    assert_eq!(LocalFileOperation::Read, error.operation());
 }
 
 /// Verifies no-replace rename and explicit overwrite behavior.

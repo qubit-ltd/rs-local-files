@@ -35,8 +35,10 @@ use super::resolve_operation_path;
 use super::validate_copy_options;
 use super::validate_list_options;
 use super::validate_scope_symlink_policy;
-use super::validate_temp_attempts;
 use super::with_current_directory;
+use crate::local_file_system_validation::validate_rename_options;
+use crate::local_file_system_validation::validate_temp_options;
+use crate::local_file_system_validation::validate_write_options;
 
 impl LocalFileSystem {
     /// Returns the namespace kind interpreted by this instance.
@@ -149,7 +151,7 @@ impl LocalFileSystem {
     ///
     /// `Some` for a Rooted filesystem and `None` for Host. The path is not an
     /// authority and may become stale after a native rename or replacement.
-    #[must_use]
+    #[must_use = "inspect the default options"]
     #[cfg_attr(not(coverage), inline)]
     #[cfg_attr(coverage, inline(never))]
     pub fn diagnostic_root(&self) -> Option<&Path> {
@@ -162,6 +164,7 @@ impl LocalFileSystem {
     /// Returns the reader options inherited by calls without explicit options.
     #[cfg_attr(not(coverage), inline)]
     #[cfg_attr(coverage, inline(never))]
+    #[must_use = "inspect the default options"]
     pub const fn default_read_options(&self) -> &LocalReadOptions {
         &self.defaults.read
     }
@@ -180,6 +183,7 @@ impl LocalFileSystem {
     /// Returns the writer options inherited by calls without explicit options.
     #[cfg_attr(not(coverage), inline)]
     #[cfg_attr(coverage, inline(never))]
+    #[must_use = "inspect the default options"]
     pub const fn default_write_options(&self) -> &LocalWriteOptions {
         &self.defaults.write
     }
@@ -188,9 +192,11 @@ impl LocalFileSystem {
     ///
     /// # Errors
     ///
-    /// This setter is currently infallible; its `Result` keeps all
-    /// configuration setters uniform and allows future validation.
+    /// Returns `RequirementNotMet` for statically unavailable guarantees.
+    /// The previously installed options remain unchanged on error.
     pub fn set_default_write_options(&mut self, options: LocalWriteOptions) -> LocalResult<()> {
+        validate_write_options(&options, self.capabilities(), LocalFileOperation::Configure)
+            .map_err(|error| with_current_directory(error, self.current_directory.virtual_path()))?;
         self.defaults.write = options;
         Ok(())
     }
@@ -198,6 +204,7 @@ impl LocalFileSystem {
     /// Returns the listing options inherited by calls without explicit options.
     #[cfg_attr(not(coverage), inline)]
     #[cfg_attr(coverage, inline(never))]
+    #[must_use = "inspect the default options"]
     pub const fn default_list_options(&self) -> &LocalListOptions {
         &self.defaults.list
     }
@@ -218,6 +225,7 @@ impl LocalFileSystem {
     /// Returns the copy options inherited by calls without explicit options.
     #[cfg_attr(not(coverage), inline)]
     #[cfg_attr(coverage, inline(never))]
+    #[must_use = "inspect the default options"]
     pub const fn default_copy_options(&self) -> &LocalCopyOptions {
         &self.defaults.copy
     }
@@ -231,8 +239,15 @@ impl LocalFileSystem {
     /// Source-dependent requirements and budget exhaustion are checked when
     /// a copy runs.
     pub fn set_default_copy_options(&mut self, options: LocalCopyOptions) -> LocalResult<()> {
-        validate_copy_options(self.scope(), self.symlink_policy, &options, None, None)
-            .map_err(|error| with_current_directory(error, self.current_directory.virtual_path()))?;
+        validate_copy_options(
+            self.scope(),
+            self.symlink_policy,
+            &options,
+            self.capabilities(),
+            None,
+            None,
+        )
+        .map_err(|error| with_current_directory(error, self.current_directory.virtual_path()))?;
         self.defaults.copy = options;
         Ok(())
     }
@@ -240,6 +255,7 @@ impl LocalFileSystem {
     /// Returns the directory-creation options inherited by defaulted calls.
     #[cfg_attr(not(coverage), inline)]
     #[cfg_attr(coverage, inline(never))]
+    #[must_use = "inspect the default options"]
     pub const fn default_create_directory_options(&self) -> &LocalCreateDirectoryOptions {
         &self.defaults.create_directory
     }
@@ -259,6 +275,7 @@ impl LocalFileSystem {
     /// options.
     #[cfg_attr(not(coverage), inline)]
     #[cfg_attr(coverage, inline(never))]
+    #[must_use = "inspect the default options"]
     pub const fn default_delete_options(&self) -> &LocalDeleteOptions {
         &self.defaults.delete
     }
@@ -277,6 +294,7 @@ impl LocalFileSystem {
     /// Returns the rename options inherited by calls without explicit options.
     #[cfg_attr(not(coverage), inline)]
     #[cfg_attr(coverage, inline(never))]
+    #[must_use = "inspect the default options"]
     pub const fn default_rename_options(&self) -> &LocalRenameOptions {
         &self.defaults.rename
     }
@@ -285,9 +303,11 @@ impl LocalFileSystem {
     ///
     /// # Errors
     ///
-    /// This setter is currently infallible; its `Result` keeps all
-    /// configuration setters uniform and allows future validation.
+    /// Returns `RequirementNotMet` for statically unavailable guarantees.
+    /// The previously installed options remain unchanged on error.
     pub fn set_default_rename_options(&mut self, options: LocalRenameOptions) -> LocalResult<()> {
+        validate_rename_options(&options, self.capabilities(), LocalFileOperation::Configure)
+            .map_err(|error| with_current_directory(error, self.current_directory.virtual_path()))?;
         self.defaults.rename = options;
         Ok(())
     }
@@ -295,6 +315,7 @@ impl LocalFileSystem {
     /// Returns the temporary-file options inherited by defaulted calls.
     #[cfg_attr(not(coverage), inline)]
     #[cfg_attr(coverage, inline(never))]
+    #[must_use = "inspect the default options"]
     pub const fn default_temp_file_options(&self) -> &LocalTempFileOptions {
         &self.defaults.temp_file
     }
@@ -303,11 +324,16 @@ impl LocalFileSystem {
     ///
     /// # Errors
     ///
-    /// Returns [`LocalFileError`] when the attempt budget is zero; existing
-    /// defaults remain unchanged.
+    /// Returns [`LocalFileError`] for invalid affixes or a zero attempt budget;
+    /// existing defaults remain unchanged.
     pub fn set_default_temp_file_options(&mut self, options: LocalTempFileOptions) -> LocalResult<()> {
-        validate_temp_attempts(options.max_attempts(), LocalFileOperation::Configure)
-            .map_err(|error| with_current_directory(error, self.current_directory.virtual_path()))?;
+        validate_temp_options(
+            options.prefix(),
+            options.suffix(),
+            options.max_attempts(),
+            LocalFileOperation::Configure,
+        )
+        .map_err(|error| with_current_directory(error, self.current_directory.virtual_path()))?;
         self.defaults.temp_file = options;
         Ok(())
     }
@@ -315,6 +341,7 @@ impl LocalFileSystem {
     /// Returns the temporary-directory options inherited by defaulted calls.
     #[cfg_attr(not(coverage), inline)]
     #[cfg_attr(coverage, inline(never))]
+    #[must_use = "inspect the default options"]
     pub const fn default_temp_directory_options(&self) -> &LocalTempDirectoryOptions {
         &self.defaults.temp_directory
     }
@@ -323,11 +350,16 @@ impl LocalFileSystem {
     ///
     /// # Errors
     ///
-    /// Returns [`LocalFileError`] when the attempt budget is zero; existing
-    /// defaults remain unchanged.
+    /// Returns [`LocalFileError`] for invalid affixes or a zero attempt budget;
+    /// existing defaults remain unchanged.
     pub fn set_default_temp_directory_options(&mut self, options: LocalTempDirectoryOptions) -> LocalResult<()> {
-        validate_temp_attempts(options.max_attempts(), LocalFileOperation::Configure)
-            .map_err(|error| with_current_directory(error, self.current_directory.virtual_path()))?;
+        validate_temp_options(
+            options.prefix(),
+            options.suffix(),
+            options.max_attempts(),
+            LocalFileOperation::Configure,
+        )
+        .map_err(|error| with_current_directory(error, self.current_directory.virtual_path()))?;
         self.defaults.temp_directory = options;
         Ok(())
     }

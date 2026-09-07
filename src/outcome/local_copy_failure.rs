@@ -260,6 +260,12 @@ pub(crate) const fn copy_failure_state(
     stage: LocalCopyDirStage,
     partial_stats: LocalCopyStats,
 ) -> LocalCopyFailureState {
+    // A completed payload remains published when only synchronization or
+    // post-publication accounting fails. Statistics are evidence of content
+    // completion; preparation and conflict failures have no such evidence.
+    if matches!(stage, LocalCopyDirStage::SynchronizeFile) && partial_stats.files() > 0 {
+        return LocalCopyFailureState::Published;
+    }
     if partial_stats.files() > 0 || partial_stats.directories() > 0 {
         return LocalCopyFailureState::PartiallyPublished;
     }
@@ -267,14 +273,14 @@ pub(crate) const fn copy_failure_state(
         LocalCopyDirStage::InspectSource
         | LocalCopyDirStage::InspectSourceEntry
         | LocalCopyDirStage::ReadSourceDirectory
-        | LocalCopyDirStage::SynchronizeFile
+        | LocalCopyDirStage::PrepareDestination
         | LocalCopyDirStage::CleanupTemporaryFile
         | LocalCopyDirStage::PublishSymlinkUnchanged => LocalCopyFailureState::Unchanged,
         LocalCopyDirStage::PublishSymlinkPartially => LocalCopyFailureState::PartiallyPublished,
-        LocalCopyDirStage::PrepareDestination
-        | LocalCopyDirStage::CopyFileContents
+        LocalCopyDirStage::CopyFileContents
         | LocalCopyDirStage::PreservePermissions
         | LocalCopyDirStage::CommitFile
+        | LocalCopyDirStage::SynchronizeFile
         | LocalCopyDirStage::UpdateStatistics => LocalCopyFailureState::Indeterminate,
         #[cfg(windows)]
         LocalCopyDirStage::PublishSymlinkIndeterminate => LocalCopyFailureState::Indeterminate,
