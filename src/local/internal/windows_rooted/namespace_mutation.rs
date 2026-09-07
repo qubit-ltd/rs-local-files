@@ -81,7 +81,9 @@ pub(crate) fn set_rooted_permissions(
     entry.set_permissions(permissions)
 }
 
-/// Deletes the entry identified by an already opened handle.
+/// Marks the entry identified by an opened handle for deletion on close.
+/// The caller must have opened `entry` with DELETE access. Returns the native
+/// disposition error; success does not itself close the supplied handle.
 pub(super) fn delete_open_entry(entry: &File) -> Result<()> {
     use windows_sys::Win32::Storage::FileSystem::FILE_DISPOSITION_INFO;
     use windows_sys::Win32::Storage::FileSystem::FileDispositionInfo;
@@ -106,6 +108,10 @@ pub(super) fn delete_open_entry(entry: &File) -> Result<()> {
 }
 
 /// Renames an opened entry relative to the same root handle.
+/// Opens the source without following its final link and retains the target
+/// parent during installation. `overwrite` permits replacement, with a legacy
+/// fallback when the extended information class is unsupported. Propagates
+/// native traversal/open/rename and payload-construction errors.
 pub(super) fn rename_open_entry(
     root: &File,
     source: &LocalRelativePath,
@@ -164,10 +170,10 @@ pub(super) fn rename_open_entry(
     }
 }
 
-/// Builds the variable-sized `FILE_RENAME_INFO` payload required by Windows.
+/// Builds the variable-sized `FILE_RENAME_INFORMATION` payload used by NT.
 ///
 /// The returned length includes the complete UTF-16 name storage required by
-/// `SetFileInformationByHandle`, while the boolean controls replacement of an
+/// `NtSetInformationFile`, while the boolean controls replacement of an
 /// existing destination.
 ///
 /// # Errors

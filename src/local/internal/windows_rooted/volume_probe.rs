@@ -80,6 +80,10 @@ pub(crate) fn probe_windows_space(file: &File) -> Result<LocalFileSystemSpace> {
 }
 
 /// Runs one synchronous `NtQueryVolumeInformationFile` request.
+/// The caller supplies `output` with writable, correctly aligned storage for
+/// `output_length` bytes and the selected `information_class`; the native call
+/// retains no pointers. Returns `InvalidInput` if the length exceeds `u32`,
+/// or the converted native query error.
 fn query_volume_information(
     file: &File,
     output: *mut core::ffi::c_void,

@@ -105,7 +105,7 @@ fn configure_nonblocking_open(options: &mut OpenOptions) {
 /// Leaves open flags unchanged on platforms without Unix descriptor flags.
 ///
 /// # Parameters
-/// - `options`: Open options that remain unchanged.
+/// - `_options`: Open options that remain unchanged.
 #[cfg(not(any(unix, windows)))]
 #[cfg_attr(not(coverage), inline(always))]
 #[cfg_attr(coverage, inline(never))]
@@ -117,6 +117,7 @@ fn configure_nonblocking_open(_options: &mut OpenOptions) {}
 ///
 /// * `options` - Configured native open options.
 /// * `path` - Path opened by the native operation.
+/// * `open_retry_timeout` - Optional bound for Unix lease-conflict retries.
 ///
 /// # Returns
 ///
@@ -124,8 +125,9 @@ fn configure_nonblocking_open(_options: &mut OpenOptions) {}
 ///
 /// # Errors
 ///
-/// Returns the native open error. On Unix, lease conflicts are retried to
-/// preserve ordinary blocking-open behavior.
+/// Returns the native open error. On Unix, a positive `open_retry_timeout`
+/// permits lease-conflict retries within that interval; `None` or zero performs
+/// only the initial attempt. Other platforms perform one native open.
 #[cfg_attr(not(coverage), inline)]
 #[cfg_attr(coverage, inline(never))]
 fn open_configured_file(options: &OpenOptions, path: &Path, open_retry_timeout: Option<Duration>) -> Result<fs::File> {
@@ -212,6 +214,8 @@ fn prepare_opened_regular_file(
 }
 
 /// Rejects a name-surrogate reparse point observed on the opened handle.
+/// Returns `InvalidInput` for a forbidden reparse tag or a contextual native
+/// attribute-query error.
 #[cfg(windows)]
 fn reject_opened_name_surrogate(file: &fs::File, path: &Path) -> Result<()> {
     use std::mem::size_of;

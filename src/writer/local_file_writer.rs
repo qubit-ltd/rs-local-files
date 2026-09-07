@@ -43,7 +43,7 @@ use crate::LocalWriterState;
 /// # Ok(())
 /// # }
 /// ```
-#[must_use = "a local writer has no effect unless it is committed or aborted"]
+#[must_use = "commit or abort the writer to observe its terminal outcome"]
 #[derive(Debug)]
 pub struct LocalFileWriter {
     /// Reusable namespace-absolute destination path.
@@ -216,7 +216,9 @@ impl LocalFileWriter {
         }
     }
 
-    /// Aborts staged publication or closes direct append.
+    /// Aborts staged publication or flushes and ends a direct append session.
+    ///
+    /// Direct append retains its native handle until this writer is dropped.
     ///
     /// # Returns
     ///
@@ -290,6 +292,10 @@ impl LocalFileWriter {
     }
 
     /// Commits either staged backend through the shared publication contract.
+    ///
+    /// Consumes `backend` and marks this writer committed on success. On
+    /// failure, returns publication certainty and an optional rebuilt writer
+    /// retaining the backend only when retry or explicit abort remains safe.
     #[allow(clippy::result_large_err)]
     fn commit_staged_backend(
         &mut self,
@@ -396,6 +402,10 @@ impl LocalFileWriter {
 
 impl Write for LocalFileWriter {
     /// Writes bytes to staging or directly appends to the destination.
+    ///
+    /// Returns `BrokenPipe` after termination or a fatal stream failure.
+    /// Other native errors propagate; interrupted and would-block errors
+    /// remain retryable. Accepted append bytes are immediately published.
     fn write(&mut self, buffer: &[u8]) -> io::Result<usize> {
         if self.state != LocalWriterState::Open || self.failure_state.is_some() {
             return Err(io::Error::new(
@@ -425,6 +435,9 @@ impl Write for LocalFileWriter {
     }
 
     /// Writes vectored bytes to staging or directly appends to the destination.
+    ///
+    /// Uses the same lifecycle and error contract as [`Self::write`], while
+    /// preserving the native short-write result of one vectored operation.
     fn write_vectored(&mut self, buffers: &[IoSlice<'_>]) -> io::Result<usize> {
         if self.state != LocalWriterState::Open || self.failure_state.is_some() {
             return Err(io::Error::new(
@@ -447,6 +460,10 @@ impl Write for LocalFileWriter {
     }
 
     /// Flushes userspace buffers without publishing staged content.
+    ///
+    /// Returns `BrokenPipe` after termination or a fatal stream failure, and
+    /// otherwise propagates the backend flush result. This is not a durability
+    /// synchronization operation.
     fn flush(&mut self) -> io::Result<()> {
         if self.state != LocalWriterState::Open || self.failure_state.is_some() {
             return Err(io::Error::new(
@@ -488,6 +505,7 @@ fn atomic_destination_state(state: crate::local::LocalAtomicDestinationState) ->
 /// # Parameters
 ///
 /// - `path`: Bound destination path.
+/// - `operation`: Commit or abort operation being performed.
 /// - `error`: Existing structured atomic-write error.
 ///
 /// # Returns

@@ -65,7 +65,7 @@ use crate::path::LocalPathResolver;
 /// # Ok(())
 /// # }
 /// ```
-#[must_use = "dropping the temporary-directory guard removes its directory"]
+#[must_use = "use explicit cleanup to observe errors; drop only attempts cleanup"]
 #[derive(Debug)]
 pub struct LocalTempDirectory {
     /// Stable namespace-absolute path after public namespace binding.
@@ -86,6 +86,9 @@ pub struct LocalTempDirectory {
 
 impl LocalTempDirectory {
     /// Builds a host temporary directory from its already-bound path.
+    /// Captures identity without following the final link. Native inspection
+    /// failure leaves cleanup of the created directory and sandbox to the
+    /// caller.
     #[cfg_attr(not(coverage), inline)]
     #[cfg_attr(coverage, inline(never))]
     pub(crate) fn host(path: PathBuf, sandbox_path: PathBuf, symlink_policy: LocalSymlinkPolicy) -> Result<Self> {
@@ -101,6 +104,9 @@ impl LocalTempDirectory {
     }
 
     /// Builds a rooted temporary directory from the retained root authority.
+    /// Requires a previously validated authority-relative `path`. Native
+    /// inspection failure leaves cleanup of the created directory and sandbox
+    /// to the caller through the retained `root` authority.
     #[cfg_attr(not(coverage), inline)]
     #[cfg_attr(coverage, inline(never))]
     pub(crate) fn rooted(
@@ -134,6 +140,11 @@ impl LocalTempDirectory {
     }
 
     /// Removes the directory tree through the retained authority.
+    ///
+    /// Returns a structured error when identity inspection, tree removal, or
+    /// empty-sandbox removal fails, or namespace certainty makes cleanup
+    /// unsafe. Tree removal is incremental and cannot be rolled back. A
+    /// sandbox-only failure can be retried; successful cleanup is idempotent.
     pub fn cleanup(&mut self) -> LocalResult<()> {
         self.ensure_cleanup_safe().map_err(|error| {
             self.contextualize_error(LocalFileError::from_io(
@@ -169,6 +180,8 @@ impl LocalTempDirectory {
     }
 
     /// Resolves one normal child component below this directory.
+    /// Performs no I/O or existence check. Returns `InvalidInput` unless
+    /// `child` is exactly one validated normal relative component.
     pub fn child(&self, child: &Path) -> Result<PathBuf> {
         let relative = LocalRelativePath::new(child)?;
         if relative.as_path().components().count() != 1 {
@@ -181,6 +194,8 @@ impl LocalTempDirectory {
     }
 
     /// Resolves a normal relative descendant below this directory.
+    /// Performs no I/O or existence check. Returns a relative-path validation
+    /// error for empty input, roots, prefixes, dots, parents, or native NUL.
     #[cfg_attr(not(coverage), inline)]
     #[cfg_attr(coverage, inline(never))]
     pub fn descendant(&self, descendant: &Path) -> Result<PathBuf> {
@@ -190,6 +205,8 @@ impl LocalTempDirectory {
 
     /// Atomically publishes the directory to a generated sibling outside its
     /// private sandbox.
+    /// Uses the default no-replacement policy of [`Self::persist_with`], with
+    /// the same publication outcome and resource-retaining failure contract.
     #[cfg_attr(not(coverage), inline)]
     #[cfg_attr(coverage, inline(never))]
     pub fn keep(self) -> std::result::Result<LocalPersistOutcome, LocalPersistError<Self>> {
@@ -205,6 +222,7 @@ impl LocalTempDirectory {
 
     /// Persists the directory without replacement through its creating
     /// authority.
+    /// Uses [`Self::persist_with`] with default options and the same errors.
     #[cfg_attr(not(coverage), inline(always))]
     #[cfg_attr(coverage, inline(never))]
     pub fn persist(
@@ -216,6 +234,18 @@ impl LocalTempDirectory {
 
     /// Persists the directory with an explicit replacement policy through its
     /// creating authority.
+    ///
+    /// Consumes this guard and resolves `target` against its creation-time
+    /// namespace and PWD. `options` controls replacement and parent creation.
+    /// Required durability returns `RequirementNotMet` before publication;
+    /// directory-content durability is not implemented. Successful publication
+    /// returns an atomic rename outcome, `durable: false`, and any later
+    /// sandbox cleanup error.
+    ///
+    /// Identity, path resolution, parent creation, policy, and native install
+    /// failures retain the resource, stage, and publication certainty in
+    /// `LocalPersistError`. Created parents are not rolled back; inspect the
+    /// failure state before retry or cleanup.
     #[cfg_attr(not(coverage), inline(always))]
     #[cfg_attr(coverage, inline(never))]
     pub fn persist_with(
@@ -228,6 +258,8 @@ impl LocalTempDirectory {
 
     /// Binds public paths and future relative persistence to the creating
     /// filesystem's namespace snapshot.
+    /// Returns a contextual path-resolution error on invalid namespace input;
+    /// consuming failure drops this guard and attempts cleanup.
     pub(crate) fn bind_namespace(mut self, resolver: LocalPathResolver) -> LocalResult<Self> {
         let input = match &self.backend {
             LocalTempResourceBackend::Host(_) => self.path.clone(),
@@ -249,6 +281,8 @@ impl LocalTempDirectory {
     }
 
     /// Persists the directory to a resolved public-API target path.
+    /// Implements the ownership, guarantee, and failure contract of
+    /// [`Self::persist_with`]; a bound resolver is a construction invariant.
     fn persist_with_path(
         mut self,
         target: &Path,
@@ -425,6 +459,8 @@ impl LocalTempDirectory {
 
     /// Removes the resource using the retained backend rather than a diagnostic
     /// path.
+    /// Rechecks identity before recursive removal and propagates inspection or
+    /// removal errors. Earlier deletions remain after a later failure.
     #[cfg_attr(not(coverage), inline)]
     #[cfg_attr(coverage, inline(never))]
     fn remove_resource(&mut self) -> Result<()> {
@@ -444,6 +480,7 @@ impl LocalTempDirectory {
     }
 
     /// Removes the now-empty private sandbox.
+    /// Propagates native removal errors, including a non-empty sandbox.
     fn release_sandbox(&self) -> Result<()> {
         #[cfg(feature = "test-support")]
         if crate::local::take_test_support("temp-directory-sandbox-remove") {
@@ -513,6 +550,8 @@ impl LocalTempDirectory {
 
     /// Rejects operations when the authority path no longer names this
     /// directory.
+    /// A mismatch marks the state indeterminate and returns `InvalidInput`;
+    /// native inspection errors propagate without changing the state.
     fn ensure_identity_matches(&mut self) -> Result<()> {
         let matches = match &self.backend {
             LocalTempResourceBackend::Host(_) => self
@@ -562,7 +601,7 @@ impl LocalTempDirectory {
 }
 
 impl Drop for LocalTempDirectory {
-    /// Performs best-effort cleanup only while the directory remains owned.
+    /// Attempts remaining tree or sandbox cleanup and discards cleanup errors.
     fn drop(&mut self) {
         let _ = self.cleanup();
     }

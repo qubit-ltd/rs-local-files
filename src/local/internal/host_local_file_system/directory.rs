@@ -107,6 +107,9 @@ impl HostLocalFileSystem {
 ///
 /// Returning the exact failed component lets the public facade distinguish an
 /// unchanged failure from a non-transactional partial publication.
+/// The success flag records creation of `path` itself. Existing directories
+/// are accepted only as allowed by `exists_ok`; inspection and creation errors
+/// retain any earlier ancestor creation as an effect of the operation.
 fn create_host_directory_tree(path: &Path, exists_ok: bool) -> LocalResult<bool> {
     let mut current = PathBuf::new();
     let mut created_any = false;

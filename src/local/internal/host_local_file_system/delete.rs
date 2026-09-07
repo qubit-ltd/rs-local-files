@@ -149,14 +149,27 @@ fn remove_host_non_directory(path: &Path, metadata: &fs::Metadata) -> io::Result
 }
 
 impl DeleteBackend for HostLocalFileSystem {
+    /// Bound native coordinates for queued deletion work.
     type Path = PathBuf;
+    /// No-follow metadata used to distinguish directories from removable
+    /// leaves.
     type Metadata = fs::Metadata;
+    /// Lazy native directory reader owned by the deletion scheduler.
     type Reader = fs::ReadDir;
 
+    /// Borrows diagnostic coordinates without allocating or resolving the
+    /// entry.
+    #[inline(always)]
     fn path<'a>(&self, value: &'a Self::Path) -> &'a Path {
         value
     }
 
+    /// Inspects the final entry without following its symbolic-link target.
+    ///
+    /// # Errors
+    ///
+    /// Returns native inspection errors, including disappearance during
+    /// traversal.
     fn metadata(&self, path: &Self::Path) -> io::Result<Self::Metadata> {
         #[cfg(feature = "test-support")]
         if crate::local::take_test_support_on_nth("host-delete-directory-child-not-found", 2) {
@@ -165,26 +178,57 @@ impl DeleteBackend for HostLocalFileSystem {
         fs::symlink_metadata(path)
     }
 
+    /// Tests whether inspected metadata denotes a real directory rather than a
+    /// link.
+    #[inline(always)]
     fn is_directory(&self, metadata: &Self::Metadata) -> bool {
         metadata.file_type().is_dir()
     }
 
+    /// Opens a lazy reader whose lifetime is controlled by the scheduler.
+    ///
+    /// # Errors
+    ///
+    /// Returns native directory-open errors without removing any entries.
+    #[inline(always)]
     fn open_directory(&self, path: &Self::Path) -> io::Result<Self::Reader> {
         fs::read_dir(path)
     }
 
+    /// Produces one child coordinate, or `None` when the reader is exhausted.
+    ///
+    /// # Errors
+    ///
+    /// Returns enumeration failures.
     fn next_child(&self, _parent: &Self::Path, reader: &mut Self::Reader) -> io::Result<Option<Self::Path>> {
         reader.next().transpose().map(|entry| entry.map(|entry| entry.path()))
     }
 
+    /// Removes the inspected leaf itself, including a final directory link.
+    ///
+    /// # Errors
+    ///
+    /// Returns native unlink errors; symbolic-link targets remain untouched.
+    #[inline(always)]
     fn remove_non_directory(&self, path: &Self::Path, metadata: &Self::Metadata) -> io::Result<()> {
         remove_host_non_directory(path, metadata)
     }
 
+    /// Removes a directory after the scheduler has processed its children.
+    ///
+    /// # Errors
+    ///
+    /// Returns native removal errors, including concurrent child creation.
+    #[inline(always)]
     fn remove_empty_directory(&self, path: &Self::Path) -> io::Result<()> {
         fs::remove_dir(path)
     }
 
+    /// Runs the deterministic test-support fault boundary before native
+    /// removal.
+    ///
+    /// Production calls have no side effects; an enabled test fault returns an
+    /// I/O error before the scheduler can count this entry as removed.
     fn before_remove(&self, path: &Self::Path) -> io::Result<()> {
         #[cfg(feature = "test-support")]
         if crate::local::take_test_support_on_nth("host-delete-directory-entry-second", 2) {

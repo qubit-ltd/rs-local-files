@@ -5,7 +5,7 @@
 
 > 状态：规范性设计文档
 >
-> 最后更新：2026-09-03
+> 最后更新：2026-09-07
 
 本文定义 `qubit-local-files` 的完整、稳定设计。公共 API、平台实现、测试、README 和用户
 指南都应与本文保持一致。本文描述库完成后的最终形态，不记录迁移历史，也不把临时实现
@@ -149,7 +149,7 @@ Rooted containment 实现。
 
 概念上的内部结构如下：
 
-```rust
+```text
 pub struct LocalFileSystem {
     // 构造后不可变，可由 clone 和已打开资源共享。
     authority: Arc<LocalAuthorityCore>,
@@ -193,7 +193,7 @@ Options、PWD、调用方预算和业务认证不属于 authority core。
 
 ### 5.3 构造
 
-```rust
+```text
 impl LocalFileSystem {
     pub fn host() -> LocalResult<Self>;
     pub fn rooted(root: &Path) -> LocalResult<Self>;
@@ -222,7 +222,7 @@ impl LocalFileSystem {
 
 ### 6.1 状态与能力
 
-```rust
+```text
 impl LocalFileSystem {
     pub fn scope(&self) -> LocalFileSystemScope;
     pub fn current_directory(&self) -> LocalResult<PathBuf>;
@@ -254,7 +254,7 @@ Host 的 `set_current_directory()` 直接委托 `std::env::set_current_dir()`：
 
 每种由 `LocalFileSystem` 直接执行的可配置操作都有 getter 和 setter：
 
-```rust
+```text
 impl LocalFileSystem {
     pub fn default_read_options(&self) -> &LocalReadOptions;
     pub fn set_default_read_options(
@@ -323,7 +323,7 @@ setter 在应用初始化阶段尽早验证结构、scope 和已知 capability �
 
 每个有 Options 的 `LocalFileSystem` 操作提供两个入口：
 
-```rust
+```text
 impl LocalFileSystem {
     pub fn metadata(&self, path: &Path) -> LocalResult<LocalFileMetadata>;
 
@@ -436,7 +436,7 @@ effective_options = explicit_options.unwrap_or(instance_default_options)
 
 如果调用方需要“默认值基础上的单次修改”，必须显式复制：
 
-```rust
+```text
 let options = filesystem
     .default_copy_options()
     .clone()
@@ -551,7 +551,7 @@ owned `PathBuf`。
 
 ### 8.2 Rooted 映射
 
-```rust
+```text
 let filesystem = LocalFileSystem::rooted(Path::new("/srv/app"))?;
 ```
 
@@ -668,7 +668,7 @@ Windows Host 保留 native drive/prefix 语义：
 
 ### 9.1 策略
 
-```rust
+```text
 pub enum LocalSymlinkPolicy {
     Reject,
     FollowWithinScope,
@@ -746,7 +746,7 @@ root path 被替换时形成两个实际目录，也避免 operation contract �
 
 `diagnostic_root()` 返回构造时捕获的 Host absolute path snapshot：
 
-```rust
+```text
 let filesystem = LocalFileSystem::rooted(Path::new("/srv/app"))?;
 assert_eq!(filesystem.diagnostic_root(), Some(Path::new("/srv/app")));
 ```
@@ -850,7 +850,7 @@ Hard link 可以让根内 entry 与根外 entry 指向同一 inode/file ID，但
 
 `LocalDirectoryEntry` 同时提供：
 
-```rust
+```text
 impl LocalDirectoryEntry {
     pub fn path(&self) -> &Path;
     pub fn relative_path(&self) -> &Path;
@@ -907,7 +907,7 @@ deadline 后继续。
 
 `LocalFileSystemLimits` 描述底层 filesystem 的客观 path/name 限制，不是应用预算：
 
-```rust
+```text
 pub enum SizeLimit {
     Maximum(usize),
     VariesByPath,
@@ -925,7 +925,7 @@ Rooted 可以从已打开 authority 缓存稳定 snapshot；Host 的 `limits()` 
 
 ### 14.1 模式
 
-```rust
+```text
 pub enum LocalWriteMode {
     CreateNew,
     CreateOrReplace,
@@ -943,7 +943,7 @@ pub enum LocalWriteMode {
 
 `LocalFileWriter` 同时是 `Write` byte stream 和 publication session：
 
-```rust
+```text
 pub enum LocalWriterState {
     Open,
     Committed,
@@ -999,7 +999,7 @@ Append 直接修改目标，不能满足 `LocalAtomicityRequirement::Required`�
 
 `LocalDirectoryWalker` 是惰性迭代器：
 
-```rust
+```text
 Iterator<Item = LocalResult<LocalDirectoryEntry>>
 ```
 
@@ -1041,7 +1041,7 @@ Walker drop 只释放 handle 和内存，不执行 namespace 修改。
 file 和 directory tree 使用同一个 copy 操作。实现根据 source metadata 和
 `LocalCopySourceMode` 选择 file、tree 或返回类型错误。
 
-```rust
+```text
 pub type LocalCopyResult =
     Result<LocalCopyOutcome, LocalCopyFailure>;
 
@@ -1108,9 +1108,34 @@ Tree copy 按 Options 控制递归、symlink、metadata 和预算。特殊文件
 
 Copy 永远不得修改 source。
 
+Host 与 Rooted 的复制统计含义一致：`files` 计入复制的普通文件和链接，`directories`
+只计入新建目录，`bytes` 只计入普通文件字节。`overwritten` 包括被替换的条目，以及
+`Overwrite` 策略下合并的已有目录，包括复制根目录。`Skip` 仍会合并同类型目录，
+但不把这些合并计为覆盖。
+
 writer 在创建缺失父目录并要求 Required durability 时，会在发布后逐一同步新增祖先。
 祖先链同步失败仍表示目标已经发布，返回 `Published` 与不完整发布错误；调用方必须检查
 类型化状态，目标字节仍可观察。
+
+### 复制源模式
+
+| 模式 | 普通文件 | 最终链接，包括悬空链接 | 实体目录 | 特殊文件 |
+| --- | --- | --- | --- | --- |
+| `Entry` | 复制内容 | 复制链接本身 | `RequirementNotMet` | `Unsupported` |
+| `Tree` | `RequirementNotMet` | `RequirementNotMet` | 复制目录树 | `Unsupported` |
+| `Auto` | 按条目复制 | 按条目复制 | 按目录树复制 | `Unsupported` |
+
+`with_entry_source()` 选择单个普通文件或链接条目，`with_tree_source()` 要求源为实体目录。
+`with_source_mode(LocalCopySourceMode::Auto)` 会明确恢复自动判断。源类型拒绝发生在创建
+目标父目录或修改目标之前。目录限定路径语法单独校验，可能在分派前返回 `NotDirectory`。
+旧的 `File` 变体和 `with_file_source()` 方法已移除，不保留兼容别名。
+源模式判断不跟随最终链接；递归目录树内部遇到的目录链接仍按有效遍历策略处理。
+源模式不会改变中间链接解析或目录树的链接遍历语义。
+
+目录树复制无法提供强制原子性或持久性，链接复制无法提供强制原子性。请求无法满足的
+`Required` 保证时，会在修改目标前返回 `RequirementNotMet`。链接持久性要求平台支持，
+并同步目标父目录和新建祖先目录。Windows 链接类型必须从不跟随源链接的
+metadata 读取；删除已有目录链接时必须使用原生目录链接删除操作，并保留其指向的内容。
 
 ## 17. Directory create、delete 与 rename
 
@@ -1157,7 +1182,7 @@ Host 与 Rooted 的操作/类型契约保持一致：`delete_file` 遇到实体�
 
 ### 17.3 Rename
 
-```rust
+```text
 pub type LocalRenameResult =
     Result<LocalRenameOutcome, LocalRenameFailure>;
 
@@ -1231,7 +1256,7 @@ Drop 只对仍可证明 owned 的资源执行 best-effort cleanup；`Indetermina
 
 ### 18.5 Persist
 
-```rust
+```text
 temp.persist(target)
 temp.persist_with(target, options)
 ```
@@ -1272,7 +1297,7 @@ Identity check 与删除通常不是一个跨平台原子操作，inode/file ID 
 
 ### 19.1 基础错误域
 
-```rust
+```text
 pub type LocalResult<T> = Result<T, LocalFileError>;
 
 pub struct LocalFileError {
@@ -1394,7 +1419,7 @@ namespace policy、mount 行为和运行时竞争仍会决定每次调用的实�
 
 ### 20.2 Requirement
 
-```rust
+```text
 pub enum LocalAtomicityRequirement {
     Required,
     Preferred,
@@ -1460,7 +1485,7 @@ handle、规范化路径、Options 和 PWD snapshot，因此可以在 filesystem
 `LocalPaths` 负责 scope-aware native path 与 canonical components 转换。它不执行业务 I/O，
 但必须使用与 `LocalFileSystem` 相同的虚拟根规则。
 
-```rust
+```text
 impl LocalPaths {
     pub const fn host() -> Self;
     pub const fn rooted() -> Self;
@@ -1544,14 +1569,19 @@ qubit_fs::spi::Request
 
 Provider identity、registry、URI、user metadata 和远程 capability 仍属于 `qubit-fs` 层。
 
+适配器必须将 `CopyMode::File` 映射为 `LocalCopySourceMode::Entry`，`Tree` 映射为
+`Tree`，`Auto` 映射为 `Auto`。已经解析的 `Auto` 请求必须覆盖 native defaults 中的
+Entry/Tree 模式，同时保留独立的资源预算。
+
 ## 24. 直接应用使用方式
 
 ### 24.1 配置一个 Rooted 应用文件系统
 
-```rust
+```rust,no_run
 use std::path::Path;
 use qubit_local_files::LocalFileSystem;
-use qubit_local_files::options::{LocalCopyOptions, LocalListOptions};
+use qubit_local_files::options::LocalCopyOptions;
+use qubit_local_files::options::LocalListOptions;
 use qubit_local_files::policy::LocalSymlinkPolicy;
 
 let mut filesystem = LocalFileSystem::rooted(Path::new("/srv/app"))?;
@@ -1578,7 +1608,10 @@ for entry in walker {
 
 ### 24.2 单次完整覆盖
 
-```rust
+```rust,no_run
+# use std::path::Path;
+# use qubit_local_files::LocalFileSystem;
+# let filesystem = LocalFileSystem::host()?;
 let options = filesystem
     .default_copy_options()
     .clone()
@@ -1589,7 +1622,7 @@ filesystem.copy_with_options(
     Path::new("/archive/input.bin"),
     &options,
 )?;
-# Ok::<(), qubit_local_files::outcome::LocalCopyFailure>(())
+# Ok::<(), Box<dyn std::error::Error>>(())
 ```
 
 显式 Options 是本次完整配置；实例的其他 copy defaults 不会隐式合并回来。
@@ -1632,6 +1665,18 @@ writer、persist 等业务状态机。
 应用 API。私有 contract tests 位于 `src/tests`，只在 crate 自身 test build 中编译。项目不再
 提供第二个 public “internal test” feature，也不公开 re-export 私有实现契约。测试 hook 不能
 改变 production 对象的正常 state model。
+
+### 共享复制调度契约
+
+遍历栈只由共享调度器维护。调度器一次构造子条目坐标，检查深度与期限，并在 backend
+处理之前对每个后代条目扣减一次预算。请求根由操作入口计数一次，剩余条目预算再交给
+目录树流水线。`CopyTreeBackend::process_entry` 返回 `None` 表示处理完成或跳过，
+返回 `Some(Frame)` 表示进入一个子目录；backend 不能直接修改遍历栈。
+
+backend 负责原生 I/O、发布操作、经 `CopyBudget` 扣减实际字节，以及由 frame 持有的
+目录读取器 permit。统计必须记录已经完成的副作用，即使之后发生错误也不能丢失。
+`finish_frame` 在后代完成后保存目录元数据；失败会释放当前 frame 和全部祖先 frame。
+释放资源只关闭读取器并归还 permit，不回滚已经发布的目标数据。
 
 ## 26. 验证策略
 

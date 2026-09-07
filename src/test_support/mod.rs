@@ -10,8 +10,9 @@
 //! This module is available only with the `test-support` feature. It is not a
 //! production API and does not carry the crate's normal semver compatibility
 //! promise. Instance-local plans validate isolated facade behavior; the
-//! process-local guard exists for native boundary and recovery-state tests that
-//! cannot be triggered through ordinary inputs.
+//! process-local guard serializes installation and affects only its owning
+//! thread. It supports native boundary and recovery-state tests that cannot be
+//! triggered through ordinary inputs.
 
 mod internal;
 mod test_fault_plan;

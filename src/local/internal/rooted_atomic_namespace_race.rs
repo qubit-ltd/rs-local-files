@@ -27,7 +27,7 @@ use crate::LocalAtomicWriteStage;
 ///
 /// # Parameters
 ///
-/// * `name` - Destination entry name relative to `parent`.
+/// * `name` - Destination entry name relative to the staging file's parent.
 /// * `destination` - Commit-time destination handle and identity.
 /// * `requested_path` - Relative destination retained for diagnostics.
 /// * `staged_file` - Armed staging file whose parent remains authoritative.

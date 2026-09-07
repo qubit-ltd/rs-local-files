@@ -25,7 +25,7 @@ use crate::LocalResult;
 pub struct LocalPathResolver {
     /// Namespace whose anchoring rules are applied to operation paths.
     scope: LocalFileSystemScope,
-    /// Normalized namespace-absolute PWD exposed by the owning filesystem.
+    /// Namespace-absolute PWD snapshot supplied at construction.
     current_directory: Option<PathBuf>,
     /// Normal components retained from the normalized PWD.
     current_components: Vec<OsString>,
@@ -35,6 +35,12 @@ pub struct LocalPathResolver {
 
 impl LocalPathResolver {
     /// Creates a resolver from a normalized namespace-absolute PWD.
+    ///
+    /// Performs lexical validation without filesystem access. Returns a
+    /// typed path-codec error for native NUL, or `InvalidPath` for a missing
+    /// namespace root, parent components, or a native prefix in Rooted scope.
+    /// Interior dot components normalized away by `Path::components` are
+    /// accepted; the exposed PWD snapshot retains the supplied spelling.
     pub fn new(scope: LocalFileSystemScope, current_directory: &Path) -> LocalResult<Self> {
         reject_native_nul(current_directory)?;
         let (current_prefix, current_components) = parse_current_directory(scope, current_directory)?;
@@ -67,6 +73,15 @@ impl LocalPathResolver {
     }
 
     /// Normalizes one absolute or PWD-relative operation path.
+    ///
+    /// Resolves lexically without filesystem access or symlink traversal.
+    /// Rooted absolute inputs start at the virtual namespace root. Empty
+    /// inputs and trailing separators or dots retain directory intent.
+    ///
+    /// Returns a typed path-codec error for native NUL, `InvalidPath` for
+    /// traversal above the namespace root, Rooted native prefixes, or
+    /// ambiguous Host drive-relative paths. A relative Host path without a
+    /// PWD snapshot returns `InvalidState`.
     pub fn resolve(&self, path: &Path) -> LocalResult<LocalNamespacePath> {
         reject_native_nul(path)?;
         if self.current_directory.is_none() && !path.is_absolute() {
@@ -126,7 +141,11 @@ impl LocalPathResolver {
     }
 }
 
-/// Parses a PWD that must already be normalized and namespace-absolute.
+/// Extracts the prefix and normal components of a namespace-absolute PWD.
+///
+/// Returns `InvalidPath` for a missing namespace root or any prefix, dot,
+/// or parent component disallowed by the scope and exposed by
+/// `Path::components`; that iterator may normalize interior dots away.
 fn parse_current_directory(
     scope: LocalFileSystemScope,
     current_directory: &Path,
@@ -158,6 +177,10 @@ fn parse_current_directory(
 }
 
 /// Selects the Host anchor for an absolute, root-relative, or ordinary path.
+///
+/// Replaces the prefix and clears descendants for an absolute input; a
+/// root-relative input retains the PWD prefix and clears descendants.
+/// Returns `InvalidPath` for ambiguous drive-relative input before mutation.
 fn prepare_host_anchor(path: &Path, prefix: &mut Option<OsString>, components: &mut Vec<OsString>) -> LocalResult<()> {
     let input_prefix = path.components().find_map(|component| match component {
         Component::Prefix(value) => Some(value.as_os_str().to_os_string()),
@@ -281,7 +304,7 @@ fn has_trailing_separator_or_dot(path: &Path) -> bool {
     final_component == [u16::from(b'.')] || final_component == [u16::from(b'.'), u16::from(b'.')]
 }
 
-/// Conservatively preserves directory intent on unsupported platforms.
+/// Returns false on unsupported platforms, whose paths are rejected earlier.
 #[cfg(not(any(unix, windows)))]
 const fn has_trailing_separator_or_dot(_path: &Path) -> bool {
     false

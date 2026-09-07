@@ -20,7 +20,10 @@ pub(crate) enum LocalCurrentDirectory {
     /// Reads the native process PWD when an operation needs a relative anchor.
     Process,
     /// Retains a namespace-absolute virtual PWD for a Rooted filesystem.
-    Virtual(PathBuf),
+    Virtual(
+        /// Namespace-absolute directory retained independently of process PWD.
+        PathBuf,
+    ),
 }
 
 impl LocalCurrentDirectory {

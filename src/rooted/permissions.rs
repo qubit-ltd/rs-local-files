@@ -20,7 +20,6 @@ pub struct Permissions {
 }
 #[allow(dead_code)]
 impl Permissions {
-    /// Test-support-only access to rooted permission resolution.
     /// Creates a portable read-only or writable permission value.
     pub const fn from_read_only(read_only: bool) -> Self {
         Self {
@@ -58,6 +57,10 @@ impl Permissions {
     }
 
     /// Resolves a portable value against an existing Unix mode.
+    ///
+    /// An explicit Unix mode replaces `current_mode`. Otherwise read-only
+    /// clears all write bits, while writable adds owner-write permission and
+    /// preserves the other bits.
     #[cfg(unix)]
     #[must_use]
     #[cfg_attr(not(coverage), inline(always))]

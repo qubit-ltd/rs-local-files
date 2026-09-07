@@ -13,35 +13,6 @@ API, or a replacement for provider-level logical paths. The crate is
 synchronous; async applications should call it from an appropriate blocking
 execution context.
 
-## Recursive deletion budgets
-
-`LocalDeleteOptions` accepts `with_max_depth`, `with_max_entries`,
-`with_max_pending_path_bytes`, and `with_deadline`. All are unbounded by default;
-matching `without_*` methods remove individual limits. Budgets apply to recursive
-directory deletion. The requested directory counts as one entry at depth zero.
-Every discovered child consumes entry capacity before entering the work queue;
-its native encoded path length consumes pending-path capacity until popped.
-This queue limit excludes allocator overhead and in-flight enumeration objects. Both Host
-and Rooted enumerate lazily with at most one directory reader open at a time.
-Deadlines are checked between native operations and cannot interrupt blocked I/O.
-
-Budget exhaustion before deletion retains `ResourceLimit` and typed resource
-facts. After any entry was removed, the error is `PublicationIncomplete` and
-still retains those facts; deadline errors retain `TimedOut` as their I/O kind.
-Inspect both the effect classification and the cause before retrying.
-
-The compatibility queries make those two dimensions explicit:
-`LocalFileError::cause_kind()` reports the best known underlying cause, while
-`LocalFileError::effect_state()` returns `Some(LocalFileEffectState::PartiallyApplied)`
-for `PublicationIncomplete` and `Some(LocalFileEffectState::Indeterminate)` for
-`Indeterminate`. Ordinary errors have no inferred effect and return `None`; that
-value does not mean `Unchanged`. The dedicated copy, rename, writer, and persist
-failure types remain the authority for their precise recovery states.
-
-Instance default Options are convenience configuration, not mandatory ceilings:
-explicit `*_with_options` replaces them completely. For a provider policy that
-requests cannot loosen, configure `qubit-fs-local::LocalResourcePolicy` instead.
-
 ## Conceptual Model
 
 ```text
@@ -153,7 +124,8 @@ Final components retain native operation semantics:
 | `CreateNew` writer | Treats an existing link as an existing entry. |
 | `Append` writer | Follows the link and appends to its target. |
 | `CreateOrReplace` writer | Follows the link, replaces its target, and preserves the link. |
-| `delete` | Removes the link entry. |
+| `delete_file` | Removes the link entry itself, including a link to a directory. |
+| `delete_directory` | Rejects a final link with `NotDirectory`. |
 | `rename` | Moves or replaces the link entry. |
 | `copy` source | Copies the link entry itself. |
 | `copy` target | Replaces the target link entry. |
@@ -226,7 +198,7 @@ publication; a failure at that point is reported as `Published` with an
 incomplete publication error.
 
 `LocalFileSystem::copy` selects file or directory behavior from source
-metadata. Use `with_file_source()` or `with_tree_source()` when the source
+metadata. Use `with_entry_source()` or `with_tree_source()` when the source
 kind must be explicit; `source_mode()` reports the selected mode. Copy Options
 separately control target conflict, type conflict, metadata, symbolic links,
 atomicity, durability, and caller-selected resource budgets. Mount and device
@@ -261,6 +233,37 @@ Rename reports `Unchanged`, `Renamed`, or `Indeterminate` through its typed
 failure state for the same reason: an error is not necessarily “nothing
 happened”.
 
+### Copy source modes
+
+In both Host and Rooted, `files()` includes copied links, `directories()` counts
+only newly created directories, and `bytes()` counts regular-file bytes.
+`overwritten()` includes replaced entries and existing directories merged under
+`Overwrite`, including the copy root. A `Skip` directory merge is not an overwrite.
+
+| Mode | Regular file | Final link, including dangling links | Directory | Special file |
+| --- | --- | --- | --- | --- |
+| `Entry` | Copy content | Copy the link itself | `RequirementNotMet` | `Unsupported` |
+| `Tree` | `RequirementNotMet` | `RequirementNotMet` | Copy the tree | `Unsupported` |
+| `Auto` | Entry copy | Entry copy | Tree copy | `Unsupported` |
+
+`with_entry_source()` selects one file or link entry; `with_tree_source()`
+requires an actual directory. `with_source_mode(LocalCopySourceMode::Auto)`
+explicitly resets either selection. Source-kind rejection happens before
+creating target parents or changing the destination. Directory-qualified path
+syntax is validated separately and can report `NotDirectory` before dispatch.
+The removed `File` variant and `with_file_source()` method have no compatibility
+aliases. A final source link is never dereferenced by mode selection. Directory
+links encountered inside a tree still follow the effective traversal policy;
+mode selection does not change intermediate-link or tree-traversal semantics.
+
+Directory-tree copies cannot provide required atomicity or durability; link
+copies cannot provide required atomicity. Unsupported `Required` guarantees
+fail with `RequirementNotMet` before destination mutation. Link durability
+depends on platform support and synchronization of the destination parent and
+newly created ancestors. Windows link copies preserve the source link's file/directory kind
+even for dangling links and replace destination links without deleting their
+referents.
+
 ## Walk and Temporary Resources
 
 `LocalFileSystem::list` returns a lazy `LocalDirectoryWalker`. It opens and
@@ -290,6 +293,53 @@ explicitly clean it. Prefixes and suffixes are checked before entry creation:
 native separators, NUL, and portable reserved-name violations do not leave an
 entry behind. Name-collision attempts are unbounded unless the caller sets
 `max_attempts`.
+
+## Scenario: inspect a closed temporary file
+
+MIME detection and external tools often reopen a filename instead of borrowing
+a writer. Stage bytes, close the native handle, invoke the path consumer, then
+explicitly clean up. Closing retains cleanup ownership. This example uses a
+file read as the consumer so the documented workflow runs without an external
+program; an application can invoke its tool in the callback instead.
+
+The error pair retains both the primary I/O failure and a cleanup failure.
+Creation failures occupy the structured-error slot before any inspection runs.
+Production applications may wrap these two channels in their own named error.
+
+```rust
+use std::io;
+use std::io::Write;
+use std::path::Path;
+
+use qubit_local_files::LocalFileError;
+use qubit_local_files::LocalFileSystem;
+use qubit_local_files::options::LocalTempFileOptions;
+
+fn inspect_staged<R>(
+    payload: &[u8],
+    inspect: impl FnOnce(&Path) -> io::Result<R>,
+) -> Result<R, (Option<io::Error>, Option<LocalFileError>)> {
+    let filesystem = LocalFileSystem::host().map_err(|error| (None, Some(error)))?;
+    let options = LocalTempFileOptions::new()
+        .with_parent(&std::env::temp_dir())
+        .with_max_attempts(16);
+    let mut file = filesystem.create_temp_file_with_options(&options)
+        .map_err(|error| (None, Some(error)))?;
+    let staged = file.write_all(payload);
+    file.close();
+    let primary = staged.and_then(|()| inspect(file.path()));
+    match (primary, file.cleanup()) {
+        (Ok(value), Ok(())) => Ok(value),
+        (Err(primary), Ok(())) => Err((Some(primary), None)),
+        (Ok(_), Err(cleanup)) => Err((None, Some(cleanup))),
+        (Err(primary), Err(cleanup)) => Err((Some(primary), Some(cleanup))),
+    }
+}
+
+let bytes = inspect_staged(b"payload", |path| std::fs::read(path))
+    .expect("staging, inspection, and cleanup should succeed");
+assert_eq!(b"payload", bytes.as_slice());
+```
 
 ## Rooted Workspaces
 
@@ -326,6 +376,36 @@ authorization.
 Windows Rooted symbolic-link reads, type checks, and creation remain relative
 to opened handles. Copying the link itself never opens its dangling or external
 target.
+
+## Recursive deletion budgets
+
+`LocalDeleteOptions` accepts `with_max_depth`, `with_max_entries`,
+`with_max_pending_path_bytes`, and `with_deadline`. All are unbounded by default;
+matching `without_*` methods remove individual limits. Budgets apply to recursive
+directory deletion. The requested directory counts as one entry at depth zero.
+Every discovered child consumes entry capacity before entering the work queue;
+its native encoded path length consumes pending-path capacity until popped.
+This queue limit excludes allocator overhead and in-flight enumeration objects. Both Host
+and Rooted enumerate lazily with at most one directory reader open at a time.
+Deadlines are checked between native operations and cannot interrupt blocked I/O.
+
+Budget exhaustion before deletion retains `ResourceLimit` and typed resource
+facts. After any entry was removed, the error is `PublicationIncomplete` and
+still retains those facts; deadline errors retain `TimedOut` as their I/O kind.
+Inspect both the effect classification and the cause before retrying.
+
+The compatibility queries make those two dimensions explicit:
+`LocalFileError::cause_kind()` reports the best known underlying cause, while
+`LocalFileError::effect_state()` returns `Some(LocalFileEffectState::PartiallyApplied)`
+for `PublicationIncomplete` and `Some(LocalFileEffectState::Indeterminate)` for
+`Indeterminate`. Ordinary errors have no inferred effect and return `None`; that
+value does not mean `Unchanged`. The dedicated copy, rename, writer, and persist
+failure types remain the authority for their precise recovery states.
+
+Instance default Options are convenience configuration, not mandatory ceilings:
+explicit `*_with_options` replaces them completely. For a provider policy that
+requests cannot loosen, configure `qubit-fs-local::LocalResourcePolicy` instead.
+
 
 ## Errors and Diagnostics
 

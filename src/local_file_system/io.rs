@@ -31,6 +31,10 @@ use crate::path::LocalNamespacePath;
 
 impl LocalFileSystem {
     /// Reads final-entry metadata without following the final symlink.
+    ///
+    /// Returns resolution, policy, or native metadata errors. A
+    /// directory-qualified operand returns `NotDirectory` unless the observed
+    /// final entry is a real directory.
     pub fn metadata(&self, path: &Path) -> LocalResult<LocalFileMetadata> {
         let resolver = self.resolver_for(path, LocalFileOperation::Metadata)?;
         let resolved = resolve_operation_path(&resolver, path, LocalFileOperation::Metadata)?;
@@ -66,11 +70,18 @@ impl LocalFileSystem {
     }
 
     /// Opens a reader using this instance's default reader options.
+    ///
+    /// Returns the owned reader or error described by
+    /// [`Self::open_reader_with_options`].
     pub fn open_reader(&self, path: &Path) -> LocalResult<LocalFileReader> {
         self.open_reader_with_options(path, &self.defaults.read)
     }
 
     /// Opens a reader using one complete explicit options value.
+    ///
+    /// Requires a regular file after applying this instance's symlink policy.
+    /// Returns path-resolution, type, or native open errors, including retry
+    /// timeout failures. The returned reader owns the opened native handle.
     pub fn open_reader_with_options(&self, path: &Path, options: &LocalReadOptions) -> LocalResult<LocalFileReader> {
         let resolver = self.resolver_for(path, LocalFileOperation::OpenReader)?;
         let resolved = resolve_operation_path(&resolver, path, LocalFileOperation::OpenReader)?;
@@ -110,11 +121,19 @@ impl LocalFileSystem {
     }
 
     /// Reads at most `max_bytes` using the default reader options.
+    ///
+    /// Returns the prefix or error described by
+    /// [`Self::read_prefix_with_options`].
     pub fn read_prefix(&self, path: &Path, max_bytes: usize) -> LocalResult<Vec<u8>> {
         self.read_prefix_with_options(path, max_bytes, &self.defaults.read)
     }
 
     /// Reads at most `max_bytes` using one complete explicit options value.
+    ///
+    /// Stops at the byte limit or EOF and returns an owned byte vector. A zero
+    /// limit still resolves and opens the source. Returns the opening errors
+    /// of [`Self::open_reader_with_options`] or a subsequent read error;
+    /// interrupted reads are retried and partial bytes are discarded on error.
     pub fn read_prefix_with_options(
         &self,
         path: &Path,
@@ -168,11 +187,20 @@ impl LocalFileSystem {
     }
 
     /// Opens a writer using this instance's default writer options.
+    ///
+    /// Returns the owned writer or error described by
+    /// [`Self::open_writer_with_options`].
     pub fn open_writer(&self, path: &Path) -> LocalResult<LocalFileWriter> {
         self.open_writer_with_options(path, &self.defaults.write)
     }
 
     /// Opens a writer using one complete explicit options value.
+    ///
+    /// Create modes return an unpublished staging writer; append opens an
+    /// existing regular file directly. Returns path, type, requirement, or
+    /// native preparation errors. Requested parent creation may remain after
+    /// an error. Commit or abort a staging writer explicitly when its final
+    /// publication or cleanup result must be observed.
     pub fn open_writer_with_options(&self, path: &Path, options: &LocalWriteOptions) -> LocalResult<LocalFileWriter> {
         let resolver = self.resolver_for(path, LocalFileOperation::OpenWriter)?;
         let resolved = resolve_operation_path(&resolver, path, LocalFileOperation::OpenWriter)?;

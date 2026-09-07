@@ -88,6 +88,8 @@ impl RootedDirectoryReader {
     }
 
     /// Requests the next batch of native directory records.
+    /// Updates buffer bounds and marks exhaustion on `STATUS_NO_MORE_FILES`.
+    /// Propagates native errors and rejects an unexpectedly empty result batch.
     fn read_next_buffer(&mut self) -> Result<()> {
         let mut status_block = IO_STATUS_BLOCK::default();
         // SAFETY: `buffer` and `status_block` are writable for this synchronous
@@ -123,7 +125,9 @@ impl RootedDirectoryReader {
         Ok(())
     }
 
-    /// Parses the current native directory record and advances its byte offset.
+    /// Parses the current record and returns its name and next byte offset.
+    /// Does not mutate iterator state. Rejects truncated headers/names, odd
+    /// UTF-16 byte lengths, and invalid or overflowing next-record offsets.
     fn current_name(&self) -> Result<(OsString, usize)> {
         let name_offset = std::mem::offset_of!(FILE_DIRECTORY_INFORMATION, FileName);
         let remaining = self
@@ -217,6 +221,9 @@ pub(crate) fn open_rooted_directory_reader(
 }
 
 /// Creates one rooted directory or directory chain.
+/// `recursive` allows creation of missing intermediate directories;
+/// `exists_ok` accepts an existing final directory. Earlier creations remain
+/// if a later component fails.
 ///
 /// # Errors
 ///
@@ -264,6 +271,8 @@ pub(crate) fn create_rooted_directory(
 }
 
 /// Removes one rooted entry or directory tree without following reparse points.
+/// `recursive` enables post-order tree removal. Earlier deletions are not
+/// rolled back if traversal or a later deletion fails.
 ///
 /// # Errors
 ///
@@ -315,6 +324,8 @@ fn delete_rooted_entry(root: &File, path: &LocalRelativePath) -> Result<()> {
 }
 
 /// Enumerates one already opened directory with `NtQueryDirectoryFile`.
+/// Returns an eager list sorted by native name, retaining a handle per child.
+/// Propagates handle duplication, native enumeration, and child-open errors.
 fn read_directory_handle(directory: &File, _diagnostic_root: &Path) -> Result<Vec<(OsString, File)>> {
     let mut entries = Vec::new();
     let mut reader = RootedDirectoryReader::new(directory.try_clone()?);
@@ -326,6 +337,8 @@ fn read_directory_handle(directory: &File, _diagnostic_root: &Path) -> Result<Ve
 }
 
 /// Rejects name-surrogate reparse points for an opened handle.
+/// Returns `InvalidInput` for a name-surrogate tag or a native attribute-query
+/// error; other reparse tags are accepted.
 pub(super) fn verify_not_name_surrogate(file: &File) -> Result<()> {
     let attributes = handle_attributes(file)?;
     if attributes.FileAttributes & FILE_ATTRIBUTE_REPARSE_POINT != 0
@@ -340,7 +353,9 @@ pub(super) fn verify_not_name_surrogate(file: &File) -> Result<()> {
     }
 }
 
-/// Verifies an opened handle is a real directory rather than a reparse point.
+/// Verifies an opened handle is a directory without a name-surrogate tag.
+/// Returns `NotADirectory` for a non-directory, `InvalidInput` for a forbidden
+/// reparse point, or the native attribute-query error.
 pub(super) fn verify_real_directory(directory: &File) -> Result<()> {
     let attributes = handle_attributes(directory)?;
     if attributes.FileAttributes & FILE_ATTRIBUTE_DIRECTORY == 0 {

@@ -20,7 +20,13 @@
 /// Pending work for one no-follow recursive deletion.
 pub(crate) enum DeleteWork<P> {
     /// Inspects an entry before deciding how to remove it.
-    Inspect(P),
+    Inspect(
+        /// Entry coordinate awaiting no-follow metadata inspection.
+        P,
+    ),
     /// Removes a directory after all of its children have been processed.
-    RemoveDirectory(P),
+    RemoveDirectory(
+        /// Directory coordinate whose children have already been processed.
+        P,
+    ),
 }

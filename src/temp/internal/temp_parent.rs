@@ -12,6 +12,12 @@ use std::path::Path;
 use std::path::PathBuf;
 
 /// Prepares a host target parent before any publication attempt.
+///
+/// Creates missing ancestors only when `create_parent` is true and returns
+/// directories requiring later namespace synchronization. Otherwise verifies
+/// the existing parent is a directory. Returns `InvalidInput` for a target
+/// without a parent, `NotADirectory` for a non-directory parent, or a native
+/// inspection/creation error. Created ancestors remain after later failures.
 // qubit-style: allow coverage-cfg
 #[cfg_attr(not(coverage), inline)]
 #[cfg_attr(coverage, inline(never))]
@@ -33,6 +39,11 @@ pub(crate) fn host(target: &Path, create_parent: bool) -> io::Result<Vec<PathBuf
 }
 
 /// Prepares a rooted target parent before any publication attempt.
+///
+/// Creates missing ancestors when `create_parent` is true; otherwise verifies
+/// the parent directory without following its final link. A direct child uses
+/// the retained root. Returns path-validation, native traversal/creation, or
+/// `NotADirectory` errors. Successfully created ancestors are not rolled back.
 #[cfg_attr(not(coverage), inline)]
 #[cfg_attr(coverage, inline(never))]
 pub(crate) fn rooted(

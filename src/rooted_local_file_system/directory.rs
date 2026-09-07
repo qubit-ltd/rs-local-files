@@ -31,6 +31,7 @@ impl RootedLocalFileSystem {
     ///
     /// - `path`: Validated relative descendant path.
     /// - `options`: Ancestor creation policy.
+    /// - `symlink_policy`: Policy applied to intermediate path components.
     ///
     /// # Returns
     ///
@@ -108,6 +109,10 @@ impl RootedLocalFileSystem {
 }
 
 /// Creates each missing Rooted component through the opened authority.
+/// Returns whether this operation created the requested final directory.
+/// `exists_ok` permits an existing or concurrently created final directory.
+/// Native inspection/creation and type-conflict failures retain the failed
+/// relative component and whether earlier directory creation had side effects.
 fn create_rooted_directory_tree(
     root: &crate::rooted::Root,
     path: &crate::local::LocalRelativePath,

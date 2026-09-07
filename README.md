@@ -148,6 +148,8 @@ unchanged. `CreateNew` and `CreateOrReplace` stage in the destination directory;
 `Append` writes an existing regular file directly and cannot satisfy required
 atomicity.
 
+Copy modes distinguish one `Entry` (a regular file or final link), a directory `Tree`, and explicit `Auto` detection. See the [source-mode contract](doc/user_guide.md#copy-source-modes).
+
 ## Platform Scope
 
 Linux, Windows, and macOS behavior is runtime-tested. FreeBSD and Android
