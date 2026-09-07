@@ -123,7 +123,7 @@ fn test_copy_rename_and_write_option_builders_retain_policies() {
         .with_type_conflict(LocalCopyTypeConflictPolicy::Replace)
         .with_metadata_preservation(LocalMetadataPreservePolicy::Permissions)
         .with_symlink_policy(LocalSymlinkPolicy::FollowWithinScope)
-        .with_file_source()
+        .with_entry_source()
         .with_tree_source()
         .with_create_parent()
         .with_atomicity(LocalAtomicityRequirement::Required)
@@ -185,9 +185,9 @@ fn test_copy_option_builders_are_independently_observable() {
     let copy = black_box(with_metadata_preservation)(black_box(copy), LocalMetadataPreservePolicy::Permissions);
     assert_eq!(copy.preserve_metadata(), LocalMetadataPreservePolicy::Permissions);
 
-    let with_file_source = black_box(LocalCopyOptions::with_file_source as fn(LocalCopyOptions) -> LocalCopyOptions);
-    let copy = black_box(with_file_source)(black_box(copy));
-    assert_eq!(copy.source_mode(), LocalCopySourceMode::File);
+    let with_entry_source = black_box(LocalCopyOptions::with_entry_source as fn(LocalCopyOptions) -> LocalCopyOptions);
+    let copy = black_box(with_entry_source)(black_box(copy));
+    assert_eq!(copy.source_mode(), LocalCopySourceMode::Entry);
 
     let with_create_parent =
         black_box(LocalCopyOptions::with_create_parent as fn(LocalCopyOptions) -> LocalCopyOptions);

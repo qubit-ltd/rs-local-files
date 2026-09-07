@@ -12,13 +12,13 @@ mod copy_dir_result;
 mod destination;
 mod error;
 mod facade;
+mod host_copy_backend;
 mod namespace_race;
 mod opened_copy_source;
 mod source;
 mod staged_copy;
 mod staging_io;
 mod statistics_overflow;
-mod traversal;
 
 pub(crate) use facade::copy_dir_all_with_paths;
 pub(crate) use facade::copy_dir_all_with_paths_scoped;

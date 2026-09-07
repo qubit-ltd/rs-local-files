@@ -243,7 +243,7 @@ fn test_local_file_system_copy_rejects_source_kind_mismatches() {
         .copy_with_options(
             &source_directory,
             &directory.path().join("directory-target"),
-            &LocalCopyOptions::new().with_file_source(),
+            &LocalCopyOptions::new().with_entry_source(),
         )
         .expect_err("file mode must reject a directory source");
     assert_eq!(LocalFileErrorKind::RequirementNotMet, directory_error.error().kind());
@@ -487,7 +487,8 @@ fn test_recursive_copy_symlink_destination_policy_matrix() {
                 .with_conflict(LocalCopyConflictPolicy::Overwrite),
         )
         .expect("overwrite policy should replace a nested file with a link");
-    assert_eq!(1, overwritten.stats().overwritten());
+    // The existing root directory is merged and its child entry is replaced.
+    assert_eq!(2, overwritten.stats().overwritten());
     assert_eq!(
         PathBuf::from("referent"),
         fs::read_link(overwrite_target.join("link")).unwrap()
@@ -516,7 +517,8 @@ fn test_recursive_copy_symlink_destination_policy_matrix() {
                 .with_type_conflict(LocalCopyTypeConflictPolicy::Replace),
         )
         .expect("replace policy should replace a nested directory with a link");
-    assert_eq!(1, replaced.stats().overwritten());
+    // Count the root merge and the nested directory replaced by a link.
+    assert_eq!(2, replaced.stats().overwritten());
     assert_eq!(
         PathBuf::from("referent"),
         fs::read_link(directory_target.join("link")).unwrap()

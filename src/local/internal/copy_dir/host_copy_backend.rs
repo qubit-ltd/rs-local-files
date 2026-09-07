@@ -22,10 +22,12 @@ use super::copy_dir_result::CopyDirResult;
 use super::destination::ensure_copy_destination_dir;
 use super::error::copy_dir_error;
 use super::error::record_created_directory;
+use super::error::record_overwritten_entry;
 use super::error::record_skipped_file;
 use super::error::with_copy_context;
 use super::source::inspect_copy_source_directory;
 use super::staged_copy::copy_file_with_options;
+use crate::LocalCopyConflictPolicy;
 use crate::LocalCopyDirOptions;
 use crate::LocalCopyDirStage;
 use crate::LocalCopyDirStats;
@@ -43,6 +45,7 @@ use crate::local::internal::copy_tree;
 /// * `dst` - Destination directory.
 /// * `options` - Recursive-copy behavior options.
 /// * `destination_root` - Canonical destination used for containment checks.
+/// * `scope_root` - Optional canonical boundary for followed directory links.
 /// * `stats` - Mutable statistics accumulator.
 ///
 /// # Errors
@@ -84,17 +87,26 @@ pub(super) fn copy_dir_iterative(
     copy_tree(&mut backend, root_frame, stats, &mut budget)
 }
 
+/// Host-specific copy operations and active directory identities.
 struct HostCopyBackend {
+    /// Fixed copy policy for the operation.
     options: LocalCopyDirOptions,
+    /// Canonical target used to reject traversal into the destination.
     destination_root: PathBuf,
+    /// Optional Host containment boundary for followed directory links.
     scope_root: Option<PathBuf>,
+    /// Native identities of the currently active directory ancestors.
     active_sources: HashSet<DirectoryIdentity>,
 }
 
 impl CopyTreeBackend for HostCopyBackend {
+    /// Owns the active directory reader and its managed-resource permit.
     type Frame = CopyDirFrame;
+    /// One lazily enumerated child before scheduler budget checks.
     type Entry = fs::DirEntry;
 
+    /// Clones frame coordinates for diagnostics without opening native handles.
+    #[inline]
     fn frame_context(&self, frame: &Self::Frame) -> CopyTreeFrameContext {
         CopyTreeFrameContext {
             source: frame.src().to_path_buf(),
@@ -103,6 +115,12 @@ impl CopyTreeBackend for HostCopyBackend {
         }
     }
 
+    /// Reads one child lazily; `None` means the directory is exhausted.
+    ///
+    /// # Errors
+    ///
+    /// Preserves current statistics and directory coordinates on reader
+    /// failure.
     fn next_entry(
         &mut self,
         frame: &mut Self::Frame,
@@ -122,6 +140,8 @@ impl CopyTreeBackend for HostCopyBackend {
         }
     }
 
+    /// Constructs child coordinates once, at one level below the active frame.
+    #[inline]
     fn child_context(&self, frame: &CopyTreeFrameContext, entry: &Self::Entry) -> CopyTreeFrameContext {
         CopyTreeFrameContext {
             source: entry.path(),
@@ -130,61 +150,73 @@ impl CopyTreeBackend for HostCopyBackend {
         }
     }
 
+    /// Publishes one admitted child or returns its owned directory frame.
+    ///
+    /// The scheduler has already charged the entry and checked its depth. This
+    /// backend charges bytes and acquired handles, and records destination
+    /// mutations as they occur. `None` means a leaf was copied or skipped;
+    /// `Some` transfers a child reader and permit to the scheduler.
+    ///
+    /// # Errors
+    ///
+    /// Returns native or policy failures with all recorded partial effects.
     fn process_entry(
         &mut self,
         entry: Self::Entry,
         frame: &CopyTreeFrameContext,
-        frames: &mut Vec<Self::Frame>,
         stats: &mut LocalCopyDirStats,
         budget: &mut CopyBudget,
-    ) -> Result<(), crate::LocalCopyDirError> {
-        let source_path = entry.path();
-        let destination_path = frame.destination.join(entry.file_name());
+    ) -> Result<Option<Self::Frame>, crate::LocalCopyDirError> {
+        let source_path = &frame.source;
+        let destination_path = &frame.destination;
         let file_type = with_copy_context(
             entry.file_type(),
             LocalCopyDirStage::InspectSourceEntry,
-            &source_path,
-            &destination_path,
+            source_path,
+            destination_path,
             stats,
         )?;
         if file_type.is_dir() {
-            if let Some(child) = enter_copy_directory(
-                &source_path,
-                &destination_path,
+            return enter_copy_directory(
+                source_path,
+                destination_path,
                 self.options,
                 &self.destination_root,
                 &mut self.active_sources,
                 stats,
                 budget,
-                frame.depth.saturating_add(1),
-            )? {
-                frames.push(child);
-            }
+                frame.depth,
+            );
         } else if file_type.is_symlink() {
             if self.options.symlink_policy().follows()
-                && symlink_target_is_directory(&source_path, &destination_path, stats, self.scope_root.as_deref())?
+                && symlink_target_is_directory(source_path, destination_path, stats, self.scope_root.as_deref())?
             {
-                if let Some(child) = enter_copy_directory(
-                    &source_path,
-                    &destination_path,
+                return enter_copy_directory(
+                    source_path,
+                    destination_path,
                     self.options,
                     &self.destination_root,
                     &mut self.active_sources,
                     stats,
                     budget,
-                    frame.depth.saturating_add(1),
-                )? {
-                    frames.push(child);
-                }
+                    frame.depth,
+                );
             } else {
-                super::staged_copy::copy_symlink_with_options(&source_path, &destination_path, self.options, stats)?;
+                super::staged_copy::copy_symlink_with_options(source_path, destination_path, self.options, stats)?;
             }
         } else {
-            copy_file_with_options(&source_path, &destination_path, self.options, stats, budget)?;
+            copy_file_with_options(source_path, destination_path, self.options, stats, budget)?;
         }
-        Ok(())
+        Ok(None)
     }
 
+    /// Applies final directory permissions after all descendants are processed.
+    ///
+    /// Consumes the frame, releasing its reader and permit on success or error.
+    ///
+    /// # Errors
+    ///
+    /// Reports permission preservation failures with current copy statistics.
     fn finish_frame(
         &mut self,
         frame: Self::Frame,
@@ -203,6 +235,8 @@ impl CopyTreeBackend for HostCopyBackend {
         Ok(())
     }
 
+    /// Attaches scheduler failure coordinates and a snapshot of partial
+    /// effects.
     fn error(
         &self,
         stage: LocalCopyDirStage,
@@ -225,10 +259,13 @@ impl CopyTreeBackend for HostCopyBackend {
 /// * `active_sources` - Filesystem-object ancestor identities used for cycle
 ///   detection.
 /// * `stats` - Mutable statistics accumulator.
+/// * `budget` - Shared deadline, depth, and open-directory budget.
+/// * `depth` - Source directory depth, with the copied root at zero.
 ///
 /// # Returns
 ///
-/// A lazy traversal frame for the entered directory.
+/// `Some` owns a lazy reader and permit for the entered directory. `None` means
+/// conflict policy skipped the destination without entering its source reader.
 ///
 /// # Errors
 ///
@@ -270,7 +307,7 @@ fn enter_copy_directory(
             ),
         ));
     }
-    let action = with_copy_context(
+    let (action, created) = with_copy_context(
         ensure_copy_destination_dir(dst, options.conflict_policy(), options.type_conflict_policy()),
         LocalCopyDirStage::PrepareDestination,
         src,
@@ -287,9 +324,20 @@ fn enter_copy_directory(
         )?;
         return Ok(None);
     }
-    if action == CopyDestinationAction::Create {
+    if created {
         with_copy_context(
             record_created_directory(stats),
+            LocalCopyDirStage::UpdateStatistics,
+            src,
+            dst,
+            stats,
+        )?;
+    }
+    if action == CopyDestinationAction::Replace
+        || (action == CopyDestinationAction::Merge && options.conflict_policy() == LocalCopyConflictPolicy::Overwrite)
+    {
+        with_copy_context(
+            record_overwritten_entry(stats),
             LocalCopyDirStage::UpdateStatistics,
             src,
             dst,
@@ -324,11 +372,13 @@ fn enter_copy_directory(
 ///
 /// * `src` - Source symbolic link.
 /// * `dst` - Destination path.
-/// * `stats` - Mutable statistics accumulator.
+/// * `stats` - Read-only snapshot attached to a failed inspection.
+/// * `scope_root` - Optional canonical boundary for the resolved link target.
 ///
 /// # Returns
 ///
-/// `true` for a directory target and `false` for a regular-file target.
+/// `true` for a directory target and `false` for a regular-file or missing
+/// target when scope canonicalization is not required.
 ///
 /// # Errors
 ///

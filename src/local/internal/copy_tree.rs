@@ -2,65 +2,33 @@
 //    Copyright (c) 2026 Haixing Hu.
 //
 //    SPDX-License-Identifier: Apache-2.0
+//
+//    Licensed under the Apache License, Version 2.0.
 // =============================================================================
 //! Shared depth-first scheduling for native directory-tree copies.
 //!
 //! The Host and Rooted backends keep their platform-specific authority and
 //! entry operations, while this module owns the traversal stack, deadline,
 //! entry and depth checks, and post-order frame completion.
-// qubit-style: allow multiple-public-types
-
-use std::path::PathBuf;
 
 use super::CopyBudget;
+use super::CopyTreeBackend;
 use crate::LocalCopyDirError;
 use crate::LocalCopyDirStage;
 use crate::LocalCopyDirStats;
 
-/// The paths and depth associated with one active directory frame.
-#[derive(Clone, Debug)]
-pub(crate) struct CopyTreeFrameContext {
-    pub(crate) source: PathBuf,
-    pub(crate) destination: PathBuf,
-    pub(crate) depth: usize,
-}
-
-/// Platform-specific operations used by the shared copy scheduler.
-pub(crate) trait CopyTreeBackend {
-    type Frame;
-    type Entry;
-
-    fn frame_context(&self, frame: &Self::Frame) -> CopyTreeFrameContext;
-
-    fn next_entry(
-        &mut self,
-        frame: &mut Self::Frame,
-        stats: &LocalCopyDirStats,
-    ) -> Result<Option<Self::Entry>, LocalCopyDirError>;
-
-    fn child_context(&self, frame: &CopyTreeFrameContext, entry: &Self::Entry) -> CopyTreeFrameContext;
-
-    fn process_entry(
-        &mut self,
-        entry: Self::Entry,
-        frame: &CopyTreeFrameContext,
-        frames: &mut Vec<Self::Frame>,
-        stats: &mut LocalCopyDirStats,
-        budget: &mut CopyBudget,
-    ) -> Result<(), LocalCopyDirError>;
-
-    fn finish_frame(&mut self, frame: Self::Frame, stats: &mut LocalCopyDirStats) -> Result<(), LocalCopyDirError>;
-
-    fn error(
-        &self,
-        stage: LocalCopyDirStage,
-        context: &CopyTreeFrameContext,
-        stats: &LocalCopyDirStats,
-        source_error: std::io::Error,
-    ) -> LocalCopyDirError;
-}
-
 /// Runs a lazy depth-first copy using a platform-specific backend.
+///
+/// The caller supplies an opened root frame and owns root-entry charging; this
+/// scheduler charges each descendant exactly once before backend processing.
+/// Only this function changes the stack. A backend may return one child frame.
+///
+/// # Errors
+///
+/// Returns the backend failure, preserving already-applied statistics, or a
+/// depth, entry, or deadline error before processing the rejected descendant.
+/// On any error, all stacked frames are dropped and release their readers and
+/// permits; completed destination changes are not rolled back.
 pub(crate) fn copy_tree<B: CopyTreeBackend>(
     backend: &mut B,
     root_frame: B::Frame,
@@ -88,7 +56,9 @@ pub(crate) fn copy_tree<B: CopyTreeBackend>(
         if let Err(source_error) = budget.charge_entry() {
             return Err(backend.error(LocalCopyDirStage::UpdateStatistics, &child, stats, source_error));
         }
-        backend.process_entry(entry, &current, &mut frames, stats, budget)?;
+        if let Some(frame) = backend.process_entry(entry, &child, stats, budget)? {
+            frames.push(frame);
+        }
     }
     Ok(())
 }

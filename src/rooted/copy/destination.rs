@@ -24,7 +24,13 @@ use crate::local::LocalCopyDirStage as Stage;
 use crate::local::LocalCopyDirStats as Statistics;
 use crate::local::decide_copy_destination;
 
-/// Copies one final symbolic-link entry without dereferencing it.
+/// Prepares a destination directory under the selected conflict policies.
+///
+/// Returns true to traverse a created or merged directory, or false after
+/// counting a skipped entry. Updates creation and overwrite statistics only
+/// after the corresponding namespace operation succeeds. Native inspection,
+/// removal, creation, policy-conflict, and counter-overflow failures retain
+/// the statistics accumulated so far; earlier mutations are not rolled back.
 pub(super) fn prepare_directory(
     root: &Root,
     source: &Path,
@@ -136,6 +142,8 @@ pub(super) fn prepare_directory(
 }
 
 /// Reads optional destination metadata without following the final link.
+///
+/// Returns `None` for a missing entry and propagates other native failures.
 pub(super) fn optional_metadata(root: &Root, path: &Path) -> io::Result<Option<Metadata>> {
     match root.symlink_metadata(path) {
         Ok(metadata) => Ok(Some(metadata)),

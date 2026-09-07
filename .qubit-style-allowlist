@@ -1,5 +1,4 @@
 multiple-public-types | src/rooted_local_file_system.rs | Rooted implementation and private resolved-path carrier share one module for policy dispatch
-multiple-public-types | src/local/internal/copy_tree.rs | Shared scheduler keeps its frame context and backend contract together for Host and Rooted traversal
 coverage-cfg | src/capability/local_file_system_capabilities.rs | Preserve coverage visibility for independently observable capability queries.
 coverage-cfg | src/local_file_system/configuration.rs | Preserve coverage visibility for public instance configuration accessors.
 coverage-cfg | src/error/local_file_error.rs | Preserve coverage visibility for structured error accessors and conversions.
