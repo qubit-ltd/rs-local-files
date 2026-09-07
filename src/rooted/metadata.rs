@@ -290,9 +290,18 @@ where
     }
 }
 
-/// Converts a non-negative Unix timestamp into [`SystemTime`].
+/// Converts signed Unix seconds and fractional nanoseconds into [`SystemTime`].
 ///
-/// Returns `None` for negative components or overflow.
+/// # Parameters
+///
+/// - `seconds`: Signed whole seconds relative to the Unix epoch.
+/// - `nanoseconds`: Non-negative fractional part, strictly below one billion.
+///   `N` permits the native platform's integer representation.
+///
+/// # Returns
+///
+/// `Some` for a representable timestamp, including times before the epoch.
+/// Returns `None` for invalid fractions or platform time-range overflow.
 #[cfg(unix)]
 #[cfg_attr(not(coverage), inline)]
 #[cfg_attr(coverage, inline(never))]
@@ -300,9 +309,24 @@ fn system_time<N>(seconds: libc::time_t, nanoseconds: N) -> Option<SystemTime>
 where
     N: TryInto<u64>,
 {
-    let seconds = u64::try_from(seconds).ok()?;
+    const NANOS_PER_SECOND: i128 = 1_000_000_000;
     let nanoseconds = nanoseconds.try_into().ok()?;
-    UNIX_EPOCH.checked_add(Duration::from_secs(seconds).saturating_add(Duration::from_nanos(nanoseconds)))
+    if nanoseconds >= NANOS_PER_SECOND as u64 {
+        return None;
+    }
+    let total = i128::from(seconds)
+        .checked_mul(NANOS_PER_SECOND)?
+        .checked_add(i128::from(nanoseconds))?;
+    let magnitude = total.checked_abs()?;
+    let duration = Duration::new(
+        u64::try_from(magnitude / NANOS_PER_SECOND).ok()?,
+        u32::try_from(magnitude % NANOS_PER_SECOND).ok()?,
+    );
+    if total < 0 {
+        UNIX_EPOCH.checked_sub(duration)
+    } else {
+        UNIX_EPOCH.checked_add(duration)
+    }
 }
 
 /// Extracts portable timestamps from Linux and Android `stat` values.
@@ -352,4 +376,51 @@ fn stat_times(status: &libc::stat) -> (Option<SystemTime>, Option<SystemTime>, O
 #[cfg_attr(coverage, inline(never))]
 fn stat_times(_status: &libc::stat) -> (Option<SystemTime>, Option<SystemTime>, Option<SystemTime>) {
     (None, None, None)
+}
+
+#[cfg(all(test, unix))]
+mod tests {
+    use std::time::Duration;
+    use std::time::UNIX_EPOCH;
+
+    use super::system_time;
+
+    /// Verifies signed seconds and positive fractional nanoseconds compose
+    /// mathematically.
+    #[test]
+    fn test_system_time_signed_fraction() {
+        assert_eq!(
+            system_time(-1, 500_000_000),
+            UNIX_EPOCH.checked_sub(Duration::from_millis(500))
+        );
+        assert_eq!(system_time(0, 0), Some(UNIX_EPOCH));
+        assert_eq!(
+            system_time(1, 500_000_000),
+            UNIX_EPOCH.checked_add(Duration::from_millis(1500))
+        );
+    }
+
+    /// Rejects invalid nanosecond components instead of normalizing or
+    /// saturating them.
+    #[test]
+    fn test_system_time_invalid_fraction() {
+        assert_eq!(system_time(0, -1), None);
+        assert_eq!(system_time(0, 1_000_000_000), None);
+        assert_eq!(system_time(0, u64::MAX), None);
+    }
+
+    /// Delegates platform range bounds to checked SystemTime arithmetic.
+    #[test]
+    fn test_system_time_platform_bounds() {
+        let maximum = libc::time_t::MAX;
+        assert_eq!(
+            system_time(maximum, 0),
+            UNIX_EPOCH.checked_add(Duration::from_secs(maximum as u64))
+        );
+        let minimum = libc::time_t::MIN;
+        assert_eq!(
+            system_time(minimum, 0),
+            UNIX_EPOCH.checked_sub(Duration::from_secs(minimum.unsigned_abs()))
+        );
+    }
 }

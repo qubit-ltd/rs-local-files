@@ -59,6 +59,7 @@ impl LocalFileSystem {
             self.scope(),
             self.symlink_policy,
             options,
+            self.capabilities(),
             Some(request_source),
             Some(request_destination),
         )
@@ -172,6 +173,19 @@ impl LocalFileSystem {
         destination: &Path,
         options: &LocalRenameOptions,
     ) -> LocalRenameResult {
+        crate::local_file_system_validation::validate_rename_options(
+            options,
+            self.capabilities(),
+            LocalFileOperation::Rename,
+        )
+        .map_err(|error| {
+            rename_failure_unchanged(with_current_directory(
+                error
+                    .with_path(source.to_path_buf())
+                    .with_target(destination.to_path_buf()),
+                self.current_directory.virtual_path(),
+            ))
+        })?;
         let request_source = source;
         let request_destination = destination;
         let resolver = self

@@ -44,15 +44,10 @@ impl LocalFileSystem {
     /// errors. The returned walker owns traversal state; subsequent I/O and
     /// budget failures are yielded during iteration.
     pub fn list_with_options(&self, path: &Path, options: &LocalListOptions) -> LocalResult<LocalDirectoryWalker> {
+        validate_list_options(self.scope(), self.symlink_policy, options, Some(path))
+            .map_err(|error| with_current_directory(error, self.current_directory.virtual_path()))?;
         let resolver = self.resolver_for(path, LocalFileOperation::List)?;
         let resolved = resolve_operation_path(&resolver, path, LocalFileOperation::List)?;
-        validate_list_options(
-            self.scope(),
-            self.symlink_policy,
-            options,
-            Some(resolved.namespace_absolute()),
-        )
-        .map_err(|error| with_current_directory(error, resolver.current_directory()))?;
         match &self.core.namespace {
             LocalNamespace::Host => {
                 HostLocalFileSystem::list_with_policy(resolved.authority_relative(), options, self.symlink_policy)

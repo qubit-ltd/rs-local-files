@@ -636,7 +636,7 @@ fn test_copy_required_durability_syncs_staging_before_publication() {
             )
             .expect_err("staging synchronization failure must stop publication");
 
-        assert_eq!(LocalCopyFailureState::Unchanged, failure.state());
+        assert_eq!(LocalCopyFailureState::Indeterminate, failure.state());
         assert_eq!(b"old", fs::read(&target).expect("target should remain").as_slice(),);
     });
 }
