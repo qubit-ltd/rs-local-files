@@ -67,7 +67,7 @@ jobs:
         run: rustup toolchain install 1.94 --profile minimal
 
       - name: Run default-feature tests
-        run: cargo +1.94 test --locked --no-default-features
+        run: cargo +1.94 test --locked --no-default-features --no-fail-fast
 
   local-contract-regressions:
     name: Local filesystem contract regressions
