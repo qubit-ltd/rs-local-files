@@ -29,11 +29,27 @@ use super::with_current_directory;
 
 impl LocalFileSystem {
     /// Copies an entry using this instance's default copy options.
+    ///
+    /// Returns the outcome or structured failure described by
+    /// [`Self::copy_with_options`].
     pub fn copy(&self, source: &Path, destination: &Path) -> LocalCopyResult {
         self.copy_with_options(source, destination, &self.defaults.copy)
     }
 
     /// Copies an entry using one complete explicit options value.
+    ///
+    /// Resolves both paths from one current-directory snapshot. `Entry`
+    /// accepts a regular file or final symbolic link; `Tree` requires a real
+    /// directory; `Auto` selects from the observed kind. Final links are
+    /// copied as entries. A directory-qualified path requires tree mode.
+    ///
+    /// # Errors
+    ///
+    /// Returns a structured failure for invalid paths/options, unsupported
+    /// source kinds, unmet requirements, exhausted budgets, or native I/O
+    /// failures. Source-mode mismatch is rejected before destination mutation.
+    /// Tree copies can fail after publishing descendants; inspect the failure
+    /// state, partial statistics, and cleanup error before retrying.
     #[allow(clippy::result_large_err)]
     pub fn copy_with_options(&self, source: &Path, destination: &Path, options: &LocalCopyOptions) -> LocalCopyResult {
         let started_at = Instant::now();
@@ -88,9 +104,9 @@ impl LocalFileSystem {
                     &directory_options
                 }
                 crate::LocalCopySourceMode::Tree => options,
-                crate::LocalCopySourceMode::File => {
+                crate::LocalCopySourceMode::Entry => {
                     let error = LocalFileError::new(LocalFileErrorKind::NotDirectory, LocalFileOperation::Copy)
-                        .with_reason("directory-qualified copy paths are incompatible with file source mode")
+                        .with_reason("directory-qualified copy paths are incompatible with entry source mode")
                         .with_path(source.namespace_absolute().to_path_buf())
                         .with_target(destination.namespace_absolute().to_path_buf());
                     return Err(copy_failure_unchanged(with_current_directory(
@@ -130,12 +146,25 @@ impl LocalFileSystem {
         })
     }
 
-    /// Creates a directory using this instance's default options.
+    /// Renames an entry using this instance's default rename options.
+    ///
+    /// Returns the outcome or structured failure described by
+    /// [`Self::rename_with_options`].
     pub fn rename(&self, source: &Path, destination: &Path) -> LocalRenameResult {
         self.rename_with_options(source, destination, &self.defaults.rename)
     }
 
     /// Renames an entry using one complete explicit options value.
+    ///
+    /// Resolves both paths from one current-directory snapshot and preserves
+    /// final symbolic links as entries. The outcome reports the achieved
+    /// atomicity and durability.
+    ///
+    /// # Errors
+    ///
+    /// Returns path, type, conflict, requirement, or native rename failures.
+    /// A post-publication synchronization failure can occur after the entry
+    /// moved; inspect the returned rename state before retrying.
     #[allow(clippy::result_large_err)]
     pub fn rename_with_options(
         &self,

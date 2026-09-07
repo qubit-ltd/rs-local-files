@@ -55,13 +55,12 @@ pub(crate) use internal::RootedSymlinkCreateError;
 pub(crate) use internal::RootedSymlinkCreateFailureState;
 pub(crate) use internal::copy_dir_all_with_paths;
 pub(crate) use internal::copy_dir_all_with_paths_scoped;
-pub(crate) use internal::copy_directory_guarantee_unavailable;
 pub(crate) use internal::copy_failure_indeterminate;
 pub(crate) use internal::copy_failure_published;
 pub(crate) use internal::copy_failure_unchanged;
 pub(crate) use internal::copy_file_replace_requires_atomicity;
 pub(crate) use internal::copy_file_with_options;
-pub(crate) use internal::copy_source_mode_mismatch;
+pub(crate) use internal::copy_source_guarantee_unavailable;
 pub(crate) use internal::copy_tree;
 #[cfg(any(unix, windows))]
 pub(crate) use internal::create_rooted_directory;
@@ -121,6 +120,7 @@ pub(crate) use internal::sync_parent_dir;
 #[cfg(unix)]
 pub(crate) use internal::sync_rooted_parent;
 pub(crate) use internal::try_random_file_name;
+pub(crate) use internal::validate_copy_source_kind;
 pub(crate) use internal::validate_temp_affixes;
 pub use local_atomic_commit_error::LocalAtomicCommitError;
 pub use local_atomic_destination_state::LocalAtomicDestinationState;

@@ -13,8 +13,12 @@
 #[must_use]
 #[non_exhaustive]
 pub enum LocalCopyMethod {
-    /// Regular file bytes were copied into same-directory staging and
-    /// published.
+    /// One non-directory entry was handled.
+    ///
+    /// Regular-file bytes use same-directory staging. Symbolic links are
+    /// created as link entries without staging file contents. This method is
+    /// also reported when conflict policy skips the entry; inspect statistics
+    /// and achieved guarantees to distinguish these cases.
     StagedFile,
     /// A directory tree was traversed and each file was staged independently.
     Recursive,

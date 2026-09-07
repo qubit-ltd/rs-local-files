@@ -384,7 +384,7 @@ fn test_metadata_and_outcomes_expose_public_values() {
 }
 
 /// Verifies recursive copy statistics distinguish new directories, skipped
-/// files, and overwritten files.
+/// files, merged directories, and overwritten files.
 #[test]
 fn test_recursive_copy_outcome_reports_all_public_statistics() {
     let directory = tempdir().expect("temporary directory should be created");
@@ -424,7 +424,8 @@ fn test_recursive_copy_outcome_reports_all_public_statistics() {
                 .with_conflict(LocalCopyConflictPolicy::Overwrite),
         )
         .expect("existing child should be overwritten");
-    assert_eq!(1, overwritten.stats().overwritten());
+    assert_eq!(0, overwritten.stats().directories());
+    assert_eq!(2, overwritten.stats().overwritten());
 }
 
 /// Verifies public typed copy and rename failures expose diagnostic text,

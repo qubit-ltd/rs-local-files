@@ -11,20 +11,18 @@
 use std::io;
 use std::io::ErrorKind;
 
-use qubit_budget::ManagedResourcePermit;
-
 use super::EntryKind;
 use super::Metadata;
 use super::Path;
 use super::Root;
 use super::copy_file;
+use super::copy_frame::CopyFrame;
 use super::copy_symlink;
 use super::destination::error;
 use super::destination::prepare_directory;
 use super::destination::unsupported_source_error;
 use super::file::preserve_permissions;
 use crate::LocalDurabilityRequirement;
-use crate::LocalResourceKind;
 use crate::local::CopyBudget;
 use crate::local::CopyTreeBackend;
 use crate::local::CopyTreeFrameContext;
@@ -34,17 +32,6 @@ use crate::local::LocalCopyDirStage as Stage;
 use crate::local::LocalCopyDirStats as Statistics;
 use crate::local::copy_tree as run_copy_tree;
 use crate::rooted::DirectoryReader;
-
-/// One active rooted directory reader retained until its children finish.
-#[derive(Debug)]
-struct CopyFrame {
-    source: Path,
-    destination: Path,
-    metadata: Metadata,
-    depth: usize,
-    reader: DirectoryReader,
-    directory_permit: Option<ManagedResourcePermit<LocalResourceKind, usize>>,
-}
 
 /// Copies a rooted directory tree with a lazy depth-first work stack.
 pub(super) fn copy_tree(
@@ -89,17 +76,26 @@ pub(super) fn copy_tree(
     Ok(statistics)
 }
 
+/// Rooted native operations bound to one immutable authority.
 struct RootedCopyBackend<'a> {
+    /// Opened authority shared by all native operations.
     root: &'a Root,
+    /// Fixed policy for this copy.
     options: &'a Options,
+    /// Selected publication durability requirement.
     durability: LocalDurabilityRequirement,
+    /// Resolved source paths for active-ancestor cycle detection.
     active_sources: Vec<Path>,
 }
 
 impl CopyTreeBackend for RootedCopyBackend<'_> {
+    /// Owns the active directory reader and its managed-resource permit.
     type Frame = CopyFrame;
+    /// One lazily enumerated child before scheduler budget checks.
     type Entry = super::super::Entry;
 
+    /// Clones frame coordinates for diagnostics without opening native handles.
+    #[inline]
     fn frame_context(&self, frame: &Self::Frame) -> CopyTreeFrameContext {
         CopyTreeFrameContext {
             source: frame.source.as_path().to_path_buf(),
@@ -108,6 +104,12 @@ impl CopyTreeBackend for RootedCopyBackend<'_> {
         }
     }
 
+    /// Reads one child lazily; `None` means the directory is exhausted.
+    ///
+    /// # Errors
+    ///
+    /// Preserves current statistics and directory coordinates on reader
+    /// failure.
     fn next_entry(&mut self, frame: &mut Self::Frame, stats: &Statistics) -> Result<Option<Self::Entry>, Error> {
         match frame.reader.next_entry() {
             Ok(entry) => Ok(entry),
@@ -121,6 +123,8 @@ impl CopyTreeBackend for RootedCopyBackend<'_> {
         }
     }
 
+    /// Constructs child coordinates once, at one level below the active frame.
+    #[inline]
     fn child_context(&self, frame: &CopyTreeFrameContext, entry: &Self::Entry) -> CopyTreeFrameContext {
         CopyTreeFrameContext {
             source: frame.source.join(entry.name()),
@@ -129,17 +133,26 @@ impl CopyTreeBackend for RootedCopyBackend<'_> {
         }
     }
 
+    /// Publishes one admitted child or returns its owned directory frame.
+    ///
+    /// The scheduler has already charged the entry and checked its depth. This
+    /// backend charges bytes and acquired handles, and records destination
+    /// mutations as they occur. `None` means a leaf was copied or skipped;
+    /// `Some` transfers a child reader and permit to the scheduler.
+    ///
+    /// # Errors
+    ///
+    /// Returns native or policy failures with all recorded partial effects.
     fn process_entry(
         &mut self,
         entry: Self::Entry,
         frame: &CopyTreeFrameContext,
-        frames: &mut Vec<Self::Frame>,
         stats: &mut Statistics,
         budget: &mut CopyBudget,
-    ) -> Result<(), Error> {
-        let source_child = Path::new(frame.source.join(entry.name())).expect("scheduler preserves rooted source paths");
-        let destination_child =
-            Path::new(frame.destination.join(entry.name())).expect("scheduler preserves rooted destination paths");
+    ) -> Result<Option<Self::Frame>, Error> {
+        let source_child = Path::new(&frame.source).expect("scheduler preserves rooted source paths");
+        let destination_child = Path::new(&frame.destination).expect("scheduler preserves rooted destination paths");
+        let mut child_frame = None;
         match entry.metadata().kind() {
             EntryKind::File => {
                 *stats = copy_file(
@@ -155,17 +168,16 @@ impl CopyTreeBackend for RootedCopyBackend<'_> {
             EntryKind::Directory => {
                 if prepare_directory(self.root, &source_child, &destination_child, self.options, stats)? {
                     let current = *stats;
-                    push_directory(
+                    child_frame = Some(enter_directory(
                         self.root,
                         &source_child,
                         &destination_child,
                         entry.metadata(),
-                        frame.depth.saturating_add(1),
-                        frames,
+                        frame.depth,
                         &mut self.active_sources,
                         budget,
                         current,
-                    )?;
+                    )?);
                 }
             }
             EntryKind::Symlink => {
@@ -203,17 +215,16 @@ impl CopyTreeBackend for RootedCopyBackend<'_> {
                     if resolved_metadata.kind() == EntryKind::Directory {
                         if prepare_directory(self.root, &resolved, &destination_child, self.options, stats)? {
                             let current = *stats;
-                            push_directory(
+                            child_frame = Some(enter_directory(
                                 self.root,
                                 &resolved,
                                 &destination_child,
                                 resolved_metadata,
-                                frame.depth.saturating_add(1),
-                                frames,
+                                frame.depth,
                                 &mut self.active_sources,
                                 budget,
                                 current,
-                            )?;
+                            )?);
                         }
                     } else {
                         *stats = copy_symlink(
@@ -256,9 +267,16 @@ impl CopyTreeBackend for RootedCopyBackend<'_> {
                 ));
             }
         }
-        Ok(())
+        Ok(child_frame)
     }
 
+    /// Applies final directory permissions after all descendants are processed.
+    ///
+    /// Consumes the frame, releasing its reader and permit on success or error.
+    ///
+    /// # Errors
+    ///
+    /// Reports permission preservation failures with current copy statistics.
     fn finish_frame(&mut self, frame: Self::Frame, stats: &mut Statistics) -> Result<(), Error> {
         preserve_permissions(
             self.root,
@@ -269,10 +287,14 @@ impl CopyTreeBackend for RootedCopyBackend<'_> {
             *stats,
         )?;
         self.active_sources.pop();
+        // Close the reader before making its capacity available again.
+        drop(frame.reader);
         drop(frame.directory_permit);
         Ok(())
     }
 
+    /// Attaches scheduler failure coordinates and a snapshot of partial
+    /// effects.
     fn error(
         &self,
         stage: Stage,
@@ -286,6 +308,7 @@ impl CopyTreeBackend for RootedCopyBackend<'_> {
     }
 }
 
+/// Opens the initial lazy reader or reports its path and partial statistics.
 fn open_root_reader(
     root: &Root,
     source: &Path,
@@ -318,18 +341,21 @@ fn open_root_reader(
     })
 }
 
+/// Opens one child reader after cycle and permit checks.
+///
+/// Returns an owned frame for the scheduler; errors release acquired capacity
+/// and retain any destination changes already recorded by the caller.
 #[allow(clippy::too_many_arguments)]
-fn push_directory(
+fn enter_directory(
     root: &Root,
     source: &Path,
     destination: &Path,
     metadata: Metadata,
     depth: usize,
-    frames: &mut Vec<CopyFrame>,
     active_sources: &mut Vec<Path>,
     budget: &CopyBudget,
     statistics: Statistics,
-) -> Result<(), Error> {
+) -> Result<CopyFrame, Error> {
     if active_sources.iter().any(|active| active == source) {
         return Err(error(
             Stage::InspectSource,
@@ -373,13 +399,12 @@ fn push_directory(
         }
     };
     active_sources.push(source.clone());
-    frames.push(CopyFrame {
+    Ok(CopyFrame {
         source: source.clone(),
         destination: destination.clone(),
         metadata,
         depth,
         reader,
         directory_permit,
-    });
-    Ok(())
+    })
 }

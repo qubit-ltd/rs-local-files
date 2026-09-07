@@ -34,17 +34,20 @@ use crate::local::internal::temp_entry::create_private_dir;
 #[cfg(feature = "test-support")]
 use crate::local::internal::test_support;
 
-/// Ensures a directory-copy destination exists as a real directory.
+/// Prepares a real directory destination unless conflict policy skips it.
 ///
 /// # Parameters
 ///
 /// * `dst` - Destination directory path.
+/// * `conflict` - Same-kind conflict policy passed to the shared decision.
 /// * `type_conflict` - Policy for an existing non-directory destination.
 ///
 /// # Returns
 ///
-/// `true` when this call created the destination, or `false` when a real
-/// directory already existed or appeared concurrently.
+/// The preparation action and whether this call created the directory.
+/// `Replace` preserves replacement accounting separately from creation;
+/// `Merge` denotes an existing real directory, and `Skip` preserves an
+/// incompatible destination. A concurrent creator can make creation false.
 ///
 /// # Errors
 ///
@@ -53,17 +56,18 @@ pub(super) fn ensure_copy_destination_dir(
     dst: &Path,
     conflict: LocalCopyConflictPolicy,
     type_conflict: LocalCopyTypeConflictPolicy,
-) -> Result<CopyDestinationAction> {
+) -> Result<(CopyDestinationAction, bool)> {
     let action = prepare_existing_directory_destination(dst, conflict, type_conflict)?;
-    if action != CopyDestinationAction::Create {
-        return Ok(action);
+    if !matches!(action, CopyDestinationAction::Create | CopyDestinationAction::Replace) {
+        return Ok((action, false));
     }
     create_copy_destination_dir(dst).map(|created| {
-        if created {
-            CopyDestinationAction::Create
-        } else {
+        let action = if !created && action == CopyDestinationAction::Create {
             CopyDestinationAction::Merge
-        }
+        } else {
+            action
+        };
+        (action, created)
     })
 }
 
@@ -149,11 +153,14 @@ pub(super) fn remove_destination_directory_if_unchanged(dst: &Path) -> Result<()
 /// # Parameters
 ///
 /// * `dst` - Destination directory path.
+/// * `conflict` - Same-kind conflict policy passed to the shared decision.
 /// * `type_conflict` - Policy for an existing non-directory.
 ///
 /// # Returns
 ///
-/// `true` when a real destination directory already exists.
+/// `Create` when the path is absent, `Replace` after permitted incompatible
+/// entry removal, `Merge` for a real directory, or `Skip` when policy preserves
+/// the entry.
 ///
 /// # Errors
 ///
@@ -176,7 +183,6 @@ fn prepare_existing_directory_destination(
         })?;
     if action == CopyDestinationAction::Replace {
         remove_destination_non_directory_if_unchanged(dst)?;
-        return Ok(CopyDestinationAction::Create);
     }
     Ok(action)
 }

@@ -9,6 +9,8 @@
 // Host copy operations.
 // qubit-style: allow source-test-pair
 
+#[cfg(windows)]
+use std::os::windows::fs::FileTypeExt;
 use std::time::Instant;
 
 use super::CopyDestinationAction;
@@ -50,6 +52,7 @@ impl HostLocalFileSystem {
     /// - `target`: Native destination entry.
     /// - `options`: Copy conflict, metadata, and guarantee policy.
     /// - `symlink_policy`: Policy for symbolic links encountered in a tree.
+    /// - `started_at`: Original operation start, including preflight time.
     ///
     /// # Returns
     ///
@@ -79,6 +82,7 @@ impl HostLocalFileSystem {
     /// - `target`: Native destination entry.
     /// - `options`: Copy conflict, metadata, and guarantee policy.
     /// - `symlink_policy`: Policy for symbolic links encountered in a tree.
+    /// - `started_at`: Original operation start, including preflight time.
     /// - `scope_root`: Optional canonical root that followed links must stay
     ///   beneath.
     ///
@@ -187,42 +191,31 @@ impl HostLocalFileSystem {
                 return Err(copy_failure_unchanged(copy_io_error(source, target, error)));
             }
         };
+        let source_kind = crate::LocalFileMetadata::from_native(&source_metadata).kind();
+        crate::local::validate_copy_source_kind(source_kind, options.source_mode()).map_err(|kind| {
+            copy_failure_unchanged(
+                LocalFileError::new(kind, LocalFileOperation::Copy)
+                    .with_reason("copy source kind is unsupported or does not satisfy the selected source mode")
+                    .with_path(source.to_path_buf())
+                    .with_target(target.to_path_buf()),
+            )
+        })?;
         reject_copy_alias(source, target, &source_metadata).map_err(copy_failure_unchanged)?;
+        if crate::local::copy_source_guarantee_unavailable(source_kind, options.atomicity(), options.durability()) {
+            return Err(copy_failure_unchanged(
+                LocalFileError::new(LocalFileErrorKind::RequirementNotMet, LocalFileOperation::Copy)
+                    .with_reason("required copy guarantees are unavailable for directory and symbolic-link sources")
+                    .with_path(source.to_path_buf())
+                    .with_target(target.to_path_buf()),
+            ));
+        }
         if source_metadata.file_type().is_symlink() {
-            if options.source_mode() == crate::LocalCopySourceMode::Tree {
-                return Err(copy_failure_unchanged(
-                    LocalFileError::new(LocalFileErrorKind::RequirementNotMet, LocalFileOperation::Copy)
-                        .with_reason("a symbolic-link entry is not a directory tree source")
-                        .with_path(source.to_path_buf())
-                        .with_target(target.to_path_buf()),
-                ));
-            }
             return copy_symlink_entry(source, target, options, &mut budget);
         }
         let effective_metadata = &source_metadata;
 
         let source_is_directory = effective_metadata.file_type().is_dir();
         if source_is_directory {
-            if crate::local::copy_source_mode_mismatch(source_is_directory, options.source_mode()) {
-                return Err(copy_failure_unchanged(
-                    LocalFileError::new(LocalFileErrorKind::RequirementNotMet, LocalFileOperation::Copy)
-                        .with_reason("copy source is a directory but file mode was required")
-                        .with_path(source.to_path_buf())
-                        .with_target(target.to_path_buf()),
-                ));
-            }
-            if crate::local::copy_directory_guarantee_unavailable(
-                source_is_directory,
-                options.atomicity(),
-                options.durability(),
-            ) {
-                return Err(copy_failure_unchanged(
-                    LocalFileError::new(LocalFileErrorKind::RequirementNotMet, LocalFileOperation::Copy)
-                        .with_reason("required directory copy guarantees are unavailable on this host")
-                        .with_path(source.to_path_buf())
-                        .with_target(target.to_path_buf()),
-                ));
-            }
             if let Err(error) = prepare_copy_parent(target, options) {
                 return Err(copy_failure_unchanged(copy_io_error(source, target, error)));
             }
@@ -242,21 +235,6 @@ impl HostLocalFileSystem {
                 false,
                 false,
                 options.preserve_metadata(),
-            ));
-        }
-        if !effective_metadata.file_type().is_file() {
-            return Err(copy_failure_unchanged(
-                LocalFileError::new(LocalFileErrorKind::TypeConflict, LocalFileOperation::Copy)
-                    .with_path(source.to_path_buf())
-                    .with_target(target.to_path_buf()),
-            ));
-        }
-        if crate::local::copy_source_mode_mismatch(source_is_directory, options.source_mode()) {
-            return Err(copy_failure_unchanged(
-                LocalFileError::new(LocalFileErrorKind::RequirementNotMet, LocalFileOperation::Copy)
-                    .with_reason("copy source is a file but directory mode was required")
-                    .with_path(source.to_path_buf())
-                    .with_target(target.to_path_buf()),
             ));
         }
         let target_is_directory = match destination_is_directory(target) {
@@ -312,6 +290,10 @@ impl HostLocalFileSystem {
 }
 
 /// Creates missing copy target parents and returns directories requiring sync.
+///
+/// Returns newly observed missing ancestors in shallow-to-deep order, or an
+/// empty list when parent creation is disabled. Inspection or creation errors
+/// propagate; successfully created ancestors are not rolled back.
 // qubit-style: allow coverage-cfg
 #[cfg_attr(not(coverage), inline)]
 #[cfg_attr(coverage, inline(never))]
@@ -324,6 +306,13 @@ fn prepare_copy_parent(target: &Path, options: &LocalCopyOptions) -> io::Result<
 }
 
 /// Copies a final symbolic-link entry without dereferencing it.
+///
+/// The caller has validated source mode, required atomicity, and platform
+/// durability support. Applies destination conflict policy, checks the
+/// deadline, then creates parents and publishes the stored link target.
+/// Returns native or budget failures with the strongest known destination
+/// state. Successful required durability synchronizes the target parent and
+/// all newly created ancestor entries.
 #[allow(clippy::result_large_err)]
 fn copy_symlink_entry(
     source: &Path,
@@ -377,14 +366,16 @@ fn copy_symlink_entry(
     if let Err(error) = budget.check_deadline() {
         return Err(copy_failure_unchanged(copy_io_error(source, target, error)));
     }
-    if let Err(error) = prepare_copy_parent(target, options) {
-        return Err(copy_failure_unchanged(copy_io_error(source, target, error)));
-    }
+    let parent_dirs_to_sync = prepare_copy_parent(target, options)
+        .map_err(|error| copy_failure_unchanged(copy_io_error(source, target, error)))?;
     if action == CopyDestinationAction::Replace {
-        let remove_result = if existing_is_directory == Some(true) {
-            fs::remove_dir_all(target)
-        } else {
-            fs::remove_file(target)
+        let remove_result = match existing.as_ref() {
+            Some(metadata) if metadata.file_type().is_dir() => fs::remove_dir_all(target),
+            #[cfg(windows)]
+            Some(metadata) if metadata.file_type().is_symlink_dir() => {
+                crate::local::internal::file_move::remove_directory_symlink(target)
+            }
+            _ => fs::remove_file(target),
         };
         if let Err(error) = remove_result {
             return Err(copy_failure_indeterminate(copy_io_error(source, target, error)));
@@ -409,9 +400,13 @@ fn copy_symlink_entry(
     let public_stats = LocalCopyStats::from_internal(stats);
     let durable = match options.durability() {
         crate::LocalDurabilityRequirement::NotRequired => false,
-        crate::LocalDurabilityRequirement::Preferred => sync_parent_directory(target).is_ok(),
+        crate::LocalDurabilityRequirement::Preferred => sync_parent_directory(target)
+            .and_then(|()| sync_created_parent_directories(&parent_dirs_to_sync))
+            .is_ok(),
         crate::LocalDurabilityRequirement::Required => {
-            if let Err(error) = sync_parent_directory(target) {
+            if let Err(error) =
+                sync_parent_directory(target).and_then(|()| sync_created_parent_directories(&parent_dirs_to_sync))
+            {
                 return Err(copy_failure_published(
                     copy_io_error(source, target, error),
                     public_stats,
@@ -430,6 +425,10 @@ fn copy_symlink_entry(
 }
 
 /// Creates a symbolic link with the platform-specific link-kind API.
+///
+/// Reads the source link kind without following its target on Windows.
+/// Returns source inspection or link-creation errors, or `Unsupported` where
+/// native symbolic links are unavailable.
 fn create_symlink_entry(link_target: &Path, _source: &Path, target: &Path) -> io::Result<()> {
     #[cfg(unix)]
     {
@@ -437,7 +436,7 @@ fn create_symlink_entry(link_target: &Path, _source: &Path, target: &Path) -> io
     }
     #[cfg(windows)]
     {
-        if fs::metadata(_source).is_ok_and(|metadata| metadata.is_dir()) {
+        if fs::symlink_metadata(_source)?.file_type().is_symlink_dir() {
             std::os::windows::fs::symlink_dir(link_target, target)
         } else {
             std::os::windows::fs::symlink_file(link_target, target)
@@ -454,6 +453,9 @@ fn create_symlink_entry(link_target: &Path, _source: &Path, target: &Path) -> io
 }
 
 /// Synchronizes newly created copy target parents from deepest to shallowest.
+///
+/// Returns the first Unix parent synchronization error. Other platforms
+/// perform no work here; required durability is rejected by capability checks.
 fn sync_created_parent_directories(paths: &[PathBuf]) -> io::Result<()> {
     #[cfg(unix)]
     {
@@ -479,7 +481,8 @@ fn sync_created_parent_directories(paths: &[PathBuf]) -> io::Result<()> {
 ///
 /// # Errors
 ///
-/// Returns `LocalFileError` when both paths identify the same entry.
+/// Returns `LocalFileError` when both paths identify the same entry, or when
+/// target metadata or native file identity cannot be inspected.
 fn reject_copy_alias(source: &Path, target: &Path, source_metadata: &fs::Metadata) -> LocalResult<()> {
     if source == target {
         return Err(copy_alias_error(source, target));

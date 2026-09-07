@@ -42,7 +42,7 @@ pub struct LocalCopyOptions {
     preserve_metadata: LocalMetadataPreservePolicy,
     /// Optional symbolic-link policy overriding the owning filesystem.
     symlink: Option<LocalSymlinkPolicy>,
-    /// Whether copying a directory tree is authorized.
+    /// Source entry kinds accepted by the operation.
     source_mode: LocalCopySourceMode,
     /// Whether missing target parent directories are created.
     create_parent: bool,
@@ -220,22 +220,37 @@ impl LocalCopyOptions {
         self
     }
 
-    /// Requires a regular file source.
+    /// Selects the complete source interpretation for this copy.
+    ///
+    /// `Auto` explicitly resets a previously configured entry or tree mode.
+    /// Every mode rejects special files before creating destination parents.
+    #[must_use = "use the configured copy options"]
+    #[inline(always)]
+    pub const fn with_source_mode(mut self, mode: LocalCopySourceMode) -> Self {
+        self.source_mode = mode;
+        self
+    }
+
+    /// Requires one regular file or symbolic-link entry.
+    ///
+    /// Final links are copied as links without opening their targets.
+    /// Directories fail with `RequirementNotMet`; special files fail with
+    /// `Unsupported`.
+    /// Link copies also reject required atomicity before modifying the
+    /// destination; their durability depends on namespace synchronization.
     #[must_use = "use the configured copy options"]
     #[cfg_attr(not(coverage), inline(always))]
     #[cfg_attr(coverage, inline(never))]
-    pub const fn with_file_source(mut self) -> Self {
-        self.source_mode = LocalCopySourceMode::File;
-        self
+    pub const fn with_entry_source(self) -> Self {
+        self.with_source_mode(LocalCopySourceMode::Entry)
     }
 
     /// Requires a directory-tree source.
     #[must_use = "use the configured copy options"]
     #[cfg_attr(not(coverage), inline(always))]
     #[cfg_attr(coverage, inline(never))]
-    pub const fn with_tree_source(mut self) -> Self {
-        self.source_mode = LocalCopySourceMode::Tree;
-        self
+    pub const fn with_tree_source(self) -> Self {
+        self.with_source_mode(LocalCopySourceMode::Tree)
     }
 
     /// Creates missing target parent directories before copying.

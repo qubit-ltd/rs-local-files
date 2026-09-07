@@ -14,7 +14,7 @@
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 #[must_use]
 pub struct LocalCopyDirStats {
-    /// Number of regular files copied.
+    /// Number of regular files and symbolic-link entries copied.
     pub files: u64,
 
     /// Number of destination directories created.
@@ -23,15 +23,18 @@ pub struct LocalCopyDirStats {
     /// Number of bytes copied from regular files.
     pub bytes: u64,
 
-    /// Number of existing destination file entries skipped.
+    /// Number of source entries skipped because of destination conflicts.
     pub skipped: u64,
 
-    /// Number of existing destination entries replaced or merged.
+    /// Number of existing destination entries replaced, including directories
+    /// merged under the Overwrite conflict policy.
     pub overwritten: u64,
-    /// Whether a completed file publication required a prior directory
-    /// removal.
+    /// Whether a completed publication used direct symbolic-link creation or
+    /// required a prior directory removal.
     pub non_atomic_publication: bool,
-    /// Whether every copied regular file was synchronized before publication.
+    /// Whether all copied regular files were synchronized, with no copied
+    /// symbolic-link entry. Parent-directory synchronization is tracked
+    /// separately.
     pub files_durable: bool,
 }
 
@@ -51,10 +54,10 @@ impl Default for LocalCopyDirStats {
 }
 #[allow(dead_code)]
 impl LocalCopyDirStats {
-    /// Returns the number of regular files copied.
+    /// Returns the number of regular files and symbolic-link entries copied.
     ///
     /// # Returns
-    /// Copied regular-file count.
+    /// Copied non-directory entry count.
     #[must_use]
     pub const fn files(&self) -> u64 {
         self.files
