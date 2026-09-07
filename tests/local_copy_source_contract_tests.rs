@@ -337,8 +337,14 @@ fn test_link_copy_overwrites_directory_link_without_removing_referent() {
     for rooted in [false, true] {
         for tree in [false, true] {
             let directory = tempdir().expect("fixture should exist");
-            let source = directory.path().join("source");
-            let target = directory.path().join("target");
+            // macOS temp paths may traverse /var -> /private/var. Resolve only
+            // the fixture parent, before creating the links under test.
+            #[cfg(target_os = "macos")]
+            let parent = fs::canonicalize(directory.path()).expect("fixture parent should resolve");
+            #[cfg(not(target_os = "macos"))]
+            let parent = directory.path().to_path_buf();
+            let source = parent.join("source");
+            let target = parent.join("target");
             fs::create_dir(directory.path().join("old-referent")).expect("old referent should exist");
             fs::write(directory.path().join("old-referent/sentinel"), b"retained")
                 .expect("referent sentinel should exist");
