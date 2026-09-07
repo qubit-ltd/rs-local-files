@@ -157,6 +157,11 @@ Linux、Windows 和 macOS 的行为会在运行时测试。FreeBSD 和 Android �
 基础错误的 `effect_state()` 返回 `None` 表示没有足够的副作用证据，不能当作
 `Unchanged`。
 
+## 进一步阅读
+
+配置会在执行文件系统 I/O 前拒绝无法满足的保证，复制失败会区分未修改、
+部分发布、已发布和结果不确定的目标。完整错误与清理语义请参阅用户指南。
+
 ## 测试
 
 本地打包验证通过 `.cargo/config.toml` 保留锁文件固定的 `qubit-redact` Git 源。

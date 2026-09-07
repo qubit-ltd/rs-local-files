@@ -134,27 +134,44 @@ fn count_entries(filesystem: &LocalFileSystem, path: &Path, options: &LocalListO
         .expect("benchmark traversal should complete without errors")
 }
 
+/// Measures copying one immutable tree into a fresh destination per iteration.
 fn bench_copy(c: &mut Criterion) {
     let directory = tempdir().expect("benchmark directory should be created");
     let source = directory.path().join("source");
     fs::create_dir(&source).expect("benchmark source should be created");
     fs::write(source.join("payload"), b"payload").expect("benchmark source file should be written");
-    let target = directory.path().join("target");
+    let filesystem = LocalFileSystem::host().expect("Host filesystem should open");
+    let options = LocalCopyOptions::default();
+    let (fixture, target) = fresh_copy_target();
+    let outcome = filesystem
+        .copy_with_options(&source, &target, &options)
+        .expect("copy fixture should succeed");
+    assert_eq!(outcome.stats().files(), 1);
+    assert_eq!(
+        fs::read(target.join("payload")).expect("copied fixture should be readable"),
+        b"payload"
+    );
+    drop(fixture);
     c.bench_function("copy", |b| {
-        b.iter_batched(
-            || {
-                let _ = fs::remove_dir_all(&target);
-            },
-            |_| {
-                let outcome = LocalFileSystem::host()
-                    .expect("Host filesystem should open")
-                    .copy_with_options(black_box(&source), black_box(&target), &LocalCopyOptions::default())
+        b.iter_batched_ref(
+            fresh_copy_target,
+            |(_, target)| {
+                let outcome = filesystem
+                    .copy_with_options(black_box(&source), black_box(target), &options)
                     .expect("benchmark copy should succeed");
-                black_box(outcome.stats().files());
+                let _ = black_box(outcome);
             },
-            criterion::BatchSize::SmallInput,
+            criterion::BatchSize::PerIteration,
         );
     });
+}
+
+/// Owns an absent copy target whose setup and destruction are outside timing.
+fn fresh_copy_target() -> (tempfile::TempDir, PathBuf) {
+    let directory = tempdir().expect("copy target parent should be created");
+    let target = directory.path().join("target");
+    assert!(!target.exists(), "copy iteration must start with an absent target");
+    (directory, target)
 }
 
 /// Measures early entry-budget rejection without timing fixture cleanup.
@@ -300,51 +317,75 @@ fn assert_copy_limit(result: LocalCopyResult, resource: LocalResourceKind) {
     );
 }
 
+/// Measures the first installation performed by a Host CreateOrReplace writer.
 fn bench_writer(c: &mut Criterion) {
-    let directory = tempdir().expect("benchmark directory should be created");
-    let target = directory.path().join("target");
-    c.bench_function("writer", |b| {
-        b.iter_batched(
-            || {
-                let _ = fs::remove_file(&target);
-            },
-            |_| {
-                let mut writer = LocalFileSystem::host()
-                    .expect("Host filesystem should open")
-                    .open_writer_with_options(
-                        black_box(&target),
-                        &LocalWriteOptions::new(LocalWriteMode::CreateOrReplace),
-                    )
-                    .expect("benchmark writer should open");
-                writer.write_all(b"payload").expect("benchmark write should succeed");
-                let _ = black_box(writer.commit().expect("benchmark commit should succeed"));
-            },
-            criterion::BatchSize::SmallInput,
-        );
-    });
+    bench_fresh_writer(c, "writer", false);
 }
 
+/// Measures the first installation performed by a Rooted CreateOrReplace
+/// writer.
 fn bench_rooted_writer(c: &mut Criterion) {
-    let directory = tempdir().expect("rooted benchmark directory should exist");
-    let filesystem = LocalFileSystem::rooted(directory.path()).expect("rooted benchmark filesystem should open");
-    let target = std::path::Path::new("target");
-    c.bench_function("rooted_writer", |b| {
-        b.iter_batched(
-            || {
-                let _ = fs::remove_file(directory.path().join(target));
-            },
-            |_| {
-                let mut writer = filesystem
-                    .open_writer_with_options(target, &LocalWriteOptions::new(LocalWriteMode::CreateOrReplace))
-                    .expect("rooted benchmark writer should open");
-                writer
-                    .write_all(b"payload")
-                    .expect("rooted benchmark write should succeed");
-                let outcome = writer.commit().expect("rooted benchmark commit should succeed");
-                let _ = black_box(outcome.state());
-                black_box(outcome.bytes_written());
-            },
-            criterion::BatchSize::SmallInput,
+    bench_fresh_writer(c, "rooted_writer", true);
+}
+
+/// Builds a scope and absent target, keeping authority construction outside
+/// timing.
+fn fresh_writer_target(rooted: bool) -> (LocalFileSystem, PathBuf, tempfile::TempDir) {
+    let directory = tempdir().expect("writer target parent should be created");
+    let (filesystem, target) = if rooted {
+        (
+            LocalFileSystem::rooted(directory.path()).expect("Rooted filesystem should open"),
+            PathBuf::from("target"),
+        )
+    } else {
+        (
+            LocalFileSystem::host().expect("Host filesystem should open"),
+            directory.path().join("target"),
+        )
+    };
+    assert!(
+        !directory.path().join("target").exists(),
+        "writer iteration must start with an absent target"
+    );
+    (filesystem, target, directory)
+}
+
+/// Writes and commits the fixed benchmark payload through the supplied scope.
+fn write_benchmark_payload(filesystem: &LocalFileSystem, target: &Path) {
+    let mut writer = filesystem
+        .open_writer_with_options(
+            black_box(target),
+            &LocalWriteOptions::new(LocalWriteMode::CreateOrReplace),
+        )
+        .expect("benchmark writer should open");
+    writer.write_all(b"payload").expect("benchmark write should succeed");
+    let outcome = writer.commit().expect("benchmark commit should succeed");
+    let _ = black_box(outcome);
+}
+
+/// Checks the fixture once, then measures I/O while borrowing per-iteration
+/// resources.
+fn bench_fresh_writer(c: &mut Criterion, name: &str, rooted: bool) {
+    {
+        let (filesystem, target, directory) = fresh_writer_target(rooted);
+        write_benchmark_payload(&filesystem, &target);
+        assert_eq!(
+            fs::read(directory.path().join("target")).expect("writer fixture should be readable"),
+            b"payload"
+        );
+        assert_eq!(
+            filesystem
+                .metadata(&target)
+                .expect("writer metadata should be readable")
+                .len(),
+            7
+        );
+    }
+    c.bench_function(name, |b| {
+        b.iter_batched_ref(
+            || fresh_writer_target(rooted),
+            |(filesystem, target, _)| write_benchmark_payload(filesystem, target),
+            criterion::BatchSize::PerIteration,
         );
     });
 }

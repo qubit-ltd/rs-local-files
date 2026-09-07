@@ -236,6 +236,9 @@ impl LocalTempFile {
     ///
     /// Consumes this guard. Resolves `target` using its creation-time namespace
     /// and PWD; `options` selects replacement, parent creation, and durability.
+    /// A relative target requires a PWD captured when the resource was created;
+    /// resources created with an absolute Host parent therefore reject relative
+    /// targets with `InvalidPath` and retain the resource in the error.
     /// Returns the achieved publication guarantees and any sandbox cleanup
     /// error after a successful install.
     ///

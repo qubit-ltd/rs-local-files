@@ -158,3 +158,29 @@ fn assert_codec_error(error: LocalFileError, expected: LocalPathCodecError) {
         Some(LocalFileErrorSource::PathCodec(actual)) if *actual == expected,
     ));
 }
+
+/// Exercises direct canonical decoding independently of encoder-generated
+/// input.
+#[test]
+fn test_decode_component_direct_text_boundaries() {
+    for text in ["%", "%0", "%GG"] {
+        assert_codec_error(
+            LocalPathCodec::decode_component(text).expect_err("malformed escape must fail"),
+            LocalPathCodecError::InvalidEscape { offset: 0 },
+        );
+    }
+    for text in ["%0a", "%41", "%2F"] {
+        assert_codec_error(
+            LocalPathCodec::decode_component(text).expect_err("noncanonical text must fail"),
+            LocalPathCodecError::NonCanonicalText,
+        );
+    }
+    for (text, native) in [("%0A", "\n"), ("%25", "%"), ("/", "/"), ("..", "..")] {
+        let decoded = LocalPathCodec::decode_component(text).expect("canonical text must decode");
+        assert_eq!(decoded, OsStr::new(native));
+        assert_eq!(
+            LocalPathCodec::encode_component(&decoded).expect("decoded text must encode"),
+            text
+        );
+    }
+}

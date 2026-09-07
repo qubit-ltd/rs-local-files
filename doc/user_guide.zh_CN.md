@@ -4,6 +4,13 @@
 [设计文档](local_file_system_design.zh_CN.md) ·
 [API 文档](https://docs.rs/qubit-local-files)
 
+## 操作契约
+
+`LocalFileSystem` 会在解析路径或修改文件系统前校验静态选项组合。复制失败
+会报告已证明的最强目标状态：`Unchanged` 表示已证明没有修改目标，
+`Indeterminate` 表示无法确定原生修改的结果。即使打开读取器失败，
+`read_prefix` 错误仍保留外层的 `Read` 操作。
+
 ## 手册目标与读者
 
 本手册面向 Rust 1.94 及以上版本的 `qubit-local-files` 0.3 使用者，适用于直接操作主机

@@ -21,6 +21,13 @@ const MAX_FUZZ_INPUT_LEN: usize = 4096;
 fuzz_target!(|data: &[u8]| {
     let data = &data[..data.len().min(MAX_FUZZ_INPUT_LEN)];
 
+    if let Ok(text) = std::str::from_utf8(data) {
+        if let Ok(decoded) = LocalPathCodec::decode_component(text) {
+            let encoded = LocalPathCodec::encode_component(&decoded).expect("successfully decoded text must encode");
+            assert_eq!(encoded, text, "decoder must accept only canonical text");
+        }
+    }
+
     #[cfg(unix)]
     if !data.contains(&0) {
         use std::os::unix::ffi::OsStringExt;
