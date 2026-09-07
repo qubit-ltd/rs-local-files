@@ -3,8 +3,7 @@
 //
 //    SPDX-License-Identifier: Apache-2.0
 //
-//    Licensed under the Apache License, Version 2.0 (the "License");
-//    you may not use this file except in compliance with the License.
+//    Licensed under the Apache License, Version 2.0.
 // =============================================================================
 //! Component-at-a-time observation for rooted path resolution.
 
@@ -24,25 +23,21 @@ use super::Metadata;
 /// previous handle, so the number of live descriptors stays constant with
 /// path depth.
 pub(crate) struct RootedResolutionCursor {
+    /// The sole owned directory authority, replaced only after successful
+    /// descent.
     current: File,
-    #[cfg(test)]
-    observation: std::cell::Cell<ResolutionObservation>,
 }
 
 impl RootedResolutionCursor {
     /// Creates a cursor from an already-opened rooted directory authority.
     pub(crate) fn new(current: File) -> Result<Self> {
-        Ok(Self {
-            current,
-            #[cfg(test)]
-            observation: std::cell::Cell::new(ResolutionObservation::default()),
-        })
+        Ok(Self { current })
     }
 
     /// Reads one child without following a final symbolic link.
     pub(crate) fn metadata(&self, name: &OsStr) -> Result<Metadata> {
         #[cfg(test)]
-        self.observation.update_metadata();
+        crate::tests::rooted::support::resolution_observation::record_metadata();
         #[cfg(unix)]
         {
             let status = crate::local::read_rooted_component_metadata(&self.current, name)?;
@@ -65,7 +60,7 @@ impl RootedResolutionCursor {
     /// The current handle is left unchanged if opening or verification fails.
     pub(crate) fn descend(&mut self, name: &OsStr) -> Result<()> {
         #[cfg(test)]
-        self.observation.update_directory_open();
+        crate::tests::rooted::support::resolution_observation::record_directory_open();
         #[cfg(any(unix, windows))]
         {
             let next = crate::local::open_rooted_component_directory(&self.current, name)?;
@@ -78,13 +73,6 @@ impl RootedResolutionCursor {
             Err(unsupported_resolution_error())
         }
     }
-
-    /// Returns the private primitive-call observations used by complexity
-    /// regression tests.
-    #[cfg(test)]
-    fn observation(&self) -> ResolutionObservation {
-        self.observation.get()
-    }
 }
 
 /// Returns the stable unsupported-platform error for rooted cursors.
@@ -96,88 +84,75 @@ fn unsupported_resolution_error() -> Error {
     )
 }
 
-#[cfg(test)]
-#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
-struct ResolutionObservation {
-    metadata_calls: usize,
-    directory_opens: usize,
-}
-
-#[cfg(test)]
-trait ObservationCellExt {
-    fn update_metadata(&self);
-    fn update_directory_open(&self);
-}
-
-#[cfg(test)]
-impl ObservationCellExt for std::cell::Cell<ResolutionObservation> {
-    fn update_metadata(&self) {
-        let mut observation = self.get();
-        observation.metadata_calls += 1;
-        self.set(observation);
-    }
-
-    fn update_directory_open(&self) {
-        let mut observation = self.get();
-        observation.directory_opens += 1;
-        self.set(observation);
-    }
-}
-
-#[cfg(test)]
+#[cfg(all(test, any(unix, windows)))]
 mod tests {
     use std::ffi::OsStr;
     use std::fs;
+    #[cfg(unix)]
+    use std::os::fd::AsRawFd;
+    #[cfg(windows)]
+    use std::os::windows::io::AsRawHandle;
 
     use super::RootedResolutionCursor;
+    use crate::rooted::EntryKind;
     use crate::rooted::Root;
 
+    /// Runs alone so another test cannot reuse a just-closed native handle.
     #[test]
-    fn cursor_observes_components_linearly_and_releases_previous_directory() {
-        let temporary = tempfile::tempdir().expect("temporary directory should be created");
-        fs::create_dir_all(temporary.path().join("a/b/c/d")).expect("fixture should be created");
-        fs::write(temporary.path().join("a/b/c/d/file"), b"payload").expect("file should be created");
-        let root = Root::open(temporary.path()).expect("root should open");
-        let mut cursor = RootedResolutionCursor::new(root.try_clone_authority().expect("root should clone"))
-            .expect("cursor should open");
-
-        for component in ["a", "b", "c", "d"] {
-            assert_eq!(
-                crate::rooted::EntryKind::Directory,
-                cursor
-                    .metadata(OsStr::new(component))
-                    .expect("directory metadata should read")
-                    .kind(),
-            );
-            cursor.descend(OsStr::new(component)).expect("directory should open");
+    fn test_cursor_releases_replaced_authority_and_retains_failed_descent() {
+        const CHILD: &str = "QUBIT_CURSOR_HANDLE_LIFECYCLE_CHILD";
+        if std::env::var_os(CHILD).is_none() {
+            let status = std::process::Command::new(std::env::current_exe().expect("test executable should exist"))
+                .args(["--exact", "rooted::rooted_resolution_cursor::tests::test_cursor_releases_replaced_authority_and_retains_failed_descent", "--test-threads=1"])
+                .env(CHILD, "1")
+                .status().expect("isolated lifecycle test should launch");
+            assert!(status.success());
+            return;
         }
+        let temporary = tempfile::tempdir().expect("temporary directory should exist");
+        fs::create_dir(temporary.path().join("child")).expect("child should exist");
+        fs::write(temporary.path().join("child/file"), b"payload").expect("file should exist");
+        let root = Root::open(temporary.path()).expect("root should open");
+        let mut cursor = RootedResolutionCursor::new(root.try_clone_authority().expect("authority should clone"))
+            .expect("cursor should open");
+        #[cfg(unix)]
+        let old = cursor.current.as_raw_fd();
+        #[cfg(windows)]
+        let old = cursor.current.as_raw_handle();
+        cursor
+            .descend(OsStr::new("child"))
+            .expect("directory descent should succeed");
+        #[cfg(unix)]
+        {
+            // SAFETY: F_GETFD only inspects the integer descriptor; it does not
+            // dereference memory or take ownership of a possibly closed file.
+            assert_eq!(-1, unsafe { libc::fcntl(old, libc::F_GETFD) });
+            assert_eq!(Some(libc::EBADF), std::io::Error::last_os_error().raw_os_error());
+        }
+        #[cfg(windows)]
+        {
+            let mut flags = 0;
+            // SAFETY: The output pointer is valid; querying a closed handle
+            // returns an error and never transfers ownership.
+            assert_eq!(0, unsafe {
+                windows_sys::Win32::Foundation::GetHandleInformation(old, &mut flags)
+            });
+        }
+        #[cfg(unix)]
+        let retained = cursor.current.as_raw_fd();
+        #[cfg(windows)]
+        let retained = cursor.current.as_raw_handle();
+        assert!(cursor.descend(OsStr::new("file")).is_err());
+        #[cfg(unix)]
+        assert_eq!(retained, cursor.current.as_raw_fd());
+        #[cfg(windows)]
+        assert_eq!(retained, cursor.current.as_raw_handle());
         assert_eq!(
-            crate::rooted::EntryKind::File,
+            EntryKind::File,
             cursor
                 .metadata(OsStr::new("file"))
-                .expect("file metadata should read")
-                .kind(),
-        );
-        let observation = cursor.observation();
-        assert_eq!(5, observation.metadata_calls);
-        assert_eq!(4, observation.directory_opens);
-    }
-
-    #[test]
-    fn failed_descent_keeps_the_current_directory_authority() {
-        let temporary = tempfile::tempdir().expect("temporary directory should be created");
-        fs::create_dir(temporary.path().join("child")).expect("fixture should be created");
-        fs::write(temporary.path().join("file"), b"payload").expect("file should be created");
-        let root = Root::open(temporary.path()).expect("root should open");
-        let mut cursor = RootedResolutionCursor::new(root.try_clone_authority().expect("root should clone"))
-            .expect("cursor should open");
-        assert!(cursor.descend(OsStr::new("file")).is_err());
-        assert_eq!(
-            crate::rooted::EntryKind::Directory,
-            cursor
-                .metadata(OsStr::new("child"))
-                .expect("current root should remain usable")
-                .kind(),
+                .expect("retained authority must remain usable")
+                .kind()
         );
     }
 }
