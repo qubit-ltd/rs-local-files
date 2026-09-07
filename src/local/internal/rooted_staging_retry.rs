@@ -24,7 +24,8 @@ use std::io::Result;
 ///
 /// # Parameters
 ///
-/// * `retries` - Optional maximum number of generated names to attempt.
+/// * `retries` - Optional maximum number of generated names to attempt; `None`
+///   permits an unbounded sequence of collisions.
 /// * `generate` - The fallible filename generator called once per attempt.
 /// * `open` - The fallible entry opener called with each generated name.
 ///
@@ -36,7 +37,8 @@ use std::io::Result;
 /// # Errors
 ///
 /// Returns a generator or non-collision open error immediately, or
-/// `AlreadyExists` after all attempts collide.
+/// `AlreadyExists` after all attempts collide. `Some(0)` returns `InvalidInput`
+/// without calling either callback.
 pub(super) fn retry_rooted_staging_entry<G, O>(
     retries: Option<usize>,
     mut generate: G,

@@ -103,6 +103,10 @@ pub(crate) fn open_rooted_directory_reader(
 }
 
 /// Reads immediate entries from a rooted descendant directory.
+///
+/// Returns children sorted by native name, with no-follow metadata. Traversal,
+/// enumeration, and metadata errors are propagated; no partial list is
+/// returned.
 pub(crate) fn read_rooted_directory(
     root: &File,
     diagnostic_root: &Path,
@@ -117,6 +121,9 @@ pub(crate) fn read_rooted_directory(
 }
 
 /// Reads one final symbolic-link target through its opened parent authority.
+///
+/// Returns the stored target without resolving it. Parent traversal and
+/// `readlinkat` errors, including a final entry that is not a link, propagate.
 pub(crate) fn read_rooted_link(root: &File, diagnostic_root: &Path, path: &LocalRelativePath) -> Result<PathBuf> {
     let diagnostic_path = diagnostic_root.join(path.as_path());
     let (parent, name, _) =
@@ -132,6 +139,9 @@ pub(crate) fn read_rooted_link(root: &File, diagnostic_root: &Path, path: &Local
 }
 
 /// Creates one final symbolic link through its opened parent authority.
+///
+/// Stores `target` as supplied, without opening its referent or creating
+/// missing parents. Returns parent traversal or native creation errors.
 pub(crate) fn create_rooted_symlink(
     root: &File,
     diagnostic_root: &Path,
@@ -152,6 +162,10 @@ pub(crate) fn create_rooted_symlink(
 }
 
 /// Creates one rooted directory, optionally creating missing parents.
+///
+/// `exists_ok` accepts an existing real directory, never a final link.
+/// Traversal, inspection, or creation failures propagate. In recursive mode,
+/// ancestors created before an error remain in place.
 pub(crate) fn create_rooted_directory(
     root: &File,
     diagnostic_root: &Path,
@@ -182,6 +196,10 @@ pub(crate) fn create_rooted_directory(
 }
 
 /// Removes one rooted entry without following symbolic links.
+///
+/// With `recursive`, removes real directories after their descendants;
+/// otherwise a directory must be empty. Traversal, enumeration, inspection,
+/// and unlink errors propagate without rolling back earlier removals.
 pub(crate) fn remove_rooted_entry(
     root: &File,
     diagnostic_root: &Path,
@@ -247,6 +265,10 @@ fn unlink_rooted_entry(root: &File, diagnostic_root: &Path, path: &LocalRelative
 }
 
 /// Renames one rooted entry without abandoning either parent descriptor.
+///
+/// `overwrite` selects native replacement; otherwise the platform must offer
+/// atomic no-replace rename. Returns traversal or native rename errors, or
+/// `Unsupported` when no no-replace implementation is compiled.
 pub(crate) fn rename_rooted_entry(
     root: &File,
     diagnostic_root: &Path,
@@ -294,6 +316,9 @@ pub(crate) fn rename_rooted_entry(
 }
 
 /// Applies portable permission bits to one rooted file or directory.
+///
+/// Masks `mode` to `0o7777` and applies it through a no-follow opened handle.
+/// Returns parent traversal, metadata, open, or `fchmod` errors.
 pub(crate) fn set_rooted_permissions(
     root: &File,
     diagnostic_root: &Path,
@@ -334,6 +359,9 @@ pub(crate) fn set_rooted_permissions(
 }
 
 /// Reads a directory through an already-open descriptor.
+///
+/// Returns children sorted by native name, excluding `.` and `..`.
+/// Enumeration and no-follow child metadata failures discard the partial list.
 fn read_directory_handle(directory: &File, diagnostic_path: &Path) -> Result<Vec<RootedDirectoryEntry>> {
     let mut stream = Dir::read_from(directory).map_err(Error::from)?;
     let mut entries = Vec::new();
@@ -353,6 +381,8 @@ fn read_directory_handle(directory: &File, diagnostic_path: &Path) -> Result<Vec
 }
 
 /// Opens a no-follow child directory from an already-open parent.
+///
+/// Returns `openat` errors, including missing, non-directory, and link entries.
 // qubit-style: allow coverage-cfg
 #[cfg_attr(not(coverage), inline)]
 #[cfg_attr(coverage, inline(never))]
@@ -366,6 +396,8 @@ fn open_directory_component(parent: &File, name: &CString) -> Result<File> {
 }
 
 /// Reads no-follow metadata for one child of an open directory.
+///
+/// Returns `fstatat` errors with `diagnostic_path` as context.
 fn stat_child(parent: &File, name: &CString, diagnostic_path: &Path) -> Result<libc::stat> {
     let mut status = std::mem::MaybeUninit::<libc::stat>::uninit();
     // SAFETY: the output storage, descriptor, and name remain valid for this
@@ -390,6 +422,8 @@ fn stat_child(parent: &File, name: &CString, diagnostic_path: &Path) -> Result<l
 }
 
 /// Reads no-follow metadata for a rooted path.
+///
+/// Propagates secure parent-traversal and final metadata errors.
 #[cfg_attr(not(coverage), inline)]
 #[cfg_attr(coverage, inline(never))]
 fn rooted_status(root: &File, diagnostic_root: &Path, path: &LocalRelativePath) -> Result<libc::stat> {
@@ -404,6 +438,9 @@ const fn is_directory(mode: libc::mode_t) -> bool {
 }
 
 /// Performs an atomic no-replace rename where the platform supports it.
+///
+/// Returns the raw native status inside `Ok`; `-1` requires the caller to
+/// capture `last_os_error` immediately, before another syscall.
 #[cfg(any(target_os = "linux", target_os = "android"))]
 #[cfg_attr(not(coverage), inline)]
 #[cfg_attr(coverage, inline(never))]
@@ -427,6 +464,9 @@ fn rename_without_replacing(
 }
 
 /// Performs an atomic no-replace rename on Apple platforms.
+///
+/// Returns the raw native status inside `Ok`; `-1` requires the caller to
+/// capture `last_os_error` immediately, before another syscall.
 #[cfg(any(target_os = "macos", target_os = "ios"))]
 #[cfg_attr(not(coverage), inline)]
 #[cfg_attr(coverage, inline(never))]

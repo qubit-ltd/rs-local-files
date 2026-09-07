@@ -39,6 +39,7 @@ impl RootedLocalFileSystem {
     ///
     /// - `path`: Validated relative descendant path.
     /// - `options`: Reader open policy.
+    /// - `symlink_policy`: Intermediate and final link-resolution policy.
     ///
     /// # Returns
     ///
@@ -46,7 +47,7 @@ impl RootedLocalFileSystem {
     ///
     /// # Errors
     ///
-    /// Returns `LocalFileError` for lexical escape, intermediate symlinks,
+    /// Returns `LocalFileError` for lexical escape, rejected symlink traversal,
     /// invalid entry kinds, or native open failures.
     pub fn open_reader(
         &self,
@@ -82,7 +83,10 @@ impl RootedLocalFileSystem {
     ///
     /// - `path`: Relative directory path, or an empty path for the authority
     ///   root.
+    /// - `namespace_root`: Public namespace-absolute listing root.
     /// - `options`: Traversal policy and optional per-operation link override.
+    /// - `symlink_policy`: Default link policy when options contain no
+    ///   override.
     ///
     /// # Returns
     ///
@@ -131,6 +135,8 @@ impl RootedLocalFileSystem {
     ///
     /// - `path`: Validated relative destination path.
     /// - `options`: Publication mode and guarantee policy.
+    /// - `symlink_policy`: Path-resolution policy; CreateNew preserves the
+    ///   final entry, while other modes apply the policy to that entry too.
     ///
     /// # Returns
     ///

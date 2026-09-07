@@ -326,7 +326,10 @@ impl LocalFileError {
         }
     }
 
-    /// Returns the namespace-absolute PWD used to bind relative paths.
+    /// Returns the namespace-absolute PWD retained from relative path binding.
+    ///
+    /// `None` means no PWD snapshot was attached, including absolute-path
+    /// calls.
     #[must_use]
     #[cfg_attr(not(coverage), inline(always))]
     #[cfg_attr(coverage, inline(never))]
@@ -505,7 +508,8 @@ impl fmt::Display for LocalFileError {
 }
 
 impl Error for LocalFileError {
-    /// Returns the concrete I/O or path codec source, if present.
+    /// Returns the concrete I/O, path codec, or resource-limit source, if
+    /// present.
     #[cfg_attr(not(coverage), inline)]
     #[cfg_attr(coverage, inline(never))]
     fn source(&self) -> Option<&(dyn Error + 'static)> {

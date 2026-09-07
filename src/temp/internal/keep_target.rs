@@ -15,6 +15,8 @@ use std::path::PathBuf;
 ///
 /// The helper is purely lexical: authority-specific persistence performs all
 /// filesystem access and path validation afterwards.
+/// Returns `InvalidInput` when two parent levels and a final name cannot be
+/// extracted from `resource`.
 pub(crate) fn generated_target(resource: &Path) -> io::Result<PathBuf> {
     resource
         .parent()

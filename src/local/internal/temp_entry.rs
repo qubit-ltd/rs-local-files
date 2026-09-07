@@ -29,6 +29,9 @@ use crate::local::internal::test_support;
 use crate::local::try_random_file_name;
 
 /// Validates caller-provided temporary-entry affixes before sandbox creation.
+///
+/// Returns `InvalidInput` for a forbidden filename fragment, without creating
+/// an entry. Absent affixes need no validation.
 pub(crate) fn validate_temp_affixes(prefix: Option<&str>, suffix: Option<&str>) -> Result<()> {
     if let Some(prefix) = prefix {
         validate_file_name_fragment("prefix", prefix)?;
@@ -45,7 +48,8 @@ pub(crate) fn validate_temp_affixes(prefix: Option<&str>, suffix: Option<&str>) 
 /// - `dir`: Directory in which to create the file.
 /// - `prefix`: Optional file-name prefix.
 /// - `suffix`: Optional file-name suffix.
-/// - `max_tries`: Optional maximum number of generated names to try.
+/// - `max_tries`: Optional maximum number of generated names to try; `None`
+///   permits unbounded collision retries.
 ///
 /// # Returns
 /// The created temporary path and open file handle.
@@ -53,6 +57,7 @@ pub(crate) fn validate_temp_affixes(prefix: Option<&str>, suffix: Option<&str>) 
 /// # Errors
 /// Returns an I/O error when `dir` does not exist, an explicit
 /// `max_tries` is zero, all authorized names collide, or file creation fails.
+/// Affix-validation and random-name-generation failures also propagate.
 pub(crate) fn create_temp_file_in_dir(
     dir: &Path,
     prefix: Option<&str>,
@@ -105,7 +110,8 @@ pub(crate) fn create_temp_file_in_dir(
 /// # Errors
 ///
 /// Returns an I/O error when affix validation, parent lookup, name
-/// generation, or directory creation fails.
+/// generation, or directory creation fails. An explicit zero attempt count
+/// returns `InvalidInput`; `None` permits unbounded collision retries.
 pub(crate) fn create_temp_dir_in_dir_with_affixes(
     dir: &Path,
     prefix: Option<&str>,

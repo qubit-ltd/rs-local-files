@@ -25,11 +25,20 @@ use super::with_current_directory;
 
 impl LocalFileSystem {
     /// Creates a temporary file using this instance's default options.
+    ///
+    /// Returns the cleanup-owned resource or error described by
+    /// [`Self::create_temp_file_with_options`].
     pub fn create_temp_file(&self) -> LocalResult<LocalTempFile> {
         self.create_temp_file_with_options(&self.defaults.temp_file)
     }
 
     /// Creates a temporary file using one complete explicit options value.
+    ///
+    /// The parent defaults to this namespace's current directory. Returns an
+    /// open file with automatic best-effort cleanup unless kept or persisted.
+    /// Returns invalid-affix/attempt, path-resolution, parent, random-name,
+    /// collision, or native creation errors. Requested parent creation may
+    /// remain after failure. Use explicit cleanup to observe cleanup errors.
     pub fn create_temp_file_with_options(&self, options: &LocalTempFileOptions) -> LocalResult<LocalTempFile> {
         let parent = options.parent().unwrap_or_else(|| Path::new(""));
         let resolver = self.resolver_for(parent, LocalFileOperation::CreateTempFile)?;
@@ -54,11 +63,20 @@ impl LocalFileSystem {
     }
 
     /// Creates a temporary directory using this instance's default options.
+    ///
+    /// Returns the cleanup-owned resource or error described by
+    /// [`Self::create_temp_directory_with_options`].
     pub fn create_temp_directory(&self) -> LocalResult<LocalTempDirectory> {
         self.create_temp_directory_with_options(&self.defaults.temp_directory)
     }
 
     /// Creates a temporary directory using one complete explicit options value.
+    ///
+    /// The parent defaults to this namespace's current directory. The
+    /// returned resource removes its tree on drop unless kept or persisted.
+    /// Returns invalid-affix/attempt, path-resolution, parent, random-name,
+    /// collision, or native creation errors. Requested parent creation may
+    /// remain after failure; explicit cleanup exposes cleanup errors.
     pub fn create_temp_directory_with_options(
         &self,
         options: &LocalTempDirectoryOptions,

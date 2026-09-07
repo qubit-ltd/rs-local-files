@@ -19,6 +19,10 @@ pub(in crate::local) struct OwnedUnicodeString {
 
 impl OwnedUnicodeString {
     /// Couples the UTF-16 storage with the header that borrows its buffer.
+    ///
+    /// The caller must construct `header` from this allocation, with valid
+    /// byte lengths. Moving the vector preserves that allocation; this owner
+    /// never resizes or replaces the retained storage.
     #[must_use]
     #[inline(always)]
     pub(super) const fn new(units: Vec<u16>, header: UNICODE_STRING) -> Self {

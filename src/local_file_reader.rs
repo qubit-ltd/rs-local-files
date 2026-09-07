@@ -50,6 +50,9 @@ impl LocalFileReader {
     /// # Parameters
     ///
     /// - `file`: Open native file handle.
+    ///
+    /// Takes ownership and captures metadata from the retained handle.
+    /// Propagates metadata errors, closing the supplied handle on failure.
     pub(crate) fn from_file(file: File) -> io::Result<Self> {
         let metadata = LocalFileMetadata::from_native(&file.metadata()?);
         Ok(Self { file, metadata })

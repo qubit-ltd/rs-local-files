@@ -137,22 +137,20 @@ impl LocalDeleteOptions {
         self
     }
 
-    /// Returns the optional limit for cooperative elapsed-time limit for
-    /// recursive deletion.
+    /// Returns the optional cooperative elapsed-time limit for recursive
+    /// deletion.
     #[must_use]
     pub const fn deadline(&self) -> Option<Duration> {
         self.deadline
     }
 
-    /// Sets the limit for cooperative elapsed-time limit for recursive
-    /// deletion.
+    /// Sets the cooperative elapsed-time limit for recursive deletion.
     pub const fn with_deadline(mut self, limit: Duration) -> Self {
         self.deadline = Some(limit);
         self
     }
 
-    /// Removes the limit for cooperative elapsed-time limit for recursive
-    /// deletion.
+    /// Removes the cooperative elapsed-time limit for recursive deletion.
     pub const fn without_deadline(mut self) -> Self {
         self.deadline = None;
         self

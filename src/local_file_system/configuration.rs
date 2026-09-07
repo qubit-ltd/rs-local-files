@@ -206,8 +206,8 @@ impl LocalFileSystem {
     ///
     /// # Errors
     ///
-    /// Returns [`LocalFileError`] when recursion, symlink, or resource-limit
-    /// settings are invalid for this scope; existing defaults remain unchanged.
+    /// Returns [`LocalFileError`] for a zero open-directory limit or a
+    /// scope-incompatible symlink policy; existing defaults remain unchanged.
     pub fn set_default_list_options(&mut self, options: LocalListOptions) -> LocalResult<()> {
         validate_list_options(self.scope(), self.symlink_policy, &options, None)
             .map_err(|error| with_current_directory(error, self.current_directory.virtual_path()))?;
@@ -226,8 +226,10 @@ impl LocalFileSystem {
     ///
     /// # Errors
     ///
-    /// Returns [`LocalFileError`] when the copy, symlink, atomicity, or budget
-    /// combination is invalid; existing defaults remain unchanged.
+    /// Returns [`LocalFileError`] for a scope-incompatible symlink policy or
+    /// an unrepresentable deadline; existing defaults remain unchanged.
+    /// Source-dependent requirements and budget exhaustion are checked when
+    /// a copy runs.
     pub fn set_default_copy_options(&mut self, options: LocalCopyOptions) -> LocalResult<()> {
         validate_copy_options(self.scope(), self.symlink_policy, &options, None, None)
             .map_err(|error| with_current_directory(error, self.current_directory.virtual_path()))?;

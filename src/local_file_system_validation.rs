@@ -22,6 +22,8 @@ use crate::LocalSymlinkPolicy;
 
 /// Rejects a file operation whose original syntax explicitly requires a
 /// directory.
+/// Returns `InvalidPath` with the namespace path and optional PWD snapshot;
+/// operands without the directory requirement succeed without I/O.
 pub(super) fn reject_directory_qualified_file(
     path: &LocalNamespacePath,
     operation: LocalFileOperation,
@@ -40,6 +42,9 @@ pub(super) fn reject_directory_qualified_file(
 }
 
 /// Validates scope-dependent symlink policy.
+///
+/// Returns `InvalidOptions` only for `FollowAcrossScope` in Rooted scope,
+/// retaining the supplied operation and optional path for diagnostics.
 pub(super) fn validate_scope_symlink_policy(
     scope: LocalFileSystemScope,
     policy: LocalSymlinkPolicy,
@@ -58,6 +63,9 @@ pub(super) fn validate_scope_symlink_policy(
 }
 
 /// Validates listing budgets and scope policy without performing I/O.
+///
+/// Returns `InvalidOptions` for a zero open-directory limit or a forbidden
+/// scope policy. An absent path identifies configuration-time validation.
 pub(super) fn validate_list_options(
     scope: LocalFileSystemScope,
     default_policy: LocalSymlinkPolicy,
@@ -85,7 +93,11 @@ pub(super) fn validate_list_options(
     )
 }
 
-/// Validates copy budgets, policy, and monotonic deadline representation.
+/// Validates copy scope policy and monotonic deadline representation.
+///
+/// Returns `InvalidOptions` for a forbidden scope policy or an unrepresentable
+/// deadline. Other budget values and source-dependent requirements are checked
+/// during execution. An absent source identifies configuration-time validation.
 pub(super) fn validate_copy_options(
     scope: LocalFileSystemScope,
     default_policy: LocalSymlinkPolicy,
@@ -122,6 +134,8 @@ pub(super) fn validate_copy_options(
 }
 
 /// Validates an explicit temporary-name collision budget.
+///
+/// Returns `InvalidOptions` for `Some(0)`; `None` permits unbounded retries.
 pub(super) fn validate_temp_attempts(max_attempts: Option<usize>, operation: LocalFileOperation) -> LocalResult<()> {
     if max_attempts != Some(0) {
         return Ok(());

@@ -40,8 +40,11 @@ impl LocalWriteOutcome {
     ///
     /// - `state`: Terminal writer state.
     /// - `atomic`: Whether publication was atomic.
+    /// - `publication_method`: Selected native backend method.
     /// - `durable`: Whether durability synchronization completed.
     /// - `bytes_written`: Bytes accepted by the stream.
+    /// - `failure_state`: Certainty retained from an earlier failure or an
+    ///   append abort with accepted bytes.
     pub(crate) const fn new(
         state: LocalWriterState,
         atomic: bool,

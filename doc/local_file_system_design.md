@@ -5,7 +5,7 @@
 
 > Status: normative design specification
 >
-> Last updated: 2026-09-03
+> Last updated: 2026-09-07
 
 This document and the [Simplified Chinese design](local_file_system_design.zh_CN.md)
 are equal, normative specifications. Public APIs, platform implementations,
@@ -302,10 +302,43 @@ metadata preservation. `LocalCopyFailure` retains the underlying structured
 error plus `Unchanged`, `PartiallyPublished`, `Published`, or `Indeterminate`
 state and partial statistics.
 
+Copy statistics have the same meaning in Host and Rooted scopes: `files`
+counts copied regular files and links, `directories` counts newly created
+directories, and `bytes` counts regular-file bytes. `overwritten` includes
+replaced entries and existing directories merged under `Overwrite`, including
+the copy root. `Skip` still merges same-kind directories but does not count
+those merges as overwrites.
+
 When a writer creates missing parents with required durability, it synchronizes
 each newly created ancestor after publication. Failure in that chain is reported
 as `Published` with an incomplete publication error; the target bytes remain
 observable and callers must inspect the typed state.
+
+### Copy source modes
+
+| Mode | Regular file | Final link, including dangling links | Directory | Special file |
+| --- | --- | --- | --- | --- |
+| `Entry` | Copy content | Copy the link itself | `RequirementNotMet` | `Unsupported` |
+| `Tree` | `RequirementNotMet` | `RequirementNotMet` | Copy the tree | `Unsupported` |
+| `Auto` | Entry copy | Entry copy | Tree copy | `Unsupported` |
+
+`with_entry_source()` selects one file or link entry; `with_tree_source()`
+requires an actual directory. `with_source_mode(LocalCopySourceMode::Auto)`
+explicitly resets either selection. Source-kind rejection happens before
+creating target parents or changing the destination. Directory-qualified path
+syntax is validated separately and can report `NotDirectory` before dispatch.
+The removed `File` variant and `with_file_source()` method have no compatibility
+aliases. A final source link is never dereferenced by mode selection. Directory
+links encountered inside a tree still follow the effective traversal policy;
+mode selection does not change intermediate-link or tree-traversal semantics.
+
+Directory-tree copies cannot provide required atomicity or durability; link
+copies cannot provide required atomicity. Unsupported `Required` guarantees
+fail with `RequirementNotMet` before destination mutation. Link durability
+requires platform support and synchronization of the destination parent and
+newly created ancestors. Windows link kind comes from no-follow source
+metadata; removing a destination directory link must use the native directory
+link removal operation and preserve its referent.
 
 ## 17. Create, Delete, and Rename
 
@@ -409,6 +442,10 @@ algorithms. Non-exhaustive native variants require a conservative provider
 fallback. Release or scheduled compatibility CI must compile and test the
 adapter against this crate so variant drift is detected before publication.
 
+The adapter must map `CopyMode::File` to `LocalCopySourceMode::Entry`,
+`Tree` to `Tree`, and `Auto` to `Auto`. A resolved `Auto` request must overwrite
+an entry/tree mode in native defaults while preserving independent budgets.
+
 ## 24. Direct Application Use
 
 Applications choose Host for process-visible paths and Rooted when one opened
@@ -416,6 +453,60 @@ directory is the authority boundary. Configure instance defaults once, clone a
 configured snapshot when needed, and use explicit options for one-call policy
 changes. Recovery-sensitive code retains writer/copy/rename/persist failures and
 branches on typed states.
+
+
+### 24.1 Configure a Rooted application filesystem
+
+```rust,no_run
+use std::path::Path;
+use qubit_local_files::LocalFileSystem;
+use qubit_local_files::options::LocalCopyOptions;
+use qubit_local_files::options::LocalListOptions;
+use qubit_local_files::policy::LocalSymlinkPolicy;
+
+let mut filesystem = LocalFileSystem::rooted(Path::new("/srv/app"))?;
+filesystem.set_symlink_policy(LocalSymlinkPolicy::FollowWithinScope)?;
+filesystem.set_default_list_options(
+    LocalListOptions::new()
+        .with_recursive()
+        .with_max_entries(100_000),
+)?;
+filesystem.set_default_copy_options(
+    LocalCopyOptions::new().with_max_bytes(1 << 30),
+)?;
+filesystem.set_current_directory(Path::new("/workspace"))?;
+
+let walker = filesystem.list(Path::new("assets"))?;
+for entry in walker {
+    let entry = entry?;
+    // entry.path() is a virtual absolute path that can be passed back directly.
+    let metadata = filesystem.metadata(entry.path())?;
+    assert_eq!(metadata.kind(), entry.metadata().kind());
+}
+# Ok::<(), Box<dyn std::error::Error>>(())
+```
+
+### 24.2 Replace options for one operation
+
+```rust,no_run
+# use std::path::Path;
+# use qubit_local_files::LocalFileSystem;
+# let filesystem = LocalFileSystem::host()?;
+let options = filesystem
+    .default_copy_options()
+    .clone()
+    .with_max_bytes(16 * 1024 * 1024);
+
+filesystem.copy_with_options(
+    Path::new("input.bin"),
+    Path::new("/archive/input.bin"),
+    &options,
+)?;
+# Ok::<(), Box<dyn std::error::Error>>(())
+```
+
+Explicit options are the complete configuration for this call; other instance
+copy defaults are not implicitly merged back.
 
 ## 25. Internal Component Boundaries
 
@@ -433,6 +524,21 @@ second public "internal test" feature and no public re-export of private
 implementation contracts. Test hooks must not change the production state
 model.
 
+### Shared copy scheduling contract
+
+The shared scheduler alone owns and mutates the traversal stack. It constructs
+child coordinates once, checks depth and deadline, and charges each descendant
+entry once before backend processing. The operation entry charges the requested
+root exactly once; remaining entry capacity is passed to the tree pipeline.
+`CopyTreeBackend::process_entry` returns `None` for a completed/skipped entry or
+`Some(Frame)` for one child directory. Backends cannot modify the stack.
+
+Backends own native I/O, publication, byte accounting through `CopyBudget`, and
+reader permits retained in frames. Statistics reflect completed effects even
+when a later call fails. `finish_frame` performs post-order metadata work;
+failure drops its consumed frame and every stacked ancestor. Dropping resources
+releases readers and permits, but never rolls back published destination data.
+
 ## 26. Verification Strategy
 
 Verification follows contracts rather than line count:
@@ -442,7 +548,7 @@ Verification follows contracts rather than line count:
 - crate-internal tests exercise real private contracts that public APIs cannot
   deterministically construct, without expanding public visibility;
 - property tests cover native path round trips and lexical invariants;
-- the exact bilingual README and user-guide Rust fences are included as
+- the exact bilingual README, user-guide, and design Rust examples are included as
   doctests, preventing copied-example drift;
 - benchmarks represent codec, walk, handle-budget, copy, writer, Rooted writer,
   prefix-read, and Rooted deep-metadata workloads; deep-metadata fixtures use
@@ -778,6 +884,6 @@ state; explicit resource budgets and their absence; virtual-root operation
 rules; and downstream typed-state preservation. Linux, Windows, and macOS run
 behavioral tests; Android and FreeBSD are compile-checked only. CI must run
 all-feature tests and strict Clippy, downstream `qubit-fs-local` contracts and
-`qubit-mime` temporary-resource integration, and compile README/user-guide
+`qubit-mime` temporary-resource integration, and compile README/user-guide/design
 examples. Fuzz targets use process-unique bounded sandboxes, bounded collision
 retry, and RAII cleanup; coverage exempts no whole file.

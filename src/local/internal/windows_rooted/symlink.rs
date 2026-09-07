@@ -76,8 +76,11 @@ pub(crate) fn read_rooted_link(root: &File, _diagnostic_root: &Path, path: &Loca
 ///
 /// # Errors
 ///
-/// Returns an I/O error when secure traversal, placeholder creation, reparse
-/// installation, or rollback fails.
+/// Returns `RootedSymlinkCreateError` for invalid target encoding, secure
+/// traversal, placeholder creation, reparse installation, or rollback failure.
+/// Retains the primary error, destination certainty, and a separate cleanup
+/// error when rollback also fails. `targets_directory` selects placeholder
+/// kind.
 pub(crate) fn create_rooted_symlink(
     root: &File,
     _diagnostic_root: &Path,
@@ -137,6 +140,7 @@ fn rollback_failure_state(
 }
 
 /// Reads the stable volume and file identifier of an opened entry.
+/// Propagates the native `GetFileInformationByHandleEx` error.
 fn handle_identity(file: &File) -> Result<(u64, [u8; 16])> {
     let mut identity = FILE_ID_INFO::default();
     // SAFETY: `file` owns a live handle and `identity` is a correctly sized
@@ -176,12 +180,15 @@ pub(crate) fn rooted_link_targets_directory(root: &File, path: &LocalRelativePat
 }
 
 /// Opens the final link without following it.
+/// Uses the requested native `access` and propagates parent traversal or final
+/// open errors. The caller verifies that the returned entry is a symbolic link.
 fn open_link(root: &File, path: &LocalRelativePath, access: u32) -> Result<File> {
     let (parent, name) = open_parent(root, path)?;
     nt_open_at(&parent, &name, access, FILE_OPEN, 0)
 }
 
 /// Retrieves the opaque reparse record for an already-opened link handle.
+/// Returns a native query error or `InvalidData` for an oversized response.
 fn read_reparse_buffer(link: &File) -> Result<Vec<u8>> {
     let mut storage = vec![0_usize; (MAXIMUM_REPARSE_DATA_BUFFER_SIZE as usize).div_ceil(size_of::<usize>())];
     let mut returned = 0_u32;
@@ -212,6 +219,9 @@ fn read_reparse_buffer(link: &File) -> Result<Vec<u8>> {
 }
 
 /// Installs a complete symbolic-link reparse record on a placeholder handle.
+/// The caller supplies the complete `buffer` and a writable placeholder.
+/// Returns `InvalidInput` for an unrepresentable buffer length or a native
+/// installation error; rollback remains the caller's responsibility.
 fn set_reparse_buffer(link: &File, buffer: &[u8]) -> Result<()> {
     let mut returned = 0_u32;
     let buffer_length = u32::try_from(buffer.len())
@@ -238,6 +248,8 @@ fn set_reparse_buffer(link: &File, buffer: &[u8]) -> Result<()> {
 }
 
 /// Builds the native reparse record that preserves one user-visible target.
+/// Returns `InvalidInput` for native NUL, length overflow, or a target
+/// exceeding native field/buffer limits. Performs no filesystem access.
 fn build_symbolic_link_buffer(target: &Path) -> Result<Vec<u8>> {
     let print_name: Vec<u16> = target.as_os_str().encode_wide().collect();
     if print_name.contains(&0) {
@@ -284,6 +296,9 @@ fn build_symbolic_link_buffer(target: &Path) -> Result<Vec<u8>> {
 }
 
 /// Parses and validates the user-visible target from a native reparse record.
+/// Prefers the print name, falling back to a normalized substitute name when
+/// it is absent. Returns `Unsupported` for other reparse tags or `InvalidData`
+/// for truncated, misaligned, or out-of-record name data.
 fn parse_symbolic_link_target(buffer: &[u8]) -> Result<PathBuf> {
     if buffer.len() < SYMLINK_PATH_BUFFER_OFFSET {
         return Err(corrupt_reparse("symbolic-link reparse buffer is truncated"));
@@ -387,6 +402,7 @@ fn normalize_substitute_name(units: &[u16]) -> Vec<u16> {
 }
 
 /// Converts a UTF-16 unit count into a native 16-bit byte length.
+/// Returns `InvalidInput` on multiplication overflow or a length above `u16`.
 fn checked_utf16_byte_length(units: usize) -> Result<u16> {
     units
         .checked_mul(size_of::<u16>())
@@ -411,6 +427,9 @@ fn read_u32(buffer: &[u8], offset: usize) -> Result<u32> {
 }
 
 /// Reads one UTF-16 slice addressed relative to the reparse path buffer.
+/// The caller must ensure `record_length <= buffer.len()`. Returns
+/// `InvalidData` for misalignment, arithmetic overflow, or a range extending
+/// beyond that validated record length.
 fn read_wide_range(buffer: &[u8], record_length: usize, offset: usize, length: usize) -> Result<Vec<u16>> {
     if !offset.is_multiple_of(size_of::<u16>()) || !length.is_multiple_of(size_of::<u16>()) {
         return Err(corrupt_reparse("symbolic-link reparse name is not UTF-16 aligned"));

@@ -19,6 +19,15 @@ use crate::LocalDurabilityRequirement;
 ///
 /// `attempt` performs backend-specific native operations. `staging_is_open`
 /// identifies whether a failed attempt can still be retried or aborted.
+///
+/// # Returns
+///
+/// The backend's achieved durability flag after a successful publication.
+///
+/// # Errors
+///
+/// Preserves the attempt's structured error and returns writer ownership only
+/// while its staging handle remains open. Otherwise the writer is dropped.
 pub(crate) fn commit_recoverably<W>(
     mut writer: W,
     attempt: impl FnOnce(&mut W) -> Result<bool, LocalAtomicWriteError>,
@@ -53,6 +62,15 @@ pub(crate) fn finalize_failed_commit<W>(
 ///
 /// `map_required_error` supplies backend-specific path and publication context
 /// for a required synchronization failure.
+///
+/// # Returns
+///
+/// `true` means file synchronization succeeded. `false` means it was not
+/// requested or a preferred attempt failed; parent synchronization is separate.
+///
+/// # Errors
+///
+/// Returns the mapped native synchronization error only for `Required`.
 pub(crate) fn synchronize_staging_file(
     file: &File,
     durability: LocalDurabilityRequirement,

@@ -118,12 +118,16 @@ pub(crate) fn read_rooted_symlink_metadata(
 
 /// Opens one child entry relative to an already-opened directory handle,
 /// retaining the final reparse point for classification by the caller.
+/// `name` must be one previously validated normal component. Propagates
+/// name-encoding and native open errors; the returned handle owns the entry.
 pub(crate) fn read_rooted_component_metadata(root: &File, name: &OsStr) -> Result<File> {
     nt_open_at(root, name, FILE_READ_ATTRIBUTES | SYNCHRONIZE, FILE_OPEN, 0)
 }
 
 /// Opens and verifies one real child directory relative to an already-opened
 /// directory handle without following name-surrogate reparse points.
+/// `name` must be one previously validated normal component. Propagates native
+/// open/inspection, non-directory, reparse-point, and name-encoding errors.
 pub(crate) fn open_rooted_component_directory(root: &File, name: &OsStr) -> Result<File> {
     let directory = nt_open_at(
         root,
@@ -195,6 +199,10 @@ pub(crate) fn open_rooted_native_writer(
 }
 
 /// Opens one validated rooted entry after securely opening every parent.
+/// Forwards native `access`, `disposition`, and `options` to the final open,
+/// which may create or truncate according to `disposition`. Rejects final
+/// name-surrogate reparse points and propagates traversal/open/inspection
+/// errors.
 pub(super) fn open_entry(
     root: &File,
     path: &LocalRelativePath,
@@ -209,6 +217,10 @@ pub(super) fn open_entry(
 
 /// Opens one rooted entry without following or rejecting its final reparse
 /// point.
+/// Securely opens each parent and returns an owned final handle using the
+/// requested `access`, `disposition`, and `options`. Propagates traversal,
+/// name-encoding, and native open errors; creation/truncation is not rolled
+/// back.
 #[cfg_attr(not(coverage), inline)]
 #[cfg_attr(coverage, inline(never))]
 pub(super) fn open_entry_no_follow(
@@ -223,6 +235,7 @@ pub(super) fn open_entry_no_follow(
 }
 
 /// Converts a native path to a NUL-terminated UTF-16 string.
+/// Returns `InvalidInput` for an embedded native NUL.
 #[cfg_attr(not(coverage), inline)]
 #[cfg_attr(coverage, inline(never))]
 fn wide_path(path: &Path) -> Result<Vec<u16>> {
@@ -237,6 +250,8 @@ fn wide_path(path: &Path) -> Result<Vec<u16>> {
 }
 
 /// Opens and verifies every parent component beneath the root.
+/// Returns the owned parent handle and final native name, propagating handle
+/// duplication, traversal, name-encoding, and directory verification errors.
 pub(super) fn open_parent(root: &File, path: &LocalRelativePath) -> Result<(File, OsString)> {
     open_parent_with_access(
         root,
@@ -246,6 +261,8 @@ pub(super) fn open_parent(root: &File, path: &LocalRelativePath) -> Result<(File
 }
 
 /// Opens every parent component with the rights needed for a rooted rename.
+/// Uses [`open_parent`]'s result and error contract. `overwrite` currently
+/// does not change the required parent access rights.
 pub(super) fn open_parent_for_rename(
     root: &File,
     path: &LocalRelativePath,
@@ -257,6 +274,9 @@ pub(super) fn open_parent_for_rename(
 
 /// Opens and verifies every parent component with the requested directory
 /// rights.
+/// Returns the owned parent and final name; an empty path is `InvalidInput`.
+/// Native duplication/open/inspection and name-encoding failures propagate,
+/// dropping any intermediate handles acquired by this attempt.
 fn open_parent_with_access(root: &File, path: &LocalRelativePath, access: u32) -> Result<(File, OsString)> {
     let mut components: Vec<OsString> = path
         .as_path()
@@ -276,6 +296,11 @@ fn open_parent_with_access(root: &File, path: &LocalRelativePath, access: u32) -
 }
 
 /// Opens one name relative to an already opened directory handle.
+/// The caller must supply one validated normal `name` and native `access`,
+/// `disposition`, and `options` consistent with the intended operation. Opens
+/// synchronously without following the final reparse point; the disposition
+/// can create or truncate. Returns encoding/native errors or an invalid-handle
+/// error; success transfers the native handle into the returned `File`.
 pub(super) fn nt_open_at(parent: &File, name: &OsStr, access: u32, disposition: u32, options: u32) -> Result<File> {
     let name = unicode_string(name)?;
     let attributes = OBJECT_ATTRIBUTES {
@@ -314,6 +339,7 @@ pub(super) fn nt_open_at(parent: &File, name: &OsStr, access: u32, disposition: 
     Ok(unsafe { File::from_raw_handle(handle) })
 }
 /// Reads file attributes and the reparse tag from an opened handle.
+/// Propagates the native `GetFileInformationByHandleEx` error.
 pub(super) fn handle_attributes(file: &File) -> Result<FILE_ATTRIBUTE_TAG_INFO> {
     let mut attributes = FILE_ATTRIBUTE_TAG_INFO::default();
     // SAFETY: `file` owns a live handle and `attributes` is a correctly sized
@@ -333,6 +359,8 @@ pub(super) fn handle_attributes(file: &File) -> Result<FILE_ATTRIBUTE_TAG_INFO> 
     }
 }
 /// Builds one NT counted Unicode string without a trailing NUL.
+/// Returns `InvalidInput` for native NUL or a UTF-16 byte length exceeding
+/// the native `u16` field. The returned value retains its backing storage.
 fn unicode_string(value: &OsStr) -> Result<OwnedUnicodeString> {
     let mut units: Vec<u16> = value.encode_wide().collect();
     if units.contains(&0) {

@@ -216,10 +216,14 @@ pub(crate) fn open_staged_writer(
 /// # Parameters
 ///
 /// - `options`: Unified public copy options.
+/// - `symlink_policy`: Owning filesystem policy used without an override.
+/// - `started_at`: Original operation start, including preflight time, used for
+///   the tree-copy deadline.
 ///
 /// # Returns
 ///
-/// Equivalent shared copy pipeline options.
+/// Tree traversal, conflict, metadata, and durability options. The facade
+/// handles source mode, atomicity, and top-level parent creation separately.
 pub(crate) fn internal_copy_options(
     options: &LocalCopyOptions,
     symlink_policy: LocalSymlinkPolicy,
@@ -254,6 +258,9 @@ pub(crate) fn internal_copy_options(
 }
 
 /// Confirms that a host temporary-resource parent is an existing directory.
+///
+/// Returns `NotDirectory` for another entry kind and propagates metadata
+/// failures with the supplied operation and parent path.
 // qubit-style: allow coverage-cfg
 #[cfg_attr(not(coverage), inline)]
 #[cfg_attr(coverage, inline(never))]

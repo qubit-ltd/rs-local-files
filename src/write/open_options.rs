@@ -33,7 +33,7 @@ impl OpenOptions {
     /// - `mode`: Native creation and positioning behavior.
     ///
     /// # Returns
-    /// Options without parent creation and with ordinary unbounded open retry.
+    /// Options without parent creation or lease-conflict retries.
     pub const fn new(mode: Mode) -> Self {
         Self {
             mode,
@@ -66,8 +66,8 @@ impl OpenOptions {
 
     /// Returns the Unix lease-conflict retry timeout.
     ///
-    /// `None` preserves ordinary unbounded blocking-open behavior. `Some`
-    /// bounds retries, and a zero duration reports the first conflict.
+    /// `None` returns the first lease conflict unchanged without retrying.
+    /// `Some` bounds retries; zero reports `TimedOut` after the first conflict.
     #[must_use]
     pub const fn open_retry_timeout(&self) -> Option<Duration> {
         self.open_retry_timeout
@@ -87,8 +87,8 @@ impl OpenOptions {
 }
 
 impl Default for OpenOptions {
-    /// Creates or truncates a file without parent creation and with ordinary
-    /// unbounded open retry.
+    /// Creates or truncates a file without parent creation or lease-conflict
+    /// retries.
     fn default() -> Self {
         Self::new(Mode::default())
     }

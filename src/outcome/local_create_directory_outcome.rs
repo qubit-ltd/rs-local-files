@@ -12,7 +12,7 @@
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 #[must_use]
 pub struct LocalCreateDirectoryOutcome {
-    /// Whether the requested directory was absent before the operation.
+    /// Whether this operation created the requested directory.
     created: bool,
 }
 

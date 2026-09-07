@@ -22,8 +22,8 @@ pub struct OpenOptions {
 impl OpenOptions {
     /// Returns the Unix lease-conflict retry timeout.
     ///
-    /// `None` preserves ordinary unbounded blocking-open behavior. `Some`
-    /// bounds retries, and a zero duration reports the first conflict.
+    /// `None` returns the first lease conflict unchanged without retrying.
+    /// `Some` bounds retries; zero reports `TimedOut` after the first conflict.
     #[must_use]
     // qubit-style: allow coverage-cfg
     #[cfg_attr(not(coverage), inline(always))]

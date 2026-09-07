@@ -85,12 +85,14 @@ use crate::write::OpenOptions as WriteOpenOptions;
 /// Staging, replacement, synchronization, and cleanup use the destination
 /// parent descriptor and entry names. No diagnostic path is reused as
 /// authority, and no underlying file or directory handle is exposed.
-/// Commit opens the current destination, copies its strict platform-native
-/// Unix metadata to staging, and verifies the opened file identity immediately
+/// On Unix, commit opens the current destination, copies strict platform-native
+/// metadata to staging, and verifies the opened file identity immediately
 /// before replacement. Metadata is therefore captured at commit time rather
 /// than when the writer begins. A metadata or ACL copy failure aborts instead
 /// of silently reducing protection. A destination that was initially absent is
 /// installed without replacing a concurrent creator.
+/// Windows preserves the destination's portable permissions and checks its
+/// handle identity; required directory durability is unsupported there.
 #[must_use = "rooted atomic writes have no effect unless committed"]
 #[derive(Debug)]
 pub struct LocalRootAtomicWriter {
@@ -142,7 +144,8 @@ impl LocalRootAtomicWriter {
     /// * `root` - Open root directory authority.
     /// * `diagnostic_root` - Path used only to contextualize traversal errors.
     /// * `path` - Validated relative destination.
-    /// * `options` - Parent-creation and destination-open retry policy.
+    /// * `options` - Parent creation, publication, durability, and open-retry
+    ///   policy, including the internal final-link replacement option.
     ///
     /// # Returns
     ///
@@ -219,6 +222,10 @@ impl LocalRootAtomicWriter {
     }
 
     /// Creates a Windows rooted atomic writer from an open root capability.
+    /// Uses `root` as authority, `diagnostic_root` only for error paths, and
+    /// `options` for parent creation, publication, and durability policy.
+    /// Native parent preparation, destination inspection, randomness, or
+    /// staging creation errors retain their stage; created parents remain.
     #[cfg(windows)]
     pub(crate) fn new(
         root: &File,
@@ -367,6 +374,8 @@ impl LocalRootAtomicWriter {
     }
 
     /// Consumes the writer and reports whether requested durability completed.
+    /// Finalizes a failed commit by attempting safe staging cleanup and returns
+    /// the primary error with any cleanup failure, without a retryable writer.
     // qubit-style: allow coverage-cfg
     #[cfg_attr(not(coverage), inline)]
     #[cfg_attr(coverage, inline(never))]
@@ -412,7 +421,8 @@ impl LocalRootAtomicWriter {
     ///
     /// # Errors
     ///
-    /// Returns a structured cleanup error when `unlinkat` fails.
+    /// Returns a structured cleanup error on native staging removal or Windows
+    /// attribute preparation failure; the caller may retry cleanup.
     #[cfg_attr(not(any(unix, windows)), allow(unused_mut))]
     pub(crate) fn abort(&mut self) -> Result<(), LocalAtomicWriteError> {
         #[cfg(unix)]
@@ -449,6 +459,10 @@ impl LocalRootAtomicWriter {
     }
 
     /// Runs one handle-relative Windows commit attempt.
+    /// Copies portable destination permissions, checks identity, and installs
+    /// staging. Returns false because namespace durability is unavailable.
+    /// Native metadata/permission/rename failures retain structured stage and
+    /// destination state; staging remains armed until successful installation.
     #[cfg(windows)]
     fn commit_attempt_windows(&mut self) -> Result<bool, LocalAtomicWriteError> {
         let destination = if self.preserve_destination_metadata {
@@ -588,8 +602,8 @@ impl LocalRootAtomicWriter {
     ///
     /// # Returns
     ///
-    /// The descriptor-relative destination when one existed at writer
-    /// creation, or `None` when commit will install a new entry.
+    /// The opened regular destination when metadata preservation is required,
+    /// or `None` for a new entry or an allowed final-link replacement.
     ///
     /// # Errors
     ///

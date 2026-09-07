@@ -122,6 +122,8 @@ Windows 上，Rooted 的链接读取、链接类型判断和链接创建都相�
 `CreateOrReplace` 在目标目录中暂存；`Append` 会直接写入已有普通文件，不能满足要求的
 原子性。
 
+复制模式明确区分单个 `Entry`（普通文件或最终链接）、目录树 `Tree` 和自动判断 `Auto`。详见[源模式契约](doc/user_guide.zh_CN.md#复制源模式)。
+
 ## 平台范围
 
 Linux、Windows 和 macOS 的行为会在运行时测试。FreeBSD 和 Android 仅编译检查配置路径；

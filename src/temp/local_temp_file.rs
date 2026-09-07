@@ -71,7 +71,7 @@ use crate::path::LocalPathResolver;
 /// # Ok(())
 /// # }
 /// ```
-#[must_use = "dropping the temporary-file guard removes its file"]
+#[must_use = "use explicit cleanup to observe errors; drop only attempts cleanup"]
 #[derive(Debug)]
 pub struct LocalTempFile {
     /// Stable namespace-absolute path after public namespace binding.
@@ -94,6 +94,9 @@ pub struct LocalTempFile {
 
 impl LocalTempFile {
     /// Builds a host temporary file from its already-bound path and handle.
+    /// Takes ownership of `file` and captures its identity. Native inspection
+    /// failures close the handle; the caller remains responsible for removing
+    /// the already-created file and sandbox when construction fails.
     #[cfg_attr(not(coverage), inline)]
     #[cfg_attr(coverage, inline(never))]
     pub(crate) fn host(
@@ -115,6 +118,9 @@ impl LocalTempFile {
     }
 
     /// Builds a rooted temporary file from the retained root authority.
+    /// Takes ownership of `file` and captures identity through that handle.
+    /// On native inspection failure, the caller must clean the already-created
+    /// resource and sandbox through `root`; the file handle is dropped.
     #[cfg_attr(not(coverage), inline)]
     #[cfg_attr(coverage, inline(never))]
     pub(crate) fn rooted(
@@ -157,6 +163,11 @@ impl LocalTempFile {
     }
 
     /// Removes the entry through the authority retained at creation time.
+    ///
+    /// Closes the I/O handle first. Returns a structured error when identity
+    /// inspection, entry removal, or empty-sandbox removal fails, or namespace
+    /// certainty makes cleanup unsafe. A sandbox-only failure can be retried;
+    /// success is idempotent. This does not undo an already-published file.
     pub fn cleanup(&mut self) -> LocalResult<()> {
         self.close();
         self.ensure_cleanup_safe().map_err(|error| {
@@ -194,6 +205,8 @@ impl LocalTempFile {
 
     /// Atomically publishes the file to a generated sibling outside its
     /// private sandbox.
+    /// Uses the default no-replacement policy of [`Self::persist_with`], with
+    /// the same publication outcome and resource-retaining failure contract.
     #[cfg_attr(not(coverage), inline)]
     #[cfg_attr(coverage, inline(never))]
     pub fn keep(self) -> std::result::Result<LocalPersistOutcome, LocalPersistError<Self>> {
@@ -208,6 +221,7 @@ impl LocalTempFile {
     }
 
     /// Persists the file within its creating authority without replacement.
+    /// Uses [`Self::persist_with`] with default options and the same errors.
     #[cfg_attr(not(coverage), inline(always))]
     #[cfg_attr(coverage, inline(never))]
     pub fn persist(
@@ -219,6 +233,17 @@ impl LocalTempFile {
 
     /// Persists the file with explicit replacement policy within its creating
     /// authority.
+    ///
+    /// Consumes this guard. Resolves `target` using its creation-time namespace
+    /// and PWD; `options` selects replacement, parent creation, and durability.
+    /// Returns the achieved publication guarantees and any sandbox cleanup
+    /// error after a successful install.
+    ///
+    /// Identity, policy, resolution, parent creation, installation, and
+    /// synchronization failures return a `LocalPersistError` retaining this
+    /// resource, its failure stage, and publication certainty. The retained
+    /// file may already be closed; created parents and a published destination
+    /// are not rolled back. Inspect the error state before retry or cleanup.
     #[cfg_attr(not(coverage), inline(always))]
     #[cfg_attr(coverage, inline(never))]
     pub fn persist_with(
@@ -238,6 +263,8 @@ impl LocalTempFile {
 
     /// Binds public paths and future relative persistence to the creating
     /// filesystem's namespace snapshot.
+    /// Returns a contextual path-resolution error on invalid namespace input;
+    /// consuming failure drops this guard and attempts cleanup.
     pub(crate) fn bind_namespace(mut self, resolver: LocalPathResolver) -> LocalResult<Self> {
         let input = match &self.backend {
             LocalTempResourceBackend::Host(_) => self.path.clone(),
@@ -259,6 +286,8 @@ impl LocalTempFile {
     }
 
     /// Persists the file to a resolved public-API target path.
+    /// Implements the ownership, guarantee, and failure contract of
+    /// [`Self::persist_with`]; a bound resolver is a construction invariant.
     fn persist_with_path(
         mut self,
         target: &Path,
@@ -469,6 +498,9 @@ impl LocalTempFile {
     }
 
     /// Synchronizes temporary file contents before namespace publication.
+    /// Returns false without I/O for `NotRequired`, or when a preferred sync
+    /// cannot be achieved. Required mode propagates unsupported-platform and
+    /// native open/sync errors. A closed file is reopened through its backend.
     fn synchronize_source(&self, durability: LocalDurabilityRequirement) -> Result<bool> {
         if durability == LocalDurabilityRequirement::NotRequired {
             return Ok(false);
@@ -515,6 +547,8 @@ impl LocalTempFile {
 
     /// Removes the resource using the retained backend rather than a diagnostic
     /// path.
+    /// Rechecks identity before removal and propagates inspection/removal
+    /// errors. An identity mismatch marks namespace state indeterminate.
     #[cfg_attr(not(coverage), inline)]
     #[cfg_attr(coverage, inline(never))]
     fn remove_resource(&mut self) -> Result<()> {
@@ -534,6 +568,7 @@ impl LocalTempFile {
     }
 
     /// Removes the now-empty private sandbox.
+    /// Propagates native removal errors, including a non-empty sandbox.
     fn release_sandbox(&self) -> Result<()> {
         #[cfg(feature = "test-support")]
         if crate::local::take_test_support("temp-file-sandbox-remove") {
@@ -607,6 +642,8 @@ impl LocalTempFile {
     }
 
     /// Rejects operations when the authority path no longer names this file.
+    /// A mismatch marks the state indeterminate and returns `InvalidInput`;
+    /// native inspection errors propagate without changing the state.
     fn ensure_identity_matches(&mut self) -> Result<()> {
         let matches = match &self.backend {
             LocalTempResourceBackend::Host(_) => self
@@ -698,6 +735,8 @@ fn synchronize_rooted_publication(
 }
 
 /// Applies preferred or required policy to one destination synchronization.
+/// Returns false without calling `synchronize` for `NotRequired`; preferred
+/// mode reports native failure as false, while required mode propagates it.
 fn synchronize_destination(
     durability: LocalDurabilityRequirement,
     synchronize: impl FnOnce() -> Result<()>,
@@ -747,7 +786,7 @@ impl Seek for LocalTempFile {
 }
 
 impl Drop for LocalTempFile {
-    /// Performs best-effort cleanup only while the resource remains owned.
+    /// Attempts remaining file or sandbox cleanup and discards cleanup errors.
     fn drop(&mut self) {
         let _ = self.cleanup();
     }

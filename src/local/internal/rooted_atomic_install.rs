@@ -20,6 +20,9 @@ use crate::LocalAtomicDestinationState;
 
 /// Installs a rooted staging file according to its initial destination state.
 ///
+/// A native installation attempt closes the staging data handle. The caller
+/// must record the result and disarm cleanup after successful publication.
+///
 /// # Parameters
 ///
 /// * `staged_file` - Armed descriptor-relative staging file.
@@ -29,7 +32,7 @@ use crate::LocalAtomicDestinationState;
 /// # Errors
 ///
 /// Returns the native installation error paired with the most precise safe
-/// destination state.
+/// destination and staging-name states.
 pub(in crate::local) fn install_rooted_atomic_file(
     staged_file: &mut RootedStagedFile,
     destination: &CString,

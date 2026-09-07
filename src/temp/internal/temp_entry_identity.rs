@@ -31,6 +31,8 @@ pub(crate) struct TempEntryIdentity {
 
 impl TempEntryIdentity {
     /// Captures identity from a newly created regular file handle.
+    /// Propagates native metadata/identity inspection errors or `Unsupported`
+    /// when stable native identity is unavailable on this platform.
     pub(crate) fn from_file(file: &fs::File) -> io::Result<Self> {
         #[cfg(unix)]
         {
@@ -51,6 +53,8 @@ impl TempEntryIdentity {
     }
 
     /// Captures identity from a newly created directory path.
+    /// Observes the final entry without following a link. Propagates native
+    /// open/inspection errors or unsupported-platform errors.
     pub(crate) fn from_path(path: &Path) -> io::Result<Self> {
         #[cfg(windows)]
         {
@@ -72,6 +76,8 @@ impl TempEntryIdentity {
     }
 
     /// Returns whether `path` still names the captured entry.
+    /// Returns false for a different identity; a missing entry or failed
+    /// native inspection is an error, not a negative match.
     pub(crate) fn matches_path(&self, path: &Path) -> io::Result<bool> {
         Ok(*self == Self::from_path(path)?)
     }
@@ -99,6 +105,7 @@ impl TempEntryIdentity {
     }
 
     /// Captures volume and file identifiers from an opened Windows handle.
+    /// Propagates the native `GetFileInformationByHandle` error.
     #[cfg(windows)]
     fn from_windows_file(file: &fs::File) -> io::Result<Self> {
         use std::os::windows::io::AsRawHandle;

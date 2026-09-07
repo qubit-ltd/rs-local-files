@@ -35,7 +35,8 @@ impl HostLocalFileSystem {
     /// Renames a Host entry with explicit overwrite, guarantee, and
     /// symbolic-link policies.
     ///
-    /// Both paths are bound using one current-directory snapshot.
+    /// The public facade supplies absolute paths resolved from one
+    /// current-directory snapshot.
     ///
     /// # Parameters
     ///
@@ -119,7 +120,7 @@ impl HostLocalFileSystem {
 /// # Parameters
 ///
 /// - `source`: Bound source path.
-/// - `target`: Bound destination path.
+/// - `target`: Bound destination path retained in the rename error.
 /// - `error`: Native rename failure.
 ///
 /// # Returns
@@ -148,7 +149,7 @@ fn rename_failure_indeterminate(error: LocalFileError) -> LocalRenameFailure {
 ///
 /// # Parameters
 ///
-/// - `target`: Bound destination path.
+/// - `path`: Bound entry path whose parent should be synchronized.
 ///
 /// # Errors
 ///
@@ -174,6 +175,9 @@ fn sync_rename_parents(source: &Path, target: &Path) -> io::Result<()> {
 }
 
 /// Reports whether the final destination entry is a real directory.
+///
+/// Missing entries and non-directories return `false`. Other no-follow
+/// metadata errors are propagated.
 pub(crate) fn destination_is_directory(path: &Path) -> io::Result<bool> {
     match fs::symlink_metadata(path) {
         Ok(metadata) => Ok(metadata.file_type().is_dir()),

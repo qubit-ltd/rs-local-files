@@ -97,6 +97,8 @@ impl Root {
     /// The cursor is an internal optimization used by rooted path resolution.
     /// It retains only one directory handle at a time and never changes the
     /// authority represented by this root.
+    /// Returns a native handle-duplication error, or `Unsupported` when rooted
+    /// descriptor operations are unavailable.
     pub(crate) fn resolution_cursor(&self) -> Result<RootedResolutionCursor> {
         #[cfg(any(unix, windows))]
         {
@@ -207,6 +209,11 @@ impl Root {
     }
 
     /// Creates a symbolic link while retaining publication and rollback facts.
+    ///
+    /// Stores `target` without dereferencing it at the validated rooted `path`.
+    /// `targets_directory` selects the Windows link kind and is ignored on
+    /// Unix. Native failures retain the primary error, destination certainty,
+    /// and any failure to remove a partially created Windows placeholder.
     pub(super) fn create_symlink_for_copy(
         &self,
         target: &Path,
@@ -320,6 +327,8 @@ impl Root {
     ///
     /// The returned handle remains relative to this opened root authority, so
     /// probing a descendant does not fall back to the diagnostic path.
+    /// Returns `InvalidInput` for other entry kinds, or a native inspection,
+    /// traversal, open, or handle-duplication error.
     #[cfg(any(unix, windows))]
     pub fn open_probe_file(&self, path: &path::Path) -> Result<File> {
         if path.as_path().as_os_str().is_empty() {
@@ -336,6 +345,7 @@ impl Root {
     }
 
     /// Duplicates the root authority for capability probing.
+    /// Propagates the native handle-duplication error.
     #[cfg(any(unix, windows))]
     pub fn open_probe_root(&self) -> Result<File> {
         self.try_clone_authority()
@@ -388,6 +398,7 @@ impl Root {
     /// Creates a descendant directory and any missing parents.
     ///
     /// Existing directories are accepted, matching [`std::fs::create_dir_all`].
+    /// Successfully created ancestors remain if a later operation fails.
     ///
     /// # Errors
     /// Returns an I/O error when secure traversal or creation fails.
@@ -461,6 +472,7 @@ impl Root {
     }
 
     /// Removes a descendant directory tree without following symbolic links.
+    /// Removal is incremental; earlier deletions remain after a later failure.
     ///
     /// # Errors
     /// Returns an I/O error when secure traversal or removal fails.

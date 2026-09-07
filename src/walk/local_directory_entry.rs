@@ -23,7 +23,7 @@ pub struct LocalDirectoryEntry {
     diagnostic_path: Option<PathBuf>,
     /// Path relative to the walker root.
     relative_path: PathBuf,
-    /// Metadata observed using the walker's symlink policy.
+    /// Metadata for the entry itself, without following its final symlink.
     metadata: LocalFileMetadata,
 }
 

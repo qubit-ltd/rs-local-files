@@ -250,12 +250,8 @@ fn validate_native_component(name: &OsStr) -> LocalResult<()> {
 ///
 /// # Returns
 ///
-/// The raw byte count on Unix or UTF-16 byte count on Windows.
-///
-/// # Errors
-///
-/// Returns an unsupported error on targets without a lossless native path
-/// representation supported by this crate.
+/// The raw Unix byte count. This implementation is infallible; the result
+/// type matches the other platform implementations.
 #[cfg(unix)]
 fn native_component_bytes(name: &OsStr) -> LocalResult<usize> {
     use std::os::unix::ffi::OsStrExt;

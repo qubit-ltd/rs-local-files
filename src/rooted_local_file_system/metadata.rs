@@ -21,6 +21,10 @@ use crate::LocalSymlinkPolicy;
 
 impl RootedLocalFileSystem {
     /// Reads metadata through the opened root authority.
+    /// An empty `path` inspects the retained root. Otherwise applies
+    /// `symlink_policy` to intermediate components and inspects the final entry
+    /// without following its link. Returns path/policy or native inspection
+    /// failures with metadata-operation context.
     pub fn metadata(&self, path: &Path, symlink_policy: LocalSymlinkPolicy) -> LocalResult<LocalFileMetadata> {
         if path.as_os_str().is_empty() {
             return self

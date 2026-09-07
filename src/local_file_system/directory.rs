@@ -31,11 +31,18 @@ use super::with_current_directory;
 
 impl LocalFileSystem {
     /// Opens a directory walker using this instance's default list options.
+    ///
+    /// Returns the walker or opening error described by
+    /// [`Self::list_with_options`].
     pub fn list(&self, path: &Path) -> LocalResult<LocalDirectoryWalker> {
         self.list_with_options(path, &self.defaults.list)
     }
 
     /// Opens a walker using one complete explicit options value.
+    ///
+    /// Returns path-resolution, invalid-option, or initial directory-open
+    /// errors. The returned walker owns traversal state; subsequent I/O and
+    /// budget failures are yielded during iteration.
     pub fn list_with_options(&self, path: &Path, options: &LocalListOptions) -> LocalResult<LocalDirectoryWalker> {
         let resolver = self.resolver_for(path, LocalFileOperation::List)?;
         let resolved = resolve_operation_path(&resolver, path, LocalFileOperation::List)?;
@@ -70,11 +77,20 @@ impl LocalFileSystem {
     }
 
     /// Creates a directory using this instance's default options.
+    ///
+    /// Returns the creation outcome or error described by
+    /// [`Self::create_directory_with_options`].
     pub fn create_directory(&self, path: &Path) -> LocalResult<LocalCreateDirectoryOutcome> {
         self.create_directory_with_options(path, &self.defaults.create_directory)
     }
 
     /// Creates a directory using one complete explicit options value.
+    ///
+    /// The outcome reports whether the requested directory was created.
+    /// `exists_ok` accepts an existing real directory, including the scope
+    /// root. Returns resolution, conflict, type, or native creation errors.
+    /// Recursive creation may leave ancestors behind after a later failure;
+    /// inspect the error's effect state.
     pub fn create_directory_with_options(
         &self,
         path: &Path,
@@ -113,11 +129,19 @@ impl LocalFileSystem {
     }
 
     /// Deletes a non-directory entry using this instance's default options.
+    ///
+    /// Returns the deletion outcome or error described by
+    /// [`Self::delete_file_with_options`].
     pub fn delete_file(&self, path: &Path) -> LocalResult<LocalDeleteOutcome> {
         self.delete_file_with_options(path, &self.defaults.delete)
     }
 
     /// Deletes a non-directory entry using complete explicit options.
+    ///
+    /// Removes a final symbolic link itself, including a link to a directory.
+    /// Returns path, type, requirement, budget, or native deletion errors.
+    /// The scope root and directory-qualified operands are rejected.
+    /// `missing_ok` controls whether an absent entry is a successful no-op.
     pub fn delete_file_with_options(
         &self,
         path: &Path,
@@ -149,11 +173,20 @@ impl LocalFileSystem {
     }
 
     /// Deletes a directory using this instance's default options.
+    ///
+    /// Returns the deletion outcome or error described by
+    /// [`Self::delete_directory_with_options`].
     pub fn delete_directory(&self, path: &Path) -> LocalResult<LocalDeleteOutcome> {
         self.delete_directory_with_options(path, &self.defaults.delete)
     }
 
     /// Deletes a directory using complete explicit options.
+    ///
+    /// Requires a real directory and rejects final symbolic links and the
+    /// scope root. Without recursion the directory must be empty.
+    /// `missing_ok` controls absence. Returns resolution, type, requirement,
+    /// budget, enumeration, or native removal errors. Recursive deletion is
+    /// not transactional; inspect the error's effect state after failure.
     pub fn delete_directory_with_options(
         &self,
         path: &Path,
