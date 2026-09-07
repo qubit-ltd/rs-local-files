@@ -38,8 +38,7 @@ impl WindowsRootedStagedFile {
     ///
     /// # Panics
     ///
-    /// Panics if the staging handle was closed before the staging name was
-    /// disarmed.
+    /// Panics if the staging handle has already been closed.
     #[must_use]
     // qubit-style: allow coverage-cfg
     #[cfg_attr(not(coverage), inline(always))]
@@ -54,8 +53,7 @@ impl WindowsRootedStagedFile {
     ///
     /// # Panics
     ///
-    /// Panics if the staging handle was closed before the staging name was
-    /// disarmed.
+    /// Panics if the staging handle has already been closed.
     #[must_use]
     #[cfg_attr(not(coverage), inline(always))]
     #[cfg_attr(coverage, inline(never))]
@@ -90,10 +88,13 @@ impl WindowsRootedStagedFile {
         Ok(())
     }
 
-    /// Marks the staging name as installed.
+    /// Closes the data handle and marks the staging name as installed.
+    /// Closing here prevents later cleanup from changing the published file's
+    /// read-only attribute through a retained staging handle.
     #[cfg_attr(not(coverage), inline(always))]
     #[cfg_attr(coverage, inline(never))]
     pub(in crate::local) fn disarm(&mut self) {
+        drop(self.file.take());
         self.armed = false;
     }
 }
@@ -102,5 +103,53 @@ impl Drop for WindowsRootedStagedFile {
     /// Performs best-effort cleanup for an armed staging entry.
     fn drop(&mut self) {
         let _ = self.cleanup();
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::fs;
+
+    use super::WindowsRootedStagedFile;
+    use crate::LocalRelativePath;
+
+    /// A published file must retain its read-only attribute after the staging
+    /// guard relinquishes cleanup ownership.
+    #[test]
+    fn test_disarmed_cleanup_preserves_published_read_only_attribute() {
+        let directory = tempfile::tempdir().expect("temporary directory should be created");
+        let destination = directory.path().join("published");
+        let file = fs::File::create(&destination).expect("published fixture should be created");
+        let mut permissions = file
+            .metadata()
+            .expect("fixture metadata should be readable")
+            .permissions();
+        permissions.set_readonly(true);
+        file.set_permissions(permissions)
+            .expect("fixture should become read-only");
+        let root = crate::local::internal::open_root_directory(directory.path()).expect("root should open");
+        let mut staging = WindowsRootedStagedFile {
+            root,
+            path: LocalRelativePath::new("published").expect("fixture path should be valid"),
+            diagnostic_path: destination.clone(),
+            file: Some(file),
+            armed: true,
+        };
+
+        staging.disarm();
+        staging.cleanup().expect("disarmed cleanup should succeed");
+        drop(staging);
+        let mut permissions = fs::metadata(&destination)
+            .expect("published entry must remain")
+            .permissions();
+        let preserved_read_only = permissions.readonly();
+        #[allow(clippy::permissions_set_readonly_false)]
+        permissions.set_readonly(false);
+        fs::set_permissions(&destination, permissions).expect("fixture should be writable for cleanup");
+
+        assert!(
+            preserved_read_only,
+            "disarmed cleanup must not mutate the published entry"
+        );
     }
 }
