@@ -186,17 +186,6 @@ cleanup contract.
 - [中文设计文档](doc/local_file_system_design.zh_CN.md)
 - [中文 README](README.zh_CN.md)
 
-Recursive deletion also supports explicit depth, entry, pending-path byte, and deadline budgets;
-the requested directory counts as one entry at depth zero. Default Options are replaceable
-configuration, not mandatory ceilings. See the [user guide](doc/user_guide.md).
-
-Deletion has a strict operation/type contract: `delete_file` returns `IsDirectory` for an
-entity directory, while `delete_directory` returns `NotDirectory` for a file or final symbolic
-link. `missing_ok` only accepts a missing requested root. If a recursive operation removes
-entries before failing, its `LocalFileError` keeps `PublicationIncomplete`; inspect
-`effect_state()` and `cause_kind()` separately before retrying. A basic error returning
-`None` from `effect_state()` carries no effect evidence and must not be treated as `Unchanged`.
-
 ## Testing
 
 Local package verification uses `.cargo/config.toml` to retain the locked Git source
