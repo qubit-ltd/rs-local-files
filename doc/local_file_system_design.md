@@ -426,8 +426,8 @@ PWD remains process-global; Rooted PWD remains instance-local.
 
 ## 22. Path and Filename Utilities
 
-`LocalPaths` provides native lexical normalization, containment, relative-path,
-and component operations without touching the filesystem. `LocalFileNames`
+`LocalPaths` provides scope-aware conversion between native paths and canonical
+components without touching the filesystem. `LocalFileNames`
 validates and manipulates individual native components. `LocalPathCodec`
 reversibly maps one component to canonical UTF-8 text for provider transport;
 decode rejects non-canonical or platform-invalid encodings. These utilities do
@@ -587,7 +587,7 @@ The design is complete only while public APIs and defaults match this document,
 Host and Rooted tests cover their distinct authorities, structured failures are
 preserved through downstream adapters, bilingual documentation stays aligned,
 all published Rust examples compile, configured CI and coverage gates pass, and
-the three maintained branches point to the same verified commit after release.
+configured release checks pass.
 
 ## Appendix: Detailed Normative Clauses
 

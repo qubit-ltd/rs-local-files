@@ -188,8 +188,8 @@ cleanup contract.
 
 ## Testing
 
-Local package verification uses `.cargo/config.toml` to retain the locked Git source
-for `qubit-redact`. Publishing to crates.io still requires that dependency version
+`Cargo.toml` declares the `qubit-redact` Git source and `Cargo.lock` pins its revision;
+`.cargo/config.toml` contains repository-specific comments only. Publishing to crates.io still requires that dependency version
 to be published to the registry first.
 
 ```bash

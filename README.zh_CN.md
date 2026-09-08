@@ -149,8 +149,8 @@ Linux、Windows 和 macOS 的行为会在运行时测试。FreeBSD 和 Android �
 
 ## 测试
 
-本地打包验证通过 `.cargo/config.toml` 保留锁文件固定的 `qubit-redact` Git 源。
-向 crates.io 发布时，仍需先将该依赖版本发布到 registry。
+`Cargo.toml` 声明 `qubit-redact` Git 源，`Cargo.lock` 固定其 revision；
+`.cargo/config.toml` 仅包含仓库说明性注释。向 crates.io 发布时，仍需先将该依赖版本发布到 registry。
 
 ```bash
 # 使用默认 feature 集运行测试
