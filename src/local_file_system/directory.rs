@@ -44,19 +44,49 @@ impl LocalFileSystem {
     /// errors. The returned walker owns traversal state; subsequent I/O and
     /// budget failures are yielded during iteration.
     pub fn list_with_options(&self, path: &Path, options: &LocalListOptions) -> LocalResult<LocalDirectoryWalker> {
+        self.list_with_options_started_at(path, options, super::Instant::now())
+    }
+
+    /// Opens a walker using a caller-supplied operation start instant.
+    ///
+    /// The instant is captured by the public facade before path binding so a
+    /// configured deadline includes validation and resolution work.
+    fn list_with_options_started_at(
+        &self,
+        path: &Path,
+        options: &LocalListOptions,
+        started_at: super::Instant,
+    ) -> LocalResult<LocalDirectoryWalker> {
         validate_list_options(self.scope(), self.symlink_policy, options, Some(path))
             .map_err(|error| with_current_directory(error, self.current_directory.virtual_path()))?;
+        if let Some(deadline) = options.deadline()
+            && started_at.elapsed() >= deadline
+        {
+            return Err(with_current_directory(
+                LocalFileError::from_io(
+                    LocalFileOperation::List,
+                    Some(path.to_path_buf()),
+                    None,
+                    std::io::Error::new(std::io::ErrorKind::TimedOut, "local operation deadline exceeded"),
+                ),
+                self.current_directory.virtual_path(),
+            ));
+        }
         let resolver = self.resolver_for(path, LocalFileOperation::List)?;
         let resolved = resolve_operation_path(&resolver, path, LocalFileOperation::List)?;
         match &self.core.namespace {
-            LocalNamespace::Host => {
-                HostLocalFileSystem::list_with_policy(resolved.authority_relative(), options, self.symlink_policy)
-            }
+            LocalNamespace::Host => HostLocalFileSystem::list_with_policy(
+                resolved.authority_relative(),
+                options,
+                self.symlink_policy,
+                started_at,
+            ),
             LocalNamespace::Rooted(rooted) => rooted.list(
                 resolved.authority_relative(),
                 resolved.namespace_absolute(),
                 options,
                 self.symlink_policy,
+                started_at,
             ),
         }
         .map(|walker| walker.bind_current_directory(resolver.current_directory().map(Path::to_path_buf)))
@@ -187,6 +217,15 @@ impl LocalFileSystem {
         path: &Path,
         options: &LocalDeleteOptions,
     ) -> LocalResult<LocalDeleteOutcome> {
+        self.delete_directory_with_options_started_at(path, options, super::Instant::now())
+    }
+
+    fn delete_directory_with_options_started_at(
+        &self,
+        path: &Path,
+        options: &LocalDeleteOptions,
+        started_at: super::Instant,
+    ) -> LocalResult<LocalDeleteOutcome> {
         let resolver = self.resolver_for(path, LocalFileOperation::DeleteDirectory)?;
         let resolved = resolve_operation_path(&resolver, path, LocalFileOperation::DeleteDirectory)?;
         self.reject_root_operand(
@@ -194,14 +233,29 @@ impl LocalFileSystem {
             LocalFileOperation::DeleteDirectory,
             resolver.current_directory(),
         )?;
+        if options
+            .deadline()
+            .is_some_and(|deadline| started_at.elapsed() >= deadline)
+        {
+            return Err(with_current_directory(
+                LocalFileError::from_io(
+                    LocalFileOperation::DeleteDirectory,
+                    Some(resolved.namespace_absolute().to_path_buf()),
+                    None,
+                    std::io::Error::new(std::io::ErrorKind::TimedOut, "local operation deadline exceeded"),
+                ),
+                resolver.current_directory(),
+            ));
+        }
         match &self.core.namespace {
             LocalNamespace::Host => HostLocalFileSystem::delete_directory_with_policy(
                 resolved.authority_relative(),
                 options,
                 self.symlink_policy,
+                started_at,
             ),
             LocalNamespace::Rooted(rooted) => {
-                rooted.delete_directory(resolved.authority_relative(), options, self.symlink_policy)
+                rooted.delete_directory(resolved.authority_relative(), options, self.symlink_policy, started_at)
             }
         }
         .map_err(|error| {

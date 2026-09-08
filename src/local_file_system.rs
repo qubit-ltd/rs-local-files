@@ -245,6 +245,7 @@ impl LocalFileSystem {
                 path.authority_relative(),
                 &LocalListOptions::new(),
                 self.symlink_policy,
+                Instant::now(),
             )
             .map(|_| ()),
             LocalNamespace::Rooted(rooted) => rooted.validate_directory(path.authority_relative(), self.symlink_policy),

@@ -59,11 +59,15 @@ pub(super) fn validate_options(root: &Path, options: &LocalListOptions) -> Local
 }
 
 /// Converts the relative deadline into one checked monotonic instant.
-pub(super) fn walker_deadline(root: &Path, options: &LocalListOptions) -> LocalResult<Option<Instant>> {
+pub(super) fn walker_deadline(
+    root: &Path,
+    options: &LocalListOptions,
+    started_at: Instant,
+) -> LocalResult<Option<Instant>> {
     let Some(duration) = options.deadline() else {
         return Ok(None);
     };
-    let Some(deadline) = Instant::now().checked_add(duration) else {
+    let Some(deadline) = started_at.checked_add(duration) else {
         return Err(
             LocalFileError::new(LocalFileErrorKind::InvalidOptions, LocalFileOperation::List)
                 .with_path(root.to_path_buf())

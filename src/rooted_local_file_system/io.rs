@@ -9,6 +9,8 @@
 // Rooted io operations.
 // qubit-style: allow source-test-pair
 
+use std::time::Instant;
+
 use super::Arc;
 use super::LocalDirectoryWalker;
 use super::LocalFileError;
@@ -102,6 +104,7 @@ impl RootedLocalFileSystem {
         namespace_root: &Path,
         options: &LocalListOptions,
         symlink_policy: LocalSymlinkPolicy,
+        started_at: Instant,
     ) -> LocalResult<LocalDirectoryWalker> {
         let symlink_policy = options.symlink_policy().unwrap_or(symlink_policy);
         validate_rooted_list_start(&self.root, path, symlink_policy)?;
@@ -126,6 +129,7 @@ impl RootedLocalFileSystem {
             namespace_root.to_path_buf(),
             *options,
             symlink_policy,
+            started_at,
         )
     }
 
