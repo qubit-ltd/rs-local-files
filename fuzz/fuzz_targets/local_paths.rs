@@ -23,6 +23,16 @@ fuzz_target!(|data: &[u8]| {
     let text = String::from_utf8_lossy(data);
     let components = text.split('\0').take(MAX_COMPONENTS).collect::<Vec<_>>();
 
+    check_rooted_components(&components);
+
+    #[cfg(unix)]
+    fuzz_host_unix(data);
+
+    #[cfg(windows)]
+    fuzz_host_windows(data);
+});
+
+fn check_rooted_components(components: &[&str]) {
     let rooted = LocalPaths::rooted();
     let Ok(native) = rooted.from_canonical_components(components.iter().copied()) else {
         return;
@@ -38,13 +48,7 @@ fuzz_target!(|data: &[u8]| {
         .to_canonical_components(Path::new(&restored))
         .expect("decoded rooted paths must encode again");
     assert_eq!(reencoded, encoded);
-
-    #[cfg(unix)]
-    fuzz_host_unix(data);
-
-    #[cfg(windows)]
-    fuzz_host_windows(data);
-});
+}
 
 #[cfg(unix)]
 fn fuzz_host_unix(data: &[u8]) {
