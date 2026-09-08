@@ -17,7 +17,8 @@
 /// ```
 /// use qubit_local_files::outcome::LocalCopyFailureState;
 ///
-/// assert_eq!(LocalCopyFailureState::Unchanged, LocalCopyFailureState::Unchanged);
+/// let state = LocalCopyFailureState::Unchanged;
+/// assert!(matches!(state, LocalCopyFailureState::Unchanged));
 /// ```
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 #[must_use]

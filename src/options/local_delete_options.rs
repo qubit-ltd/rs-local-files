@@ -16,6 +16,21 @@ use std::time::Duration;
 /// zero). Pending-path bytes count encoded native path lengths retained by the
 /// work queue, excluding allocator overhead and in-flight enumeration objects.
 /// Deadlines are cooperative checks between native calls, not I/O timeouts.
+///
+/// # Examples
+///
+/// ```
+/// use std::time::Duration;
+/// use qubit_local_files::options::LocalDeleteOptions;
+///
+/// let options = LocalDeleteOptions::new()
+///     .with_recursive()
+///     .with_missing_ok()
+///     .with_max_entries(128)
+///     .with_deadline(Duration::from_secs(2));
+/// assert!(options.recursive());
+/// assert_eq!(Some(128), options.max_entries());
+/// ```
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
 #[must_use = "delete options have no effect unless they are used"]
 pub struct LocalDeleteOptions {
