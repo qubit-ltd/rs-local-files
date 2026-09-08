@@ -17,8 +17,8 @@ execution context.
 
 `LocalFileSystem` validates static option combinations before resolving or
 mutating paths. Copy failures report the strongest proven destination state;
-`Unchanged` means no destination mutation was proven, while `Indeterminate`
-means a native mutation result could not be established. A `read_prefix` error
+`Unchanged` means this operation did not modify any destination entry, while `Indeterminate`
+means the final destination state could not be established. A `read_prefix` error
 keeps the outer `Read` operation even when opening the reader failed.
 
 ## Conceptual Model

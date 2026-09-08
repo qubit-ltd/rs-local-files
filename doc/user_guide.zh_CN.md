@@ -14,8 +14,8 @@
 ## 操作契约
 
 `LocalFileSystem` 会在解析路径或修改文件系统前校验静态选项组合。复制失败会报告已证明的
-最强目标状态：`Unchanged` 表示已证明没有修改目标，`Indeterminate` 表示无法确定原生修改
-的结果。即使打开读取器失败，`read_prefix` 错误仍保留外层的 `Read` 操作。
+最强目标状态：`Unchanged` 表示本次操作没有修改任何目标条目，`Indeterminate` 表示无法确定
+最终目标状态。即使打开读取器失败，`read_prefix` 错误仍保留外层的 `Read` 操作。
 
 ## 概念模型
 
