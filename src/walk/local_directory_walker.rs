@@ -461,7 +461,9 @@ impl LocalDirectoryWalker {
         };
         let entries = match fs::read_dir(&directory) {
             Ok(entries) => entries,
-            Err(error) => return self.handle_reopen_error(walk_io_error(&diagnostic_directory, error)),
+            Err(error) => {
+                return self.handle_reopen_error(walk_io_error(&diagnostic_directory, error));
+            }
         };
         let frame = self
             .stack
