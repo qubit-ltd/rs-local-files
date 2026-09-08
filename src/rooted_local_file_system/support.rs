@@ -48,7 +48,9 @@ pub(crate) fn validate_rooted_list_start(
     let metadata = if path.as_os_str().is_empty() {
         match root.metadata() {
             Ok(metadata) => metadata,
-            Err(error) => return Err(rooted_io_error(LocalFileOperation::List, path.as_path(), error)),
+            Err(error) => {
+                return Err(rooted_io_error(LocalFileOperation::List, path.as_path(), error));
+            }
         }
     } else {
         let relative = match crate::local::LocalRelativePath::new(&path) {
