@@ -9,6 +9,8 @@
 // Rooted delete operations.
 // qubit-style: allow source-test-pair
 
+use std::time::Instant;
+
 use super::LocalDeleteOptions;
 use super::LocalDeleteOutcome;
 use super::LocalFileError;
@@ -78,6 +80,7 @@ impl RootedLocalFileSystem {
         path: &Path,
         options: &LocalDeleteOptions,
         symlink_policy: LocalSymlinkPolicy,
+        started_at: Instant,
     ) -> LocalResult<LocalDeleteOutcome> {
         let relative = resolve_rooted_path(
             &self.root,
@@ -102,7 +105,7 @@ impl RootedLocalFileSystem {
             );
         }
         if options.recursive() {
-            return match remove_directory_tree(self, &relative, *options) {
+            return match remove_directory_tree(self, &relative, *options, started_at) {
                 Ok(()) => Ok(LocalDeleteOutcome::new(true)),
                 Err(error)
                     if options.missing_ok()

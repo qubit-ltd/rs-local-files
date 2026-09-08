@@ -9,6 +9,8 @@
 // Host delete operations.
 // qubit-style: allow source-test-pair
 
+use std::time::Instant;
+
 use super::HostLocalFileSystem;
 use super::LocalDeleteOptions;
 use super::LocalDeleteOutcome;
@@ -93,6 +95,7 @@ impl HostLocalFileSystem {
         path: &Path,
         options: &LocalDeleteOptions,
         symlink_policy: LocalSymlinkPolicy,
+        started_at: Instant,
     ) -> LocalResult<LocalDeleteOutcome> {
         let bound = resolve_host_path(path, symlink_policy, false)?;
         let Some(metadata) = metadata_for_delete(&bound, options, LocalFileOperation::DeleteDirectory)? else {
@@ -105,7 +108,7 @@ impl HostLocalFileSystem {
             );
         }
         if options.recursive() {
-            return match remove_directory_tree(&HostLocalFileSystem { _private: () }, &bound, *options) {
+            return match remove_directory_tree(&HostLocalFileSystem { _private: () }, &bound, *options, started_at) {
                 Ok(()) => Ok(LocalDeleteOutcome::new(true)),
                 Err(error)
                     if options.missing_ok()

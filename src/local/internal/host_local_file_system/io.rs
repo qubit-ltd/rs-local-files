@@ -9,6 +9,7 @@
 
 use std::fs;
 use std::path::Path;
+use std::time::Instant;
 
 use super::HostLocalFileSystem;
 use super::bind_host_path;
@@ -178,6 +179,7 @@ impl HostLocalFileSystem {
         path: &Path,
         options: &LocalListOptions,
         symlink_policy: LocalSymlinkPolicy,
+        started_at: Instant,
     ) -> LocalResult<LocalDirectoryWalker> {
         let policy = options.symlink_policy().unwrap_or(symlink_policy);
         let bound = resolve_host_path(path, policy, true)?;
@@ -187,7 +189,7 @@ impl HostLocalFileSystem {
         let diagnostic = path.to_path_buf();
         #[cfg(target_os = "macos")]
         let diagnostic = logical_macos_path(&diagnostic);
-        LocalDirectoryWalker::open_with_diagnostic(bound, diagnostic, *options, policy)
+        LocalDirectoryWalker::open_with_diagnostic(bound, diagnostic, *options, policy, started_at)
     }
 }
 

@@ -35,10 +35,10 @@ pub(crate) struct DeleteBudget {
 
 impl DeleteBudget {
     /// Creates a fresh budget; no filesystem access or mutation is performed.
-    pub(crate) fn new(options: LocalDeleteOptions) -> Self {
+    pub(crate) fn new(options: LocalDeleteOptions, started: Instant) -> Self {
         Self {
             options,
-            started: Instant::now(),
+            started,
             entries: options
                 .max_entries()
                 .map(|limit| ResourceBudget::new(LocalResourceKind::Entry, limit)),

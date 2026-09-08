@@ -101,11 +101,12 @@ impl LocalDirectoryWalker {
         diagnostic_root: PathBuf,
         options: LocalListOptions,
         symlink_policy: LocalSymlinkPolicy,
+        started_at: Instant,
     ) -> LocalResult<Self> {
         #[cfg(target_os = "macos")]
         let diagnostic_root = logical_macos_path(&diagnostic_root);
         validate_options(&diagnostic_root, &options)?;
-        let deadline = walker_deadline(&diagnostic_root, &options)?;
+        let deadline = walker_deadline(&diagnostic_root, &options, started_at)?;
         let metadata = match fs::symlink_metadata(&backend_root) {
             Ok(metadata) => metadata,
             Err(error) => return Err(walk_io_error(&diagnostic_root, error)),
@@ -189,8 +190,17 @@ impl LocalDirectoryWalker {
         namespace_root: PathBuf,
         options: LocalListOptions,
         symlink_policy: LocalSymlinkPolicy,
+        started_at: Instant,
     ) -> LocalResult<Self> {
-        Self::open_rooted_with_output(root, path, PathBuf::new(), namespace_root, options, symlink_policy)
+        Self::open_rooted_with_output(
+            root,
+            path,
+            PathBuf::new(),
+            namespace_root,
+            options,
+            symlink_policy,
+            started_at,
+        )
     }
 
     /// Creates a rooted walker with separate authority and logical output
@@ -205,13 +215,14 @@ impl LocalDirectoryWalker {
         namespace_root: PathBuf,
         options: LocalListOptions,
         symlink_policy: LocalSymlinkPolicy,
+        started_at: Instant,
     ) -> LocalResult<Self> {
         let diagnostic_root = root.path().join(match path.as_ref() {
             Some(path) => path.as_path().to_path_buf(),
             None => PathBuf::new(),
         });
         validate_options(&diagnostic_root, &options)?;
-        let deadline = walker_deadline(&diagnostic_root, &options)?;
+        let deadline = walker_deadline(&diagnostic_root, &options, started_at)?;
         let authority_parent = match path.as_ref() {
             Some(path) => path.as_path().to_path_buf(),
             None => PathBuf::new(),
