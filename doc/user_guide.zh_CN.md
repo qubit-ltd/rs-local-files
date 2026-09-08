@@ -4,19 +4,18 @@
 [设计文档](local_file_system_design.zh_CN.md) ·
 [API 文档](https://docs.rs/qubit-local-files)
 
-## 操作契约
-
-`LocalFileSystem` 会在解析路径或修改文件系统前校验静态选项组合。复制失败
-会报告已证明的最强目标状态：`Unchanged` 表示已证明没有修改目标，
-`Indeterminate` 表示无法确定原生修改的结果。即使打开读取器失败，
-`read_prefix` 错误仍保留外层的 `Read` 操作。
-
 ## 手册目标与读者
 
 本手册面向 Rust 1.94 及以上版本的 `qubit-local-files` 0.3 使用者，适用于直接操作主机
 文件系统，或需要把操作限制在一个已打开目录之下的应用。它不是 provider 注册表、远程
 文件系统 API，也不替代 provider 层的逻辑路径模型。本 crate 提供同步 API；异步应用应在
 合适的 blocking 执行环境中调用。
+
+## 操作契约
+
+`LocalFileSystem` 会在解析路径或修改文件系统前校验静态选项组合。复制失败会报告已证明的
+最强目标状态：`Unchanged` 表示已证明没有修改目标，`Indeterminate` 表示无法确定原生修改
+的结果。即使打开读取器失败，`read_prefix` 错误仍保留外层的 `Read` 操作。
 
 ## 概念模型
 
@@ -351,6 +350,12 @@ Windows Rooted 的符号链接读取、类型判断和创建均相对于已打�
 
 实例默认 Options 是便利配置，不是强制上限；显式 `*_with_options` 会完整替换它们。
 需要请求无法放宽的 provider 上限时，应配置 `qubit-fs-local::LocalResourcePolicy`。
+
+删除操作有明确的类型契约：`delete_file` 遇到实体目录返回 `IsDirectory`，
+`delete_directory` 遇到普通文件或最终符号链接返回 `NotDirectory`。`missing_ok` 只对请求的
+根条目不存在时生效。递归删除已移除条目后失败时，`LocalFileError` 会保留
+`PublicationIncomplete`；重试前应分别检查 `effect_state()` 与 `cause_kind()`。基础错误的
+`effect_state()` 返回 `None` 表示没有足够证据推断副作用，不能当作 `Unchanged`。
 
 
 ## 错误与诊断

@@ -147,21 +147,6 @@ Linux、Windows 和 macOS 的行为会在运行时测试。FreeBSD 和 Android �
 - [本地文件系统设计文档](doc/local_file_system_design.zh_CN.md)
 - [English README](README.md)
 
-递归删除也支持显式深度、条目数、待处理路径字节数与期限预算；请求目录计为一个条目、深度为零。
-默认 Options 是可替换的配置，不是强制上限。详见[用户手册](doc/user_guide.zh_CN.md)。
-
-删除操作有明确的类型契约：`delete_file` 遇到实体目录返回 `IsDirectory`，
-`delete_directory` 遇到普通文件或最终符号链接返回 `NotDirectory`。`missing_ok` 只容忍请求
-根本身不存在。递归删除已移除条目后失败时，`LocalFileError` 保留
-`PublicationIncomplete`；重试前应分别检查 `effect_state()` 与 `cause_kind()`。
-基础错误的 `effect_state()` 返回 `None` 表示没有足够的副作用证据，不能当作
-`Unchanged`。
-
-## 进一步阅读
-
-配置会在执行文件系统 I/O 前拒绝无法满足的保证，复制失败会区分未修改、
-部分发布、已发布和结果不确定的目标。完整错误与清理语义请参阅用户指南。
-
 ## 测试
 
 本地打包验证通过 `.cargo/config.toml` 保留锁文件固定的 `qubit-redact` Git 源。

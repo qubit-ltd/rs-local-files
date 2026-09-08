@@ -4,14 +4,6 @@
 [Design](local_file_system_design.md) ·
 [API reference](https://docs.rs/qubit-local-files)
 
-## Operational contracts
-
-`LocalFileSystem` validates static option combinations before resolving or
-mutating paths. Copy failures report the strongest proven destination state;
-`Unchanged` means no destination mutation was proven, while `Indeterminate`
-means a native mutation result could not be established. A `read_prefix` error
-keeps the outer `Read` operation even when opening the reader failed.
-
 ## Purpose and Audience
 
 This guide covers `qubit-local-files` 0.3 on Rust 1.94 or newer. It is for
@@ -20,6 +12,14 @@ to one opened directory. It is not a provider registry, a remote filesystem
 API, or a replacement for provider-level logical paths. The crate is
 synchronous; async applications should call it from an appropriate blocking
 execution context.
+
+## Operational contracts
+
+`LocalFileSystem` validates static option combinations before resolving or
+mutating paths. Copy failures report the strongest proven destination state;
+`Unchanged` means no destination mutation was proven, while `Indeterminate`
+means a native mutation result could not be established. A `read_prefix` error
+keeps the outer `Read` operation even when opening the reader failed.
 
 ## Conceptual Model
 
@@ -413,6 +413,15 @@ failure types remain the authority for their precise recovery states.
 Instance default Options are convenience configuration, not mandatory ceilings:
 explicit `*_with_options` replaces them completely. For a provider policy that
 requests cannot loosen, configure `qubit-fs-local::LocalResourcePolicy` instead.
+
+Deletion has a strict operation/type contract: `delete_file` returns
+`IsDirectory` for an entity directory, while `delete_directory` returns
+`NotDirectory` for a regular file or final symbolic link. `missing_ok` applies
+only when the requested root itself is missing. If recursive deletion removes
+entries before failing, the `LocalFileError` retains `PublicationIncomplete`;
+inspect `effect_state()` and `cause_kind()` separately before retrying. A basic
+error whose `effect_state()` is `None` carries insufficient effect evidence and
+must not be treated as `Unchanged`.
 
 
 ## Errors and Diagnostics
