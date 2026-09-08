@@ -131,8 +131,8 @@ dependencies = [
 
 [[package]]
 name = "qubit-redact"
-version = "0.6.0"
-source = "git+https://github.com/qubit-ltd/rs-redact#0c3a37fe119814723deefebbf49dbe5e34ffaa33"
+version = "0.8.0"
+source = "git+https://github.com/qubit-ltd/rs-redact?branch=dev-starfish#f052d517ce55ef84db21201dfb979c143b63eac7"
 dependencies = [
  "qubit-budget",
 ]

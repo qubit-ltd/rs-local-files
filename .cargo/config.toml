@@ -1,4 +1,3 @@
-# Keep local package verification on the dependency source pinned by Cargo.lock.
-# A crates.io release still requires publishing qubit-redact's registry version.
-[patch.crates-io]
-qubit-redact = { version = "0.6", git = "https://github.com/qubit-ltd/rs-redact" }
+# The direct git dependency in Cargo.toml is pinned by Cargo.lock for local
+# package verification. A crates.io release still requires publishing the
+# qubit-redact registry version.
