@@ -9,6 +9,12 @@
 #[cfg(unix)]
 use std::fs;
 #[cfg(unix)]
+use std::os::unix::ffi::OsStrExt;
+#[cfg(unix)]
+use std::process::Command;
+#[cfg(unix)]
+use std::time::Duration;
+#[cfg(unix)]
 use std::time::SystemTime;
 
 use qubit_local_files::LocalFileSystem;
@@ -58,6 +64,69 @@ fn test_host_file_system_space_observes_existing_directory() {
     assert!(space.capacity_bytes().is_some());
     #[cfg(not(any(unix, windows)))]
     let _ = &space;
+}
+
+/// Ensures capability probes reject FIFOs without blocking on a reader open.
+#[cfg(unix)]
+#[test]
+fn test_host_and_rooted_special_file_probe_does_not_block() {
+    if let Ok(operation) = std::env::var("QUBIT_FIFO_PROBE_CHILD") {
+        let path = std::env::var_os("QUBIT_FIFO_PROBE_PATH").expect("child path");
+        let path = std::path::PathBuf::from(path);
+        if operation == "host-space" {
+            assert!(
+                LocalFileSystem::host()
+                    .expect("Host filesystem")
+                    .space_at(&path)
+                    .is_err()
+            );
+        } else if operation == "host-limits" {
+            assert!(
+                LocalFileSystem::host()
+                    .expect("Host filesystem")
+                    .limits_at(&path)
+                    .is_err()
+            );
+        } else {
+            let root = path.parent().expect("FIFO parent");
+            let filesystem = LocalFileSystem::rooted(root).expect("root authority");
+            let operand = path.file_name().expect("FIFO name");
+            let operand = std::path::Path::new(operand);
+            if operation == "rooted-space" {
+                assert!(filesystem.space_at(operand).is_err());
+            } else {
+                assert!(filesystem.limits_at(operand).is_err());
+            }
+        }
+        return;
+    }
+
+    for operation in ["host-space", "host-limits", "rooted-space", "rooted-limits"] {
+        let directory = tempdir().expect("temporary directory");
+        let fifo = directory.path().join("probe.fifo");
+        let fifo_c = std::ffi::CString::new(fifo.as_os_str().as_bytes()).expect("FIFO path has no NUL");
+        assert_eq!(0, unsafe { libc::mkfifo(fifo_c.as_ptr(), 0o600) });
+        let mut child = Command::new(std::env::current_exe().expect("test executable"))
+            .arg("--exact")
+            .arg("test_host_and_rooted_special_file_probe_does_not_block")
+            .arg("--nocapture")
+            .env("QUBIT_FIFO_PROBE_CHILD", operation)
+            .env("QUBIT_FIFO_PROBE_PATH", &fifo)
+            .spawn()
+            .expect("probe child should start");
+        let deadline = std::time::Instant::now() + Duration::from_secs(5);
+        loop {
+            if child.try_wait().expect("child status").is_some() {
+                break;
+            }
+            assert!(std::time::Instant::now() < deadline, "probe blocked for {operation}");
+            std::thread::sleep(Duration::from_millis(10));
+        }
+        assert!(
+            child.wait().expect("child exit").success(),
+            "probe failed for {operation}"
+        );
+    }
 }
 
 /// Verifies rooted space observations use the opened authority for missing
