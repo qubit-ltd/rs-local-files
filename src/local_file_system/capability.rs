@@ -157,9 +157,15 @@ fn host_probe<T>(
 ///
 /// Returns native metadata or handle-open errors.
 fn open_host_probe(path: &Path) -> std::io::Result<fs::File> {
-    if fs::metadata(path)?.is_dir() {
+    let metadata = fs::symlink_metadata(path)?;
+    if metadata.is_dir() {
         crate::local::open_root_directory(path)
+    } else if metadata.is_file() {
+        crate::local::open_native_reader_path(path, &crate::read::OpenOptions::default())
     } else {
-        fs::File::open(path)
+        Err(std::io::Error::new(
+            std::io::ErrorKind::InvalidInput,
+            "capability probing requires a regular file or directory",
+        ))
     }
 }
