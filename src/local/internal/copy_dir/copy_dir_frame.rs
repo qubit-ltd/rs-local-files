@@ -45,6 +45,7 @@ impl CopyDirFrame {
     ///
     /// * `src` - Source directory path.
     /// * `dst` - Destination directory path.
+    /// * `depth` - Descendant depth of the source directory.
     /// * `source_identity` - Filesystem-object identity for cycle detection.
     /// * `source_permissions` - Permissions to apply after copying children.
     /// * `entries` - Lazy source-directory iterator.
