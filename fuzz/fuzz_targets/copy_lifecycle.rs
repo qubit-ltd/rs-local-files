@@ -99,7 +99,8 @@ fuzz_target!(|input: &[u8]| {
                 } else {
                     filesystem.delete_file(&target)
                 };
-                deletion.expect("fixture deletion must succeed");
+                let deleted = deletion.expect("fixture deletion must succeed");
+                assert!(deleted.deleted(), "fixture deletion must remove the destination");
                 assert!(!native_target.exists());
             }
             Err(failure) => {

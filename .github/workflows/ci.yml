@@ -100,3 +100,22 @@ jobs:
 
       - name: Check Rooted resolution fast path
         run: cargo +1.94 test --all-features --locked --test rooted_resolution_fast_path_tests
+
+  fuzz-check:
+    name: Fuzz target compile check
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout source
+        uses: actions/checkout@v6
+        with:
+          fetch-depth: 1
+          submodules: recursive
+
+      - name: Install Rust
+        run: rustup toolchain install 1.94 --profile minimal
+
+      - name: Check fuzz targets with warnings denied
+        env:
+          RUSTFLAGS: -D warnings
+        run: cargo +1.94 check --locked --manifest-path fuzz/Cargo.toml --bins
