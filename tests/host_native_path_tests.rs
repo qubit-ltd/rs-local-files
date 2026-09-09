@@ -11,6 +11,7 @@ use std::fs;
 use std::path::Path;
 
 use qubit_local_files::LocalFileSystem;
+use qubit_local_files::error::LocalFileErrorKind;
 
 /// Explicit parent creation preserves native missing/.. side effects and the
 /// reached destination.
@@ -153,6 +154,14 @@ fn test_host_metadata_directory_syntax_matches_native() {
         let expected = fs::symlink_metadata(&path);
         let observed = host.metadata(&path);
         match expected {
+            Ok(metadata) if !metadata.is_dir() => {
+                // Windows may normalize file/. to the file. The facade still
+                // enforces its explicit directory-qualified operand contract.
+                assert_eq!(
+                    observed.expect_err("directory-qualified file must fail").kind(),
+                    LocalFileErrorKind::NotDirectory
+                );
+            }
             Ok(metadata) => assert_eq!(observed.expect("native metadata").len(), metadata.len()),
             Err(_) => assert!(observed.is_err(), "invalid native operand: {input}"),
         }
@@ -324,4 +333,32 @@ fn test_host_windows_drive_binding() {
             .as_os_str(),
         Path::new(r"\\?\C:\base\dir\..\file").as_os_str()
     );
+}
+
+/// Windows link/parent reads use the native oracle for ordinary and verbatim
+/// paths.
+#[cfg(windows)]
+#[test]
+fn test_host_windows_link_parent_reads_match_native() {
+    use std::os::windows::fs::symlink_dir;
+    let fixture = tempfile::tempdir().expect("Windows path fixture");
+    fs::create_dir(fixture.path().join("a")).expect("lexical parent");
+    fs::create_dir_all(fixture.path().join("b/inner")).expect("link destination");
+    fs::write(fixture.path().join("a/config"), b"A").expect("lexical content");
+    fs::write(fixture.path().join("b/config"), b"B").expect("native content");
+    symlink_dir(fixture.path().join("b/inner"), fixture.path().join("a/link"))
+        .expect("Windows runtime contract requires directory symlink privilege");
+    let host = LocalFileSystem::host().expect("Host filesystem");
+    for base in [
+        fixture.path().to_path_buf(),
+        fs::canonicalize(fixture.path()).expect("verbatim base"),
+    ] {
+        let mut operand = base.into_os_string();
+        operand.push(r"\a\link\..\config");
+        let path = Path::new(&operand);
+        match fs::read(path) {
+            Ok(expected) => assert_eq!(host.read_prefix(path, 8).expect("native read"), expected),
+            Err(_) => assert!(host.read_prefix(path, 8).is_err(), "native-invalid operand must fail"),
+        }
+    }
 }
