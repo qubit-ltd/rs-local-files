@@ -54,12 +54,14 @@ impl LocalFileMetadata {
     /// - `accessed_at`: Optional access time.
     /// - `modified_at`: Optional modification time.
     /// - `created_at`: Optional creation time.
+    /// - `permissions`: Permissions observed from the native entry.
     pub(crate) const fn from_parts(
         kind: LocalFileKind,
         len: u64,
         accessed_at: Option<SystemTime>,
         modified_at: Option<SystemTime>,
         created_at: Option<SystemTime>,
+        permissions: LocalFilePermissions,
     ) -> Self {
         Self {
             kind,
@@ -67,7 +69,7 @@ impl LocalFileMetadata {
             accessed_at,
             modified_at,
             created_at,
-            permissions: LocalFilePermissions::new(false, None),
+            permissions,
         }
     }
 

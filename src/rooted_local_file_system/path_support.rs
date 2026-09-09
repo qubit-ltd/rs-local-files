@@ -16,6 +16,7 @@ use crate::LocalFileErrorKind;
 use crate::LocalFileKind;
 use crate::LocalFileMetadata;
 use crate::LocalFileOperation;
+use crate::LocalFilePermissions;
 use crate::LocalResult;
 
 /// Validates a rooted descendant and preserves the offending native path.
@@ -153,12 +154,14 @@ pub(crate) fn rooted_metadata(metadata: crate::rooted::Metadata) -> LocalFileMet
         crate::rooted::EntryKind::CharDevice => LocalFileKind::CharDevice,
         crate::rooted::EntryKind::Other => LocalFileKind::Other,
     };
+    let permissions = metadata.permissions();
     LocalFileMetadata::from_parts(
         kind,
         metadata.size(),
         metadata.accessed_at(),
         metadata.modified_at(),
         metadata.created_at(),
+        LocalFilePermissions::new(permissions.is_read_only(), permissions.unix_mode()),
     )
 }
 

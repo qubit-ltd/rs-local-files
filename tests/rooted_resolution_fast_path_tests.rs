@@ -1,19 +1,9 @@
 // =============================================================================
-//    Copyright (c) 2026 Haixing Hu.
+//    Copyright (c) 2025 - 2026 Haixing Hu.
 //
 //    SPDX-License-Identifier: Apache-2.0
 //
-//    Licensed under the Apache License, Version 2.0 (the "License");
-//    you may not use this file except in compliance with the License.
-//    You may obtain a copy of the License at
-//
-//        http://www.apache.org/licenses/LICENSE-2.0
-//
-//    Unless required by applicable law or agreed to in writing, software
-//    distributed under the License is distributed on an "AS IS" BASIS,
-//    WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-//    See the License for the specific language governing permissions and
-//    limitations under the License.
+//    Licensed under the Apache License, Version 2.0.
 // =============================================================================
 //! Public rooted-operation coverage for the component resolution fast path.
 
@@ -37,7 +27,7 @@ use tempfile::tempdir;
 /// Existing normal components resolve through a deep rooted path and retain
 /// the public metadata and reader contracts.
 #[test]
-fn rooted_deep_normal_path_preserves_metadata_and_reader_behavior() {
+fn test_rooted_deep_normal_path_preserves_metadata_and_reader_behavior() {
     let temporary = tempdir().expect("temporary root should be created");
     fs::create_dir_all(temporary.path().join("a/b/c")).expect("nested directories should be created");
     fs::write(temporary.path().join("a/b/c/payload"), b"payload").expect("payload should be written");
@@ -61,7 +51,7 @@ fn rooted_deep_normal_path_preserves_metadata_and_reader_behavior() {
 /// The same component cursor is exercised by directory creation, atomic
 /// writer publication, and rooted listing operations.
 #[test]
-fn rooted_fast_path_supports_create_write_and_list() {
+fn test_rooted_fast_path_supports_create_write_and_list() {
     let temporary = tempdir().expect("temporary root should be created");
     let rooted = LocalFileSystem::rooted(temporary.path()).expect("root authority should open");
 
@@ -91,7 +81,7 @@ fn rooted_fast_path_supports_create_write_and_list() {
 /// rules and still follows a final link for reader operations.
 #[cfg(unix)]
 #[test]
-fn rooted_link_path_preserves_symlink_fallback_behavior() {
+fn test_rooted_link_path_preserves_symlink_fallback_behavior() {
     use std::os::unix::fs::symlink;
 
     let temporary = tempdir().expect("temporary root should be created");
@@ -115,7 +105,7 @@ fn rooted_link_path_preserves_symlink_fallback_behavior() {
 /// rejection, dangling targets, cycles, and virtual-root boundary escapes.
 #[cfg(unix)]
 #[test]
-fn rooted_fast_path_fallback_preserves_symlink_policy_matrix() {
+fn test_rooted_fast_path_fallback_preserves_symlink_policy_matrix() {
     use std::os::unix::fs::symlink;
 
     let temporary = tempdir().expect("temporary root should be created");

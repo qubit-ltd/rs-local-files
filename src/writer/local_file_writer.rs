@@ -123,6 +123,11 @@ impl LocalFileWriter {
     }
 
     /// Returns publication certainty after a non-retryable stream failure.
+    ///
+    /// `Some` carries the publication state recorded by the writer. `None`
+    /// means that no failure conclusion is retained; it does not prove that
+    /// the destination is unchanged. Inspect commit or abort outcomes for
+    /// their operation-specific conclusions.
     #[must_use]
     #[cfg_attr(not(coverage), inline)]
     #[cfg_attr(coverage, inline(never))]
