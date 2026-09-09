@@ -13,6 +13,46 @@ use std::path::Path;
 use qubit_local_files::LocalFileSystem;
 use qubit_local_files::error::LocalFileErrorKind;
 
+/// Staging and installation accept the same long ordinary paths as std.
+#[cfg(windows)]
+#[test]
+fn test_host_windows_long_path_staged_publication_matches_std() {
+    use std::io::Write;
+    use std::os::windows::ffi::OsStrExt;
+
+    use qubit_local_files::options::LocalWriteMetadataPolicy;
+    use qubit_local_files::options::LocalWriteMode;
+    use qubit_local_files::options::LocalWriteOptions;
+
+    let fixture = tempfile::tempdir().expect("long-path fixture");
+    let mut parent = fixture.path().to_path_buf();
+    while parent.as_os_str().encode_wide().count() < 280 {
+        parent.push("long-native-directory-component");
+    }
+    fs::create_dir_all(&parent).expect("std creates long parent");
+    let path = parent.join("manifest.json");
+    let host = LocalFileSystem::host().expect("Host filesystem");
+    for policy in [
+        LocalWriteMetadataPolicy::PreserveExisting,
+        LocalWriteMetadataPolicy::UseStaging,
+    ] {
+        for existing in [false, true] {
+            if existing {
+                fs::write(&path, b"old").expect("std creates long target");
+            }
+            let options = LocalWriteOptions::new(LocalWriteMode::CreateOrReplace).with_metadata_policy(policy);
+            let mut writer = host
+                .open_writer_with_options(&path, &options)
+                .expect("open long-path writer");
+            writer.write_all(b"new").expect("write staged bytes");
+            let outcome = writer.commit().expect("publish long-path staging");
+            assert!(outcome.atomic());
+            assert_eq!(fs::read(&path).expect("std reads published target"), b"new");
+            fs::remove_file(&path).expect("reset long target");
+        }
+    }
+}
+
 /// Explicit parent creation preserves native missing/.. side effects and the
 /// reached destination.
 #[cfg(unix)]
