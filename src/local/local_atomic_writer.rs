@@ -46,6 +46,7 @@ use crate::LocalAtomicWriteError;
 use crate::LocalAtomicWriteOptions;
 use crate::LocalAtomicWriteStage;
 use crate::LocalDurabilityRequirement;
+use crate::options::LocalWriteMetadataPolicy;
 
 /// Default suffix used by atomic-write temporary files.
 const ATOMIC_WRITE_TEMP_SUFFIX: &str = ".tmp";
@@ -67,14 +68,16 @@ const ATOMIC_WRITE_TEMP_PREFIX: &str = ".atomic-write-";
 /// The destination must be absent or a regular file when this writer is
 /// created, except that internal copy options can allow replacement of a final
 /// symbolic-link entry. Directories, sockets, FIFOs, devices, and other special
-/// files are rejected. On Unix, commit opens the current regular destination,
-/// copies its strict platform-native metadata to staging, and verifies the
-/// opened file identity immediately before replacement. On Windows,
-/// `ReplaceFileW` merges the existing destination metadata during replacement.
-/// A metadata read, copy, ACL merge, or attribute merge failure aborts the
-/// operation instead of silently reducing the protection of the destination.
-/// A destination that was absent when this writer began is installed with a
-/// native no-replace operation, so a concurrent creator is not overwritten.
+/// files are rejected. Commit observes the current regular destination and
+/// rechecks its identity before replacement. `PreserveExisting` opens and
+/// copies strict Unix metadata, or uses Windows `ReplaceFileW` metadata
+/// merging. `UseStaging` retains staging metadata and does not require old
+/// content read access; Windows uses native replacement without metadata
+/// merging. A metadata read, copy, ACL merge, or attribute merge failure aborts
+/// the operation instead of silently reducing the protection of the
+/// destination. A destination that was absent when this writer began is
+/// installed with a native no-replace operation, so a concurrent creator is not
+/// overwritten.
 ///
 /// The final inspection and replacement remain separate path-based operations.
 /// This writer is therefore not a sandbox boundary against an actor that can
@@ -83,6 +86,8 @@ const ATOMIC_WRITE_TEMP_PREFIX: &str = ".atomic-write-";
 #[must_use = "atomic writes have no effect unless the writer is committed"]
 #[derive(Debug)]
 pub(crate) struct LocalAtomicWriter {
+    /// Controls metadata copying independently of regular-destination identity.
+    metadata_policy: LocalWriteMetadataPolicy,
     /// Requested destination path.
     path: PathBuf,
     /// Absolute destination path used by filesystem operations.
@@ -91,8 +96,8 @@ pub(crate) struct LocalAtomicWriter {
     parent_dirs_to_sync: Vec<PathBuf>,
     /// Whether a destination entry existed when this writer began.
     destination_existed: bool,
-    /// Whether commit preserves metadata from an existing regular file.
-    preserve_destination_metadata: bool,
+    /// Whether commit must observe and verify an existing regular file.
+    destination_is_regular: bool,
     /// Durability requested for this publication.
     durability: LocalDurabilityRequirement,
     /// Optional limit for retrying a nonblocking destination open.
@@ -152,7 +157,7 @@ impl LocalAtomicWriter {
             }
             Vec::new()
         };
-        let (destination_existed, preserve_destination_metadata) =
+        let (destination_existed, destination_is_regular) =
             if options.publication_mode() == LocalAtomicPublicationMode::CreateNew {
                 match fs::symlink_metadata(&operation_path) {
                     Ok(_) => {
@@ -202,7 +207,8 @@ impl LocalAtomicWriter {
             operation_path,
             parent_dirs_to_sync,
             destination_existed,
-            preserve_destination_metadata,
+            destination_is_regular,
+            metadata_policy: options.metadata_policy(),
             durability: options.durability(),
             #[cfg(unix)]
             open_retry_timeout: options.open_retry_timeout(),
@@ -257,23 +263,58 @@ impl LocalAtomicWriter {
         #[cfg(unix)]
         let destination = self.open_destination_for_commit()?;
         #[cfg(unix)]
-        self.preserve_destination_metadata(destination.as_ref())?;
+        self.apply_destination_metadata(destination.as_ref())?;
         #[cfg(not(any(unix, windows)))]
         self.reject_unsupported_metadata_preservation()?;
+        #[cfg(windows)]
+        let windows_destination = if self.destination_is_regular {
+            Some(with_atomic_context(
+                observe_windows_atomic_destination(&self.operation_path),
+                LocalAtomicWriteStage::ReadDestinationMetadata,
+                &self.path,
+                Some(self.staged_file.path().to_path_buf()),
+                LocalAtomicDestinationState::Unchanged,
+            )?)
+        } else {
+            None
+        };
         let file_durable = self.sync_temporary_file()?;
         #[cfg(unix)]
         self.verify_destination_for_commit(destination.as_ref())?;
         #[cfg(not(unix))]
         self.verify_non_unix_destination_for_commit()?;
+        #[cfg(windows)]
+        if let Some((_handle, observed)) = windows_destination.as_ref() {
+            let (_current_handle, current) = with_atomic_context(
+                observe_windows_atomic_destination(&self.operation_path),
+                LocalAtomicWriteStage::ReplaceDestination,
+                &self.path,
+                Some(self.staged_file.path().to_path_buf()),
+                LocalAtomicDestinationState::Unchanged,
+            )?;
+            if !observed.is_same_file(&current) {
+                return Err(LocalAtomicWriteError::new(
+                    LocalAtomicWriteStage::ReplaceDestination,
+                    self.path.clone(),
+                    Some(self.staged_file.path().to_path_buf()),
+                    LocalAtomicDestinationState::Unchanged,
+                    io::Error::new(
+                        ErrorKind::InvalidInput,
+                        "atomic write destination changed before replacement",
+                    ),
+                ));
+            }
+        }
         let parent_durable = self.install_and_sync_parent()?;
         Ok(file_durable && parent_durable)
     }
 
-    /// Opens the existing destination that supplies commit-time metadata.
+    /// Observes commit-time destination identity and optional metadata.
     ///
     /// # Returns
     ///
-    /// The opened regular destination when metadata preservation is required,
+    /// The observed regular destination, with a readable handle only for
+    /// `PreserveExisting`,
     /// or `None` for a new entry or an allowed final-link replacement.
     ///
     /// # Errors
@@ -283,12 +324,12 @@ impl LocalAtomicWriter {
     /// available for retry or explicit abort.
     #[cfg(unix)]
     fn open_destination_for_commit(&mut self) -> Result<Option<OpenedAtomicDestination>, LocalAtomicWriteError> {
-        if !self.preserve_destination_metadata {
+        if !self.destination_is_regular {
             return Ok(None);
         }
         let temporary_path = Some(self.staged_file.path().to_path_buf());
         let opened = with_atomic_context(
-            open_atomic_destination(&self.operation_path, self.open_retry_timeout),
+            open_atomic_destination(&self.operation_path, self.open_retry_timeout, self.metadata_policy),
             LocalAtomicWriteStage::ReadDestinationMetadata,
             &self.path,
             temporary_path,
@@ -310,21 +351,24 @@ impl LocalAtomicWriter {
     ///
     /// # Parameters
     ///
-    /// * `destination` - Opened destination, or `None` for a new file.
+    /// * `destination` - Observed destination, or `None` for a new file.
     ///
     /// # Errors
     ///
     /// Returns a structured metadata-application error while retaining staging
     /// when platform metadata cannot be preserved.
     #[cfg(unix)]
-    fn preserve_destination_metadata(
+    fn apply_destination_metadata(
         &mut self,
         destination: Option<&OpenedAtomicDestination>,
     ) -> Result<(), LocalAtomicWriteError> {
         let Some(destination) = destination else {
             return Ok(());
         };
-        let result = preserve_atomic_metadata(destination.file(), self.staged_file.file());
+        let Some(file) = destination.file() else {
+            return Ok(());
+        };
+        let result = preserve_atomic_metadata(file, self.staged_file.file());
         with_atomic_context(
             result,
             LocalAtomicWriteStage::ApplyDestinationMetadata,
@@ -342,7 +386,7 @@ impl LocalAtomicWriter {
     /// retaining staging when the destination already exists.
     #[cfg(not(any(unix, windows)))]
     fn reject_unsupported_metadata_preservation(&mut self) -> Result<(), LocalAtomicWriteError> {
-        if !self.preserve_destination_metadata {
+        if !self.destination_is_regular {
             return Ok(());
         }
         with_atomic_context(
@@ -375,11 +419,11 @@ impl LocalAtomicWriter {
         })
     }
 
-    /// Verifies that the opened destination still names the final entry.
+    /// Verifies that the observed destination still names the final entry.
     ///
     /// # Parameters
     ///
-    /// * `destination` - Opened destination, or `None` for a new file.
+    /// * `destination` - Observed destination, or `None` for a new file.
     ///
     /// # Errors
     ///
@@ -410,7 +454,7 @@ impl LocalAtomicWriter {
         if !self.destination_existed {
             return Ok(());
         }
-        let exists = if self.preserve_destination_metadata {
+        let exists = if self.destination_is_regular {
             let (exists, _metadata_preservation_required) = with_atomic_context(
                 existing_file_metadata(&self.operation_path, false),
                 LocalAtomicWriteStage::ReplaceDestination,
@@ -448,8 +492,12 @@ impl LocalAtomicWriter {
     /// synchronization error after the destination has been replaced.
     fn install_and_sync_parent(&mut self) -> Result<bool, LocalAtomicWriteError> {
         self.staged_file.close();
-        let install_result =
-            install_atomic_file(self.staged_file.path(), &self.operation_path, self.destination_existed);
+        let install_result = install_atomic_file(
+            self.staged_file.path(),
+            &self.operation_path,
+            self.destination_existed,
+            self.metadata_policy,
+        );
         if let Err((source, destination_state, staging_state)) = install_result {
             return recover_atomic_install_error(
                 AtomicInstallRecovery {
@@ -563,4 +611,36 @@ fn existing_file_metadata(path: &Path, replace_target_symlink: bool) -> io::Resu
         Err(error) if error.kind() == ErrorKind::NotFound => Ok((false, false)),
         Err(error) => Err(add_path_context(error, "read destination metadata", path)),
     }
+}
+
+/// Opens a Windows entry for attributes only and captures its stable identity.
+///
+/// Does not follow a final reparse point or require content read access.
+/// Returns native open/identity errors, or `InvalidInput` for a non-regular
+/// entry. The returned handle pins the observed file through the commit-time
+/// check; the subsequent path-based installation still has a check/install
+/// race.
+#[cfg(windows)]
+fn observe_windows_atomic_destination(path: &Path) -> io::Result<(fs::File, crate::rooted::Metadata)> {
+    use std::os::windows::fs::OpenOptionsExt;
+
+    use windows_sys::Win32::Storage::FileSystem::FILE_FLAG_BACKUP_SEMANTICS;
+    use windows_sys::Win32::Storage::FileSystem::FILE_FLAG_OPEN_REPARSE_POINT;
+    use windows_sys::Win32::Storage::FileSystem::FILE_READ_ATTRIBUTES;
+    use windows_sys::Win32::Storage::FileSystem::FILE_SHARE_DELETE;
+    use windows_sys::Win32::Storage::FileSystem::FILE_SHARE_READ;
+    use windows_sys::Win32::Storage::FileSystem::FILE_SHARE_WRITE;
+    let file = fs::OpenOptions::new()
+        .access_mode(FILE_READ_ATTRIBUTES)
+        .share_mode(FILE_SHARE_DELETE | FILE_SHARE_READ | FILE_SHARE_WRITE)
+        .custom_flags(FILE_FLAG_OPEN_REPARSE_POINT | FILE_FLAG_BACKUP_SEMANTICS)
+        .open(path)?;
+    let metadata = crate::rooted::Metadata::from_open_file(&file)?;
+    if metadata.kind() != crate::rooted::EntryKind::File {
+        return Err(io::Error::new(
+            ErrorKind::InvalidInput,
+            "atomic destination must remain a regular file",
+        ));
+    }
+    Ok((file, metadata))
 }

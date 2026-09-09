@@ -14,6 +14,7 @@ use std::time::Duration;
 
 use super::internal::LocalAtomicPublicationMode;
 use crate::LocalDurabilityRequirement;
+use crate::options::LocalWriteMetadataPolicy;
 
 /// Options used when beginning a local atomic write.
 ///
@@ -25,6 +26,9 @@ use crate::LocalDurabilityRequirement;
 pub struct LocalAtomicWriteOptions {
     /// Whether missing parent directories should be created before staging.
     create_parent: bool,
+    /// Metadata applied to replacement staging independently of identity
+    /// checks.
+    metadata_policy: LocalWriteMetadataPolicy,
     /// Optional limit for retrying a nonblocking destination open.
     open_retry_timeout: Option<Duration>,
     /// Whether a final symlink entry may be replaced without following it.
@@ -45,11 +49,24 @@ impl LocalAtomicWriteOptions {
     pub const fn new() -> Self {
         Self {
             create_parent: false,
+            metadata_policy: LocalWriteMetadataPolicy::PreserveExisting,
             open_retry_timeout: None,
             replace_target_symlink: false,
             publication_mode: LocalAtomicPublicationMode::ReplaceOrCreate,
             durability: LocalDurabilityRequirement::Required,
         }
+    }
+
+    /// Returns the metadata policy for replacing an existing regular file.
+    #[must_use]
+    pub const fn metadata_policy(&self) -> LocalWriteMetadataPolicy {
+        self.metadata_policy
+    }
+
+    /// Selects replacement metadata without changing identity verification.
+    pub const fn with_metadata_policy(mut self, policy: LocalWriteMetadataPolicy) -> Self {
+        self.metadata_policy = policy;
+        self
     }
 
     /// Returns whether missing parent directories will be created.

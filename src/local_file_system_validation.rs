@@ -189,6 +189,7 @@ pub(super) fn validate_write_options(
     operation: LocalFileOperation,
 ) -> LocalResult<()> {
     let append = options.mode() == LocalWriteMode::Append;
+
     if (append && options.atomicity() == LocalAtomicityRequirement::Required)
         || (!append
             && options.durability() == LocalDurabilityRequirement::Required

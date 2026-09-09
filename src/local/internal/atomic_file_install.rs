@@ -34,14 +34,22 @@ use super::file_move::replace_file;
 #[cfg(windows)]
 use super::file_move::wide_path;
 use crate::LocalAtomicDestinationState;
+use crate::options::LocalWriteMetadataPolicy;
 
 /// Installs a staged atomic file according to its initial destination state.
 pub(crate) fn install_atomic_file(
     staging: &Path,
     destination: &Path,
     destination_existed: bool,
+    metadata_policy: LocalWriteMetadataPolicy,
 ) -> std::result::Result<(), (Error, LocalAtomicDestinationState, AtomicStagingState)> {
     if destination_existed {
+        #[cfg(windows)]
+        if metadata_policy == LocalWriteMetadataPolicy::UseStaging {
+            return super::file_move::replace_file(staging, destination).map_err(unchanged_error);
+        }
+        #[cfg(not(windows))]
+        let _ = metadata_policy;
         match replace_existing_atomic_file(staging, destination) {
             Ok(()) => Ok(()),
             Err(source) => {
