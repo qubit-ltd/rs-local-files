@@ -305,6 +305,10 @@ impl LocalAtomicWriter {
                 ));
             }
         }
+        // Keep the observation alive through the identity check, then release
+        // it before path-based replacement of the old Windows directory entry.
+        #[cfg(windows)]
+        drop(windows_destination);
         let parent_durable = self.install_and_sync_parent()?;
         Ok(file_durable && parent_durable)
     }
