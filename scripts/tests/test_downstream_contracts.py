@@ -153,6 +153,22 @@ class CompleteLayout(unittest.TestCase):
         self.assertEqual(created, [("rs-fs-local", "consumer-ref"), ("rs-mime", "mime-ref"), ("rs-support", "support-ref")])
         self.assertEqual(set(records), {"rs-local-files", "rs-fs-local", "rs-mime", "rs-support"})
 
+    def test_explicit_extra_candidate_is_a_traversal_root(self):
+        candidate = self.root / "rs-local-files"
+        self.manifest("rs-local-files", '[package]\nname="local"\n')
+        created = []
+
+        def checkout(root, name, ref):
+            created.append((name, ref))
+            self.manifest(name, '[package]\nname="fixture"\n')
+            return root / name
+
+        with patch.object(self.layout, "ensure_checkout", side_effect=checkout), patch.object(self.layout, "git_output", return_value="a" * 40):
+            records = self.layout.prepare(self.root, candidate, {"support": "main", "rs-magika": "candidate-sha"})
+        self.assertIn(("rs-magika", "candidate-sha"), created)
+        self.assertEqual(records["rs-magika"]["ref"], "candidate-sha")
+        self.assertEqual(len([name for name, _ in created if name == "rs-magika"]), 1)
+
     def test_missing_manifest_after_checkout_is_terminal(self):
         candidate = self.root / "rs-local-files"
         self.manifest("rs-local-files", '[dependencies]\nmissing={path="../rs-extra/nonexistent"}\n')

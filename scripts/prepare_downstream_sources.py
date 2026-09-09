@@ -126,7 +126,8 @@ def prepare(root: Path, candidate: Path, refs: dict[str, str]) -> dict:
         return folder
 
     queue = deque([destination / "Cargo.toml"])
-    for name in ("rs-fs-local", "rs-mime"):
+    seeds = dict.fromkeys(("rs-fs-local", "rs-mime", *(name for name in refs if name != "support")))
+    for name in seeds:
         queue.append(checkout(name) / "Cargo.toml")
     visited = set()
     while queue:
@@ -151,11 +152,20 @@ def main() -> None:
     parser.add_argument("--fs-local-ref", required=True)
     parser.add_argument("--mime-ref", required=True)
     parser.add_argument("--support-ref", required=True)
+    parser.add_argument("--additional-ref", action="append", default=[], metavar="REPOSITORY=REF")
     args = parser.parse_args()
     if os.environ.get("CI", "").lower() not in ("true", "1"):
         parser.error("source layout is CI-only; use --root with check_downstream_contracts.py for existing local worktrees")
-    records = prepare(args.root, args.candidate,
-                      {"rs-fs-local": args.fs_local_ref, "rs-mime": args.mime_ref, "support": args.support_ref})
+    refs = {"rs-fs-local": args.fs_local_ref, "rs-mime": args.mime_ref, "support": args.support_ref}
+    additional = set()
+    for assignment in args.additional_ref:
+        name, separator, ref = assignment.partition("=")
+        if (not separator or not ref or not re.fullmatch(r"rs-[a-z0-9][a-z0-9-]*", name)
+                or name == "rs-local-files" or name in additional):
+            parser.error(f"invalid or duplicate additional repository ref: {assignment!r}")
+        refs[name] = ref
+        additional.add(name)
+    records = prepare(args.root, args.candidate, refs)
     print(json.dumps(records, indent=2, sort_keys=True))
 
 

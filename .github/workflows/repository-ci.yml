@@ -1,0 +1,153 @@
+name: Repository checks with coordinated sources
+
+on:
+  workflow_call:
+    inputs:
+      repository:
+        type: string
+        required: true
+      revision:
+        type: string
+        required: true
+      local_files_ref:
+        type: string
+        default: main
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+jobs:
+  checks:
+    name: Repository checks (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest, macos-latest]
+    defaults:
+      run:
+        shell: bash
+    env:
+      PROJECT: ${{ inputs.repository }}
+      PROJECT_REF: ${{ inputs.revision }}
+      RS_CI_ARTIFACT_CLEANUP_MODE: never
+    steps:
+      - name: Checkout source layout tools
+        uses: actions/checkout@v6
+        with:
+          repository: qubit-ltd/rs-local-files
+          ref: ${{ inputs.local_files_ref }}
+          path: ci-root/rs-local-files
+          persist-credentials: false
+      - name: Install Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: '3.11'
+      - name: Validate candidate and prepare dependencies
+        run: |
+          case "$PROJECT" in
+            rs-fs-local|rs-mime|rs-magika|rs-fs|rs-fs-registry) ;;
+            *) echo "Unsupported candidate repository" >&2; exit 1 ;;
+          esac
+          python ci-root/rs-local-files/scripts/prepare_downstream_sources.py \
+            --root ci-root --candidate ci-root/rs-local-files \
+            --fs-local-ref main --mime-ref main --support-ref main \
+            --additional-ref "$PROJECT=$PROJECT_REF"
+      - name: Install toolchains
+        working-directory: ci-root/${{ inputs.repository }}
+        run: |
+          source .rs-ci/toolchains.sh
+          configure_rs_ci_toolchains
+          rustup toolchain install "$RS_CI_BUILD_TOOLCHAIN" --profile minimal --component llvm-tools-preview
+          rustup toolchain install "$RS_CI_CLIPPY_TOOLCHAIN" --profile minimal --component clippy,rustfmt,rust-src
+          rustup default "$RS_CI_BUILD_TOOLCHAIN"
+      - name: Verify original candidate lock
+        working-directory: ci-root/${{ inputs.repository }}
+        run: cargo metadata --locked --format-version 1 > "../${PROJECT}-metadata.json"
+      - name: Install complete-check tools
+        if: runner.os == 'Linux'
+        uses: taiki-e/install-action@v2
+        with:
+          tool: cargo-llvm-cov@0.8.6,cargo-fuzz@0.13.2,cargo-audit
+      - name: Run complete repository CI
+        if: runner.os == 'Linux'
+        working-directory: ci-root/${{ inputs.repository }}
+        run: ./ci-check.sh
+      - name: Run platform static checks and feature contracts
+        if: runner.os != 'Linux'
+        working-directory: ci-root/${{ inputs.repository }}
+        run: |
+          source .rs-ci/toolchains.sh
+          configure_rs_ci_toolchains
+          cargo +"$RS_CI_CLIPPY_TOOLCHAIN" clippy --locked --all-targets --all-features -- -D warnings
+          cargo test --locked --no-default-features --no-fail-fast
+          cargo test --locked --all-features --no-fail-fast
+      - name: Run configured macOS sanitizer and Miri checks
+        if: runner.os == 'macOS'
+        working-directory: ci-root/${{ inputs.repository }}
+        run: |
+          source .rs-ci/toolchains.sh
+          configure_rs_ci_toolchains
+          export RS_CI_PROJECT_ROOT="$PWD"
+          .rs-ci/cargo-sanitizer-check.sh
+          if .rs-ci/cargo-miri-check.sh --is-configured; then
+            rustup toolchain install "$RS_CI_MIRI_TOOLCHAIN" --profile minimal --component miri
+            cargo +"$RS_CI_MIRI_TOOLCHAIN" miri setup
+          else
+            check_status=$?
+            test "$check_status" -eq 1
+          fi
+          .rs-ci/cargo-miri-check.sh
+      - name: Verify locks remained unchanged
+        if: always()
+        working-directory: ci-root/${{ inputs.repository }}
+        run: git diff --exit-code -- Cargo.toml Cargo.lock
+      - name: Render coverage without repeating tests
+        if: success() && runner.os == 'Linux'
+        working-directory: ci-root/${{ inputs.repository }}
+        run: |
+          source .rs-ci/toolchains.sh
+          configure_rs_ci_toolchains
+          CARGO_TARGET_DIR="$PWD/target/rs-ci" cargo +"$RS_CI_BUILD_TOOLCHAIN" llvm-cov report \
+            --html --output-dir target/llvm-cov
+      - name: Upload documentation and verification artifacts
+        if: always() && runner.os == 'Linux'
+        uses: actions/upload-artifact@v7
+        with:
+          name: repository-verification
+          path: |
+            ci-root/${{ inputs.repository }}/coverage*.json
+            ci-root/${{ inputs.repository }}/coverage*.txt
+            ci-root/${{ inputs.repository }}/target/llvm-cov
+            ci-root/${{ inputs.repository }}/target/rs-ci/doc
+            ci-root/${{ inputs.repository }}/fuzz/artifacts
+            ci-root/${{ inputs.repository }}-metadata.json
+          retention-days: 14
+      - name: Build Pages site
+        if: success() && runner.os == 'Linux' && github.event_name == 'push' && github.ref == 'refs/heads/main'
+        working-directory: ci-root/${{ inputs.repository }}
+        run: |
+          COVERAGE_JSON=target/llvm-cov/coverage.json COVERAGE_HTML_DIR=target/llvm-cov/html \
+            RS_CI_PAGES_OUTPUT=public node .rs-ci/page/build-pages.mjs
+      - name: Configure Pages
+        if: success() && runner.os == 'Linux' && github.event_name == 'push' && github.ref == 'refs/heads/main'
+        uses: actions/configure-pages@v6
+      - name: Upload Pages artifact
+        if: success() && runner.os == 'Linux' && github.event_name == 'push' && github.ref == 'refs/heads/main'
+        uses: actions/upload-pages-artifact@v5
+        with:
+          path: ci-root/${{ inputs.repository }}/public
+
+  deploy-pages:
+    needs: checks
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - name: Deploy Pages
+        id: deployment
+        uses: actions/deploy-pages@v5
