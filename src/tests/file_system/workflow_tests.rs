@@ -94,7 +94,7 @@ fn test_rooted_facade_workflow_preserves_namespace_and_lifecycle_contracts() {
         .expect("temporary file should accept bytes");
     let _ = temporary_file
         .persist_with(
-            Path::new("published/file"),
+            Path::new("/published/file"),
             LocalPersistOptions::new().with_create_parent(),
         )
         .expect("temporary file should persist");
@@ -108,7 +108,7 @@ fn test_rooted_facade_workflow_preserves_namespace_and_lifecycle_contracts() {
         .expect("rooted temporary directory should be created");
     let _ = temporary_directory
         .persist_with(
-            Path::new("published/directory"),
+            Path::new("/published/directory"),
             LocalPersistOptions::new().with_create_parent(),
         )
         .expect("temporary directory should persist");

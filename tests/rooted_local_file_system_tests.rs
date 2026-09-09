@@ -283,7 +283,7 @@ fn test_rooted_temp_file_persist_conflict_retains_cleanup_responsibility() {
     fs::write(root_parent.path().join(target), b"existing").expect("target should exist");
 
     let mut error = temporary
-        .persist(target)
+        .persist(Path::new("/").join(target))
         .expect_err("existing rooted target should reject persistence");
 
     assert_eq!(source, error.resource().path());
@@ -338,7 +338,9 @@ fn test_rooted_temp_file_persisted_target_survives_drop() {
         .expect("rooted temp file should be created");
     let target = Path::new("persisted-target");
 
-    let outcome = temporary.persist(target).expect("rooted file should persist");
+    let outcome = temporary
+        .persist(Path::new("/").join(target))
+        .expect("rooted file should persist");
     assert_eq!(Path::new("/persisted-target"), outcome.path());
     assert!(root_parent.path().join(target).exists());
 }
@@ -358,7 +360,7 @@ fn test_rooted_temp_file_persist_uses_retained_authority_after_root_rename() {
 
     fs::rename(&original, &renamed).expect("diagnostic root path should be renamed");
     let outcome = temporary
-        .persist(Path::new("persisted-target"))
+        .persist(Path::new("/persisted-target"))
         .expect("persist must use retained root authority");
     assert_eq!(Path::new("/persisted-target"), outcome.path());
     assert!(renamed.join("persisted-target").exists());
@@ -375,7 +377,7 @@ fn test_rooted_temp_file_missing_parent_retains_cleanup() {
     let source = temporary.path().to_path_buf();
 
     let error = temporary
-        .persist(Path::new("missing-parent/target"))
+        .persist(Path::new("/missing-parent/target"))
         .expect_err("missing rooted target parent should fail before publication");
     assert_eq!(LocalPersistStage::PrepareParent, error.stage());
     assert_eq!(LocalPersistFailureState::NotPublished, error.state());
