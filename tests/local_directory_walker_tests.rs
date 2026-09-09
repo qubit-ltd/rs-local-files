@@ -23,11 +23,11 @@ use qubit_local_files::outcome::LocalFileKind;
 use qubit_local_files::policy::LocalSymlinkPolicy;
 use tempfile::tempdir;
 
-/// Absolute listing operands use the same lexical parent normalization as
-/// metadata, even when the eliminated component is a symbolic link.
+/// Host listing follows native parent traversal; Reject observes the traversed
+/// link.
 #[cfg(unix)]
 #[test]
-fn test_host_list_normalizes_parent_before_following_symlinks() {
+fn test_host_list_follows_symlink_before_parent_component() {
     use std::os::unix::fs::symlink;
 
     let directory = tempdir().expect("fixture directory should exist");
@@ -35,8 +35,8 @@ fn test_host_list_normalizes_parent_before_following_symlinks() {
     fs::create_dir_all(root.join("work/data")).expect("lexical directory should exist");
     fs::create_dir_all(root.join("other/sub")).expect("link target should exist");
     fs::create_dir_all(root.join("other/data")).expect("physical directory should exist");
-    fs::write(root.join("work/data/expected"), b"expected").expect("lexical entry should exist");
-    fs::write(root.join("other/data/wrong"), b"wrong").expect("physical entry should exist");
+    fs::write(root.join("work/data/lexical"), b"lexical").expect("lexical entry should exist");
+    fs::write(root.join("other/data/native"), b"native").expect("physical entry should exist");
     symlink(root.join("other/sub"), root.join("work/link")).expect("link should exist");
     let operand = root.join("work/link/../data");
     let mut filesystem = LocalFileSystem::host().expect("Host should open");
@@ -44,17 +44,28 @@ fn test_host_list_normalizes_parent_before_following_symlinks() {
         filesystem
             .set_symlink_policy(policy)
             .expect("Host policy should be valid");
+        if policy == LocalSymlinkPolicy::Reject {
+            assert!(filesystem.metadata(&operand).is_err());
+            assert!(filesystem.list(&operand).is_err());
+            continue;
+        }
         assert_eq!(
             LocalFileKind::Directory,
             filesystem.metadata(&operand).expect("metadata should resolve").kind()
         );
         let entries = filesystem
             .list(&operand)
-            .expect("listing should use lexical normalization")
+            .expect("listing should follow native traversal")
             .collect::<Result<Vec<_>, _>>()
             .expect("listing should succeed");
         assert_eq!(1, entries.len());
-        assert_eq!(Path::new("expected"), entries[0].relative_path());
+        assert_eq!(Path::new("native"), entries[0].relative_path());
+        let native = fs::read_dir(&operand)
+            .expect("native listing")
+            .next()
+            .expect("one native entry")
+            .expect("native entry");
+        assert_eq!(native.file_name(), entries[0].relative_path());
     }
 }
 

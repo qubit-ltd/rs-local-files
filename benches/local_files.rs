@@ -410,7 +410,7 @@ fn bench_read_prefix(c: &mut Criterion) {
     group.finish();
 }
 
-/// Compares Host and Rooted metadata lookup across repeatable path depths.
+/// Compares std, Host, and Rooted metadata across repeatable path depths.
 fn bench_deep_metadata(c: &mut Criterion) {
     let mut group = c.benchmark_group("deep_metadata");
     for depth in [1usize, 8, 32, 64, 128] {
@@ -426,6 +426,13 @@ fn bench_deep_metadata(c: &mut Criterion) {
         fs::write(&physical, b"payload").expect("deep metadata benchmark payload should be written");
         let host = LocalFileSystem::host().expect("Host filesystem should open");
         let rooted = LocalFileSystem::rooted(directory.path()).expect("Rooted filesystem should open");
+        group.bench_function(format!("std/depth_{depth}"), |bench| {
+            bench.iter(|| {
+                let metadata =
+                    fs::symlink_metadata(black_box(&physical)).expect("std deep metadata lookup should succeed");
+                black_box(metadata.len());
+            });
+        });
         group.bench_function(format!("host/depth_{depth}"), |bench| {
             bench.iter(|| {
                 let metadata = host

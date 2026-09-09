@@ -5,26 +5,29 @@
 //
 //    Licensed under the Apache License, Version 2.0.
 // =============================================================================
-//! One normalized path in a local filesystem namespace.
+//! One bound path in a local filesystem namespace.
 
 use std::path::Path;
 use std::path::PathBuf;
 
-/// A path normalized against one [`crate::LocalFileSystem`] PWD snapshot.
+/// A path bound to one [`crate::LocalFileSystem`] namespace.
+///
+/// Host operands preserve native dots and parents for filesystem traversal.
+/// Rooted operands are normalized lexically against a virtual PWD snapshot.
 #[derive(Clone, Debug, Eq, PartialEq)]
 #[must_use]
 pub struct LocalNamespacePath {
-    /// Reusable namespace-absolute identity exposed by public values.
+    /// Reusable namespace-absolute path exposed by public values.
     namespace_absolute: PathBuf,
     /// Path representation consumed by the selected authority backend.
     authority_relative: PathBuf,
     /// Whether native input syntax requires the resolved entry to be a
-    /// directory even though normalization removed the trailing syntax.
+    /// directory, including after Rooted lexical normalization.
     directory_required: bool,
 }
 
 impl LocalNamespacePath {
-    /// Creates one resolver-owned normalized path.
+    /// Creates one resolver-owned bound path.
     pub(super) const fn new(
         namespace_absolute: PathBuf,
         authority_relative: PathBuf,
@@ -37,7 +40,7 @@ impl LocalNamespacePath {
         }
     }
 
-    /// Returns the normalized namespace-absolute path.
+    /// Returns the namespace-absolute path, retaining Host native spelling.
     #[must_use]
     // qubit-style: allow coverage-cfg
     #[cfg_attr(not(coverage), inline(always))]

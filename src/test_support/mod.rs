@@ -14,10 +14,22 @@
 //! thread. It supports native boundary and recovery-state tests that cannot be
 //! triggered through ordinary inputs.
 
+#[cfg(feature = "test-support")]
+mod host_metadata_probes;
 mod internal;
 mod test_fault_plan;
 mod test_fault_point;
 
+#[cfg(feature = "test-support")]
+#[doc(hidden)]
+pub use host_metadata_probes::host_metadata_probe_counts;
+#[cfg(feature = "test-support")]
+pub(crate) use host_metadata_probes::record_host_metadata_query;
+#[cfg(feature = "test-support")]
+pub(crate) use host_metadata_probes::record_host_prefix_probe;
+#[cfg(feature = "test-support")]
+#[doc(hidden)]
+pub use host_metadata_probes::reset_host_metadata_probe_counts;
 #[cfg(feature = "test-support")]
 #[doc(hidden)]
 pub use test_fault_plan::TestFaultPlan;

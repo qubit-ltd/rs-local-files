@@ -43,6 +43,8 @@ pub(crate) fn resolve_host_path(
             continue;
         }
         let is_final = components.peek().is_none();
+        #[cfg(feature = "test-support")]
+        crate::test_support::record_host_prefix_probe();
         let metadata = match fs::symlink_metadata(&resolved) {
             Ok(metadata) => metadata,
             Err(error) if error.kind() == io::ErrorKind::NotFound => continue,

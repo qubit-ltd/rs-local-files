@@ -72,10 +72,11 @@ impl LocalPathResolver {
         }
     }
 
-    /// Normalizes one absolute or PWD-relative operation path.
+    /// Binds one absolute or PWD-relative operation path.
     ///
-    /// Resolves lexically without filesystem access or symlink traversal.
-    /// Rooted absolute inputs start at the virtual namespace root. Empty
+    /// Preserves Host component spelling for native traversal, including
+    /// dots and parents. Rooted inputs are normalized lexically without I/O
+    /// and absolute inputs start at the virtual namespace root. Empty
     /// inputs and trailing separators or dots retain directory intent.
     ///
     /// Returns a typed path-codec error for native NUL, `InvalidPath` for
@@ -92,25 +93,22 @@ impl LocalPathResolver {
             );
         }
         let directory_required = directory_required(path);
+        if self.scope == LocalFileSystemScope::Host {
+            let bound = bind_host_operand(path, self.current_directory.as_deref())?;
+            return Ok(LocalNamespacePath::new(bound.clone(), bound, directory_required));
+        }
         let mut components = self.current_components.clone();
-        let mut prefix = self.current_prefix.clone();
-
-        match self.scope {
-            LocalFileSystemScope::Rooted => {
-                if path
-                    .components()
-                    .any(|component| matches!(component, Component::Prefix(_)))
-                {
-                    return Err(invalid_path(
-                        path,
-                        "native prefixes are not valid in a Rooted namespace",
-                    ));
-                }
-                if path.has_root() {
-                    components.clear();
-                }
-            }
-            LocalFileSystemScope::Host => prepare_host_anchor(path, &mut prefix, &mut components)?,
+        if path
+            .components()
+            .any(|component| matches!(component, Component::Prefix(_)))
+        {
+            return Err(invalid_path(
+                path,
+                "native prefixes are not valid in a Rooted namespace",
+            ));
+        }
+        if path.has_root() {
+            components.clear();
         }
 
         for component in path.components() {
@@ -128,7 +126,7 @@ impl LocalPathResolver {
             }
         }
 
-        let namespace_absolute = namespace_absolute(self.scope, prefix.as_deref(), &components);
+        let namespace_absolute = namespace_absolute(self.scope, self.current_prefix.as_deref(), &components);
         let authority_relative = match self.scope {
             LocalFileSystemScope::Host => namespace_absolute.clone(),
             LocalFileSystemScope::Rooted => components.iter().collect(),
@@ -176,26 +174,41 @@ fn parse_current_directory(
     Ok((prefix, components))
 }
 
-/// Selects the Host anchor for an absolute, root-relative, or ordinary path.
+/// Binds a Host operand without rebuilding or simplifying its components.
 ///
-/// Replaces the prefix and clears descendants for an absolute input; a
-/// root-relative input retains the PWD prefix and clears descendants.
-/// Returns `InvalidPath` for ambiguous drive-relative input before mutation.
-fn prepare_host_anchor(path: &Path, prefix: &mut Option<OsString>, components: &mut Vec<OsString>) -> LocalResult<()> {
-    let input_prefix = path.components().find_map(|component| match component {
-        Component::Prefix(value) => Some(value.as_os_str().to_os_string()),
-        _ => None,
-    });
-    if input_prefix.is_some() && !path.is_absolute() {
+/// Absolute inputs need no PWD. Relative inputs require `pwd`; Windows
+/// root-relative inputs retain its native prefix. Ambiguous drive-relative
+/// input returns `InvalidPath`, and a missing PWD returns `InvalidState`.
+fn bind_host_operand(path: &Path, pwd: Option<&Path>) -> LocalResult<PathBuf> {
+    if path.is_absolute() {
+        return Ok(path.to_path_buf());
+    }
+    if path
+        .components()
+        .any(|component| matches!(component, Component::Prefix(_)))
+    {
         return Err(invalid_path(path, "drive-relative Host paths are ambiguous"));
     }
-    if path.is_absolute() {
-        *prefix = input_prefix;
-        components.clear();
-    } else if path.has_root() {
-        components.clear();
+    let pwd = pwd.ok_or_else(|| {
+        LocalFileError::new(LocalFileErrorKind::InvalidState, LocalFileOperation::BindPath)
+            .with_path(path.to_path_buf())
+            .with_reason("a relative Host path requires a process current directory snapshot")
+    })?;
+    #[cfg(windows)]
+    if path.has_root() {
+        let mut bound = match pwd.components().next() {
+            Some(Component::Prefix(prefix)) => prefix.as_os_str().to_os_string(),
+            _ => return Err(invalid_path(path, "root-relative Host paths require a drive anchor")),
+        };
+        bound.push(path.as_os_str());
+        return Ok(PathBuf::from(bound));
     }
-    Ok(())
+    let mut bound = pwd.as_os_str().to_os_string();
+    if !path.as_os_str().is_empty() {
+        bound.push(std::path::MAIN_SEPARATOR_STR);
+        bound.push(path.as_os_str());
+    }
+    Ok(PathBuf::from(bound))
 }
 
 /// Reports whether a path has the namespace root syntax required for a PWD.
