@@ -1,0 +1,80 @@
+name: Locked downstream contracts
+
+on:
+  workflow_dispatch:
+    inputs:
+      local_files_ref:
+        description: rs-local-files branch, tag, or commit
+        type: string
+        default: main
+      fs_local_ref:
+        description: rs-fs-local branch, tag, or commit
+        type: string
+        default: main
+      mime_ref:
+        description: rs-mime branch, tag, or commit
+        type: string
+        default: main
+      support_ref:
+        description: Supporting rs-* repository branch or tag
+        type: string
+        default: main
+  workflow_call:
+    inputs:
+      local_files_ref:
+        type: string
+        default: main
+      fs_local_ref:
+        type: string
+        default: main
+      mime_ref:
+        type: string
+        default: main
+      support_ref:
+        type: string
+        default: main
+
+permissions:
+  contents: read
+
+jobs:
+  contracts:
+    name: Locked contracts (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest, macos-latest]
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - name: Checkout the explicit local-files candidate
+        uses: actions/checkout@v6
+        with:
+          repository: qubit-ltd/rs-local-files
+          ref: ${{ inputs.local_files_ref }}
+          path: ci-root/rs-local-files
+          submodules: recursive
+          persist-credentials: false
+      - name: Install Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: '3.11'
+      - name: Install Rust
+        run: |
+          rustup toolchain install 1.94 --profile minimal
+          rustup default 1.94
+      - name: Test integration scripts
+        run: python -m unittest discover -s ci-root/rs-local-files/scripts/tests -p test_downstream_contracts.py
+      - name: Prepare coordinated sources
+        env:
+          FS_LOCAL_REF: ${{ inputs.fs_local_ref }}
+          MIME_REF: ${{ inputs.mime_ref }}
+          SUPPORT_REF: ${{ inputs.support_ref }}
+        run: >-
+          python ci-root/rs-local-files/scripts/prepare_downstream_sources.py
+          --root ci-root --candidate ci-root/rs-local-files
+          --fs-local-ref "$FS_LOCAL_REF" --mime-ref "$MIME_REF" --support-ref "$SUPPORT_REF"
+      - name: Check original consumer locks and run contracts
+        run: python ci-root/rs-local-files/scripts/check_downstream_contracts.py --root ci-root
