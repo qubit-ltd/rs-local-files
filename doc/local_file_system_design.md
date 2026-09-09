@@ -75,8 +75,9 @@ as proof of containment.
 
 ### 2.5 Lexical rules and native resolution are separate
 
-The crate defines PWD, absolute/relative, `.`, `..`, and virtual-root lexical
-semantics. Real directory access, links, reparse points, permissions, and
+The crate binds Host operands without folding native `.`/`..` traversal and
+defines Rooted PWD and virtual-root lexical semantics. Real directory access,
+links, reparse points, permissions, and
 identity checks use descriptor- or handle-relative operating-system primitives
 where available.
 
@@ -237,7 +238,7 @@ directories are outside the guarantee.
 ## 11. Common Operation Data Flow
 
 Every operation selects its complete options, validates static requirements,
-captures PWD only when needed, normalizes namespace paths, resolves through the
+captures PWD only when needed, binds Host or normalizes Rooted paths, resolves through the
 selected authority and link policy, checks objective runtime facts, performs
 native I/O, and maps results into typed paths, outcomes, or failures. Validation
 that can prove a requirement impossible must happen before destructive
@@ -271,6 +272,22 @@ Writer lifecycle state is separate from publication state. A failed flush,
 install, parent sync, or cleanup retains the strongest proven destination and
 staging facts. Required durability synchronizes file content and the necessary
 parent namespace transitions before success.
+
+`LocalWriteMetadataPolicy` separates copying old metadata from destination
+identity checks. `PreserveExisting` is the default: Unix retains its implemented
+owner/mode/ACL/xattr preservation; Windows Host uses `ReplaceFileW` merging;
+Windows Rooted retains portable permissions only. Preservation failure must
+not silently fall back to staging metadata. `UseStaging` skips old-content
+reads and metadata copying; Windows Host uses non-merging replacement.
+Native staging creation may still inherit permissions. The caller explicitly
+accepts possible access-control changes when selecting this policy.
+
+Both policies observe destination type/identity and revalidate before install.
+Check and install remain separate, not atomic compare-and-swap. Commit applies
+selected metadata before staging sync, then validates identity, installs, and
+syncs parents. A metadata failure is pre-publication; a parent-sync failure
+can be `Published`. CreateNew has no old metadata to copy and retains atomic
+no-replace installation; Append performs direct writes under either policy.
 
 ## 15. Lazy Directory Walking
 
@@ -364,9 +381,20 @@ A live temporary file or directory owns cleanup responsibility in an `Armed`
 state. Every resource is created inside a private per-resource sandbox. Explicit
 `cleanup` reports failure; Drop is silent best effort. `keep` atomically moves
 the entry to a generated sibling and reports residual sandbox cleanup.
-`persist` publishes to a caller target with explicit replacement/parent policy
+`persist` publishes to a namespace-absolute caller target with replacement/parent policy
 and returns a typed outcome. Persistence failure retains the resource for retry,
 inspection, keeping, or cleanup.
+
+`persist` and `persist_with` reject relative targets. Both guard types expose
+`persist_at(self, base: &Path, target: &Path, options: LocalPersistOptions)` with
+the same retained-error result as `persist_with`. The base is an existing
+namespace-absolute directory without explicit dot/parent components, resolved
+under the captured link policy; the target is nonempty and strictly relative.
+Target parents retain Host native or Rooted lexical semantics. The creating
+authority remains the boundary; base is not a new sandbox. Validation precedes
+source sync/close and parent creation, returning `ResolveTarget` with the guard
+on invalid input. Creation PWD is diagnostic only. See the
+[migration examples](user_guide.md#migration-to-04).
 
 Prefixes and suffixes reject separators, NUL, and portable reserved names before
 creating entries. Name collisions are retried without a hidden maximum unless
@@ -668,6 +696,17 @@ a hidden fixed handle threshold. `open_retry_timeout` explicitly authorizes
 library retries: `None` and zero perform only the first attempt, while a positive
 duration permits retries in that monotonic interval.
 
+List/copy/delete expose `tighten_resource_limits(self, ceilings: &Self) -> Self`.
+Each optional limit combines by minimum, treating `None` as unbounded and zero
+as a real value. The receiver retains all non-resource behavior; this explicit
+transformation does not change complete replacement by `*_with_options`.
+List tightens depth/entries/open directories/seen-name bytes/deadline; copy
+tightens depth/entries/bytes/open directories/deadline; delete tightens
+depth/entries/pending-path bytes/deadline. The method performs no I/O or
+validation and never restarts a deadline. In fs-local the request determines
+behavior before provider ceilings are applied; filtered-list request counts
+remain separate from the native provider walker count.
+
 Options are owned values with private fields, getters, consuming `with_*`
 methods, corresponding `without_*` methods for optional budgets, and at least
 `Clone`, `Debug`, and `Default`. `new()` and `Default` have identical initial
@@ -686,11 +725,16 @@ durability before namespace mutation and never report full durability for a
 
 ### Path coordinate system and resolution
 
-Host and Rooted share lexical rules: namespace-absolute paths begin at their
-namespace root; relative Host paths begin at an operation-time process-PWD
-snapshot; relative Rooted paths begin at the instance virtual PWD; empty input
-and `.` mean PWD; and `..` removes one component but cannot cross the namespace
-root. Rooted stores a normalized namespace-absolute PWD; Host stores none.
+Namespace-absolute paths begin at their namespace root. Relative Host paths
+bind to an operation-time process-PWD snapshot, preserving native dot/parent
+components and directory intent. Rooted paths start at the instance virtual PWD
+and lexically fold dot/parent components, rejecting escape beyond virtual `/`.
+Empty input means PWD in both scopes. Rooted stores a normalized
+namespace-absolute PWD; Host stores none. On Unix, `a/link -> ../b/inner`
+makes Host `a/link/../config` access `b/config`, while Rooted's caller-path
+folding accesses `a/config`. Host `missing/../config` fails when `missing`
+does not exist. Windows behavior follows native resolution; drive-relative
+input remains rejected.
 
 For a Rooted authority opened from `/srv/app`, virtual `/`, `/etc/hosts`, and
 `/var/data/a.txt` conceptually denote `/srv/app`, `/srv/app/etc/hosts`, and
@@ -699,7 +743,7 @@ never `diagnostic_root.join(...)`. `/srv/app/log` is still a *virtual* path and
 therefore conceptually denotes `/srv/app/srv/app/log`. Windows drive, UNC, and
 device prefixes are invalid Rooted syntax.
 
-Resolution captures PWD only for a relative input, starts a component stack at
+Rooted resolution captures PWD only for a relative input, starts a component stack at
 the namespace root or PWD, adds normal components, ignores `.` and empty
 components, and rejects `..` at root before producing a namespace-absolute path.
 It uses `std::path::Component` and native `OsStr`, never UTF-8 splitting.
@@ -752,7 +796,7 @@ between copy source and target are detected and rejected.
 ### Operations and recovery contracts
 
 Each operation captures policy, options, and needed PWD; validates capabilities;
-normalizes operands; completes provable preflight before destructive I/O; invokes
+binds Host or normalizes Rooted operands; completes provable preflight before destructive I/O; invokes
 the Host or Rooted backend; then maps all results and failures back into the
 namespace coordinate system. Open resources retain their own authority, path,
 options, and PWD snapshots.

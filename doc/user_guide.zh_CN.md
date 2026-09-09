@@ -6,7 +6,7 @@
 
 ## 手册目标与读者
 
-本手册面向 Rust 1.94 及以上版本的 `qubit-local-files` 0.3 使用者，适用于直接操作主机
+本手册面向 Rust 1.94 及以上版本的 `qubit-local-files` 0.4 使用者，适用于直接操作主机
 文件系统，或需要把操作限制在一个已打开目录之下的应用。它不是 provider 注册表、远程
 文件系统 API，也不替代 provider 层的逻辑路径模型。本 crate 提供同步 API；异步应用应在
 合适的 blocking 执行环境中调用。
@@ -38,7 +38,7 @@ UTF-8。
 
 ```toml
 [dependencies]
-qubit-local-files = "0.3"
+qubit-local-files = "0.4"
 ```
 
 配置操作策略前，先选择权限范围。Host 模式使用进程可见的命名空间；Rooted 模式打开一个
@@ -239,7 +239,7 @@ Windows 复制链接会保留源链接的文件/目录类型，包括悬空链�
 ## 遍历和临时资源
 
 `LocalFileSystem::list` 返回惰性的 `LocalDirectoryWalker`。它按需打开和推进目录；
-规范化 root、Options、符号链接策略、PWD snapshot 和 authority 在创建时固定。默认不设置
+绑定后的命名空间 root、Options、符号链接策略、PWD snapshot 和 authority 在创建时固定。默认不设置
 深度、条目数、名称内存、deadline 或打开目录数预算。调用方设置打开目录预算后，
 `Reopen` 会按需关闭并重新打开活动 frame，`Fail` 则会在边界返回 `ResourceLimit`。
 零句柄预算无效并返回 `InvalidOptions`。Rooted 会逐项读取目录，避免先收集到 `Vec`；
@@ -254,6 +254,97 @@ sandbox 会和资源一起清理。需要观察清理失败时应显式调用 `c
 后续 PWD 即使变化，也能把它们再次传给同一个 filesystem。持久化失败会保留资源，调用方
 可重试、检查、保留或显式清理。创建前会校验前缀和后缀：原生分隔符、NUL 与便携保留名称
 不会留下条目。除非调用方设置 `max_attempts`，名称冲突尝试次数没有上限。
+
+## 迁移到 0.4
+
+### Host 路径保留原生解析顺序
+
+Host 将相对路径绑定到该次操作的进程 PWD，保留点组件和目录意图。以 Unix 上的
+`a/link -> ../b/inner` 为例，Host 读取 `a/link/../config` 会访问 `b/config`；
+Rooted 对调用者路径进行词法折叠，访问的则是 `a/config`。若 `missing` 不存在，
+Host 的 `missing/../config` 会失败，不能跳过缺失组件。Rooted 拒绝越过虚拟 `/` 的
+词法路径；Host 按原生规则处理根目录，包括 Unix 的 `/..`。Windows 的 `C:foo` 等
+drive-relative 输入仍然无效。Host 不提供 Rooted 的隔离边界。
+
+默认 Host metadata 只查询最终路径，不再逐级探测所有前缀；显式 `Reject` 仍检查经过的
+链接，包括 `link/..`。可用 `cargo bench --bench local_files -- deep_metadata` 在同一
+fixture 上对照 std、Host 和 Rooted；耗时受文件系统与路径深度影响。
+
+### 显式选择替换元数据策略
+
+`LocalWriteOptions::new(LocalWriteMode::CreateOrReplace)` 默认使用
+`LocalWriteMetadataPolicy::PreserveExisting`。需要保留 staging 自身元数据时，选择
+`UseStaging`。这可能改变目标的访问控制；staging 创建时仍可能从原生环境继承权限。
+
+| 平台与范围 | PreserveExisting | UseStaging |
+| --- | --- | --- |
+| Unix Host/Rooted | 保留已有实现支持的 owner/mode/ACL/xattr 等元数据，复制失败会报错 | 不请求读取旧文件内容或复制旧元数据 |
+| Windows Host | 使用 `ReplaceFileW` 原生元数据合并 | 使用不合并元数据的原生替换 |
+| Windows Rooted | 只保留 portable permissions，不承诺完整 ACL/owner 保留 | 跳过 portable permissions 复制 |
+
+两种策略都检查目标类型和身份，但检查与安装不构成原子 compare-and-swap。
+CreateNew 没有旧元数据可复制；Append 在两种策略下都直接追加。元数据保留失败发生在
+发布前，父目录同步失败则可能发生在发布后；重试前应检查 commit 错误及其保留的状态。
+
+```rust
+use qubit_local_files::options::LocalWriteMetadataPolicy;
+use qubit_local_files::options::LocalWriteMode;
+use qubit_local_files::options::LocalWriteOptions;
+
+let options = LocalWriteOptions::new(LocalWriteMode::CreateOrReplace)
+    .with_metadata_policy(LocalWriteMetadataPolicy::UseStaging);
+assert_eq!(options.metadata_policy(), LocalWriteMetadataPolicy::UseStaging);
+```
+
+### 收紧预算时保留请求行为
+
+list/copy/delete options 提供 `tighten_resource_limits(self, ceilings: &Self)`。
+每项限制中，`None` 表示无上限；两侧都有值时取较小者。0 仍是 0，操作入口仍会拒绝
+非法的零句柄上限。deadline 仍从操作开始计时。递归、覆盖、创建父目录等行为全部来自
+接收者；`*_with_options` 完整使用传入 options 的契约不变。
+
+```rust
+use qubit_local_files::options::LocalCopyOptions;
+
+let requested = LocalCopyOptions::new().with_max_bytes(100);
+let ceilings = LocalCopyOptions::new().with_max_bytes(10);
+let effective = requested.tighten_resource_limits(&ceilings);
+assert_eq!(effective.max_bytes(), Some(10));
+```
+
+`qubit-fs-local` 的 provider list 上限统计前缀过滤前的原生条目，请求上限统计过滤后
+返回的条目。因此，即使没有匹配项，也可能耗尽 provider 上限。这些限制按单次操作计算，
+不是跨并发请求的累计配额。
+
+### 用明确基准目录发布临时资源
+
+两种临时资源的 `persist` 和 `persist_with` 现在只接受命名空间绝对目标。
+原来的相对目标调用改用 `persist_at`：
+
+```rust,no_run
+use std::io::Write;
+use std::path::Path;
+use qubit_local_files::LocalFileSystem;
+use qubit_local_files::options::LocalPersistOptions;
+
+let filesystem = LocalFileSystem::host()?;
+let base = std::fs::canonicalize(std::env::temp_dir())?;
+let mut temporary = filesystem.create_temp_file()?;
+temporary.write_all(b"generated report")?;
+let published = temporary.persist_at(
+    &base, Path::new("report.txt"), LocalPersistOptions::new(),
+)?;
+# let _ = published;
+# Ok::<(), Box<dyn std::error::Error>>(())
+```
+
+base 必须是命名空间内已存在的绝对目录，不能显式包含 `.`/`..`；target 必须非空且相对，
+不能带 root 或 native prefix。target 的 parent component 按 Host 原生或 Rooted 词法
+规则处理。base 不是新沙箱：始终使用创建时捕获的 authority 和链接策略，Rooted 的诊断
+目录改名也不改变权限。Rooted `/` 不能成为最终发布目标。参数无效时，在同步或关闭源、
+创建父目录之前返回 `ResolveTarget` 并保留 guard；后续阶段失败时文件可能已经关闭，
+应检查发布状态。创建时 PWD 只用于诊断，之后修改进程 PWD 不影响显式目标基准。
+`keep()` 仍生成绝对 sibling 目标。发布到固定名称时，应按应用需求选择冲突策略。
 
 ## 场景：关闭临时文件后交给路径使用者
 

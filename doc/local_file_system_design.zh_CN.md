@@ -82,7 +82,7 @@ authority。实现不得依靠 `canonicalize` 后的字符串前缀比较证明 
 
 ### 2.5 词法语义由库定义，真实解析交给操作系统
 
-库负责 PWD、绝对/相对路径、`.`、`..` 和虚拟根的词法规范化；实际目录访问、symlink、
+库绑定 Host 路径时保留原生 `.`/`..` 解析顺序，对 Rooted 定义 PWD 和虚拟根的词法规范化；实际目录访问、symlink、
 reparse point、权限和文件身份尽量使用操作系统的 descriptor/handle-relative 原语。
 
 ### 2.6 部分成功必须结构化
@@ -491,7 +491,7 @@ filesystem.copy_with_options(source, target, &options)?;
 ### 7.4 Options 的职责
 
 - `LocalReadOptions`：打开重试窗口；
-- `LocalWriteOptions`：写入模式、父目录创建、原子性、持久性、打开重试；
+- `LocalWriteOptions`：写入模式、元数据策略、父目录创建、原子性、持久性、打开重试；
 - `LocalListOptions`：递归、symlink override、深度、条目、名称内存、deadline、打开目录、
   reopen 和错误策略；
 - `LocalCopyOptions`：冲突、类型冲突、metadata、symlink override、source mode、父目录、
@@ -515,6 +515,14 @@ filesystem.copy_with_options(source, target, &options)?;
 
 ### 7.5 Options 值语义与时间语义
 
+list/copy/delete 提供 `tighten_resource_limits(self, ceilings: &Self) -> Self`。
+各项限制取较小值，`None` 视为无上限，0 保持为有效的数值输入；非资源行为全部保留
+接收者的值。该方法是显式纯值变换，不执行 I/O 或校验，也不改变 `*_with_options`
+完整替换默认值的契约。list 收紧 depth/entries/open directories/seen-name bytes/deadline，
+copy 收紧 depth/entries/bytes/open directories/deadline，delete 收紧
+depth/entries/pending-path bytes/deadline，不重新启动计时。fs-local 先构造请求行为，
+再应用 provider 上限；过滤后返回条目数与原生 walker 条目数仍分别计算。
+
 Options 是拥有数据的普通值类型：字段私有、提供只读 getter 和消费 `self` 的 `with_*`
 组合方法，并至少实现 `Clone`、`Debug` 和 `Default`。存在无参数 `new()` 时，它必须与
 `Default::default()` 产生同一组初始语义；要求必要语义参数的构造函数可以保留参数。
@@ -536,14 +544,19 @@ clock，因此可限制继续推进 I/O，但不会把已进入内核的单次�
 
 ### 8.1 统一调用模型
 
-Host 和 Rooted 使用相同的词法路径规则，但 PWD 的所有权不同：
+Host 和 Rooted 的绑定基准一致，点组件的解释方式不同：
 
 - namespace-absolute path 从该 filesystem 的根开始；
 - Host relative path 从操作开始时捕获的进程 PWD 开始；
 - Rooted relative path 从实例虚拟 PWD 开始；
 - `.` 表示 PWD；
 - 空路径 `""` 也表示 PWD；
-- `..` 返回一层，但不得越过 namespace 根。
+- Rooted 的 `..` 词法返回一层，不得越过虚拟根；Host 保留 `.`/`..`，由原生解析决定访问对象。
+
+例如 Unix 上 `a/link -> ../b/inner`，Host 的 `a/link/../config` 访问 `b/config`，
+Rooted 的同一调用者路径则词法折叠为 `a/config`。Host 的 `missing/../config` 在
+`missing` 不存在时失败；Unix `/..` 按原生根目录行为处理。Windows 以 native/std
+结果为准，仍拒绝 `C:foo` 等 drive-relative 输入。
 
 Rooted PWD 始终保存为规范化的 namespace-absolute `PathBuf`，不随进程
 `set_current_dir()` 变化。Host 不保存 PWD；`current_directory()` 每次读取进程状态并返回
@@ -571,9 +584,11 @@ Rooted 操作入口不存在“Host absolute path”分支。即使输入文本�
 `/srv/app/log`，概念位置是 Host `/srv/app/srv/app/log`。Windows drive、UNC 和 device
 prefix 不属于 Rooted 虚拟路径语法，必须返回 `InvalidPath`，不能借此选择另一个 authority。
 
-### 8.3 路径规范化
+### 8.3 Host 绑定与 Rooted 规范化
 
-每次操作在任何 namespace I/O 前执行以下步骤：
+Host 仅绑定绝对基准，保留原生路径字节、内部点组件和目录意图，不进行词法折叠。
+默认 Host metadata 直接查询最终路径，不逐级 lstat/canonicalize；`Reject` 仍检查真实
+经过的组件，包括 `link/..`。Rooted 每次操作在任何 namespace I/O 前执行以下步骤：
 
 1. 仅当输入为相对路径时，捕获进程 PWD（Host）或复制实例虚拟 PWD（Rooted）；
 2. absolute input 以 namespace 根为初始 component stack；
@@ -685,7 +700,7 @@ Rooted 初始值为 `FollowWithinScope`；Host 初始值为 `FollowAcrossScope`�
 
 ### 9.2 链接目标路径
 
-链接目标进入与调用方路径相同的 component 规范化逻辑：
+Host 链接目标按原生顺序解析。Rooted 链接目标在打开的权限内逐级处理：
 
 - relative target 相对于链接所在目录；
 - `.` 保持当前链接解析目录；
@@ -824,7 +839,7 @@ Hard link 可以让根内 entry 与根外 entry 指向同一 inode/file ID，但
 1. 捕获 symlink policy、所选 Options，以及路径绑定实际需要的 PWD snapshot；
 2. 选择实例默认 Options 或显式完整 Options；
 3. 验证 Options 与已知 capability；
-4. 把所有输入路径规范化为 namespace-absolute path；
+4. 将 Host 输入绑定为 namespace-absolute path，对 Rooted 输入作虚拟词法规范化；
 5. 在任何破坏性 I/O 前完成可证明的 preflight；
 6. 通过 Host 或 Rooted authority 执行 native operation；
 7. 把结果、资源路径和错误上下文转换成虚拟 namespace path；
@@ -939,6 +954,18 @@ pub enum LocalWriteMode {
 
 `CreateNew` 是实例初始默认值，因为它不会意外覆盖已有数据。
 
+元数据策略 `LocalWriteMetadataPolicy` 与目标身份检查相互独立。默认
+`PreserveExisting` 保留平台现有协议：Unix 复制已实现的 owner/mode/ACL/xattr 等；
+Windows Host 使用 `ReplaceFileW` 合并；Windows Rooted 只保留 portable permissions。
+复制失败必须报错，不能静默退回 staging 元数据。显式 `UseStaging` 不读取旧文件内容或
+复制旧元数据，Windows Host 改用不合并的原生替换。staging 创建时仍可能继承原生权限，
+调用方选择此策略即接受目标访问控制可能变化。
+
+两种策略都观察目标类型和身份，并在安装前复核；检查和安装不构成原子 compare-and-swap。
+commit 先按策略应用元数据，再同步 staging、复核身份、安装、同步父目录。
+元数据失败发生在发布前，父目录同步失败则可能为 `Published`。CreateNew 没有旧元数据
+可复制，仍采用原子 no-replace 安装；Append 在两种策略下都直接写入。
+
 ### 14.2 生命周期与发布状态
 
 `LocalFileWriter` 同时是 `Write` byte stream 和 publication session：
@@ -1004,7 +1031,7 @@ Iterator<Item = LocalResult<LocalDirectoryEntry>>
 ```
 
 它按需读取 directory entry，不预先把整棵树或单个大目录完整收集到 `Vec`。Walker 创建时
-固定规范化 root、Options、symlink policy、PWD snapshot 和 authority。
+固定绑定后的命名空间 root、Options、symlink policy、PWD snapshot 和 authority。
 
 ### 15.2 预算
 
@@ -1259,11 +1286,17 @@ Drop 只对仍可证明 owned 的资源执行 best-effort cleanup；`Indetermina
 ```text
 temp.persist(target)
 temp.persist_with(target, options)
+temp.persist_at(base, target, options)
 ```
 
-相对 target 基于 temp 创建时已有的 PWD snapshot，而不是某个后来变化或已经销毁的
-`LocalFileSystem`。若 Host temp 以绝对 parent 创建而没有 PWD snapshot，相对 target 会被
-拒绝；absolute target 仍从同一 namespace root 开始。Rooted `/` 不能作为 target。
+`persist` 与 `persist_with` 只接受 namespace-absolute target。两种 guard 的
+`persist_at(self, base: &Path, target: &Path, options: LocalPersistOptions)` 返回与
+`persist_with` 相同的保留资源错误类型。base 必须是现存的绝对目录，不含显式 `.`/`..`，
+并按创建时链接策略解析；target 必须非空且相对，不带 root 或 native prefix。
+target 的 parent component 按 Host 原生或 Rooted 词法规则处理。base 不是新沙箱，
+始终保留创建 authority。参数和绑定校验先于源同步/关闭、父目录创建；无效输入返回
+`ResolveTarget` 并保留 guard。创建 PWD 只用于诊断，不参与新目标寻址。
+Rooted `/` 不能作为最终 target。示例见[迁移指南](user_guide.zh_CN.md#迁移到-04)。
 
 Persist 在同一 authority 内使用 native rename/install。Outcome 报告：
 
@@ -1703,8 +1736,9 @@ backend 负责原生 I/O、发布操作、经 `CopyBudget` 扣减实际字节，
 - canonical component round-trip；
 - PWD 修改失败不改变状态。
 
-规范化器适合使用 table-driven 和 property-based 测试：任何成功结果必须是 namespace-absolute、
-不含 `.`/`..`，再次规范化保持不变。
+Rooted 规范化器适合使用 table-driven 和 property-based 测试：任何成功结果必须是
+namespace-absolute、不含 `.`/`..`，再次规范化保持不变。Host 绑定应保持原生组件，
+由 std/native 对照测试验证实际访问对象，不能对 Host 强加无点组件的不变量。
 
 ### 26.3 Rooted authority tests
 
@@ -1724,7 +1758,7 @@ backend 负责原生 I/O、发布操作、经 `CopyBudget` 扣减实际字节，
 - Rooted clone 的虚拟 PWD、symlink policy 和默认 Options 独立；
 - 进程 current directory 改变会被已有 Host instance 的后续相对操作观察到；
 - Reader、Writer、Walker 不受后续 PWD 修改影响；
-- temp persist relative target 使用创建时 PWD；
+- temp persist/persist_with 拒绝相对目标，persist_at 使用显式 base，不受后续 PWD 变化影响；
 - filesystem drop 后已打开资源仍遵循创建时 authority。
 
 ### 26.5 Operation state tests
