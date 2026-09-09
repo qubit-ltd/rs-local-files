@@ -9,6 +9,7 @@
 
 use std::fs;
 use std::io;
+use std::path::Component;
 use std::path::Path;
 use std::path::PathBuf;
 
@@ -35,10 +36,17 @@ pub(crate) fn resolve_host_path(
     follow_final: bool,
 ) -> LocalResult<PathBuf> {
     let bound = bind_host_path(path)?;
-    let mut components = bound.components().peekable();
+    // Windows performs GetFullPathNameW normalization before filesystem
+    // traversal for ordinary paths. Verbatim operands retain their spelling.
+    #[cfg(windows)]
+    let traversal = std::path::absolute(&bound)
+        .map_err(|error| LocalFileError::from_io(LocalFileOperation::BindPath, Some(bound.clone()), None, error))?;
+    #[cfg(not(windows))]
+    let traversal = &bound;
+    let mut components = traversal.components().peekable();
     let mut resolved = PathBuf::new();
     while let Some(component) = components.next() {
-        resolved.push(component.as_os_str());
+        push_host_component(&mut resolved, component);
         if !matches!(component, std::path::Component::Normal(_)) {
             continue;
         }
@@ -71,6 +79,25 @@ pub(crate) fn resolve_host_path(
             .map_err(|error| LocalFileError::from_io(LocalFileOperation::BindPath, Some(bound.clone()), None, error))?;
     }
     Ok(resolved)
+}
+
+/// Appends one traversal component without normalizing verbatim Windows dots.
+///
+/// PathBuf::push itself simplifies verbatim Windows operands. Preserve their
+/// raw separators and components so native calls decide whether they are valid.
+fn push_host_component(path: &mut PathBuf, component: Component<'_>) {
+    #[cfg(windows)]
+    {
+        let needs_separator = !path.as_os_str().is_empty()
+            && !matches!(component, Component::Prefix(_) | Component::RootDir)
+            && !matches!(path.as_os_str().as_encoded_bytes().last(), Some(b'/' | b'\\'));
+        if needs_separator {
+            path.as_mut_os_string().push("\\");
+        }
+        path.as_mut_os_string().push(component.as_os_str());
+    }
+    #[cfg(not(windows))]
+    path.push(component.as_os_str());
 }
 
 /// Validates one path already resolved by the public Host facade.
