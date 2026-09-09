@@ -315,7 +315,8 @@ where
     // Apple may return a signed fraction for pre-epoch filesystem times.
     // Match std's accepted range without relaxing other Unix stat contracts.
     #[cfg(target_vendor = "apple")]
-    let signed_fraction = seconds <= 0 && seconds > libc::time_t::MIN && (-NANOS_PER_SECOND..0).contains(&nanoseconds);
+    let signed_fraction =
+        seconds <= 0 && seconds > libc::time_t::MIN && nanoseconds > -NANOS_PER_SECOND && nanoseconds < 0;
     #[cfg(not(target_vendor = "apple"))]
     let signed_fraction = false;
     if !(0..NANOS_PER_SECOND).contains(&nanoseconds) && !signed_fraction {
