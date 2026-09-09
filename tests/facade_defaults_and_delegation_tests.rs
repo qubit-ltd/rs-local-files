@@ -207,8 +207,15 @@ fn test_public_facade_uses_complete_instance_defaults() {
     let mut reader = filesystem.open_reader(&source).expect("default reader should open");
     assert_eq!(7, reader.metadata().len());
     let permissions = reader.metadata().permissions();
-    let _ = permissions.is_read_only();
-    let _ = permissions.unix_mode();
+    let native = fs::metadata(&source).expect("native source metadata");
+    assert_eq!(permissions.is_read_only(), native.permissions().readonly());
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        assert_eq!(permissions.unix_mode(), Some(native.permissions().mode() & 0o7777));
+    }
+    #[cfg(windows)]
+    assert_eq!(permissions.unix_mode(), None);
     let mut content = String::new();
     reader.read_to_string(&mut content).expect("default reader should read");
     assert_eq!("payload", content);

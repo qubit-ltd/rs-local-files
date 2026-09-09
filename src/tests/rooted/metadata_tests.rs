@@ -10,6 +10,8 @@
 #[cfg(unix)]
 use std::fs;
 use std::fs::File;
+#[cfg(unix)]
+use std::os::unix::fs::PermissionsExt;
 
 use crate::rooted::EntryKind;
 use crate::rooted::Metadata;
@@ -27,7 +29,15 @@ fn test_rooted_metadata_observes_open_file_and_identity() {
         metadata.created_at(),
         file.metadata().expect("native metadata available").created().ok()
     );
-    let _ = metadata.permissions();
+    let native = file.metadata().expect("native metadata available");
+    assert_eq!(metadata.permissions().is_read_only(), native.permissions().readonly());
+    #[cfg(unix)]
+    assert_eq!(
+        metadata.permissions().unix_mode(),
+        Some(native.permissions().mode() & 0o7777)
+    );
+    #[cfg(windows)]
+    assert_eq!(metadata.permissions().unix_mode(), None);
 }
 
 #[cfg(unix)]
