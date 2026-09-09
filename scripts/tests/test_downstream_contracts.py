@@ -74,7 +74,8 @@ class SourceLayout(unittest.TestCase):
     def setUp(self):
         self.directory = tempfile.TemporaryDirectory()
         self.addCleanup(self.directory.cleanup)
-        self.root = Path(self.directory.name)
+        # Match prepare() before calling helpers, including Windows 8.3 aliases.
+        self.root = Path(self.directory.name).resolve()
         self.layout = load_script("prepare_downstream_sources")
 
     def manifest(self, relative, content):
