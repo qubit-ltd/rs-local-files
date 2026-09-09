@@ -75,6 +75,7 @@ use crate::LocalAtomicWriteStage;
 use crate::LocalDurabilityRequirement;
 #[cfg(any(unix, windows))]
 use crate::LocalRelativePath;
+use crate::options::LocalWriteMetadataPolicy;
 #[cfg(windows)]
 use crate::write::Mode as WriteMode;
 #[cfg(windows)]
@@ -85,17 +86,21 @@ use crate::write::OpenOptions as WriteOpenOptions;
 /// Staging, replacement, synchronization, and cleanup use the destination
 /// parent descriptor and entry names. No diagnostic path is reused as
 /// authority, and no underlying file or directory handle is exposed.
-/// On Unix, commit opens the current destination, copies strict platform-native
-/// metadata to staging, and verifies the opened file identity immediately
-/// before replacement. Metadata is therefore captured at commit time rather
-/// than when the writer begins. A metadata or ACL copy failure aborts instead
-/// of silently reducing protection. A destination that was initially absent is
-/// installed without replacing a concurrent creator.
-/// Windows preserves the destination's portable permissions and checks its
-/// handle identity; required directory durability is unsupported there.
+/// Commit observes the current destination and verifies its identity before
+/// replacement. On Unix, `PreserveExisting` opens a readable handle and copies
+/// strict platform-native metadata; `UseStaging` needs only a no-follow stat
+/// and leaves staging metadata intact. Metadata is captured at commit time
+/// rather than when the writer begins. A metadata or ACL copy failure aborts
+/// instead of silently reducing protection. A destination that was initially
+/// absent is installed without replacing a concurrent creator.
+/// Windows checks handle identity for both policies and copies portable
+/// permissions only for `PreserveExisting`; required directory durability is
+/// unsupported there. Identity checking and installation remain distinct calls.
 #[must_use = "rooted atomic writes have no effect unless committed"]
 #[derive(Debug)]
 pub struct LocalRootAtomicWriter {
+    /// Controls metadata copying independently of regular-destination identity.
+    metadata_policy: LocalWriteMetadataPolicy,
     /// Requested relative destination retained for structured errors.
     path: PathBuf,
     /// Optional limit for retrying a nonblocking destination open.
@@ -110,9 +115,9 @@ pub struct LocalRootAtomicWriter {
     /// Whether a regular destination existed when this writer began.
     #[cfg(unix)]
     destination_existed: bool,
-    /// Whether existing regular-file metadata must be preserved.
+    /// Whether commit must observe and verify an existing regular file.
     #[cfg(unix)]
-    preserve_destination_metadata: bool,
+    destination_is_regular: bool,
     /// Durability requested for staging and parent synchronization.
     #[cfg(unix)]
     durability: LocalDurabilityRequirement,
@@ -125,9 +130,9 @@ pub struct LocalRootAtomicWriter {
     /// Whether a regular destination existed when this writer began.
     #[cfg(windows)]
     destination_existed: bool,
-    /// Whether existing regular-file metadata must be preserved.
+    /// Whether commit must observe and verify an existing regular file.
     #[cfg(windows)]
-    preserve_destination_metadata: bool,
+    destination_is_regular: bool,
     /// Durability requested for staging and parent synchronization.
     #[cfg(windows)]
     durability: LocalDurabilityRequirement,
@@ -177,7 +182,7 @@ impl LocalRootAtomicWriter {
             LocalAtomicDestinationState::Unchanged,
         )?;
         let (parent, final_name, parent_dirs_to_sync) = rooted_parent.into_parts();
-        let (destination_existed, preserve_destination_metadata) = map_atomic_error(
+        let (destination_existed, destination_is_regular) = map_atomic_error(
             inspect_rooted_atomic_destination(
                 &parent,
                 &final_name,
@@ -215,7 +220,8 @@ impl LocalRootAtomicWriter {
             final_name,
             parent_dirs_to_sync,
             destination_existed,
-            preserve_destination_metadata,
+            destination_is_regular,
+            metadata_policy: options.metadata_policy(),
             durability: options.durability(),
             staged_file,
         })
@@ -255,7 +261,7 @@ impl LocalRootAtomicWriter {
                 LocalAtomicDestinationState::Unchanged,
             )?;
         }
-        let (destination_existed, preserve_destination_metadata) =
+        let (destination_existed, destination_is_regular) =
             match read_rooted_symlink_metadata(root, diagnostic_root, path) {
                 Ok(file) => {
                     if options.publication_mode() == LocalAtomicPublicationMode::CreateNew {
@@ -355,7 +361,8 @@ impl LocalRootAtomicWriter {
                             file: Some(file),
                             armed: true,
                         },
-                        preserve_destination_metadata,
+                        destination_is_regular,
+                        metadata_policy: options.metadata_policy(),
                         durability: options.durability(),
                     });
                 }
@@ -465,7 +472,7 @@ impl LocalRootAtomicWriter {
     /// destination state; staging remains armed until successful installation.
     #[cfg(windows)]
     fn commit_attempt_windows(&mut self) -> Result<bool, LocalAtomicWriteError> {
-        let destination = if self.preserve_destination_metadata {
+        let destination = if self.destination_is_regular {
             Some(
                 read_rooted_symlink_metadata(&self.staged_file.root, Path::new(""), &self.destination).map_err(
                     |source| {
@@ -483,6 +490,31 @@ impl LocalRootAtomicWriter {
             None
         };
         if let Some(destination) = destination.as_ref() {
+            let observed = crate::rooted::Metadata::from_open_file(destination).map_err(|source| {
+                LocalAtomicWriteError::new(
+                    LocalAtomicWriteStage::ReadDestinationMetadata,
+                    self.path.clone(),
+                    Some(self.staged_file.diagnostic_path.clone()),
+                    LocalAtomicDestinationState::Unchanged,
+                    source,
+                )
+            })?;
+            if observed.kind() != crate::rooted::EntryKind::File {
+                return Err(LocalAtomicWriteError::new(
+                    LocalAtomicWriteStage::ReadDestinationMetadata,
+                    self.path.clone(),
+                    Some(self.staged_file.diagnostic_path.clone()),
+                    LocalAtomicDestinationState::Unchanged,
+                    io::Error::new(
+                        io::ErrorKind::InvalidInput,
+                        "rooted atomic destination must remain a regular file",
+                    ),
+                ));
+            }
+        }
+        if self.metadata_policy == LocalWriteMetadataPolicy::PreserveExisting
+            && let Some(destination) = destination.as_ref()
+        {
             let permissions = destination
                 .metadata()
                 .map_err(|source| {
@@ -591,18 +623,19 @@ impl LocalRootAtomicWriter {
     #[cfg(unix)]
     fn commit_attempt(&mut self) -> Result<bool, LocalAtomicWriteError> {
         let destination = self.open_destination_for_commit()?;
-        self.preserve_destination_metadata(destination.as_ref())?;
+        self.apply_destination_metadata(destination.as_ref())?;
         let file_durable = self.sync_temporary_file()?;
         self.verify_destination_for_commit(destination.as_ref())?;
         let parent_durable = self.install_and_sync_parent()?;
         Ok(file_durable && parent_durable)
     }
 
-    /// Opens the existing rooted destination for commit-time metadata.
+    /// Observes rooted commit-time identity and optional metadata.
     ///
     /// # Returns
     ///
-    /// The opened regular destination when metadata preservation is required,
+    /// The observed regular destination, with a readable handle only for
+    /// `PreserveExisting`,
     /// or `None` for a new entry or an allowed final-link replacement.
     ///
     /// # Errors
@@ -612,11 +645,15 @@ impl LocalRootAtomicWriter {
     /// available for retry or explicit abort.
     #[cfg(unix)]
     fn open_destination_for_commit(&mut self) -> Result<Option<OpenedAtomicDestination>, LocalAtomicWriteError> {
-        if !self.preserve_destination_metadata {
+        if !self.destination_is_regular {
             return Ok(None);
         }
-        let destination_result =
-            open_rooted_atomic_destination(self.staged_file.parent(), &self.final_name, self.open_retry_timeout);
+        let destination_result = open_rooted_atomic_destination(
+            self.staged_file.parent(),
+            &self.final_name,
+            self.open_retry_timeout,
+            self.metadata_policy,
+        );
         let opened = map_atomic_error(
             destination_result,
             LocalAtomicWriteStage::ReadDestinationMetadata,
@@ -640,21 +677,24 @@ impl LocalRootAtomicWriter {
     ///
     /// # Parameters
     ///
-    /// * `destination` - Opened destination, or `None` for a new entry.
+    /// * `destination` - Observed destination, or `None` for a new entry.
     ///
     /// # Errors
     ///
     /// Returns a structured metadata-application error while retaining staging
     /// when platform metadata cannot be preserved.
     #[cfg(unix)]
-    fn preserve_destination_metadata(
+    fn apply_destination_metadata(
         &mut self,
         destination: Option<&OpenedAtomicDestination>,
     ) -> Result<(), LocalAtomicWriteError> {
         let Some(destination) = destination else {
             return Ok(());
         };
-        let result = preserve_atomic_metadata(destination.file(), self.staged_file.file());
+        let Some(file) = destination.file() else {
+            return Ok(());
+        };
+        let result = preserve_atomic_metadata(file, self.staged_file.file());
         map_atomic_error(
             result,
             LocalAtomicWriteStage::ApplyDestinationMetadata,
@@ -683,11 +723,11 @@ impl LocalRootAtomicWriter {
         })
     }
 
-    /// Verifies that the rooted destination still names the opened file.
+    /// Verifies that the rooted destination still has the observed identity.
     ///
     /// # Parameters
     ///
-    /// * `destination` - Opened destination, or `None` for a new entry.
+    /// * `destination` - Observed destination, or `None` for a new entry.
     ///
     /// # Errors
     ///

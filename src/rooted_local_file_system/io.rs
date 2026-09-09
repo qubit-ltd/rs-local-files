@@ -186,7 +186,9 @@ impl RootedLocalFileSystem {
         )?;
         let backend = match options.mode() {
             LocalWriteMode::CreateNew | LocalWriteMode::CreateOrReplace => {
-                let mut atomic_options = crate::LocalAtomicWriteOptions::new().with_durability(options.durability());
+                let mut atomic_options = crate::LocalAtomicWriteOptions::new()
+                    .with_durability(options.durability())
+                    .with_metadata_policy(options.metadata_policy());
                 if options.mode() == LocalWriteMode::CreateNew {
                     atomic_options = atomic_options.with_create_new();
                 }

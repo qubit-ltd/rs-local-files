@@ -5,7 +5,7 @@
 //
 //    Licensed under the Apache License, Version 2.0.
 // =============================================================================
-//! Open Unix atomic destinations and stable file identity.
+//! Unix atomic destination identity with optional metadata-copy handles.
 // qubit-style: allow source-test-pair
 // Private behavior is covered through public integration tests.
 
@@ -26,12 +26,13 @@ use super::rooted_file_io::open_file_at;
 use super::unix_nonblocking::clear_nonblocking;
 use super::unix_nonblocking::open_with_nonblocking_retry;
 use super::unix_stat::is_regular_file_mode;
+use crate::options::LocalWriteMetadataPolicy;
 
-/// Open destination handle and Unix identity used by atomic replacement.
+/// Commit-time Unix identity and an optional metadata-copy handle.
 #[must_use = "the destination handle and captured identity must remain authoritative until commit"]
 pub(crate) struct OpenedAtomicDestination {
-    /// Open destination handle supplying commit-time metadata.
-    file: File,
+    /// Readable handle only when strict metadata preservation is requested.
+    file: Option<File>,
     /// Device identifier captured from the open handle.
     device: u64,
     /// Inode identifier captured from the open handle.
@@ -58,19 +59,20 @@ impl OpenedAtomicDestination {
         }
         clear_nonblocking(file.as_raw_fd())?;
         Ok(Self {
-            file,
+            file: Some(file),
             device: metadata.dev(),
             inode: metadata.ino(),
         })
     }
 
-    /// Returns the open destination handle.
+    /// Returns the metadata-copy handle, or `None` for identity-only
+    /// observation.
     #[must_use]
     // qubit-style: allow coverage-cfg
     #[cfg_attr(not(coverage), inline(always))]
     #[cfg_attr(coverage, inline(never))]
-    pub(crate) fn file(&self) -> &File {
-        &self.file
+    pub(crate) fn file(&self) -> Option<&File> {
+        self.file.as_ref()
     }
 
     /// Returns the captured device identifier.
@@ -90,7 +92,10 @@ impl OpenedAtomicDestination {
     }
 }
 
-/// Opens the current destination without following its final component.
+/// Observes the current destination without following its final component.
+///
+/// `UseStaging` captures no-follow identity without opening for read access;
+/// `PreserveExisting` retains a readable handle for copying metadata.
 ///
 /// Returns `None` when absent. A positive `open_retry_timeout` permits
 /// nonblocking-open retries. Links and unsupported resource kinds produce
@@ -98,7 +103,20 @@ impl OpenedAtomicDestination {
 pub(crate) fn open_atomic_destination(
     path: &Path,
     open_retry_timeout: Option<Duration>,
+    metadata_policy: LocalWriteMetadataPolicy,
 ) -> Result<Option<OpenedAtomicDestination>> {
+    if metadata_policy == LocalWriteMetadataPolicy::UseStaging {
+        return match fs::symlink_metadata(path) {
+            Ok(metadata) if metadata.is_file() => Ok(Some(OpenedAtomicDestination {
+                file: None,
+                device: metadata.dev(),
+                inode: metadata.ino(),
+            })),
+            Ok(_) => Err(invalid_atomic_destination()),
+            Err(error) if error.kind() == ErrorKind::NotFound => Ok(None),
+            Err(error) => Err(error),
+        };
+    }
     #[cfg(feature = "test-support")]
     if super::test_support::is_enabled("atomic-destination-open") {
         return Err(crate::local::test_fault_error());
@@ -154,7 +172,21 @@ pub(in crate::local) fn open_rooted_atomic_destination(
     parent: &File,
     name: &CString,
     open_retry_timeout: Option<Duration>,
+    metadata_policy: LocalWriteMetadataPolicy,
 ) -> Result<Option<OpenedAtomicDestination>> {
+    if metadata_policy == LocalWriteMetadataPolicy::UseStaging {
+        let Some(status) = rooted_destination_status(parent, name)? else {
+            return Ok(None);
+        };
+        if !is_regular_file_mode(status.st_mode) {
+            return Err(invalid_atomic_destination());
+        }
+        return Ok(Some(OpenedAtomicDestination {
+            file: None,
+            device: native_identity_component(status.st_dev)?,
+            inode: native_identity_component(status.st_ino)?,
+        }));
+    }
     #[cfg(feature = "test-support")]
     if super::test_support::is_enabled("rooted-destination-open") {
         return Err(crate::local::test_fault_error());
@@ -344,4 +376,67 @@ pub(crate) fn invalid_atomic_destination() -> Error {
         ErrorKind::InvalidInput,
         "atomic write destination must be absent or a regular file",
     )
+}
+
+#[cfg(test)]
+mod tests {
+    use std::ffi::CString;
+    use std::fs;
+    use std::fs::File;
+    use std::os::unix::fs::symlink;
+
+    use super::destination_identity_matches;
+    use super::open_atomic_destination;
+    use super::open_rooted_atomic_destination;
+    use super::rooted_destination_identity_matches;
+    use crate::options::LocalWriteMetadataPolicy;
+
+    /// Real entry replacement between observation and validation is rejected in
+    /// both namespaces.
+    #[test]
+    fn test_destination_identity_rejects_real_replacement_under_both_metadata_policies() {
+        for policy in [
+            LocalWriteMetadataPolicy::PreserveExisting,
+            LocalWriteMetadataPolicy::UseStaging,
+        ] {
+            for replacement in ["file", "symlink", "directory"] {
+                let fixture = tempfile::tempdir().expect("isolated identity fixture");
+                let path = fixture.path().join("destination");
+                fs::write(&path, b"observed").expect("original destination");
+                let parent = File::open(fixture.path()).expect("opened parent authority");
+                let name = CString::new("destination").expect("entry name");
+                let host = open_atomic_destination(&path, None, policy)
+                    .expect("host observation")
+                    .expect("existing host destination");
+                let rooted = open_rooted_atomic_destination(&parent, &name, None, policy)
+                    .expect("rooted observation")
+                    .expect("existing rooted destination");
+                assert_eq!(
+                    host.file().is_some(),
+                    policy == LocalWriteMetadataPolicy::PreserveExisting
+                );
+                assert_eq!(
+                    rooted.file().is_some(),
+                    policy == LocalWriteMetadataPolicy::PreserveExisting
+                );
+                assert!(destination_identity_matches(&path, &host).expect("unchanged host identity"));
+                assert!(
+                    rooted_destination_identity_matches(&parent, &name, &rooted).expect("unchanged rooted identity")
+                );
+
+                // Retain the original inode so the filesystem cannot recycle its identity.
+                let observed = fixture.path().join("observed");
+                fs::rename(&path, &observed).expect("replace after identity observation");
+                match replacement {
+                    "file" => fs::write(&path, b"replacement").expect("different inode"),
+                    // A following lookup would see the original inode; no-follow must reject this link.
+                    "symlink" => symlink("observed", &path).expect("link to original inode"),
+                    _ => fs::create_dir(&path).expect("directory replacement"),
+                }
+                assert!(!destination_identity_matches(&path, &host).expect("host identity check"));
+                assert!(!rooted_destination_identity_matches(&parent, &name, &rooted).expect("rooted identity check"));
+                assert_eq!(fs::read(observed).expect("retained original content"), b"observed");
+            }
+        }
+    }
 }

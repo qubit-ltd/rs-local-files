@@ -190,7 +190,9 @@ pub(crate) fn open_staged_writer(
     path: &Path,
     options: &LocalWriteOptions,
 ) -> LocalResult<crate::local::LocalAtomicWriter> {
-    let mut native_options = crate::local::LocalAtomicWriteOptions::new().with_durability(options.durability());
+    let mut native_options = crate::local::LocalAtomicWriteOptions::new()
+        .with_durability(options.durability())
+        .with_metadata_policy(options.metadata_policy());
     if options.mode() == LocalWriteMode::CreateNew {
         native_options = native_options.with_create_new();
     }
