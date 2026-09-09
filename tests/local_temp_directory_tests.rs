@@ -487,7 +487,7 @@ fn test_rooted_temp_directory_persist_supports_new_and_overwrite_targets() {
         .expect("first rooted temporary directory should be created");
 
     let outcome = temporary
-        .persist(Path::new("fresh-target"))
+        .persist(Path::new("/fresh-target"))
         .expect("rooted directory should publish to an absent target");
     assert_eq!(Path::new("/fresh-target"), outcome.path());
     assert!(parent.path().join("fresh-target").is_dir());
@@ -499,7 +499,7 @@ fn test_rooted_temp_directory_persist_supports_new_and_overwrite_targets() {
 
     let outcome = temporary
         .persist_with(
-            Path::new("replacement-target"),
+            Path::new("/replacement-target"),
             LocalPersistOptions::new().with_overwrite(),
         )
         .expect("rooted overwrite should replace the empty target");
@@ -598,13 +598,13 @@ fn test_rooted_temp_directory_conflicts_and_invalid_targets_retain_cleanup() {
     let source = temporary.path().to_path_buf();
 
     let error = temporary
-        .persist(Path::new("occupied"))
+        .persist(Path::new("/occupied"))
         .expect_err("default persistence must retain an occupied target");
     let (_io, temporary, _requested, resolved, _stage) = error.into_parts();
     assert_eq!(Some(Path::new("/occupied")), resolved.as_deref());
 
     let error = temporary
-        .persist(Path::new("../escape"))
+        .persist_at(Path::new("/"), Path::new("../escape"), LocalPersistOptions::new())
         .expect_err("rooted persistence must reject lexical escapes");
     let (_io, mut temporary, _requested, resolved, _stage) = error.into_parts();
     assert_eq!(None, resolved);

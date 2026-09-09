@@ -23,6 +23,7 @@ use qubit_local_files::error::LocalFileOperation;
 use qubit_local_files::options::LocalCopyConflictPolicy;
 use qubit_local_files::options::LocalCopyOptions;
 use qubit_local_files::options::LocalListOptions;
+use qubit_local_files::options::LocalPersistOptions;
 use qubit_local_files::options::LocalTempDirectoryOptions;
 use qubit_local_files::options::LocalTempFileOptions;
 #[cfg(unix)]
@@ -513,7 +514,7 @@ fn test_rooted_walker_can_follow_a_symlink_to_virtual_root() {
 /// Verifies temporary resources retain creation-time PWD semantics and expose
 /// only virtual namespace paths through their public identity APIs.
 #[test]
-fn test_rooted_temp_resources_retain_their_creation_pwd_snapshot() {
+fn test_rooted_temp_resources_use_explicit_persistence_base() {
     let directory = tempdir().expect("temporary root should be created");
     fs::create_dir_all(directory.path().join("first")).expect("first PWD should be created");
     fs::create_dir_all(directory.path().join("second")).expect("second PWD should be created");
@@ -531,8 +532,8 @@ fn test_rooted_temp_resources_retain_their_creation_pwd_snapshot() {
         .set_current_directory(Path::new("/second"))
         .expect("filesystem PWD should be independently mutable");
     let outcome = temporary
-        .persist(Path::new("published"))
-        .expect("relative persistence should use the creation PWD snapshot");
+        .persist_at(Path::new("/first"), Path::new("published"), LocalPersistOptions::new())
+        .expect("relative persistence should use the explicit base");
     assert_eq!(Path::new("/first/published"), outcome.path());
     assert_eq!(
         b"payload",
@@ -566,7 +567,7 @@ fn test_temp_file_persist_preserves_directory_qualified_target_intent() {
         .expect("temporary payload should be written");
 
     let error = temporary
-        .persist(Path::new("published/"))
+        .persist(Path::new("/published/"))
         .expect_err("a temporary file cannot satisfy a directory-qualified target");
 
     assert_eq!(LocalPersistStage::ResolveTarget, error.stage());
@@ -823,7 +824,11 @@ fn test_rooted_temp_persist_errors_retain_creation_pwd() {
         .expect("filesystem PWD should change independently");
 
     let error = temporary
-        .persist(Path::new("../../escape"))
+        .persist_at(
+            Path::new("/first"),
+            Path::new("../../escape"),
+            LocalPersistOptions::new(),
+        )
         .expect_err("persistence beyond the virtual root should fail");
     assert_eq!(Path::new("../../escape"), error.requested_target());
     assert_eq!(Some(Path::new("/first")), error.error().current_directory());

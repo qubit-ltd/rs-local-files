@@ -26,7 +26,9 @@ use super::internal::RootedTempResourceBackend;
 use super::internal::TempEntryIdentity;
 use super::internal::generated_target;
 use super::internal::prepare_host_parent;
+use super::internal::prepare_persist_target;
 use super::internal::prepare_rooted_parent;
+use super::internal::validate_persist_base;
 use crate::LocalDurabilityRequirement;
 use crate::LocalFileError;
 use crate::LocalFileErrorKind;
@@ -40,6 +42,7 @@ use crate::LocalPersistStage;
 use crate::LocalRelativePath;
 use crate::LocalResult;
 use crate::LocalSymlinkPolicy;
+use crate::path::LocalFileSystemScope;
 use crate::path::LocalPathResolver;
 
 /// A temporary file whose cleanup remains bound to its creating authority.
@@ -88,8 +91,8 @@ pub struct LocalTempFile {
     state: LocalTempResourceState,
     /// Symbolic-link policy retained for persistence targets.
     symlink_policy: LocalSymlinkPolicy,
-    /// Creation-time filesystem PWD and namespace semantics.
-    resolver: Option<LocalPathResolver>,
+    /// Creation-time PWD retained only for source and cleanup diagnostics.
+    creation_current_directory: Option<PathBuf>,
 }
 
 impl LocalTempFile {
@@ -113,7 +116,7 @@ impl LocalTempFile {
             file: Some(file),
             state: LocalTempResourceState::Owned,
             symlink_policy,
-            resolver: None,
+            creation_current_directory: None,
         })
     }
 
@@ -142,7 +145,7 @@ impl LocalTempFile {
             file: Some(file),
             state: LocalTempResourceState::Owned,
             symlink_policy,
-            resolver: None,
+            creation_current_directory: None,
         })
     }
 
@@ -217,7 +220,7 @@ impl LocalTempFile {
                 return Err(self.persist_error(error, requested_target, None, LocalPersistStage::ResolveTarget));
             }
         };
-        self.persist_with_path(&target, LocalPersistOptions::new())
+        self.persist_with_path(&target, None, LocalPersistOptions::new())
     }
 
     /// Persists the file within its creating authority without replacement.
@@ -234,11 +237,10 @@ impl LocalTempFile {
     /// Persists the file with explicit replacement policy within its creating
     /// authority.
     ///
-    /// Consumes this guard. Resolves `target` using its creation-time namespace
-    /// and PWD; `options` selects replacement, parent creation, and durability.
-    /// A relative target requires a PWD captured when the resource was created;
-    /// resources created with an absolute Host parent therefore reject relative
-    /// targets with `InvalidPath` and retain the resource in the error.
+    /// Consumes this guard and requires a nonempty namespace-absolute target.
+    /// Use [`Self::persist_at`] for relative targets with an explicit base.
+    /// Invalid targets retain the original open guard before synchronization.
+    /// `options` selects replacement, parent creation, and durability.
     /// Returns the achieved publication guarantees and any sandbox cleanup
     /// error after a successful install.
     ///
@@ -254,7 +256,7 @@ impl LocalTempFile {
         target: impl AsRef<Path>,
         options: LocalPersistOptions,
     ) -> std::result::Result<LocalPersistOutcome, LocalPersistError<Self>> {
-        self.persist_with_path(target.as_ref(), options)
+        self.persist_with_path(target.as_ref(), None, options)
     }
 
     /// Returns the mutable open file handle, or an error after [`Self::close`].
@@ -264,10 +266,28 @@ impl LocalTempFile {
         self.file.as_mut().ok_or_else(closed_file_error)
     }
 
-    /// Binds public paths and future relative persistence to the creating
-    /// filesystem's namespace snapshot.
-    /// Returns a contextual path-resolution error on invalid namespace input;
-    /// consuming failure drops this guard and attempts cleanup.
+    /// Persists a relative target against an explicit namespace-absolute base.
+    ///
+    /// `base` must be an existing directory without dot or parent components;
+    /// `target` must be nonempty and strictly relative. Both are interpreted
+    /// through the creating authority and its captured symlink policy. This
+    /// never reads the process PWD. Invalid parameters return `ResolveTarget`
+    /// before source synchronization or closing. Other stages and publication
+    /// guarantees match [`Self::persist_with`]. Errors retain the resource.
+    pub fn persist_at(
+        self,
+        base: &Path,
+        target: &Path,
+        options: LocalPersistOptions,
+    ) -> std::result::Result<LocalPersistOutcome, LocalPersistError<Self>> {
+        self.persist_with_path(target, Some(base), options)
+            .map_err(|error| error.with_current_directory(base.to_path_buf()))
+    }
+
+    /// Binds public paths and records the creating filesystem PWD for
+    /// diagnostics. Returns a contextual path-resolution error on invalid
+    /// namespace input; consuming failure drops this guard and attempts
+    /// cleanup.
     pub(crate) fn bind_namespace(mut self, resolver: LocalPathResolver) -> LocalResult<Self> {
         let input = match &self.backend {
             LocalTempResourceBackend::Host(_) => self.path.clone(),
@@ -284,18 +304,63 @@ impl LocalTempFile {
             })?
             .namespace_absolute()
             .to_path_buf();
-        self.resolver = Some(resolver);
+        self.creation_current_directory = resolver.current_directory().map(Path::to_path_buf);
         Ok(self)
     }
 
     /// Persists the file to a resolved public-API target path.
     /// Implements the ownership, guarantee, and failure contract of
-    /// [`Self::persist_with`]; a bound resolver is a construction invariant.
+    /// [`Self::persist_with`], using only the retained authority and explicit
+    /// base.
     fn persist_with_path(
         mut self,
         target: &Path,
+        base: Option<&Path>,
         options: LocalPersistOptions,
     ) -> std::result::Result<LocalPersistOutcome, LocalPersistError<Self>> {
+        let requested_target = target.to_path_buf();
+        let scope = match &self.backend {
+            LocalTempResourceBackend::Host(_) => LocalFileSystemScope::Host,
+            LocalTempResourceBackend::Rooted(_) => LocalFileSystemScope::Rooted,
+        };
+        let resolved_target = match prepare_persist_target(scope, base, target) {
+            Ok(target) => target,
+            Err(error) => {
+                return Err(self.persist_error(
+                    error.into_io_error(),
+                    requested_target,
+                    None,
+                    LocalPersistStage::ResolveTarget,
+                ));
+            }
+        };
+        let namespace_target = resolved_target.namespace_absolute().to_path_buf();
+        if scope == LocalFileSystemScope::Rooted && resolved_target.authority_relative().as_os_str().is_empty() {
+            return Err(self.persist_error(
+                Error::new(ErrorKind::InvalidInput, "cannot replace the Rooted virtual root"),
+                requested_target,
+                Some(namespace_target),
+                LocalPersistStage::ResolveTarget,
+            ));
+        }
+        if resolved_target.directory_required() {
+            return Err(self.persist_error(
+                Error::from(ErrorKind::NotADirectory),
+                requested_target,
+                Some(namespace_target),
+                LocalPersistStage::ResolveTarget,
+            ));
+        }
+        if let Some(base) = base
+            && let Err(error) = validate_persist_base(&self.backend, base, self.symlink_policy)
+        {
+            return Err(self.persist_error(
+                error.into_io_error(),
+                requested_target,
+                Some(namespace_target),
+                LocalPersistStage::ResolveTarget,
+            ));
+        }
         if let Err(error) = self.ensure_identity_matches() {
             return Err(self.persist_error(error, target.to_path_buf(), None, LocalPersistStage::InstallDestination));
         }
@@ -319,32 +384,6 @@ impl LocalTempFile {
             }
         };
         self.close();
-        let requested_target = target.to_path_buf();
-        let resolved_target = match self
-            .resolver
-            .as_ref()
-            .expect("temporary resource is bound by LocalFileSystem")
-            .resolve(&requested_target)
-        {
-            Ok(target) => target,
-            Err(error) => {
-                return Err(self.persist_error(
-                    error.into_io_error(),
-                    requested_target,
-                    None,
-                    LocalPersistStage::ResolveTarget,
-                ));
-            }
-        };
-        let namespace_target = resolved_target.namespace_absolute().to_path_buf();
-        if resolved_target.directory_required() {
-            return Err(self.persist_error(
-                Error::from(ErrorKind::NotADirectory),
-                requested_target,
-                Some(namespace_target),
-                LocalPersistStage::ResolveTarget,
-            ));
-        }
         let authority_target = resolved_target.authority_relative().to_path_buf();
         if matches!(&self.backend, LocalTempResourceBackend::Host(_)) {
             let target = match crate::local::resolve_host_path(&authority_target, self.symlink_policy, false) {
@@ -603,11 +642,7 @@ impl LocalTempFile {
         resolved_target: Option<PathBuf>,
         stage: LocalPersistStage,
     ) -> LocalPersistError<Self> {
-        let current_directory = self
-            .resolver
-            .as_ref()
-            .and_then(LocalPathResolver::current_directory)
-            .map(Path::to_path_buf);
+        let current_directory = self.creation_current_directory.clone();
         let requirement_not_met =
             stage == LocalPersistStage::SynchronizeSource && error.kind() == ErrorKind::Unsupported;
         let mut error = LocalPersistError::new(error, self, requested_target, resolved_target, stage);
@@ -622,11 +657,8 @@ impl LocalTempFile {
 
     /// Attaches the resource's creation-time PWD to a structured error.
     fn contextualize_error(&self, error: LocalFileError) -> LocalFileError {
-        match &self.resolver {
-            Some(resolver) => match resolver.current_directory() {
-                Some(current_directory) => error.with_current_directory(current_directory.to_path_buf()),
-                None => error,
-            },
+        match &self.creation_current_directory {
+            Some(current_directory) => error.with_current_directory(current_directory.clone()),
             None => error,
         }
     }

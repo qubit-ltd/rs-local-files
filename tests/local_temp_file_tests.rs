@@ -303,7 +303,7 @@ fn test_local_temp_file_persist_reports_required_rooted_durability() {
 
     let outcome = temporary
         .persist_with(
-            Path::new("published/nested/target"),
+            Path::new("/published/nested/target"),
             LocalPersistOptions::new()
                 .with_create_parent()
                 .with_durability(LocalDurabilityRequirement::Required),
@@ -661,7 +661,7 @@ fn test_rooted_temp_file_persist_with_overwrite_replaces_target() {
 
     let persisted = temporary
         .persist_with(
-            std::path::Path::new("target"),
+            std::path::Path::new("/target"),
             LocalPersistOptions::new().with_overwrite(),
         )
         .expect("rooted overwrite should publish the temporary file");
@@ -675,8 +675,8 @@ fn test_rooted_temp_file_persist_with_overwrite_replaces_target() {
     );
 }
 
-/// Verifies rooted temporary files can publish to an absent relative target
-/// and release automatic cleanup after publication.
+/// Verifies rooted temporary files can publish to an absent namespace-absolute
+/// target and release automatic cleanup after publication.
 #[cfg(not(windows))]
 #[test]
 fn test_rooted_temp_file_persist_publishes_absent_target() {
@@ -691,7 +691,7 @@ fn test_rooted_temp_file_persist_publishes_absent_target() {
     let source = temporary.path().to_path_buf();
 
     let outcome = temporary
-        .persist(std::path::Path::new("published"))
+        .persist(std::path::Path::new("/published"))
         .expect("rooted temporary file should publish");
     assert_eq!(std::path::Path::new("/published"), outcome.path());
     assert!(!rooted_host_path(parent.path(), &source).exists());
@@ -797,13 +797,13 @@ fn test_rooted_temp_file_conflicts_and_invalid_targets_retain_cleanup() {
     let source = temporary.path().to_path_buf();
 
     let error = temporary
-        .persist(std::path::Path::new("occupied"))
+        .persist(std::path::Path::new("/occupied"))
         .expect_err("default persistence must retain an occupied target");
     let (_io, temporary, _requested, resolved, _stage) = error.into_parts();
     assert_eq!(Some(std::path::Path::new("/occupied")), resolved.as_deref());
 
     let error = temporary
-        .persist(std::path::Path::new("../escape"))
+        .persist_at(Path::new("/"), Path::new("../escape"), LocalPersistOptions::new())
         .expect_err("rooted persistence must reject lexical escapes");
     let (_io, mut temporary, _requested, resolved, _stage) = error.into_parts();
     assert_eq!(None, resolved);

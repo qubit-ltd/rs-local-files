@@ -351,7 +351,7 @@ fn test_rooted_temporary_resources_persist_through_configured_parents() {
         .expect("temporary file should accept bytes");
     let file_outcome = temporary_file
         .persist_with(
-            Path::new("published/files/payload"),
+            Path::new("/published/files/payload"),
             LocalPersistOptions::new().with_create_parent(),
         )
         .expect("rooted temporary file should persist beneath its authority");
@@ -385,7 +385,7 @@ fn test_rooted_temporary_resources_persist_through_configured_parents() {
     .expect("temporary directory should accept a fixture entry");
     let directory_outcome = temporary_directory
         .persist_with(
-            Path::new("published/directories/resource"),
+            Path::new("/published/directories/resource"),
             LocalPersistOptions::new().with_create_parent(),
         )
         .expect("rooted temporary directory should persist beneath its authority");
