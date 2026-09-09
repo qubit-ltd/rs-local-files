@@ -19,8 +19,10 @@ mod local_rename_options;
 mod local_temp_directory_options;
 mod local_temp_file_options;
 mod local_walk_error_policy;
+mod local_write_metadata_policy;
 mod local_write_mode;
 mod local_write_options;
+mod resource_limits;
 
 pub use local_copy_options::LocalCopyOptions;
 pub use local_copy_source_mode::LocalCopySourceMode;
@@ -34,6 +36,7 @@ pub use local_rename_options::LocalRenameOptions;
 pub use local_temp_directory_options::LocalTempDirectoryOptions;
 pub use local_temp_file_options::LocalTempFileOptions;
 pub use local_walk_error_policy::LocalWalkErrorPolicy;
+pub use local_write_metadata_policy::LocalWriteMetadataPolicy;
 pub use local_write_mode::LocalWriteMode;
 pub use local_write_options::LocalWriteOptions;
 

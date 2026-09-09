@@ -10,6 +10,7 @@
 
 use std::time::Duration;
 
+use super::LocalWriteMetadataPolicy;
 use super::LocalWriteMode;
 use crate::policy::LocalAtomicityRequirement;
 use crate::policy::LocalDurabilityRequirement;
@@ -20,6 +21,8 @@ use crate::policy::LocalDurabilityRequirement;
 pub struct LocalWriteOptions {
     /// Destination publication mode.
     mode: LocalWriteMode,
+    /// Metadata protocol used when replacing an existing destination.
+    metadata_policy: LocalWriteMetadataPolicy,
     /// Whether missing parent directories should be created.
     create_parent: bool,
     /// Required atomicity.
@@ -39,6 +42,7 @@ impl LocalWriteOptions {
     pub const fn new(mode: LocalWriteMode) -> Self {
         Self {
             mode,
+            metadata_policy: LocalWriteMetadataPolicy::PreserveExisting,
             create_parent: false,
             atomicity: LocalAtomicityRequirement::Preferred,
             durability: LocalDurabilityRequirement::NotRequired,
@@ -53,6 +57,21 @@ impl LocalWriteOptions {
     #[cfg_attr(coverage, inline(never))]
     pub const fn mode(&self) -> LocalWriteMode {
         self.mode
+    }
+
+    /// Returns the metadata policy used for staged replacement.
+    #[must_use]
+    pub const fn metadata_policy(&self) -> LocalWriteMetadataPolicy {
+        self.metadata_policy
+    }
+
+    /// Selects replacement metadata without changing publication guarantees.
+    ///
+    /// `UseStaging` can change access controls. Create-new and append modes do
+    /// not copy old metadata under either policy.
+    pub const fn with_metadata_policy(mut self, policy: LocalWriteMetadataPolicy) -> Self {
+        self.metadata_policy = policy;
+        self
     }
 
     /// Reports whether missing parent directories are created.
