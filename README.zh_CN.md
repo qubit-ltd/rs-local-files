@@ -75,6 +75,10 @@ assert_eq!(content, r#"{"version":1}"#);
 
 Reader 和 writer 只接受普通文件；目录和特殊文件会被拒绝，不会被当作字节流打开。
 
+权限观测反映文件条目的原生元数据，不等于综合 ACL、挂载策略等因素后调用者实际拥有的
+访问权限。Unix 的 `unix_mode()` 保留观测到的权限位和特殊位；Windows 返回 `None`。
+`metadata()` 和目录遍历查看最终链接条目本身，reader 则报告已打开内容句柄的元数据。
+
 `LocalFileSystem` 是有状态的实例 API。Rooted 实例拥有自己的虚拟当前目录；Host
 实例只在操作需要绑定相对路径时读取进程当前目录。每个实例还拥有符号链接策略和九种
 操作的默认 Options。普通方法使用实例默认值；每个 `*_with_options` 方法都以传入的完整

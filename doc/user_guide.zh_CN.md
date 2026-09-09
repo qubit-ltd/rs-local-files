@@ -32,6 +32,10 @@ Host 命名空间 ── LocalFileSystem::host() ── 操作时读取进程 PW
 对象。`LocalFileNames` 和 `LocalPaths` 提供原生词法工具，不会把文件名强制转换为
 UTF-8。
 
+权限观测反映文件条目的原生元数据，不等于综合 ACL、挂载策略等因素后调用者实际拥有的
+访问权限。Unix 的 `unix_mode()` 保留观测到的权限位和特殊位；Windows 返回 `None`。
+`metadata()` 和目录遍历查看最终链接条目本身，reader 则报告已打开内容句柄的元数据。
+
 ## 安装与最小配置
 
 在应用的 Cargo 清单中添加依赖：

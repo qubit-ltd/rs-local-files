@@ -39,6 +39,11 @@ walkers, and temporary entries are owned stateful resources. `LocalFileNames`
 and `LocalPaths` provide native lexical utilities without converting names to
 UTF-8.
 
+Permission observations describe native entry metadata, not the caller's effective access after
+ACLs, mount policy, or other operating-system checks. On Unix, `unix_mode()` preserves the observed
+permission and special bits; on Windows it returns `None`. `metadata()` and listing inspect the final
+link entry, while a reader reports metadata from its opened content handle.
+
 ## Installation and Minimal Configuration
 
 Add the crate to the application manifest:
