@@ -18,7 +18,7 @@ in [`qubit-fs-local`](https://crates.io/crates/qubit-fs-local).
 
 ```toml
 [dependencies]
-qubit-local-files = "0.3"
+qubit-local-files = "0.4"
 ```
 
 ## Quick Start: publish a generated file
@@ -119,16 +119,25 @@ atomically publishes the entry to a generated sibling path, returns a
 
 ## Choose the right authority
 
+Host paths retain native `.`/`..` and symbolic-link traversal order; Rooted
+paths use virtual lexical normalization. Replacement writers default to
+`LocalWriteMetadataPolicy::PreserveExisting`; select `UseStaging` explicitly
+when publication should use staging metadata. Both policies retain destination
+identity checks. List/copy/delete options expose `tighten_resource_limits`
+without overwriting operation behavior. Temporary `persist`/`persist_with`
+require namespace-absolute targets; use `persist_at(base, target, options)` for
+an explicit relative target. See the [0.4 migration examples](doc/user_guide.md#migration-to-04).
+
 Use `LocalFileSystem::host()` for host paths. Use
 `LocalFileSystem::rooted(root)` when one opened directory is the authority
 boundary. Both instances expose the same operations; only path interpretation
 changes. Host absolute paths never query the process PWD. A Host relative path
 captures one process-PWD snapshot when the operation begins; a Rooted relative
 path uses the instance's virtual PWD. `.` and an empty path mean the applicable
-PWD; `..` is normalized one component at a time and is rejected only if it
-would cross the namespace root. In a Rooted instance, `/etc/hosts` is a virtual
+PWD. Rooted folds `..` lexically and rejects crossing virtual `/`; Host retains
+native traversal order. In a Rooted instance, `/etc/hosts` is a virtual
 absolute path beneath the opened root, not the Host path `/etc/hosts`. Native
-prefixes are rejected.
+prefixes are rejected in Rooted.
 
 Intermediate symbolic links follow the configured policy. Rooted absolute link
 targets restart at its virtual `/`, and `FollowWithinScope` prevents any link
@@ -188,9 +197,9 @@ cleanup contract.
 
 ## Testing
 
-`Cargo.toml` declares the `qubit-redact` Git source and `Cargo.lock` pins its revision;
-`.cargo/config.toml` contains repository-specific comments only. Publishing to crates.io still requires that dependency version
-to be published to the registry first.
+`Cargo.toml` uses registry dependency `qubit-redact = "0.8"`; `Cargo.lock`
+records the resolved version and checksum. The downstream contract runner
+checks the sibling local-files, fs-local, and mime repositories with `--locked`.
 
 ```bash
 # Run tests with the default feature set

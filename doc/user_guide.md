@@ -6,7 +6,7 @@
 
 ## Purpose and Audience
 
-This guide covers `qubit-local-files` 0.3 on Rust 1.94 or newer. It is for
+This guide covers `qubit-local-files` 0.4 on Rust 1.94 or newer. It is for
 applications that operate on the host filesystem or need operations restricted
 to one opened directory. It is not a provider registry, a remote filesystem
 API, or a replacement for provider-level logical paths. The crate is
@@ -45,7 +45,7 @@ Add the crate to the application manifest:
 
 ```toml
 [dependencies]
-qubit-local-files = "0.3"
+qubit-local-files = "0.4"
 ```
 
 Choose the authority before configuring operation policy. Host mode uses the
@@ -275,7 +275,7 @@ referents.
 ## Walk and Temporary Resources
 
 `LocalFileSystem::list` returns a lazy `LocalDirectoryWalker`. It opens and
-advances directories on demand; its normalized root, Options, symbolic-link
+advances directories on demand; its namespace-bound root, Options, symbolic-link
 policy, PWD snapshot, and authority are fixed at creation. No depth, entry,
 name-memory, deadline, or open-directory budget exists by default. When a
 caller sets an open-directory budget, `Reopen` closes and later reopens active
@@ -301,6 +301,112 @@ explicitly clean it. Prefixes and suffixes are checked before entry creation:
 native separators, NUL, and portable reserved-name violations do not leave an
 entry behind. Name-collision attempts are unbounded unless the caller sets
 `max_attempts`.
+
+## Migration to 0.4
+
+### Bind Host paths without lexical folding
+
+Host binds relative paths to one operation-time process PWD and retains native
+dot components and directory intent. Given `a/link -> ../b/inner`, reading
+`a/link/../config` on Unix reads `b/config` through Host, while Rooted folds
+the caller's path and reads `a/config`. Host `missing/../config` fails if
+`missing` does not exist; it cannot bypass that component. Rooted rejects
+lexical traversal beyond virtual `/`. Host follows native root behavior,
+including Unix `/..`; Windows drive-relative input such as `C:foo` remains
+invalid. Host is not a containment boundary.
+
+Default Host metadata performs one final metadata query without probing every
+prefix. Explicit `Reject` still checks traversed links, including `link/..`.
+Compare Host and Rooted with `std` on the same fixture using
+`cargo bench --bench local_files -- deep_metadata`; timings depend on the
+filesystem and path depth.
+
+### Choose replacement metadata explicitly
+
+`LocalWriteOptions::new(LocalWriteMode::CreateOrReplace)` defaults to
+`LocalWriteMetadataPolicy::PreserveExisting`. Use `UseStaging` when the
+replacement should retain staging metadata. This can change access control;
+staging still inherits whatever its native creation environment supplies.
+
+| Platform and scope | PreserveExisting | UseStaging |
+| --- | --- | --- |
+| Unix Host/Rooted | Existing metadata preservation, including implemented owner/mode/ACL/xattr copying; failure is reported | No old-content read or metadata copy requested |
+| Windows Host | Native `ReplaceFileW` metadata merge | Non-merging native replacement |
+| Windows Rooted | Portable permissions only; no full ACL/owner preservation promise | Skip portable permission copying |
+
+Both policies keep target type and identity checks. These checks are not an
+atomic compare-and-swap with installation. CreateNew has no old metadata to
+copy; Append writes directly under either policy. A preservation failure occurs
+before publication, while parent-sync failure may occur after publication;
+inspect the retained commit error and its state before retrying.
+
+```rust
+use qubit_local_files::options::LocalWriteMetadataPolicy;
+use qubit_local_files::options::LocalWriteMode;
+use qubit_local_files::options::LocalWriteOptions;
+
+let options = LocalWriteOptions::new(LocalWriteMode::CreateOrReplace)
+    .with_metadata_policy(LocalWriteMetadataPolicy::UseStaging);
+assert_eq!(options.metadata_policy(), LocalWriteMetadataPolicy::UseStaging);
+```
+
+### Tighten budgets without changing behavior
+
+List/copy/delete options expose `tighten_resource_limits(self, ceilings: &Self)`.
+For each resource limit, `None` means unbounded and two finite values select
+the minimum. Zero stays zero; operation validation still rejects invalid zero
+handle limits. Deadlines remain durations measured from operation start.
+Behavior, including recursion, overwrite and parent creation, stays with the
+receiver. `*_with_options` still uses the supplied complete options value.
+
+```rust
+use qubit_local_files::options::LocalCopyOptions;
+
+let requested = LocalCopyOptions::new().with_max_bytes(100);
+let ceilings = LocalCopyOptions::new().with_max_bytes(10);
+let effective = requested.tighten_resource_limits(&ceilings);
+assert_eq!(effective.max_bytes(), Some(10));
+```
+
+In `qubit-fs-local`, provider list entry ceilings count native entries before
+prefix filtering; request entry limits count returned entries after filtering.
+A filter with no matches can still exhaust the provider ceiling. These are
+per-operation limits, not aggregate quotas across concurrent requests.
+
+### Publish a temporary resource against an explicit base
+
+Both temporary guard types now accept only namespace-absolute targets in
+`persist` and `persist_with`. Replace relative calls with `persist_at`:
+
+```rust,no_run
+use std::io::Write;
+use std::path::Path;
+use qubit_local_files::LocalFileSystem;
+use qubit_local_files::options::LocalPersistOptions;
+
+let filesystem = LocalFileSystem::host()?;
+let base = std::fs::canonicalize(std::env::temp_dir())?;
+let mut temporary = filesystem.create_temp_file()?;
+temporary.write_all(b"generated report")?;
+let published = temporary.persist_at(
+    &base, Path::new("report.txt"), LocalPersistOptions::new(),
+)?;
+# let _ = published;
+# Ok::<(), Box<dyn std::error::Error>>(())
+```
+
+The base must be an existing namespace-absolute directory without explicit
+`.`/`..` components; the target must be nonempty and relative without a root
+or native prefix. Target parents follow Host native or Rooted lexical rules.
+The base does not establish another sandbox: the captured creating authority
+and symlink policy still apply, even after a Rooted diagnostic directory is
+renamed. Rooted `/` cannot be the final publication target. Invalid parameters
+return `ResolveTarget` before source sync/close or parent creation and retain
+the guard. Later failures may retain a closed file; inspect publication state.
+Creating PWD is diagnostic context only, and changing process PWD never
+changes the explicit target base. `keep()` still generates an absolute sibling
+target. Use a collision policy appropriate to the application when publishing
+to a fixed name.
 
 ## Scenario: inspect a closed temporary file
 

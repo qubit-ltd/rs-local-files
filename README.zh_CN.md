@@ -17,7 +17,7 @@
 
 ```toml
 [dependencies]
-qubit-local-files = "0.3"
+qubit-local-files = "0.4"
 ```
 
 ## 快速开始：发布生成文件
@@ -101,11 +101,18 @@ Rooted 实例的同名方法只修改该实例。
 
 ## 选择合适的权限范围
 
+Host 按原生顺序解释 `.`、`..` 和符号链接；Rooted 使用虚拟路径的词法规范化。
+替换写入默认采用 `LocalWriteMetadataPolicy::PreserveExisting`，需要发布 staging 自身的
+元数据时显式选择 `UseStaging`；两种策略都保留目标身份检查。list/copy/delete 的
+`tighten_resource_limits` 只收紧资源限制，不覆盖操作行为。临时资源的 `persist` 和
+`persist_with` 只接受命名空间绝对目标，相对目标改用 `persist_at(base, target, options)`。
+具体迁移示例见[用户指南](doc/user_guide.zh_CN.md#迁移到-04)。
+
 主机路径使用 `LocalFileSystem::host()`。当一个已打开目录就是权限边界时，
 使用 `LocalFileSystem::rooted(root)`。两种实例提供相同操作，只改变路径解释方式。Host
 绝对路径不会读取进程 PWD；Host 相对路径在操作开始时捕获一次进程 PWD，Rooted 相对路径
-使用实例的虚拟 PWD。`.` 与空路径表示对应的 PWD；`..` 会逐层规范化，只在试图越过
-namespace root 时被拒绝。在 Rooted 实例中，
+使用实例的虚拟 PWD。`.` 与空路径表示对应的 PWD；Rooted 对 `..` 进行词法折叠并拒绝
+越过虚拟 `/`，Host 则保留原生遍历顺序。在 Rooted 实例中，
 `/etc/hosts` 是已打开 root 下的虚拟绝对路径，而不是 Host 的 `/etc/hosts`；native prefix
 会被拒绝。
 
@@ -149,8 +156,8 @@ Linux、Windows 和 macOS 的行为会在运行时测试。FreeBSD 和 Android �
 
 ## 测试
 
-`Cargo.toml` 声明 `qubit-redact` Git 源，`Cargo.lock` 固定其 revision；
-`.cargo/config.toml` 仅包含仓库说明性注释。向 crates.io 发布时，仍需先将该依赖版本发布到 registry。
+`Cargo.toml` 使用 registry 依赖 `qubit-redact = "0.8"`，`Cargo.lock` 记录解析版本和校验和。
+下游契约脚本使用 `--locked` 检查同级 local-files、fs-local 和 mime 仓库。
 
 ```bash
 # 使用默认 feature 集运行测试
