@@ -13,6 +13,21 @@ use std::path::Path;
 use qubit_local_files::LocalFileSystem;
 use qubit_local_files::error::LocalFileErrorKind;
 
+/// Returned listing paths retain the requested spelling, including macOS's
+/// canonical /private/var prefix rather than an invented /var alias.
+#[test]
+fn test_host_listing_preserves_explicit_canonical_root_spelling() {
+    let fixture = tempfile::tempdir().expect("listing spelling fixture");
+    let root = fs::canonicalize(fixture.path()).expect("canonical fixture path");
+    fs::write(root.join("entry"), b"entry").expect("listing fixture entry");
+    let host = LocalFileSystem::host().expect("Host filesystem");
+    let mut walker = host.list(&root).expect("open explicit listing root");
+    assert_eq!(walker.root(), root);
+    let entry = walker.next().expect("one entry").expect("read entry");
+    assert_eq!(entry.path(), root.join("entry"));
+    assert!(walker.next().is_none());
+}
+
 /// Staging and installation accept the same long ordinary paths as std.
 #[cfg(windows)]
 #[test]

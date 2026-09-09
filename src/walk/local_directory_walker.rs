@@ -103,8 +103,6 @@ impl LocalDirectoryWalker {
         symlink_policy: LocalSymlinkPolicy,
         started_at: Instant,
     ) -> LocalResult<Self> {
-        #[cfg(target_os = "macos")]
-        let diagnostic_root = logical_macos_path(&diagnostic_root);
         validate_options(&diagnostic_root, &options)?;
         let deadline = walker_deadline(&diagnostic_root, &options, started_at)?;
         let metadata = match fs::symlink_metadata(&backend_root) {
@@ -497,17 +495,6 @@ impl LocalDirectoryWalker {
         }
         Err(error)
     }
-}
-
-/// Converts macOS's private temporary-directory spelling to its public form.
-///
-/// Paths outside `/private/var` are returned unchanged. The conversion is
-/// lexical and does not access the filesystem.
-#[cfg(target_os = "macos")]
-fn logical_macos_path(path: &Path) -> PathBuf {
-    let private_var = Path::new("/private/var");
-    path.strip_prefix(private_var)
-        .map_or_else(|_| path.to_path_buf(), |suffix| Path::new("/var").join(suffix))
 }
 
 impl LocalDirectoryWalker {
