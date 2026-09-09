@@ -26,6 +26,8 @@ jobs:
       fail-fast: false
       matrix:
         os: [ubuntu-latest, windows-latest, macos-latest]
+    outputs:
+      pages_enabled: ${{ steps.pages.outputs.enabled }}
     defaults:
       run:
         shell: bash
@@ -89,7 +91,13 @@ jobs:
           source .rs-ci/toolchains.sh
           configure_rs_ci_toolchains
           cargo +"$RS_CI_CLIPPY_TOOLCHAIN" clippy --locked --all-targets --all-features -- -D warnings
-          cargo test --locked --no-default-features --no-fail-fast
+          if [ "$PROJECT" = rs-magika ]; then
+            # Without bundled ONNX, consumers must supply a native runtime.
+            cargo check --locked --no-default-features --all-targets
+            cargo test --locked --no-fail-fast
+          else
+            cargo test --locked --no-default-features --no-fail-fast
+          fi
           cargo test --locked --all-features --no-fail-fast
       - name: Run configured macOS sanitizer and Miri checks
         if: runner.os == 'macOS'
@@ -138,18 +146,32 @@ jobs:
         run: |
           COVERAGE_JSON=target/llvm-cov/coverage.json COVERAGE_HTML_DIR=target/llvm-cov/html \
             RS_CI_PAGES_OUTPUT=public node .rs-ci/page/build-pages.mjs
-      - name: Configure Pages
+      - name: Check existing Pages configuration
+        id: pages
         if: success() && runner.os == 'Linux' && github.event_name == 'push' && github.ref == 'refs/heads/main'
+        uses: actions/github-script@v8
+        with:
+          script: |
+            try {
+              await github.rest.repos.getPages(context.repo);
+              core.setOutput('enabled', 'true');
+            } catch (error) {
+              if (error.status !== 404) throw error;
+              core.notice('Pages is not configured; verification artifacts remain available.');
+              core.setOutput('enabled', 'false');
+            }
+      - name: Configure Pages
+        if: steps.pages.outputs.enabled == 'true'
         uses: actions/configure-pages@v6
       - name: Upload Pages artifact
-        if: success() && runner.os == 'Linux' && github.event_name == 'push' && github.ref == 'refs/heads/main'
+        if: steps.pages.outputs.enabled == 'true'
         uses: actions/upload-pages-artifact@v5
         with:
           path: ci-root/${{ inputs.repository }}/public
 
   deploy-pages:
     needs: checks
-    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main' && needs.checks.outputs.pages_enabled == 'true'
     runs-on: ubuntu-latest
     environment:
       name: github-pages
