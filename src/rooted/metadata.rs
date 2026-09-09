@@ -301,22 +301,29 @@ where
 /// # Returns
 ///
 /// `Some` for a representable timestamp, including times before the epoch.
+/// Apple pre-epoch values also accept signed negative fractions, matching std.
 /// Returns `None` for invalid fractions or platform time-range overflow.
 #[cfg(unix)]
 #[cfg_attr(not(coverage), inline)]
 #[cfg_attr(coverage, inline(never))]
 fn system_time<N>(seconds: libc::time_t, nanoseconds: N) -> Option<SystemTime>
 where
-    N: TryInto<u64>,
+    N: TryInto<i128>,
 {
     const NANOS_PER_SECOND: i128 = 1_000_000_000;
     let nanoseconds = nanoseconds.try_into().ok()?;
-    if nanoseconds >= NANOS_PER_SECOND as u64 {
+    // Apple may return a signed fraction for pre-epoch filesystem times.
+    // Match std's accepted range without relaxing other Unix stat contracts.
+    #[cfg(target_vendor = "apple")]
+    let signed_fraction = seconds <= 0 && seconds > libc::time_t::MIN && (-NANOS_PER_SECOND..0).contains(&nanoseconds);
+    #[cfg(not(target_vendor = "apple"))]
+    let signed_fraction = false;
+    if !(0..NANOS_PER_SECOND).contains(&nanoseconds) && !signed_fraction {
         return None;
     }
     let total = i128::from(seconds)
         .checked_mul(NANOS_PER_SECOND)?
-        .checked_add(i128::from(nanoseconds))?;
+        .checked_add(nanoseconds)?;
     let magnitude = total.checked_abs()?;
     let duration = Duration::new(
         u64::try_from(magnitude / NANOS_PER_SECOND).ok()?,
@@ -404,9 +411,28 @@ mod tests {
     /// saturating them.
     #[test]
     fn test_system_time_invalid_fraction() {
+        #[cfg(not(target_vendor = "apple"))]
         assert_eq!(system_time(0, -1), None);
         assert_eq!(system_time(0, 1_000_000_000), None);
         assert_eq!(system_time(0, u64::MAX), None);
+    }
+
+    /// Apple pre-epoch stat fractions match std's signed timespec convention.
+    #[cfg(target_vendor = "apple")]
+    #[test]
+    fn test_system_time_apple_negative_fraction() {
+        assert_eq!(
+            system_time(0, -500_000_000),
+            UNIX_EPOCH.checked_sub(Duration::from_millis(500))
+        );
+        assert_eq!(
+            system_time(-1, -500_000_000),
+            UNIX_EPOCH.checked_sub(Duration::from_millis(1500))
+        );
+        assert_eq!(system_time(0, -1), UNIX_EPOCH.checked_sub(Duration::from_nanos(1)));
+        assert_eq!(system_time(1, -1), None);
+        assert_eq!(system_time(0, -1_000_000_000), None);
+        assert_eq!(system_time(libc::time_t::MIN, -1), None);
     }
 
     /// Delegates platform range bounds to checked SystemTime arithmetic.
