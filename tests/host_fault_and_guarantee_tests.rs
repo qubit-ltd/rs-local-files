@@ -612,8 +612,8 @@ fn test_copy_and_rename_report_injected_parent_sync_failures() {
     }
 }
 
-/// Verifies required copy durability synchronizes the staging handle before
-/// publication, leaving an existing destination unchanged on sync failure.
+/// Required durability fails before publication when unsupported or when
+/// staging synchronization fails, leaving the existing destination unchanged.
 #[cfg(feature = "test-support")]
 #[test]
 fn test_copy_required_durability_syncs_staging_before_publication() {
@@ -636,6 +636,12 @@ fn test_copy_required_durability_syncs_staging_before_publication() {
             )
             .expect_err("staging synchronization failure must stop publication");
 
+        #[cfg(windows)]
+        {
+            assert_eq!(LocalFileErrorKind::RequirementNotMet, failure.error().kind());
+            assert_eq!(LocalCopyFailureState::Unchanged, failure.state());
+        }
+        #[cfg(not(windows))]
         assert_eq!(LocalCopyFailureState::Indeterminate, failure.state());
         assert_eq!(b"old", fs::read(&target).expect("target should remain").as_slice(),);
     });
