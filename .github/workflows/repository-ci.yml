@@ -70,7 +70,14 @@ jobs:
         if: runner.os == 'Linux'
         uses: taiki-e/install-action@v2
         with:
-          tool: cargo-llvm-cov@0.8.6,cargo-fuzz@0.13.2,cargo-audit
+          tool: cargo-llvm-cov@0.8.6,cargo-audit
+      - name: Build cargo-fuzz for the runner host
+        if: runner.os == 'Linux'
+        working-directory: ci-root/${{ inputs.repository }}
+        run: |
+          source .rs-ci/toolchains.sh
+          configure_rs_ci_toolchains
+          cargo +"$RS_CI_BUILD_TOOLCHAIN" install cargo-fuzz --locked --force --version "$CARGO_FUZZ_VERSION"
       - name: Run complete repository CI
         if: runner.os == 'Linux'
         working-directory: ci-root/${{ inputs.repository }}
