@@ -40,6 +40,22 @@ pub struct LocalListOptions {
 }
 
 impl LocalListOptions {
+    /// Tightens only resource limits against `ceilings`, preserving this
+    /// request's operation behavior.
+    ///
+    /// `None` means unbounded; finite limits use the smaller value, including
+    /// zero. This performs no I/O or validation and does not restart deadlines.
+    /// Invalid limits are rejected when the resulting options are used.
+    pub fn tighten_resource_limits(mut self, ceilings: &Self) -> Self {
+        use super::resource_limits::tighter;
+        self.max_depth = tighter(self.max_depth, ceilings.max_depth);
+        self.max_entries = tighter(self.max_entries, ceilings.max_entries);
+        self.max_open_directories = tighter(self.max_open_directories, ceilings.max_open_directories);
+        self.max_seen_name_bytes = tighter(self.max_seen_name_bytes, ceilings.max_seen_name_bytes);
+        self.deadline = tighter(self.deadline, ceilings.deadline);
+        self
+    }
+
     /// Creates a non-recursive listing policy that inherits the filesystem's
     /// symbolic-link policy.
     // qubit-style: allow coverage-cfg

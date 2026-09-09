@@ -63,6 +63,22 @@ pub struct LocalCopyOptions {
 }
 
 impl LocalCopyOptions {
+    /// Tightens only resource limits against `ceilings`, preserving this
+    /// request's operation behavior.
+    ///
+    /// `None` means unbounded; finite limits use the smaller value, including
+    /// zero. This performs no I/O or validation and does not restart deadlines.
+    /// Invalid limits are rejected when the resulting options are used.
+    pub fn tighten_resource_limits(mut self, ceilings: &Self) -> Self {
+        use super::resource_limits::tighter;
+        self.max_depth = tighter(self.max_depth, ceilings.max_depth);
+        self.max_entries = tighter(self.max_entries, ceilings.max_entries);
+        self.max_bytes = tighter(self.max_bytes, ceilings.max_bytes);
+        self.max_open_directories = tighter(self.max_open_directories, ceilings.max_open_directories);
+        self.deadline = tighter(self.deadline, ceilings.deadline);
+        self
+    }
+
     /// Creates copy options that inherit the owning filesystem's
     /// symbolic-link policy.
     pub const fn new() -> Self {
