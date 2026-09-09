@@ -189,20 +189,7 @@ impl HostLocalFileSystem {
     ) -> LocalResult<LocalDirectoryWalker> {
         let policy = options.symlink_policy().unwrap_or(symlink_policy);
         let bound = resolve_host_path(path, policy, true)?;
-        #[cfg(windows)]
         let diagnostic = path.to_path_buf();
-        #[cfg(not(windows))]
-        let diagnostic = path.to_path_buf();
-        #[cfg(target_os = "macos")]
-        let diagnostic = logical_macos_path(&diagnostic);
         LocalDirectoryWalker::open_with_diagnostic(bound, diagnostic, *options, policy, started_at)
     }
-}
-
-/// Restores the stable `/var` spelling used by macOS Host callers.
-#[cfg(target_os = "macos")]
-fn logical_macos_path(path: &Path) -> std::path::PathBuf {
-    let private_var = Path::new("/private/var");
-    path.strip_prefix(private_var)
-        .map_or_else(|_| path.to_path_buf(), |suffix| Path::new("/var").join(suffix))
 }
