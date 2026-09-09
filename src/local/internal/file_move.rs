@@ -9,10 +9,9 @@
 // qubit-style: allow source-test-pair
 // Private behavior is covered through public integration tests.
 //!
-//! Windows paths are passed to native APIs as their existing UTF-16 spelling
-//! plus a terminating NUL. This module rejects interior NULs, but does not add
-//! a verbatim-path prefix, convert relative paths to absolute paths, or
-//! otherwise change platform path-length and path-resolution semantics.
+//! Windows paths reject interior NULs and retain explicit verbatim spelling.
+//! Ordinary long paths receive native absolute normalization and an extended
+//! prefix before direct Win32 calls, matching std filesystem path handling.
 
 #[cfg(any(target_os = "linux", target_os = "macos"))]
 use std::ffi::CString;
@@ -516,10 +515,13 @@ pub(crate) fn parent_dir_for(path: &Path) -> &Path {
 /// - `path`: Path to convert.
 ///
 /// # Returns
-/// Null-terminated UTF-16 path buffer.
+/// Null-terminated UTF-16 path buffer, with an extended prefix when needed to
+/// avoid legacy Win32 path-length limits. Explicit verbatim paths are
+/// unchanged.
 ///
 /// # Errors
-/// Returns [`ErrorKind::InvalidInput`] when `path` contains an interior NUL.
+/// Returns [`ErrorKind::InvalidInput`] when `path` contains an interior NUL,
+/// or a native error if an ordinary path cannot be made absolute.
 #[cfg(windows)]
 #[cfg_attr(not(coverage), inline)]
 #[cfg_attr(coverage, inline(never))]
@@ -531,5 +533,35 @@ pub(super) fn wide_path(path: &Path) -> Result<Vec<u16>> {
             format!("path contains an interior NUL: {}", path.display()),
         ));
     }
-    Ok(units.into_iter().chain(Some(0)).collect())
+    let verbatim: Vec<u16> = "\\\\?\\".encode_utf16().collect();
+    let nt: Vec<u16> = "\\??\\".encode_utf16().collect();
+    if units.is_empty()
+        || units.starts_with(&verbatim)
+        || units.starts_with(&nt)
+        || (path.is_absolute() && units.len() + 1 < 248)
+    {
+        return Ok(units.into_iter().chain(Some(0)).collect());
+    }
+    let absolute = std::path::absolute(path)?;
+    let absolute: Vec<u16> = absolute.as_os_str().encode_wide().collect();
+    let mut result = Vec::new();
+    let mut tail = absolute.as_slice();
+    if absolute.len() + 1 >= 248 {
+        match tail {
+            [_, 58, 92, ..] => result.extend_from_slice(&verbatim),
+            [92, 92, 46, 92, ..] => {
+                result.extend_from_slice(&verbatim);
+                tail = &tail[4..];
+            }
+            [92, 92, 63, 92, ..] | [92, 63, 63, 92, ..] => {}
+            [92, 92, ..] => {
+                result.extend("\\\\?\\UNC\\".encode_utf16());
+                tail = &tail[2..];
+            }
+            _ => {}
+        }
+    }
+    result.extend_from_slice(tail);
+    result.push(0);
+    Ok(result)
 }
