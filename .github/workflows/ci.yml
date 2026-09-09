@@ -119,3 +119,14 @@ jobs:
         env:
           RUSTFLAGS: -D warnings
         run: cargo +1.94 check --locked --manifest-path fuzz/Cargo.toml --bins
+
+  downstream-contracts:
+    name: Coordinated downstream contracts
+    permissions:
+      contents: read
+    uses: ./.github/workflows/downstream-contracts.yml
+    with:
+      local_files_ref: ${{ github.event.pull_request.head.sha || github.sha }}
+      fs_local_ref: main
+      mime_ref: main
+      support_ref: main
