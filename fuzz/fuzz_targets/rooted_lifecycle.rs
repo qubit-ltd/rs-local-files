@@ -120,7 +120,7 @@ fuzz_target!(|data: &[u8]| {
                 match resource.persist_at(base, target, LocalPersistOptions::new()) {
                     Ok(outcome) => {
                         assert!(valid);
-                        filesystem
+                        let _ = filesystem
                             .delete_file(outcome.path())
                             .expect("remove published fuzz file");
                     }
@@ -143,7 +143,7 @@ fuzz_target!(|data: &[u8]| {
                 match resource.persist_at(base, target, LocalPersistOptions::new()) {
                     Ok(outcome) => {
                         assert!(valid);
-                        filesystem
+                        let _ = filesystem
                             .delete_directory(outcome.path())
                             .expect("remove published fuzz directory");
                     }
