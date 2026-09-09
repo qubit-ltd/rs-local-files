@@ -40,7 +40,13 @@ impl HostLocalFileSystem {
     /// forbidden intermediate-link traversal, or native metadata errors.
     pub fn metadata_with_policy(path: &Path, symlink_policy: LocalSymlinkPolicy) -> LocalResult<LocalFileMetadata> {
         let bound = bind_host_path(path)?;
-        let resolved = resolve_host_path(&bound, symlink_policy, false)?;
+        let resolved = if symlink_policy == LocalSymlinkPolicy::FollowAcrossScope {
+            bound.clone()
+        } else {
+            resolve_host_path(&bound, symlink_policy, false)?
+        };
+        #[cfg(feature = "test-support")]
+        crate::test_support::record_host_metadata_query();
         fs::symlink_metadata(&resolved)
             .map(|metadata| LocalFileMetadata::from_native(&metadata))
             .map_err(|source| LocalFileError::from_io(LocalFileOperation::Metadata, Some(bound), None, source))
