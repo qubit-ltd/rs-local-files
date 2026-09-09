@@ -865,9 +865,12 @@ only while ownership is proven; an indeterminate resource is never automatically
 removed. Creation validates names before I/O, stores creation-time PWD when
 needed, and creates a per-resource private sandbox. `keep(self)` installs a
 generated sibling and reports sandbox cleanup; `close` closes file I/O without
-giving up ownership; `cleanup` has an explicit repeat-call contract. Persist
-uses the creation-time PWD for a relative target, retains a typed stage and
-`NotPublished` or `Indeterminate` result, and never targets Rooted `/`.
+giving up ownership; `cleanup` has an explicit repeat-call contract. `persist`
+and `persist_with` accept only namespace-absolute targets; relative targets
+require `persist_at(base, target, options)`. The creating PWD is diagnostic
+context only and never selects a new publication target. Persist retains a
+typed stage and `NotPublished` or `Indeterminate` result, and never targets
+Rooted `/`.
 `child(component)` accepts one normal component; `descendant(path)` remains
 beneath the temporary directory. Identity checks reject ordinary replacement
 before deletion or publication, but identity checking and deletion cannot be

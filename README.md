@@ -79,6 +79,12 @@ provider registration, application authorization, or async I/O.
 Readers and writers accept regular files only; directories and special files
 are rejected instead of being opened as byte streams.
 
+Permission observations describe native entry metadata, not the caller's
+effective access after ACLs, mount policy, or other operating-system checks.
+On Unix, `unix_mode()` preserves the observed permission and special bits; on
+Windows it returns `None`. `metadata()` and listing inspect the final link
+entry, while a reader reports metadata from its opened content handle.
+
 `LocalFileSystem` is a stateful instance API. Rooted instances own a virtual
 current directory; Host instances read the process current directory only when
 an operation needs to bind a relative path. Each instance also owns its
