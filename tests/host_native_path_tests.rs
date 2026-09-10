@@ -241,33 +241,6 @@ fn test_host_parent_does_not_hide_dangling_or_looping_links() {
     }
 }
 
-/// Namespace binding preserves native bytes instead of collecting components.
-#[cfg(unix)]
-#[test]
-fn test_host_binding_preserves_raw_spelling_and_non_utf8() {
-    use std::ffi::OsStr;
-    use std::os::unix::ffi::OsStrExt;
-
-    use qubit_local_files::path::LocalFileSystemScope;
-    use qubit_local_files::path::LocalPathResolver;
-    let resolver = LocalPathResolver::new(LocalFileSystemScope::Host, Path::new("/base")).expect("resolver");
-    let input = Path::new(OsStr::from_bytes(b"raw/./\xff/../leaf/"));
-    let bound = resolver.resolve(input).expect("raw relative binding");
-    assert_eq!(
-        bound.authority_relative().as_os_str().as_bytes(),
-        b"/base/raw/./\xff/../leaf/"
-    );
-    let absolute = Path::new(OsStr::from_bytes(b"/raw/./\xff/../leaf/"));
-    assert_eq!(
-        resolver
-            .resolve(absolute)
-            .expect("absolute binding")
-            .authority_relative()
-            .as_os_str(),
-        absolute.as_os_str()
-    );
-}
-
 /// Every mutating entry operation follows a symlink before its parent operand.
 #[cfg(unix)]
 #[test]
@@ -359,35 +332,6 @@ fn test_host_mutations_use_native_parent_target() {
         );
         assert!(!dir.path().join("a/output").exists());
     }
-}
-
-/// Windows drive binding preserves raw dot components and rejects
-/// drive-relative operands.
-#[cfg(windows)]
-#[test]
-fn test_host_windows_drive_binding() {
-    use qubit_local_files::path::LocalFileSystemScope;
-    use qubit_local_files::path::LocalPathResolver;
-    let resolver = LocalPathResolver::new(LocalFileSystemScope::Host, Path::new(r"C:\base")).expect("drive resolver");
-    assert_eq!(
-        resolver
-            .resolve(Path::new(r"\dir\..\file"))
-            .expect("root relative")
-            .authority_relative()
-            .as_os_str(),
-        Path::new(r"C:\dir\..\file").as_os_str()
-    );
-    assert!(resolver.resolve(Path::new("C:file")).is_err());
-    let verbatim =
-        LocalPathResolver::new(LocalFileSystemScope::Host, Path::new(r"\\?\C:\base")).expect("verbatim resolver");
-    assert_eq!(
-        verbatim
-            .resolve(Path::new(r"dir\..\file"))
-            .expect("verbatim relative")
-            .authority_relative()
-            .as_os_str(),
-        Path::new(r"\\?\C:\base\dir\..\file").as_os_str()
-    );
 }
 
 /// Windows link/parent reads use the native oracle for ordinary and verbatim

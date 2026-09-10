@@ -22,7 +22,7 @@ use crate::LocalResult;
 
 /// Resolves operation inputs against one normalized filesystem PWD snapshot.
 #[derive(Clone, Debug, Eq, PartialEq)]
-pub struct LocalPathResolver {
+pub(crate) struct LocalPathResolver {
     /// Namespace whose anchoring rules are applied to operation paths.
     scope: LocalFileSystemScope,
     /// Namespace-absolute PWD snapshot supplied at construction.
@@ -41,7 +41,7 @@ impl LocalPathResolver {
     /// namespace root, parent components, or a native prefix in Rooted scope.
     /// Interior dot components normalized away by `Path::components` are
     /// accepted; the exposed PWD snapshot retains the supplied spelling.
-    pub fn new(scope: LocalFileSystemScope, current_directory: &Path) -> LocalResult<Self> {
+    pub(crate) fn new(scope: LocalFileSystemScope, current_directory: &Path) -> LocalResult<Self> {
         reject_native_nul(current_directory)?;
         let (current_prefix, current_components) = parse_current_directory(scope, current_directory)?;
         Ok(Self {
@@ -57,7 +57,7 @@ impl LocalPathResolver {
     // qubit-style: allow coverage-cfg
     #[cfg_attr(not(coverage), inline(always))]
     #[cfg_attr(coverage, inline(never))]
-    pub fn current_directory(&self) -> Option<&Path> {
+    pub(crate) fn current_directory(&self) -> Option<&Path> {
         self.current_directory.as_deref()
     }
 
@@ -83,7 +83,7 @@ impl LocalPathResolver {
     /// traversal above the namespace root, Rooted native prefixes, or
     /// ambiguous Host drive-relative paths. A relative Host path without a
     /// PWD snapshot returns `InvalidState`.
-    pub fn resolve(&self, path: &Path) -> LocalResult<LocalNamespacePath> {
+    pub(crate) fn resolve(&self, path: &Path) -> LocalResult<LocalNamespacePath> {
         reject_native_nul(path)?;
         if self.current_directory.is_none() && !path.is_absolute() {
             return Err(

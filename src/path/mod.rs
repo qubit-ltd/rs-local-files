@@ -15,9 +15,9 @@ mod local_path_resolver;
 mod local_paths;
 
 pub use local_file_names::LocalFileNames;
-pub use local_namespace_path::LocalNamespacePath;
+pub(crate) use local_namespace_path::LocalNamespacePath;
 pub use local_path_codec::LocalPathCodec;
-pub use local_path_resolver::LocalPathResolver;
+pub(crate) use local_path_resolver::LocalPathResolver;
 pub use local_paths::LocalPaths;
 
 pub use crate::local_file_system_scope::LocalFileSystemScope;

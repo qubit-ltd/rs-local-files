@@ -19,11 +19,15 @@
 //! utilities, while readers, writers, walkers, and temporary resources retain
 //! explicit ownership and lifecycle state.
 //!
-//! The former crate-root Host convenience functions were removed. Use
-//! [`LocalFileSystem::host`] and its instance methods instead.
+//! Namespace binding is an internal operation; callers pass native
+//! [`std::path::Path`] values to [`LocalFileSystem`] methods.
 //!
 //! ```compile_fail
-//! use qubit_local_files::open_writer;
+//! use qubit_local_files::path::LocalNamespacePath;
+//! ```
+//!
+//! ```compile_fail
+//! use qubit_local_files::path::LocalPathResolver;
 //! ```
 //!
 //! Domain value types are available from their stable modules rather than the
