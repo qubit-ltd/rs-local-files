@@ -50,7 +50,7 @@ jobs:
       - name: Validate candidate and prepare dependencies
         run: |
           case "$PROJECT" in
-            rs-fs-local|rs-mime|rs-magika|rs-fs|rs-fs-registry) ;;
+            rs-fs-local|rs-mime|rs-magika|rs-fs|rs-fs-registry|rs-fs-testkit) ;;
             *) echo "Unsupported candidate repository" >&2; exit 1 ;;
           esac
           python ci-root/rs-local-files/scripts/prepare_downstream_sources.py \
