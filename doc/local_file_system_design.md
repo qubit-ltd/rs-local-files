@@ -157,6 +157,15 @@ capability snapshot, objective filesystem limits, and shared platform resource
 state. Caller budgets, options, PWD, and business authorization remain outside
 that core.
 
+The conceptual split is also an ownership rule. A clone may share the immutable
+authority and capability snapshot, but it receives its own PWD, link policy, and
+nine default option values. A Rooted instance must not retain a second root
+handle for a different operation path, and a Host instance must remain usable
+for absolute paths when the process PWD cannot temporarily be read. The
+constructor path of a Rooted instance is retained only as a diagnostic hint;
+reopening that path after a rename or replacement would violate the authority
+contract.
+
 ## 6. `LocalFileSystem` Public API
 
 The public state-and-fact API consists of `scope`, `current_directory`,
@@ -174,6 +183,14 @@ not pre-read or pre-validate PWD. Rooted first resolves and validates a director
 under its authority, then atomically replaces its virtual PWD. A failed setter,
 including an unsupported `FollowAcrossScope` policy, leaves the prior state
 unchanged.
+
+The state-and-capability queries are intentionally independent: `scope()` and
+`symlink_policy()` are infallible, while PWD, path-dependent limits, and space
+remain fallible observations. `diagnostic_root()` is never an access path.
+Each default has exactly one getter and setter; setters replace the complete
+value after validation and do not merge with a previous value. Operation
+methods repeat validation because an explicit options value and runtime path
+facts may differ from the instance defaults.
 
 ## 7. Options and Defaults
 
@@ -277,6 +294,13 @@ operand, or persistence target; violations are `InvalidPath`. Host preserves
 native drive and prefix semantics, rejects drive-relative forms such
 as `C:foo`, and does not support UNC paths in Windows Host conversion. Device
 namespace support requires a complete implemented authority contract.
+
+The resolver preserves native component bytes/code units and directory intent.
+Trailing separators, a trailing `.`, and equivalent native directory forms are
+checked after lexical normalization, so `missing/` cannot silently become a
+regular-file target. For two-path operations, source and destination are bound
+from one PWD snapshot; a lexical failure is returned before any parent creation
+or other namespace mutation and is reported as `Unchanged`.
 
 ## 9. Symbolic Links and Reparse Points
 
@@ -404,6 +428,12 @@ readers lazily. A bounded copy may inspect one child ahead while retaining the
 reader permit, does not promise entry ordering, and never turns the native
 directory buffer into an application entry budget.
 
+The root entry is charged once at depth zero. Continuation mode yields the
+current error and continues only branches whose authority and frame state are
+still valid; it does not rescan indefinitely after concurrent additions or
+deletions. A walker captures its policy and authority at `list()` creation,
+and its deadline starts there rather than at the first `next()` call.
+
 ## 16. Copy
 
 Copy auto-detects or validates file/tree source mode. Preflight rejects aliases,
@@ -460,6 +490,14 @@ Failure retains requested and failing operands, partial statistics, and staging
 context only when cleanup failed. Preflight includes destination-inside-source.
 Copy never mutates its source or silently downgrades required semantics.
 
+Statistics are portable across scopes: `files` counts copied regular files and
+links, `directories` counts newly created directories, and `bytes` counts
+regular-file payload bytes. `overwritten` includes replaced entries and
+existing directories merged under `Overwrite`, including the copy root; a
+`Skip` merge of a same-kind directory is not an overwrite. Failure retains both
+requested operands, the failing namespace path, partial statistics, and staging
+context only when cleanup itself failed.
+
 ## 17. Create, Delete, and Rename
 
 Recursive create and delete are likewise non-transactional. If they have already
@@ -487,6 +525,14 @@ turns a missing requested root into `deleted = false`; a missing child or any ot
 failure remains an error. Rooted `/` remains invalid. These checks are no-follow observations and
 do not claim atomicity against an untrusted concurrent renamer.
 
+Recursive create and delete are deliberately non-transactional. The root is
+charged as one entry at depth zero, children are charged before queueing, and
+pending-path bytes cover native encoded paths held by the scheduler (not
+allocator overhead or in-flight directory buffers). `missing_ok` applies only
+to a missing requested root; a missing child remains an error. A durability
+failure after a successful namespace rename is reported as `Renamed` with an
+incomplete-publication error, never as `Unchanged`.
+
 ## 18. Temporary Resources
 
 ### 18.1 Ownership and publication are separate
@@ -506,6 +552,12 @@ eligibility:
 publication is `NotPublished`, `Published`, or `Indeterminate`. It never implies
 source eligibility on its own. A source state is passed explicitly into each
 error; stage and `io::ErrorKind` must not be used to reconstruct ownership.
+
+`close()` on a temporary file closes only its content handle; it does not alter
+source eligibility. `keep()` follows the same publication protocol as persist
+but generates a sibling target outside the private sandbox. Drop is a silent,
+best-effort cleanup attempt only for responsibility still proven by the source
+state and must never delete an `Indeterminate` source.
 
 ### 18.2 Creation and paths
 
@@ -663,6 +715,11 @@ sandbox-only retry. Concurrent additions can yield DirectoryNotEmpty; the
 scheduler returns failure rather than rescanning forever. Enumeration, native,
 and budget failures preserve their original cause and exact failing path.
 
+The cleanup deadline is a fresh monotonic interval for each explicit cleanup
+or Drop attempt. It is checked before sandbox release and is never restarted
+for that release. Sandbox release is accounted separately from source-tree
+entries and never changes the source publication state.
+
 ## 19. Structured Errors
 
 `LocalFileError` stably exposes its kind, public operation, primary/target paths,
@@ -710,6 +767,10 @@ precondition; `Preferred` permits a typed non-atomic/non-durable outcome;
 `NotRequired` avoids extra synchronization. Runtime facts that vary by path are
 probed against the selected authority and path. Callers must combine the
 capability snapshot with the typed outcome of the actual operation.
+
+The deprecated `supports_atomic_temp_persist()` spelling is retained only as a
+source-compatibility alias for `can_attempt_atomic_temp_persist()`; neither
+method promises that arbitrary source and target paths share a filesystem.
 
 ## 21. Clone, Concurrency, and Threads
 
