@@ -148,7 +148,7 @@ when publication should use staging metadata. Both policies retain destination
 identity checks. List/copy/delete options expose `tighten_resource_limits`
 without overwriting operation behavior. Temporary `persist`/`persist_with`
 require namespace-absolute targets; use `persist_at(base, target, options)` for
-an explicit relative target. See the [0.5 migration checklist](doc/user_guide.md#migration-to-05) for the state and decomposition changes.
+an explicit relative target.
 
 Use `LocalFileSystem::host()` for host paths. Use
 `LocalFileSystem::rooted(root)` when one opened directory is the authority
@@ -205,11 +205,6 @@ component limits are queried from the selected filesystem handle. Windows Host
 path conversion intentionally does not support UNC paths.
 
 ## Learn More
-
-Configuration validation rejects impossible guarantees before filesystem I/O,
-and copy failures distinguish unchanged, partially published, published, and
-indeterminate destinations. See the user guide for the complete error and
-cleanup contract.
 
 - [User guide](doc/user_guide.md)
 - [用户手册](doc/user_guide.zh_CN.md)

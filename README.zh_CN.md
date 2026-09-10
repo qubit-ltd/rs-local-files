@@ -120,8 +120,7 @@ Host 按原生顺序解释 `.`、`..` 和符号链接；Rooted 使用虚拟路�
 替换写入默认采用 `LocalWriteMetadataPolicy::PreserveExisting`，需要发布 staging 自身的
 元数据时显式选择 `UseStaging`；两种策略都保留目标身份检查。list/copy/delete 的
 `tighten_resource_limits` 只收紧资源限制，不覆盖操作行为。临时资源的 `persist` 和
-`persist_with` 只接受命名空间绝对目标，相对目标改用 `persist_at(base, target, options)`。
-0.5 的状态和拆解接口迁移见[用户指南](doc/user_guide.zh_CN.md#迁移到-05)。
+`persist_with` 只接受命名空间绝对目标，相对目标使用 `persist_at(base, target, options)`。
 
 主机路径使用 `LocalFileSystem::host()`。当一个已打开目录就是权限边界时，
 使用 `LocalFileSystem::rooted(root)`。两种实例提供相同操作，只改变路径解释方式。Host

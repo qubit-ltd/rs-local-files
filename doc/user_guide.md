@@ -264,8 +264,7 @@ requires an actual directory. `with_source_mode(LocalCopySourceMode::Auto)`
 explicitly resets either selection. Source-kind rejection happens before
 creating target parents or changing the destination. Directory-qualified path
 syntax is validated separately and can report `NotDirectory` before dispatch.
-The removed `File` variant and `with_file_source()` method have no compatibility
-aliases. A final source link is never dereferenced by mode selection. Directory
+A final source link is never dereferenced by mode selection. Directory
 links encountered inside a tree still follow the effective traversal policy;
 mode selection does not change intermediate-link or tree-traversal semantics.
 
@@ -472,34 +471,7 @@ construct paths without I/O; they do not grant Rooted authority or validate
 on-disk symlink targets. These stricter rules are separate from ordinary Rooted
 path normalization and ordinary Host native traversal.
 
-## Migration to 0.5
-
-- Update `qubit-local-files` to `0.5`; coordinated facade consumers use
-  `qubit-fs` `0.7` with the matching `qubit-fs-local` dependency closure. Native
-  local-files remains independent of `qubit-fs`.
-- Replace tuple destructuring of `LocalPersistError::into_parts()` with named
-  `LocalPersistErrorParts<T>` fields. `into_parts_with_state` was removed;
-  preserve both publication and source snapshots when adapting errors.
-- Branch on both `state()` and `source_state()`. After `resource_mut()` or
-  decomposition, query the resource for current eligibility. Do not infer
-  source ownership from `NotPublished`, stage, or `io::ErrorKind::InvalidInput`.
-- Handle `Published` by keeping the destination and cleaning only the retained
-  sandbox. Preserve earlier `publication_target` across rejected retries and
-  cleanup in synchronous file/directory and asynchronous file facades.
-- Portable `PersistFailureState` adds `NotPublishedSourceIndeterminate`,
-  `PublishedSourceIndeterminate`, and `NotPublishedSourceCleanupRequired`.
-  Source uncertainty must not erase a proven target effect; see the
-  [adapter mapping](local_file_system_design.md#23-contract-with-qubit-fs-local).
-- Set cleanup limits on the temporary directory itself so Drop retains them.
-  There is no one-shot `cleanup_with_options` fallback with different limits.
-- Remove literal dot components before calling strict `descendant` only when
-  the application intentionally changes its input contract. The library does
-  not normalize them on the caller's behalf.
-
-The [0.4 migration notes](#migration-to-04) below still apply to Host paths,
-metadata policy, explicit targets, and general operation limits.
-
-## Migration to 0.4
+## Host paths, replacement metadata, and resource limits
 
 ### Bind Host paths without lexical folding
 
@@ -572,8 +544,8 @@ per-operation limits, not aggregate quotas across concurrent requests.
 
 ### Publish a temporary resource against an explicit base
 
-Both temporary guard types now accept only namespace-absolute targets in
-`persist` and `persist_with`. Replace relative calls with `persist_at`:
+Both temporary guard types accept only namespace-absolute targets in
+`persist` and `persist_with`. Use `persist_at` for a relative target:
 
 ```rust,no_run
 use std::io::Write;
@@ -829,14 +801,11 @@ cargo bench --locked --bench local_files --no-run
 cargo bench --locked --bench local_files -- deep_metadata
 
 # Measure new/replacement writers and wide/deep temporary-directory cleanup
-cargo bench --locked --bench local_files -- '^(writer_scenarios|temp_directory_cleanup)/' --sample-size 20 --warm-up-time 1 --measurement-time 2 --save-baseline after
-
-# Run the complete harness and retain a named baseline
-cargo bench --locked --bench local_files -- --save-baseline local-files-05
+cargo bench --locked --bench local_files -- '^(writer_scenarios|temp_directory_cleanup)/' --sample-size 20 --warm-up-time 1 --measurement-time 2
 ```
 
-Before/after comparisons require the same benchmark harness, machine,
-filesystem, toolchain, and build profile. Record Host/Rooted, new/existing
+Benchmark comparisons require the same benchmark harness, machine, filesystem,
+toolchain, and build profile. Record Host/Rooted, new/existing
 target, metadata policy, durability, and payload for writer measurements, plus
 wide/deep trees with unbounded/explicit limits for cleanup. Fixture creation
 and final scratch-parent disposal belong outside measurement. Unsupported
@@ -846,10 +815,7 @@ wall-clock gates or evidence of an improvement before measurement. Cleanup work
 and queued-path memory depend on the directory tree.
 
 Writer IDs use `writer_scenarios/{scope}/{target}/{metadata}/{durability}/{size}`;
-cleanup IDs use `temp_directory_cleanup/{scope}/{shape}/{limits}`. For an older
-revision, run the same harness and sampling parameters with `--save-baseline before`.
-Compare only IDs supported by both revisions; the new `bounded_sufficient`
-cleanup cases have no baseline on revisions without cleanup limits.
+cleanup IDs use `temp_directory_cleanup/{scope}/{shape}/{limits}`.
 
 ## Further Reading
 
