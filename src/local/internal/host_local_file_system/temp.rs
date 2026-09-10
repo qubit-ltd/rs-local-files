@@ -154,7 +154,7 @@ impl HostLocalFileSystem {
             options.max_attempts(),
         );
         let result = match created {
-            Ok(path) => LocalTempDirectory::host(path, sandbox.clone(), symlink_policy),
+            Ok(path) => LocalTempDirectory::host(path, sandbox.clone(), symlink_policy, options.cleanup_limits()),
             Err(error) => {
                 let _ = std::fs::remove_dir_all(&sandbox);
                 Err(error)

@@ -434,7 +434,7 @@ impl Root {
             if local::test_support_enabled("rooted-copy-remove-file-native") {
                 return Err(crate::local::test_fault_error());
             }
-            local::remove_rooted_entry(&self.directory, &self.path, path, false)
+            local::remove_rooted_entry(&self.directory, &self.path, path)
         }
         #[cfg(not(any(unix, windows)))]
         {
@@ -459,7 +459,7 @@ impl Root {
                     "rooted remove_empty_dir requires a directory",
                 ));
             }
-            local::remove_rooted_entry(&self.directory, &self.path, path, false)
+            local::remove_rooted_entry(&self.directory, &self.path, path)
         }
         #[cfg(not(any(unix, windows)))]
         {
@@ -468,6 +468,49 @@ impl Root {
                 ErrorKind::Unsupported,
                 "descriptor-relative local roots are unsupported on this platform",
             ))
+        }
+    }
+
+    /// Removes an entry already classified as a non-directory by the scheduler.
+    /// Unix performs no duplicate metadata lookup: unlinkat rejects a current
+    /// directory and never follows a final link. Other platforms retain their
+    /// existing checked removal path. Secure parent traversal and native
+    /// removal errors propagate; this does not grant authority over a changed
+    /// intermediate symbolic link or switch between leaf and directory removal.
+    pub(crate) fn remove_observed_non_directory(&self, path: &path::Path) -> Result<()> {
+        #[cfg(unix)]
+        {
+            #[cfg(feature = "test-support")]
+            {
+                if local::test_support_enabled("rooted-copy-remove-file-native") {
+                    return Err(crate::local::test_fault_error());
+                }
+                crate::test_support::temp_cleanup_replace_observed_entry(&self.directory, &self.path, path, false)?;
+            }
+            local::unlink_rooted_entry(&self.directory, &self.path, path, false)
+        }
+        #[cfg(not(unix))]
+        {
+            self.remove_file(path)
+        }
+    }
+
+    /// Removes a directory whose children were processed by the scheduler.
+    /// Unix fixes AT_REMOVEDIR rather than reclassifying the current entry:
+    /// replacement leaves and symbolic links are rejected, while concurrent
+    /// children produce DirectoryNotEmpty without a rescan. Other platforms
+    /// retain their checked removal path. All native traversal/removal errors
+    /// propagate without rolling back earlier removals.
+    pub(crate) fn remove_observed_empty_directory(&self, path: &path::Path) -> Result<()> {
+        #[cfg(unix)]
+        {
+            #[cfg(feature = "test-support")]
+            crate::test_support::temp_cleanup_replace_observed_entry(&self.directory, &self.path, path, true)?;
+            local::unlink_rooted_entry(&self.directory, &self.path, path, true)
+        }
+        #[cfg(not(unix))]
+        {
+            self.remove_empty_dir(path)
         }
     }
 
@@ -489,7 +532,13 @@ impl Root {
             if local::test_support_enabled("rooted-copy-remove-tree-native") {
                 return Err(crate::local::test_fault_error());
             }
-            local::remove_rooted_entry(&self.directory, &self.path, path, true)
+            local::remove_directory_tree(
+                &crate::temp::internal::TempDirectoryDeleteBackend { root: self },
+                path,
+                crate::LocalDeleteOptions::new().with_recursive(),
+                std::time::Instant::now(),
+            )
+            .map_err(crate::LocalFileError::into_io_error)
         }
         #[cfg(not(any(unix, windows)))]
         {

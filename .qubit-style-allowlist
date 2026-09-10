@@ -45,6 +45,7 @@ coverage-cfg | src/local/internal/windows_rooted/directory.rs | Coverage instrum
 coverage-cfg | src/local/internal/windows_rooted/namespace_mutation.rs | Coverage instrumentation keeps inline behavior measurable without source exemptions.
 coverage-cfg | src/local/internal/file_name_validation.rs | Coverage instrumentation keeps inline behavior measurable without source exemptions.
 coverage-cfg | src/local/internal/windows_rooted/handle.rs | Coverage instrumentation keeps inline behavior measurable without source exemptions.
+coverage-cfg | src/local/internal/windows_rooted/native.rs | Coverage instrumentation keeps inline behavior measurable without source exemptions.
 coverage-cfg | src/local/internal/directory_identity.rs | Coverage instrumentation keeps inline behavior measurable without source exemptions.
 coverage-cfg | src/local/internal/unix_stat.rs | Coverage instrumentation keeps inline behavior measurable without source exemptions.
 coverage-cfg | src/local/local_copy_dir_error.rs | Coverage instrumentation keeps inline behavior measurable without source exemptions.

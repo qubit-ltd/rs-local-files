@@ -23,6 +23,8 @@ use crate::LocalFileErrorKind;
 use crate::LocalFileOperation;
 use crate::LocalPersistFailureState;
 use crate::LocalPersistStage;
+use crate::local::LocalPersistErrorParts;
+use crate::outcome::LocalTempSourceState;
 
 /// Persistence error that returns ownership of the temporary resource.
 ///
@@ -36,6 +38,48 @@ use crate::LocalPersistStage;
 /// cleanup and never removes the destination. After an indeterminate native
 /// publish failure, temporary handles reject cleanup and their `Drop`
 /// implementation performs no namespace operation.
+///
+/// # Examples
+///
+/// A no-replace conflict leaves the destination unchanged and returns an owned
+/// temporary resource that can be cleaned up explicitly:
+///
+/// ```
+/// use std::io::Write;
+///
+/// use qubit_local_files::LocalFileSystem;
+/// use qubit_local_files::options::LocalTempDirectoryOptions;
+/// use qubit_local_files::options::LocalTempFileOptions;
+/// use qubit_local_files::outcome::LocalPersistFailureState;
+/// use qubit_local_files::outcome::LocalTempSourceState;
+///
+/// # fn main() -> Result<(), Box<dyn std::error::Error>> {
+/// let filesystem = LocalFileSystem::host()?;
+/// let parent_options = LocalTempDirectoryOptions::new()
+///     .with_parent(&std::env::temp_dir())
+///     .with_max_attempts(16);
+/// let mut parent = filesystem.create_temp_directory_with_options(&parent_options)?;
+/// let target = parent.path().join("manifest.json");
+/// std::fs::write(&target, b"existing manifest")?;
+/// let options = LocalTempFileOptions::new().with_parent(parent.path());
+/// let mut temporary = filesystem.create_temp_file_with_options(&options)?;
+/// temporary.write_all(br#"{"complete":true}"#)?;
+///
+/// let failure = temporary
+///     .persist(&target)
+///     .expect_err("no-replace must reject an existing target");
+/// assert_eq!(failure.state(), LocalPersistFailureState::NotPublished);
+/// assert_eq!(failure.source_state(), LocalTempSourceState::Owned);
+/// let mut parts = failure.into_parts();
+/// assert_eq!(parts.state, LocalPersistFailureState::NotPublished);
+/// assert_eq!(parts.source_state, LocalTempSourceState::Owned);
+/// parts.resource.cleanup()?;
+/// assert_eq!(parts.resource.source_state(), LocalTempSourceState::Released);
+/// assert_eq!(std::fs::read(&target)?, b"existing manifest");
+/// parent.cleanup()?;
+/// # Ok(())
+/// # }
+/// ```
 #[non_exhaustive]
 #[derive(Debug)]
 pub struct LocalPersistError<T> {
@@ -51,6 +95,8 @@ pub struct LocalPersistError<T> {
     stage: LocalPersistStage,
     /// Strongest namespace state established by the failed operation.
     state: LocalPersistFailureState,
+    /// Source authority snapshot at failure construction.
+    source_state: LocalTempSourceState,
 }
 
 impl<T> LocalPersistError<T> {
@@ -62,6 +108,8 @@ impl<T> LocalPersistError<T> {
     /// - `requested_target`: Target path supplied by the caller.
     /// - `resolved_target`: Absolute target, when resolution succeeded.
     /// - `stage`: Stage at which persistence failed.
+    /// - `state`: Publication fact explicitly established by this call.
+    /// - `source_state`: Current source authority snapshot.
     ///
     /// # Returns
     /// New persistence error owning both values.
@@ -74,8 +122,9 @@ impl<T> LocalPersistError<T> {
         requested_target: PathBuf,
         resolved_target: Option<PathBuf>,
         stage: LocalPersistStage,
+        state: LocalPersistFailureState,
+        source_state: LocalTempSourceState,
     ) -> Self {
-        let state = LocalPersistFailureState::from_error(stage, error.kind());
         let error = LocalFileError::from_io(
             LocalFileOperation::PersistTemp,
             Some(requested_target.clone()),
@@ -89,6 +138,7 @@ impl<T> LocalPersistError<T> {
             resolved_target,
             stage,
             state,
+            source_state,
         }
     }
 
@@ -158,10 +208,10 @@ impl<T> LocalPersistError<T> {
         self.stage
     }
 
-    /// Returns the strongest namespace state established by the failure.
+    /// Returns the publication fact established by this call.
     ///
     /// # Returns
-    /// A state describing whether the temporary resource remains safely owned.
+    /// Whether this call published its target; source authority is independent.
     #[must_use = "inspect the retained persistence state"]
     #[cfg_attr(not(coverage), inline)]
     #[cfg_attr(coverage, inline(never))]
@@ -180,56 +230,42 @@ impl<T> LocalPersistError<T> {
         self.error.kind()
     }
 
-    /// Splits this error into its retained values without publication state.
+    /// Returns the source authority snapshot captured at failure.
     ///
-    /// # Returns
-    /// Structured error, retained resource, requested target, resolved target,
-    /// and failure stage. Use [`Self::into_parts_with_state`] to retain the
-    /// publication state too.
-    ///
-    /// Ignoring the returned tuple is rejected because it owns the retained
-    /// temporary resource:
-    ///
-    /// ```compile_fail
-    /// #![deny(unused_must_use)]
-    /// use qubit_local_files::error::LocalPersistError;
-    ///
-    /// fn discard(error: LocalPersistError<()>) {
-    ///     error.into_parts();
-    /// }
-    /// ```
-    #[must_use = "the returned tuple retains the temporary resource and persistence context"]
-    pub fn into_parts(self) -> (LocalFileError, T, PathBuf, Option<PathBuf>, LocalPersistStage) {
-        let (error, resource, requested_target, resolved_target, stage, _) = self.into_parts_with_state();
-        (error, resource, requested_target, resolved_target, stage)
+    /// After `resource_mut()` changes the resource, query that resource's
+    /// `source_state()` for its current authority.
+    #[must_use = "inspect the source authority before choosing a recovery action"]
+    #[cfg_attr(not(coverage), inline)]
+    #[cfg_attr(coverage, inline(never))]
+    pub const fn source_state(&self) -> LocalTempSourceState {
+        self.source_state
     }
 
-    /// Splits this error into its retained values, including recovery state.
-    ///
-    /// # Returns
-    ///
-    /// The structured error, temporary resource, requested target, resolved
-    /// target, failure stage, and publication state in that order.
-    #[must_use = "the returned tuple retains the temporary resource and persistence context"]
-    pub fn into_parts_with_state(
-        self,
-    ) -> (
-        LocalFileError,
-        T,
-        PathBuf,
-        Option<PathBuf>,
-        LocalPersistStage,
-        LocalPersistFailureState,
-    ) {
-        let Self {
-            error,
-            resource,
-            requested_target,
-            resolved_target,
-            stage,
-            state,
-        } = self;
-        (*error, *resource, requested_target, resolved_target, stage, state)
+    /// Splits this error into named fields, retaining both recovery axes.
+    #[must_use = "the returned parts retain the resource and recovery context"]
+    pub fn into_parts(self) -> LocalPersistErrorParts<T> {
+        LocalPersistErrorParts {
+            error: *self.error,
+            resource: *self.resource,
+            requested_target: self.requested_target,
+            resolved_target: self.resolved_target,
+            stage: self.stage,
+            state: self.state,
+            source_state: self.source_state,
+        }
+    }
+
+    /// Attaches the retained resource to an already-captured failure snapshot.
+    pub(crate) fn with_resource<U>(self, resource: U) -> LocalPersistError<U> {
+        LocalPersistError {
+            error: self.error,
+            resource: Box::new(resource),
+            requested_target: self.requested_target,
+            resolved_target: self.resolved_target,
+            stage: self.stage,
+            state: self.state,
+            source_state: self.source_state,
+        }
     }
 
     /// Attaches the PWD snapshot retained by the temporary resource.
@@ -294,6 +330,7 @@ mod tests {
     use crate::LocalFileOperation;
     use crate::LocalPersistFailureState;
     use crate::LocalPersistStage;
+    use crate::outcome::LocalTempSourceState;
 
     #[test]
     fn test_persist_error_exposes_recoverable_context_and_resource() {
@@ -303,6 +340,8 @@ mod tests {
             PathBuf::from("requested"),
             Some(PathBuf::from("/resolved")),
             LocalPersistStage::PrepareParent,
+            LocalPersistFailureState::NotPublished,
+            LocalTempSourceState::Owned,
         )
         .with_current_directory(PathBuf::from("/workspace"));
 
@@ -327,9 +366,19 @@ mod tests {
             PathBuf::from("requested"),
             None,
             LocalPersistStage::InstallDestination,
+            LocalPersistFailureState::Indeterminate,
+            LocalTempSourceState::Indeterminate,
         );
 
-        let (source, resource, requested, resolved, stage, state) = error.into_parts_with_state();
+        let crate::local::LocalPersistErrorParts {
+            error: source,
+            resource,
+            requested_target: requested,
+            resolved_target: resolved,
+            stage,
+            state,
+            ..
+        } = error.into_parts();
         assert_eq!(io::ErrorKind::PermissionDenied, source.io_error_kind());
         assert_eq!(7, resource);
         assert_eq!(PathBuf::from("requested"), requested);
@@ -340,13 +389,15 @@ mod tests {
     }
 
     #[test]
-    fn test_persist_error_classifies_durability_failure_state() {
+    fn test_persist_error_retains_explicit_durability_failure_states() {
         let source_error = LocalPersistError::new(
             io::Error::from(io::ErrorKind::Other),
             (),
             PathBuf::from("requested"),
             Some(PathBuf::from("/resolved")),
             LocalPersistStage::SynchronizeSource,
+            LocalPersistFailureState::NotPublished,
+            LocalTempSourceState::Owned,
         );
         assert_eq!(LocalPersistFailureState::NotPublished, source_error.state());
 
@@ -356,6 +407,8 @@ mod tests {
             PathBuf::from("requested"),
             Some(PathBuf::from("/resolved")),
             LocalPersistStage::SynchronizeDestination,
+            LocalPersistFailureState::Published,
+            LocalTempSourceState::CleanupRequired,
         );
         assert_eq!(LocalPersistFailureState::Published, destination_error.state());
     }

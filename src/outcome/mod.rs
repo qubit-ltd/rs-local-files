@@ -16,6 +16,8 @@ mod local_copy_stats;
 mod local_create_directory_outcome;
 mod local_delete_outcome;
 mod local_persist_cleanup_state;
+mod local_temp_source_state;
+pub use local_temp_source_state::LocalTempSourceState;
 mod local_persist_method;
 mod local_persist_outcome;
 mod local_rename_failure;

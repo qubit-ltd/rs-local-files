@@ -11,6 +11,8 @@
 use std::path::Path;
 use std::path::PathBuf;
 
+use super::LocalTempCleanupLimits;
+
 /// Options for creating a cleanup-owned temporary directory.
 #[derive(Clone, Debug, Eq, PartialEq)]
 #[must_use = "temporary directory options have no effect unless they are used"]
@@ -25,6 +27,8 @@ pub struct LocalTempDirectoryOptions {
     max_attempts: Option<usize>,
     /// Whether a missing parent directory is created before allocation.
     create_parent: bool,
+    /// Limits retained for explicit cleanup and the final Drop attempt.
+    cleanup_limits: LocalTempCleanupLimits,
 }
 
 impl LocalTempDirectoryOptions {
@@ -39,7 +43,20 @@ impl LocalTempDirectoryOptions {
             suffix: None,
             max_attempts: None,
             create_parent: false,
+            cleanup_limits: LocalTempCleanupLimits::new(),
         }
+    }
+
+    /// Returns the limits that each created directory retains for cleanup.
+    #[must_use = "inspect the limits retained for explicit and automatic cleanup"]
+    pub const fn cleanup_limits(&self) -> LocalTempCleanupLimits {
+        self.cleanup_limits
+    }
+
+    /// Retains `limits` for explicit cleanup and Drop without performing I/O.
+    pub const fn with_cleanup_limits(mut self, limits: LocalTempCleanupLimits) -> Self {
+        self.cleanup_limits = limits;
+        self
     }
 
     /// Returns the configured parent, or `None` for the owning filesystem's

@@ -28,4 +28,5 @@ pub use local_resource_limit_error::LocalResourceLimitError;
 pub use local_result::LocalResult;
 
 pub use crate::local::LocalPersistError;
+pub use crate::local::LocalPersistErrorParts;
 pub use crate::writer::LocalFileCommitError;

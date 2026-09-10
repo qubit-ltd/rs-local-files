@@ -26,50 +26,12 @@ use rustix::fs::readlinkat;
 use rustix::fs::symlinkat;
 
 use super::path_operations::add_path_context;
+use super::rooted_directory_entry::RootedDirectoryEntry;
+use super::rooted_directory_entry::stat_child;
 use super::rooted_directory_reader::RootedDirectoryReader;
 use super::rooted_file_io::open_rooted_parent;
 use super::rooted_parent_mode::RootedParentMode;
 use crate::LocalRelativePath;
-
-/// A native child name and its no-follow metadata.
-pub(crate) type RootedDirectoryEntry = (OsString, libc::stat);
-
-impl RootedDirectoryReader {
-    /// Opens a reader over an already-authorized directory descriptor.
-    ///
-    /// Returns an I/O error when the descriptor cannot be duplicated for
-    /// enumeration.
-    fn open(directory: File, diagnostic_path: &Path) -> Result<Self> {
-        let stream = Dir::read_from(&directory)?;
-        Ok(Self {
-            directory,
-            stream,
-            diagnostic_path: diagnostic_path.to_path_buf(),
-        })
-    }
-
-    /// Reads the next child without following its final symbolic link.
-    ///
-    /// Returns `Ok(None)` after the directory is exhausted, and returns an I/O
-    /// error when enumeration or no-follow metadata inspection fails.
-    pub(crate) fn next_entry(&mut self) -> Result<Option<RootedDirectoryEntry>> {
-        loop {
-            let entry = match self.stream.next() {
-                Some(entry) => entry?,
-                None => return Ok(None),
-            };
-            let name = entry.file_name();
-            let name = name.to_bytes();
-            if name == b"." || name == b".." {
-                continue;
-            }
-            let name = OsString::from_vec(name.to_vec());
-            let c_name = CString::new(name.as_bytes()).expect("directory entry names never contain NUL");
-            let status = stat_child(&self.directory, &c_name, &self.diagnostic_path)?;
-            return Ok(Some((name, status)));
-        }
-    }
-}
 
 /// Opens a lazy reader over the opened root directory.
 ///
@@ -195,49 +157,17 @@ pub(crate) fn create_rooted_directory(
     Err(add_path_context(error, "create rooted directory", &diagnostic_path))
 }
 
-/// Removes one rooted entry without following symbolic links.
-///
-/// With `recursive`, removes real directories after their descendants;
-/// otherwise a directory must be empty. Traversal, enumeration, inspection,
-/// and unlink errors propagate without rolling back earlier removals.
-pub(crate) fn remove_rooted_entry(
-    root: &File,
-    diagnostic_root: &Path,
-    path: &LocalRelativePath,
-    recursive: bool,
-) -> Result<()> {
+/// Removes one rooted leaf or empty directory without following symbolic links.
+/// Traversal, inspection and unlink errors propagate. Recursive callers use
+/// the shared deletion scheduler before reaching this native boundary.
+pub(crate) fn remove_rooted_entry(root: &File, diagnostic_root: &Path, path: &LocalRelativePath) -> Result<()> {
     let status = rooted_status(root, diagnostic_root, path)?;
-    if !is_directory(status.st_mode as libc::mode_t) || !recursive {
-        return unlink_rooted_entry(
-            root,
-            diagnostic_root,
-            path,
-            is_directory(status.st_mode as libc::mode_t),
-        );
-    }
-
-    let mut work = vec![(path.clone(), false)];
-    while let Some((current, remove_directory)) = work.pop() {
-        if remove_directory {
-            unlink_rooted_entry(root, diagnostic_root, &current, true)?;
-            continue;
-        }
-        let status = rooted_status(root, diagnostic_root, &current)?;
-        if !is_directory(status.st_mode as libc::mode_t) {
-            unlink_rooted_entry(root, diagnostic_root, &current, false)?;
-            continue;
-        }
-        work.push((current.clone(), true));
-        for (name, _) in read_rooted_directory(root, diagnostic_root, &current)?
-            .into_iter()
-            .rev()
-        {
-            let child = LocalRelativePath::new(current.as_path().join(name))
-                .expect("joining validated rooted components stays valid");
-            work.push((child, false));
-        }
-    }
-    Ok(())
+    unlink_rooted_entry(
+        root,
+        diagnostic_root,
+        path,
+        is_directory(status.st_mode as libc::mode_t),
+    )
 }
 
 /// Removes one rooted entry whose observed type is already known.
@@ -246,7 +176,12 @@ pub(crate) fn remove_rooted_entry(
 ///
 /// Returns an I/O error when the parent cannot be opened securely or the
 /// entry cannot be removed.
-fn unlink_rooted_entry(root: &File, diagnostic_root: &Path, path: &LocalRelativePath, directory: bool) -> Result<()> {
+pub(crate) fn unlink_rooted_entry(
+    root: &File,
+    diagnostic_root: &Path,
+    path: &LocalRelativePath,
+    directory: bool,
+) -> Result<()> {
     let diagnostic_path = diagnostic_root.join(path.as_path());
     let (parent, name, _) =
         open_rooted_parent(root, &diagnostic_path, path, RootedParentMode::OpenExisting)?.into_parts();
@@ -393,32 +328,6 @@ fn open_directory_component(parent: &File, name: &CString) -> Result<File> {
         libc::O_RDONLY | libc::O_DIRECTORY | libc::O_NOFOLLOW | libc::O_CLOEXEC,
         0,
     )
-}
-
-/// Reads no-follow metadata for one child of an open directory.
-///
-/// Returns `fstatat` errors with `diagnostic_path` as context.
-fn stat_child(parent: &File, name: &CString, diagnostic_path: &Path) -> Result<libc::stat> {
-    let mut status = std::mem::MaybeUninit::<libc::stat>::uninit();
-    // SAFETY: the output storage, descriptor, and name remain valid for this
-    // non-retaining call.
-    let result = unsafe {
-        libc::fstatat(
-            parent.as_raw_fd(),
-            name.as_ptr(),
-            status.as_mut_ptr(),
-            libc::AT_SYMLINK_NOFOLLOW,
-        )
-    };
-    if result == -1 {
-        return Err(add_path_context(
-            Error::last_os_error(),
-            "inspect rooted directory entry",
-            diagnostic_path,
-        ));
-    }
-    // SAFETY: successful `fstatat` initialized the complete value.
-    Ok(unsafe { status.assume_init() })
 }
 
 /// Reads no-follow metadata for a rooted path.

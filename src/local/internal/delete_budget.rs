@@ -61,7 +61,8 @@ impl DeleteBudget {
             ("local-delete-deadline-8", 8),
         ]
         .into_iter()
-        .any(|(name, occurrence)| crate::local::take_test_support_on_nth(name, occurrence));
+        .any(|(name, occurrence)| crate::local::take_test_support_on_nth(name, occurrence))
+            || crate::test_support::temp_cleanup_deadline_expired();
         #[cfg(not(feature = "test-support"))]
         let forced_expiry = false;
         if forced_expiry

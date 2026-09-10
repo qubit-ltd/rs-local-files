@@ -39,10 +39,10 @@ use windows_sys::Win32::System::IO::DeviceIoControl;
 use windows_sys::Win32::System::Ioctl::FSCTL_GET_REPARSE_POINT;
 use windows_sys::Win32::System::Ioctl::FSCTL_SET_REPARSE_POINT;
 
-use super::handle::handle_attributes;
-use super::handle::nt_open_at;
 use super::handle::open_parent;
 use super::namespace_mutation::delete_open_entry;
+use super::native::handle_attributes;
+use super::native::nt_open_at;
 use crate::local::LocalRelativePath;
 use crate::local::internal::RootedSymlinkCreateError;
 use crate::local::internal::RootedSymlinkCreateFailureState;

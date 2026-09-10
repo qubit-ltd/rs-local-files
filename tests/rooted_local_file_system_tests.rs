@@ -16,6 +16,7 @@ use std::path::PathBuf;
 
 use qubit_local_files::LocalFileSystem;
 use qubit_local_files::error::LocalFileErrorKind;
+use qubit_local_files::error::LocalPersistErrorParts;
 use qubit_local_files::error::LocalResourceKind;
 use qubit_local_files::options::LocalCopyConflictPolicy;
 use qubit_local_files::options::LocalCopyOptions;
@@ -381,7 +382,14 @@ fn test_rooted_temp_file_missing_parent_retains_cleanup() {
         .expect_err("missing rooted target parent should fail before publication");
     assert_eq!(LocalPersistStage::PrepareParent, error.stage());
     assert_eq!(LocalPersistFailureState::NotPublished, error.state());
-    let (_io, mut retained, _requested, _resolved, _stage) = error.into_parts();
+    let LocalPersistErrorParts {
+        error: _io,
+        resource: mut retained,
+        requested_target: _requested,
+        resolved_target: _resolved,
+        stage: _stage,
+        ..
+    } = error.into_parts();
 
     retained
         .cleanup()

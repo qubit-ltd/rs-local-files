@@ -52,6 +52,8 @@ mod rooted_atomic_install;
 mod rooted_atomic_namespace_race;
 #[cfg(unix)]
 mod rooted_atomic_write;
+#[cfg(unix)]
+mod rooted_directory_entry;
 #[cfg(any(unix, windows))]
 mod rooted_directory_reader;
 #[cfg(unix)]
@@ -107,6 +109,7 @@ pub(crate) use copy_tree::copy_tree;
 pub(crate) use copy_tree_backend::CopyTreeBackend;
 pub(crate) use copy_tree_frame_context::CopyTreeFrameContext;
 pub(crate) use delete_backend::DeleteBackend;
+pub(crate) use delete_budget::DeleteBudget;
 pub(crate) use delete_tree::remove_directory_tree;
 pub(crate) use directory_identity::DirectoryIdentity;
 pub(crate) use directory_mutation_error::directory_mutation_error;
@@ -120,6 +123,7 @@ pub(crate) use file_move::sync_parent_dir;
 pub(crate) use file_name_generation::try_random_file_name;
 pub(crate) use host_local_file_system::HostLocalFileSystem;
 pub(crate) use host_local_file_system::internal_copy_options;
+pub(crate) use host_local_file_system::remove_host_non_directory;
 pub(crate) use host_local_file_system::resolve_host_path;
 pub use local_atomic_publication_mode::LocalAtomicPublicationMode;
 pub(crate) use local_namespace::LocalNamespace;
@@ -186,6 +190,8 @@ pub(crate) use rooted_namespace_io::remove_rooted_entry;
 pub(crate) use rooted_namespace_io::rename_rooted_entry;
 #[cfg(unix)]
 pub(crate) use rooted_namespace_io::set_rooted_permissions;
+#[cfg(unix)]
+pub(crate) use rooted_namespace_io::unlink_rooted_entry;
 #[cfg(unix)]
 pub(super) use rooted_parent_mode::RootedParentMode;
 #[cfg(unix)]

@@ -82,7 +82,7 @@ impl WindowsRootedStagedFile {
         }
         self.file.take();
         if self.armed {
-            remove_rooted_entry(&self.root, Path::new(""), &self.path, false)?;
+            remove_rooted_entry(&self.root, Path::new(""), &self.path)?;
             self.armed = false;
         }
         Ok(())

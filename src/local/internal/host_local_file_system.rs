@@ -94,3 +94,5 @@ impl HostLocalFileSystem {
         LocalFileSystemCapabilities::detect_host()
     }
 }
+
+pub(crate) use delete::remove_host_non_directory;
