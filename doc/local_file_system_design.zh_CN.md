@@ -5,11 +5,10 @@
 
 > 状态：规范性设计文档，适用 qubit-local-files 0.5.0
 >
-> 最后更新：2026-09-10
+> 最后更新：2026-09-11
 
 本文定义 `qubit-local-files` 的完整、稳定设计。公共 API、平台实现、测试、README 和用户
-指南都应与本文保持一致。本文描述库完成后的最终形态，不记录迁移历史，也不把临时实现
-细节当成长期契约。
+指南都应与本文保持一致。本文描述库完成后的最终形态。
 
 文中的“必须”“不得”“应当”用于表达规范性要求；代码片段用于说明 API 形态，具体
 `const`、`inline` 等非语义修饰不属于设计契约。
@@ -1155,7 +1154,6 @@ writer 在创建缺失父目录并要求 Required durability 时，会在发布�
 `with_entry_source()` 选择单个普通文件或链接条目，`with_tree_source()` 要求源为实体目录。
 `with_source_mode(LocalCopySourceMode::Auto)` 会明确恢复自动判断。源类型拒绝发生在创建
 目标父目录或修改目标之前。目录限定路径语法单独校验，可能在分派前返回 `NotDirectory`。
-旧的 `File` 变体和 `with_file_source()` 方法已移除，不保留兼容别名。
 源模式判断不跟随最终链接；递归目录树内部遇到的目录链接仍按有效遍历策略处理。
 源模式不会改变中间链接解析或目录树的链接遍历语义。
 
@@ -1316,9 +1314,8 @@ source_state: LocalTempSourceState
 ```
 
 `requested_target` 保留请求拼写；只有目标绑定已经确立命名空间路径时，`resolved_target`
-才有值。状态字段不会随资源操作更新。`into_parts_with_state` 已移除，旧元组拆解须改为
-具名字段。后续被拒绝的调用只说明本次 NotPublished，不表示先前已发布目标消失。
-可运行恢复示例与迁移清单见[用户指南](user_guide.zh_CN.md#迁移到-05)。
+才有值。状态字段不会随资源操作更新。后续被拒绝的调用只说明本次 NotPublished，
+不表示先前已发布目标消失。可运行恢复示例见[用户指南](user_guide.zh_CN.md#临时资源发布与失败恢复)。
 
 ### 18.6 临时目录后代路径
 
@@ -1651,9 +1648,8 @@ Entry/Tree 模式，同时保留独立的资源预算。
 
 ### 临时资源失败适配
 
-协调的破坏性版本为 `qubit-local-files 0.5.0` 与 `qubit-fs 0.7.0`，实际下游依赖约束和
-锁文件必须统一到一个兼容的 facade 版本；native crate 本身仍不依赖 facade。
-adapter 接收两个原生状态轴，先从具名 parts 将保留资源放回 slot，再构造 portable error。
+native crate 本身不依赖 facade。adapter 接收两个原生状态轴，先从具名 parts 将保留资源
+放回 slot，再构造 portable error。
 persist 与 keep 使用相同映射：
 
 | 原生 publication | 原生 source | Portable `PersistFailureState` | 本次目标副作用 |

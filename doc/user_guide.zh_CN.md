@@ -230,7 +230,6 @@ Host 与 Rooted 中，`files()` 包括复制的链接，`directories()` 只计�
 `with_entry_source()` 选择单个普通文件或链接条目，`with_tree_source()` 要求源为实体目录。
 `with_source_mode(LocalCopySourceMode::Auto)` 会明确恢复自动判断。源类型拒绝发生在创建
 目标父目录或修改目标之前。目录限定路径语法单独校验，可能在分派前返回 `NotDirectory`。
-旧的 `File` 变体和 `with_file_source()` 方法已移除，不保留兼容别名。
 源模式判断不跟随最终链接；递归目录树内部遇到的目录链接仍按有效遍历策略处理。
 源模式不会改变中间链接解析或目录树的链接遍历语义。
 
@@ -394,26 +393,7 @@ sandbox。并发新增子项可能导致 `DirectoryNotEmpty`，操作会返回�
 `a/./b` 也会失败。这些方法只构造路径，不执行 I/O，不赋予 Rooted 权限，也不证明磁盘上
 符号链接的目标安全。它们的严格规则与普通 Rooted 路径归一化、普通 Host 原生解析分别适用。
 
-## 迁移到 0.5
-
-- 将 `qubit-local-files` 升至 `0.5`；协调使用 facade 的项目采用 `qubit-fs` `0.7`，并同步
-  `qubit-fs-local` 的依赖闭包。原生 local-files 本身仍不依赖 `qubit-fs`。
-- 将 `LocalPersistError::into_parts()` 的元组解构改为 `LocalPersistErrorParts<T>` 具名字段；
-  `into_parts_with_state` 已移除。适配错误时必须同时保留 publication 与 source 快照。
-- 同时检查 `state()` 与 `source_state()`；经 `resource_mut()` 或 parts 操作资源后，查询
-  资源自身的实时资格。不能由 `NotPublished`、阶段或 `io::ErrorKind::InvalidInput` 推断 Owned。
-- 遇到 `Published` 时保留目标，只处理残留 sandbox。同步文件、同步目录和异步文件 facade
-  在拒绝重试与清理后都须保留之前的 `publication_target`。
-- portable `PersistFailureState` 新增 `NotPublishedSourceIndeterminate`、
-  `PublishedSourceIndeterminate`、`NotPublishedSourceCleanupRequired`。源不确定不能抹去
-  已知目标副作用，具体见[适配表](local_file_system_design.zh_CN.md#23-与-qubit-fs-local-的契约)。
-- 将清理限制保存在临时目录上，让 Drop 沿用；没有使用另一组限制的单次 `cleanup_with_options`。
-- 只有应用明确决定改变输入契约时，才应在调用严格 `descendant` 前自行移除点段；库不会
-  代为归一化这些输入。
-
-下方 [0.4 迁移说明](#迁移到-04) 中关于 Host 路径、元数据策略、明确目标与通用预算的规则仍然适用。
-
-## 迁移到 0.4
+## Host 路径、替换元数据与资源限制
 
 ### Host 路径保留原生解析顺序
 
@@ -476,8 +456,8 @@ assert_eq!(effective.max_bytes(), Some(10));
 
 ### 用明确基准目录发布临时资源
 
-两种临时资源的 `persist` 和 `persist_with` 现在只接受命名空间绝对目标。
-原来的相对目标调用改用 `persist_at`：
+两种临时资源的 `persist` 和 `persist_with` 只接受命名空间绝对目标。
+相对目标使用 `persist_at`：
 
 ```rust,no_run
 use std::io::Write;
@@ -692,22 +672,17 @@ cargo bench --locked --bench local_files --no-run
 cargo bench --locked --bench local_files -- deep_metadata
 
 # 测量新建/替换写入以及宽树/深树临时目录清理
-cargo bench --locked --bench local_files -- '^(writer_scenarios|temp_directory_cleanup)/' --sample-size 20 --warm-up-time 1 --measurement-time 2 --save-baseline after
-
-# 运行完整基准并保留可比较的命名结果
-cargo bench --locked --bench local_files -- --save-baseline local-files-05
+cargo bench --locked --bench local_files -- '^(writer_scenarios|temp_directory_cleanup)/' --sample-size 20 --warm-up-time 1 --measurement-time 2
 ```
 
-比较前后版本时，应使用同一 benchmark harness、机器、文件系统、工具链和构建 profile。
+比较 benchmark 结果时，应使用同一 harness、机器、文件系统、工具链和构建 profile。
 记录替换写入的 Host/Rooted、新建/已有目标、元数据策略、耐久性和 payload 组合，以及宽树、
 深树清理的无限制/显式限制组合。fixture 创建与最终 scratch parent 回收应在计时区外；
 平台不支持的策略须标记为不支持，不能充当成功样本。Criterion 结果用于评估趋势与区间，
 不作为 CI 墙钟阈值，也不代表已经证明性能提升。清理工作量和队列路径内存随目录树变化。
 
 写入 ID 使用 `writer_scenarios/{scope}/{target}/{metadata}/{durability}/{size}`；
-清理 ID 使用 `temp_directory_cleanup/{scope}/{shape}/{limits}`。旧版本使用同一 harness
-与采样参数，并以 `--save-baseline before` 保存结果。只比较两个版本都支持的 ID；
-新加入的 `bounded_sufficient` 清理场景在不支持清理限制的旧版本中没有基线。
+清理 ID 使用 `temp_directory_cleanup/{scope}/{shape}/{limits}`。
 
 ## 延伸阅读
 
