@@ -1,6 +1,5 @@
 # Qubit Local Files Complete Filesystem Design
 
-[中文设计文档](local_file_system_design.zh_CN.md) ·
 [User guide](user_guide.md) · [README](../README.md)
 
 > Status: normative design specification for qubit-local-files 0.5.0
