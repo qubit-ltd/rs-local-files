@@ -52,6 +52,14 @@ fn test_rooted_paths_reject_virtual_root_escape() {
 }
 
 #[test]
+fn test_rooted_path_resolver_rejects_relative_current_directory() {
+    let error = LocalPathResolver::new(LocalFileSystemScope::Rooted, Path::new("relative"))
+        .expect_err("Rooted current directories must be virtual absolute paths");
+
+    assert_eq!(LocalFileErrorKind::InvalidPath, error.kind());
+}
+
+#[test]
 fn test_rooted_resolver_preserves_directory_intent() {
     let resolver =
         LocalPathResolver::new(LocalFileSystemScope::Rooted, Path::new("/")).expect("rooted resolver should open");
@@ -91,6 +99,55 @@ fn test_host_relative_paths_bind_to_instance_pwd() {
         "/srv/app/etc/hosts",
     );
     assert_resolution(&resolver, Path::new("/etc/hosts"), "/etc/hosts", "/etc/hosts");
+}
+
+#[cfg(unix)]
+#[test]
+fn test_host_binding_preserves_raw_spelling_and_non_utf8() {
+    use std::ffi::OsStr;
+    use std::os::unix::ffi::OsStrExt;
+
+    let resolver = LocalPathResolver::new(LocalFileSystemScope::Host, Path::new("/base")).expect("host resolver");
+    let input = Path::new(OsStr::from_bytes(b"raw/./\xff/../leaf/"));
+    let bound = resolver.resolve(input).expect("raw relative binding");
+    assert_eq!(
+        bound.authority_relative().as_os_str().as_bytes(),
+        b"/base/raw/./\xff/../leaf/"
+    );
+    let absolute = Path::new(OsStr::from_bytes(b"/raw/./\xff/../leaf/"));
+    assert_eq!(
+        resolver
+            .resolve(absolute)
+            .expect("absolute binding")
+            .authority_relative()
+            .as_os_str(),
+        absolute.as_os_str()
+    );
+}
+
+#[cfg(windows)]
+#[test]
+fn test_host_windows_drive_binding() {
+    let resolver = LocalPathResolver::new(LocalFileSystemScope::Host, Path::new(r"C:\base")).expect("drive resolver");
+    assert_eq!(
+        resolver
+            .resolve(Path::new(r"\dir\..\file"))
+            .expect("root relative")
+            .authority_relative()
+            .as_os_str(),
+        Path::new(r"C:\dir\..\file").as_os_str()
+    );
+    assert!(resolver.resolve(Path::new("C:file")).is_err());
+    let verbatim =
+        LocalPathResolver::new(LocalFileSystemScope::Host, Path::new(r"\\?\C:\base")).expect("verbatim resolver");
+    assert_eq!(
+        verbatim
+            .resolve(Path::new(r"dir\..\file"))
+            .expect("verbatim relative")
+            .authority_relative()
+            .as_os_str(),
+        Path::new(r"\\?\C:\base\dir\..\file").as_os_str()
+    );
 }
 
 fn assert_resolution(resolver: &LocalPathResolver, input: &Path, logical: &str, backend: &str) {

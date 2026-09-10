@@ -16,7 +16,7 @@ use std::path::PathBuf;
 /// Rooted operands are normalized lexically against a virtual PWD snapshot.
 #[derive(Clone, Debug, Eq, PartialEq)]
 #[must_use]
-pub struct LocalNamespacePath {
+pub(crate) struct LocalNamespacePath {
     /// Reusable namespace-absolute path exposed by public values.
     namespace_absolute: PathBuf,
     /// Path representation consumed by the selected authority backend.
@@ -45,7 +45,7 @@ impl LocalNamespacePath {
     // qubit-style: allow coverage-cfg
     #[cfg_attr(not(coverage), inline(always))]
     #[cfg_attr(coverage, inline(never))]
-    pub fn namespace_absolute(&self) -> &Path {
+    pub(crate) fn namespace_absolute(&self) -> &Path {
         &self.namespace_absolute
     }
 
@@ -55,7 +55,7 @@ impl LocalNamespacePath {
     #[must_use]
     #[cfg_attr(not(coverage), inline(always))]
     #[cfg_attr(coverage, inline(never))]
-    pub fn authority_relative(&self) -> &Path {
+    pub(crate) fn authority_relative(&self) -> &Path {
         &self.authority_relative
     }
 
@@ -63,7 +63,7 @@ impl LocalNamespacePath {
     #[must_use]
     #[cfg_attr(not(coverage), inline(always))]
     #[cfg_attr(coverage, inline(never))]
-    pub const fn directory_required(&self) -> bool {
+    pub(crate) const fn directory_required(&self) -> bool {
         self.directory_required
     }
 }
