@@ -15,22 +15,31 @@ use std::hint::black_box;
 use std::io::Write;
 use std::path::Path;
 use std::path::PathBuf;
+use std::time::Duration;
 
 use criterion::Criterion;
 use criterion::criterion_group;
 use criterion::criterion_main;
 use qubit_local_files::LocalFileSystem;
+use qubit_local_files::LocalTempDirectory;
+use qubit_local_files::error::LocalFileError;
 use qubit_local_files::error::LocalFileErrorKind;
 use qubit_local_files::error::LocalResourceKind;
 use qubit_local_files::options::LocalCopyOptions;
 use qubit_local_files::options::LocalDirectoryReopenPolicy;
 use qubit_local_files::options::LocalListOptions;
 use qubit_local_files::options::LocalReadOptions;
+use qubit_local_files::options::LocalTempCleanupLimits;
+use qubit_local_files::options::LocalTempDirectoryOptions;
+use qubit_local_files::options::LocalWriteMetadataPolicy;
 use qubit_local_files::options::LocalWriteMode;
 use qubit_local_files::options::LocalWriteOptions;
 use qubit_local_files::outcome::LocalCopyFailureState;
 use qubit_local_files::outcome::LocalCopyResult;
+use qubit_local_files::outcome::LocalWriteOutcome;
+use qubit_local_files::outcome::LocalWriterState;
 use qubit_local_files::path::LocalPathCodec;
+use qubit_local_files::policy::LocalDurabilityRequirement;
 use tempfile::tempdir;
 
 fn bench_path_codec(c: &mut Criterion) {
@@ -390,6 +399,213 @@ fn bench_fresh_writer(c: &mut Criterion, name: &str, rooted: bool) {
     });
 }
 
+/// Measures independent new/replacement writes for both authorities and
+/// policies. Setup creates the old target when requested; payload allocation,
+/// authority construction, and scratch-directory destruction stay outside
+/// timing.
+fn bench_writer_scenarios(c: &mut Criterion) {
+    let mut group = c.benchmark_group("writer_scenarios");
+    for rooted in [false, true] {
+        let scope = if rooted { "rooted" } else { "host" };
+        for existing in [false, true] {
+            let target_mode = if existing { "replace" } else { "new" };
+            for (metadata_name, metadata) in [
+                ("preserve_existing", LocalWriteMetadataPolicy::PreserveExisting),
+                ("use_staging", LocalWriteMetadataPolicy::UseStaging),
+            ] {
+                for (durability_name, durability) in [
+                    ("not_required", LocalDurabilityRequirement::NotRequired),
+                    ("required", LocalDurabilityRequirement::Required),
+                ] {
+                    let options = LocalWriteOptions::new(LocalWriteMode::CreateOrReplace)
+                        .with_metadata_policy(metadata)
+                        .with_durability(durability);
+                    for (size_name, size) in [("4KiB", 4 * 1024), ("1MiB", 1 << 20), ("16MiB", 16 << 20)] {
+                        let id = format!("{scope}/{target_mode}/{metadata_name}/{durability_name}/{size_name}");
+                        let payload = vec![0x5a; size];
+                        let (filesystem, target, directory) = writer_scenario_target(rooted, existing);
+                        match write_scenario_payload(&filesystem, &target, &options, &payload) {
+                            Ok(outcome) => {
+                                assert_writer_outcome(outcome, size, durability);
+                                assert_eq!(
+                                    fs::read(directory.path().join("target"))
+                                        .expect("fixture target should be readable"),
+                                    payload
+                                );
+                            }
+                            Err(error)
+                                if matches!(
+                                    error.kind(),
+                                    LocalFileErrorKind::Unsupported | LocalFileErrorKind::RequirementNotMet
+                                ) =>
+                            {
+                                eprintln!("UNSUPPORTED writer_scenarios/{id}: {error}");
+                                continue;
+                            }
+                            Err(error) => panic!("writer_scenarios/{id} preflight failed: {error}"),
+                        }
+                        drop((filesystem, directory));
+                        group.throughput(criterion::Throughput::Bytes(size as u64));
+                        group.bench_function(id, |bench| {
+                            bench.iter_batched_ref(
+                                || writer_scenario_target(rooted, existing),
+                                |(filesystem, target, _)| {
+                                    let outcome = write_scenario_payload(filesystem, target, &options, &payload)
+                                        .expect("registered writer scenario should succeed");
+                                    assert_writer_outcome(outcome, size, durability);
+                                    let _ = black_box(outcome);
+                                },
+                                criterion::BatchSize::PerIteration,
+                            );
+                        });
+                    }
+                }
+            }
+        }
+    }
+    group.finish();
+}
+
+/// Creates a fresh scope and target; replacement setup writes old bytes before
+/// timing and panics if the independent fixture cannot be prepared.
+fn writer_scenario_target(rooted: bool, existing: bool) -> (LocalFileSystem, PathBuf, tempfile::TempDir) {
+    let (filesystem, target, directory) = fresh_writer_target(rooted);
+    if existing {
+        fs::write(directory.path().join("target"), b"old content").expect("replacement target should be created");
+    }
+    (filesystem, target, directory)
+}
+
+/// Opens, writes, and commits one payload, returning open/commit failures for
+/// untimed capability probing. A stream write failure always fails the run.
+fn write_scenario_payload(
+    filesystem: &LocalFileSystem,
+    target: &Path,
+    options: &LocalWriteOptions,
+    payload: &[u8],
+) -> Result<LocalWriteOutcome, LocalFileError> {
+    let mut writer = filesystem.open_writer_with_options(black_box(target), options)?;
+    writer
+        .write_all(black_box(payload))
+        .expect("scenario payload should be written");
+    writer.commit().map_err(|failure| {
+        let (error, _state, _writer) = failure.into_parts();
+        error
+    })
+}
+
+/// Fails a sample if commit did not establish the requested successful result.
+fn assert_writer_outcome(outcome: LocalWriteOutcome, size: usize, durability: LocalDurabilityRequirement) {
+    assert_eq!(outcome.state(), LocalWriterState::Committed);
+    assert_eq!(outcome.bytes_written(), size);
+    assert!(outcome.failure_state().is_none());
+    if durability == LocalDurabilityRequirement::Required {
+        assert!(outcome.durable(), "required durability must not silently downgrade");
+    }
+}
+
+/// Registers successful cleanup of wide and deep temporary trees. Each call
+/// receives a fresh tree; allocation and final fixture destruction are untimed.
+fn bench_temp_directory_cleanup(c: &mut Criterion) {
+    let mut group = c.benchmark_group("temp_directory_cleanup");
+    for rooted in [false, true] {
+        let scope = if rooted { "rooted" } else { "host" };
+        for wide in [true, false] {
+            let shape = if wide { "wide_10000" } else { "deep_64x4" };
+            for (limit_name, options) in cleanup_scenarios() {
+                let id = format!("{scope}/{shape}/{limit_name}");
+                let (mut temporary, physical, _directory) = cleanup_fixture(rooted, wide, &options);
+                temporary
+                    .cleanup()
+                    .expect("cleanup fixture should succeed within its limits");
+                assert!(!physical.exists(), "cleanup must remove the fixture tree");
+                group.throughput(criterion::Throughput::Elements(if wide { 10_001 } else { 321 }));
+                group.bench_function(id, |bench| {
+                    bench.iter_batched_ref(
+                        || cleanup_fixture(rooted, wide, &options),
+                        |(temporary, _, _)| {
+                            temporary
+                                .cleanup()
+                                .expect("benchmark cleanup should succeed within its limits");
+                        },
+                        criterion::BatchSize::PerIteration,
+                    );
+                });
+            }
+        }
+    }
+    group.finish();
+}
+
+/// Returns unlimited and generously bounded successful-cleanup configurations.
+/// All four limits accommodate both fixtures; the deadline is per cleanup call.
+fn cleanup_scenarios() -> Vec<(&'static str, LocalTempDirectoryOptions)> {
+    vec![
+        ("unlimited", LocalTempDirectoryOptions::new()),
+        (
+            "bounded_sufficient",
+            LocalTempDirectoryOptions::new().with_cleanup_limits(
+                LocalTempCleanupLimits::new()
+                    .with_max_depth(65)
+                    .with_max_entries(10_001)
+                    .with_max_pending_path_bytes(64 * 1024 * 1024)
+                    .with_deadline(Duration::from_secs(60)),
+            ),
+        ),
+    ]
+}
+
+/// Builds 10,000 root files or 64 nested levels with four files at each level.
+/// Returns the owned resource, physical diagnostic path, and scratch parent.
+/// Native setup I/O is untimed and panics on failure; Rooted cleanup itself
+/// continues to use its retained authority rather than this physical path.
+fn cleanup_fixture(
+    rooted: bool,
+    wide: bool,
+    options: &LocalTempDirectoryOptions,
+) -> (LocalTempDirectory, PathBuf, tempfile::TempDir) {
+    let directory = tempdir().expect("cleanup scratch parent should exist");
+    let (filesystem, options) = if rooted {
+        (
+            LocalFileSystem::rooted(directory.path()).expect("cleanup Rooted filesystem should open"),
+            options.clone(),
+        )
+    } else {
+        (
+            LocalFileSystem::host().expect("cleanup Host filesystem should open"),
+            options.clone().with_parent(directory.path()),
+        )
+    };
+    let temporary = filesystem
+        .create_temp_directory_with_options(&options)
+        .expect("temporary tree should be created");
+    let physical = if rooted {
+        directory.path().join(
+            temporary
+                .path()
+                .strip_prefix(Path::new("/"))
+                .expect("Rooted path should be namespace absolute"),
+        )
+    } else {
+        temporary.path().to_path_buf()
+    };
+    if wide {
+        for index in 0..10_000 {
+            fs::write(physical.join(format!("entry-{index}")), b"x").expect("wide cleanup entry should exist");
+        }
+    } else {
+        let mut current = physical.clone();
+        for _ in 0..64 {
+            current.push("d");
+            fs::create_dir(&current).expect("deep cleanup directory should exist");
+            for index in 0..4 {
+                fs::write(current.join(format!("entry-{index}")), b"x").expect("deep cleanup entry should exist");
+            }
+        }
+    }
+    (temporary, physical, directory)
+}
+
 fn bench_read_prefix(c: &mut Criterion) {
     let directory = tempdir().expect("benchmark directory should be created");
     let path = directory.path().join("prefix-payload");
@@ -463,6 +679,8 @@ criterion_group!(
     bench_copy_tree_depth,
     bench_writer,
     bench_rooted_writer,
+    bench_writer_scenarios,
+    bench_temp_directory_cleanup,
     bench_read_prefix,
     bench_deep_metadata
 );
