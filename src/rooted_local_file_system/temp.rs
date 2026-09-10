@@ -261,7 +261,13 @@ impl RootedLocalFileSystem {
             match created {
                 Ok(()) => {
                     let cleanup_sandbox = sandbox.clone();
-                    let result = LocalTempDirectory::rooted(Arc::clone(&self.root), candidate, sandbox, symlink_policy);
+                    let result = LocalTempDirectory::rooted(
+                        Arc::clone(&self.root),
+                        candidate,
+                        sandbox,
+                        symlink_policy,
+                        options.cleanup_limits(),
+                    );
                     return match result {
                         Ok(resource) => Ok(resource),
                         Err(error) => {

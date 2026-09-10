@@ -11,9 +11,13 @@
 
 use std::path::PathBuf;
 
+use super::TempEntryIdentity;
+
 /// Retains the private cleanup sandbox created beside a host resource.
 #[derive(Debug)]
 pub(crate) struct HostTempResourceBackend {
+    /// Unique native identity captured at successful construction.
+    pub(crate) identity: TempEntryIdentity,
     /// Directory that is removed after the resource is released.
     pub(crate) sandbox_path: PathBuf,
 }

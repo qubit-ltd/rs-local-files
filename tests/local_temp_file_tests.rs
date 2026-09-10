@@ -23,6 +23,7 @@ use qubit_local_files::LocalFileSystem;
 use qubit_local_files::error::LocalFileErrorKind;
 #[cfg(feature = "test-support")]
 use qubit_local_files::error::LocalFileOperation;
+use qubit_local_files::error::LocalPersistErrorParts;
 use qubit_local_files::options::LocalPersistOptions;
 use qubit_local_files::options::LocalTempFileOptions;
 #[cfg(feature = "test-support")]
@@ -31,6 +32,7 @@ use qubit_local_files::outcome::LocalPersistFailureState;
 use qubit_local_files::outcome::LocalPersistMethod;
 #[cfg(all(feature = "test-support", unix))]
 use qubit_local_files::outcome::LocalPersistStage;
+use qubit_local_files::outcome::LocalTempSourceState;
 use qubit_local_files::policy::LocalDurabilityRequirement;
 #[cfg(feature = "test-support")]
 use qubit_local_files::test_support::install_test_fault;
@@ -185,7 +187,12 @@ fn test_local_temp_file_keep_conflict_retains_resource_for_retry() {
         .keep()
         .expect_err("occupied generated target should reject keep");
     assert_eq!(LocalPersistFailureState::NotPublished, error.state());
-    let (_, temporary, requested, resolved, _) = error.into_parts();
+    let LocalPersistErrorParts {
+        resource: temporary,
+        requested_target: requested,
+        resolved_target: resolved,
+        ..
+    } = error.into_parts();
     assert_eq!(target, requested);
     assert_eq!(Some(target.clone()), resolved);
 
@@ -397,36 +404,75 @@ fn test_local_temp_file_required_source_sync_failure_is_not_published() {
     );
 }
 
-/// Verifies a required parent-sync failure reports an already-published target
-/// and never lets the returned guard delete it.
+/// Published failure permits only sandbox cleanup and retains its snapshot
+/// after resource mutation, through both Host and Rooted authorities.
 #[cfg(all(feature = "test-support", unix))]
 #[test]
-fn test_local_temp_file_required_destination_sync_failure_is_published() {
-    run_in_test_fault_process(
-        "test_local_temp_file_required_destination_sync_failure_is_published",
-        "temp-file-parent-sync",
-        || {
-            let parent = tempdir().expect("temporary parent should be created");
-            let target = parent.path().join("persisted");
-            let temporary = LocalFileSystem::host()
-                .expect("Host filesystem should open")
-                .create_temp_file_with_options(&LocalTempFileOptions::new().with_parent(parent.path()))
-                .expect("temporary file should be created");
-
-            let error = temporary
-                .persist_with(
-                    &target,
-                    LocalPersistOptions::new().with_durability(LocalDurabilityRequirement::Required),
-                )
-                .expect_err("injected destination sync failure should report partial publication");
-
-            assert_eq!(LocalPersistStage::SynchronizeDestination, error.stage());
-            assert_eq!(LocalPersistFailureState::Published, error.state());
-            assert!(target.is_file());
-            drop(error);
-            assert!(target.is_file());
-        },
-    );
+fn test_temp_published_failure_is_cleanup_only() {
+    use LocalTempSourceState;
+    for rooted in [false, true] {
+        run_in_test_fault_process(
+            "test_temp_published_failure_is_cleanup_only",
+            "temp-file-parent-sync",
+            || {
+                let parent = tempdir().expect("create parent");
+                let filesystem = if rooted {
+                    LocalFileSystem::rooted(parent.path())
+                } else {
+                    LocalFileSystem::host()
+                }
+                .expect("open authority");
+                let creation = if rooted {
+                    Path::new(std::path::MAIN_SEPARATOR_STR)
+                } else {
+                    parent.path()
+                };
+                let resource = filesystem
+                    .create_temp_file_with_options(&LocalTempFileOptions::new().with_parent(creation))
+                    .expect("create source");
+                let source = if rooted {
+                    rooted_host_path(parent.path(), resource.path())
+                } else {
+                    resource.path().to_path_buf()
+                };
+                let sandbox = source.parent().expect("sandbox parent").to_path_buf();
+                let target = creation.join("published");
+                let error = resource
+                    .persist_with(
+                        &target,
+                        LocalPersistOptions::new().with_durability(LocalDurabilityRequirement::Required),
+                    )
+                    .expect_err("inject destination sync failure");
+                assert_eq!(error.stage(), LocalPersistStage::SynchronizeDestination);
+                assert_eq!(error.state(), LocalPersistFailureState::Published);
+                assert_eq!(error.source_state(), LocalTempSourceState::CleanupRequired);
+                assert!(!source.exists());
+                assert!(sandbox.is_dir());
+                assert!(parent.path().join("published").is_file());
+                let error = error
+                    .into_parts()
+                    .resource
+                    .persist(Path::new(""))
+                    .expect_err("cleanup-only rejects retry first");
+                assert_eq!(error.state(), LocalPersistFailureState::NotPublished);
+                assert_eq!(error.source_state(), LocalTempSourceState::CleanupRequired);
+                assert_eq!(error.stage(), LocalPersistStage::InstallDestination);
+                let mut error = error
+                    .into_parts()
+                    .resource
+                    .keep()
+                    .expect_err("cleanup-only rejects keep");
+                assert_eq!(error.state(), LocalPersistFailureState::NotPublished);
+                assert_eq!(error.source_state(), LocalTempSourceState::CleanupRequired);
+                error.resource_mut().cleanup().expect("remove residual sandbox");
+                assert_eq!(error.resource().source_state(), LocalTempSourceState::Released);
+                assert_eq!(error.source_state(), LocalTempSourceState::CleanupRequired);
+                assert!(!sandbox.exists());
+                drop(error);
+                assert!(parent.path().join("published").is_file());
+            },
+        );
+    }
 }
 
 /// Verifies a relative temporary parent remains bound after the current
@@ -552,7 +598,14 @@ fn test_local_temp_file_persist_rejects_non_directory_parent_and_retains_cleanup
     let error = temporary
         .persist(blocked_parent.join("target"))
         .expect_err("a file cannot serve as a target parent");
-    let (_io, mut temporary, _requested, _resolved, _stage) = error.into_parts();
+    let LocalPersistErrorParts {
+        error: _io,
+        resource: mut temporary,
+        requested_target: _requested,
+        resolved_target: _resolved,
+        stage: _stage,
+        ..
+    } = error.into_parts();
     temporary
         .cleanup()
         .expect("parent preparation failure must retain cleanup authority");
@@ -577,7 +630,14 @@ fn test_local_temp_file_known_persist_conflict_retains_cleanup() {
         .persist_with(&target, LocalPersistOptions::new().with_overwrite())
         .expect_err("a file cannot replace a directory");
     assert_eq!(LocalPersistFailureState::NotPublished, error.state());
-    let (_io, mut temporary, _requested, _resolved, _stage) = error.into_parts();
+    let LocalPersistErrorParts {
+        error: _io,
+        resource: mut temporary,
+        requested_target: _requested,
+        resolved_target: _resolved,
+        stage: _stage,
+        ..
+    } = error.into_parts();
     temporary
         .cleanup()
         .expect("known type conflicts must retain cleanup authority");
@@ -799,13 +859,27 @@ fn test_rooted_temp_file_conflicts_and_invalid_targets_retain_cleanup() {
     let error = temporary
         .persist(std::path::Path::new("/occupied"))
         .expect_err("default persistence must retain an occupied target");
-    let (_io, temporary, _requested, resolved, _stage) = error.into_parts();
+    let LocalPersistErrorParts {
+        error: _io,
+        resource: temporary,
+        requested_target: _requested,
+        resolved_target: resolved,
+        stage: _stage,
+        ..
+    } = error.into_parts();
     assert_eq!(Some(std::path::Path::new("/occupied")), resolved.as_deref());
 
     let error = temporary
         .persist_at(Path::new("/"), Path::new("../escape"), LocalPersistOptions::new())
         .expect_err("rooted persistence must reject lexical escapes");
-    let (_io, mut temporary, _requested, resolved, _stage) = error.into_parts();
+    let LocalPersistErrorParts {
+        error: _io,
+        resource: mut temporary,
+        requested_target: _requested,
+        resolved_target: resolved,
+        stage: _stage,
+        ..
+    } = error.into_parts();
     assert_eq!(None, resolved);
     temporary
         .cleanup()
@@ -853,7 +927,14 @@ fn test_local_temp_file_persist_reports_deleted_current_directory() {
             .expect_err("a relative target requires a creation-time PWD snapshot");
         env::set_current_dir(&original).expect("original current directory should be restored");
 
-        let (io, mut temporary, _requested, resolved, _stage) = error.into_parts();
+        let LocalPersistErrorParts {
+            error: io,
+            resource: mut temporary,
+            requested_target: _requested,
+            resolved_target: resolved,
+            stage: _stage,
+            ..
+        } = error.into_parts();
         assert_eq!(LocalFileErrorKind::InvalidPath, io.kind());
         assert_eq!(None, resolved.as_deref());
         temporary
@@ -899,7 +980,14 @@ fn test_local_temp_file_persist_respects_conflict_and_overwrite_policy() {
         .persist(&target)
         .expect_err("default persistence must not replace an existing file");
     assert_eq!(target, error.requested_target());
-    let (_io, temporary, _requested, _resolved, _stage) = error.into_parts();
+    let LocalPersistErrorParts {
+        error: _io,
+        resource: temporary,
+        requested_target: _requested,
+        resolved_target: _resolved,
+        stage: _stage,
+        ..
+    } = error.into_parts();
     assert!(temporary.path().exists());
 
     let persisted = temporary
@@ -956,8 +1044,10 @@ fn test_local_temp_file_cleanup_reports_and_retries_sandbox_failure() {
             assert_eq!(LocalFileOperation::Cleanup, error.operation());
             assert!(!resource.exists());
             assert!(sandbox.exists());
+            assert_eq!(temporary.source_state(), LocalTempSourceState::CleanupRequired);
             temporary.cleanup().expect("sandbox cleanup should be retryable");
             assert!(!sandbox.exists());
+            assert_eq!(temporary.source_state(), LocalTempSourceState::Released);
         },
     );
 }
@@ -1044,7 +1134,17 @@ fn test_local_temp_file_persist_rejects_replaced_file() {
     let error = temporary
         .persist(&target)
         .expect_err("persistence must reject a replaced temporary file");
-    let (_io, temporary, _requested, _resolved, _stage) = error.into_parts();
+    assert_eq!(LocalPersistFailureState::NotPublished, error.state());
+    let LocalPersistErrorParts {
+        error: _io,
+        resource: mut temporary,
+        requested_target: _requested,
+        resolved_target: _resolved,
+        stage: _stage,
+        ..
+    } = error.into_parts();
+    assert_eq!(LocalTempSourceState::Indeterminate, temporary.source_state());
+    assert!(temporary.cleanup().is_err());
     drop(temporary);
 
     assert!(!target.exists());

@@ -32,6 +32,8 @@ mod local_copy_dir_stage;
 mod local_copy_dir_stats;
 mod local_copy_type_conflict_policy;
 mod local_persist_error;
+mod local_persist_error_parts;
+pub use local_persist_error_parts::LocalPersistErrorParts;
 mod local_persist_failure_state;
 mod local_persist_options;
 mod local_persist_stage;
@@ -44,6 +46,7 @@ pub use internal::CopyDestinationAction;
 pub(crate) use internal::CopyTreeBackend;
 pub(crate) use internal::CopyTreeFrameContext;
 pub(crate) use internal::DeleteBackend;
+pub(crate) use internal::DeleteBudget;
 pub(crate) use internal::DirectoryIdentity;
 pub(crate) use internal::HostLocalFileSystem;
 #[cfg(test)]
@@ -103,6 +106,7 @@ pub(crate) use internal::read_rooted_link;
 #[cfg(any(unix, windows))]
 pub(crate) use internal::read_rooted_symlink_metadata;
 pub(crate) use internal::remove_directory_tree;
+pub(crate) use internal::remove_host_non_directory;
 #[cfg(any(unix, windows))]
 pub(crate) use internal::remove_rooted_entry;
 pub(crate) use internal::rename_failure_after_native_attempt;
@@ -120,6 +124,8 @@ pub(crate) use internal::sync_parent_dir;
 #[cfg(unix)]
 pub(crate) use internal::sync_rooted_parent;
 pub(crate) use internal::try_random_file_name;
+#[cfg(unix)]
+pub(crate) use internal::unlink_rooted_entry;
 pub(crate) use internal::validate_copy_source_kind;
 pub(crate) use internal::validate_temp_affixes;
 pub use local_atomic_commit_error::LocalAtomicCommitError;

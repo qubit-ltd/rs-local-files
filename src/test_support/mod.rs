@@ -31,6 +31,16 @@ pub(crate) use host_metadata_probes::record_host_prefix_probe;
 #[doc(hidden)]
 pub use host_metadata_probes::reset_host_metadata_probe_counts;
 #[cfg(feature = "test-support")]
+pub(crate) use internal::temp_cleanup_add_child;
+#[cfg(feature = "test-support")]
+pub(crate) use internal::temp_cleanup_before_remove;
+#[cfg(feature = "test-support")]
+pub(crate) use internal::temp_cleanup_deadline_expired;
+#[cfg(feature = "test-support")]
+pub(crate) use internal::temp_cleanup_metadata;
+#[cfg(all(unix, feature = "test-support"))]
+pub(crate) use internal::temp_cleanup_replace_observed_entry;
+#[cfg(feature = "test-support")]
 #[doc(hidden)]
 pub use test_fault_plan::TestFaultPlan;
 pub use test_fault_point::TestFaultPoint;

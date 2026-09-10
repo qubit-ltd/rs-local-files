@@ -17,6 +17,44 @@ use crate::LocalWriteFailureState;
 
 /// Failed writer commit with publication state and an optional retryable
 /// writer.
+///
+/// # Examples
+///
+/// A create-new writer stages its bytes before publication. If another file
+/// appears at the destination, the failed commit preserves that file. Inspect
+/// the optional writer separately from the publication state: an unchanged
+/// destination does not guarantee that staging was retained for retry.
+///
+/// ```
+/// use std::fs;
+/// use std::io::Write;
+///
+/// use qubit_local_files::LocalFileSystem;
+/// use qubit_local_files::options::LocalWriteMode;
+/// use qubit_local_files::options::LocalWriteOptions;
+/// use qubit_local_files::outcome::LocalWriteFailureState;
+///
+/// # fn main() -> Result<(), Box<dyn std::error::Error>> {
+/// let directory = tempfile::tempdir()?;
+/// let target = directory.path().join("result.txt");
+/// let mut writer = LocalFileSystem::host()?.open_writer_with_options(
+///     &target,
+///     &LocalWriteOptions::new(LocalWriteMode::CreateNew),
+/// )?;
+/// writer.write_all(b"staged content")?;
+/// fs::write(&target, b"another writer's content")?;
+///
+/// let failure = writer.commit().expect_err("the destination already exists");
+/// let (_error, state, writer) = failure.into_parts();
+/// assert_eq!(state, LocalWriteFailureState::NotPublished);
+/// if let Some(mut writer) = writer {
+///     let _outcome = writer.abort()?;
+/// }
+/// assert_eq!(fs::read(&target)?, b"another writer's content");
+/// directory.close()?;
+/// # Ok(())
+/// # }
+/// ```
 #[derive(Debug)]
 pub struct LocalFileCommitError {
     /// Structured local filesystem failure.

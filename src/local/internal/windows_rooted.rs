@@ -10,8 +10,10 @@
 // Platform behavior is covered through public rooted integration tests.
 
 mod directory;
+mod file_io;
 mod handle;
 mod namespace_mutation;
+pub(in crate::local::internal) mod native;
 mod symlink;
 mod volume_probe;
 
@@ -20,10 +22,10 @@ pub(crate) use directory::open_root_directory_reader;
 pub(crate) use directory::open_rooted_directory_reader;
 pub(crate) use directory::read_rooted_directory;
 pub(crate) use directory::remove_rooted_entry;
+pub(crate) use file_io::open_rooted_native_writer;
 pub(crate) use handle::open_root_directory;
 pub(crate) use handle::open_rooted_component_directory;
 pub(crate) use handle::open_rooted_native_reader;
-pub(crate) use handle::open_rooted_native_writer;
 pub(crate) use handle::read_rooted_component_metadata;
 pub(crate) use handle::read_rooted_symlink_metadata;
 pub(crate) use namespace_mutation::rename_rooted_entry;

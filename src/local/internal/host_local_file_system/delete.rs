@@ -138,7 +138,7 @@ impl HostLocalFileSystem {
 }
 
 /// Removes one Host entry already known not to be a real directory.
-fn remove_host_non_directory(path: &Path, metadata: &fs::Metadata) -> io::Result<()> {
+pub(crate) fn remove_host_non_directory(path: &Path, metadata: &fs::Metadata) -> io::Result<()> {
     #[cfg(windows)]
     {
         use std::os::windows::fs::FileTypeExt;

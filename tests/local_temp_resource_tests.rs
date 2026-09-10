@@ -12,6 +12,8 @@ use std::os::unix::ffi::OsStringExt;
 
 use qubit_local_files::LocalFileSystem;
 use qubit_local_files::error::LocalFileErrorKind;
+#[cfg(any(target_os = "linux", target_os = "macos"))]
+use qubit_local_files::error::LocalPersistErrorParts;
 use qubit_local_files::options::LocalTempDirectoryOptions;
 use qubit_local_files::options::LocalTempFileOptions;
 #[cfg(any(target_os = "linux", target_os = "macos"))]
@@ -142,7 +144,14 @@ fn test_local_temp_file_persist_rejects_interior_nul_target() {
         .expect_err("interior NUL must be rejected by native no-replace move");
     assert_eq!(LocalFileErrorKind::InvalidPath, error.kind());
     assert_eq!(LocalPersistFailureState::NotPublished, error.state());
-    let (_io, mut temporary, _requested, _resolved, _stage) = error.into_parts();
+    let LocalPersistErrorParts {
+        error: _io,
+        resource: mut temporary,
+        requested_target: _requested,
+        resolved_target: _resolved,
+        stage: _stage,
+        ..
+    } = error.into_parts();
     temporary
         .cleanup()
         .expect("unpublished temporary file should retain cleanup authority");

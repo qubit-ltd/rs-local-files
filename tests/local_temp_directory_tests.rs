@@ -9,6 +9,7 @@
 #[cfg(not(windows))]
 use std::env;
 use std::fs;
+use std::io::ErrorKind;
 use std::path::Path;
 use std::path::PathBuf;
 #[cfg(not(windows))]
@@ -27,9 +28,11 @@ use qubit_local_files::LocalFileSystem;
 use qubit_local_files::error::LocalFileErrorKind;
 #[cfg(feature = "test-support")]
 use qubit_local_files::error::LocalFileOperation;
+use qubit_local_files::error::LocalPersistErrorParts;
 use qubit_local_files::options::LocalPersistOptions;
 use qubit_local_files::options::LocalTempDirectoryOptions;
 use qubit_local_files::outcome::LocalPersistFailureState;
+use qubit_local_files::outcome::LocalTempSourceState;
 use qubit_local_files::policy::LocalDurabilityRequirement;
 #[cfg(feature = "test-support")]
 use qubit_local_files::test_support::install_test_fault;
@@ -68,16 +71,31 @@ fn run_in_deleted_current_directory_process(test_name: &str, action: impl FnOnce
 #[test]
 fn test_local_temp_directory_child_helpers_reject_escape_paths() {
     let parent = tempdir().expect("temporary parent should be created");
-    let temporary = LocalFileSystem::host()
+    let host = LocalFileSystem::host()
         .expect("Host filesystem should open")
         .create_temp_directory_with_options(&LocalTempDirectoryOptions::new().with_parent(parent.path()))
-        .expect("temporary directory should be created");
+        .expect("Host temporary directory should be created");
+    let rooted = LocalFileSystem::rooted(parent.path())
+        .expect("Rooted filesystem should open")
+        .create_temp_directory()
+        .expect("Rooted temporary directory should be created");
 
-    assert!(temporary.child(Path::new("nested/file")).is_err());
-    assert!(temporary.child(Path::new(".")).is_err());
-    assert!(temporary.child(parent.path()).is_err());
-    assert!(temporary.descendant(Path::new("../escape")).is_err());
-    assert!(temporary.descendant(Path::new(".")).is_err());
+    for mut temporary in [host, rooted] {
+        assert!(temporary.child(Path::new("nested/file")).is_err());
+        assert!(temporary.child(Path::new(".")).is_err());
+        assert!(temporary.child(parent.path()).is_err());
+        for invalid in ["", ".", "../escape", "a/./b", "a/../b"] {
+            let error = temporary
+                .descendant(Path::new(invalid))
+                .expect_err("descendant rejects literal dot components and empty paths");
+            assert_eq!(error.kind(), ErrorKind::InvalidInput);
+        }
+        assert_eq!(
+            temporary.descendant(Path::new("a/b")).expect("normal descendant"),
+            temporary.path().join("a/b"),
+        );
+        temporary.cleanup().expect("remove descendant fixture");
+    }
 }
 
 /// Verifies temporary-directory creation rejects a zero collision-retry
@@ -141,7 +159,10 @@ fn test_local_temp_directory_rejects_required_durability_before_publication() {
     assert_eq!(LocalPersistFailureState::NotPublished, error.state());
     assert!(source.is_dir());
     assert!(!target.exists());
-    let (_, mut temporary, _, _, _) = error.into_parts();
+    let LocalPersistErrorParts {
+        resource: mut temporary,
+        ..
+    } = error.into_parts();
     temporary
         .cleanup()
         .expect("retained temporary directory should remain cleanable");
@@ -327,7 +348,12 @@ fn test_local_temp_directory_keep_conflict_retains_resource_for_retry() {
     let error = temporary
         .keep()
         .expect_err("occupied generated target should reject keep");
-    let (_, temporary, requested, resolved, _) = error.into_parts();
+    let LocalPersistErrorParts {
+        resource: temporary,
+        requested_target: requested,
+        resolved_target: resolved,
+        ..
+    } = error.into_parts();
     assert_eq!(target, requested);
     assert_eq!(Some(target.clone()), resolved);
 
@@ -394,7 +420,14 @@ fn test_local_temp_directory_persist_conflict_retains_resource_for_overwrite() {
         .persist(&target)
         .expect_err("default persistence must not replace a destination");
     assert_eq!(target, error.requested_target());
-    let (_io, temporary, _requested, _resolved, _stage) = error.into_parts();
+    let LocalPersistErrorParts {
+        error: _io,
+        resource: temporary,
+        requested_target: _requested,
+        resolved_target: _resolved,
+        stage: _stage,
+        ..
+    } = error.into_parts();
     assert!(source.exists());
 
     let persisted = temporary
@@ -425,7 +458,14 @@ fn test_local_temp_directory_persist_rejects_non_directory_parent_and_cleans_up(
     let error = temporary
         .persist(blocked_parent.join("target"))
         .expect_err("a file cannot serve as a target parent");
-    let (_io, mut temporary, _requested, _resolved, _stage) = error.into_parts();
+    let LocalPersistErrorParts {
+        error: _io,
+        resource: mut temporary,
+        requested_target: _requested,
+        resolved_target: _resolved,
+        stage: _stage,
+        ..
+    } = error.into_parts();
     temporary
         .cleanup()
         .expect("parent preparation failure must retain cleanup authority");
@@ -450,7 +490,14 @@ fn test_local_temp_directory_known_persist_conflict_retains_cleanup() {
         .persist_with(&target, LocalPersistOptions::new().with_overwrite())
         .expect_err("a directory cannot replace a file");
     assert_eq!(LocalPersistFailureState::NotPublished, error.state());
-    let (_io, mut temporary, _requested, _resolved, _stage) = error.into_parts();
+    let LocalPersistErrorParts {
+        error: _io,
+        resource: mut temporary,
+        requested_target: _requested,
+        resolved_target: _resolved,
+        stage: _stage,
+        ..
+    } = error.into_parts();
     temporary
         .cleanup()
         .expect("known type conflicts must retain cleanup authority");
@@ -600,13 +647,27 @@ fn test_rooted_temp_directory_conflicts_and_invalid_targets_retain_cleanup() {
     let error = temporary
         .persist(Path::new("/occupied"))
         .expect_err("default persistence must retain an occupied target");
-    let (_io, temporary, _requested, resolved, _stage) = error.into_parts();
+    let LocalPersistErrorParts {
+        error: _io,
+        resource: temporary,
+        requested_target: _requested,
+        resolved_target: resolved,
+        stage: _stage,
+        ..
+    } = error.into_parts();
     assert_eq!(Some(Path::new("/occupied")), resolved.as_deref());
 
     let error = temporary
         .persist_at(Path::new("/"), Path::new("../escape"), LocalPersistOptions::new())
         .expect_err("rooted persistence must reject lexical escapes");
-    let (_io, mut temporary, _requested, resolved, _stage) = error.into_parts();
+    let LocalPersistErrorParts {
+        error: _io,
+        resource: mut temporary,
+        requested_target: _requested,
+        resolved_target: resolved,
+        stage: _stage,
+        ..
+    } = error.into_parts();
     assert_eq!(None, resolved);
     temporary
         .cleanup()
@@ -637,8 +698,10 @@ fn test_local_temp_directory_cleanup_reports_and_retries_sandbox_failure() {
             assert_eq!(LocalFileOperation::Cleanup, error.operation());
             assert!(!resource.exists());
             assert!(sandbox.exists());
+            assert_eq!(temporary.source_state(), LocalTempSourceState::CleanupRequired);
             temporary.cleanup().expect("sandbox cleanup should be retryable");
             assert!(!sandbox.exists());
+            assert_eq!(temporary.source_state(), LocalTempSourceState::Released);
         },
     );
 }
@@ -724,7 +787,14 @@ fn test_local_temp_directory_persist_reports_deleted_current_directory() {
             .expect_err("a relative target requires a creation-time PWD snapshot");
         env::set_current_dir(&original).expect("original current directory should be restored");
 
-        let (io, mut temporary, _requested, resolved, _stage) = error.into_parts();
+        let LocalPersistErrorParts {
+            error: io,
+            resource: mut temporary,
+            requested_target: _requested,
+            resolved_target: resolved,
+            stage: _stage,
+            ..
+        } = error.into_parts();
         assert_eq!(LocalFileErrorKind::InvalidPath, io.kind());
         assert_eq!(None, resolved.as_deref());
         temporary

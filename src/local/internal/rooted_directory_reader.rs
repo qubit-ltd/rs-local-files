@@ -8,6 +8,13 @@
 //! Platform-specific state for lazy Rooted directory enumeration.
 // qubit-style: allow source-test-pair
 
+// Implements Unix descriptor-relative directory enumeration.
+#[cfg(unix)]
+mod unix;
+// Implements Windows handle-relative directory enumeration.
+#[cfg(windows)]
+mod windows;
+
 use std::fs::File;
 
 #[cfg(unix)]

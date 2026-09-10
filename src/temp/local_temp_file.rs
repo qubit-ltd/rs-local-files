@@ -21,14 +21,13 @@ use std::path::PathBuf;
 use std::sync::Arc;
 
 use super::internal::LocalTempResourceBackend;
+use super::internal::LocalTempResourceCore;
 use super::internal::LocalTempResourceState;
 use super::internal::RootedTempResourceBackend;
 use super::internal::TempEntryIdentity;
 use super::internal::generated_target;
 use super::internal::prepare_host_parent;
-use super::internal::prepare_persist_target;
 use super::internal::prepare_rooted_parent;
-use super::internal::validate_persist_base;
 use crate::LocalDurabilityRequirement;
 use crate::LocalFileError;
 use crate::LocalFileErrorKind;
@@ -42,6 +41,7 @@ use crate::LocalPersistStage;
 use crate::LocalRelativePath;
 use crate::LocalResult;
 use crate::LocalSymlinkPolicy;
+use crate::outcome::LocalTempSourceState;
 use crate::path::LocalFileSystemScope;
 use crate::path::LocalPathResolver;
 
@@ -77,22 +77,10 @@ use crate::path::LocalPathResolver;
 #[must_use = "use explicit cleanup to observe errors; drop only attempts cleanup"]
 #[derive(Debug)]
 pub struct LocalTempFile {
-    /// Stable namespace-absolute path after public namespace binding.
-    path: PathBuf,
-    /// Authority and resource ownership state.
-    backend: LocalTempResourceBackend,
-    /// The open native file, until explicitly closed.
+    /// Bound authority and shared source lifecycle.
+    core: LocalTempResourceCore,
+    /// Open file handle until closed or source authority is invalidated.
     file: Option<File>,
-    /// Native identity captured when the temporary file was created.
-    host_identity: Option<TempEntryIdentity>,
-    /// Rooted identity captured through the opened root authority.
-    rooted_identity: Option<crate::rooted::Metadata>,
-    /// Namespace certainty governing cleanup and drop behavior.
-    state: LocalTempResourceState,
-    /// Symbolic-link policy retained for persistence targets.
-    symlink_policy: LocalSymlinkPolicy,
-    /// Creation-time PWD retained only for source and cleanup diagnostics.
-    creation_current_directory: Option<PathBuf>,
 }
 
 impl LocalTempFile {
@@ -108,15 +96,14 @@ impl LocalTempFile {
         file: File,
         symlink_policy: LocalSymlinkPolicy,
     ) -> Result<Self> {
+        let identity = TempEntryIdentity::from_file(&file)?;
         Ok(Self {
-            path,
-            backend: LocalTempResourceBackend::Host(super::internal::HostTempResourceBackend { sandbox_path }),
-            host_identity: Some(TempEntryIdentity::from_file(&file)?),
-            rooted_identity: None,
+            core: LocalTempResourceCore::new(
+                path,
+                LocalTempResourceBackend::Host(super::internal::HostTempResourceBackend { sandbox_path, identity }),
+                symlink_policy,
+            ),
             file: Some(file),
-            state: LocalTempResourceState::Owned,
-            symlink_policy,
-            creation_current_directory: None,
         })
     }
 
@@ -133,19 +120,19 @@ impl LocalTempFile {
         file: File,
         symlink_policy: LocalSymlinkPolicy,
     ) -> Result<Self> {
+        let identity = crate::rooted::Metadata::from_open_file(&file)?;
         Ok(Self {
-            path: path.clone(),
-            backend: LocalTempResourceBackend::Rooted(RootedTempResourceBackend {
-                root,
-                relative_path: path,
-                sandbox_path,
-            }),
-            host_identity: None,
-            rooted_identity: Some(crate::rooted::Metadata::from_open_file(&file)?),
+            core: LocalTempResourceCore::new(
+                path.clone(),
+                LocalTempResourceBackend::Rooted(RootedTempResourceBackend {
+                    root,
+                    relative_path: path,
+                    sandbox_path,
+                    identity,
+                }),
+                symlink_policy,
+            ),
             file: Some(file),
-            state: LocalTempResourceState::Owned,
-            symlink_policy,
-            creation_current_directory: None,
         })
     }
 
@@ -154,7 +141,16 @@ impl LocalTempFile {
     #[cfg_attr(not(coverage), inline(always))]
     #[cfg_attr(coverage, inline(never))]
     pub fn path(&self) -> &Path {
-        &self.path
+        &self.core.path
+    }
+
+    /// Returns the current source authority, independently of earlier
+    /// publication.
+    #[must_use = "inspect the source authority before choosing a recovery action"]
+    #[cfg_attr(not(coverage), inline)]
+    #[cfg_attr(coverage, inline(never))]
+    pub const fn source_state(&self) -> LocalTempSourceState {
+        self.core.source_state()
     }
 
     /// Closes the file I/O handle while retaining cleanup and persistence
@@ -176,23 +172,23 @@ impl LocalTempFile {
         self.ensure_cleanup_safe().map_err(|error| {
             self.contextualize_error(LocalFileError::from_io(
                 LocalFileOperation::Cleanup,
-                Some(self.path.clone()),
+                Some(self.core.path.clone()),
                 None,
                 error,
             ))
         })?;
-        if self.state == LocalTempResourceState::Owned {
+        if self.core.state == LocalTempResourceState::Owned {
             self.remove_resource().map_err(|error| {
                 self.contextualize_error(LocalFileError::from_io(
                     LocalFileOperation::Cleanup,
-                    Some(self.path.clone()),
+                    Some(self.core.path.clone()),
                     None,
                     error,
                 ))
             })?;
-            self.state = LocalTempResourceState::SandboxPending;
+            self.core.state = LocalTempResourceState::SandboxPending;
         }
-        if self.state == LocalTempResourceState::SandboxPending {
+        if self.core.state == LocalTempResourceState::SandboxPending {
             self.release_sandbox().map_err(|error| {
                 self.contextualize_error(LocalFileError::from_io(
                     LocalFileOperation::Cleanup,
@@ -201,7 +197,7 @@ impl LocalTempFile {
                     error,
                 ))
             })?;
-            self.state = LocalTempResourceState::Released;
+            self.core.state = LocalTempResourceState::Released;
         }
         Ok(())
     }
@@ -213,11 +209,26 @@ impl LocalTempFile {
     #[cfg_attr(not(coverage), inline)]
     #[cfg_attr(coverage, inline(never))]
     pub fn keep(self) -> std::result::Result<LocalPersistOutcome, LocalPersistError<Self>> {
-        let requested_target = self.path.clone();
+        let requested_target = self.core.path.clone();
+        if let Err(error) = self.core.ensure_publishable() {
+            return Err(self.persist_error(
+                error,
+                requested_target,
+                None,
+                LocalPersistStage::InstallDestination,
+                LocalPersistFailureState::NotPublished,
+            ));
+        }
         let target = match generated_target(&requested_target) {
             Ok(target) => target,
             Err(error) => {
-                return Err(self.persist_error(error, requested_target, None, LocalPersistStage::ResolveTarget));
+                return Err(self.persist_error(
+                    error,
+                    requested_target,
+                    None,
+                    LocalPersistStage::ResolveTarget,
+                    LocalPersistFailureState::NotPublished,
+                ));
             }
         };
         self.persist_with_path(&target, None, LocalPersistOptions::new())
@@ -259,10 +270,12 @@ impl LocalTempFile {
         self.persist_with_path(target.as_ref(), None, options)
     }
 
-    /// Returns the mutable open file handle, or an error after [`Self::close`].
+    /// Returns the mutable open file handle, or an error after [`Self::close`]
+    /// or when source authority no longer permits file operations.
     #[cfg_attr(not(coverage), inline(always))]
     #[cfg_attr(coverage, inline(never))]
     pub fn as_file_mut(&mut self) -> Result<&mut File> {
+        self.core.ensure_publishable()?;
         self.file.as_mut().ok_or_else(closed_file_error)
     }
 
@@ -289,22 +302,7 @@ impl LocalTempFile {
     /// namespace input; consuming failure drops this guard and attempts
     /// cleanup.
     pub(crate) fn bind_namespace(mut self, resolver: LocalPathResolver) -> LocalResult<Self> {
-        let input = match &self.backend {
-            LocalTempResourceBackend::Host(_) => self.path.clone(),
-            LocalTempResourceBackend::Rooted(rooted) => virtual_rooted_path(&rooted.relative_path),
-        };
-        self.path = resolver
-            .resolve(&input)
-            .map_err(|error| {
-                let error = error.with_operation(LocalFileOperation::CreateTempFile);
-                match resolver.current_directory() {
-                    Some(current_directory) => error.with_current_directory(current_directory.to_path_buf()),
-                    None => error,
-                }
-            })?
-            .namespace_absolute()
-            .to_path_buf();
-        self.creation_current_directory = resolver.current_directory().map(Path::to_path_buf);
+        self.core.bind_namespace(resolver, LocalFileOperation::CreateTempFile)?;
         Ok(self)
     }
 
@@ -319,11 +317,17 @@ impl LocalTempFile {
         options: LocalPersistOptions,
     ) -> std::result::Result<LocalPersistOutcome, LocalPersistError<Self>> {
         let requested_target = target.to_path_buf();
-        let scope = match &self.backend {
-            LocalTempResourceBackend::Host(_) => LocalFileSystemScope::Host,
-            LocalTempResourceBackend::Rooted(_) => LocalFileSystemScope::Rooted,
-        };
-        let resolved_target = match prepare_persist_target(scope, base, target) {
+        if let Err(error) = self.core.ensure_publishable() {
+            return Err(self.persist_error(
+                error,
+                requested_target,
+                None,
+                LocalPersistStage::InstallDestination,
+                LocalPersistFailureState::NotPublished,
+            ));
+        }
+        let scope = self.core.scope();
+        let resolved_target = match self.core.prepare_target(base, target) {
             Ok(target) => target,
             Err(error) => {
                 return Err(self.persist_error(
@@ -331,6 +335,7 @@ impl LocalTempFile {
                     requested_target,
                     None,
                     LocalPersistStage::ResolveTarget,
+                    LocalPersistFailureState::NotPublished,
                 ));
             }
         };
@@ -341,6 +346,7 @@ impl LocalTempFile {
                 requested_target,
                 Some(namespace_target),
                 LocalPersistStage::ResolveTarget,
+                LocalPersistFailureState::NotPublished,
             ));
         }
         if resolved_target.directory_required() {
@@ -349,44 +355,46 @@ impl LocalTempFile {
                 requested_target,
                 Some(namespace_target),
                 LocalPersistStage::ResolveTarget,
+                LocalPersistFailureState::NotPublished,
             ));
         }
         if let Some(base) = base
-            && let Err(error) = validate_persist_base(&self.backend, base, self.symlink_policy)
+            && let Err(error) = self.core.validate_base(base)
         {
             return Err(self.persist_error(
                 error.into_io_error(),
                 requested_target,
                 Some(namespace_target),
                 LocalPersistStage::ResolveTarget,
+                LocalPersistFailureState::NotPublished,
             ));
         }
         if let Err(error) = self.ensure_identity_matches() {
-            return Err(self.persist_error(error, target.to_path_buf(), None, LocalPersistStage::InstallDestination));
-        }
-        if self.state == LocalTempResourceState::Indeterminate {
             return Err(self.persist_error(
-                Error::other("temporary file namespace state is indeterminate"),
-                target.to_path_buf(),
-                None,
+                error,
+                requested_target,
+                Some(namespace_target),
                 LocalPersistStage::InstallDestination,
+                LocalPersistFailureState::NotPublished,
             ));
         }
+
         let file_durable = match self.synchronize_source(options.durability()) {
             Ok(durable) => durable,
             Err(error) => {
                 return Err(self.persist_error(
                     error,
-                    target.to_path_buf(),
-                    None,
+                    requested_target,
+                    Some(namespace_target),
                     LocalPersistStage::SynchronizeSource,
+                    LocalPersistFailureState::NotPublished,
                 ));
             }
         };
         self.close();
         let authority_target = resolved_target.authority_relative().to_path_buf();
-        if matches!(&self.backend, LocalTempResourceBackend::Host(_)) {
-            let target = match crate::local::resolve_host_path(&authority_target, self.symlink_policy, false) {
+        if matches!(&self.core.backend, LocalTempResourceBackend::Host(_)) {
+            let target = match crate::local::resolve_host_path(&authority_target, self.core.symlink_policy, false) {
                 Ok(target) => target,
                 Err(error) => {
                     return Err(self.persist_error(
@@ -394,6 +402,7 @@ impl LocalTempFile {
                         requested_target,
                         Some(namespace_target),
                         LocalPersistStage::ResolveTarget,
+                        LocalPersistFailureState::NotPublished,
                     ));
                 }
             };
@@ -405,36 +414,43 @@ impl LocalTempFile {
                         requested_target,
                         Some(namespace_target),
                         LocalPersistStage::PrepareParent,
+                        LocalPersistFailureState::NotPublished,
                     ));
                 }
             };
             let result = if options.overwrites() {
-                crate::local::replace_file(&self.path, &target)
+                crate::local::replace_file(&self.core.path, &target)
             } else {
-                crate::local::move_file_without_replacing(&self.path, &target)
+                crate::local::move_file_without_replacing(&self.core.path, &target)
             };
             if let Err(error) = result {
-                self.record_native_persist_failure(&error);
+                let publication = self.record_native_persist_failure(&error);
                 return Err(self.persist_error(
                     error,
                     requested_target,
                     Some(namespace_target),
                     LocalPersistStage::InstallDestination,
+                    publication,
                 ));
             }
-            self.state = LocalTempResourceState::SandboxPending;
-            let parent_durable =
-                match synchronize_host_publication(&self.path, &target, &parent_dirs_to_sync, options.durability()) {
-                    Ok(durable) => durable,
-                    Err(error) => {
-                        return Err(self.persist_error(
-                            error,
-                            requested_target,
-                            Some(namespace_target),
-                            LocalPersistStage::SynchronizeDestination,
-                        ));
-                    }
-                };
+            self.core.state = LocalTempResourceState::SandboxPending;
+            let parent_durable = match synchronize_host_publication(
+                &self.core.path,
+                &target,
+                &parent_dirs_to_sync,
+                options.durability(),
+            ) {
+                Ok(durable) => durable,
+                Err(error) => {
+                    return Err(self.persist_error(
+                        error,
+                        requested_target,
+                        Some(namespace_target),
+                        LocalPersistStage::SynchronizeDestination,
+                        LocalPersistFailureState::Published,
+                    ));
+                }
+            };
             let cleanup_error = self.release_sandbox().err().map(|error| {
                 self.contextualize_error(LocalFileError::from_io(
                     LocalFileOperation::Cleanup,
@@ -443,7 +459,7 @@ impl LocalTempFile {
                     error,
                 ))
             });
-            self.state = LocalTempResourceState::Released;
+            self.core.state = LocalTempResourceState::Released;
             return Ok(LocalPersistOutcome::new(
                 namespace_target,
                 LocalPersistMethod::AtomicRename,
@@ -460,10 +476,11 @@ impl LocalTempFile {
                     requested_target,
                     Some(namespace_target),
                     LocalPersistStage::ResolveTarget,
+                    LocalPersistFailureState::NotPublished,
                 ));
             }
         };
-        let LocalTempResourceBackend::Rooted(rooted) = &self.backend else {
+        let LocalTempResourceBackend::Rooted(rooted) = &self.core.backend else {
             unreachable!()
         };
         let source =
@@ -471,7 +488,7 @@ impl LocalTempFile {
         let resolved = match crate::rooted_local_file_system::resolve_rooted_path(
             &rooted.root,
             &target,
-            self.symlink_policy,
+            self.core.symlink_policy,
             false,
             LocalFileOperation::PersistTemp,
         ) {
@@ -482,6 +499,7 @@ impl LocalTempFile {
                     requested_target,
                     Some(namespace_target),
                     LocalPersistStage::ResolveTarget,
+                    LocalPersistFailureState::NotPublished,
                 ));
             }
         };
@@ -492,6 +510,7 @@ impl LocalTempFile {
                 requested_target,
                 Some(namespace_target),
                 LocalPersistStage::PrepareParent,
+                LocalPersistFailureState::NotPublished,
             ));
         }
         let result = if options.overwrites() {
@@ -500,15 +519,16 @@ impl LocalTempFile {
             rooted.root.rename_without_replacing(&source, &destination)
         };
         if let Err(error) = result {
-            self.record_native_persist_failure(&error);
+            let publication = self.record_native_persist_failure(&error);
             return Err(self.persist_error(
                 error,
                 requested_target,
                 Some(namespace_target),
                 LocalPersistStage::InstallDestination,
+                publication,
             ));
         }
-        self.state = LocalTempResourceState::SandboxPending;
+        self.core.state = LocalTempResourceState::SandboxPending;
         let parent_durable =
             match synchronize_rooted_publication(&rooted.root, &source, &destination, options.durability()) {
                 Ok(durable) => durable,
@@ -518,6 +538,7 @@ impl LocalTempFile {
                         requested_target,
                         Some(namespace_target),
                         LocalPersistStage::SynchronizeDestination,
+                        LocalPersistFailureState::Published,
                     ));
                 }
             };
@@ -529,7 +550,7 @@ impl LocalTempFile {
                 error,
             ))
         });
-        self.state = LocalTempResourceState::Released;
+        self.core.state = LocalTempResourceState::Released;
         Ok(LocalPersistOutcome::new(
             namespace_target,
             LocalPersistMethod::AtomicRename,
@@ -551,7 +572,7 @@ impl LocalTempFile {
         if crate::local::take_test_support("temp-file-source-sync") {
             return Err(crate::local::test_fault_error());
         }
-        let durability_supported = match &self.backend {
+        let durability_supported = match &self.core.backend {
             LocalTempResourceBackend::Host(_) => {
                 crate::LocalFileSystemCapabilities::detect_host().supports_durable_temp_file_persist()
             }
@@ -572,8 +593,8 @@ impl LocalTempFile {
             if let Some(file) = self.file.as_ref() {
                 return file.sync_all();
             }
-            match &self.backend {
-                LocalTempResourceBackend::Host(_) => File::open(&self.path)?.sync_all(),
+            match &self.core.backend {
+                LocalTempResourceBackend::Host(_) => File::open(&self.core.path)?.sync_all(),
                 LocalTempResourceBackend::Rooted(rooted) => {
                     let path = LocalRelativePath::new(&rooted.relative_path)?;
                     rooted.root.open_probe_file(&path)?.sync_all()
@@ -595,9 +616,9 @@ impl LocalTempFile {
     #[cfg_attr(coverage, inline(never))]
     fn remove_resource(&mut self) -> Result<()> {
         self.ensure_identity_matches()?;
-        match &self.backend {
+        match &self.core.backend {
             LocalTempResourceBackend::Host(_) => {
-                std::fs::remove_file(&self.path)?;
+                std::fs::remove_file(&self.core.path)?;
                 Ok(())
             }
             LocalTempResourceBackend::Rooted(rooted) => {
@@ -616,22 +637,12 @@ impl LocalTempFile {
         if crate::local::take_test_support("temp-file-sandbox-remove") {
             return Err(crate::local::test_fault_error());
         }
-        match &self.backend {
-            LocalTempResourceBackend::Host(host) => std::fs::remove_dir(&host.sandbox_path),
-            LocalTempResourceBackend::Rooted(rooted) => {
-                let sandbox = LocalRelativePath::new(&rooted.sandbox_path)
-                    .expect("rooted temporary sandbox path was validated at creation");
-                rooted.root.remove_empty_dir(&sandbox)
-            }
-        }
+        self.core.release_sandbox()
     }
 
     /// Returns the authority-local sandbox path used for cleanup diagnostics.
     fn cleanup_path(&self) -> PathBuf {
-        match &self.backend {
-            LocalTempResourceBackend::Host(host) => host.sandbox_path.clone(),
-            LocalTempResourceBackend::Rooted(rooted) => virtual_rooted_path(&rooted.sandbox_path),
-        }
+        self.core.cleanup_path()
     }
 
     /// Builds a persistence failure with the resource's creation-time PWD.
@@ -641,26 +652,24 @@ impl LocalTempFile {
         requested_target: PathBuf,
         resolved_target: Option<PathBuf>,
         stage: LocalPersistStage,
+        publication: LocalPersistFailureState,
     ) -> LocalPersistError<Self> {
-        let current_directory = self.creation_current_directory.clone();
         let requirement_not_met =
             stage == LocalPersistStage::SynchronizeSource && error.kind() == ErrorKind::Unsupported;
-        let mut error = LocalPersistError::new(error, self, requested_target, resolved_target, stage);
-        if requirement_not_met {
-            error = error.with_kind(LocalFileErrorKind::RequirementNotMet);
-        }
-        match current_directory {
-            Some(current_directory) => error.with_current_directory(current_directory),
-            None => error,
-        }
+        let error = self
+            .core
+            .persist_error(error, requested_target, resolved_target, stage, publication);
+        let error = if requirement_not_met {
+            error.with_kind(LocalFileErrorKind::RequirementNotMet)
+        } else {
+            error
+        };
+        error.with_resource(self)
     }
 
     /// Attaches the resource's creation-time PWD to a structured error.
     fn contextualize_error(&self, error: LocalFileError) -> LocalFileError {
-        match &self.creation_current_directory {
-            Some(current_directory) => error.with_current_directory(current_directory.clone()),
-            None => error,
-        }
+        self.core.contextualize_error(error)
     }
 
     /// Rejects namespace cleanup after an indeterminate native publication
@@ -668,62 +677,26 @@ impl LocalTempFile {
     #[cfg_attr(not(coverage), inline)]
     #[cfg_attr(coverage, inline(never))]
     fn ensure_cleanup_safe(&self) -> Result<()> {
-        if self.state == LocalTempResourceState::Indeterminate {
-            return Err(Error::other(
-                "temporary file namespace state is indeterminate; cleanup is unsafe",
-            ));
-        }
-        Ok(())
+        self.core.ensure_cleanup_safe()
     }
 
     /// Rejects operations when the authority path no longer names this file.
     /// A mismatch marks the state indeterminate and returns `InvalidInput`;
-    /// native inspection errors propagate without changing the state.
+    /// failed identity inspection also marks the state indeterminate while
+    /// preserving its native error.
     fn ensure_identity_matches(&mut self) -> Result<()> {
-        let matches = match &self.backend {
-            LocalTempResourceBackend::Host(_) => self
-                .host_identity
-                .as_ref()
-                .expect("host temporary file must retain host identity")
-                .matches_path(&self.path),
-            LocalTempResourceBackend::Rooted(rooted) => rooted
-                .root
-                .symlink_metadata(
-                    &LocalRelativePath::new(&rooted.relative_path)
-                        .expect("rooted temporary path was validated at creation"),
-                )
-                .map(|metadata| {
-                    metadata.is_same_file(
-                        self.rooted_identity
-                            .as_ref()
-                            .expect("rooted temporary file must retain rooted identity"),
-                    )
-                }),
-        };
-        match matches {
-            Ok(true) => Ok(()),
-            Ok(false) => {
-                self.state = LocalTempResourceState::Indeterminate;
-                Err(Error::new(
-                    ErrorKind::InvalidInput,
-                    "temporary file path no longer names the created entry",
-                ))
-            }
-            Err(error) => Err(error),
+        let result = self.core.ensure_identity_matches();
+        if self.core.state == LocalTempResourceState::Indeterminate {
+            self.close();
         }
+        result
     }
 
     /// Records whether a failed native install proves the source remains owned.
     #[cfg_attr(not(coverage), inline)]
     #[cfg_attr(coverage, inline(never))]
-    fn record_native_persist_failure(&mut self, error: &Error) {
-        self.state = if LocalPersistFailureState::from_error(LocalPersistStage::InstallDestination, error.kind())
-            == LocalPersistFailureState::NotPublished
-        {
-            LocalTempResourceState::Owned
-        } else {
-            LocalTempResourceState::Indeterminate
-        };
+    fn record_native_persist_failure(&mut self, error: &Error) -> LocalPersistFailureState {
+        self.core.record_native_persist_failure(error)
     }
 }
 
@@ -833,11 +806,4 @@ impl Drop for LocalTempFile {
 #[cfg_attr(coverage, inline(never))]
 fn closed_file_error() -> Error {
     Error::new(ErrorKind::BrokenPipe, "temporary file handle is closed")
-}
-
-/// Converts one authority-relative Rooted path into virtual absolute syntax.
-fn virtual_rooted_path(path: &Path) -> PathBuf {
-    let mut result = PathBuf::from(std::path::MAIN_SEPARATOR_STR);
-    result.push(path);
-    result
 }
