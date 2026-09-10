@@ -17,7 +17,7 @@
 
 ```toml
 [dependencies]
-qubit-local-files = "0.4"
+qubit-local-files = "0.5"
 ```
 
 ## 快速开始：发布生成文件
@@ -37,7 +37,7 @@ filesystem.set_default_write_options(LocalWriteOptions::new(
     LocalWriteMode::CreateOrReplace,
 ))?;
 
-let work = filesystem.create_temp_directory()?;
+let mut work = filesystem.create_temp_directory()?;
 let path = work.path().join("manifest.json");
 let mut writer = filesystem.open_writer(&path)?;
 writer.write_all(br#"{"version":1}"#)?;
@@ -48,6 +48,7 @@ let mut content = String::new();
 filesystem.open_reader(&path)?
     .read_to_string(&mut content)?;
 assert_eq!(content, r#"{"version":1}"#);
+work.cleanup()?;
 # Ok::<(), Box<dyn std::error::Error>>(())
 ```
 
@@ -103,6 +104,16 @@ Rooted 实例的同名方法只修改该实例。
 每个临时资源都创建在独立的私有 sandbox 中，返回路径包含一个生成的 sandbox 组件；调用
 `keep` 会原子发布到生成的 sibling 路径，返回 `LocalPersistOutcome`，并报告 sandbox 清理是否残留。
 
+临时发布失败必须同时检查两个状态轴：`LocalPersistError::state()` 说明本次目标是否发布，
+`source_state()` 说明错误产生时的源资源资格。`NotPublished` 可能对应 `Indeterminate`
+源，不能单凭目标未发布就重试或删除。`Published + CleanupRequired` 只能清理剩余 sandbox，
+不能再次发布或回滚目标。`into_parts()` 返回具名 `LocalPersistErrorParts<T>`；修改保留资源后，
+应读取资源自身的实时 `source_state()`。完整恢复示例见[用户手册](doc/user_guide.zh_CN.md#临时资源发布与失败恢复)。
+
+临时目录可通过 `LocalTempCleanupLimits` 设置清理深度、条目数、待处理路径字节数和期限。
+限制保存在目录对象中，显式 `cleanup()` 与 Drop 均使用它；每次调用独立计费，Drop 不会退回无界清理。
+`descendant` 仅接受非空、由正常名称组成的相对路径；`a/b` 合法，`a/../b`、`a/./b` 和空路径均被拒绝。
+
 ## 选择合适的权限范围
 
 Host 按原生顺序解释 `.`、`..` 和符号链接；Rooted 使用虚拟路径的词法规范化。
@@ -110,7 +121,7 @@ Host 按原生顺序解释 `.`、`..` 和符号链接；Rooted 使用虚拟路�
 元数据时显式选择 `UseStaging`；两种策略都保留目标身份检查。list/copy/delete 的
 `tighten_resource_limits` 只收紧资源限制，不覆盖操作行为。临时资源的 `persist` 和
 `persist_with` 只接受命名空间绝对目标，相对目标改用 `persist_at(base, target, options)`。
-具体迁移示例见[用户指南](doc/user_guide.zh_CN.md#迁移到-04)。
+0.5 的状态和拆解接口迁移见[用户指南](doc/user_guide.zh_CN.md#迁移到-05)。
 
 主机路径使用 `LocalFileSystem::host()`。当一个已打开目录就是权限边界时，
 使用 `LocalFileSystem::rooted(root)`。两种实例提供相同操作，只改变路径解释方式。Host
@@ -137,7 +148,8 @@ Windows 上，Rooted 的链接读取、链接类型判断和链接创建都相�
 
 ## 平台范围
 
-Linux、Windows 和 macOS 的行为会在运行时测试。FreeBSD 和 Android 仅编译检查配置路径；
+CI 配置了 Linux、Windows 和 macOS 运行时测试；本次修改是否通过，以对应 CI 结果为准。
+FreeBSD 和 Android 仅编译检查配置路径；
 本 crate 不承诺这些目标上的运行时保证。`capabilities()` 只报告当前 build 是否实现了
 对应的完整操作协议，不会探测具体的运行时文件系统，也不声称证明底层硬件已经持久化数据；无法满足要求的原子性或耐久性时，
 会在命名空间变更前拒绝操作。
@@ -160,18 +172,12 @@ Linux、Windows 和 macOS 的行为会在运行时测试。FreeBSD 和 Android �
 
 ## 测试
 
-`Cargo.toml` 使用 registry 依赖 `qubit-redact = "0.8"`，`Cargo.lock` 记录解析版本和校验和。
-下游契约脚本使用 `--locked` 检查同级 local-files、fs-local 和 mime 仓库。
-
 ```bash
 # 使用默认 feature 集运行测试
 cargo test
 
 # 使用项目声明的全部 feature 运行测试
 cargo test --all-features
-
-# 对照不同深度的 Rooted metadata 路径
-cargo bench --bench local_files -- deep_metadata
 
 # 运行项目 CI 检查
 ./ci-check.sh

@@ -18,7 +18,7 @@ in [`qubit-fs-local`](https://crates.io/crates/qubit-fs-local).
 
 ```toml
 [dependencies]
-qubit-local-files = "0.4"
+qubit-local-files = "0.5"
 ```
 
 ## Quick Start: publish a generated file
@@ -39,7 +39,7 @@ filesystem.set_default_write_options(LocalWriteOptions::new(
     LocalWriteMode::CreateOrReplace,
 ))?;
 
-let work = filesystem.create_temp_directory()?;
+let mut work = filesystem.create_temp_directory()?;
 let path = work.path().join("manifest.json");
 let mut writer = filesystem.open_writer(&path)?;
 writer.write_all(br#"{"version":1}"#)?;
@@ -50,6 +50,7 @@ let mut content = String::new();
 filesystem.open_reader(&path)?
     .read_to_string(&mut content)?;
 assert_eq!(content, r#"{"version":1}"#);
+work.cleanup()?;
 # Ok::<(), Box<dyn std::error::Error>>(())
 ```
 
@@ -123,6 +124,21 @@ resource path therefore includes one generated sandbox component; `keep`
 atomically publishes the entry to a generated sibling path, returns a
 `LocalPersistOutcome`, and reports whether sandbox cleanup left a residual.
 
+Temporary publication failures have two independent axes: `LocalPersistError::state()`
+reports this call's destination publication, while `source_state()` snapshots
+source eligibility when the error was created. `NotPublished` can retain an
+`Indeterminate` source; it does not by itself permit retry or deletion.
+`Published + CleanupRequired` permits only residual sandbox cleanup, without
+republishing or rolling back the destination. `into_parts()` returns named
+`LocalPersistErrorParts<T>`; after mutating the retained resource, query that
+resource's live `source_state()`. See the [recovery workflow](doc/user_guide.md#temporary-publication-and-recovery).
+
+Temporary directories accept `LocalTempCleanupLimits` for depth, entries,
+pending-path bytes, and elapsed time. Limits stay on the directory and apply to
+explicit `cleanup()` and Drop, with a fresh budget per call and no unbounded
+Drop fallback. `descendant` accepts only nonempty relative paths of normal
+names: `a/b` succeeds, while `a/../b`, `a/./b`, and empty input fail.
+
 ## Choose the right authority
 
 Host paths retain native `.`/`..` and symbolic-link traversal order; Rooted
@@ -132,7 +148,7 @@ when publication should use staging metadata. Both policies retain destination
 identity checks. List/copy/delete options expose `tighten_resource_limits`
 without overwriting operation behavior. Temporary `persist`/`persist_with`
 require namespace-absolute targets; use `persist_at(base, target, options)` for
-an explicit relative target. See the [0.4 migration examples](doc/user_guide.md#migration-to-04).
+an explicit relative target. See the [0.5 migration checklist](doc/user_guide.md#migration-to-05) for the state and decomposition changes.
 
 Use `LocalFileSystem::host()` for host paths. Use
 `LocalFileSystem::rooted(root)` when one opened directory is the authority
@@ -167,7 +183,8 @@ Copy modes distinguish one `Entry` (a regular file or final link), a directory `
 
 ## Platform Scope
 
-Linux, Windows, and macOS behavior is runtime-tested. FreeBSD and Android
+CI is configured to run behavioral tests on Linux, Windows, and macOS; consult
+the matching CI results for validation of a particular change. FreeBSD and Android
 configuration paths are compile-checked only; this crate makes no runtime
 guarantee for those targets. `capabilities()` reports whether this build
 implements each complete operation protocol; it does not probe a particular
@@ -203,19 +220,12 @@ cleanup contract.
 
 ## Testing
 
-`Cargo.toml` uses registry dependency `qubit-redact = "0.8"`; `Cargo.lock`
-records the resolved version and checksum. The downstream contract runner
-checks the sibling local-files, fs-local, and mime repositories with `--locked`.
-
 ```bash
 # Run tests with the default feature set
 cargo test
 
 # Run tests with all declared features
 cargo test --all-features
-
-# Compare the Rooted metadata path at representative depths
-cargo bench --bench local_files -- deep_metadata
 
 # Project CI checks
 ./ci-check.sh

@@ -6,7 +6,7 @@
 
 ## Purpose and Audience
 
-This guide covers `qubit-local-files` 0.4 on Rust 1.94 or newer. It is for
+This guide covers `qubit-local-files` 0.5 on Rust 1.94 or newer. It is for
 applications that operate on the host filesystem or need operations restricted
 to one opened directory. It is not a provider registry, a remote filesystem
 API, or a replacement for provider-level logical paths. The crate is
@@ -50,7 +50,7 @@ Add the crate to the application manifest:
 
 ```toml
 [dependencies]
-qubit-local-files = "0.4"
+qubit-local-files = "0.5"
 ```
 
 Choose the authority before configuring operation policy. Host mode uses the
@@ -292,7 +292,8 @@ namespace path as the public root even when a followed symbolic link points to
 another physical directory; the optional diagnostic path may still identify
 that physical access path.
 
-Temporary files and directories own cleanup while armed. Each resource lives in
+Temporary files and directories own cleanup according to current source
+eligibility. Each resource lives in
 a private generated sandbox that is removed with the resource. Dropping them
 performs silent best-effort cleanup; call `cleanup()` when the caller must
 observe a cleanup failure. `keep` atomically publishes to a generated sibling outside
@@ -301,11 +302,202 @@ residual sandbox. With no explicit parent, creation uses the filesystem PWD
 captured for that operation. `path()`, `keep`, and persistence outcomes all
 return namespace-absolute paths for both Host and Rooted, so they can be passed
 back to the same filesystem independently of later PWD changes. Persistence
-failures retain the resource so the caller can retry, inspect, keep, or
-explicitly clean it. Prefixes and suffixes are checked before entry creation:
+failures retain the resource; publication and source eligibility together
+determine which subsequent operations are permitted. Prefixes and suffixes are
+checked before entry creation:
 native separators, NUL, and portable reserved-name violations do not leave an
 entry behind. Name-collision attempts are unbounded unless the caller sets
 `max_attempts`.
+
+## Temporary publication and recovery
+
+A generated temporary file is published only after writing finishes. `persist`
+and `persist_with` consume the guard and accept namespace-absolute targets;
+`persist_at` supplies an explicit base for a relative target. `LocalPersistOptions::new()`
+rejects an existing destination. Successful publication returns
+`LocalPersistOutcome`: inspect its path, atomicity, durability, `cleanup_state()`,
+and `cleanup_error()`. A residual sandbox is reported in the successful outcome;
+it does not undo publication or authorize another attempt.
+
+On failure, inspect two independent facts:
+
+| Query | Values and meaning |
+| --- | --- |
+| `failure.state()` | `NotPublished`, `Published`, or `Indeterminate`: what this call established about target publication. |
+| `failure.source_state()` | A snapshot of `Owned`, `CleanupRequired`, `Released`, or `Indeterminate` source eligibility when the failure was created. |
+| `failure.resource().source_state()` | The retained resource's current eligibility, including changes made through `resource_mut()`. |
+
+`Owned` permits another lifecycle attempt, subject to a fresh identity check.
+It does not promise intact contents: a failed recursive cleanup may already
+have deleted some descendants. `CleanupRequired` means the original entry left
+the source and only its private sandbox remains the guard's responsibility.
+Only sandbox cleanup is allowed. `Released` has no cleanup obligation and
+`cleanup()` succeeds idempotently. `Indeterminate` forbids persist, keep,
+cleanup, and Drop deletion because source authority cannot be proven.
+
+| Failure situation | Publication | Source | Recovery |
+| --- | --- | --- | --- |
+| Invalid target or parent preparation failure from an owned guard | `NotPublished` | `Owned` | Correct the target and retry, keep, or clean up. |
+| No-replace conflict with source identity intact | `NotPublished` | `Owned` | Select a different target or explicit overwrite policy; cleanup is also allowed. |
+| Original source replaced before publication | `NotPublished` | `Indeterminate` | Diagnose only; never remove the replacement. |
+| Native install result cannot be established | `Indeterminate` | `Indeterminate` | Reconcile externally without automatic deletion or restoring eligibility. |
+| Installation succeeded, then file publication synchronization failed | `Published` | `CleanupRequired` | Keep the published target; clean only the sandbox. |
+| Retry on `CleanupRequired`, `Released`, or `Indeterminate` | `NotPublished` | Previous source state | Reject the new publication; retain existing source restrictions and any earlier target fact. |
+
+The source lifecycle is checked before parsing a new target. An invalid target
+cannot turn an indeterminate resource back into an owned one. Errors describe
+this call; a later rejected call does not erase an earlier published target.
+`keep` obeys the same source rules. Temporary directories reject required
+durability before publication because the guard cannot prove synchronization
+of arbitrary descendants. File persistence can fail after publication during
+parent synchronization; it never rolls the target back.
+
+### Recover an occupied output name
+
+This complete example stages a manifest beneath its own temporary parent,
+provokes a deterministic no-replace conflict, and explicitly checks cleanup.
+The existing output remains unchanged. Use the retained resource for a retry
+only after confirming it is still `Owned`.
+
+```rust
+use std::io::Write;
+
+use qubit_local_files::LocalFileSystem;
+use qubit_local_files::options::LocalTempDirectoryOptions;
+use qubit_local_files::options::LocalTempFileOptions;
+use qubit_local_files::outcome::LocalPersistFailureState;
+use qubit_local_files::outcome::LocalTempSourceState;
+
+let filesystem = LocalFileSystem::host()?;
+let parent_options = LocalTempDirectoryOptions::new()
+    .with_parent(&std::env::temp_dir())
+    .with_max_attempts(16);
+let mut parent = filesystem.create_temp_directory_with_options(&parent_options)?;
+let target = parent.path().join("manifest.json");
+std::fs::write(&target, b"existing manifest")?;
+let options = LocalTempFileOptions::new().with_parent(parent.path());
+let mut temporary = filesystem.create_temp_file_with_options(&options)?;
+temporary.write_all(br#"{"complete":true}"#)?;
+
+let failure = temporary.persist(&target).expect_err("no-replace must reject an existing target");
+assert_eq!(failure.state(), LocalPersistFailureState::NotPublished);
+assert_eq!(failure.source_state(), LocalTempSourceState::Owned);
+let mut parts = failure.into_parts();
+assert_eq!(parts.state, LocalPersistFailureState::NotPublished);
+assert_eq!(parts.source_state, LocalTempSourceState::Owned);
+parts.resource.cleanup()?;
+assert_eq!(parts.resource.source_state(), LocalTempSourceState::Released);
+assert_eq!(parts.source_state, LocalTempSourceState::Owned);
+assert_eq!(std::fs::read(&target)?, b"existing manifest");
+parent.cleanup()?;
+# Ok::<(), Box<dyn std::error::Error>>(())
+```
+
+`into_parts()` returns `error::LocalPersistErrorParts<T>` with named fields
+`error`, `resource`, `requested_target`, `resolved_target`, `stage`, `state`,
+and `source_state`. The latter two fields are failure snapshots; cleanup in the
+example changes the resource's live state but leaves the snapshot `Owned`.
+Dropping the error or parts also drops its owned resource under the same source
+and cleanup restrictions. Do not discard a retained error solely because its
+publication is `NotPublished`.
+
+## Temporary-directory cleanup limits
+
+Configure `options::LocalTempCleanupLimits` at creation with
+`LocalTempDirectoryOptions::with_cleanup_limits`. The value provides getters,
+`with_*`, and `without_*` for `max_depth`, `max_entries`,
+`max_pending_path_bytes`, and `deadline: Duration`. `new()` and `Default` leave
+all four unbounded. It contains no recursive or missing-ok behavior switch.
+
+```rust
+use std::path::Path;
+use std::time::Duration;
+
+use qubit_local_files::LocalFileSystem;
+use qubit_local_files::options::LocalTempCleanupLimits;
+use qubit_local_files::options::LocalTempDirectoryOptions;
+
+let filesystem = LocalFileSystem::host()?;
+let limits = LocalTempCleanupLimits::new()
+    .with_max_depth(8)
+    .with_max_entries(1_024)
+    .with_max_pending_path_bytes(1024 * 1024)
+    .with_deadline(Duration::from_secs(30));
+let options = LocalTempDirectoryOptions::new()
+    .with_parent(&std::env::temp_dir())
+    .with_cleanup_limits(limits);
+let mut directory = filesystem.create_temp_directory_with_options(&options)?;
+assert_eq!(directory.cleanup_limits(), limits);
+assert!(directory.descendant(Path::new("a/b")).is_ok());
+assert!(directory.descendant(Path::new("a/../b")).is_err());
+assert!(directory.descendant(Path::new("a/./b")).is_err());
+assert!(directory.descendant(Path::new("")).is_err());
+directory.cleanup()?;
+# Ok::<(), Box<dyn std::error::Error>>(())
+```
+
+`cleanup_limits()` reads the retained value. `set_cleanup_limits(limits)` changes
+it without I/O and controls all subsequent explicit cleanup and Drop attempts.
+Each attempt receives a fresh budget with the same stored limits. After an
+explicit failure, Drop may make at most one more attempt; it never switches to
+unbounded cleanup. Increase limits explicitly when the remaining work needs a
+larger budget. A deadline is a cooperative per-call duration, not a lifetime
+allowance or an interrupt for blocked native I/O.
+
+The source root has depth zero and counts as one entry. Discovered descendants
+consume entry capacity before queuing. Pending-path bytes count only retained
+native-encoded paths in the work queue, excluding allocator overhead, reader
+buffers, and the currently enumerated object. Zero values and invalid
+combinations follow `LocalDeleteOptions` validation before any deletion.
+Sandbox release costs at most one additional native deletion, outside the
+source-tree entry and path budgets. It uses the same call deadline: the clock
+starts at cleanup entry and is checked again before sandbox removal, without
+restarting after tree removal.
+
+Cleanup uses unsorted post-order traversal shared with recursive deletion. It
+removes a child link itself without visiting its target and does not promise a
+deletion order or constant memory use. A failure after some children were
+removed preserves partial-effect information and the exact failed path; source
+eligibility remains `Owned` while the source tree remains owned. Retry cleans
+the remaining tree, and republishing it would publish only remaining contents.
+Once the source is removed, a sandbox failure leaves `CleanupRequired`; only
+sandbox removal is retried. Concurrent additions may cause `DirectoryNotEmpty`;
+the operation returns an error instead of rescanning forever.
+
+`child` accepts one normal name. `descendant` accepts a nonempty relative path
+of normal names and rejects roots, native prefixes/drives, literal `.` or `..`
+components, and NUL. In particular `a/../b` and literal `a/./b` are rejected even
+when lexical normalization could keep them inside the directory. These helpers
+construct paths without I/O; they do not grant Rooted authority or validate
+on-disk symlink targets. These stricter rules are separate from ordinary Rooted
+path normalization and ordinary Host native traversal.
+
+## Migration to 0.5
+
+- Update `qubit-local-files` to `0.5`; coordinated facade consumers use
+  `qubit-fs` `0.7` with the matching `qubit-fs-local` dependency closure. Native
+  local-files remains independent of `qubit-fs`.
+- Replace tuple destructuring of `LocalPersistError::into_parts()` with named
+  `LocalPersistErrorParts<T>` fields. `into_parts_with_state` was removed;
+  preserve both publication and source snapshots when adapting errors.
+- Branch on both `state()` and `source_state()`. After `resource_mut()` or
+  decomposition, query the resource for current eligibility. Do not infer
+  source ownership from `NotPublished`, stage, or `io::ErrorKind::InvalidInput`.
+- Handle `Published` by keeping the destination and cleaning only the retained
+  sandbox. Preserve earlier `publication_target` across rejected retries and
+  cleanup in synchronous file/directory and asynchronous file facades.
+- Portable `PersistFailureState` adds `NotPublishedSourceIndeterminate`,
+  `PublishedSourceIndeterminate`, and `NotPublishedSourceCleanupRequired`.
+  Source uncertainty must not erase a proven target effect; see the
+  [adapter mapping](local_file_system_design.md#23-contract-with-qubit-fs-local).
+- Set cleanup limits on the temporary directory itself so Drop retains them.
+  There is no one-shot `cleanup_with_options` fallback with different limits.
+- Remove literal dot components before calling strict `descendant` only when
+  the application intentionally changes its input contract. The library does
+  not normalize them on the caller's behalf.
+
+The [0.4 migration notes](#migration-to-04) below still apply to Host paths,
+metadata policy, explicit targets, and general operation limits.
 
 ## Migration to 0.4
 
@@ -405,8 +597,8 @@ The base must be an existing namespace-absolute directory without explicit
 or native prefix. Target parents follow Host native or Rooted lexical rules.
 The base does not establish another sandbox: the captured creating authority
 and symlink policy still apply, even after a Rooted diagnostic directory is
-renamed. Rooted `/` cannot be the final publication target. Invalid parameters
-return `ResolveTarget` before source sync/close or parent creation and retain
+renamed. Rooted `/` cannot be the final publication target. Once the source is confirmed
+eligible, invalid parameters return `ResolveTarget` before source sync/close or parent creation and retain
 the guard. Later failures may retain a closed file; inspect publication state.
 Creating PWD is diagnostic context only, and changing process PWD never
 changes the explicit target base. `keep()` still generates an absolute sibling
@@ -544,7 +736,8 @@ and never define Rooted authority. Publication operations use dedicated failure
 types to preserve partial-success state.
 
 `LocalPersistError` retains the temporary resource and its structured
-`LocalFileError`; its `state()` is the single recovery-state authority. Native
+`LocalFileError`; `state()` reports this call's publication and `source_state()` snapshots source
+eligibility. Recovery requires both, and the live resource getter after mutation. Native
 I/O errors are available through the structured error source when present.
 
 The basic error exposes additive compatibility queries for callers that need
@@ -594,7 +787,8 @@ rely on the same path and error contracts in either case.
 
 ## Limitations and Best Practices
 
-Linux, Windows, and macOS are runtime-tested. FreeBSD and Android are
+CI is configured for Linux, Windows, and macOS behavioral tests; actual CI
+results establish validation for a particular change. FreeBSD and Android are
 compile-checked only. `capabilities()` reports the selected authority's build
 capability snapshot; a Rooted instance caches it when opening the authority.
 `scope()` lets integration code distinguish the two namespaces, and
@@ -619,6 +813,43 @@ resources. Prefer Rooted mode for workspace authority, use trusted parents for
 cleanup-sensitive temporary entries, set explicit budgets for untrusted trees,
 inspect typed publication states after errors, and synchronize shared mutable
 configuration in caller code.
+
+## Tests and performance baselines
+
+Registry dependencies are resolved with versions and checksums in `Cargo.lock`.
+The downstream contract runner checks the coordinated local-files, fs, fs-local,
+and mime dependency closure with `--locked`. Run performance measurements
+separately from correctness tests:
+
+```bash
+# Compile the Criterion benchmark
+cargo bench --locked --bench local_files --no-run
+
+# Compare std, Host, and Rooted metadata on the same fixture
+cargo bench --locked --bench local_files -- deep_metadata
+
+# Measure new/replacement writers and wide/deep temporary-directory cleanup
+cargo bench --locked --bench local_files -- '^(writer_scenarios|temp_directory_cleanup)/' --sample-size 20 --warm-up-time 1 --measurement-time 2 --save-baseline after
+
+# Run the complete harness and retain a named baseline
+cargo bench --locked --bench local_files -- --save-baseline local-files-05
+```
+
+Before/after comparisons require the same benchmark harness, machine,
+filesystem, toolchain, and build profile. Record Host/Rooted, new/existing
+target, metadata policy, durability, and payload for writer measurements, plus
+wide/deep trees with unbounded/explicit limits for cleanup. Fixture creation
+and final scratch-parent disposal belong outside measurement. Unsupported
+platform-policy combinations must be identified as unsupported, not successful
+samples. Criterion results describe trends and intervals; they are not CI
+wall-clock gates or evidence of an improvement before measurement. Cleanup work
+and queued-path memory depend on the directory tree.
+
+Writer IDs use `writer_scenarios/{scope}/{target}/{metadata}/{durability}/{size}`;
+cleanup IDs use `temp_directory_cleanup/{scope}/{shape}/{limits}`. For an older
+revision, run the same harness and sampling parameters with `--save-baseline before`.
+Compare only IDs supported by both revisions; the new `bounded_sufficient`
+cleanup cases have no baseline on revisions without cleanup limits.
 
 ## Further Reading
 
