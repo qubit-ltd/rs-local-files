@@ -6,7 +6,7 @@
 
 ## 手册目标与读者
 
-本手册面向 Rust 1.94 及以上版本的 `qubit-local-files` 0.4 使用者，适用于直接操作主机
+本手册面向 Rust 1.94 及以上版本的 `qubit-local-files` 0.5 使用者，适用于直接操作主机
 文件系统，或需要把操作限制在一个已打开目录之下的应用。它不是 provider 注册表、远程
 文件系统 API，也不替代 provider 层的逻辑路径模型。本 crate 提供同步 API；异步应用应在
 合适的 blocking 执行环境中调用。
@@ -42,7 +42,7 @@ UTF-8。
 
 ```toml
 [dependencies]
-qubit-local-files = "0.4"
+qubit-local-files = "0.5"
 ```
 
 配置操作策略前，先选择权限范围。Host 模式使用进程可见的命名空间；Rooted 模式打开一个
@@ -250,14 +250,168 @@ Windows 复制链接会保留源链接的文件/目录类型，包括悬空链�
 drop walker 只释放句柄。Host 列举即使跟随符号链接进入另一个物理目录，也会保留请求的
 namespace 路径作为公开 root；可选的 diagnostic path 仍可记录实际访问的物理路径。
 
-临时文件和目录在仍处于 armed 状态时拥有清理责任。每个资源都创建在独立的私有 sandbox 中，
+临时文件和目录按当前源资格承担清理责任。每个资源都创建在独立的私有 sandbox 中，
 sandbox 会和资源一起清理。需要观察清理失败时应显式调用 `cleanup()`；drop 只会静默地尽力清理。
 `keep` 会原子发布到 sandbox 外生成的 sibling 路径，返回 `LocalPersistOutcome`，其 cleanup state
 会报告 sandbox 残留。未显式指定 parent 时，在该次操作捕获的 filesystem PWD 下创建。
 `path()`、`keep` 和持久化结果对 Host 与 Rooted 都返回 namespace-absolute 路径，因此
-后续 PWD 即使变化，也能把它们再次传给同一个 filesystem。持久化失败会保留资源，调用方
-可重试、检查、保留或显式清理。创建前会校验前缀和后缀：原生分隔符、NUL 与便携保留名称
+后续 PWD 即使变化，也能把它们再次传给同一个 filesystem。持久化失败会保留资源，后续允许
+的操作由发布状态和源资格共同决定。创建前会校验前缀和后缀：原生分隔符、NUL 与便携保留名称
 不会留下条目。除非调用方设置 `max_attempts`，名称冲突尝试次数没有上限。
+
+## 临时资源发布与失败恢复
+
+临时文件写完后才能发布。`persist` 和 `persist_with` 消耗 guard，接收命名空间绝对目标；
+相对目标通过 `persist_at` 明确指定基准目录。`LocalPersistOptions::new()` 遇到已有目标会失败。
+成功时返回 `LocalPersistOutcome`，调用方应检查路径、原子性、耐久性、`cleanup_state()` 和
+`cleanup_error()`。sandbox 残留通过成功结果报告，不会撤销发布，也不表示可以再次发布。
+
+失败时要分别检查目标发布结果与源资源资格：
+
+| 查询 | 含义 |
+| --- | --- |
+| `failure.state()` | 本次目标发布结论：`NotPublished`、`Published` 或 `Indeterminate`。 |
+| `failure.source_state()` | 错误产生时的源资格快照：`Owned`、`CleanupRequired`、`Released` 或 `Indeterminate`。 |
+| `failure.resource().source_state()` | 保留资源的实时资格，包含通过 `resource_mut()` 执行操作后的变化。 |
+
+`Owned` 允许继续执行生命周期操作，但每次仍须复核身份；它不保证内容完整，递归清理失败前
+可能已经删掉部分后代。`CleanupRequired` 表示原条目已离开源位置，guard 只负责私有 sandbox，
+只能重试 sandbox 清理。`Released` 没有剩余责任，重复 `cleanup()` 幂等成功。
+`Indeterminate` 表示无法证明源操作资格，persist、keep、cleanup 和 Drop 删除均被禁止。
+
+| 失败场景 | 发布状态 | 源资格 | 恢复方式 |
+| --- | --- | --- | --- |
+| Owned 资源的目标参数或父目录准备失败 | `NotPublished` | `Owned` | 修正目标后重试，或 keep、cleanup。 |
+| 源身份有效，no-replace 遇到目标冲突 | `NotPublished` | `Owned` | 换目标、明确选择覆盖，或清理源。 |
+| 发布前发现原源条目被替换 | `NotPublished` | `Indeterminate` | 仅诊断，不能删除替换条目。 |
+| 无法确定 native install 是否生效 | `Indeterminate` | `Indeterminate` | 由外部核对；不得自动删除或恢复资格。 |
+| 安装成功，随后文件发布同步失败 | `Published` | `CleanupRequired` | 保留已发布目标，只清理 sandbox。 |
+| 对 `CleanupRequired`、`Released` 或 `Indeterminate` 再次发布 | `NotPublished` | 原源状态 | 拒绝本次发布，保留源限制与之前已发布目标的事实。 |
+
+生命周期资格检查先于新目标解析。再次传入错误目标不能让 Indeterminate 资源变回 Owned。
+错误只描述本次调用，后来被拒绝的调用不会让先前已发布目标消失。`keep` 遵循同一源资格契约。
+目录 guard 无法证明任意后代都已同步，因此要求耐久性时会在发布前拒绝；文件则可能在安装
+目标后的父目录同步阶段失败，本库不会回滚已发布目标。
+
+### 从输出名称冲突中恢复
+
+下面在独立临时 parent 中暂存清单，利用 no-replace 冲突稳定地产生失败，再显式检查清理结果。
+已有输出的内容保持不变。需要重试时，先确认保留资源当前仍为 `Owned`。
+
+```rust
+use std::io::Write;
+
+use qubit_local_files::LocalFileSystem;
+use qubit_local_files::options::LocalTempDirectoryOptions;
+use qubit_local_files::options::LocalTempFileOptions;
+use qubit_local_files::outcome::LocalPersistFailureState;
+use qubit_local_files::outcome::LocalTempSourceState;
+
+let filesystem = LocalFileSystem::host()?;
+let parent_options = LocalTempDirectoryOptions::new()
+    .with_parent(&std::env::temp_dir())
+    .with_max_attempts(16);
+let mut parent = filesystem.create_temp_directory_with_options(&parent_options)?;
+let target = parent.path().join("manifest.json");
+std::fs::write(&target, b"existing manifest")?;
+let options = LocalTempFileOptions::new().with_parent(parent.path());
+let mut temporary = filesystem.create_temp_file_with_options(&options)?;
+temporary.write_all(br#"{"complete":true}"#)?;
+
+let failure = temporary.persist(&target).expect_err("no-replace must reject an existing target");
+assert_eq!(failure.state(), LocalPersistFailureState::NotPublished);
+assert_eq!(failure.source_state(), LocalTempSourceState::Owned);
+let mut parts = failure.into_parts();
+assert_eq!(parts.state, LocalPersistFailureState::NotPublished);
+assert_eq!(parts.source_state, LocalTempSourceState::Owned);
+parts.resource.cleanup()?;
+assert_eq!(parts.resource.source_state(), LocalTempSourceState::Released);
+assert_eq!(parts.source_state, LocalTempSourceState::Owned);
+assert_eq!(std::fs::read(&target)?, b"existing manifest");
+parent.cleanup()?;
+# Ok::<(), Box<dyn std::error::Error>>(())
+```
+
+`into_parts()` 返回 `error::LocalPersistErrorParts<T>`，字段为 `error`、`resource`、
+`requested_target`、`resolved_target`、`stage`、`state` 和 `source_state`。两个状态字段
+都是错误快照；示例清理后，资源实时状态为 Released，快照仍为 Owned。
+丢弃错误或 parts 也会丢弃其拥有的资源，仍受相同的源资格与清理限制约束；不能只看到
+`NotPublished` 就忽略保留资源。
+
+## 临时目录清理限制
+
+创建目录时，用 `LocalTempDirectoryOptions::with_cleanup_limits` 保存
+`options::LocalTempCleanupLimits`。四项限制为 `max_depth`、`max_entries`、
+`max_pending_path_bytes` 和 `deadline: Duration`，每项都有 getter、`with_*` 和
+`without_*`。`new()` 与 `Default` 均不限；该类型不包含 recursive 或 missing-ok 行为开关。
+
+```rust
+use std::path::Path;
+use std::time::Duration;
+
+use qubit_local_files::LocalFileSystem;
+use qubit_local_files::options::LocalTempCleanupLimits;
+use qubit_local_files::options::LocalTempDirectoryOptions;
+
+let filesystem = LocalFileSystem::host()?;
+let limits = LocalTempCleanupLimits::new()
+    .with_max_depth(8)
+    .with_max_entries(1_024)
+    .with_max_pending_path_bytes(1024 * 1024)
+    .with_deadline(Duration::from_secs(30));
+let options = LocalTempDirectoryOptions::new()
+    .with_parent(&std::env::temp_dir())
+    .with_cleanup_limits(limits);
+let mut directory = filesystem.create_temp_directory_with_options(&options)?;
+assert_eq!(directory.cleanup_limits(), limits);
+assert!(directory.descendant(Path::new("a/b")).is_ok());
+assert!(directory.descendant(Path::new("a/../b")).is_err());
+assert!(directory.descendant(Path::new("a/./b")).is_err());
+assert!(directory.descendant(Path::new("")).is_err());
+directory.cleanup()?;
+# Ok::<(), Box<dyn std::error::Error>>(())
+```
+
+`cleanup_limits()` 返回资源保存的限制，`set_cleanup_limits(limits)` 不执行 I/O，影响之后的
+显式 cleanup 与 Drop。每次调用都按同一组已存限制开启新预算。显式清理失败后，Drop 最多
+再尝试一次，不会退回无限制清理；剩余工作需要更多预算时，调用方必须明确修改限制。
+deadline 是每次调用的协作式时长，不是对象生命期累计额度，也不能中断已经阻塞的原生 I/O。
+
+源根深度为 0，并计为一个条目；后代在加入队列前占用条目额度。待处理路径字节数只统计
+工作队列保留的原生编码路径，不包括分配器开销、reader 缓冲或当前枚举对象。
+零值与非法组合沿用 `LocalDeleteOptions` 的校验规则，任何删除前先完成校验。
+sandbox 释放最多额外执行一次原生删除，不计入源树条目和路径预算；但仍使用同一次调用的
+期限。计时从 cleanup 入口开始，树删除完成后不重启，删除 sandbox 前再次检查相同 deadline。
+
+清理复用递归删除的后序遍历，不进行字典序排序。子符号链接只删除链接自身，不访问目标；
+库不保证删除顺序或常量内存。部分子项删除后失败，会保留部分副作用与准确失败路径；只要
+源树仍归 guard 所有，源资格就保持 `Owned`。再次 cleanup 处理剩余树；若选择发布，发布的
+也只是剩余内容。源实体已删除而 sandbox 删除失败时进入 `CleanupRequired`，重试只处理
+sandbox。并发新增子项可能导致 `DirectoryNotEmpty`，操作会返回错误，不会无限重扫。
+
+`child` 接受单个正常名称；`descendant` 只接受非空、全部由正常名称组成的相对路径，拒绝根、
+原生 prefix/盘符、字面 `.`、`..` 和 NUL。即使归一化后仍在目录内，`a/../b` 与字面
+`a/./b` 也会失败。这些方法只构造路径，不执行 I/O，不赋予 Rooted 权限，也不证明磁盘上
+符号链接的目标安全。它们的严格规则与普通 Rooted 路径归一化、普通 Host 原生解析分别适用。
+
+## 迁移到 0.5
+
+- 将 `qubit-local-files` 升至 `0.5`；协调使用 facade 的项目采用 `qubit-fs` `0.7`，并同步
+  `qubit-fs-local` 的依赖闭包。原生 local-files 本身仍不依赖 `qubit-fs`。
+- 将 `LocalPersistError::into_parts()` 的元组解构改为 `LocalPersistErrorParts<T>` 具名字段；
+  `into_parts_with_state` 已移除。适配错误时必须同时保留 publication 与 source 快照。
+- 同时检查 `state()` 与 `source_state()`；经 `resource_mut()` 或 parts 操作资源后，查询
+  资源自身的实时资格。不能由 `NotPublished`、阶段或 `io::ErrorKind::InvalidInput` 推断 Owned。
+- 遇到 `Published` 时保留目标，只处理残留 sandbox。同步文件、同步目录和异步文件 facade
+  在拒绝重试与清理后都须保留之前的 `publication_target`。
+- portable `PersistFailureState` 新增 `NotPublishedSourceIndeterminate`、
+  `PublishedSourceIndeterminate`、`NotPublishedSourceCleanupRequired`。源不确定不能抹去
+  已知目标副作用，具体见[适配表](local_file_system_design.zh_CN.md#23-与-qubit-fs-local-的契约)。
+- 将清理限制保存在临时目录上，让 Drop 沿用；没有使用另一组限制的单次 `cleanup_with_options`。
+- 只有应用明确决定改变输入契约时，才应在调用严格 `descendant` 前自行移除点段；库不会
+  代为归一化这些输入。
+
+下方 [0.4 迁移说明](#迁移到-04) 中关于 Host 路径、元数据策略、明确目标与通用预算的规则仍然适用。
 
 ## 迁移到 0.4
 
@@ -345,7 +499,7 @@ let published = temporary.persist_at(
 base 必须是命名空间内已存在的绝对目录，不能显式包含 `.`/`..`；target 必须非空且相对，
 不能带 root 或 native prefix。target 的 parent component 按 Host 原生或 Rooted 词法
 规则处理。base 不是新沙箱：始终使用创建时捕获的 authority 和链接策略，Rooted 的诊断
-目录改名也不改变权限。Rooted `/` 不能成为最终发布目标。参数无效时，在同步或关闭源、
+目录改名也不改变权限。Rooted `/` 不能成为最终发布目标。在确认资源仍允许发布后，参数无效时会在同步或关闭源、
 创建父目录之前返回 `ResolveTarget` 并保留 guard；后续阶段失败时文件可能已经关闭，
 应检查发布状态。创建时 PWD 只用于诊断，之后修改进程 PWD 不影响显式目标基准。
 `keep()` 仍生成绝对 sibling 目标。发布到固定名称时，应按应用需求选择冲突策略。
@@ -460,8 +614,8 @@ namespace-absolute 主/目标路径、操作使用的 PWD snapshot，以及可�
 物理路径只作为可选诊断信息，绝不定义 Rooted authority。发布操作用专门失败类型保存部分
 成功状态。
 
-`LocalPersistError` 同时保留临时资源和结构化的 `LocalFileError`；其 `state()` 是唯一的
-恢复状态来源。存在原生 I/O 错误时，可从结构化错误的 source 取得。
+`LocalPersistError` 同时保留临时资源和结构化的 `LocalFileError`；其 `state()` 报告本次发布，`source_state()` 保存源资格快照；
+完整恢复须同时检查两者，操作资源后再读取其当前 `source_state()`。存在原生 I/O 错误时，可从结构化错误的 source 取得。
 
 基础错误提供了增量兼容查询，调用方可以在不取得错误所有权的情况下分别读取两个维度：
 
@@ -505,7 +659,8 @@ Rooted metadata 等操作对不含链接的普通路径使用私有的一次顺�
 
 ## 限制与最佳实践
 
-Linux、Windows 和 macOS 会进行运行时测试。FreeBSD 与 Android 仅做编译检查。
+CI 配置了 Linux、Windows 和 macOS 运行时测试；具体修改的验证状态以实际 CI 结果为准。
+FreeBSD 与 Android 仅做编译检查。
 `capabilities()` 返回所选 authority 的 build capability 快照；Rooted 实例在打开
 authority 时缓存该快照。`scope()` 供集成层区分两种命名空间；Rooted 实例的诊断锚点通过
 `diagnostic_root()` 单独读取。Host 命名空间的 `limits()` 返回 `SizeLimit::VariesByPath`；使用
@@ -523,6 +678,36 @@ authority 时缓存该快照。`scope()` 供集成层区分两种命名空间；
 优先使用 Rooted 模式；需要可靠清理的临时资源应放在可信 parent 中；处理不受信任的目录树时
 应设置明确预算；操作失败后应检查类型化发布状态；多个线程需要修改同一实例时，由调用方提供
 同步机制。
+
+## 测试与性能基线
+
+项目使用 registry 依赖，`Cargo.lock` 固定解析版本与校验和。下游契约脚本以 `--locked`
+检查协调的 local-files、fs、fs-local 和 mime 依赖闭包。性能测量在 correctness tests 之外执行：
+
+```bash
+# 编译 Criterion benchmark
+cargo bench --locked --bench local_files --no-run
+
+# 同一 fixture 对照 std、Host 和 Rooted metadata
+cargo bench --locked --bench local_files -- deep_metadata
+
+# 测量新建/替换写入以及宽树/深树临时目录清理
+cargo bench --locked --bench local_files -- '^(writer_scenarios|temp_directory_cleanup)/' --sample-size 20 --warm-up-time 1 --measurement-time 2 --save-baseline after
+
+# 运行完整基准并保留可比较的命名结果
+cargo bench --locked --bench local_files -- --save-baseline local-files-05
+```
+
+比较前后版本时，应使用同一 benchmark harness、机器、文件系统、工具链和构建 profile。
+记录替换写入的 Host/Rooted、新建/已有目标、元数据策略、耐久性和 payload 组合，以及宽树、
+深树清理的无限制/显式限制组合。fixture 创建与最终 scratch parent 回收应在计时区外；
+平台不支持的策略须标记为不支持，不能充当成功样本。Criterion 结果用于评估趋势与区间，
+不作为 CI 墙钟阈值，也不代表已经证明性能提升。清理工作量和队列路径内存随目录树变化。
+
+写入 ID 使用 `writer_scenarios/{scope}/{target}/{metadata}/{durability}/{size}`；
+清理 ID 使用 `temp_directory_cleanup/{scope}/{shape}/{limits}`。旧版本使用同一 harness
+与采样参数，并以 `--save-baseline before` 保存结果。只比较两个版本都支持的 ID；
+新加入的 `bounded_sufficient` 清理场景在不支持清理限制的旧版本中没有基线。
 
 ## 延伸阅读
 
