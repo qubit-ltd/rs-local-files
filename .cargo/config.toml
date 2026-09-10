@@ -1,3 +1,2 @@
-# The direct git dependency in Cargo.toml is pinned by Cargo.lock for local
-# package verification. A crates.io release still requires publishing the
-# qubit-redact registry version.
+# Project-specific Cargo settings are intentionally empty. Cargo.toml defines
+# package metadata and dependency requirements; Cargo.lock records resolution.
