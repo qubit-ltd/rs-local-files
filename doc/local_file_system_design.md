@@ -2,7 +2,7 @@
 
 [User guide](user_guide.md) · [README](../README.md)
 
-> Status: normative design specification for qubit-local-files 0.5.0
+> Status: normative design specification for qubit-local-files 0.3
 >
 > Last updated: 2026-09-11
 
