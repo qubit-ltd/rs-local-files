@@ -6,7 +6,7 @@
 
 ## 手册目标与读者
 
-本手册面向 Rust 1.94 及以上版本的 `qubit-local-files` 0.5 使用者，适用于直接操作主机
+本手册面向 Rust 1.94 及以上版本的 `qubit-local-files` 0.3 使用者，适用于直接操作主机
 文件系统，或需要把操作限制在一个已打开目录之下的应用。它不是 provider 注册表、远程
 文件系统 API，也不替代 provider 层的逻辑路径模型。本 crate 提供同步 API；异步应用应在
 合适的 blocking 执行环境中调用。
@@ -42,7 +42,7 @@ UTF-8。
 
 ```toml
 [dependencies]
-qubit-local-files = "0.5"
+qubit-local-files = "0.3"
 ```
 
 配置操作策略前，先选择权限范围。Host 模式使用进程可见的命名空间；Rooted 模式打开一个

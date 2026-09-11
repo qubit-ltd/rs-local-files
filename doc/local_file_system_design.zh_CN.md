@@ -3,7 +3,7 @@
 [English design document](local_file_system_design.md) ·
 [用户手册](user_guide.zh_CN.md) · [README](../README.zh_CN.md)
 
-> 状态：规范性设计文档，适用 qubit-local-files 0.5.0
+> 状态：规范性设计文档，适用 qubit-local-files 0.3
 >
 > 最后更新：2026-09-11
 

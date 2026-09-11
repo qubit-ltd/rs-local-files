@@ -6,7 +6,7 @@
 
 ## Purpose and Audience
 
-This guide covers `qubit-local-files` 0.5 on Rust 1.94 or newer. It is for
+This guide covers `qubit-local-files` 0.3 on Rust 1.94 or newer. It is for
 applications that operate on the host filesystem or need operations restricted
 to one opened directory. It is not a provider registry, a remote filesystem
 API, or a replacement for provider-level logical paths. The crate is
@@ -50,7 +50,7 @@ Add the crate to the application manifest:
 
 ```toml
 [dependencies]
-qubit-local-files = "0.5"
+qubit-local-files = "0.3"
 ```
 
 Choose the authority before configuring operation policy. Host mode uses the
