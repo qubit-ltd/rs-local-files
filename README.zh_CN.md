@@ -17,7 +17,7 @@
 
 ```toml
 [dependencies]
-qubit-local-files = "0.3"
+qubit-local-files = "0.4"
 ```
 
 ## 快速开始：发布生成文件
