@@ -1,6 +1,6 @@
 [package]
 name = "qubit-local-files"
-version = "0.3.1"
+version = "0.4.0"
 edition = "2024"
 rust-version = "1.94"
 authors = ["Haixing Hu <starfish.hu@gmail.com>"]
@@ -32,8 +32,8 @@ default = []
 test-support = []
 
 [dependencies]
-qubit-budget = "0.5"
-qubit-redact = { version = "0.8", default-features = false }
+qubit-budget = "0.7"
+qubit-redact = { version = "0.9", default-features = false }
 getrandom = "0.4"
 
 [target.'cfg(unix)'.dependencies]
@@ -41,7 +41,7 @@ libc = "0.2"
 rustix = { version = "1.1", features = ["fs"] }
 
 [target.'cfg(windows)'.dependencies]
-windows-sys = { version = "0.61.2", features = [
+windows-sys = { version = "0.61", features = [
     "Wdk_Foundation",
     "Wdk_Storage_FileSystem",
     "Wdk_System_SystemServices",
@@ -53,8 +53,8 @@ windows-sys = { version = "0.61.2", features = [
 ] }
 
 [dev-dependencies]
-criterion = "0.5"
-proptest = "1.0"
+criterion = "0.8"
+proptest = "1.11"
 tempfile = "3.27"
 
 [[bench]]
