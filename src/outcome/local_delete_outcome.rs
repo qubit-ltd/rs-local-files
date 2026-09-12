@@ -22,17 +22,14 @@ impl LocalDeleteOutcome {
     /// # Parameters
     ///
     /// - `deleted`: Whether an existing entry was removed.
-    // qubit-style: allow coverage-cfg
-    #[cfg_attr(not(coverage), inline)]
-    #[cfg_attr(coverage, inline(never))]
+    #[inline]
     pub(crate) const fn new(deleted: bool) -> Self {
         Self { deleted }
     }
 
     /// Reports whether an entry was removed.
     #[must_use]
-    #[cfg_attr(not(coverage), inline(always))]
-    #[cfg_attr(coverage, inline(never))]
+    #[inline]
     pub const fn deleted(self) -> bool {
         self.deleted
     }

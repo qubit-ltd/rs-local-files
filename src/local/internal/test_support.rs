@@ -100,9 +100,7 @@ impl Drop for TestFaultGuard {
 /// `Some` with an I/O error when the feature is enabled and this thread's
 /// installed selector matches `name`; otherwise `None`.
 #[must_use]
-// qubit-style: allow coverage-cfg
-#[cfg_attr(not(coverage), inline(always))]
-#[cfg_attr(coverage, inline(never))]
+#[inline]
 pub(crate) fn io_error(name: &str) -> Option<io::Error> {
     #[cfg(feature = "test-support")]
     {
@@ -116,8 +114,7 @@ pub(crate) fn io_error(name: &str) -> Option<io::Error> {
 
 /// Builds the platform-specific deterministic I/O failure used by selectors.
 #[must_use]
-#[cfg_attr(not(coverage), inline)]
-#[cfg_attr(coverage, inline(never))]
+#[inline]
 pub(crate) fn fault_error() -> io::Error {
     #[cfg(all(feature = "test-support", unix))]
     {
@@ -144,8 +141,7 @@ pub(crate) fn fault_error() -> io::Error {
 /// `true` only when the feature is enabled and this thread owns an installed
 /// selector matching `name`.
 #[must_use]
-#[cfg_attr(not(coverage), inline(always))]
-#[cfg_attr(coverage, inline(never))]
+#[inline]
 pub(crate) fn is_enabled(name: &str) -> bool {
     is_enabled_impl(name)
 }
@@ -160,8 +156,7 @@ pub(crate) fn is_enabled(name: &str) -> bool {
 ///
 /// `true` only for the first matching call after installation on this thread.
 #[cfg(feature = "test-support")]
-#[cfg_attr(not(coverage), inline(always))]
-#[cfg_attr(coverage, inline(never))]
+#[inline]
 pub(crate) fn take(name: &str) -> bool {
     take_impl(name)
 }
@@ -178,8 +173,7 @@ pub(crate) fn take(name: &str) -> bool {
 /// `true` only for the requested matching invocation on the owning thread.
 #[cfg(feature = "test-support")]
 #[must_use]
-#[cfg_attr(not(coverage), inline)]
-#[cfg_attr(coverage, inline(never))]
+#[inline]
 pub(crate) fn take_on_nth(name: &str, occurrence: usize) -> bool {
     take_on_nth_impl(name, occurrence)
 }
@@ -194,8 +188,7 @@ pub(crate) fn take_on_nth(name: &str, occurrence: usize) -> bool {
 /// `true` when the calling thread owns the matching selector; otherwise
 /// `false`.
 #[cfg(feature = "test-support")]
-#[cfg_attr(not(coverage), inline(always))]
-#[cfg_attr(coverage, inline(never))]
+#[inline]
 fn is_enabled_impl(name: &str) -> bool {
     let owner = std::thread::current().id();
     ACTIVE_FAULT
@@ -211,8 +204,7 @@ fn is_enabled_impl(name: &str) -> bool {
 /// # Returns
 /// Always returns `false` when internal test support is disabled.
 #[cfg(not(feature = "test-support"))]
-#[cfg_attr(not(coverage), inline(always))]
-#[cfg_attr(coverage, inline(never))]
+#[inline]
 fn is_enabled_impl(_name: &str) -> bool {
     false
 }
@@ -226,8 +218,7 @@ fn is_enabled_impl(_name: &str) -> bool {
 /// # Returns
 /// `true` only for the first matching call after installation.
 #[cfg(feature = "test-support")]
-#[cfg_attr(not(coverage), inline(always))]
-#[cfg_attr(coverage, inline(never))]
+#[inline]
 fn take_impl(name: &str) -> bool {
     is_enabled_impl(name)
         && ONE_SHOT_FAULT_TAKEN
@@ -246,8 +237,7 @@ fn take_impl(name: &str) -> bool {
 /// `true` only when `name` is selected and the requested occurrence is reached.
 #[cfg(feature = "test-support")]
 #[must_use]
-#[cfg_attr(not(coverage), inline)]
-#[cfg_attr(coverage, inline(never))]
+#[inline]
 fn take_on_nth_impl(name: &str, occurrence: usize) -> bool {
     is_enabled_impl(name) && NTH_FAULT_OCCURRENCES.fetch_add(1, Ordering::Relaxed) + 1 == occurrence
 }

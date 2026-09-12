@@ -62,9 +62,7 @@ impl LocalAtomicWriteError {
     /// # Returns
     /// New atomic-write error retaining the native source error.
     #[must_use = "the constructed atomic-write error should be handled"]
-    // qubit-style: allow coverage-cfg
-    #[cfg_attr(not(coverage), inline(always))]
-    #[cfg_attr(coverage, inline(never))]
+    #[inline]
     pub fn new(
         stage: LocalAtomicWriteStage,
         path: PathBuf,
@@ -88,8 +86,7 @@ impl LocalAtomicWriteError {
     /// # Returns
     /// Failed atomic-write stage.
     #[must_use = "the failed atomic-write stage should be inspected"]
-    #[cfg_attr(not(coverage), inline)]
-    #[cfg_attr(coverage, inline(never))]
+    #[inline]
     pub const fn stage(&self) -> LocalAtomicWriteStage {
         self.stage
     }
@@ -99,8 +96,7 @@ impl LocalAtomicWriteError {
     /// # Returns
     /// Destination path supplied by the caller.
     #[must_use]
-    #[cfg_attr(not(coverage), inline)]
-    #[cfg_attr(coverage, inline(never))]
+    #[inline]
     pub fn path(&self) -> &Path {
         &self.path
     }
@@ -111,8 +107,7 @@ impl LocalAtomicWriteError {
     /// Staging path retained for diagnostics. The entry is not guaranteed to
     /// exist after a completed replacement or a successful cleanup.
     #[must_use]
-    #[cfg_attr(not(coverage), inline)]
-    #[cfg_attr(coverage, inline(never))]
+    #[inline]
     pub fn temporary_path(&self) -> Option<&Path> {
         self.temporary_path.as_deref()
     }
@@ -124,8 +119,7 @@ impl LocalAtomicWriteError {
     /// [`LocalAtomicDestinationState::Indeterminate`] conservatively and
     /// inspect the destination and staging path before retrying.
     #[must_use = "the destination recovery state should be inspected"]
-    #[cfg_attr(not(coverage), inline)]
-    #[cfg_attr(coverage, inline(never))]
+    #[inline]
     pub const fn destination_state(&self) -> LocalAtomicDestinationState {
         self.destination_state
     }
@@ -135,8 +129,7 @@ impl LocalAtomicWriteError {
     /// # Returns
     /// Cleanup error without replacing the primary source error.
     #[must_use]
-    #[cfg_attr(not(coverage), inline)]
-    #[cfg_attr(coverage, inline(never))]
+    #[inline]
     pub fn cleanup_error(&self) -> Option<&io::Error> {
         self.cleanup_error.as_ref()
     }
@@ -147,8 +140,7 @@ impl LocalAtomicWriteError {
     /// # Returns
     /// Parent synchronization error without replacing the primary source error.
     #[must_use]
-    #[cfg_attr(not(coverage), inline)]
-    #[cfg_attr(coverage, inline(never))]
+    #[inline]
     pub fn parent_sync_error(&self) -> Option<&io::Error> {
         self.parent_sync_error.as_ref()
     }
@@ -158,8 +150,7 @@ impl LocalAtomicWriteError {
     /// # Returns
     /// Retained primary I/O error without dynamic downcasting.
     #[must_use]
-    #[cfg_attr(not(coverage), inline)]
-    #[cfg_attr(coverage, inline(never))]
+    #[inline]
     pub const fn source_error(&self) -> &io::Error {
         &self.source
     }
@@ -169,8 +160,7 @@ impl LocalAtomicWriteError {
     /// # Returns
     /// Error kind reported by the retained source error.
     #[must_use]
-    #[cfg_attr(not(coverage), inline)]
-    #[cfg_attr(coverage, inline(never))]
+    #[inline]
     pub fn kind(&self) -> io::ErrorKind {
         self.source.kind()
     }
@@ -181,8 +171,7 @@ impl LocalAtomicWriteError {
     /// I/O error in that order. The stage, destination state, and parent-sync
     /// error are discarded; inspect them before consuming the error if needed.
     #[must_use]
-    #[cfg_attr(not(coverage), inline)]
-    #[cfg_attr(coverage, inline(never))]
+    #[inline]
     pub fn into_staging_parts(self) -> (Option<PathBuf>, Option<io::Error>, io::Error) {
         (self.temporary_path, self.cleanup_error, self.source)
     }
@@ -196,8 +185,7 @@ impl LocalAtomicWriteError {
     /// # Returns
     /// This atomic-write error enriched with cleanup context.
     #[must_use]
-    #[cfg_attr(not(coverage), inline)]
-    #[cfg_attr(coverage, inline(never))]
+    #[inline]
     pub fn with_cleanup_error(mut self, cleanup_error: Option<io::Error>) -> Self {
         self.cleanup_error = cleanup_error;
         self
@@ -212,8 +200,7 @@ impl LocalAtomicWriteError {
     /// # Returns
     /// This atomic-write error enriched with parent synchronization context.
     #[must_use]
-    #[cfg_attr(not(coverage), inline)]
-    #[cfg_attr(coverage, inline(never))]
+    #[inline]
     pub fn with_parent_sync_error(mut self, parent_sync_error: Option<io::Error>) -> Self {
         self.parent_sync_error = parent_sync_error;
         self
@@ -254,8 +241,7 @@ impl Display for LocalAtomicWriteError {
 
 impl Error for LocalAtomicWriteError {
     /// Returns the retained native I/O error.
-    #[cfg_attr(not(coverage), inline(always))]
-    #[cfg_attr(coverage, inline(never))]
+    #[inline]
     fn source(&self) -> Option<&(dyn Error + 'static)> {
         Some(self.source_error())
     }

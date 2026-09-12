@@ -24,14 +24,14 @@ impl OwnedUnicodeString {
     /// byte lengths. Moving the vector preserves that allocation; this owner
     /// never resizes or replaces the retained storage.
     #[must_use]
-    #[inline(always)]
+    #[inline]
     pub(super) const fn new(units: Vec<u16>, header: UNICODE_STRING) -> Self {
         Self { _units: units, header }
     }
 
     /// Returns the stable header pointer while this owned string remains live.
     #[must_use]
-    #[inline(always)]
+    #[inline]
     pub(super) fn header(&self) -> *const UNICODE_STRING {
         &raw const self.header
     }

@@ -5,7 +5,6 @@
 //
 //    Licensed under the Apache License, Version 2.0.
 // =============================================================================
-// qubit-style: allow coverage-cfg
 
 use std::ffi::OsStr;
 use std::ffi::OsString;
@@ -47,8 +46,7 @@ pub struct LocalPaths {
 
 impl LocalPaths {
     /// Creates path operations for the process-visible host namespace.
-    #[cfg_attr(not(coverage), inline(always))]
-    #[cfg_attr(coverage, inline(never))]
+    #[inline]
     pub const fn host() -> Self {
         Self {
             scope: LocalFileSystemScope::Host,
@@ -57,8 +55,7 @@ impl LocalPaths {
     }
 
     /// Creates path operations for virtual namespace-absolute Rooted paths.
-    #[cfg_attr(not(coverage), inline(always))]
-    #[cfg_attr(coverage, inline(never))]
+    #[inline]
     pub const fn rooted() -> Self {
         Self {
             scope: LocalFileSystemScope::Rooted,
@@ -68,16 +65,14 @@ impl LocalPaths {
 
     /// Returns the namespace interpreted by this path object.
     #[must_use = "inspect the path namespace"]
-    #[cfg_attr(not(coverage), inline(always))]
-    #[cfg_attr(coverage, inline(never))]
+    #[inline]
     pub const fn scope(&self) -> LocalFileSystemScope {
         self.scope
     }
 
     /// Returns the native filename policy for this path namespace.
     #[must_use = "inspect the filename policy"]
-    #[cfg_attr(not(coverage), inline(always))]
-    #[cfg_attr(coverage, inline(never))]
+    #[inline]
     pub const fn file_names(&self) -> LocalFileNames {
         self.names
     }
@@ -159,8 +154,7 @@ fn to_canonical_rooted_components(path: &Path) -> LocalResult<Vec<String>> {
 ///
 /// `true` when `.` or `..` is present.
 #[must_use]
-#[cfg_attr(not(coverage), inline)]
-#[cfg_attr(coverage, inline(never))]
+#[inline]
 fn has_disallowed_component(path: &Path) -> bool {
     path.components()
         .any(|component| matches!(component, Component::CurDir | Component::ParentDir))
@@ -178,8 +172,7 @@ fn has_disallowed_component(path: &Path) -> bool {
 /// `true` when a raw component is `.` or `..`.
 #[cfg(unix)]
 #[must_use]
-#[cfg_attr(not(coverage), inline)]
-#[cfg_attr(coverage, inline(never))]
+#[inline]
 fn has_raw_dot_component(path: &Path) -> bool {
     use std::os::unix::ffi::OsStrExt;
 
@@ -195,8 +188,7 @@ fn has_raw_dot_component(path: &Path) -> bool {
 ///
 /// A `ComposePath` invalid-input error with no native path context, because
 /// the rejected shape may not be safely representable as a path.
-#[cfg_attr(not(coverage), inline(always))]
-#[cfg_attr(coverage, inline(never))]
+#[inline]
 fn invalid_path_error() -> LocalFileError {
     LocalFileError::new(LocalFileErrorKind::InvalidPath, LocalFileOperation::ComposePath)
 }
@@ -241,8 +233,7 @@ fn decode_normal_component(component: &str) -> LocalResult<OsString> {
 ///
 /// Returns a `ComposePath` error retaining a `PathCodec` source when the text
 /// is malformed, non-canonical, or unrepresentable on the current platform.
-#[cfg_attr(not(coverage), inline)]
-#[cfg_attr(coverage, inline(never))]
+#[inline]
 fn decode_canonical_component(component: &str) -> LocalResult<OsString> {
     LocalPathCodec::decode_component(component)
 }
@@ -278,8 +269,7 @@ fn is_normal_native_component(component: &OsStr) -> bool {
 /// # Errors
 ///
 /// Returns a `ComposePath` error retaining the underlying path-codec failure.
-#[cfg_attr(not(coverage), inline)]
-#[cfg_attr(coverage, inline(never))]
+#[inline]
 fn encode_native_component(component: &OsStr) -> LocalResult<String> {
     LocalPathCodec::encode_component(component)
 }
@@ -295,8 +285,7 @@ fn encode_native_component(component: &OsStr) -> LocalResult<String> {
 /// `true` when the component contains a separator that would make `push`
 /// interpret it as more than one lexical component.
 #[cfg(unix)]
-#[cfg_attr(not(coverage), inline)]
-#[cfg_attr(coverage, inline(never))]
+#[inline]
 fn has_native_separator(component: &OsStr) -> bool {
     use std::os::unix::ffi::OsStrExt;
 
@@ -313,8 +302,7 @@ fn has_native_separator(component: &OsStr) -> bool {
 ///
 /// `true` when the component contains a slash or backslash.
 #[cfg(windows)]
-#[cfg_attr(not(coverage), inline)]
-#[cfg_attr(coverage, inline(never))]
+#[inline]
 fn has_native_separator(component: &OsStr) -> bool {
     use std::os::windows::ffi::OsStrExt;
 
@@ -335,8 +323,7 @@ fn has_native_separator(component: &OsStr) -> bool {
 /// Always `true`, preventing platform-specific path construction on targets
 /// that this API does not support.
 #[cfg(not(any(unix, windows)))]
-#[cfg_attr(not(coverage), inline(always))]
-#[cfg_attr(coverage, inline(never))]
+#[inline]
 const fn has_native_separator(_component: &OsStr) -> bool {
     true
 }
@@ -443,8 +430,7 @@ fn from_canonical_host_components<'a>(components: impl IntoIterator<Item = &'a s
 ///
 /// `true` only for one ASCII letter followed by a colon.
 #[cfg(windows)]
-#[cfg_attr(not(coverage), inline)]
-#[cfg_attr(coverage, inline(never))]
+#[inline]
 fn is_windows_drive_component(component: &str) -> bool {
     matches!(component.as_bytes(), [letter, b':'] if letter.is_ascii_alphabetic())
 }
@@ -532,8 +518,7 @@ fn from_canonical_host_components<'a>(_components: impl IntoIterator<Item = &'a 
 ///
 /// Always returns a `ComposePath` unsupported-platform error.
 #[cfg(not(any(unix, windows)))]
-#[cfg_attr(not(coverage), inline(always))]
-#[cfg_attr(coverage, inline(never))]
+#[inline]
 fn to_canonical_host_components(_path: &Path) -> LocalResult<Vec<String>> {
     Err(LocalFileError::new(
         LocalFileErrorKind::Unsupported,
@@ -551,8 +536,7 @@ fn to_canonical_host_components(_path: &Path) -> LocalResult<Vec<String>> {
 ///
 /// `true` when a raw component is `.` or `..`.
 #[cfg(windows)]
-#[cfg_attr(not(coverage), inline)]
-#[cfg_attr(coverage, inline(never))]
+#[inline]
 fn has_raw_dot_component(path: &Path) -> bool {
     use std::os::windows::ffi::OsStrExt;
 
@@ -566,8 +550,7 @@ fn has_raw_dot_component(path: &Path) -> bool {
 
 /// Detects raw dot components on unsupported native targets.
 #[cfg(not(any(unix, windows)))]
-#[cfg_attr(not(coverage), inline(always))]
-#[cfg_attr(coverage, inline(never))]
+#[inline]
 const fn has_raw_dot_component(_path: &Path) -> bool {
     false
 }

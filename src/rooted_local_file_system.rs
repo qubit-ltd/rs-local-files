@@ -148,25 +148,21 @@ impl RootedLocalFileSystem {
 
     /// Returns the non-authoritative diagnostic path captured at open time.
     #[must_use]
-    // qubit-style: allow coverage-cfg
-    #[cfg_attr(not(coverage), inline)]
-    #[cfg_attr(coverage, inline(never))]
+    #[inline]
     pub fn diagnostic_path(&self) -> &Path {
         self.root.path()
     }
 
     /// Returns the native capability snapshot cached for this opened authority.
     #[must_use = "inspect the rooted capability snapshot"]
-    #[cfg_attr(not(coverage), inline)]
-    #[cfg_attr(coverage, inline(never))]
+    #[inline]
     pub const fn capabilities(&self) -> LocalFileSystemCapabilities {
         self.capabilities
     }
 
     /// Returns limits observed from the opened root authority.
     #[must_use = "inspect the rooted path limits"]
-    #[cfg_attr(not(coverage), inline)]
-    #[cfg_attr(coverage, inline(never))]
+    #[inline]
     pub const fn limits(&self) -> LocalFileSystemLimits {
         self.limits
     }

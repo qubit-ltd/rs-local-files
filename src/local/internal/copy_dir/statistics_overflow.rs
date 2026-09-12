@@ -18,9 +18,7 @@ use std::io::ErrorKind;
 ///
 /// An `InvalidData` error identifying the directory counter.
 #[must_use]
-// qubit-style: allow coverage-cfg
-#[cfg_attr(not(coverage), inline(always))]
-#[cfg_attr(coverage, inline(never))]
+#[inline]
 pub(super) fn directory_statistics_overflow_error() -> Error {
     statistics_overflow_error("directories")
 }
@@ -30,8 +28,7 @@ pub(super) fn directory_statistics_overflow_error() -> Error {
 /// # Returns
 ///
 /// An `InvalidData` error identifying the skipped-file counter.
-#[cfg_attr(not(coverage), inline(always))]
-#[cfg_attr(coverage, inline(never))]
+#[inline]
 pub(super) fn skipped_statistics_overflow_error() -> Error {
     statistics_overflow_error("skipped")
 }
@@ -41,8 +38,7 @@ pub(super) fn skipped_statistics_overflow_error() -> Error {
 /// # Returns
 ///
 /// An `InvalidData` error identifying the overwritten-entry counter.
-#[cfg_attr(not(coverage), inline(always))]
-#[cfg_attr(coverage, inline(never))]
+#[inline]
 pub(super) fn overwritten_statistics_overflow_error() -> Error {
     statistics_overflow_error("overwritten")
 }
@@ -52,8 +48,7 @@ pub(super) fn overwritten_statistics_overflow_error() -> Error {
 /// # Returns
 ///
 /// An `InvalidData` error identifying the copied-file counter.
-#[cfg_attr(not(coverage), inline(always))]
-#[cfg_attr(coverage, inline(never))]
+#[inline]
 pub(super) fn file_statistics_overflow_error() -> Error {
     statistics_overflow_error("files")
 }
@@ -63,8 +58,7 @@ pub(super) fn file_statistics_overflow_error() -> Error {
 /// # Returns
 ///
 /// An `InvalidData` error identifying the copied-byte counter.
-#[cfg_attr(not(coverage), inline(always))]
-#[cfg_attr(coverage, inline(never))]
+#[inline]
 pub(super) fn byte_statistics_overflow_error() -> Error {
     statistics_overflow_error("bytes")
 }
@@ -79,8 +73,7 @@ pub(super) fn byte_statistics_overflow_error() -> Error {
 ///
 /// An `InvalidData` error naming the overflowing field.
 #[must_use]
-#[cfg_attr(not(coverage), inline)]
-#[cfg_attr(coverage, inline(never))]
+#[inline]
 fn statistics_overflow_error(field: &str) -> Error {
     Error::new(
         ErrorKind::InvalidData,

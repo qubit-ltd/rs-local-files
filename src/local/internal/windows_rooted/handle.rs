@@ -76,9 +76,7 @@ pub(crate) fn open_root_directory(path: &Path) -> Result<File> {
 /// # Errors
 ///
 /// Returns an I/O error when traversal, opening, or metadata inspection fails.
-// qubit-style: allow coverage-cfg
-#[cfg_attr(not(coverage), inline)]
-#[cfg_attr(coverage, inline(never))]
+#[inline]
 pub(crate) fn read_rooted_symlink_metadata(
     root: &File,
     _diagnostic_root: &Path,
@@ -157,8 +155,7 @@ pub(super) fn open_entry(
 /// requested `access`, `disposition`, and `options`. Propagates traversal,
 /// name-encoding, and native open errors; creation/truncation is not rolled
 /// back.
-#[cfg_attr(not(coverage), inline)]
-#[cfg_attr(coverage, inline(never))]
+#[inline]
 pub(super) fn open_entry_no_follow(
     root: &File,
     path: &LocalRelativePath,
@@ -172,8 +169,7 @@ pub(super) fn open_entry_no_follow(
 
 /// Converts a native path to a NUL-terminated UTF-16 string.
 /// Returns `InvalidInput` for an embedded native NUL.
-#[cfg_attr(not(coverage), inline)]
-#[cfg_attr(coverage, inline(never))]
+#[inline]
 fn wide_path(path: &Path) -> Result<Vec<u16>> {
     let units: Vec<u16> = path.as_os_str().encode_wide().collect();
     if units.contains(&0) {

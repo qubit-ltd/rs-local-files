@@ -85,9 +85,7 @@ impl LocalCopyDirError {
     /// # Returns
     /// Failed recursive-copy stage.
     #[must_use = "the failed recursive-copy stage should be inspected"]
-    // qubit-style: allow coverage-cfg
-    #[cfg_attr(not(coverage), inline)]
-    #[cfg_attr(coverage, inline(never))]
+    #[inline]
     pub const fn stage(&self) -> LocalCopyDirStage {
         self.stage
     }
@@ -97,8 +95,7 @@ impl LocalCopyDirError {
     /// # Returns
     /// Source path being processed.
     #[must_use]
-    #[cfg_attr(not(coverage), inline)]
-    #[cfg_attr(coverage, inline(never))]
+    #[inline]
     pub fn source_path(&self) -> &Path {
         &self.source_path
     }
@@ -108,8 +105,7 @@ impl LocalCopyDirError {
     /// # Returns
     /// Destination path being processed.
     #[must_use]
-    #[cfg_attr(not(coverage), inline)]
-    #[cfg_attr(coverage, inline(never))]
+    #[inline]
     pub fn destination_path(&self) -> &Path {
         &self.destination_path
     }
@@ -119,8 +115,7 @@ impl LocalCopyDirError {
     /// # Returns
     /// Partial recursive-copy statistics.
     #[must_use = "the partial copy statistics should be inspected"]
-    #[cfg_attr(not(coverage), inline)]
-    #[cfg_attr(coverage, inline(never))]
+    #[inline]
     pub const fn stats(&self) -> &LocalCopyDirStats {
         &self.stats
     }
@@ -130,8 +125,7 @@ impl LocalCopyDirError {
     /// # Returns
     /// Staging path retained for diagnostics.
     #[must_use]
-    #[cfg_attr(not(coverage), inline)]
-    #[cfg_attr(coverage, inline(never))]
+    #[inline]
     pub fn temporary_path(&self) -> Option<&Path> {
         self.temporary_path.as_deref()
     }
@@ -141,8 +135,7 @@ impl LocalCopyDirError {
     /// # Returns
     /// Cleanup error without replacing the primary source error.
     #[must_use]
-    #[cfg_attr(not(coverage), inline)]
-    #[cfg_attr(coverage, inline(never))]
+    #[inline]
     pub fn cleanup_error(&self) -> Option<&io::Error> {
         self.cleanup_error.as_ref()
     }
@@ -152,8 +145,7 @@ impl LocalCopyDirError {
     /// # Returns
     /// Retained primary I/O error.
     #[must_use]
-    #[cfg_attr(not(coverage), inline)]
-    #[cfg_attr(coverage, inline(never))]
+    #[inline]
     pub const fn error(&self) -> &io::Error {
         &self.error
     }
@@ -163,8 +155,7 @@ impl LocalCopyDirError {
     /// # Returns
     /// Error kind reported by the retained source error.
     #[must_use]
-    #[cfg_attr(not(coverage), inline)]
-    #[cfg_attr(coverage, inline(never))]
+    #[inline]
     pub fn kind(&self) -> io::ErrorKind {
         self.error.kind()
     }
@@ -208,8 +199,7 @@ impl LocalCopyDirError {
     /// # Returns
     /// This copy error enriched with staging cleanup context.
     #[must_use]
-    #[cfg_attr(not(coverage), inline)]
-    #[cfg_attr(coverage, inline(never))]
+    #[inline]
     pub fn with_staging_context(mut self, temporary_path: PathBuf, cleanup_error: Option<io::Error>) -> Self {
         self.temporary_path = Some(temporary_path.into_boxed_path());
         self.cleanup_error = cleanup_error;
@@ -218,8 +208,7 @@ impl LocalCopyDirError {
 
     /// Attaches a secondary cleanup failure without a staging path.
     #[must_use]
-    #[cfg_attr(not(coverage), inline)]
-    #[cfg_attr(coverage, inline(never))]
+    #[inline]
     pub(crate) fn with_cleanup_error(mut self, cleanup_error: io::Error) -> Self {
         self.cleanup_error = Some(cleanup_error);
         self
@@ -256,8 +245,7 @@ impl Display for LocalCopyDirError {
 
 impl Error for LocalCopyDirError {
     /// Returns the retained native I/O error.
-    #[cfg_attr(not(coverage), inline(always))]
-    #[cfg_attr(coverage, inline(never))]
+    #[inline]
     fn source(&self) -> Option<&(dyn Error + 'static)> {
         Some(&self.error)
     }

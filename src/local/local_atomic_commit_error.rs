@@ -46,9 +46,7 @@ impl<T> LocalAtomicCommitError<T> {
     /// # Returns
     ///
     /// A commit error preserving the failure and optional writer.
-    // qubit-style: allow coverage-cfg
-    #[cfg_attr(not(coverage), inline)]
-    #[cfg_attr(coverage, inline(never))]
+    #[inline]
     pub fn new(error: LocalAtomicWriteError, writer: Option<T>) -> Self {
         Self {
             error,
@@ -111,8 +109,7 @@ impl<T> LocalAtomicCommitError<T> {
     ///
     /// The finalized writer failure when recovery remained available, or the
     /// original terminal failure when no writer was retained.
-    #[cfg_attr(not(coverage), inline)]
-    #[cfg_attr(coverage, inline(never))]
+    #[inline]
     pub fn into_final_error_with<F>(self, finalize_writer: F) -> LocalAtomicWriteError
     where
         F: FnOnce(T, LocalAtomicWriteError) -> LocalAtomicWriteError,
@@ -141,8 +138,7 @@ where
     T: Debug,
 {
     /// Returns the structured atomic-write failure.
-    #[cfg_attr(not(coverage), inline(always))]
-    #[cfg_attr(coverage, inline(never))]
+    #[inline]
     fn source(&self) -> Option<&(dyn Error + 'static)> {
         Some(&self.error)
     }

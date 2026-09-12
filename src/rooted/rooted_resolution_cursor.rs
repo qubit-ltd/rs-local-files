@@ -30,7 +30,7 @@ pub(crate) struct RootedResolutionCursor {
 
 impl RootedResolutionCursor {
     /// Creates a cursor from an already-opened rooted directory authority.
-    #[inline(always)]
+    #[inline]
     pub(crate) fn new(current: File) -> Result<Self> {
         Ok(Self { current })
     }

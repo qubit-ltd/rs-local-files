@@ -383,9 +383,7 @@ impl LocalRootAtomicWriter {
     /// Consumes the writer and reports whether requested durability completed.
     /// Finalizes a failed commit by attempting safe staging cleanup and returns
     /// the primary error with any cleanup failure, without a retryable writer.
-    // qubit-style: allow coverage-cfg
-    #[cfg_attr(not(coverage), inline)]
-    #[cfg_attr(coverage, inline(never))]
+    #[inline]
     pub(crate) fn commit_with_durability(self) -> Result<bool, LocalAtomicWriteError> {
         self.commit_recoverable_with_durability()
             .map_err(|error| error.into_final_error_with(Self::finalize_failed_commit))
@@ -734,8 +732,7 @@ impl LocalRootAtomicWriter {
     /// Returns the structured namespace-race error produced by the rooted
     /// identity verifier.
     #[cfg(unix)]
-    #[cfg_attr(not(coverage), inline)]
-    #[cfg_attr(coverage, inline(never))]
+    #[inline]
     fn verify_destination_for_commit(
         &mut self,
         destination: Option<&OpenedAtomicDestination>,
@@ -756,8 +753,7 @@ impl LocalRootAtomicWriter {
     ///
     /// The failure enriched with any staging cleanup error.
     #[cfg(unix)]
-    #[cfg_attr(not(coverage), inline)]
-    #[cfg_attr(coverage, inline(never))]
+    #[inline]
     fn finalize_failed_commit(self, error: LocalAtomicWriteError) -> LocalAtomicWriteError {
         finalize_failed_commit(
             self,
@@ -772,8 +768,7 @@ impl LocalRootAtomicWriter {
 
     /// Finalizes a consuming Windows commit failure.
     #[cfg(windows)]
-    #[cfg_attr(not(coverage), inline)]
-    #[cfg_attr(coverage, inline(never))]
+    #[inline]
     fn finalize_failed_commit(self, error: LocalAtomicWriteError) -> LocalAtomicWriteError {
         finalize_failed_commit(self, error, |writer| writer.staged_file.cleanup(), |_| {})
     }
@@ -788,8 +783,7 @@ impl LocalRootAtomicWriter {
     ///
     /// The unchanged unsupported failure.
     #[cfg(not(any(unix, windows)))]
-    #[cfg_attr(not(coverage), inline(always))]
-    #[cfg_attr(coverage, inline(never))]
+    #[inline]
     fn finalize_failed_commit(self, error: LocalAtomicWriteError) -> LocalAtomicWriteError {
         error
     }
@@ -848,8 +842,7 @@ impl LocalRootAtomicWriter {
 
 impl Write for LocalRootAtomicWriter {
     /// Writes bytes into the private rooted staging file.
-    #[cfg_attr(not(coverage), inline(always))]
-    #[cfg_attr(coverage, inline(never))]
+    #[inline]
     fn write(&mut self, buffer: &[u8]) -> io::Result<usize> {
         #[cfg(unix)]
         {
@@ -870,8 +863,7 @@ impl Write for LocalRootAtomicWriter {
     }
 
     /// Writes bytes from multiple buffers into the rooted staging file.
-    #[cfg_attr(not(coverage), inline(always))]
-    #[cfg_attr(coverage, inline(never))]
+    #[inline]
     fn write_vectored(&mut self, buffers: &[io::IoSlice<'_>]) -> io::Result<usize> {
         #[cfg(unix)]
         {
@@ -892,8 +884,7 @@ impl Write for LocalRootAtomicWriter {
     }
 
     /// Flushes userspace data into the private rooted staging file.
-    #[cfg_attr(not(coverage), inline(always))]
-    #[cfg_attr(coverage, inline(never))]
+    #[inline]
     fn flush(&mut self) -> io::Result<()> {
         #[cfg(unix)]
         {

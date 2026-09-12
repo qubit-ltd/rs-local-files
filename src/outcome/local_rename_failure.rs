@@ -7,7 +7,6 @@
 // =============================================================================
 
 //! Typed failures from unified rename operations.
-// qubit-style: allow coverage-cfg
 
 use std::error::Error;
 use std::fmt::Display;
@@ -29,8 +28,7 @@ pub struct LocalRenameFailure {
 
 impl Display for LocalRenameFailure {
     /// Formats the primary rename failure and its proven namespace state.
-    #[cfg_attr(not(coverage), inline)]
-    #[cfg_attr(coverage, inline(never))]
+    #[inline]
     fn fmt(&self, formatter: &mut Formatter<'_>) -> FmtResult {
         write!(formatter, "rename failed with {:?} state: {}", self.state, self.error)
     }
@@ -46,8 +44,7 @@ impl Error for LocalRenameFailure {
 impl LocalRenameFailure {
     /// Creates a typed rename failure from implementation facts.
     #[must_use = "handle the constructed rename failure"]
-    #[cfg_attr(not(coverage), inline(always))]
-    #[cfg_attr(coverage, inline(never))]
+    #[inline]
     pub(crate) fn new(error: LocalFileError, state: LocalRenameFailureState) -> Self {
         Self {
             error: Box::new(error),
@@ -63,15 +60,13 @@ impl LocalRenameFailure {
 
     /// Returns the most precise namespace state proven by native operations.
     #[must_use = "inspect the proven rename failure state"]
-    #[cfg_attr(not(coverage), inline(always))]
-    #[cfg_attr(coverage, inline(never))]
+    #[inline]
     pub const fn state(&self) -> LocalRenameFailureState {
         self.state
     }
 
     /// Consumes this failure and returns its error and proven state.
-    #[cfg_attr(not(coverage), inline(always))]
-    #[cfg_attr(coverage, inline(never))]
+    #[inline]
     pub fn into_parts(self) -> (LocalFileError, LocalRenameFailureState) {
         (*self.error, self.state)
     }

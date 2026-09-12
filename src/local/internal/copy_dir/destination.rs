@@ -277,9 +277,7 @@ fn remove_destination_non_directory_if_unchanged(dst: &Path) -> Result<()> {
 /// # Errors
 ///
 /// Returns the I/O error reported by `symlink_metadata`.
-// qubit-style: allow coverage-cfg
-#[cfg_attr(not(coverage), inline(always))]
-#[cfg_attr(coverage, inline(never))]
+#[inline]
 fn inspect_destination_metadata(dst: &Path) -> Result<fs::Metadata> {
     fs::symlink_metadata(dst)
 }

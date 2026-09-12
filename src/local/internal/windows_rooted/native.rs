@@ -175,9 +175,7 @@ fn unicode_string(value: &OsStr) -> Result<OwnedUnicodeString> {
 }
 
 /// Converts an NTSTATUS result into a standard I/O result.
-// qubit-style: allow coverage-cfg
-#[cfg_attr(not(coverage), inline)]
-#[cfg_attr(coverage, inline(never))]
+#[inline]
 pub(in crate::local::internal) fn nt_result(status: i32) -> Result<()> {
     if status >= 0 {
         return Ok(());

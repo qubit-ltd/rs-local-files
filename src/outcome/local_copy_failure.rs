@@ -7,7 +7,6 @@
 // =============================================================================
 
 //! Typed failures from unified copy operations.
-// qubit-style: allow coverage-cfg
 
 use std::error::Error;
 use std::fmt::Display;
@@ -35,8 +34,7 @@ pub struct LocalCopyFailure {
 
 impl Display for LocalCopyFailure {
     /// Formats the primary copy failure and its proven destination state.
-    #[cfg_attr(not(coverage), inline(always))]
-    #[cfg_attr(coverage, inline(never))]
+    #[inline]
     fn fmt(&self, formatter: &mut Formatter<'_>) -> FmtResult {
         write!(
             formatter,
@@ -141,72 +139,63 @@ impl LocalCopyFailure {
 
     /// Returns the primary typed filesystem error.
     #[must_use = "inspect the primary copy error"]
-    #[cfg_attr(not(coverage), inline(always))]
-    #[cfg_attr(coverage, inline(never))]
+    #[inline]
     pub fn error(&self) -> &LocalFileError {
         &self.details.error
     }
 
     /// Returns the source path supplied for the copy request.
     #[must_use]
-    #[cfg_attr(not(coverage), inline(always))]
-    #[cfg_attr(coverage, inline(never))]
+    #[inline]
     pub fn request_source_path(&self) -> Option<&Path> {
         self.details.request_source_path.as_deref()
     }
 
     /// Returns the destination path supplied for the copy request.
     #[must_use]
-    #[cfg_attr(not(coverage), inline(always))]
-    #[cfg_attr(coverage, inline(never))]
+    #[inline]
     pub fn request_target_path(&self) -> Option<&Path> {
         self.details.request_target_path.as_deref()
     }
 
     /// Returns the source entry being processed when the copy failed.
     #[must_use]
-    #[cfg_attr(not(coverage), inline(always))]
-    #[cfg_attr(coverage, inline(never))]
+    #[inline]
     pub fn failed_source_path(&self) -> Option<&Path> {
         self.details.failed_source_path.as_deref()
     }
 
     /// Returns the destination entry being processed when the copy failed.
     #[must_use]
-    #[cfg_attr(not(coverage), inline(always))]
-    #[cfg_attr(coverage, inline(never))]
+    #[inline]
     pub fn failed_target_path(&self) -> Option<&Path> {
         self.details.failed_target_path.as_deref()
     }
 
     /// Returns the most precise destination state proven by native operations.
     #[must_use = "inspect the proven copy failure state"]
-    #[cfg_attr(not(coverage), inline(always))]
-    #[cfg_attr(coverage, inline(never))]
+    #[inline]
     pub fn state(&self) -> LocalCopyFailureState {
         self.details.state
     }
 
     /// Returns statistics accumulated before the failure.
     #[must_use = "partial statistics retain copy progress"]
-    #[cfg_attr(not(coverage), inline(always))]
-    #[cfg_attr(coverage, inline(never))]
+    #[inline]
     pub fn partial_stats(&self) -> &LocalCopyStats {
         &self.details.partial_stats
     }
 
     /// Returns the retained staging path when cleanup failed.
     #[must_use]
-    #[cfg_attr(not(coverage), inline(always))]
-    #[cfg_attr(coverage, inline(never))]
+    #[inline]
     pub fn staging_path(&self) -> Option<&Path> {
         self.details.staging_path.as_deref()
     }
 
     /// Returns the secondary rollback or cleanup error when cleanup failed.
     #[must_use]
-    #[cfg_attr(not(coverage), inline(always))]
-    #[cfg_attr(coverage, inline(never))]
+    #[inline]
     pub fn cleanup_error(&self) -> Option<&LocalFileError> {
         self.details.cleanup_error.as_ref()
     }

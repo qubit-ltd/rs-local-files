@@ -7,7 +7,6 @@
 // =============================================================================
 //! Stateful Host or Rooted local filesystem service.
 // qubit-style: allow source-test-pair
-// qubit-style: allow coverage-cfg
 
 #[cfg(feature = "test-support")]
 use super::Arc;
@@ -48,8 +47,7 @@ impl LocalFileSystem {
     /// `Host` for process-wide native paths or `Rooted` for paths interpreted
     /// below a retained directory authority.
     #[must_use = "inspect which namespace this filesystem uses"]
-    #[cfg_attr(not(coverage), inline)]
-    #[cfg_attr(coverage, inline(never))]
+    #[inline]
     pub fn scope(&self) -> LocalFileSystemScope {
         match &self.core.namespace {
             LocalNamespace::Host => LocalFileSystemScope::Host,
@@ -122,8 +120,7 @@ impl LocalFileSystem {
     /// Returns the default symlink policy inherited by operations that do not
     /// supply an explicit policy.
     #[must_use = "inspect the default symbolic-link policy"]
-    #[cfg_attr(not(coverage), inline)]
-    #[cfg_attr(coverage, inline(never))]
+    #[inline]
     pub const fn symlink_policy(&self) -> LocalSymlinkPolicy {
         self.symlink_policy
     }
@@ -152,8 +149,7 @@ impl LocalFileSystem {
     /// `Some` for a Rooted filesystem and `None` for Host. The path is not an
     /// authority and may become stale after a native rename or replacement.
     #[must_use = "inspect the default options"]
-    #[cfg_attr(not(coverage), inline)]
-    #[cfg_attr(coverage, inline(never))]
+    #[inline]
     pub fn diagnostic_root(&self) -> Option<&Path> {
         match &self.core.namespace {
             LocalNamespace::Host => None,
@@ -162,8 +158,7 @@ impl LocalFileSystem {
     }
 
     /// Returns the reader options inherited by calls without explicit options.
-    #[cfg_attr(not(coverage), inline)]
-    #[cfg_attr(coverage, inline(never))]
+    #[inline]
     #[must_use = "inspect the default options"]
     pub const fn default_read_options(&self) -> &LocalReadOptions {
         &self.defaults.read
@@ -181,8 +176,7 @@ impl LocalFileSystem {
     }
 
     /// Returns the writer options inherited by calls without explicit options.
-    #[cfg_attr(not(coverage), inline)]
-    #[cfg_attr(coverage, inline(never))]
+    #[inline]
     #[must_use = "inspect the default options"]
     pub const fn default_write_options(&self) -> &LocalWriteOptions {
         &self.defaults.write
@@ -202,8 +196,7 @@ impl LocalFileSystem {
     }
 
     /// Returns the listing options inherited by calls without explicit options.
-    #[cfg_attr(not(coverage), inline)]
-    #[cfg_attr(coverage, inline(never))]
+    #[inline]
     #[must_use = "inspect the default options"]
     pub const fn default_list_options(&self) -> &LocalListOptions {
         &self.defaults.list
@@ -223,8 +216,7 @@ impl LocalFileSystem {
     }
 
     /// Returns the copy options inherited by calls without explicit options.
-    #[cfg_attr(not(coverage), inline)]
-    #[cfg_attr(coverage, inline(never))]
+    #[inline]
     #[must_use = "inspect the default options"]
     pub const fn default_copy_options(&self) -> &LocalCopyOptions {
         &self.defaults.copy
@@ -253,8 +245,7 @@ impl LocalFileSystem {
     }
 
     /// Returns the directory-creation options inherited by defaulted calls.
-    #[cfg_attr(not(coverage), inline)]
-    #[cfg_attr(coverage, inline(never))]
+    #[inline]
     #[must_use = "inspect the default options"]
     pub const fn default_create_directory_options(&self) -> &LocalCreateDirectoryOptions {
         &self.defaults.create_directory
@@ -273,8 +264,7 @@ impl LocalFileSystem {
 
     /// Returns the deletion options inherited by calls without explicit
     /// options.
-    #[cfg_attr(not(coverage), inline)]
-    #[cfg_attr(coverage, inline(never))]
+    #[inline]
     #[must_use = "inspect the default options"]
     pub const fn default_delete_options(&self) -> &LocalDeleteOptions {
         &self.defaults.delete
@@ -292,8 +282,7 @@ impl LocalFileSystem {
     }
 
     /// Returns the rename options inherited by calls without explicit options.
-    #[cfg_attr(not(coverage), inline)]
-    #[cfg_attr(coverage, inline(never))]
+    #[inline]
     #[must_use = "inspect the default options"]
     pub const fn default_rename_options(&self) -> &LocalRenameOptions {
         &self.defaults.rename
@@ -313,8 +302,7 @@ impl LocalFileSystem {
     }
 
     /// Returns the temporary-file options inherited by defaulted calls.
-    #[cfg_attr(not(coverage), inline)]
-    #[cfg_attr(coverage, inline(never))]
+    #[inline]
     #[must_use = "inspect the default options"]
     pub const fn default_temp_file_options(&self) -> &LocalTempFileOptions {
         &self.defaults.temp_file
@@ -339,8 +327,7 @@ impl LocalFileSystem {
     }
 
     /// Returns the temporary-directory options inherited by defaulted calls.
-    #[cfg_attr(not(coverage), inline)]
-    #[cfg_attr(coverage, inline(never))]
+    #[inline]
     #[must_use = "inspect the default options"]
     pub const fn default_temp_directory_options(&self) -> &LocalTempDirectoryOptions {
         &self.defaults.temp_directory
@@ -367,8 +354,7 @@ impl LocalFileSystem {
     /// Installs an instance-local fault plan in test-support builds.
     #[cfg(feature = "test-support")]
     #[doc(hidden)]
-    #[cfg_attr(not(coverage), inline)]
-    #[cfg_attr(coverage, inline(never))]
+    #[inline]
     pub fn with_test_faults(mut self, test_faults: Option<crate::TestFaultPlan>) -> Self {
         self.core = Arc::new(LocalFileSystemCore {
             namespace: self.core.namespace.clone(),

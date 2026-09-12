@@ -54,9 +54,7 @@ impl LocalPathResolver {
 
     /// Returns the PWD snapshot used by this resolver.
     #[must_use]
-    // qubit-style: allow coverage-cfg
-    #[cfg_attr(not(coverage), inline(always))]
-    #[cfg_attr(coverage, inline(never))]
+    #[inline]
     pub(crate) fn current_directory(&self) -> Option<&Path> {
         self.current_directory.as_deref()
     }

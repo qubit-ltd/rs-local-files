@@ -358,9 +358,7 @@ fn unlink_staging_name(staging_parent: RawFd, staging: &CStr) -> Result<()> {
 
 /// Converts a Unix path to a NUL-terminated byte string.
 #[cfg(unix)]
-// qubit-style: allow coverage-cfg
-#[cfg_attr(not(coverage), inline)]
-#[cfg_attr(coverage, inline(never))]
+#[inline]
 fn native_path(path: &Path) -> Result<CString> {
     match CString::new(path.as_os_str().as_bytes()) {
         Ok(path) => Ok(path),
@@ -369,8 +367,7 @@ fn native_path(path: &Path) -> Result<CString> {
 }
 
 /// Pairs an error with a destination known to be unmodified.
-#[cfg_attr(not(coverage), inline)]
-#[cfg_attr(coverage, inline(never))]
+#[inline]
 fn unchanged_error(error: Error) -> (Error, LocalAtomicDestinationState, AtomicStagingState) {
     (
         error,

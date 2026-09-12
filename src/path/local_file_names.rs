@@ -6,7 +6,6 @@
 //    Licensed under the Apache License, Version 2.0.
 // =============================================================================
 //! Scope-compatible native and portable filename policies.
-// qubit-style: allow coverage-cfg
 
 use std::ffi::OsStr;
 use std::ffi::OsString;
@@ -46,8 +45,7 @@ pub struct LocalFileNames {
 
 impl LocalFileNames {
     /// Creates the conservative cross-platform filename policy.
-    #[cfg_attr(not(coverage), inline(always))]
-    #[cfg_attr(coverage, inline(never))]
+    #[inline]
     pub const fn portable() -> Self {
         Self {
             policy: LocalFileNamePolicy::Portable,
@@ -56,8 +54,7 @@ impl LocalFileNames {
     }
 
     /// Creates the lossless current-platform filename policy.
-    #[cfg_attr(not(coverage), inline(always))]
-    #[cfg_attr(coverage, inline(never))]
+    #[inline]
     pub(crate) const fn native() -> Self {
         Self {
             policy: LocalFileNamePolicy::Native,
@@ -135,8 +132,7 @@ impl LocalFileNames {
     ///
     /// Returns a structured generation error when operating-system randomness
     /// is unavailable or the generated name violates this policy.
-    #[cfg_attr(not(coverage), inline(always))]
-    #[cfg_attr(coverage, inline(never))]
+    #[inline]
     pub fn random_name(&self) -> LocalResult<OsString> {
         self.random_name_with(None, None)
     }
@@ -360,8 +356,7 @@ fn is_windows_reserved_file_name(name: &str) -> bool {
 }
 
 /// Creates a structured invalid filename error.
-#[cfg_attr(not(coverage), inline(always))]
-#[cfg_attr(coverage, inline(never))]
+#[inline]
 fn invalid_name_error() -> LocalFileError {
     LocalFileError::new(LocalFileErrorKind::InvalidPath, LocalFileOperation::ValidateName)
 }

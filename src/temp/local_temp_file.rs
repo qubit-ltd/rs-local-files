@@ -6,7 +6,6 @@
 //    Licensed under the Apache License, Version 2.0.
 // =============================================================================
 //! Cleanup-owned temporary files with host or rooted authority.
-// qubit-style: allow coverage-cfg
 
 use std::fs::File;
 use std::io::Error;
@@ -88,8 +87,7 @@ impl LocalTempFile {
     /// Takes ownership of `file` and captures its identity. Native inspection
     /// failures close the handle; the caller remains responsible for removing
     /// the already-created file and sandbox when construction fails.
-    #[cfg_attr(not(coverage), inline)]
-    #[cfg_attr(coverage, inline(never))]
+    #[inline]
     pub(crate) fn host(
         path: PathBuf,
         sandbox_path: PathBuf,
@@ -111,8 +109,7 @@ impl LocalTempFile {
     /// Takes ownership of `file` and captures identity through that handle.
     /// On native inspection failure, the caller must clean the already-created
     /// resource and sandbox through `root`; the file handle is dropped.
-    #[cfg_attr(not(coverage), inline)]
-    #[cfg_attr(coverage, inline(never))]
+    #[inline]
     pub(crate) fn rooted(
         root: Arc<crate::rooted::Root>,
         path: PathBuf,
@@ -138,8 +135,7 @@ impl LocalTempFile {
 
     /// Returns the namespace-absolute generated path.
     #[must_use]
-    #[cfg_attr(not(coverage), inline(always))]
-    #[cfg_attr(coverage, inline(never))]
+    #[inline]
     pub fn path(&self) -> &Path {
         &self.core.path
     }
@@ -147,16 +143,14 @@ impl LocalTempFile {
     /// Returns the current source authority, independently of earlier
     /// publication.
     #[must_use = "inspect the source authority before choosing a recovery action"]
-    #[cfg_attr(not(coverage), inline)]
-    #[cfg_attr(coverage, inline(never))]
+    #[inline]
     pub const fn source_state(&self) -> LocalTempSourceState {
         self.core.source_state()
     }
 
     /// Closes the file I/O handle while retaining cleanup and persistence
     /// responsibility.
-    #[cfg_attr(not(coverage), inline(always))]
-    #[cfg_attr(coverage, inline(never))]
+    #[inline]
     pub fn close(&mut self) {
         drop(self.file.take());
     }
@@ -206,8 +200,7 @@ impl LocalTempFile {
     /// private sandbox.
     /// Uses the default no-replacement policy of [`Self::persist_with`], with
     /// the same publication outcome and resource-retaining failure contract.
-    #[cfg_attr(not(coverage), inline)]
-    #[cfg_attr(coverage, inline(never))]
+    #[inline]
     pub fn keep(self) -> std::result::Result<LocalPersistOutcome, LocalPersistError<Self>> {
         let requested_target = self.core.path.clone();
         if let Err(error) = self.core.ensure_publishable() {
@@ -236,8 +229,7 @@ impl LocalTempFile {
 
     /// Persists the file within its creating authority without replacement.
     /// Uses [`Self::persist_with`] with default options and the same errors.
-    #[cfg_attr(not(coverage), inline(always))]
-    #[cfg_attr(coverage, inline(never))]
+    #[inline]
     pub fn persist(
         self,
         target: impl AsRef<Path>,
@@ -260,8 +252,7 @@ impl LocalTempFile {
     /// resource, its failure stage, and publication certainty. The retained
     /// file may already be closed; created parents and a published destination
     /// are not rolled back. Inspect the error state before retry or cleanup.
-    #[cfg_attr(not(coverage), inline(always))]
-    #[cfg_attr(coverage, inline(never))]
+    #[inline]
     pub fn persist_with(
         self,
         target: impl AsRef<Path>,
@@ -272,8 +263,7 @@ impl LocalTempFile {
 
     /// Returns the mutable open file handle, or an error after [`Self::close`]
     /// or when source authority no longer permits file operations.
-    #[cfg_attr(not(coverage), inline(always))]
-    #[cfg_attr(coverage, inline(never))]
+    #[inline]
     pub fn as_file_mut(&mut self) -> Result<&mut File> {
         self.core.ensure_publishable()?;
         self.file.as_mut().ok_or_else(closed_file_error)
@@ -612,8 +602,7 @@ impl LocalTempFile {
     /// path.
     /// Rechecks identity before removal and propagates inspection/removal
     /// errors. An identity mismatch marks namespace state indeterminate.
-    #[cfg_attr(not(coverage), inline)]
-    #[cfg_attr(coverage, inline(never))]
+    #[inline]
     fn remove_resource(&mut self) -> Result<()> {
         self.ensure_identity_matches()?;
         match &self.core.backend {
@@ -674,8 +663,7 @@ impl LocalTempFile {
 
     /// Rejects namespace cleanup after an indeterminate native publication
     /// attempt.
-    #[cfg_attr(not(coverage), inline)]
-    #[cfg_attr(coverage, inline(never))]
+    #[inline]
     fn ensure_cleanup_safe(&self) -> Result<()> {
         self.core.ensure_cleanup_safe()
     }
@@ -693,8 +681,7 @@ impl LocalTempFile {
     }
 
     /// Records whether a failed native install proves the source remains owned.
-    #[cfg_attr(not(coverage), inline)]
-    #[cfg_attr(coverage, inline(never))]
+    #[inline]
     fn record_native_persist_failure(&mut self, error: &Error) -> LocalPersistFailureState {
         self.core.record_native_persist_failure(error)
     }
@@ -763,22 +750,19 @@ fn synchronize_destination(
 
 impl Write for LocalTempFile {
     /// Writes bytes to the still-open temporary file.
-    #[cfg_attr(not(coverage), inline(always))]
-    #[cfg_attr(coverage, inline(never))]
+    #[inline]
     fn write(&mut self, buffer: &[u8]) -> Result<usize> {
         self.as_file_mut()?.write(buffer)
     }
 
     /// Writes vectored bytes to the still-open temporary file.
-    #[cfg_attr(not(coverage), inline(always))]
-    #[cfg_attr(coverage, inline(never))]
+    #[inline]
     fn write_vectored(&mut self, buffers: &[IoSlice<'_>]) -> Result<usize> {
         self.as_file_mut()?.write_vectored(buffers)
     }
 
     /// Flushes the still-open temporary file.
-    #[cfg_attr(not(coverage), inline(always))]
-    #[cfg_attr(coverage, inline(never))]
+    #[inline]
     fn flush(&mut self) -> Result<()> {
         self.as_file_mut()?.flush()
     }
@@ -786,8 +770,7 @@ impl Write for LocalTempFile {
 
 impl Seek for LocalTempFile {
     /// Seeks the still-open temporary file.
-    #[cfg_attr(not(coverage), inline(always))]
-    #[cfg_attr(coverage, inline(never))]
+    #[inline]
     fn seek(&mut self, position: SeekFrom) -> Result<u64> {
         self.as_file_mut()?.seek(position)
     }
@@ -802,8 +785,7 @@ impl Drop for LocalTempFile {
 
 /// Builds the error used after a temporary file handle was closed.
 #[must_use]
-#[cfg_attr(not(coverage), inline)]
-#[cfg_attr(coverage, inline(never))]
+#[inline]
 fn closed_file_error() -> Error {
     Error::new(ErrorKind::BrokenPipe, "temporary file handle is closed")
 }

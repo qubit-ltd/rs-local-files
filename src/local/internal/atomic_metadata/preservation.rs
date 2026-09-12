@@ -134,9 +134,7 @@ where
     target_os = "macos",
     target_os = "freebsd",
 )))]
-// qubit-style: allow coverage-cfg
-#[cfg_attr(not(coverage), inline(always))]
-#[cfg_attr(coverage, inline(never))]
+#[inline]
 fn preserve_extended_metadata(_source: &File, _staging: &File) -> Result<()> {
     Err(Error::new(
         ErrorKind::Unsupported,

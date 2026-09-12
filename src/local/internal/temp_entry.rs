@@ -160,9 +160,7 @@ pub(crate) fn create_temp_dir_in_dir_with_affixes(
 ///
 /// # Errors
 /// Returns the I/O error reported while creating the directory.
-// qubit-style: allow coverage-cfg
-#[cfg_attr(not(coverage), inline)]
-#[cfg_attr(coverage, inline(never))]
+#[inline]
 pub(crate) fn create_private_dir(path: &Path) -> Result<()> {
     #[cfg(unix)]
     let mut builder = DirBuilder::new();
@@ -183,8 +181,7 @@ pub(crate) fn create_private_dir(path: &Path) -> Result<()> {
 /// # Returns
 /// `true` only for an existing entry when another attempt remains.
 #[must_use]
-#[cfg_attr(not(coverage), inline(always))]
-#[cfg_attr(coverage, inline(never))]
+#[inline]
 fn should_retry_collision(error: &Error, attempt: usize, max_tries: Option<usize>) -> bool {
     error.kind() == ErrorKind::AlreadyExists && max_tries.is_none_or(|max_tries| attempt < max_tries)
 }
@@ -196,8 +193,7 @@ fn should_retry_collision(error: &Error, attempt: usize, max_tries: Option<usize
 ///
 /// # Errors
 /// Returns [`ErrorKind::InvalidInput`] when `max_tries` is zero.
-#[cfg_attr(not(coverage), inline)]
-#[cfg_attr(coverage, inline(never))]
+#[inline]
 fn validate_max_tries(max_tries: Option<usize>) -> Result<()> {
     if max_tries == Some(0) {
         return Err(Error::new(

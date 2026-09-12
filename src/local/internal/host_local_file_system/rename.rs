@@ -126,9 +126,7 @@ impl HostLocalFileSystem {
 /// # Returns
 ///
 /// Structured rename error.
-// qubit-style: allow coverage-cfg
-#[cfg_attr(not(coverage), inline)]
-#[cfg_attr(coverage, inline(never))]
+#[inline]
 fn rename_io_error(source: &Path, target: &Path, error: io::Error) -> LocalFileError {
     LocalFileError::from_io(
         LocalFileOperation::Rename,
@@ -139,8 +137,7 @@ fn rename_io_error(source: &Path, target: &Path, error: io::Error) -> LocalFileE
 }
 
 /// Wraps a failure whose native rename effect cannot be proven.
-#[cfg_attr(not(coverage), inline(always))]
-#[cfg_attr(coverage, inline(never))]
+#[inline]
 fn rename_failure_indeterminate(error: LocalFileError) -> LocalRenameFailure {
     LocalRenameFailure::new(error, LocalRenameFailureState::Indeterminate)
 }

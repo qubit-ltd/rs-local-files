@@ -180,9 +180,7 @@ pub(super) fn checked_add(
 }
 
 /// Creates one structured rooted-copy error.
-// qubit-style: allow coverage-cfg
-#[cfg_attr(not(coverage), inline)]
-#[cfg_attr(coverage, inline(never))]
+#[inline]
 pub(super) fn error(
     stage: Stage,
     source: &Path,
@@ -201,8 +199,7 @@ pub(super) fn error(
 
 /// Creates the stable error used for unsupported source entry types.
 #[must_use]
-#[cfg_attr(not(coverage), inline(always))]
-#[cfg_attr(coverage, inline(never))]
+#[inline]
 pub(super) fn unsupported_source_error() -> io::Error {
     io::Error::new(
         ErrorKind::Unsupported,

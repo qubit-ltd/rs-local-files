@@ -41,17 +41,14 @@ impl Permissions {
 
     /// Returns whether the portable permission view disables writing.
     #[must_use]
-    // qubit-style: allow coverage-cfg
-    #[cfg_attr(not(coverage), inline(always))]
-    #[cfg_attr(coverage, inline(never))]
+    #[inline]
     pub const fn is_read_only(self) -> bool {
         self.read_only
     }
 
     /// Returns exact Unix mode bits when they are available.
     #[must_use]
-    #[cfg_attr(not(coverage), inline(always))]
-    #[cfg_attr(coverage, inline(never))]
+    #[inline]
     pub const fn unix_mode(self) -> Option<u32> {
         self.unix_mode
     }
@@ -63,8 +60,7 @@ impl Permissions {
     /// preserves the other bits.
     #[cfg(unix)]
     #[must_use]
-    #[cfg_attr(not(coverage), inline(always))]
-    #[cfg_attr(coverage, inline(never))]
+    #[inline]
     pub const fn resolve_unix_mode(self, current_mode: u32) -> u32 {
         match self.unix_mode {
             Some(mode) => mode,

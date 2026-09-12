@@ -42,9 +42,7 @@ pub(super) fn sync_rooted_parent_chain(parent: &File, parent_dirs_to_sync: &[Fil
 
 /// Adds structured atomic context to a native I/O result.
 #[cfg(any(unix, windows))]
-// qubit-style: allow coverage-cfg
-#[cfg_attr(not(coverage), inline)]
-#[cfg_attr(coverage, inline(never))]
+#[inline]
 pub(super) fn map_atomic_error<T>(
     result: io::Result<T>,
     stage: LocalAtomicWriteStage,
@@ -66,8 +64,7 @@ pub(super) fn map_atomic_error<T>(
 
 /// Creates a structured unsupported rooted atomic-write error.
 #[cfg(not(unix))]
-#[cfg_attr(not(coverage), inline)]
-#[cfg_attr(coverage, inline(never))]
+#[inline]
 pub(super) fn unsupported_atomic_error(path: &Path) -> LocalAtomicWriteError {
     LocalAtomicWriteError::new(
         LocalAtomicWriteStage::PrepareParent,

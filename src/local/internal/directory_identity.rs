@@ -79,9 +79,7 @@ impl DirectoryIdentity {
     ///
     /// A stable identity suitable for active-ancestor cycle detection.
     #[cfg(unix)]
-    // qubit-style: allow coverage-cfg
-    #[cfg_attr(not(coverage), inline)]
-    #[cfg_attr(coverage, inline(never))]
+    #[inline]
     pub(crate) fn from_metadata(metadata: &Metadata, canonical_path: &Path) -> Self {
         #[cfg(feature = "test-support")]
         if injected_cycle_identity() {
@@ -125,8 +123,7 @@ impl DirectoryIdentity {
     ///
     /// The canonical path wrapped as a directory identity.
     #[cfg(not(any(unix, windows)))]
-    #[cfg_attr(not(coverage), inline(always))]
-    #[cfg_attr(coverage, inline(never))]
+    #[inline]
     pub(crate) fn from_metadata(metadata: &Metadata, canonical_path: &Path) -> Self {
         let _ = metadata;
         Self::Canonical(canonical_path.to_path_buf())
@@ -171,8 +168,7 @@ fn windows_native_identity(path: &Path) -> Option<DirectoryIdentity> {
 /// `true` when either directory-cycle fault is selected.
 #[cfg(all(feature = "test-support", any(unix, windows)))]
 #[must_use]
-#[cfg_attr(not(coverage), inline)]
-#[cfg_attr(coverage, inline(never))]
+#[inline]
 fn injected_cycle_identity() -> bool {
     super::test_support::is_enabled("copy-dir-directory-identity-cycle")
         || super::test_support::is_enabled("dir-size-directory-identity-cycle")

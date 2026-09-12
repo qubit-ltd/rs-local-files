@@ -42,9 +42,7 @@ impl LocalNamespacePath {
 
     /// Returns the namespace-absolute path, retaining Host native spelling.
     #[must_use]
-    // qubit-style: allow coverage-cfg
-    #[cfg_attr(not(coverage), inline(always))]
-    #[cfg_attr(coverage, inline(never))]
+    #[inline]
     pub(crate) fn namespace_absolute(&self) -> &Path {
         &self.namespace_absolute
     }
@@ -53,16 +51,14 @@ impl LocalNamespacePath {
     ///
     /// Rooted paths omit the virtual root. Host paths remain fully qualified.
     #[must_use]
-    #[cfg_attr(not(coverage), inline(always))]
-    #[cfg_attr(coverage, inline(never))]
+    #[inline]
     pub(crate) fn authority_relative(&self) -> &Path {
         &self.authority_relative
     }
 
     /// Reports whether the original native syntax requires a directory.
     #[must_use]
-    #[cfg_attr(not(coverage), inline(always))]
-    #[cfg_attr(coverage, inline(never))]
+    #[inline]
     pub(crate) const fn directory_required(&self) -> bool {
         self.directory_required
     }

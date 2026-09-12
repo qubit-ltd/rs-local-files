@@ -263,9 +263,7 @@ pub(crate) fn internal_copy_options(
 ///
 /// Returns `NotDirectory` for another entry kind and propagates metadata
 /// failures with the supplied operation and parent path.
-// qubit-style: allow coverage-cfg
-#[cfg_attr(not(coverage), inline)]
-#[cfg_attr(coverage, inline(never))]
+#[inline]
 fn validate_host_temp_parent(parent: &Path, operation: LocalFileOperation) -> LocalResult<()> {
     let metadata = match fs::metadata(parent) {
         Ok(metadata) => metadata,

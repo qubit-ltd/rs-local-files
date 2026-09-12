@@ -151,9 +151,7 @@ pub(super) fn normalize_opened_regular_file_metadata(
 
 /// Returns whether test support should reject an opened directory's type.
 #[must_use]
-// qubit-style: allow coverage-cfg
-#[cfg_attr(not(coverage), inline)]
-#[cfg_attr(coverage, inline(never))]
+#[inline]
 fn rooted_directory_type_fault_enabled() -> bool {
     #[cfg(feature = "test-support")]
     return super::test_support::is_enabled("rooted-directory-type");
@@ -162,8 +160,7 @@ fn rooted_directory_type_fault_enabled() -> bool {
 }
 
 /// Returns whether test support should reject an opened file's type.
-#[cfg_attr(not(coverage), inline)]
-#[cfg_attr(coverage, inline(never))]
+#[inline]
 fn rooted_file_type_fault_enabled() -> bool {
     #[cfg(feature = "test-support")]
     return super::test_support::is_enabled("rooted-file-type");

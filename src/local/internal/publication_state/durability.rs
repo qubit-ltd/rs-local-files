@@ -35,9 +35,7 @@ use crate::LocalResult;
 ///
 /// Returns `PublicationIncomplete` when required synchronization fails after
 /// the namespace mutation.
-// qubit-style: allow coverage-cfg
-#[cfg_attr(not(coverage), inline)]
-#[cfg_attr(coverage, inline(never))]
+#[inline]
 pub(crate) fn published_durability(
     requirement: LocalDurabilityRequirement,
     sync: impl FnOnce() -> io::Result<()>,

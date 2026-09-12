@@ -21,9 +21,7 @@ use crate::LocalFileError;
 /// # Returns
 ///
 /// A copy failure with empty partial statistics and unchanged state.
-// qubit-style: allow coverage-cfg
-#[cfg_attr(not(coverage), inline)]
-#[cfg_attr(coverage, inline(never))]
+#[inline]
 pub(crate) fn copy_failure_unchanged(error: LocalFileError) -> LocalCopyFailure {
     LocalCopyFailure::new(
         error,
@@ -44,8 +42,7 @@ pub(crate) fn copy_failure_unchanged(error: LocalFileError) -> LocalCopyFailure 
 /// # Returns
 ///
 /// A copy failure with indeterminate state and empty confirmed copy statistics.
-#[cfg_attr(not(coverage), inline)]
-#[cfg_attr(coverage, inline(never))]
+#[inline]
 pub(crate) fn copy_failure_indeterminate(error: LocalFileError) -> LocalCopyFailure {
     LocalCopyFailure::new(
         error,
@@ -66,8 +63,7 @@ pub(crate) fn copy_failure_indeterminate(error: LocalFileError) -> LocalCopyFail
 /// # Returns
 ///
 /// A copy failure marked as published with the supplied statistics.
-#[cfg_attr(not(coverage), inline)]
-#[cfg_attr(coverage, inline(never))]
+#[inline]
 pub(crate) fn copy_failure_published(error: LocalFileError, partial_stats: LocalCopyStats) -> LocalCopyFailure {
     LocalCopyFailure::new(error, LocalCopyFailureState::Published, partial_stats, None, None)
 }
