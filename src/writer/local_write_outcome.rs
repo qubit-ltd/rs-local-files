@@ -65,41 +65,35 @@ impl LocalWriteOutcome {
 
     /// Returns the terminal writer state.
     #[must_use = "inspect the terminal writer state"]
-    // qubit-style: allow coverage-cfg
-    #[cfg_attr(not(coverage), inline)]
-    #[cfg_attr(coverage, inline(never))]
+    #[inline]
     pub const fn state(self) -> LocalWriterState {
         self.state
     }
 
     /// Reports whether destination publication was atomic.
     #[must_use]
-    #[cfg_attr(not(coverage), inline)]
-    #[cfg_attr(coverage, inline(never))]
+    #[inline]
     pub const fn atomic(self) -> bool {
         self.atomic
     }
 
     /// Returns the native method used by this writer session.
     #[must_use = "the publication method must be inspected or stored"]
-    #[cfg_attr(not(coverage), inline)]
-    #[cfg_attr(coverage, inline(never))]
+    #[inline]
     pub const fn publication_method(self) -> LocalWritePublicationMethod {
         self.publication_method
     }
 
     /// Reports whether durability synchronization completed.
     #[must_use]
-    #[cfg_attr(not(coverage), inline)]
-    #[cfg_attr(coverage, inline(never))]
+    #[inline]
     pub const fn durable(self) -> bool {
         self.durable
     }
 
     /// Returns the number of bytes accepted by the writer stream.
     #[must_use]
-    #[cfg_attr(not(coverage), inline)]
-    #[cfg_attr(coverage, inline(never))]
+    #[inline]
     pub const fn bytes_written(self) -> usize {
         self.bytes_written
     }
@@ -107,8 +101,7 @@ impl LocalWriteOutcome {
     /// Returns a failure state retained from an earlier stream or publication
     /// error, or `None` when the terminal outcome is fully successful.
     #[must_use]
-    #[cfg_attr(not(coverage), inline)]
-    #[cfg_attr(coverage, inline(never))]
+    #[inline]
     pub const fn failure_state(self) -> Option<LocalWriteFailureState> {
         self.failure_state
     }

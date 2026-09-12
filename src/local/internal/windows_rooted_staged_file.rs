@@ -40,9 +40,7 @@ impl WindowsRootedStagedFile {
     ///
     /// Panics if the staging handle has already been closed.
     #[must_use]
-    // qubit-style: allow coverage-cfg
-    #[cfg_attr(not(coverage), inline(always))]
-    #[cfg_attr(coverage, inline(never))]
+    #[inline]
     pub(in crate::local) fn file(&self) -> &File {
         self.file
             .as_ref()
@@ -55,8 +53,7 @@ impl WindowsRootedStagedFile {
     ///
     /// Panics if the staging handle has already been closed.
     #[must_use]
-    #[cfg_attr(not(coverage), inline(always))]
-    #[cfg_attr(coverage, inline(never))]
+    #[inline]
     pub(in crate::local) fn file_mut(&mut self) -> &mut File {
         self.file
             .as_mut()
@@ -91,8 +88,7 @@ impl WindowsRootedStagedFile {
     /// Closes the data handle and marks the staging name as installed.
     /// Closing here prevents later cleanup from changing the published file's
     /// read-only attribute through a retained staging handle.
-    #[cfg_attr(not(coverage), inline(always))]
-    #[cfg_attr(coverage, inline(never))]
+    #[inline]
     pub(in crate::local) fn disarm(&mut self) {
         drop(self.file.take());
         self.armed = false;

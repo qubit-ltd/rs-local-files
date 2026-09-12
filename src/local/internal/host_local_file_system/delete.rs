@@ -162,7 +162,7 @@ impl DeleteBackend for HostLocalFileSystem {
 
     /// Borrows diagnostic coordinates without allocating or resolving the
     /// entry.
-    #[inline(always)]
+    #[inline]
     fn path<'a>(&self, value: &'a Self::Path) -> &'a Path {
         value
     }
@@ -183,7 +183,7 @@ impl DeleteBackend for HostLocalFileSystem {
 
     /// Tests whether inspected metadata denotes a real directory rather than a
     /// link.
-    #[inline(always)]
+    #[inline]
     fn is_directory(&self, metadata: &Self::Metadata) -> bool {
         metadata.file_type().is_dir()
     }
@@ -193,7 +193,7 @@ impl DeleteBackend for HostLocalFileSystem {
     /// # Errors
     ///
     /// Returns native directory-open errors without removing any entries.
-    #[inline(always)]
+    #[inline]
     fn open_directory(&self, path: &Self::Path) -> io::Result<Self::Reader> {
         fs::read_dir(path)
     }
@@ -212,7 +212,7 @@ impl DeleteBackend for HostLocalFileSystem {
     /// # Errors
     ///
     /// Returns native unlink errors; symbolic-link targets remain untouched.
-    #[inline(always)]
+    #[inline]
     fn remove_non_directory(&self, path: &Self::Path, metadata: &Self::Metadata) -> io::Result<()> {
         remove_host_non_directory(path, metadata)
     }
@@ -222,7 +222,7 @@ impl DeleteBackend for HostLocalFileSystem {
     /// # Errors
     ///
     /// Returns native removal errors, including concurrent child creation.
-    #[inline(always)]
+    #[inline]
     fn remove_empty_directory(&self, path: &Self::Path) -> io::Result<()> {
         fs::remove_dir(path)
     }

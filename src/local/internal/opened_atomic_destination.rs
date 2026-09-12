@@ -68,25 +68,21 @@ impl OpenedAtomicDestination {
     /// Returns the metadata-copy handle, or `None` for identity-only
     /// observation.
     #[must_use]
-    // qubit-style: allow coverage-cfg
-    #[cfg_attr(not(coverage), inline(always))]
-    #[cfg_attr(coverage, inline(never))]
+    #[inline]
     pub(crate) fn file(&self) -> Option<&File> {
         self.file.as_ref()
     }
 
     /// Returns the captured device identifier.
     #[must_use]
-    #[cfg_attr(not(coverage), inline(always))]
-    #[cfg_attr(coverage, inline(never))]
+    #[inline]
     pub(crate) const fn device(&self) -> u64 {
         self.device
     }
 
     /// Returns the captured inode identifier.
     #[must_use]
-    #[cfg_attr(not(coverage), inline(always))]
-    #[cfg_attr(coverage, inline(never))]
+    #[inline]
     pub(crate) const fn inode(&self) -> u64 {
         self.inode
     }
@@ -355,8 +351,7 @@ where
 }
 
 /// Returns whether a test-support-only atomic destination fault is selected.
-#[cfg_attr(not(coverage), inline)]
-#[cfg_attr(coverage, inline(never))]
+#[inline]
 fn test_support_enabled(name: &str) -> bool {
     #[cfg(feature = "test-support")]
     return super::test_support::is_enabled(name);
@@ -369,8 +364,7 @@ fn test_support_enabled(name: &str) -> bool {
 
 /// Creates the stable type error for atomic destinations.
 #[must_use]
-#[cfg_attr(not(coverage), inline(always))]
-#[cfg_attr(coverage, inline(never))]
+#[inline]
 pub(crate) fn invalid_atomic_destination() -> Error {
     Error::new(
         ErrorKind::InvalidInput,

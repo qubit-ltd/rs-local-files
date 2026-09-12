@@ -24,9 +24,7 @@ pub(crate) struct LocalStagedCommitError {
 impl LocalStagedCommitError {
     /// Splits the failure into its error and optional retryable backend.
     #[must_use]
-    // qubit-style: allow coverage-cfg
-    #[cfg_attr(not(coverage), inline)]
-    #[cfg_attr(coverage, inline(never))]
+    #[inline]
     pub(crate) fn into_parts(self) -> (LocalAtomicWriteError, Option<LocalFileWriterBackend>) {
         (self.error, self.backend.map(|backend| *backend))
     }

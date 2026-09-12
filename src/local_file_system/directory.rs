@@ -220,6 +220,10 @@ impl LocalFileSystem {
         self.delete_directory_with_options_started_at(path, options, super::Instant::now())
     }
 
+    /// Deletes a directory with an explicitly captured operation start time.
+    ///
+    /// The captured time keeps deadline enforcement deterministic for callers
+    /// that need to inject or reuse the beginning of an operation.
     fn delete_directory_with_options_started_at(
         &self,
         path: &Path,

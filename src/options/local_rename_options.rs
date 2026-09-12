@@ -22,9 +22,7 @@ pub struct LocalRenameOptions {
 
 impl LocalRenameOptions {
     /// Creates no-replace rename options without required durability.
-    // qubit-style: allow coverage-cfg
-    #[cfg_attr(not(coverage), inline)]
-    #[cfg_attr(coverage, inline(never))]
+    #[inline]
     pub const fn new() -> Self {
         Self {
             overwrite: false,
@@ -34,16 +32,14 @@ impl LocalRenameOptions {
 
     /// Reports whether an existing destination may be replaced.
     #[must_use]
-    #[cfg_attr(not(coverage), inline(always))]
-    #[cfg_attr(coverage, inline(never))]
+    #[inline]
     pub const fn overwrite(&self) -> bool {
         self.overwrite
     }
 
     /// Returns the requested durability.
     #[must_use = "inspect the requested durability"]
-    #[cfg_attr(not(coverage), inline(always))]
-    #[cfg_attr(coverage, inline(never))]
+    #[inline]
     pub const fn durability(&self) -> LocalDurabilityRequirement {
         self.durability
     }

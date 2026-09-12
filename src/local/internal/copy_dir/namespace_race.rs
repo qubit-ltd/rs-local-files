@@ -61,9 +61,7 @@ where
 /// Returns whether test support should classify a racing entry as
 /// non-directory.
 #[must_use]
-// qubit-style: allow coverage-cfg
-#[cfg_attr(not(coverage), inline)]
-#[cfg_attr(coverage, inline(never))]
+#[inline]
 fn test_non_directory_race_enabled() -> bool {
     #[cfg(feature = "test-support")]
     return test_support::is_enabled("copy-directory-race-nondirectory");
@@ -97,8 +95,7 @@ pub(super) fn removable_non_directory_metadata(result: Result<fs::Metadata>) -> 
 
 /// Returns whether test support should classify a replacement race as
 /// directory.
-#[cfg_attr(not(coverage), inline)]
-#[cfg_attr(coverage, inline(never))]
+#[inline]
 fn test_removal_directory_race_enabled() -> bool {
     #[cfg(feature = "test-support")]
     return test_support::is_enabled("copy-removal-race-directory");

@@ -25,9 +25,7 @@ use crate::LocalResult;
 ///
 /// Returns `LocalFileError` for empty, absolute, prefixed, dot, or parent
 /// paths.
-// qubit-style: allow coverage-cfg
-#[cfg_attr(not(coverage), inline)]
-#[cfg_attr(coverage, inline(never))]
+#[inline]
 pub(crate) fn rooted_path(path: &Path, operation: LocalFileOperation) -> LocalResult<crate::local::LocalRelativePath> {
     match crate::local::LocalRelativePath::new(path) {
         Ok(path) => Ok(path),
@@ -62,8 +60,7 @@ pub(crate) fn rooted_destination_is_directory(
 ///
 /// Returns `LocalFileError` when the configured parent is not a normal
 /// relative descendant of the opened root.
-#[cfg_attr(not(coverage), inline)]
-#[cfg_attr(coverage, inline(never))]
+#[inline]
 pub(crate) fn rooted_temp_parent(parent: Option<&Path>, operation: LocalFileOperation) -> LocalResult<PathBuf> {
     let Some(parent) = parent else {
         return Ok(PathBuf::new());
@@ -82,8 +79,7 @@ pub(crate) fn rooted_temp_parent(parent: Option<&Path>, operation: LocalFileOper
 ///
 /// Returns `LocalFileError` when the parent cannot be read or is not a
 /// directory.
-#[cfg_attr(not(coverage), inline)]
-#[cfg_attr(coverage, inline(never))]
+#[inline]
 pub(crate) fn validate_rooted_temp_parent(
     root: &crate::rooted::Root,
     parent: &Path,
@@ -114,8 +110,7 @@ pub(crate) fn validate_rooted_temp_parent(
 ///
 /// Returns `LocalFileError` when an affix is invalid or randomness is
 /// unavailable.
-#[cfg_attr(not(coverage), inline)]
-#[cfg_attr(coverage, inline(never))]
+#[inline]
 pub(crate) fn temp_candidate(
     parent: &Path,
     prefix: Option<&str>,
@@ -137,8 +132,7 @@ pub(crate) fn temp_candidate(
 }
 
 /// Converts descriptor-relative metadata to the unified metadata type.
-#[cfg_attr(not(coverage), inline)]
-#[cfg_attr(coverage, inline(never))]
+#[inline]
 pub(crate) fn rooted_metadata(metadata: crate::rooted::Metadata) -> LocalFileMetadata {
     let kind = match metadata.kind() {
         crate::rooted::EntryKind::File => LocalFileKind::File,
@@ -166,8 +160,7 @@ pub(crate) fn rooted_metadata(metadata: crate::rooted::Metadata) -> LocalFileMet
 }
 
 /// Adds rooted operation and descendant context to a native I/O failure.
-#[cfg_attr(not(coverage), inline(always))]
-#[cfg_attr(coverage, inline(never))]
+#[inline]
 pub(crate) fn rooted_io_error(operation: LocalFileOperation, path: &Path, error: io::Error) -> LocalFileError {
     LocalFileError::from_io(operation, Some(path.to_path_buf()), None, error)
 }

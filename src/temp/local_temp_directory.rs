@@ -6,7 +6,6 @@
 //    Licensed under the Apache License, Version 2.0.
 // =============================================================================
 //! Cleanup-owned temporary directories with host or rooted authority.
-// qubit-style: allow coverage-cfg
 
 use std::io::Error;
 use std::io::ErrorKind;
@@ -88,8 +87,7 @@ impl LocalTempDirectory {
     /// Captures identity without following the final link. Native inspection
     /// failure leaves cleanup of the created directory and sandbox to the
     /// caller.
-    #[cfg_attr(not(coverage), inline)]
-    #[cfg_attr(coverage, inline(never))]
+    #[inline]
     pub(crate) fn host(
         path: PathBuf,
         sandbox_path: PathBuf,
@@ -111,8 +109,7 @@ impl LocalTempDirectory {
     /// Requires a previously validated authority-relative `path`. Native
     /// inspection failure leaves cleanup of the created directory and sandbox
     /// to the caller through the retained `root` authority.
-    #[cfg_attr(not(coverage), inline)]
-    #[cfg_attr(coverage, inline(never))]
+    #[inline]
     pub(crate) fn rooted(
         root: Arc<crate::rooted::Root>,
         path: PathBuf,
@@ -139,8 +136,7 @@ impl LocalTempDirectory {
 
     /// Returns the namespace-absolute generated path.
     #[must_use]
-    #[cfg_attr(not(coverage), inline(always))]
-    #[cfg_attr(coverage, inline(never))]
+    #[inline]
     pub fn path(&self) -> &Path {
         &self.core.path
     }
@@ -148,8 +144,7 @@ impl LocalTempDirectory {
     /// Returns the current source authority, independently of earlier
     /// publication.
     #[must_use = "inspect the source authority before choosing a recovery action"]
-    #[cfg_attr(not(coverage), inline)]
-    #[cfg_attr(coverage, inline(never))]
+    #[inline]
     pub const fn source_state(&self) -> LocalTempSourceState {
         self.core.source_state()
     }
@@ -234,8 +229,7 @@ impl LocalTempDirectory {
     /// Resolves a normal relative descendant below this directory.
     /// Performs no I/O or existence check. Returns a relative-path validation
     /// error for empty input, roots, prefixes, dots, parents, or native NUL.
-    #[cfg_attr(not(coverage), inline)]
-    #[cfg_attr(coverage, inline(never))]
+    #[inline]
     pub fn descendant(&self, descendant: &Path) -> Result<PathBuf> {
         let relative = LocalRelativePath::new(descendant)?;
         Ok(self.core.path.join(relative.as_path()))
@@ -245,8 +239,7 @@ impl LocalTempDirectory {
     /// private sandbox.
     /// Uses the default no-replacement policy of [`Self::persist_with`], with
     /// the same publication outcome and resource-retaining failure contract.
-    #[cfg_attr(not(coverage), inline)]
-    #[cfg_attr(coverage, inline(never))]
+    #[inline]
     pub fn keep(self) -> std::result::Result<LocalPersistOutcome, LocalPersistError<Self>> {
         let requested_target = self.core.path.clone();
         if let Err(error) = self.core.ensure_publishable() {
@@ -276,8 +269,7 @@ impl LocalTempDirectory {
     /// Persists the directory without replacement through its creating
     /// authority.
     /// Uses [`Self::persist_with`] with default options and the same errors.
-    #[cfg_attr(not(coverage), inline(always))]
-    #[cfg_attr(coverage, inline(never))]
+    #[inline]
     pub fn persist(
         self,
         target: impl AsRef<Path>,
@@ -301,8 +293,7 @@ impl LocalTempDirectory {
     /// failures retain the resource, stage, and publication certainty in
     /// `LocalPersistError`. Created parents are not rolled back; inspect the
     /// failure state before retry or cleanup.
-    #[cfg_attr(not(coverage), inline(always))]
-    #[cfg_attr(coverage, inline(never))]
+    #[inline]
     pub fn persist_with(
         self,
         target: impl AsRef<Path>,
@@ -557,8 +548,7 @@ impl LocalTempDirectory {
     /// path.
     /// Rechecks identity before recursive removal and propagates inspection or
     /// removal errors. Earlier deletions remain after a later failure.
-    #[cfg_attr(not(coverage), inline)]
-    #[cfg_attr(coverage, inline(never))]
+    #[inline]
     fn remove_resource(&mut self, started_at: Instant) -> LocalResult<()> {
         self.ensure_identity_matches().map_err(|error| {
             self.contextualize_error(LocalFileError::from_io(
@@ -631,8 +621,7 @@ impl LocalTempDirectory {
 
     /// Rejects namespace cleanup after an indeterminate native publication
     /// attempt.
-    #[cfg_attr(not(coverage), inline)]
-    #[cfg_attr(coverage, inline(never))]
+    #[inline]
     fn ensure_cleanup_safe(&self) -> Result<()> {
         self.core.ensure_cleanup_safe()
     }
@@ -647,8 +636,7 @@ impl LocalTempDirectory {
     }
 
     /// Records whether a failed native install proves the source remains owned.
-    #[cfg_attr(not(coverage), inline)]
-    #[cfg_attr(coverage, inline(never))]
+    #[inline]
     fn record_native_persist_failure(&mut self, error: &Error) -> LocalPersistFailureState {
         self.core.record_native_persist_failure(error)
     }

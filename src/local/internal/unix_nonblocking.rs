@@ -127,9 +127,7 @@ fn wait_for_nonblocking_open_retry(delay: &mut Duration, remaining: Duration) {
 
 /// Creates the stable error returned when an open retry deadline expires.
 #[must_use]
-// qubit-style: allow coverage-cfg
-#[cfg_attr(not(coverage), inline)]
-#[cfg_attr(coverage, inline(never))]
+#[inline]
 fn open_retry_timed_out(timeout: Duration) -> Error {
     Error::new(
         ErrorKind::TimedOut,

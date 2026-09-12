@@ -54,9 +54,7 @@ impl LocalDirectoryEntry {
 
     /// Returns the reusable namespace-absolute identity path.
     #[must_use]
-    // qubit-style: allow coverage-cfg
-    #[cfg_attr(not(coverage), inline)]
-    #[cfg_attr(coverage, inline(never))]
+    #[inline]
     pub fn path(&self) -> &Path {
         &self.path
     }
@@ -66,24 +64,21 @@ impl LocalDirectoryEntry {
     /// Rooted walkers retain descriptor authority, so callers must use
     /// [`Self::path`] for a reusable namespace identity.
     #[must_use]
-    #[cfg_attr(not(coverage), inline)]
-    #[cfg_attr(coverage, inline(never))]
+    #[inline]
     pub fn diagnostic_path(&self) -> Option<&Path> {
         self.diagnostic_path.as_deref()
     }
 
     /// Returns the path relative to the listing root.
     #[must_use]
-    #[cfg_attr(not(coverage), inline)]
-    #[cfg_attr(coverage, inline(never))]
+    #[inline]
     pub fn relative_path(&self) -> &Path {
         &self.relative_path
     }
 
     /// Returns normalized metadata observed during traversal.
     #[must_use = "inspect the observed metadata"]
-    #[cfg_attr(not(coverage), inline)]
-    #[cfg_attr(coverage, inline(never))]
+    #[inline]
     pub const fn metadata(&self) -> &LocalFileMetadata {
         &self.metadata
     }

@@ -434,9 +434,7 @@ impl LocalAtomicWriter {
     /// Returns the structured namespace-race error produced by the identity
     /// verifier while retaining staging for retry or explicit abort.
     #[cfg(unix)]
-    // qubit-style: allow coverage-cfg
-    #[cfg_attr(not(coverage), inline)]
-    #[cfg_attr(coverage, inline(never))]
+    #[inline]
     fn verify_destination_for_commit(
         &mut self,
         destination: Option<&OpenedAtomicDestination>,
@@ -544,30 +542,26 @@ impl LocalAtomicWriter {
 
 impl Write for LocalAtomicWriter {
     /// Writes bytes into the private staging file.
-    #[cfg_attr(not(coverage), inline(always))]
-    #[cfg_attr(coverage, inline(never))]
+    #[inline]
     fn write(&mut self, buffer: &[u8]) -> io::Result<usize> {
         self.staged_file.file_mut().write(buffer)
     }
 
     /// Writes bytes from multiple buffers into the private staging file.
-    #[cfg_attr(not(coverage), inline(always))]
-    #[cfg_attr(coverage, inline(never))]
+    #[inline]
     fn write_vectored(&mut self, buffers: &[io::IoSlice<'_>]) -> io::Result<usize> {
         self.staged_file.file_mut().write_vectored(buffers)
     }
 
     /// Flushes userspace data into the private staging file.
-    #[cfg_attr(not(coverage), inline(always))]
-    #[cfg_attr(coverage, inline(never))]
+    #[inline]
     fn flush(&mut self) -> io::Result<()> {
         self.staged_file.file_mut().flush()
     }
 }
 
 /// Adds atomic-write context to a native I/O result.
-#[cfg_attr(not(coverage), inline)]
-#[cfg_attr(coverage, inline(never))]
+#[inline]
 fn with_atomic_context<T>(
     result: io::Result<T>,
     stage: LocalAtomicWriteStage,

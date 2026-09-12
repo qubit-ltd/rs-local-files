@@ -72,9 +72,7 @@ impl Root {
 
     /// Returns the diagnostic path captured when the root was opened.
     #[must_use]
-    // qubit-style: allow coverage-cfg
-    #[cfg_attr(not(coverage), inline(always))]
-    #[cfg_attr(coverage, inline(never))]
+    #[inline]
     pub fn path(&self) -> &Path {
         &self.path
     }
@@ -86,8 +84,7 @@ impl Root {
     /// Returns an I/O error when the operating system cannot duplicate the
     /// already-opened authority handle.
     #[cfg(any(unix, windows))]
-    #[cfg_attr(not(coverage), inline)]
-    #[cfg_attr(coverage, inline(never))]
+    #[inline]
     pub fn try_clone_authority(&self) -> Result<File> {
         self.directory.try_clone()
     }
@@ -725,8 +722,7 @@ impl Root {
     /// Returns a structured copy error when the source is unsupported,
     /// destination policies reject an entry, traversal fails, staging cannot
     /// be installed, or required synchronization fails.
-    #[cfg_attr(not(coverage), inline(always))]
-    #[cfg_attr(coverage, inline(never))]
+    #[inline]
     pub fn copy_with_durability(
         &self,
         source: &path::Path,

@@ -318,9 +318,7 @@ fn read_directory_handle(directory: &File, diagnostic_path: &Path) -> Result<Vec
 /// Opens a no-follow child directory from an already-open parent.
 ///
 /// Returns `openat` errors, including missing, non-directory, and link entries.
-// qubit-style: allow coverage-cfg
-#[cfg_attr(not(coverage), inline)]
-#[cfg_attr(coverage, inline(never))]
+#[inline]
 fn open_directory_component(parent: &File, name: &CString) -> Result<File> {
     super::rooted_file_io::open_file_at(
         parent,
@@ -333,15 +331,13 @@ fn open_directory_component(parent: &File, name: &CString) -> Result<File> {
 /// Reads no-follow metadata for a rooted path.
 ///
 /// Propagates secure parent-traversal and final metadata errors.
-#[cfg_attr(not(coverage), inline)]
-#[cfg_attr(coverage, inline(never))]
+#[inline]
 fn rooted_status(root: &File, diagnostic_root: &Path, path: &LocalRelativePath) -> Result<libc::stat> {
     super::rooted_file_io::read_rooted_symlink_metadata(root, diagnostic_root, path)
 }
 
 /// Returns whether one native mode represents a directory.
-#[cfg_attr(not(coverage), inline(always))]
-#[cfg_attr(coverage, inline(never))]
+#[inline]
 const fn is_directory(mode: libc::mode_t) -> bool {
     mode & libc::S_IFMT == libc::S_IFDIR
 }
@@ -351,8 +347,7 @@ const fn is_directory(mode: libc::mode_t) -> bool {
 /// Returns the raw native status inside `Ok`; `-1` requires the caller to
 /// capture `last_os_error` immediately, before another syscall.
 #[cfg(any(target_os = "linux", target_os = "android"))]
-#[cfg_attr(not(coverage), inline)]
-#[cfg_attr(coverage, inline(never))]
+#[inline]
 fn rename_without_replacing(
     source_parent: &File,
     source_name: &CString,
@@ -377,8 +372,7 @@ fn rename_without_replacing(
 /// Returns the raw native status inside `Ok`; `-1` requires the caller to
 /// capture `last_os_error` immediately, before another syscall.
 #[cfg(any(target_os = "macos", target_os = "ios"))]
-#[cfg_attr(not(coverage), inline)]
-#[cfg_attr(coverage, inline(never))]
+#[inline]
 fn rename_without_replacing(
     source_parent: &File,
     source_name: &CString,
@@ -400,8 +394,7 @@ fn rename_without_replacing(
 
 /// Reports platforms without an atomic descriptor-relative no-replace rename.
 #[cfg(not(any(target_os = "linux", target_os = "android", target_os = "macos", target_os = "ios",)))]
-#[cfg_attr(not(coverage), inline)]
-#[cfg_attr(coverage, inline(never))]
+#[inline]
 fn rename_without_replacing(
     _source_parent: &File,
     _source_name: &CString,

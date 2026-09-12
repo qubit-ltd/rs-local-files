@@ -145,9 +145,7 @@ pub(crate) fn remove_rooted_entry(root: &File, _diagnostic_root: &Path, path: &L
 /// # Errors
 ///
 /// Returns an I/O error when the entry cannot be opened or deleted.
-// qubit-style: allow coverage-cfg
-#[cfg_attr(not(coverage), inline)]
-#[cfg_attr(coverage, inline(never))]
+#[inline]
 fn delete_rooted_entry(root: &File, path: &LocalRelativePath) -> Result<()> {
     let entry = open_entry_no_follow(root, path, DELETE | FILE_READ_ATTRIBUTES | SYNCHRONIZE, FILE_OPEN, 0)?;
     delete_open_entry(&entry)

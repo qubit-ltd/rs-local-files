@@ -197,9 +197,7 @@ fn get_xattr(file: &File, name: &[u8]) -> Result<Vec<u8>> {
 }
 
 /// Gets an optional extended-attribute value, retrying size races.
-// qubit-style: allow coverage-cfg
-#[cfg_attr(not(coverage), inline)]
-#[cfg_attr(coverage, inline(never))]
+#[inline]
 fn get_optional_xattr(file: &File, name: &[u8]) -> Result<Option<Vec<u8>>> {
     #[cfg(feature = "test-support")]
     if super::super::test_support::is_enabled("atomic-metadata-equal-value") {
@@ -310,8 +308,7 @@ fn read_xattr_value(file: &File, name: &CString, value: &mut [u8]) -> Result<usi
 /// # Errors
 /// Returns the injected error or the operating system's last error when the
 /// native syscall returns `-1`.
-#[cfg_attr(not(coverage), inline)]
-#[cfg_attr(coverage, inline(never))]
+#[inline]
 fn xattr_size_result(result: isize, forced_error: Option<i32>) -> Result<usize> {
     if result == -1 {
         Err(forced_error.map_or_else(Error::last_os_error, Error::from_raw_os_error))
@@ -372,8 +369,7 @@ fn remove_xattr(file: &File, name: &[u8]) -> Result<()> {
 }
 
 /// Converts an xattr name to a native C string.
-#[cfg_attr(not(coverage), inline)]
-#[cfg_attr(coverage, inline(never))]
+#[inline]
 fn native_name(name: &[u8]) -> Result<CString> {
     match CString::new(name) {
         Ok(name) => Ok(name),
@@ -386,16 +382,14 @@ fn native_name(name: &[u8]) -> Result<CString> {
 
 /// Reports the platform's missing-attribute error.
 #[must_use]
-#[cfg_attr(not(coverage), inline)]
-#[cfg_attr(coverage, inline(never))]
+#[inline]
 fn is_missing_xattr(error: &Error) -> bool {
     error.raw_os_error() == Some(libc::ENODATA)
 }
 
 /// Reports that the filesystem exposes no extended-attribute interface.
 #[must_use]
-#[cfg_attr(not(coverage), inline)]
-#[cfg_attr(coverage, inline(never))]
+#[inline]
 fn is_not_supported(error: &Error) -> bool {
     let code = error.raw_os_error();
     code == Some(libc::ENOTSUP) || code == Some(libc::EOPNOTSUPP)

@@ -52,9 +52,7 @@ use crate::write;
 ///
 /// Returns a contextual I/O error when the resolved path is missing, is not a
 /// directory, or cannot be opened.
-// qubit-style: allow coverage-cfg
-#[cfg_attr(not(coverage), inline)]
-#[cfg_attr(coverage, inline(never))]
+#[inline]
 pub(crate) fn open_root_directory(path: &Path) -> Result<File> {
     let mut options = OpenOptions::new();
     options.read(true).custom_flags(libc::O_DIRECTORY | libc::O_CLOEXEC);
@@ -359,8 +357,7 @@ pub(in crate::local) fn open_rooted_parent(
 ///
 /// Panics if `name` violates the validated-component invariant by containing
 /// an interior NUL.
-#[cfg_attr(not(coverage), inline)]
-#[cfg_attr(coverage, inline(never))]
+#[inline]
 fn open_directory_at(parent: &File, name: &OsStr) -> Result<File> {
     let name = component_c_string(name);
     open_file_at(
@@ -392,8 +389,7 @@ fn open_directory_at(parent: &File, name: &OsStr) -> Result<File> {
 ///
 /// Panics if `name` violates the validated-component invariant by containing
 /// an interior NUL.
-#[cfg_attr(not(coverage), inline)]
-#[cfg_attr(coverage, inline(never))]
+#[inline]
 fn create_directory_at(parent: &File, name: &OsStr, diagnostic_path: &Path) -> Result<()> {
     let name = component_c_string(name);
     // SAFETY: the parent descriptor and NUL-terminated component remain live;
@@ -482,8 +478,7 @@ fn reject_existing_non_file(parent: &File, name: &CString, diagnostic_path: &Pat
 /// # Errors
 ///
 /// Returns a contextual metadata error or `InvalidInput` for a non-directory.
-#[cfg_attr(not(coverage), inline)]
-#[cfg_attr(coverage, inline(never))]
+#[inline]
 fn verify_opened_directory(directory: &File, operation: &'static str, diagnostic_path: &Path) -> Result<()> {
     normalize_opened_directory_metadata(directory.metadata(), operation, diagnostic_path)
 }
@@ -505,8 +500,7 @@ fn verify_opened_directory(directory: &File, operation: &'static str, diagnostic
 ///
 /// Returns a contextual metadata or descriptor error, or `InvalidInput` for a
 /// non-regular handle.
-#[cfg_attr(not(coverage), inline)]
-#[cfg_attr(coverage, inline(never))]
+#[inline]
 fn prepare_opened_rooted_regular_file(
     file: &File,
     restore_operation: &'static str,
@@ -530,8 +524,7 @@ fn prepare_opened_rooted_regular_file(
 ///
 /// Panics if the validated component unexpectedly contains an interior NUL.
 #[must_use]
-#[cfg_attr(not(coverage), inline)]
-#[cfg_attr(coverage, inline(never))]
+#[inline]
 fn component_c_string(component: &OsStr) -> CString {
     CString::new(component.as_bytes()).expect("LocalRelativePath guarantees components without NUL")
 }
@@ -556,8 +549,7 @@ fn component_c_string(component: &OsStr) -> CString {
 ///
 /// Returns a contextual error when `result` is `Err`, normalizing stable link
 /// and wrong-directory failures to `InvalidInput`.
-#[cfg_attr(not(coverage), inline)]
-#[cfg_attr(coverage, inline(never))]
+#[inline]
 fn rooted_open_result<T>(result: Result<T>, operation: &'static str, path: &Path) -> Result<T> {
     match result {
         Ok(value) => Ok(value),
@@ -595,8 +587,7 @@ fn rooted_open_error(error: Error, operation: &'static str, path: &Path) -> Erro
 /// # Returns
 ///
 /// An invalid-input error naming the required type.
-#[cfg_attr(not(coverage), inline)]
-#[cfg_attr(coverage, inline(never))]
+#[inline]
 pub(super) fn rooted_type_error(path: &Path, expected: &str) -> Error {
     Error::new(
         ErrorKind::InvalidInput,

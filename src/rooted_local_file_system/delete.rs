@@ -140,7 +140,7 @@ impl DeleteBackend for RootedLocalFileSystem {
 
     /// Borrows diagnostic coordinates without allocating or resolving the
     /// entry.
-    #[inline(always)]
+    #[inline]
     fn path<'a>(&self, value: &'a Self::Path) -> &'a std::path::Path {
         value.as_path()
     }
@@ -161,7 +161,7 @@ impl DeleteBackend for RootedLocalFileSystem {
 
     /// Tests whether inspected metadata denotes a real directory rather than a
     /// link.
-    #[inline(always)]
+    #[inline]
     fn is_directory(&self, metadata: &Self::Metadata) -> bool {
         metadata.kind() == crate::rooted::EntryKind::Directory
     }
@@ -171,7 +171,7 @@ impl DeleteBackend for RootedLocalFileSystem {
     /// # Errors
     ///
     /// Returns native directory-open errors without removing any entries.
-    #[inline(always)]
+    #[inline]
     fn open_directory(&self, path: &Self::Path) -> io::Result<Self::Reader> {
         self.root.open_dir_reader(path)
     }
@@ -192,7 +192,7 @@ impl DeleteBackend for RootedLocalFileSystem {
     /// # Errors
     ///
     /// Returns native unlink errors; symbolic-link targets remain untouched.
-    #[inline(always)]
+    #[inline]
     fn remove_non_directory(&self, path: &Self::Path, _metadata: &Self::Metadata) -> io::Result<()> {
         self.root.remove_file(path)
     }
@@ -202,7 +202,7 @@ impl DeleteBackend for RootedLocalFileSystem {
     /// # Errors
     ///
     /// Returns native removal errors, including concurrent child creation.
-    #[inline(always)]
+    #[inline]
     fn remove_empty_directory(&self, path: &Self::Path) -> io::Result<()> {
         self.root.remove_empty_dir(path)
     }

@@ -107,9 +107,7 @@ impl LocalCopyDirOptions {
     /// # Returns
     /// Options that fail on destination conflicts, do not follow symbolic
     /// links, and do not preserve source permissions.
-    // qubit-style: allow coverage-cfg
-    #[cfg_attr(not(coverage), inline)]
-    #[cfg_attr(coverage, inline(never))]
+    #[inline]
     pub const fn new() -> Self {
         Self {
             conflict: LocalCopyConflictPolicy::Fail,
@@ -128,8 +126,7 @@ impl LocalCopyDirOptions {
     }
 
     /// Sets the synchronization policy for staged regular files.
-    #[cfg_attr(not(coverage), inline(always))]
-    #[cfg_attr(coverage, inline(never))]
+    #[inline]
     pub const fn with_durability(mut self, durability: LocalDurabilityRequirement) -> Self {
         self.durability = durability;
         self
@@ -137,95 +134,82 @@ impl LocalCopyDirOptions {
 
     /// Returns the staged-file synchronization policy.
     #[must_use = "inspect the requested durability"]
-    #[cfg_attr(not(coverage), inline(always))]
-    #[cfg_attr(coverage, inline(never))]
+    #[inline]
     pub const fn durability(&self) -> LocalDurabilityRequirement {
         self.durability
     }
 
     /// Returns the maximum descendant depth.
     #[must_use]
-    #[cfg_attr(not(coverage), inline(always))]
-    #[cfg_attr(coverage, inline(never))]
+    #[inline]
     pub const fn max_depth(&self) -> Option<usize> {
         self.max_depth
     }
     /// Returns the maximum number of processed source entries.
     #[must_use]
-    #[cfg_attr(not(coverage), inline(always))]
-    #[cfg_attr(coverage, inline(never))]
+    #[inline]
     pub const fn max_entries(&self) -> Option<usize> {
         self.max_entries
     }
     /// Returns the maximum number of actual source bytes copied.
     #[must_use]
-    #[cfg_attr(not(coverage), inline(always))]
-    #[cfg_attr(coverage, inline(never))]
+    #[inline]
     pub const fn max_bytes(&self) -> Option<u64> {
         self.max_bytes
     }
     /// Returns the maximum concurrently open source directories.
     #[must_use]
-    #[cfg_attr(not(coverage), inline(always))]
-    #[cfg_attr(coverage, inline(never))]
+    #[inline]
     pub const fn max_open_directories(&self) -> Option<usize> {
         self.max_open_directories
     }
     /// Returns the relative elapsed-time budget.
     #[must_use]
-    #[cfg_attr(not(coverage), inline(always))]
-    #[cfg_attr(coverage, inline(never))]
+    #[inline]
     pub const fn deadline(&self) -> Option<Duration> {
         self.deadline
     }
 
     /// Returns the monotonic operation-entry instant when one was supplied.
     #[must_use]
-    #[cfg_attr(not(coverage), inline(always))]
-    #[cfg_attr(coverage, inline(never))]
+    #[inline]
     pub const fn started_at(&self) -> Option<Instant> {
         self.started_at
     }
 
     /// Sets the maximum descendant depth.
-    #[cfg_attr(not(coverage), inline(always))]
-    #[cfg_attr(coverage, inline(never))]
+    #[inline]
     pub const fn with_max_depth(mut self, value: usize) -> Self {
         self.max_depth = Some(value);
         self
     }
     /// Sets the maximum number of processed source entries.
-    #[cfg_attr(not(coverage), inline(always))]
-    #[cfg_attr(coverage, inline(never))]
+    #[inline]
     pub const fn with_max_entries(mut self, value: usize) -> Self {
         self.max_entries = Some(value);
         self
     }
     /// Sets the maximum number of actual source bytes copied.
-    #[cfg_attr(not(coverage), inline(always))]
-    #[cfg_attr(coverage, inline(never))]
+    #[inline]
     pub const fn with_max_bytes(mut self, value: u64) -> Self {
         self.max_bytes = Some(value);
         self
     }
     /// Sets the maximum concurrently open source directories.
-    #[cfg_attr(not(coverage), inline(always))]
-    #[cfg_attr(coverage, inline(never))]
+    #[inline]
     pub const fn with_max_open_directories(mut self, value: usize) -> Self {
         self.max_open_directories = Some(value);
         self
     }
     /// Sets the maximum elapsed time for the complete copy.
-    #[cfg_attr(not(coverage), inline(always))]
-    #[cfg_attr(coverage, inline(never))]
+    #[inline]
     pub const fn with_deadline(mut self, value: Duration) -> Self {
         self.deadline = Some(value);
         self
     }
 
     /// Records the monotonic instant at which the public operation began.
-    #[cfg_attr(not(coverage), inline(always))]
-    #[cfg_attr(coverage, inline(never))]
+    #[inline]
     pub const fn with_started_at(mut self, value: Instant) -> Self {
         self.started_at = Some(value);
         self
@@ -235,8 +219,7 @@ impl LocalCopyDirOptions {
     ///
     /// # Returns
     /// Policy applied to existing destination file entries.
-    #[cfg_attr(not(coverage), inline(always))]
-    #[cfg_attr(coverage, inline(never))]
+    #[inline]
     pub const fn conflict_policy(&self) -> LocalCopyConflictPolicy {
         self.conflict
     }
@@ -248,8 +231,7 @@ impl LocalCopyDirOptions {
     ///
     /// # Returns
     /// Updated directory copy options.
-    #[cfg_attr(not(coverage), inline(always))]
-    #[cfg_attr(coverage, inline(never))]
+    #[inline]
     pub const fn with_conflict(mut self, conflict: LocalCopyConflictPolicy) -> Self {
         self.conflict = conflict;
         self
@@ -259,8 +241,7 @@ impl LocalCopyDirOptions {
     ///
     /// # Returns
     /// Policy applied to source and destination type mismatches.
-    #[cfg_attr(not(coverage), inline(always))]
-    #[cfg_attr(coverage, inline(never))]
+    #[inline]
     pub const fn type_conflict_policy(&self) -> LocalCopyTypeConflictPolicy {
         self.type_conflict
     }
@@ -272,8 +253,7 @@ impl LocalCopyDirOptions {
     ///
     /// # Returns
     /// Updated directory copy options.
-    #[cfg_attr(not(coverage), inline(always))]
-    #[cfg_attr(coverage, inline(never))]
+    #[inline]
     pub const fn with_type_conflict(mut self, type_conflict: LocalCopyTypeConflictPolicy) -> Self {
         self.type_conflict = type_conflict;
         self
@@ -284,8 +264,7 @@ impl LocalCopyDirOptions {
     /// # Returns
     /// The configured source-tree symbolic-link policy.
     #[must_use = "inspect the source-tree symbolic-link policy"]
-    #[cfg_attr(not(coverage), inline(always))]
-    #[cfg_attr(coverage, inline(never))]
+    #[inline]
     pub const fn symlink_policy(&self) -> LocalSymlinkPolicy {
         self.symlink_policy
     }
@@ -294,8 +273,7 @@ impl LocalCopyDirOptions {
     ///
     /// # Returns
     /// Updated directory copy options.
-    #[cfg_attr(not(coverage), inline(always))]
-    #[cfg_attr(coverage, inline(never))]
+    #[inline]
     pub const fn with_symlink_policy(mut self, symlink_policy: LocalSymlinkPolicy) -> Self {
         self.symlink_policy = symlink_policy;
         self
@@ -306,8 +284,7 @@ impl LocalCopyDirOptions {
     /// # Returns
     /// `true` when destination permissions are copied from the source.
     #[must_use]
-    #[cfg_attr(not(coverage), inline(always))]
-    #[cfg_attr(coverage, inline(never))]
+    #[inline]
     pub const fn preserves_permissions(&self) -> bool {
         self.preserve_permissions
     }
@@ -316,8 +293,7 @@ impl LocalCopyDirOptions {
     ///
     /// # Returns
     /// Updated directory copy options.
-    #[cfg_attr(not(coverage), inline(always))]
-    #[cfg_attr(coverage, inline(never))]
+    #[inline]
     pub const fn preserve_permissions(mut self) -> Self {
         self.preserve_permissions = true;
         self
@@ -333,8 +309,7 @@ impl LocalCopyDirOptions {
     /// # Returns
     /// The configured timeout, or `None` when retries are disabled.
     #[must_use]
-    #[cfg_attr(not(coverage), inline(always))]
-    #[cfg_attr(coverage, inline(never))]
+    #[inline]
     pub const fn open_retry_timeout(&self) -> Option<Duration> {
         self.open_retry_timeout
     }

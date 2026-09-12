@@ -73,9 +73,7 @@ pub(crate) fn verify_atomic_destination_identity(
 /// # Returns
 ///
 /// A structured pre-installation failure.
-// qubit-style: allow coverage-cfg
-#[cfg_attr(not(coverage), inline)]
-#[cfg_attr(coverage, inline(never))]
+#[inline]
 fn identity_error(
     requested_path: &Path,
     source: Error,

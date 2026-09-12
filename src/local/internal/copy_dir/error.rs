@@ -37,9 +37,7 @@ use crate::local::internal::StagedFile;
 /// # Returns
 ///
 /// A structured recursive-copy error retaining the native source error.
-// qubit-style: allow coverage-cfg
-#[cfg_attr(not(coverage), inline)]
-#[cfg_attr(coverage, inline(never))]
+#[inline]
 pub(super) fn copy_dir_error(
     stage: LocalCopyDirStage,
     src: &Path,
@@ -64,8 +62,7 @@ pub(super) fn copy_dir_error(
 /// # Returns
 ///
 /// A structured error retaining primary and secondary cleanup context.
-#[cfg_attr(not(coverage), inline)]
-#[cfg_attr(coverage, inline(never))]
+#[inline]
 pub(super) fn copy_dir_error_with_staging(
     stage: LocalCopyDirStage,
     src: &Path,
@@ -92,8 +89,7 @@ pub(super) fn copy_dir_error_with_staging(
 /// # Returns
 ///
 /// The successful value or a structured recursive-copy error.
-#[cfg_attr(not(coverage), inline(always))]
-#[cfg_attr(coverage, inline(never))]
+#[inline]
 pub(super) fn with_copy_context<T>(
     result: Result<T>,
     stage: LocalCopyDirStage,

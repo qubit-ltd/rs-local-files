@@ -25,9 +25,7 @@ impl OpenOptions {
     /// `None` returns the first lease conflict unchanged without retrying.
     /// `Some` bounds retries; zero reports `TimedOut` after the first conflict.
     #[must_use]
-    // qubit-style: allow coverage-cfg
-    #[cfg_attr(not(coverage), inline(always))]
-    #[cfg_attr(coverage, inline(never))]
+    #[inline]
     pub(crate) const fn open_retry_timeout(&self) -> Option<Duration> {
         self.open_retry_timeout
     }
@@ -39,8 +37,7 @@ impl OpenOptions {
     ///
     /// # Returns
     /// Updated options.
-    #[cfg_attr(not(coverage), inline)]
-    #[cfg_attr(coverage, inline(never))]
+    #[inline]
     pub(crate) const fn with_open_retry_timeout(mut self, timeout: Duration) -> Self {
         self.open_retry_timeout = Some(timeout);
         self

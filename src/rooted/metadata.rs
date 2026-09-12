@@ -173,14 +173,14 @@ impl Metadata {
 
     /// Returns the final entry type observed by the rooted operation.
     #[must_use = "inspect the rooted entry kind"]
-    #[inline(always)]
+    #[inline]
     pub const fn kind(&self) -> EntryKind {
         self.kind
     }
 
     /// Returns the byte size reported by the rooted metadata operation.
     #[must_use]
-    #[inline(always)]
+    #[inline]
     pub const fn size(&self) -> u64 {
         self.len
     }
@@ -188,7 +188,7 @@ impl Metadata {
     /// Returns the last access time, or `None` when the platform did not
     /// provide one.
     #[must_use]
-    #[inline(always)]
+    #[inline]
     pub const fn accessed_at(&self) -> Option<SystemTime> {
         self.accessed_at
     }
@@ -196,7 +196,7 @@ impl Metadata {
     /// Returns the last modification time, or `None` when the platform did not
     /// provide one.
     #[must_use]
-    #[inline(always)]
+    #[inline]
     pub const fn modified_at(&self) -> Option<SystemTime> {
         self.modified_at
     }
@@ -204,21 +204,21 @@ impl Metadata {
     /// Returns the creation time, or `None` when the platform did not provide
     /// one.
     #[must_use]
-    #[inline(always)]
+    #[inline]
     pub const fn created_at(&self) -> Option<SystemTime> {
         self.created_at
     }
 
     /// Returns the permissions observed through the rooted operation.
     #[must_use = "inspect the rooted permissions"]
-    #[inline(always)]
+    #[inline]
     pub const fn permissions(&self) -> Permissions {
         self.permissions
     }
 
     /// Returns whether two metadata values identify the same native entry.
     #[must_use]
-    #[inline(always)]
+    #[inline]
     pub const fn is_same_file(&self, other: &Self) -> bool {
         matches!(
             (self.device_id, self.file_id, other.device_id, other.file_id),
@@ -229,7 +229,7 @@ impl Metadata {
 
     /// Returns a stable native entry identity when the platform supplied one.
     #[must_use]
-    #[inline(always)]
+    #[inline]
     pub const fn native_identity(&self) -> Option<(u64, u64)> {
         match (self.device_id, self.file_id) {
             (Some(device), Some(file)) => Some((device, file)),
@@ -241,9 +241,7 @@ impl Metadata {
 /// Converts a platform-native mode into portable permission bits.
 #[cfg(unix)]
 #[must_use]
-// qubit-style: allow coverage-cfg
-#[cfg_attr(not(coverage), inline(always))]
-#[cfg_attr(coverage, inline(never))]
+#[inline]
 fn permission_mode<T>(mode: T) -> u32
 where
     T: Into<u32>,
@@ -253,8 +251,7 @@ where
 
 /// Converts a platform-native identity field into the portable representation.
 #[cfg(unix)]
-#[cfg_attr(not(coverage), inline(always))]
-#[cfg_attr(coverage, inline(never))]
+#[inline]
 fn native_id<T>(value: T) -> Option<u64>
 where
     T: TryInto<u64>,
@@ -264,8 +261,7 @@ where
 
 /// Classifies one platform-native `st_mode` value.
 #[cfg(unix)]
-#[cfg_attr(not(coverage), inline)]
-#[cfg_attr(coverage, inline(never))]
+#[inline]
 fn entry_kind_from_mode<T>(mode: T) -> EntryKind
 where
     T: BitAnd<Output = T> + Copy + From<libc::mode_t> + PartialEq,
@@ -304,8 +300,7 @@ where
 /// Apple pre-epoch values also accept signed negative fractions, matching std.
 /// Returns `None` for invalid fractions or platform time-range overflow.
 #[cfg(unix)]
-#[cfg_attr(not(coverage), inline)]
-#[cfg_attr(coverage, inline(never))]
+#[inline]
 fn system_time<N>(seconds: libc::time_t, nanoseconds: N) -> Option<SystemTime>
 where
     N: TryInto<i128>,
@@ -339,8 +334,7 @@ where
 
 /// Extracts portable timestamps from Linux and Android `stat` values.
 #[cfg(any(target_os = "linux", target_os = "android"))]
-#[cfg_attr(not(coverage), inline)]
-#[cfg_attr(coverage, inline(never))]
+#[inline]
 fn stat_times(status: &libc::stat) -> (Option<SystemTime>, Option<SystemTime>, Option<SystemTime>) {
     (
         system_time(status.st_atime, status.st_atime_nsec),
@@ -351,8 +345,7 @@ fn stat_times(status: &libc::stat) -> (Option<SystemTime>, Option<SystemTime>, O
 
 /// Extracts portable timestamps from Apple and FreeBSD `stat` values.
 #[cfg(any(target_os = "macos", target_os = "ios", target_os = "freebsd"))]
-#[cfg_attr(not(coverage), inline)]
-#[cfg_attr(coverage, inline(never))]
+#[inline]
 fn stat_times(status: &libc::stat) -> (Option<SystemTime>, Option<SystemTime>, Option<SystemTime>) {
     (
         system_time(status.st_atime, status.st_atime_nsec),
@@ -380,8 +373,7 @@ fn stat_times(status: &libc::stat) -> (Option<SystemTime>, Option<SystemTime>, O
         target_os = "freebsd",
     ))
 ))]
-#[cfg_attr(not(coverage), inline)]
-#[cfg_attr(coverage, inline(never))]
+#[inline]
 fn stat_times(_status: &libc::stat) -> (Option<SystemTime>, Option<SystemTime>, Option<SystemTime>) {
     (None, None, None)
 }

@@ -272,9 +272,7 @@ impl LocalDirectoryWalker {
 
     /// Returns the bound traversal root.
     #[must_use]
-    // qubit-style: allow coverage-cfg
-    #[cfg_attr(not(coverage), inline(always))]
-    #[cfg_attr(coverage, inline(never))]
+    #[inline]
     pub fn root(&self) -> &Path {
         &self.root
     }
@@ -295,8 +293,7 @@ impl LocalDirectoryWalker {
     /// # Returns
     ///
     /// `true` when recursion and the configured depth limit permit descent.
-    #[cfg_attr(not(coverage), inline(always))]
-    #[cfg_attr(coverage, inline(never))]
+    #[inline]
     fn may_descend(&self, entry_depth: usize) -> bool {
         self.options.recursive() && self.options.max_depth().is_none_or(|max_depth| entry_depth < max_depth)
     }
@@ -1024,8 +1021,7 @@ fn native_directory_identity(metadata: &fs::Metadata, path: &Path) -> LocalResul
 /// # Returns
 ///
 /// Structured listing error.
-#[cfg_attr(not(coverage), inline)]
-#[cfg_attr(coverage, inline(never))]
+#[inline]
 fn walk_io_error(path: &Path, error: std::io::Error) -> LocalFileError {
     LocalFileError::from_io(LocalFileOperation::List, Some(path.to_path_buf()), None, error)
 }

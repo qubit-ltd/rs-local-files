@@ -72,9 +72,7 @@ impl LocalFileWriter {
     /// - `diagnostic_path`: Destination path captured for diagnostics.
     /// - `backend`: Staged or append backend.
     /// - `options`: Writer policy.
-    // qubit-style: allow coverage-cfg
-    #[cfg_attr(not(coverage), inline)]
-    #[cfg_attr(coverage, inline(never))]
+    #[inline]
     pub(crate) fn new(diagnostic_path: PathBuf, backend: LocalFileWriterBackend, options: LocalWriteOptions) -> Self {
         Self {
             path: diagnostic_path.clone(),
@@ -97,8 +95,7 @@ impl LocalFileWriter {
 
     /// Returns the reusable namespace-absolute destination path.
     #[must_use]
-    #[cfg_attr(not(coverage), inline)]
-    #[cfg_attr(coverage, inline(never))]
+    #[inline]
     pub fn path(&self) -> &Path {
         &self.path
     }
@@ -108,16 +105,14 @@ impl LocalFileWriter {
     /// Rooted writers retain descriptor authority, so this path can refer to a
     /// replacement after the opened root is renamed.
     #[must_use]
-    #[cfg_attr(not(coverage), inline)]
-    #[cfg_attr(coverage, inline(never))]
+    #[inline]
     pub fn diagnostic_path(&self) -> Option<&Path> {
         self.diagnostic_path.as_deref()
     }
 
     /// Returns the current writer state.
     #[must_use = "inspect the writer state"]
-    #[cfg_attr(not(coverage), inline)]
-    #[cfg_attr(coverage, inline(never))]
+    #[inline]
     pub const fn state(&self) -> LocalWriterState {
         self.state
     }
@@ -129,8 +124,7 @@ impl LocalFileWriter {
     /// the destination is unchanged. Inspect commit or abort outcomes for
     /// their operation-specific conclusions.
     #[must_use]
-    #[cfg_attr(not(coverage), inline)]
-    #[cfg_attr(coverage, inline(never))]
+    #[inline]
     pub const fn failure_state(&self) -> Option<LocalWriteFailureState> {
         self.failure_state
     }
@@ -343,8 +337,7 @@ impl LocalFileWriter {
     /// # Returns
     ///
     /// A writer carrying the original path, options, state, and byte count.
-    #[cfg_attr(not(coverage), inline)]
-    #[cfg_attr(coverage, inline(never))]
+    #[inline]
     fn retain_backend(&self, backend: LocalFileWriterBackend) -> Self {
         Self {
             path: self.path.clone(),
@@ -363,8 +356,7 @@ impl LocalFileWriter {
     /// # Parameters
     ///
     /// - `written`: Bytes accepted by the backend.
-    #[cfg_attr(not(coverage), inline)]
-    #[cfg_attr(coverage, inline(never))]
+    #[inline]
     fn record_written(&mut self, written: usize) {
         self.bytes_written = self.bytes_written.saturating_add(written);
     }
@@ -382,8 +374,7 @@ impl LocalFileWriter {
     /// # Returns
     ///
     /// The original result.
-    #[cfg_attr(not(coverage), inline)]
-    #[cfg_attr(coverage, inline(never))]
+    #[inline]
     fn observe_stream_result<T>(&mut self, result: io::Result<T>) -> io::Result<T> {
         if let Err(error) = &result
             && !matches!(error.kind(), io::ErrorKind::Interrupted | io::ErrorKind::WouldBlock)
@@ -516,8 +507,7 @@ fn atomic_destination_state(state: crate::local::LocalAtomicDestinationState) ->
 /// # Returns
 ///
 /// Unified local filesystem error retaining the atomic error as its source.
-#[cfg_attr(not(coverage), inline)]
-#[cfg_attr(coverage, inline(never))]
+#[inline]
 fn atomic_write_error(
     path: &Path,
     operation: LocalFileOperation,
@@ -538,8 +528,7 @@ fn atomic_write_error(
 /// # Returns
 ///
 /// Structured writer error.
-#[cfg_attr(not(coverage), inline(always))]
-#[cfg_attr(coverage, inline(never))]
+#[inline]
 fn writer_io_error(path: &Path, operation: LocalFileOperation, error: io::Error) -> LocalFileError {
     LocalFileError::from_io(operation, Some(path.to_path_buf()), None, error)
 }
@@ -555,8 +544,7 @@ fn writer_io_error(path: &Path, operation: LocalFileOperation, error: io::Error)
 /// # Returns
 ///
 /// An invalid-state error retaining the operation and path.
-#[cfg_attr(not(coverage), inline)]
-#[cfg_attr(coverage, inline(never))]
+#[inline]
 fn writer_state_error(path: &Path, operation: LocalFileOperation, state: LocalWriterState) -> LocalFileError {
     LocalFileError::from_io(
         operation,

@@ -6,7 +6,6 @@
 //    Licensed under the Apache License, Version 2.0.
 // =============================================================================
 // qubit-style: allow source-test-pair
-// qubit-style: allow coverage-cfg
 // Covered by copy integration tests.
 
 use super::LocalCopyMethod;
@@ -58,40 +57,35 @@ impl LocalCopyOutcome {
 
     /// Returns aggregate copy statistics.
     #[must_use = "the aggregate copy statistics should be inspected"]
-    #[cfg_attr(not(coverage), inline(always))]
-    #[cfg_attr(coverage, inline(never))]
+    #[inline]
     pub const fn stats(&self) -> LocalCopyStats {
         self.stats
     }
 
     /// Returns the method used to copy the entry.
     #[must_use = "the copy publication method should be inspected"]
-    #[cfg_attr(not(coverage), inline(always))]
-    #[cfg_attr(coverage, inline(never))]
+    #[inline]
     pub const fn method(&self) -> LocalCopyMethod {
         self.method
     }
 
     /// Reports whether the entire destination publication was atomic.
     #[must_use]
-    #[cfg_attr(not(coverage), inline(always))]
-    #[cfg_attr(coverage, inline(never))]
+    #[inline]
     pub const fn atomic(&self) -> bool {
         self.atomic
     }
 
     /// Reports whether durability synchronization completed.
     #[must_use]
-    #[cfg_attr(not(coverage), inline)]
-    #[cfg_attr(coverage, inline(never))]
+    #[inline]
     pub const fn durable(&self) -> bool {
         self.durable
     }
 
     /// Returns metadata preservation applied by the copy pipeline.
     #[must_use = "the applied metadata policy should be inspected"]
-    #[cfg_attr(not(coverage), inline)]
-    #[cfg_attr(coverage, inline(never))]
+    #[inline]
     pub const fn metadata_preservation(&self) -> LocalMetadataPreservePolicy {
         self.metadata_preservation
     }

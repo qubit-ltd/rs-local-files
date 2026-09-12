@@ -37,9 +37,7 @@ impl RootedParent {
     /// # Returns
     ///
     /// A rooted parent result retaining all required descriptors.
-    // qubit-style: allow coverage-cfg
-    #[cfg_attr(not(coverage), inline)]
-    #[cfg_attr(coverage, inline(never))]
+    #[inline]
     pub(in crate::local) fn new(directory: File, final_name: CString, parent_dirs_to_sync: Vec<File>) -> Self {
         Self {
             directory,
@@ -55,8 +53,7 @@ impl RootedParent {
     /// The final parent, final entry name, and ancestor descriptors ordered
     /// shallowest to deepest.
     #[must_use = "the rooted parent descriptors, final name, and durability work must all be retained"]
-    #[cfg_attr(not(coverage), inline(always))]
-    #[cfg_attr(coverage, inline(never))]
+    #[inline]
     pub(in crate::local) fn into_parts(self) -> (File, CString, Vec<File>) {
         (self.directory, self.final_name, self.parent_dirs_to_sync)
     }

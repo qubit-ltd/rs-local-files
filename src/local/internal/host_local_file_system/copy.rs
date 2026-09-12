@@ -294,9 +294,7 @@ impl HostLocalFileSystem {
 /// Returns newly observed missing ancestors in shallow-to-deep order, or an
 /// empty list when parent creation is disabled. Inspection or creation errors
 /// propagate; successfully created ancestors are not rolled back.
-// qubit-style: allow coverage-cfg
-#[cfg_attr(not(coverage), inline)]
-#[cfg_attr(coverage, inline(never))]
+#[inline]
 fn prepare_copy_parent(target: &Path, options: &LocalCopyOptions) -> io::Result<Vec<PathBuf>> {
     if options.creates_parent() {
         crate::local::ensure_parent_path_with_sync_dirs(target)
@@ -566,8 +564,7 @@ fn windows_file_identity(path: &Path) -> io::Result<(u32, u64)> {
 /// # Returns
 ///
 /// Invalid-options copy error.
-#[cfg_attr(not(coverage), inline)]
-#[cfg_attr(coverage, inline(never))]
+#[inline]
 fn copy_alias_error(source: &Path, target: &Path) -> LocalFileError {
     LocalFileError::new(LocalFileErrorKind::InvalidOptions, LocalFileOperation::Copy)
         .with_path(source.to_path_buf())
@@ -575,8 +572,7 @@ fn copy_alias_error(source: &Path, target: &Path) -> LocalFileError {
 }
 
 /// Converts a pipeline failure into a lossless public copy failure.
-#[cfg_attr(not(coverage), inline(always))]
-#[cfg_attr(coverage, inline(never))]
+#[inline]
 fn copy_pipeline_failure(source: &Path, target: &Path, error: crate::local::LocalCopyDirError) -> LocalCopyFailure {
     LocalCopyFailure::from_copy_dir_error(source, target, error)
 }
@@ -592,8 +588,7 @@ fn copy_pipeline_failure(source: &Path, target: &Path, error: crate::local::Loca
 /// # Returns
 ///
 /// Structured copy error.
-#[cfg_attr(not(coverage), inline)]
-#[cfg_attr(coverage, inline(never))]
+#[inline]
 fn copy_io_error(source: &Path, target: &Path, error: io::Error) -> LocalFileError {
     LocalFileError::from_io(
         LocalFileOperation::Copy,

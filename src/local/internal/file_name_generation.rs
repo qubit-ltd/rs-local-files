@@ -49,9 +49,7 @@ pub(crate) fn try_random_file_name(default_prefix: &str, prefix: Option<&str>, s
 /// # Returns
 /// Nanoseconds since the Unix epoch, or zero if the system clock is earlier
 /// than the epoch.
-// qubit-style: allow coverage-cfg
-#[cfg_attr(not(coverage), inline)]
-#[cfg_attr(coverage, inline(never))]
+#[inline]
 #[must_use]
 fn unix_timestamp_nanos() -> u128 {
     SystemTime::now()
@@ -68,8 +66,7 @@ fn unix_timestamp_nanos() -> u128 {
 /// # Errors
 /// Returns [`std::io::ErrorKind::Other`] if the operating system random
 /// source cannot provide bytes.
-#[cfg_attr(not(coverage), inline)]
-#[cfg_attr(coverage, inline(never))]
+#[inline]
 fn try_random_hex() -> Result<String> {
     let mut bytes = [0_u8; RANDOM_NAME_BYTES];
     fill_random_bytes(&mut bytes)?;
@@ -84,8 +81,7 @@ fn try_random_hex() -> Result<String> {
 /// # Errors
 /// Returns [`std::io::ErrorKind::Other`] if the operating system random
 /// source cannot provide bytes.
-#[cfg_attr(not(coverage), inline)]
-#[cfg_attr(coverage, inline(never))]
+#[inline]
 fn fill_random_bytes(bytes: &mut [u8]) -> Result<()> {
     getrandom::fill(bytes).map_err(Error::other)
 }

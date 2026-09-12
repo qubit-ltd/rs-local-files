@@ -5,7 +5,6 @@
 //
 //    Licensed under the Apache License, Version 2.0.
 // =============================================================================
-// qubit-style: allow coverage-cfg
 /// Immutable snapshot of filesystem operation capabilities implemented by this
 /// build.
 ///
@@ -86,8 +85,7 @@ impl LocalFileSystemCapabilities {
     }
 
     /// Reports whether secure rooted operations are implemented.
-    #[cfg_attr(not(coverage), inline)]
-    #[cfg_attr(coverage, inline(never))]
+    #[inline]
     #[must_use]
     pub const fn supports_rooted_operations(self) -> bool {
         self.rooted_operations
@@ -95,16 +93,14 @@ impl LocalFileSystemCapabilities {
 
     /// Reports whether native atomic rename is implemented.
     #[must_use]
-    #[cfg_attr(not(coverage), inline(always))]
-    #[cfg_attr(coverage, inline(never))]
+    #[inline]
     pub const fn supports_atomic_rename(self) -> bool {
         self.atomic_rename
     }
 
     /// Reports whether native atomic replacement is implemented.
     #[must_use]
-    #[cfg_attr(not(coverage), inline)]
-    #[cfg_attr(coverage, inline(never))]
+    #[inline]
     pub const fn supports_atomic_replace(self) -> bool {
         self.atomic_replace
     }
@@ -118,8 +114,7 @@ impl LocalFileSystemCapabilities {
     /// permission, sandbox, or platform policy. Callers must inspect the
     /// persistence outcome or error for the actual operation result.
     #[must_use]
-    #[cfg_attr(not(coverage), inline(always))]
-    #[cfg_attr(coverage, inline(never))]
+    #[inline]
     pub const fn can_attempt_atomic_temp_persist(self) -> bool {
         self.atomic_temp_persist_attempt
     }
@@ -133,8 +128,7 @@ impl LocalFileSystemCapabilities {
         note = "use can_attempt_atomic_temp_persist; runtime success is conditional"
     )]
     #[must_use]
-    #[cfg_attr(not(coverage), inline(always))]
-    #[cfg_attr(coverage, inline(never))]
+    #[inline]
     pub const fn supports_atomic_temp_persist(self) -> bool {
         self.can_attempt_atomic_temp_persist()
     }
@@ -142,8 +136,7 @@ impl LocalFileSystemCapabilities {
     /// Reports whether the full durable rename publication protocol is
     /// implemented for this target.
     #[must_use]
-    #[cfg_attr(not(coverage), inline(always))]
-    #[cfg_attr(coverage, inline(never))]
+    #[inline]
     pub const fn supports_durable_rename(self) -> bool {
         self.durable_rename
     }
@@ -151,8 +144,7 @@ impl LocalFileSystemCapabilities {
     /// Reports whether the full durable file-copy publication protocol is
     /// implemented for this target.
     #[must_use]
-    #[cfg_attr(not(coverage), inline(always))]
-    #[cfg_attr(coverage, inline(never))]
+    #[inline]
     pub const fn supports_durable_file_copy(self) -> bool {
         self.durable_file_copy
     }
@@ -160,8 +152,7 @@ impl LocalFileSystemCapabilities {
     /// Reports whether the full durable writer publication protocol is
     /// implemented for this target.
     #[must_use]
-    #[cfg_attr(not(coverage), inline(always))]
-    #[cfg_attr(coverage, inline(never))]
+    #[inline]
     pub const fn supports_durable_write(self) -> bool {
         self.durable_write
     }
@@ -169,8 +160,7 @@ impl LocalFileSystemCapabilities {
     /// Reports whether temporary-file contents and destination namespace can
     /// both be synchronized during persistence on this target.
     #[must_use]
-    #[cfg_attr(not(coverage), inline(always))]
-    #[cfg_attr(coverage, inline(never))]
+    #[inline]
     pub const fn supports_durable_temp_file_persist(self) -> bool {
         self.durable_temp_file_persist
     }
