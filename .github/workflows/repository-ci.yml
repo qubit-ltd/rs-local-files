@@ -60,7 +60,7 @@ jobs:
       - name: Install toolchains
         working-directory: ci-root/${{ inputs.repository }}
         run: |
-          source .rs-ci/toolchains.sh
+          source .infra/tools/rs-ci/toolchains.sh
           configure_rs_ci_toolchains
           rustup toolchain install "$RS_CI_BUILD_TOOLCHAIN" --profile minimal --component llvm-tools-preview
           rustup toolchain install "$RS_CI_CLIPPY_TOOLCHAIN" --profile minimal --component clippy,rustfmt,rust-src
@@ -77,7 +77,7 @@ jobs:
         if: runner.os == 'Linux'
         working-directory: ci-root/${{ inputs.repository }}
         run: |
-          source .rs-ci/toolchains.sh
+          source .infra/tools/rs-ci/toolchains.sh
           configure_rs_ci_toolchains
           cargo +"$RS_CI_BUILD_TOOLCHAIN" install cargo-fuzz --locked --force --version "$CARGO_FUZZ_VERSION"
       - name: Run complete repository CI
@@ -88,7 +88,7 @@ jobs:
         if: runner.os != 'Linux'
         working-directory: ci-root/${{ inputs.repository }}
         run: |
-          source .rs-ci/toolchains.sh
+          source .infra/tools/rs-ci/toolchains.sh
           configure_rs_ci_toolchains
           cargo +"$RS_CI_CLIPPY_TOOLCHAIN" clippy --locked --all-targets --all-features -- -D warnings
           if [ "$PROJECT" = rs-magika ]; then
@@ -103,18 +103,18 @@ jobs:
         if: runner.os == 'macOS'
         working-directory: ci-root/${{ inputs.repository }}
         run: |
-          source .rs-ci/toolchains.sh
+          source .infra/tools/rs-ci/toolchains.sh
           configure_rs_ci_toolchains
           export RS_CI_PROJECT_ROOT="$PWD"
-          .rs-ci/cargo-sanitizer-check.sh
-          if .rs-ci/cargo-miri-check.sh --is-configured; then
+          .infra/tools/rs-ci/cargo-sanitizer-check.sh
+          if .infra/tools/rs-ci/cargo-miri-check.sh --is-configured; then
             rustup toolchain install "$RS_CI_MIRI_TOOLCHAIN" --profile minimal --component miri
             cargo +"$RS_CI_MIRI_TOOLCHAIN" miri setup
           else
             check_status=$?
             test "$check_status" -eq 1
           fi
-          .rs-ci/cargo-miri-check.sh
+          .infra/tools/rs-ci/cargo-miri-check.sh
       - name: Verify locks remained unchanged
         if: always()
         working-directory: ci-root/${{ inputs.repository }}
@@ -123,7 +123,7 @@ jobs:
         if: success() && runner.os == 'Linux'
         working-directory: ci-root/${{ inputs.repository }}
         run: |
-          source .rs-ci/toolchains.sh
+          source .infra/tools/rs-ci/toolchains.sh
           configure_rs_ci_toolchains
           CARGO_TARGET_DIR="$PWD/target/rs-ci" cargo +"$RS_CI_BUILD_TOOLCHAIN" llvm-cov report \
             --html --output-dir target/llvm-cov
@@ -145,7 +145,7 @@ jobs:
         working-directory: ci-root/${{ inputs.repository }}
         run: |
           COVERAGE_JSON=target/llvm-cov/coverage.json COVERAGE_HTML_DIR=target/llvm-cov/html \
-            RS_CI_PAGES_OUTPUT=public node .rs-ci/page/build-pages.mjs
+            RS_CI_PAGES_OUTPUT=public node .infra/tools/rs-ci/page/build-pages.mjs
       - name: Check existing Pages configuration
         id: pages
         if: success() && runner.os == 'Linux' && github.event_name == 'push' && github.ref == 'refs/heads/main'
