@@ -1,10 +1,85 @@
-name: Repository CI
+name: Repository checks with coordinated sources
 on:
   workflow_call:
+    inputs:
+      repository: {type: string, required: true}
+      revision: {type: string, required: true}
+      local_files_ref: {type: string, default: main}
+permissions:
+  contents: read
+  pages: write
+  id-token: write
 jobs:
-  verify:
+  dependency-baseline:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@stable
-      - run: ./ci-check.sh
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09
+        with:
+          repository: qubit-ltd/${{ inputs.repository }}
+          ref: ${{ inputs.revision }}
+          path: project
+      - uses: dtolnay/rust-toolchain@6bed0761d98439e5a578e2877258200ad565ba87
+        with: {toolchain: stable}
+      - working-directory: project
+        run: ./dependency-update.sh --check
+  checks:
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix: {os: [ubuntu-latest, windows-latest, macos-latest]}
+    defaults:
+      run: {shell: bash}
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09
+        with:
+          repository: qubit-ltd/${{ inputs.repository }}
+          ref: ${{ inputs.revision }}
+          path: project
+      - uses: dtolnay/rust-toolchain@6bed0761d98439e5a578e2877258200ad565ba87
+        with: {toolchain: stable}
+      - working-directory: project
+        run: ./style-check.sh && ./ci-check.sh
+      - if: runner.os == 'Linux'
+        working-directory: project
+        run: |
+          cargo install cargo-llvm-cov --locked
+          cargo install cargo-audit --locked
+          cargo install cargo-fuzz --locked
+          ./coverage.sh
+          ./.infra/tools/infra-tool.sh rs-infra-verify --project "$PWD" run --suite audit
+          ./.infra/tools/infra-tool.sh rs-infra-verify --project "$PWD" run --suite fuzz
+      - if: runner.os == 'macOS'
+        working-directory: project
+        run: |
+          rustup toolchain install nightly --profile minimal --component miri,rust-src
+          cargo +nightly miri setup
+          ./.infra/tools/infra-tool.sh rs-infra-verify --project "$PWD" run --suite miri
+          ./.infra/tools/infra-tool.sh rs-infra-verify --project "$PWD" run --suite address-sanitizer
+      - if: always() && runner.os == 'Linux'
+        uses: actions/upload-artifact@v4
+        with:
+          name: repository-verification
+          path: project/target/{llvm-cov,infra,package}
+  pages:
+    needs: checks
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09
+        with:
+          repository: qubit-ltd/${{ inputs.repository }}
+          ref: ${{ inputs.revision }}
+          path: project
+      - uses: dtolnay/rust-toolchain@6bed0761d98439e5a578e2877258200ad565ba87
+        with: {toolchain: stable}
+      - working-directory: project
+        run: ./.infra/tools/infra-tool.sh rs-infra-pages --project "$PWD" build
+      - uses: actions/upload-pages-artifact@v3
+        with: {path: project/public}
+  deploy-pages:
+    needs: pages
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    environment: {name: github-pages}
+    steps:
+      - uses: actions/deploy-pages@v4
