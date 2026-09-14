@@ -42,7 +42,11 @@ pub(crate) trait CopyTreeBackend {
     ) -> Result<Option<Self::Entry>, LocalCopyDirError>;
 
     /// Constructs child paths and depth once, without filesystem mutation.
-    fn child_context(&self, frame: &CopyTreeFrameContext, entry: &Self::Entry) -> CopyTreeFrameContext;
+    fn child_context(
+        &self,
+        frame: &CopyTreeFrameContext,
+        entry: &Self::Entry,
+    ) -> CopyTreeFrameContext;
 
     /// Processes an already-budgeted child using its precomputed coordinates.
     ///
@@ -62,7 +66,11 @@ pub(crate) trait CopyTreeBackend {
     ///
     /// Metadata-preservation failures retain partial effects and release the
     /// consumed frame. The scheduler then drops every remaining ancestor.
-    fn finish_frame(&mut self, frame: Self::Frame, stats: &mut LocalCopyDirStats) -> Result<(), LocalCopyDirError>;
+    fn finish_frame(
+        &mut self,
+        frame: Self::Frame,
+        stats: &mut LocalCopyDirStats,
+    ) -> Result<(), LocalCopyDirError>;
 
     /// Wraps a scheduler failure with its coordinates and completed statistics.
     /// This conversion must neither mutate destinations nor advance accounting.

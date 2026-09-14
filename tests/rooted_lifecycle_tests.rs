@@ -57,7 +57,10 @@ fn test_rooted_local_file_system_runs_core_entry_workflow() {
     let mut writer = rooted
         .open_writer_with_options(payload, &LocalWriteOptions::new(LocalWriteMode::CreateNew))
         .expect("rooted writer should open");
-    assert_eq!(Some(parent.path().join(payload).as_path()), writer.diagnostic_path());
+    assert_eq!(
+        Some(parent.path().join(payload).as_path()),
+        writer.diagnostic_path()
+    );
     writer
         .write_all(b"first")
         .expect("rooted writer should accept staged bytes");
@@ -79,14 +82,20 @@ fn test_rooted_local_file_system_runs_core_entry_workflow() {
     assert_eq!("first", content);
 
     let entries = rooted
-        .list_with_options(Path::new("nested"), &LocalListOptions::new().with_recursive())
+        .list_with_options(
+            Path::new("nested"),
+            &LocalListOptions::new().with_recursive(),
+        )
         .expect("rooted directory should be listable")
         .collect::<Result<Vec<_>, _>>()
         .expect("rooted traversal should succeed");
     assert_eq!(2, entries.len());
 
     let deleted = rooted
-        .delete_directory_with_options(Path::new("nested"), &LocalDeleteOptions::new().with_recursive())
+        .delete_directory_with_options(
+            Path::new("nested"),
+            &LocalDeleteOptions::new().with_recursive(),
+        )
         .expect("recursive rooted deletion should succeed");
     assert!(deleted.deleted());
     assert!(!parent.path().join("nested").exists());
@@ -115,17 +124,28 @@ fn test_rooted_sessions_report_diagnostic_paths_after_root_rename() {
         .expect("opened root should still contain listed entry")
         .expect("rooted listing should succeed");
     assert_eq!(Path::new("listed"), entry.relative_path());
-    assert_eq!(Some(original.join("listed").as_path()), entry.diagnostic_path());
+    assert_eq!(
+        Some(original.join("listed").as_path()),
+        entry.diagnostic_path()
+    );
     assert_eq!(LocalFileKind::File, entry.metadata().kind());
 
     let mut writer = rooted
-        .open_writer_with_options(Path::new("written"), &LocalWriteOptions::new(LocalWriteMode::CreateNew))
+        .open_writer_with_options(
+            Path::new("written"),
+            &LocalWriteOptions::new(LocalWriteMode::CreateNew),
+        )
         .expect("rooted writer should open through retained authority");
-    assert_eq!(Some(original.join("written").as_path()), writer.diagnostic_path());
+    assert_eq!(
+        Some(original.join("written").as_path()),
+        writer.diagnostic_path()
+    );
     writer
         .write_all(b"authoritative")
         .expect("writer should retain opened root authority");
-    let _ = writer.commit().expect("writer should publish through opened root");
+    let _ = writer
+        .commit()
+        .expect("writer should publish through opened root");
     assert_eq!(
         b"authoritative",
         fs::read(renamed.join("written"))
@@ -146,7 +166,8 @@ fn test_rooted_listing_follows_link_after_root_path_rename() {
     let original = parent.path().join("original");
     let renamed = parent.path().join("renamed");
     fs::create_dir_all(original.join("target")).expect("target should exist");
-    fs::write(original.join("target/entry"), b"authoritative").expect("target entry should be written");
+    fs::write(original.join("target/entry"), b"authoritative")
+        .expect("target entry should be written");
     symlink("target", original.join("link")).expect("link should be created");
     let rooted = LocalFileSystem::rooted(&original).expect("root authority should open");
 
@@ -184,12 +205,18 @@ fn test_rooted_local_file_system_handles_entry_type_and_missing_policies() {
         .expect_err("rooted directories must not open as readers");
     assert_eq!(LocalFileErrorKind::TypeConflict, reader_error.kind());
     let create_error = rooted
-        .create_directory_with_options(Path::new("file"), &LocalCreateDirectoryOptions::new().with_exists_ok())
+        .create_directory_with_options(
+            Path::new("file"),
+            &LocalCreateDirectoryOptions::new().with_exists_ok(),
+        )
         .expect_err("an existing file cannot satisfy a directory request");
     assert_eq!(LocalFileErrorKind::TypeConflict, create_error.kind());
 
     let missing_file = rooted
-        .delete_file_with_options(Path::new("missing-file"), &LocalDeleteOptions::new().with_missing_ok())
+        .delete_file_with_options(
+            Path::new("missing-file"),
+            &LocalDeleteOptions::new().with_missing_ok(),
+        )
         .expect("missing rooted file should be accepted by policy");
     assert!(!missing_file.deleted());
     let missing_directory = rooted
@@ -210,24 +237,35 @@ fn test_rooted_local_file_system_append_commit_and_abort_report_states() {
     fs::write(parent.path().join("payload"), b"base").expect("payload fixture should be written");
 
     let mut committed = rooted
-        .open_writer_with_options(Path::new("payload"), &LocalWriteOptions::new(LocalWriteMode::Append))
+        .open_writer_with_options(
+            Path::new("payload"),
+            &LocalWriteOptions::new(LocalWriteMode::Append),
+        )
         .expect("rooted append writer should open");
     committed
         .write_all(b"-commit")
         .expect("rooted append writer should accept bytes");
-    let committed_outcome = committed.commit().expect("rooted append writer should commit");
+    let committed_outcome = committed
+        .commit()
+        .expect("rooted append writer should commit");
     assert_eq!(LocalWriterState::Committed, committed_outcome.state());
     assert!(!committed_outcome.atomic());
 
     let mut aborted = rooted
-        .open_writer_with_options(Path::new("payload"), &LocalWriteOptions::new(LocalWriteMode::Append))
+        .open_writer_with_options(
+            Path::new("payload"),
+            &LocalWriteOptions::new(LocalWriteMode::Append),
+        )
         .expect("second rooted append writer should open");
     aborted
         .write_all(b"-abort")
         .expect("second rooted append writer should accept bytes");
     let aborted_outcome = aborted.abort().expect("append abort should flush");
     assert_eq!(LocalWriterState::Aborted, aborted_outcome.state());
-    assert_eq!(Some(LocalWriteFailureState::Published), aborted_outcome.failure_state(),);
+    assert_eq!(
+        Some(LocalWriteFailureState::Published),
+        aborted_outcome.failure_state(),
+    );
     assert_eq!(
         b"base-commit-abort",
         fs::read(parent.path().join("payload"))
@@ -256,7 +294,8 @@ fn test_rooted_local_file_system_follows_in_scope_symlink_listing() {
 
     let parent = tempdir().expect("root parent should be created");
     fs::create_dir(parent.path().join("target")).expect("target directory should be created");
-    fs::write(parent.path().join("target/entry"), b"payload").expect("target entry should be written");
+    fs::write(parent.path().join("target/entry"), b"payload")
+        .expect("target entry should be written");
     symlink("target", parent.path().join("link")).expect("in-scope link should be created");
     let rooted = LocalFileSystem::rooted(parent.path()).expect("root authority should open");
 
@@ -335,9 +374,11 @@ fn test_rooted_local_file_system_reports_changed_child_during_recursive_list() {
 
     let original = parent.path().join("original-child");
     let replacement = parent.path().join("replacement-child");
-    fs::create_dir(&replacement).expect("replacement directory should be created with another identity");
+    fs::create_dir(&replacement)
+        .expect("replacement directory should be created with another identity");
     fs::rename(&child, &original).expect("observed child should move without freeing its identity");
-    fs::rename(&replacement, &child).expect("known-distinct replacement should take the child path");
+    fs::rename(&replacement, &child)
+        .expect("known-distinct replacement should take the child path");
 
     let error = walker
         .next()
@@ -365,7 +406,10 @@ fn test_rooted_local_file_system_copy_enforces_directory_policies() {
             &LocalCopyOptions::new().with_entry_source(),
         )
         .expect_err("file-only copy must reject a directory source");
-    assert_eq!(LocalFileErrorKind::RequirementNotMet, file_only.error().kind());
+    assert_eq!(
+        LocalFileErrorKind::RequirementNotMet,
+        file_only.error().kind()
+    );
     let atomic_required = rooted
         .copy_with_options(
             Path::new("source"),
@@ -375,7 +419,10 @@ fn test_rooted_local_file_system_copy_enforces_directory_policies() {
                 .with_atomicity(LocalAtomicityRequirement::Required),
         )
         .expect_err("directory copy cannot promise required atomicity");
-    assert_eq!(LocalFileErrorKind::RequirementNotMet, atomic_required.error().kind());
+    assert_eq!(
+        LocalFileErrorKind::RequirementNotMet,
+        atomic_required.error().kind()
+    );
 
     let outcome = rooted
         .copy_with_options(
@@ -409,7 +456,9 @@ fn test_rooted_local_file_system_rejects_lexical_escape_across_operations() {
         .expect_err("rooted file deletion must reject lexical escapes");
     assert_eq!(LocalFileErrorKind::InvalidPath, delete_error.kind());
     let temporary_error = rooted
-        .create_temp_file_with_options(&LocalTempFileOptions::new().with_parent(Path::new("../escape")))
+        .create_temp_file_with_options(
+            &LocalTempFileOptions::new().with_parent(Path::new("../escape")),
+        )
         .expect_err("rooted temporary parents must reject lexical escapes");
     assert_eq!(LocalFileErrorKind::InvalidPath, temporary_error.kind());
 }

@@ -30,7 +30,9 @@ where
 {
     const TEST_FAULT_ENV: &str = "QUBIT_LOCAL_FILES_TEST_FAULT";
     const TEST_FAULT_CHILD_ENV: &str = "QUBIT_LOCAL_FILES_TEST_FAULT_CHILD";
-    if std::env::var_os(TEST_FAULT_ENV).is_some_and(|selected| selected == std::ffi::OsStr::new(fault)) {
+    if std::env::var_os(TEST_FAULT_ENV)
+        .is_some_and(|selected| selected == std::ffi::OsStr::new(fault))
+    {
         let _fault = install_test_fault(fault).expect("test fault controller should install");
         action();
         return;
@@ -105,7 +107,8 @@ fn assert_bound_paths(expected: &Path, actual: &Path) {
 fn test_local_directory_walker_non_recursive_listing_retains_bound_root() {
     let directory = tempdir().expect("temporary directory should be created");
     fs::create_dir(directory.path().join("nested")).expect("nested directory should be created");
-    fs::write(directory.path().join("nested/child"), b"child").expect("nested child should be written");
+    fs::write(directory.path().join("nested/child"), b"child")
+        .expect("nested child should be written");
     fs::write(directory.path().join("top"), b"top").expect("top-level fixture should be written");
 
     let walker = LocalFileSystem::host()
@@ -227,8 +230,16 @@ fn test_local_directory_walker_resource_limit_terminates_continue_policy() {
         )
         .expect("walker should open");
 
-    assert!(walker.next().expect("resource limit should be yielded").is_err(),);
-    assert!(walker.next().is_none(), "resource exhaustion must terminate");
+    assert!(
+        walker
+            .next()
+            .expect("resource limit should be yielded")
+            .is_err(),
+    );
+    assert!(
+        walker.next().is_none(),
+        "resource exhaustion must terminate"
+    );
 }
 
 /// Verifies an unrepresentable monotonic deadline is rejected without panic.
@@ -238,7 +249,10 @@ fn test_local_directory_walker_rejects_unrepresentable_deadline() {
 
     let error = LocalFileSystem::host()
         .expect("Host filesystem should open")
-        .list_with_options(directory.path(), &LocalListOptions::new().with_deadline(Duration::MAX))
+        .list_with_options(
+            directory.path(),
+            &LocalListOptions::new().with_deadline(Duration::MAX),
+        )
         .expect_err("unrepresentable deadline should be invalid");
 
     assert_eq!(LocalFileErrorKind::InvalidOptions, error.kind());
@@ -252,7 +266,10 @@ fn test_local_directory_walker_rejects_zero_open_directory_budget() {
 
     let error = LocalFileSystem::host()
         .expect("Host filesystem should open")
-        .list_with_options(directory.path(), &LocalListOptions::new().with_max_open_directories(0))
+        .list_with_options(
+            directory.path(),
+            &LocalListOptions::new().with_max_open_directories(0),
+        )
         .expect_err("zero directory-handle budgets must be invalid");
 
     assert_eq!(LocalFileErrorKind::InvalidOptions, error.kind());
@@ -288,7 +305,11 @@ fn test_local_directory_walker_follow_mode_traverses_links_and_rejects_cycles() 
         .expect("follow-mode walker should open")
         .collect::<Result<Vec<_>, _>>()
         .expect("one symlinked directory should be traversable");
-    assert!(entries.iter().any(|entry| entry.relative_path() == "link/child"));
+    assert!(
+        entries
+            .iter()
+            .any(|entry| entry.relative_path() == "link/child")
+    );
 
     symlink(directory.path(), target.join("cycle")).expect("cycle link should be created");
     let error = LocalFileSystem::host()
@@ -315,7 +336,8 @@ fn test_local_directory_walker_follow_mode_reports_dangling_link() {
 
     let directory = tempdir().expect("temporary directory should be created");
     let link = directory.path().join("dangling");
-    symlink(directory.path().join("missing"), &link).expect("dangling link fixture should be created");
+    symlink(directory.path().join("missing"), &link)
+        .expect("dangling link fixture should be created");
 
     let error = LocalFileSystem::host()
         .expect("Host filesystem should open")
@@ -348,7 +370,8 @@ fn test_local_directory_walker_reports_unreadable_child_directory() {
     let child = directory.path().join("restricted");
     fs::create_dir(&child).expect("restricted child should be created");
     fs::write(child.join("entry"), b"payload").expect("restricted child fixture should be written");
-    fs::set_permissions(&child, fs::Permissions::from_mode(0o000)).expect("restricted child should become unreadable");
+    fs::set_permissions(&child, fs::Permissions::from_mode(0o000))
+        .expect("restricted child should become unreadable");
 
     let mut walker = LocalFileSystem::host()
         .expect("Host filesystem should open")
@@ -380,7 +403,8 @@ fn test_local_directory_walker_rejects_unreadable_root_directory() {
     let directory = tempdir().expect("temporary directory should be created");
     let root = directory.path().join("restricted-root");
     fs::create_dir(&root).expect("restricted root should be created");
-    fs::set_permissions(&root, fs::Permissions::from_mode(0o000)).expect("restricted root should become unreadable");
+    fs::set_permissions(&root, fs::Permissions::from_mode(0o000))
+        .expect("restricted root should become unreadable");
 
     let error = LocalFileSystem::host()
         .expect("Host filesystem should open")
@@ -401,8 +425,11 @@ fn test_local_directory_walker_fail_fast_stops_after_error() {
     use std::os::unix::fs::symlink;
 
     let directory = tempdir().expect("temporary directory should be created");
-    symlink(directory.path().join("missing"), directory.path().join("dangling"))
-        .expect("dangling link fixture should be created");
+    symlink(
+        directory.path().join("missing"),
+        directory.path().join("dangling"),
+    )
+    .expect("dangling link fixture should be created");
 
     let mut walker = LocalFileSystem::host()
         .expect("Host filesystem should open")
@@ -411,7 +438,12 @@ fn test_local_directory_walker_fail_fast_stops_after_error() {
             &LocalListOptions::new().with_symlink_policy(LocalSymlinkPolicy::FollowWithinScope),
         )
         .expect("walker should open");
-    assert!(walker.next().expect("dangling link should produce an error").is_err());
+    assert!(
+        walker
+            .next()
+            .expect("dangling link should produce an error")
+            .is_err()
+    );
     assert!(walker.next().is_none());
 }
 
@@ -423,9 +455,13 @@ fn test_local_directory_walker_continue_policy_keeps_iterating() {
     use std::os::unix::fs::symlink;
 
     let directory = tempdir().expect("temporary directory should be created");
-    fs::write(directory.path().join("readable"), b"payload").expect("readable entry should be created");
-    symlink(directory.path().join("missing"), directory.path().join("dangling"))
-        .expect("dangling link fixture should be created");
+    fs::write(directory.path().join("readable"), b"payload")
+        .expect("readable entry should be created");
+    symlink(
+        directory.path().join("missing"),
+        directory.path().join("dangling"),
+    )
+    .expect("dangling link fixture should be created");
 
     let walker = LocalFileSystem::host()
         .expect("Host filesystem should open")
@@ -461,7 +497,8 @@ fn test_local_directory_walker_detects_native_directory_identity_cycle() {
     const TEST_NAME: &str = "test_local_directory_walker_detects_native_directory_identity_cycle";
     run_walker_fault_process(TEST_NAME, "walker-directory-identity-cycle", || {
         let directory = tempdir().expect("temporary directory should be created");
-        fs::create_dir(directory.path().join("nested")).expect("nested directory should be created");
+        fs::create_dir(directory.path().join("nested"))
+            .expect("nested directory should be created");
         let error = LocalFileSystem::host()
             .expect("Host filesystem should open")
             .list_with_options(directory.path(), &LocalListOptions::new().with_recursive())
@@ -491,7 +528,9 @@ fn test_local_directory_walker_reports_injected_iteration_failures() {
                 .expect("nested directory fixture should be created");
             fs::write(directory.path().join("nested/child/payload"), b"payload")
                 .expect("nested payload should be written");
-            let options = LocalListOptions::new().with_recursive().with_max_open_directories(1);
+            let options = LocalListOptions::new()
+                .with_recursive()
+                .with_max_open_directories(1);
             let result = LocalFileSystem::host()
                 .expect("Host filesystem should open")
                 .list_with_options(directory.path(), &options);

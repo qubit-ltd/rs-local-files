@@ -43,7 +43,11 @@ impl LocalFileSystem {
     /// Returns path-resolution, invalid-option, or initial directory-open
     /// errors. The returned walker owns traversal state; subsequent I/O and
     /// budget failures are yielded during iteration.
-    pub fn list_with_options(&self, path: &Path, options: &LocalListOptions) -> LocalResult<LocalDirectoryWalker> {
+    pub fn list_with_options(
+        &self,
+        path: &Path,
+        options: &LocalListOptions,
+    ) -> LocalResult<LocalDirectoryWalker> {
         self.list_with_options_started_at(path, options, super::Instant::now())
     }
 
@@ -57,8 +61,9 @@ impl LocalFileSystem {
         options: &LocalListOptions,
         started_at: super::Instant,
     ) -> LocalResult<LocalDirectoryWalker> {
-        validate_list_options(self.scope(), self.symlink_policy, options, Some(path))
-            .map_err(|error| with_current_directory(error, self.current_directory.virtual_path()))?;
+        validate_list_options(self.scope(), self.symlink_policy, options, Some(path)).map_err(
+            |error| with_current_directory(error, self.current_directory.virtual_path()),
+        )?;
         if let Some(deadline) = options.deadline()
             && started_at.elapsed() >= deadline
         {
@@ -67,7 +72,10 @@ impl LocalFileSystem {
                     LocalFileOperation::List,
                     Some(path.to_path_buf()),
                     None,
-                    std::io::Error::new(std::io::ErrorKind::TimedOut, "local operation deadline exceeded"),
+                    std::io::Error::new(
+                        std::io::ErrorKind::TimedOut,
+                        "local operation deadline exceeded",
+                    ),
                 ),
                 self.current_directory.virtual_path(),
             ));
@@ -89,7 +97,9 @@ impl LocalFileSystem {
                 started_at,
             ),
         }
-        .map(|walker| walker.bind_current_directory(resolver.current_directory().map(Path::to_path_buf)))
+        .map(|walker| {
+            walker.bind_current_directory(resolver.current_directory().map(Path::to_path_buf))
+        })
         .map_err(|error| {
             operation_error(
                 error,
@@ -122,13 +132,17 @@ impl LocalFileSystem {
         options: &LocalCreateDirectoryOptions,
     ) -> LocalResult<LocalCreateDirectoryOutcome> {
         let resolver = self.resolver_for(path, LocalFileOperation::CreateDirectory)?;
-        let resolved = resolve_operation_path(&resolver, path, LocalFileOperation::CreateDirectory)?;
+        let resolved =
+            resolve_operation_path(&resolver, path, LocalFileOperation::CreateDirectory)?;
         if self.is_root_operand(&resolved) {
             if options.exists_ok() {
                 return Ok(LocalCreateDirectoryOutcome::new(false));
             }
-            let error = LocalFileError::new(LocalFileErrorKind::AlreadyExists, LocalFileOperation::CreateDirectory)
-                .with_path(resolved.namespace_absolute().to_path_buf());
+            let error = LocalFileError::new(
+                LocalFileErrorKind::AlreadyExists,
+                LocalFileOperation::CreateDirectory,
+            )
+            .with_path(resolved.namespace_absolute().to_path_buf());
             return Err(with_current_directory(error, resolver.current_directory()));
         }
         match &self.core.namespace {
@@ -174,8 +188,16 @@ impl LocalFileSystem {
     ) -> LocalResult<LocalDeleteOutcome> {
         let resolver = self.resolver_for(path, LocalFileOperation::DeleteFile)?;
         let resolved = resolve_operation_path(&resolver, path, LocalFileOperation::DeleteFile)?;
-        self.reject_root_operand(&resolved, LocalFileOperation::DeleteFile, resolver.current_directory())?;
-        reject_directory_qualified_file(&resolved, LocalFileOperation::DeleteFile, resolver.current_directory())?;
+        self.reject_root_operand(
+            &resolved,
+            LocalFileOperation::DeleteFile,
+            resolver.current_directory(),
+        )?;
+        reject_directory_qualified_file(
+            &resolved,
+            LocalFileOperation::DeleteFile,
+            resolver.current_directory(),
+        )?;
         match &self.core.namespace {
             LocalNamespace::Host => HostLocalFileSystem::delete_file_with_policy(
                 resolved.authority_relative(),
@@ -231,7 +253,8 @@ impl LocalFileSystem {
         started_at: super::Instant,
     ) -> LocalResult<LocalDeleteOutcome> {
         let resolver = self.resolver_for(path, LocalFileOperation::DeleteDirectory)?;
-        let resolved = resolve_operation_path(&resolver, path, LocalFileOperation::DeleteDirectory)?;
+        let resolved =
+            resolve_operation_path(&resolver, path, LocalFileOperation::DeleteDirectory)?;
         self.reject_root_operand(
             &resolved,
             LocalFileOperation::DeleteDirectory,
@@ -246,7 +269,10 @@ impl LocalFileSystem {
                     LocalFileOperation::DeleteDirectory,
                     Some(resolved.namespace_absolute().to_path_buf()),
                     None,
-                    std::io::Error::new(std::io::ErrorKind::TimedOut, "local operation deadline exceeded"),
+                    std::io::Error::new(
+                        std::io::ErrorKind::TimedOut,
+                        "local operation deadline exceeded",
+                    ),
                 ),
                 resolver.current_directory(),
             ));
@@ -258,9 +284,12 @@ impl LocalFileSystem {
                 self.symlink_policy,
                 started_at,
             ),
-            LocalNamespace::Rooted(rooted) => {
-                rooted.delete_directory(resolved.authority_relative(), options, self.symlink_policy, started_at)
-            }
+            LocalNamespace::Rooted(rooted) => rooted.delete_directory(
+                resolved.authority_relative(),
+                options,
+                self.symlink_policy,
+                started_at,
+            ),
         }
         .map_err(|error| {
             let path = operation_failure_path(&error, self.scope(), resolved.namespace_absolute());

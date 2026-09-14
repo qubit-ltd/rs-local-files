@@ -10,7 +10,7 @@
 use std::fs;
 use std::path::PathBuf;
 
-use super::support::resolution_observation;
+use super::support::resolution_observation_tests;
 use crate::LocalFileOperation;
 use crate::LocalSymlinkPolicy;
 use crate::rooted::Root;
@@ -30,7 +30,7 @@ fn test_complete_resolver_uses_linear_ordinary_path_work() {
         path.push("payload");
         fs::write(temporary.path().join(&path), b"payload").expect("leaf should exist");
         for follow_final in [false, true] {
-            resolution_observation::reset();
+            resolution_observation_tests::reset();
             let resolved = resolve_rooted_path(
                 &root,
                 &path,
@@ -40,10 +40,13 @@ fn test_complete_resolver_uses_linear_ordinary_path_work() {
             )
             .expect("normal path should resolve");
             assert_eq!(path, resolved.as_path());
-            let (metadata, opened, fallback) = resolution_observation::snapshot();
+            let (metadata, opened, fallback) = resolution_observation_tests::snapshot();
             assert_eq!(depth + usize::from(follow_final), metadata);
             assert_eq!(depth, opened);
-            assert_eq!(0, fallback, "ordinary paths must not silently lose the fast path");
+            assert_eq!(
+                0, fallback,
+                "ordinary paths must not silently lose the fast path"
+            );
         }
     }
 }

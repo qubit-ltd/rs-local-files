@@ -110,10 +110,11 @@ impl LocalDirectoryWalker {
             Err(error) => return Err(walk_io_error(&diagnostic_root, error)),
         };
         if !metadata.file_type().is_dir() {
-            return Err(
-                LocalFileError::new(LocalFileErrorKind::TypeConflict, LocalFileOperation::List)
-                    .with_path(diagnostic_root.clone()),
-            );
+            return Err(LocalFileError::new(
+                LocalFileErrorKind::TypeConflict,
+                LocalFileOperation::List,
+            )
+            .with_path(diagnostic_root.clone()));
         }
         let open_directories = directory_pool(&options);
         let directory_permit = open_directories.as_ref().map(|pool| {
@@ -233,7 +234,8 @@ impl LocalDirectoryWalker {
             Ok(metadata) => metadata,
             Err(error) => return Err(walk_io_error(&namespace_root, error)),
         };
-        let start_identity = DirectoryIdentity::from_rooted_metadata(&start_metadata, &authority_parent);
+        let start_identity =
+            DirectoryIdentity::from_rooted_metadata(&start_metadata, &authority_parent);
         let mut followed_directories = HashSet::new();
         followed_directories.insert(start_identity.clone());
         Ok(Self {
@@ -295,7 +297,11 @@ impl LocalDirectoryWalker {
     /// `true` when recursion and the configured depth limit permit descent.
     #[inline]
     fn may_descend(&self, entry_depth: usize) -> bool {
-        self.options.recursive() && self.options.max_depth().is_none_or(|max_depth| entry_depth < max_depth)
+        self.options.recursive()
+            && self
+                .options
+                .max_depth()
+                .is_none_or(|max_depth| entry_depth < max_depth)
     }
 
     /// Closes every currently open host reader while retaining its frame.
@@ -391,11 +397,12 @@ impl LocalDirectoryWalker {
         }
         let identity = native_directory_identity(metadata, path)?;
         if self.followed_directories.contains(&identity) {
-            return Err(
-                LocalFileError::new(LocalFileErrorKind::InvalidPath, LocalFileOperation::List)
-                    .with_reason("directory identity cycle detected")
-                    .with_path(path.to_path_buf()),
-            );
+            return Err(LocalFileError::new(
+                LocalFileErrorKind::InvalidPath,
+                LocalFileOperation::List,
+            )
+            .with_reason("directory identity cycle detected")
+            .with_path(path.to_path_buf()));
         }
         let directory_permit = self.acquire_host_directory(path)?;
         let entries = fs::read_dir(path).map_err(|error| walk_io_error(path, error))?;
@@ -507,7 +514,10 @@ impl LocalDirectoryWalker {
             self.terminated = true;
             return Some(Err(walk_io_error(
                 &self.root,
-                std::io::Error::new(std::io::ErrorKind::TimedOut, "local listing deadline exceeded"),
+                std::io::Error::new(
+                    std::io::ErrorKind::TimedOut,
+                    "local listing deadline exceeded",
+                ),
             )));
         }
         if let Some(state) = self.rooted.as_mut() {
@@ -523,7 +533,8 @@ impl LocalDirectoryWalker {
                 &mut self.seen_name_budget,
                 self.deadline,
             );
-            if matches!(&result, Some(Err(error)) if is_terminal_walk_error(error, self.options.error_policy())) {
+            if matches!(&result, Some(Err(error)) if is_terminal_walk_error(error, self.options.error_policy()))
+            {
                 self.terminated = true;
             }
             return result;
@@ -556,7 +567,9 @@ impl LocalDirectoryWalker {
             };
             #[cfg(feature = "test-support")]
             let next_entry = if crate::local::take_test_support("walker-entry") {
-                Some(Err(std::io::Error::other("injected walker directory entry failure")))
+                Some(Err(std::io::Error::other(
+                    "injected walker directory entry failure",
+                )))
             } else {
                 next_entry
             };
@@ -587,13 +600,19 @@ impl LocalDirectoryWalker {
                 && let Err(error) = budget.try_consume(1)
             {
                 self.terminated = true;
-                return Some(Err(directory_limit_error(&self.root.join(&relative_parent), error)));
+                return Some(Err(directory_limit_error(
+                    &self.root.join(&relative_parent),
+                    error,
+                )));
             }
             if let Some(budget) = self.seen_name_budget.as_mut()
                 && let Err(error) = budget.try_consume(name_bytes(&entry.file_name()))
             {
                 self.terminated = true;
-                return Some(Err(directory_limit_error(&self.root.join(&relative_parent), error)));
+                return Some(Err(directory_limit_error(
+                    &self.root.join(&relative_parent),
+                    error,
+                )));
             }
             let path = entry.path();
             let relative = relative_parent.join(entry.file_name());
@@ -606,25 +625,27 @@ impl LocalDirectoryWalker {
                     return Some(Err(walk_io_error(&path, error)));
                 }
             };
-            let descent_metadata = if entry_metadata.file_type().is_symlink() && self.symlink_policy.follows() {
-                match fs::metadata(&path) {
-                    Ok(metadata) => metadata,
-                    Err(error) => {
-                        if self.options.error_policy() == LocalWalkErrorPolicy::FailFast {
-                            self.terminated = true;
+            let descent_metadata =
+                if entry_metadata.file_type().is_symlink() && self.symlink_policy.follows() {
+                    match fs::metadata(&path) {
+                        Ok(metadata) => metadata,
+                        Err(error) => {
+                            if self.options.error_policy() == LocalWalkErrorPolicy::FailFast {
+                                self.terminated = true;
+                            }
+                            return Some(Err(walk_io_error(&path, error)));
                         }
-                        return Some(Err(walk_io_error(&path, error)));
                     }
-                }
-            } else {
-                entry_metadata.clone()
-            };
+                } else {
+                    entry_metadata.clone()
+                };
             let is_directory = descent_metadata.file_type().is_dir();
             let metadata = LocalFileMetadata::from_native(&entry_metadata);
 
             if is_directory
                 && self.may_descend(entry_depth)
-                && let Err(error) = self.descend(&path, &descent_metadata, relative.clone(), entry_depth)
+                && let Err(error) =
+                    self.descend(&path, &descent_metadata, relative.clone(), entry_depth)
             {
                 if self.options.error_policy() == LocalWalkErrorPolicy::FailFast {
                     self.terminated = true;
@@ -770,7 +791,10 @@ fn next_rooted_entry(
         if matches!(deadline, Some(deadline) if Instant::now() >= deadline) {
             return Some(Err(walk_io_error(
                 namespace_root,
-                std::io::Error::new(std::io::ErrorKind::TimedOut, "local listing deadline exceeded"),
+                std::io::Error::new(
+                    std::io::ErrorKind::TimedOut,
+                    "local listing deadline exceeded",
+                ),
             )));
         }
         let frame = state.stack.last()?;
@@ -780,29 +804,33 @@ fn next_rooted_entry(
         let needs_reader = frame.reader.is_none();
         if needs_reader {
             #[cfg(feature = "test-support")]
-            let authority_parent = if crate::local::test_support_enabled("walker-rooted-relative-path") {
-                PathBuf::from("../invalid")
-            } else {
-                authority_parent.clone()
-            };
+            let authority_parent =
+                if crate::local::test_support_enabled("walker-rooted-relative-path") {
+                    PathBuf::from("../invalid")
+                } else {
+                    authority_parent.clone()
+                };
             let public_parent = namespace_root.join(&output_parent);
-            let directory_permit = match acquire_rooted_directory(state, options, pool, &public_parent) {
-                Ok(permit) => permit,
-                Err(error) => {
-                    let failed = pop_rooted_frame(state).expect("rooted walker stack is non-empty");
-                    if let Some(identity) = failed.identity {
-                        state.followed_directories.remove(&identity);
+            let directory_permit =
+                match acquire_rooted_directory(state, options, pool, &public_parent) {
+                    Ok(permit) => permit,
+                    Err(error) => {
+                        let failed =
+                            pop_rooted_frame(state).expect("rooted walker stack is non-empty");
+                        if let Some(identity) = failed.identity {
+                            state.followed_directories.remove(&identity);
+                        }
+                        return Some(Err(error));
                     }
-                    return Some(Err(error));
-                }
-            };
+                };
             let reader = if authority_parent.as_os_str().is_empty() {
                 state.root.open_root_dir_reader()
             } else {
                 let relative = match crate::local::LocalRelativePath::new(&authority_parent) {
                     Ok(relative) => relative,
                     Err(error) => {
-                        let failed = pop_rooted_frame(state).expect("rooted walker stack is non-empty");
+                        let failed =
+                            pop_rooted_frame(state).expect("rooted walker stack is non-empty");
                         if let Some(identity) = failed.identity {
                             state.followed_directories.remove(&identity);
                         }
@@ -816,19 +844,24 @@ fn next_rooted_entry(
                     let observed_identity = match reader
                         .try_clone_directory()
                         .and_then(|file| crate::rooted::Metadata::from_open_file(&file))
-                        .map(|metadata| DirectoryIdentity::from_rooted_metadata(&metadata, &authority_parent))
-                    {
+                        .map(|metadata| {
+                            DirectoryIdentity::from_rooted_metadata(&metadata, &authority_parent)
+                        }) {
                         Ok(identity) => identity,
                         Err(error) => {
-                            let failed = pop_rooted_frame(state).expect("rooted walker stack is non-empty");
+                            let failed =
+                                pop_rooted_frame(state).expect("rooted walker stack is non-empty");
                             if let Some(identity) = failed.identity {
                                 state.followed_directories.remove(&identity);
                             }
                             return Some(Err(walk_io_error(&public_parent, error)));
                         }
                     };
-                    if state.stack.last().and_then(|frame| frame.identity.as_ref()) != Some(&observed_identity) {
-                        let failed = pop_rooted_frame(state).expect("rooted walker stack is non-empty");
+                    if state.stack.last().and_then(|frame| frame.identity.as_ref())
+                        != Some(&observed_identity)
+                    {
+                        let failed =
+                            pop_rooted_frame(state).expect("rooted walker stack is non-empty");
                         if let Some(identity) = failed.identity {
                             state.followed_directories.remove(&identity);
                         }
@@ -839,7 +872,10 @@ fn next_rooted_entry(
                         .with_reason("directory identity changed while reopening walker frame")
                         .with_path(public_parent)));
                     }
-                    let frame = state.stack.last_mut().expect("rooted walker stack is non-empty");
+                    let frame = state
+                        .stack
+                        .last_mut()
+                        .expect("rooted walker stack is non-empty");
                     frame.reader = Some(reader);
                     frame.directory_permit = directory_permit;
                 }
@@ -887,10 +923,16 @@ fn next_rooted_entry(
                 {
                     state.followed_directories.remove(&identity);
                 }
-                return Some(Err(walk_io_error(&namespace_root.join(&output_parent), error)));
+                return Some(Err(walk_io_error(
+                    &namespace_root.join(&output_parent),
+                    error,
+                )));
             }
         };
-        if options.max_depth().is_some_and(|max_depth| entry_depth > max_depth) {
+        if options
+            .max_depth()
+            .is_some_and(|max_depth| entry_depth > max_depth)
+        {
             continue;
         }
         if let Some(budget) = entry_budget.as_mut()
@@ -907,10 +949,14 @@ fn next_rooted_entry(
         let output_path = output_parent.join(entry.name());
         let entry_metadata = entry.metadata();
         let metadata = crate::rooted_local_file_system::rooted_metadata(entry_metadata);
-        let may_descend = options.recursive() && options.max_depth().is_none_or(|max_depth| entry_depth < max_depth);
+        let may_descend = options.recursive()
+            && options
+                .max_depth()
+                .is_none_or(|max_depth| entry_depth < max_depth);
         let mut followed_directory = None;
         if metadata.kind() == crate::LocalFileKind::Directory {
-            let identity = DirectoryIdentity::from_rooted_metadata(&entry_metadata, &authority_path);
+            let identity =
+                DirectoryIdentity::from_rooted_metadata(&entry_metadata, &authority_path);
             if state.followed_directories.contains(&identity) {
                 return Some(Err(LocalFileError::new(
                     LocalFileErrorKind::InvalidPath,
@@ -920,7 +966,10 @@ fn next_rooted_entry(
                 .with_path(namespace_root.join(&output_path))));
             }
             followed_directory = Some((authority_path.clone(), identity));
-        } else if metadata.kind() == crate::LocalFileKind::Symlink && state.symlink_policy.follows() && may_descend {
+        } else if metadata.kind() == crate::LocalFileKind::Symlink
+            && state.symlink_policy.follows()
+            && may_descend
+        {
             let target = match crate::rooted_local_file_system::resolve_rooted_path_allow_root(
                 &state.root,
                 &authority_path,
@@ -944,7 +993,10 @@ fn next_rooted_entry(
             let target_metadata = match target_metadata {
                 Ok(metadata) => metadata,
                 Err(error) => {
-                    return Some(Err(walk_io_error(&namespace_root.join(&output_path), error)));
+                    return Some(Err(walk_io_error(
+                        &namespace_root.join(&output_path),
+                        error,
+                    )));
                 }
             };
             if target_metadata.kind() == crate::rooted::EntryKind::Directory {
@@ -999,7 +1051,10 @@ fn next_rooted_entry(
 ///
 /// Returns `LocalFileError` when the platform requires canonical path
 /// resolution and that resolution fails.
-fn native_directory_identity(metadata: &fs::Metadata, path: &Path) -> LocalResult<DirectoryIdentity> {
+fn native_directory_identity(
+    metadata: &fs::Metadata,
+    path: &Path,
+) -> LocalResult<DirectoryIdentity> {
     #[cfg(windows)]
     let identity_path = fs::canonicalize(path).map_err(|error| walk_io_error(path, error))?;
     #[cfg(not(windows))]
@@ -1023,5 +1078,10 @@ fn native_directory_identity(metadata: &fs::Metadata, path: &Path) -> LocalResul
 /// Structured listing error.
 #[inline]
 fn walk_io_error(path: &Path, error: std::io::Error) -> LocalFileError {
-    LocalFileError::from_io(LocalFileOperation::List, Some(path.to_path_buf()), None, error)
+    LocalFileError::from_io(
+        LocalFileOperation::List,
+        Some(path.to_path_buf()),
+        None,
+        error,
+    )
 }

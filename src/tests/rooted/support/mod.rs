@@ -7,4 +7,4 @@
 // =============================================================================
 //! Private observation support for rooted contract tests.
 
-pub(crate) mod resolution_observation;
+pub(crate) mod resolution_observation_tests;

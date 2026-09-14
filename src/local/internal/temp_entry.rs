@@ -130,7 +130,9 @@ pub(crate) fn create_temp_dir_in_dir_with_affixes(
                 "injected temporary directory collision",
             ))
         } else if test_support::is_enabled("temp-directory-create") {
-            Err(Error::other("injected temporary directory creation failure"))
+            Err(Error::other(
+                "injected temporary directory creation failure",
+            ))
         } else {
             create_private_dir(&path)
         };
@@ -183,7 +185,8 @@ pub(crate) fn create_private_dir(path: &Path) -> Result<()> {
 #[must_use]
 #[inline]
 fn should_retry_collision(error: &Error, attempt: usize, max_tries: Option<usize>) -> bool {
-    error.kind() == ErrorKind::AlreadyExists && max_tries.is_none_or(|max_tries| attempt < max_tries)
+    error.kind() == ErrorKind::AlreadyExists
+        && max_tries.is_none_or(|max_tries| attempt < max_tries)
 }
 
 /// Validates a retry count.

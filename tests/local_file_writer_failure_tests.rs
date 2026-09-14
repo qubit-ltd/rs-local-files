@@ -44,14 +44,22 @@ fn test_local_file_writer_retries_transient_stream_errors() {
             let mut writer = filesystem.open_writer(&target).expect("writer should open");
             let _fault = install_test_fault(fault).expect("fault should install");
             if fault == "local-writer-would-block" {
-                let error = writer.write(b"payload").expect_err("initial write should block");
+                let error = writer
+                    .write(b"payload")
+                    .expect_err("initial write should block");
                 assert_eq!(std::io::ErrorKind::WouldBlock, error.kind());
             }
             writer
                 .write_all(b"payload")
                 .expect("transient failure should be retryable");
             assert_eq!(None, writer.failure_state());
-            assert_eq!(7, writer.commit().expect("commit should succeed").bytes_written());
+            assert_eq!(
+                7,
+                writer
+                    .commit()
+                    .expect("commit should succeed")
+                    .bytes_written()
+            );
             assert_eq!(
                 b"payload",
                 fs::read(directory.path().join("payload"))
@@ -157,7 +165,9 @@ fn test_local_file_writer_append_commit_reports_direct_publication() {
     assert_eq!(7, outcome.bytes_written());
     assert_eq!(
         b"base-vector",
-        fs::read(&target).expect("appended payload should read").as_slice(),
+        fs::read(&target)
+            .expect("appended payload should read")
+            .as_slice(),
     );
 }
 
@@ -175,7 +185,9 @@ fn test_local_file_writer_append_abort_reports_aborted_and_published_states() {
         .expect("append writer should open");
     let untouched_outcome = untouched.abort().expect("untouched append should abort");
     assert_eq!(LocalWriterState::Aborted, untouched_outcome.state());
-    let repeated = untouched.abort().expect_err("completed append abort must be terminal");
+    let repeated = untouched
+        .abort()
+        .expect_err("completed append abort must be terminal");
     assert_eq!(LocalFileErrorKind::InvalidState, repeated.kind(),);
 
     let mut published = LocalFileSystem::host()
@@ -193,7 +205,9 @@ fn test_local_file_writer_append_abort_reports_aborted_and_published_states() {
     );
     assert_eq!(
         b"base-published",
-        fs::read(&target).expect("published payload should read").as_slice(),
+        fs::read(&target)
+            .expect("published payload should read")
+            .as_slice(),
     );
 }
 
@@ -210,13 +224,17 @@ fn test_local_file_writer_creates_missing_parent_when_requested() {
             &LocalWriteOptions::new(LocalWriteMode::CreateNew).with_create_parent(),
         )
         .expect("writer should create the requested parent directory");
-    writer.write_all(b"payload").expect("staged writer should accept bytes");
+    writer
+        .write_all(b"payload")
+        .expect("staged writer should accept bytes");
     let outcome = writer.commit().expect("staged writer should commit");
 
     assert_eq!(LocalWriterState::Committed, outcome.state());
     assert_eq!(
         b"payload",
-        fs::read(target).expect("published payload should read").as_slice(),
+        fs::read(target)
+            .expect("published payload should read")
+            .as_slice(),
     );
 }
 
@@ -236,8 +254,12 @@ fn test_local_file_writer_creates_nested_durable_parent_chain() {
                 .with_durability(LocalDurabilityRequirement::Required),
         )
         .expect("writer should create and synchronize missing parents");
-    writer.write_all(b"payload").expect("staged writer should accept bytes");
-    let outcome = writer.commit().expect("durable staged writer should commit");
+    writer
+        .write_all(b"payload")
+        .expect("staged writer should accept bytes");
+    let outcome = writer
+        .commit()
+        .expect("durable staged writer should commit");
 
     assert!(outcome.durable());
     assert_eq!(
@@ -264,15 +286,25 @@ fn test_local_file_writer_detects_created_ancestor_sync_failure() {
                 .with_durability(LocalDurabilityRequirement::Required),
         )
         .expect("writer should create the requested parent chain");
-    writer.write_all(b"payload").expect("writer should accept bytes");
-    let _fault = install_test_fault("atomic-writer-created-parent-sync").expect("fault should install");
+    writer
+        .write_all(b"payload")
+        .expect("writer should accept bytes");
+    let _fault =
+        install_test_fault("atomic-writer-created-parent-sync").expect("fault should install");
 
-    let error = writer.commit().expect_err("ancestor sync failure should be reported");
+    let error = writer
+        .commit()
+        .expect_err("ancestor sync failure should be reported");
     assert_eq!(LocalWriteFailureState::Published, error.state());
-    assert_eq!(LocalFileErrorKind::PublicationIncomplete, error.error().kind());
+    assert_eq!(
+        LocalFileErrorKind::PublicationIncomplete,
+        error.error().kind()
+    );
     assert_eq!(
         b"payload",
-        fs::read(&target).expect("published payload should remain").as_slice()
+        fs::read(&target)
+            .expect("published payload should remain")
+            .as_slice()
     );
 }
 
@@ -292,7 +324,9 @@ fn test_local_file_writer_create_new_rejects_existing_entry_before_staging() {
     assert_eq!(LocalFileErrorKind::AlreadyExists, error.kind());
     assert_eq!(
         b"existing",
-        fs::read(&target).expect("existing payload should remain").as_slice(),
+        fs::read(&target)
+            .expect("existing payload should remain")
+            .as_slice(),
     );
     assert_eq!(
         1,
@@ -312,15 +346,23 @@ fn test_local_file_writer_flushes_staging_without_publishing_destination() {
         .expect("Host filesystem should open")
         .open_writer_with_options(&target, &LocalWriteOptions::new(LocalWriteMode::CreateNew))
         .expect("staged writer should open");
-    writer.write_all(b"payload").expect("staged writer should accept bytes");
-    writer.flush().expect("staged writer should flush its staging file");
+    writer
+        .write_all(b"payload")
+        .expect("staged writer should accept bytes");
+    writer
+        .flush()
+        .expect("staged writer should flush its staging file");
 
     assert!(!target.exists());
-    let outcome = writer.commit().expect("staged writer should commit after flush");
+    let outcome = writer
+        .commit()
+        .expect("staged writer should commit after flush");
     assert_eq!(LocalWriterState::Committed, outcome.state());
     assert_eq!(
         b"payload",
-        fs::read(target).expect("published payload should read").as_slice(),
+        fs::read(target)
+            .expect("published payload should read")
+            .as_slice(),
     );
 }
 
@@ -334,7 +376,9 @@ fn test_local_file_writer_commit_conflict_preserves_concurrent_destination() {
         .expect("Host filesystem should open")
         .open_writer_with_options(&target, &LocalWriteOptions::new(LocalWriteMode::CreateNew))
         .expect("create-new writer should open for an absent target");
-    writer.write_all(b"staged").expect("writer should accept staged bytes");
+    writer
+        .write_all(b"staged")
+        .expect("writer should accept staged bytes");
     fs::write(&target, b"concurrent").expect("concurrent destination should be created");
 
     let error = writer
@@ -347,7 +391,9 @@ fn test_local_file_writer_commit_conflict_preserves_concurrent_destination() {
     assert!(retained.is_none());
     assert_eq!(
         b"concurrent",
-        fs::read(&target).expect("concurrent target should remain").as_slice(),
+        fs::read(&target)
+            .expect("concurrent target should remain")
+            .as_slice(),
     );
 }
 
@@ -400,7 +446,9 @@ fn test_local_file_writer_append_honors_durability_policies() {
                 &LocalWriteOptions::new(LocalWriteMode::Append).with_durability(requirement),
             )
             .expect("append writer should open for a regular file");
-        writer.write_all(b"+").expect("append writer should accept one byte");
+        writer
+            .write_all(b"+")
+            .expect("append writer should accept one byte");
         let outcome = writer
             .commit()
             .expect("regular-file durability synchronization should succeed");
@@ -426,7 +474,10 @@ fn test_local_file_writer_returns_retryable_writer_before_publication() {
     fs::write(&target, b"existing").expect("existing payload should be written");
     let mut writer = LocalFileSystem::host()
         .expect("Host filesystem should open")
-        .open_writer_with_options(&target, &LocalWriteOptions::new(LocalWriteMode::CreateOrReplace))
+        .open_writer_with_options(
+            &target,
+            &LocalWriteOptions::new(LocalWriteMode::CreateOrReplace),
+        )
         .expect("replacement writer should open before destination removal");
     writer
         .write_all(b"staged")
@@ -504,7 +555,9 @@ fn test_local_file_writer_rooted_sessions_report_commit_and_abort_outcomes() {
         .write_all(&b"rooted"[written..])
         .expect("remaining bytes should be accepted");
     committed.flush().expect("rooted staging should flush");
-    let committed_outcome = committed.commit().expect("rooted staged writer should commit");
+    let committed_outcome = committed
+        .commit()
+        .expect("rooted staged writer should commit");
 
     assert_eq!(LocalWriterState::Committed, committed_outcome.state());
     assert!(committed_outcome.atomic());
@@ -517,7 +570,10 @@ fn test_local_file_writer_rooted_sessions_report_commit_and_abort_outcomes() {
     );
 
     let mut aborted = rooted
-        .open_writer_with_options(Path::new("aborted"), &LocalWriteOptions::new(LocalWriteMode::CreateNew))
+        .open_writer_with_options(
+            Path::new("aborted"),
+            &LocalWriteOptions::new(LocalWriteMode::CreateNew),
+        )
         .expect("second rooted staged writer should open");
     aborted
         .write_all(b"discarded")
@@ -576,7 +632,9 @@ where
 {
     const TEST_FAULT_ENV: &str = "QUBIT_LOCAL_FILES_TEST_FAULT";
     const TEST_FAULT_CHILD_ENV: &str = "QUBIT_LOCAL_FILES_TEST_FAULT_CHILD";
-    if std::env::var_os(TEST_FAULT_ENV).is_some_and(|selected| selected == std::ffi::OsStr::new(fault)) {
+    if std::env::var_os(TEST_FAULT_ENV)
+        .is_some_and(|selected| selected == std::ffi::OsStr::new(fault))
+    {
         let _fault = install_test_fault(fault).expect("test fault controller should install");
         action();
         return;
@@ -676,7 +734,10 @@ fn test_local_file_writer_reports_injected_replacement_failure() {
         fs::write(&target, b"existing").expect("replacement destination should be written");
         let mut writer = LocalFileSystem::host()
             .expect("Host filesystem should open")
-            .open_writer_with_options(&target, &LocalWriteOptions::new(LocalWriteMode::CreateOrReplace))
+            .open_writer_with_options(
+                &target,
+                &LocalWriteOptions::new(LocalWriteMode::CreateOrReplace),
+            )
             .expect("replacement writer should open");
         writer
             .write_all(b"replacement")
@@ -715,7 +776,9 @@ fn test_local_file_writer_reports_injected_append_commit_flush_failure() {
             .write_all(b"+")
             .expect("append write should succeed before flush fault");
 
-        let error = writer.commit().expect_err("injected append flush must fail commit");
+        let error = writer
+            .commit()
+            .expect_err("injected append flush must fail commit");
         assert_eq!(LocalWriteFailureState::Indeterminate, error.state());
         assert_eq!(LocalFileErrorKind::Indeterminate, error.error().kind());
     });
@@ -735,16 +798,22 @@ fn test_local_file_writer_reports_injected_required_append_sync_failure() {
             .expect("Host filesystem should open")
             .open_writer_with_options(
                 &target,
-                &LocalWriteOptions::new(LocalWriteMode::Append).with_durability(LocalDurabilityRequirement::Required),
+                &LocalWriteOptions::new(LocalWriteMode::Append)
+                    .with_durability(LocalDurabilityRequirement::Required),
             )
             .expect("append writer should open");
         writer
             .write_all(b"+")
             .expect("append write should succeed before sync fault");
 
-        let error = writer.commit().expect_err("injected append sync must fail commit");
+        let error = writer
+            .commit()
+            .expect_err("injected append sync must fail commit");
         assert_eq!(LocalWriteFailureState::Published, error.state());
-        assert_eq!(LocalFileErrorKind::PublicationIncomplete, error.error().kind(),);
+        assert_eq!(
+            LocalFileErrorKind::PublicationIncomplete,
+            error.error().kind(),
+        );
     });
 }
 
@@ -763,7 +832,9 @@ fn test_local_file_writer_reports_injected_append_abort_flush_failure() {
             .open_writer_with_options(&target, &LocalWriteOptions::new(LocalWriteMode::Append))
             .expect("append writer should open");
 
-        let error = writer.abort().expect_err("injected append flush must fail abort");
+        let error = writer
+            .abort()
+            .expect_err("injected append flush must fail abort");
         assert_eq!(LocalFileOperation::Abort, error.operation());
     });
 }

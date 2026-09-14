@@ -42,15 +42,23 @@ impl LocalFileSystem {
             .fail_if_requested(crate::test_support::TestFaultPoint::Metadata)
             .map_err(|error| {
                 with_current_directory(
-                    LocalFileError::from_io(LocalFileOperation::Metadata, Some(path.to_path_buf()), None, error),
+                    LocalFileError::from_io(
+                        LocalFileOperation::Metadata,
+                        Some(path.to_path_buf()),
+                        None,
+                        error,
+                    ),
                     resolver.current_directory(),
                 )
             })?;
         let metadata = match &self.core.namespace {
-            LocalNamespace::Host => {
-                HostLocalFileSystem::metadata_with_policy(resolved.authority_relative(), self.symlink_policy)
+            LocalNamespace::Host => HostLocalFileSystem::metadata_with_policy(
+                resolved.authority_relative(),
+                self.symlink_policy,
+            ),
+            LocalNamespace::Rooted(rooted) => {
+                rooted.metadata(resolved.authority_relative(), self.symlink_policy)
             }
-            LocalNamespace::Rooted(rooted) => rooted.metadata(resolved.authority_relative(), self.symlink_policy),
         }
         .map_err(|error| {
             operation_error(
@@ -62,8 +70,11 @@ impl LocalFileSystem {
             )
         })?;
         if resolved.directory_required() && metadata.kind() != LocalFileKind::Directory {
-            let error = LocalFileError::new(LocalFileErrorKind::NotDirectory, LocalFileOperation::Metadata)
-                .with_path(resolved.namespace_absolute().to_path_buf());
+            let error = LocalFileError::new(
+                LocalFileErrorKind::NotDirectory,
+                LocalFileOperation::Metadata,
+            )
+            .with_path(resolved.namespace_absolute().to_path_buf());
             return Err(with_current_directory(error, resolver.current_directory()));
         }
         Ok(metadata)
@@ -82,7 +93,11 @@ impl LocalFileSystem {
     /// Requires a regular file after applying this instance's symlink policy.
     /// Returns path-resolution, type, or native open errors, including retry
     /// timeout failures. The returned reader owns the opened native handle.
-    pub fn open_reader_with_options(&self, path: &Path, options: &LocalReadOptions) -> LocalResult<LocalFileReader> {
+    pub fn open_reader_with_options(
+        &self,
+        path: &Path,
+        options: &LocalReadOptions,
+    ) -> LocalResult<LocalFileReader> {
         let resolver = self.resolver_for(path, LocalFileOperation::OpenReader)?;
         let resolved = resolve_operation_path(&resolver, path, LocalFileOperation::OpenReader)?;
         self.open_resolved_reader(
@@ -115,7 +130,15 @@ impl LocalFileSystem {
                 rooted.open_reader(resolved.authority_relative(), options, self.symlink_policy)
             }
         }
-        .map_err(|error| operation_error(error, operation, resolved.namespace_absolute(), None, current_directory))
+        .map_err(|error| {
+            operation_error(
+                error,
+                operation,
+                resolved.namespace_absolute(),
+                None,
+                current_directory,
+            )
+        })
     }
 
     /// Reads at most `max_bytes` using the default reader options.
@@ -172,12 +195,18 @@ impl LocalFileSystem {
             };
             #[cfg(not(feature = "test-support"))]
             let read_result = reader.read(&mut buffer[..read_len]);
-            if matches!(&read_result, Err(error) if error.kind() == std::io::ErrorKind::Interrupted) {
+            if matches!(&read_result, Err(error) if error.kind() == std::io::ErrorKind::Interrupted)
+            {
                 continue;
             }
             let count = read_result.map_err(|source| {
                 with_current_directory(
-                    LocalFileError::from_io(LocalFileOperation::Read, Some(error_path.clone()), None, source),
+                    LocalFileError::from_io(
+                        LocalFileOperation::Read,
+                        Some(error_path.clone()),
+                        None,
+                        source,
+                    ),
                     resolver.current_directory(),
                 )
             })?;
@@ -204,7 +233,11 @@ impl LocalFileSystem {
     /// native preparation errors. Requested parent creation may remain after
     /// an error. Commit or abort a staging writer explicitly when its final
     /// publication or cleanup result must be observed.
-    pub fn open_writer_with_options(&self, path: &Path, options: &LocalWriteOptions) -> LocalResult<LocalFileWriter> {
+    pub fn open_writer_with_options(
+        &self,
+        path: &Path,
+        options: &LocalWriteOptions,
+    ) -> LocalResult<LocalFileWriter> {
         crate::local_file_system_validation::validate_write_options(
             options,
             self.capabilities(),
@@ -218,8 +251,16 @@ impl LocalFileSystem {
         })?;
         let resolver = self.resolver_for(path, LocalFileOperation::OpenWriter)?;
         let resolved = resolve_operation_path(&resolver, path, LocalFileOperation::OpenWriter)?;
-        self.reject_root_operand(&resolved, LocalFileOperation::OpenWriter, resolver.current_directory())?;
-        reject_directory_qualified_file(&resolved, LocalFileOperation::OpenWriter, resolver.current_directory())?;
+        self.reject_root_operand(
+            &resolved,
+            LocalFileOperation::OpenWriter,
+            resolver.current_directory(),
+        )?;
+        reject_directory_qualified_file(
+            &resolved,
+            LocalFileOperation::OpenWriter,
+            resolver.current_directory(),
+        )?;
         match &self.core.namespace {
             LocalNamespace::Host => HostLocalFileSystem::open_writer_with_policy(
                 resolved.authority_relative(),

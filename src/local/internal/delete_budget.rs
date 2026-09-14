@@ -103,7 +103,9 @@ impl DeleteBudget {
                     remaining,
                     requested,
                 } = error;
-                resource_error(LocalResourceLimitError::new(resource, limit, remaining, requested))
+                resource_error(LocalResourceLimitError::new(
+                    resource, limit, remaining, requested,
+                ))
             })?;
         }
         Ok(())

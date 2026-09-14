@@ -26,10 +26,25 @@ fn test_rooted_paths_use_virtual_absolute_and_pwd_semantics() {
         "/work/project/data.db",
         "work/project/data.db",
     );
-    assert_resolution(&resolver, Path::new("a/./b"), "/work/project/a/b", "work/project/a/b");
-    assert_resolution(&resolver, Path::new("a/../b"), "/work/project/b", "work/project/b");
+    assert_resolution(
+        &resolver,
+        Path::new("a/./b"),
+        "/work/project/a/b",
+        "work/project/a/b",
+    );
+    assert_resolution(
+        &resolver,
+        Path::new("a/../b"),
+        "/work/project/b",
+        "work/project/b",
+    );
     assert_resolution(&resolver, Path::new("../../tmp"), "/tmp", "tmp");
-    assert_resolution(&resolver, Path::new("/etc/hosts"), "/etc/hosts", "etc/hosts");
+    assert_resolution(
+        &resolver,
+        Path::new("/etc/hosts"),
+        "/etc/hosts",
+        "etc/hosts",
+    );
 }
 
 #[test]
@@ -61,12 +76,32 @@ fn test_rooted_path_resolver_rejects_relative_current_directory() {
 
 #[test]
 fn test_rooted_resolver_preserves_directory_intent() {
-    let resolver =
-        LocalPathResolver::new(LocalFileSystemScope::Rooted, Path::new("/")).expect("rooted resolver should open");
-    assert!(resolver.resolve(Path::new("missing/")).unwrap().directory_required());
-    assert!(resolver.resolve(Path::new("a/.")).unwrap().directory_required());
-    assert!(resolver.resolve(Path::new("a/..")).unwrap().directory_required());
-    assert!(!resolver.resolve(Path::new("missing")).unwrap().directory_required());
+    let resolver = LocalPathResolver::new(LocalFileSystemScope::Rooted, Path::new("/"))
+        .expect("rooted resolver should open");
+    assert!(
+        resolver
+            .resolve(Path::new("missing/"))
+            .unwrap()
+            .directory_required()
+    );
+    assert!(
+        resolver
+            .resolve(Path::new("a/."))
+            .unwrap()
+            .directory_required()
+    );
+    assert!(
+        resolver
+            .resolve(Path::new("a/.."))
+            .unwrap()
+            .directory_required()
+    );
+    assert!(
+        !resolver
+            .resolve(Path::new("missing"))
+            .unwrap()
+            .directory_required()
+    );
 }
 
 #[cfg(unix)]
@@ -76,15 +111,18 @@ fn test_resolver_preserves_non_utf8_normal_components() {
     use std::os::unix::ffi::OsStringExt;
     use std::path::PathBuf;
 
-    let resolver =
-        LocalPathResolver::new(LocalFileSystemScope::Rooted, Path::new("/")).expect("rooted resolver should open");
+    let resolver = LocalPathResolver::new(LocalFileSystemScope::Rooted, Path::new("/"))
+        .expect("rooted resolver should open");
     let component = OsString::from_vec(vec![0x66, 0x80]);
     let input = PathBuf::from(&component);
     let resolved = resolver
         .resolve(&input)
         .expect("non-UTF-8 component should remain valid");
     assert_eq!(resolved.authority_relative(), input);
-    assert_eq!(resolved.namespace_absolute().file_name(), Some(component.as_os_str()));
+    assert_eq!(
+        resolved.namespace_absolute().file_name(),
+        Some(component.as_os_str())
+    );
 }
 
 #[cfg(unix)]
@@ -98,7 +136,12 @@ fn test_host_relative_paths_bind_to_instance_pwd() {
         "/srv/app/etc/hosts",
         "/srv/app/etc/hosts",
     );
-    assert_resolution(&resolver, Path::new("/etc/hosts"), "/etc/hosts", "/etc/hosts");
+    assert_resolution(
+        &resolver,
+        Path::new("/etc/hosts"),
+        "/etc/hosts",
+        "/etc/hosts",
+    );
 }
 
 #[cfg(unix)]
@@ -107,7 +150,8 @@ fn test_host_binding_preserves_raw_spelling_and_non_utf8() {
     use std::ffi::OsStr;
     use std::os::unix::ffi::OsStrExt;
 
-    let resolver = LocalPathResolver::new(LocalFileSystemScope::Host, Path::new("/base")).expect("host resolver");
+    let resolver = LocalPathResolver::new(LocalFileSystemScope::Host, Path::new("/base"))
+        .expect("host resolver");
     let input = Path::new(OsStr::from_bytes(b"raw/./\xff/../leaf/"));
     let bound = resolver.resolve(input).expect("raw relative binding");
     assert_eq!(
@@ -128,7 +172,8 @@ fn test_host_binding_preserves_raw_spelling_and_non_utf8() {
 #[cfg(windows)]
 #[test]
 fn test_host_windows_drive_binding() {
-    let resolver = LocalPathResolver::new(LocalFileSystemScope::Host, Path::new(r"C:\base")).expect("drive resolver");
+    let resolver = LocalPathResolver::new(LocalFileSystemScope::Host, Path::new(r"C:\base"))
+        .expect("drive resolver");
     assert_eq!(
         resolver
             .resolve(Path::new(r"\dir\..\file"))
@@ -138,8 +183,8 @@ fn test_host_windows_drive_binding() {
         Path::new(r"C:\dir\..\file").as_os_str()
     );
     assert!(resolver.resolve(Path::new("C:file")).is_err());
-    let verbatim =
-        LocalPathResolver::new(LocalFileSystemScope::Host, Path::new(r"\\?\C:\base")).expect("verbatim resolver");
+    let verbatim = LocalPathResolver::new(LocalFileSystemScope::Host, Path::new(r"\\?\C:\base"))
+        .expect("verbatim resolver");
     assert_eq!(
         verbatim
             .resolve(Path::new(r"dir\..\file"))

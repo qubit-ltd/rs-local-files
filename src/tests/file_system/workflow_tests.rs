@@ -36,7 +36,9 @@ fn test_rooted_facade_workflow_preserves_namespace_and_lifecycle_contracts() {
     let _ = filesystem
         .create_directory_with_options(
             Path::new("source/nested"),
-            &LocalCreateDirectoryOptions::new().with_recursive().with_exists_ok(),
+            &LocalCreateDirectoryOptions::new()
+                .with_recursive()
+                .with_exists_ok(),
         )
         .expect("source directories should be created");
     let mut writer = filesystem
@@ -45,7 +47,9 @@ fn test_rooted_facade_workflow_preserves_namespace_and_lifecycle_contracts() {
             &LocalWriteOptions::new(LocalWriteMode::CreateNew),
         )
         .expect("rooted writer should open");
-    writer.write_all(b"payload").expect("writer should accept bytes");
+    writer
+        .write_all(b"payload")
+        .expect("writer should accept bytes");
     let _ = writer.commit().expect("writer should publish");
 
     let copy = filesystem
@@ -65,12 +69,19 @@ fn test_rooted_facade_workflow_preserves_namespace_and_lifecycle_contracts() {
     );
 
     let entries = filesystem
-        .list_with_options(Path::new("copied"), &LocalListOptions::new().with_recursive())
+        .list_with_options(
+            Path::new("copied"),
+            &LocalListOptions::new().with_recursive(),
+        )
         .expect("rooted walker should open")
         .collect::<Result<Vec<_>, _>>()
         .expect("rooted walker should finish");
     assert_eq!(2, entries.len());
-    assert!(filesystem.metadata(Path::new("copied/nested/payload")).is_ok());
+    assert!(
+        filesystem
+            .metadata(Path::new("copied/nested/payload"))
+            .is_ok()
+    );
     assert!(filesystem.limits_at(Path::new("copied/missing")).is_ok());
     assert!(filesystem.space_at(Path::new("copied/missing")).is_ok());
 
@@ -114,7 +125,10 @@ fn test_rooted_facade_workflow_preserves_namespace_and_lifecycle_contracts() {
         .expect("temporary directory should persist");
 
     let _ = filesystem
-        .delete_directory_with_options(Path::new("source"), &LocalDeleteOptions::new().with_recursive())
+        .delete_directory_with_options(
+            Path::new("source"),
+            &LocalDeleteOptions::new().with_recursive(),
+        )
         .expect("source tree should be deleted");
 }
 
@@ -142,7 +156,9 @@ fn test_host_facade_workflow_covers_copy_and_temporary_resource_paths() {
     temporary.cleanup().expect("temporary file should clean up");
 
     let mut temporary_directory = filesystem
-        .create_temp_directory_with_options(&LocalTempDirectoryOptions::new().with_parent(directory.path()))
+        .create_temp_directory_with_options(
+            &LocalTempDirectoryOptions::new().with_parent(directory.path()),
+        )
         .expect("host temporary directory should be created");
     temporary_directory
         .cleanup()
@@ -157,9 +173,11 @@ fn test_rooted_facade_resolves_links_and_rejects_virtual_root_escape() {
 
     let directory = tempdir().expect("temporary root should be created");
     fs::create_dir(directory.path().join("real")).expect("real directory should be created");
-    fs::write(directory.path().join("real/payload"), b"payload").expect("payload should be written");
+    fs::write(directory.path().join("real/payload"), b"payload")
+        .expect("payload should be written");
     symlink("real", directory.path().join("link")).expect("link should be created");
-    symlink("../../outside", directory.path().join("escape")).expect("escape link should be created");
+    symlink("../../outside", directory.path().join("escape"))
+        .expect("escape link should be created");
     let filesystem = LocalFileSystem::rooted(directory.path()).expect("root authority should open");
 
     assert_eq!(

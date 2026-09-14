@@ -149,7 +149,11 @@ impl LocalFileNames {
     /// Returns a structured generation error when operating-system randomness
     /// is unavailable, or a validation error when the resulting component
     /// violates this policy.
-    pub fn random_name_with(&self, prefix: Option<&OsStr>, suffix: Option<&OsStr>) -> LocalResult<OsString> {
+    pub fn random_name_with(
+        &self,
+        prefix: Option<&OsStr>,
+        suffix: Option<&OsStr>,
+    ) -> LocalResult<OsString> {
         let mut random = [0_u8; RANDOM_NAME_BYTES];
         getrandom::fill(&mut random).map_err(|source| {
             LocalFileError::from_io(
@@ -160,7 +164,8 @@ impl LocalFileNames {
             )
         })?;
         let random = encode_hex(&random);
-        let mut name = prefix.map_or_else(|| OsString::from("qubit-local-files-"), OsStr::to_os_string);
+        let mut name =
+            prefix.map_or_else(|| OsString::from("qubit-local-files-"), OsStr::to_os_string);
         name.push(random);
         if let Some(suffix) = suffix {
             name.push(suffix);
@@ -206,7 +211,11 @@ fn validate_portable_component(name: &str) -> LocalResult<()> {
         || name == ".."
         || name.ends_with([' ', '.'])
         || name.chars().any(|character| {
-            character.is_control() || matches!(character, '/' | '\\' | '<' | '>' | ':' | '"' | '|' | '?' | '*')
+            character.is_control()
+                || matches!(
+                    character,
+                    '/' | '\\' | '<' | '>' | ':' | '"' | '|' | '?' | '*'
+                )
         })
         || is_windows_reserved_file_name(name)
     {
@@ -232,7 +241,9 @@ fn validate_native_component(name: &OsStr) -> LocalResult<()> {
     }
     let path = std::path::Path::new(name);
     let mut components = path.components();
-    if !matches!(components.next(), Some(std::path::Component::Normal(_))) || components.next().is_some() {
+    if !matches!(components.next(), Some(std::path::Component::Normal(_)))
+        || components.next().is_some()
+    {
         return Err(invalid_name_error());
     }
     Ok(())
@@ -358,7 +369,10 @@ fn is_windows_reserved_file_name(name: &str) -> bool {
 /// Creates a structured invalid filename error.
 #[inline]
 fn invalid_name_error() -> LocalFileError {
-    LocalFileError::new(LocalFileErrorKind::InvalidPath, LocalFileOperation::ValidateName)
+    LocalFileError::new(
+        LocalFileErrorKind::InvalidPath,
+        LocalFileOperation::ValidateName,
+    )
 }
 
 /// Creates a structured component-size limit error.
@@ -375,6 +389,11 @@ fn component_limit_error(requested: usize, limit: usize) -> LocalFileError {
     LocalFileError::from_resource_limit(
         LocalFileOperation::ValidateName,
         None,
-        LocalResourceLimitError::new(LocalResourceKind::PathComponentBytes, limit, limit, requested),
+        LocalResourceLimitError::new(
+            LocalResourceKind::PathComponentBytes,
+            limit,
+            limit,
+            requested,
+        ),
     )
 }

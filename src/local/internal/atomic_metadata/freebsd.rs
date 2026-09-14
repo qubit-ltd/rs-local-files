@@ -93,7 +93,9 @@ fn preserve_namespace(source: &File, staging: &File, namespace: libc::c_int) -> 
     }
     for name in &source_names {
         let source_value = get_attribute(source, namespace, name)?;
-        if get_optional_attribute(staging, namespace, name)?.as_deref() != Some(source_value.as_slice()) {
+        if get_optional_attribute(staging, namespace, name)?.as_deref()
+            != Some(source_value.as_slice())
+        {
             set_attribute(staging, namespace, name, &source_value)?;
         }
     }
@@ -106,7 +108,8 @@ fn list_attributes(file: &File, namespace: libc::c_int) -> Result<BTreeSet<Vec<u
     loop {
         // SAFETY: the descriptor remains live and null output requests only
         // the current byte length of the namespace's name list.
-        let length = unsafe { libc::extattr_list_fd(file.as_raw_fd(), namespace, std::ptr::null_mut(), 0) };
+        let length =
+            unsafe { libc::extattr_list_fd(file.as_raw_fd(), namespace, std::ptr::null_mut(), 0) };
         if length == -1 {
             let error = Error::last_os_error();
             if is_not_supported(&error) {
@@ -120,8 +123,14 @@ fn list_attributes(file: &File, namespace: libc::c_int) -> Result<BTreeSet<Vec<u
         let mut buffer = vec![0_u8; length as usize];
         // SAFETY: `buffer` is writable for its full length and the descriptor
         // remains live for this non-retaining call.
-        let read =
-            unsafe { libc::extattr_list_fd(file.as_raw_fd(), namespace, buffer.as_mut_ptr().cast(), buffer.len()) };
+        let read = unsafe {
+            libc::extattr_list_fd(
+                file.as_raw_fd(),
+                namespace,
+                buffer.as_mut_ptr().cast(),
+                buffer.len(),
+            )
+        };
         if read == -1 {
             let error = Error::last_os_error();
             if error.raw_os_error() == Some(libc::ERANGE) && remaining_attempts > 1 {
@@ -142,9 +151,12 @@ fn parse_attribute_names(buffer: &[u8]) -> Result<BTreeSet<Vec<u8>>> {
     while offset < buffer.len() {
         let length = usize::from(buffer[offset]);
         offset += 1;
-        let end = offset
-            .checked_add(length)
-            .ok_or_else(|| Error::new(ErrorKind::InvalidData, "extended-attribute name length overflow"))?;
+        let end = offset.checked_add(length).ok_or_else(|| {
+            Error::new(
+                ErrorKind::InvalidData,
+                "extended-attribute name length overflow",
+            )
+        })?;
         if length == 0 || end > buffer.len() {
             return Err(Error::new(
                 ErrorKind::InvalidData,
@@ -175,14 +187,25 @@ fn get_attribute(file: &File, namespace: libc::c_int, name: &[u8]) -> Result<Vec
 }
 
 /// Gets one optional extended-attribute value, retrying size races.
-fn get_optional_attribute(file: &File, namespace: libc::c_int, name: &[u8]) -> Result<Option<Vec<u8>>> {
+fn get_optional_attribute(
+    file: &File,
+    namespace: libc::c_int,
+    name: &[u8],
+) -> Result<Option<Vec<u8>>> {
     let name = native_name(name)?;
     let mut remaining_attempts = XATTR_SIZE_RACE_ATTEMPTS;
     loop {
         // SAFETY: the descriptor and name remain live, and null output asks
         // only for the current value length.
-        let length =
-            unsafe { libc::extattr_get_fd(file.as_raw_fd(), namespace, name.as_ptr(), std::ptr::null_mut(), 0) };
+        let length = unsafe {
+            libc::extattr_get_fd(
+                file.as_raw_fd(),
+                namespace,
+                name.as_ptr(),
+                std::ptr::null_mut(),
+                0,
+            )
+        };
         if length == -1 {
             let error = Error::last_os_error();
             if is_missing_attribute(&error) {
@@ -265,7 +288,12 @@ fn remove_attribute(file: &File, namespace: libc::c_int, name: &[u8]) -> Result<
 /// Converts an attribute name to a native C string.
 #[inline]
 fn native_name(name: &[u8]) -> Result<CString> {
-    CString::new(name).map_err(|_| Error::new(ErrorKind::InvalidData, "extended-attribute name contains NUL"))
+    CString::new(name).map_err(|_| {
+        Error::new(
+            ErrorKind::InvalidData,
+            "extended-attribute name contains NUL",
+        )
+    })
 }
 
 /// Reports an absent FreeBSD extended attribute.

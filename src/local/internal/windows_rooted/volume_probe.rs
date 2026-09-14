@@ -48,7 +48,8 @@ pub(crate) fn probe_windows_limits(file: &File) -> Result<LocalFileSystemLimits>
     // SAFETY: the successful native query initialized at least the fixed
     // FILE_FS_ATTRIBUTE_INFORMATION header in aligned storage.
     let attributes = unsafe { &*storage.as_ptr().cast::<FILE_FS_ATTRIBUTE_INFORMATION>() };
-    let component = u64::try_from(attributes.MaximumComponentNameLength).map_or(SizeLimit::Unknown, SizeLimit::Maximum);
+    let component = u64::try_from(attributes.MaximumComponentNameLength)
+        .map_or(SizeLimit::Unknown, SizeLimit::Maximum);
     Ok(LocalFileSystemLimits::new(
         SizeLimit::Unknown,
         component,
@@ -69,8 +70,8 @@ pub(crate) fn probe_windows_space(file: &File) -> Result<LocalFileSystemSpace> {
         size_of::<FILE_FS_FULL_SIZE_INFORMATION>(),
         FileFsFullSizeInformation,
     )?;
-    let bytes_per_allocation_unit =
-        u64::from(information.SectorsPerAllocationUnit).checked_mul(u64::from(information.BytesPerSector));
+    let bytes_per_allocation_unit = u64::from(information.SectorsPerAllocationUnit)
+        .checked_mul(u64::from(information.BytesPerSector));
     let bytes = |units| allocation_bytes(units, bytes_per_allocation_unit);
     Ok(LocalFileSystemSpace::new(
         bytes(information.TotalAllocationUnits),

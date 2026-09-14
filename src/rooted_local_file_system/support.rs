@@ -37,19 +37,25 @@ pub(crate) fn validate_rooted_list_start(
             Err(error) => return Err(rooted_io_error(LocalFileOperation::List, path, error)),
         };
         if metadata.kind() != crate::rooted::EntryKind::Directory {
-            return Err(
-                LocalFileError::new(LocalFileErrorKind::TypeConflict, LocalFileOperation::List)
-                    .with_path(path.to_path_buf()),
-            );
+            return Err(LocalFileError::new(
+                LocalFileErrorKind::TypeConflict,
+                LocalFileOperation::List,
+            )
+            .with_path(path.to_path_buf()));
         }
         return Ok(());
     }
-    let path = resolve_rooted_path_allow_root(root, path, symlink_policy, true, LocalFileOperation::List)?;
+    let path =
+        resolve_rooted_path_allow_root(root, path, symlink_policy, true, LocalFileOperation::List)?;
     let metadata = if path.as_os_str().is_empty() {
         match root.metadata() {
             Ok(metadata) => metadata,
             Err(error) => {
-                return Err(rooted_io_error(LocalFileOperation::List, path.as_path(), error));
+                return Err(rooted_io_error(
+                    LocalFileOperation::List,
+                    path.as_path(),
+                    error,
+                ));
             }
         }
     } else {
@@ -63,10 +69,11 @@ pub(crate) fn validate_rooted_list_start(
         }
     };
     if metadata.kind() != crate::rooted::EntryKind::Directory {
-        return Err(
-            LocalFileError::new(LocalFileErrorKind::TypeConflict, LocalFileOperation::List)
-                .with_path(path.as_path().to_path_buf()),
-        );
+        return Err(LocalFileError::new(
+            LocalFileErrorKind::TypeConflict,
+            LocalFileOperation::List,
+        )
+        .with_path(path.as_path().to_path_buf()));
     }
     Ok(())
 }
@@ -81,10 +88,13 @@ pub(crate) fn resolve_rooted_path(
     follow_final: bool,
     operation: LocalFileOperation,
 ) -> LocalResult<crate::local::LocalRelativePath> {
-    let resolved = resolve_rooted_path_allow_root(root, path, symlink_policy, follow_final, operation)?;
+    let resolved =
+        resolve_rooted_path_allow_root(root, path, symlink_policy, follow_final, operation)?;
     match crate::local::LocalRelativePath::new(&resolved) {
         Ok(path) => Ok(path),
-        Err(error) => Err(rooted_io_error(operation, path, error).with_kind(LocalFileErrorKind::InvalidPath)),
+        Err(error) => {
+            Err(rooted_io_error(operation, path, error).with_kind(LocalFileErrorKind::InvalidPath))
+        }
     }
 }
 
@@ -104,14 +114,23 @@ pub(crate) fn resolve_rooted_path_allow_root(
 ) -> LocalResult<PathBuf> {
     let relative = rooted_path(path, operation)?;
     if symlink_policy == LocalSymlinkPolicy::FollowAcrossScope {
-        return Err(LocalFileError::new(LocalFileErrorKind::InvalidOptions, operation)
-            .with_reason("FollowAcrossScope is incompatible with a Rooted filesystem")
-            .with_path(path.to_path_buf()));
+        return Err(
+            LocalFileError::new(LocalFileErrorKind::InvalidOptions, operation)
+                .with_reason("FollowAcrossScope is incompatible with a Rooted filesystem")
+                .with_path(path.to_path_buf()),
+        );
     }
     if let Some(resolved) = try_resolve_without_symlinks(root, &relative, follow_final) {
         return Ok(resolved);
     }
-    resolve_rooted_symlinks(root, relative, symlink_policy, follow_final, operation, path)
+    resolve_rooted_symlinks(
+        root,
+        relative,
+        symlink_policy,
+        follow_final,
+        operation,
+        path,
+    )
 }
 
 /// Checks a normal rooted path with linear descriptor-relative work.
@@ -162,11 +181,13 @@ fn resolve_rooted_symlinks(
 ) -> LocalResult<PathBuf> {
     use std::collections::HashSet;
     #[cfg(test)]
-    crate::tests::rooted::support::resolution_observation::record_fallback();
+    crate::tests::rooted::support::resolution_observation_tests::record_fallback();
     if symlink_policy == LocalSymlinkPolicy::FollowAcrossScope {
-        return Err(LocalFileError::new(LocalFileErrorKind::InvalidOptions, operation)
-            .with_reason("FollowAcrossScope is incompatible with a Rooted filesystem")
-            .with_path(original.to_path_buf()));
+        return Err(
+            LocalFileError::new(LocalFileErrorKind::InvalidOptions, operation)
+                .with_reason("FollowAcrossScope is incompatible with a Rooted filesystem")
+                .with_path(original.to_path_buf()),
+        );
     }
     let mut pending = steps_from_path(path.as_path(), original, operation)?;
     let mut resolved = Vec::<std::ffi::OsString>::new();
@@ -176,17 +197,22 @@ fn resolve_rooted_symlinks(
             ResolutionStep::ResetRoot => resolved.clear(),
             ResolutionStep::Parent => {
                 if resolved.pop().is_none() {
-                    return Err(LocalFileError::new(LocalFileErrorKind::InvalidPath, operation)
-                        .with_reason("symbolic-link target escaped the Rooted virtual root")
-                        .with_path(original.to_path_buf()));
+                    return Err(
+                        LocalFileError::new(LocalFileErrorKind::InvalidPath, operation)
+                            .with_reason("symbolic-link target escaped the Rooted virtual root")
+                            .with_path(original.to_path_buf()),
+                    );
                 }
             }
             ResolutionStep::EndSymlink(identity) => {
                 active_symlinks.remove(&identity);
             }
             ResolutionStep::Normal(component) => {
-                let candidate =
-                    relative_from_components(resolved.iter().chain(std::iter::once(&component)), original, operation)?;
+                let candidate = relative_from_components(
+                    resolved.iter().chain(std::iter::once(&component)),
+                    original,
+                    operation,
+                )?;
                 let is_final = pending.iter().all(is_end_symlink_step);
                 if is_final && !follow_final {
                     resolved.push(component);
@@ -205,18 +231,22 @@ fn resolve_rooted_symlinks(
                     continue;
                 }
                 if symlink_policy == LocalSymlinkPolicy::Reject {
-                    return Err(LocalFileError::new(LocalFileErrorKind::Unsupported, operation)
-                        .with_reason("symbolic-link traversal is rejected by policy")
-                        .with_path(original.to_path_buf()));
+                    return Err(
+                        LocalFileError::new(LocalFileErrorKind::Unsupported, operation)
+                            .with_reason("symbolic-link traversal is rejected by policy")
+                            .with_path(original.to_path_buf()),
+                    );
                 }
                 let identity = match metadata.native_identity() {
                     Some((device, file)) => SymlinkIdentity::Native(device, file),
                     None => SymlinkIdentity::NamespacePath(candidate.as_path().to_path_buf()),
                 };
                 if !active_symlinks.insert(identity.clone()) {
-                    return Err(LocalFileError::new(LocalFileErrorKind::InvalidPath, operation)
-                        .with_reason("symbolic-link expansion cycle detected")
-                        .with_path(original.to_path_buf()));
+                    return Err(
+                        LocalFileError::new(LocalFileErrorKind::InvalidPath, operation)
+                            .with_reason("symbolic-link expansion cycle detected")
+                            .with_path(original.to_path_buf()),
+                    );
                 }
                 let target = match root.read_link(&candidate) {
                     Ok(target) => target,
@@ -253,9 +283,11 @@ fn steps_from_path(
     for component in path.components() {
         match component {
             Component::Prefix(_) => {
-                return Err(LocalFileError::new(LocalFileErrorKind::InvalidPath, operation)
-                    .with_reason("native prefixes are invalid in Rooted symbolic-link targets")
-                    .with_path(original.to_path_buf()));
+                return Err(
+                    LocalFileError::new(LocalFileErrorKind::InvalidPath, operation)
+                        .with_reason("native prefixes are invalid in Rooted symbolic-link targets")
+                        .with_path(original.to_path_buf()),
+                );
             }
             Component::RootDir => steps.push_back(ResolutionStep::ResetRoot),
             Component::CurDir => {}
@@ -280,12 +312,17 @@ fn relative_from_components<'component>(
     }
     match crate::local::LocalRelativePath::new(&path) {
         Ok(path) => Ok(path),
-        Err(error) => Err(rooted_io_error(operation, original, error).with_kind(LocalFileErrorKind::InvalidPath)),
+        Err(error) => {
+            Err(rooted_io_error(operation, original, error)
+                .with_kind(LocalFileErrorKind::InvalidPath))
+        }
     }
 }
 
 /// Builds a rooted relative path, including the empty virtual-root spelling.
-fn path_from_components<'component>(components: impl Iterator<Item = &'component std::ffi::OsString>) -> PathBuf {
+fn path_from_components<'component>(
+    components: impl Iterator<Item = &'component std::ffi::OsString>,
+) -> PathBuf {
     let mut path = PathBuf::new();
     for component in components {
         path.push(component);
@@ -306,7 +343,8 @@ pub(crate) fn sync_rooted_copy_parent_chain(
         if path.as_os_str().is_empty() {
             break;
         }
-        let path = crate::local::LocalRelativePath::new(&path).expect("parent of a validated rooted path is valid");
+        let path = crate::local::LocalRelativePath::new(&path)
+            .expect("parent of a validated rooted path is valid");
         root.sync_parent(&path)?;
         parent = path.as_path().parent().map(Path::to_path_buf);
     }

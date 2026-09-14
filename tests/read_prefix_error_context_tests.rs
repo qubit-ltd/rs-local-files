@@ -26,7 +26,9 @@ fn test_read_prefix_preserves_outer_operation_and_error_context() {
     for (filesystem, parent) in [(&host, directory.path()), (&rooted, Path::new("/"))] {
         for name in ["missing", "file/", "bad\0name", "."] {
             let path = parent.join(name);
-            let opening = filesystem.open_reader(&path).expect_err("operand should be rejected");
+            let opening = filesystem
+                .open_reader(&path)
+                .expect_err("operand should be rejected");
             for limit in [0, 8] {
                 let reading = filesystem
                     .read_prefix(&path, limit)

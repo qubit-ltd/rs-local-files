@@ -55,7 +55,8 @@ impl RootedLocalFileSystem {
             LocalFileOperation::CreateDirectory,
         )?;
         #[cfg(feature = "test-support")]
-        let metadata = if crate::local::test_support_enabled("rooted-local-create-directory-status") {
+        let metadata = if crate::local::test_support_enabled("rooted-local-create-directory-status")
+        {
             Err(io::Error::from(io::ErrorKind::PermissionDenied))
         } else {
             self.root.symlink_metadata(&relative)
@@ -65,14 +66,19 @@ impl RootedLocalFileSystem {
         let existing_directory = match metadata {
             Ok(metadata) if metadata.kind() == crate::rooted::EntryKind::Directory => Some(true),
             Ok(_) => {
-                return Err(
-                    LocalFileError::new(LocalFileErrorKind::TypeConflict, LocalFileOperation::CreateDirectory)
-                        .with_path(path.to_path_buf()),
-                );
+                return Err(LocalFileError::new(
+                    LocalFileErrorKind::TypeConflict,
+                    LocalFileOperation::CreateDirectory,
+                )
+                .with_path(path.to_path_buf()));
             }
             Err(error) if error.kind() == io::ErrorKind::NotFound => None,
             Err(error) => {
-                return Err(rooted_io_error(LocalFileOperation::CreateDirectory, path, error));
+                return Err(rooted_io_error(
+                    LocalFileOperation::CreateDirectory,
+                    path,
+                    error,
+                ));
             }
         };
         let existed = existing_directory.is_some();
@@ -96,14 +102,17 @@ impl RootedLocalFileSystem {
             Err(error)
                 if options.exists_ok()
                     && error.kind() == io::ErrorKind::AlreadyExists
-                    && self
-                        .root
-                        .symlink_metadata(&relative)
-                        .is_ok_and(|metadata| metadata.kind() == crate::rooted::EntryKind::Directory) =>
+                    && self.root.symlink_metadata(&relative).is_ok_and(|metadata| {
+                        metadata.kind() == crate::rooted::EntryKind::Directory
+                    }) =>
             {
                 Ok(LocalCreateDirectoryOutcome::new(false))
             }
-            Err(error) => Err(rooted_io_error(LocalFileOperation::CreateDirectory, path, error)),
+            Err(error) => Err(rooted_io_error(
+                LocalFileOperation::CreateDirectory,
+                path,
+                error,
+            )),
         }
     }
 }
@@ -123,8 +132,8 @@ fn create_rooted_directory_tree(
     let mut created_target = false;
     for component in path.as_path().components() {
         current.push(component.as_os_str());
-        let current =
-            crate::local::LocalRelativePath::new(&current).expect("prefixes of a validated rooted path remain valid");
+        let current = crate::local::LocalRelativePath::new(&current)
+            .expect("prefixes of a validated rooted path remain valid");
         match root.symlink_metadata(&current) {
             Ok(metadata) if metadata.kind() == crate::rooted::EntryKind::Directory => {
                 if current.as_path() == path.as_path() && !exists_ok {
@@ -147,7 +156,10 @@ fn create_rooted_directory_tree(
             }
             Err(error) if error.kind() == io::ErrorKind::NotFound => {
                 #[cfg(feature = "test-support")]
-                if crate::local::take_test_support_on_nth("rooted-create-directory-component-second", 2) {
+                if crate::local::take_test_support_on_nth(
+                    "rooted-create-directory-component-second",
+                    2,
+                ) {
                     return Err(rooted_create_component_error(
                         &current,
                         created_any,
@@ -160,11 +172,16 @@ fn create_rooted_directory_tree(
                         created_target = current.as_path() == path.as_path();
                     }
                     Err(error) if error.kind() == io::ErrorKind::AlreadyExists => {
-                        let raced_directory = root
-                            .symlink_metadata(&current)
-                            .is_ok_and(|metadata| metadata.kind() == crate::rooted::EntryKind::Directory);
+                        let raced_directory =
+                            root.symlink_metadata(&current).is_ok_and(|metadata| {
+                                metadata.kind() == crate::rooted::EntryKind::Directory
+                            });
                         if !raced_directory || (current.as_path() == path.as_path() && !exists_ok) {
-                            return Err(rooted_create_component_error(&current, created_any, error));
+                            return Err(rooted_create_component_error(
+                                &current,
+                                created_any,
+                                error,
+                            ));
                         }
                     }
                     Err(error) => {
@@ -186,5 +203,10 @@ fn rooted_create_component_error(
     created_any: bool,
     source: io::Error,
 ) -> LocalFileError {
-    directory_mutation_error(LocalFileOperation::CreateDirectory, path.as_path(), created_any, source)
+    directory_mutation_error(
+        LocalFileOperation::CreateDirectory,
+        path.as_path(),
+        created_any,
+        source,
+    )
 }

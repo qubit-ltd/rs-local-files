@@ -42,13 +42,21 @@ pub(crate) fn remove_directory_tree<B: DeleteBackend>(
             DeleteWork::Inspect(path) | DeleteWork::RemoveDirectory(path) => path,
         };
         budget.release_path(backend.path(path));
-        budget.check_deadline().map_err(|error| fail(path, changed, error))?;
+        budget
+            .check_deadline()
+            .map_err(|error| fail(path, changed, error))?;
         match item {
             DeleteWork::Inspect(path) => {
-                let metadata = backend.metadata(&path).map_err(|error| fail(&path, changed, error))?;
+                let metadata = backend
+                    .metadata(&path)
+                    .map_err(|error| fail(&path, changed, error))?;
                 let is_directory = backend.is_directory(&metadata);
                 if depth == 0 && !is_directory {
-                    return Err(fail(&path, changed, io::Error::from(io::ErrorKind::NotADirectory)));
+                    return Err(fail(
+                        &path,
+                        changed,
+                        io::Error::from(io::ErrorKind::NotADirectory),
+                    ));
                 }
                 if is_directory {
                     let mut reader = backend
@@ -60,7 +68,9 @@ pub(crate) fn remove_directory_tree<B: DeleteBackend>(
                     work.push((DeleteWork::RemoveDirectory(path.clone()), depth));
                     let children_start = work.len();
                     loop {
-                        budget.check_deadline().map_err(|error| fail(&path, changed, error))?;
+                        budget
+                            .check_deadline()
+                            .map_err(|error| fail(&path, changed, error))?;
                         let Some(child) = backend
                             .next_child(&path, &mut reader)
                             .map_err(|error| fail(&path, changed, error))?
@@ -75,7 +85,9 @@ pub(crate) fn remove_directory_tree<B: DeleteBackend>(
                     }
                     work[children_start..].reverse();
                 } else {
-                    budget.check_deadline().map_err(|error| fail(&path, changed, error))?;
+                    budget
+                        .check_deadline()
+                        .map_err(|error| fail(&path, changed, error))?;
                     backend
                         .before_remove(&path)
                         .map_err(|error| fail(&path, changed, error))?;

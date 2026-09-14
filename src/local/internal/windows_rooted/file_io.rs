@@ -42,9 +42,18 @@ pub(crate) fn open_rooted_native_writer(
     options: &write::OpenOptions,
 ) -> Result<File> {
     if options.creates_parents()
-        && let Some(parent) = path.as_path().parent().filter(|parent| !parent.as_os_str().is_empty())
+        && let Some(parent) = path
+            .as_path()
+            .parent()
+            .filter(|parent| !parent.as_os_str().is_empty())
     {
-        create_rooted_directory(root, Path::new(""), &LocalRelativePath::new(parent)?, true, true)?;
+        create_rooted_directory(
+            root,
+            Path::new(""),
+            &LocalRelativePath::new(parent)?,
+            true,
+            true,
+        )?;
     }
     let (access, disposition) = match options.mode() {
         write::Mode::CreateOrTruncate => (GENERIC_WRITE, FILE_OVERWRITE_IF),

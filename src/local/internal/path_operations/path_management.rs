@@ -123,7 +123,10 @@ pub(crate) fn ensure_parent_path(path: &Path) -> Result<()> {
 /// Returns an I/O error when a parent component cannot be inspected or
 /// created, or an existing component is not a directory.
 pub(crate) fn ensure_parent_path_with_sync_dirs(path: &Path) -> Result<Vec<PathBuf>> {
-    let Some(parent) = path.parent().filter(|parent| !parent.as_os_str().is_empty()) else {
+    let Some(parent) = path
+        .parent()
+        .filter(|parent| !parent.as_os_str().is_empty())
+    else {
         return Ok(Vec::new());
     };
     let mut missing = Vec::new();
@@ -134,7 +137,10 @@ pub(crate) fn ensure_parent_path_with_sync_dirs(path: &Path) -> Result<Vec<PathB
             Ok(_) => {
                 return Err(Error::new(
                     ErrorKind::AlreadyExists,
-                    format!("parent path component is not a directory: {}", current.display()),
+                    format!(
+                        "parent path component is not a directory: {}",
+                        current.display()
+                    ),
                 ));
             }
             Err(error) if error.kind() == ErrorKind::NotFound => {
@@ -285,8 +291,8 @@ mod tests {
         let parent = directory.path().join("not-a-directory");
         fs::write(&parent, b"payload").expect("conflicting file should be created");
 
-        let error =
-            ensure_parent_path_with_sync_dirs(&parent.join("child")).expect_err("a file parent must be rejected");
+        let error = ensure_parent_path_with_sync_dirs(&parent.join("child"))
+            .expect_err("a file parent must be rejected");
         assert_eq!(ErrorKind::AlreadyExists, error.kind());
         assert!(error.to_string().contains("not a directory"));
     }
@@ -299,7 +305,11 @@ mod tests {
         let error = add_path_context(native, "open", Path::new("private/payload"));
 
         assert_eq!(ErrorKind::PermissionDenied, error.kind());
-        assert!(error.to_string().contains("failed to open 'private/payload'"));
+        assert!(
+            error
+                .to_string()
+                .contains("failed to open 'private/payload'")
+        );
         assert!(error.source().is_some());
     }
 
@@ -311,7 +321,8 @@ mod tests {
         let nested = directory.path().join("nested");
         fs::create_dir(&nested).expect("nested directory should be created");
         fs::write(nested.join("payload"), b"payload").expect("nested file should be created");
-        fs::write(directory.path().join("sibling"), b"sibling").expect("sibling file should be created");
+        fs::write(directory.path().join("sibling"), b"sibling")
+            .expect("sibling file should be created");
 
         clean_dir_path(directory.path()).expect("directory children should be removed");
         assert!(directory.path().is_dir());

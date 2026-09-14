@@ -73,7 +73,10 @@ fn run_in_deleted_current_directory_process(test_name: &str, action: impl FnOnce
         .env(CHILD_ENV, "1")
         .status()
         .expect("deleted-current-directory child should launch");
-    assert!(status.success(), "deleted-current-directory child should pass");
+    assert!(
+        status.success(),
+        "deleted-current-directory child should pass"
+    );
 }
 
 /// Verifies closing file I/O does not release the retained persistence
@@ -98,7 +101,9 @@ fn test_local_temp_file_close_retains_path_and_persist_responsibility() {
             .expect_err("closed file should reject seeks")
             .kind()
     );
-    let outcome = temporary.persist(&target).expect("closed file should persist");
+    let outcome = temporary
+        .persist(&target)
+        .expect("closed file should persist");
     assert_eq!(target, outcome.path());
     assert!(target.exists());
 }
@@ -111,7 +116,11 @@ fn test_local_temp_file_create_parent_creates_missing_host_parent() {
 
     let temporary = LocalFileSystem::host()
         .expect("Host filesystem should open")
-        .create_temp_file_with_options(&LocalTempFileOptions::new().with_parent(&parent).with_create_parent())
+        .create_temp_file_with_options(
+            &LocalTempFileOptions::new()
+                .with_parent(&parent)
+                .with_create_parent(),
+        )
         .expect("explicit parent creation should create the temporary parent");
 
     assert!(parent.is_dir());
@@ -180,7 +189,11 @@ fn test_local_temp_file_keep_conflict_retains_resource_for_retry() {
         .parent()
         .and_then(Path::parent)
         .expect("temporary resource should have a publication parent")
-        .join(source.file_name().expect("temporary resource should have a name"));
+        .join(
+            source
+                .file_name()
+                .expect("temporary resource should have a name"),
+        );
     fs::write(&target, b"existing").expect("generated target should be reservable");
 
     let error = temporary
@@ -197,7 +210,9 @@ fn test_local_temp_file_keep_conflict_retains_resource_for_retry() {
     assert_eq!(Some(target.clone()), resolved);
 
     fs::remove_file(&target).expect("fixture collision should be removable");
-    let outcome = temporary.keep().expect("retained temporary file should retry keep");
+    let outcome = temporary
+        .keep()
+        .expect("retained temporary file should retry keep");
     assert_eq!(&target, outcome.path());
     fs::remove_file(target).expect("published fixture should be removable");
 }
@@ -217,7 +232,8 @@ fn test_local_temp_file_uses_private_cleanup_sandbox() {
         .expect("temporary file should have a sandbox parent")
         .to_path_buf();
 
-    let canonical_parent = fs::canonicalize(parent.path()).expect("temporary parent should canonicalize");
+    let canonical_parent =
+        fs::canonicalize(parent.path()).expect("temporary parent should canonicalize");
     assert!(resource_path.starts_with(&canonical_parent));
     assert_ne!(sandbox, canonical_parent);
     assert!(sandbox.is_dir());
@@ -320,7 +336,8 @@ fn test_local_temp_file_persist_reports_required_rooted_durability() {
     assert!(outcome.durable());
     assert_eq!(
         b"durable payload".as_slice(),
-        fs::read(root.path().join("published/nested/target")).expect("published target should be readable"),
+        fs::read(root.path().join("published/nested/target"))
+            .expect("published target should be readable"),
     );
 }
 
@@ -385,14 +402,17 @@ fn test_local_temp_file_required_source_sync_failure_is_not_published() {
             let target = parent.path().join("persisted");
             let temporary = LocalFileSystem::host()
                 .expect("Host filesystem should open")
-                .create_temp_file_with_options(&LocalTempFileOptions::new().with_parent(parent.path()))
+                .create_temp_file_with_options(
+                    &LocalTempFileOptions::new().with_parent(parent.path()),
+                )
                 .expect("temporary file should be created");
             let source = temporary.path().to_path_buf();
 
             let error = temporary
                 .persist_with(
                     &target,
-                    LocalPersistOptions::new().with_durability(LocalDurabilityRequirement::Required),
+                    LocalPersistOptions::new()
+                        .with_durability(LocalDurabilityRequirement::Required),
                 )
                 .expect_err("injected source sync failure should reject persistence");
 
@@ -428,7 +448,9 @@ fn test_temp_published_failure_is_cleanup_only() {
                     parent.path()
                 };
                 let resource = filesystem
-                    .create_temp_file_with_options(&LocalTempFileOptions::new().with_parent(creation))
+                    .create_temp_file_with_options(
+                        &LocalTempFileOptions::new().with_parent(creation),
+                    )
                     .expect("create source");
                 let source = if rooted {
                     rooted_host_path(parent.path(), resource.path())
@@ -440,7 +462,8 @@ fn test_temp_published_failure_is_cleanup_only() {
                 let error = resource
                     .persist_with(
                         &target,
-                        LocalPersistOptions::new().with_durability(LocalDurabilityRequirement::Required),
+                        LocalPersistOptions::new()
+                            .with_durability(LocalDurabilityRequirement::Required),
                     )
                     .expect_err("inject destination sync failure");
                 assert_eq!(error.stage(), LocalPersistStage::SynchronizeDestination);
@@ -464,8 +487,14 @@ fn test_temp_published_failure_is_cleanup_only() {
                     .expect_err("cleanup-only rejects keep");
                 assert_eq!(error.state(), LocalPersistFailureState::NotPublished);
                 assert_eq!(error.source_state(), LocalTempSourceState::CleanupRequired);
-                error.resource_mut().cleanup().expect("remove residual sandbox");
-                assert_eq!(error.resource().source_state(), LocalTempSourceState::Released);
+                error
+                    .resource_mut()
+                    .cleanup()
+                    .expect("remove residual sandbox");
+                assert_eq!(
+                    error.resource().source_state(),
+                    LocalTempSourceState::Released
+                );
                 assert_eq!(error.source_state(), LocalTempSourceState::CleanupRequired);
                 assert!(!sandbox.exists());
                 drop(error);
@@ -480,7 +509,8 @@ fn test_temp_published_failure_is_cleanup_only() {
 #[cfg(not(windows))]
 #[test]
 fn test_local_temp_file_relative_parent_remains_bound_after_current_directory_change() {
-    const TEST_NAME: &str = "test_local_temp_file_relative_parent_remains_bound_after_current_directory_change";
+    const TEST_NAME: &str =
+        "test_local_temp_file_relative_parent_remains_bound_after_current_directory_change";
     run_in_deleted_current_directory_process(TEST_NAME, || {
         let creation = tempdir().expect("creation directory should be created");
         let later = tempdir().expect("later directory should be created");
@@ -498,9 +528,13 @@ fn test_local_temp_file_relative_parent_remains_bound_after_current_directory_ch
         let path = temporary.path().to_path_buf();
 
         assert!(path.is_absolute());
-        assert!(path.starts_with(fs::canonicalize(creation.path()).expect("creation directory should canonicalize")));
+        assert!(path.starts_with(
+            fs::canonicalize(creation.path()).expect("creation directory should canonicalize")
+        ));
         env::set_current_dir(later.path()).expect("later directory should become current");
-        temporary.cleanup().expect("bound temporary file should clean up");
+        temporary
+            .cleanup()
+            .expect("bound temporary file should clean up");
         assert!(!path.exists());
 
         env::set_current_dir(original).expect("original current directory should be restored");
@@ -545,14 +579,20 @@ fn test_local_temp_file_reads_back_written_content_before_cleanup() {
     let offset = temporary
         .stream_position()
         .expect("temporary file should report its current offset");
-    temporary.flush().expect("temporary file should flush its bytes");
+    temporary
+        .flush()
+        .expect("temporary file should flush its bytes");
 
     assert_eq!(7, offset);
     assert_eq!(
         b"payload",
-        fs::read(&path).expect("temporary path should read").as_slice()
+        fs::read(&path)
+            .expect("temporary path should read")
+            .as_slice()
     );
-    temporary.cleanup().expect("temporary file should be removed");
+    temporary
+        .cleanup()
+        .expect("temporary file should be removed");
     assert!(!path.exists());
 }
 
@@ -578,7 +618,9 @@ fn test_local_temp_file_exposes_mutable_open_file_handle() {
 
     assert_eq!(
         b"payload",
-        fs::read(&path).expect("temporary path should read").as_slice()
+        fs::read(&path)
+            .expect("temporary path should read")
+            .as_slice()
     );
     temporary.cleanup().expect("temporary file should clean up");
 }
@@ -588,7 +630,8 @@ fn test_local_temp_file_exposes_mutable_open_file_handle() {
 fn test_local_temp_file_persist_rejects_non_directory_parent_and_retains_cleanup() {
     let parent = tempdir().expect("temporary parent should be created");
     let blocked_parent = parent.path().join("blocked");
-    fs::write(&blocked_parent, b"not a directory").expect("blocked parent fixture should be written");
+    fs::write(&blocked_parent, b"not a directory")
+        .expect("blocked parent fixture should be written");
     let temporary = LocalFileSystem::host()
         .expect("Host filesystem should open")
         .create_temp_file_with_options(&LocalTempFileOptions::new().with_parent(parent.path()))
@@ -653,27 +696,31 @@ fn test_local_temp_file_persist_reports_indeterminate_install() {
     const TEST_FAULT_ENV: &str = "QUBIT_LOCAL_FILES_TEST_FAULT";
     const TEST_FAULT_CHILD_ENV: &str = "QUBIT_LOCAL_FILES_TEST_FAULT_CHILD";
     if std::env::var_os(TEST_FAULT_CHILD_ENV).is_some()
-        && std::env::var_os(TEST_FAULT_ENV)
-            .is_none_or(|selected| selected != std::ffi::OsStr::new("persist-install-indeterminate"))
+        && std::env::var_os(TEST_FAULT_ENV).is_none_or(|selected| {
+            selected != std::ffi::OsStr::new("persist-install-indeterminate")
+        })
     {
         return;
     }
     if std::env::var_os(TEST_FAULT_ENV)
         .is_none_or(|selected| selected != std::ffi::OsStr::new("persist-install-indeterminate"))
     {
-        let status = std::process::Command::new(std::env::current_exe().expect("test executable should be available"))
-            .arg("--exact")
-            .arg(TEST_NAME)
-            .arg("--nocapture")
-            .env(TEST_FAULT_ENV, "persist-install-indeterminate")
-            .env(TEST_FAULT_CHILD_ENV, "1")
-            .status()
-            .expect("test fault child should launch");
+        let status = std::process::Command::new(
+            std::env::current_exe().expect("test executable should be available"),
+        )
+        .arg("--exact")
+        .arg(TEST_NAME)
+        .arg("--nocapture")
+        .env(TEST_FAULT_ENV, "persist-install-indeterminate")
+        .env(TEST_FAULT_CHILD_ENV, "1")
+        .status()
+        .expect("test fault child should launch");
         assert!(status.success(), "test fault child should pass");
         return;
     }
 
-    let _fault = install_test_fault("persist-install-indeterminate").expect("test fault controller should install");
+    let _fault = install_test_fault("persist-install-indeterminate")
+        .expect("test fault controller should install");
 
     let parent = tempdir().expect("temporary parent should be created");
     let temporary = LocalFileSystem::host()
@@ -773,7 +820,9 @@ fn test_rooted_temp_file_cleanup_removes_entry() {
         .expect("rooted temporary file should be created");
     let path = temporary.path().to_path_buf();
 
-    temporary.cleanup().expect("rooted temporary file should clean up");
+    temporary
+        .cleanup()
+        .expect("rooted temporary file should clean up");
 
     assert!(!rooted_host_path(parent.path(), &path).exists());
 }
@@ -795,7 +844,9 @@ fn test_rooted_temp_file_stream_keep_and_cleanup_rejects_replacement() {
                 .write_vectored(&[IoSlice::new(b"root"), IoSlice::new(b"ed!")])
                 .expect("rooted temporary file should accept vectored bytes"),
         );
-        temporary.flush().expect("rooted temporary file should flush");
+        temporary
+            .flush()
+            .expect("rooted temporary file should flush");
         temporary
             .seek(SeekFrom::Start(0))
             .expect("rooted temporary file should seek");
@@ -850,7 +901,8 @@ fn test_rooted_temp_file_stream_keep_and_cleanup_rejects_replacement() {
 fn test_rooted_temp_file_conflicts_and_invalid_targets_retain_cleanup() {
     let parent = tempdir().expect("root parent should be created");
     let rooted = LocalFileSystem::rooted(parent.path()).expect("root authority should open");
-    fs::write(parent.path().join("occupied"), b"existing").expect("occupied target should be written");
+    fs::write(parent.path().join("occupied"), b"existing")
+        .expect("occupied target should be written");
     let temporary = rooted
         .create_temp_file_with_options(&LocalTempFileOptions::new())
         .expect("rooted temporary file should be created");
@@ -870,7 +922,11 @@ fn test_rooted_temp_file_conflicts_and_invalid_targets_retain_cleanup() {
     assert_eq!(Some(std::path::Path::new("/occupied")), resolved.as_deref());
 
     let error = temporary
-        .persist_at(Path::new("/"), Path::new("../escape"), LocalPersistOptions::new())
+        .persist_at(
+            Path::new("/"),
+            Path::new("../escape"),
+            LocalPersistOptions::new(),
+        )
         .expect_err("rooted persistence must reject lexical escapes");
     let LocalPersistErrorParts {
         error: _io,
@@ -1013,11 +1069,17 @@ fn test_local_temp_file_close_rejects_stream_access_and_allows_cleanup() {
 
     temporary.close();
     assert!(temporary.write_all(b"unavailable").is_err());
-    assert!(temporary.write_vectored(&[IoSlice::new(b"unavailable")]).is_err());
+    assert!(
+        temporary
+            .write_vectored(&[IoSlice::new(b"unavailable")])
+            .is_err()
+    );
     assert!(temporary.flush().is_err());
     assert!(temporary.seek(SeekFrom::Start(0)).is_err());
     assert!(temporary.as_file_mut().is_err());
-    temporary.cleanup().expect("closed temporary file should clean up");
+    temporary
+        .cleanup()
+        .expect("closed temporary file should clean up");
     assert!(!path.exists());
 }
 
@@ -1032,7 +1094,9 @@ fn test_local_temp_file_cleanup_reports_and_retries_sandbox_failure() {
             let parent = tempdir().expect("temporary parent should be created");
             let mut temporary = LocalFileSystem::host()
                 .expect("Host filesystem should open")
-                .create_temp_file_with_options(&LocalTempFileOptions::new().with_parent(parent.path()))
+                .create_temp_file_with_options(
+                    &LocalTempFileOptions::new().with_parent(parent.path()),
+                )
                 .expect("temporary file should be created");
             let resource = temporary.path().to_path_buf();
             let sandbox = resource
@@ -1040,12 +1104,19 @@ fn test_local_temp_file_cleanup_reports_and_retries_sandbox_failure() {
                 .expect("temporary file should have a sandbox")
                 .to_path_buf();
 
-            let error = temporary.cleanup().expect_err("sandbox failure should be reported");
+            let error = temporary
+                .cleanup()
+                .expect_err("sandbox failure should be reported");
             assert_eq!(LocalFileOperation::Cleanup, error.operation());
             assert!(!resource.exists());
             assert!(sandbox.exists());
-            assert_eq!(temporary.source_state(), LocalTempSourceState::CleanupRequired);
-            temporary.cleanup().expect("sandbox cleanup should be retryable");
+            assert_eq!(
+                temporary.source_state(),
+                LocalTempSourceState::CleanupRequired
+            );
+            temporary
+                .cleanup()
+                .expect("sandbox cleanup should be retryable");
             assert!(!sandbox.exists());
             assert_eq!(temporary.source_state(), LocalTempSourceState::Released);
         },
@@ -1063,11 +1134,16 @@ fn test_local_temp_file_keep_reports_residual_sandbox_cleanup() {
             let parent = tempdir().expect("temporary parent should be created");
             let outcome = LocalFileSystem::host()
                 .expect("Host filesystem should open")
-                .create_temp_file_with_options(&LocalTempFileOptions::new().with_parent(parent.path()))
+                .create_temp_file_with_options(
+                    &LocalTempFileOptions::new().with_parent(parent.path()),
+                )
                 .expect("temporary file should be created")
                 .keep()
                 .expect("publication should succeed despite sandbox cleanup failure");
-            assert_eq!(LocalPersistCleanupState::ResidualSandbox, outcome.cleanup_state());
+            assert_eq!(
+                LocalPersistCleanupState::ResidualSandbox,
+                outcome.cleanup_state()
+            );
             assert!(outcome.cleanup_error().is_some());
             let (path, _) = outcome.into_parts();
             fs::remove_file(&path).expect("published file should remain removable");
@@ -1095,7 +1171,10 @@ fn test_local_temp_file_cleanup_rejects_replaced_entry() {
         .cleanup()
         .expect_err("cleanup must reject the replacement entry");
     assert_eq!(LocalFileErrorKind::InvalidPath, error.kind());
-    assert_eq!(fs::read(&path).expect("replacement must remain"), b"restored");
+    assert_eq!(
+        fs::read(&path).expect("replacement must remain"),
+        b"restored"
+    );
 }
 
 /// Verifies silent best-effort drop does not remove a different replacement.
@@ -1143,14 +1222,19 @@ fn test_local_temp_file_persist_rejects_replaced_file() {
         stage: _stage,
         ..
     } = error.into_parts();
-    assert_eq!(LocalTempSourceState::Indeterminate, temporary.source_state());
+    assert_eq!(
+        LocalTempSourceState::Indeterminate,
+        temporary.source_state()
+    );
     assert!(temporary.cleanup().is_err());
     drop(temporary);
 
     assert!(!target.exists());
     assert_eq!(
         b"replacement",
-        fs::read(&path).expect("replacement should remain").as_slice()
+        fs::read(&path)
+            .expect("replacement should remain")
+            .as_slice()
     );
     fs::remove_file(path).expect("replacement fixture should be removed");
     fs::remove_file(original).expect("original fixture should be removed");

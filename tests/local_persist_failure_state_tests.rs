@@ -37,7 +37,10 @@ fn test_temp_source_replacement_host_file() {
     assert_eq!(error.source_state(), LocalTempSourceState::Indeterminate);
     let mut parts = error.into_parts();
     assert_eq!(parts.source_state, LocalTempSourceState::Indeterminate);
-    assert_eq!(parts.resource.source_state(), LocalTempSourceState::Indeterminate);
+    assert_eq!(
+        parts.resource.source_state(),
+        LocalTempSourceState::Indeterminate
+    );
     assert!(parts.resource.cleanup().is_err());
     assert!(parts.resource.as_file_mut().is_err());
     drop(parts);
@@ -66,7 +69,10 @@ fn test_temp_source_replacement_host_directory() {
     assert_eq!(error.source_state(), LocalTempSourceState::Indeterminate);
     let mut parts = error.into_parts();
     assert_eq!(parts.source_state, LocalTempSourceState::Indeterminate);
-    assert_eq!(parts.resource.source_state(), LocalTempSourceState::Indeterminate);
+    assert_eq!(
+        parts.resource.source_state(),
+        LocalTempSourceState::Indeterminate
+    );
     assert!(parts.resource.cleanup().is_err());
 
     drop(parts);
@@ -87,9 +93,12 @@ fn test_temp_source_replacement_rooted_file() {
     let resource = filesystem
         .create_temp_file_with_options(&LocalTempFileOptions::new().with_parent(creation))
         .expect("create source");
-    let source = parent
-        .path()
-        .join(resource.path().strip_prefix(creation).expect("virtual root"));
+    let source = parent.path().join(
+        resource
+            .path()
+            .strip_prefix(creation)
+            .expect("virtual root"),
+    );
     let original = parent.path().join("original");
     let target = creation.join("target");
     fs::rename(&source, &original).expect("retain original entity");
@@ -100,7 +109,10 @@ fn test_temp_source_replacement_rooted_file() {
     assert_eq!(error.source_state(), LocalTempSourceState::Indeterminate);
     let mut parts = error.into_parts();
     assert_eq!(parts.source_state, LocalTempSourceState::Indeterminate);
-    assert_eq!(parts.resource.source_state(), LocalTempSourceState::Indeterminate);
+    assert_eq!(
+        parts.resource.source_state(),
+        LocalTempSourceState::Indeterminate
+    );
     assert!(parts.resource.cleanup().is_err());
     assert!(parts.resource.as_file_mut().is_err());
     drop(parts);
@@ -118,9 +130,12 @@ fn test_temp_source_replacement_rooted_directory() {
     let resource = filesystem
         .create_temp_directory_with_options(&LocalTempDirectoryOptions::new().with_parent(creation))
         .expect("create source");
-    let source = parent
-        .path()
-        .join(resource.path().strip_prefix(creation).expect("virtual root"));
+    let source = parent.path().join(
+        resource
+            .path()
+            .strip_prefix(creation)
+            .expect("virtual root"),
+    );
     let original = parent.path().join("original");
     let target = creation.join("target");
     fs::rename(&source, &original).expect("retain original entity");
@@ -131,7 +146,10 @@ fn test_temp_source_replacement_rooted_directory() {
     assert_eq!(error.source_state(), LocalTempSourceState::Indeterminate);
     let mut parts = error.into_parts();
     assert_eq!(parts.source_state, LocalTempSourceState::Indeterminate);
-    assert_eq!(parts.resource.source_state(), LocalTempSourceState::Indeterminate);
+    assert_eq!(
+        parts.resource.source_state(),
+        LocalTempSourceState::Indeterminate
+    );
     assert!(parts.resource.cleanup().is_err());
 
     drop(parts);
@@ -187,7 +205,9 @@ fn test_temp_retry_after_conflict() {
     for rooted in [false, true] {
         let (parent, filesystem, creation) = state_fixture(rooted);
         let resource = filesystem
-            .create_temp_directory_with_options(&LocalTempDirectoryOptions::new().with_parent(&creation))
+            .create_temp_directory_with_options(
+                &LocalTempDirectoryOptions::new().with_parent(&creation),
+            )
             .expect("create source");
         let conflict = creation.join("conflict");
         fs::create_dir(parent.path().join("conflict")).expect("create conflict");
@@ -215,9 +235,12 @@ fn test_temp_invalid_target_preserves_indeterminate_source() {
             .create_temp_file_with_options(&LocalTempFileOptions::new().with_parent(&creation))
             .expect("create source");
         let source = if rooted {
-            parent
-                .path()
-                .join(resource.path().strip_prefix(&creation).expect("virtual root"))
+            parent.path().join(
+                resource
+                    .path()
+                    .strip_prefix(&creation)
+                    .expect("virtual root"),
+            )
         } else {
             resource.path().to_path_buf()
         };
@@ -248,12 +271,17 @@ fn test_temp_invalid_target_preserves_indeterminate_source() {
     for rooted in [false, true] {
         let (parent, filesystem, creation) = state_fixture(rooted);
         let resource = filesystem
-            .create_temp_directory_with_options(&LocalTempDirectoryOptions::new().with_parent(&creation))
+            .create_temp_directory_with_options(
+                &LocalTempDirectoryOptions::new().with_parent(&creation),
+            )
             .expect("create source");
         let source = if rooted {
-            parent
-                .path()
-                .join(resource.path().strip_prefix(&creation).expect("virtual root"))
+            parent.path().join(
+                resource
+                    .path()
+                    .strip_prefix(&creation)
+                    .expect("virtual root"),
+            )
         } else {
             resource.path().to_path_buf()
         };
@@ -305,17 +333,26 @@ fn test_temp_cleanup_is_idempotent() {
             .resource_mut()
             .cleanup()
             .expect("error resource cleanup stays idempotent");
-        let mut error = error.into_parts().resource.keep().expect_err("reject released keep");
+        let mut error = error
+            .into_parts()
+            .resource
+            .keep()
+            .expect_err("reject released keep");
         assert_eq!(error.state(), LocalPersistFailureState::NotPublished);
         assert_eq!(error.source_state(), LocalTempSourceState::Released);
-        error.resource_mut().cleanup().expect("released keep resource cleanup");
+        error
+            .resource_mut()
+            .cleanup()
+            .expect("released keep resource cleanup");
         drop(error);
         assert_eq!(fs::read_dir(parent.path()).expect("read parent").count(), 0);
     }
     for rooted in [false, true] {
         let (parent, filesystem, creation) = state_fixture(rooted);
         let mut resource = filesystem
-            .create_temp_directory_with_options(&LocalTempDirectoryOptions::new().with_parent(&creation))
+            .create_temp_directory_with_options(
+                &LocalTempDirectoryOptions::new().with_parent(&creation),
+            )
             .expect("create source");
         assert_eq!(resource.source_state(), LocalTempSourceState::Owned);
         resource.cleanup().expect("remove source and sandbox");
@@ -330,10 +367,17 @@ fn test_temp_cleanup_is_idempotent() {
             .resource_mut()
             .cleanup()
             .expect("error resource cleanup stays idempotent");
-        let mut error = error.into_parts().resource.keep().expect_err("reject released keep");
+        let mut error = error
+            .into_parts()
+            .resource
+            .keep()
+            .expect_err("reject released keep");
         assert_eq!(error.state(), LocalPersistFailureState::NotPublished);
         assert_eq!(error.source_state(), LocalTempSourceState::Released);
-        error.resource_mut().cleanup().expect("released keep resource cleanup");
+        error
+            .resource_mut()
+            .cleanup()
+            .expect("released keep resource cleanup");
         drop(error);
         assert_eq!(fs::read_dir(parent.path()).expect("read parent").count(), 0);
     }

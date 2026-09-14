@@ -37,7 +37,9 @@ fn test_read_only_file_permissions_match_across_public_entry_points() {
     let directory = tempdir().expect("create fixture");
     let physical = directory.path().join("payload");
     fs::write(&physical, b"payload").expect("write fixture");
-    let original = fs::metadata(&physical).expect("original metadata").permissions();
+    let original = fs::metadata(&physical)
+        .expect("original metadata")
+        .permissions();
     let mut read_only = original.clone();
     read_only.set_readonly(true);
     fs::set_permissions(&physical, read_only).expect("set read-only permissions");
@@ -46,7 +48,9 @@ fn test_read_only_file_permissions_match_across_public_entry_points() {
     let host = LocalFileSystem::host().expect("Host filesystem");
     let rooted = LocalFileSystem::rooted(directory.path()).expect("Rooted filesystem");
     let host_metadata = host.metadata(&physical).expect("Host metadata");
-    let rooted_metadata = rooted.metadata(Path::new("payload")).expect("Rooted metadata");
+    let rooted_metadata = rooted
+        .metadata(Path::new("payload"))
+        .expect("Rooted metadata");
     let reader_metadata = rooted
         .open_reader(Path::new("payload"))
         .expect("Rooted reader")
@@ -90,7 +94,10 @@ fn test_directory_root_and_listing_preserve_unix_mode_bits() {
     let rooted = LocalFileSystem::rooted(directory.path()).expect("Rooted filesystem");
     let root_native = fs::symlink_metadata(directory.path()).expect("native root");
     let child_native = fs::symlink_metadata(&child).expect("native child");
-    assert_permissions_equal(&rooted.metadata(Path::new("/")).expect("root metadata"), &root_native);
+    assert_permissions_equal(
+        &rooted.metadata(Path::new("/")).expect("root metadata"),
+        &root_native,
+    );
     assert_permissions_equal(
         &rooted.metadata(Path::new("child")).expect("child metadata"),
         &child_native,
@@ -122,7 +129,10 @@ fn test_symlink_metadata_and_reader_observe_their_respective_objects() {
         &fs::symlink_metadata(&link).expect("native link metadata"),
     );
     assert_permissions_equal(
-        rooted.open_reader(Path::new("link")).expect("linked reader").metadata(),
+        rooted
+            .open_reader(Path::new("link"))
+            .expect("linked reader")
+            .metadata(),
         &fs::metadata(&physical).expect("native target metadata"),
     );
 }

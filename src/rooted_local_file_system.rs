@@ -170,7 +170,11 @@ impl RootedLocalFileSystem {
     /// Validates that a normalized backend path resolves to a directory.
     /// Propagates path/policy and native inspection errors; a resolved
     /// non-directory returns a structured type-conflict error.
-    pub(crate) fn validate_directory(&self, path: &Path, symlink_policy: LocalSymlinkPolicy) -> LocalResult<()> {
+    pub(crate) fn validate_directory(
+        &self,
+        path: &Path,
+        symlink_policy: LocalSymlinkPolicy,
+    ) -> LocalResult<()> {
         validate_rooted_list_start(&self.root, path, symlink_policy)
     }
 
@@ -186,7 +190,11 @@ impl RootedLocalFileSystem {
         let file = self.open_nearest_probe(path, symlink_policy)?;
         match crate::capability::probe_limits(&file) {
             Ok(limits) => Ok(limits),
-            Err(error) => Err(rooted_io_error(LocalFileOperation::Capabilities, path, error)),
+            Err(error) => Err(rooted_io_error(
+                LocalFileOperation::Capabilities,
+                path,
+                error,
+            )),
         }
     }
 
@@ -202,27 +210,49 @@ impl RootedLocalFileSystem {
         let file = self.open_nearest_probe(path, symlink_policy)?;
         match crate::capability::probe_space(&file) {
             Ok(space) => Ok(space),
-            Err(error) => Err(rooted_io_error(LocalFileOperation::Capabilities, path, error)),
+            Err(error) => Err(rooted_io_error(
+                LocalFileOperation::Capabilities,
+                path,
+                error,
+            )),
         }
     }
 
     /// Opens the nearest existing entry for a capability probe.
     /// Falls back to parents only for `NotFound`. Returns other path/policy or
     /// native errors, including rejection of non-file/non-directory entries.
-    fn open_nearest_probe(&self, path: &Path, symlink_policy: LocalSymlinkPolicy) -> LocalResult<std::fs::File> {
+    fn open_nearest_probe(
+        &self,
+        path: &Path,
+        symlink_policy: LocalSymlinkPolicy,
+    ) -> LocalResult<std::fs::File> {
         if path.as_os_str().is_empty() {
             return match self.root.open_probe_root() {
                 Ok(file) => Ok(file),
-                Err(error) => Err(rooted_io_error(LocalFileOperation::Capabilities, path, error)),
+                Err(error) => Err(rooted_io_error(
+                    LocalFileOperation::Capabilities,
+                    path,
+                    error,
+                )),
             };
         }
-        let resolved = resolve_rooted_path(&self.root, path, symlink_policy, true, LocalFileOperation::Capabilities)?;
+        let resolved = resolve_rooted_path(
+            &self.root,
+            path,
+            symlink_policy,
+            true,
+            LocalFileOperation::Capabilities,
+        )?;
         let mut candidate = resolved.as_path().to_path_buf();
         loop {
             if candidate.as_os_str().is_empty() {
                 return match self.root.open_probe_root() {
                     Ok(file) => Ok(file),
-                    Err(error) => Err(rooted_io_error(LocalFileOperation::Capabilities, path, error)),
+                    Err(error) => Err(rooted_io_error(
+                        LocalFileOperation::Capabilities,
+                        path,
+                        error,
+                    )),
                 };
             }
             let candidate_path = rooted_path(&candidate, LocalFileOperation::Capabilities)?;
@@ -232,12 +262,20 @@ impl RootedLocalFileSystem {
                     if !candidate.pop() {
                         return match self.root.open_probe_root() {
                             Ok(file) => Ok(file),
-                            Err(error) => Err(rooted_io_error(LocalFileOperation::Capabilities, path, error)),
+                            Err(error) => Err(rooted_io_error(
+                                LocalFileOperation::Capabilities,
+                                path,
+                                error,
+                            )),
                         };
                     }
                 }
                 Err(error) => {
-                    return Err(rooted_io_error(LocalFileOperation::Capabilities, path, error));
+                    return Err(rooted_io_error(
+                        LocalFileOperation::Capabilities,
+                        path,
+                        error,
+                    ));
                 }
             }
         }

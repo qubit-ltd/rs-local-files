@@ -41,7 +41,13 @@ impl RootedSymlinkCreateError {
     }
 
     /// Decomposes this failure into publication state and native errors.
-    pub(crate) fn into_parts(self) -> (RootedSymlinkCreateFailureState, io::Error, Option<io::Error>) {
+    pub(crate) fn into_parts(
+        self,
+    ) -> (
+        RootedSymlinkCreateFailureState,
+        io::Error,
+        Option<io::Error>,
+    ) {
         (self.state, self.primary, self.cleanup)
     }
 }

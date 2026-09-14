@@ -117,9 +117,17 @@ pub(super) fn rename_open_entry(
     overwrite: bool,
 ) -> Result<()> {
     use windows_sys::Win32::Storage::FileSystem::DELETE;
-    let source = open_entry_no_follow(root, source, DELETE | FILE_READ_ATTRIBUTES | SYNCHRONIZE, FILE_OPEN, 0)?;
-    let (destination_parent, destination_name) = open_parent_for_rename(root, destination, overwrite)?;
-    let (mut buffer, information_length) = build_rename_information(destination_name.as_os_str(), overwrite)?;
+    let source = open_entry_no_follow(
+        root,
+        source,
+        DELETE | FILE_READ_ATTRIBUTES | SYNCHRONIZE,
+        FILE_OPEN,
+        0,
+    )?;
+    let (destination_parent, destination_name) =
+        open_parent_for_rename(root, destination, overwrite)?;
+    let (mut buffer, information_length) =
+        build_rename_information(destination_name.as_os_str(), overwrite)?;
     // SAFETY: `Vec<usize>` provides alignment suitable for the native
     // FILE_RENAME_INFORMATION payload.
     let information = unsafe { &mut *buffer.as_mut_ptr().cast::<FILE_RENAME_INFORMATION>() };
@@ -203,8 +211,8 @@ fn build_rename_information(destination: &OsStr, overwrite: bool) -> Result<(Vec
     // and the allocation includes the complete trailing UTF-16 name.
     let information = unsafe { &mut *buffer.as_mut_ptr().cast::<FILE_RENAME_INFORMATION>() };
     information.Anonymous.ReplaceIfExists = overwrite;
-    information.FileNameLength =
-        u32::try_from(file_name_bytes).map_err(|_| Error::new(ErrorKind::InvalidInput, "rename name is too long"))?;
+    information.FileNameLength = u32::try_from(file_name_bytes)
+        .map_err(|_| Error::new(ErrorKind::InvalidInput, "rename name is too long"))?;
     // SAFETY: the allocation reserves enough trailing storage for the full
     // destination name and the source slice remains live for the copy.
     unsafe {
@@ -244,11 +252,14 @@ mod tests {
     /// Verifies rooted rename buffers include all UTF-16 filename bytes.
     #[test]
     fn rename_buffer_reports_complete_payload_length() {
-        let destination = LocalRelativePath::new(Path::new("nested/renamed")).expect("destination should be valid");
+        let destination = LocalRelativePath::new(Path::new("nested/renamed"))
+            .expect("destination should be valid");
         let (buffer, information_length) =
-            build_rename_information(destination.as_path().as_os_str(), true).expect("rename payload should build");
+            build_rename_information(destination.as_path().as_os_str(), true)
+                .expect("rename payload should build");
         let information = unsafe { &*buffer.as_ptr().cast::<FILE_RENAME_INFORMATION>() };
-        let expected_name_bytes = destination.as_path().as_os_str().encode_wide().count() * size_of::<u16>();
+        let expected_name_bytes =
+            destination.as_path().as_os_str().encode_wide().count() * size_of::<u16>();
 
         assert_eq!(
             information_length as usize,

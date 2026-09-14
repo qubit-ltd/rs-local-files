@@ -53,30 +53,49 @@ impl HostLocalFileSystem {
         options: &LocalTempFileOptions,
         symlink_policy: LocalSymlinkPolicy,
     ) -> LocalResult<LocalTempFile> {
-        let parent = options.parent().map_or_else(std::env::temp_dir, Path::to_path_buf);
+        let parent = options
+            .parent()
+            .map_or_else(std::env::temp_dir, Path::to_path_buf);
         let parent = resolve_host_path(&parent, symlink_policy, true)?;
         if options.creates_parent() {
             create_host_temp_parent(&parent, LocalFileOperation::CreateTempFile)?;
         }
         validate_host_temp_parent(&parent, LocalFileOperation::CreateTempFile)?;
         validate_temp_affixes(options.prefix(), options.suffix()).map_err(|error| {
-            LocalFileError::from_io(LocalFileOperation::CreateTempFile, Some(parent.clone()), None, error)
-                .with_kind(LocalFileErrorKind::InvalidOptions)
+            LocalFileError::from_io(
+                LocalFileOperation::CreateTempFile,
+                Some(parent.clone()),
+                None,
+                error,
+            )
+            .with_kind(LocalFileErrorKind::InvalidOptions)
         })?;
-        let sandbox =
-            crate::local::create_temp_dir_in_dir_with_affixes(&parent, Some("sandbox-"), None, options.max_attempts())
-                .map_err(|error| {
-                    let invalid_options = error.kind() == io::ErrorKind::InvalidInput;
-                    let error =
-                        LocalFileError::from_io(LocalFileOperation::CreateTempFile, Some(parent.clone()), None, error);
-                    if invalid_options {
-                        error.with_kind(LocalFileErrorKind::InvalidOptions)
-                    } else {
-                        error
-                    }
-                })?;
-        let created =
-            crate::local::create_temp_file_in_dir(&sandbox, options.prefix(), options.suffix(), options.max_attempts());
+        let sandbox = crate::local::create_temp_dir_in_dir_with_affixes(
+            &parent,
+            Some("sandbox-"),
+            None,
+            options.max_attempts(),
+        )
+        .map_err(|error| {
+            let invalid_options = error.kind() == io::ErrorKind::InvalidInput;
+            let error = LocalFileError::from_io(
+                LocalFileOperation::CreateTempFile,
+                Some(parent.clone()),
+                None,
+                error,
+            );
+            if invalid_options {
+                error.with_kind(LocalFileErrorKind::InvalidOptions)
+            } else {
+                error
+            }
+        })?;
+        let created = crate::local::create_temp_file_in_dir(
+            &sandbox,
+            options.prefix(),
+            options.suffix(),
+            options.max_attempts(),
+        );
         let result = match created {
             Ok((path, file)) => LocalTempFile::host(path, sandbox.clone(), file, symlink_policy),
             Err(error) => {
@@ -86,7 +105,12 @@ impl HostLocalFileSystem {
         };
         result.map_err(|error| {
             let invalid_options = error.kind() == io::ErrorKind::InvalidInput;
-            let error = LocalFileError::from_io(LocalFileOperation::CreateTempFile, Some(parent), None, error);
+            let error = LocalFileError::from_io(
+                LocalFileOperation::CreateTempFile,
+                Some(parent),
+                None,
+                error,
+            );
             if invalid_options {
                 error.with_kind(LocalFileErrorKind::InvalidOptions)
             } else {
@@ -116,7 +140,9 @@ impl HostLocalFileSystem {
         options: &LocalTempDirectoryOptions,
         symlink_policy: LocalSymlinkPolicy,
     ) -> LocalResult<LocalTempDirectory> {
-        let parent = options.parent().map_or_else(std::env::temp_dir, Path::to_path_buf);
+        let parent = options
+            .parent()
+            .map_or_else(std::env::temp_dir, Path::to_path_buf);
         let parent = resolve_host_path(&parent, symlink_policy, true)?;
         if options.creates_parent() {
             create_host_temp_parent(&parent, LocalFileOperation::CreateTempDirectory)?;
@@ -131,22 +157,26 @@ impl HostLocalFileSystem {
             )
             .with_kind(LocalFileErrorKind::InvalidOptions)
         })?;
-        let sandbox =
-            crate::local::create_temp_dir_in_dir_with_affixes(&parent, Some("sandbox-"), None, options.max_attempts())
-                .map_err(|error| {
-                    let invalid_options = error.kind() == io::ErrorKind::InvalidInput;
-                    let error = LocalFileError::from_io(
-                        LocalFileOperation::CreateTempDirectory,
-                        Some(parent.clone()),
-                        None,
-                        error,
-                    );
-                    if invalid_options {
-                        error.with_kind(LocalFileErrorKind::InvalidOptions)
-                    } else {
-                        error
-                    }
-                })?;
+        let sandbox = crate::local::create_temp_dir_in_dir_with_affixes(
+            &parent,
+            Some("sandbox-"),
+            None,
+            options.max_attempts(),
+        )
+        .map_err(|error| {
+            let invalid_options = error.kind() == io::ErrorKind::InvalidInput;
+            let error = LocalFileError::from_io(
+                LocalFileOperation::CreateTempDirectory,
+                Some(parent.clone()),
+                None,
+                error,
+            );
+            if invalid_options {
+                error.with_kind(LocalFileErrorKind::InvalidOptions)
+            } else {
+                error
+            }
+        })?;
         let created = crate::local::create_temp_dir_in_dir_with_affixes(
             &sandbox,
             options.prefix(),
@@ -154,7 +184,12 @@ impl HostLocalFileSystem {
             options.max_attempts(),
         );
         let result = match created {
-            Ok(path) => LocalTempDirectory::host(path, sandbox.clone(), symlink_policy, options.cleanup_limits()),
+            Ok(path) => LocalTempDirectory::host(
+                path,
+                sandbox.clone(),
+                symlink_policy,
+                options.cleanup_limits(),
+            ),
             Err(error) => {
                 let _ = std::fs::remove_dir_all(&sandbox);
                 Err(error)
@@ -162,7 +197,12 @@ impl HostLocalFileSystem {
         };
         result.map_err(|error| {
             let invalid_options = error.kind() == io::ErrorKind::InvalidInput;
-            let error = LocalFileError::from_io(LocalFileOperation::CreateTempDirectory, Some(parent), None, error);
+            let error = LocalFileError::from_io(
+                LocalFileOperation::CreateTempDirectory,
+                Some(parent),
+                None,
+                error,
+            );
             if invalid_options {
                 error.with_kind(LocalFileErrorKind::InvalidOptions)
             } else {
@@ -277,7 +317,10 @@ fn validate_host_temp_parent(parent: &Path, operation: LocalFileOperation) -> Lo
         }
     };
     if !metadata.is_dir() {
-        return Err(LocalFileError::new(LocalFileErrorKind::NotDirectory, operation).with_path(parent.to_path_buf()));
+        return Err(
+            LocalFileError::new(LocalFileErrorKind::NotDirectory, operation)
+                .with_path(parent.to_path_buf()),
+        );
     }
     Ok(())
 }

@@ -55,7 +55,9 @@ impl StagedFile {
     #[must_use]
     #[inline]
     pub(crate) fn path(&self) -> &Path {
-        self.path.as_deref().expect("staging path has already been disarmed")
+        self.path
+            .as_deref()
+            .expect("staging path has already been disarmed")
     }
 
     /// Returns the open staging file.
@@ -68,7 +70,9 @@ impl StagedFile {
     #[must_use]
     #[inline]
     pub(crate) fn file(&self) -> &File {
-        self.file.as_ref().expect("staging file handle has already been closed")
+        self.file
+            .as_ref()
+            .expect("staging file handle has already been closed")
     }
 
     /// Returns the open staging file mutably.
@@ -81,7 +85,9 @@ impl StagedFile {
     #[must_use]
     #[inline]
     pub(crate) fn file_mut(&mut self) -> &mut File {
-        self.file.as_mut().expect("staging file handle has already been closed")
+        self.file
+            .as_mut()
+            .expect("staging file handle has already been closed")
     }
 
     /// Returns whether the staging data handle remains open for recovery.

@@ -42,7 +42,11 @@ fn fixture(rooted: bool) -> (TempDir, LocalTempDirectory, PathBuf) {
         LocalFileSystem::host()
     }
     .expect("filesystem should open");
-    let options = LocalTempDirectoryOptions::new().with_parent(if rooted { Path::new("") } else { parent.path() });
+    let options = LocalTempDirectoryOptions::new().with_parent(if rooted {
+        Path::new("")
+    } else {
+        parent.path()
+    });
     let directory = filesystem
         .create_temp_directory_with_options(&options)
         .expect("temporary directory should exist");
@@ -65,7 +69,8 @@ fn test_temp_cleanup_budget_preserved_for_drop() {
     for rooted in [false, true] {
         let (_parent, mut directory, native) = fixture(rooted);
         for index in 0..32 {
-            fs::write(native.join(format!("sentinel-{index}")), b"data").expect("leaf should exist");
+            fs::write(native.join(format!("sentinel-{index}")), b"data")
+                .expect("leaf should exist");
         }
         directory.set_cleanup_limits(LocalTempCleanupLimits::new().with_max_entries(1));
         let error = directory
@@ -130,7 +135,11 @@ fn test_temp_cleanup_limits_options_and_creation() {
 fn test_temp_cleanup_exact_entry_depth_and_pending_boundaries() {
     for rooted in [false, true] {
         let (_parent, mut directory, native) = fixture(rooted);
-        directory.set_cleanup_limits(LocalTempCleanupLimits::new().with_max_depth(0).with_max_entries(1));
+        directory.set_cleanup_limits(
+            LocalTempCleanupLimits::new()
+                .with_max_depth(0)
+                .with_max_entries(1),
+        );
         directory
             .cleanup()
             .expect("one empty root needs one entry even with sandbox");
@@ -139,16 +148,24 @@ fn test_temp_cleanup_exact_entry_depth_and_pending_boundaries() {
         let (_parent, mut directory, native) = fixture(rooted);
         fs::write(native.join("child"), b"data").expect("leaf");
         let charged = if rooted {
-            directory.path().strip_prefix(MAIN_SEPARATOR_STR).expect("virtual root")
+            directory
+                .path()
+                .strip_prefix(MAIN_SEPARATOR_STR)
+                .expect("virtual root")
         } else {
             directory.path()
         };
         let bytes = charged.as_os_str().len() + charged.join("child").as_os_str().len();
-        directory.set_cleanup_limits(LocalTempCleanupLimits::new().with_max_pending_path_bytes(bytes - 1));
+        directory.set_cleanup_limits(
+            LocalTempCleanupLimits::new().with_max_pending_path_bytes(bytes - 1),
+        );
         let error = directory.cleanup().expect_err("one byte short must fail");
         assert_eq!(
             LocalResourceKind::PendingPathBytes,
-            error.resource_limit_error().expect("budget facts").resource()
+            error
+                .resource_limit_error()
+                .expect("budget facts")
+                .resource()
         );
         assert!(native.join("child").exists());
         directory.set_cleanup_limits(
@@ -198,17 +215,26 @@ fn test_temp_cleanup_partial_failure_retains_owned_source() {
         for name in ["first", "second"] {
             fs::write(native.join(name), b"data").expect("leaf should exist");
         }
-        let fault = install_test_fault("temp-directory-remove-second").expect("fault should install");
+        let fault =
+            install_test_fault("temp-directory-remove-second").expect("fault should install");
         let error = directory
             .cleanup()
             .expect_err("second removal must fail after the first leaf");
         assert_eq!(LocalFileErrorKind::PublicationIncomplete, error.kind());
-        assert_eq!(Some(LocalFileEffectState::PartiallyApplied), error.effect_state());
+        assert_eq!(
+            Some(LocalFileEffectState::PartiallyApplied),
+            error.effect_state()
+        );
         assert_eq!(LocalTempSourceState::Owned, directory.source_state());
-        assert_eq!(1, fs::read_dir(&native).expect("root should remain").count());
+        assert_eq!(
+            1,
+            fs::read_dir(&native).expect("root should remain").count()
+        );
         assert_ne!(Some(directory.path()), error.path());
         drop(fault);
-        directory.cleanup().expect("retry should remove remaining entries");
+        directory
+            .cleanup()
+            .expect("retry should remove remaining entries");
         assert!(!native.exists());
     }
 }
@@ -219,25 +245,39 @@ fn test_temp_cleanup_partial_failure_retains_owned_source() {
 fn test_temp_cleanup_sandbox_failure_retains_cleanup_required() {
     for rooted in [false, true] {
         let (_parent, mut directory, native) = fixture(rooted);
-        let fault = install_test_fault("temp-directory-sandbox-remove").expect("fault should install");
+        let fault =
+            install_test_fault("temp-directory-sandbox-remove").expect("fault should install");
         let error = directory.cleanup().expect_err("sandbox removal must fail");
-        assert_eq!(Some(LocalFileEffectState::PartiallyApplied), error.effect_state());
-        assert_eq!(LocalTempSourceState::CleanupRequired, directory.source_state());
+        assert_eq!(
+            Some(LocalFileEffectState::PartiallyApplied),
+            error.effect_state()
+        );
+        assert_eq!(
+            LocalTempSourceState::CleanupRequired,
+            directory.source_state()
+        );
         assert!(!native.exists());
         drop(fault);
         fs::create_dir(&native).expect("external source replacement");
         fs::write(native.join("replacement"), b"safe").expect("replacement leaf");
-        let retry_error = directory.cleanup().expect_err("replacement makes sandbox nonempty");
+        let retry_error = directory
+            .cleanup()
+            .expect_err("replacement makes sandbox nonempty");
         assert_eq!(ErrorKind::DirectoryNotEmpty, retry_error.io_error_kind());
         assert_eq!(None, retry_error.effect_state());
-        assert_eq!(LocalTempSourceState::CleanupRequired, directory.source_state());
+        assert_eq!(
+            LocalTempSourceState::CleanupRequired,
+            directory.source_state()
+        );
         assert!(native.join("replacement").exists());
         fs::remove_dir_all(&native).expect("test removes its own replacement");
         directory
             .cleanup()
             .expect("sandbox-only retry should succeed without inspecting missing source");
         assert_eq!(LocalTempSourceState::Released, directory.source_state());
-        directory.cleanup().expect("successful cleanup is idempotent");
+        directory
+            .cleanup()
+            .expect("successful cleanup is idempotent");
     }
 }
 
@@ -273,9 +313,11 @@ fn test_temp_identity_missing_source_locks_file_and_directory() {
             .create_temp_file_with_options(&LocalTempFileOptions::new().with_parent(public_parent))
             .expect("temporary file");
         let native = if rooted {
-            parent
-                .path()
-                .join(file.path().strip_prefix(MAIN_SEPARATOR_STR).expect("virtual root"))
+            parent.path().join(
+                file.path()
+                    .strip_prefix(MAIN_SEPARATOR_STR)
+                    .expect("virtual root"),
+            )
         } else {
             file.path().to_path_buf()
         };
@@ -337,9 +379,14 @@ fn test_temp_cleanup_replaced_root_preserves_both_trees() {
         fs::rename(&native, &moved).expect("move original");
         fs::create_dir(&native).expect("replacement directory");
         fs::write(native.join("replacement"), b"replacement").expect("replacement leaf");
-        let error = directory.cleanup().expect_err("identity mismatch must fail");
+        let error = directory
+            .cleanup()
+            .expect_err("identity mismatch must fail");
         assert_eq!(ErrorKind::InvalidInput, error.io_error_kind());
-        assert_eq!(LocalTempSourceState::Indeterminate, directory.source_state());
+        assert_eq!(
+            LocalTempSourceState::Indeterminate,
+            directory.source_state()
+        );
         drop(directory);
         assert!(native.join("replacement").exists());
         assert!(moved.join("original").exists());
@@ -355,7 +402,11 @@ fn test_temp_cleanup_symlink_target_is_untouched() {
         let outside = tempdir().expect("outside parent");
         fs::write(outside.path().join("sentinel"), b"safe").expect("outside leaf");
         symlink(outside.path(), native.join("link")).expect("directory link");
-        directory.set_cleanup_limits(LocalTempCleanupLimits::new().with_max_depth(1).with_max_entries(2));
+        directory.set_cleanup_limits(
+            LocalTempCleanupLimits::new()
+                .with_max_depth(1)
+                .with_max_entries(2),
+        );
         directory.cleanup().expect("link counts as one leaf");
         assert_eq!(
             b"safe",
@@ -381,7 +432,9 @@ fn test_temp_cleanup_concurrent_child_preserves_owned_state() {
         assert_eq!(LocalTempSourceState::Owned, directory.source_state());
         assert!(native.join("late-child").exists());
         drop(fault);
-        directory.cleanup().expect("fresh attempt should remove the new child");
+        directory
+            .cleanup()
+            .expect("fresh attempt should remove the new child");
     }
 }
 
@@ -408,14 +461,22 @@ fn test_temp_cleanup_missing_child_retains_owned_source() {
 fn test_temp_cleanup_deadline_covers_sandbox_and_restarts_on_retry() {
     for rooted in [false, true] {
         let (_parent, mut directory, native) = fixture(rooted);
-        directory.set_cleanup_limits(LocalTempCleanupLimits::new().with_deadline(Duration::from_secs(60)));
+        directory.set_cleanup_limits(
+            LocalTempCleanupLimits::new().with_deadline(Duration::from_secs(60)),
+        );
         let fault = install_test_fault("local-delete-deadline-5").expect("fault");
         let error = directory
             .cleanup()
             .expect_err("deadline expires before sandbox removal");
         assert_eq!(ErrorKind::TimedOut, error.io_error_kind());
-        assert_eq!(Some(LocalFileEffectState::PartiallyApplied), error.effect_state());
-        assert_eq!(LocalTempSourceState::CleanupRequired, directory.source_state());
+        assert_eq!(
+            Some(LocalFileEffectState::PartiallyApplied),
+            error.effect_state()
+        );
+        assert_eq!(
+            LocalTempSourceState::CleanupRequired,
+            directory.source_state()
+        );
         assert!(!native.exists());
         assert!(native.parent().expect("sandbox").exists());
         drop(fault);
@@ -434,7 +495,9 @@ fn test_temp_cleanup_rooted_authority_survives_root_rename() {
     let root = parent.path().join("root");
     fs::create_dir(&root).expect("root directory");
     let filesystem = LocalFileSystem::rooted(&root).expect("opened root");
-    let mut directory = filesystem.create_temp_directory().expect("temporary directory");
+    let mut directory = filesystem
+        .create_temp_directory()
+        .expect("temporary directory");
     let relative = directory
         .path()
         .strip_prefix(MAIN_SEPARATOR_STR)
@@ -463,7 +526,8 @@ fn test_temp_cleanup_observed_file_replaced_by_directory_is_preserved() {
     let (_parent, mut directory, native) = fixture(true);
     let child = native.join("child");
     fs::write(&child, b"original").expect("original leaf");
-    let fault = install_test_fault("temp-observed-file-becomes-directory").expect("scoped type replacement fault");
+    let fault = install_test_fault("temp-observed-file-becomes-directory")
+        .expect("scoped type replacement fault");
     let error = directory
         .cleanup()
         .expect_err("unlink must reject the substituted directory");
@@ -485,14 +549,19 @@ fn test_temp_cleanup_observed_directory_replaced_by_file_is_preserved() {
     let (_parent, mut directory, native) = fixture(true);
     let child = native.join("child");
     fs::create_dir(&child).expect("original child directory");
-    let fault = install_test_fault("temp-observed-directory-becomes-file").expect("scoped type replacement fault");
-    let error = directory.cleanup().expect_err("rmdir must reject the substituted file");
+    let fault = install_test_fault("temp-observed-directory-becomes-file")
+        .expect("scoped type replacement fault");
+    let error = directory
+        .cleanup()
+        .expect_err("rmdir must reject the substituted file");
     assert_eq!(ErrorKind::NotADirectory, error.io_error_kind());
     assert_eq!(Some(directory.path().join("child").as_path()), error.path());
     assert_eq!(LocalTempSourceState::Owned, directory.source_state());
     assert_eq!(
         b"replacement",
-        fs::read(&child).expect("replacement file remains").as_slice()
+        fs::read(&child)
+            .expect("replacement file remains")
+            .as_slice()
     );
     drop(fault);
 }
@@ -508,7 +577,8 @@ fn test_temp_cleanup_observed_directory_replaced_by_symlink_is_preserved() {
     fs::write(outside.join("sentinel"), b"safe").expect("outside sentinel");
     let child = native.join("child");
     fs::create_dir(&child).expect("original child directory");
-    let fault = install_test_fault("temp-observed-directory-becomes-symlink").expect("scoped type replacement fault");
+    let fault = install_test_fault("temp-observed-directory-becomes-symlink")
+        .expect("scoped type replacement fault");
     let error = directory
         .cleanup()
         .expect_err("rmdir must reject the substituted symlink");
@@ -527,7 +597,9 @@ fn test_temp_cleanup_observed_directory_replaced_by_symlink_is_preserved() {
     );
     assert_eq!(
         b"safe",
-        fs::read(outside.join("sentinel")).expect("target remains").as_slice()
+        fs::read(outside.join("sentinel"))
+            .expect("target remains")
+            .as_slice()
     );
     drop(fault);
 }

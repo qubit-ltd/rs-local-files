@@ -123,7 +123,8 @@ mod tests {
         permissions.set_readonly(true);
         file.set_permissions(permissions)
             .expect("fixture should become read-only");
-        let root = crate::local::internal::open_root_directory(directory.path()).expect("root should open");
+        let root = crate::local::internal::open_root_directory(directory.path())
+            .expect("root should open");
         let mut staging = WindowsRootedStagedFile {
             root,
             path: LocalRelativePath::new("published").expect("fixture path should be valid"),
@@ -141,7 +142,8 @@ mod tests {
         let preserved_read_only = permissions.readonly();
         #[allow(clippy::permissions_set_readonly_false)]
         permissions.set_readonly(false);
-        fs::set_permissions(&destination, permissions).expect("fixture should be writable for cleanup");
+        fs::set_permissions(&destination, permissions)
+            .expect("fixture should be writable for cleanup");
 
         assert!(
             preserved_read_only,

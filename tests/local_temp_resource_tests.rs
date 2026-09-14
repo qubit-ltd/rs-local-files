@@ -69,7 +69,9 @@ fn test_local_file_system_create_temp_directory_applies_suffix() {
         .expect("test affixes are UTF-8");
     assert!(name.starts_with("work-"));
     assert!(name.ends_with(".tmp"));
-    directory.cleanup().expect("temporary directory should be removed");
+    directory
+        .cleanup()
+        .expect("temporary directory should be removed");
     assert!(!path.exists());
 }
 
@@ -105,7 +107,9 @@ fn test_local_file_system_create_temp_resources_create_missing_parent() {
     let directory_path = directory.path().to_path_buf();
     assert!(directory_parent.is_dir());
     assert!(directory_path.is_dir());
-    directory.cleanup().expect("temporary directory should be removed");
+    directory
+        .cleanup()
+        .expect("temporary directory should be removed");
 }
 
 /// Verifies parent creation reports a stable type error when the requested
@@ -118,7 +122,11 @@ fn test_local_file_system_create_temp_file_rejects_file_parent() {
     let filesystem = LocalFileSystem::host().expect("Host filesystem should open");
 
     let error = filesystem
-        .create_temp_file_with_options(&LocalTempFileOptions::new().with_parent(&parent).with_create_parent())
+        .create_temp_file_with_options(
+            &LocalTempFileOptions::new()
+                .with_parent(&parent)
+                .with_create_parent(),
+        )
         .expect_err("a file cannot be used as a temporary parent");
 
     assert_eq!(LocalFileErrorKind::NotDirectory, error.kind());
@@ -163,7 +171,9 @@ fn test_local_temp_file_persist_rejects_interior_nul_target() {
 #[test]
 fn test_local_file_system_create_temp_file_rejects_separator_affix() {
     let parent = tempdir().expect("temporary parent should be created");
-    let before = fs::read_dir(parent.path()).expect("parent should be readable").count();
+    let before = fs::read_dir(parent.path())
+        .expect("parent should be readable")
+        .count();
 
     let result = LocalFileSystem::host()
         .expect("Host filesystem should open")

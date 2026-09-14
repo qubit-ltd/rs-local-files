@@ -31,9 +31,15 @@ impl LocalCurrentDirectory {
     ///
     /// `operation` and `path` are attached to failures from querying the
     /// process PWD. A virtual PWD is cloned without native I/O.
-    pub(crate) fn snapshot(&self, operation: LocalFileOperation, path: Option<&Path>) -> LocalResult<PathBuf> {
+    pub(crate) fn snapshot(
+        &self,
+        operation: LocalFileOperation,
+        path: Option<&Path>,
+    ) -> LocalResult<PathBuf> {
         #[cfg(feature = "test-support")]
-        if matches!(self, Self::Process) && crate::local::take_test_support_on_nth("local-pwd-second-snapshot", 2) {
+        if matches!(self, Self::Process)
+            && crate::local::take_test_support_on_nth("local-pwd-second-snapshot", 2)
+        {
             return Err(LocalFileError::from_io(
                 operation,
                 path.map(Path::to_path_buf),

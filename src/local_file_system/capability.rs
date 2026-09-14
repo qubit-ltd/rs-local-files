@@ -47,16 +47,20 @@ impl LocalFileSystem {
         let resolver = self.resolver_for(path, LocalFileOperation::Capabilities)?;
         let resolved = resolve_operation_path(&resolver, path, LocalFileOperation::Capabilities)?;
         match &self.core.namespace {
-            LocalNamespace::Host => host_probe(&resolved, self.symlink_policy, crate::capability::probe_limits)
-                .map_err(|error| {
-                    operation_error(
-                        error,
-                        LocalFileOperation::Capabilities,
-                        resolved.namespace_absolute(),
-                        None,
-                        resolver.current_directory(),
-                    )
-                }),
+            LocalNamespace::Host => host_probe(
+                &resolved,
+                self.symlink_policy,
+                crate::capability::probe_limits,
+            )
+            .map_err(|error| {
+                operation_error(
+                    error,
+                    LocalFileOperation::Capabilities,
+                    resolved.namespace_absolute(),
+                    None,
+                    resolver.current_directory(),
+                )
+            }),
             LocalNamespace::Rooted(rooted) => rooted
                 .limits_at(resolved.authority_relative(), self.symlink_policy)
                 .map_err(|error| {
@@ -79,17 +83,20 @@ impl LocalFileSystem {
         let resolver = self.resolver_for(path, LocalFileOperation::Capabilities)?;
         let resolved = resolve_operation_path(&resolver, path, LocalFileOperation::Capabilities)?;
         match &self.core.namespace {
-            LocalNamespace::Host => {
-                host_probe(&resolved, self.symlink_policy, crate::capability::probe_space).map_err(|error| {
-                    operation_error(
-                        error,
-                        LocalFileOperation::Capabilities,
-                        resolved.namespace_absolute(),
-                        None,
-                        resolver.current_directory(),
-                    )
-                })
-            }
+            LocalNamespace::Host => host_probe(
+                &resolved,
+                self.symlink_policy,
+                crate::capability::probe_space,
+            )
+            .map_err(|error| {
+                operation_error(
+                    error,
+                    LocalFileOperation::Capabilities,
+                    resolved.namespace_absolute(),
+                    None,
+                    resolver.current_directory(),
+                )
+            }),
             LocalNamespace::Rooted(rooted) => rooted
                 .space_at(resolved.authority_relative(), self.symlink_policy)
                 .map_err(|error| {
@@ -114,7 +121,8 @@ fn host_probe<T>(
     symlink_policy: LocalSymlinkPolicy,
     probe: fn(&fs::File) -> std::io::Result<T>,
 ) -> LocalResult<T> {
-    let mut candidate = crate::local::resolve_host_path(path.authority_relative(), symlink_policy, true)?;
+    let mut candidate =
+        crate::local::resolve_host_path(path.authority_relative(), symlink_policy, true)?;
     loop {
         match open_host_probe(&candidate) {
             Ok(file) => match probe(&file) {
