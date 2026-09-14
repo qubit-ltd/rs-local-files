@@ -80,3 +80,6 @@ external/
 *.rar
 *.7z
 /\.worktrees/
+
+# Locally installed pinned rs-infra tools
+.infra/tools/bin/
