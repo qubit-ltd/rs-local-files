@@ -37,6 +37,8 @@ jobs:
           path: project
       - uses: dtolnay/rust-toolchain@6bed0761d98439e5a578e2877258200ad565ba87
         with: {toolchain: stable}
+      - name: Install Rustfmt
+        run: rustup component add rustfmt
       - working-directory: project
         run: ./style-check.sh && ./ci-check.sh
       - if: runner.os == 'Linux'
