@@ -19,6 +19,21 @@ permissions:
   id-token: write
 
 jobs:
+  dependency-policy:
+    name: Dependency policy
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout candidate project
+        uses: actions/checkout@v6
+        with:
+          repository: qubit-ltd/${{ inputs.repository }}
+          ref: ${{ inputs.revision }}
+          path: project
+          persist-credentials: false
+      - uses: qubit-ltd/rs-dependency-policy/.github/actions/check@39895c60b725068b7a72dc14d0ae18ee60c30e46
+        with:
+          project: project
+
   checks:
     name: Repository checks (${{ matrix.os }})
     runs-on: ${{ matrix.os }}
