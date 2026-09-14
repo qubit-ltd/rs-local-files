@@ -6,7 +6,6 @@
 //    Licensed under the Apache License, Version 2.0.
 // =============================================================================
 //! Atomic destination identity normalization for externally timed races.
-// qubit-style: allow source-test-pair
 // Public fixtures cannot deterministically replace a destination between its
 // commit-time handle open and the immediately following identity check.
 

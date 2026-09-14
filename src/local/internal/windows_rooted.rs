@@ -6,7 +6,6 @@
 //    Licensed under the Apache License, Version 2.0.
 // =============================================================================
 //! Windows handle-relative rooted filesystem operations.
-// qubit-style: allow source-test-pair
 // Platform behavior is covered through public rooted integration tests.
 
 mod directory;

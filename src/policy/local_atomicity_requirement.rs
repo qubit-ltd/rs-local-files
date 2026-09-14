@@ -5,7 +5,6 @@
 //
 //    Licensed under the Apache License, Version 2.0.
 // =============================================================================
-// qubit-style: allow source-test-pair
 // Covered through operation policy integration tests.
 
 /// Required atomicity for a namespace publication operation.

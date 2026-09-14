@@ -6,7 +6,6 @@
 //    Licensed under the Apache License, Version 2.0.
 // =============================================================================
 //! Handle-authoritative regular-file opening for recursive copy.
-// qubit-style: allow source-test-pair
 // Private behavior is covered through public integration tests.
 
 use std::fs::File;

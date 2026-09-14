@@ -6,7 +6,6 @@
 //    Licensed under the Apache License, Version 2.0.
 // =============================================================================
 
-// qubit-style: allow source-test-pair
 // Error-source behavior is covered through the public error integration tests.
 use std::error::Error;
 use std::fmt;

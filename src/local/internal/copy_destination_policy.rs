@@ -6,8 +6,6 @@
 //    Licensed under the Apache License, Version 2.0.
 // =============================================================================
 //! Shared copy destination policy decisions.
-// qubit-style: allow source-test-pair
-// qubit-style: allow explicit-imports
 
 use super::CopyDestinationAction;
 use crate::LocalCopyConflictPolicy;

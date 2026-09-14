@@ -6,7 +6,6 @@
 //    Licensed under the Apache License, Version 2.0.
 // =============================================================================
 //! Shared authority marker for unified temporary resources.
-// qubit-style: allow source-test-pair
 // Covered through the public temporary-resource integration tests.
 
 use super::HostTempResourceBackend;

@@ -6,7 +6,6 @@
 //    Licensed under the Apache License, Version 2.0.
 // =============================================================================
 //! Facade for the private recursive directory-copy pipeline.
-// qubit-style: allow source-test-pair
 // Private behavior is covered through public integration tests.
 
 use std::path::Path;

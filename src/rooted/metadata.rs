@@ -6,8 +6,6 @@
 //    Licensed under the Apache License, Version 2.0.
 // =============================================================================
 //! Descriptor-relative entry metadata.
-// qubit-style: allow source-test-pair
-// qubit-style: allow explicit-imports
 
 use std::fs;
 #[cfg(unix)]

@@ -6,7 +6,6 @@
 //    Licensed under the Apache License, Version 2.0.
 // =============================================================================
 //! Atomic existing-file replacement and no-replace installation.
-// qubit-style: allow source-test-pair
 // Private behavior is covered through public integration tests.
 
 #[cfg(unix)]

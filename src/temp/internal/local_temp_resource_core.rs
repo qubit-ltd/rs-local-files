@@ -6,7 +6,6 @@
 //    Licensed under the Apache License, Version 2.0.
 // =============================================================================
 //! Shared temporary-resource authority, state transitions, and diagnostics.
-// qubit-style: allow source-test-pair
 // Covered by public file and directory lifecycle integration tests.
 
 use std::io::Error;

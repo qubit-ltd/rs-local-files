@@ -6,7 +6,6 @@
 //    Licensed under the Apache License, Version 2.0.
 // =============================================================================
 //! Private random file-name generation.
-// qubit-style: allow source-test-pair
 
 use std::io::Error;
 use std::io::Result;

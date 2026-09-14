@@ -6,7 +6,6 @@
 //    Licensed under the Apache License, Version 2.0.
 // =============================================================================
 //! Destination inspection, conflict policy, and type-stable removal.
-// qubit-style: allow source-test-pair
 // Private behavior is covered through public integration tests.
 
 use std::fs;

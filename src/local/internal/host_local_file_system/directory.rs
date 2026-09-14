@@ -7,7 +7,6 @@
 // =============================================================================
 
 // Host directory operations.
-// qubit-style: allow source-test-pair
 
 use super::HostLocalFileSystem;
 use super::LocalCreateDirectoryOptions;

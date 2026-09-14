@@ -6,7 +6,6 @@
 //    Licensed under the Apache License, Version 2.0.
 // =============================================================================
 //! Private platform-specific file moves and parent synchronization.
-// qubit-style: allow source-test-pair
 // Private behavior is covered through public integration tests.
 //!
 //! Windows paths reject interior NULs and retain explicit verbatim spelling.

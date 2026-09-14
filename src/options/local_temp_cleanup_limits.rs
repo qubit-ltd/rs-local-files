@@ -7,7 +7,6 @@
 // =============================================================================
 //! Resource limits retained by a temporary directory for explicit and Drop
 //! cleanup.
-// qubit-style: allow source-test-pair
 // Covered through public temporary cleanup integration tests.
 
 use std::time::Duration;

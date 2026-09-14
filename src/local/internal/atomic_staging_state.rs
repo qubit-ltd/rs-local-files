@@ -6,7 +6,6 @@
 //    Licensed under the Apache License, Version 2.0.
 // =============================================================================
 //! Internal staging-name state after an atomic installation failure.
-// qubit-style: allow source-test-pair
 // Private behavior is covered through public integration tests.
 
 /// Describes whether an atomic staging name remains safe to clean up.

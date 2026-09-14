@@ -6,7 +6,6 @@
 //    Licensed under the Apache License, Version 2.0.
 // =============================================================================
 //! Recursive enumeration and symbolic-link dispatch for directory copies.
-// qubit-style: allow source-test-pair
 // Private behavior is covered through public integration tests.
 
 use std::collections::HashSet;

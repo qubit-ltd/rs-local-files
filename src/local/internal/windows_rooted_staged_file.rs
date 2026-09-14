@@ -6,7 +6,6 @@
 //    Licensed under the Apache License, Version 2.0.
 // =============================================================================
 //! Windows rooted staging-file lifecycle.
-// qubit-style: allow source-test-pair
 // Covered through the public rooted atomic-writer integration tests.
 
 use std::fs::File;

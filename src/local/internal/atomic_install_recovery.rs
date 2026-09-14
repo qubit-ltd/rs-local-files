@@ -6,7 +6,6 @@
 //    Licensed under the Apache License, Version 2.0.
 // =============================================================================
 //! Shared recovery state machine for failed atomic installations.
-// qubit-style: allow source-test-pair
 // Private behavior is covered through public integration tests.
 
 use std::io;

@@ -6,8 +6,6 @@
 //    Licensed under the Apache License, Version 2.0.
 // =============================================================================
 //! Path-aware I/O error context.
-// qubit-style: allow source-test-pair
-// qubit-style: allow explicit-imports
 // Private behavior is covered through public integration tests.
 
 use std::io::Error;

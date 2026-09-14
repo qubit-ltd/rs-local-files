@@ -6,7 +6,6 @@
 //    Licensed under the Apache License, Version 2.0.
 // =============================================================================
 //! Native namespace scope exposed by a local filesystem instance.
-// qubit-style: allow source-test-pair
 
 /// Namespace in which a [`crate::LocalFileSystem`] interprets paths.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]

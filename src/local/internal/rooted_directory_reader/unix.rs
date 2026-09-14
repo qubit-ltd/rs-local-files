@@ -6,7 +6,6 @@
 //    Licensed under the Apache License, Version 2.0.
 // =============================================================================
 //! Unix descriptor-relative lazy directory enumeration.
-// qubit-style: allow source-test-pair
 
 use std::ffi::CString;
 use std::ffi::OsString;

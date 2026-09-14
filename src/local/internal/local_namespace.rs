@@ -6,7 +6,6 @@
 //    Licensed under the Apache License, Version 2.0.
 // =============================================================================
 //! Private namespace carrier for [`LocalFileSystem`](crate::LocalFileSystem).
-// qubit-style: allow source-test-pair
 
 use crate::rooted_local_file_system::RootedLocalFileSystem;
 

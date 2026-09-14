@@ -6,7 +6,6 @@
 //    Licensed under the Apache License, Version 2.0.
 // =============================================================================
 //! Retry control for cryptographically random rooted-staging collisions.
-// qubit-style: allow source-test-pair
 // Finite fixtures cannot deterministically exhaust random filename retries.
 
 use std::ffi::CString;

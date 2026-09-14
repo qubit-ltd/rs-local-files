@@ -6,7 +6,6 @@
 //    Licensed under the Apache License, Version 2.0.
 // =============================================================================
 //! Portable interpretation of native Unix stat mode fields.
-// qubit-style: allow source-test-pair
 // Private behavior is covered through public integration tests.
 
 use std::ops::BitAnd;

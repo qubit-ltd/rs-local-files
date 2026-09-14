@@ -6,7 +6,6 @@
 //    Licensed under the Apache License, Version 2.0.
 // =============================================================================
 //! Strict platform-native metadata preservation for atomic replacement.
-// qubit-style: allow source-test-pair
 // Private behavior is covered through public integration tests.
 
 #[cfg(target_os = "freebsd")]

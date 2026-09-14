@@ -6,7 +6,6 @@
 //    Licensed under the Apache License, Version 2.0.
 // =============================================================================
 //! Rooted copy destination policy and shared failure helpers.
-// qubit-style: allow source-test-pair
 
 use std::io;
 use std::io::ErrorKind;

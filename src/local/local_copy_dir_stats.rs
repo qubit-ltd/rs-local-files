@@ -6,8 +6,6 @@
 //    Licensed under the Apache License, Version 2.0.
 // =============================================================================
 //! Recursive directory copy statistics.
-// qubit-style: allow source-test-pair
-// qubit-style: allow explicit-imports
 
 /// Statistics reported by recursive directory copy operations.
 #[non_exhaustive]

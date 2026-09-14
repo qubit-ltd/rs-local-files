@@ -6,7 +6,6 @@
 //    Licensed under the Apache License, Version 2.0.
 // =============================================================================
 //! Structured facts describing a local resource-limit failure.
-// qubit-style: allow source-test-pair
 // Covered by public error and walker integration tests.
 
 use std::error::Error;
