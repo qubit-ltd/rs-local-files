@@ -6,7 +6,6 @@
 //    Licensed under the Apache License, Version 2.0.
 // =============================================================================
 //! Windows handle-relative lazy directory enumeration.
-// qubit-style: allow source-test-pair
 
 use std::ffi::OsStr;
 use std::ffi::OsString;

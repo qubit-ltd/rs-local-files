@@ -6,7 +6,6 @@
 //    Licensed under the Apache License, Version 2.0.
 // =============================================================================
 //! Temporary-resource persistence options.
-// qubit-style: allow source-test-pair
 
 use crate::policy::LocalDurabilityRequirement;
 

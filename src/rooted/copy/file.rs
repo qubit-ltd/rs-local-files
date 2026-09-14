@@ -6,7 +6,6 @@
 //    Licensed under the Apache License, Version 2.0.
 // =============================================================================
 //! Rooted regular-file copy and staged publication.
-// qubit-style: allow source-test-pair
 
 use std::io;
 use std::io::ErrorKind;

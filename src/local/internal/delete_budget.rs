@@ -6,7 +6,6 @@
 //    Licensed under the Apache License, Version 2.0.
 // =============================================================================
 //! Shared cooperative resource accounting for recursive deletion.
-// qubit-style: allow source-test-pair
 // Covered by public Host and Rooted deletion-budget integration tests.
 
 use std::io;

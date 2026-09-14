@@ -7,7 +7,6 @@
 // =============================================================================
 
 // Host delete operations.
-// qubit-style: allow source-test-pair
 
 use std::time::Instant;
 

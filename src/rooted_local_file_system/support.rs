@@ -7,7 +7,6 @@
 // =============================================================================
 
 // Rooted support operations.
-// qubit-style: allow source-test-pair
 
 use super::LocalFileError;
 use super::LocalFileErrorKind;

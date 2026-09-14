@@ -6,7 +6,6 @@
 //    Licensed under the Apache License, Version 2.0.
 // =============================================================================
 //! Unix descriptor status restoration after nonblocking safety opens.
-// qubit-style: allow source-test-pair
 // Public APIs keep descriptors live, so native `fcntl` failures cannot be
 // induced deterministically by integration fixtures.
 

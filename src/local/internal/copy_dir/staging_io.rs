@@ -6,7 +6,6 @@
 //    Licensed under the Apache License, Version 2.0.
 // =============================================================================
 //! Live-descriptor I/O normalization for recursive-copy staging.
-// qubit-style: allow source-test-pair
 // Public APIs retain both descriptors, so post-open copy and permission
 // failures cannot be induced deterministically by portable fixtures.
 

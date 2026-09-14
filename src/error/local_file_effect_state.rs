@@ -5,7 +5,6 @@
 //
 //    Licensed under the Apache License, Version 2.0.
 // =============================================================================
-// qubit-style: allow source-test-pair
 // Covered by structured error integration tests.
 
 /// Namespace effect state known from a local filesystem error.

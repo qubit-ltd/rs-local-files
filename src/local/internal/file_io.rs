@@ -6,7 +6,6 @@
 //    Licensed under the Apache License, Version 2.0.
 // =============================================================================
 //! Private local file reader and writer construction.
-// qubit-style: allow source-test-pair
 // Public APIs cannot force an opened regular-file metadata failure.
 
 use std::fs;

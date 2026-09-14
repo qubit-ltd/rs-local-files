@@ -1,0 +1,616 @@
+format = 1
+
+[[exceptions]]
+rule = "coverage-cfg"
+path = "src/capability/filesystem_probe.rs"
+reason = "Coverage instrumentation keeps inline behavior measurable without source exemptions."
+
+[[exceptions]]
+rule = "coverage-cfg"
+path = "src/capability/local_file_system_capabilities.rs"
+reason = "Preserve coverage visibility for independently observable capability queries."
+
+[[exceptions]]
+rule = "coverage-cfg"
+path = "src/capability/local_file_system_limits.rs"
+reason = "Coverage instrumentation keeps inline behavior measurable without source exemptions."
+
+[[exceptions]]
+rule = "coverage-cfg"
+path = "src/capability/local_file_system_space.rs"
+reason = "Coverage instrumentation keeps inline behavior measurable without source exemptions."
+
+[[exceptions]]
+rule = "coverage-cfg"
+path = "src/error/local_file_error.rs"
+reason = "Preserve coverage visibility for structured error accessors and conversions."
+
+[[exceptions]]
+rule = "coverage-cfg"
+path = "src/error/local_file_error_source.rs"
+reason = "Coverage instrumentation keeps inline behavior measurable without source exemptions."
+
+[[exceptions]]
+rule = "coverage-cfg"
+path = "src/error/local_resource_limit_error.rs"
+reason = "Coverage instrumentation keeps inline behavior measurable without source exemptions."
+
+[[exceptions]]
+rule = "coverage-cfg"
+path = "src/file_system/local_current_directory.rs"
+reason = "Coverage instrumentation keeps inline behavior measurable without source exemptions."
+
+[[exceptions]]
+rule = "coverage-cfg"
+path = "src/local/internal/atomic_file_install.rs"
+reason = "Coverage instrumentation keeps inline behavior measurable without source exemptions."
+
+[[exceptions]]
+rule = "coverage-cfg"
+path = "src/local/internal/atomic_metadata/freebsd.rs"
+reason = "Coverage instrumentation keeps inline behavior measurable without source exemptions."
+
+[[exceptions]]
+rule = "coverage-cfg"
+path = "src/local/internal/atomic_metadata/linux_android.rs"
+reason = "Coverage instrumentation keeps inline behavior measurable without source exemptions."
+
+[[exceptions]]
+rule = "coverage-cfg"
+path = "src/local/internal/atomic_metadata/preservation.rs"
+reason = "Coverage instrumentation keeps inline behavior measurable without source exemptions."
+
+[[exceptions]]
+rule = "coverage-cfg"
+path = "src/local/internal/atomic_namespace_race.rs"
+reason = "Coverage instrumentation keeps inline behavior measurable without source exemptions."
+
+[[exceptions]]
+rule = "coverage-cfg"
+path = "src/local/internal/copy_budget.rs"
+reason = "Coverage instrumentation keeps inline behavior measurable without source exemptions."
+
+[[exceptions]]
+rule = "coverage-cfg"
+path = "src/local/internal/copy_dir/destination.rs"
+reason = "Coverage instrumentation keeps inline behavior measurable without source exemptions."
+
+[[exceptions]]
+rule = "coverage-cfg"
+path = "src/local/internal/copy_dir/error.rs"
+reason = "Coverage instrumentation keeps inline behavior measurable without source exemptions."
+
+[[exceptions]]
+rule = "coverage-cfg"
+path = "src/local/internal/copy_dir/namespace_race.rs"
+reason = "Coverage instrumentation keeps inline behavior measurable without source exemptions."
+
+[[exceptions]]
+rule = "coverage-cfg"
+path = "src/local/internal/copy_dir/opened_copy_source.rs"
+reason = "Coverage instrumentation keeps inline behavior measurable without source exemptions."
+
+[[exceptions]]
+rule = "coverage-cfg"
+path = "src/local/internal/copy_dir/statistics_overflow.rs"
+reason = "Coverage instrumentation keeps inline behavior measurable without source exemptions."
+
+[[exceptions]]
+rule = "coverage-cfg"
+path = "src/local/internal/copy_policy.rs"
+reason = "Coverage instrumentation keeps inline behavior measurable without source exemptions."
+
+[[exceptions]]
+rule = "coverage-cfg"
+path = "src/local/internal/directory_identity.rs"
+reason = "Coverage instrumentation keeps inline behavior measurable without source exemptions."
+
+[[exceptions]]
+rule = "coverage-cfg"
+path = "src/local/internal/file_io.rs"
+reason = "Coverage instrumentation keeps inline behavior measurable without source exemptions."
+
+[[exceptions]]
+rule = "coverage-cfg"
+path = "src/local/internal/file_move.rs"
+reason = "Coverage instrumentation keeps inline behavior measurable without source exemptions."
+
+[[exceptions]]
+rule = "coverage-cfg"
+path = "src/local/internal/file_name_generation.rs"
+reason = "Coverage instrumentation keeps inline behavior measurable without source exemptions."
+
+[[exceptions]]
+rule = "coverage-cfg"
+path = "src/local/internal/file_name_validation.rs"
+reason = "Coverage instrumentation keeps inline behavior measurable without source exemptions."
+
+[[exceptions]]
+rule = "coverage-cfg"
+path = "src/local/internal/host_local_file_system.rs"
+reason = "Coverage instrumentation keeps inline behavior measurable without source exemptions."
+
+[[exceptions]]
+rule = "coverage-cfg"
+path = "src/local/internal/host_local_file_system/copy.rs"
+reason = "Coverage instrumentation keeps inline behavior measurable without source exemptions."
+
+[[exceptions]]
+rule = "coverage-cfg"
+path = "src/local/internal/host_local_file_system/rename.rs"
+reason = "Coverage instrumentation keeps inline behavior measurable without source exemptions."
+
+[[exceptions]]
+rule = "coverage-cfg"
+path = "src/local/internal/host_local_file_system/temp.rs"
+reason = "Coverage instrumentation keeps inline behavior measurable without source exemptions."
+
+[[exceptions]]
+rule = "coverage-cfg"
+path = "src/local/internal/opened_atomic_destination.rs"
+reason = "Coverage instrumentation keeps inline behavior measurable without source exemptions."
+
+[[exceptions]]
+rule = "coverage-cfg"
+path = "src/local/internal/path_io_error.rs"
+reason = "Coverage instrumentation keeps inline behavior measurable without source exemptions."
+
+[[exceptions]]
+rule = "coverage-cfg"
+path = "src/local/internal/publication_state/copy_failure.rs"
+reason = "Coverage instrumentation keeps inline behavior measurable without source exemptions."
+
+[[exceptions]]
+rule = "coverage-cfg"
+path = "src/local/internal/publication_state/durability.rs"
+reason = "Coverage instrumentation keeps inline behavior measurable without source exemptions."
+
+[[exceptions]]
+rule = "coverage-cfg"
+path = "src/local/internal/publication_state/rename_failure.rs"
+reason = "Coverage instrumentation keeps inline behavior measurable without source exemptions."
+
+[[exceptions]]
+rule = "coverage-cfg"
+path = "src/local/internal/rooted_atomic_namespace_race.rs"
+reason = "Coverage instrumentation keeps inline behavior measurable without source exemptions."
+
+[[exceptions]]
+rule = "coverage-cfg"
+path = "src/local/internal/rooted_file_io.rs"
+reason = "Coverage instrumentation keeps inline behavior measurable without source exemptions."
+
+[[exceptions]]
+rule = "coverage-cfg"
+path = "src/local/internal/rooted_io_result.rs"
+reason = "Coverage instrumentation keeps inline behavior measurable without source exemptions."
+
+[[exceptions]]
+rule = "coverage-cfg"
+path = "src/local/internal/rooted_namespace_io.rs"
+reason = "Coverage instrumentation keeps inline behavior measurable without source exemptions."
+
+[[exceptions]]
+rule = "coverage-cfg"
+path = "src/local/internal/rooted_parent.rs"
+reason = "Coverage instrumentation keeps inline behavior measurable without source exemptions."
+
+[[exceptions]]
+rule = "coverage-cfg"
+path = "src/local/internal/rooted_parent_mode.rs"
+reason = "Coverage instrumentation keeps inline behavior measurable without source exemptions."
+
+[[exceptions]]
+rule = "coverage-cfg"
+path = "src/local/internal/rooted_staged_file.rs"
+reason = "Coverage instrumentation keeps inline behavior measurable without source exemptions."
+
+[[exceptions]]
+rule = "coverage-cfg"
+path = "src/local/internal/staged_file.rs"
+reason = "Coverage instrumentation keeps inline behavior measurable without source exemptions."
+
+[[exceptions]]
+rule = "coverage-cfg"
+path = "src/local/internal/temp_entry.rs"
+reason = "Coverage instrumentation keeps inline behavior measurable without source exemptions."
+
+[[exceptions]]
+rule = "coverage-cfg"
+path = "src/local/internal/test_support.rs"
+reason = "Coverage instrumentation keeps inline behavior measurable without source exemptions."
+
+[[exceptions]]
+rule = "coverage-cfg"
+path = "src/local/internal/unix_nonblocking.rs"
+reason = "Coverage instrumentation keeps inline behavior measurable without source exemptions."
+
+[[exceptions]]
+rule = "coverage-cfg"
+path = "src/local/internal/unix_stat.rs"
+reason = "Coverage instrumentation keeps inline behavior measurable without source exemptions."
+
+[[exceptions]]
+rule = "coverage-cfg"
+path = "src/local/internal/windows_rooted/directory.rs"
+reason = "Coverage instrumentation keeps inline behavior measurable without source exemptions."
+
+[[exceptions]]
+rule = "coverage-cfg"
+path = "src/local/internal/windows_rooted/handle.rs"
+reason = "Coverage instrumentation keeps inline behavior measurable without source exemptions."
+
+[[exceptions]]
+rule = "coverage-cfg"
+path = "src/local/internal/windows_rooted/namespace_mutation.rs"
+reason = "Coverage instrumentation keeps inline behavior measurable without source exemptions."
+
+[[exceptions]]
+rule = "coverage-cfg"
+path = "src/local/internal/windows_rooted/native.rs"
+reason = "Coverage instrumentation keeps inline behavior measurable without source exemptions."
+
+[[exceptions]]
+rule = "coverage-cfg"
+path = "src/local/internal/windows_rooted_staged_file.rs"
+reason = "Coverage instrumentation keeps inline behavior measurable without source exemptions."
+
+[[exceptions]]
+rule = "coverage-cfg"
+path = "src/local/local_atomic_commit_error.rs"
+reason = "Coverage instrumentation keeps inline behavior measurable without source exemptions."
+
+[[exceptions]]
+rule = "coverage-cfg"
+path = "src/local/local_atomic_write_error.rs"
+reason = "Coverage instrumentation keeps inline behavior measurable without source exemptions."
+
+[[exceptions]]
+rule = "coverage-cfg"
+path = "src/local/local_atomic_write_options.rs"
+reason = "Preserve coverage visibility for atomic-write option accessors."
+
+[[exceptions]]
+rule = "coverage-cfg"
+path = "src/local/local_atomic_writer.rs"
+reason = "Coverage instrumentation keeps inline behavior measurable without source exemptions."
+
+[[exceptions]]
+rule = "coverage-cfg"
+path = "src/local/local_copy_dir_error.rs"
+reason = "Coverage instrumentation keeps inline behavior measurable without source exemptions."
+
+[[exceptions]]
+rule = "coverage-cfg"
+path = "src/local/local_copy_dir_options.rs"
+reason = "Coverage instrumentation keeps inline behavior measurable without source exemptions."
+
+[[exceptions]]
+rule = "coverage-cfg"
+path = "src/local/local_copy_dir_stats.rs"
+reason = "Coverage instrumentation keeps inline behavior measurable without source exemptions."
+
+[[exceptions]]
+rule = "coverage-cfg"
+path = "src/local/local_persist_error.rs"
+reason = "Coverage instrumentation keeps inline behavior measurable without source exemptions."
+
+[[exceptions]]
+rule = "coverage-cfg"
+path = "src/local/local_relative_path.rs"
+reason = "Coverage instrumentation keeps inline behavior measurable without source exemptions."
+
+[[exceptions]]
+rule = "coverage-cfg"
+path = "src/local/local_root_atomic_writer.rs"
+reason = "Coverage instrumentation keeps inline behavior measurable without source exemptions."
+
+[[exceptions]]
+rule = "coverage-cfg"
+path = "src/local/local_root_atomic_writer_support.rs"
+reason = "Coverage instrumentation keeps inline behavior measurable without source exemptions."
+
+[[exceptions]]
+rule = "coverage-cfg"
+path = "src/local_file_metadata.rs"
+reason = "Coverage instrumentation keeps inline behavior measurable without source exemptions."
+
+[[exceptions]]
+rule = "coverage-cfg"
+path = "src/local_file_permissions.rs"
+reason = "Coverage instrumentation keeps inline behavior measurable without source exemptions."
+
+[[exceptions]]
+rule = "coverage-cfg"
+path = "src/local_file_reader.rs"
+reason = "Coverage instrumentation keeps inline behavior measurable without source exemptions."
+
+[[exceptions]]
+rule = "coverage-cfg"
+path = "src/local_file_system/capability.rs"
+reason = "Coverage instrumentation keeps inline behavior measurable without source exemptions."
+
+[[exceptions]]
+rule = "coverage-cfg"
+path = "src/local_file_system/configuration.rs"
+reason = "Preserve coverage visibility for public instance configuration accessors."
+
+[[exceptions]]
+rule = "coverage-cfg"
+path = "src/options/local_copy_options.rs"
+reason = "Coverage instrumentation keeps inline behavior measurable without source exemptions."
+
+[[exceptions]]
+rule = "coverage-cfg"
+path = "src/options/local_create_directory_options.rs"
+reason = "Coverage instrumentation keeps inline behavior measurable without source exemptions."
+
+[[exceptions]]
+rule = "coverage-cfg"
+path = "src/options/local_delete_options.rs"
+reason = "Coverage instrumentation keeps inline behavior measurable without source exemptions."
+
+[[exceptions]]
+rule = "coverage-cfg"
+path = "src/options/local_list_options.rs"
+reason = "Coverage instrumentation keeps inline behavior measurable without source exemptions."
+
+[[exceptions]]
+rule = "coverage-cfg"
+path = "src/options/local_read_options.rs"
+reason = "Coverage instrumentation keeps inline behavior measurable without source exemptions."
+
+[[exceptions]]
+rule = "coverage-cfg"
+path = "src/options/local_rename_options.rs"
+reason = "Coverage instrumentation keeps inline behavior measurable without source exemptions."
+
+[[exceptions]]
+rule = "coverage-cfg"
+path = "src/options/local_temp_directory_options.rs"
+reason = "Coverage instrumentation keeps inline behavior measurable without source exemptions."
+
+[[exceptions]]
+rule = "coverage-cfg"
+path = "src/options/local_temp_file_options.rs"
+reason = "Coverage instrumentation keeps inline behavior measurable without source exemptions."
+
+[[exceptions]]
+rule = "coverage-cfg"
+path = "src/options/local_write_options.rs"
+reason = "Coverage instrumentation keeps inline behavior measurable without source exemptions."
+
+[[exceptions]]
+rule = "coverage-cfg"
+path = "src/outcome/local_copy_failure.rs"
+reason = "Preserve coverage visibility for typed copy-failure recovery accessors."
+
+[[exceptions]]
+rule = "coverage-cfg"
+path = "src/outcome/local_copy_outcome.rs"
+reason = "Preserve coverage visibility for copy outcome accessors."
+
+[[exceptions]]
+rule = "coverage-cfg"
+path = "src/outcome/local_copy_stats.rs"
+reason = "Coverage instrumentation keeps inline behavior measurable without source exemptions."
+
+[[exceptions]]
+rule = "coverage-cfg"
+path = "src/outcome/local_create_directory_outcome.rs"
+reason = "Coverage instrumentation keeps inline behavior measurable without source exemptions."
+
+[[exceptions]]
+rule = "coverage-cfg"
+path = "src/outcome/local_delete_outcome.rs"
+reason = "Coverage instrumentation keeps inline behavior measurable without source exemptions."
+
+[[exceptions]]
+rule = "coverage-cfg"
+path = "src/outcome/local_persist_outcome.rs"
+reason = "Preserve coverage visibility for persistence outcome accessors."
+
+[[exceptions]]
+rule = "coverage-cfg"
+path = "src/outcome/local_rename_failure.rs"
+reason = "Preserve coverage visibility for rename failure accessors."
+
+[[exceptions]]
+rule = "coverage-cfg"
+path = "src/outcome/local_rename_outcome.rs"
+reason = "Preserve coverage visibility for rename outcome accessors."
+
+[[exceptions]]
+rule = "coverage-cfg"
+path = "src/path/local_file_names.rs"
+reason = "Preserve coverage visibility for native filename validation helpers."
+
+[[exceptions]]
+rule = "coverage-cfg"
+path = "src/path/local_namespace_path.rs"
+reason = "Coverage instrumentation keeps inline behavior measurable without source exemptions."
+
+[[exceptions]]
+rule = "coverage-cfg"
+path = "src/path/local_path_codec.rs"
+reason = "Coverage instrumentation keeps inline behavior measurable without source exemptions."
+
+[[exceptions]]
+rule = "coverage-cfg"
+path = "src/path/local_path_resolver.rs"
+reason = "Coverage instrumentation keeps inline behavior measurable without source exemptions."
+
+[[exceptions]]
+rule = "coverage-cfg"
+path = "src/path/local_paths.rs"
+reason = "Preserve coverage visibility for scope-aware path utilities."
+
+[[exceptions]]
+rule = "coverage-cfg"
+path = "src/policy/local_symlink_policy.rs"
+reason = "Coverage instrumentation keeps inline behavior measurable without source exemptions."
+
+[[exceptions]]
+rule = "coverage-cfg"
+path = "src/read/open_options.rs"
+reason = "Coverage instrumentation keeps inline behavior measurable without source exemptions."
+
+[[exceptions]]
+rule = "coverage-cfg"
+path = "src/rooted/copy/destination.rs"
+reason = "Coverage instrumentation keeps inline behavior measurable without source exemptions."
+
+[[exceptions]]
+rule = "coverage-cfg"
+path = "src/rooted/entry.rs"
+reason = "Coverage instrumentation keeps inline behavior measurable without source exemptions."
+
+[[exceptions]]
+rule = "coverage-cfg"
+path = "src/rooted/metadata.rs"
+reason = "Coverage instrumentation keeps inline behavior measurable without source exemptions."
+
+[[exceptions]]
+rule = "coverage-cfg"
+path = "src/rooted/permissions.rs"
+reason = "Coverage instrumentation keeps inline behavior measurable without source exemptions."
+
+[[exceptions]]
+rule = "coverage-cfg"
+path = "src/rooted/root.rs"
+reason = "Coverage instrumentation keeps inline behavior measurable without source exemptions."
+
+[[exceptions]]
+rule = "coverage-cfg"
+path = "src/rooted_local_file_system.rs"
+reason = "Coverage instrumentation keeps inline behavior measurable without source exemptions."
+
+[[exceptions]]
+rule = "coverage-cfg"
+path = "src/rooted_local_file_system/path_support.rs"
+reason = "Coverage instrumentation keeps inline behavior measurable without source exemptions."
+
+[[exceptions]]
+rule = "coverage-cfg"
+path = "src/temp/internal/temp_parent.rs"
+reason = "Coverage instrumentation keeps inline behavior measurable without source exemptions."
+
+[[exceptions]]
+rule = "coverage-cfg"
+path = "src/temp/local_temp_directory.rs"
+reason = "Preserve coverage visibility for temporary-directory lifecycle accessors."
+
+[[exceptions]]
+rule = "coverage-cfg"
+path = "src/temp/local_temp_file.rs"
+reason = "Preserve coverage visibility for temporary-file lifecycle accessors."
+
+[[exceptions]]
+rule = "coverage-cfg"
+path = "src/walk/local_directory_entry.rs"
+reason = "Coverage instrumentation keeps inline behavior measurable without source exemptions."
+
+[[exceptions]]
+rule = "coverage-cfg"
+path = "src/walk/local_directory_walker.rs"
+reason = "Coverage instrumentation keeps inline behavior measurable without source exemptions."
+
+[[exceptions]]
+rule = "coverage-cfg"
+path = "src/writer/internal/local_staged_commit_error.rs"
+reason = "Coverage instrumentation keeps inline behavior measurable without source exemptions."
+
+[[exceptions]]
+rule = "coverage-cfg"
+path = "src/writer/local_file_commit_error.rs"
+reason = "Coverage instrumentation keeps inline behavior measurable without source exemptions."
+
+[[exceptions]]
+rule = "coverage-cfg"
+path = "src/writer/local_file_writer.rs"
+reason = "Coverage instrumentation keeps inline behavior measurable without source exemptions."
+
+[[exceptions]]
+rule = "coverage-cfg"
+path = "src/writer/local_write_outcome.rs"
+reason = "Coverage instrumentation keeps inline behavior measurable without source exemptions."
+
+[[exceptions]]
+rule = "explicit-imports"
+path = "src/local/internal/copy_destination_policy.rs"
+reason = "This file intentionally uses a legacy import shape required by its module boundary."
+
+[[exceptions]]
+rule = "explicit-imports"
+path = "src/local/internal/io_result_context.rs"
+reason = "This file intentionally uses a legacy import shape required by its module boundary."
+
+[[exceptions]]
+rule = "explicit-imports"
+path = "src/local/internal/path_io_error.rs"
+reason = "This file intentionally uses a legacy import shape required by its module boundary."
+
+[[exceptions]]
+rule = "explicit-imports"
+path = "src/local/local_atomic_commit_error.rs"
+reason = "This file intentionally uses a legacy import shape required by its module boundary."
+
+[[exceptions]]
+rule = "explicit-imports"
+path = "src/local/local_atomic_write_error.rs"
+reason = "This file intentionally uses a legacy import shape required by its module boundary."
+
+[[exceptions]]
+rule = "explicit-imports"
+path = "src/local/local_atomic_write_options.rs"
+reason = "This file intentionally uses a legacy import shape required by its module boundary."
+
+[[exceptions]]
+rule = "explicit-imports"
+path = "src/local/local_copy_dir_error.rs"
+reason = "This file intentionally uses a legacy import shape required by its module boundary."
+
+[[exceptions]]
+rule = "explicit-imports"
+path = "src/local/local_copy_dir_options.rs"
+reason = "This file intentionally uses a legacy import shape required by its module boundary."
+
+[[exceptions]]
+rule = "explicit-imports"
+path = "src/local/local_copy_dir_stats.rs"
+reason = "This file intentionally uses a legacy import shape required by its module boundary."
+
+[[exceptions]]
+rule = "explicit-imports"
+path = "src/local/local_persist_error.rs"
+reason = "This file intentionally uses a legacy import shape required by its module boundary."
+
+[[exceptions]]
+rule = "explicit-imports"
+path = "src/outcome/local_copy_stats.rs"
+reason = "This file intentionally uses a legacy import shape required by its module boundary."
+
+[[exceptions]]
+rule = "explicit-imports"
+path = "src/rooted/metadata.rs"
+reason = "This file intentionally uses a legacy import shape required by its module boundary."
+
+[[exceptions]]
+rule = "explicit-imports"
+path = "src/rooted/permissions.rs"
+reason = "This file intentionally uses a legacy import shape required by its module boundary."
+
+[[exceptions]]
+rule = "explicit-imports"
+path = "src/rooted_local_file_system/metadata.rs"
+reason = "This file intentionally uses a legacy import shape required by its module boundary."
+
+[[exceptions]]
+rule = "explicit-imports"
+path = "src/write/open_options.rs"
+reason = "This file intentionally uses a legacy import shape required by its module boundary."
+
+[[exceptions]]
+rule = "public-type-layout"
+path = "src/rooted_local_file_system.rs"
+reason = "Rooted implementation and private resolved-path carrier share one module for policy dispatch"

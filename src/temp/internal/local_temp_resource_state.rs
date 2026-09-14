@@ -6,7 +6,6 @@
 //    Licensed under the Apache License, Version 2.0.
 // =============================================================================
 //! Namespace certainty for a temporary resource.
-// qubit-style: allow source-test-pair
 // Covered through the public temporary-resource integration tests.
 
 /// Namespace certainty retained after a temporary-resource state transition.

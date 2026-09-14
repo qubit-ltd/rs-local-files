@@ -7,7 +7,6 @@
 // =============================================================================
 
 //! One active directory frame for iterative recursive-copy traversal.
-// qubit-style: allow source-test-pair
 // Private behavior is covered through public integration tests.
 
 use std::fs;

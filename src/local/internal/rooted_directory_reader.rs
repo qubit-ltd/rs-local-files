@@ -6,7 +6,6 @@
 //    Licensed under the Apache License, Version 2.0.
 // =============================================================================
 //! Platform-specific state for lazy Rooted directory enumeration.
-// qubit-style: allow source-test-pair
 
 // Implements Unix descriptor-relative directory enumeration.
 #[cfg(unix)]

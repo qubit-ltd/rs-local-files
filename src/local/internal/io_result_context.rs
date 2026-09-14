@@ -6,8 +6,6 @@
 //    Licensed under the Apache License, Version 2.0.
 // =============================================================================
 //! Context normalization for descriptor errors unavailable to public fixtures.
-// qubit-style: allow source-test-pair
-// qubit-style: allow explicit-imports
 // Live descriptors cannot be invalidated through the public API.
 
 use std::io::Result;

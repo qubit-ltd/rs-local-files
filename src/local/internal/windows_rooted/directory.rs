@@ -6,7 +6,6 @@
 //    Licensed under the Apache License, Version 2.0.
 // =============================================================================
 //! Windows handle-relative rooted directory operations.
-// qubit-style: allow source-test-pair
 
 use std::ffi::OsString;
 use std::fs::File;

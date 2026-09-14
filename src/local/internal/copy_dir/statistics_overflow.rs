@@ -6,7 +6,6 @@
 //    Licensed under the Apache License, Version 2.0.
 // =============================================================================
 //! Overflow errors for recursive-copy statistics beyond finite fixtures.
-// qubit-style: allow source-test-pair
 // Portable integration fixtures cannot force counters beyond `u64::MAX`.
 
 use std::io::Error;

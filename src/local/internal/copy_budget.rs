@@ -6,7 +6,6 @@
 //    Licensed under the Apache License, Version 2.0.
 // =============================================================================
 //! Shared resource accounting for Host and Rooted copy implementations.
-// qubit-style: allow source-test-pair
 
 use std::io;
 use std::io::Read;

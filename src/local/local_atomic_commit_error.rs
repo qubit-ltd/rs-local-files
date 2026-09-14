@@ -6,8 +6,6 @@
 //    Licensed under the Apache License, Version 2.0.
 // =============================================================================
 //! Recoverable atomic-commit errors.
-// qubit-style: allow source-test-pair
-// qubit-style: allow explicit-imports
 
 use std::error::Error;
 use std::fmt::Debug;

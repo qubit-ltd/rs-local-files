@@ -6,7 +6,6 @@
 //    Licensed under the Apache License, Version 2.0.
 // =============================================================================
 //! Private path resolution, preparation, and cleanup operations.
-// qubit-style: allow source-test-pair
 
 use std::ffi::OsString;
 use std::fs;

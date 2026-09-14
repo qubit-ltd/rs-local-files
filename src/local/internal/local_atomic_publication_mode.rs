@@ -6,7 +6,6 @@
 //    Licensed under the Apache License, Version 2.0.
 // =============================================================================
 
-// qubit-style: allow source-test-pair
 // Internal publication policy is covered through public atomic-writer tests.
 /// Publication policy enforced by the final atomic installation step.
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]

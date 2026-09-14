@@ -6,7 +6,6 @@
 //    Licensed under the Apache License, Version 2.0.
 // =============================================================================
 //! Stateful Host or Rooted local filesystem service.
-// qubit-style: allow source-test-pair
 
 use super::HostLocalFileSystem;
 use super::Instant;

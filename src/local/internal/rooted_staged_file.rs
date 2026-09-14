@@ -6,7 +6,6 @@
 //    Licensed under the Apache License, Version 2.0.
 // =============================================================================
 //! Panic-safe ownership of a descriptor-relative staging file.
-// qubit-style: allow source-test-pair
 // Private behavior is covered through public integration tests.
 
 use std::ffi::CString;

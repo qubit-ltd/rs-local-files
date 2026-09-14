@@ -6,7 +6,6 @@
 //    Licensed under the Apache License, Version 2.0.
 // =============================================================================
 //! Rooted parent traversal modes.
-// qubit-style: allow source-test-pair
 // Private behavior is covered through public integration tests.
 
 /// Controls missing-parent creation and durability tracking during traversal.

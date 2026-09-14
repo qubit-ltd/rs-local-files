@@ -6,7 +6,6 @@
 //    Licensed under the Apache License, Version 2.0.
 // =============================================================================
 //! Heap-owned storage for one failed copy operation.
-// qubit-style: allow source-test-pair
 // Covered through the public LocalCopyFailure integration tests.
 
 use std::path::PathBuf;

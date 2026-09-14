@@ -6,7 +6,6 @@
 //    Licensed under the Apache License, Version 2.0.
 // =============================================================================
 //! Native file write-open modes.
-// qubit-style: allow source-test-pair
 
 /// Selects the native creation and positioning behavior for a writer.
 #[must_use]

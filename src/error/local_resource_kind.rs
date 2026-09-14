@@ -6,7 +6,6 @@
 //    Licensed under the Apache License, Version 2.0.
 // =============================================================================
 //! Resource dimensions tracked by local filesystem operations.
-// qubit-style: allow source-test-pair
 // Covered by resource-limit walker integration tests.
 
 use std::fmt;

@@ -6,7 +6,6 @@
 //    Licensed under the Apache License, Version 2.0.
 // =============================================================================
 //! Stable identity checks for cleanup-owned host temporary entries.
-// qubit-style: allow source-test-pair
 
 use std::fs;
 use std::io;

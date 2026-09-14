@@ -7,7 +7,6 @@
 // =============================================================================
 
 // Host rename operations.
-// qubit-style: allow source-test-pair
 
 use super::HostLocalFileSystem;
 use super::LocalFileError;

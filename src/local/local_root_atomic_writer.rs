@@ -6,7 +6,6 @@
 //    Licensed under the Apache License, Version 2.0.
 // =============================================================================
 //! Streaming descriptor-relative atomic file replacement.
-// qubit-style: allow source-test-pair
 
 #[cfg(unix)]
 use std::ffi::CString;

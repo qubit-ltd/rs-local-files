@@ -6,7 +6,6 @@
 //    Licensed under the Apache License, Version 2.0.
 // =============================================================================
 //! Result normalization for descriptor failures and namespace races.
-// qubit-style: allow source-test-pair
 // Public APIs retain live descriptors and cannot force these interleavings.
 
 use std::fs;

@@ -6,7 +6,6 @@
 //    Licensed under the Apache License, Version 2.0.
 // =============================================================================
 //! Descriptor-relative file and directory copying.
-// qubit-style: allow source-test-pair
 mod copy_frame;
 mod destination;
 mod file;

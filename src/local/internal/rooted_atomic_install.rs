@@ -6,7 +6,6 @@
 //    Licensed under the Apache License, Version 2.0.
 // =============================================================================
 //! Descriptor-relative atomic installation result normalization.
-// qubit-style: allow source-test-pair
 // Replacement failures after a validated live destination require externally
 // timed namespace or mount failures that public fixtures cannot force.
 

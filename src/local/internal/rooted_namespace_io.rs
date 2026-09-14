@@ -6,7 +6,6 @@
 //    Licensed under the Apache License, Version 2.0.
 // =============================================================================
 //! Unix descriptor-relative rooted namespace operations.
-// qubit-style: allow source-test-pair
 // Private behavior is covered through public integration tests.
 
 use std::ffi::CString;

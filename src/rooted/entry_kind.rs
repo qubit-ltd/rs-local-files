@@ -6,7 +6,6 @@
 //    Licensed under the Apache License, Version 2.0.
 // =============================================================================
 //! Descriptor-relative filesystem entry kinds.
-// qubit-style: allow source-test-pair
 
 /// The type of a rooted filesystem entry observed without following its final
 /// symbolic link.

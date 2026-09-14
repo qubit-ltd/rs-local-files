@@ -6,8 +6,6 @@
 //    Licensed under the Apache License, Version 2.0.
 // =============================================================================
 //! Recursive directory copy options.
-// qubit-style: allow source-test-pair
-// qubit-style: allow explicit-imports
 
 use std::time::Duration;
 use std::time::Instant;

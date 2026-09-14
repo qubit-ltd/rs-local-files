@@ -7,7 +7,6 @@
 // =============================================================================
 
 // Host copy operations.
-// qubit-style: allow source-test-pair
 
 #[cfg(windows)]
 use std::os::windows::fs::FileTypeExt;

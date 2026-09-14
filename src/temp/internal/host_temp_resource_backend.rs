@@ -5,7 +5,6 @@
 //
 //    Licensed under the Apache License, Version 2.0.
 // =============================================================================
-// qubit-style: allow source-test-pair
 // Temporary-resource behavior is covered through public integration tests.
 //! Host-bound temporary-resource storage.
 

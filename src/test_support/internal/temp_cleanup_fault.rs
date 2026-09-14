@@ -6,7 +6,6 @@
 //    Licensed under the Apache License, Version 2.0.
 // =============================================================================
 //! Thread-isolated temporary cleanup failure boundaries.
-// qubit-style: allow source-test-pair
 // Covered through public temporary cleanup fault-injection tests.
 
 use std::io;

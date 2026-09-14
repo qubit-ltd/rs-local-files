@@ -6,7 +6,6 @@
 //    Licensed under the Apache License, Version 2.0.
 // =============================================================================
 //! Native read-open options.
-// qubit-style: allow source-test-pair
 
 use std::time::Duration;
 

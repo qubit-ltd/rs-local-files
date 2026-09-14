@@ -6,7 +6,6 @@
 //    Licensed under the Apache License, Version 2.0.
 // =============================================================================
 //! Streaming durable atomic file replacement.
-// qubit-style: allow source-test-pair
 
 use std::fs;
 use std::io;

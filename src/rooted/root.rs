@@ -6,7 +6,6 @@
 //    Licensed under the Apache License, Version 2.0.
 // =============================================================================
 //! Open directory capabilities.
-// qubit-style: allow source-test-pair
 
 use std::fs::File;
 use std::io::Error;

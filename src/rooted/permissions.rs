@@ -6,8 +6,6 @@
 //    Licensed under the Apache License, Version 2.0.
 // =============================================================================
 //! Cross-platform rooted entry permissions.
-// qubit-style: allow source-test-pair
-// qubit-style: allow explicit-imports
 
 /// Permissions observed or applied through a rooted filesystem capability.
 #[must_use]

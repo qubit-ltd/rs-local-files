@@ -6,7 +6,6 @@
 //    Licensed under the Apache License, Version 2.0.
 // =============================================================================
 
-// qubit-style: allow source-test-pair
 // Outcome states are covered through public rename integration tests.
 //! States proven when a unified rename operation fails.
 

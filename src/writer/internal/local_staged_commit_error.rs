@@ -6,7 +6,6 @@
 //    Licensed under the Apache License, Version 2.0.
 // =============================================================================
 //! Recoverable staged-writer commit error.
-// qubit-style: allow source-test-pair
 // Covered by writer integration tests.
 
 use super::LocalFileWriterBackend;

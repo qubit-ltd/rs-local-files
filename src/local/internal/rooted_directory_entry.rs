@@ -6,7 +6,6 @@
 //    Licensed under the Apache License, Version 2.0.
 // =============================================================================
 //! Native Unix directory-entry metadata primitives.
-// qubit-style: allow source-test-pair
 
 use std::ffi::CString;
 use std::ffi::OsString;

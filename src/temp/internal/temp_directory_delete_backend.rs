@@ -6,7 +6,6 @@
 //    Licensed under the Apache License, Version 2.0.
 // =============================================================================
 //! Borrowed native backends for the shared temporary-tree deletion scheduler.
-// qubit-style: allow source-test-pair
 // Covered by temporary cleanup and rooted tree integration tests.
 
 use std::fs;

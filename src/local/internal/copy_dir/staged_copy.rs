@@ -6,7 +6,6 @@
 //    Licensed under the Apache License, Version 2.0.
 // =============================================================================
 //! Regular-file staging and commit for recursive directory copies.
-// qubit-style: allow source-test-pair
 // Private behavior is covered through public integration tests.
 
 use std::io::ErrorKind;

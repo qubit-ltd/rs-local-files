@@ -6,7 +6,6 @@
 //    Licensed under the Apache License, Version 2.0.
 // =============================================================================
 //! Result normalization for externally timed copy-destination races.
-// qubit-style: allow source-test-pair
 // Public fixtures cannot deterministically interleave these namespace changes.
 
 use std::fs;

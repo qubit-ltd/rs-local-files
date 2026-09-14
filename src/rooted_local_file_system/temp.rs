@@ -7,7 +7,6 @@
 // =============================================================================
 
 // Rooted temp operations.
-// qubit-style: allow source-test-pair
 
 use super::Arc;
 use super::LocalFileErrorKind;
