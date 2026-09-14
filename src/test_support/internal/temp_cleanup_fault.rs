@@ -68,7 +68,12 @@ pub(crate) fn temp_cleanup_replace_observed_entry(
     }
     if directory && crate::local::take_test_support("temp-observed-directory-becomes-symlink") {
         crate::local::remove_rooted_entry(root, diagnostic_root, path)?;
-        return crate::local::create_rooted_symlink(root, diagnostic_root, std::path::Path::new("../../outside"), path);
+        return crate::local::create_rooted_symlink(
+            root,
+            diagnostic_root,
+            std::path::Path::new("../../outside"),
+            path,
+        );
     }
     Ok(())
 }

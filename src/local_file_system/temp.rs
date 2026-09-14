@@ -39,7 +39,10 @@ impl LocalFileSystem {
     /// Returns invalid-affix/attempt, path-resolution, parent, random-name,
     /// collision, or native creation errors. Requested parent creation may
     /// remain after failure. Use explicit cleanup to observe cleanup errors.
-    pub fn create_temp_file_with_options(&self, options: &LocalTempFileOptions) -> LocalResult<LocalTempFile> {
+    pub fn create_temp_file_with_options(
+        &self,
+        options: &LocalTempFileOptions,
+    ) -> LocalResult<LocalTempFile> {
         let parent = options.parent().unwrap_or_else(|| Path::new(""));
         validate_temp_options(
             options.prefix(),
@@ -54,11 +57,16 @@ impl LocalFileSystem {
             )
         })?;
         let resolver = self.resolver_for(parent, LocalFileOperation::CreateTempFile)?;
-        let resolved = resolve_operation_path(&resolver, parent, LocalFileOperation::CreateTempFile)?;
+        let resolved =
+            resolve_operation_path(&resolver, parent, LocalFileOperation::CreateTempFile)?;
         let options = options.clone().with_parent(resolved.authority_relative());
         let resource = match &self.core.namespace {
-            LocalNamespace::Host => HostLocalFileSystem::create_temp_file_with_policy(&options, self.symlink_policy),
-            LocalNamespace::Rooted(rooted) => rooted.create_temp_file(&options, self.symlink_policy),
+            LocalNamespace::Host => {
+                HostLocalFileSystem::create_temp_file_with_policy(&options, self.symlink_policy)
+            }
+            LocalNamespace::Rooted(rooted) => {
+                rooted.create_temp_file(&options, self.symlink_policy)
+            }
         }
         .map_err(|error| {
             operation_error(
@@ -105,13 +113,17 @@ impl LocalFileSystem {
             )
         })?;
         let resolver = self.resolver_for(parent, LocalFileOperation::CreateTempDirectory)?;
-        let resolved = resolve_operation_path(&resolver, parent, LocalFileOperation::CreateTempDirectory)?;
+        let resolved =
+            resolve_operation_path(&resolver, parent, LocalFileOperation::CreateTempDirectory)?;
         let options = options.clone().with_parent(resolved.authority_relative());
         let resource = match &self.core.namespace {
-            LocalNamespace::Host => {
-                HostLocalFileSystem::create_temp_directory_with_policy(&options, self.symlink_policy)
+            LocalNamespace::Host => HostLocalFileSystem::create_temp_directory_with_policy(
+                &options,
+                self.symlink_policy,
+            ),
+            LocalNamespace::Rooted(rooted) => {
+                rooted.create_temp_directory(&options, self.symlink_policy)
             }
-            LocalNamespace::Rooted(rooted) => rooted.create_temp_directory(&options, self.symlink_policy),
         }
         .map_err(|error| {
             operation_error(

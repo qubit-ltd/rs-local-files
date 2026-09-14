@@ -20,9 +20,10 @@ use std::path::PathBuf;
 /// inspection/creation error. Created ancestors remain after later failures.
 #[inline]
 pub(crate) fn host(target: &Path, create_parent: bool) -> io::Result<Vec<PathBuf>> {
-    let parent = target
-        .parent()
-        .ok_or(io::Error::new(io::ErrorKind::InvalidInput, "target has no parent"))?;
+    let parent = target.parent().ok_or(io::Error::new(
+        io::ErrorKind::InvalidInput,
+        "target has no parent",
+    ))?;
     if parent.as_os_str().is_empty() {
         return Ok(Vec::new());
     }

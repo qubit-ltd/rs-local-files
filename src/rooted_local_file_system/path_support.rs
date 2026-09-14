@@ -26,7 +26,10 @@ use crate::LocalResult;
 /// Returns `LocalFileError` for empty, absolute, prefixed, dot, or parent
 /// paths.
 #[inline]
-pub(crate) fn rooted_path(path: &Path, operation: LocalFileOperation) -> LocalResult<crate::local::LocalRelativePath> {
+pub(crate) fn rooted_path(
+    path: &Path,
+    operation: LocalFileOperation,
+) -> LocalResult<crate::local::LocalRelativePath> {
     match crate::local::LocalRelativePath::new(path) {
         Ok(path) => Ok(path),
         Err(error) => Err(LocalFileError::from_io(
@@ -61,7 +64,10 @@ pub(crate) fn rooted_destination_is_directory(
 /// Returns `LocalFileError` when the configured parent is not a normal
 /// relative descendant of the opened root.
 #[inline]
-pub(crate) fn rooted_temp_parent(parent: Option<&Path>, operation: LocalFileOperation) -> LocalResult<PathBuf> {
+pub(crate) fn rooted_temp_parent(
+    parent: Option<&Path>,
+    operation: LocalFileOperation,
+) -> LocalResult<PathBuf> {
     let Some(parent) = parent else {
         return Ok(PathBuf::new());
     };
@@ -91,7 +97,8 @@ pub(crate) fn validate_rooted_temp_parent(
     let relative = match crate::local::LocalRelativePath::new(parent) {
         Ok(relative) => relative,
         Err(error) => {
-            return Err(rooted_io_error(operation, parent, error).with_kind(LocalFileErrorKind::InvalidPath));
+            return Err(rooted_io_error(operation, parent, error)
+                .with_kind(LocalFileErrorKind::InvalidPath));
         }
     };
     let metadata = match root.symlink_metadata(&relative) {
@@ -99,7 +106,10 @@ pub(crate) fn validate_rooted_temp_parent(
         Err(error) => return Err(rooted_io_error(operation, parent, error)),
     };
     if metadata.kind() != crate::rooted::EntryKind::Directory {
-        return Err(LocalFileError::new(LocalFileErrorKind::NotDirectory, operation).with_path(parent.to_path_buf()));
+        return Err(
+            LocalFileError::new(LocalFileErrorKind::NotDirectory, operation)
+                .with_path(parent.to_path_buf()),
+        );
     }
     Ok(())
 }
@@ -161,6 +171,10 @@ pub(crate) fn rooted_metadata(metadata: crate::rooted::Metadata) -> LocalFileMet
 
 /// Adds rooted operation and descendant context to a native I/O failure.
 #[inline]
-pub(crate) fn rooted_io_error(operation: LocalFileOperation, path: &Path, error: io::Error) -> LocalFileError {
+pub(crate) fn rooted_io_error(
+    operation: LocalFileOperation,
+    path: &Path,
+    error: io::Error,
+) -> LocalFileError {
     LocalFileError::from_io(operation, Some(path.to_path_buf()), None, error)
 }

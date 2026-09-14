@@ -27,10 +27,16 @@ fn test_rooted_metadata_observes_open_file_and_identity() {
     assert!(metadata.modified_at().is_some());
     assert_eq!(
         metadata.created_at(),
-        file.metadata().expect("native metadata available").created().ok()
+        file.metadata()
+            .expect("native metadata available")
+            .created()
+            .ok()
     );
     let native = file.metadata().expect("native metadata available");
-    assert_eq!(metadata.permissions().is_read_only(), native.permissions().readonly());
+    assert_eq!(
+        metadata.permissions().is_read_only(),
+        native.permissions().readonly()
+    );
     #[cfg(unix)]
     assert_eq!(
         metadata.permissions().unix_mode(),

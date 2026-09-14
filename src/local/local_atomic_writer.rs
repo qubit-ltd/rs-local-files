@@ -121,7 +121,10 @@ impl LocalAtomicWriter {
     /// # Errors
     /// Returns a structured error when parent preparation, destination
     /// inspection, or staging-file creation fails.
-    pub(crate) fn new(path: &Path, options: LocalAtomicWriteOptions) -> Result<Self, LocalAtomicWriteError> {
+    pub(crate) fn new(
+        path: &Path,
+        options: LocalAtomicWriteOptions,
+    ) -> Result<Self, LocalAtomicWriteError> {
         let operation_path = with_atomic_context(
             absolute_path(path),
             LocalAtomicWriteStage::PrepareParent,
@@ -152,7 +155,10 @@ impl LocalAtomicWriter {
                     path.to_path_buf(),
                     None,
                     LocalAtomicDestinationState::Unchanged,
-                    io::Error::new(ErrorKind::NotADirectory, "atomic write parent must be a directory"),
+                    io::Error::new(
+                        ErrorKind::NotADirectory,
+                        "atomic write parent must be a directory",
+                    ),
                 ));
             }
             Vec::new()
@@ -166,7 +172,10 @@ impl LocalAtomicWriter {
                             path.to_path_buf(),
                             None,
                             LocalAtomicDestinationState::Unchanged,
-                            io::Error::new(ErrorKind::AlreadyExists, "atomic create-new destination already exists"),
+                            io::Error::new(
+                                ErrorKind::AlreadyExists,
+                                "atomic create-new destination already exists",
+                            ),
                         ));
                     }
                     Err(error) if error.kind() == ErrorKind::NotFound => (false, false),
@@ -227,8 +236,12 @@ impl LocalAtomicWriter {
     ///
     /// Returns a recoverable error when publication did not begin, or a
     /// terminal error after destination state may have changed.
-    pub(crate) fn commit_recoverable_with_durability(self) -> Result<bool, LocalAtomicCommitError<Self>> {
-        commit_recoverably(self, Self::commit_attempt, |writer| writer.staged_file.is_open())
+    pub(crate) fn commit_recoverable_with_durability(
+        self,
+    ) -> Result<bool, LocalAtomicCommitError<Self>> {
+        commit_recoverably(self, Self::commit_attempt, |writer| {
+            writer.staged_file.is_open()
+        })
     }
 
     /// Aborts the staged replacement and removes its temporary file.
@@ -327,13 +340,19 @@ impl LocalAtomicWriter {
     /// be opened or disappeared before commit. The staging writer remains
     /// available for retry or explicit abort.
     #[cfg(unix)]
-    fn open_destination_for_commit(&mut self) -> Result<Option<OpenedAtomicDestination>, LocalAtomicWriteError> {
+    fn open_destination_for_commit(
+        &mut self,
+    ) -> Result<Option<OpenedAtomicDestination>, LocalAtomicWriteError> {
         if !self.destination_is_regular {
             return Ok(None);
         }
         let temporary_path = Some(self.staged_file.path().to_path_buf());
         let opened = with_atomic_context(
-            open_atomic_destination(&self.operation_path, self.open_retry_timeout, self.metadata_policy),
+            open_atomic_destination(
+                &self.operation_path,
+                self.open_retry_timeout,
+                self.metadata_policy,
+            ),
             LocalAtomicWriteStage::ReadDestinationMetadata,
             &self.path,
             temporary_path,
@@ -442,7 +461,12 @@ impl LocalAtomicWriter {
         let Some(destination) = destination else {
             return Ok(());
         };
-        verify_atomic_destination_identity(&self.operation_path, destination, &self.path, self.staged_file.path())
+        verify_atomic_destination_identity(
+            &self.operation_path,
+            destination,
+            &self.path,
+            self.staged_file.path(),
+        )
     }
 
     /// Verifies that an existing non-Unix destination remains present.
@@ -515,7 +539,9 @@ impl LocalAtomicWriter {
                     staged_file.close();
                     staged_file.disarm();
                 },
-                |_: &StagedFile| sync_atomic_parent_chain(&self.operation_path, &self.parent_dirs_to_sync),
+                |_: &StagedFile| {
+                    sync_atomic_parent_chain(&self.operation_path, &self.parent_dirs_to_sync)
+                },
             )
             .map(|()| false);
         }
@@ -570,7 +596,13 @@ fn with_atomic_context<T>(
     destination_state: LocalAtomicDestinationState,
 ) -> Result<T, LocalAtomicWriteError> {
     result.map_err(|source| {
-        LocalAtomicWriteError::new(stage, path.to_path_buf(), temporary_path, destination_state, source)
+        LocalAtomicWriteError::new(
+            stage,
+            path.to_path_buf(),
+            temporary_path,
+            destination_state,
+            source,
+        )
     })
 }
 
@@ -601,7 +633,9 @@ fn sync_atomic_parent_chain(path: &Path, parent_dirs_to_sync: &[PathBuf]) -> io:
 fn existing_file_metadata(path: &Path, replace_target_symlink: bool) -> io::Result<(bool, bool)> {
     match fs::symlink_metadata(path) {
         Ok(metadata) if metadata.file_type().is_file() => Ok((true, true)),
-        Ok(metadata) if replace_target_symlink && metadata.file_type().is_symlink() => Ok((true, false)),
+        Ok(metadata) if replace_target_symlink && metadata.file_type().is_symlink() => {
+            Ok((true, false))
+        }
         Ok(_) => Err(io::Error::new(
             ErrorKind::InvalidInput,
             "atomic write destination must be absent or a regular file",
@@ -619,7 +653,9 @@ fn existing_file_metadata(path: &Path, replace_target_symlink: bool) -> io::Resu
 /// check; the subsequent path-based installation still has a check/install
 /// race.
 #[cfg(windows)]
-fn observe_windows_atomic_destination(path: &Path) -> io::Result<(fs::File, crate::rooted::Metadata)> {
+fn observe_windows_atomic_destination(
+    path: &Path,
+) -> io::Result<(fs::File, crate::rooted::Metadata)> {
     use std::os::windows::fs::OpenOptionsExt;
 
     use windows_sys::Win32::Storage::FileSystem::FILE_FLAG_BACKUP_SEMANTICS;

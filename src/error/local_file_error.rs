@@ -305,7 +305,9 @@ impl LocalFileError {
     #[inline]
     pub fn effect_state(&self) -> Option<LocalFileEffectState> {
         match self.kind {
-            LocalFileErrorKind::PublicationIncomplete => Some(LocalFileEffectState::PartiallyApplied),
+            LocalFileErrorKind::PublicationIncomplete => {
+                Some(LocalFileEffectState::PartiallyApplied)
+            }
             LocalFileErrorKind::Indeterminate => Some(LocalFileEffectState::Indeterminate),
             _ => None,
         }
@@ -441,16 +443,18 @@ fn standard_io_error_kind(error: &LocalFileError) -> io::ErrorKind {
         Some(LocalFileErrorSource::ResourceLimit(_)) => io::ErrorKind::Other,
         None => match error.kind {
             LocalFileErrorKind::AlreadyExists => io::ErrorKind::AlreadyExists,
-            LocalFileErrorKind::InvalidPath | LocalFileErrorKind::InvalidOptions | LocalFileErrorKind::InvalidState => {
-                io::ErrorKind::InvalidInput
-            }
+            LocalFileErrorKind::InvalidPath
+            | LocalFileErrorKind::InvalidOptions
+            | LocalFileErrorKind::InvalidState => io::ErrorKind::InvalidInput,
             LocalFileErrorKind::NotDirectory => io::ErrorKind::NotADirectory,
             LocalFileErrorKind::IsDirectory => io::ErrorKind::IsADirectory,
             LocalFileErrorKind::NotFound => io::ErrorKind::NotFound,
             LocalFileErrorKind::PermissionDenied => io::ErrorKind::PermissionDenied,
             LocalFileErrorKind::ResourceLimit => io::ErrorKind::Other,
             LocalFileErrorKind::DataCorruption => io::ErrorKind::InvalidData,
-            LocalFileErrorKind::RequirementNotMet | LocalFileErrorKind::Unsupported => io::ErrorKind::Unsupported,
+            LocalFileErrorKind::RequirementNotMet | LocalFileErrorKind::Unsupported => {
+                io::ErrorKind::Unsupported
+            }
             _ => io::ErrorKind::Other,
         },
     }
@@ -459,7 +463,11 @@ fn standard_io_error_kind(error: &LocalFileError) -> io::ErrorKind {
 impl fmt::Display for LocalFileError {
     /// Formats the structured operation and available native path context.
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(formatter, "{:?} failed with {:?}", self.operation, self.kind)?;
+        write!(
+            formatter,
+            "{:?} failed with {:?}",
+            self.operation, self.kind
+        )?;
         if let Some(reason) = self.reason {
             write!(formatter, ": {reason}")?;
         }
@@ -538,7 +546,11 @@ mod tests {
         )
         .with_kind(LocalFileErrorKind::InvalidOptions)
         .with_operation(LocalFileOperation::OpenWriter);
-        error.replace_paths(Some("source".into()), Some("target".into()), Some("/workspace".into()));
+        error.replace_paths(
+            Some("source".into()),
+            Some("target".into()),
+            Some("/workspace".into()),
+        );
 
         assert_eq!(LocalFileErrorKind::InvalidOptions, error.kind());
         assert_eq!(LocalFileOperation::OpenWriter, error.operation());
@@ -554,17 +566,23 @@ mod tests {
     #[test]
     fn test_resource_limit_and_cleanup_sources_are_preserved_independently() {
         let source = LocalResourceLimitError::new(LocalResourceKind::Entry, 4, 1, 2);
-        let error = LocalFileError::from_resource_limit(LocalFileOperation::Copy, Some("source".into()), source)
-            .with_cleanup_error(LocalFileError::from_io(
-                LocalFileOperation::Cleanup,
-                Some("temporary".into()),
-                None,
-                io::Error::from(io::ErrorKind::PermissionDenied),
-            ));
+        let error = LocalFileError::from_resource_limit(
+            LocalFileOperation::Copy,
+            Some("source".into()),
+            source,
+        )
+        .with_cleanup_error(LocalFileError::from_io(
+            LocalFileOperation::Cleanup,
+            Some("temporary".into()),
+            None,
+            io::Error::from(io::ErrorKind::PermissionDenied),
+        ));
 
         assert_eq!(Some(&source), error.resource_limit_error());
         assert!(error.io_error().is_none());
-        let cleanup = error.cleanup_error().expect("cleanup error should be retained");
+        let cleanup = error
+            .cleanup_error()
+            .expect("cleanup error should be retained");
         assert_eq!(LocalFileOperation::Cleanup, cleanup.operation());
         assert_eq!(
             Some(io::ErrorKind::PermissionDenied),
@@ -575,10 +593,16 @@ mod tests {
 
     #[test]
     fn test_source_free_error_reason_maps_to_the_compatible_io_kind() {
-        let error = LocalFileError::new(LocalFileErrorKind::RequirementNotMet, LocalFileOperation::Commit)
-            .with_reason("the requested guarantee is unavailable");
+        let error = LocalFileError::new(
+            LocalFileErrorKind::RequirementNotMet,
+            LocalFileOperation::Commit,
+        )
+        .with_reason("the requested guarantee is unavailable");
 
-        assert_eq!(Some("the requested guarantee is unavailable"), error.reason());
+        assert_eq!(
+            Some("the requested guarantee is unavailable"),
+            error.reason()
+        );
         assert_eq!(io::ErrorKind::Unsupported, error.io_error_kind());
         assert!(error.typed_source().is_none());
         assert!(error.to_string().contains("requested guarantee"));
@@ -594,8 +618,14 @@ mod tests {
         )
         .with_kind(LocalFileErrorKind::PublicationIncomplete);
 
-        assert_eq!(Some(LocalFileErrorKind::PermissionDenied), error.cause_kind());
-        assert_eq!(Some(LocalFileEffectState::PartiallyApplied), error.effect_state());
+        assert_eq!(
+            Some(LocalFileErrorKind::PermissionDenied),
+            error.cause_kind()
+        );
+        assert_eq!(
+            Some(LocalFileEffectState::PartiallyApplied),
+            error.effect_state()
+        );
         assert_eq!(io::ErrorKind::PermissionDenied, error.io_error_kind());
         assert!(error.io_error().is_some());
     }
@@ -607,7 +637,10 @@ mod tests {
             .with_kind(LocalFileErrorKind::PublicationIncomplete);
 
         assert_eq!(Some(LocalFileErrorKind::ResourceLimit), error.cause_kind());
-        assert_eq!(Some(LocalFileEffectState::PartiallyApplied), error.effect_state());
+        assert_eq!(
+            Some(LocalFileEffectState::PartiallyApplied),
+            error.effect_state()
+        );
         assert!(error.resource_limit_error().is_some());
     }
 
@@ -621,7 +654,10 @@ mod tests {
         .with_kind(LocalFileErrorKind::Indeterminate);
 
         assert_eq!(Some(LocalFileErrorKind::InvalidPath), error.cause_kind());
-        assert_eq!(Some(LocalFileEffectState::Indeterminate), error.effect_state());
+        assert_eq!(
+            Some(LocalFileEffectState::Indeterminate),
+            error.effect_state()
+        );
     }
 
     #[test]

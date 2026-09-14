@@ -42,17 +42,37 @@ fn test_local_file_writer_publishes_staged_content_on_commit() {
 
     let mut writer = LocalFileSystem::host()
         .expect("Host filesystem should open")
-        .open_writer_with_options(&target, &LocalWriteOptions::new(LocalWriteMode::CreateOrReplace))
+        .open_writer_with_options(
+            &target,
+            &LocalWriteOptions::new(LocalWriteMode::CreateOrReplace),
+        )
         .expect("staged writer should open");
-    writer.write_all(b"new").expect("staged content should be written");
-    assert_eq!(b"old", fs::read(&target).expect("old target should remain").as_slice());
+    writer
+        .write_all(b"new")
+        .expect("staged content should be written");
+    assert_eq!(
+        b"old",
+        fs::read(&target)
+            .expect("old target should remain")
+            .as_slice()
+    );
 
-    let outcome = writer.commit().expect("commit should publish staged content");
+    let outcome = writer
+        .commit()
+        .expect("commit should publish staged content");
     assert_eq!(LocalWriterState::Committed, outcome.state());
     assert!(outcome.atomic());
-    assert_eq!(LocalWritePublicationMethod::AtomicRename, outcome.publication_method());
+    assert_eq!(
+        LocalWritePublicationMethod::AtomicRename,
+        outcome.publication_method()
+    );
     assert_eq!(3, outcome.bytes_written());
-    assert_eq!(b"new", fs::read(&target).expect("target should be replaced").as_slice());
+    assert_eq!(
+        b"new",
+        fs::read(&target)
+            .expect("target should be replaced")
+            .as_slice()
+    );
 }
 
 /// Verifies that overwrite publication follows a target symlink.
@@ -72,7 +92,9 @@ fn test_local_file_writer_follows_target_symlink() {
         .expect("Host filesystem should open")
         .open_writer_with_options(&target, &options)
         .expect("writer should accept a target symlink entry");
-    writer.write_all(b"replacement").expect("replacement should be staged");
+    writer
+        .write_all(b"replacement")
+        .expect("replacement should be staged");
     let outcome = writer.commit().expect("replacement should publish");
     assert_eq!(LocalWriterState::Committed, outcome.state());
 
@@ -112,7 +134,10 @@ fn test_local_file_writer_append_follows_target_symlink() {
         .write_all(b"-append")
         .expect("append should write to the referent");
     let outcome = writer.commit().expect("append should commit");
-    assert_eq!(LocalWritePublicationMethod::DirectAppend, outcome.publication_method());
+    assert_eq!(
+        LocalWritePublicationMethod::DirectAppend,
+        outcome.publication_method()
+    );
     assert_eq!(b"original-append", fs::read(&referent).unwrap().as_slice());
 }
 
@@ -144,7 +169,9 @@ fn test_local_file_writer_append_follows_target_symlink_on_windows() {
     let _ = writer.commit().expect("append should commit");
     assert_eq!(
         b"original-append",
-        fs::read(referent).expect("referent should remain readable").as_slice(),
+        fs::read(referent)
+            .expect("referent should remain readable")
+            .as_slice(),
     );
 }
 
@@ -173,7 +200,9 @@ fn test_local_file_writer_create_new_preserves_concurrent_target() {
         .expect("Host filesystem should open")
         .open_writer_with_options(&target, &LocalWriteOptions::new(LocalWriteMode::CreateNew))
         .expect("create-new staging should open for an absent target");
-    writer.write_all(b"staged").expect("staged bytes should be written");
+    writer
+        .write_all(b"staged")
+        .expect("staged bytes should be written");
     fs::write(&target, b"concurrent").expect("concurrent target should be created");
 
     let error = writer
@@ -183,7 +212,9 @@ fn test_local_file_writer_create_new_preserves_concurrent_target() {
     assert_eq!(LocalWriteFailureState::NotPublished, error.state());
     assert_eq!(
         b"concurrent",
-        fs::read(&target).expect("concurrent target should remain").as_slice(),
+        fs::read(&target)
+            .expect("concurrent target should remain")
+            .as_slice(),
     );
 }
 
@@ -195,16 +226,23 @@ fn test_local_file_writer_abort_keeps_original_target() {
     fs::write(&target, b"old").expect("target fixture should be written");
     let mut writer = LocalFileSystem::host()
         .expect("Host filesystem should open")
-        .open_writer_with_options(&target, &LocalWriteOptions::new(LocalWriteMode::CreateOrReplace))
+        .open_writer_with_options(
+            &target,
+            &LocalWriteOptions::new(LocalWriteMode::CreateOrReplace),
+        )
         .expect("staged writer should open");
-    writer.write_all(b"new").expect("staging write should succeed");
+    writer
+        .write_all(b"new")
+        .expect("staging write should succeed");
 
     let outcome = writer.abort().expect("abort should clean staging");
 
     assert_eq!(LocalWriterState::Aborted, outcome.state());
     assert_eq!(
         b"old",
-        fs::read(&target).expect("target should remain unchanged").as_slice()
+        fs::read(&target)
+            .expect("target should remain unchanged")
+            .as_slice()
     );
 }
 
@@ -219,7 +257,8 @@ fn test_local_file_writer_append_rejects_required_atomicity() {
         .expect("Host filesystem should open")
         .open_writer_with_options(
             &target,
-            &LocalWriteOptions::new(LocalWriteMode::Append).with_atomicity(LocalAtomicityRequirement::Required),
+            &LocalWriteOptions::new(LocalWriteMode::Append)
+                .with_atomicity(LocalAtomicityRequirement::Required),
         )
         .expect_err("direct append cannot provide required atomicity");
 
@@ -248,7 +287,9 @@ fn test_local_file_writer_reports_parent_sync_result() {
                 &LocalWriteOptions::new(LocalWriteMode::CreateNew).with_durability(requirement),
             )
             .expect("staged writer should open before permissions change");
-        writer.write_all(b"published").expect("staged bytes should be written");
+        writer
+            .write_all(b"published")
+            .expect("staged bytes should be written");
         fs::set_permissions(&parent, fs::Permissions::from_mode(0o300))
             .expect("parent should reject read-only directory opens");
         match requirement {
@@ -261,14 +302,20 @@ fn test_local_file_writer_reports_parent_sync_result() {
                     .commit()
                     .expect_err("required durability must report sync failure");
                 assert_eq!(LocalWriteFailureState::Published, error.state());
-                assert_eq!(LocalFileErrorKind::PublicationIncomplete, error.error().kind(),);
+                assert_eq!(
+                    LocalFileErrorKind::PublicationIncomplete,
+                    error.error().kind(),
+                );
             }
             LocalDurabilityRequirement::NotRequired => unreachable!(),
         }
-        fs::set_permissions(&parent, fs::Permissions::from_mode(0o700)).expect("parent permissions should be restored");
+        fs::set_permissions(&parent, fs::Permissions::from_mode(0o700))
+            .expect("parent permissions should be restored");
         assert_eq!(
             b"published",
-            fs::read(&target).expect("published target should remain").as_slice(),
+            fs::read(&target)
+                .expect("published target should remain")
+                .as_slice(),
         );
     }
 }
@@ -291,7 +338,10 @@ fn test_local_file_writer_append_preserves_not_published_state() {
             .env(FAILED_APPEND_CASE, case)
             .status()
             .expect("failed append child should start");
-        assert!(status.success(), "failed append {case} child should succeed");
+        assert!(
+            status.success(),
+            "failed append {case} child should succeed"
+        );
     }
 }
 
@@ -331,8 +381,9 @@ fn run_failed_append_case(case: &str) {
     writer
         .write_all(b"x")
         .expect_err("zero file-size limit should reject append");
-    let failure_state =
-        std::hint::black_box(LocalFileWriter::failure_state as fn(&LocalFileWriter) -> Option<LocalWriteFailureState>);
+    let failure_state = std::hint::black_box(
+        LocalFileWriter::failure_state as fn(&LocalFileWriter) -> Option<LocalWriteFailureState>,
+    );
     assert_eq!(
         Some(LocalWriteFailureState::NotPublished),
         std::hint::black_box(failure_state)(&writer),
@@ -344,8 +395,13 @@ fn run_failed_append_case(case: &str) {
     let vectored_after_failure = writer
         .write_vectored(&[IoSlice::new(b"x")])
         .expect_err("failed writer must reject further vectored writes");
-    assert_eq!(std::io::ErrorKind::BrokenPipe, vectored_after_failure.kind());
-    let flush_after_failure = writer.flush().expect_err("failed writer must reject further flushes");
+    assert_eq!(
+        std::io::ErrorKind::BrokenPipe,
+        vectored_after_failure.kind()
+    );
+    let flush_after_failure = writer
+        .flush()
+        .expect_err("failed writer must reject further flushes");
     assert_eq!(std::io::ErrorKind::BrokenPipe, flush_after_failure.kind());
     match case {
         "commit" => {
@@ -353,9 +409,14 @@ fn run_failed_append_case(case: &str) {
             assert_eq!(LocalWriteFailureState::NotPublished, error.state());
         }
         "abort" => {
-            let outcome = writer.abort().expect("abort should close a failed append writer");
+            let outcome = writer
+                .abort()
+                .expect("abort should close a failed append writer");
             assert_eq!(LocalWriterState::Aborted, outcome.state());
-            assert_eq!(Some(LocalWriteFailureState::NotPublished), outcome.failure_state(),);
+            assert_eq!(
+                Some(LocalWriteFailureState::NotPublished),
+                outcome.failure_state(),
+            );
         }
         other => panic!("unexpected append regression case: {other}"),
     }

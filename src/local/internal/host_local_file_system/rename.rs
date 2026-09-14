@@ -59,12 +59,15 @@ impl HostLocalFileSystem {
         options: &LocalRenameOptions,
         symlink_policy: LocalSymlinkPolicy,
     ) -> LocalRenameResult {
-        let [source, target] = bind_host_paths([source, target]).map_err(rename_failure_unchanged)?;
-        let source = resolve_host_path(&source, symlink_policy, false).map_err(rename_failure_unchanged)?;
-        let target = resolve_host_path(&target, symlink_policy, false).map_err(rename_failure_unchanged)?;
+        let [source, target] =
+            bind_host_paths([source, target]).map_err(rename_failure_unchanged)?;
+        let source =
+            resolve_host_path(&source, symlink_policy, false).map_err(rename_failure_unchanged)?;
+        let target =
+            resolve_host_path(&target, symlink_policy, false).map_err(rename_failure_unchanged)?;
         let implements_durability = Self::capabilities().supports_durable_rename();
-        let implements_durability =
-            implements_durability && !crate::local::test_support_enabled("local-fs-required-directory-durability");
+        let implements_durability = implements_durability
+            && !crate::local::test_support_enabled("local-fs-required-directory-durability");
         ensure_required_directory_durability(
             options.durability(),
             LocalFileOperation::Rename,

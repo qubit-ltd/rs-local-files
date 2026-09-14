@@ -58,15 +58,25 @@ impl DeleteBackend for TempDirectoryDeleteBackend<'_> {
     }
 
     /// Returns the next validated child; native enumeration errors propagate.
-    fn next_child(&self, parent: &Self::Path, reader: &mut Self::Reader) -> io::Result<Option<Self::Path>> {
-        reader
-            .next_entry()
-            .and_then(|entry| entry.map_or(Ok(None), |entry| parent.join_component(entry.name()).map(Some)))
+    fn next_child(
+        &self,
+        parent: &Self::Path,
+        reader: &mut Self::Reader,
+    ) -> io::Result<Option<Self::Path>> {
+        reader.next_entry().and_then(|entry| {
+            entry.map_or(Ok(None), |entry| {
+                parent.join_component(entry.name()).map(Some)
+            })
+        })
     }
 
     /// Removes the leaf itself without following its target; native errors
     /// propagate.
-    fn remove_non_directory(&self, path: &Self::Path, _metadata: &Self::Metadata) -> io::Result<()> {
+    fn remove_non_directory(
+        &self,
+        path: &Self::Path,
+        _metadata: &Self::Metadata,
+    ) -> io::Result<()> {
         self.root.remove_observed_non_directory(path)
     }
 
@@ -120,8 +130,15 @@ impl DeleteBackend for HostTempResourceBackend {
     }
 
     /// Produces one child path or propagates an enumeration error.
-    fn next_child(&self, _parent: &Self::Path, reader: &mut Self::Reader) -> io::Result<Option<Self::Path>> {
-        reader.next().transpose().map(|entry| entry.map(|entry| entry.path()))
+    fn next_child(
+        &self,
+        _parent: &Self::Path,
+        reader: &mut Self::Reader,
+    ) -> io::Result<Option<Self::Path>> {
+        reader
+            .next()
+            .transpose()
+            .map(|entry| entry.map(|entry| entry.path()))
     }
 
     /// Removes the leaf itself, including Windows directory links, without

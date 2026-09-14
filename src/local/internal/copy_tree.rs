@@ -39,7 +39,12 @@ pub(crate) fn copy_tree<B: CopyTreeBackend>(
     while !frames.is_empty() {
         let current = backend.frame_context(frames.last().expect("non-empty frame stack"));
         if let Err(source_error) = budget.check_deadline() {
-            return Err(backend.error(LocalCopyDirStage::ReadSourceDirectory, &current, stats, source_error));
+            return Err(backend.error(
+                LocalCopyDirStage::ReadSourceDirectory,
+                &current,
+                stats,
+                source_error,
+            ));
         }
 
         let next = backend.next_entry(frames.last_mut().expect("non-empty frame stack"), stats)?;
@@ -51,10 +56,20 @@ pub(crate) fn copy_tree<B: CopyTreeBackend>(
 
         let child = backend.child_context(&current, &entry);
         if let Err(source_error) = budget.check_depth(child.depth) {
-            return Err(backend.error(LocalCopyDirStage::InspectSourceEntry, &child, stats, source_error));
+            return Err(backend.error(
+                LocalCopyDirStage::InspectSourceEntry,
+                &child,
+                stats,
+                source_error,
+            ));
         }
         if let Err(source_error) = budget.charge_entry() {
-            return Err(backend.error(LocalCopyDirStage::UpdateStatistics, &child, stats, source_error));
+            return Err(backend.error(
+                LocalCopyDirStage::UpdateStatistics,
+                &child,
+                stats,
+                source_error,
+            ));
         }
         if let Some(frame) = backend.process_entry(entry, &child, stats, budget)? {
             frames.push(frame);

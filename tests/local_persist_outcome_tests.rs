@@ -88,7 +88,10 @@ fn test_local_file_persist_outcome_preserves_logical_target_path() {
         .expect("temporary file must persist");
 
     assert_eq!(expected, outcome.path());
-    assert_eq!(fs::read(&target).expect("target must be readable"), b"payload",);
+    assert_eq!(
+        fs::read(&target).expect("target must be readable"),
+        b"payload",
+    );
 }
 
 /// Verifies Host temporary-directory persistence keeps the logical target
@@ -106,7 +109,9 @@ fn test_local_directory_persist_outcome_preserves_logical_target_path() {
 
     let temporary = LocalFileSystem::host()
         .expect("Host filesystem should open")
-        .create_temp_directory_with_options(&LocalTempDirectoryOptions::new().with_parent(root.path()))
+        .create_temp_directory_with_options(
+            &LocalTempDirectoryOptions::new().with_parent(root.path()),
+        )
         .expect("temporary directory must be created");
 
     let outcome = temporary
@@ -129,7 +134,9 @@ fn test_local_persist_outcome_reports_residual_sandbox_cleanup() {
             let target = root.path().join("target.txt");
             let temporary = LocalFileSystem::host()
                 .expect("Host filesystem should open")
-                .create_temp_file_with_options(&LocalTempFileOptions::new().with_parent(root.path()))
+                .create_temp_file_with_options(
+                    &LocalTempFileOptions::new().with_parent(root.path()),
+                )
                 .expect("temporary file must be created");
 
             let outcome = temporary
@@ -137,7 +144,10 @@ fn test_local_persist_outcome_reports_residual_sandbox_cleanup() {
                 .expect("publication should succeed despite sandbox cleanup failure");
 
             assert_eq!(target, outcome.path());
-            assert_eq!(LocalPersistCleanupState::ResidualSandbox, outcome.cleanup_state(),);
+            assert_eq!(
+                LocalPersistCleanupState::ResidualSandbox,
+                outcome.cleanup_state(),
+            );
             assert!(outcome.cleanup_error().is_some());
             assert!(target.is_file());
         },

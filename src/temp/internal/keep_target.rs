@@ -23,5 +23,10 @@ pub(crate) fn generated_target(resource: &Path) -> io::Result<PathBuf> {
         .and_then(|sandbox| sandbox.parent())
         .zip(resource.file_name())
         .map(|(parent, name)| parent.join(name))
-        .ok_or_else(|| io::Error::new(io::ErrorKind::InvalidInput, "invalid temporary resource sandbox path"))
+        .ok_or_else(|| {
+            io::Error::new(
+                io::ErrorKind::InvalidInput,
+                "invalid temporary resource sandbox path",
+            )
+        })
 }

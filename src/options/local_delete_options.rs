@@ -59,7 +59,8 @@ impl LocalDeleteOptions {
         use super::resource_limits::tighter;
         self.max_depth = tighter(self.max_depth, ceilings.max_depth);
         self.max_entries = tighter(self.max_entries, ceilings.max_entries);
-        self.max_pending_path_bytes = tighter(self.max_pending_path_bytes, ceilings.max_pending_path_bytes);
+        self.max_pending_path_bytes =
+            tighter(self.max_pending_path_bytes, ceilings.max_pending_path_bytes);
         self.deadline = tighter(self.deadline, ceilings.deadline);
         self
     }

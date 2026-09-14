@@ -36,7 +36,9 @@ fn test_persist_at_accepts_rooted_base_link_to_virtual_root() {
         fs::read(dir.path().join("published-file")).expect("published contents"),
         b"root-bound"
     );
-    let directory = filesystem.create_temp_directory().expect("temporary directory");
+    let directory = filesystem
+        .create_temp_directory()
+        .expect("temporary directory");
     let _ = directory
         .persist_at(
             Path::new("/root-link"),
@@ -79,7 +81,9 @@ fn test_persist_at_uses_explicit_base_for_both_resources() {
             b"payload"
         );
         let temporary = filesystem
-            .create_temp_directory_with_options(&LocalTempDirectoryOptions::new().with_parent(creation))
+            .create_temp_directory_with_options(
+                &LocalTempDirectoryOptions::new().with_parent(creation),
+            )
             .expect("temporary directory");
         let _ = temporary
             .persist_at(base, Path::new("directory"), LocalPersistOptions::new())
@@ -164,7 +168,10 @@ fn test_persist_at_rejects_invalid_parameters_without_consuming_resources() {
             (root.join("dest/.."), Path::new("target").to_path_buf()),
             (root.to_path_buf(), root.join("absolute-target")),
             (root.to_path_buf(), Path::new("").to_path_buf()),
-            (root.to_path_buf(), Path::new("invalid\0target").to_path_buf()),
+            (
+                root.to_path_buf(),
+                Path::new("invalid\0target").to_path_buf(),
+            ),
         ];
         for (base, target) in cases {
             let temporary = filesystem
@@ -182,7 +189,9 @@ fn test_persist_at_rejects_invalid_parameters_without_consuming_resources() {
                 .expect("invalid parameter leaves handle open");
             error.resource_mut().cleanup().expect("file cleanup");
             let temporary = filesystem
-                .create_temp_directory_with_options(&LocalTempDirectoryOptions::new().with_parent(root))
+                .create_temp_directory_with_options(
+                    &LocalTempDirectoryOptions::new().with_parent(root),
+                )
                 .expect("temporary directory");
             let mut error = temporary
                 .persist_at(&base, &target, LocalPersistOptions::new())
@@ -204,14 +213,24 @@ fn test_persist_at_retains_root_authority_after_rename() {
     let filesystem = LocalFileSystem::rooted(&original).expect("root authority");
     let mut file = filesystem.create_temp_file().expect("temporary file");
     file.write_all(b"payload").expect("source content");
-    let directory = filesystem.create_temp_directory().expect("temporary directory");
+    let directory = filesystem
+        .create_temp_directory()
+        .expect("temporary directory");
     fs::rename(&original, &moved).expect("rename opened root");
     fs::create_dir_all(original.join("dest")).expect("unrelated replacement root");
     let _ = file
-        .persist_at(Path::new("/dest"), Path::new("file"), LocalPersistOptions::new())
+        .persist_at(
+            Path::new("/dest"),
+            Path::new("file"),
+            LocalPersistOptions::new(),
+        )
         .expect("retained file authority");
     let _ = directory
-        .persist_at(Path::new("/dest"), Path::new("directory"), LocalPersistOptions::new())
+        .persist_at(
+            Path::new("/dest"),
+            Path::new("directory"),
+            LocalPersistOptions::new(),
+        )
         .expect("retained directory authority");
     assert_eq!(
         fs::read(moved.join("dest/file")).expect("correct root content"),
@@ -261,7 +280,11 @@ fn test_persist_at_ignores_process_pwd_changes() {
     const CHILD: &str = "RS_LOCAL_FILES_PERSIST_BASE_CHILD";
     if std::env::var_os(CHILD).is_none() {
         let status = std::process::Command::new(std::env::current_exe().expect("test executable"))
-            .args(["--exact", "test_persist_at_ignores_process_pwd_changes", "--nocapture"])
+            .args([
+                "--exact",
+                "test_persist_at_ignores_process_pwd_changes",
+                "--nocapture",
+            ])
             .env(CHILD, "1")
             .status()
             .expect("PWD-isolated child");
@@ -276,14 +299,17 @@ fn test_persist_at_ignores_process_pwd_changes() {
     fs::create_dir(&second).expect("second directory");
     std::env::set_current_dir(&first).expect("select creation PWD");
     let filesystem = LocalFileSystem::host().expect("host filesystem");
-    let mut file = filesystem.create_temp_file().expect("PWD-relative temporary file");
+    let mut file = filesystem
+        .create_temp_file()
+        .expect("PWD-relative temporary file");
     let directory = filesystem
         .create_temp_directory()
         .expect("PWD-relative temporary directory");
     file.write_all(b"payload").expect("temporary content");
     std::env::set_current_dir(&second).expect("change process PWD");
     let file_result = file.persist_at(&first, Path::new("file"), LocalPersistOptions::new());
-    let directory_result = directory.persist_at(&first, Path::new("directory"), LocalPersistOptions::new());
+    let directory_result =
+        directory.persist_at(&first, Path::new("directory"), LocalPersistOptions::new());
     std::env::set_current_dir(original_pwd).expect("restore child PWD before cleanup");
     let _ = file_result.expect("fixed file base");
     let _ = directory_result.expect("fixed directory base");
@@ -292,7 +318,12 @@ fn test_persist_at_ignores_process_pwd_changes() {
         b"payload"
     );
     assert!(first.join("directory").is_dir());
-    assert_eq!(fs::read_dir(second).expect("second directory entries").count(), 0);
+    assert_eq!(
+        fs::read_dir(second)
+            .expect("second directory entries")
+            .count(),
+        0
+    );
 }
 
 /// Explicit relative Rooted targets cannot walk above their retained authority.
@@ -317,7 +348,9 @@ fn test_persist_at_rejects_rooted_escape() {
         .write_all(b"still-open")
         .expect("escape rejected before close");
     error.resource_mut().cleanup().expect("file cleanup");
-    let temporary = filesystem.create_temp_directory().expect("temporary directory");
+    let temporary = filesystem
+        .create_temp_directory()
+        .expect("temporary directory");
     let mut error = temporary
         .persist_at(
             Path::new("/dest"),

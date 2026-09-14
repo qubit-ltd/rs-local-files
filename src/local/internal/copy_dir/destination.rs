@@ -58,7 +58,10 @@ pub(super) fn ensure_copy_destination_dir(
     type_conflict: LocalCopyTypeConflictPolicy,
 ) -> Result<(CopyDestinationAction, bool)> {
     let action = prepare_existing_directory_destination(dst, conflict, type_conflict)?;
-    if !matches!(action, CopyDestinationAction::Create | CopyDestinationAction::Replace) {
+    if !matches!(
+        action,
+        CopyDestinationAction::Create | CopyDestinationAction::Replace
+    ) {
         return Ok((action, false));
     }
     create_copy_destination_dir(dst).map(|created| {
@@ -174,13 +177,21 @@ fn prepare_existing_directory_destination(
     let Some(metadata) = destination_metadata_if_exists(dst)? else {
         return Ok(CopyDestinationAction::Create);
     };
-    let action = decide_copy_destination(true, Some(is_real_directory(&metadata)), conflict, type_conflict)
-        .ok_or_else(|| {
-            Error::new(
-                ErrorKind::AlreadyExists,
-                format!("destination type conflicts with source directory: {}", dst.display(),),
-            )
-        })?;
+    let action = decide_copy_destination(
+        true,
+        Some(is_real_directory(&metadata)),
+        conflict,
+        type_conflict,
+    )
+    .ok_or_else(|| {
+        Error::new(
+            ErrorKind::AlreadyExists,
+            format!(
+                "destination type conflicts with source directory: {}",
+                dst.display(),
+            ),
+        )
+    })?;
     if action == CopyDestinationAction::Replace {
         remove_destination_non_directory_if_unchanged(dst)?;
     }
@@ -209,7 +220,10 @@ fn create_copy_destination_dir(dst: &Path) -> Result<bool> {
         || test_support::is_enabled("copy-directory-race-nondirectory")
         || test_support::is_enabled("copy-directory-race-inspect")
     {
-        Err(Error::new(ErrorKind::AlreadyExists, "injected directory creation race"))
+        Err(Error::new(
+            ErrorKind::AlreadyExists,
+            "injected directory creation race",
+        ))
     } else if test_support::is_enabled("copy-directory-create-error") {
         Err(Error::other("injected directory creation failure"))
     } else {
@@ -243,7 +257,10 @@ fn remove_destination_non_directory_if_unchanged(dst: &Path) -> Result<()> {
     let result = inspect_destination_metadata(dst);
     #[cfg(feature = "test-support")]
     let result = if test_support::is_enabled("copy-removal-race-not-found") {
-        Err(Error::new(ErrorKind::NotFound, "injected destination disappearance"))
+        Err(Error::new(
+            ErrorKind::NotFound,
+            "injected destination disappearance",
+        ))
     } else if test_support::is_enabled("copy-removal-race-inspect") {
         Err(Error::other("injected destination reinspection failure"))
     } else {

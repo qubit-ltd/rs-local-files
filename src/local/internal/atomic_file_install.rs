@@ -198,7 +198,10 @@ pub(crate) fn install_new_atomic_file_at(
             Error::last_os_error()
         };
         let code = error.raw_os_error();
-        if code != Some(libc::ENOSYS) && code != Some(libc::EINVAL) && code != Some(libc::EOPNOTSUPP) {
+        if code != Some(libc::ENOSYS)
+            && code != Some(libc::EINVAL)
+            && code != Some(libc::EOPNOTSUPP)
+        {
             return Err(unchanged_error(error));
         }
         link_then_unlink(staging_parent, staging, destination_parent, destination)
@@ -305,11 +308,12 @@ fn link_then_unlink(
         }
     }
     #[cfg(feature = "test-support")]
-    let staging_state = if super::test_support::is_enabled("atomic-install-unlink-indeterminate-sync") {
-        AtomicStagingState::Indeterminate
-    } else {
-        AtomicStagingState::Present
-    };
+    let staging_state =
+        if super::test_support::is_enabled("atomic-install-unlink-indeterminate-sync") {
+            AtomicStagingState::Indeterminate
+        } else {
+            AtomicStagingState::Present
+        };
     #[cfg(not(feature = "test-support"))]
     let staging_state = AtomicStagingState::Present;
     Err((
@@ -362,7 +366,10 @@ fn unlink_staging_name(staging_parent: RawFd, staging: &CStr) -> Result<()> {
 fn native_path(path: &Path) -> Result<CString> {
     match CString::new(path.as_os_str().as_bytes()) {
         Ok(path) => Ok(path),
-        Err(_) => Err(Error::new(ErrorKind::InvalidInput, "atomic install path contains NUL")),
+        Err(_) => Err(Error::new(
+            ErrorKind::InvalidInput,
+            "atomic install path contains NUL",
+        )),
     }
 }
 

@@ -108,7 +108,10 @@ pub(in crate::local) fn inspect_rooted_atomic_destination(
 /// # Panics
 ///
 /// Panics if the filename generator violates its no-NUL invariant.
-pub(in crate::local) fn create_rooted_staged_file(parent: File, relative_parent: &Path) -> Result<RootedStagedFile> {
+pub(in crate::local) fn create_rooted_staged_file(
+    parent: File,
+    relative_parent: &Path,
+) -> Result<RootedStagedFile> {
     retry_rooted_staging_entry(
         None,
         || {
@@ -132,8 +135,8 @@ pub(in crate::local) fn create_rooted_staged_file(parent: File, relative_parent:
             } else if super::test_support::is_enabled("rooted-staging-open") {
                 return Err(Error::other("injected rooted staging open failure"));
             }
-            let native_name =
-                CString::new(name.as_bytes()).expect("random_file_name_with guarantees generated names without NUL");
+            let native_name = CString::new(name.as_bytes())
+                .expect("random_file_name_with guarantees generated names without NUL");
             open_file_at(
                 &parent,
                 &native_name,
@@ -143,5 +146,7 @@ pub(in crate::local) fn create_rooted_staged_file(parent: File, relative_parent:
             .map(|file| (native_name, file))
         },
     )
-    .map(|(name, native_name, file)| RootedStagedFile::new(parent, native_name, file, relative_parent.join(name)))
+    .map(|(name, native_name, file)| {
+        RootedStagedFile::new(parent, native_name, file, relative_parent.join(name))
+    })
 }

@@ -38,7 +38,7 @@ impl RootedResolutionCursor {
     /// Reads one child without following a final symbolic link.
     pub(crate) fn metadata(&self, name: &OsStr) -> Result<Metadata> {
         #[cfg(test)]
-        crate::tests::rooted::support::resolution_observation::record_metadata();
+        crate::tests::rooted::support::resolution_observation_tests::record_metadata();
         #[cfg(unix)]
         {
             let status = crate::local::read_rooted_component_metadata(&self.current, name)?;
@@ -61,7 +61,7 @@ impl RootedResolutionCursor {
     /// The current handle is left unchanged if opening or verification fails.
     pub(crate) fn descend(&mut self, name: &OsStr) -> Result<()> {
         #[cfg(test)]
-        crate::tests::rooted::support::resolution_observation::record_directory_open();
+        crate::tests::rooted::support::resolution_observation_tests::record_directory_open();
         #[cfg(any(unix, windows))]
         {
             let next = crate::local::open_rooted_component_directory(&self.current, name)?;
@@ -114,8 +114,10 @@ mod tests {
         fs::create_dir(temporary.path().join("child")).expect("child should exist");
         fs::write(temporary.path().join("child/file"), b"payload").expect("file should exist");
         let root = Root::open(temporary.path()).expect("root should open");
-        let mut cursor = RootedResolutionCursor::new(root.try_clone_authority().expect("authority should clone"))
-            .expect("cursor should open");
+        let mut cursor = RootedResolutionCursor::new(
+            root.try_clone_authority().expect("authority should clone"),
+        )
+        .expect("cursor should open");
         #[cfg(unix)]
         let old = cursor.current.as_raw_fd();
         #[cfg(windows)]
@@ -128,7 +130,10 @@ mod tests {
             // SAFETY: F_GETFD only inspects the integer descriptor; it does not
             // dereference memory or take ownership of a possibly closed file.
             assert_eq!(-1, unsafe { libc::fcntl(old, libc::F_GETFD) });
-            assert_eq!(Some(libc::EBADF), std::io::Error::last_os_error().raw_os_error());
+            assert_eq!(
+                Some(libc::EBADF),
+                std::io::Error::last_os_error().raw_os_error()
+            );
         }
         #[cfg(windows)]
         {

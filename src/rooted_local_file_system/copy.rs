@@ -73,25 +73,37 @@ impl RootedLocalFileSystem {
         )
         .map_err(copy_failure_unchanged)?;
         let symlink_policy = options.symlink_policy_override().unwrap_or(symlink_policy);
-        let mut internal_options = crate::local::internal_copy_options(options, symlink_policy, started_at);
+        let mut internal_options =
+            crate::local::internal_copy_options(options, symlink_policy, started_at);
         let mut budget = crate::local::CopyBudget::new(internal_options);
-        budget
-            .check_deadline()
-            .map_err(|error| copy_failure_unchanged(rooted_io_error(LocalFileOperation::Copy, source, error)))?;
-        budget
-            .charge_entry()
-            .map_err(|error| copy_failure_unchanged(rooted_io_error(LocalFileOperation::Copy, source, error)))?;
+        budget.check_deadline().map_err(|error| {
+            copy_failure_unchanged(rooted_io_error(LocalFileOperation::Copy, source, error))
+        })?;
+        budget.charge_entry().map_err(|error| {
+            copy_failure_unchanged(rooted_io_error(LocalFileOperation::Copy, source, error))
+        })?;
         if let Some(max_entries) = internal_options.max_entries() {
             internal_options = internal_options.with_max_entries(max_entries - 1);
         }
-        let source_path = resolve_rooted_path(&self.root, source, symlink_policy, false, LocalFileOperation::Copy)
-            .map_err(copy_failure_unchanged)?;
-        let target_path = resolve_rooted_path(&self.root, target, symlink_policy, false, LocalFileOperation::Copy)
-            .map_err(copy_failure_unchanged)?;
-        let metadata = self
-            .root
-            .symlink_metadata(&source_path)
-            .map_err(|error| copy_failure_unchanged(rooted_io_error(LocalFileOperation::Copy, source, error)))?;
+        let source_path = resolve_rooted_path(
+            &self.root,
+            source,
+            symlink_policy,
+            false,
+            LocalFileOperation::Copy,
+        )
+        .map_err(copy_failure_unchanged)?;
+        let target_path = resolve_rooted_path(
+            &self.root,
+            target,
+            symlink_policy,
+            false,
+            LocalFileOperation::Copy,
+        )
+        .map_err(copy_failure_unchanged)?;
+        let metadata = self.root.symlink_metadata(&source_path).map_err(|error| {
+            copy_failure_unchanged(rooted_io_error(LocalFileOperation::Copy, source, error))
+        })?;
         let source_kind = super::rooted_metadata(metadata).kind();
         let directory = source_kind == crate::LocalFileKind::Directory;
         crate::local::validate_copy_source_kind(source_kind, options.source_mode()).map_err(|kind| {
@@ -102,24 +114,40 @@ impl RootedLocalFileSystem {
                     .with_target(target.to_path_buf()),
             )
         })?;
-        if crate::local::copy_source_guarantee_unavailable(source_kind, options.atomicity(), options.durability()) {
+        if crate::local::copy_source_guarantee_unavailable(
+            source_kind,
+            options.atomicity(),
+            options.durability(),
+        ) {
             return Err(copy_failure_unchanged(
-                LocalFileError::new(LocalFileErrorKind::RequirementNotMet, LocalFileOperation::Copy)
-                    .with_reason("required copy guarantees are unavailable for this rooted authority")
-                    .with_path(source.to_path_buf())
-                    .with_target(target.to_path_buf()),
+                LocalFileError::new(
+                    LocalFileErrorKind::RequirementNotMet,
+                    LocalFileOperation::Copy,
+                )
+                .with_reason("required copy guarantees are unavailable for this rooted authority")
+                .with_path(source.to_path_buf())
+                .with_target(target.to_path_buf()),
             ));
         }
         let target_is_directory = rooted_destination_is_directory(&self.root, &target_path)
-            .map_err(|error| copy_failure_unchanged(rooted_io_error(LocalFileOperation::Copy, target, error)))?;
+            .map_err(|error| {
+                copy_failure_unchanged(rooted_io_error(LocalFileOperation::Copy, target, error))
+            })?;
         let target_exists = self
             .root
             .symlink_metadata(&target_path)
             .map(|_| true)
-            .or_else(|error| (error.kind() == io::ErrorKind::NotFound).then_some(false).ok_or(error))
-            .map_err(|error| copy_failure_unchanged(rooted_io_error(LocalFileOperation::Copy, target, error)))?;
+            .or_else(|error| {
+                (error.kind() == io::ErrorKind::NotFound)
+                    .then_some(false)
+                    .ok_or(error)
+            })
+            .map_err(|error| {
+                copy_failure_unchanged(rooted_io_error(LocalFileOperation::Copy, target, error))
+            })?;
         if options.type_conflict() == crate::LocalCopyTypeConflictPolicy::Skip
-            && ((directory && !target_is_directory && target_exists) || (!directory && target_is_directory))
+            && ((directory && !target_is_directory && target_exists)
+                || (!directory && target_is_directory))
         {
             return Ok(LocalCopyOutcome::new(
                 LocalCopyStats::skipped_one(),
@@ -140,10 +168,13 @@ impl RootedLocalFileSystem {
             target_is_directory,
         ) {
             return Err(copy_failure_unchanged(
-                LocalFileError::new(LocalFileErrorKind::RequirementNotMet, LocalFileOperation::Copy)
-                    .with_reason("required atomic replacement is unavailable for this copy")
-                    .with_path(source.to_path_buf())
-                    .with_target(target.to_path_buf()),
+                LocalFileError::new(
+                    LocalFileErrorKind::RequirementNotMet,
+                    LocalFileOperation::Copy,
+                )
+                .with_reason("required atomic replacement is unavailable for this copy")
+                .with_path(source.to_path_buf())
+                .with_target(target.to_path_buf()),
             ));
         }
         if options.creates_parent()
@@ -152,15 +183,20 @@ impl RootedLocalFileSystem {
                 .parent()
                 .filter(|parent| !parent.as_os_str().is_empty())
         {
-            let parent =
-                crate::local::LocalRelativePath::new(parent).expect("parent of a validated rooted path is valid");
-            self.root
-                .create_dir_all(&parent)
-                .map_err(|error| copy_failure_unchanged(rooted_io_error(LocalFileOperation::Copy, target, error)))?;
+            let parent = crate::local::LocalRelativePath::new(parent)
+                .expect("parent of a validated rooted path is valid");
+            self.root.create_dir_all(&parent).map_err(|error| {
+                copy_failure_unchanged(rooted_io_error(LocalFileOperation::Copy, target, error))
+            })?;
         }
         let stats = self
             .root
-            .copy_with_durability(&source_path, &target_path, internal_options, options.durability())
+            .copy_with_durability(
+                &source_path,
+                &target_path,
+                internal_options,
+                options.durability(),
+            )
             .map_err(|error| LocalCopyFailure::from_copy_dir_error(source, target, error))?;
         let parent_durable = published_durability(
             options.durability(),

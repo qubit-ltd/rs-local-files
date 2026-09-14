@@ -131,7 +131,9 @@ impl CopyBudget {
     /// Returns a structured resource-limit error when the directory capacity
     /// is exhausted.
     #[inline]
-    pub fn acquire_directory(&self) -> io::Result<Option<ManagedResourcePermit<LocalResourceKind, usize>>> {
+    pub fn acquire_directory(
+        &self,
+    ) -> io::Result<Option<ManagedResourcePermit<LocalResourceKind, usize>>> {
         self.open_directories
             .as_ref()
             .map(|pool| pool.try_acquire(1).map_err(usize_budget_error))
@@ -166,7 +168,12 @@ impl CopyBudget {
 
     /// Copies in bounded chunks, checking the cooperative deadline at every
     /// read and write progress boundary.
-    pub(crate) fn copy_with_now<R, W, N>(&mut self, reader: &mut R, writer: &mut W, mut now: N) -> io::Result<u64>
+    pub(crate) fn copy_with_now<R, W, N>(
+        &mut self,
+        reader: &mut R,
+        writer: &mut W,
+        mut now: N,
+    ) -> io::Result<u64>
     where
         R: Read + ?Sized,
         W: Write + ?Sized,
@@ -204,7 +211,10 @@ impl CopyBudget {
             .deadline
             .is_some_and(|(started, duration)| now.saturating_duration_since(started) >= duration)
         {
-            return Err(io::Error::new(io::ErrorKind::TimedOut, "local copy deadline exceeded"));
+            return Err(io::Error::new(
+                io::ErrorKind::TimedOut,
+                "local copy deadline exceeded",
+            ));
         }
         Ok(())
     }
@@ -297,7 +307,9 @@ fn usize_budget_error(error: InsufficientBudgetError<LocalResourceKind, usize>) 
         remaining,
         requested,
     } = error;
-    resource_error(LocalResourceLimitError::new(resource, limit, remaining, requested))
+    resource_error(LocalResourceLimitError::new(
+        resource, limit, remaining, requested,
+    ))
 }
 
 /// Converts a byte budget failure into structured machine-sized facts.

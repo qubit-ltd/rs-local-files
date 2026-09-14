@@ -53,10 +53,11 @@ impl HostLocalFileSystem {
         {
             Ok(metadata) if metadata.file_type().is_dir() => Some(true),
             Ok(_) => {
-                return Err(
-                    LocalFileError::new(LocalFileErrorKind::TypeConflict, LocalFileOperation::CreateDirectory)
-                        .with_path(bound),
-                );
+                return Err(LocalFileError::new(
+                    LocalFileErrorKind::TypeConflict,
+                    LocalFileOperation::CreateDirectory,
+                )
+                .with_path(bound));
             }
             Err(error) if error.kind() == io::ErrorKind::NotFound => None,
             Err(source) => {
@@ -81,7 +82,8 @@ impl HostLocalFileSystem {
             return Ok(LocalCreateDirectoryOutcome::new(false));
         }
         if options.recursive() {
-            return create_host_directory_tree(&bound, options.exists_ok()).map(LocalCreateDirectoryOutcome::new);
+            return create_host_directory_tree(&bound, options.exists_ok())
+                .map(LocalCreateDirectoryOutcome::new);
         }
         let result = fs::create_dir(&bound);
         match result {
@@ -89,7 +91,8 @@ impl HostLocalFileSystem {
             Err(source)
                 if options.exists_ok()
                     && source.kind() == io::ErrorKind::AlreadyExists
-                    && fs::symlink_metadata(&bound).is_ok_and(|metadata| metadata.file_type().is_dir()) =>
+                    && fs::symlink_metadata(&bound)
+                        .is_ok_and(|metadata| metadata.file_type().is_dir()) =>
             {
                 Ok(LocalCreateDirectoryOutcome::new(false))
             }
@@ -141,7 +144,10 @@ fn create_host_directory_tree(path: &Path, exists_ok: bool) -> LocalResult<bool>
             }
             Err(error) if error.kind() == io::ErrorKind::NotFound => {
                 #[cfg(feature = "test-support")]
-                if crate::local::take_test_support_on_nth("host-create-directory-component-second", 2) {
+                if crate::local::take_test_support_on_nth(
+                    "host-create-directory-component-second",
+                    2,
+                ) {
                     return Err(create_component_error(
                         &current,
                         created_any,
@@ -154,8 +160,8 @@ fn create_host_directory_tree(path: &Path, exists_ok: bool) -> LocalResult<bool>
                         created_target = current == path;
                     }
                     Err(error) if error.kind() == io::ErrorKind::AlreadyExists => {
-                        let raced_directory =
-                            fs::symlink_metadata(&current).is_ok_and(|metadata| metadata.file_type().is_dir());
+                        let raced_directory = fs::symlink_metadata(&current)
+                            .is_ok_and(|metadata| metadata.file_type().is_dir());
                         if !raced_directory || (current == path && !exists_ok) {
                             return Err(create_component_error(&current, created_any, error));
                         }
@@ -175,5 +181,10 @@ fn create_host_directory_tree(path: &Path, exists_ok: bool) -> LocalResult<bool>
 
 /// Builds one recursive-create error while retaining partial publication.
 fn create_component_error(path: &Path, created_any: bool, source: io::Error) -> LocalFileError {
-    directory_mutation_error(LocalFileOperation::CreateDirectory, path, created_any, source)
+    directory_mutation_error(
+        LocalFileOperation::CreateDirectory,
+        path,
+        created_any,
+        source,
+    )
 }

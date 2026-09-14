@@ -97,10 +97,14 @@ pub(super) fn preserve_staged_permissions(
     let result = if crate::local::internal::test_support::is_enabled("copy-staging-permissions") {
         Err(crate::local::test_fault_error())
     } else {
-        staged_file.file().set_permissions(source_metadata.permissions())
+        staged_file
+            .file()
+            .set_permissions(source_metadata.permissions())
     };
     #[cfg(not(feature = "test-support"))]
-    let result = staged_file.file().set_permissions(source_metadata.permissions());
+    let result = staged_file
+        .file()
+        .set_permissions(source_metadata.permissions());
     if let Err(source) = result {
         return Err(copy_dir_error_with_staging(
             LocalCopyDirStage::PreservePermissions,

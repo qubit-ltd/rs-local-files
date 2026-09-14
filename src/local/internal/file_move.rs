@@ -227,7 +227,13 @@ pub(crate) fn move_path_without_replacing(source: &Path, destination: &Path) -> 
     // SAFETY: both UTF-16 buffers are NUL-terminated, contain no interior NUL,
     // and remain alive for the call. MOVEFILE_WRITE_THROUGH is a documented
     // MoveFileExW flag and the function does not retain either pointer.
-    let result = unsafe { MoveFileExW(source.as_ptr(), destination.as_ptr(), MOVEFILE_WRITE_THROUGH) };
+    let result = unsafe {
+        MoveFileExW(
+            source.as_ptr(),
+            destination.as_ptr(),
+            MOVEFILE_WRITE_THROUGH,
+        )
+    };
     if result == 0 {
         Err(std::io::Error::last_os_error())
     } else {
@@ -481,7 +487,8 @@ pub(crate) fn sync_parent_dir(path: &Path) -> Result<()> {
 fn is_ignorable_windows_parent_sync_error(error: &Error) -> bool {
     const ERROR_SHARING_VIOLATION: i32 = 32;
 
-    error.kind() == ErrorKind::PermissionDenied || error.raw_os_error() == Some(ERROR_SHARING_VIOLATION)
+    error.kind() == ErrorKind::PermissionDenied
+        || error.raw_os_error() == Some(ERROR_SHARING_VIOLATION)
 }
 
 /// Gets the parent directory that should be synced for `path`.

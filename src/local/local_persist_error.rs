@@ -344,7 +344,10 @@ mod tests {
         assert_eq!("temporary-updated", error.resource());
         assert!(error.to_string().contains("resolved as '/resolved'"));
         assert!(Error::source(&error).is_some());
-        assert_eq!(Some(Path::new("/workspace")), error.error().current_directory());
+        assert_eq!(
+            Some(Path::new("/workspace")),
+            error.error().current_directory()
+        );
     }
 
     #[test]
@@ -399,6 +402,9 @@ mod tests {
             LocalPersistFailureState::Published,
             LocalTempSourceState::CleanupRequired,
         );
-        assert_eq!(LocalPersistFailureState::Published, destination_error.state());
+        assert_eq!(
+            LocalPersistFailureState::Published,
+            destination_error.state()
+        );
     }
 }

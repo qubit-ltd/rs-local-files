@@ -55,7 +55,8 @@ fn test_host_windows_long_path_staged_publication_matches_std() {
             if existing {
                 fs::write(&path, b"old").expect("std creates long target");
             }
-            let options = LocalWriteOptions::new(LocalWriteMode::CreateOrReplace).with_metadata_policy(policy);
+            let options = LocalWriteOptions::new(LocalWriteMode::CreateOrReplace)
+                .with_metadata_policy(policy);
             let mut writer = host
                 .open_writer_with_options(&path, &options)
                 .expect("open long-path writer");
@@ -88,7 +89,8 @@ fn test_host_parent_creation_keeps_native_dot_traversal_effects() {
         fs::write(root.join("existing"), b"old").expect("existing destination");
     }
     let native_path = native_root.join("missing/../existing");
-    fs::create_dir_all(native_path.parent().expect("native parent")).expect("native parent creation");
+    fs::create_dir_all(native_path.parent().expect("native parent"))
+        .expect("native parent creation");
     fs::write(&native_path, b"new").expect("native replacement");
 
     let host = LocalFileSystem::host().expect("Host filesystem");
@@ -108,7 +110,11 @@ fn test_host_parent_creation_keeps_native_dot_traversal_effects() {
 
     let parent = library_root.join("temp-parent/..");
     let mut temporary = host
-        .create_temp_file_with_options(&LocalTempFileOptions::new().with_parent(&parent).with_create_parent())
+        .create_temp_file_with_options(
+            &LocalTempFileOptions::new()
+                .with_parent(&parent)
+                .with_create_parent(),
+        )
         .expect("temporary native parent creation");
     assert!(library_root.join("temp-parent").is_dir());
     temporary.cleanup().expect("explicit temporary cleanup");
@@ -178,7 +184,10 @@ fn test_host_reject_checks_traversed_link_before_parent() {
     let mut host = LocalFileSystem::host().expect("host filesystem");
     host.set_symlink_policy(LocalSymlinkPolicy::Reject)
         .expect("reject policy");
-    assert!(host.read_prefix(&dir.path().join("link/../config"), 8).is_err());
+    assert!(
+        host.read_prefix(&dir.path().join("link/../config"), 8)
+            .is_err()
+    );
 }
 
 /// Host root-parent traversal follows the platform root semantics.
@@ -213,7 +222,9 @@ fn test_host_metadata_directory_syntax_matches_native() {
                 // Windows may normalize file/. to the file. The facade still
                 // enforces its explicit directory-qualified operand contract.
                 assert_eq!(
-                    observed.expect_err("directory-qualified file must fail").kind(),
+                    observed
+                        .expect_err("directory-qualified file must fail")
+                        .kind(),
                     LocalFileErrorKind::NotDirectory
                 );
             }
@@ -274,11 +285,17 @@ fn test_host_mutations_use_native_parent_target() {
         match operation {
             "copy" => {
                 let _ = host.copy(&config, &output).expect("copy native object");
-                assert_eq!(fs::read(dir.path().join("b/output")).expect("copy result"), b"B");
+                assert_eq!(
+                    fs::read(dir.path().join("b/output")).expect("copy result"),
+                    b"B"
+                );
             }
             "rename" => {
                 let _ = host.rename(&config, &output).expect("rename native object");
-                assert_eq!(fs::read(dir.path().join("b/output")).expect("rename result"), b"B");
+                assert_eq!(
+                    fs::read(dir.path().join("b/output")).expect("rename result"),
+                    b"B"
+                );
                 assert!(!dir.path().join("b/config").exists());
             }
             "delete" => {
@@ -287,7 +304,10 @@ fn test_host_mutations_use_native_parent_target() {
             }
             "writer" => {
                 let mut writer = host
-                    .open_writer_with_options(&config, &LocalWriteOptions::new(LocalWriteMode::CreateOrReplace))
+                    .open_writer_with_options(
+                        &config,
+                        &LocalWriteOptions::new(LocalWriteMode::CreateOrReplace),
+                    )
                     .expect("open native object");
                 writer.write_all(b"changed").expect("staged write");
                 let _ = writer.commit().expect("publish native object");
@@ -297,30 +317,52 @@ fn test_host_mutations_use_native_parent_target() {
                 );
             }
             "directory" => {
-                let _ = host.create_directory(&output).expect("create native directory");
+                let _ = host
+                    .create_directory(&output)
+                    .expect("create native directory");
                 assert!(dir.path().join("b/output").is_dir());
-                let _ = host.delete_directory(&output).expect("delete native directory");
+                let _ = host
+                    .delete_directory(&output)
+                    .expect("delete native directory");
                 assert!(!dir.path().join("b/output").exists());
             }
             "temp-file" => {
                 let temporary = host
-                    .create_temp_file_with_options(&LocalTempFileOptions::new().with_parent(&parent))
+                    .create_temp_file_with_options(
+                        &LocalTempFileOptions::new().with_parent(&parent),
+                    )
                     .expect("create native temporary file");
-                assert_eq!(fs::read_dir(dir.path().join("b")).expect("b entries").count(), 3);
+                assert_eq!(
+                    fs::read_dir(dir.path().join("b"))
+                        .expect("b entries")
+                        .count(),
+                    3
+                );
                 drop(temporary);
                 assert_eq!(
-                    fs::read_dir(dir.path().join("b")).expect("cleaned b entries").count(),
+                    fs::read_dir(dir.path().join("b"))
+                        .expect("cleaned b entries")
+                        .count(),
                     2
                 );
             }
             "temp-directory" => {
                 let temporary = host
-                    .create_temp_directory_with_options(&LocalTempDirectoryOptions::new().with_parent(&parent))
+                    .create_temp_directory_with_options(
+                        &LocalTempDirectoryOptions::new().with_parent(&parent),
+                    )
                     .expect("create native temporary directory");
-                assert_eq!(fs::read_dir(dir.path().join("b")).expect("b entries").count(), 3);
+                assert_eq!(
+                    fs::read_dir(dir.path().join("b"))
+                        .expect("b entries")
+                        .count(),
+                    3
+                );
                 drop(temporary);
                 assert_eq!(
-                    fs::read_dir(dir.path().join("b")).expect("cleaned b entries").count(),
+                    fs::read_dir(dir.path().join("b"))
+                        .expect("cleaned b entries")
+                        .count(),
                     2
                 );
             }
@@ -345,8 +387,11 @@ fn test_host_windows_link_parent_reads_match_native() {
     fs::create_dir_all(fixture.path().join("b/inner")).expect("link destination");
     fs::write(fixture.path().join("a/config"), b"A").expect("lexical content");
     fs::write(fixture.path().join("b/config"), b"B").expect("native content");
-    symlink_dir(fixture.path().join("b/inner"), fixture.path().join("a/link"))
-        .expect("Windows runtime contract requires directory symlink privilege");
+    symlink_dir(
+        fixture.path().join("b/inner"),
+        fixture.path().join("a/link"),
+    )
+    .expect("Windows runtime contract requires directory symlink privilege");
     let host = LocalFileSystem::host().expect("Host filesystem");
     for base in [
         fixture.path().to_path_buf(),
@@ -357,7 +402,10 @@ fn test_host_windows_link_parent_reads_match_native() {
         let path = Path::new(&operand);
         match fs::read(path) {
             Ok(expected) => assert_eq!(host.read_prefix(path, 8).expect("native read"), expected),
-            Err(_) => assert!(host.read_prefix(path, 8).is_err(), "native-invalid operand must fail"),
+            Err(_) => assert!(
+                host.read_prefix(path, 8).is_err(),
+                "native-invalid operand must fail"
+            ),
         }
     }
 }

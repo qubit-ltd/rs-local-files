@@ -146,7 +146,9 @@ fn read_xattr_list(file: &File, buffer: &mut [u8]) -> Result<usize> {
     // descriptor and buffer are not retained by the system call.
     let read = match forced_error {
         Some(_) => -1,
-        None => unsafe { libc::flistxattr(file.as_raw_fd(), buffer.as_mut_ptr().cast(), buffer.len()) },
+        None => unsafe {
+            libc::flistxattr(file.as_raw_fd(), buffer.as_mut_ptr().cast(), buffer.len())
+        },
     };
     xattr_size_result(read, forced_error)
 }
@@ -258,7 +260,9 @@ fn query_xattr_value_length(file: &File, name: &CString) -> Result<usize> {
     // for the current value length.
     let length = match forced_error {
         Some(_) => -1,
-        None => unsafe { libc::fgetxattr(file.as_raw_fd(), name.as_ptr(), std::ptr::null_mut(), 0) },
+        None => unsafe {
+            libc::fgetxattr(file.as_raw_fd(), name.as_ptr(), std::ptr::null_mut(), 0)
+        },
     };
     xattr_size_result(length, forced_error)
 }
@@ -277,20 +281,28 @@ fn query_xattr_value_length(file: &File, name: &CString) -> Result<usize> {
 /// Returns the native `fgetxattr` error or a selected test fault.
 fn read_xattr_value(file: &File, name: &CString, value: &mut [u8]) -> Result<usize> {
     #[cfg(feature = "test-support")]
-    let forced_error = if super::super::test_support::is_enabled("atomic-metadata-value-range-persistent") {
-        Some(libc::ERANGE)
-    } else if super::super::test_support::is_enabled("atomic-metadata-value-read") {
-        Some(libc::EIO)
-    } else {
-        None
-    };
+    let forced_error =
+        if super::super::test_support::is_enabled("atomic-metadata-value-range-persistent") {
+            Some(libc::ERANGE)
+        } else if super::super::test_support::is_enabled("atomic-metadata-value-read") {
+            Some(libc::EIO)
+        } else {
+            None
+        };
     #[cfg(not(feature = "test-support"))]
     let forced_error = None;
     // SAFETY: `value` is writable for its full length and the descriptor and
     // name remain live for this non-retaining system call.
     let read = match forced_error {
         Some(_) => -1,
-        None => unsafe { libc::fgetxattr(file.as_raw_fd(), name.as_ptr(), value.as_mut_ptr().cast(), value.len()) },
+        None => unsafe {
+            libc::fgetxattr(
+                file.as_raw_fd(),
+                name.as_ptr(),
+                value.as_mut_ptr().cast(),
+                value.len(),
+            )
+        },
     };
     xattr_size_result(read, forced_error)
 }
@@ -329,7 +341,15 @@ fn set_xattr(file: &File, name: &[u8], value: &[u8]) -> Result<()> {
     let result = if forced_error {
         -1
     } else {
-        unsafe { libc::fsetxattr(file.as_raw_fd(), name.as_ptr(), value.as_ptr().cast(), value.len(), 0) }
+        unsafe {
+            libc::fsetxattr(
+                file.as_raw_fd(),
+                name.as_ptr(),
+                value.as_ptr().cast(),
+                value.len(),
+                0,
+            )
+        }
     };
     if result == -1 {
         return Err(if forced_error {

@@ -30,7 +30,10 @@ fn test_host_metadata_query_count_is_independent_of_depth() {
         reset_host_metadata_probe_counts();
         assert_eq!(host.metadata(&path).expect("Host metadata").len(), 7);
         let (prefix_probes, final_queries) = host_metadata_probe_counts();
-        assert_eq!(prefix_probes, 0, "default metadata must not inspect prefixes");
+        assert_eq!(
+            prefix_probes, 0,
+            "default metadata must not inspect prefixes"
+        );
         assert_eq!(final_queries, 1);
     }
 }
@@ -50,6 +53,9 @@ fn test_reject_policy_records_required_prefix_probes() {
     reset_host_metadata_probe_counts();
     let _ = host.metadata(&path).expect("metadata without links");
     let (prefix_probes, final_queries) = host_metadata_probe_counts();
-    assert!(prefix_probes > 0, "the instrument must observe policy probes");
+    assert!(
+        prefix_probes > 0,
+        "the instrument must observe policy probes"
+    );
     assert_eq!(final_queries, 1);
 }

@@ -57,7 +57,9 @@ pub(super) fn copy_symlink(
     };
     let action = decide_copy_destination(
         false,
-        destination_metadata.as_ref().map(|_| destination_is_directory),
+        destination_metadata
+            .as_ref()
+            .map(|_| destination_is_directory),
         options.conflict_policy(),
         options.type_conflict_policy(),
     );
@@ -76,7 +78,8 @@ pub(super) fn copy_symlink(
     let replaced_existing = action == CopyDestinationAction::Replace;
     match action {
         CopyDestinationAction::Skip => {
-            statistics.skipped = checked_add(statistics.skipped, 1, source, destination, statistics)?;
+            statistics.skipped =
+                checked_add(statistics.skipped, 1, source, destination, statistics)?;
             return Ok(statistics);
         }
         CopyDestinationAction::Replace => {}
@@ -109,7 +112,15 @@ pub(super) fn copy_symlink(
     #[cfg(windows)]
     let targets_directory = root
         .symlink_targets_directory(source)
-        .map_err(|source_error| error(Stage::InspectSourceEntry, source, destination, statistics, source_error))?;
+        .map_err(|source_error| {
+            error(
+                Stage::InspectSourceEntry,
+                source,
+                destination,
+                statistics,
+                source_error,
+            )
+        })?;
     #[cfg(not(windows))]
     let targets_directory = false;
     if replaced_existing {
@@ -140,7 +151,8 @@ pub(super) fn copy_symlink(
         })?;
     statistics.files = checked_add(statistics.files, 1, source, destination, statistics)?;
     if destination_metadata.is_some() {
-        statistics.overwritten = checked_add(statistics.overwritten, 1, source, destination, statistics)?;
+        statistics.overwritten =
+            checked_add(statistics.overwritten, 1, source, destination, statistics)?;
     }
     statistics.non_atomic_publication = true;
     statistics.files_durable = false;
@@ -149,9 +161,14 @@ pub(super) fn copy_symlink(
 
 /// Maps native publication facts plus prior destination removal into the
 /// strongest end-to-end copy state.
-fn publication_failure_stage(state: RootedSymlinkCreateFailureState, replaced_existing: bool) -> Stage {
+fn publication_failure_stage(
+    state: RootedSymlinkCreateFailureState,
+    replaced_existing: bool,
+) -> Stage {
     match state {
-        RootedSymlinkCreateFailureState::Unchanged if replaced_existing => Stage::PublishSymlinkPartially,
+        RootedSymlinkCreateFailureState::Unchanged if replaced_existing => {
+            Stage::PublishSymlinkPartially
+        }
         RootedSymlinkCreateFailureState::Unchanged => Stage::PublishSymlinkUnchanged,
         #[cfg(windows)]
         RootedSymlinkCreateFailureState::PartiallyPublished => Stage::PublishSymlinkPartially,

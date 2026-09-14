@@ -30,8 +30,10 @@ fn test_directory_copy_statistics_match_publication_actions() {
             fs::create_dir(fixture.path().join("source")).expect("source directory should exist");
             fs::write(fixture.path().join("source/payload"), b"new").expect("payload should exist");
             match existing {
-                "directory" => fs::create_dir(fixture.path().join("target")).expect("target directory should exist"),
-                "file" => fs::write(fixture.path().join("target"), b"old").expect("target file should exist"),
+                "directory" => fs::create_dir(fixture.path().join("target"))
+                    .expect("target directory should exist"),
+                "file" => fs::write(fixture.path().join("target"), b"old")
+                    .expect("target file should exist"),
                 _ => {}
             }
             let filesystem = if rooted {
