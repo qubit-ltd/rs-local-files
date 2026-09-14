@@ -274,6 +274,14 @@ jobs:
     steps:
       - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09
       - uses: dtolnay/rust-toolchain@6bed0761d98439e5a578e2877258200ad565ba87
+      - name: Install suite-specific tools
+        run: |
+          case "${{ matrix.suite }}" in
+            audit) cargo install cargo-audit --locked ;;
+            fuzz) cargo install cargo-fuzz --locked ;;
+            miri) rustup toolchain install nightly --profile minimal --component miri,rust-src ;;
+            address-sanitizer) rustup toolchain install nightly --profile minimal --component rust-src ;;
+          esac
       - name: Run configured infrastructure suite
         run: ./.infra/tools/infra-tool.sh rs-infra-verify --project "$GITHUB_WORKSPACE" run --suite "${{ matrix.suite }}"
 
