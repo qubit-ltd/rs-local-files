@@ -243,3 +243,48 @@ jobs:
       fs_local_ref: main
       mime_ref: main
       support_ref: main
+
+  pages:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - name: Build GitHub Pages site
+        run: ./.infra/tools/infra-tool.sh rs-infra-pages --project "$GITHUB_WORKSPACE" build
+      - name: Prepare GitHub Pages artifact
+        run: ./.infra/tools/infra-tool.sh rs-infra-pages --project "$GITHUB_WORKSPACE" artifact
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: public
+
+  advanced-verification:
+    name: Infrastructure suite (${{ matrix.suite }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        suite:
+          - miri
+          - address-sanitizer
+          - loom
+          - fuzz
+          - audit
+          - cross
+          - platform
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - name: Run configured infrastructure suite
+        run: ./.infra/tools/infra-tool.sh rs-infra-verify --project "$GITHUB_WORKSPACE" run --suite "${{ matrix.suite }}"
+
+  pages-deploy:
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    needs: [pages]
+    runs-on: ubuntu-latest
+    permissions:
+      pages: write
+      id-token: write
+    environment:
+      name: github-pages
+    steps:
+      - uses: actions/deploy-pages@v4

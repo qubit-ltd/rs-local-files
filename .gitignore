@@ -83,3 +83,4 @@ external/
 
 # Locally installed pinned rs-infra tools
 .infra/tools/bin/
+public/
