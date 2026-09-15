@@ -247,9 +247,18 @@ jobs:
       support_ref: main
 
   pages:
+    needs: [coverage, feature-matrix]
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main' && needs.coverage.result == 'success' && needs.feature-matrix.result == 'success'
+    outputs:
+      deploy: ${{ steps.pages-config.outputs.deploy }}
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09
+      - name: Validate Pages configuration
+        id: pages-config
+        run: |
+          jq -e '.deploy | type == "boolean"' .infra/ci/pages.json >/dev/null
+          echo "deploy=$(jq -r .deploy .infra/ci/pages.json)" >> "$GITHUB_OUTPUT"
       - uses: dtolnay/rust-toolchain@6bed0761d98439e5a578e2877258200ad565ba87
       - name: Build GitHub Pages site
         run: ./.infra/tools/infra-tool.sh rs-infra-pages --project "$GITHUB_WORKSPACE" build
@@ -288,7 +297,7 @@ jobs:
         run: ./.infra/tools/infra-tool.sh rs-infra-verify --project "$GITHUB_WORKSPACE" run --suite "${{ matrix.suite }}"
 
   pages-deploy:
-    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    if: needs.pages.outputs.deploy == 'true' && github.event_name == 'push' && github.ref == 'refs/heads/main'
     needs: [pages]
     runs-on: ubuntu-latest
     permissions:
