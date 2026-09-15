@@ -43,10 +43,18 @@ package=$(tool_value package)
 
 mkdir -p "$bin_dir"
 target="$bin_dir/$binary"
-if [ ! -x "$target" ]; then
+revision_marker="$install_root/$tool.revision"
+installed_revision=""
+if [ -f "$revision_marker" ]; then
+    IFS= read -r installed_revision < "$revision_marker" || true
+fi
+if [ ! -x "$target" ] || [ "$installed_revision" != "$revision" ]; then
     echo "==> installing $tool@$revision"
-    cargo install --git "$source" --rev "$revision" --locked --root "$install_root" \
+    cargo install --git "$source" --rev "$revision" --locked --force --root "$install_root" \
         "$package" --bin "$binary"
+    marker_tmp="$revision_marker.tmp"
+    printf '%s\n' "$revision" > "$marker_tmp"
+    mv "$marker_tmp" "$revision_marker"
 fi
 
 if [ "$tool" = "rs-infra-ci" ]; then

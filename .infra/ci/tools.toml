@@ -1,18 +1,18 @@
 [rs-infra-style]
 source = "https://github.com/qubit-ltd/rs-infra-style.git"
-revision = "1dc2ef5b156f7d8acf88ef61a4cd7ea35f8ecdd9"
+revision = "b38ed5bc601c7f81116da03dd6924583885eb986"
 binary = "rs-infra-style"
 package = "qubit-infra-style"
 
 [rs-infra-verify]
 source = "https://github.com/qubit-ltd/rs-infra-verify.git"
-revision = "168b5222c401ff1e2245a2b902fe2813e321b180"
+revision = "3d59ff2189be13a16fcf26b7d207315ab3ab606a"
 binary = "rs-infra-verify"
 package = "qubit-infra-verify"
 
 [rs-infra-coverage]
 source = "https://github.com/qubit-ltd/rs-infra-coverage.git"
-revision = "ca8e9f5a81e3f7f85a0a8f56e71341c62a1e08bd"
+revision = "de49b025b33bc350770d816d641af6fb16488d4a"
 binary = "rs-infra-coverage"
 package = "qubit-infra-coverage"
 
