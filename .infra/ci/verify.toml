@@ -1,2 +1,0 @@
-version = 1
-required = ["lock", "build", "test", "doc", "package", "clippy", "feature-matrix", "cross", "platform", "miri", "address-sanitizer", "loom", "fuzz", "audit"]
