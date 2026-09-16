@@ -19,14 +19,7 @@ pub(super) fn preserve_extended_metadata(source: &File, staging: &File) -> Resul
     // SAFETY: both descriptors remain live for this non-retaining call. A
     // null copyfile state requests the default state, and both flags are
     // native metadata-only copyfile flags.
-    let result = unsafe {
-        libc::fcopyfile(
-            source.as_raw_fd(),
-            staging.as_raw_fd(),
-            std::ptr::null_mut(),
-            flags,
-        )
-    };
+    let result = unsafe { libc::fcopyfile(source.as_raw_fd(), staging.as_raw_fd(), std::ptr::null_mut(), flags) };
     if result == -1 {
         return Err(Error::last_os_error());
     }

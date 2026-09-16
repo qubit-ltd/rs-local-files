@@ -51,15 +51,8 @@ pub(crate) fn prepare_persist_target(
                 "persistence base must be absolute without dot or parent components",
             ));
         }
-        if target.has_root()
-            || target
-                .components()
-                .any(|part| matches!(part, Component::Prefix(_)))
-        {
-            return Err(invalid(
-                target,
-                "persist_at requires a strictly relative target",
-            ));
+        if target.has_root() || target.components().any(|part| matches!(part, Component::Prefix(_))) {
+            return Err(invalid(target, "persist_at requires a strictly relative target"));
         }
         LocalPathResolver::new(scope, base)?
     } else {
@@ -91,8 +84,7 @@ pub(crate) fn validate_persist_base(
             std::fs::metadata(path).map(|metadata| metadata.is_dir())
         }
         LocalTempResourceBackend::Rooted(rooted) => {
-            let bound = LocalPathResolver::new(LocalFileSystemScope::Rooted, Path::new("/"))?
-                .resolve(base)?;
+            let bound = LocalPathResolver::new(LocalFileSystemScope::Rooted, Path::new("/"))?.resolve(base)?;
             let relative = bound.authority_relative();
             if relative.as_os_str().is_empty() {
                 rooted
@@ -118,20 +110,14 @@ pub(crate) fn validate_persist_base(
         }
     };
     let directory = result.map_err(|error| {
-        LocalFileError::from_io(
-            LocalFileOperation::PersistTemp,
-            Some(base.to_path_buf()),
-            None,
-            error,
-        )
+        LocalFileError::from_io(LocalFileOperation::PersistTemp, Some(base.to_path_buf()), None, error)
     })?;
     if !directory {
-        return Err(LocalFileError::new(
-            LocalFileErrorKind::NotDirectory,
-            LocalFileOperation::PersistTemp,
-        )
-        .with_path(base.to_path_buf())
-        .with_reason("persistence base must be an existing directory"));
+        return Err(
+            LocalFileError::new(LocalFileErrorKind::NotDirectory, LocalFileOperation::PersistTemp)
+                .with_path(base.to_path_buf())
+                .with_reason("persistence base must be an existing directory"),
+        );
     }
     Ok(())
 }
@@ -141,10 +127,7 @@ fn namespace_absolute(scope: LocalFileSystemScope, path: &Path) -> bool {
     match scope {
         LocalFileSystemScope::Host => path.is_absolute(),
         LocalFileSystemScope::Rooted => {
-            path.has_root()
-                && !path
-                    .components()
-                    .any(|part| matches!(part, Component::Prefix(_)))
+            path.has_root() && !path.components().any(|part| matches!(part, Component::Prefix(_)))
         }
     }
 }
@@ -177,10 +160,7 @@ fn contains_dot_component(_path: &Path) -> bool {
 
 /// Returns a structured invalid-operand error preserving its original spelling.
 fn invalid(path: &Path, reason: &'static str) -> LocalFileError {
-    LocalFileError::new(
-        LocalFileErrorKind::InvalidPath,
-        LocalFileOperation::PersistTemp,
-    )
-    .with_path(path.to_path_buf())
-    .with_reason(reason)
+    LocalFileError::new(LocalFileErrorKind::InvalidPath, LocalFileOperation::PersistTemp)
+        .with_path(path.to_path_buf())
+        .with_reason(reason)
 }

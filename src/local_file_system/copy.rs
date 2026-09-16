@@ -50,12 +50,7 @@ impl LocalFileSystem {
     /// Tree copies can fail after publishing descendants; inspect the failure
     /// state, partial statistics, and cleanup error before retrying.
     #[allow(clippy::result_large_err)]
-    pub fn copy_with_options(
-        &self,
-        source: &Path,
-        destination: &Path,
-        options: &LocalCopyOptions,
-    ) -> LocalCopyResult {
+    pub fn copy_with_options(&self, source: &Path, destination: &Path, options: &LocalCopyOptions) -> LocalCopyResult {
         let started_at = Instant::now();
         let request_source = source;
         let request_destination = destination;
@@ -76,49 +71,30 @@ impl LocalFileSystem {
             ))
         })?;
         let resolver = self
-            .resolver_for_pair(
-                request_source,
-                request_destination,
-                LocalFileOperation::Copy,
-            )
-            .map_err(|error| {
-                copy_failure_unchanged(error.with_target(request_destination.to_path_buf()))
-            })?;
+            .resolver_for_pair(request_source, request_destination, LocalFileOperation::Copy)
+            .map_err(|error| copy_failure_unchanged(error.with_target(request_destination.to_path_buf())))?;
         let source = resolve_operation_path(&resolver, request_source, LocalFileOperation::Copy)
-            .map_err(|error| {
-                copy_failure_unchanged(error.with_target(request_destination.to_path_buf()))
-            })?;
+            .map_err(|error| copy_failure_unchanged(error.with_target(request_destination.to_path_buf())))?;
         let destination =
-            resolve_operation_path(&resolver, request_destination, LocalFileOperation::Copy)
-                .map_err(|error| {
-                    copy_failure_unchanged(
-                        error
-                            .with_path(request_source.to_path_buf())
-                            .with_target(request_destination.to_path_buf()),
-                    )
-                })?;
-        self.reject_root_operand(
-            &source,
-            LocalFileOperation::Copy,
-            resolver.current_directory(),
-        )
-        .map_err(|error| {
-            copy_failure_unchanged(
-                error.with_target(destination.namespace_absolute().to_path_buf()),
-            )
-        })?;
-        self.reject_root_operand(
-            &destination,
-            LocalFileOperation::Copy,
-            resolver.current_directory(),
-        )
-        .map_err(|error| {
-            copy_failure_unchanged(
-                error
-                    .with_path(source.namespace_absolute().to_path_buf())
-                    .with_target(destination.namespace_absolute().to_path_buf()),
-            )
-        })?;
+            resolve_operation_path(&resolver, request_destination, LocalFileOperation::Copy).map_err(|error| {
+                copy_failure_unchanged(
+                    error
+                        .with_path(request_source.to_path_buf())
+                        .with_target(request_destination.to_path_buf()),
+                )
+            })?;
+        self.reject_root_operand(&source, LocalFileOperation::Copy, resolver.current_directory())
+            .map_err(|error| {
+                copy_failure_unchanged(error.with_target(destination.namespace_absolute().to_path_buf()))
+            })?;
+        self.reject_root_operand(&destination, LocalFileOperation::Copy, resolver.current_directory())
+            .map_err(|error| {
+                copy_failure_unchanged(
+                    error
+                        .with_path(source.namespace_absolute().to_path_buf())
+                        .with_target(destination.namespace_absolute().to_path_buf()),
+                )
+            })?;
         let directory_qualified = source.directory_required() || destination.directory_required();
         let directory_options;
         let options = if directory_qualified {
@@ -129,15 +105,10 @@ impl LocalFileSystem {
                 }
                 crate::LocalCopySourceMode::Tree => options,
                 crate::LocalCopySourceMode::Entry => {
-                    let error = LocalFileError::new(
-                        LocalFileErrorKind::NotDirectory,
-                        LocalFileOperation::Copy,
-                    )
-                    .with_reason(
-                        "directory-qualified copy paths are incompatible with entry source mode",
-                    )
-                    .with_path(source.namespace_absolute().to_path_buf())
-                    .with_target(destination.namespace_absolute().to_path_buf());
+                    let error = LocalFileError::new(LocalFileErrorKind::NotDirectory, LocalFileOperation::Copy)
+                        .with_reason("directory-qualified copy paths are incompatible with entry source mode")
+                        .with_path(source.namespace_absolute().to_path_buf())
+                        .with_target(destination.namespace_absolute().to_path_buf());
                     return Err(copy_failure_unchanged(with_current_directory(
                         error,
                         resolver.current_directory(),
@@ -217,71 +188,42 @@ impl LocalFileSystem {
         let request_source = source;
         let request_destination = destination;
         let resolver = self
-            .resolver_for_pair(
-                request_source,
-                request_destination,
-                LocalFileOperation::Rename,
-            )
-            .map_err(|error| {
-                rename_failure_unchanged(error.with_target(request_destination.to_path_buf()))
-            })?;
+            .resolver_for_pair(request_source, request_destination, LocalFileOperation::Rename)
+            .map_err(|error| rename_failure_unchanged(error.with_target(request_destination.to_path_buf())))?;
         let source = resolve_operation_path(&resolver, request_source, LocalFileOperation::Rename)
-            .map_err(|error| {
-                rename_failure_unchanged(error.with_target(request_destination.to_path_buf()))
-            })?;
+            .map_err(|error| rename_failure_unchanged(error.with_target(request_destination.to_path_buf())))?;
         let destination =
-            resolve_operation_path(&resolver, request_destination, LocalFileOperation::Rename)
-                .map_err(|error| {
-                    rename_failure_unchanged(
-                        error
-                            .with_path(request_source.to_path_buf())
-                            .with_target(request_destination.to_path_buf()),
-                    )
-                })?;
-        self.reject_root_operand(
-            &source,
-            LocalFileOperation::Rename,
-            resolver.current_directory(),
-        )
-        .map_err(|error| {
-            rename_failure_unchanged(
-                error.with_target(destination.namespace_absolute().to_path_buf()),
-            )
-        })?;
-        self.reject_root_operand(
-            &destination,
-            LocalFileOperation::Rename,
-            resolver.current_directory(),
-        )
-        .map_err(|error| {
-            rename_failure_unchanged(
-                error
-                    .with_path(source.namespace_absolute().to_path_buf())
-                    .with_target(destination.namespace_absolute().to_path_buf()),
-            )
-        })?;
-        self.validate_directory_requirement(
-            &source,
-            LocalFileOperation::Rename,
-            resolver.current_directory(),
-        )
-        .map_err(|error| {
-            rename_failure_unchanged(
-                error.with_target(destination.namespace_absolute().to_path_buf()),
-            )
-        })?;
-        self.validate_directory_requirement(
-            &destination,
-            LocalFileOperation::Rename,
-            resolver.current_directory(),
-        )
-        .map_err(|error| {
-            rename_failure_unchanged(
-                error
-                    .with_path(source.namespace_absolute().to_path_buf())
-                    .with_target(destination.namespace_absolute().to_path_buf()),
-            )
-        })?;
+            resolve_operation_path(&resolver, request_destination, LocalFileOperation::Rename).map_err(|error| {
+                rename_failure_unchanged(
+                    error
+                        .with_path(request_source.to_path_buf())
+                        .with_target(request_destination.to_path_buf()),
+                )
+            })?;
+        self.reject_root_operand(&source, LocalFileOperation::Rename, resolver.current_directory())
+            .map_err(|error| {
+                rename_failure_unchanged(error.with_target(destination.namespace_absolute().to_path_buf()))
+            })?;
+        self.reject_root_operand(&destination, LocalFileOperation::Rename, resolver.current_directory())
+            .map_err(|error| {
+                rename_failure_unchanged(
+                    error
+                        .with_path(source.namespace_absolute().to_path_buf())
+                        .with_target(destination.namespace_absolute().to_path_buf()),
+                )
+            })?;
+        self.validate_directory_requirement(&source, LocalFileOperation::Rename, resolver.current_directory())
+            .map_err(|error| {
+                rename_failure_unchanged(error.with_target(destination.namespace_absolute().to_path_buf()))
+            })?;
+        self.validate_directory_requirement(&destination, LocalFileOperation::Rename, resolver.current_directory())
+            .map_err(|error| {
+                rename_failure_unchanged(
+                    error
+                        .with_path(source.namespace_absolute().to_path_buf())
+                        .with_target(destination.namespace_absolute().to_path_buf()),
+                )
+            })?;
         let result = match &self.core.namespace {
             LocalNamespace::Host => HostLocalFileSystem::rename_with_policy(
                 source.authority_relative(),

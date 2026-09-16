@@ -126,14 +126,7 @@ pub(super) fn copy(
                 &mut budget,
             )
         }
-        EntryKind::Symlink => copy_symlink(
-            root,
-            source,
-            destination,
-            &options,
-            Statistics::default(),
-            &mut budget,
-        ),
+        EntryKind::Symlink => copy_symlink(root, source, destination, &options, Statistics::default(), &mut budget),
         EntryKind::Other => Err(error(
             Stage::InspectSource,
             source,
@@ -142,14 +135,12 @@ pub(super) fn copy(
             unsupported_source_error(),
         )),
         #[cfg(unix)]
-        EntryKind::Fifo | EntryKind::Socket | EntryKind::BlockDevice | EntryKind::CharDevice => {
-            Err(error(
-                Stage::InspectSource,
-                source,
-                destination,
-                Statistics::default(),
-                unsupported_source_error(),
-            ))
-        }
+        EntryKind::Fifo | EntryKind::Socket | EntryKind::BlockDevice | EntryKind::CharDevice => Err(error(
+            Stage::InspectSource,
+            source,
+            destination,
+            Statistics::default(),
+            unsupported_source_error(),
+        )),
     }
 }

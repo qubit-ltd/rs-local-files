@@ -72,8 +72,7 @@ pub(super) fn prepare_directory(
                     source_error,
                 )
             })?;
-            statistics.directories =
-                checked_add(statistics.directories, 1, source, destination, *statistics)?;
+            statistics.directories = checked_add(statistics.directories, 1, source, destination, *statistics)?;
             Ok(true)
         }
         Some(metadata) => {
@@ -86,19 +85,13 @@ pub(super) fn prepare_directory(
             ) {
                 Some(CopyDestinationAction::Merge) => {
                     if options.conflict_policy() == ConflictPolicy::Overwrite {
-                        statistics.overwritten = checked_add(
-                            statistics.overwritten,
-                            1,
-                            source,
-                            destination,
-                            *statistics,
-                        )?;
+                        statistics.overwritten =
+                            checked_add(statistics.overwritten, 1, source, destination, *statistics)?;
                     }
                     Ok(true)
                 }
                 Some(CopyDestinationAction::Skip) => {
-                    statistics.skipped =
-                        checked_add(statistics.skipped, 1, source, destination, *statistics)?;
+                    statistics.skipped = checked_add(statistics.skipped, 1, source, destination, *statistics)?;
                     Ok(false)
                 }
                 Some(CopyDestinationAction::Replace) => {
@@ -125,10 +118,8 @@ pub(super) fn prepare_directory(
                             source_error,
                         )
                     })?;
-                    statistics.directories =
-                        checked_add(statistics.directories, 1, source, destination, *statistics)?;
-                    statistics.overwritten =
-                        checked_add(statistics.overwritten, 1, source, destination, *statistics)?;
+                    statistics.directories = checked_add(statistics.directories, 1, source, destination, *statistics)?;
+                    statistics.overwritten = checked_add(statistics.overwritten, 1, source, destination, *statistics)?;
                     Ok(true)
                 }
                 Some(CopyDestinationAction::Create) => {

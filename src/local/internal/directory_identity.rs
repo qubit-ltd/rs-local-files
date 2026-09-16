@@ -47,16 +47,10 @@ pub(crate) enum DirectoryIdentity {
 
 impl DirectoryIdentity {
     /// Builds an identity from descriptor-relative rooted metadata.
-    pub(crate) fn from_rooted_metadata(
-        metadata: &crate::rooted::Metadata,
-        fallback: &Path,
-    ) -> Self {
+    pub(crate) fn from_rooted_metadata(metadata: &crate::rooted::Metadata, fallback: &Path) -> Self {
         #[cfg(all(feature = "test-support", any(unix, windows)))]
         if injected_cycle_identity() {
-            return Self::Native {
-                filesystem: 0,
-                file: 0,
-            };
+            return Self::Native { filesystem: 0, file: 0 };
         }
         #[cfg(any(unix, windows))]
         {
@@ -88,10 +82,7 @@ impl DirectoryIdentity {
     pub(crate) fn from_metadata(metadata: &Metadata, canonical_path: &Path) -> Self {
         #[cfg(feature = "test-support")]
         if injected_cycle_identity() {
-            return Self::Native {
-                filesystem: 0,
-                file: 0,
-            };
+            return Self::Native { filesystem: 0, file: 0 };
         }
         let _ = canonical_path;
         Self::Native {
@@ -114,14 +105,10 @@ impl DirectoryIdentity {
     pub(crate) fn from_metadata(metadata: &Metadata, canonical_path: &Path) -> Self {
         #[cfg(feature = "test-support")]
         if injected_cycle_identity() {
-            return Self::Native {
-                filesystem: 0,
-                file: 0,
-            };
+            return Self::Native { filesystem: 0, file: 0 };
         }
         let _ = metadata;
-        windows_native_identity(canonical_path)
-            .unwrap_or_else(|| Self::Canonical(canonical_path.to_path_buf()))
+        windows_native_identity(canonical_path).unwrap_or_else(|| Self::Canonical(canonical_path.to_path_buf()))
     }
 
     /// Builds a canonical directory identity on other targets.
@@ -162,8 +149,7 @@ fn windows_native_identity(path: &Path) -> Option<DirectoryIdentity> {
     let mut information = BY_HANDLE_FILE_INFORMATION::default();
     // SAFETY: `directory` owns a valid handle for the duration of the call,
     // and `information` is a writable structure with the required layout.
-    let result =
-        unsafe { GetFileInformationByHandle(directory.as_raw_handle(), &raw mut information) };
+    let result = unsafe { GetFileInformationByHandle(directory.as_raw_handle(), &raw mut information) };
     if result == 0 {
         return None;
     }

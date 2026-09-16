@@ -33,10 +33,7 @@ fn test_local_atomic_write_error_exposes_context_and_formats_secondary_errors() 
     assert_eq!(error.stage(), LocalAtomicWriteStage::ReplaceDestination);
     assert_eq!(error.path(), Path::new("target"));
     assert_eq!(error.temporary_path(), Some(Path::new("staging")));
-    assert_eq!(
-        error.destination_state(),
-        LocalAtomicDestinationState::Replaced
-    );
+    assert_eq!(error.destination_state(), LocalAtomicDestinationState::Replaced);
     assert!(error.cleanup_error().is_some());
     assert!(error.parent_sync_error().is_some());
     assert_eq!(error.source_error().kind(), io::ErrorKind::Other);

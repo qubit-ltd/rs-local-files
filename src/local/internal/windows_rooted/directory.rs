@@ -33,10 +33,7 @@ use crate::local::internal::rooted_directory_reader::RootedDirectoryReader;
 /// Opens a lazy reader for immediate children of the opened root.
 ///
 /// Returns an I/O error when the root handle cannot be duplicated.
-pub(crate) fn open_root_directory_reader(
-    root: &File,
-    _diagnostic_root: &Path,
-) -> Result<RootedDirectoryReader> {
+pub(crate) fn open_root_directory_reader(root: &File, _diagnostic_root: &Path) -> Result<RootedDirectoryReader> {
     root.try_clone().map(RootedDirectoryReader::new)
 }
 
@@ -122,9 +119,7 @@ pub(crate) fn create_rooted_directory(
                 verify_real_directory(&directory)?;
                 parent = directory;
             }
-            Err(source_error)
-                if !recursive && !final_component && source_error.kind() == ErrorKind::NotFound =>
-            {
+            Err(source_error) if !recursive && !final_component && source_error.kind() == ErrorKind::NotFound => {
                 return Err(source_error);
             }
             Err(source_error) => return Err(source_error),
@@ -140,11 +135,7 @@ pub(crate) fn create_rooted_directory(
 /// # Errors
 ///
 /// Returns an I/O error when traversal, enumeration, or handle deletion fails.
-pub(crate) fn remove_rooted_entry(
-    root: &File,
-    _diagnostic_root: &Path,
-    path: &LocalRelativePath,
-) -> Result<()> {
+pub(crate) fn remove_rooted_entry(root: &File, _diagnostic_root: &Path, path: &LocalRelativePath) -> Result<()> {
     delete_rooted_entry(root, path)
 }
 
@@ -155,23 +146,14 @@ pub(crate) fn remove_rooted_entry(
 /// Returns an I/O error when the entry cannot be opened or deleted.
 #[inline]
 fn delete_rooted_entry(root: &File, path: &LocalRelativePath) -> Result<()> {
-    let entry = open_entry_no_follow(
-        root,
-        path,
-        DELETE | FILE_READ_ATTRIBUTES | SYNCHRONIZE,
-        FILE_OPEN,
-        0,
-    )?;
+    let entry = open_entry_no_follow(root, path, DELETE | FILE_READ_ATTRIBUTES | SYNCHRONIZE, FILE_OPEN, 0)?;
     delete_open_entry(&entry)
 }
 
 /// Enumerates one already opened directory with `NtQueryDirectoryFile`.
 /// Returns an eager list sorted by native name, retaining a handle per child.
 /// Propagates handle duplication, native enumeration, and child-open errors.
-fn read_directory_handle(
-    directory: &File,
-    _diagnostic_root: &Path,
-) -> Result<Vec<(OsString, File)>> {
+fn read_directory_handle(directory: &File, _diagnostic_root: &Path) -> Result<Vec<(OsString, File)>> {
     let mut entries = Vec::new();
     let mut reader = RootedDirectoryReader::new(directory.try_clone()?);
     while let Some(entry) = reader.next_entry()? {

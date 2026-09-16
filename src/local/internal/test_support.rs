@@ -46,10 +46,7 @@ static ACTIVE_FAULT: (Mutex<Option<ActiveFault>>, Condvar) = (Mutex::new(None), 
 #[doc(hidden)]
 pub fn install_test_fault(name: &str) -> io::Result<TestFaultGuard> {
     let owner = std::thread::current().id();
-    let mut active = ACTIVE_FAULT
-        .0
-        .lock()
-        .unwrap_or_else(std::sync::PoisonError::into_inner);
+    let mut active = ACTIVE_FAULT.0.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
     loop {
         match active.as_ref() {
             Some(current) if current.owner == owner => {
@@ -83,10 +80,7 @@ impl Drop for TestFaultGuard {
         if !self.active {
             return;
         }
-        let mut active = ACTIVE_FAULT
-            .0
-            .lock()
-            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        let mut active = ACTIVE_FAULT.0.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
         active.take();
         ONE_SHOT_FAULT_TAKEN.store(false, Ordering::Relaxed);
         NTH_FAULT_OCCURRENCES.store(0, Ordering::Relaxed);

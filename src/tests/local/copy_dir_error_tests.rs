@@ -39,10 +39,7 @@ fn test_local_copy_dir_error_exposes_parts_and_formats_cleanup_context() {
     let (_, source, destination, _, staging, cleanup, native) = error.into_parts();
     assert_eq!(source, PathBuf::from("source"));
     assert_eq!(destination, PathBuf::from("destination"));
-    assert_eq!(
-        staging.expect("staging path").as_ref(),
-        Path::new("staging")
-    );
+    assert_eq!(staging.expect("staging path").as_ref(), Path::new("staging"));
     assert!(cleanup.is_some());
     assert_eq!(native.kind(), io::ErrorKind::Other);
 }

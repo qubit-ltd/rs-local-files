@@ -33,17 +33,13 @@ impl ScriptedReader {
 
 impl Read for ScriptedReader {
     fn read(&mut self, buffer: &mut [u8]) -> io::Result<usize> {
-        let action = self
-            .actions
-            .pop_front()
-            .unwrap_or(ScriptedAction::Bytes(Vec::new()));
+        let action = self.actions.pop_front().unwrap_or(ScriptedAction::Bytes(Vec::new()));
         match action {
             ScriptedAction::Bytes(bytes) => {
                 let count = bytes.len().min(buffer.len());
                 buffer[..count].copy_from_slice(&bytes[..count]);
                 if count < bytes.len() {
-                    self.actions
-                        .push_front(ScriptedAction::Bytes(bytes[count..].to_vec()));
+                    self.actions.push_front(ScriptedAction::Bytes(bytes[count..].to_vec()));
                 }
                 Ok(count)
             }
@@ -63,8 +59,8 @@ fn test_vectored_fallback_returns_progress_before_later_error() {
     let mut second = [0_u8; 2];
     let mut buffers = [IoSliceMut::new(&mut first), IoSliceMut::new(&mut second)];
 
-    let count = read_vectored_fallback(&mut reader, &mut buffers)
-        .expect("progress before a later error should be returned");
+    let count =
+        read_vectored_fallback(&mut reader, &mut buffers).expect("progress before a later error should be returned");
 
     assert_eq!(count, 2);
     assert_eq!(&first, b"ab");
@@ -78,8 +74,7 @@ fn test_vectored_fallback_returns_first_error_without_progress() {
     let mut buffer = [0_u8; 2];
     let mut buffers = [IoSliceMut::new(&mut buffer)];
 
-    let error = read_vectored_fallback(&mut reader, &mut buffers)
-        .expect_err("the first error should be preserved");
+    let error = read_vectored_fallback(&mut reader, &mut buffers).expect_err("the first error should be preserved");
 
     assert_eq!(error.kind(), ErrorKind::PermissionDenied);
     assert_eq!(&buffer, &[0_u8; 2]);
@@ -111,8 +106,8 @@ fn test_vectored_fallback_stops_after_short_read() {
     let mut second = [0_u8; 2];
     let mut buffers = [IoSliceMut::new(&mut first), IoSliceMut::new(&mut second)];
 
-    let count = read_vectored_fallback(&mut reader, &mut buffers)
-        .expect("a short read should complete the vectored operation");
+    let count =
+        read_vectored_fallback(&mut reader, &mut buffers).expect("a short read should complete the vectored operation");
 
     assert_eq!(count, 1);
     assert_eq!(&first, &[b'a', 0]);
@@ -130,8 +125,7 @@ fn test_vectored_fallback_stops_at_eof() {
     let mut second = [0_u8; 2];
     let mut buffers = [IoSliceMut::new(&mut first), IoSliceMut::new(&mut second)];
 
-    let count = read_vectored_fallback(&mut reader, &mut buffers)
-        .expect("EOF should complete the vectored operation");
+    let count = read_vectored_fallback(&mut reader, &mut buffers).expect("EOF should complete the vectored operation");
 
     assert_eq!(count, 0);
     assert_eq!(&first, &[0_u8; 2]);

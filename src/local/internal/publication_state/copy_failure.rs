@@ -64,15 +64,6 @@ pub(crate) fn copy_failure_indeterminate(error: LocalFileError) -> LocalCopyFail
 ///
 /// A copy failure marked as published with the supplied statistics.
 #[inline]
-pub(crate) fn copy_failure_published(
-    error: LocalFileError,
-    partial_stats: LocalCopyStats,
-) -> LocalCopyFailure {
-    LocalCopyFailure::new(
-        error,
-        LocalCopyFailureState::Published,
-        partial_stats,
-        None,
-        None,
-    )
+pub(crate) fn copy_failure_published(error: LocalFileError, partial_stats: LocalCopyStats) -> LocalCopyFailure {
+    LocalCopyFailure::new(error, LocalCopyFailureState::Published, partial_stats, None, None)
 }

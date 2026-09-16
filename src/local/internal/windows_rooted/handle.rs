@@ -209,11 +209,7 @@ pub(super) fn open_parent_for_rename(
 /// Returns the owned parent and final name; an empty path is `InvalidInput`.
 /// Native duplication/open/inspection and name-encoding failures propagate,
 /// dropping any intermediate handles acquired by this attempt.
-fn open_parent_with_access(
-    root: &File,
-    path: &LocalRelativePath,
-    access: u32,
-) -> Result<(File, OsString)> {
+fn open_parent_with_access(root: &File, path: &LocalRelativePath, access: u32) -> Result<(File, OsString)> {
     let mut components: Vec<OsString> = path
         .as_path()
         .components()

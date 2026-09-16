@@ -99,8 +99,7 @@ impl LocalFileSystem {
             });
         }
         let resolver = self.resolver_for(path, LocalFileOperation::SetCurrentDirectory)?;
-        let resolved =
-            resolve_operation_path(&resolver, path, LocalFileOperation::SetCurrentDirectory)?;
+        let resolved = resolve_operation_path(&resolver, path, LocalFileOperation::SetCurrentDirectory)?;
         self.validate_directory(&resolved).map_err(|error| {
             operation_error(
                 error,
@@ -137,9 +136,7 @@ impl LocalFileSystem {
     /// scope. The previous policy remains installed on error.
     pub fn set_symlink_policy(&mut self, policy: LocalSymlinkPolicy) -> LocalResult<()> {
         validate_scope_symlink_policy(self.scope(), policy, LocalFileOperation::Configure, None)
-            .map_err(|error| {
-                with_current_directory(error, self.current_directory.virtual_path())
-            })?;
+            .map_err(|error| with_current_directory(error, self.current_directory.virtual_path()))?;
         self.symlink_policy = policy;
         Ok(())
     }
@@ -192,9 +189,7 @@ impl LocalFileSystem {
     /// The previously installed options remain unchanged on error.
     pub fn set_default_write_options(&mut self, options: LocalWriteOptions) -> LocalResult<()> {
         validate_write_options(&options, self.capabilities(), LocalFileOperation::Configure)
-            .map_err(|error| {
-                with_current_directory(error, self.current_directory.virtual_path())
-            })?;
+            .map_err(|error| with_current_directory(error, self.current_directory.virtual_path()))?;
         self.defaults.write = options;
         Ok(())
     }
@@ -213,9 +208,8 @@ impl LocalFileSystem {
     /// Returns [`LocalFileError`] for a zero open-directory limit or a
     /// scope-incompatible symlink policy; existing defaults remain unchanged.
     pub fn set_default_list_options(&mut self, options: LocalListOptions) -> LocalResult<()> {
-        validate_list_options(self.scope(), self.symlink_policy, &options, None).map_err(
-            |error| with_current_directory(error, self.current_directory.virtual_path()),
-        )?;
+        validate_list_options(self.scope(), self.symlink_policy, &options, None)
+            .map_err(|error| with_current_directory(error, self.current_directory.virtual_path()))?;
         self.defaults.list = options;
         Ok(())
     }
@@ -262,10 +256,7 @@ impl LocalFileSystem {
     ///
     /// This setter is currently infallible; its `Result` keeps all
     /// configuration setters uniform and allows future validation.
-    pub fn set_default_create_directory_options(
-        &mut self,
-        options: LocalCreateDirectoryOptions,
-    ) -> LocalResult<()> {
+    pub fn set_default_create_directory_options(&mut self, options: LocalCreateDirectoryOptions) -> LocalResult<()> {
         self.defaults.create_directory = options;
         Ok(())
     }
@@ -304,9 +295,7 @@ impl LocalFileSystem {
     /// The previously installed options remain unchanged on error.
     pub fn set_default_rename_options(&mut self, options: LocalRenameOptions) -> LocalResult<()> {
         validate_rename_options(&options, self.capabilities(), LocalFileOperation::Configure)
-            .map_err(|error| {
-                with_current_directory(error, self.current_directory.virtual_path())
-            })?;
+            .map_err(|error| with_current_directory(error, self.current_directory.virtual_path()))?;
         self.defaults.rename = options;
         Ok(())
     }
@@ -324,10 +313,7 @@ impl LocalFileSystem {
     ///
     /// Returns [`LocalFileError`] for invalid affixes or a zero attempt budget;
     /// existing defaults remain unchanged.
-    pub fn set_default_temp_file_options(
-        &mut self,
-        options: LocalTempFileOptions,
-    ) -> LocalResult<()> {
+    pub fn set_default_temp_file_options(&mut self, options: LocalTempFileOptions) -> LocalResult<()> {
         validate_temp_options(
             options.prefix(),
             options.suffix(),
@@ -352,10 +338,7 @@ impl LocalFileSystem {
     ///
     /// Returns [`LocalFileError`] for invalid affixes or a zero attempt budget;
     /// existing defaults remain unchanged.
-    pub fn set_default_temp_directory_options(
-        &mut self,
-        options: LocalTempDirectoryOptions,
-    ) -> LocalResult<()> {
+    pub fn set_default_temp_directory_options(&mut self, options: LocalTempDirectoryOptions) -> LocalResult<()> {
         validate_temp_options(
             options.prefix(),
             options.suffix(),

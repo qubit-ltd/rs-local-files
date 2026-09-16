@@ -46,20 +46,19 @@ fn bench_path_codec(c: &mut Criterion) {
     let native = std::ffi::OsStr::new("manifest%2Fready");
     c.bench_function("path_codec", |b| {
         b.iter(|| {
-            let canonical = LocalPathCodec::encode_component(black_box(native))
-                .expect("benchmark component should encode");
-            let restored = LocalPathCodec::decode_component(&canonical)
-                .expect("benchmark component should decode");
+            let canonical =
+                LocalPathCodec::encode_component(black_box(native)).expect("benchmark component should encode");
+            let restored = LocalPathCodec::decode_component(&canonical).expect("benchmark component should decode");
             black_box(restored);
         });
     });
     let plain = std::ffi::OsStr::new("ordinary-unicode-文档");
     c.bench_function("path_codec_plain", |b| {
         b.iter(|| {
-            let canonical = LocalPathCodec::encode_component(black_box(plain))
-                .expect("plain benchmark component should encode");
-            let restored = LocalPathCodec::decode_component(&canonical)
-                .expect("plain benchmark component should decode");
+            let canonical =
+                LocalPathCodec::encode_component(black_box(plain)).expect("plain benchmark component should encode");
+            let restored =
+                LocalPathCodec::decode_component(&canonical).expect("plain benchmark component should decode");
             black_box(restored);
         });
     });
@@ -96,12 +95,10 @@ fn bench_walk_handle_budget(c: &mut Criterion) {
         current.push(format!("level-{depth}"));
         fs::create_dir(&current).expect("budget benchmark level should be created");
     }
-    fs::write(current.join("payload"), b"payload")
-        .expect("budget benchmark leaf should be written");
+    fs::write(current.join("payload"), b"payload").expect("budget benchmark leaf should be written");
 
     let host = LocalFileSystem::host().expect("Host filesystem should open");
-    let rooted = LocalFileSystem::rooted(directory.path())
-        .expect("budget rooted benchmark filesystem should open");
+    let rooted = LocalFileSystem::rooted(directory.path()).expect("budget rooted benchmark filesystem should open");
     let mut group = c.benchmark_group("walk_handle_budget");
     for max_open_directories in [1, 4, 64] {
         let options = LocalListOptions::new()
@@ -142,11 +139,7 @@ fn bench_walk_handle_budget(c: &mut Criterion) {
 fn count_entries(filesystem: &LocalFileSystem, path: &Path, options: &LocalListOptions) -> usize {
     filesystem
         .list_with_options(path, options)
-        .and_then(|mut walker| {
-            walker.try_fold(0_usize, |count, entry| {
-                entry.map(|_| count.saturating_add(1))
-            })
-        })
+        .and_then(|mut walker| walker.try_fold(0_usize, |count, entry| entry.map(|_| count.saturating_add(1))))
         .expect("benchmark traversal should complete without errors")
 }
 
@@ -186,10 +179,7 @@ fn bench_copy(c: &mut Criterion) {
 fn fresh_copy_target() -> (tempfile::TempDir, PathBuf) {
     let directory = tempdir().expect("copy target parent should be created");
     let target = directory.path().join("target");
-    assert!(
-        !target.exists(),
-        "copy iteration must start with an absent target"
-    );
+    assert!(!target.exists(), "copy iteration must start with an absent target");
     (directory, target)
 }
 
@@ -200,9 +190,7 @@ fn bench_copy_budget_width(c: &mut Criterion) {
     for rooted in [false, true] {
         let scope = if rooted { "rooted" } else { "host" };
         for width in [100usize, 10_000] {
-            let options = LocalCopyOptions::new()
-                .with_tree_source()
-                .with_max_entries(1);
+            let options = LocalCopyOptions::new().with_tree_source().with_max_entries(1);
             let fixture = tempdir().expect("width fixture should exist");
             let source = create_wide_source(fixture.path(), width);
             let (filesystem, source, target) = copy_coordinates(fixture.path(), &source, rooted);
@@ -219,11 +207,7 @@ fn bench_copy_budget_width(c: &mut Criterion) {
                         (directory, coordinates)
                     },
                     |(_, (filesystem, source, target))| {
-                        let _ = black_box(filesystem.copy_with_options(
-                            black_box(source),
-                            black_box(target),
-                            &options,
-                        ));
+                        let _ = black_box(filesystem.copy_with_options(black_box(source), black_box(target), &options));
                     },
                     criterion::BatchSize::PerIteration,
                 );
@@ -242,13 +226,13 @@ fn bench_copy_tree_depth(c: &mut Criterion) {
         for depth in [1usize, 8, 32, 64] {
             for limited in [false, true] {
                 let label = if limited { "limit" } else { "success" };
-                let options = LocalCopyOptions::new()
-                    .with_tree_source()
-                    .with_max_depth(if limited { depth } else { depth + 1 });
+                let options =
+                    LocalCopyOptions::new()
+                        .with_tree_source()
+                        .with_max_depth(if limited { depth } else { depth + 1 });
                 let fixture = tempdir().expect("depth fixture should exist");
                 let source = create_deep_source(fixture.path(), depth);
-                let (filesystem, source, target) =
-                    copy_coordinates(fixture.path(), &source, rooted);
+                let (filesystem, source, target) = copy_coordinates(fixture.path(), &source, rooted);
                 let result = filesystem.copy_with_options(&source, &target, &options);
                 if limited {
                     assert_copy_limit(result, LocalResourceKind::Depth);
@@ -269,18 +253,14 @@ fn bench_copy_tree_depth(c: &mut Criterion) {
                 group.bench_function(format!("{scope}/{label}_depth_{depth}"), |bench| {
                     bench.iter_batched_ref(
                         || {
-                            let directory =
-                                tempdir().expect("depth benchmark directory should exist");
+                            let directory = tempdir().expect("depth benchmark directory should exist");
                             let source = create_deep_source(directory.path(), depth);
                             let coordinates = copy_coordinates(directory.path(), &source, rooted);
                             (directory, coordinates)
                         },
                         |(_, (filesystem, source, target))| {
-                            let _ = black_box(filesystem.copy_with_options(
-                                black_box(source),
-                                black_box(target),
-                                &options,
-                            ));
+                            let _ =
+                                black_box(filesystem.copy_with_options(black_box(source), black_box(target), &options));
                         },
                         criterion::BatchSize::PerIteration,
                     );
@@ -315,11 +295,7 @@ fn create_deep_source(parent: &Path, depth: usize) -> PathBuf {
 }
 
 /// Binds one fixture to equivalent Host or Rooted operation coordinates.
-fn copy_coordinates(
-    parent: &Path,
-    source: &Path,
-    rooted: bool,
-) -> (LocalFileSystem, PathBuf, PathBuf) {
+fn copy_coordinates(parent: &Path, source: &Path, rooted: bool) -> (LocalFileSystem, PathBuf, PathBuf) {
     if rooted {
         (
             LocalFileSystem::rooted(parent).expect("root should open"),
@@ -346,10 +322,7 @@ fn assert_copy_limit(result: LocalCopyResult, resource: LocalResourceKind) {
     assert!(failure.cleanup_error().is_none());
     assert_eq!(
         Some(resource),
-        failure
-            .error()
-            .resource_limit_error()
-            .map(|error| error.resource())
+        failure.error().resource_limit_error().map(|error| error.resource())
     );
 }
 
@@ -394,9 +367,7 @@ fn write_benchmark_payload(filesystem: &LocalFileSystem, target: &Path) {
             &LocalWriteOptions::new(LocalWriteMode::CreateOrReplace),
         )
         .expect("benchmark writer should open");
-    writer
-        .write_all(b"payload")
-        .expect("benchmark write should succeed");
+    writer.write_all(b"payload").expect("benchmark write should succeed");
     let outcome = writer.commit().expect("benchmark commit should succeed");
     let _ = black_box(outcome);
 }
@@ -439,10 +410,7 @@ fn bench_writer_scenarios(c: &mut Criterion) {
         for existing in [false, true] {
             let target_mode = if existing { "replace" } else { "new" };
             for (metadata_name, metadata) in [
-                (
-                    "preserve_existing",
-                    LocalWriteMetadataPolicy::PreserveExisting,
-                ),
+                ("preserve_existing", LocalWriteMetadataPolicy::PreserveExisting),
                 ("use_staging", LocalWriteMetadataPolicy::UseStaging),
             ] {
                 for (durability_name, durability) in [
@@ -452,15 +420,10 @@ fn bench_writer_scenarios(c: &mut Criterion) {
                     let options = LocalWriteOptions::new(LocalWriteMode::CreateOrReplace)
                         .with_metadata_policy(metadata)
                         .with_durability(durability);
-                    for (size_name, size) in
-                        [("4KiB", 4 * 1024), ("1MiB", 1 << 20), ("16MiB", 16 << 20)]
-                    {
-                        let id = format!(
-                            "{scope}/{target_mode}/{metadata_name}/{durability_name}/{size_name}"
-                        );
+                    for (size_name, size) in [("4KiB", 4 * 1024), ("1MiB", 1 << 20), ("16MiB", 16 << 20)] {
+                        let id = format!("{scope}/{target_mode}/{metadata_name}/{durability_name}/{size_name}");
                         let payload = vec![0x5a; size];
-                        let (filesystem, target, directory) =
-                            writer_scenario_target(rooted, existing);
+                        let (filesystem, target, directory) = writer_scenario_target(rooted, existing);
                         match write_scenario_payload(&filesystem, &target, &options, &payload) {
                             Ok(outcome) => {
                                 assert_writer_outcome(outcome, size, durability);
@@ -473,8 +436,7 @@ fn bench_writer_scenarios(c: &mut Criterion) {
                             Err(error)
                                 if matches!(
                                     error.kind(),
-                                    LocalFileErrorKind::Unsupported
-                                        | LocalFileErrorKind::RequirementNotMet
+                                    LocalFileErrorKind::Unsupported | LocalFileErrorKind::RequirementNotMet
                                 ) =>
                             {
                                 eprintln!("UNSUPPORTED writer_scenarios/{id}: {error}");
@@ -488,10 +450,8 @@ fn bench_writer_scenarios(c: &mut Criterion) {
                             bench.iter_batched_ref(
                                 || writer_scenario_target(rooted, existing),
                                 |(filesystem, target, _)| {
-                                    let outcome = write_scenario_payload(
-                                        filesystem, target, &options, &payload,
-                                    )
-                                    .expect("registered writer scenario should succeed");
+                                    let outcome = write_scenario_payload(filesystem, target, &options, &payload)
+                                        .expect("registered writer scenario should succeed");
                                     assert_writer_outcome(outcome, size, durability);
                                     let _ = black_box(outcome);
                                 },
@@ -508,14 +468,10 @@ fn bench_writer_scenarios(c: &mut Criterion) {
 
 /// Creates a fresh scope and target; replacement setup writes old bytes before
 /// timing and panics if the independent fixture cannot be prepared.
-fn writer_scenario_target(
-    rooted: bool,
-    existing: bool,
-) -> (LocalFileSystem, PathBuf, tempfile::TempDir) {
+fn writer_scenario_target(rooted: bool, existing: bool) -> (LocalFileSystem, PathBuf, tempfile::TempDir) {
     let (filesystem, target, directory) = fresh_writer_target(rooted);
     if existing {
-        fs::write(directory.path().join("target"), b"old content")
-            .expect("replacement target should be created");
+        fs::write(directory.path().join("target"), b"old content").expect("replacement target should be created");
     }
     (filesystem, target, directory)
 }
@@ -539,19 +495,12 @@ fn write_scenario_payload(
 }
 
 /// Fails a sample if commit did not establish the requested successful result.
-fn assert_writer_outcome(
-    outcome: LocalWriteOutcome,
-    size: usize,
-    durability: LocalDurabilityRequirement,
-) {
+fn assert_writer_outcome(outcome: LocalWriteOutcome, size: usize, durability: LocalDurabilityRequirement) {
     assert_eq!(outcome.state(), LocalWriterState::Committed);
     assert_eq!(outcome.bytes_written(), size);
     assert!(outcome.failure_state().is_none());
     if durability == LocalDurabilityRequirement::Required {
-        assert!(
-            outcome.durable(),
-            "required durability must not silently downgrade"
-        );
+        assert!(outcome.durable(), "required durability must not silently downgrade");
     }
 }
 
@@ -570,11 +519,7 @@ fn bench_temp_directory_cleanup(c: &mut Criterion) {
                     .cleanup()
                     .expect("cleanup fixture should succeed within its limits");
                 assert!(!physical.exists(), "cleanup must remove the fixture tree");
-                group.throughput(criterion::Throughput::Elements(if wide {
-                    10_001
-                } else {
-                    321
-                }));
+                group.throughput(criterion::Throughput::Elements(if wide { 10_001 } else { 321 }));
                 group.bench_function(id, |bench| {
                     bench.iter_batched_ref(
                         || cleanup_fixture(rooted, wide, &options),
@@ -622,8 +567,7 @@ fn cleanup_fixture(
     let directory = tempdir().expect("cleanup scratch parent should exist");
     let (filesystem, options) = if rooted {
         (
-            LocalFileSystem::rooted(directory.path())
-                .expect("cleanup Rooted filesystem should open"),
+            LocalFileSystem::rooted(directory.path()).expect("cleanup Rooted filesystem should open"),
             options.clone(),
         )
     } else {
@@ -647,8 +591,7 @@ fn cleanup_fixture(
     };
     if wide {
         for index in 0..10_000 {
-            fs::write(physical.join(format!("entry-{index}")), b"x")
-                .expect("wide cleanup entry should exist");
+            fs::write(physical.join(format!("entry-{index}")), b"x").expect("wide cleanup entry should exist");
         }
     } else {
         let mut current = physical.clone();
@@ -656,8 +599,7 @@ fn cleanup_fixture(
             current.push("d");
             fs::create_dir(&current).expect("deep cleanup directory should exist");
             for index in 0..4 {
-                fs::write(current.join(format!("entry-{index}")), b"x")
-                    .expect("deep cleanup entry should exist");
+                fs::write(current.join(format!("entry-{index}")), b"x").expect("deep cleanup entry should exist");
             }
         }
     }
@@ -694,19 +636,16 @@ fn bench_deep_metadata(c: &mut Criterion) {
             relative.push("d");
         }
         let physical_dir = directory.path().join(&relative);
-        fs::create_dir_all(&physical_dir)
-            .expect("deep metadata benchmark directories should be created");
+        fs::create_dir_all(&physical_dir).expect("deep metadata benchmark directories should be created");
         relative.push("payload");
         let physical = directory.path().join(&relative);
-        fs::write(&physical, b"payload")
-            .expect("deep metadata benchmark payload should be written");
+        fs::write(&physical, b"payload").expect("deep metadata benchmark payload should be written");
         let host = LocalFileSystem::host().expect("Host filesystem should open");
-        let rooted =
-            LocalFileSystem::rooted(directory.path()).expect("Rooted filesystem should open");
+        let rooted = LocalFileSystem::rooted(directory.path()).expect("Rooted filesystem should open");
         group.bench_function(format!("std/depth_{depth}"), |bench| {
             bench.iter(|| {
-                let metadata = fs::symlink_metadata(black_box(&physical))
-                    .expect("std deep metadata lookup should succeed");
+                let metadata =
+                    fs::symlink_metadata(black_box(&physical)).expect("std deep metadata lookup should succeed");
                 black_box(metadata.len());
             });
         });

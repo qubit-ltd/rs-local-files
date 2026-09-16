@@ -103,12 +103,11 @@ impl HostLocalFileSystem {
         scope_root: Option<&Path>,
     ) -> LocalCopyResult {
         let symlink_policy = options.symlink_policy_override().unwrap_or(symlink_policy);
-        let [bound_source, bound_target] =
-            bind_host_paths([source, target]).map_err(copy_failure_unchanged)?;
-        let resolved_source = resolve_host_path(&bound_source, symlink_policy, false)
-            .map_err(copy_failure_unchanged)?;
-        let resolved_target = resolve_host_path(&bound_target, symlink_policy, false)
-            .map_err(copy_failure_unchanged)?;
+        let [bound_source, bound_target] = bind_host_paths([source, target]).map_err(copy_failure_unchanged)?;
+        let resolved_source =
+            resolve_host_path(&bound_source, symlink_policy, false).map_err(copy_failure_unchanged)?;
+        let resolved_target =
+            resolve_host_path(&bound_target, symlink_policy, false).map_err(copy_failure_unchanged)?;
         Self::copy_resolved_with_policy(
             &resolved_source,
             &resolved_target,
@@ -170,8 +169,8 @@ impl HostLocalFileSystem {
             internal_options = internal_options.with_max_entries(max_entries - 1);
         }
         let implements_durability = Self::capabilities().supports_durable_file_copy();
-        let implements_durability = implements_durability
-            && !crate::local::test_support_enabled("local-fs-required-directory-durability");
+        let implements_durability =
+            implements_durability && !crate::local::test_support_enabled("local-fs-required-directory-durability");
         ensure_required_directory_durability(
             options.durability(),
             LocalFileOperation::Copy,
@@ -201,11 +200,7 @@ impl HostLocalFileSystem {
             )
         })?;
         reject_copy_alias(source, target, &source_metadata).map_err(copy_failure_unchanged)?;
-        if crate::local::copy_source_guarantee_unavailable(
-            source_kind,
-            options.atomicity(),
-            options.durability(),
-        ) {
+        if crate::local::copy_source_guarantee_unavailable(source_kind, options.atomicity(), options.durability()) {
             return Err(copy_failure_unchanged(
                 LocalFileError::new(LocalFileErrorKind::RequirementNotMet, LocalFileOperation::Copy)
                     .with_reason("required copy guarantees are unavailable for directory and symbolic-link sources")
@@ -224,12 +219,9 @@ impl HostLocalFileSystem {
                 return Err(copy_failure_unchanged(copy_io_error(source, target, error)));
             }
             let stats = match scope_root {
-                Some(scope_root) => crate::local::copy_dir_all_with_paths_scoped(
-                    source,
-                    target,
-                    internal_options,
-                    scope_root,
-                ),
+                Some(scope_root) => {
+                    crate::local::copy_dir_all_with_paths_scoped(source, target, internal_options, scope_root)
+                }
                 None => crate::local::copy_dir_all_with_paths(source, target, internal_options),
             };
             let stats = match stats {
@@ -257,13 +249,10 @@ impl HostLocalFileSystem {
             target_is_directory,
         ) {
             return Err(copy_failure_unchanged(
-                LocalFileError::new(
-                    LocalFileErrorKind::RequirementNotMet,
-                    LocalFileOperation::Copy,
-                )
-                .with_reason("required atomic replacement is unavailable for this copy")
-                .with_path(source.to_path_buf())
-                .with_target(target.to_path_buf()),
+                LocalFileError::new(LocalFileErrorKind::RequirementNotMet, LocalFileOperation::Copy)
+                    .with_reason("required atomic replacement is unavailable for this copy")
+                    .with_path(source.to_path_buf())
+                    .with_target(target.to_path_buf()),
             ));
         }
 
@@ -275,21 +264,14 @@ impl HostLocalFileSystem {
         };
 
         let mut stats = crate::local::LocalCopyDirStats::default();
-        if let Err(error) = crate::local::copy_file_with_options(
-            source,
-            target,
-            internal_options,
-            &mut stats,
-            &mut budget,
-        ) {
+        if let Err(error) =
+            crate::local::copy_file_with_options(source, target, internal_options, &mut stats, &mut budget)
+        {
             return Err(copy_pipeline_failure(source, target, error));
         }
         let parent_durable = published_durability(
             options.durability(),
-            || {
-                sync_parent_directory(target)
-                    .and_then(|()| sync_created_parent_directories(&parent_dirs_to_sync))
-            },
+            || sync_parent_directory(target).and_then(|()| sync_created_parent_directories(&parent_dirs_to_sync)),
             LocalFileOperation::Copy,
             source,
             target,
@@ -342,9 +324,7 @@ fn copy_symlink_entry(
             return Err(copy_failure_unchanged(copy_io_error(source, target, error)));
         }
     };
-    let existing_is_directory = existing
-        .as_ref()
-        .map(|metadata| metadata.file_type().is_dir());
+    let existing_is_directory = existing.as_ref().map(|metadata| metadata.file_type().is_dir());
     let action = decide_copy_destination(
         false,
         existing_is_directory,
@@ -395,9 +375,7 @@ fn copy_symlink_entry(
             _ => fs::remove_file(target),
         };
         if let Err(error) = remove_result {
-            return Err(copy_failure_indeterminate(copy_io_error(
-                source, target, error,
-            )));
+            return Err(copy_failure_indeterminate(copy_io_error(source, target, error)));
         }
     }
     let create_result = test_io_fault("local-fs-copy-symlink-create")
@@ -423,8 +401,8 @@ fn copy_symlink_entry(
             .and_then(|()| sync_created_parent_directories(&parent_dirs_to_sync))
             .is_ok(),
         crate::LocalDurabilityRequirement::Required => {
-            if let Err(error) = sync_parent_directory(target)
-                .and_then(|()| sync_created_parent_directories(&parent_dirs_to_sync))
+            if let Err(error) =
+                sync_parent_directory(target).and_then(|()| sync_created_parent_directories(&parent_dirs_to_sync))
             {
                 return Err(copy_failure_published(
                     copy_io_error(source, target, error),
@@ -502,30 +480,23 @@ fn sync_created_parent_directories(paths: &[PathBuf]) -> io::Result<()> {
 ///
 /// Returns `LocalFileError` when both paths identify the same entry, or when
 /// target metadata or native file identity cannot be inspected.
-fn reject_copy_alias(
-    source: &Path,
-    target: &Path,
-    source_metadata: &fs::Metadata,
-) -> LocalResult<()> {
+fn reject_copy_alias(source: &Path, target: &Path, source_metadata: &fs::Metadata) -> LocalResult<()> {
     if source == target {
         return Err(copy_alias_error(source, target));
     }
-    let target_metadata = match test_io_fault("local-fs-copy-target-metadata")
-        .map_or_else(|| fs::symlink_metadata(target), Err)
-    {
-        Ok(metadata) => metadata,
-        Err(error) if error.kind() == io::ErrorKind::NotFound => {
-            return Ok(());
-        }
-        Err(error) => return Err(copy_io_error(source, target, error)),
-    };
+    let target_metadata =
+        match test_io_fault("local-fs-copy-target-metadata").map_or_else(|| fs::symlink_metadata(target), Err) {
+            Ok(metadata) => metadata,
+            Err(error) if error.kind() == io::ErrorKind::NotFound => {
+                return Ok(());
+            }
+            Err(error) => return Err(copy_io_error(source, target, error)),
+        };
     #[cfg(unix)]
     {
         use std::os::unix::fs::MetadataExt;
 
-        if source_metadata.dev() == target_metadata.dev()
-            && source_metadata.ino() == target_metadata.ino()
-        {
+        if source_metadata.dev() == target_metadata.dev() && source_metadata.ino() == target_metadata.ino() {
             return Err(copy_alias_error(source, target));
         }
     }
@@ -536,10 +507,8 @@ fn reject_copy_alias(
         }
         if !source_metadata.file_type().is_symlink()
             && !target_metadata.file_type().is_symlink()
-            && windows_file_identity(source)
-                .map_err(|error| copy_io_error(source, target, error))?
-                == windows_file_identity(target)
-                    .map_err(|error| copy_io_error(source, target, error))?
+            && windows_file_identity(source).map_err(|error| copy_io_error(source, target, error))?
+                == windows_file_identity(target).map_err(|error| copy_io_error(source, target, error))?
         {
             return Err(copy_alias_error(source, target));
         }
@@ -580,8 +549,7 @@ fn windows_file_identity(path: &Path) -> io::Result<(u32, u64)> {
     if unsafe { GetFileInformationByHandle(file.as_raw_handle(), &raw mut information) } == 0 {
         return Err(io::Error::last_os_error());
     }
-    let file_index =
-        (u64::from(information.nFileIndexHigh) << 32) | u64::from(information.nFileIndexLow);
+    let file_index = (u64::from(information.nFileIndexHigh) << 32) | u64::from(information.nFileIndexLow);
     Ok((information.dwVolumeSerialNumber, file_index))
 }
 
@@ -604,11 +572,7 @@ fn copy_alias_error(source: &Path, target: &Path) -> LocalFileError {
 
 /// Converts a pipeline failure into a lossless public copy failure.
 #[inline]
-fn copy_pipeline_failure(
-    source: &Path,
-    target: &Path,
-    error: crate::local::LocalCopyDirError,
-) -> LocalCopyFailure {
+fn copy_pipeline_failure(source: &Path, target: &Path, error: crate::local::LocalCopyDirError) -> LocalCopyFailure {
     LocalCopyFailure::from_copy_dir_error(source, target, error)
 }
 

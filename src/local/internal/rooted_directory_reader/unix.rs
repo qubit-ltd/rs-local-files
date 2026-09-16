@@ -26,10 +26,7 @@ impl RootedDirectoryReader {
     ///
     /// Returns an I/O error when the descriptor cannot be duplicated for
     /// enumeration.
-    pub(in crate::local::internal) fn open(
-        directory: File,
-        diagnostic_path: &Path,
-    ) -> Result<Self> {
+    pub(in crate::local::internal) fn open(directory: File, diagnostic_path: &Path) -> Result<Self> {
         let stream = Dir::read_from(&directory)?;
         Ok(Self {
             directory,
@@ -54,8 +51,7 @@ impl RootedDirectoryReader {
                 continue;
             }
             let name = OsString::from_vec(name.to_vec());
-            let c_name =
-                CString::new(name.as_bytes()).expect("directory entry names never contain NUL");
+            let c_name = CString::new(name.as_bytes()).expect("directory entry names never contain NUL");
             let status = stat_child(&self.directory, &c_name, &self.diagnostic_path)?;
             return Ok(Some((name, status)));
         }

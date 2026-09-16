@@ -198,11 +198,7 @@ impl LocalCopyDirError {
     /// This copy error enriched with staging cleanup context.
     #[must_use]
     #[inline]
-    pub fn with_staging_context(
-        mut self,
-        temporary_path: PathBuf,
-        cleanup_error: Option<io::Error>,
-    ) -> Self {
+    pub fn with_staging_context(mut self, temporary_path: PathBuf, cleanup_error: Option<io::Error>) -> Self {
         self.temporary_path = Some(temporary_path.into_boxed_path());
         self.cleanup_error = cleanup_error;
         self

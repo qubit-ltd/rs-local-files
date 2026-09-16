@@ -39,11 +39,7 @@ fn test_rooted_paths_round_trip_virtual_absolute_components() {
             .to_canonical_components(Path::new("/escape"))
             .expect("rooted virtual absolute paths should encode"),
     );
-    assert!(
-        paths
-            .to_canonical_components(Path::new("relative"))
-            .is_err()
-    );
+    assert!(paths.to_canonical_components(Path::new("relative")).is_err());
 }
 
 /// Verifies canonical component decoders accept iterators without requiring a
@@ -150,20 +146,13 @@ fn test_rooted_canonical_components_retain_path_codec_failure() {
 
     assert_eq!(LocalFileErrorKind::InvalidPath, error.kind());
     assert_eq!(LocalFileOperation::ComposePath, error.operation());
-    assert!(matches!(
-        error.typed_source(),
-        Some(LocalFileErrorSource::PathCodec(_))
-    ));
+    assert!(matches!(error.typed_source(), Some(LocalFileErrorSource::PathCodec(_))));
 }
 
 /// Verifies Host canonical components reject authority-changing components.
 #[test]
 fn test_absolute_conversion_rejects_relative_shape() {
-    assert!(
-        LocalPaths::host()
-            .from_canonical_components(["a", "%2F"])
-            .is_err()
-    );
+    assert!(LocalPaths::host().from_canonical_components(["a", "%2F"]).is_err());
 }
 
 /// Verifies canonical rooted components round-trip through virtual absolute
@@ -214,10 +203,7 @@ fn test_rooted_canonical_components_reject_native_nul() {
 
     assert_eq!(LocalFileErrorKind::InvalidPath, error.kind());
     assert_eq!(LocalFileOperation::ComposePath, error.operation());
-    assert!(matches!(
-        error.typed_source(),
-        Some(LocalFileErrorSource::PathCodec(_))
-    ));
+    assert!(matches!(error.typed_source(), Some(LocalFileErrorSource::PathCodec(_))));
 }
 
 /// Verifies that native filename access does not require UTF-8 conversion.
@@ -285,11 +271,7 @@ fn test_local_paths_expose_scope_and_native_file_names() {
 
     assert_eq!(LocalFileSystemScope::Host, host.scope());
     assert_eq!(LocalFileSystemScope::Rooted, rooted.scope());
-    assert!(
-        host.file_names()
-            .validate(OsStr::new("native-name"))
-            .is_ok()
-    );
+    assert!(host.file_names().validate(OsStr::new("native-name")).is_ok());
 }
 
 /// Verifies native Unix random-name affixes retain non-UTF-8 bytes.
@@ -326,10 +308,7 @@ fn test_rooted_paths_round_trip_unix_non_utf8_component() {
         .from_canonical_components(canonical.iter().map(String::as_str))
         .expect("canonical Unix component should decode");
 
-    assert_eq!(
-        native.as_os_str().as_bytes(),
-        decoded.as_os_str().as_bytes()
-    );
+    assert_eq!(native.as_os_str().as_bytes(), decoded.as_os_str().as_bytes());
 }
 
 /// Verifies rooted path conversion preserves Windows unpaired surrogates
@@ -363,10 +342,6 @@ fn test_rooted_paths_round_trip_windows_unpaired_surrogate() {
 fn test_rooted_paths_reject_windows_drive_relative_prefix() {
     let paths = LocalPaths::rooted();
 
-    assert!(
-        paths
-            .to_canonical_components(Path::new(r"C:escape"))
-            .is_err()
-    );
+    assert!(paths.to_canonical_components(Path::new(r"C:escape")).is_err());
     assert!(paths.from_canonical_components(["C:escape"]).is_err());
 }

@@ -41,12 +41,7 @@ impl Display for LocalCopyFailure {
             "copy failed with {:?} state: {}",
             self.details.state, self.details.error
         )?;
-        if let (
-            Some(request_source),
-            Some(request_target),
-            Some(failed_source),
-            Some(failed_target),
-        ) = (
+        if let (Some(request_source), Some(request_target), Some(failed_source), Some(failed_target)) = (
             self.details.request_source_path.as_deref(),
             self.details.request_target_path.as_deref(),
             self.details.failed_source_path.as_deref(),
@@ -98,13 +93,8 @@ impl LocalCopyFailure {
 
     /// Converts a structured native copy-pipeline error without losing facts.
     #[must_use]
-    pub(crate) fn from_copy_dir_error(
-        source: &Path,
-        target: &Path,
-        error: LocalCopyDirError,
-    ) -> Self {
-        let (stage, failed_source, failed_target, stats, staging_path, cleanup_error, primary) =
-            error.into_parts();
+    pub(crate) fn from_copy_dir_error(source: &Path, target: &Path, error: LocalCopyDirError) -> Self {
+        let (stage, failed_source, failed_target, stats, staging_path, cleanup_error, primary) = error.into_parts();
         let partial_stats = LocalCopyStats::from_internal(stats);
         let state = copy_failure_state(stage, partial_stats);
         let resource_limit = primary
@@ -220,23 +210,17 @@ impl LocalCopyFailure {
         rooted: bool,
         current_directory: Option<&Path>,
     ) -> Self {
-        let map_source =
-            |path: &Path| map_backend_path(path, backend_source, request_source, rooted);
-        let map_target =
-            |path: &Path| map_backend_path(path, backend_target, request_target, rooted);
+        let map_source = |path: &Path| map_backend_path(path, backend_source, request_source, rooted);
+        let map_target = |path: &Path| map_backend_path(path, backend_target, request_target, rooted);
         self.details.request_source_path = Some(request_source.to_path_buf());
         self.details.request_target_path = Some(request_target.to_path_buf());
-        self.details.failed_source_path =
-            self.details.failed_source_path.as_deref().map(&map_source);
-        self.details.failed_target_path =
-            self.details.failed_target_path.as_deref().map(&map_target);
+        self.details.failed_source_path = self.details.failed_source_path.as_deref().map(&map_source);
+        self.details.failed_target_path = self.details.failed_target_path.as_deref().map(&map_target);
         let error_path = self.details.error.path().map(map_source);
         let error_target = self.details.error.target().map(&map_target);
-        self.details.error.replace_paths(
-            error_path,
-            error_target,
-            current_directory.map(Path::to_path_buf),
-        );
+        self.details
+            .error
+            .replace_paths(error_path, error_target, current_directory.map(Path::to_path_buf));
         if let Some(cleanup) = self.details.cleanup_error.as_mut() {
             let path = cleanup.path().map(&map_target);
             let target = cleanup.target().map(&map_target);
@@ -248,12 +232,7 @@ impl LocalCopyFailure {
 }
 
 /// Maps one backend path through its logical request prefix.
-fn map_backend_path(
-    path: &Path,
-    backend_base: &Path,
-    namespace_base: &Path,
-    rooted: bool,
-) -> PathBuf {
+fn map_backend_path(path: &Path, backend_base: &Path, namespace_base: &Path, rooted: bool) -> PathBuf {
     if let Ok(relative) = path.strip_prefix(backend_base) {
         return namespace_base.join(relative);
     }

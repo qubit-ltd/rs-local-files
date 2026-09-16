@@ -21,10 +21,7 @@ impl LocalFilePermissions {
     /// Creates a permission observation.
     #[inline]
     pub const fn new(read_only: bool, unix_mode: Option<u32>) -> Self {
-        Self {
-            read_only,
-            unix_mode,
-        }
+        Self { read_only, unix_mode }
     }
 
     /// Reports whether the native entry is read-only.

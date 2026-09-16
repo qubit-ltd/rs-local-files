@@ -21,7 +21,8 @@ fn test_test_support_injects_selected_fault_only_in_child_process() {
     const FAULT_ENV: &str = "QUBIT_LOCAL_FILES_TEST_FAULT";
     const CHILD_ENV: &str = "QUBIT_LOCAL_FILES_TEST_FAULT_CHILD";
     const FAULT: &str = "local-fs-delete-file-remove";
-    const TEST_NAME: &str = "local::internal::test_support_tests::test_test_support_injects_selected_fault_only_in_child_process";
+    const TEST_NAME: &str =
+        "local::internal::test_support_tests::test_test_support_injects_selected_fault_only_in_child_process";
 
     match std::env::var(CHILD_ENV).as_deref() {
         Ok("normal") => {

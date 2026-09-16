@@ -200,9 +200,7 @@ impl LocalFileSystem {
                 #[cfg(feature = "test-support")]
                 test_faults: None,
             }),
-            current_directory: LocalCurrentDirectory::Virtual(PathBuf::from(
-                std::path::MAIN_SEPARATOR_STR,
-            )),
+            current_directory: LocalCurrentDirectory::Virtual(PathBuf::from(std::path::MAIN_SEPARATOR_STR)),
             symlink_policy: LocalSymlinkPolicy::FollowWithinScope,
             defaults: LocalFileSystemDefaults::default(),
         })
@@ -212,17 +210,12 @@ impl LocalFileSystem {
     ///
     /// Absolute Host operands avoid PWD lookup. Returns snapshot or resolver
     /// validation errors annotated with the requested operation.
-    fn resolver_for(
-        &self,
-        path: &Path,
-        operation: LocalFileOperation,
-    ) -> LocalResult<LocalPathResolver> {
+    fn resolver_for(&self, path: &Path, operation: LocalFileOperation) -> LocalResult<LocalPathResolver> {
         if self.scope() == LocalFileSystemScope::Host && path.is_absolute() {
             return Ok(LocalPathResolver::absolute_host());
         }
         let current_directory = self.current_directory.snapshot(operation, Some(path))?;
-        LocalPathResolver::new(self.scope(), &current_directory)
-            .map_err(|error| error.with_operation(operation))
+        LocalPathResolver::new(self.scope(), &current_directory).map_err(|error| error.with_operation(operation))
     }
 
     /// Creates one resolver for a two-path operation from a single PWD
@@ -235,15 +228,11 @@ impl LocalFileSystem {
         target: &Path,
         operation: LocalFileOperation,
     ) -> LocalResult<LocalPathResolver> {
-        if self.scope() == LocalFileSystemScope::Host
-            && source.is_absolute()
-            && target.is_absolute()
-        {
+        if self.scope() == LocalFileSystemScope::Host && source.is_absolute() && target.is_absolute() {
             return Ok(LocalPathResolver::absolute_host());
         }
         let current_directory = self.current_directory.snapshot(operation, Some(source))?;
-        LocalPathResolver::new(self.scope(), &current_directory)
-            .map_err(|error| error.with_operation(operation))
+        LocalPathResolver::new(self.scope(), &current_directory).map_err(|error| error.with_operation(operation))
     }
 
     /// Validates a directory using native lookup and the configured policy.
@@ -258,9 +247,7 @@ impl LocalFileSystem {
                 Instant::now(),
             )
             .map(|_| ()),
-            LocalNamespace::Rooted(rooted) => {
-                rooted.validate_directory(path.authority_relative(), self.symlink_policy)
-            }
+            LocalNamespace::Rooted(rooted) => rooted.validate_directory(path.authority_relative(), self.symlink_policy),
         }
     }
 
@@ -279,23 +266,12 @@ impl LocalFileSystem {
             return Ok(());
         }
         let metadata = match &self.core.namespace {
-            LocalNamespace::Host => HostLocalFileSystem::metadata_with_policy(
-                path.authority_relative(),
-                self.symlink_policy,
-            ),
-            LocalNamespace::Rooted(rooted) => {
-                rooted.metadata(path.authority_relative(), self.symlink_policy)
+            LocalNamespace::Host => {
+                HostLocalFileSystem::metadata_with_policy(path.authority_relative(), self.symlink_policy)
             }
+            LocalNamespace::Rooted(rooted) => rooted.metadata(path.authority_relative(), self.symlink_policy),
         }
-        .map_err(|error| {
-            operation_error(
-                error,
-                operation,
-                path.namespace_absolute(),
-                None,
-                current_directory,
-            )
-        })?;
+        .map_err(|error| operation_error(error, operation, path.namespace_absolute(), None, current_directory))?;
         if metadata.kind() == LocalFileKind::Directory {
             return Ok(());
         }
@@ -306,8 +282,7 @@ impl LocalFileSystem {
 
     /// Reports whether a path denotes the protected Rooted virtual root.
     fn is_root_operand(&self, path: &LocalNamespacePath) -> bool {
-        self.scope() == LocalFileSystemScope::Rooted
-            && path.authority_relative().as_os_str().is_empty()
+        self.scope() == LocalFileSystemScope::Rooted && path.authority_relative().as_os_str().is_empty()
     }
 
     /// Rejects an operation that may remove or replace the Rooted virtual root.
@@ -337,9 +312,7 @@ fn resolve_operation_path(
     operation: LocalFileOperation,
 ) -> LocalResult<LocalNamespacePath> {
     resolver.resolve(path).map_err(|error| {
-        let error = error
-            .with_operation(operation)
-            .with_path(path.to_path_buf());
+        let error = error.with_operation(operation).with_path(path.to_path_buf());
         with_current_directory(error, resolver.current_directory())
     })
 }
@@ -353,9 +326,7 @@ fn operation_error(
     current_directory: Option<&Path>,
 ) -> LocalFileError {
     let error = with_current_directory(
-        error
-            .with_operation(operation)
-            .with_path(path.to_path_buf()),
+        error.with_operation(operation).with_path(path.to_path_buf()),
         current_directory,
     );
     if let Some(target) = target {
@@ -366,10 +337,7 @@ fn operation_error(
 }
 
 /// Attaches a PWD snapshot when path binding actually required one.
-fn with_current_directory(
-    error: LocalFileError,
-    current_directory: Option<&Path>,
-) -> LocalFileError {
+fn with_current_directory(error: LocalFileError, current_directory: Option<&Path>) -> LocalFileError {
     match current_directory {
         Some(current_directory) => error.with_current_directory(current_directory.to_path_buf()),
         None => error,
@@ -385,11 +353,7 @@ fn redacted_path(path: &Path) -> RedactedText {
 }
 
 /// Selects the public path for an operation that may partially publish.
-fn operation_failure_path(
-    error: &LocalFileError,
-    scope: LocalFileSystemScope,
-    fallback: &Path,
-) -> PathBuf {
+fn operation_failure_path(error: &LocalFileError, scope: LocalFileSystemScope, fallback: &Path) -> PathBuf {
     if error.kind() != LocalFileErrorKind::PublicationIncomplete {
         return fallback.to_path_buf();
     }

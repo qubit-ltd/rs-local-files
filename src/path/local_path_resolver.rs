@@ -43,8 +43,7 @@ impl LocalPathResolver {
     /// accepted; the exposed PWD snapshot retains the supplied spelling.
     pub(crate) fn new(scope: LocalFileSystemScope, current_directory: &Path) -> LocalResult<Self> {
         reject_native_nul(current_directory)?;
-        let (current_prefix, current_components) =
-            parse_current_directory(scope, current_directory)?;
+        let (current_prefix, current_components) = parse_current_directory(scope, current_directory)?;
         Ok(Self {
             scope,
             current_directory: Some(current_directory.to_path_buf()),
@@ -85,21 +84,16 @@ impl LocalPathResolver {
     pub(crate) fn resolve(&self, path: &Path) -> LocalResult<LocalNamespacePath> {
         reject_native_nul(path)?;
         if self.current_directory.is_none() && !path.is_absolute() {
-            return Err(LocalFileError::new(
-                LocalFileErrorKind::InvalidState,
-                LocalFileOperation::BindPath,
-            )
-            .with_path(path.to_path_buf())
-            .with_reason("a relative Host path requires a process current directory snapshot"));
+            return Err(
+                LocalFileError::new(LocalFileErrorKind::InvalidState, LocalFileOperation::BindPath)
+                    .with_path(path.to_path_buf())
+                    .with_reason("a relative Host path requires a process current directory snapshot"),
+            );
         }
         let directory_required = directory_required(path);
         if self.scope == LocalFileSystemScope::Host {
             let bound = bind_host_operand(path, self.current_directory.as_deref())?;
-            return Ok(LocalNamespacePath::new(
-                bound.clone(),
-                bound,
-                directory_required,
-            ));
+            return Ok(LocalNamespacePath::new(bound.clone(), bound, directory_required));
         }
         let mut components = self.current_components.clone();
         if path
@@ -130,8 +124,7 @@ impl LocalPathResolver {
             }
         }
 
-        let namespace_absolute =
-            namespace_absolute(self.scope, self.current_prefix.as_deref(), &components);
+        let namespace_absolute = namespace_absolute(self.scope, self.current_prefix.as_deref(), &components);
         let authority_relative = match self.scope {
             LocalFileSystemScope::Host => namespace_absolute.clone(),
             LocalFileSystemScope::Rooted => components.iter().collect(),
@@ -192,28 +185,19 @@ fn bind_host_operand(path: &Path, pwd: Option<&Path>) -> LocalResult<PathBuf> {
         .components()
         .any(|component| matches!(component, Component::Prefix(_)))
     {
-        return Err(invalid_path(
-            path,
-            "drive-relative Host paths are ambiguous",
-        ));
+        return Err(invalid_path(path, "drive-relative Host paths are ambiguous"));
     }
     let pwd = pwd.ok_or_else(|| {
-        LocalFileError::new(
-            LocalFileErrorKind::InvalidState,
-            LocalFileOperation::BindPath,
-        )
-        .with_path(path.to_path_buf())
-        .with_reason("a relative Host path requires a process current directory snapshot")
+        LocalFileError::new(LocalFileErrorKind::InvalidState, LocalFileOperation::BindPath)
+            .with_path(path.to_path_buf())
+            .with_reason("a relative Host path requires a process current directory snapshot")
     })?;
     #[cfg(windows)]
     if path.has_root() {
         let mut bound = match pwd.components().next() {
             Some(Component::Prefix(prefix)) => prefix.as_os_str().to_os_string(),
             _ => {
-                return Err(invalid_path(
-                    path,
-                    "root-relative Host paths require a drive anchor",
-                ));
+                return Err(invalid_path(path, "root-relative Host paths require a drive anchor"));
             }
         };
         bound.push(path.as_os_str());
@@ -261,12 +245,9 @@ fn namespace_absolute(
 
 /// Creates one structured lexical-path error.
 fn invalid_path(path: &Path, reason: &'static str) -> LocalFileError {
-    LocalFileError::new(
-        LocalFileErrorKind::InvalidPath,
-        LocalFileOperation::BindPath,
-    )
-    .with_path(path.to_path_buf())
-    .with_reason(reason)
+    LocalFileError::new(LocalFileErrorKind::InvalidPath, LocalFileOperation::BindPath)
+        .with_path(path.to_path_buf())
+        .with_reason(reason)
 }
 
 /// Rejects embedded native NUL without lossy text conversion.
@@ -318,10 +299,7 @@ fn has_trailing_separator_or_dot(path: &Path) -> bool {
     if bytes.last() == Some(&b'/') {
         return true;
     }
-    let final_component = bytes
-        .rsplit(|byte| *byte == b'/')
-        .next()
-        .unwrap_or_default();
+    let final_component = bytes.rsplit(|byte| *byte == b'/').next().unwrap_or_default();
     final_component == b"." || final_component == b".."
 }
 

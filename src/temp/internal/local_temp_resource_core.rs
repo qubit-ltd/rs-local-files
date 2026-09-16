@@ -48,11 +48,7 @@ pub(crate) struct LocalTempResourceCore {
 
 impl LocalTempResourceCore {
     /// Takes a successfully bound backend and its namespace path.
-    pub(crate) fn new(
-        path: PathBuf,
-        backend: LocalTempResourceBackend,
-        symlink_policy: LocalSymlinkPolicy,
-    ) -> Self {
+    pub(crate) fn new(path: PathBuf, backend: LocalTempResourceBackend, symlink_policy: LocalSymlinkPolicy) -> Self {
         Self {
             path,
             backend,
@@ -106,8 +102,7 @@ impl LocalTempResourceCore {
             LocalTempResourceBackend::Rooted(rooted) => rooted
                 .root
                 .symlink_metadata(
-                    &LocalRelativePath::new(&rooted.relative_path)
-                        .expect("temporary source was validated at creation"),
+                    &LocalRelativePath::new(&rooted.relative_path).expect("temporary source was validated at creation"),
                 )
                 .map(|metadata| metadata.is_same_file(&rooted.identity)),
         };
@@ -130,14 +125,9 @@ impl LocalTempResourceCore {
     /// Records an actual native rename failure and returns only its publication
     /// fact. A definite failure retains authority only after a fresh identity
     /// check; an uncertain rename permanently disables source operations.
-    pub(crate) fn record_native_persist_failure(
-        &mut self,
-        error: &Error,
-    ) -> LocalPersistFailureState {
+    pub(crate) fn record_native_persist_failure(&mut self, error: &Error) -> LocalPersistFailureState {
         let publication = LocalPersistFailureState::from_native_error(error.kind());
-        if publication == LocalPersistFailureState::Indeterminate
-            || self.ensure_identity_matches().is_err()
-        {
+        if publication == LocalPersistFailureState::Indeterminate || self.ensure_identity_matches().is_err() {
             self.state = LocalTempResourceState::Indeterminate;
         }
         publication
@@ -149,8 +139,8 @@ impl LocalTempResourceCore {
         match &self.backend {
             LocalTempResourceBackend::Host(host) => std::fs::remove_dir(&host.sandbox_path),
             LocalTempResourceBackend::Rooted(rooted) => {
-                let sandbox = LocalRelativePath::new(&rooted.sandbox_path)
-                    .expect("temporary sandbox was validated at creation");
+                let sandbox =
+                    LocalRelativePath::new(&rooted.sandbox_path).expect("temporary sandbox was validated at creation");
                 rooted.root.remove_empty_dir(&sandbox)
             }
         }
@@ -233,11 +223,7 @@ impl LocalTempResourceCore {
     }
 
     /// Performs lexical target preparation without changing source authority.
-    pub(crate) fn prepare_target(
-        &self,
-        base: Option<&Path>,
-        target: &Path,
-    ) -> LocalResult<LocalNamespacePath> {
+    pub(crate) fn prepare_target(&self, base: Option<&Path>, target: &Path) -> LocalResult<LocalNamespacePath> {
         prepare_persist_target(self.scope(), base, target)
     }
 

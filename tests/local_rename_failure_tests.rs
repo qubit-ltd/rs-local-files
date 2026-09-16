@@ -72,8 +72,7 @@ fn test_rename_parent_durability_failure_reports_renamed() {
             .rename_with_options(
                 &source,
                 &target,
-                &LocalRenameOptions::default()
-                    .with_durability(LocalDurabilityRequirement::Required),
+                &LocalRenameOptions::default().with_durability(LocalDurabilityRequirement::Required),
             )
             .expect_err("parent durability fault must fail");
 

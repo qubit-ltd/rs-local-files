@@ -56,13 +56,7 @@ impl RootedLocalFileSystem {
         options: &LocalReadOptions,
         symlink_policy: LocalSymlinkPolicy,
     ) -> LocalResult<LocalFileReader> {
-        let relative = resolve_rooted_path(
-            &self.root,
-            path,
-            symlink_policy,
-            true,
-            LocalFileOperation::OpenReader,
-        )?;
+        let relative = resolve_rooted_path(&self.root, path, symlink_policy, true, LocalFileOperation::OpenReader)?;
         let native_options = options
             .open_retry_timeout()
             .map_or_else(crate::read::OpenOptions::default, |timeout| {
@@ -73,11 +67,10 @@ impl RootedLocalFileSystem {
             .symlink_metadata(&relative)
             .map_err(|error| rooted_io_error(LocalFileOperation::OpenReader, path, error))?;
         if metadata.kind() != crate::rooted::EntryKind::File {
-            return Err(LocalFileError::new(
-                LocalFileErrorKind::TypeConflict,
-                LocalFileOperation::OpenReader,
-            )
-            .with_path(path.to_path_buf()));
+            return Err(
+                LocalFileError::new(LocalFileErrorKind::TypeConflict, LocalFileOperation::OpenReader)
+                    .with_path(path.to_path_buf()),
+            );
         }
         self.root
             .open_reader(&relative, &native_options)
@@ -117,22 +110,14 @@ impl RootedLocalFileSystem {
         let authority_path = if path.as_os_str().is_empty() {
             None
         } else if symlink_policy.follows() {
-            let resolved = resolve_rooted_path_allow_root(
-                &self.root,
-                path,
-                symlink_policy,
-                true,
-                LocalFileOperation::List,
-            )?;
+            let resolved =
+                resolve_rooted_path_allow_root(&self.root, path, symlink_policy, true, LocalFileOperation::List)?;
             if resolved.as_os_str().is_empty() {
                 None
             } else {
-                Some(
-                    crate::local::LocalRelativePath::new(&resolved).map_err(|error| {
-                        rooted_io_error(LocalFileOperation::List, path, error)
-                            .with_kind(LocalFileErrorKind::InvalidPath)
-                    })?,
-                )
+                Some(crate::local::LocalRelativePath::new(&resolved).map_err(|error| {
+                    rooted_io_error(LocalFileOperation::List, path, error).with_kind(LocalFileErrorKind::InvalidPath)
+                })?)
             }
         } else {
             Some(rooted_path(path, LocalFileOperation::List)?)
@@ -173,15 +158,13 @@ impl RootedLocalFileSystem {
     ) -> LocalResult<LocalFileWriter> {
         use crate::writer::internal::LocalFileWriterBackend;
 
-        if options.mode() == LocalWriteMode::Append
-            && options.atomicity() == crate::LocalAtomicityRequirement::Required
+        if options.mode() == LocalWriteMode::Append && options.atomicity() == crate::LocalAtomicityRequirement::Required
         {
-            return Err(LocalFileError::new(
-                LocalFileErrorKind::RequirementNotMet,
-                LocalFileOperation::OpenWriter,
-            )
-            .with_reason("append mode cannot provide required atomic publication")
-            .with_path(path.to_path_buf()));
+            return Err(
+                LocalFileError::new(LocalFileErrorKind::RequirementNotMet, LocalFileOperation::OpenWriter)
+                    .with_reason("append mode cannot provide required atomic publication")
+                    .with_path(path.to_path_buf()),
+            );
         }
         if options.mode() != LocalWriteMode::Append {
             ensure_required_directory_durability(
@@ -219,36 +202,29 @@ impl RootedLocalFileSystem {
                     .begin_atomic_write_with_options(&relative, atomic_options)
                     .map_err(|error| {
                         let kind = error.kind();
-                        rooted_io_error(
-                            LocalFileOperation::OpenWriter,
-                            path,
-                            io::Error::new(kind, error),
-                        )
+                        rooted_io_error(LocalFileOperation::OpenWriter, path, io::Error::new(kind, error))
                     })?;
                 LocalFileWriterBackend::Rooted(writer)
             }
             LocalWriteMode::Append => {
-                let metadata = self.root.symlink_metadata(&relative).map_err(|error| {
-                    rooted_io_error(LocalFileOperation::OpenWriter, path, error)
-                })?;
+                let metadata = self
+                    .root
+                    .symlink_metadata(&relative)
+                    .map_err(|error| rooted_io_error(LocalFileOperation::OpenWriter, path, error))?;
                 if metadata.kind() != crate::rooted::EntryKind::File {
-                    return Err(LocalFileError::new(
-                        LocalFileErrorKind::TypeConflict,
-                        LocalFileOperation::OpenWriter,
-                    )
-                    .with_path(path.to_path_buf()));
+                    return Err(
+                        LocalFileError::new(LocalFileErrorKind::TypeConflict, LocalFileOperation::OpenWriter)
+                            .with_path(path.to_path_buf()),
+                    );
                 }
-                let mut native_options =
-                    crate::write::OpenOptions::new(crate::write::Mode::AppendExisting);
+                let mut native_options = crate::write::OpenOptions::new(crate::write::Mode::AppendExisting);
                 if let Some(timeout) = options.open_retry_timeout() {
                     native_options = native_options.with_open_retry_timeout(timeout);
                 }
                 let file = self
                     .root
                     .open_writer(&relative, &native_options)
-                    .map_err(|error| {
-                        rooted_io_error(LocalFileOperation::OpenWriter, path, error)
-                    })?;
+                    .map_err(|error| rooted_io_error(LocalFileOperation::OpenWriter, path, error))?;
                 LocalFileWriterBackend::Append(file)
             }
         };

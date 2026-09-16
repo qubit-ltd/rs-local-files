@@ -154,10 +154,7 @@ impl LocalFileMetadata {
 fn local_file_permissions(metadata: &Metadata) -> LocalFilePermissions {
     use std::os::unix::fs::MetadataExt;
 
-    LocalFilePermissions::new(
-        metadata.permissions().readonly(),
-        Some(metadata.mode() & 0o7777),
-    )
+    LocalFilePermissions::new(metadata.permissions().readonly(), Some(metadata.mode() & 0o7777))
 }
 
 /// Extracts the portable read-only state where Unix mode bits are unavailable.

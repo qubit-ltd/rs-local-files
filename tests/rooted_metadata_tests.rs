@@ -15,8 +15,7 @@ use qubit_local_files::outcome::LocalFileKind;
 
 #[test]
 fn test_observes_root_limits_space_and_metadata() {
-    let filesystem =
-        LocalFileSystem::rooted(Path::new(".")).expect("current directory can be opened");
+    let filesystem = LocalFileSystem::rooted(Path::new(".")).expect("current directory can be opened");
     let limits = filesystem
         .limits_at(Path::new("Cargo.toml"))
         .expect("limits are queryable");
@@ -26,24 +25,15 @@ fn test_observes_root_limits_space_and_metadata() {
     let space = filesystem
         .space_at(Path::new("Cargo.toml"))
         .expect("space is queryable");
-    let _ = (
-        space.available_bytes(),
-        space.capacity_bytes(),
-        space.free_bytes(),
-    );
-    if let (Some(capacity), Some(free), Some(available)) = (
-        space.capacity_bytes(),
-        space.free_bytes(),
-        space.available_bytes(),
-    ) {
+    let _ = (space.available_bytes(), space.capacity_bytes(), space.free_bytes());
+    if let (Some(capacity), Some(free), Some(available)) =
+        (space.capacity_bytes(), space.free_bytes(), space.available_bytes())
+    {
         assert!(capacity >= free);
         assert!(free >= available);
     }
     assert_eq!(
-        filesystem
-            .metadata(Path::new(""))
-            .expect("root metadata")
-            .kind(),
+        filesystem.metadata(Path::new("")).expect("root metadata").kind(),
         LocalFileKind::Directory
     );
     assert_eq!(

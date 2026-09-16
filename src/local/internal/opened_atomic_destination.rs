@@ -117,9 +117,7 @@ pub(crate) fn open_atomic_destination(
         return Err(crate::local::test_fault_error());
     }
     let mut options = OpenOptions::new();
-    options
-        .read(true)
-        .custom_flags(libc::O_NOFOLLOW | libc::O_NONBLOCK);
+    options.read(true).custom_flags(libc::O_NOFOLLOW | libc::O_NONBLOCK);
     open_destination_with_retry(open_retry_timeout, || {
         let result = options.open(path);
         #[cfg(feature = "test-support")]
@@ -137,10 +135,7 @@ pub(crate) fn open_atomic_destination(
 ///
 /// Returns `false` for absence, a different identity, or a non-regular entry.
 /// Other no-follow metadata errors are propagated.
-pub(crate) fn destination_identity_matches(
-    path: &Path,
-    destination: &OpenedAtomicDestination,
-) -> Result<bool> {
+pub(crate) fn destination_identity_matches(path: &Path, destination: &OpenedAtomicDestination) -> Result<bool> {
     #[cfg(feature = "test-support")]
     if super::test_support::is_enabled("atomic-identity-mismatch") {
         return Ok(false);
@@ -230,12 +225,7 @@ where
     match open_with_nonblocking_retry(open_retry_timeout, open) {
         Ok(file) => OpenedAtomicDestination::from_file(file).map(Some),
         Err(error) if error.kind() == ErrorKind::NotFound => Ok(None),
-        Err(error)
-            if matches!(
-                error.raw_os_error(),
-                Some(libc::ELOOP | libc::ENXIO | libc::ENODEV)
-            ) =>
-        {
+        Err(error) if matches!(error.raw_os_error(), Some(libc::ELOOP | libc::ENXIO | libc::ENODEV)) => {
             Err(invalid_atomic_destination())
         }
         Err(error) => Err(error),
@@ -422,12 +412,9 @@ mod tests {
                     rooted.file().is_some(),
                     policy == LocalWriteMetadataPolicy::PreserveExisting
                 );
+                assert!(destination_identity_matches(&path, &host).expect("unchanged host identity"));
                 assert!(
-                    destination_identity_matches(&path, &host).expect("unchanged host identity")
-                );
-                assert!(
-                    rooted_destination_identity_matches(&parent, &name, &rooted)
-                        .expect("unchanged rooted identity")
+                    rooted_destination_identity_matches(&parent, &name, &rooted).expect("unchanged rooted identity")
                 );
 
                 // Retain the original inode so the filesystem cannot recycle its identity.
@@ -440,14 +427,8 @@ mod tests {
                     _ => fs::create_dir(&path).expect("directory replacement"),
                 }
                 assert!(!destination_identity_matches(&path, &host).expect("host identity check"));
-                assert!(
-                    !rooted_destination_identity_matches(&parent, &name, &rooted)
-                        .expect("rooted identity check")
-                );
-                assert_eq!(
-                    fs::read(observed).expect("retained original content"),
-                    b"observed"
-                );
+                assert!(!rooted_destination_identity_matches(&parent, &name, &rooted).expect("rooted identity check"));
+                assert_eq!(fs::read(observed).expect("retained original content"), b"observed");
             }
         }
     }

@@ -53,8 +53,7 @@ pub(crate) fn copy_source_guarantee_unavailable(
     durability: LocalDurabilityRequirement,
 ) -> bool {
     (source_kind != LocalFileKind::File && atomicity == LocalAtomicityRequirement::Required)
-        || (source_kind == LocalFileKind::Directory
-            && durability == LocalDurabilityRequirement::Required)
+        || (source_kind == LocalFileKind::Directory && durability == LocalDurabilityRequirement::Required)
 }
 
 /// Reports whether replacing a directory would violate required atomicity.

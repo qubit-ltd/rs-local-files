@@ -114,10 +114,8 @@ mod tests {
         fs::create_dir(temporary.path().join("child")).expect("child should exist");
         fs::write(temporary.path().join("child/file"), b"payload").expect("file should exist");
         let root = Root::open(temporary.path()).expect("root should open");
-        let mut cursor = RootedResolutionCursor::new(
-            root.try_clone_authority().expect("authority should clone"),
-        )
-        .expect("cursor should open");
+        let mut cursor = RootedResolutionCursor::new(root.try_clone_authority().expect("authority should clone"))
+            .expect("cursor should open");
         #[cfg(unix)]
         let old = cursor.current.as_raw_fd();
         #[cfg(windows)]
@@ -130,10 +128,7 @@ mod tests {
             // SAFETY: F_GETFD only inspects the integer descriptor; it does not
             // dereference memory or take ownership of a possibly closed file.
             assert_eq!(-1, unsafe { libc::fcntl(old, libc::F_GETFD) });
-            assert_eq!(
-                Some(libc::EBADF),
-                std::io::Error::last_os_error().raw_os_error()
-            );
+            assert_eq!(Some(libc::EBADF), std::io::Error::last_os_error().raw_os_error());
         }
         #[cfg(windows)]
         {

@@ -123,11 +123,7 @@ fn configure_nonblocking_open(_options: &mut OpenOptions) {}
 /// permits lease-conflict retries within that interval; `None` or zero performs
 /// only the initial attempt. Other platforms perform one native open.
 #[inline]
-fn open_configured_file(
-    options: &OpenOptions,
-    path: &Path,
-    open_retry_timeout: Option<Duration>,
-) -> Result<fs::File> {
+fn open_configured_file(options: &OpenOptions, path: &Path, open_retry_timeout: Option<Duration>) -> Result<fs::File> {
     #[cfg(unix)]
     {
         open_with_nonblocking_retry(open_retry_timeout, || options.open(path))
@@ -289,10 +285,7 @@ fn open_reader_file(path: &Path, open_retry_timeout: Option<Duration>) -> Result
 /// Returns a contextual I/O error when the path cannot be inspected or opened,
 /// or when the opened object is not a regular file.
 #[inline]
-pub(crate) fn open_native_reader_path(
-    path: &Path,
-    options: &read::OpenOptions,
-) -> Result<fs::File> {
+pub(crate) fn open_native_reader_path(path: &Path, options: &read::OpenOptions) -> Result<fs::File> {
     open_reader_file(path, options.open_retry_timeout())
 }
 
@@ -367,10 +360,7 @@ fn open_writer_file(
 /// Returns a contextual I/O error when parent creation, inspection, opening, or
 /// post-open truncation fails.
 #[inline]
-pub(crate) fn open_native_writer_path(
-    path: &Path,
-    options: &write::OpenOptions,
-) -> Result<fs::File> {
+pub(crate) fn open_native_writer_path(path: &Path, options: &write::OpenOptions) -> Result<fs::File> {
     open_writer_file(
         path,
         options.creates_parents(),

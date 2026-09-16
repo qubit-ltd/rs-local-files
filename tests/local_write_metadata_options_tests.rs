@@ -15,15 +15,9 @@ use qubit_local_files::options::LocalWriteOptions;
 #[test]
 fn test_metadata_policy_defaults_to_preservation() {
     let original = LocalWriteOptions::new(LocalWriteMode::CreateOrReplace);
-    assert_eq!(
-        original.metadata_policy(),
-        LocalWriteMetadataPolicy::PreserveExisting
-    );
+    assert_eq!(original.metadata_policy(), LocalWriteMetadataPolicy::PreserveExisting);
     let selected = original.with_metadata_policy(LocalWriteMetadataPolicy::UseStaging);
-    assert_eq!(
-        selected.metadata_policy(),
-        LocalWriteMetadataPolicy::UseStaging
-    );
+    assert_eq!(selected.metadata_policy(), LocalWriteMetadataPolicy::UseStaging);
     assert_eq!(selected.mode(), original.mode());
     assert_eq!(selected.atomicity(), original.atomicity());
     assert_eq!(selected.durability(), original.durability());

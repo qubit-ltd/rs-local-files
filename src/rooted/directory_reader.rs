@@ -53,24 +53,18 @@ impl DirectoryReader {
     ///
     /// Returns an I/O error when secure traversal or enumeration cannot be
     /// performed.
-    pub(crate) fn open_descendant(
-        root: &File,
-        diagnostic_root: &Path,
-        path: &super::Path,
-    ) -> Result<Self> {
+    pub(crate) fn open_descendant(root: &File, diagnostic_root: &Path, path: &super::Path) -> Result<Self> {
         #[cfg(feature = "test-support")]
         if local::test_support_enabled("rooted-copy-directory-read-native") {
             return Err(crate::local::test_fault_error());
         }
         #[cfg(unix)]
         {
-            local::open_rooted_directory_reader(root, diagnostic_root, path)
-                .map(|inner| Self { inner })
+            local::open_rooted_directory_reader(root, diagnostic_root, path).map(|inner| Self { inner })
         }
         #[cfg(windows)]
         {
-            local::open_rooted_directory_reader(root, diagnostic_root, path)
-                .map(|inner| Self { inner })
+            local::open_rooted_directory_reader(root, diagnostic_root, path).map(|inner| Self { inner })
         }
         #[cfg(not(any(unix, windows)))]
         {
@@ -89,17 +83,15 @@ impl DirectoryReader {
     pub fn next_entry(&mut self) -> Result<Option<Entry>> {
         #[cfg(unix)]
         {
-            self.inner.next_entry().map(|entry| {
-                entry.map(|(name, status)| Entry::new(name, Metadata::from_stat(&status)))
-            })
+            self.inner
+                .next_entry()
+                .map(|entry| entry.map(|(name, status)| Entry::new(name, Metadata::from_stat(&status))))
         }
         #[cfg(windows)]
         {
             self.inner.next_entry().and_then(|entry| {
                 entry
-                    .map(|(name, file)| {
-                        Metadata::from_open_file(&file).map(|metadata| Entry::new(name, metadata))
-                    })
+                    .map(|(name, file)| Metadata::from_open_file(&file).map(|metadata| Entry::new(name, metadata)))
                     .transpose()
             })
         }

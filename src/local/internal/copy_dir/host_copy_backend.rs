@@ -141,11 +141,7 @@ impl CopyTreeBackend for HostCopyBackend {
 
     /// Constructs child coordinates once, at one level below the active frame.
     #[inline]
-    fn child_context(
-        &self,
-        frame: &CopyTreeFrameContext,
-        entry: &Self::Entry,
-    ) -> CopyTreeFrameContext {
+    fn child_context(&self, frame: &CopyTreeFrameContext, entry: &Self::Entry) -> CopyTreeFrameContext {
         CopyTreeFrameContext {
             source: entry.path(),
             destination: frame.destination.join(entry.file_name()),
@@ -192,12 +188,7 @@ impl CopyTreeBackend for HostCopyBackend {
             );
         } else if file_type.is_symlink() {
             if self.options.symlink_policy().follows()
-                && symlink_target_is_directory(
-                    source_path,
-                    destination_path,
-                    stats,
-                    self.scope_root.as_deref(),
-                )?
+                && symlink_target_is_directory(source_path, destination_path, stats, self.scope_root.as_deref())?
             {
                 return enter_copy_directory(
                     source_path,
@@ -210,12 +201,7 @@ impl CopyTreeBackend for HostCopyBackend {
                     frame.depth,
                 );
             } else {
-                super::staged_copy::copy_symlink_with_options(
-                    source_path,
-                    destination_path,
-                    self.options,
-                    stats,
-                )?;
+                super::staged_copy::copy_symlink_with_options(source_path, destination_path, self.options, stats)?;
             }
         } else {
             copy_file_with_options(source_path, destination_path, self.options, stats, budget)?;
@@ -257,13 +243,7 @@ impl CopyTreeBackend for HostCopyBackend {
         stats: &LocalCopyDirStats,
         source_error: Error,
     ) -> crate::LocalCopyDirError {
-        copy_dir_error(
-            stage,
-            &context.source,
-            &context.destination,
-            stats,
-            source_error,
-        )
+        copy_dir_error(stage, &context.source, &context.destination, stats, source_error)
     }
 }
 
@@ -301,12 +281,12 @@ fn enter_copy_directory(
     budget: &mut CopyBudget,
     depth: usize,
 ) -> CopyDirResult<Option<CopyDirFrame>> {
-    budget.check_deadline().map_err(|source| {
-        copy_dir_error(LocalCopyDirStage::InspectSource, src, dst, stats, source)
-    })?;
-    budget.check_depth(depth).map_err(|source| {
-        copy_dir_error(LocalCopyDirStage::InspectSource, src, dst, stats, source)
-    })?;
+    budget
+        .check_deadline()
+        .map_err(|source| copy_dir_error(LocalCopyDirStage::InspectSource, src, dst, stats, source))?;
+    budget
+        .check_depth(depth)
+        .map_err(|source| copy_dir_error(LocalCopyDirStage::InspectSource, src, dst, stats, source))?;
     let (source_metadata, source_identity) = with_copy_context(
         inspect_copy_source_directory(src, options.symlink_policy(), destination_root),
         LocalCopyDirStage::InspectSource,
@@ -327,11 +307,7 @@ fn enter_copy_directory(
         ));
     }
     let (action, created) = with_copy_context(
-        ensure_copy_destination_dir(
-            dst,
-            options.conflict_policy(),
-            options.type_conflict_policy(),
-        ),
+        ensure_copy_destination_dir(dst, options.conflict_policy(), options.type_conflict_policy()),
         LocalCopyDirStage::PrepareDestination,
         src,
         dst,
@@ -357,8 +333,7 @@ fn enter_copy_directory(
         )?;
     }
     if action == CopyDestinationAction::Replace
-        || (action == CopyDestinationAction::Merge
-            && options.conflict_policy() == LocalCopyConflictPolicy::Overwrite)
+        || (action == CopyDestinationAction::Merge && options.conflict_policy() == LocalCopyConflictPolicy::Overwrite)
     {
         with_copy_context(
             record_overwritten_entry(stats),
@@ -368,15 +343,9 @@ fn enter_copy_directory(
             stats,
         )?;
     }
-    let directory_permit = budget.acquire_directory().map_err(|source| {
-        copy_dir_error(
-            LocalCopyDirStage::ReadSourceDirectory,
-            src,
-            dst,
-            stats,
-            source,
-        )
-    })?;
+    let directory_permit = budget
+        .acquire_directory()
+        .map_err(|source| copy_dir_error(LocalCopyDirStage::ReadSourceDirectory, src, dst, stats, source))?;
     let entries = with_copy_context(
         fs::read_dir(src),
         LocalCopyDirStage::ReadSourceDirectory,
@@ -436,10 +405,7 @@ fn symlink_target_is_directory(
                 stats,
                 Error::new(
                     ErrorKind::InvalidInput,
-                    format!(
-                        "followed symbolic-link directory escaped copy scope: {}",
-                        src.display()
-                    ),
+                    format!("followed symbolic-link directory escaped copy scope: {}", src.display()),
                 ),
             ));
         }

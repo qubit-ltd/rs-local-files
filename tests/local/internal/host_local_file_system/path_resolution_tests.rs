@@ -40,10 +40,7 @@ fn test_host_path_resolution_follows_intermediate_symlink() {
 
     let mut reader = LocalFileSystem::host()
         .expect("Host filesystem should open")
-        .open_reader_with_options(
-            &directory.path().join("link/payload"),
-            &LocalReadOptions::new(),
-        )
+        .open_reader_with_options(&directory.path().join("link/payload"), &LocalReadOptions::new())
         .expect("host resolution should follow the intermediate link");
     let mut content = String::new();
     reader

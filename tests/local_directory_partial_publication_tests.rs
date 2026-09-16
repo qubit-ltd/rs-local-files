@@ -32,11 +32,7 @@ where
     action();
 }
 
-fn filesystem_and_path(
-    backend: Backend,
-    root: &Path,
-    relative: &Path,
-) -> (LocalFileSystem, PathBuf, PathBuf) {
+fn filesystem_and_path(backend: Backend, root: &Path, relative: &Path) -> (LocalFileSystem, PathBuf, PathBuf) {
     match backend {
         Backend::Host => (
             LocalFileSystem::host().expect("Host filesystem should open"),
@@ -53,8 +49,7 @@ fn filesystem_and_path(
 
 #[test]
 fn test_recursive_create_reports_the_first_unfinished_path_after_partial_publication() {
-    const TEST_NAME: &str =
-        "recursive_create_reports_the_first_unfinished_path_after_partial_publication";
+    const TEST_NAME: &str = "recursive_create_reports_the_first_unfinished_path_after_partial_publication";
     for (backend, fault) in [
         (Backend::Host, "host-create-directory-component-second"),
         (Backend::Rooted, "rooted-create-directory-component-second"),
@@ -62,14 +57,10 @@ fn test_recursive_create_reports_the_first_unfinished_path_after_partial_publica
         run_in_test_fault_process(TEST_NAME, fault, || {
             let directory = tempdir().expect("temporary directory should be created");
             let relative = Path::new("created/blocked/target");
-            let (filesystem, target, native_target) =
-                filesystem_and_path(backend, directory.path(), relative);
+            let (filesystem, target, native_target) = filesystem_and_path(backend, directory.path(), relative);
 
             let error = filesystem
-                .create_directory_with_options(
-                    &target,
-                    &LocalCreateDirectoryOptions::new().with_recursive(),
-                )
+                .create_directory_with_options(&target, &LocalCreateDirectoryOptions::new().with_recursive())
                 .expect_err("the second directory creation should fail");
 
             assert_eq!(LocalFileErrorKind::PublicationIncomplete, error.kind());
@@ -97,25 +88,17 @@ fn test_recursive_delete_reports_the_failed_path_after_partial_publication() {
             std::fs::create_dir(&tree).expect("tree should be created");
             std::fs::write(tree.join("first"), b"first").expect("first file should be written");
             std::fs::write(tree.join("second"), b"second").expect("second file should be written");
-            let (filesystem, target, _) =
-                filesystem_and_path(backend, directory.path(), Path::new("tree"));
+            let (filesystem, target, _) = filesystem_and_path(backend, directory.path(), Path::new("tree"));
 
             let error = filesystem
                 .delete_directory_with_options(&target, &LocalDeleteOptions::new().with_recursive())
                 .expect_err("the second recursive removal should fail");
 
             assert_eq!(LocalFileErrorKind::PublicationIncomplete, error.kind());
-            let failed = error
-                .path()
-                .expect("the failed entry path should be retained");
+            let failed = error.path().expect("the failed entry path should be retained");
             assert!(failed.starts_with(&target));
             assert!(tree.is_dir());
-            assert_eq!(
-                1,
-                std::fs::read_dir(&tree)
-                    .expect("tree should remain")
-                    .count()
-            );
+            assert_eq!(1, std::fs::read_dir(&tree).expect("tree should remain").count());
         });
     }
 }
@@ -133,13 +116,9 @@ fn test_recursive_delete_missing_ok_does_not_swallow_missing_descendant() {
             let tree = directory.path().join("tree");
             std::fs::create_dir(&tree).expect("tree should be created");
             std::fs::write(tree.join("child"), b"child").expect("child should be written");
-            let (filesystem, target, _) =
-                filesystem_and_path(backend, directory.path(), Path::new("tree"));
+            let (filesystem, target, _) = filesystem_and_path(backend, directory.path(), Path::new("tree"));
             let error = filesystem
-                .delete_directory_with_options(
-                    &target,
-                    &LocalDeleteOptions::new().with_recursive().with_missing_ok(),
-                )
+                .delete_directory_with_options(&target, &LocalDeleteOptions::new().with_recursive().with_missing_ok())
                 .expect_err("missing descendant must not be accepted as a missing root");
 
             assert_eq!(LocalFileErrorKind::NotFound, error.kind());
@@ -147,10 +126,7 @@ fn test_recursive_delete_missing_ok_does_not_swallow_missing_descendant() {
             // unchanged failures; the descendant distinction is preserved by
             // the fact that `missing_ok` did not accept this error.
             assert_eq!(Some(target.as_path()), error.path());
-            assert!(
-                tree.is_dir(),
-                "the root must remain after a descendant error"
-            );
+            assert!(tree.is_dir(), "the root must remain after a descendant error");
             assert!(tree.join("child").is_file(), "the descendant must remain");
         });
     }

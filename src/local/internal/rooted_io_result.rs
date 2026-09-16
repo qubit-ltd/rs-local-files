@@ -47,11 +47,7 @@ pub(super) fn normalize_mkdirat_result(result: libc::c_int, diagnostic_path: &Pa
             Error::last_os_error()
         };
         if error.kind() != ErrorKind::AlreadyExists {
-            return Err(add_path_context(
-                error,
-                "create rooted directory",
-                diagnostic_path,
-            ));
+            return Err(add_path_context(error, "create rooted directory", diagnostic_path));
         }
     }
     Ok(())
@@ -83,11 +79,7 @@ pub(super) fn missing_rooted_entry(error: Error, diagnostic_path: &Path) -> Resu
     if error.kind() == ErrorKind::NotFound {
         Ok(())
     } else {
-        Err(add_path_context(
-            error,
-            "inspect rooted file entry",
-            diagnostic_path,
-        ))
+        Err(add_path_context(error, "inspect rooted file entry", diagnostic_path))
     }
 }
 

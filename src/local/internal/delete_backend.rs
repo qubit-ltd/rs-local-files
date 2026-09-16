@@ -28,11 +28,7 @@ pub(crate) trait DeleteBackend {
     /// Opens a lazy reader for one real directory.
     fn open_directory(&self, path: &Self::Path) -> io::Result<Self::Reader>;
     /// Returns the next immediate child from an opened directory.
-    fn next_child(
-        &self,
-        parent: &Self::Path,
-        reader: &mut Self::Reader,
-    ) -> io::Result<Option<Self::Path>>;
+    fn next_child(&self, parent: &Self::Path, reader: &mut Self::Reader) -> io::Result<Option<Self::Path>>;
     /// Removes one entry that is known not to be a real directory.
     fn remove_non_directory(&self, path: &Self::Path, metadata: &Self::Metadata) -> io::Result<()>;
     /// Removes one empty real directory.

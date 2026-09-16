@@ -25,9 +25,7 @@ use qubit_local_files::policy::LocalSymlinkPolicy;
 /// Copy limits must not inherit source mode or parent-creation behavior.
 #[test]
 fn test_copy_tightening_preserves_request_behavior() {
-    let request = LocalCopyOptions::new()
-        .with_entry_source()
-        .with_max_entries(20);
+    let request = LocalCopyOptions::new().with_entry_source().with_max_entries(20);
     let ceiling = LocalCopyOptions::new()
         .with_tree_source()
         .with_create_parent()
@@ -424,8 +422,8 @@ fn test_tightened_zero_handles_are_rejected() {
     use qubit_local_files::error::LocalFileErrorKind;
     let dir = tempfile::tempdir().expect("isolated directory");
     let host = LocalFileSystem::host().expect("host filesystem");
-    let options = LocalListOptions::new()
-        .tighten_resource_limits(&LocalListOptions::new().with_max_open_directories(0));
+    let options =
+        LocalListOptions::new().tighten_resource_limits(&LocalListOptions::new().with_max_open_directories(0));
     let error = host
         .list_with_options(dir.path(), &options)
         .expect_err("zero handles are invalid");
@@ -442,8 +440,7 @@ fn test_tightened_zero_limits_stop_copy_and_deletion() {
     let target = dir.path().join("target");
     std::fs::write(&source, b"payload").expect("source fixture");
     let host = LocalFileSystem::host().expect("host filesystem");
-    let copy =
-        LocalCopyOptions::new().tighten_resource_limits(&LocalCopyOptions::new().with_max_bytes(0));
+    let copy = LocalCopyOptions::new().tighten_resource_limits(&LocalCopyOptions::new().with_max_bytes(0));
     let error = host
         .copy_with_options(&source, &target, &copy)
         .expect_err("zero bytes cannot copy payload");

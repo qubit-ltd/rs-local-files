@@ -35,10 +35,7 @@ use crate::LocalRelativePath;
 /// Opens a lazy reader over the opened root directory.
 ///
 /// Returns an I/O error when the root descriptor cannot be enumerated.
-pub(crate) fn open_root_directory_reader(
-    root: &File,
-    diagnostic_root: &Path,
-) -> Result<RootedDirectoryReader> {
+pub(crate) fn open_root_directory_reader(root: &File, diagnostic_root: &Path) -> Result<RootedDirectoryReader> {
     RootedDirectoryReader::open(root.try_clone()?, diagnostic_root)
 }
 
@@ -52,8 +49,7 @@ pub(crate) fn open_rooted_directory_reader(
 ) -> Result<RootedDirectoryReader> {
     let diagnostic_path = diagnostic_root.join(path.as_path());
     let (parent, name, _) =
-        open_rooted_parent(root, &diagnostic_path, path, RootedParentMode::OpenExisting)?
-            .into_parts();
+        open_rooted_parent(root, &diagnostic_path, path, RootedParentMode::OpenExisting)?.into_parts();
     let directory = match open_directory_component(&parent, &name) {
         Ok(directory) => directory,
         Err(error) => {
@@ -79,11 +75,9 @@ pub(crate) fn read_rooted_directory(
 ) -> Result<Vec<RootedDirectoryEntry>> {
     let diagnostic_path = diagnostic_root.join(path.as_path());
     let (parent, name, _) =
-        open_rooted_parent(root, &diagnostic_path, path, RootedParentMode::OpenExisting)?
-            .into_parts();
-    let directory = open_directory_component(&parent, &name).map_err(|error| {
-        add_path_context(error, "open rooted directory for listing", &diagnostic_path)
-    })?;
+        open_rooted_parent(root, &diagnostic_path, path, RootedParentMode::OpenExisting)?.into_parts();
+    let directory = open_directory_component(&parent, &name)
+        .map_err(|error| add_path_context(error, "open rooted directory for listing", &diagnostic_path))?;
     read_directory_handle(&directory, &diagnostic_path)
 }
 
@@ -91,15 +85,10 @@ pub(crate) fn read_rooted_directory(
 ///
 /// Returns the stored target without resolving it. Parent traversal and
 /// `readlinkat` errors, including a final entry that is not a link, propagate.
-pub(crate) fn read_rooted_link(
-    root: &File,
-    diagnostic_root: &Path,
-    path: &LocalRelativePath,
-) -> Result<PathBuf> {
+pub(crate) fn read_rooted_link(root: &File, diagnostic_root: &Path, path: &LocalRelativePath) -> Result<PathBuf> {
     let diagnostic_path = diagnostic_root.join(path.as_path());
     let (parent, name, _) =
-        open_rooted_parent(root, &diagnostic_path, path, RootedParentMode::OpenExisting)?
-            .into_parts();
+        open_rooted_parent(root, &diagnostic_path, path, RootedParentMode::OpenExisting)?.into_parts();
     match readlinkat(&parent, &name, Vec::new()) {
         Ok(target) => Ok(PathBuf::from(OsString::from_vec(target.into_bytes()))),
         Err(error) => Err(add_path_context(
@@ -122,8 +111,7 @@ pub(crate) fn create_rooted_symlink(
 ) -> Result<()> {
     let diagnostic_path = diagnostic_root.join(path.as_path());
     let (parent, name, _) =
-        open_rooted_parent(root, &diagnostic_path, path, RootedParentMode::OpenExisting)?
-            .into_parts();
+        open_rooted_parent(root, &diagnostic_path, path, RootedParentMode::OpenExisting)?.into_parts();
     match symlinkat(target, &parent, &name) {
         Ok(()) => Ok(()),
         Err(error) => Err(add_path_context(
@@ -165,21 +153,13 @@ pub(crate) fn create_rooted_directory(
             return Ok(());
         }
     }
-    Err(add_path_context(
-        error,
-        "create rooted directory",
-        &diagnostic_path,
-    ))
+    Err(add_path_context(error, "create rooted directory", &diagnostic_path))
 }
 
 /// Removes one rooted leaf or empty directory without following symbolic links.
 /// Traversal, inspection and unlink errors propagate. Recursive callers use
 /// the shared deletion scheduler before reaching this native boundary.
-pub(crate) fn remove_rooted_entry(
-    root: &File,
-    diagnostic_root: &Path,
-    path: &LocalRelativePath,
-) -> Result<()> {
+pub(crate) fn remove_rooted_entry(root: &File, diagnostic_root: &Path, path: &LocalRelativePath) -> Result<()> {
     let status = rooted_status(root, diagnostic_root, path)?;
     unlink_rooted_entry(
         root,
@@ -203,8 +183,7 @@ pub(crate) fn unlink_rooted_entry(
 ) -> Result<()> {
     let diagnostic_path = diagnostic_root.join(path.as_path());
     let (parent, name, _) =
-        open_rooted_parent(root, &diagnostic_path, path, RootedParentMode::OpenExisting)?
-            .into_parts();
+        open_rooted_parent(root, &diagnostic_path, path, RootedParentMode::OpenExisting)?.into_parts();
     let flags = if directory { libc::AT_REMOVEDIR } else { 0 };
     // SAFETY: `parent` and `name` remain live for this non-retaining call.
     let result = unsafe { libc::unlinkat(parent.as_raw_fd(), name.as_ptr(), flags) };
@@ -234,15 +213,9 @@ pub(crate) fn rename_rooted_entry(
     let source_path = diagnostic_root.join(source.as_path());
     let destination_path = diagnostic_root.join(destination.as_path());
     let (source_parent, source_name, _) =
-        open_rooted_parent(root, &source_path, source, RootedParentMode::OpenExisting)?
-            .into_parts();
-    let (destination_parent, destination_name, _) = open_rooted_parent(
-        root,
-        &destination_path,
-        destination,
-        RootedParentMode::OpenExisting,
-    )?
-    .into_parts();
+        open_rooted_parent(root, &source_path, source, RootedParentMode::OpenExisting)?.into_parts();
+    let (destination_parent, destination_name, _) =
+        open_rooted_parent(root, &destination_path, destination, RootedParentMode::OpenExisting)?.into_parts();
     #[cfg(feature = "test-support")]
     if super::test_support::is_enabled("rooted-rename-indeterminate") {
         return Err(add_path_context(
@@ -263,12 +236,7 @@ pub(crate) fn rename_rooted_entry(
             )
         }
     } else {
-        rename_without_replacing(
-            &source_parent,
-            &source_name,
-            &destination_parent,
-            &destination_name,
-        )?
+        rename_without_replacing(&source_parent, &source_name, &destination_parent, &destination_name)?
     };
     if result == 0 {
         Ok(())
@@ -293,8 +261,7 @@ pub(crate) fn set_rooted_permissions(
 ) -> Result<()> {
     let diagnostic_path = diagnostic_root.join(path.as_path());
     let (parent, name, _) =
-        open_rooted_parent(root, &diagnostic_path, path, RootedParentMode::OpenExisting)?
-            .into_parts();
+        open_rooted_parent(root, &diagnostic_path, path, RootedParentMode::OpenExisting)?.into_parts();
     let status = stat_child(&parent, &name, &diagnostic_path)?;
     let flags = if is_directory(status.st_mode as libc::mode_t) {
         libc::O_RDONLY | libc::O_DIRECTORY | libc::O_NOFOLLOW | libc::O_CLOEXEC
@@ -311,8 +278,7 @@ pub(crate) fn set_rooted_permissions(
             ));
         }
     };
-    let native_mode =
-        libc::mode_t::try_from(mode & 0o7777).expect("portable permission bits fit native mode");
+    let native_mode = libc::mode_t::try_from(mode & 0o7777).expect("portable permission bits fit native mode");
     // SAFETY: `entry` owns a valid descriptor for this non-retaining call.
     let result = unsafe { libc::fchmod(entry.as_raw_fd(), native_mode) };
     if result == 0 {
@@ -330,10 +296,7 @@ pub(crate) fn set_rooted_permissions(
 ///
 /// Returns children sorted by native name, excluding `.` and `..`.
 /// Enumeration and no-follow child metadata failures discard the partial list.
-fn read_directory_handle(
-    directory: &File,
-    diagnostic_path: &Path,
-) -> Result<Vec<RootedDirectoryEntry>> {
+fn read_directory_handle(directory: &File, diagnostic_path: &Path) -> Result<Vec<RootedDirectoryEntry>> {
     let mut stream = Dir::read_from(directory).map_err(Error::from)?;
     let mut entries = Vec::new();
     for entry in &mut stream {
@@ -343,8 +306,7 @@ fn read_directory_handle(
             continue;
         }
         let name = OsString::from_vec(name.to_vec());
-        let c_name =
-            CString::new(name.as_bytes()).expect("directory entry names never contain NUL");
+        let c_name = CString::new(name.as_bytes()).expect("directory entry names never contain NUL");
         let status = stat_child(directory, &c_name, diagnostic_path)?;
         entries.push((name, status));
     }
@@ -369,11 +331,7 @@ fn open_directory_component(parent: &File, name: &CString) -> Result<File> {
 ///
 /// Propagates secure parent-traversal and final metadata errors.
 #[inline]
-fn rooted_status(
-    root: &File,
-    diagnostic_root: &Path,
-    path: &LocalRelativePath,
-) -> Result<libc::stat> {
+fn rooted_status(root: &File, diagnostic_root: &Path, path: &LocalRelativePath) -> Result<libc::stat> {
     super::rooted_file_io::read_rooted_symlink_metadata(root, diagnostic_root, path)
 }
 
@@ -434,12 +392,7 @@ fn rename_without_replacing(
 }
 
 /// Reports platforms without an atomic descriptor-relative no-replace rename.
-#[cfg(not(any(
-    target_os = "linux",
-    target_os = "android",
-    target_os = "macos",
-    target_os = "ios",
-)))]
+#[cfg(not(any(target_os = "linux", target_os = "android", target_os = "macos", target_os = "ios",)))]
 #[inline]
 fn rename_without_replacing(
     _source_parent: &File,

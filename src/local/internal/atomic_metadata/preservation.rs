@@ -46,8 +46,7 @@ pub(crate) fn preserve_atomic_metadata(source: &File, staging: &File) -> Result<
     #[cfg(not(feature = "test-support"))]
     let source_metadata = source.metadata()?;
     #[cfg(feature = "test-support")]
-    let staging_metadata = if super::super::test_support::is_enabled("atomic-metadata-staging-stat")
-    {
+    let staging_metadata = if super::super::test_support::is_enabled("atomic-metadata-staging-stat") {
         Err(crate::local::test_fault_error())
     } else {
         staging.metadata()
@@ -57,8 +56,7 @@ pub(crate) fn preserve_atomic_metadata(source: &File, staging: &File) -> Result<
     #[cfg(feature = "test-support")]
     let forced_owner_error = super::super::test_support::is_enabled("atomic-metadata-owner");
     #[cfg(feature = "test-support")]
-    let forced_owner_native_error =
-        super::super::test_support::is_enabled("atomic-metadata-owner-native");
+    let forced_owner_native_error = super::super::test_support::is_enabled("atomic-metadata-owner-native");
     #[cfg(not(feature = "test-support"))]
     let forced_owner_error = false;
     #[cfg(not(feature = "test-support"))]
@@ -73,13 +71,7 @@ pub(crate) fn preserve_atomic_metadata(source: &File, staging: &File) -> Result<
         let result = if forced_owner_native_error {
             -1
         } else {
-            unsafe {
-                libc::fchown(
-                    staging.as_raw_fd(),
-                    source_metadata.uid(),
-                    source_metadata.gid(),
-                )
-            }
+            unsafe { libc::fchown(staging.as_raw_fd(), source_metadata.uid(), source_metadata.gid()) }
         };
         if forced_owner_error || result == -1 {
             return Err(if forced_owner_error {

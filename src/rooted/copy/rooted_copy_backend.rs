@@ -109,11 +109,7 @@ impl CopyTreeBackend for RootedCopyBackend<'_> {
     ///
     /// Preserves current statistics and directory coordinates on reader
     /// failure.
-    fn next_entry(
-        &mut self,
-        frame: &mut Self::Frame,
-        stats: &Statistics,
-    ) -> Result<Option<Self::Entry>, Error> {
+    fn next_entry(&mut self, frame: &mut Self::Frame, stats: &Statistics) -> Result<Option<Self::Entry>, Error> {
         match frame.reader.next_entry() {
             Ok(entry) => Ok(entry),
             Err(source_error) => Err(error(
@@ -128,11 +124,7 @@ impl CopyTreeBackend for RootedCopyBackend<'_> {
 
     /// Constructs child coordinates once, at one level below the active frame.
     #[inline]
-    fn child_context(
-        &self,
-        frame: &CopyTreeFrameContext,
-        entry: &Self::Entry,
-    ) -> CopyTreeFrameContext {
+    fn child_context(&self, frame: &CopyTreeFrameContext, entry: &Self::Entry) -> CopyTreeFrameContext {
         CopyTreeFrameContext {
             source: frame.source.join(entry.name()),
             destination: frame.destination.join(entry.name()),
@@ -157,10 +149,8 @@ impl CopyTreeBackend for RootedCopyBackend<'_> {
         stats: &mut Statistics,
         budget: &mut CopyBudget,
     ) -> Result<Option<Self::Frame>, Error> {
-        let source_child =
-            Path::new(&frame.source).expect("scheduler preserves rooted source paths");
-        let destination_child =
-            Path::new(&frame.destination).expect("scheduler preserves rooted destination paths");
+        let source_child = Path::new(&frame.source).expect("scheduler preserves rooted source paths");
+        let destination_child = Path::new(&frame.destination).expect("scheduler preserves rooted destination paths");
         let mut child_frame = None;
         match entry.metadata().kind() {
             EntryKind::File => {
@@ -175,13 +165,7 @@ impl CopyTreeBackend for RootedCopyBackend<'_> {
                 )?;
             }
             EntryKind::Directory => {
-                if prepare_directory(
-                    self.root,
-                    &source_child,
-                    &destination_child,
-                    self.options,
-                    stats,
-                )? {
+                if prepare_directory(self.root, &source_child, &destination_child, self.options, stats)? {
                     let current = *stats;
                     child_frame = Some(enter_directory(
                         self.root,
@@ -228,13 +212,7 @@ impl CopyTreeBackend for RootedCopyBackend<'_> {
                         }
                     };
                     if resolved_metadata.kind() == EntryKind::Directory {
-                        if prepare_directory(
-                            self.root,
-                            &resolved,
-                            &destination_child,
-                            self.options,
-                            stats,
-                        )? {
+                        if prepare_directory(self.root, &resolved, &destination_child, self.options, stats)? {
                             let current = *stats;
                             child_frame = Some(enter_directory(
                                 self.root,
@@ -278,10 +256,7 @@ impl CopyTreeBackend for RootedCopyBackend<'_> {
                 ));
             }
             #[cfg(unix)]
-            EntryKind::Fifo
-            | EntryKind::Socket
-            | EntryKind::BlockDevice
-            | EntryKind::CharDevice => {
+            EntryKind::Fifo | EntryKind::Socket | EntryKind::BlockDevice | EntryKind::CharDevice => {
                 return Err(error(
                     Stage::InspectSourceEntry,
                     &source_child,
@@ -327,8 +302,7 @@ impl CopyTreeBackend for RootedCopyBackend<'_> {
         source_error: io::Error,
     ) -> Error {
         let source = Path::new(&context.source).expect("scheduler preserves rooted source paths");
-        let destination =
-            Path::new(&context.destination).expect("scheduler preserves rooted destination paths");
+        let destination = Path::new(&context.destination).expect("scheduler preserves rooted destination paths");
         error(stage, &source, &destination, *stats, source_error)
     }
 }
@@ -387,10 +361,7 @@ fn enter_directory(
             source,
             destination,
             statistics,
-            io::Error::new(
-                ErrorKind::InvalidInput,
-                "rooted copy source directory cycle detected",
-            ),
+            io::Error::new(ErrorKind::InvalidInput, "rooted copy source directory cycle detected"),
         ));
     }
     let directory_permit = budget.acquire_directory().map_err(|source_error| {

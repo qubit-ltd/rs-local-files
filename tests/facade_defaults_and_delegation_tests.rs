@@ -46,23 +46,15 @@ fn test_public_facade_uses_complete_instance_defaults() {
     filesystem
         .set_symlink_policy(LocalSymlinkPolicy::FollowAcrossScope)
         .expect("Host symlink policy should be configurable");
-    let symlink_policy = std::hint::black_box(
-        LocalFileSystem::symlink_policy as fn(&LocalFileSystem) -> LocalSymlinkPolicy,
-    );
-    assert_eq!(
-        LocalSymlinkPolicy::FollowAcrossScope,
-        symlink_policy(&filesystem)
-    );
-    let diagnostic_root = std::hint::black_box(
-        LocalFileSystem::diagnostic_root as fn(&LocalFileSystem) -> Option<&Path>,
-    );
+    let symlink_policy =
+        std::hint::black_box(LocalFileSystem::symlink_policy as fn(&LocalFileSystem) -> LocalSymlinkPolicy);
+    assert_eq!(LocalSymlinkPolicy::FollowAcrossScope, symlink_policy(&filesystem));
+    let diagnostic_root =
+        std::hint::black_box(LocalFileSystem::diagnostic_root as fn(&LocalFileSystem) -> Option<&Path>);
     assert!(diagnostic_root(&filesystem).is_none());
-    let capabilities = std::hint::black_box(
-        LocalFileSystem::capabilities as fn(&LocalFileSystem) -> LocalFileSystemCapabilities,
-    );
-    let limits = std::hint::black_box(
-        LocalFileSystem::limits as fn(&LocalFileSystem) -> LocalFileSystemLimits,
-    );
+    let capabilities =
+        std::hint::black_box(LocalFileSystem::capabilities as fn(&LocalFileSystem) -> LocalFileSystemCapabilities);
+    let limits = std::hint::black_box(LocalFileSystem::limits as fn(&LocalFileSystem) -> LocalFileSystemLimits);
     assert!(capabilities(&filesystem).supports_rooted_operations());
     assert_eq!(limits(&filesystem), filesystem.limits());
     let rooted_paths = LocalPaths::rooted();
@@ -79,9 +71,9 @@ fn test_public_facade_uses_complete_instance_defaults() {
         .expect("reader defaults should be configurable");
     assert_eq!(
         Some(Duration::ZERO),
-        std::hint::black_box(
-            LocalFileSystem::default_read_options as fn(&LocalFileSystem) -> &LocalReadOptions
-        )(&filesystem,)
+        std::hint::black_box(LocalFileSystem::default_read_options as fn(&LocalFileSystem) -> &LocalReadOptions)(
+            &filesystem,
+        )
         .open_retry_timeout()
     );
 
@@ -91,9 +83,9 @@ fn test_public_facade_uses_complete_instance_defaults() {
         .expect("writer defaults should be configurable");
     assert_eq!(
         LocalWriteMode::CreateOrReplace,
-        std::hint::black_box(
-            LocalFileSystem::default_write_options as fn(&LocalFileSystem) -> &LocalWriteOptions
-        )(&filesystem,)
+        std::hint::black_box(LocalFileSystem::default_write_options as fn(&LocalFileSystem) -> &LocalWriteOptions)(
+            &filesystem,
+        )
         .mode()
     );
 
@@ -106,9 +98,9 @@ fn test_public_facade_uses_complete_instance_defaults() {
         .set_default_list_options(LocalListOptions::new().with_recursive())
         .expect("listing defaults should be configurable");
     assert!(
-        std::hint::black_box(
-            LocalFileSystem::default_list_options as fn(&LocalFileSystem) -> &LocalListOptions
-        )(&filesystem,)
+        std::hint::black_box(LocalFileSystem::default_list_options as fn(&LocalFileSystem) -> &LocalListOptions)(
+            &filesystem,
+        )
         .recursive()
     );
 
@@ -118,15 +110,13 @@ fn test_public_facade_uses_complete_instance_defaults() {
             .is_err()
     );
     filesystem
-        .set_default_copy_options(
-            LocalCopyOptions::new().with_conflict(LocalCopyConflictPolicy::Overwrite),
-        )
+        .set_default_copy_options(LocalCopyOptions::new().with_conflict(LocalCopyConflictPolicy::Overwrite))
         .expect("copy defaults should be configurable");
     assert_eq!(
         LocalCopyConflictPolicy::Overwrite,
-        std::hint::black_box(
-            LocalFileSystem::default_copy_options as fn(&LocalFileSystem) -> &LocalCopyOptions
-        )(&filesystem,)
+        std::hint::black_box(LocalFileSystem::default_copy_options as fn(&LocalFileSystem) -> &LocalCopyOptions)(
+            &filesystem,
+        )
         .conflict()
     );
 
@@ -135,8 +125,7 @@ fn test_public_facade_uses_complete_instance_defaults() {
         .expect("directory-creation defaults should be configurable");
     assert!(
         std::hint::black_box(
-            LocalFileSystem::default_create_directory_options
-                as fn(&LocalFileSystem) -> &LocalCreateDirectoryOptions,
+            LocalFileSystem::default_create_directory_options as fn(&LocalFileSystem) -> &LocalCreateDirectoryOptions,
         )(&filesystem)
         .recursive()
     );
@@ -145,9 +134,9 @@ fn test_public_facade_uses_complete_instance_defaults() {
         .set_default_delete_options(LocalDeleteOptions::new().with_recursive())
         .expect("deletion defaults should be configurable");
     assert!(
-        std::hint::black_box(
-            LocalFileSystem::default_delete_options as fn(&LocalFileSystem) -> &LocalDeleteOptions
-        )(&filesystem,)
+        std::hint::black_box(LocalFileSystem::default_delete_options as fn(&LocalFileSystem) -> &LocalDeleteOptions)(
+            &filesystem,
+        )
         .recursive()
     );
 
@@ -155,9 +144,9 @@ fn test_public_facade_uses_complete_instance_defaults() {
         .set_default_rename_options(LocalRenameOptions::new().with_overwrite())
         .expect("rename defaults should be configurable");
     assert!(
-        std::hint::black_box(
-            LocalFileSystem::default_rename_options as fn(&LocalFileSystem) -> &LocalRenameOptions
-        )(&filesystem,)
+        std::hint::black_box(LocalFileSystem::default_rename_options as fn(&LocalFileSystem) -> &LocalRenameOptions)(
+            &filesystem,
+        )
         .overwrite()
     );
 
@@ -176,17 +165,14 @@ fn test_public_facade_uses_complete_instance_defaults() {
     assert_eq!(
         Some(8),
         std::hint::black_box(
-            LocalFileSystem::default_temp_file_options
-                as fn(&LocalFileSystem) -> &LocalTempFileOptions,
+            LocalFileSystem::default_temp_file_options as fn(&LocalFileSystem) -> &LocalTempFileOptions,
         )(&filesystem)
         .max_attempts(),
     );
 
     assert!(
         filesystem
-            .set_default_temp_directory_options(
-                LocalTempDirectoryOptions::new().with_max_attempts(0)
-            )
+            .set_default_temp_directory_options(LocalTempDirectoryOptions::new().with_max_attempts(0))
             .is_err()
     );
     filesystem
@@ -199,8 +185,7 @@ fn test_public_facade_uses_complete_instance_defaults() {
     assert_eq!(
         Some(8),
         std::hint::black_box(
-            LocalFileSystem::default_temp_directory_options
-                as fn(&LocalFileSystem) -> &LocalTempDirectoryOptions,
+            LocalFileSystem::default_temp_directory_options as fn(&LocalFileSystem) -> &LocalTempDirectoryOptions,
         )(&filesystem)
         .max_attempts(),
     );
@@ -213,17 +198,13 @@ fn test_public_facade_uses_complete_instance_defaults() {
     let source = directory.path().join("source");
     let copied = directory.path().join("copied");
     let renamed = directory.path().join("renamed");
-    let mut writer = filesystem
-        .open_writer(&source)
-        .expect("default writer should open");
+    let mut writer = filesystem.open_writer(&source).expect("default writer should open");
     writer
         .write_all(b"payload")
         .expect("default writer should accept bytes");
     let _ = writer.commit().expect("default writer should commit");
 
-    let mut reader = filesystem
-        .open_reader(&source)
-        .expect("default reader should open");
+    let mut reader = filesystem.open_reader(&source).expect("default reader should open");
     assert_eq!(7, reader.metadata().len());
     let permissions = reader.metadata().permissions();
     let native = fs::metadata(&source).expect("native source metadata");
@@ -231,26 +212,16 @@ fn test_public_facade_uses_complete_instance_defaults() {
     #[cfg(unix)]
     {
         use std::os::unix::fs::PermissionsExt;
-        assert_eq!(
-            permissions.unix_mode(),
-            Some(native.permissions().mode() & 0o7777)
-        );
+        assert_eq!(permissions.unix_mode(), Some(native.permissions().mode() & 0o7777));
     }
     #[cfg(windows)]
     assert_eq!(permissions.unix_mode(), None);
     let mut content = String::new();
-    reader
-        .read_to_string(&mut content)
-        .expect("default reader should read");
+    reader.read_to_string(&mut content).expect("default reader should read");
     assert_eq!("payload", content);
-    assert_eq!(
-        b"pay",
-        filesystem.read_prefix(&source, 3).unwrap().as_slice()
-    );
+    assert_eq!(b"pay", filesystem.read_prefix(&source, 3).unwrap().as_slice());
 
-    let _ = filesystem
-        .copy(&source, &copied)
-        .expect("default copy should succeed");
+    let _ = filesystem.copy(&source, &copied).expect("default copy should succeed");
     let _ = filesystem
         .rename(&copied, &renamed)
         .expect("default rename should succeed");
@@ -306,10 +277,8 @@ fn test_public_facade_contextualizes_capability_and_root_operand_failures() {
         host.space_at(&link).unwrap_err().kind()
     );
 
-    fs::write(directory.path().join("source"), b"payload")
-        .expect("rooted source should be created");
-    symlink("../../outside", directory.path().join("escape"))
-        .expect("escaping symlink should be created");
+    fs::write(directory.path().join("source"), b"payload").expect("rooted source should be created");
+    symlink("../../outside", directory.path().join("escape")).expect("escaping symlink should be created");
     let rooted = LocalFileSystem::rooted(directory.path()).expect("Rooted filesystem should open");
     assert_eq!(
         LocalFileErrorKind::InvalidPath,
@@ -394,9 +363,7 @@ fn test_public_host_facade_delegates_ordinary_operations() {
         .open_reader_with_options(&source, &LocalReadOptions::new())
         .expect("source reader should open");
     let mut content = String::new();
-    reader
-        .read_to_string(&mut content)
-        .expect("source reader should read");
+    reader.read_to_string(&mut content).expect("source reader should read");
     assert_eq!("payload", content);
     assert_eq!(
         b"pay",
@@ -442,13 +409,9 @@ fn test_public_host_facade_delegates_ordinary_operations() {
         .create_temp_file_with_options(&LocalTempFileOptions::new().with_parent(directory.path()))
         .expect("temporary file should be created");
     temporary_file.close();
-    temporary_file
-        .cleanup()
-        .expect("temporary file should clean up");
+    temporary_file.cleanup().expect("temporary file should clean up");
     let mut temporary_directory = filesystem
-        .create_temp_directory_with_options(
-            &LocalTempDirectoryOptions::new().with_parent(directory.path()),
-        )
+        .create_temp_directory_with_options(&LocalTempDirectoryOptions::new().with_parent(directory.path()))
         .expect("temporary directory should be created");
     temporary_directory
         .cleanup()
@@ -460,8 +423,7 @@ fn test_public_host_facade_delegates_ordinary_operations() {
 #[test]
 fn test_public_rooted_facade_delegates_relative_operations() {
     let directory = tempdir().expect("temporary root should be created");
-    let filesystem =
-        LocalFileSystem::rooted(directory.path()).expect("rooted filesystem should open");
+    let filesystem = LocalFileSystem::rooted(directory.path()).expect("rooted filesystem should open");
     assert_eq!(LocalFileSystemScope::Rooted, filesystem.scope());
     assert_eq!(Some(directory.path()), filesystem.diagnostic_root());
     let _ = filesystem.capabilities();
@@ -482,9 +444,7 @@ fn test_public_rooted_facade_delegates_relative_operations() {
             &LocalWriteOptions::new(LocalWriteMode::CreateOrReplace),
         )
         .expect("rooted writer should open");
-    writer
-        .write_all(b"payload")
-        .expect("rooted writer should write");
+    writer.write_all(b"payload").expect("rooted writer should write");
     let _ = writer.commit().expect("rooted writer should commit");
     let _ = filesystem
         .copy_with_options(

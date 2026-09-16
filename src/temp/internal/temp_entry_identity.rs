@@ -115,15 +115,13 @@ impl TempEntryIdentity {
         let mut information = BY_HANDLE_FILE_INFORMATION::default();
         // SAFETY: `file` owns a live handle and `information` is the matching
         // writable output structure.
-        let result =
-            unsafe { GetFileInformationByHandle(file.as_raw_handle(), &raw mut information) };
+        let result = unsafe { GetFileInformationByHandle(file.as_raw_handle(), &raw mut information) };
         if result == 0 {
             return Err(io::Error::last_os_error());
         }
         Ok(Self {
             volume: u64::from(information.dwVolumeSerialNumber),
-            file: (u64::from(information.nFileIndexHigh) << 32)
-                | u64::from(information.nFileIndexLow),
+            file: (u64::from(information.nFileIndexHigh) << 32) | u64::from(information.nFileIndexLow),
         })
     }
 }

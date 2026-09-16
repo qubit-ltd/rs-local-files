@@ -31,8 +31,7 @@ fn test_special_source_is_unsupported_before_parent_creation() {
             LocalCopyOptions::new().with_tree_source(),
         ] {
             let directory = tempdir().expect("fixture should exist");
-            let _listener = UnixListener::bind(directory.path().join("socket"))
-                .expect("socket source should exist");
+            let _listener = UnixListener::bind(directory.path().join("socket")).expect("socket source should exist");
             let (filesystem, source, target) = if rooted {
                 (
                     LocalFileSystem::rooted(directory.path()).expect("root should open"),
@@ -70,25 +69,18 @@ fn test_copy_source_modes_and_preflight_side_effects() {
                 for existing_target in [false, true] {
                     let directory = tempdir().expect("fixture should exist");
                     if directory_source {
-                        fs::create_dir(directory.path().join("source"))
-                            .expect("source directory should exist");
-                        fs::write(directory.path().join("source/payload"), b"payload")
-                            .expect("payload should exist");
+                        fs::create_dir(directory.path().join("source")).expect("source directory should exist");
+                        fs::write(directory.path().join("source/payload"), b"payload").expect("payload should exist");
                     } else {
-                        fs::write(directory.path().join("source"), b"payload")
-                            .expect("source should exist");
+                        fs::write(directory.path().join("source"), b"payload").expect("source should exist");
                     }
                     if existing_target {
-                        fs::create_dir(directory.path().join("parent"))
-                            .expect("target parent should exist");
+                        fs::create_dir(directory.path().join("parent")).expect("target parent should exist");
                         if directory_source {
                             fs::create_dir(directory.path().join("parent/target"))
                                 .expect("target directory should exist");
-                            fs::write(
-                                directory.path().join("parent/target/sentinel"),
-                                b"unchanged",
-                            )
-                            .expect("sentinel should exist");
+                            fs::write(directory.path().join("parent/target/sentinel"), b"unchanged")
+                                .expect("sentinel should exist");
                         } else {
                             fs::write(directory.path().join("parent/target"), b"unchanged")
                                 .expect("target should exist");
@@ -119,10 +111,7 @@ fn test_copy_source_modes_and_preflight_side_effects() {
                         || (!directory_source && mode == LocalCopySourceMode::Tree);
                     if mismatch {
                         let failure = result.expect_err("source mode must reject a different kind");
-                        assert_eq!(
-                            LocalFileErrorKind::RequirementNotMet,
-                            failure.error().kind()
-                        );
+                        assert_eq!(LocalFileErrorKind::RequirementNotMet, failure.error().kind());
                         assert_eq!(LocalCopyFailureState::Unchanged, failure.state());
                         if existing_target {
                             let sentinel = if directory_source {
@@ -171,10 +160,8 @@ fn test_final_link_source_modes_do_not_follow_targets() {
                 LocalCopySourceMode::Auto,
             ] {
                 let directory = tempdir().expect("fixture should exist");
-                fs::write(directory.path().join("file"), b"payload")
-                    .expect("referent should exist");
-                fs::create_dir(directory.path().join("directory"))
-                    .expect("directory referent should exist");
+                fs::write(directory.path().join("file"), b"payload").expect("referent should exist");
+                fs::create_dir(directory.path().join("directory")).expect("directory referent should exist");
                 #[cfg(unix)]
                 std::os::unix::fs::symlink(referent, directory.path().join("source"))
                     .expect("source link should exist");
@@ -202,16 +189,11 @@ fn test_final_link_source_modes_do_not_follow_targets() {
                 } else {
                     directory.path().join("parent/target")
                 };
-                let options = LocalCopyOptions::new()
-                    .with_source_mode(mode)
-                    .with_create_parent();
+                let options = LocalCopyOptions::new().with_source_mode(mode).with_create_parent();
                 let result = filesystem.copy_with_options(&source, &target, &options);
                 if mode == LocalCopySourceMode::Tree {
                     let failure = result.expect_err("tree requires an actual directory");
-                    assert_eq!(
-                        LocalFileErrorKind::RequirementNotMet,
-                        failure.error().kind()
-                    );
+                    assert_eq!(LocalFileErrorKind::RequirementNotMet, failure.error().kind());
                     assert_eq!(LocalCopyFailureState::Unchanged, failure.state());
                     assert!(!directory.path().join("parent").exists());
                 } else {
@@ -230,8 +212,7 @@ fn test_final_link_source_modes_do_not_follow_targets() {
                     }
                     assert_eq!(
                         PathBuf::from(referent),
-                        fs::read_link(directory.path().join("parent/target"))
-                            .expect("target should be a link")
+                        fs::read_link(directory.path().join("parent/target")).expect("target should be a link")
                     );
                 }
             }
@@ -296,8 +277,7 @@ fn test_tree_copy_preserves_dangling_directory_link_kind() {
 #[test]
 fn test_auto_reset_copies_opposite_source_kind_and_retains_byte_limit() {
     let select = std::hint::black_box(
-        LocalCopyOptions::with_source_mode
-            as fn(LocalCopyOptions, LocalCopySourceMode) -> LocalCopyOptions,
+        LocalCopyOptions::with_source_mode as fn(LocalCopyOptions, LocalCopySourceMode) -> LocalCopyOptions,
     );
     for rooted in [false, true] {
         for initial in [LocalCopySourceMode::Entry, LocalCopySourceMode::Tree] {
@@ -336,10 +316,7 @@ fn test_auto_reset_copies_opposite_source_kind_and_retains_byte_limit() {
             let mismatch = filesystem
                 .copy_with_options(&source, &target, &configured)
                 .expect_err("configured mode rejects the opposite source kind");
-            assert_eq!(
-                LocalFileErrorKind::RequirementNotMet,
-                mismatch.error().kind()
-            );
+            assert_eq!(LocalFileErrorKind::RequirementNotMet, mismatch.error().kind());
             let automatic = select(configured, LocalCopySourceMode::Auto);
             assert_eq!(Some(7), automatic.max_bytes());
             let outcome = filesystem
@@ -368,12 +345,10 @@ fn test_link_copy_overwrites_directory_link_without_removing_referent() {
             let parent = directory.path().to_path_buf();
             let source = parent.join("source");
             let target = parent.join("target");
-            fs::create_dir(directory.path().join("old-referent"))
-                .expect("old referent should exist");
+            fs::create_dir(directory.path().join("old-referent")).expect("old referent should exist");
             fs::write(directory.path().join("old-referent/sentinel"), b"retained")
                 .expect("referent sentinel should exist");
-            fs::write(directory.path().join("new-referent"), b"new")
-                .expect("new referent should exist");
+            fs::write(directory.path().join("new-referent"), b"new").expect("new referent should exist");
             let (source_link, target_link, new_referent, old_referent) = if tree {
                 fs::create_dir(&source).expect("source tree should exist");
                 fs::create_dir(&target).expect("target tree should exist");
@@ -384,19 +359,12 @@ fn test_link_copy_overwrites_directory_link_without_removing_referent() {
                     "../old-referent",
                 )
             } else {
-                (
-                    source.clone(),
-                    target.clone(),
-                    "new-referent",
-                    "old-referent",
-                )
+                (source.clone(), target.clone(), "new-referent", "old-referent")
             };
             #[cfg(unix)]
             {
-                std::os::unix::fs::symlink(new_referent, &source_link)
-                    .expect("source link should exist");
-                std::os::unix::fs::symlink(old_referent, &target_link)
-                    .expect("target link should exist");
+                std::os::unix::fs::symlink(new_referent, &source_link).expect("source link should exist");
+                std::os::unix::fs::symlink(old_referent, &target_link).expect("target link should exist");
             }
             #[cfg(windows)]
             {
@@ -411,16 +379,8 @@ fn test_link_copy_overwrites_directory_link_without_removing_referent() {
                 LocalFileSystem::host()
             }
             .expect("filesystem should open");
-            let source_operand = if rooted {
-                PathBuf::from("source")
-            } else {
-                source
-            };
-            let target_operand = if rooted {
-                PathBuf::from("target")
-            } else {
-                target
-            };
+            let source_operand = if rooted { PathBuf::from("source") } else { source };
+            let target_operand = if rooted { PathBuf::from("target") } else { target };
             let _ = filesystem
                 .copy_with_options(
                     &source_operand,
@@ -473,8 +433,7 @@ fn test_link_copy_rejects_required_atomicity_before_mutation() {
                 .with_atomicity(LocalAtomicityRequirement::Required);
             let directory = tempdir().expect("fixture should exist");
             #[cfg(unix)]
-            std::os::unix::fs::symlink("missing", directory.path().join("source"))
-                .expect("source link should exist");
+            std::os::unix::fs::symlink("missing", directory.path().join("source")).expect("source link should exist");
             #[cfg(windows)]
             std::os::windows::fs::symlink_file("missing", directory.path().join("source"))
                 .expect("source link fixture requires symlink privilege");
@@ -497,10 +456,7 @@ fn test_link_copy_rejects_required_atomicity_before_mutation() {
             let failure = filesystem
                 .copy_with_options(&source, &target, &options.with_create_parent())
                 .expect_err("link copying cannot satisfy the required guarantee");
-            assert_eq!(
-                LocalFileErrorKind::RequirementNotMet,
-                failure.error().kind()
-            );
+            assert_eq!(LocalFileErrorKind::RequirementNotMet, failure.error().kind());
             assert_eq!(LocalCopyFailureState::Unchanged, failure.state());
             assert!(!directory.path().join("parent").exists());
         }
@@ -549,8 +505,7 @@ fn test_link_copy_reports_required_namespace_durability() {
         assert_eq!(0, outcome.stats().bytes());
         assert_eq!(
             PathBuf::from("missing"),
-            fs::read_link(directory.path().join("new/nested/target"))
-                .expect("published link remains dangling")
+            fs::read_link(directory.path().join("new/nested/target")).expect("published link remains dangling")
         );
     }
 }

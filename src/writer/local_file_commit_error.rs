@@ -73,11 +73,7 @@ impl LocalFileCommitError {
     /// - `state`: Established publication state.
     /// - `writer`: Retryable writer when publication has not started.
     #[inline]
-    pub(crate) fn new(
-        error: LocalFileError,
-        state: LocalWriteFailureState,
-        writer: Option<LocalFileWriter>,
-    ) -> Self {
+    pub(crate) fn new(error: LocalFileError, state: LocalWriteFailureState, writer: Option<LocalFileWriter>) -> Self {
         Self {
             error,
             state,
@@ -109,13 +105,7 @@ impl LocalFileCommitError {
 
     /// Consumes the failure into its error, state, and optional retryable
     /// writer.
-    pub fn into_parts(
-        self,
-    ) -> (
-        LocalFileError,
-        LocalWriteFailureState,
-        Option<LocalFileWriter>,
-    ) {
+    pub fn into_parts(self) -> (LocalFileError, LocalWriteFailureState, Option<LocalFileWriter>) {
         (self.error, self.state, self.writer.map(|writer| *writer))
     }
 }

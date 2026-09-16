@@ -43,10 +43,7 @@ fn test_complete_resolver_uses_linear_ordinary_path_work() {
             let (metadata, opened, fallback) = resolution_observation_tests::snapshot();
             assert_eq!(depth + usize::from(follow_final), metadata);
             assert_eq!(depth, opened);
-            assert_eq!(
-                0, fallback,
-                "ordinary paths must not silently lose the fast path"
-            );
+            assert_eq!(0, fallback, "ordinary paths must not silently lose the fast path");
         }
     }
 }

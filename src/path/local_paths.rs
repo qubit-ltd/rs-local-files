@@ -86,10 +86,7 @@ impl LocalPaths {
     /// Returns a typed codec error for invalid canonical text, `InvalidPath`
     /// for unsafe component shapes or an invalid Windows drive, and
     /// `Unsupported` for an unsupported native platform. Performs no I/O.
-    pub fn from_canonical_components<'a>(
-        &self,
-        components: impl IntoIterator<Item = &'a str>,
-    ) -> LocalResult<PathBuf> {
+    pub fn from_canonical_components<'a>(&self, components: impl IntoIterator<Item = &'a str>) -> LocalResult<PathBuf> {
         match self.scope {
             LocalFileSystemScope::Host => from_canonical_host_components(components),
             LocalFileSystemScope::Rooted => {
@@ -193,10 +190,7 @@ fn has_raw_dot_component(path: &Path) -> bool {
 /// the rejected shape may not be safely representable as a path.
 #[inline]
 fn invalid_path_error() -> LocalFileError {
-    LocalFileError::new(
-        LocalFileErrorKind::InvalidPath,
-        LocalFileOperation::ComposePath,
-    )
+    LocalFileError::new(LocalFileErrorKind::InvalidPath, LocalFileOperation::ComposePath)
 }
 
 /// Decodes one canonical component and verifies it is one native normal
@@ -257,10 +251,7 @@ fn decode_canonical_component(component: &str) -> LocalResult<OsString> {
 #[must_use]
 fn is_normal_native_component(component: &OsStr) -> bool {
     !has_native_separator(component)
-        && matches!(
-            Path::new(component).components().next(),
-            Some(Component::Normal(_))
-        )
+        && matches!(Path::new(component).components().next(), Some(Component::Normal(_)))
         && Path::new(component).components().count() == 1
 }
 
@@ -352,9 +343,7 @@ const fn has_native_separator(_component: &OsStr) -> bool {
 /// Returns a `ComposePath` error when any component is malformed.
 #[cfg(unix)]
 #[inline(never)]
-fn from_canonical_host_components<'a>(
-    components: impl IntoIterator<Item = &'a str>,
-) -> LocalResult<PathBuf> {
+fn from_canonical_host_components<'a>(components: impl IntoIterator<Item = &'a str>) -> LocalResult<PathBuf> {
     let mut path = PathBuf::from("/");
     for component in components {
         path.push(decode_normal_component(component)?);
@@ -415,9 +404,7 @@ fn to_canonical_host_components(path: &Path) -> LocalResult<Vec<String>> {
 /// Returns a `ComposePath` error when the drive or any component is malformed.
 #[cfg(windows)]
 #[inline(never)]
-fn from_canonical_host_components<'a>(
-    components: impl IntoIterator<Item = &'a str>,
-) -> LocalResult<PathBuf> {
+fn from_canonical_host_components<'a>(components: impl IntoIterator<Item = &'a str>) -> LocalResult<PathBuf> {
     let mut components = components.into_iter();
     let Some(drive) = components.next() else {
         return Err(invalid_path_error());
@@ -510,9 +497,7 @@ fn to_canonical_host_components(path: &Path) -> LocalResult<Vec<String>> {
 /// Always returns a `ComposePath` unsupported error.
 #[cfg(not(any(unix, windows)))]
 #[inline(never)]
-fn from_canonical_host_components<'a>(
-    _components: impl IntoIterator<Item = &'a str>,
-) -> LocalResult<PathBuf> {
+fn from_canonical_host_components<'a>(_components: impl IntoIterator<Item = &'a str>) -> LocalResult<PathBuf> {
     Err(LocalFileError::new(
         LocalFileErrorKind::Unsupported,
         LocalFileOperation::ComposePath,

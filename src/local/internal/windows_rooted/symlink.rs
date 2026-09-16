@@ -62,16 +62,8 @@ const SYMLINK_REPARSE_FIXED_DATA_LENGTH: usize = 12;
 ///
 /// Returns an I/O error when parent traversal, final-handle opening, native
 /// reparse retrieval, or buffer validation fails.
-pub(crate) fn read_rooted_link(
-    root: &File,
-    _diagnostic_root: &Path,
-    path: &LocalRelativePath,
-) -> Result<PathBuf> {
-    let link = open_link(
-        root,
-        path,
-        GENERIC_READ | FILE_READ_ATTRIBUTES | SYNCHRONIZE,
-    )?;
+pub(crate) fn read_rooted_link(root: &File, _diagnostic_root: &Path, path: &LocalRelativePath) -> Result<PathBuf> {
+    let link = open_link(root, path, GENERIC_READ | FILE_READ_ATTRIBUTES | SYNCHRONIZE)?;
     let buffer = read_reparse_buffer(&link)?;
     parse_symbolic_link_target(&buffer)
 }
@@ -96,9 +88,7 @@ pub(crate) fn create_rooted_symlink(
     path: &LocalRelativePath,
     targets_directory: bool,
 ) -> std::result::Result<(), RootedSymlinkCreateError> {
-    let unchanged = |primary| {
-        RootedSymlinkCreateError::new(RootedSymlinkCreateFailureState::Unchanged, primary, None)
-    };
+    let unchanged = |primary| RootedSymlinkCreateError::new(RootedSymlinkCreateFailureState::Unchanged, primary, None);
     let buffer = build_symbolic_link_buffer(target).map_err(unchanged)?;
     let (parent, name) = open_parent(root, path).map_err(unchanged)?;
     let options = if targets_directory {
@@ -119,11 +109,7 @@ pub(crate) fn create_rooted_symlink(
             Ok(()) => Err(unchanged(source_error)),
             Err(cleanup_error) => {
                 let state = rollback_failure_state(&parent, &name, &link);
-                Err(RootedSymlinkCreateError::new(
-                    state,
-                    source_error,
-                    Some(cleanup_error),
-                ))
+                Err(RootedSymlinkCreateError::new(state, source_error, Some(cleanup_error)))
             }
         };
     }
@@ -140,13 +126,7 @@ fn rollback_failure_state(
     name: &std::ffi::OsStr,
     placeholder: &File,
 ) -> RootedSymlinkCreateFailureState {
-    let reopened = match nt_open_at(
-        parent,
-        name,
-        FILE_READ_ATTRIBUTES | SYNCHRONIZE,
-        FILE_OPEN,
-        0,
-    ) {
+    let reopened = match nt_open_at(parent, name, FILE_READ_ATTRIBUTES | SYNCHRONIZE, FILE_OPEN, 0) {
         Ok(reopened) => reopened,
         Err(error) if error.kind() == ErrorKind::NotFound => {
             return RootedSymlinkCreateFailureState::Unchanged;
@@ -154,9 +134,7 @@ fn rollback_failure_state(
         Err(_) => return RootedSymlinkCreateFailureState::Indeterminate,
     };
     match (handle_identity(placeholder), handle_identity(&reopened)) {
-        (Ok(expected), Ok(observed)) if expected == observed => {
-            RootedSymlinkCreateFailureState::PartiallyPublished
-        }
+        (Ok(expected), Ok(observed)) if expected == observed => RootedSymlinkCreateFailureState::PartiallyPublished,
         _ => RootedSymlinkCreateFailureState::Indeterminate,
     }
 }
@@ -212,8 +190,7 @@ fn open_link(root: &File, path: &LocalRelativePath, access: u32) -> Result<File>
 /// Retrieves the opaque reparse record for an already-opened link handle.
 /// Returns a native query error or `InvalidData` for an oversized response.
 fn read_reparse_buffer(link: &File) -> Result<Vec<u8>> {
-    let mut storage =
-        vec![0_usize; (MAXIMUM_REPARSE_DATA_BUFFER_SIZE as usize).div_ceil(size_of::<usize>())];
+    let mut storage = vec![0_usize; (MAXIMUM_REPARSE_DATA_BUFFER_SIZE as usize).div_ceil(size_of::<usize>())];
     let mut returned = 0_u32;
     // SAFETY: `link` remains open, the output allocation is writable for the
     // advertised capacity, and this synchronous call retains no pointers.
@@ -234,9 +211,7 @@ fn read_reparse_buffer(link: &File) -> Result<Vec<u8>> {
     }
     let returned = returned as usize;
     if returned > MAXIMUM_REPARSE_DATA_BUFFER_SIZE as usize {
-        return Err(corrupt_reparse(
-            "reparse query returned an oversized buffer",
-        ));
+        return Err(corrupt_reparse("reparse query returned an oversized buffer"));
     }
     // SAFETY: `storage` contains `returned` initialized bytes written by the
     // successful synchronous query.
@@ -249,12 +224,8 @@ fn read_reparse_buffer(link: &File) -> Result<Vec<u8>> {
 /// installation error; rollback remains the caller's responsibility.
 fn set_reparse_buffer(link: &File, buffer: &[u8]) -> Result<()> {
     let mut returned = 0_u32;
-    let buffer_length = u32::try_from(buffer.len()).map_err(|_| {
-        Error::new(
-            ErrorKind::InvalidInput,
-            "symbolic-link reparse buffer is too large",
-        )
-    })?;
+    let buffer_length = u32::try_from(buffer.len())
+        .map_err(|_| Error::new(ErrorKind::InvalidInput, "symbolic-link reparse buffer is too large"))?;
     // SAFETY: `link` remains open, `buffer` contains a complete immutable
     // reparse record, and this synchronous call retains no pointers.
     let result = unsafe {
@@ -296,20 +267,10 @@ fn build_symbolic_link_buffer(target: &Path) -> Result<Vec<u8>> {
     let data_length = SYMLINK_REPARSE_FIXED_DATA_LENGTH
         .checked_add(path_bytes)
         .and_then(|length| u16::try_from(length).ok())
-        .ok_or_else(|| {
-            Error::new(
-                ErrorKind::InvalidInput,
-                "symbolic-link reparse data is too long",
-            )
-        })?;
+        .ok_or_else(|| Error::new(ErrorKind::InvalidInput, "symbolic-link reparse data is too long"))?;
     let total_length = 8_usize
         .checked_add(usize::from(data_length))
-        .ok_or_else(|| {
-            Error::new(
-                ErrorKind::InvalidInput,
-                "symbolic-link reparse buffer overflowed",
-            )
-        })?;
+        .ok_or_else(|| Error::new(ErrorKind::InvalidInput, "symbolic-link reparse buffer overflowed"))?;
     if total_length > MAXIMUM_REPARSE_DATA_BUFFER_SIZE as usize {
         return Err(Error::new(
             ErrorKind::InvalidInput,
@@ -469,16 +430,9 @@ fn read_u32(buffer: &[u8], offset: usize) -> Result<u32> {
 /// The caller must ensure `record_length <= buffer.len()`. Returns
 /// `InvalidData` for misalignment, arithmetic overflow, or a range extending
 /// beyond that validated record length.
-fn read_wide_range(
-    buffer: &[u8],
-    record_length: usize,
-    offset: usize,
-    length: usize,
-) -> Result<Vec<u16>> {
+fn read_wide_range(buffer: &[u8], record_length: usize, offset: usize, length: usize) -> Result<Vec<u16>> {
     if !offset.is_multiple_of(size_of::<u16>()) || !length.is_multiple_of(size_of::<u16>()) {
-        return Err(corrupt_reparse(
-            "symbolic-link reparse name is not UTF-16 aligned",
-        ));
+        return Err(corrupt_reparse("symbolic-link reparse name is not UTF-16 aligned"));
     }
     let start = SYMLINK_PATH_BUFFER_OFFSET
         .checked_add(offset)
@@ -528,8 +482,7 @@ mod tests {
     #[test]
     fn test_relative_symbolic_link_reparse_buffer_round_trips() {
         let target = Path::new(r"..\missing\target");
-        let buffer =
-            build_symbolic_link_buffer(target).expect("relative reparse buffer should encode");
+        let buffer = build_symbolic_link_buffer(target).expect("relative reparse buffer should encode");
 
         assert_eq!(target, parse_symbolic_link_target(&buffer).unwrap());
     }
@@ -538,8 +491,7 @@ mod tests {
     #[test]
     fn test_absolute_symbolic_link_reparse_buffer_round_trips() {
         let target = Path::new(r"C:\outside\target");
-        let buffer =
-            build_symbolic_link_buffer(target).expect("absolute reparse buffer should encode");
+        let buffer = build_symbolic_link_buffer(target).expect("absolute reparse buffer should encode");
 
         assert_eq!(target, parse_symbolic_link_target(&buffer).unwrap());
     }
@@ -551,8 +503,7 @@ mod tests {
             Path::new(r"\\?\C:\outside\target"),
             Path::new(r"\\?\UNC\server\share\target"),
         ] {
-            let buffer =
-                build_symbolic_link_buffer(target).expect("verbatim reparse buffer should encode");
+            let buffer = build_symbolic_link_buffer(target).expect("verbatim reparse buffer should encode");
 
             assert_eq!(target, parse_symbolic_link_target(&buffer).unwrap());
         }

@@ -41,9 +41,7 @@ fn test_rooted_temp_resources_validate_attempt_and_affix_policies() {
     assert_eq!(LocalFileErrorKind::InvalidOptions, file_affix.kind());
 
     let directory_affix = filesystem
-        .create_temp_directory_with_options(
-            &LocalTempDirectoryOptions::new().with_suffix("/nested"),
-        )
+        .create_temp_directory_with_options(&LocalTempDirectoryOptions::new().with_suffix("/nested"))
         .expect_err("a directory suffix containing a separator must be rejected");
     assert_eq!(LocalFileErrorKind::InvalidOptions, directory_affix.kind());
 }
@@ -53,38 +51,26 @@ fn test_rooted_temp_resources_validate_attempt_and_affix_policies() {
 #[test]
 fn test_rooted_temp_resources_validate_parent_state() {
     let directory = tempdir().expect("temporary root should be created");
-    fs::write(directory.path().join("file-parent"), b"payload")
-        .expect("file parent fixture should be written");
+    fs::write(directory.path().join("file-parent"), b"payload").expect("file parent fixture should be written");
     let filesystem = LocalFileSystem::rooted(directory.path()).expect("root authority should open");
 
     let missing_file_parent = filesystem
-        .create_temp_file_with_options(
-            &LocalTempFileOptions::new().with_parent(Path::new("missing")),
-        )
+        .create_temp_file_with_options(&LocalTempFileOptions::new().with_parent(Path::new("missing")))
         .expect_err("a missing file parent must be rejected");
     assert_eq!(LocalFileErrorKind::NotFound, missing_file_parent.kind());
 
     let missing_directory_parent = filesystem
-        .create_temp_directory_with_options(
-            &LocalTempDirectoryOptions::new().with_parent(Path::new("missing")),
-        )
+        .create_temp_directory_with_options(&LocalTempDirectoryOptions::new().with_parent(Path::new("missing")))
         .expect_err("a missing directory parent must be rejected");
-    assert_eq!(
-        LocalFileErrorKind::NotFound,
-        missing_directory_parent.kind()
-    );
+    assert_eq!(LocalFileErrorKind::NotFound, missing_directory_parent.kind());
 
     let file_parent = filesystem
-        .create_temp_file_with_options(
-            &LocalTempFileOptions::new().with_parent(Path::new("file-parent")),
-        )
+        .create_temp_file_with_options(&LocalTempFileOptions::new().with_parent(Path::new("file-parent")))
         .expect_err("a regular file cannot be a temporary-file parent");
     assert_eq!(LocalFileErrorKind::NotDirectory, file_parent.kind());
 
     let directory_parent = filesystem
-        .create_temp_directory_with_options(
-            &LocalTempDirectoryOptions::new().with_parent(Path::new("file-parent")),
-        )
+        .create_temp_directory_with_options(&LocalTempDirectoryOptions::new().with_parent(Path::new("file-parent")))
         .expect_err("a regular file cannot be a temporary-directory parent");
     assert_eq!(LocalFileErrorKind::NotDirectory, directory_parent.kind());
 }
@@ -94,8 +80,7 @@ fn test_rooted_temp_resources_validate_parent_state() {
 #[test]
 fn test_rooted_directory_creation_enforces_existing_entry_policies() {
     let directory = tempdir().expect("temporary root should be created");
-    fs::create_dir(directory.path().join("existing"))
-        .expect("existing directory should be created");
+    fs::create_dir(directory.path().join("existing")).expect("existing directory should be created");
     fs::write(directory.path().join("file"), b"payload").expect("file fixture should be written");
     let filesystem = LocalFileSystem::rooted(directory.path()).expect("root authority should open");
 
@@ -113,27 +98,19 @@ fn test_rooted_directory_creation_enforces_existing_entry_policies() {
     assert!(!accepted.created());
 
     let conflict = filesystem
-        .create_directory_with_options(
-            Path::new("file"),
-            &LocalCreateDirectoryOptions::new().with_exists_ok(),
-        )
+        .create_directory_with_options(Path::new("file"), &LocalCreateDirectoryOptions::new().with_exists_ok())
         .expect_err("exists-ok must not accept a regular file");
     assert_eq!(LocalFileErrorKind::TypeConflict, conflict.kind());
 
     let missing_parent = filesystem
-        .create_directory_with_options(
-            Path::new("missing/child"),
-            &LocalCreateDirectoryOptions::new(),
-        )
+        .create_directory_with_options(Path::new("missing/child"), &LocalCreateDirectoryOptions::new())
         .expect_err("non-recursive creation must not synthesize ancestors");
     assert_eq!(LocalFileErrorKind::NotFound, missing_parent.kind());
 
     let recursive = filesystem
         .create_directory_with_options(
             Path::new("tree/branch/leaf"),
-            &LocalCreateDirectoryOptions::new()
-                .with_recursive()
-                .with_exists_ok(),
+            &LocalCreateDirectoryOptions::new().with_recursive().with_exists_ok(),
         )
         .expect("recursive creation should create every missing component");
     assert!(recursive.created());

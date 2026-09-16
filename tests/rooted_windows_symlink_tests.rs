@@ -71,10 +71,7 @@ fn test_rooted_copy_preserves_dangling_directory_link_kind() {
         .copy(Path::new("source"), Path::new("destination"))
         .expect("dangling directory link should copy without target lookup");
 
-    assert_eq!(
-        target,
-        fs::read_link(root.path().join("destination")).unwrap()
-    );
+    assert_eq!(target, fs::read_link(root.path().join("destination")).unwrap());
 }
 
 /// Verifies copying a link uses the retained root after the diagnostic path is
@@ -101,10 +98,7 @@ fn test_rooted_link_copy_ignores_replacement_diagnostic_root() {
         .copy(Path::new("source"), Path::new("destination"))
         .expect("link copy should use retained root handles");
 
-    assert_eq!(
-        retained_target,
-        fs::read_link(renamed.join("destination")).unwrap(),
-    );
+    assert_eq!(retained_target, fs::read_link(renamed.join("destination")).unwrap(),);
     assert!(!original.join("destination").exists());
 }
 
@@ -125,8 +119,5 @@ fn test_rooted_copy_preserves_link_to_existing_external_file() {
         .copy(Path::new("source"), Path::new("destination"))
         .expect("external-target link should copy as a link entry");
 
-    assert_eq!(
-        target,
-        fs::read_link(root.path().join("destination")).unwrap()
-    );
+    assert_eq!(target, fs::read_link(root.path().join("destination")).unwrap());
 }
