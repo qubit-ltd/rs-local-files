@@ -3,7 +3,15 @@
   "default_language": "en",
   "deploy": true,
   "languages": {
-    "en": {"readme": "README.md", "output": "index.html", "label": "English"},
-    "zh_CN": {"readme": "README.zh_CN.md", "output": "zh_CN/index.html", "label": "中文"}
+    "en": {
+      "readme": "README.md",
+      "output": "index.html",
+      "label": "English"
+    },
+    "zh_CN": {
+      "readme": "README.zh_CN.md",
+      "output": "zh_CN/index.html",
+      "label": "中文"
+    }
   }
 }
