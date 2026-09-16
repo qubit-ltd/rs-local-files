@@ -34,7 +34,7 @@ test-support = []
 [dependencies]
 qubit-budget = "0.7"
 qubit-redact = { version = "0.9", default-features = false }
-getrandom = "0.4"
+getrandom = "^0.4"
 
 [target.'cfg(unix)'.dependencies]
 libc = "0.2"
@@ -53,9 +53,9 @@ windows-sys = { version = "0.61", features = [
 ] }
 
 [dev-dependencies]
-criterion = "0.8"
-proptest = "1.11"
-tempfile = "3.27"
+criterion = "^0.8"
+proptest = "^1.11"
+tempfile = "^3.27"
 
 [[bench]]
 name = "local_files"
