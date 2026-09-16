@@ -45,15 +45,9 @@ pub(super) fn copy_file(
     mut statistics: Statistics,
     budget: &mut CopyBudget,
 ) -> Result<Statistics, Error> {
-    budget.check_deadline().map_err(|source_error| {
-        error(
-            Stage::InspectSourceEntry,
-            source,
-            destination,
-            statistics,
-            source_error,
-        )
-    })?;
+    budget
+        .check_deadline()
+        .map_err(|source_error| error(Stage::InspectSourceEntry, source, destination, statistics, source_error))?;
     #[cfg(feature = "test-support")]
     if crate::local::take_test_support_on_nth("rooted-copy-file-second", 2) {
         return Err(error(
@@ -76,33 +70,17 @@ pub(super) fn copy_file(
     }
     let mut reader = root
         .open_reader(source, &read::OpenOptions::default())
-        .map_err(|source_error| {
-            error(
-                Stage::InspectSourceEntry,
-                source,
-                destination,
-                statistics,
-                source_error,
-            )
-        })?;
+        .map_err(|source_error| error(Stage::InspectSourceEntry, source, destination, statistics, source_error))?;
     #[cfg(feature = "test-support")]
-    let source_metadata_result =
-        if crate::local::test_support_enabled("rooted-copy-source-metadata-native") {
-            Err(crate::local::test_fault_error())
-        } else {
-            Metadata::from_open_file(&reader)
-        };
+    let source_metadata_result = if crate::local::test_support_enabled("rooted-copy-source-metadata-native") {
+        Err(crate::local::test_fault_error())
+    } else {
+        Metadata::from_open_file(&reader)
+    };
     #[cfg(not(feature = "test-support"))]
     let source_metadata_result = Metadata::from_open_file(&reader);
-    let source_metadata = source_metadata_result.map_err(|source_error| {
-        error(
-            Stage::InspectSourceEntry,
-            source,
-            destination,
-            statistics,
-            source_error,
-        )
-    })?;
+    let source_metadata = source_metadata_result
+        .map_err(|source_error| error(Stage::InspectSourceEntry, source, destination, statistics, source_error))?;
     #[cfg(feature = "test-support")]
     {
         if crate::local::test_support_enabled("rooted-copy-destination-metadata") {
@@ -115,15 +93,8 @@ pub(super) fn copy_file(
             ));
         }
     }
-    let destination_metadata = optional_metadata(root, destination).map_err(|source_error| {
-        error(
-            Stage::PrepareDestination,
-            source,
-            destination,
-            statistics,
-            source_error,
-        )
-    })?;
+    let destination_metadata = optional_metadata(root, destination)
+        .map_err(|source_error| error(Stage::PrepareDestination, source, destination, statistics, source_error))?;
     if destination_metadata
         .as_ref()
         .is_some_and(|metadata| source_metadata.is_same_file(metadata))
@@ -151,8 +122,7 @@ pub(super) fn copy_file(
         );
         match action {
             Some(CopyDestinationAction::Skip) => {
-                statistics.skipped =
-                    checked_add(statistics.skipped, 1, source, destination, statistics)?;
+                statistics.skipped = checked_add(statistics.skipped, 1, source, destination, statistics)?;
                 return Ok(statistics);
             }
             Some(CopyDestinationAction::Replace) => {
@@ -165,13 +135,7 @@ pub(super) fn copy_file(
                         root.remove_file(destination)
                     };
                     remove_result.map_err(|source_error| {
-                        error(
-                            Stage::PrepareDestination,
-                            source,
-                            destination,
-                            statistics,
-                            source_error,
-                        )
+                        error(Stage::PrepareDestination, source, destination, statistics, source_error)
                     })?;
                 }
             }
@@ -205,19 +169,10 @@ pub(super) fn copy_file(
         }
     }
     let mut writer = root
-        .begin_atomic_write_with_options(
-            destination,
-            LocalAtomicWriteOptions::new().with_durability(durability),
-        )
+        .begin_atomic_write_with_options(destination, LocalAtomicWriteOptions::new().with_durability(durability))
         .map_err(|source_error| {
             let source_error = io::Error::new(source_error.kind(), source_error);
-            error(
-                Stage::PrepareDestination,
-                source,
-                destination,
-                statistics,
-                source_error,
-            )
+            error(Stage::PrepareDestination, source, destination, statistics, source_error)
         })?;
     #[cfg(feature = "test-support")]
     let copy_result = if crate::local::test_support_enabled("rooted-copy-file-contents-native") {
@@ -227,15 +182,8 @@ pub(super) fn copy_file(
     };
     #[cfg(not(feature = "test-support"))]
     let copy_result = budget.copy(&mut reader, &mut writer);
-    let bytes = copy_result.map_err(|source_error| {
-        error(
-            Stage::CopyFileContents,
-            source,
-            destination,
-            statistics,
-            source_error,
-        )
-    })?;
+    let bytes = copy_result
+        .map_err(|source_error| error(Stage::CopyFileContents, source, destination, statistics, source_error))?;
     #[cfg(feature = "test-support")]
     let commit_result = if crate::local::test_support_enabled("rooted-copy-file-commit-native") {
         Err(crate::LocalAtomicWriteError::new(
@@ -250,24 +198,15 @@ pub(super) fn copy_file(
     };
     #[cfg(not(feature = "test-support"))]
     let commit_result = writer.commit_with_durability();
-    let file_durable = commit_result.map_err(|source_error| {
-        rooted_commit_error(source, destination, statistics, source_error)
-    })?;
+    let file_durable =
+        commit_result.map_err(|source_error| rooted_commit_error(source, destination, statistics, source_error))?;
     statistics.files_durable &= file_durable;
     statistics.files = checked_add(statistics.files, 1, source, destination, statistics)?;
     statistics.bytes = checked_add(statistics.bytes, bytes, source, destination, statistics)?;
     if destination_metadata.is_some() {
-        statistics.overwritten =
-            checked_add(statistics.overwritten, 1, source, destination, statistics)?;
+        statistics.overwritten = checked_add(statistics.overwritten, 1, source, destination, statistics)?;
     }
-    preserve_permissions(
-        root,
-        source,
-        destination,
-        source_metadata,
-        options,
-        statistics,
-    )?;
+    preserve_permissions(root, source, destination, source_metadata, options, statistics)?;
     if destination_directory_requires_removal {
         statistics.non_atomic_publication = true;
     }

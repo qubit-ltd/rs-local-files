@@ -25,28 +25,16 @@ fn test_metadata_preserves_pre_epoch_timestamps() {
     let file = File::create(&native_path).expect("fixture file should be created");
     let host = LocalFileSystem::host().expect("Host filesystem should open");
     let rooted = LocalFileSystem::rooted(directory.path()).expect("Rooted filesystem should open");
-    for duration in [
-        Duration::from_secs(1),
-        Duration::from_millis(500),
-        Duration::ZERO,
-    ] {
-        let requested = UNIX_EPOCH
-            .checked_sub(duration)
-            .expect("timestamp is representable");
-        file.set_times(
-            FileTimes::new()
-                .set_modified(requested)
-                .set_accessed(requested),
-        )
-        .expect("fixture timestamps should be set");
+    for duration in [Duration::from_secs(1), Duration::from_millis(500), Duration::ZERO] {
+        let requested = UNIX_EPOCH.checked_sub(duration).expect("timestamp is representable");
+        file.set_times(FileTimes::new().set_modified(requested).set_accessed(requested))
+            .expect("fixture timestamps should be set");
         let native = file.metadata().expect("native metadata should be readable");
         for (filesystem, path, parent) in [
             (&host, native_path.as_path(), directory.path()),
             (&rooted, Path::new("/entry"), Path::new("/")),
         ] {
-            let metadata = filesystem
-                .metadata(path)
-                .expect("entry metadata should be readable");
+            let metadata = filesystem.metadata(path).expect("entry metadata should be readable");
             assert_eq!(
                 metadata.modified_at(),
                 native.modified().ok(),

@@ -36,10 +36,7 @@ impl LocalFileSystemCore {
     ///
     /// Returns the configured injected I/O error when `point` matches the next
     /// fault; otherwise returns `Ok(())`.
-    pub(crate) fn fail_if_requested(
-        &self,
-        point: crate::test_support::TestFaultPoint,
-    ) -> std::io::Result<()> {
+    pub(crate) fn fail_if_requested(&self, point: crate::test_support::TestFaultPoint) -> std::io::Result<()> {
         #[cfg(feature = "test-support")]
         {
             if let Some(error) = self.test_faults.as_ref().and_then(|plan| plan.take(point)) {

@@ -39,14 +39,8 @@ pub(crate) fn resolve_host_path(
     // Windows performs GetFullPathNameW normalization before filesystem
     // traversal for ordinary paths. Verbatim operands retain their spelling.
     #[cfg(windows)]
-    let traversal = std::path::absolute(&bound).map_err(|error| {
-        LocalFileError::from_io(
-            LocalFileOperation::BindPath,
-            Some(bound.clone()),
-            None,
-            error,
-        )
-    })?;
+    let traversal = std::path::absolute(&bound)
+        .map_err(|error| LocalFileError::from_io(LocalFileOperation::BindPath, Some(bound.clone()), None, error))?;
     #[cfg(not(windows))]
     let traversal = &bound;
     let mut components = traversal.components().peekable();
@@ -75,21 +69,14 @@ pub(crate) fn resolve_host_path(
             continue;
         }
         if !symlink_policy.follows() {
-            return Err(LocalFileError::new(
-                LocalFileErrorKind::Unsupported,
-                LocalFileOperation::BindPath,
-            )
-            .with_reason("path resolution requires following a symbolic link")
-            .with_path(bound));
+            return Err(
+                LocalFileError::new(LocalFileErrorKind::Unsupported, LocalFileOperation::BindPath)
+                    .with_reason("path resolution requires following a symbolic link")
+                    .with_path(bound),
+            );
         }
-        resolved = fs::canonicalize(&resolved).map_err(|error| {
-            LocalFileError::from_io(
-                LocalFileOperation::BindPath,
-                Some(bound.clone()),
-                None,
-                error,
-            )
-        })?;
+        resolved = fs::canonicalize(&resolved)
+            .map_err(|error| LocalFileError::from_io(LocalFileOperation::BindPath, Some(bound.clone()), None, error))?;
     }
     Ok(resolved)
 }
@@ -103,10 +90,7 @@ fn push_host_component(path: &mut PathBuf, component: Component<'_>) {
     {
         let needs_separator = !path.as_os_str().is_empty()
             && !matches!(component, Component::Prefix(_) | Component::RootDir)
-            && !matches!(
-                path.as_os_str().as_encoded_bytes().last(),
-                Some(b'/' | b'\\')
-            );
+            && !matches!(path.as_os_str().as_encoded_bytes().last(), Some(b'/' | b'\\'));
         if needs_separator {
             path.as_mut_os_string().push("\\");
         }
@@ -132,12 +116,11 @@ fn push_host_component(path: &mut PathBuf, component: Component<'_>) {
 /// absolute-path invariant.
 pub(super) fn bind_host_path(path: &Path) -> LocalResult<PathBuf> {
     if !path.is_absolute() {
-        return Err(LocalFileError::new(
-            LocalFileErrorKind::InvalidPath,
-            LocalFileOperation::BindPath,
-        )
-        .with_reason("Host backend paths must be resolved by the public filesystem facade")
-        .with_path(path.to_path_buf()));
+        return Err(
+            LocalFileError::new(LocalFileErrorKind::InvalidPath, LocalFileOperation::BindPath)
+                .with_reason("Host backend paths must be resolved by the public filesystem facade")
+                .with_path(path.to_path_buf()),
+        );
     }
     Ok(path.to_path_buf())
 }

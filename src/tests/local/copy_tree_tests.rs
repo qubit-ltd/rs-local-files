@@ -70,11 +70,7 @@ impl CopyTreeBackend for Backend {
     }
 
     /// Emits one child per frame until the terminal directory.
-    fn next_entry(
-        &mut self,
-        frame: &mut Frame,
-        stats: &LocalCopyDirStats,
-    ) -> Result<Option<()>, LocalCopyDirError> {
+    fn next_entry(&mut self, frame: &mut Frame, stats: &LocalCopyDirStats) -> Result<Option<()>, LocalCopyDirError> {
         if frame.depth == 1 && self.failure == Some(LocalCopyDirStage::ReadSourceDirectory) {
             return Err(self.error(
                 LocalCopyDirStage::ReadSourceDirectory,
@@ -119,11 +115,7 @@ impl CopyTreeBackend for Backend {
 
     /// Records post-order completion or fails while consuming the deepest
     /// frame.
-    fn finish_frame(
-        &mut self,
-        frame: Frame,
-        stats: &mut LocalCopyDirStats,
-    ) -> Result<(), LocalCopyDirError> {
+    fn finish_frame(&mut self, frame: Frame, stats: &mut LocalCopyDirStats) -> Result<(), LocalCopyDirError> {
         if frame.depth == 2 && self.failure == Some(LocalCopyDirStage::PreservePermissions) {
             return Err(self.error(
                 LocalCopyDirStage::PreservePermissions,
@@ -180,8 +172,7 @@ fn test_copy_tree_post_order_and_exact_descendant_budget() {
     );
     let frame = Frame::new(0, Rc::clone(&live), &budget);
     let mut stats = LocalCopyDirStats::default();
-    copy_tree(&mut backend, frame, &mut stats, &mut budget)
-        .expect("exact budget should permit both descendants");
+    copy_tree(&mut backend, frame, &mut stats, &mut budget).expect("exact budget should permit both descendants");
     assert_eq!([2, 1, 0], backend.finished.as_slice());
     assert_eq!(2, stats.directories);
     assert_eq!(0, live.get());
@@ -205,18 +196,12 @@ fn test_copy_tree_failures_release_frames_and_preserve_effects() {
             finished: Vec::new(),
             failure: Some(stage),
         };
-        let mut budget =
-            CopyBudget::new(LocalCopyDirOptions::default().with_max_open_directories(3));
+        let mut budget = CopyBudget::new(LocalCopyDirOptions::default().with_max_open_directories(3));
         let frame = Frame::new(0, Rc::clone(&live), &budget);
         let mut stats = LocalCopyDirStats::default();
-        let error = copy_tree(&mut backend, frame, &mut stats, &mut budget)
-            .expect_err("selected boundary must fail");
+        let error = copy_tree(&mut backend, frame, &mut stats, &mut budget).expect_err("selected boundary must fail");
         assert_eq!(stage, error.stage());
-        assert_eq!(
-            &stats,
-            error.stats(),
-            "failure must preserve already-recorded effects"
-        );
+        assert_eq!(&stats, error.stats(), "failure must preserve already-recorded effects");
         assert_eq!(
             if stage == LocalCopyDirStage::ReadSourceDirectory {
                 1
@@ -232,11 +217,7 @@ fn test_copy_tree_failures_release_frames_and_preserve_effects() {
         );
         assert!(backend.finished.is_empty());
         let permits = (0..3)
-            .map(|_| {
-                budget
-                    .acquire_directory()
-                    .expect("all capacity should have returned")
-            })
+            .map(|_| budget.acquire_directory().expect("all capacity should have returned"))
             .collect::<Vec<_>>();
         assert!(budget.acquire_directory().is_err());
         drop(permits);
@@ -255,8 +236,7 @@ fn test_copy_tree_depth_rejection_precedes_child_processing() {
     let mut budget = CopyBudget::new(LocalCopyDirOptions::default().with_max_depth(1));
     let frame = Frame::new(0, Rc::clone(&live), &budget);
     let mut stats = LocalCopyDirStats::default();
-    let error = copy_tree(&mut backend, frame, &mut stats, &mut budget)
-        .expect_err("second descendant exceeds depth");
+    let error = copy_tree(&mut backend, frame, &mut stats, &mut budget).expect_err("second descendant exceeds depth");
     assert_eq!(LocalCopyDirStage::InspectSourceEntry, error.stage());
     assert_eq!(PathBuf::from("source-2"), error.source_path());
     assert_eq!(1, stats.directories);

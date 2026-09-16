@@ -51,12 +51,7 @@ impl RootedStagedFile {
     ///
     /// A guard that removes the staging entry unless disarmed after commit.
     #[inline]
-    pub(in crate::local) fn new(
-        parent: File,
-        name: CString,
-        file: File,
-        diagnostic_path: PathBuf,
-    ) -> Self {
+    pub(in crate::local) fn new(parent: File, name: CString, file: File, diagnostic_path: PathBuf) -> Self {
         Self {
             parent,
             name: Some(name),
@@ -199,12 +194,7 @@ impl RootedStagedFile {
             .name
             .as_ref()
             .expect("rooted staging entry has already been disarmed");
-        install_new_atomic_file_at(
-            self.parent.as_raw_fd(),
-            name,
-            self.parent.as_raw_fd(),
-            destination,
-        )
+        install_new_atomic_file_at(self.parent.as_raw_fd(), name, self.parent.as_raw_fd(), destination)
     }
 
     /// Closes and removes the uncommitted staging entry.

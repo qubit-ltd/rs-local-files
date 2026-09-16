@@ -98,13 +98,11 @@ impl Metadata {
             let mut identity = BY_HANDLE_FILE_INFORMATION::default();
             // SAFETY: `file` owns a live handle and `identity` is a correctly
             // sized writable buffer for `GetFileInformationByHandle`.
-            let result =
-                unsafe { GetFileInformationByHandle(file.as_raw_handle(), &raw mut identity) };
+            let result = unsafe { GetFileInformationByHandle(file.as_raw_handle(), &raw mut identity) };
             if result == 0 {
                 return Err(std::io::Error::last_os_error());
             }
-            let file_id =
-                (u64::from(identity.nFileIndexHigh) << 32) | u64::from(identity.nFileIndexLow);
+            let file_id = (u64::from(identity.nFileIndexHigh) << 32) | u64::from(identity.nFileIndexLow);
             Ok(Self::from_windows_metadata(
                 &metadata,
                 Some(u64::from(identity.dwVolumeSerialNumber)),
@@ -148,11 +146,7 @@ impl Metadata {
 
     /// Builds rooted metadata from Windows metadata and handle identity.
     #[cfg(windows)]
-    fn from_windows_metadata(
-        metadata: &fs::Metadata,
-        device_id: Option<u64>,
-        file_id: Option<u64>,
-    ) -> Self {
+    fn from_windows_metadata(metadata: &fs::Metadata, device_id: Option<u64>, file_id: Option<u64>) -> Self {
         let file_type = metadata.file_type();
         let kind = if file_type.is_symlink() {
             EntryKind::Symlink
@@ -314,10 +308,8 @@ where
     // Apple may return a signed fraction for pre-epoch filesystem times.
     // Match std's accepted range without relaxing other Unix stat contracts.
     #[cfg(target_vendor = "apple")]
-    let signed_fraction = seconds <= 0
-        && seconds > libc::time_t::MIN
-        && nanoseconds > -NANOS_PER_SECOND
-        && nanoseconds < 0;
+    let signed_fraction =
+        seconds <= 0 && seconds > libc::time_t::MIN && nanoseconds > -NANOS_PER_SECOND && nanoseconds < 0;
     #[cfg(not(target_vendor = "apple"))]
     let signed_fraction = false;
     if !(0..NANOS_PER_SECOND).contains(&nanoseconds) && !signed_fraction {
@@ -380,9 +372,7 @@ fn stat_times(status: &libc::stat) -> (Option<SystemTime>, Option<SystemTime>, O
     ))
 ))]
 #[inline]
-fn stat_times(
-    _status: &libc::stat,
-) -> (Option<SystemTime>, Option<SystemTime>, Option<SystemTime>) {
+fn stat_times(_status: &libc::stat) -> (Option<SystemTime>, Option<SystemTime>, Option<SystemTime>) {
     (None, None, None)
 }
 
@@ -430,10 +420,7 @@ mod tests {
             system_time(-1, -500_000_000),
             UNIX_EPOCH.checked_sub(Duration::from_millis(1500))
         );
-        assert_eq!(
-            system_time(0, -1),
-            UNIX_EPOCH.checked_sub(Duration::from_nanos(1))
-        );
+        assert_eq!(system_time(0, -1), UNIX_EPOCH.checked_sub(Duration::from_nanos(1)));
         assert_eq!(system_time(1, -1), None);
         assert_eq!(system_time(0, -1_000_000_000), None);
         assert_eq!(system_time(libc::time_t::MIN, -1), None);

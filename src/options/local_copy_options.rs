@@ -73,8 +73,7 @@ impl LocalCopyOptions {
         self.max_depth = tighter(self.max_depth, ceilings.max_depth);
         self.max_entries = tighter(self.max_entries, ceilings.max_entries);
         self.max_bytes = tighter(self.max_bytes, ceilings.max_bytes);
-        self.max_open_directories =
-            tighter(self.max_open_directories, ceilings.max_open_directories);
+        self.max_open_directories = tighter(self.max_open_directories, ceilings.max_open_directories);
         self.deadline = tighter(self.deadline, ceilings.deadline);
         self
     }
@@ -205,10 +204,7 @@ impl LocalCopyOptions {
     /// Sets metadata preservation policy.
     #[must_use = "use the configured copy options"]
     #[inline]
-    pub const fn with_metadata_preservation(
-        mut self,
-        preserve_metadata: LocalMetadataPreservePolicy,
-    ) -> Self {
+    pub const fn with_metadata_preservation(mut self, preserve_metadata: LocalMetadataPreservePolicy) -> Self {
         self.preserve_metadata = preserve_metadata;
         self
     }

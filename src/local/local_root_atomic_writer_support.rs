@@ -24,10 +24,7 @@ use super::internal::test_support;
 
 /// Synchronizes the final parent and newly created ancestor entries.
 #[cfg(unix)]
-pub(super) fn sync_rooted_parent_chain(
-    parent: &File,
-    parent_dirs_to_sync: &[File],
-) -> io::Result<()> {
+pub(super) fn sync_rooted_parent_chain(parent: &File, parent_dirs_to_sync: &[File]) -> io::Result<()> {
     #[cfg(feature = "test-support")]
     if test_support::is_enabled("atomic-install-unlink-recover-sync")
         || test_support::is_enabled("atomic-install-unlink-persistent-sync")

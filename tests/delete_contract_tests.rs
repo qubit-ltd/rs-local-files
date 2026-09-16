@@ -26,10 +26,7 @@ fn host_recursive_directory_delete_rejects_regular_file() {
         .delete_directory_with_options(&physical, &LocalDeleteOptions::new().with_recursive())
         .expect_err("a regular file is not a directory");
     assert_eq!(LocalFileErrorKind::NotDirectory, error.kind());
-    assert_eq!(
-        std::fs::read(&physical).expect("victim must survive"),
-        b"must survive"
-    );
+    assert_eq!(std::fs::read(&physical).expect("victim must survive"), b"must survive");
 }
 
 #[test]
@@ -40,14 +37,8 @@ fn rooted_recursive_directory_delete_rejects_regular_file() {
 
     let error = LocalFileSystem::rooted(directory.path())
         .expect("root authority should open")
-        .delete_directory_with_options(
-            Path::new("victim"),
-            &LocalDeleteOptions::new().with_recursive(),
-        )
+        .delete_directory_with_options(Path::new("victim"), &LocalDeleteOptions::new().with_recursive())
         .expect_err("a regular file is not a directory");
     assert_eq!(LocalFileErrorKind::NotDirectory, error.kind());
-    assert_eq!(
-        std::fs::read(&physical).expect("victim must survive"),
-        b"must survive"
-    );
+    assert_eq!(std::fs::read(&physical).expect("victim must survive"), b"must survive");
 }

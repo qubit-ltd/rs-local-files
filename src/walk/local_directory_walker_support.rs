@@ -49,12 +49,11 @@ pub(super) fn directory_limit_error(
 /// Validates options that must hold before a walker can be constructed.
 pub(super) fn validate_options(root: &Path, options: &LocalListOptions) -> LocalResult<()> {
     if options.max_open_directories() == Some(0) {
-        return Err(LocalFileError::new(
-            LocalFileErrorKind::InvalidOptions,
-            LocalFileOperation::List,
-        )
-        .with_path(root.to_path_buf())
-        .with_reason("maximum open directory count must be greater than zero"));
+        return Err(
+            LocalFileError::new(LocalFileErrorKind::InvalidOptions, LocalFileOperation::List)
+                .with_path(root.to_path_buf())
+                .with_reason("maximum open directory count must be greater than zero"),
+        );
     }
     Ok(())
 }
@@ -69,20 +68,17 @@ pub(super) fn walker_deadline(
         return Ok(None);
     };
     let Some(deadline) = started_at.checked_add(duration) else {
-        return Err(LocalFileError::new(
-            LocalFileErrorKind::InvalidOptions,
-            LocalFileOperation::List,
-        )
-        .with_path(root.to_path_buf())
-        .with_reason("listing deadline exceeds the monotonic clock range"));
+        return Err(
+            LocalFileError::new(LocalFileErrorKind::InvalidOptions, LocalFileOperation::List)
+                .with_path(root.to_path_buf())
+                .with_reason("listing deadline exceeds the monotonic clock range"),
+        );
     };
     Ok(Some(deadline))
 }
 
 /// Creates the finite pool that accounts for opened directory readers.
-pub(super) fn directory_pool(
-    options: &LocalListOptions,
-) -> Option<ManagedResourcePool<LocalResourceKind, usize>> {
+pub(super) fn directory_pool(options: &LocalListOptions) -> Option<ManagedResourcePool<LocalResourceKind, usize>> {
     options
         .max_open_directories()
         .map(|limit| ManagedResourcePool::new(LocalResourceKind::OpenDirectory, limit))
@@ -108,10 +104,7 @@ pub(super) fn name_bytes(name: &std::ffi::OsStr) -> usize {
 
 /// Reports whether an iterator error must terminate global traversal state.
 #[must_use]
-pub(super) fn is_terminal_walk_error(
-    error: &LocalFileError,
-    policy: crate::LocalWalkErrorPolicy,
-) -> bool {
+pub(super) fn is_terminal_walk_error(error: &LocalFileError, policy: crate::LocalWalkErrorPolicy) -> bool {
     policy == crate::LocalWalkErrorPolicy::FailFast
         || error.kind() == LocalFileErrorKind::ResourceLimit
         || error

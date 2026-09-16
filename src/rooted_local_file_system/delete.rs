@@ -48,13 +48,7 @@ impl RootedLocalFileSystem {
         options: &LocalDeleteOptions,
         symlink_policy: LocalSymlinkPolicy,
     ) -> LocalResult<LocalDeleteOutcome> {
-        let relative = resolve_rooted_path(
-            &self.root,
-            path,
-            symlink_policy,
-            false,
-            LocalFileOperation::DeleteFile,
-        )?;
+        let relative = resolve_rooted_path(&self.root, path, symlink_policy, false, LocalFileOperation::DeleteFile)?;
         let result = self.root.remove_file(&relative);
         match result {
             Ok(()) => Ok(LocalDeleteOutcome::new(true)),
@@ -100,19 +94,14 @@ impl RootedLocalFileSystem {
                 return Ok(LocalDeleteOutcome::new(false));
             }
             Err(error) => {
-                return Err(rooted_io_error(
-                    LocalFileOperation::DeleteDirectory,
-                    path,
-                    error,
-                ));
+                return Err(rooted_io_error(LocalFileOperation::DeleteDirectory, path, error));
             }
         };
         if metadata.kind() != crate::rooted::EntryKind::Directory {
-            return Err(LocalFileError::new(
-                LocalFileErrorKind::NotDirectory,
-                LocalFileOperation::DeleteDirectory,
-            )
-            .with_path(path.to_path_buf()));
+            return Err(
+                LocalFileError::new(LocalFileErrorKind::NotDirectory, LocalFileOperation::DeleteDirectory)
+                    .with_path(path.to_path_buf()),
+            );
         }
         if options.recursive() {
             return match remove_directory_tree(self, &relative, *options, started_at) {
@@ -134,11 +123,7 @@ impl RootedLocalFileSystem {
             Err(error) if error.kind() == io::ErrorKind::NotFound && options.missing_ok() => {
                 Ok(LocalDeleteOutcome::new(false))
             }
-            Err(error) => Err(rooted_io_error(
-                LocalFileOperation::DeleteDirectory,
-                path,
-                error,
-            )),
+            Err(error) => Err(rooted_io_error(LocalFileOperation::DeleteDirectory, path, error)),
         }
     }
 }
@@ -195,16 +180,10 @@ impl DeleteBackend for RootedLocalFileSystem {
     /// # Errors
     ///
     /// Returns enumeration or relative-coordinate validation failures.
-    fn next_child(
-        &self,
-        parent: &Self::Path,
-        reader: &mut Self::Reader,
-    ) -> io::Result<Option<Self::Path>> {
-        reader.next_entry().and_then(|entry| {
-            entry.map_or(Ok(None), |entry| {
-                parent.join_component(entry.name()).map(Some)
-            })
-        })
+    fn next_child(&self, parent: &Self::Path, reader: &mut Self::Reader) -> io::Result<Option<Self::Path>> {
+        reader
+            .next_entry()
+            .and_then(|entry| entry.map_or(Ok(None), |entry| parent.join_component(entry.name()).map(Some)))
     }
 
     /// Removes the inspected leaf itself, including a final directory link.
@@ -213,11 +192,7 @@ impl DeleteBackend for RootedLocalFileSystem {
     ///
     /// Returns native unlink errors; symbolic-link targets remain untouched.
     #[inline]
-    fn remove_non_directory(
-        &self,
-        path: &Self::Path,
-        _metadata: &Self::Metadata,
-    ) -> io::Result<()> {
+    fn remove_non_directory(&self, path: &Self::Path, _metadata: &Self::Metadata) -> io::Result<()> {
         self.root.remove_file(path)
     }
 

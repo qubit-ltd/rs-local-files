@@ -84,10 +84,7 @@ pub(in crate::local::internal) fn nt_open_at(
             FILE_ATTRIBUTE_NORMAL,
             ROOTED_SHARE_MODE,
             disposition,
-            options
-                | FILE_OPEN_FOR_BACKUP_INTENT
-                | FILE_OPEN_REPARSE_POINT
-                | FILE_SYNCHRONOUS_IO_NONALERT,
+            options | FILE_OPEN_FOR_BACKUP_INTENT | FILE_OPEN_REPARSE_POINT | FILE_SYNCHRONOUS_IO_NONALERT,
             null(),
             0,
         )

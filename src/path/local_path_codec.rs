@@ -167,9 +167,7 @@ mod platform_codec {
 
         /// Encodes a Unix native component while preserving invalid UTF-8
         /// bytes.
-        pub(crate) fn encode_native_text<'a>(
-            native: &'a OsStr,
-        ) -> Result<Cow<'a, str>, LocalPathCodecError> {
+        pub(crate) fn encode_native_text<'a>(native: &'a OsStr) -> Result<Cow<'a, str>, LocalPathCodecError> {
             let bytes = native.as_bytes();
             if bytes.contains(&0) {
                 return Err(LocalPathCodecError::NativeNul);
@@ -235,9 +233,7 @@ mod platform_codec {
 
         /// Encodes a Windows native component while preserving unpaired
         /// surrogate code units as escaped WTF-8 bytes.
-        pub(crate) fn encode_native_text<'a>(
-            native: &'a OsStr,
-        ) -> Result<Cow<'a, str>, LocalPathCodecError> {
+        pub(crate) fn encode_native_text<'a>(native: &'a OsStr) -> Result<Cow<'a, str>, LocalPathCodecError> {
             let units = native.encode_wide().collect::<Vec<_>>();
             if units.contains(&0) {
                 return Err(LocalPathCodecError::NativeNul);
@@ -291,13 +287,10 @@ mod platform_codec {
             let first = *bytes.get(index)?;
             let second = *bytes.get(index + 1)?;
             let third = *bytes.get(index + 2)?;
-            if first != 0xED || !(0xA0..=0xBF).contains(&second) || !(0x80..=0xBF).contains(&third)
-            {
+            if first != 0xED || !(0xA0..=0xBF).contains(&second) || !(0x80..=0xBF).contains(&third) {
                 return None;
             }
-            let surrogate = (u16::from(first & 0x0F) << 12)
-                | (u16::from(second & 0x3F) << 6)
-                | u16::from(third & 0x3F);
+            let surrogate = (u16::from(first & 0x0F) << 12) | (u16::from(second & 0x3F) << 6) | u16::from(third & 0x3F);
             Some((surrogate, 3))
         }
 
@@ -329,9 +322,7 @@ mod platform_codec {
 
         /// Reports that this platform has no supported reversible codec.
         #[inline]
-        pub(crate) fn encode_native_text<'a>(
-            _native: &'a OsStr,
-        ) -> Result<Cow<'a, str>, LocalPathCodecError> {
+        pub(crate) fn encode_native_text<'a>(_native: &'a OsStr) -> Result<Cow<'a, str>, LocalPathCodecError> {
             Err(LocalPathCodecError::UnsupportedNativeEncoding)
         }
     }

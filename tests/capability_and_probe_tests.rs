@@ -29,9 +29,7 @@ use tempfile::tempdir;
 /// filesystem-specific limit.
 #[test]
 fn test_host_file_system_limits_vary_by_path() {
-    let limits = LocalFileSystem::host()
-        .expect("Host filesystem should open")
-        .limits();
+    let limits = LocalFileSystem::host().expect("Host filesystem should open").limits();
 
     assert_eq!(SizeLimit::VariesByPath, limits.max_path_length());
     assert_eq!(SizeLimit::VariesByPath, limits.max_component_length());
@@ -106,8 +104,7 @@ fn test_host_and_rooted_special_file_probe_does_not_block() {
     for operation in ["host-space", "host-limits", "rooted-space", "rooted-limits"] {
         let directory = tempdir().expect("temporary directory");
         let fifo = directory.path().join("probe.fifo");
-        let fifo_c =
-            std::ffi::CString::new(fifo.as_os_str().as_bytes()).expect("FIFO path has no NUL");
+        let fifo_c = std::ffi::CString::new(fifo.as_os_str().as_bytes()).expect("FIFO path has no NUL");
         assert_eq!(0, unsafe { libc::mkfifo(fifo_c.as_ptr(), 0o600) });
         let mut child = Command::new(std::env::current_exe().expect("test executable"))
             .arg("--exact")
@@ -122,10 +119,7 @@ fn test_host_and_rooted_special_file_probe_does_not_block() {
             if child.try_wait().expect("child status").is_some() {
                 break;
             }
-            assert!(
-                std::time::Instant::now() < deadline,
-                "probe blocked for {operation}"
-            );
+            assert!(std::time::Instant::now() < deadline, "probe blocked for {operation}");
             std::thread::sleep(Duration::from_millis(10));
         }
         assert!(
@@ -166,10 +160,7 @@ fn test_local_file_system_capabilities_report_operation_support() {
     assert_eq!(cfg!(unix), capabilities.supports_durable_rename());
     assert_eq!(cfg!(unix), capabilities.supports_durable_file_copy(),);
     assert_eq!(cfg!(unix), capabilities.supports_durable_write());
-    assert_eq!(
-        cfg!(unix),
-        capabilities.supports_durable_temp_file_persist(),
-    );
+    assert_eq!(cfg!(unix), capabilities.supports_durable_temp_file_persist(),);
 
     let rooted = tempdir().expect("root should be created");
     let rooted_capabilities = LocalFileSystem::rooted(rooted.path())
@@ -195,9 +186,7 @@ fn test_host_capabilities_match_host_no_replace_backend() {
 #[test]
 fn test_local_file_names_generate_random_portable_components() {
     let names = LocalFileNames::portable();
-    let first = names
-        .random_name()
-        .expect("a random filename should be generated");
+    let first = names.random_name().expect("a random filename should be generated");
     let second = names
         .random_name_with(
             Some(std::ffi::OsStr::new("prefix-")),
@@ -206,9 +195,7 @@ fn test_local_file_names_generate_random_portable_components() {
         .expect("a random filename with affixes should be generated");
 
     assert_ne!(first, second);
-    let second_text = second
-        .to_str()
-        .expect("a portable random filename should be UTF-8");
+    let second_text = second.to_str().expect("a portable random filename should be UTF-8");
     assert!(second_text.starts_with("prefix-"));
     assert!(second_text.ends_with(".tmp"));
     names

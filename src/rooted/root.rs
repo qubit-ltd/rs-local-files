@@ -227,25 +227,13 @@ impl Root {
         #[cfg(unix)]
         {
             let _ = targets_directory;
-            local::create_rooted_symlink(&self.directory, &self.path, target, path).map_err(
-                |primary| {
-                    local::RootedSymlinkCreateError::new(
-                        local::RootedSymlinkCreateFailureState::Unchanged,
-                        primary,
-                        None,
-                    )
-                },
-            )
+            local::create_rooted_symlink(&self.directory, &self.path, target, path).map_err(|primary| {
+                local::RootedSymlinkCreateError::new(local::RootedSymlinkCreateFailureState::Unchanged, primary, None)
+            })
         }
         #[cfg(windows)]
         {
-            local::create_rooted_symlink(
-                &self.directory,
-                &self.path,
-                target,
-                path,
-                targets_directory,
-            )
+            local::create_rooted_symlink(&self.directory, &self.path, target, path, targets_directory)
         }
         #[cfg(not(any(unix, windows)))]
         {
@@ -308,9 +296,7 @@ impl Root {
         {
             local::read_rooted_directory(&self.directory, &self.path, path)?
                 .into_iter()
-                .map(|(name, file)| {
-                    Metadata::from_open_file(&file).map(|metadata| Entry::new(name, metadata))
-                })
+                .map(|(name, file)| Metadata::from_open_file(&file).map(|metadata| Entry::new(name, metadata)))
                 .collect()
         }
         #[cfg(not(any(unix, windows)))]
@@ -495,12 +481,7 @@ impl Root {
                 if local::test_support_enabled("rooted-copy-remove-file-native") {
                     return Err(crate::local::test_fault_error());
                 }
-                crate::test_support::temp_cleanup_replace_observed_entry(
-                    &self.directory,
-                    &self.path,
-                    path,
-                    false,
-                )?;
+                crate::test_support::temp_cleanup_replace_observed_entry(&self.directory, &self.path, path, false)?;
             }
             local::unlink_rooted_entry(&self.directory, &self.path, path, false)
         }
@@ -520,12 +501,7 @@ impl Root {
         #[cfg(unix)]
         {
             #[cfg(feature = "test-support")]
-            crate::test_support::temp_cleanup_replace_observed_entry(
-                &self.directory,
-                &self.path,
-                path,
-                true,
-            )?;
+            crate::test_support::temp_cleanup_replace_observed_entry(&self.directory, &self.path, path, true)?;
             local::unlink_rooted_entry(&self.directory, &self.path, path, true)
         }
         #[cfg(not(unix))]
@@ -595,11 +571,7 @@ impl Root {
     /// # Errors
     /// Returns an I/O error when secure traversal fails, the destination
     /// exists, or the requested atomic rename is unavailable.
-    pub fn rename_without_replacing(
-        &self,
-        source: &path::Path,
-        destination: &path::Path,
-    ) -> Result<()> {
+    pub fn rename_without_replacing(&self, source: &path::Path, destination: &path::Path) -> Result<()> {
         #[cfg(any(unix, windows))]
         {
             local::rename_rooted_entry(&self.directory, &self.path, source, destination, false)

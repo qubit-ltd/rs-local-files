@@ -31,30 +31,20 @@ mod unix {
             } else {
                 LocalFileSystem::host().expect("Host filesystem should open")
             };
-            let input = if rooted {
-                Path::new("link")
-            } else {
-                link.as_path()
-            };
+            let input = if rooted { Path::new("link") } else { link.as_path() };
 
             let error = filesystem
                 .delete_directory_with_options(input, &LocalDeleteOptions::new().with_recursive())
                 .expect_err("a final symlink is not a directory entry");
             assert_eq!(LocalFileErrorKind::NotDirectory, error.kind());
-            assert!(
-                fs::symlink_metadata(&link).is_ok(),
-                "the symlink must survive"
-            );
+            assert!(fs::symlink_metadata(&link).is_ok(), "the symlink must survive");
             assert_eq!(fs::read(target.join("payload")).unwrap(), b"keep");
 
             let outcome = filesystem
                 .delete_file_with_options(input, &LocalDeleteOptions::new())
                 .expect("a final symlink should be removed as an entry");
             assert!(outcome.deleted());
-            assert!(
-                fs::symlink_metadata(&link).is_err(),
-                "the symlink should be removed"
-            );
+            assert!(fs::symlink_metadata(&link).is_err(), "the symlink should be removed");
             assert_eq!(fs::read(target.join("payload")).unwrap(), b"keep");
             if !rooted {
                 symlink(&target, &link).expect("directory symlink should be restored");
@@ -73,11 +63,7 @@ mod unix {
             } else {
                 LocalFileSystem::host().expect("Host filesystem should open")
             };
-            let input = if rooted {
-                Path::new("dangling")
-            } else {
-                link.as_path()
-            };
+            let input = if rooted { Path::new("dangling") } else { link.as_path() };
 
             let outcome = filesystem
                 .delete_file_with_options(input, &LocalDeleteOptions::new())
@@ -116,11 +102,7 @@ mod windows {
             } else {
                 LocalFileSystem::host().expect("Host filesystem should open")
             };
-            let input = if rooted {
-                Path::new("link")
-            } else {
-                link.as_path()
-            };
+            let input = if rooted { Path::new("link") } else { link.as_path() };
             let error = filesystem
                 .delete_directory_with_options(input, &LocalDeleteOptions::new().with_recursive())
                 .expect_err("a final symlink is not a directory entry");
@@ -147,11 +129,7 @@ mod windows {
             } else {
                 LocalFileSystem::host().expect("Host filesystem should open")
             };
-            let input = if rooted {
-                Path::new("link")
-            } else {
-                link.as_path()
-            };
+            let input = if rooted { Path::new("link") } else { link.as_path() };
             let outcome = filesystem
                 .delete_file_with_options(input, &LocalDeleteOptions::new())
                 .expect("a final symlink should be removed as an entry");

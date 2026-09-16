@@ -27,10 +27,7 @@ use qubit_local_files::test_support::install_test_fault;
 
 /// Creates a process-specific path that is absent before each test use.
 fn temp_path(name: &str) -> PathBuf {
-    std::env::temp_dir().join(format!(
-        "qubit-local-files-copy-failure-{name}-{}",
-        std::process::id()
-    ))
+    std::env::temp_dir().join(format!("qubit-local-files-copy-failure-{name}-{}", std::process::id()))
 }
 
 /// Runs one test-support-only fault case in an isolated child test process.
@@ -57,11 +54,7 @@ fn test_copy_failure_exposes_typed_state_and_parts() {
     assert_eq!(Some(source.as_path()), failure.request_source_path());
     assert_eq!(Some(target.as_path()), failure.request_target_path());
     assert_eq!(Some(source.as_path()), failure.error().path());
-    assert!(
-        failure
-            .to_string()
-            .contains("copy failed with Unchanged state")
-    );
+    assert!(failure.to_string().contains("copy failed with Unchanged state"));
     assert_eq!(failure.partial_stats(), &LocalCopyStats::default());
     assert!(failure.staging_path().is_none());
     assert!(failure.cleanup_error().is_none());
@@ -142,11 +135,7 @@ fn test_copy_failure_reports_second_child_partial_publication() {
 
         let failure = LocalFileSystem::host()
             .expect("Host filesystem should open")
-            .copy_with_options(
-                &source,
-                &target,
-                &LocalCopyOptions::default().with_tree_source(),
-            )
+            .copy_with_options(&source, &target, &LocalCopyOptions::default().with_tree_source())
             .expect_err("second child staging fault must fail");
 
         assert_eq!(LocalCopyFailureState::PartiallyPublished, failure.state());
@@ -171,12 +160,9 @@ fn test_symlink_replacement_failure_reports_partial_publication() {
     const TEST_NAME: &str = "test_symlink_replacement_failure_reports_partial_publication";
     run_in_test_fault_process(TEST_NAME, "rooted-copy-symlink-create", || {
         let directory = tempfile::tempdir().expect("temporary directory should be created");
-        symlink("referent", directory.path().join("source"))
-            .expect("source link should be created");
-        fs::write(directory.path().join("destination"), b"previous")
-            .expect("previous destination should be written");
-        let filesystem =
-            LocalFileSystem::rooted(directory.path()).expect("Rooted filesystem should open");
+        symlink("referent", directory.path().join("source")).expect("source link should be created");
+        fs::write(directory.path().join("destination"), b"previous").expect("previous destination should be written");
+        let filesystem = LocalFileSystem::rooted(directory.path()).expect("Rooted filesystem should open");
 
         let failure = filesystem
             .copy_with_options(
@@ -245,9 +231,7 @@ fn test_copy_failure_reports_published_after_parent_sync_fault() {
         assert_eq!(1, failure.partial_stats().files());
         assert_eq!(
             b"payload",
-            fs::read(&target)
-                .expect("target should remain published")
-                .as_slice()
+            fs::read(&target).expect("target should remain published").as_slice()
         );
     });
 }
@@ -299,8 +283,7 @@ fn test_copy_failure_omits_staging_after_successful_cleanup() {
 #[cfg(feature = "test-support")]
 #[test]
 fn test_copy_failure_reports_unchanged_for_destination_preparation_fault() {
-    const TEST_NAME: &str =
-        "test_copy_failure_reports_indeterminate_for_destination_preparation_fault";
+    const TEST_NAME: &str = "test_copy_failure_reports_indeterminate_for_destination_preparation_fault";
     run_in_test_fault_process(TEST_NAME, "copy-destination-absolute", || {
         let directory = tempfile::tempdir().expect("temporary directory should be created");
         let source = directory.path().join("source");
@@ -309,11 +292,7 @@ fn test_copy_failure_reports_unchanged_for_destination_preparation_fault() {
 
         let failure = LocalFileSystem::host()
             .expect("Host filesystem should open")
-            .copy_with_options(
-                &source,
-                &target,
-                &LocalCopyOptions::default().with_tree_source(),
-            )
+            .copy_with_options(&source, &target, &LocalCopyOptions::default().with_tree_source())
             .expect_err("destination preparation fault must fail");
 
         assert_eq!(LocalCopyFailureState::Unchanged, failure.state());
@@ -335,11 +314,7 @@ fn test_copy_failure_reports_unchanged_for_source_inspection_fault() {
 
         let failure = LocalFileSystem::host()
             .expect("Host filesystem should open")
-            .copy_with_options(
-                &source,
-                &target,
-                &LocalCopyOptions::default().with_tree_source(),
-            )
+            .copy_with_options(&source, &target, &LocalCopyOptions::default().with_tree_source())
             .expect_err("source inspection fault must fail before publication");
 
         assert_eq!(LocalCopyFailureState::Unchanged, failure.state());
@@ -357,18 +332,12 @@ fn test_copy_failure_reports_directory_identity_cycle() {
         let directory = tempfile::tempdir().expect("temporary directory should be created");
         let source = directory.path().join("source");
         let target = directory.path().join("target");
-        fs::create_dir_all(source.join("nested"))
-            .expect("nested source directory should be created");
-        fs::write(source.join("nested/payload"), b"payload")
-            .expect("source payload should be written");
+        fs::create_dir_all(source.join("nested")).expect("nested source directory should be created");
+        fs::write(source.join("nested/payload"), b"payload").expect("source payload should be written");
 
         LocalFileSystem::host()
             .expect("Host filesystem should open")
-            .copy_with_options(
-                &source,
-                &target,
-                &LocalCopyOptions::default().with_tree_source(),
-            )
+            .copy_with_options(&source, &target, &LocalCopyOptions::default().with_tree_source())
             .expect_err("injected directory cycle must fail");
     });
 }
@@ -389,8 +358,7 @@ fn test_copy_failure_reports_staging_permission_failure() {
             .copy_with_options(
                 &source,
                 &target,
-                &LocalCopyOptions::default()
-                    .with_metadata_preservation(LocalMetadataPreservePolicy::Permissions),
+                &LocalCopyOptions::default().with_metadata_preservation(LocalMetadataPreservePolicy::Permissions),
             )
             .expect_err("staging permission fault must fail");
     });

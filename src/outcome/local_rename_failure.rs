@@ -30,11 +30,7 @@ impl Display for LocalRenameFailure {
     /// Formats the primary rename failure and its proven namespace state.
     #[inline]
     fn fmt(&self, formatter: &mut Formatter<'_>) -> FmtResult {
-        write!(
-            formatter,
-            "rename failed with {:?} state: {}",
-            self.state, self.error
-        )
+        write!(formatter, "rename failed with {:?} state: {}", self.state, self.error)
     }
 }
 
@@ -76,12 +72,7 @@ impl LocalRenameFailure {
     }
 
     /// Rewrites backend path context into normalized public operands.
-    pub(crate) fn remap_namespace(
-        mut self,
-        source: &Path,
-        target: &Path,
-        current_directory: Option<&Path>,
-    ) -> Self {
+    pub(crate) fn remap_namespace(mut self, source: &Path, target: &Path, current_directory: Option<&Path>) -> Self {
         self.error.replace_paths(
             Some(source.to_path_buf()),
             Some(target.to_path_buf()),

@@ -24,22 +24,14 @@ fn test_atomic_commit_state_publishes_host_staging() {
     fs::write(&target, b"old").expect("target fixture should be written");
     let mut writer = LocalFileSystem::host()
         .expect("Host filesystem should open")
-        .open_writer_with_options(
-            &target,
-            &LocalWriteOptions::new(LocalWriteMode::CreateOrReplace),
-        )
+        .open_writer_with_options(&target, &LocalWriteOptions::new(LocalWriteMode::CreateOrReplace))
         .expect("Host writer should open");
-    writer
-        .write_all(b"new")
-        .expect("staging should accept bytes");
+    writer.write_all(b"new").expect("staging should accept bytes");
 
     let outcome = writer.commit().expect("Host commit should publish");
 
     assert_eq!(LocalWriterState::Committed, outcome.state());
-    assert_eq!(
-        b"new".to_vec(),
-        fs::read(&target).expect("target should be readable")
-    );
+    assert_eq!(b"new".to_vec(), fs::read(&target).expect("target should be readable"));
 }
 
 /// Verifies shared atomic publication transitions preserve rooted replacement.
@@ -47,17 +39,14 @@ fn test_atomic_commit_state_publishes_host_staging() {
 fn test_atomic_commit_state_publishes_rooted_staging() {
     let directory = tempdir().expect("temporary directory should be created");
     fs::write(directory.path().join("target"), b"old").expect("target fixture should be written");
-    let filesystem =
-        LocalFileSystem::rooted(directory.path()).expect("rooted filesystem should open");
+    let filesystem = LocalFileSystem::rooted(directory.path()).expect("rooted filesystem should open");
     let mut writer = filesystem
         .open_writer_with_options(
             Path::new("target"),
             &LocalWriteOptions::new(LocalWriteMode::CreateOrReplace),
         )
         .expect("rooted writer should open");
-    writer
-        .write_all(b"new")
-        .expect("staging should accept bytes");
+    writer.write_all(b"new").expect("staging should accept bytes");
 
     let outcome = writer.commit().expect("rooted commit should publish");
 

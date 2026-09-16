@@ -43,9 +43,7 @@ pub(super) fn reject_directory_qualified_file(
         .with_reason("a directory-qualified path cannot be used as a file")
         .with_path(path.namespace_absolute().to_path_buf());
     match current_directory {
-        Some(current_directory) => {
-            Err(error.with_current_directory(current_directory.to_path_buf()))
-        }
+        Some(current_directory) => Err(error.with_current_directory(current_directory.to_path_buf())),
         None => Err(error),
     }
 }
@@ -172,17 +170,12 @@ pub(super) fn validate_copy_options(
 /// Validates an explicit temporary-name collision budget.
 ///
 /// Returns `InvalidOptions` for `Some(0)`; `None` permits unbounded retries.
-pub(super) fn validate_temp_attempts(
-    max_attempts: Option<usize>,
-    operation: LocalFileOperation,
-) -> LocalResult<()> {
+pub(super) fn validate_temp_attempts(max_attempts: Option<usize>, operation: LocalFileOperation) -> LocalResult<()> {
     if max_attempts != Some(0) {
         return Ok(());
     }
-    Err(
-        LocalFileError::new(LocalFileErrorKind::InvalidOptions, operation)
-            .with_reason("temporary entry attempt count must be greater than zero"),
-    )
+    Err(LocalFileError::new(LocalFileErrorKind::InvalidOptions, operation)
+        .with_reason("temporary entry attempt count must be greater than zero"))
 }
 
 /// Validates writer guarantees without resolving paths or touching the
@@ -202,10 +195,8 @@ pub(super) fn validate_write_options(
             && options.durability() == LocalDurabilityRequirement::Required
             && !capabilities.supports_durable_write())
     {
-        return Err(
-            LocalFileError::new(LocalFileErrorKind::RequirementNotMet, operation)
-                .with_reason("the requested writer guarantee is unavailable for these options"),
-        );
+        return Err(LocalFileError::new(LocalFileErrorKind::RequirementNotMet, operation)
+            .with_reason("the requested writer guarantee is unavailable for these options"));
     }
     Ok(())
 }
@@ -221,13 +212,10 @@ pub(super) fn validate_rename_options(
     operation: LocalFileOperation,
 ) -> LocalResult<()> {
     if !capabilities.supports_atomic_rename()
-        || (options.durability() == LocalDurabilityRequirement::Required
-            && !capabilities.supports_durable_rename())
+        || (options.durability() == LocalDurabilityRequirement::Required && !capabilities.supports_durable_rename())
     {
-        return Err(
-            LocalFileError::new(LocalFileErrorKind::RequirementNotMet, operation)
-                .with_reason("the requested rename guarantee is unavailable on this build"),
-        );
+        return Err(LocalFileError::new(LocalFileErrorKind::RequirementNotMet, operation)
+            .with_reason("the requested rename guarantee is unavailable on this build"));
     }
     Ok(())
 }
@@ -245,7 +233,6 @@ pub(super) fn validate_temp_options(
 ) -> LocalResult<()> {
     validate_temp_attempts(max_attempts, operation)?;
     crate::local::validate_temp_affixes(prefix, suffix).map_err(|error| {
-        LocalFileError::from_io(operation, None, None, error)
-            .with_kind(LocalFileErrorKind::InvalidOptions)
+        LocalFileError::from_io(operation, None, None, error).with_kind(LocalFileErrorKind::InvalidOptions)
     })
 }

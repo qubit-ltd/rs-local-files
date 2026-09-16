@@ -40,13 +40,9 @@ fn test_local_file_reader_reads_and_seeks() {
     assert_eq!(count, first.len());
     assert_eq!(&first, b"ab");
 
-    reader
-        .seek(SeekFrom::Start(3))
-        .expect("seek should succeed");
+    reader.seek(SeekFrom::Start(3)).expect("seek should succeed");
     let mut last = [0_u8; 3];
-    reader
-        .read_exact(&mut last)
-        .expect("suffix should be readable");
+    reader.read_exact(&mut last).expect("suffix should be readable");
     assert_eq!(&last, b"def");
 }
 
@@ -71,11 +67,7 @@ fn test_local_file_reader_supports_vectored_reads() {
 
     assert!(count > 0);
     assert!(count <= first.len() + second.len());
-    let bytes = first
-        .iter()
-        .chain(second.iter())
-        .copied()
-        .collect::<Vec<_>>();
+    let bytes = first.iter().chain(second.iter()).copied().collect::<Vec<_>>();
     assert_eq!(&bytes[..count], b"a");
 }
 

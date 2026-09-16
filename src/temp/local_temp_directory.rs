@@ -99,10 +99,7 @@ impl LocalTempDirectory {
             cleanup_limits,
             core: LocalTempResourceCore::new(
                 path,
-                LocalTempResourceBackend::Host(super::internal::HostTempResourceBackend {
-                    sandbox_path,
-                    identity,
-                }),
+                LocalTempResourceBackend::Host(super::internal::HostTempResourceBackend { sandbox_path, identity }),
                 symlink_policy,
             ),
         })
@@ -120,8 +117,7 @@ impl LocalTempDirectory {
         symlink_policy: LocalSymlinkPolicy,
         cleanup_limits: LocalTempCleanupLimits,
     ) -> Result<Self> {
-        let relative =
-            LocalRelativePath::new(&path).expect("rooted temporary path was validated at creation");
+        let relative = LocalRelativePath::new(&path).expect("rooted temporary path was validated at creation");
         let identity = root.symlink_metadata(&relative)?;
         Ok(Self {
             cleanup_limits,
@@ -368,14 +364,9 @@ impl LocalTempDirectory {
             }
         };
         let namespace_target = resolved_target.namespace_absolute().to_path_buf();
-        if scope == LocalFileSystemScope::Rooted
-            && resolved_target.authority_relative().as_os_str().is_empty()
-        {
+        if scope == LocalFileSystemScope::Rooted && resolved_target.authority_relative().as_os_str().is_empty() {
             return Err(self.persist_error(
-                Error::new(
-                    ErrorKind::InvalidInput,
-                    "cannot replace the Rooted virtual root",
-                ),
+                Error::new(ErrorKind::InvalidInput, "cannot replace the Rooted virtual root"),
                 requested_target,
                 Some(namespace_target),
                 LocalPersistStage::ResolveTarget,
@@ -420,11 +411,7 @@ impl LocalTempDirectory {
         let authority_target = resolved_target.authority_relative().to_path_buf();
         match &self.core.backend {
             LocalTempResourceBackend::Host(_) => {
-                let target = match crate::local::resolve_host_path(
-                    &authority_target,
-                    self.core.symlink_policy,
-                    false,
-                ) {
+                let target = match crate::local::resolve_host_path(&authority_target, self.core.symlink_policy, false) {
                     Ok(target) => target,
                     Err(error) => {
                         return Err(self.persist_error(
@@ -512,9 +499,7 @@ impl LocalTempDirectory {
                     }
                 };
                 let destination = resolved;
-                if let Err(error) =
-                    prepare_rooted_parent(&rooted.root, &destination, options.creates_parent())
-                {
+                if let Err(error) = prepare_rooted_parent(&rooted.root, &destination, options.creates_parent()) {
                     return Err(self.persist_error(
                         error,
                         requested_target,
@@ -575,9 +560,7 @@ impl LocalTempDirectory {
         })?;
         let options = self.cleanup_limits.delete_options();
         let result = match &self.core.backend {
-            LocalTempResourceBackend::Host(host) => {
-                remove_directory_tree(host, &self.core.path, options, started_at)
-            }
+            LocalTempResourceBackend::Host(host) => remove_directory_tree(host, &self.core.path, options, started_at),
             LocalTempResourceBackend::Rooted(rooted) => {
                 let path = LocalRelativePath::new(&rooted.relative_path)
                     .expect("rooted temporary path was validated at creation");
@@ -598,9 +581,7 @@ impl LocalTempDirectory {
                 })
             }
         };
-        result.map_err(|error| {
-            self.contextualize_error(error.with_operation(LocalFileOperation::Cleanup))
-        })
+        result.map_err(|error| self.contextualize_error(error.with_operation(LocalFileOperation::Cleanup)))
     }
 
     /// Removes the now-empty private sandbox.
@@ -627,9 +608,9 @@ impl LocalTempDirectory {
         stage: LocalPersistStage,
         publication: LocalPersistFailureState,
     ) -> LocalPersistError<Self> {
-        let error =
-            self.core
-                .persist_error(error, requested_target, resolved_target, stage, publication);
+        let error = self
+            .core
+            .persist_error(error, requested_target, resolved_target, stage, publication);
         error.with_resource(self)
     }
 

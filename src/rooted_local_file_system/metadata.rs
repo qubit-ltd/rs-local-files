@@ -24,11 +24,7 @@ impl RootedLocalFileSystem {
     /// `symlink_policy` to intermediate components and inspects the final entry
     /// without following its link. Returns path/policy or native inspection
     /// failures with metadata-operation context.
-    pub fn metadata(
-        &self,
-        path: &Path,
-        symlink_policy: LocalSymlinkPolicy,
-    ) -> LocalResult<LocalFileMetadata> {
+    pub fn metadata(&self, path: &Path, symlink_policy: LocalSymlinkPolicy) -> LocalResult<LocalFileMetadata> {
         if path.as_os_str().is_empty() {
             return self
                 .root
@@ -36,13 +32,7 @@ impl RootedLocalFileSystem {
                 .map(rooted_metadata)
                 .map_err(|error| rooted_io_error(LocalFileOperation::Metadata, path, error));
         }
-        let relative = resolve_rooted_path(
-            &self.root,
-            path,
-            symlink_policy,
-            false,
-            LocalFileOperation::Metadata,
-        )?;
+        let relative = resolve_rooted_path(&self.root, path, symlink_policy, false, LocalFileOperation::Metadata)?;
         self.root
             .symlink_metadata(&relative)
             .map(rooted_metadata)

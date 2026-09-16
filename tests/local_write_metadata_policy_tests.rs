@@ -33,8 +33,7 @@ fn test_windows_host_metadata_policy_selects_native_merge_behavior() {
         let stream = Path::new(&stream_name);
         fs::write(stream, b"old stream metadata").expect("NTFS alternate data stream");
         let filesystem = LocalFileSystem::host().expect("Host filesystem");
-        let options =
-            LocalWriteOptions::new(LocalWriteMode::CreateOrReplace).with_metadata_policy(policy);
+        let options = LocalWriteOptions::new(LocalWriteMode::CreateOrReplace).with_metadata_policy(policy);
         let mut writer = filesystem
             .open_writer_with_options(&target, &options)
             .expect("staged writer");
@@ -42,15 +41,10 @@ fn test_windows_host_metadata_policy_selects_native_merge_behavior() {
         assert!(writer.commit().expect("native replacement").atomic());
         assert_eq!(fs::read(&target).expect("published content"), b"new");
         if policy == LocalWriteMetadataPolicy::PreserveExisting {
-            assert_eq!(
-                fs::read(stream).expect("merged stream"),
-                b"old stream metadata"
-            );
+            assert_eq!(fs::read(stream).expect("merged stream"), b"old stream metadata");
         } else {
             assert_eq!(
-                fs::read(stream)
-                    .expect_err("old stream must not be merged")
-                    .kind(),
+                fs::read(stream).expect_err("old stream must not be merged").kind(),
                 std::io::ErrorKind::NotFound
             );
         }
@@ -82,10 +76,7 @@ fn test_use_staging_replaces_content_after_commit() {
             .open_writer_with_options(path, &options)
             .expect("staging writer");
         writer.write_all(b"new").expect("staged content");
-        assert_eq!(
-            fs::read(&physical).expect("old content before commit"),
-            b"old"
-        );
+        assert_eq!(fs::read(&physical).expect("old content before commit"), b"old");
         assert!(writer.commit().expect("atomic commit").atomic());
         assert_eq!(fs::read(&physical).expect("published content"), b"new");
     }
@@ -104,8 +95,7 @@ fn test_metadata_policy_selects_permissions() {
             let dir = tempfile::tempdir().expect("isolated fixture");
             let physical = dir.path().join("target");
             fs::write(&physical, b"old").expect("old content");
-            fs::set_permissions(&physical, fs::Permissions::from_mode(0o700))
-                .expect("old permissions");
+            fs::set_permissions(&physical, fs::Permissions::from_mode(0o700)).expect("old permissions");
             let filesystem = if rooted {
                 LocalFileSystem::rooted(dir.path())
             } else {
@@ -117,26 +107,17 @@ fn test_metadata_policy_selects_permissions() {
             } else {
                 physical.as_path()
             };
-            let options = LocalWriteOptions::new(LocalWriteMode::CreateOrReplace)
-                .with_metadata_policy(policy);
+            let options = LocalWriteOptions::new(LocalWriteMode::CreateOrReplace).with_metadata_policy(policy);
             let mut writer = filesystem
                 .open_writer_with_options(path, &options)
                 .expect("staging writer");
             writer.write_all(b"new").expect("staged content");
             assert!(writer.commit().expect("commit").atomic());
-            let actual = fs::metadata(&physical)
-                .expect("permissions")
-                .permissions()
-                .mode()
-                & 0o777;
+            let actual = fs::metadata(&physical).expect("permissions").permissions().mode() & 0o777;
             if policy == LocalWriteMetadataPolicy::PreserveExisting {
                 assert_eq!(actual, 0o700);
             } else {
-                assert_eq!(
-                    actual & 0o111,
-                    0,
-                    "staging must not acquire old executable bits"
-                );
+                assert_eq!(actual & 0o111, 0, "staging must not acquire old executable bits");
             }
         }
     }
@@ -184,8 +165,7 @@ fn test_use_staging_keeps_identity_checks_and_skips_metadata_reads() {
                 } else {
                     physical.as_path()
                 };
-                let options = LocalWriteOptions::new(LocalWriteMode::CreateOrReplace)
-                    .with_metadata_policy(policy);
+                let options = LocalWriteOptions::new(LocalWriteMode::CreateOrReplace).with_metadata_policy(policy);
                 let mut writer = filesystem
                     .open_writer_with_options(path, &options)
                     .expect("staging writer");
@@ -201,11 +181,7 @@ fn test_use_staging_keeps_identity_checks_and_skips_metadata_reads() {
                     let _ = writer.abort().expect("abort retained staging");
                     assert_eq!(fs::read(&physical).expect("untouched target"), b"old");
                 } else {
-                    assert!(
-                        result
-                            .expect("metadata fault must not affect UseStaging")
-                            .atomic()
-                    );
+                    assert!(result.expect("metadata fault must not affect UseStaging").atomic());
                     assert_eq!(fs::read(&physical).expect("published target"), b"new");
                 }
             }
@@ -234,18 +210,14 @@ fn test_metadata_policy_keeps_create_new_conflicts() {
             } else {
                 physical.as_path()
             };
-            let options =
-                LocalWriteOptions::new(LocalWriteMode::CreateNew).with_metadata_policy(policy);
+            let options = LocalWriteOptions::new(LocalWriteMode::CreateNew).with_metadata_policy(policy);
             let mut writer = filesystem
                 .open_writer_with_options(path, &options)
                 .expect("new staging writer");
             writer.write_all(b"ours").expect("staged content");
             fs::write(&physical, b"concurrent").expect("concurrent creator");
             assert!(writer.commit().is_err());
-            assert_eq!(
-                fs::read(&physical).expect("concurrent content"),
-                b"concurrent"
-            );
+            assert_eq!(fs::read(&physical).expect("concurrent content"), b"concurrent");
         }
     }
 }
@@ -304,8 +276,7 @@ fn test_use_staging_does_not_require_old_read_access() {
             let dir = tempfile::tempdir().expect("isolated permission fixture");
             let physical = dir.path().join("target");
             fs::write(&physical, b"old").expect("old content");
-            fs::set_permissions(&physical, fs::Permissions::from_mode(0o200))
-                .expect("write-only old target");
+            fs::set_permissions(&physical, fs::Permissions::from_mode(0o200)).expect("write-only old target");
             let filesystem = if rooted {
                 LocalFileSystem::rooted(dir.path())
             } else {
@@ -317,24 +288,18 @@ fn test_use_staging_does_not_require_old_read_access() {
             } else {
                 physical.as_path()
             };
-            let options = LocalWriteOptions::new(LocalWriteMode::CreateOrReplace)
-                .with_metadata_policy(policy);
+            let options = LocalWriteOptions::new(LocalWriteMode::CreateOrReplace).with_metadata_policy(policy);
             let mut writer = filesystem
                 .open_writer_with_options(path, &options)
                 .expect("staging writer");
             writer.write_all(b"new").expect("staged content");
             let result = writer.commit();
-            fs::set_permissions(&physical, fs::Permissions::from_mode(0o600))
-                .expect("restore inspection permission");
+            fs::set_permissions(&physical, fs::Permissions::from_mode(0o600)).expect("restore inspection permission");
             if policy == LocalWriteMetadataPolicy::PreserveExisting {
                 assert!(result.is_err(), "old metadata requires readable old handle");
                 assert_eq!(fs::read(&physical).expect("old target"), b"old");
             } else {
-                assert!(
-                    result
-                        .expect("replacement without old read access")
-                        .atomic()
-                );
+                assert!(result.expect("replacement without old read access").atomic());
                 assert_eq!(fs::read(&physical).expect("new target"), b"new");
             }
         }
@@ -384,10 +349,7 @@ fn test_metadata_policy_preserves_published_sync_failure() {
             let error = writer.commit().expect_err("required parent sync must fail");
             drop(guard);
             assert_eq!(error.state(), LocalWriteFailureState::Published);
-            assert_eq!(
-                fs::read(&physical).expect("published content"),
-                b"published"
-            );
+            assert_eq!(fs::read(&physical).expect("published content"), b"published");
         }
     }
 }

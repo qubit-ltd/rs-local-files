@@ -26,10 +26,7 @@ impl OwnedUnicodeString {
     #[must_use]
     #[inline]
     pub(super) const fn new(units: Vec<u16>, header: UNICODE_STRING) -> Self {
-        Self {
-            _units: units,
-            header,
-        }
+        Self { _units: units, header }
     }
 
     /// Returns the stable header pointer while this owned string remains live.

@@ -22,16 +22,12 @@ use tempfile::tempdir;
 fn test_recursive_delete_rejects_exhausted_budgets_before_mutation() {
     for rooted in [false, true] {
         for options in [
-            LocalDeleteOptions::new()
-                .with_recursive()
-                .with_max_entries(0),
+            LocalDeleteOptions::new().with_recursive().with_max_entries(0),
             LocalDeleteOptions::new().with_recursive().with_max_depth(0),
             LocalDeleteOptions::new()
                 .with_recursive()
                 .with_max_pending_path_bytes(0),
-            LocalDeleteOptions::new()
-                .with_recursive()
-                .with_deadline(Duration::ZERO),
+            LocalDeleteOptions::new().with_recursive().with_deadline(Duration::ZERO),
         ] {
             let fixture = tempdir().expect("fixture should exist");
             let tree = fixture.path().join("tree");
@@ -43,11 +39,7 @@ fn test_recursive_delete_rejects_exhausted_budgets_before_mutation() {
                 LocalFileSystem::host()
             }
             .expect("filesystem should open");
-            let operand = if rooted {
-                Path::new("tree")
-            } else {
-                tree.as_path()
-            };
+            let operand = if rooted { Path::new("tree") } else { tree.as_path() };
             let error = filesystem
                 .delete_directory_with_options(operand, &options)
                 .expect_err("exhausted budget must stop deletion");
@@ -59,9 +51,7 @@ fn test_recursive_delete_rejects_exhausted_budgets_before_mutation() {
             }
             assert_eq!(
                 b"payload",
-                fs::read(tree.join("child"))
-                    .expect("child must remain")
-                    .as_slice()
+                fs::read(tree.join("child")).expect("child must remain").as_slice()
             );
         }
     }
@@ -83,14 +73,8 @@ fn test_recursive_delete_budget_failure_retains_partial_publication() {
             LocalFileSystem::host()
         }
         .expect("filesystem should open");
-        let operand = if rooted {
-            Path::new("tree")
-        } else {
-            tree.as_path()
-        };
-        let options = LocalDeleteOptions::new()
-            .with_recursive()
-            .with_max_entries(4);
+        let operand = if rooted { Path::new("tree") } else { tree.as_path() };
+        let options = LocalDeleteOptions::new().with_recursive().with_max_entries(4);
         let error = filesystem
             .delete_directory_with_options(operand, &options)
             .expect_err("second branch exceeds budget");
@@ -116,11 +100,7 @@ fn test_recursive_delete_exact_budget_and_explicit_override() {
     let fixture = tempdir().expect("fixture should exist");
     let mut filesystem = LocalFileSystem::rooted(fixture.path()).expect("Rooted should open");
     filesystem
-        .set_default_delete_options(
-            LocalDeleteOptions::new()
-                .with_recursive()
-                .with_max_entries(0),
-        )
+        .set_default_delete_options(LocalDeleteOptions::new().with_recursive().with_max_entries(0))
         .expect("defaults should be accepted");
     fs::create_dir(fixture.path().join("tree")).expect("tree should exist");
     fs::write(fixture.path().join("tree/child"), b"data").expect("child should exist");
@@ -159,11 +139,7 @@ fn test_recursive_delete_bounds_pending_paths_during_enumeration() {
             LocalFileSystem::host()
         }
         .expect("filesystem should open");
-        let operand = if rooted {
-            Path::new("tree")
-        } else {
-            tree.as_path()
-        };
+        let operand = if rooted { Path::new("tree") } else { tree.as_path() };
         let capacity = operand.as_os_str().len() + operand.join("one").as_os_str().len();
         let options = LocalDeleteOptions::new()
             .with_recursive()
@@ -172,9 +148,7 @@ fn test_recursive_delete_bounds_pending_paths_during_enumeration() {
             .delete_directory_with_options(operand, &options)
             .expect_err("second queued child should exceed capacity");
         assert_eq!(LocalFileErrorKind::ResourceLimit, error.kind());
-        let facts = error
-            .resource_limit_error()
-            .expect("pending-path facts should survive");
+        let facts = error.resource_limit_error().expect("pending-path facts should survive");
         assert_eq!(LocalResourceKind::PendingPathBytes, facts.resource());
         assert_eq!(capacity, facts.limit());
         assert_eq!(0, facts.remaining());
@@ -232,11 +206,7 @@ fn test_recursive_delete_deadlines_preserve_partial_effects() {
                 LocalFileSystem::host()
             }
             .expect("filesystem should open");
-            let operand = if rooted {
-                Path::new("tree")
-            } else {
-                tree.as_path()
-            };
+            let operand = if rooted { Path::new("tree") } else { tree.as_path() };
             let options = LocalDeleteOptions::new()
                 .with_recursive()
                 .with_deadline(Duration::from_secs(60));
@@ -249,10 +219,7 @@ fn test_recursive_delete_deadlines_preserve_partial_effects() {
             assert!(tree.exists(), "unfinished root must remain");
             if checkpoint > removal_check {
                 assert_eq!(LocalFileErrorKind::PublicationIncomplete, error.kind());
-                assert!(
-                    !child.exists(),
-                    "completed deletion must not be rolled back"
-                );
+                assert!(!child.exists(), "completed deletion must not be rolled back");
             } else {
                 assert_ne!(LocalFileErrorKind::PublicationIncomplete, error.kind());
                 assert!(child.exists(), "deadline must precede mutation");

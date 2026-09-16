@@ -31,8 +31,7 @@ fn test_local_file_system_debug_redacts_root_paths() {
     let directory = tempdir().expect("temporary directory should be created");
     let sensitive_root = directory.path().join("customer-secret-root-8f921d");
     fs::create_dir(&sensitive_root).expect("sensitive rooted directory should be created");
-    let filesystem =
-        LocalFileSystem::rooted(&sensitive_root).expect("Rooted filesystem should open");
+    let filesystem = LocalFileSystem::rooted(&sensitive_root).expect("Rooted filesystem should open");
 
     let diagnostic = format!("{filesystem:?}");
 
@@ -67,11 +66,7 @@ fn test_local_file_system_default_copy_and_rename_skip_sync() {
         return;
     }
 
-    if std::process::Command::new("strace")
-        .arg("--version")
-        .output()
-        .is_err()
-    {
+    if std::process::Command::new("strace").arg("--version").output().is_err() {
         eprintln!("skipping default host sync trace because strace is unavailable");
         return;
     }
@@ -108,10 +103,7 @@ fn test_local_file_system_create_directory_reports_created_entries() {
 
     let outcome = LocalFileSystem::host()
         .expect("Host filesystem should open")
-        .create_directory_with_options(
-            &target,
-            &LocalCreateDirectoryOptions::new().with_recursive(),
-        )
+        .create_directory_with_options(&target, &LocalCreateDirectoryOptions::new().with_recursive())
         .expect("recursive directory creation should succeed");
 
     assert!(outcome.created());
@@ -128,18 +120,12 @@ fn test_local_file_system_copy_creates_missing_parent() {
 
     let _ = LocalFileSystem::host()
         .expect("Host filesystem should open")
-        .copy_with_options(
-            &source,
-            &target,
-            &LocalCopyOptions::new().with_create_parent(),
-        )
+        .copy_with_options(&source, &target, &LocalCopyOptions::new().with_create_parent())
         .expect("copy should create the missing parent");
 
     assert_eq!(
         b"payload",
-        fs::read(&target)
-            .expect("copied target should read")
-            .as_slice()
+        fs::read(&target).expect("copied target should read").as_slice()
     );
 }
 
@@ -152,10 +138,7 @@ fn test_local_file_system_create_directory_accepts_existing_directory() {
 
     let outcome = LocalFileSystem::host()
         .expect("Host filesystem should open")
-        .create_directory_with_options(
-            &target,
-            &LocalCreateDirectoryOptions::new().with_exists_ok(),
-        )
+        .create_directory_with_options(&target, &LocalCreateDirectoryOptions::new().with_exists_ok())
         .expect("existing directory should be accepted");
 
     assert!(!outcome.created());
@@ -230,25 +213,17 @@ fn test_local_file_system_rename_respects_overwrite_policy() {
     assert_eq!(LocalFileErrorKind::AlreadyExists, error.error().kind());
     assert_eq!(
         b"old".as_slice(),
-        fs::read(&target)
-            .expect("target should remain readable")
-            .as_slice(),
+        fs::read(&target).expect("target should remain readable").as_slice(),
     );
 
     let outcome = LocalFileSystem::host()
         .expect("Host filesystem should open")
-        .rename_with_options(
-            &source,
-            &target,
-            &LocalRenameOptions::new().with_overwrite(),
-        )
+        .rename_with_options(&source, &target, &LocalRenameOptions::new().with_overwrite())
         .expect("explicit overwrite should replace the target entry");
     assert!(outcome.atomic());
     assert_eq!(
         b"new".as_slice(),
-        fs::read(&target)
-            .expect("target should be replaced")
-            .as_slice(),
+        fs::read(&target).expect("target should be replaced").as_slice(),
     );
 }
 
@@ -285,10 +260,7 @@ fn test_local_file_system_rename_reports_parent_sync_result() {
             }
             LocalDurabilityRequirement::Required => {
                 let error = result.expect_err("required durability must report failure");
-                assert_eq!(
-                    LocalFileErrorKind::PublicationIncomplete,
-                    error.error().kind(),
-                );
+                assert_eq!(LocalFileErrorKind::PublicationIncomplete, error.error().kind(),);
             }
             LocalDurabilityRequirement::NotRequired => unreachable!(),
         }
@@ -296,9 +268,7 @@ fn test_local_file_system_rename_reports_parent_sync_result() {
             .expect("target parent permissions should be restored");
         assert_eq!(
             b"payload",
-            fs::read(&target)
-                .expect("renamed target should remain")
-                .as_slice(),
+            fs::read(&target).expect("renamed target should remain").as_slice(),
         );
     }
 }
@@ -334,8 +304,7 @@ fn test_local_file_system_delete_uses_explicit_directory_recursion() {
 fn test_read_prefix_uses_one_process_pwd_snapshot() {
     let filesystem = LocalFileSystem::host().expect("Host should open");
     let expected = std::fs::read("Cargo.toml").expect("manifest should be readable");
-    let _fault =
-        install_test_fault("local-pwd-second-snapshot").expect("snapshot fault should install");
+    let _fault = install_test_fault("local-pwd-second-snapshot").expect("snapshot fault should install");
     assert_eq!(
         &expected[..16],
         filesystem

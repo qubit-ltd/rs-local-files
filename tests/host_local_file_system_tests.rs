@@ -54,9 +54,7 @@ fn test_host_local_file_system_workflow() {
     let mut writer = filesystem
         .open_writer_with_options(&source, &LocalWriteOptions::new(LocalWriteMode::CreateNew))
         .expect("writer should open");
-    writer
-        .write_all(b"payload")
-        .expect("payload should be written");
+    writer.write_all(b"payload").expect("payload should be written");
     let _ = writer.commit().expect("payload should be committed");
 
     let mut payload = Vec::new();

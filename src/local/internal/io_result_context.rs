@@ -33,11 +33,7 @@ use super::path_operations::add_path_context;
 /// # Errors
 ///
 /// Returns the supplied error with path context when `result` is `Err`.
-pub(crate) fn with_path_context<T>(
-    result: Result<T>,
-    operation: &'static str,
-    path: &Path,
-) -> Result<T> {
+pub(crate) fn with_path_context<T>(result: Result<T>, operation: &'static str, path: &Path) -> Result<T> {
     match result {
         Ok(value) => Ok(value),
         Err(error) => Err(add_path_context(error, operation, path)),

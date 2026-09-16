@@ -35,9 +35,7 @@ pub(crate) fn commit_recoverably<W>(
 ) -> Result<bool, LocalAtomicCommitError<W>> {
     match attempt(&mut writer) {
         Ok(durable) => Ok(durable),
-        Err(error) if staging_is_open(&writer) => {
-            Err(LocalAtomicCommitError::new(error, Some(writer)))
-        }
+        Err(error) if staging_is_open(&writer) => Err(LocalAtomicCommitError::new(error, Some(writer))),
         Err(error) => Err(LocalAtomicCommitError::new(error, None)),
     }
 }
@@ -136,10 +134,7 @@ mod tests {
 
     #[test]
     fn test_commit_recoverably_reports_success_and_retains_only_open_staging() {
-        assert!(
-            commit_recoverably(1_u8, successful_commit, staging_is_open)
-                .expect("success should be retained")
-        );
+        assert!(commit_recoverably(1_u8, successful_commit, staging_is_open).expect("success should be retained"));
 
         let recoverable = commit_recoverably(2_u8, failed_commit, staging_is_open)
             .expect_err("open staging should be returned to the caller");
@@ -169,10 +164,7 @@ mod tests {
             cleanup_writer,
             abandon_writer,
         );
-        assert_eq!(
-            LocalAtomicDestinationState::Replaced,
-            published.destination_state()
-        );
+        assert_eq!(LocalAtomicDestinationState::Replaced, published.destination_state());
         assert!(published.cleanup_error().is_none());
     }
 

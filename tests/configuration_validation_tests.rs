@@ -33,8 +33,8 @@ fn test_configuration_rejects_static_requirements_transactionally() {
         LocalFileSystem::rooted(directory.path()).expect("Rooted should open"),
     ] {
         let previous = *filesystem.default_write_options();
-        let invalid = LocalWriteOptions::new(LocalWriteMode::Append)
-            .with_atomicity(LocalAtomicityRequirement::Required);
+        let invalid =
+            LocalWriteOptions::new(LocalWriteMode::Append).with_atomicity(LocalAtomicityRequirement::Required);
         let error = filesystem
             .set_default_write_options(invalid)
             .expect_err("append cannot be atomic");
@@ -65,10 +65,7 @@ fn test_configuration_rejects_static_requirements_transactionally() {
             let failure = filesystem
                 .copy_with_options(Path::new("missing/source"), Path::new("target"), &invalid)
                 .expect_err("static tree guarantee must win before lookup");
-            assert_eq!(
-                failure.error().kind(),
-                LocalFileErrorKind::RequirementNotMet
-            );
+            assert_eq!(failure.error().kind(), LocalFileErrorKind::RequirementNotMet);
         }
     }
 }

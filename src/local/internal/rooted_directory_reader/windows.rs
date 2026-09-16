@@ -64,13 +64,7 @@ impl RootedDirectoryReader {
             if name == OsStr::new(".") || name == OsStr::new("..") {
                 continue;
             }
-            let child = nt_open_at(
-                &self.directory,
-                &name,
-                FILE_READ_ATTRIBUTES | SYNCHRONIZE,
-                FILE_OPEN,
-                0,
-            )?;
+            let child = nt_open_at(&self.directory, &name, FILE_READ_ATTRIBUTES | SYNCHRONIZE, FILE_OPEN, 0)?;
             return Ok(Some((name, child)));
         }
     }
@@ -108,9 +102,7 @@ impl RootedDirectoryReader {
         self.used = status_block.Information.min(DIRECTORY_READ_BUFFER_SIZE);
         self.offset = 0;
         if self.used == 0 {
-            return Err(Error::other(
-                "NtQueryDirectoryFile returned an empty record batch",
-            ));
+            return Err(Error::other("NtQueryDirectoryFile returned an empty record batch"));
         }
         Ok(())
     }
@@ -149,12 +141,7 @@ impl RootedDirectoryReader {
             return Err(Error::other("truncated directory record name"));
         }
         // SAFETY: `name_end` was verified within the current native record.
-        let name = unsafe {
-            OsString::from_wide(std::slice::from_raw_parts(
-                information.FileName.as_ptr(),
-                name_size,
-            ))
-        };
+        let name = unsafe { OsString::from_wide(std::slice::from_raw_parts(information.FileName.as_ptr(), name_size)) };
         let next_offset = if information.NextEntryOffset == 0 {
             self.used
         } else {

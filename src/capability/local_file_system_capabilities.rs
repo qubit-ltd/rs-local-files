@@ -50,11 +50,7 @@ impl LocalFileSystemCapabilities {
             rooted_operations: cfg!(any(unix, windows)),
             atomic_rename: cfg!(any(target_os = "linux", target_os = "macos", windows)),
             atomic_replace: cfg!(any(unix, windows)),
-            atomic_temp_persist_attempt: cfg!(any(
-                target_os = "linux",
-                target_os = "macos",
-                windows
-            )),
+            atomic_temp_persist_attempt: cfg!(any(target_os = "linux", target_os = "macos", windows)),
             durable_rename: cfg!(unix),
             durable_file_copy: cfg!(unix),
             durable_write: cfg!(unix),

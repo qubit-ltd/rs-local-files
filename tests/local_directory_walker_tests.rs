@@ -40,10 +40,7 @@ fn test_host_list_follows_symlink_before_parent_component() {
     symlink(root.join("other/sub"), root.join("work/link")).expect("link should exist");
     let operand = root.join("work/link/../data");
     let mut filesystem = LocalFileSystem::host().expect("Host should open");
-    for policy in [
-        LocalSymlinkPolicy::FollowAcrossScope,
-        LocalSymlinkPolicy::Reject,
-    ] {
+    for policy in [LocalSymlinkPolicy::FollowAcrossScope, LocalSymlinkPolicy::Reject] {
         filesystem
             .set_symlink_policy(policy)
             .expect("Host policy should be valid");
@@ -54,10 +51,7 @@ fn test_host_list_follows_symlink_before_parent_component() {
         }
         assert_eq!(
             LocalFileKind::Directory,
-            filesystem
-                .metadata(&operand)
-                .expect("metadata should resolve")
-                .kind()
+            filesystem.metadata(&operand).expect("metadata should resolve").kind()
         );
         let entries = filesystem
             .list(&operand)
@@ -113,8 +107,7 @@ fn test_local_directory_walker_recurses_lazily() {
     let directory = tempdir().expect("temporary directory should be created");
     fs::create_dir(directory.path().join("nested")).expect("nested directory should be created");
     fs::write(directory.path().join("root.txt"), b"root").expect("root file should be written");
-    fs::write(directory.path().join("nested/child.txt"), b"child")
-        .expect("nested file should be written");
+    fs::write(directory.path().join("nested/child.txt"), b"child").expect("nested file should be written");
 
     let walker = LocalFileSystem::host()
         .expect("Host filesystem should open")
@@ -169,17 +162,10 @@ fn test_local_directory_walker_honors_entry_and_name_budgets() {
         .expect("Host filesystem should open")
         .list_with_options(
             directory.path(),
-            &LocalListOptions::new()
-                .with_max_entries(1)
-                .with_max_seen_name_bytes(16),
+            &LocalListOptions::new().with_max_entries(1).with_max_seen_name_bytes(16),
         )
         .expect("walker should be created");
-    assert!(
-        walker
-            .next()
-            .expect("first entry should be returned")
-            .is_ok()
-    );
+    assert!(walker.next().expect("first entry should be returned").is_ok());
     let error = walker
         .next()
         .expect("entry budget exhaustion should be reported")
@@ -187,10 +173,7 @@ fn test_local_directory_walker_honors_entry_and_name_budgets() {
     assert_eq!(LocalFileErrorKind::ResourceLimit, error.kind());
     let mut name_limited = LocalFileSystem::host()
         .expect("Host filesystem should open")
-        .list_with_options(
-            directory.path(),
-            &LocalListOptions::new().with_max_seen_name_bytes(2),
-        )
+        .list_with_options(directory.path(), &LocalListOptions::new().with_max_seen_name_bytes(2))
         .expect("walker should be created");
     assert_eq!(
         LocalFileErrorKind::ResourceLimit,
@@ -224,9 +207,7 @@ fn test_local_directory_walker_rejects_handle_budget_exhaustion() {
         .expect("descending beyond the handle budget should fail");
 
     assert_eq!(LocalFileErrorKind::ResourceLimit, error.kind());
-    let source = error
-        .resource_limit_error()
-        .expect("budget facts should be retained");
+    let source = error.resource_limit_error().expect("budget facts should be retained");
     assert_eq!(LocalResourceKind::OpenDirectory, source.resource());
     assert_eq!(1, source.limit());
     assert_eq!(0, source.remaining());
@@ -289,15 +270,9 @@ fn test_local_directory_walker_fail_fast_terminates_after_reopen_error() {
             .expect("nested entry should be valid")
             .relative_path(),
     );
-    fs::rename(directory.path(), &moved)
-        .expect("walker root should be moved after opening the child");
+    fs::rename(directory.path(), &moved).expect("walker root should be moved after opening the child");
 
-    assert!(
-        walker
-            .next()
-            .expect("reopen failure should be yielded")
-            .is_err()
-    );
+    assert!(walker.next().expect("reopen failure should be yielded").is_err());
     assert!(
         walker.next().is_none(),
         "fail-fast traversal must terminate after a reopen error",
@@ -325,15 +300,9 @@ fn test_local_directory_walker_continue_discards_reopen_error_frame() {
         .next()
         .expect("nested entry should be yielded")
         .expect("nested entry should be valid");
-    fs::rename(directory.path(), &moved)
-        .expect("walker root should be moved after opening the child");
+    fs::rename(directory.path(), &moved).expect("walker root should be moved after opening the child");
 
-    assert!(
-        walker
-            .next()
-            .expect("reopen failure should be yielded")
-            .is_err()
-    );
+    assert!(walker.next().expect("reopen failure should be yielded").is_err());
     assert!(
         walker.next().is_none(),
         "continue traversal must discard an unreopenable frame",
@@ -371,8 +340,7 @@ fn test_local_directory_walker_can_reject_symlinks_per_operation() {
 
     let directory = tempdir().expect("temporary directory should be created");
     let outside = tempdir().expect("outside directory should be created");
-    let directory_path = fs::canonicalize(directory.path())
-        .expect("temporary directory path should be canonicalized");
+    let directory_path = fs::canonicalize(directory.path()).expect("temporary directory path should be canonicalized");
     symlink(outside.path(), directory_path.join("link")).expect("link should be created");
 
     let entries = LocalFileSystem::host()

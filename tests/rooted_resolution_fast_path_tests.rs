@@ -29,10 +29,8 @@ use tempfile::tempdir;
 #[test]
 fn test_rooted_deep_normal_path_preserves_metadata_and_reader_behavior() {
     let temporary = tempdir().expect("temporary root should be created");
-    fs::create_dir_all(temporary.path().join("a/b/c"))
-        .expect("nested directories should be created");
-    fs::write(temporary.path().join("a/b/c/payload"), b"payload")
-        .expect("payload should be written");
+    fs::create_dir_all(temporary.path().join("a/b/c")).expect("nested directories should be created");
+    fs::write(temporary.path().join("a/b/c/payload"), b"payload").expect("payload should be written");
     let rooted = LocalFileSystem::rooted(temporary.path()).expect("root authority should open");
 
     let metadata = rooted
@@ -58,10 +56,7 @@ fn test_rooted_fast_path_supports_create_write_and_list() {
     let rooted = LocalFileSystem::rooted(temporary.path()).expect("root authority should open");
 
     let created = rooted
-        .create_directory_with_options(
-            Path::new("a/b/c"),
-            &LocalCreateDirectoryOptions::new().with_recursive(),
-        )
+        .create_directory_with_options(Path::new("a/b/c"), &LocalCreateDirectoryOptions::new().with_recursive())
         .expect("deep directory should be created");
     assert!(created.created());
 
@@ -71,9 +66,7 @@ fn test_rooted_fast_path_supports_create_write_and_list() {
             &LocalWriteOptions::new(LocalWriteMode::CreateNew),
         )
         .expect("deep writer should open");
-    writer
-        .write_all(b"payload")
-        .expect("writer should accept bytes");
+    writer.write_all(b"payload").expect("writer should accept bytes");
     let _ = writer.commit().expect("writer should publish payload");
 
     let entries = rooted
@@ -81,11 +74,7 @@ fn test_rooted_fast_path_supports_create_write_and_list() {
         .expect("deep directory should be listable")
         .collect::<Result<Vec<_>, _>>()
         .expect("rooted listing should complete");
-    assert!(
-        entries
-            .iter()
-            .any(|entry| entry.path() == Path::new("/a/b/c/payload"))
-    );
+    assert!(entries.iter().any(|entry| entry.path() == Path::new("/a/b/c/payload")));
 }
 
 /// A symbolic link causes the rooted resolver to use its existing expansion
@@ -96,10 +85,8 @@ fn test_rooted_link_path_preserves_symlink_fallback_behavior() {
     use std::os::unix::fs::symlink;
 
     let temporary = tempdir().expect("temporary root should be created");
-    fs::create_dir_all(temporary.path().join("a/target"))
-        .expect("target directory should be created");
-    fs::write(temporary.path().join("a/target/payload"), b"through-link")
-        .expect("target payload should be written");
+    fs::create_dir_all(temporary.path().join("a/target")).expect("target directory should be created");
+    fs::write(temporary.path().join("a/target/payload"), b"through-link").expect("target payload should be written");
     symlink("target", temporary.path().join("a/link")).expect("symbolic link should be created");
     let rooted = LocalFileSystem::rooted(temporary.path()).expect("root authority should open");
 
@@ -122,22 +109,14 @@ fn test_rooted_fast_path_fallback_preserves_symlink_policy_matrix() {
     use std::os::unix::fs::symlink;
 
     let temporary = tempdir().expect("temporary root should be created");
-    fs::create_dir_all(temporary.path().join("target/nested"))
-        .expect("target directories should be created");
-    fs::write(
-        temporary.path().join("target/nested/payload"),
-        b"through-link",
-    )
-    .expect("target payload should be written");
-    symlink("/target", temporary.path().join("absolute-link"))
-        .expect("absolute link should be created");
+    fs::create_dir_all(temporary.path().join("target/nested")).expect("target directories should be created");
+    fs::write(temporary.path().join("target/nested/payload"), b"through-link")
+        .expect("target payload should be written");
+    symlink("/target", temporary.path().join("absolute-link")).expect("absolute link should be created");
     symlink("missing", temporary.path().join("dangling")).expect("dangling link should be created");
-    symlink("cycle-b", temporary.path().join("cycle-a"))
-        .expect("first cycle link should be created");
-    symlink("cycle-a", temporary.path().join("cycle-b"))
-        .expect("second cycle link should be created");
-    symlink("../../outside", temporary.path().join("escape"))
-        .expect("escaping link should be created");
+    symlink("cycle-b", temporary.path().join("cycle-a")).expect("first cycle link should be created");
+    symlink("cycle-a", temporary.path().join("cycle-b")).expect("second cycle link should be created");
+    symlink("../../outside", temporary.path().join("escape")).expect("escaping link should be created");
 
     let mut rooted = LocalFileSystem::rooted(temporary.path()).expect("root authority should open");
     rooted
@@ -157,18 +136,11 @@ fn test_rooted_fast_path_fallback_preserves_symlink_policy_matrix() {
             .as_slice(),
     );
     let linked_entries = rooted
-        .list_with_options(
-            Path::new("absolute-link"),
-            &LocalListOptions::new().with_recursive(),
-        )
+        .list_with_options(Path::new("absolute-link"), &LocalListOptions::new().with_recursive())
         .expect("followed link directory should list")
         .collect::<Result<Vec<_>, _>>()
         .expect("linked listing should complete");
-    assert!(
-        linked_entries
-            .iter()
-            .any(|entry| entry.path().ends_with("payload"))
-    );
+    assert!(linked_entries.iter().any(|entry| entry.path().ends_with("payload")));
 
     let dangling = rooted
         .open_reader(Path::new("dangling"))
