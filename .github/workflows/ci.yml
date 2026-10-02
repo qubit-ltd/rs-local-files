@@ -18,7 +18,7 @@ concurrency:
 
 jobs:
   rust-ci:
-    uses: qubit-ltd/rs-infra-ci/.github/workflows/github-ci.yml@ef5ccc7e77a8da1b85b09f74cff6be6166b0a1e8
+    uses: qubit-ltd/rs-infra-ci/.github/workflows/github-ci.yml@5a51d1833cb6a2646b4e004c3b51d8c71c9f4401
     with:
       feature-test-os: '["ubuntu-latest", "windows-latest", "macos-latest"]'
       cross-targets: '["x86_64-unknown-freebsd", "armv7-linux-androideabi"]'
