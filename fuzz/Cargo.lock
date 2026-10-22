@@ -110,12 +110,22 @@ dependencies = [
 ]
 
 [[package]]
+name = "qubit-io"
+version = "0.18.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "5d63611364edac55dadd6747dc1a548f7aab3c322acee30b3967af382c1e70f2"
+dependencies = [
+ "qubit-utils",
+]
+
+[[package]]
 name = "qubit-local-files"
-version = "0.4.0"
+version = "0.5.0"
 dependencies = [
  "getrandom",
  "libc",
  "qubit-budget",
+ "qubit-io",
  "qubit-redact",
  "rustix",
  "windows-sys",
@@ -126,6 +136,7 @@ name = "qubit-local-files-fuzz"
 version = "0.0.0"
 dependencies = [
  "libfuzzer-sys",
+ "qubit-io",
  "qubit-local-files",
 ]
 
@@ -137,6 +148,12 @@ checksum = "240e7d45b9e8bd72ed7653b02c4fb16ea116b09feeaa07a4aa15a6475da5e2ec"
 dependencies = [
  "qubit-budget",
 ]
+
+[[package]]
+name = "qubit-utils"
+version = "0.3.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "ff9da2a76c1f983bc036d4135036db57f9d066c6fd6e8cdfbfacee72de4e2309"
 
 [[package]]
 name = "quote"
