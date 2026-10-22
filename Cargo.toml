@@ -32,9 +32,9 @@ default = []
 test-support = []
 
 [dependencies]
-qubit-io = "0.18.1"
-qubit-budget = "0.7"
-qubit-redact = { version = "0.9", default-features = false }
+qubit-io = "^0.18"
+qubit-budget = "^0.9"
+qubit-redact = { version = "^0.9", default-features = false }
 getrandom = "^0.4"
 
 [target.'cfg(unix)'.dependencies]
