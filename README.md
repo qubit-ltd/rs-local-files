@@ -18,7 +18,7 @@ in [`qubit-fs-local`](https://crates.io/crates/qubit-fs-local).
 
 ```toml
 [dependencies]
-qubit-local-files = "0.5.0"
+qubit-local-files = "0.5"
 qubit-io = "0.18.1"
 ```
 
