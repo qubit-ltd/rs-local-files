@@ -92,7 +92,6 @@ impl LocalPersistOutcome {
     }
 
     /// Returns the cleanup error retained after successful publication.
-    #[must_use]
     #[inline]
     pub const fn cleanup_error(&self) -> Option<&LocalFileError> {
         self.cleanup_error.as_ref()

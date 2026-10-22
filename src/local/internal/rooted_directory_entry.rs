@@ -17,12 +17,30 @@ use std::path::Path;
 
 use super::path_operations::add_path_context;
 
-/// A native child name and its no-follow metadata.
+/// Stores a child name with metadata read without following symbolic links.
+///
+/// The name is kept as an [`OsString`] so non-Unicode filesystem names remain
+/// representable. The `stat` value describes the entry itself, rather than a
+/// target reached by following a symbolic link.
 pub(crate) type RootedDirectoryEntry = (OsString, libc::stat);
 
-/// Reads no-follow metadata for one child of an open directory.
+/// Reads no-follow metadata for a child of an open directory.
 ///
-/// Returns `fstatat` errors with `diagnostic_path` as context.
+/// # Parameters
+///
+/// - `parent`: An open directory whose file descriptor anchors the lookup.
+/// - `name`: The NUL-terminated child name to inspect relative to `parent`.
+/// - `diagnostic_path`: The path included in any error context for diagnostics.
+///
+/// # Returns
+///
+/// The metadata for the directory entry itself, without following a symbolic
+/// link.
+///
+/// # Errors
+///
+/// Returns the operating-system error from `fstatat` if the lookup fails,
+/// augmented with the operation name and `diagnostic_path`.
 pub(in crate::local::internal) fn stat_child(
     parent: &File,
     name: &CString,

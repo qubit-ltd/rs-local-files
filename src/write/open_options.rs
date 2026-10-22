@@ -32,6 +32,7 @@ impl OpenOptions {
     ///
     /// # Returns
     /// Options without parent creation or lease-conflict retries.
+    #[inline]
     pub const fn new(mode: Mode) -> Self {
         Self {
             mode,
@@ -42,12 +43,14 @@ impl OpenOptions {
 
     /// Returns the native write mode.
     #[must_use = "inspect the native write mode"]
+    #[inline]
     pub const fn mode(&self) -> Mode {
         self.mode
     }
 
     /// Returns whether missing parents are created.
     #[must_use]
+    #[inline]
     pub const fn creates_parents(&self) -> bool {
         self.create_parents
     }
@@ -57,6 +60,7 @@ impl OpenOptions {
     /// # Returns
     /// Updated options.
     #[allow(dead_code)]
+    #[inline]
     pub const fn with_parents(mut self) -> Self {
         self.create_parents = true;
         self
@@ -67,6 +71,7 @@ impl OpenOptions {
     /// `None` returns the first lease conflict unchanged without retrying.
     /// `Some` bounds retries; zero reports `TimedOut` after the first conflict.
     #[must_use]
+    #[inline]
     pub const fn open_retry_timeout(&self) -> Option<Duration> {
         self.open_retry_timeout
     }
@@ -78,6 +83,7 @@ impl OpenOptions {
     ///
     /// # Returns
     /// Updated options.
+    #[inline]
     pub const fn with_open_retry_timeout(mut self, timeout: Duration) -> Self {
         self.open_retry_timeout = Some(timeout);
         self

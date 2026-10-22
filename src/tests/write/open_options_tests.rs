@@ -17,8 +17,20 @@ fn test_open_options_builders_update_open_behavior() {
     let options = OpenOptions::new(Mode::AppendOrCreate)
         .with_parents()
         .with_open_retry_timeout(Duration::from_millis(5));
-    assert_eq!(options.mode(), Mode::AppendOrCreate);
-    assert!(options.creates_parents());
-    assert_eq!(options.open_retry_timeout(), Some(Duration::from_millis(5)));
-    assert_eq!(OpenOptions::default().mode(), Mode::default());
+    assert_eq!(
+        options.mode(),
+        Mode::AppendOrCreate,
+        "the configured write mode must be preserved"
+    );
+    assert!(options.creates_parents(), "with_parents must enable parent creation");
+    assert_eq!(
+        options.open_retry_timeout(),
+        Some(Duration::from_millis(5)),
+        "the configured open retry timeout must be preserved"
+    );
+    assert_eq!(
+        OpenOptions::default().mode(),
+        Mode::default(),
+        "default options must use the default write mode"
+    );
 }

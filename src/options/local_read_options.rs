@@ -10,6 +10,16 @@
 use std::time::Duration;
 
 /// Options for opening a native local file reader.
+///
+/// # Examples
+///
+/// ```
+/// use qubit_local_files::options::LocalReadOptions;
+/// use std::time::Duration;
+///
+/// let options = LocalReadOptions::new().with_open_retry_timeout(Duration::from_secs(1));
+/// assert_eq!(options.open_retry_timeout(), Some(Duration::from_secs(1)));
+/// ```
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
 #[must_use = "read options have no effect unless they are used"]
 pub struct LocalReadOptions {
@@ -29,7 +39,6 @@ impl LocalReadOptions {
     /// Returns the configured Unix open retry timeout.
     ///
     /// `None` means the library does not retry.
-    #[must_use]
     #[inline]
     pub const fn open_retry_timeout(&self) -> Option<Duration> {
         self.open_retry_timeout

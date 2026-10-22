@@ -216,7 +216,10 @@ fn test_metadata_policy_keeps_create_new_conflicts() {
                 .expect("new staging writer");
             Output::write_fully(&mut writer, b"ours").expect("staged content");
             fs::write(&physical, b"concurrent").expect("concurrent creator");
-            assert!(writer.commit().is_err());
+            assert!(
+                writer.commit().is_err(),
+                "create-new must not replace a concurrent destination"
+            );
             assert_eq!(fs::read(&physical).expect("concurrent content"), b"concurrent");
         }
     }

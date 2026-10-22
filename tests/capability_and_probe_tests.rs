@@ -49,7 +49,7 @@ fn test_host_file_system_limits_probe_missing_descendant() {
         .limits_at(&root.path().join("missing/child"))
         .expect("missing Host descendants should be probeable");
 
-    let _ = limits;
+    assert_eq!(SizeLimit::VariesByPath, limits.max_path_length());
 }
 
 /// Verifies space observations are available without caching host limits.

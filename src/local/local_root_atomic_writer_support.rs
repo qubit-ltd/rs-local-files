@@ -22,7 +22,13 @@ use super::LocalAtomicWriteStage;
 #[cfg(all(unix, feature = "test-support"))]
 use super::internal::test_support;
 
-/// Synchronizes the final parent and newly created ancestor entries.
+/// Persists the final parent entry and any newly created ancestor entries.
+///
+/// The ancestor descriptors are synchronized from the closest parent toward
+/// the root so each newly created directory entry is durable before its own
+/// parent. Returns the first native I/O error; when test fault injection is
+/// enabled, the configured synchronization scenarios return that error before
+/// performing any synchronization.
 #[cfg(unix)]
 pub(super) fn sync_rooted_parent_chain(parent: &File, parent_dirs_to_sync: &[File]) -> io::Result<()> {
     #[cfg(feature = "test-support")]
@@ -40,7 +46,12 @@ pub(super) fn sync_rooted_parent_chain(parent: &File, parent_dirs_to_sync: &[Fil
     Ok(())
 }
 
-/// Adds structured atomic context to a native I/O result.
+/// Converts a native I/O result into an atomic-write error with recovery
+/// context.
+///
+/// On failure, the error retains the stage, destination path, optional staging
+/// path, known destination state, and original I/O error. Successful values
+/// pass through unchanged.
 #[cfg(any(unix, windows))]
 #[inline]
 pub(super) fn map_atomic_error<T>(
@@ -64,6 +75,7 @@ pub(super) fn map_atomic_error<T>(
 
 /// Creates a structured unsupported rooted atomic-write error.
 #[cfg(not(unix))]
+#[must_use = "the unsupported atomic-write error should be returned or handled"]
 #[inline]
 pub(super) fn unsupported_atomic_error(path: &Path) -> LocalAtomicWriteError {
     LocalAtomicWriteError::new(

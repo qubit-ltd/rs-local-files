@@ -99,7 +99,6 @@ impl Drop for TestFaultGuard {
 ///
 /// `Some` with an I/O error when the feature is enabled and this thread's
 /// installed selector matches `name`; otherwise `None`.
-#[must_use]
 #[inline]
 pub(crate) fn io_error(name: &str) -> Option<io::Error> {
     #[cfg(feature = "test-support")]

@@ -9,6 +9,8 @@
 
 use std::time::Duration;
 
+use super::resource_limits::tighter;
+
 /// Options for deleting a native filesystem entry.
 ///
 /// Recursive budgets are opt-in. Entries include the requested root (depth
@@ -48,21 +50,6 @@ pub struct LocalDeleteOptions {
 }
 
 impl LocalDeleteOptions {
-    /// Tightens only resource limits against `ceilings`, preserving this
-    /// request's operation behavior.
-    ///
-    /// `None` means unbounded; finite limits use the smaller value, including
-    /// zero. This performs no I/O or validation and does not restart deadlines.
-    /// Invalid limits are rejected when the resulting options are used.
-    pub fn tighten_resource_limits(mut self, ceilings: &Self) -> Self {
-        use super::resource_limits::tighter;
-        self.max_depth = tighter(self.max_depth, ceilings.max_depth);
-        self.max_entries = tighter(self.max_entries, ceilings.max_entries);
-        self.max_pending_path_bytes = tighter(self.max_pending_path_bytes, ceilings.max_pending_path_bytes);
-        self.deadline = tighter(self.deadline, ceilings.deadline);
-        self
-    }
-
     /// Creates strict, non-recursive deletion options.
     #[inline]
     pub const fn new() -> Self {
@@ -74,6 +61,20 @@ impl LocalDeleteOptions {
             max_pending_path_bytes: None,
             deadline: None,
         }
+    }
+
+    /// Tightens only resource limits against `ceilings`, preserving this
+    /// request's operation behavior.
+    ///
+    /// `None` means unbounded; finite limits use the smaller value, including
+    /// zero. This performs no I/O or validation and does not restart deadlines.
+    /// Invalid limits are rejected when the resulting options are used.
+    pub fn tighten_resource_limits(mut self, ceilings: &Self) -> Self {
+        self.max_depth = tighter(self.max_depth, ceilings.max_depth);
+        self.max_entries = tighter(self.max_entries, ceilings.max_entries);
+        self.max_pending_path_bytes = tighter(self.max_pending_path_bytes, ceilings.max_pending_path_bytes);
+        self.deadline = tighter(self.deadline, ceilings.deadline);
+        self
     }
 
     /// Reports whether directory deletion is recursive.
@@ -91,12 +92,14 @@ impl LocalDeleteOptions {
     }
 
     /// Enables recursive directory deletion.
+    #[inline]
     pub const fn with_recursive(mut self) -> Self {
         self.recursive = true;
         self
     }
 
     /// Treats a missing entry as a successful no-op.
+    #[inline]
     pub const fn with_missing_ok(mut self) -> Self {
         self.missing_ok = true;
         self
@@ -110,6 +113,7 @@ impl LocalDeleteOptions {
 
     /// Sets the limit for entry depth, with the requested directory at depth
     /// zero.
+    #[inline]
     pub const fn with_max_depth(mut self, limit: usize) -> Self {
         self.max_depth = Some(limit);
         self
@@ -117,6 +121,7 @@ impl LocalDeleteOptions {
 
     /// Removes the limit for entry depth, with the requested directory at depth
     /// zero.
+    #[inline]
     pub const fn without_max_depth(mut self) -> Self {
         self.max_depth = None;
         self
@@ -131,6 +136,7 @@ impl LocalDeleteOptions {
 
     /// Sets the limit for discovered entries, including the requested
     /// directory.
+    #[inline]
     pub const fn with_max_entries(mut self, limit: usize) -> Self {
         self.max_entries = Some(limit);
         self
@@ -138,6 +144,7 @@ impl LocalDeleteOptions {
 
     /// Removes the limit for discovered entries, including the requested
     /// directory.
+    #[inline]
     pub const fn without_max_entries(mut self) -> Self {
         self.max_entries = None;
         self
@@ -151,12 +158,14 @@ impl LocalDeleteOptions {
     }
 
     /// Sets the limit for encoded native bytes retained by pending paths.
+    #[inline]
     pub const fn with_max_pending_path_bytes(mut self, limit: usize) -> Self {
         self.max_pending_path_bytes = Some(limit);
         self
     }
 
     /// Removes the limit for encoded native bytes retained by pending paths.
+    #[inline]
     pub const fn without_max_pending_path_bytes(mut self) -> Self {
         self.max_pending_path_bytes = None;
         self
@@ -170,12 +179,14 @@ impl LocalDeleteOptions {
     }
 
     /// Sets the cooperative elapsed-time limit for recursive deletion.
+    #[inline]
     pub const fn with_deadline(mut self, limit: Duration) -> Self {
         self.deadline = Some(limit);
         self
     }
 
     /// Removes the cooperative elapsed-time limit for recursive deletion.
+    #[inline]
     pub const fn without_deadline(mut self) -> Self {
         self.deadline = None;
         self

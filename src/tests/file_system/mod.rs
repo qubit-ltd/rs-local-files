@@ -6,6 +6,4 @@
 //    Licensed under the Apache License, Version 2.0.
 // =============================================================================
 
-#[cfg(feature = "test-support")]
-mod core_tests;
 mod workflow_tests;

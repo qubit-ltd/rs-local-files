@@ -35,6 +35,7 @@ use crate::local::internal::path_operations::canonicalize_existing_prefix;
 ///
 /// Returns a structured error when validation, containment, traversal,
 /// staging, commit, permission preservation, or statistics accounting fails.
+#[inline]
 pub(crate) fn copy_dir_all_with_paths(
     src: &Path,
     dst: &Path,
@@ -45,6 +46,22 @@ pub(crate) fn copy_dir_all_with_paths(
 
 /// Recursively copies a directory tree while constraining followed directory
 /// links to a canonical scope root.
+///
+/// # Parameters
+///
+/// * `src` - Source directory.
+/// * `dst` - Destination directory.
+/// * `options` - Copy behavior options.
+/// * `scope_root` - Root that followed directory links must remain within.
+///
+/// # Returns
+/// Exact statistics for copied files, created directories, bytes, and skips.
+///
+/// # Errors
+/// Returns a structured copy error when path resolution, scope
+/// canonicalization, traversal, staging, commit, permission preservation, or
+/// statistics accounting fails.
+#[inline]
 pub(crate) fn copy_dir_all_with_paths_scoped(
     src: &Path,
     dst: &Path,

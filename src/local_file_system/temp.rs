@@ -27,6 +27,7 @@ impl LocalFileSystem {
     ///
     /// Returns the cleanup-owned resource or error described by
     /// [`Self::create_temp_file_with_options`].
+    #[inline]
     pub fn create_temp_file(&self) -> LocalResult<LocalTempFile> {
         self.create_temp_file_with_options(&self.defaults.temp_file)
     }
@@ -75,6 +76,7 @@ impl LocalFileSystem {
     ///
     /// Returns the cleanup-owned resource or error described by
     /// [`Self::create_temp_directory_with_options`].
+    #[inline]
     pub fn create_temp_directory(&self) -> LocalResult<LocalTempDirectory> {
         self.create_temp_directory_with_options(&self.defaults.temp_directory)
     }

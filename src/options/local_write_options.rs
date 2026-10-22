@@ -15,6 +15,20 @@ use crate::policy::LocalAtomicityRequirement;
 use crate::policy::LocalDurabilityRequirement;
 
 /// Options fixed for a local file writer session.
+///
+/// # Examples
+///
+/// ```
+/// use qubit_local_files::options::LocalWriteMode;
+/// use qubit_local_files::options::LocalWriteOptions;
+/// use qubit_local_files::policy::LocalAtomicityRequirement;
+///
+/// let options = LocalWriteOptions::new(LocalWriteMode::CreateOrReplace)
+///     .with_create_parent()
+///     .with_atomicity(LocalAtomicityRequirement::Required);
+/// assert!(options.creates_parent());
+/// assert_eq!(options.atomicity(), LocalAtomicityRequirement::Required);
+/// ```
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 #[must_use = "write options have no effect unless they are used"]
 pub struct LocalWriteOptions {
@@ -50,14 +64,13 @@ impl LocalWriteOptions {
     }
 
     /// Returns the publication mode.
-    #[must_use = "inspect the publication mode"]
     #[inline]
     pub const fn mode(&self) -> LocalWriteMode {
         self.mode
     }
 
     /// Returns the metadata policy used for staged replacement.
-    #[must_use]
+    #[inline]
     pub const fn metadata_policy(&self) -> LocalWriteMetadataPolicy {
         self.metadata_policy
     }
@@ -66,6 +79,7 @@ impl LocalWriteOptions {
     ///
     /// `UseStaging` can change access controls. Create-new and append modes do
     /// not copy old metadata under either policy.
+    #[inline]
     pub const fn with_metadata_policy(mut self, policy: LocalWriteMetadataPolicy) -> Self {
         self.metadata_policy = policy;
         self
@@ -79,50 +93,53 @@ impl LocalWriteOptions {
     }
 
     /// Returns the required atomicity.
-    #[must_use = "inspect the requested atomicity"]
     #[inline]
     pub const fn atomicity(&self) -> LocalAtomicityRequirement {
         self.atomicity
     }
 
     /// Returns the required durability.
-    #[must_use = "inspect the requested durability"]
     #[inline]
     pub const fn durability(&self) -> LocalDurabilityRequirement {
         self.durability
     }
 
     /// Returns the configured Unix open retry timeout.
-    #[must_use]
+    #[inline]
     pub const fn open_retry_timeout(&self) -> Option<Duration> {
         self.open_retry_timeout
     }
 
     /// Enables creation of missing parent directories.
+    #[inline]
     pub const fn with_create_parent(mut self) -> Self {
         self.create_parent = true;
         self
     }
 
     /// Sets the required atomicity.
+    #[inline]
     pub const fn with_atomicity(mut self, atomicity: LocalAtomicityRequirement) -> Self {
         self.atomicity = atomicity;
         self
     }
 
     /// Sets the required durability.
+    #[inline]
     pub const fn with_durability(mut self, durability: LocalDurabilityRequirement) -> Self {
         self.durability = durability;
         self
     }
 
     /// Sets the maximum time spent retrying Unix lease conflicts.
+    #[inline]
     pub const fn with_open_retry_timeout(mut self, timeout: Duration) -> Self {
         self.open_retry_timeout = Some(timeout);
         self
     }
 
     /// Disables library-level open retries.
+    #[inline]
     pub const fn without_open_retry_timeout(mut self) -> Self {
         self.open_retry_timeout = None;
         self

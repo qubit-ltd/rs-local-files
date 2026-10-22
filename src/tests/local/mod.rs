@@ -17,3 +17,4 @@ mod copy_dir_stats_tests;
 mod copy_failure_state_tests;
 
 mod copy_tree_tests;
+mod local_persist_error_tests;

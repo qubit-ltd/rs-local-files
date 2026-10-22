@@ -57,6 +57,7 @@ impl LocalCopyDirStats {
     /// # Returns
     /// Copied non-directory entry count.
     #[must_use]
+    #[inline]
     pub const fn files(&self) -> u64 {
         self.files
     }
@@ -66,6 +67,7 @@ impl LocalCopyDirStats {
     /// # Returns
     /// Created directory count.
     #[must_use]
+    #[inline]
     pub const fn directories(&self) -> u64 {
         self.directories
     }
@@ -75,6 +77,7 @@ impl LocalCopyDirStats {
     /// # Returns
     /// Copied byte count.
     #[must_use]
+    #[inline]
     pub const fn bytes(&self) -> u64 {
         self.bytes
     }
@@ -84,12 +87,14 @@ impl LocalCopyDirStats {
     /// # Returns
     /// Skipped entry count.
     #[must_use]
+    #[inline]
     pub const fn skipped(&self) -> u64 {
         self.skipped
     }
 
     /// Returns the number of destination entries overwritten.
     #[must_use]
+    #[inline]
     pub const fn overwritten(&self) -> u64 {
         self.overwritten
     }

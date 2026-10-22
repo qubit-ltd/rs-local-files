@@ -32,6 +32,8 @@ use crate::local::internal::rooted_directory_reader::RootedDirectoryReader;
 
 /// Opens a lazy reader for immediate children of the opened root.
 ///
+/// # Errors
+///
 /// Returns an I/O error when the root handle cannot be duplicated.
 pub(crate) fn open_root_directory_reader(root: &File, _diagnostic_root: &Path) -> Result<RootedDirectoryReader> {
     root.try_clone().map(RootedDirectoryReader::new)
@@ -60,6 +62,8 @@ pub(crate) fn read_rooted_directory(
 }
 
 /// Opens a lazy reader for immediate children of a rooted descendant.
+///
+/// # Errors
 ///
 /// Returns an I/O error when secure traversal or directory opening fails.
 pub(crate) fn open_rooted_directory_reader(

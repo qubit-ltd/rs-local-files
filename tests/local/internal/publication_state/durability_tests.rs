@@ -33,5 +33,5 @@ fn test_required_rename_durability_is_reported() {
         )
         .expect("required durable rename must succeed");
 
-    assert!(outcome.durable());
+    assert!(outcome.durable(), "required rename should report durable publication",);
 }

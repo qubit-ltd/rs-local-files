@@ -20,6 +20,18 @@ use std::os::fd::AsRawFd;
 const XATTR_SIZE_RACE_ATTEMPTS: usize = 8;
 
 /// Copies the complete descriptor-visible xattr set to staging.
+///
+/// Ordinary attributes are copied before security attributes so permission
+/// changes cannot prevent the remaining metadata from being preserved.
+///
+/// # Parameters
+/// - `source`: Open file whose extended attributes are copied.
+/// - `staging`: Open file that receives the source attribute set.
+///
+/// # Errors
+/// Returns an I/O error if listing, reading, writing, or removing an attribute
+/// fails. Filesystems without xattr support are treated as exposing no
+/// attributes.
 pub(super) fn preserve_extended_metadata(source: &File, staging: &File) -> Result<()> {
     let source_names = list_xattrs(source)?;
     #[cfg(feature = "test-support")]
@@ -59,6 +71,16 @@ pub(super) fn preserve_extended_metadata(source: &File, staging: &File) -> Resul
 }
 
 /// Lists all extended-attribute names visible through a file descriptor.
+///
+/// # Parameters
+/// - `file`: Open file whose attributes should be listed.
+///
+/// # Returns
+/// A sorted set of attribute names, or an empty set when xattrs are
+/// unsupported.
+///
+/// # Errors
+/// Returns an I/O error when the native list operation fails.
 fn list_xattrs(file: &File) -> Result<BTreeSet<Vec<u8>>> {
     let mut remaining_attempts = XATTR_SIZE_RACE_ATTEMPTS;
     loop {
@@ -179,6 +201,17 @@ fn ordered_names(names: &BTreeSet<Vec<u8>>) -> Vec<&[u8]> {
 }
 
 /// Gets one required extended-attribute value, retrying size races.
+///
+/// # Parameters
+/// - `file`: Open file containing the attribute.
+/// - `name`: Attribute name as raw bytes.
+///
+/// # Returns
+/// The attribute value read from the file.
+///
+/// # Errors
+/// Returns `NotFound` if the source attribute disappears, or the underlying
+/// I/O error if the name is invalid or a native lookup/read fails.
 fn get_xattr(file: &File, name: &[u8]) -> Result<Vec<u8>> {
     #[cfg(feature = "test-support")]
     let name = if super::super::test_support::is_enabled("atomic-metadata-invalid-name") {
@@ -196,6 +229,17 @@ fn get_xattr(file: &File, name: &[u8]) -> Result<Vec<u8>> {
 }
 
 /// Gets an optional extended-attribute value, retrying size races.
+///
+/// # Parameters
+/// - `file`: Open file containing the attribute.
+/// - `name`: Attribute name as raw bytes.
+///
+/// # Returns
+/// `Some(value)` when the attribute exists, or `None` when it is absent.
+///
+/// # Errors
+/// Returns an I/O error when the name is invalid or a native lookup/read fails
+/// for a reason other than the attribute being absent.
 #[inline]
 fn get_optional_xattr(file: &File, name: &[u8]) -> Result<Option<Vec<u8>>> {
     #[cfg(feature = "test-support")]

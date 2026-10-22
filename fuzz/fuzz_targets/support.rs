@@ -105,7 +105,7 @@ pub(crate) mod lifecycle {
 
     /// Publication errors keep ownership and both independent state axes.
     struct Retained {
-        resource: Resource,
+        resource: Box<Resource>,
         publication: LocalPersistFailureState,
         stage: LocalPersistStage,
         source: LocalTempSourceState,
@@ -123,7 +123,7 @@ pub(crate) mod lifecycle {
             ..
         } = error.into_parts();
         Retained {
-            resource: wrap(resource),
+            resource: Box::new(wrap(resource)),
             publication: state,
             stage,
             source: source_state,
@@ -452,7 +452,7 @@ pub(crate) mod lifecycle {
                                 assert_eq!(retained.stage, LocalPersistStage::ResolveTarget);
                             }
                             if opcode == 10 && previous == LocalTempSourceState::Owned && writable {
-                                if let Resource::File(file) = &mut retained.resource {
+                                if let Resource::File(file) = &mut *retained.resource {
                                     Output::write_fully(file, b"retained")
                                         .expect("invalid operands retain writable file");
                                     expected_bytes.extend_from_slice(b"retained");
@@ -479,12 +479,13 @@ pub(crate) mod lifecycle {
                                 };
                                 assert_eq!(retained.resource.source_state(), expected_source);
                                 published.push((path, bytes));
-                            } else if let Some(path) = &target_host {
-                                if !conflict && retained.publication == LocalPersistFailureState::NotPublished {
-                                    assert!(!path.exists(), "NotPublished created a target");
-                                }
+                            } else if let Some(path) = &target_host
+                                && !conflict
+                                && retained.publication == LocalPersistFailureState::NotPublished
+                            {
+                                assert!(!path.exists(), "NotPublished created a target");
                             }
-                            current = Some(retained.resource);
+                            current = Some(*retained.resource);
                         }
                     }
                     if conflict {

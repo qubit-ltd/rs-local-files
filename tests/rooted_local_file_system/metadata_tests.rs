@@ -9,18 +9,16 @@
 
 use std::fs;
 
-use qubit_local_files::outcome::LocalFileKind;
 use qubit_local_files::LocalFileSystem;
+use qubit_local_files::outcome::LocalFileKind;
 use tempfile::tempdir;
 
 /// Verifies the split Rooted metadata module retains authority-relative reads.
 #[test]
 fn test_rooted_metadata_operation_reads_relative_file() {
     let directory = tempdir().expect("metadata test directory should exist");
-    fs::write(directory.path().join("payload"), b"payload")
-        .expect("metadata test payload should be written");
-    let filesystem = LocalFileSystem::rooted(directory.path())
-        .expect("rooted filesystem should open");
+    fs::write(directory.path().join("payload"), b"payload").expect("metadata test payload should be written");
+    let filesystem = LocalFileSystem::rooted(directory.path()).expect("rooted filesystem should open");
 
     let metadata = filesystem
         .metadata(std::path::Path::new("payload"))

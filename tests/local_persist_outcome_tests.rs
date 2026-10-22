@@ -11,10 +11,13 @@
 use std::fs;
 #[cfg(unix)]
 use std::os::unix::fs::symlink;
+use std::path::absolute;
 
 use qubit_io::Output;
 use qubit_local_files::LocalFileSystem;
 use qubit_local_files::options::LocalPersistOptions;
+#[cfg(unix)]
+use qubit_local_files::options::LocalTempDirectoryOptions;
 use qubit_local_files::options::LocalTempFileOptions;
 use qubit_local_files::outcome::LocalPersistCleanupState;
 use qubit_local_files::outcome::LocalPersistMethod;
@@ -29,9 +32,6 @@ where
     let _fault = install_test_fault(fault).expect("test fault controller should install");
     action();
 }
-
-#[cfg(unix)]
-use qubit_local_files::options::LocalTempDirectoryOptions;
 
 /// Verifies outcome accessors report the completed temporary-file publication.
 #[test]
@@ -54,7 +54,6 @@ fn test_local_persist_outcome_reports_published_path_and_guarantees() {
     assert!(!outcome.durable());
     assert_eq!(LocalPersistCleanupState::Complete, outcome.cleanup_state());
     assert!(outcome.cleanup_error().is_none());
-    assert_eq!(target, outcome.path());
     let (published_path, cleanup_error) = outcome.into_parts();
     assert_eq!(target, published_path);
     assert!(cleanup_error.is_none());
@@ -71,7 +70,7 @@ fn test_local_file_persist_outcome_preserves_logical_target_path() {
     let logical_parent = root.path().join("logical");
     symlink(&real_parent, &logical_parent).expect("logical parent symlink must be created");
     let target = logical_parent.join("target.txt");
-    let expected = std::path::absolute(&target).expect("logical target must be made absolute");
+    let expected = absolute(&target).expect("logical target must be made absolute");
 
     let mut temporary = LocalFileSystem::host()
         .expect("Host filesystem should open")
@@ -98,7 +97,7 @@ fn test_local_directory_persist_outcome_preserves_logical_target_path() {
     let logical_parent = root.path().join("logical");
     symlink(&real_parent, &logical_parent).expect("logical parent symlink must be created");
     let target = logical_parent.join("target");
-    let expected = std::path::absolute(&target).expect("logical target must be made absolute");
+    let expected = absolute(&target).expect("logical target must be made absolute");
 
     let temporary = LocalFileSystem::host()
         .expect("Host filesystem should open")

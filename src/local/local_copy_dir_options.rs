@@ -123,18 +123,18 @@ impl LocalCopyDirOptions {
         }
     }
 
-    /// Sets the synchronization policy for staged regular files.
-    #[inline]
-    pub const fn with_durability(mut self, durability: LocalDurabilityRequirement) -> Self {
-        self.durability = durability;
-        self
-    }
-
     /// Returns the staged-file synchronization policy.
     #[must_use = "inspect the requested durability"]
     #[inline]
     pub const fn durability(&self) -> LocalDurabilityRequirement {
         self.durability
+    }
+
+    /// Sets the synchronization policy for staged regular files.
+    #[inline]
+    pub const fn with_durability(mut self, durability: LocalDurabilityRequirement) -> Self {
+        self.durability = durability;
+        self
     }
 
     /// Returns the maximum descendant depth.

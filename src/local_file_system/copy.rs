@@ -31,6 +31,7 @@ impl LocalFileSystem {
     ///
     /// Returns the outcome or structured failure described by
     /// [`Self::copy_with_options`].
+    #[inline]
     pub fn copy(&self, source: &Path, destination: &Path) -> LocalCopyResult {
         self.copy_with_options(source, destination, &self.defaults.copy)
     }
@@ -150,6 +151,7 @@ impl LocalFileSystem {
     ///
     /// Returns the outcome or structured failure described by
     /// [`Self::rename_with_options`].
+    #[inline]
     pub fn rename(&self, source: &Path, destination: &Path) -> LocalRenameResult {
         self.rename_with_options(source, destination, &self.defaults.rename)
     }

@@ -6,7 +6,7 @@
 //    Licensed under the Apache License, Version 2.0.
 // =============================================================================
 //! Retry control for cryptographically random rooted-staging collisions.
-// Finite fixtures cannot deterministically exhaust random filename retries.
+//! Finite fixtures cannot deterministically exhaust random filename retries.
 
 use std::ffi::CString;
 use std::fs::File;

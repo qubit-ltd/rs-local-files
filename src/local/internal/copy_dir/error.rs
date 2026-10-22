@@ -36,6 +36,7 @@ use crate::local::internal::StagedFile;
 /// # Returns
 ///
 /// A structured recursive-copy error retaining the native source error.
+#[must_use]
 #[inline]
 pub(super) fn copy_dir_error(
     stage: LocalCopyDirStage,
@@ -61,6 +62,7 @@ pub(super) fn copy_dir_error(
 /// # Returns
 ///
 /// A structured error retaining primary and secondary cleanup context.
+#[must_use]
 #[inline]
 pub(super) fn copy_dir_error_with_staging(
     stage: LocalCopyDirStage,

@@ -27,10 +27,27 @@ use crate::local::decide_copy_destination;
 
 /// Copies a symbolic-link entry without dereferencing its stored target.
 ///
+/// # Parameters
+///
+/// - `root`: Provides confined access to the source and destination entries.
+/// - `source`: Identifies the symbolic link to copy.
+/// - `destination`: Identifies the destination entry to create or replace.
+/// - `options`: Supplies conflict handling policies for the destination.
+/// - `statistics`: Carries copy counters accumulated before this entry.
+/// - `budget`: Enforces shared copy limits and deadline constraints.
+///
+/// # Returns
+///
+/// Returns updated copy statistics after publishing the symbolic link.
+/// Skipped entries increment the skipped count without reading the source
+/// target.
+///
 /// # Errors
 ///
 /// Returns a structured copy failure when destination preparation, source-link
-/// inspection, or final link publication fails.
+/// inspection, deadline enforcement, or final link publication fails. If an
+/// existing destination was removed before publication failed, the error stage
+/// records that the operation left a partial result.
 pub(super) fn copy_symlink(
     root: &Root,
     source: &Path,

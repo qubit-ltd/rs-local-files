@@ -8,6 +8,18 @@
 // Covered by directory integration tests.
 
 /// Options for creating a native directory.
+///
+/// # Examples
+///
+/// ```
+/// use qubit_local_files::options::LocalCreateDirectoryOptions;
+///
+/// let options = LocalCreateDirectoryOptions::new()
+///     .with_recursive()
+///     .with_exists_ok();
+/// assert!(options.recursive());
+/// assert!(options.exists_ok());
+/// ```
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
 #[must_use = "directory creation options have no effect unless they are used"]
 pub struct LocalCreateDirectoryOptions {
@@ -42,12 +54,14 @@ impl LocalCreateDirectoryOptions {
     }
 
     /// Enables recursive ancestor creation.
+    #[inline]
     pub const fn with_recursive(mut self) -> Self {
         self.recursive = true;
         self
     }
 
     /// Accepts an existing directory as a successful outcome.
+    #[inline]
     pub const fn with_exists_ok(mut self) -> Self {
         self.exists_ok = true;
         self

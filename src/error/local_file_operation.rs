@@ -12,9 +12,15 @@
 /// # Examples
 ///
 /// ```
+/// use qubit_local_files::error::LocalFileError;
+/// use qubit_local_files::error::LocalFileErrorKind;
 /// use qubit_local_files::error::LocalFileOperation;
 ///
-/// assert_eq!(LocalFileOperation::Read, LocalFileOperation::Read);
+/// let error = LocalFileError::new(
+///     LocalFileErrorKind::NotFound,
+///     LocalFileOperation::Metadata,
+/// );
+/// assert_eq!(error.operation(), LocalFileOperation::Metadata);
 /// ```
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
 #[non_exhaustive]

@@ -7,7 +7,20 @@
 // =============================================================================
 //! Portable permission observations for native metadata.
 
-/// Permissions exposed by a local metadata observation.
+/// Portable permission information observed for a local filesystem entry.
+///
+/// The read-only flag is available on every platform. Unix mode bits are
+/// included only when the observing platform exposes them.
+///
+/// # Examples
+///
+/// ```
+/// use qubit_local_files::LocalFilePermissions;
+///
+/// let permissions = LocalFilePermissions::new(true, Some(0o444));
+/// assert!(permissions.is_read_only());
+/// assert_eq!(permissions.unix_mode(), Some(0o444));
+/// ```
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 #[must_use]
 pub struct LocalFilePermissions {
@@ -18,7 +31,12 @@ pub struct LocalFilePermissions {
 }
 
 impl LocalFilePermissions {
-    /// Creates a permission observation.
+    /// Creates a permission observation from platform-specific metadata.
+    ///
+    /// # Parameters
+    ///
+    /// - `read_only`: whether the native metadata marks the entry read-only.
+    /// - `unix_mode`: Unix mode bits, or `None` when they are unavailable.
     #[inline]
     pub const fn new(read_only: bool, unix_mode: Option<u32>) -> Self {
         Self { read_only, unix_mode }
@@ -32,7 +50,8 @@ impl LocalFilePermissions {
     }
 
     /// Returns Unix mode bits when the platform exposes them.
-    #[must_use]
+    ///
+    /// `None` means the observing platform does not expose Unix mode bits.
     #[inline]
     pub const fn unix_mode(self) -> Option<u32> {
         self.unix_mode

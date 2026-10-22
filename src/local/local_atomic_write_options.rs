@@ -17,6 +17,23 @@ use crate::options::LocalWriteMetadataPolicy;
 ///
 /// Builder results must be used so that an accidentally discarded option does
 /// not silently leave the original value unchanged.
+///
+/// # Examples
+///
+/// ```
+/// use qubit_local_files::local::LocalAtomicWriteOptions;
+/// use qubit_local_files::options::LocalWriteMetadataPolicy;
+/// use qubit_local_files::policy::LocalDurabilityRequirement;
+///
+/// let options = LocalAtomicWriteOptions::new()
+///     .with_create_parent()
+///     .with_metadata_policy(LocalWriteMetadataPolicy::UseStaging)
+///     .with_durability(LocalDurabilityRequirement::Preferred);
+///
+/// assert!(options.creates_parent());
+/// assert_eq!(options.metadata_policy(), LocalWriteMetadataPolicy::UseStaging);
+/// assert_eq!(options.durability(), LocalDurabilityRequirement::Preferred);
+/// ```
 #[must_use = "atomic write options have no effect unless they are used"]
 #[non_exhaustive]
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -54,12 +71,13 @@ impl LocalAtomicWriteOptions {
     }
 
     /// Returns the metadata policy for replacing an existing regular file.
-    #[must_use]
+    #[inline]
     pub const fn metadata_policy(&self) -> LocalWriteMetadataPolicy {
         self.metadata_policy
     }
 
     /// Selects replacement metadata without changing identity verification.
+    #[inline]
     pub const fn with_metadata_policy(mut self, policy: LocalWriteMetadataPolicy) -> Self {
         self.metadata_policy = policy;
         self

@@ -6,6 +6,10 @@
 //    Licensed under the Apache License, Version 2.0.
 // =============================================================================
 
+mod local_file_system_tests {
+    mod configuration_tests;
+}
+
 use std::fs;
 
 use qubit_io::Input;

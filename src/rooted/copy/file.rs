@@ -33,9 +33,16 @@ use crate::read;
 /// Applies `options` to conflicts and permission preservation, charges copied
 /// bytes and deadline checks to `budget`, and requests `durability` from the
 /// staged writer. Returns updated statistics, including skipped entries.
-/// Native, budget, publication, permission, and counter-overflow failures
-/// retain prior statistics and any available staging cleanup error. Destination
-/// preparation can remove an incompatible entry before a later failure.
+/// Errors retain the statistics accumulated when the failure occurs and any
+/// available staging cleanup error. Destination preparation can remove an
+/// incompatible entry before a later failure, and permission preservation can
+/// fail after the copied content has been published.
+///
+/// # Errors
+///
+/// Returns a structured error for deadline, source or destination inspection,
+/// conflict policy, staging, copy, publication, permission, or statistics
+/// failures. The error records the failing stage and accumulated statistics.
 pub(super) fn copy_file(
     root: &Root,
     source: &Path,
@@ -218,6 +225,10 @@ pub(super) fn copy_file(
 /// Does nothing when preservation is disabled. A native permission failure
 /// returns the `PreservePermissions` stage and supplied statistics; it does
 /// not undo content already copied to the destination.
+///
+/// # Errors
+///
+/// Returns a structured error if updating destination permissions fails.
 pub(super) fn preserve_permissions(
     root: &Root,
     source: &Path,
@@ -252,6 +263,9 @@ pub(super) fn preserve_permissions(
 }
 
 /// Converts a rooted atomic commit failure without discarding cleanup details.
+///
+/// Retains the primary I/O error and attaches the staging path and cleanup
+/// error when the failed commit reports them.
 fn rooted_commit_error(
     source: &Path,
     destination: &Path,

@@ -23,6 +23,18 @@ use super::LocalDeleteOptions;
 /// The private sandbox costs at most one additional removal outside the entry
 /// and path budgets, and shares the cleanup attempt's cooperative deadline.
 /// Native calls cannot be interrupted by this deadline. Defaults are unbounded.
+///
+/// # Examples
+///
+/// ```
+/// use qubit_local_files::options::LocalTempCleanupLimits;
+///
+/// let limits = LocalTempCleanupLimits::new()
+///     .with_max_depth(4)
+///     .with_max_entries(128);
+/// assert_eq!(Some(4), limits.max_depth());
+/// assert_eq!(Some(128), limits.max_entries());
+/// ```
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
 #[must_use = "cleanup limits have no effect unless retained by a temporary directory"]
 pub struct LocalTempCleanupLimits {

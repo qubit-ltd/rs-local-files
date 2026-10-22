@@ -30,7 +30,7 @@ fn temp_path(name: &str) -> PathBuf {
     std::env::temp_dir().join(format!("qubit-local-files-copy-failure-{name}-{}", std::process::id()))
 }
 
-/// Runs one test-support-only fault case in an isolated child test process.
+/// Runs one test-support-only fault case while excluding competing selectors.
 #[cfg(feature = "test-support")]
 fn run_in_test_fault_process<F>(_test_name: &str, fault: &str, action: F)
 where

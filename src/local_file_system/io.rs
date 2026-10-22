@@ -26,7 +26,11 @@ use super::operation_error;
 use super::reject_directory_qualified_file;
 use super::resolve_operation_path;
 use super::with_current_directory;
+#[cfg(feature = "test-support")]
+use crate::local::take_test_support;
+use crate::local_file_system_validation::validate_write_options;
 use crate::path::LocalNamespacePath;
+use crate::test_support::TestFaultPoint;
 
 impl LocalFileSystem {
     /// Reads final-entry metadata without following the final symlink.
@@ -37,14 +41,12 @@ impl LocalFileSystem {
     pub fn metadata(&self, path: &Path) -> LocalResult<LocalFileMetadata> {
         let resolver = self.resolver_for(path, LocalFileOperation::Metadata)?;
         let resolved = resolve_operation_path(&resolver, path, LocalFileOperation::Metadata)?;
-        self.core
-            .fail_if_requested(crate::test_support::TestFaultPoint::Metadata)
-            .map_err(|error| {
-                with_current_directory(
-                    LocalFileError::from_io(LocalFileOperation::Metadata, Some(path.to_path_buf()), None, error),
-                    resolver.current_directory(),
-                )
-            })?;
+        self.core.fail_if_requested(TestFaultPoint::Metadata).map_err(|error| {
+            with_current_directory(
+                LocalFileError::from_io(LocalFileOperation::Metadata, Some(path.to_path_buf()), None, error),
+                resolver.current_directory(),
+            )
+        })?;
         let metadata = match &self.core.namespace {
             LocalNamespace::Host => {
                 HostLocalFileSystem::metadata_with_policy(resolved.authority_relative(), self.symlink_policy)
@@ -154,7 +156,7 @@ impl LocalFileSystem {
         while result.len() < max_bytes {
             let read_len = (max_bytes - result.len()).min(buffer.len());
             #[cfg(feature = "test-support")]
-            if crate::local::take_test_support("local-fs-read-prefix-read") {
+            if take_test_support("local-fs-read-prefix-read") {
                 let error = LocalFileError::from_io(
                     LocalFileOperation::Read,
                     Some(error_path),
@@ -164,7 +166,7 @@ impl LocalFileSystem {
                 return Err(with_current_directory(error, resolver.current_directory()));
             }
             #[cfg(feature = "test-support")]
-            let read_result = if crate::local::take_test_support("local-prefix-interrupted") {
+            let read_result = if take_test_support("local-prefix-interrupted") {
                 Err(std::io::Error::from(std::io::ErrorKind::Interrupted))
             } else {
                 Input::read(&mut reader, &mut buffer[..read_len])
@@ -204,12 +206,7 @@ impl LocalFileSystem {
     /// an error. Commit or abort a staging writer explicitly when its final
     /// publication or cleanup result must be observed.
     pub fn open_writer_with_options(&self, path: &Path, options: &LocalWriteOptions) -> LocalResult<LocalFileWriter> {
-        crate::local_file_system_validation::validate_write_options(
-            options,
-            self.capabilities(),
-            LocalFileOperation::OpenWriter,
-        )
-        .map_err(|error| {
+        validate_write_options(options, self.capabilities(), LocalFileOperation::OpenWriter).map_err(|error| {
             with_current_directory(
                 error.with_path(path.to_path_buf()),
                 self.current_directory.virtual_path(),

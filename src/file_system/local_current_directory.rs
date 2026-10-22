@@ -31,6 +31,11 @@ impl LocalCurrentDirectory {
     ///
     /// `operation` and `path` are attached to failures from querying the
     /// process PWD. A virtual PWD is cloned without native I/O.
+    ///
+    /// Returns the process PWD or the retained virtual PWD. Returns an error
+    /// when reading the process PWD fails (or when the test-support failure is
+    /// triggered); the error includes `operation` and the optional `path` as
+    /// context.
     pub(crate) fn snapshot(&self, operation: LocalFileOperation, path: Option<&Path>) -> LocalResult<PathBuf> {
         #[cfg(feature = "test-support")]
         if matches!(self, Self::Process) && crate::local::take_test_support_on_nth("local-pwd-second-snapshot", 2) {
@@ -59,9 +64,11 @@ impl LocalCurrentDirectory {
         }
     }
 
-    /// Replaces a retained virtual PWD.
+    /// Replaces a retained virtual PWD, taking ownership of its new path.
     ///
-    /// Returns `false` when called for process-backed state.
+    /// Returns `true` when the virtual PWD was replaced, or `false` when this
+    /// state is process-backed and has no retained path to replace.
+    #[must_use = "check whether the virtual PWD was replaced"]
     pub(crate) fn replace_virtual(&mut self, path: PathBuf) -> bool {
         match self {
             Self::Process => false,

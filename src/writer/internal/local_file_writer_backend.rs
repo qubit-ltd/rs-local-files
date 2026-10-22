@@ -37,9 +37,16 @@ pub(crate) enum LocalFileWriterBackend {
 impl LocalFileWriterBackend {
     /// Commits a staged backend and preserves it when retry remains safe.
     ///
-    /// Returns whether requested durability synchronization completed. Native
-    /// preparation, publication, or synchronization errors retain publication
-    /// state and the backend only while retry remains safe.
+    /// # Returns
+    ///
+    /// `Ok(true)` indicates requested durability synchronization completed;
+    /// `Ok(false)` indicates the commit succeeded without completing requested
+    /// synchronization.
+    ///
+    /// # Errors
+    ///
+    /// Returns the native preparation, publication, or synchronization error.
+    /// The error retains the backend only when retry remains safe.
     ///
     /// # Panics
     ///
@@ -68,8 +75,11 @@ impl LocalFileWriterBackend {
 
     /// Aborts a staged backend and removes its temporary file.
     ///
-    /// Returns a structured cleanup error on close or removal failure; the
-    /// backend remains available for a later abort attempt.
+    /// # Errors
+    ///
+    /// Returns a structured cleanup error when closing the staged file or
+    /// removing it fails. The backend remains available for a later abort
+    /// attempt.
     ///
     /// # Panics
     ///

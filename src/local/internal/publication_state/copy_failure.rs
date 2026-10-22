@@ -21,6 +21,7 @@ use crate::LocalFileError;
 /// # Returns
 ///
 /// A copy failure with empty partial statistics and unchanged state.
+#[must_use]
 #[inline]
 pub(crate) fn copy_failure_unchanged(error: LocalFileError) -> LocalCopyFailure {
     LocalCopyFailure::new(
@@ -42,6 +43,7 @@ pub(crate) fn copy_failure_unchanged(error: LocalFileError) -> LocalCopyFailure 
 /// # Returns
 ///
 /// A copy failure with indeterminate state and empty confirmed copy statistics.
+#[must_use]
 #[inline]
 pub(crate) fn copy_failure_indeterminate(error: LocalFileError) -> LocalCopyFailure {
     LocalCopyFailure::new(
@@ -63,6 +65,7 @@ pub(crate) fn copy_failure_indeterminate(error: LocalFileError) -> LocalCopyFail
 /// # Returns
 ///
 /// A copy failure marked as published with the supplied statistics.
+#[must_use]
 #[inline]
 pub(crate) fn copy_failure_published(error: LocalFileError, partial_stats: LocalCopyStats) -> LocalCopyFailure {
     LocalCopyFailure::new(error, LocalCopyFailureState::Published, partial_stats, None, None)

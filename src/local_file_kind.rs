@@ -7,6 +7,15 @@
 // =============================================================================
 
 /// Normalized kind of a native filesystem entry.
+///
+/// # Examples
+///
+/// ```
+/// use qubit_local_files::outcome::LocalFileKind;
+///
+/// let kind = LocalFileKind::Directory;
+/// assert_eq!(kind, LocalFileKind::Directory);
+/// ```
 #[non_exhaustive]
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
 #[must_use]

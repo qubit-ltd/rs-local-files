@@ -7,6 +7,7 @@
 // =============================================================================
 //! Budget, deadline, and frame helpers for local directory walking.
 
+use std::ffi::OsStr;
 use std::path::Path;
 use std::time::Instant;
 
@@ -85,7 +86,7 @@ pub(super) fn directory_pool(options: &LocalListOptions) -> Option<ManagedResour
 }
 
 /// Measures the platform-native storage size of one directory-entry name.
-pub(super) fn name_bytes(name: &std::ffi::OsStr) -> usize {
+pub(super) fn name_bytes(name: &OsStr) -> usize {
     #[cfg(unix)]
     {
         use std::os::unix::ffi::OsStrExt;

@@ -15,15 +15,6 @@ use std::path::PathBuf;
 #[cfg(not(windows))]
 use std::process::Command;
 
-#[cfg(feature = "test-support")]
-fn run_in_test_fault_process<F>(_test_name: &str, fault: &str, action: F)
-where
-    F: FnOnce(),
-{
-    let _fault = install_test_fault(fault).expect("test fault controller should install");
-    action();
-}
-
 use qubit_local_files::LocalFileSystem;
 use qubit_local_files::error::LocalFileErrorKind;
 #[cfg(feature = "test-support")]
@@ -32,11 +23,21 @@ use qubit_local_files::error::LocalPersistErrorParts;
 use qubit_local_files::options::LocalPersistOptions;
 use qubit_local_files::options::LocalTempDirectoryOptions;
 use qubit_local_files::outcome::LocalPersistFailureState;
+#[cfg(feature = "test-support")]
 use qubit_local_files::outcome::LocalTempSourceState;
 use qubit_local_files::policy::LocalDurabilityRequirement;
 #[cfg(feature = "test-support")]
 use qubit_local_files::test_support::install_test_fault;
 use tempfile::tempdir;
+
+#[cfg(feature = "test-support")]
+fn run_in_test_fault_process<F>(_test_name: &str, fault: &str, action: F)
+where
+    F: FnOnce(),
+{
+    let _fault = install_test_fault(fault).expect("test fault controller should install");
+    action();
+}
 
 fn rooted_host_path(root: &Path, virtual_path: &Path) -> PathBuf {
     root.join(

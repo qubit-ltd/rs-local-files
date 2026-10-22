@@ -13,6 +13,8 @@ use std::path::Path;
 use qubit_io::Output;
 use qubit_local_files::LocalFileSystem;
 use qubit_local_files::error::LocalFileErrorKind;
+#[cfg(unix)]
+use qubit_local_files::policy::LocalSymlinkPolicy;
 
 /// Returned listing paths retain the requested spelling, including macOS's
 /// canonical /private/var prefix rather than an invented /var alias.
@@ -115,9 +117,6 @@ fn test_host_parent_creation_keeps_native_dot_traversal_effects() {
         "caller parent effects outlive temporary cleanup"
     );
 }
-#[cfg(unix)]
-use qubit_local_files::policy::LocalSymlinkPolicy;
-
 /// Native parent traversal follows a preceding symlink before walking upward.
 #[cfg(unix)]
 #[test]

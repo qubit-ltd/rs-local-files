@@ -18,7 +18,7 @@ mod unix {
     use tempfile::tempdir;
 
     #[test]
-    fn final_symlinks_are_deleted_as_entries_and_directory_requests_reject_them() {
+    fn test_final_symlinks_are_deleted_as_entries_and_directory_requests_reject_them() {
         for rooted in [false, true] {
             let directory = tempdir().expect("temporary directory should be created");
             let target = directory.path().join("target");
@@ -38,14 +38,20 @@ mod unix {
                 .expect_err("a final symlink is not a directory entry");
             assert_eq!(LocalFileErrorKind::NotDirectory, error.kind());
             assert!(fs::symlink_metadata(&link).is_ok(), "the symlink must survive");
-            assert_eq!(fs::read(target.join("payload")).unwrap(), b"keep");
+            assert_eq!(
+                fs::read(target.join("payload")).expect("target payload should remain"),
+                b"keep"
+            );
 
             let outcome = filesystem
                 .delete_file_with_options(input, &LocalDeleteOptions::new())
                 .expect("a final symlink should be removed as an entry");
             assert!(outcome.deleted());
             assert!(fs::symlink_metadata(&link).is_err(), "the symlink should be removed");
-            assert_eq!(fs::read(target.join("payload")).unwrap(), b"keep");
+            assert_eq!(
+                fs::read(target.join("payload")).expect("target payload should remain"),
+                b"keep"
+            );
             if !rooted {
                 symlink(&target, &link).expect("directory symlink should be restored");
             }
@@ -53,7 +59,7 @@ mod unix {
     }
 
     #[test]
-    fn dangling_final_symlinks_are_removed_as_files() {
+    fn test_dangling_final_symlinks_are_removed_as_files() {
         for rooted in [false, true] {
             let directory = tempdir().expect("temporary directory should be created");
             let link = directory.path().join("dangling");
@@ -90,7 +96,7 @@ mod windows {
     use tempfile::tempdir;
 
     #[test]
-    fn final_directory_symlinks_are_not_followed_by_delete_contract() {
+    fn test_final_directory_symlinks_are_not_followed_by_delete_contract() {
         let directory = tempdir().expect("temporary directory should be created");
         let target = directory.path().join("target");
         let link = directory.path().join("link");
@@ -117,7 +123,7 @@ mod windows {
     }
 
     #[test]
-    fn final_file_symlinks_are_removed_as_files() {
+    fn test_final_file_symlinks_are_removed_as_files() {
         let directory = tempdir().expect("temporary directory should be created");
         let target = directory.path().join("target");
         let link = directory.path().join("link");
@@ -135,7 +141,7 @@ mod windows {
                 .expect("a final symlink should be removed as an entry");
             assert!(outcome.deleted());
             assert!(fs::symlink_metadata(&link).is_err());
-            assert_eq!(fs::read(&target).unwrap(), b"keep");
+            assert_eq!(fs::read(&target).expect("target file should remain"), b"keep");
             symlink_file(&target, &link).expect("file symlink should be restored");
         }
     }

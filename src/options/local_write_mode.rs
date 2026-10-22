@@ -8,6 +8,16 @@
 // Covered by writer integration tests.
 
 /// Publication mode for a local file writer.
+///
+/// # Examples
+///
+/// ```
+/// use qubit_local_files::options::LocalWriteMode;
+/// use qubit_local_files::options::LocalWriteOptions;
+///
+/// let options = LocalWriteOptions::new(LocalWriteMode::Append);
+/// assert_eq!(options.mode(), LocalWriteMode::Append);
+/// ```
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
 #[must_use]
 pub enum LocalWriteMode {

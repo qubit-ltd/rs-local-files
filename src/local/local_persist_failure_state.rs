@@ -13,6 +13,15 @@ use std::io;
 ///
 /// Source ownership is independent; inspect the error's `source_state()`
 /// before retrying or cleaning up its retained resource.
+///
+/// # Examples
+///
+/// ```
+/// use qubit_local_files::outcome::LocalPersistFailureState;
+///
+/// let state = LocalPersistFailureState::Published;
+/// assert_eq!(state, LocalPersistFailureState::Published);
+/// ```
 #[must_use]
 #[non_exhaustive]
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]

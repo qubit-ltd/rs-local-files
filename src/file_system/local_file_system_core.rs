@@ -7,9 +7,14 @@
 // =============================================================================
 //! Shared immutable state retained by filesystem clones.
 
+use std::io;
+
 use crate::LocalFileSystemCapabilities;
 use crate::LocalFileSystemLimits;
+#[cfg(feature = "test-support")]
+use crate::TestFaultPlan;
 use crate::local::LocalNamespace;
+use crate::test_support::TestFaultPoint;
 
 /// Immutable state shared by all clones of a configured filesystem.
 #[derive(Debug)]
@@ -22,11 +27,12 @@ pub(crate) struct LocalFileSystemCore {
     pub(crate) limits: LocalFileSystemLimits,
     /// Instance-local deterministic faults available only to tests.
     #[cfg(feature = "test-support")]
-    pub(crate) test_faults: Option<crate::TestFaultPlan>,
+    pub(crate) test_faults: Option<TestFaultPlan>,
 }
 
 impl LocalFileSystemCore {
-    /// Returns an injected error for one operation boundary, when configured.
+    /// Returns an injected error for one operation boundary when test support
+    /// is enabled and a matching fault is configured.
     ///
     /// # Parameters
     ///
@@ -34,9 +40,9 @@ impl LocalFileSystemCore {
     ///
     /// # Errors
     ///
-    /// Returns the configured injected I/O error when `point` matches the next
-    /// fault; otherwise returns `Ok(())`.
-    pub(crate) fn fail_if_requested(&self, point: crate::test_support::TestFaultPoint) -> std::io::Result<()> {
+    /// Returns the configured injected I/O error when `point` matches a
+    /// pending fault; otherwise returns `Ok(())`.
+    pub(crate) fn fail_if_requested(&self, point: TestFaultPoint) -> io::Result<()> {
         #[cfg(feature = "test-support")]
         {
             if let Some(error) = self.test_faults.as_ref().and_then(|plan| plan.take(point)) {

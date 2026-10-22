@@ -24,6 +24,22 @@ impl RootedLocalFileSystem {
     /// `symlink_policy` to intermediate components and inspects the final entry
     /// without following its link. Returns path/policy or native inspection
     /// failures with metadata-operation context.
+    ///
+    /// # Parameters
+    ///
+    /// - `path`: Relative descendant path, or an empty path for the opened
+    ///   root.
+    /// - `symlink_policy`: Policy applied while resolving intermediate path
+    ///   components.
+    ///
+    /// # Returns
+    ///
+    /// Normalized metadata for the opened root or final entry.
+    ///
+    /// # Errors
+    ///
+    /// Returns `LocalFileError` when the path is invalid, violates the
+    /// symlink policy, or native metadata inspection fails.
     pub fn metadata(&self, path: &Path, symlink_policy: LocalSymlinkPolicy) -> LocalResult<LocalFileMetadata> {
         if path.as_os_str().is_empty() {
             return self

@@ -26,6 +26,19 @@ use crate::LocalSymlinkPolicy;
 /// it as an entry. Missing final components remain unresolved so create and
 /// replace operations can apply their native conflict semantics.
 ///
+/// # Parameters
+///
+/// - `path`: Absolute Host path supplied by the public filesystem facade.
+/// - `symlink_policy`: Policy controlling whether encountered symbolic links
+///   may be followed.
+/// - `follow_final`: Whether the final path component is followed when it is a
+///   symbolic link.
+///
+/// # Returns
+///
+/// The path after resolving every existing component required by the selected
+/// policy. A missing component and any remaining suffix are preserved.
+///
 /// # Errors
 ///
 /// Returns `LocalFileError` when binding, inspecting, or resolving a path
@@ -85,6 +98,12 @@ pub(crate) fn resolve_host_path(
 ///
 /// PathBuf::push itself simplifies verbatim Windows operands. Preserve their
 /// raw separators and components so native calls decide whether they are valid.
+///
+/// # Parameters
+///
+/// - `path`: Path buffer being assembled from traversal components.
+/// - `component`: Component to append while preserving verbatim Windows
+///   spelling.
 fn push_host_component(path: &mut PathBuf, component: Component<'_>) {
     #[cfg(windows)]
     {

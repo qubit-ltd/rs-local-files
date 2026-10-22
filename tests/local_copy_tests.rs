@@ -66,7 +66,7 @@ fn test_copy_tree_skips_nested_type_conflicts() {
     );
 }
 
-/// Creates a process-specific path that is absent before each test use.
+/// Builds a process-specific path for a test fixture.
 fn temp_path(name: &str) -> PathBuf {
     std::env::temp_dir().join(format!("qubit-local-files-copy-{name}-{}", std::process::id()))
 }
@@ -208,7 +208,12 @@ fn test_local_file_system_copy_conflict_policy_matrix() {
         )
         .expect("overwrite policy should replace an existing file");
     assert_eq!(1, outcome.stats().files());
-    assert_eq!(b"source", fs::read(&target).unwrap().as_slice());
+    assert_eq!(
+        b"source",
+        fs::read(&target)
+            .expect("overwritten target should be readable")
+            .as_slice()
+    );
 
     fs::remove_file(&target).expect("file target should be removed");
     fs::create_dir(&target).expect("directory target should be created");
@@ -283,7 +288,11 @@ fn test_local_file_system_copy_symlink_policy_matrix() {
         )
         .expect("skip policy should retain an existing target");
     assert_eq!(1, skipped.stats().skipped());
-    assert!(fs::symlink_metadata(&skip_target).unwrap().is_file());
+    assert!(
+        fs::symlink_metadata(&skip_target)
+            .expect("skipped target should remain accessible")
+            .is_file()
+    );
 
     let fail_target = directory.path().join("fail-target");
     fs::write(&fail_target, b"existing").expect("fail target should be written");
@@ -303,7 +312,10 @@ fn test_local_file_system_copy_symlink_policy_matrix() {
         )
         .expect("overwrite policy should replace a file with the source link");
     assert_eq!(1, overwritten.stats().overwritten());
-    assert_eq!(PathBuf::from("referent"), fs::read_link(&overwrite_target).unwrap());
+    assert_eq!(
+        PathBuf::from("referent"),
+        fs::read_link(&overwrite_target).expect("overwritten target should remain a symlink")
+    );
 
     let directory_target = directory.path().join("directory-target");
     fs::create_dir(&directory_target).expect("directory target should be created");
@@ -326,7 +338,10 @@ fn test_local_file_system_copy_symlink_policy_matrix() {
         )
         .expect("replace policy should replace a directory with the source link");
     assert_eq!(1, replaced.stats().overwritten());
-    assert_eq!(PathBuf::from("referent"), fs::read_link(&directory_target).unwrap());
+    assert_eq!(
+        PathBuf::from("referent"),
+        fs::read_link(&directory_target).expect("replaced directory target should become a symlink")
+    );
 
     for (name, durability) in [
         ("preferred", LocalDurabilityRequirement::Preferred),
@@ -342,7 +357,10 @@ fn test_local_file_system_copy_symlink_policy_matrix() {
             )
             .expect("symlink copy should satisfy the selected durability policy");
         assert!(outcome.durable());
-        assert_eq!(PathBuf::from("referent"), fs::read_link(target).unwrap());
+        assert_eq!(
+            PathBuf::from("referent"),
+            fs::read_link(target).expect("copied target should be a symlink")
+        );
     }
 }
 
@@ -491,7 +509,7 @@ fn test_recursive_copy_symlink_destination_policy_matrix() {
     assert_eq!(2, overwritten.stats().overwritten());
     assert_eq!(
         PathBuf::from("referent"),
-        fs::read_link(overwrite_target.join("link")).unwrap()
+        fs::read_link(overwrite_target.join("link")).expect("overwritten nested target should be a symlink")
     );
 
     let directory_target = directory.path().join("directory-target");
@@ -521,7 +539,7 @@ fn test_recursive_copy_symlink_destination_policy_matrix() {
     assert_eq!(2, replaced.stats().overwritten());
     assert_eq!(
         PathBuf::from("referent"),
-        fs::read_link(directory_target.join("link")).unwrap()
+        fs::read_link(directory_target.join("link")).expect("replaced nested target should be a symlink")
     );
 }
 
@@ -549,7 +567,14 @@ fn test_recursive_copy_preserves_directory_permissions() {
         )
         .expect("recursive copy should preserve directory permissions");
     assert_eq!(1, outcome.stats().files());
-    assert_eq!(0o750, fs::metadata(&target).unwrap().permissions().mode() & 0o7777);
+    assert_eq!(
+        0o750,
+        fs::metadata(&target)
+            .expect("copied directory metadata should be readable")
+            .permissions()
+            .mode()
+            & 0o7777
+    );
 }
 
 /// Verifies recursive copies preserve nested final symlink entries instead of

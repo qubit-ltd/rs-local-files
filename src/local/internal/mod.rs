@@ -78,6 +78,9 @@ pub(crate) mod test_fault_guard;
 pub(crate) mod test_support;
 #[cfg(unix)]
 mod unix_nonblocking;
+#[cfg(all(test, unix))]
+#[path = "../../tests/local/internal/unix_nonblocking_tests.rs"]
+mod unix_nonblocking_tests;
 #[cfg(unix)]
 mod unix_stat;
 #[cfg(windows)]

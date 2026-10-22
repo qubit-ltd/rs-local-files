@@ -10,6 +10,9 @@
 use std::fs::File;
 use std::io;
 
+#[cfg(unix)]
+use libc;
+
 use super::LocalFileSystemLimits;
 use super::LocalFileSystemSpace;
 #[cfg(not(windows))]
@@ -59,6 +62,16 @@ pub(crate) fn limits(file: &File) -> io::Result<LocalFileSystemLimits> {
 
 /// Reads dynamic capacity from an already-opened filesystem handle.
 ///
+/// # Parameters
+///
+/// - `file`: Open file handle queried for filesystem capacity.
+///
+/// # Returns
+///
+/// The total, free, and caller-available capacity values observed from the
+/// open handle.
+/// Individual values are `None` when they cannot be represented as `u64`.
+///
 /// # Errors
 ///
 /// Returns the native query error when capacity cannot be observed.
@@ -97,6 +110,20 @@ pub(crate) fn space(file: &File) -> io::Result<LocalFileSystemSpace> {
 }
 
 /// Converts one `fpathconf` result into the explicit public limit state.
+///
+/// # Parameters
+///
+/// - `descriptor`: Open file descriptor passed to the native query.
+/// - `name`: POSIX path limit constant to query.
+///
+/// # Returns
+///
+/// The finite limit, an unknown limit when the platform cannot determine one,
+/// or an error when the native query fails.
+///
+/// # Errors
+///
+/// Returns the operating system error reported by `fpathconf`.
 #[cfg(unix)]
 #[inline]
 fn pathconf(descriptor: std::os::fd::RawFd, name: libc::c_int) -> io::Result<SizeLimit> {

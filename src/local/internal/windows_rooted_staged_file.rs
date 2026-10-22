@@ -5,8 +5,8 @@
 //
 //    Licensed under the Apache License, Version 2.0.
 // =============================================================================
-//! Windows rooted staging-file lifecycle.
-// Covered through the public rooted atomic-writer integration tests.
+//! Windows rooted staging-file lifecycle, including its private disarm
+//! behavior.
 
 use std::fs::File;
 use std::io;

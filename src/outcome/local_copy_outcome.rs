@@ -12,6 +12,26 @@ use super::LocalCopyStats;
 use crate::LocalMetadataPreservePolicy;
 
 /// Structured result of a native file or directory copy.
+///
+/// The outcome reports transfer statistics together with the method and
+/// guarantees achieved by the copy pipeline.
+///
+/// # Examples
+///
+/// ```
+/// use qubit_local_files::LocalFileSystem;
+///
+/// let filesystem = LocalFileSystem::host()?;
+/// let directory = std::env::temp_dir();
+/// let source = directory.join(format!("qubit-copy-source-{}", std::process::id()));
+/// let target = directory.join(format!("qubit-copy-target-{}", std::process::id()));
+/// std::fs::write(&source, b"copy example")?;
+/// let outcome = filesystem.copy(&source, &target)?;
+/// assert_eq!(outcome.stats().bytes(), 12);
+/// std::fs::remove_file(source)?;
+/// std::fs::remove_file(target)?;
+/// # Ok::<(), Box<dyn std::error::Error>>(())
+/// ```
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 #[must_use]
 pub struct LocalCopyOutcome {
@@ -38,6 +58,11 @@ impl LocalCopyOutcome {
     /// - `durable`: Whether durability synchronization completed.
     /// - `metadata_preservation`: Metadata preservation applied to copied
     ///   entries.
+    ///
+    /// # Returns
+    ///
+    /// An outcome containing the supplied statistics, method, and achieved
+    /// copy guarantees.
     pub(crate) const fn new(
         stats: LocalCopyStats,
         method: LocalCopyMethod,

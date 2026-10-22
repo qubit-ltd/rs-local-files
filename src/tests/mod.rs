@@ -6,8 +6,10 @@
 //    Licensed under the Apache License, Version 2.0.
 // =============================================================================
 
+mod error;
 mod file_system;
 mod local;
+mod outcome;
 mod path;
 pub(crate) mod rooted;
 mod vectored_read_tests;

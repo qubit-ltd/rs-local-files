@@ -142,6 +142,10 @@ impl LocalTempFile {
     }
 
     /// Returns the namespace-absolute generated path.
+    ///
+    /// # Returns
+    ///
+    /// The generated path in the creating filesystem's namespace.
     #[must_use]
     #[inline]
     pub fn path(&self) -> &Path {
@@ -150,6 +154,10 @@ impl LocalTempFile {
 
     /// Returns the current source authority, independently of earlier
     /// publication.
+    ///
+    /// # Returns
+    ///
+    /// The source lifecycle state, including whether cleanup remains required.
     #[must_use = "inspect the source authority before choosing a recovery action"]
     #[inline]
     pub const fn source_state(&self) -> LocalTempSourceState {
@@ -158,6 +166,10 @@ impl LocalTempFile {
 
     /// Closes the file I/O handle while retaining cleanup and persistence
     /// responsibility.
+    ///
+    /// # Side Effects
+    ///
+    /// Drops the open file handle, if present. Repeated calls have no effect.
     #[inline]
     pub fn close(&mut self) {
         drop(self.file.take());
@@ -169,6 +181,12 @@ impl LocalTempFile {
     /// inspection, entry removal, or empty-sandbox removal fails, or namespace
     /// certainty makes cleanup unsafe. A sandbox-only failure can be retried;
     /// success is idempotent. This does not undo an already-published file.
+    ///
+    /// # Errors
+    ///
+    /// Returns a structured cleanup error containing the affected path and
+    /// native cause when identity checking or removal fails, or cleanup is
+    /// unsafe.
     pub fn cleanup(&mut self) -> LocalResult<()> {
         self.close();
         self.ensure_cleanup_safe().map_err(|error| {
@@ -208,6 +226,16 @@ impl LocalTempFile {
     /// private sandbox.
     /// Uses the default no-replacement policy of [`Self::persist_with`], with
     /// the same publication outcome and resource-retaining failure contract.
+    ///
+    /// # Returns
+    ///
+    /// The publication outcome on success, or an error retaining this resource
+    /// and its publication state.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if publication fails; the error records the failure
+    /// stage and retains this resource for recovery.
     #[inline]
     pub fn keep(self) -> std::result::Result<LocalPersistOutcome, LocalPersistError<Self>> {
         let requested_target = self.core.path.clone();
@@ -237,6 +265,20 @@ impl LocalTempFile {
 
     /// Persists the file within its creating authority without replacement.
     /// Uses [`Self::persist_with`] with default options and the same errors.
+    ///
+    /// # Parameters
+    ///
+    /// `target` is a nonempty namespace-absolute destination.
+    ///
+    /// # Returns
+    ///
+    /// The publication outcome, or an error retaining this resource and its
+    /// publication state.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if target resolution or publication fails; the error
+    /// retains this resource and reports publication certainty.
     #[inline]
     pub fn persist(
         self,
@@ -260,6 +302,22 @@ impl LocalTempFile {
     /// resource, its failure stage, and publication certainty. The retained
     /// file may already be closed; created parents and a published destination
     /// are not rolled back. Inspect the error state before retry or cleanup.
+    ///
+    /// # Parameters
+    ///
+    /// `target` is a nonempty namespace-absolute destination. `options` selects
+    /// replacement, parent creation, and durability behavior.
+    ///
+    /// # Returns
+    ///
+    /// The achieved publication outcome, or an error retaining this resource
+    /// and reporting the failure stage and publication certainty.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error for invalid targets, authority or policy failures,
+    /// parent preparation, installation, or synchronization. It retains this
+    /// resource and records the failure stage and publication certainty.
     #[inline]
     pub fn persist_with(
         self,
@@ -271,6 +329,11 @@ impl LocalTempFile {
 
     /// Returns the mutable open file handle, or an error after [`Self::close`]
     /// or when source authority no longer permits file operations.
+    ///
+    /// # Errors
+    ///
+    /// Returns the underlying authority error, or `BrokenPipe` when the handle
+    /// has already been closed.
     #[inline]
     pub fn as_file_mut(&mut self) -> Result<&mut File> {
         self.core.ensure_publishable()?;
@@ -285,6 +348,23 @@ impl LocalTempFile {
     /// never reads the process PWD. Invalid parameters return `ResolveTarget`
     /// before source synchronization or closing. Other stages and publication
     /// guarantees match [`Self::persist_with`]. Errors retain the resource.
+    ///
+    /// # Parameters
+    ///
+    /// `base` must be an existing namespace-absolute directory. `target` must
+    /// be a nonempty relative path. `options` selects replacement, parent
+    /// creation, and durability behavior.
+    ///
+    /// # Returns
+    ///
+    /// The achieved publication outcome, or an error retaining this resource
+    /// and reporting the failure stage and publication certainty.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error for invalid paths, authority or policy failures, parent
+    /// preparation, installation, or synchronization. It retains this resource
+    /// and records the failure stage and publication certainty.
     pub fn persist_at(
         self,
         base: &Path,

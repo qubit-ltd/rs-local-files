@@ -39,8 +39,11 @@ impl HostLocalFileSystem {
     ///
     /// # Errors
     ///
-    /// Returns `LocalFileError` when creation fails or an existing entry is not
-    /// a directory.
+    /// Returns `LocalFileError` when path resolution or creation fails, or when
+    /// an existing entry is not a directory. Recursive creation can leave
+    /// already-created ancestor directories in place when a later component
+    /// fails; the error identifies the failed component and whether an earlier
+    /// ancestor was created.
     pub fn create_directory_with_policy(
         path: &Path,
         options: &LocalCreateDirectoryOptions,

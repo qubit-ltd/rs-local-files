@@ -15,6 +15,25 @@ use crate::LocalWritePublicationMethod;
 ///
 /// [`Self::publication_method`] reports the backend method directly; callers
 /// do not need to infer it from [`Self::atomic`].
+///
+/// # Examples
+///
+/// ```no_run
+/// use std::io::Write;
+/// use std::path::Path;
+///
+/// use qubit_local_files::LocalFileSystem;
+/// use qubit_local_files::LocalWriterState;
+///
+/// # fn main() -> Result<(), Box<dyn std::error::Error>> {
+/// let filesystem = LocalFileSystem::host()?;
+/// let mut writer = filesystem.open_writer(Path::new("output.txt"))?;
+/// writer.write_all(b"hello")?;
+/// let outcome = writer.commit()?;
+/// assert_eq!(outcome.state(), LocalWriterState::Committed);
+/// # Ok(())
+/// # }
+/// ```
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 #[must_use]
 pub struct LocalWriteOutcome {
@@ -99,7 +118,6 @@ impl LocalWriteOutcome {
 
     /// Returns a failure state retained from an earlier stream or publication
     /// error, or `None` when the terminal outcome is fully successful.
-    #[must_use]
     #[inline]
     pub const fn failure_state(self) -> Option<LocalWriteFailureState> {
         self.failure_state

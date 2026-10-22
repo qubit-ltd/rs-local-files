@@ -9,6 +9,15 @@
 
 /// The type of a rooted filesystem entry observed without following its final
 /// symbolic link.
+///
+/// # Examples
+///
+/// ```
+/// use qubit_local_files::rooted::EntryKind;
+///
+/// let kind = EntryKind::Symlink;
+/// assert_eq!(kind, EntryKind::Symlink);
+/// ```
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 #[must_use]
 pub enum EntryKind {

@@ -10,6 +10,7 @@
 // closures propagate it without changing the observed workload.
 #![cfg_attr(windows, allow(clippy::result_large_err))]
 
+use std::ffi::OsStr;
 use std::fs;
 use std::hint::black_box;
 use std::path::Path;
@@ -43,7 +44,7 @@ use qubit_local_files::policy::LocalDurabilityRequirement;
 use tempfile::tempdir;
 
 fn bench_path_codec(c: &mut Criterion) {
-    let native = std::ffi::OsStr::new("manifest%2Fready");
+    let native = OsStr::new("manifest%2Fready");
     c.bench_function("path_codec", |b| {
         b.iter(|| {
             let canonical =
@@ -52,7 +53,7 @@ fn bench_path_codec(c: &mut Criterion) {
             black_box(restored);
         });
     });
-    let plain = std::ffi::OsStr::new("ordinary-unicode-文档");
+    let plain = OsStr::new("ordinary-unicode-文档");
     c.bench_function("path_codec_plain", |b| {
         b.iter(|| {
             let canonical =
@@ -629,7 +630,7 @@ fn bench_deep_metadata(c: &mut Criterion) {
     let mut group = c.benchmark_group("deep_metadata");
     for depth in [1usize, 8, 32, 64, 128] {
         let directory = tempdir().expect("deep metadata benchmark directory should exist");
-        let mut relative = std::path::PathBuf::new();
+        let mut relative = PathBuf::new();
         for _ in 0..depth {
             relative.push("d");
         }

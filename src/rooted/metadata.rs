@@ -185,7 +185,6 @@ impl Metadata {
 
     /// Returns the last access time, or `None` when the platform did not
     /// provide one.
-    #[must_use]
     #[inline]
     pub const fn accessed_at(&self) -> Option<SystemTime> {
         self.accessed_at
@@ -193,7 +192,6 @@ impl Metadata {
 
     /// Returns the last modification time, or `None` when the platform did not
     /// provide one.
-    #[must_use]
     #[inline]
     pub const fn modified_at(&self) -> Option<SystemTime> {
         self.modified_at
@@ -201,7 +199,6 @@ impl Metadata {
 
     /// Returns the creation time, or `None` when the platform did not provide
     /// one.
-    #[must_use]
     #[inline]
     pub const fn created_at(&self) -> Option<SystemTime> {
         self.created_at
@@ -226,7 +223,6 @@ impl Metadata {
     }
 
     /// Returns a stable native entry identity when the platform supplied one.
-    #[must_use]
     #[inline]
     pub const fn native_identity(&self) -> Option<(u64, u64)> {
         match (self.device_id, self.file_id) {

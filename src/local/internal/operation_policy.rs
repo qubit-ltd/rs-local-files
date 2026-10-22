@@ -15,8 +15,28 @@ use crate::LocalFileErrorKind;
 use crate::LocalFileOperation;
 use crate::LocalResult;
 
-/// Rejects a required directory-durability guarantee before namespace
-/// mutation.
+/// Checks whether an operation can provide its required directory-durability
+/// guarantee before it mutates the filesystem namespace.
+///
+/// # Parameters
+///
+/// - `requirement` selects whether directory durability is optional, preferred,
+///   or required.
+/// - `operation` identifies the operation reported if the guarantee is
+///   unavailable.
+/// - `source` and `target` provide the paths attached to that failure.
+/// - `supported` reports whether the operation can synchronize the affected
+///   directory.
+/// - `reason` explains why the guarantee is unavailable.
+///
+/// # Returns
+///
+/// Returns `Ok(())` unless durability is required and unsupported.
+///
+/// # Errors
+///
+/// Returns `LocalFileErrorKind::RequirementNotMet` with the operation, reason,
+/// source path, and target path when durability is required but unsupported.
 pub(crate) fn ensure_required_directory_durability(
     requirement: LocalDurabilityRequirement,
     operation: LocalFileOperation,

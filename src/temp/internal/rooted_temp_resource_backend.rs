@@ -11,13 +11,16 @@
 use std::path::PathBuf;
 use std::sync::Arc;
 
+use crate::rooted::Metadata;
+use crate::rooted::Root;
+
 /// Retains the exact root authority used to create a temporary descendant.
 #[derive(Debug)]
 pub(crate) struct RootedTempResourceBackend {
     /// Unique identity captured through the retained root authority.
-    pub(crate) identity: crate::rooted::Metadata,
+    pub(crate) identity: Metadata,
     /// Open root descriptor/handle; its diagnostic path is never authority.
-    pub(crate) root: Arc<crate::rooted::Root>,
+    pub(crate) root: Arc<Root>,
     /// Root-relative descendant path.
     pub(crate) relative_path: PathBuf,
     /// Root-relative private cleanup sandbox.

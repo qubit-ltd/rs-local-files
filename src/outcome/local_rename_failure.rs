@@ -15,9 +15,31 @@ use std::fmt::Result as FmtResult;
 use std::path::Path;
 
 use super::LocalRenameFailureState;
+use super::LocalRenameOutcome;
 use crate::LocalFileError;
 
 /// Failure details retained when a unified rename does not complete.
+///
+/// Inspect the primary error and proven namespace state before deciding
+/// whether a rename can be retried.
+///
+/// # Examples
+///
+/// ```
+/// use std::path::Path;
+///
+/// use qubit_local_files::LocalFileSystem;
+/// use qubit_local_files::outcome::LocalRenameFailureState;
+///
+/// let filesystem = LocalFileSystem::host()?;
+/// let source = std::env::temp_dir().join("qubit-local-files-missing-rename-source");
+/// let target = std::env::temp_dir().join("qubit-local-files-rename-target");
+/// let failure = filesystem
+///     .rename(Path::new(&source), Path::new(&target))
+///     .expect_err("source is missing");
+/// assert_eq!(failure.state(), LocalRenameFailureState::Unchanged);
+/// # Ok::<(), Box<dyn std::error::Error>>(())
+/// ```
 #[derive(Debug)]
 pub struct LocalRenameFailure {
     /// Primary typed filesystem error.
@@ -66,6 +88,7 @@ impl LocalRenameFailure {
     }
 
     /// Consumes this failure and returns its error and proven state.
+    #[must_use = "inspect the primary rename error and proven state"]
     #[inline]
     pub fn into_parts(self) -> (LocalFileError, LocalRenameFailureState) {
         (*self.error, self.state)
@@ -83,4 +106,4 @@ impl LocalRenameFailure {
 }
 
 /// Result returned by unified rename operations.
-pub type LocalRenameResult = Result<super::LocalRenameOutcome, LocalRenameFailure>;
+pub type LocalRenameResult = Result<LocalRenameOutcome, LocalRenameFailure>;

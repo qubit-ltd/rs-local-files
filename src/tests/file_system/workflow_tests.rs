@@ -60,7 +60,7 @@ fn test_rooted_facade_workflow_preserves_namespace_and_lifecycle_contracts() {
         b"payload",
         filesystem
             .read_prefix(Path::new("copied/nested/payload"), 32)
-            .unwrap()
+            .expect("copied payload should be readable")
             .as_slice(),
     );
 
@@ -162,7 +162,7 @@ fn test_rooted_facade_resolves_links_and_rejects_virtual_root_escape() {
         b"payload",
         filesystem
             .read_prefix(Path::new("link/payload"), 32)
-            .unwrap()
+            .expect("linked payload should be readable")
             .as_slice(),
     );
     assert!(filesystem.open_reader(Path::new("escape")).is_err());

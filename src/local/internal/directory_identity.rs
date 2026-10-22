@@ -47,6 +47,16 @@ pub(crate) enum DirectoryIdentity {
 
 impl DirectoryIdentity {
     /// Builds an identity from descriptor-relative rooted metadata.
+    ///
+    /// # Parameters
+    ///
+    /// * `metadata` - Rooted metadata whose native identity is preferred when
+    ///   available.
+    /// * `fallback` - Path used when the metadata has no native identity.
+    ///
+    /// # Returns
+    ///
+    /// A native identity when available, otherwise the fallback path identity.
     pub(crate) fn from_rooted_metadata(metadata: &crate::rooted::Metadata, fallback: &Path) -> Self {
         #[cfg(all(feature = "test-support", any(unix, windows)))]
         if injected_cycle_identity() {

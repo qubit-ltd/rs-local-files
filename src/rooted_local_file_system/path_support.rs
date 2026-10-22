@@ -21,10 +21,20 @@ use crate::LocalResult;
 
 /// Validates a rooted descendant and preserves the offending native path.
 ///
+/// # Parameters
+///
+/// * `path` - Candidate descendant relative to the opened root.
+/// * `operation` - Operation recorded in any validation error.
+///
+/// # Returns
+///
+/// The validated relative path on success.
+///
 /// # Errors
 ///
-/// Returns `LocalFileError` for empty, absolute, prefixed, dot, or parent
-/// paths.
+/// Returns `LocalFileError` for empty, absolute, prefixed, dot, parent, or
+/// otherwise invalid rooted paths. The error retains the candidate path and
+/// operation context.
 #[inline]
 pub(crate) fn rooted_path(path: &Path, operation: LocalFileOperation) -> LocalResult<crate::local::LocalRelativePath> {
     match crate::local::LocalRelativePath::new(path) {
@@ -40,9 +50,20 @@ pub(crate) fn rooted_path(path: &Path, operation: LocalFileOperation) -> LocalRe
 
 /// Reports whether a rooted destination currently names a real directory.
 ///
+/// # Parameters
+///
+/// * `root` - Open directory capability used for descriptor-relative lookup.
+/// * `path` - Validated descendant to inspect without following its final link.
+///
+/// # Returns
+///
+/// `true` only when the current entry is a directory; an absent entry returns
+/// `false`.
+///
 /// # Errors
 ///
-/// Returns native metadata errors other than an absent final entry.
+/// Returns native metadata errors other than an absent final entry, preserving
+/// the operating-system error for the caller to add operation context.
 pub(crate) fn rooted_destination_is_directory(
     root: &crate::rooted::Root,
     path: &crate::local::LocalRelativePath,
@@ -56,10 +77,21 @@ pub(crate) fn rooted_destination_is_directory(
 
 /// Validates an optional rooted temporary-resource parent.
 ///
+/// # Parameters
+///
+/// * `parent` - Optional configured parent path; absence or an empty path means
+///   the opened root itself.
+/// * `operation` - Operation recorded in any validation error.
+///
+/// # Returns
+///
+/// An owned relative parent path, empty when the root itself is selected.
+///
 /// # Errors
 ///
 /// Returns `LocalFileError` when the configured parent is not a normal
-/// relative descendant of the opened root.
+/// relative descendant of the opened root; the error retains the operation
+/// and offending path.
 #[inline]
 pub(crate) fn rooted_temp_parent(parent: Option<&Path>, operation: LocalFileOperation) -> LocalResult<PathBuf> {
     let Some(parent) = parent else {
@@ -75,10 +107,20 @@ pub(crate) fn rooted_temp_parent(parent: Option<&Path>, operation: LocalFileOper
 
 /// Confirms that a rooted temporary-resource parent is an existing directory.
 ///
+/// # Parameters
+///
+/// * `root` - Open directory capability that bounds the lookup.
+/// * `parent` - Relative parent path; an empty path denotes the root itself.
+/// * `operation` - Operation recorded in any validation error.
+///
+/// # Returns
+///
+/// `()` when the parent is empty or resolves to a directory.
+///
 /// # Errors
 ///
-/// Returns `LocalFileError` when the parent cannot be read or is not a
-/// directory.
+/// Returns `LocalFileError` when the path is invalid, cannot be inspected, or
+/// resolves to a non-directory entry. Native lookup context is retained.
 #[inline]
 pub(crate) fn validate_rooted_temp_parent(
     root: &crate::rooted::Root,
@@ -106,10 +148,21 @@ pub(crate) fn validate_rooted_temp_parent(
 
 /// Generates one rooted temporary-entry candidate beneath a validated parent.
 ///
+/// # Parameters
+///
+/// * `parent` - Validated directory path beneath which to place the candidate.
+/// * `prefix` - Optional filename prefix.
+/// * `suffix` - Optional filename suffix.
+/// * `operation` - Operation recorded in any generation error.
+///
+/// # Returns
+///
+/// A candidate path formed by joining the parent and generated filename.
+///
 /// # Errors
 ///
 /// Returns `LocalFileError` when an affix is invalid or randomness is
-/// unavailable.
+/// unavailable; invalid affixes are classified as invalid options.
 #[inline]
 pub(crate) fn temp_candidate(
     parent: &Path,
@@ -132,6 +185,15 @@ pub(crate) fn temp_candidate(
 }
 
 /// Converts descriptor-relative metadata to the unified metadata type.
+///
+/// # Parameters
+///
+/// * `metadata` - Metadata obtained from a rooted descriptor-relative lookup.
+///
+/// # Returns
+///
+/// Unified local metadata with the entry kind, size, timestamps, and
+/// permissions copied from the rooted representation.
 #[inline]
 pub(crate) fn rooted_metadata(metadata: crate::rooted::Metadata) -> LocalFileMetadata {
     let kind = match metadata.kind() {
@@ -160,6 +222,17 @@ pub(crate) fn rooted_metadata(metadata: crate::rooted::Metadata) -> LocalFileMet
 }
 
 /// Adds rooted operation and descendant context to a native I/O failure.
+///
+/// # Parameters
+///
+/// * `operation` - Filesystem operation that encountered the failure.
+/// * `path` - Root-relative path associated with the failure.
+/// * `error` - Native I/O error whose kind and message are retained.
+///
+/// # Returns
+///
+/// A `LocalFileError` containing the operation and path context alongside the
+/// original I/O failure.
 #[inline]
 pub(crate) fn rooted_io_error(operation: LocalFileOperation, path: &Path, error: io::Error) -> LocalFileError {
     LocalFileError::from_io(operation, Some(path.to_path_buf()), None, error)

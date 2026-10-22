@@ -7,3 +7,4 @@
 // =============================================================================
 
 mod local_copy_source_mode_tests;
+mod local_directory_reopen_policy_tests;

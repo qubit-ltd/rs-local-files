@@ -12,6 +12,18 @@
 /// Additional stages may be added as persistence behavior evolves. Downstream
 /// matches must retain a wildcard arm.
 ///
+/// # Examples
+///
+/// ```
+/// use qubit_local_files::outcome::LocalPersistStage;
+///
+/// let stage = LocalPersistStage::ResolveTarget;
+/// match stage {
+///     LocalPersistStage::ResolveTarget => {}
+///     _ => {}
+/// }
+/// ```
+///
 /// ```compile_fail
 /// use qubit_local_files::outcome::LocalPersistStage;
 ///

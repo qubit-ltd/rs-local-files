@@ -30,6 +30,14 @@ use crate::local::decide_copy_destination;
 /// after the corresponding namespace operation succeeds. Native inspection,
 /// removal, creation, policy-conflict, and counter-overflow failures retain
 /// the statistics accumulated so far; earlier mutations are not rolled back.
+///
+/// # Errors
+///
+/// Returns a structured copy error when destination inspection or a namespace
+/// operation fails, when the configured policies reject the existing entry,
+/// or when a statistics counter overflows. The error includes the operation
+/// stage, source and destination paths, accumulated statistics, and underlying
+/// cause.
 pub(super) fn prepare_directory(
     root: &Root,
     source: &Path,
@@ -143,6 +151,11 @@ pub(super) fn prepare_directory(
 /// Reads optional destination metadata without following the final link.
 ///
 /// Returns `None` for a missing entry and propagates other native failures.
+///
+/// # Errors
+///
+/// Returns the native I/O error when inspecting the path fails for a reason
+/// other than the entry being absent.
 pub(super) fn optional_metadata(root: &Root, path: &Path) -> io::Result<Option<Metadata>> {
     match root.symlink_metadata(path) {
         Ok(metadata) => Ok(Some(metadata)),
@@ -152,6 +165,10 @@ pub(super) fn optional_metadata(root: &Root, path: &Path) -> io::Result<Option<M
 }
 
 /// Adds an exact statistic or reports overflow.
+///
+/// # Errors
+///
+/// Returns a structured copy error if adding the value would overflow `u64`.
 pub(super) fn checked_add(
     value: u64,
     addition: u64,

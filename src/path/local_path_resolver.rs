@@ -22,6 +22,7 @@ use crate::LocalResult;
 
 /// Resolves operation inputs against one normalized filesystem PWD snapshot.
 #[derive(Clone, Debug, Eq, PartialEq)]
+#[must_use = "a path resolver has no effect unless it is used to bind paths"]
 pub(crate) struct LocalPathResolver {
     /// Namespace whose anchoring rules are applied to operation paths.
     scope: LocalFileSystemScope,
@@ -60,7 +61,6 @@ impl LocalPathResolver {
     }
 
     /// Creates a Host resolver that can resolve absolute paths without a PWD.
-    #[must_use]
     pub(crate) const fn absolute_host() -> Self {
         Self {
             scope: LocalFileSystemScope::Host,

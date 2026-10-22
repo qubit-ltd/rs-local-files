@@ -12,7 +12,17 @@ use std::path::PathBuf;
 
 use super::LocalTempCleanupLimits;
 
-/// Options for creating a cleanup-owned temporary directory.
+/// Options for creating a temporary directory whose cleanup limits are
+/// retained.
+///
+/// # Examples
+///
+/// ```
+/// use qubit_local_files::options::LocalTempDirectoryOptions;
+///
+/// let options = LocalTempDirectoryOptions::new().with_prefix("cache-");
+/// assert_eq!(options.prefix(), Some("cache-"));
+/// ```
 #[derive(Clone, Debug, Eq, PartialEq)]
 #[must_use = "temporary directory options have no effect unless they are used"]
 pub struct LocalTempDirectoryOptions {
@@ -50,36 +60,26 @@ impl LocalTempDirectoryOptions {
         self.cleanup_limits
     }
 
-    /// Retains `limits` for explicit cleanup and Drop without performing I/O.
-    pub const fn with_cleanup_limits(mut self, limits: LocalTempCleanupLimits) -> Self {
-        self.cleanup_limits = limits;
-        self
-    }
-
     /// Returns the configured parent, or `None` for the owning filesystem's
     /// PWD.
-    #[must_use]
     #[inline]
     pub fn parent(&self) -> Option<&Path> {
         self.parent.as_deref()
     }
 
     /// Returns the optional directory-name prefix.
-    #[must_use]
     #[inline]
     pub fn prefix(&self) -> Option<&str> {
         self.prefix.as_deref()
     }
 
     /// Returns the optional directory-name suffix.
-    #[must_use]
     #[inline]
     pub fn suffix(&self) -> Option<&str> {
         self.suffix.as_deref()
     }
 
     /// Returns the optional maximum random-name creation attempts.
-    #[must_use]
     #[inline]
     pub const fn max_attempts(&self) -> Option<usize> {
         self.max_attempts
@@ -90,6 +90,12 @@ impl LocalTempDirectoryOptions {
     #[inline]
     pub const fn creates_parent(&self) -> bool {
         self.create_parent
+    }
+
+    /// Retains `limits` for explicit cleanup and Drop without performing I/O.
+    pub const fn with_cleanup_limits(mut self, limits: LocalTempCleanupLimits) -> Self {
+        self.cleanup_limits = limits;
+        self
     }
 
     /// Enables recursive creation of a missing parent directory.

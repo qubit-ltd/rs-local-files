@@ -13,7 +13,23 @@
 /// This policy only affects replacement. Creating a new entry publishes its
 /// staging metadata, and appending leaves metadata changes to native writes.
 /// Neither policy relaxes destination identity or no-replacement checks.
+///
+/// # Examples
+///
+/// ```
+/// use qubit_local_files::options::LocalWriteMetadataPolicy;
+/// use qubit_local_files::options::LocalWriteMode;
+/// use qubit_local_files::options::LocalWriteOptions;
+///
+/// let options = LocalWriteOptions::new(LocalWriteMode::CreateOrReplace)
+///     .with_metadata_policy(LocalWriteMetadataPolicy::UseStaging);
+/// assert_eq!(
+///     options.metadata_policy(),
+///     LocalWriteMetadataPolicy::UseStaging,
+/// );
+/// ```
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+#[must_use]
 pub enum LocalWriteMetadataPolicy {
     /// Preserve metadata using the existing backend protocol, failing rather
     /// than silently dropping unsupported attributes. Unix copies owner,

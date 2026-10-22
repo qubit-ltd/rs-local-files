@@ -14,6 +14,8 @@ use proptest::prelude::any;
 use proptest::prelude::prop_assert;
 use proptest::prelude::prop_assert_eq;
 use proptest::prelude::proptest;
+use qubit_local_files::LocalFileSystem;
+use qubit_local_files::error::LocalFileErrorKind;
 use qubit_local_files::options::LocalCopyOptions;
 use qubit_local_files::options::LocalCopySourceMode;
 use qubit_local_files::options::LocalDeleteOptions;
@@ -418,8 +420,6 @@ proptest! {
 /// Tightening retains invalid zero handle limits for operation-time validation.
 #[test]
 fn test_tightened_zero_handles_are_rejected() {
-    use qubit_local_files::LocalFileSystem;
-    use qubit_local_files::error::LocalFileErrorKind;
     let dir = tempfile::tempdir().expect("isolated directory");
     let host = LocalFileSystem::host().expect("host filesystem");
     let options =
@@ -433,8 +433,6 @@ fn test_tightened_zero_handles_are_rejected() {
 /// Zero byte and entry ceilings remain enforced when a composed request runs.
 #[test]
 fn test_tightened_zero_limits_stop_copy_and_deletion() {
-    use qubit_local_files::LocalFileSystem;
-    use qubit_local_files::error::LocalFileErrorKind;
     let dir = tempfile::tempdir().expect("isolated directory");
     let source = dir.path().join("source");
     let target = dir.path().join("target");

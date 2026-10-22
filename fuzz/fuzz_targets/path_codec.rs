@@ -12,6 +12,13 @@
 
 #![no_main]
 
+#[cfg(unix)]
+use std::os::unix::ffi::OsStringExt;
+#[cfg(windows)]
+use std::os::windows::ffi::OsStrExt;
+#[cfg(windows)]
+use std::os::windows::ffi::OsStringExt;
+
 use libfuzzer_sys::fuzz_target;
 use qubit_local_files::path::LocalPathCodec;
 
@@ -21,17 +28,15 @@ const MAX_FUZZ_INPUT_LEN: usize = 4096;
 fuzz_target!(|data: &[u8]| {
     let data = &data[..data.len().min(MAX_FUZZ_INPUT_LEN)];
 
-    if let Ok(text) = std::str::from_utf8(data) {
-        if let Ok(decoded) = LocalPathCodec::decode_component(text) {
-            let encoded = LocalPathCodec::encode_component(&decoded).expect("successfully decoded text must encode");
-            assert_eq!(encoded, text, "decoder must accept only canonical text");
-        }
+    if let Ok(text) = std::str::from_utf8(data)
+        && let Ok(decoded) = LocalPathCodec::decode_component(text)
+    {
+        let encoded = LocalPathCodec::encode_component(&decoded).expect("successfully decoded text must encode");
+        assert_eq!(encoded, text, "decoder must accept only canonical text");
     }
 
     #[cfg(unix)]
     if !data.contains(&0) {
-        use std::os::unix::ffi::OsStringExt;
-
         let native = std::ffi::OsString::from_vec(data.to_vec());
         let canonical = LocalPathCodec::encode_component(&native).expect("non-NUL native bytes must convert");
         let restored = LocalPathCodec::decode_component(&canonical).expect("canonical native text must convert");
@@ -43,9 +48,6 @@ fuzz_target!(|data: &[u8]| {
 
     #[cfg(windows)]
     {
-        use std::os::windows::ffi::OsStrExt;
-        use std::os::windows::ffi::OsStringExt;
-
         let units = data
             .chunks_exact(2)
             .map(|chunk| u16::from_le_bytes([chunk[0], chunk[1]]))

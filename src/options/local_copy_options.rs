@@ -120,7 +120,6 @@ impl LocalCopyOptions {
     }
 
     /// Returns the optional symbolic-link policy override.
-    #[must_use]
     #[inline]
     pub const fn symlink_policy_override(&self) -> Option<LocalSymlinkPolicy> {
         self.symlink
@@ -155,31 +154,26 @@ impl LocalCopyOptions {
     }
 
     /// Returns the optional maximum tree depth.
-    #[must_use]
     #[inline]
     pub const fn max_depth(&self) -> Option<usize> {
         self.max_depth
     }
     /// Returns the optional maximum source-entry count.
-    #[must_use]
     #[inline]
     pub const fn max_entries(&self) -> Option<usize> {
         self.max_entries
     }
     /// Returns the optional maximum source-byte count.
-    #[must_use]
     #[inline]
     pub const fn max_bytes(&self) -> Option<u64> {
         self.max_bytes
     }
     /// Returns the optional maximum open-directory count.
-    #[must_use]
     #[inline]
     pub const fn max_open_directories(&self) -> Option<usize> {
         self.max_open_directories
     }
     /// Returns the optional elapsed-time budget.
-    #[must_use]
     #[inline]
     pub const fn deadline(&self) -> Option<Duration> {
         self.deadline

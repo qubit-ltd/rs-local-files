@@ -18,7 +18,27 @@ use crate::LocalDeleteOptions;
 use crate::LocalFileOperation;
 use crate::LocalResult;
 
-/// Removes a directory tree while preserving budgets, failure paths, and state.
+/// Removes `root` and its descendants in post-order without following directory
+/// links.
+///
+/// The supplied budget options constrain discovered entries, depth, pending
+/// path storage, and elapsed time. Each native operation is preceded by a
+/// cooperative deadline check; an in-flight filesystem call cannot be
+/// interrupted.
+///
+/// # Parameters
+///
+/// * `backend` provides filesystem operations and path conversion for this
+///   traversal.
+/// * `root` is the directory to remove and must identify a directory.
+/// * `options` sets resource and deadline limits for this deletion.
+/// * `started_at` is the monotonic start time used to measure the deadline.
+///
+/// # Errors
+///
+/// Returns a contextual local-file error if `root` is not a directory, a
+/// backend operation fails, or a configured resource budget or deadline is
+/// exceeded. The error records whether an earlier entry was already removed.
 pub(crate) fn remove_directory_tree<B: DeleteBackend>(
     backend: &B,
     root: &B::Path,

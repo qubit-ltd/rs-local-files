@@ -6,7 +6,7 @@
 //    Licensed under the Apache License, Version 2.0.
 // =============================================================================
 
-// Host copy operations.
+//! Host copy operations.
 
 #[cfg(windows)]
 use std::os::windows::fs::FileTypeExt;

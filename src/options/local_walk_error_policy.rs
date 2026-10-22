@@ -8,6 +8,15 @@
 // Covered by walker integration tests.
 
 /// Controls whether a directory walker stops after an iteration error.
+///
+/// # Examples
+///
+/// ```
+/// use qubit_local_files::options::LocalWalkErrorPolicy;
+///
+/// let policy = LocalWalkErrorPolicy::Continue;
+/// assert_eq!(policy, LocalWalkErrorPolicy::Continue);
+/// ```
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
 #[must_use]
 pub enum LocalWalkErrorPolicy {

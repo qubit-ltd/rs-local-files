@@ -475,8 +475,6 @@ fn test_local_file_writer_abort_reports_missing_host_staging_file() {
 fn test_local_file_writer_rooted_sessions_report_commit_and_abort_outcomes() {
     use std::path::Path;
 
-    use qubit_local_files::LocalFileSystem;
-
     let directory = tempdir().expect("temporary directory should be created");
     let rooted = LocalFileSystem::rooted(directory.path()).expect("rooted filesystem should open");
 
@@ -521,8 +519,6 @@ fn test_local_file_writer_rooted_sessions_report_commit_and_abort_outcomes() {
 #[test]
 fn test_local_file_writer_rooted_prepublication_failure_retains_writer() {
     use std::path::Path;
-
-    use qubit_local_files::LocalFileSystem;
 
     let directory = tempdir().expect("temporary directory should be created");
     let target = directory.path().join("payload");

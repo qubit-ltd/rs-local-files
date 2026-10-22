@@ -27,6 +27,7 @@ pub(super) fn directory_statistics_overflow_error() -> Error {
 /// # Returns
 ///
 /// An `InvalidData` error identifying the skipped-file counter.
+#[must_use]
 #[inline]
 pub(super) fn skipped_statistics_overflow_error() -> Error {
     statistics_overflow_error("skipped")
@@ -37,6 +38,7 @@ pub(super) fn skipped_statistics_overflow_error() -> Error {
 /// # Returns
 ///
 /// An `InvalidData` error identifying the overwritten-entry counter.
+#[must_use]
 #[inline]
 pub(super) fn overwritten_statistics_overflow_error() -> Error {
     statistics_overflow_error("overwritten")
@@ -47,6 +49,7 @@ pub(super) fn overwritten_statistics_overflow_error() -> Error {
 /// # Returns
 ///
 /// An `InvalidData` error identifying the copied-file counter.
+#[must_use]
 #[inline]
 pub(super) fn file_statistics_overflow_error() -> Error {
     statistics_overflow_error("files")
@@ -57,6 +60,7 @@ pub(super) fn file_statistics_overflow_error() -> Error {
 /// # Returns
 ///
 /// An `InvalidData` error identifying the copied-byte counter.
+#[must_use]
 #[inline]
 pub(super) fn byte_statistics_overflow_error() -> Error {
     statistics_overflow_error("bytes")

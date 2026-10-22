@@ -13,7 +13,15 @@ use std::io::Error;
 use std::io::Result;
 use std::os::fd::AsRawFd;
 
-/// Copies ACLs and extended attributes through the native copyfile API.
+/// Copies the source file's ACLs and extended attributes to the staging file
+/// through macOS's native `copyfile` API.
+///
+/// # Parameters
+/// - `source`: Open file whose ACLs and extended attributes are preserved.
+/// - `staging`: Open file that receives the source metadata.
+///
+/// # Errors
+/// Returns the operating system error if the native copy operation fails.
 pub(super) fn preserve_extended_metadata(source: &File, staging: &File) -> Result<()> {
     let flags = libc::COPYFILE_ACL | libc::COPYFILE_XATTR;
     // SAFETY: both descriptors remain live for this non-retaining call. A

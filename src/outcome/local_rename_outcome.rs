@@ -8,6 +8,24 @@
 // Covered by rename integration tests.
 
 /// Guarantees actually achieved by a native rename.
+///
+/// # Examples
+///
+/// ```
+/// use std::path::Path;
+///
+/// use qubit_local_files::LocalFileSystem;
+///
+/// let filesystem = LocalFileSystem::host()?;
+/// let directory = std::env::temp_dir();
+/// let source = directory.join(format!("qubit-rename-source-{}", std::process::id()));
+/// let target = directory.join(format!("qubit-rename-target-{}", std::process::id()));
+/// std::fs::write(&source, b"rename example")?;
+/// let outcome = filesystem.rename(Path::new(&source), Path::new(&target))?;
+/// assert!(outcome.atomic());
+/// std::fs::remove_file(target)?;
+/// # Ok::<(), Box<dyn std::error::Error>>(())
+/// ```
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 #[must_use]
 pub struct LocalRenameOutcome {
@@ -24,6 +42,11 @@ impl LocalRenameOutcome {
     ///
     /// - `atomic`: Whether the namespace change was atomic.
     /// - `durable`: Whether parent-directory durability was synchronized.
+    ///
+    /// # Returns
+    ///
+    /// An outcome recording the atomicity and durability guarantees achieved
+    /// by the rename operation.
     pub(crate) const fn new(atomic: bool, durable: bool) -> Self {
         Self { atomic, durable }
     }

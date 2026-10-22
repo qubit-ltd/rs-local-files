@@ -41,28 +41,24 @@ impl LocalTempFileOptions {
 
     /// Returns the configured parent, or `None` for the owning filesystem's
     /// PWD.
-    #[must_use]
     #[inline]
     pub fn parent(&self) -> Option<&Path> {
         self.parent.as_deref()
     }
 
     /// Returns the optional filename prefix.
-    #[must_use]
     #[inline]
     pub fn prefix(&self) -> Option<&str> {
         self.prefix.as_deref()
     }
 
     /// Returns the optional filename suffix.
-    #[must_use]
     #[inline]
     pub fn suffix(&self) -> Option<&str> {
         self.suffix.as_deref()
     }
 
     /// Returns the optional maximum random-name creation attempts.
-    #[must_use]
     #[inline]
     pub const fn max_attempts(&self) -> Option<usize> {
         self.max_attempts

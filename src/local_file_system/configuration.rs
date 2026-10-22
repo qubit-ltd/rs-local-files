@@ -353,6 +353,7 @@ impl LocalFileSystem {
     /// Installs an instance-local fault plan in test-support builds.
     #[cfg(feature = "test-support")]
     #[doc(hidden)]
+    #[must_use = "use the filesystem configured with test faults"]
     #[inline]
     pub fn with_test_faults(mut self, test_faults: Option<crate::TestFaultPlan>) -> Self {
         self.core = Arc::new(LocalFileSystemCore {

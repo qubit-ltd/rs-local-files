@@ -49,8 +49,9 @@ impl RootedDirectoryReader {
 
     /// Reads the next child without following a final reparse point.
     ///
-    /// Returns `Ok(None)` after all native records are consumed, and returns an
-    /// I/O error when native enumeration or child inspection fails.
+    /// Returns the next child name and opened handle in `Some`, or `None` after
+    /// all native records are consumed. Returns an I/O error when native
+    /// enumeration or child inspection fails.
     pub(crate) fn next_entry(&mut self) -> Result<Option<(OsString, File)>> {
         loop {
             if self.offset >= self.used {

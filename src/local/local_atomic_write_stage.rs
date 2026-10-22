@@ -11,6 +11,15 @@
 ///
 /// Additional stages may be added as durability behavior evolves. Downstream
 /// matches must retain a wildcard arm.
+///
+/// # Examples
+///
+/// ```
+/// use qubit_local_files::LocalAtomicWriteStage;
+///
+/// let stage = LocalAtomicWriteStage::ReplaceDestination;
+/// assert_eq!(stage, LocalAtomicWriteStage::ReplaceDestination);
+/// ```
 #[must_use]
 #[non_exhaustive]
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]

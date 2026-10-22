@@ -7,6 +7,7 @@
 // =============================================================================
 // Covered by metadata integration tests.
 
+use std::fs::FileType;
 use std::fs::Metadata;
 use std::time::SystemTime;
 
@@ -114,21 +115,18 @@ impl LocalFileMetadata {
     }
 
     /// Returns the access time, or `None` when unavailable.
-    #[must_use]
     #[inline]
     pub const fn accessed_at(&self) -> Option<SystemTime> {
         self.accessed_at
     }
 
     /// Returns the modification time, or `None` when unavailable.
-    #[must_use]
     #[inline]
     pub const fn modified_at(&self) -> Option<SystemTime> {
         self.modified_at
     }
 
     /// Returns the creation time, or `None` when unavailable.
-    #[must_use]
     #[inline]
     pub const fn created_at(&self) -> Option<SystemTime> {
         self.created_at
@@ -181,7 +179,7 @@ fn local_file_permissions(metadata: &Metadata) -> LocalFilePermissions {
 /// The most specific platform-independent kind available for the entry.
 #[cfg(unix)]
 #[inline]
-fn local_file_kind(file_type: std::fs::FileType) -> LocalFileKind {
+fn local_file_kind(file_type: FileType) -> LocalFileKind {
     use std::os::unix::fs::FileTypeExt;
 
     if file_type.is_file() {
@@ -215,7 +213,7 @@ fn local_file_kind(file_type: std::fs::FileType) -> LocalFileKind {
 /// The regular, directory, symlink, or fallback kind available on the target.
 #[cfg(not(unix))]
 #[inline]
-fn local_file_kind(file_type: std::fs::FileType) -> LocalFileKind {
+fn local_file_kind(file_type: FileType) -> LocalFileKind {
     if file_type.is_file() {
         LocalFileKind::File
     } else if file_type.is_dir() {

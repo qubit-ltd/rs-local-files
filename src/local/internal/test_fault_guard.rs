@@ -9,6 +9,7 @@
 
 /// Releases one process-local deterministic fault selector when dropped.
 #[derive(Debug)]
+#[must_use = "the guard must remain alive while the test fault is active"]
 #[cfg(feature = "test-support")]
 #[doc(hidden)]
 pub struct TestFaultGuard {

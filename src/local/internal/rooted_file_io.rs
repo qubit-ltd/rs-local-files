@@ -6,7 +6,7 @@
 //    Licensed under the Apache License, Version 2.0.
 // =============================================================================
 //! Unix descriptor-relative rooted ordinary-file operations.
-// Private behavior is covered through public integration tests.
+// Inline tests cover contracts that require this module's restricted access.
 
 use std::ffi::CString;
 use std::ffi::OsStr;

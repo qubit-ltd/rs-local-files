@@ -24,6 +24,8 @@ use crate::LocalWriteOptions;
 use crate::LocalWriteOutcome;
 use crate::LocalWritePublicationMethod;
 use crate::LocalWriterState;
+use crate::local::LocalAtomicDestinationState;
+use crate::local::LocalAtomicWriteError;
 
 /// Stateful native byte output and destination publication session.
 ///
@@ -91,13 +93,6 @@ impl LocalFileWriter {
             bytes_written: 0,
             failure_state: None,
         }
-    }
-
-    /// Replaces the public identity with its normalized namespace path.
-    pub(crate) fn bind_namespace(mut self, path: PathBuf, current_directory: Option<PathBuf>) -> Self {
-        self.path = path;
-        self.current_directory = current_directory;
-        self
     }
 
     /// Returns the reusable namespace-absolute destination path.
@@ -295,6 +290,13 @@ impl LocalFileWriter {
                 ))
             }
         }
+    }
+
+    /// Replaces the public identity with its normalized namespace path.
+    pub(crate) fn bind_namespace(mut self, path: PathBuf, current_directory: Option<PathBuf>) -> Self {
+        self.path = path;
+        self.current_directory = current_directory;
+        self
     }
 
     /// Commits either staged backend through the shared publication contract.
@@ -495,13 +497,13 @@ impl qubit_io::Output for LocalFileWriter {
 /// # Returns
 ///
 /// Unified publication state.
-fn atomic_destination_state(state: crate::local::LocalAtomicDestinationState) -> LocalWriteFailureState {
+fn atomic_destination_state(state: LocalAtomicDestinationState) -> LocalWriteFailureState {
     match state {
-        crate::local::LocalAtomicDestinationState::Unchanged | crate::local::LocalAtomicDestinationState::Missing => {
+        LocalAtomicDestinationState::Unchanged | LocalAtomicDestinationState::Missing => {
             LocalWriteFailureState::NotPublished
         }
-        crate::local::LocalAtomicDestinationState::Replaced => LocalWriteFailureState::Published,
-        crate::local::LocalAtomicDestinationState::Indeterminate => LocalWriteFailureState::Indeterminate,
+        LocalAtomicDestinationState::Replaced => LocalWriteFailureState::Published,
+        LocalAtomicDestinationState::Indeterminate => LocalWriteFailureState::Indeterminate,
     }
 }
 
@@ -517,11 +519,7 @@ fn atomic_destination_state(state: crate::local::LocalAtomicDestinationState) ->
 ///
 /// Unified local filesystem error retaining the atomic error as its source.
 #[inline]
-fn atomic_write_error(
-    path: &Path,
-    operation: LocalFileOperation,
-    error: crate::local::LocalAtomicWriteError,
-) -> LocalFileError {
+fn atomic_write_error(path: &Path, operation: LocalFileOperation, error: LocalAtomicWriteError) -> LocalFileError {
     let kind = error.kind();
     writer_io_error(path, operation, io::Error::new(kind, error))
 }

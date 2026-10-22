@@ -8,6 +8,16 @@
 //! Cross-platform rooted entry permissions.
 
 /// Permissions observed or applied through a rooted filesystem capability.
+///
+/// # Examples
+///
+/// ```
+/// use qubit_local_files::rooted::Permissions;
+///
+/// let permissions = Permissions::from_read_only(true);
+/// assert!(permissions.is_read_only());
+/// assert_eq!(permissions.unix_mode(), None);
+/// ```
 #[must_use]
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub struct Permissions {
@@ -44,7 +54,8 @@ impl Permissions {
         self.read_only
     }
 
-    /// Returns exact Unix mode bits when they are available.
+    /// Returns exact Unix mode bits, or `None` when created from a portable
+    /// read-only value without an explicit Unix mode.
     #[must_use]
     #[inline]
     pub const fn unix_mode(self) -> Option<u32> {

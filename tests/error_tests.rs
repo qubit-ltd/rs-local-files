@@ -57,6 +57,47 @@ fn test_local_file_error_cause_and_effect_for_ordinary_error() {
     assert_eq!(None, error.effect_state());
 }
 
+/// Verifies a resource-limit source and a later cleanup failure remain
+/// distinct.
+#[test]
+fn test_resource_limit_and_cleanup_sources_are_preserved_independently() {
+    let source = LocalResourceLimitError::new(LocalResourceKind::Entry, 4, 1, 2);
+    let error = LocalFileError::from_io(
+        LocalFileOperation::Copy,
+        Some(Path::new("source").to_path_buf()),
+        None,
+        io::Error::other(source),
+    )
+    .with_cleanup_error(LocalFileError::from_io(
+        LocalFileOperation::Cleanup,
+        Some(Path::new("temporary").to_path_buf()),
+        None,
+        io::Error::from(io::ErrorKind::PermissionDenied),
+    ));
+
+    assert_eq!(Some(&source), error.resource_limit_error());
+    assert!(error.io_error().is_none());
+    let cleanup = error.cleanup_error().expect("cleanup error should be retained");
+    assert_eq!(LocalFileOperation::Cleanup, cleanup.operation());
+    assert_eq!(
+        Some(io::ErrorKind::PermissionDenied),
+        cleanup.io_error().map(io::Error::kind)
+    );
+    assert!(Error::source(&error).is_some());
+}
+
+/// Verifies source-free policy errors map to their compatible I/O kind.
+#[test]
+fn test_source_free_error_reason_maps_to_the_compatible_io_kind() {
+    let error = LocalFileError::new(LocalFileErrorKind::RequirementNotMet, LocalFileOperation::Commit)
+        .with_reason("the requested guarantee is unavailable");
+
+    assert_eq!(Some("the requested guarantee is unavailable"), error.reason());
+    assert_eq!(io::ErrorKind::Unsupported, error.io_error_kind());
+    assert!(error.typed_source().is_none());
+    assert!(error.to_string().contains("requested guarantee"));
+}
+
 /// Verifies effect markers remain conservative when no originating source is
 /// retained by the basic error.
 #[test]

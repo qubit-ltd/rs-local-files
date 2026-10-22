@@ -7,6 +7,7 @@
 // =============================================================================
 //! Shared temporary-resource parent preparation.
 
+use std::fs;
 use std::io;
 use std::path::Path;
 use std::path::PathBuf;
@@ -29,7 +30,7 @@ pub(crate) fn host(target: &Path, create_parent: bool) -> io::Result<Vec<PathBuf
     if create_parent {
         return crate::local::ensure_parent_path_with_sync_dirs(target);
     }
-    if std::fs::metadata(parent)?.is_dir() {
+    if fs::metadata(parent)?.is_dir() {
         Ok(Vec::new())
     } else {
         Err(io::Error::from(io::ErrorKind::NotADirectory))

@@ -516,17 +516,13 @@ fn classify_io_error(error: &io::Error) -> LocalFileErrorKind {
 
 #[cfg(test)]
 mod tests {
-    use std::error::Error;
     use std::io;
     use std::path::Path;
 
-    use super::LocalFileEffectState;
     use super::LocalFileError;
     use super::LocalFileErrorKind;
     use super::LocalFileOperation;
     use super::LocalPathCodecError;
-    use super::LocalResourceLimitError;
-    use crate::error::LocalResourceKind;
 
     #[test]
     fn test_internal_error_remapping_retains_every_context_field() {
@@ -548,92 +544,5 @@ mod tests {
         assert!(error.typed_source().is_some());
         assert!(error.io_error().is_none());
         assert!(error.to_string().contains("caused by"));
-    }
-
-    #[test]
-    fn test_resource_limit_and_cleanup_sources_are_preserved_independently() {
-        let source = LocalResourceLimitError::new(LocalResourceKind::Entry, 4, 1, 2);
-        let error = LocalFileError::from_resource_limit(LocalFileOperation::Copy, Some("source".into()), source)
-            .with_cleanup_error(LocalFileError::from_io(
-                LocalFileOperation::Cleanup,
-                Some("temporary".into()),
-                None,
-                io::Error::from(io::ErrorKind::PermissionDenied),
-            ));
-
-        assert_eq!(Some(&source), error.resource_limit_error());
-        assert!(error.io_error().is_none());
-        let cleanup = error.cleanup_error().expect("cleanup error should be retained");
-        assert_eq!(LocalFileOperation::Cleanup, cleanup.operation());
-        assert_eq!(
-            Some(io::ErrorKind::PermissionDenied),
-            cleanup.io_error().map(io::Error::kind)
-        );
-        assert!(Error::source(&error).is_some());
-    }
-
-    #[test]
-    fn test_source_free_error_reason_maps_to_the_compatible_io_kind() {
-        let error = LocalFileError::new(LocalFileErrorKind::RequirementNotMet, LocalFileOperation::Commit)
-            .with_reason("the requested guarantee is unavailable");
-
-        assert_eq!(Some("the requested guarantee is unavailable"), error.reason());
-        assert_eq!(io::ErrorKind::Unsupported, error.io_error_kind());
-        assert!(error.typed_source().is_none());
-        assert!(error.to_string().contains("requested guarantee"));
-    }
-
-    #[test]
-    fn test_effect_queries_preserve_cause_and_effect_for_reclassified_io() {
-        let error = LocalFileError::from_io(
-            LocalFileOperation::DeleteDirectory,
-            None,
-            None,
-            io::Error::from(io::ErrorKind::PermissionDenied),
-        )
-        .with_kind(LocalFileErrorKind::PublicationIncomplete);
-
-        assert_eq!(Some(LocalFileErrorKind::PermissionDenied), error.cause_kind());
-        assert_eq!(Some(LocalFileEffectState::PartiallyApplied), error.effect_state());
-        assert_eq!(io::ErrorKind::PermissionDenied, error.io_error_kind());
-        assert!(error.io_error().is_some());
-    }
-
-    #[test]
-    fn test_effect_queries_preserve_resource_limit_cause() {
-        let source = LocalResourceLimitError::new(LocalResourceKind::Entry, 4, 1, 2);
-        let error = LocalFileError::from_resource_limit(LocalFileOperation::Copy, None, source)
-            .with_kind(LocalFileErrorKind::PublicationIncomplete);
-
-        assert_eq!(Some(LocalFileErrorKind::ResourceLimit), error.cause_kind());
-        assert_eq!(Some(LocalFileEffectState::PartiallyApplied), error.effect_state());
-        assert!(error.resource_limit_error().is_some());
-    }
-
-    #[test]
-    fn test_effect_queries_map_path_codec_cause() {
-        let error = LocalFileError::from_path_codec(
-            LocalFileOperation::Read,
-            Some("source".into()),
-            LocalPathCodecError::NativeNul,
-        )
-        .with_kind(LocalFileErrorKind::Indeterminate);
-
-        assert_eq!(Some(LocalFileErrorKind::InvalidPath), error.cause_kind());
-        assert_eq!(Some(LocalFileEffectState::Indeterminate), error.effect_state());
-    }
-
-    #[test]
-    fn test_effect_queries_preserve_semantic_cause_reclassification() {
-        let error = LocalFileError::from_io(
-            LocalFileOperation::Copy,
-            None,
-            None,
-            io::Error::from(io::ErrorKind::InvalidInput),
-        )
-        .with_kind(LocalFileErrorKind::TypeConflict);
-
-        assert_eq!(Some(LocalFileErrorKind::TypeConflict), error.cause_kind());
-        assert_eq!(None, error.effect_state());
     }
 }

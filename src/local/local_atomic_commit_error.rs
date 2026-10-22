@@ -25,6 +25,7 @@ use crate::LocalAtomicWriteError;
 ///
 /// * `T` - Type of staging writer retained for recovery.
 #[non_exhaustive]
+#[must_use = "the atomic-commit failure should be handled"]
 #[derive(Debug)]
 pub struct LocalAtomicCommitError<T> {
     /// Structured atomic-write failure.
@@ -68,7 +69,6 @@ impl<T> LocalAtomicCommitError<T> {
     ///
     /// `Some` for a pre-installation failure that permits retry or explicit
     /// abort, or `None` after installation began.
-    #[must_use]
     pub fn writer(&self) -> Option<&T> {
         self.writer.as_deref()
     }
@@ -79,7 +79,6 @@ impl<T> LocalAtomicCommitError<T> {
     ///
     /// `Some` for a pre-installation failure that permits additional staging
     /// writes, retry, or explicit abort, or `None` after installation began.
-    #[must_use]
     pub fn writer_mut(&mut self) -> Option<&mut T> {
         self.writer.as_deref_mut()
     }

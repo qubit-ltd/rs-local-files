@@ -10,6 +10,25 @@
 use crate::local::LocalCopyDirStats;
 
 /// Statistics collected by a unified native copy operation.
+///
+/// # Examples
+///
+/// ```
+/// use qubit_local_files::LocalFileSystem;
+///
+/// let filesystem = LocalFileSystem::host()?;
+/// let directory = std::env::temp_dir();
+/// let source = directory.join(format!("qubit-copy-stats-source-{}", std::process::id()));
+/// let target = directory.join(format!("qubit-copy-stats-target-{}", std::process::id()));
+/// std::fs::write(&source, b"copy statistics")?;
+/// let outcome = filesystem.copy(&source, &target)?;
+/// let stats = outcome.stats();
+/// assert_eq!(stats.bytes(), 15);
+/// assert_eq!(stats.files(), 1);
+/// std::fs::remove_file(source)?;
+/// std::fs::remove_file(target)?;
+/// # Ok::<(), Box<dyn std::error::Error>>(())
+/// ```
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
 #[must_use]
 pub struct LocalCopyStats {
@@ -87,41 +106,5 @@ impl LocalCopyStats {
     #[inline]
     pub const fn overwritten(self) -> u64 {
         self.overwritten
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::LocalCopyStats;
-    use crate::local::LocalCopyDirStats;
-
-    #[test]
-    fn test_internal_constructors_preserve_all_copy_statistics() {
-        let internal = LocalCopyDirStats {
-            files: 2,
-            directories: 3,
-            bytes: 5,
-            skipped: 7,
-            overwritten: 11,
-            ..LocalCopyDirStats::default()
-        };
-
-        let converted = LocalCopyStats::from_internal(internal);
-        assert_eq!(2, converted.files());
-        assert_eq!(3, converted.directories());
-        assert_eq!(5, converted.bytes());
-        assert_eq!(7, converted.skipped());
-        assert_eq!(11, converted.overwritten());
-    }
-
-    #[test]
-    fn test_skipped_one_records_only_the_skipped_entry() {
-        let stats = LocalCopyStats::skipped_one();
-
-        assert_eq!(0, stats.files());
-        assert_eq!(0, stats.directories());
-        assert_eq!(0, stats.bytes());
-        assert_eq!(1, stats.skipped());
-        assert_eq!(0, stats.overwritten());
     }
 }

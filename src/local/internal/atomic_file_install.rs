@@ -35,7 +35,25 @@ use super::file_move::wide_path;
 use crate::LocalAtomicDestinationState;
 use crate::options::LocalWriteMetadataPolicy;
 
-/// Installs a staged atomic file according to its initial destination state.
+/// Installs a staged atomic file using the operation selected from the
+/// destination state observed before staging began.
+///
+/// Existing destinations are replaced atomically; on Windows, staging
+/// metadata is also selected according to `metadata_policy`. New destinations
+/// are installed without replacing an entry created concurrently. The result
+/// includes destination and staging states so callers can recover safely.
+///
+/// # Parameters
+///
+/// * `staging` - Path of the fully written temporary file to publish.
+/// * `destination` - Path that receives the staged file.
+/// * `destination_existed` - Whether the destination existed before staging.
+/// * `metadata_policy` - Metadata behavior for Windows replacement.
+///
+/// # Errors
+///
+/// Returns the operating-system error together with conservative destination
+/// and staging states describing what is known after the failed operation.
 pub(crate) fn install_atomic_file(
     staging: &Path,
     destination: &Path,
@@ -66,7 +84,25 @@ pub(crate) fn install_atomic_file(
     }
 }
 
-/// Atomically replaces an existing destination file.
+/// Atomically replaces an existing destination file with the staged file.
+///
+/// On Windows this uses the native replacement operation; on other platforms
+/// it delegates to the platform-specific file replacement helper. The staged
+/// path must identify a file on the same filesystem as the destination.
+///
+/// # Parameters
+///
+/// * `staging` - Path of the staged file.
+/// * `destination` - Existing path to replace.
+///
+/// # Returns
+///
+/// Returns `Ok(())` after replacement succeeds.
+///
+/// # Errors
+///
+/// Returns the underlying replacement error when the operating system cannot
+/// complete the replacement.
 pub(crate) fn replace_existing_atomic_file(staging: &Path, destination: &Path) -> Result<()> {
     #[cfg(all(feature = "test-support", unix))]
     if super::test_support::is_enabled("atomic-install-replace")
@@ -102,7 +138,26 @@ pub(crate) fn replace_existing_atomic_file(staging: &Path, destination: &Path) -
     }
 }
 
-/// Installs a new destination without replacing a concurrent entry.
+/// Installs a new destination without replacing an entry created concurrently.
+///
+/// Unix targets use a no-replace native operation relative to the current
+/// working directory; other targets use the platform file-move helper. The
+/// caller receives conservative destination and staging states on failure.
+///
+/// # Parameters
+///
+/// * `staging` - Path of the fully written temporary file to publish.
+/// * `destination` - Path that must not be replaced if it already exists.
+///
+/// # Errors
+///
+/// Returns the native error and the destination/staging states known after
+/// installation fails.
+///
+/// # Returns
+///
+/// Returns `Ok(())` after installation or an error with the known filesystem
+/// states when installation fails.
 pub(crate) fn install_new_atomic_file(
     staging: &Path,
     destination: &Path,
@@ -119,7 +174,20 @@ pub(crate) fn install_new_atomic_file(
     }
 }
 
-/// Classifies a native existing-file replacement failure.
+/// Classifies the destination state reported by a native replacement failure.
+///
+/// Windows replacement error codes distinguish an unchanged destination, a
+/// missing destination, and an indeterminate outcome. Other platforms report
+/// the destination as unchanged because their replacement helper does not
+/// expose a more precise state.
+///
+/// # Parameters
+///
+/// * `error` - Native error returned by the replacement operation.
+///
+/// # Returns
+///
+/// Returns the most precise destination state available on this platform.
 pub(crate) fn replacement_error_state(error: &Error) -> LocalAtomicDestinationState {
     #[cfg(feature = "test-support")]
     if super::test_support::is_enabled("atomic-install-replace-indeterminate")
@@ -143,7 +211,33 @@ pub(crate) fn replacement_error_state(error: &Error) -> LocalAtomicDestinationSt
     }
 }
 
-/// Installs a new descriptor-relative destination without replacement.
+/// Installs a new descriptor-relative destination without replacing an entry.
+///
+/// Linux and Android first attempt `renameat2` with `RENAME_NOREPLACE`, then
+/// fall back to linking and unlinking when that operation is unavailable.
+/// macOS uses `renameatx_np` with `RENAME_EXCL`; FreeBSD uses the link/unlink
+/// fallback. Other Unix targets return `Unsupported`.
+///
+/// # Errors
+///
+/// Returns the native operation error paired with the destination and staging
+/// states known after the failure.
+///
+/// # Parameters
+///
+/// * `staging_parent` - Open directory containing the staging name.
+/// * `staging` - NUL-terminated staging entry name.
+/// * `destination_parent` - Open directory containing the destination name.
+/// * `destination` - NUL-terminated destination entry name.
+///
+/// # Returns
+///
+/// Returns `Ok(())` after installation, or the failure and known states.
+///
+/// # Panics
+///
+/// The link/unlink fallback panics only if its compile-time unlink attempt
+/// count is changed to zero.
 #[cfg(unix)]
 pub(crate) fn install_new_atomic_file_at(
     staging_parent: RawFd,
@@ -239,7 +333,7 @@ pub(crate) fn install_new_atomic_file_at(
     }
 }
 
-/// Creates a new hard link and then removes the staging name.
+/// Publishes the destination as a hard link, then removes the staging name.
 ///
 /// # Parameters
 ///
@@ -318,7 +412,7 @@ fn link_then_unlink(
     ))
 }
 
-/// Removes the staging name after its destination hard link is published.
+/// Removes the staging name after its destination hard link has been published.
 ///
 /// # Parameters
 ///
@@ -328,6 +422,10 @@ fn link_then_unlink(
 /// # Errors
 ///
 /// Returns the native `unlinkat` error or a selected test fault.
+///
+/// # Returns
+///
+/// Returns `Ok(())` after the staging name is removed.
 #[cfg(any(target_os = "linux", target_os = "android", target_os = "freebsd",))]
 fn unlink_staging_name(staging_parent: RawFd, staging: &CStr) -> Result<()> {
     #[cfg(feature = "test-support")]
@@ -355,7 +453,18 @@ fn unlink_staging_name(staging_parent: RawFd, staging: &CStr) -> Result<()> {
     Ok(())
 }
 
-/// Converts a Unix path to a NUL-terminated byte string.
+/// Converts a Unix path's raw bytes to a NUL-terminated byte string.
+///
+/// This preserves non-UTF-8 path bytes. Paths containing an interior NUL are
+/// rejected because native path-taking system calls use NUL termination.
+///
+/// # Errors
+///
+/// Returns `InvalidInput` when the path contains an interior NUL byte.
+///
+/// # Returns
+///
+/// Returns the raw path bytes as a `CString` when they contain no interior NUL.
 #[cfg(unix)]
 #[inline]
 fn native_path(path: &Path) -> Result<CString> {
@@ -365,7 +474,16 @@ fn native_path(path: &Path) -> Result<CString> {
     }
 }
 
-/// Pairs an error with a destination known to be unmodified.
+/// Pairs an error with states indicating that the destination is unchanged
+/// and the staging file is still present.
+///
+/// # Parameters
+///
+/// * `error` - The failure that occurred before destination publication.
+///
+/// # Returns
+///
+/// Returns the error paired with `Unchanged` and `Present` states.
 #[inline]
 fn unchanged_error(error: Error) -> (Error, LocalAtomicDestinationState, AtomicStagingState) {
     (

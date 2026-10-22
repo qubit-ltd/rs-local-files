@@ -19,6 +19,19 @@ use crate::policy::LocalDurabilityRequirement;
 /// Construct this non-exhaustive type through [`Self::new`] and its builder.
 /// Builder results must be used:
 ///
+/// # Examples
+///
+/// ```
+/// use qubit_local_files::options::LocalPersistOptions;
+/// use qubit_local_files::policy::LocalDurabilityRequirement;
+///
+/// let options = LocalPersistOptions::new()
+///     .with_overwrite()
+///     .with_durability(LocalDurabilityRequirement::Preferred);
+/// assert!(options.overwrites());
+/// assert_eq!(options.durability(), LocalDurabilityRequirement::Preferred);
+/// ```
+///
 /// ```compile_fail
 /// #![deny(unused_must_use)]
 /// use qubit_local_files::options::LocalPersistOptions;
@@ -52,7 +65,6 @@ impl LocalPersistOptions {
     /// # Returns
     /// Options that reject existing destination paths and do not require
     /// durability.
-    #[must_use = "use the configured persistence options"]
     #[inline]
     pub const fn new() -> Self {
         Self {
@@ -87,7 +99,6 @@ impl LocalPersistOptions {
     }
 
     /// Enables recursive creation of a missing target parent.
-    #[must_use = "use the configured persistence options"]
     #[inline]
     pub const fn with_create_parent(mut self) -> Self {
         self.create_parent = true;
@@ -95,7 +106,6 @@ impl LocalPersistOptions {
     }
 
     /// Sets the required persistence durability.
-    #[must_use = "use the configured persistence options"]
     #[inline]
     pub const fn with_durability(mut self, durability: LocalDurabilityRequirement) -> Self {
         self.durability = durability;
@@ -106,7 +116,6 @@ impl LocalPersistOptions {
     ///
     /// # Returns
     /// Updated persistence options that permit overwriting.
-    #[must_use = "use the configured persistence options"]
     #[inline]
     pub const fn with_overwrite(mut self) -> Self {
         self.overwrite = true;

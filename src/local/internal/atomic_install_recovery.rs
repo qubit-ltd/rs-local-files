@@ -42,6 +42,24 @@ pub(crate) struct AtomicInstallRecovery<'a> {
 /// instead. Parent synchronization is attempted only when the destination is
 /// known replaced.
 ///
+/// # Parameters
+///
+/// * `context` - Installation error and the filesystem states known after the
+///   failed installation.
+/// * `staged_file` - Backend-owned staging state used by the recovery
+///   callbacks.
+/// * `cleanup_staging` - Removes a staging entry known to remain present.
+/// * `disarm_indeterminate_staging` - Prevents automatic cleanup when the
+///   staging entry's state cannot be determined.
+/// * `sync_parent` - Synchronizes the destination's parent directory after a
+///   known replacement.
+///
+/// # Returns
+///
+/// Returns `Ok(())` only when a known replacement is followed by successful
+/// staging cleanup and parent synchronization. Otherwise returns the original
+/// installation error with any cleanup or synchronization error attached.
+///
 /// # Errors
 ///
 /// Retains the installation error and secondary cleanup/synchronization errors.

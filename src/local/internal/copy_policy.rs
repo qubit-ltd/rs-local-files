@@ -5,7 +5,6 @@
 //
 //    Licensed under the Apache License, Version 2.0.
 // =============================================================================
-// tests.
 //! Shared, side-effect-free copy policy decisions.
 
 use crate::LocalAtomicityRequirement;
@@ -46,6 +45,7 @@ pub(crate) fn validate_copy_source_kind(
 /// Directory trees cannot provide whole-operation atomicity or durability.
 /// Symbolic-link copying cannot provide whole-operation atomicity. File and
 /// link durability also depends on platform capabilities and synchronization.
+#[must_use]
 #[inline]
 pub(crate) fn copy_source_guarantee_unavailable(
     source_kind: LocalFileKind,
@@ -57,6 +57,7 @@ pub(crate) fn copy_source_guarantee_unavailable(
 }
 
 /// Reports whether replacing a directory would violate required atomicity.
+#[must_use]
 #[inline]
 pub(crate) fn copy_file_replace_requires_atomicity(
     source_is_directory: bool,

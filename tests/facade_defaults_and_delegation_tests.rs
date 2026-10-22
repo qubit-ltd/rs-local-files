@@ -16,7 +16,6 @@ use qubit_io::Output;
 use qubit_local_files::LocalFileSystem;
 use qubit_local_files::capability::LocalFileSystemCapabilities;
 use qubit_local_files::capability::LocalFileSystemLimits;
-#[cfg(unix)]
 use qubit_local_files::error::LocalFileErrorKind;
 use qubit_local_files::error::LocalResourceKind;
 use qubit_local_files::error::LocalResourceLimitError;
@@ -89,10 +88,12 @@ fn test_public_facade_uses_complete_instance_defaults() {
         .mode()
     );
 
-    assert!(
+    assert_eq!(
+        LocalFileErrorKind::InvalidOptions,
         filesystem
             .set_default_list_options(LocalListOptions::new().with_max_open_directories(0))
-            .is_err()
+            .unwrap_err()
+            .kind()
     );
     filesystem
         .set_default_list_options(LocalListOptions::new().with_recursive())
@@ -104,10 +105,12 @@ fn test_public_facade_uses_complete_instance_defaults() {
         .recursive()
     );
 
-    assert!(
+    assert_eq!(
+        LocalFileErrorKind::InvalidOptions,
         filesystem
             .set_default_copy_options(LocalCopyOptions::new().with_deadline(Duration::MAX))
-            .is_err()
+            .unwrap_err()
+            .kind()
     );
     filesystem
         .set_default_copy_options(LocalCopyOptions::new().with_conflict(LocalCopyConflictPolicy::Overwrite))
@@ -150,10 +153,12 @@ fn test_public_facade_uses_complete_instance_defaults() {
         .overwrite()
     );
 
-    assert!(
+    assert_eq!(
+        LocalFileErrorKind::InvalidOptions,
         filesystem
             .set_default_temp_file_options(LocalTempFileOptions::new().with_max_attempts(0))
-            .is_err()
+            .unwrap_err()
+            .kind()
     );
     filesystem
         .set_default_temp_file_options(
@@ -170,10 +175,12 @@ fn test_public_facade_uses_complete_instance_defaults() {
         .max_attempts(),
     );
 
-    assert!(
+    assert_eq!(
+        LocalFileErrorKind::InvalidOptions,
         filesystem
             .set_default_temp_directory_options(LocalTempDirectoryOptions::new().with_max_attempts(0))
-            .is_err()
+            .unwrap_err()
+            .kind()
     );
     filesystem
         .set_default_temp_directory_options(

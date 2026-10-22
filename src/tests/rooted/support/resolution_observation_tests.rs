@@ -34,6 +34,7 @@ pub(crate) fn reset() {
     FALLBACK.set(0);
 }
 /// Returns metadata, directory-open, and fallback observations in that order.
+#[must_use]
 pub(crate) fn snapshot() -> (usize, usize, usize) {
     (METADATA.get(), DIRECTORY_OPEN.get(), FALLBACK.get())
 }

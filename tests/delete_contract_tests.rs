@@ -16,7 +16,7 @@ use tempfile::tempdir;
 /// A recursive directory request must reject a regular file without deleting
 /// it, consistently for Host and Rooted authorities.
 #[test]
-fn host_recursive_directory_delete_rejects_regular_file() {
+fn test_host_recursive_directory_delete_rejects_regular_file() {
     let directory = tempdir().expect("temporary directory should be created");
     let physical = directory.path().join("victim");
     std::fs::write(&physical, b"must survive").expect("victim fixture should be written");
@@ -30,7 +30,7 @@ fn host_recursive_directory_delete_rejects_regular_file() {
 }
 
 #[test]
-fn rooted_recursive_directory_delete_rejects_regular_file() {
+fn test_rooted_recursive_directory_delete_rejects_regular_file() {
     let directory = tempdir().expect("temporary directory should be created");
     let physical = directory.path().join("victim");
     std::fs::write(&physical, b"must survive").expect("victim fixture should be written");

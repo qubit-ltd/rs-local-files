@@ -10,6 +10,24 @@
 //! States proven when a unified rename operation fails.
 
 /// Namespace state proven by a failed unified rename operation.
+///
+/// # Examples
+///
+/// ```
+/// use std::path::Path;
+///
+/// use qubit_local_files::LocalFileSystem;
+/// use qubit_local_files::outcome::LocalRenameFailureState;
+///
+/// let filesystem = LocalFileSystem::host()?;
+/// let source = std::env::temp_dir().join("qubit-local-files-missing-rename-source");
+/// let target = std::env::temp_dir().join("qubit-local-files-rename-target");
+/// let failure = filesystem
+///     .rename(Path::new(&source), Path::new(&target))
+///     .expect_err("source is missing");
+/// assert_eq!(failure.state(), LocalRenameFailureState::Unchanged);
+/// # Ok::<(), Box<dyn std::error::Error>>(())
+/// ```
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 #[must_use]
 pub enum LocalRenameFailureState {

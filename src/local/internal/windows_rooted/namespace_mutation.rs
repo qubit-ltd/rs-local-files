@@ -243,7 +243,7 @@ mod tests {
 
     /// Verifies rooted rename buffers include all UTF-16 filename bytes.
     #[test]
-    fn rename_buffer_reports_complete_payload_length() {
+    fn test_rename_buffer_reports_complete_payload_length() {
         let destination = LocalRelativePath::new(Path::new("nested/renamed")).expect("destination should be valid");
         let (buffer, information_length) =
             build_rename_information(destination.as_path().as_os_str(), true).expect("rename payload should build");
@@ -259,7 +259,7 @@ mod tests {
     }
 
     #[test]
-    fn legacy_rename_fallback_is_limited_to_unsupported_classes() {
+    fn test_legacy_rename_fallback_is_limited_to_unsupported_classes() {
         assert!(is_legacy_rename_status(STATUS_INVALID_INFO_CLASS));
         assert!(is_legacy_rename_status(STATUS_INVALID_PARAMETER));
         assert!(is_legacy_rename_status(STATUS_NOT_SUPPORTED));

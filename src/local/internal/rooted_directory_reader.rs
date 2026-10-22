@@ -15,6 +15,7 @@ mod unix;
 mod windows;
 
 use std::fs::File;
+use std::path::PathBuf;
 
 #[cfg(unix)]
 use rustix::fs::Dir;
@@ -29,7 +30,7 @@ pub(crate) struct RootedDirectoryReader {
     pub(super) stream: Dir,
     /// Path used only to enrich Unix native I/O errors.
     #[cfg(unix)]
-    pub(super) diagnostic_path: std::path::PathBuf,
+    pub(super) diagnostic_path: PathBuf,
     /// Aligned storage for Windows native directory records.
     #[cfg(windows)]
     pub(super) buffer: Vec<usize>,
@@ -49,6 +50,8 @@ pub(crate) struct RootedDirectoryReader {
 
 impl RootedDirectoryReader {
     /// Duplicates the directory handle retained by this reader.
+    ///
+    /// Returns an I/O error if the underlying handle cannot be duplicated.
     pub(crate) fn try_clone_directory(&self) -> std::io::Result<File> {
         self.directory.try_clone()
     }

@@ -16,6 +16,20 @@ use crate::LocalPathCodecError;
 use crate::LocalResult;
 
 /// Reversible canonical conversion for one native path component.
+///
+/// # Examples
+///
+/// ```
+/// use std::ffi::OsStr;
+///
+/// use qubit_local_files::path::LocalPathCodec;
+///
+/// let native = OsStr::new("report%final.txt");
+/// let encoded = LocalPathCodec::encode_component(native)?;
+/// let decoded = LocalPathCodec::decode_component(&encoded)?;
+/// assert_eq!(decoded, native);
+/// # Ok::<(), Box<dyn std::error::Error>>(())
+/// ```
 pub struct LocalPathCodec;
 
 impl LocalPathCodec {

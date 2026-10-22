@@ -38,6 +38,16 @@ use crate::read;
 use crate::write;
 
 /// An opened directory descriptor that authorizes contained operations.
+///
+/// # Examples
+///
+/// ```
+/// use qubit_local_files::rooted::Root;
+///
+/// let directory = tempfile::tempdir().expect("temporary directory should be created");
+/// let root = Root::open(directory.path()).expect("directory should be opened as a root");
+/// assert_eq!(root.path(), directory.path());
+/// ```
 #[must_use]
 #[derive(Debug)]
 pub struct Root {

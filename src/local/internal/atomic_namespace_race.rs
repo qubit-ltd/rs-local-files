@@ -88,7 +88,11 @@ fn identity_error(
     )
 }
 
-/// Classifies a pre-replacement destination identity mismatch.
+/// Determines whether a destination mismatch left the operation path missing.
+///
+/// A missing path is reported as `Missing`; every other metadata result keeps
+/// the conservative `Unchanged` state because this check cannot prove that the
+/// caller's original destination was replaced.
 fn destination_mismatch_state(path: &Path) -> LocalAtomicDestinationState {
     #[cfg(feature = "test-support")]
     let metadata = if super::test_support::is_enabled("atomic-identity-missing") {

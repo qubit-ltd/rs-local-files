@@ -7,12 +7,17 @@
 // =============================================================================
 //! Stateful filesystem, virtual PWD, and explicit-option contract tests.
 
+use std::env;
 use std::fs;
+#[cfg(unix)]
+use std::os::unix::fs::symlink;
 use std::path::Path;
+use std::path::absolute;
 #[cfg(not(windows))]
 use std::process::Command;
 use std::sync::Arc;
 use std::sync::Mutex;
+use std::thread;
 
 use qubit_io::Output;
 use qubit_local_files::LocalFileSystem;
@@ -52,7 +57,7 @@ fn assert_path_eq(actual: &Path, expected: &Path) {
 #[test]
 fn test_host_observes_process_pwd_and_clone_configuration_is_independent() {
     let _pwd_guard = PROCESS_PWD_LOCK.lock().expect("process PWD lock should be available");
-    let process_pwd = std::env::current_dir().expect("process PWD should be readable");
+    let process_pwd = env::current_dir().expect("process PWD should be readable");
     let mut filesystem = LocalFileSystem::host().expect("Host filesystem should open");
     assert_path_eq(
         &filesystem.current_directory().expect("Host PWD should be readable"),
@@ -86,7 +91,7 @@ fn test_host_observes_process_pwd_and_clone_configuration_is_independent() {
     );
     assert!(!filesystem.default_list_options().recursive());
     assert!(cloned.default_list_options().recursive());
-    std::env::set_current_dir(process_pwd).expect("original process PWD should be restored");
+    env::set_current_dir(process_pwd).expect("original process PWD should be restored");
 }
 
 #[test]
@@ -101,12 +106,30 @@ fn test_rooted_paths_observe_chroot_style_absolute_and_relative_semantics() {
         filesystem.current_directory().expect("Rooted PWD should be available"),
         Path::new("/"),
     );
-    assert_eq!(filesystem.metadata(Path::new("/at-root")).unwrap().len(), 4);
+    assert_eq!(
+        filesystem
+            .metadata(Path::new("/at-root"))
+            .expect("root fixture metadata should be available")
+            .len(),
+        4,
+    );
     filesystem
         .set_current_directory(Path::new("/work/project"))
         .expect("virtual PWD should change");
-    assert_eq!(filesystem.metadata(Path::new("../value")).unwrap().len(), 4);
-    assert_eq!(filesystem.metadata(Path::new("../../at-root")).unwrap().len(), 4);
+    assert_eq!(
+        filesystem
+            .metadata(Path::new("../value"))
+            .expect("relative work fixture metadata should be available")
+            .len(),
+        4,
+    );
+    assert_eq!(
+        filesystem
+            .metadata(Path::new("../../at-root"))
+            .expect("relative root fixture metadata should be available")
+            .len(),
+        4,
+    );
 
     let failure = filesystem
         .copy_with_options(
@@ -149,8 +172,6 @@ fn test_rooted_setters_are_transactional() {
 #[cfg(unix)]
 #[test]
 fn test_host_reject_policy_applies_to_listing_roots_and_copy_parents() {
-    use std::os::unix::fs::symlink;
-
     let directory = tempdir().expect("temporary directory should be created");
     let target = directory.path().join("target");
     fs::create_dir(&target).expect("target directory should be created");
@@ -187,7 +208,12 @@ fn test_host_reject_policy_applies_to_listing_roots_and_copy_parents() {
     let _ = filesystem
         .copy_with_options(&link.join("source"), &destination, &copy_options)
         .expect("an explicit copy override should replace the instance policy");
-    assert_eq!(b"payload", fs::read(destination).unwrap().as_slice());
+    assert_eq!(
+        b"payload",
+        fs::read(destination)
+            .expect("overridden copy should publish its destination")
+            .as_slice(),
+    );
 }
 
 #[test]
@@ -235,7 +261,7 @@ fn test_callers_can_wrap_a_filesystem_in_their_own_lock() {
     let filesystem = LocalFileSystem::host().expect("Host filesystem should open");
     let shared = Arc::new(Mutex::new(filesystem));
     let cloned = Arc::clone(&shared);
-    let thread = std::thread::spawn(move || {
+    let thread = thread::spawn(move || {
         cloned
             .lock()
             .expect("shared filesystem lock should be available")
@@ -248,18 +274,23 @@ fn test_callers_can_wrap_a_filesystem_in_their_own_lock() {
 #[test]
 fn test_host_relative_operations_use_the_process_pwd() {
     let _pwd_guard = PROCESS_PWD_LOCK.lock().expect("process PWD lock should be available");
-    let process_pwd = std::env::current_dir().expect("process PWD should be readable");
+    let process_pwd = env::current_dir().expect("process PWD should be readable");
     let directory = tempdir().expect("temporary directory should be created");
     fs::write(directory.path().join("source"), b"payload").expect("source fixture should be written");
-    std::env::set_current_dir(directory.path()).expect("fixture PWD should be selected");
+    env::set_current_dir(directory.path()).expect("fixture PWD should be selected");
 
     let filesystem = LocalFileSystem::host().expect("Host filesystem should open");
-    let metadata = filesystem.metadata(Path::new("source")).unwrap();
+    let metadata = filesystem
+        .metadata(Path::new("source"))
+        .expect("relative source metadata should be available");
     assert_eq!(7, metadata.len());
     let _ = metadata.permissions().unix_mode();
     assert_eq!(
         b"pay",
-        filesystem.read_prefix(Path::new("source"), 3).unwrap().as_slice()
+        filesystem
+            .read_prefix(Path::new("source"), 3)
+            .expect("relative source prefix should be readable")
+            .as_slice()
     );
     let limits = filesystem
         .limits_at(Path::new("missing/child"))
@@ -274,9 +305,14 @@ fn test_host_relative_operations_use_the_process_pwd() {
     let _ = filesystem
         .rename(Path::new("copied"), Path::new("renamed"))
         .expect("relative rename should succeed");
-    assert_eq!(b"payload", fs::read("renamed").unwrap().as_slice());
+    assert_eq!(
+        b"payload",
+        fs::read("renamed")
+            .expect("relative rename destination should be readable")
+            .as_slice(),
+    );
 
-    std::env::set_current_dir(process_pwd).expect("original process PWD should be restored");
+    env::set_current_dir(process_pwd).expect("original process PWD should be restored");
 }
 
 #[cfg(feature = "test-support")]
@@ -302,12 +338,12 @@ fn test_read_prefix_preserves_context_for_a_post_open_read_failure() {
 #[cfg(not(windows))]
 fn run_in_isolated_process(test_name: &str, action: impl FnOnce()) {
     const CHILD_ENV: &str = "QUBIT_LOCAL_FILES_STATEFUL_DELETED_CWD_TEST";
-    if std::env::var_os(CHILD_ENV).is_some() {
+    if env::var_os(CHILD_ENV).is_some() {
         action();
         return;
     }
 
-    let executable = std::env::current_exe().expect("test executable should be available");
+    let executable = env::current_exe().expect("test executable should be available");
     let status = Command::new(executable)
         .arg("--exact")
         .arg(test_name)
@@ -330,7 +366,7 @@ fn test_host_reads_process_pwd_only_for_pwd_dependent_operations() {
         fs::create_dir(&removed).expect("current-directory fixture should be created");
         let absolute_file = parent.path().join("absolute-file");
         fs::write(&absolute_file, b"payload").expect("absolute fixture should be written");
-        std::env::set_current_dir(&removed).expect("fixture PWD should be selected");
+        env::set_current_dir(&removed).expect("fixture PWD should be selected");
         fs::remove_dir(&removed).expect("fixture PWD should be removed");
 
         let filesystem = LocalFileSystem::host().expect("Host construction must not read the process PWD");
@@ -353,8 +389,6 @@ fn test_host_reads_process_pwd_only_for_pwd_dependent_operations() {
 #[cfg(unix)]
 #[test]
 fn test_rooted_constructor_follows_its_one_time_root_symlink() {
-    use std::os::unix::fs::symlink;
-
     let directory = tempdir().expect("temporary directory should be created");
     let real_root = directory.path().join("real");
     fs::create_dir(&real_root).expect("real root should be created");
@@ -364,7 +398,13 @@ fn test_rooted_constructor_follows_its_one_time_root_symlink() {
 
     let filesystem = LocalFileSystem::rooted(&root_link).expect("root constructor should follow its final symlink");
     assert_eq!(filesystem.diagnostic_root(), Some(root_link.as_path()));
-    assert_eq!(filesystem.metadata(Path::new("/value")).unwrap().len(), 7);
+    assert_eq!(
+        filesystem
+            .metadata(Path::new("/value"))
+            .expect("rooted symlink target metadata should be available")
+            .len(),
+        7,
+    );
 }
 
 /// Verifies a relative constructor input is captured once as an absolute
@@ -372,7 +412,7 @@ fn test_rooted_constructor_follows_its_one_time_root_symlink() {
 #[test]
 fn test_rooted_constructor_captures_one_absolute_diagnostic_snapshot() {
     let _pwd_guard = PROCESS_PWD_LOCK.lock().expect("process PWD lock should be available");
-    let current_directory = std::env::current_dir().expect("current directory should be readable");
+    let current_directory = env::current_dir().expect("current directory should be readable");
     let root = Builder::new()
         .prefix("rooted-constructor-")
         .tempdir_in(&current_directory)
@@ -382,7 +422,7 @@ fn test_rooted_constructor_captures_one_absolute_diagnostic_snapshot() {
         .path()
         .strip_prefix(&current_directory)
         .expect("fixture should be beneath the current directory");
-    let expected = std::path::absolute(relative).expect("diagnostic path should resolve");
+    let expected = absolute(relative).expect("diagnostic path should resolve");
 
     let filesystem = LocalFileSystem::rooted(relative).expect("relative root authority should open");
 
@@ -392,7 +432,13 @@ fn test_rooted_constructor_captures_one_absolute_diagnostic_snapshot() {
             .expect("rooted diagnostic root should be available"),
         &expected,
     );
-    assert_eq!(7, filesystem.metadata(Path::new("value")).unwrap().len());
+    assert_eq!(
+        7,
+        filesystem
+            .metadata(Path::new("value"))
+            .expect("relative rooted metadata should be available")
+            .len(),
+    );
 }
 
 /// Verifies a regular file cannot be opened as a Rooted directory authority.
@@ -410,8 +456,6 @@ fn test_rooted_constructor_rejects_regular_file_authority() {
 #[cfg(unix)]
 #[test]
 fn test_rooted_symlink_targets_use_virtual_root_and_dot_parent_semantics() {
-    use std::os::unix::fs::symlink;
-
     let directory = tempdir().expect("temporary root should be created");
     fs::create_dir_all(directory.path().join("etc/nested")).expect("fixture directories should be created");
     fs::write(directory.path().join("etc/value"), b"payload").expect("fixture should be written");
@@ -419,13 +463,24 @@ fn test_rooted_symlink_targets_use_virtual_root_and_dot_parent_semantics() {
     symlink("./nested/../value", directory.path().join("etc/relative-link")).expect("relative link should be created");
 
     let filesystem = LocalFileSystem::rooted(directory.path()).expect("Rooted filesystem should open");
-    assert_eq!(filesystem.metadata(Path::new("/absolute-link/value")).unwrap().len(), 7,);
     assert_eq!(
-        filesystem.metadata(Path::new("/etc/relative-link")).unwrap().kind(),
+        filesystem
+            .metadata(Path::new("/absolute-link/value"))
+            .expect("virtual absolute symlink target metadata should be available")
+            .len(),
+        7,
+    );
+    assert_eq!(
+        filesystem
+            .metadata(Path::new("/etc/relative-link"))
+            .expect("relative symlink metadata should be available")
+            .kind(),
         LocalFileKind::Symlink,
     );
     assert_eq!(
-        filesystem.read_prefix(Path::new("/etc/relative-link"), 16).unwrap(),
+        filesystem
+            .read_prefix(Path::new("/etc/relative-link"), 16)
+            .expect("relative symlink target should be readable"),
         b"payload",
     );
 }
@@ -433,8 +488,6 @@ fn test_rooted_symlink_targets_use_virtual_root_and_dot_parent_semantics() {
 #[cfg(unix)]
 #[test]
 fn test_rooted_symlink_escape_and_cycles_are_rejected() {
-    use std::os::unix::fs::symlink;
-
     let directory = tempdir().expect("temporary root should be created");
     symlink("../../outside", directory.path().join("escape")).expect("escape link should be created");
     symlink("second", directory.path().join("first")).expect("first cycle link should be created");
@@ -456,8 +509,6 @@ fn test_rooted_symlink_escape_and_cycles_are_rejected() {
 #[cfg(unix)]
 #[test]
 fn test_rooted_walker_paths_and_symlink_entries_use_virtual_namespace_semantics() {
-    use std::os::unix::fs::symlink;
-
     let directory = tempdir().expect("temporary root should be created");
     fs::create_dir(directory.path().join("target")).expect("target directory should be created");
     fs::write(directory.path().join("target/payload"), b"payload").expect("payload should be written");
@@ -492,8 +543,6 @@ fn test_rooted_walker_paths_and_symlink_entries_use_virtual_namespace_semantics(
 #[cfg(unix)]
 #[test]
 fn test_rooted_walker_can_follow_a_symlink_to_virtual_root() {
-    use std::os::unix::fs::symlink;
-
     let directory = tempdir().expect("temporary root should be created");
     fs::write(directory.path().join("payload"), b"payload").expect("payload should be written");
     symlink("/", directory.path().join("root-link")).expect("root link should be created");

@@ -12,10 +12,10 @@
 pub(crate) enum RootedSymlinkCreateFailureState {
     /// No destination entry was created.
     Unchanged,
+    #[cfg(windows)]
     /// A destination placeholder remains published.
-    #[cfg(windows)]
     PartiallyPublished,
-    /// The final destination state could not be proven.
     #[cfg(windows)]
+    /// The final destination state could not be proven.
     Indeterminate,
 }
