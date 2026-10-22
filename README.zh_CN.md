@@ -17,7 +17,7 @@
 
 ```toml
 [dependencies]
-qubit-local-files = "0.5"
+qubit-local-files = "0.5.0"
 qubit-io = "0.18.1"
 ```
 
