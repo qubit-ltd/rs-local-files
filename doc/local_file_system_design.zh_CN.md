@@ -3,7 +3,7 @@
 [English design document](local_file_system_design.md) ·
 [用户手册](user_guide.zh_CN.md) · [README](../README.zh_CN.md)
 
-> 状态：规范性设计文档，适用 qubit-local-files 0.3
+> 状态：规范性设计文档，适用 qubit-local-files 0.5
 >
 > 最后更新：2026-09-11
 
@@ -138,7 +138,7 @@ unit。只有明确用于跨层传输的 codec 才转换成 canonical UTF-8 text
           qubit-fs
 ```
 
-`qubit-local-files` 不依赖 `qubit-fs` 或 registry。所有 Unix、Windows 和其他平台差异
+`qubit-local-files` 依赖 `qubit-io` 定义字节流协议，但不依赖 `qubit-fs`。所有 Unix、Windows 和其他平台差异
 都封装在本 crate 内；adapter 不复制 path codec、symlink traversal、publication 或
 Rooted containment 实现。
 
@@ -908,7 +908,8 @@ Path 泄漏。
 
 ### 13.2 Reader
 
-`LocalFileReader` 拥有已打开 native file，实现 `Read + Seek`，并允许读取与同一 handle
+`LocalFileReader` 拥有已打开 native file，实现 `qubit_io::Input<Item = u8>` 和
+`std::io::Seek`，并允许读取与同一 handle
 对应的 metadata。打开成功后路径 rename、PWD 变化或 diagnostic root 变化不重定向 reader。
 
 `read_prefix(path, max_bytes)` 最多读取 `max_bytes`，不会把整个文件隐式载入内存。`max_bytes`
@@ -967,7 +968,11 @@ commit 先按策略应用元数据，再同步 staging、复核身份、安装�
 
 ### 14.2 生命周期与发布状态
 
-`LocalFileWriter` 同时是 `Write` byte stream 和 publication session：
+`LocalFileWriter` 实现 `qubit_io::Output<Item = u8>`，同时承担 publication session。
+标准 I/O 消费者可使用 `OutputRef::new(&mut writer).into_std_write()`；调用 `commit` 或
+`abort` 前应先释放借用适配器。拥有型适配器可通过 `into_inner().commit()` 取回并提交
+writer。适配器转换不会 flush、commit 或同步底层对象。`flush` 只转发到打开的流，不会发布
+目标，也不提供 durable 同步。固有 `write_vectored` 方法保留原生向量 I/O 路径。
 
 ```text
 pub enum LocalWriterState {

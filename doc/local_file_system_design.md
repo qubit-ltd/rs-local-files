@@ -2,7 +2,7 @@
 
 [User guide](user_guide.md) · [README](../README.md)
 
-> Status: normative design specification for qubit-local-files 0.3
+> Status: normative design specification for qubit-local-files 0.5
 >
 > Last updated: 2026-09-11
 
@@ -34,7 +34,8 @@ Unless explicitly qualified as physical or diagnostic, “absolute path”,
 ## 1. Positioning
 
 `qubit-local-files` is a synchronous, native, application-facing local
-filesystem capability layer. It serves applications, provider adapters such as
+filesystem capability layer. It depends on `qubit-io` for byte-stream protocols
+and serves applications, provider adapters such as
 `qubit-fs-local`, and libraries that need Rooted authority, reliable
 publication, temporary resources, recursive traversal, or structured failure
 states. It is neither a rename of `std::fs` nor a duplicate of `qubit-fs`.
@@ -644,8 +645,8 @@ structured `NotFound`, not `Option`.
 
 ### 13.2 Readers
 
-Readers own their native file, implement `Read + Seek`, and are not redirected
-by later rename or PWD changes.
+Readers own their native file, implement `qubit_io::Input<Item = u8>` and
+`std::io::Seek`, and are not redirected by later rename or PWD changes.
 `read_prefix` reads at most the requested byte count and never silently loads a
 whole file.
 
@@ -700,6 +701,14 @@ pub enum LocalWriteFailureState {
     Indeterminate,
 }
 ```
+
+`LocalFileWriter` implements `qubit_io::Output<Item = u8>` and is a publication
+session. Standard I/O consumers use `OutputRef::new(&mut writer).into_std_write()`;
+drop the borrowed adapter before calling `commit` or `abort`. An owning adapter
+can return the writer with `into_inner().commit()`. Conversion does not flush,
+commit, or synchronize the underlying object. `flush` forwards to the open stream
+but does not publish the destination or provide durable synchronization. The
+inherent `write_vectored` method retains the native vectored path.
 
 Writer lifecycle is `Open`, `Committed`, or `Aborted`; failure knowledge is
 `NotPublished`, `Published`, or `Indeterminate` and is independent of lifecycle.

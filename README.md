@@ -18,8 +18,19 @@ in [`qubit-fs-local`](https://crates.io/crates/qubit-fs-local).
 
 ```toml
 [dependencies]
-qubit-local-files = "0.4"
+qubit-local-files = "0.5"
+qubit-io = "0.18.1"
 ```
+
+Readers implement `qubit_io::Input<Item = u8>` and writers and temporary files
+implement `qubit_io::Output<Item = u8>`. Use `read_exactly` and `write_fully`
+for these objects. To call standard I/O APIs, convert a reader with
+`into_std_read()` or wrap a borrowed writer with
+`qubit_io::OutputRef::new(&mut writer).into_std_write()`. Drop a borrowed
+wrapper before committing its writer; an owned wrapper can return it through
+`into_inner().commit()`. `flush` does not publish or durably synchronize a
+writer. Vectored I/O remains available through each file type's inherent
+`read_vectored` or `write_vectored` method.
 
 ## Quick Start: publish a generated file
 
@@ -28,7 +39,8 @@ have been written. This example creates a work directory, writes a manifest
 through a writer, commits it, and reads the published result.
 
 ```rust
-use std::io::{Read, Write};
+use std::io::Read;
+use qubit_io::{Input, Output};
 
 use qubit_local_files::LocalFileSystem;
 use qubit_local_files::options::{LocalWriteMode, LocalWriteOptions};
@@ -42,13 +54,15 @@ filesystem.set_default_write_options(LocalWriteOptions::new(
 let mut work = filesystem.create_temp_directory()?;
 let path = work.path().join("manifest.json");
 let mut writer = filesystem.open_writer(&path)?;
-writer.write_all(br#"{"version":1}"#)?;
+qubit_io::Output::write_fully(&mut writer, br#"{"version":1}"#)?;
 let outcome = writer.commit()?;
 assert_eq!(outcome.state(), LocalWriterState::Committed);
 
 let mut content = String::new();
-filesystem.open_reader(&path)?
-    .read_to_string(&mut content)?;
+std::io::Read::read_to_string(
+    &mut filesystem.open_reader(&path)?.into_std_read(),
+    &mut content,
+)?;
 assert_eq!(content, r#"{"version":1}"#);
 work.cleanup()?;
 # Ok::<(), Box<dyn std::error::Error>>(())

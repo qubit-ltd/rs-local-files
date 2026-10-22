@@ -17,8 +17,16 @@
 
 ```toml
 [dependencies]
-qubit-local-files = "0.4"
+qubit-local-files = "0.5"
+qubit-io = "0.18.1"
 ```
+
+Reader 实现 `qubit_io::Input<Item = u8>`；writer 和临时文件实现
+`qubit_io::Output<Item = u8>`。这些对象使用 `read_exactly` 和 `write_fully`。
+调用标准 I/O API 时，reader 可转换为 `into_std_read()`；借用 writer 可包装为
+`qubit_io::OutputRef::new(&mut writer).into_std_write()`。提交 writer 前先释放借用包装器；
+拥有型包装器可通过 `into_inner().commit()` 取回 writer。`flush` 不会发布文件，也不代表
+durable 同步。向量 I/O 仍由各文件类型的固有 `read_vectored` 或 `write_vectored` 方法提供。
 
 ## 快速开始：发布生成文件
 
@@ -26,7 +34,8 @@ qubit-local-files = "0.4"
 通过 writer 写入清单并提交，然后读回已经发布的内容。
 
 ```rust
-use std::io::{Read, Write};
+use std::io::Read;
+use qubit_io::{Input, Output};
 
 use qubit_local_files::LocalFileSystem;
 use qubit_local_files::options::{LocalWriteMode, LocalWriteOptions};
@@ -40,13 +49,15 @@ filesystem.set_default_write_options(LocalWriteOptions::new(
 let mut work = filesystem.create_temp_directory()?;
 let path = work.path().join("manifest.json");
 let mut writer = filesystem.open_writer(&path)?;
-writer.write_all(br#"{"version":1}"#)?;
+qubit_io::Output::write_fully(&mut writer, br#"{"version":1}"#)?;
 let outcome = writer.commit()?;
 assert_eq!(outcome.state(), LocalWriterState::Committed);
 
 let mut content = String::new();
-filesystem.open_reader(&path)?
-    .read_to_string(&mut content)?;
+std::io::Read::read_to_string(
+    &mut filesystem.open_reader(&path)?.into_std_read(),
+    &mut content,
+)?;
 assert_eq!(content, r#"{"version":1}"#);
 work.cleanup()?;
 # Ok::<(), Box<dyn std::error::Error>>(())

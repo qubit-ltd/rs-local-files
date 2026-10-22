@@ -28,6 +28,37 @@ Host namespace ── LocalFileSystem::host() ── operation-time process PWD
 opened root ───── LocalFileSystem::rooted(root) ── virtual / and instance PWD
 ```
 
+## Byte stream protocols and standard I/O
+
+`LocalFileReader` implements `Input<Item = u8>` and retains `std::io::Seek`.
+`LocalFileWriter`, `LocalTempFile`, and the internal atomic writers implement
+`Output<Item = u8>`. Use `Input::read_exactly` and `Output::write_fully` for
+these objects. Standard readers can be adapted with `into_std_read()`.
+
+For a standard producer that must leave the writer available for publication,
+use a borrowed adapter and end its scope before committing:
+
+```rust,no_run
+use qubit_io::{Output, OutputRef};
+use qubit_local_files::LocalFileSystem;
+
+let filesystem = LocalFileSystem::host()?;
+let mut writer = filesystem.open_writer(std::path::Path::new("report.txt"))?;
+{
+    let mut standard = OutputRef::new(&mut writer).into_std_write();
+    std::io::Write::write_all(&mut standard, b"report")?;
+    std::io::Write::flush(&mut standard)?;
+}
+writer.commit()?;
+# Ok::<(), Box<dyn std::error::Error>>(())
+```
+
+An owned `StdWrite<LocalFileWriter>` can instead be consumed with
+`into_inner().commit()`. Adapter conversion does not flush or commit. `flush`
+does not publish the destination and does not provide durable synchronization.
+The native vectored paths remain available as inherent `read_vectored` and
+`write_vectored` methods.
+
 `LocalFileSystem` is a stateful filesystem object. `host()` selects the
 process-visible namespace without reading the current directory. An absolute
 Host path never requires it; a relative Host path captures one process-PWD
@@ -50,7 +81,8 @@ Add the crate to the application manifest:
 
 ```toml
 [dependencies]
-qubit-local-files = "0.3"
+qubit-local-files = "0.5"
+qubit-io = "0.18.1"
 ```
 
 Choose the authority before configuring operation policy. Host mode uses the
@@ -159,7 +191,7 @@ complete write, and inspect the result. The observable success condition is a
 `Committed` writer outcome and the bytes read back from the published file.
 
 ```rust,no_run
-use std::io::{Read, Write};
+use qubit_io::{Input, Output};
 use qubit_local_files::LocalFileSystem;
 use qubit_local_files::options::{
     LocalCreateDirectoryOptions, LocalWriteMode, LocalWriteOptions,
@@ -178,12 +210,14 @@ let output = std::path::Path::new("build/output");
 filesystem.create_directory(output)?;
 let path = output.join("manifest.json");
 let mut writer = filesystem.open_writer(&path)?;
-writer.write_all(br#"{"complete":true}"#)?;
+qubit_io::Output::write_fully(&mut writer, br#"{"complete":true}"#)?;
 let result = writer.commit()?;
 assert_eq!(result.state(), LocalWriterState::Committed);
 let mut text = String::new();
-filesystem.open_reader(&path)?
-    .read_to_string(&mut text)?;
+std::io::Read::read_to_string(
+    &mut filesystem.open_reader(&path)?.into_std_read(),
+    &mut text,
+)?;
 assert_eq!(text, r#"{"complete":true}"#);
 # Ok::<(), Box<dyn std::error::Error>>(())
 ```
@@ -359,7 +393,7 @@ The existing output remains unchanged. Use the retained resource for a retry
 only after confirming it is still `Owned`.
 
 ```rust
-use std::io::Write;
+use qubit_io::Output;
 
 use qubit_local_files::LocalFileSystem;
 use qubit_local_files::options::LocalTempDirectoryOptions;
@@ -376,7 +410,7 @@ let target = parent.path().join("manifest.json");
 std::fs::write(&target, b"existing manifest")?;
 let options = LocalTempFileOptions::new().with_parent(parent.path());
 let mut temporary = filesystem.create_temp_file_with_options(&options)?;
-temporary.write_all(br#"{"complete":true}"#)?;
+qubit_io::Output::write_fully(&mut temporary, br#"{"complete":true}"#)?;
 
 let failure = temporary.persist(&target).expect_err("no-replace must reject an existing target");
 assert_eq!(failure.state(), LocalPersistFailureState::NotPublished);
@@ -548,7 +582,7 @@ Both temporary guard types accept only namespace-absolute targets in
 `persist` and `persist_with`. Use `persist_at` for a relative target:
 
 ```rust,no_run
-use std::io::Write;
+use qubit_io::Output;
 use std::path::Path;
 use qubit_local_files::LocalFileSystem;
 use qubit_local_files::options::LocalPersistOptions;
@@ -556,7 +590,7 @@ use qubit_local_files::options::LocalPersistOptions;
 let filesystem = LocalFileSystem::host()?;
 let base = std::fs::canonicalize(std::env::temp_dir())?;
 let mut temporary = filesystem.create_temp_file()?;
-temporary.write_all(b"generated report")?;
+qubit_io::Output::write_fully(&mut temporary, b"generated report")?;
 let published = temporary.persist_at(
     &base, Path::new("report.txt"), LocalPersistOptions::new(),
 )?;
@@ -591,7 +625,7 @@ Production applications may wrap these two channels in their own named error.
 
 ```rust
 use std::io;
-use std::io::Write;
+use qubit_io::Output;
 use std::path::Path;
 
 use qubit_local_files::LocalFileError;
@@ -608,7 +642,7 @@ fn inspect_staged<R>(
         .with_max_attempts(16);
     let mut file = filesystem.create_temp_file_with_options(&options)
         .map_err(|error| (None, Some(error)))?;
-    let staged = file.write_all(payload);
+    let staged = qubit_io::Output::write_fully(&mut file, payload);
     file.close();
     let primary = staged.and_then(|()| inspect(file.path()));
     match (primary, file.cleanup()) {

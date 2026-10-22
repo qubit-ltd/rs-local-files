@@ -24,6 +24,34 @@ Host 命名空间 ── LocalFileSystem::host() ── 操作时读取进程 PW
 已打开根目录 ─── LocalFileSystem::rooted(root) ── 虚拟 / 与实例 PWD
 ```
 
+## 字节流协议与标准 I/O
+
+`LocalFileReader` 实现 `Input<Item = u8>`，并保留 `std::io::Seek`。
+`LocalFileWriter`、`LocalTempFile` 和内部原子 writer 实现 `Output<Item = u8>`。
+这些对象使用 `Input::read_exactly` 和 `Output::write_fully`；标准 reader 可通过
+`into_std_read()` 适配。
+
+若标准 producer 写入后还要显式发布 writer，可使用借用适配器，并在提交前结束借用：
+
+```rust,no_run
+use qubit_io::{Output, OutputRef};
+use qubit_local_files::LocalFileSystem;
+
+let filesystem = LocalFileSystem::host()?;
+let mut writer = filesystem.open_writer(std::path::Path::new("report.txt"))?;
+{
+    let mut standard = OutputRef::new(&mut writer).into_std_write();
+    std::io::Write::write_all(&mut standard, b"report")?;
+    std::io::Write::flush(&mut standard)?;
+}
+writer.commit()?;
+# Ok::<(), Box<dyn std::error::Error>>(())
+```
+
+拥有型 `StdWrite<LocalFileWriter>` 可通过 `into_inner().commit()` 消耗包装器并取回 writer。
+适配器转换不会 flush 或 commit。`flush` 不会发布目标，也不提供 durable 同步。原生向量 I/O
+仍通过固有 `read_vectored` 和 `write_vectored` 方法提供。
+
 `LocalFileSystem` 是有状态的文件系统对象。`host()` 选择进程可见命名空间，但构造时
 不读取当前目录；Host 绝对路径从不依赖 PWD，相对路径在操作开始时捕获一次进程 PWD。
 `rooted(root)` 打开唯一目录 authority，将其映射为虚拟
@@ -42,7 +70,8 @@ UTF-8。
 
 ```toml
 [dependencies]
-qubit-local-files = "0.3"
+qubit-local-files = "0.5"
+qubit-io = "0.18.1"
 ```
 
 配置操作策略前，先选择权限范围。Host 模式使用进程可见的命名空间；Rooted 模式打开一个
@@ -140,7 +169,7 @@ Reader 和 writer 最终只接受普通文件内容。即使策略允许跟随�
 的可观察条件是 writer 返回 `Committed`，且能读取已经发布的字节。
 
 ```rust,no_run
-use std::io::{Read, Write};
+use qubit_io::{Input, Output};
 use qubit_local_files::LocalFileSystem;
 use qubit_local_files::options::{
     LocalCreateDirectoryOptions, LocalWriteMode, LocalWriteOptions,
@@ -159,12 +188,14 @@ let output = std::path::Path::new("build/output");
 filesystem.create_directory(output)?;
 let path = output.join("manifest.json");
 let mut writer = filesystem.open_writer(&path)?;
-writer.write_all(br#"{"complete":true}"#)?;
+qubit_io::Output::write_fully(&mut writer, br#"{"complete":true}"#)?;
 let result = writer.commit()?;
 assert_eq!(result.state(), LocalWriterState::Committed);
 let mut text = String::new();
-filesystem.open_reader(&path)?
-    .read_to_string(&mut text)?;
+std::io::Read::read_to_string(
+    &mut filesystem.open_reader(&path)?.into_std_read(),
+    &mut text,
+)?;
 assert_eq!(text, r#"{"complete":true}"#);
 # Ok::<(), Box<dyn std::error::Error>>(())
 ```
@@ -298,7 +329,7 @@ sandbox 会和资源一起清理。需要观察清理失败时应显式调用 `c
 已有输出的内容保持不变。需要重试时，先确认保留资源当前仍为 `Owned`。
 
 ```rust
-use std::io::Write;
+use qubit_io::Output;
 
 use qubit_local_files::LocalFileSystem;
 use qubit_local_files::options::LocalTempDirectoryOptions;
@@ -315,7 +346,7 @@ let target = parent.path().join("manifest.json");
 std::fs::write(&target, b"existing manifest")?;
 let options = LocalTempFileOptions::new().with_parent(parent.path());
 let mut temporary = filesystem.create_temp_file_with_options(&options)?;
-temporary.write_all(br#"{"complete":true}"#)?;
+qubit_io::Output::write_fully(&mut temporary, br#"{"complete":true}"#)?;
 
 let failure = temporary.persist(&target).expect_err("no-replace must reject an existing target");
 assert_eq!(failure.state(), LocalPersistFailureState::NotPublished);
@@ -460,7 +491,7 @@ assert_eq!(effective.max_bytes(), Some(10));
 相对目标使用 `persist_at`：
 
 ```rust,no_run
-use std::io::Write;
+use qubit_io::Output;
 use std::path::Path;
 use qubit_local_files::LocalFileSystem;
 use qubit_local_files::options::LocalPersistOptions;
@@ -468,7 +499,7 @@ use qubit_local_files::options::LocalPersistOptions;
 let filesystem = LocalFileSystem::host()?;
 let base = std::fs::canonicalize(std::env::temp_dir())?;
 let mut temporary = filesystem.create_temp_file()?;
-temporary.write_all(b"generated report")?;
+qubit_io::Output::write_fully(&mut temporary, b"generated report")?;
 let published = temporary.persist_at(
     &base, Path::new("report.txt"), LocalPersistOptions::new(),
 )?;
@@ -495,7 +526,7 @@ MIME 检测器和外部程序通常需要重新按路径打开文件。应先写
 
 ```rust
 use std::io;
-use std::io::Write;
+use qubit_io::Output;
 use std::path::Path;
 
 use qubit_local_files::LocalFileError;
@@ -512,7 +543,7 @@ fn inspect_staged<R>(
         .with_max_attempts(16);
     let mut file = filesystem.create_temp_file_with_options(&options)
         .map_err(|error| (None, Some(error)))?;
-    let staged = file.write_all(payload);
+    let staged = qubit_io::Output::write_fully(&mut file, payload);
     file.close();
     let primary = staged.and_then(|()| inspect(file.path()));
     match (primary, file.cleanup()) {
