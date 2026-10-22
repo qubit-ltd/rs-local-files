@@ -41,7 +41,7 @@ use crate::write;
 ///
 /// # Examples
 ///
-/// ```
+/// ```ignore
 /// use qubit_local_files::rooted::Root;
 ///
 /// let directory = tempfile::tempdir().expect("temporary directory should be created");

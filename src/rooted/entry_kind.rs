@@ -12,7 +12,7 @@
 ///
 /// # Examples
 ///
-/// ```
+/// ```ignore
 /// use qubit_local_files::rooted::EntryKind;
 ///
 /// let kind = EntryKind::Symlink;

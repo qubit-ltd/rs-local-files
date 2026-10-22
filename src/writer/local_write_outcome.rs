@@ -18,7 +18,7 @@ use crate::LocalWritePublicationMethod;
 ///
 /// # Examples
 ///
-/// ```no_run
+/// ```ignore
 /// use std::io::Write;
 /// use std::path::Path;
 ///

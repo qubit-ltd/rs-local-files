@@ -9,6 +9,8 @@
 
 use std::cell::Cell;
 use std::io;
+use std::panic::AssertUnwindSafe;
+use std::panic::catch_unwind;
 use std::path::PathBuf;
 use std::rc::Rc;
 
@@ -58,6 +60,7 @@ struct Backend {
     live: Rc<Cell<usize>>,
     finished: Vec<usize>,
     failure: Option<LocalCopyDirStage>,
+    panic_on_next_entry: bool,
 }
 
 impl CopyTreeBackend for Backend {
@@ -71,6 +74,9 @@ impl CopyTreeBackend for Backend {
 
     /// Emits one child per frame until the terminal directory.
     fn next_entry(&mut self, frame: &mut Frame, stats: &LocalCopyDirStats) -> Result<Option<()>, LocalCopyDirError> {
+        if self.panic_on_next_entry {
+            panic!("injected backend panic while a directory permit is held");
+        }
         if frame.depth == 1 && self.failure == Some(LocalCopyDirStage::ReadSourceDirectory) {
             return Err(self.error(
                 LocalCopyDirStage::ReadSourceDirectory,
@@ -163,6 +169,7 @@ fn test_copy_tree_post_order_and_exact_descendant_budget() {
         live: Rc::clone(&live),
         finished: Vec::new(),
         failure: None,
+        panic_on_next_entry: false,
     };
     let mut budget = CopyBudget::new(
         LocalCopyDirOptions::default()
@@ -195,6 +202,7 @@ fn test_copy_tree_failures_release_frames_and_preserve_effects() {
             live: Rc::clone(&live),
             finished: Vec::new(),
             failure: Some(stage),
+            panic_on_next_entry: false,
         };
         let mut budget = CopyBudget::new(LocalCopyDirOptions::default().with_max_open_directories(3));
         let frame = Frame::new(0, Rc::clone(&live), &budget);
@@ -232,6 +240,7 @@ fn test_copy_tree_depth_rejection_precedes_child_processing() {
         live: Rc::clone(&live),
         finished: Vec::new(),
         failure: None,
+        panic_on_next_entry: false,
     };
     let mut budget = CopyBudget::new(LocalCopyDirOptions::default().with_max_depth(1));
     let frame = Frame::new(0, Rc::clone(&live), &budget);
@@ -241,4 +250,35 @@ fn test_copy_tree_depth_rejection_precedes_child_processing() {
     assert_eq!(PathBuf::from("source-2"), error.source_path());
     assert_eq!(1, stats.directories);
     assert_eq!(0, live.get());
+}
+
+/// Unwinding drops active copy frames and returns their managed capacity.
+#[test]
+fn test_copy_tree_panic_releases_directory_permits() {
+    let live = Rc::new(Cell::new(0));
+    let mut backend = Backend {
+        live: Rc::clone(&live),
+        finished: Vec::new(),
+        failure: None,
+        panic_on_next_entry: true,
+    };
+    let mut budget = CopyBudget::new(LocalCopyDirOptions::default().with_max_open_directories(3));
+    let frame = Frame::new(0, Rc::clone(&live), &budget);
+    let mut stats = LocalCopyDirStats::default();
+
+    let result = catch_unwind(AssertUnwindSafe(|| {
+        copy_tree(&mut backend, frame, &mut stats, &mut budget)
+    }));
+
+    assert!(result.is_err());
+    assert_eq!(0, live.get(), "unwinding must drop every active frame");
+    let permits = (0..3)
+        .map(|_| {
+            budget
+                .acquire_directory()
+                .expect("all capacity should return")
+        })
+        .collect::<Vec<_>>();
+    assert!(budget.acquire_directory().is_err());
+    drop(permits);
 }

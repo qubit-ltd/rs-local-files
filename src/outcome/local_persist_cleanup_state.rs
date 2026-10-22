@@ -12,23 +12,20 @@
 /// # Examples
 ///
 /// ```
-/// use std::io::Write;
+/// use qubit_io::Output;
 ///
 /// use qubit_local_files::LocalFileSystem;
 /// use qubit_local_files::outcome::LocalPersistCleanupState;
 ///
 /// let filesystem = LocalFileSystem::host()?;
 /// let mut temporary = filesystem.create_temp_file()?;
-/// temporary.write_all(b"payload")?;
-/// let target = std::env::temp_dir().join(format!(
-///     "qubit-persist-example-{}",
-///     std::process::id()
-/// ));
+/// temporary.write_fully(b"payload")?;
+/// let target_directory = tempfile::tempdir_in(std::env::current_dir()?)?;
+/// let target = target_directory.path().join("persisted");
 /// let outcome = temporary
 ///     .persist(&target)
 ///     .expect("temporary file must persist");
 /// assert_eq!(outcome.cleanup_state(), LocalPersistCleanupState::Complete);
-/// std::fs::remove_file(target)?;
 /// # Ok::<(), Box<dyn std::error::Error>>(())
 /// ```
 #[must_use]

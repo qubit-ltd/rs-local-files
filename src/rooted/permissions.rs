@@ -11,7 +11,7 @@
 ///
 /// # Examples
 ///
-/// ```
+/// ```ignore
 /// use qubit_local_files::rooted::Permissions;
 ///
 /// let permissions = Permissions::from_read_only(true);

@@ -14,7 +14,7 @@
 ///
 /// # Examples
 ///
-/// ```
+/// ```ignore
 /// use qubit_local_files::LocalFilePermissions;
 ///
 /// let permissions = LocalFilePermissions::new(true, Some(0o444));

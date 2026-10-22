@@ -44,12 +44,15 @@ fn test_host_file_system_limits_vary_by_path() {
 #[test]
 fn test_host_file_system_limits_probe_missing_descendant() {
     let root = tempdir().expect("temporary root should be created");
-    let limits = LocalFileSystem::host()
-        .expect("Host filesystem should open")
+    let filesystem = LocalFileSystem::host().expect("Host filesystem should open");
+    let expected = filesystem
+        .limits_at(root.path())
+        .expect("existing Host path limits should be probeable");
+    let limits = filesystem
         .limits_at(&root.path().join("missing/child"))
         .expect("missing Host descendants should be probeable");
 
-    assert_eq!(SizeLimit::VariesByPath, limits.max_path_length());
+    assert_eq!(expected, limits);
 }
 
 /// Verifies space observations are available without caching host limits.

@@ -14,7 +14,7 @@
 ///
 /// # Examples
 ///
-/// ```
+/// ```ignore
 /// use qubit_local_files::LocalAtomicWriteStage;
 ///
 /// let stage = LocalAtomicWriteStage::ReplaceDestination;

@@ -476,5 +476,13 @@ mod tests {
         assert_eq!(io::ErrorKind::QuotaExceeded, error.kind());
         assert_eq!(b"abc", over_writer.as_slice());
         assert_eq!(Some(0), over_budget.remaining_bytes());
+        let facts = error
+            .get_ref()
+            .and_then(|source| source.downcast_ref::<crate::LocalResourceLimitError>())
+            .expect("over-budget error should retain structured facts");
+        assert_eq!(crate::LocalResourceKind::CopiedBytes, facts.resource());
+        assert_eq!(3, facts.limit());
+        assert_eq!(0, facts.remaining());
+        assert_eq!(1, facts.requested());
     }
 }

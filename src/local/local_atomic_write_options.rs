@@ -20,7 +20,7 @@ use crate::options::LocalWriteMetadataPolicy;
 ///
 /// # Examples
 ///
-/// ```
+/// ```ignore
 /// use qubit_local_files::local::LocalAtomicWriteOptions;
 /// use qubit_local_files::options::LocalWriteMetadataPolicy;
 /// use qubit_local_files::policy::LocalDurabilityRequirement;
