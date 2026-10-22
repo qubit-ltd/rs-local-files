@@ -539,23 +539,25 @@ impl LocalAtomicWriter {
     }
 }
 
-impl Write for LocalAtomicWriter {
-    /// Writes bytes into the private staging file.
-    #[inline]
-    fn write(&mut self, buffer: &[u8]) -> io::Result<usize> {
-        self.staged_file.file_mut().write(buffer)
-    }
-
+impl LocalAtomicWriter {
     /// Writes bytes from multiple buffers into the private staging file.
     #[inline]
-    fn write_vectored(&mut self, buffers: &[io::IoSlice<'_>]) -> io::Result<usize> {
+    pub(crate) fn write_vectored(&mut self, buffers: &[io::IoSlice<'_>]) -> io::Result<usize> {
         self.staged_file.file_mut().write_vectored(buffers)
+    }
+}
+
+impl qubit_io::Output for LocalAtomicWriter {
+    type Item = u8;
+
+    unsafe fn write_unchecked(&mut self, input: &[u8], index: usize, count: usize) -> io::Result<usize> {
+        Write::write(self.staged_file.file_mut(), &input[index..index + count])
     }
 
     /// Flushes userspace data into the private staging file.
     #[inline]
     fn flush(&mut self) -> io::Result<()> {
-        self.staged_file.file_mut().flush()
+        Write::flush(self.staged_file.file_mut())
     }
 }
 
@@ -640,4 +642,35 @@ fn observe_windows_atomic_destination(path: &Path) -> io::Result<(fs::File, crat
         ));
     }
     Ok((file, metadata))
+}
+
+#[cfg(test)]
+mod output_range_tests {
+    use tempfile::tempdir;
+
+    use super::LocalAtomicWriter;
+    use crate::LocalAtomicWriteOptions;
+    use crate::LocalDurabilityRequirement;
+
+    #[test]
+    fn local_atomic_writer_output_range_preserves_sentinels() {
+        let directory = tempdir().expect("temporary directory should be created");
+        let destination = directory.path().join("target");
+        let options = LocalAtomicWriteOptions::new().with_durability(LocalDurabilityRequirement::NotRequired);
+        let mut writer = LocalAtomicWriter::new(&destination, options).expect("atomic writer should open");
+        // SAFETY: 2..5 is a valid input range.
+        assert_eq!(
+            3,
+            unsafe { qubit_io::Output::write_unchecked(&mut writer, b"!!xyz!!", 2, 3) }.unwrap()
+        );
+        // SAFETY: 7..7 is a valid empty input range.
+        assert_eq!(
+            0,
+            unsafe { qubit_io::Output::write_unchecked(&mut writer, b"1234567", 7, 0) }.unwrap()
+        );
+        writer
+            .commit_recoverable_with_durability()
+            .expect("atomic writer should commit");
+        assert_eq!(b"xyz", std::fs::read(destination).unwrap().as_slice());
+    }
 }

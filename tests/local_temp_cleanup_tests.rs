@@ -9,7 +9,6 @@
 
 use std::fs;
 use std::io::ErrorKind;
-use std::io::Write;
 #[cfg(unix)]
 use std::os::unix::fs::symlink;
 use std::path::MAIN_SEPARATOR_STR;
@@ -17,6 +16,7 @@ use std::path::Path;
 use std::path::PathBuf;
 use std::time::Duration;
 
+use qubit_io::Output;
 use qubit_local_files::LocalFileSystem;
 use qubit_local_files::LocalTempDirectory;
 #[cfg(feature = "test-support")]
@@ -286,7 +286,7 @@ fn test_temp_identity_missing_source_locks_file_and_directory() {
         assert_eq!(ErrorKind::NotFound, error.error().io_error_kind());
         assert_eq!(LocalPersistFailureState::NotPublished, error.state());
         assert_eq!(LocalTempSourceState::Indeterminate, error.source_state());
-        assert!(error.resource_mut().write_all(b"must not write").is_err());
+        assert!(Output::write_fully(error.resource_mut(), b"must not write").is_err());
         assert!(error.resource_mut().cleanup().is_err());
         drop(error);
         assert_eq!(

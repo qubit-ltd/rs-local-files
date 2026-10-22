@@ -12,7 +12,6 @@
 
 use std::fs;
 use std::hint::black_box;
-use std::io::Write;
 use std::path::Path;
 use std::path::PathBuf;
 use std::time::Duration;
@@ -20,6 +19,7 @@ use std::time::Duration;
 use criterion::Criterion;
 use criterion::criterion_group;
 use criterion::criterion_main;
+use qubit_io::Output;
 use qubit_local_files::LocalFileSystem;
 use qubit_local_files::LocalTempDirectory;
 use qubit_local_files::error::LocalFileError;
@@ -367,7 +367,7 @@ fn write_benchmark_payload(filesystem: &LocalFileSystem, target: &Path) {
             &LocalWriteOptions::new(LocalWriteMode::CreateOrReplace),
         )
         .expect("benchmark writer should open");
-    writer.write_all(b"payload").expect("benchmark write should succeed");
+    Output::write_fully(&mut writer, b"payload").expect("benchmark write should succeed");
     let outcome = writer.commit().expect("benchmark commit should succeed");
     let _ = black_box(outcome);
 }
@@ -485,9 +485,7 @@ fn write_scenario_payload(
     payload: &[u8],
 ) -> Result<LocalWriteOutcome, LocalFileError> {
     let mut writer = filesystem.open_writer_with_options(black_box(target), options)?;
-    writer
-        .write_all(black_box(payload))
-        .expect("scenario payload should be written");
+    Output::write_fully(&mut writer, black_box(payload)).expect("scenario payload should be written");
     writer.commit().map_err(|failure| {
         let (error, _state, _writer) = failure.into_parts();
         error

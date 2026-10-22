@@ -7,12 +7,13 @@
 // =============================================================================
 
 use std::fs;
-use std::io::Read;
 use std::io::Write;
 use std::path::Path;
 #[cfg(not(windows))]
 use std::time::Duration;
 
+use qubit_io::Input;
+use qubit_io::Output;
 use qubit_local_files::LocalFileSystem;
 use qubit_local_files::error::LocalFileErrorKind;
 use qubit_local_files::error::LocalFileOperation;
@@ -682,9 +683,7 @@ fn test_rooted_local_file_system_writer_abort_discards_staging() {
             &LocalWriteOptions::new(LocalWriteMode::CreateNew),
         )
         .expect("rooted staged writer should open");
-    writer
-        .write_all(b"staged")
-        .expect("rooted writer should accept staged bytes");
+    Output::write_fully(&mut writer, b"staged").expect("rooted writer should accept staged bytes");
 
     let outcome = writer.abort().expect("rooted writer should abort");
 
@@ -708,17 +707,14 @@ fn test_rooted_local_file_system_reads_metadata_and_appends() {
         .open_reader_with_options(Path::new("payload"), &LocalReadOptions::new())
         .expect("rooted reader should open");
     let mut payload = String::new();
-    reader
-        .read_to_string(&mut payload)
+    std::io::Read::read_to_string(&mut qubit_io::InputRef::new(&mut reader).into_std_read(), &mut payload)
         .expect("rooted reader should read payload");
     assert_eq!("base", payload);
 
     let mut writer = rooted
         .open_writer_with_options(Path::new("payload"), &LocalWriteOptions::new(LocalWriteMode::Append))
         .expect("rooted append writer should open");
-    writer
-        .write_all(b"-append")
-        .expect("rooted append writer should accept bytes");
+    Output::write_fully(&mut writer, b"-append").expect("rooted append writer should accept bytes");
     let _ = writer.commit().expect("rooted append writer should commit");
     assert_eq!(
         b"base-append",
@@ -782,9 +778,7 @@ fn test_rooted_local_file_system_create_new_commit_preserves_concurrent_target()
     let mut writer = rooted
         .open_writer_with_options(Path::new("target"), &LocalWriteOptions::new(LocalWriteMode::CreateNew))
         .expect("rooted create-new writer should open");
-    writer
-        .write_all(b"staged")
-        .expect("rooted staged writer should accept bytes");
+    Output::write_fully(&mut writer, b"staged").expect("rooted staged writer should accept bytes");
     fs::write(directory.path().join("target"), b"concurrent").expect("concurrent rooted target should be created");
 
     let error = writer
@@ -845,9 +839,7 @@ fn test_rooted_local_file_system_exercises_directory_copy_and_writer_policies() 
             &LocalWriteOptions::new(LocalWriteMode::CreateOrReplace).with_create_parent(),
         )
         .expect("rooted writer should create requested parents");
-    writer
-        .write_all(b"created")
-        .expect("rooted parent-creating writer should accept bytes");
+    Output::write_fully(&mut writer, b"created").expect("rooted parent-creating writer should accept bytes");
     let outcome = writer.commit().expect("rooted parent-creating writer should commit");
     assert!(outcome.atomic());
     assert_eq!(
@@ -1034,9 +1026,7 @@ fn test_rooted_local_file_system_returns_retryable_writer_before_publication() {
             &LocalWriteOptions::new(LocalWriteMode::CreateOrReplace),
         )
         .expect("rooted replacement writer should open");
-    writer
-        .write_all(b"staged")
-        .expect("rooted replacement writer should accept bytes");
+    Output::write_fully(&mut writer, b"staged").expect("rooted replacement writer should accept bytes");
     fs::remove_file(directory.path().join("payload"))
         .expect("inspected rooted destination should be removed before commit");
 
@@ -1071,8 +1061,7 @@ fn test_rooted_local_file_system_opens_reader_and_writer_with_retry_deadlines() 
         )
         .expect("initial rooted reader attempt should not need a retry");
     let mut contents = String::new();
-    reader
-        .read_to_string(&mut contents)
+    std::io::Read::read_to_string(&mut qubit_io::InputRef::new(&mut reader).into_std_read(), &mut contents)
         .expect("rooted reader should read its fixture");
     assert_eq!("reader", contents);
 
@@ -1083,7 +1072,7 @@ fn test_rooted_local_file_system_opens_reader_and_writer_with_retry_deadlines() 
         )
         .expect("initial rooted staged writer attempt should not need a retry");
     staged
-        .write_all(b"staged")
+        .write_fully(b"staged")
         .expect("rooted staged writer should accept bytes");
     let _ = staged.commit().expect("rooted staged writer should commit");
 
@@ -1094,7 +1083,7 @@ fn test_rooted_local_file_system_opens_reader_and_writer_with_retry_deadlines() 
         )
         .expect("initial rooted append writer attempt should not need a retry");
     append
-        .write_all(b"+")
+        .write_fully(b"+")
         .expect("rooted append writer should accept bytes");
     let _ = append.commit().expect("rooted append writer should commit");
     assert_eq!(
@@ -1400,9 +1389,7 @@ fn test_rooted_writer_exercises_destination_identity_fault_boundaries() {
                     &LocalWriteOptions::new(LocalWriteMode::CreateOrReplace),
                 )
                 .expect("rooted replacement writer should open");
-            writer
-                .write_all(b"replacement")
-                .expect("rooted writer should accept replacement bytes");
+            Output::write_fully(&mut writer, b"replacement").expect("rooted writer should accept replacement bytes");
 
             assert_eq!(
                 fails,
@@ -1465,9 +1452,7 @@ fn test_rooted_local_file_system_writer_reports_injected_install_failure() {
                 &LocalWriteOptions::new(LocalWriteMode::CreateOrReplace),
             )
             .expect("rooted replacement writer should open");
-        writer
-            .write_all(b"replacement")
-            .expect("rooted replacement writer should accept bytes");
+        Output::write_fully(&mut writer, b"replacement").expect("rooted replacement writer should accept bytes");
 
         let error = writer
             .commit()

@@ -8,10 +8,10 @@
 //! Behavioral coverage for synchronous local file readers.
 
 use std::io::IoSliceMut;
-use std::io::Read;
 use std::io::Seek;
 use std::io::SeekFrom;
 
+use qubit_io::Input;
 use qubit_local_files::LocalFileSystem;
 use qubit_local_files::options::LocalReadOptions;
 use tempfile::tempdir;
@@ -42,7 +42,7 @@ fn test_local_file_reader_reads_and_seeks() {
 
     reader.seek(SeekFrom::Start(3)).expect("seek should succeed");
     let mut last = [0_u8; 3];
-    reader.read_exact(&mut last).expect("suffix should be readable");
+    Input::read_exactly(&mut reader, &mut last).expect("suffix should be readable");
     assert_eq!(&last, b"def");
 }
 
@@ -94,8 +94,7 @@ fn test_local_file_reader_follows_final_file_symlink_on_windows() {
         .open_reader_with_options(&link, &LocalReadOptions::new())
         .expect("the default Host policy should follow a final file symlink");
     let mut payload = Vec::new();
-    reader
-        .read_to_end(&mut payload)
+    std::io::Read::read_to_end(&mut qubit_io::InputRef::new(&mut reader).into_std_read(), &mut payload)
         .expect("linked file contents should be readable");
     assert_eq!(b"payload", payload.as_slice());
 }

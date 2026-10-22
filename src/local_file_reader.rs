@@ -10,7 +10,6 @@
 use std::fs::File;
 use std::io;
 use std::io::IoSliceMut;
-use std::io::Read;
 use std::io::Seek;
 use std::io::SeekFrom;
 
@@ -20,7 +19,13 @@ use crate::LocalFileMetadata;
 ///
 /// # Examples
 ///
+/// ```compile_fail
+/// fn require_read<T: std::io::Read>() {}
+/// require_read::<qubit_local_files::LocalFileReader>();
+/// ```
+///
 /// ```no_run
+/// use qubit_io::Input;
 /// use std::io::Read;
 /// use std::path::Path;
 ///
@@ -28,7 +33,8 @@ use crate::LocalFileMetadata;
 ///
 /// # fn main() -> Result<(), Box<dyn std::error::Error>> {
 /// let filesystem = LocalFileSystem::host()?;
-/// let mut reader = filesystem.open_reader(Path::new("Cargo.toml"))?;
+/// let reader = filesystem.open_reader(Path::new("Cargo.toml"))?;
+/// let mut reader = reader.into_std_read();
 /// let mut contents = String::new();
 /// reader.read_to_string(&mut contents)?;
 /// assert!(!contents.is_empty());
@@ -72,20 +78,23 @@ impl LocalFileReader {
     }
 }
 
-impl Read for LocalFileReader {
-    /// Reads bytes from the native file at its current offset.
-    fn read(&mut self, buffer: &mut [u8]) -> io::Result<usize> {
-        self.file.read(buffer)
-    }
-
+impl LocalFileReader {
     /// Reads bytes into multiple buffers from the current offset.
-    fn read_vectored(&mut self, buffers: &mut [IoSliceMut<'_>]) -> io::Result<usize> {
+    pub fn read_vectored(&mut self, buffers: &mut [IoSliceMut<'_>]) -> io::Result<usize> {
         #[cfg(windows)]
         {
             crate::read::read_vectored_fallback(&mut self.file, buffers)
         }
         #[cfg(not(windows))]
-        self.file.read_vectored(buffers)
+        std::io::Read::read_vectored(&mut self.file, buffers)
+    }
+}
+
+impl qubit_io::Input for LocalFileReader {
+    type Item = u8;
+
+    unsafe fn read_unchecked(&mut self, output: &mut [u8], index: usize, count: usize) -> io::Result<usize> {
+        std::io::Read::read(&mut self.file, &mut output[index..index + count])
     }
 }
 

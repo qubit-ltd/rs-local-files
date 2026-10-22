@@ -8,6 +8,7 @@
 //! Stateful Host or Rooted local filesystem service.
 
 use super::HostLocalFileSystem;
+use super::Input;
 use super::LocalFileError;
 use super::LocalFileErrorKind;
 use super::LocalFileKind;
@@ -21,7 +22,6 @@ use super::LocalReadOptions;
 use super::LocalResult;
 use super::LocalWriteOptions;
 use super::Path;
-use super::Read;
 use super::operation_error;
 use super::reject_directory_qualified_file;
 use super::resolve_operation_path;
@@ -167,10 +167,10 @@ impl LocalFileSystem {
             let read_result = if crate::local::take_test_support("local-prefix-interrupted") {
                 Err(std::io::Error::from(std::io::ErrorKind::Interrupted))
             } else {
-                reader.read(&mut buffer[..read_len])
+                Input::read(&mut reader, &mut buffer[..read_len])
             };
             #[cfg(not(feature = "test-support"))]
-            let read_result = reader.read(&mut buffer[..read_len]);
+            let read_result = Input::read(&mut reader, &mut buffer[..read_len]);
             if matches!(&read_result, Err(error) if error.kind() == std::io::ErrorKind::Interrupted) {
                 continue;
             }

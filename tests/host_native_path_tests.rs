@@ -10,6 +10,7 @@
 use std::fs;
 use std::path::Path;
 
+use qubit_io::Output;
 use qubit_local_files::LocalFileSystem;
 use qubit_local_files::error::LocalFileErrorKind;
 
@@ -32,7 +33,6 @@ fn test_host_listing_preserves_explicit_canonical_root_spelling() {
 #[cfg(windows)]
 #[test]
 fn test_host_windows_long_path_staged_publication_matches_std() {
-    use std::io::Write;
     use std::os::windows::ffi::OsStrExt;
 
     use qubit_local_files::options::LocalWriteMetadataPolicy;
@@ -59,7 +59,7 @@ fn test_host_windows_long_path_staged_publication_matches_std() {
             let mut writer = host
                 .open_writer_with_options(&path, &options)
                 .expect("open long-path writer");
-            writer.write_all(b"new").expect("write staged bytes");
+            Output::write_fully(&mut writer, b"new").expect("write staged bytes");
             let outcome = writer.commit().expect("publish long-path staging");
             assert!(outcome.atomic());
             assert_eq!(fs::read(&path).expect("std reads published target"), b"new");
@@ -73,8 +73,6 @@ fn test_host_windows_long_path_staged_publication_matches_std() {
 #[cfg(unix)]
 #[test]
 fn test_host_parent_creation_keeps_native_dot_traversal_effects() {
-    use std::io::Write;
-
     use qubit_local_files::options::LocalTempFileOptions;
     use qubit_local_files::options::LocalWriteMode;
     use qubit_local_files::options::LocalWriteOptions;
@@ -97,7 +95,7 @@ fn test_host_parent_creation_keeps_native_dot_traversal_effects() {
     let mut writer = host
         .open_writer_with_options(&path, &options)
         .expect("create native parents");
-    writer.write_all(b"new").expect("staged replacement");
+    Output::write_fully(&mut writer, b"new").expect("staged replacement");
     let _ = writer.commit().expect("publish reached destination");
     assert_eq!(
         fs::read(library_root.join("existing")).expect("library destination"),
@@ -245,7 +243,6 @@ fn test_host_parent_does_not_hide_dangling_or_looping_links() {
 #[cfg(unix)]
 #[test]
 fn test_host_mutations_use_native_parent_target() {
-    use std::io::Write;
     use std::os::unix::fs::symlink;
 
     use qubit_local_files::options::LocalTempDirectoryOptions;
@@ -289,7 +286,7 @@ fn test_host_mutations_use_native_parent_target() {
                 let mut writer = host
                     .open_writer_with_options(&config, &LocalWriteOptions::new(LocalWriteMode::CreateOrReplace))
                     .expect("open native object");
-                writer.write_all(b"changed").expect("staged write");
+                Output::write_fully(&mut writer, b"changed").expect("staged write");
                 let _ = writer.commit().expect("publish native object");
                 assert_eq!(
                     fs::read(dir.path().join("b/config")).expect("written result"),

@@ -9,11 +9,11 @@
 #![cfg(not(windows))]
 
 use std::fs;
-use std::io::Read;
-use std::io::Write;
 use std::path::Path;
 use std::path::PathBuf;
 
+use qubit_io::Input;
+use qubit_io::Output;
 use qubit_local_files::LocalFileSystem;
 use qubit_local_files::error::LocalFileErrorKind;
 use qubit_local_files::error::LocalPersistErrorParts;
@@ -866,7 +866,7 @@ fn test_rooted_local_file_system_writes_and_copies_file() {
     let mut writer = rooted
         .open_writer_with_options(Path::new("source"), &LocalWriteOptions::new(LocalWriteMode::CreateNew))
         .expect("rooted writer should open");
-    writer.write_all(b"payload").expect("staging write should succeed");
+    Output::write_fully(&mut writer, b"payload").expect("staging write should succeed");
     let _outcome = writer.commit().expect("rooted commit should succeed");
 
     let outcome = rooted
@@ -890,7 +890,7 @@ fn test_rooted_writer_commit_reports_state() {
     let mut writer = rooted
         .open_writer_with_options(Path::new("target"), &LocalWriteOptions::new(LocalWriteMode::CreateNew))
         .expect("rooted writer should open");
-    writer.write_all(payload).expect("staging write should succeed");
+    Output::write_fully(&mut writer, payload).expect("staging write should succeed");
 
     let outcome = writer.commit().expect("rooted writer should commit");
     assert_eq!(outcome.state(), LocalWriterState::Committed);
@@ -914,7 +914,7 @@ fn test_rooted_local_file_system_writer_follows_final_symlink() {
     let mut writer = root
         .open_writer_with_options(Path::new("target"), &options)
         .expect("rooted writer should accept the final symlink");
-    writer.write_all(b"replacement").expect("replacement should be staged");
+    Output::write_fully(&mut writer, b"replacement").expect("replacement should be staged");
     let outcome = writer.commit().expect("replacement should publish");
 
     assert_eq!(LocalWriterState::Committed, outcome.state());
@@ -939,7 +939,7 @@ fn test_rooted_local_file_system_create_new_preserves_concurrent_target() {
     let mut writer = root
         .open_writer_with_options(Path::new("target"), &LocalWriteOptions::new(LocalWriteMode::CreateNew))
         .expect("create-new staging should open for an absent target");
-    writer.write_all(b"staged").expect("staged bytes should be written");
+    Output::write_fully(&mut writer, b"staged").expect("staged bytes should be written");
     fs::write(&target, b"concurrent").expect("concurrent target should be created");
 
     let error = writer
@@ -1003,7 +1003,8 @@ fn test_rooted_local_file_system_reads_regular_file() {
         .open_reader_with_options(Path::new("payload"), &LocalReadOptions::new())
         .expect("reader should open");
     let mut content = String::new();
-    reader.read_to_string(&mut content).expect("reader should read fixture");
+    std::io::Read::read_to_string(&mut qubit_io::InputRef::new(&mut reader).into_std_read(), &mut content)
+        .expect("reader should read fixture");
     assert_eq!("content", content);
 }
 

@@ -7,8 +7,8 @@
 // =============================================================================
 
 use std::fs;
-use std::io::Read;
 
+use qubit_io::Input;
 use qubit_local_files::LocalFileSystem;
 use qubit_local_files::error::LocalFileErrorKind;
 use qubit_local_files::error::LocalFileOperation;
@@ -156,8 +156,7 @@ fn test_local_file_system_open_reader_requires_regular_file() {
         .open_reader_with_options(&file, &LocalReadOptions::new())
         .expect("regular file should open");
     let mut content = String::new();
-    reader
-        .read_to_string(&mut content)
+    std::io::Read::read_to_string(&mut qubit_io::InputRef::new(&mut reader).into_std_read(), &mut content)
         .expect("reader should return fixture content");
     assert_eq!("content", content);
 

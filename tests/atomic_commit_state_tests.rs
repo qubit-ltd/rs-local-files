@@ -7,9 +7,9 @@
 // =============================================================================
 
 use std::fs;
-use std::io::Write;
 use std::path::Path;
 
+use qubit_io::Output;
 use qubit_local_files::LocalFileSystem;
 use qubit_local_files::options::LocalWriteMode;
 use qubit_local_files::options::LocalWriteOptions;
@@ -26,7 +26,7 @@ fn test_atomic_commit_state_publishes_host_staging() {
         .expect("Host filesystem should open")
         .open_writer_with_options(&target, &LocalWriteOptions::new(LocalWriteMode::CreateOrReplace))
         .expect("Host writer should open");
-    writer.write_all(b"new").expect("staging should accept bytes");
+    Output::write_fully(&mut writer, b"new").expect("staging should accept bytes");
 
     let outcome = writer.commit().expect("Host commit should publish");
 
@@ -46,7 +46,7 @@ fn test_atomic_commit_state_publishes_rooted_staging() {
             &LocalWriteOptions::new(LocalWriteMode::CreateOrReplace),
         )
         .expect("rooted writer should open");
-    writer.write_all(b"new").expect("staging should accept bytes");
+    Output::write_fully(&mut writer, b"new").expect("staging should accept bytes");
 
     let outcome = writer.commit().expect("rooted commit should publish");
 

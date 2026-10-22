@@ -8,8 +8,6 @@
 //! Shared resource accounting for Host and Rooted copy implementations.
 
 use std::io;
-use std::io::Read;
-use std::io::Write;
 use std::time::Duration;
 use std::time::Instant;
 
@@ -17,6 +15,8 @@ use qubit_budget::InsufficientBudgetError;
 use qubit_budget::ManagedResourcePermit;
 use qubit_budget::ManagedResourcePool;
 use qubit_budget::ResourceBudget;
+use qubit_io::Input;
+use qubit_io::Output;
 
 use crate::LocalCopyDirOptions;
 use crate::LocalResourceKind;
@@ -157,8 +157,8 @@ impl CopyBudget {
     /// structured copied-byte resource-limit error.
     pub fn copy<R, W>(&mut self, reader: &mut R, writer: &mut W) -> io::Result<u64>
     where
-        R: Read + ?Sized,
-        W: Write + ?Sized,
+        R: Input<Item = u8> + ?Sized,
+        W: Output<Item = u8> + ?Sized,
     {
         self.copy_with_now(reader, writer, Instant::now)
     }
@@ -167,8 +167,8 @@ impl CopyBudget {
     /// read and write progress boundary.
     pub(crate) fn copy_with_now<R, W, N>(&mut self, reader: &mut R, writer: &mut W, mut now: N) -> io::Result<u64>
     where
-        R: Read + ?Sized,
-        W: Write + ?Sized,
+        R: Input<Item = u8> + ?Sized,
+        W: Output<Item = u8> + ?Sized,
         N: FnMut() -> Instant,
     {
         let mut buffer = [0_u8; COPY_CHUNK_SIZE];
@@ -177,7 +177,7 @@ impl CopyBudget {
         loop {
             self.check_deadline_at(now())?;
             let read_capacity = self.read_capacity(buffer.len());
-            let read = match reader.read(&mut buffer[..read_capacity]) {
+            let read = match Input::read(reader, &mut buffer[..read_capacity]) {
                 Ok(0) => return Ok(copied),
                 Ok(read) => read,
                 Err(error) if error.kind() == io::ErrorKind::Interrupted => continue,
@@ -234,12 +234,12 @@ impl CopyBudget {
         now: &mut N,
     ) -> io::Result<()>
     where
-        W: Write + ?Sized,
+        W: Output<Item = u8> + ?Sized,
         N: FnMut() -> Instant,
     {
         while !source.is_empty() {
             self.check_deadline_at(now())?;
-            let written = match writer.write(source) {
+            let written = match Output::write(writer, source) {
                 Ok(0) => {
                     return Err(io::Error::new(
                         io::ErrorKind::WriteZero,
@@ -313,4 +313,168 @@ fn u64_budget_error(error: InsufficientBudgetError<LocalResourceKind, u64>) -> i
         usize::try_from(remaining).unwrap_or(usize::MAX),
         usize::try_from(requested).unwrap_or(usize::MAX),
     ))
+}
+
+#[cfg(test)]
+mod tests {
+    use std::io::Cursor;
+    use std::time::Duration;
+    use std::time::Instant;
+
+    use qubit_io::Output;
+
+    use super::CopyBudget;
+    use super::io;
+    use crate::local::LocalCopyDirOptions;
+
+    struct TwoThenBlock {
+        bytes: Vec<u8>,
+    }
+
+    impl Output for TwoThenBlock {
+        type Item = u8;
+
+        unsafe fn write_unchecked(&mut self, input: &[u8], index: usize, count: usize) -> io::Result<usize> {
+            if !self.bytes.is_empty() {
+                return Err(io::ErrorKind::WouldBlock.into());
+            }
+            let accepted = count.min(2);
+            self.bytes.extend_from_slice(&input[index..index + accepted]);
+            Ok(accepted)
+        }
+
+        fn flush(&mut self) -> io::Result<()> {
+            Ok(())
+        }
+    }
+
+    struct DeadlineAfterPartialWrite {
+        bytes: Vec<u8>,
+    }
+
+    impl Output for DeadlineAfterPartialWrite {
+        type Item = u8;
+
+        unsafe fn write_unchecked(&mut self, input: &[u8], index: usize, count: usize) -> io::Result<usize> {
+            let accepted = count.min(2);
+            self.bytes.extend_from_slice(&input[index..index + accepted]);
+            Ok(accepted)
+        }
+
+        fn flush(&mut self) -> io::Result<()> {
+            Ok(())
+        }
+    }
+
+    struct InterruptOnceOutput {
+        bytes: Vec<u8>,
+        interrupted: bool,
+    }
+
+    impl Output for InterruptOnceOutput {
+        type Item = u8;
+
+        unsafe fn write_unchecked(&mut self, input: &[u8], index: usize, count: usize) -> io::Result<usize> {
+            if !self.interrupted {
+                self.interrupted = true;
+                return Err(io::ErrorKind::Interrupted.into());
+            }
+            self.bytes.extend_from_slice(&input[index..index + count]);
+            Ok(count)
+        }
+
+        fn flush(&mut self) -> io::Result<()> {
+            Ok(())
+        }
+    }
+
+    struct ZeroOutput;
+
+    impl Output for ZeroOutput {
+        type Item = u8;
+
+        unsafe fn write_unchecked(&mut self, _input: &[u8], _index: usize, _count: usize) -> io::Result<usize> {
+            Ok(0)
+        }
+
+        fn flush(&mut self) -> io::Result<()> {
+            Ok(())
+        }
+    }
+
+    #[test]
+    fn test_copy_budget_charges_partial_write_before_would_block() {
+        let mut budget = CopyBudget::new(LocalCopyDirOptions::new().with_max_bytes(3));
+        let mut reader = Cursor::new(b"abcde");
+        let mut writer = TwoThenBlock { bytes: Vec::new() };
+
+        let error = budget.copy(&mut reader, &mut writer).unwrap_err();
+
+        assert_eq!(io::ErrorKind::WouldBlock, error.kind());
+        assert_eq!(b"ab", writer.bytes.as_slice());
+        assert_eq!(Some(1), budget.remaining_bytes());
+    }
+
+    #[test]
+    fn test_copy_budget_checks_deadline_after_partial_write() {
+        let started = Instant::now();
+        let mut budget = CopyBudget::new(
+            LocalCopyDirOptions::new()
+                .with_max_bytes(3)
+                .with_deadline(Duration::from_millis(1))
+                .with_started_at(started),
+        );
+        let mut reader = Cursor::new(b"abcd");
+        let mut writer = DeadlineAfterPartialWrite { bytes: Vec::new() };
+        let mut calls = 0;
+        let mut now = || {
+            calls += 1;
+            if calls < 4 {
+                started
+            } else {
+                started + Duration::from_millis(1)
+            }
+        };
+
+        let error = budget.copy_with_now(&mut reader, &mut writer, &mut now).unwrap_err();
+
+        assert_eq!(io::ErrorKind::TimedOut, error.kind());
+        assert_eq!(b"ab", writer.bytes.as_slice());
+        assert_eq!(Some(1), budget.remaining_bytes());
+    }
+
+    #[test]
+    fn test_copy_budget_retries_interrupted_write_and_rejects_zero_progress() {
+        let mut budget = CopyBudget::new(LocalCopyDirOptions::new());
+        let mut reader = Cursor::new(b"retry");
+        let mut writer = InterruptOnceOutput {
+            bytes: Vec::new(),
+            interrupted: false,
+        };
+
+        assert_eq!(5, budget.copy(&mut reader, &mut writer).unwrap());
+        assert_eq!(b"retry", writer.bytes.as_slice());
+
+        let mut budget = CopyBudget::new(LocalCopyDirOptions::new());
+        let mut reader = Cursor::new(b"x");
+        let error = budget.copy(&mut reader, &mut ZeroOutput).unwrap_err();
+        assert_eq!(io::ErrorKind::WriteZero, error.kind());
+    }
+
+    #[test]
+    fn test_copy_budget_accepts_exact_limit_and_rejects_one_byte_over() {
+        let mut exact_budget = CopyBudget::new(LocalCopyDirOptions::new().with_max_bytes(3));
+        let mut exact_reader = Cursor::new(b"abc");
+        let mut exact_writer = Vec::new();
+        assert_eq!(3, exact_budget.copy(&mut exact_reader, &mut exact_writer).unwrap());
+        assert_eq!(Some(0), exact_budget.remaining_bytes());
+
+        let mut over_budget = CopyBudget::new(LocalCopyDirOptions::new().with_max_bytes(3));
+        let mut over_reader = Cursor::new(b"abcd");
+        let mut over_writer = Vec::new();
+        let error = over_budget.copy(&mut over_reader, &mut over_writer).unwrap_err();
+        assert_eq!(io::ErrorKind::QuotaExceeded, error.kind());
+        assert_eq!(b"abc", over_writer.as_slice());
+        assert_eq!(Some(0), over_budget.remaining_bytes());
+    }
 }

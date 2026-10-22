@@ -22,12 +22,12 @@ mod temp;
 
 use std::fmt;
 use std::fs;
-use std::io::Read;
 use std::path::Path;
 use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::Instant;
 
+use qubit_io::Input;
 use qubit_redact::RedactedText;
 use qubit_redact::Redactor;
 

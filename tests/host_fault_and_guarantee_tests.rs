@@ -9,12 +9,13 @@
 #[cfg(any(target_os = "linux", target_os = "android"))]
 use std::ffi::CString;
 use std::fs;
-use std::io::Read;
 #[cfg(any(target_os = "linux", target_os = "android"))]
 use std::os::unix::ffi::OsStrExt;
 use std::path::Path;
 use std::time::Duration;
 
+use qubit_io::Input;
+use qubit_io::Output;
 use qubit_local_files::LocalFileSystem;
 use qubit_local_files::error::LocalFileErrorKind;
 #[cfg(feature = "test-support")]
@@ -147,8 +148,7 @@ fn test_host_facade_uses_configured_reader_writer_and_list_policies() {
         .open_reader_with_options(&file, &LocalReadOptions::new().with_open_retry_timeout(Duration::ZERO))
         .expect("regular file should open with an explicit retry timeout");
     let mut content = String::new();
-    reader
-        .read_to_string(&mut content)
+    std::io::Read::read_to_string(&mut qubit_io::InputRef::new(&mut reader).into_std_read(), &mut content)
         .expect("reader should return the fixture bytes");
     assert_eq!("payload", content);
 
@@ -159,10 +159,7 @@ fn test_host_facade_uses_configured_reader_writer_and_list_policies() {
             &LocalWriteOptions::new(LocalWriteMode::Append).with_open_retry_timeout(Duration::ZERO),
         )
         .expect("append writer should open with an explicit retry timeout");
-    use std::io::Write;
-    writer
-        .write_all(b"-appended")
-        .expect("append writer should accept bytes");
+    Output::write_fully(&mut writer, b"-appended").expect("append writer should accept bytes");
     let outcome = writer.commit().expect("append writer should commit");
     assert!(!outcome.atomic());
 
@@ -258,8 +255,6 @@ fn test_host_facade_mutates_file_and_directory_entries() {
 #[cfg(any(target_os = "linux", target_os = "android"))]
 #[test]
 fn test_atomic_replacement_preserves_extended_attributes() {
-    use std::io::Write;
-
     let directory = tempdir().expect("temporary directory should be created");
     let path = directory.path().join("destination");
     fs::write(&path, b"previous").expect("destination fixture should be written");
@@ -288,9 +283,7 @@ fn test_atomic_replacement_preserves_extended_attributes() {
         .expect("Host filesystem should open")
         .open_writer_with_options(&path, &LocalWriteOptions::new(LocalWriteMode::CreateOrReplace))
         .expect("existing destination should open for atomic replacement");
-    writer
-        .write_all(b"replacement")
-        .expect("staging writer should accept replacement bytes");
+    Output::write_fully(&mut writer, b"replacement").expect("staging writer should accept replacement bytes");
     let outcome = writer.commit().expect("atomic replacement should commit");
     assert!(outcome.atomic());
 
@@ -381,8 +374,6 @@ fn test_atomic_replacement_exercises_metadata_fault_boundaries() {
         ("atomic-metadata-staging-list", true),
     ] {
         run_facade_fault(TEST_NAME, fault, || {
-            use std::io::Write;
-
             let directory = tempdir().expect("temporary directory should be created");
             let path = directory.path().join("destination");
             fs::write(&path, b"previous").expect("destination fixture should be written");
@@ -411,9 +402,7 @@ fn test_atomic_replacement_exercises_metadata_fault_boundaries() {
                 .expect("Host filesystem should open")
                 .open_writer_with_options(&path, &LocalWriteOptions::new(LocalWriteMode::CreateOrReplace))
                 .expect("existing destination should open for replacement");
-            writer
-                .write_all(b"replacement")
-                .expect("staging writer should accept replacement bytes");
+            Output::write_fully(&mut writer, b"replacement").expect("staging writer should accept replacement bytes");
             assert_eq!(
                 fails,
                 writer.commit().is_err(),

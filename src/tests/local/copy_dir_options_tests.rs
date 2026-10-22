@@ -87,6 +87,40 @@ fn test_copy_budget_stops_at_the_next_chunk_deadline_boundary() {
 }
 
 #[test]
+fn test_copy_budget_accepts_pure_item_wrappers() {
+    let mut budget = CopyBudget::new(LocalCopyDirOptions::new());
+    let mut input = qubit_io::CountingInput::new(Cursor::new(b"payload"));
+    let mut output = qubit_io::CountingOutput::new(Vec::<u8>::new());
+
+    assert_eq!(budget.copy(&mut input, &mut output).unwrap(), 7);
+    assert_eq!(input.items_read(), 7);
+    assert_eq!(output.items_written(), 7);
+    assert_eq!(output.into_inner(), b"payload");
+}
+
+#[test]
+fn test_copy_budget_accepts_dynamic_protocol_references() {
+    let mut budget = CopyBudget::new(LocalCopyDirOptions::new());
+    let mut source = Cursor::new(b"dynamic".to_vec());
+    let mut destination = Vec::new();
+    let reader: &mut dyn qubit_io::Input<Item = u8> = &mut source;
+    let writer: &mut dyn qubit_io::Output<Item = u8> = &mut destination;
+
+    assert_eq!(budget.copy(reader, writer).unwrap(), 7);
+    assert_eq!(destination, b"dynamic");
+}
+
+#[test]
+fn test_copy_budget_accepts_standard_cursor_and_vec() {
+    let mut budget = CopyBudget::new(LocalCopyDirOptions::new());
+    let mut reader = Cursor::new(b"standard".to_vec());
+    let mut writer = Vec::new();
+
+    assert_eq!(budget.copy(&mut reader, &mut writer).unwrap(), 8);
+    assert_eq!(writer, b"standard");
+}
+
+#[test]
 fn test_generated_keep_target_promotes_only_well_formed_sandbox_paths() {
     assert_eq!(
         std::path::Path::new("/parent/resource"),

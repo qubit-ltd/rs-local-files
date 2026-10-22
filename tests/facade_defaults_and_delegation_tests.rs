@@ -8,11 +8,11 @@
 //! Crate-local coverage tests for public filesystem facade delegation.
 
 use std::fs;
-use std::io::Read;
-use std::io::Write;
 use std::path::Path;
 use std::time::Duration;
 
+use qubit_io::Input;
+use qubit_io::Output;
 use qubit_local_files::LocalFileSystem;
 use qubit_local_files::capability::LocalFileSystemCapabilities;
 use qubit_local_files::capability::LocalFileSystemLimits;
@@ -199,9 +199,7 @@ fn test_public_facade_uses_complete_instance_defaults() {
     let copied = directory.path().join("copied");
     let renamed = directory.path().join("renamed");
     let mut writer = filesystem.open_writer(&source).expect("default writer should open");
-    writer
-        .write_all(b"payload")
-        .expect("default writer should accept bytes");
+    Output::write_fully(&mut writer, b"payload").expect("default writer should accept bytes");
     let _ = writer.commit().expect("default writer should commit");
 
     let mut reader = filesystem.open_reader(&source).expect("default reader should open");
@@ -217,7 +215,8 @@ fn test_public_facade_uses_complete_instance_defaults() {
     #[cfg(windows)]
     assert_eq!(permissions.unix_mode(), None);
     let mut content = String::new();
-    reader.read_to_string(&mut content).expect("default reader should read");
+    std::io::Read::read_to_string(&mut qubit_io::InputRef::new(&mut reader).into_std_read(), &mut content)
+        .expect("default reader should read");
     assert_eq!("payload", content);
     assert_eq!(b"pay", filesystem.read_prefix(&source, 3).unwrap().as_slice());
 
@@ -363,7 +362,8 @@ fn test_public_host_facade_delegates_ordinary_operations() {
         .open_reader_with_options(&source, &LocalReadOptions::new())
         .expect("source reader should open");
     let mut content = String::new();
-    reader.read_to_string(&mut content).expect("source reader should read");
+    std::io::Read::read_to_string(&mut qubit_io::InputRef::new(&mut reader).into_std_read(), &mut content)
+        .expect("source reader should read");
     assert_eq!("payload", content);
     assert_eq!(
         b"pay",
@@ -382,7 +382,7 @@ fn test_public_host_facade_delegates_ordinary_operations() {
     let mut writer = filesystem
         .open_writer_with_options(&renamed, &LocalWriteOptions::new(LocalWriteMode::Append))
         .expect("append writer should open");
-    writer.write_all(b"!").expect("append writer should write");
+    Output::write_fully(&mut writer, b"!").expect("append writer should write");
     let _ = writer.commit().expect("append writer should commit");
 
     let created = directory.path().join("created");
@@ -444,7 +444,7 @@ fn test_public_rooted_facade_delegates_relative_operations() {
             &LocalWriteOptions::new(LocalWriteMode::CreateOrReplace),
         )
         .expect("rooted writer should open");
-    writer.write_all(b"payload").expect("rooted writer should write");
+    Output::write_fully(&mut writer, b"payload").expect("rooted writer should write");
     let _ = writer.commit().expect("rooted writer should commit");
     let _ = filesystem
         .copy_with_options(

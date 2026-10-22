@@ -62,10 +62,10 @@ impl Drop for FuzzRoot {
 #[allow(dead_code)]
 pub(crate) mod lifecycle {
     use std::fs;
-    use std::io::Write;
     use std::path::Path;
     use std::path::PathBuf;
 
+    use qubit_io::Output;
     use qubit_local_files::LocalFileSystem;
     use qubit_local_files::LocalResult;
     use qubit_local_files::LocalTempDirectory;
@@ -302,7 +302,7 @@ pub(crate) mod lifecycle {
                         &LocalWriteOptions::new(LocalWriteMode::CreateOrReplace).with_metadata_policy(policy),
                     )
                     .expect("open bounded writer");
-                writer.write_all(PAYLOAD).expect("write staged payload");
+                Output::write_fully(&mut writer, PAYLOAD).expect("write staged payload");
                 let outcome = writer.commit().expect("commit staged payload");
                 assert_eq!(outcome.state(), LocalWriterState::Committed);
                 let path = host_path(root.path(), &target, rooted);
@@ -339,7 +339,7 @@ pub(crate) mod lifecycle {
                             )
                             .ok()
                             .map(|mut resource| {
-                                resource.write_all(PAYLOAD).expect("write original fuzz file");
+                                Output::write_fully(&mut resource, PAYLOAD).expect("write original fuzz file");
                                 Resource::File(resource)
                             })
                     } else {
@@ -453,7 +453,7 @@ pub(crate) mod lifecycle {
                             }
                             if opcode == 10 && previous == LocalTempSourceState::Owned && writable {
                                 if let Resource::File(file) = &mut retained.resource {
-                                    file.write_all(b"retained")
+                                    Output::write_fully(file, b"retained")
                                         .expect("invalid operands retain writable file");
                                     expected_bytes.extend_from_slice(b"retained");
                                 }

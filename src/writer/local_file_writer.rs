@@ -29,16 +29,23 @@ use crate::LocalWriterState;
 ///
 /// # Examples
 ///
+/// This writer implements [`qubit_io::Output`], not `std::io::Write`.
+///
+/// ```compile_fail
+/// fn require_write<T: std::io::Write>() {}
+/// require_write::<qubit_local_files::LocalFileWriter>();
+/// ```
+///
 /// ```no_run
-/// use std::io::Write;
 /// use std::path::Path;
+/// use qubit_io::Output;
 ///
 /// use qubit_local_files::LocalFileSystem;
 ///
 /// # fn main() -> Result<(), Box<dyn std::error::Error>> {
 /// let filesystem = LocalFileSystem::host()?;
 /// let mut writer = filesystem.open_writer(Path::new("output.txt"))?;
-/// writer.write_all(b"hello")?;
+/// writer.write_fully(b"hello")?;
 /// let _outcome = writer.commit()?;
 /// # Ok(())
 /// # }
@@ -394,15 +401,9 @@ impl LocalFileWriter {
             None => error,
         }
     }
-}
 
-impl Write for LocalFileWriter {
-    /// Writes bytes to staging or directly appends to the destination.
-    ///
-    /// Returns `BrokenPipe` after termination or a fatal stream failure.
-    /// Other native errors propagate; interrupted and would-block errors
-    /// remain retryable. Accepted append bytes are immediately published.
-    fn write(&mut self, buffer: &[u8]) -> io::Result<usize> {
+    /// Performs one state-checked native write and records accepted bytes.
+    fn write_once(&mut self, buffer: &[u8]) -> io::Result<usize> {
         if self.state != LocalWriterState::Open || self.failure_state.is_some() {
             return Err(io::Error::new(
                 io::ErrorKind::BrokenPipe,
@@ -420,30 +421,30 @@ impl Write for LocalFileWriter {
             }
         }
         let result = match self.backend.as_mut() {
-            Some(LocalFileWriterBackend::Staged(writer)) => writer.write(buffer),
-            Some(LocalFileWriterBackend::Rooted(writer)) => writer.write(buffer),
-            Some(LocalFileWriterBackend::Append(file)) => file.write(buffer),
+            Some(LocalFileWriterBackend::Staged(writer)) => qubit_io::Output::write(writer, buffer),
+            Some(LocalFileWriterBackend::Rooted(writer)) => qubit_io::Output::write(writer, buffer),
+            Some(LocalFileWriterBackend::Append(file)) => Write::write(file, buffer),
             None => unreachable!("open writer must retain one backend"),
         };
         let written = self.observe_stream_result(result)?;
         self.record_written(written);
         Ok(written)
     }
+}
 
+impl LocalFileWriter {
     /// Writes vectored bytes to staging or directly appends to the destination.
     ///
-    /// Uses the same lifecycle and error contract as [`Self::write`], while
-    /// preserving the native short-write result of one vectored operation.
-    fn write_vectored(&mut self, buffers: &[IoSlice<'_>]) -> io::Result<usize> {
+    /// Uses the same lifecycle and error contract as
+    /// [`qubit_io::Output::write`], while preserving the native short-write
+    /// result of one vectored operation.
+    pub fn write_vectored(&mut self, buffers: &[IoSlice<'_>]) -> io::Result<usize> {
         if self.state != LocalWriterState::Open || self.failure_state.is_some() {
             return Err(io::Error::new(
                 io::ErrorKind::BrokenPipe,
                 "local file writer is not open",
             ));
         }
-
-        // Delegate one operation so short writes and failures retain the
-        // standard Write contract on every platform.
         let result = match self.backend.as_mut() {
             Some(LocalFileWriterBackend::Staged(writer)) => writer.write_vectored(buffers),
             Some(LocalFileWriterBackend::Rooted(writer)) => writer.write_vectored(buffers),
@@ -453,6 +454,14 @@ impl Write for LocalFileWriter {
         let written = self.observe_stream_result(result)?;
         self.record_written(written);
         Ok(written)
+    }
+}
+
+impl qubit_io::Output for LocalFileWriter {
+    type Item = u8;
+
+    unsafe fn write_unchecked(&mut self, input: &[u8], index: usize, count: usize) -> io::Result<usize> {
+        self.write_once(&input[index..index + count])
     }
 
     /// Flushes userspace buffers without publishing staged content.
@@ -468,9 +477,9 @@ impl Write for LocalFileWriter {
             ));
         }
         let result = match self.backend.as_mut() {
-            Some(LocalFileWriterBackend::Staged(writer)) => writer.flush(),
-            Some(LocalFileWriterBackend::Rooted(writer)) => writer.flush(),
-            Some(LocalFileWriterBackend::Append(file)) => file.flush(),
+            Some(LocalFileWriterBackend::Staged(writer)) => qubit_io::Output::flush(writer),
+            Some(LocalFileWriterBackend::Rooted(writer)) => qubit_io::Output::flush(writer),
+            Some(LocalFileWriterBackend::Append(file)) => Write::flush(file),
             None => unreachable!("open writer must retain one backend"),
         };
         self.observe_stream_result(result)

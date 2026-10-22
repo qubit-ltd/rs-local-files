@@ -9,6 +9,7 @@
 use std::fs;
 use std::path::Path;
 
+use qubit_io::Output;
 use qubit_local_files::LocalFileSystem;
 use qubit_local_files::error::LocalFileErrorKind;
 use qubit_local_files::error::LocalFileOperation;
@@ -60,15 +61,13 @@ fn test_local_file_system_clone_preserves_host_configuration() {
 /// Verifies the Host facade publishes a file through the configured instance.
 #[test]
 fn test_local_file_system_host_writer_workflow() {
-    use std::io::Write;
-
     let directory = tempdir().expect("temporary directory should be created");
     let path = directory.path().join("payload");
     let filesystem = LocalFileSystem::host().expect("Host filesystem should open");
     let mut writer = filesystem
         .open_writer_with_options(&path, &LocalWriteOptions::new(LocalWriteMode::CreateOrReplace))
         .expect("Host writer should open");
-    writer.write_all(b"payload").expect("Host writer should accept payload");
+    Output::write_fully(&mut writer, b"payload").expect("Host writer should accept payload");
     let outcome = writer.commit().expect("Host writer should commit");
     assert_eq!(LocalWriterState::Committed, outcome.state());
     assert_eq!(b"payload", fs::read(path).expect("payload should exist").as_slice());

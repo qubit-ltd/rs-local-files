@@ -8,9 +8,9 @@
 //! Atomic metadata policy is independent of publication and identity checks.
 
 use std::fs;
-use std::io::Write;
 use std::path::Path;
 
+use qubit_io::Output;
 use qubit_local_files::LocalFileSystem;
 use qubit_local_files::options::LocalWriteMetadataPolicy;
 use qubit_local_files::options::LocalWriteMode;
@@ -37,7 +37,7 @@ fn test_windows_host_metadata_policy_selects_native_merge_behavior() {
         let mut writer = filesystem
             .open_writer_with_options(&target, &options)
             .expect("staged writer");
-        writer.write_all(b"new").expect("staged content");
+        Output::write_fully(&mut writer, b"new").expect("staged content");
         assert!(writer.commit().expect("native replacement").atomic());
         assert_eq!(fs::read(&target).expect("published content"), b"new");
         if policy == LocalWriteMetadataPolicy::PreserveExisting {
@@ -75,7 +75,7 @@ fn test_use_staging_replaces_content_after_commit() {
         let mut writer = filesystem
             .open_writer_with_options(path, &options)
             .expect("staging writer");
-        writer.write_all(b"new").expect("staged content");
+        Output::write_fully(&mut writer, b"new").expect("staged content");
         assert_eq!(fs::read(&physical).expect("old content before commit"), b"old");
         assert!(writer.commit().expect("atomic commit").atomic());
         assert_eq!(fs::read(&physical).expect("published content"), b"new");
@@ -111,7 +111,7 @@ fn test_metadata_policy_selects_permissions() {
             let mut writer = filesystem
                 .open_writer_with_options(path, &options)
                 .expect("staging writer");
-            writer.write_all(b"new").expect("staged content");
+            Output::write_fully(&mut writer, b"new").expect("staged content");
             assert!(writer.commit().expect("commit").atomic());
             let actual = fs::metadata(&physical).expect("permissions").permissions().mode() & 0o777;
             if policy == LocalWriteMetadataPolicy::PreserveExisting {
@@ -169,7 +169,7 @@ fn test_use_staging_keeps_identity_checks_and_skips_metadata_reads() {
                 let mut writer = filesystem
                     .open_writer_with_options(path, &options)
                     .expect("staging writer");
-                writer.write_all(b"new").expect("staged content");
+                Output::write_fully(&mut writer, b"new").expect("staged content");
                 let guard = install_test_fault(fault).expect("fault controller");
                 let result = writer.commit();
                 drop(guard);
@@ -214,7 +214,7 @@ fn test_metadata_policy_keeps_create_new_conflicts() {
             let mut writer = filesystem
                 .open_writer_with_options(path, &options)
                 .expect("new staging writer");
-            writer.write_all(b"ours").expect("staged content");
+            Output::write_fully(&mut writer, b"ours").expect("staged content");
             fs::write(&physical, b"concurrent").expect("concurrent creator");
             assert!(writer.commit().is_err());
             assert_eq!(fs::read(&physical).expect("concurrent content"), b"concurrent");
@@ -237,7 +237,7 @@ fn test_metadata_policy_does_not_change_append() {
         let mut writer = filesystem
             .open_writer_with_options(&physical, &options)
             .expect("append writer");
-        writer.write_all(b"+").expect("append bytes");
+        Output::write_fully(&mut writer, b"+").expect("append bytes");
         let _ = writer.abort().expect("abort releases append handle");
         assert_eq!(fs::read(&physical).expect("appended content"), b"old+");
     }
@@ -292,7 +292,7 @@ fn test_use_staging_does_not_require_old_read_access() {
             let mut writer = filesystem
                 .open_writer_with_options(path, &options)
                 .expect("staging writer");
-            writer.write_all(b"new").expect("staged content");
+            Output::write_fully(&mut writer, b"new").expect("staged content");
             let result = writer.commit();
             fs::set_permissions(&physical, fs::Permissions::from_mode(0o600)).expect("restore inspection permission");
             if policy == LocalWriteMetadataPolicy::PreserveExisting {
@@ -339,7 +339,7 @@ fn test_metadata_policy_preserves_published_sync_failure() {
             let mut writer = filesystem
                 .open_writer_with_options(path, &options)
                 .expect("staging writer");
-            writer.write_all(b"published").expect("staged content");
+            Output::write_fully(&mut writer, b"published").expect("staged content");
             let fault = if rooted {
                 "rooted-preferred-parent-sync"
             } else {

@@ -26,7 +26,7 @@ use crate::LocalWriteFailureState;
 ///
 /// ```
 /// use std::fs;
-/// use std::io::Write;
+/// use qubit_io::Output;
 ///
 /// use qubit_local_files::LocalFileSystem;
 /// use qubit_local_files::options::LocalWriteMode;
@@ -40,7 +40,7 @@ use crate::LocalWriteFailureState;
 ///     &target,
 ///     &LocalWriteOptions::new(LocalWriteMode::CreateNew),
 /// )?;
-/// writer.write_all(b"staged content")?;
+/// Output::write_fully(&mut writer, b"staged content")?;
 /// fs::write(&target, b"another writer's content")?;
 ///
 /// let failure = writer.commit().expect_err("the destination already exists");

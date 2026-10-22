@@ -7,9 +7,9 @@
 // =============================================================================
 
 use std::fs;
-use std::io::Read;
-use std::io::Write;
 
+use qubit_io::Input;
+use qubit_io::Output;
 use qubit_local_files::LocalFileSystem;
 use qubit_local_files::options::LocalCopyOptions;
 use qubit_local_files::options::LocalCreateDirectoryOptions;
@@ -54,14 +54,14 @@ fn test_host_local_file_system_workflow() {
     let mut writer = filesystem
         .open_writer_with_options(&source, &LocalWriteOptions::new(LocalWriteMode::CreateNew))
         .expect("writer should open");
-    writer.write_all(b"payload").expect("payload should be written");
+    Output::write_fully(&mut writer, b"payload").expect("payload should be written");
     let _ = writer.commit().expect("payload should be committed");
 
     let mut payload = Vec::new();
-    filesystem
+    let mut reader = filesystem
         .open_reader_with_options(&source, &LocalReadOptions::new())
-        .expect("reader should open")
-        .read_to_end(&mut payload)
+        .expect("reader should open");
+    std::io::Read::read_to_end(&mut qubit_io::InputRef::new(&mut reader).into_std_read(), &mut payload)
         .expect("payload should be read");
     assert_eq!(b"payload", payload.as_slice());
     assert_eq!(

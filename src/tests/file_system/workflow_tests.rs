@@ -9,9 +9,9 @@
 //! In-crate facade workflows that exercise the unit-test build of the library.
 
 use std::fs;
-use std::io::Write;
 use std::path::Path;
 
+use qubit_io::Output;
 use tempfile::tempdir;
 
 use crate::LocalFileSystem;
@@ -45,7 +45,7 @@ fn test_rooted_facade_workflow_preserves_namespace_and_lifecycle_contracts() {
             &LocalWriteOptions::new(LocalWriteMode::CreateNew),
         )
         .expect("rooted writer should open");
-    writer.write_all(b"payload").expect("writer should accept bytes");
+    Output::write_fully(&mut writer, b"payload").expect("writer should accept bytes");
     let _ = writer.commit().expect("writer should publish");
 
     let copy = filesystem
@@ -89,9 +89,7 @@ fn test_rooted_facade_workflow_preserves_namespace_and_lifecycle_contracts() {
                 .with_create_parent(),
         )
         .expect("rooted temporary file should be created");
-    temporary_file
-        .write_all(b"temporary")
-        .expect("temporary file should accept bytes");
+    Output::write_fully(&mut temporary_file, b"temporary").expect("temporary file should accept bytes");
     let _ = temporary_file
         .persist_with(
             Path::new("/published/file"),
@@ -136,9 +134,7 @@ fn test_host_facade_workflow_covers_copy_and_temporary_resource_paths() {
     let mut temporary = filesystem
         .create_temp_file_with_options(&LocalTempFileOptions::new().with_parent(directory.path()))
         .expect("host temporary file should be created");
-    temporary
-        .write_all(b"temporary")
-        .expect("temporary file should accept bytes");
+    Output::write_fully(&mut temporary, b"temporary").expect("temporary file should accept bytes");
     temporary.cleanup().expect("temporary file should clean up");
 
     let mut temporary_directory = filesystem

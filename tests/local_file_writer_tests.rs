@@ -6,15 +6,14 @@
 //    Licensed under the Apache License, Version 2.0.
 // =============================================================================
 
-#[cfg(unix)]
 use std::env;
 use std::fs;
 #[cfg(unix)]
 use std::io::IoSlice;
-use std::io::Write;
 #[cfg(unix)]
 use std::process::Command;
 
+use qubit_io::Output;
 use qubit_local_files::LocalFileSystem;
 #[cfg(unix)]
 use qubit_local_files::LocalFileWriter;
@@ -44,7 +43,7 @@ fn test_local_file_writer_publishes_staged_content_on_commit() {
         .expect("Host filesystem should open")
         .open_writer_with_options(&target, &LocalWriteOptions::new(LocalWriteMode::CreateOrReplace))
         .expect("staged writer should open");
-    writer.write_all(b"new").expect("staged content should be written");
+    Output::write_fully(&mut writer, b"new").expect("staged content should be written");
     assert_eq!(b"old", fs::read(&target).expect("old target should remain").as_slice());
 
     let outcome = writer.commit().expect("commit should publish staged content");
@@ -72,7 +71,7 @@ fn test_local_file_writer_follows_target_symlink() {
         .expect("Host filesystem should open")
         .open_writer_with_options(&target, &options)
         .expect("writer should accept a target symlink entry");
-    writer.write_all(b"replacement").expect("replacement should be staged");
+    Output::write_fully(&mut writer, b"replacement").expect("replacement should be staged");
     let outcome = writer.commit().expect("replacement should publish");
     assert_eq!(LocalWriterState::Committed, outcome.state());
 
@@ -108,9 +107,7 @@ fn test_local_file_writer_append_follows_target_symlink() {
         .expect("Host filesystem should open")
         .open_writer_with_options(&target, &LocalWriteOptions::new(LocalWriteMode::Append))
         .expect("append should follow a final symlink");
-    writer
-        .write_all(b"-append")
-        .expect("append should write to the referent");
+    Output::write_fully(&mut writer, b"-append").expect("append should write to the referent");
     let outcome = writer.commit().expect("append should commit");
     assert_eq!(LocalWritePublicationMethod::DirectAppend, outcome.publication_method());
     assert_eq!(b"original-append", fs::read(&referent).unwrap().as_slice());
@@ -138,9 +135,7 @@ fn test_local_file_writer_append_follows_target_symlink_on_windows() {
         .expect("Host filesystem should open")
         .open_writer_with_options(&target, &LocalWriteOptions::new(LocalWriteMode::Append))
         .expect("append should follow a final file symlink");
-    writer
-        .write_all(b"-append")
-        .expect("append should write through the link");
+    Output::write_fully(&mut writer, b"-append").expect("append should write through the link");
     let _ = writer.commit().expect("append should commit");
     assert_eq!(
         b"original-append",
@@ -173,7 +168,7 @@ fn test_local_file_writer_create_new_preserves_concurrent_target() {
         .expect("Host filesystem should open")
         .open_writer_with_options(&target, &LocalWriteOptions::new(LocalWriteMode::CreateNew))
         .expect("create-new staging should open for an absent target");
-    writer.write_all(b"staged").expect("staged bytes should be written");
+    Output::write_fully(&mut writer, b"staged").expect("staged bytes should be written");
     fs::write(&target, b"concurrent").expect("concurrent target should be created");
 
     let error = writer
@@ -197,7 +192,7 @@ fn test_local_file_writer_abort_keeps_original_target() {
         .expect("Host filesystem should open")
         .open_writer_with_options(&target, &LocalWriteOptions::new(LocalWriteMode::CreateOrReplace))
         .expect("staged writer should open");
-    writer.write_all(b"new").expect("staging write should succeed");
+    Output::write_fully(&mut writer, b"new").expect("staging write should succeed");
 
     let outcome = writer.abort().expect("abort should clean staging");
 
@@ -248,7 +243,7 @@ fn test_local_file_writer_reports_parent_sync_result() {
                 &LocalWriteOptions::new(LocalWriteMode::CreateNew).with_durability(requirement),
             )
             .expect("staged writer should open before permissions change");
-        writer.write_all(b"published").expect("staged bytes should be written");
+        Output::write_fully(&mut writer, b"published").expect("staged bytes should be written");
         fs::set_permissions(&parent, fs::Permissions::from_mode(0o300))
             .expect("parent should reject read-only directory opens");
         match requirement {
@@ -328,9 +323,7 @@ fn run_failed_append_case(case: &str) {
         .expect("Host filesystem should open")
         .open_writer_with_options(&target, &LocalWriteOptions::new(LocalWriteMode::Append))
         .expect("append writer should open before the failing write");
-    writer
-        .write_all(b"x")
-        .expect_err("zero file-size limit should reject append");
+    Output::write_fully(&mut writer, b"x").expect_err("zero file-size limit should reject append");
     let failure_state =
         std::hint::black_box(LocalFileWriter::failure_state as fn(&LocalFileWriter) -> Option<LocalWriteFailureState>);
     assert_eq!(

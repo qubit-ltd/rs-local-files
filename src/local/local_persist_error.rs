@@ -43,7 +43,7 @@ use crate::outcome::LocalTempSourceState;
 /// temporary resource that can be cleaned up explicitly:
 ///
 /// ```
-/// use std::io::Write;
+/// use qubit_io::Output;
 ///
 /// use qubit_local_files::LocalFileSystem;
 /// use qubit_local_files::options::LocalTempDirectoryOptions;
@@ -61,7 +61,7 @@ use crate::outcome::LocalTempSourceState;
 /// std::fs::write(&target, b"existing manifest")?;
 /// let options = LocalTempFileOptions::new().with_parent(parent.path());
 /// let mut temporary = filesystem.create_temp_file_with_options(&options)?;
-/// temporary.write_all(br#"{"complete":true}"#)?;
+/// Output::write_fully(&mut temporary, br#"{"complete":true}"#)?;
 ///
 /// let failure = temporary
 ///     .persist(&target)

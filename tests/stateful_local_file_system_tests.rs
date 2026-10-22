@@ -8,13 +8,13 @@
 //! Stateful filesystem, virtual PWD, and explicit-option contract tests.
 
 use std::fs;
-use std::io::Write;
 use std::path::Path;
 #[cfg(not(windows))]
 use std::process::Command;
 use std::sync::Arc;
 use std::sync::Mutex;
 
+use qubit_io::Output;
 use qubit_local_files::LocalFileSystem;
 #[cfg(unix)]
 use qubit_local_files::LocalResult;
@@ -524,9 +524,7 @@ fn test_rooted_temp_resources_use_explicit_persistence_base() {
         .expect("first PWD should be selected");
     let mut temporary = filesystem.create_temp_file().expect("temporary file should be created");
     assert!(temporary.path().starts_with(Path::new("/first")));
-    temporary
-        .write_all(b"payload")
-        .expect("temporary payload should be written");
+    Output::write_fully(&mut temporary, b"payload").expect("temporary payload should be written");
 
     filesystem
         .set_current_directory(Path::new("/second"))
@@ -562,9 +560,7 @@ fn test_temp_file_persist_preserves_directory_qualified_target_intent() {
     let directory = tempdir().expect("temporary root should be created");
     let filesystem = LocalFileSystem::rooted(directory.path()).expect("Rooted filesystem should open");
     let mut temporary = filesystem.create_temp_file().expect("temporary file should be created");
-    temporary
-        .write_all(b"payload")
-        .expect("temporary payload should be written");
+    Output::write_fully(&mut temporary, b"payload").expect("temporary payload should be written");
 
     let error = temporary
         .persist(Path::new("/published/"))
@@ -600,7 +596,7 @@ fn test_rooted_writer_retains_its_open_time_pwd_snapshot() {
     filesystem
         .set_current_directory(Path::new("/second"))
         .expect("filesystem PWD should be independently mutable");
-    writer.write_all(b"payload").expect("writer should accept bytes");
+    Output::write_fully(&mut writer, b"payload").expect("writer should accept bytes");
     let _ = writer
         .commit()
         .expect("writer should publish to its original destination");

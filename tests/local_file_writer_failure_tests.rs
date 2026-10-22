@@ -9,8 +9,8 @@
 use std::error::Error as StdError;
 use std::fs;
 use std::io::IoSlice;
-use std::io::Write;
 
+use qubit_io::Output;
 use qubit_local_files::LocalFileSystem;
 use qubit_local_files::error::LocalFileErrorKind;
 use qubit_local_files::error::LocalFileOperation;
@@ -47,9 +47,7 @@ fn test_local_file_writer_retries_transient_stream_errors() {
                 let error = writer.write(b"payload").expect_err("initial write should block");
                 assert_eq!(std::io::ErrorKind::WouldBlock, error.kind());
             }
-            writer
-                .write_all(b"payload")
-                .expect("transient failure should be retryable");
+            Output::write_fully(&mut writer, b"payload").expect("transient failure should be retryable");
             assert_eq!(None, writer.failure_state());
             assert_eq!(7, writer.commit().expect("commit should succeed").bytes_written());
             assert_eq!(
@@ -74,7 +72,7 @@ fn test_local_file_writer_stream_failure_preserves_publication_certainty() {
         let mut writer = filesystem
             .open_writer_with_options(&target, &LocalWriteOptions::new(mode))
             .expect("writer should open");
-        writer.write_all(b"+").expect("first write should succeed");
+        Output::write_fully(&mut writer, b"+").expect("first write should succeed");
         let _fault = install_test_fault("local-writer-write-failed").expect("fault should install");
         writer.write(b"lost").expect_err("native write should fail");
         let expected = if mode == LocalWriteMode::Append {
@@ -143,9 +141,7 @@ fn test_local_file_writer_append_commit_reports_direct_publication() {
         .write_vectored(&[IoSlice::new(b"-vec"), IoSlice::new(b"tor")])
         .expect("append writer should accept vectored bytes");
     assert!((1..=7).contains(&written));
-    writer
-        .write_all(&b"-vector"[written..])
-        .expect("remaining bytes should be accepted");
+    Output::write_fully(&mut writer, &b"-vector"[written..]).expect("remaining bytes should be accepted");
     writer
         .flush()
         .expect("append writer should flush directly published bytes");
@@ -182,9 +178,7 @@ fn test_local_file_writer_append_abort_reports_aborted_and_published_states() {
         .expect("Host filesystem should open")
         .open_writer_with_options(&target, &LocalWriteOptions::new(LocalWriteMode::Append))
         .expect("second append writer should open");
-    published
-        .write_all(b"-published")
-        .expect("append writer should accept bytes");
+    Output::write_fully(&mut published, b"-published").expect("append writer should accept bytes");
     let published_outcome = published.abort().expect("append abort should flush");
     assert_eq!(LocalWriterState::Aborted, published_outcome.state());
     assert_eq!(
@@ -210,7 +204,7 @@ fn test_local_file_writer_creates_missing_parent_when_requested() {
             &LocalWriteOptions::new(LocalWriteMode::CreateNew).with_create_parent(),
         )
         .expect("writer should create the requested parent directory");
-    writer.write_all(b"payload").expect("staged writer should accept bytes");
+    Output::write_fully(&mut writer, b"payload").expect("staged writer should accept bytes");
     let outcome = writer.commit().expect("staged writer should commit");
 
     assert_eq!(LocalWriterState::Committed, outcome.state());
@@ -236,7 +230,7 @@ fn test_local_file_writer_creates_nested_durable_parent_chain() {
                 .with_durability(LocalDurabilityRequirement::Required),
         )
         .expect("writer should create and synchronize missing parents");
-    writer.write_all(b"payload").expect("staged writer should accept bytes");
+    Output::write_fully(&mut writer, b"payload").expect("staged writer should accept bytes");
     let outcome = writer.commit().expect("durable staged writer should commit");
 
     assert!(outcome.durable());
@@ -264,7 +258,7 @@ fn test_local_file_writer_detects_created_ancestor_sync_failure() {
                 .with_durability(LocalDurabilityRequirement::Required),
         )
         .expect("writer should create the requested parent chain");
-    writer.write_all(b"payload").expect("writer should accept bytes");
+    Output::write_fully(&mut writer, b"payload").expect("writer should accept bytes");
     let _fault = install_test_fault("atomic-writer-created-parent-sync").expect("fault should install");
 
     let error = writer.commit().expect_err("ancestor sync failure should be reported");
@@ -312,7 +306,7 @@ fn test_local_file_writer_flushes_staging_without_publishing_destination() {
         .expect("Host filesystem should open")
         .open_writer_with_options(&target, &LocalWriteOptions::new(LocalWriteMode::CreateNew))
         .expect("staged writer should open");
-    writer.write_all(b"payload").expect("staged writer should accept bytes");
+    Output::write_fully(&mut writer, b"payload").expect("staged writer should accept bytes");
     writer.flush().expect("staged writer should flush its staging file");
 
     assert!(!target.exists());
@@ -334,7 +328,7 @@ fn test_local_file_writer_commit_conflict_preserves_concurrent_destination() {
         .expect("Host filesystem should open")
         .open_writer_with_options(&target, &LocalWriteOptions::new(LocalWriteMode::CreateNew))
         .expect("create-new writer should open for an absent target");
-    writer.write_all(b"staged").expect("writer should accept staged bytes");
+    Output::write_fully(&mut writer, b"staged").expect("writer should accept staged bytes");
     fs::write(&target, b"concurrent").expect("concurrent destination should be created");
 
     let error = writer
@@ -361,9 +355,7 @@ fn test_local_file_commit_error_exposes_complete_public_context() {
         .expect("Host filesystem should open")
         .open_writer_with_options(&target, &LocalWriteOptions::new(LocalWriteMode::CreateNew))
         .expect("create-new writer should open before the target exists");
-    writer
-        .write_all(b"staged")
-        .expect("staged writer should accept payload");
+    Output::write_fully(&mut writer, b"staged").expect("staged writer should accept payload");
     fs::write(&target, b"concurrent").expect("concurrent destination should be created");
 
     let error = writer
@@ -400,7 +392,7 @@ fn test_local_file_writer_append_honors_durability_policies() {
                 &LocalWriteOptions::new(LocalWriteMode::Append).with_durability(requirement),
             )
             .expect("append writer should open for a regular file");
-        writer.write_all(b"+").expect("append writer should accept one byte");
+        Output::write_fully(&mut writer, b"+").expect("append writer should accept one byte");
         let outcome = writer
             .commit()
             .expect("regular-file durability synchronization should succeed");
@@ -428,9 +420,7 @@ fn test_local_file_writer_returns_retryable_writer_before_publication() {
         .expect("Host filesystem should open")
         .open_writer_with_options(&target, &LocalWriteOptions::new(LocalWriteMode::CreateOrReplace))
         .expect("replacement writer should open before destination removal");
-    writer
-        .write_all(b"staged")
-        .expect("replacement writer should accept staged bytes");
+    Output::write_fully(&mut writer, b"staged").expect("replacement writer should accept staged bytes");
     fs::remove_file(&target).expect("existing destination should be removed before commit");
 
     let error = writer
@@ -500,9 +490,7 @@ fn test_local_file_writer_rooted_sessions_report_commit_and_abort_outcomes() {
         .write_vectored(&[IoSlice::new(b"root"), IoSlice::new(b"ed")])
         .expect("rooted writer should accept vectored bytes");
     assert!((1..=6).contains(&written));
-    committed
-        .write_all(&b"rooted"[written..])
-        .expect("remaining bytes should be accepted");
+    Output::write_fully(&mut committed, &b"rooted"[written..]).expect("remaining bytes should be accepted");
     committed.flush().expect("rooted staging should flush");
     let committed_outcome = committed.commit().expect("rooted staged writer should commit");
 
@@ -519,9 +507,7 @@ fn test_local_file_writer_rooted_sessions_report_commit_and_abort_outcomes() {
     let mut aborted = rooted
         .open_writer_with_options(Path::new("aborted"), &LocalWriteOptions::new(LocalWriteMode::CreateNew))
         .expect("second rooted staged writer should open");
-    aborted
-        .write_all(b"discarded")
-        .expect("aborted rooted writer should accept bytes");
+    Output::write_fully(&mut aborted, b"discarded").expect("aborted rooted writer should accept bytes");
     let aborted_outcome = aborted.abort().expect("rooted writer should abort");
 
     assert_eq!(LocalWriterState::Aborted, aborted_outcome.state());
@@ -548,9 +534,7 @@ fn test_local_file_writer_rooted_prepublication_failure_retains_writer() {
             &LocalWriteOptions::new(LocalWriteMode::CreateOrReplace),
         )
         .expect("rooted replacement writer should open");
-    writer
-        .write_all(b"staged")
-        .expect("rooted replacement should accept staged bytes");
+    Output::write_fully(&mut writer, b"staged").expect("rooted replacement should accept staged bytes");
     fs::remove_file(&target).expect("inspected rooted destination should be removed");
 
     let error = writer
@@ -651,9 +635,7 @@ fn test_local_file_writer_exercises_atomic_install_fault_boundaries() {
                 .expect("Host filesystem should open")
                 .open_writer_with_options(&target, &LocalWriteOptions::new(mode))
                 .expect("atomic writer should open");
-            writer
-                .write_all(b"replacement")
-                .expect("staging writer should accept replacement bytes");
+            Output::write_fully(&mut writer, b"replacement").expect("staging writer should accept replacement bytes");
 
             assert_eq!(
                 fails,
@@ -678,9 +660,7 @@ fn test_local_file_writer_reports_injected_replacement_failure() {
             .expect("Host filesystem should open")
             .open_writer_with_options(&target, &LocalWriteOptions::new(LocalWriteMode::CreateOrReplace))
             .expect("replacement writer should open");
-        writer
-            .write_all(b"replacement")
-            .expect("replacement writer should accept staged bytes");
+        Output::write_fully(&mut writer, b"replacement").expect("replacement writer should accept staged bytes");
 
         let error = writer
             .commit()
@@ -711,9 +691,7 @@ fn test_local_file_writer_reports_injected_append_commit_flush_failure() {
             .expect("Host filesystem should open")
             .open_writer_with_options(&target, &LocalWriteOptions::new(LocalWriteMode::Append))
             .expect("append writer should open");
-        writer
-            .write_all(b"+")
-            .expect("append write should succeed before flush fault");
+        Output::write_fully(&mut writer, b"+").expect("append write should succeed before flush fault");
 
         let error = writer.commit().expect_err("injected append flush must fail commit");
         assert_eq!(LocalWriteFailureState::Indeterminate, error.state());
@@ -738,9 +716,7 @@ fn test_local_file_writer_reports_injected_required_append_sync_failure() {
                 &LocalWriteOptions::new(LocalWriteMode::Append).with_durability(LocalDurabilityRequirement::Required),
             )
             .expect("append writer should open");
-        writer
-            .write_all(b"+")
-            .expect("append write should succeed before sync fault");
+        Output::write_fully(&mut writer, b"+").expect("append write should succeed before sync fault");
 
         let error = writer.commit().expect_err("injected append sync must fail commit");
         assert_eq!(LocalWriteFailureState::Published, error.state());

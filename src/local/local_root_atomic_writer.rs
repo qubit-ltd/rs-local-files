@@ -839,17 +839,17 @@ impl LocalRootAtomicWriter {
     }
 }
 
-impl Write for LocalRootAtomicWriter {
+impl LocalRootAtomicWriter {
     /// Writes bytes into the private rooted staging file.
     #[inline]
-    fn write(&mut self, buffer: &[u8]) -> io::Result<usize> {
+    fn write_once(&mut self, buffer: &[u8]) -> io::Result<usize> {
         #[cfg(unix)]
         {
-            self.staged_file.file_mut().write(buffer)
+            Write::write(self.staged_file.file_mut(), buffer)
         }
         #[cfg(windows)]
         {
-            self.staged_file.file_mut().write(buffer)
+            Write::write(self.staged_file.file_mut(), buffer)
         }
         #[cfg(not(any(unix, windows)))]
         {
@@ -863,7 +863,7 @@ impl Write for LocalRootAtomicWriter {
 
     /// Writes bytes from multiple buffers into the rooted staging file.
     #[inline]
-    fn write_vectored(&mut self, buffers: &[io::IoSlice<'_>]) -> io::Result<usize> {
+    pub(crate) fn write_vectored(&mut self, buffers: &[io::IoSlice<'_>]) -> io::Result<usize> {
         #[cfg(unix)]
         {
             self.staged_file.file_mut().write_vectored(buffers)
@@ -881,17 +881,60 @@ impl Write for LocalRootAtomicWriter {
             ))
         }
     }
+}
 
-    /// Flushes userspace data into the private rooted staging file.
-    #[inline]
+#[cfg(all(test, unix))]
+mod output_range_tests {
+    use std::path::Path;
+
+    use tempfile::tempdir;
+
+    use super::LocalRootAtomicWriter;
+    use crate::LocalAtomicWriteOptions;
+    use crate::LocalDurabilityRequirement;
+    use crate::LocalRelativePath;
+
+    #[test]
+    fn rooted_atomic_writer_output_range_preserves_sentinels() {
+        let directory = tempdir().expect("temporary directory should be created");
+        let root = std::fs::File::open(directory.path()).expect("root directory should open");
+        let path = LocalRelativePath::new(Path::new("target")).expect("relative path should be valid");
+        let options = LocalAtomicWriteOptions::new().with_durability(LocalDurabilityRequirement::NotRequired);
+        let mut writer = LocalRootAtomicWriter::new(&root, directory.path(), &path, options)
+            .expect("rooted atomic writer should open");
+        // SAFETY: 2..5 is a valid input range.
+        assert_eq!(
+            3,
+            unsafe { qubit_io::Output::write_unchecked(&mut writer, b"!!xyz!!", 2, 3) }.unwrap()
+        );
+        // SAFETY: 7..7 is a valid empty input range.
+        assert_eq!(
+            0,
+            unsafe { qubit_io::Output::write_unchecked(&mut writer, b"1234567", 7, 0) }.unwrap()
+        );
+        writer.commit_with_durability().expect("rooted writer should commit");
+        assert_eq!(
+            b"xyz",
+            std::fs::read(directory.path().join("target")).unwrap().as_slice()
+        );
+    }
+}
+
+impl qubit_io::Output for LocalRootAtomicWriter {
+    type Item = u8;
+
+    unsafe fn write_unchecked(&mut self, input: &[u8], index: usize, count: usize) -> io::Result<usize> {
+        self.write_once(&input[index..index + count])
+    }
+
     fn flush(&mut self) -> io::Result<()> {
         #[cfg(unix)]
         {
-            self.staged_file.file_mut().flush()
+            Write::flush(self.staged_file.file_mut())
         }
         #[cfg(windows)]
         {
-            self.staged_file.file_mut().flush()
+            Write::flush(self.staged_file.file_mut())
         }
         #[cfg(not(any(unix, windows)))]
         {

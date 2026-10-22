@@ -9,10 +9,10 @@
 
 #[cfg(unix)]
 use std::fs;
-use std::io::Write;
 #[cfg(unix)]
 use std::os::unix::fs::symlink;
 
+use qubit_io::Output;
 use qubit_local_files::LocalFileSystem;
 use qubit_local_files::options::LocalPersistOptions;
 use qubit_local_files::options::LocalTempFileOptions;
@@ -42,9 +42,7 @@ fn test_local_persist_outcome_reports_published_path_and_guarantees() {
         .expect("Host filesystem should open")
         .create_temp_file_with_options(&LocalTempFileOptions::new().with_parent(root.path()))
         .expect("temporary file must be created");
-    temporary
-        .write_all(b"payload")
-        .expect("temporary file must be writable");
+    Output::write_fully(&mut temporary, b"payload").expect("temporary file must be writable");
 
     let outcome = temporary
         .persist_with(&target, LocalPersistOptions::new())
@@ -79,9 +77,7 @@ fn test_local_file_persist_outcome_preserves_logical_target_path() {
         .expect("Host filesystem should open")
         .create_temp_file_with_options(&LocalTempFileOptions::new().with_parent(root.path()))
         .expect("temporary file must be created");
-    temporary
-        .write_all(b"payload")
-        .expect("temporary file must be writable");
+    Output::write_fully(&mut temporary, b"payload").expect("temporary file must be writable");
 
     let outcome = temporary
         .persist_with(&target, LocalPersistOptions::new())

@@ -14,10 +14,11 @@ use std::io::IoSlice;
 use std::io::Result;
 use std::io::Seek;
 use std::io::SeekFrom;
-use std::io::Write;
 use std::path::Path;
 use std::path::PathBuf;
 use std::sync::Arc;
+
+use qubit_io::Output;
 
 use super::internal::LocalTempResourceBackend;
 use super::internal::LocalTempResourceCore;
@@ -61,17 +62,24 @@ use crate::path::LocalPathResolver;
 /// # Examples
 ///
 /// ```no_run
-/// use std::io::Write;
+/// use qubit_io::Output;
 ///
 /// use qubit_local_files::LocalFileSystem;
 ///
 /// # fn main() -> Result<(), Box<dyn std::error::Error>> {
 /// let filesystem = LocalFileSystem::host()?;
 /// let mut temporary = filesystem.create_temp_file()?;
-/// temporary.write_all(b"temporary data")?;
+/// temporary.write_fully(b"temporary data")?;
 /// temporary.cleanup()?;
 /// # Ok(())
 /// # }
+/// ```
+///
+/// `LocalTempFile` implements [`Output`], not `std::io::Write`:
+///
+/// ```compile_fail
+/// fn require_write<T: std::io::Write>() {}
+/// require_write::<qubit_local_files::LocalTempFile>();
 /// ```
 #[must_use = "use explicit cleanup to observe errors; drop only attempts cleanup"]
 #[derive(Debug)]
@@ -748,23 +756,32 @@ fn synchronize_destination(
     }
 }
 
-impl Write for LocalTempFile {
-    /// Writes bytes to the still-open temporary file.
-    #[inline]
-    fn write(&mut self, buffer: &[u8]) -> Result<usize> {
-        self.as_file_mut()?.write(buffer)
-    }
-
+impl LocalTempFile {
     /// Writes vectored bytes to the still-open temporary file.
     #[inline]
-    fn write_vectored(&mut self, buffers: &[IoSlice<'_>]) -> Result<usize> {
-        self.as_file_mut()?.write_vectored(buffers)
+    pub fn write_vectored(&mut self, buffers: &[IoSlice<'_>]) -> Result<usize> {
+        std::io::Write::write_vectored(self.as_file_mut()?, buffers)
+    }
+}
+
+impl Output for LocalTempFile {
+    type Item = u8;
+
+    /// Writes the requested valid range to the still-open temporary file.
+    ///
+    /// # Safety
+    ///
+    /// `index..index + count` must be a valid range inside `input`, and the
+    /// addition must not overflow.
+    #[inline]
+    unsafe fn write_unchecked(&mut self, input: &[u8], index: usize, count: usize) -> Result<usize> {
+        std::io::Write::write(self.as_file_mut()?, &input[index..index + count])
     }
 
     /// Flushes the still-open temporary file.
     #[inline]
     fn flush(&mut self) -> Result<()> {
-        self.as_file_mut()?.flush()
+        std::io::Write::flush(self.as_file_mut()?)
     }
 }
 

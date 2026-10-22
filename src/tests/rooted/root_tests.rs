@@ -9,10 +9,10 @@
 
 use std::fs;
 use std::io;
-use std::io::Read;
-use std::io::Write;
 use std::path::Path;
 
+use qubit_io::Input;
+use qubit_io::Output;
 use tempfile::tempdir;
 
 use crate::local::LocalRelativePath;
@@ -67,15 +67,14 @@ fn test_root_authority_manages_descendant_entries() {
         .open_reader(&file, &InternalReadOptions::default())
         .expect("rooted reader should open");
     let mut content = String::new();
-    reader
-        .read_to_string(&mut content)
+    std::io::Read::read_to_string(&mut qubit_io::InputRef::new(&mut reader).into_std_read(), &mut content)
         .expect("rooted reader should read fixture content");
     assert_eq!("payload", content);
     drop(reader);
     let appended = LocalRelativePath::new(Path::new("nested/appended")).expect("appended path should be valid");
     root.open_writer(&appended, &InternalWriteOptions::default())
         .expect("rooted writer should open")
-        .write_all(b"appended")
+        .write_fully(b"appended")
         .expect("rooted writer should write fixture bytes");
     root.remove_file(&appended).expect("appended file should be removed");
     root.remove_file(&file).expect("file should be removed");

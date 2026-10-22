@@ -6,7 +6,6 @@
 //    Licensed under the Apache License, Version 2.0.
 // =============================================================================
 
-#[cfg(not(windows))]
 use std::env;
 use std::fs;
 use std::io::ErrorKind;
@@ -19,6 +18,7 @@ use std::path::PathBuf;
 #[cfg(not(windows))]
 use std::process::Command;
 
+use qubit_io::Output;
 use qubit_local_files::LocalFileSystem;
 use qubit_local_files::error::LocalFileErrorKind;
 #[cfg(feature = "test-support")]
@@ -145,9 +145,7 @@ fn test_local_temp_file_keep_retains_contents_after_guard_is_consumed() {
             .expect("Host filesystem should open")
             .create_temp_file_with_options(&LocalTempFileOptions::new().with_parent(parent.path()))
             .expect("temporary file should be created");
-        temporary
-            .write_all(b"payload")
-            .expect("temporary file should accept bytes");
+        Output::write_fully(&mut temporary, b"payload").expect("temporary file should accept bytes");
         let outcome = temporary.keep().expect("temporary file should publish");
         assert!(!outcome.durable());
         outcome.into_parts().0
@@ -270,9 +268,7 @@ fn test_local_temp_file_persist_reports_required_host_durability() {
         .expect("Host filesystem should open")
         .create_temp_file_with_options(&LocalTempFileOptions::new().with_parent(parent.path()))
         .expect("temporary file should be created");
-    temporary
-        .write_all(b"durable payload")
-        .expect("temporary file should be writable");
+    Output::write_fully(&mut temporary, b"durable payload").expect("temporary file should be writable");
 
     let outcome = temporary
         .persist_with(
@@ -304,9 +300,7 @@ fn test_local_temp_file_persist_reports_required_rooted_durability() {
                 .with_create_parent(),
         )
         .expect("rooted temporary file should be created");
-    temporary
-        .write_all(b"durable payload")
-        .expect("temporary file should be writable");
+    Output::write_fully(&mut temporary, b"durable payload").expect("temporary file should be writable");
 
     let outcome = temporary
         .persist_with(
@@ -539,9 +533,7 @@ fn test_local_temp_file_reads_back_written_content_before_cleanup() {
         .write_vectored(&[IoSlice::new(b"pay"), IoSlice::new(b"load")])
         .expect("temporary file should accept vectored bytes");
     assert!((1..=7).contains(&written));
-    temporary
-        .write_all(&b"payload"[written..])
-        .expect("remaining bytes should be accepted");
+    Output::write_fully(&mut temporary, &b"payload"[written..]).expect("remaining bytes should be accepted");
     let offset = temporary
         .stream_position()
         .expect("temporary file should report its current offset");
@@ -715,9 +707,7 @@ fn test_rooted_temp_file_persist_with_overwrite_replaces_target() {
     let mut temporary = rooted
         .create_temp_file_with_options(&LocalTempFileOptions::new())
         .expect("rooted temporary file should be created");
-    temporary
-        .write_all(b"replacement")
-        .expect("rooted temporary file should accept bytes");
+    Output::write_fully(&mut temporary, b"replacement").expect("rooted temporary file should accept bytes");
 
     let persisted = temporary
         .persist_with(
@@ -745,9 +735,7 @@ fn test_rooted_temp_file_persist_publishes_absent_target() {
     let mut temporary = rooted
         .create_temp_file_with_options(&LocalTempFileOptions::new())
         .expect("rooted temporary file should be created");
-    temporary
-        .write_all(b"payload")
-        .expect("rooted temporary file should accept bytes");
+    Output::write_fully(&mut temporary, b"payload").expect("rooted temporary file should accept bytes");
     let source = temporary.path().to_path_buf();
 
     let outcome = temporary
@@ -972,9 +960,7 @@ fn test_local_temp_file_persist_respects_conflict_and_overwrite_policy() {
         .expect("Host filesystem should open")
         .create_temp_file_with_options(&LocalTempFileOptions::new().with_parent(parent.path()))
         .expect("temporary file should be created");
-    temporary
-        .write_all(b"replacement")
-        .expect("temporary file should accept bytes");
+    Output::write_fully(&mut temporary, b"replacement").expect("temporary file should accept bytes");
 
     let error = temporary
         .persist(&target)
@@ -1012,7 +998,7 @@ fn test_local_temp_file_close_rejects_stream_access_and_allows_cleanup() {
     let path = temporary.path().to_path_buf();
 
     temporary.close();
-    assert!(temporary.write_all(b"unavailable").is_err());
+    assert!(Output::write_fully(&mut temporary, b"unavailable").is_err());
     assert!(temporary.write_vectored(&[IoSlice::new(b"unavailable")]).is_err());
     assert!(temporary.flush().is_err());
     assert!(temporary.seek(SeekFrom::Start(0)).is_err());

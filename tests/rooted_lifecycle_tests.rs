@@ -8,10 +8,10 @@
 
 use std::fs;
 #[cfg(not(windows))]
-use std::io::Read;
-use std::io::Write;
 use std::path::Path;
 
+use qubit_io::Input;
+use qubit_io::Output;
 use qubit_local_files::LocalFileSystem;
 use qubit_local_files::error::LocalFileErrorKind;
 #[cfg(not(windows))]
@@ -58,9 +58,7 @@ fn test_rooted_local_file_system_runs_core_entry_workflow() {
         .open_writer_with_options(payload, &LocalWriteOptions::new(LocalWriteMode::CreateNew))
         .expect("rooted writer should open");
     assert_eq!(Some(parent.path().join(payload).as_path()), writer.diagnostic_path());
-    writer
-        .write_all(b"first")
-        .expect("rooted writer should accept staged bytes");
+    Output::write_fully(&mut writer, b"first").expect("rooted writer should accept staged bytes");
     let outcome = writer.commit().expect("rooted writer should commit");
     assert_eq!(LocalWriterState::Committed, outcome.state());
     assert!(outcome.atomic());
@@ -73,8 +71,7 @@ fn test_rooted_local_file_system_runs_core_entry_workflow() {
         .open_reader_with_options(payload, &LocalReadOptions::new())
         .expect("rooted payload should open for reading");
     let mut content = String::new();
-    reader
-        .read_to_string(&mut content)
+    std::io::Read::read_to_string(&mut qubit_io::InputRef::new(&mut reader).into_std_read(), &mut content)
         .expect("rooted reader should return payload bytes");
     assert_eq!("first", content);
 
@@ -122,9 +119,7 @@ fn test_rooted_sessions_report_diagnostic_paths_after_root_rename() {
         .open_writer_with_options(Path::new("written"), &LocalWriteOptions::new(LocalWriteMode::CreateNew))
         .expect("rooted writer should open through retained authority");
     assert_eq!(Some(original.join("written").as_path()), writer.diagnostic_path());
-    writer
-        .write_all(b"authoritative")
-        .expect("writer should retain opened root authority");
+    Output::write_fully(&mut writer, b"authoritative").expect("writer should retain opened root authority");
     let _ = writer.commit().expect("writer should publish through opened root");
     assert_eq!(
         b"authoritative",
@@ -212,9 +207,7 @@ fn test_rooted_local_file_system_append_commit_and_abort_report_states() {
     let mut committed = rooted
         .open_writer_with_options(Path::new("payload"), &LocalWriteOptions::new(LocalWriteMode::Append))
         .expect("rooted append writer should open");
-    committed
-        .write_all(b"-commit")
-        .expect("rooted append writer should accept bytes");
+    Output::write_fully(&mut committed, b"-commit").expect("rooted append writer should accept bytes");
     let committed_outcome = committed.commit().expect("rooted append writer should commit");
     assert_eq!(LocalWriterState::Committed, committed_outcome.state());
     assert!(!committed_outcome.atomic());
@@ -222,9 +215,7 @@ fn test_rooted_local_file_system_append_commit_and_abort_report_states() {
     let mut aborted = rooted
         .open_writer_with_options(Path::new("payload"), &LocalWriteOptions::new(LocalWriteMode::Append))
         .expect("second rooted append writer should open");
-    aborted
-        .write_all(b"-abort")
-        .expect("second rooted append writer should accept bytes");
+    Output::write_fully(&mut aborted, b"-abort").expect("second rooted append writer should accept bytes");
     let aborted_outcome = aborted.abort().expect("append abort should flush");
     assert_eq!(LocalWriterState::Aborted, aborted_outcome.state());
     assert_eq!(Some(LocalWriteFailureState::Published), aborted_outcome.failure_state(),);

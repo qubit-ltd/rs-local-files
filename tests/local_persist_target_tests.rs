@@ -8,9 +8,9 @@
 //! Explicit persistence bases are independent of temporary creation spelling.
 
 use std::fs;
-use std::io::Write;
 use std::path::Path;
 
+use qubit_io::Output;
 use qubit_local_files::LocalFileSystem;
 use qubit_local_files::options::LocalPersistOptions;
 use qubit_local_files::options::LocalTempDirectoryOptions;
@@ -24,7 +24,7 @@ fn test_persist_at_accepts_rooted_base_link_to_virtual_root() {
     std::os::unix::fs::symlink("/", dir.path().join("root-link")).expect("virtual root link");
     let filesystem = LocalFileSystem::rooted(dir.path()).expect("rooted filesystem");
     let mut file = filesystem.create_temp_file().expect("temporary file");
-    file.write_all(b"root-bound").expect("temporary contents");
+    Output::write_fully(&mut file, b"root-bound").expect("temporary contents");
     let _ = file
         .persist_at(
             Path::new("/root-link"),
@@ -70,7 +70,7 @@ fn test_persist_at_uses_explicit_base_for_both_resources() {
         let mut temporary = filesystem
             .create_temp_file_with_options(&LocalTempFileOptions::new().with_parent(creation))
             .expect("temporary file");
-        temporary.write_all(b"payload").expect("temporary content");
+        Output::write_fully(&mut temporary, b"payload").expect("temporary content");
         let _ = temporary
             .persist_at(base, Path::new("file"), LocalPersistOptions::new())
             .expect("explicit file persistence");
@@ -104,10 +104,7 @@ fn test_invalid_target_keeps_original_file_open() {
             LocalPersistOptions::new(),
         )
         .expect_err("relative base must fail");
-    error
-        .resource_mut()
-        .write_all(b"still-open")
-        .expect("invalid parameters must not close source");
+    Output::write_fully(error.resource_mut(), b"still-open").expect("invalid parameters must not close source");
     error.resource_mut().cleanup().expect("retained cleanup");
 }
 
@@ -129,10 +126,7 @@ fn test_relative_persist_is_always_rejected_before_close() {
         let mut error = temporary
             .persist(Path::new("relative"))
             .expect_err("relative persist must fail consistently");
-        error
-            .resource_mut()
-            .write_all(b"still-open")
-            .expect("relative target must not close source");
+        Output::write_fully(error.resource_mut(), b"still-open").expect("relative target must not close source");
         error.resource_mut().cleanup().expect("retained cleanup");
     }
 }
@@ -176,10 +170,7 @@ fn test_persist_at_rejects_invalid_parameters_without_consuming_resources() {
             assert_eq!(error.stage(), LocalPersistStage::ResolveTarget);
             assert_eq!(error.requested_target(), target);
             assert_eq!(error.error().current_directory(), Some(base.as_path()));
-            error
-                .resource_mut()
-                .write_all(b"still-open")
-                .expect("invalid parameter leaves handle open");
+            Output::write_fully(error.resource_mut(), b"still-open").expect("invalid parameter leaves handle open");
             error.resource_mut().cleanup().expect("file cleanup");
             let temporary = filesystem
                 .create_temp_directory_with_options(&LocalTempDirectoryOptions::new().with_parent(root))
@@ -203,7 +194,7 @@ fn test_persist_at_retains_root_authority_after_rename() {
     fs::create_dir_all(original.join("dest")).expect("destination base");
     let filesystem = LocalFileSystem::rooted(&original).expect("root authority");
     let mut file = filesystem.create_temp_file().expect("temporary file");
-    file.write_all(b"payload").expect("source content");
+    Output::write_fully(&mut file, b"payload").expect("source content");
     let directory = filesystem.create_temp_directory().expect("temporary directory");
     fs::rename(&original, &moved).expect("rename opened root");
     fs::create_dir_all(original.join("dest")).expect("unrelated replacement root");
@@ -239,7 +230,7 @@ fn test_persist_at_host_base_uses_native_parent_order() {
     let mut temporary = filesystem
         .create_temp_file_with_options(&LocalTempFileOptions::new().with_parent(dir.path()))
         .expect("temporary file");
-    temporary.write_all(b"payload").expect("source content");
+    Output::write_fully(&mut temporary, b"payload").expect("source content");
     let _ = temporary
         .persist_at(
             &dir.path().join("a/link"),
@@ -280,7 +271,7 @@ fn test_persist_at_ignores_process_pwd_changes() {
     let directory = filesystem
         .create_temp_directory()
         .expect("PWD-relative temporary directory");
-    file.write_all(b"payload").expect("temporary content");
+    Output::write_fully(&mut file, b"payload").expect("temporary content");
     std::env::set_current_dir(&second).expect("change process PWD");
     let file_result = file.persist_at(&first, Path::new("file"), LocalPersistOptions::new());
     let directory_result = directory.persist_at(&first, Path::new("directory"), LocalPersistOptions::new());
@@ -312,10 +303,7 @@ fn test_persist_at_rejects_rooted_escape() {
         .expect_err("root escape must fail");
     assert_eq!(error.stage(), LocalPersistStage::ResolveTarget);
     assert!(error.resolved_target().is_none());
-    error
-        .resource_mut()
-        .write_all(b"still-open")
-        .expect("escape rejected before close");
+    Output::write_fully(error.resource_mut(), b"still-open").expect("escape rejected before close");
     error.resource_mut().cleanup().expect("file cleanup");
     let temporary = filesystem.create_temp_directory().expect("temporary directory");
     let mut error = temporary

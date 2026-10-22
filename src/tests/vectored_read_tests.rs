@@ -10,7 +10,8 @@ use std::collections::VecDeque;
 use std::io;
 use std::io::ErrorKind;
 use std::io::IoSliceMut;
-use std::io::Read;
+
+use qubit_io::Input;
 
 use crate::read::read_vectored_fallback;
 
@@ -31,8 +32,11 @@ impl ScriptedReader {
     }
 }
 
-impl Read for ScriptedReader {
-    fn read(&mut self, buffer: &mut [u8]) -> io::Result<usize> {
+impl Input for ScriptedReader {
+    type Item = u8;
+
+    unsafe fn read_unchecked(&mut self, buffer: &mut [u8], index: usize, count: usize) -> io::Result<usize> {
+        let buffer = &mut buffer[index..index + count];
         let action = self.actions.pop_front().unwrap_or(ScriptedAction::Bytes(Vec::new()));
         match action {
             ScriptedAction::Bytes(bytes) => {
