@@ -101,7 +101,13 @@ fn required_parent_sync_error_is_reported_after_published_file_sync() {
             .unwrap()
             .map(|entry| entry.unwrap().file_name())
             .collect();
-        panic!("published target should remain readable ({error}); directory entries: {names:?}");
+        panic!(
+            "published target should remain readable ({error}); stage={:?}, publication={:?}, \
+             failure={}, directory entries: {names:?}",
+            failure.stage(),
+            failure.publication(),
+            failure,
+        );
     });
     assert_eq!(installed, b"B");
     assert_eq!(
