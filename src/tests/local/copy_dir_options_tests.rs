@@ -103,8 +103,8 @@ fn test_copy_budget_accepts_dynamic_protocol_references() {
     let mut budget = CopyBudget::new(LocalCopyDirOptions::new());
     let mut source = Cursor::new(b"dynamic".to_vec());
     let mut destination = Vec::new();
-    let reader: &mut dyn qubit_io::Input<Item = u8> = &mut source;
-    let writer: &mut dyn qubit_io::Output<Item = u8> = &mut destination;
+    let reader: &mut dyn qubit_io::ByteInput = &mut source;
+    let writer: &mut dyn qubit_io::ByteOutput = &mut destination;
 
     assert_eq!(budget.copy(reader, writer).unwrap(), 7);
     assert_eq!(destination, b"dynamic");

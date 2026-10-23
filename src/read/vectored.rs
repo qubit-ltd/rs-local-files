@@ -10,6 +10,7 @@
 use std::io;
 use std::io::IoSliceMut;
 
+use qubit_io::ByteInput;
 use qubit_io::Input;
 
 /// Reads sequentially into vectored buffers while preserving `Read` progress
@@ -34,7 +35,7 @@ use qubit_io::Input;
 /// Returns the first read error unchanged when no bytes were read. Errors after
 /// a successful read are suppressed and the accumulated byte count is returned.
 #[cfg(any(windows, test))]
-pub(crate) fn read_vectored_fallback<R: Input<Item = u8> + ?Sized>(
+pub(crate) fn read_vectored_fallback<R: ByteInput + ?Sized>(
     reader: &mut R,
     buffers: &mut [IoSliceMut<'_>],
 ) -> io::Result<usize> {

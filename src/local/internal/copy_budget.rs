@@ -15,6 +15,8 @@ use qubit_budget::InsufficientBudgetError;
 use qubit_budget::ManagedResourcePermit;
 use qubit_budget::ManagedResourcePool;
 use qubit_budget::ResourceBudget;
+use qubit_io::ByteInput;
+use qubit_io::ByteOutput;
 use qubit_io::Input;
 use qubit_io::Output;
 
@@ -157,8 +159,8 @@ impl CopyBudget {
     /// structured copied-byte resource-limit error.
     pub fn copy<R, W>(&mut self, reader: &mut R, writer: &mut W) -> io::Result<u64>
     where
-        R: Input<Item = u8> + ?Sized,
-        W: Output<Item = u8> + ?Sized,
+        R: ByteInput + ?Sized,
+        W: ByteOutput + ?Sized,
     {
         self.copy_with_now(reader, writer, Instant::now)
     }
@@ -167,8 +169,8 @@ impl CopyBudget {
     /// read and write progress boundary.
     pub(crate) fn copy_with_now<R, W, N>(&mut self, reader: &mut R, writer: &mut W, mut now: N) -> io::Result<u64>
     where
-        R: Input<Item = u8> + ?Sized,
-        W: Output<Item = u8> + ?Sized,
+        R: ByteInput + ?Sized,
+        W: ByteOutput + ?Sized,
         N: FnMut() -> Instant,
     {
         let mut buffer = [0_u8; COPY_CHUNK_SIZE];
@@ -234,7 +236,7 @@ impl CopyBudget {
         now: &mut N,
     ) -> io::Result<()>
     where
-        W: Output<Item = u8> + ?Sized,
+        W: ByteOutput + ?Sized,
         N: FnMut() -> Instant,
     {
         while !source.is_empty() {
