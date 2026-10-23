@@ -270,7 +270,9 @@ fn conditional_windows_host_content_preserves_destination_acl() {
     .expect("matching content should publish");
     let dacl_after = dacl_bytes(&target);
     assert!(
-        dacl_after.starts_with(&dacl_before),
+        dacl_after[8..]
+            .windows(dacl_before.len() - 8)
+            .any(|entries| entries == &dacl_before[8..]),
         "ReplaceFileW should retain the target DACL while merging inherited ACEs",
     );
 }
