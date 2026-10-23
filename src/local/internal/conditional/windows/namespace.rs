@@ -513,21 +513,7 @@ impl Namespace {
     }
 
     pub(super) fn rename(&self, source: &OsStr, destination: &OsStr, overwrite: bool) -> io::Result<()> {
-        match &self.scope {
-            Scope::Host { .. } => {
-                let from = self.host_child_path(source)?;
-                let to = self.host_child_path(destination)?;
-                if overwrite {
-                    std::fs::rename(from, to)
-                } else {
-                    std::fs::hard_link(&from, &to)?;
-                    std::fs::remove_file(from)
-                }
-            }
-            Scope::Rooted { .. } => {
-                rename_conditional_entry_at(&self.parent, source, &self.parent, destination, overwrite)
-            }
-        }
+        rename_conditional_entry_at(&self.parent, source, &self.parent, destination, overwrite)
     }
 
     pub(super) fn remove(&self, entry: &ConditionalEntry) -> io::Result<()> {

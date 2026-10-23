@@ -43,11 +43,7 @@ pub(super) fn replace_with_backup(target: &Path, replacement: &Path, backup: &Pa
 
 /// Installs a candidate only when the destination name is absent.
 pub(super) fn install_absent(namespace: &Namespace, candidate: &OsStr) -> io::Result<()> {
-    if namespace.is_rooted() {
-        namespace.rename(candidate, namespace.target_name(), false)
-    } else {
-        std::fs::hard_link(namespace.private_file_path(candidate)?, namespace.target_path())
-    }
+    namespace.rename(candidate, namespace.target_name(), false)
 }
 
 fn wide_path(value: &OsStr) -> io::Result<Vec<u16>> {
