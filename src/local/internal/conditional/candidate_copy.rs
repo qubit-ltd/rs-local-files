@@ -1,13 +1,18 @@
 // =============================================================================
+//    Copyright (c) 2025 - 2026 Haixing Hu.
+//
+//    SPDX-License-Identifier: Apache-2.0
+//
+//    Licensed under the Apache License, Version 2.0.
+// =============================================================================
 
 use digest::Digest;
 use digest::Output;
 
-use crate::recovery::LocalRecoveryFileRole;
-
 use super::ConditionalBackend;
 use super::ConditionalEntry;
 use super::digest_reader::digest_entry;
+use crate::recovery::LocalRecoveryFileRole;
 
 pub(super) fn prepare_copy<D, B>(
     backend: &mut B,
@@ -17,9 +22,7 @@ where
     D: Digest,
     B: ConditionalBackend,
 {
-    let mut copy = backend
-        .create_candidate_copy()
-        .map_err(|error| (error, None))?;
+    let mut copy = backend.create_candidate_copy().map_err(|error| (error, None))?;
     copy.set_role(LocalRecoveryFileRole::StagedCandidate);
     if let Err(error) = backend.checkpoint(super::ConditionalPoint::CandidateCopyCreated) {
         return Err((error, Some(copy)));
@@ -30,10 +33,7 @@ where
     };
     if copied_digest != *candidate_digest {
         return Err((
-            std::io::Error::new(
-                std::io::ErrorKind::InvalidData,
-                "candidate copy digest mismatch",
-            ),
+            std::io::Error::new(std::io::ErrorKind::InvalidData, "candidate copy digest mismatch"),
             Some(copy),
         ));
     }

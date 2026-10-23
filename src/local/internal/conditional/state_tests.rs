@@ -81,12 +81,10 @@ mod conditional_state_tests {
         use super::super::ConditionalHooks;
         use super::super::ConditionalPoint;
 
-        let backend = super::super::fake_backend::FakeBackend::new(b"A", b"B").with_hooks(
-            ConditionalHooks::fail_once(
-                ConditionalPoint::Flush,
-                std::io::ErrorKind::PermissionDenied,
-            ),
-        );
+        let backend = super::super::fake_backend::FakeBackend::new(b"A", b"B").with_hooks(ConditionalHooks::fail_once(
+            ConditionalPoint::Flush,
+            std::io::ErrorKind::PermissionDenied,
+        ));
         let (_lease, target_path) = backend.target_observer();
         let error = super::super::commit::commit_conditional::<Sha256, _>(
             backend,
@@ -95,22 +93,13 @@ mod conditional_state_tests {
             1,
         )
         .expect_err("flush failure must stop before candidate verification");
-        assert_eq!(
-            error.stage(),
-            crate::error::LocalConditionalWriteStage::Prepare
-        );
-        assert_eq!(
-            error.reason(),
-            crate::error::LocalConditionalFailureReason::Io
-        );
+        assert_eq!(error.stage(), crate::error::LocalConditionalWriteStage::Prepare);
+        assert_eq!(error.reason(), crate::error::LocalConditionalFailureReason::Io);
         assert_eq!(
             error.publication(),
             crate::outcome::LocalConditionalPublicationState::NotPublished
         );
-        assert_eq!(
-            error.error().kind(),
-            crate::LocalFileErrorKind::PermissionDenied
-        );
+        assert_eq!(error.error().kind(), crate::LocalFileErrorKind::PermissionDenied);
         assert!(error.candidate().is_none());
         assert_eq!(std::fs::read(target_path).expect("target unchanged"), b"A");
     }
@@ -130,19 +119,13 @@ mod conditional_state_tests {
             error.reason(),
             crate::error::LocalConditionalFailureReason::PreconditionMismatch
         );
-        assert_eq!(
-            error.stage(),
-            crate::error::LocalConditionalWriteStage::Precheck
-        );
+        assert_eq!(error.stage(), crate::error::LocalConditionalWriteStage::Precheck);
         assert_eq!(
             error.publication(),
             crate::outcome::LocalConditionalPublicationState::NotPublished
         );
         let copy = error.candidate().expect("verified copy must be retained");
-        assert_eq!(
-            copy.role(),
-            crate::recovery::LocalRecoveryFileRole::CandidateCopy
-        );
+        assert_eq!(copy.role(), crate::recovery::LocalRecoveryFileRole::CandidateCopy);
         let reader = copy.open_reader().expect("retained copy remains readable");
         use std::io::Read;
         let mut bytes = Vec::new();
@@ -151,10 +134,7 @@ mod conditional_state_tests {
             .read_to_end(&mut bytes)
             .expect("read recovery content");
         assert_eq!(bytes, b"B");
-        assert_eq!(
-            std::fs::read(target_path).expect("precondition target remains"),
-            b"A"
-        );
+        assert_eq!(std::fs::read(target_path).expect("precondition target remains"), b"A");
     }
 
     #[test]
@@ -176,12 +156,11 @@ mod conditional_state_tests {
         use super::super::ConditionalHooks;
         use super::super::ConditionalPoint;
 
-        let backend = super::super::fake_backend::FakeBackend::new(b"A", b"B").with_hooks(
-            ConditionalHooks::sequence(vec![(
+        let backend =
+            super::super::fake_backend::FakeBackend::new(b"A", b"B").with_hooks(ConditionalHooks::sequence(vec![(
                 ConditionalPoint::CandidateCopyCreated,
                 ConditionalHookAction::CorruptCandidateCopy(b"broken".to_vec()),
-            )]),
-        );
+            )]));
         let (_lease, target_path) = backend.target_observer();
         let error = super::super::commit::commit_conditional::<Sha256, _>(
             backend,
@@ -205,14 +184,46 @@ mod conditional_state_tests {
         );
         assert_eq!(recovery_bytes(&error.recovery_files()[0]), b"broken");
         assert_eq!(std::fs::read(target_path).expect("target unchanged"), b"A");
+        assert_eq!(error.reason(), crate::error::LocalConditionalFailureReason::Io);
+        assert_eq!(error.error().kind(), crate::LocalFileErrorKind::DataCorruption);
+    }
+
+    #[test]
+    fn conditional_state_candidate_copy_digest_mismatch_retains_corrupt_copy() {
+        use super::super::ConditionalHookAction;
+        use super::super::ConditionalHooks;
+        use super::super::ConditionalPoint;
+
+        let backend =
+            super::super::fake_backend::FakeBackend::new(b"A", b"B").with_hooks(ConditionalHooks::sequence(vec![(
+                ConditionalPoint::CandidateCopyCreated,
+                ConditionalHookAction::CorruptCandidateCopy(b"damaged".to_vec()),
+            )]));
+        let (_lease, target_path) = backend.target_observer();
+        let error = super::super::commit::commit_conditional::<Sha256, _>(
+            backend,
+            LocalWritePrecondition::Content(Sha256::digest(b"A")),
+            super::super::fake_backend::required_options(),
+            1,
+        )
+        .expect_err("digest-mismatched candidate copy must not publish");
+
         assert_eq!(
-            error.reason(),
-            crate::error::LocalConditionalFailureReason::Io
+            error.stage(),
+            crate::error::LocalConditionalWriteStage::VerifyCandidateCopy
         );
         assert_eq!(
-            error.error().kind(),
-            crate::LocalFileErrorKind::DataCorruption
+            error.publication(),
+            crate::outcome::LocalConditionalPublicationState::NotPublished
         );
+        assert!(error.candidate().is_none());
+        assert_eq!(error.recovery_files().len(), 1);
+        assert_eq!(
+            error.recovery_files()[0].role(),
+            crate::recovery::LocalRecoveryFileRole::StagedCandidate
+        );
+        assert_eq!(recovery_bytes(&error.recovery_files()[0]), b"damaged");
+        assert_eq!(std::fs::read(target_path).expect("target remains unchanged"), b"A");
     }
 
     #[test]
@@ -220,12 +231,10 @@ mod conditional_state_tests {
         use super::super::ConditionalHooks;
         use super::super::ConditionalPoint;
 
-        let backend = super::super::fake_backend::FakeBackend::new(b"A", b"B").with_hooks(
-            ConditionalHooks::fail_once(
-                ConditionalPoint::SyncCandidate,
-                std::io::ErrorKind::PermissionDenied,
-            ),
-        );
+        let backend = super::super::fake_backend::FakeBackend::new(b"A", b"B").with_hooks(ConditionalHooks::fail_once(
+            ConditionalPoint::SyncCandidate,
+            std::io::ErrorKind::PermissionDenied,
+        ));
         let error = super::super::commit::commit_conditional::<Sha256, _>(
             backend,
             LocalWritePrecondition::Content(Sha256::digest(b"A")),
@@ -233,18 +242,9 @@ mod conditional_state_tests {
             1,
         )
         .expect_err("required candidate sync failure must stop publication");
-        assert_eq!(
-            error.stage(),
-            crate::error::LocalConditionalWriteStage::Sync
-        );
-        assert_eq!(
-            error.reason(),
-            crate::error::LocalConditionalFailureReason::Io
-        );
-        assert_eq!(
-            error.error().kind(),
-            crate::error::LocalFileErrorKind::PermissionDenied
-        );
+        assert_eq!(error.stage(), crate::error::LocalConditionalWriteStage::Sync);
+        assert_eq!(error.reason(), crate::error::LocalConditionalFailureReason::Io);
+        assert_eq!(error.error().kind(), crate::error::LocalFileErrorKind::PermissionDenied);
         assert!(error.candidate().is_some());
     }
 
@@ -270,26 +270,14 @@ mod conditional_state_tests {
             1,
         )
         .expect_err("required postpublication namespace sync must fail");
-        assert_eq!(
-            error.reason(),
-            crate::error::LocalConditionalFailureReason::Io
-        );
-        assert_eq!(
-            error.stage(),
-            crate::error::LocalConditionalWriteStage::Sync
-        );
+        assert_eq!(error.reason(), crate::error::LocalConditionalFailureReason::Io);
+        assert_eq!(error.stage(), crate::error::LocalConditionalWriteStage::Sync);
         assert_eq!(
             error.publication(),
             crate::outcome::LocalConditionalPublicationState::Published
         );
-        assert_eq!(
-            std::fs::read(target_path).expect("published B remains"),
-            b"B"
-        );
-        assert_eq!(
-            recovery_bytes(error.candidate().expect("verified B copy")),
-            b"B"
-        );
+        assert_eq!(std::fs::read(target_path).expect("published B remains"), b"B");
+        assert_eq!(recovery_bytes(error.candidate().expect("verified B copy")), b"B");
         let installed = error
             .recovery_files()
             .iter()
@@ -302,10 +290,7 @@ mod conditional_state_tests {
             .find(|file| file.role() == crate::recovery::LocalRecoveryFileRole::Displaced)
             .expect("old target transferred");
         assert_eq!(recovery_bytes(displaced), b"A");
-        assert_eq!(
-            error.error().kind(),
-            crate::LocalFileErrorKind::PermissionDenied
-        );
+        assert_eq!(error.error().kind(), crate::LocalFileErrorKind::PermissionDenied);
     }
 
     #[test]
@@ -313,12 +298,10 @@ mod conditional_state_tests {
         use super::super::ConditionalHooks;
         use super::super::ConditionalPoint;
 
-        let backend = super::super::fake_backend::FakeBackend::new(b"A", b"B").with_hooks(
-            ConditionalHooks::fail_once(
-                ConditionalPoint::SyncInstalled,
-                std::io::ErrorKind::PermissionDenied,
-            ),
-        );
+        let backend = super::super::fake_backend::FakeBackend::new(b"A", b"B").with_hooks(ConditionalHooks::fail_once(
+            ConditionalPoint::SyncInstalled,
+            std::io::ErrorKind::PermissionDenied,
+        ));
         let (_lease, target_path) = backend.target_observer();
         let error = super::super::commit::commit_conditional::<Sha256, _>(
             backend,
@@ -327,76 +310,48 @@ mod conditional_state_tests {
             1,
         )
         .expect_err("required installed-file sync must fail");
-        assert_eq!(
-            error.reason(),
-            crate::error::LocalConditionalFailureReason::Io
-        );
-        assert_eq!(
-            error.stage(),
-            crate::error::LocalConditionalWriteStage::Sync
-        );
+        assert_eq!(error.reason(), crate::error::LocalConditionalFailureReason::Io);
+        assert_eq!(error.stage(), crate::error::LocalConditionalWriteStage::Sync);
         assert_eq!(
             error.publication(),
             crate::outcome::LocalConditionalPublicationState::Published
         );
         assert_eq!(std::fs::read(target_path).expect("published target"), b"B");
-        assert_eq!(
-            recovery_bytes(error.candidate().expect("verified B copy")),
-            b"B"
-        );
+        assert_eq!(recovery_bytes(error.candidate().expect("verified B copy")), b"B");
         assert!(error.recovery_files().iter().any(|file| {
-            file.role() == crate::recovery::LocalRecoveryFileRole::StagedCandidate
-                && recovery_bytes(file) == b"B"
+            file.role() == crate::recovery::LocalRecoveryFileRole::StagedCandidate && recovery_bytes(file) == b"B"
         }));
         assert!(error.recovery_files().iter().any(|file| {
-            file.role() == crate::recovery::LocalRecoveryFileRole::Displaced
-                && recovery_bytes(file) == b"A"
+            file.role() == crate::recovery::LocalRecoveryFileRole::Displaced && recovery_bytes(file) == b"A"
         }));
-        assert_eq!(
-            error.error().kind(),
-            crate::LocalFileErrorKind::PermissionDenied
-        );
+        assert_eq!(error.error().kind(), crate::LocalFileErrorKind::PermissionDenied);
     }
 
     #[test]
-    fn conditional_state_save_complete_failure_keeps_installed_and_copy() {
+    fn conditional_state_save_complete_cleanup_failure_returns_success_and_retains_files() {
         use super::super::ConditionalHooks;
         use super::super::ConditionalPoint;
 
-        let backend = super::super::fake_backend::FakeBackend::new(b"A", b"B").with_hooks(
-            ConditionalHooks::fail_once(
-                ConditionalPoint::SaveComplete,
-                std::io::ErrorKind::PermissionDenied,
-            ),
-        );
+        let backend = super::super::fake_backend::FakeBackend::new(b"A", b"B").with_hooks(ConditionalHooks::fail_once(
+            ConditionalPoint::SaveComplete,
+            std::io::ErrorKind::PermissionDenied,
+        ));
         let (_lease, target_path) = backend.target_observer();
-        let error = super::super::commit::commit_conditional::<Sha256, _>(
+        let outcome = super::super::commit::commit_conditional::<Sha256, _>(
             backend,
             LocalWritePrecondition::Content(Sha256::digest(b"A")),
             super::super::fake_backend::required_options(),
             1,
         )
-        .expect_err("save-complete boundary failure must remain an error");
-        assert_eq!(
-            error.stage(),
-            crate::error::LocalConditionalWriteStage::Sync
-        );
-        assert_eq!(
-            error.publication(),
-            crate::outcome::LocalConditionalPublicationState::Published
-        );
+        .expect("post-save cleanup failure must remain successful");
         assert_eq!(std::fs::read(target_path).expect("installed target"), b"B");
-        assert_eq!(
-            recovery_bytes(error.candidate().expect("verified B copy")),
-            b"B"
-        );
-        assert!(error.recovery_files().iter().any(|file| {
-            file.role() == crate::recovery::LocalRecoveryFileRole::StagedCandidate
-                && recovery_bytes(file) == b"B"
+        assert_eq!(outcome.digest(), &Sha256::digest(b"B"));
+        assert_eq!(outcome.cleanup_errors().len(), 1);
+        assert!(outcome.retained_files().iter().any(|file| {
+            file.role() == crate::recovery::LocalRecoveryFileRole::CandidateCopy && recovery_bytes(file) == b"B"
         }));
-        assert!(error.recovery_files().iter().any(|file| {
-            file.role() == crate::recovery::LocalRecoveryFileRole::Displaced
-                && recovery_bytes(file) == b"A"
+        assert!(outcome.retained_files().iter().any(|file| {
+            file.role() == crate::recovery::LocalRecoveryFileRole::Displaced && recovery_bytes(file) == b"A"
         }));
     }
 
@@ -422,20 +377,13 @@ mod conditional_state_tests {
             error.reason(),
             crate::error::LocalConditionalFailureReason::PostPublicationConflict
         );
-        assert_eq!(
-            error.stage(),
-            crate::error::LocalConditionalWriteStage::Sync
-        );
+        assert_eq!(error.stage(), crate::error::LocalConditionalWriteStage::Sync);
         assert_eq!(
             error.publication(),
             crate::outcome::LocalConditionalPublicationState::Restored
         );
         assert!(error.candidate().is_some());
-        let roles: Vec<_> = error
-            .recovery_files()
-            .iter()
-            .map(|file| file.role())
-            .collect();
+        let roles: Vec<_> = error.recovery_files().iter().map(|file| file.role()).collect();
         assert!(roles.contains(&crate::recovery::LocalRecoveryFileRole::RollbackDisplaced));
         assert!(roles.contains(&crate::recovery::LocalRecoveryFileRole::Displaced));
         let restored = error
@@ -459,10 +407,7 @@ mod conditional_state_tests {
         use super::super::ConditionalPoint;
 
         let hooks = ConditionalHooks::sequence(vec![
-            (
-                ConditionalPoint::Publish,
-                ConditionalHookAction::PartialPublish,
-            ),
+            (ConditionalPoint::Publish, ConditionalHookAction::PartialPublish),
             (
                 ConditionalPoint::Rollback,
                 ConditionalHookAction::OverwriteTargetInPlace(b"C".to_vec()),
@@ -490,32 +435,16 @@ mod conditional_state_tests {
             error.publication(),
             crate::outcome::LocalConditionalPublicationState::Indeterminate
         );
-        assert_eq!(
-            std::fs::read(target_path).expect("in-place competitor remains"),
-            b"C"
-        );
-        assert_eq!(
-            recovery_bytes(error.candidate().expect("independent B copy")),
-            b"B"
-        );
+        assert_eq!(std::fs::read(target_path).expect("in-place competitor remains"), b"C");
+        assert_eq!(recovery_bytes(error.candidate().expect("independent B copy")), b"B");
         assert!(error.recovery_files().iter().any(|file| {
-            file.role() == crate::recovery::LocalRecoveryFileRole::StagedCandidate
-                && recovery_bytes(file) == b"C"
+            file.role() == crate::recovery::LocalRecoveryFileRole::StagedCandidate && recovery_bytes(file) == b"C"
         }));
         assert!(error.recovery_files().iter().any(|file| {
-            file.role() == crate::recovery::LocalRecoveryFileRole::Displaced
-                && recovery_bytes(file) == b"A"
+            file.role() == crate::recovery::LocalRecoveryFileRole::Displaced && recovery_bytes(file) == b"A"
         }));
-        assert!(
-            !events
-                .borrow()
-                .iter()
-                .any(|event| *event == super::super::fake_backend::Event::Rollback)
-        );
-        assert_eq!(
-            error.error().kind(),
-            crate::LocalFileErrorKind::DataCorruption
-        );
+        assert!(!events.borrow().contains(&super::super::fake_backend::Event::Rollback));
+        assert_eq!(error.error().kind(), crate::LocalFileErrorKind::DataCorruption);
     }
 
     #[test]
@@ -549,21 +478,13 @@ mod conditional_state_tests {
             error.publication(),
             crate::outcome::LocalConditionalPublicationState::Indeterminate
         );
-        assert_eq!(
-            std::fs::read(target_path).expect("competitor remains"),
-            b"C"
-        );
-        assert_eq!(
-            recovery_bytes(error.candidate().expect("independent B copy")),
-            b"B"
-        );
+        assert_eq!(std::fs::read(target_path).expect("competitor remains"), b"C");
+        assert_eq!(recovery_bytes(error.candidate().expect("independent B copy")), b"B");
         assert!(error.recovery_files().iter().any(|file| {
-            file.role() == crate::recovery::LocalRecoveryFileRole::StagedCandidate
-                && recovery_bytes(file) == b"C"
+            file.role() == crate::recovery::LocalRecoveryFileRole::StagedCandidate && recovery_bytes(file) == b"C"
         }));
         assert!(error.recovery_files().iter().any(|file| {
-            file.role() == crate::recovery::LocalRecoveryFileRole::Displaced
-                && recovery_bytes(file) == b"A"
+            file.role() == crate::recovery::LocalRecoveryFileRole::Displaced && recovery_bytes(file) == b"A"
         }));
     }
 
@@ -589,16 +510,11 @@ mod conditional_state_tests {
             error.publication(),
             crate::outcome::LocalConditionalPublicationState::Restored
         );
-        assert_eq!(
-            std::fs::read(target_path).expect("prior target restored"),
-            b"A"
-        );
+        assert_eq!(std::fs::read(target_path).expect("prior target restored"), b"A");
         let source = std::error::Error::source(&error).expect("structured error source");
         let source = std::error::Error::source(source).expect("native I/O source");
         assert_eq!(
-            source
-                .downcast_ref::<std::io::Error>()
-                .map(std::io::Error::kind),
+            source.downcast_ref::<std::io::Error>().map(std::io::Error::kind),
             Some(std::io::ErrorKind::Other)
         );
     }
@@ -628,37 +544,87 @@ mod conditional_state_tests {
             1,
         )
         .expect_err("failed rollback must keep recovery state");
-        assert_eq!(
-            error.stage(),
-            crate::error::LocalConditionalWriteStage::Rollback
-        );
+        assert_eq!(error.stage(), crate::error::LocalConditionalWriteStage::Rollback);
         assert_eq!(
             error.publication(),
             crate::outcome::LocalConditionalPublicationState::Published
         );
-        assert_eq!(
-            std::fs::read(target_path).expect("installed candidate"),
-            b"B"
-        );
+        assert_eq!(std::fs::read(target_path).expect("installed candidate"), b"B");
         assert!(error.candidate().is_some());
-        assert_eq!(
-            recovery_bytes(error.candidate().expect("candidate copy")),
-            b"B"
-        );
-        assert_eq!(
-            error.error().kind(),
-            crate::LocalFileErrorKind::PermissionDenied
-        );
+        assert_eq!(recovery_bytes(error.candidate().expect("candidate copy")), b"B");
+        assert_eq!(error.error().kind(), crate::LocalFileErrorKind::PermissionDenied);
         assert!(
-            error.recovery_files().iter().any(
-                |file| file.role() == crate::recovery::LocalRecoveryFileRole::RollbackDisplaced
-            )
+            error
+                .recovery_files()
+                .iter()
+                .any(|file| file.role() == crate::recovery::LocalRecoveryFileRole::RollbackDisplaced)
         );
         assert!(
             error
                 .recovery_files()
                 .iter()
                 .any(|file| file.role() == crate::recovery::LocalRecoveryFileRole::StagedCandidate)
+        );
+    }
+
+    #[cfg(feature = "test-support")]
+    #[test]
+    fn conditional_state_partial_rollback_failure_runs_hook_before_receipts() {
+        use super::super::ConditionalHookAction;
+        use super::super::ConditionalHooks;
+        use super::super::ConditionalPoint;
+        use crate::test_support::TestConditionalHooks;
+        use crate::test_support::TestConditionalPoint;
+
+        let backend = super::super::fake_backend::FakeBackend::new(b"A", b"B").fail_after_first_rollback_rename_once();
+        let (_lease, target_path) = backend.target_observer();
+        let hook_target = target_path.clone();
+        let hooks = ConditionalHooks::sequence(vec![(
+            ConditionalPoint::Publish,
+            ConditionalHookAction::ReplaceTarget(b"R".to_vec()),
+        )])
+        .with_test(TestConditionalHooks::once(
+            TestConditionalPoint::AfterRollback,
+            move || {
+                std::fs::write(hook_target, b"D")?;
+                Err(std::io::Error::new(
+                    std::io::ErrorKind::PermissionDenied,
+                    "injected post-rollback hook error",
+                ))
+            },
+        ));
+        let backend = backend.with_hooks(hooks);
+        let error = super::super::commit::commit_conditional::<Sha256, _>(
+            backend,
+            LocalWritePrecondition::Content(Sha256::digest(b"A")),
+            super::super::fake_backend::required_options(),
+            1,
+        )
+        .expect_err("partial rollback failure must preserve recovery state");
+
+        assert_eq!(error.stage(), crate::error::LocalConditionalWriteStage::Rollback);
+        assert_eq!(
+            error.publication(),
+            crate::outcome::LocalConditionalPublicationState::Indeterminate
+        );
+        assert_eq!(std::fs::read(&target_path).expect("hook target side effect"), b"D");
+        let displaced = error
+            .recovery_files()
+            .iter()
+            .find(|file| file.role() == crate::recovery::LocalRecoveryFileRole::Displaced)
+            .expect("receipt for hook replacement");
+        assert_eq!(recovery_bytes(displaced), b"D");
+        assert_eq!(recovery_bytes(error.candidate().expect("candidate copy")), b"B");
+
+        let source = std::error::Error::source(&error).expect("structured error source");
+        let source = std::error::Error::source(source).expect("native rollback error");
+        let native_error = source
+            .downcast_ref::<std::io::Error>()
+            .expect("rollback source is an I/O error");
+        assert_eq!(native_error.kind(), std::io::ErrorKind::Other);
+        assert_eq!(
+            native_error.to_string(),
+            "injected fake rollback syscall failure after first rename"
         );
     }
 
@@ -687,32 +653,21 @@ mod conditional_state_tests {
             1,
         )
         .expect_err("required rollback sync failure must be an error");
-        assert_eq!(
-            error.stage(),
-            crate::error::LocalConditionalWriteStage::Sync
-        );
+        assert_eq!(error.stage(), crate::error::LocalConditionalWriteStage::Sync);
         assert_eq!(
             error.publication(),
             crate::outcome::LocalConditionalPublicationState::Restored
         );
         assert!(error.candidate().is_some());
         assert_eq!(std::fs::read(target_path).expect("restored target"), b"R");
-        assert_eq!(
-            recovery_bytes(error.candidate().expect("candidate copy")),
-            b"B"
-        );
+        assert_eq!(recovery_bytes(error.candidate().expect("candidate copy")), b"B");
         assert!(error.recovery_files().iter().any(|file| {
-            file.role() == crate::recovery::LocalRecoveryFileRole::RollbackDisplaced
-                && recovery_bytes(file) == b"B"
+            file.role() == crate::recovery::LocalRecoveryFileRole::RollbackDisplaced && recovery_bytes(file) == b"B"
         }));
         assert!(error.recovery_files().iter().any(|file| {
-            file.role() == crate::recovery::LocalRecoveryFileRole::Displaced
-                && recovery_bytes(file) == b"R"
+            file.role() == crate::recovery::LocalRecoveryFileRole::Displaced && recovery_bytes(file) == b"R"
         }));
-        assert_eq!(
-            error.error().kind(),
-            crate::LocalFileErrorKind::PermissionDenied
-        );
+        assert_eq!(error.error().kind(), crate::LocalFileErrorKind::PermissionDenied);
     }
 
     #[test]
@@ -744,31 +699,20 @@ mod conditional_state_tests {
             error.reason(),
             crate::error::LocalConditionalFailureReason::PostPublicationConflict
         );
-        assert_eq!(
-            error.stage(),
-            crate::error::LocalConditionalWriteStage::VerifyRollback
-        );
+        assert_eq!(error.stage(), crate::error::LocalConditionalWriteStage::VerifyRollback);
         assert_eq!(
             error.publication(),
             crate::outcome::LocalConditionalPublicationState::Indeterminate
         );
         assert_eq!(std::fs::read(target_path).expect("restored target"), b"R");
-        assert_eq!(
-            recovery_bytes(error.candidate().expect("verified B copy")),
-            b"B"
-        );
+        assert_eq!(recovery_bytes(error.candidate().expect("verified B copy")), b"B");
         assert!(error.recovery_files().iter().any(|file| {
-            file.role() == crate::recovery::LocalRecoveryFileRole::Displaced
-                && recovery_bytes(file) == b"R"
+            file.role() == crate::recovery::LocalRecoveryFileRole::Displaced && recovery_bytes(file) == b"R"
         }));
         assert!(error.recovery_files().iter().any(|file| {
-            file.role() == crate::recovery::LocalRecoveryFileRole::RollbackDisplaced
-                && recovery_bytes(file) == b"B"
+            file.role() == crate::recovery::LocalRecoveryFileRole::RollbackDisplaced && recovery_bytes(file) == b"B"
         }));
-        assert_eq!(
-            error.error().kind(),
-            crate::LocalFileErrorKind::PermissionDenied
-        );
+        assert_eq!(error.error().kind(), crate::LocalFileErrorKind::PermissionDenied);
     }
 
     #[test]
@@ -776,12 +720,10 @@ mod conditional_state_tests {
         use super::super::ConditionalHooks;
         use super::super::ConditionalPoint;
 
-        let backend = super::super::fake_backend::FakeBackend::new(b"A", b"B").with_hooks(
-            ConditionalHooks::fail_once(
-                ConditionalPoint::VerifyInstalled,
-                std::io::ErrorKind::PermissionDenied,
-            ),
-        );
+        let backend = super::super::fake_backend::FakeBackend::new(b"A", b"B").with_hooks(ConditionalHooks::fail_once(
+            ConditionalPoint::VerifyInstalled,
+            std::io::ErrorKind::PermissionDenied,
+        ));
         let (_lease, target_path) = backend.target_observer();
         let error = super::super::commit::commit_conditional::<Sha256, _>(
             backend,
@@ -790,10 +732,7 @@ mod conditional_state_tests {
             1,
         )
         .expect_err("installed readback failure must fail closed");
-        assert_eq!(
-            error.stage(),
-            crate::error::LocalConditionalWriteStage::VerifyInstalled
-        );
+        assert_eq!(error.stage(), crate::error::LocalConditionalWriteStage::VerifyInstalled);
         assert_eq!(
             error.publication(),
             crate::outcome::LocalConditionalPublicationState::Indeterminate
@@ -814,17 +753,12 @@ mod conditional_state_tests {
         assert_eq!(std::fs::read(target_path).expect("published target"), b"B");
         assert_eq!(recovery_bytes(error.candidate().expect("B copy")), b"B");
         assert!(error.recovery_files().iter().any(|file| {
-            file.role() == crate::recovery::LocalRecoveryFileRole::StagedCandidate
-                && recovery_bytes(file) == b"B"
+            file.role() == crate::recovery::LocalRecoveryFileRole::StagedCandidate && recovery_bytes(file) == b"B"
         }));
         assert!(error.recovery_files().iter().any(|file| {
-            file.role() == crate::recovery::LocalRecoveryFileRole::Displaced
-                && recovery_bytes(file) == b"A"
+            file.role() == crate::recovery::LocalRecoveryFileRole::Displaced && recovery_bytes(file) == b"A"
         }));
-        assert_eq!(
-            error.error().kind(),
-            crate::LocalFileErrorKind::PermissionDenied
-        );
+        assert_eq!(error.error().kind(), crate::LocalFileErrorKind::PermissionDenied);
     }
 
     #[test]
@@ -832,12 +766,10 @@ mod conditional_state_tests {
         use super::super::ConditionalHooks;
         use super::super::ConditionalPoint;
 
-        let backend = super::super::fake_backend::FakeBackend::new(b"A", b"B").with_hooks(
-            ConditionalHooks::fail_once(
-                ConditionalPoint::CleanupOld,
-                std::io::ErrorKind::PermissionDenied,
-            ),
-        );
+        let backend = super::super::fake_backend::FakeBackend::new(b"A", b"B").with_hooks(ConditionalHooks::fail_once(
+            ConditionalPoint::CleanupOld,
+            std::io::ErrorKind::PermissionDenied,
+        ));
         let (_lease, target_path) = backend.target_observer();
         let outcome = super::super::commit::commit_conditional::<Sha256, _>(
             backend,
@@ -866,12 +798,10 @@ mod conditional_state_tests {
         use super::super::ConditionalHooks;
         use super::super::ConditionalPoint;
 
-        let backend = super::super::fake_backend::FakeBackend::new(b"A", b"B").with_hooks(
-            ConditionalHooks::fail_once(
-                ConditionalPoint::CleanupSync,
-                std::io::ErrorKind::PermissionDenied,
-            ),
-        );
+        let backend = super::super::fake_backend::FakeBackend::new(b"A", b"B").with_hooks(ConditionalHooks::fail_once(
+            ConditionalPoint::CleanupSync,
+            std::io::ErrorKind::PermissionDenied,
+        ));
         let (_lease, target_path) = backend.target_observer();
         let outcome = super::super::commit::commit_conditional::<Sha256, _>(
             backend,
@@ -904,10 +834,7 @@ mod conditional_state_tests {
             error.reason(),
             crate::error::LocalConditionalFailureReason::TargetExists
         );
-        assert_eq!(
-            error.stage(),
-            crate::error::LocalConditionalWriteStage::Precheck
-        );
+        assert_eq!(error.stage(), crate::error::LocalConditionalWriteStage::Precheck);
         assert_eq!(
             error.publication(),
             crate::outcome::LocalConditionalPublicationState::NotPublished
@@ -944,10 +871,7 @@ mod conditional_state_tests {
             error.publication(),
             crate::outcome::LocalConditionalPublicationState::NotPublished
         );
-        assert_eq!(
-            std::fs::read(target_path).expect("racing target stays"),
-            b"racer"
-        );
+        assert_eq!(std::fs::read(target_path).expect("racing target stays"), b"racer");
         assert!(error.candidate().is_some());
     }
 
@@ -986,10 +910,7 @@ mod conditional_state_tests {
             error.reason(),
             crate::error::LocalConditionalFailureReason::TargetMissing
         );
-        assert_eq!(
-            error.stage(),
-            crate::error::LocalConditionalWriteStage::Precheck
-        );
+        assert_eq!(error.stage(), crate::error::LocalConditionalWriteStage::Precheck);
         assert_eq!(
             error.publication(),
             crate::outcome::LocalConditionalPublicationState::NotPublished
@@ -1005,12 +926,10 @@ mod conditional_state_tests {
         use super::super::ConditionalHooks;
         use super::super::ConditionalPoint;
 
-        let backend = super::super::fake_backend::FakeBackend::new(b"A", b"B").with_hooks(
-            ConditionalHooks::fail_once(
-                ConditionalPoint::PrepareCandidateCopy,
-                std::io::ErrorKind::PermissionDenied,
-            ),
-        );
+        let backend = super::super::fake_backend::FakeBackend::new(b"A", b"B").with_hooks(ConditionalHooks::fail_once(
+            ConditionalPoint::PrepareCandidateCopy,
+            std::io::ErrorKind::PermissionDenied,
+        ));
         let (_lease, target_path) = backend.target_observer();
         let error = super::super::commit::commit_conditional::<Sha256, _>(
             backend,
@@ -1078,9 +997,8 @@ mod conditional_state_tests {
             ConditionalPoint::SyncEntry,
             ConditionalPoint::SyncNamespace,
         ] {
-            let backend = super::super::fake_backend::FakeBackend::new(b"A", b"B").with_hooks(
-                ConditionalHooks::fail_once(point, std::io::ErrorKind::PermissionDenied),
-            );
+            let backend = super::super::fake_backend::FakeBackend::new(b"A", b"B")
+                .with_hooks(ConditionalHooks::fail_once(point, std::io::ErrorKind::PermissionDenied));
             let (_lease, target_path) = backend.target_observer();
             let error = super::super::commit::commit_conditional::<Sha256, _>(
                 backend,
@@ -1089,18 +1007,12 @@ mod conditional_state_tests {
                 1,
             )
             .expect_err("every required prepublication sync must be enforced");
-            assert_eq!(
-                error.stage(),
-                crate::error::LocalConditionalWriteStage::Sync
-            );
+            assert_eq!(error.stage(), crate::error::LocalConditionalWriteStage::Sync);
             assert_eq!(
                 error.publication(),
                 crate::outcome::LocalConditionalPublicationState::NotPublished
             );
-            assert_eq!(
-                error.error().kind(),
-                crate::LocalFileErrorKind::PermissionDenied
-            );
+            assert_eq!(error.error().kind(), crate::LocalFileErrorKind::PermissionDenied);
             assert!(error.candidate().is_some());
             assert_eq!(std::fs::read(target_path).expect("target unchanged"), b"A");
         }
@@ -1118,12 +1030,10 @@ mod conditional_state_tests {
         let options = LocalWriteOptions::new(LocalWriteMode::CreateOrReplace)
             .with_atomicity(LocalAtomicityRequirement::Required)
             .with_durability(LocalDurabilityRequirement::Preferred);
-        let backend = super::super::fake_backend::FakeBackend::new(b"A", b"B").with_hooks(
-            ConditionalHooks::fail_once(
-                ConditionalPoint::SyncCandidate,
-                std::io::ErrorKind::PermissionDenied,
-            ),
-        );
+        let backend = super::super::fake_backend::FakeBackend::new(b"A", b"B").with_hooks(ConditionalHooks::fail_once(
+            ConditionalPoint::SyncCandidate,
+            std::io::ErrorKind::PermissionDenied,
+        ));
         let outcome = super::super::commit::commit_conditional::<Sha256, _>(
             backend,
             LocalWritePrecondition::Content(Sha256::digest(b"A")),
@@ -1141,12 +1051,10 @@ mod conditional_state_tests {
         use super::super::ConditionalHooks;
         use super::super::ConditionalPoint;
 
-        let backend = super::super::fake_backend::FakeBackend::new(b"A", b"B").with_hooks(
-            ConditionalHooks::fail_once(
-                ConditionalPoint::CleanupCopy,
-                std::io::ErrorKind::PermissionDenied,
-            ),
-        );
+        let backend = super::super::fake_backend::FakeBackend::new(b"A", b"B").with_hooks(ConditionalHooks::fail_once(
+            ConditionalPoint::CleanupCopy,
+            std::io::ErrorKind::PermissionDenied,
+        ));
         let (_lease, target_path) = backend.target_observer();
         let outcome = super::super::commit::commit_conditional::<Sha256, _>(
             backend,

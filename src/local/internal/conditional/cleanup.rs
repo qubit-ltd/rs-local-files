@@ -1,18 +1,22 @@
 // =============================================================================
-
-use crate::LocalFileError;
-use crate::LocalFileOperation;
-use crate::recovery::LocalRecoveryFile;
+//    Copyright (c) 2025 - 2026 Haixing Hu.
+//
+//    SPDX-License-Identifier: Apache-2.0
+//
+//    Licensed under the Apache License, Version 2.0.
+// =============================================================================
 
 use super::ConditionalBackend;
 use super::ConditionalEntry;
+use crate::LocalFileError;
+use crate::LocalFileOperation;
+use crate::recovery::LocalRecoveryFile;
 
 pub(super) fn cleanup_entries<B: ConditionalBackend>(
     backend: &mut B,
     mut entries: Vec<ConditionalEntry>,
 ) -> (Vec<LocalFileError>, Vec<LocalRecoveryFile>) {
-    entries
-        .sort_by_key(|entry| entry.role() == crate::recovery::LocalRecoveryFileRole::CandidateCopy);
+    entries.sort_by_key(|entry| entry.role() == crate::recovery::LocalRecoveryFileRole::CandidateCopy);
     let mut errors = Vec::new();
     let mut retained = Vec::new();
     for entry in entries {

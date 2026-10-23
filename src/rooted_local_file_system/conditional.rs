@@ -8,10 +8,12 @@
 
 use std::path::Path;
 
+use super::LocalFileError;
+use super::LocalFileOperation;
+use super::LocalResult;
+use super::RootedLocalFileSystem;
 use crate::local::conditional::ConditionalWriterBackend;
 use crate::options::LocalWriteOptions;
-
-use super::{LocalFileError, LocalFileOperation, LocalResult, RootedLocalFileSystem};
 
 impl RootedLocalFileSystem {
     pub(crate) fn open_conditional_backend(

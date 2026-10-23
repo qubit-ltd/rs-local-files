@@ -162,6 +162,8 @@ impl LocalFileSystem {
                 ),
                 #[cfg(feature = "test-support")]
                 test_faults: None,
+                #[cfg(all(feature = "digest", feature = "test-support"))]
+                conditional_hooks: None,
             }),
             current_directory: LocalCurrentDirectory::Process,
             symlink_policy: LocalSymlinkPolicy::FollowAcrossScope,
@@ -201,6 +203,8 @@ impl LocalFileSystem {
                 limits,
                 #[cfg(feature = "test-support")]
                 test_faults: None,
+                #[cfg(all(feature = "digest", feature = "test-support"))]
+                conditional_hooks: None,
             }),
             current_directory: LocalCurrentDirectory::Virtual(PathBuf::from(std::path::MAIN_SEPARATOR_STR)),
             symlink_policy: LocalSymlinkPolicy::FollowWithinScope,

@@ -49,19 +49,16 @@ impl<D: Digest> LocalConditionalWriteOutcome<D> {
     }
 
     /// Returns the byte count, publication method, and durability result.
-    #[must_use]
     pub const fn write_outcome(&self) -> &LocalWriteOutcome {
         &self.write_outcome
     }
 
     /// Returns files that could not be removed during successful cleanup.
-    #[must_use]
     pub fn retained_files(&self) -> &[LocalRecoveryFile] {
         &self.retained_files
     }
 
     /// Returns cleanup failures that did not invalidate the completed save.
-    #[must_use]
     pub fn cleanup_errors(&self) -> &[LocalFileError] {
         &self.cleanup_errors
     }

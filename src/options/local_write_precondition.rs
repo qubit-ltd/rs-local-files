@@ -32,8 +32,6 @@ mod conditional_types_tests {
     fn conditional_types_keep_full_digest() {
         let expected = Sha256::digest(b"A");
         let condition = LocalWritePrecondition::Content(expected);
-        assert!(
-            matches!(condition, LocalWritePrecondition::Content(value) if value == Sha256::digest(b"A"))
-        );
+        assert!(matches!(condition, LocalWritePrecondition::Content(value) if value == Sha256::digest(b"A")));
     }
 }

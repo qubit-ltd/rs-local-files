@@ -7,15 +7,13 @@
 // =============================================================================
 //! Strict metadata preservation for the Unix candidate.
 
+use std::fs::File;
 use std::io;
 
 use super::super::ConditionalEntry;
 use crate::local::internal::preserve_atomic_metadata;
-use std::fs::File;
 
 pub(super) fn preserve(observed: &ConditionalEntry, candidate: &File) -> io::Result<()> {
-    let source = observed
-        .open_reader()
-        .map_err(|error| io::Error::other(error))?;
+    let source = observed.open_reader().map_err(io::Error::other)?;
     preserve_atomic_metadata(source.as_file(), candidate)
 }

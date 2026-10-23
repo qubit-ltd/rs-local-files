@@ -28,6 +28,10 @@ pub(crate) struct LocalFileSystemCore {
     /// Instance-local deterministic faults available only to tests.
     #[cfg(feature = "test-support")]
     pub(crate) test_faults: Option<TestFaultPlan>,
+    /// Instance-local conditional publication checkpoints for integration
+    /// tests.
+    #[cfg(all(feature = "digest", feature = "test-support"))]
+    pub(crate) conditional_hooks: Option<crate::local::conditional::ConditionalHooks>,
 }
 
 impl LocalFileSystemCore {

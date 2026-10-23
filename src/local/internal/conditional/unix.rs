@@ -17,19 +17,23 @@ mod tests;
 
 use std::ffi::CString;
 use std::fs::File;
-use std::io::{self, Read, Write};
+use std::io;
+use std::io::Read;
+use std::io::Write;
 use std::os::unix::fs::MetadataExt;
 use std::path::Path;
 
+use namespace::Namespace;
+
+use super::ConditionalBackend;
+use super::ConditionalEntry;
+use super::ConditionalHooks;
+use super::ConditionalPoint;
+use super::NativeAttempt;
+use super::RecoveryAccess;
 use crate::options::LocalWriteOptions;
 use crate::outcome::LocalConditionalPublicationState;
 use crate::recovery::LocalRecoveryFileRole;
-
-use super::{
-    ConditionalBackend, ConditionalEntry, ConditionalHooks, ConditionalPoint, NativeAttempt,
-    RecoveryAccess,
-};
-use namespace::Namespace;
 
 const COPY_BUFFER_SIZE: usize = 64 * 1024;
 
@@ -69,11 +73,7 @@ impl UnixConditionalBackend {
         let (candidate_name, candidate) = namespace.create_private("candidate")?;
         let metadata = candidate.metadata()?;
         let candidate_identity = (metadata.dev(), metadata.ino());
-        let candidate_entry = namespace.entry(
-            LocalRecoveryFileRole::StagedCandidate,
-            candidate_name.clone(),
-            None,
-        )?;
+        let candidate_entry = namespace.entry(LocalRecoveryFileRole::StagedCandidate, candidate_name.clone(), None)?;
         Ok(Self {
             namespace,
             candidate_name,
@@ -106,10 +106,7 @@ impl UnixConditionalBackend {
             )
             .ok();
         let displaced = self
-            .entry(
-                LocalRecoveryFileRole::Displaced,
-                self.candidate_name.clone(),
-            )
+            .entry(LocalRecoveryFileRole::Displaced, self.candidate_name.clone())
             .ok();
         let candidate_identity = self
             .candidate
@@ -123,21 +120,13 @@ impl UnixConditionalBackend {
             .map(|metadata| (metadata.dev(), metadata.ino()))
             == candidate_identity;
         let staged_is_candidate = self
-            .entry(
-                LocalRecoveryFileRole::StagedCandidate,
-                self.candidate_name.clone(),
-            )
+            .entry(LocalRecoveryFileRole::StagedCandidate, self.candidate_name.clone())
             .ok()
             .and_then(|entry| entry.open_reader().ok())
             .and_then(|reader| reader.as_file().metadata().ok())
             .map(|metadata| (metadata.dev(), metadata.ino()))
             == candidate_identity;
-        let publication = match (
-            error.is_some(),
-            installed_is_candidate,
-            staged_is_candidate,
-            &displaced,
-        ) {
+        let publication = match (error.is_some(), installed_is_candidate, staged_is_candidate, &displaced) {
             (false, true, _, Some(_)) => LocalConditionalPublicationState::Published,
             (true, _, true, _) => LocalConditionalPublicationState::NotPublished,
             (_, true, _, Some(_)) => LocalConditionalPublicationState::Published,
@@ -160,6 +149,8 @@ impl UnixConditionalBackend {
     }
 
     fn checkpoint_action(&mut self, point: ConditionalPoint) -> io::Result<()> {
+        #[cfg(all(feature = "digest", feature = "test-support"))]
+        self.hooks.run_callback(point)?;
         let action = self.hooks.take(point);
         if point == ConditionalPoint::RollbackPrecheck {
             if let Some(
@@ -186,9 +177,7 @@ impl UnixConditionalBackend {
                 self.namespace.overwrite_target(&bytes)?;
                 Ok(())
             }
-            Some(super::ConditionalHookAction::PartialPublish)
-                if point == ConditionalPoint::Publish =>
-            {
+            Some(super::ConditionalHookAction::PartialPublish) if point == ConditionalPoint::Publish => {
                 self.partial_publish = true;
                 Ok(())
             }
@@ -205,17 +194,11 @@ impl qubit_io::Output for UnixConditionalBackend {
     type Item = u8;
 
     fn write_vectored(&mut self, slices: &[&[u8]]) -> io::Result<usize> {
-        let slices: Vec<io::IoSlice<'_>> =
-            slices.iter().map(|slice| io::IoSlice::new(slice)).collect();
+        let slices: Vec<io::IoSlice<'_>> = slices.iter().map(|slice| io::IoSlice::new(slice)).collect();
         Write::write_vectored(&mut self.candidate, &slices)
     }
 
-    unsafe fn write_unchecked(
-        &mut self,
-        input: &[u8],
-        index: usize,
-        count: usize,
-    ) -> io::Result<usize> {
+    unsafe fn write_unchecked(&mut self, input: &[u8], index: usize, count: usize) -> io::Result<usize> {
         Write::write(&mut self.candidate, &input[index..index + count])
     }
 
@@ -226,10 +209,7 @@ impl qubit_io::Output for UnixConditionalBackend {
 
 impl UnixConditionalBackend {
     fn open_verified_candidate_target(&self) -> io::Result<ConditionalEntry> {
-        let target = self.entry(
-            LocalRecoveryFileRole::Displaced,
-            self.namespace.target_name.clone(),
-        )?;
+        let target = self.entry(LocalRecoveryFileRole::Displaced, self.namespace.target_name.clone())?;
         let target_reader = target.open_reader().map_err(io::Error::other)?;
         let target_metadata = target_reader.as_file().metadata()?;
         if (target_metadata.dev(), target_metadata.ino()) != self.candidate_identity {
@@ -238,9 +218,7 @@ impl UnixConditionalBackend {
                 "rollback target no longer has the candidate identity",
             ));
         }
-        let (Some(copy_name), Some(copy_identity)) =
-            (&self.candidate_copy_name, self.candidate_copy_identity)
-        else {
+        let (Some(copy_name), Some(copy_identity)) = (&self.candidate_copy_name, self.candidate_copy_identity) else {
             return Err(io::Error::new(
                 io::ErrorKind::InvalidData,
                 "verified candidate copy is unavailable for rollback",
@@ -260,22 +238,12 @@ impl UnixConditionalBackend {
         Ok(target)
     }
 
-    fn rollback_receipt(
-        &self,
-        old_identity: (u64, u64),
-        syscall_error: Option<io::Error>,
-    ) -> NativeAttempt {
+    fn rollback_receipt(&self, old_identity: (u64, u64), syscall_error: Option<io::Error>) -> NativeAttempt {
         let restored = self
-            .entry(
-                LocalRecoveryFileRole::Displaced,
-                self.namespace.target_name.clone(),
-            )
+            .entry(LocalRecoveryFileRole::Displaced, self.namespace.target_name.clone())
             .ok();
         let moved = self
-            .entry(
-                LocalRecoveryFileRole::RollbackDisplaced,
-                self.candidate_name.clone(),
-            )
+            .entry(LocalRecoveryFileRole::RollbackDisplaced, self.candidate_name.clone())
             .ok();
         let restored_identity = restored
             .as_ref()
@@ -374,10 +342,7 @@ impl ConditionalBackend for UnixConditionalBackend {
     }
 
     fn open_target(&self) -> io::Result<ConditionalEntry> {
-        self.entry(
-            LocalRecoveryFileRole::Displaced,
-            self.namespace.target_name.clone(),
-        )
+        self.entry(LocalRecoveryFileRole::Displaced, self.namespace.target_name.clone())
     }
 
     fn preserve_metadata(&mut self, observed: &ConditionalEntry) -> io::Result<()> {
@@ -395,9 +360,7 @@ impl ConditionalBackend for UnixConditionalBackend {
     }
 
     fn is_candidate(&self, entry: &ConditionalEntry) -> io::Result<bool> {
-        let installed = entry
-            .open_reader()
-            .map_err(|error| io::Error::other(error))?;
+        let installed = entry.open_reader().map_err(io::Error::other)?;
         let candidate = self.candidate.metadata()?;
         let installed = installed.as_file().metadata()?;
         Ok(candidate.dev() == installed.dev() && candidate.ino() == installed.ino())
@@ -443,11 +406,8 @@ impl ConditionalBackend for UnixConditionalBackend {
                     None
                 };
                 let staged_alias = if publication == LocalConditionalPublicationState::Published {
-                    self.entry(
-                        LocalRecoveryFileRole::StagedCandidate,
-                        self.candidate_name.clone(),
-                    )
-                    .ok()
+                    self.entry(LocalRecoveryFileRole::StagedCandidate, self.candidate_name.clone())
+                        .ok()
                 } else {
                     None
                 };
@@ -467,9 +427,7 @@ impl ConditionalBackend for UnixConditionalBackend {
                 self.candidate_guard = false;
                 if self.partial_publish {
                     self.partial_publish = false;
-                    self.attempt_after_exchange(Some(io::Error::other(
-                        "injected partial publication",
-                    )))
+                    self.attempt_after_exchange(Some(io::Error::other("injected partial publication")))
                 } else {
                     self.attempt_after_exchange(None)
                 }
@@ -493,12 +451,8 @@ impl ConditionalBackend for UnixConditionalBackend {
     fn rollback(&mut self, displaced: &ConditionalEntry) -> NativeAttempt {
         if let Some(action) = self.deferred_rollback_action.take() {
             let result = match action {
-                super::ConditionalHookAction::ReplaceTarget(bytes) => {
-                    self.namespace.replace_target(&bytes)
-                }
-                super::ConditionalHookAction::OverwriteTargetInPlace(bytes) => {
-                    self.namespace.overwrite_target(&bytes)
-                }
+                super::ConditionalHookAction::ReplaceTarget(bytes) => self.namespace.replace_target(&bytes),
+                super::ConditionalHookAction::OverwriteTargetInPlace(bytes) => self.namespace.overwrite_target(&bytes),
                 _ => Ok(()),
             };
             if let Err(error) = result {
@@ -533,10 +487,9 @@ impl ConditionalBackend for UnixConditionalBackend {
         if let Err(error) = self.checkpoint_action(ConditionalPoint::RollbackExchange) {
             return self.indeterminate_rollback(error, None, None);
         }
-        match self.exchange(&displaced_name, &self.namespace.target_name) {
-            Ok(()) => self.rollback_receipt(old_metadata, None),
-            Err(error) => self.rollback_receipt(old_metadata, Some(error)),
-        }
+        let syscall_error = self.exchange(&displaced_name, &self.namespace.target_name).err();
+        let hook_error = self.checkpoint_action(ConditionalPoint::AfterRollbackSyscall).err();
+        self.rollback_receipt(old_metadata, syscall_error.or(hook_error))
     }
 
     fn remove_observed(&mut self, entry: &ConditionalEntry) -> io::Result<()> {
@@ -550,25 +503,18 @@ impl ConditionalBackend for UnixConditionalBackend {
         Ok(())
     }
     fn take_recovery_entries(&mut self) -> Vec<ConditionalEntry> {
-        if let Ok((device, inode)) =
-            namespace::identity_at(&self.namespace.parent, &self.candidate_name)
-        {
-            if self
+        if let Ok((device, inode)) = namespace::identity_at(&self.namespace.parent, &self.candidate_name)
+            && self
                 .candidate
                 .metadata()
                 .is_ok_and(|metadata| metadata.dev() == device && metadata.ino() == inode)
-                && !self.recovery_entries.iter().any(|entry| {
-                    entry.namespace_path().file_name()
-                        == self.candidate_entry.namespace_path().file_name()
-                })
-            {
-                if let Ok(entry) = self.entry(
-                    LocalRecoveryFileRole::StagedCandidate,
-                    self.candidate_name.clone(),
-                ) {
-                    self.recovery_entries.push(entry);
-                }
-            }
+            && !self
+                .recovery_entries
+                .iter()
+                .any(|entry| entry.namespace_path().file_name() == self.candidate_entry.namespace_path().file_name())
+            && let Ok(entry) = self.entry(LocalRecoveryFileRole::StagedCandidate, self.candidate_name.clone())
+        {
+            self.recovery_entries.push(entry);
         }
         std::mem::take(&mut self.recovery_entries)
     }

@@ -17,9 +17,7 @@ pub(super) enum ReplaceFailure {
 
 pub(super) fn classify_replace_failure(raw_os_error: Option<i32>) -> ReplaceFailure {
     match raw_os_error.map(|code| code as u32) {
-        Some(windows_sys::Win32::Foundation::ERROR_UNABLE_TO_REMOVE_REPLACED) => {
-            ReplaceFailure::UnableToRemoveReplaced
-        }
+        Some(windows_sys::Win32::Foundation::ERROR_UNABLE_TO_REMOVE_REPLACED) => ReplaceFailure::UnableToRemoveReplaced,
         Some(windows_sys::Win32::Foundation::ERROR_UNABLE_TO_MOVE_REPLACEMENT) => {
             ReplaceFailure::UnableToMoveReplacement
         }

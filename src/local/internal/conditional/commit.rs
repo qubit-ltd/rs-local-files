@@ -11,6 +11,11 @@ use std::io;
 use digest::Digest;
 use digest::Output;
 
+use super::ConditionalBackend;
+use super::ConditionalPoint;
+use super::candidate_copy::prepare_copy;
+use super::cleanup::cleanup_entries;
+use super::digest_reader::digest_entry;
 use crate::LocalFileError;
 use crate::LocalFileOperation;
 use crate::LocalWriteOutcome;
@@ -26,12 +31,7 @@ use crate::outcome::LocalWritePublicationMethod;
 use crate::policy::LocalDurabilityRequirement;
 use crate::recovery::LocalRecoveryFileRole;
 
-use super::ConditionalBackend;
-use super::ConditionalPoint;
-use super::candidate_copy::prepare_copy;
-use super::cleanup::cleanup_entries;
-use super::digest_reader::digest_entry;
-
+#[allow(clippy::result_large_err)]
 pub(crate) fn commit_conditional<D, B>(
     mut backend: B,
     precondition: LocalWritePrecondition<Output<D>>,
@@ -52,25 +52,23 @@ where
     let result = (|| {
         qubit_io::Output::flush(&mut backend).map_err(|error| (stage, error))?;
         stage = LocalConditionalWriteStage::VerifyCandidate;
-        let candidate_digest =
-            digest_entry::<D>(backend.candidate()).map_err(|error| (stage, error))?;
+        let candidate_digest = digest_entry::<D>(backend.candidate()).map_err(|error| (stage, error))?;
 
         stage = LocalConditionalWriteStage::PrepareCandidateCopy;
         backend
             .checkpoint(ConditionalPoint::PrepareCandidateCopy)
             .map_err(|error| (stage, error))?;
-        let copy =
-            prepare_copy::<D, B>(&mut backend, &candidate_digest).map_err(|(error, entry)| {
-                stage = if entry.is_some() {
-                    LocalConditionalWriteStage::VerifyCandidateCopy
-                } else {
-                    LocalConditionalWriteStage::PrepareCandidateCopy
-                };
-                if let Some(entry) = entry {
-                    entries.push(entry);
-                }
-                (stage, error)
-            })?;
+        let copy = prepare_copy::<D, B>(&mut backend, &candidate_digest).map_err(|(error, entry)| {
+            stage = if entry.is_some() {
+                LocalConditionalWriteStage::VerifyCandidateCopy
+            } else {
+                LocalConditionalWriteStage::PrepareCandidateCopy
+            };
+            if let Some(entry) = entry {
+                entries.push(entry);
+            }
+            (stage, error)
+        })?;
         stage = LocalConditionalWriteStage::VerifyCandidateCopy;
         entries.push(copy);
         backend
@@ -80,9 +78,13 @@ where
         stage = LocalConditionalWriteStage::Sync;
         if options.durability() != LocalDurabilityRequirement::NotRequired {
             let sync = backend
-                .sync_candidate()
-                .and_then(|()| backend.sync_entry(&entries[0]))
-                .and_then(|()| backend.sync_namespace());
+                .checkpoint(ConditionalPoint::BeforeRequiredFileSync)
+                .and_then(|()| {
+                    backend
+                        .sync_candidate()
+                        .and_then(|()| backend.sync_entry(&entries[0]))
+                        .and_then(|()| backend.sync_namespace())
+                });
             if let Err(error) = sync {
                 if options.durability() == LocalDurabilityRequirement::Required {
                     return Err((stage, error));
@@ -98,13 +100,9 @@ where
         let observed = backend.open_target();
         match (&precondition, observed) {
             (LocalWritePrecondition::Absent, Ok(_)) => {
-                return Err((
-                    stage,
-                    io::Error::new(io::ErrorKind::AlreadyExists, "target exists"),
-                ));
+                return Err((stage, io::Error::new(io::ErrorKind::AlreadyExists, "target exists")));
             }
-            (LocalWritePrecondition::Absent, Err(error))
-                if error.kind() == io::ErrorKind::NotFound => {}
+            (LocalWritePrecondition::Absent, Err(error)) if error.kind() == io::ErrorKind::NotFound => {}
             (LocalWritePrecondition::Absent, Err(error)) => return Err((stage, error)),
             (LocalWritePrecondition::Content(_), Err(error)) => return Err((stage, error)),
             (LocalWritePrecondition::Content(expected), Ok(target)) => {
@@ -114,19 +112,15 @@ where
                         io::Error::new(io::ErrorKind::InvalidData, "content precondition mismatch"),
                     ));
                 }
-                if options.metadata_policy()
-                    == crate::options::LocalWriteMetadataPolicy::PreserveExisting
-                {
-                    backend
-                        .preserve_metadata(&target)
-                        .map_err(|error| (stage, error))?;
-                    if options.durability() != LocalDurabilityRequirement::NotRequired {
-                        if let Err(error) = backend.sync_candidate() {
-                            if options.durability() == LocalDurabilityRequirement::Required {
-                                return Err((stage, error));
-                            }
-                            durable = false;
+                if options.metadata_policy() == crate::options::LocalWriteMetadataPolicy::PreserveExisting {
+                    backend.preserve_metadata(&target).map_err(|error| (stage, error))?;
+                    if options.durability() != LocalDurabilityRequirement::NotRequired
+                        && let Err(error) = backend.sync_candidate()
+                    {
+                        if options.durability() == LocalDurabilityRequirement::Required {
+                            return Err((stage, error));
                         }
+                        durable = false;
                     }
                 }
                 // The observed target is only a precheck/metadata source. The
@@ -135,22 +129,48 @@ where
         }
 
         backend
+            .checkpoint(ConditionalPoint::AfterPrecheck)
+            .map_err(|error| (stage, error))?;
+
+        backend
             .verify_entry(backend.candidate())
             .map_err(|error| (stage, error))?;
-        backend.begin_publication();
         stage = LocalConditionalWriteStage::Publish;
         backend
             .checkpoint(ConditionalPoint::Publish)
             .map_err(|error| (stage, error))?;
+        backend.begin_publication();
         let attempt = match precondition {
             LocalWritePrecondition::Absent => backend.publish_absent(),
             LocalWritePrecondition::Content(_) => backend.publish_content(),
         };
+        if let Err(error) = backend.checkpoint(ConditionalPoint::AfterPublish) {
+            publication = attempt.publication;
+            if let Some(installed) = attempt.installed {
+                entries.push(installed);
+            }
+            entries.extend(attempt.displaced);
+            return Err((stage, error));
+        }
         publication = attempt.publication;
+        if !absent_precondition
+            && attempt.publication != LocalConditionalPublicationState::NotPublished
+            && attempt.displaced.is_empty()
+        {
+            if let Some(installed) = attempt.installed {
+                entries.push(installed);
+            }
+            publication = LocalConditionalPublicationState::Indeterminate;
+            let error = attempt.error.unwrap_or_else(|| {
+                io::Error::new(
+                    io::ErrorKind::InvalidData,
+                    "content publication did not report the displaced target",
+                )
+            });
+            return Err((stage, error));
+        }
         if let Some(error) = attempt.error {
-            if !absent_precondition
-                && attempt.publication == LocalConditionalPublicationState::Published
-            {
+            if !absent_precondition && attempt.publication == LocalConditionalPublicationState::Published {
                 publication_attempt_error = Some(error);
                 post_publication_conflict = true;
             } else {
@@ -170,10 +190,7 @@ where
             publication = LocalConditionalPublicationState::Indeterminate;
             return Err((
                 stage,
-                io::Error::new(
-                    io::ErrorKind::InvalidData,
-                    "backend did not report installed entry",
-                ),
+                io::Error::new(io::ErrorKind::InvalidData, "backend did not report installed entry"),
             ));
         };
         let mut displaced_entries = Vec::new();
@@ -309,18 +326,31 @@ where
                 publication = LocalConditionalPublicationState::Indeterminate;
                 return Err((stage, error));
             }
+            if let Err(error) = backend.checkpoint(ConditionalPoint::RollbackValidated) {
+                entries.push(installed);
+                entries.extend(displaced_entries);
+                publication = LocalConditionalPublicationState::Indeterminate;
+                return Err((stage, error));
+            }
             stage = LocalConditionalWriteStage::Rollback;
             let rollback = backend.rollback(displaced);
             publication = rollback.publication;
+            if let Err(error) = backend.checkpoint(ConditionalPoint::RollbackCompleted) {
+                if let Some(restored) = rollback.installed {
+                    entries.push(restored);
+                }
+                entries.extend(rollback.displaced);
+                entries.extend(displaced_entries);
+                publication = LocalConditionalPublicationState::Indeterminate;
+                return Err((stage, error));
+            }
             if let Some(error) = rollback.error {
                 for displaced_entry in displaced_entries {
                     let represented_by_receipt = rollback
                         .installed
                         .iter()
                         .chain(rollback.displaced.iter())
-                        .any(|receipt| {
-                            receipt.namespace_path() == displaced_entry.namespace_path()
-                        });
+                        .any(|receipt| receipt.namespace_path() == displaced_entry.namespace_path());
                     if !represented_by_receipt && backend.verify_entry(&displaced_entry).is_ok() {
                         entries.push(displaced_entry);
                     }
@@ -342,10 +372,7 @@ where
                 publication = LocalConditionalPublicationState::Indeterminate;
                 return Err((
                     stage,
-                    io::Error::new(
-                        io::ErrorKind::InvalidData,
-                        "rollback did not report restored target",
-                    ),
+                    io::Error::new(io::ErrorKind::InvalidData, "rollback did not report restored target"),
                 ));
             };
             entries.extend(rollback.displaced.into_iter().map(|mut entry| {
@@ -364,9 +391,7 @@ where
                     return Err((stage, error));
                 }
             };
-            if publication != LocalConditionalPublicationState::Restored
-                || restored_digest != old_digest
-            {
+            if publication != LocalConditionalPublicationState::Restored || restored_digest != old_digest {
                 entries.push(restored);
                 publication = LocalConditionalPublicationState::Indeterminate;
                 return Err((
@@ -399,16 +424,15 @@ where
             entries.push(installed);
             return Err((
                 stage,
-                io::Error::new(
-                    io::ErrorKind::InvalidData,
-                    "installed candidate verification failed",
-                ),
+                io::Error::new(io::ErrorKind::InvalidData, "installed candidate verification failed"),
             ));
         }
         if options.durability() == LocalDurabilityRequirement::Required {
             stage = LocalConditionalWriteStage::Sync;
             let sync = backend
-                .sync_entry(&installed)
+                .checkpoint(ConditionalPoint::BeforeRequiredFileSync)
+                .and_then(|()| backend.sync_entry(&installed))
+                .and_then(|()| backend.checkpoint(ConditionalPoint::BeforeRequiredParentSync))
                 .and_then(|()| backend.sync_namespace());
             if let Err(error) = sync {
                 entries.push(installed);
@@ -423,10 +447,6 @@ where
             {
                 durable = false;
             }
-        }
-        if let Err(error) = backend.checkpoint(ConditionalPoint::SaveComplete) {
-            entries.push(installed);
-            return Err((stage, error));
         }
         Ok((installed, candidate_digest))
     })();
@@ -445,9 +465,7 @@ where
                     LocalConditionalFailureReason::PreconditionMismatch
                 }
                 (_, io::ErrorKind::AlreadyExists) => LocalConditionalFailureReason::TargetExists,
-                (_, _) if post_publication_conflict => {
-                    LocalConditionalFailureReason::PostPublicationConflict
-                }
+                (_, _) if post_publication_conflict => LocalConditionalFailureReason::PostPublicationConflict,
                 _ => LocalConditionalFailureReason::Io,
             };
             let mut recovery: Vec<_> = backend
@@ -472,17 +490,27 @@ where
         }
     };
 
-    let (mut cleanup_errors, retained_files) = cleanup_entries(&mut backend, entries);
+    let (mut cleanup_errors, retained_files) = match backend.checkpoint(ConditionalPoint::SaveComplete) {
+        Ok(()) => cleanup_entries(&mut backend, entries),
+        Err(source) => {
+            let retained = entries
+                .into_iter()
+                .map(|entry| {
+                    let role = entry.role();
+                    entry.into_recovery(role)
+                })
+                .collect();
+            (
+                vec![LocalFileError::from_io(LocalFileOperation::Cleanup, None, None, source)],
+                retained,
+            )
+        }
+    };
     if let Err(source) = backend
         .checkpoint(ConditionalPoint::CleanupSync)
         .and_then(|()| backend.sync_namespace())
     {
-        cleanup_errors.push(LocalFileError::from_io(
-            LocalFileOperation::Commit,
-            None,
-            None,
-            source,
-        ));
+        cleanup_errors.push(LocalFileError::from_io(LocalFileOperation::Commit, None, None, source));
     }
     let outcome = LocalWriteOutcome::new(
         LocalWriterState::Committed,

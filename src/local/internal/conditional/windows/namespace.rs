@@ -10,35 +10,55 @@
 use std::cell::RefCell;
 use std::ffi::OsStr;
 use std::ffi::OsString;
-use std::fs::{self, File, OpenOptions};
-use std::io::{self, ErrorKind};
+use std::fs;
+use std::fs::File;
+use std::fs::OpenOptions;
+use std::io;
+use std::io::ErrorKind;
 use std::os::windows::ffi::OsStrExt;
 use std::os::windows::fs::OpenOptionsExt;
-use std::os::windows::io::{AsRawHandle, FromRawHandle};
-use std::path::{Path, PathBuf};
-use std::ptr::{null, null_mut};
+use std::os::windows::io::AsRawHandle;
+use std::os::windows::io::FromRawHandle;
+use std::path::Path;
+use std::path::PathBuf;
+use std::ptr::null;
+use std::ptr::null_mut;
 
-use windows_sys::Wdk::Storage::FileSystem::{FILE_CREATE, FILE_NON_DIRECTORY_FILE, FILE_OPEN};
-use windows_sys::Win32::Foundation::{GENERIC_READ, GENERIC_WRITE, INVALID_HANDLE_VALUE};
-use windows_sys::Win32::Storage::FileSystem::{
-    CreateFileW, FILE_ATTRIBUTE_REPARSE_POINT, FILE_FLAG_BACKUP_SEMANTICS,
-    FILE_FLAG_OPEN_REPARSE_POINT, FILE_ID_INFO, FILE_LIST_DIRECTORY, FILE_READ_ATTRIBUTES,
-    FILE_SHARE_DELETE, FILE_SHARE_READ, FILE_SHARE_WRITE, FILE_TRAVERSE, FileAttributeTagInfo,
-    FileIdInfo, GetFileInformationByHandleEx, OPEN_EXISTING, SYNCHRONIZE,
-};
-
-use crate::LocalFileReader;
-use crate::LocalRelativePath;
-use crate::LocalResult;
-use crate::local::internal::windows_rooted::{
-    create_rooted_directory, open_conditional_entry_at, open_conditional_parent,
-    open_root_directory, rename_conditional_entry_at,
-};
-use crate::options::LocalWriteOptions;
-use crate::recovery::LocalRecoveryFileRole;
+use windows_sys::Wdk::Storage::FileSystem::FILE_CREATE;
+use windows_sys::Wdk::Storage::FileSystem::FILE_NON_DIRECTORY_FILE;
+use windows_sys::Wdk::Storage::FileSystem::FILE_OPEN;
+use windows_sys::Win32::Foundation::GENERIC_READ;
+use windows_sys::Win32::Foundation::GENERIC_WRITE;
+use windows_sys::Win32::Foundation::INVALID_HANDLE_VALUE;
+use windows_sys::Win32::Storage::FileSystem::CreateFileW;
+use windows_sys::Win32::Storage::FileSystem::FILE_ATTRIBUTE_REPARSE_POINT;
+use windows_sys::Win32::Storage::FileSystem::FILE_FLAG_BACKUP_SEMANTICS;
+use windows_sys::Win32::Storage::FileSystem::FILE_FLAG_OPEN_REPARSE_POINT;
+use windows_sys::Win32::Storage::FileSystem::FILE_ID_INFO;
+use windows_sys::Win32::Storage::FileSystem::FILE_LIST_DIRECTORY;
+use windows_sys::Win32::Storage::FileSystem::FILE_READ_ATTRIBUTES;
+use windows_sys::Win32::Storage::FileSystem::FILE_SHARE_DELETE;
+use windows_sys::Win32::Storage::FileSystem::FILE_SHARE_READ;
+use windows_sys::Win32::Storage::FileSystem::FILE_SHARE_WRITE;
+use windows_sys::Win32::Storage::FileSystem::FILE_TRAVERSE;
+use windows_sys::Win32::Storage::FileSystem::FileAttributeTagInfo;
+use windows_sys::Win32::Storage::FileSystem::FileIdInfo;
+use windows_sys::Win32::Storage::FileSystem::GetFileInformationByHandleEx;
+use windows_sys::Win32::Storage::FileSystem::OPEN_EXISTING;
+use windows_sys::Win32::Storage::FileSystem::SYNCHRONIZE;
 
 use super::super::ConditionalEntry;
 use super::super::RecoveryAccess;
+use crate::LocalFileReader;
+use crate::LocalRelativePath;
+use crate::LocalResult;
+use crate::local::internal::windows_rooted::create_rooted_directory;
+use crate::local::internal::windows_rooted::open_conditional_entry_at;
+use crate::local::internal::windows_rooted::open_conditional_parent;
+use crate::local::internal::windows_rooted::open_root_directory;
+use crate::local::internal::windows_rooted::rename_conditional_entry_at;
+use crate::options::LocalWriteOptions;
+use crate::recovery::LocalRecoveryFileRole;
 
 pub(super) const SHARE_ALL: u32 = FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE;
 pub(super) const ENTRY_ACCESS: u32 = GENERIC_READ | FILE_READ_ATTRIBUTES | SYNCHRONIZE;
@@ -78,12 +98,7 @@ impl Namespace {
         }
         let target_name = path
             .file_name()
-            .ok_or_else(|| {
-                io::Error::new(
-                    ErrorKind::InvalidInput,
-                    "conditional target has no filename",
-                )
-            })?
+            .ok_or_else(|| io::Error::new(ErrorKind::InvalidInput, "conditional target has no filename"))?
             .to_os_string();
         let parent = open_root_directory(&parent_path)?;
         Ok(Self {
@@ -106,10 +121,7 @@ impl Namespace {
     ) -> io::Result<Self> {
         let relative = LocalRelativePath::new(relative)?;
         if options.creates_parent()
-            && let Some(parent) = relative
-                .as_path()
-                .parent()
-                .filter(|path| !path.as_os_str().is_empty())
+            && let Some(parent) = relative.as_path().parent().filter(|path| !path.as_os_str().is_empty())
         {
             let parent = LocalRelativePath::new(parent)?;
             create_rooted_directory(&root, Path::new(""), &parent, true, true)?;
@@ -160,11 +172,8 @@ impl Namespace {
                 None,
                 None,
             )?;
-            let backup_name = crate::local::internal::file_name_generation::try_random_file_name(
-                "displaced-",
-                None,
-                Some(".bak"),
-            )?;
+            let backup_name =
+                crate::local::internal::file_name_generation::try_random_file_name("displaced-", None, Some(".bak"))?;
             let container = parent.join(dirname);
             match fs::create_dir(&container) {
                 Ok(()) => {
@@ -198,13 +207,7 @@ impl Namespace {
             .ok_or_else(|| io::Error::new(ErrorKind::InvalidInput, "backup path has no leaf"))?
             .to_os_string();
         let parent = open_host_directory_no_reparse(container)?;
-        let file = open_conditional_entry_at(
-            &parent,
-            &name,
-            ENTRY_ACCESS,
-            FILE_OPEN,
-            FILE_NON_DIRECTORY_FILE,
-        )?;
+        let file = open_conditional_entry_at(&parent, &name, ENTRY_ACCESS, FILE_OPEN, FILE_NON_DIRECTORY_FILE)?;
         let identity = file_identity(&file)?;
         self.recovery_parents
             .borrow_mut()
@@ -269,12 +272,9 @@ impl Namespace {
                     "conditional recovery container handle is unavailable",
                 )
             })?;
-        let name = container.file_name().ok_or_else(|| {
-            io::Error::new(
-                ErrorKind::InvalidInput,
-                "recovery container has no filename",
-            )
-        })?;
+        let name = container
+            .file_name()
+            .ok_or_else(|| io::Error::new(ErrorKind::InvalidInput, "recovery container has no filename"))?;
         let directory = open_conditional_entry_at(
             &self.parent,
             name,
@@ -283,7 +283,8 @@ impl Namespace {
             windows_sys::Wdk::Storage::FileSystem::FILE_DIRECTORY_FILE,
         )?;
         let mut tag = windows_sys::Win32::Storage::FileSystem::FILE_ATTRIBUTE_TAG_INFO::default();
-        // SAFETY: `directory` owns a live handle and `tag` is a correctly sized output buffer.
+        // SAFETY: `directory` owns a live handle and `tag` is a correctly sized output
+        // buffer.
         let success = unsafe {
             GetFileInformationByHandleEx(
                 directory.as_raw_handle(),
@@ -315,18 +316,12 @@ impl Namespace {
         let file = match &self.scope {
             Scope::Host { .. } => open_host_file(
                 &entry.namespace_path().to_path_buf(),
-                GENERIC_READ
-                    | windows_sys::Win32::Foundation::GENERIC_WRITE
-                    | FILE_READ_ATTRIBUTES
-                    | SYNCHRONIZE,
+                GENERIC_READ | windows_sys::Win32::Foundation::GENERIC_WRITE | FILE_READ_ATTRIBUTES | SYNCHRONIZE,
             )?,
             Scope::Rooted { .. } => open_conditional_entry_at(
                 &self.parent,
                 name,
-                GENERIC_READ
-                    | windows_sys::Win32::Foundation::GENERIC_WRITE
-                    | FILE_READ_ATTRIBUTES
-                    | SYNCHRONIZE,
+                GENERIC_READ | windows_sys::Win32::Foundation::GENERIC_WRITE | FILE_READ_ATTRIBUTES | SYNCHRONIZE,
                 FILE_OPEN,
                 FILE_NON_DIRECTORY_FILE,
             )?,
@@ -342,13 +337,9 @@ impl Namespace {
     ) -> io::Result<()> {
         match &self.scope {
             Scope::Host { .. } => fs::rename(source_path, &self.target_path),
-            Scope::Rooted { .. } => rename_conditional_entry_at(
-                &self.parent,
-                source_name,
-                &self.parent,
-                &self.target_name,
-                overwrite,
-            ),
+            Scope::Rooted { .. } => {
+                rename_conditional_entry_at(&self.parent, source_name, &self.parent, &self.target_name, overwrite)
+            }
         }
     }
 
@@ -359,11 +350,7 @@ impl Namespace {
     pub(super) fn child_path(&self, name: &OsStr) -> PathBuf {
         match &self.scope {
             Scope::Host { parent_path } => parent_path.join(name),
-            Scope::Rooted { relative, .. } => relative
-                .as_path()
-                .parent()
-                .unwrap_or_else(|| Path::new(""))
-                .join(name),
+            Scope::Rooted { relative, .. } => relative.as_path().parent().unwrap_or_else(|| Path::new("")).join(name),
         }
     }
 
@@ -377,11 +364,7 @@ impl Namespace {
         }
     }
 
-    pub(super) fn entry(
-        &self,
-        role: LocalRecoveryFileRole,
-        name: OsString,
-    ) -> io::Result<ConditionalEntry> {
+    pub(super) fn entry(&self, role: LocalRecoveryFileRole, name: OsString) -> io::Result<ConditionalEntry> {
         let file = self.open_entry(&name)?;
         let identity = file_identity(&file)?;
         verify_regular_no_reparse(&file)?;
@@ -403,13 +386,11 @@ impl Namespace {
 
     pub(super) fn create_private(&self, prefix: &str) -> io::Result<(OsString, File)> {
         for _ in 0..32 {
-            let name = OsString::from(
-                crate::local::internal::file_name_generation::try_random_file_name(
-                    &format!(".qubit-{prefix}-"),
-                    None,
-                    None,
-                )?,
-            );
+            let name = OsString::from(crate::local::internal::file_name_generation::try_random_file_name(
+                &format!(".qubit-{prefix}-"),
+                None,
+                None,
+            )?);
             let result = match &self.scope {
                 Scope::Host { .. } => OpenOptions::new()
                     .read(true)
@@ -452,21 +433,13 @@ impl Namespace {
     pub(super) fn open_entry(&self, name: &OsStr) -> io::Result<File> {
         match &self.scope {
             Scope::Host { .. } => open_host_file(&self.host_child_path(name)?, ENTRY_ACCESS),
-            Scope::Rooted { .. } => open_conditional_entry_at(
-                &self.parent,
-                name,
-                ENTRY_ACCESS,
-                FILE_OPEN,
-                FILE_NON_DIRECTORY_FILE,
-            ),
+            Scope::Rooted { .. } => {
+                open_conditional_entry_at(&self.parent, name, ENTRY_ACCESS, FILE_OPEN, FILE_NON_DIRECTORY_FILE)
+            }
         }
     }
 
-    pub(super) fn create_reader(
-        &self,
-        name: &OsStr,
-        expected: FileIdentity,
-    ) -> LocalResult<LocalFileReader> {
+    pub(super) fn create_reader(&self, name: &OsStr, expected: FileIdentity) -> LocalResult<LocalFileReader> {
         let file = self.open_entry(name).map_err(|error| {
             crate::LocalFileError::from_io(
                 crate::LocalFileOperation::OpenReader,
@@ -488,10 +461,7 @@ impl Namespace {
                 crate::LocalFileOperation::OpenReader,
                 Some(self.diagnostic_path.clone()),
                 None,
-                io::Error::new(
-                    ErrorKind::InvalidData,
-                    "conditional recovery entry identity changed",
-                ),
+                io::Error::new(ErrorKind::InvalidData, "conditional recovery entry identity changed"),
             ));
         }
         LocalFileReader::from_file(file).map_err(|error| {
@@ -536,22 +506,13 @@ impl Namespace {
         Ok(())
     }
 
-    pub(super) fn same_identity(
-        &self,
-        left: &ConditionalEntry,
-        right: &ConditionalEntry,
-    ) -> io::Result<bool> {
+    pub(super) fn same_identity(&self, left: &ConditionalEntry, right: &ConditionalEntry) -> io::Result<bool> {
         let left_reader = left.open_reader().map_err(io::Error::other)?;
         let right_reader = right.open_reader().map_err(io::Error::other)?;
         Ok(file_identity(left_reader.as_file())? == file_identity(right_reader.as_file())?)
     }
 
-    pub(super) fn rename(
-        &self,
-        source: &OsStr,
-        destination: &OsStr,
-        overwrite: bool,
-    ) -> io::Result<()> {
+    pub(super) fn rename(&self, source: &OsStr, destination: &OsStr, overwrite: bool) -> io::Result<()> {
         match &self.scope {
             Scope::Host { .. } => {
                 let from = self.host_child_path(source)?;
@@ -563,13 +524,9 @@ impl Namespace {
                     std::fs::remove_file(from)
                 }
             }
-            Scope::Rooted { .. } => rename_conditional_entry_at(
-                &self.parent,
-                source,
-                &self.parent,
-                destination,
-                overwrite,
-            ),
+            Scope::Rooted { .. } => {
+                rename_conditional_entry_at(&self.parent, source, &self.parent, destination, overwrite)
+            }
         }
     }
 
@@ -579,15 +536,14 @@ impl Namespace {
         match &self.scope {
             Scope::Host { .. } => {
                 let parent = self.parent_handle_for(entry.namespace_path())?;
-                let name = entry.namespace_path().file_name().ok_or_else(|| {
-                    io::Error::new(ErrorKind::InvalidInput, "entry has no filename")
-                })?;
+                let name = entry
+                    .namespace_path()
+                    .file_name()
+                    .ok_or_else(|| io::Error::new(ErrorKind::InvalidInput, "entry has no filename"))?;
                 let file = open_conditional_entry_at(
                     &parent,
                     name,
-                    windows_sys::Win32::Storage::FileSystem::DELETE
-                        | FILE_READ_ATTRIBUTES
-                        | SYNCHRONIZE,
+                    windows_sys::Win32::Storage::FileSystem::DELETE | FILE_READ_ATTRIBUTES | SYNCHRONIZE,
                     FILE_OPEN,
                     FILE_NON_DIRECTORY_FILE,
                 )?;
@@ -601,15 +557,14 @@ impl Namespace {
             }
             Scope::Rooted { .. } => {
                 let parent = self.parent.try_clone()?;
-                let name = entry.namespace_path().file_name().ok_or_else(|| {
-                    io::Error::new(ErrorKind::InvalidInput, "entry has no filename")
-                })?;
+                let name = entry
+                    .namespace_path()
+                    .file_name()
+                    .ok_or_else(|| io::Error::new(ErrorKind::InvalidInput, "entry has no filename"))?;
                 let file = open_conditional_entry_at(
                     &parent,
                     &name,
-                    windows_sys::Win32::Storage::FileSystem::DELETE
-                        | FILE_READ_ATTRIBUTES
-                        | SYNCHRONIZE,
+                    windows_sys::Win32::Storage::FileSystem::DELETE | FILE_READ_ATTRIBUTES | SYNCHRONIZE,
                     FILE_OPEN,
                     FILE_NON_DIRECTORY_FILE,
                 )?;
@@ -624,11 +579,7 @@ impl Namespace {
         }
     }
 
-    pub(super) fn delete_created_private(
-        &self,
-        file: &File,
-        expected: Option<FileIdentity>,
-    ) -> io::Result<()> {
+    pub(super) fn delete_created_private(&self, file: &File, expected: Option<FileIdentity>) -> io::Result<()> {
         if let Some(expected) = expected {
             if file_identity(file)? != expected {
                 return Err(io::Error::new(
@@ -654,12 +605,7 @@ impl Namespace {
             .find(|(container, _)| container == parent_path)
             .map(|(_, parent)| parent.try_clone())
             .transpose()?
-            .ok_or_else(|| {
-                io::Error::new(
-                    ErrorKind::NotFound,
-                    "conditional recovery parent handle is unavailable",
-                )
-            })
+            .ok_or_else(|| io::Error::new(ErrorKind::NotFound, "conditional recovery parent handle is unavailable"))
     }
 }
 
@@ -714,10 +660,7 @@ impl RecoveryAccess for EntryAccess {
                 crate::LocalFileOperation::OpenReader,
                 self.diagnostic_path.clone(),
                 None,
-                io::Error::new(
-                    ErrorKind::InvalidData,
-                    "conditional recovery entry identity changed",
-                ),
+                io::Error::new(ErrorKind::InvalidData, "conditional recovery entry identity changed"),
             ));
         }
         LocalFileReader::from_file(file).map_err(|error| {
@@ -761,22 +704,20 @@ pub(super) fn verify_regular_no_reparse(file: &File) -> io::Result<()> {
         ));
     }
     let mut tag = windows_sys::Win32::Storage::FileSystem::FILE_ATTRIBUTE_TAG_INFO::default();
-    // SAFETY: `file` owns a live handle and `tag` is a correctly sized output buffer.
+    // SAFETY: `file` owns a live handle and `tag` is a correctly sized output
+    // buffer.
     let success = unsafe {
         GetFileInformationByHandleEx(
             file.as_raw_handle(),
             windows_sys::Win32::Storage::FileSystem::FileAttributeTagInfo,
             (&raw mut tag).cast(),
-            std::mem::size_of::<windows_sys::Win32::Storage::FileSystem::FILE_ATTRIBUTE_TAG_INFO>()
-                as u32,
+            std::mem::size_of::<windows_sys::Win32::Storage::FileSystem::FILE_ATTRIBUTE_TAG_INFO>() as u32,
         )
     };
     if success == 0 {
         return Err(io::Error::last_os_error());
     }
-    if tag.FileAttributes & FILE_ATTRIBUTE_REPARSE_POINT != 0
-        || tag.FileAttributes & FILE_ATTRIBUTE_DIRECTORY != 0
-    {
+    if tag.FileAttributes & FILE_ATTRIBUTE_REPARSE_POINT != 0 || tag.FileAttributes & FILE_ATTRIBUTE_DIRECTORY != 0 {
         return Err(io::Error::new(
             ErrorKind::InvalidInput,
             "conditional entry is a reparse point or directory",
@@ -788,10 +729,7 @@ pub(super) fn verify_regular_no_reparse(file: &File) -> io::Result<()> {
 pub(super) fn open_host_file(path: &Path, access: u32) -> io::Result<File> {
     let wide: Vec<u16> = path.as_os_str().encode_wide().chain(Some(0)).collect();
     if wide[..wide.len() - 1].contains(&0) {
-        return Err(io::Error::new(
-            ErrorKind::InvalidInput,
-            "path contains an interior NUL",
-        ));
+        return Err(io::Error::new(ErrorKind::InvalidInput, "path contains an interior NUL"));
     }
     // SAFETY: `wide` is NUL terminated and remains live for the synchronous
     // CreateFileW call. The returned handle is checked before ownership transfer.
@@ -818,10 +756,7 @@ pub(super) fn open_host_file(path: &Path, access: u32) -> io::Result<File> {
 fn open_host_directory_no_reparse(path: &Path) -> io::Result<File> {
     let wide: Vec<u16> = path.as_os_str().encode_wide().chain(Some(0)).collect();
     if wide[..wide.len() - 1].contains(&0) {
-        return Err(io::Error::new(
-            ErrorKind::InvalidInput,
-            "path contains an interior NUL",
-        ));
+        return Err(io::Error::new(ErrorKind::InvalidInput, "path contains an interior NUL"));
     }
     // SAFETY: `wide` remains live through the synchronous call; the returned
     // handle is validated before ownership transfers to `File`.
@@ -842,7 +777,8 @@ fn open_host_directory_no_reparse(path: &Path) -> io::Result<File> {
     // SAFETY: CreateFileW returned a uniquely owned valid handle.
     let file = unsafe { File::from_raw_handle(handle) };
     let mut tag = windows_sys::Win32::Storage::FileSystem::FILE_ATTRIBUTE_TAG_INFO::default();
-    // SAFETY: `file` owns a live handle and `tag` is a correctly sized output buffer.
+    // SAFETY: `file` owns a live handle and `tag` is a correctly sized output
+    // buffer.
     let success = unsafe {
         GetFileInformationByHandleEx(
             file.as_raw_handle(),
@@ -854,9 +790,7 @@ fn open_host_directory_no_reparse(path: &Path) -> io::Result<File> {
     if success == 0 {
         return Err(io::Error::last_os_error());
     }
-    if tag.FileAttributes & FILE_ATTRIBUTE_REPARSE_POINT != 0
-        || tag.FileAttributes & FILE_ATTRIBUTE_DIRECTORY == 0
-    {
+    if tag.FileAttributes & FILE_ATTRIBUTE_REPARSE_POINT != 0 || tag.FileAttributes & FILE_ATTRIBUTE_DIRECTORY == 0 {
         return Err(io::Error::new(
             ErrorKind::InvalidInput,
             "conditional recovery container is not a real directory",
@@ -866,11 +800,12 @@ fn open_host_directory_no_reparse(path: &Path) -> io::Result<File> {
 }
 
 fn delete_open_entry(file: &File) -> io::Result<()> {
-    use windows_sys::Win32::Storage::FileSystem::{
-        FILE_DISPOSITION_INFO, FileDispositionInfo, SetFileInformationByHandle,
-    };
+    use windows_sys::Win32::Storage::FileSystem::FILE_DISPOSITION_INFO;
+    use windows_sys::Win32::Storage::FileSystem::FileDispositionInfo;
+    use windows_sys::Win32::Storage::FileSystem::SetFileInformationByHandle;
     let disposition = FILE_DISPOSITION_INFO { DeleteFile: true };
-    // SAFETY: The handle was opened with DELETE and the buffer matches the info class.
+    // SAFETY: The handle was opened with DELETE and the buffer matches the info
+    // class.
     let success = unsafe {
         SetFileInformationByHandle(
             file.as_raw_handle(),

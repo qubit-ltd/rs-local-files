@@ -17,11 +17,7 @@ use windows_sys::Win32::Storage::FileSystem::ReplaceFileW;
 use super::namespace::Namespace;
 
 /// Calls `ReplaceFileW` with a nonempty same-volume backup path.
-pub(super) fn replace_with_backup(
-    target: &Path,
-    replacement: &Path,
-    backup: &Path,
-) -> io::Result<()> {
+pub(super) fn replace_with_backup(target: &Path, replacement: &Path, backup: &Path) -> io::Result<()> {
     let target = wide_path(target.as_os_str())?;
     let replacement = wide_path(replacement.as_os_str())?;
     let backup = wide_path(backup.as_os_str())?;
@@ -50,10 +46,7 @@ pub(super) fn install_absent(namespace: &Namespace, candidate: &OsStr) -> io::Re
     if namespace.is_rooted() {
         namespace.rename(candidate, namespace.target_name(), false)
     } else {
-        std::fs::hard_link(
-            namespace.private_file_path(candidate)?,
-            namespace.target_path(),
-        )
+        std::fs::hard_link(namespace.private_file_path(candidate)?, namespace.target_path())
     }
 }
 

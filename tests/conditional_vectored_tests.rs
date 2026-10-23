@@ -10,9 +10,12 @@
 
 use qubit_io::Output;
 use qubit_local_files::LocalFileSystem;
-use qubit_local_files::options::{LocalWriteMode, LocalWriteOptions, LocalWritePrecondition};
+use qubit_local_files::options::LocalWriteMode;
+use qubit_local_files::options::LocalWriteOptions;
+use qubit_local_files::options::LocalWritePrecondition;
 use qubit_local_files::policy::LocalSymlinkPolicy;
-use sha2::{Digest, Sha256};
+use sha2::Digest;
+use sha2::Sha256;
 
 #[test]
 fn aborted_conditional_writer_rejects_empty_vectors() {
@@ -50,10 +53,7 @@ fn mixed_scalar_and_vectored_writes_publish_expected_digest() {
         )
         .unwrap();
     writer.write_fully(b"a").unwrap();
-    assert_eq!(
-        Output::write_vectored(&mut writer, &[b"b", b"c"]).unwrap(),
-        2
-    );
+    assert_eq!(Output::write_vectored(&mut writer, &[b"b", b"c"]).unwrap(), 2);
     let saved = writer.commit().unwrap();
     assert_eq!(std::fs::read(path).unwrap(), b"abc");
     assert_eq!(saved.digest(), &Sha256::digest(b"abc"));

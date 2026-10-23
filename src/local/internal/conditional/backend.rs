@@ -8,10 +8,9 @@
 
 use std::io;
 
-use crate::outcome::LocalConditionalPublicationState;
-
 use super::ConditionalEntry;
 use super::ConditionalHooks;
+use crate::outcome::LocalConditionalPublicationState;
 
 /// Outcome of a native operation, including observations made after failure.
 #[derive(Debug)]
@@ -27,6 +26,7 @@ pub(crate) struct NativeAttempt {
 }
 
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
+#[allow(dead_code)] // Includes checkpoints exercised only by the fake backend tests.
 pub(crate) enum ConditionalPoint {
     Flush,
     PrepareCandidateCopy,
@@ -37,22 +37,30 @@ pub(crate) enum ConditionalPoint {
     SyncNamespace,
     SyncInstalled,
     Precheck,
+    AfterPrecheck,
     Publish,
+    AfterPublish,
     VerifyDisplaced,
     VerifyInstalled,
     RollbackPrecheck,
+    RollbackValidated,
     Rollback,
+    RollbackCompleted,
     RollbackExchange,
+    AfterRollbackSyscall,
     VerifyRollback,
     SyncRollback,
     SaveComplete,
     CleanupOld,
     CleanupCopy,
     CleanupSync,
+    BeforeRequiredFileSync,
+    BeforeRequiredParentSync,
 }
 
 /// One deterministic action consumed by a backend checkpoint.
 #[derive(Clone, Debug)]
+#[allow(dead_code)] // The fake backend constructs these actions in deterministic tests.
 pub(crate) enum ConditionalHookAction {
     Noop,
     Fail(io::ErrorKind),
@@ -67,14 +75,17 @@ pub(crate) enum ConditionalHookAction {
 pub(crate) trait ConditionalBackend: qubit_io::Output<Item = u8> {
     /// Returns the candidate staging entry.
     fn candidate(&self) -> &ConditionalEntry;
-    /// Creates an independent copy using a fixed-size buffer in the controlled namespace.
+    /// Creates an independent copy using a fixed-size buffer in the controlled
+    /// namespace.
     ///
-    /// If copying fails after creating an entry, the backend registers that entry so
-    /// `take_recovery_entries` can transfer it without resolving a path again.
+    /// If copying fails after creating an entry, the backend registers that
+    /// entry so `take_recovery_entries` can transfer it without resolving a
+    /// path again.
     fn create_candidate_copy(&mut self) -> io::Result<ConditionalEntry>;
     /// Opens and identity-checks the current destination.
     fn open_target(&self) -> io::Result<ConditionalEntry>;
-    /// Applies requested metadata from the observed destination to the candidate.
+    /// Applies requested metadata from the observed destination to the
+    /// candidate.
     fn preserve_metadata(&mut self, observed: &ConditionalEntry) -> io::Result<()>;
     /// Synchronizes candidate file content and metadata.
     fn sync_candidate(&self) -> io::Result<()>;
@@ -86,7 +97,8 @@ pub(crate) trait ConditionalBackend: qubit_io::Output<Item = u8> {
     fn is_candidate(&self, entry: &ConditionalEntry) -> io::Result<bool>;
     /// Verifies that an entry still has its observed native identity and type.
     fn verify_entry(&self, entry: &ConditionalEntry) -> io::Result<()>;
-    /// Transfers guards to the publication-may-have-occurred state before a syscall.
+    /// Transfers guards to the publication-may-have-occurred state before a
+    /// syscall.
     fn begin_publication(&mut self);
     /// Installs candidate only if the destination is absent.
     fn publish_absent(&mut self) -> NativeAttempt;
@@ -98,10 +110,12 @@ pub(crate) trait ConditionalBackend: qubit_io::Output<Item = u8> {
     fn remove_observed(&mut self, entry: &ConditionalEntry) -> io::Result<()>;
     /// Cleans this backend's unpublished staging entries.
     fn abort(&mut self) -> io::Result<()>;
-    /// Transfers retained recovery entries without resolving them by path again.
+    /// Transfers retained recovery entries without resolving them by path
+    /// again.
     fn take_recovery_entries(&mut self) -> Vec<ConditionalEntry>;
     /// Installs deterministic test hooks for backend checkpoints.
     fn set_hooks(&mut self, hooks: ConditionalHooks);
-    /// Runs a deterministic test checkpoint, or succeeds as a no-op in production.
+    /// Runs a deterministic test checkpoint, or succeeds as a no-op in
+    /// production.
     fn checkpoint(&mut self, point: ConditionalPoint) -> io::Result<()>;
 }

@@ -13,7 +13,8 @@
 pub enum LocalRecoveryFileRole {
     /// Complete, independently verified copy of the candidate content.
     CandidateCopy,
-    /// Staging content that may be incomplete or not yet independently verified.
+    /// Staging content that may be incomplete or not yet independently
+    /// verified.
     StagedCandidate,
     /// A file displaced from the target during publication.
     Displaced,

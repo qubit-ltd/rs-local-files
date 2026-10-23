@@ -223,7 +223,7 @@ pub(in crate::local::internal) fn rename_conditional_entry_at(
     if status < 0 {
         // SAFETY: conversion accepts any NTSTATUS and retains no pointers.
         Err(Error::from_raw_os_error(
-            unsafe { RtlNtStatusToDosErrorNoTeb(status) } as i32,
+            unsafe { RtlNtStatusToDosErrorNoTeb(status) } as i32
         ))
     } else {
         Ok(())

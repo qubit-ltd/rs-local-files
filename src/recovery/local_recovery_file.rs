@@ -28,6 +28,51 @@ pub struct LocalRecoveryFile {
     access: Box<dyn RecoveryAccess>,
 }
 
+impl LocalRecoveryFile {
+    /// Creates a recovery handle from an observed entry and its retained
+    /// access.
+    pub(crate) fn new(
+        role: LocalRecoveryFileRole,
+        namespace_path: PathBuf,
+        diagnostic_path: Option<PathBuf>,
+        access: Box<dyn RecoveryAccess>,
+    ) -> Self {
+        Self {
+            role,
+            namespace_path,
+            diagnostic_path,
+            access,
+        }
+    }
+
+    /// Returns the retained file's role in the conditional write attempt.
+    pub const fn role(&self) -> LocalRecoveryFileRole {
+        self.role
+    }
+
+    /// Returns the file's namespace path for diagnostics and user guidance.
+    #[must_use]
+    pub fn namespace_path(&self) -> &Path {
+        &self.namespace_path
+    }
+
+    /// Returns an optional path suitable for diagnostic display.
+    #[must_use]
+    pub fn diagnostic_path(&self) -> Option<&Path> {
+        self.diagnostic_path.as_deref()
+    }
+
+    /// Opens a reader after verifying that the retained entry still identifies
+    /// the same file.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the entry was removed, replaced, or cannot be read.
+    pub fn open_reader(&self) -> LocalResult<LocalFileReader> {
+        self.access.open_reader()
+    }
+}
+
 #[cfg(test)]
 mod conditional_types_tests {
     use std::fs::File;
@@ -54,20 +99,10 @@ mod conditional_types_tests {
     impl RecoveryAccess for FakeRecoveryAccess {
         fn open_reader(&self) -> LocalResult<LocalFileReader> {
             let file = File::open(&self.path).map_err(|error| {
-                LocalFileError::from_io(
-                    LocalFileOperation::OpenReader,
-                    Some(self.path.clone()),
-                    None,
-                    error,
-                )
+                LocalFileError::from_io(LocalFileOperation::OpenReader, Some(self.path.clone()), None, error)
             })?;
             LocalFileReader::from_file(file).map_err(|error| {
-                LocalFileError::from_io(
-                    LocalFileOperation::OpenReader,
-                    Some(self.path.clone()),
-                    None,
-                    error,
-                )
+                LocalFileError::from_io(LocalFileOperation::OpenReader, Some(self.path.clone()), None, error)
             })
         }
     }
@@ -96,54 +131,6 @@ mod conditional_types_tests {
         assert_eq!(contents, b"candidate B");
         drop(recovery);
 
-        assert_eq!(
-            std::fs::read(path).expect("recovery file remains"),
-            b"candidate B"
-        );
-    }
-}
-
-impl LocalRecoveryFile {
-    /// Creates a recovery handle from an observed entry and its retained access.
-    pub(crate) fn new(
-        role: LocalRecoveryFileRole,
-        namespace_path: PathBuf,
-        diagnostic_path: Option<PathBuf>,
-        access: Box<dyn RecoveryAccess>,
-    ) -> Self {
-        Self {
-            role,
-            namespace_path,
-            diagnostic_path,
-            access,
-        }
-    }
-
-    /// Returns the retained file's role in the conditional write attempt.
-    #[must_use]
-    pub const fn role(&self) -> LocalRecoveryFileRole {
-        self.role
-    }
-
-    /// Returns the file's namespace path for diagnostics and user guidance.
-    #[must_use]
-    pub fn namespace_path(&self) -> &Path {
-        &self.namespace_path
-    }
-
-    /// Returns an optional path suitable for diagnostic display.
-    #[must_use]
-    pub fn diagnostic_path(&self) -> Option<&Path> {
-        self.diagnostic_path.as_deref()
-    }
-
-    /// Opens a reader after verifying that the retained entry still identifies
-    /// the same file.
-    ///
-    /// # Errors
-    ///
-    /// Returns an error if the entry was removed, replaced, or cannot be read.
-    pub fn open_reader(&self) -> LocalResult<LocalFileReader> {
-        self.access.open_reader()
+        assert_eq!(std::fs::read(path).expect("recovery file remains"), b"candidate B");
     }
 }

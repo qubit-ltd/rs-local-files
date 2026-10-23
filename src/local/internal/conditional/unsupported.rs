@@ -41,8 +41,10 @@ fn unsupported_error() -> io::Error {
 
 #[cfg(test)]
 mod tests {
-    use super::{open_host, open_rooted};
-    use crate::options::{LocalWriteMode, LocalWriteOptions};
+    use super::open_host;
+    use super::open_rooted;
+    use crate::options::LocalWriteMode;
+    use crate::options::LocalWriteOptions;
 
     #[test]
     fn unsupported_conditional_constructors_fail_closed() {

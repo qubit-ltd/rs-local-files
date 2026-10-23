@@ -16,26 +16,25 @@ pub(in crate::local::internal) mod native;
 mod symlink;
 mod volume_probe;
 
-#[cfg(feature = "digest")]
-pub(in crate::local::internal) use handle::open_conditional_parent;
-#[cfg(feature = "digest")]
-pub(in crate::local::internal) use namespace_mutation::rename_conditional_entry_at;
-#[cfg(feature = "digest")]
-pub(in crate::local::internal) use native::open_conditional_entry_at;
-
 pub(crate) use directory::create_rooted_directory;
 pub(crate) use directory::open_root_directory_reader;
 pub(crate) use directory::open_rooted_directory_reader;
 pub(crate) use directory::read_rooted_directory;
 pub(crate) use directory::remove_rooted_entry;
 pub(crate) use file_io::open_rooted_native_writer;
+#[cfg(feature = "digest")]
+pub(in crate::local::internal) use handle::open_conditional_parent;
 pub(crate) use handle::open_root_directory;
 pub(crate) use handle::open_rooted_component_directory;
 pub(crate) use handle::open_rooted_native_reader;
 pub(crate) use handle::read_rooted_component_metadata;
 pub(crate) use handle::read_rooted_symlink_metadata;
+#[cfg(feature = "digest")]
+pub(in crate::local::internal) use namespace_mutation::rename_conditional_entry_at;
 pub(crate) use namespace_mutation::rename_rooted_entry;
 pub(crate) use namespace_mutation::set_rooted_permissions;
+#[cfg(feature = "digest")]
+pub(in crate::local::internal) use native::open_conditional_entry_at;
 pub(crate) use symlink::create_rooted_symlink;
 pub(crate) use symlink::read_rooted_link;
 pub(crate) use symlink::rooted_link_targets_directory;

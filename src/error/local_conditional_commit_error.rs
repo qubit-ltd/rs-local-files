@@ -16,7 +16,8 @@ use crate::outcome::LocalConditionalPublicationState;
 use crate::recovery::LocalRecoveryFile;
 use crate::recovery::LocalRecoveryFileRole;
 
-/// Failure of a conditional commit with its publication state and recoverable files.
+/// Failure of a conditional commit with its publication state and recoverable
+/// files.
 #[must_use]
 #[derive(Debug)]
 pub struct LocalConditionalCommitError {
@@ -28,7 +29,8 @@ pub struct LocalConditionalCommitError {
 }
 
 impl LocalConditionalCommitError {
-    /// Creates the structured terminal failure and transfers retained resources.
+    /// Creates the structured terminal failure and transfers retained
+    /// resources.
     pub(crate) fn new(
         error: LocalFileError,
         reason: LocalConditionalFailureReason,
@@ -45,7 +47,8 @@ impl LocalConditionalCommitError {
         }
     }
 
-    /// Supplies the public operation path when the failure has no more specific path.
+    /// Supplies the public operation path when the failure has no more specific
+    /// path.
     ///
     /// The existing error and its native source are retained when a path is
     /// already present.
@@ -56,26 +59,23 @@ impl LocalConditionalCommitError {
         self
     }
 
-    /// Returns the structured local filesystem error, including its native source.
-    #[must_use]
+    /// Returns the structured local filesystem error, including its native
+    /// source.
     pub const fn error(&self) -> &LocalFileError {
         &self.error
     }
 
     /// Returns the stable conditional failure classification.
-    #[must_use]
     pub const fn reason(&self) -> LocalConditionalFailureReason {
         self.reason
     }
 
     /// Returns the operation stage at which the attempt stopped.
-    #[must_use]
     pub const fn stage(&self) -> LocalConditionalWriteStage {
         self.stage
     }
 
     /// Returns the observed destination state when the attempt stopped.
-    #[must_use]
     pub const fn publication(&self) -> LocalConditionalPublicationState {
         self.publication
     }
@@ -89,7 +89,6 @@ impl LocalConditionalCommitError {
     }
 
     /// Returns every file retained to support recovery.
-    #[must_use]
     pub fn recovery_files(&self) -> &[LocalRecoveryFile] {
         &self.recovery_files
     }
@@ -122,13 +121,12 @@ mod conditional_types_tests {
     use std::error::Error;
     use std::io;
 
+    use super::LocalConditionalCommitError;
     use crate::LocalFileError;
     use crate::LocalFileOperation;
     use crate::error::LocalConditionalFailureReason;
     use crate::error::LocalConditionalWriteStage;
     use crate::outcome::LocalConditionalPublicationState;
-
-    use super::LocalConditionalCommitError;
 
     #[test]
     fn conditional_commit_error_preserves_native_io_source() {
@@ -148,10 +146,11 @@ mod conditional_types_tests {
         let local_error = Error::source(&error).expect("structured local error source");
         let native_error = Error::source(local_error).expect("native I/O error source");
         assert_eq!(
-            native_error
-                .downcast_ref::<io::Error>()
-                .map(io::Error::kind),
+            native_error.downcast_ref::<io::Error>().map(io::Error::kind),
             Some(io::ErrorKind::PermissionDenied)
         );
+        assert!(error.to_string().contains("conditional commit failed at Publish"));
+        assert!(error.source().is_some());
+        assert!(error.into_recovery_files().is_empty());
     }
 }

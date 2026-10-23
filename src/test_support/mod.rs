@@ -14,12 +14,26 @@
 //! thread. It supports native boundary and recovery-state tests that cannot be
 //! triggered through ordinary inputs.
 
+#[cfg(all(feature = "digest", feature = "test-support"))]
+mod conditional_hooks;
+#[cfg(all(feature = "digest", feature = "test-support"))]
+mod conditional_point;
 #[cfg(feature = "test-support")]
 mod host_metadata_probes;
 mod internal;
+#[cfg(all(feature = "digest", feature = "test-support"))]
+mod test_conditional_hooks;
+#[cfg(all(feature = "digest", feature = "test-support"))]
+mod test_conditional_point;
 mod test_fault_plan;
 mod test_fault_point;
 
+#[cfg(all(feature = "digest", feature = "test-support"))]
+#[doc(hidden)]
+pub use conditional_hooks::TestConditionalHooks;
+#[cfg(all(feature = "digest", feature = "test-support"))]
+#[doc(hidden)]
+pub use conditional_point::TestConditionalPoint;
 #[cfg(feature = "test-support")]
 #[doc(hidden)]
 pub use host_metadata_probes::host_metadata_probe_counts;

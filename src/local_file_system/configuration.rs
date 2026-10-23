@@ -361,6 +361,29 @@ impl LocalFileSystem {
             capabilities: self.core.capabilities,
             limits: self.core.limits,
             test_faults,
+            #[cfg(all(feature = "digest", feature = "test-support"))]
+            conditional_hooks: self.core.conditional_hooks.clone(),
+        });
+        self
+    }
+
+    /// Installs one instance-local conditional publication hook for tests.
+    #[cfg(all(feature = "digest", feature = "test-support"))]
+    #[doc(hidden)]
+    #[must_use = "use the filesystem configured with conditional test hooks"]
+    pub fn with_conditional_test_hooks(mut self, hooks: crate::test_support::TestConditionalHooks) -> Self {
+        let conditional_hooks = if let Some(existing) = &self.core.conditional_hooks {
+            existing.with_test(hooks)
+        } else {
+            crate::local::conditional::ConditionalHooks::from_test(hooks)
+        };
+        self.core = Arc::new(LocalFileSystemCore {
+            namespace: self.core.namespace.clone(),
+            capabilities: self.core.capabilities,
+            limits: self.core.limits,
+            #[cfg(feature = "test-support")]
+            test_faults: self.core.test_faults.clone(),
+            conditional_hooks: Some(conditional_hooks),
         });
         self
     }

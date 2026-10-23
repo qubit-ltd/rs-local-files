@@ -18,21 +18,29 @@ use std::ffi::OsStr;
 use std::ffi::OsString;
 use std::fmt;
 use std::fs::File;
-use std::io::{self, Read, Seek, Write};
-use std::path::{Path, PathBuf};
+use std::io;
+use std::io::Read;
+use std::io::Seek;
+use std::io::Write;
+use std::path::Path;
+use std::path::PathBuf;
 
+use namespace::FileIdentity;
+use namespace::Namespace;
+use namespace::file_identity;
 use qubit_io::Output;
+use recovery::classify_replace_failure;
 
-use crate::options::{LocalWriteMetadataPolicy, LocalWriteOptions};
+use super::ConditionalBackend;
+use super::ConditionalEntry;
+use super::ConditionalHookAction;
+use super::ConditionalHooks;
+use super::ConditionalPoint;
+use super::NativeAttempt;
+use crate::options::LocalWriteMetadataPolicy;
+use crate::options::LocalWriteOptions;
 use crate::outcome::LocalConditionalPublicationState;
 use crate::recovery::LocalRecoveryFileRole;
-
-use super::{
-    ConditionalBackend, ConditionalEntry, ConditionalHookAction, ConditionalHooks,
-    ConditionalPoint, NativeAttempt,
-};
-use namespace::{FileIdentity, Namespace, file_identity};
-use recovery::classify_replace_failure;
 
 const COPY_BUFFER_SIZE: usize = 64 * 1024;
 
@@ -58,13 +66,7 @@ fn combine_observation_error(
     match (native_error, observation_error) {
         (Some(native), Some(observation)) => {
             let kind = native.kind();
-            Some(io::Error::new(
-                kind,
-                NativeReceiptError {
-                    native,
-                    observation,
-                },
-            ))
+            Some(io::Error::new(kind, NativeReceiptError { native, observation }))
         }
         (Some(error), None) | (None, Some(error)) => Some(error),
         (None, None) => None,
@@ -198,9 +200,7 @@ impl Drop for PrivateEntryGuard<'_> {
         let Some(identity) = self.identity else {
             return;
         };
-        let _ = self
-            .namespace
-            .delete_created_private(&self._file, Some(identity));
+        let _ = self.namespace.delete_created_private(&self._file, Some(identity));
     }
 }
 
@@ -230,10 +230,7 @@ impl WindowsConditionalBackend {
         diagnostic: &Path,
         options: &LocalWriteOptions,
     ) -> io::Result<Self> {
-        Self::open(
-            Namespace::open_rooted(root, relative, diagnostic, options)?,
-            options,
-        )
+        Self::open(Namespace::open_rooted(root, relative, diagnostic, options)?, options)
     }
 
     fn open(namespace: Namespace, options: &LocalWriteOptions) -> io::Result<Self> {
@@ -259,17 +256,12 @@ impl WindowsConditionalBackend {
         self.namespace.entry(role, name)
     }
 
-    fn entry_if_present(
-        &self,
-        role: LocalRecoveryFileRole,
-        name: &OsStr,
-    ) -> io::Result<Option<ConditionalEntry>> {
+    fn entry_if_present(&self, role: LocalRecoveryFileRole, name: &OsStr) -> io::Result<Option<ConditionalEntry>> {
         observe_optional_entry(|| self.entry(role, name.to_os_string()))
     }
 
     fn observe_candidate_entry(&self) -> io::Result<Option<ConditionalEntry>> {
-        let candidate =
-            self.entry_if_present(LocalRecoveryFileRole::StagedCandidate, &self.candidate_name)?;
+        let candidate = self.entry_if_present(LocalRecoveryFileRole::StagedCandidate, &self.candidate_name)?;
         let Some(candidate) = candidate else {
             return Ok(None);
         };
@@ -308,10 +300,9 @@ impl WindowsConditionalBackend {
         let _failure_class = error
             .as_ref()
             .map(|source| classify_replace_failure(source.raw_os_error()));
-        let (installed, mut observation_error) = observe_with_error(self.entry_if_present(
-            LocalRecoveryFileRole::StagedCandidate,
-            self.namespace.target_name(),
-        ));
+        let (installed, mut observation_error) = observe_with_error(
+            self.entry_if_present(LocalRecoveryFileRole::StagedCandidate, self.namespace.target_name()),
+        );
         let (backup, backup_error) = match backup_container.zip(backup_path) {
             Some((container, path)) => observe_with_error(observe_optional_entry(|| {
                 self.namespace
@@ -367,16 +358,11 @@ impl WindowsConditionalBackend {
         let _failure_class = error
             .as_ref()
             .map(|source| classify_replace_failure(source.raw_os_error()));
-        let (installed, mut observation_error) = observe_with_error(self.entry_if_present(
-            LocalRecoveryFileRole::Displaced,
-            self.namespace.target_name(),
-        ));
+        let (installed, mut observation_error) =
+            observe_with_error(self.entry_if_present(LocalRecoveryFileRole::Displaced, self.namespace.target_name()));
         let (backup, backup_error) = observe_with_error(observe_optional_entry(|| {
-            self.namespace.entry_in_container(
-                LocalRecoveryFileRole::RollbackDisplaced,
-                backup_container,
-                backup_path,
-            )
+            self.namespace
+                .entry_in_container(LocalRecoveryFileRole::RollbackDisplaced, backup_container, backup_path)
         }));
         observation_error = observation_error.or(backup_error);
         let (installed_identity, identity_error) = match installed.as_ref() {
@@ -415,16 +401,14 @@ impl WindowsConditionalBackend {
     }
 
     fn checkpoint_action(&mut self, point: ConditionalPoint) -> io::Result<()> {
+        #[cfg(all(feature = "digest", feature = "test-support"))]
+        self.hooks.run_callback(point)?;
         match self.hooks.take(point) {
             Some(ConditionalHookAction::Fail(kind)) => {
                 Err(io::Error::new(kind, "injected Windows conditional failure"))
             }
-            Some(ConditionalHookAction::ReplaceTarget(bytes)) => {
-                self.write_target_for_hook(&bytes, false)
-            }
-            Some(ConditionalHookAction::OverwriteTargetInPlace(bytes)) => {
-                self.write_target_for_hook(&bytes, true)
-            }
+            Some(ConditionalHookAction::ReplaceTarget(bytes)) => self.write_target_for_hook(&bytes, false),
+            Some(ConditionalHookAction::OverwriteTargetInPlace(bytes)) => self.write_target_for_hook(&bytes, true),
             Some(ConditionalHookAction::PartialCandidateCopy(_))
             | Some(ConditionalHookAction::CorruptCandidateCopy(_))
             | Some(ConditionalHookAction::PartialPublish)
@@ -437,16 +421,10 @@ impl WindowsConditionalBackend {
         use std::io::Write as _;
         let path = self.namespace.target_path();
         if in_place {
-            let mut file = std::fs::OpenOptions::new()
-                .write(true)
-                .truncate(true)
-                .open(path)?;
+            let mut file = std::fs::OpenOptions::new().write(true).truncate(true).open(path)?;
             file.write_all(bytes)
         } else {
-            let mut file = std::fs::OpenOptions::new()
-                .write(true)
-                .create_new(true)
-                .open(path)?;
+            let mut file = std::fs::OpenOptions::new().write(true).create_new(true).open(path)?;
             file.write_all(bytes)
         }
     }
@@ -472,11 +450,8 @@ impl WindowsConditionalBackend {
         };
         match install::replace_with_backup(self.namespace.target_path(), &candidate_path, &backup) {
             Ok(()) => {
-                let mut attempt =
-                    self.collect_native_receipt(None, Some(&container), Some(&backup));
-                if attempt.publication != LocalConditionalPublicationState::Published
-                    || attempt.displaced.is_empty()
-                {
+                let mut attempt = self.collect_native_receipt(None, Some(&container), Some(&backup));
+                if attempt.publication != LocalConditionalPublicationState::Published || attempt.displaced.is_empty() {
                     attempt.error = Some(io::Error::new(
                         io::ErrorKind::InvalidData,
                         "ReplaceFileW succeeded without a verified target and backup receipt",
@@ -509,30 +484,28 @@ impl Output for WindowsConditionalBackend {
     type Item = u8;
 
     fn write_vectored(&mut self, slices: &[&[u8]]) -> io::Result<usize> {
-        let file = self.candidate_file.as_mut().ok_or_else(|| {
-            io::Error::new(io::ErrorKind::BrokenPipe, "conditional candidate is closed")
-        })?;
-        let slices: Vec<io::IoSlice<'_>> =
-            slices.iter().map(|slice| io::IoSlice::new(slice)).collect();
+        let file = self
+            .candidate_file
+            .as_mut()
+            .ok_or_else(|| io::Error::new(io::ErrorKind::BrokenPipe, "conditional candidate is closed"))?;
+        let slices: Vec<io::IoSlice<'_>> = slices.iter().map(|slice| io::IoSlice::new(slice)).collect();
         Write::write_vectored(file, &slices)
     }
 
-    unsafe fn write_unchecked(
-        &mut self,
-        input: &[u8],
-        index: usize,
-        count: usize,
-    ) -> io::Result<usize> {
-        let file = self.candidate_file.as_mut().ok_or_else(|| {
-            io::Error::new(io::ErrorKind::BrokenPipe, "conditional candidate is closed")
-        })?;
+    unsafe fn write_unchecked(&mut self, input: &[u8], index: usize, count: usize) -> io::Result<usize> {
+        let file = self
+            .candidate_file
+            .as_mut()
+            .ok_or_else(|| io::Error::new(io::ErrorKind::BrokenPipe, "conditional candidate is closed"))?;
         Write::write(file, &input[index..index + count])
     }
 
     fn flush(&mut self) -> io::Result<()> {
-        Write::flush(self.candidate_file.as_mut().ok_or_else(|| {
-            io::Error::new(io::ErrorKind::BrokenPipe, "conditional candidate is closed")
-        })?)
+        Write::flush(
+            self.candidate_file
+                .as_mut()
+                .ok_or_else(|| io::Error::new(io::ErrorKind::BrokenPipe, "conditional candidate is closed"))?,
+        )
     }
 }
 
@@ -551,9 +524,10 @@ impl ConditionalBackend for WindowsConditionalBackend {
         };
         let mut guard = PrivateEntryGuard::new(&self.namespace, &destination)?;
         let result = (|| {
-            let source = self.candidate_file.as_ref().ok_or_else(|| {
-                io::Error::new(io::ErrorKind::BrokenPipe, "conditional candidate is closed")
-            })?;
+            let source = self
+                .candidate_file
+                .as_ref()
+                .ok_or_else(|| io::Error::new(io::ErrorKind::BrokenPipe, "conditional candidate is closed"))?;
             let mut source = source.try_clone()?;
             source.rewind()?;
             let mut buffer = [0_u8; COPY_BUFFER_SIZE];
@@ -609,9 +583,7 @@ impl ConditionalBackend for WindowsConditionalBackend {
     fn sync_candidate(&self) -> io::Result<()> {
         self.candidate_file
             .as_ref()
-            .ok_or_else(|| {
-                io::Error::new(io::ErrorKind::BrokenPipe, "conditional candidate is closed")
-            })?
+            .ok_or_else(|| io::Error::new(io::ErrorKind::BrokenPipe, "conditional candidate is closed"))?
             .sync_all()
     }
 
@@ -665,10 +637,9 @@ impl ConditionalBackend for WindowsConditionalBackend {
     fn publish_absent(&mut self) -> NativeAttempt {
         match install::install_absent(&self.namespace, &self.candidate_name) {
             Ok(()) => {
-                let (installed, installed_error) = observe_with_error(self.entry_if_present(
-                    LocalRecoveryFileRole::StagedCandidate,
-                    self.namespace.target_name(),
-                ));
+                let (installed, installed_error) = observe_with_error(
+                    self.entry_if_present(LocalRecoveryFileRole::StagedCandidate, self.namespace.target_name()),
+                );
                 let (candidate, candidate_error) = if !self.namespace.is_rooted() {
                     observe_with_error(self.observe_candidate_entry())
                 } else {
@@ -719,9 +690,7 @@ impl ConditionalBackend for WindowsConditionalBackend {
     }
 
     fn rollback(&mut self, displaced: &ConditionalEntry) -> NativeAttempt {
-        if self.namespace.is_rooted()
-            || self.options.metadata_policy() != LocalWriteMetadataPolicy::PreserveExisting
-        {
+        if self.namespace.is_rooted() || self.options.metadata_policy() != LocalWriteMetadataPolicy::PreserveExisting {
             return NativeAttempt {
                 error: Some(io::Error::new(
                     io::ErrorKind::Unsupported,
@@ -767,20 +736,19 @@ impl ConditionalBackend for WindowsConditionalBackend {
                 };
             }
         };
+        if let Err(error) = self.checkpoint_action(ConditionalPoint::RollbackExchange) {
+            return self.collect_rollback_receipt(Some(error), expected_restored, &container, &backup);
+        }
         match install::replace_with_backup(self.namespace.target_path(), displaced_path, &backup) {
             Ok(()) => {
-                let (installed, installed_error) = observe_with_error(self.entry_if_present(
-                    LocalRecoveryFileRole::Displaced,
-                    self.namespace.target_name(),
-                ));
-                let (replacement_displaced, displaced_error) =
-                    observe_with_error(observe_optional_entry(|| {
-                        self.namespace.entry_in_container(
-                            LocalRecoveryFileRole::RollbackDisplaced,
-                            &container,
-                            &backup,
-                        )
-                    }));
+                let hook_error = self.checkpoint_action(ConditionalPoint::AfterRollbackSyscall).err();
+                let (installed, installed_error) = observe_with_error(
+                    self.entry_if_present(LocalRecoveryFileRole::Displaced, self.namespace.target_name()),
+                );
+                let (replacement_displaced, displaced_error) = observe_with_error(observe_optional_entry(|| {
+                    self.namespace
+                        .entry_in_container(LocalRecoveryFileRole::RollbackDisplaced, &container, &backup)
+                }));
                 let (restored_identity, identity_error) = match installed.as_ref() {
                     Some(entry) => match entry
                         .open_reader()
@@ -792,17 +760,19 @@ impl ConditionalBackend for WindowsConditionalBackend {
                     },
                     None => (None, None),
                 };
-                let observation_error = installed_error.or(displaced_error).or(identity_error);
+                let observation_error = hook_error.or(installed_error).or(displaced_error).or(identity_error);
                 let complete = observation_error.is_none()
                     && restored_identity == Some(expected_restored)
                     && replacement_displaced.is_some();
                 NativeAttempt {
-                    error: observation_error.or_else(|| (!complete).then(|| {
-                        io::Error::new(
-                            io::ErrorKind::InvalidData,
-                            "ReplaceFileW rollback succeeded without a verified restoration receipt",
-                        )
-                    })),
+                    error: observation_error.or_else(|| {
+                        (!complete).then(|| {
+                            io::Error::new(
+                                io::ErrorKind::InvalidData,
+                                "ReplaceFileW rollback succeeded without a verified restoration receipt",
+                            )
+                        })
+                    }),
                     publication: if complete {
                         LocalConditionalPublicationState::Restored
                     } else {
@@ -813,7 +783,8 @@ impl ConditionalBackend for WindowsConditionalBackend {
                 }
             }
             Err(error) => {
-                self.collect_rollback_receipt(Some(error), expected_restored, &container, &backup)
+                let hook_error = self.checkpoint_action(ConditionalPoint::AfterRollbackSyscall).err();
+                self.collect_rollback_receipt(Some(error).or(hook_error), expected_restored, &container, &backup)
             }
         }
     }
@@ -828,14 +799,9 @@ impl ConditionalBackend for WindowsConditionalBackend {
             self.candidate_copy = None;
         }
         if let Some(parent) = entry.namespace_path().parent() {
-            if self
-                .recovery_containers
-                .iter()
-                .any(|container| container == parent)
-            {
+            if self.recovery_containers.iter().any(|container| container == parent) {
                 self.namespace.remove_container(parent)?;
-                self.recovery_containers
-                    .retain(|container| container != parent);
+                self.recovery_containers.retain(|container| container != parent);
             }
         }
         Ok(())

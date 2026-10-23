@@ -8,12 +8,19 @@
 
 #![cfg(feature = "digest")]
 
+use digest::FixedOutput;
+use digest::HashMarker;
+use digest::OutputSizeUser;
+use digest::Update;
 use digest::consts::U32;
-use digest::{FixedOutput, HashMarker, OutputSizeUser, Update};
 use qubit_io::Output;
 use qubit_local_files::LocalFileSystem;
-use qubit_local_files::options::{LocalWriteMode, LocalWriteOptions, LocalWritePrecondition};
-use sha2::{Digest, Sha256, Sha512};
+use qubit_local_files::options::LocalWriteMode;
+use qubit_local_files::options::LocalWriteOptions;
+use qubit_local_files::options::LocalWritePrecondition;
+use sha2::Digest;
+use sha2::Sha256;
+use sha2::Sha512;
 
 struct NoCloneNoDebugSha256(Sha256);
 impl Default for NoCloneNoDebugSha256 {
@@ -56,6 +63,39 @@ fn absent_save_returns_actual_digest() {
     assert_eq!(saved.digest(), &Sha256::digest(b"B"));
     assert!(saved.cleanup_errors().is_empty());
     assert!(saved.retained_files().is_empty());
+}
+
+#[test]
+fn writer_exposes_paths_debug_state_and_all_output_entry_points() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("output-contract");
+    let mut fs = LocalFileSystem::host().unwrap();
+    fs.set_symlink_policy(qubit_local_files::policy::LocalSymlinkPolicy::Reject)
+        .unwrap();
+    let mut writer = fs
+        .open_conditional_writer::<Sha256>(
+            &path,
+            LocalWritePrecondition::Absent,
+            &LocalWriteOptions::new(LocalWriteMode::CreateNew),
+        )
+        .unwrap();
+
+    assert_eq!(writer.path(), path.as_path());
+    assert_eq!(writer.diagnostic_path(), Some(path.as_path()));
+    assert_eq!(writer.state(), qubit_local_files::outcome::LocalWriterState::Open);
+    assert!(format!("{writer:?}").contains("LocalConditionalWriter"));
+    assert_eq!(Output::write(&mut writer, b"A").unwrap(), 1);
+    assert_eq!(Output::write_vectored(&mut writer, &[b"B", b"C"]).unwrap(), 2);
+    // SAFETY: index 1 and count 2 select the valid `xy` slice.
+    assert_eq!(
+        unsafe { Output::write_unchecked(&mut writer, b"x y", 1, 2) }.unwrap(),
+        2
+    );
+    Output::flush(&mut writer).unwrap();
+
+    let saved = writer.commit().unwrap();
+    assert_eq!(std::fs::read(&path).unwrap(), b"ABC y");
+    assert_eq!(saved.write_outcome().bytes_written(), 5);
 }
 
 #[test]
@@ -213,10 +253,7 @@ fn no_clone_no_debug_digest_works_through_public_api() {
         .unwrap();
     writer.write_fully(b"typed").unwrap();
     let saved = writer.commit().unwrap();
-    assert_eq!(
-        saved.digest().as_slice(),
-        Sha256::digest(b"typed").as_slice()
-    );
+    assert_eq!(saved.digest().as_slice(), Sha256::digest(b"typed").as_slice());
 }
 
 #[test]

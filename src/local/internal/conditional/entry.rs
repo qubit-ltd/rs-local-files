@@ -29,7 +29,8 @@ pub(crate) struct ConditionalEntry {
 }
 
 impl ConditionalEntry {
-    /// Creates an entry retaining its namespace description and read permission.
+    /// Creates an entry retaining its namespace description and read
+    /// permission.
     pub(crate) fn new(
         role: LocalRecoveryFileRole,
         namespace_path: PathBuf,
@@ -54,17 +55,13 @@ impl ConditionalEntry {
         &self.namespace_path
     }
 
-    /// Returns an optional diagnostic path without granting namespace access.
-    pub(crate) fn diagnostic_path(&self) -> Option<&std::path::Path> {
-        self.diagnostic_path.as_deref()
-    }
-
     /// Changes the role after the corresponding verification or native action.
     pub(crate) fn set_role(&mut self, role: LocalRecoveryFileRole) {
         self.role = role;
     }
 
-    /// Reopens the entry through its retained permission and validates identity.
+    /// Reopens the entry through its retained permission and validates
+    /// identity.
     #[allow(dead_code)]
     pub(crate) fn open_reader(&self) -> LocalResult<LocalFileReader> {
         self.access.open_reader()

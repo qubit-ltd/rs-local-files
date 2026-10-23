@@ -10,7 +10,8 @@
 use std::ffi::CString;
 use std::fs::File;
 use std::io;
-use std::os::fd::{AsRawFd, FromRawFd};
+use std::os::fd::AsRawFd;
+use std::os::fd::FromRawFd;
 use std::os::unix::fs::MetadataExt;
 use std::path::PathBuf;
 
@@ -28,13 +29,7 @@ pub(super) struct EntryAccess {
 }
 
 impl EntryAccess {
-    pub(super) fn new(
-        parent: File,
-        name: CString,
-        device: u64,
-        inode: u64,
-        diagnostic: Option<PathBuf>,
-    ) -> Self {
+    pub(super) fn new(parent: File, name: CString, device: u64, inode: u64, diagnostic: Option<PathBuf>) -> Self {
         Self {
             parent,
             name,
@@ -95,12 +90,9 @@ impl RecoveryAccess for EntryAccess {
 
 pub(super) fn name(entry: &super::super::ConditionalEntry) -> io::Result<CString> {
     use std::os::unix::ffi::OsStrExt;
-    let name = entry.namespace_path().file_name().ok_or_else(|| {
-        io::Error::new(
-            io::ErrorKind::InvalidInput,
-            "entry path has no final component",
-        )
-    })?;
-    CString::new(name.as_bytes())
-        .map_err(|_| io::Error::new(io::ErrorKind::InvalidInput, "entry name contains NUL"))
+    let name = entry
+        .namespace_path()
+        .file_name()
+        .ok_or_else(|| io::Error::new(io::ErrorKind::InvalidInput, "entry path has no final component"))?;
+    CString::new(name.as_bytes()).map_err(|_| io::Error::new(io::ErrorKind::InvalidInput, "entry name contains NUL"))
 }

@@ -77,9 +77,7 @@ pub(super) fn install_absent(
         Ok(()) => Ok(()),
         Err((error, destination, staging)) => {
             let publication = match destination {
-                LocalAtomicDestinationState::Replaced => {
-                    crate::outcome::LocalConditionalPublicationState::Published
-                }
+                LocalAtomicDestinationState::Replaced => crate::outcome::LocalConditionalPublicationState::Published,
                 LocalAtomicDestinationState::Indeterminate => {
                     crate::outcome::LocalConditionalPublicationState::Indeterminate
                 }

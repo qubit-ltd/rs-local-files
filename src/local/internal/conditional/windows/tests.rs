@@ -13,25 +13,28 @@ use std::os::windows::fs::OpenOptionsExt;
 use std::path::Path;
 
 use digest::Digest;
-use sha2::{Sha256, digest::Output};
+use sha2::Sha256;
+use sha2::digest::Output;
 
+use super::PrivateEntryGuard;
+use super::WindowsConditionalBackend;
+use super::combine_observation_error;
+use super::namespace::Namespace;
+use super::open_verified_candidate_entry;
+use super::receipt_publication;
+use super::recovery::ReplaceFailure;
+use super::recovery::classify_replace_failure;
 use crate::local::internal::conditional::ConditionalBackend;
 use crate::local::internal::conditional::ConditionalHookAction;
 use crate::local::internal::conditional::ConditionalHooks;
 use crate::local::internal::conditional::ConditionalPoint;
 use crate::local::internal::conditional::commit::commit_conditional;
-use crate::options::{LocalWriteMode, LocalWriteOptions, LocalWritePrecondition};
+use crate::options::LocalWriteMode;
+use crate::options::LocalWriteOptions;
+use crate::options::LocalWritePrecondition;
 use crate::outcome::LocalConditionalPublicationState;
 use crate::policy::LocalAtomicityRequirement;
 use crate::recovery::LocalRecoveryFileRole;
-
-use super::WindowsConditionalBackend;
-use super::namespace::Namespace;
-use super::recovery::{ReplaceFailure, classify_replace_failure};
-use super::{
-    PrivateEntryGuard, WindowsConditionalBackend, combine_observation_error,
-    open_verified_candidate_entry, receipt_publication,
-};
 
 fn options(mode: LocalWriteMode) -> LocalWriteOptions {
     LocalWriteOptions::new(mode)
@@ -51,8 +54,8 @@ fn digest(bytes: &[u8]) -> Output<Sha256> {
 fn conditional_windows_candidate_reopen_rejects_replaced_name() {
     let directory = tempfile::tempdir().expect("fixture directory should be created");
     let target = directory.path().join("target");
-    let namespace = Namespace::open_host(&target, &options(LocalWriteMode::CreateOrReplace))
-        .expect("Host namespace should open");
+    let namespace =
+        Namespace::open_host(&target, &options(LocalWriteMode::CreateOrReplace)).expect("Host namespace should open");
     let (name, original) = namespace
         .create_private("candidate")
         .expect("candidate should be created exclusively");
@@ -79,10 +82,7 @@ fn conditional_windows_combined_receipt_error_keeps_native_error_source() {
     let expected_kind = native.kind();
     let combined = combine_observation_error(
         Some(native),
-        Some(io::Error::new(
-            io::ErrorKind::PermissionDenied,
-            "receipt lookup denied",
-        )),
+        Some(io::Error::new(io::ErrorKind::PermissionDenied, "receipt lookup denied")),
     )
     .expect("combined errors should be returned");
     assert_eq!(combined.kind(), expected_kind);
@@ -120,8 +120,8 @@ fn conditional_windows_optional_entry_observation_propagates_non_not_found() {
 fn conditional_windows_private_entry_guard_removes_only_original_identity() {
     let directory = tempfile::tempdir().expect("fixture directory should be created");
     let target = directory.path().join("target");
-    let namespace = Namespace::open_host(&target, &options(LocalWriteMode::CreateOrReplace))
-        .expect("Host namespace should open");
+    let namespace =
+        Namespace::open_host(&target, &options(LocalWriteMode::CreateOrReplace)).expect("Host namespace should open");
 
     let (owned_name, owned_file) = namespace
         .create_private("guard-owned")
@@ -129,10 +129,7 @@ fn conditional_windows_private_entry_guard_removes_only_original_identity() {
     let owned_path = namespace
         .private_file_path(&owned_name)
         .expect("private path should resolve");
-    drop(
-        PrivateEntryGuard::new(&namespace, &owned_file)
-            .expect("guard should retain its original handle"),
-    );
+    drop(PrivateEntryGuard::new(&namespace, &owned_file).expect("guard should retain its original handle"));
     assert!(
         !owned_path.exists(),
         "guard should remove the entry matching its original handle identity"
@@ -145,12 +142,8 @@ fn conditional_windows_private_entry_guard_removes_only_original_identity() {
         .private_file_path(&replaced_name)
         .expect("private path should resolve");
     fs::remove_file(&replaced_path).expect("original entry should be removable");
-    fs::write(&replaced_path, b"foreign replacement")
-        .expect("foreign replacement should be created");
-    drop(
-        PrivateEntryGuard::new(&namespace, &replaced_file)
-            .expect("guard should retain its original handle"),
-    );
+    fs::write(&replaced_path, b"foreign replacement").expect("foreign replacement should be created");
+    drop(PrivateEntryGuard::new(&namespace, &replaced_file).expect("guard should retain its original handle"));
     assert_eq!(
         fs::read(&replaced_path).expect("foreign replacement should remain"),
         b"foreign replacement"
@@ -161,9 +154,8 @@ fn conditional_windows_private_entry_guard_removes_only_original_identity() {
 fn conditional_windows_candidate_copy_keeps_original_handle_identity() {
     let directory = tempfile::tempdir().expect("fixture directory should be created");
     let target = directory.path().join("target");
-    let mut backend =
-        WindowsConditionalBackend::open_host(&target, &options(LocalWriteMode::CreateOrReplace))
-            .expect("Host candidate should open");
+    let mut backend = WindowsConditionalBackend::open_host(&target, &options(LocalWriteMode::CreateOrReplace))
+        .expect("Host candidate should open");
     put(&mut backend, b"complete B copy");
     let copy = backend
         .create_candidate_copy()
@@ -176,8 +168,7 @@ fn conditional_windows_candidate_copy_keeps_original_handle_identity() {
         .open_reader()
         .expect("retained original copy handle should remain readable");
     let mut bytes = Vec::new();
-    std::io::Read::read_to_end(&mut reader, &mut bytes)
-        .expect("original B copy should be readable");
+    std::io::Read::read_to_end(&mut reader, &mut bytes).expect("original B copy should be readable");
     assert_eq!(bytes, b"complete B copy");
     assert_eq!(
         fs::read(copy_path).expect("foreign replacement should remain"),
@@ -193,7 +184,8 @@ fn conditional_windows_candidate_copy_keeps_original_handle_identity() {
 }
 
 fn dacl_security_descriptor(path: &Path) -> Vec<u8> {
-    use windows_sys::Win32::Security::{DACL_SECURITY_INFORMATION, GetFileSecurityW};
+    use windows_sys::Win32::Security::DACL_SECURITY_INFORMATION;
+    use windows_sys::Win32::Security::GetFileSecurityW;
 
     let wide: Vec<u16> = path.as_os_str().encode_wide().chain(Some(0)).collect();
     let mut required = 0_u32;
@@ -231,9 +223,8 @@ fn conditional_windows_host_content_replacement_retains_then_cleans_backup() {
     let directory = tempfile::tempdir().expect("fixture directory should be created");
     let target = directory.path().join("target");
     fs::write(&target, b"A").expect("old target should be written");
-    let backend =
-        WindowsConditionalBackend::open_host(&target, &options(LocalWriteMode::CreateOrReplace))
-            .expect("Host conditional candidate should open");
+    let backend = WindowsConditionalBackend::open_host(&target, &options(LocalWriteMode::CreateOrReplace))
+        .expect("Host conditional candidate should open");
     let mut backend = backend;
     put(&mut backend, b"B");
     let result = commit_conditional::<Sha256, _>(
@@ -244,10 +235,7 @@ fn conditional_windows_host_content_replacement_retains_then_cleans_backup() {
     )
     .expect("matching Content should publish");
 
-    assert_eq!(
-        fs::read(&target).expect("installed content should be readable"),
-        b"B"
-    );
+    assert_eq!(fs::read(&target).expect("installed content should be readable"), b"B");
     assert_eq!(result.digest(), &digest(b"B"));
     assert!(
         result.retained_files().is_empty(),
@@ -265,9 +253,8 @@ fn conditional_windows_host_content_preserves_destination_acl() {
     let target = directory.path().join("target");
     fs::write(&target, b"A").expect("old target should be written");
     let dacl_before = dacl_security_descriptor(&target);
-    let mut backend =
-        WindowsConditionalBackend::open_host(&target, &options(LocalWriteMode::CreateOrReplace))
-            .expect("Host candidate should open");
+    let mut backend = WindowsConditionalBackend::open_host(&target, &options(LocalWriteMode::CreateOrReplace))
+        .expect("Host candidate should open");
     put(&mut backend, b"B");
 
     commit_conditional::<Sha256, _>(
@@ -289,24 +276,16 @@ fn conditional_windows_required_durability_fails_before_publication() {
     let directory = tempfile::tempdir().expect("fixture directory should be created");
     let target = directory.path().join("target");
     fs::write(&target, b"A").expect("old target should be written");
-    let required = options(LocalWriteMode::CreateOrReplace)
-        .with_durability(crate::policy::LocalDurabilityRequirement::Required);
-    let mut backend = WindowsConditionalBackend::open_host(&target, &required)
-        .expect("Host conditional candidate should open");
+    let required =
+        options(LocalWriteMode::CreateOrReplace).with_durability(crate::policy::LocalDurabilityRequirement::Required);
+    let mut backend =
+        WindowsConditionalBackend::open_host(&target, &required).expect("Host conditional candidate should open");
     put(&mut backend, b"B");
 
-    let failure = commit_conditional::<Sha256, _>(
-        backend,
-        LocalWritePrecondition::Content(digest(b"A")),
-        required,
-        1,
-    )
-    .expect_err("unsupported Required directory durability must fail closed");
+    let failure = commit_conditional::<Sha256, _>(backend, LocalWritePrecondition::Content(digest(b"A")), required, 1)
+        .expect_err("unsupported Required directory durability must fail closed");
     assert_eq!(fs::read(&target).expect("old target should remain"), b"A");
-    assert_eq!(
-        failure.publication(),
-        LocalConditionalPublicationState::NotPublished
-    );
+    assert_eq!(failure.publication(), LocalConditionalPublicationState::NotPublished);
     assert!(failure.candidate().is_some(), "B copy remains recoverable");
 }
 
@@ -314,9 +293,8 @@ fn conditional_windows_required_durability_fails_before_publication() {
 fn conditional_windows_absent_race_never_overwrites_late_target() {
     let directory = tempfile::tempdir().expect("fixture directory should be created");
     let target = directory.path().join("target");
-    let mut backend =
-        WindowsConditionalBackend::open_host(&target, &options(LocalWriteMode::CreateNew))
-            .expect("Host conditional candidate should open");
+    let mut backend = WindowsConditionalBackend::open_host(&target, &options(LocalWriteMode::CreateNew))
+        .expect("Host conditional candidate should open");
     put(&mut backend, b"B");
     backend.set_hooks(ConditionalHooks::sequence(vec![(
         ConditionalPoint::Publish,
@@ -330,19 +308,54 @@ fn conditional_windows_absent_race_never_overwrites_late_target() {
         1,
     )
     .expect_err("the racing target must reject no-replace installation");
-    assert_eq!(
-        fs::read(&target).expect("racing target should remain"),
-        b"C"
-    );
-    let candidate = failure
-        .candidate()
-        .expect("complete B copy must remain recoverable");
-    let mut reader = candidate
-        .open_reader()
-        .expect("candidate copy identity should verify");
+    assert_eq!(fs::read(&target).expect("racing target should remain"), b"C");
+    let candidate = failure.candidate().expect("complete B copy must remain recoverable");
+    let mut reader = candidate.open_reader().expect("candidate copy identity should verify");
     let mut bytes = Vec::new();
     std::io::Read::read_to_end(&mut reader, &mut bytes).expect("candidate copy should read");
     assert_eq!(bytes, b"B");
+}
+
+#[test]
+fn conditional_windows_publish_checkpoint_failure_keeps_copy_and_cleans_candidate() {
+    let directory = tempfile::tempdir().expect("fixture directory should be created");
+    let target = directory.path().join("target");
+    fs::write(&target, b"A").expect("old target should be written");
+    let mut backend = WindowsConditionalBackend::open_host(&target, &options(LocalWriteMode::CreateOrReplace))
+        .expect("Host conditional candidate should open");
+    put(&mut backend, b"B");
+    backend.set_hooks(ConditionalHooks::fail_once(
+        ConditionalPoint::Publish,
+        io::ErrorKind::PermissionDenied,
+    ));
+
+    let failure = commit_conditional::<Sha256, _>(
+        backend,
+        LocalWritePrecondition::Content(digest(b"A")),
+        options(LocalWriteMode::CreateOrReplace),
+        1,
+    )
+    .expect_err("pre-publication checkpoint should fail");
+    assert_eq!(fs::read(&target).expect("old target should remain"), b"A");
+    assert_eq!(failure.stage(), crate::error::LocalConditionalWriteStage::Publish);
+    assert!(failure.candidate().is_some(), "independent B copy remains recoverable");
+    assert!(
+        failure
+            .recovery_files()
+            .iter()
+            .all(|file| file.role() != LocalRecoveryFileRole::StagedCandidate)
+    );
+    let names: Vec<_> = fs::read_dir(directory.path())
+        .expect("fixture directory should be readable")
+        .map(|entry| entry.expect("directory entry should be readable").file_name())
+        .collect();
+    assert_eq!(
+        names
+            .iter()
+            .filter(|name| name.to_string_lossy().contains("candidate"))
+            .count(),
+        1
+    );
 }
 
 #[test]
@@ -350,8 +363,7 @@ fn conditional_windows_rooted_content_is_explicitly_unsupported() {
     let directory = tempfile::tempdir().expect("fixture directory should be created");
     let target = directory.path().join("target");
     fs::write(&target, b"A").expect("old target should be written");
-    let root =
-        crate::local::internal::open_root_directory(directory.path()).expect("root should open");
+    let root = crate::local::internal::open_root_directory(directory.path()).expect("root should open");
     let mut backend = WindowsConditionalBackend::open_rooted(
         root,
         Path::new("target"),
@@ -369,29 +381,18 @@ fn conditional_windows_rooted_content_is_explicitly_unsupported() {
     )
     .expect_err("Windows Rooted Content must fail closed");
     assert_eq!(fs::read(&target).expect("old target should remain"), b"A");
-    assert_eq!(
-        failure.publication(),
-        LocalConditionalPublicationState::NotPublished
-    );
-    assert!(
-        failure.candidate().is_some(),
-        "complete B copy should remain available"
-    );
+    assert_eq!(failure.publication(), LocalConditionalPublicationState::NotPublished);
+    assert!(failure.candidate().is_some(), "complete B copy should remain available");
 }
 
 #[test]
 fn conditional_windows_rooted_absent_uses_handle_relative_no_replace() {
     let directory = tempfile::tempdir().expect("fixture directory should be created");
     let target = directory.path().join("target");
-    let root =
-        crate::local::internal::open_root_directory(directory.path()).expect("root should open");
-    let mut backend = WindowsConditionalBackend::open_rooted(
-        root,
-        Path::new("target"),
-        &target,
-        &options(LocalWriteMode::CreateNew),
-    )
-    .expect("Rooted candidate should open");
+    let root = crate::local::internal::open_root_directory(directory.path()).expect("root should open");
+    let mut backend =
+        WindowsConditionalBackend::open_rooted(root, Path::new("target"), &target, &options(LocalWriteMode::CreateNew))
+            .expect("Rooted candidate should open");
     put(&mut backend, b"B");
     commit_conditional::<Sha256, _>(
         backend,
@@ -400,10 +401,7 @@ fn conditional_windows_rooted_absent_uses_handle_relative_no_replace() {
         1,
     )
     .expect("Rooted absent target should install");
-    assert_eq!(
-        fs::read(target).expect("Rooted target should be readable"),
-        b"B"
-    );
+    assert_eq!(fs::read(target).expect("Rooted target should be readable"), b"B");
 }
 
 #[test]
@@ -418,8 +416,7 @@ fn conditional_windows_reparse_target_is_rejected() {
         eprintln!("skipped: creating a Windows symbolic link is not permitted");
         return;
     }
-    let result =
-        WindowsConditionalBackend::open_host(&target, &options(LocalWriteMode::CreateOrReplace));
+    let result = WindowsConditionalBackend::open_host(&target, &options(LocalWriteMode::CreateOrReplace));
     assert!(
         result.is_ok(),
         "opening a candidate does not follow or open the target entry"
@@ -433,14 +430,8 @@ fn conditional_windows_reparse_target_is_rejected() {
         1,
     )
     .expect_err("final reparse points must be rejected");
-    assert_eq!(
-        failure.publication(),
-        LocalConditionalPublicationState::NotPublished
-    );
-    assert_eq!(
-        fs::read(actual).expect("symlink referent must remain"),
-        b"A"
-    );
+    assert_eq!(failure.publication(), LocalConditionalPublicationState::NotPublished);
+    assert_eq!(fs::read(actual).expect("symlink referent must remain"), b"A");
 }
 
 #[test]
@@ -456,9 +447,8 @@ fn conditional_windows_sharing_conflict_preserves_candidate_and_target() {
         )
         .open(&target)
         .expect("sharing blocker should open");
-    let mut backend =
-        WindowsConditionalBackend::open_host(&target, &options(LocalWriteMode::CreateOrReplace))
-            .expect("Host candidate should open alongside shared reader");
+    let mut backend = WindowsConditionalBackend::open_host(&target, &options(LocalWriteMode::CreateOrReplace))
+        .expect("Host candidate should open alongside shared reader");
     put(&mut backend, b"B");
     let failure = commit_conditional::<Sha256, _>(
         backend,
@@ -485,9 +475,8 @@ fn conditional_windows_read_only_target_conflict_preserves_candidate_and_target(
         .permissions();
     permissions.set_readonly(true);
     fs::set_permissions(&target, permissions).expect("target should become read-only");
-    let mut backend =
-        WindowsConditionalBackend::open_host(&target, &options(LocalWriteMode::CreateOrReplace))
-            .expect("Host candidate should open");
+    let mut backend = WindowsConditionalBackend::open_host(&target, &options(LocalWriteMode::CreateOrReplace))
+        .expect("Host candidate should open");
     put(&mut backend, b"B");
 
     let failure = commit_conditional::<Sha256, _>(
@@ -530,16 +519,11 @@ fn conditional_windows_partial_1177_receipt_reports_installed_and_displaced_entr
     let directory = tempfile::tempdir().expect("fixture directory should be created");
     let target = directory.path().join("target");
     fs::write(&target, b"A").expect("old target should be written");
-    let mut backend =
-        WindowsConditionalBackend::open_host(&target, &options(LocalWriteMode::CreateOrReplace))
-            .expect("Host candidate should open");
+    let mut backend = WindowsConditionalBackend::open_host(&target, &options(LocalWriteMode::CreateOrReplace))
+        .expect("Host candidate should open");
     put(&mut backend, b"B");
-    let old = backend
-        .open_target()
-        .expect("old target should be observed");
-    let (container, backup) = backend
-        .make_backup()
-        .expect("recovery container should be exclusive");
+    let old = backend.open_target().expect("old target should be observed");
+    let (container, backup) = backend.make_backup().expect("recovery container should be exclusive");
     backend.begin_publication();
     fs::rename(&target, &backup).expect("simulate ReplaceFileW moving the replaced entry");
     fs::rename(directory.path().join(&backend.candidate_name), &target)
@@ -550,19 +534,13 @@ fn conditional_windows_partial_1177_receipt_reports_installed_and_displaced_entr
         Some(&container),
         Some(&backup),
     );
-    assert_eq!(
-        attempt.publication,
-        LocalConditionalPublicationState::Published
-    );
+    assert_eq!(attempt.publication, LocalConditionalPublicationState::Published);
     assert!(
         attempt.installed.is_some(),
         "final destination must be reopened after native error"
     );
     assert_eq!(attempt.displaced.len(), 1, "actual backup must be reported");
-    assert_eq!(
-        attempt.displaced[0].role(),
-        LocalRecoveryFileRole::Displaced
-    );
+    assert_eq!(attempt.displaced[0].role(), LocalRecoveryFileRole::Displaced);
     assert!(
         backend
             .namespace
@@ -576,13 +554,10 @@ fn conditional_windows_partial_1177_receipt_retains_every_visible_object() {
     let directory = tempfile::tempdir().expect("fixture directory should be created");
     let target = directory.path().join("target");
     fs::write(&target, b"A").expect("old target should be written");
-    let mut backend =
-        WindowsConditionalBackend::open_host(&target, &options(LocalWriteMode::CreateOrReplace))
-            .expect("Host candidate should open");
+    let mut backend = WindowsConditionalBackend::open_host(&target, &options(LocalWriteMode::CreateOrReplace))
+        .expect("Host candidate should open");
     put(&mut backend, b"B");
-    let (container, backup) = backend
-        .make_backup()
-        .expect("recovery container should be exclusive");
+    let (container, backup) = backend.make_backup().expect("recovery container should be exclusive");
     backend.begin_publication();
 
     // Model the documented partial state where the old destination reached
@@ -593,19 +568,9 @@ fn conditional_windows_partial_1177_receipt_retains_every_visible_object() {
         Some(&container),
         Some(&backup),
     );
-    assert_eq!(
-        attempt.publication,
-        LocalConditionalPublicationState::Indeterminate
-    );
-    assert!(
-        attempt.installed.is_none(),
-        "target name is currently absent"
-    );
-    assert_eq!(
-        attempt.displaced.len(),
-        2,
-        "backup and candidate are retained"
-    );
+    assert_eq!(attempt.publication, LocalConditionalPublicationState::Indeterminate);
+    assert!(attempt.installed.is_none(), "target name is currently absent");
+    assert_eq!(attempt.displaced.len(), 2, "backup and candidate are retained");
     let roles: Vec<_> = attempt.displaced.iter().map(|entry| entry.role()).collect();
     assert!(roles.contains(&LocalRecoveryFileRole::Displaced));
     assert!(roles.contains(&LocalRecoveryFileRole::StagedCandidate));
@@ -625,8 +590,8 @@ fn conditional_windows_partial_1177_receipt_retains_every_visible_object() {
 fn conditional_windows_recovery_container_collision_does_not_reuse_existing_directory() {
     let directory = tempfile::tempdir().expect("fixture directory should be created");
     let target = directory.path().join("target");
-    let namespace = Namespace::open_host(&target, &options(LocalWriteMode::CreateOrReplace))
-        .expect("Host namespace should open");
+    let namespace =
+        Namespace::open_host(&target, &options(LocalWriteMode::CreateOrReplace)).expect("Host namespace should open");
     let collision = directory.path().join(".conditional-recovery-collision");
     fs::create_dir(&collision).expect("collision directory should be created");
     let marker = collision.join("user-data");
@@ -638,8 +603,5 @@ fn conditional_windows_recovery_container_collision_does_not_reuse_existing_dire
             .kind(),
         io::ErrorKind::AlreadyExists
     );
-    assert_eq!(
-        fs::read(marker).expect("existing container data must remain"),
-        b"keep"
-    );
+    assert_eq!(fs::read(marker).expect("existing container data must remain"), b"keep");
 }

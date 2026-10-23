@@ -10,6 +10,8 @@ use std::io;
 use std::path::Path;
 
 use super::ConditionalBackend;
+#[cfg(all(feature = "digest", feature = "test-support"))]
+use super::ConditionalHooks;
 use crate::options::LocalWriteOptions;
 
 #[cfg(unix)]
@@ -19,6 +21,15 @@ pub(crate) enum ConditionalWriterBackend {
 #[cfg(windows)]
 pub(crate) enum ConditionalWriterBackend {
     Native(super::windows::WindowsConditionalBackend),
+}
+
+#[cfg(all(feature = "digest", feature = "test-support", any(unix, windows)))]
+impl ConditionalWriterBackend {
+    pub(crate) fn set_hooks(&mut self, hooks: ConditionalHooks) {
+        match self {
+            Self::Native(backend) => backend.set_hooks(hooks),
+        }
+    }
 }
 
 #[cfg(unix)]
@@ -32,8 +43,7 @@ impl ConditionalWriterBackend {
         diagnostic: &Path,
         options: &LocalWriteOptions,
     ) -> io::Result<Self> {
-        super::unix::UnixConditionalBackend::open_rooted(root, relative, diagnostic, options)
-            .map(Self::Native)
+        super::unix::UnixConditionalBackend::open_rooted(root, relative, diagnostic, options).map(Self::Native)
     }
 }
 #[cfg(windows)]
@@ -47,8 +57,7 @@ impl ConditionalWriterBackend {
         diagnostic: &Path,
         options: &LocalWriteOptions,
     ) -> io::Result<Self> {
-        super::windows::WindowsConditionalBackend::open_rooted(root, relative, diagnostic, options)
-            .map(Self::Native)
+        super::windows::WindowsConditionalBackend::open_rooted(root, relative, diagnostic, options).map(Self::Native)
     }
 }
 
@@ -111,18 +120,11 @@ impl qubit_io::Output for ConditionalWriterBackend {
             _ => match *self {},
         }
     }
-    unsafe fn write_unchecked(
-        &mut self,
-        input: &[u8],
-        index: usize,
-        count: usize,
-    ) -> io::Result<usize> {
+    unsafe fn write_unchecked(&mut self, input: &[u8], index: usize, count: usize) -> io::Result<usize> {
         // SAFETY: delegated to the native backend with the caller-provided valid range.
         match self {
             #[cfg(any(unix, windows))]
-            Self::Native(backend) => unsafe {
-                qubit_io::Output::write_unchecked(backend, input, index, count)
-            },
+            Self::Native(backend) => unsafe { qubit_io::Output::write_unchecked(backend, input, index, count) },
             #[cfg(not(any(unix, windows)))]
             _ => match *self {},
         }

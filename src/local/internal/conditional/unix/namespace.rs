@@ -9,20 +9,22 @@
 
 use std::ffi::CString;
 use std::fs::File;
-use std::io::{self, Write};
-use std::os::fd::{AsRawFd, FromRawFd};
+use std::io;
+use std::io::Write;
+use std::os::fd::AsRawFd;
+use std::os::fd::FromRawFd;
 use std::os::unix::ffi::OsStrExt;
 use std::os::unix::fs::MetadataExt;
-use std::path::{Path, PathBuf};
-
-use crate::local::internal::{
-    RootedParentMode, ensure_parent_path_with_sync_dirs, open_rooted_parent,
-};
-use crate::options::LocalWriteOptions;
-use crate::recovery::LocalRecoveryFileRole;
+use std::path::Path;
+use std::path::PathBuf;
 
 use super::ConditionalEntry;
 use super::recovery::EntryAccess;
+use crate::local::internal::RootedParentMode;
+use crate::local::internal::ensure_parent_path_with_sync_dirs;
+use crate::local::internal::open_rooted_parent;
+use crate::options::LocalWriteOptions;
+use crate::recovery::LocalRecoveryFileRole;
 
 #[derive(Debug)]
 pub(super) struct Namespace {
@@ -41,9 +43,9 @@ impl Namespace {
             std::env::current_dir()?.join(path)
         };
         let parent_path = absolute.parent().unwrap_or(Path::new("/"));
-        let name = absolute.file_name().ok_or_else(|| {
-            io::Error::new(io::ErrorKind::InvalidInput, "target has no final component")
-        })?;
+        let name = absolute
+            .file_name()
+            .ok_or_else(|| io::Error::new(io::ErrorKind::InvalidInput, "target has no final component"))?;
         let created = if options.creates_parent() {
             ensure_parent_path_with_sync_dirs(&absolute)?
         } else {
@@ -78,8 +80,7 @@ impl Namespace {
         } else {
             RootedParentMode::OpenExisting
         };
-        let (parent, target_name, sync_dirs) =
-            open_rooted_parent(&root, diagnostic, &relative, mode)?.into_parts();
+        let (parent, target_name, sync_dirs) = open_rooted_parent(&root, diagnostic, &relative, mode)?.into_parts();
         Ok(Self {
             parent,
             target_name,
@@ -92,8 +93,7 @@ impl Namespace {
     pub(super) fn create_private(&self, prefix: &str) -> io::Result<(CString, File)> {
         let prefix = format!(".qubit-{prefix}-");
         for _ in 0..128 {
-            let generated =
-                crate::local::try_random_file_name(".qubit-conditional-", Some(&prefix), None)?;
+            let generated = crate::local::try_random_file_name(".qubit-conditional-", Some(&prefix), None)?;
             let name = CString::new(generated).map_err(invalid_name)?;
             match open_at(
                 &self.parent,
@@ -160,20 +160,8 @@ impl Namespace {
         self.entry_identity(entry).map(|_| ())
     }
 
-    pub(super) fn same_identity(
-        &self,
-        left: &ConditionalEntry,
-        right: &ConditionalEntry,
-    ) -> io::Result<bool> {
-        Ok(self.entry_identity(left)? == self.entry_identity(right)?)
-    }
-
     fn entry_identity(&self, entry: &ConditionalEntry) -> io::Result<(u64, u64)> {
-        let metadata = entry
-            .open_reader()
-            .map_err(|error| io::Error::new(io::ErrorKind::Other, error))?
-            .as_file()
-            .metadata()?;
+        let metadata = entry.open_reader().map_err(io::Error::other)?.as_file().metadata()?;
         Ok((metadata.dev(), metadata.ino()))
     }
 
@@ -230,10 +218,27 @@ impl Namespace {
     }
 }
 
+#[allow(clippy::unnecessary_cast)] // Native stat fields differ across Unix targets.
 pub(super) fn identity_at(parent: &File, name: &CString) -> io::Result<(u64, u64)> {
-    let file = open_regular_at(parent, name)?;
-    let metadata = file.metadata()?;
-    Ok((metadata.dev(), metadata.ino()))
+    let mut metadata = std::mem::MaybeUninit::<libc::stat>::uninit();
+    // SAFETY: `parent` is an open directory handle, `name` is NUL terminated,
+    // and `metadata` points to writable storage. AT_SYMLINK_NOFOLLOW records
+    // the named object itself so post-publication receipts can retain a
+    // substituted symlink without opening its target.
+    let result = unsafe {
+        libc::fstatat(
+            parent.as_raw_fd(),
+            name.as_ptr(),
+            metadata.as_mut_ptr(),
+            libc::AT_SYMLINK_NOFOLLOW,
+        )
+    };
+    if result == -1 {
+        return Err(io::Error::last_os_error());
+    }
+    // SAFETY: successful fstatat initialized the output structure.
+    let metadata = unsafe { metadata.assume_init() };
+    Ok((metadata.st_dev as u64, metadata.st_ino as u64))
 }
 
 pub(super) fn open_regular_at(parent: &File, name: &CString) -> io::Result<File> {
@@ -253,22 +258,10 @@ pub(super) fn open_regular_at(parent: &File, name: &CString) -> io::Result<File>
     Ok(file)
 }
 
-fn open_at(
-    parent: &File,
-    name: &CString,
-    flags: libc::c_int,
-    mode: libc::mode_t,
-) -> io::Result<File> {
+fn open_at(parent: &File, name: &CString, flags: libc::c_int, mode: libc::mode_t) -> io::Result<File> {
     // SAFETY: the directory handle and NUL-terminated component are live for
     // the call. A successful descriptor is immediately wrapped as owned.
-    let descriptor = unsafe {
-        libc::openat(
-            parent.as_raw_fd(),
-            name.as_ptr(),
-            flags,
-            libc::c_uint::from(mode),
-        )
-    };
+    let descriptor = unsafe { libc::openat(parent.as_raw_fd(), name.as_ptr(), flags, libc::c_uint::from(mode)) };
     if descriptor == -1 {
         return Err(io::Error::last_os_error());
     }
