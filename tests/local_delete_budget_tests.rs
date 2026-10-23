@@ -152,10 +152,7 @@ fn test_recursive_delete_bounds_pending_paths_during_enumeration() {
         assert_eq!(LocalResourceKind::PendingPathBytes, facts.resource());
         assert_eq!(capacity, facts.limit());
         assert_eq!(0, facts.remaining());
-        assert_eq!(
-            operand.join("two").as_os_str().len(),
-            facts.requested()
-        );
+        assert_eq!(operand.join("two").as_os_str().len(), facts.requested());
         assert_eq!(3, fs::read_dir(&tree).expect("root should remain").count());
     }
 }

@@ -273,11 +273,7 @@ fn test_copy_tree_panic_releases_directory_permits() {
     assert!(result.is_err());
     assert_eq!(0, live.get(), "unwinding must drop every active frame");
     let permits = (0..3)
-        .map(|_| {
-            budget
-                .acquire_directory()
-                .expect("all capacity should return")
-        })
+        .map(|_| budget.acquire_directory().expect("all capacity should return"))
         .collect::<Vec<_>>();
     assert!(budget.acquire_directory().is_err());
     drop(permits);
