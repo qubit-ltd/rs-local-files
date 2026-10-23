@@ -743,6 +743,69 @@ syncs parents. A metadata failure is pre-publication; a parent-sync failure
 can be `Published`. CreateNew has no old metadata to copy and retains atomic
 no-replace installation; Append performs direct writes under either policy.
 
+### 14.6 Conditional write protocol
+
+The optional `digest` feature adds `LocalWritePrecondition<T>`,
+`LocalFileSystem::open_conditional_writer<D: Digest>()`,
+`LocalConditionalWriter<D>`, and a typed success/error pair. `digest` 0.11 is an
+optional dependency; applications choose an algorithm implementation such as
+`sha2` 0.11. `Content` carries the full digest output type, not a truncated tag.
+`Absent` requests create-only publication; it is usable only when the backend
+provides a native no-overwrite install. `Content` requires
+`CreateOrReplace`; `Append` is rejected. Symlink-following policies are rejected
+for this operation.
+
+Commit follows this sequence:
+
+1. Flush and hash the staged candidate B.
+2. Create a separate, independently verified copy of B. This is the recovery
+   copy and does not share the staged candidate's identity.
+3. Apply the selected metadata policy and requested file synchronization.
+4. Check the precondition immediately before publication: `Absent` observes no
+   target; `Content(A)` hashes the current target and compares it with A.
+5. Publish through the platform namespace protocol. For replacement, verify the
+   displaced old entry against A and verify the installed entry against B.
+6. If publication effects conflict, recheck the installed candidate and make at
+   most one rollback attempt. Verify the restored entry before reporting it.
+7. After publication and required synchronization have succeeded, remove the
+   displaced/old entries first and the B candidate copy last. Cleanup failures are returned as
+   `LocalConditionalWriteOutcome::cleanup_errors()` and `retained_files()`;
+   they do not turn a completed save into an error.
+
+The two old-content checks are observations around native publication, not an
+atomic compare-and-swap. A process with an already-open handle can modify the
+old inode after a digest read, and ABA can return the bytes to the same digest.
+The protocol verifies identities and content at its checkpoints but cannot
+freeze external writers. Staging, candidate-copy, and recovery names may be
+visible in the parent directory. Rooted operations retain opened directory
+handles and use them as namespace authority; diagnostic paths do not grant
+authority.
+
+`LocalWriteOptions` controls atomicity and durability independently. `Required`
+means the backend must complete the needed synchronization; an unsupported
+namespace synchronization or sync error returns `Err`, with publication state
+and recovery files describing what was observed. `Preferred` attempts
+synchronization but may return success with `write_outcome()` reporting
+`durable = false`. `NotRequired` skips that requirement. A successful outcome
+means publication and all required synchronization finished, even if later
+cleanup reports residual files. On error, `reason()`, `stage()`, and
+`publication()` describe the observed failure; `candidate()` provides the
+verified B copy when retained. `LocalRecoveryFile::open_reader()` verifies the
+retained entry before opening it. Dropping recovery handles never deletes the
+files. An open writer's `abort()` or Drop cancels publication and attempts to
+remove unpublished resources; a commit error transfers retained recovery
+resources to the error. Process abort and machine crash may interrupt any step,
+and restart-time orphan scanning is not provided.
+
+Backend scope currently established by the implementation:
+
+| Namespace | `Absent` | `Content` | Metadata/durability notes |
+| --- | --- | --- | --- |
+| Linux/macOS Host and Rooted | Native no-replace install | Supported | Rooted operations use retained directory descriptors; `Required` depends on file and namespace sync support. |
+| Windows Host | Native no-replace install | `PreserveExisting` only | Content with another metadata policy is unsupported; required directory durability is unsupported. |
+| Windows Rooted | Native no-replace install | Unsupported | Rooted `Absent` is handle-relative. |
+| Android and FreeBSD | Not claimed | Not claimed | Do not infer support from other Unix targets. |
+
 ## 15. Lazy Directory Walking
 
 ### 15.1 Walker
@@ -1052,7 +1115,7 @@ parents; ordinary Host paths preserve native traversal order.
 These helpers return namespace-absolute paths without opening or creating an
 entry. A returned `PathBuf` grants no Rooted authority and proves nothing about
 on-disk symlink targets. Regression cases are maintained in the [temporary-directory
-public contract tests](../tests/local_temp_directory_tests.rs) and the runnable [cleanup example](user_guide.md#temporary-directory-cleanup-limits).
+public contract tests](../tests/temp/local_temp_directory_tests.rs) and the runnable [cleanup example](user_guide.md#temporary-directory-cleanup-limits).
 
 ### 18.7 Identity and authority limits
 

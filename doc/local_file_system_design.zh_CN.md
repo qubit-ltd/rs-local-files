@@ -1024,6 +1024,57 @@ Append 直接修改目标，不能满足 `LocalAtomicityRequirement::Required`�
 
 调用方可以基于 state 决定重试、清理、保留或人工检查，不能根据 error message 猜测。
 
+### 14.6 条件写入协议
+
+可选 `digest` feature 增加 `LocalWritePrecondition<T>`、
+`LocalFileSystem::open_conditional_writer<D: Digest>()`、
+`LocalConditionalWriter<D>` 及有类型的成功/失败结果。`digest` 0.11 是可选依赖；
+算法由应用选择，例如 `sha2` 0.11。`Content` 保存完整摘要输出类型，不会截断摘要。
+`Absent` 要求仅在目标不存在时发布；后端必须提供原生 no-overwrite 安装能力。
+`Content` 必须搭配 `CreateOrReplace`，`Append` 会被拒绝。启用符号链接跟随策略时，
+此操作也会被拒绝。
+
+提交顺序如下：
+
+1. 刷新暂存候选 B，并计算摘要。
+2. 创建并独立校验 B 的完整副本，作为恢复副本；它与暂存候选具有不同的文件身份。
+3. 应用所选元数据策略，并执行请求的文件同步。
+4. 在发布前重新检查条件：`Absent` 要求目标不存在；`Content(A)` 重新计算当前目标
+   摘要并与 A 比较。
+5. 通过平台命名空间协议发布。替换时，核对被移出的旧文件仍符合 A，并核对新目标
+   的内容是 B。
+6. 若发布后的观测发现冲突，重新检查已安装候选，最多尝试一次回滚，并验证恢复后的
+   目标。
+7. 发布及必要同步成功后，先删除被移出的旧文件，最后删除 B 的 candidate 副本。清理失败通过
+   `LocalConditionalWriteOutcome::cleanup_errors()` 与 `retained_files()` 返回；
+   它不会把已经完成的保存改报为失败。
+
+两次旧内容检查是围绕原生命名空间发布的观测，不构成原子 compare-and-swap。其他进程
+可能在摘要读取后通过已打开句柄修改旧 inode；ABA 也可能让内容改变后又恢复为同一摘要。
+协议会在各检查点核对身份和内容，却不能冻结外部写入者。staging、candidate 副本和
+恢复文件名可能出现在父目录中。Rooted 操作保留已打开的目录句柄，并以该句柄作为
+命名空间 authority；诊断路径本身不授予访问权限。
+
+`LocalWriteOptions` 分别控制原子性与耐久性。`Required` 要求后端完成所需同步；若命名
+空间同步不受支持或同步失败，操作返回 `Err`，并由发布状态和恢复文件说明已经观察到的
+结果。`Preferred` 会尝试同步，但可以在 `write_outcome()` 报告 `durable = false` 时
+仍然成功。`NotRequired` 不提出该要求。成功 outcome 表示发布和所有必需同步均已完成，
+即使后续清理报告了遗留文件也是如此。失败时用 `reason()`、`stage()`、`publication()`
+判断观测结果；若已保留经校验的 B 副本，可通过 `candidate()` 访问。
+`LocalRecoveryFile::open_reader()` 会在读取前重新核对恢复文件身份。销毁恢复句柄不会
+删除文件。打开中的 writer 调用 `abort()` 或离开作用域会取消发布并尝试删除未发布资源；
+commit 错误则把保留的恢复资源移交给错误对象。进程 abort 或机器崩溃可能中断任一步骤，
+库不会在重启时扫描孤儿文件。
+
+当前实现已核实的平台范围：
+
+| 命名空间 | `Absent` | `Content` | 元数据/耐久性说明 |
+| --- | --- | --- | --- |
+| Linux/macOS Host 和 Rooted | 原生 no-replace 安装 | 支持 | Rooted 使用保留的目录描述符；`Required` 取决于文件及命名空间同步能力。 |
+| Windows Host | 原生 no-replace 安装 | 仅 `PreserveExisting` | Content 配合其他元数据策略不受支持；不支持 Required 目录耐久性。 |
+| Windows Rooted | 原生 no-replace 安装 | 不支持 | Rooted `Absent` 使用相对已打开句柄的安装。 |
+| Android 和 FreeBSD | 未声明支持 | 未声明支持 | 不应从其他 Unix 目标推断支持。 |
+
 ## 15. Lazy directory walk
 
 ### 15.1 Walker
@@ -1332,7 +1383,7 @@ source_state: LocalTempSourceState
 未越根的词法 parent；普通 Host 路径仍保留原生解析顺序。
 
 这些助手只返回命名空间绝对路径，不打开或创建条目。返回的 `PathBuf` 不赋予 Rooted 权限，
-也不证明磁盘上 symlink 目标安全。[临时目录公开契约测试](../tests/local_temp_directory_tests.rs)
+也不证明磁盘上 symlink 目标安全。[临时目录公开契约测试](../tests/temp/local_temp_directory_tests.rs)
 及可运行的[清理示例](user_guide.zh_CN.md#临时目录清理限制) 应锁定上述接受和拒绝集合。
 
 ### 18.7 身份与权限边界

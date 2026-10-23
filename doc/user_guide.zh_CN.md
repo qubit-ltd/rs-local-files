@@ -204,6 +204,91 @@ assert_eq!(text, r#"{"complete":true}"#);
 多次系统调用使用的相对路径会在操作开始时绑定。复制和重命名会用同一个当前目录快照绑定
 源和目标。`metadata` 观察最终条目本身，不跟随最终符号链接。
 
+## 条件写入
+
+当应用读取文档 A、基于它准备新内容 B，并且不能覆盖其他人后来保存的版本时，使用
+条件写入。应用清单需启用可选 feature，并加入算法实现：
+
+```toml
+[dependencies]
+qubit-local-files = { version = "0.5.0", features = ["digest"] }
+qubit-io = "0.19"
+sha2 = "0.11"
+
+[dev-dependencies]
+tempfile = "^3.27"
+```
+
+下面的完整示例先创建 A，计算 SHA-256 摘要，再尝试以 B 替换。随后演示冲突分支：
+在第二次提交前，另一个写入者把 A 改成 C；提交因此失败，应用从保留的 candidate
+副本中读回 B。`cfg` 包装会让此示例仅在启用 `digest` 时编译；它没有用忽略标记
+掩盖不完整或错误的代码。
+
+```rust
+# #[cfg(feature = "digest")] {
+use std::io::Read;
+
+use qubit_io::{Input, Output};
+use qubit_local_files::LocalFileSystem;
+use qubit_local_files::options::{
+    LocalWriteMode, LocalWriteOptions, LocalWritePrecondition,
+};
+use sha2::{Digest, Sha256};
+
+let directory = tempfile::tempdir()?;
+let path = directory.path().join("document.txt");
+std::fs::write(&path, b"A")?;
+let filesystem = LocalFileSystem::host()?;
+let old_digest = Sha256::digest(std::fs::read(&path)?);
+let options = LocalWriteOptions::new(LocalWriteMode::CreateOrReplace);
+let mut writer = filesystem.open_conditional_writer::<Sha256>(
+    &path, LocalWritePrecondition::Content(old_digest), &options,
+)?;
+writer.write_fully(b"B")?;
+let saved = writer.commit()?;
+assert_eq!(saved.digest(), &Sha256::digest(b"B"));
+assert!(saved.cleanup_errors().is_empty());
+assert!(saved.retained_files().is_empty());
+
+// 第二次编辑仍从 A 开始；提交前，另一个写入者把它改成 C。
+std::fs::write(&path, b"A")?;
+let expected_a = Sha256::digest(b"A");
+let mut conflicted = filesystem.open_conditional_writer::<Sha256>(
+    &path, LocalWritePrecondition::Content(expected_a), &options,
+)?;
+conflicted.write_fully(b"B")?;
+std::fs::write(&path, b"C")?;
+let failure = conflicted.commit().expect_err("C 与 A 不再匹配");
+assert_eq!(failure.reason(), qubit_local_files::error::LocalConditionalFailureReason::PreconditionMismatch);
+let candidate = failure.candidate().expect("B 的恢复副本仍被保留");
+let mut reader = candidate.open_reader()?.into_std_read();
+let mut recovered = Vec::new();
+reader.read_to_end(&mut recovered)?;
+assert_eq!(recovered, b"B");
+# Ok::<(), Box<dyn std::error::Error>>(())
+# }
+```
+
+`LocalWritePrecondition::Absent` 用于仅创建、不覆盖的发布；只有后端支持安全的
+no-overwrite 安装时才可用。`Content(digest)` 必须搭配 `CreateOrReplace`，不能搭配
+`Append`。`LocalWriteOptions` 还控制原子性与耐久性。要求设为 `Required` 时，后端
+无法满足就会返回 `Err`；`Preferred` 允许后端采用可行方案，结果会报告实际情况。
+
+成功表示发布及必需的同步已完成。之后库会清理临时内容和独立 candidate 副本；若
+清理失败，成功 outcome 仍会通过 `cleanup_errors()`、`retained_files()` 告知调用方。
+失败时检查 `reason()`、`stage()`、`publication()`；保留错误对象，或用
+`into_recovery_files()` 接管恢复文件。如果需要找回 B，应在错误对象销毁前调用
+`candidate().open_reader()`。恢复句柄只读，销毁句柄不会删除文件。尚未提交时调用
+`abort()` 或直接丢弃 writer 会取消发布并尝试清理；`commit()` 出错则把可恢复状态
+交给错误对象。
+
+该协议不提供严格的 compare-and-swap。发布前会检查旧内容，发布后会检查被替换内容；
+但其他进程仍可能通过已打开的旧 inode 修改文件，ABA 也可能让变化后的内容再次具有相同
+摘要。staging 与恢复文件名可能在父目录中可见。回滚至多尝试一次。进程被 abort 或
+机器崩溃可能中断发布或清理；库不会在重启时扫描遗留文件。平台范围方面，Windows
+Host 的 Content 仅支持 `PreserveExisting` 元数据策略；Windows Rooted Content 不受支持。
+Rooted 操作使用已打开的目录句柄。这里不宣称 Android 或 FreeBSD 支持 Content。
+
 ## 发布、复制与恢复
 
 `CreateNew` 与 `CreateOrReplace` 使用目标目录内的暂存；`Append` 直接修改已有普通文件，

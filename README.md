@@ -69,6 +69,46 @@ work.cleanup()?;
 # Ok::<(), Box<dyn std::error::Error>>(())
 ```
 
+## Conditional write: save B only if A is still current
+
+An editor can read a document as A, let a user make changes, then publish B only
+when the current file still has A’s digest. Enable the optional `digest` feature
+and choose an algorithm crate that implements `digest::Digest` (for example,
+`sha2` 0.11); the feature uses `digest` 0.11. The writer stages B and commits
+it only if the requested condition still holds. Add the feature and algorithm
+dependency to the application manifest:
+
+```toml
+qubit-local-files = { version = "0.5", features = ["digest"] }
+sha2 = "0.11"
+```
+
+```rust,no_run
+use qubit_io::Output;
+use qubit_local_files::{LocalFileSystem, options::{LocalWriteMode, LocalWriteOptions, LocalWritePrecondition}};
+use sha2::{Digest, Sha256};
+
+let filesystem = LocalFileSystem::host()?;
+let old_digest = Sha256::digest(b"A"); // digest the bytes read from the existing file
+let mut writer = filesystem.open_conditional_writer::<Sha256>(
+    std::path::Path::new("document.txt"),
+    LocalWritePrecondition::Content(old_digest),
+    &LocalWriteOptions::new(LocalWriteMode::CreateOrReplace),
+)?;
+writer.write_fully(b"B")?;
+let saved = writer.commit()?; // inspect saved.digest(), cleanup_errors(), retained_files()
+# let _ = saved;
+# Ok::<(), Box<dyn std::error::Error>>(())
+```
+
+A successful commit returns the digest of installed B; cleanup problems are
+reported in `cleanup_errors()` and `retained_files()` without changing the
+success result. A failed commit returns a structured error that owns recovery
+files, including an independently verified candidate copy when available. An
+uncommitted writer is cancelled on `abort()` or Drop and does not publish B. See
+the [conditional-write guide](doc/user_guide.md#conditional-write) for complete
+success and recovery flows and platform limits.
+
 ## Why This Project Exists
 
 `std::fs` is the right choice for isolated file operations. Applications that

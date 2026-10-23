@@ -228,6 +228,101 @@ starts. Copy and rename bind source and target from one current-directory
 snapshot. `metadata` observes the final entry without following a final
 symbolic link.
 
+## Conditional write
+
+Use a conditional write when an application reads document A, prepares an edit B,
+and must avoid replacing a newer version written by someone else. Add the
+optional feature and an algorithm implementation to the application manifest:
+
+```toml
+[dependencies]
+qubit-local-files = { version = "0.5.0", features = ["digest"] }
+qubit-io = "0.19"
+sha2 = "0.11"
+
+[dev-dependencies]
+tempfile = "^3.27"
+```
+
+The following complete example creates A, computes its SHA-256 digest, and
+conditionally replaces it with B. It also demonstrates the conflict path: after
+C replaces A, commit fails and the application reads B from the retained
+candidate copy. The `cfg` wrapper makes this example compile only when `digest`
+is enabled; it does not hide an ignored or incomplete example.
+
+```rust
+# #[cfg(feature = "digest")] {
+use std::io::Read;
+
+use qubit_io::{Input, Output};
+use qubit_local_files::LocalFileSystem;
+use qubit_local_files::options::{
+    LocalWriteMode, LocalWriteOptions, LocalWritePrecondition,
+};
+use sha2::{Digest, Sha256};
+
+let directory = tempfile::tempdir()?;
+let path = directory.path().join("document.txt");
+std::fs::write(&path, b"A")?;
+let filesystem = LocalFileSystem::host()?;
+let old_digest = Sha256::digest(std::fs::read(&path)?);
+let options = LocalWriteOptions::new(LocalWriteMode::CreateOrReplace);
+let mut writer = filesystem.open_conditional_writer::<Sha256>(
+    &path, LocalWritePrecondition::Content(old_digest), &options,
+)?;
+writer.write_fully(b"B")?;
+let saved = writer.commit()?;
+assert_eq!(saved.digest(), &Sha256::digest(b"B"));
+assert!(saved.cleanup_errors().is_empty());
+assert!(saved.retained_files().is_empty());
+
+// Start a second edit from A; a competing save changes it to C before commit.
+std::fs::write(&path, b"A")?;
+let expected_a = Sha256::digest(b"A");
+let mut conflicted = filesystem.open_conditional_writer::<Sha256>(
+    &path, LocalWritePrecondition::Content(expected_a), &options,
+)?;
+conflicted.write_fully(b"B")?;
+std::fs::write(&path, b"C")?;
+let failure = conflicted.commit().expect_err("C no longer matches A");
+assert_eq!(failure.reason(), qubit_local_files::error::LocalConditionalFailureReason::PreconditionMismatch);
+let candidate = failure.candidate().expect("B recovery copy is retained");
+let mut reader = candidate.open_reader()?.into_std_read();
+let mut recovered = Vec::new();
+reader.read_to_end(&mut recovered)?;
+assert_eq!(recovered, b"B");
+# Ok::<(), Box<dyn std::error::Error>>(())
+# }
+```
+
+`LocalWritePrecondition::Absent` is for create-only publication and is available
+only where the backend can install without overwriting a concurrently created
+entry. `Content(digest)` requires `CreateOrReplace`; `Append` is invalid.
+`LocalWriteOptions` also controls atomicity and durability. `Required` fails with
+`Err` when the selected backend cannot meet the requirement. `Preferred` permits
+a supported fallback and the result reports what happened.
+
+On success, publication and required synchronization completed. Cleanup then
+removes temporary content and the independent candidate copy; cleanup errors and
+retained paths remain visible on the successful outcome. On error, inspect
+`reason()`, `stage()`, and `publication()`; retain the error or transfer its
+files with `into_recovery_files()`. Read `candidate().open_reader()` before
+dropping the error when B must be recovered. Recovery handles are read-only and
+dropping them does not remove their files. Explicit `abort()` and dropping an
+uncommitted writer cancel publication and attempt cleanup; `commit()` errors
+transfer recoverable state into the error.
+
+This protocol is not a strict compare-and-swap. It checks old content before
+publication and checks displaced content after publication, but another process
+can modify an old inode through an already-open handle; digest ABA can also make
+changed content look equal. Staging and recovery names may be visible in the
+parent directory. Rollback is attempted at most once. Process abort or machine
+crash can interrupt publication or cleanup; the library does not scan for
+leftovers on restart. For backend availability, Windows Host supports
+`PreserveExisting` metadata only for Content; Windows Rooted Content is
+unsupported. Rooted uses opened directory handles. Android and FreeBSD Content
+are not claimed as supported.
+
 ## Publish, Copy, and Recover
 
 `CreateNew` and `CreateOrReplace` use same-directory staging. `Append` changes
