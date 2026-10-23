@@ -8,12 +8,16 @@
 //! Stateful native writer publication sessions.
 
 pub(crate) mod internal;
+#[cfg(feature = "digest")]
+mod local_conditional_writer;
 mod local_file_commit_error;
 mod local_file_writer;
 mod local_write_failure_state;
 mod local_write_outcome;
 mod local_writer_state;
 
+#[cfg(feature = "digest")]
+pub use local_conditional_writer::LocalConditionalWriter;
 pub use local_file_commit_error::LocalFileCommitError;
 pub use local_file_writer::LocalFileWriter;
 pub use local_write_failure_state::LocalWriteFailureState;

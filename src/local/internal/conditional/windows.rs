@@ -508,6 +508,15 @@ impl WindowsConditionalBackend {
 impl Output for WindowsConditionalBackend {
     type Item = u8;
 
+    fn write_vectored(&mut self, slices: &[&[u8]]) -> io::Result<usize> {
+        let file = self.candidate_file.as_mut().ok_or_else(|| {
+            io::Error::new(io::ErrorKind::BrokenPipe, "conditional candidate is closed")
+        })?;
+        let slices: Vec<io::IoSlice<'_>> =
+            slices.iter().map(|slice| io::IoSlice::new(slice)).collect();
+        Write::write_vectored(file, &slices)
+    }
+
     unsafe fn write_unchecked(
         &mut self,
         input: &[u8],

@@ -152,6 +152,8 @@ pub use temp::LocalTempFile;
 pub(crate) use test_support::TestFaultPlan;
 pub(crate) use walk::LocalDirectoryEntry;
 pub use walk::LocalDirectoryWalker;
+#[cfg(feature = "digest")]
+pub use writer::LocalConditionalWriter;
 pub(crate) use writer::LocalFileCommitError;
 pub use writer::LocalFileWriter;
 pub(crate) use writer::LocalWriteFailureState;

@@ -45,6 +45,17 @@ impl LocalConditionalCommitError {
         }
     }
 
+    /// Supplies the public operation path when the failure has no more specific path.
+    ///
+    /// The existing error and its native source are retained when a path is
+    /// already present.
+    pub(crate) fn with_fallback_path(mut self, path: std::path::PathBuf) -> Self {
+        if self.error.path().is_none() {
+            self.error = self.error.with_path(path);
+        }
+        self
+    }
+
     /// Returns the structured local filesystem error, including its native source.
     #[must_use]
     pub const fn error(&self) -> &LocalFileError {

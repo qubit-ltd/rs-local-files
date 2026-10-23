@@ -8,6 +8,8 @@
 
 // Implements rooted file and directory copy operations.
 mod copy;
+#[cfg(feature = "digest")]
+mod conditional;
 // Implements rooted deletion operations.
 mod delete;
 // Implements rooted directory operations.

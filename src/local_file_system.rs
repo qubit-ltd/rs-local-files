@@ -9,6 +9,8 @@
 
 // Implements capability and filesystem-space observations.
 mod capability;
+#[cfg(feature = "digest")]
+mod conditional;
 // Implements instance scope, policy, and default-option configuration.
 mod configuration;
 // Implements copy and rename operations.

@@ -204,6 +204,12 @@ impl UnixConditionalBackend {
 impl qubit_io::Output for UnixConditionalBackend {
     type Item = u8;
 
+    fn write_vectored(&mut self, slices: &[&[u8]]) -> io::Result<usize> {
+        let slices: Vec<io::IoSlice<'_>> =
+            slices.iter().map(|slice| io::IoSlice::new(slice)).collect();
+        Write::write_vectored(&mut self.candidate, &slices)
+    }
+
     unsafe fn write_unchecked(
         &mut self,
         input: &[u8],

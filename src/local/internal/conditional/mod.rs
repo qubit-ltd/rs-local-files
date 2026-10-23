@@ -15,22 +15,28 @@ mod digest_reader;
 mod entry;
 mod hooks;
 
+#[cfg(feature = "digest")]
+pub(crate) use backend_dispatch::ConditionalWriterBackend;
+#[cfg(feature = "digest")]
+mod backend_dispatch;
+
 #[cfg(test)]
 mod fake_backend;
 #[cfg(test)]
 mod state_tests;
 
 #[cfg(unix)]
-mod unix;
+pub(super) mod unix;
 #[cfg(not(any(unix, windows)))]
 mod unsupported;
 #[cfg(windows)]
-mod windows;
+pub(super) mod windows;
 
 pub(crate) use backend::ConditionalBackend;
 pub(crate) use backend::ConditionalHookAction;
 pub(crate) use backend::ConditionalPoint;
 pub(crate) use backend::NativeAttempt;
+pub(crate) use commit::commit_conditional;
 pub(crate) use entry::ConditionalEntry;
 pub(crate) use entry::RecoveryAccess;
 pub(crate) use hooks::ConditionalHooks;
