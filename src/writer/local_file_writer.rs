@@ -8,7 +8,6 @@
 
 use std::io;
 use std::io::IoSlice;
-use std::io::Write;
 use std::path::Path;
 use std::path::PathBuf;
 
@@ -447,20 +446,31 @@ impl LocalFileWriter {
                 "local file writer is not open",
             ));
         }
+        let slices = crate::vectored::byte_slices(buffers)?;
+        qubit_io::Output::write_vectored(self, &slices)
+    }
+}
+
+impl qubit_io::Output for LocalFileWriter {
+    type Item = u8;
+
+    fn write_vectored(&mut self, buffers: &[&[u8]]) -> io::Result<usize> {
+        if self.state != LocalWriterState::Open || self.failure_state.is_some() {
+            return Err(io::Error::new(
+                io::ErrorKind::BrokenPipe,
+                "local file writer is not open",
+            ));
+        }
         let result = match self.backend.as_mut() {
-            Some(LocalFileWriterBackend::Staged(writer)) => writer.write_vectored(buffers),
-            Some(LocalFileWriterBackend::Rooted(writer)) => writer.write_vectored(buffers),
-            Some(LocalFileWriterBackend::Append(file)) => file.write_vectored(buffers),
+            Some(LocalFileWriterBackend::Staged(writer)) => qubit_io::Output::write_vectored(writer, buffers),
+            Some(LocalFileWriterBackend::Rooted(writer)) => qubit_io::Output::write_vectored(writer, buffers),
+            Some(LocalFileWriterBackend::Append(file)) => qubit_io::Output::write_vectored(file, buffers),
             None => unreachable!("open writer must retain one backend"),
         };
         let written = self.observe_stream_result(result)?;
         self.record_written(written);
         Ok(written)
     }
-}
-
-impl qubit_io::Output for LocalFileWriter {
-    type Item = u8;
 
     unsafe fn write_unchecked(&mut self, input: &[u8], index: usize, count: usize) -> io::Result<usize> {
         self.write_once(&input[index..index + count])

@@ -12,7 +12,6 @@ use std::ffi::CString;
 #[cfg(any(unix, windows))]
 use std::fs::File;
 use std::io;
-use std::io::Write;
 use std::path::Path;
 use std::path::PathBuf;
 #[cfg(unix)]
@@ -861,16 +860,14 @@ impl LocalRootAtomicWriter {
         }
     }
 
-    /// Writes bytes from multiple buffers into the rooted staging file.
+    /// Writes bytes into the private rooted staging file.
     #[inline]
+    #[allow(dead_code)]
     pub(crate) fn write_vectored(&mut self, buffers: &[io::IoSlice<'_>]) -> io::Result<usize> {
-        #[cfg(unix)]
+        #[cfg(any(unix, windows))]
         {
-            self.staged_file.file_mut().write_vectored(buffers)
-        }
-        #[cfg(windows)]
-        {
-            self.staged_file.file_mut().write_vectored(buffers)
+            let slices = crate::vectored::byte_slices(buffers)?;
+            qubit_io::Output::write_vectored(self, &slices)
         }
         #[cfg(not(any(unix, windows)))]
         {
@@ -922,6 +919,21 @@ mod output_range_tests {
 
 impl qubit_io::Output for LocalRootAtomicWriter {
     type Item = u8;
+
+    fn write_vectored(&mut self, buffers: &[&[u8]]) -> io::Result<usize> {
+        #[cfg(any(unix, windows))]
+        {
+            qubit_io::Output::write_vectored(self.staged_file.file_mut(), buffers)
+        }
+        #[cfg(not(any(unix, windows)))]
+        {
+            let _ = buffers;
+            Err(io::Error::new(
+                io::ErrorKind::Unsupported,
+                "secure rooted atomic writes are unsupported on this target",
+            ))
+        }
+    }
 
     unsafe fn write_unchecked(&mut self, input: &[u8], index: usize, count: usize) -> io::Result<usize> {
         self.write_once(&input[index..index + count])

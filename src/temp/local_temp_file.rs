@@ -840,12 +840,18 @@ impl LocalTempFile {
     /// Writes vectored bytes to the still-open temporary file.
     #[inline]
     pub fn write_vectored(&mut self, buffers: &[IoSlice<'_>]) -> Result<usize> {
-        std::io::Write::write_vectored(self.as_file_mut()?, buffers)
+        self.as_file_mut()?;
+        let slices = crate::vectored::byte_slices(buffers)?;
+        Output::write_vectored(self, &slices)
     }
 }
 
 impl Output for LocalTempFile {
     type Item = u8;
+
+    fn write_vectored(&mut self, buffers: &[&[u8]]) -> Result<usize> {
+        Output::write_vectored(self.as_file_mut()?, buffers)
+    }
 
     /// Writes the requested valid range to the still-open temporary file.
     ///

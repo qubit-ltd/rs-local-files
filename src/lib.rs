@@ -68,6 +68,7 @@ mod test_support;
 pub mod test_support;
 #[cfg(test)]
 mod tests;
+mod vectored;
 mod walk;
 mod write;
 mod writer;

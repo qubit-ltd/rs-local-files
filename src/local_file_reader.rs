@@ -81,17 +81,29 @@ impl LocalFileReader {
 impl LocalFileReader {
     /// Reads bytes into multiple buffers from the current offset.
     pub fn read_vectored(&mut self, buffers: &mut [IoSliceMut<'_>]) -> io::Result<usize> {
-        #[cfg(windows)]
-        {
-            crate::read::read_vectored_fallback(&mut self.file, buffers)
+        if buffers.iter().all(|buffer| buffer.is_empty()) {
+            return Ok(0);
         }
-        #[cfg(not(windows))]
-        std::io::Read::read_vectored(&mut self.file, buffers)
+        let mut slices = crate::vectored::byte_slices_mut(buffers)?;
+        qubit_io::Input::read_vectored(self, &mut slices)
     }
 }
 
 impl qubit_io::Input for LocalFileReader {
     type Item = u8;
+
+    fn read_vectored(&mut self, buffers: &mut [&mut [u8]]) -> io::Result<usize> {
+        if buffers.iter().all(|buffer| buffer.is_empty()) {
+            return Ok(0);
+        }
+        #[cfg(windows)]
+        {
+            let mut slices = crate::vectored::io_slices_mut(buffers)?;
+            crate::read::read_vectored_fallback(&mut self.file, &mut slices)
+        }
+        #[cfg(not(windows))]
+        qubit_io::Input::read_vectored(&mut self.file, buffers)
+    }
 
     unsafe fn read_unchecked(&mut self, output: &mut [u8], index: usize, count: usize) -> io::Result<usize> {
         qubit_io::Input::read(&mut self.file, &mut output[index..index + count])

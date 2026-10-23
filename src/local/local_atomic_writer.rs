@@ -10,7 +10,6 @@
 use std::fs;
 use std::io;
 use std::io::ErrorKind;
-use std::io::Write;
 use std::path::Path;
 use std::path::PathBuf;
 #[cfg(unix)]
@@ -542,13 +541,19 @@ impl LocalAtomicWriter {
 impl LocalAtomicWriter {
     /// Writes bytes from multiple buffers into the private staging file.
     #[inline]
+    #[allow(dead_code)]
     pub(crate) fn write_vectored(&mut self, buffers: &[io::IoSlice<'_>]) -> io::Result<usize> {
-        self.staged_file.file_mut().write_vectored(buffers)
+        let slices = crate::vectored::byte_slices(buffers)?;
+        qubit_io::Output::write_vectored(self, &slices)
     }
 }
 
 impl qubit_io::Output for LocalAtomicWriter {
     type Item = u8;
+
+    fn write_vectored(&mut self, buffers: &[&[u8]]) -> io::Result<usize> {
+        qubit_io::Output::write_vectored(self.staged_file.file_mut(), buffers)
+    }
 
     unsafe fn write_unchecked(&mut self, input: &[u8], index: usize, count: usize) -> io::Result<usize> {
         qubit_io::Output::write(self.staged_file.file_mut(), &input[index..index + count])
