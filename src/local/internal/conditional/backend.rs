@@ -42,6 +42,7 @@ pub(crate) enum ConditionalPoint {
     VerifyInstalled,
     RollbackPrecheck,
     Rollback,
+    RollbackExchange,
     VerifyRollback,
     SyncRollback,
     SaveComplete,

@@ -313,13 +313,26 @@ where
             let rollback = backend.rollback(displaced);
             publication = rollback.publication;
             if let Some(error) = rollback.error {
-                entries.push(installed);
-                entries.extend(displaced_entries);
-                if let Some(mut restored_or_partial) = rollback.installed {
-                    restored_or_partial.set_role(LocalRecoveryFileRole::RollbackDisplaced);
-                    entries.push(restored_or_partial);
+                for displaced_entry in displaced_entries {
+                    let represented_by_receipt = rollback
+                        .installed
+                        .iter()
+                        .chain(rollback.displaced.iter())
+                        .any(|receipt| {
+                            receipt.namespace_path() == displaced_entry.namespace_path()
+                        });
+                    if !represented_by_receipt && backend.verify_entry(&displaced_entry).is_ok() {
+                        entries.push(displaced_entry);
+                    }
                 }
-                entries.extend(rollback.displaced);
+                if let Some(mut current_target) = rollback.installed {
+                    current_target.set_role(LocalRecoveryFileRole::Displaced);
+                    entries.push(current_target);
+                }
+                entries.extend(rollback.displaced.into_iter().map(|mut entry| {
+                    entry.set_role(LocalRecoveryFileRole::RollbackDisplaced);
+                    entry
+                }));
                 return Err((stage, error));
             }
             let Some(restored) = rollback.installed else {
