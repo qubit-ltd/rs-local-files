@@ -12,6 +12,7 @@ use std::io;
 use std::os::windows::ffi::OsStrExt;
 use std::path::Path;
 
+use windows_sys::Win32::Storage::FileSystem::MoveFileExW;
 use windows_sys::Win32::Storage::FileSystem::ReplaceFileW;
 
 use super::namespace::Namespace;
@@ -43,7 +44,20 @@ pub(super) fn replace_with_backup(target: &Path, replacement: &Path, backup: &Pa
 
 /// Installs a candidate only when the destination name is absent.
 pub(super) fn install_absent(namespace: &Namespace, candidate: &OsStr) -> io::Result<()> {
-    namespace.rename(candidate, namespace.target_name(), false)
+    if namespace.is_rooted() {
+        return namespace.rename(candidate, namespace.target_name(), false);
+    }
+    let source = wide_path(namespace.private_file_path(candidate)?.as_os_str())?;
+    let destination = wide_path(namespace.target_path().as_os_str())?;
+    // Omitting MOVEFILE_REPLACE_EXISTING makes the same-volume move an atomic
+    // no-replace publication: a concurrently created target is left intact.
+    // SAFETY: both paths are live, NUL-terminated UTF-16 buffers for the call.
+    let result = unsafe { MoveFileExW(source.as_ptr(), destination.as_ptr(), 0) };
+    if result == 0 {
+        Err(io::Error::last_os_error())
+    } else {
+        Ok(())
+    }
 }
 
 fn wide_path(value: &OsStr) -> io::Result<Vec<u16>> {
