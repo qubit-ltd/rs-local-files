@@ -30,10 +30,11 @@ opened root ───── LocalFileSystem::rooted(root) ── virtual / and i
 
 ## Byte stream protocols and standard I/O
 
-`LocalFileReader` implements `Input<Item = u8>` and retains `std::io::Seek`.
-`LocalFileWriter`, `LocalTempFile`, and the internal atomic writers implement
-`Output<Item = u8>`. Use `Input::read_exactly` and `Output::write_fully` for
-these objects. Standard readers can be adapted with `into_std_read()`.
+`LocalFileReader` uses `ByteInput` and retains `std::io::Seek`.
+`LocalFileWriter`, `LocalTempFile`, and the internal atomic writers use
+`ByteOutput`. These marker traits are implemented automatically for
+`Input<Item = u8>` and `Output<Item = u8>`, which provide `read_exactly` and
+`write_fully`. Standard readers can be adapted with `into_std_read()`.
 
 For a standard producer that must leave the writer available for publication,
 use a borrowed adapter and end its scope before committing:
@@ -82,7 +83,7 @@ Add the crate to the application manifest:
 ```toml
 [dependencies]
 qubit-local-files = "0.5.0"
-qubit-io = "0.18.1"
+qubit-io = "0.19"
 ```
 
 Choose the authority before configuring operation policy. Host mode uses the

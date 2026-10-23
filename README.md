@@ -19,12 +19,13 @@ in [`qubit-fs-local`](https://crates.io/crates/qubit-fs-local).
 ```toml
 [dependencies]
 qubit-local-files = "0.5"
-qubit-io = "0.18.1"
+qubit-io = "0.19"
 ```
 
-Readers implement `qubit_io::Input<Item = u8>` and writers and temporary files
-implement `qubit_io::Output<Item = u8>`. Use `read_exactly` and `write_fully`
-for these objects. To call standard I/O APIs, convert a reader with
+Readers use `qubit_io::ByteInput`; writers and temporary files use
+`qubit_io::ByteOutput`. These marker traits are implemented automatically for
+`Input<Item = u8>` and `Output<Item = u8>`, which continue to provide the
+`read_exactly` and `write_fully` methods. To call standard I/O APIs, convert a reader with
 `into_std_read()` or wrap a borrowed writer with
 `qubit_io::OutputRef::new(&mut writer).into_std_write()`. Drop a borrowed
 wrapper before committing its writer; an owned wrapper can return it through

@@ -645,8 +645,8 @@ structured `NotFound`, not `Option`.
 
 ### 13.2 Readers
 
-Readers own their native file, implement `qubit_io::Input<Item = u8>` and
-`std::io::Seek`, and are not redirected by later rename or PWD changes.
+Readers own their native file, implement `qubit_io::ByteInput` (automatically implemented for
+`qubit_io::Input<Item = u8>`) and `std::io::Seek`, and are not redirected by later rename or PWD changes.
 `read_prefix` reads at most the requested byte count and never silently loads a
 whole file.
 
@@ -702,7 +702,8 @@ pub enum LocalWriteFailureState {
 }
 ```
 
-`LocalFileWriter` implements `qubit_io::Output<Item = u8>` and is a publication
+`LocalFileWriter` implements `qubit_io::ByteOutput` (automatically implemented for
+`qubit_io::Output<Item = u8>`) and is a publication
 session. Standard I/O consumers use `OutputRef::new(&mut writer).into_std_write()`;
 drop the borrowed adapter before calling `commit` or `abort`. An owning adapter
 can return the writer with `into_inner().commit()`. Conversion does not flush,

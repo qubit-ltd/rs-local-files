@@ -908,7 +908,7 @@ Path 泄漏。
 
 ### 13.2 Reader
 
-`LocalFileReader` 拥有已打开 native file，实现 `qubit_io::Input<Item = u8>` 和
+`LocalFileReader` 拥有已打开 native file，实现 `qubit_io::ByteInput`（由 `qubit_io::Input<Item = u8>` 自动实现）和
 `std::io::Seek`，并允许读取与同一 handle
 对应的 metadata。打开成功后路径 rename、PWD 变化或 diagnostic root 变化不重定向 reader。
 
@@ -968,7 +968,7 @@ commit 先按策略应用元数据，再同步 staging、复核身份、安装�
 
 ### 14.2 生命周期与发布状态
 
-`LocalFileWriter` 实现 `qubit_io::Output<Item = u8>`，同时承担 publication session。
+`LocalFileWriter` 实现 `qubit_io::ByteOutput`（由 `qubit_io::Output<Item = u8>` 自动实现），同时承担 publication session。
 标准 I/O 消费者可使用 `OutputRef::new(&mut writer).into_std_write()`；调用 `commit` 或
 `abort` 前应先释放借用适配器。拥有型适配器可通过 `into_inner().commit()` 取回并提交
 writer。适配器转换不会 flush、commit 或同步底层对象。`flush` 只转发到打开的流，不会发布

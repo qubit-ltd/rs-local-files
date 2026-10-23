@@ -18,11 +18,12 @@
 ```toml
 [dependencies]
 qubit-local-files = "0.5"
-qubit-io = "0.18.1"
+qubit-io = "0.19"
 ```
 
-Reader 实现 `qubit_io::Input<Item = u8>`；writer 和临时文件实现
-`qubit_io::Output<Item = u8>`。这些对象使用 `read_exactly` 和 `write_fully`。
+Reader 使用 `qubit_io::ByteInput`，writer 和临时文件使用
+`qubit_io::ByteOutput`。这两个标记 trait 会由 `Input<Item = u8>` 和
+`Output<Item = u8>` 自动实现；读写方法仍由这两个父 trait 提供。
 调用标准 I/O API 时，reader 可转换为 `into_std_read()`；借用 writer 可包装为
 `qubit_io::OutputRef::new(&mut writer).into_std_write()`。提交 writer 前先释放借用包装器；
 拥有型包装器可通过 `into_inner().commit()` 取回 writer。`flush` 不会发布文件，也不代表

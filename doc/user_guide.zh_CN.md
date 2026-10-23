@@ -26,8 +26,9 @@ Host 命名空间 ── LocalFileSystem::host() ── 操作时读取进程 PW
 
 ## 字节流协议与标准 I/O
 
-`LocalFileReader` 实现 `Input<Item = u8>`，并保留 `std::io::Seek`。
-`LocalFileWriter`、`LocalTempFile` 和内部原子 writer 实现 `Output<Item = u8>`。
+`LocalFileReader` 使用 `ByteInput`，并保留 `std::io::Seek`。
+`LocalFileWriter`、`LocalTempFile` 和内部原子 writer 使用 `ByteOutput`。这两个标记
+trait 会由 `Input<Item = u8>` 和 `Output<Item = u8>` 自动实现。
 这些对象使用 `Input::read_exactly` 和 `Output::write_fully`；标准 reader 可通过
 `into_std_read()` 适配。
 
@@ -71,7 +72,7 @@ UTF-8。
 ```toml
 [dependencies]
 qubit-local-files = "0.5.0"
-qubit-io = "0.18.1"
+qubit-io = "0.19"
 ```
 
 配置操作策略前，先选择权限范围。Host 模式使用进程可见的命名空间；Rooted 模式打开一个
