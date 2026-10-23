@@ -77,6 +77,45 @@ mod conditional_state_tests {
     }
 
     #[test]
+    fn conditional_state_flush_failure_reports_prepare_stage() {
+        use super::super::ConditionalHooks;
+        use super::super::ConditionalPoint;
+
+        let backend = super::super::fake_backend::FakeBackend::new(b"A", b"B").with_hooks(
+            ConditionalHooks::fail_once(
+                ConditionalPoint::Flush,
+                std::io::ErrorKind::PermissionDenied,
+            ),
+        );
+        let (_lease, target_path) = backend.target_observer();
+        let error = super::super::commit::commit_conditional::<Sha256, _>(
+            backend,
+            LocalWritePrecondition::Content(Sha256::digest(b"A")),
+            super::super::fake_backend::required_options(),
+            1,
+        )
+        .expect_err("flush failure must stop before candidate verification");
+        assert_eq!(
+            error.stage(),
+            crate::error::LocalConditionalWriteStage::Prepare
+        );
+        assert_eq!(
+            error.reason(),
+            crate::error::LocalConditionalFailureReason::Io
+        );
+        assert_eq!(
+            error.publication(),
+            crate::outcome::LocalConditionalPublicationState::NotPublished
+        );
+        assert_eq!(
+            error.error().kind(),
+            crate::LocalFileErrorKind::PermissionDenied
+        );
+        assert!(error.candidate().is_none());
+        assert_eq!(std::fs::read(target_path).expect("target unchanged"), b"A");
+    }
+
+    #[test]
     fn conditional_state_precondition_failure_retains_candidate_copy() {
         let backend = super::super::fake_backend::FakeBackend::new(b"A", b"B");
         let (_lease, target_path) = backend.target_observer();
@@ -411,6 +450,72 @@ mod conditional_state_tests {
             .find(|file| file.role() == crate::recovery::LocalRecoveryFileRole::RollbackDisplaced)
             .expect("published candidate retained");
         assert_eq!(recovery_bytes(displaced_candidate), b"B");
+    }
+
+    #[test]
+    fn conditional_state_in_place_candidate_change_blocks_rollback() {
+        use super::super::ConditionalHookAction;
+        use super::super::ConditionalHooks;
+        use super::super::ConditionalPoint;
+
+        let hooks = ConditionalHooks::sequence(vec![
+            (
+                ConditionalPoint::Publish,
+                ConditionalHookAction::PartialPublish,
+            ),
+            (
+                ConditionalPoint::Rollback,
+                ConditionalHookAction::OverwriteTargetInPlace(b"C".to_vec()),
+            ),
+        ]);
+        let backend = super::super::fake_backend::FakeBackend::new(b"A", b"B").with_hooks(hooks);
+        let (_lease, target_path) = backend.target_observer();
+        let events = backend.events();
+        let error = super::super::commit::commit_conditional::<Sha256, _>(
+            backend,
+            LocalWritePrecondition::Content(Sha256::digest(b"A")),
+            super::super::fake_backend::required_options(),
+            1,
+        )
+        .expect_err("changed installed bytes must fail rollback precheck");
+        assert_eq!(
+            error.reason(),
+            crate::error::LocalConditionalFailureReason::PostPublicationConflict
+        );
+        assert_eq!(
+            error.stage(),
+            crate::error::LocalConditionalWriteStage::RollbackPrecheck
+        );
+        assert_eq!(
+            error.publication(),
+            crate::outcome::LocalConditionalPublicationState::Indeterminate
+        );
+        assert_eq!(
+            std::fs::read(target_path).expect("in-place competitor remains"),
+            b"C"
+        );
+        assert_eq!(
+            recovery_bytes(error.candidate().expect("independent B copy")),
+            b"B"
+        );
+        assert!(error.recovery_files().iter().any(|file| {
+            file.role() == crate::recovery::LocalRecoveryFileRole::StagedCandidate
+                && recovery_bytes(file) == b"C"
+        }));
+        assert!(error.recovery_files().iter().any(|file| {
+            file.role() == crate::recovery::LocalRecoveryFileRole::Displaced
+                && recovery_bytes(file) == b"A"
+        }));
+        assert!(
+            !events
+                .borrow()
+                .iter()
+                .any(|event| *event == super::super::fake_backend::Event::Rollback)
+        );
+        assert_eq!(
+            error.error().kind(),
+            crate::LocalFileErrorKind::DataCorruption
+        );
     }
 
     #[test]

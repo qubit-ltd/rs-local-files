@@ -43,7 +43,7 @@ where
     B: ConditionalBackend,
 {
     let mut entries = Vec::new();
-    let mut stage = LocalConditionalWriteStage::VerifyCandidate;
+    let mut stage = LocalConditionalWriteStage::Prepare;
     let mut publication = LocalConditionalPublicationState::NotPublished;
     let mut post_publication_conflict = false;
     let mut publication_attempt_error = None;
@@ -51,6 +51,7 @@ where
     let mut durable = options.durability() != LocalDurabilityRequirement::NotRequired;
     let result = (|| {
         qubit_io::Output::flush(&mut backend).map_err(|error| (stage, error))?;
+        stage = LocalConditionalWriteStage::VerifyCandidate;
         let candidate_digest =
             digest_entry::<D>(backend.candidate()).map_err(|error| (stage, error))?;
 
@@ -262,6 +263,16 @@ where
                 publication = LocalConditionalPublicationState::Indeterminate;
                 return Err((stage, error));
             }
+            stage = LocalConditionalWriteStage::Rollback;
+            if let Err(error) = backend.checkpoint(ConditionalPoint::Rollback) {
+                entries.push(installed);
+                entries.extend(displaced_entries);
+                return Err((stage, error));
+            }
+            // Recheck immediately before the reverse native operation. Identity alone
+            // misses in-place writes to the installed candidate after the earlier
+            // publication readback.
+            stage = LocalConditionalWriteStage::RollbackPrecheck;
             let candidate_still_installed = match backend.is_candidate(&installed) {
                 Ok(identity) => identity,
                 Err(error) => {
@@ -271,25 +282,34 @@ where
                     return Err((stage, error));
                 }
             };
-            let can_rollback = candidate_still_installed && backend.verify_entry(displaced).is_ok();
-            if !can_rollback {
+            let current_installed_digest = match digest_entry::<D>(&installed) {
+                Ok(digest) => digest,
+                Err(error) => {
+                    entries.push(installed);
+                    entries.extend(displaced_entries);
+                    publication = LocalConditionalPublicationState::Indeterminate;
+                    return Err((stage, error));
+                }
+            };
+            if !candidate_still_installed || current_installed_digest != candidate_digest {
                 entries.push(installed);
                 entries.extend(displaced_entries);
                 publication = LocalConditionalPublicationState::Indeterminate;
                 return Err((
                     stage,
                     io::Error::new(
-                        io::ErrorKind::Other,
-                        "rollback precheck could not prove safe identities",
+                        io::ErrorKind::InvalidData,
+                        "rollback precheck no longer observes the installed candidate",
                     ),
                 ));
             }
-            stage = LocalConditionalWriteStage::Rollback;
-            if let Err(error) = backend.checkpoint(ConditionalPoint::Rollback) {
+            if let Err(error) = backend.verify_entry(displaced) {
                 entries.push(installed);
                 entries.extend(displaced_entries);
+                publication = LocalConditionalPublicationState::Indeterminate;
                 return Err((stage, error));
             }
+            stage = LocalConditionalWriteStage::Rollback;
             let rollback = backend.rollback(displaced);
             publication = rollback.publication;
             if let Some(error) = rollback.error {

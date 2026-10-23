@@ -25,6 +25,7 @@ use crate::recovery::LocalRecoveryFileRole;
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub(super) enum Event {
+    Rollback,
     VerifyCopy,
     Publish,
     VerifyInstalled,
@@ -67,8 +68,8 @@ pub(super) struct FakeBackend {
     candidate_entry: ConditionalEntry,
     events: Rc<RefCell<Vec<Event>>>,
     hooks: ConditionalHooks,
-    candidate_bytes: Vec<u8>,
     partial_publish: Cell<bool>,
+    target_is_candidate: Cell<bool>,
     recovery_entries: RefCell<Vec<ConditionalEntry>>,
 }
 
@@ -96,8 +97,8 @@ impl FakeBackend {
             candidate_entry,
             events: Rc::new(RefCell::new(Vec::new())),
             hooks: ConditionalHooks::default(),
-            candidate_bytes: candidate.to_vec(),
             partial_publish: Cell::new(false),
+            target_is_candidate: Cell::new(false),
             recovery_entries: RefCell::new(Vec::new()),
         }
     }
@@ -133,7 +134,22 @@ impl FakeBackend {
                 ConditionalHookAction::Fail(kind) => {
                     return Err(io::Error::new(kind, "injected checkpoint failure"));
                 }
-                ConditionalHookAction::ReplaceTarget(bytes) => fs::write(&self.target, bytes)?,
+                ConditionalHookAction::ReplaceTarget(bytes) => {
+                    let replacement = self.root.path().join("replacement");
+                    fs::write(&replacement, bytes)?;
+                    if self.target.exists() {
+                        fs::remove_file(&self.target)?;
+                    }
+                    fs::rename(replacement, &self.target)?;
+                    self.target_is_candidate.set(false);
+                }
+                ConditionalHookAction::OverwriteTargetInPlace(bytes) => {
+                    let mut target = fs::OpenOptions::new()
+                        .write(true)
+                        .truncate(true)
+                        .open(&self.target)?;
+                    std::io::Write::write_all(&mut target, &bytes)?;
+                }
                 ConditionalHookAction::CorruptCandidateCopy(bytes) => {
                     fs::write(self.root.path().join("copy"), bytes)?
                 }
@@ -169,7 +185,7 @@ impl std::io::Write for FakeBackend {
             .write(bytes)
     }
     fn flush(&mut self) -> io::Result<()> {
-        Ok(())
+        self.inject(ConditionalPoint::Flush)
     }
 }
 impl ConditionalBackend for FakeBackend {
@@ -212,8 +228,7 @@ impl ConditionalBackend for FakeBackend {
         self.inject(ConditionalPoint::SyncNamespace)
     }
     fn is_candidate(&self, entry: &ConditionalEntry) -> io::Result<bool> {
-        Ok(entry.namespace_path() == self.target
-            && fs::read(entry.namespace_path())? == self.candidate_bytes)
+        Ok(entry.namespace_path() == self.target && self.target_is_candidate.get())
     }
     fn verify_entry(&self, entry: &ConditionalEntry) -> io::Result<()> {
         if entry.namespace_path().is_file() {
@@ -246,6 +261,7 @@ impl ConditionalBackend for FakeBackend {
                 displaced: Vec::new(),
             };
         }
+        self.target_is_candidate.set(true);
         NativeAttempt {
             error: None,
             publication: LocalConditionalPublicationState::Published,
@@ -260,6 +276,7 @@ impl ConditionalBackend for FakeBackend {
         let operation =
             fs::rename(&self.target, &old).and_then(|()| fs::rename(&self.candidate, &self.target));
         if let Err(error) = operation {
+            self.target_is_candidate.set(false);
             let installed = self
                 .target
                 .is_file()
@@ -276,6 +293,7 @@ impl ConditionalBackend for FakeBackend {
                 displaced,
             };
         }
+        self.target_is_candidate.set(true);
         if self.partial_publish.replace(false) {
             return NativeAttempt {
                 error: Some(io::Error::other("injected partial publication")),
@@ -296,10 +314,12 @@ impl ConditionalBackend for FakeBackend {
         }
     }
     fn rollback(&mut self, displaced: &ConditionalEntry) -> NativeAttempt {
+        self.events.borrow_mut().push(Event::Rollback);
         let discarded = self.root.path().join("rollback-displaced");
         let operation = fs::rename(&self.target, &discarded)
             .and_then(|()| fs::rename(displaced.namespace_path(), &self.target));
         if let Err(error) = operation {
+            self.target_is_candidate.set(false);
             let installed = self
                 .target
                 .is_file()
@@ -316,6 +336,7 @@ impl ConditionalBackend for FakeBackend {
                 displaced,
             };
         }
+        self.target_is_candidate.set(false);
         NativeAttempt {
             error: None,
             publication: LocalConditionalPublicationState::Restored,

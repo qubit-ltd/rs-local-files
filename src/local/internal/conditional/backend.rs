@@ -28,6 +28,7 @@ pub(crate) struct NativeAttempt {
 
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
 pub(crate) enum ConditionalPoint {
+    Flush,
     PrepareCandidateCopy,
     CandidateCopyCreated,
     VerifyCandidateCopy,
@@ -55,6 +56,7 @@ pub(crate) enum ConditionalHookAction {
     Noop,
     Fail(io::ErrorKind),
     ReplaceTarget(Vec<u8>),
+    OverwriteTargetInPlace(Vec<u8>),
     CorruptCandidateCopy(Vec<u8>),
     PartialCandidateCopy(Vec<u8>),
     PartialPublish,
