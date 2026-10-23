@@ -13,6 +13,7 @@ use std::os::windows::fs::OpenOptionsExt;
 use std::path::Path;
 
 use digest::Digest;
+use qubit_io::Input;
 use sha2::Sha256;
 use sha2::digest::Output;
 
@@ -308,7 +309,8 @@ fn conditional_windows_absent_race_never_overwrites_late_target() {
     .expect_err("the racing target must reject no-replace installation");
     assert_eq!(fs::read(&target).expect("racing target should remain"), b"C");
     let candidate = failure.candidate().expect("complete B copy must remain recoverable");
-    let mut reader = candidate.open_reader().expect("candidate copy identity should verify");
+    let reader = candidate.open_reader().expect("candidate copy identity should verify");
+    let mut reader = reader.into_std_read();
     let mut bytes = Vec::new();
     std::io::Read::read_to_end(&mut reader, &mut bytes).expect("candidate copy should read");
     assert_eq!(bytes, b"B");
@@ -572,13 +574,14 @@ fn conditional_windows_partial_1177_receipt_retains_every_visible_object() {
     let roles: Vec<_> = attempt.displaced.iter().map(|entry| entry.role()).collect();
     assert!(roles.contains(&LocalRecoveryFileRole::Displaced));
     assert!(roles.contains(&LocalRecoveryFileRole::StagedCandidate));
-    let mut candidate = attempt
+    let candidate = attempt
         .displaced
         .iter()
         .find(|entry| entry.role() == LocalRecoveryFileRole::StagedCandidate)
         .expect("candidate path must be reported")
         .open_reader()
         .expect("candidate should remain readable");
+    let mut candidate = candidate.into_std_read();
     let mut bytes = Vec::new();
     std::io::Read::read_to_end(&mut candidate, &mut bytes).expect("candidate should read");
     assert_eq!(bytes, b"B");
