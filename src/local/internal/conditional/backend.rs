@@ -11,6 +11,7 @@ use std::io;
 use crate::outcome::LocalConditionalPublicationState;
 
 use super::ConditionalEntry;
+use super::ConditionalHooks;
 
 /// Outcome of a native operation, including observations made after failure.
 #[derive(Debug)]
@@ -25,19 +26,48 @@ pub(crate) struct NativeAttempt {
     pub(crate) displaced: Vec<ConditionalEntry>,
 }
 
-/// Placeholder hook bundle, populated by the state-machine task.
-#[derive(Clone, Debug, Default)]
-pub(crate) struct ConditionalHooks;
+#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
+pub(crate) enum ConditionalPoint {
+    PrepareCandidateCopy,
+    CandidateCopyCreated,
+    VerifyCandidateCopy,
+    SyncCandidate,
+    SyncEntry,
+    SyncNamespace,
+    SyncInstalled,
+    Precheck,
+    Publish,
+    VerifyDisplaced,
+    VerifyInstalled,
+    RollbackPrecheck,
+    Rollback,
+    VerifyRollback,
+    SyncRollback,
+    SaveComplete,
+    CleanupOld,
+    CleanupCopy,
+    CleanupSync,
+}
 
-/// Placeholder checkpoint label, populated by the state-machine task.
-#[derive(Clone, Copy, Debug)]
-pub(crate) struct ConditionalPoint;
+/// One deterministic action consumed by a backend checkpoint.
+#[derive(Clone, Debug)]
+pub(crate) enum ConditionalHookAction {
+    Noop,
+    Fail(io::ErrorKind),
+    ReplaceTarget(Vec<u8>),
+    CorruptCandidateCopy(Vec<u8>),
+    PartialCandidateCopy(Vec<u8>),
+    PartialPublish,
+}
 
 /// Native operations required by the generic conditional commit state machine.
 pub(crate) trait ConditionalBackend: qubit_io::Output<Item = u8> {
     /// Returns the candidate staging entry.
     fn candidate(&self) -> &ConditionalEntry;
-    /// Creates an independent copy of candidate content in the controlled namespace.
+    /// Creates an independent copy using a fixed-size buffer in the controlled namespace.
+    ///
+    /// If copying fails after creating an entry, the backend registers that entry so
+    /// `take_recovery_entries` can transfer it without resolving a path again.
     fn create_candidate_copy(&mut self) -> io::Result<ConditionalEntry>;
     /// Opens and identity-checks the current destination.
     fn open_target(&self) -> io::Result<ConditionalEntry>;
