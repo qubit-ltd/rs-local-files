@@ -168,6 +168,68 @@ pub(super) fn rename_open_entry(
     }
 }
 
+/// Renames one entry between retained Windows directory handles.
+#[cfg(feature = "digest")]
+pub(in crate::local::internal) fn rename_conditional_entry_at(
+    source_parent: &File,
+    source_name: &OsStr,
+    destination_parent: &File,
+    destination_name: &OsStr,
+    overwrite: bool,
+) -> Result<()> {
+    use windows_sys::Win32::Storage::FileSystem::DELETE;
+
+    let source = super::native::nt_open_at(
+        source_parent,
+        source_name,
+        DELETE | FILE_READ_ATTRIBUTES | SYNCHRONIZE,
+        FILE_OPEN,
+        0,
+    )?;
+    let (mut buffer, information_length) = build_rename_information(destination_name, overwrite)?;
+    // SAFETY: the aligned buffer contains a complete rename payload and both
+    // retained parent handles remain open throughout the native call.
+    let information = unsafe { &mut *buffer.as_mut_ptr().cast::<FILE_RENAME_INFORMATION>() };
+    information.RootDirectory = destination_parent.as_raw_handle();
+    if overwrite {
+        information.Anonymous.Flags = FILE_RENAME_REPLACE_IF_EXISTS | FILE_RENAME_POSIX_SEMANTICS;
+    }
+    let mut status_block = IO_STATUS_BLOCK::default();
+    let mut status = unsafe {
+        NtSetInformationFile(
+            source.as_raw_handle(),
+            &raw mut status_block,
+            buffer.as_ptr().cast(),
+            information_length,
+            if overwrite {
+                FileRenameInformationEx
+            } else {
+                FileRenameInformation
+            },
+        )
+    };
+    if overwrite && is_legacy_rename_status(status) {
+        information.Anonymous.ReplaceIfExists = true;
+        status = unsafe {
+            NtSetInformationFile(
+                source.as_raw_handle(),
+                &raw mut status_block,
+                buffer.as_ptr().cast(),
+                information_length,
+                FileRenameInformation,
+            )
+        };
+    }
+    if status < 0 {
+        // SAFETY: conversion accepts any NTSTATUS and retains no pointers.
+        Err(Error::from_raw_os_error(
+            unsafe { RtlNtStatusToDosErrorNoTeb(status) } as i32,
+        ))
+    } else {
+        Ok(())
+    }
+}
+
 /// Builds the variable-sized `FILE_RENAME_INFORMATION` payload used by NT.
 ///
 /// The returned length includes the complete UTF-16 name storage required by

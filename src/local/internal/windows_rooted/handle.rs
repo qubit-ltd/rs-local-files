@@ -192,6 +192,17 @@ pub(super) fn open_parent(root: &File, path: &LocalRelativePath) -> Result<(File
     )
 }
 
+/// Opens the validated parent of a conditional-write target relative to `root`.
+#[cfg(feature = "digest")]
+pub(in crate::local::internal) fn open_conditional_parent(
+    root: &File,
+    path: &LocalRelativePath,
+) -> Result<(File, OsString)> {
+    let (parent, name) = open_parent(root, path)?;
+    // The caller keeps the opened parent handle for the entire operation.
+    Ok((parent, name))
+}
+
 /// Opens every parent component with the rights needed for a rooted rename.
 /// Uses [`open_parent`]'s result and error contract. `overwrite` currently
 /// does not change the required parent access rights.

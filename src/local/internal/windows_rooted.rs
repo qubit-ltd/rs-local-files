@@ -16,6 +16,13 @@ pub(in crate::local::internal) mod native;
 mod symlink;
 mod volume_probe;
 
+#[cfg(feature = "digest")]
+pub(in crate::local::internal) use handle::open_conditional_parent;
+#[cfg(feature = "digest")]
+pub(in crate::local::internal) use namespace_mutation::rename_conditional_entry_at;
+#[cfg(feature = "digest")]
+pub(in crate::local::internal) use native::open_conditional_entry_at;
+
 pub(crate) use directory::create_rooted_directory;
 pub(crate) use directory::open_root_directory_reader;
 pub(crate) use directory::open_rooted_directory_reader;

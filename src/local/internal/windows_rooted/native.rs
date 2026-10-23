@@ -97,6 +97,18 @@ pub(in crate::local::internal) fn nt_open_at(
     Ok(unsafe { File::from_raw_handle(handle) })
 }
 
+/// Opens one already-validated child name relative to a retained directory.
+#[cfg(feature = "digest")]
+pub(in crate::local::internal) fn open_conditional_entry_at(
+    parent: &File,
+    name: &OsStr,
+    access: u32,
+    disposition: u32,
+    options: u32,
+) -> Result<File> {
+    nt_open_at(parent, name, access, disposition, options)
+}
+
 /// Reads file attributes and the reparse tag from an opened handle.
 /// Propagates the native `GetFileInformationByHandleEx` error.
 pub(super) fn handle_attributes(file: &File) -> Result<FILE_ATTRIBUTE_TAG_INFO> {
