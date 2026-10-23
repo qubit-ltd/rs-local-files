@@ -833,7 +833,7 @@ impl ConditionalBackend for WindowsConditionalBackend {
     }
 
     fn take_recovery_entries(&mut self) -> Vec<ConditionalEntry> {
-        if !self.candidate_guard {
+        if !self.candidate_guard || self.candidate_copy.is_none() {
             self.retain_original_candidate();
         }
         std::mem::take(&mut self.recovery_entries)
