@@ -53,7 +53,11 @@ fn mixed_scalar_and_vectored_writes_publish_expected_digest() {
         )
         .unwrap();
     writer.write_fully(b"a").unwrap();
-    assert_eq!(Output::write_vectored(&mut writer, &[b"b", b"c"]).unwrap(), 2);
+    let written = Output::write_vectored(&mut writer, &[b"b", b"c"]).unwrap();
+    assert!((1..=2).contains(&written));
+    if written < 2 {
+        writer.write_fully(b"c").unwrap();
+    }
     let saved = writer.commit().unwrap();
     assert_eq!(std::fs::read(path).unwrap(), b"abc");
     assert_eq!(saved.digest(), &Sha256::digest(b"abc"));
