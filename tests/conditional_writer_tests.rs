@@ -85,7 +85,11 @@ fn writer_exposes_paths_debug_state_and_all_output_entry_points() {
     assert_eq!(writer.state(), qubit_local_files::outcome::LocalWriterState::Open);
     assert!(format!("{writer:?}").contains("LocalConditionalWriter"));
     assert_eq!(Output::write(&mut writer, b"A").unwrap(), 1);
-    assert_eq!(Output::write_vectored(&mut writer, &[b"B", b"C"]).unwrap(), 2);
+    let vectored = Output::write_vectored(&mut writer, &[b"B", b"C"]).unwrap();
+    assert!((1..=2).contains(&vectored));
+    if vectored < 2 {
+        writer.write_fully(b"C").unwrap();
+    }
     // SAFETY: index 1 and count 2 select the valid `xy` slice.
     assert_eq!(
         unsafe { Output::write_unchecked(&mut writer, b"x y", 1, 2) }.unwrap(),
@@ -99,6 +103,7 @@ fn writer_exposes_paths_debug_state_and_all_output_entry_points() {
 }
 
 #[test]
+#[cfg(unix)]
 fn content_precondition_replaces_rooted_file_and_returns_digest() {
     let dir = tempfile::tempdir().unwrap();
     let native_path = dir.path().join("rooted-model");
@@ -117,6 +122,40 @@ fn content_precondition_replaces_rooted_file_and_returns_digest() {
     let saved = writer.commit().unwrap();
     assert_eq!(std::fs::read(native_path).unwrap(), b"new");
     assert_eq!(saved.digest(), &Sha256::digest(b"new"));
+}
+
+#[test]
+#[cfg(windows)]
+fn rooted_content_precondition_is_unsupported_and_retains_candidate() {
+    let dir = tempfile::tempdir().unwrap();
+    let native_path = dir.path().join("rooted-model");
+    std::fs::write(&native_path, b"old").unwrap();
+    let mut fs = LocalFileSystem::rooted(dir.path()).unwrap();
+    fs.set_symlink_policy(qubit_local_files::policy::LocalSymlinkPolicy::Reject)
+        .unwrap();
+    let mut writer = fs
+        .open_conditional_writer::<Sha256>(
+            std::path::Path::new("/rooted-model"),
+            LocalWritePrecondition::Content(Sha256::digest(b"old")),
+            &LocalWriteOptions::new(LocalWriteMode::CreateOrReplace),
+        )
+        .unwrap();
+    writer.write_fully(b"new").unwrap();
+
+    let failure = writer.commit().expect_err("Windows Rooted Content is unsupported");
+
+    assert_eq!(std::fs::read(native_path).unwrap(), b"old");
+    assert_eq!(
+        failure.publication(),
+        qubit_local_files::outcome::LocalConditionalPublicationState::NotPublished
+    );
+    assert!(
+        failure
+            .error()
+            .to_string()
+            .contains("Windows Rooted conditional Content is unsupported")
+    );
+    assert!(failure.candidate().is_some());
 }
 
 #[test]
