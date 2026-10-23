@@ -16,3 +16,12 @@ fn test_local_write_publication_methods_are_distinct() {
         LocalWritePublicationMethod::DirectAppend,
     );
 }
+
+#[cfg(feature = "digest")]
+#[test]
+fn test_conditional_write_publication_methods_are_available_with_digest() {
+    assert_ne!(
+        LocalWritePublicationMethod::AtomicExchange,
+        LocalWritePublicationMethod::AtomicReplaceWithBackup,
+    );
+}

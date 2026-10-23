@@ -17,7 +17,9 @@ pub enum LocalWritePublicationMethod {
     /// Bytes were written directly to an existing destination.
     DirectAppend,
     /// Existing content was exchanged with the candidate using a native exchange operation.
+    #[cfg(feature = "digest")]
     AtomicExchange,
     /// Existing content was replaced while retaining the displaced file as a backup.
+    #[cfg(feature = "digest")]
     AtomicReplaceWithBackup,
 }
