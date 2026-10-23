@@ -164,12 +164,10 @@ fn conditional_windows_candidate_copy_keeps_original_handle_identity() {
     fs::remove_file(&copy_path).expect("copy name should be replaceable in test");
     fs::write(&copy_path, b"foreign replacement").expect("foreign replacement should be created");
 
-    let mut reader = copy
-        .open_reader()
-        .expect("retained original copy handle should remain readable");
-    let mut bytes = Vec::new();
-    std::io::Read::read_to_end(&mut reader, &mut bytes).expect("original B copy should be readable");
-    assert_eq!(bytes, b"complete B copy");
+    assert!(
+        copy.open_reader().is_err(),
+        "reader should reject a replaced namespace entry"
+    );
     assert_eq!(
         fs::read(copy_path).expect("foreign replacement should remain"),
         b"foreign replacement"
@@ -524,7 +522,7 @@ fn conditional_windows_partial_1177_receipt_reports_installed_and_displaced_entr
     put(&mut backend, b"B");
     let old = backend.open_target().expect("old target should be observed");
     let (container, backup) = backend.make_backup().expect("recovery container should be exclusive");
-    backend.begin_publication();
+    backend.begin_publication().expect("candidate access should be rebound");
     fs::rename(&target, &backup).expect("simulate ReplaceFileW moving the replaced entry");
     fs::rename(directory.path().join(&backend.candidate_name), &target)
         .expect("simulate replacement name becoming the destination");
@@ -558,7 +556,7 @@ fn conditional_windows_partial_1177_receipt_retains_every_visible_object() {
         .expect("Host candidate should open");
     put(&mut backend, b"B");
     let (container, backup) = backend.make_backup().expect("recovery container should be exclusive");
-    backend.begin_publication();
+    backend.begin_publication().expect("candidate access should be rebound");
 
     // Model the documented partial state where the old destination reached
     // the backup but the replacement remains under its candidate name.

@@ -370,8 +370,9 @@ impl ConditionalBackend for UnixConditionalBackend {
         self.namespace.verify(entry)
     }
 
-    fn begin_publication(&mut self) {
+    fn begin_publication(&mut self) -> io::Result<()> {
         self.candidate_guard = false;
+        Ok(())
     }
 
     fn publish_absent(&mut self) -> NativeAttempt {

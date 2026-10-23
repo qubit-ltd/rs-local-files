@@ -238,7 +238,9 @@ impl ConditionalBackend for FakeBackend {
             Err(io::Error::new(io::ErrorKind::NotFound, "fake retained entry missing"))
         }
     }
-    fn begin_publication(&mut self) {}
+    fn begin_publication(&mut self) -> io::Result<()> {
+        Ok(())
+    }
     fn publish_absent(&mut self) -> NativeAttempt {
         if self.target.exists() {
             return NativeAttempt {

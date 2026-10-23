@@ -218,7 +218,7 @@ impl Namespace {
             namespace_path: backup_path.to_path_buf(),
             diagnostic_path: Some(self.diagnostic_path.clone()),
             identity,
-            retained: None,
+            _retained: None,
         };
         Ok(ConditionalEntry::new(
             role,
@@ -242,7 +242,7 @@ impl Namespace {
             namespace_path: self.child_path(&name),
             diagnostic_path: Some(self.diagnostic_path.clone()),
             identity,
-            retained: Some(file.try_clone()?),
+            _retained: Some(file.try_clone()?),
         };
         Ok(ConditionalEntry::new(
             role,
@@ -374,7 +374,7 @@ impl Namespace {
             namespace_path: self.child_path(&name),
             diagnostic_path: Some(self.diagnostic_path.clone()),
             identity,
-            retained: None,
+            _retained: None,
         };
         Ok(ConditionalEntry::new(
             role,
@@ -616,21 +616,18 @@ struct EntryAccess {
     namespace_path: PathBuf,
     diagnostic_path: Option<PathBuf>,
     identity: FileIdentity,
-    retained: Option<File>,
+    _retained: Option<File>,
 }
 
 impl RecoveryAccess for EntryAccess {
     fn open_reader(&self) -> LocalResult<LocalFileReader> {
-        let file = match &self.retained {
-            Some(retained) => retained.try_clone(),
-            None => open_conditional_entry_at(
-                &self.parent,
-                &self.name,
-                ENTRY_ACCESS,
-                FILE_OPEN,
-                FILE_NON_DIRECTORY_FILE,
-            ),
-        }
+        let file = open_conditional_entry_at(
+            &self.parent,
+            &self.name,
+            ENTRY_ACCESS,
+            FILE_OPEN,
+            FILE_NON_DIRECTORY_FILE,
+        )
         .map_err(|error| {
             crate::LocalFileError::from_io(
                 crate::LocalFileOperation::OpenReader,

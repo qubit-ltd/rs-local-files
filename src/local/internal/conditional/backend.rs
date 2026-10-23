@@ -99,7 +99,7 @@ pub(crate) trait ConditionalBackend: qubit_io::Output<Item = u8> {
     fn verify_entry(&self, entry: &ConditionalEntry) -> io::Result<()>;
     /// Transfers guards to the publication-may-have-occurred state before a
     /// syscall.
-    fn begin_publication(&mut self);
+    fn begin_publication(&mut self) -> io::Result<()>;
     /// Installs candidate only if the destination is absent.
     fn publish_absent(&mut self) -> NativeAttempt;
     /// Publishes candidate while retaining the displaced destination.

@@ -168,6 +168,9 @@ impl<D: Digest> LocalConditionalWriter<D> {
     }
     fn write_inner(&mut self, slices: &[&[u8]], vectored: bool) -> io::Result<usize> {
         self.writable()?;
+        if vectored && slices.iter().all(|slice| slice.is_empty()) {
+            return Ok(0);
+        }
         let backend = self.backend.as_mut().expect("open writer retains backend");
         let result = if vectored {
             qubit_io::Output::write_vectored(backend, slices)

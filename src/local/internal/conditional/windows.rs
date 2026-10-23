@@ -629,9 +629,21 @@ impl ConditionalBackend for WindowsConditionalBackend {
         Ok(())
     }
 
-    fn begin_publication(&mut self) {
+    fn begin_publication(&mut self) -> io::Result<()> {
+        let observed = self
+            .namespace
+            .entry(LocalRecoveryFileRole::StagedCandidate, self.candidate_name.clone())?;
+        let reader = observed.open_reader().map_err(io::Error::other)?;
+        if file_identity(reader.as_file())? != self.candidate_identity {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidData,
+                "conditional candidate changed identity before publication",
+            ));
+        }
+        self.candidate_entry = observed;
         self.candidate_guard = false;
         self.candidate_file.take();
+        Ok(())
     }
 
     fn publish_absent(&mut self) -> NativeAttempt {
@@ -821,6 +833,7 @@ impl ConditionalBackend for WindowsConditionalBackend {
     }
 
     fn take_recovery_entries(&mut self) -> Vec<ConditionalEntry> {
+        self.retain_original_candidate();
         std::mem::take(&mut self.recovery_entries)
     }
     fn set_hooks(&mut self, hooks: ConditionalHooks) {

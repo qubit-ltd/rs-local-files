@@ -139,7 +139,7 @@ where
         backend
             .checkpoint(ConditionalPoint::Publish)
             .map_err(|error| (stage, error))?;
-        backend.begin_publication();
+        backend.begin_publication().map_err(|error| (stage, error))?;
         let attempt = match precondition {
             LocalWritePrecondition::Absent => backend.publish_absent(),
             LocalWritePrecondition::Content(_) => backend.publish_content(),
