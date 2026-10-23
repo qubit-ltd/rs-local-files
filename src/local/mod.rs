@@ -8,6 +8,8 @@
 //! Concrete local filesystem APIs and their private implementation.
 
 mod internal;
+#[cfg(feature = "digest")]
+pub(crate) use internal::conditional;
 #[cfg(feature = "test-support")]
 pub use internal::test_fault_guard::TestFaultGuard;
 pub(crate) use internal::test_support::fault_error as test_fault_error;

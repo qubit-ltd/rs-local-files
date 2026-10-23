@@ -59,6 +59,8 @@ pub mod outcome;
 pub mod path;
 pub mod policy;
 mod read;
+#[cfg(feature = "digest")]
+pub mod recovery;
 mod rooted;
 mod rooted_local_file_system;
 mod temp;

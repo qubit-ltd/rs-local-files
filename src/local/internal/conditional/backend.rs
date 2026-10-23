@@ -1,0 +1,74 @@
+// =============================================================================
+//    Copyright (c) 2025 - 2026 Haixing Hu.
+//
+//    SPDX-License-Identifier: Apache-2.0
+//
+//    Licensed under the Apache License, Version 2.0.
+// =============================================================================
+
+use std::io;
+
+use crate::outcome::LocalConditionalPublicationState;
+
+use super::ConditionalEntry;
+
+/// Outcome of a native operation, including observations made after failure.
+#[derive(Debug)]
+pub(crate) struct NativeAttempt {
+    /// Native error, retained alongside any observed partial namespace change.
+    pub(crate) error: Option<io::Error>,
+    /// Observed publication state after the native attempt.
+    pub(crate) publication: LocalConditionalPublicationState,
+    /// Entry reopened from the final destination name, when available.
+    pub(crate) installed: Option<ConditionalEntry>,
+    /// Entries actually displaced by the native operation.
+    pub(crate) displaced: Vec<ConditionalEntry>,
+}
+
+/// Placeholder hook bundle, populated by the state-machine task.
+#[derive(Clone, Debug, Default)]
+pub(crate) struct ConditionalHooks;
+
+/// Placeholder checkpoint label, populated by the state-machine task.
+#[derive(Clone, Copy, Debug)]
+pub(crate) struct ConditionalPoint;
+
+/// Native operations required by the generic conditional commit state machine.
+pub(crate) trait ConditionalBackend: qubit_io::Output<Item = u8> {
+    /// Returns the candidate staging entry.
+    fn candidate(&self) -> &ConditionalEntry;
+    /// Creates an independent copy of candidate content in the controlled namespace.
+    fn create_candidate_copy(&mut self) -> io::Result<ConditionalEntry>;
+    /// Opens and identity-checks the current destination.
+    fn open_target(&self) -> io::Result<ConditionalEntry>;
+    /// Applies requested metadata from the observed destination to the candidate.
+    fn preserve_metadata(&mut self, observed: &ConditionalEntry) -> io::Result<()>;
+    /// Synchronizes candidate file content and metadata.
+    fn sync_candidate(&self) -> io::Result<()>;
+    /// Synchronizes a retained entry.
+    fn sync_entry(&self, entry: &ConditionalEntry) -> io::Result<()>;
+    /// Synchronizes the relevant namespace and newly created parent chain.
+    fn sync_namespace(&self) -> io::Result<()>;
+    /// Checks whether an entry is the current candidate by native identity.
+    fn is_candidate(&self, entry: &ConditionalEntry) -> io::Result<bool>;
+    /// Verifies that an entry still has its observed native identity and type.
+    fn verify_entry(&self, entry: &ConditionalEntry) -> io::Result<()>;
+    /// Transfers guards to the publication-may-have-occurred state before a syscall.
+    fn begin_publication(&mut self);
+    /// Installs candidate only if the destination is absent.
+    fn publish_absent(&mut self) -> NativeAttempt;
+    /// Publishes candidate while retaining the displaced destination.
+    fn publish_content(&mut self) -> NativeAttempt;
+    /// Attempts one reverse publication using the observed displaced entry.
+    fn rollback(&mut self, displaced: &ConditionalEntry) -> NativeAttempt;
+    /// Removes only an entry whose identity was verified as safe to discard.
+    fn remove_observed(&mut self, entry: &ConditionalEntry) -> io::Result<()>;
+    /// Cleans this backend's unpublished staging entries.
+    fn abort(&mut self) -> io::Result<()>;
+    /// Transfers retained recovery entries without resolving them by path again.
+    fn take_recovery_entries(&mut self) -> Vec<ConditionalEntry>;
+    /// Installs deterministic test hooks for backend checkpoints.
+    fn set_hooks(&mut self, hooks: ConditionalHooks);
+    /// Runs a deterministic test checkpoint, or succeeds as a no-op in production.
+    fn checkpoint(&mut self, point: ConditionalPoint) -> io::Result<()>;
+}

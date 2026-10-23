@@ -7,6 +7,9 @@
 // =============================================================================
 //! Private implementation support for local filesystem operations.
 
+#[cfg(feature = "digest")]
+pub(crate) mod conditional;
+
 mod active_fault;
 mod atomic_commit_state;
 mod atomic_file_install;

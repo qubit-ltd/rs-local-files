@@ -23,6 +23,8 @@ mod local_walk_error_policy;
 mod local_write_metadata_policy;
 mod local_write_mode;
 mod local_write_options;
+#[cfg(feature = "digest")]
+mod local_write_precondition;
 mod resource_limits;
 
 pub use local_copy_options::LocalCopyOptions;
@@ -41,6 +43,8 @@ pub use local_walk_error_policy::LocalWalkErrorPolicy;
 pub use local_write_metadata_policy::LocalWriteMetadataPolicy;
 pub use local_write_mode::LocalWriteMode;
 pub use local_write_options::LocalWriteOptions;
+#[cfg(feature = "digest")]
+pub use local_write_precondition::LocalWritePrecondition;
 
 pub use crate::local::LocalCopyConflictPolicy;
 pub use crate::local::LocalCopyTypeConflictPolicy;

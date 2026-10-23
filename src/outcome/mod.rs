@@ -18,6 +18,10 @@ mod local_delete_outcome;
 mod local_persist_cleanup_state;
 mod local_temp_source_state;
 pub use local_temp_source_state::LocalTempSourceState;
+#[cfg(feature = "digest")]
+mod local_conditional_publication_state;
+#[cfg(feature = "digest")]
+mod local_conditional_write_outcome;
 mod local_persist_method;
 mod local_persist_outcome;
 mod local_rename_failure;
@@ -25,6 +29,10 @@ mod local_rename_failure_state;
 mod local_rename_outcome;
 mod local_write_publication_method;
 
+#[cfg(feature = "digest")]
+pub use local_conditional_publication_state::LocalConditionalPublicationState;
+#[cfg(feature = "digest")]
+pub use local_conditional_write_outcome::LocalConditionalWriteOutcome;
 pub use local_copy_failure::LocalCopyFailure;
 pub use local_copy_failure::LocalCopyResult;
 #[cfg(all(test, windows))]

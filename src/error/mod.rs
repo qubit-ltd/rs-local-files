@@ -7,6 +7,12 @@
 // =============================================================================
 //! Structured errors for native local filesystem operations.
 
+#[cfg(feature = "digest")]
+mod local_conditional_commit_error;
+#[cfg(feature = "digest")]
+mod local_conditional_failure_reason;
+#[cfg(feature = "digest")]
+mod local_conditional_write_stage;
 mod local_file_effect_state;
 mod local_file_error;
 mod local_file_error_kind;
@@ -17,6 +23,12 @@ mod local_resource_kind;
 mod local_resource_limit_error;
 mod local_result;
 
+#[cfg(feature = "digest")]
+pub use local_conditional_commit_error::LocalConditionalCommitError;
+#[cfg(feature = "digest")]
+pub use local_conditional_failure_reason::LocalConditionalFailureReason;
+#[cfg(feature = "digest")]
+pub use local_conditional_write_stage::LocalConditionalWriteStage;
 pub use local_file_effect_state::LocalFileEffectState;
 pub use local_file_error::LocalFileError;
 pub use local_file_error_kind::LocalFileErrorKind;
