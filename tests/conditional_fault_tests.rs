@@ -96,7 +96,14 @@ fn required_parent_sync_error_is_reported_after_published_file_sync() {
         .unwrap();
     writer.write_fully(b"B").unwrap();
     let failure = writer.commit().unwrap_err();
-    assert_eq!(std::fs::read(path).unwrap(), b"B");
+    let installed = std::fs::read(&path).unwrap_or_else(|error| {
+        let names: Vec<_> = std::fs::read_dir(directory.path())
+            .unwrap()
+            .map(|entry| entry.unwrap().file_name())
+            .collect();
+        panic!("published target should remain readable ({error}); directory entries: {names:?}");
+    });
+    assert_eq!(installed, b"B");
     assert_eq!(
         failure.publication(),
         qubit_local_files::outcome::LocalConditionalPublicationState::Published
