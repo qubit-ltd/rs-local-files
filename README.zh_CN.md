@@ -77,11 +77,15 @@ sha2 = "0.11"
 ```
 
 ```rust,no_run
+# fn main() -> Result<(), Box<dyn std::error::Error>> {
+# #[cfg(feature = "digest")] {
 use qubit_io::Output;
 use qubit_local_files::{LocalFileSystem, options::{LocalWriteMode, LocalWriteOptions, LocalWritePrecondition}};
+use qubit_local_files::policy::LocalSymlinkPolicy;
 use sha2::{Digest, Sha256};
 
-let filesystem = LocalFileSystem::host()?;
+let mut filesystem = LocalFileSystem::host()?;
+filesystem.set_symlink_policy(LocalSymlinkPolicy::Reject)?;
 let old_digest = Sha256::digest(b"A"); // 对从现有文件读出的字节计算摘要
 let mut writer = filesystem.open_conditional_writer::<Sha256>(
     std::path::Path::new("document.txt"),
@@ -91,7 +95,9 @@ let mut writer = filesystem.open_conditional_writer::<Sha256>(
 writer.write_fully(b"B")?;
 let saved = writer.commit()?; // 检查 saved.digest()、cleanup_errors() 和 retained_files()
 # let _ = saved;
-# Ok::<(), Box<dyn std::error::Error>>(())
+# }
+# Ok(())
+# }
 ```
 
 提交成功会返回已安装 B 的摘要；清理失败通过 `cleanup_errors()` 和

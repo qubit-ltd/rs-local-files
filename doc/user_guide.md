@@ -251,6 +251,7 @@ candidate copy. The `cfg` wrapper makes this example compile only when `digest`
 is enabled; it does not hide an ignored or incomplete example.
 
 ```rust
+# fn main() -> Result<(), Box<dyn std::error::Error>> {
 # #[cfg(feature = "digest")] {
 use std::io::Read;
 
@@ -259,12 +260,14 @@ use qubit_local_files::LocalFileSystem;
 use qubit_local_files::options::{
     LocalWriteMode, LocalWriteOptions, LocalWritePrecondition,
 };
+use qubit_local_files::policy::LocalSymlinkPolicy;
 use sha2::{Digest, Sha256};
 
 let directory = tempfile::tempdir()?;
 let path = directory.path().join("document.txt");
 std::fs::write(&path, b"A")?;
-let filesystem = LocalFileSystem::host()?;
+let mut filesystem = LocalFileSystem::host()?;
+filesystem.set_symlink_policy(LocalSymlinkPolicy::Reject)?;
 let old_digest = Sha256::digest(std::fs::read(&path)?);
 let options = LocalWriteOptions::new(LocalWriteMode::CreateOrReplace);
 let mut writer = filesystem.open_conditional_writer::<Sha256>(
@@ -291,7 +294,8 @@ let mut reader = candidate.open_reader()?.into_std_read();
 let mut recovered = Vec::new();
 reader.read_to_end(&mut recovered)?;
 assert_eq!(recovered, b"B");
-# Ok::<(), Box<dyn std::error::Error>>(())
+# }
+# Ok(())
 # }
 ```
 
@@ -299,8 +303,9 @@ assert_eq!(recovered, b"B");
 only where the backend can install without overwriting a concurrently created
 entry. `Content(digest)` requires `CreateOrReplace`; `Append` is invalid.
 `LocalWriteOptions` also controls atomicity and durability. `Required` fails with
-`Err` when the selected backend cannot meet the requirement. `Preferred` permits
-a supported fallback and the result reports what happened.
+`Err` when the selected backend cannot meet the requirement. `Preferred` may
+report weaker durability when synchronization is unavailable; it never downgrades
+the requested atomic publication to an ordinary overwrite.
 
 On success, publication and required synchronization completed. Cleanup then
 removes temporary content and the independent candidate copy; cleanup errors and

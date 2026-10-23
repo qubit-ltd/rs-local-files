@@ -84,11 +84,15 @@ sha2 = "0.11"
 ```
 
 ```rust,no_run
+# fn main() -> Result<(), Box<dyn std::error::Error>> {
+# #[cfg(feature = "digest")] {
 use qubit_io::Output;
 use qubit_local_files::{LocalFileSystem, options::{LocalWriteMode, LocalWriteOptions, LocalWritePrecondition}};
+use qubit_local_files::policy::LocalSymlinkPolicy;
 use sha2::{Digest, Sha256};
 
-let filesystem = LocalFileSystem::host()?;
+let mut filesystem = LocalFileSystem::host()?;
+filesystem.set_symlink_policy(LocalSymlinkPolicy::Reject)?;
 let old_digest = Sha256::digest(b"A"); // digest the bytes read from the existing file
 let mut writer = filesystem.open_conditional_writer::<Sha256>(
     std::path::Path::new("document.txt"),
@@ -98,7 +102,9 @@ let mut writer = filesystem.open_conditional_writer::<Sha256>(
 writer.write_fully(b"B")?;
 let saved = writer.commit()?; // inspect saved.digest(), cleanup_errors(), retained_files()
 # let _ = saved;
-# Ok::<(), Box<dyn std::error::Error>>(())
+# }
+# Ok(())
+# }
 ```
 
 A successful commit returns the digest of installed B; cleanup problems are

@@ -225,6 +225,7 @@ tempfile = "^3.27"
 掩盖不完整或错误的代码。
 
 ```rust
+# fn main() -> Result<(), Box<dyn std::error::Error>> {
 # #[cfg(feature = "digest")] {
 use std::io::Read;
 
@@ -233,12 +234,14 @@ use qubit_local_files::LocalFileSystem;
 use qubit_local_files::options::{
     LocalWriteMode, LocalWriteOptions, LocalWritePrecondition,
 };
+use qubit_local_files::policy::LocalSymlinkPolicy;
 use sha2::{Digest, Sha256};
 
 let directory = tempfile::tempdir()?;
 let path = directory.path().join("document.txt");
 std::fs::write(&path, b"A")?;
-let filesystem = LocalFileSystem::host()?;
+let mut filesystem = LocalFileSystem::host()?;
+filesystem.set_symlink_policy(LocalSymlinkPolicy::Reject)?;
 let old_digest = Sha256::digest(std::fs::read(&path)?);
 let options = LocalWriteOptions::new(LocalWriteMode::CreateOrReplace);
 let mut writer = filesystem.open_conditional_writer::<Sha256>(
@@ -265,14 +268,16 @@ let mut reader = candidate.open_reader()?.into_std_read();
 let mut recovered = Vec::new();
 reader.read_to_end(&mut recovered)?;
 assert_eq!(recovered, b"B");
-# Ok::<(), Box<dyn std::error::Error>>(())
+# }
+# Ok(())
 # }
 ```
 
 `LocalWritePrecondition::Absent` 用于仅创建、不覆盖的发布；只有后端支持安全的
 no-overwrite 安装时才可用。`Content(digest)` 必须搭配 `CreateOrReplace`，不能搭配
 `Append`。`LocalWriteOptions` 还控制原子性与耐久性。要求设为 `Required` 时，后端
-无法满足就会返回 `Err`；`Preferred` 允许后端采用可行方案，结果会报告实际情况。
+无法满足就会返回 `Err`。耐久性设为 `Preferred` 时，若同步不可用，结果会报告较弱的
+耐久性；原子性要求不会降级为普通覆盖。
 
 成功表示发布及必需的同步已完成。之后库会清理临时内容和独立 candidate 副本；若
 清理失败，成功 outcome 仍会通过 `cleanup_errors()`、`retained_files()` 告知调用方。
