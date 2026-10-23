@@ -35,6 +35,16 @@ assert_not_impl!(LocalTempFile, std::io::Read);
 assert_not_impl!(LocalTempFile, qubit_io::Input);
 
 #[test]
+fn native_handles_satisfy_byte_traits() {
+    fn input<T: qubit_io::ByteInput>() {}
+    fn output<T: qubit_io::ByteOutput>() {}
+
+    input::<LocalFileReader>();
+    output::<LocalFileWriter>();
+    output::<LocalTempFile>();
+}
+
+#[test]
 fn adapters_supply_standard_traits_and_seek() {
     fn reader<T: std::io::Read + std::io::Seek>() {}
     fn writer<T: std::io::Write>() {}

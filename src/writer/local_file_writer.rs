@@ -165,10 +165,10 @@ impl LocalFileWriter {
                 let flush_result = if crate::local::test_support_enabled("writer-append-commit-flush") {
                     Err(crate::local::test_fault_error())
                 } else {
-                    file.flush()
+                    qubit_io::Output::flush(&mut file)
                 };
                 #[cfg(not(feature = "test-support"))]
-                let flush_result = file.flush();
+                let flush_result = qubit_io::Output::flush(&mut file);
                 if let Err(error) = flush_result {
                     return Err(LocalFileCommitError::new(
                         self.contextualize_error(publication_error(
@@ -266,10 +266,10 @@ impl LocalFileWriter {
                 let flush_result = if crate::local::test_support_enabled("writer-append-abort-flush") {
                     Err(crate::local::test_fault_error())
                 } else {
-                    file.flush()
+                    qubit_io::Output::flush(file)
                 };
                 #[cfg(not(feature = "test-support"))]
-                let flush_result = file.flush();
+                let flush_result = qubit_io::Output::flush(file);
                 if let Err(error) = flush_result {
                     return Err(self.contextualize_error(writer_io_error(
                         &self.path,
@@ -425,7 +425,7 @@ impl LocalFileWriter {
         let result = match self.backend.as_mut() {
             Some(LocalFileWriterBackend::Staged(writer)) => qubit_io::Output::write(writer, buffer),
             Some(LocalFileWriterBackend::Rooted(writer)) => qubit_io::Output::write(writer, buffer),
-            Some(LocalFileWriterBackend::Append(file)) => Write::write(file, buffer),
+            Some(LocalFileWriterBackend::Append(file)) => qubit_io::Output::write(file, buffer),
             None => unreachable!("open writer must retain one backend"),
         };
         let written = self.observe_stream_result(result)?;
@@ -481,7 +481,7 @@ impl qubit_io::Output for LocalFileWriter {
         let result = match self.backend.as_mut() {
             Some(LocalFileWriterBackend::Staged(writer)) => qubit_io::Output::flush(writer),
             Some(LocalFileWriterBackend::Rooted(writer)) => qubit_io::Output::flush(writer),
-            Some(LocalFileWriterBackend::Append(file)) => Write::flush(file),
+            Some(LocalFileWriterBackend::Append(file)) => qubit_io::Output::flush(file),
             None => unreachable!("open writer must retain one backend"),
         };
         self.observe_stream_result(result)

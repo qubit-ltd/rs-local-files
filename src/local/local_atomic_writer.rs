@@ -551,13 +551,13 @@ impl qubit_io::Output for LocalAtomicWriter {
     type Item = u8;
 
     unsafe fn write_unchecked(&mut self, input: &[u8], index: usize, count: usize) -> io::Result<usize> {
-        Write::write(self.staged_file.file_mut(), &input[index..index + count])
+        qubit_io::Output::write(self.staged_file.file_mut(), &input[index..index + count])
     }
 
     /// Flushes userspace data into the private staging file.
     #[inline]
     fn flush(&mut self) -> io::Result<()> {
-        Write::flush(self.staged_file.file_mut())
+        qubit_io::Output::flush(self.staged_file.file_mut())
     }
 }
 

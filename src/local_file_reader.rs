@@ -94,7 +94,7 @@ impl qubit_io::Input for LocalFileReader {
     type Item = u8;
 
     unsafe fn read_unchecked(&mut self, output: &mut [u8], index: usize, count: usize) -> io::Result<usize> {
-        std::io::Read::read(&mut self.file, &mut output[index..index + count])
+        qubit_io::Input::read(&mut self.file, &mut output[index..index + count])
     }
 }
 

@@ -855,13 +855,13 @@ impl Output for LocalTempFile {
     /// addition must not overflow.
     #[inline]
     unsafe fn write_unchecked(&mut self, input: &[u8], index: usize, count: usize) -> Result<usize> {
-        std::io::Write::write(self.as_file_mut()?, &input[index..index + count])
+        Output::write(self.as_file_mut()?, &input[index..index + count])
     }
 
     /// Flushes the still-open temporary file.
     #[inline]
     fn flush(&mut self) -> Result<()> {
-        std::io::Write::flush(self.as_file_mut()?)
+        Output::flush(self.as_file_mut()?)
     }
 }
 

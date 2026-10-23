@@ -845,11 +845,11 @@ impl LocalRootAtomicWriter {
     fn write_once(&mut self, buffer: &[u8]) -> io::Result<usize> {
         #[cfg(unix)]
         {
-            Write::write(self.staged_file.file_mut(), buffer)
+            qubit_io::Output::write(self.staged_file.file_mut(), buffer)
         }
         #[cfg(windows)]
         {
-            Write::write(self.staged_file.file_mut(), buffer)
+            qubit_io::Output::write(self.staged_file.file_mut(), buffer)
         }
         #[cfg(not(any(unix, windows)))]
         {
@@ -930,11 +930,11 @@ impl qubit_io::Output for LocalRootAtomicWriter {
     fn flush(&mut self) -> io::Result<()> {
         #[cfg(unix)]
         {
-            Write::flush(self.staged_file.file_mut())
+            qubit_io::Output::flush(self.staged_file.file_mut())
         }
         #[cfg(windows)]
         {
-            Write::flush(self.staged_file.file_mut())
+            qubit_io::Output::flush(self.staged_file.file_mut())
         }
         #[cfg(not(any(unix, windows)))]
         {

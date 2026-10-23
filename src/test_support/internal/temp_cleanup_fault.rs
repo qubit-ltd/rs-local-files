@@ -12,9 +12,10 @@
 use std::fs::File;
 use std::io;
 #[cfg(unix)]
-use std::io::Write;
-#[cfg(unix)]
 use std::path::Path;
+
+#[cfg(unix)]
+use qubit_io::Output;
 
 use crate::LocalRelativePath;
 use crate::local::create_rooted_directory;
@@ -73,7 +74,7 @@ pub(crate) fn temp_cleanup_replace_observed_entry(
     if directory && take_test_support("temp-observed-directory-becomes-file") {
         remove_rooted_entry(root, diagnostic_root, path)?;
         return open_rooted_native_writer(root, diagnostic_root, path, &OpenOptions::default())?
-            .write_all(b"replacement");
+            .write_fully(b"replacement");
     }
     if directory && take_test_support("temp-observed-directory-becomes-symlink") {
         remove_rooted_entry(root, diagnostic_root, path)?;

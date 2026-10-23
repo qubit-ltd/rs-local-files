@@ -19,7 +19,7 @@ use crate::LocalWritePublicationMethod;
 /// # Examples
 ///
 /// ```ignore
-/// use std::io::Write;
+/// use qubit_io::Output;
 /// use std::path::Path;
 ///
 /// use qubit_local_files::LocalFileSystem;
@@ -28,7 +28,7 @@ use crate::LocalWritePublicationMethod;
 /// # fn main() -> Result<(), Box<dyn std::error::Error>> {
 /// let filesystem = LocalFileSystem::host()?;
 /// let mut writer = filesystem.open_writer(Path::new("output.txt"))?;
-/// writer.write_all(b"hello")?;
+/// writer.write_fully(b"hello")?;
 /// let outcome = writer.commit()?;
 /// assert_eq!(outcome.state(), LocalWriterState::Committed);
 /// # Ok(())
