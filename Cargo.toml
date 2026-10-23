@@ -33,7 +33,7 @@ test-support = []
 
 [dependencies]
 qubit-io = { path = "../rs-io", version = "0.19" }
-qubit-budget = { path = "../rs-budget", version = "0.9" }
+qubit-budget = "0.9"
 qubit-redact = { version = "0.9", default-features = false }
 getrandom = "^0.4"
 

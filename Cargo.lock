@@ -532,7 +532,9 @@ dependencies = [
 
 [[package]]
 name = "qubit-budget"
-version = "0.9.1"
+version = "0.9.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "49bf5243c23f2a18a70b7f365ab03c9c100622308ddb940c0d5a28e0c49442bc"
 dependencies = [
  "thiserror",
 ]
@@ -552,7 +554,7 @@ dependencies = [
  "getrandom",
  "libc",
  "proptest",
- "qubit-budget 0.9.1",
+ "qubit-budget 0.9.0",
  "qubit-io",
  "qubit-redact",
  "rustix",
