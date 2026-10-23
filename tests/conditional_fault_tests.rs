@@ -79,6 +79,7 @@ fn required_file_sync_error_before_publication_is_reported_as_not_published() {
 }
 
 #[test]
+#[cfg(unix)]
 fn required_parent_sync_error_is_reported_after_published_file_sync() {
     let directory = tempfile::tempdir().unwrap();
     let path = directory.path().join("target");
@@ -115,6 +116,43 @@ fn required_parent_sync_error_is_reported_after_published_file_sync() {
         qubit_local_files::outcome::LocalConditionalPublicationState::Published
     );
     assert_eq!(failure.error().source().unwrap().to_string(), "sync parent");
+}
+
+#[test]
+#[cfg(windows)]
+fn required_parent_sync_unavailability_fails_before_publication() {
+    let directory = tempfile::tempdir().unwrap();
+    let path = directory.path().join("target");
+    let mut writer = conditional::host()
+        .open_conditional_writer::<Sha256>(
+            &path,
+            LocalWritePrecondition::Absent,
+            &LocalWriteOptions::new(LocalWriteMode::CreateOrReplace)
+                .with_durability(LocalDurabilityRequirement::Required),
+        )
+        .unwrap();
+    writer.write_fully(b"B").unwrap();
+
+    let failure = writer.commit().unwrap_err();
+
+    assert!(!path.exists());
+    assert_eq!(
+        failure.stage(),
+        qubit_local_files::error::LocalConditionalWriteStage::Sync
+    );
+    assert_eq!(
+        failure.publication(),
+        qubit_local_files::outcome::LocalConditionalPublicationState::NotPublished
+    );
+    assert!(
+        failure
+            .error()
+            .to_string()
+            .contains("Windows directory durability is not guaranteed"),
+        "unexpected Required durability error: {}",
+        failure.error()
+    );
+    assert_eq!(conditional::read_candidate(&failure), b"B");
 }
 
 #[test]
