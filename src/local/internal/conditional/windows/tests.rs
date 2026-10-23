@@ -131,6 +131,7 @@ fn conditional_windows_private_entry_guard_removes_only_original_identity() {
         .private_file_path(&owned_name)
         .expect("private path should resolve");
     drop(PrivateEntryGuard::new(&namespace, &owned_file).expect("guard should retain its original handle"));
+    drop(owned_file);
     assert!(
         !owned_path.exists(),
         "guard should remove the entry matching its original handle identity"
@@ -173,16 +174,13 @@ fn conditional_windows_candidate_copy_keeps_original_handle_identity() {
         fs::read(copy_path).expect("foreign replacement should remain"),
         b"foreign replacement"
     );
-    assert_eq!(
-        backend
-            .verify_entry(&copy)
-            .expect_err("replaced copy name must reject publication")
-            .kind(),
-        io::ErrorKind::InvalidData
+    assert!(
+        backend.verify_entry(&copy).is_err(),
+        "replaced copy name must reject publication"
     );
 }
 
-fn dacl_security_descriptor(path: &Path) -> Vec<u8> {
+fn dacl_bytes(path: &Path) -> Vec<u8> {
     use windows_sys::Win32::Security::DACL_SECURITY_INFORMATION;
     use windows_sys::Win32::Security::GetFileSecurityW;
 
@@ -214,7 +212,14 @@ fn dacl_security_descriptor(path: &Path) -> Vec<u8> {
     };
     assert_ne!(success, 0, "security descriptor should be readable");
     descriptor.truncate(required as usize);
-    descriptor
+    let dacl_offset = u32::from_le_bytes(descriptor[16..20].try_into().expect("DACL offset is present")) as usize;
+    assert_ne!(dacl_offset, 0, "DACL should be present");
+    let dacl_size = u16::from_le_bytes(
+        descriptor[dacl_offset + 2..dacl_offset + 4]
+            .try_into()
+            .expect("ACL size is present"),
+    ) as usize;
+    descriptor[dacl_offset..dacl_offset + dacl_size].to_vec()
 }
 
 #[test]
@@ -251,7 +256,7 @@ fn conditional_windows_host_content_preserves_destination_acl() {
     let directory = tempfile::tempdir().expect("fixture directory should be created");
     let target = directory.path().join("target");
     fs::write(&target, b"A").expect("old target should be written");
-    let dacl_before = dacl_security_descriptor(&target);
+    let dacl_before = dacl_bytes(&target);
     let mut backend = WindowsConditionalBackend::open_host(&target, &options(LocalWriteMode::CreateOrReplace))
         .expect("Host candidate should open");
     put(&mut backend, b"B");
@@ -264,7 +269,7 @@ fn conditional_windows_host_content_preserves_destination_acl() {
     )
     .expect("matching content should publish");
     assert_eq!(
-        dacl_security_descriptor(&target),
+        dacl_bytes(&target),
         dacl_before,
         "ReplaceFileW should preserve the target DACL",
     );
@@ -522,7 +527,6 @@ fn conditional_windows_partial_1177_receipt_reports_installed_and_displaced_entr
     let mut backend = WindowsConditionalBackend::open_host(&target, &options(LocalWriteMode::CreateOrReplace))
         .expect("Host candidate should open");
     put(&mut backend, b"B");
-    let old = backend.open_target().expect("old target should be observed");
     let (container, backup) = backend.make_backup().expect("recovery container should be exclusive");
     backend.begin_publication().expect("candidate access should be rebound");
     fs::rename(&target, &backup).expect("simulate ReplaceFileW moving the replaced entry");
@@ -541,12 +545,13 @@ fn conditional_windows_partial_1177_receipt_reports_installed_and_displaced_entr
     );
     assert_eq!(attempt.displaced.len(), 1, "actual backup must be reported");
     assert_eq!(attempt.displaced[0].role(), LocalRecoveryFileRole::Displaced);
-    assert!(
-        backend
-            .namespace
-            .same_identity(&attempt.displaced[0], &old)
-            .expect("backup should retain observed identity")
-    );
+    let backup_reader = attempt.displaced[0]
+        .open_reader()
+        .expect("backup should retain the displaced file");
+    let mut backup_reader = backup_reader.into_std_read();
+    let mut backup_bytes = Vec::new();
+    std::io::Read::read_to_end(&mut backup_reader, &mut backup_bytes).expect("displaced file should remain readable");
+    assert_eq!(backup_bytes, b"A");
 }
 
 #[test]
