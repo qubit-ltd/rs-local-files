@@ -40,6 +40,14 @@
 //! ```compile_fail
 //! use qubit_local_files::LocalFileSystemProtocols;
 //! ```
+#![cfg_attr(
+    not(feature = "digest"),
+    doc = r#"
+```compile_fail
+use qubit_local_files::LocalConditionalWriter;
+```
+"#
+)]
 pub mod capability;
 // Compiles the exact README, user-guide, and design Rust examples as doctests.
 #[cfg(doctest)]

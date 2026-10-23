@@ -35,3 +35,9 @@ jobs:
       fs_local_ref: main
       mime_ref: main
       support_ref: main
+
+  conditional-write:
+    name: Conditional write contracts
+    permissions:
+      contents: read
+    uses: ./.github/workflows/conditional-write.yml
