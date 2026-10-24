@@ -21,6 +21,45 @@ use crate::recovery::LocalRecoveryFileRole;
 /// observed entry identity; dropping this value never removes the file.
 /// The owner must arrange any eventual deletion using an authorized filesystem
 /// operation after inspecting the recovery role and publication state.
+///
+/// # Example
+///
+/// A failed conditional write can return a recovery handle whose permission
+/// remains usable even if no diagnostic path is available:
+///
+/// ```
+/// use qubit_io::Output;
+/// use qubit_local_files::LocalFileSystem;
+/// use qubit_local_files::options::LocalWriteMode;
+/// use qubit_local_files::options::LocalWriteOptions;
+/// use qubit_local_files::options::LocalWritePrecondition;
+/// use qubit_local_files::recovery::LocalRecoveryFileRole;
+/// use sha2::Sha256;
+/// use tempfile::tempdir;
+///
+/// let directory = tempdir()?;
+/// let target = directory.path().join("model");
+/// std::fs::write(&target, b"old")?;
+/// let mut filesystem = LocalFileSystem::host()?;
+/// filesystem.set_symlink_policy(qubit_local_files::policy::LocalSymlinkPolicy::Reject)?;
+/// let mut writer = filesystem.open_conditional_writer::<Sha256>(
+///     &target,
+///     LocalWritePrecondition::Absent,
+///     &LocalWriteOptions::new(LocalWriteMode::CreateOrReplace),
+/// )?;
+/// writer.write_fully(b"new")?;
+/// let failure = writer.commit().expect_err("the target is present");
+/// let recovery = failure.candidate().expect("candidate copy is retained");
+/// assert_eq!(recovery.role(), LocalRecoveryFileRole::CandidateCopy);
+/// if let Some(path) = recovery.diagnostic_path() {
+///     eprintln!("recovery file: {}", path.display());
+/// }
+/// let mut reader = recovery.open_reader()?;
+/// let mut bytes = Vec::new();
+/// qubit_io::Streams::copy_input_to_output(&mut reader, &mut bytes)?;
+/// assert_eq!(bytes, b"new");
+/// # Ok::<(), Box<dyn std::error::Error>>(())
+/// ```
 #[must_use]
 #[derive(Debug)]
 pub struct LocalRecoveryFile {
@@ -59,6 +98,10 @@ impl LocalRecoveryFile {
     }
 
     /// Returns an optional path suitable for diagnostic display.
+    ///
+    /// `None` reports that no display path was captured. It does not affect
+    /// the retained read permission and must not be used as a reason to access
+    /// the file by another path.
     #[must_use]
     pub fn diagnostic_path(&self) -> Option<&Path> {
         self.diagnostic_path.as_deref()
@@ -70,6 +113,8 @@ impl LocalRecoveryFile {
     /// # Errors
     ///
     /// Returns an error if the entry was removed, replaced, or cannot be read.
+    /// The retained permission is used for this operation; `diagnostic_path()`
+    /// is informational and does not authorize access.
     pub fn open_reader(&self) -> LocalResult<LocalFileReader> {
         self.access.open_reader()
     }

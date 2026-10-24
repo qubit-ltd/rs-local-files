@@ -15,11 +15,18 @@ use crate::recovery::LocalRecoveryFile;
 use crate::recovery::LocalRecoveryFileRole;
 
 /// Read-only permission to reopen and validate one retained native entry.
+///
+/// Implementations must use their retained namespace authority and validate
+/// the current entry identity. A diagnostic path is not an access capability.
 pub(crate) trait RecoveryAccess: Debug {
     fn open_reader(&self) -> LocalResult<LocalFileReader>;
 }
 
 /// An observed namespace entry and the permission required to read it again.
+///
+/// Its role changes only when the protocol verifies a state transition. Moving
+/// the access object into recovery transfers the read permission and paths
+/// without scheduling deletion.
 #[derive(Debug)]
 pub(crate) struct ConditionalEntry {
     role: LocalRecoveryFileRole,
@@ -56,6 +63,10 @@ impl ConditionalEntry {
     }
 
     /// Changes the role after the corresponding verification or native action.
+    ///
+    /// Callers must update the role only after the operation that establishes
+    /// that role has succeeded; in particular, a created but unverified copy
+    /// remains `StagedCandidate`.
     pub(crate) fn set_role(&mut self, role: LocalRecoveryFileRole) {
         self.role = role;
     }
@@ -68,6 +79,8 @@ impl ConditionalEntry {
     }
 
     /// Transfers the retained permission into a non-deleting recovery value.
+    ///
+    /// The supplied role must describe the verified state at transfer time.
     pub(crate) fn into_recovery(self, role: LocalRecoveryFileRole) -> LocalRecoveryFile {
         LocalRecoveryFile::new(role, self.namespace_path, self.diagnostic_path, self.access)
     }

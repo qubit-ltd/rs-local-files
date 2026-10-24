@@ -27,9 +27,54 @@ use crate::outcome::LocalConditionalWriteOutcome;
 ///
 /// `commit` consumes the writer. On failure, the returned
 /// [`LocalConditionalCommitError`] owns retained recovery files; the writer
-/// does not remain available for another commit. `abort` can be retried after
-/// a cleanup failure while the writer remains open, but writing and committing
-/// are disabled after a permanent stream or abort failure.
+/// cannot be committed again. A successful result means the candidate was
+/// published and required synchronization completed. Cleanup failures are
+/// reported in `cleanup_errors()` and do not undo publication; any files that
+/// could not be removed remain owned by `retained_files()`.
+///
+/// Recovery handles carry a role describing each retained file's place in the
+/// attempt. Their read permission is retained independently of the optional
+/// diagnostic path, and dropping a recovery handle does not delete its file.
+/// `abort` may be retried after a cleanup failure while the writer is open;
+/// writing and committing are disabled after a permanent stream or abort
+/// failure. Dropping an open writer makes a best-effort abort of its staging
+/// candidate.
+///
+/// # Example
+///
+/// This example forces an `Absent` precondition failure, then reads the
+/// independently verified candidate copy from the error that owns it.
+///
+/// ```
+/// use qubit_io::Output;
+/// use qubit_local_files::LocalFileSystem;
+/// use qubit_local_files::options::LocalWriteMode;
+/// use qubit_local_files::options::LocalWriteOptions;
+/// use qubit_local_files::options::LocalWritePrecondition;
+/// use qubit_local_files::recovery::LocalRecoveryFileRole;
+/// use sha2::Sha256;
+/// use tempfile::tempdir;
+///
+/// let directory = tempdir()?;
+/// let target = directory.path().join("model");
+/// std::fs::write(&target, b"existing")?;
+/// let mut filesystem = LocalFileSystem::host()?;
+/// filesystem.set_symlink_policy(qubit_local_files::policy::LocalSymlinkPolicy::Reject)?;
+/// let mut writer = filesystem.open_conditional_writer::<Sha256>(
+///     &target,
+///     LocalWritePrecondition::Absent,
+///     &LocalWriteOptions::new(LocalWriteMode::CreateOrReplace),
+/// )?;
+/// writer.write_fully(b"candidate")?;
+/// let error = writer.commit().expect_err("the destination already exists");
+/// let candidate = error.candidate().expect("verified candidate copy is retained");
+/// assert_eq!(candidate.role(), LocalRecoveryFileRole::CandidateCopy);
+/// let mut reader = candidate.open_reader()?;
+/// let mut bytes = Vec::new();
+/// qubit_io::Streams::copy_input_to_output(&mut reader, &mut bytes)?;
+/// assert_eq!(bytes, b"candidate");
+/// # Ok::<(), Box<dyn std::error::Error>>(())
+/// ```
 ///
 /// [`LocalConditionalCommitError`]: crate::error::LocalConditionalCommitError
 #[must_use = "commit or abort the conditional writer"]
@@ -81,6 +126,10 @@ impl<D: Digest> LocalConditionalWriter<D> {
         &self.path
     }
     /// Returns the captured host path used for diagnostics, when available.
+    ///
+    /// `None` means that no host path was captured; it does not grant
+    /// permission to reopen or modify the destination. Operations use the
+    /// retained namespace authority instead.
     #[must_use]
     pub fn diagnostic_path(&self) -> Option<&Path> {
         self.diagnostic_path.as_deref()
@@ -100,6 +149,13 @@ impl<D: Digest> LocalConditionalWriter<D> {
         }
     }
     /// Publishes the candidate after checking the selected precondition.
+    ///
+    /// This consumes the writer on both success and failure. On success,
+    /// publication and required synchronization are complete, while cleanup
+    /// errors and retained files are reported separately. On failure, the
+    /// returned error owns any recovery files; inspect or transfer them before
+    /// dropping the error. The digest precheck is not a strict
+    /// compare-and-swap.
     #[allow(clippy::result_large_err)]
     pub fn commit(mut self) -> Result<LocalConditionalWriteOutcome<D>, LocalConditionalCommitError> {
         if self.state != LocalWriterState::Open || self.write_failed || self.abort_failed {

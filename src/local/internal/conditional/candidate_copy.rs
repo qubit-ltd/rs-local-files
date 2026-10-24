@@ -14,6 +14,13 @@ use super::ConditionalEntry;
 use super::digest_reader::digest_entry;
 use crate::recovery::LocalRecoveryFileRole;
 
+/// Creates and independently verifies a recovery copy before publication.
+///
+/// The entry is first marked `StagedCandidate`, because creation alone does
+/// not prove it contains the complete candidate. A read error or digest
+/// mismatch returns that entry with the error so its owner can retain it for
+/// recovery. Only a matching digest changes its role to `CandidateCopy` and
+/// permits the publication protocol to proceed with it.
 pub(super) fn prepare_copy<D, B>(
     backend: &mut B,
     candidate_digest: &Output<D>,

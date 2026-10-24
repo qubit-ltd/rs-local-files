@@ -32,6 +32,18 @@ use crate::policy::LocalDurabilityRequirement;
 use crate::recovery::LocalRecoveryFileRole;
 
 #[allow(clippy::result_large_err)]
+/// Runs the conditional publication protocol using the backend's retained
+/// namespace authority.
+///
+/// The candidate is flushed and digested, then copied to an independently
+/// verified recovery entry before the target precondition is checked. After
+/// publication, the installed entry and displaced entries are verified. A
+/// detected post-publication conflict is rolled back only after rechecking the
+/// installed candidate and displaced entry; uncertainty retains the observed
+/// entries for recovery. A successful return means publication and required
+/// synchronization completed; cleanup failures are returned alongside any
+/// retained files and do not change that success. This protocol does not
+/// provide a strict compare-and-swap guarantee.
 pub(crate) fn commit_conditional<D, B>(
     mut backend: B,
     precondition: LocalWritePrecondition<Output<D>>,
