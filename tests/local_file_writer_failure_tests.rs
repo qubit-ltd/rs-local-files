@@ -469,6 +469,109 @@ fn test_local_file_writer_abort_reports_missing_host_staging_file() {
     assert_eq!(LocalFileOperation::Abort, retry.operation(),);
 }
 
+/// Verifies a failed staged abort rejects every stream operation and commit,
+/// while allowing a later abort retry to finish cleanup.
+#[cfg(all(feature = "test-support", unix))]
+#[test]
+fn test_abort_failure_rejects_stream_and_commit() {
+    use std::path::Path;
+
+    for rooted in [false, true] {
+        for operation in ["write", "trait_vectored", "inherent_vectored", "flush", "commit"] {
+            let directory = tempdir().expect("fixture should exist");
+            let target = directory.path().join("payload");
+            fs::write(&target, b"A").expect("original target should exist");
+            let filesystem = if rooted {
+                LocalFileSystem::rooted(directory.path())
+            } else {
+                LocalFileSystem::host()
+            }
+            .expect("filesystem should open");
+            let path = if rooted { Path::new("payload") } else { target.as_path() };
+            let mut writer = filesystem
+                .open_writer_with_options(path, &LocalWriteOptions::new(LocalWriteMode::CreateOrReplace))
+                .expect("staged writer should open");
+            Output::write_fully(&mut writer, b"B").expect("staging write should succeed");
+            {
+                let _fault = install_test_fault("atomic-install-unlink-persistent").expect("fault should install");
+                let _ = writer.abort().expect_err("staging unlink should fail");
+            }
+
+            match operation {
+                "write" => {
+                    assert_eq!(
+                        std::io::ErrorKind::BrokenPipe,
+                        writer.write(b"C").expect_err("write must fail").kind()
+                    );
+                }
+                "trait_vectored" => {
+                    assert_eq!(
+                        std::io::ErrorKind::BrokenPipe,
+                        Output::write_vectored(&mut writer, &[b"C"])
+                            .expect_err("trait vectored write must fail")
+                            .kind()
+                    );
+                }
+                "inherent_vectored" => {
+                    assert_eq!(
+                        std::io::ErrorKind::BrokenPipe,
+                        writer
+                            .write_vectored(&[IoSlice::new(b"C")])
+                            .expect_err("inherent vectored write must fail")
+                            .kind()
+                    );
+                }
+                "flush" => {
+                    assert_eq!(
+                        std::io::ErrorKind::BrokenPipe,
+                        writer.flush().expect_err("flush must fail").kind()
+                    );
+                }
+                "commit" => {
+                    let error = writer.commit().expect_err("commit must fail after failed abort");
+                    assert_eq!(LocalWriteFailureState::NotPublished, error.state());
+                }
+                _ => unreachable!(),
+            }
+            assert_eq!(
+                b"A",
+                fs::read(&target).expect("original target should remain").as_slice()
+            );
+        }
+
+        let directory = tempdir().expect("retry fixture should exist");
+        let target = directory.path().join("payload");
+        fs::write(&target, b"A").expect("original target should exist");
+        let filesystem = if rooted {
+            LocalFileSystem::rooted(directory.path())
+        } else {
+            LocalFileSystem::host()
+        }
+        .expect("filesystem should open");
+        let path = if rooted { Path::new("payload") } else { target.as_path() };
+        let mut writer = filesystem
+            .open_writer_with_options(path, &LocalWriteOptions::new(LocalWriteMode::CreateOrReplace))
+            .expect("retry writer should open");
+        Output::write_fully(&mut writer, b"B").expect("staging write should succeed");
+        {
+            let _fault = install_test_fault("atomic-install-unlink-persistent").expect("fault should install");
+            let _ = writer.abort().expect_err("staging unlink should fail");
+        }
+        let outcome = writer.abort().expect("abort retry should clean up");
+        assert_eq!(LocalWriterState::Aborted, outcome.state());
+        assert_eq!(
+            b"A",
+            fs::read(&target).expect("original target should remain").as_slice()
+        );
+        assert_eq!(
+            1,
+            fs::read_dir(directory.path())
+                .expect("directory should be readable")
+                .count()
+        );
+    }
+}
+
 /// Verifies rooted facade writers preserve the shared writer outcome contract
 /// for both commit and explicit abort.
 #[cfg(unix)]

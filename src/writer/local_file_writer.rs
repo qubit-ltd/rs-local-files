@@ -229,8 +229,9 @@ impl LocalFileWriter {
     /// # Errors
     ///
     /// Returns `LocalFileError` when the writer is terminal, staging cleanup
-    /// fails, or append flushing fails. A cleanup failure retains the open
-    /// writer so the caller can retry abort.
+    /// fails, or append flushing fails. After staged cleanup fails, only
+    /// another abort may be attempted; stream operations and commit fail.
+    /// Retrying abort remains available so cleanup can complete.
     pub fn abort(&mut self) -> LocalResult<LocalWriteOutcome> {
         if self.state != LocalWriterState::Open {
             return Err(self.contextualize_error(writer_state_error(
@@ -244,6 +245,7 @@ impl LocalFileWriter {
         match backend {
             backend @ (LocalFileWriterBackend::Staged(_) | LocalFileWriterBackend::Rooted(_)) => {
                 if let Err(error) = backend.abort_staged() {
+                    self.failure_state.get_or_insert(LocalWriteFailureState::NotPublished);
                     return Err(self.contextualize_error(atomic_write_error(
                         &self.path,
                         LocalFileOperation::Abort,

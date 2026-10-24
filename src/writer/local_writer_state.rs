@@ -11,7 +11,10 @@
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
 #[must_use]
 pub enum LocalWriterState {
-    /// The byte stream remains writable.
+    /// The writer has not completed a terminal operation.
+    ///
+    /// Stream operations are available only while no failure state is
+    /// recorded; after staged abort cleanup fails, only abort may be retried.
     Open,
     /// Commit completed successfully.
     Committed,
