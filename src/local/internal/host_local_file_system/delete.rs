@@ -25,6 +25,8 @@ use super::io;
 use super::resolve_host_path;
 use super::test_io_fault;
 use crate::local::DeleteBackend;
+#[cfg(windows)]
+use crate::local::internal::file_move::remove_directory_symlink;
 use crate::local::remove_directory_tree;
 
 impl HostLocalFileSystem {
@@ -143,7 +145,7 @@ pub(crate) fn remove_host_non_directory(path: &Path, metadata: &fs::Metadata) ->
         use std::os::windows::fs::FileTypeExt;
 
         if metadata.file_type().is_symlink_dir() {
-            return fs::remove_dir(path);
+            return remove_directory_symlink(path);
         }
     }
     let _ = metadata;
@@ -238,6 +240,32 @@ impl DeleteBackend for HostLocalFileSystem {
         }
         let _ = path;
         Ok(())
+    }
+}
+
+#[cfg(all(test, windows))]
+mod tests {
+    use std::fs;
+    use std::os::windows::fs::symlink_dir;
+
+    use super::remove_host_non_directory;
+
+    #[test]
+    fn test_remove_host_non_directory_rejects_replaced_directory_symlink() {
+        let directory = tempfile::tempdir().expect("temporary directory should be created");
+        let target = directory.path().join("target");
+        let entry = directory.path().join("entry");
+        fs::create_dir(&target).expect("link target should be created");
+        symlink_dir(&target, &entry).expect("directory link should be created");
+        let metadata = fs::symlink_metadata(&entry).expect("link metadata should be captured");
+
+        fs::remove_dir(&entry).expect("link should be replaced");
+        fs::create_dir(&entry).expect("replacement directory should be created");
+
+        let result = remove_host_non_directory(&entry, &metadata);
+
+        assert!(result.is_err(), "replacement directory must not be removed");
+        assert!(entry.is_dir(), "replacement directory should remain");
     }
 }
 
