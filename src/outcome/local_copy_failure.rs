@@ -111,9 +111,10 @@ impl LocalCopyFailure {
     /// Converts a structured native copy-pipeline error without losing facts.
     #[must_use]
     pub(crate) fn from_copy_dir_error(source: &Path, target: &Path, error: LocalCopyDirError) -> Self {
+        let failure_hint = error.failure_state();
         let (stage, failed_source, failed_target, stats, staging_path, cleanup_error, primary) = error.into_parts();
         let partial_stats = LocalCopyStats::from_internal(stats);
-        let state = copy_failure_state(stage, partial_stats);
+        let state = merge_copy_failure_state(copy_failure_state(stage, partial_stats), failure_hint);
         let resource_limit = primary
             .get_ref()
             .and_then(|source| source.downcast_ref::<LocalResourceLimitError>())
@@ -290,6 +291,23 @@ pub(crate) const fn copy_failure_state(
         | LocalCopyDirStage::UpdateStatistics => LocalCopyFailureState::Indeterminate,
         #[cfg(windows)]
         LocalCopyDirStage::PublishSymlinkIndeterminate => LocalCopyFailureState::Indeterminate,
+    }
+}
+
+/// Merges the copy pipeline's inferred state with a separately observed effect.
+pub(crate) const fn merge_copy_failure_state(
+    inferred: LocalCopyFailureState,
+    hint: Option<LocalCopyFailureState>,
+) -> LocalCopyFailureState {
+    match (inferred, hint) {
+        (LocalCopyFailureState::Published, _) => LocalCopyFailureState::Published,
+        (_, Some(LocalCopyFailureState::Published)) => LocalCopyFailureState::Published,
+        (_, Some(LocalCopyFailureState::Indeterminate)) | (LocalCopyFailureState::Indeterminate, _) => {
+            LocalCopyFailureState::Indeterminate
+        }
+        (LocalCopyFailureState::PartiallyPublished, _)
+        | (_, Some(LocalCopyFailureState::PartiallyPublished)) => LocalCopyFailureState::PartiallyPublished,
+        (_, Some(LocalCopyFailureState::Unchanged)) | (_, None) => inferred,
     }
 }
 

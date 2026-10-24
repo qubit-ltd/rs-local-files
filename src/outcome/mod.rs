@@ -37,6 +37,8 @@ pub use local_copy_failure::LocalCopyFailure;
 pub use local_copy_failure::LocalCopyResult;
 #[cfg(all(test, windows))]
 pub(crate) use local_copy_failure::copy_failure_state;
+#[cfg(test)]
+pub(crate) use local_copy_failure::merge_copy_failure_state;
 pub use local_copy_failure_state::LocalCopyFailureState;
 pub use local_copy_method::LocalCopyMethod;
 pub use local_copy_outcome::LocalCopyOutcome;

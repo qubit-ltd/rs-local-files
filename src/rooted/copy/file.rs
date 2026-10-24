@@ -14,6 +14,8 @@ use super::EntryKind;
 use super::Metadata;
 use super::Path;
 use super::Root;
+use super::deletion_failure_hint;
+use super::mark_partial_after_removal;
 use super::destination::checked_add;
 use super::destination::error;
 use super::destination::optional_metadata;
@@ -120,6 +122,7 @@ pub(super) fn copy_file(
     let destination_directory_requires_removal = destination_metadata
         .as_ref()
         .is_some_and(|metadata| metadata.kind() == EntryKind::Directory);
+    let mut destination_removed = false;
     if let Some(metadata) = destination_metadata {
         let action = decide_copy_destination(
             false,
@@ -136,14 +139,27 @@ pub(super) fn copy_file(
                 if metadata.kind() == EntryKind::File {
                     // The staged writer replaces regular files at commit.
                 } else {
-                    let remove_result = if metadata.kind() == EntryKind::Directory {
-                        root.remove_tree(destination)
+                    if metadata.kind() == EntryKind::Directory {
+                        root.remove_tree_typed(destination).map_err(|delete_error| {
+                            let failure_hint = deletion_failure_hint(&delete_error);
+                            let mut copy_error = error(
+                                Stage::PrepareDestination,
+                                source,
+                                destination,
+                                statistics,
+                                delete_error.into_io_error(),
+                            );
+                            if let Some(failure_hint) = failure_hint {
+                                copy_error = copy_error.with_failure_state(failure_hint);
+                            }
+                            copy_error
+                        })?;
                     } else {
-                        root.remove_file(destination)
-                    };
-                    remove_result.map_err(|source_error| {
-                        error(Stage::PrepareDestination, source, destination, statistics, source_error)
-                    })?;
+                        root.remove_file(destination).map_err(|source_error| {
+                            error(Stage::PrepareDestination, source, destination, statistics, source_error)
+                        })?;
+                    }
+                    destination_removed = true;
                 }
             }
             None => {
@@ -166,20 +182,23 @@ pub(super) fn copy_file(
     #[cfg(feature = "test-support")]
     {
         if crate::local::test_support_enabled("rooted-copy-writer-open") {
-            return Err(error(
+            return Err(mark_partial_after_removal(error(
                 Stage::PrepareDestination,
                 source,
                 destination,
                 statistics,
                 io::Error::from(ErrorKind::PermissionDenied),
-            ));
+            ), destination_removed));
         }
     }
     let mut writer = root
         .begin_atomic_write_with_options(destination, LocalAtomicWriteOptions::new().with_durability(durability))
         .map_err(|source_error| {
             let source_error = io::Error::new(source_error.kind(), source_error);
-            error(Stage::PrepareDestination, source, destination, statistics, source_error)
+            mark_partial_after_removal(
+                error(Stage::PrepareDestination, source, destination, statistics, source_error),
+                destination_removed,
+            )
         })?;
     #[cfg(feature = "test-support")]
     let copy_result = if crate::local::test_support_enabled("rooted-copy-file-contents-native") {
@@ -190,7 +209,12 @@ pub(super) fn copy_file(
     #[cfg(not(feature = "test-support"))]
     let copy_result = budget.copy(&mut reader, &mut writer);
     let bytes = copy_result
-        .map_err(|source_error| error(Stage::CopyFileContents, source, destination, statistics, source_error))?;
+        .map_err(|source_error| {
+            mark_partial_after_removal(
+                error(Stage::CopyFileContents, source, destination, statistics, source_error),
+                destination_removed,
+            )
+        })?;
     #[cfg(feature = "test-support")]
     let commit_result = if crate::local::test_support_enabled("rooted-copy-file-commit-native") {
         Err(crate::LocalAtomicWriteError::new(
@@ -205,8 +229,12 @@ pub(super) fn copy_file(
     };
     #[cfg(not(feature = "test-support"))]
     let commit_result = writer.commit_with_durability();
-    let file_durable =
-        commit_result.map_err(|source_error| rooted_commit_error(source, destination, statistics, source_error))?;
+    let file_durable = commit_result.map_err(|source_error| {
+        mark_partial_after_removal(
+            rooted_commit_error(source, destination, statistics, source_error),
+            destination_removed,
+        )
+    })?;
     statistics.files_durable &= file_durable;
     statistics.files = checked_add(statistics.files, 1, source, destination, statistics)?;
     statistics.bytes = checked_add(statistics.bytes, bytes, source, destination, statistics)?;

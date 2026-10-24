@@ -32,6 +32,8 @@ use crate::LocalCopyDirError;
 use crate::LocalCopyDirOptions;
 use crate::LocalCopyDirStats;
 use crate::LocalDurabilityRequirement;
+use crate::LocalFileError;
+use crate::LocalFileOperation;
 #[cfg(any(unix, windows))]
 use crate::local;
 use crate::read;
@@ -526,17 +528,40 @@ impl Root {
     /// # Errors
     /// Returns an I/O error when secure traversal or removal fails.
     pub fn remove_tree(&self, path: &path::Path) -> Result<()> {
+        self.remove_tree_typed(path).map_err(LocalFileError::into_io_error)
+    }
+
+    /// Removes a descendant tree while retaining the typed partial-effect state.
+    pub(crate) fn remove_tree_typed(&self, path: &path::Path) -> crate::LocalResult<()> {
         #[cfg(any(unix, windows))]
         {
-            if self.symlink_metadata(path)?.kind() != super::EntryKind::Directory {
-                return Err(std::io::Error::new(
-                    std::io::ErrorKind::NotADirectory,
-                    "rooted remove_tree requires a directory",
+            let metadata = self.symlink_metadata(path).map_err(|source| {
+                LocalFileError::from_io(
+                    LocalFileOperation::DeleteDirectory,
+                    Some(path.as_path().to_path_buf()),
+                    None,
+                    source,
+                )
+            })?;
+            if metadata.kind() != super::EntryKind::Directory {
+                return Err(LocalFileError::from_io(
+                    LocalFileOperation::DeleteDirectory,
+                    Some(path.as_path().to_path_buf()),
+                    None,
+                    std::io::Error::new(
+                        std::io::ErrorKind::NotADirectory,
+                        "rooted remove_tree requires a directory",
+                    ),
                 ));
             }
             #[cfg(feature = "test-support")]
             if local::test_support_enabled("rooted-copy-remove-tree-native") {
-                return Err(crate::local::test_fault_error());
+                return Err(LocalFileError::from_io(
+                    LocalFileOperation::DeleteDirectory,
+                    Some(path.as_path().to_path_buf()),
+                    None,
+                    crate::local::test_fault_error(),
+                ));
             }
             local::remove_directory_tree(
                 &crate::temp::internal::TempDirectoryDeleteBackend { root: self },
@@ -544,14 +569,18 @@ impl Root {
                 crate::LocalDeleteOptions::new().with_recursive(),
                 std::time::Instant::now(),
             )
-            .map_err(crate::LocalFileError::into_io_error)
         }
         #[cfg(not(any(unix, windows)))]
         {
             let _ = path;
-            Err(Error::new(
-                ErrorKind::Unsupported,
-                "descriptor-relative local roots are unsupported on this platform",
+            Err(LocalFileError::from_io(
+                LocalFileOperation::DeleteDirectory,
+                None,
+                None,
+                Error::new(
+                    ErrorKind::Unsupported,
+                    "descriptor-relative local roots are unsupported on this platform",
+                ),
             ))
         }
     }

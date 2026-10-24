@@ -17,6 +17,7 @@ use std::path::PathBuf;
 
 use crate::LocalCopyDirStage;
 use crate::LocalCopyDirStats;
+use crate::outcome::LocalCopyFailureState;
 
 /// Error returned by a recursive directory copy operation.
 ///
@@ -45,6 +46,8 @@ pub struct LocalCopyDirError {
     cleanup_error: Option<io::Error>,
     /// Native I/O error that caused the failure.
     error: io::Error,
+    /// Strongest destination effect proven before this error was created.
+    failure_state: Option<LocalCopyFailureState>,
 }
 #[allow(dead_code)]
 impl LocalCopyDirError {
@@ -75,6 +78,7 @@ impl LocalCopyDirError {
             temporary_path: None,
             cleanup_error: None,
             error,
+            failure_state: None,
         }
     }
 
@@ -210,6 +214,21 @@ impl LocalCopyDirError {
     pub(crate) fn with_cleanup_error(mut self, cleanup_error: io::Error) -> Self {
         self.cleanup_error = Some(cleanup_error);
         self
+    }
+
+    /// Attaches a proven destination effect that copy statistics cannot show.
+    #[must_use]
+    #[inline]
+    pub(crate) fn with_failure_state(mut self, state: LocalCopyFailureState) -> Self {
+        self.failure_state = Some(state);
+        self
+    }
+
+    /// Returns the destination effect hint, when a native operation proved one.
+    #[must_use]
+    #[inline]
+    pub(crate) const fn failure_state(&self) -> Option<LocalCopyFailureState> {
+        self.failure_state
     }
 }
 

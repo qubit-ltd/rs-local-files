@@ -14,6 +14,7 @@ use super::EntryKind;
 use super::Metadata;
 use super::Path;
 use super::Root;
+use super::deletion_failure_hint;
 use crate::LocalCopyDirError;
 use crate::local::CopyDestinationAction;
 use crate::local::LocalCopyConflictPolicy as ConflictPolicy;
@@ -103,20 +104,43 @@ pub(super) fn prepare_directory(
                     Ok(false)
                 }
                 Some(CopyDestinationAction::Replace) => {
-                    let remove_result = if destination_is_directory {
-                        root.remove_tree(destination)
+                    if destination_is_directory {
+                        root.remove_tree_typed(destination).map_err(|delete_error| {
+                            let failure_hint = deletion_failure_hint(&delete_error);
+                            let mut copy_error = error(
+                                Stage::PrepareDestination,
+                                source,
+                                destination,
+                                *statistics,
+                                delete_error.into_io_error(),
+                            );
+                            if let Some(failure_hint) = failure_hint {
+                                copy_error = copy_error.with_failure_state(failure_hint);
+                            }
+                            copy_error
+                        })?;
                     } else {
-                        root.remove_file(destination)
-                    };
-                    remove_result.map_err(|source_error| {
-                        error(
+                        root.remove_file(destination).map_err(|source_error| {
+                            error(
+                                Stage::PrepareDestination,
+                                source,
+                                destination,
+                                *statistics,
+                                source_error,
+                            )
+                        })?;
+                    }
+                    #[cfg(feature = "test-support")]
+                    if crate::local::test_support_enabled("rooted-copy-replacement-directory-create") {
+                        return Err(error(
                             Stage::PrepareDestination,
                             source,
                             destination,
                             *statistics,
-                            source_error,
+                            crate::local::test_fault_error(),
                         )
-                    })?;
+                        .with_failure_state(crate::LocalCopyFailureState::PartiallyPublished));
+                    }
                     root.create_dir(destination).map_err(|source_error| {
                         error(
                             Stage::PrepareDestination,
@@ -125,9 +149,12 @@ pub(super) fn prepare_directory(
                             *statistics,
                             source_error,
                         )
+                        .with_failure_state(crate::LocalCopyFailureState::PartiallyPublished)
                     })?;
-                    statistics.directories = checked_add(statistics.directories, 1, source, destination, *statistics)?;
-                    statistics.overwritten = checked_add(statistics.overwritten, 1, source, destination, *statistics)?;
+                    statistics.directories = checked_add(statistics.directories, 1, source, destination, *statistics)
+                        .map_err(|failure| failure.with_failure_state(crate::LocalCopyFailureState::PartiallyPublished))?;
+                    statistics.overwritten = checked_add(statistics.overwritten, 1, source, destination, *statistics)
+                        .map_err(|failure| failure.with_failure_state(crate::LocalCopyFailureState::PartiallyPublished))?;
                     Ok(true)
                 }
                 Some(CopyDestinationAction::Create) => {

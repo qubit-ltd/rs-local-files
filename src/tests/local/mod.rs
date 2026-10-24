@@ -13,6 +13,7 @@ mod copy_destination_policy_tests;
 mod copy_dir_error_tests;
 mod copy_dir_options_tests;
 mod copy_dir_stats_tests;
+mod copy_failure_state_merge_tests;
 #[cfg(windows)]
 mod copy_failure_state_tests;
 

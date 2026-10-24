@@ -16,6 +16,8 @@ use super::Error;
 use super::Options;
 use super::Path;
 use super::Root;
+use super::deletion_failure_hint;
+use super::mark_partial_after_removal;
 use super::Stage;
 use super::Statistics;
 use super::destination::checked_add;
@@ -129,31 +131,40 @@ pub(super) fn copy_symlink(
         .map_err(|source_error| error(Stage::InspectSourceEntry, source, destination, statistics, source_error))?;
     #[cfg(not(windows))]
     let targets_directory = false;
+    let mut destination_removed = false;
     if replaced_existing {
-        let removal = if destination_is_directory {
-            root.remove_tree(destination)
+        if destination_is_directory {
+            root.remove_tree_typed(destination).map_err(|delete_error| {
+                let failure_hint = deletion_failure_hint(&delete_error);
+                let mut copy_error = error(
+                    Stage::PrepareDestination,
+                    source,
+                    destination,
+                    statistics,
+                    delete_error.into_io_error(),
+                );
+                if let Some(failure_hint) = failure_hint {
+                    copy_error = copy_error.with_failure_state(failure_hint);
+                }
+                copy_error
+            })?;
         } else {
-            root.remove_file(destination)
-        };
-        if let Err(source_error) = removal {
-            return Err(error(
-                Stage::PrepareDestination,
-                source,
-                destination,
-                statistics,
-                source_error,
-            ));
+            root.remove_file(destination).map_err(|source_error| {
+                error(Stage::PrepareDestination, source, destination, statistics, source_error)
+            })?;
         }
+        destination_removed = true;
     }
     root.create_symlink_for_copy(&link_target, destination, targets_directory)
         .map_err(|failure| {
             let (state, primary, cleanup) = failure.into_parts();
             let stage = publication_failure_stage(state, replaced_existing);
             let failure = error(stage, source, destination, statistics, primary);
-            match cleanup {
+            let failure = match cleanup {
                 Some(cleanup) => failure.with_cleanup_error(cleanup),
                 None => failure,
-            }
+            };
+            mark_partial_after_removal(failure, destination_removed)
         })?;
     statistics.files = checked_add(statistics.files, 1, source, destination, statistics)?;
     if destination_metadata.is_some() {
