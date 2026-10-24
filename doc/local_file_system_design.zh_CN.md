@@ -1150,6 +1150,10 @@ pub enum LocalCopyFailureState {
 - `Published`：完整内容已发布，随后 metadata/durability/cleanup 步骤失败；
 - `Indeterminate`：native failure 无法证明最终状态。
 
+失败状态记录的是请求目标条目和内容的发布事实，不包含
+`with_create_parent()` 创建的辅助父目录。父目录创建后、目标内容发布前发生错误时，状态可以是
+`Unchanged`，而新父目录仍会保留。库不回滚这些目录，以免影响可能已开始使用它们的并发操作。
+
 ### 16.2 Failure 内容
 
 `LocalCopyFailure` 保留：

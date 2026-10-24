@@ -243,6 +243,11 @@ impl LocalCopyOptions {
     }
 
     /// Creates missing target parent directories before copying.
+    ///
+    /// A later copy failure does not automatically remove directories created
+    /// by this option. [`crate::outcome::LocalCopyFailureState::Unchanged`]
+    /// describes the requested destination publication, so it may coexist
+    /// with a newly created parent directory.
     #[must_use = "use the configured copy options"]
     #[inline]
     pub const fn with_create_parent(mut self) -> Self {

@@ -887,6 +887,12 @@ metadata preservation. `LocalCopyFailure` retains the underlying structured
 error plus `Unchanged`, `PartiallyPublished`, `Published`, or `Indeterminate`
 state and partial statistics.
 
+The failure state tracks publication facts for requested destination entries
+and content. It excludes auxiliary parent directories created by
+`with_create_parent()`: a failure after parent creation but before destination
+publication may report `Unchanged` while leaving those directories in place.
+They are not rolled back because concurrent operations may already use them.
+
 Tree-copy preparation can remove an incompatible destination before installing
 replacement entries. A later failure reports `PartiallyPublished` when that
 removal changed the destination, even if copied-file statistics remain zero.

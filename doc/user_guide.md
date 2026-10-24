@@ -233,26 +233,25 @@ and must avoid replacing a newer version written by someone else. Add the
 optional feature and an algorithm implementation to the application manifest:
 
 ```toml
+# BEGIN executable application dependencies
 [dependencies]
 qubit-local-files = { version = "0.5.0", features = ["digest"] }
 qubit-io = "0.19"
 sha2 = "0.11"
-
-[dev-dependencies]
 tempfile = "^3.27"
+# END executable application dependencies
 ```
 
 The following complete example creates A, computes its SHA-256 digest, and
 conditionally replaces it with B. It also demonstrates the conflict path: after
 C replaces A, commit fails and the application reads B from the retained
-candidate copy. The `cfg` wrapper makes this example compile only when `digest`
-is enabled; it does not hide an ignored or incomplete example.
+candidate copy.
 The dependency feature is enabled on `qubit-local-files`; the consuming
 application does not need to define its own `digest` feature.
 
 ```rust
-# fn main() -> Result<(), Box<dyn std::error::Error>> {
-# #[cfg(feature = "digest")] {
+# #[cfg(not(feature = "digest"))] fn main() {}
+# #[cfg(feature = "digest")] fn main() -> Result<(), Box<dyn std::error::Error>> {
 // BEGIN executable conditional write example
 use qubit_io::{Output, Streams};
 use qubit_local_files::LocalFileSystem;
@@ -295,7 +294,6 @@ let mut recovered = Vec::new();
 Streams::copy_input_to_output(&mut reader, &mut recovered)?;
 assert_eq!(recovered, b"B");
 // END executable conditional write example
-# }
 # Ok(())
 # }
 ```
@@ -387,6 +385,13 @@ replacement. If a later step fails, inspect `LocalCopyFailure::state()` and
 `partial_stats()`; `PartiallyPublished` records that removal even when no file
 was counted as copied. An error alone does not imply that the destination is
 unchanged.
+
+With `with_create_parent()`, a copy creates missing parent directories before
+opening the source and publishing the requested destination. If a later step
+fails, those helper directories remain; they are not destination content
+publication, and `LocalCopyFailureState::Unchanged` can still be correct when
+the requested target was not changed. The library leaves them in place because
+another operation may already be using them.
 
 ### Copy source modes
 

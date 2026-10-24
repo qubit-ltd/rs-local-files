@@ -208,24 +208,24 @@ assert_eq!(text, r#"{"complete":true}"#);
 条件写入。应用清单需启用可选 feature，并加入算法实现：
 
 ```toml
+# BEGIN executable application dependencies
 [dependencies]
 qubit-local-files = { version = "0.5.0", features = ["digest"] }
 qubit-io = "0.19"
 sha2 = "0.11"
-
-[dev-dependencies]
 tempfile = "^3.27"
+# END executable application dependencies
 ```
 
 下面的完整示例先创建 A，计算 SHA-256 摘要，再尝试以 B 替换。随后演示冲突分支：
 在第二次提交前，另一个写入者把 A 改成 C；提交因此失败，应用从保留的 candidate
-副本中读回 B。`cfg` 包装会让此示例仅在启用 `digest` 时编译；它没有用忽略标记
-掩盖不完整或错误的代码。
+副本中读回 B。
 这个 feature 由 `qubit-local-files` 依赖开启；应用本身无需声明 `digest` feature。
 
 ```rust
-# fn main() -> Result<(), Box<dyn std::error::Error>> {
-# #[cfg(feature = "digest")] {
+# #[cfg(not(feature = "digest"))] fn main() {}
+# #[cfg(feature = "digest")] fn main() -> Result<(), Box<dyn std::error::Error>> {
+// BEGIN executable conditional write example
 use qubit_io::{Output, Streams};
 use qubit_local_files::LocalFileSystem;
 use qubit_local_files::options::{
@@ -266,7 +266,7 @@ let mut reader = candidate.open_reader()?;
 let mut recovered = Vec::new();
 Streams::copy_input_to_output(&mut reader, &mut recovered)?;
 assert_eq!(recovered, b"B");
-# }
+// END executable conditional write example
 # Ok(())
 # }
 ```
@@ -338,6 +338,11 @@ match filesystem.copy_with_options(
 目录树复制可能先删除与源类型冲突的目标，再开始复制替代内容。后续步骤失败时，应同时检查
 `LocalCopyFailure::state()` 与 `partial_stats()`；即使尚未计入已复制文件，
 `PartiallyPublished` 也会保留目标已被删除的事实。不能只凭 `Err` 推断目标未改变。
+
+使用 `with_create_parent()` 时，复制会先创建缺失的目标父目录，再打开源并发布目标内容。
+如果后续步骤失败，这些辅助目录会保留；它们不代表目标内容已经发布。因此，只要请求的目标
+本身没有改变，`LocalCopyFailureState::Unchanged` 仍然准确。库不会自动删除这些目录，因为其他
+并发操作可能已经开始使用它们。
 
 ### 复制源模式
 

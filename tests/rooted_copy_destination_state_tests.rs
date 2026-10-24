@@ -61,6 +61,27 @@ fn test_failure_before_tree_removal_is_unchanged() {
 }
 
 #[test]
+fn test_create_parent_remains_after_source_open_failure_without_destination_publication() {
+    let directory = tempdir().expect("temporary root should be created");
+    fs::write(directory.path().join("source"), b"replacement").expect("source file should be written");
+    let rooted = LocalFileSystem::rooted(directory.path()).expect("root authority should open");
+    let _fault = install_test_fault("rooted-copy-source-open").expect("source-open fault should install");
+
+    let failure = rooted
+        .copy_with_options(
+            Path::new("source"),
+            Path::new("new-parent/target"),
+            &LocalCopyOptions::new().with_create_parent(),
+        )
+        .expect_err("injected source-open fault should fail");
+
+    assert_eq!(LocalCopyFailureState::Unchanged, failure.state());
+    assert!(directory.path().join("new-parent").is_dir());
+    assert!(!directory.path().join("new-parent/target").exists());
+    assert_eq!(LocalFileErrorKind::PermissionDenied, failure.error().kind());
+}
+
+#[test]
 fn test_writer_open_failure_after_tree_removal_is_partial() {
     let directory = tempdir().expect("temporary root should be created");
     let failure = copy_file_over_replaced_tree(directory.path(), "rooted-copy-writer-open");

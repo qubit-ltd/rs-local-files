@@ -9,7 +9,15 @@
 // Outcome states are covered through public copy integration tests.
 //! States proven when a unified copy operation fails.
 
-/// Namespace state proven by a failed unified copy operation.
+/// Publication state proven for the requested destination by a failed unified
+/// copy operation.
+///
+/// This state describes destination entries and requested content, not
+/// auxiliary parent directories created to reach the destination. With
+/// `LocalCopyOptions::with_create_parent`, a failed copy can therefore report
+/// [`Unchanged`](Self::Unchanged) while a newly created parent directory
+/// remains. Such directories are not automatically removed because concurrent
+/// operations may already be using them.
 ///
 /// # Examples
 ///
