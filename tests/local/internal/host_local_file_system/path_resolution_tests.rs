@@ -8,7 +8,6 @@
 
 #[cfg(unix)]
 use std::fs;
-#[cfg(unix)]
 #[cfg(any(unix, windows))]
 use std::path::Path;
 

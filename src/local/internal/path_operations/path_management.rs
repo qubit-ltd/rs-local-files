@@ -49,10 +49,6 @@ pub(crate) fn absolute_path(path: &Path) -> Result<PathBuf> {
 ///
 /// # Errors
 /// Returns an I/O error when the existing prefix cannot be canonicalized.
-///
-/// # Panics
-/// Panics if an absolute path is reported as missing after traversal reaches
-/// its filesystem root.
 pub(crate) fn canonicalize_existing_prefix(path: &Path) -> Result<PathBuf> {
     if path.try_exists()? {
         return fs::canonicalize(path);
@@ -63,11 +59,19 @@ pub(crate) fn canonicalize_existing_prefix(path: &Path) -> Result<PathBuf> {
     let mut missing = Vec::<OsString>::new();
     let mut current = absolute_path(path)?;
     while !current.try_exists()? {
-        let name = current
-            .file_name()
-            .expect("a missing absolute path should have a file name");
+        let Some(name) = current.file_name() else {
+            return Err(Error::new(
+                ErrorKind::NotFound,
+                format!("path has no existing prefix: {}", path.display()),
+            ));
+        };
         missing.push(name.to_os_string());
-        let _ = current.pop();
+        if !current.pop() {
+            return Err(Error::new(
+                ErrorKind::NotFound,
+                format!("path has no existing prefix: {}", path.display()),
+            ));
+        }
     }
     let mut canonical = fs::canonicalize(current)?;
     for component in missing.into_iter().rev() {

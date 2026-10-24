@@ -7,7 +7,6 @@
 // =============================================================================
 
 use std::fs;
-#[cfg(not(windows))]
 use std::path::Path;
 
 use qubit_io::Output;
