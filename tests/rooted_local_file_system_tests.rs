@@ -108,7 +108,14 @@ fn test_copy_tree_skips_nested_type_conflicts() {
 #[test]
 fn test_rooted_local_file_system_default_copy_and_rename_skip_sync() {
     const CHILD_ENV: &str = "QUBIT_LOCAL_FILES_DEFAULT_ROOTED_SYNC_CHILD";
+    const PROBE_ENV: &str = "QUBIT_LOCAL_FILES_DEFAULT_ROOTED_SYNC_PROBE";
+    if std::env::var_os(PROBE_ENV).is_some() {
+        return;
+    }
     if std::env::var_os(CHILD_ENV).is_some() {
+        if std::env::var_os("QUBIT_LOCAL_FILES_DEFAULT_ROOTED_SYNC_FAIL_CHILD").is_some() {
+            panic!("injected rooted trace child failure");
+        }
         let directory = tempdir().expect("temporary root should be created");
         fs::write(directory.path().join("copy-source"), b"copy").expect("copy source should be written");
         let rooted = LocalFileSystem::rooted(directory.path()).expect("root authority should open");
@@ -131,10 +138,70 @@ fn test_rooted_local_file_system_default_copy_and_rename_skip_sync() {
         return;
     }
 
-    if std::process::Command::new("strace").arg("--version").output().is_err() {
-        eprintln!("skipping default rooted sync trace because strace is unavailable");
-        return;
-    }
+    let probe_trace = NamedTempFile::new().expect("probe trace file should be created");
+    let probe = std::process::Command::new("strace")
+        .args(["-f", "-e", "trace=none", "-o"])
+        .arg(probe_trace.path())
+        .arg(std::env::current_exe().expect("test executable should resolve"))
+        .args([
+            "--exact",
+            "test_rooted_local_file_system_default_copy_and_rename_skip_sync",
+            "--nocapture",
+        ])
+        .env(PROBE_ENV, "1")
+        .env("LSAN_OPTIONS", "detect_leaks=0")
+        .output();
+    let probe = match probe {
+        Ok(output) if output.status.success() => output,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+            eprintln!("skipping default rooted sync trace: strace executable is unavailable");
+            return;
+        }
+        Ok(output)
+            if {
+                let stderr = String::from_utf8_lossy(&output.stderr);
+                stderr.contains("Operation not permitted")
+                    || stderr.contains("Permission denied")
+                    || stderr.contains("ptrace")
+            } =>
+        {
+            eprintln!(
+                "skipping default rooted sync trace: ptrace probe denied: {}",
+                String::from_utf8_lossy(&output.stderr)
+            );
+            return;
+        }
+        Ok(output) => panic!(
+            "strace capability probe failed (status {}): stdout: {}; stderr: {}",
+            output.status,
+            String::from_utf8_lossy(&output.stdout),
+            String::from_utf8_lossy(&output.stderr),
+        ),
+        Err(error) => panic!("strace capability probe could not run: {error}"),
+    };
+    assert!(probe.status.success());
+
+    let failure_probe = std::process::Command::new("strace")
+        .args(["-f", "-e", "trace=none", "-o"])
+        .arg(probe_trace.path())
+        .arg(std::env::current_exe().expect("test executable should resolve"))
+        .args([
+            "--exact",
+            "test_rooted_local_file_system_default_copy_and_rename_skip_sync",
+            "--nocapture",
+        ])
+        .env(CHILD_ENV, "1")
+        .env("QUBIT_LOCAL_FILES_DEFAULT_ROOTED_SYNC_FAIL_CHILD", "1")
+        .env("LSAN_OPTIONS", "detect_leaks=0")
+        .output()
+        .expect("strace should execute intentional-failure child");
+    assert!(
+        !failure_probe.status.success(),
+        "intentional rooted child failure must fail the traced test: stdout: {}; stderr: {}",
+        String::from_utf8_lossy(&failure_probe.stdout),
+        String::from_utf8_lossy(&failure_probe.stderr),
+    );
+
     let trace = NamedTempFile::new().expect("trace file should be created");
     let output = std::process::Command::new("strace")
         .args(["-f", "-e", "trace=fsync", "-o"])
@@ -149,10 +216,13 @@ fn test_rooted_local_file_system_default_copy_and_rename_skip_sync() {
         .env("LSAN_OPTIONS", "detect_leaks=0")
         .output()
         .expect("strace should launch the traced child");
-    if !output.status.success() {
-        eprintln!("skipping default rooted sync trace: ptrace is unavailable");
-        return;
-    }
+    assert!(
+        output.status.success(),
+        "traced rooted filesystem child failed (status {}): stdout: {}; stderr: {}",
+        output.status,
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr),
+    );
     let trace = fs::read_to_string(trace.path()).expect("trace should be readable");
     assert!(
         !trace.contains("fsync("),
