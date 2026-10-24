@@ -122,6 +122,7 @@ mod conditional_types_tests {
         let recovery = entry.into_recovery(LocalRecoveryFileRole::CandidateCopy);
         assert_eq!(recovery.role(), LocalRecoveryFileRole::CandidateCopy);
         assert_eq!(recovery.namespace_path(), path);
+        assert_eq!(recovery.diagnostic_path(), Some(path.as_path()));
         let mut reader = recovery.open_reader().expect("open retained recovery file");
         let mut contents = Vec::new();
         InputRef::new(&mut reader)

@@ -29,6 +29,26 @@ use qubit_local_files::test_support::install_test_fault;
 use tempfile::NamedTempFile;
 use tempfile::tempdir;
 
+#[test]
+#[cfg(unix)]
+fn test_recursive_host_create_reports_file_component_conflict() {
+    let root = tempdir().expect("test root should be created");
+    let blocker = root.path().join("blocker");
+    fs::write(&blocker, b"file").expect("blocking file should be written");
+    let target = blocker.join("child");
+    let filesystem = LocalFileSystem::host().expect("Host filesystem should open");
+
+    let error = filesystem
+        .create_directory_with_options(&target, &LocalCreateDirectoryOptions::new().with_recursive())
+        .expect_err("recursive creation must reject a file path component");
+
+    assert_eq!(LocalFileOperation::CreateDirectory, error.operation());
+    assert_eq!(Some(target.as_path()), error.path());
+    assert_eq!(std::io::ErrorKind::NotADirectory, error.io_error_kind());
+    assert!(blocker.is_file());
+    assert!(!target.exists());
+}
+
 /// Verifies Rooted filesystem diagnostics never expose native authority paths.
 #[test]
 fn test_local_file_system_debug_redacts_root_paths() {

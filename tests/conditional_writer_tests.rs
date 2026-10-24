@@ -66,6 +66,50 @@ fn absent_save_returns_actual_digest() {
 }
 
 #[test]
+fn opening_host_conditional_writer_reports_missing_parent_context() {
+    let directory = tempfile::tempdir().expect("fixture directory should be created");
+    let target = directory.path().join("missing-parent").join("target");
+    let mut filesystem = LocalFileSystem::host().expect("Host filesystem should open");
+    filesystem
+        .set_symlink_policy(qubit_local_files::policy::LocalSymlinkPolicy::Reject)
+        .expect("conditional writes should use a non-following policy");
+
+    let error = filesystem
+        .open_conditional_writer::<Sha256>(
+            &target,
+            LocalWritePrecondition::Absent,
+            &LocalWriteOptions::new(LocalWriteMode::CreateNew),
+        )
+        .expect_err("a missing parent should prevent writer creation");
+
+    assert_eq!(std::io::ErrorKind::NotFound, error.io_error_kind());
+    assert_eq!(Some(target.as_path()), error.path());
+}
+
+#[test]
+#[cfg(unix)]
+fn opening_rooted_conditional_writer_reports_non_directory_parent() {
+    let directory = tempfile::tempdir().expect("fixture directory should be created");
+    std::fs::write(directory.path().join("blocker"), b"file").expect("parent blocker should be written");
+    let mut filesystem = LocalFileSystem::rooted(directory.path()).expect("Rooted filesystem should open");
+    filesystem
+        .set_symlink_policy(qubit_local_files::policy::LocalSymlinkPolicy::Reject)
+        .expect("conditional writes should use a non-following policy");
+    let target = std::path::Path::new("/blocker/target");
+
+    let error = filesystem
+        .open_conditional_writer::<Sha256>(
+            target,
+            LocalWritePrecondition::Absent,
+            &LocalWriteOptions::new(LocalWriteMode::CreateNew),
+        )
+        .expect_err("a file cannot serve as a rooted parent directory");
+
+    assert_eq!(std::io::ErrorKind::InvalidInput, error.io_error_kind());
+    assert_eq!(Some(target), error.path());
+}
+
+#[test]
 fn writer_exposes_paths_debug_state_and_all_output_entry_points() {
     let dir = tempfile::tempdir().unwrap();
     let path = dir.path().join("output-contract");

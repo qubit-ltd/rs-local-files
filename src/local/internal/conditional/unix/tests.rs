@@ -62,6 +62,24 @@ fn conditional_unix_absent_install_does_not_overwrite_a_racing_creator() {
 }
 
 #[test]
+fn conditional_unix_required_durability_publishes_with_nested_parents() {
+    use crate::policy::LocalDurabilityRequirement;
+
+    let directory = tempfile::tempdir().expect("fixture directory should be created");
+    let target = directory.path().join("one").join("two").join("target");
+    let options = LocalWriteOptions::new(LocalWriteMode::CreateNew)
+        .with_create_parent()
+        .with_durability(LocalDurabilityRequirement::Required);
+    let mut backend = UnixConditionalBackend::open_host(&target, &options).expect("backend should create parents");
+    backend.candidate.write_all(b"B").expect("candidate should be written");
+
+    let result = commit_conditional::<Sha256, _>(backend, LocalWritePrecondition::Absent, options, 1);
+
+    assert!(result.is_ok(), "required namespace sync should succeed: {result:?}");
+    assert_eq!(fs::read(&target).expect("published target should be readable"), b"B");
+}
+
+#[test]
 fn conditional_unix_absent_precheck_race_keeps_the_racing_file() {
     let directory = tempfile::tempdir().expect("fixture directory should be created");
     let target = directory.path().join("target");

@@ -196,6 +196,8 @@ fn rollback_exchange_displaces_competitor_and_retains_each_resource_once() {
     assert_eq!(conditional::read_recovery(displaced), b"C");
     assert_eq!(conditional::read_recovery(candidate), b"B");
     assert_eq!(displaced.namespace_path(), path);
+    assert_eq!(displaced.diagnostic_path(), Some(path.as_path()));
+    assert_eq!(candidate.diagnostic_path(), Some(path.as_path()));
     assert_ne!(candidate.namespace_path(), displaced.namespace_path());
     assert_ne!(candidate.namespace_path(), rollback_displaced.namespace_path());
     assert_ne!(displaced.namespace_path(), rollback_displaced.namespace_path());

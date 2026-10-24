@@ -76,6 +76,14 @@ pub(super) struct FakeBackend {
     hooks: ConditionalHooks,
     partial_publish: Cell<bool>,
     partial_rollback: Cell<bool>,
+    fail_candidate_copy: Cell<Option<io::ErrorKind>>,
+    fail_target_open: Cell<Option<io::ErrorKind>>,
+    omit_displaced_receipt: Cell<bool>,
+    omit_installed_receipt: Cell<bool>,
+    fail_displaced_verify: Cell<bool>,
+    fail_candidate_identity: Cell<bool>,
+    remove_displaced_after_verify: Cell<bool>,
+    remove_installed_after_identity: Cell<bool>,
     target_is_candidate: Cell<bool>,
     recovery_entries: RefCell<Vec<ConditionalEntry>>,
 }
@@ -106,6 +114,14 @@ impl FakeBackend {
             hooks: ConditionalHooks::default(),
             partial_publish: Cell::new(false),
             partial_rollback: Cell::new(false),
+            fail_candidate_copy: Cell::new(None),
+            fail_target_open: Cell::new(None),
+            omit_displaced_receipt: Cell::new(false),
+            omit_installed_receipt: Cell::new(false),
+            fail_displaced_verify: Cell::new(false),
+            fail_candidate_identity: Cell::new(false),
+            remove_displaced_after_verify: Cell::new(false),
+            remove_installed_after_identity: Cell::new(false),
             target_is_candidate: Cell::new(false),
             recovery_entries: RefCell::new(Vec::new()),
         }
@@ -119,6 +135,38 @@ impl FakeBackend {
     }
     pub(super) fn fail_after_first_rollback_rename_once(self) -> Self {
         self.partial_rollback.set(true);
+        self
+    }
+    pub(super) fn fail_candidate_copy_once(self, kind: io::ErrorKind) -> Self {
+        self.fail_candidate_copy.set(Some(kind));
+        self
+    }
+    pub(super) fn fail_target_open_once(self, kind: io::ErrorKind) -> Self {
+        self.fail_target_open.set(Some(kind));
+        self
+    }
+    pub(super) fn omit_displaced_receipt_once(self) -> Self {
+        self.omit_displaced_receipt.set(true);
+        self
+    }
+    pub(super) fn omit_installed_receipt_once(self) -> Self {
+        self.omit_installed_receipt.set(true);
+        self
+    }
+    pub(super) fn fail_displaced_verify_once(self) -> Self {
+        self.fail_displaced_verify.set(true);
+        self
+    }
+    pub(super) fn fail_candidate_identity_once(self) -> Self {
+        self.fail_candidate_identity.set(true);
+        self
+    }
+    pub(super) fn remove_displaced_after_verify_once(self) -> Self {
+        self.remove_displaced_after_verify.set(true);
+        self
+    }
+    pub(super) fn remove_installed_after_identity_once(self) -> Self {
+        self.remove_installed_after_identity.set(true);
         self
     }
     pub(super) fn target_observer(&self) -> (Arc<tempfile::TempDir>, PathBuf) {
@@ -197,11 +245,17 @@ impl ConditionalBackend for FakeBackend {
         &self.candidate_entry
     }
     fn create_candidate_copy(&mut self) -> io::Result<ConditionalEntry> {
+        if let Some(kind) = self.fail_candidate_copy.take() {
+            return Err(io::Error::new(kind, "injected candidate-copy creation failure"));
+        }
         let copy = self.root.path().join("copy");
         fs::copy(&self.candidate, &copy)?;
         Ok(self.entry(copy, LocalRecoveryFileRole::StagedCandidate))
     }
     fn open_target(&self) -> io::Result<ConditionalEntry> {
+        if let Some(kind) = self.fail_target_open.take() {
+            return Err(io::Error::new(kind, "injected target-open failure"));
+        }
         if !self.target.is_file() {
             return Err(io::Error::new(io::ErrorKind::NotFound, "fake target is absent"));
         }
@@ -229,10 +283,29 @@ impl ConditionalBackend for FakeBackend {
         self.inject(ConditionalPoint::SyncNamespace)
     }
     fn is_candidate(&self, entry: &ConditionalEntry) -> io::Result<bool> {
-        Ok(entry.namespace_path() == self.target && self.target_is_candidate.get())
+        if self.fail_candidate_identity.replace(false) {
+            return Err(io::Error::new(
+                io::ErrorKind::PermissionDenied,
+                "injected identity check failure",
+            ));
+        }
+        let candidate = entry.namespace_path() == self.target && self.target_is_candidate.get();
+        if candidate && self.remove_installed_after_identity.replace(false) {
+            fs::remove_file(&self.target)?;
+        }
+        Ok(candidate)
     }
     fn verify_entry(&self, entry: &ConditionalEntry) -> io::Result<()> {
+        if entry.role() == LocalRecoveryFileRole::Displaced && self.fail_displaced_verify.replace(false) {
+            return Err(io::Error::new(
+                io::ErrorKind::PermissionDenied,
+                "injected displaced verification failure",
+            ));
+        }
         if entry.namespace_path().is_file() {
+            if entry.role() == LocalRecoveryFileRole::Displaced && self.remove_displaced_after_verify.replace(false) {
+                fs::remove_file(entry.namespace_path())?;
+            }
             Ok(())
         } else {
             Err(io::Error::new(io::ErrorKind::NotFound, "fake retained entry missing"))
@@ -288,6 +361,22 @@ impl ConditionalBackend for FakeBackend {
             };
         }
         self.target_is_candidate.set(true);
+        if self.omit_displaced_receipt.replace(false) {
+            return NativeAttempt {
+                error: None,
+                publication: LocalConditionalPublicationState::Published,
+                installed: Some(self.entry(self.target.clone(), LocalRecoveryFileRole::StagedCandidate)),
+                displaced: Vec::new(),
+            };
+        }
+        if self.omit_installed_receipt.replace(false) {
+            return NativeAttempt {
+                error: None,
+                publication: LocalConditionalPublicationState::Published,
+                installed: None,
+                displaced: vec![self.entry(old, LocalRecoveryFileRole::Displaced)],
+            };
+        }
         if self.partial_publish.replace(false) {
             return NativeAttempt {
                 error: Some(io::Error::other("injected partial publication")),

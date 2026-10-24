@@ -105,6 +105,415 @@ mod conditional_state_tests {
     }
 
     #[test]
+    fn conditional_state_prepublication_checkpoints_fail_closed_with_recovery_copy() {
+        use super::super::ConditionalHooks;
+        use super::super::ConditionalPoint;
+
+        for (point, expected_stage) in [
+            (
+                ConditionalPoint::VerifyCandidateCopy,
+                crate::error::LocalConditionalWriteStage::VerifyCandidateCopy,
+            ),
+            (
+                ConditionalPoint::Precheck,
+                crate::error::LocalConditionalWriteStage::Precheck,
+            ),
+            (
+                ConditionalPoint::AfterPrecheck,
+                crate::error::LocalConditionalWriteStage::Precheck,
+            ),
+            (
+                ConditionalPoint::Publish,
+                crate::error::LocalConditionalWriteStage::Publish,
+            ),
+        ] {
+            let backend = super::super::fake_backend::FakeBackend::new(b"A", b"B")
+                .with_hooks(ConditionalHooks::fail_once(point, std::io::ErrorKind::PermissionDenied));
+            let (_lease, target_path) = backend.target_observer();
+            let error = super::super::commit::commit_conditional::<Sha256, _>(
+                backend,
+                LocalWritePrecondition::Content(Sha256::digest(b"A")),
+                super::super::fake_backend::required_options(),
+                1,
+            )
+            .expect_err("a failed prepublication checkpoint must prevent publishing");
+
+            assert_eq!(error.stage(), expected_stage, "checkpoint {point:?}");
+            assert_eq!(error.reason(), crate::error::LocalConditionalFailureReason::Io);
+            assert_eq!(
+                error.publication(),
+                crate::outcome::LocalConditionalPublicationState::NotPublished
+            );
+            assert_eq!(
+                recovery_bytes(error.candidate().expect("verified B copy retained")),
+                b"B"
+            );
+            assert_eq!(std::fs::read(target_path).expect("old target remains"), b"A");
+        }
+    }
+
+    #[test]
+    fn conditional_state_postpublication_checkpoint_error_transfers_native_receipts() {
+        use super::super::ConditionalHooks;
+        use super::super::ConditionalPoint;
+
+        let backend = super::super::fake_backend::FakeBackend::new(b"A", b"B").with_hooks(ConditionalHooks::fail_once(
+            ConditionalPoint::AfterPublish,
+            std::io::ErrorKind::Other,
+        ));
+        let (_lease, target_path) = backend.target_observer();
+        let error = super::super::commit::commit_conditional::<Sha256, _>(
+            backend,
+            LocalWritePrecondition::Content(Sha256::digest(b"A")),
+            super::super::fake_backend::required_options(),
+            1,
+        )
+        .expect_err("failure after native publication must preserve its receipts");
+
+        assert_eq!(error.stage(), crate::error::LocalConditionalWriteStage::Publish);
+        assert_eq!(error.reason(), crate::error::LocalConditionalFailureReason::Io);
+        assert_eq!(
+            error.publication(),
+            crate::outcome::LocalConditionalPublicationState::Published
+        );
+        assert_eq!(std::fs::read(target_path).expect("published target remains"), b"B");
+        assert_eq!(recovery_bytes(error.candidate().expect("verified copy retained")), b"B");
+        assert!(error.recovery_files().iter().any(|file| {
+            file.role() == crate::recovery::LocalRecoveryFileRole::StagedCandidate && recovery_bytes(file) == b"B"
+        }));
+        assert!(error.recovery_files().iter().any(|file| {
+            file.role() == crate::recovery::LocalRecoveryFileRole::Displaced && recovery_bytes(file) == b"A"
+        }));
+    }
+
+    #[test]
+    fn conditional_state_displaced_and_rollback_checkpoints_preserve_recovery() {
+        use super::super::ConditionalHookAction;
+        use super::super::ConditionalHooks;
+        use super::super::ConditionalPoint;
+
+        let displaced_backend = super::super::fake_backend::FakeBackend::new(b"A", b"B").with_hooks(
+            ConditionalHooks::fail_once(ConditionalPoint::VerifyDisplaced, std::io::ErrorKind::Other),
+        );
+        let (_lease, target_path) = displaced_backend.target_observer();
+        let error = super::super::commit::commit_conditional::<Sha256, _>(
+            displaced_backend,
+            LocalWritePrecondition::Content(Sha256::digest(b"A")),
+            super::super::fake_backend::required_options(),
+            1,
+        )
+        .expect_err("displaced-entry verification failure must retain both entries");
+        assert_eq!(error.stage(), crate::error::LocalConditionalWriteStage::VerifyDisplaced);
+        assert_eq!(
+            error.publication(),
+            crate::outcome::LocalConditionalPublicationState::Indeterminate
+        );
+        assert_eq!(std::fs::read(target_path).expect("published candidate remains"), b"B");
+        assert!(error.candidate().is_some());
+        assert!(
+            error
+                .recovery_files()
+                .iter()
+                .any(|file| { file.role() == crate::recovery::LocalRecoveryFileRole::Displaced })
+        );
+
+        for point in [
+            ConditionalPoint::RollbackPrecheck,
+            ConditionalPoint::RollbackValidated,
+            ConditionalPoint::RollbackCompleted,
+        ] {
+            let hooks = ConditionalHooks::sequence(vec![
+                (
+                    ConditionalPoint::Publish,
+                    ConditionalHookAction::ReplaceTarget(b"R".to_vec()),
+                ),
+                (point, ConditionalHookAction::Fail(std::io::ErrorKind::PermissionDenied)),
+            ]);
+            let backend = super::super::fake_backend::FakeBackend::new(b"A", b"B").with_hooks(hooks);
+            let (_lease, target_path) = backend.target_observer();
+            let error = super::super::commit::commit_conditional::<Sha256, _>(
+                backend,
+                LocalWritePrecondition::Content(Sha256::digest(b"A")),
+                super::super::fake_backend::required_options(),
+                1,
+            )
+            .expect_err("rollback checkpoint failure must retain recovery entries");
+
+            assert_eq!(
+                error.reason(),
+                crate::error::LocalConditionalFailureReason::PostPublicationConflict
+            );
+            assert_eq!(
+                error.publication(),
+                crate::outcome::LocalConditionalPublicationState::Indeterminate
+            );
+            let expected_target = if point == ConditionalPoint::RollbackCompleted {
+                b"R".as_slice()
+            } else {
+                b"B".as_slice()
+            };
+            assert_eq!(
+                std::fs::read(target_path).expect("current target retained"),
+                expected_target
+            );
+            assert!(error.candidate().is_some());
+            assert!(error.recovery_files().iter().any(|file| {
+                matches!(
+                    file.role(),
+                    crate::recovery::LocalRecoveryFileRole::Displaced
+                        | crate::recovery::LocalRecoveryFileRole::RollbackDisplaced
+                )
+            }));
+        }
+    }
+
+    #[test]
+    fn conditional_state_candidate_copy_backend_error_has_no_copy() {
+        let backend = super::super::fake_backend::FakeBackend::new(b"A", b"B")
+            .fail_candidate_copy_once(std::io::ErrorKind::PermissionDenied);
+        let (_lease, target_path) = backend.target_observer();
+        let error = super::super::commit::commit_conditional::<Sha256, _>(
+            backend,
+            LocalWritePrecondition::Content(Sha256::digest(b"A")),
+            super::super::fake_backend::required_options(),
+            1,
+        )
+        .expect_err("candidate-copy creation error must fail before publication");
+
+        assert_eq!(
+            error.stage(),
+            crate::error::LocalConditionalWriteStage::PrepareCandidateCopy
+        );
+        assert_eq!(error.reason(), crate::error::LocalConditionalFailureReason::Io);
+        assert_eq!(
+            error.publication(),
+            crate::outcome::LocalConditionalPublicationState::NotPublished
+        );
+        assert!(error.candidate().is_none());
+        assert!(error.recovery_files().is_empty());
+        assert_eq!(std::fs::read(target_path).expect("old target remains"), b"A");
+    }
+
+    #[test]
+    fn conditional_state_absent_precheck_io_error_is_not_target_missing() {
+        let backend = super::super::fake_backend::FakeBackend::new(b"A", b"B")
+            .fail_target_open_once(std::io::ErrorKind::PermissionDenied);
+        let (_lease, target_path) = backend.target_observer();
+        let error = super::super::commit::commit_conditional::<Sha256, _>(
+            backend,
+            LocalWritePrecondition::Absent,
+            super::super::fake_backend::required_options(),
+            1,
+        )
+        .expect_err("non-NotFound target-open failure must be classified as I/O");
+
+        assert_eq!(error.stage(), crate::error::LocalConditionalWriteStage::Precheck);
+        assert_eq!(error.reason(), crate::error::LocalConditionalFailureReason::Io);
+        assert_eq!(
+            error.publication(),
+            crate::outcome::LocalConditionalPublicationState::NotPublished
+        );
+        assert_eq!(recovery_bytes(error.candidate().expect("verified copy retained")), b"B");
+        assert_eq!(std::fs::read(target_path).expect("old target remains"), b"A");
+    }
+
+    #[test]
+    fn conditional_state_content_publish_without_displaced_receipt_is_indeterminate() {
+        let backend = super::super::fake_backend::FakeBackend::new(b"A", b"B").omit_displaced_receipt_once();
+        let (_lease, target_path) = backend.target_observer();
+        let error = super::super::commit::commit_conditional::<Sha256, _>(
+            backend,
+            LocalWritePrecondition::Content(Sha256::digest(b"A")),
+            super::super::fake_backend::required_options(),
+            1,
+        )
+        .expect_err("content publication requires a receipt for the displaced target");
+
+        assert_eq!(error.stage(), crate::error::LocalConditionalWriteStage::Publish);
+        assert_eq!(error.reason(), crate::error::LocalConditionalFailureReason::Io);
+        assert_eq!(
+            error.publication(),
+            crate::outcome::LocalConditionalPublicationState::Indeterminate
+        );
+        assert_eq!(error.error().kind(), crate::LocalFileErrorKind::DataCorruption);
+        assert_eq!(std::fs::read(target_path).expect("installed candidate remains"), b"B");
+        assert_eq!(
+            recovery_bytes(error.candidate().expect("independent copy retained")),
+            b"B"
+        );
+        assert!(error.recovery_files().iter().any(|file| {
+            file.role() == crate::recovery::LocalRecoveryFileRole::StagedCandidate && recovery_bytes(file) == b"B"
+        }));
+    }
+
+    #[test]
+    fn conditional_state_preferred_metadata_sync_failure_only_downgrades_durability() {
+        use super::super::ConditionalHookAction;
+        use super::super::ConditionalHooks;
+        use super::super::ConditionalPoint;
+        use crate::options::LocalWriteMode;
+        use crate::options::LocalWriteOptions;
+        use crate::policy::LocalAtomicityRequirement;
+        use crate::policy::LocalDurabilityRequirement;
+
+        let options = LocalWriteOptions::new(LocalWriteMode::CreateOrReplace)
+            .with_atomicity(LocalAtomicityRequirement::Required)
+            .with_durability(LocalDurabilityRequirement::Preferred);
+        let hooks = ConditionalHooks::sequence(vec![
+            (ConditionalPoint::SyncCandidate, ConditionalHookAction::Noop),
+            (
+                ConditionalPoint::SyncCandidate,
+                ConditionalHookAction::Fail(std::io::ErrorKind::PermissionDenied),
+            ),
+        ]);
+        let backend = super::super::fake_backend::FakeBackend::new(b"A", b"B").with_hooks(hooks);
+        let (_lease, target_path) = backend.target_observer();
+        let outcome = super::super::commit::commit_conditional::<Sha256, _>(
+            backend,
+            LocalWritePrecondition::Content(Sha256::digest(b"A")),
+            options,
+            1,
+        )
+        .expect("Preferred durability must permit publication after metadata sync failure");
+
+        assert!(!outcome.write_outcome().durable());
+        assert_eq!(outcome.digest(), &Sha256::digest(b"B"));
+        assert_eq!(std::fs::read(target_path).expect("candidate published"), b"B");
+    }
+
+    #[test]
+    fn conditional_state_native_receipt_and_identity_failures_keep_all_recovery_entries() {
+        let backend = super::super::fake_backend::FakeBackend::new(b"A", b"B").omit_installed_receipt_once();
+        let (_lease, target_path) = backend.target_observer();
+        let error = super::super::commit::commit_conditional::<Sha256, _>(
+            backend,
+            LocalWritePrecondition::Content(Sha256::digest(b"A")),
+            super::super::fake_backend::required_options(),
+            1,
+        )
+        .expect_err("publication without an installed receipt is indeterminate");
+        assert_eq!(error.stage(), crate::error::LocalConditionalWriteStage::Publish);
+        assert_eq!(
+            error.publication(),
+            crate::outcome::LocalConditionalPublicationState::Indeterminate
+        );
+        assert_eq!(std::fs::read(target_path).expect("published target remains"), b"B");
+        assert!(error.candidate().is_some());
+        assert!(error.recovery_files().iter().any(|file| {
+            file.role() == crate::recovery::LocalRecoveryFileRole::Displaced && recovery_bytes(file) == b"A"
+        }));
+
+        for backend in [
+            super::super::fake_backend::FakeBackend::new(b"A", b"B").fail_displaced_verify_once(),
+            super::super::fake_backend::FakeBackend::new(b"A", b"B").fail_candidate_identity_once(),
+        ] {
+            let (_lease, target_path) = backend.target_observer();
+            let error = super::super::commit::commit_conditional::<Sha256, _>(
+                backend,
+                LocalWritePrecondition::Content(Sha256::digest(b"A")),
+                super::super::fake_backend::required_options(),
+                1,
+            )
+            .expect_err("native receipt verification errors must preserve recovery entries");
+            assert_eq!(
+                error.publication(),
+                crate::outcome::LocalConditionalPublicationState::Indeterminate
+            );
+            assert_eq!(std::fs::read(target_path).expect("published target remains"), b"B");
+            assert!(error.candidate().is_some());
+            assert!(error.recovery_files().iter().any(|file| {
+                file.role() == crate::recovery::LocalRecoveryFileRole::Displaced && recovery_bytes(file) == b"A"
+            }));
+        }
+    }
+
+    #[test]
+    fn conditional_state_digest_readback_errors_keep_published_receipts() {
+        let backend = super::super::fake_backend::FakeBackend::new(b"A", b"B").remove_displaced_after_verify_once();
+        let (_lease, target_path) = backend.target_observer();
+        let error = super::super::commit::commit_conditional::<Sha256, _>(
+            backend,
+            LocalWritePrecondition::Content(Sha256::digest(b"A")),
+            super::super::fake_backend::required_options(),
+            1,
+        )
+        .expect_err("displaced digest readback failure must be indeterminate");
+        assert_eq!(error.stage(), crate::error::LocalConditionalWriteStage::VerifyDisplaced);
+        assert_eq!(
+            error.publication(),
+            crate::outcome::LocalConditionalPublicationState::Indeterminate
+        );
+        assert_eq!(std::fs::read(target_path).expect("published target remains"), b"B");
+        assert_eq!(
+            recovery_bytes(error.candidate().expect("independent copy retained")),
+            b"B"
+        );
+        assert!(
+            error
+                .recovery_files()
+                .iter()
+                .any(|file| { file.role() == crate::recovery::LocalRecoveryFileRole::Displaced })
+        );
+
+        let backend = super::super::fake_backend::FakeBackend::new(b"A", b"B").remove_installed_after_identity_once();
+        let (_lease, target_path) = backend.target_observer();
+        let error = super::super::commit::commit_conditional::<Sha256, _>(
+            backend,
+            LocalWritePrecondition::Content(Sha256::digest(b"A")),
+            super::super::fake_backend::required_options(),
+            1,
+        )
+        .expect_err("installed digest readback failure must be indeterminate");
+        assert_eq!(error.stage(), crate::error::LocalConditionalWriteStage::VerifyInstalled);
+        assert_eq!(
+            error.publication(),
+            crate::outcome::LocalConditionalPublicationState::Indeterminate
+        );
+        assert!(!target_path.exists());
+        assert_eq!(
+            recovery_bytes(error.candidate().expect("independent copy retained")),
+            b"B"
+        );
+        assert!(
+            error
+                .recovery_files()
+                .iter()
+                .any(|file| { file.role() == crate::recovery::LocalRecoveryFileRole::StagedCandidate })
+        );
+    }
+
+    #[test]
+    fn conditional_state_preferred_published_sync_failure_returns_durable_false() {
+        use super::super::ConditionalHooks;
+        use super::super::ConditionalPoint;
+        use crate::options::LocalWriteMode;
+        use crate::options::LocalWriteOptions;
+        use crate::policy::LocalAtomicityRequirement;
+        use crate::policy::LocalDurabilityRequirement;
+
+        let options = LocalWriteOptions::new(LocalWriteMode::CreateOrReplace)
+            .with_atomicity(LocalAtomicityRequirement::Required)
+            .with_durability(LocalDurabilityRequirement::Preferred);
+        let backend = super::super::fake_backend::FakeBackend::new(b"A", b"B").with_hooks(ConditionalHooks::fail_once(
+            ConditionalPoint::SyncInstalled,
+            std::io::ErrorKind::PermissionDenied,
+        ));
+        let (_lease, target_path) = backend.target_observer();
+        let outcome = super::super::commit::commit_conditional::<Sha256, _>(
+            backend,
+            LocalWritePrecondition::Content(Sha256::digest(b"A")),
+            options,
+            1,
+        )
+        .expect("Preferred post-publication sync failure cannot undo the save");
+
+        assert!(!outcome.write_outcome().durable());
+        assert_eq!(outcome.digest(), &Sha256::digest(b"B"));
+        assert_eq!(std::fs::read(target_path).expect("published candidate remains"), b"B");
+        assert!(outcome.cleanup_errors().is_empty());
+    }
+
+    #[test]
     fn conditional_state_precondition_failure_retains_candidate_copy() {
         let backend = super::super::fake_backend::FakeBackend::new(b"A", b"B");
         let (_lease, target_path) = backend.target_observer();

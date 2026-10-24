@@ -11,6 +11,8 @@
 use std::fs;
 #[cfg(unix)]
 use std::os::unix::fs::symlink;
+#[cfg(all(feature = "test-support", unix))]
+use std::path::Path;
 use std::path::absolute;
 
 use qubit_io::Output;
@@ -135,6 +137,38 @@ fn test_local_persist_outcome_reports_residual_sandbox_cleanup() {
             assert_eq!(LocalPersistCleanupState::ResidualSandbox, outcome.cleanup_state(),);
             assert!(outcome.cleanup_error().is_some());
             assert!(target.is_file());
+        },
+    );
+}
+
+/// Verifies rooted file publication reports residual sandbox cleanup.
+#[cfg(all(feature = "test-support", unix))]
+#[test]
+fn test_rooted_file_persist_outcome_reports_residual_sandbox_cleanup() {
+    run_in_test_fault_process(
+        "test_rooted_file_persist_outcome_reports_residual_sandbox_cleanup",
+        "temp-file-sandbox-remove",
+        || {
+            let root = tempfile::tempdir().expect("test root must be created");
+            let filesystem = LocalFileSystem::rooted(root.path()).expect("root authority should open");
+            let mut temporary = filesystem
+                .create_temp_file()
+                .expect("rooted temporary file must be created");
+            Output::write_fully(&mut temporary, b"payload").expect("temporary file must be writable");
+
+            let outcome = temporary
+                .persist(Path::new("/published"))
+                .expect("publication should succeed despite sandbox cleanup failure");
+
+            assert_eq!(Path::new("/published"), outcome.path());
+            assert_eq!(LocalPersistCleanupState::ResidualSandbox, outcome.cleanup_state());
+            assert!(outcome.cleanup_error().is_some());
+            assert_eq!(
+                b"payload",
+                fs::read(root.path().join("published"))
+                    .expect("published file must read")
+                    .as_slice(),
+            );
         },
     );
 }

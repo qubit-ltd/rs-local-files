@@ -9,6 +9,7 @@
 #![cfg(not(windows))]
 
 use std::fs;
+use std::io::ErrorKind;
 use std::path::Path;
 use std::path::PathBuf;
 
@@ -180,6 +181,25 @@ fn test_rooted_local_file_system_copy_creates_missing_parent() {
             .expect("copied target should read")
             .as_slice()
     );
+}
+
+/// Verifies rooted recursive creation reports a regular file component.
+#[test]
+fn test_rooted_recursive_create_reports_file_component_conflict() {
+    let root = tempdir().expect("temporary root should be created");
+    fs::write(root.path().join("blocker"), b"file").expect("blocking file should be written");
+    let rooted = LocalFileSystem::rooted(root.path()).expect("root authority should open");
+    let target = Path::new("/blocker/child");
+
+    let error = rooted
+        .create_directory_with_options(target, &LocalCreateDirectoryOptions::new().with_recursive())
+        .expect_err("a regular file cannot be a rooted directory component");
+
+    assert_eq!(LocalFileErrorKind::InvalidPath, error.kind());
+    assert_eq!(Some(target), error.path());
+    assert_eq!(ErrorKind::InvalidInput, error.io_error_kind());
+    assert!(root.path().join("blocker").is_file());
+    assert!(!root.path().join("blocker/child").exists());
 }
 
 /// Verifies cleanup follows the root descriptor after its diagnostic path
@@ -1006,6 +1026,24 @@ fn test_rooted_local_file_system_reads_regular_file() {
     std::io::Read::read_to_string(&mut qubit_io::InputRef::new(&mut reader).into_std_read(), &mut content)
         .expect("reader should read fixture");
     assert_eq!("content", content);
+}
+
+/// Verifies rooted reader type conflicts retain the virtual operand path.
+#[test]
+fn test_rooted_reader_rejects_directory_with_virtual_path() {
+    let root = tempdir().expect("temporary root should be created");
+    fs::create_dir(root.path().join("directory")).expect("directory fixture should be created");
+    let rooted = LocalFileSystem::rooted(root.path()).expect("root authority should open");
+    let path = Path::new("/directory");
+
+    let error = rooted
+        .open_reader_with_options(path, &LocalReadOptions::new())
+        .expect_err("a directory cannot be opened as a file reader");
+
+    assert_eq!(LocalFileErrorKind::TypeConflict, error.kind());
+    assert_eq!(Some(path), error.path());
+    assert_eq!(ErrorKind::Other, error.io_error_kind());
+    assert!(root.path().join("directory").is_dir());
 }
 
 /// Verifies rooted rename defaults to no-replace.

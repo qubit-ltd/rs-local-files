@@ -22,6 +22,8 @@ use qubit_local_files::error::LocalFileOperation;
 use qubit_local_files::error::LocalPersistErrorParts;
 use qubit_local_files::options::LocalPersistOptions;
 use qubit_local_files::options::LocalTempDirectoryOptions;
+#[cfg(feature = "test-support")]
+use qubit_local_files::outcome::LocalPersistCleanupState;
 use qubit_local_files::outcome::LocalPersistFailureState;
 #[cfg(feature = "test-support")]
 use qubit_local_files::outcome::LocalTempSourceState;
@@ -133,6 +135,33 @@ fn test_local_temp_directory_persist_with_overwrite_replaces_empty_destination()
 
     assert_eq!(target, persisted.path());
     assert!(persisted.path().is_dir());
+}
+
+/// Verifies rooted directory publication reports a residual sandbox when its
+/// post-publication sandbox cleanup fails.
+#[cfg(all(feature = "test-support", unix))]
+#[test]
+fn test_rooted_temp_directory_persist_reports_residual_sandbox_cleanup() {
+    run_in_test_fault_process(
+        "test_rooted_temp_directory_persist_reports_residual_sandbox_cleanup",
+        "temp-directory-sandbox-remove",
+        || {
+            let root = tempdir().expect("temporary root should be created");
+            let rooted = LocalFileSystem::rooted(root.path()).expect("root authority should open");
+            let temporary = rooted
+                .create_temp_directory()
+                .expect("rooted temporary directory should be created");
+
+            let outcome = temporary
+                .persist(Path::new("/published"))
+                .expect("publication should succeed despite sandbox cleanup failure");
+
+            assert_eq!(Path::new("/published"), outcome.path());
+            assert_eq!(LocalPersistCleanupState::ResidualSandbox, outcome.cleanup_state());
+            assert!(outcome.cleanup_error().is_some());
+            assert!(root.path().join("published").is_dir());
+        },
+    );
 }
 
 /// Verifies directory persistence rejects required durability before changing
