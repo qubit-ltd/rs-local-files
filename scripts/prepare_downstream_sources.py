@@ -66,6 +66,72 @@ def path_dependencies(manifest: Path, root: Path):
                     yield inside(root, base / dependency["path"] / "Cargo.toml")
 
 
+def redirect_fixture_io_paths(fixture: Path) -> None:
+    """Point explicit qubit-io paths in the disposable tree at its one checkout."""
+    io_directory = fixture / "rs-io"
+    manifests = set()
+    for name in ("rs-fs-local", "rs-mime", "rs-local-files"):
+        manifest = fixture / name / "Cargo.toml"
+        if not manifest.is_file():
+            raise RuntimeError(f"candidate fixture missing resolver manifest: {manifest}")
+        manifests.add(manifest)
+        folder = manifest.parent
+        while folder != fixture:
+            ancestor = folder / "Cargo.toml"
+            if ancestor.is_file():
+                data = manifest_data(ancestor)
+                if "workspace" in data:
+                    manifests.add(ancestor)
+                    break
+            folder = folder.parent
+        data = manifest_data(manifest)
+        if data.get("package", {}).get("workspace") is not None:
+            manifests.add(workspace_manifest(manifest, data, fixture))
+
+    for manifest in sorted(manifests):
+        original = manifest.read_text(encoding="utf-8")
+        relative_io = Path(os.path.relpath(io_directory, manifest.parent)).as_posix()
+
+        def redirect(match):
+            body = match.group("body")
+            if not re.search(r"\bpath\s*=", body):
+                return match.group(0)
+            body = re.sub(r"(\bpath\s*=\s*)(['\"])[^'\"]*\2",
+                          lambda path_match: f'{path_match.group(1)}"{relative_io}"', body, count=1)
+            return match.group("start") + body + match.group("end")
+
+        updated = re.sub(
+            r"(?m)^(?P<start>[ \t]*qubit-io[ \t]*=[ \t]*\{)(?P<body>[^}]*)(?P<end>\})",
+            redirect, original)
+        if updated != original:
+            manifest.write_text(updated, encoding="utf-8")
+        data = manifest_data(manifest)
+        scopes = [data, *data.get("target", {}).values()]
+        for scope in scopes:
+            for table_name in DEPENDENCY_TABLES:
+                dependency = scope.get(table_name, {}).get("qubit-io")
+                if isinstance(dependency, dict) and "path" in dependency:
+                    resolved = (manifest.parent / dependency["path"]).resolve()
+                    if resolved != io_directory.resolve():
+                        raise RuntimeError(f"candidate fixture qubit-io path was not redirected: {manifest}: {resolved}")
+        workspace = data.get("workspace", {}).get("dependencies", {}).get("qubit-io")
+        if isinstance(workspace, dict) and "path" in workspace:
+            resolved = (manifest.parent / workspace["path"]).resolve()
+            if resolved != io_directory.resolve():
+                raise RuntimeError(f"candidate fixture workspace qubit-io path was not redirected: {manifest}: {resolved}")
+
+
+def write_candidate_config(fixture: Path) -> Path:
+    """Patch registry sources to the matching fixture copies."""
+    config = fixture / ".cargo" / "config.toml"
+    config.parent.mkdir()
+    config.write_text(
+        '[patch.crates-io]\n'
+        'qubit-local-files = { path = "rs-local-files" }\n'
+        'qubit-io = { path = "rs-io" }\n', encoding="utf-8")
+    return config
+
+
 def git_output(folder: Path, *arguments: str) -> str:
     """Read a Git result; failed commands retain their normal failure status."""
     return subprocess.run(["git", "-C", str(folder), *arguments], check=True,
@@ -126,7 +192,7 @@ def prepare(root: Path, candidate: Path, refs: dict[str, str]) -> dict:
         return folder
 
     queue = deque([destination / "Cargo.toml"])
-    seeds = dict.fromkeys(("rs-fs-local", "rs-mime", *(name for name in refs if name != "support")))
+    seeds = dict.fromkeys(("rs-fs-local", "rs-mime", "rs-io", *(name for name in refs if name != "support")))
     for name in seeds:
         queue.append(checkout(name) / "Cargo.toml")
     visited = set()
@@ -141,6 +207,27 @@ def prepare(root: Path, candidate: Path, refs: dict[str, str]) -> dict:
             raise RuntimeError(f"missing path dependency manifest after checkout: {manifest}")
         visited.add(manifest)
         queue.extend(path_dependencies(manifest, root))
+    # Materialize a private tree for candidate resolution. The original checkout
+    # layout above remains the immutable --locked/hash verification channel.
+    fixture = root / "candidate-fixture"
+    if fixture.exists():
+        raise RuntimeError(f"candidate fixture already exists: {fixture}")
+    fixture.mkdir()
+    for name in records:
+        source = root / name
+        if not source.is_dir():
+            continue
+        shutil.copytree(source, fixture / name, symlinks=True,
+                        ignore=shutil.ignore_patterns(".git", "target", ".codegraph", "__pycache__"))
+    redirect_fixture_io_paths(fixture)
+    config = write_candidate_config(fixture)
+    io_manifest = fixture / "rs-io/Cargo.toml"
+    if not io_manifest.is_file():
+        raise RuntimeError(f"candidate fixture missing same-source qubit-io checkout: {io_manifest}")
+    for consumer in ("rs-fs-local", "rs-mime"):
+        subprocess.run(["cargo", "metadata", "--format-version", "1"], cwd=fixture / consumer,
+                       check=True, stdout=subprocess.DEVNULL)
+    records["candidate-fixture"] = {"path": str(fixture), "config": str(config)}
     return records
 
 

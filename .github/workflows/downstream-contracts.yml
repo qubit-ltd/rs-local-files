@@ -77,4 +77,6 @@ jobs:
           --root ci-root --candidate ci-root/rs-local-files
           --fs-local-ref "$FS_LOCAL_REF" --mime-ref "$MIME_REF" --support-ref "$SUPPORT_REF"
       - name: Check original consumer locks and run contracts
-        run: python ci-root/rs-local-files/scripts/check_downstream_contracts.py --root ci-root
+        run: >-
+          python ci-root/rs-local-files/scripts/check_downstream_contracts.py
+          --root ci-root --candidate-fixture ci-root/candidate-fixture
