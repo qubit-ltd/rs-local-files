@@ -33,8 +33,8 @@ test-support = []
 digest = ["dep:digest", "qubit-io/digest"]
 
 [dependencies]
-qubit-io = { path = "../rs-io", version = "0.19" }
 digest = { version = "^0.11", optional = true, default-features = false }
+qubit-io = "0.19"
 qubit-budget = "0.9"
 qubit-redact = { version = "0.9", default-features = false }
 getrandom = "^0.4"
