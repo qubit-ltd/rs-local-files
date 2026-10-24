@@ -40,8 +40,7 @@ have been written. This example creates a work directory, writes a manifest
 through a writer, commits it, and reads the published result.
 
 ```rust
-use std::io::Read;
-use qubit_io::{Input, Output};
+use qubit_io::{Output, Streams};
 
 use qubit_local_files::LocalFileSystem;
 use qubit_local_files::options::{LocalWriteMode, LocalWriteOptions};
@@ -55,15 +54,13 @@ filesystem.set_default_write_options(LocalWriteOptions::new(
 let mut work = filesystem.create_temp_directory()?;
 let path = work.path().join("manifest.json");
 let mut writer = filesystem.open_writer(&path)?;
-qubit_io::Output::write_fully(&mut writer, br#"{"version":1}"#)?;
+writer.write_fully(br#"{"version":1}"#)?;
 let outcome = writer.commit()?;
 assert_eq!(outcome.state(), LocalWriterState::Committed);
 
-let mut content = String::new();
-std::io::Read::read_to_string(
-    &mut filesystem.open_reader(&path)?.into_std_read(),
-    &mut content,
-)?;
+let mut bytes = Vec::new();
+Streams::copy_input_to_output(&mut filesystem.open_reader(&path)?, &mut bytes)?;
+let content = String::from_utf8(bytes)?;
 assert_eq!(content, r#"{"version":1}"#);
 work.cleanup()?;
 # Ok::<(), Box<dyn std::error::Error>>(())

@@ -25,18 +25,17 @@ use crate::LocalFileMetadata;
 /// ```
 ///
 /// ```no_run
-/// use qubit_io::Input;
-/// use std::io::Read;
+/// use qubit_io::Streams;
 /// use std::path::Path;
 ///
 /// use qubit_local_files::LocalFileSystem;
 ///
 /// # fn main() -> Result<(), Box<dyn std::error::Error>> {
 /// let filesystem = LocalFileSystem::host()?;
-/// let reader = filesystem.open_reader(Path::new("Cargo.toml"))?;
-/// let mut reader = reader.into_std_read();
-/// let mut contents = String::new();
-/// reader.read_to_string(&mut contents)?;
+/// let mut reader = filesystem.open_reader(Path::new("Cargo.toml"))?;
+/// let mut bytes = Vec::new();
+/// Streams::copy_input_to_output(&mut reader, &mut bytes)?;
+/// let contents = String::from_utf8(bytes)?;
 /// assert!(!contents.is_empty());
 /// # Ok(())
 /// # }

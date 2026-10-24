@@ -192,7 +192,7 @@ complete write, and inspect the result. The observable success condition is a
 `Committed` writer outcome and the bytes read back from the published file.
 
 ```rust,no_run
-use qubit_io::{Input, Output};
+use qubit_io::{Output, Streams};
 use qubit_local_files::LocalFileSystem;
 use qubit_local_files::options::{
     LocalCreateDirectoryOptions, LocalWriteMode, LocalWriteOptions,
@@ -211,14 +211,12 @@ let output = std::path::Path::new("build/output");
 filesystem.create_directory(output)?;
 let path = output.join("manifest.json");
 let mut writer = filesystem.open_writer(&path)?;
-qubit_io::Output::write_fully(&mut writer, br#"{"complete":true}"#)?;
+writer.write_fully(br#"{"complete":true}"#)?;
 let result = writer.commit()?;
 assert_eq!(result.state(), LocalWriterState::Committed);
-let mut text = String::new();
-std::io::Read::read_to_string(
-    &mut filesystem.open_reader(&path)?.into_std_read(),
-    &mut text,
-)?;
+let mut bytes = Vec::new();
+Streams::copy_input_to_output(&mut filesystem.open_reader(&path)?, &mut bytes)?;
+let text = String::from_utf8(bytes)?;
 assert_eq!(text, r#"{"complete":true}"#);
 # Ok::<(), Box<dyn std::error::Error>>(())
 ```
@@ -253,9 +251,7 @@ is enabled; it does not hide an ignored or incomplete example.
 ```rust
 # fn main() -> Result<(), Box<dyn std::error::Error>> {
 # #[cfg(feature = "digest")] {
-use std::io::Read;
-
-use qubit_io::{Input, Output};
+use qubit_io::{Output, Streams};
 use qubit_local_files::LocalFileSystem;
 use qubit_local_files::options::{
     LocalWriteMode, LocalWriteOptions, LocalWritePrecondition,
@@ -290,9 +286,9 @@ std::fs::write(&path, b"C")?;
 let failure = conflicted.commit().expect_err("C no longer matches A");
 assert_eq!(failure.reason(), qubit_local_files::error::LocalConditionalFailureReason::PreconditionMismatch);
 let candidate = failure.candidate().expect("B recovery copy is retained");
-let mut reader = candidate.open_reader()?.into_std_read();
+let mut reader = candidate.open_reader()?;
 let mut recovered = Vec::new();
-reader.read_to_end(&mut recovered)?;
+Streams::copy_input_to_output(&mut reader, &mut recovered)?;
 assert_eq!(recovered, b"B");
 # }
 # Ok(())
