@@ -17,6 +17,7 @@ use qubit_local_files::error::LocalFileOperation;
 use qubit_local_files::options::LocalWriteMode;
 use qubit_local_files::options::LocalWriteOptions;
 use qubit_local_files::outcome::LocalWriteFailureState;
+use qubit_local_files::outcome::LocalWritePublicationMethod;
 use qubit_local_files::outcome::LocalWriterState;
 use qubit_local_files::policy::LocalDurabilityRequirement;
 #[cfg(all(feature = "test-support", unix))]
@@ -582,27 +583,222 @@ where
 #[test]
 fn test_local_file_writer_exercises_atomic_install_fault_boundaries() {
     const TEST_NAME: &str = "test_local_file_writer_exercises_atomic_install_fault_boundaries";
-    for (fault, existing, fails) in [
-        ("atomic-destination-stat", true, true),
-        ("atomic-destination-type", true, true),
-        ("atomic-destination-open", true, true),
-        ("atomic-destination-would-block", true, true),
-        ("atomic-destination-invalid", true, true),
-        ("atomic-destination-native", true, true),
-        ("atomic-identity-mismatch", true, true),
-        ("atomic-identity-missing", true, true),
-        ("atomic-identity-inspect", true, true),
-        ("atomic-install-replace", true, true),
-        ("atomic-install-replace-indeterminate", true, true),
-        ("atomic-install-before-native-call", false, true),
-        ("atomic-install-fallback", false, false),
-        ("atomic-install-link", false, true),
-        ("atomic-install-unlink", false, false),
-        ("atomic-install-unlink-persistent", false, true),
-        ("atomic-install-unlink-persistent-sync", false, true),
-        ("atomic-install-unlink-recover-sync", false, true),
-        ("atomic-install-unlink-indeterminate-sync", false, true),
-    ] {
+    struct Expected {
+        fault: &'static str,
+        existing: bool,
+        succeeds: bool,
+        state: LocalWriteFailureState,
+        destination: Option<&'static [u8]>,
+        staging_remains: bool,
+        cleanup_error: bool,
+        sync_error: bool,
+    }
+    const MISSING: Option<&[u8]> = None;
+    const ORIGINAL: Option<&[u8]> = Some(b"existing");
+    const REPLACEMENT: Option<&[u8]> = Some(b"replacement");
+    let cases = [
+        Expected {
+            fault: "atomic-destination-stat",
+            existing: true,
+            succeeds: false,
+            state: LocalWriteFailureState::NotPublished,
+            destination: ORIGINAL,
+            staging_remains: true,
+            cleanup_error: false,
+            sync_error: false,
+        },
+        Expected {
+            fault: "atomic-destination-type",
+            existing: true,
+            succeeds: false,
+            state: LocalWriteFailureState::NotPublished,
+            destination: ORIGINAL,
+            staging_remains: true,
+            cleanup_error: false,
+            sync_error: false,
+        },
+        Expected {
+            fault: "atomic-destination-open",
+            existing: true,
+            succeeds: false,
+            state: LocalWriteFailureState::NotPublished,
+            destination: ORIGINAL,
+            staging_remains: true,
+            cleanup_error: false,
+            sync_error: false,
+        },
+        Expected {
+            fault: "atomic-destination-would-block",
+            existing: true,
+            succeeds: false,
+            state: LocalWriteFailureState::NotPublished,
+            destination: ORIGINAL,
+            staging_remains: true,
+            cleanup_error: false,
+            sync_error: false,
+        },
+        Expected {
+            fault: "atomic-destination-invalid",
+            existing: true,
+            succeeds: false,
+            state: LocalWriteFailureState::NotPublished,
+            destination: ORIGINAL,
+            staging_remains: true,
+            cleanup_error: false,
+            sync_error: false,
+        },
+        Expected {
+            fault: "atomic-destination-native",
+            existing: true,
+            succeeds: false,
+            state: LocalWriteFailureState::NotPublished,
+            destination: ORIGINAL,
+            staging_remains: true,
+            cleanup_error: false,
+            sync_error: false,
+        },
+        Expected {
+            fault: "atomic-identity-mismatch",
+            existing: true,
+            succeeds: false,
+            state: LocalWriteFailureState::NotPublished,
+            destination: ORIGINAL,
+            staging_remains: true,
+            cleanup_error: false,
+            sync_error: false,
+        },
+        Expected {
+            fault: "atomic-identity-missing",
+            existing: true,
+            succeeds: false,
+            state: LocalWriteFailureState::NotPublished,
+            destination: ORIGINAL,
+            staging_remains: true,
+            cleanup_error: false,
+            sync_error: false,
+        },
+        Expected {
+            fault: "atomic-identity-inspect",
+            existing: true,
+            succeeds: false,
+            state: LocalWriteFailureState::NotPublished,
+            destination: ORIGINAL,
+            staging_remains: true,
+            cleanup_error: false,
+            sync_error: false,
+        },
+        Expected {
+            fault: "atomic-install-replace",
+            existing: true,
+            succeeds: false,
+            state: LocalWriteFailureState::NotPublished,
+            destination: ORIGINAL,
+            staging_remains: false,
+            cleanup_error: false,
+            sync_error: false,
+        },
+        Expected {
+            fault: "atomic-install-replace-indeterminate",
+            existing: true,
+            succeeds: false,
+            state: LocalWriteFailureState::Indeterminate,
+            destination: ORIGINAL,
+            staging_remains: true,
+            cleanup_error: false,
+            sync_error: false,
+        },
+        Expected {
+            fault: "atomic-install-before-native-call",
+            existing: false,
+            succeeds: false,
+            state: LocalWriteFailureState::NotPublished,
+            destination: MISSING,
+            staging_remains: false,
+            cleanup_error: false,
+            sync_error: false,
+        },
+        Expected {
+            fault: "atomic-install-fallback",
+            existing: false,
+            succeeds: true,
+            state: LocalWriteFailureState::NotPublished,
+            destination: REPLACEMENT,
+            staging_remains: false,
+            cleanup_error: false,
+            sync_error: false,
+        },
+        Expected {
+            fault: "atomic-install-link",
+            existing: false,
+            succeeds: false,
+            state: LocalWriteFailureState::NotPublished,
+            destination: MISSING,
+            staging_remains: false,
+            cleanup_error: false,
+            sync_error: false,
+        },
+        Expected {
+            fault: "atomic-install-unlink",
+            existing: false,
+            succeeds: true,
+            state: LocalWriteFailureState::NotPublished,
+            destination: REPLACEMENT,
+            staging_remains: false,
+            cleanup_error: false,
+            sync_error: false,
+        },
+        Expected {
+            fault: "atomic-install-unlink-persistent",
+            existing: false,
+            succeeds: false,
+            state: LocalWriteFailureState::Published,
+            destination: REPLACEMENT,
+            staging_remains: true,
+            cleanup_error: true,
+            sync_error: false,
+        },
+        Expected {
+            fault: "atomic-install-unlink-persistent-sync",
+            existing: false,
+            succeeds: false,
+            state: LocalWriteFailureState::Published,
+            destination: REPLACEMENT,
+            staging_remains: true,
+            cleanup_error: true,
+            sync_error: true,
+        },
+        Expected {
+            fault: "atomic-install-unlink-recover-sync",
+            existing: false,
+            succeeds: false,
+            state: LocalWriteFailureState::Published,
+            destination: REPLACEMENT,
+            staging_remains: false,
+            cleanup_error: false,
+            sync_error: true,
+        },
+        Expected {
+            fault: "atomic-install-unlink-indeterminate-sync",
+            existing: false,
+            succeeds: false,
+            state: LocalWriteFailureState::Published,
+            destination: REPLACEMENT,
+            staging_remains: true,
+            cleanup_error: false,
+            sync_error: true,
+        },
+    ];
+    for case in cases {
+        let Expected {
+            fault,
+            existing,
+            succeeds,
+            state: expected_state,
+            destination: expected_destination,
+            staging_remains: staging_expected,
+            cleanup_error: cleanup_expected,
+            sync_error: sync_expected,
+        } = case;
         if cfg!(target_os = "macos")
             && matches!(
                 fault,
@@ -633,11 +829,58 @@ fn test_local_file_writer_exercises_atomic_install_fault_boundaries() {
                 .expect("atomic writer should open");
             Output::write_fully(&mut writer, b"replacement").expect("staging writer should accept replacement bytes");
 
-            assert_eq!(
-                fails,
-                writer.commit().is_err(),
-                "selected {fault} should have the documented outcome",
-            );
+            let result = writer.commit();
+            assert_eq!(succeeds, result.is_ok(), "selected {fault} outcome");
+            if !succeeds {
+                let error = result.expect_err("fault row expects a failure");
+                let current = fs::read(&target).ok();
+                assert_eq!(expected_state, error.state(), "typed state for {fault}");
+                match expected_state {
+                    LocalWriteFailureState::Indeterminate => {
+                        assert_eq!(LocalFileErrorKind::Indeterminate, error.error().kind());
+                    }
+                    LocalWriteFailureState::Published => {
+                        assert_eq!(LocalFileErrorKind::PublicationIncomplete, error.error().kind());
+                    }
+                    LocalWriteFailureState::NotPublished => {
+                        assert!(!matches!(
+                            error.error().kind(),
+                            LocalFileErrorKind::Indeterminate | LocalFileErrorKind::PublicationIncomplete
+                        ));
+                    }
+                }
+                assert_eq!(
+                    expected_destination,
+                    current.as_deref(),
+                    "destination bytes for {fault}"
+                );
+                let display = error.error().to_string();
+                assert_eq!(
+                    cleanup_expected,
+                    display.contains("staging cleanup also failed"),
+                    "cleanup fact for {fault}: {display}"
+                );
+                let has_sync_failure =
+                    display.contains("synchronization also failed") || display.contains("failed during SyncParent");
+                assert_eq!(sync_expected, has_sync_failure, "sync fact for {fault}: {display}");
+                let staging_entries = fs::read_dir(directory.path())
+                    .expect("fixture directory should remain readable")
+                    .filter_map(Result::ok)
+                    .filter(|entry| entry.path() != target)
+                    .count();
+                assert_eq!(staging_expected, staging_entries > 0, "staging fact for {fault}");
+            } else {
+                let outcome = result.expect("successful fault row should commit");
+                assert_eq!(LocalWriterState::Committed, outcome.state());
+                assert!(outcome.atomic());
+                assert_eq!(LocalWritePublicationMethod::AtomicRename, outcome.publication_method());
+                assert_eq!(11, outcome.bytes_written());
+                assert_eq!(None, outcome.failure_state());
+                assert_eq!(
+                    expected_destination.unwrap(),
+                    fs::read(&target).expect("target should exist").as_slice()
+                );
+            }
         });
     }
 }
