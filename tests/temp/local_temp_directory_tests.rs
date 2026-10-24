@@ -54,20 +54,58 @@ fn rooted_host_path(root: &Path, virtual_path: &Path) -> PathBuf {
 #[cfg(not(windows))]
 fn run_in_deleted_current_directory_process(test_name: &str, action: impl FnOnce()) {
     const CHILD_ENV: &str = "QUBIT_LOCAL_FILES_DELETED_CWD_TEST";
+    const SENTINEL_ENV: &str = "QUBIT_LOCAL_FILES_DELETED_CWD_SENTINEL";
     if env::var_os(CHILD_ENV).is_some() {
         action();
+        let sentinel = env::var_os(SENTINEL_ENV).expect("child should receive its sentinel path");
+        fs::write(sentinel, test_name).expect("child should record scenario completion");
         return;
     }
 
     let executable = env::current_exe().expect("test executable should be available");
-    let status = Command::new(executable)
+    let module = module_path!().split_once("::").map_or("", |(_, tail)| tail);
+    let full_name = format!("{module}::{test_name}");
+    let probe = tempdir().expect("probe directory should be created");
+    let probe_sentinel = probe.path().join("completed");
+    let probe_name = format!("{module}::__deliberately_unmatched_child_test");
+    let probe_output = Command::new(&executable)
         .arg("--exact")
-        .arg(test_name)
+        .arg(&probe_name)
         .arg("--nocapture")
         .env(CHILD_ENV, "1")
-        .status()
+        .env(SENTINEL_ENV, &probe_sentinel)
+        .output()
+        .expect("unmatched child probe should launch");
+    assert!(
+        probe_output.status.success(),
+        "unmatched libtest name should exit successfully"
+    );
+    assert!(
+        !probe_sentinel.exists(),
+        "a successful zero-test child must not prove scenario execution"
+    );
+
+    let child = tempdir().expect("child sentinel directory should be created");
+    let sentinel = child.path().join("completed");
+    let output = Command::new(executable)
+        .arg("--exact")
+        .arg(&full_name)
+        .arg("--nocapture")
+        .env(CHILD_ENV, "1")
+        .env(SENTINEL_ENV, &sentinel)
+        .output()
         .expect("deleted-current-directory child should launch");
-    assert!(status.success(), "deleted-current-directory child should pass");
+    assert!(
+        output.status.success(),
+        "deleted-current-directory child should pass; stdout: {}; stderr: {}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr),
+    );
+    assert_eq!(
+        fs::read_to_string(sentinel).expect("child should prove scenario completion"),
+        test_name,
+        "child sentinel should identify this scenario",
+    );
 }
 
 /// Verifies temporary-directory child helpers reject lexical escape shapes.
