@@ -24,6 +24,14 @@ use crate::outcome::LocalConditionalWriteOutcome;
 
 /// Stateful conditional file writer. Call [`commit`](Self::commit) to publish
 /// or [`abort`](Self::abort) to discard its unpublished candidate.
+///
+/// `commit` consumes the writer. On failure, the returned
+/// [`LocalConditionalCommitError`] owns retained recovery files; the writer
+/// does not remain available for another commit. `abort` can be retried after
+/// a cleanup failure while the writer remains open, but writing and committing
+/// are disabled after a permanent stream or abort failure.
+///
+/// [`LocalConditionalCommitError`]: crate::error::LocalConditionalCommitError
 #[must_use = "commit or abort the conditional writer"]
 pub struct LocalConditionalWriter<D: Digest> {
     path: PathBuf,
@@ -101,7 +109,7 @@ impl<D: Digest> LocalConditionalWriter<D> {
                     crate::LocalFileOperation::Commit,
                 )
                 .with_path(self.path.clone()),
-                crate::error::LocalConditionalFailureReason::Io,
+                crate::error::LocalConditionalFailureReason::InvalidState,
                 crate::error::LocalConditionalWriteStage::Prepare,
                 crate::outcome::LocalConditionalPublicationState::NotPublished,
                 Vec::new(),

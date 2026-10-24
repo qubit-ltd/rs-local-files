@@ -15,6 +15,7 @@ use digest::Update;
 use digest::consts::U32;
 use qubit_io::Output;
 use qubit_local_files::LocalFileSystem;
+use qubit_local_files::error::LocalFileErrorKind;
 use qubit_local_files::options::LocalWriteMode;
 use qubit_local_files::options::LocalWriteOptions;
 use qubit_local_files::options::LocalWritePrecondition;
@@ -265,14 +266,16 @@ fn dropping_uncommitted_writer_does_not_publish_candidate() {
 #[test]
 fn commit_after_abort_reports_invalid_state() {
     let dir = tempfile::tempdir().unwrap();
+    let target = dir.path().join("aborted");
+    std::fs::write(&target, b"original").expect("original target should be written");
     let mut fs = LocalFileSystem::host().unwrap();
     fs.set_symlink_policy(qubit_local_files::policy::LocalSymlinkPolicy::Reject)
         .unwrap();
     let mut writer = fs
         .open_conditional_writer::<Sha256>(
-            &dir.path().join("aborted"),
-            LocalWritePrecondition::Absent,
-            &LocalWriteOptions::new(LocalWriteMode::CreateNew),
+            &target,
+            LocalWritePrecondition::Content(Sha256::digest(b"original")),
+            &LocalWriteOptions::new(LocalWriteMode::CreateOrReplace),
         )
         .unwrap();
     assert_eq!(
@@ -283,7 +286,115 @@ fn commit_after_abort_reports_invalid_state() {
         Ok(_) => panic!("commit after abort must fail"),
         Err(error) => error,
     };
-    assert_eq!(format!("{:?}", error.error().kind()), "InvalidState");
+    assert_eq!(error.error().kind(), LocalFileErrorKind::InvalidState);
+    assert_eq!(
+        error.reason(),
+        qubit_local_files::error::LocalConditionalFailureReason::InvalidState
+    );
+    assert_eq!(
+        error.stage(),
+        qubit_local_files::error::LocalConditionalWriteStage::Prepare
+    );
+    assert_eq!(
+        error.publication(),
+        qubit_local_files::outcome::LocalConditionalPublicationState::NotPublished
+    );
+    assert_eq!(std::fs::read(target).unwrap(), b"original");
+}
+
+#[test]
+fn commit_after_abort_failure_reports_invalid_state() {
+    let dir = tempfile::tempdir().expect("fixture should be created");
+    let target = dir.path().join("abort-failed");
+    std::fs::write(&target, b"original").expect("original target should be written");
+    let mut filesystem = LocalFileSystem::host().expect("Host filesystem should open");
+    filesystem
+        .set_symlink_policy(qubit_local_files::policy::LocalSymlinkPolicy::Reject)
+        .expect("conditional writes should use a non-following policy");
+    let before: std::collections::HashSet<_> = std::fs::read_dir(dir.path())
+        .expect("fixture should be readable")
+        .map(|entry| entry.expect("fixture entry should be readable").path())
+        .collect();
+    let mut writer = filesystem
+        .open_conditional_writer::<Sha256>(
+            &target,
+            LocalWritePrecondition::Content(Sha256::digest(b"original")),
+            &LocalWriteOptions::new(LocalWriteMode::CreateOrReplace),
+        )
+        .expect("conditional writer should open");
+    writer.write_fully(b"candidate").expect("candidate should be written");
+    let staged: Vec<_> = std::fs::read_dir(dir.path())
+        .expect("fixture should be readable")
+        .map(|entry| entry.expect("fixture entry should be readable").path())
+        .filter(|path| !before.contains(path))
+        .collect();
+    assert_eq!(staged.len(), 1, "one private staging entry should be created");
+    std::fs::remove_file(&staged[0]).expect("staging entry should be externally removed");
+    assert!(writer.abort().is_err(), "abort should report the missing staged entry");
+
+    let error = writer.commit().expect_err("commit after abort failure must fail");
+    assert_eq!(error.error().kind(), LocalFileErrorKind::InvalidState);
+    assert_eq!(
+        error.reason(),
+        qubit_local_files::error::LocalConditionalFailureReason::InvalidState
+    );
+    assert_eq!(
+        error.stage(),
+        qubit_local_files::error::LocalConditionalWriteStage::Prepare
+    );
+    assert_eq!(
+        error.publication(),
+        qubit_local_files::outcome::LocalConditionalPublicationState::NotPublished
+    );
+    assert_eq!(std::fs::read(target).unwrap(), b"original");
+}
+
+#[cfg(feature = "test-support")]
+#[test]
+fn commit_after_permanent_write_failure_reports_invalid_state() {
+    use qubit_local_files::test_support::TestConditionalHooks;
+    use qubit_local_files::test_support::TestConditionalPoint;
+
+    let dir = tempfile::tempdir().expect("fixture should be created");
+    let target = dir.path().join("write-failed");
+    std::fs::write(&target, b"original").expect("original target should be written");
+    let mut filesystem = LocalFileSystem::host().expect("Host filesystem should open");
+    filesystem
+        .set_symlink_policy(qubit_local_files::policy::LocalSymlinkPolicy::Reject)
+        .expect("conditional writes should use a non-following policy");
+    let filesystem = filesystem
+        .with_conditional_test_hooks(TestConditionalHooks::once(TestConditionalPoint::BeforeWrite, || {
+            Err(std::io::Error::other("injected permanent write failure"))
+        }));
+    let mut writer = filesystem
+        .open_conditional_writer::<Sha256>(
+            &target,
+            LocalWritePrecondition::Content(Sha256::digest(b"original")),
+            &LocalWriteOptions::new(LocalWriteMode::CreateOrReplace),
+        )
+        .expect("conditional writer should open");
+
+    let write_error = writer
+        .write_fully(b"candidate")
+        .expect_err("injected permanent write failure should reach the caller");
+    assert_eq!(write_error.kind(), std::io::ErrorKind::Other);
+    let error = writer
+        .commit()
+        .expect_err("commit after permanent write failure must fail");
+    assert_eq!(error.error().kind(), LocalFileErrorKind::InvalidState);
+    assert_eq!(
+        error.reason(),
+        qubit_local_files::error::LocalConditionalFailureReason::InvalidState
+    );
+    assert_eq!(
+        error.stage(),
+        qubit_local_files::error::LocalConditionalWriteStage::Prepare
+    );
+    assert_eq!(
+        error.publication(),
+        qubit_local_files::outcome::LocalConditionalPublicationState::NotPublished
+    );
+    assert_eq!(std::fs::read(target).unwrap(), b"original");
 }
 
 #[test]

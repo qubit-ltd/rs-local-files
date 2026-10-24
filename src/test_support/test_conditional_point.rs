@@ -12,6 +12,8 @@
 pub enum TestConditionalPoint {
     /// Before creating the independent candidate copy.
     BeforeCandidateCopy,
+    /// Immediately before writing bytes to the unpublished candidate.
+    BeforeWrite,
     /// After the independent candidate copy has been created.
     AfterCandidateCopy,
     /// Before checking the caller's precondition.

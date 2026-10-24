@@ -38,6 +38,7 @@ impl ConditionalHooks {
 
         let (point, callback) = hooks.into_parts();
         let point = match point {
+            PublicPoint::BeforeWrite => ConditionalPoint::Write,
             PublicPoint::BeforeCandidateCopy => ConditionalPoint::PrepareCandidateCopy,
             PublicPoint::AfterCandidateCopy => ConditionalPoint::CandidateCopyCreated,
             PublicPoint::BeforePrecheck => ConditionalPoint::Precheck,
