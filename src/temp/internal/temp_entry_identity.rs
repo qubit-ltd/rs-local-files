@@ -33,6 +33,12 @@ impl TempEntryIdentity {
     /// Propagates native metadata/identity inspection errors or `Unsupported`
     /// when stable native identity is unavailable on this platform.
     pub(crate) fn from_file(file: &fs::File) -> io::Result<Self> {
+        #[cfg(feature = "test-support")]
+        if crate::local::take_test_support("temp-identity-file")
+            || crate::local::take_test_support("temp-identity-file-cleanup")
+        {
+            return Err(io::Error::other("injected temporary file identity failure"));
+        }
         #[cfg(unix)]
         {
             Self::from_metadata(&file.metadata()?)
@@ -55,6 +61,12 @@ impl TempEntryIdentity {
     /// Observes the final entry without following a link. Propagates native
     /// open/inspection errors or unsupported-platform errors.
     pub(crate) fn from_path(path: &Path) -> io::Result<Self> {
+        #[cfg(feature = "test-support")]
+        if crate::local::take_test_support("temp-identity-directory")
+            || crate::local::take_test_support("temp-identity-file-cleanup")
+        {
+            return Err(io::Error::other("injected temporary directory identity failure"));
+        }
         #[cfg(windows)]
         {
             use std::os::windows::fs::OpenOptionsExt;

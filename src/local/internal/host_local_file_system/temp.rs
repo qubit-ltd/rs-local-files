@@ -8,6 +8,8 @@
 
 // Host temp operations.
 
+use std::error::Error;
+use std::fmt;
 use std::time::Instant;
 
 use super::HostLocalFileSystem;
@@ -76,13 +78,8 @@ impl HostLocalFileSystem {
                 })?;
         let created =
             crate::local::create_temp_file_in_dir(&sandbox, options.prefix(), options.suffix(), options.max_attempts());
-        let result = match created {
-            Ok((path, file)) => LocalTempFile::host(path, sandbox.clone(), file, symlink_policy),
-            Err(error) => {
-                let _ = std::fs::remove_dir_all(&sandbox);
-                Err(error)
-            }
-        };
+        let result = created.and_then(|(path, file)| LocalTempFile::host(path, sandbox.clone(), file, symlink_policy));
+        let result = result.map_err(|error| cleanup_failed_temp_sandbox(&sandbox, error));
         result.map_err(|error| {
             let invalid_options = error.kind() == io::ErrorKind::InvalidInput;
             let error = LocalFileError::from_io(LocalFileOperation::CreateTempFile, Some(parent), None, error);
@@ -152,13 +149,9 @@ impl HostLocalFileSystem {
             options.suffix(),
             options.max_attempts(),
         );
-        let result = match created {
-            Ok(path) => LocalTempDirectory::host(path, sandbox.clone(), symlink_policy, options.cleanup_limits()),
-            Err(error) => {
-                let _ = std::fs::remove_dir_all(&sandbox);
-                Err(error)
-            }
-        };
+        let result = created
+            .and_then(|path| LocalTempDirectory::host(path, sandbox.clone(), symlink_policy, options.cleanup_limits()));
+        let result = result.map_err(|error| cleanup_failed_temp_sandbox(&sandbox, error));
         result.map_err(|error| {
             let invalid_options = error.kind() == io::ErrorKind::InvalidInput;
             let error = LocalFileError::from_io(LocalFileOperation::CreateTempDirectory, Some(parent), None, error);
@@ -168,6 +161,57 @@ impl HostLocalFileSystem {
                 error
             }
         })
+    }
+}
+
+/// Removes only the sandbox created by this failed temporary-resource build.
+fn cleanup_failed_temp_sandbox(sandbox: &Path, primary: io::Error) -> io::Error {
+    #[cfg(feature = "test-support")]
+    let cleanup = if crate::local::test_support_enabled("temp-identity-file-cleanup") {
+        Err(io::Error::other("injected sandbox cleanup failure"))
+    } else {
+        fs::remove_dir_all(sandbox)
+    };
+    #[cfg(not(feature = "test-support"))]
+    let cleanup = fs::remove_dir_all(sandbox);
+
+    match cleanup {
+        Ok(()) => primary,
+        Err(cleanup_error) => io::Error::new(
+            primary.kind(),
+            TempSandboxCleanupError {
+                primary,
+                sandbox: sandbox.to_path_buf(),
+                cleanup: cleanup_error,
+            },
+        ),
+    }
+}
+
+/// Retains the owner-construction error while describing failed sandbox
+/// cleanup.
+#[derive(Debug)]
+struct TempSandboxCleanupError {
+    primary: io::Error,
+    sandbox: std::path::PathBuf,
+    cleanup: io::Error,
+}
+
+impl fmt::Display for TempSandboxCleanupError {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(
+            formatter,
+            "{}; failed to remove temporary sandbox {}: {}",
+            self.primary,
+            self.sandbox.display(),
+            self.cleanup
+        )
+    }
+}
+
+impl Error for TempSandboxCleanupError {
+    fn source(&self) -> Option<&(dyn Error + 'static)> {
+        Some(&self.primary)
     }
 }
 
