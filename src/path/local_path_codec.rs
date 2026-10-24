@@ -15,25 +15,42 @@ use crate::LocalFileOperation;
 use crate::LocalPathCodecError;
 use crate::LocalResult;
 
-/// Reversible canonical conversion for one native path component.
+/// Reversible canonical conversion between native strings and escaped text.
+///
+/// This codec preserves native path data; it does not verify that a value is
+/// a single filename component, relative, or safe to use in a path. In
+/// particular, `/` and `..` are valid codec data, but are not safe filenames
+/// to concatenate into a path. Use [`LocalFileNames::validate`] when a filename
+/// component must satisfy the public portable filename policy.
 ///
 /// # Examples
 ///
 /// ```
 /// use std::ffi::OsStr;
 ///
-/// use qubit_local_files::path::LocalPathCodec;
+/// use qubit_local_files::path::{LocalFileNames, LocalPathCodec};
 ///
 /// let native = OsStr::new("report%final.txt");
 /// let encoded = LocalPathCodec::encode_component(native)?;
 /// let decoded = LocalPathCodec::decode_component(&encoded)?;
 /// assert_eq!(decoded, native);
+///
+/// // Decoding preserves data and does not perform filename safety checks.
+/// for text in ["/", ".."] {
+///     let decoded = LocalPathCodec::decode_component(text)?;
+///     assert!(LocalFileNames::portable().validate(&decoded).is_err());
+/// }
 /// # Ok::<(), Box<dyn std::error::Error>>(())
 /// ```
 pub struct LocalPathCodec;
 
 impl LocalPathCodec {
-    /// Converts one native path component to canonical escaped-byte text.
+    /// Converts native path data to canonical escaped-byte text.
+    ///
+    /// This is a reversible encoding operation, not filename validation:
+    /// values such as `/` and `..` can be encoded. Validate the resulting
+    /// native value with [`LocalFileNames::validate`] before using it as a
+    /// filename component.
     ///
     /// # Parameters
     ///
@@ -54,7 +71,12 @@ impl LocalPathCodec {
             .map_err(path_codec_error)
     }
 
-    /// Converts canonical escaped-byte text to one native path component.
+    /// Converts canonical escaped-byte text to native path data.
+    ///
+    /// This is a reversible decoding operation, not filename validation.
+    /// For example, `/` and `..` decode successfully even though they are not
+    /// accepted as portable filename components by
+    /// [`LocalFileNames::validate`].
     ///
     /// # Parameters
     ///
