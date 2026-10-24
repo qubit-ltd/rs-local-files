@@ -9,6 +9,7 @@
 mod error;
 mod file_system;
 mod local;
+mod local_file_metadata_tests;
 mod outcome;
 mod path;
 pub(crate) mod rooted;
