@@ -95,8 +95,6 @@ pub(crate) use atomic_commit_state::commit_recoverably;
 pub(crate) use atomic_commit_state::finalize_failed_commit;
 pub(crate) use atomic_commit_state::synchronize_staging_file;
 pub(crate) use atomic_file_install::install_atomic_file;
-#[cfg(unix)]
-pub(crate) use atomic_file_install::install_new_atomic_file_at;
 pub(crate) use atomic_install_recovery::AtomicInstallRecovery;
 pub(crate) use atomic_install_recovery::recover_atomic_install_error;
 #[cfg(unix)]

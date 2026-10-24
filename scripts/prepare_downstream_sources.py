@@ -2,6 +2,7 @@
 """Prepare explicit coordinated checkouts without changing manifests or locks."""
 import argparse
 from collections import deque
+import fnmatch
 import json
 import os
 from pathlib import Path
@@ -48,7 +49,7 @@ def path_dependencies(manifest: Path, root: Path):
     """Yield normal/dev/build and target-specific path dependencies, with inheritance."""
     manifest = inside(root, manifest)
     data = manifest_data(manifest)
-    scopes = [data, *data.get("target", {}).values()]
+    scopes = [data, *data.get("target", {}).values(), data.get("workspace", {})]
     for scope in scopes:
         for table in DEPENDENCY_TABLES:
             for name, dependency in scope.get(table, {}).items():
@@ -66,59 +67,229 @@ def path_dependencies(manifest: Path, root: Path):
                     yield inside(root, base / dependency["path"] / "Cargo.toml")
 
 
-def redirect_fixture_io_paths(fixture: Path) -> None:
-    """Point explicit qubit-io paths in the disposable tree at its one checkout."""
+def workspace_member_manifests(manifest: Path, root: Path):
+    """Yield package manifests explicitly selected by this workspace."""
+    data = manifest_data(manifest)
+    workspace = data.get("workspace")
+    if workspace is None:
+        return
+    excluded = workspace.get("exclude", [])
+    for pattern in workspace.get("members", []):
+        for member in manifest.parent.glob(pattern):
+            relative = member.relative_to(manifest.parent).as_posix()
+            if any(fnmatch.fnmatchcase(relative, item) for item in excluded):
+                continue
+            candidate = member / "Cargo.toml" if member.is_dir() else member
+            if candidate.is_file():
+                yield inside(root, candidate)
+
+
+def manifest_lockfile(manifest: Path, root: Path) -> Path:
+    """Return the manifest's lockfile, including a workspace-owned lockfile."""
+    lockfile = manifest.with_name("Cargo.lock")
+    if lockfile.is_file():
+        return lockfile
+    data = manifest_data(manifest)
+    if "workspace" in data or data.get("package", {}).get("workspace") is not None:
+        return workspace_manifest(manifest, data, root).with_name("Cargo.lock")
+    folder = manifest.parent
+    while folder != root:
+        candidate = folder / "Cargo.toml"
+        if candidate.is_file() and "workspace" in manifest_data(candidate):
+            return candidate.with_name("Cargo.lock")
+        folder = folder.parent
+    return lockfile
+
+
+def local_package_dependencies(manifest: Path, root: Path, registry_names=frozenset()):
+    """Return direct locked local qubit packages absent from the registry lock."""
+    lockfile = manifest_lockfile(manifest, root)
+    if not lockfile.is_file():
+        return set()
+    local_names = {
+        package["name"]
+        for package in manifest_data(lockfile).get("package", [])
+        if package["name"].startswith("qubit-") and "source" not in package
+    }
+    data = manifest_data(manifest)
+    scopes = [data, *data.get("target", {}).values(), data.get("workspace", {})]
+    return {
+        dependency.get("package", alias) if isinstance(dependency, dict) else alias
+        for scope in scopes
+        for table_name in DEPENDENCY_TABLES
+        for alias, dependency in scope.get(table_name, {}).items()
+        if (dependency.get("package", alias) if isinstance(dependency, dict) else alias) in local_names
+        and (dependency.get("package", alias) if isinstance(dependency, dict) else alias) not in registry_names
+    }
+
+
+def use_latest_local_dependencies(manifest: Path, root: Path, checkout, registry_names=frozenset()) -> None:
+    """Use latest sibling sources for locked qubit packages absent from the registry."""
+    lockfile = manifest_lockfile(manifest, root)
+    if not lockfile.is_file():
+        return
+    local_names = {
+        package["name"]
+        for package in manifest_data(lockfile).get("package", [])
+        if package["name"].startswith("qubit-") and "source" not in package
+    }
+    data = manifest_data(manifest)
+    scopes = [data, *data.get("target", {}).values(), data.get("workspace", {})]
+    contents = manifest.read_text(encoding="utf-8")
+
+    def update_declaration(source, table_name, alias, transform):
+        """Update matching aliases only inside dependency table sections."""
+        section = re.compile(
+            rf"(?ms)(?P<header>^[ \t]*\[[^\]\r\n]*\.{re.escape(table_name)}\][ \t]*\r?\n|"
+            rf"^[ \t]*\[{re.escape(table_name)}\][ \t]*\r?\n)"
+            rf"(?P<body>.*?)(?=^[ \t]*\[|\Z)"
+        )
+        declaration = re.compile(
+            rf"(?m)^(?P<prefix>[ \t]*{re.escape(alias)}[ \t]*=[ \t]*)"
+            rf"(?P<value>[^\r\n]+)$"
+        )
+
+        def update_section(match):
+            body, count = declaration.subn(transform, match.group("body"))
+            return match.group("header") + body if count else match.group(0)
+
+        updated, count = section.subn(update_section, source)
+        if count == 0:
+            raise RuntimeError(f"cannot locate {alias} declaration in [{table_name}] in {manifest}")
+        return updated
+
+    for scope in scopes:
+        for table_name in DEPENDENCY_TABLES:
+            for alias, dependency in scope.get(table_name, {}).items():
+                package_name = dependency.get("package", alias) if isinstance(dependency, dict) else alias
+                if package_name not in local_names:
+                    continue
+                if isinstance(dependency, dict) and dependency.get("workspace"):
+                    continue
+                if package_name in registry_names:
+                    if isinstance(dependency, dict) and "path" in dependency:
+                        def remove_path(match):
+                            value = match.group("value").strip()
+                            if not value.startswith("{") or not value.endswith("}"):
+                                raise RuntimeError(f"unsupported dependency syntax for {package_name} in {manifest}")
+                            fields = re.sub(r"\bpath\s*=\s*(['\"])[^'\"]*\1", "", value[1:-1], count=1)
+                            fields = fields.strip().strip(",").strip()
+                            return f'{match.group("prefix")}{{{fields}}}'
+
+                        contents = update_declaration(contents, table_name, alias, remove_path)
+                    continue
+                repository = package_name.replace("qubit-", "rs-", 1)
+                sibling = checkout(repository)
+                version = dependency if isinstance(dependency, str) else dependency.get("version")
+                if not version and not (isinstance(dependency, dict) and "path" in dependency):
+                    raise RuntimeError(f"missing version constraint for local {package_name} in {manifest}")
+                if isinstance(dependency, dict) and "path" in dependency:
+                    current = inside(root, manifest.parent / dependency["path"] / "Cargo.toml")
+                    if current.is_file():
+                        actual_name = manifest_data(current).get("package", {}).get("name")
+                        if actual_name != package_name:
+                            raise RuntimeError(f"{package_name} path resolves to {actual_name!r} in {manifest}")
+                        if current.resolve() == (sibling / "Cargo.toml").resolve():
+                            continue
+                def add_path(match):
+                    value = match.group("value").strip()
+                    relative = Path(os.path.relpath(sibling, manifest.parent)).as_posix()
+                    if value.startswith(("'", '"')):
+                        return (f'{match.group("prefix")}{{ path = "{relative}", '
+                                f'version = {value} }}')
+                    if value.startswith("{") and value.endswith("}"):
+                        fields = value[1:-1].strip().rstrip(",")
+                        fields = re.sub(r"\bpath\s*=\s*(['\"])[^'\"]*\1", "", fields, count=1)
+                        fields = fields.strip().strip(",").strip()
+                        suffix = f", {fields}" if fields else ""
+                        return f'{match.group("prefix")}{{ path = "{relative}"{suffix} }}'
+                    raise RuntimeError(f"unsupported dependency syntax for {package_name} in {manifest}")
+
+                contents = update_declaration(contents, table_name, alias, add_path)
+    if contents != manifest.read_text(encoding="utf-8"):
+        manifest.write_text(contents, encoding="utf-8")
+
+    updated = manifest_data(manifest)
+    for scope in [updated, *updated.get("target", {}).values(), updated.get("workspace", {})]:
+        for table_name in DEPENDENCY_TABLES:
+            for alias, dependency in scope.get(table_name, {}).items():
+                package_name = dependency.get("package", alias) if isinstance(dependency, dict) else alias
+                if package_name not in local_names:
+                    continue
+                if package_name in registry_names:
+                    continue
+                if isinstance(dependency, dict) and dependency.get("workspace"):
+                    continue
+                if not isinstance(dependency, dict) or "path" not in dependency:
+                    raise RuntimeError(f"{package_name} must use a sibling path in {manifest}")
+                actual = inside(root, manifest.parent / dependency["path"] / "Cargo.toml")
+                if manifest_data(actual).get("package", {}).get("name") != package_name:
+                    raise RuntimeError(f"{package_name} path resolves to a different package in {manifest}")
+
+
+def redirect_fixture_io_paths(fixture: Path, manifests: set[Path] | None = None) -> None:
+    """Make every selected qubit-io edge use the same newest sibling checkout."""
     io_directory = fixture / "rs-io"
-    manifests = set()
-    for name in ("rs-fs-local", "rs-mime", "rs-local-files"):
-        manifest = fixture / name / "Cargo.toml"
-        if not manifest.is_file():
-            raise RuntimeError(f"candidate fixture missing resolver manifest: {manifest}")
-        manifests.add(manifest)
-        folder = manifest.parent
-        while folder != fixture:
-            ancestor = folder / "Cargo.toml"
-            if ancestor.is_file():
-                data = manifest_data(ancestor)
-                if "workspace" in data:
-                    manifests.add(ancestor)
-                    break
-            folder = folder.parent
+    if manifests is None:
+        manifests = {fixture / name / "Cargo.toml"
+                     for name in ("rs-fs-local", "rs-mime", "rs-local-files")}
+    selected = set(manifests)
+    for manifest in tuple(selected):
         data = manifest_data(manifest)
         if data.get("package", {}).get("workspace") is not None:
-            manifests.add(workspace_manifest(manifest, data, fixture))
+            selected.add(workspace_manifest(manifest, data, fixture))
+        else:
+            folder = manifest.parent
+            while folder != fixture:
+                ancestor = folder / "Cargo.toml"
+                if ancestor.is_file() and "workspace" in manifest_data(ancestor):
+                    selected.add(ancestor)
+                    break
+                folder = folder.parent
 
-    for manifest in sorted(manifests):
+    for manifest in sorted(selected):
         original = manifest.read_text(encoding="utf-8")
         relative_io = Path(os.path.relpath(io_directory, manifest.parent)).as_posix()
 
         def redirect(match):
-            body = match.group("body")
-            if not re.search(r"\bpath\s*=", body):
+            value = match.group("value").strip()
+            comment = match.group("comment") or ""
+            if value.startswith(("'", '"')):
+                return (f'{match.group("indent")}qubit-io = {{ path = "{relative_io}", '
+                        f'version = {value} }}{comment}')
+            if not (value.startswith("{") and value.endswith("}")):
+                raise RuntimeError(f"unsupported qubit-io dependency syntax in {manifest}")
+            dependency = tomllib.loads(f"dependency = {value}")["dependency"]
+            if dependency.get("workspace"):
                 return match.group(0)
-            body = re.sub(r"(\bpath\s*=\s*)(['\"])[^'\"]*\2",
-                          lambda path_match: f'{path_match.group(1)}"{relative_io}"', body, count=1)
-            return match.group("start") + body + match.group("end")
+            if "path" in dependency:
+                body = re.sub(r"\bpath\s*=\s*(['\"])[^'\"]*\1",
+                              f'path = "{relative_io}"', value, count=1)
+            else:
+                body = value.replace("{", f'{{ path = "{relative_io}",', 1)
+            return f'{match.group("indent")}qubit-io = {body}{comment}'
 
         updated = re.sub(
-            r"(?m)^(?P<start>[ \t]*qubit-io[ \t]*=[ \t]*\{)(?P<body>[^}]*)(?P<end>\})",
-            redirect, original)
+            r"(?m)^(?P<indent>[ \t]*)qubit-io[ \t]*=[ \t]*(?P<value>[^\r\n]+?)(?P<comment>[ \t]+#.*)?[ \t]*$",
+            redirect,
+            original,
+        )
         if updated != original:
             manifest.write_text(updated, encoding="utf-8")
         data = manifest_data(manifest)
         scopes = [data, *data.get("target", {}).values()]
-        for scope in scopes:
-            for table_name in DEPENDENCY_TABLES:
-                dependency = scope.get(table_name, {}).get("qubit-io")
-                if isinstance(dependency, dict) and "path" in dependency:
-                    resolved = (manifest.parent / dependency["path"]).resolve()
-                    if resolved != io_directory.resolve():
-                        raise RuntimeError(f"candidate fixture qubit-io path was not redirected: {manifest}: {resolved}")
+        dependencies = [scope.get(table_name, {}).get("qubit-io")
+                        for scope in scopes for table_name in DEPENDENCY_TABLES]
         workspace = data.get("workspace", {}).get("dependencies", {}).get("qubit-io")
-        if isinstance(workspace, dict) and "path" in workspace:
-            resolved = (manifest.parent / workspace["path"]).resolve()
+        dependencies.append(workspace)
+        for dependency in dependencies:
+            if dependency is None or (isinstance(dependency, dict) and dependency.get("workspace")):
+                continue
+            if not isinstance(dependency, dict) or "path" not in dependency:
+                raise RuntimeError(f"qubit-io is not a sibling path dependency in {manifest}")
+            resolved = (manifest.parent / dependency["path"]).resolve()
             if resolved != io_directory.resolve():
-                raise RuntimeError(f"candidate fixture workspace qubit-io path was not redirected: {manifest}: {resolved}")
+                raise RuntimeError(f"qubit-io path does not use selected sibling checkout in {manifest}: {resolved}")
 
 
 def write_candidate_config(fixture: Path) -> Path:
@@ -192,7 +363,8 @@ def prepare(root: Path, candidate: Path, refs: dict[str, str]) -> dict:
         return folder
 
     queue = deque([destination / "Cargo.toml"])
-    seeds = dict.fromkeys(("rs-fs-local", "rs-mime", "rs-io", *(name for name in refs if name != "support")))
+    seeds = dict.fromkeys(("rs-fs-local", "rs-mime", "rs-io",
+                           *(name for name in refs if name != "support")))
     for name in seeds:
         queue.append(checkout(name) / "Cargo.toml")
     visited = set()
@@ -206,6 +378,29 @@ def prepare(root: Path, candidate: Path, refs: dict[str, str]) -> dict:
         if not manifest.is_file():
             raise RuntimeError(f"missing path dependency manifest after checkout: {manifest}")
         visited.add(manifest)
+        candidate_lockfile = destination / "Cargo.lock"
+        registry_names = {
+            package["name"]
+            for package in (manifest_data(candidate_lockfile).get("package", []) if candidate_lockfile.is_file() else [])
+            if package["name"].startswith("qubit-") and package.get("source", "").startswith("registry+")
+        }
+        for package_name in local_package_dependencies(manifest, root, registry_names):
+            repository = package_name.replace("qubit-", "rs-", 1)
+            dependency_checkout = checkout(repository)
+            queue.append(dependency_checkout / "Cargo.toml")
+        data = manifest_data(manifest)
+        if "workspace" in data:
+            queue.extend(workspace_member_manifests(manifest, root))
+        elif data.get("package", {}).get("workspace") is not None:
+            queue.append(workspace_manifest(manifest, data, root))
+        else:
+            folder = manifest.parent
+            while folder != root:
+                workspace_root = folder / "Cargo.toml"
+                if workspace_root.is_file() and "workspace" in manifest_data(workspace_root):
+                    queue.append(workspace_root)
+                    break
+                folder = folder.parent
         queue.extend(path_dependencies(manifest, root))
     # Materialize a private tree for candidate resolution. The original checkout
     # layout above remains the immutable --locked/hash verification channel.
@@ -219,7 +414,17 @@ def prepare(root: Path, candidate: Path, refs: dict[str, str]) -> dict:
             continue
         shutil.copytree(source, fixture / name, symlinks=True,
                         ignore=shutil.ignore_patterns(".git", "target", ".codegraph", "__pycache__"))
-    redirect_fixture_io_paths(fixture)
+    fixture_manifests = {fixture / manifest.relative_to(root) for manifest in visited}
+    def fixture_checkout(repository):
+        """Return the selected dependency source inside the disposable fixture."""
+        dependency_manifest = fixture / repository / "Cargo.toml"
+        if not dependency_manifest.is_file():
+            raise RuntimeError(f"candidate fixture missing local dependency: {dependency_manifest}")
+        return fixture / repository
+
+    for manifest in sorted(fixture_manifests):
+        use_latest_local_dependencies(manifest, fixture, fixture_checkout, registry_names)
+    redirect_fixture_io_paths(fixture, fixture_manifests)
     config = write_candidate_config(fixture)
     io_manifest = fixture / "rs-io/Cargo.toml"
     if not io_manifest.is_file():

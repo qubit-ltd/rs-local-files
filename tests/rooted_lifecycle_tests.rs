@@ -70,8 +70,7 @@ fn test_rooted_local_file_system_runs_core_entry_workflow() {
         .open_reader_with_options(payload, &LocalReadOptions::new())
         .expect("rooted payload should open for reading");
     let mut content = Vec::new();
-    Streams::copy_input_to_output(&mut reader, &mut content)
-        .expect("rooted reader should return payload bytes");
+    Streams::copy_input_to_output(&mut reader, &mut content).expect("rooted reader should return payload bytes");
     let content = String::from_utf8(content).expect("file contents should be UTF-8");
     assert_eq!("first", content);
 

@@ -19,6 +19,12 @@ mod conditional_state_tests {
 
     use crate::options::LocalWritePrecondition;
 
+    #[test]
+    fn conditional_hooks_debug_output_hides_actions() {
+        let hooks = super::super::hooks::ConditionalHooks::default();
+        assert_eq!("ConditionalHooks { .. }", format!("{hooks:?}"));
+    }
+
     struct NoCloneSha256(Sha256);
     impl Default for NoCloneSha256 {
         fn default() -> Self {

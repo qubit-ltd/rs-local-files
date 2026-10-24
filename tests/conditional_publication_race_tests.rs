@@ -53,6 +53,19 @@ use sha2::Digest;
 use sha2::Sha256;
 
 #[test]
+fn test_conditional_hooks_debug_output_only_exposes_checkpoint() {
+    let secret = String::from("callback-private-data");
+    let hooks = TestConditionalHooks::once(TestConditionalPoint::BeforePublish, move || {
+        let _ = &secret;
+        Ok(())
+    });
+
+    let debug = format!("{hooks:?}");
+    assert!(debug.contains("BeforePublish"));
+    assert!(!debug.contains("callback-private-data"));
+}
+
+#[test]
 fn absent_race_preserves_late_file_and_independent_candidate_copy() {
     let directory = tempfile::tempdir().unwrap();
     let path = directory.path().join("target");

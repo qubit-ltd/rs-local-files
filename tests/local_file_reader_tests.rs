@@ -96,7 +96,6 @@ fn test_local_file_reader_follows_final_file_symlink_on_windows() {
         .open_reader_with_options(&link, &LocalReadOptions::new())
         .expect("the default Host policy should follow a final file symlink");
     let mut payload = Vec::new();
-    Streams::copy_input_to_output(&mut reader, &mut payload)
-        .expect("linked file contents should be readable");
+    Streams::copy_input_to_output(&mut reader, &mut payload).expect("linked file contents should be readable");
     assert_eq!(b"payload", payload.as_slice());
 }

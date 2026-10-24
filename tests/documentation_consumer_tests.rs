@@ -47,7 +47,6 @@ fn documented_conditional_write_runs_as_a_consumer_without_a_digest_feature() {
             dependency_line,
             &dependency_line.replace("version = \"0.5.0\"", &format!("path = \"{dependency_path}\"")),
         );
-
         let visible_code = extract_marked(guide, START, END, language)
             .lines()
             .filter(|line| {

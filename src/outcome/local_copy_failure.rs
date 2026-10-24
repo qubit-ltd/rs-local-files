@@ -306,8 +306,9 @@ pub(crate) const fn merge_copy_failure_state(
         (_, Some(LocalCopyFailureState::Indeterminate)) | (LocalCopyFailureState::Indeterminate, _) => {
             LocalCopyFailureState::Indeterminate
         }
-        (LocalCopyFailureState::PartiallyPublished, _)
-        | (_, Some(LocalCopyFailureState::PartiallyPublished)) => LocalCopyFailureState::PartiallyPublished,
+        (LocalCopyFailureState::PartiallyPublished, _) | (_, Some(LocalCopyFailureState::PartiallyPublished)) => {
+            LocalCopyFailureState::PartiallyPublished
+        }
         (_, Some(LocalCopyFailureState::Unchanged)) | (_, None) => inferred,
     }
 }

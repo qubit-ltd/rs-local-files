@@ -152,9 +152,13 @@ pub(super) fn prepare_directory(
                         .with_failure_state(crate::LocalCopyFailureState::PartiallyPublished)
                     })?;
                     statistics.directories = checked_add(statistics.directories, 1, source, destination, *statistics)
-                        .map_err(|failure| failure.with_failure_state(crate::LocalCopyFailureState::PartiallyPublished))?;
+                        .map_err(|failure| {
+                        failure.with_failure_state(crate::LocalCopyFailureState::PartiallyPublished)
+                    })?;
                     statistics.overwritten = checked_add(statistics.overwritten, 1, source, destination, *statistics)
-                        .map_err(|failure| failure.with_failure_state(crate::LocalCopyFailureState::PartiallyPublished))?;
+                        .map_err(|failure| {
+                        failure.with_failure_state(crate::LocalCopyFailureState::PartiallyPublished)
+                    })?;
                     Ok(true)
                 }
                 Some(CopyDestinationAction::Create) => {

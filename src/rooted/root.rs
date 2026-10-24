@@ -531,7 +531,8 @@ impl Root {
         self.remove_tree_typed(path).map_err(LocalFileError::into_io_error)
     }
 
-    /// Removes a descendant tree while retaining the typed partial-effect state.
+    /// Removes a descendant tree while retaining the typed partial-effect
+    /// state.
     pub(crate) fn remove_tree_typed(&self, path: &path::Path) -> crate::LocalResult<()> {
         #[cfg(any(unix, windows))]
         {

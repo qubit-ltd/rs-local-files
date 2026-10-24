@@ -34,7 +34,11 @@ fn test_copy_failure_state_merges_independent_destination_effects() {
             Some(LocalCopyFailureState::Indeterminate),
             LocalCopyFailureState::Indeterminate,
         ),
-        (LocalCopyFailureState::PartiallyPublished, None, LocalCopyFailureState::PartiallyPublished),
+        (
+            LocalCopyFailureState::PartiallyPublished,
+            None,
+            LocalCopyFailureState::PartiallyPublished,
+        ),
         (
             LocalCopyFailureState::PartiallyPublished,
             Some(LocalCopyFailureState::Unchanged),
@@ -76,7 +80,11 @@ fn test_copy_failure_state_merges_independent_destination_effects() {
             Some(LocalCopyFailureState::Indeterminate),
             LocalCopyFailureState::Published,
         ),
-        (LocalCopyFailureState::Indeterminate, None, LocalCopyFailureState::Indeterminate),
+        (
+            LocalCopyFailureState::Indeterminate,
+            None,
+            LocalCopyFailureState::Indeterminate,
+        ),
         (
             LocalCopyFailureState::Indeterminate,
             Some(LocalCopyFailureState::Unchanged),

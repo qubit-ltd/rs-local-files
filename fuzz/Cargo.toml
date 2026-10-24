@@ -10,7 +10,7 @@ cargo-fuzz = true
 
 [dependencies]
 libfuzzer-sys = "^0.4"
-qubit-io = { path = "../../rs-io", version = "0.19" }
+qubit-io = "0.19"
 qubit-local-files = { path = ".." }
 
 [[bin]]

@@ -15,10 +15,10 @@ use super::Metadata;
 use super::Path;
 use super::Root;
 use super::deletion_failure_hint;
-use super::mark_partial_after_removal;
 use super::destination::checked_add;
 use super::destination::error;
 use super::destination::optional_metadata;
+use super::mark_partial_after_removal;
 use crate::LocalAtomicWriteOptions;
 use crate::LocalDurabilityRequirement;
 use crate::local::CopyBudget;
@@ -182,13 +182,16 @@ pub(super) fn copy_file(
     #[cfg(feature = "test-support")]
     {
         if crate::local::test_support_enabled("rooted-copy-writer-open") {
-            return Err(mark_partial_after_removal(error(
-                Stage::PrepareDestination,
-                source,
-                destination,
-                statistics,
-                io::Error::from(ErrorKind::PermissionDenied),
-            ), destination_removed));
+            return Err(mark_partial_after_removal(
+                error(
+                    Stage::PrepareDestination,
+                    source,
+                    destination,
+                    statistics,
+                    io::Error::from(ErrorKind::PermissionDenied),
+                ),
+                destination_removed,
+            ));
         }
     }
     let mut writer = root
@@ -211,13 +214,12 @@ pub(super) fn copy_file(
     };
     #[cfg(not(feature = "test-support"))]
     let copy_result = budget.copy(&mut reader, &mut writer);
-    let bytes = copy_result
-        .map_err(|source_error| {
-            mark_partial_after_removal(
-                error(Stage::CopyFileContents, source, destination, statistics, source_error),
-                destination_removed,
-            )
-        })?;
+    let bytes = copy_result.map_err(|source_error| {
+        mark_partial_after_removal(
+            error(Stage::CopyFileContents, source, destination, statistics, source_error),
+            destination_removed,
+        )
+    })?;
     #[cfg(feature = "test-support")]
     let commit_result = if crate::local::test_support_enabled("rooted-copy-file-commit-native") {
         Err(crate::LocalAtomicWriteError::new(
@@ -323,5 +325,84 @@ fn rooted_commit_error(
             copy_error.with_staging_context(temporary_path, Some(cleanup_error))
         }
         _ => copy_error,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::io;
+    use std::path::Path;
+    use std::path::PathBuf;
+    use std::time::Duration;
+
+    use super::copy_file;
+    use super::rooted_commit_error;
+
+    #[test]
+    fn rooted_commit_error_maps_metadata_and_replacement_failures() {
+        let source = crate::local::LocalRelativePath::new(Path::new("source")).expect("valid relative source");
+        let destination =
+            crate::local::LocalRelativePath::new(Path::new("destination")).expect("valid relative destination");
+        let metadata_error = rooted_commit_error(
+            &source,
+            &destination,
+            super::super::Statistics::default(),
+            crate::LocalAtomicWriteError::new(
+                crate::LocalAtomicWriteStage::ApplyDestinationMetadata,
+                PathBuf::from("destination"),
+                Some(PathBuf::from("staging")),
+                crate::LocalAtomicDestinationState::Unchanged,
+                io::Error::from(io::ErrorKind::PermissionDenied),
+            )
+            .with_cleanup_error(Some(io::Error::from(io::ErrorKind::Other))),
+        );
+        assert_eq!(super::super::Stage::PrepareDestination, metadata_error.stage());
+        assert_eq!(Some(Path::new("staging")), metadata_error.temporary_path());
+        assert_eq!(
+            Some(io::ErrorKind::Other),
+            metadata_error.cleanup_error().map(io::Error::kind)
+        );
+        assert_eq!(io::ErrorKind::PermissionDenied, metadata_error.error().kind());
+
+        let replacement_error = rooted_commit_error(
+            &source,
+            &destination,
+            super::super::Statistics::default(),
+            crate::LocalAtomicWriteError::new(
+                crate::LocalAtomicWriteStage::ReplaceDestination,
+                PathBuf::from("destination"),
+                None,
+                crate::LocalAtomicDestinationState::Indeterminate,
+                io::Error::from(io::ErrorKind::Other),
+            ),
+        );
+        assert_eq!(super::super::Stage::CommitFile, replacement_error.stage());
+        assert_eq!(io::ErrorKind::Other, replacement_error.error().kind());
+    }
+
+    #[test]
+    fn rooted_file_copy_deadline_fails_before_source_inspection() {
+        let directory = tempfile::tempdir().expect("temporary root should be created");
+        let root = super::super::Root::open(directory.path()).expect("root authority should open");
+        let source = crate::local::LocalRelativePath::new(Path::new("source")).expect("valid relative source");
+        let destination =
+            crate::local::LocalRelativePath::new(Path::new("destination")).expect("valid relative destination");
+        let options = crate::local::LocalCopyDirOptions::new().with_deadline(Duration::ZERO);
+        let mut budget = crate::local::CopyBudget::new(options);
+
+        let error = copy_file(
+            &root,
+            &source,
+            &destination,
+            &options,
+            crate::LocalDurabilityRequirement::NotRequired,
+            super::super::Statistics::default(),
+            &mut budget,
+        )
+        .expect_err("expired deadline must stop before source inspection");
+
+        assert_eq!(super::super::Stage::InspectSourceEntry, error.stage());
+        assert_eq!(io::ErrorKind::TimedOut, error.error().kind());
+        assert!(!directory.path().join("destination").exists());
     }
 }

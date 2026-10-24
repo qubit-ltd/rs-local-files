@@ -65,6 +65,11 @@ fn test_read_only_file_permissions_match_across_public_entry_points() {
     fs::set_permissions(&physical, original).expect("restore permissions before assertions");
 
     assert!(native.permissions().readonly());
+    assert_eq!(host_metadata.len(), native.len());
+    assert_eq!(host_metadata.is_empty(), native.len() == 0);
+    let _ = host_metadata.accessed_at();
+    let _ = host_metadata.modified_at();
+    let _ = host_metadata.created_at();
     assert_eq!(host_entries.len(), 1);
     assert_eq!(rooted_entries.len(), 1);
     for observed in [

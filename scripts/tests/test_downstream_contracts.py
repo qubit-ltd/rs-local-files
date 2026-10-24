@@ -166,6 +166,146 @@ class SourceLayout(unittest.TestCase):
         with self.assertRaisesRegex(RuntimeError, "inherited dependency"):
             list(self.layout.path_dependencies(manifest, self.root))
 
+    def test_unpublished_mime_dependencies_use_latest_sibling_paths(self):
+        self.manifest("rs-command", '[package]\nname="qubit-command"\nversion="0.11.0"\n')
+        self.manifest("rs-local-files", '[package]\nname="qubit-local-files"\nversion="0.5.0"\n')
+        self.manifest("rs-config", '[package]\nname="qubit-config"\nversion="0.15.0"\n')
+        lockfile = self.root / "rs-mime/Cargo.lock"
+        lockfile.parent.mkdir(parents=True)
+        lockfile.write_text('version = 4\n'
+                            '[[package]]\nname="qubit-command"\nversion="0.11.0"\n'
+                            '[[package]]\nname="qubit-local-files"\nversion="0.5.0"\n'
+                            '[[package]]\nname="qubit-config"\nversion="0.15.0"\n')
+        mime = self.manifest("rs-mime", '[dependencies]\nqubit-command="0.11"\n'
+                             'qubit-local-files="0.5"\n'
+                             'qubit-config={version="0.15", default-features=false}\n')
+        checked_out = []
+
+        def checkout(name):
+            checked_out.append(name)
+            return self.root / name
+
+        self.layout.use_latest_local_dependencies(mime, self.root, checkout)
+
+        dependencies = self.layout.manifest_data(mime)["dependencies"]
+        self.assertEqual(dependencies["qubit-command"], {
+            "path": "../rs-command", "version": "0.11"})
+        self.assertEqual(dependencies["qubit-local-files"], {
+            "path": "../rs-local-files", "version": "0.5"})
+        self.assertEqual(dependencies["qubit-config"], {
+            "path": "../rs-config", "version": "0.15", "default-features": False})
+        self.assertEqual(checked_out, ["rs-command", "rs-local-files", "rs-config"])
+        self.assertEqual(set(self.layout.path_dependencies(mime, self.root)), {
+            self.root / "rs-command/Cargo.toml", self.root / "rs-local-files/Cargo.toml",
+            self.root / "rs-config/Cargo.toml"})
+
+    def test_missing_existing_path_dependency_checks_out_latest_sibling(self):
+        lockfile = self.root / "rs-consumer/Cargo.lock"
+        lockfile.parent.mkdir(parents=True)
+        lockfile.write_text('version = 4\n[[package]]\nname="qubit-redact"\nversion="0.10.0"\n')
+        manifest = self.manifest(
+            "rs-consumer",
+            '[dependencies]\nqubit-redact={path="../rs-redact", version="0.10", default-features=false}\n',
+        )
+        (self.root / "rs-redact").mkdir()
+        (self.root / "rs-redact/Cargo.toml").write_text(
+            '[package]\nname="qubit-redact"\nversion="0.10.0"\n'
+        )
+        checkouts = []
+
+        def checkout(name):
+            checkouts.append(name)
+            return self.root / name
+
+        self.layout.use_latest_local_dependencies(manifest, self.root, checkout)
+
+        self.assertEqual(checkouts, ["rs-redact"])
+        self.assertEqual(
+            self.layout.manifest_data(manifest)["dependencies"]["qubit-redact"],
+            {"path": "../rs-redact", "version": "0.10", "default-features": False},
+        )
+
+    def test_same_local_dependency_in_multiple_tables_gets_sibling_path(self):
+        self.manifest("rs-redact", '[package]\nname="qubit-redact"\nversion="0.10.0"\n')
+        manifest = self.manifest(
+            "rs-consumer",
+            '[package]\nname="consumer"\n'
+            '[dependencies]\nqubit-redact="0.10"\n'
+            '[dev-dependencies]\nqubit-redact="0.10"\n',
+        )
+        lockfile = manifest.with_name("Cargo.lock")
+        lockfile.write_text('version = 4\n[[package]]\nname="qubit-redact"\nversion="0.10.0"\n')
+
+        self.layout.use_latest_local_dependencies(manifest, self.root, lambda name: self.root / name)
+
+        data = self.layout.manifest_data(manifest)
+        self.assertEqual(data["dependencies"]["qubit-redact"], {
+            "path": "../rs-redact", "version": "0.10"})
+        self.assertEqual(data["dev-dependencies"]["qubit-redact"], {
+            "path": "../rs-redact", "version": "0.10"})
+
+    def test_candidate_registry_source_wins_over_stale_path_lock_source(self):
+        manifest = self.manifest(
+            "rs-a",
+            '[dependencies]\nqubit-budget={path="../rs-budget", version="0.9.1", features=["json"]}\n',
+        )
+        lockfile = self.root / "rs-a/Cargo.lock"
+        lockfile.write_text('version = 4\n[[package]]\nname="qubit-budget"\nversion="0.9.1"\n')
+        checkout_calls = []
+
+        def checkout(name):
+            checkout_calls.append(name)
+            return self.root / name
+
+        self.layout.use_latest_local_dependencies(manifest, self.root, checkout, {"qubit-budget"})
+
+        self.assertEqual(
+            self.layout.manifest_data(manifest)["dependencies"]["qubit-budget"],
+            {"version": "0.9.1", "features": ["json"]},
+        )
+        self.assertEqual(checkout_calls, [])
+
+    def test_workspace_inherited_unpublished_dependency_uses_sibling_path(self):
+        self.manifest("rs-redact", '[package]\nname="qubit-redact"\nversion="0.10.0"\n')
+        workspace = self.manifest(
+            "rs-consumer",
+            '[workspace]\nmembers=["member"]\n'
+            '[workspace.dependencies]\nqubit-redact="0.10"\n',
+        )
+        member = self.manifest(
+            "rs-consumer/member",
+            '[package]\nname="consumer"\nversion="1.0.0"\n'
+            '[dependencies]\nqubit-redact={workspace=true}\n',
+        )
+        (self.root / "rs-consumer/Cargo.lock").write_text(
+            'version = 4\n[[package]]\nname="qubit-redact"\nversion="0.10.0"\n'
+        )
+
+        self.layout.use_latest_local_dependencies(workspace, self.root, lambda name: self.root / "rs-redact")
+
+        self.assertEqual(
+            self.layout.manifest_data(workspace)["workspace"]["dependencies"]["qubit-redact"],
+            {"path": "../rs-redact", "version": "0.10"},
+        )
+        self.assertTrue(self.layout.manifest_data(member)["dependencies"]["qubit-redact"]["workspace"])
+
+    def test_path_only_local_dependency_is_valid(self):
+        self.manifest("rs-redact", '[package]\nname="qubit-redact"\nversion="0.10.0"\n')
+        manifest = self.manifest(
+            "rs-consumer",
+            '[dependencies]\nqubit-redact={path="../rs-redact"}\n',
+        )
+        manifest.with_name("Cargo.lock").write_text(
+            'version = 4\n[[package]]\nname="qubit-redact"\nversion="0.10.0"\n'
+        )
+
+        self.layout.use_latest_local_dependencies(manifest, self.root, lambda name: self.root / "rs-redact")
+
+        self.assertEqual(
+            self.layout.manifest_data(manifest)["dependencies"]["qubit-redact"],
+            {"path": "../rs-redact"},
+        )
+
     def test_fixture_qubit_io_paths_all_use_one_copy_without_touching_source(self):
         fixture = self.root / "candidate-fixture"
         original_io = self.manifest("rs-io", '[package]\nname="qubit-io"\n')
@@ -175,7 +315,7 @@ class SourceLayout(unittest.TestCase):
                                  '[dev-dependencies]\nqubit-io={path="../rs-io"}\n'
                                  '[target.\'cfg(unix)\'.dependencies]\nqubit-io={path="../rs-io"}\n')
         workspace = self.manifest("rs-mime", '[workspace]\nmembers=["member"]\n'
-                                  '[workspace.dependencies]\nqubit-io={path="../rs-io"}\n')
+                                  '[workspace.dependencies]\nqubit-io="0.19"\n')
         member = self.manifest("rs-mime/member", '[package]\nname="member"\n'
                                '[dependencies]\nqubit-io={workspace=true}\n')
         fixture.mkdir()
@@ -196,7 +336,9 @@ class SourceLayout(unittest.TestCase):
         copied_member = fixture / "rs-mime/member/Cargo.toml"
         self.assertEqual(list(self.layout.path_dependencies(copied_member, fixture)), [fixture / "rs-io/Cargo.toml"])
         self.assertIn('path="../rs-io"', consumer.read_text())
-        self.assertIn('path="../rs-io"', workspace.read_text())
+        self.assertIn('path = "../rs-io"', (fixture / "rs-fs-local/Cargo.toml").read_text())
+        self.assertIn('qubit-io="0.19"', workspace.read_text())
+        self.assertIn('path = "../rs-io"', (fixture / "rs-mime/Cargo.toml").read_text())
         self.assertEqual(original_io.read_text(), '[package]\nname="qubit-io"\n')
 
     def test_cargo_config_patches_resolve_to_fixture_sources(self):
@@ -240,6 +382,60 @@ class CompleteLayout(unittest.TestCase):
     setUp = SourceLayout.setUp
     manifest = SourceLayout.manifest
 
+    def test_prepare_rewrites_only_fixture_and_processes_workspace_members(self):
+        candidate = self.root / "rs-local-files"
+        self.manifest("rs-local-files", '[package]\nname="local"\nversion="0.5.0"\n')
+        original_workspace = (
+            '[workspace]\nmembers=["member"]\n'
+            '[workspace.dependencies]\nqubit-redact="0.10"\n'
+        )
+        original_member = (
+            '[package]\nname="mime-member"\nversion="1.0.0"\n'
+            '[dependencies]\nqubit-redact={workspace=true}\nqubit-command="0.11"\n'
+        )
+        original_lock = ('version = 4\n[[package]]\nname="qubit-redact"\nversion="0.10.0"\n'
+                         '[[package]]\nname="qubit-command"\nversion="0.11.0"\n')
+        self.manifest("rs-mime", original_workspace)
+        self.manifest("rs-mime/member", original_member)
+        (self.root / "rs-mime/Cargo.lock").write_text(original_lock)
+        created = []
+
+        def checkout(root, name, ref):
+            created.append(name)
+            if name == "rs-mime":
+                self.manifest(name, original_workspace)
+                self.manifest("rs-mime/member", original_member)
+                (root / name / "Cargo.lock").write_text(original_lock)
+            else:
+                package_name = name.replace("rs-", "qubit-")
+                version = "0.10.0" if name == "rs-redact" else "0.11.0"
+                self.manifest(name, f'[package]\nname="{package_name}"\nversion="{version}"\n')
+            return root / name
+
+        with patch.object(self.layout, "ensure_checkout", side_effect=checkout), \
+                patch.object(self.layout, "git_output", side_effect=lambda folder, *args: "" if args[0] == "status" else "a" * 40), \
+                patch.object(self.layout.subprocess, "run"):
+            records = self.layout.prepare(
+                self.root,
+                candidate,
+                {"rs-fs-local": "fs-ref", "rs-mime": "mime-ref", "support": "support-ref"},
+            )
+
+        fixture_workspace = self.root / "candidate-fixture/rs-mime/Cargo.toml"
+        fixture_member = self.root / "candidate-fixture/rs-mime/member/Cargo.toml"
+        self.assertEqual(self.layout.manifest_data(fixture_workspace)["workspace"]["dependencies"]["qubit-redact"], {
+            "path": "../rs-redact", "version": "0.10"})
+        self.assertTrue(self.layout.manifest_data(fixture_member)["dependencies"]["qubit-redact"]["workspace"])
+        self.assertEqual(self.layout.manifest_data(fixture_member)["dependencies"]["qubit-command"], {
+            "path": "../../rs-command", "version": "0.11"})
+        self.assertEqual((self.root / "rs-mime/Cargo.toml").read_text(), original_workspace)
+        self.assertEqual((self.root / "rs-mime/member/Cargo.toml").read_text(), original_member)
+        self.assertEqual((self.root / "rs-mime/Cargo.lock").read_text(), original_lock)
+        self.assertIn("rs-redact", created)
+        self.assertIn("rs-command", created)
+        self.assertIn("rs-redact", records)
+        self.assertIn("rs-command", records)
+
     def test_cycles_and_nested_fixtures_do_not_create_spurious_repositories(self):
         candidate = self.root / "rs-local-files"
         self.manifest("rs-local-files", '[package]\nname="local"\n[dev-dependencies]\nfixture={path="tests/fixture"}\n')
@@ -252,7 +448,8 @@ class CompleteLayout(unittest.TestCase):
             if name == "rs-fs-local":
                 contents += '[dependencies]\ncommon={path="../rs-support"}\n'
             elif name == "rs-mime":
-                contents += '[dependencies]\nlocal={path="../rs-local-files"}\n'
+                contents += ('[dependencies]\nqubit-command="0.11"\n'
+                             'qubit-local-files="0.5"\nlocal={path="../rs-local-files"}\n')
             elif name == "rs-support":
                 contents += '[dependencies]\nconsumer={path="../rs-fs-local"}\n'
             self.manifest(name, contents)

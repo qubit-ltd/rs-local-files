@@ -7,6 +7,7 @@
 // =============================================================================
 //! Named deterministic checkpoint actions shared by generic and fake backends.
 
+#[cfg(all(feature = "digest", feature = "test-support"))]
 use std::io;
 use std::sync::Arc;
 use std::sync::Mutex;

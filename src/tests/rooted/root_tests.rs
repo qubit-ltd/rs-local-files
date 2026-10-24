@@ -67,8 +67,7 @@ fn test_root_authority_manages_descendant_entries() {
         .open_reader(&file, &InternalReadOptions::default())
         .expect("rooted reader should open");
     let mut content = Vec::new();
-    Streams::copy_input_to_output(&mut reader, &mut content)
-        .expect("rooted reader should read fixture content");
+    Streams::copy_input_to_output(&mut reader, &mut content).expect("rooted reader should read fixture content");
     let content = String::from_utf8(content).expect("file contents should be UTF-8");
     assert_eq!("payload", content);
     drop(reader);

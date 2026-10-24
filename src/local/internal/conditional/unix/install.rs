@@ -14,7 +14,7 @@ use std::os::fd::AsRawFd;
 use super::namespace::Namespace;
 use crate::local::LocalAtomicDestinationState;
 use crate::local::internal::AtomicStagingState;
-use crate::local::internal::install_new_atomic_file_at;
+use crate::local::internal::atomic_file_install::install_new_atomic_file_at;
 
 pub(super) fn exchange(namespace: &Namespace, left: &CString, right: &CString) -> io::Result<()> {
     #[cfg(target_os = "linux")]

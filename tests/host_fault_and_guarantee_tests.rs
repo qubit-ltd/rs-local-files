@@ -148,8 +148,7 @@ fn test_host_facade_uses_configured_reader_writer_and_list_policies() {
         .open_reader_with_options(&file, &LocalReadOptions::new().with_open_retry_timeout(Duration::ZERO))
         .expect("regular file should open with an explicit retry timeout");
     let mut content = Vec::new();
-    Streams::copy_input_to_output(&mut reader, &mut content)
-        .expect("reader should return the fixture bytes");
+    Streams::copy_input_to_output(&mut reader, &mut content).expect("reader should return the fixture bytes");
     let content = String::from_utf8(content).expect("file contents should be UTF-8");
     assert_eq!("payload", content);
 
@@ -327,7 +326,9 @@ fn test_freebsd_xattr_short_read_and_atomic_preservation() {
     if set_result == -1 {
         let error = std::io::Error::last_os_error();
         if error.raw_os_error() == Some(libc::ENOTSUP) {
-            eprintln!("skipping FreeBSD xattr preservation: user extended attributes are unsupported on this filesystem");
+            eprintln!(
+                "skipping FreeBSD xattr preservation: user extended attributes are unsupported on this filesystem"
+            );
             return;
         }
         panic!("destination extended attribute should be created: {error}");
