@@ -205,7 +205,7 @@ impl FakeBackend {
                 }
                 ConditionalHookAction::OverwriteTargetInPlace(bytes) => {
                     let mut target = fs::OpenOptions::new().write(true).truncate(true).open(&self.target)?;
-                    std::io::Write::write_all(&mut target, &bytes)?;
+                    qubit_io::Output::write_fully(&mut target, &bytes)?;
                 }
                 ConditionalHookAction::CorruptCandidateCopy(bytes) => fs::write(self.root.path().join("copy"), bytes)?,
                 ConditionalHookAction::PartialCandidateCopy(bytes) => {
@@ -232,9 +232,14 @@ pub(super) fn required_options() -> LocalWriteOptions {
         .with_durability(LocalDurabilityRequirement::Required)
 }
 
-impl std::io::Write for FakeBackend {
-    fn write(&mut self, bytes: &[u8]) -> io::Result<usize> {
-        fs::OpenOptions::new().append(true).open(&self.candidate)?.write(bytes)
+impl qubit_io::Output for FakeBackend {
+    type Item = u8;
+
+    unsafe fn write_unchecked(&mut self, bytes: &[u8], index: usize, count: usize) -> io::Result<usize> {
+        qubit_io::Output::write(
+            &mut fs::OpenOptions::new().append(true).open(&self.candidate)?,
+            &bytes[index..index + count],
+        )
     }
     fn flush(&mut self) -> io::Result<()> {
         self.inject(ConditionalPoint::Flush)

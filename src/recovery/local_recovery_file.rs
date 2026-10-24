@@ -76,11 +76,9 @@ impl LocalRecoveryFile {
 #[cfg(test)]
 mod conditional_types_tests {
     use std::fs::File;
-    use std::io::Read;
     use std::path::PathBuf;
 
-    use qubit_io::Input;
-    use qubit_io::InputRef;
+    use qubit_io::Streams;
     use tempfile::tempdir;
 
     use crate::LocalFileError;
@@ -125,10 +123,7 @@ mod conditional_types_tests {
         assert_eq!(recovery.diagnostic_path(), Some(path.as_path()));
         let mut reader = recovery.open_reader().expect("open retained recovery file");
         let mut contents = Vec::new();
-        InputRef::new(&mut reader)
-            .into_std_read()
-            .read_to_end(&mut contents)
-            .expect("read recovery content");
+        Streams::copy_input_to_output(&mut reader, &mut contents).expect("read recovery content");
         assert_eq!(contents, b"candidate B");
         drop(recovery);
 

@@ -12,7 +12,6 @@ use std::io::ErrorKind;
 use std::io::IoSlice;
 use std::io::Seek;
 use std::io::SeekFrom;
-use std::io::Write;
 use std::path::Path;
 use std::path::PathBuf;
 #[cfg(not(windows))]
@@ -562,7 +561,7 @@ fn test_local_temp_file_exposes_mutable_open_file_handle() {
     temporary
         .as_file_mut()
         .expect("open temporary file should expose its native handle")
-        .write_all(b"payload")
+        .write_fully(b"payload")
         .expect("native handle should write through the guard");
     temporary
         .flush()

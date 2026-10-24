@@ -11,8 +11,8 @@ use std::fs;
 use std::io;
 use std::path::Path;
 
-use qubit_io::Input;
 use qubit_io::Output;
+use qubit_io::Streams;
 use tempfile::tempdir;
 
 use crate::local::LocalRelativePath;
@@ -66,9 +66,10 @@ fn test_root_authority_manages_descendant_entries() {
     let mut reader = root
         .open_reader(&file, &InternalReadOptions::default())
         .expect("rooted reader should open");
-    let mut content = String::new();
-    std::io::Read::read_to_string(&mut qubit_io::InputRef::new(&mut reader).into_std_read(), &mut content)
+    let mut content = Vec::new();
+    Streams::copy_input_to_output(&mut reader, &mut content)
         .expect("rooted reader should read fixture content");
+    let content = String::from_utf8(content).expect("file contents should be UTF-8");
     assert_eq!("payload", content);
     drop(reader);
     let appended = LocalRelativePath::new(Path::new("nested/appended")).expect("appended path should be valid");

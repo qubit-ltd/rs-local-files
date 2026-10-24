@@ -12,7 +12,7 @@ mod local_file_system_tests {
 
 use std::fs;
 
-use qubit_io::Input;
+use qubit_io::Streams;
 use qubit_local_files::LocalFileSystem;
 use qubit_local_files::error::LocalFileErrorKind;
 use qubit_local_files::error::LocalFileOperation;
@@ -179,9 +179,9 @@ fn test_local_file_system_open_reader_requires_regular_file() {
         .expect("Host filesystem should open")
         .open_reader_with_options(&file, &LocalReadOptions::new())
         .expect("regular file should open");
-    let mut content = String::new();
-    std::io::Read::read_to_string(&mut qubit_io::InputRef::new(&mut reader).into_std_read(), &mut content)
-        .expect("reader should return fixture content");
+    let mut content = Vec::new();
+    Streams::copy_input_to_output(&mut reader, &mut content).expect("reader should return fixture content");
+    let content = String::from_utf8(content).expect("file contents should be UTF-8");
     assert_eq!("content", content);
 
     let error = LocalFileSystem::host()

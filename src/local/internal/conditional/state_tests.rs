@@ -13,7 +13,7 @@ mod conditional_state_tests {
     use digest::OutputSizeUser;
     use digest::Update;
     use digest::consts::U32;
-    use qubit_io::Input;
+    use qubit_io::Streams;
     use sha2::Digest;
     use sha2::Sha256;
 
@@ -42,13 +42,9 @@ mod conditional_state_tests {
     }
 
     fn recovery_bytes(file: &crate::recovery::LocalRecoveryFile) -> Vec<u8> {
-        use std::io::Read;
-        let reader = file.open_reader().expect("recovery entry opens");
+        let mut reader = file.open_reader().expect("recovery entry opens");
         let mut bytes = Vec::new();
-        reader
-            .into_std_read()
-            .read_to_end(&mut bytes)
-            .expect("recovery entry reads");
+        Streams::copy_input_to_output(&mut reader, &mut bytes).expect("recovery entry reads");
         bytes
     }
 
@@ -535,13 +531,9 @@ mod conditional_state_tests {
         );
         let copy = error.candidate().expect("verified copy must be retained");
         assert_eq!(copy.role(), crate::recovery::LocalRecoveryFileRole::CandidateCopy);
-        let reader = copy.open_reader().expect("retained copy remains readable");
-        use std::io::Read;
+        let mut reader = copy.open_reader().expect("retained copy remains readable");
         let mut bytes = Vec::new();
-        reader
-            .into_std_read()
-            .read_to_end(&mut bytes)
-            .expect("read recovery content");
+        Streams::copy_input_to_output(&mut reader, &mut bytes).expect("read recovery content");
         assert_eq!(bytes, b"B");
         assert_eq!(std::fs::read(target_path).expect("precondition target remains"), b"A");
     }

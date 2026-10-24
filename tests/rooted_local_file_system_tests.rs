@@ -13,8 +13,8 @@ use std::io::ErrorKind;
 use std::path::Path;
 use std::path::PathBuf;
 
-use qubit_io::Input;
 use qubit_io::Output;
+use qubit_io::Streams;
 use qubit_local_files::LocalFileSystem;
 use qubit_local_files::error::LocalFileErrorKind;
 use qubit_local_files::error::LocalPersistErrorParts;
@@ -1022,9 +1022,9 @@ fn test_rooted_local_file_system_reads_regular_file() {
     let mut reader = rooted
         .open_reader_with_options(Path::new("payload"), &LocalReadOptions::new())
         .expect("reader should open");
-    let mut content = String::new();
-    std::io::Read::read_to_string(&mut qubit_io::InputRef::new(&mut reader).into_std_read(), &mut content)
-        .expect("reader should read fixture");
+    let mut content = Vec::new();
+    Streams::copy_input_to_output(&mut reader, &mut content).expect("reader should read fixture");
+    let content = String::from_utf8(content).expect("file contents should be UTF-8");
     assert_eq!("content", content);
 }
 

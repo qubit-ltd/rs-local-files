@@ -7,13 +7,12 @@
 // =============================================================================
 
 use std::fs;
-use std::io::Write;
 use std::path::Path;
 #[cfg(not(windows))]
 use std::time::Duration;
 
-use qubit_io::Input;
 use qubit_io::Output;
+use qubit_io::Streams;
 use qubit_local_files::LocalFileSystem;
 use qubit_local_files::error::LocalFileErrorKind;
 use qubit_local_files::error::LocalFileOperation;
@@ -346,9 +345,7 @@ fn test_rooted_temporary_resources_persist_through_configured_parents() {
         )
         .expect("rooted temporary file should create its parent");
     temporary_file
-        .as_file_mut()
-        .expect("temporary file should retain an open handle")
-        .write_all(b"temporary payload")
+        .write_fully(b"temporary payload")
         .expect("temporary file should accept bytes");
     let file_outcome = temporary_file
         .persist_with(
@@ -706,9 +703,9 @@ fn test_rooted_local_file_system_reads_metadata_and_appends() {
     let mut reader = rooted
         .open_reader_with_options(Path::new("payload"), &LocalReadOptions::new())
         .expect("rooted reader should open");
-    let mut payload = String::new();
-    std::io::Read::read_to_string(&mut qubit_io::InputRef::new(&mut reader).into_std_read(), &mut payload)
-        .expect("rooted reader should read payload");
+    let mut payload = Vec::new();
+    Streams::copy_input_to_output(&mut reader, &mut payload).expect("rooted reader should read payload");
+    let payload = String::from_utf8(payload).expect("file contents should be UTF-8");
     assert_eq!("base", payload);
 
     let mut writer = rooted
@@ -1060,9 +1057,10 @@ fn test_rooted_local_file_system_opens_reader_and_writer_with_retry_deadlines() 
             &LocalReadOptions::new().with_open_retry_timeout(Duration::ZERO),
         )
         .expect("initial rooted reader attempt should not need a retry");
-    let mut contents = String::new();
-    std::io::Read::read_to_string(&mut qubit_io::InputRef::new(&mut reader).into_std_read(), &mut contents)
+    let mut contents = Vec::new();
+    Streams::copy_input_to_output(&mut reader, &mut contents)
         .expect("rooted reader should read its fixture");
+    let contents = String::from_utf8(contents).expect("file contents should be UTF-8");
     assert_eq!("reader", contents);
 
     let mut staged = rooted

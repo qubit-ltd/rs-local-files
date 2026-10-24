@@ -14,8 +14,8 @@ use std::os::unix::ffi::OsStrExt;
 use std::path::Path;
 use std::time::Duration;
 
-use qubit_io::Input;
 use qubit_io::Output;
+use qubit_io::Streams;
 use qubit_local_files::LocalFileSystem;
 use qubit_local_files::error::LocalFileErrorKind;
 #[cfg(feature = "test-support")]
@@ -147,9 +147,10 @@ fn test_host_facade_uses_configured_reader_writer_and_list_policies() {
         .expect("Host filesystem should open")
         .open_reader_with_options(&file, &LocalReadOptions::new().with_open_retry_timeout(Duration::ZERO))
         .expect("regular file should open with an explicit retry timeout");
-    let mut content = String::new();
-    std::io::Read::read_to_string(&mut qubit_io::InputRef::new(&mut reader).into_std_read(), &mut content)
+    let mut content = Vec::new();
+    Streams::copy_input_to_output(&mut reader, &mut content)
         .expect("reader should return the fixture bytes");
+    let content = String::from_utf8(content).expect("file contents should be UTF-8");
     assert_eq!("payload", content);
 
     let mut writer = LocalFileSystem::host()

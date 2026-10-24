@@ -13,7 +13,7 @@ use std::os::windows::fs::OpenOptionsExt;
 use std::path::Path;
 
 use digest::Digest;
-use qubit_io::Input;
+use qubit_io::Streams;
 use sha2::Sha256;
 use sha2::digest::Output;
 
@@ -316,10 +316,9 @@ fn conditional_windows_absent_race_never_overwrites_late_target() {
     .expect_err("the racing target must reject no-replace installation");
     assert_eq!(fs::read(&target).expect("racing target should remain"), b"C");
     let candidate = failure.candidate().expect("complete B copy must remain recoverable");
-    let reader = candidate.open_reader().expect("candidate copy identity should verify");
-    let mut reader = reader.into_std_read();
+    let mut reader = candidate.open_reader().expect("candidate copy identity should verify");
     let mut bytes = Vec::new();
-    std::io::Read::read_to_end(&mut reader, &mut bytes).expect("candidate copy should read");
+    Streams::copy_input_to_output(&mut reader, &mut bytes).expect("candidate copy should read");
     assert_eq!(bytes, b"B");
 }
 
@@ -547,12 +546,11 @@ fn conditional_windows_partial_1177_receipt_reports_installed_and_displaced_entr
     );
     assert_eq!(attempt.displaced.len(), 1, "actual backup must be reported");
     assert_eq!(attempt.displaced[0].role(), LocalRecoveryFileRole::Displaced);
-    let backup_reader = attempt.displaced[0]
+    let mut backup_reader = attempt.displaced[0]
         .open_reader()
         .expect("backup should retain the displaced file");
-    let mut backup_reader = backup_reader.into_std_read();
     let mut backup_bytes = Vec::new();
-    std::io::Read::read_to_end(&mut backup_reader, &mut backup_bytes).expect("displaced file should remain readable");
+    Streams::copy_input_to_output(&mut backup_reader, &mut backup_bytes).expect("displaced file should remain readable");
     assert_eq!(backup_bytes, b"A");
 }
 
@@ -581,16 +579,15 @@ fn conditional_windows_partial_1177_receipt_retains_every_visible_object() {
     let roles: Vec<_> = attempt.displaced.iter().map(|entry| entry.role()).collect();
     assert!(roles.contains(&LocalRecoveryFileRole::Displaced));
     assert!(roles.contains(&LocalRecoveryFileRole::StagedCandidate));
-    let candidate = attempt
+    let mut candidate = attempt
         .displaced
         .iter()
         .find(|entry| entry.role() == LocalRecoveryFileRole::StagedCandidate)
         .expect("candidate path must be reported")
         .open_reader()
         .expect("candidate should remain readable");
-    let mut candidate = candidate.into_std_read();
     let mut bytes = Vec::new();
-    std::io::Read::read_to_end(&mut candidate, &mut bytes).expect("candidate should read");
+    Streams::copy_input_to_output(&mut candidate, &mut bytes).expect("candidate should read");
     assert_eq!(bytes, b"B");
 }
 

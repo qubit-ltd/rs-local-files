@@ -12,7 +12,7 @@ use std::fs;
 #[cfg(any(unix, windows))]
 use std::path::Path;
 
-use qubit_io::Input;
+use qubit_io::Streams;
 #[cfg(any(unix, windows))]
 use qubit_local_files::LocalFileSystem;
 #[cfg(any(unix, windows))]
@@ -42,9 +42,9 @@ fn test_host_path_resolution_follows_intermediate_symlink() {
         .expect("Host filesystem should open")
         .open_reader_with_options(&directory.path().join("link/payload"), &LocalReadOptions::new())
         .expect("host resolution should follow the intermediate link");
-    let mut content = String::new();
-    std::io::Read::read_to_string(&mut qubit_io::InputRef::new(&mut reader).into_std_read(), &mut content)
-        .expect("resolved payload should be readable");
+    let mut content = Vec::new();
+    Streams::copy_input_to_output(&mut reader, &mut content).expect("resolved payload should be readable");
+    let content = String::from_utf8(content).expect("file contents should be UTF-8");
     assert_eq!("payload", content);
 }
 

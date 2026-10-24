@@ -8,8 +8,8 @@
 
 use std::fs;
 
-use qubit_io::Input;
 use qubit_io::Output;
+use qubit_io::Streams;
 use qubit_local_files::LocalFileSystem;
 use qubit_local_files::options::LocalCopyOptions;
 use qubit_local_files::options::LocalCreateDirectoryOptions;
@@ -61,8 +61,7 @@ fn test_host_local_file_system_workflow() {
     let mut reader = filesystem
         .open_reader_with_options(&source, &LocalReadOptions::new())
         .expect("reader should open");
-    std::io::Read::read_to_end(&mut qubit_io::InputRef::new(&mut reader).into_std_read(), &mut payload)
-        .expect("payload should be read");
+    Streams::copy_input_to_output(&mut reader, &mut payload).expect("payload should be read");
     assert_eq!(b"payload", payload.as_slice());
     assert_eq!(
         1,

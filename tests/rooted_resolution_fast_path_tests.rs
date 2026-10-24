@@ -10,8 +10,8 @@
 use std::fs;
 use std::path::Path;
 
-use qubit_io::Input;
 use qubit_io::Output;
+use qubit_io::Streams;
 use qubit_local_files::LocalFileSystem;
 #[cfg(unix)]
 use qubit_local_files::error::LocalFileErrorKind;
@@ -42,8 +42,7 @@ fn test_rooted_deep_normal_path_preserves_metadata_and_reader_behavior() {
         .open_reader(Path::new("a/b/c/payload"))
         .expect("deep reader should resolve");
     let mut content = Vec::new();
-    std::io::Read::read_to_end(&mut qubit_io::InputRef::new(&mut reader).into_std_read(), &mut content)
-        .expect("deep reader should read payload");
+    Streams::copy_input_to_output(&mut reader, &mut content).expect("deep reader should read payload");
     assert_eq!(b"payload", content.as_slice());
 }
 
@@ -93,8 +92,7 @@ fn test_rooted_link_path_preserves_symlink_fallback_behavior() {
         .open_reader(Path::new("a/link/payload"))
         .expect("link traversal should follow existing rooted policy");
     let mut content = Vec::new();
-    std::io::Read::read_to_end(&mut qubit_io::InputRef::new(&mut reader).into_std_read(), &mut content)
-        .expect("link traversal should read payload");
+    Streams::copy_input_to_output(&mut reader, &mut content).expect("link traversal should read payload");
     assert_eq!(b"through-link", content.as_slice());
 }
 

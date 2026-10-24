@@ -10,8 +10,8 @@ use std::fs;
 #[cfg(not(windows))]
 use std::path::Path;
 
-use qubit_io::Input;
 use qubit_io::Output;
+use qubit_io::Streams;
 use qubit_local_files::LocalFileSystem;
 use qubit_local_files::error::LocalFileErrorKind;
 #[cfg(not(windows))]
@@ -70,9 +70,10 @@ fn test_rooted_local_file_system_runs_core_entry_workflow() {
     let mut reader = rooted
         .open_reader_with_options(payload, &LocalReadOptions::new())
         .expect("rooted payload should open for reading");
-    let mut content = String::new();
-    std::io::Read::read_to_string(&mut qubit_io::InputRef::new(&mut reader).into_std_read(), &mut content)
+    let mut content = Vec::new();
+    Streams::copy_input_to_output(&mut reader, &mut content)
         .expect("rooted reader should return payload bytes");
+    let content = String::from_utf8(content).expect("file contents should be UTF-8");
     assert_eq!("first", content);
 
     let entries = rooted

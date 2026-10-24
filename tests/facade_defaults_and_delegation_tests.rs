@@ -11,8 +11,8 @@ use std::fs;
 use std::path::Path;
 use std::time::Duration;
 
-use qubit_io::Input;
 use qubit_io::Output;
+use qubit_io::Streams;
 use qubit_local_files::LocalFileSystem;
 use qubit_local_files::capability::LocalFileSystemCapabilities;
 use qubit_local_files::capability::LocalFileSystemLimits;
@@ -221,9 +221,9 @@ fn test_public_facade_uses_complete_instance_defaults() {
     }
     #[cfg(windows)]
     assert_eq!(permissions.unix_mode(), None);
-    let mut content = String::new();
-    std::io::Read::read_to_string(&mut qubit_io::InputRef::new(&mut reader).into_std_read(), &mut content)
-        .expect("default reader should read");
+    let mut content = Vec::new();
+    Streams::copy_input_to_output(&mut reader, &mut content).expect("default reader should read");
+    let content = String::from_utf8(content).expect("file contents should be UTF-8");
     assert_eq!("payload", content);
     assert_eq!(b"pay", filesystem.read_prefix(&source, 3).unwrap().as_slice());
 
@@ -368,9 +368,9 @@ fn test_public_host_facade_delegates_ordinary_operations() {
     let mut reader = filesystem
         .open_reader_with_options(&source, &LocalReadOptions::new())
         .expect("source reader should open");
-    let mut content = String::new();
-    std::io::Read::read_to_string(&mut qubit_io::InputRef::new(&mut reader).into_std_read(), &mut content)
-        .expect("source reader should read");
+    let mut content = Vec::new();
+    Streams::copy_input_to_output(&mut reader, &mut content).expect("source reader should read");
+    let content = String::from_utf8(content).expect("file contents should be UTF-8");
     assert_eq!("payload", content);
     assert_eq!(
         b"pay",

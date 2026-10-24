@@ -12,6 +12,8 @@ use std::io::Seek;
 use std::io::SeekFrom;
 
 use qubit_io::Input;
+#[cfg(windows)]
+use qubit_io::Streams;
 use qubit_local_files::LocalFileSystem;
 use qubit_local_files::options::LocalReadOptions;
 use tempfile::tempdir;
@@ -94,7 +96,7 @@ fn test_local_file_reader_follows_final_file_symlink_on_windows() {
         .open_reader_with_options(&link, &LocalReadOptions::new())
         .expect("the default Host policy should follow a final file symlink");
     let mut payload = Vec::new();
-    std::io::Read::read_to_end(&mut qubit_io::InputRef::new(&mut reader).into_std_read(), &mut payload)
+    Streams::copy_input_to_output(&mut reader, &mut payload)
         .expect("linked file contents should be readable");
     assert_eq!(b"payload", payload.as_slice());
 }
