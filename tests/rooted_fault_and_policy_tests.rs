@@ -1058,8 +1058,7 @@ fn test_rooted_local_file_system_opens_reader_and_writer_with_retry_deadlines() 
         )
         .expect("initial rooted reader attempt should not need a retry");
     let mut contents = Vec::new();
-    Streams::copy_input_to_output(&mut reader, &mut contents)
-        .expect("rooted reader should read its fixture");
+    Streams::copy_input_to_output(&mut reader, &mut contents).expect("rooted reader should read its fixture");
     let contents = String::from_utf8(contents).expect("file contents should be UTF-8");
     assert_eq!("reader", contents);
 
@@ -1363,19 +1362,81 @@ where
 #[test]
 fn test_rooted_writer_exercises_destination_identity_fault_boundaries() {
     const TEST_NAME: &str = "test_rooted_writer_exercises_destination_identity_fault_boundaries";
-    for (fault, fails) in [
-        ("rooted-destination-open", true),
-        ("rooted-destination-missing", true),
-        ("rooted-destination-would-block", true),
-        ("rooted-destination-invalid", true),
-        ("rooted-destination-native", true),
-        ("rooted-identity-mismatch", true),
-        ("rooted-identity-missing", true),
-        ("rooted-identity-inspect", true),
-        ("rooted-status-type", true),
-        ("rooted-status-missing", true),
-        ("rooted-status-error", true),
-        ("rooted-identity-overflow", true),
+    for (fault, native_kind, raw_os_error, error_kind) in [
+        // The first five selectors fail while commit opens the destination.
+        (
+            "rooted-destination-open",
+            std::io::ErrorKind::Other,
+            Some(libc::EIO),
+            LocalFileErrorKind::Io,
+        ),
+        (
+            "rooted-destination-missing",
+            std::io::ErrorKind::NotFound,
+            None,
+            LocalFileErrorKind::NotFound,
+        ),
+        (
+            "rooted-destination-would-block",
+            std::io::ErrorKind::WouldBlock,
+            None,
+            LocalFileErrorKind::Io,
+        ),
+        (
+            "rooted-destination-invalid",
+            std::io::ErrorKind::InvalidInput,
+            None,
+            LocalFileErrorKind::InvalidPath,
+        ),
+        (
+            "rooted-destination-native",
+            std::io::ErrorKind::Other,
+            Some(libc::EIO),
+            LocalFileErrorKind::Io,
+        ),
+        // The remaining selectors fail during descriptor-relative identity verification.
+        (
+            "rooted-identity-mismatch",
+            std::io::ErrorKind::InvalidInput,
+            None,
+            LocalFileErrorKind::InvalidPath,
+        ),
+        (
+            "rooted-identity-missing",
+            std::io::ErrorKind::InvalidInput,
+            None,
+            LocalFileErrorKind::InvalidPath,
+        ),
+        (
+            "rooted-identity-inspect",
+            std::io::ErrorKind::Other,
+            Some(libc::EIO),
+            LocalFileErrorKind::Io,
+        ),
+        (
+            "rooted-status-type",
+            std::io::ErrorKind::InvalidInput,
+            None,
+            LocalFileErrorKind::InvalidPath,
+        ),
+        (
+            "rooted-status-missing",
+            std::io::ErrorKind::InvalidInput,
+            None,
+            LocalFileErrorKind::InvalidPath,
+        ),
+        (
+            "rooted-status-error",
+            std::io::ErrorKind::Other,
+            Some(libc::EIO),
+            LocalFileErrorKind::Io,
+        ),
+        (
+            "rooted-identity-overflow",
+            std::io::ErrorKind::InvalidData,
+            None,
+            LocalFileErrorKind::DataCorruption,
+        ),
     ] {
         run_rooted_writer_fault(TEST_NAME, fault, || {
             let directory = tempdir().expect("temporary directory should be created");
@@ -1389,10 +1450,66 @@ fn test_rooted_writer_exercises_destination_identity_fault_boundaries() {
                 .expect("rooted replacement writer should open");
             Output::write_fully(&mut writer, b"replacement").expect("rooted writer should accept replacement bytes");
 
+            let failure = writer
+                .commit()
+                .expect_err("the selected destination fault must reject commit");
+            let (error, state, retained) = failure.into_parts();
             assert_eq!(
-                fails,
-                writer.commit().is_err(),
-                "selected {fault} should have the documented outcome",
+                LocalWriteFailureState::NotPublished,
+                state,
+                "{fault} fails before installation"
+            );
+            assert_eq!(
+                error_kind,
+                error.kind(),
+                "{fault} should retain its stable error classification"
+            );
+            let native = error
+                .io_error()
+                .expect("the commit failure should retain its native I/O error");
+            match raw_os_error {
+                Some(raw_os_error) => {
+                    let raw_os_error_in_chain =
+                        std::iter::successors(Some(native as &dyn std::error::Error), |source| source.source())
+                            .find_map(|source| {
+                                source
+                                    .downcast_ref::<std::io::Error>()
+                                    .and_then(std::io::Error::raw_os_error)
+                            });
+                    assert_eq!(Some(raw_os_error), raw_os_error_in_chain, "{fault} native code");
+                }
+                None => assert_eq!(native_kind, native.kind(), "{fault} native error kind"),
+            }
+            assert_eq!(
+                b"existing",
+                fs::read(directory.path().join("payload"))
+                    .expect("destination should remain readable")
+                    .as_slice()
+            );
+
+            let mut retained = retained.expect("pre-installation faults must retain the staged writer");
+            assert_eq!(LocalWriterState::Open, retained.state());
+            assert_eq!(None, retained.failure_state());
+            assert_eq!(
+                2,
+                fs::read_dir(directory.path())
+                    .expect("root entries should be inspectable")
+                    .count()
+            );
+            let abort_outcome = retained.abort().expect("retained staging should abort cleanly");
+            assert_eq!(LocalWriterState::Aborted, abort_outcome.state());
+            assert_eq!(LocalWriterState::Aborted, retained.state());
+            assert_eq!(
+                1,
+                fs::read_dir(directory.path())
+                    .expect("aborted root entries should be inspectable")
+                    .count()
+            );
+            assert_eq!(
+                b"existing",
+                fs::read(directory.path().join("payload"))
+                    .expect("abort must preserve destination")
+                    .as_slice()
             );
         });
     }
