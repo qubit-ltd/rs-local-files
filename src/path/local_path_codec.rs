@@ -20,7 +20,7 @@ use crate::LocalResult;
 /// This codec preserves native path data; it does not verify that a value is
 /// a single filename component, relative, or safe to use in a path. In
 /// particular, `/` and `..` are valid codec data, but are not safe filenames
-/// to concatenate into a path. Use [`LocalFileNames::validate`] when a filename
+/// to concatenate into a path. Use [`crate::path::LocalFileNames::validate`] when a filename
 /// component must satisfy the public portable filename policy.
 ///
 /// # Examples
@@ -49,7 +49,7 @@ impl LocalPathCodec {
     ///
     /// This is a reversible encoding operation, not filename validation:
     /// values such as `/` and `..` can be encoded. Validate the resulting
-    /// native value with [`LocalFileNames::validate`] before using it as a
+    /// native value with [`crate::path::LocalFileNames::validate`] before using it as a
     /// filename component.
     ///
     /// # Parameters
@@ -76,7 +76,7 @@ impl LocalPathCodec {
     /// This is a reversible decoding operation, not filename validation.
     /// For example, `/` and `..` decode successfully even though they are not
     /// accepted as portable filename components by
-    /// [`LocalFileNames::validate`].
+    /// [`crate::path::LocalFileNames::validate`].
     ///
     /// # Parameters
     ///
