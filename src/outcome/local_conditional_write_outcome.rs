@@ -17,6 +17,8 @@ use crate::recovery::LocalRecoveryFile;
 ///
 /// A successful value means publication and required synchronization completed.
 /// Cleanup failures are reported separately and do not change that result.
+/// Retained files are owned by this outcome; dropping a recovery handle never
+/// deletes the file, so cleanup policy remains with the caller.
 #[must_use]
 #[derive(Debug)]
 pub struct LocalConditionalWriteOutcome<D: Digest> {

@@ -11,10 +11,14 @@ use std::io;
 use super::ConditionalEntry;
 use super::ConditionalHooks;
 use crate::outcome::LocalConditionalPublicationState;
+use crate::outcome::LocalWritePublicationMethod;
 
 /// Outcome of a native operation, including observations made after failure.
 #[derive(Debug)]
 pub(crate) struct NativeAttempt {
+    /// Native publication protocol used by this attempt, independent of
+    /// outcome.
+    pub(crate) publication_method: LocalWritePublicationMethod,
     /// Native error, retained alongside any observed partial namespace change.
     pub(crate) error: Option<io::Error>,
     /// Observed publication state after the native attempt.
@@ -28,6 +32,7 @@ pub(crate) struct NativeAttempt {
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
 #[allow(dead_code)] // Includes checkpoints exercised only by the fake backend tests.
 pub(crate) enum ConditionalPoint {
+    Write,
     Flush,
     PrepareCandidateCopy,
     CandidateCopyCreated,

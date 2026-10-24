@@ -37,6 +37,16 @@ use crate::recovery::LocalRecoveryFileRole;
 
 const COPY_BUFFER_SIZE: usize = 64 * 1024;
 
+#[cfg(feature = "digest")]
+fn exchange_publication_method() -> crate::outcome::LocalWritePublicationMethod {
+    crate::outcome::LocalWritePublicationMethod::AtomicExchange
+}
+
+#[cfg(not(feature = "digest"))]
+fn exchange_publication_method() -> crate::outcome::LocalWritePublicationMethod {
+    crate::outcome::LocalWritePublicationMethod::AtomicRename
+}
+
 #[derive(Debug)]
 pub(crate) struct UnixConditionalBackend {
     namespace: Namespace,
@@ -62,10 +72,11 @@ impl UnixConditionalBackend {
     pub(crate) fn open_rooted(
         root: File,
         relative: &Path,
-        diagnostic: &Path,
+        namespace_absolute: &Path,
+        diagnostic: Option<&Path>,
         options: &LocalWriteOptions,
     ) -> io::Result<Self> {
-        let namespace = Namespace::open_rooted(root, relative, diagnostic, options)?;
+        let namespace = Namespace::open_rooted(root, relative, namespace_absolute, diagnostic, options)?;
         Self::open(namespace)
     }
 
@@ -133,6 +144,7 @@ impl UnixConditionalBackend {
             _ => LocalConditionalPublicationState::Indeterminate,
         };
         NativeAttempt {
+            publication_method: exchange_publication_method(),
             error,
             publication,
             installed: if publication == LocalConditionalPublicationState::NotPublished {
@@ -266,6 +278,7 @@ impl UnixConditionalBackend {
         };
         if restored_identity == Some(old_identity) && moved_matches_candidate {
             NativeAttempt {
+                publication_method: exchange_publication_method(),
                 error: syscall_error,
                 publication,
                 installed: restored,
@@ -273,6 +286,7 @@ impl UnixConditionalBackend {
             }
         } else {
             NativeAttempt {
+                publication_method: exchange_publication_method(),
                 error: syscall_error,
                 publication: LocalConditionalPublicationState::Indeterminate,
                 installed: restored,
@@ -305,6 +319,7 @@ impl UnixConditionalBackend {
         displaced: Option<ConditionalEntry>,
     ) -> NativeAttempt {
         NativeAttempt {
+            publication_method: exchange_publication_method(),
             error: Some(error),
             publication: LocalConditionalPublicationState::Indeterminate,
             installed,
@@ -386,6 +401,7 @@ impl ConditionalBackend for UnixConditionalBackend {
                     )
                     .ok();
                 NativeAttempt {
+                    publication_method: crate::outcome::LocalWritePublicationMethod::AtomicRename,
                     error: None,
                     publication: if installed.is_some() {
                         LocalConditionalPublicationState::Published
@@ -413,6 +429,7 @@ impl ConditionalBackend for UnixConditionalBackend {
                     None
                 };
                 NativeAttempt {
+                    publication_method: crate::outcome::LocalWritePublicationMethod::AtomicRename,
                     error: Some(error),
                     publication,
                     installed,
@@ -439,6 +456,7 @@ impl ConditionalBackend for UnixConditionalBackend {
                     self.attempt_after_exchange(Some(error))
                 } else {
                     NativeAttempt {
+                        publication_method: exchange_publication_method(),
                         error: Some(error),
                         publication: LocalConditionalPublicationState::NotPublished,
                         installed: None,

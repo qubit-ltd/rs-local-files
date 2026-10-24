@@ -25,6 +25,7 @@ use crate::local::internal::conditional::NativeAttempt;
 use crate::options::LocalWriteMode;
 use crate::options::LocalWriteOptions;
 use crate::outcome::LocalConditionalPublicationState;
+use crate::outcome::LocalWritePublicationMethod;
 use crate::policy::LocalAtomicityRequirement;
 use crate::policy::LocalDurabilityRequirement;
 use crate::recovery::LocalRecoveryFileRole;
@@ -86,6 +87,9 @@ pub(super) struct FakeBackend {
     remove_installed_after_identity: Cell<bool>,
     target_is_candidate: Cell<bool>,
     recovery_entries: RefCell<Vec<ConditionalEntry>>,
+    absent_method: LocalWritePublicationMethod,
+    content_method: LocalWritePublicationMethod,
+    rollback_method: LocalWritePublicationMethod,
 }
 
 impl FakeBackend {
@@ -124,6 +128,9 @@ impl FakeBackend {
             remove_installed_after_identity: Cell::new(false),
             target_is_candidate: Cell::new(false),
             recovery_entries: RefCell::new(Vec::new()),
+            absent_method: LocalWritePublicationMethod::AtomicRename,
+            content_method: LocalWritePublicationMethod::AtomicRename,
+            rollback_method: LocalWritePublicationMethod::AtomicRename,
         }
     }
     pub(super) fn events(&self) -> Rc<RefCell<Vec<Event>>> {
@@ -131,6 +138,17 @@ impl FakeBackend {
     }
     pub(super) fn with_hooks(mut self, hooks: ConditionalHooks) -> Self {
         self.set_hooks(hooks);
+        self
+    }
+    pub(super) fn with_publication_methods(
+        mut self,
+        absent: LocalWritePublicationMethod,
+        content: LocalWritePublicationMethod,
+        rollback: LocalWritePublicationMethod,
+    ) -> Self {
+        self.absent_method = absent;
+        self.content_method = content;
+        self.rollback_method = rollback;
         self
     }
     pub(super) fn fail_after_first_rollback_rename_once(self) -> Self {
@@ -320,8 +338,10 @@ impl ConditionalBackend for FakeBackend {
         Ok(())
     }
     fn publish_absent(&mut self) -> NativeAttempt {
+        let publication_method = self.absent_method;
         if self.target.exists() {
             return NativeAttempt {
+                publication_method,
                 error: Some(io::Error::new(io::ErrorKind::AlreadyExists, "target exists")),
                 publication: LocalConditionalPublicationState::NotPublished,
                 installed: None,
@@ -330,6 +350,7 @@ impl ConditionalBackend for FakeBackend {
         }
         if let Err(error) = fs::rename(&self.candidate, &self.target) {
             return NativeAttempt {
+                publication_method,
                 error: Some(error),
                 publication: LocalConditionalPublicationState::NotPublished,
                 installed: None,
@@ -338,6 +359,7 @@ impl ConditionalBackend for FakeBackend {
         }
         self.target_is_candidate.set(true);
         NativeAttempt {
+            publication_method,
             error: None,
             publication: LocalConditionalPublicationState::Published,
             installed: Some(self.entry(self.target.clone(), LocalRecoveryFileRole::StagedCandidate)),
@@ -345,6 +367,7 @@ impl ConditionalBackend for FakeBackend {
         }
     }
     fn publish_content(&mut self) -> NativeAttempt {
+        let publication_method = self.content_method;
         let old = self.root.path().join("old");
         let operation = fs::rename(&self.target, &old).and_then(|()| fs::rename(&self.candidate, &self.target));
         if let Err(error) = operation {
@@ -359,6 +382,7 @@ impl ConditionalBackend for FakeBackend {
                 .into_iter()
                 .collect();
             return NativeAttempt {
+                publication_method,
                 error: Some(error),
                 publication: LocalConditionalPublicationState::Indeterminate,
                 installed,
@@ -368,6 +392,7 @@ impl ConditionalBackend for FakeBackend {
         self.target_is_candidate.set(true);
         if self.omit_displaced_receipt.replace(false) {
             return NativeAttempt {
+                publication_method,
                 error: None,
                 publication: LocalConditionalPublicationState::Published,
                 installed: Some(self.entry(self.target.clone(), LocalRecoveryFileRole::StagedCandidate)),
@@ -376,6 +401,7 @@ impl ConditionalBackend for FakeBackend {
         }
         if self.omit_installed_receipt.replace(false) {
             return NativeAttempt {
+                publication_method,
                 error: None,
                 publication: LocalConditionalPublicationState::Published,
                 installed: None,
@@ -384,6 +410,7 @@ impl ConditionalBackend for FakeBackend {
         }
         if self.partial_publish.replace(false) {
             return NativeAttempt {
+                publication_method,
                 error: Some(io::Error::other("injected partial publication")),
                 publication: LocalConditionalPublicationState::Published,
                 installed: Some(self.entry(self.target.clone(), LocalRecoveryFileRole::StagedCandidate)),
@@ -391,6 +418,7 @@ impl ConditionalBackend for FakeBackend {
             };
         }
         NativeAttempt {
+            publication_method,
             error: None,
             publication: LocalConditionalPublicationState::Published,
             installed: Some(self.entry(self.target.clone(), LocalRecoveryFileRole::StagedCandidate)),
@@ -398,9 +426,11 @@ impl ConditionalBackend for FakeBackend {
         }
     }
     fn rollback(&mut self, displaced: &ConditionalEntry) -> NativeAttempt {
+        let publication_method = self.rollback_method;
         self.events.borrow_mut().push(Event::Rollback);
         if let Err(error) = self.checkpoint(ConditionalPoint::RollbackExchange) {
             return NativeAttempt {
+                publication_method,
                 error: Some(error),
                 publication: LocalConditionalPublicationState::Indeterminate,
                 installed: self
@@ -433,6 +463,7 @@ impl ConditionalBackend for FakeBackend {
                 .into_iter()
                 .collect();
             return NativeAttempt {
+                publication_method,
                 error: Some(error),
                 publication: LocalConditionalPublicationState::Indeterminate,
                 installed,
@@ -446,6 +477,7 @@ impl ConditionalBackend for FakeBackend {
             LocalConditionalPublicationState::Restored
         };
         NativeAttempt {
+            publication_method,
             error: hook_error,
             publication,
             installed: Some(self.entry(self.target.clone(), LocalRecoveryFileRole::Displaced)),
@@ -477,6 +509,40 @@ impl ConditionalBackend for FakeBackend {
             _ => {}
         }
         Ok(())
+    }
+}
+
+#[cfg(feature = "digest")]
+#[cfg(test)]
+mod publication_receipt_tests {
+    use sha2::Digest;
+    use sha2::Sha256;
+
+    use super::FakeBackend;
+    use super::required_options;
+    use crate::local::internal::conditional::commit_conditional;
+    use crate::options::LocalWritePrecondition;
+    use crate::outcome::LocalWritePublicationMethod;
+
+    #[test]
+    fn selected_fake_publication_method_is_reported_verbatim() {
+        let backend = FakeBackend::new(b"A", b"B").with_publication_methods(
+            LocalWritePublicationMethod::AtomicExchange,
+            LocalWritePublicationMethod::AtomicReplaceWithBackup,
+            LocalWritePublicationMethod::AtomicRename,
+        );
+        let outcome = commit_conditional::<Sha256, _>(
+            backend,
+            LocalWritePrecondition::Content(Sha256::digest(b"A")),
+            required_options(),
+            1,
+        )
+        .expect("fake content publication should succeed");
+
+        assert_eq!(
+            LocalWritePublicationMethod::AtomicReplaceWithBackup,
+            outcome.write_outcome().publication_method(),
+        );
     }
 }
 //    Copyright (c) 2025 - 2026 Haixing Hu.

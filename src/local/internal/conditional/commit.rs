@@ -48,6 +48,7 @@ where
     let mut post_publication_conflict = false;
     let mut publication_attempt_error = None;
     let absent_precondition = matches!(&precondition, LocalWritePrecondition::Absent);
+    let mut publication_method = LocalWritePublicationMethod::AtomicRename;
     let mut durable = options.durability() != LocalDurabilityRequirement::NotRequired;
     let result = (|| {
         qubit_io::Output::flush(&mut backend).map_err(|error| (stage, error))?;
@@ -144,6 +145,9 @@ where
             LocalWritePrecondition::Absent => backend.publish_absent(),
             LocalWritePrecondition::Content(_) => backend.publish_content(),
         };
+        if attempt.publication != LocalConditionalPublicationState::NotPublished {
+            publication_method = attempt.publication_method;
+        }
         if let Err(error) = backend.checkpoint(ConditionalPoint::AfterPublish) {
             publication = attempt.publication;
             if let Some(installed) = attempt.installed {
@@ -515,11 +519,7 @@ where
     let outcome = LocalWriteOutcome::new(
         LocalWriterState::Committed,
         true,
-        if absent_precondition {
-            LocalWritePublicationMethod::AtomicRename
-        } else {
-            LocalWritePublicationMethod::AtomicExchange
-        },
+        publication_method,
         durable,
         bytes_written,
         None,

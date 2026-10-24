@@ -23,6 +23,34 @@ use crate::writer::LocalConditionalWriter;
 impl LocalFileSystem {
     /// Opens a writer that publishes only when the supplied destination
     /// condition holds.
+    ///
+    /// Enable the optional `digest` feature, which uses `digest` 0.11, and
+    /// select an algorithm crate such as `sha2` 0.11. `Content` compares the
+    /// full output of `D` over the current target and
+    /// requires `CreateOrReplace`; `Absent` requests create-only publication.
+    /// `Append` and symlink-following policies are rejected. The operation is
+    /// not a strict compare-and-swap: the digest checks surround a native
+    /// publication protocol and cannot prevent writes through an already-open
+    /// handle.
+    ///
+    /// Backend support differs by platform. Linux and macOS support Host and
+    /// Rooted `Content`; Windows Host supports `Content` with
+    /// `PreserveExisting` metadata only, while Windows Rooted does not support
+    /// `Content`. `Absent` is available only where the backend has a native
+    /// no-overwrite install. Android and FreeBSD support is not claimed.
+    ///
+    /// The returned writer owns staged B until
+    /// [`LocalConditionalWriter::commit`] consumes it. A commit error owns
+    /// the retained recovery files; use its
+    /// [`candidate`](crate::error::LocalConditionalCommitError::candidate)
+    /// reader or transfer the files with
+    /// [`into_recovery_files`](crate::error::LocalConditionalCommitError::into_recovery_files).
+    /// Dropping a recovery handle does not delete its file.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error when the mode, symlink policy, path, or selected
+    /// backend cannot support the requested conditional write.
     pub fn open_conditional_writer<D: Digest>(
         &self,
         path: &Path,
@@ -77,6 +105,7 @@ impl LocalFileSystem {
             crate::local::LocalNamespace::Rooted(rooted) => rooted.open_conditional_backend(
                 resolved.authority_relative(),
                 resolved.namespace_absolute(),
+                None,
                 options,
             )?,
         };

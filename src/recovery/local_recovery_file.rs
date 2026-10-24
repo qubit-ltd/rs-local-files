@@ -19,6 +19,8 @@ use crate::recovery::LocalRecoveryFileRole;
 /// The namespace paths are for locating and describing the retained file.
 /// Reads use the retained native parent-directory permission and verify the
 /// observed entry identity; dropping this value never removes the file.
+/// The owner must arrange any eventual deletion using an authorized filesystem
+/// operation after inspecting the recovery role and publication state.
 #[must_use]
 #[derive(Debug)]
 pub struct LocalRecoveryFile {

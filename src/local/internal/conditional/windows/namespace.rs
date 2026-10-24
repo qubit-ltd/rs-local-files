@@ -72,8 +72,13 @@ pub(super) struct FileIdentity {
 
 #[derive(Debug)]
 enum Scope {
-    Host { parent_path: PathBuf },
-    Rooted { relative: LocalRelativePath },
+    Host {
+        parent_path: PathBuf,
+    },
+    Rooted {
+        relative: LocalRelativePath,
+        namespace_absolute: PathBuf,
+    },
 }
 
 #[derive(Debug)]
@@ -82,7 +87,7 @@ pub(super) struct Namespace {
     parent: File,
     target_name: OsString,
     target_path: PathBuf,
-    diagnostic_path: PathBuf,
+    diagnostic_path: Option<PathBuf>,
     recovery_parents: RefCell<Vec<(PathBuf, File)>>,
 }
 
@@ -108,7 +113,7 @@ impl Namespace {
             parent,
             target_name,
             target_path: path.to_path_buf(),
-            diagnostic_path: path.to_path_buf(),
+            diagnostic_path: Some(path.to_path_buf()),
             recovery_parents: RefCell::new(Vec::new()),
         })
     }
@@ -116,7 +121,8 @@ impl Namespace {
     pub(super) fn open_rooted(
         root: File,
         relative: &Path,
-        diagnostic: &Path,
+        namespace_absolute: &Path,
+        diagnostic: Option<&Path>,
         options: &LocalWriteOptions,
     ) -> io::Result<Self> {
         let relative = LocalRelativePath::new(relative)?;
@@ -128,10 +134,13 @@ impl Namespace {
         }
         let (parent, target_name) = open_conditional_parent(&root, &relative)?;
         Ok(Self {
-            scope: Scope::Rooted { relative },
+            scope: Scope::Rooted {
+                relative,
+                namespace_absolute: namespace_absolute.to_path_buf(),
+            },
             parent,
-            target_path: diagnostic.to_path_buf(),
-            diagnostic_path: diagnostic.to_path_buf(),
+            target_path: namespace_absolute.to_path_buf(),
+            diagnostic_path: diagnostic.map(Path::to_path_buf),
             target_name,
             recovery_parents: RefCell::new(Vec::new()),
         })
@@ -143,8 +152,8 @@ impl Namespace {
     pub(super) fn target_path(&self) -> &Path {
         &self.target_path
     }
-    pub(super) fn diagnostic_path(&self) -> &Path {
-        &self.diagnostic_path
+    pub(super) fn diagnostic_path(&self) -> Option<&Path> {
+        self.diagnostic_path.as_deref()
     }
     pub(super) fn is_rooted(&self) -> bool {
         matches!(self.scope, Scope::Rooted { .. })
@@ -216,14 +225,14 @@ impl Namespace {
             parent,
             name: name.clone(),
             namespace_path: backup_path.to_path_buf(),
-            diagnostic_path: Some(self.diagnostic_path.clone()),
+            diagnostic_path: self.diagnostic_path.clone(),
             identity,
             _retained: None,
         };
         Ok(ConditionalEntry::new(
             role,
             backup_path.to_path_buf(),
-            Some(self.diagnostic_path.clone()),
+            self.diagnostic_path.clone(),
             Box::new(access),
         ))
     }
@@ -240,14 +249,14 @@ impl Namespace {
             parent: self.parent.try_clone()?,
             name: name.clone(),
             namespace_path: self.child_path(&name),
-            diagnostic_path: Some(self.diagnostic_path.clone()),
+            diagnostic_path: self.diagnostic_path.clone(),
             identity,
             _retained: Some(file.try_clone()?),
         };
         Ok(ConditionalEntry::new(
             role,
             self.child_path(&name),
-            Some(self.diagnostic_path.clone()),
+            self.diagnostic_path.clone(),
             Box::new(access),
         ))
     }
@@ -350,7 +359,9 @@ impl Namespace {
     pub(super) fn child_path(&self, name: &OsStr) -> PathBuf {
         match &self.scope {
             Scope::Host { parent_path } => parent_path.join(name),
-            Scope::Rooted { relative, .. } => relative.as_path().parent().unwrap_or_else(|| Path::new("")).join(name),
+            Scope::Rooted { namespace_absolute, .. } => {
+                namespace_absolute.parent().unwrap_or_else(|| Path::new("/")).join(name)
+            }
         }
     }
 
@@ -372,14 +383,14 @@ impl Namespace {
             parent: self.parent.try_clone()?,
             name: name.clone(),
             namespace_path: self.child_path(&name),
-            diagnostic_path: Some(self.diagnostic_path.clone()),
+            diagnostic_path: self.diagnostic_path.clone(),
             identity,
             _retained: None,
         };
         Ok(ConditionalEntry::new(
             role,
             self.child_path(&name),
-            Some(self.diagnostic_path.clone()),
+            self.diagnostic_path.clone(),
             Box::new(access),
         ))
     }
@@ -443,7 +454,7 @@ impl Namespace {
         let file = self.open_entry(name).map_err(|error| {
             crate::LocalFileError::from_io(
                 crate::LocalFileOperation::OpenReader,
-                Some(self.diagnostic_path.clone()),
+                self.diagnostic_path.clone(),
                 None,
                 error,
             )
@@ -451,7 +462,7 @@ impl Namespace {
         let observed = file_identity(&file).map_err(|error| {
             crate::LocalFileError::from_io(
                 crate::LocalFileOperation::OpenReader,
-                Some(self.diagnostic_path.clone()),
+                self.diagnostic_path.clone(),
                 None,
                 error,
             )
@@ -459,7 +470,7 @@ impl Namespace {
         if observed != expected {
             return Err(crate::LocalFileError::from_io(
                 crate::LocalFileOperation::OpenReader,
-                Some(self.diagnostic_path.clone()),
+                self.diagnostic_path.clone(),
                 None,
                 io::Error::new(ErrorKind::InvalidData, "conditional recovery entry identity changed"),
             ));
@@ -467,7 +478,7 @@ impl Namespace {
         LocalFileReader::from_file(file).map_err(|error| {
             crate::LocalFileError::from_io(
                 crate::LocalFileOperation::OpenReader,
-                Some(self.diagnostic_path.clone()),
+                self.diagnostic_path.clone(),
                 None,
                 error,
             )

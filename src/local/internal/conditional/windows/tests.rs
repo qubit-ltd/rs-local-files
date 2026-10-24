@@ -374,6 +374,7 @@ fn conditional_windows_rooted_content_is_explicitly_unsupported() {
         root,
         Path::new("target"),
         &target,
+        Some(&target),
         &options(LocalWriteMode::CreateOrReplace),
     )
     .expect("Rooted candidate should open");
@@ -396,9 +397,14 @@ fn conditional_windows_rooted_absent_uses_handle_relative_no_replace() {
     let directory = tempfile::tempdir().expect("fixture directory should be created");
     let target = directory.path().join("target");
     let root = crate::local::internal::open_root_directory(directory.path()).expect("root should open");
-    let mut backend =
-        WindowsConditionalBackend::open_rooted(root, Path::new("target"), &target, &options(LocalWriteMode::CreateNew))
-            .expect("Rooted candidate should open");
+    let mut backend = WindowsConditionalBackend::open_rooted(
+        root,
+        Path::new("target"),
+        &target,
+        Some(&target),
+        &options(LocalWriteMode::CreateNew),
+    )
+    .expect("Rooted candidate should open");
     put(&mut backend, b"B");
     commit_conditional::<Sha256, _>(
         backend,
@@ -550,7 +556,8 @@ fn conditional_windows_partial_1177_receipt_reports_installed_and_displaced_entr
         .open_reader()
         .expect("backup should retain the displaced file");
     let mut backup_bytes = Vec::new();
-    Streams::copy_input_to_output(&mut backup_reader, &mut backup_bytes).expect("displaced file should remain readable");
+    Streams::copy_input_to_output(&mut backup_reader, &mut backup_bytes)
+        .expect("displaced file should remain readable");
     assert_eq!(backup_bytes, b"A");
 }
 

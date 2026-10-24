@@ -33,7 +33,10 @@ fn conditional_unix_content_exchange_publishes_candidate_and_returns_old_bytes()
     fs::write(&target, b"A").expect("initial target should be written");
     let mut backend =
         UnixConditionalBackend::open_host(&target, &LocalWriteOptions::default()).expect("backend should open");
-    backend.candidate.write_fully(b"B").expect("candidate should be written");
+    backend
+        .candidate
+        .write_fully(b"B")
+        .expect("candidate should be written");
     let result = commit_conditional::<Sha256, _>(
         backend,
         LocalWritePrecondition::Content(Sha256::digest(b"A")),
@@ -50,7 +53,10 @@ fn conditional_unix_absent_install_does_not_overwrite_a_racing_creator() {
     let target = directory.path().join("target");
     let mut backend =
         UnixConditionalBackend::open_host(&target, &LocalWriteOptions::default()).expect("backend should open");
-    backend.candidate.write_fully(b"B").expect("candidate should be written");
+    backend
+        .candidate
+        .write_fully(b"B")
+        .expect("candidate should be written");
     let result = commit_conditional::<Sha256, _>(
         backend,
         LocalWritePrecondition::Absent,
@@ -71,7 +77,10 @@ fn conditional_unix_required_durability_publishes_with_nested_parents() {
         .with_create_parent()
         .with_durability(LocalDurabilityRequirement::Required);
     let mut backend = UnixConditionalBackend::open_host(&target, &options).expect("backend should create parents");
-    backend.candidate.write_fully(b"B").expect("candidate should be written");
+    backend
+        .candidate
+        .write_fully(b"B")
+        .expect("candidate should be written");
 
     let result = commit_conditional::<Sha256, _>(backend, LocalWritePrecondition::Absent, options, 1);
 
@@ -85,7 +94,10 @@ fn conditional_unix_absent_precheck_race_keeps_the_racing_file() {
     let target = directory.path().join("target");
     let mut backend =
         UnixConditionalBackend::open_host(&target, &LocalWriteOptions::default()).expect("backend should open");
-    backend.candidate.write_fully(b"B").expect("candidate should be written");
+    backend
+        .candidate
+        .write_fully(b"B")
+        .expect("candidate should be written");
     backend.set_hooks(ConditionalHooks::sequence(vec![(
         ConditionalPoint::Precheck,
         ConditionalHookAction::ReplaceTarget(b"racer".to_vec()),
@@ -120,10 +132,18 @@ fn conditional_unix_rooted_parent_rename_keeps_the_open_namespace() {
     fs::write(root_path.join("target"), b"A").expect("target should be written");
     let root = std::fs::File::open(&root_path).expect("root capability should open");
     let diagnostic = root_path.join("target");
-    let mut backend =
-        UnixConditionalBackend::open_rooted(root, Path::new("target"), &diagnostic, &LocalWriteOptions::default())
-            .expect("rooted backend should open");
-    backend.candidate.write_fully(b"B").expect("candidate should be written");
+    let mut backend = UnixConditionalBackend::open_rooted(
+        root,
+        Path::new("target"),
+        &diagnostic,
+        Some(&diagnostic),
+        &LocalWriteOptions::default(),
+    )
+    .expect("rooted backend should open");
+    backend
+        .candidate
+        .write_fully(b"B")
+        .expect("candidate should be written");
     fs::rename(&root_path, &moved_path).expect("root should be renamed");
     let result = commit_conditional::<Sha256, _>(
         backend,
@@ -149,7 +169,10 @@ fn conditional_unix_precheck_same_inode_rewrite_is_detected_and_retained() {
     let original_inode = fs::metadata(&target).expect("target metadata should be readable").ino();
     let mut backend =
         UnixConditionalBackend::open_host(&target, &LocalWriteOptions::default()).expect("backend should open");
-    backend.candidate.write_fully(b"B").expect("candidate should be written");
+    backend
+        .candidate
+        .write_fully(b"B")
+        .expect("candidate should be written");
     backend.set_hooks(ConditionalHooks::sequence(vec![(
         ConditionalPoint::Precheck,
         ConditionalHookAction::OverwriteTargetInPlace(b"C".to_vec()),
@@ -181,7 +204,10 @@ fn conditional_unix_precheck_replacement_inode_with_matching_content_can_publish
     let original_inode = fs::metadata(&target).expect("target metadata should be readable").ino();
     let mut backend =
         UnixConditionalBackend::open_host(&target, &LocalWriteOptions::default()).expect("backend should open");
-    backend.candidate.write_fully(b"B").expect("candidate should be written");
+    backend
+        .candidate
+        .write_fully(b"B")
+        .expect("candidate should be written");
     backend.set_hooks(ConditionalHooks::sequence(vec![(
         ConditionalPoint::Precheck,
         ConditionalHookAction::ReplaceTarget(b"A".to_vec()),
@@ -263,7 +289,10 @@ fn conditional_unix_prepublication_error_retains_candidate_and_copy_after_error_
     fs::write(&target, b"A").expect("initial target should be written");
     let mut backend =
         UnixConditionalBackend::open_host(&target, &LocalWriteOptions::default()).expect("backend should open");
-    backend.candidate.write_fully(b"B").expect("candidate should be written");
+    backend
+        .candidate
+        .write_fully(b"B")
+        .expect("candidate should be written");
     backend.set_hooks(ConditionalHooks::sequence(vec![(
         ConditionalPoint::Publish,
         ConditionalHookAction::Fail(std::io::ErrorKind::Unsupported),
@@ -311,7 +340,10 @@ fn conditional_unix_rollback_window_replacement_is_not_exchanged_or_reported_res
     fs::write(&target, b"A").expect("initial target should be written");
     let mut backend =
         UnixConditionalBackend::open_host(&target, &LocalWriteOptions::default()).expect("backend should open");
-    backend.candidate.write_fully(b"B").expect("candidate should be written");
+    backend
+        .candidate
+        .write_fully(b"B")
+        .expect("candidate should be written");
     backend.set_hooks(ConditionalHooks::sequence(vec![
         (ConditionalPoint::Publish, ConditionalHookAction::PartialPublish),
         (
@@ -340,8 +372,7 @@ fn conditional_unix_rollback_window_replacement_is_not_exchanged_or_reported_res
         .map(|file| {
             let mut reader = file.open_reader().expect("every recovery entry must remain readable");
             let mut content = Vec::new();
-            Streams::copy_input_to_output(&mut reader, &mut content)
-                .expect("every recovery entry should be readable");
+            Streams::copy_input_to_output(&mut reader, &mut content).expect("every recovery entry should be readable");
             (file.role(), file.namespace_path().to_owned(), content)
         })
         .collect();
@@ -382,7 +413,10 @@ fn conditional_unix_rollback_exchange_window_reports_actual_namespace_receipts()
     fs::write(&target, b"A").expect("initial target should be written");
     let mut backend =
         UnixConditionalBackend::open_host(&target, &LocalWriteOptions::default()).expect("backend should open");
-    backend.candidate.write_fully(b"B").expect("candidate should be written");
+    backend
+        .candidate
+        .write_fully(b"B")
+        .expect("candidate should be written");
     backend.set_hooks(ConditionalHooks::sequence(vec![
         (ConditionalPoint::Publish, ConditionalHookAction::PartialPublish),
         (
@@ -411,8 +445,7 @@ fn conditional_unix_rollback_exchange_window_reports_actual_namespace_receipts()
         .map(|file| {
             let mut reader = file.open_reader().expect("every recovery entry must remain readable");
             let mut content = Vec::new();
-            Streams::copy_input_to_output(&mut reader, &mut content)
-                .expect("every recovery entry should be readable");
+            Streams::copy_input_to_output(&mut reader, &mut content).expect("every recovery entry should be readable");
             (file.role(), file.namespace_path().to_owned(), content)
         })
         .collect();

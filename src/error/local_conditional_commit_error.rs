@@ -18,6 +18,12 @@ use crate::recovery::LocalRecoveryFileRole;
 
 /// Failure of a conditional commit with its publication state and recoverable
 /// files.
+///
+/// This error owns every retained recovery file. Inspect
+/// [`candidate`](Self::candidate) and read it with
+/// [`LocalRecoveryFile::open_reader`] while the error is alive, or consume the
+/// error with [`into_recovery_files`](Self::into_recovery_files) to transfer
+/// ownership. Dropping those handles does not delete their files.
 #[must_use]
 #[derive(Debug)]
 pub struct LocalConditionalCommitError {

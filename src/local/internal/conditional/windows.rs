@@ -44,6 +44,16 @@ use crate::recovery::LocalRecoveryFileRole;
 
 const COPY_BUFFER_SIZE: usize = 64 * 1024;
 
+#[cfg(feature = "digest")]
+fn replace_with_backup_publication_method() -> crate::outcome::LocalWritePublicationMethod {
+    crate::outcome::LocalWritePublicationMethod::AtomicReplaceWithBackup
+}
+
+#[cfg(not(feature = "digest"))]
+fn replace_with_backup_publication_method() -> crate::outcome::LocalWritePublicationMethod {
+    crate::outcome::LocalWritePublicationMethod::AtomicRename
+}
+
 fn observe_optional_entry<T>(open: impl FnOnce() -> io::Result<T>) -> io::Result<Option<T>> {
     match open() {
         Ok(entry) => Ok(Some(entry)),
@@ -227,10 +237,14 @@ impl WindowsConditionalBackend {
     pub(crate) fn open_rooted(
         root: File,
         relative: &Path,
-        diagnostic: &Path,
+        namespace_absolute: &Path,
+        diagnostic: Option<&Path>,
         options: &LocalWriteOptions,
     ) -> io::Result<Self> {
-        Self::open(Namespace::open_rooted(root, relative, diagnostic, options)?, options)
+        Self::open(
+            Namespace::open_rooted(root, relative, namespace_absolute, diagnostic, options)?,
+            options,
+        )
     }
 
     fn open(namespace: Namespace, options: &LocalWriteOptions) -> io::Result<Self> {
@@ -278,6 +292,7 @@ impl WindowsConditionalBackend {
         let (candidate, observation_error) = observe_with_error(self.observe_candidate_entry());
         let observation_failed = observation_error.is_some();
         NativeAttempt {
+            publication_method: replace_with_backup_publication_method(),
             error: combine_observation_error(Some(error), observation_error),
             publication: if observation_failed {
                 LocalConditionalPublicationState::Indeterminate
@@ -341,6 +356,11 @@ impl WindowsConditionalBackend {
             }
         }
         NativeAttempt {
+            publication_method: if backup_container.is_some() {
+                replace_with_backup_publication_method()
+            } else {
+                crate::outcome::LocalWritePublicationMethod::AtomicRename
+            },
             error: combine_observation_error(error, observation_error),
             publication,
             installed,
@@ -387,6 +407,7 @@ impl WindowsConditionalBackend {
             LocalConditionalPublicationState::Indeterminate
         };
         NativeAttempt {
+            publication_method: replace_with_backup_publication_method(),
             error: combine_observation_error(error, observation_error),
             publication,
             installed,
@@ -663,6 +684,7 @@ impl ConditionalBackend for WindowsConditionalBackend {
                     && let Err(error) = self.namespace.remove(&candidate)
                 {
                     return NativeAttempt {
+                        publication_method: crate::outcome::LocalWritePublicationMethod::AtomicRename,
                         error: combine_observation_error(Some(error), observation_error),
                         publication: if observation_failed {
                             LocalConditionalPublicationState::Indeterminate
@@ -681,6 +703,7 @@ impl ConditionalBackend for WindowsConditionalBackend {
                     LocalConditionalPublicationState::Indeterminate
                 };
                 NativeAttempt {
+                    publication_method: crate::outcome::LocalWritePublicationMethod::AtomicRename,
                     error: observation_error,
                     publication,
                     installed,
@@ -704,6 +727,7 @@ impl ConditionalBackend for WindowsConditionalBackend {
     fn rollback(&mut self, displaced: &ConditionalEntry) -> NativeAttempt {
         if self.namespace.is_rooted() || self.options.metadata_policy() != LocalWriteMetadataPolicy::PreserveExisting {
             return NativeAttempt {
+                publication_method: replace_with_backup_publication_method(),
                 error: Some(io::Error::new(
                     io::ErrorKind::Unsupported,
                     "Windows conditional rollback is unsupported for this namespace",
@@ -715,6 +739,7 @@ impl ConditionalBackend for WindowsConditionalBackend {
         }
         if let Err(error) = self.namespace.verify_entry(displaced) {
             return NativeAttempt {
+                publication_method: replace_with_backup_publication_method(),
                 error: Some(error),
                 publication: LocalConditionalPublicationState::NotPublished,
                 installed: None,
@@ -729,6 +754,7 @@ impl ConditionalBackend for WindowsConditionalBackend {
             Ok(identity) => identity,
             Err(error) => {
                 return NativeAttempt {
+                    publication_method: replace_with_backup_publication_method(),
                     error: Some(error),
                     publication: LocalConditionalPublicationState::NotPublished,
                     installed: None,
@@ -741,6 +767,7 @@ impl ConditionalBackend for WindowsConditionalBackend {
             Ok(paths) => paths,
             Err(error) => {
                 return NativeAttempt {
+                    publication_method: replace_with_backup_publication_method(),
                     error: Some(error),
                     publication: LocalConditionalPublicationState::NotPublished,
                     installed: None,
@@ -777,6 +804,7 @@ impl ConditionalBackend for WindowsConditionalBackend {
                     && restored_identity == Some(expected_restored)
                     && replacement_displaced.is_some();
                 NativeAttempt {
+                    publication_method: replace_with_backup_publication_method(),
                     error: observation_error.or_else(|| {
                         (!complete).then(|| {
                             io::Error::new(

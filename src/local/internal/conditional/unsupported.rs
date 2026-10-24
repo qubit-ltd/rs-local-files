@@ -26,7 +26,8 @@ pub(crate) fn open_host(_path: &Path, _options: &LocalWriteOptions) -> io::Resul
 pub(crate) fn open_rooted(
     _root: std::fs::File,
     _relative: &Path,
-    _diagnostic: &Path,
+    _namespace_absolute: &Path,
+    _diagnostic: Option<&Path>,
     _options: &LocalWriteOptions,
 ) -> io::Result<()> {
     Err(unsupported_error())
@@ -60,6 +61,7 @@ mod tests {
                 std::fs::File::open(".").expect("current directory should open"),
                 std::path::Path::new("target"),
                 std::path::Path::new("target"),
+                None,
                 &options,
             )
             .expect_err("Rooted construction must fail closed")

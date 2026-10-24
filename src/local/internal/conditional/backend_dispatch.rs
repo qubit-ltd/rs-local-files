@@ -40,10 +40,12 @@ impl ConditionalWriterBackend {
     pub(crate) fn rooted(
         root: std::fs::File,
         relative: &Path,
-        diagnostic: &Path,
+        namespace_absolute: &Path,
+        diagnostic: Option<&Path>,
         options: &LocalWriteOptions,
     ) -> io::Result<Self> {
-        super::unix::UnixConditionalBackend::open_rooted(root, relative, diagnostic, options).map(Self::Native)
+        super::unix::UnixConditionalBackend::open_rooted(root, relative, namespace_absolute, diagnostic, options)
+            .map(Self::Native)
     }
 }
 #[cfg(windows)]
@@ -54,10 +56,12 @@ impl ConditionalWriterBackend {
     pub(crate) fn rooted(
         root: std::fs::File,
         relative: &Path,
-        diagnostic: &Path,
+        namespace_absolute: &Path,
+        diagnostic: Option<&Path>,
         options: &LocalWriteOptions,
     ) -> io::Result<Self> {
-        super::windows::WindowsConditionalBackend::open_rooted(root, relative, diagnostic, options).map(Self::Native)
+        super::windows::WindowsConditionalBackend::open_rooted(root, relative, namespace_absolute, diagnostic, options)
+            .map(Self::Native)
     }
 }
 
@@ -69,7 +73,8 @@ impl ConditionalWriterBackend {
     pub(crate) fn rooted(
         _root: std::fs::File,
         _relative: &Path,
-        _diagnostic: &Path,
+        _namespace_absolute: &Path,
+        _diagnostic: Option<&Path>,
         _options: &LocalWriteOptions,
     ) -> io::Result<Self> {
         Err(unsupported_error())
@@ -85,6 +90,21 @@ fn unsupported_error() -> io::Error {
 }
 
 impl ConditionalWriterBackend {
+    #[cfg(all(feature = "digest", feature = "test-support"))]
+    fn checkpoint_before_write(&mut self) -> io::Result<()> {
+        match self {
+            #[cfg(any(unix, windows))]
+            Self::Native(backend) => backend.checkpoint(super::ConditionalPoint::Write),
+            #[cfg(not(any(unix, windows)))]
+            _ => match *self {},
+        }
+    }
+
+    #[cfg(not(all(feature = "digest", feature = "test-support")))]
+    fn checkpoint_before_write(&mut self) -> io::Result<()> {
+        Ok(())
+    }
+
     pub(crate) fn abort(&mut self) -> io::Result<()> {
         match self {
             #[cfg(any(unix, windows))]
@@ -97,6 +117,7 @@ impl ConditionalWriterBackend {
 impl qubit_io::Output for ConditionalWriterBackend {
     type Item = u8;
     fn write(&mut self, bytes: &[u8]) -> io::Result<usize> {
+        self.checkpoint_before_write()?;
         match self {
             #[cfg(any(unix, windows))]
             Self::Native(backend) => qubit_io::Output::write(backend, bytes),
@@ -105,6 +126,7 @@ impl qubit_io::Output for ConditionalWriterBackend {
         }
     }
     fn write_vectored(&mut self, slices: &[&[u8]]) -> io::Result<usize> {
+        self.checkpoint_before_write()?;
         match self {
             #[cfg(any(unix, windows))]
             Self::Native(backend) => qubit_io::Output::write_vectored(backend, slices),
@@ -122,6 +144,7 @@ impl qubit_io::Output for ConditionalWriterBackend {
     }
     unsafe fn write_unchecked(&mut self, input: &[u8], index: usize, count: usize) -> io::Result<usize> {
         // SAFETY: delegated to the native backend with the caller-provided valid range.
+        self.checkpoint_before_write()?;
         match self {
             #[cfg(any(unix, windows))]
             Self::Native(backend) => unsafe { qubit_io::Output::write_unchecked(backend, input, index, count) },

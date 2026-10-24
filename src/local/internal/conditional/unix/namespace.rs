@@ -70,7 +70,8 @@ impl Namespace {
     pub(super) fn open_rooted(
         root: File,
         relative: &Path,
-        diagnostic: &Path,
+        namespace_absolute: &Path,
+        diagnostic: Option<&Path>,
         options: &LocalWriteOptions,
     ) -> io::Result<Self> {
         let relative = crate::LocalRelativePath::new(relative)
@@ -80,13 +81,14 @@ impl Namespace {
         } else {
             RootedParentMode::OpenExisting
         };
-        let (parent, target_name, sync_dirs) = open_rooted_parent(&root, diagnostic, &relative, mode)?.into_parts();
+        let (parent, target_name, sync_dirs) =
+            open_rooted_parent(&root, namespace_absolute, &relative, mode)?.into_parts();
         Ok(Self {
             parent,
             target_name,
             sync_dirs,
-            namespace_path: relative.as_path().to_path_buf(),
-            diagnostic_path: Some(diagnostic.to_path_buf()),
+            namespace_path: namespace_absolute.to_path_buf(),
+            diagnostic_path: diagnostic.map(Path::to_path_buf),
         })
     }
 

@@ -19,21 +19,22 @@ impl RootedLocalFileSystem {
     pub(crate) fn open_conditional_backend(
         &self,
         relative: &Path,
-        diagnostic: &Path,
+        namespace_absolute: &Path,
+        diagnostic: Option<&Path>,
         options: &LocalWriteOptions,
     ) -> LocalResult<ConditionalWriterBackend> {
         let root = self.root.try_clone_authority().map_err(|error| {
             LocalFileError::from_io(
                 LocalFileOperation::OpenWriter,
-                Some(diagnostic.to_path_buf()),
+                Some(namespace_absolute.to_path_buf()),
                 None,
                 error,
             )
         })?;
-        ConditionalWriterBackend::rooted(root, relative, diagnostic, options).map_err(|error| {
+        ConditionalWriterBackend::rooted(root, relative, namespace_absolute, diagnostic, options).map_err(|error| {
             LocalFileError::from_io(
                 LocalFileOperation::OpenWriter,
-                Some(diagnostic.to_path_buf()),
+                Some(namespace_absolute.to_path_buf()),
                 None,
                 error,
             )
