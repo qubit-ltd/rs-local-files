@@ -843,16 +843,19 @@ not read the directory; with depth, entry, and seen-name-byte limits all zero,
 both backends return an empty listing without child reads or seen-name charges.
 The Host walker checks its deadline while skipping seen names and before its
 next directory read; the cooperative deadline cannot interrupt a blocked native
-read. Rooted and Host tree copies advance directory readers lazily. A bounded copy may inspect one child ahead while retaining the
+read. Listing does not charge the starting directory against the entry budget;
+only yielded child entries are charged. A zero entry budget therefore yields no
+children, including when the depth limit is zero. Rooted and Host tree copies advance directory readers lazily. A bounded copy may inspect one child ahead while retaining the
 reader permit, does not promise entry ordering, and never turns the native
 directory buffer into an application entry budget.
 
 ### 15.3 Error policy
 
-The root entry is charged once at depth zero. Continuation mode yields the
-current error and continues only branches whose authority and frame state are
-still valid; it does not rescan indefinitely after concurrent additions or
-deletions. A walker captures its policy and authority at `list()` creation,
+The list starting directory is not yielded or charged against the entry budget;
+budget accounting begins with its children. Continuation mode yields the current
+error and continues only branches whose authority and frame state are still
+valid; it does not rescan indefinitely after concurrent additions or deletions.
+A walker captures its policy and authority at `list()` creation,
 and its deadline starts there rather than at the first `next()` call.
 
 ## 16. Copy
