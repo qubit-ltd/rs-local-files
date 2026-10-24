@@ -18,16 +18,17 @@ use crate::LocalWritePublicationMethod;
 ///
 /// # Examples
 ///
-/// ```ignore
+/// ```
 /// use qubit_io::Output;
-/// use std::path::Path;
+/// use tempfile::tempdir;
 ///
 /// use qubit_local_files::LocalFileSystem;
-/// use qubit_local_files::LocalWriterState;
+/// use qubit_local_files::outcome::LocalWriterState;
 ///
 /// # fn main() -> Result<(), Box<dyn std::error::Error>> {
+/// let directory = tempdir()?;
 /// let filesystem = LocalFileSystem::host()?;
-/// let mut writer = filesystem.open_writer(Path::new("output.txt"))?;
+/// let mut writer = filesystem.open_writer(&directory.path().join("output.txt"))?;
 /// writer.write_fully(b"hello")?;
 /// let outcome = writer.commit()?;
 /// assert_eq!(outcome.state(), LocalWriterState::Committed);

@@ -1075,6 +1075,10 @@ commit 错误则把保留的恢复资源移交给错误对象。进程 abort 或
 | Windows Rooted | 原生 no-replace 安装 | 不支持 | Rooted `Absent` 使用相对已打开句柄的安装。 |
 | Android 和 FreeBSD | 未声明支持 | 未声明支持 | 不应从其他 Unix 目标推断支持。 |
 
+Linux 的扩展属性读取会处理长度查询与值读取之间发生的大小变化，包括查询到零长度后、读取前
+属性变为非空的情况。若原生读取报告所需空间大于当前缓冲区，读取器会在固定的 8 次尝试预算内重试；
+预算耗尽时返回 `ERANGE`。Linux 回归测试通过有序测试检查点覆盖零转非零增长。本证据不代表已验证 Android 运行时行为。
+
 ## 15. Lazy directory walk
 
 ### 15.1 Walker
@@ -1102,8 +1106,10 @@ Iterator<Item = LocalResult<LocalDirectoryEntry>>
 `LocalDirectoryReopenPolicy` 决定达到预算时重新打开 frame 还是返回 `ResourceLimit`。
 
 Host 列举即使通过符号链接访问了另一个物理目录，公开 entry path 仍保留请求的 namespace
-root，diagnostic path 才可记录实际访问位置。Rooted 和 Host 的 tree copy 都按需推进
-directory reader；受限复制允许在仍持有 reader 预算时预读一个子项，不承诺条目排序，也不会
+root，diagnostic path 才可记录实际访问位置。深度限制为零时不会读取子项；当深度、条目数和
+seen-name 字节预算均为零时，两种后端都返回空列表，不读取子项，也不扣减 seen-name 预算。
+Host walker 在跳过已见名称期间及下一次目录读取前检查 deadline；协作式期限不能中断已阻塞的原生读取。
+Rooted 和 Host 的 tree copy 都按需推进 directory reader；受限复制允许在仍持有 reader 预算时预读一个子项，不承诺条目排序，也不会
 把 native 目录缓冲区误当成应用已处理条目预算。
 
 ### 15.3 错误策略
@@ -1182,6 +1188,10 @@ Preflight 只能提前拒绝可证明的不合法情况，不能用不可靠字�
 Required semantics 不能通过 outcome 静默降级。Publish 成功而 parent sync 失败时返回
 `Published`。
 
+`LocalCopyOptions` 默认不保留源元数据。请求保留 portable permissions 后，文件复制会在
+同步与安装前将源权限应用到 staging。发布前失败会保留原目标；如果准备阶段已删除类型冲突目标，
+copy failure 会保留该部分变更状态。
+
 ### 16.5 Tree copy
 
 Tree copy 按 Options 控制递归、symlink、metadata 和预算。特殊文件默认拒绝，除非公开策略
@@ -1194,6 +1204,10 @@ Host 与 Rooted 的复制统计含义一致：`files` 计入复制的普通文�
 只计入新建目录，`bytes` 只计入普通文件字节。`overwritten` 包括被替换的条目，以及
 `Overwrite` 策略下合并的已有目录，包括复制根目录。`Skip` 仍会合并同类型目录，
 但不把这些合并计为覆盖。
+
+目录树复制准备阶段可能先删除类型冲突的目标，再安装替代条目。后续步骤失败时，即使已复制文件统计
+仍为零，只要该删除已经改变目标，就会报告 `PartiallyPublished`。目标状态应合并已发生的发布事实，
+不能只根据错误阶段推断。
 
 writer 在创建缺失父目录并要求 Required durability 时，会在发布后逐一同步新增祖先。
 祖先链同步失败仍表示目标已经发布，返回 `Published` 与不完整发布错误；调用方必须检查

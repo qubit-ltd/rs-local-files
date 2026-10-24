@@ -70,3 +70,6 @@ unexpected_cfgs = { level = "warn", check-cfg = ["cfg(coverage)"] }
 
 [package.metadata.rs-infra]
 sanitizers = ["address"]
+
+[package.metadata.docs.rs]
+features = ["digest"]

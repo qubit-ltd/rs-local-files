@@ -806,6 +806,14 @@ Backend scope currently established by the implementation:
 | Windows Rooted | Native no-replace install | Unsupported | Rooted `Absent` is handle-relative. |
 | Android and FreeBSD | Not claimed | Not claimed | Do not infer support from other Unix targets. |
 
+On Linux, the extended-attribute value reader handles a size change between
+the length query and value read, including a zero-capacity buffer whose
+attribute grew before the read. If the native read reports a larger required
+size, the reader retries within its fixed eight-attempt budget; exhausting the
+budget returns `ERANGE`. A Linux regression uses an ordered test checkpoint to
+reproduce zero-to-nonzero growth. This evidence does not claim Android runtime
+validation.
+
 ## 15. Lazy Directory Walking
 
 ### 15.1 Walker
@@ -830,8 +838,12 @@ capacity is invalid. No such limit is implied when the caller leaves it unset.
 
 Host listing keeps the requested namespace root in public entry paths even when
 the access path follows a symbolic link; an optional diagnostic path may expose
-the physical access location. Rooted and Host tree copies advance directory
-readers lazily. A bounded copy may inspect one child ahead while retaining the
+the physical access location. A zero depth limit yields no children and does
+not read the directory; with depth, entry, and seen-name-byte limits all zero,
+both backends return an empty listing without child reads or seen-name charges.
+The Host walker checks its deadline while skipping seen names and before its
+next directory read; the cooperative deadline cannot interrupt a blocked native
+read. Rooted and Host tree copies advance directory readers lazily. A bounded copy may inspect one child ahead while retaining the
 reader permit, does not promise entry ordering, and never turns the native
 directory buffer into an application entry budget.
 
@@ -872,6 +884,12 @@ metadata preservation. `LocalCopyFailure` retains the underlying structured
 error plus `Unchanged`, `PartiallyPublished`, `Published`, or `Indeterminate`
 state and partial statistics.
 
+Tree-copy preparation can remove an incompatible destination before installing
+replacement entries. A later failure reports `PartiallyPublished` when that
+removal changed the destination, even if copied-file statistics remain zero.
+Merge destination facts with publication facts; do not derive state from the
+operation stage alone.
+
 ### 16.3 Preflight
 
 Copy statistics have the same meaning in Host and Rooted scopes: `files`
@@ -887,6 +905,13 @@ When a writer creates missing parents with required durability, it synchronizes
 each newly created ancestor after publication. Failure in that chain is reported
 as `Published` with an incomplete publication error; the target bytes remain
 observable and callers must inspect the typed state.
+
+`LocalCopyOptions` defaults to no source metadata preservation. When portable
+permissions are requested for a file copy, the source permissions are applied
+to the staging file before its synchronization and installation. Failure before
+installation leaves the old destination intact unless preparation already
+removed a conflicting entry, in which case the copy failure retains that
+partial state.
 
 ### 16.5 Tree copy
 

@@ -247,10 +247,13 @@ conditionally replaces it with B. It also demonstrates the conflict path: after
 C replaces A, commit fails and the application reads B from the retained
 candidate copy. The `cfg` wrapper makes this example compile only when `digest`
 is enabled; it does not hide an ignored or incomplete example.
+The dependency feature is enabled on `qubit-local-files`; the consuming
+application does not need to define its own `digest` feature.
 
 ```rust
 # fn main() -> Result<(), Box<dyn std::error::Error>> {
 # #[cfg(feature = "digest")] {
+// BEGIN executable conditional write example
 use qubit_io::{Output, Streams};
 use qubit_local_files::LocalFileSystem;
 use qubit_local_files::options::{
@@ -285,11 +288,13 @@ conflicted.write_fully(b"B")?;
 std::fs::write(&path, b"C")?;
 let failure = conflicted.commit().expect_err("C no longer matches A");
 assert_eq!(failure.reason(), qubit_local_files::error::LocalConditionalFailureReason::PreconditionMismatch);
+assert_eq!(std::fs::read(&path)?, b"C");
 let candidate = failure.candidate().expect("B recovery copy is retained");
 let mut reader = candidate.open_reader()?;
 let mut recovered = Vec::new();
 Streams::copy_input_to_output(&mut reader, &mut recovered)?;
 assert_eq!(recovered, b"B");
+// END executable conditional write example
 # }
 # Ok(())
 # }
@@ -377,6 +382,12 @@ Rename reports `Unchanged`, `Renamed`, or `Indeterminate` through its typed
 failure state for the same reason: an error is not necessarily “nothing
 happened”.
 
+Tree copy can remove an incompatible destination entry before it copies the
+replacement. If a later step fails, inspect `LocalCopyFailure::state()` and
+`partial_stats()`; `PartiallyPublished` records that removal even when no file
+was counted as copied. An error alone does not imply that the destination is
+unchanged.
+
 ### Copy source modes
 
 In both Host and Rooted, `files()` includes copied links, `directories()` counts
@@ -389,6 +400,14 @@ only newly created directories, and `bytes()` counts regular-file bytes.
 | `Entry` | Copy content | Copy the link itself | `RequirementNotMet` | `Unsupported` |
 | `Tree` | `RequirementNotMet` | `RequirementNotMet` | Copy the tree | `Unsupported` |
 | `Auto` | Entry copy | Entry copy | Tree copy | `Unsupported` |
+
+Copy options default to `LocalMetadataPreservePolicy::None`. When
+`Permissions` is requested, file copies apply the source permissions to the
+staged destination before its file synchronization and publication. A failure
+before publication retains an existing destination; if a conflicting
+destination was already removed, the typed failure reports that partial
+effect. This copies permission metadata only, not source ACLs or all file
+metadata.
 
 `with_entry_source()` selects one file or link entry; `with_tree_source()`
 requires an actual directory. `with_source_mode(LocalCopySourceMode::Auto)`
@@ -420,7 +439,11 @@ streams each directory instead of first collecting it into a vector. Dropping
 the walker only releases handles. Host enumeration keeps the requested
 namespace path as the public root even when a followed symbolic link points to
 another physical directory; the optional diagnostic path may still identify
-that physical access path.
+that physical access path. A zero `max_depth` produces no entries and does not
+read directory children; the same empty traversal applies when the depth,
+entry, and seen-name-byte budgets are all zero. The deadline is checked while
+the Host walker skips previously seen names and before its next directory
+read; it remains cooperative and cannot interrupt a blocked native read.
 
 Temporary files and directories own cleanup according to current source
 eligibility. Each resource lives in

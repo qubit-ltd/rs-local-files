@@ -110,7 +110,9 @@ success result. A failed commit returns a structured error that owns recovery
 files, including an independently verified candidate copy when available. An
 uncommitted writer is cancelled on `abort()` or Drop and does not publish B. See
 the [conditional-write guide](doc/user_guide.md#conditional-write) for complete
-success and recovery flows and platform limits.
+success and recovery flows and platform limits. The visible `cfg` wrapper in
+the example is for this crate's doctest; an application only enables `digest`
+on the dependency and does not need a matching application feature.
 
 ## Why This Project Exists
 

@@ -221,6 +221,7 @@ tempfile = "^3.27"
 在第二次提交前，另一个写入者把 A 改成 C；提交因此失败，应用从保留的 candidate
 副本中读回 B。`cfg` 包装会让此示例仅在启用 `digest` 时编译；它没有用忽略标记
 掩盖不完整或错误的代码。
+这个 feature 由 `qubit-local-files` 依赖开启；应用本身无需声明 `digest` feature。
 
 ```rust
 # fn main() -> Result<(), Box<dyn std::error::Error>> {
@@ -259,6 +260,7 @@ conflicted.write_fully(b"B")?;
 std::fs::write(&path, b"C")?;
 let failure = conflicted.commit().expect_err("C 与 A 不再匹配");
 assert_eq!(failure.reason(), qubit_local_files::error::LocalConditionalFailureReason::PreconditionMismatch);
+assert_eq!(std::fs::read(&path)?, b"C");
 let candidate = failure.candidate().expect("B 的恢复副本仍被保留");
 let mut reader = candidate.open_reader()?;
 let mut recovered = Vec::new();
@@ -333,6 +335,10 @@ match filesystem.copy_with_options(
 重命名也会通过类型化失败状态报告 `Unchanged`、`Renamed` 或 `Indeterminate`；出错并不等于
 “什么都没发生”。
 
+目录树复制可能先删除与源类型冲突的目标，再开始复制替代内容。后续步骤失败时，应同时检查
+`LocalCopyFailure::state()` 与 `partial_stats()`；即使尚未计入已复制文件，
+`PartiallyPublished` 也会保留目标已被删除的事实。不能只凭 `Err` 推断目标未改变。
+
 ### 复制源模式
 
 Host 与 Rooted 中，`files()` 包括复制的链接，`directories()` 只计入新建目录，
@@ -344,6 +350,10 @@ Host 与 Rooted 中，`files()` 包括复制的链接，`directories()` 只计�
 | `Entry` | 复制内容 | 复制链接本身 | `RequirementNotMet` | `Unsupported` |
 | `Tree` | `RequirementNotMet` | `RequirementNotMet` | 复制目录树 | `Unsupported` |
 | `Auto` | 按条目复制 | 按条目复制 | 按目录树复制 | `Unsupported` |
+
+Copy Options 默认使用 `LocalMetadataPreservePolicy::None`。显式请求 `Permissions` 后，
+文件复制会先把源权限应用到 staging，再同步并发布。发布前失败时已有目标仍保留；若此前已
+删除冲突目标，类型化失败会反映这项部分变更。该选项只复制权限元数据，不复制源 ACL 或所有文件元数据。
 
 `with_entry_source()` 选择单个普通文件或链接条目，`with_tree_source()` 要求源为实体目录。
 `with_source_mode(LocalCopySourceMode::Auto)` 会明确恢复自动判断。源类型拒绝发生在创建
@@ -366,6 +376,9 @@ Windows 复制链接会保留源链接的文件/目录类型，包括悬空链�
 零句柄预算无效并返回 `InvalidOptions`。Rooted 会逐项读取目录，避免先收集到 `Vec`；
 drop walker 只释放句柄。Host 列举即使跟随符号链接进入另一个物理目录，也会保留请求的
 namespace 路径作为公开 root；可选的 diagnostic path 仍可记录实际访问的物理路径。
+`max_depth` 为零时结果为空，并且不读取目录子项；深度、条目数和 seen-name 字节预算都为零时，
+同样不会读取子项。Host walker 在跳过已见名称期间及下一次目录读取前检查 deadline；这是协作式
+期限，不能中断已经阻塞的原生读取。
 
 临时文件和目录按当前源资格承担清理责任。每个资源都创建在独立的私有 sandbox 中，
 sandbox 会和资源一起清理。需要观察清理失败时应显式调用 `cleanup()`；drop 只会静默地尽力清理。

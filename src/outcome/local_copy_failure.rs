@@ -37,8 +37,9 @@ use crate::LocalResourceLimitError;
 /// use qubit_local_files::outcome::LocalCopyFailureState;
 ///
 /// let filesystem = LocalFileSystem::host()?;
-/// let source = std::env::temp_dir().join("qubit-local-files-missing-source");
-/// let target = std::env::temp_dir().join("qubit-local-files-copy-target");
+/// let directory = tempfile::tempdir()?;
+/// let source = directory.path().join("missing-source");
+/// let target = directory.path().join("copy-target");
 /// let failure = filesystem.copy(&source, &target).expect_err("source is missing");
 /// assert_eq!(failure.state(), LocalCopyFailureState::Unchanged);
 /// # Ok::<(), Box<dyn std::error::Error>>(())

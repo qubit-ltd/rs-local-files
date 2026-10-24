@@ -102,6 +102,8 @@ let saved = writer.commit()?; // 检查 saved.digest()、cleanup_errors() 和 re
 可恢复文件；条件允许时，其中包括经过独立校验的 B 副本。尚未提交的写入器调用
 `abort()` 或离开作用域时会取消，不会发布 B。完整成功和恢复流程及平台限制见
 [条件写入指南](doc/user_guide.zh_CN.md#条件写入)。
+示例中的 `cfg` wrapper 是为了适配库自身的 doctest；应用只需在依赖上启用 `digest`，无需再声明
+同名 feature。
 
 ## 为什么需要这个项目
 

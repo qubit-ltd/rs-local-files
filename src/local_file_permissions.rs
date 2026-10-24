@@ -14,8 +14,8 @@
 ///
 /// # Examples
 ///
-/// ```ignore
-/// use qubit_local_files::LocalFilePermissions;
+/// ```
+/// use qubit_local_files::outcome::LocalFilePermissions;
 ///
 /// let permissions = LocalFilePermissions::new(true, Some(0o444));
 /// assert!(permissions.is_read_only());
