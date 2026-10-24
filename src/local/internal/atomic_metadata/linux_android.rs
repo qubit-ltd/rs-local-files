@@ -260,11 +260,29 @@ fn get_xattr_inner(file: &File, name: &[u8]) -> Result<Option<Vec<u8>>> {
             Err(error) => return Err(error),
         };
         let mut value = vec![0_u8; length];
+        #[cfg(feature = "test-support")]
+        {
+            if super::super::test_support::take("atomic-metadata-value-disappears") {
+                remove_xattr(file, name.as_bytes())?;
+            } else if super::super::test_support::take("atomic-metadata-value-growth-once") {
+                set_xattr(file, name.as_bytes(), b"grown once")?;
+            } else if super::super::test_support::take("atomic-metadata-zero-growth") && value.is_empty() {
+                set_xattr(file, name.as_bytes(), b"grew")?;
+            } else if super::super::test_support::is_enabled("atomic-metadata-value-growth-persistent") {
+                let grown = vec![b'x'; length + 1];
+                set_xattr(file, name.as_bytes(), &grown)?;
+            }
+        }
         match read_xattr_value(file, &name, &mut value) {
-            Ok(read) => {
+            Ok(read) if read <= value.len() => {
                 value.truncate(read);
                 return Ok(Some(value));
             }
+            Ok(_) if remaining_attempts > 1 => {
+                remaining_attempts -= 1;
+                continue;
+            }
+            Ok(_) => return Err(Error::from_raw_os_error(libc::ERANGE)),
             Err(error) if error.raw_os_error() == Some(libc::ERANGE) && remaining_attempts > 1 => {
                 remaining_attempts -= 1;
                 continue;
@@ -272,6 +290,121 @@ fn get_xattr_inner(file: &File, name: &[u8]) -> Result<Option<Vec<u8>>> {
             Err(error) if is_missing_xattr(&error) => return Ok(None),
             Err(error) => return Err(error),
         }
+    }
+}
+
+#[cfg(all(test, feature = "test-support"))]
+mod tests {
+    use std::fs::File;
+
+    use super::get_xattr_inner;
+    use super::remove_xattr;
+    use super::set_xattr;
+
+    #[test]
+    fn test_get_xattr_retries_zero_capacity_growth() {
+        let directory = tempfile::tempdir().expect("temporary directory should be created");
+        let file = File::create(directory.path().join("fixture")).expect("fixture should be created");
+        let name = b"user.qubit_q01_growth";
+        if let Err(error) = set_xattr(&file, name, b"") {
+            if super::is_not_supported(&error) {
+                eprintln!("xattr growth path unavailable: {error}");
+                return;
+            }
+            panic!("empty xattr setup failed: {error}");
+        }
+        let _fault = super::super::super::test_support::install_test_fault("atomic-metadata-zero-growth")
+            .expect("growth checkpoint should install");
+        assert_eq!(
+            Some(b"grew".to_vec()),
+            get_xattr_inner(&file, name).expect("xattr read should retry")
+        );
+    }
+
+    #[test]
+    fn test_get_xattr_handles_empty_value_growth_and_disappearance() {
+        let directory = tempfile::tempdir().expect("temporary directory should be created");
+        let file = File::create(directory.path().join("fixture")).expect("fixture should be created");
+        let name = b"user.qubit_q01_states";
+        if let Err(error) = set_xattr(&file, name, b"") {
+            if super::is_not_supported(&error) {
+                eprintln!("xattr state tests unavailable: {error}");
+                return;
+            }
+            panic!("empty xattr setup failed: {error}");
+        }
+        assert_eq!(
+            Some(Vec::new()),
+            get_xattr_inner(&file, name).expect("empty xattr should read")
+        );
+        set_xattr(&file, name, b"longer value").expect("xattr should grow");
+        assert_eq!(
+            Some(b"longer value".to_vec()),
+            get_xattr_inner(&file, name).expect("grown xattr should read")
+        );
+        remove_xattr(&file, name).expect("xattr should be removed");
+        assert_eq!(
+            None,
+            get_xattr_inner(&file, name).expect("missing xattr should be absent")
+        );
+    }
+
+    #[test]
+    fn test_get_xattr_retries_nonzero_value_growth() {
+        let directory = tempfile::tempdir().expect("temporary directory should be created");
+        let file = File::create(directory.path().join("fixture")).expect("fixture should be created");
+        let name = b"user.qubit_q01_nonzero_growth";
+        if let Err(error) = set_xattr(&file, name, b"small") {
+            if super::is_not_supported(&error) {
+                eprintln!("xattr nonzero growth test unavailable: {error}");
+                return;
+            }
+            panic!("xattr setup failed: {error}");
+        }
+        let _fault = super::super::super::test_support::install_test_fault("atomic-metadata-value-growth-once")
+            .expect("nonzero growth fault should install");
+        assert_eq!(
+            Some(b"grown once".to_vec()),
+            get_xattr_inner(&file, name).expect("nonzero xattr growth should retry")
+        );
+    }
+
+    #[test]
+    fn test_get_xattr_reports_disappearance_between_query_and_read() {
+        let directory = tempfile::tempdir().expect("temporary directory should be created");
+        let file = File::create(directory.path().join("fixture")).expect("fixture should be created");
+        let name = b"user.qubit_q01_disappears";
+        if let Err(error) = set_xattr(&file, name, b"value") {
+            if super::is_not_supported(&error) {
+                eprintln!("xattr disappearance test unavailable: {error}");
+                return;
+            }
+            panic!("xattr setup failed: {error}");
+        }
+        let _fault = super::super::super::test_support::install_test_fault("atomic-metadata-value-disappears")
+            .expect("disappearance fault should install");
+        assert_eq!(
+            None,
+            get_xattr_inner(&file, name).expect("disappearing xattr should be absent")
+        );
+    }
+
+    #[test]
+    fn test_get_xattr_returns_erange_when_size_race_budget_is_exhausted() {
+        let directory = tempfile::tempdir().expect("temporary directory should be created");
+        let file = File::create(directory.path().join("fixture")).expect("fixture should be created");
+        let name = b"user.qubit_q01_budget";
+        if let Err(error) = set_xattr(&file, name, b"value") {
+            if super::is_not_supported(&error) {
+                eprintln!("xattr budget test unavailable: {error}");
+                return;
+            }
+            panic!("xattr setup failed: {error}");
+        }
+        let _fault = super::super::super::test_support::install_test_fault("atomic-metadata-value-growth-persistent")
+            .expect("persistent race fault should install");
+        let error = get_xattr_inner(&file, name).expect_err("exhausted size races must fail");
+        assert_eq!(Some(libc::ERANGE), error.raw_os_error());
     }
 }
 
