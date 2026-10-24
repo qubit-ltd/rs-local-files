@@ -206,47 +206,89 @@ fn get_attribute(file: &File, namespace: libc::c_int, name: &[u8]) -> Result<Vec
 /// failures are returned as errors.
 fn get_optional_attribute(file: &File, namespace: libc::c_int, name: &[u8]) -> Result<Option<Vec<u8>>> {
     let name = native_name(name)?;
+    read_optional_attribute(
+        || {
+            // SAFETY: the descriptor and name remain live, and null output asks
+            // only for the current value length.
+            let length =
+                unsafe { libc::extattr_get_fd(file.as_raw_fd(), namespace, name.as_ptr(), std::ptr::null_mut(), 0) };
+            if length == -1 {
+                Err(Error::last_os_error())
+            } else {
+                usize::try_from(length).map_err(|_| Error::new(ErrorKind::InvalidData, "invalid xattr length"))
+            }
+        },
+        |value| {
+            // SAFETY: `value` is writable for its full length and the descriptor
+            // and name remain live for this non-retaining call.
+            let read = unsafe {
+                libc::extattr_get_fd(
+                    file.as_raw_fd(),
+                    namespace,
+                    name.as_ptr(),
+                    value.as_mut_ptr().cast(),
+                    value.len(),
+                )
+            };
+            if read == -1 {
+                Err(Error::last_os_error())
+            } else {
+                usize::try_from(read).map_err(|_| Error::new(ErrorKind::InvalidData, "invalid xattr read length"))
+            }
+        },
+    )
+}
+
+fn read_optional_attribute(
+    mut probe: impl FnMut() -> Result<usize>,
+    mut read: impl FnMut(&mut [u8]) -> Result<usize>,
+) -> Result<Option<Vec<u8>>> {
     let mut remaining_attempts = XATTR_SIZE_RACE_ATTEMPTS;
     loop {
-        // SAFETY: the descriptor and name remain live, and null output asks
-        // only for the current value length.
-        let length =
-            unsafe { libc::extattr_get_fd(file.as_raw_fd(), namespace, name.as_ptr(), std::ptr::null_mut(), 0) };
-        if length == -1 {
-            let error = Error::last_os_error();
-            if is_missing_attribute(&error) {
-                return Ok(None);
+        let length = match probe() {
+            Ok(length) => length,
+            Err(error) => {
+                if is_missing_attribute(&error) {
+                    return Ok(None);
+                }
+                return Err(error);
             }
-            return Err(error);
-        }
-        if length == 0 {
-            return Ok(Some(Vec::new()));
-        }
-        let mut value = vec![0_u8; length as usize];
-        // SAFETY: `value` is writable for its full length and the descriptor
-        // and name remain live for this non-retaining call.
-        let read = unsafe {
-            libc::extattr_get_fd(
-                file.as_raw_fd(),
-                namespace,
-                name.as_ptr(),
-                value.as_mut_ptr().cast(),
-                value.len(),
-            )
         };
-        if read == -1 {
-            let error = Error::last_os_error();
-            if error.raw_os_error() == Some(libc::ERANGE) && remaining_attempts > 1 {
-                remaining_attempts -= 1;
-                continue;
+        let capacity = length
+            .checked_add(1)
+            .ok_or_else(|| Error::new(ErrorKind::InvalidData, "extended-attribute length overflow"))?;
+        let mut value = Vec::new();
+        value.try_reserve_exact(capacity).map_err(|error| {
+            Error::new(
+                ErrorKind::Other,
+                format!("cannot allocate extended-attribute buffer: {error}"),
+            )
+        })?;
+        value.resize(capacity, 0);
+        let read = match read(&mut value) {
+            Ok(read) => read,
+            Err(error) => {
+                if error.raw_os_error() == Some(libc::ERANGE) && remaining_attempts > 1 {
+                    remaining_attempts -= 1;
+                    continue;
+                }
+                if is_missing_attribute(&error) {
+                    return Ok(None);
+                }
+                return Err(error);
             }
-            if is_missing_attribute(&error) {
-                return Ok(None);
-            }
-            return Err(error);
+        };
+        if read < capacity {
+            value.truncate(read);
+            return Ok(Some(value));
         }
-        value.truncate(read as usize);
-        return Ok(Some(value));
+        if remaining_attempts == 1 {
+            return Err(Error::new(
+                ErrorKind::Other,
+                "extended attribute changed during every read attempt",
+            ));
+        }
+        remaining_attempts -= 1;
     }
 }
 
@@ -310,6 +352,104 @@ fn native_name(name: &[u8]) -> Result<CString> {
 #[inline]
 fn is_missing_attribute(error: &Error) -> bool {
     error.raw_os_error() == Some(libc::ENOATTR)
+}
+
+#[cfg(test)]
+mod tests {
+    use std::collections::VecDeque;
+    use std::io::Error;
+    use std::io::ErrorKind;
+
+    use super::read_optional_attribute;
+
+    #[test]
+    fn test_attribute_read_zero_length_still_reads_and_observes_growth() {
+        let mut probes: VecDeque<Result<usize, Error>> = VecDeque::from([Ok(0), Ok(3)]);
+        let mut reads: VecDeque<Result<usize, Error>> = VecDeque::from([Ok(1), Ok(3)]);
+        let value = read_optional_attribute(
+            || probes.pop_front().expect("probe should be available"),
+            |buffer| {
+                let read = reads.pop_front().expect("read should be available")?;
+                buffer[..read].copy_from_slice(b"abc"[..read].as_ref());
+                Ok(read)
+            },
+        )
+        .expect("attribute should be read")
+        .expect("attribute should exist");
+        assert_eq!(b"abc", value.as_slice());
+        assert!(probes.is_empty());
+        assert!(reads.is_empty());
+    }
+
+    #[test]
+    fn test_attribute_read_accepts_stable_empty_and_nonempty_values() {
+        for (length, bytes) in [(0, b"".as_slice()), (3, b"xyz".as_slice())] {
+            let value = read_optional_attribute(
+                || Ok(length),
+                |buffer| {
+                    buffer[..bytes.len()].copy_from_slice(bytes);
+                    Ok(bytes.len())
+                },
+            )
+            .expect("attribute should be read")
+            .expect("attribute should exist");
+            assert_eq!(bytes, value);
+        }
+    }
+
+    #[test]
+    fn test_attribute_read_retries_full_buffer_and_erange() {
+        let mut probes: VecDeque<Result<usize, Error>> = VecDeque::from([Ok(2), Ok(3), Ok(3)]);
+        let mut reads: VecDeque<Result<usize, Error>> =
+            VecDeque::from([Ok(3), Err(Error::from_raw_os_error(libc::ERANGE)), Ok(3)]);
+        let value = read_optional_attribute(
+            || probes.pop_front().expect("probe should be available"),
+            |buffer| {
+                let result = reads.pop_front().expect("read should be available");
+                if let Ok(read) = result {
+                    buffer[..read].copy_from_slice(b"new");
+                    Ok(read)
+                } else {
+                    result
+                }
+            },
+        )
+        .expect("racing reads should eventually succeed")
+        .expect("attribute should exist");
+        assert_eq!(b"new", value.as_slice());
+        assert!(probes.is_empty());
+        assert!(reads.is_empty());
+    }
+
+    #[test]
+    fn test_attribute_read_returns_none_when_attribute_disappears() {
+        let absent = || Err(Error::from_raw_os_error(libc::ENOATTR));
+        assert!(
+            read_optional_attribute(absent, |_| unreachable!("absent probe skips read"))
+                .expect("missing attribute is not an error")
+                .is_none()
+        );
+        assert!(
+            read_optional_attribute(|| Ok(1), |_| Err(Error::from_raw_os_error(libc::ENOATTR)),)
+                .expect("disappearing attribute is not an error")
+                .is_none()
+        );
+    }
+
+    #[test]
+    fn test_attribute_read_rejects_continuous_growth_after_budget() {
+        let reads = std::cell::Cell::new(0);
+        let result = read_optional_attribute(
+            || Ok(reads.get()),
+            |buffer| {
+                reads.set(reads.get() + 1);
+                Ok(buffer.len())
+            },
+        );
+        let error = result.expect_err("repeated full buffers must not return a truncated value");
+        assert_eq!(ErrorKind::Other, error.kind());
+        assert_eq!(8, reads.get());
+    }
 }
 
 /// Reports that a filesystem lacks an extended-attribute namespace.

@@ -6,7 +6,7 @@
 //    Licensed under the Apache License, Version 2.0.
 // =============================================================================
 
-#[cfg(any(target_os = "linux", target_os = "android"))]
+#[cfg(any(target_os = "linux", target_os = "android", target_os = "freebsd"))]
 use std::ffi::CString;
 use std::fs;
 #[cfg(any(target_os = "linux", target_os = "android"))]
@@ -292,6 +292,73 @@ fn test_atomic_replacement_preserves_extended_attributes() {
     let length = unsafe {
         libc::getxattr(
             native_path.as_ptr(),
+            attribute.as_ptr(),
+            observed.as_mut_ptr().cast(),
+            observed.len(),
+        )
+    };
+    assert_eq!(value.len() as isize, length);
+    assert_eq!(value, &observed[..length as usize]);
+}
+
+/// Verifies FreeBSD short-buffer reads succeed and atomic replacement preserves
+/// the complete user extended attribute on filesystems with the user namespace.
+#[cfg(target_os = "freebsd")]
+#[test]
+fn test_freebsd_xattr_short_read_and_atomic_preservation() {
+    use std::os::fd::AsRawFd;
+
+    let directory = tempdir().expect("temporary directory should be created");
+    let path = directory.path().join("destination");
+    fs::write(&path, b"previous").expect("destination fixture should be written");
+    let file = fs::File::open(&path).expect("destination should open");
+    let attribute = CString::new("qubit-local-files-coverage").expect("attribute name should not contain NUL");
+    let value = b"preserved-complete-value";
+
+    let set_result = unsafe {
+        libc::extattr_set_fd(
+            file.as_raw_fd(),
+            libc::EXTATTR_NAMESPACE_USER,
+            attribute.as_ptr(),
+            value.as_ptr().cast(),
+            value.len(),
+        )
+    };
+    if set_result == -1 {
+        let error = std::io::Error::last_os_error();
+        if error.raw_os_error() == Some(libc::ENOTSUP) {
+            eprintln!("skipping FreeBSD xattr preservation: user extended attributes are unsupported on this filesystem");
+            return;
+        }
+        panic!("destination extended attribute should be created: {error}");
+    }
+
+    let mut short_buffer = [0_u8; 1];
+    let short_read = unsafe {
+        libc::extattr_get_fd(
+            file.as_raw_fd(),
+            libc::EXTATTR_NAMESPACE_USER,
+            attribute.as_ptr(),
+            short_buffer.as_mut_ptr().cast(),
+            short_buffer.len(),
+        )
+    };
+    assert_eq!(1, short_read, "FreeBSD should return a successful short read");
+
+    let mut writer = LocalFileSystem::host()
+        .expect("Host filesystem should open")
+        .open_writer_with_options(&path, &LocalWriteOptions::new(LocalWriteMode::CreateOrReplace))
+        .expect("existing destination should open for atomic replacement");
+    Output::write_fully(&mut writer, b"replacement").expect("staging writer should accept replacement bytes");
+    let outcome = writer.commit().expect("atomic replacement should commit");
+    assert!(outcome.atomic());
+
+    let replaced = fs::File::open(&path).expect("replaced destination should open");
+    let mut observed = [0_u8; 64];
+    let length = unsafe {
+        libc::extattr_get_fd(
+            replaced.as_raw_fd(),
+            libc::EXTATTR_NAMESPACE_USER,
             attribute.as_ptr(),
             observed.as_mut_ptr().cast(),
             observed.len(),
@@ -668,11 +735,20 @@ fn test_copy_rejects_injected_missing_directory_durability() {
 #[test]
 fn test_host_copy_reports_injected_destination_races() {
     const TEST_NAME: &str = "test_host_copy_reports_injected_destination_races";
-    for fault in [
-        "copy-directory-create-error",
-        "copy-directory-race-existing",
-        "copy-directory-race-inspect",
-        "copy-directory-race-nondirectory",
+    for (fault, expected) in [
+        (
+            "copy-directory-create-error",
+            Err((std::io::ErrorKind::Other, LocalFileErrorKind::Io)),
+        ),
+        ("copy-directory-race-existing", Ok(())),
+        (
+            "copy-directory-race-inspect",
+            Err((std::io::ErrorKind::Other, LocalFileErrorKind::Io)),
+        ),
+        (
+            "copy-directory-race-nondirectory",
+            Err((std::io::ErrorKind::AlreadyExists, LocalFileErrorKind::AlreadyExists)),
+        ),
     ] {
         run_facade_fault(TEST_NAME, fault, || {
             let directory = tempdir().expect("temporary directory should be created");
@@ -684,13 +760,52 @@ fn test_host_copy_reports_injected_destination_races() {
             let result = LocalFileSystem::host()
                 .expect("Host filesystem should open")
                 .copy_with_options(&source, &target, &LocalCopyOptions::new().with_tree_source());
-            if result.is_ok() {
-                assert_eq!(
-                    b"payload",
-                    fs::read(target.join("nested/payload"))
-                        .expect("a reconciled successful copy must publish the full tree")
-                        .as_slice(),
-                );
+            match expected {
+                Ok(()) => {
+                    let outcome = result.expect("a racing real destination directory must reconcile");
+                    assert_eq!(
+                        0,
+                        outcome.stats().directories(),
+                        "the injected race reconciles both root and nested directories as already existing",
+                    );
+                    assert_eq!(
+                        b"payload",
+                        fs::read(target.join("nested/payload"))
+                            .expect("a reconciled successful copy must publish the full tree")
+                            .as_slice(),
+                    );
+                }
+                Err((native_kind, local_kind)) => {
+                    let failure = result.expect_err("the selected destination fault must fail the copy");
+                    assert_eq!(local_kind, failure.error().kind());
+                    let native = failure
+                        .error()
+                        .io_error()
+                        .expect("the copy failure should retain its native I/O error");
+                    assert_eq!(
+                        native_kind,
+                        native.kind(),
+                        "the selector's native error must be preserved"
+                    );
+                    assert_eq!(LocalCopyFailureState::Unchanged, failure.state());
+                    assert_eq!(0, failure.partial_stats().directories());
+                    assert_eq!(0, failure.partial_stats().files());
+                    assert!(
+                        failure.staging_path().is_none(),
+                        "direct directory copy has no retained staging tree"
+                    );
+                    assert!(
+                        target.is_dir(),
+                        "the native create call made the root before the injected error"
+                    );
+                    assert_eq!(
+                        0,
+                        fs::read_dir(&target)
+                            .expect("failed destination root should remain inspectable")
+                            .count(),
+                        "no source entries should have been copied after destination preparation failed",
+                    );
+                }
             }
         });
     }
