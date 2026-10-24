@@ -13,6 +13,8 @@ use std::time::Duration;
 
 use qubit_local_files::LocalFileSystem;
 use qubit_local_files::error::LocalFileErrorKind;
+#[cfg(feature = "test-support")]
+use qubit_local_files::options::LocalDirectoryReopenPolicy;
 use qubit_local_files::options::LocalListOptions;
 use qubit_local_files::options::LocalWalkErrorPolicy;
 use qubit_local_files::outcome::LocalFileKind;
@@ -209,6 +211,68 @@ fn test_local_directory_walker_zero_depth_does_not_consume_yield_budgets() {
         .expect("zero-depth traversal should not consume yield budgets");
 
     assert!(entries.is_empty());
+}
+
+/// Verifies zero-depth listing never reaches either backend's child reader.
+#[cfg(feature = "test-support")]
+#[test]
+fn test_local_directory_walker_zero_depth_does_not_read_children() {
+    let directory = tempdir().expect("temporary directory should be created");
+    fs::write(directory.path().join("entry"), b"payload").expect("entry fixture should be written");
+
+    for rooted in [false, true] {
+        let _fault = install_test_fault("walker-entry").expect("child-read fault should install");
+        let filesystem = if rooted {
+            LocalFileSystem::rooted(directory.path()).expect("Rooted filesystem should open")
+        } else {
+            LocalFileSystem::host().expect("Host filesystem should open")
+        };
+        let root = if rooted { Path::new("/") } else { directory.path() };
+        let entries = filesystem
+            .list_with_options(
+                root,
+                &LocalListOptions::new()
+                    .with_max_depth(0)
+                    .with_max_entries(0)
+                    .with_max_seen_name_bytes(0),
+            )
+            .expect("zero-depth walker should preserve root validation")
+            .collect::<Result<Vec<_>, _>>()
+            .expect("zero-depth walk must not read a child entry");
+        assert!(entries.is_empty());
+    }
+}
+
+/// Verifies a repeated-name progress boundary observes deadline expiry before
+/// starting another native read and terminates both error policies.
+#[cfg(feature = "test-support")]
+#[test]
+fn test_local_directory_walker_deadline_terminates_after_duplicate_progress() {
+    let directory = tempdir().expect("temporary directory should be created");
+    fs::write(directory.path().join("entry"), b"payload").expect("entry fixture should be written");
+
+    for error_policy in [LocalWalkErrorPolicy::FailFast, LocalWalkErrorPolicy::Continue] {
+        let _fault = install_test_fault("walker-deadline-inner").expect("deadline progress fault should install");
+        let mut walker = LocalFileSystem::host()
+            .expect("Host filesystem should open")
+            .list_with_options(
+                directory.path(),
+                &LocalListOptions::new()
+                    .with_reopen_policy(LocalDirectoryReopenPolicy::Reopen)
+                    .with_error_policy(error_policy),
+            )
+            .expect("Host walker should open");
+
+        let error = walker
+            .next()
+            .expect("deadline error should be returned")
+            .expect_err("deadline should expire");
+        assert_eq!(std::io::ErrorKind::TimedOut, error.io_error_kind());
+        assert!(
+            walker.next().is_none(),
+            "deadline should terminate even under Continue policy"
+        );
+    }
 }
 
 /// Verifies an exhausted global resource budget terminates Continue traversal.

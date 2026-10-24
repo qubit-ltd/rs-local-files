@@ -132,21 +132,28 @@ impl LocalDirectoryWalker {
             ));
         }
         let root_identity = native_directory_identity(&metadata, &backend_root)?;
+        let zero_depth = options.max_depth() == Some(0);
         let mut followed_directories = HashSet::new();
-        followed_directories.insert(root_identity.clone());
+        if !zero_depth {
+            followed_directories.insert(root_identity.clone());
+        }
         Ok(Self {
             root: diagnostic_root,
             backend_root,
             current_directory: None,
             options,
-            stack: vec![WalkFrame {
-                entries: Some(entries),
-                directory_permit,
-                seen: HashSet::new(),
-                relative: PathBuf::new(),
-                identity: Some(root_identity),
-                entry_depth: 1,
-            }],
+            stack: if zero_depth {
+                Vec::new()
+            } else {
+                vec![WalkFrame {
+                    entries: Some(entries),
+                    directory_permit,
+                    seen: HashSet::new(),
+                    relative: PathBuf::new(),
+                    identity: Some(root_identity),
+                    entry_depth: 1,
+                }]
+            },
             open_directories,
             followed_directories,
             rooted: None,
@@ -234,8 +241,11 @@ impl LocalDirectoryWalker {
             Err(error) => return Err(walk_io_error(&namespace_root, error)),
         };
         let start_identity = DirectoryIdentity::from_rooted_metadata(&start_metadata, &authority_parent);
+        let zero_depth = options.max_depth() == Some(0);
         let mut followed_directories = HashSet::new();
-        followed_directories.insert(start_identity.clone());
+        if !zero_depth {
+            followed_directories.insert(start_identity.clone());
+        }
         Ok(Self {
             root: namespace_root,
             backend_root: PathBuf::new(),
@@ -246,15 +256,19 @@ impl LocalDirectoryWalker {
             followed_directories: HashSet::new(),
             rooted: Some(RootedWalkState {
                 root,
-                stack: vec![RootedWalkFrame {
-                    reader: None,
-                    directory_permit: None,
-                    seen: HashSet::new(),
-                    authority_parent,
-                    output_parent,
-                    entry_depth: 1,
-                    identity: Some(start_identity),
-                }],
+                stack: if zero_depth {
+                    Vec::new()
+                } else {
+                    vec![RootedWalkFrame {
+                        reader: None,
+                        directory_permit: None,
+                        seen: HashSet::new(),
+                        authority_parent,
+                        output_parent,
+                        entry_depth: 1,
+                        identity: Some(start_identity),
+                    }]
+                },
                 followed_directories,
                 symlink_policy,
             }),
@@ -529,6 +543,13 @@ impl LocalDirectoryWalker {
             return result;
         }
         loop {
+            if matches!(self.deadline, Some(deadline) if Instant::now() >= deadline) {
+                self.terminated = true;
+                return Some(Err(walk_io_error(
+                    &self.root,
+                    std::io::Error::new(std::io::ErrorKind::TimedOut, "local listing deadline exceeded"),
+                )));
+            }
             let frame = self.stack.last()?;
             let entry_depth = frame.entry_depth;
             let relative_parent = frame.relative.clone();
@@ -538,6 +559,22 @@ impl LocalDirectoryWalker {
             }
             let frame = self.stack.last_mut()?;
             let next_entry = loop {
+                if matches!(self.deadline, Some(deadline) if Instant::now() >= deadline) {
+                    self.terminated = true;
+                    return Some(Err(walk_io_error(
+                        &self.root,
+                        std::io::Error::new(std::io::ErrorKind::TimedOut, "local listing deadline exceeded"),
+                    )));
+                }
+                #[cfg(feature = "test-support")]
+                if self.deadline.is_some_and(|deadline| Instant::now() >= deadline)
+                    && crate::local::test_support_enabled("walker-deadline-inner")
+                {
+                    return Some(Err(walk_io_error(
+                        &self.root,
+                        std::io::Error::other("test instrumentation observed an unchecked deadline"),
+                    )));
+                }
                 let next = frame
                     .entries
                     .as_mut()
@@ -546,6 +583,14 @@ impl LocalDirectoryWalker {
                 match next {
                     Some(Ok(entry)) => {
                         let name = entry.file_name();
+                        #[cfg(feature = "test-support")]
+                        let force_duplicate_deadline = crate::local::take_test_support("walker-deadline-inner");
+                        #[cfg(not(feature = "test-support"))]
+                        let force_duplicate_deadline = false;
+                        if force_duplicate_deadline {
+                            frame.seen.insert(name.clone());
+                            self.deadline = Some(Instant::now());
+                        }
                         if frame.seen.insert(name) {
                             break Some(Ok(entry));
                         }
@@ -860,6 +905,12 @@ fn next_rooted_entry(
             .as_mut()
             .expect("rooted frame reader was initialized")
             .next_entry();
+        #[cfg(feature = "test-support")]
+        let next_entry = if crate::local::take_test_support("walker-entry") {
+            Err(std::io::Error::other("injected walker directory entry failure"))
+        } else {
+            next_entry
+        };
         let entry = match next_entry {
             Ok(Some(entry)) => {
                 if !state
