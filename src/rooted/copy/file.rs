@@ -200,6 +200,9 @@ pub(super) fn copy_file(
                 destination_removed,
             )
         })?;
+    if options.preserves_permissions() {
+        writer.set_copy_permissions(source_metadata.permissions());
+    }
     #[cfg(feature = "test-support")]
     let copy_result = if crate::local::test_support_enabled("rooted-copy-file-contents-native") {
         Err(crate::local::test_fault_error())
@@ -241,7 +244,6 @@ pub(super) fn copy_file(
     if destination_metadata.is_some() {
         statistics.overwritten = checked_add(statistics.overwritten, 1, source, destination, statistics)?;
     }
-    preserve_permissions(root, source, destination, source_metadata, options, statistics)?;
     if destination_directory_requires_removal {
         statistics.non_atomic_publication = true;
     }
@@ -300,10 +302,17 @@ fn rooted_commit_error(
     statistics: Statistics,
     source_error: crate::LocalAtomicWriteError,
 ) -> Error {
+    let prepublication_metadata_failure = source_error.stage()
+        == crate::LocalAtomicWriteStage::ApplyDestinationMetadata
+        && source_error.destination_state() == crate::LocalAtomicDestinationState::Unchanged;
     let (temporary_path, cleanup_error, source_error) = source_error.into_staging_parts();
     let source_kind = source_error.kind();
     let copy_error = error(
-        Stage::CommitFile,
+        if prepublication_metadata_failure {
+            Stage::PrepareDestination
+        } else {
+            Stage::CommitFile
+        },
         source,
         destination,
         statistics,

@@ -12,6 +12,8 @@ use std::ffi::CString;
 #[cfg(any(unix, windows))]
 use std::fs::File;
 use std::io;
+#[cfg(unix)]
+use std::os::unix::fs::PermissionsExt;
 use std::path::Path;
 use std::path::PathBuf;
 #[cfg(unix)]
@@ -99,6 +101,8 @@ use crate::write::OpenOptions as WriteOpenOptions;
 pub struct LocalRootAtomicWriter {
     /// Controls metadata copying independently of regular-destination identity.
     metadata_policy: LocalWriteMetadataPolicy,
+    /// Optional source permission override used only by rooted file copies.
+    copy_permissions: Option<crate::rooted::Permissions>,
     /// Requested relative destination retained for structured errors.
     path: PathBuf,
     /// Optional limit for retrying a nonblocking destination open.
@@ -214,6 +218,7 @@ impl LocalRootAtomicWriter {
         )?;
         Ok(Self {
             path: requested_path,
+            copy_permissions: None,
             open_retry_timeout: options.open_retry_timeout(),
             final_name,
             parent_dirs_to_sync,
@@ -350,6 +355,7 @@ impl LocalRootAtomicWriter {
                 Ok(file) => {
                     return Ok(Self {
                         path: requested_path,
+                        copy_permissions: None,
                         destination: path.clone(),
                         destination_existed,
                         staged_file: WindowsRootedStagedFile {
@@ -418,6 +424,11 @@ impl LocalRootAtomicWriter {
             let error = unsupported_atomic_error(&self.path);
             Err(LocalAtomicCommitError::new(error, None))
         }
+    }
+
+    /// Selects source permissions to apply to copy staging before publication.
+    pub(crate) fn set_copy_permissions(&mut self, permissions: crate::rooted::Permissions) {
+        self.copy_permissions = Some(permissions);
     }
 
     /// Aborts replacement and removes the descriptor-relative staging entry.
@@ -533,6 +544,7 @@ impl LocalRootAtomicWriter {
                 )
             })?;
         }
+        self.apply_copy_permissions()?;
         if self.durability == LocalDurabilityRequirement::Required {
             self.staged_file.file().sync_all().map_err(|source| {
                 LocalAtomicWriteError::new(
@@ -620,10 +632,70 @@ impl LocalRootAtomicWriter {
     fn commit_attempt(&mut self) -> Result<bool, LocalAtomicWriteError> {
         let destination = self.open_destination_for_commit()?;
         self.apply_destination_metadata(destination.as_ref())?;
+        self.apply_copy_permissions()?;
         let file_durable = self.sync_temporary_file()?;
         self.verify_destination_for_commit(destination.as_ref())?;
         let parent_durable = self.install_and_sync_parent()?;
         Ok(file_durable && parent_durable)
+    }
+
+    /// Applies the copy-only permission override after destination metadata.
+    ///
+    /// # Errors
+    ///
+    /// Returns `ApplyDestinationMetadata` while staging is still unpublished.
+    fn apply_copy_permissions(&mut self) -> Result<(), LocalAtomicWriteError> {
+        let Some(permissions) = self.copy_permissions else {
+            return Ok(());
+        };
+        #[cfg(unix)]
+        let result = self
+            .staged_file
+            .file()
+            .metadata()
+            .map(|metadata| {
+                let current_mode = metadata.permissions().mode();
+                std::fs::Permissions::from_mode(permissions.resolve_unix_mode(current_mode))
+            })
+            .and_then(|permissions| self.staged_file.file().set_permissions(permissions));
+        #[cfg(windows)]
+        let result = self
+            .staged_file
+            .file()
+            .metadata()
+            .map(|metadata| {
+                let mut native_permissions = metadata.permissions();
+                native_permissions.set_readonly(permissions.is_read_only());
+                native_permissions
+            })
+            .and_then(|permissions| self.staged_file.file().set_permissions(permissions));
+        #[cfg(not(any(unix, windows)))]
+        let result: io::Result<()> = Err(io::Error::new(
+            io::ErrorKind::Unsupported,
+            "rooted copy permission preservation is unsupported on this target",
+        ));
+        #[cfg(feature = "test-support")]
+        let result = if crate::local::test_support_enabled("rooted-copy-set-permissions") {
+            Err(io::Error::from(io::ErrorKind::PermissionDenied))
+        } else if crate::local::test_support_enabled("rooted-copy-set-permissions-native") {
+            Err(crate::local::test_fault_error())
+        } else {
+            result
+        };
+        result.map_err(|source| {
+            LocalAtomicWriteError::new(
+                LocalAtomicWriteStage::ApplyDestinationMetadata,
+                self.path.clone(),
+                #[cfg(unix)]
+                Some(self.staged_file.diagnostic_path().to_path_buf()),
+                #[cfg(windows)]
+                Some(self.staged_file.diagnostic_path.clone()),
+                #[cfg(not(any(unix, windows)))]
+                None,
+                LocalAtomicDestinationState::Unchanged,
+                source,
+            )
+        })
     }
 
     /// Observes rooted commit-time identity and optional metadata.
