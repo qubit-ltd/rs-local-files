@@ -35,7 +35,7 @@ digest = ["dep:digest", "qubit-io/digest"]
 [dependencies]
 digest = { version = "^0.11", optional = true, default-features = false }
 qubit-io = "0.19"
-qubit-budget = "0.9"
+qubit-budget = "0.10"
 qubit-redact = { path = "../rs-redact", version = "0.10", default-features = false }
 getrandom = "^0.4"
 
