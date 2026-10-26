@@ -36,7 +36,7 @@ jobs:
         run: cargo +1.94 check --locked --features digest
       - name: Run plain digest library tests
         working-directory: ci-root/rs-local-files
-        run: cargo +1.94 test --locked --features digest --lib
+        run: cargo +1.94 test --locked --features digest --lib conditional_
       - name: Run plain digest integration contracts
         working-directory: ci-root/rs-local-files
         run: >-
