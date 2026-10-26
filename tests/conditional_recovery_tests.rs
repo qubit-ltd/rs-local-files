@@ -217,7 +217,9 @@ fn windows_rollback_exchange_receipts_track_restored_and_competing_identities() 
             metadata
                 .volume_serial_number()
                 .expect("Windows should report the volume serial number"),
-            metadata.file_index().expect("Windows should report the file index"),
+            metadata
+                .file_index()
+                .expect("Windows should report the file index"),
         )
     }
 
@@ -236,7 +238,9 @@ fn windows_rollback_exchange_receipts_track_restored_and_competing_identities() 
             move || {
                 for entry in std::fs::read_dir(parent)? {
                     let entry = entry?;
-                    if entry.path() != installed_path && std::fs::read(entry.path()).ok().as_deref() == Some(b"A") {
+                    if entry.path() != installed_path
+                        && std::fs::read(entry.path()).ok().as_deref() == Some(b"A")
+                    {
                         std::fs::write(entry.path(), b"C")?;
                         return Ok(());
                     }
@@ -254,7 +258,8 @@ fn windows_rollback_exchange_receipts_track_restored_and_competing_identities() 
                 std::fs::write(&replacement_path, b"C")?;
                 *observed_competitor_identity
                     .lock()
-                    .expect("competitor identity lock should be available") = Some(identity(&replacement_path));
+                    .expect("competitor identity lock should be available") =
+                    Some(identity(&replacement_path));
                 Ok(())
             },
         ));
@@ -268,11 +273,16 @@ fn windows_rollback_exchange_receipts_track_restored_and_competing_identities() 
     writer.write_fully(b"B").unwrap();
     let failure = writer.commit().unwrap_err();
 
-    assert_eq!(failure.publication(), LocalConditionalPublicationState::Restored);
+    assert_eq!(
+        failure.publication(),
+        LocalConditionalPublicationState::Restored
+    );
     let receipts = failure.recovery_files();
     let restored = receipts
         .iter()
-        .find(|entry| entry.role() == LocalRecoveryFileRole::Displaced && entry.namespace_path() == path)
+        .find(|entry| {
+            entry.role() == LocalRecoveryFileRole::Displaced && entry.namespace_path() == path
+        })
         .expect("restored target should have a Displaced receipt");
     let competitor = receipts
         .iter()
@@ -282,6 +292,11 @@ fn windows_rollback_exchange_receipts_track_restored_and_competing_identities() 
         .iter()
         .find(|entry| entry.role() == LocalRecoveryFileRole::CandidateCopy)
         .expect("published B should have a CandidateCopy receipt");
+    assert_eq!(
+        receipts.len(),
+        3,
+        "every native object should have one receipt"
+    );
 
     assert_eq!(std::fs::read(&path).unwrap(), b"C");
     assert_eq!(conditional::read_recovery(restored), b"C");
@@ -291,19 +306,120 @@ fn windows_rollback_exchange_receipts_track_restored_and_competing_identities() 
     assert_eq!(restored.diagnostic_path(), Some(path.as_path()));
     assert_ne!(competitor.namespace_path(), path);
     assert_eq!(identity(restored.namespace_path()), original_identity);
+    let target_identity = identity(path.as_path());
+    let competitor_file_identity = identity(competitor.namespace_path());
+    let candidate_copy_identity = identity(candidate.namespace_path());
     assert_eq!(
-        identity(competitor.namespace_path()),
+        competitor_file_identity,
         competitor_identity
             .lock()
             .expect("competitor identity lock should be available")
             .expect("competitor identity should have been recorded")
     );
-    assert_ne!(identity(path.as_path()), identity(competitor.namespace_path()));
-    assert_ne!(identity(path.as_path()), identity(candidate.namespace_path()));
-    assert_ne!(
-        identity(competitor.namespace_path()),
-        identity(candidate.namespace_path())
+    assert_ne!(target_identity, competitor_file_identity);
+    assert_ne!(target_identity, candidate_copy_identity);
+    assert_ne!(competitor_file_identity, candidate_copy_identity);
+}
+
+#[cfg(windows)]
+#[test]
+fn windows_rollback_without_target_replacement_restores_original_identity() {
+    use std::os::windows::fs::MetadataExt;
+
+    use qubit_local_files::outcome::LocalConditionalPublicationState;
+    use qubit_local_files::recovery::LocalRecoveryFileRole;
+
+    fn identity(path: &std::path::Path) -> (u32, u64) {
+        let metadata = std::fs::metadata(path).expect("receipt path should identify an entry");
+        (
+            metadata
+                .volume_serial_number()
+                .expect("Windows should report the volume serial number"),
+            metadata
+                .file_index()
+                .expect("Windows should report the file index"),
+        )
+    }
+
+    let directory = tempfile::tempdir().unwrap();
+    let path = directory.path().join("target");
+    std::fs::write(&path, b"A").unwrap();
+    let original_identity = identity(&path);
+    let parent = directory.path().to_path_buf();
+    let installed_path = path.clone();
+    let filesystem = conditional::host().with_conditional_test_hooks(TestConditionalHooks::once(
+        TestConditionalPoint::BeforeVerifyDisplaced,
+        move || {
+            for entry in std::fs::read_dir(parent)? {
+                let entry = entry?;
+                if entry.path() != installed_path
+                    && std::fs::read(entry.path()).ok().as_deref() == Some(b"A")
+                {
+                    std::fs::write(entry.path(), b"C")?;
+                    return Ok(());
+                }
+            }
+            Err(std::io::Error::new(
+                std::io::ErrorKind::NotFound,
+                "displaced A not found",
+            ))
+        },
+    ));
+    let mut writer = filesystem
+        .open_conditional_writer::<Sha256>(
+            &path,
+            LocalWritePrecondition::Content(Sha256::digest(b"A")),
+            &LocalWriteOptions::new(LocalWriteMode::CreateOrReplace),
+        )
+        .unwrap();
+    writer.write_fully(b"B").unwrap();
+    let failure = writer.commit().unwrap_err();
+
+    assert_eq!(
+        failure.publication(),
+        LocalConditionalPublicationState::Restored
     );
+    let receipts = failure.recovery_files();
+    assert_eq!(
+        receipts.len(),
+        3,
+        "every native object should have one receipt"
+    );
+    let restored = receipts
+        .iter()
+        .find(|entry| {
+            entry.role() == LocalRecoveryFileRole::Displaced && entry.namespace_path() == path
+        })
+        .expect("restored target should have a Displaced receipt");
+    let rollback_displaced = receipts
+        .iter()
+        .find(|entry| entry.role() == LocalRecoveryFileRole::RollbackDisplaced)
+        .expect("published B should have a RollbackDisplaced receipt");
+    let candidate = receipts
+        .iter()
+        .find(|entry| entry.role() == LocalRecoveryFileRole::CandidateCopy)
+        .expect("candidate copy B should have a CandidateCopy receipt");
+
+    assert_eq!(std::fs::read(&path).unwrap(), b"C");
+    assert_eq!(conditional::read_recovery(restored), b"C");
+    assert_eq!(conditional::read_recovery(rollback_displaced), b"B");
+    assert_eq!(conditional::read_recovery(candidate), b"B");
+    assert_eq!(restored.namespace_path(), path);
+    assert_eq!(restored.diagnostic_path(), Some(path.as_path()));
+    assert_ne!(rollback_displaced.namespace_path(), path);
+    assert_ne!(candidate.namespace_path(), path);
+    assert_ne!(
+        rollback_displaced.namespace_path(),
+        candidate.namespace_path()
+    );
+
+    let target_identity = identity(path.as_path());
+    let rollback_displaced_identity = identity(rollback_displaced.namespace_path());
+    let candidate_copy_identity = identity(candidate.namespace_path());
+    assert_eq!(target_identity, original_identity);
+    assert_ne!(target_identity, rollback_displaced_identity);
+    assert_ne!(target_identity, candidate_copy_identity);
+    assert_ne!(rollback_displaced_identity, candidate_copy_identity);
 }
 
 #[cfg(unix)]
