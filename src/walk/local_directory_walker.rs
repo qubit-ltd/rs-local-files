@@ -651,7 +651,11 @@ impl LocalDirectoryWalker {
                     return Some(Err(walk_io_error(&path, error)));
                 }
             };
-            let descent_metadata = if entry_metadata.file_type().is_symlink() && self.symlink_policy.follows() {
+            let may_descend = self.may_descend(entry_depth);
+            let descent_metadata = if entry_metadata.file_type().is_symlink()
+                && may_descend
+                && self.symlink_policy.follows()
+            {
                 match fs::metadata(&path) {
                     Ok(metadata) => metadata,
                     Err(error) => {
@@ -668,7 +672,7 @@ impl LocalDirectoryWalker {
             let metadata = LocalFileMetadata::from_native(&entry_metadata);
 
             if is_directory
-                && self.may_descend(entry_depth)
+                && may_descend
                 && let Err(error) = self.descend(&path, &descent_metadata, relative.clone(), entry_depth)
             {
                 if self.options.error_policy() == LocalWalkErrorPolicy::FailFast {

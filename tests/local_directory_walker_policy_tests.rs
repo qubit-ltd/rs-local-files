@@ -243,6 +243,125 @@ fn test_local_directory_walker_zero_depth_does_not_read_children() {
     }
 }
 
+/// Verifies a failed child open is local under Continue for both backends.
+#[test]
+fn test_local_directory_walker_continue_skips_handle_limited_branch() {
+    for rooted in [false, true] {
+        let directory = tempdir().expect("temporary directory should be created");
+        fs::create_dir(directory.path().join("nested")).expect("nested directory should be created");
+        fs::write(directory.path().join("sibling"), b"payload").expect("sibling should be created");
+        let filesystem = if rooted {
+            LocalFileSystem::rooted(directory.path()).expect("Rooted filesystem should open")
+        } else {
+            LocalFileSystem::host().expect("Host filesystem should open")
+        };
+        let root = if rooted { Path::new("/") } else { directory.path() };
+        let fail_fast_options = LocalListOptions::new()
+            .with_recursive()
+            .with_max_open_directories(1)
+            .with_reopen_policy(qubit_local_files::options::LocalDirectoryReopenPolicy::Fail)
+            .with_error_policy(LocalWalkErrorPolicy::FailFast);
+        let mut fail_fast = filesystem
+            .list_with_options(root, &fail_fast_options)
+            .expect("fail-fast walker should open");
+        loop {
+            match fail_fast.next() {
+                Some(Err(error)) => {
+                    assert_eq!(LocalFileErrorKind::ResourceLimit, error.kind());
+                    break;
+                }
+                Some(Ok(_)) => {}
+                None => panic!("handle limit should be reached while entering nested"),
+            }
+        }
+        assert!(fail_fast.next().is_none(), "FailFast should fuse after the local branch error");
+
+        let options = LocalListOptions::new()
+            .with_recursive()
+            .with_max_open_directories(1)
+            .with_reopen_policy(qubit_local_files::options::LocalDirectoryReopenPolicy::Fail)
+            .with_error_policy(LocalWalkErrorPolicy::Continue);
+        let walker = filesystem.list_with_options(root, &options).expect("walker should open");
+
+        let mut saw_capacity_error = false;
+        let mut saw_sibling = false;
+        for result in walker {
+            match result {
+                Ok(entry) if entry.relative_path() == "sibling" => saw_sibling = true,
+                Err(error) => {
+                    assert_eq!(LocalFileErrorKind::ResourceLimit, error.kind());
+                    saw_capacity_error = true;
+                }
+                Ok(_) => {}
+            }
+        }
+        assert!(saw_capacity_error, "child capacity error should be reported");
+        assert!(saw_sibling, "continue policy should preserve the parent frame");
+    }
+}
+
+/// Verifies both backends defer link resolution until a branch can be entered.
+#[cfg(unix)]
+#[test]
+fn test_local_directory_walker_resolves_links_only_when_descent_is_allowed() {
+    use std::os::unix::fs::symlink;
+
+    for rooted in [false, true] {
+        let directory = tempdir().expect("temporary directory should be created");
+        let target = directory.path().join("target");
+        fs::create_dir(&target).expect("target directory should be created");
+        fs::write(target.join("child"), b"payload").expect("target child should be written");
+        symlink("target", directory.path().join("directory-link")).expect("directory link should be created");
+        symlink("missing", directory.path().join("dangling"))
+            .expect("dangling link should be created");
+        symlink("..", target.join("cycle")).expect("cycle link should be created");
+
+        let filesystem = if rooted {
+            LocalFileSystem::rooted(directory.path()).expect("Rooted filesystem should open")
+        } else {
+            LocalFileSystem::host().expect("Host filesystem should open")
+        };
+        let root = if rooted { Path::new("/") } else { directory.path() };
+        let shallow = filesystem
+            .list_with_options(
+                root,
+                &LocalListOptions::new()
+                    .with_symlink_policy(LocalSymlinkPolicy::FollowWithinScope)
+                    .with_max_depth(1),
+            )
+            .expect("shallow walker should open")
+            .collect::<Result<Vec<_>, _>>()
+            .expect("shallow traversal should not resolve final links");
+        assert!(shallow.iter().any(|entry| entry.relative_path() == "dangling"));
+        assert!(shallow.iter().any(|entry| entry.relative_path() == "directory-link"));
+
+        let recursive = filesystem
+            .list_with_options(
+                root,
+                &LocalListOptions::new()
+                    .with_recursive()
+                    .with_symlink_policy(LocalSymlinkPolicy::FollowWithinScope)
+                    .with_error_policy(LocalWalkErrorPolicy::Continue),
+            )
+            .expect("recursive walker should open");
+        let results = recursive.collect::<Vec<_>>();
+        assert!(
+            results.iter().filter_map(|result| result.as_ref().ok()).any(|entry| {
+                entry.relative_path() == "directory-link/child"
+            }),
+            "directory symlink should be followed (rooted={rooted}): {results:?}",
+        );
+        assert!(results.iter().any(|result| result.as_ref().is_err()), "recursive dangling/cycle links should fail");
+        assert!(
+            results
+                .iter()
+                .filter_map(|result| result.as_ref().err())
+                .any(|error| error.kind() == LocalFileErrorKind::InvalidPath),
+            "cycle should be rejected for rooted={rooted}",
+        );
+    }
+}
+
 /// Verifies a repeated-name progress boundary observes deadline expiry before
 /// starting another native read and terminates both error policies.
 #[cfg(feature = "test-support")]
@@ -281,18 +400,26 @@ fn test_local_directory_walker_resource_limit_terminates_continue_policy() {
     let directory = tempdir().expect("temporary directory should be created");
     fs::write(directory.path().join("first"), b"first").expect("first entry should be written");
     fs::write(directory.path().join("second"), b"second").expect("second entry should be written");
-    let mut walker = LocalFileSystem::host()
-        .expect("Host filesystem should open")
-        .list_with_options(
-            directory.path(),
-            &LocalListOptions::new()
+    for rooted in [false, true] {
+        let filesystem = if rooted {
+            LocalFileSystem::rooted(directory.path()).expect("Rooted filesystem should open")
+        } else {
+            LocalFileSystem::host().expect("Host filesystem should open")
+        };
+        let root = if rooted { Path::new("/") } else { directory.path() };
+        for options in [
+            LocalListOptions::new()
                 .with_max_entries(0)
                 .with_error_policy(LocalWalkErrorPolicy::Continue),
-        )
-        .expect("walker should open");
-
-    assert!(walker.next().expect("resource limit should be yielded").is_err(),);
-    assert!(walker.next().is_none(), "resource exhaustion must terminate");
+            LocalListOptions::new()
+                .with_max_seen_name_bytes(0)
+                .with_error_policy(LocalWalkErrorPolicy::Continue),
+        ] {
+            let mut walker = filesystem.list_with_options(root, &options).expect("walker should open");
+            assert!(walker.next().expect("resource limit should be yielded").is_err());
+            assert!(walker.next().is_none(), "global resource exhaustion must terminate");
+        }
+    }
 }
 
 /// Verifies an unrepresentable monotonic deadline is rejected without panic.
@@ -370,8 +497,7 @@ fn test_local_directory_walker_follow_mode_traverses_links_and_rejects_cycles() 
     assert_eq!(LocalFileErrorKind::InvalidPath, error.kind());
 }
 
-/// Verifies follow-mode reports the dangling-link metadata failure at the
-/// entry itself instead of treating the unresolved link as an ordinary file.
+/// Verifies non-recursive follow mode yields a dangling link without resolving it.
 #[cfg(unix)]
 #[test]
 fn test_local_directory_walker_follow_mode_reports_dangling_link() {
@@ -381,7 +507,7 @@ fn test_local_directory_walker_follow_mode_reports_dangling_link() {
     let link = directory.path().join("dangling");
     symlink(directory.path().join("missing"), &link).expect("dangling link fixture should be created");
 
-    let error = LocalFileSystem::host()
+    let entry = LocalFileSystem::host()
         .expect("Host filesystem should open")
         .list_with_options(
             directory.path(),
@@ -390,10 +516,10 @@ fn test_local_directory_walker_follow_mode_reports_dangling_link() {
         .expect("follow-mode walker should open")
         .next()
         .expect("dangling entry should be observed")
-        .expect_err("follow-mode walker must resolve a symlink target");
+        .expect("non-recursive traversal should not resolve the dangling target");
 
-    assert_eq!(LocalFileErrorKind::NotFound, error.kind());
-    assert_bound_path(&link, error.path());
+    assert_eq!(Path::new("dangling"), entry.relative_path());
+    assert_eq!(LocalFileKind::Symlink, entry.metadata().kind());
 }
 
 /// Verifies recursive traversal reports native child-directory opening errors
@@ -472,7 +598,9 @@ fn test_local_directory_walker_fail_fast_stops_after_error() {
         .expect("Host filesystem should open")
         .list_with_options(
             directory.path(),
-            &LocalListOptions::new().with_symlink_policy(LocalSymlinkPolicy::FollowWithinScope),
+            &LocalListOptions::new()
+                .with_recursive()
+                .with_symlink_policy(LocalSymlinkPolicy::FollowWithinScope),
         )
         .expect("walker should open");
     assert!(walker.next().expect("dangling link should produce an error").is_err());
@@ -496,6 +624,7 @@ fn test_local_directory_walker_continue_policy_keeps_iterating() {
         .list_with_options(
             directory.path(),
             &LocalListOptions::new()
+                .with_recursive()
                 .with_symlink_policy(LocalSymlinkPolicy::FollowWithinScope)
                 .with_error_policy(LocalWalkErrorPolicy::Continue),
         )

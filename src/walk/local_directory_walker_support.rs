@@ -106,8 +106,13 @@ pub(super) fn name_bytes(name: &OsStr) -> usize {
 /// Reports whether an iterator error must terminate global traversal state.
 #[must_use]
 pub(super) fn is_terminal_walk_error(error: &LocalFileError, policy: crate::LocalWalkErrorPolicy) -> bool {
-    policy == crate::LocalWalkErrorPolicy::FailFast
-        || error.kind() == LocalFileErrorKind::ResourceLimit
+    if policy == crate::LocalWalkErrorPolicy::FailFast {
+        return true;
+    }
+    let global_resource_limit = error
+        .resource_limit_error()
+        .is_some_and(|limit| limit.resource() != LocalResourceKind::OpenDirectory);
+    global_resource_limit
         || error
             .io_error()
             .is_some_and(|source| source.kind() == std::io::ErrorKind::TimedOut)

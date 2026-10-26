@@ -249,9 +249,12 @@ fn test_local_directory_walker_reopens_frames_past_handle_budget() {
 #[cfg(not(windows))]
 #[test]
 fn test_local_directory_walker_fail_fast_terminates_after_reopen_error() {
-    let directory = tempdir().expect("temporary directory should be created");
-    let moved = directory.path().with_extension("moved");
-    fs::create_dir(directory.path().join("nested")).expect("nested directory should be created");
+    let owner = tempdir().expect("fixture owner should be created");
+    let owner_path = owner.path().to_path_buf();
+    let directory = owner.path().join("original");
+    let moved = owner.path().join("moved");
+    fs::create_dir(&directory).expect("original root should be created");
+    fs::create_dir(directory.join("nested")).expect("nested directory should be created");
 
     let options = LocalListOptions::new()
         .with_recursive()
@@ -260,7 +263,7 @@ fn test_local_directory_walker_fail_fast_terminates_after_reopen_error() {
         .with_error_policy(LocalWalkErrorPolicy::FailFast);
     let mut walker = LocalFileSystem::host()
         .expect("Host filesystem should open")
-        .list_with_options(directory.path(), &options)
+        .list_with_options(&directory, &options)
         .expect("walker should be created");
     assert_eq!(
         PathBuf::from("nested"),
@@ -270,22 +273,28 @@ fn test_local_directory_walker_fail_fast_terminates_after_reopen_error() {
             .expect("nested entry should be valid")
             .relative_path(),
     );
-    fs::rename(directory.path(), &moved).expect("walker root should be moved after opening the child");
+    fs::rename(&directory, &moved).expect("walker root should be moved after opening the child");
 
     assert!(walker.next().expect("reopen failure should be yielded").is_err());
     assert!(
         walker.next().is_none(),
         "fail-fast traversal must terminate after a reopen error",
     );
+    drop(walker);
+    drop(owner);
+    assert!(!owner_path.exists(), "fixture owner should clean the renamed root");
 }
 
 /// Verifies continue traversal discards a frame that cannot be reopened.
 #[cfg(not(windows))]
 #[test]
 fn test_local_directory_walker_continue_discards_reopen_error_frame() {
-    let directory = tempdir().expect("temporary directory should be created");
-    let moved = directory.path().with_extension("moved");
-    fs::create_dir(directory.path().join("nested")).expect("nested directory should be created");
+    let owner = tempdir().expect("fixture owner should be created");
+    let owner_path = owner.path().to_path_buf();
+    let directory = owner.path().join("original");
+    let moved = owner.path().join("moved");
+    fs::create_dir(&directory).expect("original root should be created");
+    fs::create_dir(directory.join("nested")).expect("nested directory should be created");
 
     let options = LocalListOptions::new()
         .with_recursive()
@@ -294,19 +303,22 @@ fn test_local_directory_walker_continue_discards_reopen_error_frame() {
         .with_error_policy(LocalWalkErrorPolicy::Continue);
     let mut walker = LocalFileSystem::host()
         .expect("Host filesystem should open")
-        .list_with_options(directory.path(), &options)
+        .list_with_options(&directory, &options)
         .expect("walker should be created");
     let _ = walker
         .next()
         .expect("nested entry should be yielded")
         .expect("nested entry should be valid");
-    fs::rename(directory.path(), &moved).expect("walker root should be moved after opening the child");
+    fs::rename(&directory, &moved).expect("walker root should be moved after opening the child");
 
     assert!(walker.next().expect("reopen failure should be yielded").is_err());
     assert!(
         walker.next().is_none(),
         "continue traversal must discard an unreopenable frame",
     );
+    drop(walker);
+    drop(owner);
+    assert!(!owner_path.exists(), "fixture owner should clean the renamed root");
 }
 
 /// Verifies that Host's default traversal follows symbolic links.
