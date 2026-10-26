@@ -178,6 +178,7 @@ fn required_parent_sync_unavailability_fails_before_publication() {
     use qubit_local_files::LocalFileSystem;
     use qubit_local_files::error::LocalFileErrorKind;
     use qubit_local_files::error::LocalFileOperation;
+    use qubit_local_files::policy::LocalSymlinkPolicy;
 
     for rooted in [false, true] {
         for existing_target in [false, true] {
