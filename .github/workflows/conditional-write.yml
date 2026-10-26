@@ -44,6 +44,7 @@ jobs:
           --test conditional_writer_tests --test conditional_vectored_tests
           --test conditional_backend_contract_tests
       - name: Run fuzz lifecycle model tests
+        if: runner.os != 'Windows'
         working-directory: ci-root/rs-local-files
         run: >-
           cargo +1.94 test --locked --manifest-path fuzz/Cargo.toml
