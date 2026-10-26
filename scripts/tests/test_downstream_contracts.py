@@ -77,7 +77,8 @@ class LockedChecks(unittest.TestCase):
 
         self.assertEqual([call.args[0][1] for call in run.call_args_list],
                          ["metadata"] * 3 + ["test"] * 2)
-        self.assertTrue(all(call.kwargs["cwd"].parent == fixture for call in run.call_args_list[-2:]))
+        self.assertTrue(all(call.kwargs["cwd"].parent == fixture.resolve()
+                            for call in run.call_args_list[-2:]))
 
     def test_failed_metadata_does_not_start_tests(self):
         with patch.object(checker.subprocess, "run", side_effect=subprocess.CalledProcessError(101, "cargo")) as run:
