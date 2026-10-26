@@ -27,6 +27,10 @@ on:
         description: rs-datatype revision compatible with qubit-budget 0.9.1
         type: string
         default: 3dd860c779f72bd19eaa0a2557589cf5b4a280b9
+      json_ref:
+        description: rs-json revision compatible with qubit-budget 0.9.1
+        type: string
+        default: 16554f048a8eb681d3503608e353654c355af7fe
       budget_ref:
         description: rs-budget revision required by the locked legacy consumer
         type: string
@@ -51,6 +55,9 @@ on:
       datatype_ref:
         type: string
         default: 3dd860c779f72bd19eaa0a2557589cf5b4a280b9
+      json_ref:
+        type: string
+        default: 16554f048a8eb681d3503608e353654c355af7fe
       budget_ref:
         type: string
         default: 45bac87a11ea64fbb161023cc5c85051b51842d8
@@ -95,6 +102,7 @@ jobs:
           SUPPORT_REF: ${{ inputs.support_ref }}
           REDACT_REF: ${{ inputs.redact_ref }}
           DATATYPE_REF: ${{ inputs.datatype_ref }}
+          JSON_REF: ${{ inputs.json_ref }}
           BUDGET_REF: ${{ inputs.budget_ref }}
         run: >-
           python ci-root/rs-local-files/scripts/prepare_downstream_sources.py
@@ -102,6 +110,7 @@ jobs:
           --fs-local-ref "$FS_LOCAL_REF" --mime-ref "$MIME_REF" --support-ref "$SUPPORT_REF"
           --additional-ref "rs-redact=$REDACT_REF"
           --additional-ref "rs-datatype=$DATATYPE_REF"
+          --additional-ref "rs-json=$JSON_REF"
           --additional-ref "rs-budget=$BUDGET_REF"
       - name: Check original consumer locks and run contracts
         run: >-
