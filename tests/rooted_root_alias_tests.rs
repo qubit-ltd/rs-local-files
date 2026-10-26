@@ -14,10 +14,12 @@ mod unix {
     use std::os::unix::fs::symlink;
     use std::path::Path;
 
+    use qubit_io::Output;
     use qubit_local_files::LocalFileSystem;
     use qubit_local_files::error::LocalFileErrorKind;
     use qubit_local_files::options::LocalTempDirectoryOptions;
     use qubit_local_files::options::LocalTempFileOptions;
+    use qubit_local_files::outcome::LocalPersistFailureState;
     use qubit_local_files::policy::LocalSymlinkPolicy;
     use tempfile::tempdir;
 
@@ -106,5 +108,54 @@ mod unix {
             )
             .expect_err("Reject policy should continue rejecting the root link");
         assert_eq!(LocalFileErrorKind::Unsupported, rejected.kind());
+    }
+
+    /// Root aliases remain invalid deletion roots and persistence targets.
+    #[test]
+    fn deletion_and_persistence_still_reject_root_aliases() {
+        let directory = tempdir().expect("temporary root should be created");
+        fs::write(directory.path().join("sentinel"), b"keep").expect("sentinel should be written");
+        symlink(".", directory.path().join("alias")).expect("root alias should be created");
+        let rooted = LocalFileSystem::rooted(directory.path()).expect("root authority should open");
+
+        let remove_file = rooted
+            .delete_file(Path::new("alias/."))
+            .expect_err("the virtual root reached through an alias cannot be removed as a file");
+        assert_eq!(LocalFileErrorKind::InvalidPath, remove_file.kind());
+        let remove_directory = rooted.delete_directory(Path::new("alias/.")).expect_err(
+            "the virtual root reached through an alias cannot be removed as a directory",
+        );
+        assert!(matches!(
+            remove_directory.kind(),
+            LocalFileErrorKind::InvalidPath | LocalFileErrorKind::NotDirectory
+        ));
+        assert!(directory.path().join("alias").symlink_metadata().is_ok());
+        assert_eq!(
+            b"keep",
+            fs::read(directory.path().join("sentinel"))
+                .unwrap()
+                .as_slice()
+        );
+
+        let mut temporary = rooted
+            .create_temp_file()
+            .expect("temporary file should be created");
+        Output::write_fully(&mut temporary, b"source")
+            .expect("temporary contents should be written");
+        let mut persist = temporary
+            .persist(Path::new("/alias"))
+            .expect_err("a root alias cannot be the final persistence target");
+        assert_eq!(LocalPersistFailureState::NotPublished, persist.state());
+        persist
+            .resource_mut()
+            .cleanup()
+            .expect("rejected persistence should retain cleanup ownership");
+        assert!(directory.path().is_dir());
+        assert_eq!(
+            b"keep",
+            fs::read(directory.path().join("sentinel"))
+                .unwrap()
+                .as_slice()
+        );
     }
 }

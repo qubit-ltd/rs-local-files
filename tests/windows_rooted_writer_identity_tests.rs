@@ -86,3 +86,43 @@ fn rooted_writer_destination_replacement_before_install_is_not_published() {
             .count()
     );
 }
+
+/// A failure reported after native rename remains terminal and published.
+#[test]
+fn rooted_writer_failure_after_rename_reports_published() {
+    let directory = tempdir().expect("temporary directory should be created");
+    let destination = directory.path().join("payload");
+    fs::write(&destination, b"original destination")
+        .expect("original destination should be written");
+    let rooted = LocalFileSystem::rooted(directory.path()).expect("root authority should open");
+    let mut writer = rooted
+        .open_writer_with_options(
+            Path::new("payload"),
+            &LocalWriteOptions::new(LocalWriteMode::CreateOrReplace),
+        )
+        .expect("replacement writer should open");
+    Output::write_fully(&mut writer, b"published replacement")
+        .expect("writer should accept staged data");
+
+    let _fault = install_test_fault("rooted-writer-post-rename-error")
+        .expect("post-rename hook should be installed");
+    let failure = writer
+        .commit()
+        .expect_err("the synthetic post-rename error should be reported");
+
+    assert_eq!(LocalWriteFailureState::Published, failure.state());
+    let (error, state, retained) = failure.into_parts();
+    assert_eq!(LocalWriteFailureState::Published, state);
+    assert_eq!(LocalFileErrorKind::PublicationIncomplete, error.kind());
+    assert_eq!(
+        Some(std::io::ErrorKind::Other),
+        error.io_error().map(std::io::Error::kind)
+    );
+    assert!(retained.is_none(), "a published writer cannot be retried");
+    assert_eq!(
+        b"published replacement",
+        fs::read(&destination)
+            .expect("native rename should publish staged contents")
+            .as_slice()
+    );
+}

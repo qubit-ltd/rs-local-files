@@ -652,6 +652,16 @@ impl LocalRootAtomicWriter {
             )
         })?;
         self.staged_file.disarm();
+        #[cfg(feature = "test-support")]
+        if crate::local::test_support_enabled("rooted-writer-post-rename-error") {
+            return Err(LocalAtomicWriteError::new(
+                LocalAtomicWriteStage::ReplaceDestination,
+                self.path.clone(),
+                Some(self.staged_file.diagnostic_path.clone()),
+                LocalAtomicDestinationState::Replaced,
+                io::Error::other("injected error after rooted destination rename"),
+            ));
+        }
         Ok(false)
     }
 
