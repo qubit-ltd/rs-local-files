@@ -217,9 +217,7 @@ fn windows_rollback_exchange_receipts_track_restored_and_competing_identities() 
             metadata
                 .volume_serial_number()
                 .expect("Windows should report the volume serial number"),
-            metadata
-                .file_index()
-                .expect("Windows should report the file index"),
+            metadata.file_index().expect("Windows should report the file index"),
         )
     }
 
@@ -238,9 +236,7 @@ fn windows_rollback_exchange_receipts_track_restored_and_competing_identities() 
             move || {
                 for entry in std::fs::read_dir(parent)? {
                     let entry = entry?;
-                    if entry.path() != installed_path
-                        && std::fs::read(entry.path()).ok().as_deref() == Some(b"A")
-                    {
+                    if entry.path() != installed_path && std::fs::read(entry.path()).ok().as_deref() == Some(b"A") {
                         std::fs::write(entry.path(), b"C")?;
                         return Ok(());
                     }
@@ -272,10 +268,7 @@ fn windows_rollback_exchange_receipts_track_restored_and_competing_identities() 
     writer.write_fully(b"B").unwrap();
     let failure = writer.commit().unwrap_err();
 
-    assert_eq!(
-        failure.publication(),
-        LocalConditionalPublicationState::Restored
-    );
+    assert_eq!(failure.publication(), LocalConditionalPublicationState::Restored);
     let receipts = failure.recovery_files();
     let restored = receipts
         .iter()

@@ -5,13 +5,19 @@
 //
 //    Licensed under the Apache License, Version 2.0.
 // =============================================================================
+#[cfg(feature = "test-support")]
 use std::fs;
+#[cfg(feature = "test-support")]
 use std::path::Path;
 
+#[cfg(feature = "test-support")]
 use tempfile::tempdir;
 
+#[cfg(feature = "test-support")]
 use crate::local::LocalRelativePath;
+#[cfg(feature = "test-support")]
 use crate::rooted::EntryKind;
+#[cfg(feature = "test-support")]
 use crate::rooted::Root;
 
 #[cfg(all(unix, feature = "test-support"))]
