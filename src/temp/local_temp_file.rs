@@ -389,11 +389,36 @@ impl LocalTempFile {
     /// [`Self::persist_with`], using only the retained authority and explicit
     /// base.
     fn persist_with_path(
-        mut self,
+        self,
         target: &Path,
         base: Option<&Path>,
         options: LocalPersistOptions,
     ) -> std::result::Result<LocalPersistOutcome, LocalPersistError<Self>> {
+        self.persist_with_path_before_reopen(target, base, options, || {})
+    }
+
+    /// Persists after running `before_reopen` at the closed-source reopen
+    /// boundary. The public persistence path supplies a no-op action.
+    ///
+    /// # Parameters
+    /// - `target`: Requested publication target.
+    /// - `base`: Optional explicit namespace base.
+    /// - `options`: Publication and durability policy.
+    /// - `before_reopen`: One-shot action run after source identity precheck
+    ///   and before opening a closed source through its authority.
+    ///
+    /// # Returns
+    /// The persistence outcome or a recoverable error retaining this resource.
+    fn persist_with_path_before_reopen<F>(
+        mut self,
+        target: &Path,
+        base: Option<&Path>,
+        options: LocalPersistOptions,
+        before_reopen: F,
+    ) -> std::result::Result<LocalPersistOutcome, LocalPersistError<Self>>
+    where
+        F: FnOnce(),
+    {
         let requested_target = target.to_path_buf();
         if let Err(error) = self.core.ensure_publishable() {
             return Err(self.persist_error(
@@ -457,7 +482,9 @@ impl LocalTempFile {
             ));
         }
 
-        let file_durable = match self.synchronize_source(options.durability()) {
+        let file_durable = match self
+            .synchronize_source_before_reopen(options.durability(), before_reopen)
+        {
             Ok(durable) => durable,
             Err(error) => {
                 return Err(self.persist_error(
@@ -642,7 +669,26 @@ impl LocalTempFile {
     /// Returns false without I/O for `NotRequired`, or when a preferred sync
     /// cannot be achieved. Required mode propagates unsupported-platform and
     /// native open/sync errors. A closed file is reopened through its backend.
-    fn synchronize_source(&self, durability: LocalDurabilityRequirement) -> Result<bool> {
+    /// Runs an action between source-path precheck and closed-handle reopen.
+    ///
+    /// # Parameters
+    /// - `durability`: Requested source durability behavior.
+    /// - `before_reopen`: One-shot action run only when the source handle is
+    ///   closed and the backend is about to reopen the source.
+    ///
+    /// # Returns
+    /// Whether source synchronization succeeded.
+    ///
+    /// # Errors
+    /// Returns required synchronization or source-identity failures.
+    fn synchronize_source_before_reopen<F>(
+        &self,
+        durability: LocalDurabilityRequirement,
+        before_reopen: F,
+    ) -> Result<bool>
+    where
+        F: FnOnce(),
+    {
         if durability == LocalDurabilityRequirement::NotRequired {
             return Ok(false);
         }
@@ -667,10 +713,14 @@ impl LocalTempFile {
                 LocalDurabilityRequirement::Preferred | LocalDurabilityRequirement::NotRequired => Ok(false),
             };
         }
-        let synchronize = || -> Result<bool> {
+        let mut before_reopen = Some(before_reopen);
+        let mut synchronize = || -> Result<bool> {
             if let Some(file) = self.file.as_ref() {
                 return self.synchronize_open_file(file);
             }
+            before_reopen
+                .take()
+                .expect("closed-source reopen action should run only once")();
             match &self.core.backend {
                 LocalTempResourceBackend::Host(_) => {
                     let file = File::open(&self.core.path)?;
@@ -938,4 +988,98 @@ fn sync_identity_error() -> Error {
         ErrorKind::InvalidInput,
         "temporary file handle does not identify the retained source",
     )
+}
+
+#[cfg(test)]
+mod sync_identity_tests {
+    use std::fs;
+    use std::path::Path;
+
+    use crate::LocalDurabilityRequirement;
+    use crate::LocalFileSystem;
+    use crate::LocalPersistFailureState;
+    use crate::LocalPersistOptions;
+    use crate::LocalPersistStage;
+    use crate::LocalTempFileOptions;
+    use crate::outcome::LocalTempSourceState;
+
+    #[test]
+    fn closed_reopen_rejects_path_replacement_after_source_precheck() {
+        for rooted in [false, true] {
+            for durability in [
+                LocalDurabilityRequirement::Required,
+                LocalDurabilityRequirement::Preferred,
+            ] {
+                let directory = tempfile::tempdir().expect("private parent should be created");
+                let filesystem = if rooted {
+                    LocalFileSystem::rooted(directory.path()).expect("root authority should open")
+                } else {
+                    LocalFileSystem::host().expect("host authority should open")
+                };
+                let parent = if rooted {
+                    Path::new("/")
+                } else {
+                    directory.path()
+                };
+                let mut temporary = filesystem
+                    .create_temp_file_with_options(&LocalTempFileOptions::new().with_parent(parent))
+                    .expect("temporary source should be created");
+                let namespace_source = temporary.path().to_path_buf();
+                let source = if rooted {
+                    directory.path().join(
+                        namespace_source
+                            .strip_prefix(Path::new("/"))
+                            .expect("rooted source should be virtual-absolute"),
+                    )
+                } else {
+                    namespace_source
+                };
+                let replacement = directory.path().join("replacement");
+                fs::write(&replacement, b"replacement entity")
+                    .expect("replacement entity should be created before swapping");
+                temporary.close();
+
+                let target = directory.path().join("published");
+                let namespace_target = if rooted {
+                    Path::new("/published")
+                } else {
+                    target.as_path()
+                };
+                let mut seam_reached = false;
+                let error = temporary
+                    .persist_with_path_before_reopen(
+                        namespace_target,
+                        None,
+                        LocalPersistOptions::new().with_durability(durability),
+                        || {
+                            fs::remove_file(&source)
+                                .expect("prechecked source should be removable");
+                            fs::rename(&replacement, &source)
+                                .expect("replacement should take the prechecked source path");
+                            seam_reached = true;
+                        },
+                    )
+                    .expect_err("reopened handle identity mismatch must reject persistence");
+
+                assert!(seam_reached, "replacement seam must run");
+                assert_eq!(LocalPersistStage::SynchronizeSource, error.stage());
+                assert_eq!(LocalPersistFailureState::NotPublished, error.state());
+                assert_eq!(LocalTempSourceState::Owned, error.source_state());
+                assert!(
+                    error
+                        .error()
+                        .to_string()
+                        .contains("temporary file handle does not identify the retained source"),
+                    "failure must come from the reopened handle identity comparison",
+                );
+                assert!(!target.exists(), "replacement must not be published");
+                assert_eq!(
+                    b"replacement entity",
+                    fs::read(&source)
+                        .expect("replacement must remain at the source path")
+                        .as_slice(),
+                );
+            }
+        }
+    }
 }
