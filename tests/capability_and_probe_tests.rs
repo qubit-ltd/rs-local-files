@@ -11,6 +11,8 @@ use std::fs;
 #[cfg(unix)]
 use std::os::unix::ffi::OsStrExt;
 #[cfg(unix)]
+use std::process::Child;
+#[cfg(unix)]
 use std::process::Command;
 #[cfg(unix)]
 use std::time::Duration;
@@ -24,6 +26,33 @@ use qubit_local_files::capability::SizeLimit;
 use qubit_local_files::outcome::LocalFileKind;
 use qubit_local_files::path::LocalFileNames;
 use tempfile::tempdir;
+
+#[cfg(unix)]
+struct ProbeChild {
+    child: Child,
+    reaped: bool,
+}
+
+#[cfg(unix)]
+impl ProbeChild {
+    fn terminate_and_wait(&mut self) -> (std::io::Result<()>, std::io::Result<std::process::ExitStatus>) {
+        let killed = self.child.kill();
+        let waited = self.child.wait();
+        self.reaped = waited.is_ok();
+        (killed, waited)
+    }
+}
+
+#[cfg(unix)]
+impl Drop for ProbeChild {
+    fn drop(&mut self) {
+        if !self.reaped {
+            let _ = self.child.kill();
+            let _ = self.child.wait();
+            self.reaped = true;
+        }
+    }
+}
 
 /// Verifies capabilities do not misrepresent a compile-time path bound as a
 /// filesystem-specific limit.
@@ -109,7 +138,7 @@ fn test_host_and_rooted_special_file_probe_does_not_block() {
         let fifo = directory.path().join("probe.fifo");
         let fifo_c = std::ffi::CString::new(fifo.as_os_str().as_bytes()).expect("FIFO path has no NUL");
         assert_eq!(0, unsafe { libc::mkfifo(fifo_c.as_ptr(), 0o600) });
-        let mut child = Command::new(std::env::current_exe().expect("test executable"))
+        let child = Command::new(std::env::current_exe().expect("test executable"))
             .arg("--exact")
             .arg("test_host_and_rooted_special_file_probe_does_not_block")
             .arg("--nocapture")
@@ -117,18 +146,20 @@ fn test_host_and_rooted_special_file_probe_does_not_block() {
             .env("QUBIT_FIFO_PROBE_PATH", &fifo)
             .spawn()
             .expect("probe child should start");
+        let mut child = ProbeChild { child, reaped: false };
         let deadline = std::time::Instant::now() + Duration::from_secs(5);
         loop {
-            if child.try_wait().expect("child status").is_some() {
+            if let Some(status) = child.child.try_wait().expect("child status") {
+                child.reaped = true;
+                assert!(status.success(), "probe failed for {operation}: {status}");
                 break;
             }
-            assert!(std::time::Instant::now() < deadline, "probe blocked for {operation}");
+            if std::time::Instant::now() >= deadline {
+                let (kill_result, wait_result) = child.terminate_and_wait();
+                panic!("probe blocked for {operation}; kill={kill_result:?}, wait={wait_result:?}");
+            }
             std::thread::sleep(Duration::from_millis(10));
         }
-        assert!(
-            child.wait().expect("child exit").success(),
-            "probe failed for {operation}"
-        );
     }
 }
 

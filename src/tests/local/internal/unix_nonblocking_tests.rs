@@ -30,16 +30,24 @@ fn test_clear_nonblocking_restores_descriptor_flags() {
         .write(true)
         .create(true)
         .truncate(true)
-        .custom_flags(libc::O_NONBLOCK)
+        .custom_flags(libc::O_APPEND | libc::O_NONBLOCK)
         .open(path)
         .expect("nonblocking file should open");
 
-    clear_nonblocking(file.as_raw_fd()).expect("nonblocking status should clear");
     // SAFETY: `file` owns a live descriptor throughout this non-retaining
     // status query.
-    let flags = unsafe { libc::fcntl(file.as_raw_fd(), libc::F_GETFL) };
-    assert_ne!(-1, flags);
-    assert_eq!(0, flags & libc::O_NONBLOCK);
+    let before = unsafe { libc::fcntl(file.as_raw_fd(), libc::F_GETFL) };
+    assert_ne!(-1, before);
+    assert_ne!(0, before & libc::O_APPEND, "fixture must set O_APPEND");
+    assert_ne!(0, before & libc::O_NONBLOCK, "fixture must set O_NONBLOCK");
+
+    clear_nonblocking(file.as_raw_fd()).expect("nonblocking status should clear");
+    // SAFETY: `file` still owns the live descriptor.
+    let after = unsafe { libc::fcntl(file.as_raw_fd(), libc::F_GETFL) };
+    assert_ne!(-1, after);
+    assert_eq!(before & !libc::O_NONBLOCK, after);
+    assert_ne!(0, after & libc::O_APPEND, "clearing nonblocking must retain append mode");
+    assert_eq!(0, after & libc::O_NONBLOCK);
 }
 
 /// Verifies descriptor status restoration preserves native errors for an

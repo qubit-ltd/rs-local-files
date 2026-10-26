@@ -25,6 +25,8 @@ use qubit_local_files::options::LocalRenameOptions;
 use qubit_local_files::policy::LocalDurabilityRequirement;
 #[cfg(feature = "test-support")]
 use qubit_local_files::test_support::install_test_fault;
+#[cfg(all(unix, feature = "test-support"))]
+use qubit_local_files::outcome::LocalRenameFailureState;
 #[cfg(target_os = "linux")]
 use tempfile::NamedTempFile;
 use tempfile::tempdir;
@@ -305,23 +307,18 @@ fn test_local_file_system_rename_respects_overwrite_policy() {
 
 /// Verifies rename durability distinguishes preferred downgrade from required
 /// partial success.
-#[cfg(unix)]
+#[cfg(all(unix, feature = "test-support"))]
 #[test]
 fn test_local_file_system_rename_reports_parent_sync_result() {
-    use std::os::unix::fs::PermissionsExt;
-
     let directory = tempdir().expect("temporary directory should be created");
     for requirement in [
         LocalDurabilityRequirement::Preferred,
         LocalDurabilityRequirement::Required,
     ] {
         let source = directory.path().join(format!("source-{requirement:?}"));
-        let parent = directory.path().join(format!("parent-{requirement:?}"));
-        let target = parent.join("target");
+        let target = directory.path().join(format!("target-{requirement:?}"));
         fs::write(&source, b"payload").expect("source should be written");
-        fs::create_dir(&parent).expect("target parent should be created");
-        fs::set_permissions(&parent, fs::Permissions::from_mode(0o300))
-            .expect("target parent should reject directory open");
+        let _fault = install_test_fault("rename-parent-sync").expect("parent-sync fault should install");
         let result = LocalFileSystem::host()
             .expect("Host filesystem should open")
             .rename_with_options(
@@ -337,16 +334,54 @@ fn test_local_file_system_rename_reports_parent_sync_result() {
             LocalDurabilityRequirement::Required => {
                 let error = result.expect_err("required durability must report failure");
                 assert_eq!(LocalFileErrorKind::PublicationIncomplete, error.error().kind(),);
+                assert_eq!(LocalRenameFailureState::Renamed, error.state());
             }
             LocalDurabilityRequirement::NotRequired => unreachable!(),
         }
-        fs::set_permissions(&parent, fs::Permissions::from_mode(0o700))
-            .expect("target parent permissions should be restored");
         assert_eq!(
             b"payload",
             fs::read(&target).expect("renamed target should remain").as_slice(),
         );
     }
+}
+
+/// Verifies preferred rename durability downgrades when directory access is denied.
+#[cfg(unix)]
+#[test]
+fn test_local_file_system_rename_handles_permission_denial_when_enforced() {
+    use std::fs::OpenOptions;
+    use std::os::unix::fs::PermissionsExt;
+
+    let directory = tempdir().expect("temporary directory should be created");
+    let source = directory.path().join("source");
+    let parent = directory.path().join("parent");
+    let target = parent.join("target");
+    fs::write(&source, b"payload").expect("source should be written");
+    fs::create_dir(&parent).expect("target parent should be created");
+    fs::set_permissions(&parent, fs::Permissions::from_mode(0o300))
+        .expect("target parent permissions should be configured");
+    match OpenOptions::new().read(true).open(&parent) {
+        Err(error) if error.kind() == std::io::ErrorKind::PermissionDenied => {}
+        Ok(_) => {
+            eprintln!("skipping permission case: current process can open the restricted directory");
+            return;
+        }
+        Err(error) => panic!("permission precondition probe failed: {error}"),
+    }
+
+    let result = LocalFileSystem::host()
+        .expect("Host filesystem should open")
+        .rename_with_options(
+            &source,
+            &target,
+            &LocalRenameOptions::new().with_durability(LocalDurabilityRequirement::Preferred),
+        );
+    fs::set_permissions(&parent, fs::Permissions::from_mode(0o700))
+        .expect("target parent permissions should be restored");
+
+    let outcome = result.expect("preferred rename durability may report a downgrade");
+    assert!(!outcome.durable());
+    assert_eq!(b"payload", fs::read(&target).expect("target should remain").as_slice());
 }
 
 /// Verifies file and recursive-directory deletion semantics.

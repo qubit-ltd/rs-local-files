@@ -22,6 +22,8 @@ use qubit_local_files::outcome::LocalCopyStats;
 use qubit_local_files::policy::LocalAtomicityRequirement;
 #[cfg(unix)]
 use qubit_local_files::policy::LocalDurabilityRequirement;
+#[cfg(feature = "test-support")]
+use qubit_local_files::test_support::install_test_fault;
 use tempfile::tempdir;
 
 /// Verifies nested type conflicts honor `Skip` without traversing skipped
@@ -706,9 +708,58 @@ fn test_local_file_system_copy_skips_dangling_target_symlink() {
 }
 
 /// Verifies preferred file-copy durability reports a parent-sync downgrade.
-#[cfg(unix)]
+#[cfg(all(unix, feature = "test-support"))]
 #[test]
 fn test_local_copy_preferred_durability_reports_downgrade() {
+    let directory = tempdir().expect("temporary directory should be created");
+    let source = directory.path().join("source");
+    let target = directory.path().join("target");
+    fs::write(&source, b"payload").expect("source should be written");
+    let _fault = install_test_fault("copy-parent-sync").expect("parent-sync fault should install");
+    let outcome = LocalFileSystem::host()
+        .expect("Host filesystem should open")
+        .copy_with_options(
+            &source,
+            &target,
+            &LocalCopyOptions::new().with_durability(LocalDurabilityRequirement::Preferred),
+        )
+        .expect("preferred copy durability may report a downgrade");
+
+    assert!(!outcome.durable());
+    assert_eq!(
+        b"payload",
+        fs::read(&target).expect("copied target should remain").as_slice(),
+    );
+}
+
+/// Verifies required copy durability reports a post-publication parent-sync failure.
+#[cfg(all(unix, feature = "test-support"))]
+#[test]
+fn test_local_copy_required_durability_reports_published_parent_sync_failure() {
+    let directory = tempdir().expect("temporary directory should be created");
+    let source = directory.path().join("source");
+    let target = directory.path().join("target");
+    fs::write(&source, b"payload").expect("source should be written");
+    let _fault = install_test_fault("copy-parent-sync").expect("parent-sync fault should install");
+
+    let failure = LocalFileSystem::host()
+        .expect("Host filesystem should open")
+        .copy_with_options(
+            &source,
+            &target,
+            &LocalCopyOptions::new().with_durability(LocalDurabilityRequirement::Required),
+        )
+        .expect_err("required durability must report a parent-sync failure");
+
+    assert_eq!(LocalCopyFailureState::Published, failure.state());
+    assert_eq!(b"payload", fs::read(&target).expect("target must remain published").as_slice());
+}
+
+/// Verifies preferred copy durability downgrades when directory access is denied.
+#[cfg(unix)]
+#[test]
+fn test_local_copy_preferred_durability_handles_permission_denial_when_enforced() {
+    use std::fs::OpenOptions;
     use std::os::unix::fs::PermissionsExt;
 
     let directory = tempdir().expect("temporary directory should be created");
@@ -718,7 +769,15 @@ fn test_local_copy_preferred_durability_reports_downgrade() {
     fs::write(&source, b"payload").expect("source should be written");
     fs::create_dir(&parent).expect("target parent should be created");
     fs::set_permissions(&parent, fs::Permissions::from_mode(0o300))
-        .expect("target parent should reject directory open");
+        .expect("target parent permissions should be configured");
+    match OpenOptions::new().read(true).open(&parent) {
+        Err(error) if error.kind() == std::io::ErrorKind::PermissionDenied => {}
+        Ok(_) => {
+            eprintln!("skipping permission case: current process can open the restricted directory");
+            return;
+        }
+        Err(error) => panic!("permission precondition probe failed: {error}"),
+    }
 
     let outcome = LocalFileSystem::host()
         .expect("Host filesystem should open")
@@ -732,8 +791,5 @@ fn test_local_copy_preferred_durability_reports_downgrade() {
     fs::set_permissions(&parent, fs::Permissions::from_mode(0o700))
         .expect("target parent permissions should be restored");
     assert!(!outcome.durable());
-    assert_eq!(
-        b"payload",
-        fs::read(&target).expect("copied target should remain").as_slice(),
-    );
+    assert_eq!(b"payload", fs::read(&target).expect("target should remain").as_slice());
 }

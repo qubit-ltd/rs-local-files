@@ -147,26 +147,38 @@ fn test_local_file_error_consumes_optional_typed_source() {
 fn test_local_file_error_display_propagates_formatter_failure() {
     struct RejectingWriter {
         successful_writes: usize,
+        rejected: bool,
+        output: String,
     }
 
     impl fmt::Write for RejectingWriter {
-        fn write_str(&mut self, _value: &str) -> fmt::Result {
+        fn write_str(&mut self, value: &str) -> fmt::Result {
             if self.successful_writes == 0 {
+                self.rejected = true;
                 Err(fmt::Error)
             } else {
                 self.successful_writes -= 1;
+                self.output.push_str(value);
                 Ok(())
             }
         }
     }
 
-    for successful_writes in 0..16 {
-        let error = LocalFileError::new(LocalFileErrorKind::Io, LocalFileOperation::Metadata)
-            .with_path("source".into())
-            .with_target("target".into());
-        let mut writer = RejectingWriter { successful_writes };
-        let _ = fmt::write(&mut writer, format_args!("{error}"));
-    }
+    let error = LocalFileError::new(LocalFileErrorKind::Io, LocalFileOperation::Metadata)
+        .with_path("source".into())
+        .with_target("target".into());
+    let expected = error.to_string();
+
+    let mut rejecting = RejectingWriter { successful_writes: 0, rejected: false, output: String::new() };
+    let result = fmt::write(&mut rejecting, format_args!("{error}"));
+    assert!(rejecting.rejected, "writer must actually reject formatting");
+    assert_eq!(Err(fmt::Error), result);
+
+    let mut accepting = RejectingWriter { successful_writes: usize::MAX, rejected: false, output: String::new() };
+    let result = fmt::write(&mut accepting, format_args!("{error}"));
+    assert!(!accepting.rejected);
+    assert_eq!(Ok(()), result);
+    assert_eq!(expected, accepting.output);
 }
 
 /// Verifies all public path-codec diagnostics produce stable, useful text.

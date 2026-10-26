@@ -15,6 +15,7 @@ use std::path::Path;
 use qubit_io::Output;
 use qubit_io::OutputRef;
 use qubit_local_files::LocalFileSystem;
+use qubit_local_files::options::LocalTempFileOptions;
 use tempfile::tempdir;
 
 fn rooted_host_path(root: &Path, virtual_path: &Path) -> std::path::PathBuf {
@@ -116,10 +117,12 @@ fn rooted_temp_range_write_and_cleanup_preserve_authority() {
 
 #[test]
 fn owned_std_write_can_be_recovered_before_keep_and_persist() {
-    let directory = tempfile::tempdir_in(".").expect("same-filesystem destination directory should be created");
+    let directory = tempdir().expect("same-filesystem destination directory should be created");
     let fs = LocalFileSystem::host().expect("host filesystem should open");
 
-    let mut keep_file = fs.create_temp_file().expect("temporary file should be created");
+    let mut keep_file = fs
+        .create_temp_file_with_options(&LocalTempFileOptions::new().with_parent(directory.path()))
+        .expect("temporary file should be created in the destination filesystem");
     Output::write_fully(&mut keep_file, b"kept").expect("keep contents should be written");
     let std_file = keep_file.into_std_write().into_inner();
     let outcome = std_file.keep().expect("recovered temp file should be kept");
@@ -129,7 +132,9 @@ fn owned_std_write_can_be_recovered_before_keep_and_persist() {
     );
     std::fs::remove_file(outcome.path()).expect("kept test artifact should be removed");
 
-    let mut persist_file = fs.create_temp_file().expect("second temporary file should be created");
+    let mut persist_file = fs
+        .create_temp_file_with_options(&LocalTempFileOptions::new().with_parent(directory.path()))
+        .expect("second temporary file should be created in the destination filesystem");
     Output::write_fully(&mut persist_file, b"persisted").expect("persist contents should be written");
     let persist_target = directory.path().join("persisted.txt");
     let std_file = persist_file.into_std_write().into_inner();
