@@ -99,6 +99,21 @@ pub(crate) mod lifecycle {
     // Bound the model from the fixture's entry/depth limits and largest marker.
     const MAX_SNAPSHOT_BYTES: usize = MAX_ENTRIES * (MAX_DEPTH * 16 + REPLACEMENT.len());
 
+    fn require_created<T>(result: LocalResult<T>, kind: &str) -> T {
+        match result {
+            Ok(resource) => resource,
+            Err(error) => panic!("prepared lifecycle fixture could not create {kind}: {error}"),
+        }
+    }
+
+    #[derive(Debug, Default, PartialEq, Eq)]
+    struct LifecycleWitness {
+        created: usize,
+        explicit_cleanups: usize,
+        released: usize,
+        artifacts_absent: usize,
+    }
+
     /// The public resource retained between independently decoded operations.
     #[derive(Debug)]
     enum Resource {
@@ -385,8 +400,12 @@ pub(crate) mod lifecycle {
     /// file. Filesystem assertion failures are fuzz findings; ambient
     /// initial setup errors skip.
     pub(crate) fn run(data: &[u8], rooted: bool) {
+        let _ = run_model(data, rooted);
+    }
+
+    fn run_model(data: &[u8], rooted: bool) -> Option<LifecycleWitness> {
         let Some(root) = FuzzRoot::create(if rooted { "rooted-lifecycle" } else { "lifecycle" }) else {
-            return;
+            return None;
         };
         let filesystem = if rooted {
             LocalFileSystem::rooted(root.path())
@@ -394,7 +413,7 @@ pub(crate) mod lifecycle {
             LocalFileSystem::host()
         };
         let Ok(filesystem) = filesystem else {
-            return;
+            return None;
         };
         let parent = if rooted { Path::new("/") } else { root.path() };
         fs::create_dir(root.path().join("scratch")).expect("create explicit publication base");
@@ -406,6 +425,7 @@ pub(crate) mod lifecycle {
         let mut current: Option<Resource> = None;
         let mut replacements = Vec::new();
         let mut published: Vec<PublishedResource> = Vec::new();
+        let mut witness = LifecycleWitness::default();
 
         for (index, operation) in data.chunks(2).take(MAX_OPERATIONS).enumerate() {
             let opcode = operation[0] % 14;
@@ -466,29 +486,30 @@ pub(crate) mod lifecycle {
                     expected_bytes = PAYLOAD.to_vec();
                     writable = true;
                     current = if selector & 1 == 0 {
-                        filesystem
-                            .create_temp_file_with_options(
+                        let resource = require_created(
+                            filesystem.create_temp_file_with_options(
                                 &LocalTempFileOptions::new().with_parent(parent).with_max_attempts(4),
-                            )
-                            .ok()
-                            .map(|mut resource| {
-                                Output::write_fully(&mut resource, PAYLOAD).expect("write original fuzz file");
-                                Resource::File(resource)
-                            })
+                            ),
+                            "file",
+                        );
+                        let mut resource = resource;
+                        Output::write_fully(&mut resource, PAYLOAD).expect("write original fuzz file");
+                        witness.created += 1;
+                        Some(Resource::File(resource))
                     } else {
-                        filesystem
-                            .create_temp_directory_with_options(
+                        let resource = require_created(
+                            filesystem.create_temp_directory_with_options(
                                 &LocalTempDirectoryOptions::new()
                                     .with_parent(parent)
                                     .with_max_attempts(4)
                                     .with_cleanup_limits(cleanup_limits()),
-                            )
-                            .ok()
-                            .map(|resource| {
-                                fs::write(host_path(root.path(), resource.path(), rooted).join("payload"), PAYLOAD)
-                                    .expect("write original directory marker");
-                                Resource::Directory(resource)
-                            })
+                            ),
+                            "directory",
+                        );
+                        fs::write(host_path(root.path(), resource.path(), rooted).join("payload"), PAYLOAD)
+                            .expect("write original directory marker");
+                        witness.created += 1;
+                        Some(Resource::Directory(resource))
                     };
                 }
                 continue;
@@ -650,6 +671,9 @@ pub(crate) mod lifecycle {
                     if result.is_ok() {
                         assert_eq!(resource.source_state(), LocalTempSourceState::Released);
                         assert!(resource.cleanup().is_ok(), "Released cleanup must be idempotent");
+                        witness.explicit_cleanups += 1;
+                        witness.released += 1;
+                        witness.artifacts_absent += usize::from(!source_path.exists());
                     }
                     expected_source = if result.is_ok() {
                         LocalTempSourceState::Released
@@ -728,5 +752,66 @@ pub(crate) mod lifecycle {
         // FuzzRoot outlives all tested guards and independently reclaims saved
         // entities, replacements, publications and any tree a bounded
         // cleanup intentionally left.
+        Some(witness)
+    }
+
+    #[cfg(test)]
+    mod lifecycle_fixture_tests {
+        use qubit_local_files::LocalFileError;
+        use qubit_local_files::error::LocalFileErrorKind;
+        use qubit_local_files::error::LocalFileOperation;
+
+        use super::require_created;
+        use super::run_model;
+
+        #[test]
+        fn require_created_panics_for_fixture_creation_errors_and_returns_success() {
+            for kind in [LocalFileErrorKind::Unsupported, LocalFileErrorKind::InvalidPath] {
+                let error = LocalFileError::new(kind, LocalFileOperation::CreateTempFile);
+                assert!(
+                    std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                        require_created::<()>(Err(error), "file")
+                    }))
+                    .is_err()
+                );
+            }
+            assert_eq!(require_created(Ok(17), "file"), 17);
+        }
+
+        #[test]
+        fn fixed_file_lifecycle_creates_cleans_releases_and_removes_artifact() {
+            let witness = run_model(&[0, 0, 11, 0, 4, 0, 5, 0], false).expect("fixture environment");
+            assert_eq!(witness.created, 1);
+            assert_eq!(witness.explicit_cleanups, 1);
+            assert_eq!(witness.released, 1);
+            assert_eq!(witness.artifacts_absent, 1);
+        }
+
+        #[test]
+        fn fixed_directory_lifecycle_creates_cleans_releases_and_removes_artifact() {
+            let witness = run_model(&[0, 1, 11, 0, 4, 0, 5, 0], true).expect("fixture environment");
+            assert_eq!(witness.created, 1);
+            assert_eq!(witness.explicit_cleanups, 1);
+            assert_eq!(witness.released, 1);
+            assert_eq!(witness.artifacts_absent, 1);
+        }
+
+        #[test]
+        fn fixed_host_directory_lifecycle_creates_cleans_releases_and_removes_artifact() {
+            let witness = run_model(&[0, 1, 11, 0, 4, 0, 5, 0], false).expect("fixture environment");
+            assert_eq!(witness.created, 1);
+            assert_eq!(witness.explicit_cleanups, 1);
+            assert_eq!(witness.released, 1);
+            assert_eq!(witness.artifacts_absent, 1);
+        }
+
+        #[test]
+        fn fixed_rooted_file_lifecycle_creates_cleans_releases_and_removes_artifact() {
+            let witness = run_model(&[0, 0, 11, 0, 4, 0, 5, 0], true).expect("fixture environment");
+            assert_eq!(witness.created, 1);
+            assert_eq!(witness.explicit_cleanups, 1);
+            assert_eq!(witness.released, 1);
+            assert_eq!(witness.artifacts_absent, 1);
+        }
     }
 }
