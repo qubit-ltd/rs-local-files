@@ -150,7 +150,7 @@ fn test_rooted_tree_copy_rejects_followed_directory_cycle() {
         .expect_err("a followed source directory cycle should fail the copy");
 
     assert_eq!(LocalFileErrorKind::InvalidPath, failure.error().kind());
-    assert!(directory.path().join("target/cycle").is_dir());
+    assert!(!directory.path().join("target/cycle").exists());
 }
 
 #[test]

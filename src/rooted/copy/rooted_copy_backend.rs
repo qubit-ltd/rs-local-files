@@ -43,6 +43,7 @@ pub(super) fn copy_tree(
     budget: &mut CopyBudget,
 ) -> Result<Statistics, Error> {
     let mut statistics = Statistics::default();
+    validate_source_directory(source, destination, destination, &[], statistics)?;
     let root_permit = budget.acquire_directory().map_err(|source_error| {
         error(
             Stage::ReadSourceDirectory,
@@ -69,6 +70,7 @@ pub(super) fn copy_tree(
         root,
         options,
         durability,
+        destination_root: destination.clone(),
         active_sources: vec![source.clone()],
     };
     run_copy_tree(&mut backend, root_frame, &mut statistics, budget)?;
@@ -83,6 +85,8 @@ struct RootedCopyBackend<'a> {
     options: &'a Options,
     /// Selected publication durability requirement.
     durability: LocalDurabilityRequirement,
+    /// Original destination root for source-containment checks.
+    destination_root: Path,
     /// Resolved source paths for active-ancestor cycle detection.
     active_sources: Vec<Path>,
 }
@@ -165,6 +169,13 @@ impl CopyTreeBackend for RootedCopyBackend<'_> {
                 )?;
             }
             EntryKind::Directory => {
+                validate_source_directory(
+                    &source_child,
+                    &destination_child,
+                    &self.destination_root,
+                    &self.active_sources,
+                    *stats,
+                )?;
                 if prepare_directory(self.root, &source_child, &destination_child, self.options, stats)? {
                     let current = *stats;
                     child_frame = Some(enter_directory(
@@ -212,6 +223,13 @@ impl CopyTreeBackend for RootedCopyBackend<'_> {
                         }
                     };
                     if resolved_metadata.kind() == EntryKind::Directory {
+                        validate_source_directory(
+                            &resolved,
+                            &destination_child,
+                            &self.destination_root,
+                            &self.active_sources,
+                            *stats,
+                        )?;
                         if prepare_directory(self.root, &resolved, &destination_child, self.options, stats)? {
                             let current = *stats;
                             child_frame = Some(enter_directory(
@@ -355,15 +373,6 @@ fn enter_directory(
     budget: &CopyBudget,
     statistics: Statistics,
 ) -> Result<CopyFrame, Error> {
-    if active_sources.iter().any(|active| active == source) {
-        return Err(error(
-            Stage::InspectSource,
-            source,
-            destination,
-            statistics,
-            io::Error::new(ErrorKind::InvalidInput, "rooted copy source directory cycle detected"),
-        ));
-    }
     let directory_permit = budget.acquire_directory().map_err(|source_error| {
         error(
             Stage::ReadSourceDirectory,
@@ -406,4 +415,37 @@ fn enter_directory(
         reader,
         directory_permit,
     })
+}
+
+/// Rejects a source directory that contains the fixed destination root or is
+/// already an active ancestor before any child destination is prepared.
+fn validate_source_directory(
+    source: &Path,
+    destination: &Path,
+    destination_root: &Path,
+    active_sources: &[Path],
+    statistics: Statistics,
+) -> Result<(), Error> {
+    if destination_root.as_path().starts_with(source.as_path()) {
+        return Err(error(
+            Stage::InspectSource,
+            source,
+            destination,
+            statistics,
+            io::Error::new(
+                ErrorKind::InvalidInput,
+                "rooted tree destination must not be inside the source",
+            ),
+        ));
+    }
+    if active_sources.iter().any(|active| active == source) {
+        return Err(error(
+            Stage::InspectSource,
+            source,
+            destination,
+            statistics,
+            io::Error::new(ErrorKind::InvalidInput, "rooted copy source directory cycle detected"),
+        ));
+    }
+    Ok(())
 }

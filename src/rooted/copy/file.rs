@@ -9,6 +9,8 @@
 
 use std::io;
 use std::io::ErrorKind;
+#[cfg(feature = "test-support")]
+use std::io::Write;
 
 use super::EntryKind;
 use super::Metadata;
@@ -180,6 +182,9 @@ pub(super) fn copy_file(
         }
     }
     #[cfg(feature = "test-support")]
+    inject_race_destination(root, destination, "rooted-copy-race-before-writer-open")
+        .map_err(|source_error| error(Stage::PrepareDestination, source, destination, statistics, source_error))?;
+    #[cfg(feature = "test-support")]
     {
         if crate::local::test_support_enabled("rooted-copy-writer-open") {
             return Err(mark_partial_after_removal(
@@ -194,15 +199,34 @@ pub(super) fn copy_file(
             ));
         }
     }
-    let mut writer = root
-        .begin_atomic_write_with_options(destination, LocalAtomicWriteOptions::new().with_durability(durability))
-        .map_err(|source_error| {
-            let source_error = io::Error::new(source_error.kind(), source_error);
-            mark_partial_after_removal(
-                error(Stage::PrepareDestination, source, destination, statistics, source_error),
+    let mut writer_options = LocalAtomicWriteOptions::new().with_durability(durability);
+    if options.conflict_policy() != crate::local::LocalCopyConflictPolicy::Overwrite {
+        writer_options = writer_options.with_create_new();
+    }
+    let mut writer = match root.begin_atomic_write_with_options(destination, writer_options) {
+        Ok(writer) => writer,
+        Err(source_error) => {
+            if !destination_removed
+                && should_skip_conflict_race(
+                    root,
+                    destination,
+                    options,
+                    crate::LocalAtomicWriteStage::InspectDestination,
+                    &source_error,
+                )
+            {
+                statistics.skipped = checked_add(statistics.skipped, 1, source, destination, statistics)?;
+                return Ok(statistics);
+            }
+            return Err(rooted_open_error(
+                source,
+                destination,
+                statistics,
                 destination_removed,
-            )
-        })?;
+                source_error,
+            ));
+        }
+    };
     if options.preserves_permissions() {
         writer.set_copy_permissions(source_metadata.permissions());
     }
@@ -221,6 +245,9 @@ pub(super) fn copy_file(
         )
     })?;
     #[cfg(feature = "test-support")]
+    inject_race_destination(root, destination, "rooted-copy-race-before-writer-commit")
+        .map_err(|source_error| error(Stage::CommitFile, source, destination, statistics, source_error))?;
+    #[cfg(feature = "test-support")]
     let commit_result = if crate::local::test_support_enabled("rooted-copy-file-commit-native") {
         Err(crate::LocalAtomicWriteError::new(
             crate::LocalAtomicWriteStage::ReplaceDestination,
@@ -234,12 +261,27 @@ pub(super) fn copy_file(
     };
     #[cfg(not(feature = "test-support"))]
     let commit_result = writer.commit_with_durability();
-    let file_durable = commit_result.map_err(|source_error| {
-        mark_partial_after_removal(
-            rooted_commit_error(source, destination, statistics, source_error),
-            destination_removed,
-        )
-    })?;
+    let file_durable = match commit_result {
+        Ok(file_durable) => file_durable,
+        Err(source_error) => {
+            if !destination_removed
+                && should_skip_conflict_race(
+                    root,
+                    destination,
+                    options,
+                    crate::LocalAtomicWriteStage::ReplaceDestination,
+                    &source_error,
+                )
+            {
+                statistics.skipped = checked_add(statistics.skipped, 1, source, destination, statistics)?;
+                return Ok(statistics);
+            }
+            return Err(mark_partial_after_removal(
+                rooted_commit_error(source, destination, statistics, source_error),
+                destination_removed,
+            ));
+        }
+    };
     statistics.files_durable &= file_durable;
     statistics.files = checked_add(statistics.files, 1, source, destination, statistics)?;
     statistics.bytes = checked_add(statistics.bytes, bytes, source, destination, statistics)?;
@@ -250,6 +292,80 @@ pub(super) fn copy_file(
         statistics.non_atomic_publication = true;
     }
     Ok(statistics)
+}
+
+/// Creates a deterministic competing destination through the retained Root
+/// authority at one selected copy boundary.
+#[cfg(feature = "test-support")]
+fn inject_race_destination(root: &Root, destination: &Path, selector: &str) -> io::Result<()> {
+    let selected = crate::local::take_test_support(selector)
+        || (selector == "rooted-copy-race-before-writer-commit"
+            && crate::local::test_support_enabled("rooted-copy-install-cleanup"));
+    if !selected {
+        return Ok(());
+    }
+    if optional_metadata(root, destination)?.is_some() {
+        return Ok(());
+    }
+    let options = crate::write::OpenOptions::new(crate::write::Mode::CreateNew);
+    let mut sentinel = root.open_writer(destination, &options)?;
+    sentinel.write_all(b"concurrent sentinel")
+}
+
+/// Returns true only when a staged-writer conflict proves an unchanged
+/// destination that the configured copy policies explicitly allow skipping.
+fn should_skip_conflict_race(
+    root: &Root,
+    destination: &Path,
+    options: &Options,
+    expected_stage: crate::LocalAtomicWriteStage,
+    source_error: &crate::LocalAtomicWriteError,
+) -> bool {
+    if source_error.stage() != expected_stage
+        || source_error.kind() != ErrorKind::AlreadyExists
+        || source_error.destination_state() != crate::LocalAtomicDestinationState::Unchanged
+        || source_error.cleanup_error().is_some()
+        || source_error.parent_sync_error().is_some()
+    {
+        return false;
+    }
+    let Ok(Some(metadata)) = optional_metadata(root, destination) else {
+        return false;
+    };
+    decide_copy_destination(
+        false,
+        Some(metadata.kind() == EntryKind::Directory),
+        options.conflict_policy(),
+        options.type_conflict_policy(),
+    ) == Some(CopyDestinationAction::Skip)
+}
+
+/// Converts a rooted atomic-writer initialization failure without discarding
+/// staging cleanup details.
+fn rooted_open_error(
+    source: &Path,
+    destination: &Path,
+    statistics: Statistics,
+    destination_removed: bool,
+    source_error: crate::LocalAtomicWriteError,
+) -> Error {
+    let (temporary_path, cleanup_error, source_error) = source_error.into_staging_parts();
+    let source_kind = source_error.kind();
+    let copy_error = error(
+        Stage::PrepareDestination,
+        source,
+        destination,
+        statistics,
+        io::Error::new(source_kind, source_error),
+    );
+    let copy_error = match temporary_path {
+        Some(temporary_path) => copy_error.with_staging_context(temporary_path, cleanup_error),
+        None => match cleanup_error {
+            Some(cleanup_error) => copy_error.with_cleanup_error(cleanup_error),
+            None => copy_error,
+        },
+    };
+    mark_partial_after_removal(copy_error, destination_removed)
 }
 
 /// Applies source permissions when requested by the caller.
@@ -307,10 +423,15 @@ fn rooted_commit_error(
     let prepublication_metadata_failure = source_error.stage()
         == crate::LocalAtomicWriteStage::ApplyDestinationMetadata
         && source_error.destination_state() == crate::LocalAtomicDestinationState::Unchanged;
+    let prepublication_destination_conflict = source_error.stage() == crate::LocalAtomicWriteStage::ReplaceDestination
+        && source_error.kind() == ErrorKind::AlreadyExists
+        && source_error.destination_state() == crate::LocalAtomicDestinationState::Unchanged
+        && source_error.cleanup_error().is_none()
+        && source_error.parent_sync_error().is_none();
     let (temporary_path, cleanup_error, source_error) = source_error.into_staging_parts();
     let source_kind = source_error.kind();
     let copy_error = error(
-        if prepublication_metadata_failure {
+        if prepublication_metadata_failure || prepublication_destination_conflict {
             Stage::PrepareDestination
         } else {
             Stage::CommitFile
@@ -337,6 +458,56 @@ mod tests {
 
     use super::copy_file;
     use super::rooted_commit_error;
+    use super::should_skip_conflict_race;
+
+    #[test]
+    fn conflict_race_is_skipped_only_for_a_clean_unchanged_allowed_conflict() {
+        let directory = tempfile::tempdir().expect("temporary root should be created");
+        let root = super::super::Root::open(directory.path()).expect("root authority should open");
+        let destination =
+            crate::local::LocalRelativePath::new(Path::new("destination")).expect("valid relative destination");
+        std::fs::write(directory.path().join("destination"), b"sentinel").expect("concurrent destination should exist");
+        let options =
+            crate::local::LocalCopyDirOptions::new().with_conflict(crate::local::LocalCopyConflictPolicy::Skip);
+        let conflict = || {
+            crate::LocalAtomicWriteError::new(
+                crate::LocalAtomicWriteStage::ReplaceDestination,
+                PathBuf::from("destination"),
+                None,
+                crate::LocalAtomicDestinationState::Unchanged,
+                io::Error::from(io::ErrorKind::AlreadyExists),
+            )
+        };
+
+        assert!(should_skip_conflict_race(
+            &root,
+            &destination,
+            &options,
+            crate::LocalAtomicWriteStage::ReplaceDestination,
+            &conflict(),
+        ));
+        assert!(!should_skip_conflict_race(
+            &root,
+            &destination,
+            &options,
+            crate::LocalAtomicWriteStage::InspectDestination,
+            &conflict(),
+        ));
+        assert!(!should_skip_conflict_race(
+            &root,
+            &destination,
+            &options,
+            crate::LocalAtomicWriteStage::ReplaceDestination,
+            &conflict().with_cleanup_error(Some(io::Error::from(io::ErrorKind::Other))),
+        ));
+        assert!(!should_skip_conflict_race(
+            &root,
+            &destination,
+            &options,
+            crate::LocalAtomicWriteStage::ReplaceDestination,
+            &conflict().with_parent_sync_error(Some(io::Error::from(io::ErrorKind::Other))),
+        ));
+    }
 
     #[test]
     fn rooted_commit_error_maps_metadata_and_replacement_failures() {
