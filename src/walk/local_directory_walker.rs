@@ -25,6 +25,8 @@ use super::local_directory_walker_support::directory_limit_error;
 use super::local_directory_walker_support::directory_pool;
 use super::local_directory_walker_support::is_terminal_walk_error;
 use super::local_directory_walker_support::name_bytes;
+#[cfg(feature = "test-support")]
+use super::local_directory_walker_support::scripted_open_directory_error;
 use super::local_directory_walker_support::validate_options;
 use super::local_directory_walker_support::walker_deadline;
 use crate::LocalDirectoryEntry;
@@ -557,6 +559,13 @@ impl LocalDirectoryWalker {
             if needs_reopen && let Err(error) = self.reopen_host_frame(&relative_parent) {
                 return Some(Err(error));
             }
+            #[cfg(feature = "test-support")]
+            if let Some(error) = scripted_open_directory_error(
+                &self.open_directories,
+                &self.root.join(&relative_parent).join("nested"),
+            ) {
+                return Some(Err(error));
+            }
             let frame = self.stack.last_mut()?;
             let next_entry = loop {
                 if matches!(self.deadline, Some(deadline) if Instant::now() >= deadline) {
@@ -900,6 +909,13 @@ fn next_rooted_entry(
                     return Some(Err(walk_io_error(&public_parent, error)));
                 }
             }
+        }
+        #[cfg(feature = "test-support")]
+        if let Some(error) = scripted_open_directory_error(
+            pool,
+            &namespace_root.join(&output_parent).join("nested"),
+        ) {
+            return Some(Err(error));
         }
         let next_entry = state
             .stack

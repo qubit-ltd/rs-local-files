@@ -85,6 +85,29 @@ pub(super) fn directory_pool(options: &LocalListOptions) -> Option<ManagedResour
         .map(|limit| ManagedResourcePool::new(LocalResourceKind::OpenDirectory, limit))
 }
 
+/// Scripts a local child-directory capacity failure before parent iteration.
+///
+/// The test fault attempts to reserve one additional handle while the current
+/// frame owns the configured capacity. Keeping the parent reader untouched
+/// makes the error-before-sibling order deterministic without depending on
+/// native directory enumeration order.
+#[cfg(feature = "test-support")]
+pub(super) fn scripted_open_directory_error(
+    pool: &Option<ManagedResourcePool<LocalResourceKind, usize>>,
+    path: &Path,
+) -> Option<LocalFileError> {
+    if !crate::local::take_test_support("walker-enter-open-host")
+        && !crate::local::take_test_support("walker-enter-open-rooted")
+    {
+        return None;
+    }
+    let pool = pool.as_ref()?;
+    match pool.try_acquire(1) {
+        Ok(_permit) => None,
+        Err(error) => Some(directory_limit_error(path, error)),
+    }
+}
+
 /// Measures the platform-native storage size of one directory-entry name.
 pub(super) fn name_bytes(name: &OsStr) -> usize {
     #[cfg(unix)]

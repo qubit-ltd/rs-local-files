@@ -14,6 +14,8 @@ use std::time::Duration;
 use qubit_local_files::LocalFileSystem;
 use qubit_local_files::error::LocalFileErrorKind;
 #[cfg(feature = "test-support")]
+use qubit_local_files::error::LocalResourceKind;
+#[cfg(feature = "test-support")]
 use qubit_local_files::options::LocalDirectoryReopenPolicy;
 use qubit_local_files::options::LocalListOptions;
 use qubit_local_files::options::LocalWalkErrorPolicy;
@@ -300,6 +302,53 @@ fn test_local_directory_walker_continue_skips_handle_limited_branch() {
     }
 }
 
+/// Verifies a scripted local open error precedes a later sibling on both backends.
+#[cfg(feature = "test-support")]
+#[test]
+fn test_local_directory_walker_scripted_open_error_precedes_sibling() {
+    const TEST_NAME: &str = "test_local_directory_walker_scripted_open_error_precedes_sibling";
+
+    for rooted in [false, true] {
+        let fault = if rooted {
+            "walker-enter-open-rooted"
+        } else {
+            "walker-enter-open-host"
+        };
+        run_walker_fault_process(TEST_NAME, fault, || {
+            let directory = tempdir().expect("temporary directory should be created");
+            fs::create_dir(directory.path().join("nested")).expect("nested directory should be created");
+            fs::write(directory.path().join("sibling"), b"payload").expect("sibling should be created");
+            let filesystem = if rooted {
+                LocalFileSystem::rooted(directory.path()).expect("Rooted filesystem should open")
+            } else {
+                LocalFileSystem::host().expect("Host filesystem should open")
+            };
+            let root = if rooted { Path::new("/") } else { directory.path() };
+            let options = LocalListOptions::new()
+                .with_recursive()
+                .with_max_open_directories(1)
+                .with_reopen_policy(qubit_local_files::options::LocalDirectoryReopenPolicy::Fail)
+                .with_error_policy(LocalWalkErrorPolicy::Continue);
+            let mut walker = filesystem.list_with_options(root, &options).expect("walker should open");
+
+            let error = walker
+                .next()
+                .expect("scripted child-open error should be yielded")
+                .expect_err("the occupied root reader should exhaust the handle allowance");
+            assert_eq!(LocalFileErrorKind::ResourceLimit, error.kind());
+            assert_eq!(
+                Some(LocalResourceKind::OpenDirectory),
+                error.resource_limit_error().map(|limit| limit.resource()),
+            );
+
+            let sibling = walker
+                .find_map(|result| result.ok().filter(|entry| entry.relative_path() == "sibling"))
+                .expect("Continue should return the sibling after the scripted error");
+            assert_eq!(Path::new("sibling"), sibling.relative_path());
+        });
+    }
+}
+
 /// Verifies both backends defer link resolution until a branch can be entered.
 #[cfg(unix)]
 #[test]
@@ -360,6 +409,49 @@ fn test_local_directory_walker_resolves_links_only_when_descent_is_allowed() {
             "cycle should be rejected for rooted={rooted}",
         );
     }
+}
+
+/// Verifies Rooted refuses to follow a link whose target escapes its root.
+#[cfg(unix)]
+#[test]
+fn test_rooted_directory_walker_rejects_out_of_scope_symlink() {
+    use std::os::unix::fs::symlink;
+
+    let owner = tempdir().expect("fixture owner should be created");
+    let root = owner.path().join("root");
+    let outside = owner.path().join("outside");
+    fs::create_dir(&root).expect("root should be created");
+    fs::create_dir(&outside).expect("outside directory should be created");
+    fs::write(outside.join("secret"), b"secret").expect("outside file should be written");
+    symlink("../outside", root.join("escape")).expect("out-of-scope link should be created");
+
+    let results = LocalFileSystem::rooted(&root)
+        .expect("Rooted filesystem should open")
+        .list_with_options(
+            Path::new("/"),
+            &LocalListOptions::new()
+                .with_recursive()
+                .with_symlink_policy(LocalSymlinkPolicy::FollowWithinScope)
+                .with_error_policy(LocalWalkErrorPolicy::Continue),
+        )
+        .expect("recursive walker should open")
+        .collect::<Vec<_>>();
+
+    assert!(results.iter().any(|result| {
+        result
+            .as_ref()
+            .err()
+            .is_some_and(|error| error.kind() == LocalFileErrorKind::InvalidPath)
+    }));
+    assert!(
+        results.iter().all(|result| {
+            result
+                .as_ref()
+                .ok()
+                .is_none_or(|entry| !entry.relative_path().starts_with("escape/"))
+        }),
+        "the walker must not expose out-of-scope target entries",
+    );
 }
 
 /// Verifies a repeated-name progress boundary observes deadline expiry before
