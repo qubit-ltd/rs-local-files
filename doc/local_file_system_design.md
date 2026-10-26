@@ -1636,10 +1636,10 @@ resource tests verify that opened objects retain creation-time state.
 Operation tests cover complete option replacement, budgets, partial effects,
 typed recovery states, and deterministic fault injection.
 
-### 26.6 Cross-platform and downstream validation
+### 26.6 Cross-platform validation
 
-Configured platform jobs and downstream adapter checks validate target-specific
-behavior and mapping completeness.
+Configured platform jobs validate this crate's target-specific behavior. Each
+downstream crate is responsible for testing its own behavior and integration.
 
 Verification follows contracts rather than line count:
 
@@ -1661,9 +1661,6 @@ Verification follows contracts rather than line count:
   machine paths;
 - CI is configured for Linux, Windows, and macOS behavioral tests; FreeBSD and Android are
   compile-checked;
-- a scheduled and manually dispatchable compatibility workflow tests
-  `qubit-fs-local` and `qubit-mime` against the checked-out revision and their
-  complete local path-dependency closure;
 - the project-level coverage configuration grants no whole-file exemption;
   state-machine branches are covered through public behavior, crate-private
   contracts, or narrow deterministic fault injection.

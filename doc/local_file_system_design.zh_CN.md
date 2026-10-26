@@ -1956,21 +1956,18 @@ namespace-absolute、不含 `.`/`..`，再次规范化保持不变。Host 绑定
 - Rooted 无链接深路径的解析计数与深度 1、8、32、64、128 的 Host/Rooted benchmark；
 - Unix 默认与 `test-support` 的 vectored read 路径，以及 Windows 顺序回退的进度规则。
 
-### 26.6 跨平台和下游
+### 26.6 跨平台验证
 
 - Linux、Windows、macOS runtime tests；
 - Android、FreeBSD 等只有 compile-check 时文档不得宣称 runtime guarantee；
 - `cargo test --all-features`；
 - `cargo clippy --all-targets --all-features -- -D warnings`；
-- `qubit-fs-local` 全特性与 provider contract tests；
-- `qubit-mime` 临时文件集成测试；
 - README 和用户指南示例作为编译测试。
 
 Host/Rooted lifecycle fuzz targets 必须使用进程级唯一 sandbox、有限 collision retry 和 RAII
-cleanup，不依赖机器上的 ambient path。定时且可手动触发的 downstream compatibility workflow
-必须把当前 revision 与完整本地 path-dependency closure 一起 checkout，并测试
-`qubit-fs-local` 和 `qubit-mime`。项目 coverage 配置不得豁免整个文件；状态机分支应通过公开
-行为、crate-private contract 或窄范围确定性 fault injection 覆盖。
+cleanup，不依赖机器上的 ambient path。本 crate 的 CI 只验证本 crate；各下游 crate 自行验证
+其行为和集成。项目 coverage 配置不得豁免整个文件；状态机分支应通过公开行为、crate-private
+contract 或窄范围确定性 fault injection 覆盖。
 
 测试必须验证可观察行为和真实操作结果，不能只验证字段 getter 已保存某个值。
 

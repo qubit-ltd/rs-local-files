@@ -994,9 +994,8 @@ configuration in caller code.
 ## Tests and performance baselines
 
 Registry dependencies are resolved with versions and checksums in `Cargo.lock`.
-The downstream contract runner checks the coordinated local-files, fs, fs-local,
-and mime dependency closure with `--locked`. Run performance measurements
-separately from correctness tests:
+This crate's CI validates this crate's own package and does not run downstream
+consumer tests. Run performance measurements separately from correctness tests:
 
 ```bash
 # Compile the Criterion benchmark

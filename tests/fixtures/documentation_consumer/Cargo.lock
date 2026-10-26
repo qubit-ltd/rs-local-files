@@ -168,7 +168,7 @@ dependencies = [
 name = "qubit-redact"
 version = "0.10.0"
 dependencies = [
- "qubit-budget 0.10.0",
+ "qubit-budget 0.9.0",
 ]
 
 [[package]]
@@ -285,4 +285,13 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "ae137229bcbd6cdf0f7b80a31df61766145077ddf49416a728b02cb3921ff3fc"
 dependencies = [
  "windows-link",
+]
+
+[[package]]
+name = "qubit-budget"
+version = "0.9.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "49bf5243c23f2a18a70b7f365ab03c9c100622308ddb940c0d5a28e0c49442bc"
+dependencies = [
+ "thiserror",
 ]

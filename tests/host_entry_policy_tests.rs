@@ -145,7 +145,7 @@ fn test_host_delete_directory_symlink_preserves_target() {
     assert!(outcome.deleted());
     assert!(!link.exists());
     assert_eq!(
-        b"preserved",
+        b"preserved".to_vec(),
         fs::read(target.join("payload")).expect("target should remain")
     );
 }
