@@ -67,3 +67,30 @@ impl Error for RootedSymlinkCreateError {
         Some(&self.primary)
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use std::error::Error;
+    use std::io;
+
+    use super::RootedSymlinkCreateError;
+    use crate::local::internal::RootedSymlinkCreateFailureState;
+
+    #[test]
+    fn test_display_and_source_retain_publication_and_cleanup_errors() {
+        let error = RootedSymlinkCreateError::new(
+            RootedSymlinkCreateFailureState::Unchanged,
+            io::Error::other("publish failed"),
+            Some(io::Error::other("cleanup failed")),
+        );
+
+        let message = error.to_string();
+        assert!(message.contains("Unchanged"));
+        assert!(message.contains("publish failed"));
+        assert!(message.contains("cleanup failed"));
+        assert_eq!(
+            "publish failed",
+            error.source().expect("primary error source").to_string()
+        );
+    }
+}

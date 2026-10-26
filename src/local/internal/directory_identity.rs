@@ -183,3 +183,23 @@ fn injected_cycle_identity() -> bool {
         || super::test_support::is_enabled("dir-size-directory-identity-cycle")
         || super::test_support::is_enabled("walker-directory-identity-cycle")
 }
+
+#[cfg(all(test, unix))]
+mod tests {
+    use std::fs;
+
+    use tempfile::tempdir;
+
+    use super::DirectoryIdentity;
+
+    #[test]
+    fn test_metadata_identity_uses_native_directory_identity() {
+        let directory = tempdir().expect("temporary directory should be created");
+        let metadata = fs::metadata(directory.path()).expect("directory metadata should be available");
+
+        let identity = DirectoryIdentity::from_metadata(&metadata, directory.path());
+
+        assert_eq!(identity, DirectoryIdentity::from_metadata(&metadata, directory.path()));
+        assert!(matches!(identity, DirectoryIdentity::Native { .. }));
+    }
+}

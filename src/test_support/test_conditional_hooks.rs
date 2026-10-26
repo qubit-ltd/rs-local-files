@@ -45,3 +45,20 @@ impl TestConditionalHooks {
         (self.point, self.action)
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use std::io;
+
+    use super::TestConditionalHooks;
+    use crate::test_support::TestConditionalPoint;
+
+    #[test]
+    fn test_debug_shows_hook_point_without_exposing_action() {
+        let hooks = TestConditionalHooks::once(TestConditionalPoint::BeforePublish, || Ok::<(), io::Error>(()));
+
+        let debug = format!("{hooks:?}");
+        assert!(debug.contains("BeforePublish"));
+        assert!(!debug.contains("action"));
+    }
+}

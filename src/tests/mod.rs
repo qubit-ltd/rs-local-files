@@ -14,4 +14,5 @@ mod outcome;
 mod path;
 pub(crate) mod rooted;
 mod vectored_read_tests;
+mod vectored_tests;
 mod write;
