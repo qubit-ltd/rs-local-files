@@ -276,7 +276,12 @@ fn windows_rollback_exchange_receipts_track_restored_and_competing_identities() 
     writer.write_fully(b"B").unwrap();
     let failure = writer.commit().unwrap_err();
 
-    assert_eq!(failure.publication(), LocalConditionalPublicationState::Restored);
+    assert_eq!(
+        failure.publication(),
+        LocalConditionalPublicationState::Restored,
+        "{failure} (reason: {:?})",
+        failure.reason()
+    );
     let receipts = failure.recovery_files();
     let restored = receipts
         .iter()
@@ -353,7 +358,12 @@ fn windows_rollback_without_target_replacement_restores_original_identity() {
     writer.write_fully(b"B").unwrap();
     let failure = writer.commit().unwrap_err();
 
-    assert_eq!(failure.publication(), LocalConditionalPublicationState::Restored);
+    assert_eq!(
+        failure.publication(),
+        LocalConditionalPublicationState::Restored,
+        "{failure} (reason: {:?})",
+        failure.reason()
+    );
     let receipts = failure.recovery_files();
     assert_eq!(receipts.len(), 3, "every native object should have one receipt");
     let restored = receipts
