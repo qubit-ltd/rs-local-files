@@ -213,10 +213,7 @@ where
                     installed.set_role(LocalRecoveryFileRole::StagedCandidate);
                     entries.push(installed);
                 }
-                entries.extend(attempt.displaced.into_iter().map(|mut entry| {
-                    entry.set_role(LocalRecoveryFileRole::Displaced);
-                    entry
-                }));
+                entries.extend(attempt.displaced);
                 return Err((stage, error));
             }
         }

@@ -55,6 +55,7 @@ use sha2::Sha256;
 use support::conditional_temp_directory::tempdir;
 
 #[test]
+#[cfg(unix)]
 fn required_file_sync_error_before_publication_is_reported_as_not_published() {
     let directory = tempdir().unwrap();
     let path = directory.path().join("target");
@@ -198,11 +199,16 @@ fn required_parent_sync_unavailability_fails_before_publication() {
             } else {
                 physical_path.clone()
             };
-            let filesystem = if rooted {
+            let mut filesystem = if rooted {
                 LocalFileSystem::rooted(directory.path()).expect("Rooted filesystem")
             } else {
                 conditional::host()
             };
+            if rooted {
+                filesystem
+                    .set_symlink_policy(LocalSymlinkPolicy::Reject)
+                    .expect("Rooted conditional writes require rejecting symlinks");
+            }
             let entries_before = std::fs::read_dir(directory.path())
                 .expect("fixture directory entries")
                 .map(|entry| entry.expect("fixture entry").file_name())
@@ -390,6 +396,9 @@ fn default_durability_skips_cleanup_sync_checkpoint_for_host_and_rooted_writes()
     use qubit_local_files::LocalFileSystem;
 
     for rooted in [false, true] {
+        if cfg!(windows) && rooted {
+            continue;
+        }
         for replace_existing in [false, true] {
             let directory = tempdir().expect("fixture directory");
             let physical_path = directory.path().join("target");
