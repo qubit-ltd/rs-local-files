@@ -1043,12 +1043,13 @@ fn next_rooted_entry(
             }
             followed_directory = Some((authority_path.clone(), identity));
         } else if metadata.kind() == crate::LocalFileKind::Symlink && state.symlink_policy.follows() && may_descend {
-            let target = match crate::rooted_local_file_system::resolve_rooted_path_allow_root(
+            let target = match crate::rooted_local_file_system::resolve_rooted_path_allow_root_with_deadline(
                 &state.root,
                 &authority_path,
                 state.symlink_policy,
                 true,
                 LocalFileOperation::List,
+                deadline,
             ) {
                 Ok(target) => target,
                 Err(error) => {

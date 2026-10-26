@@ -8,11 +8,59 @@
 //! Thread-local primitive observations used only by library test builds.
 
 use std::cell::Cell;
+use std::time::Instant;
 
 thread_local! {
     static METADATA: Cell<usize> = const { Cell::new(0) };
     static DIRECTORY_OPEN: Cell<usize> = const { Cell::new(0) };
     static FALLBACK: Cell<usize> = const { Cell::new(0) };
+    static DEADLINE_CHECKS: Cell<usize> = const { Cell::new(0) };
+    static EXPIRE_AFTER: Cell<Option<usize>> = const { Cell::new(None) };
+}
+
+pub(crate) fn resolution_now(deadline: Option<Instant>) -> Instant {
+    DEADLINE_CHECKS.set(DEADLINE_CHECKS.get() + 1);
+    if EXPIRE_AFTER.get().is_some_and(|limit| DEADLINE_CHECKS.get() > limit) {
+        deadline.unwrap_or_else(Instant::now)
+    } else {
+        Instant::now()
+    }
+}
+
+#[cfg(test)]
+#[test]
+fn test_deadline_clock_guard_restores_hook_after_drop_and_unwind() {
+    let deadline = Instant::now() + std::time::Duration::from_secs(60);
+    {
+        let _clock = DeadlineClockGuard::expire_after(0);
+        assert_eq!(deadline, resolution_now(Some(deadline)));
+    }
+    assert!(resolution_now(Some(deadline)) < deadline);
+
+    let unwind = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        let _clock = DeadlineClockGuard::expire_after(0);
+        assert_eq!(deadline, resolution_now(Some(deadline)));
+        panic!("exercise deadline clock guard unwind");
+    }));
+    assert!(unwind.is_err());
+    assert!(resolution_now(Some(deadline)) < deadline);
+}
+
+pub(crate) struct DeadlineClockGuard(Option<usize>);
+
+impl DeadlineClockGuard {
+    pub(crate) fn expire_after(checks: usize) -> Self {
+        let previous = EXPIRE_AFTER.replace(Some(checks));
+        DEADLINE_CHECKS.set(0);
+        Self(previous)
+    }
+}
+
+impl Drop for DeadlineClockGuard {
+    fn drop(&mut self) {
+        EXPIRE_AFTER.set(self.0);
+        DEADLINE_CHECKS.set(0);
+    }
 }
 
 /// Records a metadata attempt at the cursor's native operation boundary.

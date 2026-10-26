@@ -28,9 +28,7 @@ use super::RootedLocalFileSystem;
 use super::ensure_required_directory_durability;
 use super::io;
 use super::resolve_rooted_path;
-use super::resolve_rooted_path_allow_root;
 use super::rooted_io_error;
-use super::rooted_path;
 use super::validate_rooted_list_start;
 
 impl RootedLocalFileSystem {
@@ -106,21 +104,21 @@ impl RootedLocalFileSystem {
         started_at: Instant,
     ) -> LocalResult<LocalDirectoryWalker> {
         let symlink_policy = options.symlink_policy().unwrap_or(symlink_policy);
-        validate_rooted_list_start(&self.root, path, symlink_policy)?;
-        let authority_path = if path.as_os_str().is_empty() {
+        let deadline = match options.deadline() {
+            Some(duration) => Some(started_at.checked_add(duration).ok_or_else(|| {
+                LocalFileError::new(LocalFileErrorKind::InvalidOptions, LocalFileOperation::List)
+                    .with_reason("listing deadline is not representable")
+                    .with_path(path.to_path_buf())
+            })?),
+            None => None,
+        };
+        let resolved = validate_rooted_list_start(&self.root, path, symlink_policy, deadline)?;
+        let authority_path = if resolved.as_os_str().is_empty() {
             None
-        } else if symlink_policy.follows() {
-            let resolved =
-                resolve_rooted_path_allow_root(&self.root, path, symlink_policy, true, LocalFileOperation::List)?;
-            if resolved.as_os_str().is_empty() {
-                None
-            } else {
-                Some(crate::local::LocalRelativePath::new(&resolved).map_err(|error| {
-                    rooted_io_error(LocalFileOperation::List, path, error).with_kind(LocalFileErrorKind::InvalidPath)
-                })?)
-            }
         } else {
-            Some(rooted_path(path, LocalFileOperation::List)?)
+            Some(crate::local::LocalRelativePath::new(&resolved).map_err(|error| {
+                rooted_io_error(LocalFileOperation::List, path, error).with_kind(LocalFileErrorKind::InvalidPath)
+            })?)
         };
         LocalDirectoryWalker::open_rooted(
             Arc::clone(&self.root),

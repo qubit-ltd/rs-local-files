@@ -8,6 +8,8 @@
 
 // Rooted support operations.
 
+use std::time::Instant;
+
 use super::LocalFileError;
 use super::LocalFileErrorKind;
 use super::LocalFileOperation;
@@ -29,9 +31,13 @@ pub(crate) fn validate_rooted_list_start(
     root: &crate::rooted::Root,
     path: &Path,
     symlink_policy: LocalSymlinkPolicy,
-) -> LocalResult<()> {
+    deadline: Option<Instant>,
+) -> LocalResult<PathBuf> {
+    check_resolution_deadline(deadline, path, LocalFileOperation::List)?;
     if path.as_os_str().is_empty() {
-        let metadata = match root.metadata() {
+        let metadata_result = root.metadata();
+        check_resolution_deadline(deadline, path, LocalFileOperation::List)?;
+        let metadata = match metadata_result {
             Ok(metadata) => metadata,
             Err(error) => return Err(rooted_io_error(LocalFileOperation::List, path, error)),
         };
@@ -41,11 +47,23 @@ pub(crate) fn validate_rooted_list_start(
                     .with_path(path.to_path_buf()),
             );
         }
-        return Ok(());
+        check_resolution_deadline(deadline, path, LocalFileOperation::List)?;
+        return Ok(PathBuf::new());
     }
-    let path = resolve_rooted_path_allow_root(root, path, symlink_policy, true, LocalFileOperation::List)?;
+    let original = path;
+    let path = resolve_rooted_path_allow_root_with_deadline(
+        root,
+        path,
+        symlink_policy,
+        true,
+        LocalFileOperation::List,
+        deadline,
+    )?;
+    check_resolution_deadline(deadline, original, LocalFileOperation::List)?;
     let metadata = if path.as_os_str().is_empty() {
-        match root.metadata() {
+        let metadata_result = root.metadata();
+        check_resolution_deadline(deadline, original, LocalFileOperation::List)?;
+        match metadata_result {
             Ok(metadata) => metadata,
             Err(error) => {
                 return Err(rooted_io_error(LocalFileOperation::List, path.as_path(), error));
@@ -56,7 +74,9 @@ pub(crate) fn validate_rooted_list_start(
             Ok(relative) => relative,
             Err(error) => return Err(rooted_io_error(LocalFileOperation::List, &path, error)),
         };
-        match root.symlink_metadata(&relative) {
+        let metadata_result = root.symlink_metadata(&relative);
+        check_resolution_deadline(deadline, original, LocalFileOperation::List)?;
+        match metadata_result {
             Ok(metadata) => metadata,
             Err(error) => return Err(rooted_io_error(LocalFileOperation::List, &path, error)),
         }
@@ -67,7 +87,8 @@ pub(crate) fn validate_rooted_list_start(
                 .with_path(path.as_path().to_path_buf()),
         );
     }
-    Ok(())
+    check_resolution_deadline(deadline, original, LocalFileOperation::List)?;
+    Ok(path)
 }
 
 /// Resolves rooted path components while preserving final-entry semantics.
@@ -101,16 +122,52 @@ pub(crate) fn resolve_rooted_path_allow_root(
     follow_final: bool,
     operation: LocalFileOperation,
 ) -> LocalResult<PathBuf> {
+    resolve_rooted_path_allow_root_with_deadline(root, path, symlink_policy, follow_final, operation, None)
+}
+
+/// Resolves a rooted path while checking an optional absolute listing deadline.
+pub(crate) fn resolve_rooted_path_allow_root_with_deadline(
+    root: &crate::rooted::Root,
+    path: &Path,
+    symlink_policy: LocalSymlinkPolicy,
+    follow_final: bool,
+    operation: LocalFileOperation,
+    deadline: Option<Instant>,
+) -> LocalResult<PathBuf> {
+    check_resolution_deadline(deadline, path, operation)?;
     let relative = rooted_path(path, operation)?;
     if symlink_policy == LocalSymlinkPolicy::FollowAcrossScope {
         return Err(LocalFileError::new(LocalFileErrorKind::InvalidOptions, operation)
             .with_reason("FollowAcrossScope is incompatible with a Rooted filesystem")
             .with_path(path.to_path_buf()));
     }
-    if let Some(resolved) = try_resolve_without_symlinks(root, &relative, follow_final) {
+    if let Some(resolved) = try_resolve_without_symlinks(root, &relative, follow_final, deadline, path, operation)? {
         return Ok(resolved);
     }
-    resolve_rooted_symlinks(root, relative, symlink_policy, follow_final, operation, path)
+    resolve_rooted_symlinks(root, relative, symlink_policy, follow_final, operation, path, deadline)
+}
+
+fn check_resolution_deadline(
+    deadline: Option<Instant>,
+    original: &Path,
+    operation: LocalFileOperation,
+) -> LocalResult<()> {
+    let Some(deadline) = deadline else {
+        return Ok(());
+    };
+    #[cfg(test)]
+    let now = crate::tests::rooted::support::resolution_observation_tests::resolution_now(Some(deadline));
+    #[cfg(not(test))]
+    let now = Instant::now();
+    if now >= deadline {
+        return Err(LocalFileError::from_io(
+            operation,
+            Some(original.to_path_buf()),
+            None,
+            io::Error::new(io::ErrorKind::TimedOut, "local listing deadline exceeded"),
+        ));
+    }
+    Ok(())
 }
 
 /// Checks a normal rooted path with linear descriptor-relative work.
@@ -122,27 +179,44 @@ fn try_resolve_without_symlinks(
     root: &crate::rooted::Root,
     path: &crate::local::LocalRelativePath,
     follow_final: bool,
-) -> Option<PathBuf> {
-    let mut cursor = root.resolution_cursor().ok()?;
+    deadline: Option<Instant>,
+    original: &Path,
+    operation: LocalFileOperation,
+) -> LocalResult<Option<PathBuf>> {
+    check_resolution_deadline(deadline, original, operation)?;
+    let mut cursor = match root.resolution_cursor() {
+        Ok(cursor) => cursor,
+        Err(_) => return Ok(None),
+    };
     let mut components = path.as_path().components().peekable();
     while let Some(component) = components.next() {
+        check_resolution_deadline(deadline, original, operation)?;
         let name = component.as_os_str();
         let final_component = components.peek().is_none();
         if final_component && !follow_final {
-            return Some(path.as_path().to_path_buf());
+            return Ok(Some(path.as_path().to_path_buf()));
         }
-        let metadata = cursor.metadata(name).ok()?;
+        let metadata_result = cursor.metadata(name);
+        check_resolution_deadline(deadline, original, operation)?;
+        let metadata = match metadata_result {
+            Ok(metadata) => metadata,
+            Err(_) => return Ok(None),
+        };
         if metadata.kind() == crate::rooted::EntryKind::Symlink {
-            return None;
+            return Ok(None);
         }
         if !final_component {
             if metadata.kind() != crate::rooted::EntryKind::Directory {
-                return None;
+                return Ok(None);
             }
-            cursor.descend(name).ok()?;
+            let descend_result = cursor.descend(name);
+            check_resolution_deadline(deadline, original, operation)?;
+            if descend_result.is_err() {
+                return Ok(None);
+            }
         }
     }
-    Some(path.as_path().to_path_buf())
+    Ok(Some(path.as_path().to_path_buf()))
 }
 
 /// Expands symlinks from the retained root handle without consulting its
@@ -158,6 +232,7 @@ fn resolve_rooted_symlinks(
     follow_final: bool,
     operation: LocalFileOperation,
     original: &Path,
+    deadline: Option<Instant>,
 ) -> LocalResult<PathBuf> {
     use std::collections::HashSet;
     #[cfg(test)]
@@ -171,6 +246,7 @@ fn resolve_rooted_symlinks(
     let mut resolved = Vec::<std::ffi::OsString>::new();
     let mut active_symlinks = HashSet::<SymlinkIdentity>::new();
     while let Some(step) = pending.pop_front() {
+        check_resolution_deadline(deadline, original, operation)?;
         match step {
             ResolutionStep::ResetRoot => resolved.clear(),
             ResolutionStep::Parent => {
@@ -191,7 +267,10 @@ fn resolve_rooted_symlinks(
                     resolved.push(component);
                     continue;
                 }
-                let metadata = match root.symlink_metadata(&candidate) {
+                check_resolution_deadline(deadline, original, operation)?;
+                let metadata_result = root.symlink_metadata(&candidate);
+                check_resolution_deadline(deadline, original, operation)?;
+                let metadata = match metadata_result {
                     Ok(metadata) => metadata,
                     Err(error) if error.kind() == io::ErrorKind::NotFound => {
                         resolved.push(component);
@@ -217,7 +296,10 @@ fn resolve_rooted_symlinks(
                         .with_reason("symbolic-link expansion cycle detected")
                         .with_path(original.to_path_buf()));
                 }
-                let target = match root.read_link(&candidate) {
+                check_resolution_deadline(deadline, original, operation)?;
+                let target_result = root.read_link(&candidate);
+                check_resolution_deadline(deadline, original, operation)?;
+                let target = match target_result {
                     Ok(target) => target,
                     Err(error) => return Err(rooted_io_error(operation, original, error)),
                 };

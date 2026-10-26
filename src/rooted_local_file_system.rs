@@ -47,6 +47,7 @@ pub(crate) use path_support::temp_candidate;
 pub(crate) use path_support::validate_rooted_temp_parent;
 pub(crate) use support::resolve_rooted_path;
 pub(crate) use support::resolve_rooted_path_allow_root;
+pub(crate) use support::resolve_rooted_path_allow_root_with_deadline;
 pub(super) use support::sync_rooted_copy_parent_chain;
 pub(super) use support::validate_rooted_list_start;
 
@@ -172,7 +173,7 @@ impl RootedLocalFileSystem {
     /// Propagates path/policy and native inspection errors; a resolved
     /// non-directory returns a structured type-conflict error.
     pub(crate) fn validate_directory(&self, path: &Path, symlink_policy: LocalSymlinkPolicy) -> LocalResult<()> {
-        validate_rooted_list_start(&self.root, path, symlink_policy)
+        validate_rooted_list_start(&self.root, path, symlink_policy, None).map(|_| ())
     }
 
     /// Observes objective path limits through the nearest existing rooted

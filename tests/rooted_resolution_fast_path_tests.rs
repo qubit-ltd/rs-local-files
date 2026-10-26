@@ -9,6 +9,7 @@
 
 use std::fs;
 use std::path::Path;
+use std::time::Duration;
 
 use qubit_io::Output;
 use qubit_io::Streams;
@@ -73,6 +74,21 @@ fn test_rooted_fast_path_supports_create_write_and_list() {
         .collect::<Result<Vec<_>, _>>()
         .expect("rooted listing should complete");
     assert!(entries.iter().any(|entry| entry.path() == Path::new("/a/b/c/payload")));
+}
+
+/// A zero listing deadline reaches rooted start-path resolution through the
+/// public API.
+#[test]
+fn test_rooted_list_deadline_applies_to_start_resolution() {
+    let temporary = tempdir().expect("temporary root should be created");
+    fs::create_dir_all(temporary.path().join("a/b")).expect("nested directories should be created");
+    let rooted = LocalFileSystem::rooted(temporary.path()).expect("root authority should open");
+
+    let error = rooted
+        .list_with_options(Path::new("a/b"), &LocalListOptions::new().with_deadline(Duration::ZERO))
+        .expect_err("zero deadline should expire during rooted start resolution");
+
+    assert_eq!(std::io::ErrorKind::TimedOut, error.io_error_kind());
 }
 
 /// A symbolic link causes the rooted resolver to use its existing expansion
