@@ -295,10 +295,9 @@ fn build_symbolic_link_buffer(target: &Path) -> Result<Vec<u8>> {
     Ok(buffer)
 }
 
-/// Parses and validates the user-visible target from a native reparse record.
-/// Prefers the print name, falling back to a normalized substitute name when
-/// it is absent. Returns `Unsupported` for other reparse tags or `InvalidData`
-/// for truncated, misaligned, or out-of-record name data.
+/// Parses and validates the actual target from a native reparse record.
+/// Returns `Unsupported` for other reparse tags or unsupported absolute
+/// namespaces, and `InvalidData` for malformed names or inconsistent flags.
 fn parse_symbolic_link_target(buffer: &[u8]) -> Result<PathBuf> {
     if buffer.len() < SYMLINK_PATH_BUFFER_OFFSET {
         return Err(corrupt_reparse("symbolic-link reparse buffer is truncated"));
@@ -316,20 +315,71 @@ fn parse_symbolic_link_target(buffer: &[u8]) -> Result<PathBuf> {
         .ok_or_else(|| corrupt_reparse("symbolic-link reparse data length is invalid"))?;
     let substitute_offset = usize::from(read_u16(buffer, 8)?);
     let substitute_length = usize::from(read_u16(buffer, 10)?);
-    let print_offset = usize::from(read_u16(buffer, 12)?);
-    let print_length = usize::from(read_u16(buffer, 14)?);
-    let (offset, length, strip_native_prefix) = if print_length == 0 {
-        (substitute_offset, substitute_length, true)
-    } else {
-        (print_offset, print_length, false)
-    };
-    let units = read_wide_range(buffer, record_length, offset, length)?;
-    let units = if strip_native_prefix {
-        normalize_substitute_name(&units)
-    } else {
-        units
+    let _print_offset = read_u16(buffer, 12)?;
+    let _print_length = read_u16(buffer, 14)?;
+    let flags = read_u32(buffer, 16)?;
+    let units = read_wide_range(buffer, record_length, substitute_offset, substitute_length)?;
+    let units = match flags {
+        SYMLINK_FLAG_RELATIVE if is_rooted_wide_path(&units) => {
+            return Err(corrupt_reparse("relative symbolic-link target is rooted"));
+        }
+        SYMLINK_FLAG_RELATIVE => units,
+        0 => normalize_absolute_substitute_name(&units)?,
+        _ => return Err(corrupt_reparse("symbolic-link reparse flags are unsupported")),
     };
     Ok(PathBuf::from(OsString::from_wide(&units)))
+}
+
+/// Converts supported absolute NT substitute names to equivalent Win32 paths.
+fn normalize_absolute_substitute_name(units: &[u16]) -> Result<Vec<u16>> {
+    const NT_PREFIX: &[u16] = &[b'\\' as u16, b'?' as u16, b'?' as u16, b'\\' as u16];
+    const NT_UNC_PREFIX: &[u16] = &[
+        b'\\' as u16,
+        b'?' as u16,
+        b'?' as u16,
+        b'\\' as u16,
+        b'U' as u16,
+        b'N' as u16,
+        b'C' as u16,
+        b'\\' as u16,
+    ];
+    if let Some(rest) = units.strip_prefix(NT_UNC_PREFIX) {
+        if rest.is_empty() || rest[0] == b'\\' as u16 {
+            return Err(corrupt_reparse("absolute symbolic-link UNC target is invalid"));
+        }
+        return Ok([b'\\' as u16, b'\\' as u16]
+            .into_iter()
+            .chain(rest.iter().copied())
+            .collect());
+    }
+    if let Some(rest) = units.strip_prefix(NT_PREFIX) {
+        if rest.len() >= 3 && matches!(rest[0], 65..=90 | 97..=122) && rest[1] == b':' as u16 && rest[2] == b'\\' as u16
+        {
+            return Ok(rest.to_vec());
+        }
+        return Err(Error::new(
+            ErrorKind::Unsupported,
+            "symbolic-link NT namespace is unsupported",
+        ));
+    }
+    if is_rooted_wide_path(units) {
+        Err(Error::new(
+            ErrorKind::Unsupported,
+            "symbolic-link NT namespace is unsupported",
+        ))
+    } else {
+        Err(corrupt_reparse(
+            "absolute symbolic-link target has no supported NT prefix",
+        ))
+    }
+}
+
+/// Identifies drive-rooted or slash-rooted UTF-16 paths without host APIs.
+fn is_rooted_wide_path(units: &[u16]) -> bool {
+    units
+        .first()
+        .is_some_and(|unit| *unit == b'\\' as u16 || *unit == b'/' as u16)
+        || (units.len() >= 2 && units[1] == b':' as u16)
 }
 
 /// Produces the kernel substitute name and relative-link flag.
@@ -374,31 +424,6 @@ fn substitute_name(target: &Path, print_name: &[u16]) -> (Vec<u16>, u32) {
         substitute.extend_from_slice(print_name);
     }
     (substitute, 0)
-}
-
-/// Removes a Win32 NT namespace prefix from a substitute-name fallback.
-fn normalize_substitute_name(units: &[u16]) -> Vec<u16> {
-    const NT_PREFIX: &[u16] = &[b'\\' as u16, b'?' as u16, b'?' as u16, b'\\' as u16];
-    const NT_UNC_PREFIX: &[u16] = &[
-        b'\\' as u16,
-        b'?' as u16,
-        b'?' as u16,
-        b'\\' as u16,
-        b'U' as u16,
-        b'N' as u16,
-        b'C' as u16,
-        b'\\' as u16,
-    ];
-    if let Some(rest) = units.strip_prefix(NT_UNC_PREFIX) {
-        [b'\\' as u16, b'\\' as u16]
-            .into_iter()
-            .chain(rest.iter().copied())
-            .collect()
-    } else if let Some(rest) = units.strip_prefix(NT_PREFIX) {
-        rest.to_vec()
-    } else {
-        units.to_vec()
-    }
 }
 
 /// Converts a UTF-16 unit count into a native 16-bit byte length.
@@ -475,8 +500,39 @@ mod tests {
     use std::io::ErrorKind;
     use std::path::Path;
 
+    use super::SYMLINK_FLAG_RELATIVE;
     use super::build_symbolic_link_buffer;
     use super::parse_symbolic_link_target;
+
+    fn raw_symbolic_link_buffer(substitute: &[u16], print: &[u16], flags: u32, print_first: bool) -> Vec<u8> {
+        let substitute_length = (substitute.len() * 2) as u16;
+        let print_length = (print.len() * 2) as u16;
+        let (substitute_offset, print_offset) = if print_first {
+            (print_length, 0)
+        } else {
+            (0, substitute_length)
+        };
+        let data_length = 12 + usize::from(substitute_length) + usize::from(print_length);
+        let mut buffer = vec![0_u8; 20 + usize::from(substitute_length) + usize::from(print_length)];
+        buffer[0..4].copy_from_slice(&0xA000_000Cu32.to_le_bytes());
+        buffer[4..6].copy_from_slice(&(data_length as u16).to_le_bytes());
+        buffer[8..10].copy_from_slice(&substitute_offset.to_le_bytes());
+        buffer[10..12].copy_from_slice(&substitute_length.to_le_bytes());
+        buffer[12..14].copy_from_slice(&print_offset.to_le_bytes());
+        buffer[14..16].copy_from_slice(&print_length.to_le_bytes());
+        buffer[16..20].copy_from_slice(&flags.to_le_bytes());
+        let mut offset = 20 + usize::from(substitute_offset);
+        for unit in substitute {
+            buffer[offset..offset + 2].copy_from_slice(&unit.to_le_bytes());
+            offset += 2;
+        }
+        offset = 20 + usize::from(print_offset);
+        for unit in print {
+            buffer[offset..offset + 2].copy_from_slice(&unit.to_le_bytes());
+            offset += 2;
+        }
+        buffer
+    }
 
     /// Verifies relative dangling targets survive native reparse encoding.
     #[test]
@@ -496,7 +552,87 @@ mod tests {
         assert_eq!(target, parse_symbolic_link_target(&buffer).unwrap());
     }
 
-    /// Verifies verbatim absolute targets retain their user-visible spelling.
+    #[test]
+    fn test_symbolic_link_reparse_uses_substitute_name_and_flags() {
+        let actual: Vec<u16> = r"\??\C:\actual.txt".encode_utf16().collect();
+        let display: Vec<u16> = r"C:\display.txt".encode_utf16().collect();
+        let buffer = raw_symbolic_link_buffer(&actual, &display, 0, false);
+
+        assert_eq!(
+            Path::new(r"C:\actual.txt"),
+            parse_symbolic_link_target(&buffer).unwrap()
+        );
+    }
+
+    #[test]
+    fn test_symbolic_link_reparse_accepts_empty_print_name_and_reversed_offsets() {
+        let actual: Vec<u16> = r"..\actual.txt".encode_utf16().collect();
+        let buffer = raw_symbolic_link_buffer(&actual, &[], SYMLINK_FLAG_RELATIVE, true);
+
+        assert_eq!(
+            Path::new(r"..\actual.txt"),
+            parse_symbolic_link_target(&buffer).unwrap()
+        );
+    }
+
+    #[test]
+    fn test_symbolic_link_reparse_reads_substitute_after_print_name() {
+        let actual: Vec<u16> = r"\??\C:\actual.txt".encode_utf16().collect();
+        let display: Vec<u16> = r"C:\display.txt".encode_utf16().collect();
+        let buffer = raw_symbolic_link_buffer(&actual, &display, 0, true);
+
+        assert_eq!(
+            Path::new(r"C:\actual.txt"),
+            parse_symbolic_link_target(&buffer).unwrap()
+        );
+    }
+
+    #[test]
+    fn test_symbolic_link_reparse_rejects_unknown_flags() {
+        let actual: Vec<u16> = r"..\actual.txt".encode_utf16().collect();
+        let buffer = raw_symbolic_link_buffer(&actual, &[], 2, false);
+
+        assert_eq!(
+            ErrorKind::InvalidData,
+            parse_symbolic_link_target(&buffer).unwrap_err().kind()
+        );
+    }
+
+    #[test]
+    fn test_symbolic_link_reparse_rejects_flags_that_conflict_with_target() {
+        let actual: Vec<u16> = r"C:\actual.txt".encode_utf16().collect();
+        let buffer = raw_symbolic_link_buffer(&actual, &[], SYMLINK_FLAG_RELATIVE, false);
+
+        assert_eq!(
+            ErrorKind::InvalidData,
+            parse_symbolic_link_target(&buffer).unwrap_err().kind()
+        );
+    }
+
+    #[test]
+    fn test_symbolic_link_reparse_rejects_invalid_substitute_range() {
+        let actual: Vec<u16> = r"..\actual.txt".encode_utf16().collect();
+        let mut buffer = raw_symbolic_link_buffer(&actual, &[], SYMLINK_FLAG_RELATIVE, false);
+        buffer[8..10].copy_from_slice(&2_u16.to_le_bytes());
+
+        assert_eq!(
+            ErrorKind::InvalidData,
+            parse_symbolic_link_target(&buffer).unwrap_err().kind()
+        );
+    }
+
+    #[test]
+    fn test_symbolic_link_reparse_rejects_unrecognized_absolute_namespace() {
+        let actual: Vec<u16> = r"\Device\HarddiskVolume1\actual.txt".encode_utf16().collect();
+        let buffer = raw_symbolic_link_buffer(&actual, &[], 0, false);
+
+        assert_eq!(
+            ErrorKind::Unsupported,
+            parse_symbolic_link_target(&buffer).unwrap_err().kind()
+        );
+    }
+
+    /// Verifies verbatim absolute targets retain their filesystem referent.
     #[test]
     fn test_verbatim_symbolic_link_reparse_buffer_round_trips() {
         for target in [
@@ -505,7 +641,13 @@ mod tests {
         ] {
             let buffer = build_symbolic_link_buffer(target).expect("verbatim reparse buffer should encode");
 
-            assert_eq!(target, parse_symbolic_link_target(&buffer).unwrap());
+            let parsed = parse_symbolic_link_target(&buffer).unwrap();
+            assert_eq!(target.is_absolute(), parsed.is_absolute());
+            if target.starts_with(r"\\?\UNC\") {
+                assert_eq!(Path::new(r"\\server\share\target"), parsed);
+            } else {
+                assert_eq!(Path::new(r"C:\outside\target"), parsed);
+            }
         }
     }
 

@@ -11,10 +11,20 @@
 
 use std::fs;
 use std::io::ErrorKind;
+use std::os::windows::ffi::OsStrExt;
+use std::os::windows::fs::OpenOptionsExt;
+use std::os::windows::io::AsRawHandle;
 use std::path::Path;
+use std::ptr::null;
+use std::ptr::null_mut;
 
+use qubit_io::Input;
 use qubit_local_files::LocalFileSystem;
 use tempfile::tempdir;
+use windows_sys::Win32::Storage::FileSystem::FILE_FLAG_BACKUP_SEMANTICS;
+use windows_sys::Win32::Storage::FileSystem::FILE_FLAG_OPEN_REPARSE_POINT;
+use windows_sys::Win32::System::IO::DeviceIoControl;
+use windows_sys::Win32::System::Ioctl::FSCTL_SET_REPARSE_POINT;
 
 /// Creates a file link or reports that the host has not granted link creation.
 fn create_file_link(target: &Path, link: &Path) -> bool {
@@ -32,6 +42,54 @@ fn create_directory_link(target: &Path, link: &Path) -> bool {
         Err(error) if error.kind() == ErrorKind::PermissionDenied => false,
         Err(error) => panic!("directory-link fixture should be created: {error}"),
     }
+}
+
+/// Replaces a file link's record with distinct actual and display names.
+fn set_distinct_reparse_names(link: &Path, actual: &Path, display: &Path) {
+    let mut substitute: Vec<u16> = r"\??\".encode_utf16().collect();
+    substitute.extend(actual.as_os_str().encode_wide());
+    let print: Vec<u16> = display.as_os_str().encode_wide().collect();
+    let substitute_bytes = (substitute.len() * 2) as u16;
+    let print_bytes = (print.len() * 2) as u16;
+    let data_length = 12 + usize::from(substitute_bytes) + usize::from(print_bytes);
+    let mut buffer = vec![0_u8; 20 + usize::from(substitute_bytes) + usize::from(print_bytes)];
+    buffer[0..4].copy_from_slice(&0xA000_000Cu32.to_le_bytes());
+    buffer[4..6].copy_from_slice(&(data_length as u16).to_le_bytes());
+    buffer[8..10].copy_from_slice(&0_u16.to_le_bytes());
+    buffer[10..12].copy_from_slice(&substitute_bytes.to_le_bytes());
+    buffer[12..14].copy_from_slice(&substitute_bytes.to_le_bytes());
+    buffer[14..16].copy_from_slice(&print_bytes.to_le_bytes());
+    buffer[16..20].copy_from_slice(&0_u32.to_le_bytes());
+    for (index, unit) in substitute.iter().chain(print.iter()).enumerate() {
+        let start = 20 + index * 2;
+        buffer[start..start + 2].copy_from_slice(&unit.to_le_bytes());
+    }
+    let file = fs::OpenOptions::new()
+        .read(true)
+        .write(true)
+        .custom_flags(FILE_FLAG_OPEN_REPARSE_POINT | FILE_FLAG_BACKUP_SEMANTICS)
+        .open(link)
+        .expect("symbolic-link reparse point should open without following");
+    let mut returned = 0_u32;
+    // SAFETY: file owns the link handle and buffer remains valid for the call.
+    let result = unsafe {
+        DeviceIoControl(
+            file.as_raw_handle(),
+            FSCTL_SET_REPARSE_POINT,
+            buffer.as_ptr().cast(),
+            buffer.len() as u32,
+            null_mut(),
+            0,
+            &raw mut returned,
+            null(),
+        )
+    };
+    assert_ne!(
+        0,
+        result,
+        "reparse record should be replaced: {}",
+        std::io::Error::last_os_error()
+    );
 }
 
 /// Verifies copying a dangling link still succeeds after the diagnostic root
@@ -120,4 +178,41 @@ fn test_rooted_copy_preserves_link_to_existing_external_file() {
         .expect("external-target link should copy as a link entry");
 
     assert_eq!(target, fs::read_link(root.path().join("destination")).unwrap());
+}
+
+/// Verifies Rooted reading and copying follow the substitute name when the
+/// reparse record's display name points at a different file.
+#[test]
+fn test_rooted_copy_uses_actual_reparse_target_instead_of_display_name() {
+    let root = tempdir().expect("temporary root should be created");
+    let outside = tempdir().expect("external directory should be created");
+    let actual = outside.path().join("actual-payload");
+    let display = outside.path().join("display-payload");
+    fs::write(&actual, b"actual target").expect("actual target should be written");
+    fs::write(&display, b"display target").expect("display target should be written");
+    if !create_file_link(&actual, &root.path().join("source")) {
+        return;
+    }
+    set_distinct_reparse_names(&root.path().join("source"), &actual, &display);
+    let mut filesystem = LocalFileSystem::rooted(root.path()).expect("root authority should open");
+    filesystem
+        .set_symlink_policy(qubit_local_files::policy::LocalSymlinkPolicy::FollowAcrossScope)
+        .expect("Rooted policy should permit the external target for this regression");
+
+    let mut reader = filesystem
+        .open_reader(Path::new("source"))
+        .expect("Rooted reader should follow the actual target");
+    let mut source_bytes = [0_u8; 12];
+    Input::read_exactly(&mut reader, &mut source_bytes).expect("Rooted reader should read target bytes");
+    assert_eq!(b"actual target", source_bytes);
+
+    let _ = filesystem
+        .copy(Path::new("source"), Path::new("destination"))
+        .expect("link with distinct names should copy through its actual target");
+
+    assert_eq!(actual, fs::read_link(root.path().join("destination")).unwrap());
+    assert_eq!(
+        b"actual target",
+        fs::read(root.path().join("destination")).unwrap().as_slice()
+    );
 }
