@@ -75,7 +75,7 @@ def workspace_member_manifests(manifest: Path, root: Path):
         return
     excluded = workspace.get("exclude", [])
     for pattern in workspace.get("members", []):
-        if not pattern:
+        if not pattern or pattern == ".":
             continue
         for member in manifest.parent.glob(pattern):
             relative = member.relative_to(manifest.parent).as_posix()

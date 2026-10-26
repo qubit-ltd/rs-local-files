@@ -166,8 +166,8 @@ class SourceLayout(unittest.TestCase):
         with self.assertRaisesRegex(RuntimeError, "inherited dependency"):
             list(self.layout.path_dependencies(manifest, self.root))
 
-    def test_empty_workspace_member_pattern_is_ignored(self):
-        manifest = self.manifest("rs-a", '[workspace]\nmembers=[""]\n')
+    def test_root_workspace_member_patterns_are_ignored(self):
+        manifest = self.manifest("rs-a", '[workspace]\nmembers=["", "."]\n')
         with patch.object(Path, "glob") as glob:
             self.assertEqual(list(self.layout.workspace_member_manifests(manifest, self.root)), [])
         glob.assert_not_called()
