@@ -38,6 +38,9 @@ jobs:
       - name: Check plain digest build
         working-directory: ci-root/rs-local-files
         run: cargo +1.94 check --locked --features digest
+      - name: Run plain digest library tests
+        working-directory: ci-root/rs-local-files
+        run: cargo +1.94 test --locked --features digest --lib
       - name: Run conditional contracts
         working-directory: ci-root/rs-local-files
         run: >-

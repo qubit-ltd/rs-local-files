@@ -253,17 +253,17 @@ fn hooks_are_instance_local_and_shared_by_clones() {
     let directory = tempfile::tempdir().unwrap();
     let first_path = directory.path().join("first");
     let second_path = directory.path().join("second");
-    let first_flag = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
-    let observed = first_flag.clone();
+    let calls = std::sync::Arc::new(std::sync::atomic::AtomicUsize::new(0));
+    let observed = calls.clone();
     let configured = conditional::host().with_conditional_test_hooks(TestConditionalHooks::once(
         TestConditionalPoint::BeforePublish,
         move || {
-            observed.store(true, std::sync::atomic::Ordering::SeqCst);
+            observed.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
             Ok(())
         },
     ));
     let clone = configured.clone();
-    for (filesystem, path) in [(&configured, &first_path), (&clone, &second_path)] {
+    for (filesystem, path) in [(&clone, &second_path), (&configured, &first_path)] {
         let mut writer = filesystem
             .open_conditional_writer::<Sha256>(
                 path,
@@ -274,7 +274,7 @@ fn hooks_are_instance_local_and_shared_by_clones() {
         writer.write_fully(b"B").unwrap();
         let _outcome = writer.commit().unwrap();
     }
-    assert!(first_flag.load(std::sync::atomic::Ordering::SeqCst));
+    assert_eq!(calls.load(std::sync::atomic::Ordering::SeqCst), 1);
     assert_eq!(std::fs::read(first_path).unwrap(), b"B");
     assert_eq!(std::fs::read(second_path).unwrap(), b"B");
 }
@@ -283,12 +283,12 @@ fn hooks_are_instance_local_and_shared_by_clones() {
 fn another_instance_does_not_consume_configured_hook() {
     let directory = tempfile::tempdir().unwrap();
     let target = directory.path().join("target");
-    let flag = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
-    let observed = flag.clone();
+    let calls = std::sync::Arc::new(std::sync::atomic::AtomicUsize::new(0));
+    let observed = calls.clone();
     let configured = conditional::host().with_conditional_test_hooks(TestConditionalHooks::once(
         TestConditionalPoint::BeforePublish,
         move || {
-            observed.store(true, std::sync::atomic::Ordering::SeqCst);
+            observed.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
             Ok(())
         },
     ));
@@ -302,7 +302,7 @@ fn another_instance_does_not_consume_configured_hook() {
         .unwrap();
     writer.write_fully(b"B").unwrap();
     let _outcome = writer.commit().unwrap();
-    assert!(!flag.load(std::sync::atomic::Ordering::SeqCst));
+    assert_eq!(calls.load(std::sync::atomic::Ordering::SeqCst), 0);
     drop(configured);
 }
 

@@ -81,12 +81,18 @@ use crate::outcome::LocalConditionalWriteOutcome;
 pub struct LocalConditionalWriter<D: Digest> {
     path: PathBuf,
     diagnostic_path: Option<PathBuf>,
+    /// PWD captured by the resolver when this writer was opened.
+    current_directory: Option<PathBuf>,
     backend: Option<ConditionalWriterBackend>,
     precondition: Option<LocalWritePrecondition<Output<D>>>,
     options: LocalWriteOptions,
     state: LocalWriterState,
     bytes_written: usize,
+    /// Fatal stream errors disable writes and commits; `Interrupted` and
+    /// `WouldBlock` remain retryable.
     write_failed: bool,
+    /// An abort error disables writes and commits, while a later explicit
+    /// abort may retry cleanup as long as the writer remains open.
     abort_failed: bool,
 }
 
@@ -104,6 +110,7 @@ impl<D: Digest> LocalConditionalWriter<D> {
     pub(crate) fn new(
         path: PathBuf,
         diagnostic_path: Option<PathBuf>,
+        current_directory: Option<PathBuf>,
         backend: ConditionalWriterBackend,
         precondition: LocalWritePrecondition<Output<D>>,
         options: LocalWriteOptions,
@@ -111,6 +118,7 @@ impl<D: Digest> LocalConditionalWriter<D> {
         Self {
             path,
             diagnostic_path,
+            current_directory,
             backend: Some(backend),
             precondition: Some(precondition),
             options,
@@ -148,6 +156,17 @@ impl<D: Digest> LocalConditionalWriter<D> {
             Ok(())
         }
     }
+
+    /// Completes an unsuccessful commit with the PWD captured at open time.
+    ///
+    /// The commit is terminal after either success or failure, and a failed
+    /// commit transfers recovery ownership through its error.
+    fn contextualize_commit_error(
+        &self,
+        error: LocalConditionalCommitError,
+    ) -> LocalConditionalCommitError {
+        error.with_fallback_current_directory(self.current_directory.clone())
+    }
     /// Publishes the candidate after checking the selected precondition.
     ///
     /// This consumes the writer on both success and failure. On success,
@@ -157,7 +176,9 @@ impl<D: Digest> LocalConditionalWriter<D> {
     /// dropping the error. The digest precheck is not a strict
     /// compare-and-swap.
     #[allow(clippy::result_large_err)]
-    pub fn commit(mut self) -> Result<LocalConditionalWriteOutcome<D>, LocalConditionalCommitError> {
+    pub fn commit(
+        mut self,
+    ) -> Result<LocalConditionalWriteOutcome<D>, LocalConditionalCommitError> {
         if self.state != LocalWriterState::Open || self.write_failed || self.abort_failed {
             return Err(LocalConditionalCommitError::new(
                 crate::LocalFileError::new(
@@ -169,25 +190,34 @@ impl<D: Digest> LocalConditionalWriter<D> {
                 crate::error::LocalConditionalWriteStage::Prepare,
                 crate::outcome::LocalConditionalPublicationState::NotPublished,
                 Vec::new(),
-            ));
+            )
+            .with_fallback_current_directory(self.current_directory.clone()));
         }
-        let backend = self.backend.take().expect("open conditional writer retains backend");
+        let backend = self
+            .backend
+            .take()
+            .expect("open conditional writer retains backend");
         let condition = self
             .precondition
             .take()
             .expect("open conditional writer retains precondition");
         let result = match backend {
             #[cfg(any(unix, windows))]
-            ConditionalWriterBackend::Native(backend) => crate::local::conditional::commit_conditional::<D, _>(
-                backend,
-                condition,
-                self.options,
-                self.bytes_written,
-            ),
+            ConditionalWriterBackend::Native(backend) => {
+                crate::local::conditional::commit_conditional_with_directory::<D, _>(
+                    backend,
+                    condition,
+                    self.options,
+                    self.bytes_written,
+                    self.current_directory.clone(),
+                )
+            }
             #[cfg(not(any(unix, windows)))]
             _ => match backend {},
         };
-        let result = result.map_err(|error| error.with_fallback_path(self.path.clone()));
+        let result = result.map_err(|error| {
+            self.contextualize_commit_error(error.with_fallback_path(self.path.clone()))
+        });
         if result.is_ok() {
             self.state = LocalWriterState::Committed;
         }
@@ -198,13 +228,21 @@ impl<D: Digest> LocalConditionalWriter<D> {
     /// writing and committing stay disabled.
     pub fn abort(&mut self) -> crate::LocalResult<LocalWriteOutcome> {
         if self.state != LocalWriterState::Open {
-            return Err(crate::LocalFileError::new(
+            let error = crate::LocalFileError::new(
                 crate::LocalFileErrorKind::InvalidState,
                 crate::LocalFileOperation::Abort,
             )
-            .with_path(self.path.clone()));
+            .with_path(self.path.clone());
+            return Err(match self.current_directory.clone() {
+                Some(directory) => error.with_current_directory(directory),
+                None => error,
+            });
         }
-        let result = self.backend.as_mut().expect("open writer retains backend").abort();
+        let result = self
+            .backend
+            .as_mut()
+            .expect("open writer retains backend")
+            .abort();
         match result {
             Ok(()) => {
                 self.backend.take();
@@ -221,12 +259,16 @@ impl<D: Digest> LocalConditionalWriter<D> {
             }
             Err(error) => {
                 self.abort_failed = true;
-                Err(crate::LocalFileError::from_io(
+                let error = crate::LocalFileError::from_io(
                     crate::LocalFileOperation::Abort,
                     Some(self.path.clone()),
                     None,
                     error,
-                ))
+                );
+                Err(match self.current_directory.clone() {
+                    Some(directory) => error.with_current_directory(directory),
+                    None => error,
+                })
             }
         }
     }
@@ -246,7 +288,14 @@ impl<D: Digest> LocalConditionalWriter<D> {
                 self.bytes_written = self.bytes_written.saturating_add(count);
                 Ok(count)
             }
-            Err(error) if matches!(error.kind(), io::ErrorKind::Interrupted | io::ErrorKind::WouldBlock) => Err(error),
+            Err(error)
+                if matches!(
+                    error.kind(),
+                    io::ErrorKind::Interrupted | io::ErrorKind::WouldBlock
+                ) =>
+            {
+                Err(error)
+            }
             Err(error) => {
                 self.write_failed = true;
                 Err(error)
@@ -267,14 +316,26 @@ impl<D: Digest> qubit_io::Output for LocalConditionalWriter<D> {
         self.writable()?;
         match qubit_io::Output::flush(self.backend.as_mut().expect("open writer retains backend")) {
             Ok(()) => Ok(()),
-            Err(error) if matches!(error.kind(), io::ErrorKind::Interrupted | io::ErrorKind::WouldBlock) => Err(error),
+            Err(error)
+                if matches!(
+                    error.kind(),
+                    io::ErrorKind::Interrupted | io::ErrorKind::WouldBlock
+                ) =>
+            {
+                Err(error)
+            }
             Err(error) => {
                 self.write_failed = true;
                 Err(error)
             }
         }
     }
-    unsafe fn write_unchecked(&mut self, input: &[u8], index: usize, count: usize) -> io::Result<usize> {
+    unsafe fn write_unchecked(
+        &mut self,
+        input: &[u8],
+        index: usize,
+        count: usize,
+    ) -> io::Result<usize> {
         self.writable()?;
         // SAFETY: the Output caller guarantees the indexed range is valid.
         let backend = self.backend.as_mut().expect("open writer retains backend");
@@ -284,7 +345,14 @@ impl<D: Digest> qubit_io::Output for LocalConditionalWriter<D> {
                 self.bytes_written = self.bytes_written.saturating_add(written);
                 Ok(written)
             }
-            Err(error) if matches!(error.kind(), io::ErrorKind::Interrupted | io::ErrorKind::WouldBlock) => Err(error),
+            Err(error)
+                if matches!(
+                    error.kind(),
+                    io::ErrorKind::Interrupted | io::ErrorKind::WouldBlock
+                ) =>
+            {
+                Err(error)
+            }
             Err(error) => {
                 self.write_failed = true;
                 Err(error)

@@ -118,6 +118,55 @@ fn required_parent_sync_error_is_reported_after_published_file_sync() {
     assert_eq!(failure.error().source().unwrap().to_string(), "sync parent");
 }
 
+#[cfg(windows)]
+#[test]
+fn windows_sharing_failure_removes_empty_owned_recovery_container() {
+    use std::os::windows::fs::OpenOptionsExt;
+
+    use qubit_local_files::recovery::LocalRecoveryFileRole;
+
+    let directory = tempfile::tempdir().expect("fixture directory should be created");
+    let target = directory.path().join("target");
+    std::fs::write(&target, b"A").expect("old target should be written");
+    let sharing_lock = std::fs::OpenOptions::new()
+        .read(true)
+        .share_mode(1)
+        .open(&target)
+        .expect("target should open with delete sharing denied");
+    let mut filesystem = conditional::host();
+    let mut writer = filesystem
+        .open_conditional_writer::<Sha256>(
+            &target,
+            LocalWritePrecondition::Content(Sha256::digest(b"A")),
+            &LocalWriteOptions::new(LocalWriteMode::CreateOrReplace),
+        )
+        .expect("conditional writer should open");
+    writer.write_fully(b"B").expect("candidate should accept bytes");
+
+    let failure = writer
+        .commit()
+        .expect_err("sharing lock should prevent ReplaceFileW");
+
+    assert_eq!(std::fs::read(&target).expect("target should remain"), b"A");
+    assert_eq!(
+        failure.publication(),
+        qubit_local_files::outcome::LocalConditionalPublicationState::NotPublished
+    );
+    assert_eq!(conditional::read_candidate(&failure), b"B");
+    assert!(
+        failure.recovery_files().iter().all(|file| file.role() != LocalRecoveryFileRole::Displaced),
+        "no backup should be retained when ReplaceFileW did not create one"
+    );
+    assert!(
+        std::fs::read_dir(directory.path())
+            .expect("fixture parent should remain readable")
+            .filter_map(Result::ok)
+            .all(|entry| !entry.file_type().is_ok_and(|kind| kind.is_dir())),
+        "empty recovery container should be removed"
+    );
+    drop(sharing_lock);
+}
+
 #[test]
 #[cfg(windows)]
 fn required_parent_sync_unavailability_fails_before_publication() {

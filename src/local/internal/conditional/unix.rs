@@ -10,6 +10,7 @@
 mod install;
 mod metadata;
 mod namespace;
+mod private_entry_guard;
 mod recovery;
 
 #[cfg(test)]
@@ -24,6 +25,7 @@ use std::os::unix::fs::MetadataExt;
 use std::path::Path;
 
 use namespace::Namespace;
+use private_entry_guard::PrivateEntryGuard;
 
 use super::ConditionalBackend;
 use super::ConditionalEntry;
@@ -82,9 +84,21 @@ impl UnixConditionalBackend {
 
     fn open(namespace: Namespace) -> io::Result<Self> {
         let (candidate_name, candidate) = namespace.create_private("candidate")?;
-        let metadata = candidate.metadata()?;
+        let mut guard = match PrivateEntryGuard::new(&namespace, candidate_name.clone(), &candidate) {
+            Ok(guard) => guard,
+            Err((primary, mut guard)) => return Err(guard.finish_with(primary)),
+        };
+        let metadata = match candidate.metadata() {
+            Ok(metadata) => metadata,
+            Err(primary) => return Err(guard.finish_with(primary)),
+        };
         let candidate_identity = (metadata.dev(), metadata.ino());
-        let candidate_entry = namespace.entry(LocalRecoveryFileRole::StagedCandidate, candidate_name.clone(), None)?;
+        let candidate_entry = match namespace.entry(LocalRecoveryFileRole::StagedCandidate, candidate_name.clone(), None) {
+            Ok(entry) => entry,
+            Err(primary) => return Err(guard.finish_with(primary)),
+        };
+        guard.disarm();
+        drop(guard);
         Ok(Self {
             namespace,
             candidate_name,
@@ -335,9 +349,21 @@ impl ConditionalBackend for UnixConditionalBackend {
 
     fn create_candidate_copy(&mut self) -> io::Result<ConditionalEntry> {
         let (name, mut copy) = self.namespace.create_private("candidate-copy")?;
-        let entry = self.entry(LocalRecoveryFileRole::StagedCandidate, name.clone())?;
-        self.recovery_entries
-            .push(self.entry(LocalRecoveryFileRole::StagedCandidate, name.clone())?);
+        let mut guard = match PrivateEntryGuard::new(&self.namespace, name.clone(), &copy) {
+            Ok(guard) => guard,
+            Err((primary, mut guard)) => return Err(guard.finish_with(primary)),
+        };
+        let entry = match self.entry(LocalRecoveryFileRole::StagedCandidate, name.clone()) {
+            Ok(entry) => entry,
+            Err(primary) => return Err(guard.finish_with(primary)),
+        };
+        let recovery_entry = match self.entry(LocalRecoveryFileRole::StagedCandidate, name.clone()) {
+            Ok(entry) => entry,
+            Err(primary) => return Err(guard.finish_with(primary)),
+        };
+        self.recovery_entries.push(recovery_entry);
+        guard.disarm();
+        drop(guard);
         let mut reader = self.namespace.open_name(&self.candidate_name)?;
         let mut buffer = [0_u8; COPY_BUFFER_SIZE];
         loop {
@@ -537,6 +563,7 @@ impl ConditionalBackend for UnixConditionalBackend {
         }
         std::mem::take(&mut self.recovery_entries)
     }
+    #[cfg(any(test, all(feature = "digest", feature = "test-support")))]
     fn set_hooks(&mut self, hooks: ConditionalHooks) {
         self.hooks = hooks;
     }

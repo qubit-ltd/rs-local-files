@@ -186,6 +186,27 @@ impl Namespace {
             let container = parent.join(dirname);
             match fs::create_dir(&container) {
                 Ok(()) => {
+                    let handle = match open_host_directory_no_reparse(&container) {
+                        Ok(handle) => handle,
+                        Err(primary) => {
+                            let cleanup = fs::remove_dir(&container);
+                            return Err(match cleanup {
+                                Ok(()) => primary,
+                                Err(cleanup) => io::Error::new(
+                                    primary.kind(),
+                                    format!(
+                                        "{}; empty recovery container cleanup failed at {}: {}",
+                                        primary,
+                                        container.display(),
+                                        cleanup
+                                    ),
+                                ),
+                            });
+                        }
+                    };
+                    self.recovery_parents
+                        .borrow_mut()
+                        .push((container.clone(), handle));
                     return Ok((container.clone(), container.join(backup_name)));
                 }
                 Err(error) if error.kind() == ErrorKind::AlreadyExists => continue,

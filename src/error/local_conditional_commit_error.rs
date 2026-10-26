@@ -65,6 +65,21 @@ impl LocalConditionalCommitError {
         self
     }
 
+    /// Adds the operation's captured current directory when the native error
+    /// does not already carry one. The native source and recovery ownership
+    /// are preserved.
+    pub(crate) fn with_fallback_current_directory(
+        mut self,
+        current_directory: Option<std::path::PathBuf>,
+    ) -> Self {
+        if self.error.current_directory().is_none()
+            && let Some(current_directory) = current_directory
+        {
+            self.error = self.error.with_current_directory(current_directory);
+        }
+        self
+    }
+
     /// Returns the structured local filesystem error, including its native
     /// source.
     pub const fn error(&self) -> &LocalFileError {
@@ -152,10 +167,16 @@ mod conditional_types_tests {
         let local_error = Error::source(&error).expect("structured local error source");
         let native_error = Error::source(local_error).expect("native I/O error source");
         assert_eq!(
-            native_error.downcast_ref::<io::Error>().map(io::Error::kind),
+            native_error
+                .downcast_ref::<io::Error>()
+                .map(io::Error::kind),
             Some(io::ErrorKind::PermissionDenied)
         );
-        assert!(error.to_string().contains("conditional commit failed at Publish"));
+        assert!(
+            error
+                .to_string()
+                .contains("conditional commit failed at Publish")
+        );
         assert!(error.source().is_some());
         assert!(error.into_recovery_files().is_empty());
     }

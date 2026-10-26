@@ -7,6 +7,7 @@
 // =============================================================================
 
 use std::io;
+use std::path::PathBuf;
 
 use digest::Digest;
 use digest::Output;
@@ -44,11 +45,29 @@ use crate::recovery::LocalRecoveryFileRole;
 /// synchronization completed; cleanup failures are returned alongside any
 /// retained files and do not change that success. This protocol does not
 /// provide a strict compare-and-swap guarantee.
+#[cfg(test)]
 pub(crate) fn commit_conditional<D, B>(
+    backend: B,
+    precondition: LocalWritePrecondition<Output<D>>,
+    options: LocalWriteOptions,
+    bytes_written: usize,
+) -> Result<LocalConditionalWriteOutcome<D>, LocalConditionalCommitError>
+where
+    D: Digest,
+    B: ConditionalBackend,
+{
+    commit_conditional_with_directory(backend, precondition, options, bytes_written, None)
+}
+
+/// Executes the commit protocol and binds fallback diagnostics to the resolver
+/// snapshot captured when the public writer was opened.
+#[allow(clippy::result_large_err)]
+pub(crate) fn commit_conditional_with_directory<D, B>(
     mut backend: B,
     precondition: LocalWritePrecondition<Output<D>>,
     options: LocalWriteOptions,
     bytes_written: usize,
+    current_directory: Option<PathBuf>,
 ) -> Result<LocalConditionalWriteOutcome<D>, LocalConditionalCommitError>
 where
     D: Digest,
@@ -542,5 +561,6 @@ where
         outcome,
         retained_files,
         cleanup_errors,
+        current_directory,
     ))
 }

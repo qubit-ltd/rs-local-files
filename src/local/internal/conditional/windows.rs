@@ -132,17 +132,26 @@ fn receipt_publication(
 fn open_verified_candidate_entry(
     namespace: &Namespace,
     candidate_name: &OsStr,
-    candidate_file: &File,
+    candidate_file: &mut File,
 ) -> io::Result<(ConditionalEntry, FileIdentity)> {
-    let mut guard = PrivateEntryGuard::new(namespace, candidate_file)?;
-    let candidate_identity = file_identity(candidate_file)?;
-    let candidate_entry = open_verified_private_entry(
+    let mut guard = match PrivateEntryGuard::new(namespace, candidate_name, candidate_file) {
+        Ok(guard) => guard,
+        Err((primary, mut guard)) => return Err(guard.finish_with(primary)),
+    };
+    let candidate_identity = match file_identity(guard.file) {
+        Ok(identity) => identity,
+        Err(primary) => return Err(guard.finish_with(primary)),
+    };
+    let candidate_entry = match open_verified_private_entry(
         namespace,
         LocalRecoveryFileRole::StagedCandidate,
         candidate_name,
-        candidate_file,
+        guard.file,
         candidate_identity,
-    )?;
+    ) {
+        Ok(entry) => entry,
+        Err(primary) => return Err(guard.finish_with(primary)),
+    };
     guard.disarm();
     Ok((candidate_entry, candidate_identity))
 }
@@ -168,37 +177,50 @@ fn open_verified_private_entry(
 #[derive(Debug)]
 struct PrivateEntryGuard<'a> {
     namespace: &'a Namespace,
-    _file: File,
+    file: &'a mut File,
+    path: PathBuf,
     identity: Option<FileIdentity>,
     armed: bool,
 }
 
 impl<'a> PrivateEntryGuard<'a> {
-    fn new(namespace: &'a Namespace, file: &File) -> io::Result<Self> {
-        let identity = match file_identity(file) {
-            Ok(identity) => identity,
-            Err(error) => {
-                let _ = namespace.delete_created_private(file, None);
-                return Err(error);
-            }
-        };
-        let retained = match file.try_clone() {
-            Ok(retained) => retained,
-            Err(error) => {
-                let _ = namespace.delete_created_private(file, Some(identity));
-                return Err(error);
-            }
-        };
-        Ok(Self {
+    fn new(namespace: &'a Namespace, name: &OsStr, file: &'a mut File) -> Result<Self, (io::Error, Self)> {
+        let guard = Self {
             namespace,
-            _file: retained,
-            identity: Some(identity),
+            file,
+            path: namespace.child_path(name),
+            identity: None,
             armed: true,
-        })
+        };
+        match file_identity(guard.file) {
+            Ok(identity) => Ok(Self { identity: Some(identity), ..guard }),
+            Err(error) => Err((error, guard)),
+        }
     }
 
     fn disarm(&mut self) {
         self.armed = false;
+    }
+
+    fn finish_with(&mut self, primary: io::Error) -> io::Error {
+        let cleanup = self.cleanup();
+        if cleanup.is_ok() {
+            self.disarm();
+        }
+        match cleanup {
+            Ok(()) => primary,
+            Err(cleanup) => {
+                let kind = primary.kind();
+                io::Error::new(kind, PrivateEntrySetupError { primary, cleanup, path: self.path.clone() })
+            }
+        }
+    }
+
+    fn cleanup(&self) -> io::Result<()> {
+        let Some(identity) = self.identity else {
+            return Err(io::Error::new(io::ErrorKind::InvalidData, "private entry identity unavailable"));
+        };
+        self.namespace.delete_created_private(self.file, Some(identity))
     }
 }
 
@@ -207,10 +229,26 @@ impl Drop for PrivateEntryGuard<'_> {
         if !self.armed {
             return;
         }
-        let Some(identity) = self.identity else {
-            return;
-        };
-        let _ = self.namespace.delete_created_private(&self._file, Some(identity));
+        let _ = self.cleanup();
+    }
+}
+
+#[derive(Debug)]
+struct PrivateEntrySetupError {
+    primary: io::Error,
+    cleanup: io::Error,
+    path: PathBuf,
+}
+
+impl fmt::Display for PrivateEntrySetupError {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(formatter, "{}; private-entry cleanup failed at {}: {}", self.primary, self.path.display(), self.cleanup)
+    }
+}
+
+impl std::error::Error for PrivateEntrySetupError {
+    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+        Some(&self.primary)
     }
 }
 
@@ -248,9 +286,9 @@ impl WindowsConditionalBackend {
     }
 
     fn open(namespace: Namespace, options: &LocalWriteOptions) -> io::Result<Self> {
-        let (candidate_name, candidate_file) = namespace.create_private("candidate")?;
+        let (candidate_name, mut candidate_file) = namespace.create_private("candidate")?;
         let (candidate_entry, candidate_identity) =
-            open_verified_candidate_entry(&namespace, &candidate_name, &candidate_file)?;
+            open_verified_candidate_entry(&namespace, &candidate_name, &mut candidate_file)?;
         Ok(Self {
             namespace,
             candidate_name,
@@ -466,10 +504,11 @@ impl WindowsConditionalBackend {
         let candidate_path = match self.namespace.private_file_path(&self.candidate_name) {
             Ok(path) => path,
             Err(error) => {
-                return self.collect_native_receipt(Some(error), Some(&container), Some(&backup));
+                let attempt = self.collect_native_receipt(Some(error), Some(&container), Some(&backup));
+                return self.cleanup_empty_container(container, backup, attempt);
             }
         };
-        match install::replace_with_backup(self.namespace.target_path(), &candidate_path, &backup) {
+        let attempt = match install::replace_with_backup(self.namespace.target_path(), &candidate_path, &backup) {
             Ok(()) => {
                 let mut attempt = self.collect_native_receipt(None, Some(&container), Some(&backup));
                 if attempt.publication != LocalConditionalPublicationState::Published || attempt.displaced.is_empty() {
@@ -482,7 +521,30 @@ impl WindowsConditionalBackend {
                 attempt
             }
             Err(error) => self.collect_native_receipt(Some(error), Some(&container), Some(&backup)),
+        };
+        self.cleanup_empty_container(container, backup, attempt)
+    }
+
+    fn cleanup_empty_container(
+        &mut self,
+        container: PathBuf,
+        backup: PathBuf,
+        mut attempt: NativeAttempt,
+    ) -> NativeAttempt {
+        if attempt.displaced.iter().any(|entry| entry.namespace_path() == backup) {
+            return attempt;
         }
+        match self.namespace.remove_container(&container) {
+            Ok(()) => self.recovery_containers.retain(|path| path != &container),
+            Err(cleanup) => {
+                let error = io::Error::new(
+                    cleanup.kind(),
+                    format!("empty recovery container cleanup failed at {}: {}", container.display(), cleanup),
+                );
+                attempt.error = combine_observation_error(attempt.error, Some(error));
+            }
+        }
+        attempt
     }
 
     fn retain_original_candidate(&mut self) {
@@ -543,7 +605,10 @@ impl ConditionalBackend for WindowsConditionalBackend {
                 return Err(error);
             }
         };
-        let mut guard = PrivateEntryGuard::new(&self.namespace, &destination)?;
+        let mut guard = match PrivateEntryGuard::new(&self.namespace, &name, &mut destination) {
+            Ok(guard) => guard,
+            Err((primary, mut guard)) => return Err(guard.finish_with(primary)),
+        };
         let result = (|| {
             let source = self
                 .candidate_file
@@ -557,27 +622,28 @@ impl ConditionalBackend for WindowsConditionalBackend {
                 if read == 0 {
                     break;
                 }
-                destination.write_all(&buffer[..read])?;
+                guard.file.write_all(&buffer[..read])?;
             }
-            Write::flush(&mut destination)?;
-            let identity = file_identity(&destination)?;
+            Write::flush(guard.file)?;
+            let identity = file_identity(guard.file)?;
             let entry = open_verified_private_entry(
                 &self.namespace,
                 LocalRecoveryFileRole::StagedCandidate,
                 &name,
-                &destination,
+                guard.file,
                 identity,
             )?;
             Ok((entry, identity))
         })();
         match result {
             Ok((entry, identity)) => {
-                self.candidate_copy = Some((name, identity));
                 guard.disarm();
                 drop(guard);
+                self.candidate_copy = Some((name, identity));
                 Ok(entry)
             }
             Err(error) => {
+                let error = guard.finish_with(error);
                 drop(guard);
                 self.retain_original_candidate();
                 Err(error)
@@ -776,7 +842,8 @@ impl ConditionalBackend for WindowsConditionalBackend {
             }
         };
         if let Err(error) = self.checkpoint_action(ConditionalPoint::RollbackExchange) {
-            return self.collect_rollback_receipt(Some(error), expected_restored, &container, &backup);
+            let attempt = self.collect_rollback_receipt(Some(error), expected_restored, &container, &backup);
+            return self.cleanup_empty_container(container, backup, attempt);
         }
         match install::replace_with_backup(self.namespace.target_path(), displaced_path, &backup) {
             Ok(()) => {
@@ -803,7 +870,7 @@ impl ConditionalBackend for WindowsConditionalBackend {
                 let complete = observation_error.is_none()
                     && restored_identity == Some(expected_restored)
                     && replacement_displaced.is_some();
-                NativeAttempt {
+                let attempt = NativeAttempt {
                     publication_method: replace_with_backup_publication_method(),
                     error: observation_error.or_else(|| {
                         (!complete).then(|| {
@@ -820,11 +887,18 @@ impl ConditionalBackend for WindowsConditionalBackend {
                     },
                     installed,
                     displaced: replacement_displaced.into_iter().collect(),
-                }
+                };
+                self.cleanup_empty_container(container, backup, attempt)
             }
             Err(error) => {
                 let hook_error = self.checkpoint_action(ConditionalPoint::AfterRollbackSyscall).err();
-                self.collect_rollback_receipt(Some(error).or(hook_error), expected_restored, &container, &backup)
+                let attempt = self.collect_rollback_receipt(
+                    Some(error).or(hook_error),
+                    expected_restored,
+                    &container,
+                    &backup,
+                );
+                self.cleanup_empty_container(container, backup, attempt)
             }
         }
     }
@@ -866,6 +940,7 @@ impl ConditionalBackend for WindowsConditionalBackend {
         }
         std::mem::take(&mut self.recovery_entries)
     }
+    #[cfg(any(test, all(feature = "digest", feature = "test-support")))]
     fn set_hooks(&mut self, hooks: ConditionalHooks) {
         self.hooks = hooks;
     }

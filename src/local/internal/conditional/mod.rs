@@ -36,7 +36,9 @@ pub(crate) use backend::ConditionalBackend;
 pub(crate) use backend::ConditionalHookAction;
 pub(crate) use backend::ConditionalPoint;
 pub(crate) use backend::NativeAttempt;
+#[cfg(test)]
 pub(crate) use commit::commit_conditional;
+pub(crate) use commit::commit_conditional_with_directory;
 pub(crate) use entry::ConditionalEntry;
 pub(crate) use entry::RecoveryAccess;
 pub(crate) use hooks::ConditionalHooks;

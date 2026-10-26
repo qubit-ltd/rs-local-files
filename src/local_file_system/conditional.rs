@@ -107,7 +107,11 @@ impl LocalFileSystem {
                 resolved.namespace_absolute(),
                 None,
                 options,
-            )?,
+            )
+            .map_err(|error| match resolver.current_directory() {
+                Some(directory) => error.with_current_directory(directory.to_path_buf()),
+                None => error,
+            })?,
         };
         #[cfg(all(feature = "digest", feature = "test-support"))]
         let mut backend = backend;
@@ -122,6 +126,7 @@ impl LocalFileSystem {
             } else {
                 None
             },
+            resolver.current_directory().map(Path::to_path_buf),
             backend,
             precondition,
             *options,

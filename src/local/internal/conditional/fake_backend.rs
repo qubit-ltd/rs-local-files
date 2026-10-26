@@ -493,6 +493,7 @@ impl ConditionalBackend for FakeBackend {
     fn take_recovery_entries(&mut self) -> Vec<ConditionalEntry> {
         std::mem::take(self.recovery_entries.get_mut())
     }
+    #[cfg(any(test, all(feature = "digest", feature = "test-support")))]
     fn set_hooks(&mut self, hooks: ConditionalHooks) {
         self.hooks = hooks;
     }

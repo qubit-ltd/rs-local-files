@@ -471,9 +471,20 @@ fn conditional_windows_sharing_conflict_preserves_candidate_and_target() {
     .expect_err("a handle denying delete sharing must block ReplaceFileW");
     drop(blocker);
     assert_eq!(fs::read(&target).expect("old target should remain"), b"A");
+    assert_eq!(failure.publication(), LocalConditionalPublicationState::NotPublished);
     assert!(
         failure.candidate().is_some(),
         "candidate copy must survive sharing failure"
+    );
+    assert!(
+        fs::read_dir(directory.path())
+            .expect("fixture parent should remain readable")
+            .filter_map(Result::ok)
+            .all(|entry| {
+                entry.file_type().is_ok_and(|kind| !kind.is_dir())
+                    || !entry.file_name().to_string_lossy().starts_with(".qubit-conditional-recovery-")
+            }),
+        "empty recovery container should be removed when ReplaceFileW makes no backup"
     );
 }
 
@@ -616,4 +627,63 @@ fn conditional_windows_recovery_container_collision_does_not_reuse_existing_dire
         io::ErrorKind::AlreadyExists
     );
     assert_eq!(fs::read(marker).expect("existing container data must remain"), b"keep");
+}
+
+#[test]
+fn conditional_windows_recovery_container_cleanup_rejects_replacement_identity() {
+    let directory = tempfile::tempdir().expect("fixture directory should be created");
+    let target = directory.path().join("target");
+    let namespace =
+        Namespace::open_host(&target, &options(LocalWriteMode::CreateOrReplace)).expect("Host namespace should open");
+    let (container, _) = namespace.backup_container().expect("recovery container should be created");
+    let moved = directory.path().join("original-container");
+    fs::rename(&container, &moved).expect("created container should be moved by fixture");
+    fs::create_dir(&container).expect("replacement container should be created");
+    let marker = container.join("user-data");
+    fs::write(&marker, b"keep").expect("replacement content should be written");
+
+    let error = namespace
+        .remove_container(&container)
+        .expect_err("replacement identity must not be deleted");
+
+    assert_eq!(error.kind(), io::ErrorKind::InvalidData);
+    assert_eq!(fs::read(marker).expect("replacement data should remain"), b"keep");
+}
+
+#[test]
+fn conditional_windows_recovery_container_cleanup_refuses_non_empty_directory() {
+    let directory = tempfile::tempdir().expect("fixture directory should be created");
+    let target = directory.path().join("target");
+    let namespace =
+        Namespace::open_host(&target, &options(LocalWriteMode::CreateOrReplace)).expect("Host namespace should open");
+    let (container, _) = namespace.backup_container().expect("recovery container should be created");
+    let marker = container.join("user-data");
+    fs::write(&marker, b"keep").expect("container data should be written");
+
+    let error = namespace
+        .remove_container(&container)
+        .expect_err("non-empty recovery directory must not be removed");
+
+    assert_ne!(error.kind(), io::ErrorKind::NotFound);
+    assert_eq!(fs::read(marker).expect("container data should remain"), b"keep");
+}
+
+#[test]
+fn conditional_windows_failed_empty_container_cleanup_reports_its_path() {
+    let directory = tempfile::tempdir().expect("fixture directory should be created");
+    let target = directory.path().join("target");
+    fs::write(&target, b"A").expect("target should be written");
+    let mut backend = WindowsConditionalBackend::open_host(&target, &options(LocalWriteMode::CreateOrReplace))
+        .expect("Host candidate should open");
+    put(&mut backend, b"B");
+    let (container, backup) = backend.make_backup().expect("recovery container should be created");
+    let marker = container.join("unexpected");
+    fs::write(&marker, b"keep").expect("unexpected content should be written");
+    let attempt = backend.candidate_receipt(io::Error::other("injected ReplaceFileW failure"));
+
+    let attempt = backend.cleanup_empty_container(container.clone(), backup, attempt);
+
+    let error = attempt.error.expect("cleanup failure should be reported");
+    assert!(error.to_string().contains(&container.display().to_string()));
+    assert_eq!(fs::read(marker).expect("unexpected content should remain"), b"keep");
 }
