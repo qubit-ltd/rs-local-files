@@ -69,6 +69,37 @@ fn windows_file_identity(path: &std::path::Path) -> (u32, u64) {
     (information.dwVolumeSerialNumber, file_index)
 }
 
+#[cfg(windows)]
+fn mutate_displaced_copy(parent: &std::path::Path, installed: &std::path::Path) -> std::io::Result<()> {
+    fn visit(directory: &std::path::Path, installed: &std::path::Path) -> std::io::Result<bool> {
+        for entry in std::fs::read_dir(directory)? {
+            let entry = entry?;
+            let path = entry.path();
+            if path == installed {
+                continue;
+            }
+            if entry.file_type()?.is_dir() {
+                if visit(&path, installed)? {
+                    return Ok(true);
+                }
+            } else if entry.file_type()?.is_file() && std::fs::read(&path).ok().as_deref() == Some(b"A") {
+                std::fs::write(path, b"C")?;
+                return Ok(true);
+            }
+        }
+        Ok(false)
+    }
+
+    if visit(parent, installed)? {
+        Ok(())
+    } else {
+        Err(std::io::Error::new(
+            std::io::ErrorKind::NotFound,
+            "displaced A not found",
+        ))
+    }
+}
+
 #[cfg(unix)]
 #[test]
 fn rollback_backend_precheck_observes_competitor_without_exchange() {
@@ -240,19 +271,7 @@ fn windows_rollback_exchange_receipts_track_restored_and_competing_identities() 
     let filesystem = conditional::host()
         .with_conditional_test_hooks(TestConditionalHooks::once(
             TestConditionalPoint::BeforeVerifyDisplaced,
-            move || {
-                for entry in std::fs::read_dir(parent)? {
-                    let entry = entry?;
-                    if entry.path() != installed_path && std::fs::read(entry.path()).ok().as_deref() == Some(b"A") {
-                        std::fs::write(entry.path(), b"C")?;
-                        return Ok(());
-                    }
-                }
-                Err(std::io::Error::new(
-                    std::io::ErrorKind::NotFound,
-                    "displaced A not found",
-                ))
-            },
+            move || mutate_displaced_copy(&parent, &installed_path),
         ))
         .with_conditional_test_hooks(TestConditionalHooks::once(
             TestConditionalPoint::BeforeRollbackExchange,
@@ -334,19 +353,7 @@ fn windows_rollback_without_target_replacement_restores_original_identity() {
     let installed_path = path.clone();
     let filesystem = conditional::host().with_conditional_test_hooks(TestConditionalHooks::once(
         TestConditionalPoint::BeforeVerifyDisplaced,
-        move || {
-            for entry in std::fs::read_dir(parent)? {
-                let entry = entry?;
-                if entry.path() != installed_path && std::fs::read(entry.path()).ok().as_deref() == Some(b"A") {
-                    std::fs::write(entry.path(), b"C")?;
-                    return Ok(());
-                }
-            }
-            Err(std::io::Error::new(
-                std::io::ErrorKind::NotFound,
-                "displaced A not found",
-            ))
-        },
+        move || mutate_displaced_copy(&parent, &installed_path),
     ));
     let mut writer = filesystem
         .open_conditional_writer::<Sha256>(
