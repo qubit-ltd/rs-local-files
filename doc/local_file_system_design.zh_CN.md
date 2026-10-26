@@ -1062,7 +1062,9 @@ Windows Rooted staged writer 若在最终安装前的 identity 复核中发现�
 空间同步不受支持或同步失败，操作返回 `Err`，并由发布状态和恢复文件说明已经观察到的
 结果。`Preferred` 会尝试同步，但可以在 `write_outcome()` 报告 `durable = false` 时
 仍然成功。`NotRequired` 不提出该要求。成功 outcome 表示发布和所有必需同步均已完成，
-即使后续清理报告了遗留文件也是如此。失败时用 `reason()`、`stage()`、`publication()`
+即使后续清理报告了遗留文件也是如此。清理成功路径中，`NotRequired` 会跳过命名空间同步；
+`Preferred` 和 `Required` 会尝试同步，同步失败通过 `cleanup_errors()` 报告，不会撤销发布或改写
+耐久性结果。失败时用 `reason()`、`stage()`、`publication()`
 判断观测结果；若已保留经校验的 B 副本，可通过 `candidate()` 访问。
 `LocalRecoveryFile::open_reader()` 会在读取前重新核对恢复文件身份。销毁恢复句柄不会
 删除文件。打开中的 writer 调用 `abort()` 或离开作用域会取消发布并尝试删除未发布资源；
@@ -1111,7 +1113,9 @@ Iterator<Item = LocalResult<LocalDirectoryEntry>>
 Host 列举即使通过符号链接访问了另一个物理目录，公开 entry path 仍保留请求的 namespace
 root，diagnostic path 才可记录实际访问位置。深度限制为零时不会读取子项；当深度、条目数和
 seen-name 字节预算均为零时，两种后端都返回空列表，不读取子项，也不扣减 seen-name 预算。
-Host walker 在跳过已见名称期间及下一次目录读取前检查 deadline；协作式期限不能中断已阻塞的原生读取。
+Host walker 在跳过已见名称期间及下一次目录读取前检查 deadline。Rooted 列表也会在路径和符号链接
+解析期间（包括每次展开）检查期限，并复用已解析的起始目录。协作式期限不能中断已阻塞的原生操作；
+未配置期限时，Rooted 解析不会施加隐藏的符号链接展开上限。
 list 的起始目录不扣减条目预算，只有返回的子项才计费。因此条目预算为零时不会返回子项，
 深度限制为零时同样返回空列表。
 Rooted 和 Host 的 tree copy 都按需推进 directory reader；受限复制允许在仍持有 reader 预算时预读一个子项，不承诺条目排序，也不会

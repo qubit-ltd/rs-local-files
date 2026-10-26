@@ -278,6 +278,10 @@ no-overwrite 安装时才可用。`Content(digest)` 必须搭配 `CreateOrReplac
 无法满足就会返回 `Err`。耐久性设为 `Preferred` 时，若同步不可用，结果会报告较弱的
 耐久性；原子性要求不会降级为普通覆盖。
 
+默认 `NotRequired` 会跳过清理阶段的命名空间同步。`Preferred` 和 `Required` 仍会在删除
+临时内容及 candidate 副本后尝试同步；清理同步失败会通过成功结果的 `cleanup_errors()` 报告，
+不会撤销已发布文件，也不会改写其耐久性结果。
+
 成功表示发布及必需的同步已完成。之后库会清理临时内容和独立 candidate 副本；若
 清理失败，成功 outcome 仍会通过 `cleanup_errors()`、`retained_files()` 告知调用方。
 失败时检查 `reason()`、`stage()`、`publication()`；保留错误对象，或用
@@ -390,8 +394,9 @@ Windows 复制链接会保留源链接的文件/目录类型，包括悬空链�
 drop walker 只释放句柄。Host 列举即使跟随符号链接进入另一个物理目录，也会保留请求的
 namespace 路径作为公开 root；可选的 diagnostic path 仍可记录实际访问的物理路径。
 `max_depth` 为零时结果为空，并且不读取目录子项；深度、条目数和 seen-name 字节预算都为零时，
-同样不会读取子项。Host walker 在跳过已见名称期间及下一次目录读取前检查 deadline；这是协作式
-期限，不能中断已经阻塞的原生读取。
+同样不会读取子项。Host walker 在跳过已见名称期间及下一次目录读取前检查 deadline。Rooted 列表也会在
+路径与符号链接解析期间（包括每次展开）检查期限，并复用已解析的起始目录。这些期限都是协作式的，
+不能中断已经阻塞的原生操作。未配置期限时，Rooted 解析不会施加隐藏的符号链接展开上限。
 不允许向下遍历时，最终链接按自身 metadata 返回，不会先解析目标；Host 非递归列表因此会
 保留悬空链接条目。递归跟随目录链接时，悬空或越界链接会产生错误。`Continue` 会返回局部子目录
 打开错误并继续安全的同层条目；全局预算或 deadline 耗尽仍会终止遍历。

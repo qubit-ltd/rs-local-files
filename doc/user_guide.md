@@ -313,6 +313,11 @@ entry. `Content(digest)` requires `CreateOrReplace`; `Append` is invalid.
 report weaker durability when synchronization is unavailable; it never downgrades
 the requested atomic publication to an ordinary overwrite.
 
+`NotRequired` skips the cleanup namespace sync. `Preferred` and `Required` still
+attempt that sync after removing temporary content and the candidate copy; a
+cleanup sync failure is reported through `cleanup_errors()` on the successful
+outcome and does not undo the published file or change its durability result.
+
 On success, publication and required synchronization completed. Cleanup then
 removes temporary content and the independent candidate copy; cleanup errors and
 retained paths remain visible on the successful outcome. On error, inspect
@@ -464,7 +469,11 @@ that physical access path. A zero `max_depth` produces no entries and does not
 read directory children; the same empty traversal applies when the depth,
 entry, and seen-name-byte budgets are all zero. The deadline is checked while
 the Host walker skips previously seen names and before its next directory
-read; it remains cooperative and cannot interrupt a blocked native read.
+read. Rooted listing also checks it during path and symbolic-link resolution,
+including each expansion step, and reuses the resolved starting directory.
+These deadlines are cooperative: they cannot interrupt a blocked native
+operation. Without a configured deadline, Rooted resolution has no hidden
+symbolic-link expansion limit.
 
 Temporary files and directories own cleanup according to current source
 eligibility. Each resource lives in

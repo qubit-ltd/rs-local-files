@@ -792,7 +792,10 @@ and recovery files describing what was observed. `Preferred` attempts
 synchronization but may return success with `write_outcome()` reporting
 `durable = false`. `NotRequired` skips that requirement. A successful outcome
 means publication and all required synchronization finished, even if later
-cleanup reports residual files. On error, `reason()`, `stage()`, and
+cleanup reports residual files. During successful cleanup, `NotRequired` skips
+the namespace sync; `Preferred` and `Required` attempt it, and a sync failure is
+reported in `cleanup_errors()` without undoing publication or changing the
+durability result. On error, `reason()`, `stage()`, and
 `publication()` describe the observed failure; `candidate()` provides the
 verified B copy when retained. `LocalRecoveryFile::open_reader()` verifies the
 retained entry before opening it. Dropping recovery handles never deletes the
@@ -851,8 +854,12 @@ the physical access location. A zero depth limit yields no children and does
 not read the directory; with depth, entry, and seen-name-byte limits all zero,
 both backends return an empty listing without child reads or seen-name charges.
 The Host walker checks its deadline while skipping seen names and before its
-next directory read; the cooperative deadline cannot interrupt a blocked native
-read. Listing does not charge the starting directory against the entry budget;
+next directory read. Rooted listing also checks the deadline during path and
+symbolic-link resolution, including each expansion step, and reuses its
+resolved starting directory. A deadline remains cooperative and cannot
+interrupt one blocked native operation. Without a configured deadline,
+Rooted resolution has no hidden symbolic-link expansion limit. Listing does
+not charge the starting directory against the entry budget;
 only yielded child entries are charged. A zero entry budget therefore yields no
 children, including when the depth limit is zero. Rooted and Host tree copies advance directory readers lazily. A bounded copy may inspect one child ahead while retaining the
 reader permit, does not promise entry ordering, and never turns the native
