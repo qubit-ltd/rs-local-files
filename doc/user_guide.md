@@ -268,7 +268,8 @@ use qubit_local_files::policy::LocalSymlinkPolicy;
 use sha2::{Digest, Sha256};
 
 let directory = tempfile::tempdir()?;
-let path = directory.path().join("document.txt");
+// Reject also applies to links in the system temporary-directory path.
+let path = directory.path().canonicalize()?.join("document.txt");
 std::fs::write(&path, b"A")?;
 let mut filesystem = LocalFileSystem::host()?;
 filesystem.set_symlink_policy(LocalSymlinkPolicy::Reject)?;
