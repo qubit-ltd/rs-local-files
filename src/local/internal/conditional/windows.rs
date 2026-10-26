@@ -428,38 +428,44 @@ impl WindowsConditionalBackend {
     fn collect_rollback_receipt(
         &self,
         error: Option<io::Error>,
-        expected_restored: FileIdentity,
-        backup_container: &Path,
-        backup_path: &Path,
+        expected_restored: Option<FileIdentity>,
+        backup_paths: Option<(&Path, &Path)>,
     ) -> NativeAttempt {
         let _failure_class = error
             .as_ref()
             .map(|source| classify_replace_failure(source.raw_os_error()));
         let (installed, mut observation_error) =
             observe_with_error(self.entry_if_present(LocalRecoveryFileRole::Displaced, self.namespace.target_name()));
-        let (backup, backup_error) = observe_with_error(observe_optional_entry(|| {
-            self.namespace
-                .entry_in_container(LocalRecoveryFileRole::RollbackDisplaced, backup_container, backup_path)
-        }));
+        let (backup, backup_error) = match backup_paths {
+            Some((container, path)) => observe_with_error(observe_optional_entry(|| {
+                self.namespace
+                    .entry_in_container(LocalRecoveryFileRole::RollbackDisplaced, container, path)
+            })),
+            None => (None, None),
+        };
         observation_error = observation_error.or(backup_error);
         let (installed_identity, identity_error) = match installed.as_ref() {
-            Some(entry) => match entry
-                .open_reader()
-                .map_err(io::Error::other)
-                .and_then(|reader| file_identity(reader.as_file()))
-            {
-                Ok(identity) => (Some(identity), None),
-                Err(error) => (None, Some(error)),
-            },
+            Some(entry) => {
+                match entry
+                    .open_reader()
+                    .map_err(io::Error::other)
+                    .and_then(|reader| file_identity(reader.as_file()))
+                {
+                    Ok(identity) => (Some(identity), None),
+                    Err(error) => (None, Some(error)),
+                }
+            }
             None => (None, None),
         };
         observation_error = observation_error.or(identity_error);
-        let publication = if observation_error.is_some() {
-            LocalConditionalPublicationState::Indeterminate
-        } else if installed_identity == Some(expected_restored) {
+        // A failed reverse operation cannot undo the earlier publication fact.
+        // Only a verified restoration or the candidate's current target identity
+        // establishes a definite state; other observations remain indeterminate.
+        let publication = if installed_identity == Some(self.candidate_identity) {
+            LocalConditionalPublicationState::Published
+        } else if observation_error.is_none() && expected_restored.is_some() && installed_identity == expected_restored
+        {
             LocalConditionalPublicationState::Restored
-        } else if installed_identity == Some(self.candidate_identity) && backup.is_none() {
-            LocalConditionalPublicationState::NotPublished
         } else {
             LocalConditionalPublicationState::Indeterminate
         };
@@ -815,25 +821,17 @@ impl ConditionalBackend for WindowsConditionalBackend {
 
     fn rollback(&mut self, displaced: &ConditionalEntry) -> NativeAttempt {
         if self.namespace.is_rooted() || self.options.metadata_policy() != LocalWriteMetadataPolicy::PreserveExisting {
-            return NativeAttempt {
-                publication_method: replace_with_backup_publication_method(),
-                error: Some(io::Error::new(
+            return self.collect_rollback_receipt(
+                Some(io::Error::new(
                     io::ErrorKind::Unsupported,
                     "Windows conditional rollback is unsupported for this namespace",
                 )),
-                publication: LocalConditionalPublicationState::NotPublished,
-                installed: None,
-                displaced: Vec::new(),
-            };
+                None,
+                None,
+            );
         }
         if let Err(error) = self.namespace.verify_entry(displaced) {
-            return NativeAttempt {
-                publication_method: replace_with_backup_publication_method(),
-                error: Some(error),
-                publication: LocalConditionalPublicationState::NotPublished,
-                installed: None,
-                displaced: Vec::new(),
-            };
+            return self.collect_rollback_receipt(Some(error), None, None);
         }
         let expected_restored = match displaced
             .open_reader()
@@ -841,31 +839,16 @@ impl ConditionalBackend for WindowsConditionalBackend {
             .and_then(|reader| file_identity(reader.as_file()))
         {
             Ok(identity) => identity,
-            Err(error) => {
-                return NativeAttempt {
-                    publication_method: replace_with_backup_publication_method(),
-                    error: Some(error),
-                    publication: LocalConditionalPublicationState::NotPublished,
-                    installed: None,
-                    displaced: Vec::new(),
-                };
-            }
+            Err(error) => return self.collect_rollback_receipt(Some(error), None, None),
         };
         let displaced_path = displaced.namespace_path();
         let (container, backup) = match self.make_backup() {
             Ok(paths) => paths,
-            Err(error) => {
-                return NativeAttempt {
-                    publication_method: replace_with_backup_publication_method(),
-                    error: Some(error),
-                    publication: LocalConditionalPublicationState::NotPublished,
-                    installed: None,
-                    displaced: Vec::new(),
-                };
-            }
+            Err(error) => return self.collect_rollback_receipt(Some(error), None, None),
         };
         if let Err(error) = self.checkpoint_action(ConditionalPoint::RollbackExchange) {
-            let attempt = self.collect_rollback_receipt(Some(error), expected_restored, &container, &backup);
+            let attempt =
+                self.collect_rollback_receipt(Some(error), Some(expected_restored), Some((&container, &backup)));
             return self.cleanup_empty_container(container, backup, attempt);
         }
         match install::replace_with_backup(self.namespace.target_path(), displaced_path, &backup) {
@@ -915,8 +898,11 @@ impl ConditionalBackend for WindowsConditionalBackend {
             }
             Err(error) => {
                 let hook_error = self.checkpoint_action(ConditionalPoint::AfterRollbackSyscall).err();
-                let attempt =
-                    self.collect_rollback_receipt(Some(error).or(hook_error), expected_restored, &container, &backup);
+                let attempt = self.collect_rollback_receipt(
+                    Some(error).or(hook_error),
+                    Some(expected_restored),
+                    Some((&container, &backup)),
+                );
                 self.cleanup_empty_container(container, backup, attempt)
             }
         }

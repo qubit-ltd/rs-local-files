@@ -8,6 +8,8 @@
 
 #![cfg(feature = "digest")]
 
+mod support;
+
 use digest::FixedOutput;
 use digest::HashMarker;
 use digest::OutputSizeUser;
@@ -16,12 +18,15 @@ use digest::consts::U32;
 use qubit_io::Output;
 use qubit_local_files::LocalFileSystem;
 use qubit_local_files::error::LocalFileErrorKind;
+#[cfg(unix)]
+use qubit_local_files::error::LocalFileOperation;
 use qubit_local_files::options::LocalWriteMode;
 use qubit_local_files::options::LocalWriteOptions;
 use qubit_local_files::options::LocalWritePrecondition;
 use sha2::Digest;
 use sha2::Sha256;
 use sha2::Sha512;
+use support::conditional_temp_directory::tempdir;
 
 struct NoCloneNoDebugSha256(Sha256);
 impl Default for NoCloneNoDebugSha256 {
@@ -46,7 +51,7 @@ impl FixedOutput for NoCloneNoDebugSha256 {
 
 #[test]
 fn absent_save_returns_actual_digest() {
-    let dir = tempfile::tempdir().unwrap();
+    let dir = tempdir().unwrap();
     let path = dir.path().join("model");
     let mut fs = LocalFileSystem::host().unwrap();
     fs.set_symlink_policy(qubit_local_files::policy::LocalSymlinkPolicy::Reject)
@@ -68,7 +73,7 @@ fn absent_save_returns_actual_digest() {
 
 #[test]
 fn opening_host_conditional_writer_reports_missing_parent_context() {
-    let directory = tempfile::tempdir().expect("fixture directory should be created");
+    let directory = tempdir().expect("fixture directory should be created");
     let target = directory.path().join("missing-parent").join("target");
     let mut filesystem = LocalFileSystem::host().expect("Host filesystem should open");
     filesystem
@@ -89,8 +94,84 @@ fn opening_host_conditional_writer_reports_missing_parent_context() {
 
 #[test]
 #[cfg(unix)]
+fn opening_host_conditional_writer_rejects_intermediate_symlink() {
+    let directory = tempdir().expect("fixture directory should be created");
+    let real = directory.path().join("real");
+    std::fs::create_dir(&real).expect("real parent should be created");
+    std::fs::write(real.join("existing"), b"original").expect("existing target should be written");
+    std::os::unix::fs::symlink(&real, directory.path().join("link")).expect("parent symlink should be created");
+    let mut filesystem = LocalFileSystem::host().expect("Host filesystem should open");
+    filesystem
+        .set_symlink_policy(qubit_local_files::policy::LocalSymlinkPolicy::Reject)
+        .expect("conditional writes should use a non-following policy");
+
+    for (name, precondition) in [
+        ("absent", LocalWritePrecondition::Absent),
+        ("existing", LocalWritePrecondition::Content(Sha256::digest(b"original"))),
+    ] {
+        let target = directory.path().join("link").join(name);
+        let error = filesystem
+            .open_conditional_writer::<Sha256>(
+                &target,
+                precondition,
+                &LocalWriteOptions::new(LocalWriteMode::CreateOrReplace),
+            )
+            .expect_err("an intermediate symlink must be rejected before staging");
+
+        assert_eq!(LocalFileErrorKind::Unsupported, error.kind());
+        assert_eq!(LocalFileOperation::OpenWriter, error.operation());
+        assert_eq!(Some(target.as_path()), error.path());
+        assert_eq!(
+            1,
+            std::fs::read_dir(&real)
+                .expect("real parent should be readable")
+                .count()
+        );
+        assert_eq!(
+            b"original",
+            std::fs::read(real.join("existing"))
+                .expect("target should be readable")
+                .as_slice()
+        );
+    }
+}
+
+#[test]
+#[cfg(unix)]
+fn opening_host_conditional_writer_rejects_symlink_before_creating_missing_parent() {
+    let directory = tempdir().expect("fixture directory should be created");
+    let real = directory.path().join("real");
+    std::fs::create_dir(&real).expect("real parent should be created");
+    std::os::unix::fs::symlink(&real, directory.path().join("link")).expect("parent symlink should be created");
+    let target = directory.path().join("link/missing/target");
+    let mut filesystem = LocalFileSystem::host().expect("Host filesystem should open");
+    filesystem
+        .set_symlink_policy(qubit_local_files::policy::LocalSymlinkPolicy::Reject)
+        .expect("conditional writes should use a non-following policy");
+
+    let error = filesystem
+        .open_conditional_writer::<Sha256>(
+            &target,
+            LocalWritePrecondition::Absent,
+            &LocalWriteOptions::new(LocalWriteMode::CreateNew).with_create_parent(),
+        )
+        .expect_err("symlink rejection must precede parent creation");
+
+    assert_eq!(LocalFileErrorKind::Unsupported, error.kind());
+    assert_eq!(LocalFileOperation::OpenWriter, error.operation());
+    assert_eq!(Some(target.as_path()), error.path());
+    assert_eq!(
+        0,
+        std::fs::read_dir(&real)
+            .expect("real parent should be readable")
+            .count()
+    );
+}
+
+#[test]
+#[cfg(unix)]
 fn opening_rooted_conditional_writer_reports_non_directory_parent() {
-    let directory = tempfile::tempdir().expect("fixture directory should be created");
+    let directory = tempdir().expect("fixture directory should be created");
     std::fs::write(directory.path().join("blocker"), b"file").expect("parent blocker should be written");
     let mut filesystem = LocalFileSystem::rooted(directory.path()).expect("Rooted filesystem should open");
     filesystem
@@ -112,7 +193,7 @@ fn opening_rooted_conditional_writer_reports_non_directory_parent() {
 
 #[test]
 fn writer_exposes_paths_debug_state_and_all_output_entry_points() {
-    let dir = tempfile::tempdir().unwrap();
+    let dir = tempdir().unwrap();
     let path = dir.path().join("output-contract");
     let mut fs = LocalFileSystem::host().unwrap();
     fs.set_symlink_policy(qubit_local_files::policy::LocalSymlinkPolicy::Reject)
@@ -150,7 +231,7 @@ fn writer_exposes_paths_debug_state_and_all_output_entry_points() {
 #[test]
 #[cfg(unix)]
 fn content_precondition_replaces_rooted_file_and_returns_digest() {
-    let dir = tempfile::tempdir().unwrap();
+    let dir = tempdir().unwrap();
     let native_path = dir.path().join("rooted-model");
     std::fs::write(&native_path, b"old").unwrap();
     let mut fs = LocalFileSystem::rooted(dir.path()).unwrap();
@@ -172,7 +253,7 @@ fn content_precondition_replaces_rooted_file_and_returns_digest() {
 #[test]
 #[cfg(windows)]
 fn rooted_content_precondition_is_unsupported_and_retains_candidate() {
-    let dir = tempfile::tempdir().unwrap();
+    let dir = tempdir().unwrap();
     let native_path = dir.path().join("rooted-model");
     std::fs::write(&native_path, b"old").unwrap();
     let mut fs = LocalFileSystem::rooted(dir.path()).unwrap();
@@ -205,7 +286,7 @@ fn rooted_content_precondition_is_unsupported_and_retains_candidate() {
 
 #[test]
 fn append_and_follow_policy_are_rejected_before_open() {
-    let dir = tempfile::tempdir().unwrap();
+    let dir = tempdir().unwrap();
     let path = dir.path().join("existing");
     std::fs::write(&path, b"unchanged").unwrap();
     let mut fs = LocalFileSystem::host().unwrap();
@@ -246,7 +327,7 @@ fn append_and_follow_policy_are_rejected_before_open() {
 
 #[test]
 fn dropping_uncommitted_writer_does_not_publish_candidate() {
-    let dir = tempfile::tempdir().unwrap();
+    let dir = tempdir().unwrap();
     let path = dir.path().join("not-published");
     let mut fs = LocalFileSystem::host().unwrap();
     fs.set_symlink_policy(qubit_local_files::policy::LocalSymlinkPolicy::Reject)
@@ -265,7 +346,7 @@ fn dropping_uncommitted_writer_does_not_publish_candidate() {
 
 #[test]
 fn commit_after_abort_reports_invalid_state() {
-    let dir = tempfile::tempdir().unwrap();
+    let dir = tempdir().unwrap();
     let target = dir.path().join("aborted");
     std::fs::write(&target, b"original").expect("original target should be written");
     let mut fs = LocalFileSystem::host().unwrap();
@@ -304,7 +385,7 @@ fn commit_after_abort_reports_invalid_state() {
 
 #[test]
 fn commit_after_abort_failure_reports_invalid_state() {
-    let dir = tempfile::tempdir().expect("fixture should be created");
+    let dir = tempdir().expect("fixture should be created");
     let target = dir.path().join("abort-failed");
     std::fs::write(&target, b"original").expect("original target should be written");
     let mut filesystem = LocalFileSystem::host().expect("Host filesystem should open");
@@ -355,7 +436,7 @@ fn commit_after_permanent_write_failure_reports_invalid_state() {
     use qubit_local_files::test_support::TestConditionalHooks;
     use qubit_local_files::test_support::TestConditionalPoint;
 
-    let dir = tempfile::tempdir().expect("fixture should be created");
+    let dir = tempdir().expect("fixture should be created");
     let target = dir.path().join("write-failed");
     std::fs::write(&target, b"original").expect("original target should be written");
     let mut filesystem = LocalFileSystem::host().expect("Host filesystem should open");
@@ -399,7 +480,7 @@ fn commit_after_permanent_write_failure_reports_invalid_state() {
 
 #[test]
 fn empty_and_large_candidates_return_sha512_digest() {
-    let dir = tempfile::tempdir().unwrap();
+    let dir = tempdir().unwrap();
     let mut fs = LocalFileSystem::host().unwrap();
     fs.set_symlink_policy(qubit_local_files::policy::LocalSymlinkPolicy::Reject)
         .unwrap();
@@ -433,7 +514,7 @@ fn empty_and_large_candidates_return_sha512_digest() {
 
 #[test]
 fn no_clone_no_debug_digest_works_through_public_api() {
-    let dir = tempfile::tempdir().unwrap();
+    let dir = tempdir().unwrap();
     let path = dir.path().join("custom-digest");
     let mut fs = LocalFileSystem::host().unwrap();
     fs.set_symlink_policy(qubit_local_files::policy::LocalSymlinkPolicy::Reject)
@@ -452,7 +533,7 @@ fn no_clone_no_debug_digest_works_through_public_api() {
 
 #[test]
 fn conditional_commit_error_debug_and_error_do_not_require_digest_debug() {
-    let dir = tempfile::tempdir().unwrap();
+    let dir = tempdir().unwrap();
     let path = dir.path().join("missing-target");
     let mut fs = LocalFileSystem::host().unwrap();
     fs.set_symlink_policy(qubit_local_files::policy::LocalSymlinkPolicy::Reject)
@@ -475,7 +556,7 @@ fn conditional_commit_error_debug_and_error_do_not_require_digest_debug() {
 
 #[test]
 fn content_precondition_rejects_create_new_before_open() {
-    let dir = tempfile::tempdir().unwrap();
+    let dir = tempdir().unwrap();
     let path = dir.path().join("existing");
     std::fs::write(&path, b"old").unwrap();
     let mut fs = LocalFileSystem::host().unwrap();
@@ -494,7 +575,7 @@ fn content_precondition_rejects_create_new_before_open() {
 
 #[test]
 fn content_commit_failure_reports_host_target_path() {
-    let dir = tempfile::tempdir().unwrap();
+    let dir = tempdir().unwrap();
     let missing = dir.path().join("missing");
     let mismatched = dir.path().join("mismatched");
     std::fs::write(&mismatched, b"current").unwrap();
@@ -525,7 +606,7 @@ fn content_commit_failure_reports_host_target_path() {
 
 #[test]
 fn rooted_content_commit_failure_reports_namespace_path_only() {
-    let dir = tempfile::tempdir().unwrap();
+    let dir = tempdir().unwrap();
     let native_path = dir.path().join("model");
     std::fs::write(&native_path, b"current").unwrap();
     let namespace_path = std::path::Path::new("/model");

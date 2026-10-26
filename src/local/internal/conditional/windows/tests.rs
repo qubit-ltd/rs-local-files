@@ -58,7 +58,7 @@ fn conditional_windows_candidate_reopen_rejects_replaced_name() {
     let target = directory.path().join("target");
     let namespace =
         Namespace::open_host(&target, &options(LocalWriteMode::CreateOrReplace)).expect("Host namespace should open");
-    let (name, original) = namespace
+    let (name, mut original) = namespace
         .create_private("candidate")
         .expect("candidate should be created exclusively");
     let candidate_path = namespace
@@ -67,7 +67,7 @@ fn conditional_windows_candidate_reopen_rejects_replaced_name() {
     fs::remove_file(&candidate_path).expect("original candidate name should be removed");
     fs::write(&candidate_path, b"other user's entry").expect("replacement entry should be created");
 
-    let error = open_verified_candidate_entry(&namespace, &name, &original)
+    let error = open_verified_candidate_entry(&namespace, &name, &mut original)
         .expect_err("reopening a replaced candidate name must fail identity verification");
     assert_eq!(error.kind(), io::ErrorKind::InvalidData);
     assert_eq!(
@@ -125,20 +125,23 @@ fn conditional_windows_private_entry_guard_removes_only_original_identity() {
     let namespace =
         Namespace::open_host(&target, &options(LocalWriteMode::CreateOrReplace)).expect("Host namespace should open");
 
-    let (owned_name, owned_file) = namespace
+    let (owned_name, mut owned_file) = namespace
         .create_private("guard-owned")
         .expect("private entry should be created");
     let owned_path = namespace
         .private_file_path(&owned_name)
         .expect("private path should resolve");
-    drop(PrivateEntryGuard::new(&namespace, &owned_file).expect("guard should retain its original handle"));
+    drop(
+        PrivateEntryGuard::new(&namespace, &owned_name, &mut owned_file)
+            .expect("guard should retain its original handle"),
+    );
     drop(owned_file);
     assert!(
         !owned_path.exists(),
         "guard should remove the entry matching its original handle identity"
     );
 
-    let (replaced_name, replaced_file) = namespace
+    let (replaced_name, mut replaced_file) = namespace
         .create_private("guard-replaced")
         .expect("private entry should be created");
     let replaced_path = namespace
@@ -146,7 +149,10 @@ fn conditional_windows_private_entry_guard_removes_only_original_identity() {
         .expect("private path should resolve");
     fs::remove_file(&replaced_path).expect("original entry should be removable");
     fs::write(&replaced_path, b"foreign replacement").expect("foreign replacement should be created");
-    drop(PrivateEntryGuard::new(&namespace, &replaced_file).expect("guard should retain its original handle"));
+    drop(
+        PrivateEntryGuard::new(&namespace, &replaced_name, &mut replaced_file)
+            .expect("guard should retain its original handle"),
+    );
     assert_eq!(
         fs::read(&replaced_path).expect("foreign replacement should remain"),
         b"foreign replacement"
@@ -522,6 +528,80 @@ fn conditional_windows_read_only_target_conflict_preserves_candidate_and_target(
     permissions.set_readonly(false);
     fs::set_permissions(&target, permissions).expect("fixture target should become writable");
     drop(failure);
+}
+
+#[test]
+fn conditional_windows_rollback_preparation_failure_observes_current_publication() {
+    for replace_installed in [false, true] {
+        let directory = tempfile::tempdir().expect("fixture directory should be created");
+        let target = directory.path().join("target");
+        fs::write(&target, b"A").expect("old target should be written");
+        let mut backend = WindowsConditionalBackend::open_host(&target, &options(LocalWriteMode::CreateOrReplace))
+            .expect("Host candidate should open");
+        put(&mut backend, b"B");
+        backend.begin_publication().expect("publication should begin");
+        let mut published = backend.publish_content();
+        assert_eq!(published.publication, LocalConditionalPublicationState::Published);
+        assert!(published.error.is_none(), "publication should succeed");
+        let displaced = published.displaced.pop().expect("old target should have a receipt");
+        fs::rename(displaced.namespace_path(), directory.path().join("moved-displaced"))
+            .expect("displaced name should move before rollback preparation");
+        if replace_installed {
+            fs::rename(&target, directory.path().join("moved-candidate"))
+                .expect("published candidate should move away");
+            fs::write(&target, b"D").expect("competitor should replace the target");
+        }
+
+        let attempt = backend.rollback(&displaced);
+
+        assert!(attempt.error.is_some(), "missing displaced name should block rollback");
+        assert_eq!(
+            attempt.publication,
+            if replace_installed {
+                LocalConditionalPublicationState::Indeterminate
+            } else {
+                LocalConditionalPublicationState::Published
+            },
+        );
+        assert!(attempt.installed.is_some(), "current target should retain a receipt");
+        assert_eq!(
+            fs::read(&target).expect("target should remain"),
+            if replace_installed { b"D" } else { b"B" }
+        );
+    }
+}
+
+#[test]
+fn conditional_windows_rollback_container_failure_preserves_published_state() {
+    let directory = tempfile::tempdir().expect("fixture directory should be created");
+    let target = directory.path().join("target");
+    fs::write(&target, b"A").expect("old target should be written");
+    let mut backend = WindowsConditionalBackend::open_host(&target, &options(LocalWriteMode::CreateOrReplace))
+        .expect("Host candidate should open");
+    put(&mut backend, b"B");
+    backend.begin_publication().expect("publication should begin");
+    let mut published = backend.publish_content();
+    assert_eq!(published.publication, LocalConditionalPublicationState::Published);
+    assert!(published.error.is_none(), "publication should succeed");
+    let displaced = published.displaced.pop().expect("old target should have a receipt");
+    backend.namespace.fail_next_container_verification();
+
+    let attempt = backend.rollback(&displaced);
+
+    assert!(
+        attempt
+            .error
+            .expect("container setup should fail")
+            .to_string()
+            .contains("injected recovery container verification failure")
+    );
+    assert_eq!(attempt.publication, LocalConditionalPublicationState::Published);
+    assert!(attempt.installed.is_some(), "still-published B should retain a receipt");
+    assert_eq!(fs::read(&target).expect("candidate should remain installed"), b"B");
+    assert_eq!(
+        fs::read(displaced.namespace_path()).expect("old file should remain recoverable"),
+        b"A"
+    );
 }
 
 #[test]

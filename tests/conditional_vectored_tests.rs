@@ -8,6 +8,8 @@
 
 #![cfg(feature = "digest")]
 
+mod support;
+
 use qubit_io::Output;
 use qubit_local_files::LocalFileSystem;
 use qubit_local_files::options::LocalWriteMode;
@@ -16,10 +18,11 @@ use qubit_local_files::options::LocalWritePrecondition;
 use qubit_local_files::policy::LocalSymlinkPolicy;
 use sha2::Digest;
 use sha2::Sha256;
+use support::conditional_temp_directory::tempdir;
 
 #[test]
 fn aborted_conditional_writer_rejects_empty_vectors() {
-    let dir = tempfile::tempdir().unwrap();
+    let dir = tempdir().unwrap();
     let mut fs = LocalFileSystem::host().unwrap();
     fs.set_symlink_policy(LocalSymlinkPolicy::Reject).unwrap();
     let mut writer = fs
@@ -41,7 +44,7 @@ fn aborted_conditional_writer_rejects_empty_vectors() {
 
 #[test]
 fn mixed_scalar_and_vectored_writes_publish_expected_digest() {
-    let dir = tempfile::tempdir().unwrap();
+    let dir = tempdir().unwrap();
     let path = dir.path().join("mixed");
     let mut fs = LocalFileSystem::host().unwrap();
     fs.set_symlink_policy(LocalSymlinkPolicy::Reject).unwrap();
@@ -66,7 +69,7 @@ fn mixed_scalar_and_vectored_writes_publish_expected_digest() {
 
 #[test]
 fn active_empty_vectors_return_zero_without_changing_count() {
-    let dir = tempfile::tempdir().unwrap();
+    let dir = tempdir().unwrap();
     let path = dir.path().join("empty-vectors");
     let mut fs = LocalFileSystem::host().unwrap();
     fs.set_symlink_policy(LocalSymlinkPolicy::Reject).unwrap();

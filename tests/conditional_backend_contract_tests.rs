@@ -8,6 +8,8 @@
 
 #![cfg(feature = "digest")]
 
+mod support;
+
 use std::path::Path;
 
 use qubit_io::Output;
@@ -20,7 +22,7 @@ use qubit_local_files::options::LocalWritePrecondition;
 use qubit_local_files::outcome::LocalWritePublicationMethod;
 use sha2::Digest;
 use sha2::Sha256;
-use tempfile::tempdir;
+use support::conditional_temp_directory::tempdir;
 
 fn read_all(mut reader: impl qubit_io::Input<Item = u8>) -> Vec<u8> {
     let mut bytes = Vec::new();

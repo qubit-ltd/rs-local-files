@@ -8,6 +8,8 @@
 
 #![cfg(all(feature = "digest", feature = "test-support"))]
 
+mod support;
+
 mod conditional {
     use qubit_io::Input;
     use qubit_local_files::LocalFileSystem;
@@ -51,6 +53,7 @@ use qubit_local_files::test_support::TestFaultPlan;
 use qubit_local_files::test_support::TestFaultPoint;
 use sha2::Digest;
 use sha2::Sha256;
+use support::conditional_temp_directory::tempdir;
 
 #[test]
 fn test_conditional_hooks_debug_output_only_exposes_checkpoint() {
@@ -67,7 +70,7 @@ fn test_conditional_hooks_debug_output_only_exposes_checkpoint() {
 
 #[test]
 fn absent_race_preserves_late_file_and_independent_candidate_copy() {
-    let directory = tempfile::tempdir().unwrap();
+    let directory = tempdir().unwrap();
     let path = directory.path().join("target");
     let competitor = path.clone();
     let filesystem = conditional::host().with_conditional_test_hooks(TestConditionalHooks::once(
@@ -91,7 +94,7 @@ fn absent_race_preserves_late_file_and_independent_candidate_copy() {
 #[cfg(unix)]
 #[test]
 fn after_precheck_inode_content_change_is_detected_and_restored() {
-    let directory = tempfile::tempdir().unwrap();
+    let directory = tempdir().unwrap();
     let path = directory.path().join("target");
     std::fs::write(&path, b"A").unwrap();
     let competing = path.clone();
@@ -116,7 +119,7 @@ fn after_precheck_inode_content_change_is_detected_and_restored() {
 #[cfg(unix)]
 #[test]
 fn same_contents_on_a_new_inode_remain_eligible_for_content_publish() {
-    let directory = tempfile::tempdir().unwrap();
+    let directory = tempdir().unwrap();
     let path = directory.path().join("target");
     let replacement = directory.path().join("replacement");
     std::fs::write(&path, b"A").unwrap();
@@ -146,7 +149,7 @@ fn same_contents_on_a_new_inode_remain_eligible_for_content_publish() {
 #[cfg(unix)]
 #[test]
 fn aba_back_to_expected_contents_is_allowed_by_content_condition() {
-    let directory = tempfile::tempdir().unwrap();
+    let directory = tempdir().unwrap();
     let path = directory.path().join("target");
     std::fs::write(&path, b"A").unwrap();
     let raced_path = path.clone();
@@ -173,7 +176,7 @@ fn aba_back_to_expected_contents_is_allowed_by_content_condition() {
 #[cfg(unix)]
 #[test]
 fn symlink_replacement_after_precheck_is_not_followed_or_overwritten() {
-    let directory = tempfile::tempdir().unwrap();
+    let directory = tempdir().unwrap();
     let path = directory.path().join("target");
     let external = directory.path().join("external");
     let old = directory.path().join("old");
@@ -219,7 +222,7 @@ fn symlink_replacement_after_precheck_is_not_followed_or_overwritten() {
 #[cfg(unix)]
 #[test]
 fn after_publish_change_is_never_overwritten_during_recovery() {
-    let directory = tempfile::tempdir().unwrap();
+    let directory = tempdir().unwrap();
     let path = directory.path().join("target");
     std::fs::write(&path, b"A").unwrap();
     let competitor = path.clone();
@@ -250,7 +253,7 @@ fn after_publish_change_is_never_overwritten_during_recovery() {
 
 #[test]
 fn hooks_are_instance_local_and_shared_by_clones() {
-    let directory = tempfile::tempdir().unwrap();
+    let directory = tempdir().unwrap();
     let first_path = directory.path().join("first");
     let second_path = directory.path().join("second");
     let calls = std::sync::Arc::new(std::sync::atomic::AtomicUsize::new(0));
@@ -281,7 +284,7 @@ fn hooks_are_instance_local_and_shared_by_clones() {
 
 #[test]
 fn another_instance_does_not_consume_configured_hook() {
-    let directory = tempfile::tempdir().unwrap();
+    let directory = tempdir().unwrap();
     let target = directory.path().join("target");
     let calls = std::sync::Arc::new(std::sync::atomic::AtomicUsize::new(0));
     let observed = calls.clone();
@@ -308,7 +311,7 @@ fn another_instance_does_not_consume_configured_hook() {
 
 #[test]
 fn conditional_hooks_and_existing_test_faults_survive_core_reconfiguration() {
-    let directory = tempfile::tempdir().unwrap();
+    let directory = tempdir().unwrap();
     let existing = directory.path().join("existing");
     let target = directory.path().join("target");
     std::fs::write(&existing, b"A").unwrap();

@@ -56,7 +56,7 @@ use crate::outcome::LocalConditionalWriteOutcome;
 /// use tempfile::tempdir;
 ///
 /// let directory = tempdir()?;
-/// let target = directory.path().join("model");
+/// let target = directory.path().canonicalize()?.join("model");
 /// std::fs::write(&target, b"existing")?;
 /// let mut filesystem = LocalFileSystem::host()?;
 /// filesystem.set_symlink_policy(qubit_local_files::policy::LocalSymlinkPolicy::Reject)?;

@@ -90,7 +90,18 @@ impl LocalFileSystem {
         )?;
         let backend = match &self.core.namespace {
             crate::local::LocalNamespace::Host => {
-                ConditionalWriterBackend::host(resolved.authority_relative(), options).map_err(|error| {
+                let host_path =
+                    crate::local::resolve_host_path(resolved.authority_relative(), self.symlink_policy, false)
+                        .map_err(|error| {
+                            super::operation_error(
+                                error,
+                                LocalFileOperation::OpenWriter,
+                                resolved.namespace_absolute(),
+                                None,
+                                resolver.current_directory(),
+                            )
+                        })?;
+                ConditionalWriterBackend::host(&host_path, options).map_err(|error| {
                     super::with_current_directory(
                         LocalFileError::from_io(
                             LocalFileOperation::OpenWriter,

@@ -8,6 +8,8 @@
 
 #![cfg(all(feature = "digest", feature = "test-support"))]
 
+mod support;
+
 mod conditional {
     use qubit_io::Input;
     use qubit_local_files::LocalFileSystem;
@@ -103,7 +105,7 @@ fn mutate_displaced_copy(parent: &std::path::Path, installed: &std::path::Path) 
 #[cfg(unix)]
 #[test]
 fn rollback_backend_precheck_observes_competitor_without_exchange() {
-    let directory = tempfile::tempdir().unwrap();
+    let directory = support::conditional_temp_directory::tempdir().unwrap();
     let path = directory.path().join("target");
     std::fs::write(&path, b"A").unwrap();
     let parent = directory.path().to_path_buf();
@@ -167,7 +169,7 @@ fn rollback_exchange_displaces_competitor_and_retains_each_resource_once() {
     use qubit_local_files::outcome::LocalConditionalPublicationState;
     use qubit_local_files::recovery::LocalRecoveryFileRole;
 
-    let directory = tempfile::tempdir().unwrap();
+    let directory = support::conditional_temp_directory::tempdir().unwrap();
     let path = directory.path().join("target");
     std::fs::write(&path, b"A").unwrap();
     let parent = directory.path().to_path_buf();
@@ -259,7 +261,7 @@ fn windows_rollback_exchange_receipts_track_restored_and_competing_identities() 
     use qubit_local_files::outcome::LocalConditionalPublicationState;
     use qubit_local_files::recovery::LocalRecoveryFileRole;
 
-    let directory = tempfile::tempdir().unwrap();
+    let directory = support::conditional_temp_directory::tempdir().unwrap();
     let path = directory.path().join("target");
     std::fs::write(&path, b"A").unwrap();
     let original_identity = windows_file_identity(&path);
@@ -341,11 +343,82 @@ fn windows_rollback_exchange_receipts_track_restored_and_competing_identities() 
 
 #[cfg(windows)]
 #[test]
+fn windows_failed_rollback_exchange_preserves_published_candidate_and_displaced_file() {
+    use qubit_local_files::error::LocalConditionalWriteStage;
+    use qubit_local_files::outcome::LocalConditionalPublicationState;
+    use qubit_local_files::recovery::LocalRecoveryFileRole;
+
+    let directory = support::conditional_temp_directory::tempdir().unwrap();
+    let path = directory.path().join("target");
+    std::fs::write(&path, b"A").unwrap();
+    let original_identity = windows_file_identity(&path);
+    let parent = directory.path().to_path_buf();
+    let installed_path = path.clone();
+    let filesystem = conditional::host()
+        .with_conditional_test_hooks(TestConditionalHooks::once(
+            TestConditionalPoint::BeforeVerifyDisplaced,
+            move || mutate_displaced_copy(&parent, &installed_path),
+        ))
+        .with_conditional_test_hooks(TestConditionalHooks::once(
+            TestConditionalPoint::BeforeRollbackExchange,
+            || {
+                Err(std::io::Error::new(
+                    std::io::ErrorKind::PermissionDenied,
+                    "rollback blocked",
+                ))
+            },
+        ));
+    let mut writer = filesystem
+        .open_conditional_writer::<Sha256>(
+            &path,
+            LocalWritePrecondition::Content(Sha256::digest(b"A")),
+            &LocalWriteOptions::new(LocalWriteMode::CreateOrReplace),
+        )
+        .unwrap();
+    writer.write_fully(b"B").unwrap();
+    let failure = writer.commit().unwrap_err();
+
+    assert_eq!(failure.stage(), LocalConditionalWriteStage::Rollback);
+    assert_eq!(failure.publication(), LocalConditionalPublicationState::Published);
+    assert_eq!(std::fs::read(&path).unwrap(), b"B");
+    assert_eq!(conditional::read_candidate(&failure), b"B");
+    let receipts = failure.recovery_files();
+    assert_eq!(
+        receipts.len(),
+        3,
+        "installed B, displaced C and candidate copy B remain"
+    );
+    let displaced = receipts
+        .iter()
+        .find(|entry| entry.role() == LocalRecoveryFileRole::Displaced && entry.namespace_path() != path)
+        .expect("original displaced file should remain recoverable");
+    let installed = receipts
+        .iter()
+        .find(|entry| entry.namespace_path() == path)
+        .expect("still-published candidate should have a receipt");
+    let candidate = failure.candidate().unwrap();
+    assert_eq!(conditional::read_recovery(displaced), b"C");
+    assert_eq!(conditional::read_recovery(installed), b"B");
+    assert_eq!(windows_file_identity(displaced.namespace_path()), original_identity);
+    assert_ne!(windows_file_identity(&path), original_identity);
+    assert_ne!(
+        windows_file_identity(candidate.namespace_path()),
+        windows_file_identity(&path)
+    );
+    assert!(
+        receipts
+            .iter()
+            .all(|entry| entry.role() != LocalRecoveryFileRole::RollbackDisplaced)
+    );
+}
+
+#[cfg(windows)]
+#[test]
 fn windows_rollback_without_target_replacement_restores_original_identity() {
     use qubit_local_files::outcome::LocalConditionalPublicationState;
     use qubit_local_files::recovery::LocalRecoveryFileRole;
 
-    let directory = tempfile::tempdir().unwrap();
+    let directory = support::conditional_temp_directory::tempdir().unwrap();
     let path = directory.path().join("target");
     std::fs::write(&path, b"A").unwrap();
     let original_identity = windows_file_identity(&path);
@@ -413,7 +486,7 @@ fn after_rollback_replacement_is_retained_with_the_observed_identity() {
     use qubit_local_files::outcome::LocalConditionalPublicationState;
     use qubit_local_files::recovery::LocalRecoveryFileRole;
 
-    let directory = tempfile::tempdir().unwrap();
+    let directory = support::conditional_temp_directory::tempdir().unwrap();
     let path = directory.path().join("target");
     std::fs::write(&path, b"A").unwrap();
     let parent = directory.path().to_path_buf();
@@ -473,7 +546,7 @@ fn after_rollback_replacement_is_retained_with_the_observed_identity() {
 
 #[test]
 fn uncommitted_drop_does_not_publish_candidate() {
-    let directory = tempfile::tempdir().unwrap();
+    let directory = support::conditional_temp_directory::tempdir().unwrap();
     let path = directory.path().join("target");
     let filesystem: LocalFileSystem = conditional::host();
     let mut writer = filesystem
@@ -490,7 +563,7 @@ fn uncommitted_drop_does_not_publish_candidate() {
 
 #[test]
 fn abort_cleans_unpublished_candidate_without_touching_target() {
-    let directory = tempfile::tempdir().unwrap();
+    let directory = support::conditional_temp_directory::tempdir().unwrap();
     let path = directory.path().join("target");
     std::fs::write(&path, b"A").unwrap();
     let mut writer = conditional::host()
@@ -509,7 +582,7 @@ fn abort_cleans_unpublished_candidate_without_touching_target() {
 #[cfg(unix)]
 #[test]
 fn abort_failure_can_be_retried_after_candidate_name_is_restored() {
-    let directory = tempfile::tempdir().unwrap();
+    let directory = support::conditional_temp_directory::tempdir().unwrap();
     let path = directory.path().join("target");
     let mut writer = conditional::host()
         .open_conditional_writer::<Sha256>(
@@ -538,7 +611,7 @@ fn abort_failure_can_be_retried_after_candidate_name_is_restored() {
 #[cfg(unix)]
 #[test]
 fn dropping_commit_error_keeps_recovery_candidate_on_disk() {
-    let directory = tempfile::tempdir().unwrap();
+    let directory = support::conditional_temp_directory::tempdir().unwrap();
     let path = directory.path().join("target");
     std::fs::write(&path, b"A").unwrap();
     let competitor = path.clone();
@@ -563,7 +636,7 @@ fn dropping_commit_error_keeps_recovery_candidate_on_disk() {
 
 #[test]
 fn dropping_success_outcome_does_not_remove_retained_cleanup_file() {
-    let directory = tempfile::tempdir().unwrap();
+    let directory = support::conditional_temp_directory::tempdir().unwrap();
     let path = directory.path().join("target");
     let filesystem = conditional::host().with_conditional_test_hooks(TestConditionalHooks::once(
         TestConditionalPoint::BeforeCleanupCopy,
