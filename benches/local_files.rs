@@ -83,6 +83,51 @@ fn bench_walk(c: &mut Criterion) {
     });
 }
 
+/// Measures wide recursive traversals with and without directory reopening.
+fn bench_walk_name_cache(c: &mut Criterion) {
+    let mut group = c.benchmark_group("walk_name_cache");
+    for rooted in [false, true] {
+        let scope = if rooted { "rooted" } else { "host" };
+        for width in [100usize, 10_000] {
+            let fixture = tempdir().expect("wide walker fixture should exist");
+            for index in 0..width {
+                let name = format!("entry-{index:05}-fixed-name");
+                fs::write(fixture.path().join(name), b"x").expect("wide walker fixture entry should be written");
+            }
+            let child = fixture.path().join("z-child");
+            fs::create_dir(&child).expect("reopen fixture child should be created");
+            fs::write(child.join("payload"), b"x").expect("reopen fixture payload should be written");
+            let filesystem = if rooted {
+                LocalFileSystem::rooted(fixture.path()).expect("Rooted filesystem should open")
+            } else {
+                LocalFileSystem::host().expect("Host filesystem should open")
+            };
+            let path = if rooted { Path::new("/") } else { fixture.path() };
+            for (mode, options) in [
+                ("retained_handles", LocalListOptions::new().with_recursive()),
+                (
+                    "reopen_cache",
+                    LocalListOptions::new()
+                        .with_recursive()
+                        .with_max_open_directories(1)
+                        .with_reopen_policy(LocalDirectoryReopenPolicy::Reopen),
+                ),
+            ] {
+                let expected = width + 2;
+                assert_eq!(count_entries(&filesystem, path, &options), expected);
+                group.bench_function(format!("{scope}/{mode}/entries_{width}"), |bench| {
+                    bench.iter(|| {
+                        let count = count_entries(&filesystem, black_box(path), &options);
+                        assert_eq!(count, expected, "each measured traversal must consume every entry");
+                        black_box(count);
+                    });
+                });
+            }
+        }
+    }
+    group.finish();
+}
+
 fn bench_walk_handle_budget(c: &mut Criterion) {
     let directory = tempdir().expect("budget benchmark directory should exist");
     let tree = directory.path().join("tree");
@@ -208,7 +253,10 @@ fn bench_copy_budget_width(c: &mut Criterion) {
                         (directory, coordinates)
                     },
                     |(_, (filesystem, source, target))| {
-                        let _ = black_box(filesystem.copy_with_options(black_box(source), black_box(target), &options));
+                        assert_copy_limit(
+                            filesystem.copy_with_options(black_box(source), black_box(target), &options),
+                            LocalResourceKind::Entry,
+                        );
                     },
                     criterion::BatchSize::PerIteration,
                 );
@@ -260,8 +308,14 @@ fn bench_copy_tree_depth(c: &mut Criterion) {
                             (directory, coordinates)
                         },
                         |(_, (filesystem, source, target))| {
-                            let _ =
-                                black_box(filesystem.copy_with_options(black_box(source), black_box(target), &options));
+                            let result = filesystem.copy_with_options(black_box(source), black_box(target), &options);
+                            if limited {
+                                assert_copy_limit(result, LocalResourceKind::Depth);
+                            } else {
+                                let outcome = result.expect("benchmark tree copy should succeed");
+                                assert_eq!(1, outcome.stats().files());
+                                black_box(outcome.stats().files());
+                            }
                         },
                         criterion::BatchSize::PerIteration,
                     );
@@ -672,6 +726,7 @@ criterion_group!(
     local_files,
     bench_path_codec,
     bench_walk,
+    bench_walk_name_cache,
     bench_walk_handle_budget,
     bench_copy,
     bench_copy_budget_width,

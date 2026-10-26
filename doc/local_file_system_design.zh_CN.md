@@ -1070,6 +1070,9 @@ Windows Rooted staged writer 若在最终安装前的 identity 复核中发现�
 删除文件。打开中的 writer 调用 `abort()` 或离开作用域会取消发布并尝试删除未发布资源；
 commit 错误则把保留的恢复资源移交给错误对象。进程 abort 或机器崩溃可能中断任一步骤，
 库不会在重启时扫描孤儿文件。
+Windows 上，使用 `Required` 耐久性打开条件 writer 会在路径解析或创建后端资源前返回
+`RequirementNotMet`。恢复文件和条件提交错误满足 `Send + Sync`；条件写入 outcome 也会在
+其 digest 类型满足相应约束时满足 `Send + Sync`。这不表示打开中的 writer 可跨线程安全使用。
 
 当前实现已核实的平台范围：
 
@@ -1116,6 +1119,9 @@ seen-name 字节预算均为零时，两种后端都返回空列表，不读取�
 Host walker 在跳过已见名称期间及下一次目录读取前检查 deadline。Rooted 列表也会在路径和符号链接
 解析期间（包括每次展开）检查期限，并复用已解析的起始目录。协作式期限不能中断已阻塞的原生操作；
 未配置期限时，Rooted 解析不会施加隐藏的符号链接展开上限。
+walker 仅在配置 seen-name 字节预算，或有限打开目录预算下 `Reopen` 可能重新访问 frame 时保留
+已返回名称。无缓存时，并发目录变化遵循原生 reader 语义，不提供快照或全局 exactly-once 保证；
+重开的 frame 仍会抑制先前已返回的名称。
 list 的起始目录不扣减条目预算，只有返回的子项才计费。因此条目预算为零时不会返回子项，
 深度限制为零时同样返回空列表。
 Rooted 和 Host 的 tree copy 都按需推进 directory reader；受限复制允许在仍持有 reader 预算时预读一个子项，不承诺条目排序，也不会

@@ -296,6 +296,9 @@ no-overwrite 安装时才可用。`Content(digest)` 必须搭配 `CreateOrReplac
 机器崩溃可能中断发布或清理；库不会在重启时扫描遗留文件。平台范围方面，Windows
 Host 的 Content 仅支持 `PreserveExisting` 元数据策略；Windows Rooted Content 不受支持。
 Rooted 操作使用已打开的目录句柄。这里不宣称 Android 或 FreeBSD 支持 Content。
+Windows 上，使用 `Required` 耐久性打开条件 writer 会在路径解析或创建后端资源前返回
+`RequirementNotMet`。恢复文件和条件提交错误满足 `Send + Sync`；条件写入 outcome 也会在
+其 digest 类型满足相应约束时满足 `Send + Sync`。这不表示打开中的 writer 可跨线程安全使用。
 
 Conditional writer 创建时会保存本次操作的 PWD context。之后的 commit、abort 和 cleanup 错误
 使用该快照，不会重新查询可能已经变化的进程 PWD；Host 物理路径只是可选诊断，也不会替换
@@ -397,6 +400,9 @@ namespace 路径作为公开 root；可选的 diagnostic path 仍可记录实际
 同样不会读取子项。Host walker 在跳过已见名称期间及下一次目录读取前检查 deadline。Rooted 列表也会在
 路径与符号链接解析期间（包括每次展开）检查期限，并复用已解析的起始目录。这些期限都是协作式的，
 不能中断已经阻塞的原生操作。未配置期限时，Rooted 解析不会施加隐藏的符号链接展开上限。
+只有配置 seen-name 字节预算，或有限打开目录预算下的 `Reopen` 可能重新访问 frame 时，walker 才保留
+已返回名称。无缓存时，并发目录变化遵循原生 reader 语义，不提供快照或全局 exactly-once 保证；
+重开的 frame 仍会抑制先前已返回的名称。
 不允许向下遍历时，最终链接按自身 metadata 返回，不会先解析目标；Host 非递归列表因此会
 保留悬空链接条目。递归跟随目录链接时，悬空或越界链接会产生错误。`Continue` 会返回局部子目录
 打开错误并继续安全的同层条目；全局预算或 deadline 耗尽仍会终止遍历。

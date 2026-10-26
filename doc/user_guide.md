@@ -317,6 +317,9 @@ the requested atomic publication to an ordinary overwrite.
 attempt that sync after removing temporary content and the candidate copy; a
 cleanup sync failure is reported through `cleanup_errors()` on the successful
 outcome and does not undo the published file or change its durability result.
+On Windows, `open_conditional_writer` rejects `Required` durability immediately
+with `RequirementNotMet`; it does so before resolving or creating backend
+resources, so no candidate namespace is created for an unsupported request.
 
 On success, publication and required synchronization completed. Cleanup then
 removes temporary content and the independent candidate copy; cleanup errors and
@@ -338,6 +341,11 @@ leftovers on restart. For backend availability, Windows Host supports
 `PreserveExisting` metadata only for Content; Windows Rooted Content is
 unsupported. Rooted uses opened directory handles. Android and FreeBSD Content
 are not claimed as supported.
+On Windows, opening a conditional writer with `Required` durability returns
+`RequirementNotMet` before path resolution or backend resource creation.
+Recovery files and conditional commit errors are `Send + Sync`; a conditional
+write outcome is also `Send + Sync` when its digest type supports those bounds.
+This does not imply that an open writer is thread-safe.
 
 Conditional writers capture the operation's PWD context when created. Later
 commit, abort, and cleanup errors use that snapshot rather than querying a
@@ -474,6 +482,11 @@ including each expansion step, and reuses the resolved starting directory.
 These deadlines are cooperative: they cannot interrupt a blocked native
 operation. Without a configured deadline, Rooted resolution has no hidden
 symbolic-link expansion limit.
+The walkers retain yielded names only when a seen-name-byte budget is configured
+or `Reopen` may revisit frames under a finite open-directory budget. Without
+that cache, concurrent directory changes follow native reader semantics and do
+not provide a snapshot or global exactly-once guarantee; reopened frames still
+suppress names already yielded.
 
 Temporary files and directories own cleanup according to current source
 eligibility. Each resource lives in

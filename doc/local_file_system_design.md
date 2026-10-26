@@ -803,6 +803,11 @@ files. An open writer's `abort()` or Drop cancels publication and attempts to
 remove unpublished resources; a commit error transfers retained recovery
 resources to the error. Process abort and machine crash may interrupt any step,
 and restart-time orphan scanning is not provided.
+On Windows, opening a conditional writer with `Required` durability returns
+`RequirementNotMet` before path resolution or backend resource creation.
+Recovery files and conditional commit errors are `Send + Sync`; a conditional
+write outcome is also `Send + Sync` when its digest type supports those bounds.
+This does not imply that an open writer is thread-safe.
 
 Backend scope currently established by the implementation:
 
@@ -859,11 +864,18 @@ symbolic-link resolution, including each expansion step, and reuses its
 resolved starting directory. A deadline remains cooperative and cannot
 interrupt one blocked native operation. Without a configured deadline,
 Rooted resolution has no hidden symbolic-link expansion limit. Listing does
-not charge the starting directory against the entry budget;
-only yielded child entries are charged. A zero entry budget therefore yields no
-children, including when the depth limit is zero. Rooted and Host tree copies advance directory readers lazily. A bounded copy may inspect one child ahead while retaining the
-reader permit, does not promise entry ordering, and never turns the native
-directory buffer into an application entry budget.
+not charge the starting directory against the entry budget; only yielded child
+entries are charged. A zero entry budget therefore yields no children,
+including when the depth limit is zero. Rooted and Host tree copies advance
+directory readers lazily. A bounded copy may inspect one child ahead while
+retaining the reader permit, does not promise entry ordering, and never turns
+the native directory buffer into an application entry budget.
+
+walkers retain yielded names only when a seen-name-byte budget is configured or
+`Reopen` may revisit frames under a finite open-directory budget. Without that
+cache, concurrent directory changes follow native reader semantics and do not
+provide a snapshot or global exactly-once guarantee; reopened frames still
+suppress names already yielded.
 
 ### 15.3 Error policy
 
