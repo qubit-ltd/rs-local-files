@@ -5,6 +5,7 @@
 //
 //    Licensed under the Apache License, Version 2.0.
 // =============================================================================
+// qubit-style: allow coverage-cfg
 //! Portable permission observations for native metadata.
 
 /// Portable permission information observed for a local filesystem entry.

@@ -5,6 +5,7 @@
 //
 //    Licensed under the Apache License, Version 2.0.
 // =============================================================================
+// qubit-style: allow coverage-cfg
 // Covered by metadata integration tests.
 
 use std::fs::FileType;
