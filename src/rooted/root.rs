@@ -469,7 +469,7 @@ impl Root {
                     "rooted remove_empty_dir requires a directory",
                 ));
             }
-            #[cfg(all(unix, feature = "test-support"))]
+            #[cfg(all(any(unix, windows), feature = "test-support"))]
             crate::test_support::temp_cleanup_replace_observed_entry(&self.directory, &self.path, path, true)?;
             local::remove_rooted_entry_typed(&self.directory, &self.path, path, true)
         }
