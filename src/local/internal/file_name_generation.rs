@@ -13,6 +13,7 @@ use std::time::SystemTime;
 use std::time::UNIX_EPOCH;
 
 use super::file_name_validation::validate_file_name_fragment;
+use super::file_name_validation::validate_portable_generated_component;
 
 /// Random payload length used by generated file names.
 const RANDOM_NAME_BYTES: usize = 16;
@@ -40,7 +41,9 @@ pub(crate) fn try_random_file_name(default_prefix: &str, prefix: Option<&str>, s
     let timestamp = unix_timestamp_nanos();
     let process_id = std::process::id();
     let random = try_random_hex()?;
-    Ok(format!("{prefix}{timestamp:x}-{process_id:x}-{random}{suffix}"))
+    let component = format!("{prefix}{timestamp:x}-{process_id:x}-{random}{suffix}");
+    validate_portable_generated_component(&component)?;
+    Ok(component)
 }
 
 /// Returns the current Unix timestamp in nanoseconds.

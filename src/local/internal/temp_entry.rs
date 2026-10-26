@@ -22,6 +22,7 @@ use std::path::Path;
 use std::path::PathBuf;
 
 use super::file_name_validation::validate_file_name_fragment;
+use super::file_name_validation::validate_portable_generated_component;
 use super::path_operations::add_path_context;
 #[cfg(feature = "test-support")]
 use crate::local::internal::test_support;
@@ -38,7 +39,12 @@ pub(crate) fn validate_temp_affixes(prefix: Option<&str>, suffix: Option<&str>) 
     if let Some(suffix) = suffix {
         validate_file_name_fragment("suffix", suffix)?;
     }
-    Ok(())
+    let component = format!(
+        "{}0-0-00000000000000000000000000000000{}",
+        prefix.unwrap_or(""),
+        suffix.unwrap_or("")
+    );
+    validate_portable_generated_component(&component)
 }
 
 /// Creates a unique temporary file in `dir`.

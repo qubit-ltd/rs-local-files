@@ -667,22 +667,59 @@ impl LocalTempFile {
                 LocalDurabilityRequirement::Preferred | LocalDurabilityRequirement::NotRequired => Ok(false),
             };
         }
-        let synchronize = || -> Result<()> {
+        let synchronize = || -> Result<bool> {
             if let Some(file) = self.file.as_ref() {
-                return file.sync_all();
+                return self.synchronize_open_file(file);
             }
             match &self.core.backend {
-                LocalTempResourceBackend::Host(_) => File::open(&self.core.path)?.sync_all(),
+                LocalTempResourceBackend::Host(_) => {
+                    let file = File::open(&self.core.path)?;
+                    self.synchronize_open_file(&file)
+                }
                 LocalTempResourceBackend::Rooted(rooted) => {
                     let path = LocalRelativePath::new(&rooted.relative_path)?;
-                    rooted.root.open_probe_file(&path)?.sync_all()
+                    let file = rooted.root.open_probe_file(&path)?;
+                    self.synchronize_open_file(&file)
                 }
             }
         };
         match durability {
-            LocalDurabilityRequirement::Required => synchronize().map(|()| true),
-            LocalDurabilityRequirement::Preferred => Ok(synchronize().is_ok()),
+            LocalDurabilityRequirement::Required => match synchronize()? {
+                true => Ok(true),
+                false => Err(sync_identity_error()),
+            },
+            LocalDurabilityRequirement::Preferred => match synchronize() {
+                Ok(true) => Ok(true),
+                Ok(false) => Err(sync_identity_error()),
+                Err(_) => Ok(false),
+            },
             LocalDurabilityRequirement::NotRequired => Ok(false),
+        }
+    }
+
+    /// Synchronizes `file` only when it identifies the retained source entity.
+    ///
+    /// # Parameters
+    /// - `file`: The candidate handle to validate and synchronize.
+    ///
+    /// # Returns
+    /// `true` after synchronization, or `false` for a different file identity.
+    ///
+    /// # Errors
+    /// Returns identity-inspection or synchronization failures.
+    fn synchronize_open_file(&self, file: &File) -> Result<bool> {
+        let matches = match &self.core.backend {
+            LocalTempResourceBackend::Host(backend) => backend.identity.matches_file(file)?,
+            LocalTempResourceBackend::Rooted(backend) => {
+                let opened = crate::rooted::Metadata::from_open_file(file)?;
+                backend.identity.is_same_file(&opened)
+            }
+        };
+        if matches {
+            file.sync_all()?;
+            Ok(true)
+        } else {
+            Ok(false)
         }
     }
 
@@ -891,4 +928,14 @@ impl Drop for LocalTempFile {
 #[inline]
 fn closed_file_error() -> Error {
     Error::new(ErrorKind::BrokenPipe, "temporary file handle is closed")
+}
+
+/// Builds the error used when the opened synchronization object is not source.
+#[must_use]
+#[inline]
+fn sync_identity_error() -> Error {
+    Error::new(
+        ErrorKind::InvalidInput,
+        "temporary file handle does not identify the retained source",
+    )
 }

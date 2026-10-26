@@ -93,6 +93,17 @@ impl TempEntryIdentity {
         Ok(*self == Self::from_path(path)?)
     }
 
+    /// Returns whether `file` has the captured native identity.
+    ///
+    /// # Parameters
+    /// - `file`: Open file handle to inspect.
+    ///
+    /// # Errors
+    /// Returns native identity-inspection failures.
+    pub(crate) fn matches_file(&self, file: &fs::File) -> io::Result<bool> {
+        Ok(*self == Self::from_file(file)?)
+    }
+
     /// Captures the stable native identity reported by metadata.
     #[cfg(not(windows))]
     fn from_metadata(metadata: &fs::Metadata) -> io::Result<Self> {
