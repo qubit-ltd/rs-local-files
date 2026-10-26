@@ -10,6 +10,7 @@
 mod copy_dir_frame;
 mod copy_dir_result;
 mod destination;
+mod destination_removal_failure;
 mod error;
 mod facade;
 mod host_copy_backend;

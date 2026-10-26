@@ -9,6 +9,7 @@
 mod metadata_tests;
 mod permissions_tests;
 mod root_tests;
+mod deletion_type_tests;
 
 mod resolution_complexity_tests;
 pub(crate) mod support;

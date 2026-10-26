@@ -438,11 +438,13 @@ impl Root {
                     "rooted remove_file does not remove directories",
                 ));
             }
+            #[cfg(all(unix, feature = "test-support"))]
+            crate::test_support::temp_cleanup_replace_observed_entry(&self.directory, &self.path, path, false)?;
             #[cfg(feature = "test-support")]
             if local::test_support_enabled("rooted-copy-remove-file-native") {
                 return Err(crate::local::test_fault_error());
             }
-            local::remove_rooted_entry(&self.directory, &self.path, path)
+            local::remove_rooted_entry_typed(&self.directory, &self.path, path, false)
         }
         #[cfg(not(any(unix, windows)))]
         {
@@ -467,7 +469,9 @@ impl Root {
                     "rooted remove_empty_dir requires a directory",
                 ));
             }
-            local::remove_rooted_entry(&self.directory, &self.path, path)
+            #[cfg(all(unix, feature = "test-support"))]
+            crate::test_support::temp_cleanup_replace_observed_entry(&self.directory, &self.path, path, true)?;
+            local::remove_rooted_entry_typed(&self.directory, &self.path, path, true)
         }
         #[cfg(not(any(unix, windows)))]
         {

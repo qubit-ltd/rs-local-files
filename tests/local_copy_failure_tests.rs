@@ -17,6 +17,8 @@ use qubit_local_files::LocalFileSystem;
 use qubit_local_files::options::LocalCopyConflictPolicy;
 use qubit_local_files::options::LocalCopyOptions;
 #[cfg(feature = "test-support")]
+use qubit_local_files::options::LocalCopyTypeConflictPolicy;
+#[cfg(feature = "test-support")]
 use qubit_local_files::options::LocalMetadataPreservePolicy;
 use qubit_local_files::outcome::LocalCopyFailureState;
 use qubit_local_files::outcome::LocalCopyStats;
@@ -152,6 +154,41 @@ fn test_copy_failure_reports_second_child_partial_publication() {
         let expected_target = target.join(["first", "second"][failed_child_index]);
         assert_eq!(Some(expected_target.as_path()), Some(failed_target));
     });
+}
+
+#[cfg(all(feature = "test-support", unix))]
+#[test]
+fn test_copy_failure_reports_partial_destination_removal() {
+    let directory = tempfile::tempdir().expect("fixture directory should be created");
+    let source = directory.path().join("source");
+    let target = directory.path().join("target");
+    fs::write(&source, b"replacement").expect("source file should be written");
+    fs::create_dir(&target).expect("destination directory should be created");
+    fs::write(target.join("first"), b"first").expect("first child should be written");
+    fs::write(target.join("second"), b"second").expect("second child should be written");
+    let _fault = install_test_fault("copy-destination-remove-after-child")
+        .expect("partial removal fault should install");
+
+    let failure = LocalFileSystem::host()
+        .expect("Host filesystem should open")
+        .copy_with_options(
+            &source,
+            &target,
+            &LocalCopyOptions::new().with_type_conflict(LocalCopyTypeConflictPolicy::Replace),
+        )
+        .expect_err("injected removal failure should fail the copy");
+
+    assert_ne!(LocalCopyFailureState::Unchanged, failure.state());
+    assert!(
+        target.is_dir(),
+        "the incompletely removed destination should remain"
+    );
+    assert_eq!(
+        1,
+        fs::read_dir(&target)
+            .expect("remaining children should be listed")
+            .count()
+    );
 }
 
 /// Verifies a failed symlink replacement cannot report unchanged after the

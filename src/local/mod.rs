@@ -111,6 +111,8 @@ pub(crate) use internal::remove_directory_tree;
 pub(crate) use internal::remove_host_non_directory;
 #[cfg(any(unix, windows))]
 pub(crate) use internal::remove_rooted_entry;
+#[cfg(any(unix, windows))]
+pub(crate) use internal::remove_rooted_entry_typed;
 pub(crate) use internal::rename_failure_after_native_attempt;
 pub(crate) use internal::rename_failure_renamed;
 pub(crate) use internal::rename_failure_unchanged;

@@ -795,17 +795,24 @@ fn test_host_copy_reports_injected_destination_races() {
                         failure.staging_path().is_none(),
                         "direct directory copy has no retained staging tree"
                     );
-                    assert!(
-                        target.is_dir(),
-                        "the native create call made the root before the injected error"
-                    );
-                    assert_eq!(
-                        0,
-                        fs::read_dir(&target)
-                            .expect("failed destination root should remain inspectable")
-                            .count(),
-                        "no source entries should have been copied after destination preparation failed",
-                    );
+                    match fault {
+                        "copy-directory-create-error" => assert!(
+                            !target.exists(),
+                            "a syscall-preceding create fault must not publish the destination",
+                        ),
+                        "copy-directory-race-inspect" => assert_eq!(
+                            0,
+                            fs::read_dir(&target)
+                                .expect("competing creator's directory should remain inspectable")
+                                .count(),
+                            "source entries must not be copied after race inspection fails",
+                        ),
+                        "copy-directory-race-nondirectory" => assert!(
+                            target.is_file(),
+                            "the independent competing file creator should remain untouched",
+                        ),
+                        _ => unreachable!("only error fault cases reach this branch"),
+                    }
                 }
             }
         });

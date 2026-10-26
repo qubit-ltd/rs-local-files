@@ -193,6 +193,8 @@ pub(crate) use rooted_namespace_io::read_rooted_link;
 #[cfg(unix)]
 pub(crate) use rooted_namespace_io::remove_rooted_entry;
 #[cfg(unix)]
+pub(crate) use rooted_namespace_io::remove_rooted_entry_typed;
+#[cfg(unix)]
 pub(crate) use rooted_namespace_io::rename_rooted_entry;
 #[cfg(unix)]
 pub(crate) use rooted_namespace_io::set_rooted_permissions;
@@ -242,6 +244,8 @@ pub(crate) use windows_rooted::read_rooted_link;
 pub(crate) use windows_rooted::read_rooted_symlink_metadata;
 #[cfg(windows)]
 pub(crate) use windows_rooted::remove_rooted_entry;
+#[cfg(windows)]
+pub(crate) use windows_rooted::remove_rooted_entry_typed;
 #[cfg(windows)]
 pub(crate) use windows_rooted::rename_rooted_entry;
 #[cfg(windows)]

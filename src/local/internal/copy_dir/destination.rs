@@ -140,7 +140,23 @@ pub(super) fn destination_metadata_if_exists(dst: &Path) -> Result<Option<fs::Me
 /// Returns the I/O error reported while inspecting or removing the directory.
 pub(super) fn remove_destination_directory_if_unchanged(dst: &Path) -> Result<()> {
     match inspect_destination_metadata(dst) {
-        Ok(metadata) if is_real_directory(&metadata) => fs::remove_dir_all(dst),
+        Ok(metadata) if is_real_directory(&metadata) => {
+            #[cfg(feature = "test-support")]
+            if test_support::is_enabled("copy-destination-remove-after-child") {
+                let child = fs::read_dir(dst)?.next().transpose()?.ok_or_else(|| {
+                    Error::other("injected partial destination removal requires a child")
+                })?;
+                if child.file_type()?.is_dir() {
+                    fs::remove_dir_all(child.path())?;
+                } else {
+                    fs::remove_file(child.path())?;
+                }
+                return Err(super::destination_removal_failure::mark_attempted(
+                    Error::other("injected failure after partial destination removal"),
+                ));
+            }
+            fs::remove_dir_all(dst).map_err(super::destination_removal_failure::mark_attempted)
+        }
         Ok(_) => Ok(()),
         Err(error) if error.kind() == ErrorKind::NotFound => Ok(()),
         Err(error) => Err(error),
@@ -202,18 +218,22 @@ fn prepare_existing_directory_destination(
 /// Returns an I/O error when creation fails or a racing entry is not a real
 /// directory.
 fn create_copy_destination_dir(dst: &Path) -> Result<bool> {
-    let result = create_private_dir(dst);
     #[cfg(feature = "test-support")]
-    let result = if test_support::is_enabled("copy-directory-race-existing")
-        || test_support::is_enabled("copy-directory-race-nondirectory")
-        || test_support::is_enabled("copy-directory-race-inspect")
-    {
-        Err(Error::new(ErrorKind::AlreadyExists, "injected directory creation race"))
-    } else if test_support::is_enabled("copy-directory-create-error") {
-        Err(Error::other("injected directory creation failure"))
-    } else {
-        result
-    };
+    let race_file = test_support::is_enabled("copy-directory-race-nondirectory");
+    #[cfg(feature = "test-support")]
+    let race_directory = test_support::is_enabled("copy-directory-race-existing")
+        || test_support::is_enabled("copy-directory-race-inspect");
+    #[cfg(feature = "test-support")]
+    if test_support::is_enabled("copy-directory-create-error") {
+        return Err(Error::other("injected directory creation failure"));
+    }
+    #[cfg(feature = "test-support")]
+    if race_file {
+        fs::write(dst, b"racing creator")?;
+    } else if race_directory {
+        fs::create_dir(dst)?;
+    }
+    let result = create_private_dir(dst);
     reconcile_directory_creation(dst, result, |path| {
         #[cfg(feature = "test-support")]
         if test_support::is_enabled("copy-directory-race-inspect") {

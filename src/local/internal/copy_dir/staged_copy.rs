@@ -17,6 +17,7 @@ use super::copy_dir_result::CopyDirResult;
 use super::destination::destination_metadata_if_exists;
 use super::destination::existing_file_destination_should_be_skipped;
 use super::destination::remove_destination_directory_if_unchanged;
+use super::destination_removal_failure::was_attempted;
 use super::error::copy_dir_error;
 use super::error::copy_dir_error_with_staging;
 use super::error::record_copied_file;
@@ -31,6 +32,7 @@ use crate::LocalCopyConflictPolicy;
 use crate::LocalCopyDirOptions;
 use crate::LocalCopyDirStage;
 use crate::LocalCopyDirStats;
+use crate::LocalCopyFailureState;
 use crate::LocalDurabilityRequirement;
 use crate::local::CopyBudget;
 use crate::local::CopyDestinationAction;
@@ -217,7 +219,15 @@ pub(crate) fn copy_symlink_with_options(
             }
             _ => std::fs::remove_file(dst),
         };
-        with_copy_context(removal, LocalCopyDirStage::PrepareDestination, src, dst, stats)?;
+        removal.map_err(|source| {
+            let attempted = was_attempted(&source);
+            let error = copy_dir_error(LocalCopyDirStage::PrepareDestination, src, dst, stats, source);
+            if attempted {
+                error.with_failure_state(LocalCopyFailureState::Indeterminate)
+            } else {
+                error
+            }
+        })?;
     }
     let link_target = with_copy_context(
         std::fs::read_link(src),
@@ -413,14 +423,20 @@ fn commit_staged_copy_file(
         // Stage source bytes before deleting a conflicting directory. The
         // second type check ensures a racing file is left for file policy.
         if let Err(source) = remove_destination_directory_if_unchanged(dst) {
-            return Err(copy_dir_error_with_staging(
+            let attempted = was_attempted(&source);
+            let error = copy_dir_error_with_staging(
                 LocalCopyDirStage::PrepareDestination,
                 src,
                 dst,
                 stats,
                 source,
                 &mut staged_file,
-            ));
+            );
+            return Err(if attempted {
+                error.with_failure_state(LocalCopyFailureState::Indeterminate)
+            } else {
+                error
+            });
         }
     }
 

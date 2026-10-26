@@ -21,6 +21,7 @@ pub(crate) use directory::open_root_directory_reader;
 pub(crate) use directory::open_rooted_directory_reader;
 pub(crate) use directory::read_rooted_directory;
 pub(crate) use directory::remove_rooted_entry;
+pub(crate) use directory::remove_rooted_entry_typed;
 pub(crate) use file_io::open_rooted_native_writer;
 #[cfg(feature = "digest")]
 pub(in crate::local::internal) use handle::open_conditional_parent;

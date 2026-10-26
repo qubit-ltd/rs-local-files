@@ -169,6 +169,16 @@ pub(crate) fn remove_rooted_entry(root: &File, diagnostic_root: &Path, path: &Lo
     )
 }
 
+/// Removes an entry using the caller's fixed leaf-versus-directory request.
+pub(crate) fn remove_rooted_entry_typed(
+    root: &File,
+    diagnostic_root: &Path,
+    path: &LocalRelativePath,
+    directory: bool,
+) -> Result<()> {
+    unlink_rooted_entry(root, diagnostic_root, path, directory)
+}
+
 /// Removes one rooted entry whose observed type is already known.
 ///
 /// # Errors

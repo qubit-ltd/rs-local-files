@@ -29,6 +29,8 @@ use super::native::nt_open_at;
 use super::native::verify_real_directory;
 use crate::local::LocalRelativePath;
 use crate::local::internal::rooted_directory_reader::RootedDirectoryReader;
+use crate::rooted::EntryKind;
+use crate::rooted::Metadata;
 
 /// Opens a lazy reader for immediate children of the opened root.
 ///
@@ -141,6 +143,29 @@ pub(crate) fn create_rooted_directory(
 /// Returns an I/O error when traversal, enumeration, or handle deletion fails.
 pub(crate) fn remove_rooted_entry(root: &File, _diagnostic_root: &Path, path: &LocalRelativePath) -> Result<()> {
     delete_rooted_entry(root, path)
+}
+
+/// Removes one no-follow handle after checking the requested entry type.
+pub(crate) fn remove_rooted_entry_typed(
+    root: &File,
+    _diagnostic_root: &Path,
+    path: &LocalRelativePath,
+    directory: bool,
+) -> Result<()> {
+    let entry = open_entry_no_follow(root, path, DELETE | FILE_READ_ATTRIBUTES | SYNCHRONIZE, FILE_OPEN, 0)?;
+    let kind = Metadata::from_open_file(&entry)?.kind();
+    let matches = if directory {
+        kind == EntryKind::Directory
+    } else {
+        kind != EntryKind::Directory
+    };
+    if !matches {
+        return Err(std::io::Error::new(
+            if directory { ErrorKind::NotADirectory } else { ErrorKind::IsADirectory },
+            "rooted removal type does not match the requested operation",
+        ));
+    }
+    delete_open_entry(&entry)
 }
 
 /// Opens and deletes one rooted entry without following a reparse point.
