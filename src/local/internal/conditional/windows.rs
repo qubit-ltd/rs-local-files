@@ -185,7 +185,7 @@ struct PrivateEntryGuard<'a> {
 
 impl<'a> PrivateEntryGuard<'a> {
     fn new(namespace: &'a Namespace, name: &OsStr, file: &'a mut File) -> Result<Self, (io::Error, Self)> {
-        let guard = Self {
+        let mut guard = Self {
             namespace,
             file,
             path: namespace.child_path(name),
@@ -193,7 +193,10 @@ impl<'a> PrivateEntryGuard<'a> {
             armed: true,
         };
         match file_identity(guard.file) {
-            Ok(identity) => Ok(Self { identity: Some(identity), ..guard }),
+            Ok(identity) => {
+                guard.identity = Some(identity);
+                Ok(guard)
+            }
             Err(error) => Err((error, guard)),
         }
     }

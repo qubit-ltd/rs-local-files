@@ -25,6 +25,7 @@ use std::ptr::null;
 use std::ptr::null_mut;
 
 use windows_sys::Wdk::Storage::FileSystem::FILE_CREATE;
+use windows_sys::Wdk::Storage::FileSystem::FILE_DIRECTORY_FILE;
 use windows_sys::Wdk::Storage::FileSystem::FILE_NON_DIRECTORY_FILE;
 use windows_sys::Wdk::Storage::FileSystem::FILE_OPEN;
 use windows_sys::Win32::Foundation::GENERIC_READ;
@@ -53,6 +54,7 @@ use crate::LocalFileReader;
 use crate::LocalRelativePath;
 use crate::LocalResult;
 use crate::local::internal::windows_rooted::create_rooted_directory;
+use crate::local::internal::windows_rooted::native::nt_open_at_with_share_mode;
 use crate::local::internal::windows_rooted::open_conditional_entry_at;
 use crate::local::internal::windows_rooted::open_conditional_parent;
 use crate::local::internal::windows_rooted::open_root_directory;
@@ -183,34 +185,34 @@ impl Namespace {
             )?;
             let backup_name =
                 crate::local::internal::file_name_generation::try_random_file_name("displaced-", None, Some(".bak"))?;
-            let container = parent.join(dirname);
-            match fs::create_dir(&container) {
-                Ok(()) => {
-                    let handle = match open_host_directory_no_reparse(&container) {
-                        Ok(handle) => handle,
-                        Err(primary) => {
-                            let cleanup = fs::remove_dir(&container);
-                            return Err(match cleanup {
-                                Ok(()) => primary,
-                                Err(cleanup) => io::Error::new(
-                                    primary.kind(),
-                                    format!(
-                                        "{}; empty recovery container cleanup failed at {}: {}",
-                                        primary,
-                                        container.display(),
-                                        cleanup
-                                    ),
-                                ),
-                            });
-                        }
-                    };
+            let container = parent.join(&dirname);
+            let handle = nt_open_at_with_share_mode(
+                &self.parent,
+                OsStr::new(&dirname),
+                windows_sys::Win32::Storage::FileSystem::DELETE | FILE_READ_ATTRIBUTES | SYNCHRONIZE,
+                FILE_CREATE,
+                FILE_DIRECTORY_FILE,
+                FILE_SHARE_READ | FILE_SHARE_WRITE,
+            );
+            match handle {
+                Ok(handle) => {
+                    verify_directory_no_reparse(&handle)?;
                     self.recovery_parents
                         .borrow_mut()
                         .push((container.clone(), handle));
                     return Ok((container.clone(), container.join(backup_name)));
                 }
                 Err(error) if error.kind() == ErrorKind::AlreadyExists => continue,
-                Err(error) => return Err(error),
+                Err(error) => {
+                    return Err(io::Error::new(
+                        error.kind(),
+                        format!(
+                            "failed to create and bind recovery container {}: {}",
+                            container.display(),
+                            error
+                        ),
+                    ));
+                }
             }
         }
         Err(io::Error::new(
@@ -289,53 +291,21 @@ impl Namespace {
                 "Rooted publication has no Host recovery container",
             ));
         }
-        let expected = self
-            .recovery_parents
-            .borrow()
+        let mut recovery_parents = self.recovery_parents.borrow_mut();
+        let index = recovery_parents
             .iter()
-            .find(|(path, _)| path == container)
-            .map(|(_, parent)| file_identity(parent))
-            .transpose()?
+            .position(|(path, _)| path == container)
             .ok_or_else(|| {
                 io::Error::new(
                     ErrorKind::NotFound,
                     "conditional recovery container handle is unavailable",
                 )
             })?;
-        let name = container
-            .file_name()
-            .ok_or_else(|| io::Error::new(ErrorKind::InvalidInput, "recovery container has no filename"))?;
-        let directory = open_conditional_entry_at(
-            &self.parent,
-            name,
-            windows_sys::Win32::Storage::FileSystem::DELETE | FILE_READ_ATTRIBUTES | SYNCHRONIZE,
-            FILE_OPEN,
-            windows_sys::Wdk::Storage::FileSystem::FILE_DIRECTORY_FILE,
-        )?;
-        let mut tag = windows_sys::Win32::Storage::FileSystem::FILE_ATTRIBUTE_TAG_INFO::default();
-        // SAFETY: `directory` owns a live handle and `tag` is a correctly sized output
-        // buffer.
-        let success = unsafe {
-            GetFileInformationByHandleEx(
-                directory.as_raw_handle(),
-                FileAttributeTagInfo,
-                (&raw mut tag).cast(),
-                std::mem::size_of_val(&tag) as u32,
-            )
-        };
-        if success == 0 {
-            return Err(io::Error::last_os_error());
-        }
-        if tag.FileAttributes & FILE_ATTRIBUTE_REPARSE_POINT != 0
-            || tag.FileAttributes & FILE_ATTRIBUTE_DIRECTORY == 0
-            || file_identity(&directory)? != expected
-        {
-            return Err(io::Error::new(
-                ErrorKind::InvalidData,
-                "conditional recovery container identity changed",
-            ));
-        }
-        delete_open_entry(&directory)
+        let directory = &recovery_parents[index].1;
+        verify_directory_no_reparse(directory)?;
+        delete_open_entry(directory)?;
+        recovery_parents.remove(index);
+        Ok(())
     }
 
     pub(super) fn sync_entry(&self, entry: &ConditionalEntry) -> io::Result<()> {
@@ -791,6 +761,11 @@ fn open_host_directory_no_reparse(path: &Path) -> io::Result<File> {
     }
     // SAFETY: CreateFileW returned a uniquely owned valid handle.
     let file = unsafe { File::from_raw_handle(handle) };
+    verify_directory_no_reparse(&file)?;
+    Ok(file)
+}
+
+fn verify_directory_no_reparse(file: &File) -> io::Result<()> {
     let mut tag = windows_sys::Win32::Storage::FileSystem::FILE_ATTRIBUTE_TAG_INFO::default();
     // SAFETY: `file` owns a live handle and `tag` is a correctly sized output
     // buffer.
@@ -811,7 +786,7 @@ fn open_host_directory_no_reparse(path: &Path) -> io::Result<File> {
             "conditional recovery container is not a real directory",
         ));
     }
-    Ok(file)
+    Ok(())
 }
 
 fn delete_open_entry(file: &File) -> io::Result<()> {

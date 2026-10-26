@@ -630,24 +630,20 @@ fn conditional_windows_recovery_container_collision_does_not_reuse_existing_dire
 }
 
 #[test]
-fn conditional_windows_recovery_container_cleanup_rejects_replacement_identity() {
+fn conditional_windows_recovery_container_name_cannot_be_replaced_while_owned() {
     let directory = tempfile::tempdir().expect("fixture directory should be created");
     let target = directory.path().join("target");
     let namespace =
         Namespace::open_host(&target, &options(LocalWriteMode::CreateOrReplace)).expect("Host namespace should open");
     let (container, _) = namespace.backup_container().expect("recovery container should be created");
-    let moved = directory.path().join("original-container");
-    fs::rename(&container, &moved).expect("created container should be moved by fixture");
-    fs::create_dir(&container).expect("replacement container should be created");
-    let marker = container.join("user-data");
-    fs::write(&marker, b"keep").expect("replacement content should be written");
+    let moved = directory.path().join("replacement-container");
+    fs::rename(&container, &moved).expect_err("owned directory name must reject replacement");
 
-    let error = namespace
+    namespace
         .remove_container(&container)
-        .expect_err("replacement identity must not be deleted");
-
-    assert_eq!(error.kind(), io::ErrorKind::InvalidData);
-    assert_eq!(fs::read(marker).expect("replacement data should remain"), b"keep");
+        .expect("owned directory should be removable by its handle");
+    assert!(!container.exists(), "owned directory name should be removed");
+    assert!(!moved.exists(), "replacement path should remain absent");
 }
 
 #[test]

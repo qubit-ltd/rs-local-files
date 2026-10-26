@@ -60,6 +60,18 @@ pub(in crate::local::internal) fn nt_open_at(
     disposition: u32,
     options: u32,
 ) -> Result<File> {
+    nt_open_at_with_share_mode(parent, name, access, disposition, options, ROOTED_SHARE_MODE)
+}
+
+/// Opens or creates one name relative to a retained directory with explicit sharing.
+pub(in crate::local::internal) fn nt_open_at_with_share_mode(
+    parent: &File,
+    name: &OsStr,
+    access: u32,
+    disposition: u32,
+    options: u32,
+    share_mode: u32,
+) -> Result<File> {
     let name = unicode_string(name)?;
     let attributes = OBJECT_ATTRIBUTES {
         Length: size_of::<OBJECT_ATTRIBUTES>() as u32,
@@ -82,7 +94,7 @@ pub(in crate::local::internal) fn nt_open_at(
             &raw mut status_block,
             null(),
             FILE_ATTRIBUTE_NORMAL,
-            ROOTED_SHARE_MODE,
+            share_mode,
             disposition,
             options | FILE_OPEN_FOR_BACKUP_INTENT | FILE_OPEN_REPARSE_POINT | FILE_SYNCHRONOUS_IO_NONALERT,
             null(),
