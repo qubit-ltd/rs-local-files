@@ -34,7 +34,7 @@ jobs:
           python ci-root/rs-local-files/scripts/prepare_downstream_sources.py
           --root ci-root --candidate ci-root/rs-local-files
           --fs-local-ref main --mime-ref main --support-ref main
-          --additional-ref rs-io=c44e597e82171ba4ac3767b97d50e4413ba56aca
+          --additional-ref rs-io=ebb32513e14791c593fac94febda145fc6753609
       - name: Check plain digest build
         working-directory: ci-root/rs-local-files
         run: cargo +1.94 check --locked --features digest

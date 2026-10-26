@@ -56,7 +56,7 @@
     },
     ".infra/ci/local-path-dependencies.tsv": {
       "executable": false,
-      "sha256": "cad0e7751664de89655111c4b859fe19d14940e755b4cca2ff6901cb1eaee52a"
+      "sha256": "4b1a3ffa162f7c509d405eff073c0fa430162bf9affb8db9bdafb13acb2d3a22"
     },
     ".infra/dependency/policy.toml": {
       "executable": false,
