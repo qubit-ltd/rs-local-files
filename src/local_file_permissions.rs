@@ -44,7 +44,8 @@ impl LocalFilePermissions {
 
     /// Reports whether the native entry is read-only.
     #[must_use]
-    #[inline]
+    #[cfg_attr(coverage, inline(never))]
+    #[cfg_attr(not(coverage), inline)]
     pub const fn is_read_only(self) -> bool {
         self.read_only
     }
@@ -52,7 +53,8 @@ impl LocalFilePermissions {
     /// Returns Unix mode bits when the platform exposes them.
     ///
     /// `None` means the observing platform does not expose Unix mode bits.
-    #[inline]
+    #[cfg_attr(coverage, inline(never))]
+    #[cfg_attr(not(coverage), inline)]
     pub const fn unix_mode(self) -> Option<u32> {
         self.unix_mode
     }

@@ -64,14 +64,16 @@ impl LocalFileReader {
 
     /// Returns the underlying native file handle.
     #[must_use]
-    #[inline]
+    #[cfg_attr(coverage, inline(never))]
+    #[cfg_attr(not(coverage), inline)]
     pub const fn as_file(&self) -> &File {
         &self.file
     }
 
     /// Returns metadata captured from this reader's retained handle.
     #[must_use = "the retained-handle metadata should be inspected"]
-    #[inline]
+    #[cfg_attr(coverage, inline(never))]
+    #[cfg_attr(not(coverage), inline)]
     pub const fn metadata(&self) -> &LocalFileMetadata {
         &self.metadata
     }
