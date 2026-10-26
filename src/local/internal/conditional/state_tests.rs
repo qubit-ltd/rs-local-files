@@ -1201,6 +1201,134 @@ mod conditional_state_tests {
     }
 
     #[test]
+    fn conditional_state_not_required_skips_cleanup_sync_checkpoint_and_namespace_sync() {
+        use super::super::ConditionalHooks;
+        use super::super::ConditionalPoint;
+        use crate::options::LocalWriteMode;
+        use crate::options::LocalWriteOptions;
+
+        let backend = super::super::fake_backend::FakeBackend::new(b"A", b"B").with_hooks(ConditionalHooks::fail_once(
+            ConditionalPoint::CleanupSync,
+            std::io::ErrorKind::PermissionDenied,
+        ));
+        let sync_calls = backend.namespace_sync_observer();
+        let (_lease, target_path) = backend.target_observer();
+        let outcome = super::super::commit::commit_conditional::<Sha256, _>(
+            backend,
+            LocalWritePrecondition::Content(Sha256::digest(b"A")),
+            LocalWriteOptions::new(LocalWriteMode::CreateOrReplace),
+            1,
+        )
+        .expect("NotRequired cleanup does not run its sync checkpoint");
+
+        assert_eq!(sync_calls.get(), 0);
+        assert!(outcome.cleanup_errors().is_empty());
+        assert!(outcome.retained_files().is_empty());
+        assert!(!outcome.write_outcome().durable());
+        assert_eq!(std::fs::read(target_path).expect("saved target"), b"B");
+    }
+
+    #[test]
+    fn conditional_state_preferred_and_required_cleanup_sync_remains_best_effort() {
+        use super::super::ConditionalHookAction;
+        use super::super::ConditionalHooks;
+        use super::super::ConditionalPoint;
+        use crate::options::LocalWriteMode;
+        use crate::options::LocalWriteOptions;
+        use crate::policy::LocalAtomicityRequirement;
+        use crate::policy::LocalDurabilityRequirement;
+
+        for durability in [
+            LocalDurabilityRequirement::Preferred,
+            LocalDurabilityRequirement::Required,
+        ] {
+            let options = LocalWriteOptions::new(LocalWriteMode::CreateOrReplace)
+                .with_atomicity(LocalAtomicityRequirement::Required)
+                .with_durability(durability);
+            let backend = super::super::fake_backend::FakeBackend::new(b"A", b"B");
+            let baseline_sync_calls = backend.namespace_sync_observer();
+            let baseline = super::super::commit::commit_conditional::<Sha256, _>(
+                backend,
+                LocalWritePrecondition::Content(Sha256::digest(b"A")),
+                options,
+                1,
+            )
+            .expect("successful cleanup sync should complete");
+            assert_eq!(baseline_sync_calls.get(), 3, "{durability:?} sync baseline");
+            assert!(baseline.cleanup_errors().is_empty());
+
+            let checkpoint_backend = super::super::fake_backend::FakeBackend::new(b"A", b"B").with_hooks(
+                ConditionalHooks::fail_once(ConditionalPoint::CleanupSync, std::io::ErrorKind::PermissionDenied),
+            );
+            let checkpoint_sync_calls = checkpoint_backend.namespace_sync_observer();
+            let (_lease, checkpoint_target) = checkpoint_backend.target_observer();
+            let checkpoint_outcome = super::super::commit::commit_conditional::<Sha256, _>(
+                checkpoint_backend,
+                LocalWritePrecondition::Content(Sha256::digest(b"A")),
+                options,
+                1,
+            )
+            .expect("cleanup checkpoint failure must preserve published success");
+            assert_eq!(checkpoint_sync_calls.get(), 2, "{durability:?} checkpoint failure");
+            assert!(!checkpoint_outcome.cleanup_errors().is_empty());
+            assert!(checkpoint_outcome.retained_files().is_empty());
+            assert_eq!(std::fs::read(checkpoint_target).expect("published target"), b"B");
+
+            let sync_hooks = ConditionalHooks::sequence(vec![
+                (ConditionalPoint::SyncNamespace, ConditionalHookAction::Noop),
+                (ConditionalPoint::SyncNamespace, ConditionalHookAction::Noop),
+                (
+                    ConditionalPoint::SyncNamespace,
+                    ConditionalHookAction::Fail(std::io::ErrorKind::PermissionDenied),
+                ),
+            ]);
+            let sync_backend = super::super::fake_backend::FakeBackend::new(b"A", b"B").with_hooks(sync_hooks);
+            let sync_calls = sync_backend.namespace_sync_observer();
+            let (_lease, sync_target) = sync_backend.target_observer();
+            let sync_outcome = super::super::commit::commit_conditional::<Sha256, _>(
+                sync_backend,
+                LocalWritePrecondition::Content(Sha256::digest(b"A")),
+                options,
+                1,
+            )
+            .expect("cleanup namespace sync failure must preserve published success");
+            assert_eq!(sync_calls.get(), 3, "{durability:?} namespace sync count");
+            assert!(!sync_outcome.cleanup_errors().is_empty());
+            assert!(sync_outcome.retained_files().is_empty());
+            assert_eq!(std::fs::read(sync_target).expect("published target"), b"B");
+        }
+    }
+
+    #[test]
+    fn conditional_state_not_required_still_reports_real_cleanup_failure() {
+        use super::super::ConditionalHooks;
+        use super::super::ConditionalPoint;
+        use crate::options::LocalWriteMode;
+        use crate::options::LocalWriteOptions;
+
+        let backend = super::super::fake_backend::FakeBackend::new(b"A", b"B").with_hooks(ConditionalHooks::fail_once(
+            ConditionalPoint::CleanupOld,
+            std::io::ErrorKind::PermissionDenied,
+        ));
+        let (_lease, target_path) = backend.target_observer();
+        let outcome = super::super::commit::commit_conditional::<Sha256, _>(
+            backend,
+            LocalWritePrecondition::Content(Sha256::digest(b"A")),
+            LocalWriteOptions::new(LocalWriteMode::CreateOrReplace),
+            1,
+        )
+        .expect("real deletion failure remains a successful commit outcome");
+
+        assert_eq!(outcome.cleanup_errors().len(), 1);
+        assert_eq!(outcome.retained_files().len(), 1);
+        assert_eq!(
+            outcome.retained_files()[0].role(),
+            crate::recovery::LocalRecoveryFileRole::Displaced
+        );
+        assert_eq!(std::fs::read(target_path).expect("published target"), b"B");
+    }
+
+    #[test]
     fn conditional_state_cleanup_sync_failure_after_copy_delete_is_reported_as_ok() {
         use super::super::ConditionalHooks;
         use super::super::ConditionalPoint;

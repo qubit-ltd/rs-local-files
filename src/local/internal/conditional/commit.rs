@@ -541,9 +541,10 @@ where
             )
         }
     };
-    if let Err(source) = backend
-        .checkpoint(ConditionalPoint::CleanupSync)
-        .and_then(|()| backend.sync_namespace())
+    if options.durability() != LocalDurabilityRequirement::NotRequired
+        && let Err(source) = backend
+            .checkpoint(ConditionalPoint::CleanupSync)
+            .and_then(|()| backend.sync_namespace())
     {
         cleanup_errors.push(LocalFileError::from_io(LocalFileOperation::Commit, None, None, source));
     }

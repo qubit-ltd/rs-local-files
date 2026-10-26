@@ -74,6 +74,7 @@ pub(super) struct FakeBackend {
     candidate: PathBuf,
     candidate_entry: ConditionalEntry,
     events: Rc<RefCell<Vec<Event>>>,
+    namespace_sync_calls: Rc<Cell<usize>>,
     hooks: ConditionalHooks,
     partial_publish: Cell<bool>,
     partial_rollback: Cell<bool>,
@@ -115,6 +116,7 @@ impl FakeBackend {
             candidate: candidate_path,
             candidate_entry,
             events: Rc::new(RefCell::new(Vec::new())),
+            namespace_sync_calls: Rc::new(Cell::new(0)),
             hooks: ConditionalHooks::default(),
             partial_publish: Cell::new(false),
             partial_rollback: Cell::new(false),
@@ -135,6 +137,9 @@ impl FakeBackend {
     }
     pub(super) fn events(&self) -> Rc<RefCell<Vec<Event>>> {
         Rc::clone(&self.events)
+    }
+    pub(super) fn namespace_sync_observer(&self) -> Rc<Cell<usize>> {
+        Rc::clone(&self.namespace_sync_calls)
     }
     pub(super) fn with_hooks(mut self, hooks: ConditionalHooks) -> Self {
         self.set_hooks(hooks);
@@ -303,6 +308,7 @@ impl ConditionalBackend for FakeBackend {
         self.inject(point)
     }
     fn sync_namespace(&self) -> io::Result<()> {
+        self.namespace_sync_calls.set(self.namespace_sync_calls.get() + 1);
         self.inject(ConditionalPoint::SyncNamespace)
     }
     fn is_candidate(&self, entry: &ConditionalEntry) -> io::Result<bool> {

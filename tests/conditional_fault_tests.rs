@@ -339,7 +339,8 @@ fn cleanup_directory_sync_error_keeps_success_even_after_copy_removal() {
         .open_conditional_writer::<Sha256>(
             &path,
             LocalWritePrecondition::Absent,
-            &LocalWriteOptions::new(LocalWriteMode::CreateOrReplace),
+            &LocalWriteOptions::new(LocalWriteMode::CreateOrReplace)
+                .with_durability(LocalDurabilityRequirement::Preferred),
         )
         .unwrap();
     writer.write_fully(b"B").unwrap();
@@ -347,6 +348,64 @@ fn cleanup_directory_sync_error_keeps_success_even_after_copy_removal() {
     assert_eq!(outcome.digest(), &Sha256::digest(b"B"));
     assert_eq!(outcome.retained_files().len(), 0);
     assert!(!outcome.cleanup_errors().is_empty());
+}
+
+#[test]
+fn default_durability_skips_cleanup_sync_checkpoint_for_host_and_rooted_writes() {
+    use qubit_local_files::LocalFileSystem;
+
+    for rooted in [false, true] {
+        for replace_existing in [false, true] {
+            let directory = tempdir().expect("fixture directory");
+            let physical_path = directory.path().join("target");
+            if replace_existing {
+                std::fs::write(&physical_path, b"A").expect("old target");
+            }
+            let path = if rooted {
+                std::path::PathBuf::from("/target")
+            } else {
+                physical_path.clone()
+            };
+            let mut filesystem = if rooted {
+                LocalFileSystem::rooted(directory.path()).expect("rooted filesystem")
+            } else {
+                conditional::host()
+            };
+            if rooted {
+                filesystem
+                    .set_symlink_policy(qubit_local_files::policy::LocalSymlinkPolicy::Reject)
+                    .expect("Rooted conditional writes reject symlinks");
+            }
+            let filesystem = filesystem.with_conditional_test_hooks(TestConditionalHooks::once(
+                TestConditionalPoint::BeforeCleanupSync,
+                || {
+                    Err(std::io::Error::new(
+                        std::io::ErrorKind::PermissionDenied,
+                        "cleanup sync checkpoint must be skipped",
+                    ))
+                },
+            ));
+            let precondition = if replace_existing {
+                LocalWritePrecondition::Content(Sha256::digest(b"A"))
+            } else {
+                LocalWritePrecondition::Absent
+            };
+            let mut writer = filesystem
+                .open_conditional_writer::<Sha256>(
+                    &path,
+                    precondition,
+                    &LocalWriteOptions::new(LocalWriteMode::CreateOrReplace),
+                )
+                .expect("default conditional writer opens");
+            writer.write_fully(b"B").expect("candidate accepts bytes");
+            let outcome = writer.commit().expect("NotRequired cleanup sync is skipped");
+
+            assert_eq!(std::fs::read(physical_path).expect("published target"), b"B");
+            assert!(outcome.cleanup_errors().is_empty());
+            assert!(outcome.retained_files().is_empty());
+            assert!(!outcome.write_outcome().durable());
+        }
+    }
 }
 
 #[test]
