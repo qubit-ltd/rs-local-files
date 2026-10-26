@@ -54,7 +54,7 @@ class LockedChecks(unittest.TestCase):
             checker.run(self.root, True)
         self.assertEqual(run.call_count, 3)
         for call in run.call_args_list:
-            self.assertEqual(call.args[0], ["cargo", "metadata", "--locked", "--format-version", "1"])
+            self.assertEqual(call.args[0], ["cargo", "metadata", "--locked", "--no-deps", "--format-version", "1"])
             self.assertTrue(call.kwargs["check"])
 
     def test_full_run_checks_every_graph_before_tests(self):
@@ -63,6 +63,21 @@ class LockedChecks(unittest.TestCase):
         self.assertEqual([call.args[0][1] for call in run.call_args_list], ["metadata"] * 3 + ["test"] * 3)
         for call in run.call_args_list:
             self.assertIn("--locked", call.args[0])
+
+    def test_candidate_run_tests_only_the_isolated_fixture(self):
+        fixture = self.root / "candidate-fixture"
+        fixture.mkdir()
+        for name in ("rs-fs-local", "rs-mime", "rs-local-files", "rs-io"):
+            (fixture / name).mkdir()
+        metadata = metadata_fixture(local_path=str(fixture / "rs-local-files/Cargo.toml"),
+                                    io_path=str(fixture / "rs-io/Cargo.toml"))
+        with patch.object(checker, "_metadata", return_value=metadata), \
+             patch.object(checker.subprocess, "run") as run:
+            checker.run(self.root, False, fixture)
+
+        self.assertEqual([call.args[0][1] for call in run.call_args_list],
+                         ["metadata"] * 3 + ["test"] * 2)
+        self.assertTrue(all(call.kwargs["cwd"].parent == fixture for call in run.call_args_list[-2:]))
 
     def test_failed_metadata_does_not_start_tests(self):
         with patch.object(checker.subprocess, "run", side_effect=subprocess.CalledProcessError(101, "cargo")) as run:

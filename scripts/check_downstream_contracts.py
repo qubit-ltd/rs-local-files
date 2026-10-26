@@ -78,7 +78,11 @@ def run(root: Path, metadata_only: bool, candidate_fixture: Path | None = None) 
     before = lock_digest(root)
     try:
         for name in REPOSITORIES:
-            subprocess.run(["cargo", "metadata", "--locked", "--format-version", "1"],
+            # The source checkouts contain newer path dependencies than some
+            # consumers' committed locks. Inspect each original manifest
+            # without resolving those external sources; the isolated candidate
+            # fixture below gets its own lock for full graph and test checks.
+            subprocess.run(["cargo", "metadata", "--locked", "--no-deps", "--format-version", "1"],
                            cwd=root / name, check=True, stdout=subprocess.DEVNULL)
         if candidate_fixture is not None:
             fixture = candidate_fixture.resolve(strict=True)
@@ -92,13 +96,14 @@ def run(root: Path, metadata_only: bool, candidate_fixture: Path | None = None) 
                     raise RuntimeError(f"consumer {name}: metadata has no resolve root")
                 validate_candidate_metadata(metadata, root_id, expected)
         if not metadata_only:
-            for name in REPOSITORIES:
-                subprocess.run(["cargo", "test", "--locked", "--all-features", "--no-fail-fast"],
-                               cwd=root / name, check=True)
             if candidate_fixture is not None:
                 for name in ("rs-fs-local", "rs-mime"):
                     subprocess.run(["cargo", "test", "--locked", "--all-features", "--no-fail-fast"],
                                    cwd=fixture / name, check=True)
+            else:
+                for name in REPOSITORIES:
+                    subprocess.run(["cargo", "test", "--locked", "--all-features", "--no-fail-fast"],
+                                   cwd=root / name, check=True)
     finally:
         if before != lock_digest(root):
             raise RuntimeError("manifest or lock changed during locked verification")
