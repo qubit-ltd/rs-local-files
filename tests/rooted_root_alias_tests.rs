@@ -110,9 +110,9 @@ mod unix {
         assert_eq!(LocalFileErrorKind::Unsupported, rejected.kind());
     }
 
-    /// Root aliases remain invalid deletion roots and persistence targets.
+    /// Dotted directory operands and a final link remain rejected at their own path boundary.
     #[test]
-    fn deletion_and_persistence_still_reject_root_aliases() {
+    fn directory_qualified_alias_and_final_link_operands_are_rejected() {
         let directory = tempdir().expect("temporary root should be created");
         fs::write(directory.path().join("sentinel"), b"keep").expect("sentinel should be written");
         symlink(".", directory.path().join("alias")).expect("root alias should be created");
@@ -150,6 +150,45 @@ mod unix {
             .resource_mut()
             .cleanup()
             .expect("rejected persistence should retain cleanup ownership");
+        assert!(directory.path().is_dir());
+        assert_eq!(
+            b"keep",
+            fs::read(directory.path().join("sentinel"))
+                .unwrap()
+                .as_slice()
+        );
+    }
+
+    /// Literal virtual-root operands are rejected before any removal or persist publication.
+    #[test]
+    fn virtual_root_operands_are_rejected_for_removal_and_persistence() {
+        let directory = tempdir().expect("temporary root should be created");
+        fs::write(directory.path().join("sentinel"), b"keep").expect("sentinel should be written");
+        let rooted = LocalFileSystem::rooted(directory.path()).expect("root authority should open");
+
+        let remove_file = rooted
+            .delete_file(Path::new("/"))
+            .expect_err("the virtual root cannot be removed as a file");
+        assert_eq!(LocalFileErrorKind::InvalidPath, remove_file.kind());
+        let remove_directory = rooted
+            .delete_directory(Path::new("/"))
+            .expect_err("the virtual root cannot be removed as a directory");
+        assert_eq!(LocalFileErrorKind::InvalidPath, remove_directory.kind());
+
+        let mut temporary = rooted
+            .create_temp_file()
+            .expect("temporary file should be created");
+        Output::write_fully(&mut temporary, b"source")
+            .expect("temporary contents should be written");
+        let mut persist = temporary
+            .persist(Path::new("/"))
+            .expect_err("the virtual root cannot be the final persistence target");
+        assert_eq!(LocalPersistFailureState::NotPublished, persist.state());
+        persist
+            .resource_mut()
+            .cleanup()
+            .expect("rejected persistence should retain cleanup ownership");
+
         assert!(directory.path().is_dir());
         assert_eq!(
             b"keep",
