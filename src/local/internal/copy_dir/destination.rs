@@ -40,6 +40,8 @@ use crate::local::internal::test_support;
 /// * `dst` - Destination directory path.
 /// * `conflict` - Same-kind conflict policy passed to the shared decision.
 /// * `type_conflict` - Policy for an existing non-directory destination.
+/// * `destination_removed` - Set after this call removes a conflicting entry,
+///   including when subsequent directory creation fails.
 ///
 /// # Returns
 ///
@@ -55,8 +57,9 @@ pub(super) fn ensure_copy_destination_dir(
     dst: &Path,
     conflict: LocalCopyConflictPolicy,
     type_conflict: LocalCopyTypeConflictPolicy,
+    destination_removed: &mut bool,
 ) -> Result<(CopyDestinationAction, bool)> {
-    let action = prepare_existing_directory_destination(dst, conflict, type_conflict)?;
+    let action = prepare_existing_directory_destination(dst, conflict, type_conflict, destination_removed)?;
     if !matches!(action, CopyDestinationAction::Create | CopyDestinationAction::Replace) {
         return Ok((action, false));
     }
@@ -171,6 +174,7 @@ pub(super) fn remove_destination_directory_if_unchanged(dst: &Path) -> Result<()
 /// * `dst` - Destination directory path.
 /// * `conflict` - Same-kind conflict policy passed to the shared decision.
 /// * `type_conflict` - Policy for an existing non-directory.
+/// * `destination_removed` - Set only after a conflicting entry was removed.
 ///
 /// # Returns
 ///
@@ -186,6 +190,7 @@ fn prepare_existing_directory_destination(
     dst: &Path,
     conflict: LocalCopyConflictPolicy,
     type_conflict: LocalCopyTypeConflictPolicy,
+    destination_removed: &mut bool,
 ) -> Result<CopyDestinationAction> {
     let Some(metadata) = destination_metadata_if_exists(dst)? else {
         return Ok(CopyDestinationAction::Create);
@@ -198,7 +203,7 @@ fn prepare_existing_directory_destination(
             )
         })?;
     if action == CopyDestinationAction::Replace {
-        remove_destination_non_directory_if_unchanged(dst)?;
+        *destination_removed = remove_destination_non_directory_if_unchanged(dst)?;
     }
     Ok(action)
 }
@@ -253,13 +258,13 @@ fn create_copy_destination_dir(dst: &Path) -> Result<bool> {
 ///
 /// # Returns
 ///
-/// `Ok(())` after the entry is absent, removed, or observed as a real
-/// directory.
+/// `true` after removing the entry, or `false` when the entry is absent or
+/// observed as a real directory.
 ///
 /// # Errors
 ///
 /// Returns the I/O error reported while inspecting or removing the entry.
-fn remove_destination_non_directory_if_unchanged(dst: &Path) -> Result<()> {
+fn remove_destination_non_directory_if_unchanged(dst: &Path) -> Result<bool> {
     let result = inspect_destination_metadata(dst);
     #[cfg(feature = "test-support")]
     let result = if test_support::is_enabled("copy-removal-race-not-found") {
@@ -269,15 +274,15 @@ fn remove_destination_non_directory_if_unchanged(dst: &Path) -> Result<()> {
     } else {
         result
     };
-    removable_non_directory_metadata(result)?.map_or(Ok(()), |metadata| {
+    removable_non_directory_metadata(result)?.map_or(Ok(false), |metadata| {
         #[cfg(windows)]
         if metadata.file_type().is_symlink_dir() {
             remove_directory_symlink(dst)?;
-            return Ok(());
+            return Ok(true);
         }
         #[cfg(not(windows))]
         let _ = metadata;
-        fs::remove_file(dst)
+        fs::remove_file(dst).map(|()| true)
     })
 }
 
@@ -314,15 +319,18 @@ mod tests {
     fn unchanged_real_directory_destination_can_be_removed() {
         let parent = tempfile::tempdir().expect("parent directory should be created");
         let absent = parent.path().join("absent");
+        let mut destination_removed = false;
         assert_eq!(
             prepare_existing_directory_destination(
                 &absent,
                 LocalCopyConflictPolicy::Fail,
                 LocalCopyTypeConflictPolicy::Fail,
+                &mut destination_removed,
             )
             .expect("missing destination should be prepared"),
             CopyDestinationAction::Create
         );
+        assert!(!destination_removed);
         let destination = parent.path().join("destination");
         std::fs::create_dir(&destination).expect("destination should be created");
         std::fs::write(destination.join("entry"), b"content").expect("child should be written");

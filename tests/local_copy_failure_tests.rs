@@ -14,6 +14,8 @@ use std::path::PathBuf;
 
 use qubit_local_files::LocalFileSystem;
 #[cfg(feature = "test-support")]
+use qubit_local_files::error::LocalFileErrorKind;
+#[cfg(feature = "test-support")]
 use qubit_local_files::options::LocalCopyConflictPolicy;
 use qubit_local_files::options::LocalCopyOptions;
 #[cfg(feature = "test-support")]
@@ -339,6 +341,79 @@ fn test_copy_failure_reports_unchanged_for_destination_preparation_fault() {
     });
 }
 
+#[cfg(feature = "test-support")]
+#[test]
+fn test_directory_creation_failure_without_replacement_reports_unchanged() {
+    const TEST_NAME: &str = "test_directory_creation_failure_without_replacement_reports_unchanged";
+    run_in_test_fault_process(TEST_NAME, "copy-directory-create-error", || {
+        let directory = tempfile::tempdir().expect("fixture directory should be created");
+        let source = directory.path().join("source");
+        let target = directory.path().join("target");
+        fs::create_dir(&source).expect("source directory should be created");
+
+        let failure = LocalFileSystem::host()
+            .expect("Host filesystem should open")
+            .copy_with_options(&source, &target, &LocalCopyOptions::new().with_tree_source())
+            .expect_err("creation must fail before changing the missing destination");
+
+        assert_eq!(LocalFileErrorKind::Io, failure.error().kind());
+        assert_eq!(std::io::ErrorKind::Other, failure.error().io_error_kind());
+        assert!(
+            failure
+                .error()
+                .to_string()
+                .contains("injected directory creation failure")
+        );
+        assert_eq!(LocalCopyFailureState::Unchanged, failure.state());
+        assert_eq!(&LocalCopyStats::default(), failure.partial_stats());
+        assert!(!target.exists());
+        assert!(source.is_dir());
+    });
+}
+
+#[cfg(feature = "test-support")]
+#[test]
+fn test_directory_replacement_creation_failure_reports_removed_destination() {
+    const TEST_NAME: &str = "test_directory_replacement_creation_failure_reports_removed_destination";
+    run_in_test_fault_process(TEST_NAME, "copy-directory-create-error", || {
+        let directory = tempfile::tempdir().expect("fixture directory should be created");
+        let source = directory.path().join("source");
+        let target = directory.path().join("target");
+        fs::create_dir(&source).expect("source directory should be created");
+        fs::write(source.join("payload"), b"source").expect("source payload should be written");
+        fs::write(&target, b"previous").expect("previous destination should be written");
+
+        let failure = LocalFileSystem::host()
+            .expect("Host filesystem should open")
+            .copy_with_options(
+                &source,
+                &target,
+                &LocalCopyOptions::new()
+                    .with_tree_source()
+                    .with_type_conflict(LocalCopyTypeConflictPolicy::Replace),
+            )
+            .expect_err("creation must fail after removing the conflicting file");
+
+        assert_eq!(LocalFileErrorKind::Io, failure.error().kind());
+        assert_eq!(std::io::ErrorKind::Other, failure.error().io_error_kind());
+        assert!(
+            failure
+                .error()
+                .to_string()
+                .contains("injected directory creation failure")
+        );
+        assert_eq!(LocalCopyFailureState::PartiallyPublished, failure.state());
+        assert_eq!(&LocalCopyStats::default(), failure.partial_stats());
+        assert!(!target.exists(), "the previous destination was irreversibly removed");
+        assert_eq!(
+            b"source",
+            fs::read(source.join("payload"))
+                .expect("source remains intact")
+                .as_slice()
+        );
+    });
+}
+
 /// Verifies source inspection failures in the recursive pipeline prove that no
 /// destination publication began.
 #[cfg(feature = "test-support")]
@@ -374,10 +449,28 @@ fn test_copy_failure_reports_directory_identity_cycle() {
         fs::create_dir_all(source.join("nested")).expect("nested source directory should be created");
         fs::write(source.join("nested/payload"), b"payload").expect("source payload should be written");
 
-        LocalFileSystem::host()
+        let failure = LocalFileSystem::host()
             .expect("Host filesystem should open")
             .copy_with_options(&source, &target, &LocalCopyOptions::default().with_tree_source())
             .expect_err("injected directory cycle must fail");
+
+        assert_eq!(LocalFileErrorKind::InvalidPath, failure.error().kind());
+        assert_eq!(std::io::ErrorKind::InvalidInput, failure.error().io_error_kind());
+        assert!(failure.error().to_string().contains("source directory cycle detected"));
+        assert_eq!(LocalCopyFailureState::PartiallyPublished, failure.state());
+        assert_eq!(1, failure.partial_stats().directories());
+        assert_eq!(0, failure.partial_stats().files());
+        assert_eq!(0, failure.partial_stats().bytes());
+        assert_eq!(0, failure.partial_stats().skipped());
+        assert_eq!(0, failure.partial_stats().overwritten());
+        assert!(target.is_dir());
+        assert!(!target.join("nested").exists());
+        assert_eq!(
+            b"payload",
+            fs::read(source.join("nested/payload"))
+                .expect("source remains intact")
+                .as_slice()
+        );
     });
 }
 
@@ -392,7 +485,7 @@ fn test_copy_failure_reports_staging_permission_failure() {
         let target = directory.path().join("target");
         fs::write(&source, b"payload").expect("source payload should be written");
 
-        LocalFileSystem::host()
+        let failure = LocalFileSystem::host()
             .expect("Host filesystem should open")
             .copy_with_options(
                 &source,
@@ -400,6 +493,26 @@ fn test_copy_failure_reports_staging_permission_failure() {
                 &LocalCopyOptions::default().with_metadata_preservation(LocalMetadataPreservePolicy::Permissions),
             )
             .expect_err("staging permission fault must fail");
+
+        assert_eq!(LocalFileErrorKind::Io, failure.error().kind());
+        #[cfg(unix)]
+        let injected_error = std::io::Error::from_raw_os_error(libc::EIO);
+        #[cfg(windows)]
+        let injected_error = std::io::Error::from_raw_os_error(windows_sys::Win32::Foundation::ERROR_IO_DEVICE as i32);
+        #[cfg(not(any(unix, windows)))]
+        let injected_error = std::io::Error::from(std::io::ErrorKind::Other);
+        assert_eq!(injected_error.kind(), failure.error().io_error_kind());
+        assert!(failure.error().to_string().contains(&injected_error.to_string()));
+        assert_eq!(LocalCopyFailureState::Indeterminate, failure.state());
+        assert_eq!(&LocalCopyStats::default(), failure.partial_stats());
+        assert!(!target.exists());
+        assert_eq!(
+            1,
+            fs::read_dir(directory.path())
+                .expect("fixture entries should be listed")
+                .count()
+        );
+        assert_eq!(b"payload", fs::read(&source).expect("source remains intact").as_slice());
     });
 }
 
@@ -415,7 +528,7 @@ fn test_copy_failure_reports_directory_statistics_overflow() {
         fs::create_dir_all(&source).expect("nested source directory should be created");
         fs::write(source.join("payload"), b"payload").expect("source payload should be written");
 
-        LocalFileSystem::host()
+        let failure = LocalFileSystem::host()
             .expect("Host filesystem should open")
             .copy_with_options(
                 &directory.path().join("source"),
@@ -423,6 +536,21 @@ fn test_copy_failure_reports_directory_statistics_overflow() {
                 &LocalCopyOptions::default().with_tree_source(),
             )
             .expect_err("directory statistics overflow must fail");
+
+        assert_statistics_overflow(&failure, "directories");
+        assert_eq!(LocalCopyFailureState::Indeterminate, failure.state());
+        assert_eq!(&LocalCopyStats::default(), failure.partial_stats());
+        assert!(target.is_dir(), "directory was created before accounting failed");
+        assert_eq!(
+            0,
+            fs::read_dir(&target).expect("target entries should be listed").count()
+        );
+        assert_eq!(
+            b"payload",
+            fs::read(source.join("payload"))
+                .expect("source remains intact")
+                .as_slice()
+        );
     });
 }
 
@@ -438,7 +566,7 @@ fn test_copy_failure_reports_skipped_statistics_overflow() {
         fs::write(&source, b"source").expect("source payload should be written");
         fs::write(&target, b"target").expect("target payload should be written");
 
-        LocalFileSystem::host()
+        let failure = LocalFileSystem::host()
             .expect("Host filesystem should open")
             .copy_with_options(
                 &source,
@@ -446,6 +574,15 @@ fn test_copy_failure_reports_skipped_statistics_overflow() {
                 &LocalCopyOptions::default().with_conflict(LocalCopyConflictPolicy::Skip),
             )
             .expect_err("skipped statistics overflow must fail");
+
+        assert_statistics_overflow(&failure, "skipped");
+        assert_eq!(LocalCopyFailureState::Indeterminate, failure.state());
+        assert_eq!(&LocalCopyStats::default(), failure.partial_stats());
+        assert_eq!(
+            b"target",
+            fs::read(&target).expect("existing target remains intact").as_slice()
+        );
+        assert_eq!(b"source", fs::read(&source).expect("source remains intact").as_slice());
     });
 }
 
@@ -460,10 +597,21 @@ fn test_copy_failure_reports_file_statistics_overflow() {
         let target = directory.path().join("target");
         fs::write(&source, b"source").expect("source payload should be written");
 
-        LocalFileSystem::host()
+        let failure = LocalFileSystem::host()
             .expect("Host filesystem should open")
             .copy_with_options(&source, &target, &LocalCopyOptions::default())
             .expect_err("file statistics overflow must fail");
+
+        assert_statistics_overflow(&failure, "files");
+        assert_eq!(LocalCopyFailureState::Indeterminate, failure.state());
+        assert_eq!(&LocalCopyStats::default(), failure.partial_stats());
+        assert_eq!(
+            b"source",
+            fs::read(&target)
+                .expect("file was published before accounting failed")
+                .as_slice()
+        );
+        assert_eq!(b"source", fs::read(&source).expect("source remains intact").as_slice());
     });
 }
 
@@ -478,10 +626,21 @@ fn test_copy_failure_reports_byte_statistics_overflow() {
         let target = directory.path().join("target");
         fs::write(&source, b"source").expect("source payload should be written");
 
-        LocalFileSystem::host()
+        let failure = LocalFileSystem::host()
             .expect("Host filesystem should open")
             .copy_with_options(&source, &target, &LocalCopyOptions::default())
             .expect_err("byte statistics overflow must fail");
+
+        assert_statistics_overflow(&failure, "bytes");
+        assert_eq!(LocalCopyFailureState::Indeterminate, failure.state());
+        assert_eq!(&LocalCopyStats::default(), failure.partial_stats());
+        assert_eq!(
+            b"source",
+            fs::read(&target)
+                .expect("file was published before accounting failed")
+                .as_slice()
+        );
+        assert_eq!(b"source", fs::read(&source).expect("source remains intact").as_slice());
     });
 }
 
@@ -500,7 +659,7 @@ fn test_copy_failure_reports_overwritten_statistics_overflow() {
         fs::create_dir(&target).expect("target directory should be created");
         fs::write(target.join("payload"), b"target").expect("target payload should be written");
 
-        LocalFileSystem::host()
+        let failure = LocalFileSystem::host()
             .expect("Host filesystem should open")
             .copy_with_options(
                 &source,
@@ -510,5 +669,35 @@ fn test_copy_failure_reports_overwritten_statistics_overflow() {
                     .with_conflict(LocalCopyConflictPolicy::Overwrite),
             )
             .expect_err("overwritten statistics overflow must fail");
+
+        assert_statistics_overflow(&failure, "overwritten");
+        assert_eq!(LocalCopyFailureState::Indeterminate, failure.state());
+        assert_eq!(&LocalCopyStats::default(), failure.partial_stats());
+        assert_eq!(
+            b"target",
+            fs::read(target.join("payload"))
+                .expect("target remains intact before root merge accounting")
+                .as_slice()
+        );
+        assert_eq!(
+            b"source",
+            fs::read(source.join("payload"))
+                .expect("source remains intact")
+                .as_slice()
+        );
     });
+}
+
+#[cfg(feature = "test-support")]
+fn assert_statistics_overflow(failure: &qubit_local_files::outcome::LocalCopyFailure, field: &str) {
+    assert_eq!(LocalFileErrorKind::DataCorruption, failure.error().kind());
+    assert_eq!(std::io::ErrorKind::InvalidData, failure.error().io_error_kind());
+    assert!(
+        failure
+            .error()
+            .to_string()
+            .contains(&format!("recursive-copy {field} statistics overflow"))
+    );
+    assert!(failure.staging_path().is_none());
+    assert!(failure.cleanup_error().is_none());
 }

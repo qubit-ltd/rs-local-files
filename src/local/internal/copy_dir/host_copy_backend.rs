@@ -30,6 +30,7 @@ use crate::LocalCopyConflictPolicy;
 use crate::LocalCopyDirOptions;
 use crate::LocalCopyDirStage;
 use crate::LocalCopyDirStats;
+use crate::LocalCopyFailureState;
 use crate::local::CopyBudget;
 use crate::local::CopyDestinationAction;
 use crate::local::internal::CopyTreeBackend;
@@ -306,13 +307,21 @@ fn enter_copy_directory(
             ),
         ));
     }
-    let (action, created) = with_copy_context(
-        ensure_copy_destination_dir(dst, options.conflict_policy(), options.type_conflict_policy()),
-        LocalCopyDirStage::PrepareDestination,
-        src,
+    let mut destination_removed = false;
+    let (action, created) = ensure_copy_destination_dir(
         dst,
-        stats,
-    )?;
+        options.conflict_policy(),
+        options.type_conflict_policy(),
+        &mut destination_removed,
+    )
+    .map_err(|source| {
+        let error = copy_dir_error(LocalCopyDirStage::PrepareDestination, src, dst, stats, source);
+        if destination_removed {
+            error.with_failure_state(LocalCopyFailureState::PartiallyPublished)
+        } else {
+            error
+        }
+    })?;
     if action == CopyDestinationAction::Skip {
         with_copy_context(
             record_skipped_file(stats),
