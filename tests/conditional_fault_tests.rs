@@ -143,9 +143,7 @@ fn windows_sharing_failure_removes_empty_owned_recovery_container() {
         .expect("conditional writer should open");
     writer.write_fully(b"B").expect("candidate should accept bytes");
 
-    let failure = writer
-        .commit()
-        .expect_err("sharing lock should prevent ReplaceFileW");
+    let failure = writer.commit().expect_err("sharing lock should prevent ReplaceFileW");
 
     assert_eq!(std::fs::read(&target).expect("target should remain"), b"A");
     assert_eq!(
@@ -154,7 +152,10 @@ fn windows_sharing_failure_removes_empty_owned_recovery_container() {
     );
     assert_eq!(conditional::read_candidate(&failure), b"B");
     assert!(
-        failure.recovery_files().iter().all(|file| file.role() != LocalRecoveryFileRole::Displaced),
+        failure
+            .recovery_files()
+            .iter()
+            .all(|file| file.role() != LocalRecoveryFileRole::Displaced),
         "no backup should be retained when ReplaceFileW did not create one"
     );
     assert!(

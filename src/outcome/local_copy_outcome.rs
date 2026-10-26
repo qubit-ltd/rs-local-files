@@ -21,15 +21,13 @@ use crate::LocalMetadataPreservePolicy;
 /// ```
 /// use qubit_local_files::LocalFileSystem;
 ///
+/// let directory = tempfile::tempdir()?;
 /// let filesystem = LocalFileSystem::host()?;
-/// let directory = std::env::temp_dir();
-/// let source = directory.join(format!("qubit-copy-source-{}", std::process::id()));
-/// let target = directory.join(format!("qubit-copy-target-{}", std::process::id()));
+/// let source = directory.path().join("source.txt");
+/// let target = directory.path().join("copy.txt");
 /// std::fs::write(&source, b"copy example")?;
 /// let outcome = filesystem.copy(&source, &target)?;
 /// assert_eq!(outcome.stats().bytes(), 12);
-/// std::fs::remove_file(source)?;
-/// std::fs::remove_file(target)?;
 /// # Ok::<(), Box<dyn std::error::Error>>(())
 /// ```
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]

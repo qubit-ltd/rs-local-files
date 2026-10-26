@@ -214,14 +214,24 @@ impl<'a> PrivateEntryGuard<'a> {
             Ok(()) => primary,
             Err(cleanup) => {
                 let kind = primary.kind();
-                io::Error::new(kind, PrivateEntrySetupError { primary, cleanup, path: self.path.clone() })
+                io::Error::new(
+                    kind,
+                    PrivateEntrySetupError {
+                        primary,
+                        cleanup,
+                        path: self.path.clone(),
+                    },
+                )
             }
         }
     }
 
     fn cleanup(&self) -> io::Result<()> {
         let Some(identity) = self.identity else {
-            return Err(io::Error::new(io::ErrorKind::InvalidData, "private entry identity unavailable"));
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidData,
+                "private entry identity unavailable",
+            ));
         };
         self.namespace.delete_created_private(self.file, Some(identity))
     }
@@ -245,7 +255,13 @@ struct PrivateEntrySetupError {
 
 impl fmt::Display for PrivateEntrySetupError {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(formatter, "{}; private-entry cleanup failed at {}: {}", self.primary, self.path.display(), self.cleanup)
+        write!(
+            formatter,
+            "{}; private-entry cleanup failed at {}: {}",
+            self.primary,
+            self.path.display(),
+            self.cleanup
+        )
     }
 }
 
@@ -542,7 +558,11 @@ impl WindowsConditionalBackend {
             Err(cleanup) => {
                 let error = io::Error::new(
                     cleanup.kind(),
-                    format!("empty recovery container cleanup failed at {}: {}", container.display(), cleanup),
+                    format!(
+                        "empty recovery container cleanup failed at {}: {}",
+                        container.display(),
+                        cleanup
+                    ),
                 );
                 attempt.error = combine_observation_error(attempt.error, Some(error));
             }
@@ -895,12 +915,8 @@ impl ConditionalBackend for WindowsConditionalBackend {
             }
             Err(error) => {
                 let hook_error = self.checkpoint_action(ConditionalPoint::AfterRollbackSyscall).err();
-                let attempt = self.collect_rollback_receipt(
-                    Some(error).or(hook_error),
-                    expected_restored,
-                    &container,
-                    &backup,
-                );
+                let attempt =
+                    self.collect_rollback_receipt(Some(error).or(hook_error), expected_restored, &container, &backup);
                 self.cleanup_empty_container(container, backup, attempt)
             }
         }

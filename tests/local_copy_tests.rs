@@ -732,7 +732,8 @@ fn test_local_copy_preferred_durability_reports_downgrade() {
     );
 }
 
-/// Verifies required copy durability reports a post-publication parent-sync failure.
+/// Verifies required copy durability reports a post-publication parent-sync
+/// failure.
 #[cfg(all(unix, feature = "test-support"))]
 #[test]
 fn test_local_copy_required_durability_reports_published_parent_sync_failure() {
@@ -752,10 +753,14 @@ fn test_local_copy_required_durability_reports_published_parent_sync_failure() {
         .expect_err("required durability must report a parent-sync failure");
 
     assert_eq!(LocalCopyFailureState::Published, failure.state());
-    assert_eq!(b"payload", fs::read(&target).expect("target must remain published").as_slice());
+    assert_eq!(
+        b"payload",
+        fs::read(&target).expect("target must remain published").as_slice()
+    );
 }
 
-/// Verifies preferred copy durability downgrades when directory access is denied.
+/// Verifies preferred copy durability downgrades when directory access is
+/// denied.
 #[cfg(unix)]
 #[test]
 fn test_local_copy_preferred_durability_handles_permission_denial_when_enforced() {

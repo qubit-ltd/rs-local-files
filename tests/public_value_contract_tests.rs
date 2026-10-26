@@ -169,12 +169,20 @@ fn test_local_file_error_display_propagates_formatter_failure() {
         .with_target("target".into());
     let expected = error.to_string();
 
-    let mut rejecting = RejectingWriter { successful_writes: 0, rejected: false, output: String::new() };
+    let mut rejecting = RejectingWriter {
+        successful_writes: 0,
+        rejected: false,
+        output: String::new(),
+    };
     let result = fmt::write(&mut rejecting, format_args!("{error}"));
     assert!(rejecting.rejected, "writer must actually reject formatting");
     assert_eq!(Err(fmt::Error), result);
 
-    let mut accepting = RejectingWriter { successful_writes: usize::MAX, rejected: false, output: String::new() };
+    let mut accepting = RejectingWriter {
+        successful_writes: usize::MAX,
+        rejected: false,
+        output: String::new(),
+    };
     let result = fmt::write(&mut accepting, format_args!("{error}"));
     assert!(!accepting.rejected);
     assert_eq!(Ok(()), result);

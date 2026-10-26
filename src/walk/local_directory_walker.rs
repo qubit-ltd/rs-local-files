@@ -687,22 +687,20 @@ impl LocalDirectoryWalker {
                 }
             };
             let may_descend = self.may_descend(entry_depth);
-            let descent_metadata = if entry_metadata.file_type().is_symlink()
-                && may_descend
-                && self.symlink_policy.follows()
-            {
-                match fs::metadata(&path) {
-                    Ok(metadata) => metadata,
-                    Err(error) => {
-                        if self.options.error_policy() == LocalWalkErrorPolicy::FailFast {
-                            self.terminated = true;
+            let descent_metadata =
+                if entry_metadata.file_type().is_symlink() && may_descend && self.symlink_policy.follows() {
+                    match fs::metadata(&path) {
+                        Ok(metadata) => metadata,
+                        Err(error) => {
+                            if self.options.error_policy() == LocalWalkErrorPolicy::FailFast {
+                                self.terminated = true;
+                            }
+                            return Some(Err(walk_io_error(&path, error)));
                         }
-                        return Some(Err(walk_io_error(&path, error)));
                     }
-                }
-            } else {
-                entry_metadata.clone()
-            };
+                } else {
+                    entry_metadata.clone()
+                };
             let is_directory = descent_metadata.file_type().is_dir();
             let metadata = LocalFileMetadata::from_native(&entry_metadata);
 

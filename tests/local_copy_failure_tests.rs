@@ -166,8 +166,8 @@ fn test_copy_failure_reports_partial_destination_removal() {
     fs::create_dir(&target).expect("destination directory should be created");
     fs::write(target.join("first"), b"first").expect("first child should be written");
     fs::write(target.join("second"), b"second").expect("second child should be written");
-    let _fault = install_test_fault("copy-destination-remove-after-child")
-        .expect("partial removal fault should install");
+    let _fault =
+        install_test_fault("copy-destination-remove-after-child").expect("partial removal fault should install");
 
     let failure = LocalFileSystem::host()
         .expect("Host filesystem should open")
@@ -179,10 +179,7 @@ fn test_copy_failure_reports_partial_destination_removal() {
         .expect_err("injected removal failure should fail the copy");
 
     assert_ne!(LocalCopyFailureState::Unchanged, failure.state());
-    assert!(
-        target.is_dir(),
-        "the incompletely removed destination should remain"
-    );
+    assert!(target.is_dir(), "the incompletely removed destination should remain");
     assert_eq!(
         1,
         fs::read_dir(&target)

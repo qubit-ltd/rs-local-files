@@ -1,7 +1,9 @@
 // =============================================================================
-//    Copyright (c) 2026 Haixing Hu.
+//    Copyright (c) 2025 - 2026 Haixing Hu.
 //
 //    SPDX-License-Identifier: Apache-2.0
+//
+//    Licensed under the Apache License, Version 2.0.
 // =============================================================================
 
 use std::fs;
@@ -69,11 +71,7 @@ fn test_temp_affixes_allow_legal_fragments_and_default_names() {
         } else {
             LocalFileSystem::host().expect("host authority should open")
         };
-        let parent = if rooted {
-            Path::new("/")
-        } else {
-            fixture.path()
-        };
+        let parent = if rooted { Path::new("/") } else { fixture.path() };
         for directory_entry in [false, true] {
             for (prefix, suffix) in [
                 (Some("tmp."), None),

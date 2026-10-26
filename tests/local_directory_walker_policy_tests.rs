@@ -276,14 +276,19 @@ fn test_local_directory_walker_continue_skips_handle_limited_branch() {
                 None => panic!("handle limit should be reached while entering nested"),
             }
         }
-        assert!(fail_fast.next().is_none(), "FailFast should fuse after the local branch error");
+        assert!(
+            fail_fast.next().is_none(),
+            "FailFast should fuse after the local branch error"
+        );
 
         let options = LocalListOptions::new()
             .with_recursive()
             .with_max_open_directories(1)
             .with_reopen_policy(qubit_local_files::options::LocalDirectoryReopenPolicy::Fail)
             .with_error_policy(LocalWalkErrorPolicy::Continue);
-        let walker = filesystem.list_with_options(root, &options).expect("walker should open");
+        let walker = filesystem
+            .list_with_options(root, &options)
+            .expect("walker should open");
 
         let mut saw_capacity_error = false;
         let mut saw_sibling = false;
@@ -302,7 +307,8 @@ fn test_local_directory_walker_continue_skips_handle_limited_branch() {
     }
 }
 
-/// Verifies a scripted local open error precedes a later sibling on both backends.
+/// Verifies a scripted local open error precedes a later sibling on both
+/// backends.
 #[cfg(feature = "test-support")]
 #[test]
 fn test_local_directory_walker_scripted_open_error_precedes_sibling() {
@@ -329,7 +335,9 @@ fn test_local_directory_walker_scripted_open_error_precedes_sibling() {
                 .with_max_open_directories(1)
                 .with_reopen_policy(qubit_local_files::options::LocalDirectoryReopenPolicy::Fail)
                 .with_error_policy(LocalWalkErrorPolicy::Continue);
-            let walker = filesystem.list_with_options(root, &options).expect("walker should open");
+            let walker = filesystem
+                .list_with_options(root, &options)
+                .expect("walker should open");
 
             let results = walker.collect::<Vec<_>>();
             let error_index = results
@@ -337,9 +345,9 @@ fn test_local_directory_walker_scripted_open_error_precedes_sibling() {
                 .position(|result| {
                     result.as_ref().err().is_some_and(|error| {
                         error.kind() == LocalFileErrorKind::ResourceLimit
-                            && error.resource_limit_error().is_some_and(|limit| {
-                                limit.resource() == LocalResourceKind::OpenDirectory
-                            })
+                            && error
+                                .resource_limit_error()
+                                .is_some_and(|limit| limit.resource() == LocalResourceKind::OpenDirectory)
                             && error.path().and_then(Path::file_name) == Some(std::ffi::OsStr::new("nested"))
                     })
                 })
@@ -353,11 +361,13 @@ fn test_local_directory_walker_scripted_open_error_precedes_sibling() {
                         .is_some_and(|entry| entry.relative_path() == "sibling")
                 })
                 .expect("Continue should return the sibling after the nested-child error");
-            assert!(error_index < sibling_index, "nested error must precede sibling: {results:?}");
+            assert!(
+                error_index < sibling_index,
+                "nested error must precede sibling: {results:?}"
+            );
             assert!(
                 results.iter().all(|result| result.as_ref().ok().is_none_or(|entry| {
-                    entry.relative_path() == Path::new("nested")
-                        || !entry.relative_path().starts_with("nested")
+                    entry.relative_path() == Path::new("nested") || !entry.relative_path().starts_with("nested")
                 })),
                 "the failed nested branch must not yield descendants: {results:?}"
             );
@@ -389,8 +399,7 @@ fn test_local_directory_walker_resolves_links_only_when_descent_is_allowed() {
         fs::create_dir(&target).expect("target directory should be created");
         fs::write(target.join("child"), b"payload").expect("target child should be written");
         symlink("target", directory.path().join("directory-link")).expect("directory link should be created");
-        symlink("missing", directory.path().join("dangling"))
-            .expect("dangling link should be created");
+        symlink("missing", directory.path().join("dangling")).expect("dangling link should be created");
         symlink("..", target.join("cycle")).expect("cycle link should be created");
 
         let filesystem = if rooted {
@@ -423,12 +432,16 @@ fn test_local_directory_walker_resolves_links_only_when_descent_is_allowed() {
             .expect("recursive walker should open");
         let results = recursive.collect::<Vec<_>>();
         assert!(
-            results.iter().filter_map(|result| result.as_ref().ok()).any(|entry| {
-                entry.relative_path() == "directory-link/child"
-            }),
+            results
+                .iter()
+                .filter_map(|result| result.as_ref().ok())
+                .any(|entry| { entry.relative_path() == "directory-link/child" }),
             "directory symlink should be followed (rooted={rooted}): {results:?}",
         );
-        assert!(results.iter().any(|result| result.as_ref().is_err()), "recursive dangling/cycle links should fail");
+        assert!(
+            results.iter().any(|result| result.as_ref().is_err()),
+            "recursive dangling/cycle links should fail"
+        );
         assert!(
             results
                 .iter()
@@ -535,7 +548,9 @@ fn test_local_directory_walker_resource_limit_terminates_continue_policy() {
                 .with_max_seen_name_bytes(0)
                 .with_error_policy(LocalWalkErrorPolicy::Continue),
         ] {
-            let mut walker = filesystem.list_with_options(root, &options).expect("walker should open");
+            let mut walker = filesystem
+                .list_with_options(root, &options)
+                .expect("walker should open");
             assert!(walker.next().expect("resource limit should be yielded").is_err());
             assert!(walker.next().is_none(), "global resource exhaustion must terminate");
         }
@@ -617,7 +632,8 @@ fn test_local_directory_walker_follow_mode_traverses_links_and_rejects_cycles() 
     assert_eq!(LocalFileErrorKind::InvalidPath, error.kind());
 }
 
-/// Verifies non-recursive follow mode yields a dangling link without resolving it.
+/// Verifies non-recursive follow mode yields a dangling link without resolving
+/// it.
 #[cfg(unix)]
 #[test]
 fn test_local_directory_walker_follow_mode_reports_dangling_link() {

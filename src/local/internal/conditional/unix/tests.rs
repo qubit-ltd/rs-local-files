@@ -16,9 +16,9 @@ use qubit_io::Streams;
 use sha2::Sha256;
 
 use super::super::commit::commit_conditional;
+use super::UnixConditionalBackend;
 use super::namespace::Namespace;
 use super::test_support;
-use super::UnixConditionalBackend;
 use crate::local::internal::conditional::ConditionalBackend;
 use crate::local::internal::conditional::ConditionalHookAction;
 use crate::local::internal::conditional::ConditionalHooks;
@@ -47,13 +47,11 @@ fn conditional_unix_candidate_setup_failures_cleanup_or_report_the_candidate() {
         (test_support::FailurePoint::EntryParentClone, false),
     ] {
         let directory = tempfile::tempdir().expect("fixture directory should be created");
-        let namespace =
-            Namespace::open_host(&directory.path().join("target"), &LocalWriteOptions::default())
-                .expect("namespace should open");
+        let namespace = Namespace::open_host(&directory.path().join("target"), &LocalWriteOptions::default())
+            .expect("namespace should open");
         test_support::fail_next(point);
 
-        let error =
-            UnixConditionalBackend::open(namespace).expect_err("injected setup step should fail");
+        let error = UnixConditionalBackend::open(namespace).expect_err("injected setup step should fail");
 
         assert!(
             error.to_string().contains("injected"),
@@ -90,11 +88,7 @@ fn conditional_unix_candidate_copy_registration_failure_cleans_copy() {
         .create_candidate_copy()
         .expect_err("injected candidate-copy registration should fail");
 
-    assert!(
-        error
-            .to_string()
-            .contains("injected CandidateCopyRegistration failure")
-    );
+    assert!(error.to_string().contains("injected CandidateCopyRegistration failure"));
     assert!(
         private_entries(directory.path(), ".qubit-candidate-copy-").is_empty(),
         "candidate copy should not remain unreported"

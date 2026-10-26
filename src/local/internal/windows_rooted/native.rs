@@ -63,7 +63,8 @@ pub(in crate::local::internal) fn nt_open_at(
     nt_open_at_with_share_mode(parent, name, access, disposition, options, ROOTED_SHARE_MODE)
 }
 
-/// Opens or creates one name relative to a retained directory with explicit sharing.
+/// Opens or creates one name relative to a retained directory with explicit
+/// sharing.
 pub(in crate::local::internal) fn nt_open_at_with_share_mode(
     parent: &File,
     name: &OsStr,

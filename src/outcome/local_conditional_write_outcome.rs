@@ -69,12 +69,10 @@ impl<D: Digest> LocalConditionalWriteOutcome<D> {
     ) -> Self {
         let cleanup_errors = cleanup_errors
             .into_iter()
-            .map(
-                |error| match (error.current_directory(), current_directory.as_ref()) {
-                    (None, Some(directory)) => error.with_current_directory(directory.clone()),
-                    _ => error,
-                },
-            )
+            .map(|error| match (error.current_directory(), current_directory.as_ref()) {
+                (None, Some(directory)) => error.with_current_directory(directory.clone()),
+                _ => error,
+            })
             .collect();
         Self {
             digest,

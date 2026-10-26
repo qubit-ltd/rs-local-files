@@ -187,7 +187,9 @@ fn host_absolute_commit_error_has_no_pwd_fallback() {
         )
         .expect("absolute Host writer should open");
     writer.write_fully(b"candidate").expect("candidate should accept bytes");
-    let error = writer.commit().expect_err("existing target should reject absent condition");
+    let error = writer
+        .commit()
+        .expect_err("existing target should reject absent condition");
     assert_eq!(None, error.error().current_directory());
 }
 

@@ -46,7 +46,11 @@ fn test_clear_nonblocking_restores_descriptor_flags() {
     let after = unsafe { libc::fcntl(file.as_raw_fd(), libc::F_GETFL) };
     assert_ne!(-1, after);
     assert_eq!(before & !libc::O_NONBLOCK, after);
-    assert_ne!(0, after & libc::O_APPEND, "clearing nonblocking must retain append mode");
+    assert_ne!(
+        0,
+        after & libc::O_APPEND,
+        "clearing nonblocking must retain append mode"
+    );
     assert_eq!(0, after & libc::O_NONBLOCK);
 }
 

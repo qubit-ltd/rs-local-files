@@ -1,3 +1,10 @@
+// =============================================================================
+//    Copyright (c) 2025 - 2026 Haixing Hu.
+//
+//    SPDX-License-Identifier: Apache-2.0
+//
+//    Licensed under the Apache License, Version 2.0.
+// =============================================================================
 use std::fs;
 use std::path::Path;
 
@@ -20,10 +27,7 @@ fn test_rooted_delete_type_contract_preserves_mismatched_entries() {
         .delete_directory_with_options(Path::new("file"), &LocalDeleteOptions::new())
         .expect_err("directory deletion must reject a file");
     assert_eq!(LocalFileErrorKind::NotDirectory, file_as_directory.kind());
-    assert_eq!(
-        b"keep",
-        fs::read(&file).expect("file should remain").as_slice()
-    );
+    assert_eq!(b"keep", fs::read(&file).expect("file should remain").as_slice());
 
     let directory_as_file = filesystem
         .delete_file_with_options(Path::new("directory"), &LocalDeleteOptions::new())

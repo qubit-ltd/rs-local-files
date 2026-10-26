@@ -12,12 +12,11 @@ use std::os::windows::ffi::OsStrExt;
 use std::os::windows::fs::OpenOptionsExt;
 use std::path::Path;
 
-use windows_sys::Win32::Foundation::ERROR_SHARING_VIOLATION;
-
 use digest::Digest;
 use qubit_io::Streams;
 use sha2::Sha256;
 use sha2::digest::Output;
+use windows_sys::Win32::Foundation::ERROR_SHARING_VIOLATION;
 
 use super::PrivateEntryGuard;
 use super::WindowsConditionalBackend;
@@ -484,7 +483,10 @@ fn conditional_windows_sharing_conflict_preserves_candidate_and_target() {
             .filter_map(Result::ok)
             .all(|entry| {
                 entry.file_type().is_ok_and(|kind| !kind.is_dir())
-                    || !entry.file_name().to_string_lossy().starts_with(".qubit-conditional-recovery-")
+                    || !entry
+                        .file_name()
+                        .to_string_lossy()
+                        .starts_with(".qubit-conditional-recovery-")
             }),
         "empty recovery container should be removed when ReplaceFileW makes no backup"
     );
@@ -643,9 +645,11 @@ fn conditional_windows_failed_container_verification_cleans_bound_directory() {
         .backup_container()
         .expect_err("injected verification failure should fail creation");
 
-    assert!(error
-        .to_string()
-        .contains("injected recovery container verification failure"));
+    assert!(
+        error
+            .to_string()
+            .contains("injected recovery container verification failure")
+    );
     let leftovers: Vec<_> = fs::read_dir(directory.path())
         .expect("fixture directory should be readable")
         .map(|entry| entry.expect("directory entry should be readable").path())
@@ -666,7 +670,9 @@ fn conditional_windows_recovery_container_name_cannot_be_replaced_while_owned() 
     let target = directory.path().join("target");
     let namespace =
         Namespace::open_host(&target, &options(LocalWriteMode::CreateOrReplace)).expect("Host namespace should open");
-    let (container, _) = namespace.backup_container().expect("recovery container should be created");
+    let (container, _) = namespace
+        .backup_container()
+        .expect("recovery container should be created");
     let moved = directory.path().join("replacement-container");
     let error = fs::rename(&container, &moved).expect_err("owned directory name must reject replacement");
     assert_eq!(
@@ -688,7 +694,9 @@ fn conditional_windows_recovery_container_cleanup_refuses_non_empty_directory() 
     let target = directory.path().join("target");
     let namespace =
         Namespace::open_host(&target, &options(LocalWriteMode::CreateOrReplace)).expect("Host namespace should open");
-    let (container, _) = namespace.backup_container().expect("recovery container should be created");
+    let (container, _) = namespace
+        .backup_container()
+        .expect("recovery container should be created");
     let marker = container.join("user-data");
     fs::write(&marker, b"keep").expect("container data should be written");
 

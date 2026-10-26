@@ -129,7 +129,8 @@ pub(crate) mod lifecycle {
     }
 
     impl DirectorySnapshot {
-        /// Captures the complete tree within the harness entry and byte budgets.
+        /// Captures the complete tree within the harness entry and byte
+        /// budgets.
         fn capture(root: &Path) -> Self {
             fn visit(
                 path: &Path,
@@ -141,10 +142,7 @@ pub(crate) mod lifecycle {
                     relative.components().count() <= MAX_DEPTH,
                     "snapshot exceeded its depth budget"
                 );
-                assert!(
-                    entries.len() < MAX_ENTRIES,
-                    "snapshot exceeded its entry budget"
-                );
+                assert!(entries.len() < MAX_ENTRIES, "snapshot exceeded its entry budget");
                 let metadata = fs::symlink_metadata(path).expect("snapshot entry metadata");
                 let snapshot_entry = if metadata.file_type().is_symlink() {
                     let target = fs::read_link(path).expect("read snapshot link text");
@@ -152,31 +150,21 @@ pub(crate) mod lifecycle {
                         .checked_add(relative.as_os_str().len())
                         .and_then(|size| size.checked_add(target.as_os_str().len()))
                         .expect("snapshot byte budget arithmetic");
-                    assert!(
-                        *byte_count <= MAX_SNAPSHOT_BYTES,
-                        "snapshot exceeded its byte budget"
-                    );
+                    assert!(*byte_count <= MAX_SNAPSHOT_BYTES, "snapshot exceeded its byte budget");
                     SnapshotEntry::Symlink(target)
                 } else if metadata.is_dir() {
                     *byte_count = byte_count
                         .checked_add(relative.as_os_str().len())
                         .expect("snapshot byte budget arithmetic");
-                    assert!(
-                        *byte_count <= MAX_SNAPSHOT_BYTES,
-                        "snapshot exceeded its byte budget"
-                    );
+                    assert!(*byte_count <= MAX_SNAPSHOT_BYTES, "snapshot exceeded its byte budget");
                     SnapshotEntry::Directory
                 } else if metadata.is_file() {
-                    let file_size =
-                        usize::try_from(metadata.len()).expect("snapshot file size fits usize");
+                    let file_size = usize::try_from(metadata.len()).expect("snapshot file size fits usize");
                     *byte_count = byte_count
                         .checked_add(relative.as_os_str().len())
                         .and_then(|size| size.checked_add(file_size))
                         .expect("snapshot byte budget arithmetic");
-                    assert!(
-                        *byte_count <= MAX_SNAPSHOT_BYTES,
-                        "snapshot exceeded its byte budget"
-                    );
+                    assert!(*byte_count <= MAX_SNAPSHOT_BYTES, "snapshot exceeded its byte budget");
                     SnapshotEntry::File(fs::read(path).expect("read snapshot file"))
                 } else {
                     panic!("unsupported entry in fuzz-owned directory: {path:?}");
@@ -201,11 +189,7 @@ pub(crate) mod lifecycle {
 
         /// Asserts the exact relative paths, entry kinds, link text and bytes.
         fn assert_matches(&self, root: &Path) {
-            assert_eq!(
-                self,
-                &Self::capture(root),
-                "published directory tree changed: {root:?}"
-            );
+            assert_eq!(self, &Self::capture(root), "published directory tree changed: {root:?}");
         }
     }
 
@@ -337,7 +321,8 @@ pub(crate) mod lifecycle {
     mod directory_snapshot_tests {
         use std::fs;
 
-        use super::{DirectorySnapshot, FuzzRoot};
+        use super::DirectorySnapshot;
+        use super::FuzzRoot;
 
         #[test]
         fn snapshot_rejects_payload_loss_and_accepts_remaining_tree() {
@@ -361,8 +346,7 @@ pub(crate) mod lifecycle {
             use std::os::unix::fs::symlink;
 
             let root = FuzzRoot::create("symlink-snapshot-test").expect("create fixture root");
-            let outside_root =
-                FuzzRoot::create("symlink-snapshot-outside").expect("create outside root");
+            let outside_root = FuzzRoot::create("symlink-snapshot-outside").expect("create outside root");
             let root_path = root.path();
             let outside = outside_root.path().join("target");
             fs::write(&outside, b"outside").expect("write external target");
@@ -386,15 +370,8 @@ pub(crate) mod lifecycle {
         for resource in published {
             match resource {
                 PublishedResource::File(path, bytes) => {
-                    assert!(
-                        fs::symlink_metadata(path)
-                            .expect("published file remains")
-                            .is_file()
-                    );
-                    assert_eq!(
-                        &fs::read(path).expect("published bytes remain readable"),
-                        bytes
-                    );
+                    assert!(fs::symlink_metadata(path).expect("published file remains").is_file());
+                    assert_eq!(&fs::read(path).expect("published bytes remain readable"), bytes);
                 }
                 PublishedResource::Directory(path, snapshot) => snapshot.assert_matches(path),
             }
@@ -586,8 +563,7 @@ pub(crate) mod lifecycle {
                             } else {
                                 published.push(PublishedResource::Directory(
                                     path,
-                                    directory_snapshot
-                                        .expect("owned directory has a publication snapshot"),
+                                    directory_snapshot.expect("owned directory has a publication snapshot"),
                                 ));
                             }
                         }
@@ -638,8 +614,7 @@ pub(crate) mod lifecycle {
                                 } else {
                                     published.push(PublishedResource::Directory(
                                         path,
-                                        directory_snapshot
-                                            .expect("owned directory has a publication snapshot"),
+                                        directory_snapshot.expect("owned directory has a publication snapshot"),
                                     ));
                                 }
                                 // A retained published guard may clean its sandbox, never its target.

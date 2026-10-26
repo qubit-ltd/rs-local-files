@@ -2,6 +2,8 @@
 //    Copyright (c) 2025 - 2026 Haixing Hu.
 //
 //    SPDX-License-Identifier: Apache-2.0
+//
+//    Licensed under the Apache License, Version 2.0.
 // =============================================================================
 //! Identity-bound cleanup ownership for a newly created Unix private entry.
 
@@ -26,11 +28,7 @@ pub(super) struct PrivateEntryGuard<'a> {
 }
 
 impl<'a> PrivateEntryGuard<'a> {
-    pub(super) fn new(
-        namespace: &'a Namespace,
-        name: CString,
-        file: &File,
-    ) -> Result<Self, (io::Error, Self)> {
+    pub(super) fn new(namespace: &'a Namespace, name: CString, file: &File) -> Result<Self, (io::Error, Self)> {
         let mut guard = Self {
             namespace,
             name,
@@ -38,10 +36,8 @@ impl<'a> PrivateEntryGuard<'a> {
             armed: true,
         };
         #[cfg(test)]
-        let metadata = super::test_support::fail_if_requested(
-            super::test_support::FailurePoint::GuardIdentityMetadata,
-        )
-        .and_then(|()| file.metadata());
+        let metadata = super::test_support::fail_if_requested(super::test_support::FailurePoint::GuardIdentityMetadata)
+            .and_then(|()| file.metadata());
         #[cfg(not(test))]
         let metadata = file.metadata();
         match metadata {
@@ -99,8 +95,7 @@ impl<'a> PrivateEntryGuard<'a> {
         }
         // SAFETY: the parent descriptor is retained and the single-component
         // name is NUL-terminated. Identity was checked immediately above.
-        let result =
-            unsafe { libc::unlinkat(self.namespace.parent.as_raw_fd(), self.name.as_ptr(), 0) };
+        let result = unsafe { libc::unlinkat(self.namespace.parent.as_raw_fd(), self.name.as_ptr(), 0) };
         if result == -1 {
             Err(io::Error::last_os_error())
         } else {
@@ -177,18 +172,12 @@ mod tests {
         let (name, mut file) = namespace
             .create_private("candidate")
             .expect("candidate should be created");
-        file.write_all(b"candidate")
-            .expect("candidate should be writable");
-        let mut guard = PrivateEntryGuard::new(&namespace, name.clone(), &file)
-            .expect("identity should be captured");
+        file.write_all(b"candidate").expect("candidate should be writable");
+        let mut guard = PrivateEntryGuard::new(&namespace, name.clone(), &file).expect("identity should be captured");
 
         let error = guard.finish_with(std::io::Error::other("injected entry registration failure"));
 
-        assert!(
-            error
-                .to_string()
-                .contains("injected entry registration failure")
-        );
+        assert!(error.to_string().contains("injected entry registration failure"));
         assert!(
             !directory
                 .path()
@@ -204,20 +193,14 @@ mod tests {
         let (name, file) = namespace
             .create_private("candidate")
             .expect("candidate should be created");
-        let mut guard = PrivateEntryGuard::new(&namespace, name.clone(), &file)
-            .expect("identity should be captured");
-        let path = directory
-            .path()
-            .join(std::ffi::OsStr::from_bytes(name.as_bytes()));
+        let mut guard = PrivateEntryGuard::new(&namespace, name.clone(), &file).expect("identity should be captured");
+        let path = directory.path().join(std::ffi::OsStr::from_bytes(name.as_bytes()));
         std::fs::remove_file(&path).expect("original candidate should be removed by fixture");
         std::fs::write(&path, b"competitor").expect("replacement should be created");
 
         let error = guard.finish_with(std::io::Error::other("injected metadata failure"));
 
         assert!(error.to_string().contains("identity changed"));
-        assert_eq!(
-            std::fs::read(path).expect("competitor should remain"),
-            b"competitor"
-        );
+        assert_eq!(std::fs::read(path).expect("competitor should remain"), b"competitor");
     }
 }

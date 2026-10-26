@@ -1,3 +1,10 @@
+// =============================================================================
+//    Copyright (c) 2025 - 2026 Haixing Hu.
+//
+//    SPDX-License-Identifier: Apache-2.0
+//
+//    Licensed under the Apache License, Version 2.0.
+// =============================================================================
 use std::fs;
 use std::path::Path;
 
@@ -63,10 +70,15 @@ fn test_remove_file_does_not_delete_replacement_directory_handle() {
     let result = root.remove_file(&path);
     drop(fault);
 
-    assert!(result.is_err(), "file removal must reject the replacement directory handle");
+    assert!(
+        result.is_err(),
+        "file removal must reject the replacement directory handle"
+    );
     assert_eq!(
         EntryKind::Directory,
-        root.symlink_metadata(&path).expect("replacement directory should remain").kind(),
+        root.symlink_metadata(&path)
+            .expect("replacement directory should remain")
+            .kind(),
     );
 }
 

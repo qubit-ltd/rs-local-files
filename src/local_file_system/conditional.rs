@@ -102,16 +102,17 @@ impl LocalFileSystem {
                     )
                 })?
             }
-            crate::local::LocalNamespace::Rooted(rooted) => rooted.open_conditional_backend(
-                resolved.authority_relative(),
-                resolved.namespace_absolute(),
-                None,
-                options,
-            )
-            .map_err(|error| match resolver.current_directory() {
-                Some(directory) => error.with_current_directory(directory.to_path_buf()),
-                None => error,
-            })?,
+            crate::local::LocalNamespace::Rooted(rooted) => rooted
+                .open_conditional_backend(
+                    resolved.authority_relative(),
+                    resolved.namespace_absolute(),
+                    None,
+                    options,
+                )
+                .map_err(|error| match resolver.current_directory() {
+                    Some(directory) => error.with_current_directory(directory.to_path_buf()),
+                    None => error,
+                })?,
         };
         #[cfg(all(feature = "digest", feature = "test-support"))]
         let mut backend = backend;

@@ -30,21 +30,14 @@ mod unix {
     fn temp_parents_and_probes_accept_root_aliases_within_policy() {
         let directory = tempdir().expect("temporary root should be created");
         fs::create_dir(directory.path().join("child")).expect("child directory should be created");
-        symlink(".", directory.path().join("alias"))
-            .expect("relative root alias should be created");
-        symlink("/", directory.path().join("absolute-alias"))
-            .expect("absolute virtual-root alias should be created");
-        symlink("child", directory.path().join("child-alias"))
-            .expect("ordinary child alias should be created");
-        symlink("../..", directory.path().join("escape-alias"))
-            .expect("outside link fixture should be created");
+        symlink(".", directory.path().join("alias")).expect("relative root alias should be created");
+        symlink("/", directory.path().join("absolute-alias")).expect("absolute virtual-root alias should be created");
+        symlink("child", directory.path().join("child-alias")).expect("ordinary child alias should be created");
+        symlink("../..", directory.path().join("escape-alias")).expect("outside link fixture should be created");
 
-        let mut rooted =
-            LocalFileSystem::rooted(directory.path()).expect("root authority should open");
+        let mut rooted = LocalFileSystem::rooted(directory.path()).expect("root authority should open");
         let file = rooted
-            .create_temp_file_with_options(
-                &LocalTempFileOptions::new().with_parent(Path::new("alias")),
-            )
+            .create_temp_file_with_options(&LocalTempFileOptions::new().with_parent(Path::new("alias")))
             .expect("relative root alias should be a valid temp parent");
         assert!(file.path().starts_with(Path::new("/")));
         drop(file);
@@ -70,30 +63,19 @@ mod unix {
             .limits_at(Path::new("/"))
             .expect("root limits should be observable");
         assert_eq!(root_limits.length_unit(), limits.length_unit());
-        assert_eq!(
-            root_limits.max_component_length(),
-            limits.max_component_length()
-        );
+        assert_eq!(root_limits.max_component_length(), limits.max_component_length());
         assert_eq!(root_limits.max_path_length(), limits.max_path_length());
         let space = rooted
             .space_at(Path::new("alias"))
             .expect("root-alias space should be observable");
-        assert!(
-            space.capacity_bytes().is_some()
-                || space.free_bytes().is_some()
-                || space.available_bytes().is_some()
-        );
+        assert!(space.capacity_bytes().is_some() || space.free_bytes().is_some() || space.available_bytes().is_some());
 
         let child_file = rooted
-            .create_temp_file_with_options(
-                &LocalTempFileOptions::new().with_parent(Path::new("child-alias")),
-            )
+            .create_temp_file_with_options(&LocalTempFileOptions::new().with_parent(Path::new("child-alias")))
             .expect("ordinary in-scope directory links should remain supported");
         drop(child_file);
         let escaped = rooted
-            .create_temp_file_with_options(
-                &LocalTempFileOptions::new().with_parent(Path::new("escape-alias")),
-            )
+            .create_temp_file_with_options(&LocalTempFileOptions::new().with_parent(Path::new("escape-alias")))
             .expect_err("an alias escaping the opened root must remain rejected");
         assert_eq!(LocalFileErrorKind::InvalidPath, escaped.kind());
 
@@ -104,14 +86,13 @@ mod unix {
             .set_symlink_policy(LocalSymlinkPolicy::Reject)
             .expect("Reject policy should be selectable");
         let rejected = rooted
-            .create_temp_file_with_options(
-                &LocalTempFileOptions::new().with_parent(Path::new("alias")),
-            )
+            .create_temp_file_with_options(&LocalTempFileOptions::new().with_parent(Path::new("alias")))
             .expect_err("Reject policy should continue rejecting the root link");
         assert_eq!(LocalFileErrorKind::Unsupported, rejected.kind());
     }
 
-    /// Dotted directory operands and a final link remain rejected at their own path boundary.
+    /// Dotted directory operands and a final link remain rejected at their own
+    /// path boundary.
     #[test]
     fn directory_qualified_alias_and_final_link_operands_are_rejected() {
         let directory = tempdir().expect("temporary root should be created");
@@ -123,26 +104,18 @@ mod unix {
             .delete_file(Path::new("alias/."))
             .expect_err("the virtual root reached through an alias cannot be removed as a file");
         assert_eq!(LocalFileErrorKind::InvalidPath, remove_file.kind());
-        let remove_directory = rooted.delete_directory(Path::new("alias/.")).expect_err(
-            "the virtual root reached through an alias cannot be removed as a directory",
-        );
+        let remove_directory = rooted
+            .delete_directory(Path::new("alias/."))
+            .expect_err("the virtual root reached through an alias cannot be removed as a directory");
         assert!(matches!(
             remove_directory.kind(),
             LocalFileErrorKind::InvalidPath | LocalFileErrorKind::NotDirectory
         ));
         assert!(directory.path().join("alias").symlink_metadata().is_ok());
-        assert_eq!(
-            b"keep",
-            fs::read(directory.path().join("sentinel"))
-                .unwrap()
-                .as_slice()
-        );
+        assert_eq!(b"keep", fs::read(directory.path().join("sentinel")).unwrap().as_slice());
 
-        let mut temporary = rooted
-            .create_temp_file()
-            .expect("temporary file should be created");
-        Output::write_fully(&mut temporary, b"source")
-            .expect("temporary contents should be written");
+        let mut temporary = rooted.create_temp_file().expect("temporary file should be created");
+        Output::write_fully(&mut temporary, b"source").expect("temporary contents should be written");
         let mut persist = temporary
             .persist(Path::new("/alias"))
             .expect_err("a root alias cannot be the final persistence target");
@@ -152,15 +125,11 @@ mod unix {
             .cleanup()
             .expect("rejected persistence should retain cleanup ownership");
         assert!(directory.path().is_dir());
-        assert_eq!(
-            b"keep",
-            fs::read(directory.path().join("sentinel"))
-                .unwrap()
-                .as_slice()
-        );
+        assert_eq!(b"keep", fs::read(directory.path().join("sentinel")).unwrap().as_slice());
     }
 
-    /// Literal virtual-root operands are rejected before any removal or persist publication.
+    /// Literal virtual-root operands are rejected before any removal or persist
+    /// publication.
     #[test]
     fn virtual_root_operands_are_rejected_for_removal_and_persistence() {
         let directory = tempdir().expect("temporary root should be created");
@@ -176,11 +145,8 @@ mod unix {
             .expect_err("the virtual root cannot be removed as a directory");
         assert_eq!(LocalFileErrorKind::InvalidPath, remove_directory.kind());
 
-        let mut temporary = rooted
-            .create_temp_file()
-            .expect("temporary file should be created");
-        Output::write_fully(&mut temporary, b"source")
-            .expect("temporary contents should be written");
+        let mut temporary = rooted.create_temp_file().expect("temporary file should be created");
+        Output::write_fully(&mut temporary, b"source").expect("temporary contents should be written");
         let mut persist = temporary
             .persist(Path::new("/"))
             .expect_err("the virtual root cannot be the final persistence target");
@@ -192,11 +158,6 @@ mod unix {
             .expect("rejected persistence should retain cleanup ownership");
 
         assert!(directory.path().is_dir());
-        assert_eq!(
-            b"keep",
-            fs::read(directory.path().join("sentinel"))
-                .unwrap()
-                .as_slice()
-        );
+        assert_eq!(b"keep", fs::read(directory.path().join("sentinel")).unwrap().as_slice());
     }
 }

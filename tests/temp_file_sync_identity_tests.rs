@@ -1,7 +1,9 @@
 // =============================================================================
-//    Copyright (c) 2026 Haixing Hu.
+//    Copyright (c) 2025 - 2026 Haixing Hu.
 //
 //    SPDX-License-Identifier: Apache-2.0
+//
+//    Licensed under the Apache License, Version 2.0.
 // =============================================================================
 
 use std::fs;
@@ -42,12 +44,7 @@ fn test_required_persist_rejects_replaced_open_handle_and_retains_source() {
             let outside = directory.path().join("other");
             fs::write(&outside, b"other file").expect("other file should be created");
             let replaced = File::open(&outside).expect("other file should open");
-            let original = mem::replace(
-                temporary
-                    .as_file_mut()
-                    .expect("source handle should be open"),
-                replaced,
-            );
+            let original = mem::replace(temporary.as_file_mut().expect("source handle should be open"), replaced);
             let target = if rooted {
                 std::path::PathBuf::from("/published")
             } else {
@@ -65,14 +62,10 @@ fn test_required_persist_rejects_replaced_open_handle_and_retains_source() {
             assert!(!host_target.exists());
             assert_eq!(
                 b"other file",
-                fs::read(&outside)
-                    .expect("other file must remain")
-                    .as_slice()
+                fs::read(&outside).expect("other file must remain").as_slice()
             );
             let mut temporary = error.into_parts().resource;
-            *temporary
-                .as_file_mut()
-                .expect("replacement handle remains open") = original;
+            *temporary.as_file_mut().expect("replacement handle remains open") = original;
             let outcome = temporary
                 .persist(&target)
                 .expect("restored source handle should persist");
@@ -89,9 +82,7 @@ fn test_required_persist_accepts_cloned_and_reopened_source_handles() {
         let directory = tempdir().expect("private parent should be created");
         let mut temporary = LocalFileSystem::host()
             .expect("host authority should open")
-            .create_temp_file_with_options(
-                &LocalTempFileOptions::new().with_parent(directory.path()),
-            )
+            .create_temp_file_with_options(&LocalTempFileOptions::new().with_parent(directory.path()))
             .expect("temporary source should be created");
         if reopen {
             temporary.close();
@@ -101,9 +92,7 @@ fn test_required_persist_accepts_cloned_and_reopened_source_handles() {
                 .expect("source handle should be open")
                 .try_clone()
                 .expect("same-entity handle should clone");
-            *temporary
-                .as_file_mut()
-                .expect("source handle should be open") = clone;
+            *temporary.as_file_mut().expect("source handle should be open") = clone;
         }
         let target = directory.path().join("published");
         let outcome = temporary
@@ -153,8 +142,7 @@ fn test_closed_persist_rejects_reopened_replacement_path_for_each_durability() {
             };
             temporary.close();
             fs::remove_file(&source).expect("original path entity should be removed");
-            fs::rename(&replacement, &source)
-                .expect("replacement entity should occupy the source path");
+            fs::rename(&replacement, &source).expect("replacement entity should occupy the source path");
 
             let target = if rooted {
                 std::path::PathBuf::from("/published")
@@ -163,10 +151,7 @@ fn test_closed_persist_rejects_reopened_replacement_path_for_each_durability() {
             };
             let host_target = directory.path().join("published");
             let error = temporary
-                .persist_with(
-                    &target,
-                    LocalPersistOptions::new().with_durability(durability),
-                )
+                .persist_with(&target, LocalPersistOptions::new().with_durability(durability))
                 .expect_err("a reopened replacement entity must not be persisted");
 
             assert_eq!(LocalPersistStage::InstallDestination, error.stage());

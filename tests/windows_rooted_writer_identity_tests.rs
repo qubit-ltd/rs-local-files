@@ -29,8 +29,7 @@ use tempfile::tempdir;
 fn rooted_writer_destination_replacement_before_install_is_not_published() {
     let directory = tempdir().expect("temporary directory should be created");
     let destination = directory.path().join("payload");
-    fs::write(&destination, b"original destination")
-        .expect("original destination should be written");
+    fs::write(&destination, b"original destination").expect("original destination should be written");
     let rooted = LocalFileSystem::rooted(directory.path()).expect("root authority should open");
     let mut writer = rooted
         .open_writer_with_options(
@@ -38,14 +37,11 @@ fn rooted_writer_destination_replacement_before_install_is_not_published() {
             &LocalWriteOptions::new(LocalWriteMode::CreateOrReplace),
         )
         .expect("replacement writer should open");
-    Output::write_fully(&mut writer, b"staged replacement")
-        .expect("writer should accept staged data");
+    Output::write_fully(&mut writer, b"staged replacement").expect("writer should accept staged data");
 
-    let _fault = install_test_fault("rooted-writer-identity-replace")
-        .expect("identity replacement hook should be installed");
-    let failure = writer
-        .commit()
-        .expect_err("identity mismatch must prevent publication");
+    let _fault =
+        install_test_fault("rooted-writer-identity-replace").expect("identity replacement hook should be installed");
+    let failure = writer.commit().expect_err("identity mismatch must prevent publication");
 
     assert_eq!(LocalWriteFailureState::NotPublished, failure.state());
     let (error, state, retained) = failure.into_parts();
@@ -65,13 +61,9 @@ fn rooted_writer_destination_replacement_before_install_is_not_published() {
     assert_eq!(LocalWriterState::Open, retained.state());
     assert_eq!(
         2,
-        fs::read_dir(directory.path())
-            .expect("root should be readable")
-            .count()
+        fs::read_dir(directory.path()).expect("root should be readable").count()
     );
-    let aborted = retained
-        .abort()
-        .expect("retained staging should abort cleanly");
+    let aborted = retained.abort().expect("retained staging should abort cleanly");
     assert_eq!(LocalWriterState::Aborted, aborted.state());
     assert_eq!(
         b"competing destination",
@@ -81,9 +73,7 @@ fn rooted_writer_destination_replacement_before_install_is_not_published() {
     );
     assert_eq!(
         1,
-        fs::read_dir(directory.path())
-            .expect("root should be readable")
-            .count()
+        fs::read_dir(directory.path()).expect("root should be readable").count()
     );
 }
 
@@ -92,8 +82,7 @@ fn rooted_writer_destination_replacement_before_install_is_not_published() {
 fn rooted_writer_failure_after_rename_reports_published() {
     let directory = tempdir().expect("temporary directory should be created");
     let destination = directory.path().join("payload");
-    fs::write(&destination, b"original destination")
-        .expect("original destination should be written");
+    fs::write(&destination, b"original destination").expect("original destination should be written");
     let rooted = LocalFileSystem::rooted(directory.path()).expect("root authority should open");
     let mut writer = rooted
         .open_writer_with_options(
@@ -101,11 +90,9 @@ fn rooted_writer_failure_after_rename_reports_published() {
             &LocalWriteOptions::new(LocalWriteMode::CreateOrReplace),
         )
         .expect("replacement writer should open");
-    Output::write_fully(&mut writer, b"published replacement")
-        .expect("writer should accept staged data");
+    Output::write_fully(&mut writer, b"published replacement").expect("writer should accept staged data");
 
-    let _fault = install_test_fault("rooted-writer-post-rename-error")
-        .expect("post-rename hook should be installed");
+    let _fault = install_test_fault("rooted-writer-post-rename-error").expect("post-rename hook should be installed");
     let failure = writer
         .commit()
         .expect_err("the synthetic post-rename error should be reported");

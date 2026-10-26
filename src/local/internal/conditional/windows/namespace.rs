@@ -219,9 +219,7 @@ impl Namespace {
                             ),
                         });
                     }
-                    self.recovery_parents
-                        .borrow_mut()
-                        .push((container.clone(), handle));
+                    self.recovery_parents.borrow_mut().push((container.clone(), handle));
                     return Ok((container.clone(), container.join(backup_name)));
                 }
                 Err(error) if error.kind() == ErrorKind::AlreadyExists => continue,
@@ -246,9 +244,7 @@ impl Namespace {
     fn verify_new_container(&self, handle: &File) -> io::Result<()> {
         #[cfg(test)]
         if self.fail_container_verification.replace(false) {
-            return Err(io::Error::other(
-                "injected recovery container verification failure",
-            ));
+            return Err(io::Error::other("injected recovery container verification failure"));
         }
         verify_directory_no_reparse(handle)
     }

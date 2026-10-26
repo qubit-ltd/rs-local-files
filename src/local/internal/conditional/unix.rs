@@ -132,10 +132,11 @@ impl UnixConditionalBackend {
             Err(primary) => return Err(guard.finish_with(primary)),
         };
         let candidate_identity = (metadata.dev(), metadata.ino());
-        let candidate_entry = match namespace.entry(LocalRecoveryFileRole::StagedCandidate, candidate_name.clone(), None) {
-            Ok(entry) => entry,
-            Err(primary) => return Err(guard.finish_with(primary)),
-        };
+        let candidate_entry =
+            match namespace.entry(LocalRecoveryFileRole::StagedCandidate, candidate_name.clone(), None) {
+                Ok(entry) => entry,
+                Err(primary) => return Err(guard.finish_with(primary)),
+            };
         guard.disarm();
         drop(guard);
         Ok(Self {
@@ -407,9 +408,7 @@ impl ConditionalBackend for UnixConditionalBackend {
             Err(primary) => return Err(guard.finish_with(primary)),
         };
         #[cfg(test)]
-        if let Err(primary) = test_support::fail_if_requested(
-            test_support::FailurePoint::CandidateCopyRegistration,
-        ) {
+        if let Err(primary) = test_support::fail_if_requested(test_support::FailurePoint::CandidateCopyRegistration) {
             return Err(guard.finish_with(primary));
         }
         self.recovery_entries.push(recovery_entry);

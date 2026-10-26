@@ -482,9 +482,7 @@ impl LocalTempFile {
             ));
         }
 
-        let file_durable = match self
-            .synchronize_source_before_reopen(options.durability(), before_reopen)
-        {
+        let file_durable = match self.synchronize_source_before_reopen(options.durability(), before_reopen) {
             Ok(durable) => durable,
             Err(error) => {
                 return Err(self.persist_error(
@@ -1016,11 +1014,7 @@ mod sync_identity_tests {
                 } else {
                     LocalFileSystem::host().expect("host authority should open")
                 };
-                let parent = if rooted {
-                    Path::new("/")
-                } else {
-                    directory.path()
-                };
+                let parent = if rooted { Path::new("/") } else { directory.path() };
                 let mut temporary = filesystem
                     .create_temp_file_with_options(&LocalTempFileOptions::new().with_parent(parent))
                     .expect("temporary source should be created");
@@ -1052,8 +1046,7 @@ mod sync_identity_tests {
                         None,
                         LocalPersistOptions::new().with_durability(durability),
                         || {
-                            fs::remove_file(&source)
-                                .expect("prechecked source should be removable");
+                            fs::remove_file(&source).expect("prechecked source should be removable");
                             fs::rename(&replacement, &source)
                                 .expect("replacement should take the prechecked source path");
                             seam_reached = true;

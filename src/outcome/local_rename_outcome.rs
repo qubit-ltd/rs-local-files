@@ -16,14 +16,14 @@
 ///
 /// use qubit_local_files::LocalFileSystem;
 ///
+/// let directory = tempfile::tempdir()?;
 /// let filesystem = LocalFileSystem::host()?;
-/// let directory = std::env::temp_dir();
-/// let source = directory.join(format!("qubit-rename-source-{}", std::process::id()));
-/// let target = directory.join(format!("qubit-rename-target-{}", std::process::id()));
+/// let source = directory.path().join("source.txt");
+/// let target = directory.path().join("renamed.txt");
 /// std::fs::write(&source, b"rename example")?;
 /// let outcome = filesystem.rename(Path::new(&source), Path::new(&target))?;
 /// assert!(outcome.atomic());
-/// std::fs::remove_file(target)?;
+/// assert_eq!(std::fs::read(&target)?, b"rename example");
 /// # Ok::<(), Box<dyn std::error::Error>>(())
 /// ```
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]

@@ -126,13 +126,7 @@ impl Namespace {
         #[cfg(test)]
         super::test_support::fail_if_requested(super::test_support::FailurePoint::EntryParentClone)?;
         let parent = self.parent.try_clone()?;
-        let access = EntryAccess::new(
-            parent,
-            name.clone(),
-            device,
-            inode,
-            self.diagnostic_path.clone(),
-        );
+        let access = EntryAccess::new(parent, name.clone(), device, inode, self.diagnostic_path.clone());
         let display = self
             .namespace_path
             .parent()

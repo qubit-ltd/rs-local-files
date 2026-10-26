@@ -16,17 +16,15 @@ use crate::local::LocalCopyDirStats;
 /// ```
 /// use qubit_local_files::LocalFileSystem;
 ///
+/// let directory = tempfile::tempdir()?;
 /// let filesystem = LocalFileSystem::host()?;
-/// let directory = std::env::temp_dir();
-/// let source = directory.join(format!("qubit-copy-stats-source-{}", std::process::id()));
-/// let target = directory.join(format!("qubit-copy-stats-target-{}", std::process::id()));
+/// let source = directory.path().join("source.txt");
+/// let target = directory.path().join("copy.txt");
 /// std::fs::write(&source, b"copy statistics")?;
 /// let outcome = filesystem.copy(&source, &target)?;
 /// let stats = outcome.stats();
 /// assert_eq!(stats.bytes(), 15);
 /// assert_eq!(stats.files(), 1);
-/// std::fs::remove_file(source)?;
-/// std::fs::remove_file(target)?;
 /// # Ok::<(), Box<dyn std::error::Error>>(())
 /// ```
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]

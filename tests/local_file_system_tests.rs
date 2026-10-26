@@ -21,12 +21,12 @@ use qubit_local_files::options::LocalCreateDirectoryOptions;
 use qubit_local_files::options::LocalDeleteOptions;
 use qubit_local_files::options::LocalReadOptions;
 use qubit_local_files::options::LocalRenameOptions;
+#[cfg(all(unix, feature = "test-support"))]
+use qubit_local_files::outcome::LocalRenameFailureState;
 #[cfg(unix)]
 use qubit_local_files::policy::LocalDurabilityRequirement;
 #[cfg(feature = "test-support")]
 use qubit_local_files::test_support::install_test_fault;
-#[cfg(all(unix, feature = "test-support"))]
-use qubit_local_files::outcome::LocalRenameFailureState;
 #[cfg(target_os = "linux")]
 use tempfile::NamedTempFile;
 use tempfile::tempdir;
@@ -345,7 +345,8 @@ fn test_local_file_system_rename_reports_parent_sync_result() {
     }
 }
 
-/// Verifies preferred rename durability downgrades when directory access is denied.
+/// Verifies preferred rename durability downgrades when directory access is
+/// denied.
 #[cfg(unix)]
 #[test]
 fn test_local_file_system_rename_handles_permission_denial_when_enforced() {
