@@ -27,26 +27,6 @@ jobs:
           python-version: '3.11'
       - name: Install MSRV
         run: rustup toolchain install 1.94 --profile minimal
-      - uses: actions/checkout@v6
-        if: matrix.os == 'windows-latest'
-        with:
-          repository: qubit-ltd/rs-redact
-          ref: main
-          path: ci-root/rs-redact
-          submodules: recursive
-          persist-credentials: false
-      - uses: actions/checkout@v6
-        if: matrix.os == 'windows-latest'
-        with:
-          repository: qubit-ltd/rs-json
-          ref: main
-          path: ci-root/rs-json
-          submodules: recursive
-          persist-credentials: false
-      - name: Run Windows rollback recovery contracts
-        if: matrix.os == 'windows-latest'
-        working-directory: ci-root/rs-local-files
-        run: cargo +1.94 test --locked --features digest,test-support --test conditional_recovery_tests
       - name: Prepare isolated coordinated sources
         env:
           CI: 'true'
@@ -72,3 +52,34 @@ jobs:
       - name: Run private state and native backend contracts
         working-directory: ci-root/rs-local-files
         run: cargo +1.94 test --locked --features digest,test-support --lib conditional_
+
+  windows-recovery:
+    name: Windows rollback recovery contracts
+    runs-on: windows-latest
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          path: ci-root/rs-local-files
+          persist-credentials: false
+      - uses: actions/checkout@v6
+        with:
+          repository: qubit-ltd/rs-redact
+          ref: main
+          path: ci-root/rs-redact
+          submodules: recursive
+          persist-credentials: false
+      - uses: actions/checkout@v6
+        with:
+          repository: qubit-ltd/rs-json
+          ref: main
+          path: ci-root/rs-json
+          submodules: recursive
+          persist-credentials: false
+      - name: Install MSRV
+        run: rustup toolchain install 1.94 --profile minimal
+      - name: Run rollback recovery contracts
+        working-directory: ci-root/rs-local-files
+        run: cargo +1.94 test --locked --features digest,test-support --test conditional_recovery_tests
