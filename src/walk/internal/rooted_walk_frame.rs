@@ -33,4 +33,7 @@ pub(in crate::walk) struct RootedWalkFrame {
     pub(in crate::walk) entry_depth: usize,
     /// Native directory identity retained for cycle detection.
     pub(in crate::walk) identity: Option<crate::local::DirectoryIdentity>,
+    /// Test script buffers a sibling until the selected child fails to open.
+    #[cfg(feature = "test-support")]
+    pub(in crate::walk) scripted_sibling: Option<crate::rooted::Entry>,
 }

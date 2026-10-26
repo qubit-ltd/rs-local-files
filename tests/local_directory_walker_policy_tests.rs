@@ -329,22 +329,50 @@ fn test_local_directory_walker_scripted_open_error_precedes_sibling() {
                 .with_max_open_directories(1)
                 .with_reopen_policy(qubit_local_files::options::LocalDirectoryReopenPolicy::Fail)
                 .with_error_policy(LocalWalkErrorPolicy::Continue);
-            let mut walker = filesystem.list_with_options(root, &options).expect("walker should open");
+            let walker = filesystem.list_with_options(root, &options).expect("walker should open");
 
-            let error = walker
-                .next()
-                .expect("scripted child-open error should be yielded")
-                .expect_err("the occupied root reader should exhaust the handle allowance");
-            assert_eq!(LocalFileErrorKind::ResourceLimit, error.kind());
-            assert_eq!(
-                Some(LocalResourceKind::OpenDirectory),
-                error.resource_limit_error().map(|limit| limit.resource()),
+            let results = walker.collect::<Vec<_>>();
+            let error_index = results
+                .iter()
+                .position(|result| {
+                    result.as_ref().err().is_some_and(|error| {
+                        error.kind() == LocalFileErrorKind::ResourceLimit
+                            && error.resource_limit_error().is_some_and(|limit| {
+                                limit.resource() == LocalResourceKind::OpenDirectory
+                            })
+                            && error.path().and_then(Path::file_name) == Some(std::ffi::OsStr::new("nested"))
+                    })
+                })
+                .expect("the scripted nested-child open failure should be reported");
+            let sibling_index = results
+                .iter()
+                .position(|result| {
+                    result
+                        .as_ref()
+                        .ok()
+                        .is_some_and(|entry| entry.relative_path() == "sibling")
+                })
+                .expect("Continue should return the sibling after the nested-child error");
+            assert!(error_index < sibling_index, "nested error must precede sibling: {results:?}");
+            assert!(
+                results.iter().all(|result| result.as_ref().ok().is_none_or(|entry| {
+                    entry.relative_path() == Path::new("nested")
+                        || !entry.relative_path().starts_with("nested")
+                })),
+                "the failed nested branch must not yield descendants: {results:?}"
             );
-
-            let sibling = walker
-                .find_map(|result| result.ok().filter(|entry| entry.relative_path() == "sibling"))
-                .expect("Continue should return the sibling after the scripted error");
-            assert_eq!(Path::new("sibling"), sibling.relative_path());
+            if rooted {
+                let nested_index = results
+                    .iter()
+                    .position(|result| {
+                        result
+                            .as_ref()
+                            .ok()
+                            .is_some_and(|entry| entry.relative_path() == "nested")
+                    })
+                    .expect("Rooted should yield the nested entry before attempting its reader");
+                assert!(nested_index < error_index, "nested entry should precede its open error");
+            }
         });
     }
 }

@@ -85,17 +85,19 @@ pub(super) fn directory_pool(options: &LocalListOptions) -> Option<ManagedResour
         .map(|limit| ManagedResourcePool::new(LocalResourceKind::OpenDirectory, limit))
 }
 
-/// Scripts a local child-directory capacity failure before parent iteration.
+/// Scripts a capacity failure while entering the selected `nested` child.
 ///
-/// The test fault attempts to reserve one additional handle while the current
-/// frame owns the configured capacity. Keeping the parent reader untouched
-/// makes the error-before-sibling order deterministic without depending on
-/// native directory enumeration order.
+/// The fault attempts to reserve one additional handle at the child frame's
+/// actual acquisition point, while its parent still owns the configured
+/// capacity.
 #[cfg(feature = "test-support")]
 pub(super) fn scripted_open_directory_error(
     pool: &Option<ManagedResourcePool<LocalResourceKind, usize>>,
     path: &Path,
 ) -> Option<LocalFileError> {
+    if path.file_name() != Some(OsStr::new("nested")) {
+        return None;
+    }
     if !crate::local::take_test_support("walker-enter-open-host")
         && !crate::local::take_test_support("walker-enter-open-rooted")
     {

@@ -154,6 +154,8 @@ impl LocalDirectoryWalker {
                     relative: PathBuf::new(),
                     identity: Some(root_identity),
                     entry_depth: 1,
+                    #[cfg(feature = "test-support")]
+                    scripted_sibling: None,
                 }]
             },
             open_directories,
@@ -269,6 +271,8 @@ impl LocalDirectoryWalker {
                         output_parent,
                         entry_depth: 1,
                         identity: Some(start_identity),
+                        #[cfg(feature = "test-support")]
+                        scripted_sibling: None,
                     }]
                 },
                 followed_directories,
@@ -359,6 +363,10 @@ impl LocalDirectoryWalker {
         let Some(pool) = self.open_directories.as_ref() else {
             return Ok(None);
         };
+        #[cfg(feature = "test-support")]
+        if let Some(error) = scripted_open_directory_error(&self.open_directories, path) {
+            return Err(error);
+        }
         match pool.try_acquire(1) {
             Ok(permit) => Ok(Some(permit)),
             Err(_error) if self.options.reopen_policy() == LocalDirectoryReopenPolicy::Reopen => {
@@ -423,6 +431,8 @@ impl LocalDirectoryWalker {
             relative,
             identity: Some(identity),
             entry_depth: entry_depth + 1,
+            #[cfg(feature = "test-support")]
+            scripted_sibling: None,
         });
         Ok(())
     }
@@ -559,13 +569,6 @@ impl LocalDirectoryWalker {
             if needs_reopen && let Err(error) = self.reopen_host_frame(&relative_parent) {
                 return Some(Err(error));
             }
-            #[cfg(feature = "test-support")]
-            if let Some(error) = scripted_open_directory_error(
-                &self.open_directories,
-                &self.root.join(&relative_parent).join("nested"),
-            ) {
-                return Some(Err(error));
-            }
             let frame = self.stack.last_mut()?;
             let next_entry = loop {
                 if matches!(self.deadline, Some(deadline) if Instant::now() >= deadline) {
@@ -584,6 +587,20 @@ impl LocalDirectoryWalker {
                         std::io::Error::other("test instrumentation observed an unchecked deadline"),
                     )));
                 }
+                #[cfg(feature = "test-support")]
+                let (next, scripted_sibling) = if let Some(entry) = frame.scripted_sibling.take() {
+                    (Some(Ok(entry)), true)
+                } else {
+                    (
+                        frame
+                            .entries
+                            .as_mut()
+                            .expect("host walker reader was initialized")
+                            .next(),
+                        false,
+                    )
+                };
+                #[cfg(not(feature = "test-support"))]
                 let next = frame
                     .entries
                     .as_mut()
@@ -591,6 +608,15 @@ impl LocalDirectoryWalker {
                     .next();
                 match next {
                     Some(Ok(entry)) => {
+                        #[cfg(feature = "test-support")]
+                        if !scripted_sibling
+                            && relative_parent.as_os_str().is_empty()
+                            && crate::local::test_support_enabled("walker-enter-open-host")
+                            && entry.file_name() == std::ffi::OsStr::new("sibling")
+                        {
+                            frame.scripted_sibling = Some(entry);
+                            continue;
+                        }
                         let name = entry.file_name();
                         #[cfg(feature = "test-support")]
                         let force_duplicate_deadline = crate::local::take_test_support("walker-deadline-inner");
@@ -783,6 +809,10 @@ fn acquire_rooted_directory(
     let Some(directory_pool) = pool.as_ref() else {
         return Ok(None);
     };
+    #[cfg(feature = "test-support")]
+    if let Some(error) = scripted_open_directory_error(pool, path) {
+        return Err(error);
+    }
     match directory_pool.try_acquire(1) {
         Ok(permit) => Ok(Some(permit)),
         Err(_error) if options.reopen_policy() == LocalDirectoryReopenPolicy::Reopen => {
@@ -911,12 +941,22 @@ fn next_rooted_entry(
             }
         }
         #[cfg(feature = "test-support")]
-        if let Some(error) = scripted_open_directory_error(
-            pool,
-            &namespace_root.join(&output_parent).join("nested"),
-        ) {
-            return Some(Err(error));
-        }
+        let (next_entry, scripted_sibling) = {
+            let frame = state.stack.last_mut().expect("rooted walker stack is non-empty");
+            if let Some(entry) = frame.scripted_sibling.take() {
+                (Ok(Some(entry)), true)
+            } else {
+                (
+                    frame
+                        .reader
+                        .as_mut()
+                        .expect("rooted frame reader was initialized")
+                        .next_entry(),
+                    false,
+                )
+            }
+        };
+        #[cfg(not(feature = "test-support"))]
         let next_entry = state
             .stack
             .last_mut()
@@ -933,6 +973,19 @@ fn next_rooted_entry(
         };
         let entry = match next_entry {
             Ok(Some(entry)) => {
+                #[cfg(feature = "test-support")]
+                if !scripted_sibling
+                    && output_parent.as_os_str().is_empty()
+                    && crate::local::test_support_enabled("walker-enter-open-rooted")
+                    && entry.name() == std::ffi::OsStr::new("sibling")
+                {
+                    state
+                        .stack
+                        .last_mut()
+                        .expect("rooted walker stack is non-empty")
+                        .scripted_sibling = Some(entry);
+                    continue;
+                }
                 if !state
                     .stack
                     .last_mut()
@@ -1042,6 +1095,8 @@ fn next_rooted_entry(
                 output_parent: output_path.clone(),
                 entry_depth: entry_depth + 1,
                 identity,
+                #[cfg(feature = "test-support")]
+                scripted_sibling: None,
             });
         }
         let diagnostic_path = state.root.path().join(&authority_path);

@@ -31,4 +31,7 @@ pub(in crate::walk) struct WalkFrame {
     pub(in crate::walk) identity: Option<crate::local::DirectoryIdentity>,
     /// Depth assigned to entries returned by this iterator.
     pub(in crate::walk) entry_depth: usize,
+    /// Test script buffers a sibling until the selected child fails to open.
+    #[cfg(feature = "test-support")]
+    pub(in crate::walk) scripted_sibling: Option<std::fs::DirEntry>,
 }
