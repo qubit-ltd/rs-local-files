@@ -39,6 +39,45 @@ use crate::recovery::LocalRecoveryFileRole;
 
 const COPY_BUFFER_SIZE: usize = 64 * 1024;
 
+#[cfg(test)]
+pub(super) mod test_support {
+    use std::cell::Cell;
+    use std::io;
+
+    #[derive(Clone, Copy, Debug, Eq, PartialEq)]
+    pub(super) enum FailurePoint {
+        GuardIdentityMetadata,
+        CandidateMetadata,
+        EntryIdentity,
+        EntryParentClone,
+        CandidateCopyRegistration,
+    }
+
+    thread_local! {
+        static FAILURE_POINT: Cell<Option<FailurePoint>> = const { Cell::new(None) };
+    }
+
+    pub(super) fn fail_next(point: FailurePoint) {
+        FAILURE_POINT.with(|slot| slot.set(Some(point)));
+    }
+
+    pub(super) fn fail_if_requested(point: FailurePoint) -> io::Result<()> {
+        let should_fail = FAILURE_POINT.with(|slot| {
+            if slot.get() == Some(point) {
+                slot.set(None);
+                true
+            } else {
+                false
+            }
+        });
+        if should_fail {
+            Err(io::Error::other(format!("injected {point:?} failure")))
+        } else {
+            Ok(())
+        }
+    }
+}
+
 #[cfg(feature = "digest")]
 fn exchange_publication_method() -> crate::outcome::LocalWritePublicationMethod {
     crate::outcome::LocalWritePublicationMethod::AtomicExchange
@@ -88,7 +127,7 @@ impl UnixConditionalBackend {
             Ok(guard) => guard,
             Err((primary, mut guard)) => return Err(guard.finish_with(primary)),
         };
-        let metadata = match candidate.metadata() {
+        let metadata = match candidate_metadata(&candidate) {
             Ok(metadata) => metadata,
             Err(primary) => return Err(guard.finish_with(primary)),
         };
@@ -214,6 +253,12 @@ impl UnixConditionalBackend {
             | None => Ok(()),
         }
     }
+}
+
+fn candidate_metadata(candidate: &File) -> io::Result<std::fs::Metadata> {
+    #[cfg(test)]
+    test_support::fail_if_requested(test_support::FailurePoint::CandidateMetadata)?;
+    candidate.metadata()
 }
 
 impl qubit_io::Output for UnixConditionalBackend {
@@ -361,6 +406,12 @@ impl ConditionalBackend for UnixConditionalBackend {
             Ok(entry) => entry,
             Err(primary) => return Err(guard.finish_with(primary)),
         };
+        #[cfg(test)]
+        if let Err(primary) = test_support::fail_if_requested(
+            test_support::FailurePoint::CandidateCopyRegistration,
+        ) {
+            return Err(guard.finish_with(primary));
+        }
         self.recovery_entries.push(recovery_entry);
         guard.disarm();
         drop(guard);

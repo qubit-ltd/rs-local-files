@@ -120,9 +120,14 @@ impl Namespace {
         name: CString,
         _unused: Option<()>,
     ) -> io::Result<ConditionalEntry> {
+        #[cfg(test)]
+        super::test_support::fail_if_requested(super::test_support::FailurePoint::EntryIdentity)?;
         let (device, inode) = identity_at(&self.parent, &name)?;
+        #[cfg(test)]
+        super::test_support::fail_if_requested(super::test_support::FailurePoint::EntryParentClone)?;
+        let parent = self.parent.try_clone()?;
         let access = EntryAccess::new(
-            self.parent.try_clone()?,
+            parent,
             name.clone(),
             device,
             inode,

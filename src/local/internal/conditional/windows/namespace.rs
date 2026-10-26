@@ -7,6 +7,8 @@
 // =============================================================================
 //! Windows conditional namespace permissions and entry identity checks.
 
+#[cfg(test)]
+use std::cell::Cell;
 use std::cell::RefCell;
 use std::ffi::OsStr;
 use std::ffi::OsString;
@@ -91,6 +93,8 @@ pub(super) struct Namespace {
     target_path: PathBuf,
     diagnostic_path: Option<PathBuf>,
     recovery_parents: RefCell<Vec<(PathBuf, File)>>,
+    #[cfg(test)]
+    fail_container_verification: Cell<bool>,
 }
 
 impl Namespace {
@@ -117,6 +121,8 @@ impl Namespace {
             target_path: path.to_path_buf(),
             diagnostic_path: Some(path.to_path_buf()),
             recovery_parents: RefCell::new(Vec::new()),
+            #[cfg(test)]
+            fail_container_verification: Cell::new(false),
         })
     }
 
@@ -145,6 +151,8 @@ impl Namespace {
             diagnostic_path: diagnostic.map(Path::to_path_buf),
             target_name,
             recovery_parents: RefCell::new(Vec::new()),
+            #[cfg(test)]
+            fail_container_verification: Cell::new(false),
         })
     }
 
@@ -196,7 +204,21 @@ impl Namespace {
             );
             match handle {
                 Ok(handle) => {
-                    verify_directory_no_reparse(&handle)?;
+                    if let Err(primary) = self.verify_new_container(&handle) {
+                        let cleanup = delete_open_entry(&handle);
+                        return Err(match cleanup {
+                            Ok(()) => primary,
+                            Err(cleanup) => io::Error::new(
+                                primary.kind(),
+                                format!(
+                                    "{}; bound recovery container cleanup failed at {}: {}",
+                                    primary,
+                                    container.display(),
+                                    cleanup
+                                ),
+                            ),
+                        });
+                    }
                     self.recovery_parents
                         .borrow_mut()
                         .push((container.clone(), handle));
@@ -219,6 +241,21 @@ impl Namespace {
             ErrorKind::AlreadyExists,
             "could not allocate a unique recovery container",
         ))
+    }
+
+    fn verify_new_container(&self, handle: &File) -> io::Result<()> {
+        #[cfg(test)]
+        if self.fail_container_verification.replace(false) {
+            return Err(io::Error::other(
+                "injected recovery container verification failure",
+            ));
+        }
+        verify_directory_no_reparse(handle)
+    }
+
+    #[cfg(test)]
+    pub(super) fn fail_next_container_verification(&self) {
+        self.fail_container_verification.set(true);
     }
 
     #[cfg(test)]

@@ -16,6 +16,8 @@ use qubit_io::Streams;
 use sha2::Sha256;
 
 use super::super::commit::commit_conditional;
+use super::namespace::Namespace;
+use super::test_support;
 use super::UnixConditionalBackend;
 use crate::local::internal::conditional::ConditionalBackend;
 use crate::local::internal::conditional::ConditionalHookAction;
@@ -24,6 +26,80 @@ use crate::local::internal::conditional::ConditionalPoint;
 use crate::options::LocalWriteMode;
 use crate::options::LocalWriteOptions;
 use crate::options::LocalWritePrecondition;
+
+fn private_entries(directory: &Path, marker: &str) -> Vec<std::path::PathBuf> {
+    fs::read_dir(directory)
+        .expect("fixture directory should be readable")
+        .map(|entry| entry.expect("directory entry should be readable").path())
+        .filter(|path| {
+            path.file_name()
+                .is_some_and(|name| name.to_string_lossy().contains(marker))
+        })
+        .collect()
+}
+
+#[test]
+fn conditional_unix_candidate_setup_failures_cleanup_or_report_the_candidate() {
+    for (point, expected_residue) in [
+        (test_support::FailurePoint::GuardIdentityMetadata, true),
+        (test_support::FailurePoint::CandidateMetadata, false),
+        (test_support::FailurePoint::EntryIdentity, false),
+        (test_support::FailurePoint::EntryParentClone, false),
+    ] {
+        let directory = tempfile::tempdir().expect("fixture directory should be created");
+        let namespace =
+            Namespace::open_host(&directory.path().join("target"), &LocalWriteOptions::default())
+                .expect("namespace should open");
+        test_support::fail_next(point);
+
+        let error =
+            UnixConditionalBackend::open(namespace).expect_err("injected setup step should fail");
+
+        assert!(
+            error.to_string().contains("injected"),
+            "failure source should be retained: {error}"
+        );
+        let candidates = private_entries(directory.path(), ".qubit-candidate-");
+        assert_eq!(
+            !candidates.is_empty(),
+            expected_residue,
+            "unexpected residue for {point:?}: {candidates:?}"
+        );
+        if expected_residue {
+            assert!(
+                error.to_string().contains(&candidates[0].display().to_string()),
+                "unremovable candidate path should be reported: {error}"
+            );
+        }
+    }
+}
+
+#[test]
+fn conditional_unix_candidate_copy_registration_failure_cleans_copy() {
+    let directory = tempfile::tempdir().expect("fixture directory should be created");
+    let target = directory.path().join("target");
+    let mut backend =
+        UnixConditionalBackend::open_host(&target, &LocalWriteOptions::default()).expect("backend should open");
+    backend
+        .candidate
+        .write_fully(b"candidate bytes")
+        .expect("candidate should be writable");
+    test_support::fail_next(test_support::FailurePoint::CandidateCopyRegistration);
+
+    let error = backend
+        .create_candidate_copy()
+        .expect_err("injected candidate-copy registration should fail");
+
+    assert!(
+        error
+            .to_string()
+            .contains("injected CandidateCopyRegistration failure")
+    );
+    assert!(
+        private_entries(directory.path(), ".qubit-candidate-copy-").is_empty(),
+        "candidate copy should not remain unreported"
+    );
+}
 
 #[cfg(any(target_os = "linux", target_os = "macos"))]
 #[test]

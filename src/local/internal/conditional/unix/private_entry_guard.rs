@@ -37,7 +37,14 @@ impl<'a> PrivateEntryGuard<'a> {
             identity: None,
             armed: true,
         };
-        match file.metadata() {
+        #[cfg(test)]
+        let metadata = super::test_support::fail_if_requested(
+            super::test_support::FailurePoint::GuardIdentityMetadata,
+        )
+        .and_then(|()| file.metadata());
+        #[cfg(not(test))]
+        let metadata = file.metadata();
+        match metadata {
             Ok(metadata) => {
                 guard.identity = Some((metadata.dev(), metadata.ino()));
                 Ok(guard)

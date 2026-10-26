@@ -12,6 +12,8 @@ use std::os::windows::ffi::OsStrExt;
 use std::os::windows::fs::OpenOptionsExt;
 use std::path::Path;
 
+use windows_sys::Win32::Foundation::ERROR_SHARING_VIOLATION;
+
 use digest::Digest;
 use qubit_io::Streams;
 use sha2::Sha256;
@@ -630,6 +632,35 @@ fn conditional_windows_recovery_container_collision_does_not_reuse_existing_dire
 }
 
 #[test]
+fn conditional_windows_failed_container_verification_cleans_bound_directory() {
+    let directory = tempfile::tempdir().expect("fixture directory should be created");
+    let target = directory.path().join("target");
+    let namespace =
+        Namespace::open_host(&target, &options(LocalWriteMode::CreateOrReplace)).expect("Host namespace should open");
+    namespace.fail_next_container_verification();
+
+    let error = namespace
+        .backup_container()
+        .expect_err("injected verification failure should fail creation");
+
+    assert!(error
+        .to_string()
+        .contains("injected recovery container verification failure"));
+    let leftovers: Vec<_> = fs::read_dir(directory.path())
+        .expect("fixture directory should be readable")
+        .map(|entry| entry.expect("directory entry should be readable").path())
+        .filter(|path| {
+            path.file_name()
+                .is_some_and(|name| name.to_string_lossy().starts_with(".qubit-conditional-recovery-"))
+        })
+        .collect();
+    assert!(
+        leftovers.is_empty(),
+        "bound failed container should be cleaned: {leftovers:?}"
+    );
+}
+
+#[test]
 fn conditional_windows_recovery_container_name_cannot_be_replaced_while_owned() {
     let directory = tempfile::tempdir().expect("fixture directory should be created");
     let target = directory.path().join("target");
@@ -637,7 +668,12 @@ fn conditional_windows_recovery_container_name_cannot_be_replaced_while_owned() 
         Namespace::open_host(&target, &options(LocalWriteMode::CreateOrReplace)).expect("Host namespace should open");
     let (container, _) = namespace.backup_container().expect("recovery container should be created");
     let moved = directory.path().join("replacement-container");
-    fs::rename(&container, &moved).expect_err("owned directory name must reject replacement");
+    let error = fs::rename(&container, &moved).expect_err("owned directory name must reject replacement");
+    assert_eq!(
+        error.raw_os_error(),
+        Some(ERROR_SHARING_VIOLATION as i32),
+        "directory name should be locked by the recovery handle"
+    );
 
     namespace
         .remove_container(&container)
